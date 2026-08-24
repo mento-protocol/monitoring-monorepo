@@ -250,10 +250,11 @@ progress/freshness, and Polygon replay checks.
 Do not promote on any failure. `--allow-syncing` is diagnostic only and never
 waives data or replay-semantic failures. A missing replay marker or tainted
 historical RPC replay requires a fresh deployment; `docs/deployment.md` owns
-the exact verifier contract. The verifier selects the launch-baseline probe
-from `indexer-envio/schema.graphql` at the exact deployment commit. A legacy
-rollback schema that predates the entity skips only that probe. An unreadable
-or uninspectable target schema fails closed.
+the exact verifier contract. The verifier reads `indexer-envio/schema.graphql`
+at the exact deployment commit and uses `SusdsYieldLaunchBaseline` as the
+sUSDS sampler capability marker. A legacy rollback schema without the marker
+skips all sampler-only probes and checks. An unreadable or uninspectable target
+schema fails closed and retains the strict sampler requirements.
 
 ## Phase 4 — Promote
 
@@ -348,6 +349,7 @@ Always require all of these conditions:
 - `susdsYieldSignalUnavailable` is `false`;
 - `reserveCurrentHoldingsClassificationFailed` is `false`;
 - `susdsSnapshotSourceRequired` is a boolean.
+- `hasUnindexedSusdsHolding` is `false`.
 
 Use `susdsSnapshotSourceRequired` as the fail-closed current sUSDS source
 signal. A value of `true` means that current exposure exists or cannot be
@@ -365,14 +367,16 @@ usable holding. When neither signal exists, accept
 holding or `earnedYieldAsOf`.
 
 Return the checked fields, `reserveCurrentHoldingsClassificationFailed`,
-`susdsSnapshotSourceRequired`, and the two derived signal-presence booleans as
-evidence. Treat a field required by the applicable signal branch as missing or
-non-finite, a positive sUSDS holding with a false current source signal, an
+`susdsSnapshotSourceRequired`, `hasUnindexedSusdsHolding`, and the two derived
+signal-presence booleans as evidence. Treat a field required by the applicable
+signal branch as missing or non-finite, a positive sUSDS holding with a false
+current source signal, `hasUnindexedSusdsHolding` as missing or true, an
 unexpected signal state, a non-null `earnedYieldError`, or a non-200 response
-as a failed production verification. Do not fail solely because `holdingsError`
-is non-null when classification succeeds and the sUSDS source and holding
-checks pass. Return that error as evidence. Do not fail a clean state because
-its optional sUSDS fields are absent.
+as a failed production verification. Do not fail solely because
+`holdingsError` is non-null when classification succeeds and the sUSDS source,
+holding, and indexed-wallet coverage checks pass. Return that error as
+evidence. Do not fail a clean state because its optional sUSDS fields are
+absent.
 
 For an sUSDS sampler change with a true current source signal or a nonzero
 historical signal, also verify that `/revenue` renders sUSDS reserve actuals

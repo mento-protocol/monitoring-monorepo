@@ -37,9 +37,10 @@ const validLaunchBaseline = {
 
 const strictProbeQuery = buildProbeQuery();
 assert.match(strictProbeQuery, /SusdsYieldLaunchBaseline/);
+assert.match(strictProbeQuery, /SusdsYieldDailySnapshot/);
 assert.doesNotMatch(
-  buildProbeQuery({ includeSusdsLaunchBaseline: false }),
-  /SusdsYieldLaunchBaseline/,
+  buildProbeQuery({ includeSusdsSampler: false }),
+  /SusdsYield(?:LaunchBaseline|DailySnapshot)/,
 );
 
 assert.deepEqual(
@@ -75,6 +76,14 @@ const unreadableSchema = summarizeSusdsLaunchBaselineSchema({
 assert.equal(unreadableSchema.ok, false);
 assert.equal(unreadableSchema.required, true);
 assert.match(unreadableSchema.failures.join("\n"), /schema unavailable/);
+assert.match(
+  buildProbeQuery({ includeSusdsSampler: unreadableSchema.required }),
+  /SusdsYieldLaunchBaseline/,
+);
+assert.match(
+  buildProbeQuery({ includeSusdsSampler: unreadableSchema.required }),
+  /SusdsYieldDailySnapshot/,
+);
 const emptySchema = summarizeSusdsLaunchBaselineSchema({
   value: "",
   readError: "",
@@ -83,8 +92,12 @@ assert.equal(emptySchema.ok, false);
 assert.equal(emptySchema.required, true);
 assert.match(emptySchema.failures.join("\n"), /could not inspect/);
 assert.match(
-  buildProbeQuery({ includeSusdsLaunchBaseline: emptySchema.required }),
+  buildProbeQuery({ includeSusdsSampler: emptySchema.required }),
   /SusdsYieldLaunchBaseline/,
+);
+assert.match(
+  buildProbeQuery({ includeSusdsSampler: emptySchema.required }),
+  /SusdsYieldDailySnapshot/,
 );
 for (const value of [
   "type Pool { id: ID!",
@@ -100,9 +113,15 @@ for (const value of [
   assert.match(malformedSchema.failures.join("\n"), /invalid GraphQL SDL/);
   assert.match(
     buildProbeQuery({
-      includeSusdsLaunchBaseline: malformedSchema.required,
+      includeSusdsSampler: malformedSchema.required,
     }),
     /SusdsYieldLaunchBaseline/,
+  );
+  assert.match(
+    buildProbeQuery({
+      includeSusdsSampler: malformedSchema.required,
+    }),
+    /SusdsYieldDailySnapshot/,
   );
 }
 const executableDocument = summarizeSusdsLaunchBaselineSchema({
@@ -140,6 +159,25 @@ assert.match(
     sharePriceUsdWei: "0",
   }).failures.join("\n"),
   /token is[\s\S]*launchBlock is[\s\S]*sampledAtTimestamp is[\s\S]*no positive sharePriceUsdWei/,
+);
+
+assert.deepEqual(
+  summarizeSusdsSamplerProgress({
+    required: false,
+    summaryNonzero: true,
+    latestSnapshot: undefined,
+    ethereumChain: { processedBlock: SAMPLE_BLOCK + 601 },
+    nowSeconds: NOW_SECONDS,
+  }),
+  {
+    ok: true,
+    failures: [],
+    latestSampledAtBlock: null,
+    latestSampledAtTimestamp: null,
+    processedBlock: SAMPLE_BLOCK + 601,
+    blockLag: null,
+    ageSeconds: null,
+  },
 );
 
 for (const lag of [0, 599]) {

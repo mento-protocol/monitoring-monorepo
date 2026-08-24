@@ -8,6 +8,7 @@ import {
   applySusdsYieldLedgerResult,
   fetchSusdsYieldLedger,
 } from "@/lib/reserve-yield-susds";
+import { hasUnindexedSusdsHolding } from "@/lib/reserve-yield-susds-coverage";
 import {
   applyStethYieldLedgerResult,
   fetchLidoStethApr,
@@ -240,6 +241,7 @@ function reserveHoldingsState(
       reserveCurrentHoldingsClassificationFailed: true,
       hasCurrentSusdsAsset: false,
       susdsSnapshotSourceRequired: true,
+      hasUnindexedSusdsHolding: false,
       hasCurrentStethAsset: false,
     };
   }
@@ -272,6 +274,7 @@ function reserveHoldingsState(
       extracted.reserveCurrentHoldingsClassificationFailed,
     hasCurrentSusdsAsset: extracted.susdsAssetCount > 0,
     susdsSnapshotSourceRequired: extracted.susdsSnapshotSourceRequired,
+    hasUnindexedSusdsHolding: hasUnindexedSusdsHolding(extracted.holdings),
     hasCurrentStethAsset: extracted.stethAssetCount > 0,
   };
 }
@@ -389,6 +392,7 @@ function buildReserveYieldResponse({
     susdsEarnedYieldUsd: susdsYield.earnedYieldUsd,
     susdsYieldSignalUnavailable: susdsYield.signalUnavailable,
     susdsSnapshotSourceRequired: reserveState.susdsSnapshotSourceRequired,
+    hasUnindexedSusdsHolding: reserveState.hasUnindexedSusdsHolding,
     realizedYieldUsd: sumNullable(
       susdsYield.realizedYieldUsd,
       stethYield.realizedYieldUsd,

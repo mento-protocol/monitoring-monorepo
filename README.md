@@ -320,10 +320,11 @@ The status watcher only proves a deployment caught up. Promotion additionally
 requires `deploy:indexer:verify` to pass core rows, sUSDS post-launch sampler
 progress/freshness, Polygon replay semantics, and the exact immutable sUSDS
 launch baseline when the target commit schema declares it. The verifier reads
-the target schema from that exact commit. A legacy rollback schema that
-predates the baseline entity skips only that unsupported probe. An unreadable
-or uninspectable target schema fails closed. `--allow-syncing` never waives the
-remaining data-integrity checks.
+the target schema from that exact commit and uses the baseline entity as the
+sUSDS sampler capability marker. A legacy rollback schema without the marker
+skips all sampler-only probes and checks. An unreadable or uninspectable target
+schema fails closed and retains the strict sampler requirements.
+`--allow-syncing` never waives the remaining data-integrity checks.
 
 For an agent-operated production rollout, use the repo's `/deploy-indexer`
 skill: it also captures the prior production commit, confirms promotion, waits

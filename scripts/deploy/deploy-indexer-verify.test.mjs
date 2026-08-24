@@ -62,9 +62,10 @@ assert.match(
   PROBE_QUERY,
   /SusdsYieldLaunchBaseline[\s\S]*id: \{ _eq: "1-susds-launch" \}[\s\S]*sharePriceUsdWei/,
 );
+assert.match(PROBE_QUERY, /SusdsYieldDailySnapshot/);
 assert.doesNotMatch(
-  buildProbeQuery({ includeSusdsLaunchBaseline: false }),
-  /SusdsYieldLaunchBaseline/,
+  buildProbeQuery({ includeSusdsSampler: false }),
+  /SusdsYield(?:LaunchBaseline|DailySnapshot)/,
 );
 
 const indexerJson = {
@@ -645,6 +646,7 @@ const preBaselineRollbackSummary = buildSummary({
     data: {
       ...healthySummaryInput.graphqlJson.data,
       SusdsYieldLaunchBaseline: undefined,
+      SusdsYieldDailySnapshot: undefined,
     },
   },
   susdsLaunchBaselineSchema: summarizeSusdsLaunchBaselineSchema({
@@ -657,13 +659,22 @@ assert.equal(
   preBaselineRollbackSummary.susdsLaunchBaselineSchema.required,
   false,
 );
+assert.equal(
+  "SusdsYieldDailySnapshot" in preBaselineRollbackSummary.probe.rowCounts,
+  false,
+);
+assert.equal(preBaselineRollbackSummary.susdsSampler.ok, true);
 assert.doesNotMatch(
   preBaselineRollbackSummary.failures.join("\n"),
-  /launch baseline/,
+  /sUSDS sampler|launch baseline|SusdsYieldDailySnapshot/,
 );
 assert.match(
   renderText(preBaselineRollbackSummary),
   /sUSDS launch baseline:\n {2}required by target schema: no/,
+);
+assert.match(
+  renderText(preBaselineRollbackSummary),
+  /sUSDS sampler progress:\n {2}required by target schema: no/,
 );
 
 const recentSnapshotWithInvalidLaunchBaseline = buildSummary({

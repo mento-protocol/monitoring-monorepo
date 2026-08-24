@@ -353,18 +353,22 @@ export function renderText(summary) {
   }
   lines.push("");
   lines.push("sUSDS sampler progress:");
-  lines.push(
-    `  latest sampled block: ${formatNumber(
-      summary.susdsSampler.latestSampledAtBlock,
-    )}; processed Ethereum head: ${formatNumber(
-      summary.susdsSampler.processedBlock,
-    )}; block lag: ${formatNumber(summary.susdsSampler.blockLag)}`,
-  );
-  lines.push(
-    `  latest sampled timestamp: ${formatNumber(
-      summary.susdsSampler.latestSampledAtTimestamp,
-    )}; age: ${formatNumber(summary.susdsSampler.ageSeconds)} seconds; healthy: ${summary.susdsSampler.ok ? "yes" : "no"}`,
-  );
+  if (summary.susdsLaunchBaselineSchema.required) {
+    lines.push(
+      `  latest sampled block: ${formatNumber(
+        summary.susdsSampler.latestSampledAtBlock,
+      )}; processed Ethereum head: ${formatNumber(
+        summary.susdsSampler.processedBlock,
+      )}; block lag: ${formatNumber(summary.susdsSampler.blockLag)}`,
+    );
+    lines.push(
+      `  latest sampled timestamp: ${formatNumber(
+        summary.susdsSampler.latestSampledAtTimestamp,
+      )}; age: ${formatNumber(summary.susdsSampler.ageSeconds)} seconds; healthy: ${summary.susdsSampler.ok ? "yes" : "no"}`,
+    );
+  } else {
+    lines.push("  required by target schema: no");
+  }
   lines.push("");
   lines.push("Replay integrity contract:");
   lines.push(
@@ -471,7 +475,7 @@ async function main() {
   const graphqlJson = await queryGraphql(
     endpoint,
     buildProbeQuery({
-      includeSusdsLaunchBaseline: susdsLaunchBaselineSchema.required,
+      includeSusdsSampler: susdsLaunchBaselineSchema.required,
     }),
   );
   const summary = buildSummary({

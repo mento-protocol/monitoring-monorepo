@@ -160,4 +160,54 @@ describe("useReserveYieldHistory", () => {
     });
     expect(graphQlRequestMock).toHaveBeenCalledTimes(2);
   });
+
+  it.each([
+    ["totalEarnedYieldUsdWei", "invalid"],
+    ["dailyEarnedYieldUsdWei", undefined],
+  ] as const)(
+    "fails the history fetch closed when an sUSDS row has invalid %s",
+    async (field, value) => {
+      graphQlRequestMock.mockResolvedValueOnce({
+        SusdsYieldDailySnapshot: [
+          {
+            ...reserveSnapshot(),
+            [field]: value,
+          },
+        ],
+      });
+
+      const { fetcher } = renderReserveYieldHistoryProbe();
+
+      await expect(fetcher()).rejects.toThrow(
+        "SusdsYieldDailySnapshot contained a malformed row",
+      );
+      expect(graphQlRequestMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("suppresses a malformed sUSDS row restored from the SWR cache", () => {
+    swrMock.mockReturnValue({
+      data: {
+        rows: [
+          {
+            ...reserveSnapshot(),
+            totalEarnedYieldUsdWei: "invalid",
+          },
+        ],
+        unavailable: false,
+        truncated: false,
+      },
+      error: undefined,
+      isLoading: false,
+    });
+
+    const { result } = renderReserveYieldHistoryProbe();
+
+    expect(result).toMatchObject({
+      rows: [],
+      hasError: true,
+      unavailable: false,
+      truncated: false,
+    });
+  });
 });

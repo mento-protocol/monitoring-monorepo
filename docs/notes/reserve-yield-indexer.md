@@ -160,13 +160,14 @@ Before promoting a hosted reindex with Ethereum reserve-yield enabled, require:
    up to head.
 4. `pnpm deploy:indexer:verify <commit>` returns synced chain status plus
    non-empty `Pool`, sUSDS, and stETH GraphQL probe rows. It reads the target
-   commit schema and requires the exact immutable `1-susds-launch` baseline
-   row when that schema declares the entity. A legacy rollback schema that
-   predates the entity omits only that probe. An unreadable or uninspectable
-   schema fails closed. A nonzero sUSDS summary also requires a post-launch
-   `SusdsYieldDailySnapshot` whose `sampledAtBlock` is fresh against the
-   Ethereum processed head and whose `sampledAtTimestamp` is fresh against
-   verifier time.
+   commit schema and uses `SusdsYieldLaunchBaseline` as the sampler capability
+   marker. When the marker exists, it requires the exact immutable
+   `1-susds-launch` row and a post-launch `SusdsYieldDailySnapshot` whose
+   `sampledAtBlock` is fresh against the Ethereum processed head and whose
+   `sampledAtTimestamp` is fresh against verifier time. A legacy rollback
+   schema without the marker omits all sampler-only probes and checks. An
+   unreadable or uninspectable schema fails closed and retains the strict
+   sampler requirements.
 
 After promotion:
 
@@ -180,7 +181,8 @@ After promotion:
    it. `earnedYieldError` must be `null`, and
    `susdsYieldSignalUnavailable` must be `false`,
    `reserveCurrentHoldingsClassificationFailed` must be `false`, and
-   `susdsSnapshotSourceRequired` must be a boolean. Treat
+   `susdsSnapshotSourceRequired` must be a boolean.
+   `hasUnindexedSusdsHolding` must be `false`. Treat
    `susdsSnapshotSourceRequired: true` as current sUSDS exposure that exists or
    cannot be ruled out. A positive finite sUSDS holding must not pair with a
    false signal. A true current source signal or a nonzero historical earned

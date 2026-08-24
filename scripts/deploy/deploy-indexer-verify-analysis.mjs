@@ -13,11 +13,10 @@ const SUSDS_LAUNCH_TIMESTAMP = 1_772_496_000;
 const SUSDS_MAX_SAMPLE_BLOCK_LAG = 600;
 const SUSDS_MAX_SAMPLE_AGE_SECONDS = 24 * 60 * 60;
 
-const PROBE_TABLES = [
+const CORE_PROBE_TABLES = [
   "Pool",
   "SusdsYieldSummary",
   "SusdsYieldMovement",
-  "SusdsYieldDailySnapshot",
   "StethYieldSummary",
   "StethYieldMovement",
 ];
@@ -28,9 +27,12 @@ const SUSDS_LAUNCH_BASELINE_PROBE = `  SusdsYieldLaunchBaseline(
   ) { id chainId token launchBlock launchTimestamp sharePriceUsdWei sampledAtBlock sampledAtTimestamp }
 `;
 
-export function buildProbeQuery({ includeSusdsLaunchBaseline = true } = {}) {
-  const launchBaselineProbe = includeSusdsLaunchBaseline
-    ? SUSDS_LAUNCH_BASELINE_PROBE
+const SUSDS_DAILY_SNAPSHOT_PROBE =
+  "  SusdsYieldDailySnapshot(limit: 1, order_by: { sampledAtBlock: desc }) { id timestamp totalEarnedYieldUsdWei sampledAtBlock sampledAtTimestamp }\n";
+
+export function buildProbeQuery({ includeSusdsSampler = true } = {}) {
+  const susdsSamplerProbe = includeSusdsSampler
+    ? `${SUSDS_LAUNCH_BASELINE_PROBE}${SUSDS_DAILY_SNAPSHOT_PROBE}`
     : "";
 
   return `query VerifyIndexerRows {
@@ -54,8 +56,7 @@ export function buildProbeQuery({ includeSusdsLaunchBaseline = true } = {}) {
   }
   SusdsYieldSummary(limit: 1) { id currentShares totalEarnedYieldUsdWei lastMovementTxHash lastUpdatedBlock }
   SusdsYieldMovement(limit: 1, order_by: { blockNumber: asc }) { id kind txHash blockNumber }
-${launchBaselineProbe}  SusdsYieldDailySnapshot(limit: 1, order_by: { sampledAtBlock: desc }) { id timestamp totalEarnedYieldUsdWei sampledAtBlock sampledAtTimestamp }
-  StethYieldSummary(limit: 1) { id lastMovementTxHash lastUpdatedBlock }
+${susdsSamplerProbe}  StethYieldSummary(limit: 1) { id lastMovementTxHash lastUpdatedBlock }
   StethYieldMovement(limit: 1, order_by: { blockNumber: asc }) { id kind txHash blockNumber }
 }`;
 }
@@ -154,17 +155,23 @@ function metricSummary(metricsJson) {
   };
 }
 
-export function summarizeProbe(graphqlJson) {
+export function summarizeProbe(
+  graphqlJson,
+  { includeSusdsSampler = true } = {},
+) {
   const errors = graphqlJson.errors ?? [];
+  const probeTables = includeSusdsSampler
+    ? [...CORE_PROBE_TABLES, "SusdsYieldDailySnapshot"]
+    : CORE_PROBE_TABLES;
   const rowCounts = Object.fromEntries(
-    PROBE_TABLES.map((table) => [
+    probeTables.map((table) => [
       table,
       Array.isArray(graphqlJson.data?.[table])
         ? graphqlJson.data[table].length
         : 0,
     ]),
   );
-  const missingTables = PROBE_TABLES.filter((table) => rowCounts[table] === 0);
+  const missingTables = probeTables.filter((table) => rowCounts[table] === 0);
   const susdsSummary = graphqlJson.data?.SusdsYieldSummary?.[0];
   const susdsSummaryNonzero =
     susdsSummary !== undefined &&
@@ -185,11 +192,15 @@ export function summarizeProbe(graphqlJson) {
         return false;
       }
     });
-  if (susdsSummaryNonzero && rowCounts.SusdsYieldDailySnapshot === 0) {
+  if (
+    includeSusdsSampler &&
+    susdsSummaryNonzero &&
+    rowCounts.SusdsYieldDailySnapshot === 0
+  ) {
     if (!missingTables.includes("SusdsYieldDailySnapshot")) {
       missingTables.push("SusdsYieldDailySnapshot");
     }
-  } else if (!susdsSummaryNonzero) {
+  } else if (includeSusdsSampler && !susdsSummaryNonzero) {
     const index = missingTables.indexOf("SusdsYieldDailySnapshot");
     if (index !== -1) missingTables.splice(index, 1);
   }
@@ -281,12 +292,13 @@ export function summarizeSusdsLaunchBaseline(
 }
 
 export function summarizeSusdsSamplerProgress({
+  required = true,
   summaryNonzero,
   latestSnapshot,
   ethereumChain,
   nowSeconds,
 }) {
-  if (!summaryNonzero) {
+  if (!required || !summaryNonzero) {
     return {
       ok: true,
       failures: [],
@@ -395,12 +407,15 @@ export function buildSummary({
   },
 }) {
   const sync = summarizeStatus(statusJson);
-  const probe = summarizeProbe(graphqlJson);
+  const probe = summarizeProbe(graphqlJson, {
+    includeSusdsSampler: susdsLaunchBaselineSchema.required,
+  });
   const susdsLaunchBaseline = summarizeSusdsLaunchBaseline(
     graphqlJson.data?.SusdsYieldLaunchBaseline?.[0],
     { required: susdsLaunchBaselineSchema.required },
   );
   const susdsSampler = summarizeSusdsSamplerProgress({
+    required: susdsLaunchBaselineSchema.required,
     summaryNonzero: probe.susdsSummaryNonzero,
     latestSnapshot: graphqlJson.data?.SusdsYieldDailySnapshot?.[0],
     ethereumChain: sync.chains.find((chain) => Number(chain.chainId) === 1),

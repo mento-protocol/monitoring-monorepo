@@ -17,24 +17,15 @@ import {
   type SusdsYieldLedgerResult,
   type SusdsYieldState,
 } from "@/lib/reserve-yield-types";
+import {
+  hasUnindexedSusdsHolding,
+  isIndexedSusdsHolding,
+} from "@/lib/reserve-yield-susds-coverage";
 
 const SUSDS_YIELD_SUMMARY_ID = "1-susds";
-const TRACKED_SUSDS_WALLET_IDENTIFIERS = new Set([
-  "0xd0697f70e79476195b742d5afab14be50f98cc1e",
-  "0xd3d2e5c5af667da817b2d752d86c8f40c22137e1",
-]);
 
 function isSusdsHolding(holding: ReserveYieldHolding): boolean {
   return holding.assetSymbol.toUpperCase() === FORECASTABLE_SUSDS_SYMBOL;
-}
-
-function isIndexedSusdsHolding(holding: ReserveYieldHolding): boolean {
-  const identifier = holding.identifier?.toLowerCase() ?? null;
-  return (
-    isSusdsHolding(holding) &&
-    identifier !== null &&
-    TRACKED_SUSDS_WALLET_IDENTIFIERS.has(identifier)
-  );
 }
 
 function currentSusdsPrincipalUsd(holdings: ReserveYieldHolding[]): number {
@@ -49,12 +40,6 @@ function currentIndexedSusdsPrincipalUsd(
   return holdings
     .filter(isIndexedSusdsHolding)
     .reduce((sum, holding) => sum + holding.principalUsd, 0);
-}
-
-function hasUnindexedSusdsHolding(holdings: ReserveYieldHolding[]): boolean {
-  return holdings.some(
-    (holding) => isSusdsHolding(holding) && !isIndexedSusdsHolding(holding),
-  );
 }
 
 function applySusdsYieldLedger(

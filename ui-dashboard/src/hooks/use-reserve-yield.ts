@@ -5,6 +5,7 @@ import { fetchJsonOrThrow } from "@/lib/fetch-json";
 import type { ReserveYieldResponse } from "@/lib/reserve-yield";
 import { SWR_KEY_RESERVE_YIELD } from "@/lib/swr-keys";
 import { rateLimitAwareRetry } from "@/lib/gql-retry";
+import { hasUnindexedSusdsHolding as holdingsHaveUnindexedSusdsSource } from "@/lib/reserve-yield-susds-coverage";
 
 const RESERVE_YIELD_REFRESH_MS = 5 * 60_000;
 
@@ -13,12 +14,26 @@ export type ReserveYieldResult = {
   isLoading: boolean;
   hasError: boolean;
   reserveCurrentHoldingsClassificationFailed: boolean;
+  hasUnindexedSusdsHolding: boolean;
 };
 
 function fetchReserveYield(): Promise<ReserveYieldResponse> {
   return fetchJsonOrThrow<ReserveYieldResponse>(
     "/api/reserve-yield",
     "Reserve yield",
+  );
+}
+
+function responseHasUnindexedSusdsHolding(
+  data: ReserveYieldResponse | undefined,
+): boolean {
+  if (data === undefined) return false;
+  if (typeof data.hasUnindexedSusdsHolding === "boolean") {
+    return data.hasUnindexedSusdsHolding;
+  }
+  return (
+    Array.isArray(data.holdings) &&
+    holdingsHaveUnindexedSusdsSource(data.holdings)
   );
 }
 
@@ -43,6 +58,7 @@ export function useReserveYield(): ReserveYieldResult {
       error !== undefined ||
       (data !== undefined &&
         data.reserveCurrentHoldingsClassificationFailed !== false),
+    hasUnindexedSusdsHolding: responseHasUnindexedSusdsHolding(data),
     hasError:
       error !== undefined ||
       (data?.holdingsError ?? null) !== null ||

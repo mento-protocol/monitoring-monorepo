@@ -41,6 +41,8 @@ export type ReserveYieldResponse = {
   susdsYieldSignalUnavailable: boolean;
   /** True when current sUSDS exposure requires an indexed snapshot source. */
   susdsSnapshotSourceRequired: boolean;
+  /** True when nonzero current sUSDS exposure includes a source outside indexed wallets. */
+  hasUnindexedSusdsHolding: boolean;
   realizedYieldUsd: number | null;
   unrealizedYieldUsd: number | null;
   earnedYieldAsOf: string | null;
@@ -160,5 +162,6 @@ export type ReserveHoldingsState = {
   reserveCurrentHoldingsClassificationFailed: boolean;
   hasCurrentSusdsAsset: boolean;
   susdsSnapshotSourceRequired: boolean;
+  hasUnindexedSusdsHolding: boolean;
   hasCurrentStethAsset: boolean;
 };

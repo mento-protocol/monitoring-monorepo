@@ -6,6 +6,31 @@ import { createRoot } from "react-dom/client";
 import type { ReserveYieldResponse } from "@/lib/reserve-yield";
 import { rateLimitAwareRetry } from "@/lib/gql-retry";
 
+function susdsHolding(
+  overrides: Partial<ReserveYieldResponse["holdings"][number]> = {},
+): ReserveYieldResponse["holdings"][number] {
+  return {
+    id: "susds-source",
+    assetSymbol: "sUSDS",
+    chain: "ethereum",
+    sourceType: "wallet",
+    sourceLabel: "Reserve Safe",
+    identifier: "0x0000000000000000000000000000000000000001",
+    custodianType: "self-custody",
+    balance: 1_000,
+    hasTokenBalance: true,
+    principalUsd: 1_000,
+    earnedYieldUsd: null,
+    apyPercent: null,
+    yieldModel: "Yield source pending",
+    dailyRunRateUsd: null,
+    next30dUsd: null,
+    next365dUsd: null,
+    annualRunRateUsd: null,
+    ...overrides,
+  };
+}
+
 type ReserveYieldSWRConfig = {
   refreshInterval: number;
   revalidateOnFocus: boolean;
@@ -77,6 +102,7 @@ describe("useReserveYield", () => {
       hasError: false,
       isLoading: false,
       reserveCurrentHoldingsClassificationFailed: false,
+      hasUnindexedSusdsHolding: false,
     });
   });
 
@@ -148,6 +174,57 @@ describe("useReserveYield", () => {
       isLoading: false,
       reserveCurrentHoldingsClassificationFailed: true,
     });
+  });
+
+  it("surfaces current sUSDS exposure outside indexed wallets", () => {
+    swrMock.mockReturnValue({
+      data: {
+        holdings: [susdsHolding()],
+        holdingsError: null,
+        reserveCurrentHoldingsClassificationFailed: false,
+        hasUnindexedSusdsHolding: true,
+      } satisfies Partial<ReserveYieldResponse>,
+      error: undefined,
+      isLoading: false,
+    });
+
+    const { result } = renderReserveYieldProbe();
+    expect(result.hasUnindexedSusdsHolding).toBe(true);
+  });
+
+  it("derives missing legacy coverage without rejecting stETH-only holdings", () => {
+    swrMock.mockReturnValue({
+      data: {
+        holdings: [susdsHolding()],
+        holdingsError: null,
+        reserveCurrentHoldingsClassificationFailed: false,
+      } satisfies Partial<ReserveYieldResponse>,
+      error: undefined,
+      isLoading: false,
+    });
+    expect(renderReserveYieldProbe().result.hasUnindexedSusdsHolding).toBe(
+      true,
+    );
+
+    swrMock.mockReset();
+    swrMock.mockReturnValue({
+      data: {
+        holdings: [
+          susdsHolding({
+            assetSymbol: "stETH",
+            identifier: "0xd0697f70e79476195b742d5afab14be50f98cc1e",
+          }),
+        ],
+        holdingsError:
+          "Reserve API returned yield rows without usable USD values.",
+        reserveCurrentHoldingsClassificationFailed: false,
+      } satisfies Partial<ReserveYieldResponse>,
+      error: undefined,
+      isLoading: false,
+    });
+    expect(renderReserveYieldProbe().result.hasUnindexedSusdsHolding).toBe(
+      false,
+    );
   });
 
   it.each([

@@ -1,4 +1,6 @@
 import { currentDayBucket, dayBucket, isoDate } from "./utils";
+import { isValidSusdsYieldDailySnapshotRow } from "./reserve-snapshot-validation";
+import { hasUnindexedSusdsHolding } from "@/lib/reserve-yield-susds-coverage";
 import type {
   ActualRevenueAvailability,
   BuildCanonicalRevenueArgs,
@@ -26,8 +28,21 @@ function hasSusdsSnapshotSource(
   reserveDailySnapshots: ReadonlyArray<ReserveYieldDailySnapshotRow>,
 ): boolean {
   return reserveDailySnapshots.some(
-    (row) => !("wallet" in row) && row.chainId === 1,
+    (row) =>
+      !("wallet" in row) &&
+      isValidSusdsYieldDailySnapshotRow(row) &&
+      row.chainId === 1,
   );
+}
+
+function incompleteSusdsSnapshotCoverage(
+  args: BuildCanonicalRevenueArgs,
+): boolean {
+  if (args.hasUnindexedSusdsHolding === true) return true;
+  if (args.reserveYield === null) return false;
+  if (args.reserveYield.hasUnindexedSusdsHolding === true) return true;
+  if (args.reserveYield.hasUnindexedSusdsHolding === false) return false;
+  return hasUnindexedSusdsHolding(args.reserveYield.holdings);
 }
 
 function hasSusdsActualSignal(
@@ -132,6 +147,7 @@ export function buildActualAvailability(
       (args.reserveYieldFailed === true ||
         hasReserveYieldSignal(args.reserveYield))) ||
     knownMissingSusdsSnapshotSource(args) ||
+    incompleteSusdsSnapshotCoverage(args) ||
     unverifiableSusdsSnapshotSource(args) ||
     unavailableSusdsSignalSource(args);
   return {
@@ -145,6 +161,9 @@ export function buildActualAvailability(
 function reservePartialReason(args: BuildCanonicalRevenueArgs): string | null {
   if (args.reserveHistoryFailed) {
     return "Reserve earned-yield history failed to load.";
+  }
+  if (incompleteSusdsSnapshotCoverage(args)) {
+    return "Reserve sUSDS earned-yield actuals unavailable: indexed snapshots do not cover every current sUSDS holding.";
   }
   if (unverifiableSusdsSnapshotSource(args)) {
     return "Reserve sUSDS earned-yield actuals unavailable: current reserve holdings classification failed and no SusdsYieldDailySnapshot source exists.";

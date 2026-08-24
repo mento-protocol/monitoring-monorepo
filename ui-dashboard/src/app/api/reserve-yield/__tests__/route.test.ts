@@ -172,6 +172,7 @@ describe("GET /api/reserve-yield", () => {
       earnedYieldUsd: null,
       susdsEarnedYieldUsd: null,
       susdsSnapshotSourceRequired: true,
+      hasUnindexedSusdsHolding: false,
       grossApyPercent: 5.33,
       expenseBps: 15,
       revenueShareBps: 8000,
@@ -535,6 +536,7 @@ describe("GET /api/reserve-yield", () => {
     expect(body.realizedYieldUsd).toBeCloseTo(100, 6);
     expect(body.unrealizedYieldUsd).toBeCloseTo(100, 6);
     expect(body.earnedYieldError).toContain("outside indexed wallets");
+    expect(body.hasUnindexedSusdsHolding).toBe(true);
     expect(body.holdings).toHaveLength(3);
     expect(
       body.holdings.find(

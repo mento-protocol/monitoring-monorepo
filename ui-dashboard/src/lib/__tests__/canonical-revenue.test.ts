@@ -19,6 +19,8 @@ const UNVERIFIABLE_SUSDS_SNAPSHOT_SOURCE_REASON =
   "Reserve sUSDS earned-yield actuals unavailable: current reserve holdings classification failed and no SusdsYieldDailySnapshot source exists.";
 const UNAVAILABLE_SUSDS_SIGNAL_SOURCE_REASON =
   "Reserve sUSDS earned-yield actuals unavailable: the current sUSDS yield signal is unavailable and no SusdsYieldDailySnapshot source exists.";
+const INCOMPLETE_SUSDS_SNAPSHOT_COVERAGE_REASON =
+  "Reserve sUSDS earned-yield actuals unavailable: indexed snapshots do not cover every current sUSDS holding.";
 
 function ts(iso: string): number {
   return Date.parse(`${iso}T00:00:00Z`) / 1000;
@@ -147,6 +149,7 @@ function reserveYield(
     susdsEarnedYieldUsd: null,
     susdsYieldSignalUnavailable: false,
     susdsSnapshotSourceRequired: false,
+    hasUnindexedSusdsHolding: false,
     realizedYieldUsd: null,
     unrealizedYieldUsd: null,
     earnedYieldAsOf: null,
@@ -383,6 +386,95 @@ describe("buildCanonicalRevenue", () => {
       UNAVAILABLE_SUSDS_SIGNAL_SOURCE_REASON,
     );
   });
+
+  it("fails closed when indexed snapshots do not cover a current sUSDS holding", () => {
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({ hasUnindexedSusdsHolding: true }),
+      reserveDailySnapshots: [reserveSnapshot(ts("2026-06-12"), 5)],
+      hasUnindexedSusdsHolding: true,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.periods.allTimeSinceV3.totalUsd).toBeNull();
+    expect(result.partialReasons).toContain(
+      INCOMPLETE_SUSDS_SNAPSHOT_COVERAGE_REASON,
+    );
+  });
+
+  it("derives missing legacy coverage state without rejecting stETH-only holdings", () => {
+    const legacySusds: Partial<ReserveYieldResponse> = {
+      ...reserveYield({
+        holdings: [
+          stethHolding({
+            assetSymbol: "sUSDS",
+            identifier: "0x0000000000000000000000000000000000000001",
+            principalUsd: 1_000,
+            balance: 1_000,
+          }),
+        ],
+      }),
+    };
+    delete legacySusds.hasUnindexedSusdsHolding;
+    const incomplete = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: legacySusds as ReserveYieldResponse,
+      reserveDailySnapshots: [reserveSnapshot(ts("2026-06-12"), 5)],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    const legacySteth: Partial<ReserveYieldResponse> = {
+      ...reserveYield({ holdings: [stethHolding()] }),
+    };
+    delete legacySteth.hasUnindexedSusdsHolding;
+    const stethOnly = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: legacySteth as ReserveYieldResponse,
+      reserveDailySnapshots: [reserveSnapshot(ts("2026-06-12"), 5)],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(incomplete.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(incomplete.partialReasons).toContain(
+      INCOMPLETE_SUSDS_SNAPSHOT_COVERAGE_REASON,
+    );
+    expect(stethOnly.periods.allTimeSinceV3.reserveYieldUsd).toBe(5);
+    expect(stethOnly.partialReasons).not.toContain(
+      INCOMPLETE_SUSDS_SNAPSHOT_COVERAGE_REASON,
+    );
+  });
+
+  it.each(["totalEarnedYieldUsdWei", "dailyEarnedYieldUsdWei"] as const)(
+    "fails closed when a current sUSDS history row has invalid %s",
+    (field) => {
+      const result = buildCanonicalRevenue({
+        networkData: [],
+        cdpDailySeries: [],
+        cdpMarkets: [],
+        reserveYield: reserveYield(),
+        reserveDailySnapshots: [
+          {
+            ...reserveSnapshot(ts("2026-06-12"), 5),
+            [field]: "invalid",
+          },
+        ],
+        nowSeconds: NOW_SECONDS,
+      });
+
+      expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+      expect(result.periods.allTimeSinceV3.totalUsd).toBeNull();
+      expect(result.partialReasons).toContain(
+        "Reserve earned-yield history failed to load.",
+      );
+    },
+  );
 
   it("keeps stETH-only rows available after a clean zero sUSDS signal", () => {
     const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";

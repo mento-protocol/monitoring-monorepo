@@ -13,8 +13,11 @@ import { SWR_KEY_RESERVE_YIELD_HISTORY } from "@/lib/swr-keys";
 import type {
   ReserveYieldDailySnapshotRow,
   StethYieldDailySnapshotRow,
-  SusdsYieldDailySnapshotRow,
 } from "@/lib/canonical-revenue";
+import {
+  hasInvalidSusdsYieldDailySnapshotRow,
+  isValidSusdsYieldDailySnapshotRow,
+} from "@/lib/canonical-revenue/reserve-snapshot-validation";
 
 export type ReserveYieldHistoryResult = {
   rows: ReserveYieldDailySnapshotRow[];
@@ -22,14 +25,6 @@ export type ReserveYieldHistoryResult = {
   hasError: boolean;
   unavailable: boolean;
   truncated: boolean;
-};
-
-type SusdsYieldDailySnapshotsResponse = {
-  SusdsYieldDailySnapshot: SusdsYieldDailySnapshotRow[];
-};
-
-type StethYieldDailySnapshotsResponse = {
-  StethYieldDailySnapshot: StethYieldDailySnapshotRow[];
 };
 
 type SnapshotPageResult = {
@@ -135,31 +130,34 @@ async function fetchStethHistory(
   }
 }
 
-type ReserveYieldHistoryResponse =
-  | SusdsYieldDailySnapshotsResponse
-  | StethYieldDailySnapshotsResponse;
-
 type ReserveYieldHistoryResponseKey =
   | "SusdsYieldDailySnapshot"
   | "StethYieldDailySnapshot";
 
 function pageRowsForResponse(
-  response: ReserveYieldHistoryResponse,
+  response: unknown,
   responseKey: ReserveYieldHistoryResponseKey,
 ): ReserveYieldDailySnapshotRow[] {
-  if (
-    responseKey === "SusdsYieldDailySnapshot" &&
-    "SusdsYieldDailySnapshot" in response
-  ) {
-    return response.SusdsYieldDailySnapshot;
+  if (typeof response !== "object" || response === null) {
+    throw new Error("Reserve yield history response was not an object");
   }
-  if (
-    responseKey === "StethYieldDailySnapshot" &&
-    "StethYieldDailySnapshot" in response
-  ) {
-    return response.StethYieldDailySnapshot;
+  const pageRows = (response as Record<string, unknown>)[responseKey];
+  if (!Array.isArray(pageRows)) {
+    throw new Error(`${responseKey} was not an array`);
   }
-  return [];
+  if (responseKey === "SusdsYieldDailySnapshot") {
+    if (
+      !pageRows.every(
+        (row) =>
+          isValidSusdsYieldDailySnapshotRow(row) &&
+          row.chainId === ETHEREUM_CHAIN_ID,
+      )
+    ) {
+      throw new Error("SusdsYieldDailySnapshot contained a malformed row");
+    }
+    return pageRows;
+  }
+  return pageRows as StethYieldDailySnapshotRow[];
 }
 
 async function fetchReserveYieldHistoryPage({
@@ -183,7 +181,7 @@ async function fetchReserveYieldHistoryPage({
     return { rows, unavailable: false, truncated: true };
   }
 
-  const response = await requestWithTimeout<ReserveYieldHistoryResponse>(
+  const response = await requestWithTimeout<unknown>(
     client,
     document,
     {
@@ -219,7 +217,9 @@ export function useReserveYieldHistory(): ReserveYieldHistoryResult {
     fetchReserveYieldHistory,
     SHARED_QUERY_SWR_CONFIG,
   );
-  const hasError = error !== undefined;
+  const hasMalformedCachedSusdsHistory =
+    data !== undefined && hasInvalidSusdsYieldDailySnapshotRow(data.rows);
+  const hasError = error !== undefined || hasMalformedCachedSusdsHistory;
 
   return {
     rows: hasError ? [] : (data?.rows ?? []),

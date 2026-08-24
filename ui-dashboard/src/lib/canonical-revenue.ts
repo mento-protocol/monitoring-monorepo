@@ -13,6 +13,7 @@ import {
 } from "./canonical-revenue/forecasts";
 import { buildPeriods } from "./canonical-revenue/periods";
 import { buildStreams } from "./canonical-revenue/streams";
+import { hasInvalidSusdsYieldDailySnapshotRow } from "./canonical-revenue/reserve-snapshot-validation";
 import type {
   BuildCanonicalRevenueArgs,
   CanonicalRevenueResult,
@@ -47,12 +48,19 @@ export function buildCanonicalRevenue({
   reserveHistoryTruncated = false,
   reserveYieldFailed = false,
   reserveCurrentHoldingsClassificationFailed = false,
+  hasUnindexedSusdsHolding = false,
   swapFeesFailed = false,
   swapFeesApproximate = false,
   cdpDailySeriesFailed = false,
   cdpInputsApproximate = false,
   nowSeconds = Math.floor(Date.now() / 1000),
 }: BuildCanonicalRevenueArgs): CanonicalRevenueResult {
+  const malformedSusdsHistory = hasInvalidSusdsYieldDailySnapshotRow(
+    reserveDailySnapshots,
+  );
+  const validatedReserveDailySnapshots = malformedSusdsHistory
+    ? []
+    : reserveDailySnapshots;
   const swapSeries = buildDailyFeeSeries(
     [...networkData],
     undefined,
@@ -61,7 +69,7 @@ export function buildCanonicalRevenue({
   const reserveBuckets = buildRevenueBuckets({
     swapSeries,
     cdpDailySeries,
-    reserveDailySnapshots,
+    reserveDailySnapshots: validatedReserveDailySnapshots,
     reserveYield,
   });
   const canonicalArgs = {
@@ -69,13 +77,14 @@ export function buildCanonicalRevenue({
     cdpDailySeries,
     cdpMarkets,
     reserveYield,
-    reserveDailySnapshots,
+    reserveDailySnapshots: validatedReserveDailySnapshots,
     reserveHistoryUnavailable,
-    reserveHistoryFailed,
+    reserveHistoryFailed: reserveHistoryFailed || malformedSusdsHistory,
     reserveHistoryTruncated,
     reserveHistoryUnpriced: reserveBuckets.reserveHistoryUnpriced,
     reserveYieldFailed,
     reserveCurrentHoldingsClassificationFailed,
+    hasUnindexedSusdsHolding,
     swapFeesFailed,
     swapFeesApproximate,
     cdpDailySeriesFailed,
