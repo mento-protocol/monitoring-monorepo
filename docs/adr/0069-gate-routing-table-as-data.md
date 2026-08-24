@@ -27,12 +27,13 @@ record; what is live is the table, the engine, and the checks in section 5.
 
 ## Context
 
-`scripts/agent-quality-gate.sh` is 6,100 lines and the largest file in the
-repository. It is the subject of
+`scripts/agent-quality-gate.sh` was 6,100 lines and the largest file in the
+repository when this decision began. It was the subject of
 [issue 1498](https://github.com/mento-protocol/monitoring-monorepo/issues/1498)
 and the one hard-cap row [ADR 0065](0065-scripts-file-size-watchlist-scope.md)
 deliberately refuses to exempt, on the ground that its split is expensive rather
-than architecturally forbidden.
+than architecturally forbidden. D5c later removed the routing arms and exposed
+the residual process-control and execution layers governed by this decision.
 
 It is not one thing. The largest single region is routing: one `while IFS= read
 -r path` loop over the changed set, holding **13 top-level `case` statements**,
@@ -518,11 +519,12 @@ gate is not a trust root.
   its owned paths. Other changed-path classes keep their prior plan, except that
   the autoreview-core source class now receives the checklist and both gate
   suites by design.
-- **Issue 1498 is not satisfied as written.** Its acceptance criteria name sourced
+- **Issue 1498's original split is rejected.** Its acceptance criteria named sourced
   `scripts/lib/gate-*.sh` helpers for the watchdog, stamps and executor —
-  exactly the layers this decision keeps in bash. The criteria are rewritten
-  rather than quietly satisfied: ADR 0065 cites 1498 by number as the reason the
-  gate is not exempt, so the two records must stay consistent.
+  exactly the residual layers this decision keeps together in bash. Moving
+  those crash boundaries across files would provide no schema, test oracle, or
+  checkable invariant. The issue now reconciles ADR 0065 with this rejection
+  and needs no permanent ownership role for the measured row.
 - **`check-sentry-suites-in-ci-gate-extract.mjs` outlived the check it was
   written for.** Its `runProbeShell`, `probeDirs` and `bashFunctionSource` backed
   the classifier probe; D5c made that probe an import, and what keeps the module
@@ -570,4 +572,4 @@ gate is not a trust root.
   `scripts/gate/routing-table/pattern-oracle.test.mjs`, which is the standing
   proof rather than a one-off measurement.
 - Deferred-track queue: <https://github.com/mento-protocol/monitoring-monorepo/issues/1877>
-- Gate-split owner: <https://github.com/mento-protocol/monitoring-monorepo/issues/1498>
+- Reconciled gate-split record: <https://github.com/mento-protocol/monitoring-monorepo/issues/1498>
