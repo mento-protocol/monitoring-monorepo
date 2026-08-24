@@ -12,22 +12,7 @@ import type {
   BuildCanonicalRevenueArgs,
   ReserveYieldDailySnapshotRow,
   StethYieldDailySnapshotRow,
-  SusdsYieldDailySnapshotRow,
 } from "./types";
-
-const SUSDS_EXPOSURE_FIELDS = [
-  "currentShares",
-  "costBasisUsdWei",
-  "realizedYieldUsdWei",
-  "transferredOutYieldUsdWei",
-  "redeemedYieldUsdWei",
-  "currentValueUsdWei",
-  "unrealizedYieldUsdWei",
-  "totalEarnedYieldUsdWei",
-  "dailyEarnedYieldUsdWei",
-  "dailyRealizedYieldUsdWei",
-  "dailyUnrealizedYieldUsdWei",
-] as const satisfies ReadonlyArray<keyof SusdsYieldDailySnapshotRow>;
 
 function hasReserveYieldSignal(
   reserveYield: BuildCanonicalRevenueArgs["reserveYield"],
@@ -171,25 +156,7 @@ function hasSusdsActualSignal(
   return currentSusdsHolding || earnedYieldSignal;
 }
 
-function hasHistoricalSusdsExposure(
-  reserveDailySnapshots: ReadonlyArray<ReserveYieldDailySnapshotRow>,
-): boolean {
-  return reserveDailySnapshots.some(
-    (row) =>
-      !("wallet" in row) &&
-      SUSDS_EXPOSURE_FIELDS.some((field) => {
-        try {
-          return BigInt(row[field]) !== BigInt(0);
-        } catch {
-          return true;
-        }
-      }),
-  );
-}
-
-function hasInactiveZeroOnlySusdsSource(
-  args: BuildCanonicalRevenueArgs,
-): boolean {
+function hasInactiveSusdsSource(args: BuildCanonicalRevenueArgs): boolean {
   const reserveYield = args.reserveYield;
   return (
     reserveYield !== null &&
@@ -199,8 +166,8 @@ function hasInactiveZeroOnlySusdsSource(
     reserveYield.hasUnindexedSusdsHolding === false &&
     reserveYield.susdsYieldSignalUnavailable === false &&
     reserveYield.susdsSnapshotSourceRequired === false &&
-    !hasSusdsActualSignal(reserveYield) &&
-    !hasHistoricalSusdsExposure(args.reserveDailySnapshots)
+    reserveYield.susdsEarnedYieldUsd === 0 &&
+    !hasSusdsActualSignal(reserveYield)
   );
 }
 
@@ -241,9 +208,9 @@ function latestReserveSnapshotBucketsBySource(
   args: BuildCanonicalRevenueArgs,
 ): Map<string, number> {
   const latestBySource = new Map<string, number>();
-  const ignoreZeroOnlySusdsSource = hasInactiveZeroOnlySusdsSource(args);
+  const ignoreInactiveSusdsSource = hasInactiveSusdsSource(args);
   for (const row of args.reserveDailySnapshots) {
-    if (ignoreZeroOnlySusdsSource && !("wallet" in row)) continue;
+    if (ignoreInactiveSusdsSource && !("wallet" in row)) continue;
     const timestamp = Number(row.timestamp);
     if (!Number.isFinite(timestamp)) continue;
     const bucket = dayBucket(timestamp);

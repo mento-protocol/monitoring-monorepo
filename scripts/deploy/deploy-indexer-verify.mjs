@@ -22,6 +22,8 @@ export {
 
 const ENVIO_ORG = "mento-protocol";
 const ENVIO_INDEXER = "mento";
+export const PRODUCTION_GRAPHQL_ENDPOINT =
+  "https://indexer.hyperindex.xyz/2f3dd15/v1/graphql";
 const GRAPHQL_TIMEOUT_MS = 20_000;
 const INDEXER_SCHEMA_PATH = "indexer-envio/schema.graphql";
 const REPLAY_INTEGRITY_PATH = "indexer-envio/config/replay-integrity.json";
@@ -283,8 +285,13 @@ function resolveDeploymentEndpoint(deployment) {
   return extracted;
 }
 
-async function queryGraphql(endpoint, query) {
-  const response = await fetch(endpoint, {
+export function resolveVerificationEndpoint(deployment, { prod = false } = {}) {
+  if (prod) return PRODUCTION_GRAPHQL_ENDPOINT;
+  return resolveDeploymentEndpoint(deployment);
+}
+
+export async function queryGraphql(endpoint, query, fetchImpl = fetch) {
+  const response = await fetchImpl(endpoint, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ query }),
@@ -451,7 +458,9 @@ async function main() {
     endpointMode = "prod-static";
   }
 
-  const endpoint = resolveDeploymentEndpoint(deployment);
+  const endpoint = resolveVerificationEndpoint(deployment, {
+    prod: args.prod,
+  });
   const statusJson = runEnvioJson([
     "deployment",
     "status",

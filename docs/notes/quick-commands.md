@@ -35,7 +35,7 @@ pnpm deploy:indexer:info <commit>     # Hosted deployment info/cache state
 pnpm deploy:indexer:perf <commit>     # Combined status/metrics/log snapshot for perf comparisons
 pnpm deploy:indexer:verify <commit>   # Gate promotion on sync, core rows, schema-compatible sUSDS baseline/sampler integrity, and Polygon replay
 pnpm deploy:indexer:promote <commit>  # Promote a synced deployment to prod
-pnpm deploy:indexer:verify <commit> --prod  # After propagation, require that commit and its semantic data on the static production endpoint
+pnpm deploy:indexer:verify <commit> --prod  # After propagation, probe the fixed static endpoint directly and require that commit plus its semantic data
 pnpm deploy:indexer:rollback <last-good-sha>  # Roll prod back: re-promote if still registered, else rebuild + resync
 
 # Code health (CodeScene-equivalent OSS checks)

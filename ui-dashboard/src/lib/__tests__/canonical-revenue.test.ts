@@ -1440,10 +1440,10 @@ describe("buildCanonicalRevenue", () => {
     );
   });
 
-  it("keeps a historical sUSDS source active through later zero snapshots", () => {
+  it("retires historical sUSDS freshness after the current API proves zero exposure", () => {
     const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
     const historicalSusdsSnapshot = {
-      ...reserveSnapshot(ts("2026-06-10"), 0, 0),
+      ...reserveSnapshot(ts("2026-06-10"), 5, 5),
       currentShares: "1",
     };
     const result = buildCanonicalRevenue({
@@ -1451,11 +1451,40 @@ describe("buildCanonicalRevenue", () => {
       cdpDailySeries: [],
       cdpMarkets: [],
       reserveYield: reserveYield({
-        holdings: [stethHolding({ identifier: wallet })],
+        holdings: [
+          stethHolding({ identifier: wallet, principalUsd: 1, balance: 1 }),
+        ],
+        susdsEarnedYieldUsd: 0,
       }),
       reserveDailySnapshots: [
         historicalSusdsSnapshot,
-        reserveSnapshot(ts("2026-06-11"), 0, 0),
+        stethReserveSnapshot(ts("2026-06-12"), wallet, 1),
+      ],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBe(6);
+    expect(result.partialReasons).not.toContainEqual(
+      expect.stringContaining("Reserve earned-yield history is stale"),
+    );
+  });
+
+  it("keeps historical sUSDS freshness conservative when the current signal is unavailable", () => {
+    const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({
+        holdings: [stethHolding({ identifier: wallet })],
+        susdsEarnedYieldUsd: 0,
+        susdsYieldSignalUnavailable: true,
+      }),
+      reserveDailySnapshots: [
+        {
+          ...reserveSnapshot(ts("2026-06-10"), 0, 0),
+          currentShares: "1",
+        },
         stethReserveSnapshot(ts("2026-06-12"), wallet, 1),
       ],
       nowSeconds: NOW_SECONDS,
@@ -1463,7 +1492,7 @@ describe("buildCanonicalRevenue", () => {
 
     expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
     expect(result.partialReasons).toContain(
-      "Reserve earned-yield history is stale; latest snapshot is Jun 11, 2026.",
+      "Reserve earned-yield history is stale; latest snapshot is Jun 10, 2026.",
     );
   });
 

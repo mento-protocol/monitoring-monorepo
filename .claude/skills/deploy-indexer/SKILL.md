@@ -326,7 +326,10 @@ pnpm deploy:indexer:verify <TARGET_COMMIT> --prod
 
 This second verifier run is separate from the candidate check in Phase 3. It
 requires the target commit to be `prod` and runs the same semantic probes
-against the static production GraphQL endpoint. Stop on any failure.
+against the repo-configured static production GraphQL endpoint
+`https://indexer.hyperindex.xyz/2f3dd15/v1/graphql`. In `--prod` mode, the
+verifier does not use registry endpoint metadata or the per-deployment endpoint
+resolver. Stop if it cannot query the static endpoint or any probe fails.
 
 If `--no-verify` was passed, stop here and print the final summary.
 

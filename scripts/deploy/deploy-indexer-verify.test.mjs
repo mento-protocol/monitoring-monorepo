@@ -2,15 +2,18 @@
 
 import assert from "node:assert/strict";
 import {
+  PRODUCTION_GRAPHQL_ENDPOINT,
   PROBE_QUERY,
   buildProbeQuery,
   buildSummary,
   extractJsonValue,
   parseArgs,
   parseJsonOutput,
+  queryGraphql,
   renderText,
   resolveDeployment,
   resolveProdDeployment,
+  resolveVerificationEndpoint,
   summarizeProbe,
   summarizeReplayIntegrity,
   summarizeSusdsSamplerProgress,
@@ -152,6 +155,49 @@ assert.equal(
   null,
 );
 assert.equal(resolveProdDeployment(indexerJson)?.commit_hash, "abc1234");
+assert.equal(
+  resolveVerificationEndpoint(
+    {
+      commit_hash: "abc1234",
+      gql_endpoint: "",
+      endpoint: "https://indexer.hyperindex.xyz/per-deployment/v1/graphql",
+    },
+    { prod: true },
+  ),
+  PRODUCTION_GRAPHQL_ENDPOINT,
+);
+assert.equal(
+  resolveVerificationEndpoint(indexerJson.data.deployments[1]),
+  indexerJson.data.deployments[1].gql_endpoint,
+);
+
+let probedEndpoint = "";
+const graphqlProbe = await queryGraphql(
+  resolveVerificationEndpoint({ commit_hash: "abc1234" }, { prod: true }),
+  "query { __typename }",
+  async (endpoint) => {
+    probedEndpoint = endpoint;
+    return {
+      ok: true,
+      status: 200,
+      text: async () => '{"data":{"__typename":"query_root"}}',
+    };
+  },
+);
+assert.equal(probedEndpoint, PRODUCTION_GRAPHQL_ENDPOINT);
+assert.deepEqual(graphqlProbe, { data: { __typename: "query_root" } });
+await assert.rejects(
+  queryGraphql(
+    PRODUCTION_GRAPHQL_ENDPOINT,
+    "query { __typename }",
+    async () => ({
+      ok: false,
+      status: 503,
+      text: async () => "static endpoint unavailable",
+    }),
+  ),
+  /GraphQL probe returned HTTP 503: static endpoint unavailable/,
+);
 
 const validReplayIntegrity = summarizeReplayIntegrity(VALID_REPLAY_INTEGRITY);
 assert.equal(validReplayIntegrity.ok, true);
