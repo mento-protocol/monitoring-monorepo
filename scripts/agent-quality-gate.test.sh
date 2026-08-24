@@ -1842,6 +1842,7 @@ adapter_drift_lock="$(cd "$adapter_drift_lock" && pwd -P)"
   mkdir -p bin scripts/docs scripts/gate/mapping \
     scripts/gate/routing-table scripts/lib tools
   cp "$repo_root/scripts/agent-quality-gate.sh" scripts/agent-quality-gate.sh
+  cp "$repo_root/scripts/agent-autoreview-core.mjs" scripts/agent-autoreview-core.mjs
   cp "$repo_root/scripts/docs/docs-navigation-eval-helpers.mjs" scripts/docs/
   cp "$repo_root/scripts/lib/gh-issue-lifecycle.mjs" scripts/lib/
   cp "$repo_root/scripts/gate/lockfile-scope.mjs" scripts/gate/

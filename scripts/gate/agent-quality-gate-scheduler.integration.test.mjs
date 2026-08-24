@@ -81,6 +81,10 @@ async function copyCoordinatorRuntime(worktree) {
     join(targetScripts, "agent-quality-gate.sh"),
   );
   await copyFile(
+    join(sourceRoot, "scripts/agent-autoreview-core.mjs"),
+    join(targetScripts, "agent-autoreview-core.mjs"),
+  );
+  await copyFile(
     join(sourceRoot, "scripts/docs/docs-navigation-eval-helpers.mjs"),
     join(targetDocs, "docs-navigation-eval-helpers.mjs"),
   );
