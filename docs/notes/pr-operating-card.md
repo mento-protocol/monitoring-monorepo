@@ -62,14 +62,20 @@ even when you never open an authority.
 
    `--run` maps changed paths to the safe local checks (lint, typecheck, tests,
    browser suite) and stamps freshness so a later pre-push `--skip-if-fresh`
-   cache-hits. Run `git fetch origin main` first: the base commit is part of
-   that stamp, the hook fetches before it runs the gate, and a stamp warmed
-   against a stale `origin/main` is invalidated by that fetch, so the push pays
-   for the full gate a second time. A bare invocation diffs against
-   `origin/main`; a stacked PR (base not `main`) must resolve `baseRefName`
-   first and pass `--base origin/<baseRefName>` — a child change that reverses
-   a parent-introduced path can vanish from the `origin/main...HEAD` diff,
-   scheduling no checks for it. It does not run `trunk fmt` — run
+   cache-hits. Every base ref below lives on the **resolved base remote** —
+   `BASE_REMOTE` from step 5's resolution when it ran first, plain `origin`
+   only in the non-fork single-remote case above; in a fork checkout `origin`
+   serves the fork, so an `origin/...` base compares against the wrong
+   repository (or a missing branch) and real changes drop out of the diff,
+   skipping their mapped checks. Run `git fetch <base-remote> main` first: the
+   base commit is part of the freshness stamp, the hook fetches before it runs
+   the gate, and a stamp warmed against a stale base is invalidated by that
+   fetch, so the push pays for the full gate a second time. A bare invocation
+   diffs against `origin/main`; a fork checkout must pass
+   `--base <base-remote>/main`, and a stacked PR (base not `main`) must
+   resolve `baseRefName` and pass `--base <base-remote>/<baseRefName>` — a
+   child change that reverses a parent-introduced path can vanish from the
+   `main`-based diff, scheduling no checks for it. It does not run `trunk fmt` — run
    `./tools/trunk fmt` (the checked-in launcher; a global `trunk` may not exist)
    before committing so the required Code Quality CI stays green. The gate never
    deploys and never applies Terraform. It **refuses package-script,
