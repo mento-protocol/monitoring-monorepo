@@ -334,16 +334,30 @@ session. Use `evaluate_script` first for a focused application API check.
 
 For an sUSDS sampler or reserve-yield change, fetch
 `/api/reserve-yield?closeout=<TARGET_DISPLAY>` with `cache: "no-store"` from
-the production origin. Require all of these conditions:
+the production origin. The `closeout` value is a target-scoped browser and
+network-log marker. It also gives the request a distinct shared HTTP cache key.
+The route does not read it or scope the response.
+
+Always require all of these conditions:
 
 - the response status is 200;
-- `susdsEarnedYieldUsd` exists and is a finite number;
-- `earnedYieldAsOf` is a valid timestamp;
 - `earnedYieldError` is `null`;
-- `holdings` contains an sUSDS row whose `earnedYieldUsd` is a finite number.
+- `susdsYieldSignalUnavailable` is `false`.
+
+Inspect `holdings` for current sUSDS exposure. Exposure exists when an sUSDS
+row has a positive finite `balance` or `principalUsd`. Also inspect
+`susdsEarnedYieldUsd` for a nonzero finite historical signal.
+
+When either current exposure or a nonzero historical signal exists, require
+`susdsEarnedYieldUsd` to be finite and `earnedYieldAsOf` to be a valid
+timestamp. When current exposure exists, also require an sUSDS holding whose
+`earnedYieldUsd` is finite. When neither signal exists, accept
+`susdsEarnedYieldUsd` as `null` or finite zero and do not require an sUSDS
+holding or `earnedYieldAsOf`.
 
 Return the checked fields as evidence. Treat a missing field, non-finite value,
-non-null error, or non-200 response as a failed production verification.
+unexpected signal state, non-null error, or non-200 response as a failed
+production verification.
 
 For an sUSDS sampler change, also verify that `/revenue` renders reserve
 actuals without pending, unavailable, or stale labels.

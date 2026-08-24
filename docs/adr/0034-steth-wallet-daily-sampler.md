@@ -1,7 +1,6 @@
 ---
 title: stETH actuals use a launch-aligned sub-daily wallet balance sampler
 status: active
-superseded_by: 0071-susds-launch-aligned-daily-sampler.md (sUSDS event-only clause)
 owner: eng
 canonical: true
 last_verified: 2026-08-21

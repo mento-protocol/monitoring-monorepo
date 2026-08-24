@@ -70,4 +70,5 @@ force.
 - Ethereum block `24573203` has timestamp `1772495999`; block `24573204` has
   timestamp `1772496011`.
 - Focused sUSDS sampler tests cover launch baseline, quiet-period growth,
-  cross-day deltas, idempotent updates, null effects, and preload writes.
+  cross-day deltas, idempotent updates, null effects, and preload no-write
+  behavior.

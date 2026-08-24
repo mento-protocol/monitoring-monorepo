@@ -1,7 +1,6 @@
 ---
 title: One multichain indexer project; Ethereum reserve-yield shares the hosted deployment
 status: active
-superseded_by: 0071-susds-launch-aligned-daily-sampler.md (sUSDS event-only clause)
 owner: eng
 canonical: true
 last_verified: 2026-08-21

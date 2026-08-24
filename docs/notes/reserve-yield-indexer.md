@@ -172,10 +172,15 @@ After promotion:
    production endpoint and requires that exact commit to be production.
 7. An authorized same-origin request to production
    `/api/reserve-yield?closeout=<short-commit>` with `cache: "no-store"`
-   returns HTTP 200. `susdsEarnedYieldUsd` must be a finite number,
-   `earnedYieldAsOf` must be a valid timestamp, and `earnedYieldError` must be
-   `null`. The response must also contain an sUSDS holding with a finite
-   `earnedYieldUsd`.
+   returns HTTP 200. The query value marks the target in browser and network
+   logs and gives it a distinct shared HTTP cache key; the route does not read
+   it. `earnedYieldError` must be `null`, and
+   `susdsYieldSignalUnavailable` must be `false`. Current sUSDS exposure or
+   a nonzero historical earned signal requires finite `susdsEarnedYieldUsd`
+   and a valid `earnedYieldAsOf`. Current exposure also requires an sUSDS
+   holding with finite `earnedYieldUsd`. A clean state without either signal
+   may return `susdsEarnedYieldUsd: null` or finite zero and does not require
+   an sUSDS holding or `earnedYieldAsOf`.
 8. The dashboard `/revenue` page shows current sUSDS reserve actuals without a
    pending, unavailable, or stale label. The browser console has no errors.
 
