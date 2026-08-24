@@ -4681,6 +4681,36 @@ export type SusdsYieldMovementBoolExp = {
   readonly yieldUsdWei?: ComparisonExp<string>;
 };
 
+export type SusdsYieldSamplerProgressSelectColumn =
+  | "chainId"
+  | "id"
+  | "sampledAtBlock"
+  | "sampledAtTimestamp"
+  | "token";
+
+export type SusdsYieldSamplerProgressOrderBy = {
+  readonly chainId?: OrderBy;
+  readonly id?: OrderBy;
+  readonly sampledAtBlock?: OrderBy;
+  readonly sampledAtTimestamp?: OrderBy;
+  readonly token?: OrderBy;
+};
+
+export type SusdsYieldSamplerProgressBoolExp = {
+  readonly _and?:
+    | SusdsYieldSamplerProgressBoolExp
+    | ReadonlyArray<SusdsYieldSamplerProgressBoolExp>;
+  readonly _or?:
+    | SusdsYieldSamplerProgressBoolExp
+    | ReadonlyArray<SusdsYieldSamplerProgressBoolExp>;
+  readonly _not?: SusdsYieldSamplerProgressBoolExp;
+  readonly chainId?: ComparisonExp<number>;
+  readonly id?: ComparisonExp<string>;
+  readonly sampledAtBlock?: ComparisonExp<string>;
+  readonly sampledAtTimestamp?: ComparisonExp<string>;
+  readonly token?: ComparisonExp<string>;
+};
+
 export type SusdsYieldSummarySelectColumn =
   | "chainId"
   | "costBasisUsdWei"
