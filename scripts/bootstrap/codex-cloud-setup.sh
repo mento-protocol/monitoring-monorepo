@@ -155,7 +155,7 @@ MSG
 verify_origin_git_auth() {
   local remote_url
   remote_url="$(git remote get-url origin)"
-  if [[ "$remote_url" != https://github.com/* && "$remote_url" != git@github.com:* ]]; then
+  if [[ "$remote_url" != https://github.com/* && "$remote_url" != git@github.com:* && "$remote_url" != ssh://git@github.com/* ]]; then
     echo "==> Skipping GitHub auth probe for non-GitHub origin: ${remote_url}"
     return 0
   fi
@@ -178,13 +178,14 @@ verify_github_api_capabilities() {
   local remote_url
   local repository
   remote_url="$(git remote get-url origin)"
-  if [[ "$remote_url" != https://github.com/* && "$remote_url" != git@github.com:* ]]; then
+  if [[ "$remote_url" != https://github.com/* && "$remote_url" != git@github.com:* && "$remote_url" != ssh://git@github.com/* ]]; then
     echo "==> Skipping GitHub API probes for non-GitHub origin: ${remote_url}"
     return 0
   fi
 
   repository="${remote_url#https://github.com/}"
   repository="${repository#git@github.com:}"
+  repository="${repository#ssh://git@github.com/}"
   repository="${repository%.git}"
 
   echo "==> Verifying GitHub repository API access"
@@ -201,7 +202,7 @@ verify_origin_write_access() (
   local probe_suffix
   local cleanup_eligible=false
   remote_url="$(git remote get-url origin)"
-  if [[ "$remote_url" != https://github.com/* && "$remote_url" != git@github.com:* ]]; then
+  if [[ "$remote_url" != https://github.com/* && "$remote_url" != git@github.com:* && "$remote_url" != ssh://git@github.com/* ]]; then
     echo "==> Skipping GitHub write probe for non-GitHub origin: ${remote_url}"
     return 0
   fi

@@ -307,6 +307,22 @@ if grep -Fq "wrong-owner/wrong-repo" "$case_tool_log"; then
   fail "${case_name}: GH_REPO redirected an API probe"
 fi
 
+prepare_case "github-api-ssh-uri-origin"
+(
+  # shellcheck source=scripts/bootstrap/codex-cloud-setup.sh
+  source "$setup_script"
+  git() {
+    [[ "$*" == "remote get-url origin" ]] || return 1
+    echo "ssh://git@github.com/mento-protocol/monitoring-monorepo.git"
+  }
+  gh() { printf '%s\n' "$*" >>"$case_tool_log"; }
+  verify_github_api_capabilities
+) >"$case_stdout" 2>"$case_stderr"
+grep -Fxq "api repos/mento-protocol/monitoring-monorepo" "$case_tool_log" ||
+  fail "${case_name}: repository probe did not normalize the SSH URI origin"
+grep -Fxq "api repos/mento-protocol/monitoring-monorepo/pulls?state=open&per_page=1" "$case_tool_log" ||
+  fail "${case_name}: pull-request probe did not normalize the SSH URI origin"
+
 prepare_case "origin-write-access-refused"
 (
   # shellcheck source=scripts/bootstrap/codex-cloud-setup.sh
