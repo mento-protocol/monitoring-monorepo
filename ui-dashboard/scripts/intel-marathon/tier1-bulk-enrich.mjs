@@ -286,6 +286,10 @@ async function discoverAll() {
           capped ? " ⚠ HARD_PAGE_CAP hit — truncated" : ""
         }`,
       );
+      // A capped source is exactly as incomplete as an errored one — silently
+      // sweeping a truncated registry defeats the abort-on-partial-discovery
+      // guarantee this function otherwise enforces.
+      if (capped) failedSources.push(source.table);
     } catch (err) {
       console.warn(`  ⚠ ${source.table}: ${err.message}`);
       failedSources.push(source.table);
@@ -679,14 +683,19 @@ const AUTO_NOTE_PREFIX = "Arkham prediction (";
 // union of fresh + existing tags can exceed the cap.
 function sanitizeEntry(entry) {
   const seenTags = new Set();
-  const tags = entry.tags.slice(0, MAX_TAGS_COUNT).flatMap((raw) => {
-    const t = String(raw).trim().slice(0, MAX_TAG_LENGTH);
-    if (!t) return [];
-    const key = t.toLowerCase();
-    if (seenTags.has(key)) return [];
-    seenTags.add(key);
-    return [t];
-  });
+  // Dedupe/drop-blank BEFORE capping — otherwise a blank or duplicate tag
+  // early in the list consumes a slot in the 20-item cap that a later,
+  // genuinely unique tag never gets to fill.
+  const tags = entry.tags
+    .flatMap((raw) => {
+      const t = String(raw).trim().slice(0, MAX_TAG_LENGTH);
+      if (!t) return [];
+      const key = t.toLowerCase();
+      if (seenTags.has(key)) return [];
+      seenTags.add(key);
+      return [t];
+    })
+    .slice(0, MAX_TAGS_COUNT);
   const notes = entry.notes?.slice(0, MAX_NOTES_LENGTH);
   return {
     ...entry,
@@ -723,8 +732,12 @@ function buildWriteEntry(fresh, current) {
     return { ...fresh, createdAt: current?.createdAt ?? fresh.updatedAt };
   }
   const isAutoNote = current.notes?.startsWith(AUTO_NOTE_PREFIX) === true;
+  // Existing tags first: `current.tags` can carry Tier 2's forensic ctp:/type:
+  // tags (curated, one-shot) ahead of a bulk Arkham tag dump. Now that
+  // populatedTags can fill the 20-tag cap on its own, putting `fresh` first
+  // would let a routine refresh silently evict that curated content.
   const tags = withoutArkhamTags(
-    Array.from(new Set([...fresh.tags, ...(current.tags ?? [])])),
+    Array.from(new Set([...(current.tags ?? []), ...fresh.tags])),
   );
   return sanitizeEntry({
     name: fresh.name,
@@ -921,8 +934,17 @@ async function main() {
     const batch = pendingWrites.splice(0, pendingWrites.length);
     const news = batch.filter((w) => w.mode === "new");
     const refreshes = batch.filter((w) => w.mode === "refresh");
-    if (news.length > 0) await flushNewWrites(news);
-    if (refreshes.length > 0) await flushRefreshWrites(refreshes);
+    try {
+      if (news.length > 0) await flushNewWrites(news);
+      if (refreshes.length > 0) await flushRefreshWrites(refreshes);
+    } catch (err) {
+      // Put the batch back so the next flush retries it instead of dropping
+      // already-fetched, quality-gate-passed results. Each address already
+      // has a `{address, status}` line in progressFile from the per-address
+      // loop, so a write lost here would never be retried on resume.
+      pendingWrites.unshift(...batch);
+      throw err;
+    }
   }
 
   /** Halt on errors that every remaining address would hit too. */
@@ -1009,7 +1031,6 @@ async function main() {
       );
       appendFileSync(progressFile, JSON.stringify({ address, status }) + "\n");
       recordResult(address, status, data);
-      if (pendingWrites.length >= HSET_BATCH) await flushWrites();
       if (dropped) console.log(`  quota ↓ after ${address}: ${quotaLine()}`);
     } catch (err) {
       await haltIfFatal(err.message);
@@ -1047,6 +1068,13 @@ async function main() {
         await noteFailure(err.message);
       }
     }
+    // Outside the Arkham try/catch above: a storage failure here is not an
+    // Arkham enrichment error and must not be absorbed by noteFailure() (which
+    // would reset consecutiveErrors on the next successful fetch and mask a
+    // sustained Upstash outage from the circuit breaker). Let it propagate to
+    // main().catch() and halt the run instead of grinding through the whole
+    // queue while silently writing nothing.
+    if (pendingWrites.length >= HSET_BATCH) await flushWrites();
     const done = i + 1;
     if (done % QUOTA_LOG_EVERY === 0) {
       await flushWrites();

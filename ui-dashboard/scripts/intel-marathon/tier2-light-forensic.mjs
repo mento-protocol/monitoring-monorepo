@@ -669,9 +669,14 @@ async function main() {
           existingEntry.tags.includes("arkham")
         );
       if (!isManual) {
+        // Derived tags first: `derived.tags` already puts this pass's own
+        // ctp:/type: forensic tags ahead of raw Arkham ids (see deriveTags
+        // above). If `existingEntry.tags` came first instead, a Tier 1 entry
+        // that already fills the 20-tag cap with Arkham ids would crowd out
+        // this pass's own forensic tags at merge time.
         const mergedTags = new Set([
-          ...(existingEntry?.tags ?? []),
           ...derived.tags,
+          ...(existingEntry?.tags ?? []),
         ]);
         const newEntry = {
           // Tags-only entries keep an empty name (rendered as "—"); never

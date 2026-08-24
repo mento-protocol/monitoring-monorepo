@@ -371,8 +371,13 @@ export function mergeRefreshEntry(
   if (!existing || !isArkhamSourced(existing)) return fresh;
 
   const isAutoNote = existing.notes?.startsWith("Arkham prediction (");
+  // Existing tags first: `existing.tags` can carry curated forensic tags
+  // (e.g. tier2's ctp:/type: prefixes) ahead of a bulk Arkham tag dump. Now
+  // that populatedTags can fill the 20-tag cap on its own (see arkham.ts's
+  // addChainTags), putting `fresh` first would let a routine refresh
+  // silently evict that curated content once sanitizeEntry truncates.
   const tags = withoutArkhamTags(
-    Array.from(new Set([...fresh.tags, ...existing.tags])),
+    Array.from(new Set([...existing.tags, ...fresh.tags])),
   );
 
   return sanitizeEntry({
