@@ -147,7 +147,10 @@ scheduled evaluation. Review the output, then run:
 pnpm agent:quality-gate --run
 ```
 
-Every non-empty candidate change set also runs `pnpm tf:test`. The required
+Every non-empty candidate change set also runs the Terraform-stack suite. The
+gate spells it `pnpm tf:test`, unless a root-tooling `package.json` edit already
+scheduled the identical `node scripts/tf-stacks.test.mjs`; the two share one
+dedupe key, so the suite runs once however many arms ask for it. The required
 `Production infrastructure contract` CI job runs the same command without a
 path condition, so production-infrastructure and deployment contracts cannot
 skip on an unrelated path.
