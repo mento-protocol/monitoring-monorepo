@@ -91,7 +91,12 @@ function useRevenuePageState() {
     reserveHistoryUnavailable: reserveYieldHistory.unavailable,
     reserveHistoryFailed: reserveYieldHistory.hasError,
     reserveHistoryTruncated: reserveYieldHistory.truncated,
+    stethHistoryFailed: reserveYieldHistory.stethHistoryFailed,
+    hasStethSnapshotSource: reserveYieldHistory.hasStethSnapshotSource,
     reserveYieldFailed: reserveYieldState.hasError,
+    reserveCurrentHoldingsClassificationFailed:
+      reserveYieldState.reserveCurrentHoldingsClassificationFailed,
+    hasUnindexedSusdsHolding: reserveYieldState.hasUnindexedSusdsHolding,
     swapFeesFailed: hasSwapFeesError,
     swapFeesApproximate: feesApprox && !hasSwapFeesError,
     cdpDailySeriesFailed:

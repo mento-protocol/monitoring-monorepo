@@ -31,8 +31,8 @@ import "./handlers/virtualPool.js";
 import "./handlers/biPoolManager.js";
 import "./handlers/feeToken.js";
 import "./handlers/stables/transfer.js";
-// Ethereum reserve-yield keeps sUSDS event-only; stETH adds a sub-daily
-// wallet-level sampler that writes launch-aligned daily rows for rebases.
+// Ethereum reserve-yield uses sparse sUSDS events plus bounded launch-aligned
+// sUSDS/stETH samplers for quiet-period yield growth.
 import "./handlers/steth.js";
 import { registerSusdsYieldEventHandlers } from "./handlers/susdsEvents.js";
 import "./handlers/openLiquidityStrategy.js";

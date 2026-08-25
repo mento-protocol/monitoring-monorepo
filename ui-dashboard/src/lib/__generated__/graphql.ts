@@ -4588,6 +4588,45 @@ export type SusdsYieldDailySnapshotBoolExp = {
   readonly unrealizedYieldUsdWei?: ComparisonExp<string>;
 };
 
+export type SusdsYieldLaunchBaselineSelectColumn =
+  | "chainId"
+  | "id"
+  | "launchBlock"
+  | "launchTimestamp"
+  | "sampledAtBlock"
+  | "sampledAtTimestamp"
+  | "sharePriceUsdWei"
+  | "token";
+
+export type SusdsYieldLaunchBaselineOrderBy = {
+  readonly chainId?: OrderBy;
+  readonly id?: OrderBy;
+  readonly launchBlock?: OrderBy;
+  readonly launchTimestamp?: OrderBy;
+  readonly sampledAtBlock?: OrderBy;
+  readonly sampledAtTimestamp?: OrderBy;
+  readonly sharePriceUsdWei?: OrderBy;
+  readonly token?: OrderBy;
+};
+
+export type SusdsYieldLaunchBaselineBoolExp = {
+  readonly _and?:
+    | SusdsYieldLaunchBaselineBoolExp
+    | ReadonlyArray<SusdsYieldLaunchBaselineBoolExp>;
+  readonly _or?:
+    | SusdsYieldLaunchBaselineBoolExp
+    | ReadonlyArray<SusdsYieldLaunchBaselineBoolExp>;
+  readonly _not?: SusdsYieldLaunchBaselineBoolExp;
+  readonly chainId?: ComparisonExp<number>;
+  readonly id?: ComparisonExp<string>;
+  readonly launchBlock?: ComparisonExp<string>;
+  readonly launchTimestamp?: ComparisonExp<string>;
+  readonly sampledAtBlock?: ComparisonExp<string>;
+  readonly sampledAtTimestamp?: ComparisonExp<string>;
+  readonly sharePriceUsdWei?: ComparisonExp<string>;
+  readonly token?: ComparisonExp<string>;
+};
+
 export type SusdsYieldMovementSelectColumn =
   | "assetsUsdWei"
   | "blockNumber"
@@ -4640,6 +4679,36 @@ export type SusdsYieldMovementBoolExp = {
   readonly to?: ComparisonExp<string>;
   readonly txHash?: ComparisonExp<string>;
   readonly yieldUsdWei?: ComparisonExp<string>;
+};
+
+export type SusdsYieldSamplerProgressSelectColumn =
+  | "chainId"
+  | "id"
+  | "sampledAtBlock"
+  | "sampledAtTimestamp"
+  | "token";
+
+export type SusdsYieldSamplerProgressOrderBy = {
+  readonly chainId?: OrderBy;
+  readonly id?: OrderBy;
+  readonly sampledAtBlock?: OrderBy;
+  readonly sampledAtTimestamp?: OrderBy;
+  readonly token?: OrderBy;
+};
+
+export type SusdsYieldSamplerProgressBoolExp = {
+  readonly _and?:
+    | SusdsYieldSamplerProgressBoolExp
+    | ReadonlyArray<SusdsYieldSamplerProgressBoolExp>;
+  readonly _or?:
+    | SusdsYieldSamplerProgressBoolExp
+    | ReadonlyArray<SusdsYieldSamplerProgressBoolExp>;
+  readonly _not?: SusdsYieldSamplerProgressBoolExp;
+  readonly chainId?: ComparisonExp<number>;
+  readonly id?: ComparisonExp<string>;
+  readonly sampledAtBlock?: ComparisonExp<string>;
+  readonly sampledAtTimestamp?: ComparisonExp<string>;
+  readonly token?: ComparisonExp<string>;
 };
 
 export type SusdsYieldSummarySelectColumn =

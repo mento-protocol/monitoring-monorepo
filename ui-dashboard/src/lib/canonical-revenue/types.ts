@@ -128,7 +128,11 @@ export type BuildCanonicalRevenueArgs = {
   reserveHistoryFailed?: boolean;
   reserveHistoryTruncated?: boolean;
   reserveHistoryUnpriced?: boolean;
+  stethHistoryFailed?: boolean;
+  hasStethSnapshotSource?: boolean | undefined;
   reserveYieldFailed?: boolean;
+  reserveCurrentHoldingsClassificationFailed?: boolean;
+  hasUnindexedSusdsHolding?: boolean;
   swapFeesFailed?: boolean;
   swapFeesApproximate?: boolean;
   cdpDailySeriesFailed?: boolean;

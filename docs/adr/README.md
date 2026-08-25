@@ -92,19 +92,20 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 
 ### indexer-envio
 
-| ADR                                                      | Decision                                                                                  |
-| -------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| [0012](0012-one-multichain-indexer.md)                   | One multichain indexer project; Ethereum reserve-yield shares the hosted deployment       |
-| [0013](0013-vendored-shared-config-mirror.md)            | The indexer vendors a mirror of `shared-config` (it builds outside the workspace)         |
-| [0014](0014-snapshot-entities-no-aggregate.md)           | Precompute snapshot/rollup entities; never rely on Hasura `_aggregate`                    |
-| [0015](0015-abi-vendoring-and-address-drift-gate.md)     | Vendor ABIs from the contracts package; gate indexed config addresses on a drift check    |
-| [0016](0016-effect-rpc-split-and-heal-stages.md)         | Split effects/RPC from handlers; decompose `upsertPool` into named effect-injected stages |
-| [0017](0017-broker-denormalization-volume-dedup.md)      | Denormalize the v2 Broker swap path to de-duplicate VirtualPool-routed volume             |
-| [0018](0018-indexer-observability-loki.md)               | Archived: envisioned Loki-backed indexer error-log alerting                               |
-| [0052](0052-envio-logs-prometheus-grafana-alerting.md)   | Envio logs diagnose; Prometheus metrics and Grafana rules alert                           |
-| [0034](0034-steth-wallet-daily-sampler.md)               | stETH actuals use a launch-aligned sub-daily wallet balance sampler                       |
-| [0039](0039-multistrategy-pools-historical-fx-volume.md) | Pool strategies are many-to-many; same-currency swaps use historical FX crosses           |
-| [0046](0046-event-sourced-oracle-freshness.md)           | Oracle freshness is reconstructed from persisted report events                            |
+| ADR                                                      | Decision                                                                                                                 |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| [0012](0012-one-multichain-indexer.md)                   | One multichain indexer project; Ethereum reserve-yield shares the hosted deployment; sUSDS clause superseded by ADR 0071 |
+| [0013](0013-vendored-shared-config-mirror.md)            | The indexer vendors a mirror of `shared-config` (it builds outside the workspace)                                        |
+| [0014](0014-snapshot-entities-no-aggregate.md)           | Precompute snapshot/rollup entities; never rely on Hasura `_aggregate`                                                   |
+| [0015](0015-abi-vendoring-and-address-drift-gate.md)     | Vendor ABIs from the contracts package; gate indexed config addresses on a drift check                                   |
+| [0016](0016-effect-rpc-split-and-heal-stages.md)         | Split effects/RPC from handlers; decompose `upsertPool` into named effect-injected stages                                |
+| [0017](0017-broker-denormalization-volume-dedup.md)      | Denormalize the v2 Broker swap path to de-duplicate VirtualPool-routed volume                                            |
+| [0018](0018-indexer-observability-loki.md)               | Archived: envisioned Loki-backed indexer error-log alerting                                                              |
+| [0052](0052-envio-logs-prometheus-grafana-alerting.md)   | Envio logs diagnose; Prometheus metrics and Grafana rules alert                                                          |
+| [0034](0034-steth-wallet-daily-sampler.md)               | stETH actuals use a launch-aligned sub-daily wallet balance sampler; sUSDS clause superseded by ADR 0071                 |
+| [0071](0071-susds-launch-aligned-daily-sampler.md)       | sUSDS actuals use a launch-aligned bounded daily sampler                                                                 |
+| [0039](0039-multistrategy-pools-historical-fx-volume.md) | Pool strategies are many-to-many; same-currency swaps use historical FX crosses                                          |
+| [0046](0046-event-sourced-oracle-freshness.md)           | Oracle freshness is reconstructed from persisted report events                                                           |
 
 ### ui-dashboard
 

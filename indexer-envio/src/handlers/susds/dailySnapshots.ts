@@ -1,4 +1,4 @@
-import type { SusdsYieldDailySnapshot } from "envio";
+import type { SusdsYieldDailySnapshot, SusdsYieldLaunchBaseline } from "envio";
 import { SECONDS_PER_DAY, dayBucket } from "../../helpers.js";
 import {
   blockTimestampEffect,
@@ -7,7 +7,10 @@ import {
 import { computeYieldTotals } from "./positions.js";
 import {
   ETHEREUM_CHAIN_ID,
+  SAMPLER_PROGRESS_ID,
   SUSDS_ADDRESS,
+  V3_REVENUE_LAUNCH_BLOCK,
+  V3_REVENUE_LAUNCH_BLOCK_TIMESTAMP,
   V3_REVENUE_LAUNCH_TIMESTAMP,
   ZERO,
   type BlockMeta,
@@ -19,6 +22,10 @@ function susdsDailySnapshotId(chainId: number, bucket: bigint): string {
   return `${chainId}-susds-${bucket}`;
 }
 
+function susdsLaunchBaselineId(chainId: number): string {
+  return `${chainId}-susds-launch`;
+}
+
 type SusdsYieldDeltaBaseline = Pick<
   SusdsYieldDailySnapshot | SusdsYieldTotals,
   "totalEarnedYieldUsdWei" | "realizedYieldUsdWei" | "unrealizedYieldUsdWei"
@@ -26,6 +33,7 @@ type SusdsYieldDeltaBaseline = Pick<
 
 type SusdsYieldDailySnapshotOptions = {
   requirePreviousDay?: boolean;
+  allowZeroTotals?: boolean;
 };
 
 type SusdsHeartbeatEffectResults = {
@@ -36,13 +44,14 @@ type SusdsHeartbeatEffectResults = {
 function baselineFromSameDaySnapshot(
   snapshot: SusdsYieldDailySnapshot,
 ): SusdsYieldDeltaBaseline {
+  const realizedYieldUsdWei =
+    snapshot.realizedYieldUsdWei - snapshot.dailyRealizedYieldUsdWei;
+  const unrealizedYieldUsdWei =
+    snapshot.unrealizedYieldUsdWei - snapshot.dailyUnrealizedYieldUsdWei;
   return {
-    totalEarnedYieldUsdWei:
-      snapshot.totalEarnedYieldUsdWei - snapshot.dailyEarnedYieldUsdWei,
-    realizedYieldUsdWei:
-      snapshot.realizedYieldUsdWei - snapshot.dailyRealizedYieldUsdWei,
-    unrealizedYieldUsdWei:
-      snapshot.unrealizedYieldUsdWei - snapshot.dailyUnrealizedYieldUsdWei,
+    totalEarnedYieldUsdWei: realizedYieldUsdWei + unrealizedYieldUsdWei,
+    realizedYieldUsdWei,
+    unrealizedYieldUsdWei,
   };
 }
 
@@ -114,12 +123,20 @@ export async function recordSusdsYieldDailySnapshot(
   precomputedTotals?: SusdsYieldTotals,
   options: SusdsYieldDailySnapshotOptions = {},
 ): Promise<boolean> {
+  const validSharePriceUsdWei = requirePositiveSharePrice(
+    sharePriceUsdWei,
+    meta.blockNumber,
+  );
   if (meta.blockTimestamp < V3_REVENUE_LAUNCH_TIMESTAMP) return false;
 
   const totals =
     precomputedTotals ??
-    (await computeYieldTotals(context, meta, sharePriceUsdWei));
-  if (totals.currentShares === ZERO && totals.totalEarnedYieldUsdWei === ZERO) {
+    (await computeYieldTotals(context, meta, validSharePriceUsdWei));
+  if (
+    options.allowZeroTotals !== true &&
+    totals.currentShares === ZERO &&
+    totals.totalEarnedYieldUsdWei === ZERO
+  ) {
     return false;
   }
 
@@ -158,7 +175,7 @@ export async function recordSusdsYieldDailySnapshot(
       bucket,
       totals,
       deltaBaseline,
-      sharePriceUsdWei,
+      sharePriceUsdWei: validSharePriceUsdWei,
       sampledAtBlock: meta.blockNumber,
       sampledAtTimestamp: meta.blockTimestamp,
     }),
@@ -181,6 +198,56 @@ export async function recordSusdsYieldEventDailySnapshot(
   );
 }
 
+/**
+ * Write the launch baseline at the final pre-launch Ethereum block.
+ *
+ * The row uses the known v3 launch timestamp, but the share price read at the
+ * preceding block. This makes launch-day earned yield zero and lets the first
+ * later sampler preserve the full launch-to-sample delta.
+ */
+export async function recordSusdsYieldLaunchBaseline(
+  context: SusdsContext,
+  effectResults: SusdsHeartbeatEffectResults,
+): Promise<boolean> {
+  requireLaunchBlockTimestamp(effectResults.blockTimestamp);
+  const sharePriceUsdWei = requireSharePrice(
+    effectResults.sharePriceUsdWei,
+    BigInt(V3_REVENUE_LAUNCH_BLOCK),
+  );
+  const baselineId = susdsLaunchBaselineId(ETHEREUM_CHAIN_ID);
+  const existingBaseline =
+    await context.SusdsYieldLaunchBaseline.get(baselineId);
+  if (existingBaseline !== undefined) {
+    requireValidSusdsLaunchBaseline(existingBaseline);
+    return false;
+  }
+  const meta: BlockMeta = {
+    chainId: ETHEREUM_CHAIN_ID,
+    blockNumber: BigInt(V3_REVENUE_LAUNCH_BLOCK),
+    blockTimestamp: V3_REVENUE_LAUNCH_TIMESTAMP,
+  };
+  const totals = await computeYieldTotals(context, meta, sharePriceUsdWei);
+  const didWrite = await recordSusdsYieldDailySnapshot(
+    context,
+    meta,
+    sharePriceUsdWei,
+    totals,
+    { allowZeroTotals: true },
+  );
+  if (!didWrite) return false;
+  context.SusdsYieldLaunchBaseline.set({
+    id: baselineId,
+    chainId: ETHEREUM_CHAIN_ID,
+    token: SUSDS_ADDRESS,
+    launchBlock: BigInt(V3_REVENUE_LAUNCH_BLOCK),
+    launchTimestamp: V3_REVENUE_LAUNCH_TIMESTAMP,
+    sharePriceUsdWei,
+    sampledAtBlock: BigInt(V3_REVENUE_LAUNCH_BLOCK),
+    sampledAtTimestamp: V3_REVENUE_LAUNCH_TIMESTAMP,
+  });
+  return true;
+}
+
 export async function readSharePrice(
   context: SusdsContext,
   meta: BlockMeta,
@@ -190,12 +257,72 @@ export async function readSharePrice(
     tokenAddress: SUSDS_ADDRESS,
     blockNumber: meta.blockNumber,
   });
-  if (sharePriceUsdWei === null) {
+  return requireSharePrice(sharePriceUsdWei, meta.blockNumber);
+}
+
+function requireSharePrice(value: unknown, blockNumber: bigint): bigint {
+  if (value === null) {
     throw new Error(
-      `[sUSDS] convertToAssets(1e18) unavailable at block ${meta.blockNumber}`,
+      `[sUSDS] convertToAssets(1e18) unavailable at block ${blockNumber}`,
     );
   }
-  return sharePriceUsdWei;
+  return requirePositiveSharePrice(value, blockNumber);
+}
+
+function requirePositiveSharePrice(
+  value: unknown,
+  blockNumber: bigint,
+): bigint {
+  if (typeof value !== "bigint" || value <= ZERO) {
+    throw new Error(
+      `[sUSDS] convertToAssets(1e18) returned an invalid share price at block ${blockNumber}`,
+    );
+  }
+  return value;
+}
+
+function requireLaunchBlockTimestamp(value: unknown): bigint {
+  if (typeof value !== "bigint" || value <= ZERO) {
+    throw new Error(
+      `[sUSDS] launch block timestamp unavailable or invalid at block ${V3_REVENUE_LAUNCH_BLOCK}`,
+    );
+  }
+  if (value !== V3_REVENUE_LAUNCH_BLOCK_TIMESTAMP) {
+    throw new Error(
+      `[sUSDS] launch block timestamp ${value} does not match expected ${V3_REVENUE_LAUNCH_BLOCK_TIMESTAMP}`,
+    );
+  }
+  return value;
+}
+
+async function hasSusdsLaunchBaseline(context: SusdsContext): Promise<boolean> {
+  const baseline = await context.SusdsYieldLaunchBaseline.get(
+    susdsLaunchBaselineId(ETHEREUM_CHAIN_ID),
+  );
+  if (baseline === undefined) return false;
+  requireValidSusdsLaunchBaseline(baseline);
+  return true;
+}
+
+function requireValidSusdsLaunchBaseline(
+  baseline: SusdsYieldLaunchBaseline,
+): void {
+  if (
+    baseline.chainId !== ETHEREUM_CHAIN_ID ||
+    baseline.token !== SUSDS_ADDRESS ||
+    baseline.launchBlock !== BigInt(V3_REVENUE_LAUNCH_BLOCK) ||
+    baseline.launchTimestamp !== V3_REVENUE_LAUNCH_TIMESTAMP ||
+    baseline.sampledAtBlock !== BigInt(V3_REVENUE_LAUNCH_BLOCK) ||
+    baseline.sampledAtTimestamp !== V3_REVENUE_LAUNCH_TIMESTAMP
+  ) {
+    throw new Error(
+      "[sUSDS] stored launch baseline metadata is invalid; sampler cannot continue",
+    );
+  }
+  requirePositiveSharePrice(
+    baseline.sharePriceUsdWei,
+    BigInt(V3_REVENUE_LAUNCH_BLOCK),
+  );
 }
 
 export async function recordSusdsYieldHeartbeatSnapshot(
@@ -207,7 +334,12 @@ export async function recordSusdsYieldHeartbeatSnapshot(
     effectResults ??
     (await readSusdsHeartbeatEffectResults(context, blockNumber));
   const { blockTimestamp } = effects;
-  if (blockTimestamp === null || blockTimestamp <= 0n) return false;
+  if (blockTimestamp === null) return false;
+  if (typeof blockTimestamp !== "bigint" || blockTimestamp <= ZERO) {
+    throw new Error(
+      `[sUSDS] block timestamp returned an invalid value at block ${blockNumber}`,
+    );
+  }
 
   const meta: BlockMeta = {
     chainId: ETHEREUM_CHAIN_ID,
@@ -215,14 +347,27 @@ export async function recordSusdsYieldHeartbeatSnapshot(
     blockTimestamp,
   };
   if (meta.blockTimestamp < V3_REVENUE_LAUNCH_TIMESTAMP) return false;
+  if (effects.sharePriceUsdWei === null) return false;
 
-  const { sharePriceUsdWei } = effects;
-  if (sharePriceUsdWei === null) {
-    throw new Error(
-      `[sUSDS] convertToAssets(1e18) unavailable at block ${meta.blockNumber}`,
-    );
-  }
-  return recordSusdsYieldDailySnapshot(context, meta, sharePriceUsdWei);
+  const validSharePriceUsdWei = requireSharePrice(
+    effects.sharePriceUsdWei,
+    meta.blockNumber,
+  );
+  if (!(await hasSusdsLaunchBaseline(context))) return false;
+  const didWrite = await recordSusdsYieldDailySnapshot(
+    context,
+    meta,
+    validSharePriceUsdWei,
+  );
+  if (!didWrite) return false;
+  context.SusdsYieldSamplerProgress.set({
+    id: SAMPLER_PROGRESS_ID,
+    chainId: meta.chainId,
+    token: SUSDS_ADDRESS,
+    sampledAtBlock: meta.blockNumber,
+    sampledAtTimestamp: meta.blockTimestamp,
+  });
+  return true;
 }
 
 async function readSusdsHeartbeatEffectResults(
@@ -255,7 +400,7 @@ export async function handleSusdsYieldDailySnapshotHeartbeat({
     BigInt(block.number),
   );
   // preload-handler-note: raw block and share-price results are awaited before
-  // this guard; the dormant heartbeat still keeps snapshot work ordered.
+  // this guard; the bounded sampler keeps snapshot work ordered.
   // preload-effect-helpers: recordSusdsYieldHeartbeatSnapshot
   if (context.isPreload) return false;
   return recordSusdsYieldHeartbeatSnapshot(
@@ -263,4 +408,24 @@ export async function handleSusdsYieldDailySnapshotHeartbeat({
     BigInt(block.number),
     effectResults,
   );
+}
+
+export async function handleSusdsYieldLaunchBaseline({
+  block,
+  context,
+}: {
+  block: { number: number | bigint };
+  context: SusdsContext;
+}): Promise<boolean> {
+  const blockNumber = BigInt(block.number);
+  if (blockNumber !== BigInt(V3_REVENUE_LAUNCH_BLOCK)) return false;
+  const effectResults = await readSusdsHeartbeatEffectResults(
+    context,
+    blockNumber,
+  );
+  // preload-handler-note: the launch-block predicate is phase-stable, and the
+  // exact dormant effect reader runs with the same key in both phases.
+  // preload-effect-helpers: readSusdsHeartbeatEffectResults
+  if (context.isPreload) return false;
+  return recordSusdsYieldLaunchBaseline(context, effectResults);
 }

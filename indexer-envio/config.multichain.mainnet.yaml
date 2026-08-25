@@ -218,9 +218,9 @@ contracts:
     events:
       - event: Transfer
 
-  # Sky sUSDS — reserve-yield event indexing on Ethereum. Only sparse
-  # Deposit/Withdraw/Transfer handlers are registered; the historical onBlock
-  # heartbeat stays out of the shared hosted indexer.
+  # Sky sUSDS — reserve-yield event indexing plus a bounded launch-aligned
+  # daily sampler on Ethereum. The historical every-block heartbeat stays out
+  # of the shared hosted indexer.
   - name: Susds
     abi_file_path: abis/Susds.json
     handler: src/EventHandlers.ts

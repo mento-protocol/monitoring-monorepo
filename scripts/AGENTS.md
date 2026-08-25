@@ -41,20 +41,19 @@ subdirectories.
 | `sentry/`       | triage/autofix/gate/broker/ci-wiring   |
 
 `lib/` and `production-infra-identity-contract/` predate the reorganization.
-`setup.sh` stays flat because `.config/wt.toml` uses its exact Worktrunk
-pre-start path and eight docs name it. `redrive-onchain-deadletter.{mjs,test.mjs}`
-stays flat under `alerts/infra/` ownership; ADR 0064 gives the lint reason.
+`.config/wt.toml` and eight docs pin flat `setup.sh`.
+`redrive-onchain-deadletter.{mjs,test.mjs}` stays flat under
+`alerts/infra/`; ADR 0064 gives the lint reason.
 
 `lib/` holds cores that multiple clusters read: `hcl.mjs` for Terraform HCL,
 `workflow-yaml.mjs` for Actions and shell parsing,
 `pnpm-override-selector.mjs` for pnpm overrides, and
 `gh-issue-lifecycle.mjs` for shared GitHub issue and label mechanics.
-Documentation schedulers use this module. Local projection ensures only
+Doc schedulers use it. Local projection keeps only
 `agent-ready` on create and all lifecycle labels on closed repair. ADR 0064
 lists readers.
-`peg-policy-digest.mjs` is the one definition of the peg version-digest
-contract both peg validators check. Inventories, pinned hashes, and identities
-stay with their domain.
+`peg-policy-digest.mjs` defines the peg version-digest contract for both
+validators. Inventories, pinned hashes, and identities stay with their domain.
 
 ## Why Files Stay Flat
 
@@ -71,9 +70,12 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   `bootstrap/codex-cloud-setup.{sh,test.sh}` for offline tests. It routes
   `sentry/autofix/sentry-autofix-refused-inventory.mjs` alone to
   `pnpm sentry:autofix:run-record:test` and
-  `pnpm sentry:autofix:finalize:test`. The exact
-  `sentry/triage/sentry-triage-project-route.mjs` path routes to
-  `pnpm sentry:project:test` with the projection family.
+  `pnpm sentry:autofix:finalize:test`. Exact
+  `sentry/triage/sentry-triage-project-route.mjs` runs
+  `pnpm sentry:project:test` in the projection arm.
+  `deploy/deploy-indexer-verify{,-analysis}{,.test}.mjs` and
+  `deploy/deploy-indexer-verify-status-identity.mjs` use one any-depth arm;
+  both verifier tests run.
 - **Gate runtime module pins.** Before `cd`, `agent-quality-gate.sh` loads
   `$script_source_dir/gate/run-handles.sh`; move it with its signature, self-test
   route, and missing-helper fixture. It also pins

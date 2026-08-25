@@ -2,46 +2,33 @@
 
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { summarizePolygonPools } from "../lib/polygon-deployment-semantics.mjs";
+import {
+  buildProbeQuery,
+  buildSummary,
+  summarizeSusdsLaunchBaselineSchema,
+} from "./deploy-indexer-verify-analysis.mjs";
+
+export {
+  PROBE_QUERY,
+  buildProbeQuery,
+  buildSummary,
+  summarizeProbe,
+  summarizeReplayIntegrity,
+  summarizeStatus,
+  summarizeDeploymentIdentity,
+  summarizeSusdsLaunchBaseline,
+  summarizeSusdsLaunchBaselineSchema,
+  summarizeSusdsSamplerProgress,
+} from "./deploy-indexer-verify-analysis.mjs";
 
 const ENVIO_ORG = "mento-protocol";
 const ENVIO_INDEXER = "mento";
+export const PRODUCTION_GRAPHQL_ENDPOINT =
+  "https://indexer.hyperindex.xyz/2f3dd15/v1/graphql";
 const GRAPHQL_TIMEOUT_MS = 20_000;
+const INDEXER_SCHEMA_PATH = "indexer-envio/schema.graphql";
+const SUSDS_EVENTS_PATH = "indexer-envio/src/handlers/susdsEvents.ts";
 const REPLAY_INTEGRITY_PATH = "indexer-envio/config/replay-integrity.json";
-const REQUIRED_POLYGON_ORACLE_FRESHNESS_VERSION = 3;
-
-const PROBE_TABLES = [
-  "Pool",
-  "SusdsYieldSummary",
-  "SusdsYieldMovement",
-  "StethYieldSummary",
-  "StethYieldMovement",
-];
-
-export const PROBE_QUERY = `query VerifyIndexerRows {
-  Pool(limit: 1) { id chainId source }
-  PolygonPool: Pool(
-    where: { chainId: { _eq: 137 }, source: { _eq: "fpmm_factory" } }
-    order_by: { id: asc }
-  ) {
-    id
-    source
-    referenceRateFeedID
-    lastOracleReportAt
-    oracleExpiry
-    oracleOk
-    medianLive
-    healthStatus
-    hasHealthData
-    lastOracleSnapshotTimestamp
-    healthTotalSeconds
-    healthBinarySeconds
-  }
-  SusdsYieldSummary(limit: 1) { id lastMovementTxHash lastUpdatedBlock }
-  SusdsYieldMovement(limit: 1, order_by: { blockNumber: asc }) { id kind txHash blockNumber }
-  StethYieldSummary(limit: 1) { id lastMovementTxHash lastUpdatedBlock }
-  StethYieldMovement(limit: 1, order_by: { blockNumber: asc }) { id kind txHash blockNumber }
-}`;
 
 export function parseArgs(argv) {
   const args = {
@@ -215,27 +202,36 @@ function replayIntegrityFromCommit(commit) {
   }
 }
 
-export function summarizeReplayIntegrity(input) {
-  const observedVersion = Number(
-    input?.value?.polygonExactMedianTimestamp ?? 0,
+function indexerSchemaFromCommit(commit) {
+  const result = spawnSync(
+    "git",
+    ["show", `${commit}:${INDEXER_SCHEMA_PATH}`],
+    {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    },
   );
-  const failures = [];
-  if (input?.readError) failures.push(input.readError);
-  if (
-    !Number.isSafeInteger(observedVersion) ||
-    observedVersion < REQUIRED_POLYGON_ORACLE_FRESHNESS_VERSION
-  ) {
-    failures.push(
-      `deployment predates Polygon event-sourced oracle-freshness replay integrity v${REQUIRED_POLYGON_ORACLE_FRESHNESS_VERSION}`,
-    );
+  if (result.status !== 0) {
+    return {
+      value: null,
+      readError: `could not read ${INDEXER_SCHEMA_PATH} from deployment commit ${commit}`,
+    };
   }
-  return {
-    ok: failures.length === 0,
-    markerPath: REPLAY_INTEGRITY_PATH,
-    requiredVersion: REQUIRED_POLYGON_ORACLE_FRESHNESS_VERSION,
-    observedVersion,
-    failures,
-  };
+  return { value: result.stdout, readError: "" };
+}
+
+function susdsEventsFromCommit(commit) {
+  const result = spawnSync("git", ["show", `${commit}:${SUSDS_EVENTS_PATH}`], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (result.status !== 0) {
+    return {
+      value: null,
+      readError: `could not read ${SUSDS_EVENTS_PATH} from deployment commit ${commit}`,
+    };
+  }
+  return { value: result.stdout, readError: "" };
 }
 
 function deploymentsFromIndexer(indexerJson) {
@@ -305,57 +301,16 @@ function resolveDeploymentEndpoint(deployment) {
   return extracted;
 }
 
-export function summarizeStatus(statusJson) {
-  const chains = (statusJson.data ?? []).map((row) => ({
-    chainId: row.chain_id,
-    startBlock: Number(row.start_block ?? 0),
-    headBlock: Number(row.block_height ?? 0),
-    processedBlock: Number(row.latest_processed_block ?? 0),
-    fetchedBlock: Number(row.latest_fetched_block_number ?? 0),
-    events: Number(row.num_events_processed ?? 0),
-    syncedAt: row.timestamp_caught_up_to_head_or_endblock ?? "",
-  }));
-
-  return {
-    allSynced: chains.length > 0 && chains.every((chain) => chain.syncedAt),
-    chains,
-  };
+export function resolveVerificationEndpoint(deployment, { prod = false } = {}) {
+  if (prod) return PRODUCTION_GRAPHQL_ENDPOINT;
+  return resolveDeploymentEndpoint(deployment);
 }
 
-function metricSummary(metricsJson) {
-  const data = metricsJson.data;
-  return {
-    topLevelKeys: Object.keys(metricsJson).sort(),
-    dataKind: Array.isArray(data) ? "array" : typeof data,
-    dataRows: Array.isArray(data) ? data.length : undefined,
-  };
-}
-
-export function summarizeProbe(graphqlJson) {
-  const errors = graphqlJson.errors ?? [];
-  const rowCounts = Object.fromEntries(
-    PROBE_TABLES.map((table) => [
-      table,
-      Array.isArray(graphqlJson.data?.[table])
-        ? graphqlJson.data[table].length
-        : 0,
-    ]),
-  );
-  const missingTables = PROBE_TABLES.filter((table) => rowCounts[table] === 0);
-
-  return {
-    rowCounts,
-    errors: errors.map((error) => error.message ?? String(error)),
-    missingTables,
-    ok: errors.length === 0 && missingTables.length === 0,
-  };
-}
-
-async function queryGraphql(endpoint) {
-  const response = await fetch(endpoint, {
+export async function queryGraphql(endpoint, query, fetchImpl = fetch) {
+  const response = await fetchImpl(endpoint, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ query: PROBE_QUERY }),
+    body: JSON.stringify({ query }),
     signal: AbortSignal.timeout(GRAPHQL_TIMEOUT_MS),
   });
 
@@ -367,64 +322,9 @@ async function queryGraphql(endpoint) {
   return parseJsonOutput(body, "GraphQL probe");
 }
 
-export function buildSummary({
-  args,
-  deployment,
-  endpoint,
-  endpointMode,
-  statusJson,
-  metricsJson,
-  graphqlJson,
-  nowSeconds,
-  replayIntegrityInput,
-}) {
-  const sync = summarizeStatus(statusJson);
-  const probe = summarizeProbe(graphqlJson);
-  const replayIntegrity = summarizeReplayIntegrity(replayIntegrityInput);
-  const polygon = summarizePolygonPools(
-    graphqlJson.data?.PolygonPool,
-    nowSeconds,
-  );
-  const failures = [];
-
-  if (!args.allowSyncing && !sync.allSynced) {
-    failures.push("deployment is not caught up on every chain");
-  }
-  if (!probe.ok) {
-    if (probe.errors.length > 0) {
-      failures.push(
-        `GraphQL probe returned errors: ${probe.errors.join("; ")}`,
-      );
-    }
-    if (probe.missingTables.length > 0) {
-      failures.push(
-        `GraphQL probe returned no rows for: ${probe.missingTables.join(", ")}`,
-      );
-    }
-  }
-  failures.push(...replayIntegrity.failures);
-  failures.push(...polygon.failures);
-
-  return {
-    ok: failures.length === 0,
-    org: ENVIO_ORG,
-    indexer: ENVIO_INDEXER,
-    commit: deployment.commit_hash,
-    prodStatus: deployment.prod_status ?? "",
-    createdTime: deployment.created_time ?? "",
-    endpoint,
-    endpointMode,
-    sync,
-    metrics: metricSummary(metricsJson),
-    probe,
-    replayIntegrity,
-    polygon,
-    failures,
-  };
-}
-
 function formatNumber(value) {
-  return Number(value ?? 0).toLocaleString("en-US");
+  if (value == null) return "-";
+  return Number(value).toLocaleString("en-US");
 }
 
 export function renderText(summary) {
@@ -449,6 +349,15 @@ export function renderText(summary) {
     `  all chains caught up: ${summary.sync.allSynced ? "yes" : "no"}`,
   );
   lines.push("");
+  lines.push("Production endpoint identity:");
+  if (summary.deploymentIdentity.required) {
+    lines.push(
+      `  target _meta identity match: ${summary.deploymentIdentity.ok ? "yes" : "no"}`,
+    );
+  } else {
+    lines.push("  required: no");
+  }
+  lines.push("");
   lines.push(
     `Metrics: fetched (${summary.metrics.dataKind}${
       summary.metrics.dataRows === undefined
@@ -460,6 +369,37 @@ export function renderText(summary) {
   lines.push("GraphQL row probe:");
   for (const [table, count] of Object.entries(summary.probe.rowCounts)) {
     lines.push(`  ${table}: ${count}`);
+  }
+  lines.push("");
+  lines.push("sUSDS launch baseline:");
+  if (summary.susdsLaunchBaselineSchema.required) {
+    lines.push(
+      `  required by target schema: yes; launch block: ${formatNumber(
+        summary.susdsLaunchBaseline.launchBlock,
+      )}; sampled block: ${formatNumber(
+        summary.susdsLaunchBaseline.sampledAtBlock,
+      )}; healthy: ${summary.susdsLaunchBaseline.ok ? "yes" : "no"}`,
+    );
+  } else {
+    lines.push("  required by target schema: no");
+  }
+  lines.push("");
+  lines.push("sUSDS sampler progress:");
+  if (summary.susdsLaunchBaselineSchema.required) {
+    lines.push(
+      `  latest sampled block: ${formatNumber(
+        summary.susdsSampler.latestSampledAtBlock,
+      )}; processed Ethereum head: ${formatNumber(
+        summary.susdsSampler.processedBlock,
+      )}; block lag: ${formatNumber(summary.susdsSampler.blockLag)}`,
+    );
+    lines.push(
+      `  latest sampled timestamp: ${formatNumber(
+        summary.susdsSampler.latestSampledAtTimestamp,
+      )}; age: ${formatNumber(summary.susdsSampler.ageSeconds)} seconds; healthy: ${summary.susdsSampler.ok ? "yes" : "no"}`,
+    );
+  } else {
+    lines.push("  required by target schema: no");
   }
   lines.push("");
   lines.push("Replay integrity contract:");
@@ -492,12 +432,14 @@ function printUsage() {
   pnpm deploy:indexer:verify <commit> --prod [--json]
 
 Checks a registered Envio deployment by fetching status, metrics, a GraphQL
-endpoint, core rows, and fail-closed Polygon replay semantics.
+endpoint, core rows, sUSDS post-launch sampler progress and freshness, and
+sUSDS launch-baseline integrity, and fail-closed Polygon replay semantics.
 
 Options:
-  --prod           Probe the static production endpoint and require <commit> to be prod.
+  --prod           Probe the static production endpoint, match its per-chain _meta
+                   identity to <commit>, and require <commit> to be prod.
   --allow-syncing  Do not fail solely because one or more chains are still syncing.
-                   Empty rows and Polygon semantic failures remain failures.
+                   Empty rows, sUSDS baseline/sampler, and Polygon semantic failures remain failures.
   --json, -j       Print machine-readable summary JSON.
 `);
 }
@@ -542,7 +484,9 @@ async function main() {
     endpointMode = "prod-static";
   }
 
-  const endpoint = resolveDeploymentEndpoint(deployment);
+  const endpoint = resolveVerificationEndpoint(deployment, {
+    prod: args.prod,
+  });
   const statusJson = runEnvioJson([
     "deployment",
     "status",
@@ -560,7 +504,21 @@ async function main() {
   const replayIntegrityInput = replayIntegrityFromCommit(
     deployment.commit_hash,
   );
-  const graphqlJson = await queryGraphql(endpoint);
+  const susdsLaunchBaselineSchema = summarizeSusdsLaunchBaselineSchema(
+    indexerSchemaFromCommit(deployment.commit_hash),
+    {
+      legacyHandlerInput: susdsEventsFromCommit(deployment.commit_hash),
+    },
+  );
+  const graphqlJson = await queryGraphql(
+    endpoint,
+    buildProbeQuery({
+      includeSusdsSampler: susdsLaunchBaselineSchema.required,
+      includeSusdsSamplerProgress:
+        susdsLaunchBaselineSchema.samplerProgressRequired,
+      includeDeploymentIdentity: args.prod,
+    }),
+  );
   const summary = buildSummary({
     args,
     deployment,
@@ -569,7 +527,9 @@ async function main() {
     statusJson,
     metricsJson,
     graphqlJson,
+    nowSeconds: Math.floor(Date.now() / 1000),
     replayIntegrityInput,
+    susdsLaunchBaselineSchema,
   });
 
   if (args.json) {

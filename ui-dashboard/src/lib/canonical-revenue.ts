@@ -13,9 +13,12 @@ import {
 } from "./canonical-revenue/forecasts";
 import { buildPeriods } from "./canonical-revenue/periods";
 import { buildStreams } from "./canonical-revenue/streams";
+import { hasInvalidSusdsYieldDailySnapshotRow } from "./canonical-revenue/reserve-snapshot-validation";
+import { isValidStethYieldDailySnapshotRow } from "./canonical-revenue/steth-snapshot-validation";
 import type {
   BuildCanonicalRevenueArgs,
   CanonicalRevenueResult,
+  ReserveYieldDailySnapshotRow,
 } from "./canonical-revenue/types";
 
 export {
@@ -36,6 +39,33 @@ export type {
   SusdsYieldDailySnapshotRow,
 } from "./canonical-revenue/types";
 
+function hasWalletField(value: unknown): boolean {
+  return typeof value === "object" && value !== null && "wallet" in value;
+}
+
+function validateReserveHistory(
+  rows: ReadonlyArray<ReserveYieldDailySnapshotRow>,
+): {
+  rows: ReadonlyArray<ReserveYieldDailySnapshotRow>;
+  malformedSusdsHistory: boolean;
+  malformedStethHistory: boolean;
+} {
+  const malformedSusdsHistory = hasInvalidSusdsYieldDailySnapshotRow(rows);
+  const malformedStethHistory = rows.some(
+    (row) => hasWalletField(row) && !isValidStethYieldDailySnapshotRow(row),
+  );
+  return {
+    rows: malformedSusdsHistory
+      ? []
+      : rows.filter(
+          (row) =>
+            !hasWalletField(row) || isValidStethYieldDailySnapshotRow(row),
+        ),
+    malformedSusdsHistory,
+    malformedStethHistory,
+  };
+}
+
 export function buildCanonicalRevenue({
   networkData,
   cdpDailySeries,
@@ -45,13 +75,19 @@ export function buildCanonicalRevenue({
   reserveHistoryUnavailable = false,
   reserveHistoryFailed = false,
   reserveHistoryTruncated = false,
+  stethHistoryFailed = false,
+  hasStethSnapshotSource,
   reserveYieldFailed = false,
+  reserveCurrentHoldingsClassificationFailed = false,
+  hasUnindexedSusdsHolding = false,
   swapFeesFailed = false,
   swapFeesApproximate = false,
   cdpDailySeriesFailed = false,
   cdpInputsApproximate = false,
   nowSeconds = Math.floor(Date.now() / 1000),
 }: BuildCanonicalRevenueArgs): CanonicalRevenueResult {
+  const validatedReserveHistory = validateReserveHistory(reserveDailySnapshots);
+  const validatedReserveDailySnapshots = validatedReserveHistory.rows;
   const swapSeries = buildDailyFeeSeries(
     [...networkData],
     undefined,
@@ -60,7 +96,7 @@ export function buildCanonicalRevenue({
   const reserveBuckets = buildRevenueBuckets({
     swapSeries,
     cdpDailySeries,
-    reserveDailySnapshots,
+    reserveDailySnapshots: validatedReserveDailySnapshots,
     reserveYield,
   });
   const canonicalArgs = {
@@ -68,12 +104,18 @@ export function buildCanonicalRevenue({
     cdpDailySeries,
     cdpMarkets,
     reserveYield,
-    reserveDailySnapshots,
+    reserveDailySnapshots: validatedReserveDailySnapshots,
     reserveHistoryUnavailable,
-    reserveHistoryFailed,
+    reserveHistoryFailed:
+      reserveHistoryFailed || validatedReserveHistory.malformedSusdsHistory,
     reserveHistoryTruncated,
+    stethHistoryFailed:
+      stethHistoryFailed || validatedReserveHistory.malformedStethHistory,
+    hasStethSnapshotSource,
     reserveHistoryUnpriced: reserveBuckets.reserveHistoryUnpriced,
     reserveYieldFailed,
+    reserveCurrentHoldingsClassificationFailed,
+    hasUnindexedSusdsHolding,
     swapFeesFailed,
     swapFeesApproximate,
     cdpDailySeriesFailed,
