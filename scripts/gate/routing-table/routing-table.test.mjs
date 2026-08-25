@@ -46,6 +46,7 @@ const GROUP_ORDER = [
   "upstash-mcp-transport",
   "manifests-and-package-manager",
   "shell-syntax",
+  "babysit-repo-hook",
   "vitest-configuration",
   "tree",
   "terraform-root",

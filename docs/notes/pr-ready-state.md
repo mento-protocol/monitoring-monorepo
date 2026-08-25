@@ -136,8 +136,11 @@ suppresses ordinary duplicate posts for the same head. GitHub's issue-comment
 API has no conditional-create operation, so the marker is a detection and
 best-effort suppression mechanism rather than an atomic claim. The CodeRabbit
 check and review remain advisory: report a pending or rate-limited result as
-optional lag. If a requested review finishes while the PR is still under watch,
-rerun `pr:feedback-state` and handle its findings before all-clear.
+optional lag. CodeRabbit rate-limits reviews to roughly one per hour per PR, so
+a re-request inside that window queues or no-ops — do not tight-loop
+`@coderabbitai review` posts waiting for a faster turnaround. If a requested
+review finishes while the PR is still under watch, rerun `pr:feedback-state` and
+handle its findings before all-clear.
 
 Some non-required workflows still post feedback that becomes a repo-policy
 blocker after the required status surface is green. Their workflow status stays
