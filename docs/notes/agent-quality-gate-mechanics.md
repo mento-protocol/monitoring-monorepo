@@ -1261,7 +1261,8 @@ quality/serialized/parallel commands are stamped. Prerequisite phases
 generated code, built packages) are invisible to the source fingerprint, so a
 stamp could skip them after their outputs were deleted. The Trunk check, the
 gate self-test, and the advisory ADR reminder also always re-run — the Trunk
-check is skipped, never reused, where the CLI cannot be provisioned.
+check is skipped, never reused, where Trunk's downloads are blocked (the CLI,
+its plugin sources, or the linters a check needs).
 
 Each mapped command has a watchdog (default 1500 seconds; override with
 `--command-timeout <n>` or `AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS`). On timeout

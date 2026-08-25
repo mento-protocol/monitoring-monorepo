@@ -5233,6 +5233,52 @@ assert_contains "Installing hermetic tool shellcheck v0.11.0"
 assert_not_contains "- skipped "
 assert_not_contains "Trunk could not provision its linters."
 
+# Trunk reports a removed or renamed artifact under the same `Curl Error:`
+# prefix as a blocked connection. A 404 is a broken pin the operator has to fix,
+# so the accepted signatures are whole measured phrases and this one is not among
+# them: the run must fail.
+trunk_http_error_cause_repo="$(mktemp -d)"
+(
+  cd "$trunk_http_error_cause_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.25.0"
+  exit 0
+fi
+mkdir -p .trunk/out
+cat > .trunk/out/ERGzk.yaml <<'YAML'
+trunk_cli_version: 1.25.0
+title: "Error while executing: Installing hermetic tool shellcheck v0.11.0"
+report:
+  - "Curl Error: HTTP response code said error for https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.darwin.x86_64.tar.xz"
+YAML
+printf '\033[1m\033[30m\033[107m  FAILURES  \033[0m\n\n'
+printf ' shellcheck  Installing hermetic tool shellcheck v0.11.0  .trunk/out/ERGzk.yaml\n'
+printf '\nChecked 0 files\n'
+printf '\342\234\226 No issues, 1 failure\n'
+exit 1
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  set +e
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]]
+)
+rm -rf "$trunk_http_error_cause_repo"
+assert_contains "1 mapped command(s) failed."
+assert_not_contains "- skipped "
+assert_not_contains "Trunk could not provision its linters."
+
 # The signature has to come from the step's own recorded reason, so a bullet
 # under some other key must not be able to supply it. Same transcript as the
 # accepted case; the only difference is that the download-failure phrasing sits

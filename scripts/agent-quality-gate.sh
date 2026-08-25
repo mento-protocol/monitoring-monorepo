@@ -2521,12 +2521,17 @@ trunk_provisioning_is_blocked() {
 # Trunk's own wording for a failed download, as recorded in the detail YAML the
 # failed step writes. Measured against Trunk 1.25.0 with the download forced to
 # fail three ways: connection refused, a 403-returning forward proxy (what an
-# egress allowlist does), and an unresolvable proxy host. The first two produce
-# `Curl Error: ...`; the third produced the longer phrasing. A cause Trunk
-# phrases some other way stays unclassified on purpose — an unrecognized reason
-# fails the gate instead of being excused.
+# egress allowlist does), and an unresolvable proxy host.
+#
+# Each entry is a whole measured phrase, never the bare `Curl Error:` prefix.
+# Trunk reports a removed or renamed artifact under that same prefix, and a 404
+# is a broken pin the operator has to fix, not an allowlist to widen — matching
+# the prefix would excuse it. A cause Trunk phrases some other way stays
+# unclassified on purpose: an unrecognized reason fails the gate rather than
+# being excused, and the fix is to measure it and add it here.
 trunk_network_failure_signatures=(
-  'Curl Error:'
+  'Curl Error: Failure when receiving data from the peer'
+  'Curl Error: Could not resolve proxy name'
   'Could resolve but could not establish connection to host of'
 )
 
