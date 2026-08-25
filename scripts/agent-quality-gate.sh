@@ -78,13 +78,14 @@ Environment:
                       established must be before a dead holder in it is
                       reclaimed. Default: 600.
   AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE
-                      Overrides the check for whether the lock root is on
-                      storage this machine mounts itself. Unset, the gate asks
-                      the filesystem (df -l) and treats a network or
-                      unreadable one as possibly shared, where a lock record
-                      that cannot be tied to a machine is never reclaimed. Set
-                      0 where this machine exports the lock root and another
-                      machine's gate locks in it.
+                      Declares whether only this machine reaches the lock root.
+                      Unset, a root the gate resolved for itself is asked of
+                      the filesystem (df -l) and an AGENT_QUALITY_GATE_LOCK_DIR
+                      is assumed shared. Where the root may be shared, a lock
+                      record that cannot be tied to this machine is never
+                      reclaimed. Set 1 for an override directory this machine
+                      alone reaches; set 0 where this machine exports the lock
+                      root and another machine's gate locks in it.
 USAGE
 }
 
@@ -1021,6 +1022,19 @@ gate_lock_resolve_machine_id() {
 # as another machine would leave the record unreclaimable forever. Where the
 # root is on network storage there is no such reasoning available, and a
 # disagreeing identity has to be believed.
+#
+# The converse does not hold, and that asymmetry is why an AGREEING identity is
+# not by itself enough on a root that may be shared. A disagreeing id is proof
+# of two machines; an agreeing one is not proof of one, because ids are not
+# guaranteed unique. Containers built from a single base image famously carry
+# the same baked-in `/etc/machine-id`, so two of them mounting one lock
+# directory agree on their identity while having separate PID namespaces —
+# where a local `kill -0` on the other's holder reads "gone" and would reclaim
+# a live lock. So off proven-local storage the hostname has to agree as well;
+# where it does not, the pair is unverified and this path never reclaims it.
+# On storage this machine mounts itself no second machine is writing records in
+# the first place, and the hostname is the field the rename moved, so requiring
+# it there would refuse the very case this exists to fix.
 gate_lock_machine_verdict() {
   local owner_machine="$1"
   local owner_host="$2"
@@ -1029,7 +1043,12 @@ gate_lock_machine_verdict() {
   local root_is_per_machine="$5"
   if [[ -n "$owner_machine" && -n "$this_machine" ]]; then
     if [[ "$owner_machine" == "$this_machine" ]]; then
-      printf 'same\n'
+      if [[ "$root_is_per_machine" -eq 1 || -z "$owner_host" ||
+        "$owner_host" == "$this_host" ]]; then
+        printf 'same\n'
+      else
+        printf 'unverified\n'
+      fi
     elif [[ "${owner_machine%%:*}" == "${this_machine%%:*}" &&
       "$root_is_per_machine" -ne 1 ]]; then
       printf 'other\n'
@@ -1704,7 +1723,7 @@ release_gate_run_lock() {
 
 acquire_gate_run_lock() {
   local root lock owner_pid owner_host owner_worktree owner_token_value owner_start
-  local owner_machine owner_started_at machine_verdict record_age
+  local owner_machine owner_started_at machine_verdict record_age unverified_detail
   local stale_reason nap remaining now_millis
   # Elapsed time comes from the clock, never from adding up requested sleeps.
   # A shell that is descheduled or SIGSTOPped sleeps far longer than it asked
@@ -1746,11 +1765,20 @@ acquire_gate_run_lock() {
   this_host="$(uname -n)"
   gate_lock_resolve_machine_id
   this_machine="$gate_lock_machine_id_cached"
-  # Asked of the resolved root, not of the path it came from: an override can
-  # point at local storage and the default can land on a network home, so only
-  # the filesystem under the directory this run will actually use can answer.
+  # Evidence for the root this gate chose, a declaration for the root an
+  # operator chose. The default candidates are this user's own cache and temp
+  # directories, which nothing points at deliberately, so the only open
+  # question there is whether the storage under them is mounted from elsewhere
+  # — and the filesystem answers that. AGENT_QUALITY_GATE_LOCK_DIR is the
+  # opposite: resolve_gate_lock_root treats it as a coordination contract
+  # precisely because it can name a directory more than one machine reaches,
+  # and a local mount is no evidence against that — a machine can export its
+  # own disk. So an override is possibly-shared until its owner says otherwise,
+  # which is what the declaration is for.
   if [[ -n "$gate_lock_root_per_machine_override" ]]; then
     gate_lock_root_is_per_machine="$gate_lock_root_per_machine_override"
+  elif [[ -n "${AGENT_QUALITY_GATE_LOCK_DIR:-}" ]]; then
+    gate_lock_root_is_per_machine=0
   elif gate_lock_path_is_local_filesystem "$root"; then
     gate_lock_root_is_per_machine=1
   else
@@ -1868,11 +1896,17 @@ acquire_gate_run_lock() {
         # reclaim on this path resting on where the root lives rather than on
         # an identity that matched.
         record_age="$(gate_lock_record_age_seconds "$owner_started_at")"
+        # Stated as the two identities rather than as a mismatch of either
+        # field. `unverified` is reached in several ways — no machine field, a
+        # source mismatch, a rotated identity under an unchanged hostname — and
+        # naming a host mismatch would contradict the record in the cases where
+        # the hostname is the part that still agrees.
+        unverified_detail="it records host '${owner_host:-unknown}' machine '${owner_machine:-none}', and this run is host '${this_host}' machine '${this_machine:-none}'"
         if [[ "$gate_lock_root_is_per_machine" -ne 1 ]]; then
           if [[ "$unverified_warned" -eq 0 ]]; then
             unverified_warned=1
-            echo "warning: the gate run lock record at ${lock} cannot be tied to a machine: it names host '${owner_host}', not this host '${this_host}', and carries no machine identity this run can compare." >&2
-            echo "  This lock root is not on storage this machine mounts itself, so it may be mounted from another machine and that record may belong to a live run there. This run waits it out." >&2
+            echo "warning: the gate run lock record at ${lock} cannot be tied to this machine: ${unverified_detail}." >&2
+            echo "  This lock root is not established as storage only this machine reaches, so it may be shared and that record may belong to a live run elsewhere. This run waits it out." >&2
             echo "  If that directory is this machine's alone, set AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1 to let a dead holder in it be reclaimed." >&2
           fi
           stale_reason=""
@@ -1880,11 +1914,11 @@ acquire_gate_run_lock() {
           "$record_age" -ge "$gate_lock_unverified_machine_grace_seconds" ]]; then
           if [[ "$unverified_warned" -eq 0 ]]; then
             unverified_warned=1
-            echo "warning: the gate run lock record at ${lock} cannot be tied to a machine: it names host '${owner_host}', not this host '${this_host}', and carries no machine identity this run can compare." >&2
+            echo "warning: the gate run lock record at ${lock} cannot be tied to this machine: ${unverified_detail}." >&2
             echo "  This lock root is on storage this machine mounts itself, its ${stale_reason}, and it was written ${record_age}s ago (grace ${gate_lock_unverified_machine_grace_seconds}s), so this run reads it as this machine's own under a name or identity it has since changed, and reclaims it." >&2
             echo "  If this directory is exported to other machines and one of them locks in it, set AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=0 to refuse this reclaim." >&2
           fi
-          stale_reason="${stale_reason}; its host '${owner_host}' has no comparable machine identity and its record is ${record_age}s old on storage this machine mounts itself"
+          stale_reason="${stale_reason}; its record cannot be tied to this machine and is ${record_age}s old on storage this machine mounts itself"
         else
           # Either too young to judge or of unknowable age. Wait, which is
           # what this path did for every host mismatch before issue #2055.

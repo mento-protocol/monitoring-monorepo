@@ -447,23 +447,27 @@ fell back to `kern.uuid` are almost certainly one machine and reading their
 unequal values as two would reinvent the wedge.
 
 **Where the lock root lives decides what a local PID lookup is allowed to
-conclude**, and that is settled by evidence rather than by where the path came
-from. `$HOME` is as likely to be a network home directory as a local disk, so
-the gate asks the filesystem: `df -l` lists local filesystems and omits network
-ones — NFS, SMB, AFS, an autofs map — on both the BSD and GNU implementations,
-and the row it prints for a path, not its exit status, is the answer. Every
-failure to answer means "may be shared": no `df`, an unreadable path, an
-implementation without `-l`. That direction is the one that keeps waiting.
+conclude**, and how that is settled depends on who chose the root: evidence for
+the root the gate chose, a declaration for the root an operator chose.
 
-What the probe establishes is that the storage is not mounted _from_ somewhere
-else, which is the configuration a network home directory creates and the one a
-machine can fall into without choosing it. It does not establish that the
-directory is unreachable: a machine can export its own disk and let another
-machine's gate lock in it. That is a deliberate act, and
-`AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=0` is how it is declared — it
-refuses every reclaim on this path. Nothing in this repo asks for that setup;
-the guidance above is to run concurrent validation from another machine's own
-checkout, which has its own lock.
+The default candidates — `$HOME/.cache/agent-quality-gate`, then
+`$TMPDIR/agent-quality-gate-<uid>` — are nobody's deliberate coordination
+point, so the only open question is whether the storage under them is mounted
+from elsewhere, and the filesystem answers it. `df -l` lists local filesystems
+and omits network ones — NFS, SMB, AFS, an autofs map — on both the BSD and GNU
+implementations, and the row it prints for a path, not its exit status, is the
+answer. Every failure to answer means "may be shared": no `df`, an unreadable
+path, an implementation without `-l`. That direction is the one that keeps
+waiting.
+
+`AGENT_QUALITY_GATE_LOCK_DIR` is the opposite case. `resolve_gate_lock_root`
+treats it as a coordination contract precisely because it can name a directory
+more than one machine reaches, and a local mount is no evidence against that —
+a machine can export its own disk. So an override is possibly-shared until its
+owner says otherwise, and every reclaim on this path is refused there.
+`AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE` is that declaration, and it
+overrides both branches: `1` where an override directory is this machine's
+alone, `0` where even a default root is exported to other machines.
 
 The verdict then has three values. **Same machine** — matching identities, or
 no identity on one side and a matching hostname — runs the liveness rules
@@ -482,6 +486,17 @@ disagreeing identity is far likelier to be this machine's identity having
 moved, exactly as a rename moved its hostname, than a second machine writing
 into the same directory. Reading it as another machine would leave the record
 unreclaimable forever, which is the wedge this whole rule exists to remove.
+
+**The converse does not hold**, and the asymmetry matters: a disagreeing id is
+proof of two machines, but an agreeing one is not proof of one, because ids are
+not guaranteed unique. Containers built from a single base image famously carry
+the same baked-in `/etc/machine-id`, so two of them mounting one lock directory
+agree on their identity while having separate PID namespaces — where a local
+`kill -0` on the other's holder reads "gone". So off proven-local storage the
+hostname has to agree as well; where it does not, the pair counts as unverified
+and nothing is reclaimed. On storage the machine mounts itself no second
+machine is writing records at all, and the hostname is the field the rename
+moved, so requiring it there would refuse the case this exists to fix.
 
 An unverified record is reclaimed only on local storage, and only with a dead
 PID and an age past

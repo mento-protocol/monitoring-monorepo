@@ -7008,7 +7008,7 @@ STUB
   [[ "$renamed_exit" == "0" ]] ||
     fail "a dead holder recorded under this machine's old hostname must be reclaimed, got $renamed_exit"
   assert_contains "is stale (holder pid ${renamed_dead_pid} is gone); reclaiming it."
-  assert_not_contains "has no comparable machine identity"
+  assert_not_contains "cannot be tied to this machine"
   [[ ! -d "$gate_lock_root/run.lock" ]] ||
     fail "the run that reclaimed a renamed-host lock must release its own"
 
@@ -7043,10 +7043,43 @@ STUB
   rotated_exit="$(run_locked_gate)"
   [[ "$rotated_exit" == "0" ]] ||
     fail "a rotated machine identity on local storage must not wedge the lock, got $rotated_exit"
-  assert_contains "cannot be tied to a machine"
+  assert_contains "cannot be tied to this machine"
   assert_contains "is stale (holder pid ${rotated_dead_pid} is gone"
   [[ ! -d "$gate_lock_root/run.lock" ]] ||
     fail "the run that reclaimed a rotated-identity record must release its own"
+
+  # An agreeing identity is not proof of one machine, only a disagreeing one is
+  # proof of two. Containers built from a single base image carry the same
+  # baked-in /etc/machine-id, so two of them mounting one lock directory agree
+  # on their identity while having separate PID namespaces — the other's holder
+  # PID reads "gone" here. Off proven-local storage the hostname has to agree
+  # too, and where it does not this record is left alone however old it is.
+  cloned_id_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the cloned-identity case"
+  write_machine_lock_owner \
+    "$cloned_id_dead_pid" "other-container" "override:machine-a" "$(($(date +%s) - 7200))"
+  cloned_id_exit="$(AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=0 run_locked_gate)"
+  [[ "$cloned_id_exit" == "2" ]] ||
+    fail "a shared machine id under a different hostname must be waited out on a shared root, got $cloned_id_exit"
+  assert_contains "timed out after"
+  assert_not_contains "reclaiming it."
+  [[ -d "$gate_lock_root/run.lock" ]] ||
+    fail "a duplicated machine id must not authorise reclaiming another host's lock"
+  rm -rf "$gate_lock_root/run.lock"
+
+  # The same record on storage this machine mounts itself. Nothing else is
+  # writing records there, and the hostname is exactly the field a rename
+  # moved, so requiring it to agree would refuse the case this all exists for.
+  renamed_local_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the local renamed-host case"
+  write_machine_lock_owner \
+    "$renamed_local_dead_pid" "other-container" "override:machine-a" "$(($(date +%s) - 7200))"
+  renamed_local_exit="$(run_locked_gate)"
+  [[ "$renamed_local_exit" == "0" ]] ||
+    fail "a matching identity on local storage must reclaim whatever the record calls the host, got $renamed_local_exit"
+  assert_contains "is stale (holder pid ${renamed_local_dead_pid} is gone); reclaiming it."
+  [[ ! -d "$gate_lock_root/run.lock" ]] ||
+    fail "the run that reclaimed under a matching local identity must release its own"
 
   # A record written by a gate that predates the machine field, under a
   # hostname this machine no longer answers to. The root is proven local, so
@@ -7059,10 +7092,10 @@ STUB
   legacy_exit="$(run_locked_gate)"
   [[ "$legacy_exit" == "0" ]] ||
     fail "an aged legacy record under a stale hostname must self-heal, got $legacy_exit"
-  assert_contains "carries no machine identity this run can compare"
+  assert_contains "cannot be tied to this machine"
   assert_contains "This lock root is on storage this machine mounts itself"
   assert_contains "under a name or identity it has since changed, and reclaims it"
-  assert_contains "has no comparable machine identity"
+  assert_contains "its record cannot be tied to this machine and is"
   [[ ! -d "$gate_lock_root/run.lock" ]] ||
     fail "the run that reclaimed a legacy record must release its own"
 
@@ -7096,7 +7129,7 @@ STUB
   set -e
   [[ "$grace_exit" == "0" ]] ||
     fail "a zero grace must let the same legacy record be reclaimed, got $grace_exit"
-  assert_contains "carries no machine identity this run can compare"
+  assert_contains "cannot be tied to this machine"
   [[ ! -d "$gate_lock_root/run.lock" ]] ||
     fail "the run that reclaimed under a zero grace must release its own"
 
@@ -7112,7 +7145,7 @@ STUB
   source_mismatch_exit="$(run_locked_gate)"
   [[ "$source_mismatch_exit" == "0" ]] ||
     fail "a machine id from another source must not read as another machine, got $source_mismatch_exit"
-  assert_contains "carries no machine identity this run can compare"
+  assert_contains "cannot be tied to this machine"
   [[ ! -d "$gate_lock_root/run.lock" ]] ||
     fail "the run that reclaimed a source-mismatched record must release its own"
 
@@ -7129,7 +7162,7 @@ STUB
   shared_root_exit="$(AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=0 run_locked_gate)"
   [[ "$shared_root_exit" == "2" ]] ||
     fail "an unverified record on a possibly shared lock root must be waited out, got $shared_root_exit"
-  assert_contains "not on storage this machine mounts itself"
+  assert_contains "not established as storage only this machine reaches"
   assert_contains "AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1"
   assert_not_contains "reclaiming it."
   [[ -d "$gate_lock_root/run.lock" ]] ||
