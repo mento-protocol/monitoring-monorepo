@@ -558,7 +558,7 @@ jobs:
             echo 'SENTRY_AUTOFIX_PROMPT_EOF'
           } >> "${GITHUB_OUTPUT}"
 
-      - uses: anthropics/claude-code-action@5ef2e550a465a721f4f45e4a7d3c340c873e1dcc # v1.0.190
+      - uses: anthropics/claude-code-action@459ad358ae43fea66bfefd0a1f8d840b4b9791fb # v1.0.194
         if: ${{ matrix.entry.reconcile != true }}
         with:
           github_token: ${{ github.token }}

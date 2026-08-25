@@ -49,6 +49,9 @@ pnpm code-health:schema-diff       # GraphQL schema breaking-change diff vs orig
 pnpm code-health                   # Run knip + deps together (everything except history + duplication)
 pnpm agent:quality-gate            # Map changed paths to required local checks and PR checklists
 pnpm agent:quality-gate --run      # Execute the mapped local-only checks
+# Package scripts, package-manager settings, and lockfiles can change code that
+# runs during install. Review those changes before acknowledging them:
+pnpm agent:quality-gate --run --allow-package-script-changes
 pnpm agent:context-check           # Validate repo-visible agent instructions, links, and routing
 pnpm agent:review-materiality      # Classify review depth + context-update signals for current diff
 pnpm agent:autoreview              # Isolated closeout review; multi-pass uses --prepare-bundle-dir DIR + one fresh-context reviewer; quality gate owns tests
@@ -65,6 +68,9 @@ pnpm docs:navigation-eval -- --prompt          # Print the bounded read-only eva
 pnpm docs:navigation-eval -- --prompt --base-commit <full-sha>  # Pin a committed result to a reachable default-branch ancestor
 pnpm docs:navigation-eval -- --validate <result.json>  # Recompute authority, evidence, route, and context scores
 pnpm agent:context-budget --strict # Enforce root, scoped-file, and aggregate-route AGENTS byte caps
+# Run feedback-state first. Final all-clear needs the current-head Codex
+# PR-description +1 or this exact-head human override:
+# /pr-ready-override gate=codex-description-approval head=<full-head-sha> reason=<why this is safe>
 pnpm --silent pr:feedback-state --pr 123 --json  # Normalize unresolved/reply-required feedback before all-clear
 pnpm pr:ready-state --pr 123 --json              # Final current-head required-readiness probe
 node scripts/pr/review-process-metrics.mjs --prs <pr1,pr2,...> --output <result.json>  # Collect a new cohort; define its boundary and tracking issue first
