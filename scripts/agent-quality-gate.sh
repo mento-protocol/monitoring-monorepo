@@ -513,6 +513,58 @@ if [[ -n "$parallel_release_failure_at" ]] && {
   echo "AGENT_QUALITY_GATE_TEST_PARALLEL_RELEASE_FAILURE_AT: test-only override requires NODE_ENV=test and a positive integer" >&2
   exit 2
 fi
+owner_discard_test_barrier="${AGENT_QUALITY_GATE_TEST_OWNER_DISCARD_BARRIER:-}"
+if [[ -n "$owner_discard_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
+  echo "AGENT_QUALITY_GATE_TEST_OWNER_DISCARD_BARRIER: test-only override requires NODE_ENV=test" >&2
+  exit 2
+fi
+owner_quarantined_test_barrier="${AGENT_QUALITY_GATE_TEST_OWNER_QUARANTINED_BARRIER:-}"
+if [[ -n "$owner_quarantined_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
+  echo "AGENT_QUALITY_GATE_TEST_OWNER_QUARANTINED_BARRIER: test-only override requires NODE_ENV=test" >&2
+  exit 2
+fi
+owner_witness_test_barrier="${AGENT_QUALITY_GATE_TEST_OWNER_WITNESS_BARRIER:-}"
+if [[ -n "$owner_witness_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
+  echo "AGENT_QUALITY_GATE_TEST_OWNER_WITNESS_BARRIER: test-only override requires NODE_ENV=test" >&2
+  exit 2
+fi
+marker_witness_test_barrier="${AGENT_QUALITY_GATE_TEST_MARKER_WITNESS_BARRIER:-}"
+if [[ -n "$marker_witness_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
+  echo "AGENT_QUALITY_GATE_TEST_MARKER_WITNESS_BARRIER: test-only override requires NODE_ENV=test" >&2
+  exit 2
+fi
+owner_quarantine_before_claim_test_barrier="${AGENT_QUALITY_GATE_TEST_QUARANTINE_BEFORE_CLAIM_BARRIER:-}"
+if [[ -n "$owner_quarantine_before_claim_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
+  echo "AGENT_QUALITY_GATE_TEST_QUARANTINE_BEFORE_CLAIM_BARRIER: test-only override requires NODE_ENV=test" >&2
+  exit 2
+fi
+owner_quarantine_after_claim_test_barrier="${AGENT_QUALITY_GATE_TEST_QUARANTINE_AFTER_CLAIM_BARRIER:-}"
+if [[ -n "$owner_quarantine_after_claim_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
+  echo "AGENT_QUALITY_GATE_TEST_QUARANTINE_AFTER_CLAIM_BARRIER: test-only override requires NODE_ENV=test" >&2
+  exit 2
+fi
+owner_restore_link_failure="${AGENT_QUALITY_GATE_TEST_OWNER_RESTORE_LINK_FAILURE:-}"
+if [[ -n "$owner_restore_link_failure" ]] && {
+  [[ "${NODE_ENV:-}" != "test" ]] || [[ "$owner_restore_link_failure" != "1" ]];
+}; then
+  echo "AGENT_QUALITY_GATE_TEST_OWNER_RESTORE_LINK_FAILURE: test-only override requires NODE_ENV=test and value 1" >&2
+  exit 2
+fi
+release_validated_test_barrier="${AGENT_QUALITY_GATE_TEST_RELEASE_VALIDATED_BARRIER:-}"
+if [[ -n "$release_validated_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
+  echo "AGENT_QUALITY_GATE_TEST_RELEASE_VALIDATED_BARRIER: test-only override requires NODE_ENV=test" >&2
+  exit 2
+fi
+release_private_test_barrier="${AGENT_QUALITY_GATE_TEST_RELEASE_PRIVATE_BARRIER:-}"
+if [[ -n "$release_private_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
+  echo "AGENT_QUALITY_GATE_TEST_RELEASE_PRIVATE_BARRIER: test-only override requires NODE_ENV=test" >&2
+  exit 2
+fi
+lock_taken_test_barrier="${AGENT_QUALITY_GATE_TEST_LOCK_TAKEN_BARRIER:-}"
+if [[ -n "$lock_taken_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
+  echo "AGENT_QUALITY_GATE_TEST_LOCK_TAKEN_BARRIER: test-only override requires NODE_ENV=test" >&2
+  exit 2
+fi
 
 kill_process_tree() {
   local pid="$1"
@@ -652,17 +704,15 @@ teardown_active_timeouts() {
 # It retains this lock as a mixed-version barrier, and this Bash path remains
 # the election and recovery mechanism for legacy holders and dead coordinators.
 #
-# mkdir(2), O_EXCL and rename(2) are the primitives: all three are atomic,
-# flock(1) does not exist on macOS, and the repo's floor is Bash 3.2. Renaming
-# is used on the owner *file* only — `mv src dir` when dir exists moves src
-# *inside* it instead of failing, so a rename can never be a conditional claim
-# on a directory here, but renaming a regular file away fails with ENOENT for
-# everyone who arrives second, which is exactly the test-and-set the reclaim
-# path needs. The invariant the code below keeps is: at every instant at most
-# one process believes it holds the lock, and no waiter ever removes or renames
-# a lock directory. A holder is made by two atomic steps — win `mkdir` on the
-# lock path, then create the owner file with O_EXCL — and a reclaimer takes a
-# dead record away by rename before it may write its own.
+# mkdir(2), link(2), O_EXCL, and rename(2) are the atomic primitives. flock(1)
+# does not exist on macOS, and the repo's floor is Bash 3.2. Owner records move
+# by exact file rename. Recovery freezes a dead private quarantine with one
+# Node rename over a verified empty placeholder; it never uses `mv src dir`,
+# whose directory-destination behavior is not a conditional claim. The
+# invariant is: at most one process believes it holds the lock, and no waiter
+# deletes a shared owner pathname. A holder wins `mkdir`, then publishes its
+# owner with O_EXCL. A reclaimer binds each record or quarantine inode before it
+# can retire private evidence.
 # ---------------------------------------------------------------------------
 gate_lock_dir=""
 gate_lock_token=""
@@ -686,6 +736,29 @@ gate_cleanup_preserve_legacy_lock=0
 # and it can never name another run's file.
 gate_lock_reclaim_tmp=""
 gate_lock_reclaim_origin=""
+# Owner records are never unlinked through a shared pathname. A discard first
+# creates a hard-link witness in a fresh mode-0700 directory beside the record,
+# establishes a canonical-owner or condemned-run fallback, then atomically
+# moves the shared name beside that witness. Only those private names are
+# removed. These globals join the two phases without passing delimiter-bearing
+# record content through positional arguments.
+gate_lock_quarantine_dir=""
+gate_lock_quarantine_origin=""
+gate_lock_quarantine_anchor=""
+gate_lock_quarantine_taken=""
+gate_lock_quarantine_fallback=""
+gate_lock_quarantine_authority_value=""
+gate_lock_quarantine_raw_marker_token=""
+gate_lock_quarantine_retention_state="Nothing has been executed."
+gate_lock_active_quarantine_pid=""
+gate_lock_active_quarantine_host=""
+gate_lock_local_host_name=""
+gate_lock_local_host_fingerprint=""
+gate_lock_claimed_quarantine=""
+# A marker cleanup that failed its exact-inode check must not be retried during
+# EXIT teardown. A later attempt could bind the changed inode as a new witness
+# and delete the evidence that the first attempt restored or retained.
+gate_run_marker_cleanup_refused_tokens=""
 # Private file a claim builds its record in before publishing it. Same rule:
 # PID-suffixed, so registering it before creation is safe.
 gate_lock_claim_tmp=""
@@ -725,20 +798,913 @@ gate_lock_require_safe_existing_owner_record() {
   gate_lock_refuse_unsafe_owner_record "$record"
 }
 
-gate_lock_condemn_before_discard() {
+gate_lock_clear_quarantine_state() {
+  gate_lock_quarantine_dir=""
+  gate_lock_quarantine_origin=""
+  gate_lock_quarantine_anchor=""
+  gate_lock_quarantine_taken=""
+  gate_lock_quarantine_fallback=""
+  gate_lock_quarantine_authority_value=""
+  gate_lock_quarantine_raw_marker_token=""
+  gate_lock_quarantine_retention_state="Nothing has been executed."
+}
+
+gate_lock_quarantine_authority_from_record() {
   local record="$1"
-  local record_token_value
-  record_token_value="$(gate_lock_field_from_file "$record" token)"
-  [[ -n "$record_token_value" ]] || return 0
-  record_condemned_run "$record_token_value"
+  if [[ -n "$gate_lock_quarantine_raw_marker_token" ]]; then
+    gate_run_marker_snapshot_is_exact \
+      "$record" "$gate_lock_quarantine_raw_marker_token" || return 1
+    printf '%s\n' "$gate_lock_quarantine_raw_marker_token"
+    return 0
+  fi
+  gate_lock_current_user_authority_token_from_record "$record"
+}
+
+gate_lock_private_quarantine_directory_is_safe() {
+  local directory="$1"
+  node -e '
+    const fs = require("node:fs");
+    const path = process.argv[1];
+    const expectedUid = Number(process.argv[2]);
+    const stat = fs.lstatSync(path);
+    process.exit(
+      stat.isDirectory() &&
+      !stat.isSymbolicLink() &&
+      stat.uid === expectedUid &&
+      (stat.mode & 0o777) === 0o700
+        ? 0
+        : 1,
+    );
+  ' "$directory" "$(id -u)" 2>/dev/null
+}
+
+gate_lock_current_host_fingerprint() {
+  local host_name="$1"
+  [[ -n "$host_name" && "$host_name" != *$'\n'* &&
+    "$host_name" != *$'\r'* ]] || return 2
+  node -e '
+    const { createHash } = require("node:crypto");
+    process.stdout.write(
+      createHash("sha256").update(process.argv[1], "utf8").digest("hex"),
+    );
+  ' "$host_name" 2>/dev/null
+}
+
+gate_lock_ensure_local_host_fingerprint() {
+  local fingerprint host_name
+  if [[ -n "$gate_lock_local_host_name" &&
+    "$gate_lock_local_host_fingerprint" =~ ^[0-9a-f]{64}$ ]]; then
+    return 0
+  fi
+  if ! host_name="$(uname -n 2>/dev/null)" ||
+    [[ -z "$host_name" || "$host_name" == *$'\n'* ||
+      "$host_name" == *$'\r'* ]] ||
+    ! fingerprint="$(gate_lock_current_host_fingerprint "$host_name")" ||
+    [[ ! "$fingerprint" =~ ^[0-9a-f]{64}$ ]]; then
+    gate_lock_local_host_name=""
+    gate_lock_local_host_fingerprint=""
+    return 2
+  fi
+  gate_lock_local_host_name="$host_name"
+  gate_lock_local_host_fingerprint="$fingerprint"
+}
+
+gate_lock_path_matches_open_descriptor() {
+  local path="$1"
+  local descriptor="$2"
+  node -e '
+    const fs = require("node:fs");
+    const path = process.argv[1];
+    const descriptor = Number(process.argv[2]);
+    const expectedUid = Number(process.argv[3]);
+    const pathStat = fs.lstatSync(path, { bigint: true });
+    const descriptorStat = fs.fstatSync(descriptor, { bigint: true });
+    process.exit(
+      pathStat.isFile() &&
+      !pathStat.isSymbolicLink() &&
+      descriptorStat.isFile() &&
+      pathStat.uid === BigInt(expectedUid) &&
+      descriptorStat.uid === BigInt(expectedUid) &&
+      pathStat.dev === descriptorStat.dev &&
+      pathStat.ino === descriptorStat.ino
+        ? 0
+        : 1,
+    );
+  ' "$path" "$descriptor" "$(id -u)" 2>/dev/null
+}
+
+gate_lock_retain_quarantine() {
+  local reason="$1"
+  local retention_state="$gate_lock_quarantine_retention_state"
+  echo "error: ${reason}" >&2
+  if [[ -n "$gate_lock_quarantine_dir" ]]; then
+    echo "The owner quarantine was retained at ${gate_lock_quarantine_dir}. ${retention_state}" >&2
+  else
+    echo "The owner evidence was retained. ${retention_state}" >&2
+  fi
+  gate_lock_clear_quarantine_state
+  return 2
+}
+
+gate_lock_prepare_owner_quarantine() {
+  local record="$1"
+  local retention_state="${2:-Nothing has been executed.}"
+  local raw_marker_token="${3:-}"
+  local parent quarantine quarantine_prefix="owner.reclaiming.quarantine.v1"
+  gate_lock_clear_quarantine_state
+  gate_lock_quarantine_retention_state="$retention_state"
+  if [[ -n "$raw_marker_token" ]]; then
+    if ! gate_lock_token_is_wellformed "$raw_marker_token"; then
+      gate_lock_clear_quarantine_state
+      return 2
+    fi
+    gate_lock_quarantine_raw_marker_token="$raw_marker_token"
+    quarantine_prefix="holder.reclaiming.quarantine.v1"
+  fi
+  parent="${record%/*}"
+  if [[ -z "$parent" || "$parent" == "$record" ||
+    ! "$gate_lock_local_host_fingerprint" =~ ^[0-9a-f]{64}$ ]]; then
+    gate_lock_clear_quarantine_state
+    return 2
+  fi
+  if ! quarantine="$(mktemp -d "${parent}/${quarantine_prefix}.${gate_lock_local_host_fingerprint}.$$.XXXXXX")"; then
+    gate_lock_clear_quarantine_state
+    return 2
+  fi
+  if ! chmod 700 "$quarantine" ||
+    ! gate_lock_private_quarantine_directory_is_safe "$quarantine"; then
+    rmdir "$quarantine" 2>/dev/null || true
+    gate_lock_clear_quarantine_state
+    return 2
+  fi
+  gate_lock_quarantine_dir="$quarantine"
+  gate_lock_quarantine_origin="$record"
+  gate_lock_quarantine_anchor="${quarantine}/anchor"
+  gate_lock_quarantine_taken="${quarantine}/record"
+  gate_lock_quarantine_fallback="${quarantine}/fallback-ready"
+  # `-P` is required on macOS. Without it, ln follows a source symlink and the
+  # witness can name the symlink target instead of the shared directory entry.
+  if ! /bin/ln -P "$record" "$gate_lock_quarantine_anchor" 2>/dev/null; then
+    rmdir "$quarantine" 2>/dev/null || true
+    gate_lock_clear_quarantine_state
+    [[ ! -e "$record" && ! -L "$record" ]] && return 1
+    return 2
+  fi
+  if ! gate_lock_quarantine_authority_value="$(
+    gate_lock_quarantine_authority_from_record "$gate_lock_quarantine_anchor"
+  )"; then
+    gate_lock_report_foreign_owner_recovery \
+      "$record" "$gate_lock_quarantine_retention_state"
+    gate_lock_retain_quarantine \
+      "the quality-gate owner witness is foreign or unsafe"
+    return 2
+  fi
+  if ! gate_lock_wait_for_test_barrier "$owner_witness_test_barrier"; then
+    gate_lock_retain_quarantine \
+      "the quality-gate owner witness barrier failed"
+    return 2
+  fi
+  gate_lock_test_crash after-owner-quarantine-anchor
+}
+
+gate_lock_mark_quarantine_fallback() {
+  [[ -n "$gate_lock_quarantine_fallback" ]] || return 2
+  if ! gate_lock_private_quarantine_directory_is_safe "$gate_lock_quarantine_dir" ||
+    ! gate_lock_record_is_readable_regular "$gate_lock_quarantine_anchor" ||
+    ! printf '%s\n' "$gate_lock_quarantine_authority_value" \
+      > "$gate_lock_quarantine_fallback" ||
+    ! chmod 600 "$gate_lock_quarantine_fallback"; then
+    gate_lock_retain_quarantine \
+      "could not record the quality-gate owner quarantine fallback"
+    return 2
+  fi
+  gate_lock_test_crash after-owner-quarantine-fallback
+}
+
+gate_lock_quarantine_fallback_is_valid() {
+  local value
+  [[ -f "$gate_lock_quarantine_fallback" &&
+    ! -L "$gate_lock_quarantine_fallback" &&
+    -O "$gate_lock_quarantine_fallback" ]] || return 1
+  value="$(sed -n '1p' "$gate_lock_quarantine_fallback" 2>/dev/null)" ||
+    return 1
+  [[ "$value" == "$gate_lock_quarantine_authority_value" ]]
+}
+
+gate_lock_cancel_prepared_quarantine() {
+  if ! gate_lock_private_quarantine_directory_is_safe "$gate_lock_quarantine_dir" ||
+    [[ -e "$gate_lock_quarantine_taken" || -L "$gate_lock_quarantine_taken" ]] ||
+    [[ -e "$gate_lock_quarantine_fallback" || -L "$gate_lock_quarantine_fallback" ]] ||
+    ! gate_lock_record_is_readable_regular "$gate_lock_quarantine_origin" ||
+    ! gate_lock_record_is_readable_regular "$gate_lock_quarantine_anchor" ||
+    [[ ! "$gate_lock_quarantine_origin" -ef "$gate_lock_quarantine_anchor" ]] ||
+    ! /bin/rm -f "$gate_lock_quarantine_anchor" ||
+    ! /bin/rmdir "$gate_lock_quarantine_dir"; then
+    gate_lock_retain_quarantine \
+      "could not cancel the prepared quality-gate owner quarantine"
+    return 2
+  fi
+  gate_lock_clear_quarantine_state
+}
+
+gate_lock_take_prepared_quarantine() {
+  local observed_authority_value
+  [[ -n "$gate_lock_quarantine_dir" &&
+    -n "$gate_lock_quarantine_origin" &&
+    -n "$gate_lock_quarantine_anchor" &&
+    -n "$gate_lock_quarantine_taken" &&
+    -n "$gate_lock_quarantine_fallback" ]] || return 2
+  gate_lock_quarantine_fallback_is_valid || return 2
+  if ! gate_lock_wait_for_test_barrier "$owner_discard_test_barrier"; then
+    gate_lock_retain_quarantine \
+      "the quality-gate owner discard barrier failed"
+    return 2
+  fi
+  gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_DISCARD_DELAY_SECONDS:-}"
+  if ! gate_lock_private_quarantine_directory_is_safe "$gate_lock_quarantine_dir" ||
+    ! gate_lock_quarantine_fallback_is_valid ||
+    [[ -e "$gate_lock_quarantine_taken" || -L "$gate_lock_quarantine_taken" ]]; then
+    gate_lock_retain_quarantine \
+      "the quality-gate owner path could not enter its private quarantine"
+    return 2
+  fi
+  if ! /bin/mv "$gate_lock_quarantine_origin" \
+    "$gate_lock_quarantine_taken" 2>/dev/null; then
+    # An active releaser can move a recovery-visible remnant after this gate
+    # hard-links its exact inode and establishes the canonical fallback. The
+    # missing source is a completed competing move, not changed evidence.
+    [[ ! -e "$gate_lock_quarantine_origin" &&
+      ! -L "$gate_lock_quarantine_origin" ]] && return 1
+    gate_lock_retain_quarantine \
+      "the quality-gate owner path could not enter its private quarantine"
+    return 2
+  fi
+  gate_lock_test_crash after-owner-quarantine-take
+  if ! gate_lock_record_is_readable_regular "$gate_lock_quarantine_taken" ||
+    [[ ! "$gate_lock_quarantine_taken" -ef "$gate_lock_quarantine_anchor" ]]; then
+    gate_lock_retain_quarantine \
+      "the quality-gate owner inode changed before quarantine"
+    return 2
+  fi
+  if ! observed_authority_value="$(
+    gate_lock_quarantine_authority_from_record "$gate_lock_quarantine_taken"
+  )" || [[ "$observed_authority_value" != "$gate_lock_quarantine_authority_value" ]]; then
+    gate_lock_retain_quarantine \
+      "the quality-gate owner authority changed before quarantine"
+    return 2
+  fi
+  if ! gate_lock_wait_for_test_barrier "$owner_quarantined_test_barrier"; then
+    gate_lock_retain_quarantine \
+      "the quarantined quality-gate owner barrier failed"
+    return 2
+  fi
+  if [[ -e "$gate_lock_quarantine_origin" || -L "$gate_lock_quarantine_origin" ]]; then
+    gate_lock_retain_quarantine \
+      "replacement quality-gate owner evidence appeared after quarantine"
+    return 2
+  fi
+}
+
+gate_lock_drop_private_quarantine() {
+  local observed_authority_value
+  if ! gate_lock_private_quarantine_directory_is_safe "$gate_lock_quarantine_dir" ||
+    ! gate_lock_quarantine_fallback_is_valid ||
+    ! gate_lock_record_is_readable_regular "$gate_lock_quarantine_anchor" ||
+    ! gate_lock_record_is_readable_regular "$gate_lock_quarantine_taken" ||
+    [[ ! "$gate_lock_quarantine_taken" -ef "$gate_lock_quarantine_anchor" ]] ||
+    ! observed_authority_value="$(
+      gate_lock_quarantine_authority_from_record "$gate_lock_quarantine_taken"
+    )" || [[ "$observed_authority_value" != "$gate_lock_quarantine_authority_value" ]]; then
+    gate_lock_retain_quarantine \
+      "the private quality-gate owner evidence changed before deletion"
+    return 2
+  fi
+  if ! /bin/rm -f "$gate_lock_quarantine_taken" ||
+    ! /bin/rm -f "$gate_lock_quarantine_anchor" ||
+    ! /bin/rm -f "$gate_lock_quarantine_fallback" ||
+    ! /bin/rmdir "$gate_lock_quarantine_dir"; then
+    gate_lock_retain_quarantine \
+      "could not remove the private quality-gate owner quarantine"
+    return 2
+  fi
+  gate_lock_clear_quarantine_state
+}
+
+gate_lock_drop_prepared_quarantine_without_taken() {
+  local observed_authority_value
+  if ! gate_lock_private_quarantine_directory_is_safe "$gate_lock_quarantine_dir" ||
+    ! gate_lock_quarantine_fallback_is_valid ||
+    ! gate_lock_record_is_readable_regular "$gate_lock_quarantine_anchor" ||
+    [[ -e "$gate_lock_quarantine_taken" || -L "$gate_lock_quarantine_taken" ]] ||
+    [[ -e "$gate_lock_quarantine_origin" || -L "$gate_lock_quarantine_origin" ]] ||
+    ! observed_authority_value="$(
+      gate_lock_quarantine_authority_from_record "$gate_lock_quarantine_anchor"
+    )" || [[ "$observed_authority_value" != "$gate_lock_quarantine_authority_value" ]]; then
+    gate_lock_retain_quarantine \
+      "the moved quality-gate owner evidence changed before private cleanup"
+    return 2
+  fi
+  if ! /bin/rm -f "$gate_lock_quarantine_anchor" ||
+    ! /bin/rm -f "$gate_lock_quarantine_fallback" ||
+    ! /bin/rmdir "$gate_lock_quarantine_dir"; then
+    gate_lock_retain_quarantine \
+      "could not remove the prepared quality-gate owner quarantine"
+    return 2
+  fi
+  gate_lock_clear_quarantine_state
+}
+
+gate_run_restore_quarantined_marker() {
+  local marker="$1"
+  local taken="$2"
+  local quarantine="$3"
+  local expected_token_value="$4"
+  if [[ ! -e "$taken" && ! -L "$taken" ]]; then
+    echo "error: run-marker cleanup retained ${quarantine}; no moved marker was available to restore." >&2
+    return 2
+  fi
+  if ! gate_run_marker_snapshot_is_exact "$taken" "$expected_token_value"; then
+    echo "error: the moved run marker is unsafe or has changed bytes; it remains only in ${quarantine}." >&2
+    return 2
+  fi
+  if /bin/ln -P "$taken" "$marker" 2>/dev/null; then
+    if [[ "$marker" -ef "$taken" ]] &&
+      gate_run_marker_snapshot_is_exact "$taken" "$expected_token_value" &&
+      gate_run_marker_snapshot_is_exact "$marker" "$expected_token_value"; then
+      echo "error: a changed run marker was restored at ${marker}; its quarantine was retained at ${quarantine}." >&2
+      return 2
+    fi
+    echo "error: run-marker cleanup published an unverified canonical link at ${marker}; ${quarantine} was retained." >&2
+    return 2
+  fi
+  if [[ -e "$marker" || -L "$marker" ]]; then
+    if [[ "$marker" -ef "$taken" ]]; then
+      echo "error: a changed run marker remains visible at ${marker}; its quarantine was retained at ${quarantine}." >&2
+    else
+      echo "error: could not restore the changed run marker at ${marker} because that path is occupied; ${quarantine} was retained." >&2
+    fi
+  else
+    echo "error: could not restore the changed run marker at ${marker}; ${quarantine} was retained." >&2
+  fi
+  return 2
+}
+
+gate_run_marker_cleanup_was_refused() {
+  local expected_token_value="$1"
+  case " ${gate_run_marker_cleanup_refused_tokens} " in
+    *" ${expected_token_value} "*) return 0 ;;
+  esac
+  return 1
+}
+
+gate_run_stop_marker_cleanup_retries() {
+  local marker="$1"
+  local expected_token_value="$2"
+  if ! gate_run_marker_cleanup_was_refused "$expected_token_value"; then
+    if [[ -n "$gate_run_marker_cleanup_refused_tokens" ]]; then
+      gate_run_marker_cleanup_refused_tokens="${gate_run_marker_cleanup_refused_tokens} ${expected_token_value}"
+    else
+      gate_run_marker_cleanup_refused_tokens="$expected_token_value"
+    fi
+  fi
+  if [[ "$marker" == "$gate_run_marker_file" ]]; then
+    gate_run_marker_file=""
+  fi
+}
+
+gate_run_discard_marker_exact() {
+  local expected_token_value="$1"
+  local retention_state="${2:-Nothing has been executed.}"
+  local marker prepare_status take_status drop_status
+  local quarantine anchor taken
+  gate_lock_token_is_wellformed "$expected_token_value" || return 2
+  gate_run_marker_cleanup_was_refused "$expected_token_value" && return 2
+  marker="$(gate_run_marker_path "$expected_token_value")" || return 0
+  if gate_lock_prepare_owner_quarantine \
+    "$marker" "$retention_state" "$expected_token_value"; then
+    :
+  else
+    prepare_status=$?
+    [[ "$prepare_status" -eq 1 && ! -e "$marker" && ! -L "$marker" ]] &&
+      return 0
+    gate_run_stop_marker_cleanup_retries "$marker" "$expected_token_value"
+    return 2
+  fi
+  quarantine="$gate_lock_quarantine_dir"
+  anchor="$gate_lock_quarantine_anchor"
+  taken="$gate_lock_quarantine_taken"
+  if ! gate_run_marker_snapshot_is_exact "$anchor" "$expected_token_value"; then
+    gate_lock_retain_quarantine \
+      "the run-marker witness has unsafe ownership, changed bytes, or a changed inode" || true
+    gate_run_stop_marker_cleanup_retries "$marker" "$expected_token_value"
+    return 2
+  fi
+  if [[ -n "$marker_witness_test_barrier" &&
+    "$marker" == "$gate_run_marker_file" ]]; then
+    if ! gate_lock_wait_for_test_barrier "$marker_witness_test_barrier"; then
+      gate_lock_retain_quarantine \
+        "the run-marker witness barrier failed" || true
+      gate_run_stop_marker_cleanup_retries "$marker" "$expected_token_value"
+      return 2
+    fi
+  fi
+  gate_lock_test_crash after-run-marker-quarantine-anchor
+  if ! gate_lock_mark_quarantine_fallback; then
+    gate_run_stop_marker_cleanup_retries "$marker" "$expected_token_value"
+    return 2
+  fi
+  if gate_lock_take_prepared_quarantine; then
+    if ! gate_run_marker_snapshot_is_exact "$taken" "$expected_token_value"; then
+      gate_lock_retain_quarantine \
+        "the run marker changed after its exact witness was bound" || true
+      gate_run_restore_quarantined_marker \
+        "$marker" "$taken" "$quarantine" "$expected_token_value" || true
+      gate_run_stop_marker_cleanup_retries "$marker" "$expected_token_value"
+      return 2
+    fi
+    if gate_lock_drop_private_quarantine; then
+      return 0
+    else
+      drop_status=$?
+    fi
+    gate_run_stop_marker_cleanup_retries "$marker" "$expected_token_value"
+    return "$drop_status"
+  else
+    take_status=$?
+  fi
+  if [[ "$take_status" -eq 1 ]]; then
+    if ! gate_run_marker_snapshot_is_exact "$anchor" "$expected_token_value"; then
+      gate_lock_retain_quarantine \
+        "the run-marker witness changed after a competing cleanup" || true
+      gate_run_stop_marker_cleanup_retries "$marker" "$expected_token_value"
+      return 2
+    fi
+    if gate_lock_drop_prepared_quarantine_without_taken; then
+      return 0
+    else
+      drop_status=$?
+    fi
+    gate_run_stop_marker_cleanup_retries "$marker" "$expected_token_value"
+    return "$drop_status"
+  fi
+  if [[ -e "$taken" || -L "$taken" ]]; then
+    gate_run_restore_quarantined_marker \
+      "$marker" "$taken" "$quarantine" "$expected_token_value" || true
+  fi
+  gate_run_stop_marker_cleanup_retries "$marker" "$expected_token_value"
+  return 2
+}
+
+gate_lock_finish_canonical_quarantine() {
+  local canonical="$1"
+  local expected_token_value="$2"
+  local canonical_authority_value take_status quarantine_has_taken=0
+  if gate_lock_take_prepared_quarantine; then
+    quarantine_has_taken=1
+  else
+    take_status=$?
+    [[ "$take_status" -eq 1 ]] || return 2
+  fi
+  if ! canonical_authority_value="$(
+    gate_lock_current_user_authority_token_from_record "$canonical"
+  )" || [[ "$canonical_authority_value" != "$expected_token_value" ]] ||
+    [[ ! "$canonical" -ef "$gate_lock_quarantine_anchor" ]]; then
+    gate_lock_retain_quarantine \
+      "the canonical quality-gate owner changed during private cleanup"
+    return 2
+  fi
+  if [[ "$quarantine_has_taken" -eq 1 ]]; then
+    gate_lock_drop_private_quarantine
+  else
+    gate_lock_drop_prepared_quarantine_without_taken
+  fi
+}
+
+gate_lock_discard_inert_owner_stage() {
+  local record="$1"
+  local publisher_pid="$2"
+  local retention_state="${3:-Nothing has been executed.}"
+  local prepare_status take_status
+  if gate_lock_prepare_owner_quarantine "$record" "$retention_state"; then
+    :
+  else
+    prepare_status=$?
+    [[ "$prepare_status" -eq 1 && ! -e "$record" && ! -L "$record" ]] &&
+      return 0
+    return 2
+  fi
+  # Bind the stage inode before the final PID check. A reused publisher PID can
+  # replace the same stage pathname after an earlier liveness verdict. A live
+  # publisher keeps its stage; a replacement inode is retained by the take.
+  if gate_lock_holder_is_live "$publisher_pid" ""; then
+    gate_lock_cancel_prepared_quarantine
+    return $?
+  fi
+  gate_lock_mark_quarantine_fallback || return 2
+  if gate_lock_take_prepared_quarantine; then
+    gate_lock_drop_private_quarantine
+  else
+    take_status=$?
+    [[ "$take_status" -eq 1 ]] || return 2
+    gate_lock_drop_prepared_quarantine_without_taken
+  fi
+}
+
+gate_lock_condemn_prepared_quarantine() {
+  local obligation_status take_status
+  if [[ -n "$gate_lock_quarantine_authority_value" ]]; then
+    if record_condemned_run "$gate_lock_quarantine_authority_value"; then
+      :
+    else
+      obligation_status=$?
+      gate_lock_cancel_prepared_quarantine || return 2
+      return "$obligation_status"
+    fi
+  fi
+  gate_lock_mark_quarantine_fallback || return 2
+  if gate_lock_take_prepared_quarantine; then
+    gate_lock_drop_private_quarantine
+  else
+    take_status=$?
+    [[ "$take_status" -eq 1 ]] || return 2
+    gate_lock_drop_prepared_quarantine_without_taken
+  fi
+}
+
+gate_lock_condemn_and_discard() {
+  local record="$1"
+  if ! gate_lock_prepare_owner_quarantine "$record"; then
+    [[ -z "$gate_lock_quarantine_dir" ]] || gate_lock_clear_quarantine_state
+    return 2
+  fi
+  gate_lock_condemn_prepared_quarantine
+}
+
+gate_lock_discard_matching_duplicate() {
+  local record="$1"
+  local expected_token_value="$2"
+  local canonical="$3"
+  local canonical_authority_value
+  gate_lock_prepare_owner_quarantine "$record" || return 2
+  if ! canonical_authority_value="$(
+    gate_lock_current_user_authority_token_from_record "$canonical"
+  )" || [[ "$canonical_authority_value" != "$expected_token_value" ]] ||
+    [[ "$gate_lock_quarantine_authority_value" != "$expected_token_value" ]] ||
+    [[ ! "$canonical" -ef "$gate_lock_quarantine_anchor" ]]; then
+    gate_lock_retain_quarantine \
+      "the canonical quality-gate owner does not match the duplicate inode"
+    return 2
+  fi
+  gate_lock_mark_quarantine_fallback || return 2
+  gate_lock_finish_canonical_quarantine "$canonical" "$expected_token_value"
+}
+
+gate_lock_report_foreign_owner_recovery() {
+  local record="$1"
+  local retention_state="${2:-Nothing has been executed.}"
+  echo "error: the stale quality-gate owner record at ${record} belongs to another user or has inconsistent uid metadata." >&2
+  echo "This gate can wait on that shared owner, but it cannot safely inspect or signal the prior user's surviving commands." >&2
+  echo "The owner and generation evidence were retained. ${retention_state}" >&2
+  echo "Have the owning user or an administrator recover the stale generation." >&2
+}
+
+gate_lock_refuse_foreign_owner_recovery() {
+  gate_lock_report_foreign_owner_recovery "$1"
+  gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+    "No mapped command ran in this request"
+  exit 2
+}
+
+gate_lock_regular_file_link_count() {
+  # The dollar expression below is a JavaScript template literal.
+  # shellcheck disable=SC2016
+  node -e '
+    const fs = require("node:fs");
+    const stat = fs.lstatSync(process.argv[1]);
+    if (!stat.isFile() || stat.isSymbolicLink()) process.exit(1);
+    process.stdout.write(`${stat.nlink}\n`);
+  ' "$1" 2>/dev/null
+}
+
+gate_lock_recover_owner_quarantine() {
+  local quarantine="$1"
+  local anchor="${quarantine}/anchor"
+  local taken="${quarantine}/record"
+  local fallback="${quarantine}/fallback-ready"
+  local extra authority_value taken_authority_value fallback_value link_count
+  if ! gate_lock_private_quarantine_directory_is_safe "$quarantine"; then
+    [[ ! -e "$quarantine" && ! -L "$quarantine" ]] && return 0
+    echo "error: the quality-gate owner quarantine at ${quarantine} is not a current-user mode-0700 directory." >&2
+    return 2
+  fi
+  extra="$(
+    find "$quarantine" -mindepth 1 -maxdepth 1 \
+      ! -name anchor ! -name record ! -name fallback-ready \
+      -print -quit 2>/dev/null
+  )"
+  if [[ -n "$extra" ]]; then
+    echo "error: the quality-gate owner quarantine at ${quarantine} contains unexpected evidence: ${extra}." >&2
+    return 2
+  fi
+  if [[ ! -e "$anchor" && ! -L "$anchor" ]]; then
+    if [[ -e "$taken" || -L "$taken" ]]; then
+      echo "error: the quality-gate owner quarantine at ${quarantine} lost its inode witness." >&2
+      return 2
+    fi
+    if [[ -e "$fallback" || -L "$fallback" ]]; then
+      [[ -f "$fallback" && ! -L "$fallback" && -O "$fallback" ]] || return 2
+      /bin/rm -f "$fallback" || return 2
+    fi
+    /bin/rmdir "$quarantine"
+    return
+  fi
+  if ! authority_value="$(
+    gate_lock_current_user_authority_token_from_record "$anchor"
+  )"; then
+    gate_lock_report_foreign_owner_recovery "$anchor"
+    return 2
+  fi
+  if [[ ! -e "$fallback" && ! -L "$fallback" ]]; then
+    [[ ! -e "$taken" && ! -L "$taken" ]] || {
+      echo "error: the quality-gate owner quarantine at ${quarantine} moved evidence before it recorded a fallback." >&2
+      return 2
+    }
+    link_count="$(gate_lock_regular_file_link_count "$anchor")" || return 2
+    if [[ ! "$link_count" =~ ^[0-9]+$ ]] || [[ "$link_count" -lt 2 ]]; then
+      echo "error: the pre-fallback quality-gate owner witness at ${anchor} has no visible sibling link." >&2
+      return 2
+    fi
+    /bin/rm -f "$anchor" || return 2
+    /bin/rmdir "$quarantine"
+    return
+  fi
+  if [[ ! -f "$fallback" || -L "$fallback" || ! -O "$fallback" ]]; then
+    echo "error: the quality-gate owner quarantine fallback at ${fallback} is unsafe." >&2
+    return 2
+  fi
+  fallback_value="$(sed -n '1p' "$fallback" 2>/dev/null)" || return 2
+  [[ "$fallback_value" == "$authority_value" ]] || {
+    echo "error: the quality-gate owner quarantine fallback at ${fallback} names different authority." >&2
+    return 2
+  }
+  if [[ -e "$taken" || -L "$taken" ]]; then
+    if ! taken_authority_value="$(
+      gate_lock_current_user_authority_token_from_record "$taken"
+    )" || [[ "$taken_authority_value" != "$authority_value" ]] ||
+      [[ ! "$taken" -ef "$anchor" ]]; then
+      echo "error: the quality-gate owner quarantine at ${quarantine} retained an inode replacement." >&2
+      return 2
+    fi
+    /bin/rm -f "$taken" || return 2
+  fi
+  /bin/rm -f "$anchor" || return 2
+  /bin/rm -f "$fallback" || return 2
+  /bin/rmdir "$quarantine"
+}
+
+gate_lock_claim_owner_quarantine() {
+  local source="$1"
+  local parent claimed claim_status
+  gate_lock_claimed_quarantine=""
+  parent="${source%/*}"
+  [[ -n "$parent" && "$parent" != "$source" ]] || return 2
+  [[ "$gate_lock_local_host_fingerprint" =~ ^[0-9a-f]{64}$ ]] || return 2
+  claimed="$(mktemp -d "${parent}/owner.reclaiming.quarantine.v1.${gate_lock_local_host_fingerprint}.$$.XXXXXX")" ||
+    return 2
+  if ! chmod 700 "$claimed" ||
+    ! gate_lock_private_quarantine_directory_is_safe "$claimed"; then
+    /bin/rmdir "$claimed" 2>/dev/null || true
+    return 2
+  fi
+  gate_lock_claimed_quarantine="$claimed"
+  # The dollar expressions below are JavaScript template literals.
+  # shellcheck disable=SC2016
+  if node -e '
+    const fs = require("node:fs");
+    const { constants } = fs;
+    const [source, target, parent, uidText] = process.argv.slice(1);
+    const expectedUid = BigInt(uidText);
+    let sourceDescriptor;
+    let targetDescriptor;
+    let parentDescriptor;
+    let claimedDescriptor;
+    let status = 0;
+
+    function sameInode(first, second) {
+      return first.dev === second.dev && first.ino === second.ino;
+    }
+
+    function requirePrivateDirectory(stat, label) {
+      if (
+        !stat.isDirectory() ||
+        stat.uid !== expectedUid ||
+        (stat.mode & 0o777n) !== 0o700n
+      ) {
+        throw new Error(`${label} is not a current-user mode-0700 directory`);
+      }
+    }
+
+    function requirePathIdentity(path, expected, label) {
+      const observed = fs.lstatSync(path, { bigint: true });
+      requirePrivateDirectory(observed, label);
+      if (observed.isSymbolicLink() || !sameInode(observed, expected)) {
+        throw new Error(`${label} pathname changed before its atomic claim`);
+      }
+    }
+
+    function pathEntryExists(path) {
+      try {
+        fs.lstatSync(path);
+        return true;
+      } catch (error) {
+        if (error.code === "ENOENT") return false;
+        throw error;
+      }
+    }
+
+    try {
+      if (
+        !Number.isInteger(constants.O_DIRECTORY) ||
+        !Number.isInteger(constants.O_NOFOLLOW)
+      ) {
+        throw new Error("directory no-follow support is unavailable");
+      }
+      try {
+        sourceDescriptor = fs.openSync(
+          source,
+          constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+        );
+      } catch (error) {
+        if (error.code === "ENOENT") {
+          status = 3;
+        } else {
+          throw error;
+        }
+      }
+      if (status === 0) {
+        targetDescriptor = fs.openSync(
+          target,
+          constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+        );
+        const sourceStat = fs.fstatSync(sourceDescriptor, { bigint: true });
+        const targetStat = fs.fstatSync(targetDescriptor, { bigint: true });
+        requirePrivateDirectory(sourceStat, "source quarantine");
+        requirePrivateDirectory(targetStat, "claim placeholder");
+        requirePathIdentity(source, sourceStat, "source quarantine");
+        requirePathIdentity(target, targetStat, "claim placeholder");
+        if (fs.readdirSync(target).length !== 0) {
+          throw new Error("claim placeholder is not empty");
+        }
+        parentDescriptor = fs.openSync(
+          parent,
+          constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+        );
+        try {
+          fs.renameSync(source, target);
+        } catch (error) {
+          if (error.code === "ENOENT" && !pathEntryExists(source)) {
+            status = 3;
+          } else {
+            throw error;
+          }
+        }
+        if (status === 0) {
+          fs.fsyncSync(parentDescriptor);
+          claimedDescriptor = fs.openSync(
+            target,
+            constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+          );
+          const claimedStat = fs.fstatSync(claimedDescriptor, { bigint: true });
+          requirePrivateDirectory(claimedStat, "claimed quarantine");
+          if (!sameInode(claimedStat, sourceStat)) {
+            throw new Error("claimed quarantine does not match the source inode");
+          }
+          requirePathIdentity(target, claimedStat, "claimed quarantine");
+          fs.fsyncSync(claimedDescriptor);
+        }
+      }
+    } catch (error) {
+      process.stderr.write(`quality-gate quarantine claim failed: ${error.message}\n`);
+      status = 2;
+    } finally {
+      if (claimedDescriptor !== undefined) fs.closeSync(claimedDescriptor);
+      if (parentDescriptor !== undefined) fs.closeSync(parentDescriptor);
+      if (targetDescriptor !== undefined) fs.closeSync(targetDescriptor);
+      if (sourceDescriptor !== undefined) fs.closeSync(sourceDescriptor);
+    }
+    process.exitCode = status;
+  ' "$source" "$claimed" "$parent" "$(id -u)"; then
+    if ! gate_lock_wait_for_test_barrier "$owner_quarantine_after_claim_test_barrier"; then
+      echo "error: the claimed quality-gate owner quarantine barrier failed." >&2
+      return 2
+    fi
+    return 0
+  else
+    claim_status=$?
+  fi
+  if [[ "$claim_status" -eq 3 ]]; then
+    if gate_lock_recover_owner_quarantine "$claimed"; then
+      gate_lock_claimed_quarantine=""
+      return 1
+    fi
+  fi
+  echo "error: could not atomically claim the quality-gate owner quarantine at ${source}." >&2
+  echo "The source and claim evidence were retained. Nothing has been executed." >&2
+  return 2
 }
 
 gate_lock_recover_hidden_record() {
   local lock="$1"
   local this_host="$2"
-  local remnant pid host start recovered=1
+  local remnant remnant_name creator_host_fingerprint creator_pid creator_nonce
+  local dead_quarantine claim_status pid host start prepare_status recovered=1
+  local active_quarantine=0
+  # Settle private quarantines before ordinary remnants. A crash after the
+  # hard-link witness leaves both paths. Processing the ordinary remnant first
+  # can retire that inode and reduce the older witness to one link before its
+  # pre-fallback recovery check. A dead creator can still have an orphaned
+  # `/bin/mv` child in flight. Rename the whole directory to this waiter's
+  # identity before reading a phase. The directory rename orders recovery with
+  # that child and with every other waiter.
+  while :; do
+    active_quarantine=0
+    dead_quarantine=""
+    gate_lock_active_quarantine_pid=""
+    gate_lock_active_quarantine_host=""
+    for remnant in "$lock"/owner.reclaiming.quarantine.*; do
+      [[ -e "$remnant" || -L "$remnant" ]] || continue
+      remnant_name="${remnant##*/}"
+      if [[ ! "$remnant_name" =~ ^owner\.reclaiming\.quarantine\.v1\.([0-9a-f]+)\.([1-9][0-9]*)\.([A-Za-z0-9][A-Za-z0-9.-]*)$ ]]; then
+        echo "error: the quality-gate owner quarantine has an invalid recovery name: ${remnant}." >&2
+        echo "The quarantine was retained. Nothing has been executed." >&2
+        gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+          "No mapped command ran in this request"
+        exit 2
+      fi
+      creator_host_fingerprint="${BASH_REMATCH[1]}"
+      creator_pid="${BASH_REMATCH[2]}"
+      creator_nonce="${BASH_REMATCH[3]}"
+      if [[ "${#creator_host_fingerprint}" -ne 64 ||
+        "${#creator_nonce}" -lt 6 || "${#creator_nonce}" -gt 80 ]]; then
+        echo "error: the quality-gate owner quarantine has an invalid recovery name: ${remnant}." >&2
+        echo "The quarantine was retained. Nothing has been executed." >&2
+        gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+          "No mapped command ran in this request"
+        exit 2
+      fi
+      if [[ "$creator_host_fingerprint" != "$gate_lock_local_host_fingerprint" ]] ||
+        gate_lock_holder_is_live "$creator_pid" ""; then
+        active_quarantine=1
+        [[ -n "$gate_lock_active_quarantine_pid" ]] ||
+          gate_lock_active_quarantine_pid="$creator_pid"
+        if [[ -z "$gate_lock_active_quarantine_host" ]]; then
+          if [[ "$creator_host_fingerprint" == "$gate_lock_local_host_fingerprint" ]]; then
+            gate_lock_active_quarantine_host="$this_host"
+          else
+            gate_lock_active_quarantine_host="foreign host ${creator_host_fingerprint:0:12}"
+          fi
+        fi
+      elif [[ -z "$dead_quarantine" ]]; then
+        dead_quarantine="$remnant"
+      fi
+    done
+    # Never mutate one quarantine while another live or foreign-host creator
+    # can still advance its phase in the same shared lock directory.
+    [[ "$active_quarantine" -eq 0 ]] || return 4
+    [[ -n "$dead_quarantine" ]] || break
+    if ! gate_lock_wait_for_test_barrier_instance "$owner_quarantine_before_claim_test_barrier"; then
+      echo "error: the quality-gate owner quarantine claim barrier failed." >&2
+      gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+        "No mapped command ran in this request"
+      exit 2
+    fi
+    if gate_lock_claim_owner_quarantine "$dead_quarantine"; then
+      if gate_lock_recover_owner_quarantine "$gate_lock_claimed_quarantine"; then
+        gate_lock_claimed_quarantine=""
+        recovered=0
+        continue
+      fi
+      echo "The claimed quarantine was retained. Nothing has been executed." >&2
+      gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+        "No mapped command ran in this request"
+      exit 2
+    else
+      claim_status=$?
+    fi
+    if [[ "$claim_status" -eq 1 ]]; then
+      # Another waiter claimed the old basename. Restart the glob so this pass
+      # sees and waits on that waiter's new basename before ordinary recovery.
+      recovered=0
+      continue
+    fi
+    echo "The quarantine was retained. Nothing has been executed." >&2
+    gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+      "No mapped command ran in this request"
+    exit 2
+  done
   for remnant in "$lock"/owner.reclaiming.*; do
     [[ -e "$remnant" || -L "$remnant" ]] || continue
+    [[ "${remnant##*/}" == owner.reclaiming.quarantine.* ]] && continue
     if ! gate_lock_record_is_readable_regular "$remnant"; then
       # Another waiter can restore or remove this remnant after the glob saw
       # it. Treat that release race as absent, while retaining dangling links.
@@ -752,9 +1718,22 @@ gate_lock_recover_hidden_record() {
         "No mapped command ran in this request"
       exit 2
     fi
-    pid="$(gate_lock_field_from_file "$remnant" pid)"
-    host="$(gate_lock_field_from_file "$remnant" host)"
-    start="$(gate_lock_field_from_file "$remnant" start_utc)"
+    if gate_lock_prepare_owner_quarantine "$remnant"; then
+      :
+    else
+      prepare_status=$?
+      if [[ "$prepare_status" -eq 1 &&
+        ! -e "$remnant" && ! -L "$remnant" ]]; then
+        continue
+      fi
+      gate_lock_report_foreign_owner_recovery "$remnant"
+      gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+        "No mapped command ran in this request"
+      exit 2
+    fi
+    pid="$(gate_lock_field_from_file "$gate_lock_quarantine_anchor" pid)"
+    host="$(gate_lock_field_from_file "$gate_lock_quarantine_anchor" host)"
+    start="$(gate_lock_field_from_file "$gate_lock_quarantine_anchor" start_utc)"
     # A PID from another host has no local meaning. Treat the record as live
     # evidence, as the canonical-owner path does, until that host replaces or
     # removes it through the shared root.
@@ -762,9 +1741,16 @@ gate_lock_recover_hidden_record() {
       gate_lock_holder_is_live "$pid" "$start"; then
       # `ln` refuses an occupied path, so a record published while we were
       # reading loses nothing: ours is then the stale copy and just goes away.
-      if ln "$remnant" "$lock/owner" 2>/dev/null; then
+      if [[ "$owner_restore_link_failure" != "1" ]] &&
+        /bin/ln -P "$gate_lock_quarantine_anchor" "$lock/owner" 2>/dev/null; then
+        if ! gate_lock_mark_quarantine_fallback ||
+          ! gate_lock_finish_canonical_quarantine \
+            "$lock/owner" "$gate_lock_quarantine_authority_value"; then
+          gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+            "No mapped command ran in this request"
+          exit 2
+        fi
         echo "Recovered the record of live holder pid ${pid} from an interrupted reclaim." >&2
-        rm -f "$remnant"
         recovered=0
       elif [[ ! -e "$lock/owner" && ! -L "$lock/owner" ]]; then
         # A shared root can expose another user's mode-0600 remnant while the
@@ -776,6 +1762,10 @@ gate_lock_recover_hidden_record() {
         gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
           "No mapped command ran in this request"
         exit 2
+      elif ! gate_lock_cancel_prepared_quarantine; then
+        gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+          "No mapped command ran in this request"
+        exit 2
       fi
       # If the link failed the canonical path already holds something. This
       # copy still names a live process, so it stays: a record naming a live
@@ -784,8 +1774,15 @@ gate_lock_recover_hidden_record() {
       # Dead holder — but "dead run" is not the same as "nothing running". Its
       # commands outlive it, and this record is the last thing that names them.
       # So the delete happens only once the obligation is written down.
-      gate_lock_condemn_before_discard "$remnant" || gate_lock_obligation_unwritable
-      rm -f "$remnant"
+      if gate_lock_condemn_prepared_quarantine; then
+        :
+      else
+        recovered=$?
+        [[ "$recovered" -ne 1 ]] || gate_lock_obligation_unwritable
+        gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+          "No mapped command ran in this request"
+        exit 2
+      fi
     fi
   done
   return "$recovered"
@@ -797,11 +1794,40 @@ gate_lock_recover_hidden_record() {
 restore_gate_lock_record() {
   [[ -n "$gate_lock_reclaim_tmp" ]] || return 0
   if [[ -e "$gate_lock_reclaim_tmp" && -n "$gate_lock_reclaim_origin" ]]; then
-    if ! ln "$gate_lock_reclaim_tmp" "$gate_lock_reclaim_origin" 2>/dev/null; then
+    if gate_lock_prepare_owner_quarantine "$gate_lock_reclaim_tmp"; then
+      :
+    else
+      # A mismatched recorded uid is untrusted input, but restoring an exact
+      # hard link is non-destructive. Keep the recovery-visible remnant and any
+      # private witness as evidence; only publish the same inode back into an
+      # empty canonical slot.
+      if /bin/ln -P "$gate_lock_reclaim_tmp" \
+        "$gate_lock_reclaim_origin" 2>/dev/null; then
+        echo "error: restored untrusted quality-gate owner evidence at ${gate_lock_reclaim_origin}; retained ${gate_lock_reclaim_tmp}." >&2
+      elif [[ -e "$gate_lock_reclaim_origin" || -L "$gate_lock_reclaim_origin" ]]; then
+        echo "error: retained untrusted quality-gate owner evidence at ${gate_lock_reclaim_tmp}; the canonical slot is occupied." >&2
+      else
+        echo "error: retained changed or foreign evidence at ${gate_lock_reclaim_tmp}; could not restore it safely." >&2
+      fi
+      gate_lock_reclaim_tmp=""
+      gate_lock_reclaim_origin=""
+      return 1
+    fi
+    if /bin/ln -P "$gate_lock_quarantine_anchor" \
+      "$gate_lock_reclaim_origin" 2>/dev/null; then
+      if ! gate_lock_mark_quarantine_fallback ||
+        ! gate_lock_finish_canonical_quarantine \
+          "$gate_lock_reclaim_origin" "$gate_lock_quarantine_authority_value"; then
+        echo "error: restored ${gate_lock_reclaim_origin}, but retained changed or foreign evidence at ${gate_lock_reclaim_tmp}." >&2
+        gate_lock_reclaim_tmp=""
+        gate_lock_reclaim_origin=""
+        return 1
+      fi
+    elif [[ -e "$gate_lock_reclaim_origin" || -L "$gate_lock_reclaim_origin" ]]; then
       # The slot is occupied, so this copy is superseded and about to be
       # dropped rather than put back. It can still name a run whose commands
       # are alive, so the obligation is written down before it goes.
-      if ! gate_lock_condemn_before_discard "$gate_lock_reclaim_tmp"; then
+      if ! gate_lock_condemn_prepared_quarantine; then
         # Nowhere to write it down, so the record itself has to survive: it is
         # the only thing naming that run's commands, and the next run's
         # hidden-record recovery reads it from exactly where it lies. This runs
@@ -811,9 +1837,15 @@ restore_gate_lock_record() {
         gate_lock_reclaim_origin=""
         return 1
       fi
+    else
+      echo "error: could not restore ${gate_lock_reclaim_tmp}; retained its private witness." >&2
+      gate_lock_retain_quarantine \
+        "the canonical quality-gate owner remained absent during restoration" || true
+      gate_lock_reclaim_tmp=""
+      gate_lock_reclaim_origin=""
+      return 1
     fi
   fi
-  rm -f "$gate_lock_reclaim_tmp"
   gate_lock_reclaim_tmp=""
   gate_lock_reclaim_origin=""
 }
@@ -1038,10 +2070,34 @@ gate_lock_test_delay() {
   sleep "$seconds"
 }
 
+gate_lock_wait_for_test_barrier() {
+  local barrier="${1:-}"
+  local waited=0
+  [[ -n "$barrier" ]] || return 0
+  : > "${barrier}.ready" || return 2
+  while [[ ! -e "${barrier}.release" ]]; do
+    [[ "$waited" -lt 600 ]] || return 2
+    sleep 0.05
+    waited=$((waited + 1))
+  done
+}
+
+gate_lock_wait_for_test_barrier_instance() {
+  local barrier="${1:-}"
+  local waited=0
+  [[ -n "$barrier" ]] || return 0
+  : > "${barrier}.ready.$$" || return 2
+  while [[ ! -e "${barrier}.release" ]]; do
+    [[ "$waited" -lt 600 ]] || return 2
+    sleep 0.05
+    waited=$((waited + 1))
+  done
+}
+
 # Test-only. Names the write boundaries a crash can land between, so the
-# self-test can kill a run at each one and assert the next run recovers. SIGKILL
-# rather than exit, because the point is to skip the exit trap the way a real
-# `kill -9`, an OOM kill or a power loss would. Unset in normal operation.
+# self-test can kill a run at each one and assert the next run recovers. Use
+# SIGKILL rather than exit to skip the exit trap, as `kill -9` or an OOM kill
+# does. This hook tests process-death recovery only. Unset in normal operation.
 gate_lock_test_crash() {
   [[ "${AGENT_QUALITY_GATE_LOCK_CRASH_AT:-}" == "$1" ]] || return 0
   kill -9 $$
@@ -1104,7 +2160,99 @@ gate_lock_field_from_file() {
   sed -n "s/^${field}=//p" "$record" 2>/dev/null | head -n1 || true
 }
 
+gate_lock_authority_token_from_record() {
+  local record="$1"
+  local value
+  value="$(gate_lock_field_from_file "$record" coordinator_token)"
+  if [[ -z "$value" ]]; then
+    value="$(gate_lock_field_from_file "$record" token)"
+  fi
+  printf '%s\n' "$value"
+}
+
+gate_lock_field_from_text() {
+  local text="$1"
+  local field="$2"
+  printf '%s\n' "$text" | sed -n "s/^${field}=//p" | head -n1 || true
+}
+
+gate_lock_current_user_authority_token_from_snapshot() {
+  local snapshot="$1"
+  local recorded_uid current_uid uid_count coordinator_count token_count value
+  uid_count="$(printf '%s\n' "$snapshot" | grep -c '^uid=' || true)"
+  coordinator_count="$(printf '%s\n' "$snapshot" | grep -c '^coordinator_token=' || true)"
+  token_count="$(printf '%s\n' "$snapshot" | grep -c '^token=' || true)"
+  [[ "$uid_count" =~ ^[0-9]+$ && "$coordinator_count" =~ ^[0-9]+$ &&
+    "$token_count" =~ ^[0-9]+$ ]] || return 1
+  [[ "$uid_count" -le 1 && "$coordinator_count" -le 1 && "$token_count" -le 1 ]] ||
+    return 1
+  if [[ "$uid_count" -eq 1 ]]; then
+    recorded_uid="$(gate_lock_field_from_text "$snapshot" uid)"
+    [[ "$recorded_uid" =~ ^[0-9]+$ ]] || return 1
+    current_uid="$(id -u 2>/dev/null)" || return 1
+    [[ "$current_uid" =~ ^[0-9]+$ && "$recorded_uid" == "$current_uid" ]] ||
+      return 1
+  fi
+  value="$(gate_lock_field_from_text "$snapshot" coordinator_token)"
+  if [[ -z "$value" ]]; then
+    value="$(gate_lock_field_from_text "$snapshot" token)"
+  fi
+  printf '%s\n' "$value"
+}
+
+gate_lock_current_user_authority_token_from_record() {
+  local record="$1"
+  local snapshot
+  gate_lock_record_is_readable_regular "$record" || return 1
+  if ! exec 15< "$record"; then
+    return 1
+  fi
+  if [[ ! -f /dev/fd/15 || ! -O /dev/fd/15 ]]; then
+    exec 15<&-
+    return 1
+  fi
+  snapshot="$(cat <&15)" || {
+    exec 15<&-
+    return 1
+  }
+  if [[ ! -f /dev/fd/15 || ! -O /dev/fd/15 ]]; then
+    exec 15<&-
+    return 1
+  fi
+  exec 15<&-
+  gate_lock_current_user_authority_token_from_snapshot "$snapshot"
+}
+
+gate_lock_current_user_authority_token_from_release_descriptor() {
+  local snapshot
+  # Linux exposes /dev/fd/N as a symlink. Duplicate the already-open release
+  # descriptor instead of sending that pseudo-path through the shared-path
+  # no-symlink guard. The descriptor target must still be a current-user
+  # regular file before and after its bytes are read.
+  if ! exec 15<&14; then
+    return 1
+  fi
+  if [[ ! -f /dev/fd/15 || ! -O /dev/fd/15 ]]; then
+    exec 15<&-
+    return 1
+  fi
+  snapshot="$(cat <&15)" || {
+    exec 15<&-
+    return 1
+  }
+  if [[ ! -f /dev/fd/15 || ! -O /dev/fd/15 ]]; then
+    exec 15<&-
+    return 1
+  fi
+  exec 15<&-
+  gate_lock_current_user_authority_token_from_snapshot "$snapshot"
+}
+
 gate_lock_owner_field() {
+  if [[ "$2" == "token" ]]; then
+    gate_lock_authority_token_from_record "$1/owner"
+    return
+  fi
   gate_lock_field_from_file "$1/owner" "$2"
 }
 
@@ -1263,7 +2411,7 @@ gate_lock_record_still_stale() {
     return 2
   fi
   current_pid="$(gate_lock_field_from_file "$record" pid)"
-  current_token_value="$(gate_lock_field_from_file "$record" token)"
+  current_token_value="$(gate_lock_authority_token_from_record "$record")"
   current_start="$(gate_lock_field_from_file "$record" start_utc)"
   if ! gate_lock_record_is_readable_regular "$record"; then
     [[ ! -e "$record" && ! -L "$record" ]] && return 3
@@ -1291,8 +2439,12 @@ gate_lock_record_still_stale() {
 claim_gate_run_lock() {
   local lock="$1"
   local token="$2"
+  local claim_uid="$3"
   local staged="$lock/owner.claiming.$$"
   local published=0
+  [[ -n "$gate_lock_local_host_name" ]] || return 2
+  [[ "$claim_uid" =~ ^[0-9]+$ ]] || return 2
+  gate_lock_token_is_wellformed "$token" || return 2
   # Registered before it exists, like every other file this path creates. Any
   # file already there was left by a dead process that happened to share our
   # PID, so it is ours to remove.
@@ -1300,7 +2452,8 @@ claim_gate_run_lock() {
   rm -f "$staged"
   if {
     printf 'pid=%s\n' "$$"
-    printf 'host=%s\n' "$(uname -n)"
+    printf 'uid=%s\n' "$claim_uid"
+    printf 'host=%s\n' "$gate_lock_local_host_name"
     printf 'started_at=%s\n' "$(date +%s)"
     printf 'start_utc=%s\n' "$(gate_lock_process_start_legacy_wire $$)"
     printf 'worktree=%s\n' "$repo_root"
@@ -1823,7 +2976,9 @@ drain_condemned_run_commands() {
   gate_drain_capture_seed_group "$token"
   if [[ -z "${gate_drain_capture//[[:space:]]/}" && "$gate_drain_scan_failed" -eq 0 ]]; then
     [[ -z "$captured_file" ]] || rm -f "$captured_file"
-    [[ -z "$gate_lock_root_dir" ]] || rm -f "${gate_lock_root_dir}/holder.${token}"
+    gate_run_discard_marker_exact "$token" \
+      "The prior command identity was drained, but its marker cleanup failed." ||
+      return $?
     return 0
   fi
 
@@ -2077,7 +3232,9 @@ EOF
   # Discharged: every process in the captured set is gone or belongs to
   # somebody else now, so the list has nothing left to hand on.
   [[ -z "$captured_file" ]] || rm -f "$captured_file"
-  [[ -z "$gate_lock_root_dir" ]] || rm -f "${gate_lock_root_dir}/holder.${token}"
+  gate_run_discard_marker_exact "$token" \
+    "The prior command identity was drained, but its marker cleanup failed." ||
+    return $?
 
   if [[ -n "$recycled" ]]; then
     echo "Left alone: pid(s) ${recycled}now belong to unrelated processes."
@@ -2188,7 +3345,9 @@ assert_gate_run_lock_still_ours_legacy() {
 }
 
 release_gate_run_lock_legacy() {
-  local recorded release_dir release_taken release_owner moved_owner_identity inert_stage inert_name inert_pid
+  local recorded release_dir release_taken release_owner moved_owner_identity moved_owner_matches
+  local private_owner_identity private_owner_matches inert_stage inert_name inert_pid
+  local release_prepare_status release_take_status restored_owner_identity
   [[ -n "$gate_lock_dir" ]] || return 0
   recorded="$(gate_lock_owner_field "$gate_lock_dir" token)"
   # A token check followed by recursive deletion is not an ownership proof.
@@ -2210,6 +3369,24 @@ release_gate_run_lock_legacy() {
     gate_lock_dir=""
     return 2
   }
+  # Keep the original owner inode open across the test delay and atomic take.
+  # A replacement can copy this run's token, so token equality alone does not
+  # authorize release. Node compares the moved path to this descriptor's
+  # device and inode because macOS exposes /dev/fd on a different st_dev.
+  if ! exec 14< "$gate_lock_dir/owner"; then
+    rmdir "$release_dir" 2>/dev/null || true
+    gate_lock_dir=""
+    return 0
+  fi
+  if ! recorded="$(
+    gate_lock_current_user_authority_token_from_release_descriptor
+  )" || [[ "$recorded" != "$gate_lock_token" ]]; then
+    exec 14<&-
+    rmdir "$release_dir" 2>/dev/null || true
+    echo "error: the quality-gate owner changed or became unsafe before release; leaving it in place." >&2
+    gate_lock_dir=""
+    return 2
+  fi
   # The unique private-directory basename also gives the in-lock take a name
   # no other releaser can own. Keep the record recovery-visible until its token
   # is validated. A SIGKILL before that check must not hide a live successor in
@@ -2218,17 +3395,29 @@ release_gate_run_lock_legacy() {
   release_owner="$release_dir/owner"
   gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_RELEASE_BEFORE_TAKE_DELAY_SECONDS:-}"
   if ! mv "$gate_lock_dir/owner" "$release_taken" 2>/dev/null; then
+    exec 14<&-
     rmdir "$release_dir" 2>/dev/null || true
     gate_lock_dir=""
     return 0
   fi
   gate_lock_test_crash after-release-visible-take
-  moved_owner_identity="$(gate_lock_field_from_file "$release_taken" token)"
-  if [[ "$moved_owner_identity" != "$gate_lock_token" ]]; then
-    if ln "$release_taken" "$gate_lock_dir/owner" 2>/dev/null; then
-      rm -f "$release_taken"
-    elif gate_lock_condemn_before_discard "$release_taken"; then
-      rm -f "$release_taken"
+  moved_owner_identity="$(gate_lock_current_user_authority_token_from_record "$release_taken")" ||
+    moved_owner_identity=""
+  moved_owner_matches=0
+  gate_lock_path_matches_open_descriptor "$release_taken" 14 &&
+    moved_owner_matches=1
+  if [[ "$moved_owner_identity" != "$gate_lock_token" ||
+    "$moved_owner_matches" -ne 1 ]]; then
+    exec 14<&-
+    if /bin/ln -P "$release_taken" "$gate_lock_dir/owner" 2>/dev/null; then
+      if ! gate_lock_discard_matching_duplicate \
+        "$release_taken" "$moved_owner_identity" "$gate_lock_dir/owner"; then
+        echo "error: the displaced quality-gate owner changed before duplicate cleanup; retained ${release_taken}." >&2
+        gate_lock_dir=""
+        return 2
+      fi
+    elif gate_lock_condemn_and_discard "$release_taken"; then
+      :
     else
       echo "error: could not restore or preserve the displaced quality-gate owner; retained ${release_taken}." >&2
       gate_lock_dir=""
@@ -2238,7 +3427,14 @@ release_gate_run_lock_legacy() {
     gate_lock_dir=""
     return 0
   fi
+  if ! gate_lock_wait_for_test_barrier "$release_validated_test_barrier"; then
+    exec 14<&-
+    echo "error: the quality-gate release validation barrier failed; retained ${release_taken}." >&2
+    gate_lock_dir=""
+    return 2
+  fi
   if ! mv "$release_taken" "$release_owner" 2>/dev/null; then
+    exec 14<&-
     # Recovery can restore a live record while this process is descheduled.
     # Yield to the canonical owner if that happened. Otherwise retain the
     # in-lock remnant so the next waiter can recover it.
@@ -2251,7 +3447,25 @@ release_gate_run_lock_legacy() {
     gate_lock_dir=""
     return 2
   fi
-  gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_RELEASE_AFTER_TAKE_DELAY_SECONDS:-}"
+  private_owner_identity="$(
+    gate_lock_current_user_authority_token_from_record "$release_owner"
+  )" || private_owner_identity=""
+  private_owner_matches=0
+  gate_lock_path_matches_open_descriptor "$release_owner" 14 &&
+    private_owner_matches=1
+  if [[ "$private_owner_identity" != "$gate_lock_token" ||
+    "$private_owner_matches" -ne 1 ]]; then
+    exec 14<&-
+    if /bin/ln -P "$release_owner" "$gate_lock_dir/owner" 2>/dev/null; then
+      echo "error: restored a replacement quality-gate owner after the private release move; retained ${release_owner}." >&2
+    elif [[ -e "$gate_lock_dir/owner" || -L "$gate_lock_dir/owner" ]]; then
+      echo "error: a successor owns the canonical quality-gate path; retained replacement evidence at ${release_owner}." >&2
+    else
+      echo "error: the private quality-gate owner changed during release; retained ${release_owner}." >&2
+    fi
+    gate_lock_dir=""
+    return 2
+  fi
   # A gate killed while it built or published an owner can leave a private
   # staging link in run.lock. These exact names never grant authority and no
   # reader consumes them. Remove them only after the canonical owner has been
@@ -2266,42 +3480,135 @@ release_gate_run_lock_legacy() {
     [[ "$inert_name" =~ ^owner\.(claiming|coordinator|rollback)\.[1-9][0-9]*$ ]] || continue
     [[ -f "$inert_stage" && ! -L "$inert_stage" && -O "$inert_stage" ]] || continue
     inert_pid="${inert_name##*.}"
-    gate_lock_holder_is_live "$inert_pid" "" && continue
-    if ! rm -f "$inert_stage"; then
+    if ! gate_lock_discard_inert_owner_stage "$inert_stage" "$inert_pid" \
+      "Mapped work passed, but exact lock release did not complete."; then
       echo "error: could not remove stale quality-gate owner stage ${inert_stage}; restoring the owner." >&2
       break
     fi
   done
-  if rmdir "$gate_lock_dir" 2>/dev/null; then
-    rm -f "$release_owner"
-    rmdir "$release_dir" 2>/dev/null || true
-    gate_lock_dir=""
-    return 0
-  fi
-  if [[ -e "$gate_lock_dir/owner" ]]; then
-    # A successor published while this release held the old record. Its
-    # canonical owner blocks rmdir, so only our private record is obsolete.
-    rm -f "$release_owner"
-  elif ln "$release_owner" "$gate_lock_dir/owner" 2>/dev/null; then
-    rm -f "$release_owner"
-  elif [[ -e "$gate_lock_dir/owner" || -L "$gate_lock_dir/owner" ]]; then
-    # A successor won the canonical path between the check and exclusive link.
-    # Preserve it and discard only this run's private release record.
-    rm -f "$release_owner"
+
+  # Bind the exact private owner before the release delay. A same-token inode
+  # can replace the predictable `owner` path while this process is paused. The
+  # quarantine anchor remains the original descriptor-bound inode. After the
+  # delay, the quarantine take moves the current pathname into private state
+  # and rejects it unless it is that same inode.
+  if gate_lock_prepare_owner_quarantine "$release_owner" \
+    "Mapped work passed, but exact lock release did not complete."; then
+    :
   else
-    echo "error: could not restore the quality-gate owner after lock release failed; retained ${release_owner}." >&2
+    release_prepare_status=$?
+    exec 14<&-
+    echo "error: could not witness the exact private quality-gate owner before release cleanup (status ${release_prepare_status}); retained ${release_dir}." >&2
     gate_lock_dir=""
     return 2
   fi
-  rmdir "$release_dir" 2>/dev/null || true
+  if [[ "$gate_lock_quarantine_authority_value" != "$gate_lock_token" ]] ||
+    ! gate_lock_path_matches_open_descriptor \
+      "$gate_lock_quarantine_anchor" 14 ||
+    [[ ! "$release_owner" -ef "$gate_lock_quarantine_anchor" ]]; then
+    exec 14<&-
+    gate_lock_retain_quarantine \
+      "the private quality-gate owner witness does not match the released inode" || true
+    gate_lock_dir=""
+    return 2
+  fi
+  exec 14<&-
+
+  gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_RELEASE_AFTER_TAKE_DELAY_SECONDS:-}"
+  if ! gate_lock_wait_for_test_barrier "$release_private_test_barrier"; then
+    gate_lock_retain_quarantine \
+      "the private quality-gate owner release barrier failed" || true
+    gate_lock_dir=""
+    return 2
+  fi
+  if ! gate_lock_mark_quarantine_fallback; then
+    gate_lock_dir=""
+    return 2
+  fi
+  if gate_lock_take_prepared_quarantine; then
+    :
+  else
+    release_take_status=$?
+    [[ -z "$gate_lock_quarantine_dir" ]] ||
+      gate_lock_retain_quarantine \
+        "the private quality-gate owner changed before exact release cleanup" || true
+    gate_lock_dir=""
+    [[ "$release_take_status" -eq 1 ]] && return 2
+    return "$release_take_status"
+  fi
+
+  if rmdir "$gate_lock_dir" 2>/dev/null; then
+    if ! gate_lock_drop_private_quarantine; then
+      gate_lock_dir=""
+      return 2
+    fi
+    if ! rmdir "$release_dir" 2>/dev/null; then
+      echo "error: private quality-gate release state changed after exact lock removal; retained ${release_dir}." >&2
+      gate_lock_dir=""
+      return 2
+    fi
+    gate_lock_dir=""
+    return 0
+  fi
+  if [[ -e "$gate_lock_dir/owner" || -L "$gate_lock_dir/owner" ]]; then
+    # A successor published while this release held the old record. Its
+    # canonical owner blocks rmdir, so only our private record is obsolete.
+    if ! gate_lock_drop_private_quarantine; then
+      gate_lock_dir=""
+      return 2
+    fi
+  elif /bin/ln -P "$gate_lock_quarantine_anchor" \
+    "$gate_lock_dir/owner" 2>/dev/null; then
+    if ! restored_owner_identity="$(
+      gate_lock_current_user_authority_token_from_record \
+        "$gate_lock_dir/owner"
+    )" || [[ "$restored_owner_identity" != "$gate_lock_token" ]] ||
+      [[ ! "$gate_lock_dir/owner" -ef "$gate_lock_quarantine_anchor" ]]; then
+      gate_lock_retain_quarantine \
+        "the restored quality-gate owner does not match the exact release inode" || true
+      gate_lock_dir=""
+      return 2
+    fi
+    if ! gate_lock_drop_private_quarantine; then
+      gate_lock_dir=""
+      return 2
+    fi
+  elif [[ -e "$gate_lock_dir/owner" || -L "$gate_lock_dir/owner" ]]; then
+    # A successor won the canonical path between the check and exclusive link.
+    # Preserve it and discard only this run's private release record.
+    if ! gate_lock_drop_private_quarantine; then
+      gate_lock_dir=""
+      return 2
+    fi
+  else
+    gate_lock_retain_quarantine \
+      "could not restore the exact quality-gate owner after lock release failed" || true
+    gate_lock_dir=""
+    return 2
+  fi
+  if ! rmdir "$release_dir" 2>/dev/null; then
+    echo "error: private quality-gate release state changed during cleanup; retained ${release_dir}." >&2
+    gate_lock_dir=""
+    return 2
+  fi
   gate_lock_dir=""
   return 0
+}
+
+gate_lock_refuse_owner_publication() {
+  echo "error: could not publish a complete, validated legacy owner identity." >&2
+  echo "Nothing has been executed." >&2
+  gate_report_coordinated_no_work_failure 2 "legacy owner publication" \
+    "No mapped command ran in this request"
+  exit 2
 }
 
 acquire_gate_run_lock_legacy() {
   local root lock owner_pid owner_host owner_worktree owner_token_value owner_start
   local stale_reason owner_state nap remaining now_millis
   local coordinator_join_status owner_record taken_record record_status
+  local hidden_recovery_status hidden_recovery_busy
+  local claim_uid claim_epoch claim_token claim_status
   # Elapsed time comes from the clock, never from adding up requested sleeps.
   # A shell that is descheduled or SIGSTOPped sleeps far longer than it asked
   # to, and counting the request would let a run outlive the budget it printed
@@ -2341,10 +3648,42 @@ acquire_gate_run_lock_legacy() {
   lock="$root/run.lock"
   owner_record="$lock/owner"
   gate_lock_root_dir="$root"
-  this_host="$(uname -n)"
+  if ! gate_lock_ensure_local_host_fingerprint; then
+    echo "error: could not derive the local host identity for safe owner quarantine recovery." >&2
+    echo "Nothing has been executed." >&2
+    gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+      "No mapped command ran in this request"
+    exit 2
+  fi
+  this_host="$gate_lock_local_host_name"
+  if ! claim_uid="$(id -u 2>/dev/null)" ||
+    [[ ! "$claim_uid" =~ ^[0-9]+$ ]]; then
+    echo "error: could not derive the current user identity for safe legacy owner publication." >&2
+    echo "Nothing has been executed." >&2
+    gate_report_coordinated_no_work_failure 2 "legacy owner publication" \
+      "No mapped command ran in this request"
+    exit 2
+  fi
+  if ! claim_epoch="$(date +%s 2>/dev/null)" ||
+    [[ ! "$claim_epoch" =~ ^[0-9]{1,12}$ ]]; then
+    echo "error: could not derive a safe legacy owner claim token." >&2
+    echo "Nothing has been executed." >&2
+    gate_report_coordinated_no_work_failure 2 "legacy owner publication" \
+      "No mapped command ran in this request"
+    exit 2
+  fi
+  claim_token="${this_host}-$$-${claim_epoch}"
+  if ! gate_lock_token_is_wellformed "$claim_token"; then
+    echo "error: could not derive a safe legacy owner claim token." >&2
+    echo "Nothing has been executed." >&2
+    gate_report_coordinated_no_work_failure 2 "legacy owner publication" \
+      "No mapped command ran in this request"
+    exit 2
+  fi
   wait_started_at="$(gate_wall_millis)"
 
   while :; do
+    hidden_recovery_busy=0
     # A coordinator can finish adopting the legacy owner while this waiter is
     # in the legacy loop. Probe before each claim attempt so a new client joins
     # it instead of waiting for its intentionally long-lived compatibility
@@ -2368,12 +3707,15 @@ acquire_gate_run_lock_legacy() {
     if mkdir "$lock" 2>/dev/null; then
       gate_lock_test_crash after-mkdir
       gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_CLAIM_DELAY_SECONDS:-}"
-      if claim_gate_run_lock "$lock" "${this_host}-$$-$(date +%s)"; then
+      if claim_gate_run_lock "$lock" "$claim_token" "$claim_uid"; then
         if [[ "$announced" -eq 1 ]]; then
           echo "Acquired the gate run lock after ${waited}s."
           echo
         fi
         return 0
+      else
+        claim_status=$?
+        [[ "$claim_status" -ne 2 ]] || gate_lock_refuse_owner_publication
       fi
       # We created the directory but never recorded ownership: a waiter
       # reclaimed it while this process was descheduled, and it is that run's
@@ -2399,12 +3741,22 @@ acquire_gate_run_lock_legacy() {
         owner_token_value="$(gate_lock_owner_field "$lock" token)"
         owner_start="$(gate_lock_owner_field "$lock" start_utc)"
         gate_lock_require_safe_existing_owner_record "$owner_record"
+      else
+        hidden_recovery_status=$?
+        if [[ "$hidden_recovery_status" -eq 4 ]]; then
+          hidden_recovery_busy=1
+          owner_pid="${gate_lock_active_quarantine_pid:-unknown}"
+          owner_host="${gate_lock_active_quarantine_host:-$this_host}"
+          owner_worktree="owner cleanup"
+        fi
       fi
     fi
 
     stale_reason=""
     [[ -n "$owner_token_value" ]] && ownerless_since=""
-    if [[ -z "$owner_token_value" ]]; then
+    if [[ -z "$owner_token_value" && "$hidden_recovery_busy" -eq 1 ]]; then
+      ownerless_since=""
+    elif [[ -z "$owner_token_value" ]]; then
       # No complete record: either no file at all, or one a run was killed
       # part-way through writing. The token is written last, so its absence
       # means the write never finished and nothing in the file can be trusted
@@ -2443,22 +3795,39 @@ acquire_gate_run_lock_legacy() {
       # canonical path is not evidence that the lock is free. If that restores
       # a live holder, this verdict is void and we go back to waiting.
       gate_lock_require_safe_existing_owner_record "$owner_record"
+      hidden_recovery_status=1
       if gate_lock_recover_hidden_record "$lock" "$this_host"; then
+        hidden_recovery_status=0
         gate_lock_require_safe_existing_owner_record "$owner_record"
         owner_pid="$(gate_lock_owner_field "$lock" pid)"
         owner_host="$(gate_lock_owner_field "$lock" host)"
         owner_worktree="$(gate_lock_owner_field "$lock" worktree)"
+      else
+        hidden_recovery_status=$?
+        if [[ "$hidden_recovery_status" -eq 4 ]]; then
+          owner_pid="${gate_lock_active_quarantine_pid:-unknown}"
+          owner_host="${gate_lock_active_quarantine_host:-$this_host}"
+          owner_worktree="owner cleanup"
+        fi
+      fi
+      if [[ "$hidden_recovery_status" -eq 4 ]]; then
+        :
+      elif [[ "$hidden_recovery_status" -eq 0 ]]; then
+        :
       elif [[ ! -e "$owner_record" && ! -L "$owner_record" ]]; then
         # Nothing in the way: publishing the record is the whole contest.
         # Whoever links it into place first holds the lock; everyone else,
         # including the creator that stalled, finds their publish refused.
-        if claim_gate_run_lock "$lock" "${this_host}-$$-$(date +%s)"; then
+        if claim_gate_run_lock "$lock" "$claim_token" "$claim_uid"; then
           echo "Gate run lock at ${lock} is stale (${stale_reason}); reclaiming it." >&2
           if [[ "$announced" -eq 1 ]]; then
             echo "Acquired the gate run lock after ${waited}s."
             echo
           fi
           return 0
+        else
+          claim_status=$?
+          [[ "$claim_status" -ne 2 ]] || gate_lock_refuse_owner_publication
         fi
       else
         # Something is in the way: a dead holder's record, or one a killed run
@@ -2472,8 +3841,21 @@ acquire_gate_run_lock_legacy() {
         gate_lock_reclaim_origin="$lock/owner"
         gate_lock_reclaim_tmp="${lock}/owner.reclaiming.$$"
         gate_lock_require_safe_existing_owner_record "$owner_record"
+        if [[ -e "$owner_record" || -L "$owner_record" ]] &&
+          [[ ! -O "$owner_record" ]]; then
+          gate_lock_reclaim_tmp=""
+          gate_lock_reclaim_origin=""
+          gate_lock_refuse_foreign_owner_recovery "$owner_record"
+        fi
         if mv "$owner_record" "$gate_lock_reclaim_tmp" 2>/dev/null; then
           gate_lock_test_crash after-take
+          if ! gate_lock_wait_for_test_barrier "$lock_taken_test_barrier"; then
+            restore_gate_lock_record || true
+            gate_report_coordinated_no_work_failure 2 \
+              "legacy owner recovery" \
+              "No mapped command ran in this request"
+            exit 2
+          fi
           gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_TAKEN_DELAY_SECONDS:-}"
           taken_record="$gate_lock_reclaim_tmp"
           if [[ ! -e "$taken_record" && ! -L "$taken_record" ]]; then
@@ -2496,19 +3878,28 @@ acquire_gate_run_lock_legacy() {
             # this run publishes its own. So the obligation is written first,
             # and a write that fails puts the record back and stops the run
             # rather than taking over with no successor for those commands.
-            if ! record_condemned_run "$owner_token_value"; then
+            if gate_lock_condemn_and_discard "$taken_record"; then
+              :
+            else
+              record_status=$?
               restore_gate_lock_record || true
-              gate_lock_obligation_unwritable
+              [[ "$record_status" -ne 1 ]] || gate_lock_obligation_unwritable
+              gate_report_coordinated_no_work_failure 2 \
+                "legacy owner recovery" \
+                "No mapped command ran in this request"
+              exit 2
             fi
-            rm -f "$gate_lock_reclaim_tmp"
             gate_lock_reclaim_tmp=""
             gate_lock_reclaim_origin=""
-            if claim_gate_run_lock "$lock" "${this_host}-$$-$(date +%s)"; then
+            if claim_gate_run_lock "$lock" "$claim_token" "$claim_uid"; then
               if [[ "$announced" -eq 1 ]]; then
                 echo "Acquired the gate run lock after ${waited}s."
                 echo
               fi
               return 0
+            else
+              claim_status=$?
+              [[ "$claim_status" -ne 2 ]] || gate_lock_refuse_owner_publication
             fi
           else
             record_status=$?
@@ -2600,7 +3991,12 @@ gate_coordinator_requested() {
 
 gate_run_ensure_token() {
   if [[ -z "$gate_run_id" ]]; then
-    gate_run_id="$(uname -n)-$$-$(date +%s)"
+    if [[ -z "$gate_lock_local_host_name" ]] &&
+      ! gate_lock_ensure_local_host_fingerprint; then
+      echo "error: this gate could not create a safe scheduler drain token." >&2
+      return 2
+    fi
+    gate_run_id="${gate_lock_local_host_name}-$$-$(date +%s)"
   fi
   if ! gate_lock_token_is_wellformed "$gate_run_id"; then
     echo "error: this gate could not create a safe scheduler drain token." >&2
@@ -2615,6 +4011,13 @@ acquire_gate_run_lock() {
     return
   fi
 
+  if ! gate_lock_ensure_local_host_fingerprint; then
+    echo "error: could not derive the local host identity for safe coordinator marker recovery." >&2
+    echo "Nothing has been executed." >&2
+    gate_report_coordinated_no_work_failure 2 "coordinator startup" \
+      "No mapped command ran in this request"
+    return 2
+  fi
   gate_run_ensure_token || return 2
   if gate_coordinator_try_join_existing; then
     return 0
@@ -2662,6 +4065,9 @@ release_gate_run_lock() {
 }
 
 cleanup_tmpfiles() {
+  local original_status=$?
+  local marker_status=0
+  local release_status=0
   teardown_active_timeouts
   if [[ ${#tmpfiles[@]} -gt 0 ]]; then
     rm -f "${tmpfiles[@]+"${tmpfiles[@]}"}"
@@ -2694,12 +4100,27 @@ cleanup_tmpfiles() {
   # purpose: that is the handle its successor needs.
   if [[ -n "$gate_run_marker_file" &&
     "$gate_active_command_drain_in_progress" -eq 0 ]]; then
-    rm -f "$gate_run_marker_file"
-    gate_run_marker_file=""
+    if gate_run_discard_marker_exact \
+      "${gate_run_id:-$gate_lock_token}" \
+      "This gate stopped, but its run-marker cleanup failed."; then
+      gate_run_marker_file=""
+    else
+      marker_status=$?
+    fi
   fi
   # Released last: the lock must outlive worker teardown, or the next run
   # starts while this one's mapped commands are still dying.
-  release_gate_run_lock
+  if release_gate_run_lock; then
+    release_status=0
+  else
+    release_status=$?
+  fi
+  if [[ "$original_status" -eq 0 ]] && {
+    [[ "$marker_status" -ne 0 ]] || [[ "$release_status" -ne 0 ]]
+  }; then
+    trap - EXIT
+    exit 2
+  fi
 }
 trap cleanup_tmpfiles EXIT
 
@@ -3500,6 +4921,12 @@ fi
 if gate_coordinator_requested; then
   exec 7>&1
   gate_coordinator_stdout_reserved=1
+  if ! gate_lock_ensure_local_host_fingerprint; then
+    echo "error: could not derive the local host identity for safe coordinator marker recovery." >&2
+    gate_coordinator_report_no_work_failure 2 "registration preparation" \
+      "No mapped command ran in this request"
+    exit 2
+  fi
   if ! gate_run_ensure_token; then
     gate_coordinator_report_no_work_failure 2 "registration preparation" "No mapped command ran in this request"
     exit 2
@@ -4024,8 +5451,9 @@ run_with_timeout() {
   # wrapper: the token in the environment, and an open descriptor on the run's
   # marker file. A command that forks a replacement and then exits leaves that
   # replacement reparented with no tagged ancestor to walk from, and only
-  # something inherited can still name it. Both are keyed to this run's token,
-  # so neither can come to name a stranger.
+  # something inherited can still name it. Both are keyed to this run's token.
+  # Descriptor-bound validation and a private hard-link witness prevent a
+  # replaced shared marker from selecting a stranger.
   gate_run_ensure_marker \
     "The mapped command did not run" \
     "The mapped command did not start."

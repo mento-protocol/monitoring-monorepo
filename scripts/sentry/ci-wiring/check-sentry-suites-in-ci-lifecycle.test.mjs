@@ -40,6 +40,15 @@ import {
 // validator's own report, so a rename or a dropped pin changes this set too.
 const TRUSTED_ALIASES = new Set(validatorPins().keys());
 const VALIDATOR_RUN = PIN_VALIDATOR_COMMAND.join(" ");
+const QUALITY_GATE_TEST_RUN = "pnpm agent:quality-gate:test";
+const CI_WIRING_RUN =
+  "node scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs";
+
+function exactRunIndexes(job, command) {
+  return (job?.steps ?? [])
+    .map((step, index) => (step?.run === command ? index : -1))
+    .filter((index) => index >= 0);
+}
 
 test("the `scripts` job validates pins before pnpm-install and any trusted alias", () => {
   // The validator makes two surfaces safe only by running first: before
@@ -93,6 +102,49 @@ test("the `scripts` job validates pins before pnpm-install and any trusted alias
     ),
     [],
     "the order check accepts a validator that runs after pnpm-install and the aliases",
+  );
+});
+
+test("required CI independently pins the quality-gate contract suite", () => {
+  // This assertion lives in the independently invoked Sentry CI-wiring suite,
+  // not in agent-quality-gate.test.sh. The suite under test therefore cannot
+  // remove its own CI step without this required check failing.
+  const validatorIndexes = exactRunIndexes(CI.jobs?.scripts, VALIDATOR_RUN);
+  const qualityGateIndexes = exactRunIndexes(
+    CI.jobs?.scripts,
+    QUALITY_GATE_TEST_RUN,
+  );
+  assert.equal(
+    validatorIndexes.length,
+    1,
+    `the \`scripts\` job must contain exactly \`run: ${VALIDATOR_RUN}\``,
+  );
+  assert.equal(
+    qualityGateIndexes.length,
+    1,
+    `the \`scripts\` job must contain exactly \`run: ${QUALITY_GATE_TEST_RUN}\``,
+  );
+  assert.ok(
+    validatorIndexes[0] < qualityGateIndexes[0],
+    `the \`scripts\` job must run \`${VALIDATOR_RUN}\` before \`${QUALITY_GATE_TEST_RUN}\``,
+  );
+
+  const sentinelNeeds = Array.isArray(CI.jobs?.ci?.needs)
+    ? CI.jobs.ci.needs
+    : [CI.jobs?.ci?.needs];
+  assert.ok(
+    sentinelNeeds.includes("scripts"),
+    "the required `ci` sentinel must include `scripts` in `needs`",
+  );
+
+  assert.deepEqual(
+    exactRunIndexes(CI.jobs?.["sentry-suites"], CI_WIRING_RUN),
+    [4],
+    "the independently invoked `sentry-suites` job must run this CI-wiring suite at its pinned step",
+  );
+  assert.ok(
+    sentinelNeeds.includes("sentry-suites"),
+    "the required `ci` sentinel must include `sentry-suites` in `needs`",
   );
 });
 

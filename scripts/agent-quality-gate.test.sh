@@ -82,11 +82,17 @@ cleanup_test_artifacts() {
   if [[ -n "${coordinator_gate_pipeline_repo:-}" ]]; then
     rm -rf "$coordinator_gate_pipeline_repo"
   fi
+  if [[ -n "${coordinator_gate_pipeline_joiner_parent:-}" ]]; then
+    rm -rf "$coordinator_gate_pipeline_joiner_parent"
+  fi
   if [[ -n "${coordinator_gate_pipeline_lock:-}" ]]; then
     rm -rf "$coordinator_gate_pipeline_lock"
   fi
   if [[ -n "${coordinator_multi_drain_scratch:-}" ]]; then
     rm -rf "$coordinator_multi_drain_scratch"
+  fi
+  if [[ -n "${linux_release_gate_copy:-}" ]]; then
+    rm -f "$linux_release_gate_copy"
   fi
 }
 trap cleanup_test_artifacts EXIT
@@ -721,6 +727,10 @@ verify_gate_family_partition
 run_gate_contract_family() {
 arm_suite_abort_trap
 assert_script_occurrences 1 "trap cleanup_tmpfiles EXIT"
+assert_script_occurrences 1 \
+  '"$record" "$gate_lock_quarantine_retention_state"'
+assert_script_occurrences 1 \
+  'The owner and generation evidence were retained. ${retention_state}'
 assert_script_occurrences 1 'changed_paths_file="$(make_tmpfile)"'
 assert_script_occurrences 0 "trap 'rm -f \"\$changed_paths_file\"' EXIT"
 assert_script_occurrences 1 'Avoid overriding a usable TMPDIR'
@@ -1143,8 +1153,8 @@ const runHandles = require("node:fs").readFileSync(
 );
 assert.match(
   source,
-  /if gate_coordinator_requested; then\n  exec 7>&1\n  gate_coordinator_stdout_reserved=1\n  if ! gate_run_ensure_token; then[\s\S]*?if ! gate_coordinator_prepare_registration_fingerprint; then/u,
-  "the coordinator stdout descriptor must open before drain-token and fingerprint preparation",
+  /if gate_coordinator_requested; then\n  exec 7>&1\n  gate_coordinator_stdout_reserved=1\n  if ! gate_lock_ensure_local_host_fingerprint; then[\s\S]*?if ! gate_run_ensure_token; then[\s\S]*?if ! gate_coordinator_prepare_registration_fingerprint; then/u,
+  "the coordinator stdout descriptor must open before host, drain-token, and fingerprint preparation",
 );
 assert.match(
   source,
@@ -1394,6 +1404,8 @@ fi
 rm -rf "$coordinator_pipeline_scratch"
 
 coordinator_gate_pipeline_repo="$(mktemp -d)"
+coordinator_gate_pipeline_joiner_parent="$(mktemp -d)"
+coordinator_gate_pipeline_joiner_repo="${coordinator_gate_pipeline_joiner_parent}/worktree"
 coordinator_gate_pipeline_lock="$(mktemp -d /tmp/qgp.XXXXXX)"
 (
   cd "$coordinator_gate_pipeline_repo"
@@ -1454,9 +1466,14 @@ exit 0
 STUB
   cat > bin/uname <<'STUB'
 #!/usr/bin/env bash
-if [[ "${QG_INVALID_HOSTNAME:-}" == 1 && "${1:-}" == "-n" ]]; then
-  printf 'invalid/host\n'
-  exit 0
+if [[ "${1:-}" == "-n" ]]; then
+  if [[ "${QG_FAIL_HOSTNAME:-}" == 1 ]]; then
+    exit 91
+  fi
+  if [[ "${QG_INVALID_HOSTNAME:-}" == 1 ]]; then
+    printf 'invalid/host\n'
+    exit 0
+  fi
 fi
 exec "${REAL_UNAME_COMMAND:?}" "$@"
 STUB
@@ -1468,21 +1485,64 @@ if [[ "${QG_FAIL_COMMAND_STAMP_READ:-}" == 1 &&
 fi
 exec "${REAL_CP_COMMAND:?}" "$@"
 STUB
-  chmod +x bin/cp bin/pnpm bin/uname tools/trunk
+  cat > bin/id <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "-u" ]]; then
+  if [[ "${QG_FAIL_CLAIM_UID:-}" == 1 ]]; then
+    exit 92
+  fi
+  if [[ "${QG_FAIL_CLAIM_EPOCH:-}" == 1 ]]; then
+    : > "${QG_CLAIM_ID_READY:?}"
+  fi
+fi
+exec "${REAL_ID_COMMAND:?}" "$@"
+STUB
+  cat > bin/date <<'STUB'
+#!/usr/bin/env bash
+if [[ "${QG_FAIL_CLAIM_EPOCH:-}" == 1 && "$*" == "+%s" &&
+  -e "${QG_CLAIM_ID_READY:?}" ]]; then
+  exit 93
+fi
+exec "${REAL_DATE_COMMAND:?}" "$@"
+STUB
+  cat > bin/lsof <<'STUB'
+#!/usr/bin/env bash
+path=""
+for path in "$@"; do :; done
+if [[ -n "${QG_LSOF_PATH_RECORD:-}" ]]; then
+  printf '%s\n' "$path" > "$QG_LSOF_PATH_RECORD"
+fi
+exit 1
+STUB
+  chmod +x bin/cp bin/date bin/id bin/lsof bin/pnpm bin/uname tools/trunk
   git add .
   git commit -qm init
+  git worktree add --detach -q "$coordinator_gate_pipeline_joiner_repo" HEAD
   printf 'scripts/gate/agent-prewarm.mjs\n' > holder-paths.txt
   printf 'scripts/context/agent-context-budget.mjs\n' > contender-paths.txt
   printf 'scripts/agent-quality-gate.sh\n' > marker-transition-paths.txt
+  printf 'scripts/context/agent-context-budget.mjs\n' \
+    > "$coordinator_gate_pipeline_joiner_repo/joiner-paths.txt"
 
   holder_started="$coordinator_gate_pipeline_repo/holder-started"
   holder_release="$coordinator_gate_pipeline_repo/holder-release"
   holder_output="$coordinator_gate_pipeline_repo/holder-output"
   preparation_stdout="$coordinator_gate_pipeline_repo/preparation-stdout"
   preparation_stderr="$coordinator_gate_pipeline_repo/preparation-stderr"
+  fingerprint_stdout="$coordinator_gate_pipeline_repo/fingerprint-stdout"
+  fingerprint_stderr="$coordinator_gate_pipeline_repo/fingerprint-stderr"
+  legacy_hostname_stdout="$coordinator_gate_pipeline_repo/legacy-hostname-stdout"
+  legacy_hostname_stderr="$coordinator_gate_pipeline_repo/legacy-hostname-stderr"
+  claim_uid_stdout="$coordinator_gate_pipeline_repo/claim-uid-stdout"
+  claim_uid_stderr="$coordinator_gate_pipeline_repo/claim-uid-stderr"
+  claim_epoch_stdout="$coordinator_gate_pipeline_repo/claim-epoch-stdout"
+  claim_epoch_stderr="$coordinator_gate_pipeline_repo/claim-epoch-stderr"
+  claim_id_ready="$coordinator_gate_pipeline_repo/claim-id-ready"
   contender_stdout="$coordinator_gate_pipeline_repo/contender-stdout"
   contender_stderr="$coordinator_gate_pipeline_repo/contender-stderr"
   contender_command_marker="$coordinator_gate_pipeline_repo/contender-command-ran"
+  joiner_output="$coordinator_gate_pipeline_repo/joiner-output"
+  joiner_lsof_path="$coordinator_gate_pipeline_repo/joiner-lsof-path"
   marker_transition_output="$coordinator_gate_pipeline_repo/marker-transition-output"
   marker_transition_serial_done="$coordinator_gate_pipeline_repo/marker-transition-serial-done"
   marker_transition_trunk_ran="$coordinator_gate_pipeline_repo/marker-transition-trunk-ran"
@@ -1494,12 +1554,22 @@ STUB
   legacy_stderr="$coordinator_gate_pipeline_repo/legacy-stderr"
   legacy_fd7_output="$coordinator_gate_pipeline_repo/legacy-fd7-output"
   holder_pid=""
+  joiner_pid=""
   real_cp_command="$(command -v cp)"
+  real_date_command="$(command -v date)"
+  real_id_command="$(command -v id)"
   real_uname_command="$(command -v uname)"
+  export REAL_DATE_COMMAND="$real_date_command"
+  export REAL_ID_COMMAND="$real_id_command"
 
   # shellcheck disable=SC2329
   cleanup_gate_pipeline_fixture() {
     : > "$holder_release"
+    if [[ "$joiner_pid" =~ ^[1-9][0-9]*$ ]]; then
+      kill -TERM "$joiner_pid" 2>/dev/null || true
+      wait "$joiner_pid" 2>/dev/null || true
+      joiner_pid=""
+    fi
     if [[ "$holder_pid" =~ ^[1-9][0-9]*$ ]]; then
       kill -TERM "$holder_pid" 2>/dev/null || true
       wait "$holder_pid" 2>/dev/null || true
@@ -1513,8 +1583,17 @@ STUB
       sed 's/^/holder: /' "$holder_output" 2>/dev/null || true
       sed 's/^/preparation stdout: /' "$preparation_stdout" 2>/dev/null || true
       sed 's/^/preparation stderr: /' "$preparation_stderr" 2>/dev/null || true
+      sed 's/^/fingerprint stdout: /' "$fingerprint_stdout" 2>/dev/null || true
+      sed 's/^/fingerprint stderr: /' "$fingerprint_stderr" 2>/dev/null || true
+      sed 's/^/legacy hostname stdout: /' "$legacy_hostname_stdout" 2>/dev/null || true
+      sed 's/^/legacy hostname stderr: /' "$legacy_hostname_stderr" 2>/dev/null || true
+      sed 's/^/claim uid stdout: /' "$claim_uid_stdout" 2>/dev/null || true
+      sed 's/^/claim uid stderr: /' "$claim_uid_stderr" 2>/dev/null || true
+      sed 's/^/claim epoch stdout: /' "$claim_epoch_stdout" 2>/dev/null || true
+      sed 's/^/claim epoch stderr: /' "$claim_epoch_stderr" 2>/dev/null || true
       sed 's/^/contender stdout: /' "$contender_stdout" 2>/dev/null || true
       sed 's/^/contender stderr: /' "$contender_stderr" 2>/dev/null || true
+      sed 's/^/joiner: /' "$joiner_output" 2>/dev/null || true
       sed 's/^/marker transition: /' "$marker_transition_output" 2>/dev/null || true
       sed 's/^/prune stdout: /' "$prune_stdout" 2>/dev/null || true
       sed 's/^/prune stderr: /' "$prune_stderr" 2>/dev/null || true
@@ -1560,6 +1639,132 @@ STUB
   [[ ! -e "$contender_command_marker" ]] ||
     fail_gate_pipeline_fixture "registration-preparation failure ran a mapped command"
 
+  set +e
+  set +o pipefail
+  AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$coordinator_gate_pipeline_lock" \
+    AGENT_QUALITY_GATE_COORDINATOR=1 \
+    AGENT_QUALITY_GATE_CAPACITY=3 \
+    NODE_ENV=test \
+    QG_FAIL_HOSTNAME=1 \
+    QG_CONTENDER_COMMAND_MARKER="$contender_command_marker" \
+    REAL_CP_COMMAND="$real_cp_command" \
+    REAL_UNAME_COMMAND="$real_uname_command" \
+    PATH="$coordinator_gate_pipeline_repo/bin:$PATH" \
+    /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file contender-paths.txt \
+      --base HEAD --run --parallel 1 --lock-wait 0 \
+      2> "$fingerprint_stderr" | cat > "$fingerprint_stdout"
+  fingerprint_statuses=("${PIPESTATUS[@]}")
+  set -o pipefail
+  set -e
+  [[ "${fingerprint_statuses[0]}" -eq 2 ]] ||
+    fail_gate_pipeline_fixture "failed hostname fingerprint preparation did not exit 2"
+  [[ "${fingerprint_statuses[1]}" -eq 0 ]] ||
+    fail_gate_pipeline_fixture "failed hostname fingerprint pipeline reader did not exit 0"
+  grep -Fq -- \
+    "Quality-gate coordinator registration preparation failed. No mapped command ran in this request; this gate exits 2." \
+    "$fingerprint_stdout" ||
+    fail_gate_pipeline_fixture "failed hostname fingerprint omitted its stdout verdict"
+  grep -Fq -- \
+    "could not derive the local host identity for safe coordinator marker recovery" \
+    "$fingerprint_stderr" ||
+    fail_gate_pipeline_fixture "failed hostname fingerprint omitted its stderr diagnosis"
+  [[ ! -e "$contender_command_marker" ]] ||
+    fail_gate_pipeline_fixture "failed hostname fingerprint ran a mapped command"
+
+  set +e
+  AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$coordinator_gate_pipeline_lock" \
+    AGENT_QUALITY_GATE_COORDINATOR=0 \
+    NODE_ENV=test \
+    QG_FAIL_HOSTNAME=1 \
+    QG_CONTENDER_COMMAND_MARKER="$contender_command_marker" \
+    REAL_CP_COMMAND="$real_cp_command" \
+    REAL_UNAME_COMMAND="$real_uname_command" \
+    PATH="$coordinator_gate_pipeline_repo/bin:$PATH" \
+    /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file contender-paths.txt \
+      --base HEAD --run --parallel 1 --lock-wait 0 \
+      > "$legacy_hostname_stdout" 2> "$legacy_hostname_stderr"
+  legacy_hostname_status=$?
+  set -e
+  [[ "$legacy_hostname_status" -eq 2 ]] ||
+    fail_gate_pipeline_fixture "failed legacy hostname fingerprint did not exit 2"
+  grep -Fq -- \
+    "could not derive the local host identity for safe owner quarantine recovery" \
+    "$legacy_hostname_stderr" ||
+    fail_gate_pipeline_fixture "failed legacy hostname fingerprint omitted its diagnosis"
+  grep -Fq -- "Nothing has been executed." "$legacy_hostname_stderr" ||
+    fail_gate_pipeline_fixture "failed legacy hostname fingerprint omitted its no-work verdict"
+  [[ ! -e "$contender_command_marker" ]] ||
+    fail_gate_pipeline_fixture "failed legacy hostname fingerprint ran a mapped command"
+
+  set +e
+  AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$coordinator_gate_pipeline_lock" \
+    AGENT_QUALITY_GATE_COORDINATOR=0 \
+    NODE_ENV=test \
+    QG_FAIL_CLAIM_UID=1 \
+    QG_CONTENDER_COMMAND_MARKER="$contender_command_marker" \
+    REAL_CP_COMMAND="$real_cp_command" \
+    REAL_UNAME_COMMAND="$real_uname_command" \
+    PATH="$coordinator_gate_pipeline_repo/bin:$PATH" \
+    /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file contender-paths.txt \
+      --base HEAD --run --parallel 1 --lock-wait 0 \
+      > "$claim_uid_stdout" 2> "$claim_uid_stderr"
+  claim_uid_status=$?
+  set -e
+  [[ "$claim_uid_status" -eq 2 ]] ||
+    fail_gate_pipeline_fixture "failed claim UID preparation did not exit 2"
+  grep -Fq -- \
+    "could not derive the current user identity for safe legacy owner publication" \
+    "$claim_uid_stderr" ||
+    fail_gate_pipeline_fixture "failed claim UID preparation omitted its diagnosis"
+  grep -Fq -- "Nothing has been executed." "$claim_uid_stderr" ||
+    fail_gate_pipeline_fixture "failed claim UID preparation omitted its no-work verdict"
+  [[ ! -e "$coordinator_gate_pipeline_lock/run.lock" ]] ||
+    fail_gate_pipeline_fixture "failed claim UID preparation created the legacy lock"
+  [[ ! -e "$contender_command_marker" ]] ||
+    fail_gate_pipeline_fixture "failed claim UID preparation ran a mapped command"
+
+  rm -f "$claim_id_ready"
+  set +e
+  AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$coordinator_gate_pipeline_lock" \
+    AGENT_QUALITY_GATE_COORDINATOR=0 \
+    NODE_ENV=test \
+    QG_FAIL_CLAIM_EPOCH=1 \
+    QG_CLAIM_ID_READY="$claim_id_ready" \
+    QG_CONTENDER_COMMAND_MARKER="$contender_command_marker" \
+    REAL_CP_COMMAND="$real_cp_command" \
+    REAL_UNAME_COMMAND="$real_uname_command" \
+    PATH="$coordinator_gate_pipeline_repo/bin:$PATH" \
+    /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file contender-paths.txt \
+      --base HEAD --run --parallel 1 --lock-wait 0 \
+      > "$claim_epoch_stdout" 2> "$claim_epoch_stderr"
+  claim_epoch_status=$?
+  set -e
+  [[ "$claim_epoch_status" -eq 2 ]] ||
+    fail_gate_pipeline_fixture "failed claim epoch preparation did not exit 2"
+  [[ -e "$claim_id_ready" ]] ||
+    fail_gate_pipeline_fixture "claim epoch fixture did not reach UID preparation"
+  grep -Fq -- "could not derive a safe legacy owner claim token" \
+    "$claim_epoch_stderr" ||
+    fail_gate_pipeline_fixture "failed claim epoch preparation omitted its diagnosis"
+  grep -Fq -- "Nothing has been executed." "$claim_epoch_stderr" ||
+    fail_gate_pipeline_fixture "failed claim epoch preparation omitted its no-work verdict"
+  [[ ! -e "$coordinator_gate_pipeline_lock/run.lock" ]] ||
+    fail_gate_pipeline_fixture "failed claim epoch preparation created the legacy lock"
+  [[ ! -e "$contender_command_marker" ]] ||
+    fail_gate_pipeline_fixture "failed claim epoch preparation ran a mapped command"
+
   AGENT_QUALITY_GATE_LOCK=1 \
     AGENT_QUALITY_GATE_LOCK_HELD='' \
     AGENT_QUALITY_GATE_LOCK_DIR="$coordinator_gate_pipeline_lock" \
@@ -1588,6 +1793,91 @@ STUB
   done
   [[ "$holder_ready" -eq 1 ]] ||
     fail_gate_pipeline_fixture "end-to-end pipeline holder never started its mapped command"
+  holder_owner_record="$coordinator_gate_pipeline_lock/run.lock/owner"
+  [[ -f "$holder_owner_record" ]] ||
+    fail_gate_pipeline_fixture "coordinator holder did not publish its legacy owner record"
+  holder_owner_host="$(awk -F= '$1 == "host" { print substr($0, 6); exit }' \
+    "$holder_owner_record")"
+  holder_owner_token="$(awk -F= '
+    $1 == "token" { legacy_token = substr($0, 7) }
+    $1 == "coordinator_token" { print substr($0, 19); found = 1; exit }
+    END { if (!found) print legacy_token }
+  ' "$holder_owner_record")"
+  holder_expected_host="$("$real_uname_command" -n)"
+  [[ -n "$holder_owner_host" && "$holder_owner_host" == "$holder_expected_host" ]] ||
+    fail_gate_pipeline_fixture "coordinator owner record did not use the validated cached hostname"
+  case "$holder_owner_token" in
+    "${holder_owner_host}-"*) ;;
+    *) fail_gate_pipeline_fixture "coordinator owner token did not use the owner record hostname" ;;
+  esac
+  holder_marker="$(find "$coordinator_gate_pipeline_lock" -maxdepth 1 -type f \
+    -name "holder.${holder_owner_host}-*" -print -quit)"
+  [[ -n "$holder_marker" ]] ||
+    fail_gate_pipeline_fixture "coordinator holder marker did not use the validated cached hostname"
+
+  # The second worktree cannot acquire the holder's legacy lock. It must join
+  # the existing coordinator, execute a distinct command under spare capacity,
+  # and drain its command marker. Joiners used to leave the local host
+  # fingerprint empty, which made every private lsof witness scan fail until
+  # the orphan-drain timeout.
+  (
+    cd "$coordinator_gate_pipeline_joiner_repo"
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$coordinator_gate_pipeline_lock" \
+      AGENT_QUALITY_GATE_COORDINATOR=1 \
+      AGENT_QUALITY_GATE_CAPACITY=3 \
+      NODE_ENV=test \
+      QG_LSOF_PATH_RECORD="$joiner_lsof_path" \
+      REAL_CP_COMMAND="$real_cp_command" \
+      REAL_UNAME_COMMAND="$real_uname_command" \
+      PATH="$coordinator_gate_pipeline_joiner_repo/bin:$PATH" \
+      /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+        --changed-paths-file joiner-paths.txt \
+        --base HEAD --run --parallel 1 --lock-wait 30
+  ) > "$joiner_output" 2>&1 &
+  joiner_pid=$!
+  joiner_finished=0
+  for ((attempt = 0; attempt < gate_test_coordinator_observer_attempts; attempt++)); do
+    joiner_state="$(gate_test_process_state "$joiner_pid")"
+    if ! kill -0 "$joiner_pid" 2>/dev/null ||
+      [[ "$joiner_state" == Z* ]]; then
+      joiner_finished=1
+      break
+    fi
+    sleep 0.05
+  done
+  [[ "$joiner_finished" -eq 1 ]] ||
+    fail_gate_pipeline_fixture "existing-coordinator joiner did not execute and drain within 45 seconds"
+  set +e
+  wait "$joiner_pid"
+  joiner_status=$?
+  set -e
+  joiner_pid=""
+  [[ "$joiner_status" -eq 0 ]] ||
+    fail_gate_pipeline_fixture "existing-coordinator joiner did not finish successfully"
+  kill -0 "$holder_pid" 2>/dev/null ||
+    fail_gate_pipeline_fixture "coordinator holder exited before the distinct joiner completed"
+  [[ ! -e "$holder_release" ]] ||
+    fail_gate_pipeline_fixture "distinct joiner released the coordinator holder barrier"
+  grep -Fq -- "role leader." "$joiner_output" ||
+    fail_gate_pipeline_fixture "distinct coordinator joiner did not lead its own execution"
+  grep -Fq -- "All mapped commands passed." "$joiner_output" ||
+    fail_gate_pipeline_fixture "distinct coordinator joiner did not execute mapped work"
+  ! grep -Fq -- "agentqg-scan-failed" "$joiner_output" ||
+    fail_gate_pipeline_fixture "distinct coordinator joiner emitted the marker scan sentinel"
+  ! grep -Fq -- "processes kept failing" "$joiner_output" ||
+    fail_gate_pipeline_fixture "distinct coordinator joiner failed its marker scans"
+  [[ -s "$joiner_lsof_path" ]] ||
+    fail_gate_pipeline_fixture "distinct coordinator joiner did not scan its private marker witness"
+  joiner_lsof_witness="$(cat "$joiner_lsof_path")"
+  case "$joiner_lsof_witness" in
+    "$coordinator_gate_pipeline_lock"/.holder-lsof-witness.v1.*/marker) ;;
+    *) fail_gate_pipeline_fixture "distinct coordinator joiner passed lsof a non-private marker path" ;;
+  esac
+  [[ -z "$(find "$coordinator_gate_pipeline_lock" -maxdepth 1 -type d \
+    -name '.holder-lsof-witness.v1.*' -print -quit)" ]] ||
+    fail_gate_pipeline_fixture "distinct coordinator joiner leaked its private lsof witness"
 
   set +e
   set +o pipefail
@@ -1748,27 +2038,54 @@ rm -rf "$coordinator_gate_pipeline_repo" "$coordinator_gate_pipeline_lock"
 
 if ! /bin/bash -c '
   set -u
-  gate_coordinator_capacity=3
   source "$1"
-  for command in \
-    "pnpm dashboard:mutation" \
-    "pnpm bridge:mutation" \
-    "pnpm indexer:mutation"; do
+
+  assert_command_policy() {
+    local capacity="$1" command="$2" expected_weight="$3"
+    local expected_all_capacity="$4" expected_class="$5"
+    local expected_resources="$6" actual_resources
+    gate_coordinator_capacity="$capacity"
     gate_coordinator_classify_command "$command"
-    [[ "$gate_coordinator_command_weight" -eq 1 ]]
-    [[ "$gate_coordinator_command_all_capacity" -eq 0 ]]
-    [[ "$gate_coordinator_command_class" == ordinary ]]
-    [[ "${#gate_coordinator_command_resources[@]}" -eq 0 ]]
-  done
-  gate_coordinator_classify_command \
-    "pnpm --filter @mento-protocol/ui-dashboard test:coverage"
-  [[ "$gate_coordinator_command_all_capacity" -eq 1 ]]
-  [[ "$gate_coordinator_command_class" == dashboard-coverage ]]
-  gate_coordinator_classify_command \
-    "pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium"
-  [[ "$gate_coordinator_command_all_capacity" -eq 0 ]]
-  [[ "$gate_coordinator_command_class" == playwright-install ]]
-  [[ "${gate_coordinator_command_resources[*]}" == playwright-install ]]
+    actual_resources="${gate_coordinator_command_resources[*]:-}"
+    [[ "$expected_resources" != none ]] || expected_resources=""
+    if [[ "$gate_coordinator_command_weight" != "$expected_weight" ||
+      "$gate_coordinator_command_all_capacity" != "$expected_all_capacity" ||
+      "$gate_coordinator_command_class" != "$expected_class" ||
+      "$actual_resources" != "$expected_resources" ]]; then
+      printf "policy mismatch for %s: got %s|%s|%s|%s; expected %s|%s|%s|%s\n" \
+        "$command" \
+        "$gate_coordinator_command_weight" \
+        "$gate_coordinator_command_all_capacity" \
+        "$gate_coordinator_command_class" \
+        "${actual_resources:-none}" \
+        "$expected_weight" "$expected_all_capacity" "$expected_class" \
+        "${expected_resources:-none}" >&2
+      return 1
+    fi
+  }
+
+  while IFS="|" read -r capacity command weight all_capacity class resources; do
+    [[ -n "$capacity" ]] || continue
+    assert_command_policy \
+      "$capacity" "$command" "$weight" "$all_capacity" "$class" "$resources" ||
+      exit 1
+  done <<"POLICY_ROWS"
+3|pnpm agent:quality-gate:test|2|0|gate-selftest|none
+3|bash scripts/agent-quality-gate.test.sh|2|0|gate-selftest|none
+1|pnpm agent:quality-gate:test|1|0|gate-selftest|none
+1|bash scripts/agent-quality-gate.test.sh|1|0|gate-selftest|none
+3|pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium|1|0|playwright-install|playwright-install
+3|pnpm exec turbo run test:browser --filter=@mento-protocol/ui-dashboard --cache=local:rw|1|1|dashboard-browser|browser-fixture-3211
+3|pnpm --filter @mento-protocol/ui-dashboard test:browser|1|1|dashboard-browser|browser-fixture-3211
+3|pnpm --filter @mento-protocol/ui-dashboard test:coverage|1|1|dashboard-coverage|none
+3|pnpm --filter @mento-protocol/ui-dashboard exec vitest related --run src/lib/gql-retry.ts|1|1|dashboard-coverage|none
+3|VERCEL_DEPLOYMENT_ID=local-quality-gate pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw|1|1|dashboard-build|none
+3|pnpm --filter @mento-protocol/ui-dashboard build|1|1|dashboard-build|none
+3|pnpm exec turbo run build --filter=@mento-protocol/ui-dashboard --cache=local:rw|1|1|dashboard-build|none
+3|pnpm dashboard:mutation|1|0|ordinary|none
+3|pnpm bridge:mutation|1|0|ordinary|none
+3|pnpm indexer:mutation|1|0|ordinary|none
+POLICY_ROWS
 ' quality-gate-command-policy \
   "$repo_root/scripts/gate/quality-gate-coordinator-support.sh"; then
   fail "quality-gate command scheduling classes are not minimal and explicit"
@@ -12013,6 +12330,340 @@ STUB
     printf '%s\n' "$?" > "$gate_race_out/$1.status"
   }
 
+  race_file_identity() {
+    node -e '
+      const fs = require("node:fs");
+      const stat = fs.lstatSync(process.argv[1], { bigint: true });
+      process.stdout.write(`${stat.dev}:${stat.ino}\n`);
+    ' "$1"
+  }
+
+  # Linux exposes /dev/fd/N as a symlink. Force the shared-path guard to reject
+  # every /dev/fd path even on macOS, then prove a clean release still succeeds.
+  # The release authority reader must use its already-open descriptor and must
+  # never ask the pathname guard to authorize that pseudo-path.
+  linux_release_gate_copy="$(mktemp \
+    "$repo_root/scripts/.agent-quality-gate-linux-fd.XXXXXX")"
+  linux_release_guard_sentinel="$gate_race_out/linux-release-path-guard-called"
+  awk '
+    { print }
+    $0 == "gate_lock_record_is_readable_regular() {" {
+      in_record_guard = 1
+      next
+    }
+    in_record_guard && $0 == "}" {
+      print ""
+      print "gate_lock_record_is_readable_regular() {"
+      print "  local record=\"$1\""
+      print "  if [[ \"$record\" == /dev/fd/* ]]; then"
+      print "    : > \"${QG_LINUX_RELEASE_PATH_GUARD_SENTINEL:?}\""
+      print "    return 1"
+      print "  fi"
+      print "  [[ ! -L \"$record\" && -f \"$record\" && -r \"$record\" ]]"
+      print "}"
+      in_record_guard = 0
+    }
+  ' "$repo_root/scripts/agent-quality-gate.sh" > "$linux_release_gate_copy"
+  chmod +x "$linux_release_gate_copy"
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root"/owner-release.*
+  rm -f "$linux_release_guard_sentinel"
+  : > "$gate_race_log"
+  set +e
+  RACE_STUB_SECONDS=0 \
+    QG_LINUX_RELEASE_PATH_GUARD_SENTINEL="$linux_release_guard_sentinel" \
+    AGENT_QUALITY_GATE_COORDINATOR=0 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$linux_release_gate_copy" --base HEAD --run --lock-wait 30 \
+      > "$gate_race_out/linux-release-descriptor.out" 2>&1
+  linux_release_status=$?
+  set -e
+  [[ "$linux_release_status" -eq 0 ]] ||
+    fail "Linux-shaped descriptor release failed with status ${linux_release_status}"
+  [[ ! -e "$linux_release_guard_sentinel" ]] ||
+    fail "release sent /dev/fd authority through the shared-path guard"
+  [[ ! -d "$gate_race_root/run.lock" ]] ||
+    fail "Linux-shaped descriptor release retained the legacy lock"
+  [[ -z "$(find "$gate_race_root" -maxdepth 1 -type d \
+    -name 'owner-release.*' -print -quit)" ]] ||
+    fail "Linux-shaped descriptor release retained private release state"
+  rm -f "$linux_release_gate_copy"
+  linux_release_gate_copy=""
+
+  # Normal Bash marker cleanup uses raw `<token>\n` bytes rather than owner
+  # record fields. It must retire that exact witnessed inode without leaving a
+  # marker-specific quarantine behind.
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -rf "$gate_race_root"/holder.reclaiming.quarantine.*
+  rm -f "$gate_race_root"/captured.* "$gate_race_root"/holder.*
+  : > "$gate_race_log"
+  AGENT_QUALITY_GATE_COORDINATOR=0 \
+    race_waiter marker-exact-normal 0 0 0
+  [[ "$(cat "$gate_race_out/marker-exact-normal.status")" == "0" ]] ||
+    fail "normal exact marker cleanup failed"
+  [[ -z "$(find "$gate_race_root" -maxdepth 1 \
+    \( -name 'holder.*' -o -name 'holder.reclaiming.quarantine.*' \) \
+    -print -quit)" ]] ||
+    fail "normal exact marker cleanup retained marker evidence"
+
+  # Pause after cleanup binds a hard-link witness. Replace the canonical path
+  # with identical raw bytes. The take can move that replacement before it
+  # detects the inode mismatch, so cleanup must link the moved inode back to the
+  # canonical holder path, retain both private inodes, and return status 2.
+  marker_witness_barrier="$gate_race_out/marker-witness"
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -rf "$gate_race_root"/holder.reclaiming.quarantine.*
+  rm -f "$gate_race_root"/captured.* "$gate_race_root"/holder.* \
+    "${marker_witness_barrier}.ready" "${marker_witness_barrier}.release"
+  : > "$gate_race_log"
+  (
+    if env \
+      NODE_ENV=test \
+      AGENT_QUALITY_GATE_COORDINATOR=0 \
+      RACE_STUB_SECONDS=0 \
+      AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      AGENT_QUALITY_GATE_TEST_MARKER_WITNESS_BARRIER="$marker_witness_barrier" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 30 \
+      > "$gate_race_out/marker-replacement.out" 2>&1; then
+      printf '0\n'
+    else
+      printf '%s\n' "$?"
+    fi
+  ) > "$gate_race_out/marker-replacement.status" &
+  marker_replacement_waiter=$!
+  marker_replacement_deadline=$(( $(date +%s) + 20 ))
+  while [[ ! -e "${marker_witness_barrier}.ready" &&
+    "$(date +%s)" -lt "$marker_replacement_deadline" ]]; do
+    sleep 0.05
+  done
+  if [[ ! -e "${marker_witness_barrier}.ready" ]]; then
+    : > "${marker_witness_barrier}.release"
+    wait "$marker_replacement_waiter" 2>/dev/null || true
+    fail "exact marker cleanup did not reach its witnessed-inode barrier"
+  fi
+  marker_replacement_path="$(find "$gate_race_root" -maxdepth 1 \
+    -type f -name 'holder.*' -print -quit)"
+  [[ -n "$marker_replacement_path" ]] ||
+    fail "exact marker cleanup barrier did not retain the canonical marker"
+  marker_replacement_token="${marker_replacement_path##*/holder.}"
+  [[ "$(cat "$marker_replacement_path")" == "$marker_replacement_token" ]] ||
+    fail "the witnessed marker did not contain its exact path token"
+  marker_original_identity="$(race_file_identity "$marker_replacement_path")"
+  rm -f "$marker_replacement_path"
+  printf '%s\n' "$marker_replacement_token" > "$marker_replacement_path"
+  chmod 600 "$marker_replacement_path"
+  marker_replacement_identity="$(race_file_identity "$marker_replacement_path")"
+  [[ "$marker_replacement_identity" != "$marker_original_identity" ]] ||
+    fail "the marker replacement fixture did not create a new inode"
+  : > "${marker_witness_barrier}.release"
+  wait "$marker_replacement_waiter" 2>/dev/null || true
+  [[ "$(cat "$gate_race_out/marker-replacement.status")" == "2" ]] ||
+    fail "identical marker replacement did not fail closed"
+  marker_replacement_quarantine="$(find "$gate_race_root" -maxdepth 1 \
+    -type d -name 'holder.reclaiming.quarantine.v1.*' -print -quit)"
+  [[ -n "$marker_replacement_quarantine" ]] ||
+    fail "identical marker replacement did not retain its private quarantine"
+  [[ -f "$marker_replacement_path" && ! -L "$marker_replacement_path" ]] ||
+    fail "identical marker replacement was not restored at its canonical path"
+  [[ "$(race_file_identity "$marker_replacement_path")" == \
+    "$marker_replacement_identity" ]] ||
+    fail "canonical marker restoration did not preserve the replacement inode"
+  [[ "$(race_file_identity "$marker_replacement_quarantine/anchor")" == \
+    "$marker_original_identity" ]] ||
+    fail "marker replacement cleanup lost the original inode witness"
+  [[ "$marker_replacement_path" -ef \
+    "$marker_replacement_quarantine/record" ]] ||
+    fail "canonical marker restoration did not link the quarantined replacement"
+  grep -q "a changed run marker was restored at ${marker_replacement_path}" \
+    "$gate_race_out/marker-replacement.out" ||
+    fail "marker replacement restoration was not reported"
+  [[ ! -d "$gate_race_root/run.lock" ]] ||
+    fail "marker cleanup failure prevented legacy lock release"
+  rm -rf "$gate_race_root/condemned.d" \
+    "$marker_replacement_quarantine"
+  rm -f "$marker_replacement_path" \
+    "${marker_witness_barrier}.ready" "${marker_witness_barrier}.release"
+
+  # A replacement can be a FIFO with no writer. Snapshot reads must use
+  # O_NONBLOCK, reject the moved FIFO, leave it only in private quarantine, and
+  # still release run.lock within a short deterministic bound.
+  fifo_marker_barrier="$gate_race_out/fifo-marker-witness"
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -rf "$gate_race_root"/holder.reclaiming.quarantine.*
+  rm -f "$gate_race_root"/captured.* "$gate_race_root"/holder.* \
+    "${fifo_marker_barrier}.ready" "${fifo_marker_barrier}.release"
+  : > "$gate_race_log"
+  (
+    if env \
+      NODE_ENV=test \
+      AGENT_QUALITY_GATE_COORDINATOR=0 \
+      RACE_STUB_SECONDS=0 \
+      AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      AGENT_QUALITY_GATE_TEST_MARKER_WITNESS_BARRIER="$fifo_marker_barrier" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 30 \
+      > "$gate_race_out/fifo-marker-replacement.out" 2>&1; then
+      printf '0\n'
+    else
+      printf '%s\n' "$?"
+    fi
+  ) > "$gate_race_out/fifo-marker-replacement.status" &
+  fifo_marker_waiter=$!
+  fifo_marker_deadline=$(( $(date +%s) + 20 ))
+  while [[ ! -e "${fifo_marker_barrier}.ready" &&
+    "$(date +%s)" -lt "$fifo_marker_deadline" ]]; do
+    sleep 0.05
+  done
+  if [[ ! -e "${fifo_marker_barrier}.ready" ]]; then
+    : > "${fifo_marker_barrier}.release"
+    wait "$fifo_marker_waiter" 2>/dev/null || true
+    fail "FIFO marker cleanup did not reach its witnessed-inode barrier"
+  fi
+  fifo_marker_path="$(find "$gate_race_root" -maxdepth 1 \
+    -type f -name 'holder.*' -print -quit)"
+  [[ -n "$fifo_marker_path" ]] ||
+    fail "FIFO marker cleanup barrier did not retain the canonical marker"
+  rm -f "$fifo_marker_path"
+  mkfifo "$fifo_marker_path"
+  : > "${fifo_marker_barrier}.release"
+  fifo_marker_deadline=$(( $(date +%s) + 15 ))
+  while kill -0 "$fifo_marker_waiter" 2>/dev/null &&
+    [[ "$(date +%s)" -lt "$fifo_marker_deadline" ]]; do
+    sleep 0.05
+  done
+  if kill -0 "$fifo_marker_waiter" 2>/dev/null; then
+    kill -TERM "$fifo_marker_waiter" 2>/dev/null || true
+    wait "$fifo_marker_waiter" 2>/dev/null || true
+    fail "FIFO marker replacement blocked cleanup past its 15-second bound"
+  fi
+  wait "$fifo_marker_waiter" 2>/dev/null || true
+  [[ "$(cat "$gate_race_out/fifo-marker-replacement.status")" == "2" ]] ||
+    fail "FIFO marker replacement did not fail closed"
+  fifo_marker_quarantine="$(find "$gate_race_root" -maxdepth 1 \
+    -type d -name 'holder.reclaiming.quarantine.v1.*' -print -quit)"
+  [[ -n "$fifo_marker_quarantine" &&
+    -p "$fifo_marker_quarantine/record" ]] ||
+    fail "FIFO marker replacement was not retained in private quarantine"
+  [[ ! -e "$fifo_marker_path" && ! -L "$fifo_marker_path" ]] ||
+    fail "unsafe FIFO marker replacement was republished canonically"
+  [[ ! -d "$gate_race_root/run.lock" ]] ||
+    fail "FIFO marker cleanup failure prevented legacy lock release"
+  grep -q "moved run marker is unsafe or has changed bytes" \
+    "$gate_race_out/fifo-marker-replacement.out" ||
+    fail "FIFO marker rejection was not reported"
+  rm -rf "$gate_race_root/condemned.d" "$fifo_marker_quarantine"
+  rm -f "${fifo_marker_barrier}.ready" "${fifo_marker_barrier}.release"
+
+  # Parallel workers retire command-specific markers. The request marker stays
+  # for EXIT cleanup. Replace that request marker after its witness to prove a
+  # clean command result plus marker failure exits 2, while release still runs.
+  marker_exit_repo="$(mktemp -d)"
+  marker_exit_root="$(mktemp -d)"
+  marker_exit_barrier="$gate_race_out/marker-exit-witness"
+  (
+    cd "$marker_exit_repo"
+    git init -q
+    git config user.email test@example.invalid
+    git config user.name "Quality Gate Test"
+    mkdir -p bin scripts tools
+    printf '#!/usr/bin/env bash\nexit 0\n' > scripts/marker-exit.sh
+    cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+    cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  printf '9.0.0\n'
+fi
+exit 0
+STUB
+    chmod +x scripts/marker-exit.sh tools/trunk bin/pnpm
+    git add .
+    git commit -qm init
+    printf '# changed\n' >> scripts/marker-exit.sh
+  )
+  rm -f "${marker_exit_barrier}.ready" \
+    "${marker_exit_barrier}.release"
+  (
+    cd "$marker_exit_repo"
+    if env \
+      NODE_ENV=test \
+      PATH="$marker_exit_repo/bin:$PATH" \
+      AGENT_QUALITY_GATE_COORDINATOR=0 \
+      AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$marker_exit_root" \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      AGENT_QUALITY_GATE_TEST_MARKER_WITNESS_BARRIER="$marker_exit_barrier" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --parallel 2 --lock-wait 30 \
+      > "$gate_race_out/marker-exit-replacement.out" 2>&1; then
+      printf '0\n'
+    else
+      printf '%s\n' "$?"
+    fi
+  ) > "$gate_race_out/marker-exit-replacement.status" &
+  marker_exit_waiter=$!
+  marker_exit_deadline=$(( $(date +%s) + 30 ))
+  while [[ ! -e "${marker_exit_barrier}.ready" &&
+    "$(date +%s)" -lt "$marker_exit_deadline" ]]; do
+    sleep 0.05
+  done
+  if [[ ! -e "${marker_exit_barrier}.ready" ]]; then
+    : > "${marker_exit_barrier}.release"
+    wait "$marker_exit_waiter" 2>/dev/null || true
+    fail "EXIT marker cleanup did not reach its witnessed-inode barrier"
+  fi
+  marker_exit_quarantine="$(find "$marker_exit_root" -maxdepth 1 \
+    -type d -name 'holder.reclaiming.quarantine.v1.*' -print -quit)"
+  [[ -n "$marker_exit_quarantine" ]] ||
+    fail "EXIT marker cleanup did not publish its private witness"
+  marker_exit_token="$(cat "$marker_exit_quarantine/anchor")"
+  marker_exit_path="$marker_exit_root/holder.${marker_exit_token}"
+  [[ -f "$marker_exit_path" ]] ||
+    fail "EXIT marker cleanup witness did not retain its canonical marker"
+  marker_exit_original_identity="$(race_file_identity "$marker_exit_path")"
+  rm -f "$marker_exit_path"
+  printf '%s\n' "$marker_exit_token" > "$marker_exit_path"
+  chmod 600 "$marker_exit_path"
+  marker_exit_replacement_identity="$(race_file_identity "$marker_exit_path")"
+  [[ "$marker_exit_replacement_identity" != \
+    "$marker_exit_original_identity" ]] ||
+    fail "EXIT marker replacement did not create a new inode"
+  : > "${marker_exit_barrier}.release"
+  wait "$marker_exit_waiter" 2>/dev/null || true
+  [[ "$(cat "$gate_race_out/marker-exit-replacement.status")" == "2" ]] ||
+    fail "EXIT marker cleanup failure did not change success to status 2"
+  grep -q "Running quality commands with parallelism 2" \
+    "$gate_race_out/marker-exit-replacement.out" ||
+    fail "EXIT marker fixture did not use the parallel request-marker path"
+  grep -q "All mapped commands passed" \
+    "$gate_race_out/marker-exit-replacement.out" ||
+    fail "EXIT marker fixture did not reach an original status of 0"
+  [[ ! -d "$marker_exit_root/run.lock" ]] ||
+    fail "EXIT marker failure skipped legacy lock release"
+  [[ -f "$marker_exit_path" &&
+    "$marker_exit_path" -ef "$marker_exit_quarantine/record" ]] ||
+    fail "EXIT marker replacement was not restored canonically"
+  [[ "$(race_file_identity "$marker_exit_path")" == \
+    "$marker_exit_replacement_identity" ]] ||
+    fail "EXIT marker restoration changed the replacement inode"
+  rm -rf "$marker_exit_repo" "$marker_exit_root"
+  rm -f "${marker_exit_barrier}.ready" \
+    "${marker_exit_barrier}.release"
+
   race_stub_probe_status=0
   race_stub_publish_probe() {
     local label="$1"
@@ -12458,23 +13109,463 @@ STUB
   [[ ! -d "$gate_race_root/run.lock" ]] ||
     fail "both race runs finished; the lock must not be left behind"
 
-  # Release must take and validate the exact owner it removes. Exercise both
-  # sides of that take: a successor that replaces the owner just before the
-  # rename, and one that publishes after the old owner has moved aside. The
-  # releasing gate must preserve either successor and must never remove its
-  # lock directory recursively.
-  for race_release_phase in before after; do
+  # A quarantine belongs to its creator until that PID exits. Pause one stale
+  # reclaim immediately after its inode witness, then again after its fallback
+  # marker. A second waiter must not recover either live phase from a stale
+  # directory snapshot or touch the source remnant.
+  active_quarantine_host_fingerprint="$(
+    node -e '
+      const { createHash } = require("node:crypto");
+      process.stdout.write(
+        createHash("sha256").update(process.argv[1], "utf8").digest("hex"),
+      );
+    ' "$(uname -n)"
+  )"
+  [[ "$active_quarantine_host_fingerprint" =~ ^[0-9a-f]{64}$ ]] ||
+    fail "could not derive the quarantine host fingerprint"
+  for active_quarantine_phase in witness fallback; do
+    race_dead_pid="$(fresh_dead_pid)" ||
+      fail "${active_quarantine_phase}: could not allocate a dead owner PID"
+    active_quarantine_token="active-quarantine-${race_dead_pid}-1"
+    active_quarantine_barrier="$gate_race_out/active-quarantine-${active_quarantine_phase}"
+    active_quarantine_creator_status="$gate_race_out/active-quarantine-${active_quarantine_phase}.status"
+    active_quarantine_observer_output="$gate_race_out/active-quarantine-${active_quarantine_phase}-observer.out"
+    rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+    rm -f \
+      "${active_quarantine_barrier}.ready" \
+      "${active_quarantine_barrier}.release" \
+      "$active_quarantine_creator_status"
+    mkdir -p "$gate_race_root/run.lock"
+    {
+      printf 'pid=%s\n' "$race_dead_pid"
+      printf 'uid=%s\n' "$(id -u)"
+      printf 'host=%s\n' "$(uname -n)"
+      printf 'started_at=%s\n' "$(date +%s)"
+      printf 'start_utc=\n'
+      printf 'worktree=%s\n' "$gate_race_repo"
+      printf 'token=%s\n' "$active_quarantine_token"
+    } > "$gate_race_root/run.lock/owner"
+    : > "$gate_race_log"
+    if [[ "$active_quarantine_phase" == "witness" ]]; then
+      active_quarantine_barrier_name="AGENT_QUALITY_GATE_TEST_OWNER_WITNESS_BARRIER"
+    else
+      active_quarantine_barrier_name="AGENT_QUALITY_GATE_TEST_OWNER_DISCARD_BARRIER"
+    fi
+    (
+      if env \
+        NODE_ENV=test \
+        RACE_STUB_SECONDS=0 \
+        AGENT_QUALITY_GATE_LOCK=1 \
+        AGENT_QUALITY_GATE_LOCK_HELD='' \
+        AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+        AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+        AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+        "$active_quarantine_barrier_name=$active_quarantine_barrier" \
+        "$repo_root/scripts/agent-quality-gate.sh" \
+        --base HEAD --run --lock-wait 30 \
+        > "$gate_race_out/active-quarantine-${active_quarantine_phase}-creator.out" 2>&1; then
+        printf '0\n'
+      else
+        printf '%s\n' "$?"
+      fi
+    ) > "$active_quarantine_creator_status" &
+    active_quarantine_creator=$!
+    for _ in {1..600}; do
+      [[ -e "${active_quarantine_barrier}.ready" ]] && break
+      sleep 0.05
+    done
+    [[ -e "${active_quarantine_barrier}.ready" ]] || {
+      : > "${active_quarantine_barrier}.release"
+      wait "$active_quarantine_creator" 2>/dev/null || true
+      fail "${active_quarantine_phase}: creator never reached its quarantine barrier"
+    }
+    active_quarantine_dir="$(find "$gate_race_root/run.lock" -maxdepth 1 \
+      -name 'owner.reclaiming.quarantine.*' -type d -print | head -n1)"
+    [[ -n "$active_quarantine_dir" ]] ||
+      fail "${active_quarantine_phase}: creator did not publish its quarantine"
+    active_quarantine_creator_identity="${active_quarantine_dir##*/owner.reclaiming.quarantine.}"
+    active_quarantine_creator_identity="${active_quarantine_creator_identity#v1.}"
+    active_quarantine_creator_identity="${active_quarantine_creator_identity#*.}"
+    active_quarantine_creator_pid="${active_quarantine_creator_identity%%.*}"
+    kill -0 "$active_quarantine_creator_pid" 2>/dev/null ||
+      fail "${active_quarantine_phase}: quarantine creator was not live"
+    active_quarantine_anchor_identity="$(
+      race_file_identity "$active_quarantine_dir/anchor"
+    )"
+    active_quarantine_entries="$(
+      find "$active_quarantine_dir" -mindepth 1 -maxdepth 1 \
+        -exec basename {} \; | sort
+    )"
+    if AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 2 \
+      > "$active_quarantine_observer_output" 2>&1; then
+      active_quarantine_observer_status=0
+    else
+      active_quarantine_observer_status=$?
+    fi
+    [[ "$active_quarantine_observer_status" -eq 2 ]] ||
+      fail "${active_quarantine_phase}: observer did not wait on the live quarantine"
+    grep -q "timed out after .* waiting for the gate run lock" \
+      "$active_quarantine_observer_output" ||
+      fail "${active_quarantine_phase}: observer did not report its bounded wait"
+    active_quarantine_observed_anchor_identity="$(
+      race_file_identity "$active_quarantine_dir/anchor"
+    )"
+    [[ "$active_quarantine_observed_anchor_identity" == "$active_quarantine_anchor_identity" ]] ||
+      fail "${active_quarantine_phase}: observer changed the inode witness"
+    [[ "$(find "$active_quarantine_dir" -mindepth 1 -maxdepth 1 \
+      -exec basename {} \; | sort)" == "$active_quarantine_entries" ]] ||
+      fail "${active_quarantine_phase}: observer changed quarantine phase state"
+    [[ -z "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+      fail "${active_quarantine_phase}: observer ran beside paused cleanup"
+    : > "${active_quarantine_barrier}.release"
+    wait "$active_quarantine_creator" 2>/dev/null || true
+    [[ "$(cat "$active_quarantine_creator_status")" == "0" ]] ||
+      fail "${active_quarantine_phase}: creator did not finish after release"
+    [[ -n "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+      fail "${active_quarantine_phase}: creator did not run mapped work"
+    [[ ! -d "$gate_race_root/run.lock" ]] ||
+      fail "${active_quarantine_phase}: creator did not release the lock"
+  done
+
+  # A live unrelated process can reuse the PID in an orphan quarantine name.
+  # Bare PID identity cannot distinguish reuse, so recovery must wait and keep
+  # every entry unchanged until that PID exits.
+  rm -rf "$gate_race_root/run.lock"
+  mkdir -p "$gate_race_root/run.lock"
+  active_quarantine_source="$gate_race_root/run.lock/owner.reclaiming.pid-reuse"
+  active_quarantine_dir="$gate_race_root/run.lock/owner.reclaiming.quarantine.v1.${active_quarantine_host_fingerprint}.${gate_test_outer_pid}.pid-reuse"
+  printf 'token=pid-reuse-quarantine-1-1\n' > "$active_quarantine_source"
+  mkdir -m 700 "$active_quarantine_dir"
+  /bin/ln -P "$active_quarantine_source" "$active_quarantine_dir/anchor"
+  active_quarantine_anchor_identity="$(
+    race_file_identity "$active_quarantine_dir/anchor"
+  )"
+  : > "$gate_race_log"
+  if AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 2 \
+    > "$gate_race_out/active-quarantine-pid-reuse.out" 2>&1; then
+    active_quarantine_observer_status=0
+  else
+    active_quarantine_observer_status=$?
+  fi
+  [[ "$active_quarantine_observer_status" -eq 2 ]] ||
+    fail "PID-reuse quarantine did not block the waiter"
+  active_quarantine_observed_anchor_identity="$(
+    race_file_identity "$active_quarantine_dir/anchor"
+  )"
+  [[ "$active_quarantine_observed_anchor_identity" == "$active_quarantine_anchor_identity" &&
+    "$active_quarantine_source" -ef "$active_quarantine_dir/anchor" ]] ||
+    fail "PID-reuse quarantine evidence changed"
+  [[ -z "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+    fail "mapped work ran beside a PID-reuse quarantine"
+  rm -rf "$gate_race_root/run.lock"
+
+  # A quarantine hostname is part of its creator identity. A dead local PID in
+  # a foreign-host name has no local meaning, so recovery must wait without
+  # changing the private phase or its shared source.
+  foreign_quarantine_host_fingerprint="$(printf '%064d' 0)"
+  if [[ "$foreign_quarantine_host_fingerprint" == "$active_quarantine_host_fingerprint" ]]; then
+    foreign_quarantine_host_fingerprint="$(printf '%064d' 1)"
+  fi
+  race_dead_pid="$(fresh_dead_pid)" ||
+    fail "foreign-host quarantine could not allocate a dead local PID"
+  foreign_quarantine_source="$gate_race_root/run.lock/owner.reclaiming.foreign-host"
+  foreign_quarantine_dir="$gate_race_root/run.lock/owner.reclaiming.quarantine.v1.${foreign_quarantine_host_fingerprint}.${race_dead_pid}.foreign"
+  mkdir -p "$gate_race_root/run.lock"
+  printf 'token=foreign-host-quarantine-1-1\n' > "$foreign_quarantine_source"
+  mkdir -m 700 "$foreign_quarantine_dir"
+  /bin/ln -P "$foreign_quarantine_source" "$foreign_quarantine_dir/anchor"
+  foreign_quarantine_anchor_identity="$(
+    race_file_identity "$foreign_quarantine_dir/anchor"
+  )"
+  foreign_quarantine_entries="$(
+    find "$foreign_quarantine_dir" -mindepth 1 -maxdepth 1 \
+      -exec basename {} \; | sort
+  )"
+  : > "$gate_race_log"
+  if AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 2 \
+    > "$gate_race_out/foreign-host-quarantine.out" 2>&1; then
+    foreign_quarantine_status=0
+  else
+    foreign_quarantine_status=$?
+  fi
+  [[ "$foreign_quarantine_status" -eq 2 ]] ||
+    fail "foreign-host quarantine did not block the waiter"
+  [[ "$(race_file_identity "$foreign_quarantine_dir/anchor")" == "$foreign_quarantine_anchor_identity" ]] ||
+    fail "foreign-host quarantine changed its inode witness"
+  [[ "$(find "$foreign_quarantine_dir" -mindepth 1 -maxdepth 1 \
+    -exec basename {} \; | sort)" == "$foreign_quarantine_entries" ]] ||
+    fail "foreign-host quarantine changed its phase entries"
+  [[ "$foreign_quarantine_source" -ef "$foreign_quarantine_dir/anchor" ]] ||
+    fail "foreign-host quarantine changed its shared source"
+  [[ -z "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+    fail "mapped work ran beside a foreign-host quarantine"
+  rm -rf "$gate_race_root/run.lock"
+
+  # Two waiters can observe the same dead creator. Pause both after selection,
+  # then release them together. One whole-directory rename wins. The loser must
+  # rescan the winner's new basename before it can inspect ordinary remnants.
+  race_dead_pid="$(fresh_dead_pid)" ||
+    fail "two-waiter quarantine claim could not allocate a dead creator PID"
+  claim_race_source="$gate_race_root/run.lock/owner.reclaiming.claim-race"
+  claim_race_dir="$gate_race_root/run.lock/owner.reclaiming.quarantine.v1.${active_quarantine_host_fingerprint}.${race_dead_pid}.claimrace"
+  claim_race_barrier="$gate_race_out/quarantine-before-claim"
+  claim_race_after_barrier="$gate_race_out/quarantine-after-claim-two-waiter"
+  rm -rf "$gate_race_root/run.lock"
+  rm -f "$claim_race_barrier".ready.* "${claim_race_barrier}.release" \
+    "${claim_race_after_barrier}.ready" \
+    "${claim_race_after_barrier}.release"
+  mkdir -p "$gate_race_root/run.lock"
+  printf 'token=claim-race-quarantine-1-1\n' > "$claim_race_source"
+  mkdir -m 700 "$claim_race_dir"
+  /bin/ln -P "$claim_race_source" "$claim_race_dir/anchor"
+  : > "$gate_race_log"
+  for claim_race_label in first second; do
+    (
+      if env \
+        NODE_ENV=test \
+        RACE_STUB_SECONDS=1 \
+        AGENT_QUALITY_GATE_LOCK=1 \
+        AGENT_QUALITY_GATE_LOCK_HELD='' \
+        AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+        AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+        AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+        AGENT_QUALITY_GATE_TEST_QUARANTINE_BEFORE_CLAIM_BARRIER="$claim_race_barrier" \
+        AGENT_QUALITY_GATE_TEST_QUARANTINE_AFTER_CLAIM_BARRIER="$claim_race_after_barrier" \
+        "$repo_root/scripts/agent-quality-gate.sh" \
+        --base HEAD --run --lock-wait 45 \
+        > "$gate_race_out/quarantine-claim-${claim_race_label}.out" 2>&1; then
+        printf '0\n'
+      else
+        printf '%s\n' "$?"
+      fi
+    ) > "$gate_race_out/quarantine-claim-${claim_race_label}.status" &
+    if [[ "$claim_race_label" == "first" ]]; then
+      claim_race_first=$!
+    else
+      claim_race_second=$!
+    fi
+  done
+  claim_race_deadline=$(( $(date +%s) + 20 ))
+  while [[ "$(find "$gate_race_out" -maxdepth 1 -name 'quarantine-before-claim.ready.*' -type f | wc -l | tr -d ' ')" -lt 2 &&
+    "$(date +%s)" -lt "$claim_race_deadline" ]]; do
+    sleep 0.05
+  done
+  [[ "$(find "$gate_race_out" -maxdepth 1 -name 'quarantine-before-claim.ready.*' -type f | wc -l | tr -d ' ')" -eq 2 ]] || {
+    : > "${claim_race_barrier}.release"
+    wait "$claim_race_first" 2>/dev/null || true
+    wait "$claim_race_second" 2>/dev/null || true
+    fail "both quarantine claim waiters did not reach the selection barrier"
+  }
+  : > "${claim_race_barrier}.release"
+  claim_race_deadline=$(( $(date +%s) + 20 ))
+  while [[ ! -e "${claim_race_after_barrier}.ready" &&
+    "$(date +%s)" -lt "$claim_race_deadline" ]]; do
+    sleep 0.05
+  done
+  [[ -e "${claim_race_after_barrier}.ready" ]] || {
+    : > "${claim_race_after_barrier}.release"
+    wait "$claim_race_first" 2>/dev/null || true
+    wait "$claim_race_second" 2>/dev/null || true
+    fail "the quarantine claim winner did not reach the post-claim barrier"
+  }
+  claim_race_claimed=""
+  for claim_race_candidate in \
+    "$gate_race_root/run.lock"/owner.reclaiming.quarantine.*; do
+    [[ -d "$claim_race_candidate" &&
+      -e "$claim_race_candidate/anchor" ]] || continue
+    claim_race_claimed="$claim_race_candidate"
+    break
+  done
+  [[ -n "$claim_race_claimed" && -d "$claim_race_claimed" ]] ||
+    fail "the quarantine claim winner did not publish its claimed basename"
+  [[ "$claim_race_claimed" != "$claim_race_dir" ]] ||
+    fail "the quarantine claim winner did not rename the selected basename"
+  claim_race_deadline=$(( $(date +%s) + 20 ))
+  while ! grep -q " in owner cleanup" \
+    "$gate_race_out/quarantine-claim-first.out" \
+    "$gate_race_out/quarantine-claim-second.out" 2>/dev/null &&
+    [[ "$(date +%s)" -lt "$claim_race_deadline" ]]; do
+    sleep 0.05
+  done
+  claim_race_waiting_count=0
+  for claim_race_label in first second; do
+    if grep -q " in owner cleanup" \
+      "$gate_race_out/quarantine-claim-${claim_race_label}.out"; then
+      claim_race_waiting_count=$((claim_race_waiting_count + 1))
+    fi
+  done
+  [[ "$claim_race_waiting_count" -eq 1 ]] ||
+    fail "the losing quarantine claimant did not rescan and wait on the claimed basename"
+  [[ ! -s "$gate_race_out/quarantine-claim-first.status" &&
+    ! -s "$gate_race_out/quarantine-claim-second.status" ]] ||
+    fail "a quarantine claimant completed while the winning basename was paused"
+  [[ -d "$claim_race_claimed" ]] ||
+    fail "the losing quarantine claimant removed the paused winning basename"
+  [[ -z "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+    fail "mapped work ran while the winning quarantine claim was paused"
+  : > "${claim_race_after_barrier}.release"
+  wait "$claim_race_first" 2>/dev/null || true
+  wait "$claim_race_second" 2>/dev/null || true
+  [[ "$(cat "$gate_race_out/quarantine-claim-first.status")" == "0" &&
+    "$(cat "$gate_race_out/quarantine-claim-second.status")" == "0" ]] ||
+    fail "both quarantine claim waiters did not settle successfully"
+  assert_runs_did_not_overlap "atomic quarantine claim, two waiters" 2
+  [[ -z "$(find "$gate_race_root" -name 'owner.reclaiming.quarantine.*' -print -quit)" ]] ||
+    fail "two-waiter quarantine claim left recovery evidence"
+  rm -f "$claim_race_barrier".ready.* "${claim_race_barrier}.release" \
+    "${claim_race_after_barrier}.ready" \
+    "${claim_race_after_barrier}.release"
+
+  # Freeze a fallback-only phase by renaming its whole directory. An orphaned
+  # mover that still names the old directory must fail and leave the shared
+  # source beside the claimed witness.
+  race_dead_pid="$(fresh_dead_pid)" ||
+    fail "orphan-mover quarantine could not allocate a dead creator PID"
+  claim_mover_source="$gate_race_root/run.lock/owner.reclaiming.orphan-mover"
+  claim_mover_dir="$gate_race_root/run.lock/owner.reclaiming.quarantine.v1.${active_quarantine_host_fingerprint}.${race_dead_pid}.mover01"
+  claim_mover_barrier="$gate_race_out/quarantine-after-claim"
+  rm -rf "$gate_race_root/run.lock"
+  rm -f "${claim_mover_barrier}.ready" "${claim_mover_barrier}.release"
+  mkdir -p "$gate_race_root/run.lock"
+  printf 'token=orphan-mover-quarantine-1-1\n' > "$claim_mover_source"
+  mkdir -m 700 "$claim_mover_dir"
+  /bin/ln -P "$claim_mover_source" "$claim_mover_dir/anchor"
+  printf 'orphan-mover-quarantine-1-1\n' > "$claim_mover_dir/fallback-ready"
+  (
+    if env \
+      NODE_ENV=test \
+      RACE_STUB_SECONDS=0 \
+      AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      AGENT_QUALITY_GATE_TEST_QUARANTINE_AFTER_CLAIM_BARRIER="$claim_mover_barrier" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 45 \
+      > "$gate_race_out/quarantine-orphan-mover.out" 2>&1; then
+      printf '0\n'
+    else
+      printf '%s\n' "$?"
+    fi
+  ) > "$gate_race_out/quarantine-orphan-mover.status" &
+  claim_mover_gate=$!
+  for _ in {1..400}; do
+    [[ -e "${claim_mover_barrier}.ready" ]] && break
+    sleep 0.05
+  done
+  [[ -e "${claim_mover_barrier}.ready" ]] || {
+    : > "${claim_mover_barrier}.release"
+    wait "$claim_mover_gate" 2>/dev/null || true
+    fail "quarantine recovery did not reach its post-claim barrier"
+  }
+  [[ ! -e "$claim_mover_dir" && ! -L "$claim_mover_dir" ]] ||
+    fail "quarantine recovery did not atomically retire the creator basename"
+  claim_mover_claimed="$(find "$gate_race_root/run.lock" -maxdepth 1 \
+    -name 'owner.reclaiming.quarantine.*' -type d -print | head -n1)"
+  [[ -n "$claim_mover_claimed" ]] ||
+    fail "quarantine recovery did not publish its claimed basename"
+  if /bin/mv "$claim_mover_source" "$claim_mover_dir/record" 2>/dev/null; then
+    fail "an orphan mover wrote through a retired quarantine basename"
+  fi
+  [[ "$claim_mover_source" -ef "$claim_mover_claimed/anchor" ]] ||
+    fail "the failed orphan mover changed the shared source or inode witness"
+  : > "${claim_mover_barrier}.release"
+  wait "$claim_mover_gate" 2>/dev/null || true
+  [[ "$(cat "$gate_race_out/quarantine-orphan-mover.status")" == "0" ]] ||
+    fail "post-claim orphan-mover recovery did not finish"
+  [[ ! -d "$gate_race_root/run.lock" ]] ||
+    fail "post-claim orphan-mover recovery did not release the lock"
+
+  # Kill a claimant after its atomic rename. The next waiter must claim the new
+  # basename again and complete recovery.
+  race_dead_pid="$(fresh_dead_pid)" ||
+    fail "crashed quarantine claimant could not allocate a dead creator PID"
+  claim_crash_source="$gate_race_root/run.lock/owner.reclaiming.claim-crash"
+  claim_crash_dir="$gate_race_root/run.lock/owner.reclaiming.quarantine.v1.${active_quarantine_host_fingerprint}.${race_dead_pid}.crash01"
+  claim_crash_barrier="$gate_race_out/quarantine-claim-crash"
+  rm -rf "$gate_race_root/run.lock"
+  rm -f "${claim_crash_barrier}.ready" "${claim_crash_barrier}.release"
+  mkdir -p "$gate_race_root/run.lock"
+  printf 'token=claim-crash-quarantine-1-1\n' > "$claim_crash_source"
+  mkdir -m 700 "$claim_crash_dir"
+  /bin/ln -P "$claim_crash_source" "$claim_crash_dir/anchor"
+  printf 'claim-crash-quarantine-1-1\n' > "$claim_crash_dir/fallback-ready"
+  env \
+    NODE_ENV=test \
+    RACE_STUB_SECONDS=0 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    AGENT_QUALITY_GATE_TEST_QUARANTINE_AFTER_CLAIM_BARRIER="$claim_crash_barrier" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 45 \
+    > "$gate_race_out/quarantine-claim-crash.out" 2>&1 &
+  claim_crash_gate=$!
+  gate_test_capture_identity "$claim_crash_gate" ||
+    fail "could not bind the crashed quarantine claimant identity"
+  claim_crash_start="$gate_test_captured_start"
+  claim_crash_parent="$gate_test_captured_parent"
+  for _ in {1..400}; do
+    [[ -e "${claim_crash_barrier}.ready" ]] && break
+    sleep 0.05
+  done
+  [[ -e "${claim_crash_barrier}.ready" ]] || {
+    : > "${claim_crash_barrier}.release"
+    wait "$claim_crash_gate" 2>/dev/null || true
+    fail "crashed quarantine claimant did not reach its post-claim barrier"
+  }
+  gate_test_signal_expected \
+    "quarantine claimant crash" KILL "$claim_crash_gate" \
+    "$claim_crash_start" "$claim_crash_parent" ||
+    fail "could not safely kill the exact quarantine claimant"
+  wait "$claim_crash_gate" 2>/dev/null || true
+  race_waiter after-quarantine-claim-crash 0 0 0
+  [[ "$(cat "$gate_race_out/after-quarantine-claim-crash.status")" == "0" ]] ||
+    fail "the next waiter did not recover a crashed quarantine claimant"
+  [[ ! -d "$gate_race_root/run.lock" ]] ||
+    fail "crashed quarantine claimant recovery did not release the lock"
+  rm -f "${claim_crash_barrier}.ready" "${claim_crash_barrier}.release"
+
+  # Release must take and validate the exact owner inode it removes. Exercise
+  # both sides of that take, plus a byte-distinct replacement that copies the
+  # releasing run's token before the rename. The releasing gate must preserve
+  # every successor and must never remove its lock directory recursively.
+  for race_release_case in before before-same-token after; do
+    race_release_phase="${race_release_case%%-*}"
     rm -rf "$gate_race_root/run.lock"
     rm -rf "$gate_race_root"/owner-release.*
     : > "$gate_race_log"
-    race_release_output="$gate_race_out/release-${race_release_phase}.out"
-    race_release_successor="release-successor-${race_release_phase}-$$-1"
+    race_release_output="$gate_race_out/release-${race_release_case}.out"
+    race_release_successor="release-successor-${race_release_case}-$$-1"
+    race_release_successor_witness="$gate_race_out/release-${race_release_case}.successor-witness"
+    rm -f "$race_release_successor_witness"
     if [[ "$race_release_phase" == "before" ]]; then
       race_release_delay_name="AGENT_QUALITY_GATE_LOCK_RELEASE_BEFORE_TAKE_DELAY_SECONDS"
     else
       race_release_delay_name="AGENT_QUALITY_GATE_LOCK_RELEASE_AFTER_TAKE_DELAY_SECONDS"
     fi
-    race_bound_launch_command "release ${race_release_phase}-take gate" 30 \
+    race_bound_launch_command "release ${race_release_case} gate" 30 \
       /bin/sh -c 'output_file="$1"; shift; exec "$@" > "$output_file" 2>&1' \
       launch-bound-command "$race_release_output" env \
       RACE_STUB_SECONDS=0 \
@@ -12485,7 +13576,7 @@ STUB
       "$race_release_delay_name=8" \
       "$repo_root/scripts/agent-quality-gate.sh" \
       --base HEAD --run --lock-wait 30 ||
-      fail "the release ${race_release_phase}-take gate could not bind its direct child"
+      fail "the release ${race_release_case} gate could not bind its direct child"
     race_release_pid="$race_bound_pid"
     race_release_start="$race_bound_start"
     race_release_parent="$race_bound_parent"
@@ -12511,7 +13602,14 @@ STUB
       sleep 0.05
     done
     [[ "$race_release_ready" -eq 1 ]] ||
-      fail "release ${race_release_phase}-take did not reach its private owner take"
+      fail "release ${race_release_case} did not reach its private owner take"
+    if [[ "$race_release_case" == "before-same-token" ]]; then
+      race_release_successor="$(
+        sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1
+      )"
+      [[ -n "$race_release_successor" ]] ||
+        fail "release same-token fixture could not read the original token"
+    fi
     race_release_staged="$gate_race_root/run.lock/owner.successor.$$"
     {
       printf 'pid=%s\n' "$$"
@@ -12521,6 +13619,8 @@ STUB
       printf 'worktree=%s\n' "$gate_race_repo"
       printf 'token=%s\n' "$race_release_successor"
     } > "$race_release_staged"
+    ln "$race_release_staged" "$race_release_successor_witness" ||
+      fail "release ${race_release_case} could not witness its successor inode"
     if [[ "$race_release_phase" == "before" ]]; then
       mv -f "$race_release_staged" "$gate_race_root/run.lock/owner"
     else
@@ -12529,17 +13629,178 @@ STUB
       rm -f "$race_release_staged"
     fi
     race_drain_wait_for_direct_wrapper \
-      "release ${race_release_phase}-take gate" "$race_release_pid" \
+      "release ${race_release_case} gate" "$race_release_pid" \
       "$race_release_start" "$race_release_parent" 20 ||
-      fail "release ${race_release_phase}-take did not finish within its bound"
+      fail "release ${race_release_case} did not finish within its bound"
     race_bound_prune_completed
     [[ "$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)" == "$race_release_successor" ]] ||
-      fail "release ${race_release_phase}-take removed or changed the successor owner"
+      fail "release ${race_release_case} removed or changed the successor owner"
+    [[ "$gate_race_root/run.lock/owner" -ef "$race_release_successor_witness" ]] ||
+      fail "release ${race_release_case} replaced the successor inode"
     [[ -z "$(find "$gate_race_root" -maxdepth 1 -type d \
       -name 'owner-release.*' -print 2>/dev/null)" ]] ||
-      fail "release ${race_release_phase}-take left private release state"
+      fail "release ${race_release_case} left private release state"
+    rm -f "$race_release_successor_witness"
     rm -rf "$gate_race_root/run.lock"
   done
+
+  # The private release owner stays exposed under a predictable basename while
+  # the after-take delay runs. Replace it with a new inode that copies the exact
+  # bytes. Cleanup must quarantine that replacement beside the original witness;
+  # it must not delete the replacement or restore it as canonical authority.
+  rm -rf "$gate_race_root/run.lock"
+  rm -rf "$gate_race_root"/owner-release.*
+  rm -f \
+    "$gate_race_out/release-private.ready" \
+    "$gate_race_out/release-private.release" \
+    "$gate_race_out/release-private.status" \
+    "$gate_race_out/release-private.replacement-witness"
+  : > "$gate_race_log"
+  (
+    if env \
+      NODE_ENV=test \
+      RACE_STUB_SECONDS=0 \
+      AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      AGENT_QUALITY_GATE_TEST_RELEASE_PRIVATE_BARRIER="$gate_race_out/release-private" \
+      /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 30 \
+      > "$gate_race_out/release-private.out" 2>&1; then
+      printf '0\n'
+    else
+      printf '%s\n' "$?"
+    fi
+  ) > "$gate_race_out/release-private.status" &
+  race_release_private_gate=$!
+  for _ in {1..600}; do
+    [[ -e "$gate_race_out/release-private.ready" ]] && break
+    sleep 0.05
+  done
+  [[ -e "$gate_race_out/release-private.ready" ]] || {
+    : > "$gate_race_out/release-private.release"
+    wait "$race_release_private_gate" 2>/dev/null || true
+    fail "release did not reach its exact private-owner barrier"
+  }
+  race_release_private_dir="$(find "$gate_race_root" -maxdepth 1 -type d \
+    -name 'owner-release.*' -print 2>/dev/null | head -n1)"
+  [[ -n "$race_release_private_dir" &&
+    -f "$race_release_private_dir/owner" ]] ||
+    fail "release did not retain its private owner at the replacement barrier"
+  race_release_private_token="$(sed -n 's/^token=//p' \
+    "$race_release_private_dir/owner" | head -n1)"
+  [[ -n "$race_release_private_token" ]] ||
+    fail "private release replacement could not read the exact owner token"
+  race_release_private_staged="$race_release_private_dir/replacement.$$"
+  /bin/cp "$race_release_private_dir/owner" \
+    "$race_release_private_staged" ||
+    fail "private release replacement could not copy the original owner bytes"
+  [[ ! "$race_release_private_staged" -ef "$race_release_private_dir/owner" ]] ||
+    fail "private release replacement did not create a new inode"
+  /bin/ln -P "$race_release_private_staged" \
+    "$gate_race_out/release-private.replacement-witness" ||
+    fail "private release replacement could not create its inode witness"
+  mv -f "$race_release_private_staged" "$race_release_private_dir/owner"
+  : > "$gate_race_out/release-private.release"
+  wait "$race_release_private_gate" 2>/dev/null || true
+  [[ "$(cat "$gate_race_out/release-private.status")" == "2" ]] ||
+    fail "release accepted a same-token replacement in private state"
+  race_release_private_record="$(find "$race_release_private_dir" \
+    -path '*/owner.reclaiming.quarantine.*/record' -type f -print | head -n1)"
+  race_release_private_anchor="$(find "$race_release_private_dir" \
+    -path '*/owner.reclaiming.quarantine.*/anchor' -type f -print | head -n1)"
+  [[ -n "$race_release_private_record" &&
+    "$race_release_private_record" -ef "$gate_race_out/release-private.replacement-witness" ]] ||
+    fail "release deleted the same-token private replacement inode"
+  [[ -n "$race_release_private_anchor" &&
+    ! "$race_release_private_anchor" -ef "$gate_race_out/release-private.replacement-witness" ]] ||
+    fail "release lost the original private-owner inode witness"
+  [[ ! -e "$gate_race_root/run.lock/owner" &&
+    ! -L "$gate_race_root/run.lock/owner" ]] ||
+    fail "release restored the same-token private replacement as canonical"
+  [[ "$(awk '/^enter/ { c++ } END { print c + 0 }' "$gate_race_log")" -eq 1 ]] ||
+    fail "private release replacement fixture did not run exactly one command"
+  rm -rf "$gate_race_root/run.lock"
+  rm -rf "$gate_race_root"/owner-release.*
+  rm -f "$gate_race_out/release-private.replacement-witness"
+
+  # Keep the original release descriptor through the second move into private
+  # state. Replace the recovery-visible record after the first inode check with
+  # a new inode that copies its token. Release must restore and retain that
+  # replacement instead of deleting it from private state.
+  rm -rf "$gate_race_root/run.lock"
+  rm -rf "$gate_race_root"/owner-release.*
+  rm -f \
+    "$gate_race_out/release-validated.ready" \
+    "$gate_race_out/release-validated.release" \
+    "$gate_race_out/release-validated.status" \
+    "$gate_race_out/release-validated.successor-witness"
+  : > "$gate_race_log"
+  (
+    if env \
+      NODE_ENV=test \
+      RACE_STUB_SECONDS=0 \
+      AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      AGENT_QUALITY_GATE_TEST_RELEASE_VALIDATED_BARRIER="$gate_race_out/release-validated" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 30 \
+      > "$gate_race_out/release-validated.out" 2>&1; then
+      printf '0\n'
+    else
+      printf '%s\n' "$?"
+    fi
+  ) > "$gate_race_out/release-validated.status" &
+  race_release_validated_gate=$!
+  for _ in {1..600}; do
+    [[ -e "$gate_race_out/release-validated.ready" ]] && break
+    sleep 0.05
+  done
+  [[ -e "$gate_race_out/release-validated.ready" ]] || {
+    : > "$gate_race_out/release-validated.release"
+    wait "$race_release_validated_gate" 2>/dev/null || true
+    fail "release did not reach its post-validation barrier"
+  }
+  race_release_validated_taken="$(find "$gate_race_root/run.lock" -maxdepth 1 \
+    -name 'owner.reclaiming.release.*' -type f -print | head -n1)"
+  [[ -n "$race_release_validated_taken" ]] ||
+    fail "release did not expose its validated owner record"
+  race_release_validated_token="$(
+    sed -n 's/^token=//p' "$race_release_validated_taken" | head -n1
+  )"
+  [[ -n "$race_release_validated_token" ]] ||
+    fail "release validated-replacement fixture could not read the owner token"
+  race_release_validated_staged="$gate_race_root/run.lock/owner.validated-successor.$$"
+  {
+    printf 'pid=%s\n' "$$"
+    printf 'uid=%s\n' "$(id -u)"
+    printf 'host=%s\n' "$(uname -n)"
+    printf 'start_utc=\n'
+    printf 'worktree=%s\n' "$gate_race_repo"
+    printf 'token=%s\n' "$race_release_validated_token"
+  } > "$race_release_validated_staged"
+  /bin/ln -P "$race_release_validated_staged" \
+    "$gate_race_out/release-validated.successor-witness"
+  mv -f "$race_release_validated_staged" "$race_release_validated_taken"
+  : > "$gate_race_out/release-validated.release"
+  wait "$race_release_validated_gate" 2>/dev/null || true
+  [[ "$(cat "$gate_race_out/release-validated.status")" == "2" ]] ||
+    fail "release accepted a same-token replacement after validation"
+  [[ "$gate_race_root/run.lock/owner" -ef "$gate_race_out/release-validated.successor-witness" ]] ||
+    fail "release did not restore the post-validation replacement"
+  race_release_validated_private="$(find "$gate_race_root" -maxdepth 2 \
+    -path '*/owner-release.*/owner' -type f -print | head -n1)"
+  [[ -n "$race_release_validated_private" &&
+    "$race_release_validated_private" -ef "$gate_race_out/release-validated.successor-witness" ]] ||
+    fail "release deleted the post-validation replacement from private state"
+  [[ "$(awk '/^enter/ { c++ } END { print c + 0 }' "$gate_race_log")" -eq 1 ]] ||
+    fail "release validated-replacement fixture did not run exactly one command"
+  rm -rf "$gate_race_root/run.lock"
+  rm -rf "$gate_race_root"/owner-release.*
+  rm -f "$gate_race_out/release-validated.successor-witness"
 
   # A stale releaser can read its own token, pause, and then take a live
   # successor's record. Kill it after that take but before token validation.
@@ -13049,22 +14310,6 @@ STUB
     # hard-link policy can then reject `ln` even though the file is readable.
     # If no canonical owner appeared, that access failure must stop this gate;
     # treating it as an ordinary lost race would allow an ownerless claim.
-    race_stub_bin="$gate_race_out/failing-remnant-link-bin"
-    mkdir -p "$race_stub_bin"
-    cat > "$race_stub_bin/ln" <<'STUB'
-#!/bin/sh
-if [ "$#" -eq 2 ]; then
-  case "$1" in
-    */owner.reclaiming.*)
-      case "$2" in
-        */run.lock/owner) exit 73 ;;
-      esac
-      ;;
-  esac
-fi
-exec /bin/ln "$@"
-STUB
-    chmod +x "$race_stub_bin/ln"
     mkdir -p "$gate_race_root/run.lock"
     {
       printf 'pid=%s\n' "$$"
@@ -13075,12 +14320,13 @@ STUB
       printf 'token=unrestorable-live-remnant-1-1\n'
     } > "$gate_race_root/run.lock/owner.reclaiming.release.unrestorable-fixture"
     : > "$gate_race_log"
-    if PATH="$race_stub_bin:$PATH" \
+    if NODE_ENV=test \
       AGENT_QUALITY_GATE_LOCK=1 \
       AGENT_QUALITY_GATE_LOCK_HELD='' \
       AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
       AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
       AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      AGENT_QUALITY_GATE_TEST_OWNER_RESTORE_LINK_FAILURE=1 \
       "$repo_root/scripts/agent-quality-gate.sh" \
       --base HEAD --run --lock-wait 5 \
       > "$gate_race_out/unrestorable-live-remnant.out" 2>&1; then
@@ -13139,6 +14385,439 @@ STUB
       fail "the unreadable-remnant fixture unexpectedly published a canonical owner"
     [[ -e "$gate_race_root/run.lock/owner.reclaiming.release.unreadable-fixture" ]] ||
       fail "the unreadable-remnant fixture discarded the only live owner evidence"
+    rm -rf "$gate_race_root/run.lock"
+
+    write_versioned_coordinator_owner() {
+      local path="$1"
+      local pid="$2"
+      local owner_id="$3"
+      local recorded_uid="$4"
+      {
+        printf 'pid=%s\n' "$pid"
+        printf 'uid=%s\n' "$recorded_uid"
+        printf 'host=%s\n' "$(uname -n)"
+        printf 'started_at=1\n'
+        printf 'start_utc=\n'
+        printf 'coordinator_start_utc=foreign-owner-fixture\n'
+        printf 'worktree=%s\n' "$gate_race_repo"
+        printf 'coordinator_token=%s\n' "$owner_id"
+        printf 'token=coordinator-owner-v1\n'
+      } > "$path"
+      chmod 640 "$path"
+    }
+
+    # A quarantine hard-link witnesses the exact remnant inode before the
+    # shared path moves. Replace that path with a byte-identical, same-token
+    # inode. The move must retain both inodes and fail closed.
+    live_remnant_original_id="live-remnant-original-$$-1"
+    live_remnant_path="$gate_race_root/run.lock/owner.reclaiming.live-replacement"
+    rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+    rm -f \
+      "$gate_race_out/live-remnant-discard.ready" \
+      "$gate_race_out/live-remnant-discard.release"
+    mkdir -p "$gate_race_root/run.lock"
+    write_versioned_coordinator_owner \
+      "$live_remnant_path" "$$" "$live_remnant_original_id" "$(id -u)"
+    : > "$gate_race_log"
+    (
+      if NODE_ENV=test \
+        AGENT_QUALITY_GATE_LOCK=1 \
+        AGENT_QUALITY_GATE_LOCK_HELD='' \
+        AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+        AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+        AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+        AGENT_QUALITY_GATE_TEST_OWNER_DISCARD_BARRIER="$gate_race_out/live-remnant-discard" \
+        "$repo_root/scripts/agent-quality-gate.sh" \
+        --base HEAD --run --lock-wait 8 \
+        > "$gate_race_out/live-remnant-replacement.out" 2>&1; then
+        printf '0\n'
+      else
+        printf '%s\n' "$?"
+      fi
+    ) > "$gate_race_out/live-remnant-replacement.status" &
+    live_remnant_waiter=$!
+    for _ in {1..600}; do
+      [[ -e "$gate_race_out/live-remnant-discard.ready" ]] && break
+      sleep 0.05
+    done
+    [[ -e "$gate_race_out/live-remnant-discard.ready" ]] || {
+      wait "$live_remnant_waiter" 2>/dev/null || true
+      fail "the live-remnant replacement fixture never reached its discard barrier"
+    }
+    rm -f "$live_remnant_path"
+    write_versioned_coordinator_owner \
+      "$live_remnant_path" "$$" "$live_remnant_original_id" "$(id -u)"
+    : > "$gate_race_out/live-remnant-discard.release"
+    wait "$live_remnant_waiter"
+    [[ "$(cat "$gate_race_out/live-remnant-replacement.status")" == "2" ]] ||
+      fail "live-remnant replacement before duplicate discard did not fail closed"
+    grep -q "owner inode changed before quarantine" \
+      "$gate_race_out/live-remnant-replacement.out" ||
+      fail "live-remnant replacement did not report the retained evidence"
+    grep -q "^coordinator_token=${live_remnant_original_id}$" \
+      "$gate_race_root/run.lock/owner" ||
+      fail "live-remnant replacement displaced the restored canonical owner"
+    live_remnant_quarantine="$(find "$gate_race_root/run.lock" -maxdepth 1 \
+      -name 'owner.reclaiming.quarantine.*' -type d -print | head -n1)"
+    [[ -n "$live_remnant_quarantine" ]] ||
+      fail "live-remnant replacement did not retain its private quarantine"
+    grep -q "^coordinator_token=${live_remnant_original_id}$" \
+      "$live_remnant_quarantine/anchor" ||
+      fail "live-remnant replacement changed the witnessed authority"
+    grep -q "^coordinator_token=${live_remnant_original_id}$" \
+      "$live_remnant_quarantine/record" ||
+      fail "live-remnant replacement changed the moved authority"
+    [[ ! "$live_remnant_quarantine/anchor" -ef "$live_remnant_quarantine/record" ]] ||
+      fail "the same-token replacement fixture did not create a new inode"
+    [[ ! -e "$live_remnant_path" ]] ||
+      fail "the pre-move replacement did not enter quarantine"
+    [[ -z "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+      fail "mapped work ran after live-remnant replacement"
+    [[ ! -e "$gate_race_root/condemned.d/${live_remnant_original_id}" ]] ||
+      fail "live-remnant replacement created a false drain obligation"
+    rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+
+    # Once the expected inode is inside quarantine, a new same-token record can
+    # appear at the original shared path. Private cleanup must not unlink it.
+    rm -f \
+      "$gate_race_out/live-remnant-quarantined.ready" \
+      "$gate_race_out/live-remnant-quarantined.release"
+    mkdir -p "$gate_race_root/run.lock"
+    write_versioned_coordinator_owner \
+      "$live_remnant_path" "$$" "$live_remnant_original_id" "$(id -u)"
+    : > "$gate_race_log"
+    (
+      if NODE_ENV=test \
+        AGENT_QUALITY_GATE_LOCK=1 \
+        AGENT_QUALITY_GATE_LOCK_HELD='' \
+        AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+        AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+        AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+        AGENT_QUALITY_GATE_TEST_OWNER_QUARANTINED_BARRIER="$gate_race_out/live-remnant-quarantined" \
+        "$repo_root/scripts/agent-quality-gate.sh" \
+        --base HEAD --run --lock-wait 8 \
+        > "$gate_race_out/live-remnant-post-quarantine.out" 2>&1; then
+        printf '0\n'
+      else
+        printf '%s\n' "$?"
+      fi
+    ) > "$gate_race_out/live-remnant-post-quarantine.status" &
+    live_remnant_waiter=$!
+    for _ in {1..600}; do
+      [[ -e "$gate_race_out/live-remnant-quarantined.ready" ]] && break
+      sleep 0.05
+    done
+    [[ -e "$gate_race_out/live-remnant-quarantined.ready" ]] || {
+      wait "$live_remnant_waiter" 2>/dev/null || true
+      fail "the post-quarantine replacement fixture never reached its barrier"
+    }
+    write_versioned_coordinator_owner \
+      "$live_remnant_path" "$$" "$live_remnant_original_id" "$(id -u)"
+    : > "$gate_race_out/live-remnant-quarantined.release"
+    wait "$live_remnant_waiter"
+    [[ "$(cat "$gate_race_out/live-remnant-post-quarantine.status")" == "2" ]] ||
+      fail "post-quarantine owner replacement did not fail closed"
+    grep -q "replacement quality-gate owner evidence appeared after quarantine" \
+      "$gate_race_out/live-remnant-post-quarantine.out" ||
+      fail "post-quarantine owner replacement was not reported"
+    live_remnant_quarantine="$(find "$gate_race_root/run.lock" -maxdepth 1 \
+      -name 'owner.reclaiming.quarantine.*' -type d -print | head -n1)"
+    [[ -n "$live_remnant_quarantine" ]] ||
+      fail "post-quarantine replacement lost the private owner evidence"
+    [[ "$live_remnant_quarantine/anchor" -ef "$live_remnant_quarantine/record" ]] ||
+      fail "post-quarantine replacement changed the quarantined inode"
+    grep -q "^coordinator_token=${live_remnant_original_id}$" \
+      "$live_remnant_path" ||
+      fail "post-quarantine replacement was deleted or changed"
+    [[ ! "$live_remnant_path" -ef "$live_remnant_quarantine/record" ]] ||
+      fail "post-quarantine replacement did not create a distinct inode"
+    grep -q "^coordinator_token=${live_remnant_original_id}$" \
+      "$gate_race_root/run.lock/owner" ||
+      fail "post-quarantine replacement displaced the canonical owner"
+    [[ -z "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+      fail "mapped work ran after post-quarantine owner replacement"
+    rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+
+    # A current gate must use coordinator_token= to recover a same-user dead
+    # coordinator. Rejecting every versioned owner would preserve foreign
+    # evidence, but it would also wedge the owning user's normal recovery path.
+    same_uid_dead_pid="$(fresh_dead_pid)" ||
+      fail "could not allocate a dead pid for the same-uid coordinator fixture"
+    same_uid_owner_id="same-uid-owner-${same_uid_dead_pid}-1"
+    rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+    rm -f "$gate_race_root/holder.${same_uid_owner_id}"
+    mkdir -p "$gate_race_root/run.lock"
+    write_versioned_coordinator_owner \
+      "$gate_race_root/run.lock/owner" "$same_uid_dead_pid" \
+      "$same_uid_owner_id" "$(id -u)"
+    printf '%s\n' "$same_uid_owner_id" > "$gate_race_root/holder.${same_uid_owner_id}"
+    : > "$gate_race_log"
+    if AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 10 \
+      > "$gate_race_out/same-uid-versioned-owner.out" 2>&1; then
+      same_uid_status=0
+    else
+      same_uid_status=$?
+    fi
+    [[ "$same_uid_status" -eq 0 ]] ||
+      fail "a stale same-uid versioned coordinator owner must recover; got ${same_uid_status}"
+    grep -q "reclaiming it" "$gate_race_out/same-uid-versioned-owner.out" ||
+      fail "same-uid versioned coordinator recovery did not reclaim the dead owner"
+    [[ -n "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+      fail "same-uid versioned coordinator recovery did not run mapped work"
+    [[ ! -e "$gate_race_root/run.lock" ]] ||
+      fail "same-uid versioned coordinator recovery did not release its lock"
+    [[ ! -e "$gate_race_root/condemned.d/${same_uid_owner_id}" ]] ||
+      fail "same-uid versioned coordinator recovery left its drain obligation"
+
+    run_foreign_coordinator_owner_case() {
+      local kind="$1"
+      local dead_pid owner_id owner_path owner_evidence status
+      dead_pid="$(fresh_dead_pid)" ||
+        fail "could not allocate a dead pid for the foreign-owner ${kind} fixture"
+      owner_id="foreign-owner-${dead_pid}-1"
+      rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+      rm -f "$gate_race_root/holder.${owner_id}"
+      mkdir -p "$gate_race_root/run.lock"
+      if [[ "$kind" == "canonical" ]]; then
+        owner_path="$gate_race_root/run.lock/owner"
+      else
+        owner_path="$gate_race_root/run.lock/owner.reclaiming.foreign-fixture"
+      fi
+      write_versioned_coordinator_owner \
+        "$owner_path" "$dead_pid" "$owner_id" "$(( $(id -u) + 1 ))"
+      printf '%s\n' "$owner_id" > "$gate_race_root/holder.${owner_id}"
+      chmod 600 "$gate_race_root/holder.${owner_id}"
+      : > "$gate_race_log"
+      if AGENT_QUALITY_GATE_LOCK=1 \
+        AGENT_QUALITY_GATE_LOCK_HELD='' \
+        AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+        AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+        AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+        "$repo_root/scripts/agent-quality-gate.sh" \
+        --base HEAD --run --lock-wait 5 \
+        > "$gate_race_out/foreign-owner-${kind}.out" 2>&1; then
+        status=0
+      else
+        status=$?
+      fi
+      [[ "$status" -eq 2 ]] ||
+        fail "a stale foreign ${kind} owner must fail closed with status 2; got ${status}"
+      grep -q "belongs to another user or has inconsistent uid metadata" \
+        "$gate_race_out/foreign-owner-${kind}.out" ||
+        fail "a stale foreign ${kind} owner did not report its ownership boundary"
+      [[ -z "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+        fail "mapped work ran after a stale foreign ${kind} owner"
+      if [[ "$kind" == "canonical" ]]; then
+        owner_evidence="$gate_race_root/run.lock/owner"
+      else
+        owner_evidence="$owner_path"
+      fi
+      [[ -f "$owner_evidence" ]] ||
+        fail "stale foreign ${kind} owner evidence was discarded"
+      grep -q "^coordinator_token=${owner_id}$" "$owner_evidence" ||
+        fail "stale foreign ${kind} owner evidence changed identity"
+      [[ -f "$gate_race_root/holder.${owner_id}" ]] ||
+        fail "stale foreign ${kind} generation evidence was removed"
+      [[ ! -e "$gate_race_root/condemned.d/${owner_id}" ]] ||
+        fail "stale foreign ${kind} owner was converted to an unsafe local drain"
+    }
+
+    run_foreign_coordinator_owner_case canonical
+    run_foreign_coordinator_owner_case hidden
+
+    # A successor can publish after this waiter takes the stale foreign owner.
+    # Cleanup must retain the foreign remnant instead of condemning it under
+    # the current uid before it yields to that successor.
+    race_dead_pid="$(fresh_dead_pid)" ||
+      fail "could not allocate a dead pid for the foreign-owner restore fixture"
+    foreign_restore_id="foreign-restore-${race_dead_pid}-1"
+    foreign_successor_id="foreign-successor-$$-1"
+    rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+    rm -f "$gate_race_root/holder.${foreign_restore_id}"
+    mkdir -p "$gate_race_root/run.lock"
+    write_versioned_coordinator_owner \
+      "$gate_race_root/run.lock/owner" "$race_dead_pid" "$foreign_restore_id" \
+      "$(( $(id -u) + 1 ))"
+    printf '%s\n' "$foreign_restore_id" > "$gate_race_root/holder.${foreign_restore_id}"
+    chmod 600 "$gate_race_root/holder.${foreign_restore_id}"
+    : > "$gate_race_log"
+    rm -f "$gate_race_out/foreign-taken.ready" "$gate_race_out/foreign-taken.release"
+    (
+      if AGENT_QUALITY_GATE_LOCK=1 \
+        AGENT_QUALITY_GATE_LOCK_HELD='' \
+        AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+        AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+        AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+        NODE_ENV=test \
+        AGENT_QUALITY_GATE_TEST_LOCK_TAKEN_BARRIER="$gate_race_out/foreign-taken" \
+        "$repo_root/scripts/agent-quality-gate.sh" \
+        --base HEAD --run --lock-wait 8 \
+        > "$gate_race_out/foreign-owner-restore.out" 2>&1; then
+        printf '0\n'
+      else
+        printf '%s\n' "$?"
+      fi
+    ) > "$gate_race_out/foreign-owner-restore.status" &
+    foreign_restore_waiter=$!
+    for _ in {1..600}; do
+      [[ -e "$gate_race_out/foreign-taken.ready" ]] && break
+      sleep 0.05
+    done
+    [[ -e "$gate_race_out/foreign-taken.ready" ]] || {
+      wait "$foreign_restore_waiter" 2>/dev/null || true
+      fail "the foreign-owner restore fixture never reached its take barrier"
+    }
+    foreign_taken_record="$(find "$gate_race_root/run.lock" -maxdepth 1 \
+      -name 'owner.reclaiming.*' -type f -print | head -n1)"
+    [[ -n "$foreign_taken_record" ]] ||
+      fail "the foreign-owner restore fixture did not retain its taken record"
+    {
+      printf 'pid=%s\n' "$$"
+      printf 'uid=%s\n' "$(id -u)"
+      printf 'host=%s\n' "$(uname -n)"
+      printf 'start_utc=\n'
+      printf 'worktree=%s\n' "$gate_race_repo"
+      printf 'token=%s\n' "$foreign_successor_id"
+    } > "$gate_race_root/run.lock/owner"
+    : > "$gate_race_out/foreign-taken.release"
+    wait "$foreign_restore_waiter"
+    [[ "$(cat "$gate_race_out/foreign-owner-restore.status")" == "2" ]] ||
+      fail "foreign-owner restore-before-discard did not fail closed"
+    grep -q "^token=${foreign_successor_id}$" \
+      "$gate_race_root/run.lock/owner" ||
+      fail "foreign-owner cleanup displaced the live successor"
+    [[ -f "$foreign_taken_record" ]] ||
+      fail "foreign-owner cleanup discarded the retained remnant"
+    grep -q "^coordinator_token=${foreign_restore_id}$" \
+      "$foreign_taken_record" ||
+      fail "foreign-owner cleanup changed the retained remnant identity"
+    [[ -f "$gate_race_root/holder.${foreign_restore_id}" ]] ||
+      fail "foreign-owner cleanup removed the retained generation evidence"
+    [[ ! -e "$gate_race_root/condemned.d/${foreign_restore_id}" ]] ||
+      fail "foreign-owner cleanup published an unsafe local drain obligation"
+    [[ -z "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+      fail "mapped work ran during foreign-owner restore-before-discard"
+    rm -rf "$gate_race_root/run.lock"
+    rm -f "$gate_race_root/holder.${foreign_restore_id}"
+
+    # Bind the token used for condemnation to the record that passed the uid
+    # and inode checks. This barrier replaces the taken path after the first
+    # snapshot. The gate must retain the replacement and stop before work.
+    replacement_dead_pid="$(fresh_dead_pid)" ||
+      fail "could not allocate a dead pid for the owner-replacement fixture"
+    replacement_original_id="replacement-original-${replacement_dead_pid}-1"
+    replacement_new_id="replacement-new-${replacement_dead_pid}-1"
+    rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+    rm -f "$gate_race_out/owner-discard.ready" "$gate_race_out/owner-discard.release"
+    mkdir -p "$gate_race_root/run.lock"
+    write_versioned_coordinator_owner \
+      "$gate_race_root/run.lock/owner" "$replacement_dead_pid" \
+      "$replacement_original_id" "$(id -u)"
+    : > "$gate_race_log"
+    (
+      if NODE_ENV=test \
+        AGENT_QUALITY_GATE_LOCK=1 \
+        AGENT_QUALITY_GATE_LOCK_HELD='' \
+        AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+        AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+        AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+        AGENT_QUALITY_GATE_TEST_OWNER_DISCARD_BARRIER="$gate_race_out/owner-discard" \
+        "$repo_root/scripts/agent-quality-gate.sh" \
+        --base HEAD --run --lock-wait 10 \
+        > "$gate_race_out/owner-replacement.out" 2>&1; then
+        printf '0\n'
+      else
+        printf '%s\n' "$?"
+      fi
+    ) > "$gate_race_out/owner-replacement.status" &
+    replacement_waiter=$!
+    for _ in {1..600}; do
+      [[ -e "$gate_race_out/owner-discard.ready" ]] && break
+      sleep 0.05
+    done
+    [[ -e "$gate_race_out/owner-discard.ready" ]] || {
+      wait "$replacement_waiter" 2>/dev/null || true
+      fail "the owner-replacement fixture never reached its discard barrier"
+    }
+    replacement_taken_record="$(find "$gate_race_root/run.lock" -maxdepth 1 \
+      -name 'owner.reclaiming.*' -type f -print | head -n1)"
+    [[ -n "$replacement_taken_record" ]] ||
+      fail "the owner-replacement fixture did not expose its taken record"
+    rm -f "$replacement_taken_record"
+    write_versioned_coordinator_owner \
+      "$replacement_taken_record" "$replacement_dead_pid" \
+      "$replacement_new_id" "$(( $(id -u) + 1 ))"
+    printf '%s\n' "$replacement_new_id" > "$gate_race_root/holder.${replacement_new_id}"
+    : > "$gate_race_out/owner-discard.release"
+    wait "$replacement_waiter"
+    [[ "$(cat "$gate_race_out/owner-replacement.status")" == "2" ]] ||
+      fail "owner replacement before discard did not fail closed"
+    grep -q "owner inode changed before quarantine" \
+      "$gate_race_out/owner-replacement.out" ||
+      fail "owner replacement before discard did not report the identity change"
+    [[ -z "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+      fail "mapped work ran after owner replacement before discard"
+    [[ ! -e "$gate_race_root/run.lock/owner" ]] ||
+      fail "owner replacement unexpectedly became canonical"
+    replacement_quarantine="$(find "$gate_race_root/run.lock" -maxdepth 1 \
+      -name 'owner.reclaiming.quarantine.*' -type d -print | head -n1)"
+    [[ -n "$replacement_quarantine" ]] ||
+      fail "owner replacement did not retain its private quarantine"
+    grep -q "^coordinator_token=${replacement_original_id}$" \
+      "$replacement_quarantine/anchor" ||
+      fail "owner replacement lost the original inode witness"
+    grep -q "^coordinator_token=${replacement_new_id}$" \
+      "$replacement_quarantine/record" ||
+      fail "owner replacement lost the replacement inode"
+    [[ ! "$replacement_quarantine/anchor" -ef "$replacement_quarantine/record" ]] ||
+      fail "owner replacement did not retain distinct inodes"
+    [[ -f "$gate_race_root/condemned.d/${replacement_original_id}" ]] ||
+      fail "owner replacement lost the original drain obligation"
+    [[ ! -e "$gate_race_root/condemned.d/${replacement_new_id}" ]] ||
+      fail "owner replacement condemned the unverified replacement identity"
+    [[ -f "$gate_race_root/holder.${replacement_new_id}" ]] ||
+      fail "owner replacement removed the replacement generation evidence"
+    rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+    rm -f "$gate_race_root/holder.${replacement_new_id}"
+
+    # A normal non-root test cannot create a foreign-owned inode. Exercise the
+    # real -O boundary when the fixture has that privilege; the Node mirror has
+    # an always-on effective-UID regression below.
+    inode_dead_pid="$(fresh_dead_pid)" ||
+      fail "could not allocate a dead pid for the foreign-inode fixture"
+    inode_owner_id="foreign-inode-${inode_dead_pid}-1"
+    inode_foreign_uid=$(( $(id -u) + 1 ))
+    mkdir -p "$gate_race_root/run.lock"
+    write_versioned_coordinator_owner \
+      "$gate_race_root/run.lock/owner" "$inode_dead_pid" \
+      "$inode_owner_id" "$inode_foreign_uid"
+    if chown "$inode_foreign_uid" "$gate_race_root/run.lock/owner" 2>/dev/null; then
+      : > "$gate_race_log"
+      if AGENT_QUALITY_GATE_LOCK=1 \
+        AGENT_QUALITY_GATE_LOCK_HELD='' \
+        AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+        AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+        AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+        "$repo_root/scripts/agent-quality-gate.sh" \
+        --base HEAD --run --lock-wait 5 \
+        > "$gate_race_out/foreign-inode-owner.out" 2>&1; then
+        inode_status=0
+      else
+        inode_status=$?
+      fi
+      [[ "$inode_status" -eq 2 ]] ||
+        fail "a stale foreign-owned inode must fail closed; got ${inode_status}"
+      [[ -z "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+        fail "mapped work ran after a stale foreign-owned inode"
+      [[ -f "$gate_race_root/run.lock/owner" ]] ||
+        fail "stale foreign-owned inode evidence was discarded"
+    fi
     rm -rf "$gate_race_root/run.lock"
 
     run_unsafe_canonical_owner_case() {
@@ -14395,6 +16074,97 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   [[ ! -e "$race_pattern_pgrep_called" ]] ||
     fail "a failed run-token pattern build still called pgrep"
 
+  # lsof follows a symlink passed as a pathname on macOS. A shared-root marker
+  # symlink must fail before lsof can return an unrelated PID. The scan creates
+  # and validates only a private hard-link witness.
+  race_symlink_token="fixture.symlink-1-1"
+  race_symlink_target="$gate_race_out/symlink-marker-target"
+  race_symlink_marker="$gate_race_root/holder.${race_symlink_token}"
+  race_symlink_lsof_called="$gate_race_out/symlink-marker-lsof-called"
+  rm -f "$race_symlink_target" "$race_symlink_marker" \
+    "$race_symlink_lsof_called"
+  rm -rf "$gate_race_root"/.holder-lsof-witness.*
+  printf '%s\n' "$race_symlink_token" > "$race_symlink_target"
+  ln -s "$race_symlink_target" "$race_symlink_marker"
+  race_symlink_output="$(
+    gate_drain_scan_error="agentqg-scan-failed"
+    gate_lock_root_dir="$gate_race_root"
+    gate_lock_local_host_fingerprint="$(node -e '
+      const { createHash } = require("node:crypto");
+      process.stdout.write(createHash("sha256")
+        .update(process.argv[1], "utf8").digest("hex"));
+    ' "$(uname -n)")"
+    source "$repo_root/scripts/gate/run-handles.sh"
+    pgrep() { return 1; }
+    lsof() {
+      : > "$race_symlink_lsof_called"
+      printf '1\n'
+      return 0
+    }
+    gate_run_tagged_pids "$race_symlink_token"
+  )"
+  [[ "$race_symlink_output" == "agentqg-scan-failed" ]] ||
+    fail "a symlink marker scan selected an unrelated PID"
+  [[ ! -e "$race_symlink_lsof_called" ]] ||
+    fail "a symlink marker reached lsof instead of failing closed"
+  [[ -L "$race_symlink_marker" ]] ||
+    fail "a symlink marker scan mutated the canonical path"
+  [[ -z "$(find "$gate_race_root" -maxdepth 1 -type d \
+    -name '.holder-lsof-witness.v1.*' -print -quit)" ]] ||
+    fail "a rejected symlink marker leaked its private scan witness"
+  rm -f "$race_symlink_marker" "$race_symlink_target"
+  rm -rf "$gate_race_root"/.holder-lsof-witness.*
+
+  # A valid marker scan must pass lsof the private hard-link witness, not the
+  # shared canonical path. The witness must name the same inode during lsof and
+  # private cleanup must leave no scan directory behind.
+  race_valid_lsof_token="fixture.valid-lsof-424242-123456789"
+  race_valid_lsof_marker="$gate_race_root/holder.${race_valid_lsof_token}"
+  race_valid_lsof_facts="$gate_race_out/valid-marker-lsof-facts"
+  rm -f "$race_valid_lsof_marker" "$race_valid_lsof_facts"
+  rm -rf "$gate_race_root"/.holder-lsof-witness.*
+  printf '%s\n' "$race_valid_lsof_token" > "$race_valid_lsof_marker"
+  chmod 600 "$race_valid_lsof_marker"
+  race_valid_lsof_identity="$(race_file_identity "$race_valid_lsof_marker")"
+  race_valid_lsof_output="$(
+    gate_drain_scan_error="agentqg-scan-failed"
+    gate_lock_root_dir="$gate_race_root"
+    gate_lock_local_host_fingerprint="$(node -e '
+      const { createHash } = require("node:crypto");
+      process.stdout.write(createHash("sha256")
+        .update(process.argv[1], "utf8").digest("hex"));
+    ' "$(uname -n)")"
+    source "$repo_root/scripts/gate/run-handles.sh"
+    pgrep() { return 1; }
+    lsof() {
+      local path=""
+      local same_inode="no"
+      for path in "$@"; do :; done
+      [[ "$path" -ef "$race_valid_lsof_marker" ]] && same_inode="yes"
+      printf '%s|%s\n' "$path" "$same_inode" > "$race_valid_lsof_facts"
+      printf '424242\n'
+      return 0
+    }
+    gate_run_tagged_pids "$race_valid_lsof_token"
+  )"
+  [[ "$race_valid_lsof_output" == "424242" ]] ||
+    fail "a valid marker lsof scan did not emit only its known PID"
+  IFS='|' read -r race_valid_lsof_path race_valid_lsof_same_inode \
+    < "$race_valid_lsof_facts"
+  case "$race_valid_lsof_path" in
+    "$gate_race_root"/.holder-lsof-witness.v1.*/marker) ;;
+    *) fail "a valid marker scan passed lsof the canonical holder path" ;;
+  esac
+  [[ "$race_valid_lsof_same_inode" == "yes" ]] ||
+    fail "the private lsof witness did not name the canonical marker inode"
+  [[ "$(race_file_identity "$race_valid_lsof_marker")" == \
+    "$race_valid_lsof_identity" ]] ||
+    fail "a valid lsof marker scan mutated the canonical marker"
+  [[ -z "$(find "$gate_race_root" -maxdepth 1 -type d \
+    -name '.holder-lsof-witness.v1.*' -print -quit)" ]] ||
+    fail "a valid marker scan leaked its private lsof witness"
+  rm -f "$race_valid_lsof_marker" "$race_valid_lsof_facts"
+
   # A scan that fails is not a scan that finds nothing. With `pgrep` exiting 2
   # — a real failure, not "no match" — a run inheriting an obligation cannot
   # tell whether anything is left, and must refuse to execute rather than
@@ -14729,10 +16499,18 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   # the suite can kill a run at each and assert the next one still recovers —
   # so a future change to this path is checked against the enumeration rather
   # than rediscovered. The mechanics note lists what each state looks like.
-  for race_crash_point in after-mkdir after-staged after-link after-take; do
+  for race_crash_point in \
+    after-mkdir \
+    after-staged \
+    after-link \
+    after-take \
+    after-owner-quarantine-anchor \
+    after-owner-quarantine-fallback \
+    after-owner-quarantine-take; do
     rm -rf "$gate_race_root/run.lock"
     : > "$gate_race_log"
-    if [[ "$race_crash_point" == "after-take" ]]; then
+    if [[ "$race_crash_point" == "after-take" ||
+      "$race_crash_point" == after-owner-quarantine-* ]]; then
       # Reached only with a record to take: plant a spent one.
       race_dead_pid="$(fresh_dead_pid)" ||
         fail "${race_crash_point}: could not obtain a reaped PID that reads as dead"

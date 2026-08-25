@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
   accessSync,
@@ -33,6 +33,10 @@ export const LEGACY_RUN_LOCK_INTEGRATION = Object.freeze({
   coordinatorHoldsLockUntilIdle: true,
   markerHeldOpen: true,
 });
+
+const LEGACY_COORDINATOR_OWNER_TOKEN = "coordinator-owner-v1";
+const OWNER_QUARANTINE_PREFIX = "owner.reclaiming.quarantine.v1";
+const HOLDER_QUARANTINE_PREFIX = "holder.reclaiming.quarantine.v1";
 
 function processSnapshot(pid) {
   try {
@@ -112,6 +116,172 @@ function ownerFieldsFromText(value) {
   return fields;
 }
 
+function legacyOwnerAuthorityToken(fields) {
+  return fields.coordinator_token || fields.token;
+}
+
+function requireNoFollowSupport() {
+  if (!Number.isInteger(constants.O_NOFOLLOW)) {
+    throw new CoordinatorError(
+      "LEGACY_LOCK_UNSAFE",
+      "this platform does not provide O_NOFOLLOW for legacy owner validation",
+    );
+  }
+}
+
+function requireCurrentUserRegularFile(
+  stat,
+  label = "legacy owner",
+  expectedUid = typeof process.getuid === "function"
+    ? BigInt(process.getuid())
+    : null,
+) {
+  if (!stat.isFile()) {
+    throw new CoordinatorError(
+      "LEGACY_LOCK_UNSAFE",
+      `${label} is not a regular file`,
+    );
+  }
+  if (expectedUid !== null && stat.uid !== expectedUid) {
+    throw new CoordinatorError(
+      "LEGACY_LOCK_FOREIGN_OWNER",
+      `${label} is not a current-user regular file`,
+    );
+  }
+}
+
+function sameInode(first, second) {
+  return first.dev === second.dev && first.ino === second.ino;
+}
+
+function quarantineHostFingerprint() {
+  return createHash("sha256").update(hostname(), "utf8").digest("hex");
+}
+
+function currentUserOwnerSnapshot(path, afterRead = null, expectedUid = null) {
+  let descriptor;
+  let pathDescriptor;
+  try {
+    requireNoFollowSupport();
+    descriptor = openSync(
+      path,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
+    const before = fstatSync(descriptor, { bigint: true });
+    const requiredUid =
+      expectedUid ??
+      (typeof process.getuid === "function" ? BigInt(process.getuid()) : null);
+    requireCurrentUserRegularFile(before, "legacy owner", requiredUid);
+    const text = readFileSync(descriptor, "utf8");
+    const after = fstatSync(descriptor, { bigint: true });
+    requireCurrentUserRegularFile(after, "legacy owner", requiredUid);
+    if (!sameInode(before, after)) {
+      throw new CoordinatorError(
+        "LEGACY_LOCK_UNSAFE",
+        "legacy owner identity changed while it was read",
+      );
+    }
+    if (afterRead) afterRead({ path, stat: after });
+    pathDescriptor = openSync(
+      path,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
+    const pathStat = fstatSync(pathDescriptor, { bigint: true });
+    requireCurrentUserRegularFile(pathStat, "legacy owner", requiredUid);
+    if (!sameInode(after, pathStat)) {
+      throw new CoordinatorError(
+        "LEGACY_LOCK_UNSAFE",
+        "legacy owner pathname changed while it was read",
+      );
+    }
+    const uidLines = text.match(/^uid=.*$/gm) ?? [];
+    const coordinatorTokenLines = text.match(/^coordinator_token=.*$/gm) ?? [];
+    const tokenLines = text.match(/^token=.*$/gm) ?? [];
+    if (
+      uidLines.length > 1 ||
+      coordinatorTokenLines.length > 1 ||
+      tokenLines.length > 1
+    ) {
+      throw new CoordinatorError(
+        "LEGACY_LOCK_UNSAFE",
+        "legacy owner contains duplicate authority fields",
+      );
+    }
+    const fields = ownerFieldsFromText(text);
+    if (uidLines.length === 1) {
+      const currentUid = process.getuid?.();
+      if (!/^(?:0|[1-9][0-9]*)$/.test(fields.uid ?? "")) {
+        throw new CoordinatorError(
+          "LEGACY_LOCK_FOREIGN_OWNER",
+          "legacy owner uid metadata is invalid",
+        );
+      }
+      if (currentUid !== undefined && fields.uid !== String(currentUid)) {
+        throw new CoordinatorError(
+          "LEGACY_LOCK_FOREIGN_OWNER",
+          "legacy owner uid does not match the current user",
+        );
+      }
+    }
+    return { fields, stat: after, text };
+  } catch (error) {
+    if (error instanceof CoordinatorError) throw error;
+    if (error.code === "ENOENT") throw error;
+    throw new CoordinatorError(
+      "LEGACY_LOCK_UNSAFE",
+      `could not read one stable legacy owner: ${error.message}`,
+    );
+  } finally {
+    if (pathDescriptor !== undefined) closeSync(pathDescriptor);
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
+function pathMatchesSnapshot(path, snapshot) {
+  try {
+    const stat = lstatSync(path, { bigint: true });
+    return (
+      stat.isFile() &&
+      !stat.isSymbolicLink() &&
+      stat.dev === snapshot.stat.dev &&
+      stat.ino === snapshot.stat.ino
+    );
+  } catch {
+    return false;
+  }
+}
+
+function requireMatchingOwnerSnapshot(snapshot, expected, phase) {
+  if (
+    !sameInode(snapshot.stat, expected.stat) ||
+    snapshot.text !== expected.text ||
+    legacyOwnerAuthorityToken(snapshot.fields) !==
+      legacyOwnerAuthorityToken(expected.fields)
+  ) {
+    throw new CoordinatorError(
+      "LEGACY_LOCK_UNSAFE",
+      `legacy owner inode or authority changed during ${phase}`,
+    );
+  }
+}
+
+function requireMatchingMarkerSnapshot(
+  snapshot,
+  expectedStat,
+  expectedText,
+  phase,
+) {
+  if (
+    !sameInode(snapshot.stat, expectedStat) ||
+    snapshot.text !== expectedText
+  ) {
+    throw new CoordinatorError(
+      "LEGACY_LOCK_UNSAFE",
+      `legacy holder marker inode or content changed during ${phase}`,
+    );
+  }
+}
+
 export function ownerFields(path) {
   if (!existsSync(path)) return {};
   return ownerFieldsFromText(readFileSync(path, "utf8"));
@@ -123,12 +293,14 @@ export function legacyOwnerRecordText(record) {
   // New coordinators read coordinator_start_utc from one file snapshot.
   return [
     `pid=${record.pid}`,
+    `uid=${record.uid ?? ""}`,
     `host=${record.host}`,
     `started_at=${record.startedAt}`,
     "start_utc=",
     `coordinator_start_utc=${record.startUtc}`,
     `worktree=${record.worktree}`,
-    `token=${record.token}`,
+    `coordinator_token=${record.token}`,
+    `token=${LEGACY_COORDINATOR_OWNER_TOKEN}`,
     "",
   ].join("\n");
 }
@@ -160,7 +332,10 @@ function legacyOwnerCompatibilityMode(path) {
 }
 
 function setTextMode(path, mode) {
-  const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const descriptor = openSync(
+    path,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  );
   try {
     const stat = fstatSync(descriptor);
     if (
@@ -188,7 +363,255 @@ function fsyncDirectory(path) {
   }
 }
 
-function removeInertLegacyOwnerStages(lockDirectory) {
+function pathEntryExists(path) {
+  try {
+    lstatSync(path);
+    return true;
+  } catch (error) {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+function requirePrivateQuarantineDirectory(
+  path,
+  expectedStat = null,
+  expectedUid = typeof process.getuid === "function"
+    ? BigInt(process.getuid())
+    : null,
+) {
+  const stat = lstatSync(path, { bigint: true });
+  if (
+    !stat.isDirectory() ||
+    stat.isSymbolicLink() ||
+    (expectedUid !== null && stat.uid !== expectedUid) ||
+    (stat.mode & 0o777n) !== 0o700n ||
+    (expectedStat && !sameInode(stat, expectedStat))
+  ) {
+    throw new CoordinatorError(
+      "LEGACY_LOCK_UNSAFE",
+      `legacy owner quarantine is not one current-user mode-0700 directory: ${path}`,
+    );
+  }
+  return stat;
+}
+
+function createOwnerQuarantine(
+  lockDirectory,
+  expectedUid = typeof process.getuid === "function"
+    ? BigInt(process.getuid())
+    : null,
+  quarantinePrefix = OWNER_QUARANTINE_PREFIX,
+) {
+  requireNoFollowSupport();
+  if (!Number.isInteger(constants.O_DIRECTORY)) {
+    throw new CoordinatorError(
+      "LEGACY_LOCK_UNSAFE",
+      "this platform does not provide O_DIRECTORY for owner quarantine",
+    );
+  }
+  const path = join(
+    lockDirectory,
+    `${quarantinePrefix}.${quarantineHostFingerprint()}.${process.pid}.${randomUUID()}`,
+  );
+  mkdirSync(path, { mode: 0o700 });
+  let descriptor;
+  try {
+    descriptor = openSync(
+      path,
+      constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+    );
+    let stat = fstatSync(descriptor, { bigint: true });
+    if (
+      !stat.isDirectory() ||
+      (expectedUid !== null && stat.uid !== expectedUid)
+    ) {
+      throw new CoordinatorError(
+        "LEGACY_LOCK_UNSAFE",
+        "legacy owner quarantine is not a current-user directory",
+      );
+    }
+    fchmodSync(descriptor, 0o700);
+    fsyncSync(descriptor);
+    stat = fstatSync(descriptor, { bigint: true });
+    requirePrivateQuarantineDirectory(path, stat, expectedUid);
+    return { path, stat };
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
+function quarantineAndDiscardOwner({
+  sourcePath,
+  expectedSnapshot,
+  lockDirectory,
+  sourceDirectory = lockDirectory,
+  canonicalPath = null,
+  phase,
+  shouldTake = null,
+  afterWitness = null,
+  beforeTake = null,
+  afterTake = null,
+  quarantinePrefix = OWNER_QUARANTINE_PREFIX,
+}) {
+  const expectedToken =
+    legacyOwnerAuthorityToken(expectedSnapshot.fields) ?? "";
+  const expectedUid = expectedSnapshot.stat.uid;
+  const initial = currentUserOwnerSnapshot(sourcePath, null, expectedUid);
+  requireMatchingOwnerSnapshot(initial, expectedSnapshot, phase);
+  const quarantine = createOwnerQuarantine(
+    lockDirectory,
+    expectedUid,
+    quarantinePrefix,
+  );
+  const anchorPath = join(quarantine.path, "anchor");
+  const takenPath = join(quarantine.path, "record");
+  const fallbackPath = join(quarantine.path, "fallback-ready");
+  let evidenceCreated = false;
+  try {
+    linkSync(sourcePath, anchorPath);
+    evidenceCreated = true;
+    fsyncDirectory(quarantine.path);
+    const anchorSnapshot = currentUserOwnerSnapshot(
+      anchorPath,
+      null,
+      expectedUid,
+    );
+    requireMatchingOwnerSnapshot(anchorSnapshot, expectedSnapshot, phase);
+    if (afterWitness) {
+      afterWitness({
+        sourcePath,
+        quarantinePath: quarantine.path,
+        anchorPath,
+        takenPath,
+      });
+    }
+    const witnessedCanonicalPath =
+      typeof canonicalPath === "function" ? canonicalPath() : canonicalPath;
+    if (witnessedCanonicalPath) {
+      const canonicalSnapshot = currentUserOwnerSnapshot(
+        witnessedCanonicalPath,
+        null,
+        expectedUid,
+      );
+      requireMatchingOwnerSnapshot(canonicalSnapshot, expectedSnapshot, phase);
+    }
+    if (
+      shouldTake &&
+      !shouldTake({
+        sourcePath,
+        quarantinePath: quarantine.path,
+        anchorPath,
+        takenPath,
+      })
+    ) {
+      const currentSource = currentUserOwnerSnapshot(
+        sourcePath,
+        null,
+        expectedUid,
+      );
+      requireMatchingOwnerSnapshot(currentSource, expectedSnapshot, phase);
+      unlinkSync(anchorPath);
+      fsyncDirectory(quarantine.path);
+      rmdirSync(quarantine.path);
+      fsyncDirectory(lockDirectory);
+      return false;
+    }
+    writeText(fallbackPath, `${expectedToken}\n`);
+    fsyncDirectory(quarantine.path);
+    if (beforeTake) {
+      beforeTake({
+        sourcePath,
+        quarantinePath: quarantine.path,
+        anchorPath,
+        takenPath,
+      });
+    }
+    renameSync(sourcePath, takenPath);
+    if (sourceDirectory !== lockDirectory) fsyncDirectory(sourceDirectory);
+    fsyncDirectory(lockDirectory);
+    fsyncDirectory(quarantine.path);
+    const takenSnapshot = currentUserOwnerSnapshot(
+      takenPath,
+      null,
+      expectedUid,
+    );
+    requireMatchingOwnerSnapshot(takenSnapshot, expectedSnapshot, phase);
+    if (afterTake) {
+      afterTake({
+        sourcePath,
+        quarantinePath: quarantine.path,
+        anchorPath,
+        takenPath,
+      });
+    }
+    const verifiedTaken = currentUserOwnerSnapshot(
+      takenPath,
+      null,
+      expectedUid,
+    );
+    requireMatchingOwnerSnapshot(verifiedTaken, expectedSnapshot, phase);
+    requirePrivateQuarantineDirectory(
+      quarantine.path,
+      quarantine.stat,
+      expectedUid,
+    );
+    const finalCanonicalPath =
+      typeof canonicalPath === "function" ? canonicalPath() : canonicalPath;
+    if (finalCanonicalPath) {
+      const canonicalSnapshot = currentUserOwnerSnapshot(
+        finalCanonicalPath,
+        null,
+        expectedUid,
+      );
+      requireMatchingOwnerSnapshot(canonicalSnapshot, expectedSnapshot, phase);
+    }
+    if (pathEntryExists(sourcePath)) {
+      throw new CoordinatorError(
+        "LEGACY_LOCK_UNSAFE",
+        `replacement legacy owner evidence appeared after ${phase}; retained ${sourcePath}`,
+      );
+    }
+    unlinkSync(takenPath);
+    unlinkSync(anchorPath);
+    unlinkSync(fallbackPath);
+    fsyncDirectory(quarantine.path);
+    rmdirSync(quarantine.path);
+    fsyncDirectory(lockDirectory);
+    return true;
+  } catch (error) {
+    if (!evidenceCreated) {
+      try {
+        if (readdirSync(quarantine.path).length === 0) {
+          rmdirSync(quarantine.path);
+          fsyncDirectory(lockDirectory);
+        }
+      } catch {
+        // Retain any path that is no longer the empty quarantine we created.
+      }
+    }
+    throw error;
+  }
+}
+
+function processMayOwnInertStage(pid) {
+  const snapshot = processSnapshot(pid);
+  if (snapshot) return !snapshot.state.startsWith("Z");
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code !== "ESRCH";
+  }
+}
+
+function removeInertLegacyOwnerStages(
+  lockDirectory,
+  {
+    publisherMayOwn = processMayOwnInertStage,
+    beforeWitnessedPublisherCheck = null,
+  } = {},
+) {
   let removed = false;
   for (const name of readdirSync(lockDirectory)) {
     if (!/^owner\.(?:claiming|coordinator|rollback)\.[1-9][0-9]*$/.test(name)) {
@@ -210,22 +633,29 @@ function removeInertLegacyOwnerStages(lockDirectory) {
       continue;
     }
     const stagePid = Number(name.slice(name.lastIndexOf(".") + 1));
-    const snapshot = processSnapshot(stagePid);
-    if (snapshot && !snapshot.state.startsWith("Z")) continue;
-    if (!snapshot) {
-      try {
-        process.kill(stagePid, 0);
-        continue;
-      } catch (error) {
-        if (error.code !== "ESRCH") continue;
-      }
-    }
+    if (publisherMayOwn(stagePid)) continue;
+    let ownerSnapshot;
     try {
-      unlinkSync(path);
-      removed = true;
+      ownerSnapshot = currentUserOwnerSnapshot(path);
     } catch (error) {
-      if (error.code !== "ENOENT") throw error;
+      if (error.code === "ENOENT") continue;
+      throw error;
     }
+    const stageRemoved = quarantineAndDiscardOwner({
+      sourcePath: path,
+      expectedSnapshot: ownerSnapshot,
+      lockDirectory,
+      phase: "inert owner stage cleanup",
+      // Recheck after the hard-link witness binds the stage inode. A reused
+      // PID can publish a new stage after the first liveness verdict.
+      shouldTake: (context) => {
+        if (beforeWitnessedPublisherCheck) {
+          beforeWitnessedPublisherCheck({ ...context, stagePid });
+        }
+        return !publisherMayOwn(stagePid);
+      },
+    });
+    if (stageRemoved) removed = true;
   }
   if (removed) fsyncDirectory(lockDirectory);
 }
@@ -294,22 +724,66 @@ function recordCondemnedRun(lockRoot, token) {
   }
 }
 
-function restoreTakenOwner(takenPath, ownerPath, lockDirectory, lockRoot) {
-  try {
-    linkSync(takenPath, ownerPath);
-    fsyncDirectory(lockDirectory);
-  } catch (error) {
-    if (error.code === "EEXIST") {
-      recordCondemnedRun(lockRoot, ownerFields(takenPath).token);
-      unlinkSync(takenPath);
-      fsyncDirectory(lockDirectory);
-      return false;
-    }
-    throw error;
-  }
-  unlinkSync(takenPath);
-  fsyncDirectory(lockDirectory);
-  return true;
+function restoreTakenOwner(
+  takenPath,
+  ownerPath,
+  lockDirectory,
+  lockRoot,
+  expectedSnapshot = null,
+  {
+    quarantineDirectory = lockDirectory,
+    sourceDirectory = lockDirectory,
+    condemnOnConflict = true,
+    ...discardHooks
+  } = {},
+) {
+  const takenSnapshot = expectedSnapshot ?? currentUserOwnerSnapshot(takenPath);
+  const discardAfterWitness = discardHooks.afterWitness ?? null;
+  let restored = false;
+  quarantineAndDiscardOwner({
+    ...discardHooks,
+    sourcePath: takenPath,
+    expectedSnapshot: takenSnapshot,
+    lockDirectory: quarantineDirectory,
+    sourceDirectory,
+    canonicalPath: () => (restored ? ownerPath : null),
+    phase: "owner restoration cleanup",
+    afterWitness: (context) => {
+      try {
+        // Publish from the verified hard-link witness. A replacement at the
+        // source pathname can never become the restored canonical owner.
+        linkSync(context.anchorPath, ownerPath);
+        fsyncDirectory(lockDirectory);
+        restored = true;
+      } catch (error) {
+        if (error.code !== "EEXIST") throw error;
+        if (pathMatchesSnapshot(ownerPath, takenSnapshot)) {
+          restored = true;
+        } else if (condemnOnConflict) {
+          recordCondemnedRun(
+            lockRoot,
+            legacyOwnerAuthorityToken(takenSnapshot.fields),
+          );
+        }
+      }
+      if (restored) {
+        const restoredSnapshot = currentUserOwnerSnapshot(
+          ownerPath,
+          null,
+          takenSnapshot.stat.uid,
+        );
+        requireMatchingOwnerSnapshot(
+          restoredSnapshot,
+          takenSnapshot,
+          "owner restoration",
+        );
+      }
+      if (discardAfterWitness) {
+        discardAfterWitness({ ...context, restored });
+      }
+    },
+  });
+  return restored;
 }
 
 function takeExpectedOwner({
@@ -319,6 +793,13 @@ function takeExpectedOwner({
   expectedToken,
   phase,
 }) {
+  const expectedSnapshot = currentUserOwnerSnapshot(ownerPath);
+  if (legacyOwnerAuthorityToken(expectedSnapshot.fields) !== expectedToken) {
+    throw new CoordinatorError(
+      "LEGACY_HANDOFF_MISMATCH",
+      `legacy owner changed before ${phase}`,
+    );
+  }
   const takenPath = join(
     lockDirectory,
     `owner.reclaiming.coordinator.${process.pid}.${randomUUID()}`,
@@ -332,8 +813,20 @@ function takeExpectedOwner({
       `legacy owner could not be taken for ${phase}: ${error.message}`,
     );
   }
-  if (ownerFields(takenPath).token === expectedToken) return takenPath;
-  restoreTakenOwner(takenPath, ownerPath, lockDirectory, lockRoot);
+  let snapshot;
+  try {
+    snapshot = currentUserOwnerSnapshot(takenPath);
+  } catch (error) {
+    restoreTakenOwner(takenPath, ownerPath, lockDirectory, lockRoot);
+    throw error;
+  }
+  if (
+    legacyOwnerAuthorityToken(snapshot.fields) === expectedToken &&
+    sameInode(snapshot.stat, expectedSnapshot.stat)
+  ) {
+    return { path: takenPath, snapshot };
+  }
+  restoreTakenOwner(takenPath, ownerPath, lockDirectory, lockRoot, snapshot);
   throw new CoordinatorError(
     "LEGACY_HANDOFF_MISMATCH",
     `legacy owner changed during ${phase}`,
@@ -357,11 +850,21 @@ export function adoptLegacyRunLock({
   generationToken,
   coordinatorIdentity,
   worktree = "quality-gate-coordinator",
+  beforeOwnerStageModeSet = null,
   beforeOwnerPublish = null,
+  beforeOwnerDiscardTake = null,
+  afterOwnerDiscardTake = null,
+  afterAuthorityOwnerRead = null,
+  afterAuthorityMarkerRead = null,
+  afterMarkerDiscardWitness = null,
+  beforeMarkerDiscardTake = null,
+  afterMarkerDiscardTake = null,
   beforeReleaseOwnerTake = null,
   afterReleaseOwnerVisibleTake = null,
   afterReleaseOwnerTake = null,
   beforeReleaseOwnerRestore = null,
+  inertStagePublisherMayOwn = processMayOwnInertStage,
+  beforeInertStagePublisherCheck = null,
 }) {
   validateLegacyToken(expectedOwnerToken, "expected legacy owner token");
   validateLegacyToken(generationToken, "coordinator generation token");
@@ -375,28 +878,120 @@ export function adoptLegacyRunLock({
     );
   }
   const ownerPath = join(lockDirectory, "owner");
-  const previousOwnerText = readFileSync(ownerPath, "utf8");
-  if (ownerFieldsFromText(previousOwnerText).token !== expectedOwnerToken) {
-    throw new CoordinatorError(
-      "LEGACY_HANDOFF_MISMATCH",
-      "legacy owner token changed before coordinator handoff",
-    );
-  }
+  let previousOwnerText = "";
   const markerPath = join(lockRoot, `holder.${generationToken}`);
+  const markerText = `${generationToken}\n`;
   let markerDescriptor;
+  let markerDescriptorStat = null;
+  let publishedMarkerSnapshot = null;
+  let markerOpen = false;
+
+  function closeMarker() {
+    if (!markerOpen) return;
+    closeSync(markerDescriptor);
+    markerOpen = false;
+  }
+
+  function discardMarkerSnapshot(expectedSnapshot, phase) {
+    return quarantineAndDiscardOwner({
+      sourcePath: markerPath,
+      expectedSnapshot,
+      lockDirectory: lockRoot,
+      sourceDirectory: lockRoot,
+      phase,
+      quarantinePrefix: HOLDER_QUARANTINE_PREFIX,
+      afterWitness: afterMarkerDiscardWitness
+        ? (context) =>
+            afterMarkerDiscardWitness({ ...context, markerPath, phase })
+        : null,
+      beforeTake: beforeMarkerDiscardTake
+        ? (context) =>
+            beforeMarkerDiscardTake({ ...context, markerPath, phase })
+        : null,
+      afterTake: afterMarkerDiscardTake
+        ? (context) => afterMarkerDiscardTake({ ...context, markerPath, phase })
+        : null,
+    });
+  }
+
+  function discardCreatedMarkerIfStillPublished(phase) {
+    if (
+      markerDescriptorStat === null ||
+      !pathMatchesSnapshot(markerPath, { stat: markerDescriptorStat })
+    ) {
+      return false;
+    }
+    let currentSnapshot;
+    try {
+      currentSnapshot = currentUserOwnerSnapshot(
+        markerPath,
+        null,
+        markerDescriptorStat.uid,
+      );
+    } catch (error) {
+      if (!pathMatchesSnapshot(markerPath, { stat: markerDescriptorStat })) {
+        return false;
+      }
+      throw error;
+    }
+    if (!sameInode(currentSnapshot.stat, markerDescriptorStat)) return false;
+    return discardMarkerSnapshot(currentSnapshot, phase);
+  }
+
+  function discardPublishedMarker(phase) {
+    const currentSnapshot = currentUserOwnerSnapshot(
+      markerPath,
+      null,
+      publishedMarkerSnapshot.stat.uid,
+    );
+    requireMatchingOwnerSnapshot(
+      currentSnapshot,
+      publishedMarkerSnapshot,
+      phase,
+    );
+    return discardMarkerSnapshot(publishedMarkerSnapshot, phase);
+  }
+
   try {
     markerDescriptor = openSync(markerPath, "wx", 0o600);
-    writeFileSync(markerDescriptor, `${generationToken}\n`, "utf8");
+    markerOpen = true;
+    markerDescriptorStat = fstatSync(markerDescriptor, { bigint: true });
+    requireCurrentUserRegularFile(
+      markerDescriptorStat,
+      "legacy holder marker",
+      markerDescriptorStat.uid,
+    );
+    writeFileSync(markerDescriptor, markerText, "utf8");
     fsyncSync(markerDescriptor);
+    publishedMarkerSnapshot = currentUserOwnerSnapshot(
+      markerPath,
+      null,
+      markerDescriptorStat.uid,
+    );
+    requireMatchingMarkerSnapshot(
+      publishedMarkerSnapshot,
+      markerDescriptorStat,
+      markerText,
+      "holder marker publication",
+    );
     fsyncDirectory(lockRoot);
   } catch (error) {
-    if (markerDescriptor !== undefined) closeSync(markerDescriptor);
-    if (existsSync(markerPath)) unlinkSync(markerPath);
-    throw error;
+    let failure = error;
+    try {
+      discardCreatedMarkerIfStillPublished(
+        "failed holder marker publication cleanup",
+      );
+    } catch (cleanupError) {
+      failure = cleanupError;
+    } finally {
+      closeMarker();
+    }
+    throw failure;
   }
   const stagedOwner = join(lockDirectory, `owner.coordinator.${process.pid}`);
   const record = {
     pid: coordinatorIdentity.pid,
+    uid: typeof process.getuid === "function" ? process.getuid() : null,
     host: hostname(),
     startedAt: Math.floor(Date.now() / 1000),
     startUtc: coordinatorIdentity.startUtc,
@@ -405,18 +1000,26 @@ export function adoptLegacyRunLock({
   };
   let published = false;
   let takenOwner = null;
+  let publishedOwnerSnapshot = null;
   let previousOwnerMode = 0o600;
+  let stagedOwnerSnapshot;
   try {
     writeOwner(stagedOwner, record);
-    takenOwner = takeExpectedOwner({
+    const taken = takeExpectedOwner({
       lockRoot,
       lockDirectory,
       ownerPath,
       expectedToken: expectedOwnerToken,
       phase: "coordinator handoff",
     });
-    previousOwnerMode = legacyOwnerCompatibilityMode(takenOwner);
+    takenOwner = taken;
+    previousOwnerText = taken.snapshot.text;
+    previousOwnerMode = legacyOwnerCompatibilityMode(taken.path);
+    if (beforeOwnerStageModeSet) {
+      beforeOwnerStageModeSet({ lockDirectory, ownerPath, stagedOwner });
+    }
     setTextMode(stagedOwner, previousOwnerMode);
+    stagedOwnerSnapshot = currentUserOwnerSnapshot(stagedOwner);
     if (beforeOwnerPublish) beforeOwnerPublish({ lockDirectory, ownerPath });
     try {
       linkSync(stagedOwner, ownerPath);
@@ -431,45 +1034,126 @@ export function adoptLegacyRunLock({
     }
     fsyncDirectory(lockDirectory);
     published = true;
-    if (ownerFields(ownerPath).token !== generationToken) {
+    publishedOwnerSnapshot = currentUserOwnerSnapshot(ownerPath);
+    if (
+      legacyOwnerAuthorityToken(publishedOwnerSnapshot.fields) !==
+      generationToken
+    ) {
       throw new CoordinatorError(
         "LEGACY_HANDOFF_FAILED",
         "coordinator owner record did not publish",
       );
     }
-    unlinkSync(stagedOwner);
-    unlinkSync(takenOwner);
+    requireMatchingOwnerSnapshot(
+      publishedOwnerSnapshot,
+      stagedOwnerSnapshot,
+      "coordinator owner publication",
+    );
+    quarantineAndDiscardOwner({
+      sourcePath: stagedOwner,
+      expectedSnapshot: stagedOwnerSnapshot,
+      lockDirectory,
+      canonicalPath: ownerPath,
+      phase: "coordinator owner stage cleanup",
+    });
+    const priorOwner = takenOwner;
     takenOwner = null;
-    fsyncDirectory(lockDirectory);
+    quarantineAndDiscardOwner({
+      sourcePath: priorOwner.path,
+      expectedSnapshot: priorOwner.snapshot,
+      lockDirectory,
+      phase: "coordinator handoff owner cleanup",
+      beforeTake: beforeOwnerDiscardTake,
+      afterTake: afterOwnerDiscardTake,
+    });
   } catch (error) {
     let failure = error;
     try {
-      if (existsSync(stagedOwner)) unlinkSync(stagedOwner);
-      if (takenOwner && existsSync(takenOwner)) {
-        restoreTakenOwner(takenOwner, ownerPath, lockDirectory, lockRoot);
+      if (pathEntryExists(stagedOwner)) {
+        const stagedSnapshot = currentUserOwnerSnapshot(stagedOwner);
+        quarantineAndDiscardOwner({
+          sourcePath: stagedOwner,
+          expectedSnapshot: stagedSnapshot,
+          lockDirectory,
+          phase: "failed coordinator owner stage cleanup",
+        });
+      }
+      if (takenOwner && pathEntryExists(takenOwner.path)) {
+        restoreTakenOwner(
+          takenOwner.path,
+          ownerPath,
+          lockDirectory,
+          lockRoot,
+          takenOwner.snapshot,
+        );
       }
     } catch (recoveryError) {
       failure = recoveryError;
-    } finally {
-      closeSync(markerDescriptor);
-      if (!published && existsSync(markerPath)) unlinkSync(markerPath);
+    }
+    try {
+      closeMarker();
+      if (!published && pathEntryExists(markerPath)) {
+        discardPublishedMarker("failed coordinator adoption marker cleanup");
+      }
+    } catch (recoveryError) {
+      failure = recoveryError;
     }
     throw failure;
   }
 
-  let markerOpen = true;
   function authority() {
-    const observed = ownerFields(ownerPath);
-    let markerValid;
+    let observed = {};
+    let ownerCurrentUser = false;
+    let ownerSnapshot = null;
     try {
-      markerValid = readFileSync(markerPath, "utf8").trim() === generationToken;
-    } catch {
-      markerValid = false;
+      ownerSnapshot = currentUserOwnerSnapshot(
+        ownerPath,
+        afterAuthorityOwnerRead,
+      );
+      observed = ownerSnapshot.fields;
+      ownerCurrentUser = true;
+    } catch (error) {
+      if (
+        error.code !== "ENOENT" &&
+        error.code !== "LEGACY_LOCK_FOREIGN_OWNER"
+      ) {
+        throw error;
+      }
     }
+    let markerValid = false;
+    if (markerOpen && publishedMarkerSnapshot !== null) {
+      try {
+        const descriptorStat = fstatSync(markerDescriptor, { bigint: true });
+        requireCurrentUserRegularFile(descriptorStat, "legacy holder marker");
+        const markerSnapshot = currentUserOwnerSnapshot(
+          markerPath,
+          afterAuthorityMarkerRead,
+        );
+        markerValid =
+          sameInode(descriptorStat, publishedMarkerSnapshot.stat) &&
+          sameInode(markerSnapshot.stat, descriptorStat) &&
+          markerSnapshot.text === markerText &&
+          pathMatchesSnapshot(markerPath, markerSnapshot);
+      } catch (error) {
+        if (
+          error.code !== "ENOENT" &&
+          error.code !== "LEGACY_LOCK_FOREIGN_OWNER"
+        ) {
+          throw error;
+        }
+      }
+    }
+    const ownerPathStillPublished =
+      ownerSnapshot !== null &&
+      publishedOwnerSnapshot !== null &&
+      sameInode(ownerSnapshot.stat, publishedOwnerSnapshot.stat) &&
+      pathMatchesSnapshot(ownerPath, ownerSnapshot);
     return {
       owned:
         markerValid &&
-        observed.token === generationToken &&
+        ownerCurrentUser &&
+        ownerPathStillPublished &&
+        legacyOwnerAuthorityToken(observed) === generationToken &&
         observed.pid === String(coordinatorIdentity.pid) &&
         observed.coordinator_start_utc === coordinatorIdentity.startUtc,
       lockRoot,
@@ -479,12 +1163,8 @@ export function adoptLegacyRunLock({
       markerPath,
       markerValid,
       owner: observed,
+      ownerAuthorityToken: legacyOwnerAuthorityToken(observed) ?? null,
     };
-  }
-  function closeMarker() {
-    if (!markerOpen) return;
-    closeSync(markerDescriptor);
-    markerOpen = false;
   }
   function abandon() {
     closeMarker();
@@ -497,39 +1177,64 @@ export function adoptLegacyRunLock({
     }
     const staged = join(lockDirectory, `owner.rollback.${process.pid}`);
     let takenOwner = null;
+    let stagedSnapshot;
     try {
       writeText(staged, previousOwnerText, previousOwnerMode);
-      takenOwner = takeExpectedOwner({
+      stagedSnapshot = currentUserOwnerSnapshot(staged);
+      const taken = takeExpectedOwner({
         lockRoot,
         lockDirectory,
         ownerPath,
         expectedToken: generationToken,
         phase: "startup rollback",
       });
+      takenOwner = taken;
       linkSync(staged, ownerPath);
       fsyncDirectory(lockDirectory);
-      if (ownerFields(ownerPath).token !== expectedOwnerToken) {
+      const restoredPrevious = currentUserOwnerSnapshot(ownerPath);
+      if (
+        legacyOwnerAuthorityToken(restoredPrevious.fields) !==
+        expectedOwnerToken
+      ) {
         throw new CoordinatorError(
           "LEGACY_HANDOFF_FAILED",
           "previous legacy owner record did not publish during rollback",
         );
       }
-      unlinkSync(staged);
-      unlinkSync(takenOwner);
+      requireMatchingOwnerSnapshot(
+        restoredPrevious,
+        stagedSnapshot,
+        "rollback owner publication",
+      );
+      quarantineAndDiscardOwner({
+        sourcePath: staged,
+        expectedSnapshot: stagedSnapshot,
+        lockDirectory,
+        canonicalPath: ownerPath,
+        phase: "rollback owner stage cleanup",
+      });
+      const coordinatorOwner = takenOwner;
       takenOwner = null;
-      fsyncDirectory(lockDirectory);
+      quarantineAndDiscardOwner({
+        sourcePath: coordinatorOwner.path,
+        expectedSnapshot: coordinatorOwner.snapshot,
+        lockDirectory,
+        phase: "rollback coordinator owner cleanup",
+      });
       closeMarker();
-      if (
-        existsSync(markerPath) &&
-        readFileSync(markerPath, "utf8").trim() === generationToken
-      ) {
-        unlinkSync(markerPath);
-        fsyncDirectory(lockRoot);
+      if (pathEntryExists(markerPath)) {
+        discardPublishedMarker("startup rollback marker cleanup");
       }
       return { rolledBack: true, generationToken };
     } catch (error) {
-      if (takenOwner && existsSync(takenOwner)) {
-        restoreTakenOwner(takenOwner, ownerPath, lockDirectory, lockRoot);
+      if (takenOwner && pathEntryExists(takenOwner.path)) {
+        restoreTakenOwner(
+          takenOwner.path,
+          ownerPath,
+          lockDirectory,
+          lockRoot,
+          takenOwner.snapshot,
+        );
       }
       abandon();
       return {
@@ -538,7 +1243,15 @@ export function adoptLegacyRunLock({
         error: error.message,
       };
     } finally {
-      if (existsSync(staged)) unlinkSync(staged);
+      if (pathEntryExists(staged)) {
+        const remainingStage = currentUserOwnerSnapshot(staged);
+        quarantineAndDiscardOwner({
+          sourcePath: staged,
+          expectedSnapshot: remainingStage,
+          lockDirectory,
+          phase: "rollback residual stage cleanup",
+        });
+      }
     }
   }
   function releaseIfOwned() {
@@ -556,26 +1269,63 @@ export function adoptLegacyRunLock({
       `owner.reclaiming.release.coordinator.${process.pid}.${randomUUID()}`,
     );
     const releaseOwner = join(releaseDirectory, "owner");
-    const settleSuccessorOwner = () => {
-      unlinkSync(releaseOwner);
-      fsyncDirectory(releaseDirectory);
-      rmdirSync(releaseDirectory);
-      fsyncDirectory(lockRoot);
-      abandon();
+    let privateReleaseSnapshot = null;
+    const discardPrivateReleaseOwner = (phase) => {
+      if (privateReleaseSnapshot === null) {
+        throw new CoordinatorError(
+          "LEGACY_LOCK_UNSAFE",
+          "private coordinator owner release has no stable snapshot",
+        );
+      }
+      quarantineAndDiscardOwner({
+        sourcePath: releaseOwner,
+        expectedSnapshot: privateReleaseSnapshot,
+        lockDirectory: releaseDirectory,
+        phase,
+      });
+    };
+    const settleSuccessorOwner = ({ ownerAlreadyDiscarded = false } = {}) => {
+      try {
+        if (!ownerAlreadyDiscarded) {
+          discardPrivateReleaseOwner("successor settlement owner cleanup");
+        }
+        fsyncDirectory(releaseDirectory);
+        rmdirSync(releaseDirectory);
+        fsyncDirectory(lockRoot);
+      } finally {
+        abandon();
+      }
       return { released: false, reason: "authority-changed", ...authority() };
     };
     let takenOwner = null;
+    const expectedReleaseSnapshot = currentUserOwnerSnapshot(ownerPath);
+    requireMatchingOwnerSnapshot(
+      expectedReleaseSnapshot,
+      publishedOwnerSnapshot,
+      "coordinator owner release",
+    );
     try {
       if (beforeReleaseOwnerTake) beforeReleaseOwnerTake({ ownerPath });
       // Keep an unvalidated take inside run.lock. Legacy recovery scans this
       // namespace, so a crash cannot hide a live successor in private state.
       renameSync(ownerPath, releaseTaken);
-      takenOwner = releaseTaken;
+      takenOwner = { path: releaseTaken, snapshot: expectedReleaseSnapshot };
       fsyncDirectory(lockDirectory);
       if (afterReleaseOwnerVisibleTake)
         afterReleaseOwnerVisibleTake({ ownerPath, releaseTaken });
-      if (ownerFields(releaseTaken).token !== generationToken) {
-        restoreTakenOwner(releaseTaken, ownerPath, lockDirectory, lockRoot);
+      const visibleReleaseSnapshot = currentUserOwnerSnapshot(releaseTaken);
+      if (
+        legacyOwnerAuthorityToken(visibleReleaseSnapshot.fields) !==
+          generationToken ||
+        !sameInode(visibleReleaseSnapshot.stat, expectedReleaseSnapshot.stat)
+      ) {
+        restoreTakenOwner(
+          releaseTaken,
+          ownerPath,
+          lockDirectory,
+          lockRoot,
+          visibleReleaseSnapshot,
+        );
         takenOwner = null;
         abandon();
         return { released: false, reason: "authority-changed", ...authority() };
@@ -583,28 +1333,76 @@ export function adoptLegacyRunLock({
       mkdirSync(releaseDirectory, { mode: 0o700 });
       fsyncDirectory(lockRoot);
       renameSync(releaseTaken, releaseOwner);
-      takenOwner = releaseOwner;
+      privateReleaseSnapshot = currentUserOwnerSnapshot(releaseOwner);
+      requireMatchingOwnerSnapshot(
+        privateReleaseSnapshot,
+        expectedReleaseSnapshot,
+        "private coordinator owner release",
+      );
+      takenOwner = { path: releaseOwner, snapshot: privateReleaseSnapshot };
       fsyncDirectory(lockDirectory);
       fsyncDirectory(releaseDirectory);
       if (afterReleaseOwnerTake)
         afterReleaseOwnerTake({ ownerPath, releaseOwner });
+      const verifiedPrivateReleaseSnapshot = currentUserOwnerSnapshot(
+        releaseOwner,
+        null,
+        privateReleaseSnapshot.stat.uid,
+      );
+      requireMatchingOwnerSnapshot(
+        verifiedPrivateReleaseSnapshot,
+        privateReleaseSnapshot,
+        "private coordinator owner release hook",
+      );
     } catch (error) {
-      if (takenOwner && existsSync(takenOwner) && existsSync(lockDirectory)) {
-        restoreTakenOwner(takenOwner, ownerPath, lockDirectory, lockRoot);
-        if (takenOwner === releaseOwner && existsSync(releaseDirectory)) {
-          fsyncDirectory(releaseDirectory);
+      let failure = error;
+      if (
+        takenOwner &&
+        pathEntryExists(takenOwner.path) &&
+        existsSync(lockDirectory)
+      ) {
+        try {
+          restoreTakenOwner(
+            takenOwner.path,
+            ownerPath,
+            lockDirectory,
+            lockRoot,
+            takenOwner.snapshot,
+            takenOwner.path === releaseOwner
+              ? {
+                  quarantineDirectory: releaseDirectory,
+                  sourceDirectory: releaseDirectory,
+                  condemnOnConflict: false,
+                }
+              : {},
+          );
+          if (
+            takenOwner.path === releaseOwner &&
+            existsSync(releaseDirectory)
+          ) {
+            fsyncDirectory(releaseDirectory);
+          }
+        } catch (recoveryError) {
+          failure = recoveryError;
         }
       }
-      if (existsSync(releaseDirectory)) rmdirSync(releaseDirectory);
+      try {
+        if (existsSync(releaseDirectory)) rmdirSync(releaseDirectory);
+      } catch {
+        // Retain non-empty private recovery evidence.
+      }
       fsyncDirectory(lockRoot);
       abandon();
-      throw error;
+      throw failure;
     }
     try {
       // These exact paths are unpublished owner stages. Remove only stages
       // whose publishing PID is gone. A live handoff or rollback still needs
       // its stage and must make this release restore or yield its owner.
-      removeInertLegacyOwnerStages(lockDirectory);
+      removeInertLegacyOwnerStages(lockDirectory, {
+        publisherMayOwn: inertStagePublisherMayOwn,
+        beforeWitnessedPublisherCheck: beforeInertStagePublisherCheck,
+      });
       rmdirSync(lockDirectory);
     } catch (error) {
       if (existsSync(ownerPath)) {
@@ -613,19 +1411,28 @@ export function adoptLegacyRunLock({
       try {
         if (beforeReleaseOwnerRestore)
           beforeReleaseOwnerRestore({ ownerPath, releaseOwner });
-        linkSync(releaseOwner, ownerPath);
-      } catch (restoreError) {
-        if (restoreError.code === "EEXIST" || existsSync(ownerPath)) {
-          return settleSuccessorOwner();
+        const restored = restoreTakenOwner(
+          releaseOwner,
+          ownerPath,
+          lockDirectory,
+          lockRoot,
+          privateReleaseSnapshot,
+          {
+            quarantineDirectory: releaseDirectory,
+            sourceDirectory: releaseDirectory,
+            condemnOnConflict: false,
+          },
+        );
+        if (!restored) {
+          return settleSuccessorOwner({ ownerAlreadyDiscarded: true });
         }
+      } catch (restoreError) {
         abandon();
         throw new CoordinatorError(
           "LEGACY_RELEASE_FAILED",
           `could not remove legacy run.lock: ${error.message}; owner restoration failed: ${restoreError.message}`,
         );
       }
-      fsyncDirectory(lockDirectory);
-      unlinkSync(releaseOwner);
       fsyncDirectory(releaseDirectory);
       rmdirSync(releaseDirectory);
       fsyncDirectory(lockRoot);
@@ -636,17 +1443,18 @@ export function adoptLegacyRunLock({
       );
     }
     fsyncDirectory(lockRoot);
-    unlinkSync(releaseOwner);
-    fsyncDirectory(releaseDirectory);
-    rmdirSync(releaseDirectory);
-    fsyncDirectory(lockRoot);
-    closeMarker();
-    if (
-      existsSync(markerPath) &&
-      readFileSync(markerPath, "utf8").trim() === generationToken
-    ) {
-      unlinkSync(markerPath);
+    try {
+      discardPrivateReleaseOwner("private coordinator owner release cleanup");
+      fsyncDirectory(releaseDirectory);
+      closeMarker();
+      if (pathEntryExists(markerPath)) {
+        discardPublishedMarker("coordinator release marker cleanup");
+      }
+      rmdirSync(releaseDirectory);
       fsyncDirectory(lockRoot);
+    } catch (error) {
+      abandon();
+      throw error;
     }
     return { released: true, generationToken };
   }

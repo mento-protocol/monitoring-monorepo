@@ -148,7 +148,7 @@ export async function startCoordinator({
         operation,
         generationToken,
         markerValid: observed.markerValid,
-        observedOwnerToken: observed.owner?.token ?? null,
+        observedOwnerToken: observed.ownerAuthorityToken ?? null,
       },
     );
   }

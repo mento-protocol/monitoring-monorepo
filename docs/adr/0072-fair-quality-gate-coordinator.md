@@ -3,7 +3,7 @@ title: Fair local quality-gate coordination across worktrees
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-23
+last_verified: 2026-08-25
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -155,27 +155,79 @@ for that owner before it starts a coordinator.
 This compatibility rule prevents an old worktree from running beside scheduled
 workers. New Bash publishers retain the padded legacy process-start wire value;
 new readers normalize only at comparison boundaries. Release atomically moves
-the owner to a recovery-visible record inside `run.lock` and validates the
-moved generation token. It moves only a matching record into a private release
-directory. A crash before validation leaves a live successor visible to the
-legacy recovery scan. That scan treats another host's record as live evidence.
-It also stops on an unreadable or unsafe remnant, or if a shared-root access
-rule prevents restoration while the canonical owner is absent. Release then
-removes only an empty lock directory. Before `rmdir`, it removes only known
-unpublished owner stages whose publishing PID is gone. A successor owner or
-live stage keeps the directory non-empty and remains untouched. Another
-directory-removal failure restores the moved owner and closes the holder marker
-descriptor. Shutdown then reports `release-failed` and settles every close
-waiter. The next gate can recover the restored owner.
+the current owner pathname to a recovery-visible record inside `run.lock`. It
+then verifies the moved current-user inode and generation token against its
+prior snapshot. A replacement that wins before the move is detected and is
+restored or retained. Only the matching inode can enter a mode-0700 private
+release directory. The Node coordinator also requires the exact record text. A
+crash before validation leaves the moved record visible to the legacy recovery
+scan. That scan treats another host's record as live evidence. It also stops on
+an unreadable or unsafe remnant, or if a shared-root access rule prevents
+restoration while the canonical owner is absent. Release then removes only an
+empty lock directory. Before `rmdir`, it removes only known unpublished owner
+stages whose publishing PID is gone. A successor owner or live stage keeps the
+directory non-empty and remains untouched. A directory-removal failure restores
+the exact private owner through a hard-link witness. The coordinator then
+closes its holder marker descriptor, reports `release-failed`, and settles every
+close waiter. The next gate can recover the restored owner. Final cleanup
+quarantines and deletes only the bound private inode. A same-text replacement
+is retained and makes release fail closed.
+
+A process crash after successful `rmdir` is different from a caught release
+failure. It can leave the private owner and holder marker outside the authority
+path. The operating system closes the marker descriptor, and no close waiter
+receives a caught-error result. The next gate takes a new lock. The top-level
+leftovers remain inert and do not block that gate.
+
 The coordinator releases the legacy lock only after every admitted worker and
 recovery drain is gone.
 
 The coordinator checks its legacy owner and marker before each request,
-response, and maintenance mutation. The scheduler checks again immediately
-before each grant. Terminal result publication has the same guard. Authority
-loss stops the coordinator and leaves the durable journal and legacy record for
-recovery. A displaced coordinator cannot grant queued work, prune records,
-clean up owners, or publish success.
+response, and maintenance mutation. The owner check binds the path to its exact
+inode and text. The marker check binds the path to the descriptor that the
+coordinator opened with exclusive creation. It requires the exact inode,
+current UID, and generation text. The scheduler checks authority again
+immediately before each grant. Terminal result publication has the same guard.
+Authority loss stops the coordinator and leaves the durable journal and legacy
+record for recovery. A displaced coordinator cannot grant queued work, prune
+records, clean up owners, or publish success. Rollback and release also remove
+the marker through an exact-inode quarantine. Every coordinator marker cleanup,
+including publication failure, adoption failure, rollback, and release, uses
+this top-level lock-root directory:
+`holder.reclaiming.quarantine.v1.<hostname-sha256>.<pid>.<nonce>`. Crash remnants
+from those quarantines are inert and never enter Bash owner recovery. Cleanup
+retains a replacement marker.
+
+A Bash run or command holder marker contains raw `<token>\n` bytes. It is not an
+owner record. Normal drain removes it only after the process census is empty.
+`EXIT` cleanup attempts removal only after worker teardown and while no command
+drain is active. Cleanup binds the current pathname at cleanup time: it requires
+a current-UID, non-symlink regular file with the exact raw body, then creates a
+hard-link witness for that inode. This rule does not claim that the inode is the
+one created at run start. The private directory uses the disjoint name
+`holder.reclaiming.quarantine.v1.<hostname-sha256>.<pid>.<nonce>`. If the shared
+path names a different inode after the witness, cleanup returns status 2 and
+retains the quarantine. If the move placed that different inode in the
+quarantine, cleanup can restore it to the shared path with an exclusive hard
+link only when it is a current-UID, non-symlink regular file with the exact
+`<token>\n` body. The quarantine retains both private inodes after that
+restoration. A moved entry with an unsafe type, UID, or body stays private. A
+replacement that appeared after the move stays at the shared path. That cleanup
+attempt never deletes its post-witness replacement. After a refusal, that
+process does not retry cleanup for the token during a later drain or `EXIT`
+teardown. `EXIT` cleanup still attempts legacy-lock release. It changes an
+otherwise successful status to 2 when marker or lock release fails and preserves
+an earlier non-zero status. A `SIGKILL` can leave a top-level holder quarantine;
+no recovery scan consumes it, and it grants no authority.
+
+The process scan never asks `lsof` to query the mutable shared marker pathname.
+It creates a mode-0700 private directory named
+`.holder-lsof-witness.v1.<hostname-sha256>.<pid>.<nonce>`, hard-links the current
+marker into it, and validates that scan-time link as a current-UID, non-symlink
+regular file with the exact raw `<token>\n` body. `lsof` reads only the
+witnessed inode. Normal cleanup and invalid-snapshot cleanup remove only the
+private witness state. A `SIGKILL` can leave the private hard link behind. No
+recovery scanner consumes it, and it grants no authority.
 
 The coordinator compatibility record leaves `start_utc=` blank so older Bash
 readers that fetch fields in separate snapshots fall back to PID liveness. It
@@ -184,23 +236,63 @@ reads that field from one record snapshot.
 
 Adoption preserves the incoming owner record's group and other read bits so a
 legacy waiter with shared-root access can observe the barrier. The replacement
-record remains writable only by its owner. Adoption does not change permissions
-on an explicit shared legacy lock root. The outer coordinator namespace
-includes the numeric UID. Its state directory contains separate version-,
-policy-, and capacity-specific namespaces. Sequential users of one shared root
-therefore do not inherit another user's mode-0700 coordinator directory.
+record remains writable only by its owner. It stores the real coordinator
+generation in `coordinator_token=`. It stores `coordinator-owner-v1` in the
+historical `token=` field. That value is outside the historical run-token
+grammar, so a historical gate waits and does not attempt a coordinator drain it
+cannot understand. A current gate prefers `coordinator_token=`. Before it
+discards stale owner evidence, it requires the recorded `uid=`, when present,
+and the file owner to match its current UID. A current gate can wait on another
+user's live owner. It retains a stale foreign owner's record and generation
+evidence, then exits with status 2. The owning user or an administrator must
+recover that generation. A discard creates a hard-link witness in a fresh
+mode-0700 quarantine beside the record. It reads the authority fields from one
+open descriptor for that witness, requires the current UID, and rejects
+duplicate authority fields. The Node coordinator also retains the exact text
+for later equality checks. The discard establishes either a canonical hard
+link or a published condemned-run obligation before it moves the shared
+pathname beside the witness. It deletes only the private names after it
+verifies that they still name the witnessed inode. A path replacement is
+retained and stops the gate, even when it has the same text and authority token.
 
-An older gate cannot drain coordinator journal entries through the socket. If
-all remaining state is drain-required work from dead clients, and no live
-client, waiter, drain claim, or result handoff remains, the coordinator closes
-its socket after the idle period without releasing `run.lock`. The old gate then
-reclaims the dead coordinator owner. It records the coordinator generation as a
-legacy drain obligation and drains every worker through the shared generation
-marker. Each worker retains that marker after its mapped wrapper exits. A
-historical gate that predates anchored group capture can stop the sentinel and
-processes found through its handle and tree scan. The same-PGID
-close-all-handle guarantee requires a gate version with anchored group capture.
-A queued, granted, or result-ready request prevents this recovery handoff.
+The owner-quarantine namespace uses names of the form
+`owner.reclaiming.quarantine.v1.<hostname-sha256>.<pid>.<nonce>`. A waiter treats
+another host's quarantine as active. It does not apply a local PID verdict to
+it. Before a waiter recovers a dead local quarantine, it atomically renames the
+whole directory over a verified empty mode-0700 placeholder that names the
+waiter. This claim orders recovery against a creator's orphaned file-move child
+and against other waiters. A waiter that loses the source-name race restarts
+the quarantine scan and observes the winner's new name before it examines
+ordinary remnants. A crash after the directory claim leaves the same versioned
+evidence for the next waiter.
+
+The Bash legacy path uses atomic pathname operations when it publishes initial
+quarantine and condemned-run state. It does not fsync those initial files or
+directories. The descriptor-bound directory-claim helper later fsyncs the
+claimed quarantine and its parent. That partial fsync does not make the complete
+Bash protocol power-loss durable. Its recovery guarantee covers process and
+signal crashes while the mounted filesystem remains available. It does not
+claim sudden-power-loss durability. The coordinator journal and other Node state
+use the separate fsync order described below.
+
+Adoption does not change permissions on an explicit shared legacy lock root.
+The outer coordinator namespace includes the numeric UID. Its state directory
+contains separate version-, policy-, and capacity-specific namespaces.
+Sequential users of one shared root do not inherit another user's mode-0700
+coordinator directory.
+
+A gate cannot drain coordinator journal entries through the socket. If all
+remaining state is drain-required work from dead clients, and no live client,
+waiter, drain claim, or result handoff remains, the coordinator closes its
+socket after the idle period without releasing `run.lock`. A current gate that
+runs with the coordinator disabled can then reclaim a same-UID dead coordinator
+owner. It records the coordinator generation as a legacy drain obligation and
+drains every worker through the shared generation marker. Each worker retains
+that marker after its mapped wrapper exits. A historical gate treats the
+versioned compatibility token as unreclaimable and waits until a current gate
+recovers or releases the owner. The same-PGID close-all-handle guarantee
+requires a gate version with anchored group capture. A queued, granted, or
+result-ready request prevents this recovery handoff.
 
 ### Serialize each worktree for the full request
 
@@ -227,8 +319,8 @@ admits the next same-worktree request without relying on PID liveness.
 `AGENT_QUALITY_GATE_CAPACITY` configures global capacity from 1 through 64. Its
 safe default is 3. Each ordinary command uses one unit. The gate self-test uses
 weight 2 when capacity is at least 2 and weight 1 at capacity 1. A request's
-`--parallel` value is a local upper bound and cannot exceed the available global
-capacity.
+`--parallel` value is a local upper bound. It does not increase the available
+global execution capacity.
 
 Scheduling is fair at the request level. Each runnable request receives at
 most one ordinary dispatch per turn, then moves behind the other runnable
@@ -275,6 +367,12 @@ shared `~/.cache/ms-playwright` browser store. Each named resource has capacity
 
 Resource names and weights are part of the versioned policy. A new exclusive
 class needs measured contention evidence and scheduler regression coverage.
+
+The coordinator accounts only commands registered through a gate `--run`
+request. Finish direct validation, dashboard servers, and browser suites on the
+same machine before the gate starts. Do not start unregistered work until the
+gate exits. Such work can mutate worktree state or consume resources outside the
+scheduler's capacity and named-resource controls.
 
 ### Coalesce only exact final verdicts
 
@@ -532,8 +630,8 @@ drainer acknowledges `processTreeEmpty=true`.
 
 ## Consequences
 
-- Independent lint, typecheck, and unit-test work from different worktrees can
-  progress together within one machine budget.
+- Independent gate-registered lint, typecheck, and unit-test work from different
+  worktrees can progress together within one machine budget.
 - The same worktree still runs one full gate request at a time. This is required
   for local outputs and result files.
 - Dashboard coverage, browser, and build work still run without competing gate

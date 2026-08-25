@@ -22,8 +22,8 @@ gate_run_request_tag() {
 # A file every mapped command of this run holds open. Descendants inherit open
 # descriptors and keep them after their parent exits, so this is a handle on a
 # process that no longer has a tagged ancestor to be walked down from. Its path
-# carries the run's token, so unlike a PID or a process group it can never come
-# to name a stranger.
+# carries the expected run token. Descriptor-bound snapshots and private
+# hard-link witnesses prevent a mutable shared path from selecting a stranger.
 gate_run_marker_path() {
   local token="${1:-${gate_run_id:-$gate_lock_token}}"
   [[ -n "$gate_lock_root_dir" && -n "$token" ]] || return 1
@@ -36,13 +36,62 @@ gate_run_created_marker_file=""
 gate_run_marker_matches_identity() {
   local token="$1"
   local marker="$2"
-  local expected body
+  local expected
   gate_lock_token_is_wellformed "$token" || return 1
   expected="$(gate_run_marker_path "$token")" || return 1
-  [[ "$marker" == "$expected" && ! -L "$marker" && -f "$marker" &&
-    -r "$marker" && -O "$marker" ]] || return 1
-  body="$(cat "$marker" 2>/dev/null)" || return 1
-  [[ "$body" == "$token" ]]
+  [[ "$marker" == "$expected" ]] || return 1
+  gate_run_marker_snapshot_is_exact "$marker" "$token"
+}
+
+gate_run_marker_snapshot_is_exact() {
+  local marker="$1"
+  local expected_token_value="$2"
+  gate_lock_token_is_wellformed "$expected_token_value" || return 1
+  # The dollar expression below is a JavaScript template literal.
+  # shellcheck disable=SC2016
+  node -e '
+    const fs = require("node:fs");
+    const { constants } = fs;
+    const [path, expectedToken, uidText] = process.argv.slice(1);
+    const expectedUid = BigInt(uidText);
+    const expectedBody = Buffer.from(`${expectedToken}\n`, "utf8");
+    let descriptor;
+    const sameInode = (left, right) =>
+      left.dev === right.dev && left.ino === right.ino;
+    const valid = (stat) =>
+      stat.isFile() && !stat.isSymbolicLink() && stat.uid === expectedUid;
+    try {
+      descriptor = fs.openSync(
+        path,
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      );
+      const descriptorBefore = fs.fstatSync(descriptor, { bigint: true });
+      const pathBefore = fs.lstatSync(path, { bigint: true });
+      if (
+        !valid(descriptorBefore) ||
+        !valid(pathBefore) ||
+        !sameInode(descriptorBefore, pathBefore)
+      ) {
+        throw new Error("unsafe marker snapshot");
+      }
+      const body = fs.readFileSync(descriptor);
+      const descriptorAfter = fs.fstatSync(descriptor, { bigint: true });
+      const pathAfter = fs.lstatSync(path, { bigint: true });
+      if (
+        !body.equals(expectedBody) ||
+        !valid(descriptorAfter) ||
+        !valid(pathAfter) ||
+        !sameInode(descriptorBefore, descriptorAfter) ||
+        !sameInode(descriptorAfter, pathAfter)
+      ) {
+        process.exitCode = 1;
+      }
+    } catch {
+      process.exitCode = 1;
+    } finally {
+      if (descriptor !== undefined) fs.closeSync(descriptor);
+    }
+  ' "$marker" "$expected_token_value" "$(id -u)" 2>/dev/null
 }
 
 gate_run_create_marker_for_identity() {
@@ -179,8 +228,9 @@ gate_lock_test_ready_and_wait_for_release() {
 # environment, readable on a host with /proc, and the open descriptor on the
 # run's marker file, readable wherever lsof exists. Both survive a command
 # that forks a replacement and then exits — the replacement is reparented, has
-# no tagged ancestor, and is invisible to a tree walk. Neither can land on a
-# stranger, because both are named by a token unique to one run.
+# no tagged ancestor, and is invisible to a tree walk. The environment entry
+# has the run's unique token. The marker scan binds and validates a private
+# hard-link witness before lsof can select a process.
 #
 # Only this user's processes are scanned, which is the same scope the rest of
 # this path can signal, and duplicates cost nothing: the capture records a PID
@@ -206,6 +256,82 @@ gate_lock_token_is_wellformed() {
 # escaping makes the match literal.
 gate_lock_token_pattern() {
   printf '%s' "$1" | sed 's/[][\.*^$+?(){}|\\]/\\&/g'
+}
+
+gate_run_private_marker_directory_is_safe() {
+  local directory="$1"
+  node -e '
+    const fs = require("node:fs");
+    const stat = fs.lstatSync(process.argv[1]);
+    const expectedUid = Number(process.argv[2]);
+    process.exit(
+      stat.isDirectory() &&
+      !stat.isSymbolicLink() &&
+      stat.uid === expectedUid &&
+      (stat.mode & 0o777) === 0o700
+        ? 0
+        : 1,
+    );
+  ' "$directory" "$(id -u)" 2>/dev/null
+}
+
+gate_run_drop_lsof_marker_witness() {
+  local witness_dir="$1"
+  local witness="$2"
+  local extra
+  gate_run_private_marker_directory_is_safe "$witness_dir" || return 1
+  if ! extra="$(find "$witness_dir" -mindepth 1 -maxdepth 1 \
+    ! -name marker -print -quit 2>/dev/null)" || [[ -n "$extra" ]]; then
+    return 1
+  fi
+  [[ -e "$witness" || -L "$witness" ]] || return 1
+  /bin/rm -f "$witness" && /bin/rmdir "$witness_dir"
+}
+
+gate_run_lsof_marker_pids() {
+  local token="$1"
+  local marker="$2"
+  local witness_dir witness found status
+  if [[ ! "${gate_lock_local_host_fingerprint:-}" =~ ^[0-9a-f]{64}$ ]]; then
+    if ! declare -F gate_lock_ensure_local_host_fingerprint >/dev/null 2>&1 ||
+      ! gate_lock_ensure_local_host_fingerprint; then
+      printf '%s\n' "$gate_drain_scan_error"
+      return 0
+    fi
+  fi
+  if ! witness_dir="$(mktemp -d \
+    "${gate_lock_root_dir}/.holder-lsof-witness.v1.${gate_lock_local_host_fingerprint}.$$.XXXXXX")"; then
+    printf '%s\n' "$gate_drain_scan_error"
+    return 0
+  fi
+  if ! chmod 700 "$witness_dir" ||
+    ! gate_run_private_marker_directory_is_safe "$witness_dir"; then
+    /bin/rmdir "$witness_dir" 2>/dev/null || true
+    printf '%s\n' "$gate_drain_scan_error"
+    return 0
+  fi
+  witness="${witness_dir}/marker"
+  if ! /bin/ln -P "$marker" "$witness" 2>/dev/null; then
+    if [[ -e "$marker" || -L "$marker" ]]; then
+      printf '%s\n' "$gate_drain_scan_error"
+    fi
+    /bin/rmdir "$witness_dir" 2>/dev/null ||
+      printf '%s\n' "$gate_drain_scan_error"
+    return 0
+  fi
+  if ! gate_run_marker_snapshot_is_exact "$witness" "$token"; then
+    gate_run_drop_lsof_marker_witness "$witness_dir" "$witness" || true
+    printf '%s\n' "$gate_drain_scan_error"
+    return 0
+  fi
+  found="$(lsof -w -t -- "$witness" 2>/dev/null)" && status=0 || status=$?
+  [[ "$status" -le 1 ]] || printf '%s\n' "$gate_drain_scan_error"
+  [[ -z "$found" ]] || printf '%s\n' "$found"
+  if ! gate_run_private_marker_directory_is_safe "$witness_dir" ||
+    ! gate_run_marker_snapshot_is_exact "$witness" "$token" ||
+    ! gate_run_drop_lsof_marker_witness "$witness_dir" "$witness"; then
+    printf '%s\n' "$gate_drain_scan_error"
+  fi
 }
 
 gate_run_tagged_pids() {
@@ -283,10 +409,9 @@ gate_run_tagged_pids() {
     done
   fi
   marker="${gate_lock_root_dir}/holder.${token}"
-  if [[ -n "$gate_lock_root_dir" && -e "$marker" ]] &&
+  if [[ -n "$gate_lock_root_dir" &&
+    ( -e "$marker" || -L "$marker" ) ]] &&
     command -v lsof > /dev/null 2>&1; then
-    found="$(lsof -w -t -- "$marker" 2>/dev/null)" && status=0 || status=$?
-    [[ "$status" -le 1 ]] || printf '%s\n' "$gate_drain_scan_error"
-    [[ -z "$found" ]] || printf '%s\n' "$found"
+    gate_run_lsof_marker_pids "$token" "$marker"
   fi
 }

@@ -10,9 +10,11 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   symlinkSync,
+  unlinkSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
@@ -65,6 +67,11 @@ function owner(pid) {
     pid,
     startUtc: `2026-08-21T12:${String(pid % 60).padStart(2, "0")}:00.000Z`,
   };
+}
+
+function ownerAuthorityToken(path) {
+  const fields = ownerFields(path);
+  return fields.coordinator_token || fields.token;
 }
 
 function capabilityFor(requestId) {
@@ -4797,7 +4804,7 @@ test("a generic legacy authority probe error stops before mutation", async () =>
         owner: requestOwner,
         reason: "must not mutate after an authority probe error",
       }),
-    (error) => error.code === "EISDIR",
+    (error) => error.code === "LEGACY_LOCK_UNSAFE",
   );
 
   const closed = await fixture.coordinator.closed;
@@ -4926,8 +4933,9 @@ test("legacy authority loss cannot grant a queued lease after release", async ()
       (error) => ({ error }),
     );
   await waiter.request("ping");
-  displaceLegacyAuthority(fixture);
+  const displacedOwnerId = displaceLegacyAuthority(fixture);
 
+  let authorityLoss;
   assert.throws(
     () =>
       fixture.coordinator.core.releaseLease({
@@ -4936,8 +4944,12 @@ test("legacy authority loss cannot grant a queued lease after release", async ()
         capability: capabilityFor("authority-active"),
         owner: activeOwner,
       }),
-    (error) => error.code === "LEGACY_AUTHORITY_LOST",
+    (error) => {
+      authorityLoss = error;
+      return error.code === "LEGACY_AUTHORITY_LOST";
+    },
   );
+  assert.equal(authorityLoss.details.observedOwnerToken, displacedOwnerId);
   const queued = fixture.coordinator.core
     .inspect()
     .leases.find((candidate) => candidate.leaseId === "authority-queued-lease");
@@ -5071,6 +5083,148 @@ test("authority loss inside result publication cannot recover success", async ()
   assert.equal(retry.executionId, registration.executionId);
 });
 
+function runLegacyFifoProbe(scenario) {
+  const root = mkdtempSync(join(tmpdir(), `quality-gate-fifo-${scenario}-`));
+  fixtures.push({ root, coordinator: null });
+  const helperPath = join(root, "fifo-probe.mjs");
+  const legacyModuleUrl = new URL(
+    "./quality-gate-coordinator-legacy.mjs",
+    import.meta.url,
+  ).href;
+  writeFileSync(
+    helperPath,
+    String.raw`
+import { spawnSync } from "node:child_process";
+import { lstatSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
+import { adoptLegacyRunLock } from ${JSON.stringify(legacyModuleUrl)};
+
+const scenario = process.argv[2];
+const root = process.argv[3];
+const lockDirectory = join(root, "run.lock");
+const ownerPath = join(lockDirectory, "owner");
+const legacyOwnerToken = "legacy-fifo-" + process.pid + "-1000";
+const generationToken = "coordinator-fifo-" + process.pid + "-1001";
+let fifoPath = ownerPath;
+let replaceOwnerDuringRead = false;
+
+function fail(message, error = null) {
+  console.error(message);
+  if (error) console.error(error.stack || error);
+  process.exit(2);
+}
+
+function makeFifo(path) {
+  const result = spawnSync("mkfifo", [path], { encoding: "utf8" });
+  if (result.error || result.status !== 0) {
+    fail("could not create FIFO: " + (result.stderr || result.error), result.error);
+  }
+}
+
+mkdirSync(lockDirectory);
+if (scenario === "owner-before-adoption") {
+  makeFifo(ownerPath);
+} else {
+  writeFileSync(
+    ownerPath,
+    "pid=" + process.pid + "\nhost=legacy-fifo\nstart_utc=\ntoken=" +
+      legacyOwnerToken +
+      "\n",
+  );
+}
+
+const options = {
+  lockRoot: root,
+  expectedOwnerToken: legacyOwnerToken,
+  generationToken,
+  coordinatorIdentity: {
+    pid: process.pid,
+    startUtc: "test-fifo-process-start",
+  },
+};
+if (scenario === "owner-path-recheck") {
+  options.afterAuthorityOwnerRead = ({ path }) => {
+    if (!replaceOwnerDuringRead) return;
+    replaceOwnerDuringRead = false;
+    unlinkSync(path);
+    makeFifo(path);
+  };
+}
+if (scenario === "owner-stage-before-mode") {
+  options.beforeOwnerStageModeSet = ({ stagedOwner }) => {
+    unlinkSync(stagedOwner);
+    makeFifo(stagedOwner);
+    fifoPath = stagedOwner;
+  };
+}
+
+let legacy = null;
+let observedError = null;
+if (scenario === "owner-path-recheck") {
+  try {
+    legacy = adoptLegacyRunLock(options);
+  } catch (error) {
+    fail("setup adoption failed", error);
+  }
+  replaceOwnerDuringRead = true;
+  try {
+    legacy.authority();
+  } catch (error) {
+    observedError = error;
+  } finally {
+    legacy.abandon();
+  }
+} else {
+  try {
+    legacy = adoptLegacyRunLock(options);
+  } catch (error) {
+    observedError = error;
+  } finally {
+    legacy?.abandon();
+  }
+}
+
+if (observedError?.code !== "LEGACY_LOCK_UNSAFE") {
+  fail("expected LEGACY_LOCK_UNSAFE", observedError);
+}
+if (!lstatSync(fifoPath).isFIFO()) {
+  fail("the unsafe FIFO was not retained");
+}
+`,
+  );
+  const result = spawnSync(process.execPath, [helperPath, scenario, root], {
+    encoding: "utf8",
+    killSignal: "SIGKILL",
+    timeout: 5_000,
+  });
+  assert.notEqual(
+    result.error?.code,
+    "ETIMEDOUT",
+    `${scenario} blocked while opening a FIFO`,
+  );
+  assert.equal(
+    result.status,
+    0,
+    [
+      `${scenario} FIFO probe failed`,
+      result.error?.stack,
+      result.stdout,
+      result.stderr,
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  );
+}
+
+for (const [scenario, title] of [
+  ["owner-before-adoption", "legacy adoption rejects an owner FIFO"],
+  ["owner-path-recheck", "legacy authority rejects a replacement owner FIFO"],
+  ["owner-stage-before-mode", "legacy adoption rejects a staged owner FIFO"],
+]) {
+  test(`${title} without blocking`, () => runLegacyFifoProbe(scenario));
+}
+
 test("legacy handoff is safe for mixed Bash field reads and releases by token", () => {
   const root = mkdtempSync(join(tmpdir(), "quality-gate-legacy-"));
   fixtures.push({ root, coordinator: null });
@@ -5105,9 +5259,17 @@ test("legacy handoff is safe for mixed Bash field reads and releases by token", 
   });
   assert.equal(statSync(root).mode & 0o777, sharedRootMode);
   const current = ownerFields(join(lockDirectory, "owner"));
+  assert.equal(current.uid, String(process.getuid?.() ?? ""));
   assert.equal(current.start_utc, "");
   assert.equal(current.coordinator_start_utc, coordinatorIdentity.startUtc);
-  assert.equal(current.token, generationId);
+  assert.equal(current.coordinator_token, generationId);
+  assert.equal(current.token, "coordinator-owner-v1");
+  assert.equal(
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,180}-[0-9]{1,10}-[0-9]{1,12}$/u.test(
+      current.token,
+    ),
+    false,
+  );
 
   // The old reader fetches PID before start_utc. Replacement is monotonic, so
   // the forced cross-version combinations are old PID/new blank start or new
@@ -5135,6 +5297,612 @@ test("legacy handoff is safe for mixed Bash field reads and releases by token", 
   assert.equal(existsSync(legacy.markerPath), false);
 });
 
+test("legacy inert stage cleanup rechecks its publisher after binding the inode", () => {
+  const root = mkdtempSync(join(tmpdir(), "quality-gate-inert-stage-"));
+  fixtures.push({ root, coordinator: null });
+  const lockDirectory = join(root, "run.lock");
+  const ownerPath = join(lockDirectory, "owner");
+  mkdirSync(lockDirectory);
+  const legacyOwnerId = `legacy-inert-stage-${process.pid}-1002`;
+  const generationId = `coordinator-inert-stage-${process.pid}-1003`;
+  writeFileSync(
+    ownerPath,
+    [
+      `pid=${process.pid}`,
+      "host=legacy-host",
+      "started_at=1002",
+      "start_utc=",
+      "worktree=/tmp/old-worktree",
+      `token=${legacyOwnerId}`,
+      "",
+    ].join("\n"),
+  );
+  const stagePid = 2_147_483_645;
+  let publisherChecks = 0;
+  let witnessed = false;
+  const legacy = adoptLegacyRunLock({
+    lockRoot: root,
+    expectedOwnerToken: legacyOwnerId,
+    generationToken: generationId,
+    coordinatorIdentity: {
+      pid: process.pid,
+      startUtc: "test-inert-stage-process-start",
+    },
+    inertStagePublisherMayOwn: (pid) => {
+      if (pid !== stagePid) return true;
+      publisherChecks += 1;
+      return publisherChecks >= 2;
+    },
+    beforeInertStagePublisherCheck: ({
+      sourcePath,
+      anchorPath,
+      stagePid: witnessedPid,
+    }) => {
+      assert.equal(witnessedPid, stagePid);
+      assert.equal(statSync(sourcePath).ino, statSync(anchorPath).ino);
+      witnessed = true;
+    },
+  });
+  const stagePath = join(lockDirectory, `owner.claiming.${stagePid}`);
+  writeFileSync(stagePath, "unpublished owner stage\n");
+  const stageInode = statSync(stagePath).ino;
+
+  assert.throws(
+    () => legacy.releaseIfOwned(),
+    (error) =>
+      error instanceof CoordinatorError &&
+      error.code === "LEGACY_RELEASE_FAILED",
+  );
+  assert.equal(publisherChecks, 2);
+  assert.equal(witnessed, true);
+  assert.equal(statSync(stagePath).ino, stageInode);
+  assert.equal(ownerAuthorityToken(ownerPath), generationId);
+  assert.deepEqual(
+    readdirSync(lockDirectory).filter((name) =>
+      name.startsWith("owner.reclaiming.quarantine."),
+    ),
+    [],
+  );
+});
+
+test("legacy authority rejects a same-token inode replacement during its path-bound read", () => {
+  const root = mkdtempSync(join(tmpdir(), "quality-gate-authority-inode-"));
+  fixtures.push({ root, coordinator: null });
+  const lockDirectory = join(root, "run.lock");
+  const ownerPath = join(lockDirectory, "owner");
+  mkdirSync(lockDirectory);
+  const legacyOwnerId = `legacy-authority-inode-${process.pid}-1002`;
+  const generationId = `coordinator-authority-inode-${process.pid}-1003`;
+  writeFileSync(
+    ownerPath,
+    `pid=${process.pid}\nhost=legacy-authority\nstart_utc=\ntoken=${legacyOwnerId}\n`,
+  );
+  let replaceDuringRead = false;
+  let priorInode = null;
+  const legacy = adoptLegacyRunLock({
+    lockRoot: root,
+    expectedOwnerToken: legacyOwnerId,
+    generationToken: generationId,
+    coordinatorIdentity: {
+      pid: process.pid,
+      startUtc: "Thu Aug 21 12:00:30 2026",
+    },
+    afterAuthorityOwnerRead: ({ path }) => {
+      if (!replaceDuringRead) return;
+      replaceDuringRead = false;
+      const text = readFileSync(path, "utf8");
+      priorInode = statSync(path).ino;
+      unlinkSync(path);
+      writeFileSync(path, text, { flag: "wx" });
+    },
+  });
+  replaceDuringRead = true;
+  assert.throws(
+    () => legacy.authority(),
+    (error) => error.code === "LEGACY_LOCK_UNSAFE",
+  );
+  assert.equal(ownerAuthorityToken(ownerPath), generationId);
+  assert.notEqual(statSync(ownerPath).ino, priorInode);
+  legacy.abandon();
+});
+
+test("legacy adoption never removes a pre-existing generation marker", () => {
+  const root = mkdtempSync(join(tmpdir(), "quality-gate-marker-existing-"));
+  fixtures.push({ root, coordinator: null });
+  const lockDirectory = join(root, "run.lock");
+  const ownerPath = join(lockDirectory, "owner");
+  mkdirSync(lockDirectory);
+  const legacyOwnerId = `legacy-marker-existing-${process.pid}-1004`;
+  const generationId = `coordinator-marker-existing-${process.pid}-1005`;
+  const markerPath = join(root, `holder.${generationId}`);
+  writeFileSync(
+    ownerPath,
+    `pid=${process.pid}\nhost=legacy-marker\nstart_utc=\ntoken=${legacyOwnerId}\n`,
+  );
+  writeFileSync(markerPath, `${generationId}\n`, { flag: "wx" });
+  const markerInode = statSync(markerPath).ino;
+
+  assert.throws(
+    () =>
+      adoptLegacyRunLock({
+        lockRoot: root,
+        expectedOwnerToken: legacyOwnerId,
+        generationToken: generationId,
+        coordinatorIdentity: {
+          pid: process.pid,
+          startUtc: "test-marker-existing-process-start",
+        },
+      }),
+    (error) => error.code === "EEXIST",
+  );
+  assert.equal(statSync(markerPath).ino, markerInode);
+  assert.equal(readFileSync(markerPath, "utf8"), `${generationId}\n`);
+  assert.equal(ownerAuthorityToken(ownerPath), legacyOwnerId);
+});
+
+test("legacy marker authority rejects and retains same-generation inode replacements", () => {
+  for (const action of ["rollback", "release"]) {
+    const root = mkdtempSync(
+      join(tmpdir(), `quality-gate-marker-replaced-${action}-`),
+    );
+    fixtures.push({ root, coordinator: null });
+    const lockDirectory = join(root, "run.lock");
+    const ownerPath = join(lockDirectory, "owner");
+    mkdirSync(lockDirectory);
+    const legacyOwnerId = `legacy-marker-replaced-${action}-${process.pid}-1006`;
+    const generationId = `coordinator-marker-replaced-${action}-${process.pid}-1007`;
+    writeFileSync(
+      ownerPath,
+      `pid=${process.pid}\nhost=legacy-marker\nstart_utc=\ntoken=${legacyOwnerId}\n`,
+    );
+    const legacy = adoptLegacyRunLock({
+      lockRoot: root,
+      expectedOwnerToken: legacyOwnerId,
+      generationToken: generationId,
+      coordinatorIdentity: {
+        pid: process.pid,
+        startUtc: `test-marker-replaced-${action}-process-start`,
+      },
+    });
+    const markerText = readFileSync(legacy.markerPath, "utf8");
+    const originalInode = statSync(legacy.markerPath).ino;
+    unlinkSync(legacy.markerPath);
+    writeFileSync(legacy.markerPath, markerText, { flag: "wx" });
+    const replacementInode = statSync(legacy.markerPath).ino;
+    assert.notEqual(replacementInode, originalInode);
+    assert.equal(legacy.authority().owned, false);
+    assert.equal(legacy.authority().markerValid, false);
+
+    const outcome =
+      action === "rollback"
+        ? legacy.rollbackHandoff()
+        : legacy.releaseIfOwned();
+    assert.equal(
+      action === "rollback" ? outcome.rolledBack : outcome.released,
+      false,
+    );
+    assert.equal(outcome.reason, "authority-lost");
+    assert.equal(statSync(legacy.markerPath).ino, replacementInode);
+    assert.equal(readFileSync(legacy.markerPath, "utf8"), markerText);
+    assert.equal(ownerAuthorityToken(ownerPath), generationId);
+    assert.equal(legacy.authority().owned, false);
+    assert.equal(legacy.authority().markerValid, false);
+  }
+});
+
+test("legacy marker cleanup retains replacements published after its exact take", () => {
+  for (const action of ["rollback", "release"]) {
+    const root = mkdtempSync(
+      join(tmpdir(), `quality-gate-marker-cleanup-${action}-`),
+    );
+    fixtures.push({ root, coordinator: null });
+    const lockDirectory = join(root, "run.lock");
+    const ownerPath = join(lockDirectory, "owner");
+    mkdirSync(lockDirectory);
+    const legacyOwnerId = `legacy-marker-cleanup-${action}-${process.pid}-1008`;
+    const generationId = `coordinator-marker-cleanup-${action}-${process.pid}-1009`;
+    writeFileSync(
+      ownerPath,
+      `pid=${process.pid}\nhost=legacy-marker\nstart_utc=\ntoken=${legacyOwnerId}\n`,
+    );
+    let replacementInode = null;
+    const legacy = adoptLegacyRunLock({
+      lockRoot: root,
+      expectedOwnerToken: legacyOwnerId,
+      generationToken: generationId,
+      coordinatorIdentity: {
+        pid: process.pid,
+        startUtc: `test-marker-cleanup-${action}-process-start`,
+      },
+      afterMarkerDiscardTake: ({ markerPath }) => {
+        writeFileSync(markerPath, `${generationId}\n`, { flag: "wx" });
+        replacementInode = statSync(markerPath).ino;
+      },
+    });
+    const originalInode = statSync(legacy.markerPath).ino;
+
+    if (action === "rollback") {
+      const outcome = legacy.rollbackHandoff();
+      assert.equal(outcome.rolledBack, false);
+      assert.equal(outcome.reason, "rollback-failed");
+      assert.equal(ownerAuthorityToken(ownerPath), legacyOwnerId);
+      assert.equal(existsSync(lockDirectory), true);
+    } else {
+      assert.throws(
+        () => legacy.releaseIfOwned(),
+        (error) => error.code === "LEGACY_LOCK_UNSAFE",
+      );
+      assert.equal(existsSync(lockDirectory), false);
+    }
+    assert.ok(replacementInode);
+    assert.notEqual(replacementInode, originalInode);
+    assert.equal(statSync(legacy.markerPath).ino, replacementInode);
+    assert.equal(readFileSync(legacy.markerPath, "utf8"), `${generationId}\n`);
+    const quarantines = readdirSync(root).filter((entry) =>
+      entry.startsWith("holder.reclaiming.quarantine.v1."),
+    );
+    assert.equal(quarantines.length, 1);
+    const quarantine = join(root, quarantines[0]);
+    assert.equal(statSync(join(quarantine, "anchor")).ino, originalInode);
+    assert.equal(statSync(join(quarantine, "record")).ino, originalInode);
+    assert.equal(legacy.authority().owned, false);
+    assert.equal(legacy.authority().markerValid, false);
+  }
+});
+
+test("coordinator marker cleanup crashes leave only inert top-level holder quarantines", () => {
+  const legacyModuleUrl = new URL(
+    "./quality-gate-coordinator-legacy.mjs",
+    import.meta.url,
+  ).href;
+  const gateScript = fileURLToPath(
+    new URL("../agent-quality-gate.sh", import.meta.url),
+  );
+  const deadOwnerPid = 2_147_483_647;
+
+  function checkedSpawn(command, args, options) {
+    const result = spawnSync(command, args, {
+      encoding: "utf8",
+      ...options,
+    });
+    assert.equal(
+      result.status,
+      0,
+      `${command} ${args.join(" ")} failed:\n${result.stderr || result.error || ""}`,
+    );
+    return result;
+  }
+
+  for (const action of ["rollback", "adoption-failure"]) {
+    for (const crashPhase of ["after-witness", "after-take"]) {
+      const root = mkdtempSync(
+        join(tmpdir(), `quality-gate-marker-crash-${action}-${crashPhase}-`),
+      );
+      fixtures.push({ root, coordinator: null });
+      const lockRoot = join(root, "lock");
+      const lockDirectory = join(lockRoot, "run.lock");
+      const ownerPath = join(lockDirectory, "owner");
+      const fixtureRepo = join(root, "repo");
+      const fixtureBin = join(fixtureRepo, "bin");
+      const fixtureTools = join(fixtureRepo, "tools");
+      const fixtureScripts = join(fixtureRepo, "scripts");
+      const fixtureGateScripts = join(fixtureScripts, "gate");
+      const expectedOwnerToken = runToken(
+        `legacy-marker-crash-${randomUUID()}`,
+        deadOwnerPid,
+        1_770_000_100,
+      );
+      const generationToken = runToken(
+        `coordinator-marker-crash-${randomUUID()}`,
+        process.pid,
+        1_770_000_101,
+      );
+      mkdirSync(lockDirectory, { recursive: true });
+      writeFileSync(
+        ownerPath,
+        `pid=${deadOwnerPid}\nhost=\nstart_utc=\nworktree=crash-fixture\ntoken=${expectedOwnerToken}\n`,
+      );
+
+      const helperPath = join(root, "marker-cleanup-crash.mjs");
+      writeFileSync(
+        helperPath,
+        [
+          `import { adoptLegacyRunLock, processStartUtc } from ${JSON.stringify(legacyModuleUrl)};`,
+          "const [lockRoot, expectedOwnerToken, generationToken, action, crashPhase] = process.argv.slice(2);",
+          'const crash = () => process.kill(process.pid, "SIGKILL");',
+          "const markerHooks =",
+          '  crashPhase === "after-witness"',
+          "    ? { afterMarkerDiscardWitness: crash }",
+          "    : { afterMarkerDiscardTake: crash };",
+          "const options = {",
+          "  lockRoot,",
+          "  expectedOwnerToken,",
+          "  generationToken,",
+          "  coordinatorIdentity: {",
+          "    pid: process.pid,",
+          "    startUtc: processStartUtc(process.pid),",
+          "  },",
+          "  ...markerHooks,",
+          "};",
+          'if (action === "adoption-failure") {',
+          "  options.beforeOwnerPublish = () => {",
+          '    throw new Error("forced adoption failure");',
+          "  };",
+          "  try {",
+          "    adoptLegacyRunLock(options);",
+          "  } catch {}",
+          "} else {",
+          "  const legacy = adoptLegacyRunLock(options);",
+          "  legacy.rollbackHandoff();",
+          "}",
+          "process.exit(91);",
+          "",
+        ].join("\n"),
+      );
+
+      const crashed = spawnSync(
+        process.execPath,
+        [
+          helperPath,
+          lockRoot,
+          expectedOwnerToken,
+          generationToken,
+          action,
+          crashPhase,
+        ],
+        { encoding: "utf8" },
+      );
+      assert.equal(crashed.signal, "SIGKILL", crashed.stderr);
+      assert.equal(ownerAuthorityToken(ownerPath), expectedOwnerToken);
+      assert.equal(
+        readdirSync(lockDirectory).some((entry) =>
+          entry.startsWith("owner.reclaiming.quarantine."),
+        ),
+        false,
+      );
+
+      const holderQuarantines = readdirSync(lockRoot).filter((entry) =>
+        entry.startsWith("holder.reclaiming.quarantine.v1."),
+      );
+      assert.equal(holderQuarantines.length, 1);
+      const holderQuarantine = join(lockRoot, holderQuarantines[0]);
+      assert.equal(statSync(holderQuarantine).mode & 0o777, 0o700);
+      assert.equal(
+        readFileSync(join(holderQuarantine, "anchor"), "utf8"),
+        `${generationToken}\n`,
+      );
+      if (crashPhase === "after-witness") {
+        assert.deepEqual(readdirSync(holderQuarantine), ["anchor"]);
+        assert.equal(
+          statSync(join(holderQuarantine, "anchor")).ino,
+          statSync(join(lockRoot, `holder.${generationToken}`)).ino,
+        );
+      } else {
+        assert.deepEqual(readdirSync(holderQuarantine).sort(), [
+          "anchor",
+          "fallback-ready",
+          "record",
+        ]);
+        assert.equal(
+          statSync(join(holderQuarantine, "anchor")).ino,
+          statSync(join(holderQuarantine, "record")).ino,
+        );
+        assert.equal(
+          existsSync(join(lockRoot, `holder.${generationToken}`)),
+          false,
+        );
+      }
+
+      mkdirSync(fixtureGateScripts, { recursive: true });
+      mkdirSync(fixtureBin);
+      mkdirSync(fixtureTools);
+      writeFileSync(
+        join(fixtureGateScripts, "agent-prewarm.mjs"),
+        'console.log("fixture");\n',
+      );
+      writeFileSync(
+        join(fixtureScripts, "agent-quality-gate.sh"),
+        "#!/usr/bin/env bash\nexit 0\n",
+      );
+      const trunkPath = join(fixtureTools, "trunk");
+      writeFileSync(trunkPath, "#!/usr/bin/env bash\nexit 0\n");
+      chmodSync(trunkPath, 0o755);
+      const pnpmPath = join(fixtureBin, "pnpm");
+      writeFileSync(
+        pnpmPath,
+        [
+          "#!/usr/bin/env bash",
+          'if [[ "${1:-}" == "--version" ]]; then',
+          "  printf '9.0.0\\n'",
+          "fi",
+          "exit 0",
+          "",
+        ].join("\n"),
+      );
+      chmodSync(pnpmPath, 0o755);
+      checkedSpawn("git", ["init", "-q"], { cwd: fixtureRepo });
+      checkedSpawn("git", ["config", "user.email", "test@example.invalid"], {
+        cwd: fixtureRepo,
+      });
+      checkedSpawn("git", ["config", "user.name", "Quality Gate Test"], {
+        cwd: fixtureRepo,
+      });
+      checkedSpawn("git", ["add", "."], { cwd: fixtureRepo });
+      checkedSpawn(
+        "git",
+        ["-c", "commit.gpgsign=false", "commit", "-qm", "init"],
+        { cwd: fixtureRepo },
+      );
+      const changedPaths = join(fixtureRepo, "changed-paths.txt");
+      writeFileSync(changedPaths, "scripts/gate/agent-prewarm.mjs\n");
+
+      const nextGate = spawnSync(
+        "/bin/bash",
+        [
+          gateScript,
+          "--changed-paths-file",
+          changedPaths,
+          "--base",
+          "HEAD",
+          "--run",
+          "--parallel",
+          "1",
+          "--lock-wait",
+          "10",
+        ],
+        {
+          cwd: fixtureRepo,
+          encoding: "utf8",
+          timeout: 30_000,
+          env: {
+            ...process.env,
+            AGENT_QUALITY_GATE_COORDINATOR: "0",
+            AGENT_QUALITY_GATE_LOCK: "1",
+            AGENT_QUALITY_GATE_LOCK_DIR: lockRoot,
+            AGENT_QUALITY_GATE_LOCK_HELD: "",
+            AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS: "0",
+            AGENT_QUALITY_GATE_LOCK_CRASH_AT: "",
+            NODE_ENV: "test",
+            PATH: `${fixtureBin}:${process.env.PATH}`,
+          },
+        },
+      );
+      assert.equal(nextGate.status, 0, nextGate.stderr);
+      assert.doesNotMatch(
+        `${nextGate.stdout}\n${nextGate.stderr}`,
+        /quality-gate owner quarantine/u,
+      );
+      assert.equal(existsSync(lockDirectory), false);
+      assert.equal(existsSync(holderQuarantine), true);
+      assert.equal(
+        readFileSync(join(holderQuarantine, "anchor"), "utf8"),
+        `${generationToken}\n`,
+      );
+    }
+  }
+});
+
+test("legacy handoff retains same-token replacements around quarantine", () => {
+  for (const phase of ["before-take", "after-take"]) {
+    const root = mkdtempSync(
+      join(tmpdir(), `quality-gate-handoff-quarantine-${phase}-`),
+    );
+    fixtures.push({ root, coordinator: null });
+    const lockDirectory = join(root, "run.lock");
+    const ownerPath = join(lockDirectory, "owner");
+    mkdirSync(lockDirectory);
+    const legacyOwnerId = `legacy-quarantine-${phase}-${process.pid}-1004`;
+    const generationId = `coordinator-quarantine-${phase}-${process.pid}-1005`;
+    const legacyText = `pid=${process.pid}\nhost=legacy-quarantine\nstart_utc=\ntoken=${legacyOwnerId}\n`;
+    writeFileSync(ownerPath, legacyText);
+    let replacementPath = null;
+    const replaceSource = ({ sourcePath }) => {
+      replacementPath = sourcePath;
+      if (existsSync(sourcePath)) unlinkSync(sourcePath);
+      writeFileSync(sourcePath, legacyText, { flag: "wx" });
+    };
+    assert.throws(
+      () =>
+        adoptLegacyRunLock({
+          lockRoot: root,
+          expectedOwnerToken: legacyOwnerId,
+          generationToken: generationId,
+          coordinatorIdentity: {
+            pid: process.pid,
+            startUtc: `Thu Aug 21 12:00:${phase === "before-take" ? "40" : "50"} 2026`,
+          },
+          beforeOwnerDiscardTake:
+            phase === "before-take" ? replaceSource : null,
+          afterOwnerDiscardTake: phase === "after-take" ? replaceSource : null,
+        }),
+      (error) => error.code === "LEGACY_LOCK_UNSAFE",
+    );
+    assert.equal(ownerAuthorityToken(ownerPath), generationId);
+    const quarantines = readdirSync(lockDirectory).filter((entry) =>
+      entry.startsWith("owner.reclaiming.quarantine."),
+    );
+    assert.equal(quarantines.length, 1);
+    const quarantine = join(lockDirectory, quarantines[0]);
+    assert.equal(statSync(quarantine).mode & 0o777, 0o700);
+    assert.deepEqual(readdirSync(quarantine).sort(), [
+      "anchor",
+      "fallback-ready",
+      "record",
+    ]);
+    assert.equal(
+      ownerAuthorityToken(join(quarantine, "anchor")),
+      legacyOwnerId,
+    );
+    assert.equal(
+      ownerAuthorityToken(join(quarantine, "record")),
+      legacyOwnerId,
+    );
+    if (phase === "before-take") {
+      assert.notEqual(
+        statSync(join(quarantine, "anchor")).ino,
+        statSync(join(quarantine, "record")).ino,
+      );
+      assert.equal(existsSync(replacementPath), false);
+    } else {
+      assert.equal(
+        statSync(join(quarantine, "anchor")).ino,
+        statSync(join(quarantine, "record")).ino,
+      );
+      assert.equal(ownerAuthorityToken(replacementPath), legacyOwnerId);
+      assert.notEqual(
+        statSync(replacementPath).ino,
+        statSync(join(quarantine, "record")).ino,
+      );
+    }
+  }
+});
+
+test("legacy handoff restores a foreign-owned inode without condemning it", (t) => {
+  if (typeof process.getuid !== "function") {
+    t.skip("effective uid is unavailable on this platform");
+    return;
+  }
+  const root = mkdtempSync(join(tmpdir(), "quality-gate-foreign-owner-"));
+  fixtures.push({ root, coordinator: null });
+  const lockDirectory = join(root, "run.lock");
+  const ownerPath = join(lockDirectory, "owner");
+  mkdirSync(lockDirectory);
+  const legacyOwnerId = `legacy-foreign-inode-${process.pid}-1002`;
+  const generationId = `coordinator-foreign-inode-${process.pid}-1003`;
+  writeFileSync(
+    ownerPath,
+    `pid=${process.pid}\nhost=legacy-foreign\nstart_utc=\ntoken=${legacyOwnerId}\n`,
+  );
+  const actualGetuid = process.getuid;
+  process.getuid = () => actualGetuid() + 1;
+  try {
+    assert.throws(
+      () =>
+        adoptLegacyRunLock({
+          lockRoot: root,
+          expectedOwnerToken: legacyOwnerId,
+          generationToken: generationId,
+          coordinatorIdentity: {
+            pid: process.pid,
+            startUtc: "Thu Aug 21 12:01:00 2026",
+          },
+        }),
+      (error) => error.code === "LEGACY_LOCK_FOREIGN_OWNER",
+    );
+  } finally {
+    process.getuid = actualGetuid;
+  }
+  assert.equal(ownerAuthorityToken(ownerPath), legacyOwnerId);
+  assert.equal(existsSync(join(root, "condemned.d", legacyOwnerId)), false);
+  assert.equal(
+    readdirSync(lockDirectory).some((name) =>
+      name.startsWith("owner.reclaiming."),
+    ),
+    false,
+  );
+  assert.equal(existsSync(join(root, `holder.${generationId}`)), false);
+});
+
 test("legacy handoff preserves shared owner read permissions through rollback", () => {
   const root = mkdtempSync(join(tmpdir(), "quality-gate-shared-owner-mode-"));
   fixtures.push({ root, coordinator: null });
@@ -5159,12 +5927,12 @@ test("legacy handoff preserves shared owner read permissions through rollback", 
       startUtc: "Thu Aug 21 12:10:00 2026",
     },
   });
-  assert.equal(ownerFields(ownerPath).token, generationId);
+  assert.equal(ownerAuthorityToken(ownerPath), generationId);
   assert.equal(statSync(ownerPath).mode & 0o777, 0o640);
 
   const rollback = legacy.rollbackHandoff();
   assert.equal(rollback.rolledBack, true);
-  assert.equal(ownerFields(ownerPath).token, legacyOwnerId);
+  assert.equal(ownerAuthorityToken(ownerPath), legacyOwnerId);
   assert.equal(statSync(ownerPath).mode & 0o777, 0o640);
   assert.equal(existsSync(legacy.markerPath), false);
 });
@@ -5287,7 +6055,7 @@ test("legacy release never removes a successor owner", () => {
                 basename(releaseTaken),
                 /^owner\.reclaiming\.release\.coordinator\./,
               );
-              assert.equal(ownerFields(releaseTaken).token, successorId);
+              assert.equal(ownerAuthorityToken(releaseTaken), successorId);
             }
           : null,
       afterReleaseOwnerTake:
@@ -5306,7 +6074,7 @@ test("legacy release never removes a successor owner", () => {
     const released = legacy.releaseIfOwned();
     assert.equal(released.released, false);
     assert.equal(released.reason, "authority-changed");
-    assert.equal(ownerFields(ownerPath).token, successorId);
+    assert.equal(ownerAuthorityToken(ownerPath), successorId);
     assert.deepEqual(
       readdirSync(lockDirectory).sort(),
       phase === "before-restore" ? ["owner", "release-blocker"] : ["owner"],
@@ -5316,6 +6084,155 @@ test("legacy release never removes a successor owner", () => {
       false,
     );
   }
+});
+
+test("legacy release retains a same-token inode replacement before take", () => {
+  const root = mkdtempSync(join(tmpdir(), "quality-gate-release-same-token-"));
+  fixtures.push({ root, coordinator: null });
+  const lockDirectory = join(root, "run.lock");
+  const ownerPath = join(lockDirectory, "owner");
+  mkdirSync(lockDirectory);
+  const oldId = `legacy-release-same-token-${process.pid}-1403`;
+  const generationId = `coordinator-release-same-token-${process.pid}-1404`;
+  writeFileSync(
+    ownerPath,
+    `pid=${process.pid}\nstart_utc=old\ntoken=${oldId}\n`,
+  );
+  let originalInode = null;
+  let replacementInode = null;
+  const legacy = adoptLegacyRunLock({
+    lockRoot: root,
+    expectedOwnerToken: oldId,
+    generationToken: generationId,
+    coordinatorIdentity: {
+      pid: process.pid,
+      startUtc: "test-release-same-token-process-start",
+    },
+    beforeReleaseOwnerTake: ({ ownerPath: currentOwnerPath }) => {
+      const text = readFileSync(currentOwnerPath, "utf8");
+      originalInode = statSync(currentOwnerPath).ino;
+      unlinkSync(currentOwnerPath);
+      writeFileSync(currentOwnerPath, text, { flag: "wx" });
+      replacementInode = statSync(currentOwnerPath).ino;
+    },
+  });
+
+  const released = legacy.releaseIfOwned();
+  assert.equal(released.released, false);
+  assert.equal(released.reason, "authority-changed");
+  assert.equal(ownerAuthorityToken(ownerPath), generationId);
+  assert.notEqual(replacementInode, originalInode);
+  assert.equal(statSync(ownerPath).ino, replacementInode);
+  assert.equal(
+    readdirSync(lockDirectory).some((entry) =>
+      entry.startsWith("owner.reclaiming.quarantine."),
+    ),
+    false,
+  );
+});
+
+test("legacy release retains an identical private owner replacement", () => {
+  const root = mkdtempSync(
+    join(tmpdir(), "quality-gate-release-private-replaced-"),
+  );
+  fixtures.push({ root, coordinator: null });
+  const lockDirectory = join(root, "run.lock");
+  const ownerPath = join(lockDirectory, "owner");
+  mkdirSync(lockDirectory);
+  const oldId = `legacy-release-private-${process.pid}-1405`;
+  const generationId = `coordinator-release-private-${process.pid}-1406`;
+  writeFileSync(
+    ownerPath,
+    `pid=${process.pid}\nstart_utc=old\ntoken=${oldId}\n`,
+  );
+  let releaseOwnerPath = null;
+  let originalInode = null;
+  let replacementInode = null;
+  let privateOwnerText = null;
+  const legacy = adoptLegacyRunLock({
+    lockRoot: root,
+    expectedOwnerToken: oldId,
+    generationToken: generationId,
+    coordinatorIdentity: {
+      pid: process.pid,
+      startUtc: "test-release-private-replaced-process-start",
+    },
+    afterReleaseOwnerTake: ({ releaseOwner }) => {
+      releaseOwnerPath = releaseOwner;
+      privateOwnerText = readFileSync(releaseOwner, "utf8");
+      originalInode = statSync(releaseOwner).ino;
+      const replacementStage = join(root, `replacement-${randomUUID()}`);
+      writeFileSync(replacementStage, privateOwnerText, { flag: "wx" });
+      replacementInode = statSync(replacementStage).ino;
+      unlinkSync(releaseOwner);
+      renameSync(replacementStage, releaseOwner);
+    },
+  });
+
+  assert.throws(
+    () => legacy.releaseIfOwned(),
+    (error) => error.code === "LEGACY_LOCK_UNSAFE",
+  );
+  assert.ok(releaseOwnerPath);
+  assert.notEqual(replacementInode, originalInode);
+  assert.equal(statSync(releaseOwnerPath).ino, replacementInode);
+  assert.equal(readFileSync(releaseOwnerPath, "utf8"), privateOwnerText);
+  assert.equal(ownerAuthorityToken(releaseOwnerPath), generationId);
+  assert.equal(existsSync(lockDirectory), true);
+  assert.equal(existsSync(ownerPath), false);
+  assert.deepEqual(readdirSync(join(releaseOwnerPath, "..")), ["owner"]);
+});
+
+test("legacy release retains an owner path replaced after its stable take", () => {
+  const root = mkdtempSync(join(tmpdir(), "quality-gate-release-replaced-"));
+  fixtures.push({ root, coordinator: null });
+  const lockDirectory = join(root, "run.lock");
+  const ownerPath = join(lockDirectory, "owner");
+  mkdirSync(lockDirectory);
+  const oldId = `legacy-release-replaced-${process.pid}-1410`;
+  const generationId = `coordinator-release-replaced-${process.pid}-1411`;
+  const successorId = `legacy-release-successor-${process.pid}-1412`;
+  const replacementId = `legacy-release-foreign-${process.pid}-1413`;
+  writeFileSync(
+    ownerPath,
+    `pid=${process.pid}\nstart_utc=old\ntoken=${oldId}\n`,
+  );
+  const legacy = adoptLegacyRunLock({
+    lockRoot: root,
+    expectedOwnerToken: oldId,
+    generationToken: generationId,
+    coordinatorIdentity: {
+      pid: process.pid,
+      startUtc: "test-release-replaced-process-start",
+    },
+    afterReleaseOwnerVisibleTake: ({ releaseTaken }) => {
+      unlinkSync(releaseTaken);
+      writeFileSync(
+        releaseTaken,
+        `pid=${process.pid}\nuid=${(process.getuid?.() ?? 0) + 1}\nstart_utc=\ncoordinator_token=${replacementId}\ntoken=coordinator-owner-v1\n`,
+      );
+      writeFileSync(
+        ownerPath,
+        `pid=${process.pid}\nstart_utc=successor\ntoken=${successorId}\n`,
+        { flag: "wx" },
+      );
+    },
+  });
+
+  assert.throws(
+    () => legacy.releaseIfOwned(),
+    (error) => error.code === "LEGACY_LOCK_FOREIGN_OWNER",
+  );
+  assert.equal(ownerAuthorityToken(ownerPath), successorId);
+  const remnants = readdirSync(lockDirectory).filter((entry) =>
+    entry.startsWith("owner.reclaiming.release.coordinator."),
+  );
+  assert.equal(remnants.length, 1);
+  assert.equal(
+    ownerAuthorityToken(join(lockDirectory, remnants[0])),
+    replacementId,
+  );
+  assert.equal(existsSync(join(root, "condemned.d", replacementId)), false);
 });
 
 test("legacy release leaves a live successor recovery-visible across SIGKILL", () => {
@@ -5423,7 +6340,7 @@ test("legacy handoff never overwrites an owner published during adoption", () =>
       }),
     (error) => error.code === "LEGACY_HANDOFF_MISMATCH",
   );
-  assert.equal(ownerFields(ownerPath).token, successorId);
+  assert.equal(ownerAuthorityToken(ownerPath), successorId);
   assert.equal(existsSync(join(root, `holder.${generationId}`)), false);
   assert.deepEqual(readdirSync(lockDirectory), ["owner"]);
   assert.equal(
@@ -5483,10 +6400,23 @@ test("legacy handoff keeps its taken owner when condemnation cannot publish", ()
   const remnant = entries.find((entry) =>
     entry.startsWith("owner.reclaiming.coordinator."),
   );
-  assert.equal(entries.length, 2);
+  const quarantine = entries.find((entry) =>
+    entry.startsWith("owner.reclaiming.quarantine."),
+  );
+  assert.equal(entries.length, 3);
   assert.ok(remnant);
-  assert.equal(ownerFields(ownerPath).token, successorId);
+  assert.ok(quarantine);
+  assert.equal(ownerAuthorityToken(ownerPath), successorId);
   assert.equal(ownerFields(join(lockDirectory, remnant)).token, expectedId);
+  assert.deepEqual(readdirSync(join(lockDirectory, quarantine)), ["anchor"]);
+  assert.equal(
+    ownerFields(join(lockDirectory, quarantine, "anchor")).token,
+    expectedId,
+  );
+  assert.equal(
+    statSync(join(lockDirectory, quarantine, "anchor")).ino,
+    statSync(join(lockDirectory, remnant)).ino,
+  );
   assert.equal(existsSync(join(root, `holder.${generationId}`)), false);
 });
 
@@ -6148,7 +7078,7 @@ test("startup source attestation guards every authority transition", async (t) =
               );
             }
             assert.equal(
-              ownerFields(ownerPath).token,
+              ownerAuthorityToken(ownerPath),
               ["startup maintenance", "ready publication"].includes(phase)
                 ? generationToken
                 : legacyOwnerToken,
@@ -6168,7 +7098,7 @@ test("startup source attestation guards every authority transition", async (t) =
         false,
         "failed startup left its socket bound",
       );
-      assert.equal(ownerFields(ownerPath).token, legacyOwnerToken);
+      assert.equal(ownerAuthorityToken(ownerPath), legacyOwnerToken);
       assert.equal(existsSync(join(root, "coordinator.json")), false);
       assert.equal(existsSync(readyFile), false);
       assert.equal(
@@ -6240,7 +7170,7 @@ test("ready publication failure removes its canonical metadata durably", async (
   assert.equal(existsSync(coordinatorFile), false);
   assert.equal(existsSync(readyFile), false);
   assert.equal(existsSync(socketPathForRoot(root)), false);
-  assert.equal(ownerFields(ownerPath).token, legacyOwnerToken);
+  assert.equal(ownerAuthorityToken(ownerPath), legacyOwnerToken);
   assert.equal(
     existsSync(join(legacyRoot, `holder.${generationToken}`)),
     false,
