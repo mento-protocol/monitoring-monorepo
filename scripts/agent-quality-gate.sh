@@ -2530,6 +2530,7 @@ trunk_network_failure_signatures=(
   'Could resolve but could not establish connection to host of'
 )
 
+# True when any measured download-failure phrasing appears in the given text.
 trunk_text_has_network_failure_signature() {
   local text="$1"
   local signature
@@ -2549,6 +2550,12 @@ trunk_text_has_network_failure_signature() {
 # reason it records is a download failure. The path comes from Trunk's own
 # output, so it is accepted only in the exact shape Trunk emits — a plain file
 # directly under .trunk/out — and never followed anywhere else.
+#
+# Scoped to `report:` and nothing else. This is one of the two checks that decide
+# whether a failure may be excused, and the classifier's rule is to verify
+# exactly rather than infer: a bullet under some other key must never be able to
+# supply the signature that `report:` did not. A `report:` block Trunk writes in
+# some other shape yields nothing here, which rejects.
 trunk_detail_yaml_reports_network_failure() {
   local yaml_path="$1"
   local report
@@ -2556,12 +2563,29 @@ trunk_detail_yaml_reports_network_failure() {
   is_trunk_detail_yaml_path "$yaml_path" || return 1
   [[ -f "$yaml_path" ]] || return 1
 
-  report="$(awk '/^[[:space:]]*- /{print}' "$yaml_path" 2>/dev/null || true)"
+  report="$(trunk_detail_yaml_report_lines "$yaml_path")"
   [[ -n "$report" ]] || return 1
 
   trunk_text_has_network_failure_signature "$report"
 }
 
+# The bullet lines under this YAML's top-level `report:` key, in order. A
+# top-level key is one that starts in column 0, so the block ends at the next
+# one.
+trunk_detail_yaml_report_lines() {
+  local yaml_path="$1"
+
+  awk '
+    /^[^[:space:]]/ {
+      in_report = ($0 ~ /^report:[[:space:]]*$/)
+      next
+    }
+    in_report && /^[[:space:]]+-[[:space:]]/ { print }
+  ' "$yaml_path" 2>/dev/null || true
+}
+
+# True when the path is exactly the shape Trunk writes its failure details to:
+# a plain file directly under .trunk/out, with no traversal.
 is_trunk_detail_yaml_path() {
   local yaml_path="$1"
 
@@ -2792,10 +2816,12 @@ print_trunk_provisioning_failure_causes() {
       printed=$((printed + 1))
       printf '  %.240s\n' "  ${detail}" >&2
     done < <(
-      awk '
-        /^title:/ { sub(/^title:[[:space:]]*/, ""); gsub(/^"|"$/, ""); print; next }
-        /^[[:space:]]*- / { sub(/^[[:space:]]*-[[:space:]]*/, ""); gsub(/^"|"$/, ""); print }
-      ' "$yaml_path" 2>/dev/null | head -n 4
+      {
+        awk '/^title:/ { sub(/^title:[[:space:]]*/, ""); gsub(/^"|"$/, ""); print; exit }' \
+          "$yaml_path" 2>/dev/null || true
+        trunk_detail_yaml_report_lines "$yaml_path" |
+          sed -e 's/^[[:space:]]*-[[:space:]]*//' -e 's/^"//' -e 's/"$//'
+      } | head -n 4
     )
   done < <(summarize_trunk_check_transcript "$output_file")
 
