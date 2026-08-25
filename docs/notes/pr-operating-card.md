@@ -98,9 +98,10 @@ even when you never open an authority.
    `--run` gates from different worktrees share weighted machine capacity. The
    default capacity is 3. Evidence-backed heavy dashboard commands form fair
    barriers and run alone. Requests from the same worktree remain serialized.
-   Exact matching requests share one verified final verdict. Background the
-   `--run` gate and the `git push`; a 600s foreground kill discards the freshness
-   stamp.
+   Exact matching requests share one exact terminal result. A Trunk-qualified
+   result reaches active followers but is never retained or
+   reused. Background the `--run` gate and the `git push`; a 600s foreground
+   kill discards the freshness stamp.
    Authority:
    [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md).
 

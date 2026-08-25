@@ -173,6 +173,18 @@ close waiter. The next gate can recover the restored owner. Final cleanup
 quarantines and deletes only the bound private inode. A same-text replacement
 is retained and makes release fail closed.
 
+Node opens every mutable legacy owner or unpublished owner-stage path with
+`O_RDONLY | O_NOFOLLOW | O_NONBLOCK`. It uses `fstat` to require a current-UID
+regular file before it reads the owner or changes a stage's mode. A symlink or
+FIFO fails closed. The nonblocking open prevents a FIFO from waiting for a
+writer before the type check.
+
+Bash opens the original owner before release and retains that descriptor across
+both owner moves. It parses the authority token through a duplicate of the open
+descriptor. Linux exposes `/dev/fd/<n>` as a symlink, so the release parser
+validates the descriptor target directly. It does not pass that pseudo-path to
+the shared-path no-symlink guard.
+
 A process crash after successful `rmdir` is different from a caught release
 failure. It can leave the private owner and holder marker outside the authority
 path. The operating system closes the marker descriptor, and no close waiter
@@ -449,6 +461,14 @@ never produces a success result for a waiter. Completed failures are delivered
 to current waiters, but only a verified success can satisfy later freshness
 reuse.
 
+A leader that skips an unprovisionable Trunk arm publishes a qualified
+success with `reusable: false` and the skip reason. Active followers receive that
+same terminal result. The coordinator does not index it for retained reuse and
+removes an older success index for the same fingerprint. A later
+`--skip-if-fresh` request must execute and retry Trunk. The post-failure
+provisioning probe runs under the failed command's identity and keeps its
+scheduler lease until the probe and all identified descendants drain.
+
 The leader gate owns the worker. A follower disconnect only detaches that
 follower. A leader disconnect, cancellation, interrupt, or stale-owner verdict
 starts the drain and publishes the same non-success result to every attached
@@ -669,16 +689,21 @@ short-plan tool waited 1,000 ms. This interval keeps both short commands live
 through normal process-start skew. The command was
 `node scripts/gate/agent-quality-gate-scheduler-benchmark.mjs`.
 
+The legacy baseline retries only the exact pre-dispatch displacement result
+once, after all initial peers settle. It first proves that the aborted attempt
+started no mapped tool. The timing remains bound to the first launch. The final
+run needed zero retries.
+
 | Mode        | Elapsed    | Maximum mapped commands | Maximum active gate labels | Cross-gate overlaps | All-capacity overlaps |
 | ----------- | ---------- | ----------------------- | -------------------------- | ------------------- | --------------------- |
-| Legacy lock | 155,069 ms | 3                       | 1                          | 0                   | 0                     |
-| Coordinator | 111,947 ms | 3                       | 2                          | 3                   | 0                     |
+| Legacy lock | 157,276 ms | 3                       | 1                          | 0                   | 0                     |
+| Coordinator | 124,983 ms | 3                       | 2                          | 6                   | 0                     |
 
 Both all-capacity commands in the coordinator plan had zero overlap with other
-mapped tools. Short package completion improved by 116,885 ms and 77,358 ms.
+mapped tools. Short package completion improved by 81,042 ms and 119,001 ms.
 The A/B label order depends on process scheduling. Total fixture time decreased
-by 43,122 ms (27.8%). The short-plan queue delays fell from 118,840 ms and
-92,605 ms to 4,759 ms and 11,259 ms. The separate scheduler integration suite
+by 32,293 ms (20.5%). The short-plan queue delays fell from 93,224 ms and
+128,758 ms to 4,225 ms and 4,358 ms. The separate scheduler integration suite
 proves that three distinct worktrees can progress at the exact capacity of 3.
 
 Elapsed time runs from the full gate's first mapped-tool start to the last gate

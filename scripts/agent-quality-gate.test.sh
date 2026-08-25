@@ -1060,7 +1060,9 @@ arm_suite_abort_trap
 gate_test_process_start() {
   local pid="$1"
   [[ "$pid" =~ ^[0-9]+$ ]] || return 1
-  TZ=UTC LC_ALL=C LANG=C ps -p "$pid" -o lstart= 2>/dev/null | head -n1 || true
+  TZ=UTC LC_ALL=C LANG=C ps -p "$pid" -o lstart= 2>/dev/null |
+    head -n1 |
+    sed 's/^[[:space:]]*//; s/[[:space:]]*$//' || true
 }
 
 # shellcheck disable=SC2329 # called through the EXIT-trap cleanup helper below
@@ -1269,6 +1271,42 @@ if ! /bin/bash -c '
 fi
 rm -f "$coordinator_adapter_probe"
 
+coordinator_qualified_payload="$(mktemp)"
+if ! /bin/bash -c '
+  set -euo pipefail
+  repo_root="$1"
+  payload_file="$2"
+  script_source_dir="$repo_root/scripts"
+  source "$repo_root/scripts/gate/quality-gate-coordinator.sh"
+  gate_coordinator_publish_result() {
+    printf "%s\t%s\n" "$1" "$2" > "$payload_file"
+  }
+  gate_coordinator_publish_success blocked
+  node -e '\''
+    const assert = require("node:assert/strict");
+    const fs = require("node:fs");
+    const [status, raw] = fs.readFileSync(process.argv[1], "utf8").trim().split("\t");
+    const payload = JSON.parse(raw);
+    assert.equal(status, "success");
+    assert.deepEqual(payload, {
+      source: "agent-quality-gate",
+      qualified: true,
+      reusable: false,
+      skipped: [{
+        command: "trunk",
+        reason: "provisioning-unavailable",
+      }],
+    });
+  '\'' "$payload_file"
+  gate_coordinator_publish_success ok
+  grep -Fxq $'\''success\t{"source":"agent-quality-gate"}'\'' "$payload_file"
+' coordinator-qualified-payload-test \
+  "$repo_root" "$coordinator_qualified_payload"; then
+  rm -f "$coordinator_qualified_payload"
+  fail "quality-gate coordinator qualified-success payload test failed"
+fi
+rm -f "$coordinator_qualified_payload"
+
 coordinator_pipeline_scratch="$(mktemp -d)"
 if ! /bin/bash -c '
   set -euo pipefail
@@ -1333,6 +1371,46 @@ if ! /bin/bash -c '
         gate_coordinator_completed_result_json="{\"result\":{\"status\":\"failure\",\"fingerprint\":\"$gate_coordinator_registration_fingerprint\",\"policyHash\":\"$gate_coordinator_policy_hash\",\"executionId\":\"$gate_coordinator_execution_id\"}}"
         gate_coordinator_wait_for_shared_result
         ;;
+      shared-ordinary)
+        gate_coordinator_role="completed"
+        gate_coordinator_completed_result_json="{\"result\":{\"status\":\"success\",\"fingerprint\":\"$gate_coordinator_registration_fingerprint\",\"policyHash\":\"$gate_coordinator_policy_hash\",\"executionId\":\"$gate_coordinator_execution_id\",\"payload\":{\"source\":\"agent-quality-gate\"}}}"
+        gate_coordinator_wait_for_shared_result
+        ;;
+      shared-qualified)
+        gate_coordinator_role="completed"
+        gate_coordinator_completed_result_json="{\"result\":{\"status\":\"success\",\"fingerprint\":\"$gate_coordinator_registration_fingerprint\",\"policyHash\":\"$gate_coordinator_policy_hash\",\"executionId\":\"$gate_coordinator_execution_id\",\"payload\":{\"source\":\"agent-quality-gate\",\"qualified\":true,\"reusable\":false,\"skipped\":[{\"command\":\"trunk\",\"reason\":\"provisioning-unavailable\"}]}}}"
+        gate_coordinator_wait_for_shared_result
+        ;;
+      shared-wrong-source)
+        gate_coordinator_role="completed"
+        gate_coordinator_completed_result_json="{\"result\":{\"status\":\"success\",\"fingerprint\":\"$gate_coordinator_registration_fingerprint\",\"policyHash\":\"$gate_coordinator_policy_hash\",\"executionId\":\"$gate_coordinator_execution_id\",\"payload\":{\"source\":\"unknown\"}}}"
+        gate_coordinator_wait_for_shared_result
+        ;;
+      shared-extra-field)
+        gate_coordinator_role="completed"
+        gate_coordinator_completed_result_json="{\"result\":{\"status\":\"success\",\"fingerprint\":\"$gate_coordinator_registration_fingerprint\",\"policyHash\":\"$gate_coordinator_policy_hash\",\"executionId\":\"$gate_coordinator_execution_id\",\"payload\":{\"source\":\"agent-quality-gate\",\"extra\":true}}}"
+        gate_coordinator_wait_for_shared_result
+        ;;
+      shared-nul-key)
+        gate_coordinator_role="completed"
+        gate_coordinator_completed_result_json="{\"result\":{\"status\":\"success\",\"fingerprint\":\"$gate_coordinator_registration_fingerprint\",\"policyHash\":\"$gate_coordinator_policy_hash\",\"executionId\":\"$gate_coordinator_execution_id\",\"payload\":{\"source\":\"agent-quality-gate\",\"extra\\u0000field\":true}}}"
+        gate_coordinator_wait_for_shared_result
+        ;;
+      shared-unqualified-metadata)
+        gate_coordinator_role="completed"
+        gate_coordinator_completed_result_json="{\"result\":{\"status\":\"success\",\"fingerprint\":\"$gate_coordinator_registration_fingerprint\",\"policyHash\":\"$gate_coordinator_policy_hash\",\"executionId\":\"$gate_coordinator_execution_id\",\"payload\":{\"source\":\"agent-quality-gate\",\"reusable\":false,\"skipped\":[{\"command\":\"trunk\",\"reason\":\"provisioning-unavailable\"}]}}}"
+        gate_coordinator_wait_for_shared_result
+        ;;
+      shared-extra-skip)
+        gate_coordinator_role="completed"
+        gate_coordinator_completed_result_json="{\"result\":{\"status\":\"success\",\"fingerprint\":\"$gate_coordinator_registration_fingerprint\",\"policyHash\":\"$gate_coordinator_policy_hash\",\"executionId\":\"$gate_coordinator_execution_id\",\"payload\":{\"source\":\"agent-quality-gate\",\"qualified\":true,\"reusable\":false,\"skipped\":[{\"command\":\"trunk\",\"reason\":\"provisioning-unavailable\"},{\"command\":\"other\",\"reason\":\"unknown\"}]}}}"
+        gate_coordinator_wait_for_shared_result
+        ;;
+      shared-qualified-extra-field)
+        gate_coordinator_role="completed"
+        gate_coordinator_completed_result_json="{\"result\":{\"status\":\"success\",\"fingerprint\":\"$gate_coordinator_registration_fingerprint\",\"policyHash\":\"$gate_coordinator_policy_hash\",\"executionId\":\"$gate_coordinator_execution_id\",\"payload\":{\"source\":\"agent-quality-gate\",\"qualified\":true,\"reusable\":false,\"skipped\":[{\"command\":\"trunk\",\"reason\":\"provisioning-unavailable\"}],\"extra\":true}}}"
+        gate_coordinator_wait_for_shared_result
+        ;;
       *) return 99 ;;
     esac
   }
@@ -1382,6 +1460,39 @@ if ! /bin/bash -c '
   assert_pipeline_failure shared 1 "shared execution" \
     "No mapped command ran in this request" \
     "Shared coordinator execution ended with status failure"
+  for corrupt_shared_success in \
+    shared-wrong-source \
+    shared-extra-field \
+    shared-nul-key \
+    shared-unqualified-metadata \
+    shared-extra-skip \
+    shared-qualified-extra-field; do
+    assert_pipeline_failure "$corrupt_shared_success" 2 \
+      "coalesced result handling" \
+      "No mapped command ran in this request" \
+      "shared coordinator success used an unknown or malformed payload"
+  done
+
+  run_pipeline_scenario shared-ordinary \
+    > "$scratch_dir/shared-ordinary.stdout" \
+    2> "$scratch_dir/shared-ordinary.stderr"
+  grep -Fq -- \
+    "Shared coordinator execution passed; no mapped command ran in this request." \
+    "$scratch_dir/shared-ordinary.stdout"
+  [[ ! -s "$scratch_dir/shared-ordinary.stderr" ]]
+
+  run_pipeline_scenario shared-qualified \
+    > "$scratch_dir/shared-qualified.stdout" \
+    2> "$scratch_dir/shared-qualified.stderr"
+  grep -Fq -- \
+    "Shared coordinator execution passed; no mapped command ran in this request." \
+    "$scratch_dir/shared-qualified.stdout"
+  grep -Fq -- \
+    "warning: the shared coordinator execution skipped Trunk because the CLI could not be provisioned." \
+    "$scratch_dir/shared-qualified.stderr"
+  grep -Fq -- \
+    "this qualified success is not reusable" \
+    "$scratch_dir/shared-qualified.stderr"
 
   set +e
   set +o pipefail
@@ -3627,10 +3738,524 @@ STUB
   rm -rf "$fixture_repo" "$fixture_lock_root"
 }
 
+run_trunk_probe_lease_regression() {
+  local probe_parallelism
+  local probe_mode
+  local fixture_repo
+  local fixture_joiner_parent
+  local fixture_joiner_repo
+  local fixture_lock_root
+
+  for probe_parallelism in 1 2; do
+    if [[ "$probe_parallelism" -eq 1 ]]; then
+      probe_mode=sequential
+    else
+      probe_mode=parallel
+    fi
+    (
+      fixture_repo=""
+      fixture_joiner_parent=""
+      fixture_joiner_repo=""
+      fixture_lock_root=""
+      # This outer trap exists before the first allocation. Setup failures and
+      # assertion failures therefore remove every private fixture directory
+      # after the inner process cleanup has finished.
+      # shellcheck disable=SC2329 # invoked through the outer EXIT trap
+      cleanup_trunk_probe_lease_directories() {
+        [[ -z "$fixture_repo" ]] || rm -rf -- "$fixture_repo"
+        [[ -z "$fixture_joiner_parent" ]] ||
+          rm -rf -- "$fixture_joiner_parent"
+        [[ -z "$fixture_lock_root" ]] || rm -rf -- "$fixture_lock_root"
+      }
+      trap cleanup_trunk_probe_lease_directories EXIT
+      fixture_repo="$(mktemp -d)"
+      fixture_joiner_parent="$(mktemp -d)"
+      fixture_joiner_repo="${fixture_joiner_parent}/worktree"
+      fixture_lock_root="$(mktemp -d /tmp/qgt.XXXXXX)"
+      (
+      cd "$fixture_repo"
+      git init -q
+      git config user.email test@example.invalid
+      git config user.name "Quality Gate Test"
+      mkdir -p bin scripts/context tools
+      printf 'console.log("holder fixture");\n' \
+        > scripts/context/agent-context-budget.mjs
+      printf 'contender fixture\n' > other.txt
+      cat > bin/qg-trunk-probe-descendant <<'STUB'
+#!/usr/bin/env bash
+trap 'printf "%s\n" stopped > "${QG_PROBE_DESCENDANT_STOPPED:?}"; exit 0' \
+  HUP INT TERM
+printf '%s\n' "$$" > "${QG_PROBE_DESCENDANT_PID_FILE:?}"
+while :; do sleep 1; done
+STUB
+      cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  if [[ "${QG_GATE_ROLE:-}" == holder ]]; then
+    qg-trunk-probe-descendant >/dev/null 2>&1 &
+    while [[ ! -s "${QG_PROBE_DESCENDANT_PID_FILE:?}" ]]; do
+      sleep 0.01
+    done
+    : > "${QG_PROBE_READY:?}"
+    while [[ ! -e "${QG_PROBE_RELEASE:?}" ]]; do
+      sleep 0.01
+    done
+    exit 1
+  fi
+  printf '1.0.0-fixture\n'
+  exit 0
+fi
+if [[ "${QG_GATE_ROLE:-}" == contender ]]; then
+  if [[ ! -e "${QG_PROBE_DESCENDANT_STOPPED:?}" ]]; then
+    : > "${QG_PROBE_OVERLAP:?}"
+  fi
+  : > "${QG_CONTENDER_STARTED:?}"
+  exit 0
+fi
+exit 1
+STUB
+      cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  printf '9.0.0\n'
+  exit 0
+fi
+if [[ "${QG_GATE_ROLE:-}" == contender ]]; then
+  if [[ ! -e "${QG_PROBE_DESCENDANT_STOPPED:?}" ]]; then
+    : > "${QG_PROBE_OVERLAP:?}"
+  fi
+  : > "${QG_CONTENDER_STARTED:?}"
+fi
+exit 0
+STUB
+      chmod +x bin/pnpm bin/qg-trunk-probe-descendant tools/trunk
+      git add .
+      git commit -qm init
+      git worktree add --detach -q "$fixture_joiner_repo" HEAD
+      printf 'scripts/context/agent-context-budget.mjs\n' > holder-paths.txt
+      printf 'other.txt\n' > "$fixture_joiner_repo/contender-paths.txt"
+
+      local holder_output="$fixture_repo/${probe_mode}-holder-output"
+      local contender_output="$fixture_repo/${probe_mode}-contender-output"
+      local probe_ready="$fixture_repo/${probe_mode}-probe-ready"
+      local probe_release="$fixture_repo/${probe_mode}-probe-release"
+      local drain_refresh_barrier="$fixture_repo/${probe_mode}-drain-refresh"
+      local descendant_pid_file="$fixture_repo/${probe_mode}-descendant-pid"
+      local descendant_stopped="$fixture_repo/${probe_mode}-descendant-stopped"
+      local contender_started="$fixture_repo/${probe_mode}-contender-started"
+      local overlap_file="$fixture_repo/${probe_mode}-overlap"
+      local holder_pid=""
+      local holder_start=""
+      local contender_pid=""
+      local contender_start=""
+      local descendant_pid=""
+      local descendant_start=""
+      local coordinator_metadata=""
+      local coordinator_identity=""
+      local coordinator_pid=""
+      local coordinator_start=""
+      local coordinator_state=2
+      local holder_exit=""
+      local contender_exit=""
+      local trunk_probe_reap_status=124
+      local attempt
+      local observed=0
+
+      # Return 0 only when this direct child is gone or is a zombie that a
+      # wait can reap. Return 1 for the exact live PID/start identity, 2 when
+      # the identity cannot be read, and 3 when the PID now names a replacement.
+      trunk_probe_child_reap_state() {
+        local pid="$1"
+        local expected_start="$2"
+        local current_start current_state
+        [[ "$pid" =~ ^[1-9][0-9]*$ && -n "$expected_start" ]] || return 2
+        kill -0 "$pid" 2>/dev/null || return 0
+        current_start="$(gate_test_process_start "$pid")"
+        if [[ -z "$current_start" ]]; then
+          kill -0 "$pid" 2>/dev/null || return 0
+          return 2
+        fi
+        [[ "$current_start" == "$expected_start" ]] || return 3
+        current_state="$(gate_test_process_state "$pid")"
+        if [[ -z "$current_state" ]]; then
+          kill -0 "$pid" 2>/dev/null || return 0
+          return 2
+        fi
+        [[ "$current_state" == Z* ]] && return 0
+        return 1
+      }
+      # Wait only while the exact child identity remains live. On deadline,
+      # revalidate its PID, start time, and stable parent before TERM and KILL.
+      # `trunk_probe_reap_status` receives the child verdict after a safe wait.
+      trunk_probe_wait_and_reap_child() {
+        local label="$1"
+        local pid="$2"
+        local expected_start="$3"
+        local wait_seconds="${4:-60}"
+        local deadline state signal_status wait_status
+        trunk_probe_reap_status=124
+        [[ "$wait_seconds" =~ ^[1-9][0-9]*$ ]] || return 124
+
+        deadline=$(( $(date +%s) + wait_seconds ))
+        while :; do
+          if trunk_probe_child_reap_state "$pid" "$expected_start"; then
+            state=0
+          else
+            state=$?
+          fi
+          [[ "$state" -ne 0 && "$(date +%s)" -lt "$deadline" ]] || break
+          [[ "$state" -eq 1 ]] || return 124
+          sleep 0.05
+        done
+        if [[ "$state" -eq 1 ]]; then
+          if gate_test_signal_with_current_parent \
+            "$label" TERM "$pid" "$expected_start"; then
+            :
+          else
+            signal_status=$?
+            [[ "$signal_status" -eq 1 ]] || return 124
+          fi
+          deadline=$(( $(date +%s) + 5 ))
+          while :; do
+            if trunk_probe_child_reap_state "$pid" "$expected_start"; then
+              state=0
+            else
+              state=$?
+            fi
+            [[ "$state" -eq 1 && "$(date +%s)" -lt "$deadline" ]] || break
+            sleep 0.05
+          done
+        fi
+        if [[ "$state" -eq 1 ]]; then
+          if gate_test_signal_with_current_parent \
+            "$label" KILL "$pid" "$expected_start"; then
+            :
+          else
+            signal_status=$?
+            [[ "$signal_status" -eq 1 ]] || return 124
+          fi
+          deadline=$(( $(date +%s) + 5 ))
+          while :; do
+            if trunk_probe_child_reap_state "$pid" "$expected_start"; then
+              state=0
+            else
+              state=$?
+            fi
+            [[ "$state" -eq 1 && "$(date +%s)" -lt "$deadline" ]] || break
+            sleep 0.05
+          done
+        fi
+        [[ "$state" -eq 0 ]] || return 124
+        if wait "$pid" 2>/dev/null; then
+          wait_status=0
+        else
+          wait_status=$?
+        fi
+        trunk_probe_reap_status="$wait_status"
+        return 0
+      }
+
+      # shellcheck disable=SC2329
+      cleanup_trunk_probe_lease_fixture() {
+        : > "$probe_release"
+        : > "${drain_refresh_barrier}.release"
+        if [[ "$holder_pid" =~ ^[1-9][0-9]*$ && -n "$holder_start" ]]; then
+          trunk_probe_wait_and_reap_child \
+            "$probe_mode Trunk-probe holder gate" \
+            "$holder_pid" "$holder_start" 1 || true
+        fi
+        if [[ "$contender_pid" =~ ^[1-9][0-9]*$ && -n "$contender_start" ]]; then
+          trunk_probe_wait_and_reap_child \
+            "$probe_mode Trunk-probe contender gate" \
+            "$contender_pid" "$contender_start" 1 || true
+        fi
+        if [[ "$descendant_pid" =~ ^[1-9][0-9]*$ && -n "$descendant_start" ]] &&
+          gate_test_process_has_live_start "$descendant_pid" "$descendant_start"; then
+          gate_test_signal_with_current_parent \
+            "$probe_mode Trunk-probe descendant" KILL \
+            "$descendant_pid" "$descendant_start" || true
+        fi
+        gate_test_stop_coordinators_in_root \
+          "$probe_mode Trunk-probe coordinator" "$fixture_lock_root"
+      }
+      fail_trunk_probe_lease_fixture() {
+        {
+          sed "s/^/${probe_mode} holder: /" "$holder_output" 2>/dev/null || true
+          sed "s/^/${probe_mode} contender: /" "$contender_output" \
+            2>/dev/null || true
+        } > "$output_file"
+        fail "$probe_mode Trunk-probe lease fixture: $*"
+      }
+      trap cleanup_trunk_probe_lease_fixture EXIT
+
+      AGENT_QUALITY_GATE_LOCK=1 \
+        AGENT_QUALITY_GATE_LOCK_HELD='' \
+        AGENT_QUALITY_GATE_LOCK_DIR="$fixture_lock_root" \
+        AGENT_QUALITY_GATE_COORDINATOR=1 \
+        AGENT_QUALITY_GATE_CAPACITY=1 \
+        AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER="$drain_refresh_barrier" \
+        NODE_ENV=test \
+        QG_GATE_ROLE=holder \
+        QG_PROBE_READY="$probe_ready" \
+        QG_PROBE_RELEASE="$probe_release" \
+        QG_PROBE_DESCENDANT_PID_FILE="$descendant_pid_file" \
+        QG_PROBE_DESCENDANT_STOPPED="$descendant_stopped" \
+        QG_PROBE_OVERLAP="$overlap_file" \
+        QG_CONTENDER_STARTED="$contender_started" \
+        PATH="$fixture_repo/bin:$PATH" \
+        /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+          --changed-paths-file holder-paths.txt \
+          --base HEAD --run --parallel "$probe_parallelism" --lock-wait 30 \
+          > "$holder_output" 2>&1 &
+      holder_pid=$!
+      for ((attempt = 0; attempt < 100; attempt++)); do
+        holder_start="$(gate_test_process_start "$holder_pid")"
+        [[ -n "$holder_start" ]] && break
+        kill -0 "$holder_pid" 2>/dev/null || break
+        sleep 0.01
+      done
+      [[ -n "$holder_start" ]] ||
+        fail_trunk_probe_lease_fixture "could not identify the holder gate"
+
+      for ((attempt = 0; attempt < gate_test_coordinator_observer_attempts; attempt++)); do
+        if [[ -e "$probe_ready" && -s "$descendant_pid_file" ]]; then
+          observed=1
+          break
+        fi
+        gate_test_process_has_live_start "$holder_pid" "$holder_start" || break
+        sleep 0.05
+      done
+      [[ "$observed" -eq 1 ]] ||
+        fail_trunk_probe_lease_fixture \
+          "the failed Trunk command did not enter its provisioning probe"
+      coordinator_metadata="$({
+        find "$fixture_lock_root" -type f -name coordinator.json -print 2>/dev/null
+      } | head -n1)"
+      [[ -f "$coordinator_metadata" ]] ||
+        fail_trunk_probe_lease_fixture \
+          "the provisioning probe did not retain coordinator metadata"
+      if ! coordinator_identity="$(node -e '
+        const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+        process.stdout.write([
+          String(value.coordinatorIdentity?.pid ?? ""),
+          value.coordinatorIdentity?.startUtc ?? "",
+        ].join("\t"));
+      ' "$coordinator_metadata")"; then
+        fail_trunk_probe_lease_fixture \
+          "the provisioning probe coordinator metadata was unreadable"
+      fi
+      IFS=$'\t' read -r coordinator_pid coordinator_start <<< "$coordinator_identity"
+      if trunk_probe_child_reap_state "$coordinator_pid" "$coordinator_start"; then
+        coordinator_state=0
+      else
+        coordinator_state=$?
+      fi
+      [[ "$coordinator_state" -eq 1 ]] ||
+        fail_trunk_probe_lease_fixture \
+          "the provisioning probe did not retain an exact live coordinator identity"
+      descendant_pid="$(cat "$descendant_pid_file")"
+      descendant_start="$(gate_test_process_start "$descendant_pid")"
+      [[ "$descendant_pid" =~ ^[1-9][0-9]*$ && -n "$descendant_start" ]] ||
+        fail_trunk_probe_lease_fixture \
+          "the provisioning probe recorded an invalid descendant identity"
+      gate_test_process_has_live_start "$descendant_pid" "$descendant_start" ||
+        fail_trunk_probe_lease_fixture \
+          "the provisioning probe descendant was not alive at its barrier"
+
+      (
+        cd "$fixture_joiner_repo"
+        AGENT_QUALITY_GATE_LOCK=1 \
+          AGENT_QUALITY_GATE_LOCK_HELD='' \
+          AGENT_QUALITY_GATE_LOCK_DIR="$fixture_lock_root" \
+          AGENT_QUALITY_GATE_COORDINATOR=1 \
+          AGENT_QUALITY_GATE_CAPACITY=1 \
+          NODE_ENV=test \
+          QG_GATE_ROLE=contender \
+          QG_PROBE_READY="$probe_ready" \
+          QG_PROBE_RELEASE="$probe_release" \
+          QG_PROBE_DESCENDANT_PID_FILE="$descendant_pid_file" \
+          QG_PROBE_DESCENDANT_STOPPED="$descendant_stopped" \
+          QG_PROBE_OVERLAP="$overlap_file" \
+          QG_CONTENDER_STARTED="$contender_started" \
+          PATH="$fixture_repo/bin:$PATH" \
+          /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+            --changed-paths-file contender-paths.txt \
+            --base HEAD --run --parallel 1 --lock-wait 30
+      ) > "$contender_output" 2>&1 &
+      contender_pid=$!
+      for ((attempt = 0; attempt < 100; attempt++)); do
+        contender_start="$(gate_test_process_start "$contender_pid")"
+        [[ -n "$contender_start" ]] && break
+        kill -0 "$contender_pid" 2>/dev/null || break
+        sleep 0.01
+      done
+      [[ -n "$contender_start" ]] ||
+        fail_trunk_probe_lease_fixture "could not identify the contender gate"
+
+      observed=0
+      for ((attempt = 0; attempt < gate_test_coordinator_observer_attempts; attempt++)); do
+        if grep -Fq "Scheduler wait:" "$contender_output" 2>/dev/null; then
+          observed=1
+          break
+        fi
+        [[ ! -e "$contender_started" ]] || break
+        gate_test_process_has_live_start "$contender_pid" "$contender_start" || break
+        sleep 0.05
+      done
+      [[ "$observed" -eq 1 ]] ||
+        fail_trunk_probe_lease_fixture \
+          "the contender did not queue behind the provisioning probe lease"
+      [[ ! -e "$contender_started" && ! -e "$overlap_file" ]] ||
+        fail_trunk_probe_lease_fixture \
+          "the contender started while the provisioning probe held capacity"
+      [[ ! -e "$descendant_stopped" ]] ||
+        fail_trunk_probe_lease_fixture \
+          "the provisioning probe descendant stopped before the probe released"
+      gate_test_process_has_live_start "$descendant_pid" "$descendant_start" ||
+        fail_trunk_probe_lease_fixture \
+          "the provisioning probe descendant exited while its lease was held"
+
+      # Let the failed launcher exit, then hold the exact descendant drain
+      # after its refreshed census and before its first signal. Capacity must
+      # remain reserved for the holder for the entire barrier interval.
+      : > "$probe_release"
+      observed=0
+      for ((attempt = 0; attempt < gate_test_coordinator_observer_attempts; attempt++)); do
+        if [[ -e "${drain_refresh_barrier}.ready" ]]; then
+          observed=1
+          break
+        fi
+        gate_test_process_has_live_start "$holder_pid" "$holder_start" || break
+        sleep 0.05
+      done
+      [[ "$observed" -eq 1 ]] ||
+        fail_trunk_probe_lease_fixture \
+          "the provisioning probe drain did not reach its refresh barrier"
+      gate_test_process_has_live_start "$descendant_pid" "$descendant_start" ||
+        fail_trunk_probe_lease_fixture \
+          "the probe descendant exited before the paused drain signalled it"
+      for ((attempt = 0; attempt < 20; attempt++)); do
+        [[ ! -e "$contender_started" && ! -e "$overlap_file" ]] ||
+          fail_trunk_probe_lease_fixture \
+            "the contender started while the provisioning drain was paused"
+        gate_test_process_has_live_start "$holder_pid" "$holder_start" ||
+          fail_trunk_probe_lease_fixture \
+            "the holder exited while its provisioning drain was paused"
+        gate_test_process_has_live_start "$contender_pid" "$contender_start" ||
+          fail_trunk_probe_lease_fixture \
+            "the queued contender exited while the provisioning drain was paused"
+        gate_test_process_has_live_start "$descendant_pid" "$descendant_start" ||
+          fail_trunk_probe_lease_fixture \
+            "the probe descendant exited while its drain was paused"
+        sleep 0.05
+      done
+      : > "${drain_refresh_barrier}.release"
+
+      # The descendant's TERM trap must run before the contender can start.
+      # Check that ordering directly instead of observing both after the fact.
+      observed=0
+      for ((attempt = 0; attempt < gate_test_coordinator_observer_attempts; attempt++)); do
+        if [[ -e "$contender_started" && ! -e "$descendant_stopped" ]]; then
+          fail_trunk_probe_lease_fixture \
+            "the contender started before the probe descendant stopped"
+        fi
+        if [[ -e "$descendant_stopped" ]]; then
+          observed=1
+          break
+        fi
+        gate_test_process_has_live_start "$holder_pid" "$holder_start" || break
+        sleep 0.05
+      done
+      [[ "$observed" -eq 1 ]] ||
+        fail_trunk_probe_lease_fixture \
+          "the probe descendant did not stop after the drain barrier released"
+      observed=0
+      for ((attempt = 0; attempt < gate_test_coordinator_observer_attempts; attempt++)); do
+        if [[ -e "$contender_started" ]]; then
+          observed=1
+          break
+        fi
+        gate_test_process_has_live_start "$contender_pid" "$contender_start" || break
+        sleep 0.05
+      done
+      [[ "$observed" -eq 1 ]] ||
+        fail_trunk_probe_lease_fixture \
+          "the contender did not start after the provisioning probe released"
+      [[ -e "$descendant_stopped" && ! -e "$overlap_file" ]] ||
+        fail_trunk_probe_lease_fixture \
+          "the contender acquired capacity before the probe descendant drained"
+      if gate_test_process_has_live_start "$descendant_pid" "$descendant_start"; then
+        fail_trunk_probe_lease_fixture \
+          "the probe descendant remained alive when the contender started"
+      fi
+
+      if ! trunk_probe_wait_and_reap_child \
+        "$probe_mode Trunk-probe holder gate" \
+        "$holder_pid" "$holder_start" 60; then
+        fail_trunk_probe_lease_fixture \
+          "the holder exceeded its identity-bound completion deadline"
+      fi
+      holder_exit="$trunk_probe_reap_status"
+      holder_pid=""
+      if ! trunk_probe_wait_and_reap_child \
+        "$probe_mode Trunk-probe contender gate" \
+        "$contender_pid" "$contender_start" 60; then
+        fail_trunk_probe_lease_fixture \
+          "the contender exceeded its identity-bound completion deadline"
+      fi
+      contender_exit="$trunk_probe_reap_status"
+      contender_pid=""
+      [[ "$holder_exit" -eq 0 && "$contender_exit" -eq 0 ]] ||
+        fail_trunk_probe_lease_fixture \
+          "the holder and contender did not both complete successfully"
+      grep -Fq \
+        "warning: skipping ./tools/trunk check scripts/context/agent-context-budget.mjs" \
+        "$holder_output" ||
+        fail_trunk_probe_lease_fixture \
+          "the failed provisioning probe did not qualify the Trunk result"
+      grep -Fq "Note: the Trunk arm was skipped" "$holder_output" ||
+        fail_trunk_probe_lease_fixture \
+          "the holder omitted its qualified-success note"
+      grep -Fq "All mapped commands passed." "$holder_output" ||
+        fail_trunk_probe_lease_fixture \
+          "the qualified holder did not complete its remaining commands"
+      grep -Fq "All mapped commands passed." "$contender_output" ||
+        fail_trunk_probe_lease_fixture \
+          "the contender did not complete after the probe drain"
+      if grep -Fq "scan-error" "$holder_output" "$contender_output"; then
+        fail_trunk_probe_lease_fixture \
+          "the live probe fixture emitted a marker scan error"
+      fi
+      observed=0
+      for ((attempt = 0; attempt < gate_test_coordinator_observer_attempts; attempt++)); do
+        if trunk_probe_child_reap_state "$coordinator_pid" "$coordinator_start"; then
+          coordinator_state=0
+        else
+          coordinator_state=$?
+        fi
+        if [[ "$coordinator_state" != 1 && "$coordinator_state" != 2 &&
+          ! -e "$fixture_lock_root/run.lock" &&
+          ! -L "$fixture_lock_root/run.lock" ]]; then
+          observed=1
+          break
+        fi
+        sleep 0.05
+      done
+      [[ "$observed" -eq 1 ]] ||
+        fail_trunk_probe_lease_fixture \
+          "the exact detached coordinator did not exit and release its run lock before fixture cleanup"
+      descendant_pid=""
+      trap - EXIT
+      )
+    )
+  done
+}
+
 run_parallel_worker_loss_coordinator_regression
 run_parallel_release_failure_coordinator_regression
 run_stale_failure_result_regression
 run_sequential_descendant_lease_regression
+run_trunk_probe_lease_regression
 
 for invalid_capacity in "" 0 65 invalid; do
   if AGENT_QUALITY_GATE_CAPACITY="$invalid_capacity" \

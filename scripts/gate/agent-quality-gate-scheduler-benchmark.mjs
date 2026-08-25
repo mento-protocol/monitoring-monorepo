@@ -288,6 +288,25 @@ function comparablePlan(plan) {
   );
 }
 
+function isLegacyPreDispatchDisplacement(result) {
+  const stderrLines = result.stderr
+    .replaceAll("\r\n", "\n")
+    .trimEnd()
+    .split("\n");
+  return (
+    result.code === 2 &&
+    stderrLines.length === 3 &&
+    /^error: this run no longer holds the gate run lock at .+\.$/u.test(
+      stderrLines[0],
+    ) &&
+    stderrLines[1] ===
+      "Another run took it over before this one reached its mapped commands." &&
+    stderrLines[2] ===
+      "Nothing has been executed. Re-run, and it will queue behind the current holder." &&
+    !/(^|\n)error:/u.test(result.stdout)
+  );
+}
+
 async function runThreeGateScenario(
   fixture,
   {
@@ -329,24 +348,59 @@ async function runThreeGateScenario(
     `${name} full gate to start its first mapped tool`,
   );
   const shortLaunchMs = Date.now();
+  const startShortGate = (worktree, index) =>
+    fixture.startGate({
+      worktree,
+      changedPath: shortChangedPaths[index],
+      scenario,
+      label: `${name}-short-${index === 0 ? "a" : "b"}`,
+      coordinator,
+      defaultDelayMs: shortCommandDelayMs,
+      lockWaitSeconds,
+      qualityParallelism,
+      extraEnvironment: {
+        PATH: `${join(worktree, "fixture-bin")}:${process.env.PATH}`,
+      },
+    });
   const [shortA, shortB] = await Promise.all(
     [shortAWorktree, shortBWorktree].map((worktree, index) =>
-      fixture.startGate({
-        worktree,
-        changedPath: shortChangedPaths[index],
-        scenario,
-        label: `${name}-short-${index === 0 ? "a" : "b"}`,
-        coordinator,
-        defaultDelayMs: shortCommandDelayMs,
-        lockWaitSeconds,
-        qualityParallelism,
-        extraEnvironment: {
-          PATH: `${join(worktree, "fixture-bin")}:${process.env.PATH}`,
-        },
-      }),
+      startShortGate(worktree, index),
     ),
   );
   const results = await Promise.all([full.done, shortA.done, shortB.done]);
+  let legacyPreDispatchRetryCount = 0;
+  if (!coordinator) {
+    const initialEvents = await fixture.events(scenario);
+    for (const [resultIndex, worktree] of [
+      shortAWorktree,
+      shortBWorktree,
+    ].entries()) {
+      const gateResultIndex = resultIndex + 1;
+      const initialResult = results[gateResultIndex];
+      if (!isLegacyPreDispatchDisplacement(initialResult)) continue;
+      assert.equal(
+        initialEvents.some(
+          (event) =>
+            event.label === initialResult.label && event.event === "start",
+        ),
+        false,
+        `${initialResult.label} must not retry after mapped work started`,
+      );
+      // The legacy lock intentionally fails closed if an old stale verdict
+      // briefly moves a newly published owner record. Retry that exact no-work
+      // result once after every initial peer has settled. Keep the first launch
+      // time so the benchmark charges the legacy baseline for the safe abort.
+      const retry = await startShortGate(worktree, resultIndex);
+      const retryResult = await retry.done;
+      results[gateResultIndex] = {
+        ...retryResult,
+        startedAtMs: initialResult.startedAtMs,
+        stdout: `${initialResult.stdout}\n--- bounded retry ---\n${retryResult.stdout}`,
+        stderr: `${initialResult.stderr}\n--- bounded retry ---\n${retryResult.stderr}`,
+      };
+      legacyPreDispatchRetryCount += 1;
+    }
+  }
   const failures = results.filter((result) => result.code !== 0);
   if (failures.length) {
     throw new Error(
@@ -395,6 +449,7 @@ async function runThreeGateScenario(
     maxConcurrentGateLabels: maxConcurrentGateLabels(intervals),
     barrierOverlapCount,
     crossGateOverlapCount,
+    legacyPreDispatchRetryCount,
     queueDelayMs: Object.fromEntries(
       labels.map((label) => [
         label.replace(`${name}-`, ""),

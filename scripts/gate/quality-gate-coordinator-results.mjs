@@ -102,6 +102,12 @@ export function validateRetainedResults({
     if (result.status !== "success") {
       throw invalidResult(path, "references a non-success terminal result");
     }
+    if (!allowsRetainedSuccessReuse(result)) {
+      throw invalidResult(
+        path,
+        "references a success terminal result that forbids retained reuse",
+      );
+    }
     if (result.completedAt !== indexed.completedAt) {
       throw invalidResult(
         `${path}.completedAt`,
@@ -138,6 +144,15 @@ function equivalentResult(left, right) {
   );
 }
 
+// A qualified success still terminates the active singleflight for its leader
+// and followers. It must not become a retained --skip-if-fresh verdict: the
+// caller omitted at least one required arm and needs a later execution to retry
+// it. Keep the opt-out in the immutable payload so restart recovery applies the
+// same rule as live publication.
+function allowsRetainedSuccessReuse(result) {
+  return result?.status === "success" && result.payload?.reusable !== false;
+}
+
 export function reusableSuccess({
   state,
   resultsDirectory,
@@ -171,7 +186,7 @@ export function reusableSuccess({
     indexed.executionId,
     policyHash,
   );
-  return result?.status === "success" &&
+  return allowsRetainedSuccessReuse(result) &&
     result.executionId === indexed.executionId &&
     result.completedAt === indexed.completedAt
     ? result
@@ -238,7 +253,7 @@ export function finishExecutionState(state, singleflight, result) {
   }
   state.requestOrder = state.requestOrder.filter((id) => !completedIds.has(id));
   delete state.singleflights[singleflight.fingerprintHash];
-  if (result.status === "success") {
+  if (allowsRetainedSuccessReuse(result)) {
     state.successIndex[singleflight.fingerprintHash] = {
       executionId: result.executionId,
       completedAt: result.completedAt,

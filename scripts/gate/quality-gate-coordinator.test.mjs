@@ -3121,6 +3121,74 @@ test("startup rejects a success index that differs from its retained result", as
   assert.equal(existsSync(socketPathForRoot(fixture.root)), false);
 });
 
+test("startup rejects a success index for a result that forbids reuse", async () => {
+  const clock = Date.parse("2026-08-21T12:00:00.000Z");
+  const fixture = await createFixture({ now: () => clock });
+  const requestOwner = owner(265);
+  const fingerprint = "reuse-index-qualified-success";
+  const hash = fingerprintHash(fingerprint);
+  const registration = await register(
+    fixture,
+    "reuse-index-qualified-success-source",
+    fingerprint,
+    requestOwner,
+  );
+  await rpc(fixture, "publish-result", {
+    requestId: registration.requestId,
+    owner: requestOwner,
+    status: "success",
+    payload: {
+      source: "agent-quality-gate",
+      qualified: true,
+      reusable: false,
+      skipped: [
+        {
+          command: "./tools/trunk check",
+          reason: "provisioning-unavailable",
+        },
+      ],
+    },
+  });
+  const result = fixture.coordinator.core.readResult(
+    fingerprint,
+    registration.executionId,
+  );
+  await acknowledgeResult(fixture, registration.requestId, requestOwner);
+
+  const journalPath = join(fixture.coordinator.stateRoot, "journal.json");
+  await fixture.coordinator.close("qualified-success-index-fixture-ready");
+  fixture.coordinator = null;
+  const journal = JSON.parse(readFileSync(journalPath, "utf8"));
+  journal.successIndex[hash] = {
+    executionId: result.executionId,
+    completedAt: result.completedAt,
+  };
+  writeFileSync(journalPath, `${JSON.stringify(journal)}\n`);
+
+  let reachedLegacyAdoption = false;
+  await assert.rejects(
+    startCoordinator({
+      root: fixture.root,
+      idleMs: 30_000,
+      ownerSweepMs: 0,
+      now: () => clock,
+      coordinatorIdentity: {
+        pid: process.pid,
+        startUtc: "test-qualified-success-index-start",
+      },
+      beforeLegacyAdopt: async () => {
+        reachedLegacyAdoption = true;
+      },
+    }),
+    (error) =>
+      error.code === "RESULT_RECORD_INVALID" &&
+      error.details?.path === `successIndex.${hash}` &&
+      /forbids retained reuse/u.test(error.message),
+  );
+  assert.equal(reachedLegacyAdoption, false);
+  assert.equal(existsSync(socketPathForRoot(fixture.root)), false);
+});
+
 test("retention preserves active requests and two-hour terminal results", async () => {
   let clock = Date.parse("2026-08-21T13:00:00.000Z");
   const fixture = await createFixture({ now: () => clock });
@@ -3758,6 +3826,148 @@ for (const terminalStatus of ["success", "failure", "cancelled"]) {
     );
   });
 }
+
+test("qualified success reaches followers but never satisfies retained reuse", async () => {
+  const clock = Date.parse("2026-08-21T12:00:00.000Z");
+  const fixture = await createFixture({ now: () => clock });
+  const fingerprint = "qualified-non-reusable-success";
+  const hash = fingerprintHash(fingerprint);
+  const priorOwner = owner(260);
+  const prior = await register(
+    fixture,
+    "qualified-success-prior-reusable",
+    fingerprint,
+    priorOwner,
+  );
+  await rpc(fixture, "publish-result", {
+    requestId: prior.requestId,
+    owner: priorOwner,
+    status: "success",
+    payload: { source: "prior-reusable-success" },
+  });
+  await acknowledgeResult(fixture, prior.requestId, priorOwner);
+  assert.equal(
+    fixture.coordinator.core.state.successIndex[hash].executionId,
+    prior.executionId,
+  );
+
+  const leaderOwner = owner(261);
+  const followerOwner = owner(262);
+  const leader = await register(
+    fixture,
+    "qualified-success-leader",
+    fingerprint,
+    leaderOwner,
+  );
+  const follower = await register(
+    fixture,
+    "qualified-success-follower",
+    fingerprint,
+    followerOwner,
+  );
+  const payload = {
+    source: "agent-quality-gate",
+    qualified: true,
+    reusable: false,
+    skipped: [
+      {
+        command: "./tools/trunk check",
+        reason: "provisioning-unavailable",
+      },
+    ],
+  };
+  const waiter = await connectCoordinator({ root: fixture.root });
+  const resultPromise = waiter.request("wait-result", {
+    requestId: follower.requestId,
+    capability: capabilityFor(follower.requestId),
+    owner: followerOwner,
+    fingerprint,
+    executionId: leader.executionId,
+    timeoutMs: 2_000,
+  });
+
+  await rpc(fixture, "publish-result", {
+    requestId: leader.requestId,
+    owner: leaderOwner,
+    status: "success",
+    payload,
+  });
+  const waited = await resultPromise;
+  assert.equal(waited.found, true);
+  assert.equal(waited.result.status, "success");
+  assert.deepEqual(waited.result.payload, payload);
+  await waiter.close();
+
+  const result = fixture.coordinator.core.readResult(
+    fingerprint,
+    leader.executionId,
+  );
+  assert.deepEqual(result.payload, payload);
+  assert.equal(fixture.coordinator.core.state.successIndex[hash], undefined);
+  assert.equal(
+    JSON.parse(
+      readFileSync(join(fixture.coordinator.stateRoot, "journal.json"), "utf8"),
+    ).successIndex[hash],
+    undefined,
+  );
+  await acknowledgeResult(fixture, leader.requestId, leaderOwner);
+  await acknowledgeResult(fixture, follower.requestId, followerOwner);
+
+  // Defense in depth: even an old process or corrupt in-memory journal index
+  // cannot promote the immutable qualified result into retained reuse.
+  fixture.coordinator.core.state.successIndex[hash] = {
+    executionId: result.executionId,
+    completedAt: result.completedAt,
+  };
+  const liveRetryOwner = owner(263);
+  const liveRetry = await register(
+    fixture,
+    "qualified-success-live-retry",
+    fingerprint,
+    liveRetryOwner,
+    { successMaxAgeMs: 120_000 },
+  );
+  assert.equal(liveRetry.role, "leader");
+  assert.notEqual(liveRetry.executionId, result.executionId);
+  await rpc(fixture, "cancel-request", {
+    requestId: liveRetry.requestId,
+    owner: liveRetryOwner,
+    reason: "qualified success must execute again",
+  });
+  await acknowledgeResult(fixture, liveRetry.requestId, liveRetryOwner);
+  assert.equal(fixture.coordinator.core.state.successIndex[hash], undefined);
+
+  await fixture.coordinator.close("qualified-success-restart");
+  fixture.coordinator = await startCoordinator({
+    root: fixture.root,
+    idleMs: 30_000,
+    ownerSweepMs: 0,
+    now: () => clock,
+    coordinatorIdentity: {
+      pid: process.pid,
+      startUtc: "test-qualified-success-restart",
+    },
+  });
+  const restartedRetryOwner = owner(264);
+  const restartedRetry = await register(
+    fixture,
+    "qualified-success-restarted-retry",
+    fingerprint,
+    restartedRetryOwner,
+    { successMaxAgeMs: 120_000 },
+  );
+  assert.equal(restartedRetry.role, "leader");
+  await rpc(fixture, "cancel-request", {
+    requestId: restartedRetry.requestId,
+    owner: restartedRetryOwner,
+    reason: "restart must preserve non-reuse",
+  });
+  await acknowledgeResult(
+    fixture,
+    restartedRetry.requestId,
+    restartedRetryOwner,
+  );
+});
 
 test("an unclean bound-client disconnect creates a drain obligation", async () => {
   const fixture = await createFixture({ capacity: 1 });

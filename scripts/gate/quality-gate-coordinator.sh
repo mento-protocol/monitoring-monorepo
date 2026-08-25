@@ -69,6 +69,12 @@ gate_coordinator_report_no_work_failure() {
   ) 2>/dev/null >&7 || true
 }
 
+gate_coordinator_print_shared_trunk_skip_warning() {
+  echo "warning: the shared coordinator execution skipped Trunk because the CLI could not be provisioned." >&2
+  echo "  The leader's provisioning probe failed, so this qualified success is not reusable." >&2
+  echo "  CI still enforces Trunk on the PR (.github/workflows/trunk.yml)." >&2
+}
+
 gate_coordinator_apply_authority_json() {
   local authority_json="$1"
   local parsed owned generation marker owner_pid owner_start expected_marker
@@ -550,7 +556,21 @@ gate_coordinator_publish_result() {
 }
 
 gate_coordinator_publish_success() {
-  gate_coordinator_publish_result success '{"source":"agent-quality-gate"}'
+  local trunk_provisioning_state="${1:-}"
+  case "$trunk_provisioning_state" in
+    ""|ok)
+      gate_coordinator_publish_result success \
+        '{"source":"agent-quality-gate"}'
+      ;;
+    blocked)
+      gate_coordinator_publish_result success \
+        '{"source":"agent-quality-gate","qualified":true,"reusable":false,"skipped":[{"command":"trunk","reason":"provisioning-unavailable"}]}'
+      ;;
+    *)
+      echo "error: unknown Trunk provisioning state for coordinator success publication." >&2
+      return 2
+      ;;
+  esac
 }
 
 gate_coordinator_publish_failure() {
@@ -559,7 +579,8 @@ gate_coordinator_publish_failure() {
 }
 
 gate_coordinator_wait_for_shared_result() {
-  local wait_file started finished rc result_json parsed found status fingerprint policy execution
+  local wait_file started finished rc result_json parsed found status fingerprint
+  local policy execution success_payload_known trunk_skipped
   started="$(date +%s)"
   if [[ "$gate_coordinator_role" == "completed" ]]; then
     result_json="$gate_coordinator_completed_result_json"
@@ -594,14 +615,40 @@ gate_coordinator_wait_for_shared_result() {
   parsed="$(printf '%s' "$result_json" | node -e '
     const value = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
     const result = value.result ?? value;
+    const payload = result.payload ?? {};
+    const isRecord = (candidate) => candidate !== null &&
+      typeof candidate === "object" && !Array.isArray(candidate);
+    const hasExactKeys = (candidate, expected) => {
+      if (!isRecord(candidate)) return false;
+      const actual = Object.keys(candidate).sort();
+      const wanted = [...expected].sort();
+      return actual.length === wanted.length &&
+        actual.every((key, index) => key === wanted[index]);
+    };
+    const ordinarySuccess = hasExactKeys(payload, ["source"]) &&
+      payload.source === "agent-quality-gate";
+    const skipped = Array.isArray(payload.skipped) ? payload.skipped : [];
+    const trunkSkipped = hasExactKeys(payload,
+      ["source", "qualified", "reusable", "skipped"]) &&
+      payload.source === "agent-quality-gate" && payload.qualified === true &&
+      payload.reusable === false &&
+      skipped.length === 1 &&
+      hasExactKeys(skipped[0], ["command", "reason"]) &&
+      skipped[0].command === "trunk" &&
+      skipped[0].reason === "provisioning-unavailable";
+    const successPayloadKnown = result.status !== "success" ||
+      ordinarySuccess || trunkSkipped;
     process.stdout.write([
       value.found === false ? "0" : "1", result.status ?? "",
       result.fingerprint ?? "", result.policyHash ?? "", result.executionId ?? "",
+      successPayloadKnown ? "1" : "0",
+      trunkSkipped ? "1" : "0",
     ].join("\x1f"));
   ')" || {
     gate_coordinator_report_no_work_failure 2 "coalesced result handling" "No mapped command ran in this request"; return 2
   }
-  IFS=$'\x1f' read -r found status fingerprint policy execution <<< "$parsed"
+  IFS=$'\x1f' read -r found status fingerprint policy execution \
+    success_payload_known trunk_skipped <<< "$parsed"
   [[ "$found" == "1" && "$fingerprint" == "$gate_coordinator_registration_fingerprint" &&
     "$policy" == "$gate_coordinator_policy_hash" &&
     "$execution" == "$gate_coordinator_execution_id" ]] || {
@@ -610,6 +657,15 @@ gate_coordinator_wait_for_shared_result() {
   gate_coordinator_verify_registration_fingerprint "before accepting a shared result" || { gate_coordinator_report_no_work_failure 2 "coalesced result handling" "No mapped command ran in this request"; return 2; }
   gate_coordinator_request_terminal=1
   if [[ "$status" == "success" ]]; then
+    if [[ "$success_payload_known" != "1" ]]; then
+      echo "error: shared coordinator success used an unknown or malformed payload." >&2
+      gate_coordinator_report_no_work_failure 2 \
+        "coalesced result handling" "No mapped command ran in this request"
+      return 2
+    fi
+    if [[ "$trunk_skipped" == "1" ]]; then
+      gate_coordinator_print_shared_trunk_skip_warning
+    fi
     echo "Shared coordinator execution passed; no mapped command ran in this request."
     return 0
   fi

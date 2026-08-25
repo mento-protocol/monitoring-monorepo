@@ -462,6 +462,7 @@ tmpfiles=()
 last_command_timed_out=false
 last_command_execution_seconds=0
 last_command_infrastructure_failed=false
+last_command_trunk_provisioning_blocked=false
 # Monotonic counter for unique per-command timeout marker paths.
 timeout_seq=0
 # Monotonic across all parallel phases so no command drain identity is reused
@@ -5184,6 +5185,14 @@ trunk_provisioning_probe_timeout_seconds=15
 # answer within its budget is torn down and reported as NOT blocked, so an
 # unanswerable question leaves the original failure standing.
 trunk_provisioning_probe() {
+  local command_tag="${1:-}"
+  local request_tag="${2:-}"
+  local command_marker="${3:-}"
+  local request_marker="${4:-}"
+  local coordinator_marker="${5:-}"
+  local close_coordinator_stdout_fd="${6:-0}"
+  local close_parallel_worker_control_fd="${7:-0}"
+  local handshake_file="${8:-}"
   local pid
   local waited=0
   local had_errexit=0
@@ -5194,8 +5203,53 @@ trunk_provisioning_probe() {
   esac
   set +e
 
-  TRUNK_LAUNCHER_QUIET=true ./tools/trunk --version >/dev/null 2>&1 &
+  if [[ -z "$handshake_file" ]] || ! rm -f "$handshake_file"; then
+    [[ "$had_errexit" == 1 ]] && set -e
+    return 2
+  fi
+
+  AGENTQG_RUN="$command_tag" \
+    AGENTQG_REQUEST="$request_tag" \
+    TRUNK_LAUNCHER_QUIET=true \
+    bash -c '
+      command_marker="$1"
+      request_marker="$2"
+      coordinator_marker="$3"
+      close_coordinator_stdout_fd="$4"
+      close_parallel_worker_control_fd="$5"
+      handshake_file="$6"
+      if [[ -n "$command_marker" ]]; then
+        [[ -r "$command_marker" ]] || exit 125
+        exec 9< "$command_marker" || exit 125
+      fi
+      if [[ -n "$request_marker" && "$request_marker" != "$command_marker" ]]; then
+        [[ -r "$request_marker" ]] || exit 125
+        exec 8< "$request_marker" || exit 125
+      fi
+      if [[ -n "$coordinator_marker" &&
+        "$coordinator_marker" != "$command_marker" &&
+        "$coordinator_marker" != "$request_marker" ]]; then
+        [[ -r "$coordinator_marker" ]] || exit 125
+        exec 6< "$coordinator_marker" || exit 125
+      fi
+      if [[ "$close_coordinator_stdout_fd" == 1 ]]; then
+        exec 7>&-
+      fi
+      if [[ "$close_parallel_worker_control_fd" == 1 ]]; then
+        exec 17>&-
+      fi
+      printf "%s\n" ready > "$handshake_file" || exit 125
+      exec ./tools/trunk --version
+    ' trunk-provisioning-probe \
+      "$command_marker" "$request_marker" "$coordinator_marker" \
+      "$close_coordinator_stdout_fd" \
+      "$close_parallel_worker_control_fd" "$handshake_file" \
+      >/dev/null 2>&1 &
   pid=$!
+  # INT/TERM cleanup must see the probe while its command identity and
+  # scheduler lease remain active. The private readiness file distinguishes a
+  # launcher failure from a wrapper that never retained the recovery handles.
+  active_timeout_pids=("$pid")
   while kill -0 "$pid" 2>/dev/null &&
     [[ "$waited" -lt "$trunk_provisioning_probe_timeout_seconds" ]]; do
     sleep 1
@@ -5211,21 +5265,36 @@ trunk_provisioning_probe() {
     rc=$?
     [[ "$rc" -le 128 ]] || rc=0
   fi
+  active_timeout_pids=()
+
+  if ! read_parallel_worker_result_value "$handshake_file" ready \
+    >/dev/null 2>&1; then
+    rc=2
+  elif [[ "$rc" -ne 0 ]]; then
+    rc=1
+  fi
 
   [[ "$had_errexit" == 1 ]] && set -e
   return "$rc"
 }
 
 trunk_provisioning_is_blocked() {
+  local probe_status
   # A missing or non-executable launcher is a real failure, not an environment
   # one: tools/trunk is tracked, so its absence means the checkout is broken.
   [[ -x ./tools/trunk ]] || return 1
 
   if [[ -z "$trunk_provisioning_state" ]]; then
-    if trunk_provisioning_probe; then
+    if trunk_provisioning_probe "$@"; then
       trunk_provisioning_state=ok
     else
-      trunk_provisioning_state=blocked
+      probe_status=$?
+      if [[ "$probe_status" -eq 1 ]]; then
+        trunk_provisioning_state=blocked
+      else
+        echo "error: the Trunk provisioning probe could not retain the mapped command's recovery identity." >&2
+        return 2
+      fi
     fi
   fi
 
@@ -5373,11 +5442,13 @@ run_with_timeout() {
   local command="$1"
   local deferred_lease_file="${2:-}"
   local command_drain_identity="${3:-}"
+  local trunk_probe_handshake_file="${4:-}"
   local cmd_pid
   local watchdog_pid
   local rc
   local release_rc=0
   local drain_rc=0
+  local provisioning_probe_rc=0
   local timeout_marker
   local had_errexit=0
   local command_started_at
@@ -5403,6 +5474,7 @@ run_with_timeout() {
   last_command_timed_out=false
   last_command_execution_seconds=0
   last_command_infrastructure_failed=false
+  last_command_trunk_provisioning_blocked=false
   if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
     gate_coordinator_is_active && [[ -z "$command_drain_identity" ]]; then
     parallel_command_sequence=$((parallel_command_sequence + 1))
@@ -5644,6 +5716,21 @@ EOF_KILL
     wait "$watchdog_pid" 2>/dev/null
   fi
   active_timeout_pids=()
+  # A failed Trunk command is not downgraded until the launcher proves that it
+  # cannot provision its CLI. Treat that probe as part of the same mapped
+  # command: it inherits the command's tags and marker handles, and the exact
+  # descendant drain below runs before the scheduler lease is released.
+  if [[ "$rc" -ne 0 && ! -s "$timeout_marker" ]] &&
+    is_trunk_command "$command"; then
+    if trunk_provisioning_is_blocked \
+      "$command_tag" "$request_tag" "$command_marker" "$request_marker" \
+      "$coordinator_marker" "$gate_coordinator_stdout_reserved" \
+      "$close_parallel_worker_control_fd" "$trunk_probe_handshake_file"; then
+      last_command_trunk_provisioning_blocked=true
+    else
+      provisioning_probe_rc=$?
+    fi
+  fi
   if [[ -z "$deferred_lease_file" ]]; then
     # A sequential wrapper can exit after it reparents a descendant. Keep the
     # scheduler lease until inherited handles prove that no process from this
@@ -5669,6 +5756,16 @@ EOF_KILL
     rm -f "$timeout_marker"
     [[ "$had_errexit" == 1 ]] && set -e
     return "$drain_rc"
+  fi
+
+  if [[ "$provisioning_probe_rc" -eq 2 ]]; then
+    # The probe might have started work that only its inherited handles can
+    # identify. The drain above settled that identity, but an unclassified
+    # launcher failure must not release capacity or become a cloud skip.
+    last_command_infrastructure_failed=true
+    rm -f "$timeout_marker"
+    [[ "$had_errexit" == 1 ]] && set -e
+    return 2
   fi
 
   if [[ -s "$timeout_marker" ]]; then
@@ -5829,18 +5926,22 @@ try_reuse_command() {
 run_mapped_command() {
   local command="$1"
   local output_file
+  local trunk_probe_handshake_file
   local gate_pid="$$"
   local monitor_done_file=""
   local monitor_pid=""
   local start_ts
   local elapsed
   local exit_code
+  local trunk_provisioning_blocked
 
   if try_reuse_command "$command"; then
     return 0
   fi
 
   output_file="$(make_tmpfile)"
+  trunk_probe_handshake_file="$(make_tmpfile)"
+  tmpfiles+=("$trunk_probe_handshake_file")
   start_ts="$(date +%s)"
   echo
   echo "+ ${command}"
@@ -5853,10 +5954,13 @@ run_mapped_command() {
     monitor_pid="$!"
   fi
   set +e
-  run_with_timeout "$command" > "$output_file" 2>&1
+  run_with_timeout "$command" "" "" "$trunk_probe_handshake_file" \
+    > "$output_file" 2>&1
   exit_code=$?
   set -e
   local timed_out="$last_command_timed_out"
+  trunk_provisioning_blocked="$last_command_trunk_provisioning_blocked"
+  rm -f "$trunk_probe_handshake_file"
   if [[ -n "$monitor_pid" ]]; then
     : > "$monitor_done_file"
     wait "$monitor_pid" 2>/dev/null || true
@@ -5879,8 +5983,9 @@ run_mapped_command() {
     return 0
   fi
 
-  if [[ "$timed_out" != true ]] && is_trunk_command "$command" &&
-    trunk_provisioning_is_blocked; then
+  if [[ "$timed_out" != true &&
+    "$trunk_provisioning_blocked" == true ]] &&
+    is_trunk_command "$command"; then
     record_command_summary "skipped" "$elapsed" "$command"
     print_trunk_environment_blocked_warning "$command"
     rm -f "$output_file"
@@ -5906,14 +6011,15 @@ run_mapped_command_to_files() {
   local elapsed_file="$4"
   local timeout_file="$5"
   local infrastructure_file="$6"
-  local lease_file="$7"
-  local command_drain_identity="$8"
+  local trunk_provisioning_file="$7"
+  local lease_file="$8"
+  local command_drain_identity="$9"
   local elapsed
   local exit_code
 
   set +e
   run_with_timeout "$command" "$lease_file" "$command_drain_identity" \
-    > "$output_file" 2>&1
+    "$trunk_provisioning_file" > "$output_file" 2>&1
   exit_code=$?
   set -e
   elapsed="$last_command_execution_seconds"
@@ -5922,6 +6028,8 @@ run_mapped_command_to_files() {
   printf '%s\n' "$elapsed" > "$elapsed_file"
   printf '%s\n' "$last_command_timed_out" > "$timeout_file"
   printf '%s\n' "$last_command_infrastructure_failed" > "$infrastructure_file"
+  printf '%s\n' "$last_command_trunk_provisioning_blocked" \
+    > "$trunk_provisioning_file"
 }
 
 fail_command_scheduler_infrastructure() {
@@ -6199,6 +6307,7 @@ run_mapped_entries_parallel() {
   local active_elapsed_files=()
   local active_timeout_files=()
   local active_infrastructure_files=()
+  local active_trunk_provisioning_files=()
   local active_lease_files=()
   local active_ready_files=()
   local active_wait_files=()
@@ -6211,6 +6320,7 @@ run_mapped_entries_parallel() {
   local next_active_elapsed_files=()
   local next_active_timeout_files=()
   local next_active_infrastructure_files=()
+  local next_active_trunk_provisioning_files=()
   local next_active_lease_files=()
   local next_active_ready_files=()
   local next_active_wait_files=()
@@ -6224,6 +6334,7 @@ run_mapped_entries_parallel() {
   local elapsed_file
   local timeout_file
   local infrastructure_file
+  local trunk_provisioning_file
   local lease_file
   local ready_file
   local ready_staging_file
@@ -6243,6 +6354,7 @@ run_mapped_entries_parallel() {
   local elapsed
   local timed_out
   local infrastructure_failed
+  local trunk_provisioning_blocked
   local worker_ready
   local phase_start_ts last_heartbeat_ts last_coordinator_recovery_ts now_ts hb_cmd
   local heartbeat_interval=20
@@ -6289,6 +6401,7 @@ run_mapped_entries_parallel() {
     next_active_elapsed_files=()
     next_active_timeout_files=()
     next_active_infrastructure_files=()
+    next_active_trunk_provisioning_files=()
     next_active_lease_files=()
     next_active_ready_files=()
     next_active_wait_files=()
@@ -6311,6 +6424,7 @@ run_mapped_entries_parallel() {
         next_active_elapsed_files+=("${active_elapsed_files[$i]}")
         next_active_timeout_files+=("${active_timeout_files[$i]}")
         next_active_infrastructure_files+=("${active_infrastructure_files[$i]}")
+        next_active_trunk_provisioning_files+=("${active_trunk_provisioning_files[$i]}")
         next_active_lease_files+=("${active_lease_files[$i]}")
         next_active_ready_files+=("$ready_file")
         next_active_wait_files+=("${active_wait_files[$i]}")
@@ -6327,6 +6441,7 @@ run_mapped_entries_parallel() {
       elapsed_file="${active_elapsed_files[$i]}"
       timeout_file="${active_timeout_files[$i]}"
       infrastructure_file="${active_infrastructure_files[$i]}"
+      trunk_provisioning_file="${active_trunk_provisioning_files[$i]}"
       lease_file="${active_lease_files[$i]}"
       wait_file="${active_wait_files[$i]}"
       worker_settlement_in_progress=1
@@ -6337,7 +6452,8 @@ run_mapped_entries_parallel() {
         "$drain_identity" "$pid" "$worker_start"; then
         finish_worker_settlement
         rm -f "$output_file" "$status_file" "$elapsed_file" "$timeout_file" \
-          "$infrastructure_file" "$lease_file" "$ready_file" \
+          "$infrastructure_file" "$trunk_provisioning_file" "$lease_file" \
+          "$ready_file" \
           "${ready_file}.publishing" "$wait_file"
         fail_command_scheduler_infrastructure "$command" || return $?
       fi
@@ -6365,16 +6481,25 @@ run_mapped_entries_parallel() {
       if ! infrastructure_failed="$(read_parallel_worker_result_value "$infrastructure_file" boolean)"; then
         fail_parallel_worker_infrastructure "$command" infrastructure || return $?
       fi
+      if ! trunk_provisioning_blocked="$(read_parallel_worker_result_value "$trunk_provisioning_file" boolean)"; then
+        fail_parallel_worker_infrastructure "$command" \
+          "Trunk provisioning classification" || return $?
+      fi
 
       if [[ "$infrastructure_failed" == true ]]; then
         rm -f "$output_file" "$status_file" "$elapsed_file" "$timeout_file" \
-          "$infrastructure_file" "$lease_file" "$ready_file" \
+          "$infrastructure_file" "$trunk_provisioning_file" "$lease_file" \
+          "$ready_file" \
           "${ready_file}.publishing" "$wait_file"
         fail_command_scheduler_infrastructure "$command" || return $?
       fi
+      if [[ "$trunk_provisioning_blocked" == true ]]; then
+        trunk_provisioning_state=blocked
+      fi
       if ! release_parallel_worker_lease "$command" "$lease_file"; then
         rm -f "$output_file" "$status_file" "$elapsed_file" "$timeout_file" \
-          "$infrastructure_file" "$lease_file" "$ready_file" \
+          "$infrastructure_file" "$trunk_provisioning_file" "$lease_file" \
+          "$ready_file" \
           "${ready_file}.publishing" "$wait_file"
         fail_command_scheduler_infrastructure "$command" || return $?
       fi
@@ -6386,8 +6511,9 @@ run_mapped_entries_parallel() {
           print_autoreview_test_timings "$output_file"
         fi
         echo "✓ ${command} ($(format_duration "$elapsed"))"
-      elif [[ "$timed_out" != true ]] && is_trunk_command "$command" &&
-        trunk_provisioning_is_blocked; then
+      elif [[ "$timed_out" != true &&
+        "$trunk_provisioning_blocked" == true ]] &&
+        is_trunk_command "$command"; then
         record_command_summary "skipped" "$elapsed" "$command"
         print_trunk_environment_blocked_warning "$command"
       else
@@ -6403,7 +6529,8 @@ run_mapped_entries_parallel() {
       fi
 
       rm -f "$output_file" "$status_file" "$elapsed_file" "$timeout_file" \
-        "$infrastructure_file" "$lease_file" "$ready_file" \
+        "$infrastructure_file" "$trunk_provisioning_file" "$lease_file" \
+        "$ready_file" \
         "${ready_file}.publishing" "$wait_file"
       completed=$((completed + 1))
     done
@@ -6420,6 +6547,7 @@ run_mapped_entries_parallel() {
     active_elapsed_files=("${next_active_elapsed_files[@]+"${next_active_elapsed_files[@]}"}")
     active_timeout_files=("${next_active_timeout_files[@]+"${next_active_timeout_files[@]}"}")
     active_infrastructure_files=("${next_active_infrastructure_files[@]+"${next_active_infrastructure_files[@]}"}")
+    active_trunk_provisioning_files=("${next_active_trunk_provisioning_files[@]+"${next_active_trunk_provisioning_files[@]}"}")
     active_lease_files=("${next_active_lease_files[@]+"${next_active_lease_files[@]}"}")
     active_ready_files=("${next_active_ready_files[@]+"${next_active_ready_files[@]}"}")
     active_wait_files=("${next_active_wait_files[@]+"${next_active_wait_files[@]}"}")
@@ -6456,13 +6584,15 @@ run_mapped_entries_parallel() {
       elapsed_file="$(make_tmpfile)"
       timeout_file="$(make_tmpfile)"
       infrastructure_file="$(make_tmpfile)"
+      trunk_provisioning_file="$(make_tmpfile)"
       lease_file="$(make_tmpfile)"
       ready_file="$(make_tmpfile)"
       ready_staging_file="${ready_file}.publishing"
       wait_file="${ready_file}.wait"
       tmpfiles+=(
         "$output_file" "$status_file" "$elapsed_file" "$timeout_file"
-        "$infrastructure_file" "$lease_file" "$ready_file"
+        "$infrastructure_file" "$trunk_provisioning_file" "$lease_file"
+        "$ready_file"
         "$ready_staging_file" "$wait_file"
       )
       # The ready path must be absent until the worker atomically publishes a
@@ -6586,8 +6716,8 @@ run_mapped_entries_parallel() {
         export AGENTQG_REQUEST
         run_mapped_command_to_files \
           "$command" "$output_file" "$status_file" "$elapsed_file" \
-          "$timeout_file" "$infrastructure_file" "$lease_file" \
-          "$drain_identity"
+          "$timeout_file" "$infrastructure_file" \
+          "$trunk_provisioning_file" "$lease_file" "$drain_identity"
         if ! printf '%s\n' ready > "$ready_staging_file" ||
           ! mv -f "$ready_staging_file" "$ready_file"; then
           exit 2
@@ -6683,6 +6813,7 @@ run_mapped_entries_parallel() {
       active_elapsed_files+=("$elapsed_file")
       active_timeout_files+=("$timeout_file")
       active_infrastructure_files+=("$infrastructure_file")
+      active_trunk_provisioning_files+=("$trunk_provisioning_file")
       active_lease_files+=("$lease_file")
       active_ready_files+=("$ready_file")
       active_wait_files+=("$wait_file")
@@ -6915,7 +7046,7 @@ if [[ "$failures" -gt 0 ]]; then
 fi
 
 if declare -F gate_coordinator_publish_success >/dev/null 2>&1; then
-  gate_coordinator_publish_success
+  gate_coordinator_publish_success "$trunk_provisioning_state"
 fi
 
 log_duration_line "ok" "$gate_total_elapsed" "__run_total__" "run" || true

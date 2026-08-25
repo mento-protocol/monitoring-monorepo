@@ -560,6 +560,16 @@ Only a verified success can satisfy later freshness reuse. A run that neither
 executes nor reuses verified work never reports success, including through a
 pipe.
 
+A run can pass after it skips Trunk only when the post-failure provisioning
+probe confirms that the launcher cannot produce its CLI. The leader publishes
+that outcome as a success with `reusable: false` and the exact skip reason. An
+active follower receives the same qualified result and warning. The coordinator
+does not create a retained-success index for it and removes any older index for
+the same fingerprint. A later `--skip-if-fresh` request therefore leads a new
+execution and retries Trunk. The probe inherits the command identity and marker
+descriptors. Its command lease stays reserved until the probe and its
+descendants drain.
+
 Each blocking RPC helper carries the request and coordinator process tags and
 marker descriptors. It closes the caller's inherited output descriptors. A
 hard-killed gate therefore cannot leave an orphaned wait process holding its
@@ -657,6 +667,13 @@ publication failure, adoption failure, rollback, and release, uses a top-level
 `holder.reclaiming.quarantine.v1.<hostname-sha256>.<pid>.<nonce>` directory at
 the lock root. Crash remnants from those quarantines are inert and never enter
 Bash owner recovery. Cleanup retains a replacement marker.
+
+Node opens every mutable legacy owner or unpublished owner-stage path with
+`O_RDONLY | O_NOFOLLOW | O_NONBLOCK`. It then uses `fstat` to require a
+current-UID regular file before it reads owner bytes or changes a stage's mode.
+`O_NOFOLLOW` rejects a symlink. `O_NONBLOCK` makes a FIFO open return, and the
+type check rejects the FIFO. Both cases fail closed without blocking the
+coordinator.
 
 A Bash run or command holder marker contains raw `<token>\n` bytes. It is not an
 owner record. A normal drain removes it only after the process census is empty.
@@ -798,9 +815,16 @@ request identity before it sends any acknowledgement.
 
 Legacy release is token- and inode-scoped. It first snapshots the owner through
 an open descriptor, then atomically moves the current owner pathname to a
-recovery-visible `owner.reclaiming.release.*` record inside `run.lock`. It
-validates the moved inode, current UID, and generation token against the prior
-snapshot before it moves that inode into a mode-0700 private release directory.
+recovery-visible `owner.reclaiming.release.*` record inside `run.lock`. It keeps
+the original descriptor open across both owner moves: first to the
+recovery-visible record, then to the private release directory. The release
+parser duplicates that descriptor and reads the duplicate. It validates the
+descriptor target as a current-UID regular file before and after that read.
+Linux exposes `/dev/fd/<n>` as a symlink, so the parser does not send that
+pseudo-path through the shared-path no-symlink guard. After the first move,
+release validates the moved inode, current UID, and generation token against the
+prior snapshot. Only then does it move that inode into a mode-0700 private
+release directory.
 A replacement that wins before the move is detected and restored or retained.
 It cannot enter private release state. The Node coordinator also requires the
 exact record text. A crash before validation leaves the record where legacy
