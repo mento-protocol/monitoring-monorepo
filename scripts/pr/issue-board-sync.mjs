@@ -384,12 +384,14 @@ async function syncIssue(options, project, listedIssue, operations) {
         );
       }
 
-      const reopenState = restoreStateFromCloseoutIssue(closeoutIssue);
       const retryQueueSnapshot = retryQueueSnapshotForCloseout(
         closeoutIssue,
         initialIssue,
         listedIssue,
       );
+      const reopenState =
+        restoreStateFromCloseoutIssue(closeoutIssue) ??
+        (retryQueueSnapshot.labels.length > 0 ? "grooming" : null);
       await operations.editIssueLabels(options, closeoutIssue, state);
       let verifiedIssue = await verifySyncCloseout(
         options,
