@@ -152,9 +152,12 @@ assert.ok(
 // the next insert clears the whole cache rather than evicting one entry or
 // growing past it. Push enough unique text through to force several clear
 // cycles, then confirm the size stayed bounded — unbounded growth here would
-// mean the clear stopped running.
+// mean the clear stopped running. One extra insert past the even 2x4096
+// multiple keeps the final size independent of how many entries earlier
+// tests left behind: 4096*2 alone can land exactly on the ceiling (still
+// failing `< 4096`) whenever the starting size is a multiple of the cycle.
 withCache(true, () => {
-  for (let index = 0; index < 4096 * 2; index += 1) {
+  for (let index = 0; index < 4096 * 2 + 1; index += 1) {
     commentMaskedHcl(`resource "overflow" "probe${index}" {}\n`);
   }
   assert.ok(
