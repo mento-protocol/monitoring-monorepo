@@ -150,7 +150,7 @@ function zeroFindingPrs(condition) {
 }
 
 /** Whether the scorer recorded a suspected answer-key leak on this row. */
-function leakSuspected(row) {
+export function leakSuspected(row) {
   return LEAK_NOTE_PATTERN.test(row?.notes ?? "");
 }
 
@@ -165,6 +165,18 @@ function comparable(row, baselineRow) {
     return {
       usable: false,
       reason: `baseline ${calibrationReason(baselineRow)}; comparison refused`,
+    };
+  }
+  // A leaked baseline is refused for the same reason, and here it matters more
+  // than on the candidate: the anchor's bits are the denominator of every later
+  // flip count, so answer-key-contaminated bits would silently score every
+  // clean run after them as a regression. `resolveBaseline` never selects such
+  // a row; this refuses one named explicitly with `--against`.
+  if (leakSuspected(baselineRow)) {
+    return {
+      usable: false,
+      reason:
+        "baseline notes record a suspected leak; comparison refused (its bits are not trusted)",
     };
   }
   if (row.comparability_key === baselineRow.comparability_key) {
@@ -237,7 +249,10 @@ function canaryVerdict({ contract, row }) {
  * Apply the pre-registered decision rule to one row. Precedence, highest
  * first: INCOMPLETE for a failed run that has no scored matrix, then AMBER for
  * a judge that failed its own calibration, then AMBER for a suspected
- * answer-key leak, then RED, AMBER, PROMOTE, GREEN.
+ * answer-key leak, then AMBER for a matrix that did not complete, then RED,
+ * AMBER, PROMOTE, GREEN. The three AMBER gates precede RED for one reason: a
+ * run whose numbers are untrusted or incomplete may not be escalated on them
+ * either.
  */
 export function verdict({ contract, row, baselineRow = null }) {
   if (!isObject(contract?.verdict_rules)) {
@@ -301,6 +316,20 @@ export function verdict({ contract, row, baselineRow = null }) {
     return { verdict: "AMBER", reasons: notes };
   }
 
+  // An incomplete matrix gates the RED floors for the same reason calibration
+  // and a leak do. The cells that never ran are the cells that would have
+  // supplied the missing P1 matches, the missing claims and the missing
+  // findings, so a subset's P1 recall, wrong-claim count and empty-PR count are
+  // not the run's. The runbook classifies a run that did not complete as AMBER
+  // and unusable for ranking; escalating on a subset would name flipped defects
+  // the run never had the chance to find.
+  if (row.status !== "complete") {
+    return {
+      verdict: "AMBER",
+      reasons: [...reasons, `run status is ${row.status}`],
+    };
+  }
+
   // The paired regression is the one RED the control condition can explain
   // away: when control fell with the headline by at least the same threshold,
   // the model moved and the loss is not attributable to the skill, which the
@@ -347,7 +376,6 @@ export function verdict({ contract, row, baselineRow = null }) {
   if (red.length) return { verdict: "RED", reasons: [...reasons, ...red] };
 
   const amber = [];
-  if (row.status !== "complete") amber.push(`run status is ${row.status}`);
   if (!pairing.usable && baselineRow) {
     amber.push("row cannot be ranked against the given baseline");
   }

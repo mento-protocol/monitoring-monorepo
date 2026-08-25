@@ -87,7 +87,7 @@ function row(overrides = {}) {
   return {
     schema_version: 1,
     kind: "full",
-    executed_at: "2026-12-08T10:41:07.000Z",
+    executed_at: "2026-12-08T10:41:07Z",
     status: "complete",
     verdict: "GREEN",
     comparability_key: KEY,
@@ -96,6 +96,7 @@ function row(overrides = {}) {
       skill_digest: "d".repeat(64),
       skill_ref: "origin/main",
       finder_argv_digest: "e".repeat(64),
+      orchestrator_digest: "f".repeat(64),
       claude_cli: "2.1.14",
       codex_cli: "0.48.2",
       host: "chapati-mbp",
@@ -111,7 +112,7 @@ function row(overrides = {}) {
 
 function baseline(overrides = {}) {
   return row({
-    executed_at: "2026-09-08T10:41:07.000Z",
+    executed_at: "2026-09-08T10:41:07Z",
     detail_dir: "docs/evals/review-skill-runs/2026-09-08-3f9c1a58",
     ...overrides,
   });
@@ -243,6 +244,45 @@ test("verdict applies the pre-registered rule to every branch", () => {
       baseline: baseline(),
       expect: "AMBER",
       reason: /run status is partial/,
+    },
+    {
+      // The cells that never ran are the cells that would have supplied the
+      // missing P1 matches. Reading a subset's P1 recall as a floor breach
+      // opens a priority issue naming defects the run never had the chance to
+      // find, so the incomplete matrix is read before the RED floors.
+      name: "AMBER, not RED, when a partial matrix is below the P1 floor",
+      row: row({
+        status: "partial",
+        conditions: {
+          pipeline: condition({ found: 20, p1Matched: 0, p1Opportunities: 12 }),
+        },
+      }),
+      baseline: baseline(),
+      expect: "AMBER",
+      reason: /run status is partial/,
+    },
+    {
+      name: "AMBER, not RED, when a partial matrix parsed nothing on two PRs",
+      row: row({
+        status: "partial",
+        conditions: {
+          pipeline: condition({ found: 20 }),
+          control: condition({ found: 6, zero_finding_prs: 2 }),
+        },
+      }),
+      baseline: baseline(),
+      expect: "AMBER",
+      reason: /run status is partial/,
+    },
+    {
+      // The anchor's bits are the denominator of every flip count after it.
+      // Ranking against answer-key-contaminated bits scores each later clean
+      // run as a regression against defects the anchor may have read.
+      name: "AMBER when the named baseline records a suspected leak",
+      row: row(),
+      baseline: baseline({ notes: "leak suspected: transcript names PR 1999" }),
+      expect: "AMBER",
+      reason: /baseline notes record a suspected leak/,
     },
     {
       name: "AMBER on judge drift",
@@ -791,7 +831,7 @@ test("the report resolves truth titles from the committed truth files", () => {
 
 test("scheduleIssuePayload stays silent while the ledger is fresh", () => {
   const fresh = freshness({
-    rows: [{ ...row(), executed_at: "2026-12-08T10:41:07.000Z" }],
+    rows: [{ ...row(), executed_at: "2026-12-08T10:41:07Z" }],
     contract,
     now: new Date("2026-12-20T00:00:00Z"),
     contractDigest: CONTRACT_DIGEST,
@@ -805,7 +845,7 @@ test("scheduleIssuePayload stays silent while the ledger is fresh", () => {
 
 test("scheduleIssuePayload dedups on the contract digest and the month", () => {
   const stale = freshness({
-    rows: [{ ...row(), executed_at: "2026-09-08T10:41:07.000Z" }],
+    rows: [{ ...row(), executed_at: "2026-09-08T10:41:07Z" }],
     contract,
     now: new Date("2026-12-20T00:00:00Z"),
     contractDigest: CONTRACT_DIGEST,

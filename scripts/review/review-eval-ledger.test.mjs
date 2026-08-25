@@ -48,8 +48,12 @@ const MS_PER_DAY = 86_400_000;
 const NOW = new Date("2026-12-01T00:00:00.000Z");
 const scorable = [...contractScorableIds(contract)];
 
+// The canonical producer format: `toISOString()` with the millisecond field
+// stripped, which is the only shape a row may carry.
 function daysAgo(days, from = NOW) {
-  return new Date(from.valueOf() - days * MS_PER_DAY).toISOString();
+  return new Date(from.valueOf() - days * MS_PER_DAY)
+    .toISOString()
+    .replace(/\.\d{3}Z$/, "Z");
 }
 
 function condition(overrides = {}) {
@@ -98,6 +102,7 @@ function row(overrides = {}) {
       skill_digest: "d".repeat(64),
       skill_ref: "origin/main",
       finder_argv_digest: "e".repeat(64),
+      orchestrator_digest: "f".repeat(64),
       claude_cli: "2.1.14",
       codex_cli: "0.48.2",
       host: "chapati-mbp",
@@ -231,7 +236,39 @@ test("row validation rejects each contract violation", () => {
     [row({ kind: "smoke" }), /kind must be one of/],
     [row({ status: "green" }), /status must be one of/],
     [row({ verdict: "green" }), /verdict must be one of/],
-    [row({ executed_at: "last tuesday" }), /executed_at must be an ISO/],
+    [row({ executed_at: "last tuesday" }), /executed_at must be a canonical/],
+    // `new Date()` parses every one of these. A row carrying one would pass
+    // validation and then sort against canonical rows by string comparison,
+    // which is how `resolveBaseline` orders the ledger.
+    [row({ executed_at: "0" }), /executed_at must be a canonical/],
+    [row({ executed_at: "2026-9-8" }), /executed_at must be a canonical/],
+    [
+      row({ executed_at: "Tue, 08 Sep 2026 10:41:07 GMT" }),
+      /executed_at must be a canonical/,
+    ],
+    [
+      row({ executed_at: "2026-09-08T10:41:07.000Z" }),
+      /executed_at must be a canonical/,
+    ],
+    [
+      row({ executed_at: "2026-09-08T10:41:07+02:00" }),
+      /executed_at must be a canonical/,
+    ],
+    // Well-shaped and impossible: `Date` rolls it into March instead of
+    // refusing it, so the round-trip is what catches it.
+    [
+      row({ executed_at: "2026-02-31T00:00:00Z" }),
+      /executed_at must be a canonical/,
+    ],
+    [
+      row({
+        vs_baseline: {
+          baseline_executed_at: "2026-9-8",
+          mcnemar: { b: 1, c: 1, delta: 0 },
+        },
+      }),
+      /baseline_executed_at must be a canonical/,
+    ],
     [row({ contract_digest: "abc" }), /contract_digest must be a lowercase/],
     [row({ extra: 1 }), /unexpected property extra/],
     [row({ conditions: {} }), /at least one condition/],
@@ -616,7 +653,9 @@ test("freshness reports the clocks and the rows it excluded", () => {
   assert.equal(result.daysSinceFull, 50);
   assert.equal(result.excludedRows, 1);
   assert.equal(result.lastFullAt, daysAgo(50));
-  assert.equal(result.evaluatedAt, NOW.toISOString());
+  // Reported in the row format, not in `toISOString()`'s: a reader compares
+  // these against `executed_at` by string.
+  assert.equal(result.evaluatedAt, "2026-12-01T00:00:00Z");
   assert.equal(result.level, "green");
 });
 

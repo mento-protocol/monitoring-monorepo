@@ -11,7 +11,11 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
 import { fixtureForPr } from "./review-eval-fixtures.mjs";
-import { judgeCalibrationPasses, verdict } from "./review-eval-report.mjs";
+import {
+  judgeCalibrationPasses,
+  leakSuspected,
+  verdict,
+} from "./review-eval-report.mjs";
 
 function readJson(file) {
   try {
@@ -115,6 +119,12 @@ export function failedRow({
  * A row whose judge calibration failed is never eligible, as anchor or as
  * re-anchor: the runbook excludes such a row from baseline comparison, and an
  * anchor is the comparison every later run is paired against.
+ *
+ * A row whose notes record a suspected leak is refused on the same ground. The
+ * runbook calls its score untrusted, and an anchor's bits are the denominator
+ * of every flip count after it: anchoring on answer-key-contaminated bits would
+ * score each later clean run as a regression against defects the anchor may
+ * have read rather than found.
  */
 export function resolveBaseline({ rows, row }) {
   const eligible = (rows ?? [])
@@ -123,6 +133,7 @@ export function resolveBaseline({ rows, row }) {
         candidate.kind === "full" &&
         candidate.status === "complete" &&
         judgeCalibrationPasses(candidate) &&
+        !leakSuspected(candidate) &&
         candidate.comparability_key === row.comparability_key &&
         candidate.executed_at < row.executed_at,
     )
@@ -174,9 +185,13 @@ function recomputeFromDetail({ dir, condition, ids, prForId }) {
   }
   if (files.length === 0) return null;
   const byDraw = new Map();
-  // Two counters that can turn a row RED are not derivable from the bits, so
-  // they are recomputed from the same per-cell records the bits come from.
+  // None of these counters is derivable from the bits, so each is recomputed
+  // from the same per-cell records the bits come from. A row states them about
+  // itself, and every one of them is printed in the committed report.
   let wrongClaims = 0;
+  let novelReal = 0;
+  let usd = 0;
+  let seconds = 0;
   const claimsByPr = new Map();
   for (const file of files) {
     const record = readJson(path.join(dir, file));
@@ -186,6 +201,9 @@ function recomputeFromDetail({ dir, condition, ids, prForId }) {
     entry.prs.add(String(record.pr));
     byDraw.set(draw, entry);
     wrongClaims += Number(record.novel?.novelWrong ?? 0);
+    novelReal += Number(record.novel?.novelReal ?? 0);
+    usd += Number(record.usd ?? 0);
+    seconds += Number(record.seconds ?? 0);
     claimsByPr.set(
       String(record.pr),
       (claimsByPr.get(String(record.pr)) ?? 0) + (record.claims ?? []).length,
@@ -209,7 +227,58 @@ function recomputeFromDetail({ dir, condition, ids, prForId }) {
         .map((draw) => (byDraw.get(draw).matched.has(id) ? 1 : 0)),
     );
   }
-  return { bits, wrongClaims, zeroFindingPrs };
+  return { bits, wrongClaims, novelReal, usd, seconds, zeroFindingPrs };
+}
+
+/** Report a stated number that is not what the detail sums to. */
+function checkClose(stated, found, tolerance, label, digits, problems) {
+  if (typeof stated !== "number" || !Number.isFinite(stated)) {
+    problems.push(`${label} is not a number; the run detail gives ${found}`);
+    return;
+  }
+  if (Math.abs(stated - found) > tolerance) {
+    problems.push(
+      `${label} is ${stated}; the run detail gives ${found.toFixed(digits)}`,
+    );
+  }
+}
+
+/**
+ * What the scorer spent on judges, re-derived from the run detail.
+ *
+ * `scoring_usd` is the one recorded number no per-cell record used to carry, so
+ * `--validate` had to take it on the row's own say-so. Each cell record now
+ * carries the dollars its own judge calls cost and `calibration.json` carries
+ * the replay's, which makes the run total a sum of evidence like every other
+ * number on the row. Returns null when the detail predates that, so a row
+ * written before the field existed is not failed for it.
+ */
+function recomputeScoringUsd(dir) {
+  let files;
+  try {
+    files = readdirSync(dir).filter(
+      (name) => name.startsWith("result-") && name.endsWith(".json"),
+    );
+  } catch {
+    return null;
+  }
+  let total = 0;
+  let seen = false;
+  for (const file of files) {
+    const record = readJson(path.join(dir, file));
+    if (!Object.hasOwn(record ?? {}, "scoring_usd")) continue;
+    seen = true;
+    total += Number(record.scoring_usd ?? 0);
+  }
+  const calibrationFile = path.join(dir, "calibration.json");
+  if (existsSync(calibrationFile)) {
+    const record = readJson(calibrationFile);
+    if (Object.hasOwn(record ?? {}, "scoring_usd")) {
+      seen = true;
+      total += Number(record.scoring_usd ?? 0);
+    }
+  }
+  return seen ? total : null;
 }
 
 /**
@@ -427,6 +496,41 @@ export function revalidateRow({
       problems.push(
         `${label}.zero_finding_prs is ${statedZero}; the run detail gives ${recomputed.zeroFindingPrs}`,
       );
+    }
+    // The remaining three recorded numbers. None of them moves a verdict, but
+    // all three are printed in the committed report as measurements, and the
+    // runbook's guarantee is that every recorded number is re-derived rather
+    // than believed. An aggregation bug or an edited row is a validation
+    // problem here instead of a figure a reader has no way to check.
+    if (condition.novel_real !== recomputed.novelReal) {
+      problems.push(
+        `${label}.novel_real is ${condition.novel_real}; the run detail gives ${recomputed.novelReal}`,
+      );
+    }
+    // Summed in a different order than `foldCondition` summed them, so the
+    // comparison is to the cent and to the tenth of a second rather than to the
+    // last bit of a float.
+    checkClose(
+      condition.usd,
+      recomputed.usd,
+      0.005,
+      `${label}.usd`,
+      2,
+      problems,
+    );
+    checkClose(
+      condition.seconds,
+      recomputed.seconds,
+      0.05,
+      `${label}.seconds`,
+      1,
+      problems,
+    );
+  }
+  if (dir && Object.hasOwn(row, "scoring_usd")) {
+    const spent = recomputeScoringUsd(dir);
+    if (spent !== null) {
+      checkClose(row.scoring_usd, spent, 0.005, "row.scoring_usd", 2, problems);
     }
   }
   // Only a directory that actually holds this run's cells is expected to hold

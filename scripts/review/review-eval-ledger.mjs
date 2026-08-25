@@ -50,6 +50,7 @@ export const INPUTS_REQUIRED_KEYS = [
   "skill_digest",
   "skill_ref",
   "finder_argv_digest",
+  "orchestrator_digest",
   "claude_cli",
   "codex_cli",
   "host",
@@ -119,16 +120,40 @@ function checkNumber(value, label, problems, { min = 0 } = {}) {
   }
 }
 
-/** Parse an ISO timestamp; return null when it is not a usable instant. */
+// The one date-time shape every producer here writes: `toISOString()` with the
+// millisecond field stripped. Anything else is refused rather than parsed.
+export const INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+
+/**
+ * Parse a canonical UTC date-time; return null when it is not one.
+ *
+ * `new Date(value)` accepts far more than the schema promises — "0", "2026-9-8"
+ * and RFC-style dates all parse — and `resolveBaseline` orders rows by
+ * comparing `executed_at` as strings. A row carrying any of those would pass
+ * validation and then sort or filter against every canonical row incorrectly,
+ * so the format is required, not merely parseable. The round-trip check is what
+ * refuses a well-shaped impossible date such as `2026-02-31T00:00:00Z`, which
+ * `Date` silently rolls forward into March.
+ */
 export function parseInstant(value) {
-  if (typeof value !== "string" || value.length === 0) return null;
+  if (typeof value !== "string" || !INSTANT_PATTERN.test(value)) return null;
   const parsed = new Date(value);
-  return Number.isNaN(parsed.valueOf()) ? null : parsed;
+  if (Number.isNaN(parsed.valueOf())) return null;
+  return parsed.toISOString().replace(/\.\d{3}Z$/, "Z") === value
+    ? parsed
+    : null;
+}
+
+/** Write one instant in the canonical shape, or null when there is none. */
+export function canonicalInstant(instant) {
+  return instant ? instant.toISOString().replace(/\.\d{3}Z$/, "Z") : null;
 }
 
 function checkInstant(value, label, problems) {
   if (!parseInstant(value)) {
-    problems.push(`${label} must be an ISO timestamp`);
+    problems.push(
+      `${label} must be a canonical UTC date-time (YYYY-MM-DDTHH:MM:SSZ)`,
+    );
   }
 }
 
@@ -314,6 +339,11 @@ export function validateLedgerRow(row, label = "row") {
     checkDigest(
       row.inputs.finder_argv_digest,
       `${label}.inputs.finder_argv_digest`,
+      problems,
+    );
+    checkDigest(
+      row.inputs.orchestrator_digest,
+      `${label}.inputs.orchestrator_digest`,
       problems,
     );
     for (const field of ["skill_ref", "claude_cli", "codex_cli", "host"]) {
@@ -707,10 +737,12 @@ export function freshness({
     daysSinceAny,
     daysSinceComplete,
     daysSinceFull,
-    lastAnyAt: lastAny ? lastAny.toISOString() : null,
-    lastCompleteAt: lastComplete ? lastComplete.toISOString() : null,
-    lastFullAt: lastFull ? lastFull.toISOString() : null,
-    evaluatedAt: evaluatedAt.toISOString(),
+    // Reported in the same canonical shape the rows carry, so a reader can
+    // match a reported instant against `executed_at` by string.
+    lastAnyAt: canonicalInstant(lastAny),
+    lastCompleteAt: canonicalInstant(lastComplete),
+    lastFullAt: canonicalInstant(lastFull),
+    evaluatedAt: canonicalInstant(evaluatedAt),
     contractDigest,
     excludedRows,
     futureRows,

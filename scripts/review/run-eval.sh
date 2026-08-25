@@ -33,8 +33,15 @@
 # the same sitting, not against the ledger's stored anchor, or the comparison
 # carries whatever the model did between the anchor and today.
 #
+# --deadline bounds the whole run, cells and scoring together. Three quarters of
+# it start cells and bound each finder and contestant process; the rest is
+# reserved for the judge pass, which is itself bounded.
+#
 # Default is --no-pr: the branch, push and gh pr create commands are printed,
-# not executed.
+# not executed. A run that fails appends a status:failed row to the checkout's
+# ledger, so it publishes that row the same way — and exits non-zero when it
+# could only print the commands, because until they are run the next run refuses
+# to start against a ledger with uncommitted changes.
 
 set -euo pipefail
 
@@ -116,7 +123,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h | --help)
-      sed -n '2,37p' "$0"
+      sed -n '2,44p' "$0"
       exit 0
       ;;
     *) fail "unknown argument: $1" ;;
@@ -191,12 +198,37 @@ fi
 
 CLI="$SPEC/scripts/review/review-eval.mjs"
 CONTRACT="$SPEC/docs/evals/review-skill-fixtures.json"
+ORCHESTRATOR="$SPEC/scripts/review/run-eval.sh"
 [[ -f $CLI ]] || fail "$CLI is missing; the spec worktree has no harness"
+
+# This script decides the contestant's tools, turn limit, skill staging, finder
+# truncation and environment, so its bytes are hashed into `comparability_key`
+# and into every cell fingerprint — from the spec worktree, which is where the
+# harness reads all of its inputs. Running an edited copy against a clean spec
+# would record the spec's digest for a matrix this file actually shaped, which
+# is the silent pairing the digest exists to prevent.
+if ! cmp -s "${BASH_SOURCE[0]}" "$ORCHESTRATOR"; then
+  fail "the running orchestrator differs from $ORCHESTRATOR, whose digest the row would record; commit or stash the change, or pass --skill-ref to evaluate this checkout"
+fi
 
 # --- plan --------------------------------------------------------------------
 
 node "$CLI" --root "$SPEC" --ledger "$LEDGER" --check-fixtures --offline >/dev/null ||
   fail "the committed contract does not validate"
+
+# An unresolvable --against would otherwise surface at --score, after the
+# matrix has already spent its hours and dollars. Resolve it now with the same
+# logic --score consumes; the resolved row is re-derived there, not cached here.
+if [[ -n $AGAINST ]]; then
+  # shellcheck disable=SC2016  # the single-quoted block is node source
+  node --input-type=module -e '
+    const [spec, ledger, reference] = process.argv.slice(1);
+    const { readLedger } = await import(`${spec}/scripts/review/review-eval-ledger.mjs`);
+    const { resolveRowReference } = await import(`${spec}/scripts/review/review-eval-result-shape.mjs`);
+    resolveRowReference({ reference, rows: readLedger(ledger), repoRoot: spec });
+  ' "$SPEC" "$LEDGER" "$AGAINST" >/dev/null 2>&1 ||
+    fail "--against $AGAINST does not resolve to exactly one ledger row or row file"
+fi
 
 PLAN_OUT="$(mktemp "$TMPROOT/review-eval-plan.XXXXXX")"
 PLAN_ARGS=(--root "$SPEC" --ledger "$LEDGER" --plan --kind "$KIND" --json)
@@ -240,6 +272,63 @@ CELL_COUNT="$(node -e '
 log "plan $KIND: $CELL_COUNT"
 log "detail directory $RUN_DIR"
 
+# --- the run deadline --------------------------------------------------------
+
+# The deadline bounds the whole run, not the gaps between cells. A quarter of
+# the budget is reserved for scoring: the matrix stops starting cells at
+# MATRIX_DEADLINE, every subprocess is bounded by what is left of it, and the
+# scoring pass gets the remainder. Without the reserve a matrix that ran to the
+# end would leave scoring nothing, and the paid cells expire with the run
+# directory's date.
+MATRIX_DEADLINE=$((DEADLINE - DEADLINE / 4))
+((MATRIX_DEADLINE > 0)) || MATRIX_DEADLINE=1
+
+# Seconds left of one budget, never below one: a zero limit would kill the
+# subprocess before it started and cost a cell for nothing.
+remaining_seconds() {
+  local budget="$1" left
+  left=$((budget - ($(date +%s) - STARTED)))
+  ((left < 1)) && left=1
+  printf '%s' "$left"
+}
+
+# Run one command with a wall-clock bound, stdout to $1. macOS ships no
+# `timeout`, so the bound is a watchdog subshell: TERM at the limit, KILL ten
+# seconds later for a child that ignores it. Returns the command's own status,
+# or 124 when the bound stopped it. The watchdog signals the child it started,
+# so a grandchild that outlives its parent is not covered; the point is that a
+# stalled cell can no longer outlive the run.
+run_bounded() {
+  local out_file="$1" limit="$2"
+  shift 2
+  local marker="${out_file}.deadline"
+  rm -f "$marker"
+  "$@" >"$out_file" 2>/dev/null &
+  local pid=$!
+  (
+    local waited=0
+    while ((waited < limit)); do
+      sleep 1
+      waited=$((waited + 1))
+      kill -0 "$pid" 2>/dev/null || exit 0
+    done
+    : >"$marker"
+    kill -TERM "$pid" 2>/dev/null || exit 0
+    sleep 10
+    kill -KILL "$pid" 2>/dev/null || true
+  ) &
+  local watcher=$!
+  local status=0
+  wait "$pid" || status=$?
+  kill -TERM "$watcher" 2>/dev/null || true
+  wait "$watcher" 2>/dev/null || true
+  if [[ -f $marker ]]; then
+    rm -f "$marker"
+    return 124
+  fi
+  return "$status"
+}
+
 # --- a failed run still leaves a trace ---------------------------------------
 
 # Appends the status:failed trace row. Returns non-zero when the row was not
@@ -271,14 +360,73 @@ write_failed_row() {
   log "appended a status:failed ledger row — $reason"
 }
 
+# Copy the run detail into the checkout and publish the row, or print the
+# commands that would. Sets PUBLISHED=1 only when a PR was actually opened.
+# $1 is the verdict the branch and commit are named for; $2 is the body file
+# inside the detail directory.
+PUBLISHED=0
+
+publish_row() {
+  local verdict="$1" body_file="$2" detail branch title
+  PUBLISHED=0
+  detail="$(json_field "$RUN_DIR/row.json" detail_dir)"
+  mkdir -p "$REPO/$(dirname "$detail")"
+  if [[ "$RUN_DIR" != "$REPO/$detail" ]]; then
+    rm -rf "${REPO:?}/$detail"
+    cp -R "$RUN_DIR" "$REPO/$detail"
+  fi
+  rm -rf "${REPO:?}/$detail/cells"
+
+  # The detail directory basename already identifies this run: date, the first
+  # eight of the comparability key, the kind, and the skill digest. A date-only
+  # branch collides the moment two runs finish on the same UTC day — which the
+  # candidate procedure requires, an installed run and a --skill-ref run in one
+  # sitting — and the collision surfaces at `git checkout -b` or at the push,
+  # after the paid run and the ledger append are already done.
+  branch="eval/review-skill-$(basename "$detail")"
+  title="Review-skill eval $(date -u +%Y-%m-%d): $verdict"
+
+  printf '\n----- ledger PR -----\n'
+  printf 'git -C %q checkout -b %q\n' "$REPO" "$branch"
+  printf 'git -C %q add docs/evals/review-skill-ledger.jsonl %q\n' "$REPO" "$detail"
+  printf 'git -C %q commit -m %q\n' "$REPO" "chore(evals): review-skill eval $verdict"
+  printf 'git -C %q push -u origin %q\n' "$REPO" "$branch"
+  printf 'gh pr create --repo mento-protocol/monitoring-monorepo --title %q --body-file %q\n' \
+    "$title" "$REPO/$detail/$body_file"
+  printf '\nNo auto-merge. A human reads the report and approves.\n'
+
+  if [[ $OPEN_PR -eq 1 ]]; then
+    log "opening the ledger PR"
+    if git -C "$REPO" checkout -b "$branch" &&
+      git -C "$REPO" add docs/evals/review-skill-ledger.jsonl "$detail" &&
+      git -C "$REPO" commit -m "chore(evals): review-skill eval $verdict" &&
+      git -C "$REPO" push -u origin "$branch" &&
+      gh pr create --repo mento-protocol/monitoring-monorepo \
+        --title "$title" --body-file "$REPO/$detail/$body_file"; then
+      PUBLISHED=1
+    else
+      log "the ledger PR could not be opened; the commands above are the recovery path"
+    fi
+  fi
+}
+
 abort() {
-  # launchd must not see a non-zero exit for a run that recorded its failure —
-  # but it must see one for a run that left no trace at all. A silent zero there
-  # reports a healthy schedule while the ledger ages towards red with nothing in
-  # it to explain why.
+  # The failed row goes into the checkout's ledger, so leaving it there and
+  # exiting zero wedges the schedule: launchd reads a healthy run while the next
+  # one refuses to start against a ledger with uncommitted changes, and nothing
+  # ever reaches a PR or the freshness workflow. Publish the row the way a
+  # scored one is published, and exit zero only when a PR actually carries it.
+  # Otherwise exit non-zero with the commands that finish the job printed above.
   write_failed_row "$1" ||
     fail "the run failed and the failure row could not be appended: $1"
-  exit 0
+  # shellcheck disable=SC2016  # the backticks are markdown in the PR body
+  printf '# Review-skill eval: run failed\n\n%s\n\nThe row is `status: failed`, `verdict: INCOMPLETE`. It exists so the run leaves a trace; it scores nothing.\n' \
+    "$1" >"$RUN_DIR/failure.md"
+  publish_row INCOMPLETE failure.md
+  if [[ $PUBLISHED -eq 1 ]]; then
+    exit 0
+  fi
+  fail "the run failed, the row was appended to $LEDGER, and no PR carries it yet; run the commands above (or re-run with --pr) — the next run refuses to start while that ledger has uncommitted changes"
 }
 
 # --- the gh-refusing shim and the per-cell credential scrub -------------------
@@ -305,6 +453,17 @@ CELL_ENV=(env
   GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=
   GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false GIT_ALLOW_PROTOCOL=file
   GH_CONFIG_DIR="$SHIM/gh-empty" PATH="$SHIM:$PATH")
+
+# One scrubbed model call inside one fixture. `run_bounded` needs a command it
+# can start in the background and signal, which a `(cd … && …)` subshell inside
+# a command substitution is not; the `cd` is confined to that background job.
+# shellcheck disable=SC2329  # started by name from run_bounded
+run_in_fixture() {
+  local fixture="$1"
+  shift
+  cd "$fixture" || return 1
+  "${CELL_ENV[@]}" "$@"
+}
 
 # --- skill staging -----------------------------------------------------------
 
@@ -526,14 +685,23 @@ run_cell() {
       log "  $cell_id FAILED — the plan carries no finder argv"
       return 1
     fi
-    # `pipefail` is on, so this status is the finder's own. A finder that hits
-    # its session limit or dies mid-report still writes what it had, and that
-    # partial report is not a review: cached, it would score forever as a
-    # finder that simply missed those defects. Fail the cell on either an
-    # unsuccessful exit or an empty report.
-    local finder_status=0
-    other_review="$(cd "$fixture" && "${CELL_ENV[@]}" \
-      "${FINDER_ARGV[@]}" 2>/dev/null | tail -c 30000)" || finder_status=$?
+    # The finder writes to a file rather than into a pipeline so the run
+    # deadline can bound it: a stalled finder inside a command substitution
+    # never returns, and the between-cells deadline check never runs again.
+    # A finder that hits its session limit or dies mid-report still writes what
+    # it had, and that partial report is not a review: cached, it would score
+    # forever as a finder that simply missed those defects. Fail the cell on an
+    # unsuccessful exit, on the deadline, or on an empty report.
+    local finder_out finder_status=0
+    finder_out="$(mktemp "$TMPROOT/review-eval-finder.XXXXXX")"
+    run_bounded "$finder_out" "$(remaining_seconds "$MATRIX_DEADLINE")" \
+      run_in_fixture "$fixture" "${FINDER_ARGV[@]}" || finder_status=$?
+    other_review="$(tail -c 30000 "$finder_out")"
+    rm -f "$finder_out"
+    if [[ $finder_status -eq 124 ]]; then
+      log "  $cell_id FAILED — the finder hit the run deadline; not cached"
+      return 1
+    fi
     if [[ $finder_status -ne 0 ]]; then
       log "  $cell_id FAILED — the finder exited $finder_status; not cached"
       return 1
@@ -581,15 +749,23 @@ run_cell() {
     claude_args+=(--append-system-prompt "$(stage_skill "$fixture")")
   fi
 
-  local raw other_file
+  local raw other_file claude_status=0
   raw="$(mktemp "$TMPROOT/review-eval-cell.XXXXXX")"
   other_file="$(mktemp "$TMPROOT/review-eval-other.XXXXXX")"
   printf '%s' "$other_review" >"$other_file"
-  if ! (cd "$fixture" && "${CELL_ENV[@]}" \
-    claude "${claude_args[@]}") >"$raw" 2>/dev/null; then
+  # Bounded by what is left of the matrix budget for the same reason the finder
+  # is: a contestant that stalls at a session limit would otherwise hold the
+  # whole run open past the deadline it advertises.
+  run_bounded "$raw" "$(remaining_seconds "$MATRIX_DEADLINE")" \
+    run_in_fixture "$fixture" claude "${claude_args[@]}" || claude_status=$?
+  if [[ $claude_status -ne 0 ]]; then
     rm -f "$raw" "$other_file"
     purge_skill "$fixture"
-    log "  $cell_id FAILED — claude exited non-zero; not cached"
+    if [[ $claude_status -eq 124 ]]; then
+      log "  $cell_id FAILED — claude hit the run deadline; not cached"
+    else
+      log "  $cell_id FAILED — claude exited $claude_status; not cached"
+    fi
     return 1
   fi
   purge_skill "$fixture"
@@ -685,9 +861,9 @@ while IFS=$'\t' read -r cell_id pr condition draw model effort finder \
   if [[ -n ${extra:-} ]]; then
     fail "the plan produced a cell row with an extra field: $extra"
   fi
-  if [[ $(($(date +%s) - STARTED)) -ge $DEADLINE ]]; then
-    STATUS_NOTE="deadline of ${DEADLINE}s reached"
-    log "deadline reached; the matrix is partial"
+  if [[ $(($(date +%s) - STARTED)) -ge $MATRIX_DEADLINE ]]; then
+    STATUS_NOTE="matrix deadline of ${MATRIX_DEADLINE}s reached"
+    log "matrix deadline reached; the matrix is partial"
     break
   fi
   if run_cell "$cell_id" "$pr" "$condition" "$draw" "$model" "$effort" \
@@ -715,10 +891,27 @@ if [[ -n $AGAINST ]]; then
   log "baseline for this run: $AGAINST"
 fi
 
+# Scoring runs inside the same deadline the matrix does, on the quarter of the
+# budget the matrix loop reserved for it. Forty calibration replays and three
+# judge calls per cell are not a bounded amount of time on their own: each judge
+# call carries a one-hour timeout, so an unbounded scoring pass can outlast the
+# whole matrix. `--score` writes the cells' scores under the run directory, so a
+# pass stopped here re-runs against the cached cells rather than re-spending
+# them.
+SCORE_OUT="$(mktemp "$TMPROOT/review-eval-score.XXXXXX")"
+SCORE_STATUS=0
+
 log "scoring (this calls the judge)"
-node "$CLI" --root "$SPEC" --ledger "$LEDGER" --score "$RUN_DIR" \
-  "${AGAINST_ARGS[@]+"${AGAINST_ARGS[@]}"}" --json ||
+run_bounded "$SCORE_OUT" "$(remaining_seconds "$DEADLINE")" \
+  node "$CLI" --root "$SPEC" --ledger "$LEDGER" --score "$RUN_DIR" \
+  "${AGAINST_ARGS[@]+"${AGAINST_ARGS[@]}"}" --json || SCORE_STATUS=$?
+cat "$SCORE_OUT"
+rm -f "$SCORE_OUT"
+if [[ $SCORE_STATUS -eq 124 ]]; then
+  abort "scoring hit the run deadline of ${DEADLINE}s"
+elif [[ $SCORE_STATUS -ne 0 ]]; then
   abort "scoring failed"
+fi
 
 log "validating the row against its own detail"
 # --detail-dir names the run directory explicitly: the contract comes from the
@@ -736,41 +929,7 @@ log "verdict $VERDICT"
 
 # --- publish -----------------------------------------------------------------
 
-DETAIL_DIR="$(json_field "$RUN_DIR/row.json" detail_dir)"
-mkdir -p "$REPO/$(dirname "$DETAIL_DIR")"
-if [[ "$RUN_DIR" != "$REPO/$DETAIL_DIR" ]]; then
-  rm -rf "${REPO:?}/$DETAIL_DIR"
-  cp -R "$RUN_DIR" "$REPO/$DETAIL_DIR"
-fi
-rm -rf "${REPO:?}/$DETAIL_DIR/cells"
-
-# The detail directory basename already identifies this run: date, the first
-# eight of the comparability key, the kind, and the skill digest. A date-only
-# branch collides the moment two runs finish on the same UTC day — which the
-# candidate procedure requires, an installed run and a --skill-ref run in one
-# sitting — and the collision surfaces at `git checkout -b` or at the push,
-# after the paid run and the ledger append are already done.
-BRANCH="eval/review-skill-$(basename "$DETAIL_DIR")"
-TITLE="Review-skill eval $(date -u +%Y-%m-%d): $VERDICT"
-
-printf '\n----- ledger PR -----\n'
-printf 'git -C %q checkout -b %q\n' "$REPO" "$BRANCH"
-printf 'git -C %q add docs/evals/review-skill-ledger.jsonl %q\n' "$REPO" "$DETAIL_DIR"
-printf 'git -C %q commit -m %q\n' "$REPO" "chore(evals): review-skill eval $VERDICT"
-printf 'git -C %q push -u origin %q\n' "$REPO" "$BRANCH"
-printf 'gh pr create --repo mento-protocol/monitoring-monorepo --title %q --body-file %q\n' \
-  "$TITLE" "$REPO/$DETAIL_DIR/report.md"
-printf '\nNo auto-merge. A human reads the report and approves.\n'
-
-if [[ $OPEN_PR -eq 1 ]]; then
-  log "opening the ledger PR"
-  git -C "$REPO" checkout -b "$BRANCH"
-  git -C "$REPO" add docs/evals/review-skill-ledger.jsonl "$DETAIL_DIR"
-  git -C "$REPO" commit -m "chore(evals): review-skill eval $VERDICT"
-  git -C "$REPO" push -u origin "$BRANCH"
-  gh pr create --repo mento-protocol/monitoring-monorepo \
-    --title "$TITLE" --body-file "$REPO/$DETAIL_DIR/report.md"
-fi
+publish_row "$VERDICT" report.md
 
 cat "$REPORT"
 exit 0

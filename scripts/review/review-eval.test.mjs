@@ -33,8 +33,10 @@ import {
   cellFingerprint,
   cellReuseDecision,
   comparabilityKey,
+  fileDigest,
   leakSignals,
   loginsInFixtureTree,
+  ORCHESTRATOR_FILE,
   planCells,
   planStalenessIssueSync,
   resolveKind,
@@ -143,6 +145,7 @@ function makeRow({
       skill_digest: "a".repeat(64),
       skill_ref: "installed",
       finder_argv_digest: "b".repeat(64),
+      orchestrator_digest: "c".repeat(64),
       claude_cli: "2.1.14",
       codex_cli: "0.48.2",
       host: "test-host",
@@ -443,6 +446,25 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
       calibrationDigest: "2".repeat(64),
     }),
   );
+  // `run-eval.sh` fixes the contestant's tools, turn limit, skill staging and
+  // finder truncation: it shapes the transcript every recorded number comes
+  // from, so an edit to it re-anchors the series the way a prompt edit does.
+  assert.notEqual(
+    base,
+    comparabilityKey({
+      contract,
+      contractDigest,
+      orchestratorDigest: "3".repeat(64),
+    }),
+  );
+  assert.equal(
+    base,
+    comparabilityKey({
+      contract,
+      contractDigest,
+      orchestratorDigest: fileDigest(ORCHESTRATOR_FILE),
+    }),
+  );
 });
 
 test("resolveKind picks full only when the last full run is past cadence", () => {
@@ -585,6 +607,7 @@ test("a cached cell from another skill or contract is never reused", () => {
     "contract_digest",
     "finder_argv_digest",
     "kind",
+    "orchestrator_digest",
     "skill_digest",
   ]);
 
@@ -611,7 +634,15 @@ test("a cached cell from another skill or contract is never reused", () => {
   // A run resumed after a CLI upgrade must re-run its cells: the new row
   // stamps the current versions, so reusing output from the previous binaries
   // would record two runtimes under one provenance.
-  for (const field of ["claude_cli", "codex_cli", "finder_argv_digest"]) {
+  // An edited orchestrator is the same class of change: it decides the tools,
+  // the turn limit and the staging a cell ran under, so cells produced by the
+  // previous script may not be folded into this run's numbers.
+  for (const field of [
+    "claude_cli",
+    "codex_cli",
+    "finder_argv_digest",
+    "orchestrator_digest",
+  ]) {
     assert.match(
       decide({ ok: true, fingerprint: { ...fingerprint, [field]: "moved" } })
         .reason,
@@ -997,6 +1028,34 @@ test("resolveBaseline refuses a row whose judge calibration failed", () => {
   };
   assert.equal(
     resolveBaseline({ rows: [drifted, clean, promoted], row }).executed_at,
+    clean.executed_at,
+  );
+});
+
+test("resolveBaseline refuses a row whose notes record a leak", () => {
+  // A leaked row's own verdict is already capped at AMBER, but as an anchor it
+  // would set the denominator of every flip count after it: each later clean
+  // run would be ranked against bits the run may have read from the answer key
+  // rather than found, and score as a regression for it.
+  const leaked = {
+    ...makeRow({ executedAt: "2026-09-08T10:00:00Z" }),
+    notes: "leak suspected: transcript names PR 1999",
+  };
+  const row = makeRow({ executedAt: "2026-12-08T10:00:00Z" });
+  assert.equal(resolveBaseline({ rows: [leaked], row }), null);
+
+  const clean = makeRow({ executedAt: "2026-10-08T10:00:00Z" });
+  assert.equal(
+    resolveBaseline({ rows: [leaked, clean], row }).executed_at,
+    clean.executed_at,
+  );
+  // Nor may it re-anchor as a PROMOTE row.
+  const promoted = {
+    ...makeRow({ executedAt: "2026-11-08T10:00:00Z", verdict: "PROMOTE" }),
+    notes: "leak_suspected: PR number in transcript",
+  };
+  assert.equal(
+    resolveBaseline({ rows: [leaked, clean, promoted], row }).executed_at,
     clean.executed_at,
   );
 });
@@ -1533,6 +1592,78 @@ test("scorePlan folds stubbed cells into a schema-valid ledger row", async () =>
   }
 });
 
+test("the login exclusions are snapshotted before the tool-bearing judge", async () => {
+  // The novelty judge runs with `Bash` inside the fixture. Fixture content that
+  // prompt-injects it into writing a reviewer login into a tracked file would,
+  // if the exclusion scan ran afterwards, have that login treated as original
+  // fixture content — and a transcript naming the reviewer would then evade the
+  // hard leak signal. The scan therefore runs on the tree `resetFixture` just
+  // restored, before any judge call.
+  const root = makeRoot();
+  try {
+    const plan = buildPlan({
+      contract,
+      contractDigest,
+      kind: "canary",
+      repoRoot: root,
+      outDir: path.join(root, "run"),
+      env: planEnv,
+    });
+    const fixture = contract.fixtures.find(
+      (candidate) => candidate.pr === plan.cells[0].pr,
+    );
+    const truth = JSON.parse(
+      readFileSync(path.join(root, fixture.truth_file), "utf8"),
+    );
+    const login = truth.findings[0].author;
+    for (const cell of plan.cells) {
+      writeCell(plan, cell, {
+        output: `I read the review ${login} left on this change.`,
+        root,
+      });
+    }
+    // The novelty judge — the only judge that runs inside the fixture — writes
+    // the login into a tracked file: from its first call on, a `git grep` for
+    // that login succeeds.
+    const { exec: inner } = stubExec();
+    let judged = false;
+    const exec = async (request) => {
+      const answer = await inner(request);
+      // Only the novelty judge runs in the fixture; the blind judges get a
+      // scratch directory.
+      if (request.cwd === root) judged = true;
+      return answer;
+    };
+    const runGit = ({ args }) => {
+      if (args[0] !== "grep") return { status: 0, stdout: "", stderr: "" };
+      return { status: judged ? 0 : 1, stdout: "", stderr: "" };
+    };
+    const scored = await scorePlan({
+      plan,
+      contract,
+      contractDigest,
+      repoRoot: root,
+      planDir: plan.plan_dir,
+      exec,
+      runGit,
+      calibrationSet: JSON.parse(
+        readFileSync(
+          path.join(root, "docs/evals/review-skill-judge-calibration.json"),
+          "utf8",
+        ),
+      ),
+    });
+    assert.match(scored.row.notes, /leak suspected/);
+    assert.ok(
+      scored.row.notes.includes(`names reviewer ${login}`),
+      scored.row.notes,
+    );
+    assert.equal(scored.row.verdict, "AMBER");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a PR that ran fewer draws loses opportunities, not recall", async () => {
   const root = makeRoot();
   try {
@@ -1850,6 +1981,49 @@ test("a PR is zero-finding only when every draw it ran found nothing", async () 
       ),
       JSON.stringify(caught.problems),
     );
+
+    // The three measurements no verdict rule reads are re-derived too: they
+    // are printed in the committed report, and the runbook's guarantee is that
+    // every recorded number comes back from the detail rather than from the
+    // row's own say-so.
+    for (const [field, delta] of [
+      ["novel_real", 7],
+      ["usd", 1.5],
+      ["seconds", 60],
+    ]) {
+      const edited = structuredClone(scored.row);
+      edited.conditions.pipeline[field] += delta;
+      const found = revalidateRow({
+        contract,
+        row: edited,
+        repoRoot: root,
+        detailDir: plan.plan_dir,
+      });
+      assert.ok(
+        found.problems.some((problem) =>
+          problem.startsWith(`conditions.pipeline.${field} is`),
+        ),
+        `${field}: ${JSON.stringify(found.problems)}`,
+      );
+    }
+
+    // `scoring_usd` was the one number with no evidence beside it. Each cell
+    // record now carries what its own judge calls cost and `calibration.json`
+    // carries the replay's, so the run total is a sum of the detail.
+    const overstated = structuredClone(scored.row);
+    overstated.scoring_usd += 2;
+    const spent = revalidateRow({
+      contract,
+      row: overstated,
+      repoRoot: root,
+      detailDir: plan.plan_dir,
+    });
+    assert.ok(
+      spent.problems.some((problem) =>
+        problem.startsWith("row.scoring_usd is"),
+      ),
+      JSON.stringify(spent.problems),
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1994,6 +2168,28 @@ test("scoring resets each fixture, uses the contract judge, and totals its cost"
       Number((judgeCalls * 0.25).toFixed(2)),
     );
     assert.deepEqual(validateLedgerRow(scored.row), []);
+    // And it is re-derivable: each cell record carries what its own judge
+    // calls cost, `calibration.json` carries the replay's, and `--validate`
+    // adds them up instead of taking the row's word for the total.
+    assert.deepEqual(
+      revalidateRow({
+        contract,
+        row: scored.row,
+        repoRoot: root,
+        detailDir: plan.plan_dir,
+      }).problems,
+      [],
+    );
+    const inflated = structuredClone(scored.row);
+    inflated.scoring_usd += 1;
+    assert.ok(
+      revalidateRow({
+        contract,
+        row: inflated,
+        repoRoot: root,
+        detailDir: plan.plan_dir,
+      }).problems.some((problem) => problem.startsWith("row.scoring_usd is")),
+    );
     // The last cell left the fixture dirty, so every scoring pass resets it
     // before the novel judge reads the tree with Bash.
     const resets = git.calls.filter((call) => call.args[0] === "reset");
@@ -2112,11 +2308,8 @@ test("the ledger branch names one run, not one day", () => {
   // the runbook asks for — collided on a date-only branch at `git checkout -b`
   // or at the push, after the paid run and the ledger append were both done.
   // The detail directory basename carries date, key, kind and skill digest.
-  assert.match(
-    script,
-    /BRANCH="eval\/review-skill-\$\(basename "\$DETAIL_DIR"\)"/,
-  );
-  assert.doesNotMatch(script, /BRANCH="eval\/review-skill-\$\(date/);
+  assert.match(script, /branch="eval\/review-skill-\$\(basename "\$detail"\)"/);
+  assert.doesNotMatch(script, /branch="eval\/review-skill-\$\(date/);
 });
 
 test("the orchestrator snapshots the skill once and refuses a mid-run edit", () => {
@@ -2135,19 +2328,73 @@ test("the orchestrator snapshots the skill once and refuses a mid-run edit", () 
   assert.match(script, /rm -rf "\$SKILL_SNAPSHOT"/);
 });
 
-test("a failed run that cannot record its failure exits non-zero", () => {
+test("a failed run records its failure, publishes it, or exits non-zero", () => {
   const script = readFileSync(
     path.join(repoRoot, "scripts/review/run-eval.sh"),
     "utf8",
   );
-  // `abort` exits zero so launchd does not double-report a failure the ledger
-  // already carries. That trade only holds while the row was really appended:
-  // a run that leaves no trace is indistinguishable from one that never ran,
+  // A run that leaves no trace is indistinguishable from one that never ran,
   // and the freshness guard cannot tell those apart either.
   assert.match(
     script,
     /write_failed_row "\$1" \|\|\n {4}fail "the run failed and the failure row could not be appended: \$1"/,
   );
+  // The failed row goes into the checkout's ledger, so `abort` may not simply
+  // leave it there and exit zero: the next run refuses to start against a
+  // ledger with uncommitted changes, and nothing reaches a PR or the freshness
+  // workflow. Publish it, and exit zero only when a PR carries it.
+  assert.match(script, /publish_row INCOMPLETE failure\.md/);
+  assert.match(
+    script,
+    /if \[\[ \$PUBLISHED -eq 1 \]\]; then\n {4}exit 0\n {2}fi\n {2}fail "the run failed, the row was appended/,
+  );
+  // The success path publishes through the same function, so a failure row is
+  // committed exactly the way a scored one is.
+  assert.match(script, /publish_row "\$VERDICT" report\.md/);
+  assert.match(script, /PUBLISHED=1/);
+});
+
+test("the run deadline bounds the cell subprocesses and the judge pass", () => {
+  const script = readFileSync(
+    path.join(repoRoot, "scripts/review/run-eval.sh"),
+    "utf8",
+  );
+  // Checked only between cells, the deadline bounded nothing: a finder or a
+  // contestant that stalls never returns to the check, and the judge pass ran
+  // outside the budget entirely. Every one of the three is now started through
+  // the bounded runner, with the matrix keeping a quarter of the budget back
+  // for scoring.
+  assert.match(script, /MATRIX_DEADLINE=\$\(\(DEADLINE - DEADLINE \/ 4\)\)/);
+  assert.match(
+    script,
+    /run_bounded "\$finder_out" "\$\(remaining_seconds "\$MATRIX_DEADLINE"\)"/,
+  );
+  assert.match(
+    script,
+    /run_bounded "\$raw" "\$\(remaining_seconds "\$MATRIX_DEADLINE"\)"/,
+  );
+  assert.match(
+    script,
+    /run_bounded "\$SCORE_OUT" "\$\(remaining_seconds "\$DEADLINE"\)"/,
+  );
+  // The watchdog escalates: a child that ignores TERM is killed.
+  assert.match(script, /kill -TERM "\$pid"/);
+  assert.match(script, /kill -KILL "\$pid"/);
+  // A cell that hit the bound fails the cell; it is never cached as a review.
+  assert.match(script, /the finder hit the run deadline; not cached/);
+  assert.match(script, /claude hit the run deadline; not cached/);
+});
+
+test("the orchestrator refuses to run bytes the row would not record", () => {
+  const script = readFileSync(
+    path.join(repoRoot, "scripts/review/run-eval.sh"),
+    "utf8",
+  );
+  // `orchestrator_digest` is taken from the spec worktree, which is where the
+  // harness reads every other input. Running an edited copy against a clean
+  // spec would record the spec's bytes for a matrix this file actually shaped.
+  assert.match(script, /ORCHESTRATOR="\$SPEC\/scripts\/review\/run-eval\.sh"/);
+  assert.match(script, /cmp -s "\$\{BASH_SOURCE\[0\]\}" "\$ORCHESTRATOR"/);
 });
 
 test("the cell reader emits nothing when the plan carries a forged field", () => {

@@ -57,7 +57,7 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 
 ## Why Files Stay Flat
 
-`scripts/` has twelve path-pin classes. Move each pin with its file in the
+`scripts/` has thirteen path-pin classes. Move each pin with its file in the
 same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
 
 - **Autoreview runtime pins.** `agent-autoreview.sh` pins sibling runtime and
@@ -102,6 +102,14 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   required `ci` sentinel stays green. The enumeration, the `routing.test.mjs`
   equality contract, and when a module glob is the safer pin are in
   [ADR 0064](../docs/adr/0064-scripts-module-directories.md#sweep-checklist-for-a-move).
+- **Review-skill eval pins.** `review-eval-freshness.yml` is one of the 23
+  above and pins `scripts/review/**` in its `pull_request` paths, plus
+  `package.json` for the `review:eval*` aliases every step runs.
+  `.trunk/trunk.yaml` pins `scripts/review/prompts/**` in an `ignore` block:
+  those prompts are byte-frozen inputs whose `sha256` is in the contract, so a
+  formatter rewrite breaks comparability rather than the layout. `run-eval.sh`
+  resolves the harness and the prompts from a detached `origin/main` worktree,
+  so a move needs both literals live on `main` before the moving commit runs.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.

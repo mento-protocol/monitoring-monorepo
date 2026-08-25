@@ -130,25 +130,36 @@ cell writes its own resumable output directory, and a failed cell is never
 cached — a finder that exits non-zero fails its cell even when it wrote a
 partial report, because a truncated review cached is a permanent zero-recall
 score. A cached cell is reused only when its stored
-fingerprint — skill digest, kind, contract digest, the two CLI versions and the
-finder argv digest — matches the current run,
+fingerprint — skill digest, kind, contract digest, the two CLI versions, the
+finder argv digest and the orchestrator digest — matches the current run,
 and the run directory carries the kind and the skill digest in its name, so an
 aborted run followed by a skill edit re-runs instead of scoring the old skill
-under the new digest. The run stops at a six-hour deadline and reports a
-partial matrix rather than a table with quietly missing cells. A PR whose
+under the new digest. The six-hour deadline bounds the whole run: three quarters
+of it start cells and bound each finder and contestant process, the rest bounds
+the judge pass, and a run that reaches either bound reports a partial matrix
+rather than a table with quietly missing cells. A stalled process is killed
+rather than waited on, because a deadline checked only between cells is no
+deadline at all. A PR whose
 draw-2 cell never ran is scored on draw 1 alone: the defect's bit vector is as
 long as the draws its own PR completed, so a missing cell shrinks the
 denominator instead of recording misses that were never possible.
 
 To evaluate a candidate skill, run it against the installed one in one sitting.
-Run the installed skill first, then name that run's row as the candidate's
-baseline with `--against`:
+Run the installed skill first, **publish its row before starting the
+candidate**, then name that row as the candidate's baseline with `--against`:
 
 ```bash
-pnpm review:eval:run -- --kind full
+pnpm review:eval:run -- --kind full --pr    # publish the installed row first
+git -C . checkout main                      # the candidate run branches from here
 pnpm review:eval:run -- --kind full --skill-ref ~/work/review-candidate \
-  --against 2026-09-08
+  --against 2026-09-08 --pr
 ```
+
+Publish first, or both rows land in one working tree and only one of them
+reaches a PR: each run appends to the same ledger file, and the candidate's
+publish stages that whole file next to its own detail directory alone. The
+installed run's detail directory is then never committed, and there is no
+second ledger delta left for a PR of its own.
 
 `--against` takes a row file path or an `executed_at` prefix and reaches
 `--score`, `--validate` and `--report` alike, so all three read the same
@@ -160,6 +171,14 @@ includes an unknown amount of model drift.
 The run ends by printing the branch, commit and `gh pr create` commands for the
 ledger PR. Pass `--pr` to execute them instead. There is no auto-merge; a human
 reads the twenty-line report and approves.
+
+A run that fails publishes the same way. Its `status: failed` row is already in
+the checkout's ledger, and a run that leaves it there uncommitted wedges the
+schedule: the next run refuses to start against a ledger with uncommitted
+changes, and nothing reaches the freshness workflow. With `--pr` the failure row
+gets its own PR and the run exits zero; without it the run prints the publish
+commands and exits non-zero, so launchd records that a human still has to
+finish the job.
 
 ### Install the scheduler
 
@@ -198,6 +217,12 @@ on the next wake while cron drops it. `--kind auto` reads the ledger and picks
 | **PROMOTE**    | `c − b ≥ 6` and the change was intentional                                                                                                                                                                                    | re-anchor the baseline in a PR that says what changed and why             |
 | **INCOMPLETE** | the run failed, or a canary did not finish                                                                                                                                                                                    | fix the harness and re-run; the row stays as a trace                      |
 
+The three AMBER gates — failed judge calibration, a leak signal, and a matrix
+that did not complete — are read before the RED lines, not after them. Each says
+the numbers under it are untrusted or partial, and a run whose numbers are
+untrusted may not be escalated on them any more than it may pass on them: a
+subset that missed its P1 cells is not a P1 regression to open an issue about.
+
 A canary is a floor test, never a ranking: RED when `replay` matches fewer
 than nine of the twenty-two grid defects, or any run emits no parseable
 finding.
@@ -226,12 +251,17 @@ mismatched keys:
 
 ```text
 comparability_key = sha256(contract_digest ‖ request_prompt ‖ handoff_prompt ‖
-                           scorer_digest ‖ calibration_digest ‖ judge_model)
+                           scorer_digest ‖ calibration_digest ‖
+                           orchestrator_digest ‖ judge_model)
 ```
 
 `scorer_digest` covers every module that can move a recorded number or a
 recorded verdict — the scorer, the per-condition fold, the recompute and the
-verdict rules — not the extraction alone. An edit to any of them re-anchors the
+verdict rules — not the extraction alone. `orchestrator_digest` is `run-eval.sh`
+itself, which fixes the contestant's allowed tools, its turn limit, how the
+skill is staged into the fixture, how far the finder report is truncated and
+what environment a cell runs in: it shapes the transcript every number is
+derived from as directly as a prompt does. An edit to any of them re-anchors the
 series, which is the conservative direction: a refused comparison is visible,
 a silently paired one is not.
 
@@ -252,6 +282,7 @@ may read. Rows with different keys are different series and plot separately.
 | reviewed model    | isolated by the `control` condition; model id and CLI version recorded                        |
 | skill text        | `skill_digest` over `SKILL.md` and `references/**` — this is the treatment                    |
 | finder command    | `argv` pinned in the contract; `finder_argv_digest` records what a cell spawned               |
+| orchestrator      | `orchestrator_digest` over `run-eval.sh`: in the key and in every cell fingerprint            |
 | machine and shell | host, CLI versions, `--setting-sources ""`, clean worktree of `origin/main`                   |
 
 **Judge calibration runs before every scoring pass.** Forty frozen

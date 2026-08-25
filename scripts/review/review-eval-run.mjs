@@ -57,6 +57,12 @@ export const DEFAULT_CALIBRATION_PATH =
 const DEFAULT_CALIBRATION_FILE = fileURLToPath(
   new URL(`../../${DEFAULT_CALIBRATION_PATH}`, import.meta.url),
 );
+// The orchestrator that spends the quota, resolved from this module the way the
+// calibration set is: `--score` and `--plan` both read the spec worktree they
+// were pointed at, and the digest must name the script that worktree carries.
+export const ORCHESTRATOR_FILE = fileURLToPath(
+  new URL("./run-eval.sh", import.meta.url),
+);
 export const DEFAULT_RUNS_DIR = "docs/evals/review-skill-runs";
 export const DEFAULT_SKILL_DIR = "~/.claude/skills/review";
 export const PLAN_KINDS = ["full", "canary", "auto"];
@@ -134,14 +140,22 @@ export function fileDigest(file) {
 /**
  * The key every later comparison is refused across. It binds the frozen
  * contract, the two frozen run prompts, the whole scoring pipeline with its
- * judge prompts, the frozen calibration set, and the judge model. Change any
- * one of them and the score stops being paired.
+ * judge prompts, the frozen calibration set, the contestant orchestrator, and
+ * the judge model. Change any one of them and the score stops being paired.
+ *
+ * `run-eval.sh` is in the key because it is the execution pipeline the recorded
+ * transcript comes out of: it fixes the contestant's allowed tools, its turn
+ * limit, how the skill is staged into the fixture, how far the finder report is
+ * truncated, and the environment a cell runs in. Editing any of that changes
+ * what the number measures exactly as editing a prompt does, and without the
+ * digest two such runs would stay paired under one key.
  */
 export function comparabilityKey({
   contract,
   contractDigest,
   matcherDigest = scorerDigest(),
   calibrationDigest = fileDigest(DEFAULT_CALIBRATION_FILE),
+  orchestratorDigest = fileDigest(ORCHESTRATOR_FILE),
 }) {
   const parts = [
     "review-skill-eval/v1",
@@ -150,6 +164,7 @@ export function comparabilityKey({
     contract.prompts.handoff.sha256,
     matcherDigest,
     calibrationDigest,
+    orchestratorDigest,
     contract.judge.model,
   ];
   return sha256(parts.join("\n"));
@@ -197,6 +212,9 @@ export function collectInputs({
     skill_digest: skillDigest(skillDir),
     skill_ref: skillRef ? path.resolve(skillDir) : "installed",
     finder_argv_digest: finderArgvDigest(contract),
+    // The bytes of the script that ran the matrix. It is recorded beside the
+    // finder argv for the same reason: both decide what a cell executed.
+    orchestrator_digest: fileDigest(ORCHESTRATOR_FILE),
     claude_cli: cliVersion("claude", env),
     codex_cli: cliVersion("codex", env),
     host: env.REVIEW_EVAL_HOST ?? hostname(),
@@ -461,7 +479,9 @@ export function leakSignals({
  * upgrade would otherwise reuse cells produced by the previous binaries while
  * the new row stamps the current versions, which puts two runtimes in one row
  * under one provenance. `finder_argv_digest` is the command the pipeline
- * condition spawns, so it moves a recorded number the same way.
+ * condition spawns, and `orchestrator_digest` is the script that spawns it with
+ * its tools, turn limit and skill staging, so both move a recorded number the
+ * same way.
  */
 export function cellFingerprint({ plan }) {
   return {
@@ -471,6 +491,7 @@ export function cellFingerprint({ plan }) {
     claude_cli: plan?.inputs?.claude_cli ?? null,
     codex_cli: plan?.inputs?.codex_cli ?? null,
     finder_argv_digest: plan?.inputs?.finder_argv_digest ?? null,
+    orchestrator_digest: plan?.inputs?.orchestrator_digest ?? null,
   };
 }
 
@@ -685,9 +706,15 @@ async function scoreOneCell({
   cellResult,
   contract,
   repoRoot,
-  exec,
+  exec: baseExec,
   runGit = defaultRunGit,
 }) {
+  // What this cell's own judge calls cost. The run total is recorded on the row
+  // as `scoring_usd`, and without a per-cell trace it was the one number
+  // `--validate` had to believe. Metering here as well as at the run level
+  // makes it a sum of evidence on disk; both tallies see every call.
+  const cellCost = { usd: 0 };
+  const exec = meterExec(baseExec, cellCost);
   const fixture = fixtureForPr(contract, cell.pr);
   const truth = readJson(path.join(repoRoot, fixture.truth_file));
   const transcript = cellResult.output;
@@ -697,6 +724,20 @@ async function scoreOneCell({
   const model = contract.judge.model;
   const fixturePath = cellResult.fixture_path ?? "";
   resetFixture({ fixturePath, cellId: cell.cell_id, runGit });
+  // Snapshot the logins the fixture already carries while the tree is still the
+  // one `resetFixture` just restored. The exclusion list exists so a reviewer
+  // login that is genuine fixture content is not read as a leak, and the novel
+  // judge below runs with `Bash` inside this same checkout: computed after it,
+  // a login that fixture text prompt-injected the judge into writing into a
+  // tracked file would be excluded, and a transcript naming the reviewer would
+  // evade the hard leak signal.
+  const excludeLogins = [
+    ...loginsInFixtureTree({
+      fixturePath,
+      logins: reviewerLogins(truth),
+      runGit,
+    }),
+  ];
   const claims = await extractClaims({ transcript, exec, model });
   const matched = await matchClaims({
     claims,
@@ -718,13 +759,7 @@ async function scoreOneCell({
     transcript,
     truth,
     pr: cell.pr,
-    excludeLogins: [
-      ...loginsInFixtureTree({
-        fixturePath,
-        logins: reviewerLogins(truth),
-        runGit,
-      }),
-    ],
+    excludeLogins,
     forbiddenShas: forbiddenShasForFixture({ fixture, repoRoot }),
   });
   return {
@@ -742,6 +777,7 @@ async function scoreOneCell({
     leak,
     seconds: Number(cellResult.seconds ?? 0),
     usd: Number(cellResult.cost_usd ?? 0),
+    scoring_usd: cellCost.usd,
   };
 }
 
@@ -906,9 +942,10 @@ export async function scorePlan({
 }) {
   const scoringCost = { usd: 0 };
   const metered = meterExec(exec, scoringCost);
+  const calibrationCost = { usd: 0 };
   const calibration = await runCalibration({
     calibrationSet,
-    exec: metered,
+    exec: meterExec(metered, calibrationCost),
     model: contract.judge.model,
   });
   // The calibration replay is the only recorded number with no other trace on
@@ -923,6 +960,9 @@ export async function scorePlan({
           model: contract.judge.model,
           agreement: calibration.agreement,
           total: calibration.total,
+          // The replay's share of `scoring_usd`. With the per-cell shares it
+          // makes the row's scoring cost re-derivable from the detail.
+          scoring_usd: calibrationCost.usd,
           outcomes: calibration.outcomes ?? [],
         },
         null,

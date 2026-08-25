@@ -430,14 +430,13 @@ export async function classifyNovel({
   const list = (claims ?? []).filter(
     (claim) => String(claim).trim().length > 0,
   );
-  const counts = { real: 0, wrong: 0, vague: 0, known: 0, unknown: 0 };
+  const counts = { real: 0, wrong: 0, vague: 0, known: 0 };
   const summary = (verdicts) => ({
     claims: list.length,
     novelReal: counts.real,
     novelWrong: counts.wrong,
     novelVague: counts.vague,
     restatedKnown: counts.known,
-    unknownClass: counts.unknown,
     alreadyMatched: matchedIds.length,
     verdicts,
   });
@@ -497,10 +496,26 @@ export async function classifyNovel({
       { raw: JSON.stringify(parsed).slice(0, 2000) },
     );
   }
+  // A class outside the four the prompt promises is an unparsable reply, not a
+  // fifth bucket. Counted as `unknownClass` it was dropped by `foldCondition`:
+  // a judge that misspelled or invented a class recorded neither a real nor a
+  // wrong claim, so a parseable malformed reply understated `wrong_claims` —
+  // one of the two counters that can turn a row RED on its own — and no number
+  // anywhere said the verdict was missing.
+  const offContract = Object.entries(parsed.verdicts)
+    .map(([key, verdict]) => [key, isObject(verdict) ? verdict.class : verdict])
+    .filter(([, cls]) => !NOVEL_CLASSES.includes(cls));
+  if (offContract.length) {
+    throw new JudgeOutputError(
+      `novel judge returned ${offContract.length} verdict(s) outside ${NOVEL_CLASSES.join(", ")}: ` +
+        offContract
+          .map(([key, cls]) => `${key}=${JSON.stringify(cls)}`)
+          .join(", "),
+      { raw: JSON.stringify(parsed).slice(0, 2000) },
+    );
+  }
   for (const verdict of Object.values(parsed.verdicts)) {
-    const cls = isObject(verdict) ? verdict.class : undefined;
-    if (NOVEL_CLASSES.includes(cls)) counts[cls] += 1;
-    else counts.unknown += 1;
+    counts[verdict.class] += 1;
   }
   return summary(parsed.verdicts);
 }

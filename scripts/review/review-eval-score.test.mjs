@@ -358,12 +358,11 @@ test("classifyNovel counts the four verdict classes", async () => {
         2: { class: "wrong", why: "code does not do that" },
         3: { class: "vague", why: "style note" },
         4: { class: "known", why: "restates defect 101" },
-        5: { class: "maybe", why: "off-contract class" },
       },
     }),
   ]);
   const result = await classifyNovel({
-    claims: ["a", "b", "c", "d", "e"],
+    claims: ["a", "b", "c", "d"],
     matchedIds: [101],
     truthFindings,
     fixturePath: "/tmp/fx-1990",
@@ -373,8 +372,7 @@ test("classifyNovel counts the four verdict classes", async () => {
   assert.equal(result.novelWrong, 1);
   assert.equal(result.novelVague, 1);
   assert.equal(result.restatedKnown, 1);
-  assert.equal(result.unknownClass, 1);
-  assert.equal(result.claims, 5);
+  assert.equal(result.claims, 4);
   assert.equal(exec.calls[0].cwd, "/tmp/fx-1990");
   assert.match(exec.calls[0].prompt, /The repository is at \/tmp\/fx-1990\./);
   assert.match(
@@ -384,6 +382,38 @@ test("classifyNovel counts the four verdict classes", async () => {
   // A finding the author never acted on is scored nowhere, so it must not be
   // offered to the judge as already known.
   assert.doesNotMatch(exec.calls[0].prompt, /Unused import/);
+});
+
+test("classifyNovel refuses a class outside the contract", async () => {
+  // Bucketed as `unknownClass` this was dropped by the per-condition fold: the
+  // claim counted as neither real nor wrong, so a judge that misspelled
+  // `wrong` understated `wrong_claims` and could turn a RED run green with no
+  // number anywhere recording that a verdict was missing.
+  for (const off of ["maybe", "Wrong", "", null, "novel"]) {
+    const exec = stubExec([
+      JSON.stringify({
+        verdicts: {
+          1: { class: "real", why: "read the file" },
+          2: { class: off, why: "off-contract class" },
+        },
+      }),
+    ]);
+    await assert.rejects(
+      classifyNovel({
+        claims: ["a", "b"],
+        matchedIds: [101],
+        truthFindings,
+        fixturePath: "/tmp/fx-1990",
+        exec,
+      }),
+      (error) => {
+        assert.equal(error.name, "JudgeOutputError");
+        assert.match(error.message, /outside real, wrong, vague, known/);
+        return true;
+      },
+      `class ${JSON.stringify(off)} was scored instead of refused`,
+    );
+  }
 });
 
 test("classifyNovel short-circuits an empty claim list", async () => {
