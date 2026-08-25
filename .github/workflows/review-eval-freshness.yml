@@ -22,7 +22,11 @@ on:
     - cron: 23 9 * * 2
   pull_request:
     paths:
-      - docs/evals/review-skill*
+      # `**`, not `*`: a single star stops at a path separator, so
+      # `review-skill*` alone matches `review-skill.md` but nothing inside
+      # `docs/evals/review-skill-truth/` or the other frozen input
+      # directories, and a PR touching only those would skip both checks.
+      - docs/evals/review-skill**
       - scripts/review/**
   workflow_dispatch:
 

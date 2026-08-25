@@ -182,8 +182,23 @@ json_field() {
   ' "$1" "$2"
 }
 
-RUN_DIR="$(json_field "$PLAN_OUT" plan_dir)"
+# The plan directory is also the resume cache, so it must outlive this process.
+# Planned against the spec worktree it would land inside a temporary directory
+# the EXIT trap removes, and an interrupted run would re-spend the whole matrix
+# instead of reusing its completed cells. Plan again into the persistent detail
+# directory under the real checkout, with the kind the first plan resolved.
+# Planning reads the contract and the ledger and spends nothing.
+DETAIL_DIR="$(json_field "$PLAN_OUT" detail_dir)"
 KIND="$(json_field "$PLAN_OUT" kind)"
+RUN_DIR="$REPO/$DETAIL_DIR"
+PLAN_ARGS=(--root "$SPEC" --ledger "$LEDGER" --plan --kind "$KIND" --json
+  --out "$RUN_DIR")
+if [[ -n $SKILL_REF ]]; then
+  PLAN_ARGS+=(--skill-ref "$SKILL_REF")
+fi
+node "$CLI" "${PLAN_ARGS[@]}" >"$PLAN_OUT" ||
+  fail "planning into $RUN_DIR failed"
+RUN_DIR="$(json_field "$PLAN_OUT" plan_dir)"
 PLAN_JSON="$RUN_DIR/plan.json"
 # shellcheck disable=SC2016  # the single-quoted block is node source
 CELL_COUNT="$(node -e '
@@ -596,7 +611,11 @@ node "$CLI" --root "$SPEC" --ledger "$LEDGER" --score "$RUN_DIR" --json ||
   abort "scoring failed"
 
 log "validating the row against its own detail"
-node "$CLI" --root "$SPEC" --ledger "$LEDGER" --validate "$RUN_DIR/row.json" --append --json ||
+# --detail-dir names the run directory explicitly: the contract comes from the
+# spec worktree while the scored cells live under the real checkout, so the
+# row's repo-relative detail_dir does not resolve against --root here.
+node "$CLI" --root "$SPEC" --ledger "$LEDGER" --validate "$RUN_DIR/row.json" \
+  --detail-dir "$RUN_DIR" --append --json ||
   abort "the scored row did not revalidate; nothing was appended"
 
 REPORT="$RUN_DIR/report.md"

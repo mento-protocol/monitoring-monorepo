@@ -60,6 +60,18 @@ const PLACEHOLDER_PATTERN = /\{\{([A-Z_]+)\}\}/g;
 
 const promptDir = fileURLToPath(new URL("./prompts", import.meta.url));
 const scriptPath = fileURLToPath(import.meta.url);
+// Every module that can change a recorded number or a recorded verdict. The
+// extraction and the matcher live here, the per-condition fold and the leak
+// signal live in `review-eval-run.mjs`, the recompute lives in
+// `review-eval-result-shape.mjs`, and the verdict rules live in
+// `review-eval-report.mjs`. Editing any of them changes what a row means, so
+// all of them are hashed into `matcher_digest` and comparison is refused
+// across the change.
+export const SCORING_MODULES = [
+  "review-eval-run.mjs",
+  "review-eval-result-shape.mjs",
+  "review-eval-report.mjs",
+].map((name) => fileURLToPath(new URL(`./${name}`, import.meta.url)));
 const promptCache = new Map();
 
 export class JudgeOutputError extends Error {
@@ -89,11 +101,21 @@ export function renderPrompt(template, values) {
   return rendered;
 }
 
-// Digest over the scorer and its prompts. It is the `matcher_digest` half of
-// the ledger's comparability key: a scoring change must break comparison.
-export function scorerDigest({ script = scriptPath, dir = promptDir } = {}) {
+// Digest over the whole scoring pipeline and its prompts. It is the
+// `matcher_digest` half of the ledger's comparability key: a change anywhere in
+// the code that turns a transcript into recorded bits, counters, or a verdict
+// must break comparison rather than silently pair two different scorers.
+export function scorerDigest({
+  script = scriptPath,
+  dir = promptDir,
+  modules = SCORING_MODULES,
+} = {}) {
   const hash = createHash("sha256");
   hash.update(readFileSync(script));
+  for (const module of modules) {
+    hash.update(path.basename(module));
+    hash.update(readFileSync(module));
+  }
   for (const file of readdirSync(dir).sort()) {
     if (!file.endsWith(".md")) continue;
     hash.update(file);

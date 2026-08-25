@@ -477,8 +477,14 @@ export function renderReport({
     lines.push("No paired baseline comparison for this row.", "");
   }
 
+  // The cells are one half of what a run costs; the judges are the other. A
+  // total that counts only the cells understates the run by a judge pass.
+  const scoringUsd =
+    typeof row.scoring_usd === "number" && Number.isFinite(row.scoring_usd)
+      ? row.scoring_usd
+      : 0;
   lines.push(
-    `Judge calibration ${row.judge_calibration.agreement}/${row.judge_calibration.total}. Cost $${totals.usd.toFixed(2)} over ${Math.round(totals.seconds)} s.`,
+    `Judge calibration ${row.judge_calibration.agreement}/${row.judge_calibration.total}. Cost $${(totals.usd + scoringUsd).toFixed(2)} over ${Math.round(totals.seconds)} s — $${totals.usd.toFixed(2)} cells, $${scoringUsd.toFixed(2)} scoring.`,
     `Skill \`${row.inputs.skill_ref}\` (\`${row.inputs.skill_digest.slice(0, 8)}\`), claude ${row.inputs.claude_cli}, codex ${row.inputs.codex_cli}, host ${row.inputs.host}.`,
     `Detail: \`${row.detail_dir}\`. Contract \`${row.contract_digest.slice(0, 8)}\`.`,
   );
@@ -594,7 +600,10 @@ export function scheduleIssuePayload({
     "### Verification commands",
     "",
     "```bash",
-    "pnpm review:eval -- --check-fixtures --check-ledger",
+    // One mode per invocation: the CLI refuses two, so a combined line would
+    // fail the moment an operator pasted this block.
+    "pnpm review:eval -- --check-fixtures",
+    "pnpm review:eval -- --check-ledger",
     "pnpm review:eval:run",
     "pnpm review:eval -- --report",
     "```",

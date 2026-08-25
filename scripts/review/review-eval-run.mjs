@@ -12,12 +12,14 @@ import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
   writeFileSync,
 } from "node:fs";
-import { hostname } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   defaultRunGit,
@@ -49,6 +51,12 @@ export const PLAN_SCHEMA_VERSION = 1;
 export const DEFAULT_LEDGER_PATH = "docs/evals/review-skill-ledger.jsonl";
 export const DEFAULT_CALIBRATION_PATH =
   "docs/evals/review-skill-judge-calibration.json";
+// The committed calibration set, resolved from this module rather than from a
+// caller's root, so `comparabilityKey` binds it even when no root is at hand.
+// It is content-addressed, so a copy of the same bytes gives the same key.
+const DEFAULT_CALIBRATION_FILE = fileURLToPath(
+  new URL(`../../${DEFAULT_CALIBRATION_PATH}`, import.meta.url),
+);
 export const DEFAULT_RUNS_DIR = "docs/evals/review-skill-runs";
 export const DEFAULT_SKILL_DIR = "~/.claude/skills/review";
 export const DEFAULT_CODEX_REVIEW_SH = "~/.claude/bin/codex-review.sh";
@@ -125,13 +133,15 @@ export function fileDigest(file) {
 
 /**
  * The key every later comparison is refused across. It binds the frozen
- * contract, the two frozen run prompts, the scorer with its judge prompts, and
- * the judge model. Change any one of them and the score stops being paired.
+ * contract, the two frozen run prompts, the whole scoring pipeline with its
+ * judge prompts, the frozen calibration set, and the judge model. Change any
+ * one of them and the score stops being paired.
  */
 export function comparabilityKey({
   contract,
   contractDigest,
   matcherDigest = scorerDigest(),
+  calibrationDigest = fileDigest(DEFAULT_CALIBRATION_FILE),
 }) {
   const parts = [
     "review-skill-eval/v1",
@@ -139,6 +149,7 @@ export function comparabilityKey({
     contract.prompts.request.sha256,
     contract.prompts.handoff.sha256,
     matcherDigest,
+    calibrationDigest,
     contract.judge.model,
   ];
   return sha256(parts.join("\n"));
@@ -469,6 +480,53 @@ function readCellResult(planDir, cell) {
     : null;
 }
 
+// The GitHub credentials a judge must never inherit. `run-eval.sh` scrubs the
+// same four for a contestant cell; the scoring pass runs the novel judge with
+// `Bash` inside the fixture, so it needs the same treatment.
+export const SCRUBBED_ENV_VARS = [
+  "GH_TOKEN",
+  "GITHUB_TOKEN",
+  "GITHUB_PERSONAL_ACCESS_TOKEN",
+  "GH_ENTERPRISE_TOKEN",
+];
+
+let scrubbedGhConfigDir = null;
+
+/** An empty `gh` config directory, created once per process. */
+function emptyGhConfigDir() {
+  if (!scrubbedGhConfigDir) {
+    scrubbedGhConfigDir = mkdtempSync(path.join(tmpdir(), "review-eval-gh-"));
+  }
+  return scrubbedGhConfigDir;
+}
+
+/**
+ * The environment a scoring subprocess runs under. It mirrors the per-cell
+ * `CELL_ENV` in `run-eval.sh`: no GitHub token, an empty `gh` config
+ * directory, and a git with no credential helper, no prompt, no askpass and
+ * no protocol but `file`. The model API stays reachable, so this is defense in
+ * depth against prompt-injected fixture content, not containment.
+ */
+export function scrubbedEnv({
+  env = process.env,
+  ghConfigDir = emptyGhConfigDir(),
+} = {}) {
+  const scrubbed = { ...env };
+  for (const name of SCRUBBED_ENV_VARS) delete scrubbed[name];
+  return {
+    ...scrubbed,
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_SYSTEM: "/dev/null",
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "credential.helper",
+    GIT_CONFIG_VALUE_0: "",
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_ASKPASS: "/bin/false",
+    GIT_ALLOW_PROTOCOL: "file",
+    GH_CONFIG_DIR: ghConfigDir,
+  };
+}
+
 /** The default model call for `--score`: one non-interactive Claude session. */
 export function claudeExec({
   prompt,
@@ -477,6 +535,7 @@ export function claudeExec({
   cwd = process.cwd(),
   allowedTools = CLAUDE_TOOLS,
   maxTurns = CLAUDE_MAX_TURNS,
+  env = scrubbedEnv(),
 }) {
   const args = [
     "-p",
@@ -498,6 +557,7 @@ export function claudeExec({
   ];
   const result = spawnSync("claude", args, {
     cwd,
+    env,
     encoding: "utf8",
     timeout: EXEC_TIMEOUT_MS,
     maxBuffer: 64 * 1024 * 1024,
@@ -508,6 +568,31 @@ export function claudeExec({
     );
   }
   return result.stdout;
+}
+
+/**
+ * Return one fixture to its pinned head before a judge looks at it.
+ *
+ * The cells ran with `Write`, `Edit` and `Bash`, and the novel judge itself
+ * runs with `Bash` inside the same checkout, so without this the judge would
+ * verify a claim against the previous model's edits instead of against the
+ * PR head. A fixture that cannot be reset is a scoring failure, not a number:
+ * the cells stay cached, so the run resumes and re-scores.
+ */
+export function resetFixture({ fixturePath, cellId, runGit = defaultRunGit }) {
+  if (!fixturePath || !existsSync(fixturePath)) return false;
+  for (const args of [
+    ["reset", "--hard", "--quiet"],
+    ["clean", "-xdffq"],
+  ]) {
+    const result = runGit({ args, cwd: fixturePath });
+    if (result.status !== 0) {
+      throw new Error(
+        `fixture ${fixturePath} could not be reset before scoring ${cellId}: git ${args[0]} exited ${result.status}`,
+      );
+    }
+  }
+  return true;
 }
 
 async function scoreOneCell({
@@ -521,20 +606,28 @@ async function scoreOneCell({
   const fixture = fixtureForPr(contract, cell.pr);
   const truth = readJson(path.join(repoRoot, fixture.truth_file));
   const transcript = cellResult.output;
-  const claims = await extractClaims({ transcript, exec });
+  // The judge model is the one the comparability key records. Reading a
+  // default here would let a judge retirement move the key while scoring kept
+  // calling the retired model.
+  const model = contract.judge.model;
+  const fixturePath = cellResult.fixture_path ?? "";
+  resetFixture({ fixturePath, cellId: cell.cell_id, runGit });
+  const claims = await extractClaims({ transcript, exec, model });
   const matched = await matchClaims({
     claims,
     truthFindings: truth.findings,
     scorableIds: fixture.scorable_ids,
     transcript,
     exec,
+    model,
   });
   const novel = await classifyNovel({
     claims,
     matchedIds: matched.matchedIds,
     truthFindings: truth.findings,
-    fixturePath: cellResult.fixture_path ?? "",
+    fixturePath,
     exec,
+    model,
   });
   const leak = leakSignals({
     transcript,
@@ -542,7 +635,7 @@ async function scoreOneCell({
     pr: cell.pr,
     excludeLogins: [
       ...loginsInFixtureTree({
-        fixturePath: cellResult.fixture_path ?? "",
+        fixturePath,
         logins: reviewerLogins(truth),
         runGit,
       }),
@@ -599,10 +692,23 @@ function foldCondition({ contract, cells, condition, scored }) {
     draws,
   });
   const mine = own.map((cell) => scored.get(cell.cell_id)).filter(Boolean);
+  // "The condition found nothing on this PR" is a statement about the PR, not
+  // about one draw. A PR counts only when every draw that completed for it
+  // emitted no parseable claim; one empty draw beside a productive one is
+  // sampling variance, and counting it would red a run that found defects.
+  const claimsByPr = new Map();
+  for (const cell of own) {
+    const record = scored.get(cell.cell_id);
+    if (!record) continue;
+    claimsByPr.set(
+      cell.pr,
+      (claimsByPr.get(cell.pr) ?? 0) + (record.claims ?? []).length,
+    );
+  }
   const zeroFindingPrs = new Set(
-    own
-      .filter((cell) => (scored.get(cell.cell_id)?.claims ?? []).length === 0)
-      .map((cell) => cell.pr),
+    [...claimsByPr.entries()]
+      .filter(([, claims]) => claims === 0)
+      .map(([pr]) => pr),
   );
   const sample = own[0];
   return {
@@ -664,6 +770,34 @@ function buildVsBaseline({ row, baselineRow }) {
   return vs;
 }
 
+/** The dollars one Claude CLI envelope reports, or 0 when it carries none. */
+function envelopeCost(raw) {
+  const text = typeof raw === "string" ? raw : "";
+  if (!text.trim().startsWith("{")) return 0;
+  try {
+    const usd = JSON.parse(text.trim())?.total_cost_usd;
+    return typeof usd === "number" && Number.isFinite(usd) && usd > 0 ? usd : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Wrap an `exec` so every judge call adds its envelope cost to `tally`.
+ *
+ * A condition's `usd` is what the contestant cell spent. Extraction, matching,
+ * novelty judging and the forty calibration replays are spent by the scorer,
+ * and a report that omits them understates the run by the price of a judge
+ * pass.
+ */
+export function meterExec(exec, tally) {
+  return async (request) => {
+    const raw = await exec(request);
+    tally.usd += envelopeCost(raw);
+    return raw;
+  };
+}
+
 /**
  * Score every collected cell and assemble one ledger row.
  *
@@ -685,7 +819,13 @@ export async function scorePlan({
   now = new Date(),
   write = true,
 }) {
-  const calibration = await runCalibration({ calibrationSet, exec });
+  const scoringCost = { usd: 0 };
+  const metered = meterExec(exec, scoringCost);
+  const calibration = await runCalibration({
+    calibrationSet,
+    exec: metered,
+    model: contract.judge.model,
+  });
   const scored = new Map();
   const missing = [];
   const leaked = [];
@@ -700,7 +840,7 @@ export async function scorePlan({
       cellResult,
       contract,
       repoRoot,
-      exec,
+      exec: metered,
       runGit,
     });
     scored.set(cell.cell_id, record);
@@ -753,6 +893,11 @@ export async function scorePlan({
       agreement: calibration.agreement,
       total: calibration.total,
     },
+    // What the scorer itself spent: claim extraction, the match judge, the
+    // novel judge, and the forty calibration replays. It is recorded beside
+    // the per-condition dollars, never folded into them: a condition's `usd`
+    // must stay the cost of the contestant cell it measures.
+    scoring_usd: Number(scoringCost.usd.toFixed(2)),
     vs_baseline: null,
     detail_dir: plan.detail_dir,
     notes: notes.join(" | "),

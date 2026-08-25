@@ -22,6 +22,7 @@ import {
   LEDGER_STATUSES,
   LEDGER_VERDICTS,
   readLedger,
+  ROW_OPTIONAL_KEYS,
   ROW_REQUIRED_KEYS,
   validateLedgerRow,
 } from "./review-eval-ledger.mjs";
@@ -127,7 +128,10 @@ function jsonl(...rows) {
 
 test("the structural validator carries the same fields as the committed schema", () => {
   assert.deepEqual(schema.required, ROW_REQUIRED_KEYS);
-  assert.deepEqual(Object.keys(schema.properties), ROW_REQUIRED_KEYS);
+  assert.deepEqual(Object.keys(schema.properties), [
+    ...ROW_REQUIRED_KEYS,
+    ...ROW_OPTIONAL_KEYS,
+  ]);
   assert.deepEqual(schema.properties.kind.enum, LEDGER_KINDS);
   assert.deepEqual(schema.properties.status.enum, LEDGER_STATUSES);
   assert.deepEqual(schema.properties.verdict.enum, LEDGER_VERDICTS);

@@ -103,19 +103,30 @@ export function failedRow({
   };
 }
 
-/** The newest earlier full, complete row this row may be paired against. */
+/**
+ * The baseline of record this row is paired against.
+ *
+ * It is the anchor, not the previous run: the first full, complete row on this
+ * comparability key, so a slow slide that never trips the per-run flip
+ * threshold still shows against the score the baseline PR established. The
+ * anchor moves only where the runbook says it may — a reviewed PROMOTE row —
+ * and the newest such row then becomes the anchor for everything after it.
+ */
 export function resolveBaseline({ rows, row }) {
-  const eligible = (rows ?? []).filter(
-    (candidate) =>
-      candidate.kind === "full" &&
-      candidate.status === "complete" &&
-      candidate.comparability_key === row.comparability_key &&
-      candidate.executed_at < row.executed_at,
-  );
+  const eligible = (rows ?? [])
+    .filter(
+      (candidate) =>
+        candidate.kind === "full" &&
+        candidate.status === "complete" &&
+        candidate.comparability_key === row.comparability_key &&
+        candidate.executed_at < row.executed_at,
+    )
+    .sort((left, right) => (left.executed_at < right.executed_at ? -1 : 1));
   if (eligible.length === 0) return null;
-  return eligible.reduce((newest, candidate) =>
-    candidate.executed_at > newest.executed_at ? candidate : newest,
+  const reAnchored = eligible.findLast(
+    (candidate) => candidate.verdict === "PROMOTE",
   );
+  return reAnchored ?? eligible[0];
 }
 
 /** Read one row from a file path, or from the ledger by executed_at prefix. */
@@ -147,6 +158,10 @@ function recomputeFromDetail({ dir, condition, ids, prForId }) {
   }
   if (files.length === 0) return null;
   const byDraw = new Map();
+  // Two counters that can turn a row RED are not derivable from the bits, so
+  // they are recomputed from the same per-cell records the bits come from.
+  let wrongClaims = 0;
+  const claimsByPr = new Map();
   for (const file of files) {
     const record = readJson(path.join(dir, file));
     const draw = Number(record.draw);
@@ -154,7 +169,15 @@ function recomputeFromDetail({ dir, condition, ids, prForId }) {
     for (const id of record.matched_ids ?? []) entry.matched.add(String(id));
     entry.prs.add(String(record.pr));
     byDraw.set(draw, entry);
+    wrongClaims += Number(record.novel?.novelWrong ?? 0);
+    claimsByPr.set(
+      String(record.pr),
+      (claimsByPr.get(String(record.pr)) ?? 0) + (record.claims ?? []).length,
+    );
   }
+  const zeroFindingPrs = [...claimsByPr.values()].filter(
+    (claims) => claims === 0,
+  ).length;
   const draws = [...byDraw.keys()].sort((a, b) => a - b);
   const bits = new Map();
   // A draw scores only the PRs that completed it, exactly as `foldCondition`
@@ -170,7 +193,7 @@ function recomputeFromDetail({ dir, condition, ids, prForId }) {
         .map((draw) => (byDraw.get(draw).matched.has(id) ? 1 : 0)),
     );
   }
-  return bits;
+  return { bits, wrongClaims, zeroFindingPrs };
 }
 
 /**
@@ -249,12 +272,25 @@ export function revalidateRow({
     if (!recomputed) continue;
     for (const id of ids) {
       const stated = condition.per_defect[id].join("");
-      const found = (recomputed.get(id) ?? []).join("");
+      const found = (recomputed.bits.get(id) ?? []).join("");
       if (found !== stated) {
         problems.push(
           `${label}.per_defect.${id} is ${stated}; the run detail gives ${found || "no draw"}`,
         );
       }
+    }
+    // Both counters can turn a row RED on their own, so neither may pass
+    // `--validate` on the row's own say-so.
+    if (condition.wrong_claims !== recomputed.wrongClaims) {
+      problems.push(
+        `${label}.wrong_claims is ${condition.wrong_claims}; the run detail gives ${recomputed.wrongClaims}`,
+      );
+    }
+    const statedZero = condition.zero_finding_prs ?? 0;
+    if (statedZero !== recomputed.zeroFindingPrs) {
+      problems.push(
+        `${label}.zero_finding_prs is ${statedZero}; the run detail gives ${recomputed.zeroFindingPrs}`,
+      );
     }
   }
   const baseline =

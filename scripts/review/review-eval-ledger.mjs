@@ -42,7 +42,7 @@ export const ROW_REQUIRED_KEYS = [
   "detail_dir",
   "notes",
 ];
-export const ROW_OPTIONAL_KEYS = [];
+export const ROW_OPTIONAL_KEYS = ["scoring_usd"];
 
 export const INPUTS_REQUIRED_KEYS = [
   "skill_digest",
@@ -288,6 +288,11 @@ export function validateLedgerRow(row, label = "row") {
   checkNonEmptyString(row.detail_dir, `${label}.detail_dir`, problems);
   if (typeof row.notes !== "string") {
     problems.push(`${label}.notes must be a string`);
+  }
+  // What the scorer spent on judges. Absent on a failed run, which never
+  // reached a judge, and on any row written before the field existed.
+  if (Object.hasOwn(row, "scoring_usd")) {
+    checkNumber(row.scoring_usd, `${label}.scoring_usd`, problems);
   }
 
   if (

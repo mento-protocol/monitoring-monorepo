@@ -78,7 +78,13 @@ Cut it last.
 Per condition the run records recall, P1 recall, novel-real count,
 wrong-claims count, dollars, seconds, and a per-defect bit vector for every
 draw. The bit vector is the load-bearing field: every later comparison runs on
-committed booleans, so no model is ever re-invoked to compare two months.
+committed booleans, so no model is ever re-invoked to compare two months. A
+condition's dollars are its contestant cells alone; what the judges cost is
+recorded once per row as `scoring_usd`, and the report prints both.
+
+A condition counts a PR as zero-finding only when every draw that completed
+for that PR emitted no parseable claim. One empty draw beside a productive one
+is sampling variance, not a condition that found nothing.
 
 ## Run it
 
@@ -134,11 +140,24 @@ reads the twenty-line report and approves.
 
 ### Install the scheduler
 
+The plist is a template. A plist has no variable substitution, so the install
+step rewrites the two literal paths it carries: the checkout inside
+`ProgramArguments`, and the log file in `StandardOutPath` and
+`StandardErrorPath`. Run this from the root of your checkout.
+
 ```bash
-cp scripts/review/launchd/org.mento.review-eval.plist ~/Library/LaunchAgents/
+sed -e "s|/Users/chapati/code/mento/monitoring-monorepo|$PWD|g" \
+    -e "s|/Users/chapati|$HOME|g" \
+    scripts/review/launchd/org.mento.review-eval.plist \
+    > ~/Library/LaunchAgents/org.mento.review-eval.plist
+grep -q "$PWD/scripts/review/run-eval.sh" ~/Library/LaunchAgents/org.mento.review-eval.plist
 launchctl bootstrap gui/"$(id -u)" ~/Library/LaunchAgents/org.mento.review-eval.plist
 launchctl kickstart -p gui/"$(id -u)"/org.mento.review-eval   # optional smoke test
 ```
+
+The `grep` is the check that the substitution actually landed: launchd reports
+a missing program only in its log, and a template that silently kept someone
+else's home directory would look installed while never running.
 
 It fires on the 8th at 10:20 and logs to
 `~/Library/Logs/mento-review-eval.log`. launchd, not cron: a laptop is asleep
@@ -184,26 +203,33 @@ mismatched keys:
 
 ```text
 comparability_key = sha256(contract_digest ‖ request_prompt ‖ handoff_prompt ‖
-                           scorer_digest ‖ judge_model)
+                           scorer_digest ‖ calibration_digest ‖ judge_model)
 ```
+
+`scorer_digest` covers every module that can move a recorded number or a
+recorded verdict — the scorer, the per-condition fold, the recompute and the
+verdict rules — not the extraction alone. An edit to any of them re-anchors the
+series, which is the conservative direction: a refused comparison is visible,
+a silently paired one is not.
 
 `--report` refuses to compute McNemar across rows with different
 `comparability_key` unless the row is a bridge run, and `--score --against`
 stores `vs_baseline.mcnemar: null` for such a pair rather than numbers nobody
 may read. Rows with different keys are different series and plot separately.
 
-| drift vector           | control                                                                     |
-| ---------------------- | --------------------------------------------------------------------------- |
-| fixture content        | eval tags plus a tree-hash check in `build-fixture.sh`                      |
-| truth content          | committed verbatim, per-file `sha256`, never re-derived from the API        |
-| scorable set           | explicit frozen id list in the contract                                     |
-| run prompts            | frozen files with `sha256` in the contract                                  |
-| extraction and matcher | `scorerDigest()` over `review-eval-score.mjs` and every judge prompt        |
-| judge model            | model id and CLI version in the row, plus 40 calibration pairs every run    |
-| reviewed model         | isolated by the `control` condition; model id and CLI version recorded      |
-| skill text             | `skill_digest` over `SKILL.md` and `references/**` — this is the treatment  |
-| `codex-review.sh`      | `codex_review_sh_digest`                                                    |
-| machine and shell      | host, CLI versions, `--setting-sources ""`, clean worktree of `origin/main` |
+| drift vector      | control                                                                                       |
+| ----------------- | --------------------------------------------------------------------------------------------- |
+| fixture content   | eval tags plus a tree-hash check in `build-fixture.sh`                                        |
+| truth content     | committed verbatim, per-file `sha256`, never re-derived from the API                          |
+| scorable set      | explicit frozen id list in the contract                                                       |
+| run prompts       | frozen files with `sha256` in the contract                                                    |
+| scoring pipeline  | `scorerDigest()` over the scorer, run, result-shape and report modules and every judge prompt |
+| judge model       | model id and CLI version in the row, plus 40 calibration pairs every run                      |
+| calibration set   | its `sha256` is bound into `comparability_key`                                                |
+| reviewed model    | isolated by the `control` condition; model id and CLI version recorded                        |
+| skill text        | `skill_digest` over `SKILL.md` and `references/**` — this is the treatment                    |
+| `codex-review.sh` | `codex_review_sh_digest`                                                                      |
+| machine and shell | host, CLI versions, `--setting-sources ""`, clean worktree of `origin/main`                   |
 
 **Judge calibration runs before every scoring pass.** Forty frozen
 `(claim, defect, verdict)` pairs replay through the current judge. Agreement
@@ -226,14 +252,21 @@ The baseline is the first `kind: "full"`, `status: "complete"` row on the
 current `comparability_key`. Until one exists, every run reports without a
 paired comparison and only the absolute floors apply.
 
+Every later run pairs against that anchor, never against the run before it: a
+five-point slide repeated four times never trips the per-run flip threshold,
+but it does show against the anchor. The anchor moves only for a `PROMOTE`
+row, which is where the runbook already requires a reviewed PR; from then on
+that promoted row is the baseline of record.
+
 1. Merge the harness. The contract must be on `main` before anything is scored
    against it, so the spec worktree can find it.
 2. Push and protect the eval tags:
    `git push origin 'refs/tags/eval/review-skill/v1/*'`, then add a repository
-   ruleset denying deletion and update on `eval/**` tags. Until then
-   `--check-fixtures` without `--offline` reports every tag as missing, and
+   ruleset denying deletion and update on `eval/**` tags. `--check-fixtures`
+   resolves every tag against the checkout it runs on, in `--offline` mode too,
+   so a checkout without the tags reports every one of them as missing and
    materialization falls back to `refs/pull/<n>/head` and records
-   `tag_pinned: false`.
+   `tag_pinned: false`. CI fetches tags for exactly this reason.
 3. Run `pnpm review:eval:run -- --kind full` from a clean checkout. Budget
    about $88 and two hours.
 4. Open the ledger PR. Its body is the generated report. State in the PR

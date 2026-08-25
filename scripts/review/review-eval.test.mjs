@@ -38,6 +38,8 @@ import {
   planStalenessIssueSync,
   resolveKind,
   scorePlan,
+  SCRUBBED_ENV_VARS,
+  scrubbedEnv,
 } from "./review-eval-run.mjs";
 import {
   failedRow,
@@ -379,6 +381,16 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
       matcherDigest: "1".repeat(64),
     }),
   );
+  // The frozen calibration set decides what `judge_calibration` means, so an
+  // edit to it starts a new series instead of being compared across.
+  assert.notEqual(
+    base,
+    comparabilityKey({
+      contract,
+      contractDigest,
+      calibrationDigest: "2".repeat(64),
+    }),
+  );
 });
 
 test("resolveKind picks full only when the last full run is past cadence", () => {
@@ -656,6 +668,44 @@ test("--validate refuses a bad row and appends a good one", () => {
   }
 });
 
+test("--validate --detail-dir recomputes from a run outside --root", () => {
+  const root = makeRoot();
+  const detail = mkdtempSync(path.join(tmpdir(), "review-eval-detail-"));
+  try {
+    const row = makeRow({ matchedIds: scorableIdsFor([1990]) });
+    const rowPath = path.join(root, "row.json");
+    writeFileSync(rowPath, JSON.stringify(row, null, 2));
+    // The orchestrator reads the contract from a spec worktree while the
+    // scored cells live in the real checkout, so the row's repo-relative
+    // detail_dir does not resolve against --root.
+    writeFileSync(
+      path.join(detail, "result-1990-pipeline-1.json"),
+      JSON.stringify({
+        pr: 1990,
+        condition: "pipeline",
+        draw: 1,
+        matched_ids: [],
+        claims: ["one"],
+        novel: { novelWrong: 0 },
+      }),
+    );
+    const result = cli(
+      ["--validate", rowPath, "--detail-dir", detail, "--json"],
+      { root },
+    );
+    assert.equal(result.status, 1);
+    const parsed = JSON.parse(result.stdout);
+    assert.equal(parsed.detail_dir, detail);
+    assert.ok(
+      parsed.problems.some((problem) => /the run detail gives/.test(problem)),
+      JSON.stringify(parsed.problems),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(detail, { recursive: true, force: true });
+  }
+});
+
 test("--validate reports a malformed row as problems, not a stack trace", () => {
   const root = makeRoot();
   try {
@@ -784,6 +834,32 @@ test("resolveBaseline ignores incomparable, incomplete, and later rows", () => {
   assert.equal(
     resolveBaseline({ rows: [...rows, usable], row }).executed_at,
     usable.executed_at,
+  );
+});
+
+test("resolveBaseline anchors on the first full row until a PROMOTE re-anchors", () => {
+  const anchor = makeRow({ executedAt: "2026-09-08T10:00:00Z" });
+  const later = makeRow({ executedAt: "2026-10-08T10:00:00Z" });
+  const row = makeRow({ executedAt: "2026-12-08T10:00:00Z" });
+  // Pairing against the previous run would hide a slide that never trips the
+  // per-run flip threshold, so the anchor is the baseline of record.
+  assert.equal(
+    resolveBaseline({ rows: [anchor, later], row }).executed_at,
+    anchor.executed_at,
+  );
+  // The runbook moves the anchor in exactly one place: a reviewed PROMOTE row.
+  const promoted = makeRow({
+    executedAt: "2026-11-08T10:00:00Z",
+    verdict: "PROMOTE",
+  });
+  const older = makeRow({
+    executedAt: "2026-10-20T10:00:00Z",
+    verdict: "PROMOTE",
+  });
+  assert.equal(
+    resolveBaseline({ rows: [anchor, older, later, promoted], row })
+      .executed_at,
+    promoted.executed_at,
   );
 });
 
@@ -1058,6 +1134,23 @@ function stubExec({ matchAll = true } = {}) {
   };
 }
 
+/**
+ * A git stand-in for the scoring path. On an operator machine the fixture a
+ * cell names is a real checkout that scoring resets before the judge reads it;
+ * here it is a temporary directory, so git answers from this instead.
+ */
+function stubGit({ failOn = null } = {}) {
+  const calls = [];
+  return {
+    calls,
+    runGit: ({ args, cwd }) => {
+      calls.push({ args, cwd });
+      const status = args[0] === failOn ? 128 : args[0] === "grep" ? 1 : 0;
+      return { status, stdout: "", stderr: "" };
+    },
+  };
+}
+
 test("scorePlan folds stubbed cells into a schema-valid ledger row", async () => {
   const root = makeRoot();
   try {
@@ -1091,6 +1184,7 @@ test("scorePlan folds stubbed cells into a schema-valid ledger row", async () =>
       repoRoot: root,
       planDir: plan.plan_dir,
       exec,
+      runGit: stubGit().runGit,
       calibrationSet: JSON.parse(
         readFileSync(
           path.join(root, "docs/evals/review-skill-judge-calibration.json"),
@@ -1174,6 +1268,7 @@ test("a PR that ran fewer draws loses opportunities, not recall", async () => {
       repoRoot: root,
       planDir: plan.plan_dir,
       exec: stubExec().exec,
+      runGit: stubGit().runGit,
       calibrationSet: JSON.parse(
         readFileSync(
           path.join(root, "docs/evals/review-skill-judge-calibration.json"),
@@ -1250,6 +1345,7 @@ test("scorePlan stores no McNemar against an incomparable baseline", async () =>
         repoRoot: root,
         planDir: plan.plan_dir,
         exec: stubExec().exec,
+        runGit: stubGit().runGit,
         calibrationSet,
         baselineRow,
       });
@@ -1297,6 +1393,7 @@ test("scorePlan reports a partial matrix and refuses an empty one", async () => 
         repoRoot: root,
         planDir: plan.plan_dir,
         exec,
+        runGit: stubGit().runGit,
         calibrationSet,
       }),
       /no completed cell results/,
@@ -1322,6 +1419,7 @@ test("scorePlan reports a partial matrix and refuses an empty one", async () => 
       repoRoot: root,
       planDir: plan.plan_dir,
       exec,
+      runGit: stubGit().runGit,
       calibrationSet,
     });
     assert.equal(scored.row.status, "partial");
@@ -1332,4 +1430,265 @@ test("scorePlan reports a partial matrix and refuses an empty one", async () => 
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+/** Write one stubbed cell result under a plan directory. */
+function writeCell(plan, cell, { output, root, usd = 3.5 }) {
+  const dir = path.join(plan.plan_dir, "cells", cell.cell_id);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    path.join(dir, "result.json"),
+    JSON.stringify({
+      ok: true,
+      output,
+      seconds: 300,
+      cost_usd: usd,
+      fixture_path: root,
+    }),
+  );
+}
+
+test("a PR is zero-finding only when every draw it ran found nothing", async () => {
+  const root = makeRoot();
+  try {
+    const plan = buildPlan({
+      contract,
+      contractDigest,
+      kind: "full",
+      repoRoot: root,
+      outDir: path.join(root, "run"),
+      env: planEnv,
+    });
+    const [quiet, mixed] = contract.fixtures.map((fixture) => fixture.pr);
+    const cells = plan.cells.filter(
+      (cell) =>
+        cell.condition === "pipeline" && [quiet, mixed].includes(cell.pr),
+    );
+    assert.equal(cells.length, 4);
+    for (const cell of cells) {
+      // `mixed` finds nothing on draw 1 and reviews on draw 2; `quiet` finds
+      // nothing on either draw. Only `quiet` found nothing on its PR.
+      const empty = cell.pr === quiet || cell.draw === 1;
+      writeCell(plan, cell, {
+        root,
+        output: empty ? "" : "scripts/review/run-eval.sh:150 is wrong.",
+      });
+    }
+    const scored = await scorePlan({
+      plan,
+      contract,
+      contractDigest,
+      repoRoot: root,
+      planDir: plan.plan_dir,
+      exec: stubExec().exec,
+      runGit: stubGit().runGit,
+      calibrationSet: JSON.parse(
+        readFileSync(
+          path.join(root, "docs/evals/review-skill-judge-calibration.json"),
+          "utf8",
+        ),
+      ),
+    });
+    const pipeline = scored.row.conditions.pipeline;
+    assert.equal(pipeline.zero_finding_prs, 1);
+    assert.deepEqual(validateLedgerRow(scored.row), []);
+    // Two zero-finding PRs are RED, so counting one empty draw per PR would
+    // red a run on the strength of a PR it did review.
+    assert.ok(
+      !scored.reasons.some((reason) =>
+        /emitted no parseable finding on 2 PRs/.test(reason),
+      ),
+      JSON.stringify(scored.reasons),
+    );
+
+    // `--validate` derives both RED-capable counters from the run detail, so
+    // an edited counter cannot ride along on the row's own say-so.
+    const honest = revalidateRow({
+      contract,
+      row: scored.row,
+      repoRoot: root,
+      detailDir: plan.plan_dir,
+    });
+    assert.deepEqual(honest.problems, []);
+    const tampered = structuredClone(scored.row);
+    tampered.conditions.pipeline.wrong_claims += 5;
+    tampered.conditions.pipeline.zero_finding_prs = 0;
+    const caught = revalidateRow({
+      contract,
+      row: tampered,
+      repoRoot: root,
+      detailDir: plan.plan_dir,
+    });
+    assert.equal(caught.ok, false);
+    assert.ok(
+      caught.problems.some((problem) => problem.includes("wrong_claims is")),
+      JSON.stringify(caught.problems),
+    );
+    assert.ok(
+      caught.problems.some((problem) =>
+        problem.includes("zero_finding_prs is 0"),
+      ),
+      JSON.stringify(caught.problems),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("scoring resets each fixture, uses the contract judge, and totals its cost", async () => {
+  const root = makeRoot();
+  try {
+    const plan = buildPlan({
+      contract,
+      contractDigest,
+      kind: "canary",
+      repoRoot: root,
+      outDir: path.join(root, "run"),
+      env: planEnv,
+    });
+    for (const cell of plan.cells) {
+      writeCell(plan, cell, {
+        root,
+        output: "scripts/review/run-eval.sh:150 is wrong.",
+      });
+    }
+    // Every judge reply arrives in a CLI envelope carrying its own cost.
+    const models = new Set();
+    const inner = stubExec().exec;
+    let judgeCalls = 0;
+    const exec = async (request) => {
+      models.add(request.model);
+      judgeCalls += 1;
+      return JSON.stringify({
+        result: await inner(request),
+        total_cost_usd: 0.25,
+      });
+    };
+    const git = stubGit();
+    const scored = await scorePlan({
+      plan,
+      contract,
+      contractDigest,
+      repoRoot: root,
+      planDir: plan.plan_dir,
+      exec,
+      runGit: git.runGit,
+      calibrationSet: JSON.parse(
+        readFileSync(
+          path.join(root, "docs/evals/review-skill-judge-calibration.json"),
+          "utf8",
+        ),
+      ),
+    });
+    // The judge the comparability key records is the judge that ran.
+    assert.deepEqual([...models], [contract.judge.model]);
+    // The forty calibration replays and every judge call the cells needed.
+    assert.ok(judgeCalls >= 40 + plan.cells.length);
+    assert.equal(
+      scored.row.scoring_usd,
+      Number((judgeCalls * 0.25).toFixed(2)),
+    );
+    assert.deepEqual(validateLedgerRow(scored.row), []);
+    // The last cell left the fixture dirty, so every scoring pass resets it
+    // before the novel judge reads the tree with Bash.
+    const resets = git.calls.filter((call) => call.args[0] === "reset");
+    const cleans = git.calls.filter((call) => call.args[0] === "clean");
+    assert.equal(resets.length, plan.cells.length);
+    assert.equal(cleans.length, plan.cells.length);
+    assert.ok(resets.every((call) => call.cwd === root));
+
+    // A fixture that cannot be reset is a scoring failure, never a number.
+    await assert.rejects(
+      scorePlan({
+        plan,
+        contract,
+        contractDigest,
+        repoRoot: root,
+        planDir: plan.plan_dir,
+        exec,
+        runGit: stubGit({ failOn: "reset" }).runGit,
+        calibrationSet: JSON.parse(
+          readFileSync(
+            path.join(root, "docs/evals/review-skill-judge-calibration.json"),
+            "utf8",
+          ),
+        ),
+      }),
+      /could not be reset before scoring/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a scoring subprocess inherits no GitHub credential", () => {
+  const scrubbed = scrubbedEnv({
+    env: {
+      PATH: "/usr/bin",
+      GH_TOKEN: "secret",
+      GITHUB_TOKEN: "secret",
+      GITHUB_PERSONAL_ACCESS_TOKEN: "secret",
+      GH_ENTERPRISE_TOKEN: "secret",
+      ANTHROPIC_API_KEY: "kept",
+    },
+    ghConfigDir: "/tmp/empty-gh",
+  });
+  for (const name of SCRUBBED_ENV_VARS) {
+    assert.equal(scrubbed[name], undefined, name);
+  }
+  // The model API must stay reachable; only the credentials go.
+  assert.equal(scrubbed.ANTHROPIC_API_KEY, "kept");
+  assert.equal(scrubbed.PATH, "/usr/bin");
+  assert.equal(scrubbed.GH_CONFIG_DIR, "/tmp/empty-gh");
+  assert.equal(scrubbed.GIT_CONFIG_GLOBAL, "/dev/null");
+  assert.equal(scrubbed.GIT_CONFIG_VALUE_0, "");
+  assert.equal(scrubbed.GIT_ALLOW_PROTOCOL, "file");
+  assert.equal(scrubbed.GIT_TERMINAL_PROMPT, "0");
+});
+
+test("the orchestrator keeps its resume cache outside the spec worktree", () => {
+  const script = readFileSync(
+    path.join(repoRoot, "scripts/review/run-eval.sh"),
+    "utf8",
+  );
+  // The spec worktree is a temporary directory the EXIT trap removes, so a
+  // plan directory inside it takes every completed cell down with it.
+  assert.match(script, /RUN_DIR="\$REPO\/\$DETAIL_DIR"/);
+  assert.match(script, /--out "\$RUN_DIR"/);
+});
+
+test("the freshness workflow watches the frozen input directories", () => {
+  const workflow = readFileSync(
+    path.join(repoRoot, ".github/workflows/review-eval-freshness.yml"),
+    "utf8",
+  );
+  // `*` stops at a path separator in a GitHub path filter, so the recursive
+  // form is what reaches docs/evals/review-skill-truth/ and its siblings.
+  assert.match(workflow, /- docs\/evals\/review-skill\*\*/);
+  assert.doesNotMatch(workflow, /- docs\/evals\/review-skill\*$/m);
+});
+
+test("every literal path in the launchd template is one the runbook rewrites", () => {
+  const plist = readFileSync(
+    path.join(repoRoot, "scripts/review/launchd/org.mento.review-eval.plist"),
+    "utf8",
+  );
+  const runbook = readFileSync(
+    path.join(repoRoot, "docs/evals/review-skill.md"),
+    "utf8",
+  );
+  const absolute = [...plist.matchAll(/<string>(\/[^<]+)<\/string>/g)].map(
+    (match) => match[1],
+  );
+  assert.ok(absolute.length > 0);
+  for (const value of absolute) {
+    // /bin/zsh is on every Mac; everything else names the author's account and
+    // must be covered by the documented substitution.
+    assert.ok(
+      value.startsWith("/Users/chapati") || value.startsWith("/bin/"),
+      `${value} is a literal path the install step does not rewrite`,
+    );
+  }
+  assert.match(runbook, /sed -e "s\|\/Users\/chapati\/code\/mento/);
+  assert.match(runbook, /s\|\/Users\/chapati\|\$HOME\|g/);
 });

@@ -60,7 +60,7 @@ const MODE_OPTIONS = {
   "check-ledger": ["base-ref", "require-base"],
   plan: ["kind", "skill-ref", "out", "runs-dir"],
   score: ["against", "calibration"],
-  validate: ["append", "against"],
+  validate: ["append", "against", "detail-dir"],
   report: ["against", "row"],
   "schedule-issue": ["repo", "dry-run", "date"],
 };
@@ -82,6 +82,7 @@ const OPTION_SPEC = {
   out: { type: "string" },
   "runs-dir": { type: "string" },
   against: { type: "string" },
+  "detail-dir": { type: "string" },
   calibration: { type: "string" },
   append: { type: "boolean" },
   row: { type: "string" },
@@ -157,6 +158,7 @@ export function parseArgs(argv, env = process.env) {
     planDir: mode === "score" ? values.score : null,
     resultPath: mode === "validate" ? values.validate : null,
     against: values.against ?? null,
+    detailDir: values["detail-dir"] ?? null,
     rowPath: values.row ?? null,
     append: values.append === true,
     repo: values.repo ?? env.GITHUB_REPOSITORY ?? DEFAULT_REVIEW_EVAL_REPO,
@@ -195,7 +197,7 @@ Modes:
   --schedule-issue       Create or retain the staleness issue
 
 Options:
-  --offline              Skip eval-tag reachability (--check-fixtures)
+  --offline              Resolve eval tags locally, never over the network
   --src-repo PATH        Resolve eval tags from a local clone
   --base-ref REF         Append-only comparison base (default: origin/main)
   --require-base         Fail when the base ref does not resolve (--check-ledger)
@@ -205,6 +207,8 @@ Options:
   --runs-dir PATH        Detail root (default: ${DEFAULT_RUNS_DIR})
   --against REF          Baseline row: a file path or an executed_at prefix
                          (--score, --report, and --validate)
+  --detail-dir DIR       Run detail to recompute from (--validate); default is
+                         the row's own detail_dir under --root
   --row REF              Row to report (default: the newest ledger row)
   --calibration PATH     Judge calibration set (--score)
   --append               Append the validated row to the ledger (--validate)
@@ -392,11 +396,9 @@ async function modeCheckFixtures(options, context) {
     contract: context.contract,
     repoRoot: context.repoRoot,
     offline: options.offline,
-    srcRepo: options.srcRepo
-      ? path.resolve(options.srcRepo)
-      : options.offline
-        ? null
-        : context.repoRoot,
+    // The checkout the CLI runs on resolves the eval tags in both modes.
+    // `--offline` forbids the network fallback, not the tag check itself.
+    srcRepo: options.srcRepo ? path.resolve(options.srcRepo) : context.repoRoot,
   });
   printObject(
     {
@@ -527,6 +529,9 @@ async function modeValidate(options, context) {
     contract: context.contract,
     row,
     repoRoot: context.repoRoot,
+    // The run detail may sit outside `--root`: the orchestrator reads the
+    // contract from a spec worktree while the cells live in the real checkout.
+    detailDir: options.detailDir ? path.resolve(options.detailDir) : null,
     ledgerRows,
     // Name the same baseline `--score --against` used, or the row's own
     // verdict is rechecked against a baseline it was never scored on.

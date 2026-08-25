@@ -445,6 +445,39 @@ test("a tag that moved off the pinned commit is reported", () => {
   assert.match(result.problems[1], /tag does not exist/);
 });
 
+test("offline mode resolves the eval tags locally and never over the network", () => {
+  const calls = [];
+  const runGit = ({ args }) => {
+    calls.push(args);
+    if (args[0] === "ls-remote") throw new Error("offline made a network call");
+    if (args.includes("cat-file")) return { status: 0, stdout: "", stderr: "" };
+    const ref = args[args.length - 1];
+    // Every tag resolves except this one, which stands for a deleted or
+    // renamed `eval/**` tag. Offline used to skip the check and stay green.
+    if (ref.includes("pr-1999/head")) {
+      return { status: 1, stdout: "", stderr: "" };
+    }
+    const fixture = committed.contract.fixtures.find(
+      (candidate) =>
+        ref.includes(candidate.tag_head) || ref.includes(candidate.tag_base),
+    );
+    const sha = ref.includes("/head") ? fixture.first_head : fixture.base_sha;
+    return { status: 0, stdout: `${sha}\n`, stderr: "" };
+  };
+  const result = checkFixtures({
+    contract: committed.contract,
+    repoRoot,
+    offline: true,
+    runGit,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.problems.length, 1);
+  assert.match(result.problems[0], /pr-1999\/head/);
+  assert.match(result.problems[0], /tag does not exist/);
+  // The repository the check runs on is the clone it resolves against.
+  assert.ok(calls.every((args) => args[0] === "-C" && args[1] === repoRoot));
+});
+
 test("online mode without a local clone peels the tag from ls-remote", () => {
   const runGit = ({ args }) => {
     assert.equal(args[0], "ls-remote");

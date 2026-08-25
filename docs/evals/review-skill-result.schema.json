@@ -93,7 +93,12 @@
       ]
     },
     "detail_dir": { "type": "string", "minLength": 1 },
-    "notes": { "type": "string" }
+    "notes": { "type": "string" },
+    "scoring_usd": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Dollars the scorer spent on judges: claim extraction, the match judge, the novel judge, and the calibration replays. A condition's `usd` is its contestant cell alone, so the run total is the conditions plus this. Absent on a failed run, which never reached a judge."
+    }
   },
   "$defs": {
     "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },

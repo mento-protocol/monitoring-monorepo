@@ -15,6 +15,7 @@ import {
   parseJudgeJson,
   renderPrompt,
   runCalibration,
+  SCORING_MODULES,
   scorerDigest,
   structuralCandidates,
   validateCalibrationSet,
@@ -548,4 +549,23 @@ test("scorerDigest is a stable sha256 over the scorer and its prompts", () => {
   const digest = scorerDigest();
   assert.match(digest, /^[0-9a-f]{64}$/);
   assert.equal(digest, scorerDigest());
+});
+
+test("scorerDigest covers every module that can move a recorded number", () => {
+  // The per-condition fold, the recompute and the verdict rules live outside
+  // this module, so an edit to one of them must break the pairing too.
+  for (const name of [
+    "review-eval-run.mjs",
+    "review-eval-result-shape.mjs",
+    "review-eval-report.mjs",
+  ]) {
+    assert.ok(
+      SCORING_MODULES.some((module) => module.endsWith(name)),
+      `${name} is not hashed into the matcher digest`,
+    );
+  }
+  assert.notEqual(
+    scorerDigest({ modules: SCORING_MODULES.slice(1) }),
+    scorerDigest(),
+  );
 });

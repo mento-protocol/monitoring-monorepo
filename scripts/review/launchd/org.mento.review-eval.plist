@@ -5,10 +5,12 @@
   10:20 on the 8th about half the time. launchd fires a missed
   StartCalendarInterval on the next wake; cron drops it silently.
 
-  Install: see "Install the scheduler" in docs/evals/review-skill.md.
-  A plist has no variable substitution, so every path below is literal. On a
-  machine that does not use these locations, edit the checkout path inside
-  ProgramArguments and both log paths (StandardOutPath, StandardErrorPath).
+  This file is a template and is not installable as it stands. A plist has no
+  variable substitution, so every path below is literal: the checkout inside
+  ProgramArguments and the log file in StandardOutPath and StandardErrorPath
+  all name /Users/chapati. "Install the scheduler" in docs/evals/review-skill.md
+  carries the one-line sed that rewrites both for the installing account; copy
+  this file unchanged and the monthly job cannot find the script or its log.
 -->
 <plist version="1.0">
   <dict>

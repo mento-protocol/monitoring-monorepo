@@ -632,29 +632,32 @@ export function checkFixtures({
     checkFinderReports({ repoRoot, fixture, seenReportFiles, problems });
   });
 
-  if (!offline) {
-    const url = `https://github.com/${contract.repo}.git`;
-    for (const fixture of fixtures) {
-      if (!isObject(fixture) || !Number.isSafeInteger(fixture.pr)) continue;
-      resolveEvalTag({
-        ref: fixture.tag_head,
-        expected: fixture.first_head,
-        srcRepo,
-        url,
-        runGit,
-        problems,
-        label: `PR ${fixture.pr} head`,
-      });
-      resolveEvalTag({
-        ref: fixture.tag_base,
-        expected: fixture.base_sha,
-        srcRepo,
-        url,
-        runGit,
-        problems,
-        label: `PR ${fixture.pr} base`,
-      });
-    }
+  // Offline forbids the network, not the check. The tags and the objects they
+  // name are in the local checkout the caller already has, and a deleted or
+  // moved `eval/**` tag is exactly what this check exists to catch; skipping
+  // it offline left CI green until a paid run tried to materialize a fixture.
+  const localRepo = offline ? (srcRepo ?? repoRoot) : srcRepo;
+  const url = offline ? null : `https://github.com/${contract.repo}.git`;
+  for (const fixture of fixtures) {
+    if (!isObject(fixture) || !Number.isSafeInteger(fixture.pr)) continue;
+    resolveEvalTag({
+      ref: fixture.tag_head,
+      expected: fixture.first_head,
+      srcRepo: localRepo,
+      url,
+      runGit,
+      problems,
+      label: `PR ${fixture.pr} head`,
+    });
+    resolveEvalTag({
+      ref: fixture.tag_base,
+      expected: fixture.base_sha,
+      srcRepo: localRepo,
+      url,
+      runGit,
+      problems,
+      label: `PR ${fixture.pr} base`,
+    });
   }
 
   return {

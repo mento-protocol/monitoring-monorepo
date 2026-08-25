@@ -482,6 +482,50 @@ test("the report states the verdict, the table, and the defects that flipped", (
   );
 });
 
+test("the report separates cell dollars from what the judges cost", () => {
+  const cells = renderReport({
+    contract,
+    row: row({ conditions: { pipeline: condition({ found: 20, usd: 60 }) } }),
+    truth,
+  });
+  // A row written before the field existed still totals what it does carry.
+  assert.match(
+    cells,
+    /Cost \$60\.00 over \d+ s — \$60\.00 cells, \$0\.00 scoring\./,
+  );
+
+  const scored = renderReport({
+    contract,
+    row: row({
+      conditions: { pipeline: condition({ found: 20, usd: 60 }) },
+      scoring_usd: 12.5,
+    }),
+    truth,
+  });
+  assert.match(
+    scored,
+    /Cost \$72\.50 over \d+ s — \$60\.00 cells, \$12\.50 scoring\./,
+  );
+});
+
+test("the generated staleness issue runs one CLI mode per command", () => {
+  const payload = scheduleIssuePayload({
+    freshnessResult: freshness({
+      rows: [],
+      contract,
+      now: new Date("2026-12-20T00:00:00Z"),
+      contractDigest: CONTRACT_DIGEST,
+    }),
+    contract,
+    contractDigest: CONTRACT_DIGEST,
+  });
+  // The CLI refuses two modes in one invocation, so a combined line would fail
+  // the acceptance check for every operator who pasted the block.
+  assert.match(payload.body, /pnpm review:eval -- --check-fixtures\n/);
+  assert.match(payload.body, /pnpm review:eval -- --check-ledger\n/);
+  assert.doesNotMatch(payload.body, /--check-fixtures --check-ledger/);
+});
+
 test("the report prints the row's verdict and flags a recomputed disagreement", () => {
   const lost = { pipeline: condition({ found: 14 }) };
   const mislabelled = renderReport({
