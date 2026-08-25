@@ -21,6 +21,7 @@
 
 import process from "node:process";
 import { appendFileSync, mkdirSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
 const ARKHAM_BASE = "https://api.arkm.com";
 const OUT_DIR = ".intel-marathon";
@@ -28,19 +29,32 @@ const HEAVY_SPACING_MS = 1100; // heavy bucket 1 req/s + headroom
 const RATE_LIMIT_BACKOFF_MS = 2000;
 const TRANSFERS_PER_ADDR = 100;
 
+// Upstash REST rejects a whole-hash read once the encoded reply exceeds
+// ~10 MB — intel_deep already exceeds that on a plain HGETALL. Read it via
+// cursor-paginated HSCAN instead (see fetchHashViaHscan). 100 fields/page
+// keeps each page well under the cap even at the largest observed field
+// size (~50 KB).
+const HSCAN_PAGE_COUNT = 100;
+// Safety bound so a cursor that never returns to "0" fails loudly instead of
+// looping forever.
+export const HSCAN_MAX_PAGES = 10_000;
+
 const required = [
   "UPSTASH_REDIS_REST_URL",
   "UPSTASH_REDIS_REST_TOKEN",
   "ARKHAM_API_KEY",
 ];
-const missing = required.filter((k) => !process.env[k]);
-if (missing.length > 0) {
-  console.error(`Missing env: ${missing.join(", ")}`);
-  process.exit(1);
-}
 const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
 const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
 const arkhamKey = process.env.ARKHAM_API_KEY;
+
+function requireEnv() {
+  const missing = required.filter((k) => !process.env[k]);
+  if (missing.length > 0) {
+    console.error(`Missing env: ${missing.join(", ")}`);
+    process.exit(1);
+  }
+}
 
 const args = process.argv.slice(2);
 const limitIdx = args.indexOf("--limit");
@@ -81,6 +95,48 @@ async function upstash(path, init = {}) {
   if (!res.ok)
     throw new Error(`Upstash ${path} → ${res.status}: ${await res.text()}`);
   return res.json();
+}
+
+// Read every field of `key` via cursor-paginated HSCAN and return the same
+// flat [field1, value1, field2, value2, ...] shape HGETALL's REST response
+// carries, so callers need no other changes. HSCAN can return a field more
+// than once across pages; later pages are merged last, so they win. Upstash
+// REST can also answer a request it can't serve with HTTP 200 and an
+// `error` body field (observed live on an oversized HGETALL), so check for
+// that on every page instead of trusting `res.ok` alone.
+export async function fetchHashViaHscan(
+  key,
+  { count = HSCAN_PAGE_COUNT, fetchImpl = fetch } = {},
+) {
+  const merged = new Map();
+  let cursor = "0";
+  let pages = 0;
+  do {
+    const res = await fetchImpl(
+      `${redisUrl}/hscan/${key}/${cursor}?count=${count}`,
+      { headers: { Authorization: `Bearer ${redisToken}` } },
+    );
+    const body = await res.json();
+    if (!res.ok || body?.error) {
+      throw new Error(
+        `Upstash /hscan/${key} (cursor ${cursor}) → ${res.status}: ${body?.error ?? JSON.stringify(body)}`,
+      );
+    }
+    const [nextCursor, flat] = body.result;
+    for (let i = 0; i < flat.length; i += 2) merged.set(flat[i], flat[i + 1]);
+    cursor = String(nextCursor);
+    pages++;
+    // Check before requesting another page, not after: a scan that
+    // completes exactly at the bound (cursor "0" on page HSCAN_MAX_PAGES)
+    // must succeed, and a scan that still isn't done at the bound must
+    // throw here instead of first fetching page HSCAN_MAX_PAGES + 1.
+    if (cursor !== "0" && pages >= HSCAN_MAX_PAGES) {
+      throw new Error(
+        `HSCAN on ${key} did not terminate within ${HSCAN_MAX_PAGES} pages; aborting instead of looping forever.`,
+      );
+    }
+  } while (cursor !== "0");
+  return Array.from(merged.entries()).flat();
 }
 
 async function pipeline(commands) {
@@ -140,8 +196,7 @@ async function buildTargetList() {
   }
 
   // 4. Top attested addresses from intel_deep — pick by counterparty USD volume.
-  const deep = await upstash(`/hgetall/intel_deep`);
-  const flat = deep.result ?? [];
+  const flat = await fetchHashViaHscan("intel_deep");
   const ranked = [];
   for (let i = 0; i < flat.length; i += 2) {
     const addr = flat[i];
@@ -189,6 +244,7 @@ async function fetchTransfers(address) {
 }
 
 async function main() {
+  requireEnv();
   const startedAt = Date.now();
   mkdirSync(OUT_DIR, { recursive: true });
   const rawFile = `${OUT_DIR}/extract-transfers-raw.jsonl`;
@@ -309,8 +365,17 @@ async function main() {
   console.log(`  raw:           ${rawFile}`);
 }
 
-main().catch((err) => {
-  console.error("✗ FAILED:", err.message);
-  console.error(err.stack);
-  process.exit(1);
-});
+export function isMainModule(importMetaUrl, argv = process.argv) {
+  const entrypoint = argv[1];
+  return typeof entrypoint === "string"
+    ? importMetaUrl === pathToFileURL(entrypoint).href
+    : false;
+}
+
+if (isMainModule(import.meta.url)) {
+  main().catch((err) => {
+    console.error("✗ FAILED:", err.message);
+    console.error(err.stack);
+    process.exit(1);
+  });
+}

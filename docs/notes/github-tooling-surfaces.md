@@ -136,3 +136,76 @@ Because of these gaps, a cloud-session readiness sweep is an emulation of
 path must be labeled **MCP-emulated** rather than probe-verified, and the final
 probe-verified all-clear belongs to a surface where the probe runs (local
 babysitter or CI).
+
+## Watching a PR from a cloud session
+
+`pnpm pr:ready-state` cannot run here, so the watch is event-driven rather than
+polled. Do not foreground-poll and never sleep-poll.
+
+1. Subscribe to PR events (`subscribe_pr_activity`) so comments, reviews, and CI
+   failures arrive as webhook activity.
+2. Arm a scheduled self check-in (for example `send_later`) before ending the
+   turn, every 15-20 minutes against the operating card's one-hour default
+   deadline. Webhooks do not cover CI success, new pushes, or merge-conflict
+   transitions, so a check-in that fired only at the deadline would miss a
+   mid-window green. Re-arming is bounded by that same deadline: at it, report
+   the current state and stop or escalate rather than re-arming silently. Stop
+   when the PR is merged or closed.
+3. On every event or check-in, run the MCP emulation of the readiness sweep
+   using the mapping above: PR state and head SHA, head check runs, unresolved
+   review threads (page to the end), unreplied root review comments, and
+   top-level comments. Three readings the mapping does not make for you:
+   - The latest per-reviewer state from `get_reviews`: an outstanding
+     `CHANGES_REQUESTED` is a required blocker until approved or dismissed.
+     GitHub's aggregate review decision persists across new pushes, so do not
+     discard it for being on an older commit. Whether an approval is required at
+     all rides on branch protection, which MCP cannot read — name it unverified.
+   - The Codex current-head signal from Codex's visible reviews and comments.
+     The reaction-backed PR-description approval gate is not readable over MCP;
+     report it as unverified rather than assumed.
+   - The CodeRabbit current-head signal from `get_reviews` and top-level
+     comments — the MCP reading of the closeout contract
+     [`pr-ready-state.md`](pr-ready-state.md) owns. Count a CodeRabbit review
+     whose body contains `**Run ID**` and whose review commit equals the
+     current full head. Also count a trusted top-level clean-run block when
+     `<!-- recent_review_start -->` and `<!-- recent_review_end -->` enclose
+     it, it contains a Run ID, its full reviewed commit range ends at the
+     current head, and its comment update time is at or after the current head
+     update time. Ignore empty reply-only reviews, skipped runs, and rate-limit
+     notices. After the optional CodeRabbit check becomes terminal, refresh
+     once. If the signal is missing or stale and no trusted top-level comment
+     contains both `@coderabbitai review` and
+     `<!-- coderabbit-final-head-review:<full-head-sha> -->`, use
+     `add_issue_comment` to post `@coderabbitai review`, a blank line, and that
+     exact marker. A marker comment is trusted only when its author association
+     is `OWNER`, `MEMBER`, or `COLLABORATOR`, or its author login is `claude`,
+     `claude[bot]`, `chatgpt-codex-connector`, or
+     `chatgpt-codex-connector[bot]`. When the head-update time is available,
+     require the request comment to be at or after it, and recheck the current
+     full head immediately before the write. The marker detects completed
+     requests and provides best-effort duplicate suppression; the issue-comment
+     API has no atomic claim.
+4. **A fork head stops the run on this surface too.** The repo gate that refuses
+   fork heads (`.claude/babysit-pr.sh`) cannot run here, so establish
+   `isCrossRepository` from the PR payload before the first repo command and
+   refuse the same way rather than proceeding unguarded.
+5. Blocker handling, reply shapes, and Codex-request discipline are identical
+   to the local path — see [`pr-operating-card.md`](pr-operating-card.md)
+   steps 6 and 7 — using the MCP write tools named above in place of `gh`.
+   Reply before resolving, always. **Checkout binding carries a cloud
+   exception, and it applies to every adapter call the repo-identity preflight
+   governs on this surface — the quality gate and a hosted ship as much as a
+   babysit blocker fix**: the canonical-`origin` requirement cannot hold here,
+   because a Claude cloud `origin` is a credential-proxy URL, not a canonical
+   GitHub URL. Bind by content instead — for a same-repository target,
+   `headRepository.nameWithOwner` must equal the session-attached repository;
+   local `git rev-parse HEAD` must equal the MCP-resolved `headRefOid` before
+   editing; the verified proxy `origin` serves as both `HEAD_REMOTE` and
+   `BASE_REMOTE`; and the post-push guard re-resolves with
+   `pull_request_read` method `get` in place of `gh pr view` and requires the
+   returned `headRefOid` to equal local `HEAD`. Every other binding rule
+   (clean worktree, explicit refspec, no force-push) applies unchanged.
+6. Label any all-clear **MCP-emulated**, never probe-verified. It is a status
+   report, not a terminal state: keep the step-2 loop armed, name the gates the
+   sweep could not verify as unverified rather than clear, and hand the final
+   probe-verified decision to a gh-capable surface.

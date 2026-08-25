@@ -21,10 +21,14 @@ import {
 } from "@/lib/address-labels/backup-format";
 import { withFlushedMonitor } from "@/lib/sentry-cron";
 
-// 5min serverless-function budget covers the steady-state cron: 7 parallel
-// HGETALLs + 8 parallel blob uploads (one per hash + manifest). Per-hash
-// blob splits keep any single upload under ~10 MB, so the bound is mostly
-// HGETALL latency on the largest hash (intel_deep).
+// 5min serverless-function budget covers the steady-state cron: labels and
+// reports read in one round trip each; each of the five intel hashes reads
+// through hgetallWithLegacy, which runs two cursor-paginated HSCAN
+// sequences (intel + legacy) concurrently — intel_deep alone needs roughly
+// 8 sequential pages at its current ~11.8 MB / 734 fields (measured
+// 2026-08-25; it keeps growing), still a small fraction of the budget.
+// Plus 7 parallel hash-blob uploads, then the manifest blob uploaded
+// afterward (it needs the hash uploads' resolved pathnames first).
 export const maxDuration = 300;
 export const BACKUP_MONITOR_MAX_RUNTIME_MINUTES = Math.ceil(maxDuration / 60);
 
@@ -66,10 +70,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         const exportedAtISO = now.toISOString();
 
         // v2 per-hash blob splits: each hash gets its own blob under the
-        // day's prefix, plus a manifest blob that lists them. Keeps every
-        // single blob under ~10 MB (largest is intel_deep at ~7 MB) so the
-        // 32 MB restore-side blob cap stops biting. Restore reads the
-        // manifest first, then fetches the referenced hash blobs in parallel.
+        // day's prefix, plus a manifest blob that lists them. intel_deep is
+        // the largest hash — its underlying Upstash data measured ~11.8 MB
+        // / 734 fields on 2026-08-25 (it keeps growing) and no longer fits
+        // the ~10 MB-per-blob target this split originally assumed.
+        // flagRestoreBreakingSnapshot() below already guards the resulting
+        // blob against MAX_RESTORE_BLOB_BYTES (16 MB) with a Sentry warning,
+        // so an oversized hash blob surfaces there instead of failing
+        // restore silently. Restore reads the manifest first, then fetches
+        // the referenced hash blobs in parallel.
         //
         // Hash blobs use `addRandomSuffix: true` so each run writes unique
         // pathnames — a retry after a partial upload failure cannot overwrite
