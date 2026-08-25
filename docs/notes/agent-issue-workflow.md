@@ -76,12 +76,15 @@ Routing labels:
    It re-reads and reclassifies each issue before it changes the Project item or
    labels. After each open-state projection, it re-reads the issue and
    reprojects bounded concurrent state changes. After a Done transition, it
-   fails if the issue is no longer closed or if a queue label remains. A
-   per-issue failure does not stop later issues. The command exits nonzero after
-   it lists the successful and failed issue numbers. When Done means still
-   requires post-merge production proof, use `Refs`, keep the issue open and
-   `in-pr`, and retain its current owner through the live checks. Close the issue
-   and run board sync only after its live acceptance criteria pass.
+   verifies that the issue remains closed and has no queue label. If the issue
+   reopened, it restores the previous queue label and projects the open state.
+   It fails if a closed issue retains a queue label or if state does not settle
+   within the bounded attempts. A per-issue failure does not stop later issues.
+   The command exits nonzero after it lists the successful and failed issue
+   numbers. When Done means still requires post-merge production proof, use
+   `Refs`, keep the issue open and `in-pr`, and retain its current owner through
+   the live checks. Close the issue and run board sync only after its live
+   acceptance criteria pass.
    When the closed issue is listed in an editable canonical parent or tracker,
    update that body in the same closeout. Mark its checklist item complete and
    remove nearby status text that still treats the child as open. Preserve a

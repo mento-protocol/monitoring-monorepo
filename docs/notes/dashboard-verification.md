@@ -85,9 +85,9 @@ if (text !== "") {
 ```
 
 Record the status, raw text, and parsed fields that prove the acceptance
-criteria. Record `parseError` when the response is not valid JSON. Do not inspect
-cookies or browser storage. Do not use this path for a cross-origin request or
-a mutation.
+criteria. Record `parseError` when parsing non-empty response text fails. Do not
+inspect cookies or browser storage. Do not use this path for a cross-origin
+request or a mutation.
 
 For a simulated authenticated session:
 
