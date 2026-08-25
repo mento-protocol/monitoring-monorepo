@@ -103,10 +103,12 @@ pass above:
   the gate is per-session platform policy, and the supported API path in these
   sessions is the GitHub MCP server.
 
-Regardless of REST behavior, MCP-first stands for Claude cloud sessions: the
-gh binary is not reliably available, GraphQL stays blocked, and the probes the
-skills depend on need both. Do not build a gh-over-MCP shim; the skills
-document the two native paths.
+Regardless of REST behavior, MCP-first stands as the default for Claude cloud
+sessions: the gh binary is not reliably available, GraphQL stays blocked, and
+the probes the skills depend on need both. The capability gate in Surface
+detection step 3 is the one exception, and no cloud container has yet
+satisfied it. Do not build a gh-over-MCP shim as a substitute for that gate;
+the skills document the two native paths.
 
 ## gh → MCP mapping
 

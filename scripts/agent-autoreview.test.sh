@@ -2359,6 +2359,23 @@ run_engine_metadata_only_without_cli_regression() {
   expect_stderr_not_contains "neither codex nor claude CLI is available"
 }
 
+# Same shell as the two regressions above -- neither CLI reachable -- but a
+# target with no changed files. The clean-target return happens before any
+# engine would be invoked, so it must not require an engine CLI either;
+# resolving the default-engine fallback before that return made a clean
+# `--mode local` run die on codex's absence for a review that runs nothing.
+run_engine_clean_target_without_cli_regression() {
+  local review_repo="$tmp_dir/engine-clean-target-no-cli"
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+
+  run_node_helper_in_repo_expect_success "$review_repo" --mode local
+  expect_stdout_contains "autoreview target: local"
+  expect_stdout_contains "autoreview clean"
+  expect_stderr_not_contains "neither codex nor claude CLI is available"
+}
+
 run_codex_resolution_helper() {
   local review_repo="$1"
   local search_path="$2"
@@ -9047,6 +9064,7 @@ run_engine_isolation_family() {
   run_engine_default_fallback_regression
   run_engine_default_fallback_neither_available_regression
   run_engine_metadata_only_without_cli_regression
+  run_engine_clean_target_without_cli_regression
   run_codex_binary_resolution_regression
   run_suite_family_diagnostic_regression
   run_claude_no_tools_regression

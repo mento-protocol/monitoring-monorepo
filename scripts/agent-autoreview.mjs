@@ -4808,14 +4808,8 @@ async function main() {
 
   console.log(`autoreview target: ${target.mode}`);
   console.log(`branch: ${branch}`);
-  // Metadata-only modes never invoke an engine: --dry-run returns just below,
-  // and --prepare-only exits after writing its bundle, before any engine
-  // runs. Resolving a fallback here would make both crash in an engine-free
-  // shell for something neither mode does.
-  if (!args.dryRun && !args.prepareOnly) {
-    applyDefaultEngineFallback(args, repo);
-  }
-  console.log(`engine: ${args.engine}`);
+  const requestedEngine = args.engine;
+  console.log(`engine: ${requestedEngine}`);
   if (target.requested_ref)
     console.log(`requested_ref: ${target.requested_ref}`);
   if (target.ref) console.log(`ref: ${target.ref}`);
@@ -4939,6 +4933,15 @@ async function main() {
     throw new Error(
       `semantic review requires ${prompts.length} bounded passes, but independent engine invocations cannot safely detect cross-pass defects; through a repo adapter, rerun with --prepare-bundle-dir <dir> and follow its bound pre/post verification flow; standalone-helper users should rerun with --prepare-only --bundle-output <path>; have one fresh-context reviewer inspect every listed pass`,
     );
+  }
+
+  // Resolved only once a semantic engine invocation is actually reached: a
+  // clean target already returned above, and --dry-run / --prepare-only
+  // never get here at all. Resolving earlier made both crash in an
+  // engine-free shell for something neither mode does.
+  applyDefaultEngineFallback(args, repo);
+  if (args.engine !== requestedEngine) {
+    console.log(`engine: ${args.engine}`);
   }
 
   let report;
