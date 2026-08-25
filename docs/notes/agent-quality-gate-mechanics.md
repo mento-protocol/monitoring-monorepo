@@ -314,8 +314,9 @@ The gate owns the machine while it runs. Two rules make that true, and both
 exist because contention — not flakiness — produced the failures in issue
 #1802.
 
-Do not start direct `pnpm` validation in the same worktree while a full gate is
-queued or running. The gate owns dependency setup and local validation
+Before invoking a full gate, wait for all direct `pnpm` validation in the same
+worktree to finish. While the gate is queued or running, do not start direct
+`pnpm` validation there. The gate owns dependency setup and local validation
 parallelism. Concurrent package-manager processes can recreate or invalidate
 `node_modules`. Use spare workers for read-only work, or use a separate, fully
 hydrated worktree.
@@ -830,14 +831,15 @@ also executes that shell fixture in CI.
 
 The [PR operating card](pr-operating-card.md#the-loop) owns ordinary gate and
 closeout sequencing. A second `--run` gate no longer needs a convention: the
-run lock above queues it behind the first one, on any worktree. What is still
-yours to avoid in the same worktree while a full gate is queued or running is
-direct `pnpm` validation, a dashboard server, or a browser suite you started
-yourself — the lock does not know about those. Browser tests and size-limit
-both run `next build` and can rewrite `next-env.d.ts`; run focused checks first,
-then let one gate own the mapped batch. For a non-trivial batch, freeze the
-card's scope baseline and run autoreview after the gate; after accepted fixes,
-rerun focused checks and autoreview.
+run lock above queues it behind the first one, on any worktree. Before invoking
+a full gate, ensure that no direct `pnpm` validation, dashboard server, or
+browser suite you started is active in the same worktree. From invocation until
+the gate exits, do not start any of them there — the lock does not know about
+those processes. Browser tests and size-limit both run `next build` and can
+rewrite `next-env.d.ts`; run focused checks first, then let one gate own the
+mapped batch. For a non-trivial batch, freeze the card's scope baseline and run
+autoreview after the gate; after accepted fixes, rerun focused checks and
+autoreview.
 
 **Stage timing and capture deadlines.** The wrapper and helper append
 best-effort stage JSONL to `.tmp/agent-autoreview/durations.jsonl`; override

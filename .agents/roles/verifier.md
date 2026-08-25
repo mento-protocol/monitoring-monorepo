@@ -19,9 +19,10 @@ Run diff-scoped verification and report only actionable results.
 1. Inspect the branch diff against `origin/main`.
 2. Run `pnpm agent:quality-gate --dry-run` and confirm mapped commands/checklists match changed surfaces.
 3. Unless the requester asked for dry verification only, run
-   `pnpm agent:quality-gate --run` as a background task. While that gate is
-   queued or running, do not start direct `pnpm` validation, another gate, a
-   dashboard server, or a browser suite in the same worktree.
+   `pnpm agent:quality-gate --run` as a background task. Before invoking it,
+   ensure that no direct `pnpm` validation, dashboard server, or browser suite
+   is active in the same worktree. From invocation until it exits, do not start
+   any of them there.
 4. Report every failed or skipped command, the relevant output, and the
    smallest next fix.
 
