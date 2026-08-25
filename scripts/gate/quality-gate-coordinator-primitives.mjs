@@ -6,8 +6,8 @@ import {
   isRunTokenValue,
 } from "./quality-gate-coordinator-journal-fields.mjs";
 
-export const PROTOCOL_VERSION = Object.freeze({ major: 1, minor: 0 });
-export const JOURNAL_SCHEMA_VERSION = 1;
+export const PROTOCOL_VERSION = Object.freeze({ major: 1, minor: 1 });
+export const JOURNAL_SCHEMA_VERSION = 2;
 export const RECORD_SCHEMA_VERSION = 1;
 export const DEFAULT_CAPACITY = 3;
 export const DEFAULT_IDLE_MS = 5_000;
@@ -16,11 +16,12 @@ export const DEFAULT_SUCCESS_MAX_AGE_MS = 0;
 const writerSuffixPattern =
   /^[1-9][0-9]{0,9}-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 
-const policyDescription = `quality-gate-coordinator-policy-v1
+const policyDescription = `quality-gate-coordinator-policy-v2
 request-round-robin weighted-capacity oldest-all-capacity-barrier
 weighted-reservation-barrier atomic-named-resources
 full-request-worktree-admission explicit-result-handoff-ack explicit-drain-ack
-per-request-capability-digest-auth strict-per-execution-results`;
+per-request-capability-digest-auth strict-per-execution-results
+distinct-request-and-per-lease-drain-identities`;
 
 export const DEFAULT_POLICY_HASH = createHash("sha256")
   .update(policyDescription)

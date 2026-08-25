@@ -35,7 +35,7 @@ export function claimDrain(
   validateIdentity(claimant, "claimant");
   const obligation = obligationFor(state, obligationId, drainIdentity);
   const siblings = Object.values(state.drainObligations).filter(
-    (candidate) => candidate.drainIdentity === drainIdentity,
+    (candidate) => candidate.requestId === obligation.requestId,
   );
   const conflict = siblings.find(
     (candidate) =>
@@ -44,7 +44,7 @@ export function claimDrain(
   if (conflict) {
     throw new CoordinatorError(
       "DRAIN_ALREADY_CLAIMED",
-      "another live process identity owns this drain token",
+      "another live process identity owns this request drain",
       { claim: copy(conflict.claim) },
     );
   }
@@ -59,6 +59,7 @@ export function claimDrain(
     claimed: true,
     idempotent: changed === 0,
     drainIdentity,
+    requestId: obligation.requestId,
     obligation: copy(obligation),
     obligations: siblings.map(copy),
   };
@@ -69,9 +70,9 @@ export function releaseDrainClaim(
   { obligationId, drainIdentity, claimant },
 ) {
   validateIdentity(claimant, "claimant");
-  obligationFor(state, obligationId, drainIdentity);
+  const obligation = obligationFor(state, obligationId, drainIdentity);
   const siblings = Object.values(state.drainObligations).filter(
-    (candidate) => candidate.drainIdentity === drainIdentity,
+    (candidate) => candidate.requestId === obligation.requestId,
   );
   const claims = siblings.filter((candidate) => candidate.claim);
   if (!claims.length) return { released: false, reason: "not-claimed" };
@@ -113,10 +114,11 @@ export function assertDrainClaim(obligation, claimant) {
 export function staleDrainClaims(state) {
   const claims = new Map();
   for (const obligation of Object.values(state.drainObligations)) {
-    if (!obligation.claim || claims.has(obligation.drainIdentity)) continue;
-    claims.set(obligation.drainIdentity, {
+    if (!obligation.claim || claims.has(obligation.requestId)) continue;
+    claims.set(obligation.requestId, {
       obligationId: obligation.obligationId,
       drainIdentity: obligation.drainIdentity,
+      requestId: obligation.requestId,
       claimant: copy(obligation.claim.claimant),
     });
   }

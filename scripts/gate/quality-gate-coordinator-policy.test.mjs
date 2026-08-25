@@ -495,9 +495,17 @@ test("a held wait reattests source before its timeout response", async (t) => {
     requestId: "runtime-wait-queued",
     capability: waiterCapability,
     owner: waiterOwner,
-    timeoutMs: 1_000,
+    timeoutMs: 10_000,
   });
-  await new Promise((resolvePromise) => setTimeout(resolvePromise, 200));
+  // The server processes messages from one socket in order. This response
+  // proves that it registered and evaluated the held waiter first.
+  const established = await client.request("inspect");
+  assert.equal(
+    established.requests.find(
+      (request) => request.requestId === "runtime-wait-queued",
+    )?.admission,
+    "queued",
+  );
   await writeFile(
     join(runtimeDirectory, "quality-gate-coordinator-policy.mjs"),
     "\n// held-wait source change\n",

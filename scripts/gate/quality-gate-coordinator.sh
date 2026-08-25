@@ -24,6 +24,8 @@ gate_coordinator_owner_subshell="${BASH_SUBSHELL:-0}"
 gate_coordinator_registration_fingerprint=""
 gate_coordinator_completed_result_json=""
 gate_coordinator_active_lease_id=""
+gate_coordinator_active_drain_identity=""
+gate_coordinator_active_drain_marker=""
 gate_coordinator_infrastructure_failed=0
 gate_coordinator_wait_pid=""
 gate_coordinator_wait_dir=""
@@ -307,18 +309,25 @@ gate_coordinator_abandon_active_lease() {
     --owner-start-utc "$gate_coordinator_owner_start" \
     --command-not-started >/dev/null 2>&1 || return 1
   gate_coordinator_active_lease_id=""
+  gate_coordinator_active_drain_identity=""
+  gate_coordinator_active_drain_marker=""
 }
 
 gate_coordinator_before_command() {
   local command="$1"
+  local lease_drain_identity="${2:-}"
   local lease_tmp lease_suffix command_digest lease_json parsed status blockers
-  local lease_sequence resource
+  local lease_sequence returned_drain_identity resource
   local wait_file wait_started wait_finished rc had_errexit=0
   local lease_args=()
   gate_coordinator_is_active || return 0
   if [[ "$gate_coordinator_infrastructure_failed" -eq 1 ||
     -n "$gate_coordinator_active_lease_id" ]]; then
     echo "error: coordinator lease state is unresolved; command scheduling has stopped." >&2
+    gate_coordinator_report_no_work_failure 2 "command lease acquisition" "The mapped command did not run"; return 2
+  fi
+  if ! gate_lock_token_is_wellformed "$lease_drain_identity"; then
+    echo "error: coordinator command drain identity is missing or malformed." >&2
     gate_coordinator_report_no_work_failure 2 "command lease acquisition" "The mapped command did not run"; return 2
   fi
   gate_coordinator_assert_authority || return 2
@@ -330,11 +339,13 @@ gate_coordinator_before_command() {
   lease_suffix="${lease_tmp##*.}"
   rm -f "$lease_tmp"
   gate_coordinator_active_lease_id="lease-${gate_coordinator_request_id}-${lease_suffix}"
+  gate_coordinator_active_drain_identity="$lease_drain_identity"
   command_digest="$(printf '%s' "$command" | hash_stream)" || { gate_coordinator_report_no_work_failure 2 "command lease acquisition" "The mapped command did not run"; return 2; }
 
   lease_args=(lease
     --request-id "$gate_coordinator_request_id"
     --lease-id "$gate_coordinator_active_lease_id"
+    --drain-token "$gate_coordinator_active_drain_identity"
     --owner-pid "$gate_coordinator_owner_pid"
     --owner-start-utc "$gate_coordinator_owner_start"
     --weight "$gate_coordinator_command_weight"
@@ -368,13 +379,23 @@ gate_coordinator_before_command() {
     const blockers = (value.blockers ?? []).map((item) =>
       item.type === "resource" ? `${item.type}:${item.resource}` : item.type
     ).join(",");
-    process.stdout.write(`${value.status ?? ""}\x1f${value.sequence ?? ""}\x1f${blockers}`);
+    process.stdout.write([
+      value.status ?? "",
+      value.sequence ?? "",
+      value.drainIdentity ?? "",
+      blockers,
+    ].join("\x1f"));
   ')"; then
     gate_coordinator_abandon_active_lease || true
     echo "error: coordinator returned an invalid command lease response." >&2
     gate_coordinator_report_no_work_failure 2 "command lease acquisition" "The mapped command did not run"; return 2
   fi
-  IFS=$'\x1f' read -r status lease_sequence blockers <<< "$parsed"
+  IFS=$'\x1f' read -r status lease_sequence returned_drain_identity blockers <<< "$parsed"
+  if [[ "$returned_drain_identity" != "$gate_coordinator_active_drain_identity" ]]; then
+    gate_coordinator_abandon_active_lease || true
+    echo "error: coordinator returned a different command drain identity." >&2
+    gate_coordinator_report_no_work_failure 2 "command lease acquisition" "The mapped command did not run"; return 2
+  fi
   wait_started="$(date +%s)"
   if [[ "$status" == "queued" ]]; then
     printf 'Scheduler wait: command %s (%s), lease sequence %s, blockers %s.\n' \
@@ -446,6 +467,8 @@ gate_coordinator_after_command() {
     return 2
   fi
   gate_coordinator_active_lease_id=""
+  gate_coordinator_active_drain_identity=""
+  gate_coordinator_active_drain_marker=""
 }
 
 gate_coordinator_cancel_and_ack() {

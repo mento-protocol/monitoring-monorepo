@@ -226,18 +226,36 @@ synthetic drift.
 A browser setup failure still lets independent lint/typecheck/unit/knip
 feedback run. `--fail-fast` stays sequential so it still stops before starting
 the next mapped command. Parallel workers use Bash job-control groups on macOS
-Bash 3.2 and Linux. INT/TERM waits for PGID registration; teardown TERM→KILLs
-each group and reaps its leader after descendants reparent. New sessions can
-escape (none of the mapped commands create one). Each parallel worker returns
-its command status and coordinator lease ID to the gate parent. The parent
-releases every completed lease before it fills another pool slot. A failed
-release keeps that lease unresolved, stops all new dispatch, and cancels the
-request through normal drain recovery.
+Bash 3.2 and Linux. The parent opens the request marker before it forks each
+worker. In coordinator mode, it also opens the shared generation marker for the
+worker. This keeps the sentinel visible to a legacy recovery handoff after its
+mapped wrapper exits. The parent opens a launch pipe before the fork. The worker waits on that
+pipe while the parent records its PID/start identity, confirms that its PGID is
+the same PID, and fills every cleanup registry. Only then can the worker request
+a lease or run mapped work. A coordinator journal persists the command identity.
+A pure legacy parent persists the same identity as a drain obligation before it
+releases the launch pipe. The worker creates and retains its command marker only
+after that recovery mapping exists and, in coordinator mode, after its lease
+exists. It atomically publishes its command result, then
+stays alive as the exact process-group anchor until the parent drains the
+command identity. The drain folds the anchored group into its durable PID/start
+capture before its first signal. This also captures a same-group descendant
+that closed every identity handle. INT/TERM waits for worker registration and
+uses the same exact drain. The parent reaps the sentinel and releases the lease
+only after the capture is empty. A no-lock sentinel exits only after its exact
+parent identity changes, becomes a zombie, or disappears. It retries an empty
+process-identity read while the parent PID still exists. It then fills another pool slot. A failed drain
+or lease release keeps that lease unresolved, stops all new dispatch, and
+cancels the request through normal drain recovery.
 In sequential mode, the gate waits for the wrapper and watchdog, refreshes the
-run-handle scan, persists every discovered descendant identity, and drains that
-set before it releases the command lease. It publishes a legacy recovery
-obligation before the first signal. A failed drain keeps the marker, obligation,
-and coordinator reservation. Its verdict states that the mapped command ran.
+request-handle scan, persists every discovered descendant identity, and drains
+that set before it releases the command lease. Parallel commands keep the same
+request identity and marker in addition to their command-specific handles. A
+client crash therefore leaves a request-wide recovery handle for the
+coordinator or its successor. A legacy run publishes its token-scoped
+obligation before the first signal. A failed drain keeps the marker,
+obligation, and coordinator reservation. Its verdict states that the mapped
+command ran.
 
 Two manifest-class changes are narrowed away from the full workspace suite
 instead of escalating unconditionally (Refs #1414). Every ambiguity fails toward
@@ -462,21 +480,21 @@ weight-1 lease. If none is eligible, it evaluates the reservation.
 An all-capacity command is a fair barrier. When that command reaches its turn,
 the coordinator stops new ordinary admission, waits for active work to drain,
 then grants all capacity to the command. New short requests cannot starve an
-older barrier. These measured command classes use all capacity:
+older barrier. These evidence-backed command classes use all capacity:
 
 - dashboard full or scoped coverage;
 - dashboard browser tests and their fixture build;
 - dashboard production build and size-limit work;
-- `pnpm dashboard:mutation`, `pnpm bridge:mutation`, and
-  `pnpm indexer:mutation`.
 
-The mutation baselines stay all-capacity until overlap measurements support a
-lower weight.
+The three mutation baselines remain ordinary weight-1 commands. Their recorded
+serial runtimes do not prove cross-run contention. The global capacity still
+bounds their aggregate concurrency.
 
 Browser work also claims `browser-fixture-3211`. Playwright installation claims
-`playwright-install`. Each named resource has capacity 1. Add a new resource or
-all-capacity class only with contention measurements and scheduler regression
-coverage.
+`playwright-install` because every worktree mutates the shared
+`~/.cache/ms-playwright` browser store. Each named resource has capacity 1. Add
+a new resource or all-capacity class only with contention measurements and
+scheduler regression coverage.
 
 **One request per worktree.** The coordinator serializes complete requests that
 use the same resolved `git rev-parse --show-toplevel` path. It does not use the
@@ -642,22 +660,28 @@ live client, waiter, drain claim, or result handoff remains, the coordinator
 closes its socket after the idle period without releasing `run.lock`. The older
 gate can then reclaim the dead coordinator owner. It records the coordinator
 generation under `condemned.d/` and drains workers through the shared generation
-marker.
+marker. A historical gate that predates anchored process-group capture can
+find and stop the retained sentinel and processes found through its existing
+handle and tree scan. The same-PGID close-all-handle guarantee requires a gate
+version that implements anchored group capture.
 A queued, granted, or result-ready request prevents this handoff.
 
 The coordinator publishes mutable request, lease, and drain state through
 same-directory temporary files and atomic rename. It creates terminal results
 as immutable files under
-`results/<fingerprintHash>/<executionId>.json`. The journal records the run
-token, gate owner PID and start identity, request capability digest, worktree,
-capacity weight, and named resources before it releases any resource. Raw
+`results/<fingerprintHash>/<executionId>.json`. The journal records the request
+drain identity, each lease's command drain identity, gate owner PID and start
+identity, request capability digest, worktree, capacity weight, and named
+resources before it releases any resource. Raw
 capabilities do not enter status, command arguments, the journal, result files,
-or coordinator logs. Workers inherit run and request tags and open marker
+or coordinator logs. Workers and mapped wrappers carry command and request
+tags. Workers retain open command, request, and coordinator generation marker
 descriptors. A successor coordinator restores uncertain
 leases as drain obligations and keeps their resources reserved. A joining Bash
-gate claims each run token. It persists the discovered worker and descendant
-PID/start identities, drains them, confirms they are gone, and acknowledges the
-obligations. Only then can the coordinator reuse capacity, a named resource,
+gate claims one stale request. It persists and drains every lease command
+identity, then drains the request identity. It confirms all discovered worker
+and descendant PID/start identities are gone before it acknowledges any lease
+obligation. Only then can the coordinator reuse capacity, a named resource,
 the worktree lease, or the legacy lock. Recovery cancels uncertain work. It
 does not requeue it or promote it to success.
 
@@ -680,11 +704,13 @@ immediately after the write, and before the journal commit. Authority loss
 after the final link appears moves that link to its writer-generated staging
 name and fsyncs the result directory. Startup ignores the staged link.
 
-One recovery process claims all current drain obligations for the same run
-token. The claim and release operations cover every sibling obligation with
-that token. A different process identity cannot acknowledge one of those
-obligations while the token claim is live. Each acknowledgement must use the
-same token and claimant and state `processTreeEmpty=true`.
+One recovery process claims all current drain obligations for the same request.
+The claim and release operations cover every sibling lease obligation even
+though each lease has a different command drain identity. A different process
+identity cannot acknowledge one of those obligations while the request claim
+is live. Each acknowledgement must use that obligation's command identity, the
+same claimant, and `processTreeEmpty=true` evidence. Recovery drains the shared
+request identity before it sends any acknowledgement.
 
 Legacy release is also token-scoped. It first atomically moves the owner to a
 recovery-visible `owner.reclaiming.release.*` record inside `run.lock`. It
@@ -808,39 +834,42 @@ process believes it holds the lock, no record naming a live holder is invisible
 to the next reader, and no stale command can make a later run exceed capacity or
 cross a named-resource boundary.
 
-| Crash lands                                                                    | State left behind                                                                                               | Next run                                                                                                                                                                    |
-| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| before `mkdir run.lock`                                                        | nothing                                                                                                         | takes the lock normally                                                                                                                                                     |
-| after `mkdir`, before the record is staged                                     | lock directory, no record                                                                                       | no complete record, so after the grace it publishes its own                                                                                                                 |
-| after staging, before `link`                                                   | `owner.claiming.<pid>` only                                                                                     | same as above; the staged file is private and inert, and a validated release removes it before `rmdir`                                                                      |
-| after `link`, before the staged copy is unlinked                               | complete record plus an inert `owner.claiming.<pid>`                                                            | reads the record; reclaims it if its holder is gone, then removes the unpublished stage during validated release                                                            |
-| after the not-ready socket binds, before legacy adoption                       | bound socket rejects `COORDINATOR_STARTING`; the prior legacy owner is unchanged                                | clients retry; a failed startup removes the socket and preserves or restores the prior owner                                                                                |
-| after legacy adoption, before ready metadata and handler activation            | coordinator owns the legacy record; the bound socket still rejects requests                                     | a handled error rolls back the owner; after a crash, the next gate reclaims the dead coordinator identity and drains its token                                              |
-| after a request or lease record is published, before its acknowledgement       | durable queued request or reserved resource with no client acknowledgement                                      | a successor drops queued command leases because their wait connections ended; it converts each granted lease to a drain obligation                                          |
-| while a worker runs mapped commands                                            | durable lease and worker identity; the command can outlive its gate client or coordinator                       | the coordinator or its successor finds the worker by the recorded token and handles, stops it when uncertain, and confirms it is gone                                       |
-| after a sequential wrapper exits while its descendant still holds a run handle | the command lease and token-scoped marker still identify that descendant                                        | the same gate persists and drains the descendant before lease release; a crash leaves the lease or legacy obligation for the next gate                                      |
-| while a worker runs, with its watchdog descheduled or suspended                | same, and the watchdog might not clean up on its own                                                            | recovery scans processes instead of waiting for the watchdog, so a watchdog that never runs changes nothing                                                                 |
-| after the last lease is released, before terminal-result publication           | active request with no lease and no terminal result                                                             | the leader retries publication; if it dies, recovery publishes cancellation and never infers success                                                                        |
-| after a terminal staging file is fsynced, before its final link                | old journal plus one exact staging file                                                                         | startup ignores the staging file; retention removes it only after the strict two-hour bound                                                                                 |
-| after the final result link, before its first directory fsync                  | old journal plus the final and staging links                                                                    | startup validates and fsyncs the result path before it reconstructs and commits result-ready state                                                                          |
-| after the first result-directory fsync, before staging unlink                  | old journal plus one durable final result and its staging link                                                  | startup validates the final result; the staging link remains inert until strict retention removes it                                                                        |
-| after immutable result creation, before journal cleanup                        | exact terminal result plus its active execution; the old journal can retain its last drain lease and obligation | a successor removes only that execution's stale leases and obligations, reconstructs result-ready state, and returns the exact result                                       |
-| after result-ready state commits, before a client's acknowledgement            | that client's terminal request still holds its worktree admission                                               | the client reconnects and acknowledges; a bound disconnect auto-acknowledges now or after any persisted drain reaches terminal state                                        |
-| after expired success-index removal commits, before result unlink              | unindexed, valid expired result                                                                                 | startup accepts the orphaned result and the next prune removes it                                                                                                           |
-| after a state-namespace writer creates a staging file, before publication      | one exact staging path listed above                                                                             | after legacy adoption and required index commits, maintenance removes it only when it is a current-UID regular non-symlink file more than two hours old                     |
-| while the empty-namespace deletion marker is published                         | `.deleting-v1.staging` alone, or the staging and marker links                                                   | stage-only recovery cancels marker creation; marker-plus-stage recovery fsyncs the marker before it removes protected entries                                               |
-| after empty-namespace deletion starts                                          | a valid deletion marker and a subset of the three protected namespace entries                                   | startup validates the marker, removes only empty or owned protected entries, and completes the parent-directory fsync                                                       |
-| after a token-scoped drain claim, before acknowledgement                       | all sibling obligations for that token name one claimant; their leases remain reserved                          | only that identity can acknowledge them; a successor releases the claim only after it verifies the claimant is dead or reused                                               |
-| after `mv owner → owner.reclaiming.<pid>`, before the taken record is judged   | no `owner`, one remnant                                                                                         | reads the remnant first: a live identity is linked back as the record, a spent one is discarded                                                                             |
-| after judging a taken record stale, before the new record is published         | no `owner`, no remnant                                                                                          | no complete record, so after the grace it publishes its own                                                                                                                 |
-| after a taken record is judged NOT stale, before it is put back                | same as the take boundary above                                                                                 | same as the take boundary above                                                                                                                                             |
-| after `mv owner → owner.reclaiming.release.*`, before token validation         | ownerless lock, one recovery-visible release remnant, and the old marker                                        | restores a local-live or foreign-host successor as canonical; an unrestorable live remnant stops the gate; a spent local identity becomes a drain obligation before removal |
-| after validation and `mv remnant → <private-release>/owner`, before `rmdir`    | ownerless lock, validated private owner, the old marker, and possible unpublished owner stages                  | release removes only known unpublished stages, then removes an empty directory; a successor owner makes `rmdir` fail and remains canonical                                  |
-| after `rmdir run.lock`, before private owner and marker cleanup                | no lock; inert private owner and marker files                                                                   | the next gate takes the lock normally; those private files do not grant authority                                                                                           |
-| after noting a condemned run, before publishing the replacement                | the obligation names a run whose record is still in place                                                       | reclaims that record again and notes the same token twice; draining a token whose processes are gone is a no-op                                                             |
-| after publishing a replacement, before draining what it condemned              | the obligation names a run nobody is clearing                                                                   | inherits the whole directory, not just the holder it reclaimed, so a chain of crashes loses nothing                                                                         |
-| after capturing a dead run's process tree, before the first signal             | the captured set is on disk, nothing has been signalled yet                                                     | re-reads it, unions it with its own tag scan, and confirms every entry — a set naming already-dead PIDs costs identity-checked no-op checks                                 |
-| mid-drain, after the TERM pass has killed the tag carrier                      | no tagged process remains, but an untagged descendant may still run                                             | inherits the persisted captured set, so it looks for those PIDs rather than for a tag nobody carries any more                                                               |
+| Crash lands                                                                    | State left behind                                                                                                   | Next run                                                                                                                                                                                 |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| before `mkdir run.lock`                                                        | nothing                                                                                                             | takes the lock normally                                                                                                                                                                  |
+| after `mkdir`, before the record is staged                                     | lock directory, no record                                                                                           | no complete record, so after the grace it publishes its own                                                                                                                              |
+| after staging, before `link`                                                   | `owner.claiming.<pid>` only                                                                                         | same as above; the staged file is private and inert, and a validated release removes it before `rmdir`                                                                                   |
+| after `link`, before the staged copy is unlinked                               | complete record plus an inert `owner.claiming.<pid>`                                                                | reads the record; reclaims it if its holder is gone, then removes the unpublished stage during validated release                                                                         |
+| after the not-ready socket binds, before legacy adoption                       | bound socket rejects `COORDINATOR_STARTING`; the prior legacy owner is unchanged                                    | clients retry; a failed startup removes the socket and preserves or restores the prior owner                                                                                             |
+| after legacy adoption, before ready metadata and handler activation            | coordinator owns the legacy record; the bound socket still rejects requests                                         | a handled error rolls back the owner; after a crash, the next gate reclaims the dead coordinator identity and drains its token                                                           |
+| after a request or lease record is published, before its acknowledgement       | durable queued request or reserved resource with no client acknowledgement                                          | a successor drops queued command leases because their wait connections ended; it converts each granted lease to a drain obligation                                                       |
+| after a parallel worker forks, before its command lease exists                 | the request record and a worker that already holds the request marker; before launch release, no mapped work exists | the worker exits if its exact parent dies behind the launch barrier; after launch release, a successor can drain it through the request identity; no unreferenced command marker remains |
+| while a worker runs mapped commands                                            | durable lease and worker identity; the command can outlive its gate client or coordinator                           | the coordinator or its successor finds the worker by the recorded token and handles, stops it when uncertain, and confirms it is gone                                                    |
+| after a sequential wrapper exits while its descendant still holds a run handle | the command lease and token-scoped marker still identify that descendant                                            | the same gate persists and drains the descendant before lease release; a crash leaves the lease or legacy obligation for the next gate                                                   |
+| after a parallel wrapper exits while a detached descendant holds its handles   | the lease, command-specific handles, and request-wide handles remain; the descendant can be outside the worker PGID | the exact command drain finds the detached process while it captures the anchored group; a client crash leaves request-wide recovery for the coordinator or its successor                |
+| after a parallel result is published, before the parent captures the group     | the lease, atomic result, command and request handles, and a live worker sentinel that still anchors its PGID       | the parent or a successor derives the group only from that live identity, captures same-group handleless descendants by PID/start, drains the set, then releases capacity                |
+| while a worker runs, with its watchdog descheduled or suspended                | same, and the watchdog might not clean up on its own                                                                | recovery scans processes instead of waiting for the watchdog, so a watchdog that never runs changes nothing                                                                              |
+| after the last lease is released, before terminal-result publication           | active request with no lease and no terminal result                                                                 | the leader retries publication; if it dies, recovery publishes cancellation and never infers success                                                                                     |
+| after a terminal staging file is fsynced, before its final link                | old journal plus one exact staging file                                                                             | startup ignores the staging file; retention removes it only after the strict two-hour bound                                                                                              |
+| after the final result link, before its first directory fsync                  | old journal plus the final and staging links                                                                        | startup validates and fsyncs the result path before it reconstructs and commits result-ready state                                                                                       |
+| after the first result-directory fsync, before staging unlink                  | old journal plus one durable final result and its staging link                                                      | startup validates the final result; the staging link remains inert until strict retention removes it                                                                                     |
+| after immutable result creation, before journal cleanup                        | exact terminal result plus its active execution; the old journal can retain its last drain lease and obligation     | a successor removes only that execution's stale leases and obligations, reconstructs result-ready state, and returns the exact result                                                    |
+| after result-ready state commits, before a client's acknowledgement            | that client's terminal request still holds its worktree admission                                                   | the client reconnects and acknowledges; a bound disconnect auto-acknowledges now or after any persisted drain reaches terminal state                                                     |
+| after expired success-index removal commits, before result unlink              | unindexed, valid expired result                                                                                     | startup accepts the orphaned result and the next prune removes it                                                                                                                        |
+| after a state-namespace writer creates a staging file, before publication      | one exact staging path listed above                                                                                 | after legacy adoption and required index commits, maintenance removes it only when it is a current-UID regular non-symlink file more than two hours old                                  |
+| while the empty-namespace deletion marker is published                         | `.deleting-v1.staging` alone, or the staging and marker links                                                       | stage-only recovery cancels marker creation; marker-plus-stage recovery fsyncs the marker before it removes protected entries                                                            |
+| after empty-namespace deletion starts                                          | a valid deletion marker and a subset of the three protected namespace entries                                       | startup validates the marker, removes only empty or owned protected entries, and completes the parent-directory fsync                                                                    |
+| after a request-scoped drain claim, before acknowledgement                     | all sibling lease obligations for that request name one claimant; their leases remain reserved                      | only that identity can acknowledge them; a successor releases the claim only after it verifies the claimant is dead or reused                                                            |
+| after `mv owner → owner.reclaiming.<pid>`, before the taken record is judged   | no `owner`, one remnant                                                                                             | reads the remnant first: a live identity is linked back as the record, a spent one is discarded                                                                                          |
+| after judging a taken record stale, before the new record is published         | no `owner`, no remnant                                                                                              | no complete record, so after the grace it publishes its own                                                                                                                              |
+| after a taken record is judged NOT stale, before it is put back                | same as the take boundary above                                                                                     | same as the take boundary above                                                                                                                                                          |
+| after `mv owner → owner.reclaiming.release.*`, before token validation         | ownerless lock, one recovery-visible release remnant, and the old marker                                            | restores a local-live or foreign-host successor as canonical; an unrestorable live remnant stops the gate; a spent local identity becomes a drain obligation before removal              |
+| after validation and `mv remnant → <private-release>/owner`, before `rmdir`    | ownerless lock, validated private owner, the old marker, and possible unpublished owner stages                      | release removes only known unpublished stages, then removes an empty directory; a successor owner makes `rmdir` fail and remains canonical                                               |
+| after `rmdir run.lock`, before private owner and marker cleanup                | no lock; inert private owner and marker files                                                                       | the next gate takes the lock normally; those private files do not grant authority                                                                                                        |
+| after noting a condemned run, before publishing the replacement                | the obligation names a run whose record is still in place                                                           | reclaims that record again and notes the same token twice; draining a token whose processes are gone is a no-op                                                                          |
+| after publishing a replacement, before draining what it condemned              | the obligation names a run nobody is clearing                                                                       | inherits the whole directory, not just the holder it reclaimed, so a chain of crashes loses nothing                                                                                      |
+| after capturing a dead run's process tree, before the first signal             | the captured set is on disk, nothing has been signalled yet                                                         | re-reads it, unions it with its own tag scan, and confirms every entry — a set naming already-dead PIDs costs identity-checked no-op checks                                              |
+| mid-drain, after the TERM pass has killed the tag carrier                      | no tagged process remains, but an untagged descendant may still run                                                 | inherits the persisted captured set, so it looks for those PIDs rather than for a tag nobody carries any more                                                                            |
 
 #### Where evidence is destroyed
 
@@ -871,8 +900,8 @@ grant no execution authority and carry no recovery obligation.
 | queued coordinator lease dropped on restart or cancellation             | a pending reservation                              | queued means no command received a grant; the replacement journal commits before the scheduler can reuse its sequence or capacity                                                                          |
 | granted lease converted after restart or stale-owner cancellation       | worker identity and reserved capacity or resources | the same journal revision marks the lease `drain-required` and adds its drain obligation; the scheduler keeps that lease reserved                                                                          |
 | queued or granted lease removed by release or abandon                   | its capacity and named-resource reservation        | release requires the authorized client to finish; abandon requires `commandStarted=false`; both reject `drain-required`, and a failed commit retains the lease                                             |
-| drain claim cleared                                                     | exclusive authority to drain one run token         | only the same claimant can release it, or the owner sweep first verifies that identity dead or reused; the obligations and leases remain in the journal                                                    |
-| lease and drain obligation removed by acknowledgement                   | stale worker identity and its reservation          | the matching token and claimant must report `processTreeEmpty=true`; a failed journal commit retains both records                                                                                          |
+| drain claim cleared                                                     | exclusive authority to drain one stale request     | only the same claimant can release it, or the owner sweep first verifies that identity dead or reused; the obligations and leases remain in the journal                                                    |
+| lease and drain obligation removed by acknowledgement                   | stale worker identity and its reservation          | the matching command identity and request claimant must report `processTreeEmpty=true`; recovery also drains the request identity first; a failed journal commit retains both records                      |
 | stale lease and drain records removed during result recovery            | a completed execution and its reservations         | recovery first validates the immutable result against the active singleflight, then marks every attached request result-ready in the same journal revision                                                 |
 | singleflight and request-order entries consumed at terminal publication | execution identity and attached waiters            | the immutable exact result is linked, fsynced, and validated first; attached requests remain result-ready until acknowledgement                                                                            |
 | result-ready request removed by acknowledgement                         | worktree admission and pending client handoff      | acknowledgement first reads and validates the immutable result; a failed commit leaves the request holding admission, and the result remains retained                                                      |
@@ -1059,15 +1088,45 @@ of them.
    Discovery cannot rest on the argv tag alone, because the tag dies with the
    wrapper. A command that forks a replacement and then **exits** leaves that
    replacement reparented, untagged, and with no ancestor left to walk down
-   from. So each mapped command starts with two handles its descendants
-   inherit and keep: the run's token in the environment, readable through
-   `/proc/<pid>/environ` where that exists, and an open descriptor on the run's
-   `holder.<token>` marker file, readable through `lsof` where that exists.
-   Both are named by a token unique to one run, so unlike a PID or a process
-   group neither can come to name a stranger. Each drain pass asks all three —
-   argv, environment, descriptor — and captures whatever is new. Where no
-   inherited handle is readable the argv tag stands alone, and a command of
-   that shape can still escape; nothing at this shell's floor closes that.
+   from. So each mapped command starts with a request identity in its
+   environment and an open descriptor on the request marker. A coordinator
+   lease also persists a unique command identity before work starts. The
+   command gets that identity in its argv and environment and holds its command
+   marker open. Normal completion drains only the command identity, so sibling
+   commands can continue. Crash recovery drains every lease identity and then
+   the request identity before it acknowledges any lease obligation.
+
+   The parallel parent opens the existing request marker before the fork. In
+   coordinator mode, it also opens the shared generation marker for the worker.
+   The worker therefore has request and mixed-version recovery identity from its first instruction without
+   creating a command marker that could outlive an unregistered lease. The
+   parent also opens a launch pipe before the fork. The worker waits there until
+   the parent records its PID/start identity, validates `PGID == PID`, and
+   publishes all aligned cleanup registries. The coordinator journal owns the
+   command-to-request recovery mapping. A pure legacy parent writes the command
+   identity as a drain obligation before launch release because it has no
+   journal. The worker creates and retains its command marker only after that
+   recovery mapping exists and, in coordinator mode, after its lease exists. It
+   publishes complete result files through an atomic ready rename, then blocks
+   as the live process-group leader until the parent drains it.
+
+   Parallel cleanup validates that live leader by its PID/start identity or an
+   inherited token handle. It then snapshots the leader's current process group
+   into the command identity's durable capture before the first signal. Crash
+   recovery can derive the group only from a still-tagged group leader. It pins
+   that leader's PID/start identity before the group snapshot. Each candidate
+   must still have the same PID/start identity and current PGID. The drain then
+   revalidates the leader's PID/start/PGID identity after that candidate read.
+   A stale tag or parent PID cannot bypass this check. It does not persist or
+   later signal a bare PGID, because a reused group has no start identity. This
+   covers a same-group descendant that closed all inherited handles, including
+   a crash after result publication but before the parent starts capture. A
+   descendant that starts a new session and also removes every inherited
+   identity handle can still escape; the supported shell and operating-system
+   interfaces provide no durable selector for that process. Each drain pass
+   asks argv, environment, descriptor, and the validated live group anchor for
+   new processes. Every persisted process uses a PID/start pair, and every
+   marker is unique, so neither can later name a stranger.
 
    Everything a PID authorises is re-checked at the moment it is used, because
    every one of these answers goes stale. Enumeration and the identity read are
@@ -1159,6 +1218,9 @@ capacity, its worktree lease, its named resources, and legacy-version
 exclusion. They are exceptional unsafe diagnostics. Do not use them to avoid a
 normal queue or to make a push proceed. Use them only when you have proved that
 no other gate, dashboard server, browser fixture, or mapped command can overlap.
+A completed parallel worker still waits as a live group anchor while its
+no-lock parent drains it. The worker tracks the parent's exact PID/start
+identity and exits if that parent dies, because no successor owns its cleanup.
 
 `AGENT_QUALITY_GATE_LOCK_HELD` remains an internal self-test path. The self-test
 exports `AGENT_QUALITY_GATE_LOCK=0` because its isolated fixture repositories
@@ -1185,11 +1247,11 @@ compatibility blocker clears. A verified matching success lets the hook's
 `--skip-if-fresh` path exit before it registers another request.
 
 **Heavy suites form barriers.** Dashboard coverage, its scoped `vitest related`
-substitute, browser work, production builds, size-limit work, and the dashboard,
-bridge, and indexer mutation baselines take all configured capacity. The
-mutation baselines stay there until overlap measurements support a lower
-weight. An older heavy command stops new ordinary admission, waits for active
-commands to drain, then runs alone. The weight-2 gate self-test reserves two
+substitute, browser work, production builds, and size-limit work take all
+configured capacity. The mutation baselines remain ordinary weight-1 work
+because their serial runtimes do not prove contention. An older heavy command
+stops new ordinary admission, waits for active commands to drain, then runs
+alone. The weight-2 gate self-test reserves two
 units when it becomes the oldest runnable weighted command. Cheap lint,
 typecheck, unit, and knip commands can otherwise overlap across worktrees.
 
@@ -1748,20 +1810,20 @@ GATE_TEST_FOCUS=routing-sources bash scripts/agent-quality-gate.test.sh
 GATE_TEST_FOCUS=routing-packaging,routing-docs bash scripts/agent-quality-gate.test.sh
 ```
 
-| Family               | Subject                                                                                                                 | Solo runtime |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------ |
-| `gate-contract`      | Pins on the gate's source text, classifier resolution, Turbo task-graph inputs, agent context check.                    | 2s           |
-| `coordinator`        | Coordinator protocol, fair weighted capacity, barriers, named resources, coalescing, and recovery.                      | 210s         |
-| `install-wiring`     | Pre-push hook installation, the install-marker library, the package-script pin validator.                               | 1s           |
-| `routing-packaging`  | Manifests, package-manager config, root package-script and dev-metadata classification, lockfile-importer scoping.      | 52s          |
-| `routing-sources`    | Source-path routing: scoped `vitest related`, indexer codegen order, shared-config blast radius, deploy/terraform arms. | 86s          |
-| `execution-phases`   | Phase order, fail-fast prerequisites, local parallelism, quality-setup, and scheduler classification.                   | 41s          |
-| `stamps-freshness`   | The fresh-run stamp: what busts it and what may reuse it.                                                               | 15s          |
-| `failure-output`     | Quiet failure output, stack traces, React Doctor, renames, the manifest-change refusal.                                 | 10s          |
-| `routing-docs`       | Documentation, agent context, code-health, Sentry and PR-tooling routing, including the `scripts/` symlink reach.       | 92s          |
-| `stamps-commands`    | Per-command stamps, always-rerun exemptions, command timeouts and interrupts.                                           | 27s          |
-| `execution-parallel` | Parallel teardown process groups, the production identity contract, prerequisite reuse.                                 | 51s          |
-| `lock-drain`         | Legacy compatibility lock: acquisition, stale-holder reclaim, drain obligations, and crash-point recovery.              | 319s         |
+| Family               | Subject                                                                                                                            | Solo runtime |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| `gate-contract`      | Pins on the gate's source text, classifier resolution, Turbo task-graph inputs, agent context check.                               | 2s           |
+| `coordinator`        | Coordinator protocol, fair weighted capacity, barriers, named resources, coalescing, and recovery.                                 | 210s         |
+| `install-wiring`     | Pre-push hook installation, the install-marker library, the package-script pin validator.                                          | 1s           |
+| `routing-packaging`  | Manifests, package-manager config, root package-script and dev-metadata classification, lockfile-importer scoping.                 | 52s          |
+| `routing-sources`    | Source-path routing: scoped `vitest related`, indexer codegen order, shared-config blast radius, deploy/terraform arms.            | 86s          |
+| `execution-phases`   | Phase order, fail-fast prerequisites, local parallelism, quality-setup, and scheduler classification.                              | 41s          |
+| `stamps-freshness`   | The fresh-run stamp: what busts it and what may reuse it.                                                                          | 15s          |
+| `failure-output`     | Quiet failure output, stack traces, React Doctor, renames, the manifest-change refusal.                                            | 10s          |
+| `routing-docs`       | Documentation, agent context, code-health, Sentry and PR-tooling routing, including the `scripts/` symlink reach.                  | 92s          |
+| `stamps-commands`    | Per-command stamps, always-rerun exemptions, command timeouts and interrupts.                                                      | 27s          |
+| `execution-parallel` | Parallel identity and process-group drains, detached-session lease ordering, the production identity contract, prerequisite reuse. | 51s          |
+| `lock-drain`         | Legacy compatibility lock: acquisition, stale-holder reclaim, drain obligations, and crash-point recovery.                         | 319s         |
 
 Rules that keep the focus honest:
 

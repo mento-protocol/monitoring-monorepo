@@ -78,6 +78,16 @@ export function registerRequest(
       { requestId: drainIdentityOwner.requestId },
     );
   }
+  const leaseDrainIdentityOwner = Object.values(coordinator.state.leases).find(
+    (lease) => lease.drainIdentity === drainIdentity,
+  );
+  if (leaseDrainIdentityOwner) {
+    throw new CoordinatorError(
+      "DRAIN_TOKEN_CONFLICT",
+      "drainIdentity belongs to another active lease",
+      { leaseId: leaseDrainIdentityOwner.leaseId },
+    );
+  }
   const singleflight = coordinator.state.singleflights[hash];
   if (singleflight && singleflight.fingerprint !== fingerprint) {
     throw new CoordinatorError(
@@ -211,6 +221,7 @@ function leaseView(coordinator, lease) {
   return {
     leaseId: lease.leaseId,
     requestId: lease.requestId,
+    drainIdentity: lease.drainIdentity,
     status: lease.status,
     sequence: lease.sequence,
     weight: lease.weight,
@@ -228,6 +239,7 @@ export function requestLease(coordinator, params, schedule, commit) {
   const {
     requestId,
     leaseId,
+    drainIdentity,
     capability,
     owner,
     weight = 1,
@@ -236,6 +248,7 @@ export function requestLease(coordinator, params, schedule, commit) {
     metadata = {},
   } = params;
   identifier(leaseId, "leaseId");
+  validateRunToken(drainIdentity, "drainIdentity");
   positiveInteger(weight, "weight");
   jsonSize(metadata, "metadata");
   const normalizedAllCapacity = Boolean(allCapacity);
@@ -273,6 +286,7 @@ export function requestLease(coordinator, params, schedule, commit) {
   if (existing) {
     if (
       existing.requestId !== requestId ||
+      existing.drainIdentity !== drainIdentity ||
       !identitiesEqual(existing.owner, owner) ||
       existing.weight !== effectiveWeight ||
       existing.allCapacity !== normalizedAllCapacity ||
@@ -288,9 +302,30 @@ export function requestLease(coordinator, params, schedule, commit) {
     }
     return leaseView(coordinator, existing);
   }
+  const requestDrainIdentityOwner = Object.values(
+    coordinator.state.requests,
+  ).find((candidate) => candidate.drainIdentity === drainIdentity);
+  if (requestDrainIdentityOwner) {
+    throw new CoordinatorError(
+      "DRAIN_TOKEN_CONFLICT",
+      "drainIdentity belongs to an active request",
+      { requestId: requestDrainIdentityOwner.requestId },
+    );
+  }
+  const leaseDrainIdentityOwner = Object.values(coordinator.state.leases).find(
+    (candidate) => candidate.drainIdentity === drainIdentity,
+  );
+  if (leaseDrainIdentityOwner) {
+    throw new CoordinatorError(
+      "DRAIN_TOKEN_CONFLICT",
+      "drainIdentity belongs to another active lease",
+      { leaseId: leaseDrainIdentityOwner.leaseId },
+    );
+  }
   const lease = {
     leaseId,
     requestId,
+    drainIdentity,
     owner: copy(owner),
     weight: effectiveWeight,
     allCapacity: normalizedAllCapacity,

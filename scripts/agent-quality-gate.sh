@@ -464,23 +464,35 @@ last_command_execution_seconds=0
 last_command_infrastructure_failed=false
 # Monotonic counter for unique per-command timeout marker paths.
 timeout_seq=0
+# Monotonic across all parallel phases so no command drain identity is reused
+# within one gate invocation.
+parallel_command_sequence=0
 # PIDs (command + watchdog) of any in-flight timed command in THIS process, so a
 # wrapper SIGINT/SIGTERM tears them down instead of leaking the watchdog's
 # background sleeps. Sequential commands run in the gate process; parallel
 # members run in their own process-group worker subshells, each maintaining its
 # own copy — which the parent's signal traps cannot see.
 active_timeout_pids=()
+active_timeout_drain_identity=""
 
 # Process-group IDs of the in-flight parallel workers. Non-interactive Bash job
 # control gives each worker a dedicated group whose ID equals its leader PID.
 # Group tracking survives the leader exiting and descendants reparenting, unlike
 # a process-tree walk rooted at that leader.
 active_worker_pgids=()
+# Drain identities align one-for-one with active_worker_pgids. A parallel
+# command can detach into a new process group, so the group alone is not a
+# complete cleanup handle.
+active_worker_drain_identities=()
+# Exact leader start identities align with the same registry. They let the
+# active parent validate a live no-lock sentinel without trusting a bare PGID.
+active_worker_start_identities=()
 
 # A signal can arrive after Bash creates a parallel worker but before the parent
 # records its process group. Defer INT/TERM handling across that short registry
 # update, then replay the first pending signal after the group is reachable.
 worker_registration_in_progress=0
+worker_settlement_in_progress=0
 pending_terminating_signal=""
 worker_registration_test_barrier="${AGENT_QUALITY_GATE_TEST_WORKER_REGISTRATION_BARRIER:-}"
 if [[ -n "$worker_registration_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
@@ -527,16 +539,57 @@ collect_process_tree() {
 teardown_active_timeouts() {
   local pid
   local pgid
+  local drain_identity
+  local worker_start
+  local clear_request_marker=0
+  local timeout_drain_identity="$active_timeout_drain_identity"
   local -a roots=("${active_timeout_pids[@]+"${active_timeout_pids[@]}"}")
   local -a worker_pgids=("${active_worker_pgids[@]+"${active_worker_pgids[@]}"}")
+  local -a worker_drain_identities=("${active_worker_drain_identities[@]+"${active_worker_drain_identities[@]}"}")
+  local -a worker_start_identities=("${active_worker_start_identities[@]+"${active_worker_start_identities[@]}"}")
   active_timeout_pids=()
+  active_timeout_drain_identity=""
   active_worker_pgids=()
-  [[ -n "${roots[*]-}" || -n "${worker_pgids[*]-}" ]] || return 0
+  active_worker_drain_identities=()
+  active_worker_start_identities=()
+  [[ -n "${roots[*]-}" || -n "${worker_pgids[*]-}" ||
+    -n "${worker_drain_identities[*]-}" ||
+    -n "${worker_start_identities[*]-}" ||
+    -n "$timeout_drain_identity" ]] || return 0
+  if [[ "${#worker_pgids[@]}" -ne "${#worker_drain_identities[@]}" ||
+    "${#worker_pgids[@]}" -ne "${#worker_start_identities[@]}" ]]; then
+    echo "error: parallel worker cleanup registry is inconsistent." >&2
+    return 0
+  fi
+
+  # Persist and drain every exact command identity before any signal can
+  # destroy its last discoverable ancestor. A failed drain retains
+  # its recovery evidence. In that case, leave all remaining processes to the
+  # preserved legacy owner or coordinator obligations.
+  if [[ -n "$timeout_drain_identity" ]]; then
+    if [[ "$timeout_drain_identity" == "${gate_run_id:-$gate_lock_token}" ]]; then
+      clear_request_marker=1
+    fi
+    if ! drain_completed_command_identity \
+      "$timeout_drain_identity" "$clear_request_marker"; then
+      return 0
+    fi
+  fi
+  local worker_index=0
+  for drain_identity in "${worker_drain_identities[@]+"${worker_drain_identities[@]}"}"; do
+    pgid="${worker_pgids[$worker_index]}"
+    worker_start="${worker_start_identities[$worker_index]}"
+    worker_index=$((worker_index + 1))
+    if ! drain_completed_parallel_command \
+      "$drain_identity" "$pgid" "$worker_start"; then
+      return 0
+    fi
+  done
   # Snapshot every descendant BEFORE signalling: TERM kills intermediate
   # subshells first, which reparents a SIGTERM-ignoring survivor away from the
   # tree, so a post-TERM re-walk would miss it. The KILL pass targets the
-  # saved pid list, not a fresh walk. Parallel workers do not need a snapshot:
-  # their registered process groups remain addressable after reparenting.
+  # saved pid list, not a fresh walk. Parallel worker groups were already
+  # folded into each command identity's durable capture above.
   local -a tree=()
   local -a tree_identities=()
   local host_identities=""
@@ -556,9 +609,6 @@ teardown_active_timeouts() {
   done
   for pid in "${tree[@]+"${tree[@]}"}"; do
     kill "-TERM" "$pid" 2>/dev/null || true
-  done
-  for pgid in "${worker_pgids[@]+"${worker_pgids[@]}"}"; do
-    kill -TERM -- "-$pgid" 2>/dev/null || true
   done
   # Same TERM-then-KILL grace as run_with_timeout's watchdog: a manual
   # interrupt (Ctrl-C/TERM to the gate) must not leave a SIGTERM-ignoring
@@ -585,17 +635,10 @@ teardown_active_timeouts() {
     fi
     kill "-KILL" "$pid" 2>/dev/null || true
   done
-  # The group pass stays PID-group-only by design: a group id is not a
-  # process, so it has no start time to pin, and skipping the group KILL when
-  # its leader has died would orphan exactly the reparented survivors this
-  # pass exists to reach. Reuse needs the recycled pid to become a group
-  # LEADER inside the same three seconds, a strictly narrower window than the
-  # per-PID case above.
+  # Every worker group was folded into its command identity's durable capture
+  # and drained above. A bare PGID is reusable and has no start identity, so do
+  # not signal it after the exact drain has proved the group empty.
   for pgid in "${worker_pgids[@]+"${worker_pgids[@]}"}"; do
-    kill -KILL -- "-$pgid" 2>/dev/null || true
-    # The group leader is the direct child the gate can reap. If it already
-    # exited, wait returns immediately; the negative-PGID signals above still
-    # reached any surviving reparented descendants.
     wait "$pgid" 2>/dev/null || true
   done
 }
@@ -1127,6 +1170,23 @@ gate_lock_process_start() {
   gate_lock_normalize_process_start "${snapshot% *}"
 }
 
+# Read start identity and process-group ID from one process-table row. Group
+# capture uses the pair so a PID replacement between two independent `ps`
+# calls cannot supply one field from each process.
+gate_lock_process_start_pgid_snapshot() {
+  local pid="$1"
+  local snapshot start pgid
+  [[ -n "$pid" ]] || return 0
+  snapshot="$(TZ=UTC LC_ALL=C ps -o lstart= -o pgid= -p "$pid" 2>/dev/null |
+    head -n1 | sed 's/^[[:blank:]]*//; s/[[:blank:]]*$//' || true)"
+  [[ "$snapshot" == *" "* ]] || return 0
+  pgid="${snapshot##* }"
+  [[ "$pgid" =~ ^[1-9][0-9]*$ ]] || return 0
+  start="$(gate_lock_normalize_process_start "${snapshot% *}")"
+  [[ -n "$start" ]] || return 0
+  printf '%s|%s\n' "$start" "$pgid"
+}
+
 gate_lock_process_state() {
   local snapshot
   snapshot="$(gate_lock_process_snapshot "$1")"
@@ -1302,6 +1362,27 @@ gate_drain_scan_error="agentqg-scan-failed"
 # The PIDs this run's handles named on the current pass, read by the
 # membership check deep inside the recursive walk.
 gate_drain_tagged_now=""
+# A live parallel parent can also seed the drain from its registered worker
+# process group. This captures a same-group descendant that closed every
+# inherited identity handle before the first signal destroys its ancestor.
+gate_drain_seed_pgid=""
+# The active parent records the worker leader's start identity at fork time.
+# This lets a no-lock drain validate its live group anchor without handles.
+gate_drain_seed_start=""
+# Set only while a snapshot tied to a live token holder is being folded into
+# the durable capture. It lets sibling group members prove membership without
+# treating a bare, reusable PGID as an identity on later passes.
+gate_drain_capture_group_pgid=""
+# The group leader whose exact start identity authorised the current group
+# snapshot. Every candidate membership check revalidates this anchor after it
+# observes the candidate. This prevents a dead group ID from being reused
+# between the snapshot and capture.
+gate_drain_capture_group_anchor_pid=""
+gate_drain_capture_group_anchor_start=""
+# Set when a group membership check cannot distinguish exit from an unreadable
+# identity. A confirmed out-of-group PID can be skipped; an ambiguous one must
+# remain as fail-closed evidence.
+gate_drain_membership_unverified=0
 
 # Recorded in place of a start time on a host that cannot produce one at all —
 # a sandbox without `ps`. It has to be distinguishable from an empty identity,
@@ -1344,13 +1425,16 @@ gate_lock_identity_source_available() {
 # subshell.
 gate_drain_refresh_tagged() {
   local token="$1"
-  gate_drain_tagged_now="$(gate_run_tagged_pids "$token")"
-  case " ${gate_drain_tagged_now} " in
-    *" ${gate_drain_scan_error} "*)
+  local raw candidate normalized=""
+  raw="$(gate_run_tagged_pids "$token")"
+  for candidate in $raw; do
+    if [[ "$candidate" == "$gate_drain_scan_error" ]]; then
       gate_drain_scan_failed=1
-      gate_drain_tagged_now="${gate_drain_tagged_now//${gate_drain_scan_error}/}"
-      ;;
-  esac
+      continue
+    fi
+    normalized="${normalized}${candidate} "
+  done
+  gate_drain_tagged_now="$normalized"
 }
 
 # Is this PID still one of ours, asked after its identity was read? Two answers
@@ -1361,14 +1445,80 @@ gate_drain_refresh_tagged() {
 gate_drain_membership_holds() {
   local pid="$1"
   local parent="${2:-}"
-  local candidate
+  local recorded_start="${3:-}"
+  local candidate candidate_snapshot candidate_start candidate_pgid
+  local anchor_snapshot anchor_start anchor_pgid
+  gate_drain_membership_unverified=0
+
+  if [[ "$gate_drain_capture_group_pgid" =~ ^[1-9][0-9]*$ ]]; then
+    # A group snapshot is authorised by one live, exact group leader. Do not
+    # accept the cached numeric tag or parent relation until both this
+    # candidate and that leader are revalidated. The leader can otherwise exit
+    # and its PID/PGID can be reused between the snapshot and this capture.
+    if [[ "$recorded_start" == "$gate_lock_identity_unavailable" ]]; then
+      gate_lock_identity_source_available && return 1
+      candidate_pgid="$(ps -o pgid= -p "$pid" 2>/dev/null |
+        head -n1 | tr -d '[:space:]' || true)"
+    else
+      candidate_snapshot="$(gate_lock_process_start_pgid_snapshot "$pid")"
+      if [[ "$candidate_snapshot" != *"|"* ]]; then
+        kill -0 "$pid" 2>/dev/null && gate_drain_membership_unverified=1
+        return 1
+      fi
+      candidate_start="${candidate_snapshot%|*}"
+      candidate_pgid="${candidate_snapshot##*|}"
+      recorded_start="$(gate_lock_normalize_process_start "$recorded_start")"
+      [[ -n "$recorded_start" && "$candidate_start" == "$recorded_start" ]] ||
+        return 1
+    fi
+
+    # Group recovery covers only current members of the pinned worker group.
+    # A child relation through a snapshot PID is not enough here: that parent
+    # PID can exit and be reused before the recursive walk observes its child.
+    # Descendants outside the group remain discoverable through inherited
+    # command/request handles; a detached process that drops every handle is
+    # outside this recovery guarantee.
+    [[ "$candidate_pgid" == "$gate_drain_capture_group_pgid" ]] || return 1
+
+    if [[ "$gate_drain_capture_group_anchor_start" == "$gate_lock_identity_unavailable" ]]; then
+      gate_lock_identity_source_available && return 1
+      if ! kill -0 "$gate_drain_capture_group_anchor_pid" 2>/dev/null; then
+        gate_drain_membership_unverified=1
+        return 1
+      fi
+      anchor_pgid="$(ps -o pgid= \
+        -p "$gate_drain_capture_group_anchor_pid" 2>/dev/null |
+        head -n1 | tr -d '[:space:]' || true)"
+      if [[ "$anchor_pgid" != "$gate_drain_capture_group_pgid" ]]; then
+        gate_drain_membership_unverified=1
+        return 1
+      fi
+    else
+      anchor_snapshot="$(gate_lock_process_start_pgid_snapshot \
+        "$gate_drain_capture_group_anchor_pid")"
+      if [[ "$anchor_snapshot" != *"|"* ]]; then
+        gate_drain_membership_unverified=1
+        return 1
+      fi
+      anchor_start="${anchor_snapshot%|*}"
+      anchor_pgid="${anchor_snapshot##*|}"
+      if [[ "$anchor_start" != "$gate_drain_capture_group_anchor_start" ||
+        "$anchor_pgid" != "$gate_drain_capture_group_pgid" ]]; then
+        gate_drain_membership_unverified=1
+        return 1
+      fi
+    fi
+    return 0
+  fi
+
   for candidate in ${gate_drain_tagged_now}; do
     [[ "$candidate" == "$pid" ]] && return 0
   done
-  [[ -n "$parent" ]] || return 1
-  for candidate in $(pgrep -P "$parent" 2>/dev/null || true); do
-    [[ "$candidate" == "$pid" ]] && return 0
-  done
+  if [[ -n "$parent" ]]; then
+    for candidate in $(pgrep -P "$parent" 2>/dev/null || true); do
+      [[ "$candidate" == "$pid" ]] && return 0
+    done
+  fi
   return 1
 }
 
@@ -1399,13 +1549,17 @@ capture_process_tree() {
       return 0
     fi
     start="$gate_lock_identity_unavailable"
-  elif ! gate_drain_membership_holds "$root_pid" "$from_parent"; then
+  elif ! gate_drain_membership_holds "$root_pid" "$from_parent" "$start"; then
     # Enumeration and identity are two reads with a gap between them, and a PID
     # recycled inside it would be recorded under a stranger's identity that
     # every later check then confirms. Re-asking whether this PID is still one
     # of ours closes that in the direction the rest of this path uses: an
     # answer that cannot be confirmed is recorded with no identity, which is
     # never signalled and holds the drain open rather than discharging it.
+    if [[ "$gate_drain_capture_group_pgid" =~ ^[1-9][0-9]*$ &&
+      "$gate_drain_membership_unverified" -eq 0 ]]; then
+      return 0
+    fi
     start=""
   fi
   entry="${root_pid}|${start}"
@@ -1422,10 +1576,124 @@ capture_process_tree() {
   fi
 }
 
+gate_drain_capture_seed_group() {
+  local token="$1"
+  local snapshot pid pgid remainder tagged tagged_pgid groups="" group
+  local group_anchor_start group_anchors=""
+  local seed_current seed_snapshot_pgid
+  local tagged_start tagged_current tagged_after tagged_after_clean=""
+  local tagged_candidate tagged_identities=""
+  local identity_source_available=0
+  [[ "$gate_drain_seed_pgid" =~ ^[1-9][0-9]*$ ||
+    -n "${gate_drain_tagged_now//[[:space:]]/}" ]] || return 0
+  if gate_lock_identity_source_available; then
+    identity_source_available=1
+  fi
+  # Pin each tagged PID before the process-group snapshot. A tag scan and a
+  # later `ps` row are independent observations. Without the start identity
+  # between them, PID reuse can make an unrelated group leader look like the
+  # recovery anchor.
+  for tagged in $gate_drain_tagged_now; do
+    [[ "$tagged" =~ ^[1-9][0-9]*$ ]] || continue
+    tagged_start="$(gate_lock_process_start "$tagged")"
+    if [[ -z "$tagged_start" ]]; then
+      [[ "$identity_source_available" -eq 0 ]] || continue
+      tagged_start="$gate_lock_identity_unavailable"
+    fi
+    tagged_identities="${tagged_identities}${tagged}|${tagged_start}
+"
+  done
+  if ! snapshot="$(TZ=UTC LC_ALL=C ps -axo pid=,pgid= 2>/dev/null)"; then
+    gate_drain_scan_failed=1
+    return 0
+  fi
+  # Re-read the handles after the group snapshot. A tagged PID can seed a
+  # group only if the same process held the token on both sides of the
+  # snapshot. Keep this list local. The caller captures newly tagged roots on
+  # its next pass.
+  tagged_after="$(gate_run_tagged_pids "$token")"
+  for tagged_candidate in $tagged_after; do
+    if [[ "$tagged_candidate" == "$gate_drain_scan_error" ]]; then
+      gate_drain_scan_failed=1
+      continue
+    fi
+    tagged_after_clean="${tagged_after_clean}${tagged_candidate} "
+  done
+  tagged_after="$tagged_after_clean"
+  if [[ "$gate_drain_seed_pgid" =~ ^[1-9][0-9]*$ &&
+    -n "$gate_drain_seed_start" ]]; then
+    seed_snapshot_pgid="$(awk -v target="$gate_drain_seed_pgid" \
+      '$1 == target && NF == 2 { print $2; exit }' <<< "$snapshot")"
+    if [[ "$seed_snapshot_pgid" == "$gate_drain_seed_pgid" ]]; then
+      seed_current="$(gate_lock_process_start "$gate_drain_seed_pgid")"
+      if [[ "$seed_current" == "$gate_drain_seed_start" ]] || {
+        [[ "$gate_drain_seed_start" == "$gate_lock_identity_unavailable" ]] &&
+          ! gate_lock_identity_source_available &&
+          kill -0 "$gate_drain_seed_pgid" 2>/dev/null
+      }; then
+        groups="${gate_drain_seed_pgid} "
+        group_anchors="${gate_drain_seed_pgid}|${gate_drain_seed_start}
+"
+      fi
+    fi
+  fi
+  # Crash recovery has no parent registry, so it derives a group only from a
+  # tagged group leader whose PID/start identity survived the complete
+  # snapshot. The active parent uses the separately validated explicit seed.
+  while IFS='|' read -r tagged tagged_start; do
+    [[ "$tagged" =~ ^[1-9][0-9]*$ && -n "$tagged_start" ]] || continue
+    case " ${tagged_after} " in
+      *" ${tagged} "*) : ;;
+      *) continue ;;
+    esac
+    tagged_pgid="$(awk -v target="$tagged" \
+      '$1 == target && NF == 2 { print $2; exit }' <<< "$snapshot")"
+    [[ "$tagged_pgid" =~ ^[1-9][0-9]*$ ]] || continue
+    tagged_current="$(gate_lock_process_start "$tagged")"
+    if [[ "$tagged_start" == "$gate_lock_identity_unavailable" ]]; then
+      [[ "$identity_source_available" -eq 0 ]] || continue
+    elif [[ -z "$tagged_current" || "$tagged_current" != "$tagged_start" ]]; then
+      continue
+    fi
+    if [[ "$tagged_pgid" == "$tagged" ]]; then
+      case " ${groups} " in
+        *" ${tagged_pgid} "*) : ;;
+        *)
+          groups="${groups}${tagged_pgid} "
+          group_anchors="${group_anchors}${tagged_pgid}|${tagged_start}
+"
+          ;;
+      esac
+    fi
+  done << EOF
+$tagged_identities
+EOF
+  while IFS='|' read -r group group_anchor_start; do
+    [[ "$group" =~ ^[1-9][0-9]*$ && -n "$group_anchor_start" ]] || continue
+    gate_drain_capture_group_pgid="$group"
+    gate_drain_capture_group_anchor_pid="$group"
+    gate_drain_capture_group_anchor_start="$group_anchor_start"
+    while read -r pid pgid remainder; do
+      [[ -z "$remainder" && "$pid" =~ ^[1-9][0-9]*$ &&
+        "$pgid" == "$group" ]] || continue
+      capture_process_tree "$pid"
+    done <<< "$snapshot"
+    gate_drain_capture_group_pgid=""
+    gate_drain_capture_group_anchor_pid=""
+    gate_drain_capture_group_anchor_start=""
+  done << EOF
+$group_anchors
+EOF
+}
+
 drain_condemned_run_commands() {
   local token="$1"
   local drain_context="${2:-stale-run}"
+  local seed_pgid="${3:-}"
+  local seed_start="${4:-}"
+  local quiet_seed_only="${5:-0}"
   local wrapper entry pid recorded current alive alive_identities recycled unverified captured_file
+  local captured_pid capture_has_non_seed=0
   local waited=0
   local drain_started_at
   local announced=0
@@ -1445,6 +1713,18 @@ drain_condemned_run_commands() {
     drain_failure_verdict="A mapped command ran, but its descendants were not confirmed gone"
   fi
   [[ -n "$token" ]] || return 0
+  if [[ -n "$seed_pgid" && ! "$seed_pgid" =~ ^[1-9][0-9]*$ ]]; then
+    echo "error: mapped-command drain received an invalid worker process group." >&2
+    gate_drain_fail_for_context "$drain_context"
+    return $?
+  fi
+  if [[ "$quiet_seed_only" != 0 && "$quiet_seed_only" != 1 ]]; then
+    echo "error: mapped-command drain received an invalid quiet-sentinel flag." >&2
+    gate_drain_fail_for_context "$drain_context"
+    return $?
+  fi
+  gate_drain_seed_pgid="$seed_pgid"
+  gate_drain_seed_start="$seed_start"
   drain_started_at="$(date +%s)"
 
   # Enumerate before signalling anything. Only the wrapper carries the tag, so
@@ -1527,11 +1807,13 @@ drain_condemned_run_commands() {
   for wrapper in $gate_drain_tagged_now; do
     capture_process_tree "$wrapper"
   done
+  gate_drain_capture_seed_group "$token"
   sleep 0.2
   gate_drain_refresh_tagged "$token"
   for wrapper in $gate_drain_tagged_now; do
     capture_process_tree "$wrapper"
   done
+  gate_drain_capture_seed_group "$token"
   if [[ -z "${gate_drain_capture//[[:space:]]/}" && "$gate_drain_scan_failed" -eq 0 ]]; then
     [[ -z "$captured_file" ]] || rm -f "$captured_file"
     [[ -z "$gate_lock_root_dir" ]] || rm -f "${gate_lock_root_dir}/holder.${token}"
@@ -1556,8 +1838,20 @@ drain_condemned_run_commands() {
     return $?
   fi
 
-  echo "$drain_start_message"
-  announced=1
+  if [[ "$quiet_seed_only" -eq 1 ]]; then
+    while IFS='|' read -r captured_pid _; do
+      [[ -z "$captured_pid" || "$captured_pid" == "$seed_pgid" ]] && continue
+      capture_has_non_seed=1
+      break
+    done << EOF
+$gate_drain_capture
+EOF
+  fi
+  if [[ "$quiet_seed_only" -eq 0 || "$capture_has_non_seed" -eq 1 ||
+    "$gate_drain_scan_failed" -ne 0 ]]; then
+    echo "$drain_start_message"
+    announced=1
+  fi
   recycled=""
 
   while :; do
@@ -1572,6 +1866,17 @@ drain_condemned_run_commands() {
     for wrapper in $gate_drain_tagged_now; do
       capture_process_tree "$wrapper"
     done
+    gate_drain_capture_seed_group "$token"
+    if [[ "$quiet_seed_only" -eq 1 && "$announced" -eq 0 ]]; then
+      while IFS='|' read -r captured_pid _; do
+        [[ -z "$captured_pid" || "$captured_pid" == "$seed_pgid" ]] && continue
+        echo "$drain_start_message"
+        announced=1
+        break
+      done << EOF
+$gate_drain_capture
+EOF
+    fi
     if ! gate_drain_test_refresh_barrier; then
       echo "error: the test-only drain refresh barrier did not release." >&2
       gate_drain_fail_for_context "$drain_context"
@@ -1710,7 +2015,14 @@ EOF
     # After the first pass the tag carrier is usually dead, which is exactly
     # the state a successor has to be able to inherit.
     [[ "$waited" -ne 0 ]] || gate_lock_test_crash after-drain-term
-    sleep 1
+    if [[ "$quiet_seed_only" -eq 1 && "$announced" -eq 0 ]]; then
+      # A completed parallel worker stays alive only as the exact group anchor.
+      # TERM should end that single blocked shell immediately. Poll quickly so
+      # the safety sentinel does not add one second to every mapped command.
+      sleep 0.05
+    else
+      sleep 1
+    fi
     # Clock, not the sum of requested sleeps: a drain that is descheduled
     # should notice that its budget went with the time, and should print the
     # time that actually passed.
@@ -1734,6 +2046,7 @@ EOF
     for pid in $alive $gate_drain_tagged_now; do
       capture_process_tree "$pid"
     done
+    gate_drain_capture_seed_group "$token"
   done
 
   # Discharged: every process in the captured set is gone or belongs to
@@ -1750,18 +2063,27 @@ EOF
   fi
 }
 
-drain_completed_sequential_command() {
-  local token="${gate_run_id:-$gate_lock_token}"
+drain_completed_command_identity() {
+  local token="$1"
+  local clear_request_marker="${2:-0}"
+  local seed_pgid="${3:-}"
+  local seed_start="${4:-}"
+  local quiet_seed_only="${5:-0}"
   local condemned_dir=""
   local coordinator_active=0
+  local legacy_lock_active=0
   [[ -n "$token" ]] || return 0
 
   if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
     gate_coordinator_is_active; then
     coordinator_active=1
   fi
+  if [[ -n "$gate_lock_dir" && -n "$gate_lock_root_dir" &&
+    -n "$gate_lock_token" ]]; then
+    legacy_lock_active=1
+  fi
 
-  if [[ "$coordinator_active" -eq 0 ]]; then
+  if [[ "$legacy_lock_active" -eq 1 ]]; then
     # One assignment-only command closes the signal window between the two
     # guards: cleanup must preserve both the marker and the legacy owner until
     # the recovery obligation exists on disk.
@@ -1777,22 +2099,52 @@ drain_completed_sequential_command() {
       return 2
     }
     gate_cleanup_preserve_legacy_lock=0
-  else
+  elif [[ "$coordinator_active" -eq 1 ]]; then
     # The coordinator journal already contains this request's drain token and
     # lease. Preserve its marker until normal cleanup or recovery succeeds.
+    gate_active_command_drain_in_progress=1
+  else
+    # An explicit --no-lock run has no durable recovery owner. It still drains
+    # its exact live identity before returning, but it has no lock record to
+    # preserve or obligation directory to publish into.
     gate_active_command_drain_in_progress=1
   fi
 
   # The active drain stays in the gate process. A second drainer for the same
   # token must never race this one over its append-only capture file.
-  drain_condemned_run_commands "$token" active-command || return $?
-  if [[ "$coordinator_active" -eq 0 ]]; then
+  drain_condemned_run_commands \
+    "$token" active-command "$seed_pgid" "$seed_start" \
+    "$quiet_seed_only" || return $?
+  if [[ "$legacy_lock_active" -eq 1 ]]; then
     rm -f "${condemned_dir}/${token}"
   fi
-  # A successful drain removes the marker whose descriptor named reparented
-  # descendants. The next command creates a new marker before it starts.
-  gate_run_marker_file=""
+  # The drain removes holder.<token>. A sequential command uses the request
+  # marker itself, so clear that cached path. Parallel commands use their own
+  # markers and leave the request-wide recovery marker in place.
+  if [[ "$clear_request_marker" -eq 1 ]]; then
+    gate_run_marker_file=""
+  fi
   gate_active_command_drain_in_progress=0
+}
+
+drain_completed_sequential_command() {
+  local token="${gate_run_id:-$gate_lock_token}"
+  local clear_request_marker=1
+  if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+    gate_coordinator_is_active &&
+    [[ -n "${gate_coordinator_active_drain_identity:-}" ]]; then
+    token="$gate_coordinator_active_drain_identity"
+    clear_request_marker=0
+  fi
+  drain_completed_command_identity "$token" "$clear_request_marker"
+}
+
+drain_completed_parallel_command() {
+  local drain_identity="$1"
+  local worker_pgid="${2:-}"
+  local worker_start="${3:-}"
+  drain_completed_command_identity \
+    "$drain_identity" 0 "$worker_pgid" "$worker_start" 1
 }
 
 assert_gate_run_lock_still_ours_legacy() {
@@ -2324,7 +2676,8 @@ trap cleanup_tmpfiles EXIT
 
 on_terminating_signal() {
   local signal="$1"
-  if [[ "$worker_registration_in_progress" -eq 1 ]]; then
+  if [[ "$worker_registration_in_progress" -eq 1 ||
+    "$worker_settlement_in_progress" -eq 1 ]]; then
     [[ -n "$pending_terminating_signal" ]] ||
       pending_terminating_signal="$signal"
     return 0
@@ -2345,15 +2698,16 @@ finish_worker_registration() {
   fi
 }
 
-drain_worker_process_group() {
-  local pgid="$1"
-  if kill -0 -- "-$pgid" 2>/dev/null; then
-    kill -TERM -- "-$pgid" 2>/dev/null || true
-    sleep 3
-    kill -KILL -- "-$pgid" 2>/dev/null || true
+finish_worker_settlement() {
+  local signal
+  worker_settlement_in_progress=0
+  if [[ -n "$pending_terminating_signal" ]]; then
+    signal="$pending_terminating_signal"
+    pending_terminating_signal=""
+    on_terminating_signal "$signal"
   fi
-  wait "$pgid" 2>/dev/null || true
 }
+
 trap 'on_terminating_signal INT' INT
 trap 'on_terminating_signal TERM' TERM
 
@@ -3562,6 +3916,7 @@ monitor_sequential_autoreview_progress() {
 run_with_timeout() {
   local command="$1"
   local deferred_lease_file="${2:-}"
+  local command_drain_identity="${3:-}"
   local cmd_pid
   local watchdog_pid
   local rc
@@ -3572,7 +3927,13 @@ run_with_timeout() {
   local command_started_at
   local command_finished_at
   local coordinator_marker="${gate_coordinator_marker_file:-}"
+  local request_marker command_marker command_tag request_tag
   local coordinator_release_deferred=0
+  local close_parallel_worker_control_fd=0
+
+  if [[ -n "$deferred_lease_file" ]]; then
+    close_parallel_worker_control_fd=1
+  fi
 
   # A `wait` that reaps a SIGTERM/SIGKILL-killed child makes bash re-raise that
   # signal at the next `return`, which would kill the gate. Run the reaping with
@@ -3586,8 +3947,18 @@ run_with_timeout() {
   last_command_timed_out=false
   last_command_execution_seconds=0
   last_command_infrastructure_failed=false
+  if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+    gate_coordinator_is_active && [[ -z "$command_drain_identity" ]]; then
+    parallel_command_sequence=$((parallel_command_sequence + 1))
+    if ! command_drain_identity="$(make_parallel_command_drain_identity "$parallel_command_sequence")"; then
+      echo "error: could not create a safe command drain identity." >&2
+      last_command_infrastructure_failed=true
+      [[ "$had_errexit" == 1 ]] && set -e
+      return 2
+    fi
+  fi
   if declare -F gate_coordinator_before_command >/dev/null 2>&1; then
-    gate_coordinator_before_command "$command"
+    gate_coordinator_before_command "$command" "$command_drain_identity"
     rc=$?
     if [[ "$rc" -ne 0 ]]; then
       last_command_infrastructure_failed=true
@@ -3629,12 +4000,51 @@ run_with_timeout() {
   gate_run_ensure_marker \
     "The mapped command did not run" \
     "The mapped command did not start."
+  request_marker="$gate_run_marker_file"
+  request_tag="$(gate_run_request_tag)"
+  command_marker="$request_marker"
+  command_tag="$(gate_run_command_tag)"
+  if [[ -n "$command_drain_identity" ]]; then
+    if ! gate_lock_token_is_wellformed "$command_drain_identity"; then
+      echo "error: the parallel command drain identity is malformed." >&2
+      last_command_infrastructure_failed=true
+      [[ "$had_errexit" == 1 ]] && set -e
+      return 2
+    fi
+    if ! gate_run_create_marker_for_identity \
+      "$command_drain_identity" \
+      "The mapped command did not run" \
+      "The mapped command did not start." 0; then
+      if declare -F gate_coordinator_abandon_active_lease >/dev/null 2>&1; then
+        gate_coordinator_abandon_active_lease || true
+      fi
+      last_command_infrastructure_failed=true
+      [[ "$had_errexit" == 1 ]] && set -e
+      return 2
+    fi
+    command_marker="$gate_run_created_marker_file"
+    if declare -p gate_coordinator_active_drain_marker >/dev/null 2>&1; then
+      gate_coordinator_active_drain_marker="$command_marker"
+    fi
+    command_tag="agentqg:${command_drain_identity}"
+    if [[ -n "$deferred_lease_file" && -n "$command_marker" ]] &&
+      ! exec 18< "$command_marker"; then
+      echo "error: could not retain the parallel command marker." >&2
+      if declare -F gate_coordinator_abandon_active_lease >/dev/null 2>&1; then
+        gate_coordinator_abandon_active_lease || true
+      fi
+      last_command_infrastructure_failed=true
+      [[ "$had_errexit" == 1 ]] && set -e
+      return 2
+    fi
+  fi
+  active_timeout_drain_identity="${command_drain_identity:-${gate_run_id:-$gate_lock_token}}"
   command_started_at="$(date +%s)"
   if declare -p gate_coordinator_recovery_drain_context >/dev/null 2>&1; then
     gate_coordinator_recovery_drain_context="active-command"
   fi
-  AGENTQG_RUN="$(gate_run_command_tag)" \
-    AGENTQG_REQUEST="$(gate_run_request_tag)" \
+  AGENTQG_RUN="$command_tag" \
+    AGENTQG_REQUEST="$request_tag" \
     bash -c '
       if [[ -n "$3" ]]; then
         # A marker this wrapper was given but cannot hold open is a refusal,
@@ -3648,19 +4058,32 @@ run_with_timeout() {
       fi
       if [[ -n "$4" && "$4" != "$3" ]]; then
         if [[ ! -r "$4" ]]; then
-          echo "error: cannot open the coordinator marker $4; refusing to start the command" >&2
+          echo "error: cannot open the request marker $4; refusing to start the command" >&2
           exit 127
         fi
         exec 8< "$4"
       fi
-      if [[ "$5" == 1 ]]; then
+      if [[ -n "$5" && "$5" != "$3" && "$5" != "$4" ]]; then
+        if [[ ! -r "$5" ]]; then
+          echo "error: cannot open the coordinator marker $5; refusing to start the command" >&2
+          exit 127
+        fi
+        exec 6< "$5"
+      fi
+      if [[ "$6" == 1 ]]; then
         exec 7>&-
+      fi
+      if [[ "$7" == 1 ]]; then
+        # fd17 is the private parallel-worker launch/sentinel pipe. Mapped
+        # code must never inherit a writer that can release its group anchor.
+        exec 17>&-
       fi
       eval "$2"
       exit $?
-    ' "$(gate_run_command_tag)" "$(gate_run_request_tag)" \
-      "$command" "$gate_run_marker_file" "$coordinator_marker" \
-      "$gate_coordinator_stdout_reserved" &
+    ' "$command_tag" "$request_tag" \
+      "$command" "$command_marker" "$request_marker" "$coordinator_marker" \
+      "$gate_coordinator_stdout_reserved" \
+      "$close_parallel_worker_control_fd" &
   cmd_pid=$!
   # Run the watchdog via `bash -c` (which execs) rather than a `( … ) &`
   # subshell. A forked subshell inherits bash's saved copy of the caller's
@@ -3672,6 +4095,9 @@ run_with_timeout() {
   # kill is inlined because bash -c cannot see this script's functions.
   bash -c '
     exec 7>&-
+    if [[ "$6" == 1 ]]; then
+      exec 17>&-
+    fi
     request_tag="$1"
     cmd_pid="$2"
     timeout_secs="$3"
@@ -3740,8 +4166,9 @@ EOF_KILL
     # re-walk would miss it. The KILL pass targets the saved list.
     kill_tree "$cmd_pid"
     exit 0
-  ' "$(gate_run_command_tag)" "$(gate_run_request_tag)" \
-    "$cmd_pid" "$command_timeout_seconds" "$timeout_marker" "$$" >/dev/null 2>&1 &
+  ' "$command_tag" "$request_tag" \
+    "$cmd_pid" "$command_timeout_seconds" "$timeout_marker" "$$" \
+    "$close_parallel_worker_control_fd" >/dev/null 2>&1 &
   watchdog_pid=$!
   active_timeout_pids=("$cmd_pid" "$watchdog_pid")
 
@@ -3762,10 +4189,17 @@ EOF_KILL
   active_timeout_pids=()
   if [[ -z "$deferred_lease_file" ]]; then
     # A sequential wrapper can exit after it reparents a descendant. Keep the
-    # scheduler lease until the run's inherited handles prove that no process
-    # from this command remains. Parallel workers defer release to their parent,
-    # which drains the registered worker process group before releasing.
+    # scheduler lease until inherited handles prove that no process from this
+    # command remains. Parallel workers defer the same identity drain and lease
+    # release to their parent after the registered worker group settles.
     drain_completed_sequential_command || drain_rc=$?
+    if [[ "$drain_rc" -eq 0 ]]; then
+      active_timeout_drain_identity=""
+    fi
+  else
+    # The parallel parent owns the registered identity and lease settlement.
+    # Do not let this worker's EXIT trap race that parent drain.
+    active_timeout_drain_identity=""
   fi
   command_finished_at="$(date +%s)"
   last_command_execution_seconds=$((command_finished_at - command_started_at))
@@ -4016,11 +4450,13 @@ run_mapped_command_to_files() {
   local timeout_file="$5"
   local infrastructure_file="$6"
   local lease_file="$7"
+  local command_drain_identity="$8"
   local elapsed
   local exit_code
 
   set +e
-  run_with_timeout "$command" "$lease_file" > "$output_file" 2>&1
+  run_with_timeout "$command" "$lease_file" "$command_drain_identity" \
+    > "$output_file" 2>&1
   exit_code=$?
   set -e
   elapsed="$last_command_execution_seconds"
@@ -4066,6 +4502,9 @@ read_parallel_worker_result_value() {
       ;;
     lease)
       [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || return 1
+      ;;
+    ready)
+      [[ "$value" == ready ]] || return 1
       ;;
     *) return 1 ;;
   esac
@@ -4249,6 +4688,45 @@ run_mapped_entries_sequential() {
   done
 }
 
+make_parallel_command_drain_identity() {
+  local sequence="$1"
+  local digest now identity
+  digest="$(printf '%s' "${gate_run_id:-nolock-$$}:${sequence}" | hash_stream)" ||
+    return 1
+  now="$(date +%s)" || return 1
+  identity="cmd${digest:0:20}-$$-${now}"
+  gate_lock_token_is_wellformed "$identity" || return 1
+  printf '%s\n' "$identity"
+}
+
+unregister_active_parallel_worker() {
+  local target_pgid="$1"
+  local target_identity="$2"
+  local target_start="$3"
+  local index found=0
+  local -a kept_pgids=()
+  local -a kept_identities=()
+  local -a kept_starts=()
+  [[ "${#active_worker_pgids[@]}" -eq "${#active_worker_drain_identities[@]}" &&
+    "${#active_worker_pgids[@]}" -eq "${#active_worker_start_identities[@]}" ]] ||
+    return 2
+  for index in "${!active_worker_pgids[@]}"; do
+    if [[ "${active_worker_pgids[$index]}" == "$target_pgid" &&
+      "${active_worker_drain_identities[$index]}" == "$target_identity" &&
+      "${active_worker_start_identities[$index]}" == "$target_start" ]]; then
+      found=1
+      continue
+    fi
+    kept_pgids+=("${active_worker_pgids[$index]}")
+    kept_identities+=("${active_worker_drain_identities[$index]}")
+    kept_starts+=("${active_worker_start_identities[$index]}")
+  done
+  [[ "$found" -eq 1 ]] || return 2
+  active_worker_pgids=("${kept_pgids[@]+"${kept_pgids[@]}"}")
+  active_worker_drain_identities=("${kept_identities[@]+"${kept_identities[@]}"}")
+  active_worker_start_identities=("${kept_starts[@]+"${kept_starts[@]}"}")
+}
+
 run_mapped_entries_parallel() {
   local phase="$1"
   local max_parallel="$2"
@@ -4265,6 +4743,10 @@ run_mapped_entries_parallel() {
   local active_timeout_files=()
   local active_infrastructure_files=()
   local active_lease_files=()
+  local active_ready_files=()
+  local active_wait_files=()
+  local active_drain_identities=()
+  local active_start_identities=()
   local next_active_pids=()
   local next_active_commands=()
   local next_active_output_files=()
@@ -4273,6 +4755,10 @@ run_mapped_entries_parallel() {
   local next_active_timeout_files=()
   local next_active_infrastructure_files=()
   local next_active_lease_files=()
+  local next_active_ready_files=()
+  local next_active_wait_files=()
+  local next_active_drain_identities=()
+  local next_active_start_identities=()
   local running_pids=()
   local entry
   local command
@@ -4282,12 +4768,25 @@ run_mapped_entries_parallel() {
   local timeout_file
   local infrastructure_file
   local lease_file
+  local ready_file
+  local ready_staging_file
+  local wait_file
+  local request_marker_open
+  local coordinator_marker_open
+  local drain_identity
+  local worker_start
+  local worker_pgid
+  local worker_parent_pid
+  local worker_parent_start
+  local worker_has_recovery_owner
+  local worker_identity_attempt
   local pid
   local i
   local status
   local elapsed
   local timed_out
   local infrastructure_failed
+  local worker_ready
   local phase_start_ts last_heartbeat_ts last_coordinator_recovery_ts now_ts hb_cmd
   local heartbeat_interval=20
   local had_monitor=0
@@ -4299,6 +4798,20 @@ run_mapped_entries_parallel() {
   if [[ "$max_parallel" -le 1 || "$total" -le 1 ]]; then
     run_mapped_entries_sequential "$phase" "${entries[@]}"
     return
+  fi
+
+  # No-lock workers have no successor that can reap their live sentinel. Bind
+  # them to this exact parent so they can leave after a fatal parent exit.
+  # Locked workers retain the same identity for the launch handshake, which
+  # stops work from starting before the parent records the worker.
+  worker_parent_pid="$$"
+  worker_parent_start="$(gate_lock_process_start "$worker_parent_pid")"
+  if [[ -z "$worker_parent_start" ]]; then
+    if gate_lock_identity_source_available; then
+      echo "error: could not identify the parallel worker parent." >&2
+      fail_command_scheduler_infrastructure "parallel worker launch" || return $?
+    fi
+    worker_parent_start="$gate_lock_identity_unavailable"
   fi
 
   echo
@@ -4320,10 +4833,20 @@ run_mapped_entries_parallel() {
     next_active_timeout_files=()
     next_active_infrastructure_files=()
     next_active_lease_files=()
+    next_active_ready_files=()
+    next_active_wait_files=()
+    next_active_drain_identities=()
+    next_active_start_identities=()
 
     for i in "${!active_pids[@]}"; do
       pid="${active_pids[$i]}"
-      if list_contains_word "$pid" "${running_pids[@]+"${running_pids[@]}"}"; then
+      ready_file="${active_ready_files[$i]}"
+      worker_ready=0
+      if read_parallel_worker_result_value "$ready_file" ready >/dev/null 2>&1; then
+        worker_ready=1
+      fi
+      if [[ "$worker_ready" -eq 0 && ! -s "$ready_file" ]] &&
+        list_contains_word "$pid" "${running_pids[@]+"${running_pids[@]}"}"; then
         next_active_pids+=("$pid")
         next_active_commands+=("${active_commands[$i]}")
         next_active_output_files+=("${active_output_files[$i]}")
@@ -4332,24 +4855,47 @@ run_mapped_entries_parallel() {
         next_active_timeout_files+=("${active_timeout_files[$i]}")
         next_active_infrastructure_files+=("${active_infrastructure_files[$i]}")
         next_active_lease_files+=("${active_lease_files[$i]}")
+        next_active_ready_files+=("$ready_file")
+        next_active_wait_files+=("${active_wait_files[$i]}")
+        next_active_drain_identities+=("${active_drain_identities[$i]}")
+        next_active_start_identities+=("${active_start_identities[$i]}")
         continue
       fi
 
-      if ! wait "$pid"; then
-        :
-      fi
-      # A worker normally leaves an empty group because run_with_timeout reaps
-      # its command and watchdog. If the leader exited unexpectedly, drain any
-      # surviving same-group descendants before unregistering the PGID.
-      drain_worker_process_group "$pid"
-
       command="${active_commands[$i]}"
+      drain_identity="${active_drain_identities[$i]}"
+      worker_start="${active_start_identities[$i]}"
       output_file="${active_output_files[$i]}"
       status_file="${active_status_files[$i]}"
       elapsed_file="${active_elapsed_files[$i]}"
       timeout_file="${active_timeout_files[$i]}"
       infrastructure_file="${active_infrastructure_files[$i]}"
       lease_file="${active_lease_files[$i]}"
+      wait_file="${active_wait_files[$i]}"
+      worker_settlement_in_progress=1
+      # Capture and drain the exact command identity before signalling the
+      # worker or its descendants. A detached child can leave the worker group.
+      # The drain retains durable evidence for every process while signals run.
+      if ! drain_completed_parallel_command \
+        "$drain_identity" "$pid" "$worker_start"; then
+        finish_worker_settlement
+        rm -f "$output_file" "$status_file" "$elapsed_file" "$timeout_file" \
+          "$infrastructure_file" "$lease_file" "$ready_file" \
+          "${ready_file}.publishing" "$wait_file"
+        fail_command_scheduler_infrastructure "$command" || return $?
+      fi
+      # The worker remains as the live group leader until this exact drain
+      # captures every same-group member. Reap it only after the drain is empty.
+      wait "$pid" 2>/dev/null || true
+      if ! unregister_active_parallel_worker \
+        "$pid" "$drain_identity" "$worker_start"; then
+        finish_worker_settlement
+        fail_parallel_worker_infrastructure "$command" "drain registry" || return $?
+      fi
+      finish_worker_settlement
+      if ! read_parallel_worker_result_value "$ready_file" ready >/dev/null; then
+        fail_parallel_worker_infrastructure "$command" readiness || return $?
+      fi
       if ! status="$(read_parallel_worker_result_value "$status_file" status)"; then
         fail_parallel_worker_infrastructure "$command" status || return $?
       fi
@@ -4365,12 +4911,14 @@ run_mapped_entries_parallel() {
 
       if [[ "$infrastructure_failed" == true ]]; then
         rm -f "$output_file" "$status_file" "$elapsed_file" "$timeout_file" \
-          "$infrastructure_file" "$lease_file"
+          "$infrastructure_file" "$lease_file" "$ready_file" \
+          "${ready_file}.publishing" "$wait_file"
         fail_command_scheduler_infrastructure "$command" || return $?
       fi
       if ! release_parallel_worker_lease "$command" "$lease_file"; then
         rm -f "$output_file" "$status_file" "$elapsed_file" "$timeout_file" \
-          "$infrastructure_file" "$lease_file"
+          "$infrastructure_file" "$lease_file" "$ready_file" \
+          "${ready_file}.publishing" "$wait_file"
         fail_command_scheduler_infrastructure "$command" || return $?
       fi
 
@@ -4398,10 +4946,15 @@ run_mapped_entries_parallel() {
       fi
 
       rm -f "$output_file" "$status_file" "$elapsed_file" "$timeout_file" \
-        "$infrastructure_file" "$lease_file"
+        "$infrastructure_file" "$lease_file" "$ready_file" \
+        "${ready_file}.publishing" "$wait_file"
       completed=$((completed + 1))
     done
 
+    # INT/TERM must see either the old complete cleanup registry or the new
+    # complete one. A trap between these aligned assignments would otherwise
+    # clear a mismatched registry and leave its worker outside EXIT cleanup.
+    worker_settlement_in_progress=1
     active_pids=("${next_active_pids[@]+"${next_active_pids[@]}"}")
     active_worker_pgids=("${next_active_pids[@]+"${next_active_pids[@]}"}")
     active_commands=("${next_active_commands[@]+"${next_active_commands[@]}"}")
@@ -4411,6 +4964,13 @@ run_mapped_entries_parallel() {
     active_timeout_files=("${next_active_timeout_files[@]+"${next_active_timeout_files[@]}"}")
     active_infrastructure_files=("${next_active_infrastructure_files[@]+"${next_active_infrastructure_files[@]}"}")
     active_lease_files=("${next_active_lease_files[@]+"${next_active_lease_files[@]}"}")
+    active_ready_files=("${next_active_ready_files[@]+"${next_active_ready_files[@]}"}")
+    active_wait_files=("${next_active_wait_files[@]+"${next_active_wait_files[@]}"}")
+    active_drain_identities=("${next_active_drain_identities[@]+"${next_active_drain_identities[@]}"}")
+    active_start_identities=("${next_active_start_identities[@]+"${next_active_start_identities[@]}"}")
+    active_worker_drain_identities=("${next_active_drain_identities[@]+"${next_active_drain_identities[@]}"}")
+    active_worker_start_identities=("${next_active_start_identities[@]+"${next_active_start_identities[@]}"}")
+    finish_worker_settlement
 
     # Process every completion observed above before opening another pool slot.
     # A completed worker can report a failed coordinator lease release. Starting
@@ -4428,8 +4988,8 @@ run_mapped_entries_parallel() {
       fi
 
       # A completed serialized command drains and removes its marker. Create
-      # the next marker in this parent before forking a parallel worker. Every
-      # worker then inherits the same path and skips exclusive re-creation.
+      # the request-wide recovery marker in this parent before forking. The
+      # worker creates its command marker after its scheduler lease exists.
       gate_run_ensure_marker \
         "The parallel command batch did not run" \
         "The parallel command batch did not start."
@@ -4440,29 +5000,246 @@ run_mapped_entries_parallel() {
       timeout_file="$(make_tmpfile)"
       infrastructure_file="$(make_tmpfile)"
       lease_file="$(make_tmpfile)"
+      ready_file="$(make_tmpfile)"
+      ready_staging_file="${ready_file}.publishing"
+      wait_file="${ready_file}.wait"
+      tmpfiles+=(
+        "$output_file" "$status_file" "$elapsed_file" "$timeout_file"
+        "$infrastructure_file" "$lease_file" "$ready_file"
+        "$ready_staging_file" "$wait_file"
+      )
+      # The ready path must be absent until the worker atomically publishes a
+      # complete result. The sibling FIFO lets the worker wait without spawning
+      # a child that would look like a leaked mapped-command descendant.
+      rm -f "$ready_file"
+      if ! mkfifo "$wait_file"; then
+        echo "error: could not create the parallel worker sentinel pipe." >&2
+        fail_command_scheduler_infrastructure "$command" || return $?
+      fi
+      parallel_command_sequence=$((parallel_command_sequence + 1))
+      if ! drain_identity="$(make_parallel_command_drain_identity "$parallel_command_sequence")"; then
+        echo "error: could not create a safe parallel command drain identity." >&2
+        fail_command_scheduler_infrastructure "$command" || return $?
+      fi
 
       echo
       echo "+ ${command}"
       worker_registration_in_progress=1
+      request_marker_open=0
+      coordinator_marker_open=0
+      worker_has_recovery_owner=0
+      if [[ -n "$gate_run_marker_file" ]]; then
+        if ! gate_run_marker_matches_identity \
+          "${gate_run_id:-$gate_lock_token}" "$gate_run_marker_file" ||
+          ! exec 19< "$gate_run_marker_file"; then
+          rm -f "$wait_file"
+          finish_worker_registration
+          echo "error: could not prepare the parallel worker's inherited request handle." >&2
+          fail_command_scheduler_infrastructure "$command" || return $?
+        fi
+        request_marker_open=1
+        worker_has_recovery_owner=1
+      fi
+      # The coordinator generation marker is the compatibility handle an
+      # older legacy gate knows how to drain after it reclaims run.lock. Keep
+      # it in the worker itself; the mapped wrapper that also holds this marker
+      # exits before the worker sentinel does.
+      if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+        gate_coordinator_is_active; then
+        if [[ -z "${gate_coordinator_generation_token:-}" ||
+          -z "${gate_coordinator_marker_file:-}" ]] ||
+          ! gate_run_marker_matches_identity \
+            "$gate_coordinator_generation_token" \
+            "$gate_coordinator_marker_file" ||
+          ! exec 16< "$gate_coordinator_marker_file"; then
+          [[ "$request_marker_open" -eq 0 ]] || exec 19<&-
+          rm -f "$wait_file"
+          finish_worker_registration
+          echo "error: could not prepare the parallel worker's inherited coordinator generation handle." >&2
+          fail_command_scheduler_infrastructure "$command" || return $?
+        fi
+        coordinator_marker_open=1
+        worker_has_recovery_owner=1
+      fi
+      # Open the control FIFO in the parent before fork. The child cannot run
+      # mapped work until this parent writes `start`, after it has bound the
+      # worker's PID/start/PGID identity and inserted every cleanup registry.
+      # O_RDWR avoids either FIFO open blocking before the other process exists.
+      if ! exec 17<> "$wait_file"; then
+        [[ "$coordinator_marker_open" -eq 0 ]] || exec 16<&-
+        [[ "$request_marker_open" -eq 0 ]] || exec 19<&-
+        rm -f "$wait_file"
+        finish_worker_registration
+        echo "error: could not open the parallel worker launch pipe." >&2
+        fail_command_scheduler_infrastructure "$command" || return $?
+      fi
       had_monitor=0
       case "$-" in
         *m*) had_monitor=1 ;;
       esac
       # macOS has no setsid(1). Bash job control is available in stock Bash
       # 3.2 and gives this background worker a dedicated process group whose ID
-      # is the worker PID, so the parent can tear down the group after the
-      # leader exits or its descendants reparent.
+      # is the worker PID. The worker stays alive as that group's validated
+      # leader until the parent captures and drains every member.
       set -m
       (
+        # A Bash subshell inherits the parent's trap handlers and their state.
+        # This worker starts while registration_in_progress=1, so keeping that
+        # handler would defer the drain's TERM forever. The parent owns cleanup.
+        trap - EXIT INT TERM HUP
+        worker_registration_in_progress=0
+        worker_settlement_in_progress=0
+        pending_terminating_signal=""
         # The parent needs monitor mode only to create this worker group. Turn
         # it back off inside the worker so run_with_timeout's command and
         # watchdog children stay in that group instead of becoming new jobs.
         set +m
+        parallel_worker_parent_is_live() {
+          local current_parent_start
+          if [[ "$worker_parent_start" == "$gate_lock_identity_unavailable" ]]; then
+            kill -0 "$worker_parent_pid" 2>/dev/null
+            return $?
+          fi
+          current_parent_start="$(gate_lock_process_start "$worker_parent_pid")"
+          if [[ -z "$current_parent_start" ]]; then
+            # One unreadable process-table sample is not proof that the exact
+            # parent died. Keep the only live group anchor while its PID still
+            # exists, then retry the identity read on the next poll.
+            kill -0 "$worker_parent_pid" 2>/dev/null
+            return $?
+          fi
+          [[ "$current_parent_start" == "$worker_parent_start" ]] || return 1
+          ! gate_lock_process_is_confirmed_zombie \
+            "$worker_parent_pid" "$worker_parent_start"
+        }
+        # The request marker and this FIFO were opened by the parent before
+        # fork. Wait until the parent has recorded the exact worker identity.
+        # If the parent dies before that point, leave without running work.
+        worker_action=""
+        while :; do
+          if IFS= read -r -t 1 worker_action <&17; then
+            break
+          fi
+          parallel_worker_parent_is_live || exit 2
+        done
+        [[ "$worker_action" == start ]] || exit 2
+        rm -f "$wait_file"
+        export AGENTQG_RUN="agentqg:${drain_identity}"
+        export AGENTQG_REQUEST="$(gate_run_request_tag)"
         run_mapped_command_to_files \
           "$command" "$output_file" "$status_file" "$elapsed_file" \
-          "$timeout_file" "$infrastructure_file" "$lease_file"
+          "$timeout_file" "$infrastructure_file" "$lease_file" \
+          "$drain_identity"
+        if ! printf '%s\n' ready > "$ready_staging_file" ||
+          ! mv -f "$ready_staging_file" "$ready_file"; then
+          exit 2
+        fi
+        # A locked run has a durable recovery owner, so this live group anchor
+        # must remain until the parent or a successor drains it. A no-lock run
+        # has no successor. Its sentinel exits when this exact parent dies.
+        if [[ "$worker_has_recovery_owner" -eq 1 ]]; then
+          while :; do
+            IFS= read -r _ <&17 || sleep 1
+          done
+        else
+          while parallel_worker_parent_is_live; do
+            IFS= read -r -t 1 _ <&17 || true
+          done
+        fi
       ) </dev/null &
       pid="$!"
+      worker_start=""
+      worker_pgid=""
+      for ((worker_identity_attempt = 0; worker_identity_attempt < 100; worker_identity_attempt++)); do
+        worker_start="$(gate_lock_process_start "$pid")"
+        worker_pgid="$(TZ=UTC LC_ALL=C ps -o pgid= -p "$pid" 2>/dev/null |
+          head -n1 | tr -d '[:space:]' || true)"
+        if [[ "$worker_pgid" == "$pid" ]] && {
+          [[ -n "$worker_start" ]] || ! gate_lock_identity_source_available
+        }; then
+          break
+        fi
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 0.01 || true
+      done
+      if [[ -z "$worker_start" ]] && ! gate_lock_identity_source_available; then
+        worker_start="$gate_lock_identity_unavailable"
+      fi
+      if [[ -z "$worker_start" || "$worker_pgid" != "$pid" ]]; then
+        # The worker is still behind the launch barrier. Ask it to leave
+        # voluntarily. Do not signal a bare PID or the assumed `-$pid` group:
+        # the failed reads did not establish either identity.
+        printf '%s\n' abort >&17 2>/dev/null || true
+        exec 17>&-
+        [[ "$coordinator_marker_open" -eq 0 ]] || exec 16<&-
+        [[ "$request_marker_open" -eq 0 ]] || exec 19<&-
+        wait "$pid" 2>/dev/null || true
+        rm -f "$ready_file" "$ready_staging_file" "$wait_file"
+        if [[ "$had_monitor" -eq 0 ]]; then
+          set +m
+        fi
+        finish_worker_registration
+        echo "error: could not bind the parallel worker to its PID, start identity, and dedicated process group." >&2
+        fail_command_scheduler_infrastructure "$command" || return $?
+      fi
+
+      # A coordinator journal already maps this command identity to its
+      # request. A pure legacy run has no such journal, so publish the command
+      # token as a legacy drain obligation before the worker can create its
+      # command marker or run work. Normal settlement removes the obligation.
+      # After SIGKILL, the next legacy holder can drain the command marker and
+      # remove it instead of leaving an unreferenced holder file forever.
+      if { ! declare -F gate_coordinator_is_active >/dev/null 2>&1 ||
+        ! gate_coordinator_is_active; } &&
+        [[ -n "$gate_lock_dir" && -n "$gate_lock_root_dir" &&
+          -n "$gate_lock_token" ]] &&
+        ! record_condemned_run "$drain_identity"; then
+        printf '%s\n' abort >&17 2>/dev/null || true
+        exec 17>&-
+        [[ "$coordinator_marker_open" -eq 0 ]] || exec 16<&-
+        [[ "$request_marker_open" -eq 0 ]] || exec 19<&-
+        wait "$pid" 2>/dev/null || true
+        rm -f "$ready_file" "$ready_staging_file" "$wait_file"
+        if [[ "$had_monitor" -eq 0 ]]; then
+          set +m
+        fi
+        finish_worker_registration
+        echo "error: could not persist the legacy parallel command drain identity." >&2
+        fail_command_scheduler_infrastructure "$command" || return $?
+      fi
+
+      # Register every cleanup view before the worker can start mapped work.
+      # A deferred INT/TERM therefore sees either no worker or this complete
+      # aligned record. SIGKILL recovery uses the inherited request handle.
+      active_pids+=("$pid")
+      active_worker_pgids+=("$worker_pgid")
+      active_worker_drain_identities+=("$drain_identity")
+      active_worker_start_identities+=("$worker_start")
+      active_commands+=("$command")
+      active_output_files+=("$output_file")
+      active_status_files+=("$status_file")
+      active_elapsed_files+=("$elapsed_file")
+      active_timeout_files+=("$timeout_file")
+      active_infrastructure_files+=("$infrastructure_file")
+      active_lease_files+=("$lease_file")
+      active_ready_files+=("$ready_file")
+      active_wait_files+=("$wait_file")
+      active_drain_identities+=("$drain_identity")
+      active_start_identities+=("$worker_start")
+      if ! printf '%s\n' start >&17; then
+        exec 17>&-
+        [[ "$coordinator_marker_open" -eq 0 ]] || exec 16<&-
+        [[ "$request_marker_open" -eq 0 ]] || exec 19<&-
+        if [[ "$had_monitor" -eq 0 ]]; then
+          set +m
+        fi
+        finish_worker_registration
+        echo "error: could not release the registered parallel worker launch barrier." >&2
+        fail_command_scheduler_infrastructure "$command" || return $?
+      fi
+      exec 17>&-
+      [[ "$coordinator_marker_open" -eq 0 ]] || exec 16<&-
+      [[ "$request_marker_open" -eq 0 ]] || exec 19<&-
       if [[ "$had_monitor" -eq 0 ]]; then
         set +m
       fi
@@ -4470,6 +5247,7 @@ run_mapped_entries_parallel() {
       # Private deterministic barrier for the signal-registration regression.
       # It is inert unless the test suite opts in.
       if [[ -n "$worker_registration_test_barrier" ]]; then
+        printf '%s\n' "$pid" >> "${worker_registration_test_barrier}.workers"
         if [[ ! -e "${worker_registration_test_barrier}.ready" ]]; then
           printf '%s\n' "$pid" > "${worker_registration_test_barrier}.ready"
         fi
@@ -4478,16 +5256,7 @@ run_mapped_entries_parallel() {
         done
       fi
 
-      active_pids+=("$pid")
-      active_worker_pgids+=("$pid")
       finish_worker_registration
-      active_commands+=("$command")
-      active_output_files+=("$output_file")
-      active_status_files+=("$status_file")
-      active_elapsed_files+=("$elapsed_file")
-      active_timeout_files+=("$timeout_file")
-      active_infrastructure_files+=("$infrastructure_file")
-      active_lease_files+=("$lease_file")
     done
 
     # Only this parent drains stale coordinator obligations. Parallel workers

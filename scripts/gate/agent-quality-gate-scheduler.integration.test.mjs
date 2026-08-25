@@ -360,27 +360,49 @@ test("the real quality gate uses scheduler concurrency and recovery", async (t) 
         assert.ok(follower);
         assert.match(follower.stdout, /Shared coordinator execution passed/u);
 
+        const refreshBarrier = join(
+          scenario.directory,
+          "singleflight-refresh-barrier",
+        );
+        let refreshReleased = false;
+        const releaseRefresh = async () => {
+          if (refreshReleased) return;
+          await writeFile(`${refreshBarrier}.release`, "release\n");
+          refreshReleased = true;
+        };
         const refresh = await fixture.startGate({
           worktree: worktrees[2],
           changedPath: "fixture-same.txt",
           scenario,
           label: "singleflight-refresh",
-          defaultDelayMs: 8_000,
+          defaultDelayMs: 100,
+          extraEnvironment: {
+            QG_FIXTURE_START_BARRIER: refreshBarrier,
+          },
         });
-        await fixture.waitForEvent(
-          scenario,
-          (event) =>
-            event.event === "start" && event.label === "singleflight-refresh",
-          "the forced refresh execution",
-        );
-        const activeCache = await fixture.startGate({
-          worktree: worktrees[3],
-          changedPath: "fixture-same.txt",
-          scenario,
-          label: "singleflight-active-cache",
-          defaultDelayMs: 2_000,
-          skipIfFresh: true,
-        });
+        let activeCache;
+        try {
+          await fixture.waitForEvent(
+            scenario,
+            (event) =>
+              event.event === "start" && event.label === "singleflight-refresh",
+            "the forced refresh execution",
+          );
+          activeCache = await fixture.startGate({
+            worktree: worktrees[3],
+            changedPath: "fixture-same.txt",
+            scenario,
+            label: "singleflight-active-cache",
+            defaultDelayMs: 2_000,
+            skipIfFresh: true,
+          });
+          await waitUntil(() => /role follower/u.test(activeCache.stdout), {
+            timeoutMs: observerTimeoutMs,
+            message: "the freshness request to join the active refresh",
+          });
+        } finally {
+          await releaseRefresh();
+        }
         const refreshResults = await Promise.all([
           refresh.done,
           activeCache.done,
@@ -690,18 +712,29 @@ test("the real quality gate uses scheduler concurrency and recovery", async (t) 
 
 test("a hard-killed follower does not leave its result waiter holding output open", async () => {
   const fixture = await createGateFixture();
+  let leaderBarrier;
+  let leaderReleased = false;
+  const releaseLeader = async () => {
+    if (!leaderBarrier || leaderReleased) return;
+    await writeFile(`${leaderBarrier}.release`, "release\n");
+    leaderReleased = true;
+  };
   try {
     const [leaderWorktree, followerWorktree] = await Promise.all([
       fixture.addWorktree("killed-follower-leader"),
       fixture.addWorktree("killed-follower-client"),
     ]);
     const scenario = fixture.scenarioPaths("killed-follower");
+    leaderBarrier = join(scenario.directory, "leader-start-barrier");
     const leader = await fixture.startGate({
       worktree: leaderWorktree,
       changedPath: "fixture-same.txt",
       scenario,
       label: "killed-follower-leader",
-      defaultDelayMs: 10_000,
+      defaultDelayMs: 100,
+      extraEnvironment: {
+        QG_FIXTURE_START_BARRIER: leaderBarrier,
+      },
     });
     await fixture.waitForEvent(
       scenario,
@@ -733,7 +766,7 @@ test("a hard-killed follower does not leave its result waiter holding output ope
       "follower",
     );
 
-    process.kill(follower.child.pid, "SIGKILL");
+    await fixture.signalGate(follower, "SIGKILL");
     await waitUntil(
       async () => !(await fixture.coordinatorRequest(scenario, requestId)),
       {
@@ -756,8 +789,10 @@ test("a hard-killed follower does not leave its result waiter holding output ope
       false,
     );
 
+    await releaseLeader();
     assertPassed(await leader.done);
   } finally {
+    await releaseLeader();
     await fixture.cleanup();
   }
 });
@@ -765,18 +800,29 @@ test("a hard-killed follower does not leave its result waiter holding output ope
 test("the real adapter cleans a request when its gate parent disconnects", async () => {
   const fixture = await createGateFixture();
   let replay = null;
+  let disconnectBarrier;
+  let disconnectReleased = false;
+  const releaseDisconnect = async () => {
+    if (!disconnectBarrier || disconnectReleased) return;
+    await writeFile(`${disconnectBarrier}.release`, "release\n");
+    disconnectReleased = true;
+  };
   try {
     const worktree = await fixture.addWorktree("bound-parent-disconnect");
     const scenario = fixture.scenarioPaths("bound-parent-disconnect");
     await mkdir(scenario.directory, { recursive: true });
+    disconnectBarrier = join(scenario.directory, "gate-start-barrier");
     replay = await replayGateOwnerIdentityAfterExit(scenario);
     const gate = await fixture.startGate({
       worktree,
       changedPath: "fixture-short-a.txt",
       scenario,
       label: "bound-parent-disconnect",
-      shortDelayMs: 3_000,
-      extraEnvironment: replay.environment,
+      shortDelayMs: 100,
+      extraEnvironment: {
+        ...replay.environment,
+        QG_FIXTURE_START_BARRIER: disconnectBarrier,
+      },
     });
     await writeFile(replay.ownerPidFile, `${gate.child.pid}\n`);
     await fixture.waitForEvent(
@@ -809,7 +855,7 @@ test("the real adapter cleans a request when its gate parent disconnects", async
       },
     );
 
-    process.kill(gate.child.pid, "SIGKILL");
+    await fixture.signalGate(gate, "SIGKILL");
     const drained = await fixture.waitForDrain(scenario);
     const request = drained.requests.find(
       (candidate) => candidate.requestId === requestId,
@@ -828,6 +874,7 @@ test("the real adapter cleans a request when its gate parent disconnects", async
     // Let fixture teardown use the real process table after the disconnect
     // assertion has proved that the replayed identity did not drive cleanup.
     if (replay) await writeFile(replay.ownerPidFile, "\n");
+    await releaseDisconnect();
     await fixture.cleanup();
   }
 });

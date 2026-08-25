@@ -193,8 +193,12 @@ all remaining state is drain-required work from dead clients, and no live
 client, waiter, drain claim, or result handoff remains, the coordinator closes
 its socket after the idle period without releasing `run.lock`. The old gate then
 reclaims the dead coordinator owner. It records the coordinator generation as a
-legacy drain obligation and drains every worker through the shared generation marker. A
-queued, granted, or result-ready request prevents this recovery handoff.
+legacy drain obligation and drains every worker through the shared generation
+marker. Each worker retains that marker after its mapped wrapper exits. A
+historical gate that predates anchored group capture can stop the sentinel and
+processes found through its handle and tree scan. The same-PGID
+close-all-handle guarantee requires a gate version with anchored group capture.
+A queued, granted, or result-ready request prevents this recovery handoff.
 
 ### Serialize each worktree for the full request
 
@@ -231,10 +235,12 @@ parallel pool can queue several leases, but it cannot consume every fair
 dispatch turn while another request is runnable.
 
 Parallel workers return their command status and lease ID to the gate parent.
-The parent processes each completion and releases its lease before it refills
-the local pool. A failed release keeps the lease ID, stops dispatch, and enters
-request cancellation and drain recovery. A worker cannot hide a release
-failure while the parent starts a replacement command.
+Each lease persists a unique command drain identity before mapped work starts.
+The parent captures and drains that identity and the registered worker process
+group before it unregisters the worker or releases the lease. It then refills
+the local pool. A failed drain or release keeps the lease ID, stops dispatch,
+and enters request cancellation and drain recovery. A worker cannot hide an
+unsettled command while the parent starts a replacement command.
 
 A queued command with weight greater than 1 reserves enough capacity when it
 becomes the oldest weighted lease at the head of its request. The reservation
@@ -248,20 +254,22 @@ An older ordinary lease that is blocked by a named resource does not block a
 grantable weighted reservation. The scheduler first grants the oldest eligible
 ordinary lease. If none is eligible, it evaluates the weighted reservation.
 
-The following measured classes use all capacity:
+The following evidence-backed classes use all capacity:
 
 - dashboard full or scoped coverage;
 - dashboard browser tests and their fixture build;
 - dashboard production build and size-limit work;
-- `pnpm dashboard:mutation`, `pnpm bridge:mutation`, and
-  `pnpm indexer:mutation`.
 
-The mutation baselines stay all-capacity until overlap measurements support a
-lower weight.
+The three mutation baselines remain ordinary weight-1 commands. Their recorded
+serial runtimes do not prove cross-run contention. The global capacity still
+bounds their aggregate concurrency.
 
 Browser work also claims the named `browser-fixture-3211` resource because the
 fixture server binds fixed loopback port 3211. Playwright installation claims
-the named `playwright-install` resource. Each named resource has capacity 1.
+the named `playwright-install` resource because every worktree mutates the
+shared `~/.cache/ms-playwright` browser store. Each named resource has capacity
+
+1.
 
 Resource names and weights are part of the versioned policy. A new exclusive
 class needs measured contention evidence and scheduler regression coverage.
@@ -426,29 +434,58 @@ A live coordinator with a different policy or capacity rejects the new client.
 The client then waits on the shared legacy lock. It starts the new namespace
 only after the prior coordinator releases that lock.
 
-Request and lease records include a unique run token, the gate owner's PID and
-process start identity, the request capability digest, the worktree, capacity
-weight, and named resources. Workers inherit the run and request tags and open
-marker descriptors. Raw capabilities and secret-bearing environment values do
-not enter the journal, result files, status output, command arguments, or
-coordinator logs.
+Request records include a unique request drain identity. Each lease includes a
+different command drain identity. The records also include the gate owner's PID
+and process start identity, the request capability digest, the worktree,
+capacity weight, and named resources. Workers and mapped wrappers carry command
+and request tags. Workers retain open command, request, and coordinator
+generation marker descriptors. Raw capabilities and secret-bearing
+environment values do not enter the journal, result files, status output,
+command arguments, or coordinator logs.
+
+The parallel parent opens the request marker before it forks a worker. In
+coordinator mode, it also opens the shared generation marker for the worker.
+The parent also opens a launch pipe before the fork. The worker waits until the
+parent records its PID/start identity, confirms that `PGID == PID`, and fills
+every cleanup registry. The coordinator journal persists the command identity.
+A pure legacy parent persists that identity as a drain obligation before launch
+release. The worker creates and retains its command marker only after that
+recovery mapping exists and, in coordinator mode, after its lease exists. It
+atomically publishes its complete result and stays
+alive as the process-group leader until the parent drains that command. A crash
+before lease registration therefore leaves no unreferenced command marker. A
+worker still behind the launch barrier exits when its exact parent dies. A
+worker released past the barrier retains its request handle for successor
+recovery and its generation handle for a legacy handoff. A no-lock sentinel
+retries an empty parent-identity read while that PID still exists. A crash after
+registration leaves request, command, and generation recovery handles where
+their lock modes provide them.
 
 A successor coordinator reads the journal before it reuses any lease. It drops
 queued command leases because their wait connections ended with the old
 coordinator. It converts each granted lease to a drain obligation and keeps its
-capacity and resources reserved. A joining Bash gate claims that run token,
-discovers the tagged worker and descendants, persists each PID and start
-identity, drains them, and confirms they are gone. It then acknowledges the
-obligation. Only that acknowledgement lets the coordinator release capacity, a
-named resource, the worktree lease, or the legacy lock.
-The sequential path applies the same rule after each command wrapper and
-watchdog settle. It scans the inherited run handles, persists the capture, and
-drains every descendant before it releases that command's scheduler lease. A
+capacity and resources reserved. A joining Bash gate claims the stale request
+and drains every lease's command identity. It then drains the request identity
+once. Each drain persists every discovered PID and start identity and confirms
+that the set is empty. Only then can it acknowledge the lease obligations and
+release capacity, a named resource, the worktree lease, or the legacy lock.
+The sequential and parallel paths apply the same rule after each command
+wrapper and watchdog settle. A parallel drain also seeds its durable capture
+from the live registered worker process group before it sends the first signal.
+The active parent validates the leader's PID/start identity. Crash recovery
+derives a group only from a token-holding group leader. It pins that leader's
+PID/start identity before the group snapshot. Each candidate must still have
+the same PID/start identity and current PGID. The drain then revalidates the
+leader's PID/start/PGID identity after that candidate read. A stale numeric tag
+or parent PID cannot bypass this check. The drain persists each group member by
+PID/start, so it can remove a same-group descendant that closed all identity
+handles without later trusting a reusable bare PGID. It drains every descendant
+before it unregisters the worker or releases that command's scheduler lease. A
 legacy run publishes its token-scoped obligation before the first signal. Each
 drain refresh captures newly tagged roots before it can declare the prior set
 empty. A failed drain keeps its recovery evidence and reports that the mapped
 command ran.
-All obligations for one run token share one token-scoped drain claim. A
+All obligations for one request share one request-scoped drain claim. A
 different process cannot acknowledge a sibling obligation while that claim is
 live. PID reuse, a matching zombie owner, an unreadable identity, an unreadable
 journal, or an incomplete terminal record fails closed. A zombie is stale and

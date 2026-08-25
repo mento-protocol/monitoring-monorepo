@@ -226,9 +226,13 @@ async function register(
 }
 
 async function lease(fixture, requestId, leaseId, requestOwner, options = {}) {
+  const drainIdentity =
+    options.drainIdentity ??
+    runToken(`test-lease-${leaseId}`, requestOwner.pid, 1_770_000_000);
   return rpc(fixture, "request-lease", {
     requestId,
     leaseId,
+    drainIdentity,
     capability: options.capability ?? capabilityFor(requestId),
     owner: requestOwner,
     weight: options.weight ?? 1,
@@ -435,6 +439,11 @@ test("request capabilities protect exposed request and lease identities", async 
       {
         ...attackerOwnerParams,
         leaseId: "capability-attacker-lease",
+        drainIdentity: runToken(
+          "capability-attacker-lease",
+          victimOwner.pid,
+          1_770_000_000,
+        ),
         weight: 1,
         resources: [],
       },
@@ -682,6 +691,30 @@ test("startup rejects corrupt journals before recovery or legacy adoption", asyn
       },
     },
     {
+      name: "malformed lease drain token",
+      path: "leases.journal-active-lease.drainIdentity",
+      mutate: (state) => {
+        activeLease(state).drainIdentity = "malformed";
+      },
+    },
+    {
+      name: "request and lease share one drain token",
+      path: "leases.journal-active-lease.drainIdentity",
+      mutate: (state) => {
+        activeLease(state).drainIdentity =
+          state.requests["journal-active"].drainIdentity;
+      },
+    },
+    {
+      name: "two leases share one drain token",
+      path: "leases.journal-draining-lease-a.drainIdentity",
+      mutate: (state) => {
+        const duplicate = activeLease(state).drainIdentity;
+        drainingLease(state).drainIdentity = duplicate;
+        drainingObligation(state).drainIdentity = duplicate;
+      },
+    },
+    {
       name: "invalid request auto acknowledgement",
       path: "requests.journal-active.autoAcknowledge",
       mutate: (state) => {
@@ -731,8 +764,19 @@ test("startup rejects corrupt journals before recovery or legacy adoption", asyn
       },
     },
     {
-      name: "partial token-scoped drain claim",
-      path: `drainObligations.${validJournal.requests["journal-draining"].drainIdentity}`,
+      name: "obligation drain token differs from its lease",
+      path: `drainObligations.${drainingLease(validJournal).drainObligationId}`,
+      mutate: (state) => {
+        drainingObligation(state).drainIdentity = runToken(
+          "wrong-obligation",
+          229,
+          1_770_000_000,
+        );
+      },
+    },
+    {
+      name: "one request has a partial drain claim",
+      path: "drainObligations.journal-draining",
       mutate: (state) => {
         drainingObligation(state).claim = {
           claimant: owner(229),
@@ -1280,6 +1324,113 @@ test("one active request owns each drain token across restart", async () => {
   );
 });
 
+test("each lease requires one distinct persisted drain identity", async () => {
+  const fixture = await createFixture({ capacity: 2 });
+  const requestOwner = owner(232);
+  const requestId = "lease-drain-identity";
+  const requestDrainIdentity = runToken(
+    "lease-drain-request",
+    requestOwner.pid,
+    1_770_000_000,
+  );
+  const leaseDrainIdentity = runToken(
+    "lease-drain-command",
+    requestOwner.pid,
+    1_770_000_001,
+  );
+  await register(
+    fixture,
+    requestId,
+    "lease-drain-identity-fingerprint",
+    requestOwner,
+    { drainIdentity: requestDrainIdentity },
+  );
+
+  const baseParams = {
+    requestId,
+    leaseId: "lease-drain-identity-a",
+    owner: requestOwner,
+    weight: 1,
+    resources: [],
+  };
+  await assert.rejects(
+    rpc(fixture, "request-lease", baseParams),
+    (error) => error.code === "INVALID_ARGUMENT",
+  );
+  await assert.rejects(
+    rpc(fixture, "request-lease", {
+      ...baseParams,
+      drainIdentity: "malformed",
+    }),
+    (error) => error.code === "INVALID_ARGUMENT",
+  );
+
+  const first = await rpc(fixture, "request-lease", {
+    ...baseParams,
+    drainIdentity: leaseDrainIdentity,
+  });
+  assert.equal(first.drainIdentity, leaseDrainIdentity);
+  assert.equal(
+    (
+      await rpc(fixture, "request-lease", {
+        ...baseParams,
+        drainIdentity: leaseDrainIdentity,
+      })
+    ).drainIdentity,
+    leaseDrainIdentity,
+  );
+  await assert.rejects(
+    rpc(fixture, "request-lease", {
+      ...baseParams,
+      drainIdentity: runToken(
+        "lease-drain-changed",
+        requestOwner.pid,
+        1_770_000_002,
+      ),
+    }),
+    (error) => error.code === "LEASE_ID_CONFLICT",
+  );
+  await assert.rejects(
+    lease(fixture, requestId, "lease-drain-identity-b", requestOwner, {
+      drainIdentity: leaseDrainIdentity,
+    }),
+    (error) =>
+      error.code === "DRAIN_TOKEN_CONFLICT" &&
+      error.details?.leaseId === "lease-drain-identity-a",
+  );
+  await assert.rejects(
+    lease(fixture, requestId, "lease-drain-identity-c", requestOwner, {
+      drainIdentity: requestDrainIdentity,
+    }),
+    (error) =>
+      error.code === "DRAIN_TOKEN_CONFLICT" &&
+      error.details?.requestId === requestId,
+  );
+  await assert.rejects(
+    register(
+      fixture,
+      "lease-token-request-collision",
+      "lease-token-request-collision-fingerprint",
+      owner(233),
+      { drainIdentity: leaseDrainIdentity },
+    ),
+    (error) =>
+      error.code === "DRAIN_TOKEN_CONFLICT" &&
+      error.details?.leaseId === "lease-drain-identity-a",
+  );
+
+  const snapshot = await status(fixture);
+  assert.equal(snapshot.leases.length, 1);
+  assert.equal(snapshot.leases[0].drainIdentity, leaseDrainIdentity);
+  const journal = JSON.parse(
+    readFileSync(join(fixture.coordinator.stateRoot, "journal.json"), "utf8"),
+  );
+  assert.equal(
+    journal.leases["lease-drain-identity-a"].drainIdentity,
+    leaseDrainIdentity,
+  );
+});
+
 test("a journal commit failure stops the coordinator before dirty state is served", async () => {
   let failNextJournalCommit = false;
   const fixture = await createFixture({
@@ -1391,6 +1542,11 @@ test("bound cleanup stops after its first journal commit failure", async () => {
     const granted = await client.request("request-lease", {
       requestId,
       leaseId: `${requestId}-lease`,
+      drainIdentity: runToken(
+        `${requestId}-lease`,
+        requestOwner.pid,
+        1_770_000_000,
+      ),
       capability: capabilityFor(requestId),
       owner: requestOwner,
       weight: 1,
@@ -3301,9 +3457,10 @@ test("a joining client can drain a dead owner's tagged process tree", async () =
     const fixture = await createFixture({ capacity: 1, ownerSweepMs: 10 });
     const deadWorkerDrainId = "gate-run-dead-worker-214-1770000000";
     await register(fixture, "dead-worker", "dead-worker-fp", deadOwner, {
-      drainIdentity: deadWorkerDrainId,
+      drainIdentity: "gate-request-dead-worker-214-1770000000",
     });
     await lease(fixture, "dead-worker", "dead-worker-lease", deadOwner, {
+      drainIdentity: deadWorkerDrainId,
       resources: ["playwright-fixture"],
     });
 
@@ -3527,6 +3684,7 @@ test("an unclean bound-client disconnect creates a drain obligation", async () =
   const disconnectedOwner = owner(171);
   const waitingOwner = owner(172);
   const disconnectedDrainId = "run-disconnect-owner-171-1770000000";
+  const disconnectedRequestDrainId = "request-disconnect-owner-171-1770000000";
   const unrelatedDrainId = "run-unrelated-999-1770000000";
   const client = await connectCoordinator({ root: fixture.root });
   const registration = await client.request("register", {
@@ -3534,13 +3692,14 @@ test("an unclean bound-client disconnect creates a drain obligation", async () =
     capability: capabilityFor("disconnect-owner"),
     fingerprint: "disconnect-fingerprint",
     worktreeKey: "/tmp/disconnect-owner",
-    drainIdentity: disconnectedDrainId,
+    drainIdentity: disconnectedRequestDrainId,
     owner: disconnectedOwner,
     bindConnection: true,
   });
   await client.request("request-lease", {
     requestId: "disconnect-owner",
     leaseId: "disconnect-lease",
+    drainIdentity: disconnectedDrainId,
     capability: capabilityFor("disconnect-owner"),
     owner: disconnectedOwner,
     weight: 1,
@@ -3581,7 +3740,7 @@ test("an unclean bound-client disconnect creates a drain obligation", async () =
   assert.equal(
     drained.requests.find((request) => request.requestId === "disconnect-owner")
       .drainIdentity,
-    disconnectedDrainId,
+    disconnectedRequestDrainId,
   );
   await assert.rejects(
     rpc(fixture, "acknowledge-drain", {
@@ -3720,6 +3879,11 @@ test("a disconnected leader auto-acknowledges after drain across restart", async
   await client.request("request-lease", {
     requestId,
     leaseId: "restart-bound-stale-lease",
+    drainIdentity: runToken(
+      "restart-bound-stale-lease",
+      requestOwner.pid,
+      1_770_000_000,
+    ),
     capability: capabilityFor(requestId),
     owner: requestOwner,
     weight: 1,
@@ -4165,7 +4329,7 @@ test("stale reports require an exact PID/start identity and explicit drain ack",
   assert.equal(snapshot.drainObligations.length, 0);
 });
 
-test("one drain-token claim owns every sibling lease obligation", async () => {
+test("one request claim owns its distinct per-lease drain identities", async () => {
   let clock = Date.parse("2026-08-21T12:00:00.000Z");
   const advancingNow = () => clock++;
   const fixture = await createFixture({ capacity: 2, now: advancingNow });
@@ -4173,30 +4337,85 @@ test("one drain-token claim owns every sibling lease obligation", async () => {
   const firstClaimant = owner(225);
   const secondClaimant = owner(226);
   await register(fixture, "sibling-drain", "sibling-drain-fp", requestOwner);
-  await lease(fixture, "sibling-drain", "sibling-drain-a", requestOwner);
-  await lease(fixture, "sibling-drain", "sibling-drain-b", requestOwner);
+  const firstDrainIdentity = runToken(
+    "sibling-drain-command-a",
+    requestOwner.pid,
+    1_770_000_000,
+  );
+  const secondDrainIdentity = runToken(
+    "sibling-drain-command-b",
+    requestOwner.pid,
+    1_770_000_001,
+  );
+  await lease(fixture, "sibling-drain", "sibling-drain-a", requestOwner, {
+    drainIdentity: firstDrainIdentity,
+  });
+  await lease(fixture, "sibling-drain", "sibling-drain-b", requestOwner, {
+    drainIdentity: secondDrainIdentity,
+  });
   const stale = await markOwnerStale(fixture, {
     requestId: "sibling-drain",
     observedOwner: requestOwner,
     reporter: firstClaimant,
-    reason: "two granted commands need one token drainer",
+    reason: "two granted commands need one request-scoped drainer",
   });
   assert.equal(stale.drainObligations.length, 2);
-  const claimed = await claimObligation(
+  assert.deepEqual(
+    new Set(stale.drainObligations.map(({ drainIdentity }) => drainIdentity)),
+    new Set([firstDrainIdentity, secondDrainIdentity]),
+  );
+  const firstObligation = stale.drainObligations.find(
+    ({ drainIdentity }) => drainIdentity === firstDrainIdentity,
+  );
+  const secondObligation = stale.drainObligations.find(
+    ({ drainIdentity }) => drainIdentity === secondDrainIdentity,
+  );
+  const firstClaim = await claimObligation(
     fixture,
-    stale.drainObligations[0],
+    firstObligation,
     firstClaimant,
   );
-  assert.equal(claimed.obligations.length, 2);
+  assert.equal(firstClaim.obligations.length, 2);
   assert.ok(
-    claimed.obligations.every(
+    firstClaim.obligations.every(
       (obligation) => obligation.claim.claimant.pid === firstClaimant.pid,
     ),
   );
   assert.equal(
-    new Set(claimed.obligations.map((obligation) => obligation.claim.claimedAt))
-      .size,
+    new Set(
+      firstClaim.obligations.map((obligation) => obligation.claim.claimedAt),
+    ).size,
     1,
+  );
+  await assert.rejects(
+    claimObligation(fixture, secondObligation, secondClaimant),
+    (error) => error.code === "DRAIN_ALREADY_CLAIMED",
+  );
+
+  const released = await rpc(fixture, "release-drain-claim", {
+    obligationId: firstObligation.obligationId,
+    drainIdentity: firstObligation.drainIdentity,
+    claimant: firstClaimant,
+  });
+  assert.equal(released.released, true);
+  assert.equal(released.releasedObligations, 2);
+  const releasedSnapshot = await status(fixture);
+  assert.equal(releasedSnapshot.drainObligations.length, 2);
+  assert.ok(
+    releasedSnapshot.drainObligations.every(
+      (obligation) => obligation.claim === null,
+    ),
+  );
+  const reclaimed = await claimObligation(
+    fixture,
+    secondObligation,
+    firstClaimant,
+  );
+  assert.equal(reclaimed.obligations.length, 2);
+  assert.ok(
+    reclaimed.obligations.every(
+      (obligation) => obligation.claim.claimant.pid === firstClaimant.pid,
+    ),
   );
 
   await fixture.coordinator.close("claimed-sibling-restart");
@@ -4222,17 +4441,21 @@ test("one drain-token claim owns every sibling lease obligation", async () => {
     1,
   );
   await assert.rejects(
-    claimObligation(fixture, stale.drainObligations[1], secondClaimant),
+    claimObligation(fixture, firstObligation, secondClaimant),
     (error) => error.code === "DRAIN_ALREADY_CLAIMED",
   );
-  for (const obligation of stale.drainObligations) {
-    await rpc(fixture, "acknowledge-drain", {
-      obligationId: obligation.obligationId,
-      drainIdentity: obligation.drainIdentity,
-      drainer: firstClaimant,
-      evidence: { processTreeEmpty: true },
-    });
-  }
+  await rpc(fixture, "acknowledge-drain", {
+    obligationId: firstObligation.obligationId,
+    drainIdentity: firstObligation.drainIdentity,
+    drainer: firstClaimant,
+    evidence: { processTreeEmpty: true },
+  });
+  await rpc(fixture, "acknowledge-drain", {
+    obligationId: secondObligation.obligationId,
+    drainIdentity: secondObligation.drainIdentity,
+    drainer: firstClaimant,
+    evidence: { processTreeEmpty: true },
+  });
   assert.equal((await status(fixture)).drainObligations.length, 0);
 });
 
@@ -4306,7 +4529,7 @@ test("restart recovery preserves stale capacity until drain acknowledgement", as
   const journal = JSON.parse(
     readFileSync(join(fixture.coordinator.stateRoot, "journal.json"), "utf8"),
   );
-  assert.equal(journal.schemaVersion, 1);
+  assert.equal(journal.schemaVersion, 2);
   assert.equal(journal.protocol.major, PROTOCOL_VERSION.major);
   assert.equal(journal.policyHash, DEFAULT_POLICY_HASH);
   assert.equal(Object.keys(journal.drainObligations).length, 0);
@@ -4342,6 +4565,7 @@ test("legacy startup queues work until adoption before owner sweeping", async ()
       leaseBeforeAdoption = core.requestLease({
         requestId: "adoption-pending",
         leaseId: "adoption-pending-lease",
+        drainIdentity: runToken("adoption-lease", 197, 5004),
         capability: capabilityFor("adoption-pending"),
         owner: requestOwner,
         weight: 1,
@@ -5308,7 +5532,8 @@ test("inactive retention keeps invalid and newer-protocol namespaces", () => {
   };
 
   const invalidJournalPolicy = "1".repeat(64);
-  const invalidJournalName = `v1.0-${invalidJournalPolicy}-c${capacity}`;
+  const currentProtocolName = `v${PROTOCOL_VERSION.major}.${PROTOCOL_VERSION.minor}`;
+  const invalidJournalName = `${currentProtocolName}-${invalidJournalPolicy}-c${capacity}`;
   const invalidJournalState = initialState(
     capacity,
     invalidJournalPolicy,
@@ -5326,7 +5551,7 @@ test("inactive retention keeps invalid and newer-protocol namespaces", () => {
   );
 
   const invalidResultPolicy = "2".repeat(64);
-  const invalidResultName = `v1.0-${invalidResultPolicy}-c${capacity}`;
+  const invalidResultName = `${currentProtocolName}-${invalidResultPolicy}-c${capacity}`;
   const invalidResultPath = createNamespace(
     invalidResultName,
     initialState(
@@ -5355,14 +5580,15 @@ test("inactive retention keeps invalid and newer-protocol namespaces", () => {
   writeFileSync(invalidResultRecordPath, "{\n");
 
   const newerPolicy = "3".repeat(64);
-  const newerName = `v2.0-${newerPolicy}-c${capacity}`;
+  const newerMajor = PROTOCOL_VERSION.major + 1;
+  const newerName = `v${newerMajor}.0-${newerPolicy}-c${capacity}`;
   const newerState = initialState(
     capacity,
     newerPolicy,
     coordinatorIdentity,
     runToken("newer-protocol", process.pid, 7003),
   );
-  newerState.protocol = { major: 2, minor: 0 };
+  newerState.protocol = { major: newerMajor, minor: 0 };
   const newerPath = createNamespace(newerName, newerState);
   const deletionMarkerPath = join(newerPath, ".deleting-v1");
   writeFileSync(deletionMarkerPath, "quality-gate-namespace-deletion-v1\n");
@@ -5390,7 +5616,7 @@ test("inactive retention keeps invalid and newer-protocol namespaces", () => {
   );
   assert.ok(
     outcome.warnings.includes(
-      `${newerName}: unsupported namespace protocol v2.0`,
+      `${newerName}: unsupported namespace protocol v${newerMajor}.0`,
     ),
   );
   assert.equal(
@@ -5425,7 +5651,12 @@ test("startup resumes only valid partial namespace deletions", async () => {
   await fixture.coordinator.close("namespace-deletion-fixture-ready");
 
   const namespacePath = (index) =>
-    join(stateDirectory, `v1.0-${index.toString(16).padStart(64, "0")}-c2`);
+    join(
+      stateDirectory,
+      `v${PROTOCOL_VERSION.major}.${PROTOCOL_VERSION.minor}-${index
+        .toString(16)
+        .padStart(64, "0")}-c2`,
+    );
   const markerName = ".deleting-v1";
   const markerStagingName = ".deleting-v1.staging";
   const markerContent = "quality-gate-namespace-deletion-v1\n";

@@ -96,7 +96,7 @@ even when you never open an authority.
    workers only for read-only work. Run concurrent validation outside the
    coordinator from a fully hydrated checkout on another machine. Concurrent
    `--run` gates from different worktrees share weighted machine capacity. The
-   default capacity is 3. Heavy dashboard and mutation commands form fair
+   default capacity is 3. Evidence-backed heavy dashboard commands form fair
    barriers and run alone. Requests from the same worktree remain serialized.
    Exact matching requests share one verified final verdict. Background the
    `--run` gate and the `git push`; a 600s foreground kill discards the freshness

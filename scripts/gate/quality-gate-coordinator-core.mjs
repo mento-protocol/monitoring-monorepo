@@ -505,7 +505,7 @@ export class QualityGateCoordinator extends EventEmitter {
         obligationId,
         leaseId: lease.leaseId,
         requestId: request.requestId,
-        drainIdentity: request.drainIdentity,
+        drainIdentity: lease.drainIdentity,
         owner: copy(lease.owner),
         weight: lease.weight,
         resources: copy(lease.resources),

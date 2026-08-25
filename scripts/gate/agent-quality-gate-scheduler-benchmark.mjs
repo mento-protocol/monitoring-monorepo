@@ -183,6 +183,27 @@ function maxConcurrency(intervals) {
   return maximum;
 }
 
+function maxConcurrentGateLabels(intervals) {
+  const transitions = intervals
+    .flatMap((interval) => [
+      { timestampMs: interval.startMs, label: interval.label, delta: 1 },
+      { timestampMs: interval.endMs, label: interval.label, delta: -1 },
+    ])
+    .sort(
+      (left, right) =>
+        left.timestampMs - right.timestampMs || left.delta - right.delta,
+    );
+  const activeByLabel = new Map();
+  let maximum = 0;
+  for (const transition of transitions) {
+    const next = (activeByLabel.get(transition.label) ?? 0) + transition.delta;
+    if (next === 0) activeByLabel.delete(transition.label);
+    else activeByLabel.set(transition.label, next);
+    maximum = Math.max(maximum, activeByLabel.size);
+  }
+  return maximum;
+}
+
 function overlaps(left, right) {
   return left.startMs < right.endMs && right.startMs < left.endMs;
 }
@@ -266,7 +287,13 @@ function comparablePlan(plan) {
 
 async function runThreeGateScenario(
   fixture,
-  { name, coordinator, fullCommandDelayMs, shortCommandDelayMs },
+  {
+    name,
+    coordinator,
+    fullCommandDelayMs,
+    shortCommandDelayMs,
+    qualityParallelism,
+  },
 ) {
   const scenario = fixture.scenarioPaths(name);
   // The legacy baseline must finish all three serialized gates. Its wait budget
@@ -286,6 +313,7 @@ async function runThreeGateScenario(
     coordinator,
     defaultDelayMs: fullCommandDelayMs,
     lockWaitSeconds,
+    qualityParallelism,
     allowPackageScriptChanges: true,
     extraEnvironment: {
       PATH: `${join(fullWorktree, "fixture-bin")}:${process.env.PATH}`,
@@ -307,6 +335,7 @@ async function runThreeGateScenario(
         coordinator,
         defaultDelayMs: shortCommandDelayMs,
         lockWaitSeconds,
+        qualityParallelism,
         extraEnvironment: {
           PATH: `${join(worktree, "fixture-bin")}:${process.env.PATH}`,
         },
@@ -347,6 +376,14 @@ async function runThreeGateScenario(
       (interval) => interval !== barrier && overlaps(barrier, interval),
     ),
   ).length;
+  const crossGateOverlapCount = intervals.filter((interval, index) =>
+    intervals
+      .slice(index + 1)
+      .some(
+        (candidate) =>
+          candidate.label !== interval.label && overlaps(interval, candidate),
+      ),
+  ).length;
 
   return {
     mode: coordinator ? "coordinator" : "legacy",
@@ -354,7 +391,9 @@ async function runThreeGateScenario(
       Math.max(...results.map((result) => result.finishedAtMs)) -
       fullStart.timestampMs,
     maxConcurrency: maxConcurrency(intervals),
+    maxConcurrentGateLabels: maxConcurrentGateLabels(intervals),
     barrierOverlapCount,
+    crossGateOverlapCount,
     queueDelayMs: Object.fromEntries(
       labels.map((label) => [
         label.replace(`${name}-`, ""),
@@ -374,6 +413,7 @@ async function runThreeGateScenario(
 }
 
 const fullCommandDelayMs = 250;
+const qualityParallelism = 3;
 // Keep both short commands live through normal process-start skew so the
 // capacity-three assertion measures the scheduler instead of launch timing.
 const shortCommandDelayMs = 1_000;
@@ -386,12 +426,14 @@ try {
     coordinator: false,
     fullCommandDelayMs,
     shortCommandDelayMs,
+    qualityParallelism,
   });
   const coordinator = await runThreeGateScenario(fixture, {
     name: "coordinator",
     coordinator: true,
     fullCommandDelayMs,
     shortCommandDelayMs,
+    qualityParallelism,
   });
 
   assertProductionPlan(legacy.plans);
@@ -400,11 +442,30 @@ try {
     comparablePlan(coordinator.plans),
     comparablePlan(legacy.plans),
   );
-  assert.equal(legacy.maxConcurrency, 1, "legacy gates must serialize");
+  assert.equal(
+    legacy.maxConcurrency,
+    qualityParallelism,
+    "the legacy baseline must preserve normal within-gate parallelism",
+  );
+  assert.equal(
+    legacy.crossGateOverlapCount,
+    0,
+    "legacy gates must serialize across worktrees",
+  );
+  assert.equal(
+    legacy.maxConcurrentGateLabels,
+    1,
+    "legacy gates must let only one gate label make progress",
+  );
   assert.equal(
     coordinator.maxConcurrency,
     3,
     "the scheduler must use all three safe slots",
+  );
+  assert.equal(
+    coordinator.maxConcurrentGateLabels,
+    3,
+    "the scheduler must let all three gate labels make progress",
   );
   assert.equal(
     coordinator.barrierOverlapCount,
@@ -442,6 +503,7 @@ try {
           shortChangedPaths,
           fullCommandDelayMs,
           shortCommandDelayMs,
+          qualityParallelism,
           tools: "real Bash gate with stubbed pnpm, forge, and Trunk",
           elapsedDefinition:
             "full gate first mapped-tool start to the last gate process exit",

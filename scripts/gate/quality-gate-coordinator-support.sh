@@ -629,15 +629,11 @@ gate_coordinator_classify_command() {
       gate_coordinator_command_all_capacity=1
       gate_coordinator_command_class="dashboard-build"
       ;;
-    "pnpm dashboard:mutation"|"pnpm bridge:mutation"|"pnpm indexer:mutation")
-      gate_coordinator_command_all_capacity=1
-      gate_coordinator_command_class="mutation"
-      ;;
   esac
 }
 
 gate_coordinator_recover_stale_obligations() {
-  local status_json status_records records="" obligation_id drain_token
+  local status_json status_records records="" obligation_id drain_token request_token request_id
   local current_status obligation_present condemned_dir
   local claim_error claim_json error_code rc had_errexit=0
   local drain_context="${1:-stale-run}"
@@ -652,15 +648,28 @@ gate_coordinator_recover_stale_obligations() {
     const value = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
     for (const item of value.drainObligations ?? []) {
       if (process.argv[1] && item.requestId !== process.argv[1]) continue;
-      process.stdout.write(`${item.obligationId ?? ""}|${item.drainIdentity ?? ""}\n`);
+      const request = (value.requests ?? []).find(
+        (candidate) => candidate.requestId === item.requestId,
+      );
+      process.stdout.write([
+        item.obligationId ?? "",
+        item.drainIdentity ?? "",
+        request?.drainIdentity ?? "",
+        item.requestId ?? "",
+      ].join("|") + "\n");
     }
   ' "$request_filter")" || return 2
-  while IFS='|' read -r obligation_id drain_token; do
+  while IFS='|' read -r obligation_id drain_token request_token request_id; do
     [[ -n "$obligation_id" ]] || continue
     gate_lock_token_is_wellformed "$drain_token" || {
       echo "error: coordinator drain obligation ${obligation_id} has no safe persisted token." >&2
       return 2
     }
+    gate_lock_token_is_wellformed "$request_token" || {
+      echo "error: coordinator drain obligation ${obligation_id} has no safe request token." >&2
+      return 2
+    }
+    [[ -n "$request_id" ]] || return 2
     claim_error="$(mktemp "$scratch_dir/coordinator-drain-claim.XXXXXX")" || return 2
     case "$-" in *e*) had_errexit=1 ;; esac
     set +e
@@ -710,13 +719,22 @@ gate_coordinator_recover_stale_obligations() {
       echo "error: coordinator drain obligation ${obligation_id} could not be persisted." >&2
       return 2
     fi
-    records="${records}${obligation_id}|${drain_token}
+    if ! record_condemned_run "$request_token"; then
+      gate_coordinator_cli release-drain-claim \
+        --obligation-id "$obligation_id" --drain-token "$drain_token" \
+        --claimant-pid "$gate_coordinator_owner_pid" \
+        --claimant-start-utc "$gate_coordinator_owner_start" \
+        >/dev/null 2>&1 || true
+      echo "error: coordinator request recovery handle for ${obligation_id} could not be persisted." >&2
+      return 2
+    fi
+    records="${records}${obligation_id}|${drain_token}|${request_token}|${request_id}
 "
   done <<< "$status_records"
   [[ -n "$records" ]] || return 0
   condemned_dir="$(gate_lock_condemned_dir)" || return 2
   [[ "$condemned_dir" == "${gate_lock_root_dir}/condemned.d" ]] || return 2
-  while IFS='|' read -r obligation_id drain_token; do
+  while IFS='|' read -r obligation_id drain_token request_token request_id; do
     [[ -n "$obligation_id" ]] || continue
     case " ${gate_lock_drained_tokens} " in
       *" ${drain_token} "*) continue ;;
@@ -730,10 +748,29 @@ gate_coordinator_recover_stale_obligations() {
     rm -f "$condemned_dir/$drain_token" || return 2
     gate_lock_drained_tokens="${gate_lock_drained_tokens} ${drain_token}"
   done <<< "$records"
-  while IFS='|' read -r obligation_id drain_token; do
+  # Command tokens recover exact command captures. The request token is a
+  # separate coarse handle retained by every command. Drain both before any
+  # lease in that stale request can release capacity.
+  while IFS='|' read -r obligation_id drain_token request_token request_id; do
+    [[ -n "$obligation_id" ]] || continue
+    case " ${gate_lock_drained_tokens} " in
+      *" ${request_token} "*) continue ;;
+    esac
+    if ! drain_condemned_run_commands "$request_token" "$drain_context"; then
+      echo "error: coordinator request ${request_id} did not reach an empty process tree." >&2
+      return 2
+    fi
+    rm -f "$condemned_dir/$request_token" || return 2
+    gate_lock_drained_tokens="${gate_lock_drained_tokens} ${request_token}"
+  done <<< "$records"
+  while IFS='|' read -r obligation_id drain_token request_token request_id; do
     [[ -n "$obligation_id" ]] || continue
     case " ${gate_lock_drained_tokens} " in
       *" ${drain_token} "*) ;;
+      *) continue ;;
+    esac
+    case " ${gate_lock_drained_tokens} " in
+      *" ${request_token} "*) ;;
       *) continue ;;
     esac
     if ! gate_coordinator_cli ack-drain \

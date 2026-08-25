@@ -88,25 +88,33 @@ async function waitUntilStopped(identities, timeoutMs = 3_000) {
 }
 
 async function signalExact(identity, signal) {
-  if (!(await identityMatches(identity))) return;
+  if (!(await identityMatches(identity))) return false;
   try {
     process.kill(identity.pid, signal);
+    return true;
   } catch (error) {
-    if (error.code !== "ESRCH") throw error;
+    if (error.code === "ESRCH") return false;
+    throw error;
   }
 }
 
 export class ExactFixtureProcesses {
   #identities = new Map();
 
-  async track(pid) {
+  async track(pid, { allowMissing = false } = {}) {
     if (this.#identities.has(pid)) return this.#identities.get(pid);
     const startUtc = await processStartUtc(pid);
-    if (!startUtc)
+    if (!startUtc && allowMissing) return null;
+    if (!startUtc) {
       throw new Error(`cannot read fixture process identity: ${pid}`);
+    }
     const identity = { pid, startUtc };
     this.#identities.set(pid, identity);
     return identity;
+  }
+
+  async signal(identity, signal) {
+    return signalExact(identity, signal);
   }
 
   async #trackTree(pid) {

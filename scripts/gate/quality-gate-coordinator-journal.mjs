@@ -140,6 +140,7 @@ function validateLease(lease, key, state, sequences, capacity) {
   identifier(lease.leaseId, `${path}.leaseId`);
   if (lease.leaseId !== key) reject(path, "map key differs from leaseId");
   identifier(lease.requestId, `${path}.requestId`);
+  runToken(lease.drainIdentity, `${path}.drainIdentity`);
   const request = own(state.requests, lease.requestId);
   if (!request) reject(`${path}.requestId`, "does not reference a request");
   identity(lease.owner, `${path}.owner`);
@@ -327,7 +328,7 @@ function validateObligation(obligation, key, state) {
   if (
     request.pendingTerminal === null ||
     request.pendingTerminal.payload.reason !== obligation.reason ||
-    request.drainIdentity !== obligation.drainIdentity ||
+    lease.drainIdentity !== obligation.drainIdentity ||
     !identitiesEqual(request.owner, obligation.owner) ||
     !identitiesEqual(lease.owner, obligation.owner) ||
     lease.weight !== obligation.weight ||
@@ -409,6 +410,22 @@ export function validatePersistedJournal(state, capacity) {
 
   for (const [key, lease] of Object.entries(state.leases)) {
     validateLease(lease, key, state, sequences, capacity);
+  }
+  const activeDrainTokens = new Map(
+    Object.values(state.requests).map((request) => [
+      request.drainIdentity,
+      `request ${request.requestId}`,
+    ]),
+  );
+  for (const lease of Object.values(state.leases)) {
+    const owner = activeDrainTokens.get(lease.drainIdentity);
+    if (owner) {
+      reject(
+        `leases.${lease.leaseId}.drainIdentity`,
+        `duplicates the drain token owned by ${owner}`,
+      );
+    }
+    activeDrainTokens.set(lease.drainIdentity, `lease ${lease.leaseId}`);
   }
   for (const [key, singleflight] of Object.entries(state.singleflights)) {
     validateSingleflight(singleflight, key, state);
@@ -495,22 +512,18 @@ export function validatePersistedJournal(state, capacity) {
     }
   }
 
-  const obligationsByToken = new Map();
+  const obligationsByRequest = new Map();
   for (const obligation of Object.values(state.drainObligations)) {
-    const siblings = obligationsByToken.get(obligation.drainIdentity) ?? [];
+    const siblings = obligationsByRequest.get(obligation.requestId) ?? [];
     siblings.push(obligation);
-    obligationsByToken.set(obligation.drainIdentity, siblings);
+    obligationsByRequest.set(obligation.requestId, siblings);
   }
-  for (const [token, obligations] of obligationsByToken) {
-    const requestId = obligations[0].requestId;
+  for (const [requestId, obligations] of obligationsByRequest) {
     const claims = obligations.map((obligation) => obligation.claim);
-    if (obligations.some((obligation) => obligation.requestId !== requestId)) {
-      reject(`drainObligations.${token}`, "one drain token spans requests");
-    }
     if (claims.some(Boolean) && claims.some((claim) => claim === null)) {
       reject(
-        `drainObligations.${token}`,
-        "sibling claims are only partly held",
+        `drainObligations.${requestId}`,
+        "one request's drain claims are only partly held",
       );
     }
     const claimant = claims.find(Boolean)?.claimant;
@@ -519,15 +532,15 @@ export function validatePersistedJournal(state, capacity) {
       claims.some((claim) => !identitiesEqual(claim.claimant, claimant))
     ) {
       reject(
-        `drainObligations.${token}`,
-        "sibling claims have different owners",
+        `drainObligations.${requestId}`,
+        "one request's drain claims have different owners",
       );
     }
     const claimedAt = claims.find(Boolean)?.claimedAt;
     if (claimedAt && claims.some((claim) => claim.claimedAt !== claimedAt)) {
       reject(
-        `drainObligations.${token}`,
-        "sibling claims have different times",
+        `drainObligations.${requestId}`,
+        "one request's drain claims have different times",
       );
     }
   }

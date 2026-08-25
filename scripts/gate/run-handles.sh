@@ -25,19 +25,56 @@ gate_run_request_tag() {
 # carries the run's token, so unlike a PID or a process group it can never come
 # to name a stranger.
 gate_run_marker_path() {
-  local token="${gate_run_id:-$gate_lock_token}"
+  local token="${1:-${gate_run_id:-$gate_lock_token}}"
   [[ -n "$gate_lock_root_dir" && -n "$token" ]] || return 1
   printf '%s/holder.%s' "$gate_lock_root_dir" "$token"
 }
 
 gate_run_marker_file=""
+gate_run_created_marker_file=""
+
+gate_run_marker_matches_identity() {
+  local token="$1"
+  local marker="$2"
+  local expected body
+  gate_lock_token_is_wellformed "$token" || return 1
+  expected="$(gate_run_marker_path "$token")" || return 1
+  [[ "$marker" == "$expected" && ! -L "$marker" && -f "$marker" &&
+    -r "$marker" && -O "$marker" ]] || return 1
+  body="$(cat "$marker" 2>/dev/null)" || return 1
+  [[ "$body" == "$token" ]]
+}
+
+gate_run_create_marker_for_identity() {
+  local token="$1"
+  local work_verdict="${2:-No mapped command ran in this request}"
+  local execution_state="${3:-Nothing has been executed.}"
+  local report_no_work="${4:-1}"
+  local marker
+  gate_run_created_marker_file=""
+  gate_lock_token_is_wellformed "$token" || return 2
+  marker="$(gate_run_marker_path "$token")" || return 0
+  # O_EXCL via noclobber. Refuse every occupied path, including symlinks.
+  if ! (set -C && printf '%s\n' "$token" > "$marker") 2>/dev/null; then
+    echo "error: could not create the run marker at ${marker} (it may already exist)." >&2
+    echo "Without it, a command that outlives a killed gate cannot be found by the next run." >&2
+    echo "${execution_state} Fix that path — permissions, free space, or a leftover file — then re-run." >&2
+    if [[ "$report_no_work" -eq 1 ]]; then
+      gate_report_coordinated_no_work_failure 2 "run-marker preparation" \
+        "$work_verdict"
+    fi
+    return 2
+  fi
+  gate_run_created_marker_file="$marker"
+}
 
 gate_run_ensure_marker() {
   local work_verdict="${1:-No mapped command ran in this request}"
   local execution_state="${2:-Nothing has been executed.}"
-  local marker
+  local token
   [[ -z "$gate_run_marker_file" ]] || return 0
-  marker="$(gate_run_marker_path)" || return 0
+  token="${gate_run_id:-$gate_lock_token}"
+  [[ -n "$token" ]] || return 0
   # Fail closed, not best-effort. On a host without /proc this marker's
   # inherited descriptor is the only durable handle to a command that forks a
   # replacement and exits, so starting the command without it would quietly
@@ -49,15 +86,9 @@ gate_run_ensure_marker() {
   # creation refuses an occupied path outright — symlinks, dangling ones
   # included, by kernel contract — and a token is unique to this run, so
   # anything already sitting at this name is not ours to replace.
-  if ! (set -C && printf '%s\n' "${gate_run_id:-$gate_lock_token}" > "$marker") 2>/dev/null; then
-    echo "error: could not create the run marker at ${marker} (it may already exist)." >&2
-    echo "Without it, a command that outlives a killed gate cannot be found by the next run." >&2
-    echo "${execution_state} Fix that path — permissions, free space, or a leftover file — then re-run." >&2
-    gate_report_coordinated_no_work_failure 2 "run-marker preparation" \
-      "$work_verdict"
-    exit 2
-  fi
-  gate_run_marker_file="$marker"
+  gate_run_create_marker_for_identity \
+    "$token" "$work_verdict" "$execution_state" || exit $?
+  gate_run_marker_file="$gate_run_created_marker_file"
 }
 
 # This barrier exists only for the lock-race fixture. It makes the otherwise

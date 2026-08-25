@@ -412,7 +412,6 @@ PATH="\${QG_FIXTURE_ORIGINAL_PATH}" exec git "$@"
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
-    await fixtureProcesses.track(child.pid);
     const handle = makeGateHandle(child, {
       label,
       changedPath,
@@ -420,7 +419,13 @@ PATH="\${QG_FIXTURE_ORIGINAL_PATH}" exec git "$@"
       startedAtMs,
     });
     gateHandles.add(handle);
-    void handle.done.finally(() => gateHandles.delete(handle));
+    void handle.done.then(
+      () => gateHandles.delete(handle),
+      () => gateHandles.delete(handle),
+    );
+    handle.processIdentity = Number.isSafeInteger(child.pid)
+      ? await fixtureProcesses.track(child.pid, { allowMissing: true })
+      : null;
     return handle;
   }
 
@@ -475,6 +480,15 @@ PATH="\${QG_FIXTURE_ORIGINAL_PATH}" exec git "$@"
       if (request) return request;
     }
     return null;
+  }
+
+  async function signalGate(handle, signal) {
+    if (!handle.processIdentity) {
+      throw new Error(`gate process identity is unavailable: ${handle.label}`);
+    }
+    if (!(await fixtureProcesses.signal(handle.processIdentity, signal))) {
+      throw new Error(`exact gate process is no longer live: ${handle.label}`);
+    }
   }
 
   async function killLeaderWithoutWatchdog(handle, stubPid, descendantPid) {
@@ -653,6 +667,7 @@ PATH="\${QG_FIXTURE_ORIGINAL_PATH}" exec git "$@"
     waitForEvent,
     waitForDrain,
     coordinatorRequest,
+    signalGate,
     killLeaderWithoutWatchdog,
     waitForCoordinatorsToIdle,
     cleanup,

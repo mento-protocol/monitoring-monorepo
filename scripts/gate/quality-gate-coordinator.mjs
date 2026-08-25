@@ -464,6 +464,7 @@ export async function runCli(argv) {
       params = {
         ...commonOwnerParams(parsed),
         leaseId: required(parsed, "--lease-id"),
+        drainIdentity: required(parsed, "--drain-token"),
         weight: integer(parsed, "--weight", 1),
         allCapacity: parsed.flags.has("--all-capacity"),
         resources: parsed.resources,

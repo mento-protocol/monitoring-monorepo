@@ -85,6 +85,9 @@ cleanup_test_artifacts() {
   if [[ -n "${coordinator_gate_pipeline_lock:-}" ]]; then
     rm -rf "$coordinator_gate_pipeline_lock"
   fi
+  if [[ -n "${coordinator_multi_drain_scratch:-}" ]]; then
+    rm -rf "$coordinator_multi_drain_scratch"
+  fi
 }
 trap cleanup_test_artifacts EXIT
 
@@ -1145,7 +1148,7 @@ assert.match(
 );
 assert.match(
   source,
-  /if \[\[ "\$5" == 1 \]\]; then\n        exec 7>&-\n      fi\n      eval "\$2"/u,
+  /if \[\[ "\$6" == 1 \]\]; then\n        exec 7>&-\n      fi\n      eval "\$2"/u,
   "mapped commands must close fd 7 only when the coordinator reserved it",
 );
 assert.match(
@@ -1155,8 +1158,13 @@ assert.match(
 );
 assert.match(
   runHandles,
-  /gate_run_ensure_marker\(\)[\s\S]*?gate_report_coordinated_no_work_failure 2 "run-marker preparation"/u,
+  /gate_run_create_marker_for_identity\(\)[\s\S]*?gate_report_coordinated_no_work_failure 2 "run-marker preparation"/u,
   "coordinated run-marker refusal must emit a stdout no-work verdict",
+);
+assert.match(
+  runHandles,
+  /gate_run_ensure_marker\(\)[\s\S]*?gate_run_create_marker_for_identity/u,
+  "the request marker must use the fail-closed identity marker creator",
 );
 assert.match(
   source,
@@ -1269,17 +1277,19 @@ if ! /bin/bash -c '
   gate_coordinator_registration_fingerprint="pipeline-fingerprint"
   gate_coordinator_policy_hash="pipeline-policy"
   gate_run_id="pipeline-drain-token"
+  pipeline_command_drain="pipeline-command-$$-$(date +%s)"
   skip_if_fresh=0
   success_stamp_ttl_seconds=60
   gate_lock_wait_seconds=0
   hash_stream() { printf "%064d\n" 0; }
+  gate_lock_token_is_wellformed() { return 0; }
   gate_coordinator_assert_authority() { return 0; }
   gate_coordinator_verify_registration_fingerprint() { return 0; }
   gate_coordinator_cli() {
     case "${1:-}" in
       lease)
         printf "%s\n" \
-          "{\"status\":\"queued\",\"sequence\":17,\"blockers\":[{\"type\":\"capacity\"}]}"
+          "{\"status\":\"queued\",\"sequence\":17,\"drainIdentity\":\"$pipeline_command_drain\",\"blockers\":[{\"type\":\"capacity\"}]}"
         ;;
       abandon-lease) return 0 ;;
       *) return 1 ;;
@@ -1301,7 +1311,8 @@ if ! /bin/bash -c '
       lease)
         gate_coordinator_active_lease_id=""
         gate_coordinator_infrastructure_failed=0
-        gate_coordinator_before_command "fixture command"
+        gate_coordinator_before_command \
+          "fixture command" "$pipeline_command_drain"
         ;;
       coalesced)
         gate_coordinator_role="follower"
@@ -1328,15 +1339,22 @@ if ! /bin/bash -c '
     pipeline_statuses=("${PIPESTATUS[@]}")
     set -o pipefail
     set -e
-    [[ "${pipeline_statuses[0]}" -eq "$expected_status" ]]
-    [[ "${pipeline_statuses[1]}" -eq 0 ]]
-    grep -Fq -- \
-      "Quality-gate coordinator $phase failed. $work_verdict; this gate exits $expected_status." \
-      "$stdout_file"
-    grep -Fq -- \
-      "Piped? A pipeline reports the reader status: read \${PIPESTATUS[0]} or set -o pipefail." \
-      "$stdout_file"
-    grep -Fq -- "$stderr_fragment" "$stderr_file"
+    if [[ "${pipeline_statuses[0]}" -eq "$expected_status" &&
+      "${pipeline_statuses[1]}" -eq 0 ]] &&
+      grep -Fq -- \
+        "Quality-gate coordinator $phase failed. $work_verdict; this gate exits $expected_status." \
+        "$stdout_file" &&
+      grep -Fq -- \
+        "Piped? A pipeline reports the reader status: read \${PIPESTATUS[0]} or set -o pipefail." \
+        "$stdout_file" &&
+      grep -Fq -- "$stderr_fragment" "$stderr_file"; then
+      return 0
+    fi
+    printf "pipeline scenario %s returned statuses %s %s\n" \
+      "$scenario" "${pipeline_statuses[0]}" "${pipeline_statuses[1]}" >&2
+    sed "s/^/${scenario} stdout: /" "$stdout_file" >&2
+    sed "s/^/${scenario} stderr: /" "$stderr_file" >&2
+    return 1
   }
 
   assert_pipeline_failure admission 2 "worktree admission" \
@@ -1728,6 +1746,34 @@ STUB
 )
 rm -rf "$coordinator_gate_pipeline_repo" "$coordinator_gate_pipeline_lock"
 
+if ! /bin/bash -c '
+  set -u
+  gate_coordinator_capacity=3
+  source "$1"
+  for command in \
+    "pnpm dashboard:mutation" \
+    "pnpm bridge:mutation" \
+    "pnpm indexer:mutation"; do
+    gate_coordinator_classify_command "$command"
+    [[ "$gate_coordinator_command_weight" -eq 1 ]]
+    [[ "$gate_coordinator_command_all_capacity" -eq 0 ]]
+    [[ "$gate_coordinator_command_class" == ordinary ]]
+    [[ "${#gate_coordinator_command_resources[@]}" -eq 0 ]]
+  done
+  gate_coordinator_classify_command \
+    "pnpm --filter @mento-protocol/ui-dashboard test:coverage"
+  [[ "$gate_coordinator_command_all_capacity" -eq 1 ]]
+  [[ "$gate_coordinator_command_class" == dashboard-coverage ]]
+  gate_coordinator_classify_command \
+    "pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium"
+  [[ "$gate_coordinator_command_all_capacity" -eq 0 ]]
+  [[ "$gate_coordinator_command_class" == playwright-install ]]
+  [[ "${gate_coordinator_command_resources[*]}" == playwright-install ]]
+' quality-gate-command-policy \
+  "$repo_root/scripts/gate/quality-gate-coordinator-support.sh"; then
+  fail "quality-gate command scheduling classes are not minimal and explicit"
+fi
+
 coordinator_policy_output="$(
   gate_coordinator_entry="$repo_root/scripts/gate/quality-gate-coordinator.mjs" \
     /bin/bash -c 'source "$1"; gate_coordinator_node_policy_hash' \
@@ -1816,7 +1862,7 @@ if ! /bin/bash -c '
     case "$1" in
       status)
         printf "%s\n" \
-          "{\"drainObligations\":[{\"obligationId\":\"obligation-1\",\"drainIdentity\":\"fixture-drain-1-1\"}]}"
+          "{\"requests\":[{\"requestId\":\"request-1\",\"drainIdentity\":\"fixture-request-1-1\"}],\"drainObligations\":[{\"obligationId\":\"obligation-1\",\"requestId\":\"request-1\",\"drainIdentity\":\"fixture-drain-1-1\"}]}"
         ;;
       claim-drain)
         printf "%s\n" \
@@ -1835,6 +1881,7 @@ if ! /bin/bash -c '
   set -e
   [[ "$drain_status" -eq 2 ]]
   [[ -f "$gate_lock_root_dir/condemned.d/fixture-drain-1-1" ]]
+  [[ -f "$gate_lock_root_dir/condemned.d/fixture-request-1-1" ]]
   [[ ! -e "$ack_marker" ]]
   [[ " $gate_lock_drained_tokens " != *" fixture-drain-1-1 "* ]]
 ' quality-gate-drain-failure \
@@ -1843,6 +1890,95 @@ if ! /bin/bash -c '
   fail "failed coordinator drain did not preserve its unacknowledged evidence"
 fi
 rm -rf "$coordinator_drain_scratch"
+
+# One stale request can own several command leases. Bash recovery must drain
+# every command identity and the shared request identity before it acknowledges
+# either lease obligation.
+coordinator_multi_drain_scratch="$(mktemp -d)"
+coordinator_multi_drain_trace="$coordinator_multi_drain_scratch/trace"
+if ! /bin/bash -c '
+  set -u
+  support="$1"
+  scratch_dir="$2"
+  trace="$3"
+  gate_lock_root_dir="$scratch_dir/lock"
+  gate_lock_drained_tokens=""
+  gate_coordinator_owner_pid="$$"
+  gate_coordinator_owner_start="fixture-owner"
+  gate_coordinator_owner_subshell="${BASH_SUBSHELL:-0}"
+  mkdir -p "$gate_lock_root_dir/condemned.d"
+  : > "$trace"
+  gate_coordinator_is_active() { return 0; }
+  gate_lock_token_is_wellformed() { return 0; }
+  gate_lock_condemned_dir() {
+    printf "%s/condemned.d\n" "$gate_lock_root_dir"
+  }
+  record_condemned_run() {
+    printf "%s\n" "$1" > "$gate_lock_root_dir/condemned.d/$1"
+  }
+  drain_condemned_run_commands() {
+    printf "drain:%s\n" "$1" >> "$trace"
+  }
+  gate_coordinator_cli() {
+    action="$1"
+    shift
+    obligation_id=""
+    drain_token=""
+    while [[ "$#" -gt 0 ]]; do
+      case "$1" in
+        --obligation-id)
+          obligation_id="$2"
+          shift 2
+          ;;
+        --drain-token)
+          drain_token="$2"
+          shift 2
+          ;;
+        *) shift ;;
+      esac
+    done
+    case "$action" in
+      status)
+        printf "%s\n" \
+          "{\"requests\":[{\"requestId\":\"request-1\",\"drainIdentity\":\"fixture-request-1-1\"}],\"drainObligations\":[{\"obligationId\":\"obligation-1\",\"requestId\":\"request-1\",\"drainIdentity\":\"fixture-drain-a-1-1\"},{\"obligationId\":\"obligation-2\",\"requestId\":\"request-1\",\"drainIdentity\":\"fixture-drain-b-1-1\"}]}"
+        ;;
+      claim-drain)
+        printf "{\"claimed\":true,\"obligation\":{\"obligationId\":\"%s\",\"drainIdentity\":\"%s\"}}\n" \
+          "$obligation_id" "$drain_token"
+        ;;
+      ack-drain)
+        expected="$(printf "%s\n" \
+          "drain:fixture-drain-a-1-1" \
+          "drain:fixture-drain-b-1-1" \
+          "drain:fixture-request-1-1")"
+        [[ "$(cat "$trace")" == "$expected" ]] || return 1
+        printf "ack:%s\n" "$obligation_id" >> "$trace"
+        ;;
+      release-drain-claim) return 0 ;;
+      *) return 1 ;;
+    esac
+  }
+  source "$support"
+  gate_coordinator_recover_stale_obligations >/dev/null
+  expected="$(printf "%s\n" \
+    "drain:fixture-drain-a-1-1" \
+    "drain:fixture-drain-b-1-1" \
+    "drain:fixture-request-1-1" \
+    "ack:obligation-1" \
+    "ack:obligation-2")"
+  [[ "$(cat "$trace")" == "$expected" ]]
+  [[ ! -e "$gate_lock_root_dir/condemned.d/fixture-drain-a-1-1" ]]
+  [[ ! -e "$gate_lock_root_dir/condemned.d/fixture-drain-b-1-1" ]]
+  [[ ! -e "$gate_lock_root_dir/condemned.d/fixture-request-1-1" ]]
+  [[ " $gate_lock_drained_tokens " == *" fixture-drain-a-1-1 "* ]]
+  [[ " $gate_lock_drained_tokens " == *" fixture-drain-b-1-1 "* ]]
+  [[ " $gate_lock_drained_tokens " == *" fixture-request-1-1 "* ]]
+' quality-gate-multi-drain \
+  "$repo_root/scripts/gate/quality-gate-coordinator-support.sh" \
+  "$coordinator_multi_drain_scratch" "$coordinator_multi_drain_trace"; then
+  fail "coordinator recovery did not drain every command and request identity before acknowledgement"
+fi
+rm -rf "$coordinator_multi_drain_scratch"
 
 adapter_drift_repo="$(mktemp -d)"
 adapter_drift_repo="$(cd "$adapter_drift_repo" && pwd -P)"
@@ -2090,6 +2226,9 @@ STUB
     # coordinator cancellation and drain recovery after it resumes.
     kill -STOP "$gate_pid"
     kill -KILL -- "-$worker_pgid"
+    # The one exact group signal has been sent. Do not leave its numeric PGID
+    # in the EXIT trap, where later PID reuse could target an unrelated group.
+    worker_pgid=""
     kill -0 "$gate_pid" 2>/dev/null ||
       fail_worker_loss_fixture "killing one worker process group also killed the gate parent"
     kill -CONT "$gate_pid"
@@ -9054,6 +9193,11 @@ STUB
     [[ "$next_gate_exit" -eq 0 ]] ||
       fail_parallel_interrupt_fixture \
         "gate after parallel $phase interrupt exited $next_gate_exit"
+    ! grep -Fq \
+      "A completed mapped command left descendants running; stopping them before releasing its scheduler lease." \
+      "$next_gate_output" ||
+      fail_parallel_interrupt_fixture \
+        "normal parallel completion reported its intentional worker sentinel as a leaked descendant"
 
     trap - EXIT
   )
@@ -9062,6 +9206,948 @@ STUB
 
 run_parallel_interrupt_regression registration INT 130
 run_parallel_interrupt_regression execution TERM 143
+
+# A no-lock run has no coordinator or legacy owner that can recover its live
+# parallel sentinel. Once the mapped command has published its result, killing
+# the parent must let every sentinel exit instead of leaving a permanent Bash
+# process behind.
+run_parallel_nolock_parent_death_regression() {
+  local fixture_repo
+  fixture_repo="$(mktemp -d)"
+  (
+    cd "$fixture_repo"
+    git init -q
+    git config user.email test@example.invalid
+    git config user.name "Quality Gate Test"
+    mkdir -p bin scripts/context scripts/gate tools
+    printf 'console.log("fixture");\n' > scripts/gate/agent-prewarm.mjs
+    printf 'console.log("fixture");\n' > scripts/context/agent-context-budget.mjs
+    cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+    cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  printf '9.0.0\n'
+fi
+exit 0
+STUB
+    chmod +x bin/pnpm tools/trunk
+    git add .
+    git commit -qm init
+    printf 'scripts/gate/agent-prewarm.mjs\nscripts/context/agent-context-budget.mjs\n' \
+      > changed-paths.txt
+
+    local registration_barrier="$fixture_repo/registration"
+    local drain_barrier="$fixture_repo/drain"
+    local gate_output="$fixture_repo/gate-output"
+    local gate_pid=""
+    local gate_start=""
+    local worker_pid worker_start
+    local attempt all_gone
+    local -a worker_pids=()
+    local -a worker_starts=()
+
+    nolock_fixture_process_live() {
+      local pid="$1"
+      local expected_start="$2"
+      local observed_start observed_state
+      observed_start="$(normalized_process_start "$pid")"
+      [[ -n "$observed_start" && "$observed_start" == "$expected_start" ]] ||
+        return 1
+      observed_state="$(TZ=UTC LC_ALL=C ps -o stat= -p "$pid" 2>/dev/null |
+        awk 'NF { print $1; exit }' || true)"
+      [[ -n "$observed_state" && "$observed_state" != Z* ]]
+    }
+    # shellcheck disable=SC2329 # invoked by the EXIT trap below
+    cleanup_parallel_nolock_fixture() {
+      local cleanup_index cleanup_pid cleanup_start cleanup_attempt
+      local candidate_start verified_start candidate_parent already_recorded
+      : > "${registration_barrier}.release"
+      : > "${drain_barrier}.release"
+      if [[ "$gate_pid" =~ ^[1-9][0-9]*$ && -z "$gate_start" ]] &&
+        jobs -pr | grep -Fxq "$gate_pid"; then
+        candidate_start="$(normalized_process_start "$gate_pid")"
+        verified_start="$(normalized_process_start "$gate_pid")"
+        if [[ -n "$candidate_start" && "$candidate_start" == "$verified_start" ]]; then
+          gate_start="$candidate_start"
+        fi
+      fi
+      # Recover workers published before an early assertion failure. Require
+      # the exact live gate parent before trusting a PID from the fixture file.
+      if [[ -s "${registration_barrier}.workers" &&
+        "$gate_pid" =~ ^[1-9][0-9]*$ && -n "$gate_start" &&
+        "$(normalized_process_start "$gate_pid")" == "$gate_start" ]]; then
+        while IFS= read -r cleanup_pid; do
+          [[ "$cleanup_pid" =~ ^[1-9][0-9]*$ ]] || continue
+          already_recorded=0
+          for cleanup_index in "${!worker_pids[@]}"; do
+            if [[ "${worker_pids[$cleanup_index]}" == "$cleanup_pid" ]]; then
+              already_recorded=1
+              break
+            fi
+          done
+          [[ "$already_recorded" -eq 0 ]] || continue
+          candidate_parent="$(TZ=UTC LC_ALL=C ps -o ppid= -p "$cleanup_pid" 2>/dev/null |
+            awk 'NF { print $1; exit }' || true)"
+          [[ "$candidate_parent" == "$gate_pid" ]] || continue
+          candidate_start="$(normalized_process_start "$cleanup_pid")"
+          verified_start="$(normalized_process_start "$cleanup_pid")"
+          [[ -n "$candidate_start" && "$candidate_start" == "$verified_start" ]] ||
+            continue
+          worker_pids+=("$cleanup_pid")
+          worker_starts+=("$candidate_start")
+        done < "${registration_barrier}.workers"
+      fi
+      if [[ "$gate_pid" =~ ^[1-9][0-9]*$ && -n "$gate_start" ]] &&
+        jobs -pr | grep -Fxq "$gate_pid" &&
+        [[ "$(normalized_process_start "$gate_pid")" == "$gate_start" ]]; then
+        kill -KILL "$gate_pid" 2>/dev/null || true
+        wait "$gate_pid" 2>/dev/null || true
+      fi
+      for cleanup_index in "${!worker_pids[@]}"; do
+        cleanup_pid="${worker_pids[$cleanup_index]}"
+        cleanup_start="${worker_starts[$cleanup_index]}"
+        nolock_fixture_process_live "$cleanup_pid" "$cleanup_start" || continue
+        kill -TERM "$cleanup_pid" 2>/dev/null || true
+        for ((cleanup_attempt = 0; cleanup_attempt < 40; cleanup_attempt++)); do
+          nolock_fixture_process_live "$cleanup_pid" "$cleanup_start" || break
+          sleep 0.05
+        done
+        if nolock_fixture_process_live "$cleanup_pid" "$cleanup_start"; then
+          [[ "$(normalized_process_start "$cleanup_pid")" == "$cleanup_start" ]] &&
+            kill -KILL "$cleanup_pid" 2>/dev/null || true
+        fi
+      done
+      rm -rf "$fixture_repo"
+    }
+    fail_parallel_nolock_fixture() {
+      cp "$gate_output" "$output_file" 2>/dev/null || true
+      fail "$*"
+    }
+    trap cleanup_parallel_nolock_fixture EXIT
+
+    : > "${registration_barrier}.release"
+    NODE_ENV=test \
+      AGENT_QUALITY_GATE_TEST_WORKER_REGISTRATION_BARRIER="$registration_barrier" \
+      AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER="$drain_barrier" \
+      PATH="$fixture_repo/bin:$PATH" \
+      /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+        --changed-paths-file changed-paths.txt \
+        --base HEAD --run --parallel 2 --no-lock \
+        > "$gate_output" 2>&1 &
+    gate_pid=$!
+    for ((attempt = 0; attempt < 100; attempt++)); do
+      gate_start="$(normalized_process_start "$gate_pid")"
+      [[ -n "$gate_start" ]] && break
+      kill -0 "$gate_pid" 2>/dev/null || break
+      sleep 0.02
+    done
+    [[ -n "$gate_start" ]] ||
+      fail_parallel_nolock_fixture "could not bind the no-lock gate identity"
+
+    for ((attempt = 0; attempt < 500; attempt++)); do
+      [[ -s "${registration_barrier}.workers" && -e "${drain_barrier}.ready" ]] &&
+        break
+      nolock_fixture_process_live "$gate_pid" "$gate_start" || break
+      sleep 0.02
+    done
+    [[ -s "${registration_barrier}.workers" && -e "${drain_barrier}.ready" ]] ||
+      fail_parallel_nolock_fixture \
+        "no-lock parallel fixture never reached completed-worker drain"
+
+    while IFS= read -r worker_pid; do
+      [[ "$worker_pid" =~ ^[1-9][0-9]*$ ]] || continue
+      worker_start="$(normalized_process_start "$worker_pid")"
+      [[ -n "$worker_start" ]] ||
+        fail_parallel_nolock_fixture "could not bind a no-lock worker identity"
+      worker_pids+=("$worker_pid")
+      worker_starts+=("$worker_start")
+    done < <(awk '!seen[$0]++' "${registration_barrier}.workers")
+    [[ "${#worker_pids[@]}" -ge 2 ]] ||
+      fail_parallel_nolock_fixture \
+        "no-lock fixture did not register both parallel workers"
+    for attempt in "${!worker_pids[@]}"; do
+      nolock_fixture_process_live \
+        "${worker_pids[$attempt]}" "${worker_starts[$attempt]}" ||
+        fail_parallel_nolock_fixture \
+          "no-lock worker was not a live sentinel at the drain barrier"
+    done
+
+    [[ "$(normalized_process_start "$gate_pid")" == "$gate_start" ]] ||
+      fail_parallel_nolock_fixture "no-lock gate identity changed before crash"
+    kill -KILL "$gate_pid"
+    wait "$gate_pid" 2>/dev/null || true
+    gate_pid=""
+    : > "${drain_barrier}.release"
+
+    for ((attempt = 0; attempt < 200; attempt++)); do
+      all_gone=1
+      for worker_pid in "${!worker_pids[@]}"; do
+        if nolock_fixture_process_live \
+          "${worker_pids[$worker_pid]}" "${worker_starts[$worker_pid]}"; then
+          all_gone=0
+          break
+        fi
+      done
+      [[ "$all_gone" -eq 0 ]] || break
+      sleep 0.05
+    done
+    [[ "$all_gone" -eq 1 ]] ||
+      fail_parallel_nolock_fixture \
+        "no-lock parent crash left a parallel worker sentinel running"
+
+    trap - EXIT
+  )
+  rm -rf "$fixture_repo"
+}
+
+run_parallel_nolock_parent_death_regression
+
+# Recovery can see more than one process that holds a command token. Preserve
+# word boundaries across the newline-delimited scan, and retain a scan failure
+# even when another backend still reports PIDs. The tagged group leader must
+# remain eligible so its handleless same-group member enters the capture.
+(
+  gate_group_function="$(awk '
+    /^gate_drain_capture_seed_group\(\)/ { capture = 1 }
+    capture { print }
+    capture && /^}$/ { exit }
+  ' "$repo_root/scripts/agent-quality-gate.sh")"
+  [[ -n "$gate_group_function" ]] ||
+    fail "could not load the parallel group-capture helper for its focused regression"
+  eval "$gate_group_function"
+
+  gate_drain_seed_pgid=""
+  gate_drain_seed_start=""
+  gate_drain_tagged_now=$'101\n202'
+  gate_drain_scan_error="agentqg-scan-failed"
+  gate_drain_scan_failed=0
+  gate_drain_capture_group_pgid=""
+  gate_lock_identity_unavailable="<no-identity-source>"
+  gate_group_captured=""
+  gate_lock_identity_source_available() { return 0; }
+  gate_lock_process_start() { printf 'start-%s\n' "$1"; }
+  gate_run_tagged_pids() {
+    printf '%s\n' "$gate_drain_scan_error" 101 202
+  }
+  ps() {
+    [[ "$*" == "-axo pid=,pgid=" ]] || return 1
+    printf '%s\n' "101 101" "202 303" "303 101"
+  }
+  capture_process_tree() {
+    gate_group_captured="${gate_group_captured}$1 "
+  }
+
+  gate_drain_capture_seed_group "cmdfixture-1-1"
+  [[ "$gate_drain_scan_failed" -eq 1 ]] ||
+    fail "mixed scan-error and PID output lost the failed-scan state"
+  case " $gate_group_captured " in
+    *" 101 "*) : ;;
+    *) fail "multi-PID recovery did not retain the pinned group leader" ;;
+  esac
+  case " $gate_group_captured " in
+    *" 303 "*) : ;;
+    *) fail "multi-PID recovery did not capture the leader's handleless group member" ;;
+  esac
+)
+
+# Group membership is authorised by the pinned leader, not by a cached numeric
+# tag or a parent PID that can be reused after the process-group snapshot.
+(
+  gate_membership_function="$(awk '
+    /^gate_drain_membership_holds\(\)/ { capture = 1 }
+    capture { print }
+    capture && /^}$/ { exit }
+  ' "$repo_root/scripts/agent-quality-gate.sh")"
+  [[ -n "$gate_membership_function" ]] ||
+    fail "could not load the group-membership helper for its focused regression"
+  eval "$gate_membership_function"
+
+  gate_drain_capture_group_pgid=101
+  gate_drain_capture_group_anchor_pid=101
+  gate_drain_capture_group_anchor_start="start-101"
+  gate_drain_tagged_now="303 404"
+  gate_lock_identity_unavailable="<no-identity-source>"
+  gate_lock_identity_source_available() { return 0; }
+  gate_lock_normalize_process_start() { printf '%s\n' "$1"; }
+  pgrep() { printf '%s\n' 404; }
+  gate_lock_process_start_pgid_snapshot() {
+    case "$1" in
+      101) printf '%s\n' "${gate_test_anchor_snapshot:-start-101|101}" ;;
+      303) printf '%s\n' 'start-303|101' ;;
+      404) printf '%s\n' 'start-404|999' ;;
+    esac
+  }
+
+  gate_drain_membership_holds 303 "" "start-303" ||
+    fail "pinned group membership rejected an exact live member"
+  gate_test_anchor_snapshot="replacement-101|101"
+  if gate_drain_membership_holds 303 "" "start-303"; then
+    fail "group membership accepted a stale tag after leader identity reuse"
+  fi
+  gate_test_anchor_snapshot="start-101|101"
+  if gate_drain_membership_holds 404 202 "start-404"; then
+    fail "group membership accepted a reused parent outside the pinned group"
+  fi
+)
+
+# A mapped command can detach into a new session and leave its worker PGID.
+# Keep capacity one so the next command proves that the parent drains the
+# command-specific inherited handle before it releases the scheduler lease.
+run_parallel_detached_drain_regression() {
+  local fixture_repo contender_repo fixture_lock_root
+  fixture_repo="$(mktemp -d)"
+  contender_repo="$(mktemp -d)"
+  fixture_lock_root="$(mktemp -d /tmp/qgpd.XXXXXX)"
+  (
+    cd "$fixture_repo"
+    git init -q
+    git config user.email test@example.invalid
+    git config user.name "Quality Gate Test"
+    mkdir -p bin scripts/context scripts/gate tools
+    printf 'console.log("fixture");\n' > scripts/gate/agent-prewarm.mjs
+    printf 'console.log("fixture");\n' > scripts/context/agent-context-budget.mjs
+
+    cat > detached-child.mjs <<'STUB'
+import { execFileSync } from "node:child_process";
+import { renameSync, writeFileSync } from "node:fs";
+
+const readyPath = process.argv[2];
+const psEnvironment = { ...process.env, TZ: "UTC", LC_ALL: "C", LANG: "C" };
+const startedAt = execFileSync("ps", ["-p", String(process.pid), "-o", "lstart="], {
+  encoding: "utf8",
+  env: psEnvironment,
+}).trim();
+const pgid = execFileSync("ps", ["-p", String(process.pid), "-o", "pgid="], {
+  encoding: "utf8",
+  env: psEnvironment,
+}).trim();
+writeFileSync(`${readyPath}.publishing`, `${process.pid}|${startedAt}|${pgid}\n`);
+renameSync(`${readyPath}.publishing`, readyPath);
+process.on("SIGTERM", () => {});
+setTimeout(() => process.exit(97), 90_000);
+setInterval(() => {}, 1_000);
+STUB
+    cp detached-child.mjs handleless-child.mjs
+    cat > detached-launcher.mjs <<'STUB'
+import { execFileSync, spawn } from "node:child_process";
+import { existsSync, renameSync, writeFileSync } from "node:fs";
+import { setTimeout as delay } from "node:timers/promises";
+
+const psEnvironment = { ...process.env, TZ: "UTC", LC_ALL: "C", LANG: "C" };
+const inheritedStdio = Array.from({ length: 20 }, () => "ignore");
+for (const fd of [6, 8, 9, 16, 18, 19]) inheritedStdio[fd] = "inherit";
+const detachedChild = spawn(
+  process.execPath,
+  [process.env.QG_DETACHED_CHILD, process.env.QG_DETACHED_READY],
+  {
+    detached: true,
+    env: process.env,
+    stdio: inheritedStdio,
+  },
+);
+detachedChild.unref();
+const handlelessChild = spawn(
+  process.execPath,
+  [process.env.QG_HANDLELESS_CHILD, process.env.QG_HANDLELESS_READY],
+  {
+    detached: false,
+    env: { PATH: process.env.PATH },
+    stdio: Array.from({ length: 20 }, () => "ignore"),
+  },
+);
+handlelessChild.unref();
+const startedAt = execFileSync("ps", ["-p", String(process.pid), "-o", "lstart="], {
+  encoding: "utf8",
+  env: psEnvironment,
+}).trim();
+const pgid = execFileSync("ps", ["-p", String(process.pid), "-o", "pgid="], {
+  encoding: "utf8",
+  env: psEnvironment,
+}).trim();
+writeFileSync(
+  `${process.env.QG_LAUNCHER_READY}.publishing`,
+  `${process.pid}|${startedAt}|${pgid}\n`,
+);
+renameSync(`${process.env.QG_LAUNCHER_READY}.publishing`, process.env.QG_LAUNCHER_READY);
+const readyDeadline = Date.now() + 5_000;
+while (
+  !existsSync(process.env.QG_DETACHED_READY) ||
+  !existsSync(process.env.QG_HANDLELESS_READY)
+) {
+  if (Date.now() >= readyDeadline) process.exit(2);
+  await delay(20);
+}
+const releaseDeadline = Date.now() + 60_000;
+while (!existsSync(process.env.QG_DETACHED_LAUNCHER_RELEASE)) {
+  if (Date.now() >= releaseDeadline) process.exit(3);
+  await delay(20);
+}
+STUB
+    cat > bin/qg-detached-check <<'STUB'
+#!/usr/bin/env bash
+label="$*"
+for ready_record in "${QG_DETACHED_READY:?}" "${QG_HANDLELESS_READY:?}"; do
+  if [[ -s "$ready_record" ]]; then
+    IFS='|' read -r child_pid expected_start _ < "$ready_record"
+  else
+    child_pid=""
+    expected_start=""
+  fi
+  if [[ "$child_pid" =~ ^[1-9][0-9]*$ && -n "$expected_start" ]]; then
+    current_start="$(TZ=UTC LC_ALL=C LANG=C \
+      ps -p "$child_pid" -o lstart= 2>/dev/null |
+      sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | head -n1 || true)"
+    current_state="$(TZ=UTC LC_ALL=C LANG=C \
+      ps -p "$child_pid" -o stat= 2>/dev/null | \
+      awk 'NF { print $1; exit }' || true)"
+    verified_start="$(TZ=UTC LC_ALL=C LANG=C \
+      ps -p "$child_pid" -o lstart= 2>/dev/null |
+      sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | head -n1 || true)"
+    if [[ "$current_start" == "$expected_start" &&
+      "$verified_start" == "$expected_start" &&
+      -n "$current_state" && "$current_state" != Z* ]]; then
+      printf '%s\n' "$label" >> "${QG_DETACHED_OVERLAP:?}"
+    fi
+  fi
+done
+printf '%s\n' "$label" >> "${QG_DETACHED_STARTED:?}"
+STUB
+    cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if { printf '%s\n' release >&17; } 2>/dev/null; then
+  echo "mapped command inherited the private worker sentinel descriptor" >&2
+  exit 4
+fi
+exec node "${QG_DETACHED_LAUNCHER:?}"
+STUB
+    cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  printf '9.0.0\n'
+  exit 0
+fi
+exec "${QG_DETACHED_CHECK:?}" "holder pnpm $*"
+STUB
+    chmod +x bin/pnpm bin/qg-detached-check tools/trunk
+    git add .
+    git commit -qm init
+    printf 'scripts/gate/agent-prewarm.mjs\nscripts/context/agent-context-budget.mjs\n' \
+      > changed-paths.txt
+
+    (
+      cd "$contender_repo"
+      git init -q
+      git config user.email test@example.invalid
+      git config user.name "Quality Gate Test"
+      mkdir -p bin scripts/context tools
+      printf 'console.log("contender fixture");\n' \
+        > scripts/context/agent-context-budget.mjs
+      cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exec "${QG_DETACHED_CHECK:?}" "external trunk $*"
+STUB
+      cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  printf '9.0.0\n'
+  exit 0
+fi
+exec "${QG_DETACHED_CHECK:?}" "external pnpm $*"
+STUB
+      chmod +x bin/pnpm tools/trunk
+      git add .
+      git commit -qm init
+      printf 'scripts/context/agent-context-budget.mjs\n' > changed-paths.txt
+    )
+
+    local gate_output="$fixture_repo/gate-output"
+    local contender_output="$fixture_repo/contender-output"
+    local ready_file="$fixture_repo/detached-ready"
+    local handleless_ready_file="$fixture_repo/handleless-ready"
+    local launcher_ready_file="$fixture_repo/launcher-ready"
+    local launcher_release_file="$fixture_repo/launcher-release"
+    local drain_refresh_barrier="$fixture_repo/drain-refresh"
+    local overlap_file="$fixture_repo/detached-overlap"
+    local holder_started_file="$fixture_repo/holder-started"
+    local contender_started_file="$fixture_repo/contender-started"
+    local gate_pid=""
+    local gate_start=""
+    local contender_pid=""
+    local contender_start=""
+    local detached_pid=""
+    local detached_start=""
+    local detached_pgid=""
+    local handleless_pid=""
+    local handleless_start=""
+    local handleless_pgid=""
+    local launcher_pid=""
+    local launcher_start=""
+    local launcher_pgid=""
+    local worker_pid=""
+    local worker_start=""
+    local gate_exit=""
+    local contender_exit=""
+    local coordinator_metadata=""
+    local coordinator_generation_token=""
+    local coordinator_generation_marker=""
+    local state_root=""
+    local journal_path=""
+    local holder_worktree=""
+    local contender_worktree=""
+    local cleanup_failed=0
+    local attempt queued=0 barrier_ready=0 settled=0
+
+    parallel_detached_process_start() {
+      local pid="$1"
+      [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+      TZ=UTC LC_ALL=C LANG=C ps -p "$pid" -o lstart= 2>/dev/null |
+        sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | head -n1 || true
+    }
+    parallel_detached_process_live() {
+      local pid="$1"
+      local expected_start="$2"
+      local current_start current_state
+      current_start="$(parallel_detached_process_start "$pid")"
+      [[ -n "$current_start" && "$current_start" == "$expected_start" ]] ||
+        return 1
+      current_state="$(TZ=UTC LC_ALL=C LANG=C \
+        ps -p "$pid" -o stat= 2>/dev/null |
+        awk 'NF { print $1; exit }' || true)"
+      [[ -n "$current_state" && "$current_state" != Z* ]]
+    }
+    parallel_detached_process_holds_path() {
+      local pid="$1"
+      local expected_path="$2"
+      local descriptor target
+      if [[ -d "/proc/${pid}/fd" ]]; then
+        for descriptor in "/proc/${pid}/fd/"*; do
+          [[ -e "$descriptor" ]] || continue
+          target="$(readlink "$descriptor" 2>/dev/null || true)"
+          [[ "$target" == "$expected_path" ]] && return 0
+        done
+      fi
+      if command -v lsof >/dev/null 2>&1; then
+        lsof -w -a -p "$pid" -- "$expected_path" >/dev/null 2>&1
+        return $?
+      fi
+      return 1
+    }
+    parallel_detached_signal_exact() {
+      local signal="$1"
+      local pid="$2"
+      local expected_start="$3"
+      case "$signal" in TERM|KILL) ;; *) return 2 ;; esac
+      [[ "$pid" != "$$" && "$pid" != "$PPID" ]] || return 2
+      parallel_detached_process_live "$pid" "$expected_start" || return 1
+      [[ "$(parallel_detached_process_start "$pid")" == "$expected_start" ]] ||
+        return 1
+      kill "-$signal" "$pid" 2>/dev/null || return 1
+    }
+    parallel_detached_stop_exact() {
+      local label="$1"
+      local pid="$2"
+      local expected_start="$3"
+      local stop_attempt
+      [[ "$pid" =~ ^[1-9][0-9]*$ && -n "$expected_start" ]] || return 0
+      parallel_detached_process_live "$pid" "$expected_start" || return 0
+      parallel_detached_signal_exact TERM "$pid" "$expected_start" || true
+      for ((stop_attempt = 0; stop_attempt < 120; stop_attempt++)); do
+        parallel_detached_process_live "$pid" "$expected_start" || return 0
+        sleep 0.05
+      done
+      parallel_detached_signal_exact KILL "$pid" "$expected_start" || true
+      for ((stop_attempt = 0; stop_attempt < 100; stop_attempt++)); do
+        parallel_detached_process_live "$pid" "$expected_start" || return 0
+        sleep 0.05
+      done
+      printf 'cleanup could not stop %s at exact pid/start identity %s\n' \
+        "$label" "$pid" >&2
+      return 1
+    }
+    # shellcheck disable=SC2329 # invoked by the EXIT trap below
+    cleanup_parallel_detached_fixture() {
+      local metadata coordinator_pid coordinator_start captured entry_pid entry_start
+      local candidate_start verified_start
+      [[ -z "$launcher_release_file" ]] || : > "$launcher_release_file"
+      [[ -z "$drain_refresh_barrier" ]] || : > "${drain_refresh_barrier}.release"
+      if [[ (! "$detached_pid" =~ ^[1-9][0-9]*$ || -z "$detached_start") &&
+        -s "$ready_file" ]]; then
+        IFS='|' read -r detached_pid detached_start detached_pgid < "$ready_file" || true
+      fi
+      if [[ (! "$handleless_pid" =~ ^[1-9][0-9]*$ || -z "$handleless_start") &&
+        -s "$handleless_ready_file" ]]; then
+        IFS='|' read -r handleless_pid handleless_start handleless_pgid \
+          < "$handleless_ready_file" || true
+      fi
+      if [[ (! "$launcher_pid" =~ ^[1-9][0-9]*$ || -z "$launcher_start") &&
+        -s "$launcher_ready_file" ]]; then
+        IFS='|' read -r launcher_pid launcher_start launcher_pgid \
+          < "$launcher_ready_file" || true
+      fi
+      if [[ ! "$worker_pid" =~ ^[1-9][0-9]*$ &&
+        "$launcher_pgid" =~ ^[1-9][0-9]*$ ]]; then
+        worker_pid="$launcher_pgid"
+      fi
+      # A first start-identity read can race immediate process launch. Recover
+      # it only while Bash still reports this PID as our live background job,
+      # then require two equal snapshots before an exact cleanup signal.
+      if [[ "$gate_pid" =~ ^[1-9][0-9]*$ && -z "$gate_start" ]] &&
+        jobs -pr | grep -Fxq "$gate_pid"; then
+        candidate_start="$(parallel_detached_process_start "$gate_pid")"
+        verified_start="$(parallel_detached_process_start "$gate_pid")"
+        if [[ -n "$candidate_start" && "$candidate_start" == "$verified_start" ]]; then
+          gate_start="$candidate_start"
+        fi
+      fi
+      if [[ "$contender_pid" =~ ^[1-9][0-9]*$ && -z "$contender_start" ]] &&
+        jobs -pr | grep -Fxq "$contender_pid"; then
+        candidate_start="$(parallel_detached_process_start "$contender_pid")"
+        verified_start="$(parallel_detached_process_start "$contender_pid")"
+        if [[ -n "$candidate_start" && "$candidate_start" == "$verified_start" ]]; then
+          contender_start="$candidate_start"
+        fi
+      fi
+      # The worker is a child of the exact-live fixture gate and the launcher
+      # records its dedicated PGID. Bind that leader before cleanup signals it.
+      if [[ "$worker_pid" =~ ^[1-9][0-9]*$ && -z "$worker_start" &&
+        "$gate_pid" =~ ^[1-9][0-9]*$ && -n "$gate_start" ]] &&
+        parallel_detached_process_live "$gate_pid" "$gate_start"; then
+        candidate_start="$(parallel_detached_process_start "$worker_pid")"
+        verified_start="$(parallel_detached_process_start "$worker_pid")"
+        if [[ -n "$candidate_start" && "$candidate_start" == "$verified_start" &&
+          "$(TZ=UTC LC_ALL=C LANG=C ps -p "$worker_pid" -o pgid= 2>/dev/null |
+            tr -d '[:space:]' || true)" == "$worker_pid" ]]; then
+          worker_start="$candidate_start"
+        fi
+      fi
+      if [[ "$gate_pid" =~ ^[1-9][0-9]*$ && -n "$gate_start" ]]; then
+        if parallel_detached_stop_exact \
+          "detached-drain holder gate" "$gate_pid" "$gate_start"; then
+          wait "$gate_pid" 2>/dev/null || true
+        else
+          cleanup_failed=1
+        fi
+      fi
+      if [[ "$contender_pid" =~ ^[1-9][0-9]*$ && -n "$contender_start" ]]; then
+        if parallel_detached_stop_exact \
+          "detached-drain contender gate" "$contender_pid" "$contender_start"; then
+          wait "$contender_pid" 2>/dev/null || true
+        else
+          cleanup_failed=1
+        fi
+      fi
+      if [[ "$worker_pid" =~ ^[1-9][0-9]*$ && -n "$worker_start" ]]; then
+        parallel_detached_stop_exact \
+          "detached-drain parallel worker sentinel" \
+          "$worker_pid" "$worker_start" || cleanup_failed=1
+      fi
+      if [[ "$detached_pid" =~ ^[1-9][0-9]*$ && -n "$detached_start" ]]; then
+        parallel_detached_stop_exact \
+          "detached mapped-command child" "$detached_pid" "$detached_start" ||
+          cleanup_failed=1
+      fi
+      if [[ "$handleless_pid" =~ ^[1-9][0-9]*$ && -n "$handleless_start" ]]; then
+        parallel_detached_stop_exact \
+          "handleless same-group mapped-command child" \
+          "$handleless_pid" "$handleless_start" || cleanup_failed=1
+      fi
+      if [[ "$launcher_pid" =~ ^[1-9][0-9]*$ && -n "$launcher_start" ]]; then
+        parallel_detached_stop_exact \
+          "detached-drain launcher" "$launcher_pid" "$launcher_start" ||
+          cleanup_failed=1
+      fi
+      while IFS= read -r captured; do
+        [[ -f "$captured" ]] || continue
+        while IFS='|' read -r entry_pid entry_start; do
+          entry_start="$(printf '%s\n' "$entry_start" |
+            sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+          [[ "$entry_pid" =~ ^[1-9][0-9]*$ && -n "$entry_start" ]] || continue
+          parallel_detached_stop_exact \
+            "captured detached-drain process" "$entry_pid" "$entry_start" ||
+            cleanup_failed=1
+        done < "$captured"
+      done < <(find "$fixture_lock_root" -type f \
+        -name 'captured.*' -print 2>/dev/null)
+      while IFS= read -r metadata; do
+        [[ -f "$metadata" ]] || continue
+        IFS=$'\t' read -r coordinator_pid coordinator_start <<< "$(node -e '
+          const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+          process.stdout.write([
+            String(value.coordinatorIdentity?.pid ?? ""),
+            value.coordinatorIdentity?.startUtc ?? "",
+          ].join("\t"));
+        ' "$metadata" 2>/dev/null || true)"
+        if [[ "$coordinator_pid" =~ ^[1-9][0-9]*$ &&
+          -n "$coordinator_start" ]]; then
+          parallel_detached_stop_exact \
+            "detached-drain coordinator" \
+            "$coordinator_pid" "$coordinator_start" || cleanup_failed=1
+        fi
+      done < <(find "$fixture_lock_root" -type f \
+        -name coordinator.json -print 2>/dev/null)
+      rm -rf "$fixture_repo" "$contender_repo" "$fixture_lock_root"
+    }
+    fail_parallel_detached_fixture() {
+      {
+        sed 's/^/holder: /' "$gate_output" 2>/dev/null || true
+        sed 's/^/contender: /' "$contender_output" 2>/dev/null || true
+      } > "$output_file"
+      fail "$*"
+    }
+    trap cleanup_parallel_detached_fixture EXIT
+
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$fixture_lock_root" \
+      AGENT_QUALITY_GATE_COORDINATOR=1 \
+      AGENT_QUALITY_GATE_CAPACITY=1 \
+      AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER="$drain_refresh_barrier" \
+      NODE_ENV=test \
+      QG_DETACHED_CHILD="$fixture_repo/detached-child.mjs" \
+      QG_HANDLELESS_CHILD="$fixture_repo/handleless-child.mjs" \
+      QG_DETACHED_LAUNCHER="$fixture_repo/detached-launcher.mjs" \
+      QG_DETACHED_LAUNCHER_RELEASE="$launcher_release_file" \
+      QG_DETACHED_CHECK="$fixture_repo/bin/qg-detached-check" \
+      QG_DETACHED_READY="$ready_file" \
+      QG_HANDLELESS_READY="$handleless_ready_file" \
+      QG_LAUNCHER_READY="$launcher_ready_file" \
+      QG_DETACHED_OVERLAP="$overlap_file" \
+      QG_DETACHED_STARTED="$holder_started_file" \
+      PATH="$fixture_repo/bin:$PATH" \
+      /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+        --changed-paths-file changed-paths.txt \
+        --base HEAD --run --parallel 2 --lock-wait 30 \
+        > "$gate_output" 2>&1 &
+    gate_pid=$!
+    gate_start="$(parallel_detached_process_start "$gate_pid")"
+    [[ -n "$gate_start" ]] ||
+      fail_parallel_detached_fixture "could not bind the detached-drain gate identity"
+
+    for ((attempt = 0; attempt < 900; attempt++)); do
+      [[ -s "$ready_file" && -s "$handleless_ready_file" &&
+        -s "$launcher_ready_file" ]] && break
+      parallel_detached_process_live "$gate_pid" "$gate_start" || break
+      sleep 0.05
+    done
+    [[ -s "$ready_file" && -s "$handleless_ready_file" &&
+      -s "$launcher_ready_file" ]] ||
+      fail_parallel_detached_fixture \
+        "parallel command never launched both descendant fixtures"
+    IFS='|' read -r detached_pid detached_start detached_pgid < "$ready_file"
+    IFS='|' read -r handleless_pid handleless_start handleless_pgid \
+      < "$handleless_ready_file"
+    IFS='|' read -r launcher_pid launcher_start launcher_pgid \
+      < "$launcher_ready_file"
+    worker_pid="$launcher_pgid"
+    worker_start="$(parallel_detached_process_start "$worker_pid")"
+    [[ "$detached_pid" =~ ^[1-9][0-9]*$ && -n "$detached_start" &&
+      "$detached_pgid" =~ ^[1-9][0-9]*$ ]] ||
+      fail_parallel_detached_fixture "detached child identity is invalid"
+    [[ "$handleless_pid" =~ ^[1-9][0-9]*$ && -n "$handleless_start" &&
+      "$handleless_pgid" =~ ^[1-9][0-9]*$ ]] ||
+      fail_parallel_detached_fixture "handleless child identity is invalid"
+    [[ "$launcher_pid" =~ ^[1-9][0-9]*$ && -n "$launcher_start" &&
+      "$launcher_pgid" =~ ^[1-9][0-9]*$ ]] ||
+      fail_parallel_detached_fixture "launcher identity is invalid"
+    [[ "$worker_pid" =~ ^[1-9][0-9]*$ && -n "$worker_start" &&
+      "$worker_pid" != "$launcher_pid" &&
+      "$(parallel_detached_process_start "$worker_pid")" == "$worker_start" &&
+      "$(TZ=UTC LC_ALL=C LANG=C ps -p "$worker_pid" -o pgid= 2>/dev/null |
+        tr -d '[:space:]' || true)" == "$worker_pid" ]] ||
+      fail_parallel_detached_fixture "parallel worker sentinel identity is invalid"
+    parallel_detached_process_live "$detached_pid" "$detached_start" ||
+      fail_parallel_detached_fixture "detached child was not live after launch"
+    parallel_detached_process_live "$handleless_pid" "$handleless_start" ||
+      fail_parallel_detached_fixture "handleless child was not live after launch"
+    [[ "$detached_pgid" == "$detached_pid" ]] ||
+      fail_parallel_detached_fixture "detached child did not leave the worker process group"
+    [[ "$handleless_pgid" == "$launcher_pgid" &&
+      "$handleless_pgid" != "$handleless_pid" ]] ||
+      fail_parallel_detached_fixture \
+        "handleless child did not remain in the launcher process group"
+
+    coordinator_metadata="$({
+      find "$fixture_lock_root" -type f -name coordinator.json -print 2>/dev/null
+    } | head -n1)"
+    [[ -f "$coordinator_metadata" ]] ||
+      fail_parallel_detached_fixture "detached-drain coordinator metadata is missing"
+    IFS=$'\t' read -r state_root coordinator_generation_token \
+      coordinator_generation_marker <<< "$(node -e '
+      const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+      process.stdout.write([
+        value.stateRoot ?? "",
+        value.generationToken ?? "",
+        value.markerPath ?? "",
+      ].join("\t"));
+    ' "$coordinator_metadata")"
+    journal_path="${state_root}/journal.json"
+    [[ -n "$state_root" && -f "$journal_path" &&
+      -n "$coordinator_generation_token" &&
+      -f "$coordinator_generation_marker" ]] ||
+      fail_parallel_detached_fixture "detached-drain coordinator journal is missing"
+    [[ "$(cat "$coordinator_generation_marker")" == "$coordinator_generation_token" ]] ||
+      fail_parallel_detached_fixture \
+        "detached-drain coordinator generation marker is invalid"
+    holder_worktree="$(pwd -P)"
+    contender_worktree="$(cd "$contender_repo" && pwd -P)"
+
+    (
+      cd "$contender_repo"
+      exec env \
+        AGENT_QUALITY_GATE_LOCK=1 \
+        AGENT_QUALITY_GATE_LOCK_HELD='' \
+        AGENT_QUALITY_GATE_LOCK_DIR="$fixture_lock_root" \
+        AGENT_QUALITY_GATE_COORDINATOR=1 \
+        AGENT_QUALITY_GATE_CAPACITY=1 \
+        NODE_ENV=test \
+        QG_DETACHED_CHECK="$fixture_repo/bin/qg-detached-check" \
+        QG_DETACHED_READY="$ready_file" \
+        QG_HANDLELESS_READY="$handleless_ready_file" \
+        QG_DETACHED_OVERLAP="$overlap_file" \
+        QG_DETACHED_STARTED="$contender_started_file" \
+        PATH="$contender_repo/bin:$PATH" \
+        /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+        --changed-paths-file changed-paths.txt \
+        --base HEAD --run --parallel 1 --lock-wait 30
+    ) > "$contender_output" 2>&1 &
+    contender_pid=$!
+    contender_start="$(parallel_detached_process_start "$contender_pid")"
+    [[ -n "$contender_start" ]] ||
+      fail_parallel_detached_fixture "could not bind the detached-drain contender identity"
+
+    # Hold the launcher open until a different worktree owns a queued command
+    # lease behind the detached command's granted capacity-one lease.
+    for ((attempt = 0; attempt < 900; attempt++)); do
+      if node -e '
+        const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+        const [holderRoot, contenderRoot] = process.argv.slice(2);
+        const requests = Object.values(value.requests ?? {});
+        const leases = Object.values(value.leases ?? {});
+        const holder = requests.find((item) => item.worktreeKey === holderRoot);
+        const contender = requests.find((item) => item.worktreeKey === contenderRoot);
+        const holderGranted = holder && leases.some((item) =>
+          item.requestId === holder.requestId && item.status === "granted");
+        const contenderQueued = contender && contender.role === "leader" &&
+          contender.admission === "held" && leases.some((item) =>
+            item.requestId === contender.requestId && item.status === "queued");
+        process.exit(holderGranted && contenderQueued ? 0 : 1);
+      ' "$journal_path" "$holder_worktree" "$contender_worktree" 2>/dev/null; then
+        queued=1
+        break
+      fi
+      parallel_detached_process_live "$gate_pid" "$gate_start" || break
+      parallel_detached_process_live "$contender_pid" "$contender_start" || break
+      sleep 0.05
+    done
+    [[ "$queued" -eq 1 ]] ||
+      fail_parallel_detached_fixture \
+        "external contender did not queue behind the detached command lease"
+    : > "$launcher_release_file"
+
+    # Pause the holder after the drain has refreshed and durably captured its
+    # descendants. The successor must inherit this exact mid-drain state.
+    for ((attempt = 0; attempt < 900; attempt++)); do
+      if [[ -e "${drain_refresh_barrier}.ready" ]]; then
+        barrier_ready=1
+        break
+      fi
+      parallel_detached_process_live "$gate_pid" "$gate_start" || break
+      sleep 0.05
+    done
+    [[ "$barrier_ready" -eq 1 ]] ||
+      fail_parallel_detached_fixture \
+        "parallel command drain did not reach its refresh barrier"
+    parallel_detached_process_live "$detached_pid" "$detached_start" ||
+      fail_parallel_detached_fixture \
+        "detached child exited before the crash-at-drain barrier"
+    parallel_detached_process_live "$handleless_pid" "$handleless_start" ||
+      fail_parallel_detached_fixture \
+        "handleless child exited before the crash-at-drain barrier"
+    parallel_detached_process_holds_path \
+      "$worker_pid" "$coordinator_generation_marker" ||
+      fail_parallel_detached_fixture \
+        "parallel worker sentinel did not retain the coordinator generation handle"
+    [[ ! -e "$contender_started_file" ]] ||
+      fail_parallel_detached_fixture \
+        "external contender started while the holder drain was paused"
+    node -e '
+      const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+      const [holderRoot, contenderRoot] = process.argv.slice(2);
+      const requests = Object.values(value.requests ?? {});
+      const leases = Object.values(value.leases ?? {});
+      const holder = requests.find((item) => item.worktreeKey === holderRoot);
+      const contender = requests.find((item) => item.worktreeKey === contenderRoot);
+      const holderReserved = holder && leases.some((item) =>
+        item.requestId === holder.requestId && item.status === "granted");
+      const contenderQueued = contender && leases.some((item) =>
+        item.requestId === contender.requestId && item.status === "queued");
+      process.exit(holderReserved && contenderQueued ? 0 : 1);
+    ' "$journal_path" "$holder_worktree" "$contender_worktree" ||
+      fail_parallel_detached_fixture \
+        "contender lease was not queued while the holder drain was paused"
+
+    parallel_detached_signal_exact KILL "$gate_pid" "$gate_start" ||
+      fail_parallel_detached_fixture \
+        "could not crash the holder at its exact drain identity"
+    set +e
+    wait "$gate_pid"
+    gate_exit=$?
+    set -e
+    gate_pid=""
+    [[ "$gate_exit" -eq 137 ]] ||
+      fail_parallel_detached_fixture \
+        "detached-drain holder exited ${gate_exit}, expected SIGKILL status 137"
+
+    for ((attempt = 0; attempt < 1200; attempt++)); do
+      if ! parallel_detached_process_live "$contender_pid" "$contender_start"; then
+        settled=1
+        break
+      fi
+      sleep 0.05
+    done
+    [[ "$settled" -eq 1 ]] ||
+      fail_parallel_detached_fixture \
+        "detached-drain successor did not settle within 60s"
+    set +e
+    wait "$contender_pid"
+    contender_exit=$?
+    set -e
+    contender_pid=""
+    [[ "$contender_exit" -eq 0 ]] ||
+      fail_parallel_detached_fixture \
+        "detached-drain contender exited ${contender_exit}"
+    [[ -s "$contender_started_file" ]] ||
+      fail_parallel_detached_fixture "queued external contender never started"
+    [[ ! -s "$overlap_file" ]] ||
+      fail_parallel_detached_fixture "scheduler released capacity while the detached child was alive"
+    ! parallel_detached_process_live "$detached_pid" "$detached_start" ||
+      fail_parallel_detached_fixture "detached child survived command drain"
+    ! parallel_detached_process_live "$handleless_pid" "$handleless_start" ||
+      fail_parallel_detached_fixture \
+        "handleless same-group child survived successor recovery"
+    grep -Fq \
+      "A completed mapped command left descendants running; stopping them before releasing its scheduler lease." \
+      "$gate_output" ||
+      fail_parallel_detached_fixture "parallel command did not report its detached-child drain"
+    [[ -z "$(find "$fixture_lock_root" -type f \
+      -name 'holder.cmd*' -print 2>/dev/null)" ]] ||
+      fail_parallel_detached_fixture "parallel command left its drain marker behind"
+    detached_pid=""
+    detached_start=""
+    handleless_pid=""
+    handleless_start=""
+    cleanup_parallel_detached_fixture
+    trap - EXIT
+    [[ "$cleanup_failed" -eq 0 ]] ||
+      fail_parallel_detached_fixture "detached-drain fixture cleanup did not settle"
+  )
+  rm -rf "$fixture_repo" "$contender_repo" "$fixture_lock_root"
+}
+
+run_parallel_detached_drain_regression
 
 # Keep the production identity contract reachable from every protected source
 # in CI and from the local changed-path router.

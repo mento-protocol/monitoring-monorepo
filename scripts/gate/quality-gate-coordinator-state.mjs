@@ -202,6 +202,7 @@ export function inspectState(state, capacity, identity) {
       ? {
           leaseId: oldestBarrier.leaseId,
           requestId: oldestBarrier.requestId,
+          drainIdentity: oldestBarrier.drainIdentity,
           sequence: oldestBarrier.sequence,
         }
       : null,
@@ -209,6 +210,7 @@ export function inspectState(state, capacity, identity) {
       ? {
           leaseId: reservation.leaseId,
           requestId: reservation.requestId,
+          drainIdentity: reservation.drainIdentity,
           sequence: reservation.sequence,
           weight: reservation.weight,
           allCapacity: reservation.allCapacity,

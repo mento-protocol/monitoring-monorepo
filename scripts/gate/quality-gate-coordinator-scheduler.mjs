@@ -33,7 +33,7 @@ export function recoverGrantedLeases(state, recoveredGeneration, now) {
         "granted lease has no request state",
       );
     }
-    validateRunToken(request.drainIdentity, "drainIdentity");
+    validateRunToken(lease.drainIdentity, "lease.drainIdentity");
     lease.status = "drain-required";
     const obligationId = `recovery-${randomUUID()}`;
     lease.drainObligationId = obligationId;
@@ -41,7 +41,7 @@ export function recoverGrantedLeases(state, recoveredGeneration, now) {
       obligationId,
       leaseId: lease.leaseId,
       requestId: lease.requestId,
-      drainIdentity: request.drainIdentity,
+      drainIdentity: lease.drainIdentity,
       owner: copy(lease.owner),
       weight: lease.weight,
       resources: copy(lease.resources),
