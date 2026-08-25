@@ -10,6 +10,7 @@ import {
   isReleasable,
   isRecoverableClaimRaceError,
   isReviewable,
+  ISSUE_STATE_LABELS,
   labelsForState,
   parseArgs,
   parseIssueNumbers,
@@ -20,6 +21,7 @@ import {
   selectStatusOption,
   shouldRollbackFailedTransition,
   stateFromLabels,
+  sync,
   validateOpenPr,
 } from "./agent-issue-board.mjs";
 import {
@@ -368,19 +370,386 @@ test("active label transition claims the issue and removes stale state", () => {
   });
 });
 
-test("closed in-pr issues sync to done and clear state labels", () => {
-  assertEqual(
-    stateFromLabels({
-      state: "CLOSED",
-      labels: [{ name: "in-pr" }],
-    }),
-    "done",
-  );
+test("closed issues with any queue label sync to done", () => {
+  for (const label of ISSUE_STATE_LABELS) {
+    assertEqual(
+      stateFromLabels({
+        state: "CLOSED",
+        labels: [{ name: label }],
+      }),
+      "done",
+      label,
+    );
+  }
   assertDeepEqual(labelsForState("done"), {
     addLabels: [],
     removeLabels: ["agent-ready", "agent-active", "in-pr", "needs-grooming"],
     statusOptions: ["Done"],
   });
+});
+
+test("sync clears every closed queue label without requiring a Project item", async () => {
+  const queries = [];
+  const edits = [];
+  const reads = new Map();
+  const closedIssues = new Map(
+    ISSUE_STATE_LABELS.map((label, index) => [
+      label,
+      {
+        number: 900 + index,
+        title: `closed ${label}`,
+        state: "CLOSED",
+        labels: [{ name: label }],
+      },
+    ]),
+  );
+
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabel: async (_options, label, { state }) => {
+        queries.push(`${state}:${label}`);
+        return state === "closed" ? [closedIssues.get(label)] : [];
+      },
+      findIssueProjectItem: async () => null,
+      updateProjectFields: async () => {
+        throw new Error("closed issues without Project items must still sync");
+      },
+      editIssueLabels: async (_options, issue, state) => {
+        edits.push({ number: issue.number, state });
+      },
+      getIssue: async (_options, number) => {
+        const issue = [...closedIssues.values()].find(
+          (candidate) => candidate.number === number,
+        );
+        const read = (reads.get(number) ?? 0) + 1;
+        reads.set(number, read);
+        return read === 1 ? issue : { ...issue, labels: [] };
+      },
+      sleep: async () => {
+        throw new Error("an immediately satisfied postcondition must not wait");
+      },
+    },
+  );
+
+  assertDeepEqual(
+    queries,
+    ISSUE_STATE_LABELS.flatMap((label) => [`open:${label}`, `closed:${label}`]),
+  );
+  assertDeepEqual(
+    results.map(({ number, state }) => ({ number, state })),
+    ISSUE_STATE_LABELS.map((_label, index) => ({
+      number: 900 + index,
+      state: "done",
+    })),
+  );
+  assertDeepEqual(
+    edits,
+    ISSUE_STATE_LABELS.map((_label, index) => ({
+      number: 900 + index,
+      state: "done",
+    })),
+  );
+  assertDeepEqual(
+    [...reads.values()],
+    ISSUE_STATE_LABELS.map(() => 2),
+  );
+});
+
+test("sync uses refreshed Project visibility before closed-item cleanup", async () => {
+  const listedIssue = {
+    number: 920,
+    title: "closed review item",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+    projectItems: [],
+  };
+  const refreshedIssue = {
+    ...listedIssue,
+    projectItems: [{ id: "item-920", project: { id: "project" } }],
+  };
+  const events = [];
+  let reads = 0;
+
+  await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabel: async (_options, label, { state }) =>
+        label === "in-pr" && state === "closed" ? [listedIssue] : [],
+      findIssueProjectItem: async (_options, issue) => {
+        events.push("find");
+        return issue.projectItems[0]?.id ?? null;
+      },
+      updateProjectFields: async () => events.push("project"),
+      editIssueLabels: async () => events.push("labels"),
+      getIssue: async () => {
+        reads += 1;
+        events.push(reads === 1 ? "refresh" : "verify");
+        return reads === 1 ? refreshedIssue : { ...refreshedIssue, labels: [] };
+      },
+      sleep: async () => events.push("sleep"),
+    },
+  );
+
+  assertDeepEqual(events, ["refresh", "find", "project", "labels", "verify"]);
+});
+
+test("sync reclassifies an issue that reopened after enumeration", async () => {
+  const listedIssue = {
+    number: 925,
+    title: "reopened review item",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+  };
+  const reopenedIssue = {
+    ...listedIssue,
+    state: "OPEN",
+    labels: [{ name: "agent-active" }],
+  };
+  const updates = [];
+  let edits = 0;
+
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabel: async (_options, label, { state }) =>
+        label === "in-pr" && state === "closed" ? [listedIssue] : [],
+      getIssue: async () => reopenedIssue,
+      findIssueProjectItem: async () => {
+        throw new Error("a reopened issue must not take the Done path");
+      },
+      ensureProjectItem: async () => "item-925",
+      updateProjectFields: async (_options, _project, _item, state) => {
+        updates.push(state);
+      },
+      editIssueLabels: async () => {
+        edits += 1;
+      },
+    },
+  );
+
+  assertDeepEqual(results, [
+    { number: 925, title: "reopened review item", state: "active" },
+  ]);
+  assertDeepEqual(updates, ["active"]);
+  assertEqual(edits, 0, "reopened issue label edits");
+});
+
+test("sync reprojects a concurrent claim after an open Project write", async () => {
+  const readyIssue = {
+    number: 926,
+    title: "concurrent claim",
+    state: "OPEN",
+    labels: [{ name: "agent-ready" }],
+  };
+  const activeIssue = {
+    ...readyIssue,
+    labels: [{ name: "agent-active" }],
+  };
+  const reads = [readyIssue, activeIssue, activeIssue];
+  const updates = [];
+  let waits = 0;
+
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabel: async (_options, label, { state }) =>
+        label === "agent-ready" && state === "open" ? [readyIssue] : [],
+      getIssue: async () => reads.shift(),
+      ensureProjectItem: async () => "item-926",
+      updateProjectFields: async (_options, _project, _item, state) => {
+        updates.push(state);
+      },
+      sleep: async () => {
+        waits += 1;
+      },
+    },
+  );
+
+  assertDeepEqual(updates, ["ready", "active"]);
+  assertEqual(waits, 1, "claim drift wait");
+  assertDeepEqual(results, [
+    { number: 926, title: "concurrent claim", state: "active" },
+  ]);
+});
+
+test("sync bounds repeated open-state projection drift", async () => {
+  const readyIssue = {
+    number: 929,
+    title: "oscillating claim",
+    state: "OPEN",
+    labels: [{ name: "agent-ready" }],
+  };
+  const activeIssue = {
+    ...readyIssue,
+    labels: [{ name: "agent-active" }],
+  };
+  const reads = [readyIssue, activeIssue, readyIssue, activeIssue];
+  const updates = [];
+  let waits = 0;
+
+  await assertRejects(
+    () =>
+      sync(
+        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+        {
+          getProject: async () => ({ id: "project" }),
+          listIssuesByLabel: async (_options, label, { state }) =>
+            label === "agent-ready" && state === "open" ? [readyIssue] : [],
+          getIssue: async () => reads.shift(),
+          ensureProjectItem: async () => "item-929",
+          updateProjectFields: async (_options, _project, _item, state) => {
+            updates.push(state);
+          },
+          sleep: async () => {
+            waits += 1;
+          },
+        },
+      ),
+    /Issue #929 did not stabilize during sync after 3 attempts; last projection drift was ready -> active/,
+  );
+
+  assertDeepEqual(updates, ["ready", "active", "ready"]);
+  assertEqual(waits, 2, "bounded open-state drift waits");
+});
+
+test("sync reprojects Done when an issue closes after an open Project write", async () => {
+  const reviewIssue = {
+    number: 928,
+    title: "concurrent close",
+    state: "OPEN",
+    labels: [{ name: "in-pr" }],
+  };
+  const closedIssue = {
+    ...reviewIssue,
+    state: "CLOSED",
+    labels: [],
+  };
+  const reads = [reviewIssue, closedIssue, closedIssue];
+  const updates = [];
+
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabel: async (_options, label, { state }) =>
+        label === "in-pr" && state === "open" ? [reviewIssue] : [],
+      getIssue: async () => reads.shift(),
+      ensureProjectItem: async () => "item-928",
+      findIssueProjectItem: async () => "item-928",
+      updateProjectFields: async (_options, _project, _item, state) => {
+        updates.push(state);
+      },
+      editIssueLabels: async () => {},
+      sleep: async () => {},
+    },
+  );
+
+  assertDeepEqual(updates, ["review", "done"]);
+  assertDeepEqual(results, [
+    { number: 928, title: "concurrent close", state: "done" },
+  ]);
+});
+
+test("sync fails if a closed issue reopens during Done cleanup", async () => {
+  const issue = {
+    number: 927,
+    title: "concurrent reopen",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+  };
+  let reads = 0;
+
+  await assertRejects(
+    () =>
+      sync(
+        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+        {
+          getProject: async () => ({ id: "project" }),
+          listIssuesByLabel: async (_options, label, { state }) =>
+            label === "in-pr" && state === "closed" ? [issue] : [],
+          getIssue: async () => {
+            reads += 1;
+            return reads === 1
+              ? issue
+              : { ...issue, state: "OPEN", labels: [] };
+          },
+          findIssueProjectItem: async () => null,
+          editIssueLabels: async () => {},
+          sleep: async () => {
+            throw new Error("a state change must fail without retrying");
+          },
+        },
+      ),
+    /Issue #927 changed state during sync: expected CLOSED, got OPEN/,
+  );
+  assertEqual(reads, 2, "refresh and postcondition reads");
+});
+
+test("sync fails when a closed issue retains a queue label", async () => {
+  const issue = {
+    number: 930,
+    title: "stale closed claim",
+    state: "CLOSED",
+    labels: [{ name: "agent-active" }],
+  };
+  let waits = 0;
+
+  await assertRejects(
+    () =>
+      sync(
+        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+        {
+          getProject: async () => ({ id: "project" }),
+          listIssuesByLabel: async (_options, label, { state }) =>
+            label === "agent-active" && state === "closed" ? [issue] : [],
+          findIssueProjectItem: async () => null,
+          editIssueLabels: async () => {},
+          getIssue: async () => issue,
+          sleep: async () => {
+            waits += 1;
+          },
+        },
+      ),
+    /Issue #930 retained queue label\(s\) after sync: agent-active/,
+  );
+  assertEqual(waits, 2, "bounded verification waits");
+});
+
+test("sync dry-run refreshes once and skips the unapplied postcondition", async () => {
+  const issue = {
+    number: 940,
+    title: "dry-run closed item",
+    state: "CLOSED",
+    labels: [{ name: "needs-grooming" }],
+  };
+  let edits = 0;
+  let reads = 0;
+
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: true },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabel: async (_options, label, { state }) =>
+        label === "needs-grooming" && state === "closed" ? [issue] : [],
+      findIssueProjectItem: async () => null,
+      editIssueLabels: async () => {
+        edits += 1;
+      },
+      getIssue: async () => {
+        reads += 1;
+        return issue;
+      },
+    },
+  );
+
+  assertEqual(edits, 1, "dry-run label plan");
+  assertEqual(reads, 1, "dry-run refresh reads");
+  assertEqual(results[0].state, "done", "dry-run result state");
 });
 
 test("claim guard only accepts open agent-ready issues", () => {

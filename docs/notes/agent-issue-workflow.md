@@ -3,7 +3,7 @@ title: Agent Issue Workflow
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-21
+last_verified: 2026-08-25
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -70,11 +70,21 @@ Routing labels:
    the Project has an `In Review` status option. With the default GitHub status
    options, it falls back to `In Progress`.
 6. On merge, GitHub closes issues referenced with closing keywords. Run
-   `pnpm issue:board sync` after merge, or on a schedule, to move those closed
-   `in-pr` issues on Project #12 to `Done` and clear the queue label. When Done
-   means still requires post-merge production proof, use `Refs`, keep the issue
-   open and `in-pr`, and retain its current owner through the live checks. Close
-   the issue and run board sync only after its live acceptance criteria pass.
+   `pnpm issue:board sync` after merge, or on a schedule, to move closed
+   queue-labeled Project #12 items to `Done` and clear all queue labels. The
+   helper also clears queue labels from closed issues that have no Project item.
+   It re-reads and reclassifies each issue before it changes the Project item or
+   labels. It verifies each open-state Project write and reprojects bounded
+   concurrent state changes. After a Done transition, it fails if the issue is
+   no longer closed or if a queue label remains. When Done means still requires
+   post-merge production proof, use `Refs`, keep the issue open and `in-pr`, and
+   retain its current owner through the live checks. Close the issue and run
+   board sync only after its live acceptance criteria pass.
+   When the closed issue is listed in an editable canonical parent or tracker,
+   update that body in the same closeout. Mark its checklist item complete and
+   remove nearby status text that still treats the child as open. Preserve a
+   generated or explicitly immutable body; record its terminal evidence in a
+   comment or linked follow-up instead.
 7. If the PR closes unmerged, run `pnpm issue:release --issue <issue>` and
    restore `agent-ready` only when the remaining work is still clear; otherwise
    run `pnpm issue:release --issue <issue> --needs-grooming`.

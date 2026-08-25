@@ -12,6 +12,7 @@ import {
   isRecoverableClaimRaceError,
   isReleasable,
   isReviewable,
+  ISSUE_STATE_LABELS,
   labelNames,
   labelsForState,
   shouldRollbackFailedTransition,
@@ -43,6 +44,9 @@ import {
 import { backfillIssue } from "./issue-board-backfill.mjs";
 
 const CLAIM_SETTLE_MS = 1500;
+const SYNC_RECONCILE_ATTEMPTS = 3;
+const SYNC_VERIFY_ATTEMPTS = 3;
+const SYNC_VERIFY_SETTLE_MS = 250;
 
 async function editIssueLabels(options, issue, state) {
   const transition = labelsForState(state);
@@ -320,39 +324,129 @@ export async function release(options) {
   return results;
 }
 
-export async function sync(options) {
-  const project = await getProject(options);
-  const byNumber = new Map();
-  for (const label of [
-    "agent-ready",
-    "agent-active",
-    "in-pr",
-    "needs-grooming",
-  ]) {
-    for (const issue of await listIssuesByLabel(options, label)) {
-      byNumber.set(issue.number, issue);
+async function verifySyncCloseout(options, issue, operations) {
+  let staleLabels = [];
+  for (let attempt = 1; attempt <= SYNC_VERIFY_ATTEMPTS; attempt += 1) {
+    const verified = await operations.getIssue(options, issue.number);
+    const verifiedState = String(verified.state ?? "").toUpperCase();
+    if (verifiedState !== "CLOSED") {
+      throw new Error(
+        `Issue #${issue.number} changed state during sync: expected CLOSED, got ${verifiedState || "UNKNOWN"}`,
+      );
+    }
+    const verifiedLabels = labelNames(verified);
+    staleLabels = ISSUE_STATE_LABELS.filter((label) =>
+      verifiedLabels.has(label),
+    );
+    if (staleLabels.length === 0) return;
+    if (attempt < SYNC_VERIFY_ATTEMPTS) {
+      await operations.sleep(SYNC_VERIFY_SETTLE_MS);
     }
   }
-  for (const issue of await listIssuesByLabel(options, "in-pr", {
-    state: "closed",
-  })) {
-    byNumber.set(issue.number, issue);
+  throw new Error(
+    `Issue #${issue.number} retained queue label(s) after sync: ${staleLabels.join(", ")}`,
+  );
+}
+
+function syncStateFromIssue(issue) {
+  const state = stateFromLabels(issue);
+  if (state) return state;
+  return String(issue.state ?? "").toUpperCase() === "CLOSED" ? "done" : null;
+}
+
+async function syncIssue(options, project, listedIssue, operations) {
+  let issue = await operations.getIssue(options, listedIssue.number);
+  let drift = null;
+
+  for (let attempt = 1; attempt <= SYNC_RECONCILE_ATTEMPTS; attempt += 1) {
+    const state = syncStateFromIssue(issue);
+    if (!state) {
+      if (!drift) return null;
+      if (attempt < SYNC_RECONCILE_ATTEMPTS) {
+        await operations.sleep(SYNC_VERIFY_SETTLE_MS);
+        issue = await operations.getIssue(options, issue.number);
+        continue;
+      }
+      throw new Error(
+        `Issue #${issue.number} lost its queue state during sync after ${attempt} attempt(s); last projection drift was ${drift}`,
+      );
+    }
+
+    if (state === "done") {
+      const itemId = await operations.findIssueProjectItem(
+        options,
+        issue,
+        project,
+      );
+      if (itemId) {
+        await operations.updateProjectFields(
+          options,
+          project,
+          itemId,
+          state,
+          {},
+        );
+      }
+      await operations.editIssueLabels(options, issue, state);
+      if (!options.dryRun) {
+        await verifySyncCloseout(options, issue, operations);
+      }
+      return { number: issue.number, title: issue.title, state };
+    }
+
+    const itemId = await operations.ensureProjectItem(options, project, issue);
+    if (!itemId) return null;
+    await operations.updateProjectFields(options, project, itemId, state, {});
+    if (options.dryRun) {
+      return { number: issue.number, title: issue.title, state };
+    }
+
+    const verified = await operations.getIssue(options, issue.number);
+    const verifiedState = syncStateFromIssue(verified);
+    if (verifiedState === state) {
+      return { number: issue.number, title: issue.title, state };
+    }
+
+    drift = `${state} -> ${verifiedState ?? "no queue state"}`;
+    if (attempt < SYNC_RECONCILE_ATTEMPTS) {
+      issue = verified;
+      await operations.sleep(SYNC_VERIFY_SETTLE_MS);
+    }
+  }
+
+  throw new Error(
+    `Issue #${issue.number} did not stabilize during sync after ${SYNC_RECONCILE_ATTEMPTS} attempts; last projection drift was ${drift}`,
+  );
+}
+
+export async function sync(options, dependencies = {}) {
+  const operations = {
+    editIssueLabels,
+    ensureProjectItem,
+    findIssueProjectItem,
+    getIssue,
+    getProject,
+    listIssuesByLabel,
+    sleep,
+    updateProjectFields,
+    ...dependencies,
+  };
+  const project = await operations.getProject(options);
+  const byNumber = new Map();
+  for (const label of ISSUE_STATE_LABELS) {
+    for (const state of ["open", "closed"]) {
+      for (const issue of await operations.listIssuesByLabel(options, label, {
+        state,
+      })) {
+        byNumber.set(issue.number, issue);
+      }
+    }
   }
 
   const results = [];
-  for (const issue of byNumber.values()) {
-    const state = stateFromLabels(issue);
-    if (!state) continue;
-    const itemId =
-      state === "done"
-        ? await findIssueProjectItem(options, issue, project)
-        : await ensureProjectItem(options, project, issue);
-    if (!itemId) continue;
-    await updateProjectFields(options, project, itemId, state, {});
-    if (state === "done") {
-      await editIssueLabels(options, issue, state);
-    }
-    results.push({ number: issue.number, title: issue.title, state });
+  for (const listedIssue of byNumber.values()) {
+    const result = await syncIssue(options, project, listedIssue, operations);
+    if (result) results.push(result);
   }
   return results;
 }

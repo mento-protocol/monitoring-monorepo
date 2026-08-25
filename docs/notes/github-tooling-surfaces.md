@@ -3,7 +3,7 @@ title: GitHub Tooling Surfaces — gh CLI vs MCP
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-21
+last_verified: 2026-08-25
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -84,6 +84,24 @@ Do not build a gh-over-MCP shim; the skills document the two native paths.
 | failing-check log reads                        | `get_job_logs`, `get_check_run`                                                                         |
 | `gh issue edit` / labels / comments            | `issue_write`, `issue_read`, `add_issue_comment`                                                        |
 | `pnpm pr:ready-state --watch` foreground loop  | `subscribe_pr_activity` webhook events + scheduled self check-ins (e.g. `send_later`); never sleep-poll |
+
+## Exact workflow-run selection
+
+Resolve the full target commit SHA before querying GitHub Actions. Select runs
+with the commit, then bind every claim to the returned `databaseId`:
+
+```bash
+gh run list --commit <full-sha> \
+  --json databaseId,headSha,workflowName,status,conclusion,url
+gh run view <databaseId>
+gh run watch <databaseId> --exit-status
+```
+
+Require `headSha` to equal the target SHA and `workflowName` to equal the
+expected workflow. A workflow display name, branch filter, or list position is
+not sufficient evidence because each can select an older or unrelated run. For
+pull requests, keep `pnpm pr:ready-state` and `gh pr checks` as the canonical
+probes.
 
 ## Issue workboard transitions
 

@@ -9,6 +9,12 @@
 export const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
 export const DEFAULT_PROJECT_OWNER = "mento-protocol";
 export const DEFAULT_PROJECT_NUMBER = 12;
+export const ISSUE_STATE_LABELS = Object.freeze([
+  "agent-ready",
+  "agent-active",
+  "in-pr",
+  "needs-grooming",
+]);
 
 const STATE_TRANSITIONS = {
   ready: {
@@ -33,7 +39,7 @@ const STATE_TRANSITIONS = {
   },
   done: {
     addLabels: [],
-    removeLabels: ["agent-ready", "agent-active", "in-pr", "needs-grooming"],
+    removeLabels: ISSUE_STATE_LABELS,
     statusOptions: ["Done"],
   },
 };
@@ -78,7 +84,12 @@ export function labelNames(issue) {
 
 export function stateFromLabels(issue) {
   const labels = labelNames(issue);
-  if (issue.state === "CLOSED" && labels.has("in-pr")) return "done";
+  if (
+    String(issue.state ?? "").toUpperCase() === "CLOSED" &&
+    ISSUE_STATE_LABELS.some((label) => labels.has(label))
+  ) {
+    return "done";
+  }
   if (labels.has("in-pr")) return "review";
   if (labels.has("agent-active")) return "active";
   if (labels.has("agent-ready")) return "ready";

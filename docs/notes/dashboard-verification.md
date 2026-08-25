@@ -3,7 +3,7 @@ title: Dashboard Local and Browser Verification
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-14
+last_verified: 2026-08-25
 doc_type: runbook
 scope: ui-dashboard
 review_interval_days: 90
@@ -60,6 +60,22 @@ Logged-out checks must use an isolated browser context or clear both
 Public pages show `Sign in`; protected pages (`/address-book` and its nested
 `/address-book/entities` section, `/integrations`, and `/revenue`) redirect to
 `/sign-in?callbackUrl=...` when auth is configured.
+
+When API proof needs an existing authenticated browser session, keep the page
+on the target origin and run a read-only same-origin request through page
+evaluation:
+
+```js
+const response = await fetch("/api/...", {
+  cache: "no-store",
+  credentials: "same-origin",
+});
+({ status: response.status, body: await response.json() });
+```
+
+Record the status and the response fields that prove the acceptance criteria.
+Do not inspect cookies or browser storage. Do not use this path for a
+cross-origin request or a mutation.
 
 For a simulated authenticated session:
 
