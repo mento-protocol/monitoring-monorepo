@@ -1,8 +1,24 @@
 import { z } from "zod/mini";
+import { SECONDS_PER_DAY } from "@/lib/time-series";
 
 export type ExhaustiveSchemaShape<T> = {
   [Field in keyof T]-?: z.ZodMiniType<T[Field]>;
 };
+
+export function matchesSampledUtcDay(value: {
+  timestamp: string;
+  sampledAtTimestamp: string;
+}): boolean {
+  try {
+    const sampledAt = BigInt(value.sampledAtTimestamp.trim());
+    const secondsPerDay = BigInt(SECONDS_PER_DAY);
+    return (
+      BigInt(value.timestamp.trim()) === sampledAt - (sampledAt % secondsPerDay)
+    );
+  } catch {
+    return false;
+  }
+}
 
 export const nonemptyStringSchema = z
   .string()

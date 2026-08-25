@@ -67,10 +67,34 @@ describe("stETH reserve snapshot validation", () => {
       balanceAmount: " 1 ",
       dailyUnrealizedYieldAmount: " -1 ",
       sampledAtBlock: " 1 ",
-      sampledAtTimestamp: " 1 ",
+      sampledAtTimestamp: " 1772668801 ",
     });
 
     expect(isValidStethYieldDailySnapshotRow(row)).toBe(true);
+  });
+
+  it("accepts a sample within its UTC-day bucket", () => {
+    const row = snapshot({ sampledAtTimestamp: "1772712000" });
+
+    expect(isValidStethYieldDailySnapshotRow(row)).toBe(true);
+  });
+
+  it("accepts a sample at the last second of its UTC-day bucket", () => {
+    const row = snapshot({ sampledAtTimestamp: "1772755199" });
+
+    expect(isValidStethYieldDailySnapshotRow(row)).toBe(true);
+  });
+
+  it("rejects a snapshot bucket that does not contain its sample time", () => {
+    const row = snapshot({ sampledAtTimestamp: "1772668799" });
+
+    expect(isValidStethYieldDailySnapshotRow(row)).toBe(false);
+  });
+
+  it("rejects a sample at the start of the next UTC-day bucket", () => {
+    const row = snapshot({ sampledAtTimestamp: "1772755200" });
+
+    expect(isValidStethYieldDailySnapshotRow(row)).toBe(false);
   });
 
   it.each([...NONNEGATIVE_STRING_FIELDS, ...POSITIVE_STRING_FIELDS])(

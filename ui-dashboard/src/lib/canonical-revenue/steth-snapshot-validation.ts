@@ -3,6 +3,7 @@ import { z } from "zod/mini";
 import {
   type ExhaustiveSchemaShape,
   integerStringSchema,
+  matchesSampledUtcDay,
   nonemptyStringSchema,
   nonnegativeIntegerStringSchema,
   positiveIntegerStringSchema,
@@ -14,28 +15,32 @@ import {
 } from "@/lib/reserve-yield-types";
 import { isTrackedStethWalletIdentifier } from "@/lib/reserve-yield-steth-coverage";
 
-const stethYieldDailySnapshotRowSchema = z.object({
-  id: nonemptyStringSchema,
-  chainId: z.literal(RESERVE_YIELD_ETHEREUM_CHAIN_ID),
-  token: z
-    .string()
-    .check(
-      z.refine((value) => value.trim().toLowerCase() === STETH_TOKEN_ADDRESS),
+const stethYieldDailySnapshotRowSchema = z
+  .object({
+    id: nonemptyStringSchema,
+    chainId: z.literal(RESERVE_YIELD_ETHEREUM_CHAIN_ID),
+    token: z
+      .string()
+      .check(
+        z.refine((value) => value.trim().toLowerCase() === STETH_TOKEN_ADDRESS),
+      ),
+    wallet: nonemptyStringSchema.check(
+      z.refine(isTrackedStethWalletIdentifier),
     ),
-  wallet: nonemptyStringSchema.check(z.refine(isTrackedStethWalletIdentifier)),
-  timestamp: safePositiveIntegerStringSchema,
-  balanceAmount: nonnegativeIntegerStringSchema,
-  principalAmount: nonnegativeIntegerStringSchema,
-  realizedYieldAmount: nonnegativeIntegerStringSchema,
-  transferredOutYieldAmount: nonnegativeIntegerStringSchema,
-  unrealizedYieldAmount: nonnegativeIntegerStringSchema,
-  totalEarnedYieldAmount: nonnegativeIntegerStringSchema,
-  dailyEarnedYieldAmount: nonnegativeIntegerStringSchema,
-  dailyRealizedYieldAmount: nonnegativeIntegerStringSchema,
-  dailyUnrealizedYieldAmount: integerStringSchema,
-  sampledAtBlock: positiveIntegerStringSchema,
-  sampledAtTimestamp: positiveIntegerStringSchema,
-} satisfies ExhaustiveSchemaShape<StethYieldDailySnapshotRow>);
+    timestamp: safePositiveIntegerStringSchema,
+    balanceAmount: nonnegativeIntegerStringSchema,
+    principalAmount: nonnegativeIntegerStringSchema,
+    realizedYieldAmount: nonnegativeIntegerStringSchema,
+    transferredOutYieldAmount: nonnegativeIntegerStringSchema,
+    unrealizedYieldAmount: nonnegativeIntegerStringSchema,
+    totalEarnedYieldAmount: nonnegativeIntegerStringSchema,
+    dailyEarnedYieldAmount: nonnegativeIntegerStringSchema,
+    dailyRealizedYieldAmount: nonnegativeIntegerStringSchema,
+    dailyUnrealizedYieldAmount: integerStringSchema,
+    sampledAtBlock: positiveIntegerStringSchema,
+    sampledAtTimestamp: positiveIntegerStringSchema,
+  } satisfies ExhaustiveSchemaShape<StethYieldDailySnapshotRow>)
+  .check(z.refine(matchesSampledUtcDay));
 
 export function isValidStethYieldDailySnapshotRow(
   value: unknown,
