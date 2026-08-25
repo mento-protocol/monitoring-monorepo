@@ -23,7 +23,6 @@ Authority: canonical
 
 - [`.agents/roles/standards-enforcer.md`](../.agents/roles/standards-enforcer.md)
 - [`.agents/roles/verifier.md`](../.agents/roles/verifier.md)
-- [`.agents/skills/babysit-pr/cloud-watch-loop.md`](../.agents/skills/babysit-pr/cloud-watch-loop.md)
 - [`.agents/skills/babysit-pr/SKILL.md`](../.agents/skills/babysit-pr/SKILL.md)
 - [`.agents/skills/deploy-indexer/SKILL.md`](../.agents/skills/deploy-indexer/SKILL.md)
 - [`.agents/skills/doc-garden/SKILL.md`](../.agents/skills/doc-garden/SKILL.md)
