@@ -4808,7 +4808,13 @@ async function main() {
 
   console.log(`autoreview target: ${target.mode}`);
   console.log(`branch: ${branch}`);
-  applyDefaultEngineFallback(args, repo);
+  // Metadata-only modes never invoke an engine: --dry-run returns just below,
+  // and --prepare-only exits after writing its bundle, before any engine
+  // runs. Resolving a fallback here would make both crash in an engine-free
+  // shell for something neither mode does.
+  if (!args.dryRun && !args.prepareOnly) {
+    applyDefaultEngineFallback(args, repo);
+  }
   console.log(`engine: ${args.engine}`);
   if (target.requested_ref)
     console.log(`requested_ref: ${target.requested_ref}`);

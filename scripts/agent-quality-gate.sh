@@ -2498,8 +2498,12 @@ trunk_provisioning_is_blocked() {
 print_trunk_environment_blocked_warning() {
   local command="$1"
   echo "warning: skipping ${command} — the Trunk CLI could not be provisioned." >&2
-  echo "  The launcher downloads the pinned CLI from trunk.io, which this environment blocks." >&2
+  echo "  The launcher self-downloads the pinned CLI from trunk.io and could not produce a" >&2
+  echo "  working one here. The probe reports that it failed, not why." >&2
+  echo "  Most often the environment blocks the download:" >&2
   echo "  Add 'trunk.io' and '*.trunk.io' to the environment's allowed domains to run it here." >&2
+  echo "  A local cause — a corrupt or unwritable launcher cache — prints this same warning." >&2
+  echo "  Run './tools/trunk --version' to see the launcher's own error." >&2
   echo "  CI still enforces Trunk on the PR (.github/workflows/trunk.yml)." >&2
 }
 

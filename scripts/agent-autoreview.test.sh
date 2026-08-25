@@ -1364,6 +1364,14 @@ expect_stdout_not_contains() {
   fi
 }
 
+expect_stderr_not_contains() {
+  local unexpected="$1"
+  if grep -Fq -- "$unexpected" "$stderr"; then
+    printf 'expected stderr not to contain %s\nstderr:\n%s\n' "$unexpected" "$(cat "$stderr")" >&2
+    exit 1
+  fi
+}
+
 expect_empty_stderr() {
   local unexpected
   unexpected="$(
@@ -2300,6 +2308,55 @@ run_engine_default_fallback_neither_available_regression() {
   expect_stderr_contains "codex CLI is not available"
   expect_stderr_contains "claude CLI is not available"
   expect_stdout_not_contains "autoreview clean"
+}
+
+# Same shell as the regression above -- neither CLI reachable -- but the two
+# modes that never invoke an engine. `--dry-run` only prints the selection, and
+# `--prepare-only` writes review material for a reviewer who runs elsewhere,
+# which is the whole point of preparing a bundle on a machine without an engine.
+# Resolving the default-engine fallback before either return made both die on
+# codex's absence for work neither does.
+run_node_helper_in_repo_expect_success() {
+  local review_repo="$1"
+  shift
+  : >"$stdout"
+  : >"$stderr"
+  local status=0
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=$hermetic_git_bin" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "GIT_CONFIG_GLOBAL=/dev/null" \
+      "AUTOREVIEW_EXTRA_BIN_DIRS=" \
+      "$node_bin" "$repo_root/scripts/agent-autoreview.mjs" \
+      "$@" >"$stdout" 2>"$stderr"
+  ) || status=$?
+  if [[ "$status" -ne 0 ]]; then
+    printf 'expected helper to succeed\nstdout:\n%s\nstderr:\n%s\n' \
+      "$(cat "$stdout")" "$(cat "$stderr")" >&2
+    exit 1
+  fi
+}
+
+run_engine_metadata_only_without_cli_regression() {
+  local review_repo="$tmp_dir/engine-metadata-only-no-cli"
+  local bundle_output="$tmp_dir/engine-metadata-only-no-cli-bundle.md"
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  printf 'change\n' >>"$review_repo/README.md"
+
+  run_node_helper_in_repo_expect_success "$review_repo" --mode local --dry-run
+  expect_stdout_contains "autoreview target: local"
+  expect_stdout_contains "engine: codex"
+  expect_stderr_not_contains "neither codex nor claude CLI is available"
+
+  run_node_helper_in_repo_expect_success "$review_repo" \
+    --mode local --prepare-only --bundle-output "$bundle_output"
+  expect_stdout_contains "bundle_output:"
+  expect_stderr_not_contains "neither codex nor claude CLI is available"
 }
 
 run_codex_resolution_helper() {
@@ -8989,6 +9046,7 @@ run_engine_isolation_family() {
   run_requested_codex_missing_regression
   run_engine_default_fallback_regression
   run_engine_default_fallback_neither_available_regression
+  run_engine_metadata_only_without_cli_regression
   run_codex_binary_resolution_regression
   run_suite_family_diagnostic_regression
   run_claude_no_tools_regression

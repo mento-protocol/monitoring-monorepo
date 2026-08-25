@@ -24,7 +24,7 @@ skills link here instead of duplicating it.
   blocked (the probes rely on it — `pnpm pr:ready-state` fails on its first
   call because `gh pr view --json` rides on GraphQL). GitHub work goes through
   the GitHub MCP tools, and monitoring goes through PR webhook subscription
-  plus scheduled self check-ins.
+  plus scheduled self-check-ins.
 
 ## Surface detection
 
@@ -40,8 +40,14 @@ skills link here instead of duplicating it.
    check reads "command not found" as an evaluation failure instead of the
    absence signal it actually is. When gh is present, a repo-scoped
    `gh api repos/<owner>/<repo>` call, a minimal GraphQL query
-   (`gh api graphql -f query='query{viewer{login}}'`), and `gh api --slurp`
-   support must all succeed. **Do not use `gh auth status` or `/user`
+   (`gh api graphql -f query='query{viewer{login}}'`), and a flag-support check
+   for pagination slurping (`gh api --help | grep -- --slurp`) must all
+   succeed. Probe `--slurp` by capability, not by version: `--slurp` is only
+   valid alongside `--paginate` on a real endpoint, so a bare `gh api --slurp`
+   is not runnable, and distro builds backport flags unevenly — the observed
+   floor is that gh 2.45.0 (the default Ubuntu apt build) lacks it while gh
+   2.96.0 has it. `scripts/bootstrap/claude-code-web-setup.sh` runs this same
+   `--help` grep. **Do not use `gh auth status` or `/user`
    reachability as the signal** — in Claude cloud sessions the proxy serves
    `/user` and `/rate_limit` (so `gh auth status` succeeds) while GraphQL is
    still blocked, and REST `/repos/*` behavior has been observed to vary (see

@@ -4861,6 +4861,13 @@ STUB
 )
 assert_contains "warning: skipping ./tools/trunk check fixture.txt — the Trunk CLI could not be provisioned."
 assert_contains "Add 'trunk.io' and '*.trunk.io' to the environment's allowed domains to run it here."
+# The probe answers "can the launcher produce a CLI at all", not "is the network
+# blocked", so the warning must not assert a cause it did not establish: it
+# names the common one, admits a local one prints the same, and hands over the
+# command that shows the launcher's own error.
+assert_contains "The probe reports that it failed, not why."
+assert_contains "A local cause — a corrupt or unwritable launcher cache — prints this same warning."
+assert_contains "Run './tools/trunk --version' to see the launcher's own error."
 assert_contains "- skipped "
 assert_contains "All mapped commands passed."
 assert_contains "Note: the Trunk arm was skipped"

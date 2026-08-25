@@ -189,9 +189,11 @@ echo "==> Installing Playwright Chromium for dashboard browser tests"
 # note in docs/notes/worktree-and-web-setup.md — the same `test -d`/`test -f`
 # preference applies here).
 PW_PREINSTALLED_DIR="/opt/pw-browsers"
+used_preinstalled_pw_dir=false
 if [ -d "$PW_PREINSTALLED_DIR" ] &&
   find "$PW_PREINSTALLED_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null | grep -q .; then
   export PLAYWRIGHT_BROWSERS_PATH="$PW_PREINSTALLED_DIR"
+  used_preinstalled_pw_dir=true
   echo "Using preinstalled Playwright browsers at $PW_PREINSTALLED_DIR (PLAYWRIGHT_BROWSERS_PATH set)."
   echo "WARN: this PLAYWRIGHT_BROWSERS_PATH export covers only this bootstrap" >&2
   echo "WARN: subprocess (including the 'playwright install' verification below)." >&2
@@ -215,11 +217,28 @@ fi
 # actually able to run the browser fixtures. With a preinstalled dir already
 # exported above, this call is expected to verify/no-op rather than download.
 if ! pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium; then
-  echo "WARN: Playwright Chromium install failed." >&2
-  echo "WARN: 'pnpm --filter @mento-protocol/ui-dashboard test:browser' will not work" >&2
-  echo "WARN: until the environment provides a usable /opt/pw-browsers preinstall or" >&2
-  echo "WARN: allows access to cdn.playwright.dev, and can install OS dependencies" >&2
-  echo "WARN: (sudo apt-get) for Chromium." >&2
+  pw_install_failed=true
+  if [ "$used_preinstalled_pw_dir" = true ]; then
+    # The preinstalled dir only proved non-empty above, not that it holds the
+    # revision this Playwright package expects, and it is typically
+    # image-owned (not writable by this session). A missing revision there
+    # turns a viable download-to-default-cache fallback into a nonfatal
+    # failure; unset the override and retry against the normal (writable)
+    # cache before giving up.
+    echo "WARN: install against the preinstalled dir failed (missing revision and/or" >&2
+    echo "WARN: read-only image path); retrying against the default Playwright cache." >&2
+    unset PLAYWRIGHT_BROWSERS_PATH
+    if pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium; then
+      pw_install_failed=false
+    fi
+  fi
+  if [ "$pw_install_failed" = true ]; then
+    echo "WARN: Playwright Chromium install failed." >&2
+    echo "WARN: 'pnpm --filter @mento-protocol/ui-dashboard test:browser' will not work" >&2
+    echo "WARN: until the environment provides a usable /opt/pw-browsers preinstall or" >&2
+    echo "WARN: allows access to cdn.playwright.dev, and can install OS dependencies" >&2
+    echo "WARN: (sudo apt-get) for Chromium." >&2
+  fi
 fi
 
 echo "==> Validating repo-visible agent context"
@@ -232,9 +251,11 @@ echo "==> Configuring GitHub integration mode"
 # credential proxy intercepts github.com/api.github.com independently of the
 # environment network allowlist (GitHub-host allowlist entries are inert),
 # overrides any client Authorization header (a GH_TOKEN is ignored), serves
-# only /user and /rate_limit, and 403s every /repos/* path and GraphQL query —
-# so `gh auth status` succeeds while pr:ready-state still cannot work
-# (empirical map: docs/notes/github-tooling-surfaces.md). The GitHub MCP server
+# only /user and /rate_limit reliably, and blocks GraphQL — REST /repos/*
+# behavior has been observed to vary by session and is not a fixed blanket
+# block (empirical map: docs/notes/github-tooling-surfaces.md). Either way,
+# `gh auth status` succeeds while pr:ready-state still cannot work, because it
+# rides on GraphQL. The GitHub MCP server
 # is the supported API path in these sessions. The token-gated gh install below
 # is kept as a best-effort for environment variants whose proxy does serve repo
 # API paths; the capability gate that matters is REST + GraphQL + --slurp
@@ -294,8 +315,9 @@ if [[ -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ]]; then
     echo "    gh api repos/<owner>/<repo> --jq .full_name"
     echo "    gh api graphql -f query='query{viewer{login}}'"
     echo "    gh api --help | grep -- --slurp"
-    echo "In Claude cloud sessions the credential proxy 403s /repos/* and GraphQL regardless of"
-    echo "GH_TOKEN; if that call fails, use the GitHub MCP server (docs/notes/github-tooling-surfaces.md)."
+    echo "In Claude cloud sessions the credential proxy blocks GraphQL regardless of GH_TOKEN, and"
+    echo "REST /repos/* behavior varies by session; if either call fails, use the GitHub MCP server"
+    echo "(docs/notes/github-tooling-surfaces.md)."
     echo "Reminder: pass --repo <owner/name> (or set GH_REPO) — the git remote is the local proxy, not a GitHub host."
   else
     echo "WARN: gh is installed but not authenticated — check the GH_TOKEN scopes/org approval." >&2
@@ -304,7 +326,8 @@ if [[ -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ]]; then
 else
   echo "No GH_TOKEN set: using the GitHub MCP server for PR/API work (the supported path here)."
   echo "Note: setting GH_TOKEN does NOT enable gh-backed flows in Claude cloud sessions — the"
-  echo "credential proxy overrides Authorization and blocks /repos/* and GraphQL either way."
+  echo "credential proxy overrides Authorization and blocks GraphQL either way; REST /repos/*"
+  echo "behavior varies by session (docs/notes/github-tooling-surfaces.md)."
   echo "See docs/notes/github-tooling-surfaces.md for the gh->MCP mapping."
 fi
 
