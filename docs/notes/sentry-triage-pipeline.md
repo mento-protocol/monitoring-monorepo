@@ -636,7 +636,7 @@ shell. The fix removes the credential instead. See
 `CLAUDE_CODE_OAUTH_TOKEN` is the remaining credential in the agent's Bash, and
 it stays there: `claude-code-action` places it in that process env itself
 (`base-action/src/parse-sdk-options.ts` spreads the whole `process.env` into the
-CLI subprocess, deleting only the OIDC request vars), and the pinned v1.0.183
+CLI subprocess, deleting only the OIDC request vars), and the pinned v1.0.194
 offers no per-step or first-class MCP env forwarding to move it. Accepted with
 its bounding: it is inference-only, so worst case is
 inference-quota abuse, not repo or queue compromise, and any use lands in an
