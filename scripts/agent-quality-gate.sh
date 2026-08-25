@@ -1690,7 +1690,7 @@ acquire_gate_run_lock() {
 
 cleanup_tmpfiles() {
   if [[ -n "$active_progress_monitor_pid" ]]; then
-    kill "$active_progress_monitor_pid" 2>/dev/null || true
+    kill_process_tree "$active_progress_monitor_pid" TERM
     wait "$active_progress_monitor_pid" 2>/dev/null || true
     active_progress_monitor_pid=""
   fi
