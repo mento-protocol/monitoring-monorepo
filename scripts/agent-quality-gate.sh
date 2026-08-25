@@ -330,9 +330,6 @@ if [[ -z "${TURBO_CACHE_DIR:-}" &&
 fi
 
 tmpfiles=()
-# A sequential progress heartbeat is a child of this shell. Track it so signal
-# teardown does not leave it in a registered worker process group.
-active_progress_monitor_pid=""
 # Set by run_with_timeout for the most recent mapped command so callers can tell
 # a timeout apart from an ordinary non-zero exit. Read only right after the call.
 last_command_timed_out=false
@@ -1689,11 +1686,6 @@ acquire_gate_run_lock() {
 }
 
 cleanup_tmpfiles() {
-  if [[ -n "$active_progress_monitor_pid" ]]; then
-    kill_process_tree "$active_progress_monitor_pid" TERM
-    wait "$active_progress_monitor_pid" 2>/dev/null || true
-    active_progress_monitor_pid=""
-  fi
   teardown_active_timeouts
   if [[ ${#tmpfiles[@]} -gt 0 ]]; then
     rm -f "${tmpfiles[@]+"${tmpfiles[@]}"}"
@@ -2489,7 +2481,7 @@ print_command_summary() {
   done
 }
 
-monitor_sequential_progress() {
+monitor_sequential_autoreview_progress() {
   local command="$1"
   local output_file="$2"
   local start_ts="$3"
@@ -2508,9 +2500,7 @@ monitor_sequential_progress() {
     if [[ $((now_ts - last_heartbeat_ts)) -ge "$heartbeat_interval" ]]; then
       printf '⏳ still running after %s:\n' "$(format_duration $((now_ts - start_ts)))"
       printf '    · %s\n' "$command"
-      if is_autoreview_test_command "$command"; then
-        latest_autoreview_test_progress "$output_file"
-      fi
+      latest_autoreview_test_progress "$output_file"
       last_heartbeat_ts="$now_ts"
     fi
   done
@@ -2822,13 +2812,14 @@ run_mapped_command() {
   start_ts="$(date +%s)"
   echo
   echo "+ ${command}"
-  monitor_done_file="${output_file}.done"
-  tmpfiles+=("$monitor_done_file")
-  rm -f "$monitor_done_file"
-  monitor_sequential_progress \
-    "$command" "$output_file" "$start_ts" "$monitor_done_file" "$gate_pid" &
-  monitor_pid="$!"
-  active_progress_monitor_pid="$monitor_pid"
+  if is_autoreview_test_command "$command"; then
+    monitor_done_file="${output_file}.done"
+    tmpfiles+=("$monitor_done_file")
+    rm -f "$monitor_done_file"
+    monitor_sequential_autoreview_progress \
+      "$command" "$output_file" "$start_ts" "$monitor_done_file" "$gate_pid" &
+    monitor_pid="$!"
+  fi
   set +e
   run_with_timeout "$command" > "$output_file" 2>&1
   exit_code=$?
@@ -2837,7 +2828,6 @@ run_mapped_command() {
   if [[ -n "$monitor_pid" ]]; then
     : > "$monitor_done_file"
     wait "$monitor_pid" 2>/dev/null || true
-    active_progress_monitor_pid=""
     rm -f "$monitor_done_file"
   fi
   end_ts="$(date +%s)"

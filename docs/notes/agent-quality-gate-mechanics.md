@@ -41,11 +41,6 @@ per-command JSON plus one `__run_total__` line to gitignored
 `.tmp/agent-quality-gate/durations.jsonl`. Targets: 3 minutes for common mapped
 sets and 8 minutes for the full workspace (Refs #1415).
 
-Every executing command emits a 20-second heartbeat with its elapsed time and
-command text, including serialized prerequisites and exclusive suites. Command
-output remains buffered until failure so concurrent logs stay readable; the
-heartbeat is the liveness signal while that buffer is quiet.
-
 If a sandboxed mapped run fails only because a command needs host capabilities,
 rerun the full mapped gate with host access on the same head. The gate reuses
 stamp-eligible fresh successes and runs the blocked commands. A resumed run does
