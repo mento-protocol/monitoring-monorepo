@@ -6327,7 +6327,10 @@ STUB
       fail_parallel_interrupt_fixture \
         "parallel $phase interrupt exited $interrupt_exit, expected $expected_exit"
 
-    for ((attempt = 0; attempt < 100; attempt++)); do
+    # Teardown gives TERM-ignoring descendants a three-second grace period.
+    # Loaded cloud runners can take several more seconds to schedule and reap
+    # every process in the group, so keep this assertion above that grace.
+    for ((attempt = 0; attempt < 400; attempt++)); do
       if ! kill -0 -- "-$worker_pgid" 2>/dev/null; then
         break
       fi
