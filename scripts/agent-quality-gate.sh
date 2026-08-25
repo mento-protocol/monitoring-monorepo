@@ -330,6 +330,9 @@ if [[ -z "${TURBO_CACHE_DIR:-}" &&
 fi
 
 tmpfiles=()
+# A sequential progress heartbeat is a child of this shell. Track it so signal
+# teardown does not leave it in a registered worker process group.
+active_progress_monitor_pid=""
 # Set by run_with_timeout for the most recent mapped command so callers can tell
 # a timeout apart from an ordinary non-zero exit. Read only right after the call.
 last_command_timed_out=false
@@ -1686,6 +1689,11 @@ acquire_gate_run_lock() {
 }
 
 cleanup_tmpfiles() {
+  if [[ -n "$active_progress_monitor_pid" ]]; then
+    kill "$active_progress_monitor_pid" 2>/dev/null || true
+    wait "$active_progress_monitor_pid" 2>/dev/null || true
+    active_progress_monitor_pid=""
+  fi
   teardown_active_timeouts
   if [[ ${#tmpfiles[@]} -gt 0 ]]; then
     rm -f "${tmpfiles[@]+"${tmpfiles[@]}"}"
@@ -2820,6 +2828,7 @@ run_mapped_command() {
   monitor_sequential_progress \
     "$command" "$output_file" "$start_ts" "$monitor_done_file" "$gate_pid" &
   monitor_pid="$!"
+  active_progress_monitor_pid="$monitor_pid"
   set +e
   run_with_timeout "$command" > "$output_file" 2>&1
   exit_code=$?
@@ -2828,6 +2837,7 @@ run_mapped_command() {
   if [[ -n "$monitor_pid" ]]; then
     : > "$monitor_done_file"
     wait "$monitor_pid" 2>/dev/null || true
+    active_progress_monitor_pid=""
     rm -f "$monitor_done_file"
   fi
   end_ts="$(date +%s)"
