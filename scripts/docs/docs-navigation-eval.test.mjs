@@ -433,15 +433,16 @@ test("fixture byte budgets can contain every cheapest accepted route", () => {
       floor.total_unique_route_bytes >=
       reserve,
   );
+  assert.equal(context.suite.targets.max_total_unique_source_bytes, 262_000);
   assert.equal(reserve, 32_768);
   const selectedRoutes = new Map(
     floor.questions.map((question) => [question.question_id, question.route]),
   );
   assert.deepEqual(selectedRoutes.get("pr-hazard-package-script-refusal"), [
-    "docs/notes/pr-operating-card.md",
+    "docs/notes/quick-commands.md",
   ]);
   assert.deepEqual(selectedRoutes.get("commands-pr-readiness"), [
-    "docs/notes/pr-operating-card.md",
+    "docs/notes/quick-commands.md",
   ]);
 
   const questionTooTight = structuredClone(context.suite);
