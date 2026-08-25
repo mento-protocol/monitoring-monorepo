@@ -81,6 +81,15 @@ Routing labels:
 
 For other partial work, keep the issue open. Remove `in-pr` after merge and set
 `agent-ready` or `needs-grooming` based on the remaining acceptance criteria.
+Before restoring `agent-ready` after a partial merge, update the issue body:
+mark the merged work complete, isolate the remaining acceptance criteria, and
+restate the current Done means. Do not return an issue to the ready queue while
+its body still presents merged work as pending.
+Generated documentation-garden issues are the exception. Their marked packet
+bodies are immutable until closure. After a partial merge, do not edit the body
+or restore `agent-ready`; set `needs-grooming`. A human can resume the frozen
+packet or create a linked ordinary follow-up before closing it. Record merged
+work in issue comments and PR links, not in the generated body.
 Do not release a production-closeout issue merely because its PR merged; retain
 `in-pr` until live proof passes or the owner explicitly releases work they
 cannot continue.

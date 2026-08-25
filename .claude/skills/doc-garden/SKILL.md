@@ -91,3 +91,9 @@ Summarize the disposition and evidence for every packet file in the PR body.
 Open a normal ready-for-review PR, use `Closes #<issue>` only when the entire
 packet is complete, and follow the repository ship/readiness workflow through
 review and merge.
+
+If a PR merges only part of a generated packet, keep the generated issue body
+and packet markers unchanged. Record merged work in issue comments and PR
+links. Follow the partial-merge route in
+[`agent-issue-workflow.md`](../../../docs/notes/agent-issue-workflow.md); never
+return the generated packet to `agent-ready`.
