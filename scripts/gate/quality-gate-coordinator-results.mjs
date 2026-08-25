@@ -218,6 +218,16 @@ export function publishExecutionResult({
 
 export function finishExecutionState(state, singleflight, result) {
   const ids = [singleflight.leaderRequestId, ...singleflight.followers];
+  const completedIds = new Set(ids);
+  let nextRequestId = null;
+  for (let offset = 0; offset < state.requestOrder.length; offset += 1) {
+    const index = (state.roundRobinCursor + offset) % state.requestOrder.length;
+    const requestId = state.requestOrder[index];
+    if (!completedIds.has(requestId)) {
+      nextRequestId = requestId;
+      break;
+    }
+  }
   for (const id of ids) {
     const request = state.requests[id];
     if (!request) continue;
@@ -226,7 +236,7 @@ export function finishExecutionState(state, singleflight, result) {
     request.state =
       request.admission === "held" ? "result-ready" : "waiting-worktree";
   }
-  state.requestOrder = state.requestOrder.filter((id) => !ids.includes(id));
+  state.requestOrder = state.requestOrder.filter((id) => !completedIds.has(id));
   delete state.singleflights[singleflight.fingerprintHash];
   if (result.status === "success") {
     state.successIndex[singleflight.fingerprintHash] = {
@@ -234,9 +244,8 @@ export function finishExecutionState(state, singleflight, result) {
       completedAt: result.completedAt,
     };
   } else delete state.successIndex[singleflight.fingerprintHash];
-  state.roundRobinCursor = state.requestOrder.length
-    ? state.roundRobinCursor % state.requestOrder.length
-    : 0;
+  state.roundRobinCursor =
+    nextRequestId === null ? 0 : state.requestOrder.indexOf(nextRequestId);
 }
 
 function invalidResult(path, reason) {

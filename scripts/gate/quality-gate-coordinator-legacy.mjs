@@ -5,6 +5,8 @@ import {
   closeSync,
   constants,
   existsSync,
+  fchmodSync,
+  fstatSync,
   fsyncSync,
   linkSync,
   lstatSync,
@@ -131,10 +133,11 @@ export function legacyOwnerRecordText(record) {
   ].join("\n");
 }
 
-function writeText(path, value) {
+function writeText(path, value, mode = 0o600) {
   const descriptor = openSync(path, "wx", 0o600);
   try {
     writeFileSync(descriptor, value, "utf8");
+    fchmodSync(descriptor, mode);
     fsyncSync(descriptor);
   } finally {
     closeSync(descriptor);
@@ -143,6 +146,37 @@ function writeText(path, value) {
 
 function writeOwner(path, record) {
   writeText(path, legacyOwnerRecordText(record));
+}
+
+function legacyOwnerCompatibilityMode(path) {
+  const stat = lstatSync(path);
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw new CoordinatorError(
+      "LEGACY_LOCK_UNSAFE",
+      "legacy owner is not a regular file",
+    );
+  }
+  return 0o600 | (stat.mode & 0o044);
+}
+
+function setTextMode(path, mode) {
+  const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const stat = fstatSync(descriptor);
+    if (
+      !stat.isFile() ||
+      (typeof process.getuid === "function" && stat.uid !== process.getuid())
+    ) {
+      throw new CoordinatorError(
+        "LEGACY_LOCK_UNSAFE",
+        "legacy owner stage is not a current-user regular file",
+      );
+    }
+    fchmodSync(descriptor, mode);
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 function fsyncDirectory(path) {
@@ -371,6 +405,7 @@ export function adoptLegacyRunLock({
   };
   let published = false;
   let takenOwner = null;
+  let previousOwnerMode = 0o600;
   try {
     writeOwner(stagedOwner, record);
     takenOwner = takeExpectedOwner({
@@ -380,6 +415,8 @@ export function adoptLegacyRunLock({
       expectedToken: expectedOwnerToken,
       phase: "coordinator handoff",
     });
+    previousOwnerMode = legacyOwnerCompatibilityMode(takenOwner);
+    setTextMode(stagedOwner, previousOwnerMode);
     if (beforeOwnerPublish) beforeOwnerPublish({ lockDirectory, ownerPath });
     try {
       linkSync(stagedOwner, ownerPath);
@@ -461,7 +498,7 @@ export function adoptLegacyRunLock({
     const staged = join(lockDirectory, `owner.rollback.${process.pid}`);
     let takenOwner = null;
     try {
-      writeText(staged, previousOwnerText);
+      writeText(staged, previousOwnerText, previousOwnerMode);
       takenOwner = takeExpectedOwner({
         lockRoot,
         lockDirectory,

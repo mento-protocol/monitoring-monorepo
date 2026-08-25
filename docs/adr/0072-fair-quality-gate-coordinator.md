@@ -182,11 +182,13 @@ readers that fetch fields in separate snapshots fall back to PID liveness. It
 writes the exact start identity to `coordinator_start_utc=`. A new coordinator
 reads that field from one record snapshot.
 
-Adoption does not change permissions on an explicit shared legacy lock root.
-The outer coordinator namespace includes the numeric UID. Its state directory
-contains separate version-, policy-, and capacity-specific namespaces.
-Sequential users of one shared root therefore do not inherit another user's
-mode-0700 coordinator directory.
+Adoption preserves the incoming owner record's group and other read bits so a
+legacy waiter with shared-root access can observe the barrier. The replacement
+record remains writable only by its owner. Adoption does not change permissions
+on an explicit shared legacy lock root. The outer coordinator namespace
+includes the numeric UID. Its state directory contains separate version-,
+policy-, and capacity-specific namespaces. Sequential users of one shared root
+therefore do not inherit another user's mode-0700 coordinator directory.
 
 An older gate cannot drain coordinator journal entries through the socket. If
 all remaining state is drain-required work from dead clients, and no live

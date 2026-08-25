@@ -650,9 +650,12 @@ durable journal and legacy record remain for recovery, so the displaced
 coordinator cannot grant queued work, prune records, clean up owners, or publish
 success.
 
-Adoption does not change permissions on an explicit shared legacy lock root.
-The private state namespace includes the numeric UID, so a later user of that
-root does not inherit another user's mode-0700 state directory.
+Adoption preserves the incoming owner record's group and other read bits so a
+legacy waiter with shared-root access can observe the barrier. The replacement
+record remains writable only by its owner. Adoption does not change permissions
+on an explicit shared legacy lock root. The private state namespace includes
+the numeric UID, so a later user of that root does not inherit another user's
+mode-0700 state directory.
 
 An older gate cannot read or acknowledge coordinator drain records. If every
 remaining request is terminal-pending, every lease is drain-required, and no

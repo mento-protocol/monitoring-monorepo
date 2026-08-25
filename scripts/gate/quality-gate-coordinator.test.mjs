@@ -2306,6 +2306,79 @@ test("request-level round robin prevents one request from taking every turn", as
   assertWithinCapacity(snapshot);
 });
 
+test("request completion preserves the next round-robin turn", async () => {
+  const fixture = await createFixture({ capacity: 1 });
+  const firstOwner = owner(233);
+  const secondOwner = owner(234);
+  const thirdOwner = owner(235);
+  const first = await register(
+    fixture,
+    "completion-a",
+    "completion-fingerprint-a",
+    firstOwner,
+  );
+  await register(
+    fixture,
+    "completion-b",
+    "completion-fingerprint-b",
+    secondOwner,
+  );
+  await register(
+    fixture,
+    "completion-c",
+    "completion-fingerprint-c",
+    thirdOwner,
+  );
+
+  assert.equal(
+    (await lease(fixture, first.requestId, "completion-a-1", firstOwner))
+      .status,
+    "granted",
+  );
+  assert.equal(
+    (await lease(fixture, "completion-b", "completion-b-1", secondOwner))
+      .status,
+    "queued",
+  );
+  assert.equal(
+    (await lease(fixture, "completion-b", "completion-b-2", secondOwner))
+      .status,
+    "queued",
+  );
+  assert.equal(
+    (await lease(fixture, "completion-c", "completion-c-1", thirdOwner)).status,
+    "queued",
+  );
+
+  await release(fixture, first.requestId, "completion-a-1", firstOwner);
+  let snapshot = await status(fixture);
+  assert.equal(
+    snapshot.leases.find((candidate) => candidate.leaseId === "completion-b-1")
+      .status,
+    "granted",
+  );
+
+  await rpc(fixture, "publish-result", {
+    requestId: first.requestId,
+    owner: firstOwner,
+    status: "success",
+    payload: null,
+  });
+  await release(fixture, "completion-b", "completion-b-1", secondOwner);
+  snapshot = await status(fixture);
+  assert.equal(
+    snapshot.leases.find((candidate) => candidate.leaseId === "completion-c-1")
+      .status,
+    "granted",
+  );
+  assert.equal(
+    snapshot.leases.find((candidate) => candidate.leaseId === "completion-b-2")
+      .status,
+    "queued",
+  );
+  assertWithinCapacity(snapshot);
+});
+
 test("weighted leases never exceed configured capacity", async () => {
   const fixture = await createFixture({ capacity: 3 });
   const owners = [owner(111), owner(112), owner(113)];
@@ -5059,6 +5132,40 @@ test("legacy handoff is safe for mixed Bash field reads and releases by token", 
   const released = legacy.releaseIfOwned();
   assert.equal(released.released, true);
   assert.equal(existsSync(lockDirectory), false);
+  assert.equal(existsSync(legacy.markerPath), false);
+});
+
+test("legacy handoff preserves shared owner read permissions through rollback", () => {
+  const root = mkdtempSync(join(tmpdir(), "quality-gate-shared-owner-mode-"));
+  fixtures.push({ root, coordinator: null });
+  chmodSync(root, 0o770);
+  const lockDirectory = join(root, "run.lock");
+  const ownerPath = join(lockDirectory, "owner");
+  mkdirSync(lockDirectory, { mode: 0o770 });
+  const legacyOwnerId = `legacy-shared-${process.pid}-1010`;
+  const generationId = `coordinator-shared-${process.pid}-1011`;
+  writeFileSync(
+    ownerPath,
+    `pid=${process.pid}\nhost=legacy-shared\nstart_utc=\ntoken=${legacyOwnerId}\n`,
+  );
+  chmodSync(ownerPath, 0o640);
+
+  const legacy = adoptLegacyRunLock({
+    lockRoot: root,
+    expectedOwnerToken: legacyOwnerId,
+    generationToken: generationId,
+    coordinatorIdentity: {
+      pid: process.pid,
+      startUtc: "Thu Aug 21 12:10:00 2026",
+    },
+  });
+  assert.equal(ownerFields(ownerPath).token, generationId);
+  assert.equal(statSync(ownerPath).mode & 0o777, 0o640);
+
+  const rollback = legacy.rollbackHandoff();
+  assert.equal(rollback.rolledBack, true);
+  assert.equal(ownerFields(ownerPath).token, legacyOwnerId);
+  assert.equal(statSync(ownerPath).mode & 0o777, 0o640);
   assert.equal(existsSync(legacy.markerPath), false);
 });
 
