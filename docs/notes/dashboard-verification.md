@@ -81,13 +81,24 @@ if (text !== "") {
     parseError = String(error);
   }
 }
-({ status, text, body, parseError });
+({
+  status,
+  parseError,
+  fields:
+    body === null
+      ? null
+      : {
+          // Select only the non-sensitive fields needed for this check.
+          expectedField: body.expectedField,
+        },
+});
 ```
 
-Record the status, raw text, and parsed fields that prove the acceptance
-criteria. Record `parseError` when parsing non-empty response text fails. Do not
-inspect cookies or browser storage. Do not use this path for a cross-origin
-request or a mutation.
+Keep the raw response text and the full parsed body local. Record only the
+status and the minimum non-sensitive fields that prove the acceptance criteria.
+Record `parseError` when parsing non-empty response text fails. Redact secrets,
+private labels, forensic reports, and personal data. Do not inspect cookies or
+browser storage. Do not use this path for a cross-origin request or a mutation.
 
 For a simulated authenticated session:
 
