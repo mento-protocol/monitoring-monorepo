@@ -4968,6 +4968,304 @@ rm -rf "$trunk_blocked_stamp_repo"
 assert_not_contains "skipping mapped commands"
 assert_contains "All mapped commands passed."
 assert_contains "Note: the Trunk arm was skipped"
+
+# The launcher is only Trunk's FIRST download. Once it has produced a CLI, that
+# CLI fetches plugin sources and, per check, the hermetic runtimes and linter
+# binaries the enabled linters need. An environment that allowlists trunk.io but
+# not those hosts answers the provisioning probe with a working `--version` and
+# still fails every check, which used to hard-fail the gate with no way out.
+#
+# Every transcript below is the real output of Trunk 1.25.0, captured by seeding
+# a hermetic TRUNK_CACHE with the CLI and then forcing its downloads to fail
+# (connection refused, a 403-returning forward proxy, an unresolvable proxy
+# host). The stubs replay it byte for byte, ANSI included, because the classifier
+# reads that text.
+trunk_blocked_linter_repo="$(mktemp -d)"
+(
+  cd "$trunk_blocked_linter_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools .trunk
+  # Trunk writes its failure details into .trunk/out, which every Trunk repo
+  # ignores (see this repo's .trunk/.gitignore). The fixture is run more than
+  # once, so it has to ignore them too or the second run would map a different
+  # command set than the first.
+  printf '*out\n' > .trunk/.gitignore
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+# A provisioned CLI: the launcher probe succeeds, so only the check verdict is
+# in question. The check then fails because it could not install a linter.
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.25.0"
+  exit 0
+fi
+mkdir -p .trunk/out
+cat > .trunk/out/ERGzk.yaml <<'YAML'
+trunk_cli_version: 1.25.0
+title: "Error while executing: Installing hermetic tool shellcheck v0.11.0"
+report:
+  - "Curl Error: Failure when receiving data from the peer for https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.darwin.x86_64.tar.xz"
+YAML
+printf '\n\033[1m\033[30m\033[107m  FAILURES  \033[0m\n\n'
+printf ' \033[1mshellcheck\033[22m  \033[1mInstalling hermetic tool shellcheck v0.11.0\033[22m  .trunk/out/ERGzk.yaml\n'
+printf '\n\033[1m\033[30m\033[107m  NOTICES  \033[0m\n\n'
+printf ' A tool failed to run. You can open the details yaml file for more information.\n'
+printf '\nChecked 0 files\n'
+printf '\033[1m\033[91m\342\234\226 No issues, 1 failure\033[0m\n'
+exit 1
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+)
+assert_contains "warning: skipping ./tools/trunk check fixture.txt — Trunk could not provision its linters."
+assert_contains "The CLI itself is installed — the launcher probe succeeded"
+# The warning must say what it established and nothing more. Trunk stated it
+# found no issues, and that statement is why the downgrade is safe.
+assert_contains "Trunk reported no issues, so no finding is being"
+# The failure row names only the step; the host that has to be allowlisted lives
+# in the detail YAML, so the warning replays it or it names no fix at all.
+assert_contains "Error while executing: Installing hermetic tool shellcheck v0.11.0"
+assert_contains "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/"
+assert_contains "- skipped "
+assert_contains "All mapped commands passed."
+assert_contains "Note: the Trunk arm was skipped"
+assert_not_contains "mapped command(s) failed."
+
+# Same degradation on the sequential path.
+(
+  cd "$trunk_blocked_linter_repo"
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run --fail-fast > "$output_file" 2>&1
+)
+assert_contains "warning: skipping ./tools/trunk check fixture.txt — Trunk could not provision its linters."
+assert_contains "All mapped commands passed."
+assert_not_contains "Stopping after first failed mapped command (--fail-fast)."
+
+# Same stamp rule as the launcher case: a run that skipped Trunk because its
+# linters could not be downloaded must not leave a clean whole-run stamp, or the
+# next --skip-if-fresh run would inherit a pass Trunk never gave.
+(
+  cd "$trunk_blocked_linter_repo"
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run --skip-if-fresh > "$output_file" 2>&1
+)
+rm -rf "$trunk_blocked_linter_repo"
+assert_not_contains "skipping mapped commands"
+assert_contains "All mapped commands passed."
+assert_contains "Note: the Trunk arm was skipped"
+
+# Trunk aborts before linting anything when it cannot fetch its plugin sources,
+# so that transcript holds one error line and nothing else. Real output, exit 2.
+trunk_blocked_plugin_repo="$(mktemp -d)"
+(
+  cd "$trunk_blocked_plugin_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.25.0"
+  exit 0
+fi
+printf '\033[0G\033[2K\033[1m\033[31m\342\234\226 Unable to download plugin https://github.com/trunk-io/plugins/archive/v1.7.5.zip: Could resolve but could not establish connection to host of https://github.com/trunk-io/plugins/archive/v1.7.5.zip\033[0m\n'
+exit 2
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+)
+rm -rf "$trunk_blocked_plugin_repo"
+assert_contains "warning: skipping ./tools/trunk check fixture.txt — Trunk could not provision its linters."
+assert_contains "Unable to download plugin https://github.com/trunk-io/plugins/archive/v1.7.5.zip"
+assert_contains "All mapped commands passed."
+assert_not_contains "mapped command(s) failed."
+
+# The invariant, restated against the new path: a Trunk that found a real problem
+# must fail the gate even when a linter download failed in the same run. This is
+# the transcript that would break the invariant if the classifier inferred "no
+# findings" from the presence of a download failure instead of reading Trunk's
+# own verdict — here Trunk never says "No issues", and it reports both counts.
+trunk_mixed_failure_repo="$(mktemp -d)"
+(
+  cd "$trunk_mixed_failure_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.25.0"
+  exit 0
+fi
+mkdir -p .trunk/out
+cat > .trunk/out/DgQ3M.yaml <<'YAML'
+trunk_cli_version: 1.25.0
+title: "Error while executing: Installing hermetic tool shellcheck v0.11.0"
+report:
+  - "Curl Error: Failure when receiving data from the peer for https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.darwin.x86_64.tar.xz"
+YAML
+printf '\033[1m\033[30m\033[107m  ISSUES  \033[0m\n\nfixture.js\n'
+printf " -:-  fmt  trunk-real-problem, autoformat by running 'trunk fmt'  prettier\n"
+printf '\n\033[1m\033[30m\033[107m  FAILURES  \033[0m\n\n'
+printf ' shellcheck  Installing hermetic tool shellcheck v0.11.0  .trunk/out/DgQ3M.yaml\n'
+printf '\nChecked 1 file\n'
+printf '\033[1m\033[91m\342\234\226 1 unformatted file\033[0m\n'
+printf '\033[1m\033[91m\342\234\226 1 failure\033[0m\n'
+exit 1
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  set +e
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]]
+)
+rm -rf "$trunk_mixed_failure_repo"
+assert_contains "1 mapped command(s) failed."
+assert_contains "trunk-real-problem"
+assert_not_contains "- skipped "
+assert_not_contains "Trunk could not provision its linters."
+
+# Fail closed on anything the classifier cannot account for exactly. Trunk
+# counted two failures and only one of them is a download step, so the other is
+# an unexplained failure and the run must fail.
+trunk_partial_failure_repo="$(mktemp -d)"
+(
+  cd "$trunk_partial_failure_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.25.0"
+  exit 0
+fi
+mkdir -p .trunk/out
+cat > .trunk/out/ERGzk.yaml <<'YAML'
+trunk_cli_version: 1.25.0
+title: "Error while executing: Installing hermetic tool shellcheck v0.11.0"
+report:
+  - "Curl Error: Failure when receiving data from the peer for https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.darwin.x86_64.tar.xz"
+YAML
+printf '\033[1m\033[30m\033[107m  FAILURES  \033[0m\n\n'
+printf ' shellcheck    Installing hermetic tool shellcheck v0.11.0  .trunk/out/ERGzk.yaml\n'
+printf ' markdownlint  markdownlint exited with code 134            .trunk/out/zzzzz.yaml\n'
+printf '\nChecked 0 files\n'
+printf '\342\234\226 No issues, 2 failures\n'
+exit 1
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  set +e
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]]
+)
+rm -rf "$trunk_partial_failure_repo"
+assert_contains "1 mapped command(s) failed."
+assert_contains "markdownlint exited with code 134"
+assert_not_contains "- skipped "
+
+# Fail closed on a cause Trunk did not phrase as a download failure. The step is
+# a download step and Trunk found nothing, but a checksum mismatch is a local
+# problem the operator has to see, not an allowlist to widen.
+trunk_local_cause_repo="$(mktemp -d)"
+(
+  cd "$trunk_local_cause_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.25.0"
+  exit 0
+fi
+mkdir -p .trunk/out
+cat > .trunk/out/ERGzk.yaml <<'YAML'
+trunk_cli_version: 1.25.0
+title: "Error while executing: Installing hermetic tool shellcheck v0.11.0"
+report:
+  - "sha256 mismatch for shellcheck-v0.11.0.darwin.x86_64.tar.xz"
+YAML
+printf '\033[1m\033[30m\033[107m  FAILURES  \033[0m\n\n'
+printf ' shellcheck  Installing hermetic tool shellcheck v0.11.0  .trunk/out/ERGzk.yaml\n'
+printf '\nChecked 0 files\n'
+printf '\342\234\226 No issues, 1 failure\n'
+exit 1
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  set +e
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]]
+)
+rm -rf "$trunk_local_cause_repo"
+assert_contains "1 mapped command(s) failed."
+# The transcript is otherwise identical to the accepted one, so the only thing
+# that kept the failure standing is the cause recorded in the detail YAML.
+assert_contains "Installing hermetic tool shellcheck v0.11.0"
+assert_not_contains "- skipped "
+assert_not_contains "Trunk could not provision its linters."
+
+# Fail closed on a plain non-zero exit that says nothing at all. No verdict, no
+# failure table, nothing to classify — the failure stands.
+trunk_silent_failure_repo="$(mktemp -d)"
+(
+  cd "$trunk_silent_failure_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.25.0"
+  exit 0
+fi
+echo "trunk-ambiguous-exit"
+exit 3
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  set +e
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]]
+)
+rm -rf "$trunk_silent_failure_repo"
+assert_contains "1 mapped command(s) failed."
+assert_contains "trunk-ambiguous-exit"
+assert_not_contains "- skipped "
 } # end family: failure-output
 
 # family: routing-docs

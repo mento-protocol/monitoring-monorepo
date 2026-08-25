@@ -46,7 +46,8 @@ rerun the full mapped gate with host access on the same head. The gate reuses
 stamp-eligible fresh successes and runs the blocked commands. A resumed run does
 not write a whole-run stamp. Trunk and the gate self-test are stamp-exempt and
 always run, including during the later pre-push gate; Trunk's one exception is
-an environment that cannot provision the CLI, where the arm is skipped. Other
+an environment that blocks its downloads — the CLI, its plugin sources, or the
+linters a check needs — where the arm is skipped. Other
 eligible successes keep per-command stamps, so the later gate can avoid
 repeating them. Running a command directly proves it but records no per-command
 stamp.
@@ -197,13 +198,28 @@ targeted Trunk checks for faster local iteration. Deleted paths,
 Trunk/tooling changes, package-manager changes, pnpm patches, and
 package-manifest changes still run full-repo Trunk locally. CI also runs a
 required full-repo Trunk check on every
-PR. Where the environment blocks `trunk.io` — a Claude cloud container proxies
-egress and refuses any host outside its allowlist, so `./tools/trunk` cannot
-download the pinned CLI — the gate probes provisioning after the Trunk command
-fails, then reports the arm as `skipped` with a warning naming the allowlist fix
-instead of failing the run, matching the posture `.trunk/hooks` already takes.
-Only a provisioning failure degrades: a provisioned Trunk that finds real
-problems still fails the gate. Normal `--run` mode executes independent
+PR. Where the environment blocks Trunk's downloads — a Claude cloud container
+proxies egress and refuses any host outside its allowlist — the gate reports the
+arm as `skipped` with a warning naming the allowlist fix instead of failing the
+run, matching the posture `.trunk/hooks` already takes. Trunk downloads at two
+stages and the gate classifies both. If the launcher cannot fetch the pinned CLI
+from `trunk.io`, a probe run after the command fails
+(`TRUNK_LAUNCHER_QUIET=true ./tools/trunk --version`) answers that directly. If
+the launcher succeeds but the CLI cannot fetch its plugin sources or the
+hermetic runtimes and linter binaries a check needs — `trunk.io` allowlisted,
+`github.com` and `nodejs.org` not — the gate classifies the check transcript
+instead. That classification never infers "nothing was found": it accepts the
+transcript only when Trunk itself reported no issues, every failure Trunk
+counted is a download step, and the reason each step recorded in its
+`.trunk/out/*.yaml` detail file is one of Trunk's download-failure phrasings.
+The warning replays those reasons so it names the host to allowlist. Everything
+else fails the gate, including a partly-explained failure set and a download
+step that failed for a local reason. Only a provisioning failure degrades: a
+provisioned Trunk that finds real problems still fails the gate, and so does a
+run that mixes real findings with a blocked download. A run whose Trunk arm was
+skipped writes no whole-run success stamp, so the next `--skip-if-fresh` run
+retries Trunk instead of inheriting a pass it never earned. Normal `--run` mode
+executes independent
 quality-phase commands with
 bounded parallelism (`--parallel <n>`, default `auto` capped at 4 workers, or
 `AGENT_QUALITY_PARALLELISM`). Preflight, codegen, post-codegen install,
