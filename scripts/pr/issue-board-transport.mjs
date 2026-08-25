@@ -179,13 +179,15 @@ export async function listReadyIssues(options) {
 export async function listIssuesByLabel(
   options,
   label,
-  { state = "open" } = {},
+  { state = "open", json = ghJson } = {},
 ) {
-  const issues = await ghJson([
+  const issues = await json([
     "issue",
     "list",
     "-R",
     options.repo,
+    "--state",
+    state,
     "--search",
     `is:issue is:${state} label:${label}`,
     "--limit",

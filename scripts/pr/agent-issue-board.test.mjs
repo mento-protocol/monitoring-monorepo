@@ -29,7 +29,10 @@ import {
   readBackfillProjectFields,
   writeBackfillProjectFields,
 } from "./issue-board-projects.mjs";
-import { listIssueComments } from "./issue-board-transport.mjs";
+import {
+  listIssueComments,
+  listIssuesByLabel,
+} from "./issue-board-transport.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -156,6 +159,38 @@ test("project scope failures name the read-write gh refresh command", () => {
     hint.includes("`read:project` alone"),
     "missing read-only scope warning",
   );
+});
+
+test("queue-label issue lists pass the requested state to gh", async () => {
+  const calls = [];
+  await listIssuesByLabel(
+    { repo: "mento-protocol/monitoring-monorepo" },
+    "agent-active",
+    {
+      state: "closed",
+      json: async (args) => {
+        calls.push(args);
+        return [];
+      },
+    },
+  );
+
+  assertDeepEqual(calls, [
+    [
+      "issue",
+      "list",
+      "-R",
+      "mento-protocol/monitoring-monorepo",
+      "--state",
+      "closed",
+      "--search",
+      "is:issue is:closed label:agent-active",
+      "--limit",
+      "1000",
+      "--json",
+      "id,number,title,url,labels,state,projectItems",
+    ],
+  ]);
 });
 
 test("project mutation scope failures receive the same guidance", () => {
