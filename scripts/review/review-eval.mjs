@@ -6,7 +6,7 @@
 // (`run-eval.sh`) invokes it.
 
 import { spawnSync } from "node:child_process";
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { parseArgs as parseNodeArgs } from "node:util";
@@ -40,6 +40,7 @@ import {
   assertAuthorizedFreshnessWorkflow,
   buildPlan,
   claudeExec,
+  comparabilityKey,
   DEFAULT_CALIBRATION_PATH,
   DEFAULT_LEDGER_PATH,
   DEFAULT_RUNS_DIR,
@@ -48,6 +49,7 @@ import {
   resolveKind,
   scorePlan,
 } from "./review-eval-run.mjs";
+import { scorerDigest } from "./review-eval-score.mjs";
 import {
   resolveBaseline,
   resolveRowReference,
@@ -61,7 +63,7 @@ const MODE_OPTIONS = {
   "check-ledger": ["base-ref", "require-base"],
   plan: ["kind", "skill-ref", "out", "runs-dir"],
   score: ["against", "calibration"],
-  validate: ["append", "against", "detail-dir"],
+  validate: ["append", "against", "calibration", "detail-dir"],
   report: ["against", "row"],
   "schedule-issue": ["repo", "dry-run", "date"],
 };
@@ -211,8 +213,10 @@ Options:
   --detail-dir DIR       Run detail to recompute from (--validate); default is
                          the row's own detail_dir under --root
   --row REF              Row to report (default: the newest ledger row)
-  --calibration PATH     Judge calibration set (--score); refused unless it
-                         digests to the set the plan's key hashed
+  --calibration PATH     Judge calibration set (--score, --validate); --score
+                         refuses it unless it digests to the set the plan's key
+                         hashed, and --validate reads it to re-derive the row's
+                         recorded judge_calibration
   --append               Append the validated row to the ledger (--validate)
   --repo OWNER/REPO      Repository for issue scheduling
   --dry-run              Plan issue synchronization without mutating
@@ -513,6 +517,29 @@ async function modeScore(options, context) {
       `plan was written against calibration ${String(plan.calibration_digest).slice(0, 8)}; ${calibrationFile} digests to ${calibrationDigest.slice(0, 8)}`,
     );
   }
+  // A full run takes hours, and under `--skill-ref` the spec is the live
+  // checkout. A scorer module or judge prompt edited between planning and
+  // scoring would score these cells with new code while the row keeps the
+  // planned `comparability_key`, pairing it against rows produced by a
+  // different pipeline. The key is recomputed rather than only compared field
+  // by field, so the judge model and the frozen prompt hashes are covered too.
+  const matcherDigest = scorerDigest();
+  if (plan.matcher_digest !== matcherDigest) {
+    throw new Error(
+      `plan was written against scorer ${String(plan.matcher_digest).slice(0, 8)}; this scorer digests to ${matcherDigest.slice(0, 8)}; re-plan before scoring`,
+    );
+  }
+  const key = comparabilityKey({
+    contract: context.contract,
+    contractDigest: context.contractDigest,
+    matcherDigest,
+    calibrationDigest,
+  });
+  if (plan.comparability_key !== key) {
+    throw new Error(
+      `plan carries comparability_key ${String(plan.comparability_key).slice(0, 8)}; this spec derives ${key.slice(0, 8)}; re-plan before scoring`,
+    );
+  }
   const rows = readLedger(path.resolve(context.repoRoot, options.ledgerPath));
   const scored = await scorePlan({
     plan,
@@ -549,6 +576,10 @@ async function modeValidate(options, context) {
   const row = readJson(rowPath);
   const ledgerPath = path.resolve(context.repoRoot, options.ledgerPath);
   const ledgerRows = readLedger(ledgerPath);
+  const calibrationFile = path.resolve(
+    context.repoRoot,
+    options.calibrationPath,
+  );
   const revalidated = revalidateRow({
     contract: context.contract,
     row,
@@ -564,6 +595,13 @@ async function modeValidate(options, context) {
       rows: ledgerRows,
       repoRoot: context.repoRoot,
     }),
+    // The frozen pairs the recorded calibration outcomes must be about, so a
+    // detail file cannot relabel what the judge was expected to answer. A row
+    // validated outside a checkout that carries the set still has its recorded
+    // agreement re-derived from the outcomes themselves.
+    calibrationSet: existsSync(calibrationFile)
+      ? readJson(calibrationFile)
+      : null,
   });
   const problems = [...revalidated.problems];
   if (row.contract_digest !== context.contractDigest) {

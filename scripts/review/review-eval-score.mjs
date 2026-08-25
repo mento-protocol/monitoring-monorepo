@@ -187,6 +187,22 @@ export function parseJudgeJson(
   });
 }
 
+/**
+ * The match judge's promised shape. A reply whose `matches` field is absent or
+ * is not an array is not "the review matched nothing": both produce zero
+ * matched defects, and only one of them is a result. A silent empty set records
+ * every candidate as missed, which can flip a regression or turn a row RED.
+ * `classifyNovel` refuses a missing `verdicts` object for the same reason.
+ */
+function requireMatches(parsed, label) {
+  if (!Array.isArray(parsed?.matches)) {
+    throw new JudgeOutputError(`${label} returned no matches array`, {
+      raw: JSON.stringify(parsed ?? null),
+    });
+  }
+  return parsed.matches;
+}
+
 let blindCwd = null;
 
 /**
@@ -369,7 +385,7 @@ export async function matchClaims({
     "match judge",
     "object",
   );
-  const matches = Array.isArray(parsed.matches) ? parsed.matches : [];
+  const matches = requireMatches(parsed, "match judge");
   const matchedIds = [
     ...new Set(
       matches
@@ -670,7 +686,7 @@ export async function runCalibration({
         `calibration ${record.record_id}`,
         "object",
       );
-      const matches = Array.isArray(parsed.matches) ? parsed.matches : [];
+      const matches = requireMatches(parsed, `calibration ${record.record_id}`);
       const actual = matches.map(Number).includes(1) ? "matched" : "unmatched";
       return {
         record_id: record.record_id,
@@ -686,9 +702,13 @@ export async function runCalibration({
   const disagreements = outcomes.filter(
     (outcome) => outcome.actual !== outcome.expected,
   );
+  // Every outcome is returned, not just the disagreements: `--validate`
+  // re-derives `judge_calibration` from these pairs instead of trusting the
+  // agreement the row states about itself.
   return {
     agreement: outcomes.length - disagreements.length,
     total: outcomes.length,
     disagreements,
+    outcomes,
   };
 }

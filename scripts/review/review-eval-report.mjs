@@ -149,8 +149,24 @@ function zeroFindingPrs(condition) {
     : 0;
 }
 
+/** Whether the scorer recorded a suspected answer-key leak on this row. */
+function leakSuspected(row) {
+  return LEAK_NOTE_PATTERN.test(row?.notes ?? "");
+}
+
 function comparable(row, baselineRow) {
   if (!baselineRow) return { usable: false, reason: null };
+  // The baseline supplies `baseHeadline`, every flip count derived from it and
+  // the wrong-claims denominator. A baseline whose own judge failed calibration
+  // would rank a calibrated candidate on numbers the runbook calls unusable, so
+  // it is refused as a baseline exactly the way `resolveBaseline` refuses to
+  // anchor on one.
+  if (!judgeCalibrationPasses(baselineRow)) {
+    return {
+      usable: false,
+      reason: `baseline ${calibrationReason(baselineRow)}; comparison refused`,
+    };
+  }
   if (row.comparability_key === baselineRow.comparability_key) {
     return { usable: true, reason: null };
   }
@@ -188,6 +204,13 @@ function canaryVerdict({ contract, row }) {
   if (!judgeCalibrationPasses(row)) {
     return { verdict: "AMBER", reasons: [calibrationReason(row)] };
   }
+  // A floor test that may have read the answer key is not a floor test either.
+  if (leakSuspected(row)) {
+    return {
+      verdict: "AMBER",
+      reasons: ["notes record a suspected leak; scores are not trusted"],
+    };
+  }
   if (condition.recall.matched < floor) {
     reasons.push(
       `${name} matched ${condition.recall.matched} grid defects, below canary_min_matched_grid ${floor}`,
@@ -213,7 +236,8 @@ function canaryVerdict({ contract, row }) {
 /**
  * Apply the pre-registered decision rule to one row. Precedence, highest
  * first: INCOMPLETE for a failed run that has no scored matrix, then AMBER for
- * a judge that failed its own calibration, then RED, AMBER, PROMOTE, GREEN.
+ * a judge that failed its own calibration, then AMBER for a suspected
+ * answer-key leak, then RED, AMBER, PROMOTE, GREEN.
  */
 export function verdict({ contract, row, baselineRow = null }) {
   if (!isObject(contract?.verdict_rules)) {
@@ -259,6 +283,20 @@ export function verdict({ contract, row, baselineRow = null }) {
   // the run is AMBER and unusable rather than GREEN, RED, or PROMOTE.
   if (!judgeCalibrationPasses(row)) {
     const notes = [...reasons, calibrationReason(row)];
+    if (row.status !== "complete") notes.push(`run status is ${row.status}`);
+    return { verdict: "AMBER", reasons: notes };
+  }
+
+  // A suspected leak gates every number under it for the same reason
+  // calibration does: the run may have scored by reading the answer key, and
+  // the runbook classifies that evidence as untrusted and AMBER. It therefore
+  // precedes RED — escalating on untrusted evidence is as wrong as passing on
+  // it, and RED here would name defects the run never really found or missed.
+  if (leakSuspected(row)) {
+    const notes = [
+      ...reasons,
+      "notes record a suspected leak; scores are not trusted",
+    ];
     if (row.status !== "complete") notes.push(`run status is ${row.status}`);
     return { verdict: "AMBER", reasons: notes };
   }
@@ -312,9 +350,6 @@ export function verdict({ contract, row, baselineRow = null }) {
   if (row.status !== "complete") amber.push(`run status is ${row.status}`);
   if (!pairing.usable && baselineRow) {
     amber.push("row cannot be ranked against the given baseline");
-  }
-  if (LEAK_NOTE_PATTERN.test(row.notes ?? "")) {
-    amber.push("notes record a suspected leak; scores are not trusted");
   }
   if (flips && !rankable) {
     amber.push(

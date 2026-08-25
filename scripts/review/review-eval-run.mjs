@@ -59,7 +59,6 @@ const DEFAULT_CALIBRATION_FILE = fileURLToPath(
 );
 export const DEFAULT_RUNS_DIR = "docs/evals/review-skill-runs";
 export const DEFAULT_SKILL_DIR = "~/.claude/skills/review";
-export const DEFAULT_CODEX_REVIEW_SH = "~/.claude/bin/codex-review.sh";
 export const PLAN_KINDS = ["full", "canary", "auto"];
 
 // Anchored on bench2: the Claude leg of `sol@high -> opus@high` cost $11.05
@@ -165,20 +164,39 @@ function cliVersion(binary, env) {
 }
 
 /**
+ * Digest over the finder command a pipeline cell actually executes. The
+ * contract pins that argument vector, and `run-eval.sh` spawns it element for
+ * element, so this is the finder half of the row's provenance.
+ *
+ * It replaced a digest of `~/.claude/bin/codex-review.sh`. That wrapper is an
+ * operator convenience no cell ever runs: recording it claimed a drift control
+ * the harness did not have, because a wrapper regression could not reach a
+ * measured number while an edited `argv` moved every pipeline cell unrecorded.
+ */
+export function finderArgvDigest(contract) {
+  const argv = contract?.sut?.finder?.argv;
+  if (!Array.isArray(argv) || argv.length === 0) {
+    throw new Error("contract sut.finder.argv must be a non-empty array");
+  }
+  return sha256(JSON.stringify(argv.map(String)));
+}
+
+/**
  * The environment stamped into the ledger row. Every value is either read from
  * disk or overridable by an environment variable, so a test never shells out.
  */
-export function collectInputs({ skillRef = null, env = process.env } = {}) {
+export function collectInputs({
+  contract,
+  skillRef = null,
+  env = process.env,
+} = {}) {
   const skillDir = expandHome(
     skillRef ?? env.REVIEW_EVAL_SKILL_DIR ?? DEFAULT_SKILL_DIR,
-  );
-  const codexReviewSh = expandHome(
-    env.REVIEW_EVAL_CODEX_REVIEW_SH ?? DEFAULT_CODEX_REVIEW_SH,
   );
   return {
     skill_digest: skillDigest(skillDir),
     skill_ref: skillRef ? path.resolve(skillDir) : "installed",
-    codex_review_sh_digest: fileDigest(codexReviewSh),
+    finder_argv_digest: finderArgvDigest(contract),
     claude_cli: cliVersion("claude", env),
     codex_cli: cliVersion("codex", env),
     host: env.REVIEW_EVAL_HOST ?? hostname(),
@@ -280,10 +298,17 @@ export function buildPlan({
   // digest in the plan is what lets `--score --calibration PATH` be refused
   // when it names a different set: the agreement that gates the verdict would
   // otherwise come from pairs the key never saw.
-  const calibrationDigest = fileDigest(DEFAULT_CALIBRATION_FILE);
+  //
+  // It is resolved under `repoRoot`, which is what `--score` reads. Hashing
+  // this module's own checkout instead would key the plan to one calibration
+  // set and score it with another whenever `--root` names a different tree —
+  // exactly what the orchestrator does with its spec worktree.
+  const calibrationDigest = fileDigest(
+    path.resolve(repoRoot, DEFAULT_CALIBRATION_PATH),
+  );
   const key = comparabilityKey({ contract, contractDigest, calibrationDigest });
   const date = now.toISOString().slice(0, 10);
-  const inputs = collectInputs({ skillRef, env });
+  const inputs = collectInputs({ contract, skillRef, env });
   // The skill under test and the kind are part of the directory name because
   // the directory is also the resume cache: two runs of the same contract with
   // different skills must never land on each other's cells.
@@ -435,8 +460,8 @@ export function leakSignals({
  * The recorded runtime is part of it. An interrupted run resumed after a CLI
  * upgrade would otherwise reuse cells produced by the previous binaries while
  * the new row stamps the current versions, which puts two runtimes in one row
- * under one provenance. `codex_review_sh_digest` is the finder wrapper the
- * pipeline condition runs, so it moves a recorded number the same way.
+ * under one provenance. `finder_argv_digest` is the command the pipeline
+ * condition spawns, so it moves a recorded number the same way.
  */
 export function cellFingerprint({ plan }) {
   return {
@@ -445,7 +470,7 @@ export function cellFingerprint({ plan }) {
     contract_digest: plan?.contract_digest ?? null,
     claude_cli: plan?.inputs?.claude_cli ?? null,
     codex_cli: plan?.inputs?.codex_cli ?? null,
-    codex_review_sh_digest: plan?.inputs?.codex_review_sh_digest ?? null,
+    finder_argv_digest: plan?.inputs?.finder_argv_digest ?? null,
   };
 }
 
@@ -886,6 +911,25 @@ export async function scorePlan({
     exec: metered,
     model: contract.judge.model,
   });
+  // The calibration replay is the only recorded number with no other trace on
+  // disk, so `--validate` had to take `judge_calibration` on the row's own say
+  // so. Writing the forty outcomes beside the cell results makes the agreement
+  // re-derivable the way every other counter already is.
+  if (write) {
+    writeFileSync(
+      path.join(planDir, "calibration.json"),
+      `${JSON.stringify(
+        {
+          model: contract.judge.model,
+          agreement: calibration.agreement,
+          total: calibration.total,
+          outcomes: calibration.outcomes ?? [],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+  }
   const scored = new Map();
   const missing = [];
   const leaked = [];

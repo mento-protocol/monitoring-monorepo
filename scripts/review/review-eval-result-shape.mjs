@@ -149,6 +149,17 @@ export function resolveRowReference({ reference, rows, repoRoot }) {
   throw new Error(`${reference} matches ${matches.length} ledger rows`);
 }
 
+/** Whether a detail directory holds any scored cell result. */
+function hasCellResults(dir) {
+  try {
+    return readdirSync(dir).some(
+      (name) => name.startsWith("result-") && name.endsWith(".json"),
+    );
+  } catch {
+    return false;
+  }
+}
+
 function recomputeFromDetail({ dir, condition, ids, prForId }) {
   let files;
   try {
@@ -202,6 +213,94 @@ function recomputeFromDetail({ dir, condition, ids, prForId }) {
 }
 
 /**
+ * Re-derive `judge_calibration` from the outcomes the scoring pass wrote.
+ *
+ * `judge_calibration` gates every other number on the row: `verdict()` caps a
+ * run below 38/40 at AMBER, `resolveBaseline` refuses to anchor on it, and the
+ * freshness clock refuses to count it as a full run. Taken from the row itself
+ * it was the one gate an edit could lift by retyping two integers, so it is
+ * recomputed here from `calibration.json` exactly as the bits are recomputed
+ * from the cell results.
+ *
+ * The limit is the same one the cell results have: this proves the row agrees
+ * with the detail the run left behind, not that a model produced that detail.
+ * A detail directory that carries cell results but no `calibration.json` is a
+ * problem rather than a skipped check, so deleting the file cannot buy back the
+ * trust it was written to remove.
+ */
+function checkCalibration({ dir, row, calibrationSet, problems }) {
+  const file = path.join(dir, "calibration.json");
+  if (!existsSync(file)) {
+    problems.push(
+      `${dir} carries cell results but no calibration.json; judge_calibration cannot be re-derived`,
+    );
+    return;
+  }
+  // `--validate` reads a detail directory it did not write, so unreadable JSON
+  // is a problem to report, not a stack trace in place of the problem list.
+  let record;
+  try {
+    record = readJson(file);
+  } catch (error) {
+    problems.push(error instanceof Error ? error.message : String(error));
+    return;
+  }
+  const outcomes = record?.outcomes;
+  if (!Array.isArray(outcomes) || outcomes.length === 0) {
+    problems.push("calibration.json carries no outcomes array");
+    return;
+  }
+  const ids = new Set(outcomes.map((outcome) => String(outcome?.record_id)));
+  if (ids.size !== outcomes.length) {
+    problems.push(
+      `calibration.json repeats a record_id; ${outcomes.length} outcome(s) cover ${ids.size} pair(s)`,
+    );
+  }
+  const expectedById = new Map(
+    (
+      (Array.isArray(calibrationSet)
+        ? calibrationSet
+        : (calibrationSet?.records ?? [])) ?? []
+    ).map((entry) => [String(entry?.record_id), entry?.expected_verdict]),
+  );
+  if (expectedById.size > 0) {
+    // Without this, flipping `expected` to whatever the judge answered turns
+    // every disagreement into agreement inside the detail file itself.
+    for (const outcome of outcomes) {
+      const id = String(outcome?.record_id);
+      if (!expectedById.has(id)) {
+        problems.push(
+          `calibration.json scores ${id}, which is not a frozen pair`,
+        );
+      } else if (expectedById.get(id) !== outcome?.expected) {
+        problems.push(
+          `calibration.json states expected ${outcome?.expected} for ${id}; the frozen pair says ${expectedById.get(id)}`,
+        );
+      }
+    }
+    if (outcomes.length !== expectedById.size) {
+      problems.push(
+        `calibration.json carries ${outcomes.length} outcome(s); the calibration set holds ${expectedById.size} pair(s)`,
+      );
+    }
+  }
+  const agreement = outcomes.filter(
+    (outcome) => outcome?.actual === outcome?.expected,
+  ).length;
+  const stated = row?.judge_calibration ?? {};
+  if (stated.total !== outcomes.length) {
+    problems.push(
+      `judge_calibration.total is ${stated.total}; calibration.json gives ${outcomes.length}`,
+    );
+  }
+  if (stated.agreement !== agreement) {
+    problems.push(
+      `judge_calibration.agreement is ${stated.agreement}; calibration.json gives ${agreement}`,
+    );
+  }
+}
+
+/**
  * Recompute a row's numbers from its own per-defect bits and, when the run
  * detail is on disk, from the per-cell matched ids. A self-reported score is
  * never trusted; this is what makes a committed row evidence.
@@ -216,6 +315,7 @@ export function revalidateRow({
   detailDir = null,
   ledgerRows = [],
   baselineRow = null,
+  calibrationSet = null,
 }) {
   const problems = [];
   const dir =
@@ -328,6 +428,12 @@ export function revalidateRow({
         `${label}.zero_finding_prs is ${statedZero}; the run detail gives ${recomputed.zeroFindingPrs}`,
       );
     }
+  }
+  // Only a directory that actually holds this run's cells is expected to hold
+  // its calibration outcomes. A row validated with no detail on disk is already
+  // checked against its own bits alone.
+  if (dir && hasCellResults(dir)) {
+    checkCalibration({ dir, row, calibrationSet, problems });
   }
   const baseline =
     baselineRow ?? resolveBaseline({ rows: ledgerRows ?? [], row });

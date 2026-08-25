@@ -97,7 +97,7 @@ function row(overrides = {}) {
     inputs: {
       skill_digest: "d".repeat(64),
       skill_ref: "origin/main",
-      codex_review_sh_digest: "e".repeat(64),
+      finder_argv_digest: "e".repeat(64),
       claude_cli: "2.1.14",
       codex_cli: "0.48.2",
       host: "chapati-mbp",
@@ -527,6 +527,22 @@ test("freshness ages the ledger from executed_at alone", () => {
       // the quarterly clock keeps running and `resolveKind` keeps asking for a
       // full run instead of dropping back to canaries for another window.
       rows: [full(121), full(1, { status: "failed", verdict: "INCOMPLETE" })],
+      level: "red",
+      reasons: [/no full run in 121 days \(full_red 120\)/],
+    },
+    {
+      name: "a full run whose judge failed calibration does not restart it",
+      // `verdict()` caps such a row at AMBER and `resolveBaseline` refuses to
+      // anchor on it. Letting it move this clock would keep the guard green and
+      // send `resolveKind` back to canaries for another whole cadence window on
+      // a score nothing may rank on.
+      rows: [
+        full(121),
+        full(1, {
+          judge_calibration: { agreement: 37, total: 40 },
+          verdict: "AMBER",
+        }),
+      ],
       level: "red",
       reasons: [/no full run in 121 days \(full_red 120\)/],
     },

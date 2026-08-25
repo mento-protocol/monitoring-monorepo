@@ -25,6 +25,13 @@
 # Usage:
 #   run-eval.sh [--kind full|canary|auto] [--skill-ref PATH] [--pr] [--no-pr]
 #               [--repo PATH] [--cache-dir DIR] [--deadline SECONDS]
+#               [--against REF]
+#
+# --against names the baseline row this run is scored, validated and reported
+# against: a row file path or an executed_at prefix. The candidate procedure
+# needs it — a --skill-ref run must be compared against the installed run from
+# the same sitting, not against the ledger's stored anchor, or the comparison
+# carries whatever the model did between the anchor and today.
 #
 # Default is --no-pr: the branch, push and gh pr create commands are printed,
 # not executed.
@@ -37,6 +44,7 @@ OPEN_PR=0
 REPO=""
 CACHE_DIR="${HOME}/.cache/mento-review-eval"
 DEADLINE=21600
+AGAINST=""
 SPEC=""
 SPEC_TEMP=0
 SHIM=""
@@ -83,6 +91,11 @@ while [[ $# -gt 0 ]]; do
       CACHE_DIR="$2"
       shift 2
       ;;
+    --against)
+      require_value "$1" "${2:-}"
+      AGAINST="$2"
+      shift 2
+      ;;
     --deadline)
       require_value "$1" "${2:-}"
       # The matrix loop compares this arithmetically. A word evaluates to 0
@@ -103,7 +116,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h | --help)
-      sed -n '2,30p' "$0"
+      sed -n '2,37p' "$0"
       exit 0
       ;;
     *) fail "unknown argument: $1" ;;
@@ -692,8 +705,19 @@ fi
 
 # --- score, validate, report -------------------------------------------------
 
+# The same baseline reaches scoring, validation and the report. Naming it for
+# only one of the three would have the row scored against the same-day run and
+# then rechecked against the ledger's stored anchor, and the two verdicts would
+# disagree for no reason a reader of the PR could see.
+AGAINST_ARGS=()
+if [[ -n $AGAINST ]]; then
+  AGAINST_ARGS=(--against "$AGAINST")
+  log "baseline for this run: $AGAINST"
+fi
+
 log "scoring (this calls the judge)"
-node "$CLI" --root "$SPEC" --ledger "$LEDGER" --score "$RUN_DIR" --json ||
+node "$CLI" --root "$SPEC" --ledger "$LEDGER" --score "$RUN_DIR" \
+  "${AGAINST_ARGS[@]+"${AGAINST_ARGS[@]}"}" --json ||
   abort "scoring failed"
 
 log "validating the row against its own detail"
@@ -701,11 +725,12 @@ log "validating the row against its own detail"
 # spec worktree while the scored cells live under the real checkout, so the
 # row's repo-relative detail_dir does not resolve against --root here.
 node "$CLI" --root "$SPEC" --ledger "$LEDGER" --validate "$RUN_DIR/row.json" \
-  --detail-dir "$RUN_DIR" --append --json ||
+  --detail-dir "$RUN_DIR" "${AGAINST_ARGS[@]+"${AGAINST_ARGS[@]}"}" --append --json ||
   abort "the scored row did not revalidate; nothing was appended"
 
 REPORT="$RUN_DIR/report.md"
-node "$CLI" --root "$SPEC" --ledger "$LEDGER" --report >"$REPORT"
+node "$CLI" --root "$SPEC" --ledger "$LEDGER" --report \
+  "${AGAINST_ARGS[@]+"${AGAINST_ARGS[@]}"}" >"$REPORT"
 VERDICT="$(json_field "$RUN_DIR/row.json" verdict)"
 log "verdict $VERDICT"
 
@@ -719,7 +744,13 @@ if [[ "$RUN_DIR" != "$REPO/$DETAIL_DIR" ]]; then
 fi
 rm -rf "${REPO:?}/$DETAIL_DIR/cells"
 
-BRANCH="eval/review-skill-$(date -u +%Y-%m-%d)"
+# The detail directory basename already identifies this run: date, the first
+# eight of the comparability key, the kind, and the skill digest. A date-only
+# branch collides the moment two runs finish on the same UTC day — which the
+# candidate procedure requires, an installed run and a --skill-ref run in one
+# sitting — and the collision surfaces at `git checkout -b` or at the push,
+# after the paid run and the ledger append are already done.
+BRANCH="eval/review-skill-$(basename "$DETAIL_DIR")"
 TITLE="Review-skill eval $(date -u +%Y-%m-%d): $VERDICT"
 
 printf '\n----- ledger PR -----\n'

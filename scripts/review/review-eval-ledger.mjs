@@ -15,6 +15,8 @@
 
 import { appendFileSync, readFileSync } from "node:fs";
 
+import { judgeCalibrationPasses } from "./review-eval-report.mjs";
+
 export const LEDGER_SCHEMA_VERSION = 1;
 export const LEDGER_KINDS = ["full", "canary", "bridge"];
 export const LEDGER_STATUSES = ["complete", "partial", "failed"];
@@ -47,7 +49,7 @@ export const ROW_OPTIONAL_KEYS = ["scoring_usd"];
 export const INPUTS_REQUIRED_KEYS = [
   "skill_digest",
   "skill_ref",
-  "codex_review_sh_digest",
+  "finder_argv_digest",
   "claude_cli",
   "codex_cli",
   "host",
@@ -310,8 +312,8 @@ export function validateLedgerRow(row, label = "row") {
       problems,
     );
     checkDigest(
-      row.inputs.codex_review_sh_digest,
-      `${label}.inputs.codex_review_sh_digest`,
+      row.inputs.finder_argv_digest,
+      `${label}.inputs.finder_argv_digest`,
       problems,
     );
     for (const field of ["skill_ref", "claude_cli", "codex_cli", "host"]) {
@@ -643,9 +645,17 @@ export function freshness({
   // actually completed, so only a complete full row moves this clock. Counting
   // a failed one would reset `daysSinceFull`, and `resolveKind` would then pick
   // canaries for another whole cadence window instead of retrying the score.
+  //
+  // A run whose judge failed its own calibration verified nothing either:
+  // `verdict()` caps it at AMBER and `resolveBaseline` refuses to anchor on it,
+  // so letting it move this clock would keep the guard green and pick canaries
+  // for a whole cadence window on a score nothing may rank on.
   const lastFull = newestInstant(
     eligible,
-    (row) => row.kind === "full" && row.status === "complete",
+    (row) =>
+      row.kind === "full" &&
+      row.status === "complete" &&
+      judgeCalibrationPasses(row),
     evaluatedAt,
   );
 

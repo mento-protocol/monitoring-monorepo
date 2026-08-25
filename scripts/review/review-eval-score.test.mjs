@@ -300,6 +300,40 @@ test("matchClaims poisons the cell when the judge output is unparsable", async (
   );
 });
 
+test("matchClaims poisons the cell when the reply carries no matches array", async () => {
+  // A parseable object without `matches` is not "the review matched nothing":
+  // scoring it as an empty set records every candidate as missed, which can
+  // manufacture a regression flip or a RED verdict out of a malformed reply.
+  for (const reply of [
+    JSON.stringify({ reasoning: { 1: "no matches key at all" } }),
+    JSON.stringify({ matches: "1", reasoning: {} }),
+    JSON.stringify({ matches: { 1: true } }),
+  ]) {
+    await assert.rejects(
+      matchClaims({
+        claims: [],
+        truthFindings,
+        scorableIds: [101],
+        transcript: "pr-ready-state-core.mjs:750 is wrong",
+        exec: stubExec([reply]),
+      }),
+      (error) =>
+        error instanceof JudgeOutputError &&
+        /match judge returned no matches array/.test(error.message),
+      reply,
+    );
+  }
+  // An explicitly empty array is a result and still scores as zero matches.
+  const empty = await matchClaims({
+    claims: [],
+    truthFindings,
+    scorableIds: [101],
+    transcript: "pr-ready-state-core.mjs:750 is wrong",
+    exec: stubExec([JSON.stringify({ matches: [], reasoning: {} })]),
+  });
+  assert.deepEqual(empty.matchedIds, []);
+});
+
 test("matchClaims poisons the cell when the judge call itself fails", async () => {
   const exec = async () => {
     throw new Error("session limit reached");

@@ -131,7 +131,7 @@ cached — a finder that exits non-zero fails its cell even when it wrote a
 partial report, because a truncated review cached is a permanent zero-recall
 score. A cached cell is reused only when its stored
 fingerprint — skill digest, kind, contract digest, the two CLI versions and the
-`codex-review.sh` digest — matches the current run,
+finder argv digest — matches the current run,
 and the run directory carries the kind and the skill digest in its name, so an
 aborted run followed by a skill edit re-runs instead of scoring the old skill
 under the new digest. The run stops at a six-hour deadline and reports a
@@ -140,13 +140,20 @@ draw-2 cell never ran is scored on draw 1 alone: the defect's bit vector is as
 long as the draws its own PR completed, so a missing cell shrinks the
 denominator instead of recording misses that were never possible.
 
-To evaluate a candidate skill, run it against the installed one in one sitting:
+To evaluate a candidate skill, run it against the installed one in one sitting.
+Run the installed skill first, then name that run's row as the candidate's
+baseline with `--against`:
 
 ```bash
-pnpm review:eval:run -- --kind full --skill-ref ~/work/review-candidate
+pnpm review:eval:run -- --kind full
+pnpm review:eval:run -- --kind full --skill-ref ~/work/review-candidate \
+  --against 2026-09-08
 ```
 
-That stamps `skill_ref` and `dirty: true` into the ledger row. Never compare a
+`--against` takes a row file path or an `executed_at` prefix and reaches
+`--score`, `--validate` and `--report` alike, so all three read the same
+baseline. Without it the candidate resolves the ledger's stored anchor. That
+stamps `skill_ref` and `dirty: true` into the ledger row. Never compare a
 candidate against a ledger row from three months ago: that comparison silently
 includes an unknown amount of model drift.
 
@@ -244,15 +251,21 @@ may read. Rows with different keys are different series and plot separately.
 | calibration set   | its `sha256` is bound into `comparability_key`                                                |
 | reviewed model    | isolated by the `control` condition; model id and CLI version recorded                        |
 | skill text        | `skill_digest` over `SKILL.md` and `references/**` — this is the treatment                    |
-| `codex-review.sh` | `codex_review_sh_digest`                                                                      |
+| finder command    | `argv` pinned in the contract; `finder_argv_digest` records what a cell spawned               |
 | machine and shell | host, CLI versions, `--setting-sources ""`, clean worktree of `origin/main`                   |
 
 **Judge calibration runs before every scoring pass.** Forty frozen
 `(claim, defect, verdict)` pairs replay through the current judge. Agreement
-under 38/40 marks the run AMBER and excludes it from baseline comparison. It
-costs about $2 and it is the only mechanism that separates "the review skill
-regressed" from "the `claude-opus-5` alias now points at different weights and
-the scorer got stricter".
+under 38/40 marks the run AMBER, excludes the row from baseline comparison, and
+keeps it off the full-run freshness clock. It costs about $2 and it is the only
+mechanism that separates "the review skill regressed" from "the `claude-opus-5`
+alias now points at different weights and the scorer got stricter".
+
+The forty outcomes are written to `calibration.json` in the run's detail
+directory. `--validate` re-derives `agreement` and `total` from them and checks
+each `expected` against the frozen pair, so the gate that caps a run at AMBER is
+evidence on disk rather than two integers the row states about itself. A detail
+directory holding cell results but no `calibration.json` fails validation.
 
 **Model retirement needs a bridge run.** Pinned models get retired and history
 cannot be re-run. When that happens, run the retiring model and its replacement

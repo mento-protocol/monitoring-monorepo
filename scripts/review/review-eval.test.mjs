@@ -6,6 +6,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   cpSync,
   mkdirSync,
@@ -46,6 +47,7 @@ import {
   resolveBaseline,
   revalidateRow,
 } from "./review-eval-result-shape.mjs";
+import { scorerDigest } from "./review-eval-score.mjs";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const scriptPath = fileURLToPath(new URL("./review-eval.mjs", import.meta.url));
@@ -59,7 +61,6 @@ const planEnv = {
   REVIEW_EVAL_CODEX_CLI: "0.48.2",
   REVIEW_EVAL_HOST: "test-host",
   REVIEW_EVAL_SKILL_DIR: path.join(repoRoot, "scripts/review/prompts"),
-  REVIEW_EVAL_CODEX_REVIEW_SH: path.join(repoRoot, contractRelative),
 };
 
 /** A temporary repository root holding only what the CLI reads. */
@@ -141,7 +142,7 @@ function makeRow({
     inputs: {
       skill_digest: "a".repeat(64),
       skill_ref: "installed",
-      codex_review_sh_digest: "b".repeat(64),
+      finder_argv_digest: "b".repeat(64),
       claude_cli: "2.1.14",
       codex_cli: "0.48.2",
       host: "test-host",
@@ -581,8 +582,8 @@ test("a cached cell from another skill or contract is never reused", () => {
   assert.deepEqual(Object.keys(fingerprint).sort(), [
     "claude_cli",
     "codex_cli",
-    "codex_review_sh_digest",
     "contract_digest",
+    "finder_argv_digest",
     "kind",
     "skill_digest",
   ]);
@@ -610,7 +611,7 @@ test("a cached cell from another skill or contract is never reused", () => {
   // A run resumed after a CLI upgrade must re-run its cells: the new row
   // stamps the current versions, so reusing output from the previous binaries
   // would record two runtimes under one provenance.
-  for (const field of ["claude_cli", "codex_cli", "codex_review_sh_digest"]) {
+  for (const field of ["claude_cli", "codex_cli", "finder_argv_digest"]) {
     assert.match(
       decide({ ok: true, fingerprint: { ...fingerprint, [field]: "moved" } })
         .reason,
@@ -1054,6 +1055,132 @@ test("--score refuses a calibration set the plan never hashed", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("buildPlan hashes the calibration set under --root, not its own checkout", () => {
+  const root = makeRoot();
+  try {
+    // `--score` resolves the calibration set under `--root`. Hashing this
+    // module's own checkout instead keys the plan to one set and scores it with
+    // another the moment the two trees differ, which is what the orchestrator's
+    // spec worktree does by design.
+    const underRoot = path.join(
+      root,
+      "docs/evals/review-skill-judge-calibration.json",
+    );
+    const edited = JSON.parse(readFileSync(underRoot, "utf8"));
+    edited.records = edited.records.slice(0, 3);
+    writeFileSync(underRoot, `${JSON.stringify(edited, null, 2)}\n`);
+    const plan = buildPlan({
+      contract,
+      contractDigest,
+      kind: "canary",
+      repoRoot: root,
+      outDir: path.join(root, "plan"),
+      env: planEnv,
+      write: false,
+    });
+    assert.equal(
+      plan.calibration_digest,
+      createHash("sha256").update(readFileSync(underRoot)).digest("hex"),
+    );
+    assert.notEqual(
+      plan.calibration_digest,
+      createHash("sha256")
+        .update(
+          readFileSync(
+            path.join(
+              repoRoot,
+              "docs/evals/review-skill-judge-calibration.json",
+            ),
+          ),
+        )
+        .digest("hex"),
+    );
+    // The key moves with it, so a row planned under one set never pairs with a
+    // row planned under another.
+    assert.notEqual(
+      plan.comparability_key,
+      comparabilityKey({ contract, contractDigest }),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--score refuses a plan whose scorer changed after planning", () => {
+  const root = makeRoot();
+  try {
+    const planDir = path.join(root, "plan");
+    mkdirSync(planDir, { recursive: true });
+    const plan = buildPlan({
+      contract,
+      contractDigest,
+      kind: "canary",
+      repoRoot: root,
+      outDir: planDir,
+      env: planEnv,
+      write: false,
+    });
+    // The recheck must accept an untouched plan: it recomputes the key exactly
+    // as `buildPlan` derived it, so a mismatch means the spec really moved.
+    assert.equal(plan.matcher_digest, scorerDigest());
+    assert.equal(
+      plan.comparability_key,
+      comparabilityKey({
+        contract,
+        contractDigest,
+        matcherDigest: scorerDigest(),
+        calibrationDigest: plan.calibration_digest,
+      }),
+    );
+    // A full run takes hours and `--skill-ref` points the spec at the live
+    // checkout, so a scorer module edited mid-run would score these cells with
+    // new code under the planned comparability key.
+    const stale = { ...plan, matcher_digest: "0".repeat(64) };
+    writeFileSync(
+      path.join(planDir, "plan.json"),
+      JSON.stringify(stale, null, 2),
+    );
+    const result = cli(["--score", planDir], { root });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /plan was written against scorer 00000000/);
+
+    // A plan whose scorer digest still matches but whose key does not is
+    // refused too: the key also binds the judge model and the frozen prompts.
+    writeFileSync(
+      path.join(planDir, "plan.json"),
+      JSON.stringify({ ...plan, comparability_key: "1".repeat(64) }, null, 2),
+    );
+    const keyed = cli(["--score", planDir], { root });
+    assert.equal(keyed.status, 1);
+    assert.match(keyed.stderr, /plan carries comparability_key 11111111/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the row records the finder command a cell runs, not an unrun wrapper", () => {
+  const plan = buildPlan({
+    contract,
+    contractDigest,
+    kind: "full",
+    repoRoot,
+    write: false,
+    env: planEnv,
+  });
+  // `codex_review_sh_digest` recorded `~/.claude/bin/codex-review.sh`, which no
+  // cell ever executes: it claimed a drift control the harness did not have.
+  // The pipeline cells spawn the contract's argv, so that is what is digested.
+  assert.equal(
+    plan.inputs.finder_argv_digest,
+    createHash("sha256")
+      .update(JSON.stringify(contract.sut.finder.argv))
+      .digest("hex"),
+  );
+  assert.ok(!Object.hasOwn(plan.inputs, "codex_review_sh_digest"));
+  const pipeline = plan.cells.find((cell) => cell.condition === "pipeline");
+  assert.deepEqual(pipeline.finder_argv, contract.sut.finder.argv);
 });
 
 test("--schedule-issue stays silent while the ledger is fresh", () => {
@@ -1728,6 +1855,91 @@ test("a PR is zero-finding only when every draw it ran found nothing", async () 
   }
 });
 
+test("--validate re-derives judge_calibration instead of trusting the row", async () => {
+  const root = makeRoot();
+  try {
+    const plan = buildPlan({
+      contract,
+      contractDigest,
+      kind: "canary",
+      repoRoot: root,
+      outDir: path.join(root, "run"),
+      env: planEnv,
+    });
+    for (const cell of plan.cells) {
+      writeCell(plan, cell, {
+        output: "scripts/pr/pr-ready-state-core.mjs:750 is too long.",
+        root,
+      });
+    }
+    const calibrationPath = path.join(
+      root,
+      "docs/evals/review-skill-judge-calibration.json",
+    );
+    const calibrationSet = JSON.parse(readFileSync(calibrationPath, "utf8"));
+    const { exec } = stubExec();
+    const scored = await scorePlan({
+      plan,
+      contract,
+      contractDigest,
+      repoRoot: root,
+      planDir: plan.plan_dir,
+      exec,
+      runGit: stubGit().runGit,
+      calibrationSet,
+    });
+    const outcomesPath = path.join(plan.plan_dir, "calibration.json");
+    const outcomes = JSON.parse(readFileSync(outcomesPath, "utf8"));
+    assert.equal(outcomes.outcomes.length, scored.row.judge_calibration.total);
+    const validate = (row) =>
+      revalidateRow({
+        contract,
+        row,
+        repoRoot: root,
+        detailDir: plan.plan_dir,
+        calibrationSet,
+      });
+    assert.deepEqual(validate(scored.row).problems, []);
+
+    // The gate every other number sits under used to be two integers the row
+    // stated about itself, so a hand-edited row could lift it.
+    const forged = structuredClone(scored.row);
+    forged.judge_calibration = { agreement: 40, total: 40 };
+    const caught = validate(forged);
+    assert.equal(caught.ok, false);
+    assert.ok(
+      caught.problems.some((problem) =>
+        /judge_calibration\.agreement is 40; calibration\.json gives/.test(
+          problem,
+        ),
+      ),
+      JSON.stringify(caught.problems),
+    );
+
+    // Relabelling what the judge was expected to answer is the cheap way to
+    // turn a disagreement into agreement inside the detail file itself.
+    const relabelled = structuredClone(outcomes);
+    relabelled.outcomes[0].expected =
+      relabelled.outcomes[0].expected === "matched" ? "unmatched" : "matched";
+    writeFileSync(outcomesPath, JSON.stringify(relabelled, null, 2));
+    assert.ok(
+      validate(scored.row).problems.some((problem) =>
+        /the frozen pair says/.test(problem),
+      ),
+    );
+
+    // Deleting the file must not buy back the trust it was written to remove.
+    rmSync(outcomesPath);
+    assert.ok(
+      validate(scored.row).problems.some((problem) =>
+        /no calibration\.json/.test(problem),
+      ),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("scoring resets each fixture, uses the contract judge, and totals its cost", async () => {
   const root = makeRoot();
   try {
@@ -1868,6 +2080,43 @@ test("the orchestrator rejects a cell whose finder or report failed", () => {
   // The replay condition's whole treatment is the frozen report; an empty one
   // would hand the model an empty handoff and score that as a review.
   assert.match(script, /frozen finder report \$finder_report is unreadable/);
+});
+
+test("the orchestrator carries one baseline through score, validate and report", () => {
+  const script = readFileSync(
+    path.join(repoRoot, "scripts/review/run-eval.sh"),
+    "utf8",
+  );
+  // The candidate procedure runs the installed skill and the candidate in one
+  // sitting. Without a baseline argument the candidate resolves the ledger's
+  // stored anchor instead, which is the model drift the procedure exists to
+  // exclude. The same argument reaches all three commands so the row, its
+  // revalidation and the PR body cannot disagree about what it was ranked on.
+  assert.match(script, /AGAINST_ARGS=\(--against "\$AGAINST"\)/);
+  const expansion = /"\$\{AGAINST_ARGS\[@\]\+"\$\{AGAINST_ARGS\[@\]\}"\}"/g;
+  assert.equal(script.match(expansion)?.length, 3);
+  for (const mode of ["--score", "--validate", "--report"]) {
+    assert.ok(
+      new RegExp(`${mode}[^\\n]*(\\n[^\\n]*)?\\$\\{AGAINST_ARGS`).test(script),
+      `${mode} does not receive the baseline`,
+    );
+  }
+});
+
+test("the ledger branch names one run, not one day", () => {
+  const script = readFileSync(
+    path.join(repoRoot, "scripts/review/run-eval.sh"),
+    "utf8",
+  );
+  // Two runs finishing on the same UTC day — the installed and candidate pair
+  // the runbook asks for — collided on a date-only branch at `git checkout -b`
+  // or at the push, after the paid run and the ledger append were both done.
+  // The detail directory basename carries date, key, kind and skill digest.
+  assert.match(
+    script,
+    /BRANCH="eval\/review-skill-\$\(basename "\$DETAIL_DIR"\)"/,
+  );
+  assert.doesNotMatch(script, /BRANCH="eval\/review-skill-\$\(date/);
 });
 
 test("the orchestrator snapshots the skill once and refuses a mid-run edit", () => {

@@ -95,7 +95,7 @@ function row(overrides = {}) {
     inputs: {
       skill_digest: "d".repeat(64),
       skill_ref: "origin/main",
-      codex_review_sh_digest: "e".repeat(64),
+      finder_argv_digest: "e".repeat(64),
       claude_cli: "2.1.14",
       codex_cli: "0.48.2",
       host: "chapati-mbp",
@@ -331,6 +331,83 @@ test("verdict applies the pre-registered rule to every branch", () => {
       `${item.name}: expected ${item.reason} in ${JSON.stringify(decision.reasons)}`,
     );
   }
+});
+
+test("a suspected leak is AMBER before any RED condition is read", () => {
+  // Every RED path a leaked run can take: the P1 floor, the wrong-claim
+  // ceiling, and a condition that parsed nothing on two PRs. A run that may
+  // have read the answer key produced evidence the runbook calls untrusted, so
+  // escalating on it is as wrong as passing on it.
+  const leaked = { notes: "leak suspected: transcript names PR 1999" };
+  const cases = [
+    row({
+      ...leaked,
+      conditions: {
+        pipeline: condition({ found: 20, p1Matched: 7, p1Opportunities: 12 }),
+      },
+    }),
+    row({
+      ...leaked,
+      conditions: { pipeline: condition({ found: 20, wrong_claims: 12 }) },
+    }),
+    row({
+      ...leaked,
+      conditions: {
+        pipeline: condition({ found: 20 }),
+        control: condition({ found: 6, zero_finding_prs: 2 }),
+      },
+    }),
+  ];
+  for (const leakedRow of cases) {
+    const decision = verdict({
+      contract,
+      row: leakedRow,
+      baselineRow: baseline(),
+    });
+    assert.equal(decision.verdict, "AMBER", JSON.stringify(decision.reasons));
+    assert.match(decision.reasons.join("\n"), /suspected leak/);
+  }
+  // The same note on a canary, where the grid floor is the RED path.
+  const canary = verdict({
+    contract,
+    row: row({
+      ...leaked,
+      kind: "canary",
+      conditions: { replay: condition({ ids: gridIds, found: 0, draws: 1 }) },
+    }),
+  });
+  assert.equal(canary.verdict, "AMBER", JSON.stringify(canary.reasons));
+  assert.match(canary.reasons.join("\n"), /suspected leak/);
+});
+
+test("an uncalibrated baseline is refused before it ranks anything", () => {
+  // The baseline supplies baseHeadline, every flip, and the wrong-claim
+  // denominator. Below 38/40 those numbers are unusable, so they may not turn a
+  // calibrated candidate RED or PROMOTE.
+  const unusable = baseline({
+    judge_calibration: { agreement: 37, total: 40 },
+  });
+  const regressed = verdict({
+    contract,
+    row: row({ conditions: { pipeline: condition({ found: 14 }) } }),
+    baselineRow: unusable,
+  });
+  assert.equal(regressed.verdict, "AMBER", JSON.stringify(regressed.reasons));
+  assert.match(
+    regressed.reasons.join("\n"),
+    /baseline judge calibration 37\/40 is below 38\/40/,
+  );
+  const promoted = verdict({
+    contract,
+    row: row({ conditions: { pipeline: condition({ found: 26 }) } }),
+    baselineRow: unusable,
+  });
+  assert.equal(promoted.verdict, "AMBER", JSON.stringify(promoted.reasons));
+  // The report reads the same pairing, so it prints no McNemar line either.
+  assert.match(
+    renderReport({ contract, row: row(), baselineRow: unusable, truth }),
+    /No paired baseline comparison for this row\./,
+  );
 });
 
 test("verdict refuses to rank a pair sharing fewer than three defects", () => {

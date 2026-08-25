@@ -37,7 +37,7 @@
       "required": [
         "skill_digest",
         "skill_ref",
-        "codex_review_sh_digest",
+        "finder_argv_digest",
         "claude_cli",
         "codex_cli",
         "host"
@@ -45,7 +45,7 @@
       "properties": {
         "skill_digest": { "$ref": "#/$defs/digest" },
         "skill_ref": { "type": "string", "minLength": 1 },
-        "codex_review_sh_digest": { "$ref": "#/$defs/digest" },
+        "finder_argv_digest": { "$ref": "#/$defs/digest" },
         "claude_cli": { "type": "string", "minLength": 1 },
         "codex_cli": { "type": "string", "minLength": 1 },
         "host": { "type": "string", "minLength": 1 },
