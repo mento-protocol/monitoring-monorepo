@@ -1848,6 +1848,7 @@ if ! /bin/bash -c '
   gate_coordinator_owner_pid="$$"
   gate_coordinator_owner_start="fixture-owner"
   gate_coordinator_owner_subshell="${BASH_SUBSHELL:-0}"
+  source "$support"
   mkdir -p "$gate_lock_root_dir/condemned.d"
   gate_coordinator_is_active() { return 0; }
   gate_lock_token_is_wellformed() { return 0; }
@@ -1874,7 +1875,6 @@ if ! /bin/bash -c '
       *) return 1 ;;
     esac
   }
-  source "$support"
   set +e
   gate_coordinator_recover_stale_obligations >/dev/null 2>&1
   drain_status=$?
@@ -1906,6 +1906,7 @@ if ! /bin/bash -c '
   gate_coordinator_owner_pid="$$"
   gate_coordinator_owner_start="fixture-owner"
   gate_coordinator_owner_subshell="${BASH_SUBSHELL:-0}"
+  source "$support"
   mkdir -p "$gate_lock_root_dir/condemned.d"
   : > "$trace"
   gate_coordinator_is_active() { return 0; }
@@ -1958,7 +1959,6 @@ if ! /bin/bash -c '
       *) return 1 ;;
     esac
   }
-  source "$support"
   gate_coordinator_recover_stale_obligations >/dev/null
   expected="$(printf "%s\n" \
     "drain:fixture-drain-a-1-1" \
@@ -2249,8 +2249,8 @@ STUB
     gate_pid=""
     [[ "$gate_exit" -ne 0 ]] ||
       fail_worker_loss_fixture "a missing parallel worker result must fail the gate"
-    grep -q "parallel worker left an invalid status result" "$gate_output" ||
-      fail_worker_loss_fixture "worker loss did not report an infrastructure result failure"
+    grep -q "parallel worker left an invalid readiness result" "$gate_output" ||
+      fail_worker_loss_fixture "worker loss did not report an invalid readiness result"
     ! grep -qF "✓ ${killed_command} (" "$gate_output" ||
       fail_worker_loss_fixture "the killed worker was reported as successful"
     [[ ! -e "$fixture_repo/.tmp/agent-quality-gate/last-success.stamp" ]] ||
