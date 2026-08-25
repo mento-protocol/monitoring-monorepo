@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Monthly review-skill evaluation. launchd, not cron: a laptop is asleep at
+  10:20 on the 8th about half the time. launchd fires a missed
+  StartCalendarInterval on the next wake; cron drops it silently.
+
+  Install: see "Install the scheduler" in docs/evals/review-skill.md.
+  Edit REPO_PATH below if the checkout is not at the default location.
+-->
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>org.mento.review-eval</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>/bin/zsh</string>
+      <string>-lc</string>
+      <string>/Users/chapati/code/mento/monitoring-monorepo/scripts/review/run-eval.sh --kind auto</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <array>
+      <dict>
+        <key>Day</key>
+        <integer>8</integer>
+        <key>Hour</key>
+        <integer>10</integer>
+        <key>Minute</key>
+        <integer>20</integer>
+      </dict>
+    </array>
+    <key>StandardOutPath</key>
+    <string>/Users/chapati/Library/Logs/mento-review-eval.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/chapati/Library/Logs/mento-review-eval.log</string>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>ProcessType</key>
+    <string>Background</string>
+  </dict>
+</plist>

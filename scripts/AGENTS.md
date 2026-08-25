@@ -94,7 +94,7 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   keys are exact repo-relative paths, reconciled against `findSentrySuites()`
   by set equality both ways. A moved or renamed suite fails the gate closed.
   `sentry/fixture-scan-canary.test.mjs` re-pins four; ADR 0068 has the policy.
-- **Enumerated workflow pins.** 22 of 32 files in
+- **Enumerated workflow pins.** 23 of 33 files in
   `.github/workflows/` pin a `scripts/` path, and `sentry-triage-agent.yml`
   stages an exact copy list at runtime; three Terraform filters instead
   copy the broad `workflowAdmissionPatterns` boundary from

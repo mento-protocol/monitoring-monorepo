@@ -76,6 +76,7 @@ Authority: canonical
 - [`alerts/rules/README.md`](../alerts/rules/README.md)
 - [`docs/deployment.md`](deployment.md)
 - [`docs/evals/documentation-navigation.md`](evals/documentation-navigation.md)
+- [`docs/evals/review-skill.md`](evals/review-skill.md)
 - [`docs/notes/agent-issue-workflow.md`](notes/agent-issue-workflow.md)
 - [`docs/notes/agent-quality-gate-mechanics.md`](notes/agent-quality-gate-mechanics.md)
 - [`docs/notes/codex-agent-skills.md`](notes/codex-agent-skills.md)
@@ -224,6 +225,20 @@ Authority: canonical
 Authority: non-canonical
 
 - [`docs/notes/autoreview-runtime-trust.md`](notes/autoreview-runtime-trust.md)
+
+Authority: unmanaged
+
+- [`docs/evals/review-skill-finder-reports/pr-1990-draw1.md`](evals/review-skill-finder-reports/pr-1990-draw1.md) (unmanaged)
+- [`docs/evals/review-skill-finder-reports/pr-1990-draw2.md`](evals/review-skill-finder-reports/pr-1990-draw2.md) (unmanaged)
+- [`docs/evals/review-skill-finder-reports/pr-1995-draw1.md`](evals/review-skill-finder-reports/pr-1995-draw1.md) (unmanaged)
+- [`docs/evals/review-skill-finder-reports/pr-1995-draw2.md`](evals/review-skill-finder-reports/pr-1995-draw2.md) (unmanaged)
+- [`docs/evals/review-skill-finder-reports/pr-1999-draw1.md`](evals/review-skill-finder-reports/pr-1999-draw1.md) (unmanaged)
+- [`docs/evals/review-skill-finder-reports/pr-1999-draw2.md`](evals/review-skill-finder-reports/pr-1999-draw2.md) (unmanaged)
+- [`scripts/review/prompts/extract-claims.md`](../scripts/review/prompts/extract-claims.md) (unmanaged)
+- [`scripts/review/prompts/handoff.md`](../scripts/review/prompts/handoff.md) (unmanaged)
+- [`scripts/review/prompts/judge-match.md`](../scripts/review/prompts/judge-match.md) (unmanaged)
+- [`scripts/review/prompts/judge-novel.md`](../scripts/review/prompts/judge-novel.md) (unmanaged)
+- [`scripts/review/prompts/request.md`](../scripts/review/prompts/request.md) (unmanaged)
 
 ## notes-plans-archive
 

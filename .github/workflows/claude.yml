@@ -105,12 +105,17 @@ jobs:
     # injected diff could steer the reviewer into posting misleading
     # commentary, which is worse than no review. Codex review and the human
     # merge gate still cover autofix PRs.
+    # Also skip review-skill evaluation PRs (head eval/review-skill-*): their
+    # diff is the scorecard of this same reviewer, so auto-reviewing one lets
+    # the reviewer under test comment on its own measurement. That is circular
+    # and spends a review on a file of committed numbers.
     if: |
       github.event_name == 'pull_request' &&
       github.event.pull_request.draft != true &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.actor != 'dependabot[bot]' &&
-      !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/')
+      !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') &&
+      !startsWith(github.event.pull_request.head.ref, 'eval/review-skill-')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     concurrency:

@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mento.org/schemas/review-skill-result-v1.json",
+  "title": "Review Skill Evaluation Ledger Row",
+  "description": "One line of docs/evals/review-skill-ledger.jsonl. The ledger is append-only: a committed row is never edited. scripts/review/review-eval-ledger.mjs carries the structural validator that enforces this schema without a JSON Schema dependency; the two must stay in step.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "executed_at",
+    "status",
+    "verdict",
+    "comparability_key",
+    "contract_digest",
+    "inputs",
+    "conditions",
+    "judge_calibration",
+    "vs_baseline",
+    "detail_dir",
+    "notes"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "kind": { "type": "string", "enum": ["full", "canary", "bridge"] },
+    "executed_at": { "type": "string", "format": "date-time" },
+    "status": { "type": "string", "enum": ["complete", "partial", "failed"] },
+    "verdict": {
+      "type": "string",
+      "enum": ["GREEN", "AMBER", "RED", "PROMOTE", "INCOMPLETE"]
+    },
+    "comparability_key": { "$ref": "#/$defs/digest" },
+    "contract_digest": { "$ref": "#/$defs/digest" },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "skill_digest",
+        "skill_ref",
+        "codex_review_sh_digest",
+        "claude_cli",
+        "codex_cli",
+        "host"
+      ],
+      "properties": {
+        "skill_digest": { "$ref": "#/$defs/digest" },
+        "skill_ref": { "type": "string", "minLength": 1 },
+        "codex_review_sh_digest": { "$ref": "#/$defs/digest" },
+        "claude_cli": { "type": "string", "minLength": 1 },
+        "codex_cli": { "type": "string", "minLength": 1 },
+        "host": { "type": "string", "minLength": 1 },
+        "dirty": { "type": "boolean" }
+      }
+    },
+    "conditions": {
+      "type": "object",
+      "description": "At least one condition. A full run carries all three; a canary carries replay alone.",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "pipeline": { "$ref": "#/$defs/condition" },
+        "replay": { "$ref": "#/$defs/condition" },
+        "control": { "$ref": "#/$defs/condition" }
+      }
+    },
+    "judge_calibration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agreement", "total"],
+      "properties": {
+        "agreement": { "type": "integer", "minimum": 0 },
+        "total": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "vs_baseline": {
+      "description": "null when the row has no comparable baseline.",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["baseline_executed_at", "mcnemar"],
+          "properties": {
+            "baseline_executed_at": { "type": "string", "format": "date-time" },
+            "baseline_comparability_key": { "$ref": "#/$defs/digest" },
+            "mcnemar": {
+              "description": "null when the baseline carries a different comparability_key: that pair is never ranked.",
+              "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/mcnemar" }]
+            },
+            "control_mcnemar": { "$ref": "#/$defs/mcnemar" }
+          }
+        }
+      ]
+    },
+    "detail_dir": { "type": "string", "minLength": 1 },
+    "notes": { "type": "string" }
+  },
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "mcnemar": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["b", "c", "delta"],
+      "properties": {
+        "b": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Defects found in the baseline and missed now."
+        },
+        "c": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Defects missed in the baseline and found now."
+        },
+        "delta": {
+          "type": "integer",
+          "description": "b - c. Positive is a net regression."
+        }
+      }
+    },
+    "count": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matched", "opportunities", "rate"],
+      "properties": {
+        "matched": { "type": "integer", "minimum": 0 },
+        "opportunities": { "type": "integer", "minimum": 0 },
+        "rate": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "condition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model",
+        "effort",
+        "draws",
+        "recall",
+        "p1",
+        "novel_real",
+        "wrong_claims",
+        "usd",
+        "seconds",
+        "per_defect"
+      ],
+      "properties": {
+        "model": { "type": "string", "minLength": 1 },
+        "effort": { "type": "string", "minLength": 1 },
+        "finder": { "type": "string", "minLength": 1 },
+        "draws": { "type": "integer", "minimum": 1 },
+        "recall": { "$ref": "#/$defs/count" },
+        "p1": { "$ref": "#/$defs/count" },
+        "novel_real": { "type": "integer", "minimum": 0 },
+        "wrong_claims": { "type": "integer", "minimum": 0 },
+        "usd": { "type": "number", "minimum": 0 },
+        "seconds": { "type": "number", "minimum": 0 },
+        "zero_finding_prs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "PRs on which this condition emitted no parseable finding. Absent means zero."
+        },
+        "per_defect": {
+          "type": "object",
+          "description": "Frozen scorable defect id to one found/missed bit per draw its own PR completed. The vector is at most `draws` long, and shorter when that PR ran fewer draws, so a cell that never ran shrinks opportunities instead of recording a miss. Every later comparison reads these committed booleans; no model is re-invoked to compare two runs.",
+          "propertyNames": { "pattern": "^[0-9]+$" },
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "integer", "enum": [0, 1] }
+          }
+        }
+      }
+    }
+  }
+}

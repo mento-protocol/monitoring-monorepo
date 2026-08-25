@@ -1,0 +1,652 @@
+// Scoring for the review-skill evaluation: turn one condition's review
+// transcript into the numbers a ledger row carries. Ported from the
+// benchmark-v2 scorers (`bench2/match_findings.py`, `bench2/judge_novel.py`),
+// keeping their two stages. A cheap structural pass proposes candidate matches
+// on file and line; a blind judge decides whether a candidate is really the
+// same defect. Text overlap alone both over-credits (same file, different bug)
+// and under-credits (same bug, different words), and neither error is
+// acceptable when the point is measuring recall.
+//
+// Every model call goes through an injected `exec` function, so nothing here
+// reaches a model on its own and the tests never call one. `exec` is
+// `async ({ prompt, model, effort }) => string` returning the model's text; a
+// Claude CLI JSON envelope is unwrapped if one arrives. A judge reply that
+// cannot be parsed throws `JudgeOutputError` instead of degrading to "nothing
+// matched": an unparsable judge and a review that found nothing produce the
+// same recall number, and only one of them is a result.
+
+import { createHash } from "node:crypto";
+import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+// Truncations, claim caps, and the line-proximity window are bench2 values.
+// Changing one changes the score, so they move only with `matcher_digest`.
+const MAX_SPLIT_REVIEW_CHARS = 40000;
+const MAX_JUDGE_REVIEW_CHARS = 30000;
+const MAX_CLAIMS = 25;
+const MAX_CLAIM_CHARS = 600;
+const MAX_DETAIL_CHARS = 400;
+const MAX_KNOWN_TITLE_CHARS = 90;
+const LINE_PROXIMITY = 25;
+
+const DEFAULT_JUDGE_MODEL = "claude-opus-5";
+const DEFAULT_JUDGE_EFFORT = "high";
+const NOVEL_JUDGE_TOOLS = ["Read", "Grep", "Glob", "Bash"];
+const NOVEL_JUDGE_MAX_TURNS = 60;
+const DEFAULT_CALIBRATION_CONCURRENCY = 4;
+
+// The match judge, the claim splitter and the calibration replay are blind by
+// construction: bench2 gave them a prompt and nothing else. Ported here that
+// means no tools, one turn, and a working directory that is not the monorepo
+// checkout — `--score` runs from the developer's repo, where the answer key,
+// the truth files and the ledger are all one `cat` away. Only `classifyNovel`
+// keeps tools, and only inside the fixture, exactly as `judge_novel.py` does.
+export const BLIND_JUDGE_TOOLS = [];
+export const BLIND_JUDGE_MAX_TURNS = 1;
+
+export const NOVEL_CLASSES = ["real", "wrong", "vague", "known"];
+export const CALIBRATION_VERDICTS = ["matched", "unmatched"];
+
+// The `.tf`, `.hcl`, `.toml`, and `.tftest.hcl` extensions were missing from
+// the original matcher, so Terraform findings were never candidates at all.
+// Absolute paths are fine here: only the basename is compared.
+const LOCATION_PATTERN =
+  /([\w./-]+\.(?:md|sh|mjs|js|ts|tsx|py|json|ya?ml|tf|hcl|toml|tftest\.hcl))(?::(\d+))?/g;
+
+const MARKUP_PATTERN = /<[^>]+>|[*`]/g;
+const PLACEHOLDER_PATTERN = /\{\{([A-Z_]+)\}\}/g;
+
+const promptDir = fileURLToPath(new URL("./prompts", import.meta.url));
+const scriptPath = fileURLToPath(import.meta.url);
+const promptCache = new Map();
+
+export class JudgeOutputError extends Error {
+  constructor(message, { raw = "", cause } = {}) {
+    super(message, cause ? { cause } : undefined);
+    this.name = "JudgeOutputError";
+    this.raw = String(raw).slice(0, 2000);
+  }
+}
+
+export function loadPrompt(name, { dir = promptDir } = {}) {
+  const key = `${dir}/${name}`;
+  if (!promptCache.has(key)) {
+    promptCache.set(key, readFileSync(path.join(dir, `${name}.md`), "utf8"));
+  }
+  return promptCache.get(key);
+}
+
+export function renderPrompt(template, values) {
+  const rendered = template.replace(PLACEHOLDER_PATTERN, (match, key) =>
+    Object.hasOwn(values, key) ? String(values[key]) : match,
+  );
+  const missing = rendered.match(PLACEHOLDER_PATTERN);
+  if (missing) {
+    throw new Error(`prompt placeholder ${missing[0]} has no value`);
+  }
+  return rendered;
+}
+
+// Digest over the scorer and its prompts. It is the `matcher_digest` half of
+// the ledger's comparability key: a scoring change must break comparison.
+export function scorerDigest({ script = scriptPath, dir = promptDir } = {}) {
+  const hash = createHash("sha256");
+  hash.update(readFileSync(script));
+  for (const file of readdirSync(dir).sort()) {
+    if (!file.endsWith(".md")) continue;
+    hash.update(file);
+    hash.update(readFileSync(path.join(dir, file)));
+  }
+  return hash.digest("hex");
+}
+
+function isObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function basenameOf(value) {
+  return String(value ?? "")
+    .split("/")
+    .pop();
+}
+
+function unwrapExecResult(raw) {
+  const text = typeof raw === "string" ? raw : String(raw ?? "");
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{")) return text;
+  try {
+    const envelope = JSON.parse(trimmed);
+    if (isObject(envelope) && typeof envelope.result === "string") {
+      return envelope.result;
+    }
+  } catch {
+    // Not a CLI envelope. The judge's own JSON is handled below.
+  }
+  return text;
+}
+
+// One repair attempt, and only for damage a model reliably produces: fenced
+// output, trailing commas, and `//` comments. Anything else is a real parse
+// failure and must surface.
+function repairJson(text) {
+  return text
+    .replace(/```[a-z]*\n?/gi, "")
+    .replace(/^\s*\/\/.*$/gm, "")
+    .replace(/,(\s*[}\]])/g, "$1");
+}
+
+function sliceJson(text, shape) {
+  const pattern = shape === "array" ? /\[[\s\S]*\]/ : /\{[\s\S]*\}/;
+  const match = text.match(pattern);
+  return match ? match[0] : null;
+}
+
+export function parseJudgeJson(
+  raw,
+  { shape = "object", label = "judge" } = {},
+) {
+  const text = unwrapExecResult(raw);
+  for (const candidate of [text, repairJson(text)]) {
+    const sliced = sliceJson(candidate, shape);
+    if (!sliced) continue;
+    try {
+      const parsed = JSON.parse(sliced);
+      const shapeOk =
+        shape === "array" ? Array.isArray(parsed) : isObject(parsed);
+      if (shapeOk) return parsed;
+    } catch {
+      // Fall through to the repaired candidate, then to the throw below.
+    }
+  }
+  throw new JudgeOutputError(`${label} returned no parseable JSON ${shape}`, {
+    raw: text,
+  });
+}
+
+let blindCwd = null;
+
+/**
+ * An empty scratch directory for the blind judges. Created once per process
+ * and never written to: it exists so a judge that ignores `allowedTools: []`
+ * still starts nowhere near the repository that holds the answer key.
+ */
+export function blindJudgeCwd() {
+  if (!blindCwd) {
+    blindCwd = mkdtempSync(path.join(tmpdir(), "review-eval-blind-"));
+  }
+  return blindCwd;
+}
+
+function blindRequest({ prompt, model, effort }) {
+  return {
+    prompt,
+    model,
+    effort,
+    cwd: blindJudgeCwd(),
+    allowedTools: BLIND_JUDGE_TOOLS,
+    maxTurns: BLIND_JUDGE_MAX_TURNS,
+  };
+}
+
+async function callJudge(exec, request, label, shape) {
+  if (typeof exec !== "function") {
+    throw new TypeError("exec must be an async function");
+  }
+  let raw;
+  try {
+    raw = await exec(request);
+  } catch (cause) {
+    throw new JudgeOutputError(
+      `${label} call failed: ${cause?.message ?? cause}`,
+      {
+        cause,
+      },
+    );
+  }
+  return parseJudgeJson(raw, { shape, label });
+}
+
+/** file:line and bare-file references in a review's prose. */
+export function mentionedLocations(text) {
+  const found = new Map();
+  for (const match of String(text ?? "").matchAll(LOCATION_PATTERN)) {
+    const file = basenameOf(match[1]);
+    const line = match[2] ? Number(match[2]) : null;
+    found.set(`${file}:${line ?? ""}`, { file, line });
+  }
+  return [...found.values()];
+}
+
+/** Findings whose file is named in the output — the set worth judging. */
+export function structuralCandidates({ truthFindings, output }) {
+  const locations = mentionedLocations(output);
+  const files = new Set(locations.map((location) => location.file));
+  const candidates = [];
+  for (const finding of truthFindings) {
+    const base = basenameOf(finding.path);
+    if (!base) continue;
+    if (!files.has(base)) continue;
+    const lineNear = locations.some(
+      (location) =>
+        location.file === base &&
+        location.line !== null &&
+        Number.isFinite(finding.line) &&
+        Math.abs(location.line - finding.line) <= LINE_PROXIMITY,
+    );
+    candidates.push({ finding, fileHit: true, lineNear });
+  }
+  return candidates;
+}
+
+function defectDetail(finding) {
+  return String(finding.body ?? "")
+    .replace(MARKUP_PATTERN, "")
+    .slice(0, MAX_DETAIL_CHARS)
+    .trim();
+}
+
+function defectBlock(findings) {
+  return findings
+    .map((finding, index) => {
+      const line = finding.line ?? "unknown";
+      return (
+        `${index + 1}. [${finding.severity}] ${finding.path}:${line} — ${finding.title}\n` +
+        `   detail: ${defectDetail(finding)}`
+      );
+    })
+    .join("\n");
+}
+
+function selectScorable(truthFindings, scorableIds) {
+  const wanted = new Set(scorableIds);
+  const selected = truthFindings.filter((finding) => wanted.has(finding.id));
+  if (selected.length !== wanted.size) {
+    const present = new Set(selected.map((finding) => finding.id));
+    const missing = [...wanted].filter((id) => !present.has(id));
+    throw new Error(
+      `truth findings are missing scorable ids: ${missing.join(", ")}`,
+    );
+  }
+  return selected;
+}
+
+/**
+ * Split a review into discrete claims.
+ *
+ * Model-driven on purpose: a regex over headings and bullets scored reviews by
+ * formatting rather than content — one contestant that wrote findings as bold
+ * numbered paragraphs extracted zero claims from a review containing several.
+ */
+export async function extractClaims({
+  transcript,
+  exec,
+  model = DEFAULT_JUDGE_MODEL,
+  effort = DEFAULT_JUDGE_EFFORT,
+}) {
+  const review = String(transcript ?? "");
+  if (!review.trim()) return [];
+  const prompt = renderPrompt(loadPrompt("extract-claims"), {
+    REVIEW: review.slice(0, MAX_SPLIT_REVIEW_CHARS),
+  });
+  const parsed = await callJudge(
+    exec,
+    blindRequest({ prompt, model, effort }),
+    "claim extraction",
+    "array",
+  );
+  return parsed
+    .map((claim) => String(claim).slice(0, MAX_CLAIM_CHARS))
+    .filter((claim) => claim.trim().length > 0)
+    .slice(0, MAX_CLAIMS);
+}
+
+/**
+ * Judge the review against the frozen scorable defects.
+ *
+ * `transcript` is the review text when the caller still holds it; that is what
+ * bench2 judged. Without it the extracted claims stand in for the review.
+ */
+export async function matchClaims({
+  claims,
+  truthFindings,
+  scorableIds,
+  exec,
+  transcript,
+  model = DEFAULT_JUDGE_MODEL,
+  effort = DEFAULT_JUDGE_EFFORT,
+}) {
+  const scorable = selectScorable(truthFindings, scorableIds);
+  const review = String(transcript ?? "").trim()
+    ? String(transcript)
+    : (claims ?? []).join("\n");
+  const candidates = structuralCandidates({
+    truthFindings: scorable,
+    output: review,
+  });
+  const shape = candidates.map((candidate, index) => ({
+    index: index + 1,
+    id: candidate.finding.id,
+    path: candidate.finding.path,
+    line: candidate.finding.line ?? null,
+    severity: candidate.finding.severity,
+    title: candidate.finding.title,
+    lineNear: candidate.lineNear,
+  }));
+  if (candidates.length === 0) {
+    return { matchedIds: [], judgeReasoning: {}, candidates: shape };
+  }
+  const prompt = renderPrompt(loadPrompt("judge-match"), {
+    DEFECTS: defectBlock(candidates.map((candidate) => candidate.finding)),
+    REVIEW: review.slice(0, MAX_JUDGE_REVIEW_CHARS),
+  });
+  const parsed = await callJudge(
+    exec,
+    blindRequest({ prompt, model, effort }),
+    "match judge",
+    "object",
+  );
+  const matches = Array.isArray(parsed.matches) ? parsed.matches : [];
+  const matchedIds = [
+    ...new Set(
+      matches
+        .map((entry) => Number(entry))
+        .filter(
+          (entry) =>
+            Number.isInteger(entry) && entry >= 1 && entry <= candidates.length,
+        )
+        .map((entry) => candidates[entry - 1].finding.id),
+    ),
+  ].sort((a, b) => a - b);
+  // bench2 keyed reasoning by candidate index, which is meaningless once the
+  // candidate list is gone. Key it by defect id so a ledger detail file stays
+  // readable on its own.
+  const reasoning = isObject(parsed.reasoning) ? parsed.reasoning : {};
+  const judgeReasoning = {};
+  for (const [key, why] of Object.entries(reasoning)) {
+    const index = Number(key);
+    if (!Number.isInteger(index) || index < 1 || index > candidates.length)
+      continue;
+    judgeReasoning[String(candidates[index - 1].finding.id)] = String(why);
+  }
+  return { matchedIds, judgeReasoning, candidates: shape };
+}
+
+/**
+ * Second pass: judge claims that fall OUTSIDE the ground-truth set. Recall
+ * alone can only measure agreement with four CI bots. It scores a real defect
+ * they missed as zero, and scores a confident hallucination as zero too — the
+ * same number for opposite outcomes. This pass separates them by making a blind
+ * judge verify each extra claim against the actual code.
+ */
+export async function classifyNovel({
+  claims,
+  matchedIds = [],
+  truthFindings,
+  exec,
+  fixturePath = "",
+  model = DEFAULT_JUDGE_MODEL,
+  effort = DEFAULT_JUDGE_EFFORT,
+}) {
+  const list = (claims ?? []).filter(
+    (claim) => String(claim).trim().length > 0,
+  );
+  const counts = { real: 0, wrong: 0, vague: 0, known: 0, unknown: 0 };
+  const summary = (verdicts) => ({
+    claims: list.length,
+    novelReal: counts.real,
+    novelWrong: counts.wrong,
+    novelVague: counts.vague,
+    restatedKnown: counts.known,
+    unknownClass: counts.unknown,
+    alreadyMatched: matchedIds.length,
+    verdicts,
+  });
+  if (list.length === 0) return summary({});
+  // `judge_novel.py` builds the known list from the acted-on findings alone.
+  // A finding the author never acted on is not scored anywhere, so listing it
+  // here turns a reviewer that correctly raised it into `restatedKnown` — a
+  // bucket the ledger drops — instead of `novel_real`.
+  const known = truthFindings
+    .filter((finding) => finding.acted_on === true)
+    .map(
+      (finding) =>
+        `- ${finding.path}:${finding.line ?? "unknown"} ` +
+        `${String(finding.title ?? "").slice(0, MAX_KNOWN_TITLE_CHARS)}`,
+    )
+    .join("\n");
+  const prompt = renderPrompt(loadPrompt("judge-novel"), {
+    FIXTURE: fixturePath,
+    CLAIMS: list.map((claim, index) => `${index + 1}. ${claim}`).join("\n"),
+    KNOWN: known,
+  });
+  const parsed = await callJudge(
+    exec,
+    {
+      prompt,
+      model,
+      effort,
+      cwd: fixturePath,
+      allowedTools: NOVEL_JUDGE_TOOLS,
+      maxTurns: NOVEL_JUDGE_MAX_TURNS,
+    },
+    "novel judge",
+    "object",
+  );
+  if (!isObject(parsed.verdicts)) {
+    throw new JudgeOutputError("novel judge returned no verdicts object", {
+      raw: JSON.stringify(parsed).slice(0, 2000),
+    });
+  }
+  for (const verdict of Object.values(parsed.verdicts)) {
+    const cls = isObject(verdict) ? verdict.class : undefined;
+    if (NOVEL_CLASSES.includes(cls)) counts[cls] += 1;
+    else counts.unknown += 1;
+  }
+  return summary(parsed.verdicts);
+}
+
+/**
+ * Fold k draws of one condition into the ledger's per-defect bit vectors.
+ *
+ * `per_defect` is what makes every later comparison deterministic: McNemar runs
+ * on committed booleans, so no model is re-invoked to compare two months.
+ */
+export function aggregateDraws({ scorableIds, p1Ids = [], draws }) {
+  if (!Array.isArray(draws) || draws.length === 0) {
+    throw new Error("aggregateDraws needs at least one draw");
+  }
+  const p1 = new Set(p1Ids);
+  // A draw may declare the defect ids it covered. A defect whose PR never ran
+  // that draw gets no bit at all, so its bit vector is as long as the number of
+  // draws its own PR completed and `opportunities` shrinks instead of `matched`.
+  const covered = draws.map((draw) =>
+    Array.isArray(draw) || !Array.isArray(draw.scorableIds)
+      ? null
+      : new Set(draw.scorableIds.map(String)),
+  );
+  const perDefect = {};
+  for (const id of scorableIds) {
+    perDefect[String(id)] = draws
+      .filter(
+        (_draw, index) => !covered[index] || covered[index].has(String(id)),
+      )
+      .map((draw) => (new Set(draw.matchedIds ?? draw).has(id) ? 1 : 0));
+  }
+  const bucket = (ids) => {
+    const matched = ids.reduce(
+      (total, id) => total + perDefect[String(id)].reduce((a, b) => a + b, 0),
+      0,
+    );
+    const opportunities = ids.reduce(
+      (total, id) => total + perDefect[String(id)].length,
+      0,
+    );
+    const rate =
+      opportunities === 0 ? null : Number((matched / opportunities).toFixed(3));
+    return { matched, opportunities, rate };
+  };
+  return {
+    draws: draws.length,
+    recall: bucket(scorableIds),
+    p1: bucket(scorableIds.filter((id) => p1.has(id))),
+    per_defect: perDefect,
+  };
+}
+
+export function validateCalibrationSet(doc) {
+  const problems = [];
+  const check = (ok, message) => {
+    if (!ok) problems.push(message);
+  };
+  if (!isObject(doc)) {
+    return { ok: false, problems: ["calibration set must be an object"] };
+  }
+  check(doc.schema_version === 1, "schema_version must be 1");
+  check(
+    typeof doc.provenance === "string" &&
+      doc.provenance.includes("not human audits"),
+    "provenance must state that the labels are the frozen judge's decisions",
+  );
+  check(
+    isObject(doc.judge) && typeof doc.judge.model === "string",
+    "judge.model must be a string",
+  );
+  if (!Array.isArray(doc.records)) {
+    return { ok: false, problems: [...problems, "records must be an array"] };
+  }
+  const records = doc.records;
+  check(
+    records.length === 40,
+    `records must hold 40 pairs, found ${records.length}`,
+  );
+  const ids = new Set();
+  const tally = { matched: 0, unmatched: 0 };
+  for (const [index, record] of records.entries()) {
+    const at = `records[${index}]`;
+    if (!isObject(record)) {
+      problems.push(`${at} must be an object`);
+      continue;
+    }
+    const id = record.record_id;
+    check(
+      typeof id === "string" && id.length > 0 && !ids.has(id),
+      `${at}.record_id must be a unique non-empty string`,
+    );
+    ids.add(id);
+    if (CALIBRATION_VERDICTS.includes(record.expected_verdict)) {
+      tally[record.expected_verdict] += 1;
+    } else {
+      problems.push(`${at}.expected_verdict must be matched or unmatched`);
+    }
+    check(
+      typeof record.claim_excerpt === "string" &&
+        record.claim_excerpt.trim().length >= 50,
+      `${at}.claim_excerpt must be a review excerpt`,
+    );
+    check(
+      typeof record.frozen_reasoning === "string" &&
+        record.frozen_reasoning.length > 0,
+      `${at}.frozen_reasoning must record why the frozen judge decided`,
+    );
+    check(
+      Number.isSafeInteger(record.defect_id),
+      `${at}.defect_id must be an integer`,
+    );
+    check(
+      isObject(record.source_cell) &&
+        Number.isSafeInteger(record.source_cell.pr),
+      `${at}.source_cell.pr must be an integer`,
+    );
+    if (!isObject(record.defect)) {
+      problems.push(`${at}.defect must be an object`);
+      continue;
+    }
+    check(
+      record.defect.id === record.defect_id,
+      `${at}.defect.id must equal defect_id`,
+    );
+    for (const key of ["severity", "path", "title", "detail"]) {
+      check(
+        typeof record.defect[key] === "string",
+        `${at}.defect.${key} must be a string`,
+      );
+    }
+  }
+  check(
+    records.length !== 40 || Math.abs(tally.matched - tally.unmatched) <= 4,
+    `records must be roughly balanced, found ${tally.matched} matched / ${tally.unmatched} unmatched`,
+  );
+  return { ok: problems.length === 0, problems };
+}
+
+async function mapWithConcurrency(items, limit, worker) {
+  const results = new Array(items.length);
+  let next = 0;
+  const runners = Array.from(
+    { length: Math.min(limit, items.length) },
+    async () => {
+      while (next < items.length) {
+        const index = next;
+        next += 1;
+        results[index] = await worker(items[index], index);
+      }
+    },
+  );
+  await Promise.all(runners);
+  return results;
+}
+
+/**
+ * Replay the frozen calibration pairs through the current judge. This is the
+ * only check that separates "the review skill regressed" from "the judge alias
+ * now points at different weights and got stricter".
+ */
+export async function runCalibration({
+  calibrationSet,
+  exec,
+  model = DEFAULT_JUDGE_MODEL,
+  effort = DEFAULT_JUDGE_EFFORT,
+  concurrency = DEFAULT_CALIBRATION_CONCURRENCY,
+}) {
+  const records = Array.isArray(calibrationSet)
+    ? calibrationSet
+    : (calibrationSet?.records ?? []);
+  if (records.length === 0) throw new Error("calibration set is empty");
+  const outcomes = await mapWithConcurrency(
+    records,
+    Math.max(1, concurrency),
+    async (record) => {
+      const prompt = renderPrompt(loadPrompt("judge-match"), {
+        DEFECTS: defectBlock([record.defect]),
+        REVIEW: String(record.claim_excerpt).slice(0, MAX_JUDGE_REVIEW_CHARS),
+      });
+      const parsed = await callJudge(
+        exec,
+        blindRequest({ prompt, model, effort }),
+        `calibration ${record.record_id}`,
+        "object",
+      );
+      const matches = Array.isArray(parsed.matches) ? parsed.matches : [];
+      const actual = matches.map(Number).includes(1) ? "matched" : "unmatched";
+      return {
+        record_id: record.record_id,
+        defect_id: record.defect_id,
+        expected: record.expected_verdict,
+        actual,
+        reasoning: isObject(parsed.reasoning)
+          ? String(parsed.reasoning["1"] ?? "")
+          : "",
+      };
+    },
+  );
+  const disagreements = outcomes.filter(
+    (outcome) => outcome.actual !== outcome.expected,
+  );
+  return {
+    agreement: outcomes.length - disagreements.length,
+    total: outcomes.length,
+    disagreements,
+  };
+}
