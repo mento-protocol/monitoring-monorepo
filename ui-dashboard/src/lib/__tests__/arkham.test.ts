@@ -52,6 +52,19 @@ function makeArkhamResponse(
   return out;
 }
 
+/**
+ * Strip `tags` from every chain entry. Production responses have carried
+ * `populatedTags` and no `tags` field since 2026-08 — omitting the key is the
+ * point of the fixture, so it can't be expressed as `tags: undefined` under
+ * `exactOptionalPropertyTypes`.
+ */
+function withoutLegacyTags(
+  response: Record<string, ArkhamEnrichedAddress>,
+): Record<string, ArkhamEnrichedAddress> {
+  for (const perChain of Object.values(response)) delete perChain.tags;
+  return response;
+}
+
 type MockFetchEntry =
   | { status: number; body?: unknown; ok?: boolean }
   | ((url: string, init: RequestInit) => Promise<Response> | Response);
@@ -217,6 +230,70 @@ describe("toAddressEntry", () => {
       (t) => t === "exchange",
     ).length;
     expect(occurrences).toBe(1);
+  });
+
+  // Arkham replaced `tags[].slug` with `populatedTags[].id` in 2026-08. Both
+  // shapes stay covered: the new one is what production returns, the legacy
+  // one keeps working if Arkham re-adds the field.
+  it("reads tags from populatedTags[].id (current Arkham shape)", () => {
+    const entry = toAddressEntry(
+      withoutLegacyTags(
+        makeArkhamResponse({
+          arkhamLabel: {
+            name: "Binance 14",
+            address: "0xabc",
+            chainType: "evm",
+          },
+          populatedTags: [
+            { id: "cex", label: "CEX", rank: 1 },
+            { id: "whale", label: "Whale", rank: 2 },
+          ],
+        }),
+      ),
+    );
+    expect(entry?.tags).toContain("cex");
+    expect(entry?.tags).toContain("whale");
+  });
+
+  it("reads tags from legacy tags[].slug when populatedTags is absent", () => {
+    const entry = toAddressEntry(
+      makeArkhamResponse({
+        arkhamLabel: { name: "Binance 14", address: "0xabc", chainType: "evm" },
+        tags: [{ id: "t1", name: "CEX", slug: "cex" }],
+      }),
+    );
+    expect(entry?.tags).toContain("cex");
+  });
+
+  it("unions both tag shapes and dedups the overlap", () => {
+    const entry = toAddressEntry(
+      makeArkhamResponse({
+        arkhamLabel: { name: "Binance 14", address: "0xabc", chainType: "evm" },
+        tags: [{ id: "t1", name: "CEX", slug: "cex" }],
+        populatedTags: [
+          { id: "cex", label: "CEX" },
+          { id: "bridge", label: "Bridge" },
+        ],
+      }),
+    );
+    expect(entry?.tags).toContain("bridge");
+    expect((entry?.tags ?? []).filter((t) => t === "cex")).toHaveLength(1);
+  });
+
+  it("ignores populatedTags entries with an empty id", () => {
+    const entry = toAddressEntry(
+      withoutLegacyTags(
+        makeArkhamResponse({
+          arkhamLabel: {
+            name: "Binance 14",
+            address: "0xabc",
+            chainType: "evm",
+          },
+          populatedTags: [{ id: "", label: "Nameless" }, { id: "cex" }],
+        }),
+      ),
+    );
+    expect(entry?.tags).toEqual(["cex"]);
   });
 
   it("flags ML-only labels with a confidence note", () => {

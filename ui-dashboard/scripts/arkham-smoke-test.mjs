@@ -88,10 +88,23 @@ async function main() {
   let label;
   let entity;
   let topPred;
+  // Tag shapes: `populatedTags[].id` is current (2026-08); `tags[].slug` is the
+  // field it replaced. Read both so the readout shows which one arrived.
+  const tagSet = new Set();
+  let populatedTagCount = 0;
+  let legacyTagCount = 0;
   for (const perChain of Object.values(data)) {
     const trimmed = perChain.arkhamLabel?.name?.trim();
     if (!label && trimmed) label = trimmed;
     if (!entity && perChain.arkhamEntity?.name) entity = perChain.arkhamEntity;
+    for (const t of perChain.populatedTags ?? []) {
+      populatedTagCount++;
+      if (t.id) tagSet.add(t.id);
+    }
+    for (const t of perChain.tags ?? []) {
+      legacyTagCount++;
+      if (t.slug) tagSet.add(t.slug);
+    }
     for (const p of perChain.entityPredictions ?? []) {
       if (p.confidence < HIGH_CONFIDENCE) continue;
       if (!topPred || p.confidence > topPred.confidence) topPred = p;
@@ -101,6 +114,10 @@ async function main() {
   console.log("\n→ Quality gate:");
   console.log(`  arkhamLabel: ${label ?? "(none)"}`);
   console.log(`  arkhamEntity: ${entity?.name ?? "(none)"}`);
+  console.log(
+    `  tags: ${tagSet.size === 0 ? "(none)" : Array.from(tagSet).join(", ")}` +
+      ` [populatedTags=${populatedTagCount} legacy tags=${legacyTagCount}]`,
+  );
   console.log(
     `  top prediction: ${topPred?.entityId ?? "(none)"} @ ${
       topPred ? `${(topPred.confidence * 100).toFixed(0)}%` : "—"
