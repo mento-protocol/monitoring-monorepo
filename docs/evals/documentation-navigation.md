@@ -166,9 +166,9 @@ The 32 KiB reserve is an authoring margin, not extra model context. Do not raise
 the 262,000-byte cap to absorb normal documentation growth. Restore the reserve
 by routing questions through narrower canonical sources that still contain the
 required answer, and keep deeper authority as an accepted alternative when it
-remains valid. The first enforcement pass applied that rule to the two largest
-single-question selections: package-script refusal and PR readiness now share
-the PR operating card as their narrow route. Run
+remains valid. Package-script refusal and PR readiness use the quick-command
+reference as their narrow route. The quality-gate mechanics, readiness guide,
+and PR operating card remain accepted deeper authorities. Run
 `pnpm docs:navigation-eval -- --check-fixtures --json` to inspect the selected
 floor, required reserve, and remaining surplus.
 
