@@ -1284,6 +1284,14 @@ function resolveTrustedCommand(command, rejectRoot, { required = true } = {}) {
 function applyDefaultEngineFallback(args, repo) {
   if (args.engineExplicit || args.engine !== "codex") return;
   if (resolveTrustedCommand("codex", repo, { required: false })) return;
+  if (process.env[commandOverrideVariable("codex")]) {
+    // trustedCommandCandidates() already treats an explicit binary override as
+    // authoritative -- a typo must surface as its own error rather than
+    // silently reviving whatever the PATH offers. Falling back to claude here
+    // would defeat that contract by swapping engines out from under a caller
+    // who named a specific codex binary, so surface codex's own error instead.
+    throw new Error(unavailableCommandMessage("codex"));
+  }
   if (!resolveTrustedCommand("claude", repo, { required: false })) {
     throw new Error(
       `neither codex nor claude CLI is available. ${unavailableCommandMessage("codex")} ${unavailableCommandMessage("claude")}`,

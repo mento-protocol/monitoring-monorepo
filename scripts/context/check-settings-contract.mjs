@@ -105,22 +105,10 @@ const allowedClaudeOtherBashPermissions = new Set([
   "Bash(ESLINT_BASELINE_MAIN=* node *)",
 ]);
 
-// Read-only inspection commands with no mutation surface: they cannot write,
-// delete, or execute other programs on their own, so a wildcard allow here
-// does not open a command-specific policy bypass the way a wildcard deploy or
-// script invocation would. Reviewed and admitted deliberately, not implied by
-// the other categories above.
-const allowedClaudeReadOnlyBashPermissions = new Set([
-  "Bash(ls:*)",
-  "Bash(stat:*)",
-  "Bash(test:*)",
-]);
-
 const allowedClaudeBashPermissions = new Set([
   ...allowedClaudeBashScriptPermissions,
   ...allowedClaudeSagPermissions,
   ...allowedClaudeOtherBashPermissions,
-  ...allowedClaudeReadOnlyBashPermissions,
 ]);
 
 // Root `scripts/` and package-local `<package>/scripts/` both count: the React

@@ -2310,6 +2310,69 @@ run_engine_default_fallback_neither_available_regression() {
   expect_stdout_not_contains "autoreview clean"
 }
 
+# An explicit AUTOREVIEW_CODEX_BIN override is authoritative per
+# trustedCommandCandidates(): a typo or missing path must surface as its own
+# error, never silently swap the caller onto claude even when claude is
+# reachable. The implicit-engine default fallback used to treat "codex not
+# found" as one undifferentiated case and fell back regardless of whether the
+# caller had explicitly pinned a (broken) codex binary.
+run_engine_default_fallback_explicit_codex_bin_override_regression() {
+  local review_repo="$tmp_dir/engine-default-fallback-codex-bin-override"
+  local fake_bin="$tmp_dir/engine-default-fallback-codex-bin-override-bin"
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  printf 'change\n' >>"$review_repo/README.md"
+
+  mkdir "$fake_bin"
+  cat >"$fake_bin/claude" <<'CLAUDE'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  cat >/dev/null
+  printf '2.1.210\n'
+  exit 0
+fi
+if [[ "${1:-}" == "--help" ]]; then
+  cat >/dev/null
+  printf '%s\n' --safe-mode --setting-sources --strict-mcp-config --disallowedTools --tools
+  exit 0
+fi
+cat >/dev/null
+cat <<'JSON'
+{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"clean","overall_confidence":0.9}
+JSON
+CLAUDE
+  chmod +x "$fake_bin/claude"
+
+  : >"$stdout"
+  : >"$stderr"
+  local status=0
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=$fake_bin:$hermetic_git_bin" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "GIT_CONFIG_GLOBAL=/dev/null" \
+      "AUTOREVIEW_EXTRA_BIN_DIRS=" \
+      "AUTOREVIEW_CODEX_BIN=$tmp_dir/absent-codex-bin-override" \
+      "$node_bin" "$repo_root/scripts/agent-autoreview.mjs" \
+      --mode local >"$stdout" 2>"$stderr"
+  ) || status=$?
+  if [[ "$status" -eq 0 ]]; then
+    printf 'expected a broken explicit AUTOREVIEW_CODEX_BIN to fail, not fall back to claude\n' >&2
+    exit 1
+  fi
+  expect_stderr_contains \
+    "AUTOREVIEW_CODEX_BIN does not point at a trusted absolute executable"
+  expect_stdout_not_contains "autoreview clean"
+  if grep -Fq "falling back" "$stderr"; then
+    printf 'an explicit AUTOREVIEW_CODEX_BIN override must never fall back silently to claude\nstderr:\n%s\n' \
+      "$(cat "$stderr")" >&2
+    exit 1
+  fi
+}
+
 # Same shell as the regression above -- neither CLI reachable -- but the two
 # modes that never invoke an engine. `--dry-run` only prints the selection, and
 # `--prepare-only` writes review material for a reviewer who runs elsewhere,
@@ -9063,6 +9126,7 @@ run_engine_isolation_family() {
   run_requested_codex_missing_regression
   run_engine_default_fallback_regression
   run_engine_default_fallback_neither_available_regression
+  run_engine_default_fallback_explicit_codex_bin_override_regression
   run_engine_metadata_only_without_cli_regression
   run_engine_clean_target_without_cli_regression
   run_codex_binary_resolution_regression

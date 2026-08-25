@@ -48,10 +48,7 @@
       "Bash(spd-say \"hey, i need your approval in the agent chat\")",
       "Bash(spd-say \"hey, the task finished and needs your attention in the agent chat\")",
       "Bash(ESLINT_BASELINE_MAIN=* node *)",
-      "WebFetch(domain:monitoring.mento.org)",
-      "Bash(ls:*)",
-      "Bash(stat:*)",
-      "Bash(test:*)"
+      "WebFetch(domain:monitoring.mento.org)"
     ],
     "deny": [
       "Read(**/node_modules/**)",
