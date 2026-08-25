@@ -130,7 +130,7 @@ async function claimIssue(options, project, issue, metadata) {
   requireClaimIdField(project);
   if (!isClaimable(issue)) {
     throw new Error(
-      `Issue #${issue.number} is not claimable; expected open agent-ready without agent-active/in-pr`,
+      `Issue #${issue.number} is not claimable; expected open agent-ready without agent-active/in-pr/needs-grooming`,
     );
   }
   const itemId = await transitionIssue(
@@ -147,13 +147,15 @@ async function claimIssue(options, project, issue, metadata) {
   await sleep(CLAIM_SETTLE_MS);
   await verifyClaimOwnership(options, project, itemId, issue, metadata);
   const verified = await getIssue(options, issue.number);
-  if (!labelNames(verified).has("agent-active")) {
-    throw new Error(`Issue #${issue.number} did not retain agent-active`);
-  }
   if (
-    labelNames(verified).has("agent-ready") ||
-    labelNames(verified).has("in-pr")
+    String(verified.state ?? "").toUpperCase() !== "OPEN" ||
+    !labelNames(verified).has("agent-active")
   ) {
+    throw new Error(
+      `Issue #${issue.number} did not retain agent-active on an open issue`,
+    );
+  }
+  if (!isReviewable(verified)) {
     throw new Error(`Issue #${issue.number} has conflicting state labels`);
   }
   await commentOnIssue(

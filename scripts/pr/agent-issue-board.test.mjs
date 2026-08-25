@@ -722,6 +722,217 @@ test("sync restores retry labels when a late Done projection fails", async () =>
   ]);
 });
 
+test("sync retries transient retry-label recovery failures", async () => {
+  const listedIssue = {
+    number: 941,
+    title: "transient retry-label recovery",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+    projectItems: [],
+  };
+  let currentIssue = listedIssue;
+  let recovering = false;
+  let recoveryReads = 0;
+  let addCalls = 0;
+  let waits = 0;
+
+  await assertRejects(
+    () =>
+      sync(
+        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+        {
+          getProject: async () => ({ id: "project" }),
+          listIssuesByLabels: async (_options, labels, { state }) =>
+            labels.includes("in-pr") && state === "all" ? [listedIssue] : [],
+          getIssue: async () => {
+            if (recovering && recoveryReads++ === 0) {
+              throw new Error("transient recovery read failure");
+            }
+            return currentIssue;
+          },
+          findIssueProjectItem: async (_options, issue) =>
+            issue.projectItems[0]?.id ?? null,
+          updateProjectFields: async () => {
+            recovering = true;
+            throw new Error("late Done projection failed");
+          },
+          editIssueLabels: async (_options, _issue, state) => {
+            if (state !== "done") return;
+            currentIssue = {
+              ...currentIssue,
+              labels: [],
+              projectItems: [{ id: "item-941", project: { id: "project" } }],
+            };
+          },
+          addIssueLabels: async (_options, _issue, labels) => {
+            addCalls += 1;
+            if (addCalls === 1) {
+              throw new Error("retry-label add failed before mutation");
+            }
+            currentIssue = {
+              ...currentIssue,
+              labels: labels.map((name) => ({ name })),
+            };
+            throw new Error("ambiguous retry-label add failure");
+          },
+          sleep: async () => {
+            waits += 1;
+          },
+        },
+      ),
+    /late Done projection failed/,
+  );
+
+  assertEqual(recoveryReads, 5, "bounded recovery reads");
+  assertEqual(addCalls, 2, "bounded recovery label additions");
+  assertEqual(waits, 2, "bounded recovery waits");
+  assertDeepEqual(currentIssue.labels, [{ name: "in-pr" }]);
+});
+
+test("sync quarantines stale queue evidence after late Done failure", async () => {
+  const listedIssue = {
+    number: 942,
+    title: "stale enumerated retry label",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+    projectItems: [],
+  };
+  let currentIssue = { ...listedIssue, labels: [] };
+  let firstEnumeration = true;
+  let failLateDone = true;
+  let projectState = "review";
+  const restoredLabels = [];
+
+  const dependencies = {
+    getProject: async () => ({ id: "project" }),
+    listIssuesByLabels: async (_options, labels, { state }) => {
+      if (state !== "all") return [];
+      if (firstEnumeration) {
+        firstEnumeration = false;
+        return [listedIssue];
+      }
+      return currentIssue.labels.some((label) => labels.includes(label.name))
+        ? [currentIssue]
+        : [];
+    },
+    getIssue: async () => currentIssue,
+    findIssueProjectItem: async (_options, issue) =>
+      issue.projectItems[0]?.id ?? null,
+    updateProjectFields: async (_options, _project, _item, state) => {
+      if (failLateDone) throw new Error("late Done projection failed");
+      projectState = state;
+    },
+    editIssueLabels: async (_options, _issue, state) => {
+      if (state !== "done") return;
+      currentIssue = {
+        ...currentIssue,
+        labels: [],
+        projectItems: [{ id: "item-942", project: { id: "project" } }],
+      };
+    },
+    addIssueLabels: async (_options, issue, labels) => {
+      assertDeepEqual(issue.labels, [], "stale recovery snapshot");
+      restoredLabels.push(...labels);
+      currentIssue = {
+        ...currentIssue,
+        state: "OPEN",
+        labels: labels.map((name) => ({ name })),
+      };
+    },
+    sleep: async () => {
+      throw new Error("an immediately restored stale label must not wait");
+    },
+  };
+
+  await assertRejects(
+    () =>
+      sync(
+        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+        dependencies,
+      ),
+    /late Done projection failed/,
+  );
+  assertDeepEqual(restoredLabels, ["needs-grooming"]);
+  assertDeepEqual(currentIssue.labels, [{ name: "needs-grooming" }]);
+  assertEqual(isClaimable(currentIssue), false, "stale retry claimability");
+  assertEqual(isReviewable(currentIssue), false, "stale retry reviewability");
+  assertEqual(isReleasable(currentIssue), false, "stale retry releasability");
+
+  failLateDone = false;
+  currentIssue = { ...currentIssue, state: "CLOSED" };
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    dependencies,
+  );
+
+  assertEqual(projectState, "done", "retried stale Project state");
+  assertDeepEqual(currentIssue.labels, []);
+  assertDeepEqual(results, [
+    { number: 942, title: "stale enumerated retry label", state: "done" },
+  ]);
+});
+
+test("sync preserves a pre-existing quarantine conflict", async () => {
+  const listedIssue = {
+    number: 943,
+    title: "label-less reopen during historical recovery",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+    projectItems: [],
+  };
+  let currentIssue = { ...listedIssue, labels: [] };
+  let addCalls = 0;
+
+  await assertRejects(
+    () =>
+      sync(
+        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+        {
+          getProject: async () => ({ id: "project" }),
+          listIssuesByLabels: async (_options, labels, { state }) =>
+            labels.includes("in-pr") && state === "all" ? [listedIssue] : [],
+          getIssue: async () => currentIssue,
+          findIssueProjectItem: async (_options, issue) =>
+            issue.projectItems[0]?.id ?? null,
+          updateProjectFields: async () => {
+            currentIssue = {
+              ...currentIssue,
+              state: "OPEN",
+              labels: [{ name: "needs-grooming" }, { name: "agent-ready" }],
+            };
+            throw new Error("late Done projection failed");
+          },
+          editIssueLabels: async (_options, _issue, state) => {
+            if (state === "done") {
+              currentIssue = {
+                ...currentIssue,
+                labels: [],
+                projectItems: [{ id: "item-943", project: { id: "project" } }],
+              };
+            }
+          },
+          addIssueLabels: async () => {
+            addCalls += 1;
+          },
+          sleep: async () => {
+            throw new Error("same-label compensation must not wait");
+          },
+        },
+      ),
+    /late Done projection failed/,
+  );
+
+  assertEqual(addCalls, 0, "historical restore attempts");
+  assertDeepEqual(currentIssue.state, "OPEN");
+  assertDeepEqual(currentIssue.labels, [
+    { name: "needs-grooming" },
+    { name: "agent-ready" },
+  ]);
+  assertEqual(isClaimable(currentIssue), false, "conflict claimability");
+  assertEqual(isReviewable(currentIssue), false, "conflict reviewability");
+  assertEqual(isReleasable(currentIssue), false, "conflict releasability");
+});
+
 test("sync preserves a concurrent retry label after late Done failure", async () => {
   const listedIssue = {
     number: 939,
@@ -745,23 +956,35 @@ test("sync preserves a concurrent retry label after late Done failure", async ()
           findIssueProjectItem: async (_options, issue) =>
             issue.projectItems[0]?.id ?? null,
           updateProjectFields: async () => {
-            currentIssue = {
-              ...currentIssue,
-              state: "OPEN",
-              labels: [{ name: "agent-active" }],
-            };
             throw new Error("late Done projection failed");
           },
           editIssueLabels: async (_options, _issue, state) => {
-            if (state !== "done") return;
+            if (state === "done") {
+              currentIssue = {
+                ...currentIssue,
+                labels: [],
+                projectItems: [{ id: "item-939", project: { id: "project" } }],
+              };
+            }
+            if (state === "active") {
+              currentIssue = {
+                ...currentIssue,
+                state: "OPEN",
+                labels: [{ name: "agent-active" }],
+              };
+            }
+          },
+          addIssueLabels: async (_options, issue, labels) => {
+            assertDeepEqual(issue.labels, [], "pre-add retry snapshot");
+            addCalls += 1;
             currentIssue = {
               ...currentIssue,
-              labels: [],
-              projectItems: [{ id: "item-939", project: { id: "project" } }],
+              state: "OPEN",
+              labels: [
+                ...labels.map((name) => ({ name })),
+                { name: "agent-active" },
+              ],
             };
-          },
-          addIssueLabels: async () => {
-            addCalls += 1;
           },
           sleep: async () => {},
         },
@@ -769,7 +992,7 @@ test("sync preserves a concurrent retry label after late Done failure", async ()
     /late Done projection failed/,
   );
 
-  assertEqual(addCalls, 0, "concurrent queue label restore calls");
+  assertEqual(addCalls, 1, "add-only retry-label restoration call");
   assertDeepEqual(currentIssue.labels, [{ name: "agent-active" }]);
 });
 
@@ -1647,6 +1870,13 @@ test("claim guard only accepts open agent-ready issues", () => {
   );
   assertEqual(
     isClaimable({
+      state: "OPEN",
+      labels: [{ name: "agent-ready" }, { name: "needs-grooming" }],
+    }),
+    false,
+  );
+  assertEqual(
+    isClaimable({
       state: "CLOSED",
       labels: [{ name: "agent-ready" }],
     }),
@@ -1666,6 +1896,13 @@ test("review guard only accepts open agent-active issues", () => {
     isReviewable({
       state: "OPEN",
       labels: [{ name: "agent-ready" }],
+    }),
+    false,
+  );
+  assertEqual(
+    isReviewable({
+      state: "OPEN",
+      labels: [{ name: "agent-active" }, { name: "needs-grooming" }],
     }),
     false,
   );

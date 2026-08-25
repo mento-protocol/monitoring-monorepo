@@ -63,6 +63,35 @@ function queueLabelsFromIssue(issue) {
   return ISSUE_STATE_LABELS.filter((label) => labels.has(label));
 }
 
+function nearestQueueLabels(...issues) {
+  for (const issue of issues) {
+    const queueLabels = queueLabelsFromIssue(issue);
+    if (queueLabels.length > 0) return queueLabels;
+  }
+  return [];
+}
+
+function retryQueueSnapshotForCloseout(
+  closeoutIssue,
+  initialIssue,
+  listedIssue,
+) {
+  const closeoutQueueLabels = queueLabelsFromIssue(closeoutIssue);
+  if (closeoutQueueLabels.length > 0) {
+    return { labels: closeoutQueueLabels, compensateAfterAdd: true };
+  }
+
+  // Stale queue evidence needs a visible state that cannot grant review or
+  // release authority if the issue reopens during recovery.
+  return {
+    labels:
+      nearestQueueLabels(initialIssue, listedIssue).length > 0
+        ? labelsForState("grooming").addLabels
+        : [],
+    compensateAfterAdd: false,
+  };
+}
+
 function hasExactQueueLabels(issue, state) {
   const expected = labelsForState(state).addLabels;
   const actual = queueLabelsFromIssue(issue);
@@ -152,36 +181,95 @@ async function compensateProvisionalQueueLabel(
   return { issue: currentIssue, provisionalQueueLabel };
 }
 
-async function preserveRetryQueueLabels(
+async function reconcileRetryQueueObservation(
   options,
   issue,
   retryQueueLabels,
   operations,
 ) {
-  let verified = await operations.getIssue(options, issue.number);
-  if (queueLabelsFromIssue(verified).length > 0) return verified;
+  let verified = issue;
+  if (
+    retryQueueLabels.length === 1 &&
+    queueLabelsFromIssue(verified).length > 0
+  ) {
+    ({ issue: verified } = await compensateProvisionalQueueLabel(
+      options,
+      verified,
+      retryQueueLabels[0],
+      operations,
+    ));
+  }
+  return verified;
+}
+
+async function preserveRetryQueueLabels(
+  options,
+  issue,
+  retryQueueLabels,
+  compensateAfterAdd,
+  operations,
+) {
   if (retryQueueLabels.length === 0) {
     throw new Error(`Issue #${issue.number} has no queue label to restore`);
   }
 
-  await operations.addIssueLabels(options, verified, retryQueueLabels);
+  let lastError = null;
+  let addAttempted = false;
   for (let attempt = 1; attempt <= SYNC_VERIFY_ATTEMPTS; attempt += 1) {
-    verified = await operations.getIssue(options, issue.number);
-    if (retryQueueLabels.length === 1) {
-      ({ issue: verified } = await compensateProvisionalQueueLabel(
-        options,
-        verified,
-        retryQueueLabels[0],
-        operations,
-      ));
+    let verified;
+    try {
+      verified = await operations.getIssue(options, issue.number);
+      if (addAttempted && compensateAfterAdd) {
+        verified = await reconcileRetryQueueObservation(
+          options,
+          verified,
+          retryQueueLabels,
+          operations,
+        );
+      }
+      if (queueLabelsFromIssue(verified).length > 0) return verified;
+    } catch (error) {
+      lastError = error;
+      if (attempt < SYNC_VERIFY_ATTEMPTS) {
+        await operations.sleep(SYNC_VERIFY_SETTLE_MS);
+      }
+      continue;
     }
-    if (queueLabelsFromIssue(verified).length > 0) return verified;
+
+    let addError = null;
+    addAttempted = true;
+    try {
+      await operations.addIssueLabels(options, verified, retryQueueLabels);
+    } catch (error) {
+      addError = error;
+    }
+
+    try {
+      verified = await operations.getIssue(options, issue.number);
+      if (compensateAfterAdd) {
+        verified = await reconcileRetryQueueObservation(
+          options,
+          verified,
+          retryQueueLabels,
+          operations,
+        );
+      }
+      if (queueLabelsFromIssue(verified).length > 0) return verified;
+      lastError =
+        addError ??
+        new Error(
+          `Issue #${issue.number} still has no queue label after restoration attempt ${attempt}`,
+        );
+    } catch (error) {
+      lastError = error;
+    }
     if (attempt < SYNC_VERIFY_ATTEMPTS) {
       await operations.sleep(SYNC_VERIFY_SETTLE_MS);
     }
   }
   throw new Error(
-    `Issue #${issue.number} has no queue label after retry-label restoration`,
+    `Issue #${issue.number} has no queue label after ${SYNC_VERIFY_ATTEMPTS} retry-label restoration attempts`,
+    { cause: lastError },
   );
 }
 
@@ -212,6 +300,7 @@ export class IssueBoardSyncError extends AggregateError {
 
 async function syncIssue(options, project, listedIssue, operations) {
   let issue = await operations.getIssue(options, listedIssue.number);
+  const initialIssue = issue;
   let drift = null;
   let provisionalQueueLabel = null;
 
@@ -296,7 +385,11 @@ async function syncIssue(options, project, listedIssue, operations) {
       }
 
       const reopenState = restoreStateFromCloseoutIssue(closeoutIssue);
-      const retryQueueLabels = queueLabelsFromIssue(closeoutIssue);
+      const retryQueueSnapshot = retryQueueSnapshotForCloseout(
+        closeoutIssue,
+        initialIssue,
+        listedIssue,
+      );
       await operations.editIssueLabels(options, closeoutIssue, state);
       let verifiedIssue = await verifySyncCloseout(
         options,
@@ -325,7 +418,8 @@ async function syncIssue(options, project, listedIssue, operations) {
             await preserveRetryQueueLabels(
               options,
               verifiedIssue,
-              retryQueueLabels,
+              retryQueueSnapshot.labels,
+              retryQueueSnapshot.compensateAfterAdd,
               operations,
             );
           } catch (retryError) {

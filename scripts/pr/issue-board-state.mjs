@@ -101,7 +101,8 @@ export function isClaimable(issue) {
     issue.state === "OPEN" &&
     labels.has("agent-ready") &&
     !labels.has("agent-active") &&
-    !labels.has("in-pr")
+    !labels.has("in-pr") &&
+    !labels.has("needs-grooming")
   );
 }
 
