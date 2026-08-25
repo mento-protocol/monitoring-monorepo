@@ -11,7 +11,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
 import { fixtureForPr } from "./review-eval-fixtures.mjs";
-import { verdict } from "./review-eval-report.mjs";
+import { judgeCalibrationPasses, verdict } from "./review-eval-report.mjs";
 
 function readJson(file) {
   try {
@@ -111,6 +111,10 @@ export function failedRow({
  * threshold still shows against the score the baseline PR established. The
  * anchor moves only where the runbook says it may — a reviewed PROMOTE row —
  * and the newest such row then becomes the anchor for everything after it.
+ *
+ * A row whose judge calibration failed is never eligible, as anchor or as
+ * re-anchor: the runbook excludes such a row from baseline comparison, and an
+ * anchor is the comparison every later run is paired against.
  */
 export function resolveBaseline({ rows, row }) {
   const eligible = (rows ?? [])
@@ -118,6 +122,7 @@ export function resolveBaseline({ rows, row }) {
       (candidate) =>
         candidate.kind === "full" &&
         candidate.status === "complete" &&
+        judgeCalibrationPasses(candidate) &&
         candidate.comparability_key === row.comparability_key &&
         candidate.executed_at < row.executed_at,
     )
@@ -239,6 +244,22 @@ export function revalidateRow({
     }
     if (!isShape(condition.recall) || !isShape(condition.p1)) {
       problems.push(`${label} is missing recall or p1; nothing to recompute`);
+      continue;
+    }
+    // Every arithmetic below reads these vectors, and the detail comparison
+    // calls `.join()` on them. A scalar or a vector carrying anything but 0 and
+    // 1 is a validation problem to report, not a stack trace that replaces the
+    // problem list `--validate` promises.
+    const malformed = ids.filter(
+      (id) =>
+        !Array.isArray(condition.per_defect[id]) ||
+        condition.per_defect[id].length === 0 ||
+        condition.per_defect[id].some((bit) => bit !== 0 && bit !== 1),
+    );
+    if (malformed.length > 0) {
+      problems.push(
+        `${label}.per_defect must map each defect to a non-empty array of 0/1 bits; ${malformed.length} vector(s) are not, starting at ${malformed[0]}`,
+      );
       continue;
     }
     const bits = ids.flatMap((id) => condition.per_defect[id]);

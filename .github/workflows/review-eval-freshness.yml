@@ -28,6 +28,10 @@ on:
       # directories, and a PR touching only those would skip both checks.
       - docs/evals/review-skill**
       - scripts/review/**
+      # Every step below runs a `review:eval*` alias. A PR that renames or
+      # removes one breaks this workflow's own commands while touching neither
+      # path above, and nothing would notice until the next scheduled run.
+      - package.json
   workflow_dispatch:
 
 permissions: read-all

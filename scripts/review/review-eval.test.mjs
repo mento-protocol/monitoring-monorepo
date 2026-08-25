@@ -227,6 +227,57 @@ test("--check-fixtures --offline passes on the committed contract", () => {
   );
 });
 
+test("--check-fixtures online proves the tags against the remote", () => {
+  const shim = mkdtempSync(path.join(tmpdir(), "review-eval-git-"));
+  try {
+    const log = path.join(shim, "calls.log");
+    // A `git` that answers `ls-remote` from the contract and refuses every
+    // other subcommand. Online mode that quietly resolved the tags in this
+    // checkout would therefore fail here, which is the point: a local tag
+    // still pointing at the pinned commit says nothing about the remote.
+    writeFileSync(
+      path.join(shim, "git"),
+      `#!/usr/bin/env node
+const { appendFileSync, readFileSync } = require("node:fs");
+const args = process.argv.slice(2);
+appendFileSync(${JSON.stringify(log)}, args.join(" ") + "\\n");
+if (args[0] !== "ls-remote") process.exit(1);
+const contract = JSON.parse(readFileSync(${JSON.stringify(path.join(repoRoot, contractRelative))}, "utf8"));
+const ref = String(args[2] || "").replace(/^refs\\/tags\\//, "");
+for (const fixture of contract.fixtures) {
+  const sha =
+    fixture.tag_head === ref
+      ? fixture.first_head
+      : fixture.tag_base === ref
+        ? fixture.base_sha
+        : null;
+  if (sha) {
+    process.stdout.write(sha + "\\trefs/tags/" + ref + "^{}\\n");
+    process.exit(0);
+  }
+}
+process.exit(1);
+`,
+      { mode: 0o755 },
+    );
+    const result = cli(["--check-fixtures", "--json"], {
+      env: { PATH: `${shim}${path.delimiter}${process.env.PATH}` },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.ok, true, JSON.stringify(output.problems));
+    assert.equal(output.offline, false);
+    const calls = readFileSync(log, "utf8").split("\n").filter(Boolean);
+    assert.equal(calls.length, contract.fixtures.length * 2);
+    assert.ok(
+      calls.every((call) => call.startsWith("ls-remote https://github.com/")),
+      calls.join(" | "),
+    );
+  } finally {
+    rmSync(shim, { recursive: true, force: true });
+  }
+});
+
 test("--check-fixtures fails on a tampered truth file", () => {
   const root = makeRoot();
   try {
@@ -528,6 +579,9 @@ test("a cached cell from another skill or contract is never reused", () => {
   });
   const fingerprint = cellFingerprint({ plan });
   assert.deepEqual(Object.keys(fingerprint).sort(), [
+    "claude_cli",
+    "codex_cli",
+    "codex_review_sh_digest",
     "contract_digest",
     "kind",
     "skill_digest",
@@ -553,6 +607,16 @@ test("a cached cell from another skill or contract is never reused", () => {
     }).reason,
     /different contract_digest/,
   );
+  // A run resumed after a CLI upgrade must re-run its cells: the new row
+  // stamps the current versions, so reusing output from the previous binaries
+  // would record two runtimes under one provenance.
+  for (const field of ["claude_cli", "codex_cli", "codex_review_sh_digest"]) {
+    assert.match(
+      decide({ ok: true, fingerprint: { ...fingerprint, [field]: "moved" } })
+        .reason,
+      new RegExp(`different ${field}`),
+    );
+  }
   assert.match(
     cellReuseDecision({ plan, resultPath: path.join(repoRoot, "no-such-cell") })
       .reason,
@@ -907,6 +971,89 @@ test("resolveBaseline anchors on the first full row until a PROMOTE re-anchors",
       .executed_at,
     promoted.executed_at,
   );
+});
+
+test("resolveBaseline refuses a row whose judge calibration failed", () => {
+  // The runbook excludes an under-calibrated row from baseline comparison, and
+  // an anchor is the comparison every later run is paired against: bits a
+  // judge that failed its own replay produced must not become the record.
+  const drifted = {
+    ...makeRow({ executedAt: "2026-09-08T10:00:00Z" }),
+    judge_calibration: { agreement: 37, total: 40 },
+  };
+  const row = makeRow({ executedAt: "2026-12-08T10:00:00Z" });
+  assert.equal(resolveBaseline({ rows: [drifted], row }), null);
+
+  const clean = makeRow({ executedAt: "2026-10-08T10:00:00Z" });
+  assert.equal(
+    resolveBaseline({ rows: [drifted, clean], row }).executed_at,
+    clean.executed_at,
+  );
+  // Nor may it re-anchor as a PROMOTE row.
+  const promoted = {
+    ...makeRow({ executedAt: "2026-11-08T10:00:00Z", verdict: "PROMOTE" }),
+    judge_calibration: { agreement: 30, total: 40 },
+  };
+  assert.equal(
+    resolveBaseline({ rows: [drifted, clean, promoted], row }).executed_at,
+    clean.executed_at,
+  );
+});
+
+test("--validate reports a malformed per_defect vector instead of throwing", () => {
+  const root = makeRoot();
+  try {
+    const rowPath = path.join(root, "row.json");
+    const row = makeRow({ matchedIds: scorableIdsFor([1990]) });
+    const [first] = Object.keys(row.conditions.pipeline.per_defect);
+    // A scalar where a bit vector belongs: `--validate` reads a row file it did
+    // not write, so this is a problem to report, not a `.join is not a
+    // function` stack trace in place of the problem list.
+    row.conditions.pipeline.per_defect[first] = 1;
+    writeFileSync(rowPath, JSON.stringify(row, null, 2));
+    const result = cli(["--validate", rowPath, "--json"], { root });
+    assert.equal(result.status, 1);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.ok, false);
+    assert.ok(
+      output.problems.some((problem) =>
+        /per_defect must map each defect to a non-empty array/.test(problem),
+      ),
+      output.problems.join(" | "),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--score refuses a calibration set the plan never hashed", () => {
+  const root = makeRoot();
+  try {
+    const planDir = path.join(root, "plan");
+    mkdirSync(planDir, { recursive: true });
+    const plan = buildPlan({
+      contract,
+      contractDigest,
+      kind: "canary",
+      repoRoot: root,
+      outDir: planDir,
+      env: planEnv,
+    });
+    assert.match(plan.calibration_digest, /^[0-9a-f]{64}$/);
+    const other = path.join(root, "other-calibration.json");
+    writeFileSync(
+      other,
+      `${readFileSync(path.join(root, "docs/evals/review-skill-judge-calibration.json"), "utf8")} `,
+    );
+    const result = cli(
+      ["--score", planDir, "--calibration", "other-calibration.json"],
+      { root },
+    );
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /plan was written against calibration/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("--schedule-issue stays silent while the ledger is fresh", () => {
@@ -1817,6 +1964,34 @@ test("the freshness workflow watches the frozen input directories", () => {
   // form is what reaches docs/evals/review-skill-truth/ and its siblings.
   assert.match(workflow, /- docs\/evals\/review-skill\*\*/);
   assert.doesNotMatch(workflow, /- docs\/evals\/review-skill\*$/m);
+  // Every step of the job runs a `review:eval*` alias, so a PR that renames or
+  // removes one has to run this workflow.
+  assert.match(workflow, /^ {6}- package\.json$/m);
+  const aliases = [
+    ...new Set(
+      [...workflow.matchAll(/pnpm (review:eval[\w:]*)/g)].map((m) => m[1]),
+    ),
+  ];
+  const scripts = JSON.parse(
+    readFileSync(path.join(repoRoot, "package.json"), "utf8"),
+  ).scripts;
+  for (const alias of aliases) {
+    assert.ok(scripts[alias], `package.json has no ${alias} script`);
+  }
+});
+
+test("a scheduled run refuses a checkout that is not at origin/main", () => {
+  const script = readFileSync(
+    path.join(repoRoot, "scripts/review/run-eval.sh"),
+    "utf8",
+  );
+  // The spec worktree pins the contract, but the ledger, the baseline it
+  // resolves and the PR commands come from the checkout launchd fires in. A
+  // feature branch there would score against the wrong anchor and offer to
+  // commit the row on top of unrelated work.
+  assert.match(script, /rev-parse origin\/main/);
+  assert.match(script, /not origin\/main/);
+  assert.match(script, /has uncommitted changes/);
 });
 
 test("the launchd template carries placeholders the runbook install step rewrites", () => {

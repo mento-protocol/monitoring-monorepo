@@ -573,12 +573,13 @@ function daysSince(instant, now) {
   return Math.floor((now.valueOf() - instant.valueOf()) / MS_PER_DAY);
 }
 
-function newestInstant(rows, predicate) {
+function newestInstant(rows, predicate, notAfter = null) {
   let newest = null;
   for (const row of rows) {
     if (!predicate(row)) continue;
     const instant = parseInstant(row.executed_at);
     if (!instant) continue;
+    if (notAfter && instant > notAfter) continue;
     if (!newest || instant > newest) newest = instant;
   }
   return newest;
@@ -621,10 +622,20 @@ export function freshness({
   );
   const excludedRows = (rows ?? []).length - eligible.length;
 
-  const lastAny = newestInstant(eligible, () => true);
+  // A row dated after `now` never ages: it would hold every clock below zero
+  // until that date arrives, so a skewed machine clock or a hand-edited
+  // `executed_at` could keep the guard green for as long as the forger liked.
+  // Future rows are counted and named instead of being allowed to run a clock.
+  const futureRows = eligible.filter((row) => {
+    const instant = parseInstant(row?.executed_at);
+    return Boolean(instant) && instant > evaluatedAt;
+  }).length;
+
+  const lastAny = newestInstant(eligible, () => true, evaluatedAt);
   const lastComplete = newestInstant(
     eligible,
     (row) => row.status === "complete",
+    evaluatedAt,
   );
   // A failed or partial full run verified nothing: it is a trace that the
   // harness ran, not a score. The baseline is "the first full, complete row"
@@ -635,9 +646,15 @@ export function freshness({
   const lastFull = newestInstant(
     eligible,
     (row) => row.kind === "full" && row.status === "complete",
+    evaluatedAt,
   );
 
   const reasons = [];
+  if (futureRows > 0) {
+    reasons.push(
+      `${futureRows} row(s) are dated after the evaluation time and were ignored by every freshness clock`,
+    );
+  }
   if (!lastAny) {
     reasons.push(
       `no ledger row for the current contract; counting from established_at ${contract.established_at}`,
@@ -686,5 +703,6 @@ export function freshness({
     evaluatedAt: evaluatedAt.toISOString(),
     contractDigest,
     excludedRows,
+    futureRows,
   };
 }

@@ -116,7 +116,12 @@ pnpm review:eval:run -- --kind full               # the quarterly score of recor
 
 `run-eval.sh` adds a detached worktree of `origin/main` and reads the contract,
 truth, prompts and scorer from there, so a dirty working tree cannot change
-what is measured. The skill under test is snapshotted once, before the first
+what is measured. The ledger, the baseline it resolves and the branch the PR
+commands cut still come from the checkout the script runs in, so a run without
+`--skill-ref` refuses to start unless that checkout is at `origin/main` with an
+unmodified ledger — on a feature branch it would plan against a ledger missing
+newer rows and offer to commit the row on top of unrelated work. The scheduled
+launchd job runs the same code path. The skill under test is snapshotted once, before the first
 cell, and every cell stages from that snapshot: the plan records one skill
 digest for the whole matrix, and two hours is long enough to edit the installed
 skill under a running evaluation. A snapshot that no longer matches the planned
@@ -125,7 +130,8 @@ cell writes its own resumable output directory, and a failed cell is never
 cached — a finder that exits non-zero fails its cell even when it wrote a
 partial report, because a truncated review cached is a permanent zero-recall
 score. A cached cell is reused only when its stored
-fingerprint — skill digest, kind, contract digest — matches the current run,
+fingerprint — skill digest, kind, contract digest, the two CLI versions and the
+`codex-review.sh` digest — matches the current run,
 and the run directory carries the kind and the skill digest in its name, so an
 aborted run followed by a skill edit re-runs instead of scoring the old skill
 under the new digest. The run stops at a six-hour deadline and reports a
@@ -249,12 +255,27 @@ regressed" from "the `claude-opus-5` alias now points at different weights and
 the scorer got stricter".
 
 **Model retirement needs a bridge run.** Pinned models get retired and history
-cannot be re-run. When that happens, run old and new model on the same day, on
-the same machine, both `kind: full`, and append one row with `kind: "bridge"`
-recording both scores and the delta. Then re-anchor the baseline to the new
-model. Never swap a model and keep comparing against the old baseline. A judge
-retirement follows the same procedure, and a human re-audits the calibration
-set before the new judge's labels are trusted.
+cannot be re-run. When that happens, run the retiring model and its replacement
+on the same day and on the same machine, both `kind: full`. The model lives in
+the contract, so each of those is an ordinary full run against its own
+`comparability_key`.
+
+The bridge row is assembled by hand from the newer of the two runs: copy its
+`row.json`, set `kind` to `"bridge"`, and record the retiring run's
+`executed_at`, its `comparability_key`, and the McNemar delta between the two
+in `vs_baseline`. `--validate ROW --detail-dir RUNDIR --append` re-derives
+every recorded number from the run detail before appending, but it does not
+recompute the `vs_baseline` of a hand-assembled row, so the reviewer of the
+ledger PR checks those two numbers against the two run reports. Then re-anchor
+the baseline to the new model. Never swap a model and keep comparing against
+the old baseline. A judge retirement follows the same procedure, and a human
+re-audits the calibration set before the new judge's labels are trusted.
+
+No CLI mode plans a bridge run: `--kind` accepts `full` and `canary`, and
+`buildPlan` refuses anything else. What the harness contributes is the row's
+standing — `bridge` is a valid ledger kind, and both `--report` and
+`--score --against` pair a bridge row across two comparability keys where every
+other row is refused.
 
 ## Establish the baseline
 

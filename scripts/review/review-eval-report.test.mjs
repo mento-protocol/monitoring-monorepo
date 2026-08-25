@@ -435,6 +435,137 @@ test("canary rows only pass or fail, and never rank", () => {
   );
 });
 
+test("a judge below its calibration floor gates every score verdict", () => {
+  const drifted = { agreement: 37, total: 40 };
+  // The judge produced the matched ids, so a floor breach it reported is not
+  // evidence either. The run is AMBER and unusable, never RED and never GREEN.
+  const belowP1 = verdict({
+    contract,
+    row: row({
+      judge_calibration: drifted,
+      conditions: {
+        pipeline: condition({ found: 20, p1Matched: 7, p1Opportunities: 12 }),
+      },
+    }),
+    baselineRow: baseline(),
+  });
+  assert.equal(belowP1.verdict, "AMBER");
+  assert.ok(
+    belowP1.reasons.some((reason) => /below 38\/40/.test(reason)),
+    belowP1.reasons.join(" | "),
+  );
+  assert.ok(!belowP1.reasons.some((reason) => /p1_recall_floor/.test(reason)));
+
+  // A paired gain that would otherwise promote is held at AMBER too.
+  assert.equal(
+    verdict({
+      contract,
+      row: row({
+        judge_calibration: drifted,
+        conditions: { pipeline: condition({ found: 26 }) },
+      }),
+      baselineRow: baseline(),
+    }).verdict,
+    "AMBER",
+  );
+
+  // A canary is a floor test read by the same judge.
+  const canary = verdict({
+    contract,
+    row: row({
+      kind: "canary",
+      judge_calibration: drifted,
+      conditions: {
+        replay: condition({
+          ids: gridIds,
+          found: 8,
+          draws: 1,
+          p1Matched: 4,
+          p1Opportunities: 6,
+        }),
+      },
+    }),
+  });
+  assert.equal(canary.verdict, "AMBER");
+  assert.match(canary.reasons[0], /below 38\/40/);
+
+  // A failed run is still INCOMPLETE: it has no matrix for a judge to read.
+  assert.equal(
+    verdict({
+      contract,
+      row: row({
+        status: "failed",
+        judge_calibration: { agreement: 0, total: 1 },
+        notes: "codex CLI unauthenticated",
+      }),
+    }).verdict,
+    "INCOMPLETE",
+  );
+});
+
+test("a regression the control moved with is AMBER, not RED", () => {
+  const moved = {
+    row: row({
+      conditions: {
+        pipeline: condition({ found: 14 }),
+        control: condition({ found: 4, draws: 1 }),
+      },
+    }),
+    baselineRow: baseline({
+      conditions: {
+        pipeline: condition({ found: 20 }),
+        control: condition({ found: 10, draws: 1 }),
+      },
+    }),
+  };
+  // Six net flips is the RED line, and the control fell by six as well: the
+  // model moved with the pipeline, so the loss is not attributable to the
+  // skill. The attribution check has to run before RED is returned, not after.
+  const decision = verdict({ contract, ...moved });
+  assert.equal(decision.verdict, "AMBER");
+  assert.ok(
+    decision.reasons.some((reason) => /control moved/.test(reason)),
+    decision.reasons.join(" | "),
+  );
+  assert.ok(
+    decision.reasons.some((reason) => /lost a net 6 defects/.test(reason)),
+    decision.reasons.join(" | "),
+  );
+
+  // The same regression with a steady control stays RED.
+  const steady = verdict({
+    contract,
+    row: row({
+      conditions: {
+        pipeline: condition({ found: 14 }),
+        control: condition({ found: 10, draws: 1 }),
+      },
+    }),
+    baselineRow: baseline({
+      conditions: {
+        pipeline: condition({ found: 20 }),
+        control: condition({ found: 10, draws: 1 }),
+      },
+    }),
+  });
+  assert.equal(steady.verdict, "RED");
+
+  // An absolute floor is a floor whatever the control did.
+  assert.equal(
+    verdict({
+      contract,
+      row: row({
+        conditions: {
+          pipeline: condition({ found: 14, p1Matched: 7, p1Opportunities: 12 }),
+          control: condition({ found: 4, draws: 1 }),
+        },
+      }),
+      baselineRow: moved.baselineRow,
+    }).verdict,
+    "RED",
+  );
+});
+
 test("the report states the verdict, the table, and the defects that flipped", () => {
   const candidate = row({
     verdict: "RED",

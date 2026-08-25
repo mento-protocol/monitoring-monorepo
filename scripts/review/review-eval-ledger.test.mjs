@@ -604,6 +604,33 @@ test("freshness reports the clocks and the rows it excluded", () => {
   assert.equal(result.level, "green");
 });
 
+test("a future-dated row runs no freshness clock", () => {
+  // A complete full row dated a year out would hold every clock below zero
+  // until that date arrives. A skewed machine clock or a hand-edited
+  // `executed_at` must not buy the ledger a year of green.
+  const result = freshness({
+    rows: [
+      row({ executed_at: daysAgo(-365) }),
+      row({ executed_at: daysAgo(200) }),
+    ],
+    contract,
+    now: NOW,
+    contractDigest: DIGEST_A,
+  });
+  assert.equal(result.futureRows, 1);
+  assert.equal(result.daysSinceAny, 200);
+  assert.equal(result.daysSinceComplete, 200);
+  assert.equal(result.daysSinceFull, 200);
+  assert.equal(result.lastFullAt, daysAgo(200));
+  assert.equal(result.level, "red");
+  assert.ok(
+    result.reasons.some((reason) =>
+      /dated after the evaluation time/.test(reason),
+    ),
+    JSON.stringify(result.reasons),
+  );
+});
+
 test("freshness refuses an unusable contract or clock", () => {
   assert.throws(
     () => freshness({ rows: [], contract: { ...contract, cadence_days: {} } }),

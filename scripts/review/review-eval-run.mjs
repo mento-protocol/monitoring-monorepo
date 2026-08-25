@@ -7,7 +7,7 @@
 // Only `scorePlan` reaches a model, and only through the `exec` function it is
 // given. Nothing in this module calls `claude` or `codex` on its own.
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   existsSync,
@@ -77,6 +77,7 @@ const CLAUDE_TOOLS = [
   "TodoWrite",
 ];
 const EXEC_TIMEOUT_MS = 3_600_000;
+const EXEC_MAX_OUTPUT_CHARS = 64 * 1024 * 1024;
 const MIN_VERBATIM_TITLE_WORDS = 6;
 
 export function expandHome(target, home = process.env.HOME ?? "") {
@@ -275,7 +276,12 @@ export function buildPlan({
   if (!["full", "canary"].includes(kind)) {
     throw new Error(`plan kind must be full or canary, not ${kind}`);
   }
-  const key = comparabilityKey({ contract, contractDigest });
+  // The key binds the committed calibration set by content. Recording that
+  // digest in the plan is what lets `--score --calibration PATH` be refused
+  // when it names a different set: the agreement that gates the verdict would
+  // otherwise come from pairs the key never saw.
+  const calibrationDigest = fileDigest(DEFAULT_CALIBRATION_FILE);
+  const key = comparabilityKey({ contract, contractDigest, calibrationDigest });
   const date = now.toISOString().slice(0, 10);
   const inputs = collectInputs({ skillRef, env });
   // The skill under test and the kind are part of the directory name because
@@ -305,6 +311,7 @@ export function buildPlan({
     planned_at: now.toISOString().replace(/\.\d{3}Z$/, "Z"),
     contract_digest: contractDigest,
     matcher_digest: scorerDigest(),
+    calibration_digest: calibrationDigest,
     comparability_key: key,
     judge: { ...contract.judge },
     detail_dir: detailDir,
@@ -424,12 +431,21 @@ export function leakSignals({
  * What a cached cell must have been produced under. The detail directory alone
  * is not enough: an aborted run leaves cells behind, and the next run may carry
  * an edited skill or an edited contract into the same directory.
+ *
+ * The recorded runtime is part of it. An interrupted run resumed after a CLI
+ * upgrade would otherwise reuse cells produced by the previous binaries while
+ * the new row stamps the current versions, which puts two runtimes in one row
+ * under one provenance. `codex_review_sh_digest` is the finder wrapper the
+ * pipeline condition runs, so it moves a recorded number the same way.
  */
 export function cellFingerprint({ plan }) {
   return {
     skill_digest: plan?.inputs?.skill_digest ?? null,
     kind: plan?.kind ?? null,
     contract_digest: plan?.contract_digest ?? null,
+    claude_cli: plan?.inputs?.claude_cli ?? null,
+    codex_cli: plan?.inputs?.codex_cli ?? null,
+    codex_review_sh_digest: plan?.inputs?.codex_review_sh_digest ?? null,
   };
 }
 
@@ -527,7 +543,14 @@ export function scrubbedEnv({
   };
 }
 
-/** The default model call for `--score`: one non-interactive Claude session. */
+/**
+ * The default model call for `--score`: one non-interactive Claude session.
+ *
+ * It spawns asynchronously on purpose. `runCalibration` replays forty frozen
+ * pairs through four workers, and a synchronous spawn blocks the event loop,
+ * so every one of those calls would queue behind the last one and the
+ * configured concurrency would buy nothing.
+ */
 export function claudeExec({
   prompt,
   model,
@@ -555,19 +578,56 @@ export function claudeExec({
     "--max-turns",
     String(maxTurns),
   ];
-  const result = spawnSync("claude", args, {
-    cwd,
-    env,
-    encoding: "utf8",
-    timeout: EXEC_TIMEOUT_MS,
-    maxBuffer: 64 * 1024 * 1024,
+  return new Promise((resolve, reject) => {
+    const child = spawn("claude", args, {
+      cwd,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve(value);
+    };
+    // The same wall clock `spawnSync` enforced, and the same output ceiling: a
+    // judge that never returns must fail its cell, not hold the run open.
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      finish(new Error(`claude did not finish within ${EXEC_TIMEOUT_MS} ms`));
+    }, EXEC_TIMEOUT_MS);
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      if (stdout.length + chunk.length > EXEC_MAX_OUTPUT_CHARS) {
+        child.kill("SIGKILL");
+        finish(
+          new Error(`claude wrote more than ${EXEC_MAX_OUTPUT_CHARS} chars`),
+        );
+        return;
+      }
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr = `${stderr}${chunk}`.slice(-4000);
+    });
+    child.on("error", (error) => {
+      finish(new Error(`claude could not be started: ${error.message}`));
+    });
+    child.on("close", (code, signal) => {
+      if (code === 0) {
+        finish(null, stdout);
+        return;
+      }
+      finish(
+        new Error(`claude exited ${code ?? signal}: ${stderr.slice(-400)}`),
+      );
+    });
   });
-  if (result.status !== 0) {
-    throw new Error(
-      `claude exited ${result.status}: ${String(result.stderr || "").slice(-400)}`,
-    );
-  }
-  return result.stdout;
 }
 
 /**

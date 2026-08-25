@@ -43,6 +43,7 @@ import {
   DEFAULT_CALIBRATION_PATH,
   DEFAULT_LEDGER_PATH,
   DEFAULT_RUNS_DIR,
+  fileDigest,
   planStalenessIssueSync,
   resolveKind,
   scorePlan,
@@ -210,7 +211,8 @@ Options:
   --detail-dir DIR       Run detail to recompute from (--validate); default is
                          the row's own detail_dir under --root
   --row REF              Row to report (default: the newest ledger row)
-  --calibration PATH     Judge calibration set (--score)
+  --calibration PATH     Judge calibration set (--score); refused unless it
+                         digests to the set the plan's key hashed
   --append               Append the validated row to the ledger (--validate)
   --repo OWNER/REPO      Repository for issue scheduling
   --dry-run              Plan issue synchronization without mutating
@@ -396,9 +398,17 @@ async function modeCheckFixtures(options, context) {
     contract: context.contract,
     repoRoot: context.repoRoot,
     offline: options.offline,
-    // The checkout the CLI runs on resolves the eval tags in both modes.
-    // `--offline` forbids the network fallback, not the tag check itself.
-    srcRepo: options.srcRepo ? path.resolve(options.srcRepo) : context.repoRoot,
+    // Offline resolves the eval tags in the local object store, which is the
+    // only store there is without the network. Online is the mode that proves
+    // the tags against the remote the contract names, so it must not fall back
+    // to this checkout: a local tag that still points at the pinned commit
+    // passes while the remote tag has moved or been deleted. An explicit
+    // --src-repo names a clone to resolve from and wins in both modes.
+    srcRepo: options.srcRepo
+      ? path.resolve(options.srcRepo)
+      : options.offline
+        ? context.repoRoot
+        : null,
   });
   printObject(
     {
@@ -487,6 +497,20 @@ async function modeScore(options, context) {
   if (plan.contract_digest !== context.contractDigest) {
     throw new Error(
       `plan was written against contract ${plan.contract_digest.slice(0, 8)}; this contract is ${context.contractDigest.slice(0, 8)}`,
+    );
+  }
+  // The plan's `comparability_key` already hashed a calibration set. Scoring
+  // with a different one would produce an agreement number, and through it a
+  // verdict, from pairs that key never saw, and the row would still be paired
+  // against every default-calibration row. Refuse the mismatch instead.
+  const calibrationFile = path.resolve(
+    context.repoRoot,
+    options.calibrationPath,
+  );
+  const calibrationDigest = fileDigest(calibrationFile);
+  if (plan.calibration_digest !== calibrationDigest) {
+    throw new Error(
+      `plan was written against calibration ${String(plan.calibration_digest).slice(0, 8)}; ${calibrationFile} digests to ${calibrationDigest.slice(0, 8)}`,
     );
   }
   const rows = readLedger(path.resolve(context.repoRoot, options.ledgerPath));

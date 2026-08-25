@@ -154,6 +154,21 @@ if [[ -n $SKILL_REF ]]; then
   log "candidate run: spec is the current checkout, skill is $SKILL_REF"
 else
   git -C "$REPO" fetch origin --tags --quiet
+  # The spec worktree pins the contract at origin/main, but the ledger, the
+  # baseline it resolves, and the branch the PR commands cut all come from this
+  # checkout. On a feature branch or behind origin/main the scheduled run would
+  # plan against a ledger that is missing newer rows, score against the wrong
+  # anchor, and offer to commit the row on top of unrelated work. Refuse before
+  # a cell spends anything; the operator's own runs use --skill-ref.
+  HEAD_SHA="$(git -C "$REPO" rev-parse HEAD)"
+  MAIN_SHA="$(git -C "$REPO" rev-parse origin/main)"
+  if [[ $HEAD_SHA != "$MAIN_SHA" ]]; then
+    fail "the checkout at $REPO is at ${HEAD_SHA:0:8}, not origin/main (${MAIN_SHA:0:8}); check out main and pull before a default run, or pass --skill-ref for a candidate run"
+  fi
+  if ! git -C "$REPO" diff --quiet -- "$LEDGER" ||
+    ! git -C "$REPO" diff --cached --quiet -- "$LEDGER"; then
+    fail "$LEDGER has uncommitted changes; a run appends to it, so commit or discard them first"
+  fi
   SPEC="$(mktemp -d "$TMPROOT/review-eval-spec.XXXXXX")"
   rm -rf "$SPEC"
   git -C "$REPO" worktree add --detach "$SPEC" origin/main --quiet

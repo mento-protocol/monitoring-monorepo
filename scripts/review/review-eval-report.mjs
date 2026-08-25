@@ -45,6 +45,31 @@ function isObject(value) {
  */
 const LEAK_NOTE_PATTERN = /leak[ _]suspected/i;
 
+/**
+ * Whether a row's judge calibration is good enough for its numbers to mean
+ * anything. Every recorded bit comes from the judge, so a judge that disagrees
+ * with the frozen pairs more than twice in forty produces a matrix nothing may
+ * rank on. The runbook: agreement under 38/40 marks the run AMBER and excludes
+ * it from baseline comparison.
+ */
+export function judgeCalibrationPasses(row) {
+  const calibration = row?.judge_calibration;
+  if (!isObject(calibration)) return false;
+  const { agreement, total } = calibration;
+  if (!Number.isFinite(agreement) || !Number.isFinite(total) || total <= 0) {
+    return false;
+  }
+  return agreement / total >= CALIBRATION_FLOOR_RATIO;
+}
+
+function calibrationReason(row) {
+  const calibration = row?.judge_calibration;
+  if (!isObject(calibration)) {
+    return "row carries no judge_calibration; the score is not usable evidence";
+  }
+  return `judge calibration ${calibration.agreement}/${calibration.total} is below 38/40`;
+}
+
 /** A rate is null when the condition had no opportunity to score it. */
 function rateText(rate) {
   return rate === null || rate === undefined ? "not measured" : rate.toFixed(3);
@@ -157,6 +182,12 @@ function canaryVerdict({ contract, row }) {
     reasons.push("canary carries no condition");
     return { verdict: "INCOMPLETE", reasons };
   }
+  // A floor test read by a judge that failed its own calibration is not a
+  // floor test. This precedes the floor checks below for the same reason it
+  // precedes RED on a full run: every matched count is the judge's output.
+  if (!judgeCalibrationPasses(row)) {
+    return { verdict: "AMBER", reasons: [calibrationReason(row)] };
+  }
   if (condition.recall.matched < floor) {
     reasons.push(
       `${name} matched ${condition.recall.matched} grid defects, below canary_min_matched_grid ${floor}`,
@@ -181,8 +212,8 @@ function canaryVerdict({ contract, row }) {
 
 /**
  * Apply the pre-registered decision rule to one row. Precedence, highest
- * first: INCOMPLETE for a failed run that has no scored matrix, then RED,
- * AMBER, PROMOTE, GREEN.
+ * first: INCOMPLETE for a failed run that has no scored matrix, then AMBER for
+ * a judge that failed its own calibration, then RED, AMBER, PROMOTE, GREEN.
  */
 export function verdict({ contract, row, baselineRow = null }) {
   if (!isObject(contract?.verdict_rules)) {
@@ -223,12 +254,28 @@ export function verdict({ contract, row, baselineRow = null }) {
     ? flips.ids.length >= (rules.noise_floor_defects ?? 0)
     : false;
 
-  const red = [];
-  if (flips && rankable && flips.delta >= rules.regression_net_flips) {
-    red.push(
-      `${name} lost a net ${flips.delta} defects against the baseline (b=${flips.b}, c=${flips.c}, regression_net_flips ${rules.regression_net_flips})`,
-    );
+  // Calibration gates every number under it. A judge below the floor produced
+  // the matched ids, the recall, the P1 counts and the wrong-claim counts, so
+  // the run is AMBER and unusable rather than GREEN, RED, or PROMOTE.
+  if (!judgeCalibrationPasses(row)) {
+    const notes = [...reasons, calibrationReason(row)];
+    if (row.status !== "complete") notes.push(`run status is ${row.status}`);
+    return { verdict: "AMBER", reasons: notes };
   }
+
+  // The paired regression is the one RED the control condition can explain
+  // away: when control fell with the headline by at least the same threshold,
+  // the model moved and the loss is not attributable to the skill, which the
+  // runbook scores AMBER. The absolute floors below are floors either way, so
+  // they stay RED whatever the control did.
+  const worldMoved = controlMoved({ contract, row, baseline, flips });
+  const regression =
+    flips && rankable && flips.delta >= rules.regression_net_flips
+      ? `${name} lost a net ${flips.delta} defects against the baseline (b=${flips.b}, c=${flips.c}, regression_net_flips ${rules.regression_net_flips})`
+      : null;
+
+  const red = [];
+  if (regression && !worldMoved) red.push(regression);
   if (condition.p1.rate === null || condition.p1.rate === undefined) {
     // Zero P1 opportunities is not zero P1 recall. Say so instead of reading
     // an unmeasured rate as a floor breach.
@@ -266,12 +313,6 @@ export function verdict({ contract, row, baselineRow = null }) {
   if (!pairing.usable && baselineRow) {
     amber.push("row cannot be ranked against the given baseline");
   }
-  const calibration = row.judge_calibration;
-  if (calibration.agreement / calibration.total < CALIBRATION_FLOOR_RATIO) {
-    amber.push(
-      `judge calibration ${calibration.agreement}/${calibration.total} is below 38/40`,
-    );
-  }
   if (LEAK_NOTE_PATTERN.test(row.notes ?? "")) {
     amber.push("notes record a suspected leak; scores are not trusted");
   }
@@ -291,8 +332,10 @@ export function verdict({ contract, row, baselineRow = null }) {
       `${name} recall ${condition.recall.rate.toFixed(3)} is below the baseline ${baseHeadline.recall.rate.toFixed(3)}, but the flip count is inside the noise floor`,
     );
   }
-  const worldMoved = controlMoved({ contract, row, baseline, flips });
-  if (worldMoved) amber.push(worldMoved);
+  if (worldMoved) {
+    amber.push(worldMoved);
+    if (regression) amber.push(regression);
+  }
   if (amber.length)
     return { verdict: "AMBER", reasons: [...reasons, ...amber] };
 
