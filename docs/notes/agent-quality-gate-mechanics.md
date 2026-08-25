@@ -831,12 +831,13 @@ also executes that shell fixture in CI.
 The [PR operating card](pr-operating-card.md#the-loop) owns ordinary gate and
 closeout sequencing. A second `--run` gate no longer needs a convention: the
 run lock above queues it behind the first one, on any worktree. What is still
-yours to avoid is a dashboard server or browser suite you started yourself
-alongside a gate — the lock does not know about those. Browser tests and
-size-limit both run `next build` and can rewrite `next-env.d.ts`; run focused
-checks first, then let one gate own the mapped batch. For a non-trivial batch, freeze the card's scope baseline
-and run autoreview after the gate; after accepted fixes, rerun focused checks
-and autoreview.
+yours to avoid in the same worktree while a full gate is queued or running is
+direct `pnpm` validation, a dashboard server, or a browser suite you started
+yourself — the lock does not know about those. Browser tests and size-limit
+both run `next build` and can rewrite `next-env.d.ts`; run focused checks first,
+then let one gate own the mapped batch. For a non-trivial batch, freeze the
+card's scope baseline and run autoreview after the gate; after accepted fixes,
+rerun focused checks and autoreview.
 
 **Stage timing and capture deadlines.** The wrapper and helper append
 best-effort stage JSONL to `.tmp/agent-autoreview/durations.jsonl`; override

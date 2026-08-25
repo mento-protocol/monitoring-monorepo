@@ -87,11 +87,12 @@ even when you never open an authority.
    deploys and never applies Terraform. It **refuses package-script,
    package-manager, or lockfile changes until their lifecycle risk is reviewed
    and explicitly acknowledged** — do not bypass the refusal; review the surface
-   and pass `--allow-package-script-changes`. Do not run a competing dashboard
-   server or browser suite alongside the gate; a second `--run` gate is handled
-   for you — it takes a machine-wide lock and queues behind the first, naming
-   the holder while it waits. Background the `--run` gate and the `git push`; a
-   600s foreground kill discards the freshness stamp. Authority:
+   and pass `--allow-package-script-changes`. While a full gate is queued or
+   running, do not start direct `pnpm` validation, a dashboard server, or a
+   browser suite in the same worktree. A second `--run` gate takes a
+   machine-wide lock and queues behind the first, naming the holder while it
+   waits. Background the `--run` gate and the `git push`; a 600s foreground
+   kill discards the freshness stamp. Authority:
    [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md).
 
 4. **Autoreview.** Freeze the scope baseline first — the initial request,
@@ -340,7 +341,11 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    present the evidence, then stop and ask. If the merge itself satisfies Done
    means, sync the issue state and workboard afterward per
    [`agent-issue-workflow.md`](agent-issue-workflow.md). If live proof remains,
-   continue to production closeout first.
+   continue to production closeout first. After a partial merge, keep the issue
+   open. Before `issue:release` restores `agent-ready`, update the issue body:
+   mark merged work complete, isolate the remaining acceptance criteria, and
+   restate the current Done means. Use `needs-grooming` instead when the
+   remaining scope is unclear.
 
 9. **Production closeout when required.** When Done means includes deployed or
    live behavior, merge is an intermediate state. Monitor the owning deployment
@@ -364,9 +369,10 @@ These bind regardless of which step you are on:
 - **Package-script, package-manager, and lockfile changes require explicit
   acknowledgement** through the gate; never bypass the refusal.
 - **Background long `--run` gates and pushes**; do not run them in a 600s
-  foreground that a kill would truncate, and do not start a dashboard server or
-  browser suite alongside a gate. A second `--run` gate queues on the gate's own
-  machine-wide lock instead of racing.
+  foreground that a kill would truncate. While a full gate is queued or
+  running, do not start direct `pnpm` validation, a dashboard server, or a
+  browser suite in the same worktree. A second `--run` gate queues on the gate's
+  own machine-wide lock instead of racing.
 - **Secrets are IaC-owned and Terraform apply needs human approval** — plan
   first, never one-off `gh secret set` / `vercel env add` /
   `gcloud secrets versions add`.
