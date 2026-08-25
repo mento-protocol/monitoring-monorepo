@@ -5917,6 +5917,7 @@ assert_contains "Stopping after first failed mapped command (--fail-fast)."
 assert_not_contains "Running quality commands with parallelism 4."
 
 autoreview_progress_repo="$(mktemp -d)"
+autoreview_progress_marker="$autoreview_progress_repo/autoreview-progress-ready"
 (
   cd "$autoreview_progress_repo"
   git init -q
@@ -5930,8 +5931,11 @@ set -euo pipefail
 printf '%s\n' \
   'AUTOREVIEW_TEST_PROGRESS family=target-selection elapsed=1s' \
   'AUTOREVIEW_TEST_PROGRESS family=adapter elapsed=2s'
+: > "${AUTOREVIEW_PROGRESS_MARKER:?}"
 echo 'successful autoreview noise that should stay quiet'
-/bin/sleep 2
+# Keep this command active while the parallel parent settles its two fast
+# siblings, so the next synthetic heartbeat can relay the published progress.
+/bin/sleep 6
 printf '%s\n' \
   'AUTOREVIEW_TEST_TIMING family=target-selection status=ok elapsed=3s' \
   'AUTOREVIEW_TEST_TIMING family=adapter status=ok elapsed=4s'
@@ -5946,11 +5950,16 @@ if [[ "$*" == agent:autoreview:test* ]]; then
   /bin/bash scripts/agent-autoreview.test.sh
 fi
 STUB
-  # Advance the gate's clock by 30 seconds per read so the 20-second heartbeat
-  # can be exercised without adding 20 real seconds to this regression suite.
+  # Keep real time until the child publishes progress. Then advance the gate's
+  # clock by 30 seconds per read so registration cannot consume the only
+  # synthetic heartbeat before the progress lines exist.
   cat > bin/date <<'STUB'
 #!/usr/bin/env bash
 if [[ "$*" != "+%s" ]]; then
+  exec /bin/date "$@"
+fi
+if [[ -n "${AUTOREVIEW_PROGRESS_MARKER:-}" &&
+  ! -e "$AUTOREVIEW_PROGRESS_MARKER" ]]; then
   exec /bin/date "$@"
 fi
 lock_dir="${DATE_COUNTER_FILE:?}.lock"
@@ -5972,7 +5981,9 @@ STUB
   git add .
   git commit -qm init
   printf 'scripts/agent-autoreview.test.sh\n' > changed-paths.txt
-  DATE_COUNTER_FILE="$autoreview_progress_repo/date-counter" \
+  rm -f "$autoreview_progress_marker"
+  AUTOREVIEW_PROGRESS_MARKER="$autoreview_progress_marker" \
+    DATE_COUNTER_FILE="$autoreview_progress_repo/date-counter" \
     PATH="$autoreview_progress_repo/bin:$PATH" \
     "$repo_root/scripts/agent-quality-gate.sh" \
       --changed-paths-file changed-paths.txt \
@@ -5998,7 +6009,9 @@ for sequential_mode in parallel-one fail-fast; do
     # monitor; per-command reuse (issue #1410) would otherwise skip the
     # autoreview test on later runs, so drop the stamps to force re-execution.
     rm -f "$autoreview_progress_repo/.tmp/agent-quality-gate/command-stamps.tsv"
-    DATE_COUNTER_FILE="$autoreview_progress_repo/date-counter" \
+    rm -f "$autoreview_progress_marker"
+    AUTOREVIEW_PROGRESS_MARKER="$autoreview_progress_marker" \
+      DATE_COUNTER_FILE="$autoreview_progress_repo/date-counter" \
       PATH="$autoreview_progress_repo/bin:$PATH" \
       "$repo_root/scripts/agent-quality-gate.sh" \
         --changed-paths-file changed-paths.txt \
