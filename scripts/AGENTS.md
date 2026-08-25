@@ -24,21 +24,19 @@ maintenance utilities.
 [ADR 0064](../docs/adr/0064-scripts-module-directories.md) governs these
 subdirectories.
 
-| Directory       | Holds                                  |
-| --------------- | -------------------------------------- |
-| `deploy/`       | deploy wrappers and their Node helpers |
-| `workflows/`    | scripts backing Actions workflow jobs  |
-| `bootstrap/`    | container and hosted-session setup     |
-| `context/`      | agent context, budget, doc catalog     |
-| `docs/`         | audit planner, garden, navigation eval |
-| `pr/`           | PR and issue state projections         |
-| `supply-chain/` | lockfile, audit, pin, skew gates       |
-| `mcp/`          | MCP broker, launcher, config rendering |
-| `alerts/`       | alert-rule lint, peg-policy checks     |
-| `repo-health/`  | code-health, file-size, lint wrappers  |
-| `terraform/`    | movable Terraform guards and helpers   |
-| `gate/`         | gate routing engine + helpers          |
-| `sentry/`       | triage/autofix/gate/broker/ci-wiring   |
+- `deploy/`: deploy wrappers and their Node helpers
+- `workflows/`: scripts backing Actions workflow jobs
+- `bootstrap/`: container and hosted-session setup
+- `context/`: agent context, budget, doc catalog
+- `docs/`: audit planner, garden, navigation eval
+- `pr/`: PR and issue state projections
+- `supply-chain/`: lockfile, audit, pin, skew gates
+- `mcp/`: MCP broker, launcher, config rendering
+- `alerts/`: alert-rule lint, peg-policy checks
+- `repo-health/`: code-health, file-size, lint wrappers
+- `terraform/`: movable Terraform guards and helpers
+- `gate/`: gate routing engine + helpers
+- `sentry/`: triage/autofix/gate/broker/ci-wiring
 
 `lib/` and `production-infra-identity-contract/` predate the reorganization.
 `.config/wt.toml` and eight docs pin flat `setup.sh`.
