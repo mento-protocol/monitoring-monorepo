@@ -26,7 +26,12 @@ import {
 } from "./issue-board-commands.mjs";
 
 export { parseArgs, parseIssueNumbers } from "./issue-board-cli.mjs";
-export { backfill, buildClaimComment, sync } from "./issue-board-commands.mjs";
+export {
+  backfill,
+  buildClaimComment,
+  IssueBoardSyncError,
+  sync,
+} from "./issue-board-commands.mjs";
 export {
   buildBackfillPlan,
   parseClaimComment,

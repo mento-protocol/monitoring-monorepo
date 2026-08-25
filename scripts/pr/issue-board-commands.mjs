@@ -330,15 +330,13 @@ async function verifySyncCloseout(options, issue, operations) {
     const verified = await operations.getIssue(options, issue.number);
     const verifiedState = String(verified.state ?? "").toUpperCase();
     if (verifiedState !== "CLOSED") {
-      throw new Error(
-        `Issue #${issue.number} changed state during sync: expected CLOSED, got ${verifiedState || "UNKNOWN"}`,
-      );
+      return verified;
     }
     const verifiedLabels = labelNames(verified);
     staleLabels = ISSUE_STATE_LABELS.filter((label) =>
       verifiedLabels.has(label),
     );
-    if (staleLabels.length === 0) return;
+    if (staleLabels.length === 0) return null;
     if (attempt < SYNC_VERIFY_ATTEMPTS) {
       await operations.sleep(SYNC_VERIFY_SETTLE_MS);
     }
@@ -352,6 +350,31 @@ function syncStateFromIssue(issue) {
   const state = stateFromLabels(issue);
   if (state) return state;
   return String(issue.state ?? "").toUpperCase() === "CLOSED" ? "done" : null;
+}
+
+export class IssueBoardSyncError extends AggregateError {
+  constructor(results, failures) {
+    const normalizedFailures = failures.map(({ number, title, error }) => ({
+      number,
+      title,
+      message: error instanceof Error ? error.message : String(error),
+    }));
+    const succeeded = results.map((result) => `#${result.number}`).join(", ");
+    const failed = normalizedFailures
+      .map((failure) => `#${failure.number}: ${failure.message}`)
+      .join("; ");
+    super(
+      failures.map((failure) => failure.error),
+      [
+        `Issue-board sync completed with ${normalizedFailures.length} failure(s) after ${results.length} success(es).`,
+        `Succeeded: ${succeeded || "none"}.`,
+        `Failed: ${failed}.`,
+      ].join("\n"),
+    );
+    this.name = "IssueBoardSyncError";
+    this.results = results;
+    this.failures = normalizedFailures;
+  }
 }
 
 async function syncIssue(options, project, listedIssue, operations) {
@@ -387,11 +410,50 @@ async function syncIssue(options, project, listedIssue, operations) {
           {},
         );
       }
-      await operations.editIssueLabels(options, issue, state);
-      if (!options.dryRun) {
-        await verifySyncCloseout(options, issue, operations);
+      if (options.dryRun) {
+        await operations.editIssueLabels(options, issue, state);
+        return { number: issue.number, title: issue.title, state };
       }
-      return { number: issue.number, title: issue.title, state };
+
+      const closeoutIssue = await operations.getIssue(options, issue.number);
+      const closeoutState = syncStateFromIssue(closeoutIssue);
+      if (closeoutState !== "done") {
+        drift = `done -> ${closeoutState ?? "no queue state"}`;
+        if (attempt < SYNC_RECONCILE_ATTEMPTS) {
+          issue = closeoutIssue;
+          await operations.sleep(SYNC_VERIFY_SETTLE_MS);
+          continue;
+        }
+        break;
+      }
+
+      const reopenState = stateFromLabels({
+        ...closeoutIssue,
+        state: "OPEN",
+      });
+      await operations.editIssueLabels(options, closeoutIssue, state);
+      let reopenedIssue = await verifySyncCloseout(
+        options,
+        closeoutIssue,
+        operations,
+      );
+      if (!reopenedIssue) {
+        return { number: issue.number, title: issue.title, state };
+      }
+
+      let reopenedState = syncStateFromIssue(reopenedIssue);
+      if (!reopenedState && reopenState) {
+        await operations.editIssueLabels(options, reopenedIssue, reopenState);
+        reopenedIssue = await operations.getIssue(options, issue.number);
+        reopenedState = syncStateFromIssue(reopenedIssue);
+      }
+      drift = `done -> ${reopenedState ?? "no queue state"}`;
+      if (attempt < SYNC_RECONCILE_ATTEMPTS) {
+        issue = reopenedIssue;
+        await operations.sleep(SYNC_VERIFY_SETTLE_MS);
+        continue;
+      }
+      break;
     }
 
     const itemId = await operations.ensureProjectItem(options, project, issue);
@@ -444,10 +506,20 @@ export async function sync(options, dependencies = {}) {
   }
 
   const results = [];
+  const failures = [];
   for (const listedIssue of byNumber.values()) {
-    const result = await syncIssue(options, project, listedIssue, operations);
-    if (result) results.push(result);
+    try {
+      const result = await syncIssue(options, project, listedIssue, operations);
+      if (result) results.push(result);
+    } catch (error) {
+      failures.push({
+        number: listedIssue.number,
+        title: listedIssue.title,
+        error,
+      });
+    }
   }
+  if (failures.length > 0) throw new IssueBoardSyncError(results, failures);
   return results;
 }
 

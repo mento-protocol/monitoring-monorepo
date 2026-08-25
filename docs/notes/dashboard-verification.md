@@ -70,12 +70,24 @@ const response = await fetch("/api/...", {
   cache: "no-store",
   credentials: "same-origin",
 });
-({ status: response.status, body: await response.json() });
+const status = response.status;
+const text = await response.text();
+let body = null;
+let parseError = null;
+if (text !== "") {
+  try {
+    body = JSON.parse(text);
+  } catch (error) {
+    parseError = String(error);
+  }
+}
+({ status, text, body, parseError });
 ```
 
-Record the status and the response fields that prove the acceptance criteria.
-Do not inspect cookies or browser storage. Do not use this path for a
-cross-origin request or a mutation.
+Record the status, raw text, and parsed fields that prove the acceptance
+criteria. Record `parseError` when the response is not valid JSON. Do not inspect
+cookies or browser storage. Do not use this path for a cross-origin request or
+a mutation.
 
 For a simulated authenticated session:
 

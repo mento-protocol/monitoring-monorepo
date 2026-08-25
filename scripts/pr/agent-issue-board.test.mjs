@@ -10,6 +10,7 @@ import {
   isReleasable,
   isRecoverableClaimRaceError,
   isReviewable,
+  IssueBoardSyncError,
   ISSUE_STATE_LABELS,
   labelsForState,
   parseArgs,
@@ -425,7 +426,7 @@ test("sync clears every closed queue label without requiring a Project item", as
         );
         const read = (reads.get(number) ?? 0) + 1;
         reads.set(number, read);
-        return read === 1 ? issue : { ...issue, labels: [] };
+        return read <= 2 ? issue : { ...issue, labels: [] };
       },
       sleep: async () => {
         throw new Error("an immediately satisfied postcondition must not wait");
@@ -453,7 +454,7 @@ test("sync clears every closed queue label without requiring a Project item", as
   );
   assertDeepEqual(
     [...reads.values()],
-    ISSUE_STATE_LABELS.map(() => 2),
+    ISSUE_STATE_LABELS.map(() => 3),
   );
 });
 
@@ -486,14 +487,23 @@ test("sync uses refreshed Project visibility before closed-item cleanup", async 
       editIssueLabels: async () => events.push("labels"),
       getIssue: async () => {
         reads += 1;
-        events.push(reads === 1 ? "refresh" : "verify");
-        return reads === 1 ? refreshedIssue : { ...refreshedIssue, labels: [] };
+        events.push(
+          reads === 1 ? "refresh" : reads === 2 ? "pre-cleanup" : "verify",
+        );
+        return reads <= 2 ? refreshedIssue : { ...refreshedIssue, labels: [] };
       },
       sleep: async () => events.push("sleep"),
     },
   );
 
-  assertDeepEqual(events, ["refresh", "find", "project", "labels", "verify"]);
+  assertDeepEqual(events, [
+    "refresh",
+    "find",
+    "project",
+    "pre-cleanup",
+    "labels",
+    "verify",
+  ]);
 });
 
 test("sync reclassifies an issue that reopened after enumeration", async () => {
@@ -536,6 +546,48 @@ test("sync reclassifies an issue that reopened after enumeration", async () => {
   ]);
   assertDeepEqual(updates, ["active"]);
   assertEqual(edits, 0, "reopened issue label edits");
+});
+
+test("sync reclassifies a reopen before the Done label edit", async () => {
+  const closedIssue = {
+    number: 924,
+    title: "reopen before cleanup",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+  };
+  const activeIssue = {
+    ...closedIssue,
+    state: "OPEN",
+    labels: [{ name: "agent-active" }],
+  };
+  const reads = [closedIssue, activeIssue, activeIssue];
+  const updates = [];
+  let edits = 0;
+
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabel: async (_options, label, { state }) =>
+        label === "in-pr" && state === "closed" ? [closedIssue] : [],
+      getIssue: async () => reads.shift(),
+      findIssueProjectItem: async () => null,
+      ensureProjectItem: async () => "item-924",
+      updateProjectFields: async (_options, _project, _item, state) => {
+        updates.push(state);
+      },
+      editIssueLabels: async () => {
+        edits += 1;
+      },
+      sleep: async () => {},
+    },
+  );
+
+  assertDeepEqual(updates, ["active"]);
+  assertEqual(edits, 0, "stale Done label edits");
+  assertDeepEqual(results, [
+    { number: 924, title: "reopen before cleanup", state: "active" },
+  ]);
 });
 
 test("sync reprojects a concurrent claim after an open Project write", async () => {
@@ -617,6 +669,67 @@ test("sync bounds repeated open-state projection drift", async () => {
   assertEqual(waits, 2, "bounded open-state drift waits");
 });
 
+test("sync attempts later issues and reports partial results after a failure", async () => {
+  const failingIssue = {
+    number: 931,
+    title: "failed projection",
+    state: "OPEN",
+    labels: [{ name: "agent-ready" }],
+  };
+  const successfulIssue = {
+    number: 932,
+    title: "successful projection",
+    state: "OPEN",
+    labels: [{ name: "agent-ready" }],
+  };
+  const updates = [];
+  let observed;
+
+  try {
+    await sync(
+      { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+      {
+        getProject: async () => ({ id: "project" }),
+        listIssuesByLabel: async (_options, label, { state }) =>
+          label === "agent-ready" && state === "open"
+            ? [failingIssue, successfulIssue]
+            : [],
+        getIssue: async (_options, number) =>
+          number === failingIssue.number ? failingIssue : successfulIssue,
+        ensureProjectItem: async (_options, _project, issue) =>
+          `item-${issue.number}`,
+        updateProjectFields: async (_options, _project, item) => {
+          updates.push(item);
+          if (item === "item-931") throw new Error("Project write failed");
+        },
+      },
+    );
+  } catch (error) {
+    observed = error;
+  }
+
+  assert(observed instanceof IssueBoardSyncError, "aggregate sync error type");
+  assertDeepEqual(updates, ["item-931", "item-932"]);
+  assertDeepEqual(observed.results, [
+    { number: 932, title: "successful projection", state: "ready" },
+  ]);
+  assertDeepEqual(observed.failures, [
+    {
+      number: 931,
+      title: "failed projection",
+      message: "Project write failed",
+    },
+  ]);
+  assert(
+    observed.message.includes("Succeeded: #932."),
+    "success summary in aggregate error",
+  );
+  assert(
+    observed.message.includes("Failed: #931: Project write failed."),
+    "failure summary in aggregate error",
+  );
+});
+
 test("sync reprojects Done when an issue closes after an open Project write", async () => {
   const reviewIssue = {
     number: 928,
@@ -629,7 +742,7 @@ test("sync reprojects Done when an issue closes after an open Project write", as
     state: "CLOSED",
     labels: [],
   };
-  const reads = [reviewIssue, closedIssue, closedIssue];
+  const reads = [reviewIssue, closedIssue, closedIssue, closedIssue];
   const updates = [];
 
   const results = await sync(
@@ -655,39 +768,55 @@ test("sync reprojects Done when an issue closes after an open Project write", as
   ]);
 });
 
-test("sync fails if a closed issue reopens during Done cleanup", async () => {
-  const issue = {
+test("sync restores queue state when a closed issue reopens during Done cleanup", async () => {
+  const listedIssue = {
     number: 927,
     title: "concurrent reopen",
     state: "CLOSED",
     labels: [{ name: "in-pr" }],
   };
+  let currentIssue = listedIssue;
   let reads = 0;
+  const edits = [];
+  const updates = [];
 
-  await assertRejects(
-    () =>
-      sync(
-        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
-        {
-          getProject: async () => ({ id: "project" }),
-          listIssuesByLabel: async (_options, label, { state }) =>
-            label === "in-pr" && state === "closed" ? [issue] : [],
-          getIssue: async () => {
-            reads += 1;
-            return reads === 1
-              ? issue
-              : { ...issue, state: "OPEN", labels: [] };
-          },
-          findIssueProjectItem: async () => null,
-          editIssueLabels: async () => {},
-          sleep: async () => {
-            throw new Error("a state change must fail without retrying");
-          },
-        },
-      ),
-    /Issue #927 changed state during sync: expected CLOSED, got OPEN/,
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabel: async (_options, label, { state }) =>
+        label === "in-pr" && state === "closed" ? [listedIssue] : [],
+      getIssue: async () => {
+        reads += 1;
+        return currentIssue;
+      },
+      findIssueProjectItem: async () => null,
+      ensureProjectItem: async () => "item-927",
+      updateProjectFields: async (_options, _project, _item, state) => {
+        updates.push(state);
+      },
+      editIssueLabels: async (_options, _issue, state) => {
+        edits.push(state);
+        if (state === "done") {
+          currentIssue = { ...listedIssue, state: "OPEN", labels: [] };
+        } else {
+          currentIssue = {
+            ...listedIssue,
+            state: "OPEN",
+            labels: [{ name: "in-pr" }],
+          };
+        }
+      },
+      sleep: async () => {},
+    },
   );
-  assertEqual(reads, 2, "refresh and postcondition reads");
+
+  assertDeepEqual(edits, ["done", "review"]);
+  assertDeepEqual(updates, ["review"]);
+  assertEqual(reads, 5, "refresh, closeout, restore, and projection reads");
+  assertDeepEqual(results, [
+    { number: 927, title: "concurrent reopen", state: "review" },
+  ]);
 });
 
 test("sync fails when a closed issue retains a queue label", async () => {
