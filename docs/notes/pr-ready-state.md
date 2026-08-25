@@ -399,7 +399,8 @@ Field expectations:
    starting a sixth.
 3. Before invoking the gate, ensure that no direct validation, dashboard server,
    or browser suite is active on the same machine. From invocation until it
-   exits, do not start any of them there. Run
+   exits, do not start any of them there. Use same-machine spare workers only
+   for read-only work. Run
    `pnpm agent:quality-gate --run` once for the batch; it owns test execution.
    Run concurrent validation from a fully hydrated checkout on another machine.
 4. For non-trivial behavioral, workflow, security, data-flow, or UI batches,
