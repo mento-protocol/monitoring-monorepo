@@ -314,6 +314,12 @@ The gate owns the machine while it runs. Two rules make that true, and both
 exist because contention — not flakiness — produced the failures in issue
 #1802.
 
+Do not start direct `pnpm` validation in the same worktree while a full gate is
+queued or running. The gate owns dependency setup and local validation
+parallelism. Concurrent package-manager processes can recreate or invalidate
+`node_modules`. Use spare workers for read-only work, or use a separate, fully
+hydrated worktree.
+
 **One `--run` gate at a time, machine-wide.** `--run` takes a mkdir lock
 (`$HOME/.cache/agent-quality-gate/run.lock`, falling back to
 `$TMPDIR/agent-quality-gate-<uid>`; override with
