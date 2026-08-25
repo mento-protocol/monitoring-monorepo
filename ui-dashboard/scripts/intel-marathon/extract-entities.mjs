@@ -18,25 +18,39 @@
 
 import process from "node:process";
 import { writeFileSync, appendFileSync, mkdirSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
 const ARKHAM_BASE = "https://api.arkm.com";
 const OUT_DIR = ".intel-marathon";
 const REQ_SPACING_MS = 60; // standard bucket
 const RATE_LIMIT_BACKOFF_MS = 1500;
 
+// Upstash REST rejects a whole-hash read once the encoded reply exceeds
+// ~10 MB — intel_deep already exceeds that on a plain HVALS/HGETALL. Read it
+// via cursor-paginated HSCAN instead (see fetchHashViaHscan). 100 fields/page
+// keeps each page well under the cap even at the largest observed field
+// size (~50 KB).
+const HSCAN_PAGE_COUNT = 100;
+// Safety bound so a cursor that never returns to "0" fails loudly instead of
+// looping forever.
+const HSCAN_MAX_PAGES = 10_000;
+
 const required = [
   "UPSTASH_REDIS_REST_URL",
   "UPSTASH_REDIS_REST_TOKEN",
   "ARKHAM_API_KEY",
 ];
-const missing = required.filter((k) => !process.env[k]);
-if (missing.length > 0) {
-  console.error(`Missing env: ${missing.join(", ")}`);
-  process.exit(1);
-}
 const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
 const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
 const arkhamKey = process.env.ARKHAM_API_KEY;
+
+function requireEnv() {
+  const missing = required.filter((k) => !process.env[k]);
+  if (missing.length > 0) {
+    console.error(`Missing env: ${missing.join(", ")}`);
+    process.exit(1);
+  }
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -73,6 +87,53 @@ async function pipeline(commands) {
     }
   }
   return json;
+}
+
+// Read every field of `key` via cursor-paginated HSCAN and return the same
+// flat [field1, value1, field2, value2, ...] shape HGETALL's REST response
+// carries. HSCAN can return a field more than once across pages; later
+// pages are merged last, so they win. Upstash REST can also answer a
+// request it can't serve with HTTP 200 and an `error` body field (observed
+// live on an oversized HGETALL), so check for that on every page instead of
+// trusting `res.ok` alone.
+export async function fetchHashViaHscan(
+  key,
+  { count = HSCAN_PAGE_COUNT, fetchImpl = fetch } = {},
+) {
+  const merged = new Map();
+  let cursor = "0";
+  let pages = 0;
+  do {
+    const res = await fetchImpl(
+      `${redisUrl}/hscan/${key}/${cursor}?count=${count}`,
+      { headers: { Authorization: `Bearer ${redisToken}` } },
+    );
+    const body = await res.json();
+    if (!res.ok || body?.error) {
+      throw new Error(
+        `Upstash /hscan/${key} (cursor ${cursor}) → ${res.status}: ${body?.error ?? JSON.stringify(body)}`,
+      );
+    }
+    const [nextCursor, flat] = body.result;
+    for (let i = 0; i < flat.length; i += 2) merged.set(flat[i], flat[i + 1]);
+    cursor = String(nextCursor);
+    pages++;
+    if (pages > HSCAN_MAX_PAGES) {
+      throw new Error(
+        `HSCAN on ${key} did not terminate within ${HSCAN_MAX_PAGES} pages; aborting instead of looping forever.`,
+      );
+    }
+  } while (cursor !== "0");
+  return Array.from(merged.entries()).flat();
+}
+
+// Values only, mirroring what HVALS used to return for this key (no field
+// names) — the one shape extractSlugs()'s deepEntries param needs.
+export async function fetchHashValuesViaHscan(key, opts) {
+  const flat = await fetchHashViaHscan(key, opts);
+  const values = [];
+  for (let i = 1; i < flat.length; i += 2) values.push(flat[i]);
+  return values;
 }
 
 function extractSlugs(deepEntries, labelEntries) {
@@ -136,16 +197,20 @@ async function fetchEntity(slug) {
 }
 
 async function main() {
+  requireEnv();
   const startedAt = Date.now();
   mkdirSync(OUT_DIR, { recursive: true });
   const rawFile = `${OUT_DIR}/extract-entities-raw.jsonl`;
 
   console.log("→ Scanning intel_deep + labels for entity slugs...");
-  const [deepResp, labelResp] = await pipeline([
-    ["HVALS", "intel_deep"],
-    ["HVALS", "labels"],
+  // intel_deep already exceeds Upstash REST's 10MB single-response cap, so
+  // it can't go through the HVALS pipeline call below; labels is well under
+  // the cap and stays on the plain pipeline path.
+  const [deepValues, [labelResp]] = await Promise.all([
+    fetchHashValuesViaHscan("intel_deep"),
+    pipeline([["HVALS", "labels"]]),
   ]);
-  const slugs = extractSlugs(deepResp.result ?? [], labelResp.result ?? []);
+  const slugs = extractSlugs(deepValues, labelResp.result ?? []);
   console.log(`  found ${slugs.length} unique entity slugs`);
 
   // Filter out slugs we've already fetched (resume safety).
@@ -236,8 +301,17 @@ async function main() {
   console.log(`  raw:              ${rawFile}`);
 }
 
-main().catch((err) => {
-  console.error("✗ FAILED:", err.message);
-  console.error(err.stack);
-  process.exit(1);
-});
+export function isMainModule(importMetaUrl, argv = process.argv) {
+  const entrypoint = argv[1];
+  return typeof entrypoint === "string"
+    ? importMetaUrl === pathToFileURL(entrypoint).href
+    : false;
+}
+
+if (isMainModule(import.meta.url)) {
+  main().catch((err) => {
+    console.error("✗ FAILED:", err.message);
+    console.error(err.stack);
+    process.exit(1);
+  });
+}

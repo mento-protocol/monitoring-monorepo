@@ -21,6 +21,16 @@ const REQ_SPACING_MS = 60; // standard bucket
 const RATE_LIMIT_BACKOFF_MS = 1500;
 const PORTFOLIO_OFFSETS_DAYS = [0, 30, 90, 180];
 
+// Upstash REST rejects a whole-hash read once the encoded reply exceeds
+// ~10 MB — intel_deep already exceeds that on a plain HGETALL. Read it via
+// cursor-paginated HSCAN instead (see fetchHashViaHscan). 100 fields/page
+// keeps each page well under the cap even at the largest observed field
+// size (~50 KB).
+const HSCAN_PAGE_COUNT = 100;
+// Safety bound so a cursor that never returns to "0" fails loudly instead of
+// looping forever.
+const HSCAN_MAX_PAGES = 10_000;
+
 const required = [
   "UPSTASH_REDIS_REST_URL",
   "UPSTASH_REDIS_REST_TOKEN",
@@ -89,6 +99,44 @@ async function pipeline(commands) {
   return json;
 }
 
+// Read every field of `key` via cursor-paginated HSCAN and return the same
+// flat [field1, value1, field2, value2, ...] shape HGETALL's REST response
+// carries, so callers need no other changes. HSCAN can return a field more
+// than once across pages; later pages are merged last, so they win. Upstash
+// REST can also answer a request it can't serve with HTTP 200 and an
+// `error` body field (observed live on an oversized HGETALL), so check for
+// that on every page instead of trusting `res.ok` alone.
+export async function fetchHashViaHscan(
+  key,
+  { count = HSCAN_PAGE_COUNT, fetchImpl = fetch } = {},
+) {
+  const merged = new Map();
+  let cursor = "0";
+  let pages = 0;
+  do {
+    const res = await fetchImpl(
+      `${redisUrl}/hscan/${key}/${cursor}?count=${count}`,
+      { headers: { Authorization: `Bearer ${redisToken}` } },
+    );
+    const body = await res.json();
+    if (!res.ok || body?.error) {
+      throw new Error(
+        `Upstash /hscan/${key} (cursor ${cursor}) → ${res.status}: ${body?.error ?? JSON.stringify(body)}`,
+      );
+    }
+    const [nextCursor, flat] = body.result;
+    for (let i = 0; i < flat.length; i += 2) merged.set(flat[i], flat[i + 1]);
+    cursor = String(nextCursor);
+    pages++;
+    if (pages > HSCAN_MAX_PAGES) {
+      throw new Error(
+        `HSCAN on ${key} did not terminate within ${HSCAN_MAX_PAGES} pages; aborting instead of looping forever.`,
+      );
+    }
+  } while (cursor !== "0");
+  return Array.from(merged.entries()).flat();
+}
+
 async function buildTargets() {
   const targets = new Map();
   targets.set(CLUSTER_7DC0_DEPLOYER, { sources: ["cluster-7dc0-deployer"] });
@@ -106,8 +154,7 @@ async function buildTargets() {
     else targets.set(lower, { sources: ["has-forensic-report"] });
   }
 
-  const deep = await upstash(`/hgetall/intel_deep`);
-  const flat = deep.result ?? [];
+  const flat = await fetchHashViaHscan("intel_deep");
   const ranked = [];
   for (let i = 0; i < flat.length; i += 2) {
     const addr = flat[i];

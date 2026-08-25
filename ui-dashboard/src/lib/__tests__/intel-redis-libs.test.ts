@@ -1,8 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock @/lib/redis so the intel-* libs never touch a real client.
+// Mock @/lib/redis so the intel-* libs never touch a real client. `hgetall`
+// is kept in the mock (and asserted un-called below) only to prove the
+// getAll* helpers never fall back to a whole-hash read; the real reads go
+// through `hscan`, since intel_deep already exceeds Upstash REST's 10MB
+// single-response cap on a plain HGETALL.
 const hget = vi.fn();
 const hgetall = vi.fn();
+const hscan = vi.fn();
 const hkeys = vi.fn();
 const hlen = vi.fn();
 const hmget = vi.fn();
@@ -14,8 +19,23 @@ const pipeline = vi.fn(() => ({
 }));
 
 vi.mock("@/lib/redis", () => ({
-  getRedis: vi.fn(() => ({ hget, hgetall, hkeys, hlen, hmget, pipeline })),
+  getRedis: vi.fn(() => ({
+    hget,
+    hgetall,
+    hscan,
+    hkeys,
+    hlen,
+    hmget,
+    pipeline,
+  })),
 }));
+
+// Mirrors how the @upstash/redis SDK returns HSCAN pages: [nextCursor, flat].
+// A single-page helper is enough for these tests; multi-page pagination and
+// duplicate-field dedupe get dedicated coverage in intel-legacy-fallback.
+function hscanPage(record: Record<string, unknown>) {
+  return Promise.resolve(["0", Object.entries(record).flat()]);
+}
 
 import {
   getIntelDeep,
@@ -49,6 +69,7 @@ import {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  hscan.mockResolvedValue(["0", []]);
   hkeys.mockResolvedValue([]);
   hlen.mockResolvedValue(0);
   hmget.mockResolvedValue({});
@@ -69,14 +90,17 @@ describe("intel-deep", () => {
     expect(await getIntelDeep("0xabc")).toBeNull();
   });
 
-  it("getAllIntelDeep: returns all records, falls back to {} on null", async () => {
+  it("getAllIntelDeep: returns all records via HSCAN, falls back to {} when both hashes are empty", async () => {
     const all = { "0xaaa": { address: "0xaaa", fetchedAt: "2026-01-01" } };
-    hgetall.mockResolvedValue(all);
+    hscan.mockImplementation((key: string) =>
+      key === INTEL_DEEP_KEY ? hscanPage(all) : hscanPage({}),
+    );
     // toEqual (not toBe) because the legacy-fallback helper spreads-merges
     // intel + arkham hashes into a fresh object.
     expect(await getAllIntelDeep()).toEqual(all);
+    expect(hgetall).not.toHaveBeenCalled();
 
-    hgetall.mockResolvedValue(null);
+    hscan.mockResolvedValue(["0", []]);
     expect(await getAllIntelDeep()).toEqual({});
   });
 
@@ -108,8 +132,8 @@ describe("intel-deep", () => {
       "0xaaa": { address: "0xaaa", source: "arkham" }, // collides
       "0xbbb": { address: "0xbbb", source: "arkham" }, // legacy-only
     };
-    hgetall.mockImplementation((key: string) =>
-      Promise.resolve(key === INTEL_DEEP_KEY ? intel : legacy),
+    hscan.mockImplementation((key: string) =>
+      hscanPage(key === INTEL_DEEP_KEY ? intel : legacy),
     );
     const result = await getAllIntelDeep();
     expect(result).toEqual({
@@ -123,8 +147,8 @@ describe("intel-deep", () => {
     const legacy = {
       "0xAaA": { address: "0xAaA", source: "arkham" }, // mixed-case key
     };
-    hgetall.mockImplementation((key: string) =>
-      Promise.resolve(key === INTEL_DEEP_KEY ? intel : legacy),
+    hscan.mockImplementation((key: string) =>
+      hscanPage(key === INTEL_DEEP_KEY ? intel : legacy),
     );
     const result = await getAllIntelDeep();
     expect(result).toEqual({
@@ -170,9 +194,10 @@ describe("intel-transfers", () => {
     expect(result).toBe(legacyRecord);
   });
 
-  it("getAllIntelTransfers: falls back to {} on null", async () => {
-    hgetall.mockResolvedValue(null);
+  it("getAllIntelTransfers: falls back to {} when both hashes are empty", async () => {
+    hscan.mockResolvedValue(["0", []]);
     expect(await getAllIntelTransfers()).toEqual({});
+    expect(hgetall).not.toHaveBeenCalled();
   });
 });
 
@@ -217,9 +242,10 @@ describe("intel-wealth", () => {
     expect(result).toBe(legacyRecord);
   });
 
-  it("getAllIntelWealth: falls back to {} on null", async () => {
-    hgetall.mockResolvedValue(null);
+  it("getAllIntelWealth: falls back to {} when both hashes are empty", async () => {
+    hscan.mockResolvedValue(["0", []]);
     expect(await getAllIntelWealth()).toEqual({});
+    expect(hgetall).not.toHaveBeenCalled();
   });
 });
 
@@ -250,9 +276,10 @@ describe("intel-entities", () => {
     expect(await getIntelEntity("unknown-slug")).toBeNull();
   });
 
-  it("getAllIntelEntities: falls back to {} on null", async () => {
-    hgetall.mockResolvedValue(null);
+  it("getAllIntelEntities: falls back to {} when both hashes are empty", async () => {
+    hscan.mockResolvedValue(["0", []]);
     expect(await getAllIntelEntities()).toEqual({});
+    expect(hgetall).not.toHaveBeenCalled();
   });
 
   it("getIntelEntityDirectorySource reads full records below both limits", async () => {
@@ -360,8 +387,9 @@ describe("intel-entity-cps", () => {
     expect(await getIntelEntityCps("unknown-slug")).toBeNull();
   });
 
-  it("getAllIntelEntityCps: falls back to {} on null", async () => {
-    hgetall.mockResolvedValue(null);
+  it("getAllIntelEntityCps: falls back to {} when both hashes are empty", async () => {
+    hscan.mockResolvedValue(["0", []]);
     expect(await getAllIntelEntityCps()).toEqual({});
+    expect(hgetall).not.toHaveBeenCalled();
   });
 });
