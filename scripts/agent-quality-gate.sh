@@ -68,6 +68,23 @@ Environment:
                       Directory holding the cross-run lock. Default:
                       $HOME/.cache/agent-quality-gate, falling back to
                       $TMPDIR/agent-quality-gate-<uid>.
+  AGENT_QUALITY_GATE_LOCK_MACHINE_ID
+                      Names the machine a lock record belongs to, in place of
+                      the hardware identity the gate reads for itself. Set it
+                      where that identity is unreadable and the lock root is
+                      shared between machines.
+  AGENT_QUALITY_GATE_LOCK_UNVERIFIED_MACHINE_GRACE_SECONDS
+                      How old a lock record whose machine cannot be
+                      established must be before a dead holder in it is
+                      reclaimed. Default: 600.
+  AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE
+                      Overrides the check for whether the lock root is on
+                      storage this machine mounts itself. Unset, the gate asks
+                      the filesystem (df -l) and treats a network or
+                      unreadable one as possibly shared, where a lock record
+                      that cannot be tied to a machine is never reclaimed. Set
+                      0 where this machine exports the lock root and another
+                      machine's gate locks in it.
 USAGE
 }
 
@@ -574,6 +591,44 @@ gate_lock_owner_grace_seconds="$(gate_lock_seconds_knob AGENT_QUALITY_GATE_LOCK_
 # the same reason as the grace — the self-test asserts that waiting happens,
 # not that it takes five seconds a round.
 gate_lock_poll_seconds="$(gate_lock_seconds_knob AGENT_QUALITY_GATE_LOCK_POLL_SECONDS 5)"
+# How old a record whose machine cannot be established has to be before a dead
+# holder in it may be reclaimed. Only records this gate did not write reach it:
+# one from a gate that predates the machine field, or one whose identity source
+# this run cannot reach. Ten minutes is long enough that a real run on a shared
+# lock root is never judged on this rule while it is starting up, and short
+# enough that a machine rename costs one wait of this length instead of the
+# whole 1800-second budget, every run, forever (GitHub issue #2055).
+gate_lock_unverified_machine_grace_seconds="$(
+  gate_lock_seconds_knob AGENT_QUALITY_GATE_LOCK_UNVERIFIED_MACHINE_GRACE_SECONDS 600
+)"
+# Whether this lock root sits on storage this machine mounts itself. It decides
+# how far a local PID lookup may be trusted, so it is established by evidence
+# rather than by where the path came from: `$HOME` is as likely to be a network
+# home directory as a local disk, and assuming otherwise would let a run
+# reclaim a lock whose holder is alive on another machine. Resolved against the
+# filesystem in acquire_gate_run_lock once the root is known; unanswerable
+# means "may be shared", which is the direction that keeps waiting.
+#
+# What this establishes is that the storage is not mounted FROM somewhere else,
+# which is the configuration a network home directory creates and the one a
+# developer machine can fall into without choosing it. It does not establish
+# that the directory is unreachable — a machine can export its own disk over
+# NFS or SMB and point another machine's gate at it. That is a deliberate act
+# of sharing, and the declaration below is how it is told: setting it to 0
+# keeps every reclaim on this path refused. Nothing in this repo asks for that
+# configuration; concurrent validation from another machine is documented as
+# running against its OWN checkout and its own lock.
+gate_lock_root_is_per_machine=0
+gate_lock_root_per_machine_override="${AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE:-}"
+case "$gate_lock_root_per_machine_override" in
+  "") ;;
+  1 | true | yes) gate_lock_root_per_machine_override=1 ;;
+  0 | false | no) gate_lock_root_per_machine_override=0 ;;
+  *)
+    echo "error: AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE must be 1 or 0; got '${gate_lock_root_per_machine_override}'." >&2
+    exit 2
+    ;;
+esac
 # The lock root, kept once resolved: outstanding obligations live beside the
 # lock rather than inside it, because the lock directory is what gets reclaimed
 # and the obligation has to outlive that.
@@ -839,6 +894,212 @@ gate_wall_millis() {
   printf '%s000\n' "$(date +%s)"
 }
 
+# A machine identity that survives a rename, recorded beside the hostname so a
+# waiter can tell "the same machine under a new name" from "another machine on
+# shared storage". The hostname alone could not: renaming a Mac from
+# `Workbook.local` to `Mac` made every later run read its own dead holder as a
+# live foreign one and wait out the whole `--lock-wait` budget with no
+# self-healing (GitHub issue #2055).
+#
+# The value is stored as `<source>:<id>`, and the source tag is load-bearing.
+# Two ids from the same source can be compared as machine identities: equal
+# means the same machine, different means a different one. Two ids from
+# DIFFERENT sources cannot — a run that read `ioplatform` and a run that fell
+# back to `kernuuid` are almost certainly the same machine, and reading their
+# unequal values as "another machine" would invent exactly the wedge this
+# exists to remove. So a source mismatch is not a verdict at all; it degrades
+# to the same unverified handling as a record with no machine field.
+#
+# The id is validated against the record's alphabet, never rewritten into it.
+# Rewriting would be lossy, and a lossy transform on an identity is a way to
+# make two machines look like one: stripping the unrepresentable characters
+# maps `machine/a` and `machinea` onto the same value, and truncating maps
+# every pair that first differs past the limit onto the same value too. Either
+# collision reads as `same` and authorises a reclaim on a PID lookup that
+# belongs to the other machine. So a value outside the alphabet is refused
+# instead, which costs an identity nobody can compare — the defined,
+# conservative state — rather than inventing one that compares equal to
+# somebody else's. `:` is outside the alphabet, so the split on the first `:`
+# is unambiguous; so is a newline, which would otherwise let an id forge a
+# second field in a record read line by line.
+gate_lock_machine_id_cached=""
+gate_lock_machine_id_resolved=0
+
+gate_lock_tag_machine_id() {
+  local source_tag="$1"
+  local value="$2"
+  # One rule, and nothing before it. Any normalisation here — trimming
+  # whitespace, deleting line breaks, truncating — is a many-to-one map, and a
+  # many-to-one map on an identity is exactly how two machines come to compare
+  # equal: deleting the break in `machine<LF>a` yields `machinea`, which is
+  # another machine's legitimate id. Distinct valid inputs must stay distinct,
+  # so the value is accepted as written or not at all. Every source below
+  # already yields a bare token; one that does not is a source this run cannot
+  # use, which is the defined conservative state.
+  [[ "$value" =~ ^[A-Za-z0-9._-]{1,128}$ ]] || return 1
+  printf '%s:%s\n' "$source_tag" "$value"
+}
+
+# Resolves into `gate_lock_machine_id_cached` rather than onto stdout, so the
+# answer survives: a function that printed it would be called through command
+# substitution, the cache would be set in a subshell, and every caller would
+# pay for the probe again. Sources are tried in a fixed order so one machine
+# cannot answer differently between two runs that both reach the same source.
+# An unavailable source is not an error: no identity at all is a defined state
+# that falls back to the hostname, which is what the gate did before this.
+gate_lock_resolve_machine_id() {
+  local raw=""
+  [[ "$gate_lock_machine_id_resolved" -eq 0 ]] || return 0
+  gate_lock_machine_id_resolved=1
+  gate_lock_machine_id_cached=""
+  # An explicit override first, so a container that hides every hardware
+  # identity — and the self-test, which has to simulate two machines on one —
+  # can still name the machine its lock root belongs to. A value this record
+  # cannot carry stops the run rather than falling through to a probed
+  # identity: the operator set this to name a machine, and continuing under a
+  # different identity than they asked for is how two machines end up comparing
+  # equal. Loud and refused, so it is fixed rather than silently ignored.
+  if [[ -n "${AGENT_QUALITY_GATE_LOCK_MACHINE_ID:-}" ]]; then
+    if ! gate_lock_machine_id_cached="$(
+      gate_lock_tag_machine_id override "${AGENT_QUALITY_GATE_LOCK_MACHINE_ID}"
+    )"; then
+      echo "error: AGENT_QUALITY_GATE_LOCK_MACHINE_ID must be 1-128 characters of A-Z a-z 0-9 . _ - and nothing else." >&2
+      echo "It names one machine in the lock records this gate writes, so it is never rewritten to fit — two values that differ must stay different." >&2
+      echo "Nothing has been executed. Fix that value, or unset it to let the gate read this machine's own identity." >&2
+      exit 2
+    fi
+  fi
+  if [[ -z "$gate_lock_machine_id_cached" ]]; then
+    # Linux. `/var/lib/dbus/machine-id` is conventionally the same file, so
+    # both carry one tag: reading either yields the same identity.
+    for raw in /etc/machine-id /var/lib/dbus/machine-id; do
+      [[ -r "$raw" ]] || continue
+      gate_lock_machine_id_cached="$(
+        gate_lock_tag_machine_id machineid "$(head -n1 "$raw" 2>/dev/null || true)" || true
+      )"
+      [[ -z "$gate_lock_machine_id_cached" ]] || break
+    done
+  fi
+  if [[ -z "$gate_lock_machine_id_cached" ]] && command -v ioreg > /dev/null 2>&1; then
+    # macOS. IOPlatformUUID is burned into the hardware and is what a rename
+    # cannot touch.
+    raw="$(
+      ioreg -rd1 -c IOPlatformExpertDevice 2>/dev/null |
+        awk -F'"' '/IOPlatformUUID/ { print $4; exit }' || true
+    )"
+    gate_lock_machine_id_cached="$(gate_lock_tag_machine_id ioplatform "$raw" || true)"
+  fi
+  if [[ -z "$gate_lock_machine_id_cached" ]] && command -v sysctl > /dev/null 2>&1; then
+    raw="$(sysctl -n kern.uuid 2>/dev/null || true)"
+    gate_lock_machine_id_cached="$(gate_lock_tag_machine_id kernuuid "$raw" || true)"
+  fi
+}
+
+# Which machine wrote a record, as far as this run can tell:
+#
+#   same        — this machine. PIDs in the record mean something here, so the
+#                 liveness rules decide, and a dead holder is reclaimed at once.
+#   other       — definitively a different machine. Its PIDs mean nothing here
+#                 and its holder may well be running, so this is never
+#                 reclaimed on any evidence available locally.
+#   unverified  — the machine cannot be established: a record from a gate that
+#                 predates the machine field, a source mismatch, or a host with
+#                 no identity source. Handled by the aged-and-dead rule at the
+#                 call site, never by a straight reclaim.
+#
+# The hostname decides only where a machine identity is missing on one side or
+# the other, which keeps the pre-existing behaviour intact for records this
+# gate did not write.
+#
+# `other` is reachable only where the root may be shared, and that restriction
+# is what keeps this from re-creating the wedge it exists to remove. A machine
+# identity is not immutable — `/etc/machine-id` is regenerated by an OS
+# reinstall or an image rebuild, and the override can simply be changed — so on
+# storage this machine mounts itself, a disagreeing identity is far more likely
+# to be this machine's own identity having moved, exactly as a rename moved its
+# hostname, than a second machine writing into the same directory. Reading it
+# as another machine would leave the record unreclaimable forever. Where the
+# root is on network storage there is no such reasoning available, and a
+# disagreeing identity has to be believed.
+gate_lock_machine_verdict() {
+  local owner_machine="$1"
+  local owner_host="$2"
+  local this_machine="$3"
+  local this_host="$4"
+  local root_is_per_machine="$5"
+  if [[ -n "$owner_machine" && -n "$this_machine" ]]; then
+    if [[ "$owner_machine" == "$this_machine" ]]; then
+      printf 'same\n'
+    elif [[ "${owner_machine%%:*}" == "${this_machine%%:*}" &&
+      "$root_is_per_machine" -ne 1 ]]; then
+      printf 'other\n'
+    else
+      printf 'unverified\n'
+    fi
+    return 0
+  fi
+  # No machine identity on one side. A matching hostname is the same evidence
+  # the gate has always run on, and an absent hostname was never treated as
+  # foreign either.
+  if [[ -z "$owner_host" || "$owner_host" == "$this_host" ]]; then
+    printf 'same\n'
+  else
+    printf 'unverified\n'
+  fi
+}
+
+# Is this directory on a filesystem only this machine can reach? `df -l` lists
+# local filesystems and omits network ones — NFS, SMB, AFS, an autofs map — on
+# both the BSD and GNU implementations, so a path that still produces a row is
+# on local storage. The row, not the exit status, is the answer: both
+# implementations exit 0 for a remote path and simply print no row for it.
+#
+# Every failure means "no", because the question only ever widens what a local
+# PID lookup is allowed to conclude. No `df`, an unreadable path, an
+# implementation without `-l`: all of them leave the root treated as possibly
+# shared, which is the answer that keeps mutual exclusion across machines.
+gate_lock_path_is_local_filesystem() {
+  local dir="$1"
+  local row
+  [[ -n "$dir" ]] || return 1
+  command -v df > /dev/null 2>&1 || return 1
+  row="$(df -l -- "$dir" 2>/dev/null | tail -n +2 | tr -d '[:space:]' || true)"
+  [[ -n "$row" ]]
+}
+
+# Test-only, and gated the same way as the other lock-test hooks. This probe
+# decides whether a local PID lookup may authorise a reclaim, so the self-test
+# has to exercise it in BOTH directions — a check that only ever answers "local"
+# would pass every case above while proving nothing. Answering "not-local"
+# needs a path on a filesystem `df -l` omits, which the suite discovers from
+# the mount table rather than fabricates, so the probe is reachable here on its
+# own. Nothing else runs on this path: it answers and exits.
+if [[ -n "${AGENT_QUALITY_GATE_LOCK_PROBE_PATH:-}" ]]; then
+  if [[ "${NODE_ENV:-}" != "test" ]]; then
+    echo "error: the gate lock locality probe is allowed only with NODE_ENV=test." >&2
+    exit 2
+  fi
+  if gate_lock_path_is_local_filesystem "$AGENT_QUALITY_GATE_LOCK_PROBE_PATH"; then
+    printf 'local\n'
+  else
+    printf 'not-local\n'
+  fi
+  exit 0
+fi
+
+# How long ago a record was written, in whole seconds, or nothing when that
+# cannot be established. Nothing is the fail-closed answer: age only ever
+# unlocks a reclaim, so an unreadable or future-dated stamp keeps this run
+# waiting rather than letting an unknown age pass for an old one.
+gate_lock_record_age_seconds() {
+  local started_at="$1"
+  local now
+  [[ "$started_at" =~ ^[0-9]{1,12}$ ]] || return 0
+  now="$(date +%s)"
+  [[ "$now" -ge "$started_at" ]] || return 0
+  printf '%s\n' $((now - started_at))
+}
+
 # The kernel's own start-time string for a PID, used verbatim. Comparing it as
 # a string keeps this free of date parsing; what makes that sound is pinning
 # the formatting environment, because `ps` renders lstart in the caller's TZ
@@ -947,6 +1208,9 @@ claim_gate_run_lock() {
   local token="$2"
   local staged="$lock/owner.claiming.$$"
   local published=0
+  # Idempotent, and free after the first call. Here as well as in the wait loop
+  # so the record can never be published without the field a later reader needs.
+  gate_lock_resolve_machine_id
   # Registered before it exists, like every other file this path creates. Any
   # file already there was left by a dead process that happened to share our
   # PID, so it is ours to remove.
@@ -955,6 +1219,11 @@ claim_gate_run_lock() {
   if {
     printf 'pid=%s\n' "$$"
     printf 'host=%s\n' "$(uname -n)"
+    # Additive on purpose. A gate that predates this field ignores it and reads
+    # the record exactly as it always did, and this gate reads a record without
+    # it through the unverified path — so the two versions coexist on one
+    # machine without either misjudging the other's locks.
+    printf 'machine=%s\n' "$gate_lock_machine_id_cached"
     printf 'started_at=%s\n' "$(date +%s)"
     printf 'start_utc=%s\n' "$(gate_lock_process_start $$)"
     printf 'worktree=%s\n' "$repo_root"
@@ -1435,6 +1704,7 @@ release_gate_run_lock() {
 
 acquire_gate_run_lock() {
   local root lock owner_pid owner_host owner_worktree owner_token_value owner_start
+  local owner_machine owner_started_at machine_verdict record_age
   local stale_reason nap remaining now_millis
   # Elapsed time comes from the clock, never from adding up requested sleeps.
   # A shell that is descheduled or SIGSTOPped sleeps far longer than it asked
@@ -1447,7 +1717,8 @@ acquire_gate_run_lock() {
   local last_beat=0
   local announced=0
   local ownerless_since=""
-  local this_host
+  local unverified_warned=0
+  local this_host this_machine
   case "$gate_lock_enabled" in
     0|false|no) return 0 ;;
   esac
@@ -1473,6 +1744,18 @@ acquire_gate_run_lock() {
   lock="$root/run.lock"
   gate_lock_root_dir="$root"
   this_host="$(uname -n)"
+  gate_lock_resolve_machine_id
+  this_machine="$gate_lock_machine_id_cached"
+  # Asked of the resolved root, not of the path it came from: an override can
+  # point at local storage and the default can land on a network home, so only
+  # the filesystem under the directory this run will actually use can answer.
+  if [[ -n "$gate_lock_root_per_machine_override" ]]; then
+    gate_lock_root_is_per_machine="$gate_lock_root_per_machine_override"
+  elif gate_lock_path_is_local_filesystem "$root"; then
+    gate_lock_root_is_per_machine=1
+  else
+    gate_lock_root_is_per_machine=0
+  fi
   wait_started_at="$(gate_wall_millis)"
 
   while :; do
@@ -1502,20 +1785,29 @@ acquire_gate_run_lock() {
 
     owner_pid="$(gate_lock_owner_field "$lock" pid)"
     owner_host="$(gate_lock_owner_field "$lock" host)"
+    owner_machine="$(gate_lock_owner_field "$lock" machine)"
     owner_worktree="$(gate_lock_owner_field "$lock" worktree)"
     owner_token_value="$(gate_lock_owner_field "$lock" token)"
     owner_start="$(gate_lock_owner_field "$lock" start_utc)"
+    owner_started_at="$(gate_lock_owner_field "$lock" started_at)"
     if [[ -z "$owner_token_value" ]]; then
       # Before believing there is no holder, read the remnants of any reclaim
       # that was killed mid-take. One of them may be the holder's own record.
       if gate_lock_recover_hidden_record "$lock"; then
         owner_pid="$(gate_lock_owner_field "$lock" pid)"
         owner_host="$(gate_lock_owner_field "$lock" host)"
+        owner_machine="$(gate_lock_owner_field "$lock" machine)"
         owner_worktree="$(gate_lock_owner_field "$lock" worktree)"
         owner_token_value="$(gate_lock_owner_field "$lock" token)"
         owner_start="$(gate_lock_owner_field "$lock" start_utc)"
+        owner_started_at="$(gate_lock_owner_field "$lock" started_at)"
       fi
     fi
+    machine_verdict="$(
+      gate_lock_machine_verdict \
+        "$owner_machine" "$owner_host" "$this_machine" "$this_host" \
+        "$gate_lock_root_is_per_machine"
+    )"
 
     stale_reason=""
     [[ -n "$owner_token_value" ]] && ownerless_since=""
@@ -1530,9 +1822,12 @@ acquire_gate_run_lock() {
       if [[ $(($(date +%s) - ownerless_since)) -ge "$gate_lock_owner_grace_seconds" ]]; then
         stale_reason="its holder never recorded a complete identity"
       fi
-    elif [[ -n "$owner_host" && "$owner_host" != "$this_host" ]]; then
-      # Only reachable if the lock root is on shared storage. Another host's
-      # PIDs mean nothing here, so wait it out rather than guess.
+    elif [[ "$machine_verdict" == other ]]; then
+      # Two machine identities from the same source that disagree, on a root
+      # this run could not prove local. There is no evidence available here
+      # that could overturn it — another machine's PIDs mean nothing locally —
+      # so this record is waited out however old it gets, and the wait expiry
+      # names the holder.
       :
     elif ! gate_lock_token_is_wellformed "$owner_token_value"; then
       # A token this gate would never generate. Reclaiming would later drain
@@ -1545,6 +1840,56 @@ acquire_gate_run_lock() {
         stale_reason="pid ${owner_pid} now belongs to a different process"
       else
         stale_reason="holder pid ${owner_pid} is gone"
+      fi
+      if [[ "$machine_verdict" == unverified ]]; then
+        # The record cannot be tied to a machine: it predates the machine
+        # field, or its identity came from a source this run did not reach, or
+        # it disagrees on a root nothing else can reach. From here "this
+        # machine under a name or identity it has since changed" and "another
+        # machine sharing this root" look the same, and what settles it is the
+        # root rather than the record.
+        #
+        # On storage this machine mounts itself, a dead holder in the record is
+        # this machine's own history under a name or identity it has since
+        # changed, and reclaiming it is the whole point of issue #2055. A root
+        # on a network filesystem, or one whose filesystem could not be read,
+        # may be mounted from another machine, and there this branch never
+        # reclaims: a dead local PID says nothing about a holder on another
+        # machine, and elapsed time does not turn it into liveness evidence.
+        #
+        # Two further legs apply even on local storage. The PID must read dead,
+        # and the record must have outlived the grace. The grace is what bounds
+        # the exposure in the one configuration the probe cannot see — a
+        # machine that EXPORTS its own disk and lets another machine's gate
+        # lock in it — because a holder there would have to be idle past the
+        # grace to be touched, and the declaration turns this branch off
+        # outright for anyone who set that up deliberately. The reclaim says
+        # out loud what it concluded and from what, because it is the one
+        # reclaim on this path resting on where the root lives rather than on
+        # an identity that matched.
+        record_age="$(gate_lock_record_age_seconds "$owner_started_at")"
+        if [[ "$gate_lock_root_is_per_machine" -ne 1 ]]; then
+          if [[ "$unverified_warned" -eq 0 ]]; then
+            unverified_warned=1
+            echo "warning: the gate run lock record at ${lock} cannot be tied to a machine: it names host '${owner_host}', not this host '${this_host}', and carries no machine identity this run can compare." >&2
+            echo "  This lock root is not on storage this machine mounts itself, so it may be mounted from another machine and that record may belong to a live run there. This run waits it out." >&2
+            echo "  If that directory is this machine's alone, set AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1 to let a dead holder in it be reclaimed." >&2
+          fi
+          stale_reason=""
+        elif [[ -n "$record_age" &&
+          "$record_age" -ge "$gate_lock_unverified_machine_grace_seconds" ]]; then
+          if [[ "$unverified_warned" -eq 0 ]]; then
+            unverified_warned=1
+            echo "warning: the gate run lock record at ${lock} cannot be tied to a machine: it names host '${owner_host}', not this host '${this_host}', and carries no machine identity this run can compare." >&2
+            echo "  This lock root is on storage this machine mounts itself, its ${stale_reason}, and it was written ${record_age}s ago (grace ${gate_lock_unverified_machine_grace_seconds}s), so this run reads it as this machine's own under a name or identity it has since changed, and reclaims it." >&2
+            echo "  If this directory is exported to other machines and one of them locks in it, set AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=0 to refuse this reclaim." >&2
+          fi
+          stale_reason="${stale_reason}; its host '${owner_host}' has no comparable machine identity and its record is ${record_age}s old on storage this machine mounts itself"
+        else
+          # Either too young to judge or of unknowable age. Wait, which is
+          # what this path did for every host mismatch before issue #2055.
+          stale_reason=""
+        fi
       fi
     fi
 
