@@ -5709,6 +5709,7 @@ assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- pnpm docs:garden:test (shared GitHub issue lifecycle module changed)"
 assert_contains "- pnpm docs:navigation-eval:test (shared GitHub issue lifecycle module changed)"
 assert_contains "- pnpm sentry:project:test (shared GitHub issue lifecycle module changed)"
+assert_contains "- pnpm issue:board:test (shared GitHub issue lifecycle module changed)"
 
 run_gate "docs/evals/documentation-navigation-fixtures.json"
 assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation contract changed)"

@@ -176,9 +176,9 @@ export async function listReadyIssues(options) {
   return issues ?? [];
 }
 
-export async function listIssuesByLabel(
+export async function listIssuesByLabels(
   options,
-  label,
+  labels,
   { state = "open", json = ghJson } = {},
 ) {
   const stateQualifier = state === "all" ? "" : ` is:${state}`;
@@ -190,7 +190,7 @@ export async function listIssuesByLabel(
     "--state",
     state,
     "--search",
-    `is:issue${stateQualifier} label:${label}`,
+    `is:issue${stateQualifier} label:${labels.join(",")}`,
     "--limit",
     "1000",
     "--json",

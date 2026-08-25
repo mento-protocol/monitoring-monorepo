@@ -36,7 +36,7 @@ import {
   getIssue,
   getPrIssues,
   listIssueComments,
-  listIssuesByLabel,
+  listIssuesByLabels,
   listReadyIssues,
   runGh,
   sleep,
@@ -352,6 +352,26 @@ function syncStateFromIssue(issue) {
   return String(issue.state ?? "").toUpperCase() === "CLOSED" ? "done" : null;
 }
 
+function queueLabelsFromIssue(issue) {
+  const labels = labelNames(issue);
+  return ISSUE_STATE_LABELS.filter((label) => labels.has(label));
+}
+
+function hasExactQueueLabels(issue, state) {
+  const expected = labelsForState(state).addLabels;
+  const actual = queueLabelsFromIssue(issue);
+  return (
+    actual.length === expected.length &&
+    expected.every((label) => actual.includes(label))
+  );
+}
+
+function conflictingOpenQueueLabels(issue) {
+  if (String(issue.state ?? "").toUpperCase() !== "OPEN") return [];
+  const labels = queueLabelsFromIssue(issue);
+  return labels.length > 1 ? labels : [];
+}
+
 export class IssueBoardSyncError extends AggregateError {
   constructor(results, failures) {
     const normalizedFailures = failures.map(({ number, title, error }) => ({
@@ -382,6 +402,19 @@ async function syncIssue(options, project, listedIssue, operations) {
   let drift = null;
 
   for (let attempt = 1; attempt <= SYNC_RECONCILE_ATTEMPTS; attempt += 1) {
+    const conflictingLabels = conflictingOpenQueueLabels(issue);
+    if (conflictingLabels.length > 0) {
+      drift = `conflicting queue labels (${conflictingLabels.join(", ")})`;
+      if (attempt < SYNC_RECONCILE_ATTEMPTS) {
+        await operations.sleep(SYNC_VERIFY_SETTLE_MS);
+        issue = await operations.getIssue(options, issue.number);
+        continue;
+      }
+      throw new Error(
+        `Issue #${issue.number} retained conflicting queue labels after ${SYNC_RECONCILE_ATTEMPTS} attempts: ${conflictingLabels.join(", ")}`,
+      );
+    }
+
     const state = syncStateFromIssue(issue);
     if (!state) {
       if (!drift) return null;
@@ -443,11 +476,20 @@ async function syncIssue(options, project, listedIssue, operations) {
 
       let reopenedState = syncStateFromIssue(reopenedIssue);
       if (!reopenedState && reopenState) {
-        await operations.editIssueLabels(options, reopenedIssue, reopenState);
         reopenedIssue = await operations.getIssue(options, issue.number);
         reopenedState = syncStateFromIssue(reopenedIssue);
+        if (!reopenedState) {
+          await operations.editIssueLabels(options, reopenedIssue, reopenState);
+          reopenedIssue = await operations.getIssue(options, issue.number);
+          reopenedState = syncStateFromIssue(reopenedIssue);
+        }
       }
-      drift = `done -> ${reopenedState ?? "no queue state"}`;
+      drift =
+        reopenedState &&
+        reopenedState !== "done" &&
+        !hasExactQueueLabels(reopenedIssue, reopenedState)
+          ? `done -> conflicting queue labels (${queueLabelsFromIssue(reopenedIssue).join(", ")})`
+          : `done -> ${reopenedState ?? "no queue state"}`;
       if (attempt < SYNC_RECONCILE_ATTEMPTS) {
         issue = reopenedIssue;
         await operations.sleep(SYNC_VERIFY_SETTLE_MS);
@@ -465,11 +507,14 @@ async function syncIssue(options, project, listedIssue, operations) {
 
     const verified = await operations.getIssue(options, issue.number);
     const verifiedState = syncStateFromIssue(verified);
-    if (verifiedState === state) {
+    if (verifiedState === state && hasExactQueueLabels(verified, state)) {
       return { number: issue.number, title: issue.title, state };
     }
 
-    drift = `${state} -> ${verifiedState ?? "no queue state"}`;
+    drift =
+      verifiedState === state
+        ? `${state} -> conflicting queue labels (${queueLabelsFromIssue(verified).join(", ")})`
+        : `${state} -> ${verifiedState ?? "no queue state"}`;
     if (attempt < SYNC_RECONCILE_ATTEMPTS) {
       issue = verified;
       await operations.sleep(SYNC_VERIFY_SETTLE_MS);
@@ -488,19 +533,19 @@ export async function sync(options, dependencies = {}) {
     findIssueProjectItem,
     getIssue,
     getProject,
-    listIssuesByLabel,
+    listIssuesByLabels,
     sleep,
     updateProjectFields,
     ...dependencies,
   };
   const project = await operations.getProject(options);
   const byNumber = new Map();
-  for (const label of ISSUE_STATE_LABELS) {
-    for (const issue of await operations.listIssuesByLabel(options, label, {
-      state: "all",
-    })) {
-      byNumber.set(issue.number, issue);
-    }
+  for (const issue of await operations.listIssuesByLabels(
+    options,
+    ISSUE_STATE_LABELS,
+    { state: "all" },
+  )) {
+    byNumber.set(issue.number, issue);
   }
 
   const results = [];

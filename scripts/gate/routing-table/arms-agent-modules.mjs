@@ -276,6 +276,10 @@ export const AGENT_MODULE_ARMS = [
         command: "pnpm sentry:project:test",
         reason: "shared GitHub issue lifecycle module changed",
       },
+      {
+        command: "pnpm issue:board:test",
+        reason: "shared GitHub issue lifecycle module changed",
+      },
     ],
   },
   {
