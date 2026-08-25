@@ -125,6 +125,7 @@ gate_coordinator_recompute_fingerprint() {
     "content=${fresh_content}" "packageRisk=${package_script_risk_changed}" \
     "allowPackageScripts=${stamp_allow_package_scripts}" \
     "commandTimeout=${command_timeout_seconds}" \
+    "gateSelftestTimeout=${gate_selftest_timeout_seconds}" \
     "qualityParallelism=${quality_parallelism}" "failFast=${fail_fast}" \
     "os=${os_name}" "arch=${os_arch}" "nodePath=${node_path}" \
     "node=${node_version}" "pnpmPath=${pnpm_path}" \

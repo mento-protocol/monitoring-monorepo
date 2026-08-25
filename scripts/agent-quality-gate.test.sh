@@ -1212,13 +1212,28 @@ for (const refName of ["base", "head"]) {
 }
 assert.match(
   support,
-  /"commandTimeout=\$\{command_timeout_seconds\}"[\s\S]*?"qualityParallelism=\$\{quality_parallelism\}" "failFast=\$\{fail_fast\}"/u,
-  "shared executions must bind timeout, parallelism, and fail-fast controls",
+  /"commandTimeout=\$\{command_timeout_seconds\}"[\s\S]*?"gateSelftestTimeout=\$\{gate_selftest_timeout_seconds\}"[\s\S]*?"qualityParallelism=\$\{quality_parallelism\}" "failFast=\$\{fail_fast\}"/u,
+  "shared executions must bind ordinary and self-test timeouts, parallelism, and fail-fast controls",
 );
 assert.match(
   source,
-  /"commandTimeout=\$\{command_timeout_seconds\}"[\s\S]*?"qualityParallelism=\$\{quality_parallelism\}" "failFast=\$\{fail_fast\}"/u,
-  "coordinated freshness must bind timeout, parallelism, and fail-fast controls",
+  /"commandTimeout=\$\{command_timeout_seconds\}"[\s\S]*?"gateSelftestTimeout=\$\{gate_selftest_timeout_seconds\}"[\s\S]*?"qualityParallelism=\$\{quality_parallelism\}" "failFast=\$\{fail_fast\}"/u,
+  "coordinated freshness must bind ordinary and self-test timeouts, parallelism, and fail-fast controls",
+);
+assert.match(
+  source,
+  /command_timeout_overridden=false[\s\S]*?AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS[\s\S]*?command_timeout_overridden=true[\s\S]*?gate_selftest_timeout_seconds=1800/u,
+  "the self-test must receive a bounded default without widening ordinary command timeouts",
+);
+assert.match(
+  source,
+  /--command-timeout\)[\s\S]*?command_timeout_overridden=true[\s\S]*?if \[\[ "\$command_timeout_overridden" == true \]\]; then\n  gate_selftest_timeout_seconds="\$command_timeout_seconds"/u,
+  "an explicit command timeout must override the self-test default",
+);
+assert.match(
+  source,
+  /mapped_command_timeout_seconds\(\)[\s\S]*?"pnpm agent:quality-gate:test"\|"bash scripts\/agent-quality-gate\.test\.sh"\)[\s\S]*?"\$gate_selftest_timeout_seconds"[\s\S]*?"\$command_timeout_seconds"[\s\S]*?effective_command_timeout_seconds="\$\(mapped_command_timeout_seconds "\$command"\)"[\s\S]*?"\$cmd_pid" "\$effective_command_timeout_seconds"/u,
+  "the watchdog must receive the effective timeout for the mapped command",
 );
 assert.match(
   support,
@@ -9762,6 +9777,43 @@ rm -rf "$command_stamp_exempt_repo"
 assert_raw_contains "↻ pnpm lint:scripts (fresh from previous run)"
 assert_not_contains "↻ pnpm agent:quality-gate:test"
 assert_not_contains "↻ ./tools/trunk check"
+
+# Execute the production timeout selector without sourcing the gate's top-level
+# workflow. This keeps the test fast while proving both accepted self-test
+# spellings and the explicit-override state that the option parser creates.
+timeout_selector="$({
+  awk '
+    /^mapped_command_timeout_seconds\(\) \{/ { capture = 1 }
+    capture { print }
+    capture && /^}$/ { exit }
+  ' "$repo_root/scripts/agent-quality-gate.sh"
+})"
+[[ -n "$timeout_selector" ]] ||
+  fail "could not load the mapped-command timeout selector"
+eval "$timeout_selector"
+command_timeout_seconds=1500
+# shellcheck disable=SC2034 # read by the eval-loaded production selector
+gate_selftest_timeout_seconds=1800
+[[ "$(mapped_command_timeout_seconds "pnpm lint:scripts")" == 1500 ]] ||
+  fail "ordinary mapped commands did not retain the 1500-second default"
+for selftest_command in \
+  "pnpm agent:quality-gate:test" \
+  "bash scripts/agent-quality-gate.test.sh"; do
+  [[ "$(mapped_command_timeout_seconds "$selftest_command")" == 1800 ]] ||
+    fail "${selftest_command} did not receive the 1800-second default"
+done
+command_timeout_seconds=7
+# shellcheck disable=SC2034 # read by the eval-loaded production selector
+gate_selftest_timeout_seconds="$command_timeout_seconds"
+for overridden_command in \
+  "pnpm lint:scripts" \
+  "pnpm agent:quality-gate:test" \
+  "bash scripts/agent-quality-gate.test.sh"; do
+  [[ "$(mapped_command_timeout_seconds "$overridden_command")" == 7 ]] ||
+    fail "an explicit command timeout did not cover ${overridden_command}"
+done
+assert_script_occurrences 2 \
+  'Command timed out after $(mapped_command_timeout_seconds "$command")s: ${command}'
 
 # GitHub issue #1410: no mapped command may hang forever. A command that sleeps
 # past --command-timeout is killed (whole process tree) and reported as a normal

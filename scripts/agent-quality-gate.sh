@@ -39,6 +39,7 @@ Options:
   --command-timeout <n>
                  With --run, kill any single mapped command that runs longer
                  than n seconds and report it as a failure. Default: 1500. The
+                 gate self-test uses 1800 unless this option overrides it. A
                  timeout is per command, never for the whole run.
   --lock-wait <n>
                  With --run, wait at most n seconds for scheduler admission,
@@ -61,7 +62,9 @@ Environment:
   AGENT_GATE_FULL_TESTS
                       Same behavior as --full-local-tests when set to 1 or true.
   AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS
-                      Same behavior as --command-timeout. Default: 1500.
+                      Same behavior as --command-timeout. Default: 1500; an
+                      explicit value also overrides the 1800-second gate
+                      self-test default.
   AGENT_QUALITY_GATE_LOCK
                       Set to 0 or false for the same effect as --no-lock.
   AGENT_QUALITY_GATE_LOCK_WAIT_SECONDS
@@ -87,15 +90,17 @@ fail_fast="${AGENT_QUALITY_FAIL_FAST:-false}"
 skip_if_fresh="${AGENT_QUALITY_SKIP_IF_FRESH:-false}"
 quality_parallelism="${AGENT_QUALITY_PARALLELISM:-auto}"
 full_local_tests="${AGENT_GATE_FULL_TESTS:-false}"
-# 900 was the bound until this gate's own self-test became the longest mapped
-# command. That suite spends most of its time asserting that runs queue rather
-# than race, so its length is load-bearing rather than slack: measured at 525s
-# alone and past 900s inside a full gate run, where it competes with everything
-# else on the machine. The cap is a backstop against a hung command, not a
-# performance budget, so it moves to the smallest number that clears the
-# measurement with room — the durations log is where a command that has grown
-# too slow gets noticed.
+# The gate self-test is the only mapped command that needs more than the
+# ordinary 1500-second watchdog. It passed at 1452 seconds, then reached the
+# unchanged watchdog at 1504 seconds after its coordinator recovery coverage
+# grew. Give that command a bounded 20% margin. An explicit global override
+# still applies to every command, including the self-test.
+command_timeout_overridden=false
+if [[ -n "${AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS:-}" ]]; then
+  command_timeout_overridden=true
+fi
 command_timeout_seconds="${AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS:-1500}"
+gate_selftest_timeout_seconds=1800
 gate_lock_enabled="${AGENT_QUALITY_GATE_LOCK:-1}"
 gate_coordinator_enabled="${AGENT_QUALITY_GATE_COORDINATOR-1}"
 gate_coordinator_capacity="${AGENT_QUALITY_GATE_CAPACITY-3}"
@@ -216,6 +221,7 @@ while [[ $# -gt 0 ]]; do
         echo "error: --command-timeout requires a positive integer" >&2
         exit 2
       fi
+      command_timeout_overridden=true
       shift 2
       ;;
     --lock-wait)
@@ -278,6 +284,9 @@ fi
 if [[ ! "$command_timeout_seconds" =~ ^[0-9]+$ || "$command_timeout_seconds" -lt 1 ]]; then
   echo "error: --command-timeout requires a positive integer" >&2
   exit 2
+fi
+if [[ "$command_timeout_overridden" == true ]]; then
+  gate_selftest_timeout_seconds="$command_timeout_seconds"
 fi
 
 if [[ ! "$gate_lock_wait_seconds" =~ ^[0-9]+$ ]]; then
@@ -4765,6 +4774,7 @@ gate_coordinator_freshness_context_hash() {
   printf '%s\n' \
     "schema=v1" "repository=${repository_identity}" \
     "commandTimeout=${command_timeout_seconds}" \
+    "gateSelftestTimeout=${gate_selftest_timeout_seconds}" \
     "qualityParallelism=${quality_parallelism}" "failFast=${fail_fast}" \
     "os=${os_name}" "arch=${os_arch}" "nodePath=${node_path}" \
     "node=${node_version}" "pnpmPath=${pnpm_path}" \
@@ -5438,6 +5448,17 @@ monitor_sequential_autoreview_progress() {
 # processes (pnpm -> node, etc.) do not survive. Sets last_command_timed_out and
 # returns the command's exit status; a signal-death is remapped to a normal
 # failure code (see below). Applies per command only, never to the whole run.
+mapped_command_timeout_seconds() {
+  case "$1" in
+    "pnpm agent:quality-gate:test"|"bash scripts/agent-quality-gate.test.sh")
+      printf '%s\n' "$gate_selftest_timeout_seconds"
+      ;;
+    *)
+      printf '%s\n' "$command_timeout_seconds"
+      ;;
+  esac
+}
+
 run_with_timeout() {
   local command="$1"
   local deferred_lease_file="${2:-}"
@@ -5453,6 +5474,7 @@ run_with_timeout() {
   local had_errexit=0
   local command_started_at
   local command_finished_at
+  local effective_command_timeout_seconds
   local coordinator_marker="${gate_coordinator_marker_file:-}"
   local request_marker command_marker command_tag request_tag
   local coordinator_release_deferred=0
@@ -5470,6 +5492,8 @@ run_with_timeout() {
     *e*) had_errexit=1 ;;
   esac
   set +e
+
+  effective_command_timeout_seconds="$(mapped_command_timeout_seconds "$command")"
 
   last_command_timed_out=false
   last_command_execution_seconds=0
@@ -5696,7 +5720,7 @@ EOF_KILL
     kill_tree "$cmd_pid"
     exit 0
   ' "$command_tag" "$request_tag" \
-    "$cmd_pid" "$command_timeout_seconds" "$timeout_marker" "$$" \
+    "$cmd_pid" "$effective_command_timeout_seconds" "$timeout_marker" "$$" \
     "$close_parallel_worker_control_fd" >/dev/null 2>&1 &
   watchdog_pid=$!
   active_timeout_pids=("$cmd_pid" "$watchdog_pid")
@@ -5994,7 +6018,7 @@ run_mapped_command() {
 
   record_command_summary "fail" "$elapsed" "$command"
   if [[ "$timed_out" == true ]]; then
-    echo "Command timed out after ${command_timeout_seconds}s: ${command}" >&2
+    echo "Command timed out after $(mapped_command_timeout_seconds "$command")s: ${command}" >&2
   else
     echo "Command failed after $(format_duration "$elapsed"): ${command}" >&2
   fi
@@ -6520,7 +6544,7 @@ run_mapped_entries_parallel() {
         failures=$((failures + 1))
         record_command_summary "fail" "$elapsed" "$command"
         if [[ "$timed_out" == true ]]; then
-          echo "Command timed out after ${command_timeout_seconds}s: ${command}" >&2
+          echo "Command timed out after $(mapped_command_timeout_seconds "$command")s: ${command}" >&2
         else
           echo "Command failed after $(format_duration "$elapsed"): ${command}" >&2
         fi

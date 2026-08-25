@@ -1921,9 +1921,13 @@ execution, the Trunk check, gate self-test, and advisory ADR reminder also
 always re-run. The Trunk check is skipped, never reused, where the CLI cannot
 be provisioned.
 
-Each mapped command has a watchdog (default 1500 seconds; override with
-`--command-timeout <n>` or `AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS`). On timeout
-it TERM→KILLs the process tree, reports
+Each mapped command has a watchdog. The ordinary default is 1500 seconds. The
+gate self-test default is 1800 seconds because measured exact-head runs took
+1452 seconds and then reached the old 1500-second bound at 1504 seconds after
+the coordinator recovery suite grew. `--command-timeout <n>` or
+`AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS` replaces both defaults. The resolved
+ordinary and self-test bounds are part of the coordinated execution identity.
+On timeout the watchdog TERM→KILLs the process tree, reports
 `Command timed out after <n>s: <command>`, and logs durations status `fail`. The
 gate does not support a self-daemonizing child that also discards every gate
 identity. Issue #2042 tracks portable containment or enforcement. The timeout
