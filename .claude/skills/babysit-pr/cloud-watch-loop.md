@@ -21,7 +21,11 @@ blocker handling stay as written in [`SKILL.md`](SKILL.md).
 Do not foreground-poll and never sleep-poll. Instead:
 
 1. Subscribe to PR events (`subscribe_pr_activity`) so comments, reviews, and
-   CI failures arrive as webhook activity.
+   CI failures arrive as webhook activity. An edit to an existing bot comment
+   (for example CodeRabbit or Codex updating its own summary) re-fires a
+   PR-activity wake the same as a new comment. Dedupe by comment id plus its
+   updated content, not by event count, or an edited-in-place summary reads
+   as new findings each time it changes.
 2. Arm a scheduled self check-in (for example `send_later`) before ending the
    turn, every 15–20 minutes against the default one-hour deadline. Webhook
    events do not cover CI success, new pushes, or merge-conflict transitions,

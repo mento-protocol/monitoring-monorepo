@@ -196,10 +196,14 @@ fully satisfies the issue.
 
 For normal monitoring-monorepo ship requests, especially `ship it` or a complete
 ship loop, open or convert the PR as ready-for-review once the local gate passes:
-drafts suppress the automated AI reviews this workflow depends on. Use draft
-only when the user explicitly asks for draft/PR-only handling or when required
-validation/review is intentionally still pending, and state that reason in the
-PR body and final summary.
+drafts suppress the automated AI reviews this workflow depends on. A draft PR
+turns off two enforcement surfaces silently: CodeRabbit auto-review (its
+`reviews.auto_review.drafts` setting could restore this, and `.coderabbit.yaml`
+deliberately leaves it `false`) and the `pr-description.yml` CI check, which
+skips `github.event.pull_request.draft == true`. Neither runs until the PR
+leaves draft. Use draft only when the user explicitly asks for draft/PR-only
+handling or when required validation/review is intentionally still pending, and
+state that reason in the PR body and final summary.
 
 ### UI visual evidence
 

@@ -299,7 +299,10 @@ summary enclosed by `<!-- recent_review_start -->` and
 `<!-- recent_review_end -->`. The summary must bind its Run ID and full reviewed
 commit range to the current head. Its comment update time must be at or after
 the head update time. Empty review records, skipped runs, and rate-limit notices
-do not count. If the optional `CodeRabbit` check is still pending, report that
+do not count. CodeRabbit reviews are rate-limited to roughly one review per hour
+per PR; a re-request inside that window queues or no-ops, so do not tight-loop
+`@coderabbitai review` requests waiting for a faster turnaround. If the optional
+`CodeRabbit` check is still pending, report that
 lag and do not race it with a manual request. After the check becomes terminal,
 refresh feedback-state once. For `missing` or `stale`, re-resolve and validate
 the full 40-hex `headRefOid`. Recheck it immediately before the write and post

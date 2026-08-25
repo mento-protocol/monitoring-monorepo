@@ -2226,6 +2226,80 @@ run_requested_codex_missing_regression() {
   expect_stderr_contains "set AUTOREVIEW_CODEX_BIN to its absolute path"
   expect_stderr_contains "Probed:"
   expect_stdout_not_contains "autoreview clean"
+  if grep -Fq "falling back" "$stderr"; then
+    printf 'an explicit --engine codex must never fall back silently\nstderr:\n%s\n' \
+      "$(cat "$stderr")" >&2
+    exit 1
+  fi
+}
+
+# The repo docs call the bare `pnpm agent:autoreview` invocation "the
+# closeout", so it must still run in a shell with no installed codex CLI (e.g.
+# a Claude cloud container): default engine selection must fall back to
+# claude, with one clear notice line, instead of failing with codex's own
+# "not available" error.
+run_engine_default_fallback_regression() {
+  local review_repo="$tmp_dir/engine-default-fallback"
+  local fake_bin="$tmp_dir/engine-default-fallback-bin"
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  printf 'change\n' >>"$review_repo/README.md"
+
+  mkdir "$fake_bin"
+  cat >"$fake_bin/claude" <<'CLAUDE'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  cat >/dev/null
+  printf '2.1.210\n'
+  exit 0
+fi
+if [[ "${1:-}" == "--help" ]]; then
+  cat >/dev/null
+  printf '%s\n' --safe-mode --setting-sources --strict-mcp-config --disallowedTools --tools
+  exit 0
+fi
+cat >/dev/null
+cat <<'JSON'
+{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"clean","overall_confidence":0.9}
+JSON
+CLAUDE
+  chmod +x "$fake_bin/claude"
+
+  : >"$stdout"
+  : >"$stderr"
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=$fake_bin:$hermetic_git_bin" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "GIT_CONFIG_GLOBAL=/dev/null" \
+      "AUTOREVIEW_EXTRA_BIN_DIRS=" \
+      "$node_bin" "$repo_root/scripts/agent-autoreview.mjs" \
+      --mode local >"$stdout" 2>"$stderr"
+  )
+  expect_stdout_contains "autoreview target: local"
+  expect_stdout_contains "engine: claude"
+  expect_stdout_contains "autoreview clean"
+  expect_stderr_contains "codex CLI not found; falling back to --engine claude"
+}
+
+# When neither engine's CLI is reachable, the caller needs one error naming
+# both -- not codex's own "not available" message standing in for claude too.
+run_engine_default_fallback_neither_available_regression() {
+  local review_repo="$tmp_dir/engine-default-fallback-neither"
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  printf 'change\n' >>"$review_repo/README.md"
+
+  run_node_helper_in_repo_expect_failure "$review_repo" --mode local
+  expect_stdout_contains "autoreview target: local"
+  expect_stderr_contains "neither codex nor claude CLI is available"
+  expect_stderr_contains "codex CLI is not available"
+  expect_stderr_contains "claude CLI is not available"
+  expect_stdout_not_contains "autoreview clean"
 }
 
 run_codex_resolution_helper() {
@@ -8913,6 +8987,8 @@ run_untrusted_cleanup_retention_regression() {
 
 run_engine_isolation_family() {
   run_requested_codex_missing_regression
+  run_engine_default_fallback_regression
+  run_engine_default_fallback_neither_available_regression
   run_codex_binary_resolution_regression
   run_suite_family_diagnostic_regression
   run_claude_no_tools_regression

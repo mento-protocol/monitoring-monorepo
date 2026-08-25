@@ -143,7 +143,9 @@ Options:
   --mode <auto|local|branch|commit>  Review target mode (default: auto)
   --base <ref>                       Base ref for branch mode
   --commit <ref>                     Commit ref for commit mode (default: HEAD)
-  --engine <codex|claude|local>      Review engine (default: AUTOREVIEW_ENGINE or codex)
+  --engine <codex|claude|local>      Review engine (default: AUTOREVIEW_ENGINE or codex;
+                                      falls back to claude when codex is not
+                                      installed and neither was set explicitly)
   --model <name>                     Model passed through to the engine
   --thinking <level>                 Codex reasoning effort or Claude effort
   --prompt <text>                    Extra review instruction (repeatable)
@@ -184,6 +186,7 @@ function parseArgs(argv) {
     base: null,
     commit: "HEAD",
     engine: process.env.AUTOREVIEW_ENGINE || "codex",
+    engineExplicit: Boolean(process.env.AUTOREVIEW_ENGINE),
     model: null,
     thinking: null,
     prompts: [],
@@ -235,6 +238,7 @@ function parseArgs(argv) {
         break;
       case "--engine":
         args.engine = next();
+        args.engineExplicit = true;
         break;
       case "--model":
         args.model = next();
@@ -1269,6 +1273,26 @@ function resolveTrustedCommand(command, rejectRoot, { required = true } = {}) {
     throw new Error(unavailableCommandMessage(command));
   }
   return null;
+}
+
+// Cloud containers and some CI shells have no installed codex CLI. The repo
+// docs call the bare invocation "the closeout", so it must still run there:
+// when the caller left --engine and AUTOREVIEW_ENGINE unset, fall back to the
+// claude engine instead of letting the codex search fail deep inside runCodex.
+// An engine the caller asked for explicitly never falls back -- it fails with
+// its own clear error instead.
+function applyDefaultEngineFallback(args, repo) {
+  if (args.engineExplicit || args.engine !== "codex") return;
+  if (resolveTrustedCommand("codex", repo, { required: false })) return;
+  if (!resolveTrustedCommand("claude", repo, { required: false })) {
+    throw new Error(
+      `neither codex nor claude CLI is available. ${unavailableCommandMessage("codex")} ${unavailableCommandMessage("claude")}`,
+    );
+  }
+  console.error(
+    "agent:autoreview: codex CLI not found; falling back to --engine claude",
+  );
+  args.engine = "claude";
 }
 
 function trustedCurrentNode(rejectRoot) {
@@ -4784,6 +4808,7 @@ async function main() {
 
   console.log(`autoreview target: ${target.mode}`);
   console.log(`branch: ${branch}`);
+  applyDefaultEngineFallback(args, repo);
   console.log(`engine: ${args.engine}`);
   if (target.requested_ref)
     console.log(`requested_ref: ${target.requested_ref}`);

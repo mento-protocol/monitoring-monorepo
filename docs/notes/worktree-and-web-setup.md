@@ -68,9 +68,43 @@ The heavy bootstrap runs only for a remote startup event, not local sessions,
 resume, or compact. It installs dependencies, prewarms Trunk, runs the context
 check, builds/code-generates the required packages, configures available
 GitHub/MCP integration, and attempts a Playwright Chromium install for the
-dashboard browser fixture suite. The Playwright step is non-fatal: hosted
-environments that restrict outbound access to `cdn.playwright.dev` warn
-instead of failing the bootstrap.
+dashboard browser fixture suite. The Playwright step prefers a preinstalled
+Chromium under `/opt/pw-browsers` when the container image ships one
+(detected via `find`/`test`, exported as `PLAYWRIGHT_BROWSERS_PATH`) and
+otherwise falls back to downloading from `cdn.playwright.dev`, now
+allowlisted in this environment; either way the step is non-fatal, so a
+still-blocked download or a missing preinstall only warns instead of failing
+the bootstrap. The `PLAYWRIGHT_BROWSERS_PATH` export covers only the
+bootstrap subprocess itself: the script has no shell-profile persistence
+mechanism, so it does not carry over to later, separate Bash tool shells in
+the same session — the bootstrap log (below) and the in-script WARN explain
+how to set it manually if a later `test:browser` run needs it.
+
+The bootstrap's combined stdout/stderr is teed to the gitignored
+`.claude/logs/web-setup.log` (created by the SessionStart hook), overwritten
+each run, so a failed or degraded bootstrap leaves a diagnosable trace on
+disk even though the hook still routes that same output only to stderr to
+keep it out of the agent's context.
+
+If the container's Node major is older than the repo's `.node-version` (for
+example, an image shipping Node v22 against a `.node-version` of `24`), the
+bootstrap does not attempt to switch the running interpreter — corepack only
+manages package-manager shims, not Node itself, and `pnpm env use --global`
+would need `nodejs.org` network access this environment does not grant, plus
+it would not reach the agent's later, separate shell invocations even if it
+succeeded. The script instead prints one clear WARN naming the mismatch and
+how to fix it env-side (rebuild/select a Node-24 container image); the
+mismatch itself only produces non-fatal pnpm engine-range warnings, since no
+root `.npmrc` sets `engine-strict`.
+
+### Workaround: directory-listing denies block `ls`, not `test`
+
+This repo's sandbox read-deny rules (e.g. `Read(**/node_modules/**)`) also
+block Bash `ls` on the denied path, because `ls` needs to read the directory
+listing. Existence and non-emptiness checks on such paths still work via
+`test -d`/`test -f`/`find … -print -quit`, which the Playwright preinstall
+detection above relies on. Prefer that pattern over `ls` for any check on a
+denied path in a hosted or sandboxed session.
 
 Repo-local `ship` and `babysit-pr` skill adapters live under `.claude/skills/`
 (mirrored under `.agents/skills/` for Codex), so the familiar `/ship` and

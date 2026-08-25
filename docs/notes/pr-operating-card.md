@@ -43,6 +43,9 @@ even when you never open an authority.
    an architecture change that constrains future work records an ADR in the
    same PR. When a change adds or alters a command, script, env var, hook, or
    ordered runbook, audit every live entry point and runbook in the same PR.
+   Adding, renaming, or removing any doc also requires
+   `pnpm docs:index --write` in the same PR — the gate's `docs:index --check`
+   fails otherwise, and the fix is not discoverable from the error alone.
    Before touching or moving docs, read
    [`../context-standards.md`](../context-standards.md).
 
@@ -78,8 +81,11 @@ even when you never open an authority.
    non-trivial completed batch, run the closeout review. Outside an active
    Codex session — the standalone helper or `--engine claude` — a bare
    `pnpm agent:autoreview` is the closeout, matching the `ship` skill and root
-   [`AGENTS.md`](../../AGENTS.md). Inside an active Codex session, a bare
-   invocation silently selects the local deterministic engine — the `ship`
+   [`AGENTS.md`](../../AGENTS.md). In codex-less environments (including
+   Claude cloud sessions) autoreview falls back to `--engine claude`
+   automatically, so a bare invocation there is equivalent to the explicit
+   flag. Inside an active Codex session, a bare invocation silently selects
+   the local deterministic engine — the `ship`
    skill's bare closeout is NOT sufficient there; use the prepared-bundle
    fresh-context flow so a separate reviewer inspects every pass:
 

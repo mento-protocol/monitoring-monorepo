@@ -4685,6 +4685,12 @@ quiet_failure_repo="$(mktemp -d)"
   mkdir -p tools
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
+# `--version` answers the gate's provisioning probe: this stub models a Trunk
+# that IS installed and found real problems, so the gate must still fail.
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.0.0-fixture"
+  exit 0
+fi
 echo "[RPC_FAILURE] expected fixture failure that should be filtered"
 echo "real failure line"
 exit 1
@@ -4715,6 +4721,10 @@ quiet_stack_repo="$(mktemp -d)"
   mkdir -p tools
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.0.0-fixture"
+  exit 0
+fi
 echo "[address-labels] expected API failure"
 echo "Command failed at step 3"
 echo "    at Object.fixture (/tmp/fixture.js:1:1)"
@@ -4824,6 +4834,94 @@ rename_repo="$(mktemp -d)"
 rm -rf "$rename_repo"
 assert_contains "Refusing to run because package manifests, patches, or lockfile changed."
 assert_contains "dependency install scripts"
+
+# The Trunk arm is stamp-exempt, so a launcher that cannot download the pinned
+# CLI used to hard-fail every run in a container that blocks trunk.io — the gate
+# could never exit 0 there. A PROVISIONING failure now degrades the way
+# .trunk/hooks already does: warn, name the allowlist fix, skip. The stub prints
+# nothing and exits non-zero for every argument, `--version` included, which is
+# what a launcher whose download 403s looks like from outside.
+trunk_unprovisionable_repo="$(mktemp -d)"
+(
+  cd "$trunk_unprovisionable_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 1
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+)
+assert_contains "warning: skipping ./tools/trunk check fixture.txt — the Trunk CLI could not be provisioned."
+assert_contains "Add 'trunk.io' and '*.trunk.io' to the environment's allowed domains to run it here."
+assert_contains "- skipped "
+assert_contains "All mapped commands passed."
+assert_contains "Note: the Trunk arm was skipped"
+assert_not_contains "mapped command(s) failed."
+
+# Same degradation on the sequential path: --fail-fast must not stop on an arm
+# the environment blocked.
+(
+  cd "$trunk_unprovisionable_repo"
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run --fail-fast > "$output_file" 2>&1
+)
+rm -rf "$trunk_unprovisionable_repo"
+assert_contains "warning: skipping ./tools/trunk check fixture.txt — the Trunk CLI could not be provisioned."
+assert_contains "All mapped commands passed."
+assert_not_contains "Stopping after first failed mapped command (--fail-fast)."
+
+# The invariant the degradation must not break: a Trunk that IS provisioned and
+# finds real problems still fails the gate. The stub answers the provisioning
+# probe, so only its `check` verdict is in question — and the last lines of what
+# it printed are replayed next to the verdict, because in a parallel run the
+# inline dump can sit far above it (and a quiet launcher leaves none at all).
+trunk_provisioned_failure_repo="$(mktemp -d)"
+(
+  cd "$trunk_provisioned_failure_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.0.0-fixture"
+  exit 0
+fi
+echo "trunk-oldest-line"
+for filler in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25; do
+  echo "trunk-filler ${filler}"
+done
+echo "trunk-real-problem fixture lint failure"
+exit 1
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  set +e
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]]
+)
+rm -rf "$trunk_provisioned_failure_repo"
+assert_contains "1 mapped command(s) failed."
+assert_contains "Failure output (last 20 lines per command):"
+assert_contains "- fail "
+assert_not_contains "- skipped "
+# Once inline, once in the replayed tail.
+assert_occurrences 2 "trunk-real-problem fixture lint failure"
+# ...and the replay is a tail: the 27th-from-last line stays inline-only.
+assert_occurrences 1 "trunk-oldest-line"
 } # end family: failure-output
 
 # family: routing-docs

@@ -3,7 +3,7 @@ title: GitHub Tooling Surfaces — gh CLI vs MCP
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-21
+last_verified: 2026-08-25
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -19,10 +19,12 @@ skills link here instead of duplicating it.
 - **Local sessions (and Codex Cloud): gh-first.** The gh CLI works, so the
   shared probes (`pnpm pr:ready-state`, `pnpm pr:feedback-state`,
   `pnpm issue:claim`) are the source of truth.
-- **Claude cloud sessions: MCP-first.** The platform's GitHub credential proxy
-  blocks the API paths gh needs, so GitHub work goes through the GitHub MCP
-  tools, and monitoring goes through PR webhook subscription plus scheduled
-  self check-ins.
+- **Claude cloud sessions: MCP-first.** The gh binary is not installed by
+  default in cloud containers, and even where it is obtained, GraphQL stays
+  blocked (the probes rely on it — `pnpm pr:ready-state` fails on its first
+  call because `gh pr view --json` rides on GraphQL). GitHub work goes through
+  the GitHub MCP tools, and monitoring goes through PR webhook subscription
+  plus scheduled self check-ins.
 
 ## Surface detection
 
@@ -32,16 +34,46 @@ skills link here instead of duplicating it.
    gate `scripts/bootstrap/claude-code-web-setup.sh` and `.claude/babysit-pr.sh`
    use.
 2. Otherwise → local (or Codex Cloud) → gh-first.
-3. The capability gate: a repo-scoped `gh api repos/<owner>/<repo>` call, a
-   minimal GraphQL query (`gh api graphql -f query='query{viewer{login}}'`),
-   and `gh api --slurp` support must all succeed. **Do not use
-   `gh auth status` or `/user` reachability as the signal** — in Claude cloud
-   sessions the proxy serves `/user` and `/rate_limit` (so `gh auth status`
-   succeeds) while every `/repos/*` path and GraphQL query is still blocked.
+3. The capability gate: run `command -v gh` **first**. Cloud containers do not
+   ship a gh binary by default, so the gate must fail here in the common case
+   rather than at the first `gh api` call below — a probe that skips this
+   check reads "command not found" as an evaluation failure instead of the
+   absence signal it actually is. When gh is present, a repo-scoped
+   `gh api repos/<owner>/<repo>` call, a minimal GraphQL query
+   (`gh api graphql -f query='query{viewer{login}}'`), and `gh api --slurp`
+   support must all succeed. **Do not use `gh auth status` or `/user`
+   reachability as the signal** — in Claude cloud sessions the proxy serves
+   `/user` and `/rate_limit` (so `gh auth status` succeeds) while GraphQL is
+   still blocked, and REST `/repos/*` behavior has been observed to vary (see
+   below).
 
 ## Why gh cannot work in Claude cloud sessions
 
-Empirical findings (2026-07-22, verified in two independent cloud containers):
+The empirical surface has moved between verification passes and is
+version/session-dependent — re-verify before relying on a specific claim
+below rather than treating any one pass as permanent.
+
+Current empirical findings (2026-08-24, two independent cloud containers):
+
+- **The gh binary is not installed by default.** The documented capability
+  gate fails at "command not found" before it reaches the `gh api` calls it
+  is meant to evaluate; the probe must start with `command -v gh` (see
+  Surface detection above).
+- **Obtaining a gh binary is itself unreliable.** A release-tarball fetch
+  from `github.com` can 403: the platform's GitHub credential proxy scopes
+  `github.com` access to session-attached repositories, and a release asset
+  is not one.
+- **REST `/repos/*` calls succeeded.** This contradicts the 2026-07-22 finding
+  below that every `/repos/*` path 403s. Treat the REST surface as
+  version-dependent rather than a fixed blanket block.
+- **GraphQL and the gh binary remain the reliably observed blockers.**
+  `pnpm pr:ready-state` and `pnpm pr:feedback-state` fail on their first call
+  regardless of REST behavior, because `gh pr view --json` rides on GraphQL
+  and no cloud container has been observed with a working gh binary.
+
+Superseded findings (2026-07-22, two independent cloud containers) — kept for
+history; the REST `/repos/*` claim below is contradicted by the 2026-08-24
+pass above:
 
 - Outbound TLS to `github.com` / `api.github.com` is intercepted by the
   platform's GitHub credential proxy (CONNECT succeeds; responses are the
@@ -55,16 +87,20 @@ Empirical findings (2026-07-22, verified in two independent cloud containers):
 - Allowed: `git` transport (via the local credential proxy the origin remote
   points at), `github.com` web pages and `raw.githubusercontent.com` for
   session-attached repos, and `api.github.com` `/user` + `/rate_limit`.
-- Blocked with structured 403s: every `api.github.com/repos/*` path (including
-  the attached repo) and all GraphQL except an internal pinned operation set
-  that serves the platform's own PR tooling. `pnpm pr:ready-state` fails on
-  its first call (`gh pr view --json` rides on GraphQL).
+- ~~Blocked with structured 403s: every `api.github.com/repos/*` path~~ —
+  superseded 2026-08-24 above. All GraphQL except an internal pinned
+  operation set that serves the platform's own PR tooling stays blocked.
+  `pnpm pr:ready-state` fails on its first call (`gh pr view --json` rides on
+  GraphQL).
 - The 403 body's remedy text ("an org admin must connect the Claude GitHub
   App") is misleading: the app being installed org-wide does not change this —
   the gate is per-session platform policy, and the supported API path in these
   sessions is the GitHub MCP server.
 
-Do not build a gh-over-MCP shim; the skills document the two native paths.
+Regardless of REST behavior, MCP-first stands for Claude cloud sessions: the
+gh binary is not reliably available, GraphQL stays blocked, and the probes the
+skills depend on need both. Do not build a gh-over-MCP shim; the skills
+document the two native paths.
 
 ## gh → MCP mapping
 
