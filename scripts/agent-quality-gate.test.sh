@@ -6162,6 +6162,15 @@ run_parallel_interrupt_regression() {
   local signal="$2"
   local expected_exit="$3"
   local parallel_interrupt_repo
+  process_group_has_non_zombie_member() {
+    ps -eo pgid=,stat= 2>/dev/null |
+      awk -v wanted="$1" '$1 == wanted && $2 !~ /^Z/ { found = 1 } END { exit !found }'
+  }
+  process_is_non_zombie() {
+    local stat
+    stat="$(ps -o stat= -p "$1" 2>/dev/null || true)"
+    [[ -n "$stat" && "$stat" != Z* ]]
+  }
   parallel_interrupt_repo="$(mktemp -d)"
   (
     cd "$parallel_interrupt_repo"
@@ -6285,7 +6294,7 @@ STUB
     [[ "$worker_pgid" =~ ^[1-9][0-9]*$ ]] ||
       fail_parallel_interrupt_fixture \
         "parallel $phase interrupt fixture recorded an invalid worker PGID"
-    kill -0 -- "-$worker_pgid" 2>/dev/null ||
+    process_group_has_non_zombie_member "$worker_pgid" ||
       fail_parallel_interrupt_fixture \
         "parallel $phase worker did not launch in a dedicated process group"
 
@@ -6328,17 +6337,17 @@ STUB
         "parallel $phase interrupt exited $interrupt_exit, expected $expected_exit"
 
     for ((attempt = 0; attempt < 100; attempt++)); do
-      if ! kill -0 -- "-$worker_pgid" 2>/dev/null; then
+      if ! process_group_has_non_zombie_member "$worker_pgid"; then
         break
       fi
       sleep 0.05
     done
-    if kill -0 -- "-$worker_pgid" 2>/dev/null; then
+    if process_group_has_non_zombie_member "$worker_pgid"; then
       fail_parallel_interrupt_fixture \
         "parallel $phase interrupt left the registered worker group running"
     fi
-    if kill -0 "$victim_pid" 2>/dev/null ||
-      kill -0 "$descendant_pid" 2>/dev/null; then
+    if process_is_non_zombie "$victim_pid" ||
+      process_is_non_zombie "$descendant_pid"; then
       fail_parallel_interrupt_fixture \
         "parallel $phase interrupt left a TERM-ignoring descendant running"
     fi
