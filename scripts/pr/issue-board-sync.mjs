@@ -77,17 +77,20 @@ function retryQueueSnapshotForCloseout(
   listedIssue,
 ) {
   const closeoutQueueLabels = queueLabelsFromIssue(closeoutIssue);
-  if (closeoutQueueLabels.length > 0) {
+  if (closeoutQueueLabels.length === 1) {
     return { labels: closeoutQueueLabels, compensateAfterAdd: true };
   }
 
-  // Stale queue evidence needs a visible state that cannot grant review or
-  // release authority if the issue reopens during recovery.
+  // Ambiguous or stale queue evidence needs a visible state that cannot grant
+  // claim, review, or release authority if the issue reopens during recovery.
+  const hasRetryEvidence =
+    closeoutQueueLabels.length > 1 ||
+    nearestQueueLabels(initialIssue, listedIssue).length > 0;
   return {
-    labels:
-      nearestQueueLabels(initialIssue, listedIssue).length > 0
-        ? labelsForState("grooming").addLabels
-        : [],
+    labels: hasRetryEvidence ? labelsForState("grooming").addLabels : [],
+    // GitHub label additions are idempotent. A successful quarantine add does
+    // not prove that this recovery created the label. Preserve any conflict so
+    // a stale fallback cannot grant claim, review, or release authority.
     compensateAfterAdd: false,
   };
 }
@@ -214,12 +217,12 @@ async function preserveRetryQueueLabels(
   }
 
   let lastError = null;
-  let addAttempted = false;
+  let provisionalAddConfirmed = false;
   for (let attempt = 1; attempt <= SYNC_VERIFY_ATTEMPTS; attempt += 1) {
     let verified;
     try {
       verified = await operations.getIssue(options, issue.number);
-      if (addAttempted && compensateAfterAdd) {
+      if (provisionalAddConfirmed && compensateAfterAdd) {
         verified = await reconcileRetryQueueObservation(
           options,
           verified,
@@ -237,16 +240,16 @@ async function preserveRetryQueueLabels(
     }
 
     let addError = null;
-    addAttempted = true;
     try {
       await operations.addIssueLabels(options, verified, retryQueueLabels);
+      provisionalAddConfirmed = true;
     } catch (error) {
       addError = error;
     }
 
     try {
       verified = await operations.getIssue(options, issue.number);
-      if (compensateAfterAdd) {
+      if (provisionalAddConfirmed && compensateAfterAdd) {
         verified = await reconcileRetryQueueObservation(
           options,
           verified,
@@ -392,22 +395,23 @@ async function syncIssue(options, project, listedIssue, operations) {
       const reopenState =
         restoreStateFromCloseoutIssue(closeoutIssue) ??
         (retryQueueSnapshot.labels.length > 0 ? "grooming" : null);
-      await operations.editIssueLabels(options, closeoutIssue, state);
-      let verifiedIssue = await verifySyncCloseout(
-        options,
-        closeoutIssue,
-        operations,
-      );
-      if (String(verifiedIssue.state ?? "").toUpperCase() === "CLOSED") {
-        const verifiedItemId = await operations.findIssueProjectItem(
+      let verifiedIssue;
+      try {
+        await operations.editIssueLabels(options, closeoutIssue, state);
+        verifiedIssue = await verifySyncCloseout(
           options,
-          verifiedIssue,
-          project,
+          closeoutIssue,
+          operations,
         );
-        if (!verifiedItemId) {
-          return { number: issue.number, title: issue.title, state };
-        }
-        try {
+        if (String(verifiedIssue.state ?? "").toUpperCase() === "CLOSED") {
+          const verifiedItemId = await operations.findIssueProjectItem(
+            options,
+            verifiedIssue,
+            project,
+          );
+          if (!verifiedItemId) {
+            return { number: issue.number, title: issue.title, state };
+          }
           await operations.updateProjectFields(
             options,
             project,
@@ -415,65 +419,71 @@ async function syncIssue(options, project, listedIssue, operations) {
             state,
             {},
           );
-        } catch (projectionError) {
-          try {
-            await preserveRetryQueueLabels(
-              options,
-              verifiedIssue,
-              retryQueueSnapshot.labels,
-              retryQueueSnapshot.compensateAfterAdd,
-              operations,
-            );
-          } catch (retryError) {
-            throw new AggregateError(
-              [projectionError, retryError],
-              `Issue #${issue.number} late Done projection and retry-label restoration failed`,
-              { cause: retryError },
-            );
+          verifiedIssue = await verifySyncCloseout(
+            options,
+            verifiedIssue,
+            operations,
+          );
+          if (String(verifiedIssue.state ?? "").toUpperCase() === "CLOSED") {
+            return { number: issue.number, title: issue.title, state };
           }
-          throw projectionError;
         }
-        verifiedIssue = await verifySyncCloseout(
-          options,
-          verifiedIssue,
-          operations,
-        );
-        if (String(verifiedIssue.state ?? "").toUpperCase() === "CLOSED") {
-          return { number: issue.number, title: issue.title, state };
-        }
-      }
 
-      let reopenedIssue = verifiedIssue;
-      let reopenedState = syncStateFromIssue(reopenedIssue);
-      if (!reopenedState && reopenState) {
-        reopenedIssue = await operations.getIssue(options, issue.number);
-        reopenedState = syncStateFromIssue(reopenedIssue);
-        if (!reopenedState) {
-          await operations.editIssueLabels(options, reopenedIssue, reopenState);
-          [provisionalQueueLabel] = labelsForState(reopenState).addLabels;
+        let reopenedIssue = verifiedIssue;
+        let reopenedState = syncStateFromIssue(reopenedIssue);
+        if (!reopenedState && reopenState) {
           reopenedIssue = await operations.getIssue(options, issue.number);
-          ({ issue: reopenedIssue, provisionalQueueLabel } =
-            await compensateProvisionalQueueLabel(
+          reopenedState = syncStateFromIssue(reopenedIssue);
+          if (!reopenedState) {
+            await operations.editIssueLabels(
               options,
               reopenedIssue,
-              provisionalQueueLabel,
-              operations,
-            ));
-          reopenedState = syncStateFromIssue(reopenedIssue);
+              reopenState,
+            );
+            provisionalQueueLabel = retryQueueSnapshot.compensateAfterAdd
+              ? labelsForState(reopenState).addLabels[0]
+              : null;
+            reopenedIssue = await operations.getIssue(options, issue.number);
+            ({ issue: reopenedIssue, provisionalQueueLabel } =
+              await compensateProvisionalQueueLabel(
+                options,
+                reopenedIssue,
+                provisionalQueueLabel,
+                operations,
+              ));
+            reopenedState = syncStateFromIssue(reopenedIssue);
+          }
         }
+        drift =
+          reopenedState &&
+          reopenedState !== "done" &&
+          !hasExactQueueLabels(reopenedIssue, reopenedState)
+            ? `done -> conflicting queue labels (${queueLabelsFromIssue(reopenedIssue).join(", ")})`
+            : `done -> ${reopenedState ?? "no queue state"}`;
+        if (attempt < SYNC_RECONCILE_ATTEMPTS) {
+          issue = reopenedIssue;
+          await operations.sleep(SYNC_VERIFY_SETTLE_MS);
+          continue;
+        }
+        break;
+      } catch (postCleanupError) {
+        try {
+          await preserveRetryQueueLabels(
+            options,
+            verifiedIssue ?? closeoutIssue,
+            retryQueueSnapshot.labels,
+            retryQueueSnapshot.compensateAfterAdd,
+            operations,
+          );
+        } catch (retryError) {
+          throw new AggregateError(
+            [postCleanupError, retryError],
+            `Issue #${issue.number} post-cleanup sync and retry-label restoration failed`,
+            { cause: retryError },
+          );
+        }
+        throw postCleanupError;
       }
-      drift =
-        reopenedState &&
-        reopenedState !== "done" &&
-        !hasExactQueueLabels(reopenedIssue, reopenedState)
-          ? `done -> conflicting queue labels (${queueLabelsFromIssue(reopenedIssue).join(", ")})`
-          : `done -> ${reopenedState ?? "no queue state"}`;
-      if (attempt < SYNC_RECONCILE_ATTEMPTS) {
-        issue = reopenedIssue;
-        await operations.sleep(SYNC_VERIFY_SETTLE_MS);
-        continue;
-      }
-      break;
     }
 
     const itemId = await operations.ensureProjectItem(options, project, issue);

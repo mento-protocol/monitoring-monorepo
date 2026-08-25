@@ -78,9 +78,13 @@ Routing labels:
    reprojects bounded concurrent state changes. After a Done transition, it
    verifies that the issue remains closed and has no queue label. If the issue
    reopened, it restores a queue label confirmed immediately before cleanup and
-   projects the open state. If only an older enumerated queue label is known,
-   it uses `needs-grooming`. This keeps the issue visible without granting stale
-   review or release authority.
+   projects the open state. If the confirmed state is ambiguous, or if only an
+   older enumerated queue label is known, it uses `needs-grooming`. If a
+   post-cleanup check or Done projection fails, it makes bounded attempts to
+   restore this retry state before exit. This keeps the issue visible without
+   granting stale claim, review, or release authority. A concurrent conflict
+   with a fallback `needs-grooming` label stays visible and fails closed for
+   manual resolution.
    It fails if a closed issue retains a queue label or if state does not settle
    within the bounded attempts. A per-issue failure does not stop later issues.
    The command exits nonzero after it lists the successful and failed issue
