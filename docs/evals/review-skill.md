@@ -151,13 +151,13 @@ reads the twenty-line report and approves.
 ### Install the scheduler
 
 The plist is a template. A plist has no variable substitution, so the install
-step rewrites the two literal paths it carries: the checkout inside
-`ProgramArguments`, and the log file in `StandardOutPath` and
-`StandardErrorPath`. Run this from the root of your checkout.
+step substitutes its two placeholders: `__REPO_CHECKOUT__` (the checkout that
+holds `run-eval.sh`) and `__USER_HOME__` (the log location). Run this from the
+root of your checkout.
 
 ```bash
-sed -e "s|/Users/chapati/code/mento/monitoring-monorepo|$PWD|g" \
-    -e "s|/Users/chapati|$HOME|g" \
+sed -e "s|__REPO_CHECKOUT__|$PWD|g" \
+    -e "s|__USER_HOME__|$HOME|g" \
     scripts/review/launchd/org.mento.review-eval.plist \
     > ~/Library/LaunchAgents/org.mento.review-eval.plist
 grep -q "$PWD/scripts/review/run-eval.sh" ~/Library/LaunchAgents/org.mento.review-eval.plist

@@ -6,11 +6,11 @@
   StartCalendarInterval on the next wake; cron drops it silently.
 
   This file is a template and is not installable as it stands. A plist has no
-  variable substitution, so every path below is literal: the checkout inside
-  ProgramArguments and the log file in StandardOutPath and StandardErrorPath
-  all name /Users/chapati. "Install the scheduler" in docs/evals/review-skill.md
-  carries the one-line sed that rewrites both for the installing account; copy
-  this file unchanged and the monthly job cannot find the script or its log.
+  variable substitution, so the checkout inside ProgramArguments and the log
+  file in StandardOutPath and StandardErrorPath carry __REPO_CHECKOUT__ and
+  __USER_HOME__ placeholders. "Install the scheduler" in
+  docs/evals/review-skill.md carries the sed that substitutes both; copy this
+  file unchanged and launchd cannot find the script or its log.
 -->
 <plist version="1.0">
   <dict>
@@ -20,7 +20,7 @@
     <array>
       <string>/bin/zsh</string>
       <string>-lc</string>
-      <string>/Users/chapati/code/mento/monitoring-monorepo/scripts/review/run-eval.sh --kind auto</string>
+      <string>__REPO_CHECKOUT__/scripts/review/run-eval.sh --kind auto</string>
     </array>
     <key>StartCalendarInterval</key>
     <array>
@@ -34,9 +34,9 @@
       </dict>
     </array>
     <key>StandardOutPath</key>
-    <string>/Users/chapati/Library/Logs/mento-review-eval.log</string>
+    <string>__USER_HOME__/Library/Logs/mento-review-eval.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/chapati/Library/Logs/mento-review-eval.log</string>
+    <string>__USER_HOME__/Library/Logs/mento-review-eval.log</string>
     <key>RunAtLoad</key>
     <false/>
     <key>ProcessType</key>

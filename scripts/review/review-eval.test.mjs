@@ -1819,7 +1819,7 @@ test("the freshness workflow watches the frozen input directories", () => {
   assert.doesNotMatch(workflow, /- docs\/evals\/review-skill\*$/m);
 });
 
-test("every literal path in the launchd template is one the runbook rewrites", () => {
+test("the launchd template carries placeholders the runbook install step rewrites", () => {
   const plist = readFileSync(
     path.join(repoRoot, "scripts/review/launchd/org.mento.review-eval.plist"),
     "utf8",
@@ -1828,18 +1828,17 @@ test("every literal path in the launchd template is one the runbook rewrites", (
     path.join(repoRoot, "docs/evals/review-skill.md"),
     "utf8",
   );
-  const absolute = [...plist.matchAll(/<string>(\/[^<]+)<\/string>/g)].map(
-    (match) => match[1],
-  );
-  assert.ok(absolute.length > 0);
-  for (const value of absolute) {
-    // /bin/zsh is on every Mac; everything else names the author's account and
-    // must be covered by the documented substitution.
+  // The managed-context rule: no author-account path may survive in either file.
+  assert.doesNotMatch(plist, /\/Users\//);
+  assert.doesNotMatch(runbook, /\/Users\//);
+  const tokens = [
+    ...new Set([...plist.matchAll(/__[A-Z_]+__/g)].map((match) => match[0])),
+  ].sort();
+  assert.deepEqual(tokens, ["__REPO_CHECKOUT__", "__USER_HOME__"]);
+  for (const token of tokens) {
     assert.ok(
-      value.startsWith("/Users/chapati") || value.startsWith("/bin/"),
-      `${value} is a literal path the install step does not rewrite`,
+      runbook.includes(`s|${token}|`),
+      `${token} is not rewritten by the documented install step`,
     );
   }
-  assert.match(runbook, /sed -e "s\|\/Users\/chapati\/code\/mento/);
-  assert.match(runbook, /s\|\/Users\/chapati\|\$HOME\|g/);
 });
