@@ -136,11 +136,17 @@ suppresses ordinary duplicate posts for the same head. GitHub's issue-comment
 API has no conditional-create operation, so the marker is a detection and
 best-effort suppression mechanism rather than an atomic claim. The CodeRabbit
 check and review remain advisory: report a pending or rate-limited result as
-optional lag. CodeRabbit rate-limits reviews to roughly one per hour per PR, so
-a re-request inside that window queues or no-ops — do not tight-loop
-`@coderabbitai review` posts waiting for a faster turnaround. If a requested
-review finishes while the PR is still under watch, rerun `pr:feedback-state` and
-handle its findings before all-clear.
+optional lag. The rate limit is a shared quota, not a per-PR allowance.
+[ADR 0066](../adr/0066-coderabbit-replaces-bugbot-third-reviewer.md) records
+the two tiers: the free OSS tier meters per repository on a star-scaled 1–10
+reviews/hour, and a paid seat meters per developer identity across every PR
+that identity opened. This org runs a paid Pro+ seat, so the ceiling is the
+identity's, currently about 4 reviews/hour at this repo's review volume.
+Either way, watching several PRs at once draws down one allowance, so a
+re-request inside the window queues or no-ops on whichever PR reaches the
+limit first — do not tight-loop `@coderabbitai review` posts waiting for a
+faster turnaround. If a requested review finishes while the PR is still under
+watch, rerun `pr:feedback-state` and handle its findings before all-clear.
 
 Some non-required workflows still post feedback that becomes a repo-policy
 blocker after the required status surface is green. Their workflow status stays

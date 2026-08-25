@@ -3463,12 +3463,18 @@ echo "All mapped commands passed."
 if [[ "$trunk_provisioning_state" == blocked ]]; then
   echo "Note: the Trunk arm was skipped because the CLI could not be provisioned here; CI still enforces it."
 fi
-if [[ "${stamp_reuse_count:-0}" -eq 0 ]]; then
+if [[ "${stamp_reuse_count:-0}" -eq 0 && "$trunk_provisioning_state" != "blocked" ]]; then
   # Only a fully-executed green run earns the whole-run fast-path stamp. A
   # resumed run reused work whose real age lives in the per-command stamps;
   # re-dating it here would let --skip-if-fresh extend validation reuse past
   # the two-hour ceiling (command passes at t=0, retry succeeds at t=119m,
-  # fresh whole-run stamp then covers t=238m).
+  # fresh whole-run stamp then covers t=238m). A run that skipped Trunk
+  # because the launcher could not be provisioned is the same hazard from a
+  # different direction: the whole-run stamp carries no record of that skip,
+  # so a later --skip-if-fresh run — even one where Trunk has since become
+  # provisionable — would trust the stamp and never attempt it. Withholding
+  # the stamp here forces the next run to actually retry Trunk instead of
+  # inheriting a pass it never earned.
   {
     printf 'created_at=%s\n' "$(date +%s)"
     printf 'stamp=%s\n' "$current_stamp"

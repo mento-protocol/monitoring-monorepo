@@ -2373,6 +2373,145 @@ CLAUDE
   fi
 }
 
+# The override above fails at resolution, which applyDefaultEngineFallback()
+# already handles. This is the other half: an AUTOREVIEW_CODEX_BIN that
+# resolves to a real trusted executable and only then fails to launch. That
+# path never reaches applyDefaultEngineFallback()'s override guard -- the
+# resolution succeeds, so it returns early -- and lands instead on the
+# unusable-launcher fallback at the dispatch site. The override is still
+# explicit, so it must fail with codex's own error rather than swap the caller
+# onto claude.
+run_engine_default_fallback_unlaunchable_codex_bin_override_regression() {
+  local review_repo="$tmp_dir/engine-default-fallback-unlaunchable-codex-bin"
+  local fake_bin="$tmp_dir/engine-default-fallback-unlaunchable-codex-bin-bin"
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  printf 'change\n' >>"$review_repo/README.md"
+
+  mkdir "$fake_bin"
+  cat >"$fake_bin/codex" <<'CODEX'
+#!/usr/bin/env bash
+printf 'Error: codex not found in PATH\n' >&2
+exit 127
+CODEX
+  chmod +x "$fake_bin/codex"
+  cat >"$fake_bin/claude" <<'CLAUDE'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  cat >/dev/null
+  printf '2.1.210\n'
+  exit 0
+fi
+if [[ "${1:-}" == "--help" ]]; then
+  cat >/dev/null
+  printf '%s\n' --safe-mode --setting-sources --strict-mcp-config --disallowedTools --tools
+  exit 0
+fi
+cat >/dev/null
+cat <<'JSON'
+{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"clean","overall_confidence":0.9}
+JSON
+CLAUDE
+  chmod +x "$fake_bin/claude"
+
+  : >"$stdout"
+  : >"$stderr"
+  local status=0
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=$hermetic_git_bin" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "GIT_CONFIG_GLOBAL=/dev/null" \
+      "AUTOREVIEW_EXTRA_BIN_DIRS=$fake_bin" \
+      "AUTOREVIEW_CODEX_BIN=$fake_bin/codex" \
+      "$node_bin" "$repo_root/scripts/agent-autoreview.mjs" \
+      --mode local >"$stdout" 2>"$stderr"
+  ) || status=$?
+  if [[ "$status" -eq 0 ]]; then
+    printf 'expected an explicitly pinned but unlaunchable codex binary to fail, not fall back to claude\nstdout:\n%s\nstderr:\n%s\n' \
+      "$(cat "$stdout")" "$(cat "$stderr")" >&2
+    exit 1
+  fi
+  expect_stdout_not_contains "autoreview clean"
+  expect_stdout_not_contains "engine: claude"
+  if grep -Fq "falling back" "$stderr"; then
+    printf 'an explicit AUTOREVIEW_CODEX_BIN override must never fall back silently to claude\nstderr:\n%s\n' \
+      "$(cat "$stderr")" >&2
+    exit 1
+  fi
+}
+
+# A trusted-executable resolution only proves a candidate exists and is safe
+# to run, not that it actually launches: an implicit codex shim that resolves
+# fine but exits 127 on every invocation (including its own --version probe)
+# clears applyDefaultEngineFallback()'s shallow check, so the fallback never
+# fires there. runCodex() discovers the launcher is unusable only after
+# trying it for real; the implicit default must still land on claude instead
+# of failing the review on an engine it never really had. An explicit
+# --engine codex must keep failing on its own error -- that is the prior
+# regression above.
+run_engine_default_fallback_unusable_implicit_codex_regression() {
+  local review_repo="$tmp_dir/engine-default-fallback-unusable-implicit-codex"
+  local fake_bin="$tmp_dir/engine-default-fallback-unusable-implicit-codex-bin"
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  printf 'change\n' >>"$review_repo/README.md"
+
+  mkdir "$fake_bin"
+  cat >"$fake_bin/codex" <<'CODEX'
+#!/usr/bin/env bash
+printf 'Error: codex not found in PATH\n' >&2
+exit 127
+CODEX
+  chmod +x "$fake_bin/codex"
+  cat >"$fake_bin/claude" <<'CLAUDE'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  cat >/dev/null
+  printf '2.1.210\n'
+  exit 0
+fi
+if [[ "${1:-}" == "--help" ]]; then
+  cat >/dev/null
+  printf '%s\n' --safe-mode --setting-sources --strict-mcp-config --disallowedTools --tools
+  exit 0
+fi
+cat >/dev/null
+cat <<'JSON'
+{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"clean","overall_confidence":0.9}
+JSON
+CLAUDE
+  chmod +x "$fake_bin/claude"
+
+  : >"$stdout"
+  : >"$stderr"
+  local status=0
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=$hermetic_git_bin" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "GIT_CONFIG_GLOBAL=/dev/null" \
+      "AUTOREVIEW_EXTRA_BIN_DIRS=$fake_bin" \
+      "$node_bin" "$repo_root/scripts/agent-autoreview.mjs" \
+      --mode local >"$stdout" 2>"$stderr"
+  ) || status=$?
+  if [[ "$status" -ne 0 ]]; then
+    printf 'expected an unusable implicit codex shim to fall back to claude, not fail\nstdout:\n%s\nstderr:\n%s\n' \
+      "$(cat "$stdout")" "$(cat "$stderr")" >&2
+    exit 1
+  fi
+  expect_stderr_contains \
+    "codex CLI resolved but could not launch; falling back to --engine claude"
+  expect_stdout_contains "engine: claude"
+  expect_stdout_contains "autoreview clean"
+}
+
 # Same shell as the regression above -- neither CLI reachable -- but the two
 # modes that never invoke an engine. `--dry-run` only prints the selection, and
 # `--prepare-only` writes review material for a reviewer who runs elsewhere,
@@ -9127,6 +9266,8 @@ run_engine_isolation_family() {
   run_engine_default_fallback_regression
   run_engine_default_fallback_neither_available_regression
   run_engine_default_fallback_explicit_codex_bin_override_regression
+  run_engine_default_fallback_unlaunchable_codex_bin_override_regression
+  run_engine_default_fallback_unusable_implicit_codex_regression
   run_engine_metadata_only_without_cli_regression
   run_engine_clean_target_without_cli_regression
   run_codex_binary_resolution_regression

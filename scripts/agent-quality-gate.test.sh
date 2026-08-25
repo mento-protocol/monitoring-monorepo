@@ -4929,6 +4929,45 @@ assert_not_contains "- skipped "
 assert_occurrences 2 "trunk-real-problem fixture lint failure"
 # ...and the replay is a tail: the 27th-from-last line stays inline-only.
 assert_occurrences 1 "trunk-oldest-line"
+
+# The whole-run success stamp carries no record of a blocked Trunk arm, so it
+# must not be written on a run that skipped one: a later --skip-if-fresh run
+# with an identical stamp fingerprint would otherwise trust that stamp and
+# never retry Trunk, even after it becomes provisionable. Nothing else about
+# the fixture changes between the two runs, so an unfixed gate would compute
+# the same stamp both times and skip the second run outright.
+trunk_blocked_stamp_repo="$(mktemp -d)"
+(
+  cd "$trunk_blocked_stamp_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 1
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+)
+(
+  cd "$trunk_blocked_stamp_repo"
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+)
+assert_contains "All mapped commands passed."
+assert_contains "Note: the Trunk arm was skipped"
+
+(
+  cd "$trunk_blocked_stamp_repo"
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run --skip-if-fresh > "$output_file" 2>&1
+)
+rm -rf "$trunk_blocked_stamp_repo"
+assert_not_contains "skipping mapped commands"
+assert_contains "All mapped commands passed."
+assert_contains "Note: the Trunk arm was skipped"
 } # end family: failure-output
 
 # family: routing-docs

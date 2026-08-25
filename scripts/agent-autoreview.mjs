@@ -3487,13 +3487,23 @@ async function runCodex(repo, args, prompt) {
     }
   }
   if (unusableLaunchers.length > 0) {
-    throw new Error(
+    const error = new Error(
       unusableEngineLauncherMessage(
         "codex",
         unusableLaunchers,
         firstLauncherError.message,
       ),
     );
+    // A trusted-executable resolution only proves a candidate exists and is
+    // safe to run, not that it actually launches: an installed shim missing
+    // its underlying runtime resolves fine and clears
+    // applyDefaultEngineFallback()'s implicit-engine check, so that check
+    // alone cannot tell this case apart from a genuinely usable codex. Tag it
+    // here, once every resolved candidate has actually been tried and failed
+    // to launch, so an implicit caller can fall back to claude instead of
+    // failing on an engine it never really had.
+    error.allCodexLaunchersUnusable = true;
+    throw error;
   }
   throw new Error(unavailableCommandMessage("codex"));
 }
@@ -4982,10 +4992,41 @@ async function main() {
         guardTargetSelectionDuringReview,
         "source changed before semantic review; rerun autoreview against the updated tree",
       );
-      const raw =
-        args.engine === "codex"
-          ? await runCodex(repo, args, prompts[0])
-          : await runClaude(repo, args, prompts[0]);
+      let raw;
+      if (args.engine === "codex") {
+        try {
+          raw = await runCodex(repo, args, prompts[0]);
+        } catch (error) {
+          // applyDefaultEngineFallback() only proved a codex candidate exists
+          // and is trusted, not that it can launch -- runCodex() just
+          // exhausted every resolved candidate and confirmed none can. An
+          // explicit --engine codex still fails with the engine's own error;
+          // only the implicit default retries with claude, the same fallback
+          // applyDefaultEngineFallback() would have taken had it detected
+          // this earlier. AUTOREVIEW_CODEX_BIN is the second explicit form and
+          // gets the same treatment: applyDefaultEngineFallback() refuses to
+          // swap engines out from under a caller who named a codex binary, and
+          // that refusal must not lapse just because the named binary resolved
+          // and then failed to launch rather than failing to resolve.
+          if (
+            !args.engineExplicit &&
+            !process.env[commandOverrideVariable("codex")] &&
+            error?.allCodexLaunchersUnusable &&
+            resolveTrustedCommand("claude", repo, { required: false })
+          ) {
+            console.error(
+              "agent:autoreview: codex CLI resolved but could not launch; falling back to --engine claude",
+            );
+            args.engine = "claude";
+            console.log(`engine: ${args.engine}`);
+            raw = await runClaude(repo, args, prompts[0]);
+          } else {
+            throw error;
+          }
+        }
+      } else {
+        raw = await runClaude(repo, args, prompts[0]);
+      }
       report = validateReport(extractReviewJson(raw), paths);
       assertReviewSourceState(
         repo,
