@@ -91,7 +91,7 @@ Resolve the full target commit SHA before querying GitHub Actions. Select runs
 with the commit, then bind every claim to the returned `databaseId`:
 
 ```bash
-gh run list --workflow <expected-workflow> --commit <full-sha> --limit 1000 \
+gh run list --workflow <expected-workflow> --all --commit <full-sha> --limit 1000 \
   --json databaseId,headSha,workflowName,status,conclusion,url
 gh run view <databaseId>
 gh run watch <databaseId> --exit-status

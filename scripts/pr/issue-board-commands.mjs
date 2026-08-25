@@ -460,6 +460,21 @@ async function syncIssue(options, project, listedIssue, operations) {
         break;
       }
 
+      const closeoutItemId = await operations.findIssueProjectItem(
+        options,
+        closeoutIssue,
+        project,
+      );
+      if (closeoutItemId) {
+        await operations.updateProjectFields(
+          options,
+          project,
+          closeoutItemId,
+          state,
+          {},
+        );
+      }
+
       const reopenState = stateFromLabels({
         ...closeoutIssue,
         state: "OPEN",

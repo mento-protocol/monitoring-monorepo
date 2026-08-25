@@ -512,7 +512,7 @@ test("sync uses refreshed Project visibility before closed-item cleanup", async 
       listIssuesByLabels: async (_options, labels, { state }) =>
         labels.includes("in-pr") && state === "all" ? [listedIssue] : [],
       findIssueProjectItem: async (_options, issue) => {
-        events.push("find");
+        events.push(issue.projectItems[0] ? "find:visible" : "find:missing");
         return issue.projectItems[0]?.id ?? null;
       },
       updateProjectFields: async () => events.push("project"),
@@ -522,7 +522,8 @@ test("sync uses refreshed Project visibility before closed-item cleanup", async 
         events.push(
           reads === 1 ? "refresh" : reads === 2 ? "pre-cleanup" : "verify",
         );
-        return reads <= 2 ? refreshedIssue : { ...refreshedIssue, labels: [] };
+        if (reads === 1) return listedIssue;
+        return reads === 2 ? refreshedIssue : { ...refreshedIssue, labels: [] };
       },
       sleep: async () => events.push("sleep"),
     },
@@ -530,11 +531,58 @@ test("sync uses refreshed Project visibility before closed-item cleanup", async 
 
   assertDeepEqual(events, [
     "refresh",
-    "find",
-    "project",
+    "find:missing",
     "pre-cleanup",
+    "find:visible",
+    "project",
     "labels",
     "verify",
+  ]);
+});
+
+test("sync reapplies Done to the same Project item before label cleanup", async () => {
+  const issue = {
+    number: 921,
+    title: "closed item with a concurrent Project write",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+    projectItems: [{ id: "item-921", project: { id: "project" } }],
+  };
+  const events = [];
+  let reads = 0;
+
+  await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabels: async (_options, labels, { state }) =>
+        labels.includes("in-pr") && state === "all" ? [issue] : [],
+      findIssueProjectItem: async () => {
+        events.push("find");
+        return "item-921";
+      },
+      updateProjectFields: async () => events.push("project"),
+      editIssueLabels: async () => events.push("labels"),
+      getIssue: async () => {
+        reads += 1;
+        events.push(`read:${reads}`);
+        return reads < 3 ? issue : { ...issue, labels: [] };
+      },
+      sleep: async () => {
+        throw new Error("an immediately satisfied postcondition must not wait");
+      },
+    },
+  );
+
+  assertDeepEqual(events, [
+    "read:1",
+    "find",
+    "project",
+    "read:2",
+    "find",
+    "project",
+    "labels",
+    "read:3",
   ]);
 });
 
@@ -796,7 +844,7 @@ test("sync reprojects Done when an issue closes after an open Project write", as
     },
   );
 
-  assertDeepEqual(updates, ["review", "done"]);
+  assertDeepEqual(updates, ["review", "done", "done"]);
   assertDeepEqual(results, [
     { number: 928, title: "concurrent close", state: "done" },
   ]);
