@@ -90,6 +90,22 @@ function restoreStateFromCloseoutIssue(issue) {
   return stateForQueueLabel(issue, queueLabels[0]);
 }
 
+async function restoreProvisionalQueueLabel(
+  options,
+  issue,
+  provisionalQueueLabel,
+  operations,
+) {
+  const provisionalState = stateForQueueLabel(issue, provisionalQueueLabel);
+  if (!provisionalState) return { issue, provisionalQueueLabel: null };
+
+  await operations.editIssueLabels(options, issue, provisionalState);
+  return {
+    issue: await operations.getIssue(options, issue.number),
+    provisionalQueueLabel,
+  };
+}
+
 async function compensateProvisionalQueueLabel(
   options,
   issue,
@@ -103,6 +119,14 @@ async function compensateProvisionalQueueLabel(
 
   const queueLabels = queueLabelsFromIssue(issue);
   if (!queueLabels.includes(provisionalQueueLabel)) {
+    if (queueLabels.length === 0) {
+      return restoreProvisionalQueueLabel(
+        options,
+        issue,
+        provisionalQueueLabel,
+        operations,
+      );
+    }
     return { issue, provisionalQueueLabel: null };
   }
   if (queueLabels.length !== 2) {
@@ -117,6 +141,17 @@ async function compensateProvisionalQueueLabel(
 
   await operations.editIssueLabels(options, issue, concurrentState);
   const verified = await operations.getIssue(options, issue.number);
+  if (
+    String(verified.state ?? "").toUpperCase() === "OPEN" &&
+    queueLabelsFromIssue(verified).length === 0
+  ) {
+    return restoreProvisionalQueueLabel(
+      options,
+      verified,
+      provisionalQueueLabel,
+      operations,
+    );
+  }
   return {
     issue: verified,
     provisionalQueueLabel: queueLabelsFromIssue(verified).includes(

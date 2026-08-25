@@ -1040,6 +1040,75 @@ test("sync compensates for a concurrent queue transition after the restore read"
   ]);
 });
 
+test("sync restores provisional state when compensation loses a transition", async () => {
+  const listedIssue = {
+    number: 937,
+    title: "compensation transition race",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+  };
+  let currentIssue = listedIssue;
+  let reads = 0;
+  const edits = [];
+  const updates = [];
+
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabels: async (_options, labels, { state }) =>
+        labels.includes("in-pr") && state === "all" ? [listedIssue] : [],
+      getIssue: async () => {
+        reads += 1;
+        return currentIssue;
+      },
+      findIssueProjectItem: async () => null,
+      ensureProjectItem: async () => "item-937",
+      updateProjectFields: async (_options, _project, _item, state) => {
+        updates.push(state);
+      },
+      editIssueLabels: async (_options, issue, state) => {
+        edits.push(state);
+        if (edits.length === 1) {
+          assertEqual(state, "done");
+          currentIssue = { ...listedIssue, state: "OPEN", labels: [] };
+          return;
+        }
+        if (edits.length === 2) {
+          assertEqual(state, "review");
+          assertDeepEqual(issue.labels, [], "fresh restore snapshot");
+          currentIssue = {
+            ...listedIssue,
+            state: "OPEN",
+            labels: [{ name: "in-pr" }, { name: "agent-active" }],
+          };
+          return;
+        }
+        if (edits.length === 3) {
+          assertEqual(state, "active");
+          currentIssue = { ...listedIssue, state: "OPEN", labels: [] };
+          return;
+        }
+        assertEqual(state, "review");
+        assertDeepEqual(issue.labels, [], "label-less compensation snapshot");
+        currentIssue = {
+          ...listedIssue,
+          state: "OPEN",
+          labels: [{ name: "in-pr" }],
+        };
+      },
+      sleep: async () => {},
+    },
+  );
+
+  assertDeepEqual(edits, ["done", "review", "active", "review"]);
+  assertDeepEqual(updates, ["review"]);
+  assertEqual(reads, 8, "restore, compensation, repair, and projection reads");
+  assertDeepEqual(results, [
+    { number: 937, title: "compensation transition race", state: "review" },
+  ]);
+});
+
 test("sync carries restore compensation through Project verification", async () => {
   const listedIssue = {
     number: 935,
