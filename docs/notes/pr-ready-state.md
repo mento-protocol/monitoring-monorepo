@@ -23,7 +23,7 @@ must have a clean feedback ledger and the subsequent current-head
 context or post replies, but they must preserve that two-projection contract.
 
 The probe shells out to gh, so it cannot run in Claude cloud sessions whose
-proxy blocks gh's API paths; a variant passing the REST + GraphQL +
+proxy blocks GraphQL and where gh is not reliably available; a variant passing the REST + GraphQL +
 `--slurp` capability gate runs it as written, passing `--repo <owner/name>`
 since gh cannot infer the repo from the proxy remote. Blocked sessions use
 the MCP emulation documented in

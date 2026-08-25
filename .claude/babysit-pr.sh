@@ -49,7 +49,7 @@ babysit_repo_gate() {
     # MCP fallback, or the guard's more useful message never gets reached and
     # the session is told only that a field was unreadable.
     if [[ -n "${CLAUDE_CODE_REMOTE:-}" ]]; then
-      printf 'PENDING fork status unreadable for #%s in this Claude cloud session (the gh repo API is platform-blocked); establish isCrossRepository over MCP and follow the cloud watch loop in docs/notes/github-tooling-surfaces.md' "$pr"
+      printf 'PENDING fork status unreadable for #%s in this Claude cloud session (gh is not reliably capable here — GraphQL and/or the repo API are unreachable this session); establish isCrossRepository over MCP and follow the cloud watch loop in docs/notes/github-tooling-surfaces.md' "$pr"
       return 0
     fi
     printf 'PENDING fork status unreadable for #%s; cannot prove the head is same-repo' "$pr"
@@ -81,19 +81,20 @@ babysit_repo_gate() {
   fi
 
   # In Claude cloud sessions the platform's GitHub credential proxy blocks
-  # gh's /repos/* and GraphQL paths regardless of tokens, so pr:ready-state
-  # cannot run there (docs/notes/github-tooling-surfaces.md). Only repo-scoped
-  # calls prove capability — `gh auth status` passes in those sessions even
-  # while the repo API is blocked. The probe needs REST /repos/*, GraphQL
-  # (`gh pr view` and the reviewThreads query), and `gh api --slurp` (missing
-  # from the default Ubuntu gh 2.45 a variant may ship), so gate on all three.
-  # Without this guard the probe failure below would read as FAIL and poison
-  # every cloud babysit run.
+  # GraphQL regardless of tokens, and the gh binary is not reliably available
+  # either, so pr:ready-state cannot run there (rides on GraphQL either way —
+  # see docs/notes/github-tooling-surfaces.md). REST /repos/* behavior varies
+  # by session rather than being a fixed block. Only repo-scoped calls prove
+  # capability — `gh auth status` passes in those sessions regardless. The
+  # probe needs REST /repos/*, GraphQL (`gh pr view` and the reviewThreads
+  # query), and `gh api --slurp` (missing from the default Ubuntu gh 2.45 a
+  # variant may ship), so gate on all three. Without this guard the probe
+  # failure below would read as FAIL and poison every cloud babysit run.
   if [[ -n "${CLAUDE_CODE_REMOTE:-}" ]] &&
     { ! gh api --help 2>/dev/null | grep -q -- '--slurp' ||
       ! gh api "repos/${owner}/${repo}" --jq .full_name >/dev/null 2>&1 ||
       ! gh api graphql -f query='query{viewer{login}}' >/dev/null 2>&1; }; then
-    printf 'PENDING pr:ready-state unavailable in this Claude cloud session (gh repo API is platform-blocked); use the MCP emulation in docs/notes/github-tooling-surfaces.md — probe-verified all-clear needs a gh-capable surface'
+    printf 'PENDING pr:ready-state unavailable in this Claude cloud session (gh is not reliably capable — GraphQL and/or the repo API are unreachable this session); use the MCP emulation in docs/notes/github-tooling-surfaces.md — probe-verified all-clear needs a gh-capable surface'
     return 0
   fi
 

@@ -112,12 +112,17 @@ Repo-local `ship` and `babysit-pr` skill adapters live under `.claude/skills/`
 agent:quality-gate`, `pnpm agent:autoreview`, `pnpm pr:ready-state`) without
 needing a developer's personal skills present.
 
-### GitHub access in hosted sessions: gh is platform-blocked
+### GitHub access in hosted sessions: gh is unreliable
 
-In Claude cloud sessions the platform's GitHub credential proxy blocks gh's
-repo API and GraphQL regardless of tokens or allowlist entries (`gh auth
-status` still passes, so it is not a capability signal), and
-`pnpm pr:ready-state` cannot run absent the capability-gate exception. Hosted sessions use the GitHub MCP tools
+In Claude cloud sessions the platform's GitHub credential proxy blocks
+GraphQL regardless of tokens or allowlist entries, and the gh binary is not
+reliably available either (`gh auth status` still passes when it is, so it
+is not a capability signal). REST `/repos/*` behavior varies by session
+rather than being a fixed blanket block — see
+[`github-tooling-surfaces.md`](github-tooling-surfaces.md) for the current
+empirical findings. `pnpm pr:ready-state` cannot run absent the
+capability-gate exception, because it rides on GraphQL either way. Hosted
+sessions use the GitHub MCP tools
 plus the `babysit-pr` cloud watch loop; the foreground
 `pnpm pr:ready-state --pr <number> --watch --compact --until-ready` loop
 remains the local fallback when the Claude `Monitor` tool is unavailable.
