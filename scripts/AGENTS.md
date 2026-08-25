@@ -57,7 +57,7 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 
 ## Why Files Stay Flat
 
-`scripts/` has thirteen path-pin classes. Move each pin with its file in the
+`scripts/` has twelve path-pin classes. Move each pin with its file in the
 same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
 
 - **Autoreview runtime pins.** `agent-autoreview.sh` pins sibling runtime and
@@ -96,20 +96,13 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   `sentry/fixture-scan-canary.test.mjs` re-pins four; ADR 0068 has the policy.
 - **Enumerated workflow pins.** 23 of 33 files in
   `.github/workflows/` pin a `scripts/` path, and `sentry-triage-agent.yml`
-  stages an exact copy list at runtime; three Terraform filters instead
-  copy the broad `workflowAdmissionPatterns` boundary from
-  `terraform.stacks.json`. A miss is silent — the job stops running while the
-  required `ci` sentinel stays green. The enumeration, the `routing.test.mjs`
-  equality contract, and when a module glob is the safer pin are in
+  stages an exact copy list at runtime. A miss is silent: the job stops
+  while `ci` stays green. Enumeration, the `routing.test.mjs`
+  equality contract, and glob guidance:
   [ADR 0064](../docs/adr/0064-scripts-module-directories.md#sweep-checklist-for-a-move).
-- **Review-skill eval pins.** `review-eval-freshness.yml` is one of the 23
-  above and pins `scripts/review/**` in its `pull_request` paths, plus
-  `package.json` for the `review:eval*` aliases every step runs.
-  `.trunk/trunk.yaml` pins `scripts/review/prompts/**` in an `ignore` block:
-  those prompts are byte-frozen inputs whose `sha256` is in the contract, so a
-  formatter rewrite breaks comparability rather than the layout. `run-eval.sh`
-  resolves the harness and the prompts from a detached `origin/main` worktree,
-  so a move needs both literals live on `main` before the moving commit runs.
+  `review-eval-freshness.yml` pins `scripts/review/**` + `review:eval*`;
+  `.trunk/trunk.yaml` ignores frozen `scripts/review/prompts/**` — see
+  `docs/evals/review-skill.md`.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.

@@ -386,6 +386,16 @@ records that the harness tried, not that the pairing still scores.
   MCP servers and CLI patch versions all leak in. Two developers running the
   same contract may legitimately differ by several defects.
 
+## Moving files
+
+Two pin classes make a rename of harness files non-trivial. The prompts under
+`scripts/review/prompts/` are byte-frozen inputs: their `sha256` values live in
+the contract, and `.trunk/trunk.yaml` ignores the directory so a formatter
+cannot rewrite them — a move must carry the ignore entry and, for the two
+contract-pinned run prompts, a digest recomputation. And `run-eval.sh` resolves
+the harness and the prompts from a detached `origin/main` worktree, so a moved
+path must exist on `main` before the first run after the moving commit.
+
 ## Files
 
 | path                                             | what it is                                               |
