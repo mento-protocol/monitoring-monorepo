@@ -181,6 +181,7 @@ export async function listIssuesByLabel(
   label,
   { state = "open", json = ghJson } = {},
 ) {
+  const stateQualifier = state === "all" ? "" : ` is:${state}`;
   const issues = await json([
     "issue",
     "list",
@@ -189,7 +190,7 @@ export async function listIssuesByLabel(
     "--state",
     state,
     "--search",
-    `is:issue is:${state} label:${label}`,
+    `is:issue${stateQualifier} label:${label}`,
     "--limit",
     "1000",
     "--json",

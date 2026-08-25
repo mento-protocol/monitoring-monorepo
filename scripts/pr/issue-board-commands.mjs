@@ -496,12 +496,10 @@ export async function sync(options, dependencies = {}) {
   const project = await operations.getProject(options);
   const byNumber = new Map();
   for (const label of ISSUE_STATE_LABELS) {
-    for (const state of ["open", "closed"]) {
-      for (const issue of await operations.listIssuesByLabel(options, label, {
-        state,
-      })) {
-        byNumber.set(issue.number, issue);
-      }
+    for (const issue of await operations.listIssuesByLabel(options, label, {
+      state: "all",
+    })) {
+      byNumber.set(issue.number, issue);
     }
   }
 

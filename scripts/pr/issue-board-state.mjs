@@ -6,15 +6,13 @@
  * offline suite (`pnpm issue:board:test`) exercises end to end.
  */
 
+import { ISSUE_STATE_LABELS } from "../lib/gh-issue-lifecycle.mjs";
+
+export { ISSUE_STATE_LABELS };
+
 export const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
 export const DEFAULT_PROJECT_OWNER = "mento-protocol";
 export const DEFAULT_PROJECT_NUMBER = 12;
-export const ISSUE_STATE_LABELS = Object.freeze([
-  "agent-ready",
-  "agent-active",
-  "in-pr",
-  "needs-grooming",
-]);
 
 const STATE_TRANSITIONS = {
   ready: {

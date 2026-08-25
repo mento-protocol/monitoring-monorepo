@@ -161,13 +161,13 @@ test("project scope failures name the read-write gh refresh command", () => {
   );
 });
 
-test("queue-label issue lists pass the requested state to gh", async () => {
+test("queue-label issue lists request all states without an is:all query", async () => {
   const calls = [];
   await listIssuesByLabel(
     { repo: "mento-protocol/monitoring-monorepo" },
     "agent-active",
     {
-      state: "closed",
+      state: "all",
       json: async (args) => {
         calls.push(args);
         return [];
@@ -182,9 +182,9 @@ test("queue-label issue lists pass the requested state to gh", async () => {
       "-R",
       "mento-protocol/monitoring-monorepo",
       "--state",
-      "closed",
+      "all",
       "--search",
-      "is:issue is:closed label:agent-active",
+      "is:issue label:agent-active",
       "--limit",
       "1000",
       "--json",
@@ -419,7 +419,7 @@ test("closed issues with any queue label sync to done", () => {
   }
   assertDeepEqual(labelsForState("done"), {
     addLabels: [],
-    removeLabels: ["agent-ready", "agent-active", "in-pr", "needs-grooming"],
+    removeLabels: ISSUE_STATE_LABELS,
     statusOptions: ["Done"],
   });
 });
@@ -446,7 +446,7 @@ test("sync clears every closed queue label without requiring a Project item", as
       getProject: async () => ({ id: "project" }),
       listIssuesByLabel: async (_options, label, { state }) => {
         queries.push(`${state}:${label}`);
-        return state === "closed" ? [closedIssues.get(label)] : [];
+        return state === "all" ? [closedIssues.get(label)] : [];
       },
       findIssueProjectItem: async () => null,
       updateProjectFields: async () => {
@@ -471,7 +471,7 @@ test("sync clears every closed queue label without requiring a Project item", as
 
   assertDeepEqual(
     queries,
-    ISSUE_STATE_LABELS.flatMap((label) => [`open:${label}`, `closed:${label}`]),
+    ISSUE_STATE_LABELS.map((label) => `all:${label}`),
   );
   assertDeepEqual(
     results.map(({ number, state }) => ({ number, state })),
@@ -513,7 +513,7 @@ test("sync uses refreshed Project visibility before closed-item cleanup", async 
     {
       getProject: async () => ({ id: "project" }),
       listIssuesByLabel: async (_options, label, { state }) =>
-        label === "in-pr" && state === "closed" ? [listedIssue] : [],
+        label === "in-pr" && state === "all" ? [listedIssue] : [],
       findIssueProjectItem: async (_options, issue) => {
         events.push("find");
         return issue.projectItems[0]?.id ?? null;
@@ -561,7 +561,7 @@ test("sync reclassifies an issue that reopened after enumeration", async () => {
     {
       getProject: async () => ({ id: "project" }),
       listIssuesByLabel: async (_options, label, { state }) =>
-        label === "in-pr" && state === "closed" ? [listedIssue] : [],
+        label === "in-pr" && state === "all" ? [listedIssue] : [],
       getIssue: async () => reopenedIssue,
       findIssueProjectItem: async () => {
         throw new Error("a reopened issue must not take the Done path");
@@ -604,7 +604,7 @@ test("sync reclassifies a reopen before the Done label edit", async () => {
     {
       getProject: async () => ({ id: "project" }),
       listIssuesByLabel: async (_options, label, { state }) =>
-        label === "in-pr" && state === "closed" ? [closedIssue] : [],
+        label === "in-pr" && state === "all" ? [closedIssue] : [],
       getIssue: async () => reads.shift(),
       findIssueProjectItem: async () => null,
       ensureProjectItem: async () => "item-924",
@@ -645,7 +645,7 @@ test("sync reprojects a concurrent claim after an open Project write", async () 
     {
       getProject: async () => ({ id: "project" }),
       listIssuesByLabel: async (_options, label, { state }) =>
-        label === "agent-ready" && state === "open" ? [readyIssue] : [],
+        label === "agent-ready" && state === "all" ? [readyIssue] : [],
       getIssue: async () => reads.shift(),
       ensureProjectItem: async () => "item-926",
       updateProjectFields: async (_options, _project, _item, state) => {
@@ -686,7 +686,7 @@ test("sync bounds repeated open-state projection drift", async () => {
         {
           getProject: async () => ({ id: "project" }),
           listIssuesByLabel: async (_options, label, { state }) =>
-            label === "agent-ready" && state === "open" ? [readyIssue] : [],
+            label === "agent-ready" && state === "all" ? [readyIssue] : [],
           getIssue: async () => reads.shift(),
           ensureProjectItem: async () => "item-929",
           updateProjectFields: async (_options, _project, _item, state) => {
@@ -726,7 +726,7 @@ test("sync attempts later issues and reports partial results after a failure", a
       {
         getProject: async () => ({ id: "project" }),
         listIssuesByLabel: async (_options, label, { state }) =>
-          label === "agent-ready" && state === "open"
+          label === "agent-ready" && state === "all"
             ? [failingIssue, successfulIssue]
             : [],
         getIssue: async (_options, number) =>
@@ -785,7 +785,7 @@ test("sync reprojects Done when an issue closes after an open Project write", as
     {
       getProject: async () => ({ id: "project" }),
       listIssuesByLabel: async (_options, label, { state }) =>
-        label === "in-pr" && state === "open" ? [reviewIssue] : [],
+        label === "in-pr" && state === "all" ? [reviewIssue] : [],
       getIssue: async () => reads.shift(),
       ensureProjectItem: async () => "item-928",
       findIssueProjectItem: async () => "item-928",
@@ -820,7 +820,7 @@ test("sync restores queue state when a closed issue reopens during Done cleanup"
     {
       getProject: async () => ({ id: "project" }),
       listIssuesByLabel: async (_options, label, { state }) =>
-        label === "in-pr" && state === "closed" ? [listedIssue] : [],
+        label === "in-pr" && state === "all" ? [listedIssue] : [],
       getIssue: async () => {
         reads += 1;
         return currentIssue;
@@ -870,7 +870,7 @@ test("sync fails when a closed issue retains a queue label", async () => {
         {
           getProject: async () => ({ id: "project" }),
           listIssuesByLabel: async (_options, label, { state }) =>
-            label === "agent-active" && state === "closed" ? [issue] : [],
+            label === "agent-active" && state === "all" ? [issue] : [],
           findIssueProjectItem: async () => null,
           editIssueLabels: async () => {},
           getIssue: async () => issue,
@@ -899,7 +899,7 @@ test("sync dry-run refreshes once and skips the unapplied postcondition", async 
     {
       getProject: async () => ({ id: "project" }),
       listIssuesByLabel: async (_options, label, { state }) =>
-        label === "needs-grooming" && state === "closed" ? [issue] : [],
+        label === "needs-grooming" && state === "all" ? [issue] : [],
       findIssueProjectItem: async () => null,
       editIssueLabels: async () => {
         edits += 1;
