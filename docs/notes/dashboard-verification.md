@@ -66,32 +66,34 @@ on the target origin and run a read-only same-origin request through page
 evaluation:
 
 ```js
-const response = await fetch("/api/...", {
-  cache: "no-store",
-  credentials: "same-origin",
-});
-const status = response.status;
-const text = await response.text();
-let body = null;
-let parseError = null;
-if (text !== "") {
-  try {
-    body = JSON.parse(text);
-  } catch (error) {
-    parseError = String(error);
+async function authenticatedApiCheck() {
+  const response = await fetch("/api/...", {
+    cache: "no-store",
+    credentials: "same-origin",
+  });
+  const status = response.status;
+  const text = await response.text();
+  let body = null;
+  let parseError = null;
+  if (text !== "") {
+    try {
+      body = JSON.parse(text);
+    } catch (error) {
+      parseError = String(error);
+    }
   }
+  return {
+    status,
+    parseError,
+    fields:
+      body === null
+        ? null
+        : {
+            // Select only the non-sensitive fields needed for this check.
+            expectedField: body.expectedField,
+          },
+  };
 }
-({
-  status,
-  parseError,
-  fields:
-    body === null
-      ? null
-      : {
-          // Select only the non-sensitive fields needed for this check.
-          expectedField: body.expectedField,
-        },
-});
 ```
 
 Keep the raw response text and the full parsed body local. Record only the

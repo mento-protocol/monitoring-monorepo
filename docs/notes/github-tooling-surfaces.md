@@ -87,21 +87,26 @@ Do not build a gh-over-MCP shim; the skills document the two native paths.
 
 ## Exact workflow-run selection
 
-Resolve the full target commit SHA before querying GitHub Actions. Select runs
-with the commit, then bind every claim to the returned `databaseId`:
+Resolve the expected workflow path to exactly one workflow database ID. Stop if
+the path has zero or multiple matches. Then resolve the full target commit SHA,
+select runs with both IDs, and bind every claim to the returned run
+`databaseId`:
 
 ```bash
-gh run list --workflow <expected-workflow> --all --commit <full-sha> --limit 1000 \
-  --json databaseId,headSha,workflowName,status,conclusion,url
+gh workflow list --all --limit 1000 --json id,path,state \
+  --jq '.[] | select(.path == "<expected-workflow-path>")'
+gh run list --workflow <workflow-database-id> --all --commit <full-sha> \
+  --limit 1000 \
+  --json databaseId,headSha,workflowDatabaseId,status,conclusion,url
 gh run view <databaseId>
 gh run watch <databaseId> --exit-status
 ```
 
-Require `headSha` to equal the target SHA and `workflowName` to equal the
-expected workflow. A workflow display name, branch filter, or list position is
-not sufficient evidence because each can select an older or unrelated run. For
-pull requests, keep `pnpm pr:ready-state` and `gh pr checks` as the canonical
-probes.
+Use the unique workflow row's `id` as `<workflow-database-id>`. Require each
+run's `headSha` to equal the target SHA and `workflowDatabaseId` to equal that
+ID. A workflow display name, branch filter, or list position is not sufficient
+evidence because each can select an older or unrelated run. For pull requests,
+keep `pnpm pr:ready-state` and `gh pr checks` as the canonical probes.
 
 ## Issue workboard transitions
 

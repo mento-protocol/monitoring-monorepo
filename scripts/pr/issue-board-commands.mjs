@@ -336,7 +336,7 @@ async function verifySyncCloseout(options, issue, operations) {
     staleLabels = ISSUE_STATE_LABELS.filter((label) =>
       verifiedLabels.has(label),
     );
-    if (staleLabels.length === 0) return null;
+    if (staleLabels.length === 0) return verified;
     if (attempt < SYNC_VERIFY_ATTEMPTS) {
       await operations.sleep(SYNC_VERIFY_SETTLE_MS);
     }
@@ -480,15 +480,38 @@ async function syncIssue(options, project, listedIssue, operations) {
         state: "OPEN",
       });
       await operations.editIssueLabels(options, closeoutIssue, state);
-      let reopenedIssue = await verifySyncCloseout(
+      let verifiedIssue = await verifySyncCloseout(
         options,
         closeoutIssue,
         operations,
       );
-      if (!reopenedIssue) {
-        return { number: issue.number, title: issue.title, state };
+      if (String(verifiedIssue.state ?? "").toUpperCase() === "CLOSED") {
+        const verifiedItemId = await operations.findIssueProjectItem(
+          options,
+          verifiedIssue,
+          project,
+        );
+        if (!verifiedItemId) {
+          return { number: issue.number, title: issue.title, state };
+        }
+        await operations.updateProjectFields(
+          options,
+          project,
+          verifiedItemId,
+          state,
+          {},
+        );
+        verifiedIssue = await verifySyncCloseout(
+          options,
+          verifiedIssue,
+          operations,
+        );
+        if (String(verifiedIssue.state ?? "").toUpperCase() === "CLOSED") {
+          return { number: issue.number, title: issue.title, state };
+        }
       }
 
+      let reopenedIssue = verifiedIssue;
       let reopenedState = syncStateFromIssue(reopenedIssue);
       if (!reopenedState && reopenState) {
         reopenedIssue = await operations.getIssue(options, issue.number);

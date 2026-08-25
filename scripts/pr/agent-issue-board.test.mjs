@@ -537,6 +537,9 @@ test("sync uses refreshed Project visibility before closed-item cleanup", async 
     "project",
     "labels",
     "verify",
+    "find:visible",
+    "project",
+    "verify",
   ]);
 });
 
@@ -583,6 +586,125 @@ test("sync reapplies Done to the same Project item before label cleanup", async 
     "project",
     "labels",
     "read:3",
+    "find",
+    "project",
+    "read:4",
+  ]);
+});
+
+test("sync projects a Project item that appears after label cleanup", async () => {
+  const listedIssue = {
+    number: 922,
+    title: "closed item with late Project visibility",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+    projectItems: [],
+  };
+  const verifiedIssue = {
+    ...listedIssue,
+    labels: [],
+    projectItems: [{ id: "item-922", project: { id: "project" } }],
+  };
+  const reads = [listedIssue, listedIssue, verifiedIssue, verifiedIssue];
+  const events = [];
+
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabels: async (_options, labels, { state }) =>
+        labels.includes("in-pr") && state === "all" ? [listedIssue] : [],
+      findIssueProjectItem: async (_options, issue) => {
+        events.push(issue.projectItems[0] ? "find:visible" : "find:missing");
+        return issue.projectItems[0]?.id ?? null;
+      },
+      updateProjectFields: async () => events.push("project"),
+      editIssueLabels: async () => events.push("labels"),
+      getIssue: async () => {
+        events.push("read");
+        return reads.shift();
+      },
+      sleep: async () => {
+        throw new Error("an immediately satisfied postcondition must not wait");
+      },
+    },
+  );
+
+  assertDeepEqual(events, [
+    "read",
+    "find:missing",
+    "read",
+    "find:missing",
+    "labels",
+    "read",
+    "find:visible",
+    "project",
+    "read",
+  ]);
+  assertDeepEqual(results, [
+    {
+      number: 922,
+      title: "closed item with late Project visibility",
+      state: "done",
+    },
+  ]);
+});
+
+test("sync reprojects a reopen during the late Project write", async () => {
+  const listedIssue = {
+    number: 923,
+    title: "reopen during late Project projection",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+    projectItems: [],
+  };
+  const clearedIssue = {
+    ...listedIssue,
+    labels: [],
+    projectItems: [{ id: "item-923", project: { id: "project" } }],
+  };
+  const activeIssue = {
+    ...listedIssue,
+    state: "OPEN",
+    labels: [{ name: "agent-active" }],
+    projectItems: clearedIssue.projectItems,
+  };
+  let currentIssue = listedIssue;
+  let reads = 0;
+  const updates = [];
+
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabels: async (_options, labels, { state }) =>
+        labels.includes("in-pr") && state === "all" ? [listedIssue] : [],
+      getIssue: async () => {
+        reads += 1;
+        return currentIssue;
+      },
+      findIssueProjectItem: async (_options, issue) =>
+        issue.projectItems[0]?.id ?? null,
+      ensureProjectItem: async () => "item-923",
+      updateProjectFields: async (_options, _project, _item, state) => {
+        updates.push(state);
+        if (state === "done") currentIssue = activeIssue;
+      },
+      editIssueLabels: async (_options, _issue, state) => {
+        if (state === "done") currentIssue = clearedIssue;
+      },
+      sleep: async () => {},
+    },
+  );
+
+  assertDeepEqual(updates, ["done", "active"]);
+  assertEqual(reads, 5, "closed verification and reopened projection reads");
+  assertDeepEqual(results, [
+    {
+      number: 923,
+      title: "reopen during late Project projection",
+      state: "active",
+    },
   ]);
 });
 
@@ -824,7 +946,13 @@ test("sync reprojects Done when an issue closes after an open Project write", as
     state: "CLOSED",
     labels: [],
   };
-  const reads = [reviewIssue, closedIssue, closedIssue, closedIssue];
+  const reads = [
+    reviewIssue,
+    closedIssue,
+    closedIssue,
+    closedIssue,
+    closedIssue,
+  ];
   const updates = [];
 
   const results = await sync(
@@ -844,7 +972,7 @@ test("sync reprojects Done when an issue closes after an open Project write", as
     },
   );
 
-  assertDeepEqual(updates, ["review", "done", "done"]);
+  assertDeepEqual(updates, ["review", "done", "done", "done"]);
   assertDeepEqual(results, [
     { number: 928, title: "concurrent close", state: "done" },
   ]);
