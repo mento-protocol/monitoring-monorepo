@@ -33,7 +33,7 @@ const RATE_LIMIT_BACKOFF_MS = 1500;
 const HSCAN_PAGE_COUNT = 100;
 // Safety bound so a cursor that never returns to "0" fails loudly instead of
 // looping forever.
-const HSCAN_MAX_PAGES = 10_000;
+export const HSCAN_MAX_PAGES = 10_000;
 
 const required = [
   "UPSTASH_REDIS_REST_URL",
@@ -118,7 +118,11 @@ export async function fetchHashViaHscan(
     for (let i = 0; i < flat.length; i += 2) merged.set(flat[i], flat[i + 1]);
     cursor = String(nextCursor);
     pages++;
-    if (pages > HSCAN_MAX_PAGES) {
+    // Check before requesting another page, not after: a scan that
+    // completes exactly at the bound (cursor "0" on page HSCAN_MAX_PAGES)
+    // must succeed, and a scan that still isn't done at the bound must
+    // throw here instead of first fetching page HSCAN_MAX_PAGES + 1.
+    if (cursor !== "0" && pages >= HSCAN_MAX_PAGES) {
       throw new Error(
         `HSCAN on ${key} did not terminate within ${HSCAN_MAX_PAGES} pages; aborting instead of looping forever.`,
       );

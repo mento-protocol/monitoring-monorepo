@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   fetchHashViaHscan,
   fetchHashValuesViaHscan,
+  HSCAN_MAX_PAGES,
 } from "./extract-entities.mjs";
 
 function hscanResponse(cursor, flat) {
@@ -67,7 +68,23 @@ describe("fetchHashViaHscan", () => {
     ).rejects.toThrow(/max request size exceeded/);
   });
 
-  it("aborts instead of looping forever when the cursor never returns to 0", async () => {
+  it("succeeds when the scan terminates on exactly the page-count bound", async () => {
+    let calls = 0;
+    const fetchImpl = vi.fn(() => {
+      calls++;
+      const cursor = calls === HSCAN_MAX_PAGES ? "0" : String(calls);
+      return Promise.resolve(
+        hscanResponse(cursor, ["0xaaa", `{"v":${calls}}`]),
+      );
+    });
+
+    const flat = await fetchHashViaHscan("intel_deep", { fetchImpl });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(HSCAN_MAX_PAGES);
+    expect(flat).toEqual(["0xaaa", `{"v":${HSCAN_MAX_PAGES}}`]);
+  });
+
+  it("aborts before requesting one page past the bound when the cursor never returns to 0", async () => {
     const fetchImpl = vi
       .fn()
       .mockResolvedValue(hscanResponse("never-zero", ["0xaaa", '{"v":1}']));
@@ -75,6 +92,8 @@ describe("fetchHashViaHscan", () => {
     await expect(
       fetchHashViaHscan("intel_deep", { fetchImpl }),
     ).rejects.toThrow(/did not terminate/);
+    // The bound must reject before a page beyond it is ever requested.
+    expect(fetchImpl).toHaveBeenCalledTimes(HSCAN_MAX_PAGES);
   });
 });
 

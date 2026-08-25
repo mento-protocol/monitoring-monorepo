@@ -48,9 +48,18 @@ async function hscanAll<T>(
       const field = String(flat[i]);
       merged[field] = coerceHScanValue<T>(flat[i + 1]);
     }
-    cursor = nextCursor;
+    // Normalize defensively: the SDK's declared return type is `string`,
+    // but nothing here should rely on that never slipping — the .mjs
+    // HSCAN helpers normalize the same way, and a stray numeric cursor
+    // (e.g. terminal `0`) must still satisfy the `"0"` check below rather
+    // than looping until the page-count bound trips.
+    cursor = String(nextCursor);
     pages += 1;
-    if (pages > HSCAN_MAX_PAGES) {
+    // Check before requesting another page, not after: a scan that
+    // completes exactly at the bound (cursor "0" on page HSCAN_MAX_PAGES)
+    // must succeed, and a scan that still isn't done at the bound must
+    // throw here instead of first fetching page HSCAN_MAX_PAGES + 1.
+    if (cursor !== "0" && pages >= HSCAN_MAX_PAGES) {
       throw new Error(
         `HSCAN on "${key}" did not terminate within ${HSCAN_MAX_PAGES} pages; aborting instead of looping forever.`,
       );

@@ -72,6 +72,31 @@ describe("hgetallWithLegacy", () => {
     });
   });
 
+  it("terminates on a numeric cursor, including numeric 0, not just string cursors", async () => {
+    // The @upstash/redis SDK's declared hscan return type is `string`, and a
+    // live probe of the installed client observed exactly that. Normalize
+    // anyway (matching the .mjs HSCAN helpers) so a client that ever returns
+    // a bare JS number here — including terminal `0` — still terminates
+    // instead of looping until the page-count bound trips.
+    hscan.mockImplementation((key: string, cursor: string | number) => {
+      if (key !== INTEL_KEY) return Promise.resolve(["0", []]);
+      if (cursor === 0) {
+        return Promise.resolve([9, ["0xaaa", { address: "0xaaa" }]]);
+      }
+      if (cursor === "9") {
+        return Promise.resolve([0, ["0xbbb", { address: "0xbbb" }]]);
+      }
+      throw new Error(`unexpected cursor ${String(cursor)}`);
+    });
+
+    const result = await hgetallWithLegacy(INTEL_KEY, LEGACY_KEY);
+
+    expect(result).toEqual({
+      "0xaaa": { address: "0xaaa" },
+      "0xbbb": { address: "0xbbb" },
+    });
+  });
+
   it("keeps the later page's value when HSCAN returns the same field twice", async () => {
     hscan.mockImplementation((key: string, cursor: string | number) => {
       if (key !== INTEL_KEY) return Promise.resolve(["0", []]);
@@ -135,14 +160,33 @@ describe("hgetallWithLegacy", () => {
     expect(result).toEqual({ "0xaaa": { v: 1 } });
   });
 
-  it("aborts instead of looping forever when the cursor never returns to 0", async () => {
+  it("succeeds when a scan terminates on exactly the page-count bound", async () => {
+    let calls = 0;
     hscan.mockImplementation((key: string) => {
       if (key !== INTEL_KEY) return Promise.resolve(["0", []]);
-      return Promise.resolve(["never-zero", ["0xaaa", { v: 1 }]]);
+      calls++;
+      const cursor = calls === HSCAN_MAX_PAGES ? "0" : String(calls);
+      return Promise.resolve([cursor, ["0xaaa", { v: calls }]]);
+    });
+
+    const result = await hgetallWithLegacy(INTEL_KEY, LEGACY_KEY);
+
+    expect(calls).toBe(HSCAN_MAX_PAGES);
+    expect(result).toEqual({ "0xaaa": { v: HSCAN_MAX_PAGES } });
+  });
+
+  it("aborts before requesting one page past the bound when the cursor never returns to 0", async () => {
+    let calls = 0;
+    hscan.mockImplementation((key: string) => {
+      if (key !== INTEL_KEY) return Promise.resolve(["0", []]);
+      calls++;
+      return Promise.resolve(["never-zero", ["0xaaa", { v: calls }]]);
     });
 
     await expect(hgetallWithLegacy(INTEL_KEY, LEGACY_KEY)).rejects.toThrow(
       new RegExp(`${HSCAN_MAX_PAGES} pages`),
     );
+    // The bound must reject before a page beyond it is ever requested.
+    expect(calls).toBe(HSCAN_MAX_PAGES);
   });
 });
