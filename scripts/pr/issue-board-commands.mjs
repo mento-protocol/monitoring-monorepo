@@ -1,5 +1,5 @@
 /**
- * Issue-board commands: claim, review, release, sync, and backfill.
+ * Issue-board commands: claim, review, release, and backfill.
  *
  * Each command drives one label transition, projects it onto the workboard,
  * and posts the matching issue comment. Label edits happen first and roll back
@@ -12,9 +12,7 @@ import {
   isRecoverableClaimRaceError,
   isReleasable,
   isReviewable,
-  ISSUE_STATE_LABELS,
   labelNames,
-  labelsForState,
   shouldRollbackFailedTransition,
   stateFromLabels,
 } from "./issue-board-state.mjs";
@@ -32,11 +30,11 @@ import {
 } from "./issue-board-projects.mjs";
 import {
   ensurePrExists,
+  editIssueLabels,
   getGitBranch,
   getIssue,
   getPrIssues,
   listIssueComments,
-  listIssuesByLabels,
   listReadyIssues,
   runGh,
   sleep,
@@ -44,30 +42,6 @@ import {
 import { backfillIssue } from "./issue-board-backfill.mjs";
 
 const CLAIM_SETTLE_MS = 1500;
-const SYNC_RECONCILE_ATTEMPTS = 3;
-const SYNC_VERIFY_ATTEMPTS = 3;
-const SYNC_VERIFY_SETTLE_MS = 250;
-
-async function editIssueLabels(options, issue, state) {
-  const transition = labelsForState(state);
-  const existingLabels = labelNames(issue);
-  const addLabels = transition.addLabels.filter(
-    (label) => !existingLabels.has(label),
-  );
-  const removeLabels = transition.removeLabels.filter((label) =>
-    existingLabels.has(label),
-  );
-  if (addLabels.length === 0 && removeLabels.length === 0) return;
-
-  const args = ["issue", "edit", String(issue.number), "-R", options.repo];
-  if (addLabels.length > 0) {
-    args.push("--add-label", addLabels.join(","));
-  }
-  if (removeLabels.length > 0) {
-    args.push("--remove-label", removeLabels.join(","));
-  }
-  await runGh(args, { dryRun: options.dryRun, mutates: true });
-}
 
 export function buildClaimComment(metadata, issue) {
   const lines = [
@@ -321,286 +295,6 @@ export async function release(options) {
       state: options.releaseState,
     });
   }
-  return results;
-}
-
-async function verifySyncCloseout(options, issue, operations) {
-  let staleLabels = [];
-  for (let attempt = 1; attempt <= SYNC_VERIFY_ATTEMPTS; attempt += 1) {
-    const verified = await operations.getIssue(options, issue.number);
-    const verifiedState = String(verified.state ?? "").toUpperCase();
-    if (verifiedState !== "CLOSED") {
-      return verified;
-    }
-    const verifiedLabels = labelNames(verified);
-    staleLabels = ISSUE_STATE_LABELS.filter((label) =>
-      verifiedLabels.has(label),
-    );
-    if (staleLabels.length === 0) return verified;
-    if (attempt < SYNC_VERIFY_ATTEMPTS) {
-      await operations.sleep(SYNC_VERIFY_SETTLE_MS);
-    }
-  }
-  throw new Error(
-    `Issue #${issue.number} retained queue label(s) after sync: ${staleLabels.join(", ")}`,
-  );
-}
-
-function syncStateFromIssue(issue) {
-  const state = stateFromLabels(issue);
-  if (state) return state;
-  return String(issue.state ?? "").toUpperCase() === "CLOSED" ? "done" : null;
-}
-
-function queueLabelsFromIssue(issue) {
-  const labels = labelNames(issue);
-  return ISSUE_STATE_LABELS.filter((label) => labels.has(label));
-}
-
-function hasExactQueueLabels(issue, state) {
-  const expected = labelsForState(state).addLabels;
-  const actual = queueLabelsFromIssue(issue);
-  return (
-    actual.length === expected.length &&
-    expected.every((label) => actual.includes(label))
-  );
-}
-
-function conflictingOpenQueueLabels(issue) {
-  if (String(issue.state ?? "").toUpperCase() !== "OPEN") return [];
-  const labels = queueLabelsFromIssue(issue);
-  return labels.length > 1 ? labels : [];
-}
-
-export class IssueBoardSyncError extends AggregateError {
-  constructor(results, failures) {
-    const normalizedFailures = failures.map(({ number, title, error }) => ({
-      number,
-      title,
-      message: error instanceof Error ? error.message : String(error),
-    }));
-    const succeeded = results.map((result) => `#${result.number}`).join(", ");
-    const failed = normalizedFailures
-      .map((failure) => `#${failure.number}: ${failure.message}`)
-      .join("; ");
-    super(
-      failures.map((failure) => failure.error),
-      [
-        `Issue-board sync completed with ${normalizedFailures.length} failure(s) after ${results.length} success(es).`,
-        `Succeeded: ${succeeded || "none"}.`,
-        `Failed: ${failed}.`,
-      ].join("\n"),
-    );
-    this.name = "IssueBoardSyncError";
-    this.results = results;
-    this.failures = normalizedFailures;
-  }
-}
-
-async function syncIssue(options, project, listedIssue, operations) {
-  let issue = await operations.getIssue(options, listedIssue.number);
-  let drift = null;
-
-  for (let attempt = 1; attempt <= SYNC_RECONCILE_ATTEMPTS; attempt += 1) {
-    const conflictingLabels = conflictingOpenQueueLabels(issue);
-    if (conflictingLabels.length > 0) {
-      drift = `conflicting queue labels (${conflictingLabels.join(", ")})`;
-      if (attempt < SYNC_RECONCILE_ATTEMPTS) {
-        await operations.sleep(SYNC_VERIFY_SETTLE_MS);
-        issue = await operations.getIssue(options, issue.number);
-        continue;
-      }
-      throw new Error(
-        `Issue #${issue.number} retained conflicting queue labels after ${SYNC_RECONCILE_ATTEMPTS} attempts: ${conflictingLabels.join(", ")}`,
-      );
-    }
-
-    const state = syncStateFromIssue(issue);
-    if (!state) {
-      if (!drift) return null;
-      if (attempt < SYNC_RECONCILE_ATTEMPTS) {
-        await operations.sleep(SYNC_VERIFY_SETTLE_MS);
-        issue = await operations.getIssue(options, issue.number);
-        continue;
-      }
-      throw new Error(
-        `Issue #${issue.number} lost its queue state during sync after ${attempt} attempt(s); last projection drift was ${drift}`,
-      );
-    }
-
-    if (state === "done") {
-      const itemId = await operations.findIssueProjectItem(
-        options,
-        issue,
-        project,
-      );
-      if (itemId) {
-        await operations.updateProjectFields(
-          options,
-          project,
-          itemId,
-          state,
-          {},
-        );
-      }
-      if (options.dryRun) {
-        await operations.editIssueLabels(options, issue, state);
-        return { number: issue.number, title: issue.title, state };
-      }
-
-      const closeoutIssue = await operations.getIssue(options, issue.number);
-      const closeoutState = syncStateFromIssue(closeoutIssue);
-      if (closeoutState !== "done") {
-        drift = `done -> ${closeoutState ?? "no queue state"}`;
-        if (attempt < SYNC_RECONCILE_ATTEMPTS) {
-          issue = closeoutIssue;
-          await operations.sleep(SYNC_VERIFY_SETTLE_MS);
-          continue;
-        }
-        break;
-      }
-
-      const closeoutItemId = await operations.findIssueProjectItem(
-        options,
-        closeoutIssue,
-        project,
-      );
-      if (closeoutItemId) {
-        await operations.updateProjectFields(
-          options,
-          project,
-          closeoutItemId,
-          state,
-          {},
-        );
-      }
-
-      const reopenState = stateFromLabels({
-        ...closeoutIssue,
-        state: "OPEN",
-      });
-      await operations.editIssueLabels(options, closeoutIssue, state);
-      let verifiedIssue = await verifySyncCloseout(
-        options,
-        closeoutIssue,
-        operations,
-      );
-      if (String(verifiedIssue.state ?? "").toUpperCase() === "CLOSED") {
-        const verifiedItemId = await operations.findIssueProjectItem(
-          options,
-          verifiedIssue,
-          project,
-        );
-        if (!verifiedItemId) {
-          return { number: issue.number, title: issue.title, state };
-        }
-        await operations.updateProjectFields(
-          options,
-          project,
-          verifiedItemId,
-          state,
-          {},
-        );
-        verifiedIssue = await verifySyncCloseout(
-          options,
-          verifiedIssue,
-          operations,
-        );
-        if (String(verifiedIssue.state ?? "").toUpperCase() === "CLOSED") {
-          return { number: issue.number, title: issue.title, state };
-        }
-      }
-
-      let reopenedIssue = verifiedIssue;
-      let reopenedState = syncStateFromIssue(reopenedIssue);
-      if (!reopenedState && reopenState) {
-        reopenedIssue = await operations.getIssue(options, issue.number);
-        reopenedState = syncStateFromIssue(reopenedIssue);
-        if (!reopenedState) {
-          await operations.editIssueLabels(options, reopenedIssue, reopenState);
-          reopenedIssue = await operations.getIssue(options, issue.number);
-          reopenedState = syncStateFromIssue(reopenedIssue);
-        }
-      }
-      drift =
-        reopenedState &&
-        reopenedState !== "done" &&
-        !hasExactQueueLabels(reopenedIssue, reopenedState)
-          ? `done -> conflicting queue labels (${queueLabelsFromIssue(reopenedIssue).join(", ")})`
-          : `done -> ${reopenedState ?? "no queue state"}`;
-      if (attempt < SYNC_RECONCILE_ATTEMPTS) {
-        issue = reopenedIssue;
-        await operations.sleep(SYNC_VERIFY_SETTLE_MS);
-        continue;
-      }
-      break;
-    }
-
-    const itemId = await operations.ensureProjectItem(options, project, issue);
-    if (!itemId) return null;
-    await operations.updateProjectFields(options, project, itemId, state, {});
-    if (options.dryRun) {
-      return { number: issue.number, title: issue.title, state };
-    }
-
-    const verified = await operations.getIssue(options, issue.number);
-    const verifiedState = syncStateFromIssue(verified);
-    if (verifiedState === state && hasExactQueueLabels(verified, state)) {
-      return { number: issue.number, title: issue.title, state };
-    }
-
-    drift =
-      verifiedState === state
-        ? `${state} -> conflicting queue labels (${queueLabelsFromIssue(verified).join(", ")})`
-        : `${state} -> ${verifiedState ?? "no queue state"}`;
-    if (attempt < SYNC_RECONCILE_ATTEMPTS) {
-      issue = verified;
-      await operations.sleep(SYNC_VERIFY_SETTLE_MS);
-    }
-  }
-
-  throw new Error(
-    `Issue #${issue.number} did not stabilize during sync after ${SYNC_RECONCILE_ATTEMPTS} attempts; last projection drift was ${drift}`,
-  );
-}
-
-export async function sync(options, dependencies = {}) {
-  const operations = {
-    editIssueLabels,
-    ensureProjectItem,
-    findIssueProjectItem,
-    getIssue,
-    getProject,
-    listIssuesByLabels,
-    sleep,
-    updateProjectFields,
-    ...dependencies,
-  };
-  const project = await operations.getProject(options);
-  const byNumber = new Map();
-  for (const issue of await operations.listIssuesByLabels(
-    options,
-    ISSUE_STATE_LABELS,
-    { state: "all" },
-  )) {
-    byNumber.set(issue.number, issue);
-  }
-
-  const results = [];
-  const failures = [];
-  for (const listedIssue of byNumber.values()) {
-    try {
-      const result = await syncIssue(options, project, listedIssue, operations);
-      if (result) results.push(result);
-    } catch (error) {
-      failures.push({
-        number: listedIssue.number,
-        title: listedIssue.title,
-        error,
-      });
-    }
-  }
-  if (failures.length > 0) throw new IssueBoardSyncError(results, failures);
   return results;
 }
 

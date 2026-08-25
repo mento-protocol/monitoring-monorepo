@@ -4,13 +4,14 @@
  * the repo's GitHub Projects workboard.
  *
  * This file is the entry point and the public surface. The implementation
- * lives in six layers it composes:
+ * lives in seven layers it composes:
  *   - `issue-board-state.mjs`     pure transitions and predicates
  *   - `issue-board-cli.mjs`       argv parsing and usage text
  *   - `issue-board-transport.mjs` the bounded `gh` runner and issue readers
  *   - `issue-board-projects.mjs`  Projects V2 field IO
  *   - `issue-board-backfill.mjs`  trusted claim recovery and fill-only plans
- *   - `issue-board-commands.mjs`  claim, review, release, sync, backfill
+ *   - `issue-board-commands.mjs`  claim, review, release, and backfill
+ *   - `issue-board-sync.mjs`      reconciliation and closeout
  */
 
 import { fileURLToPath } from "node:url";
@@ -22,16 +23,12 @@ import {
   release,
   renderResults,
   review,
-  sync,
 } from "./issue-board-commands.mjs";
+import { sync } from "./issue-board-sync.mjs";
 
 export { parseArgs, parseIssueNumbers } from "./issue-board-cli.mjs";
-export {
-  backfill,
-  buildClaimComment,
-  IssueBoardSyncError,
-  sync,
-} from "./issue-board-commands.mjs";
+export { backfill, buildClaimComment } from "./issue-board-commands.mjs";
+export { IssueBoardSyncError, sync } from "./issue-board-sync.mjs";
 export {
   buildBackfillPlan,
   parseClaimComment,

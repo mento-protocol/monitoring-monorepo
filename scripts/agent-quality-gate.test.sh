@@ -5487,6 +5487,9 @@ assert_contains "- pnpm issue:board:test (agent issue board helper changed)"
 run_gate "scripts/pr/issue-board-commands.mjs"
 assert_contains "- pnpm issue:board:test (agent issue board helper changed)"
 
+run_gate "scripts/pr/issue-board-sync.mjs"
+assert_contains "- pnpm issue:board:test (agent issue board helper changed)"
+
 run_gate "scripts/supply-chain/version-skew-check.mjs"
 assert_contains "- pnpm skew:check:test (version skew checker changed)"
 

@@ -78,8 +78,8 @@ async function authenticatedApiCheck() {
   if (text !== "") {
     try {
       body = JSON.parse(text);
-    } catch (error) {
-      parseError = String(error);
+    } catch {
+      parseError = "invalid-json";
     }
   }
   return {
@@ -98,9 +98,11 @@ async function authenticatedApiCheck() {
 
 Keep the raw response text and the full parsed body local. Record only the
 status and the minimum non-sensitive fields that prove the acceptance criteria.
-Record `parseError` when parsing non-empty response text fails. Redact secrets,
-private labels, forensic reports, and personal data. Do not inspect cookies or
-browser storage. Do not use this path for a cross-origin request or a mutation.
+Set `parseError` to the fixed `invalid-json` category when non-empty response
+text cannot be parsed. Do not include response text or parser details in it.
+Redact secrets, private labels, forensic reports, and personal data. Do not
+inspect cookies or browser storage. Do not use this path for a cross-origin
+request or a mutation.
 
 For a simulated authenticated session:
 

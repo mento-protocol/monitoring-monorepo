@@ -978,7 +978,7 @@ test("sync reprojects Done when an issue closes after an open Project write", as
   ]);
 });
 
-test("sync restores queue state when a closed issue reopens during Done cleanup", async () => {
+test("sync compensates for a concurrent queue transition after the restore read", async () => {
   const listedIssue = {
     number: 927,
     title: "concurrent reopen",
@@ -998,13 +998,6 @@ test("sync restores queue state when a closed issue reopens during Done cleanup"
         labels.includes("in-pr") && state === "all" ? [listedIssue] : [],
       getIssue: async () => {
         reads += 1;
-        if (reads === 6) {
-          currentIssue = {
-            ...listedIssue,
-            state: "OPEN",
-            labels: [{ name: "in-pr" }],
-          };
-        }
         return currentIssue;
       },
       findIssueProjectItem: async () => null,
@@ -1012,15 +1005,26 @@ test("sync restores queue state when a closed issue reopens during Done cleanup"
       updateProjectFields: async (_options, _project, _item, state) => {
         updates.push(state);
       },
-      editIssueLabels: async (_options, _issue, state) => {
+      editIssueLabels: async (_options, issue, state) => {
         edits.push(state);
         if (state === "done") {
           currentIssue = { ...listedIssue, state: "OPEN", labels: [] };
-        } else {
+        } else if (state === "review") {
+          assertDeepEqual(
+            issue.labels,
+            [],
+            "fresh label-less restore snapshot",
+          );
           currentIssue = {
             ...listedIssue,
             state: "OPEN",
             labels: [{ name: "in-pr" }, { name: "agent-active" }],
+          };
+        } else {
+          currentIssue = {
+            ...listedIssue,
+            state: "OPEN",
+            labels: [{ name: "agent-active" }],
           };
         }
       },
@@ -1028,12 +1032,184 @@ test("sync restores queue state when a closed issue reopens during Done cleanup"
     },
   );
 
-  assertDeepEqual(edits, ["done", "review"]);
-  assertDeepEqual(updates, ["review"]);
-  assertEqual(reads, 7, "refresh, closeout, restore, and projection reads");
+  assertDeepEqual(edits, ["done", "review", "active"]);
+  assertDeepEqual(updates, ["active"]);
+  assertEqual(reads, 7, "restore, compensation, and projection reads");
   assertDeepEqual(results, [
-    { number: 927, title: "concurrent reopen", state: "review" },
+    { number: 927, title: "concurrent reopen", state: "active" },
   ]);
+});
+
+test("sync carries restore compensation through Project verification", async () => {
+  const listedIssue = {
+    number: 935,
+    title: "transition after restored projection",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+  };
+  let currentIssue = listedIssue;
+  let reads = 0;
+  let waits = 0;
+  const edits = [];
+  const updates = [];
+
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabels: async (_options, labels, { state }) =>
+        labels.includes("in-pr") && state === "all" ? [listedIssue] : [],
+      getIssue: async () => {
+        reads += 1;
+        return currentIssue;
+      },
+      findIssueProjectItem: async () => null,
+      ensureProjectItem: async () => "item-935",
+      updateProjectFields: async (_options, _project, _item, state) => {
+        updates.push(state);
+        if (state === "review") {
+          currentIssue = {
+            ...listedIssue,
+            state: "OPEN",
+            labels: [{ name: "in-pr" }, { name: "agent-active" }],
+          };
+        }
+      },
+      editIssueLabels: async (_options, _issue, state) => {
+        edits.push(state);
+        currentIssue = {
+          ...listedIssue,
+          state: "OPEN",
+          labels:
+            state === "done"
+              ? []
+              : [{ name: state === "review" ? "in-pr" : "agent-active" }],
+        };
+      },
+      sleep: async () => {
+        waits += 1;
+      },
+    },
+  );
+
+  assertDeepEqual(edits, ["done", "review", "active"]);
+  assertDeepEqual(updates, ["review", "active"]);
+  assertEqual(reads, 8, "restore and later Project verification reads");
+  assertEqual(waits, 2, "bounded projection retries");
+  assertDeepEqual(results, [
+    {
+      number: 935,
+      title: "transition after restored projection",
+      state: "active",
+    },
+  ]);
+});
+
+test("sync fails closed for ambiguous labels after reopen restore", async () => {
+  const listedIssue = {
+    number: 936,
+    title: "ambiguous transition after restore",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+  };
+  let currentIssue = listedIssue;
+  let reads = 0;
+  let waits = 0;
+  const edits = [];
+
+  await assertRejects(
+    () =>
+      sync(
+        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+        {
+          getProject: async () => ({ id: "project" }),
+          listIssuesByLabels: async (_options, labels, { state }) =>
+            labels.includes("in-pr") && state === "all" ? [listedIssue] : [],
+          getIssue: async () => {
+            reads += 1;
+            return currentIssue;
+          },
+          findIssueProjectItem: async () => null,
+          ensureProjectItem: async () => {
+            throw new Error("sync must not project an ambiguous state");
+          },
+          editIssueLabels: async (_options, _issue, state) => {
+            edits.push(state);
+            currentIssue = {
+              ...listedIssue,
+              state: "OPEN",
+              labels:
+                state === "done"
+                  ? []
+                  : [
+                      { name: "in-pr" },
+                      { name: "agent-active" },
+                      { name: "agent-ready" },
+                    ],
+            };
+          },
+          sleep: async () => {
+            waits += 1;
+          },
+        },
+      ),
+    /Issue #936 retained conflicting queue labels after 3 attempts: agent-ready, agent-active, in-pr/,
+  );
+
+  assertDeepEqual(edits, ["done", "review"]);
+  assertEqual(reads, 6, "bounded ambiguous-state reads");
+  assertEqual(waits, 2, "bounded ambiguous-state waits");
+});
+
+test("sync does not restore an ambiguous closed queue state", async () => {
+  const listedIssue = {
+    number: 937,
+    title: "ambiguous closed state",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }, { name: "agent-active" }],
+  };
+  let currentIssue = listedIssue;
+  let reads = 0;
+  let waits = 0;
+  const edits = [];
+
+  await assertRejects(
+    () =>
+      sync(
+        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+        {
+          getProject: async () => ({ id: "project" }),
+          listIssuesByLabels: async (_options, labels, { state }) =>
+            labels.includes("in-pr") &&
+            labels.includes("agent-active") &&
+            state === "all"
+              ? [listedIssue]
+              : [],
+          getIssue: async () => {
+            reads += 1;
+            return currentIssue;
+          },
+          findIssueProjectItem: async () => null,
+          ensureProjectItem: async () => {
+            throw new Error("sync must not project an unknown restored state");
+          },
+          editIssueLabels: async (_options, _issue, state) => {
+            edits.push(state);
+            if (state === "done") {
+              currentIssue = { ...listedIssue, state: "OPEN", labels: [] };
+            }
+          },
+          sleep: async () => {
+            waits += 1;
+          },
+        },
+      ),
+    /Issue #937 lost its queue state during sync after 3 attempt\(s\); last projection drift was done -> no queue state/,
+  );
+
+  assertDeepEqual(edits, ["done"]);
+  assertEqual(reads, 4, "bounded ambiguous-source reads");
+  assertEqual(waits, 2, "bounded ambiguous-source waits");
 });
 
 test("sync preserves a concurrent queue transition before reopen restore", async () => {
