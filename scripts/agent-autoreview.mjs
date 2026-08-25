@@ -143,7 +143,9 @@ Options:
   --mode <auto|local|branch|commit>  Review target mode (default: auto)
   --base <ref>                       Base ref for branch mode
   --commit <ref>                     Commit ref for commit mode (default: HEAD)
-  --engine <codex|claude|local>      Review engine (default: AUTOREVIEW_ENGINE or codex)
+  --engine <codex|claude|local>      Review engine (default: AUTOREVIEW_ENGINE or codex;
+                                      falls back to claude when codex is not
+                                      installed and neither was set explicitly)
   --model <name>                     Model passed through to the engine
   --thinking <level>                 Codex reasoning effort or Claude effort
   --prompt <text>                    Extra review instruction (repeatable)
@@ -184,6 +186,7 @@ function parseArgs(argv) {
     base: null,
     commit: "HEAD",
     engine: process.env.AUTOREVIEW_ENGINE || "codex",
+    engineExplicit: Boolean(process.env.AUTOREVIEW_ENGINE),
     model: null,
     thinking: null,
     prompts: [],
@@ -235,6 +238,7 @@ function parseArgs(argv) {
         break;
       case "--engine":
         args.engine = next();
+        args.engineExplicit = true;
         break;
       case "--model":
         args.model = next();
@@ -1269,6 +1273,34 @@ function resolveTrustedCommand(command, rejectRoot, { required = true } = {}) {
     throw new Error(unavailableCommandMessage(command));
   }
   return null;
+}
+
+// Cloud containers and some CI shells have no installed codex CLI. The repo
+// docs call the bare invocation "the closeout", so it must still run there:
+// when the caller left --engine and AUTOREVIEW_ENGINE unset, fall back to the
+// claude engine instead of letting the codex search fail deep inside runCodex.
+// An engine the caller asked for explicitly never falls back -- it fails with
+// its own clear error instead.
+function applyDefaultEngineFallback(args, repo) {
+  if (args.engineExplicit || args.engine !== "codex") return;
+  if (resolveTrustedCommand("codex", repo, { required: false })) return;
+  if (process.env[commandOverrideVariable("codex")]) {
+    // trustedCommandCandidates() already treats an explicit binary override as
+    // authoritative -- a typo must surface as its own error rather than
+    // silently reviving whatever the PATH offers. Falling back to claude here
+    // would defeat that contract by swapping engines out from under a caller
+    // who named a specific codex binary, so surface codex's own error instead.
+    throw new Error(unavailableCommandMessage("codex"));
+  }
+  if (!resolveTrustedCommand("claude", repo, { required: false })) {
+    throw new Error(
+      `neither codex nor claude CLI is available. ${unavailableCommandMessage("codex")} ${unavailableCommandMessage("claude")}`,
+    );
+  }
+  console.error(
+    "agent:autoreview: codex CLI not found; falling back to --engine claude",
+  );
+  args.engine = "claude";
 }
 
 function trustedCurrentNode(rejectRoot) {
@@ -3455,13 +3487,23 @@ async function runCodex(repo, args, prompt) {
     }
   }
   if (unusableLaunchers.length > 0) {
-    throw new Error(
+    const error = new Error(
       unusableEngineLauncherMessage(
         "codex",
         unusableLaunchers,
         firstLauncherError.message,
       ),
     );
+    // A trusted-executable resolution only proves a candidate exists and is
+    // safe to run, not that it actually launches: an installed shim missing
+    // its underlying runtime resolves fine and clears
+    // applyDefaultEngineFallback()'s implicit-engine check, so that check
+    // alone cannot tell this case apart from a genuinely usable codex. Tag it
+    // here, once every resolved candidate has actually been tried and failed
+    // to launch, so an implicit caller can fall back to claude instead of
+    // failing on an engine it never really had.
+    error.allCodexLaunchersUnusable = true;
+    throw error;
   }
   throw new Error(unavailableCommandMessage("codex"));
 }
@@ -4784,7 +4826,8 @@ async function main() {
 
   console.log(`autoreview target: ${target.mode}`);
   console.log(`branch: ${branch}`);
-  console.log(`engine: ${args.engine}`);
+  const requestedEngine = args.engine;
+  console.log(`engine: ${requestedEngine}`);
   if (target.requested_ref)
     console.log(`requested_ref: ${target.requested_ref}`);
   if (target.ref) console.log(`ref: ${target.ref}`);
@@ -4910,6 +4953,15 @@ async function main() {
     );
   }
 
+  // Resolved only once a semantic engine invocation is actually reached: a
+  // clean target already returned above, and --dry-run / --prepare-only
+  // never get here at all. Resolving earlier made both crash in an
+  // engine-free shell for something neither mode does.
+  applyDefaultEngineFallback(args, repo);
+  if (args.engine !== requestedEngine) {
+    console.log(`engine: ${args.engine}`);
+  }
+
   let report;
   const engineStartedAt = Date.now();
   try {
@@ -4940,10 +4992,41 @@ async function main() {
         guardTargetSelectionDuringReview,
         "source changed before semantic review; rerun autoreview against the updated tree",
       );
-      const raw =
-        args.engine === "codex"
-          ? await runCodex(repo, args, prompts[0])
-          : await runClaude(repo, args, prompts[0]);
+      let raw;
+      if (args.engine === "codex") {
+        try {
+          raw = await runCodex(repo, args, prompts[0]);
+        } catch (error) {
+          // applyDefaultEngineFallback() only proved a codex candidate exists
+          // and is trusted, not that it can launch -- runCodex() just
+          // exhausted every resolved candidate and confirmed none can. An
+          // explicit --engine codex still fails with the engine's own error;
+          // only the implicit default retries with claude, the same fallback
+          // applyDefaultEngineFallback() would have taken had it detected
+          // this earlier. AUTOREVIEW_CODEX_BIN is the second explicit form and
+          // gets the same treatment: applyDefaultEngineFallback() refuses to
+          // swap engines out from under a caller who named a codex binary, and
+          // that refusal must not lapse just because the named binary resolved
+          // and then failed to launch rather than failing to resolve.
+          if (
+            !args.engineExplicit &&
+            !process.env[commandOverrideVariable("codex")] &&
+            error?.allCodexLaunchersUnusable &&
+            resolveTrustedCommand("claude", repo, { required: false })
+          ) {
+            console.error(
+              "agent:autoreview: codex CLI resolved but could not launch; falling back to --engine claude",
+            );
+            args.engine = "claude";
+            console.log(`engine: ${args.engine}`);
+            raw = await runClaude(repo, args, prompts[0]);
+          } else {
+            throw error;
+          }
+        }
+      } else {
+        raw = await runClaude(repo, args, prompts[0]);
+      }
       report = validateReport(extractReviewJson(raw), paths);
       assertReviewSourceState(
         repo,

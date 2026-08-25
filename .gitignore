@@ -28,6 +28,9 @@ dist/
 .claude/settings.local.json
 .claude/*.jq
 .claude/*.graphql
+# Claude Code on the web bootstrap log (session-start.sh tees the setup
+# script's combined stdout/stderr here for post-mortem diagnosis).
+.claude/logs/
 .reviews/
 .tmp/
 .stryker-tmp/

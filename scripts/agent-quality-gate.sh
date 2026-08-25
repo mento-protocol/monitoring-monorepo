@@ -2331,6 +2331,12 @@ fi
 
 failures=0
 command_summaries=()
+# `<command>\n<output tail>` per failed command, replayed next to the verdict.
+failed_command_outputs=()
+failure_output_tail_lines=20
+# Trunk launcher provisioning verdict for this run: "" (not probed yet), "ok",
+# or "blocked". Probed at most once, and only after a Trunk command failed.
+trunk_provisioning_state=""
 
 format_duration() {
   local seconds="$1"
@@ -2377,6 +2383,128 @@ filter_expected_output() {
     skip_expected_stack=false
     echo "$line"
   done
+}
+
+# The inline dump of a failing command's output can sit thousands of lines above
+# the final verdict once the parallel pool interleaves several commands, and a
+# command that fails while printing nothing (a launcher that swallows its own
+# error) leaves no trace at all. Keep the tail of each failure so the verdict can
+# repeat it, and say so explicitly when there was nothing to keep.
+record_failure_output() {
+  local command="$1"
+  local output_file="$2"
+  local tail_text
+
+  tail_text="$(filter_expected_output < "$output_file" 2>/dev/null |
+    tail -n "$failure_output_tail_lines")" || tail_text=""
+  if [[ -z "${tail_text//[[:space:]]/}" ]]; then
+    tail_text="(no output captured)"
+  fi
+  failed_command_outputs+=("${command}"$'\n'"${tail_text}")
+}
+
+print_failed_command_output() {
+  local entry
+  local command
+  local body
+
+  if [[ ${#failed_command_outputs[@]} -eq 0 ]]; then
+    return 0
+  fi
+
+  echo >&2
+  echo "Failure output (last ${failure_output_tail_lines} lines per command):" >&2
+  for entry in "${failed_command_outputs[@]+"${failed_command_outputs[@]}"}"; do
+    command="${entry%%$'\n'*}"
+    body="${entry#*$'\n'}"
+    echo "- ${command}" >&2
+    printf '%s\n' "$body" | sed 's/^/    /' >&2
+  done
+}
+
+# `./tools/trunk` is a launcher that self-downloads the pinned CLI from trunk.io
+# on first use. Where that host is unreachable — a Claude cloud container proxies
+# egress and answers "Proxy tunneling failed: Forbidden" for anything outside its
+# allowlist — the launcher exits non-zero before a single linter runs, and the
+# stamp-exempt Trunk arm would make an otherwise-clean gate unable to exit 0.
+# `.trunk/hooks` already models the answer for commits and pushes: warn, name the
+# allowlist fix, skip. The gate takes the same posture, with one restriction that
+# keeps it honest — only a PROVISIONING failure may downgrade. A provisioned
+# Trunk that finds real problems still fails the gate, so the probe runs AFTER
+# the command failed and asks the launcher whether it can produce a CLI at all.
+is_trunk_command() {
+  case "$1" in
+    "./tools/trunk "*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+trunk_provisioning_probe_timeout_seconds=15
+
+# Ask the launcher whether it can produce a CLI. Bounded: a probe that cannot
+# answer within its budget is torn down and reported as NOT blocked, so an
+# unanswerable question leaves the original failure standing.
+trunk_provisioning_probe() {
+  local pid
+  local waited=0
+  local had_errexit=0
+  local rc
+
+  case "$-" in
+    *e*) had_errexit=1 ;;
+  esac
+  set +e
+
+  TRUNK_LAUNCHER_QUIET=true ./tools/trunk --version >/dev/null 2>&1 &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null &&
+    [[ "$waited" -lt "$trunk_provisioning_probe_timeout_seconds" ]]; do
+    sleep 1
+    waited=$((waited + 1))
+  done
+
+  if kill -0 "$pid" 2>/dev/null; then
+    kill_process_tree "$pid" KILL
+    wait "$pid" 2>/dev/null
+    rc=0
+  else
+    wait "$pid" 2>/dev/null
+    rc=$?
+    [[ "$rc" -le 128 ]] || rc=0
+  fi
+
+  [[ "$had_errexit" == 1 ]] && set -e
+  return "$rc"
+}
+
+trunk_provisioning_is_blocked() {
+  # A missing or non-executable launcher is a real failure, not an environment
+  # one: tools/trunk is tracked, so its absence means the checkout is broken.
+  [[ -x ./tools/trunk ]] || return 1
+
+  if [[ -z "$trunk_provisioning_state" ]]; then
+    if trunk_provisioning_probe; then
+      trunk_provisioning_state=ok
+    else
+      trunk_provisioning_state=blocked
+    fi
+  fi
+
+  [[ "$trunk_provisioning_state" == blocked ]]
+}
+
+print_trunk_environment_blocked_warning() {
+  local command="$1"
+  echo "warning: skipping ${command} — the Trunk CLI could not be provisioned." >&2
+  echo "  The launcher self-downloads the pinned CLI from trunk.io and could not produce a" >&2
+  echo "  working one here. The probe reports that it failed, not why." >&2
+  echo "  Most often the environment blocks the download:" >&2
+  echo "  Add 'trunk.io' and '*.trunk.io' to the environment's allowed domains to run it here." >&2
+  echo "  A local cause — a corrupt or unwritable launcher cache — prints this same warning." >&2
+  echo "  Run './tools/trunk --version' to see the launcher's own error." >&2
+  echo "  CI still enforces Trunk on the PR (.github/workflows/trunk.yml)." >&2
 }
 
 is_autoreview_test_command() {
@@ -2827,6 +2955,14 @@ run_mapped_command() {
     return 0
   fi
 
+  if [[ "$timed_out" != true ]] && is_trunk_command "$command" &&
+    trunk_provisioning_is_blocked; then
+    record_command_summary "skipped" "$elapsed" "$command"
+    print_trunk_environment_blocked_warning "$command"
+    rm -f "$output_file"
+    return 0
+  fi
+
   record_command_summary "fail" "$elapsed" "$command"
   if [[ "$timed_out" == true ]]; then
     echo "Command timed out after ${command_timeout_seconds}s: ${command}" >&2
@@ -2834,6 +2970,7 @@ run_mapped_command() {
     echo "Command failed after $(format_duration "$elapsed"): ${command}" >&2
   fi
   filter_expected_output < "$output_file" >&2
+  record_failure_output "$command" "$output_file"
   rm -f "$output_file"
   return "$exit_code"
 }
@@ -2970,6 +3107,7 @@ run_mapped_entries_sequential() {
         echo
         echo "Stopping after first failed mapped command (--fail-fast)." >&2
         print_command_summary
+        print_failed_command_output
         log_duration_line "fail" "$(($(date +%s) - gate_start_ts))" "__run_total__" "run" || true
         exit 1
       fi
@@ -3138,6 +3276,10 @@ run_mapped_entries_parallel() {
           print_autoreview_test_timings "$output_file"
         fi
         echo "✓ ${command} ($(format_duration "$elapsed"))"
+      elif [[ "$timed_out" != true ]] && is_trunk_command "$command" &&
+        trunk_provisioning_is_blocked; then
+        record_command_summary "skipped" "$elapsed" "$command"
+        print_trunk_environment_blocked_warning "$command"
       else
         failures=$((failures + 1))
         record_command_summary "fail" "$elapsed" "$command"
@@ -3147,6 +3289,7 @@ run_mapped_entries_parallel() {
           echo "Command failed after $(format_duration "$elapsed"): ${command}" >&2
         fi
         filter_expected_output < "$output_file" >&2
+        record_failure_output "$command" "$output_file"
       fi
 
       rm -f "$output_file" "$status_file" "$elapsed_file" "$timeout_file"
@@ -3307,6 +3450,7 @@ gate_total_elapsed=$(( $(date +%s) - gate_start_ts ))
 
 if [[ "$failures" -gt 0 ]]; then
   log_duration_line "fail" "$gate_total_elapsed" "__run_total__" "run" || true
+  print_failed_command_output
   echo
   echo "${failures} mapped command(s) failed." >&2
   exit 1
@@ -3316,12 +3460,21 @@ log_duration_line "ok" "$gate_total_elapsed" "__run_total__" "run" || true
 
 echo
 echo "All mapped commands passed."
-if [[ "${stamp_reuse_count:-0}" -eq 0 ]]; then
+if [[ "$trunk_provisioning_state" == blocked ]]; then
+  echo "Note: the Trunk arm was skipped because the CLI could not be provisioned here; CI still enforces it."
+fi
+if [[ "${stamp_reuse_count:-0}" -eq 0 && "$trunk_provisioning_state" != "blocked" ]]; then
   # Only a fully-executed green run earns the whole-run fast-path stamp. A
   # resumed run reused work whose real age lives in the per-command stamps;
   # re-dating it here would let --skip-if-fresh extend validation reuse past
   # the two-hour ceiling (command passes at t=0, retry succeeds at t=119m,
-  # fresh whole-run stamp then covers t=238m).
+  # fresh whole-run stamp then covers t=238m). A run that skipped Trunk
+  # because the launcher could not be provisioned is the same hazard from a
+  # different direction: the whole-run stamp carries no record of that skip,
+  # so a later --skip-if-fresh run — even one where Trunk has since become
+  # provisionable — would trust the stamp and never attempt it. Withholding
+  # the stamp here forces the next run to actually retry Trunk instead of
+  # inheriting a pass it never earned.
   {
     printf 'created_at=%s\n' "$(date +%s)"
     printf 'stamp=%s\n' "$current_stamp"

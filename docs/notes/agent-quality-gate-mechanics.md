@@ -45,9 +45,11 @@ If a sandboxed mapped run fails only because a command needs host capabilities,
 rerun the full mapped gate with host access on the same head. The gate reuses
 stamp-eligible fresh successes and runs the blocked commands. A resumed run does
 not write a whole-run stamp. Trunk and the gate self-test are stamp-exempt and
-always run, including during the later pre-push gate. Other eligible successes
-keep per-command stamps, so the later gate can avoid repeating them. Running a
-command directly proves it but records no per-command stamp.
+always run, including during the later pre-push gate; Trunk's one exception is
+an environment that cannot provision the CLI, where the arm is skipped. Other
+eligible successes keep per-command stamps, so the later gate can avoid
+repeating them. Running a command directly proves it but records no per-command
+stamp.
 
 For a manual full-repository reproduction of the server-side pre-push baseline,
 including when hooks are absent or uncertain, use:
@@ -192,7 +194,14 @@ targeted Trunk checks for faster local iteration. Deleted paths,
 Trunk/tooling changes, package-manager changes, pnpm patches, and
 package-manifest changes still run full-repo Trunk locally. CI also runs a
 required full-repo Trunk check on every
-PR. Normal `--run` mode executes independent quality-phase commands with
+PR. Where the environment blocks `trunk.io` — a Claude cloud container proxies
+egress and refuses any host outside its allowlist, so `./tools/trunk` cannot
+download the pinned CLI — the gate probes provisioning after the Trunk command
+fails, then reports the arm as `skipped` with a warning naming the allowlist fix
+instead of failing the run, matching the posture `.trunk/hooks` already takes.
+Only a provisioning failure degrades: a provisioned Trunk that finds real
+problems still fails the gate. Normal `--run` mode executes independent
+quality-phase commands with
 bounded parallelism (`--parallel <n>`, default `auto` capped at 4 workers, or
 `AGENT_QUALITY_PARALLELISM`). Preflight, codegen, post-codegen install,
 Terraform init/validate chains, shared-config build setup, and the package
@@ -1232,7 +1241,8 @@ quality/serialized/parallel commands are stamped. Prerequisite phases
 (install/codegen/quality-setup) always re-run: their outputs (node_modules,
 generated code, built packages) are invisible to the source fingerprint, so a
 stamp could skip them after their outputs were deleted. The Trunk check, the
-gate self-test, and the advisory ADR reminder also always re-run.
+gate self-test, and the advisory ADR reminder also always re-run — the Trunk
+check is skipped, never reused, where the CLI cannot be provisioned.
 
 Each mapped command has a watchdog (default 1500 seconds; override with
 `--command-timeout <n>` or `AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS`). On timeout
@@ -1240,6 +1250,13 @@ it TERM→KILLs the process tree, reports
 `Command timed out after <n>s: <command>`, and logs durations status `fail`. A
 self-daemonizing child can escape the tree (none do). The timeout never bounds
 the whole run.
+
+A failing command's captured output is printed inline, and its last 20 lines are
+repeated under `Failure output (last 20 lines per command):` next to the final
+verdict. In a parallel run the inline dump can sit thousands of lines above that
+verdict, and a command that fails while printing nothing — a launcher that
+redirects its own errors away — reads as `(no output captured)` there instead
+of leaving no trace at all.
 
 That default was 900 until this gate's own self-test became the longest mapped
 command: it runs 525s alone and past 900s inside a full gate run, where it

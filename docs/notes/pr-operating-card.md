@@ -43,6 +43,8 @@ even when you never open an authority.
    an architecture change that constrains future work records an ADR in the
    same PR. When a change adds or alters a command, script, env var, hook, or
    ordered runbook, audit every live entry point and runbook in the same PR.
+   Adding, renaming, or removing a doc needs `pnpm docs:index --write` in
+   the same PR, or the gate's `docs:index --check` fails.
    Before touching or moving docs, read
    [`../context-standards.md`](../context-standards.md).
 
@@ -106,7 +108,9 @@ even when you never open an authority.
    `pnpm agent:autoreview` is the closeout, matching root
    [`AGENTS.md`](../../AGENTS.md). The skill routers defer to this step rather
    than defining the choice themselves, so do not read the agreement between them
-   as a second source. Inside an active Codex session, a bare
+   as a second source. With no codex CLI (Claude cloud) it falls back to
+   `--engine claude` itself. Inside an active
+   Codex session, a bare
    invocation silently selects the local deterministic engine — the `ship`
    skill's bare closeout is NOT sufficient there; use the prepared-bundle
    fresh-context flow so a separate reviewer inspects every pass:
@@ -151,9 +155,10 @@ even when you never open an authority.
    `scripts/pr/check-pr-description.mjs` enforces the first two sections and
    their order in CI; raw HTML other than comments and code blocks do not
    satisfy its opening-content check. PRs open **ready for
-   review, never as drafts** — a draft suppresses the automated AI reviews
-   this workflow depends on; drafting is skipping review, not a staging
-   step. A ship that updates an **existing draft** converts it to ready once
+   review, never as drafts** — a draft silently disables CodeRabbit
+   auto-review (`.coderabbit.yaml` keeps `reviews.auto_review.drafts` false)
+   and the `pr-description.yml` CI check, which skips draft PRs; drafting is
+   skipping review, not a staging step. A ship that updates an **existing draft** converts it to ready once
    the gate passes — `pr:ready-state` holds draft state as a required blocker,
    so an unconverted draft never reaches all-clear. Use or keep draft only
    when the user asks or required validation is intentionally pending, and
