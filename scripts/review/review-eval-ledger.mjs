@@ -475,6 +475,15 @@ export function contractScorableIds(contract) {
   return ids;
 }
 
+/** Frozen scorable defect ids per PR, as strings, in contract order. */
+export function contractScorableIdsByPr(contract) {
+  const byPr = new Map();
+  for (const fixture of contract?.fixtures ?? []) {
+    byPr.set(fixture.pr, (fixture.scorable_ids ?? []).map(String));
+  }
+  return byPr;
+}
+
 /**
  * Append-only comparison against the rows at a base ref. Rows may only be
  * added; an edited or removed row is a contract violation the caller reports.
@@ -514,6 +523,7 @@ export function checkLedger({ path, contract, contractDigest, baseRows }) {
   }
 
   const scorable = contractScorableIds(contract);
+  const scorableByPr = contractScorableIdsByPr(contract);
   rows.forEach((row, index) => {
     const label = `ledger row ${index + 1}`;
     const rowProblems = validateLedgerRow(row, label);
@@ -523,10 +533,26 @@ export function checkLedger({ path, contract, contractDigest, baseRows }) {
     for (const name of CONDITION_NAMES) {
       const condition = row.conditions[name];
       if (!condition) continue;
-      for (const id of Object.keys(condition.per_defect)) {
+      const scored = new Set(Object.keys(condition.per_defect));
+      for (const id of scored) {
         if (!scorable.has(id)) {
           problems.push(
             `${label}.conditions.${name}.per_defect has ${id}, which the contract does not score`,
+          );
+        }
+      }
+      // The denominator is frozen per PR. Every producer builds a condition's
+      // vectors from `conditionScope`, which takes a covered PR's whole
+      // `scorable_ids` list, so a condition that scored a PR at all carries
+      // every defect that PR froze. Dropping one shrinks `opportunities`, which
+      // lifts recall and the McNemar denominator with it, and nothing else
+      // would notice: `revalidateRow` recomputes over the ids the row lists.
+      for (const [pr, ids] of scorableByPr) {
+        if (!ids.some((id) => scored.has(id))) continue;
+        const dropped = ids.filter((id) => !scored.has(id));
+        if (dropped.length) {
+          problems.push(
+            `${label}.conditions.${name}.per_defect scored PR ${pr} but omits ${dropped.join(", ")}; the contract freezes ${ids.length} defect(s) for that PR`,
           );
         }
       }
@@ -600,7 +626,16 @@ export function freshness({
     eligible,
     (row) => row.status === "complete",
   );
-  const lastFull = newestInstant(eligible, (row) => row.kind === "full");
+  // A failed or partial full run verified nothing: it is a trace that the
+  // harness ran, not a score. The baseline is "the first full, complete row"
+  // and the operating point counts as verified only while a full run has
+  // actually completed, so only a complete full row moves this clock. Counting
+  // a failed one would reset `daysSinceFull`, and `resolveKind` would then pick
+  // canaries for another whole cadence window instead of retrying the score.
+  const lastFull = newestInstant(
+    eligible,
+    (row) => row.kind === "full" && row.status === "complete",
+  );
 
   const reasons = [];
   if (!lastAny) {

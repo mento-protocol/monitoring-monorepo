@@ -371,6 +371,42 @@ test("classifyNovel throws when the judge returns JSON without verdicts", async 
   );
 });
 
+test("classifyNovel refuses a verdict set that does not cover every claim", async () => {
+  // A judge answering for a subset is the ordinary failure of a long reply.
+  // Counting only what came back would report one classification for three
+  // claims and leave `wrong_claims` — one of the two counters that can red a
+  // row on its own — understated by the claims that fell out.
+  await assert.rejects(
+    classifyNovel({
+      claims: ["a", "b", "c"],
+      truthFindings,
+      exec: stubExec([
+        JSON.stringify({ verdicts: { 1: { class: "wrong", why: "checked" } } }),
+      ]),
+    }),
+    (error) =>
+      error instanceof JudgeOutputError && /missing 2, 3/.test(error.message),
+  );
+  // A verdict for a claim that was never sent is the same failure from the
+  // other side: the reply is not about this claim list.
+  await assert.rejects(
+    classifyNovel({
+      claims: ["a"],
+      truthFindings,
+      exec: stubExec([
+        JSON.stringify({
+          verdicts: {
+            1: { class: "real", why: "checked" },
+            2: { class: "wrong", why: "invented" },
+          },
+        }),
+      ]),
+    }),
+    (error) =>
+      error instanceof JudgeOutputError && /unexpected 2/.test(error.message),
+  );
+});
+
 test("aggregateDraws folds draws into per-defect bit vectors", () => {
   const aggregate = aggregateDraws({
     scorableIds: [101, 102, 103],

@@ -40,6 +40,7 @@ DEADLINE=21600
 SPEC=""
 SPEC_TEMP=0
 SHIM=""
+SKILL_SNAPSHOT=""
 RUN_DIR=""
 PLAN_JSON=""
 STARTED=0
@@ -137,6 +138,9 @@ cleanup() {
   if [[ -n $SHIM ]]; then
     rm -rf "$SHIM"
   fi
+  if [[ -n $SKILL_SNAPSHOT ]]; then
+    rm -rf "$SKILL_SNAPSHOT"
+  fi
   return "$code"
 }
 trap cleanup EXIT
@@ -210,6 +214,8 @@ log "detail directory $RUN_DIR"
 
 # --- a failed run still leaves a trace ---------------------------------------
 
+# Appends the status:failed trace row. Returns non-zero when the row was not
+# recorded, which is the one case the caller must not report as a clean run.
 write_failed_row() {
   local reason="$1"
   local row="$RUN_DIR/row.json"
@@ -230,14 +236,20 @@ write_failed_row() {
       process.stderr.write(`${error.message}\n`);
       process.exit(1);
     });
-  ' "$PLAN_JSON" "$CONTRACT" "$SPEC" "$LEDGER" "$row" "$reason" ||
+  ' "$PLAN_JSON" "$CONTRACT" "$SPEC" "$LEDGER" "$row" "$reason" || {
     log "could not write the failed row: $reason"
+    return 1
+  }
   log "appended a status:failed ledger row — $reason"
 }
 
 abort() {
-  write_failed_row "$1"
-  # launchd must not see a non-zero exit for a run that recorded its failure.
+  # launchd must not see a non-zero exit for a run that recorded its failure —
+  # but it must see one for a run that left no trace at all. A silent zero there
+  # reports a healthy schedule while the ledger ages towards red with nothing in
+  # it to explain why.
+  write_failed_row "$1" ||
+    fail "the run failed and the failure row could not be appended: $1"
   exit 0
 }
 
@@ -268,8 +280,41 @@ CELL_ENV=(env
 
 # --- skill staging -----------------------------------------------------------
 
-SKILL_DIR="${SKILL_REF:-${REVIEW_EVAL_SKILL_DIR:-$HOME/.claude/skills/review}}"
-[[ -f "$SKILL_DIR/SKILL.md" ]] || fail "no SKILL.md under $SKILL_DIR"
+SKILL_SRC="${SKILL_REF:-${REVIEW_EVAL_SKILL_DIR:-$HOME/.claude/skills/review}}"
+[[ -f "$SKILL_SRC/SKILL.md" ]] || fail "no SKILL.md under $SKILL_SRC"
+
+# The skill is the treatment under test, and the plan records its digest once
+# for the whole matrix — a cached cell's fingerprint carries that one digest
+# too. A full run takes about two hours, which is long enough for the operator
+# to keep editing the installed skill while it runs, so staging every cell from
+# the live directory would measure new content under the old digest and put two
+# treatments in one row. Snapshot the skill once, refuse the run if the
+# snapshot is not what was planned, and stage every cell from the snapshot.
+SKILL_SNAPSHOT="$(mktemp -d "$TMPROOT/review-eval-skill.XXXXXX")"
+rm -rf "$SKILL_SNAPSHOT"
+cp -R "$SKILL_SRC" "$SKILL_SNAPSHOT" ||
+  fail "could not snapshot the skill at $SKILL_SRC"
+chmod -R u+rwX "$SKILL_SNAPSHOT"
+SKILL_DIR="$SKILL_SNAPSHOT"
+
+# shellcheck disable=SC2016  # the single-quoted block is node source
+PLANNED_SKILL_DIGEST="$(node -e '
+  const plan = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+  process.stdout.write(String(plan.inputs.skill_digest));
+' "$PLAN_JSON")" || fail "the plan carries no skill digest"
+# shellcheck disable=SC2016  # the single-quoted block is node source
+SNAPSHOT_SKILL_DIGEST="$(node --input-type=module -e '
+  const [spec, dir] = process.argv.slice(1);
+  (async () => {
+    const run = await import(`${spec}/scripts/review/review-eval-run.mjs`);
+    process.stdout.write(run.skillDigest(dir));
+  })().catch((error) => {
+    process.stderr.write(`${error.message}\n`);
+    process.exit(1);
+  });
+' "$SPEC" "$SKILL_SNAPSHOT")" || fail "could not digest the skill snapshot"
+[[ $SNAPSHOT_SKILL_DIGEST == "$PLANNED_SKILL_DIGEST" ]] ||
+  fail "the skill at $SKILL_SRC changed after planning (planned ${PLANNED_SKILL_DIGEST:0:8}, staged ${SNAPSHOT_SKILL_DIGEST:0:8}); re-run to plan against it"
 
 purge_skill() {
   local fixture="$1"
@@ -453,14 +498,33 @@ run_cell() {
       log "  $cell_id FAILED — the plan carries no finder argv"
       return 1
     fi
+    # `pipefail` is on, so this status is the finder's own. A finder that hits
+    # its session limit or dies mid-report still writes what it had, and that
+    # partial report is not a review: cached, it would score forever as a
+    # finder that simply missed those defects. Fail the cell on either an
+    # unsuccessful exit or an empty report.
+    local finder_status=0
     other_review="$(cd "$fixture" && "${CELL_ENV[@]}" \
-      "${FINDER_ARGV[@]}" 2>/dev/null | tail -c 30000)" || true
+      "${FINDER_ARGV[@]}" 2>/dev/null | tail -c 30000)" || finder_status=$?
+    if [[ $finder_status -ne 0 ]]; then
+      log "  $cell_id FAILED — the finder exited $finder_status; not cached"
+      return 1
+    fi
     if [[ -z ${other_review//[[:space:]]/} ]]; then
       log "  $cell_id FAILED — the finder produced nothing; not cached"
       return 1
     fi
   elif [[ $condition == "replay" ]]; then
-    other_review="$(cat "$SPEC/$finder_report")"
+    # The frozen report is the whole treatment for this condition. Reading it
+    # is verified once by --check-fixtures, but the spec worktree is the live
+    # checkout under --skill-ref and a candidate run can outlive the branch it
+    # was planned on. An unreadable or empty report here would hand the model
+    # an empty handoff and score that as a review of the change.
+    if ! other_review="$(cat "$SPEC/$finder_report")" ||
+      [[ -z ${other_review//[[:space:]]/} ]]; then
+      log "  $cell_id FAILED — frozen finder report $finder_report is unreadable or empty; not cached"
+      return 1
+    fi
   fi
   codex_chars="${#other_review}"
 
@@ -553,10 +617,16 @@ run_cell() {
 # One tab-separated line per planned cell, in plan order. Every field comes
 # from the contract, so a tab or a newline in one of them would forge extra
 # rows in the reader below: such a field aborts the run instead.
+#
+# The whole matrix is built before a single line is written. Writing as it goes
+# would emit every cell up to the offending one, and the reader below cannot
+# see that the writer died: the run would spend money on a truncated matrix and
+# then score it as merely partial, which is exactly what the check is for.
 cell_rows() {
   # shellcheck disable=SC2016  # the single-quoted block is node source
   node -e '
     const plan = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+    const lines = [];
     for (const cell of plan.cells) {
       const fields = [
         cell.cell_id, cell.pr, cell.condition, cell.draw, cell.model,
@@ -570,8 +640,9 @@ cell_rows() {
           );
         }
       }
-      process.stdout.write(fields.join("\t") + "\n");
+      lines.push(fields.join("\t") + "\n");
     }
+    process.stdout.write(lines.join(""));
   ' "$PLAN_JSON"
 }
 

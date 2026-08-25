@@ -461,6 +461,26 @@ export async function classifyNovel({
       raw: JSON.stringify(parsed).slice(0, 2000),
     });
   }
+  // Every claim needs its own verdict. A judge that answers for a subset — the
+  // ordinary failure of a long reply — would otherwise have its omissions
+  // counted as nothing at all, and `wrong_claims` is one of the two counters
+  // that can turn a row RED on its own. A short reply and a clean review must
+  // not produce the same number.
+  const expectedKeys = list.map((_claim, index) => String(index + 1));
+  const missing = expectedKeys.filter(
+    (key) => !Object.hasOwn(parsed.verdicts, key),
+  );
+  const unexpected = Object.keys(parsed.verdicts).filter(
+    (key) => !expectedKeys.includes(key),
+  );
+  if (missing.length || unexpected.length) {
+    throw new JudgeOutputError(
+      `novel judge returned ${Object.keys(parsed.verdicts).length} verdicts for ${list.length} claims` +
+        (missing.length ? `; missing ${missing.join(", ")}` : "") +
+        (unexpected.length ? `; unexpected ${unexpected.join(", ")}` : ""),
+      { raw: JSON.stringify(parsed).slice(0, 2000) },
+    );
+  }
   for (const verdict of Object.values(parsed.verdicts)) {
     const cls = isObject(verdict) ? verdict.class : undefined;
     if (NOVEL_CLASSES.includes(cls)) counts[cls] += 1;

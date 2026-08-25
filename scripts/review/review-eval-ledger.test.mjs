@@ -356,8 +356,17 @@ test("compareLedgers enforces append-only history", () => {
   assert.match(removed.problems[0], /lost 1 committed row/);
 });
 
+// `checkLedger` holds the frozen denominator: a condition that scored a PR at
+// all must carry every defect that PR froze, so a committed row scores one
+// whole fixture rather than a subset of it.
+const firstFixture = contract.fixtures[0];
+const wholeFixture = (bits = [1, 0]) =>
+  Object.fromEntries(firstFixture.scorable_ids.map((id) => [String(id), bits]));
+
 test("checkLedger validates rows, contract scope, and append-only history", () => {
-  const good = row();
+  const good = row({
+    conditions: { pipeline: condition({ per_defect: wholeFixture() }) },
+  });
   const history = row({ contract_digest: DIGEST_B, executed_at: daysAgo(400) });
   withTempLedger(jsonl(history, good), (file) => {
     const checked = checkLedger({
@@ -416,6 +425,47 @@ test("checkLedger validates rows, contract scope, and append-only history", () =
   });
 });
 
+test("checkLedger refuses a row that drops a frozen defect from a scored PR", () => {
+  const whole = wholeFixture();
+  const dropped = firstFixture.scorable_ids.at(-1);
+  const shrunk = { ...whole };
+  delete shrunk[String(dropped)];
+  // The remaining bits are all misses, so dropping one lifts recall from 4/10
+  // to 4/8 and takes the defect out of the McNemar denominator with it. Every
+  // other check in the pipeline reads the ids the row itself lists, so this is
+  // the only place the frozen denominator is enforced.
+  const laundered = row({
+    conditions: { pipeline: condition({ per_defect: shrunk }) },
+  });
+  assert.deepEqual(validateLedgerRow(laundered), []);
+  withTempLedger(jsonl(laundered), (file) => {
+    const checked = checkLedger({
+      path: file,
+      contract,
+      contractDigest: DIGEST_A,
+    });
+    assert.equal(checked.ok, false);
+    assert.match(
+      checked.problems[0],
+      new RegExp(
+        `scored PR ${firstFixture.pr} but omits ${dropped}; the contract freezes ${firstFixture.scorable_ids.length} defect`,
+      ),
+    );
+  });
+
+  // A PR the row never scored is not an omission: a canary runs the grid alone,
+  // and a partial run scores only the PRs whose cells completed.
+  const untouched = row({
+    conditions: { pipeline: condition({ per_defect: whole }) },
+  });
+  withTempLedger(jsonl(untouched), (file) => {
+    assert.deepEqual(
+      checkLedger({ path: file, contract, contractDigest: DIGEST_A }).problems,
+      [],
+    );
+  });
+});
+
 test("the committed ledger passes its own contract check", () => {
   const checked = checkLedger({
     path: path.join(repoRoot, "docs/evals/review-skill-ledger.jsonl"),
@@ -467,6 +517,22 @@ test("freshness ages the ledger from executed_at alone", () => {
     {
       name: "complete canaries do not hold off the full-run clock",
       rows: [full(121), full(3, { kind: "canary" })],
+      level: "red",
+      reasons: [/no full run in 121 days \(full_red 120\)/],
+    },
+    {
+      name: "a failed full run does not restart the full-run clock",
+      // The trace row a failed run leaves keeps `kind: "full"`. It records that
+      // the harness tried, not that the operating point is still verified, so
+      // the quarterly clock keeps running and `resolveKind` keeps asking for a
+      // full run instead of dropping back to canaries for another window.
+      rows: [full(121), full(1, { status: "failed", verdict: "INCOMPLETE" })],
+      level: "red",
+      reasons: [/no full run in 121 days \(full_red 120\)/],
+    },
+    {
+      name: "a partial full run does not restart the full-run clock either",
+      rows: [full(121), full(1, { status: "partial", verdict: "AMBER" })],
       level: "red",
       reasons: [/no full run in 121 days \(full_red 120\)/],
     },

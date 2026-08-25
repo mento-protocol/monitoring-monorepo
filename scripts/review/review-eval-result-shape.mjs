@@ -253,13 +253,28 @@ export function revalidateRow({
         `${label}.recall.opportunities is ${condition.recall.opportunities}; the bits give ${bits.length}`,
       );
     }
-    const p1Matched = ids
+    const p1Bits = ids
       .filter((id) => p1.has(id))
-      .flatMap((id) => condition.per_defect[id])
-      .filter((bit) => bit === 1).length;
+      .flatMap((id) => condition.per_defect[id]);
+    const p1Matched = p1Bits.filter((bit) => bit === 1).length;
     if (p1Matched !== condition.p1.matched) {
       problems.push(
         `${label}.p1.matched is ${condition.p1.matched}; the bits give ${p1Matched}`,
+      );
+    }
+    // The P1 denominator is recomputed for the same reason the recall
+    // denominator is. `verdict()` skips the `p1_recall_floor` check on a null
+    // rate, which only zero P1 opportunities may produce, so a row that carries
+    // P1 bits and states `{matched: 0, opportunities: 0, rate: null}` would
+    // otherwise validate as GREEN while hiding a floor breach.
+    if (p1Bits.length !== condition.p1.opportunities) {
+      problems.push(
+        `${label}.p1.opportunities is ${condition.p1.opportunities}; the bits give ${p1Bits.length}`,
+      );
+    }
+    if (p1Bits.length > 0 && (condition.p1.rate ?? null) === null) {
+      problems.push(
+        `${label}.p1.rate is null, which claims no P1 defect was scored; the bits give ${p1Bits.length} P1 opportunities`,
       );
     }
     if (!dir || !existsSync(dir)) continue;

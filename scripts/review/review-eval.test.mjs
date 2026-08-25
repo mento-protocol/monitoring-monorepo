@@ -411,6 +411,22 @@ test("resolveKind picks full only when the last full run is past cadence", () =>
     resolveKind({ kind: "canary", rows: stale, contract, contractDigest, now }),
     "canary",
   );
+  // A full run that failed leaves a `kind: "full"` trace row. It is a record
+  // that the harness tried, not a score, so it must not buy the schedule
+  // another cadence window of canaries.
+  const failed = [
+    makeRow({ executedAt: "2026-01-01T00:00:00Z", kind: "full" }),
+    makeRow({
+      executedAt: "2026-11-30T00:00:00Z",
+      kind: "full",
+      status: "failed",
+      verdict: "INCOMPLETE",
+    }),
+  ];
+  assert.equal(
+    resolveKind({ kind: "auto", rows: failed, contract, contractDigest, now }),
+    "full",
+  );
 });
 
 test("leakSignals flags a PR number and a reviewer login, not a bare review", () => {
@@ -591,6 +607,36 @@ test("revalidateRow recomputes the numbers and catches a tampered count", () => 
   const bad = revalidateRow({ contract, row, repoRoot });
   assert.equal(bad.ok, false);
   assert.ok(bad.problems.some((problem) => problem.includes("recall.matched")));
+});
+
+test("revalidateRow recomputes the P1 denominator, not just its numerator", () => {
+  // `verdict()` skips the `p1_recall_floor` check on a null rate, because only
+  // zero P1 opportunities may produce one. A row that keeps its P1 bits but
+  // states it scored no P1 defect therefore hides a floor breach: every P1 bit
+  // is a miss and the row still passes as GREEN with the floor never applied.
+  const honest = makeRow({ matchedIds: [] });
+  const opportunities = honest.conditions.pipeline.p1.opportunities;
+  assert.ok(opportunities > 0);
+  const laundered = makeRow({ matchedIds: [], verdict: "GREEN" });
+  laundered.conditions.pipeline.p1 = {
+    matched: 0,
+    opportunities: 0,
+    rate: null,
+  };
+  const caught = revalidateRow({ contract, row: laundered, repoRoot });
+  assert.equal(caught.ok, false);
+  assert.ok(
+    caught.problems.some((problem) =>
+      problem.startsWith(
+        `conditions.pipeline.p1.opportunities is 0; the bits give ${opportunities}`,
+      ),
+    ),
+    JSON.stringify(caught.problems),
+  );
+  assert.ok(
+    caught.problems.some((problem) => /p1\.rate is null/.test(problem)),
+    JSON.stringify(caught.problems),
+  );
 });
 
 test("revalidateRow recomputes the verdict a row states about itself", () => {
@@ -1655,6 +1701,111 @@ test("the orchestrator keeps its resume cache outside the spec worktree", () => 
   // plan directory inside it takes every completed cell down with it.
   assert.match(script, /RUN_DIR="\$REPO\/\$DETAIL_DIR"/);
   assert.match(script, /--out "\$RUN_DIR"/);
+});
+
+test("the orchestrator rejects a cell whose finder or report failed", () => {
+  const script = readFileSync(
+    path.join(repoRoot, "scripts/review/run-eval.sh"),
+    "utf8",
+  );
+  // A finder that writes a partial report and then exits non-zero — a session
+  // limit, a killed process — produces output that is not empty and is not a
+  // review. Cached, it would score forever as a finder that missed those
+  // defects, so the cell fails on the finder's own status.
+  assert.match(script, /\|\| finder_status=\$\?/);
+  assert.match(script, /if \[\[ \$finder_status -ne 0 \]\]; then/);
+  assert.doesNotMatch(
+    script,
+    /"\$\{FINDER_ARGV\[@\]\}" 2>\/dev\/null \| tail -c 30000\)" \|\| true/,
+  );
+  // The replay condition's whole treatment is the frozen report; an empty one
+  // would hand the model an empty handoff and score that as a review.
+  assert.match(script, /frozen finder report \$finder_report is unreadable/);
+});
+
+test("the orchestrator snapshots the skill once and refuses a mid-run edit", () => {
+  const script = readFileSync(
+    path.join(repoRoot, "scripts/review/run-eval.sh"),
+    "utf8",
+  );
+  // The plan records one skill digest for the whole matrix and every cached
+  // cell's fingerprint carries it, so cells must all stage the same bytes.
+  assert.match(script, /SKILL_DIR="\$SKILL_SNAPSHOT"/);
+  assert.match(script, /cp -R "\$SKILL_DIR" "\$fixture\/\.skill"/);
+  assert.match(
+    script,
+    /\[\[ \$SNAPSHOT_SKILL_DIGEST == "\$PLANNED_SKILL_DIGEST" \]\]/,
+  );
+  assert.match(script, /rm -rf "\$SKILL_SNAPSHOT"/);
+});
+
+test("a failed run that cannot record its failure exits non-zero", () => {
+  const script = readFileSync(
+    path.join(repoRoot, "scripts/review/run-eval.sh"),
+    "utf8",
+  );
+  // `abort` exits zero so launchd does not double-report a failure the ledger
+  // already carries. That trade only holds while the row was really appended:
+  // a run that leaves no trace is indistinguishable from one that never ran,
+  // and the freshness guard cannot tell those apart either.
+  assert.match(
+    script,
+    /write_failed_row "\$1" \|\|\n {4}fail "the run failed and the failure row could not be appended: \$1"/,
+  );
+});
+
+test("the cell reader emits nothing when the plan carries a forged field", () => {
+  // The loop that spends money reads this program through a process
+  // substitution and cannot see the writer die. Emitting rows as it goes would
+  // run every cell before the offending one and then score that truncated
+  // matrix as merely partial, which is what the tab check exists to prevent.
+  const shell = readFileSync(
+    path.join(repoRoot, "scripts/review/run-eval.sh"),
+    "utf8",
+  );
+  const program = shell.match(
+    /cell_rows\(\) \{\n[\s\S]*?node -e '\n([\s\S]*?)\n {2}' "\$PLAN_JSON"/,
+  )?.[1];
+  assert.ok(program, "the cell row node program was not found");
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-cellrows-"));
+  try {
+    const planPath = path.join(dir, "plan.json");
+    const cell = (cellId, extra = {}) => ({
+      cell_id: cellId,
+      pr: 1982,
+      condition: "pipeline",
+      draw: 1,
+      model: "claude-opus-5",
+      effort: "high",
+      finder: "gpt-5.6-sol@high",
+      prompt: "handoff",
+      ...extra,
+    });
+    writeFileSync(
+      planPath,
+      JSON.stringify({ cells: [cell("first"), cell("second")] }),
+    );
+    const good = spawnSync(process.execPath, ["-e", program, planPath], {
+      encoding: "utf8",
+    });
+    assert.equal(good.status, 0);
+    assert.equal(good.stdout.split("\n").filter(Boolean).length, 2);
+
+    writeFileSync(
+      planPath,
+      JSON.stringify({
+        cells: [cell("first"), cell("second", { model: "opus\thandoff" })],
+      }),
+    );
+    const forged = spawnSync(process.execPath, ["-e", program, planPath], {
+      encoding: "utf8",
+    });
+    assert.notEqual(forged.status, 0);
+    assert.equal(forged.stdout, "");
+    assert.match(forged.stderr, /carries a tab or a newline/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("the freshness workflow watches the frozen input directories", () => {

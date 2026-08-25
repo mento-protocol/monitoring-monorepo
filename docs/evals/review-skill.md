@@ -61,6 +61,9 @@ speed bumps, and a leak has to be careless to trip them.
 The scorable defect ids are frozen explicitly in
 `docs/evals/review-skill-fixtures.json`, not recomputed from a predicate. A
 later parser change must not be able to move the denominator quietly.
+`--check-ledger` holds every committed row to that: a condition that scored a
+PR at all carries every defect id that PR froze, so no row can drop one and
+report recall over the smaller denominator.
 
 ## What one run measures
 
@@ -113,8 +116,15 @@ pnpm review:eval:run -- --kind full               # the quarterly score of recor
 
 `run-eval.sh` adds a detached worktree of `origin/main` and reads the contract,
 truth, prompts and scorer from there, so a dirty working tree cannot change
-what is measured. Every cell writes its own resumable output directory and a
-failed cell is never cached. A cached cell is reused only when its stored
+what is measured. The skill under test is snapshotted once, before the first
+cell, and every cell stages from that snapshot: the plan records one skill
+digest for the whole matrix, and two hours is long enough to edit the installed
+skill under a running evaluation. A snapshot that no longer matches the planned
+digest refuses the run instead of mixing two treatments into one row. Every
+cell writes its own resumable output directory, and a failed cell is never
+cached — a finder that exits non-zero fails its cell even when it wrote a
+partial report, because a truncated review cached is a permanent zero-recall
+score. A cached cell is reused only when its stored
 fingerprint — skill digest, kind, contract digest — matches the current run,
 and the run directory carries the kind and the skill digest in its name, so an
 aborted run followed by a skill edit re-runs instead of scoring the old skill
@@ -286,8 +296,10 @@ finder reports for the `replay` condition, and the calibration pairs.
 
 That measurement is now history. It justifies the pinned configuration; it is
 not evidence that the configuration still works. The ledger is. If
-`docs/evals/review-skill-ledger.jsonl` has no full run in the last 120 days,
-treat the operating point as unverified.
+`docs/evals/review-skill-ledger.jsonl` has no full run that reached
+`status: "complete"` in the last 120 days, treat the operating point as
+unverified: a failed run leaves a `kind: "full"` trace row, and that row
+records that the harness tried, not that the pairing still scores.
 
 ## What this evaluation cannot tell you
 
