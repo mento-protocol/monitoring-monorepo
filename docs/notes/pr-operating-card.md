@@ -88,12 +88,14 @@ even when you never open an authority.
    package-manager, or lockfile changes until their lifecycle risk is reviewed
    and explicitly acknowledged** — do not bypass the refusal; review the surface
    and pass `--allow-package-script-changes`. Before invoking a full gate,
-   ensure that no direct `pnpm` validation, dashboard server, or browser suite
-   is active in the same worktree. From invocation until the gate exits, do not
-   start any of them there. A second `--run` gate takes a machine-wide lock and
-   queues behind the first, naming the holder while it waits. Background the
-   `--run` gate and the `git push`; a 600s foreground kill discards the
-   freshness stamp. Authority:
+   ensure that no direct validation, dashboard server, or browser suite is
+   active on the same machine. From invocation until the gate exits, do not
+   start any of them there. Use same-machine spare workers only for read-only
+   work; run concurrent validation from a fully hydrated checkout on another
+   machine. A second `--run` gate takes a machine-wide lock and queues behind
+   the first, naming the holder while it waits. Background the `--run` gate and
+   the `git push`; a 600s foreground kill discards the freshness stamp.
+   Authority:
    [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md).
 
 4. **Autoreview.** Freeze the scope baseline first — the initial request,
@@ -346,7 +348,12 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    open. Before `issue:release` restores `agent-ready`, update the issue body:
    mark merged work complete, isolate the remaining acceptance criteria, and
    restate the current Done means. Use `needs-grooming` instead when the
-   remaining scope is unclear.
+   remaining scope is unclear. Generated documentation-garden packets are the
+   exception: do not edit their immutable issue bodies or restore
+   `agent-ready`. Set `needs-grooming`. A human can resume the frozen packet or
+   create a linked ordinary follow-up before closing it. Record merged work in
+   issue comments and PR links, not in the generated body. Authority:
+   [`documentation-gardening.md`](documentation-gardening.md).
 
 9. **Production closeout when required.** When Done means includes deployed or
    live behavior, merge is an intermediate state. Monitor the owning deployment
@@ -371,10 +378,11 @@ These bind regardless of which step you are on:
   acknowledgement** through the gate; never bypass the refusal.
 - **Background long `--run` gates and pushes**; do not run them in a 600s
   foreground that a kill would truncate. Before invoking a full gate, ensure
-  that no direct `pnpm` validation, dashboard server, or browser suite is active
-  in the same worktree. From invocation until the gate exits, do not start any
-  of them there. A second `--run` gate queues on the gate's own machine-wide lock
-  instead of racing.
+  that no direct validation, dashboard server, or browser suite is active on
+  the same machine. From invocation until the gate exits, do not start any of
+  them there. Use same-machine spare workers only for read-only work. Run
+  concurrent validation from another machine. A second `--run` gate queues on
+  the gate's own machine-wide lock instead of racing.
 - **Secrets are IaC-owned and Terraform apply needs human approval** — plan
   first, never one-off `gh secret set` / `vercel env add` /
   `gcloud secrets versions add`.
