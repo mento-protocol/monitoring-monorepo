@@ -4,10 +4,10 @@
  * schema, and the pairing lint, and it is the only module anything outside this
  * directory should import.
  *
- * ORDER IS ROUTING. Arms are first-match within their group, so an arm's index
- * IS its precedence — moving one up or down changes what the gate schedules.
- * Nothing about a diff will tell you that; `gate-equality.test.mjs`, which
- * compares this table against the gate's live `case` arms, will.
+ * ORDER IS ROUTING. Arms match first-to-last within a group, so an arm's index
+ * is its precedence: move one and the gate schedules something else. Nothing
+ * checks that. `routing-table.test.mjs` pins only the GROUP order, against a
+ * written-out list.
  */
 
 /**
@@ -43,9 +43,35 @@ export const AGENT_MODULE_ARMS = [
     ],
   },
   {
+    why: "The autoreview core exports the indexer-family source that arms-packages.mjs compiles. Autoreview executes the protected-main core, so it cannot see a candidate revision's new owner or false-to-true reclassification. The core path conservatively routes the checklist in both autoreview and the local gate. This intentionally overroutes unrelated core edits to preserve the trust boundary. A core-only edit must also exercise both the data-table parity suite and the live gate regression suite, in addition to its autoreview consumers.",
+    patterns: ["scripts/agent-autoreview-core.mjs"],
+    effects: [
+      {
+        command: "pnpm agent:autoreview:test",
+        reason: "agent autoreview helper changed",
+      },
+      {
+        checklist: "docs/pr-checklists/indexer-handler-invariants.md",
+        reason: "indexer invariant routing source changed",
+      },
+      {
+        why: "The scanner half of the #1943/#1970 canary (ADR 0068). Widening `credentialAssignmentKey`'s vocabulary re-traps the renamed Sentry fixtures, and nothing else would say so until the next autoreview run refused.",
+        command: "node scripts/sentry/fixture-scan-canary.test.mjs",
+        reason: "autoreview secret scanner changed",
+      },
+      {
+        command: "pnpm gate:routing-table:test",
+        reason: "indexer invariant routing source changed",
+      },
+      {
+        command: "pnpm agent:quality-gate:test",
+        reason: "indexer invariant routing source changed",
+      },
+    ],
+  },
+  {
     patterns: [
       "scripts/agent-autoreview.mjs",
-      "scripts/agent-autoreview-core.mjs",
       "scripts/agent-autoreview-core.test.mjs",
       "scripts/agent-autoreview-target-guard.test.mjs",
     ],
@@ -308,7 +334,7 @@ export const AGENT_MODULE_ARMS = [
     ],
   },
   {
-    why: "The routing table as data (ADR 0069). Its own suite owns the schema, ADR 0064's pairing rule, path staleness, the bash-oracle proof of the pattern compiler, and the equality check against the `case` arms in this file. The gate self-test rides along because every module here is in `implementation_signature()`: a change to one moves the freshness signature, which is gate behaviour whether or not the gate reads the table yet.",
+    why: "The routing table as data (ADR 0069). Its own suite owns the schema, ADR 0064's pairing rule, path staleness, the bash-oracle proof of the pattern compiler, and the closed verb set the engine implements. The gate self-test rides along because every module here is in `implementation_signature()`: a change to one moves the freshness signature, which is gate behaviour.",
     patterns: ["scripts/gate/routing-table/*.mjs"],
     effects: [
       {
@@ -322,12 +348,8 @@ export const AGENT_MODULE_ARMS = [
     ],
   },
   {
-    why: "The Node mapping engine (ADR 0069) and the harness that drives the parity corpora against it. Since D5b part 2 this IS the routing: the gate builds its plan from the engine and refuses the run if the bash `case` arms disagree by one byte, so a change here changes what every gate run does. The arm therefore carries the gate self-test and the prewarm contract as well as the engine's own unit tests — the suite's 1,229 assertions are assertions about this module's output now. It also runs the three CHEAP parity corpora: `fixture` (2s) covers the branch that skips repository-specific groups, `symlink` (6s) covers the dynamic pattern source no committed path can reach, and `multi` (57s) is where the four whole-set post-passes are exercised. The tracked, synthetic, base and self-test corpora are a 40-minute run and stay a per-PR step. D5c deletes the arms, the in-gate comparison and the harness together (issue 2020).",
-    patterns: [
-      "scripts/gate/mapping.mjs",
-      "scripts/gate/mapping/*.mjs",
-      "scripts/gate/routing-parity.mjs",
-    ],
+    why: "The Node mapping engine (ADR 0069). This IS the routing: the gate builds its plan from the engine and executes it, so a change here changes what every gate run does. D5c retired the bash `case` arms, the in-gate byte comparison and the parity harness together (issue 2020), which leaves `engine.test.mjs` as the only thing pinning the verbs, the four post-passes and the root-manifest classifier. The arm also carries the gate self-test and the prewarm contract: both parse the stdout this module produces.",
+    patterns: ["scripts/gate/mapping.mjs", "scripts/gate/mapping/*.mjs"],
     effects: [
       {
         command: "node --test scripts/gate/mapping/shell-quote.test.mjs",
@@ -336,7 +358,7 @@ export const AGENT_MODULE_ARMS = [
       {
         command: "node --test scripts/gate/mapping/engine.test.mjs",
         reason:
-          "gate mapping engine changed (behaviour the arms will stop pinning at D5c)",
+          "gate mapping engine changed (the only suite pinning its verbs and post-passes)",
       },
       {
         command: "pnpm agent:quality-gate:test",
@@ -348,19 +370,9 @@ export const AGENT_MODULE_ARMS = [
         reason: "gate mapping engine produces the stdout agent:prewarm parses",
       },
       {
-        command: "node scripts/gate/routing-parity.mjs --corpus fixture",
+        command: "pnpm gate:routing-table:test",
         reason:
-          "gate mapping engine changed (parity against the live arms, fixture repository)",
-      },
-      {
-        command: "node scripts/gate/routing-parity.mjs --corpus symlink",
-        reason:
-          "gate mapping engine changed (parity against the live arms, scripts/ symlink source)",
-      },
-      {
-        command: "node scripts/gate/routing-parity.mjs --corpus multi",
-        reason:
-          "gate mapping engine changed (parity against the live arms, whole-set post-passes)",
+          "gate mapping engine implements the routing table's closed verb set",
       },
     ],
   },

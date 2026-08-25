@@ -41,50 +41,52 @@ subdirectories.
 | `sentry/`       | triage/autofix/gate/broker/ci-wiring   |
 
 `lib/` and `production-infra-identity-contract/` predate the reorganization.
-`setup.sh` stays flat because `.config/wt.toml` uses its exact Worktrunk
-pre-start path and eight docs name it. `redrive-onchain-deadletter.{mjs,test.mjs}`
-stays flat under `alerts/infra/` ownership; ADR 0064 gives the lint reason.
+`.config/wt.toml` and eight docs pin flat `setup.sh`.
+`redrive-onchain-deadletter.{mjs,test.mjs}` stays flat under
+`alerts/infra/`; ADR 0064 gives the lint reason.
 
 `lib/` holds cores that multiple clusters read: `hcl.mjs` for Terraform HCL,
 `workflow-yaml.mjs` for Actions and shell parsing,
 `pnpm-override-selector.mjs` for pnpm overrides, and
 `gh-issue-lifecycle.mjs` for shared GitHub issue and label mechanics.
-Documentation schedulers use this module. Local projection ensures only
+Doc schedulers use it. Local projection keeps only
 `agent-ready` on create and all lifecycle labels on closed repair. ADR 0064
 lists readers.
-`peg-policy-digest.mjs` is the one definition of the peg version-digest
-contract both peg validators check. Inventories, pinned hashes, and identities
-stay with their domain.
+`peg-policy-digest.mjs` defines the peg version-digest contract for both
+validators. Inventories, pinned hashes, and identities stay with their domain.
 
 ## Why Files Stay Flat
 
 `scripts/` has twelve path-pin classes. Move each pin with its file in the
 same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
 
-- **Autoreview runtime materialization.** `agent-autoreview.sh` pins sibling
-  runtime in Perl lists and `runtime_paths`; feedback helpers use `origin/main`.
-  Move feedback paths in three merges: add copies and a dual-path fallback;
-  repoint consumers; remove old paths and fallback when no pre-move wrapper
-  remains (ADR 0064).
+- **Autoreview runtime pins.** `agent-autoreview.sh` pins sibling runtime and
+  optional `pr-feedback-state-claude.mjs` and
+  `pr-ready-state-review-signals.mjs`; feedback blobs use `origin/main`. Move
+  feedback paths in three merges: add copies/fallback; repoint; remove old paths
+  after no pre-move wrapper remains (ADR 0064).
 - **Gate routing pins.** The gate excludes stub-repo tests with
   `$script_source_dir == $repo_root/scripts`, and pairs
   `bootstrap/codex-cloud-setup.{sh,test.sh}` for offline tests. It routes
   `sentry/autofix/sentry-autofix-refused-inventory.mjs` alone to
   `pnpm sentry:autofix:run-record:test` and
-  `pnpm sentry:autofix:finalize:test`. The exact
-  `sentry/triage/sentry-triage-project-route.mjs` path routes to
-  `pnpm sentry:project:test` with the projection family.
+  `pnpm sentry:autofix:finalize:test`. Exact
+  `sentry/triage/sentry-triage-project-route.mjs` runs
+  `pnpm sentry:project:test` in the projection arm.
+  `deploy/deploy-indexer-verify{,-analysis}{,.test}.mjs` and
+  `deploy/deploy-indexer-verify-status-identity.mjs` use one any-depth arm;
+  both verifier tests run.
 - **Gate runtime module pins.** Before `cd`, `agent-quality-gate.sh` loads
   `$script_source_dir/gate/run-handles.sh`; move it with its signature, self-test
   route, and missing-helper fixture. It also pins
-  `docs/docs-navigation-eval-helpers.mjs` and `gate/lockfile-scope.mjs` to
-  `$script_source_dir` in three literals; update every pin (ADR 0064).
-- **Gate routing and mapping pins.** Every `gate/routing-table/*.mjs` and
-  `gate/mapping*.mjs` appears in `implementation_signature()` and `turbo.json`;
-  `gate/routing-parity.mjs` is signature-only, not a Turbo input. Runtime hashes
-  use `$script_source_dir`; test and parity hashes use `$repo_root`. A missing
-  pin freezes the stamp for routing code
-  ([ADR 0069](../docs/adr/0069-gate-routing-table-as-data.md)).
+  `docs/docs-navigation-eval-helpers.mjs` to `$script_source_dir`; since D5c the
+  mapping engine resolves `gate/lockfile-scope.mjs` the same way. Update both
+  literals (ADR 0064).
+- **Gate mapping pins.** The signature and three Turbo inputs pin
+  `gate/routing-table/**`, `gate/mapping*`, and external
+  `agent-autoreview-core.mjs`. Runtime hashes use `$script_source_dir`; suites
+  use `$repo_root`. Core-only edits route both gate suites. A missing pin
+  freezes the stamp ([ADR 0069](../docs/adr/0069-gate-routing-table-as-data.md)).
 - **Evaluation fixture forbidden lists.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names the navigation
   eval's own implementation.

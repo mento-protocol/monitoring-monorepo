@@ -237,14 +237,24 @@ function reserveHoldingsState(
       principalUsd: null,
       holdingsAsOf: null,
       holdingsError: errorMessage("Reserve API", reserveResult.reason),
+      reserveCurrentHoldingsClassificationFailed: true,
       hasCurrentSusdsAsset: false,
+      susdsSnapshotSourceRequired: true,
+      hasUnindexedSusdsHolding: false,
       hasCurrentStethAsset: false,
+      stethSnapshotSourceRequired: true,
+      hasIncompleteStethSourceCoverage: false,
     };
   }
 
   const extracted = extractReserveYieldHoldings(reserveResult.value);
   let holdingsError: string | null = null;
-  if (extracted.malformedCount > 0) {
+  if (extracted.reserveCurrentHoldingsClassificationFailed) {
+    holdingsError =
+      extracted.malformedCount > 0
+        ? "Reserve API response contained asset rows without usable symbols."
+        : "Reserve API response did not contain a usable collateral.assets array.";
+  } else if (extracted.malformedCount > 0) {
     holdingsError =
       extracted.holdings.length > 0
         ? "Some reserve yield rows were missing usable USD values."
@@ -254,13 +264,22 @@ function reserveHoldingsState(
   return {
     holdings: extracted.holdings,
     principalUsd:
-      extracted.holdings.length === 0 && extracted.malformedCount > 0
+      extracted.holdings.length === 0 &&
+      (extracted.reserveCurrentHoldingsClassificationFailed ||
+        extracted.malformedCount > 0)
         ? null
         : extracted.holdings.reduce((sum, h) => sum + h.principalUsd, 0),
     holdingsAsOf: fetchedAt,
     holdingsError,
+    reserveCurrentHoldingsClassificationFailed:
+      extracted.reserveCurrentHoldingsClassificationFailed,
     hasCurrentSusdsAsset: extracted.susdsAssetCount > 0,
+    susdsSnapshotSourceRequired: extracted.susdsSnapshotSourceRequired,
+    hasUnindexedSusdsHolding: extracted.hasUnindexedSusdsHolding,
     hasCurrentStethAsset: extracted.stethAssetCount > 0,
+    stethSnapshotSourceRequired: extracted.stethSnapshotSourceRequired,
+    hasIncompleteStethSourceCoverage:
+      extracted.hasIncompleteStethSourceCoverage,
   };
 }
 
@@ -374,6 +393,14 @@ function buildReserveYieldResponse({
       susdsYield.earnedYieldUsd,
       stethYield.earnedYieldUsd,
     ),
+    susdsEarnedYieldUsd: susdsYield.earnedYieldUsd,
+    susdsEarnedYieldAsOf: susdsYield.earnedYieldAsOf,
+    susdsYieldSignalUnavailable: susdsYield.signalUnavailable,
+    susdsSnapshotSourceRequired: reserveState.susdsSnapshotSourceRequired,
+    hasUnindexedSusdsHolding: reserveState.hasUnindexedSusdsHolding,
+    stethSnapshotSourceRequired: reserveState.stethSnapshotSourceRequired,
+    hasIncompleteStethSourceCoverage:
+      reserveState.hasIncompleteStethSourceCoverage,
     realizedYieldUsd: sumNullable(
       susdsYield.realizedYieldUsd,
       stethYield.realizedYieldUsd,
@@ -400,6 +427,8 @@ function buildReserveYieldResponse({
     next365dUsd: forecast.next365dUsd,
     annualRunRateUsd: forecast.annualRunRateUsd,
     forecastUnavailableSymbols: forecast.forecastUnavailableSymbols,
+    reserveCurrentHoldingsClassificationFailed:
+      reserveState.reserveCurrentHoldingsClassificationFailed,
     holdingsError: reserveState.holdingsError,
     rateError: rateErrorForUnavailableForecasts(
       forecast.forecastUnavailableSymbols,

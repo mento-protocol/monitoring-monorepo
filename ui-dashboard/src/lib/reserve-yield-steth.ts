@@ -13,24 +13,23 @@ import { STETH_YIELD_LATEST_SNAPSHOTS_QUERY } from "@/lib/queries/reserve-yield"
 import { weiToUsd } from "@/lib/format";
 import {
   FORECASTABLE_STETH_SYMBOL,
+  RESERVE_YIELD_ETHEREUM_CHAIN_ID,
+  STETH_TOKEN_ADDRESS,
   type FetchImpl,
   type ReserveYieldHolding,
   type StethYieldLedgerEntry,
   type StethYieldLedgerResult,
   type StethYieldState,
 } from "@/lib/reserve-yield-types";
+import {
+  isIndexedStethHolding,
+  isTrackedStethWalletIdentifier,
+} from "@/lib/reserve-yield-steth-coverage";
 
 const LIDO_STETH_APR_URL = "https://eth-api.lido.fi/v1/protocol/steth/apr/last";
 
-const STETH_CHAIN_ID = 1;
 const STETH_SYMBOL = "STETH";
-const STETH_ADDRESS = "0xae7ab96520de3a18e5e111b5eaab095312d7fe84";
 const STETH_LATEST_SNAPSHOT_LIMIT = 50;
-
-const TRACKED_STETH_WALLET_IDENTIFIERS = new Set([
-  "0xd0697f70e79476195b742d5afab14be50f98cc1e",
-  "0xd3d2e5c5af667da817b2d752d86c8f40c22137e1",
-]);
 
 function validateStethMeta(meta: unknown): void {
   if (!isRecord(meta)) {
@@ -44,10 +43,10 @@ function validateStethMeta(meta: unknown): void {
   if (symbol !== STETH_SYMBOL) {
     throw new Error("Lido stETH APR metadata symbol did not match stETH");
   }
-  if (address !== STETH_ADDRESS) {
+  if (address !== STETH_TOKEN_ADDRESS) {
     throw new Error("Lido stETH APR metadata address did not match stETH");
   }
-  if (chainId !== STETH_CHAIN_ID) {
+  if (chainId !== RESERVE_YIELD_ETHEREUM_CHAIN_ID) {
     throw new Error("Lido stETH APR metadata chainId did not match Ethereum");
   }
 }
@@ -76,20 +75,14 @@ function isStethHolding(holding: ReserveYieldHolding): boolean {
   return holding.assetSymbol.toUpperCase() === FORECASTABLE_STETH_SYMBOL;
 }
 
-function isIndexedStethHolding(holding: ReserveYieldHolding): boolean {
-  const identifier = holding.identifier?.toLowerCase() ?? null;
-  return (
-    isStethHolding(holding) &&
-    identifier !== null &&
-    TRACKED_STETH_WALLET_IDENTIFIERS.has(identifier)
-  );
-}
-
 function unindexedStethHoldingWarning(
   holding: ReserveYieldHolding,
 ): string | null {
   if (!isStethHolding(holding) || holding.principalUsd <= 0) return null;
-  const identifier = holding.identifier?.toLowerCase() ?? null;
+  const identifier = holding.identifier?.trim().toLowerCase() ?? null;
+  if (holding.chain.trim().toLowerCase() !== "ethereum") {
+    return "stETH earned-yield actuals are indexed only for Ethereum holdings.";
+  }
   return identifier === null
     ? "stETH earned-yield actuals missing wallet identifier for a current stETH holding."
     : `stETH earned-yield actuals missing indexed wallet configuration for ${identifier}.`;
@@ -132,6 +125,49 @@ function isMissingStethYieldDailySnapshotEntity(err: unknown): boolean {
   );
 }
 
+function trackedStethWalletIdentifier(value: unknown): string | null {
+  if (!isRecord(value) || typeof value.wallet !== "string") return null;
+  const wallet = value.wallet.trim().toLowerCase();
+  return isTrackedStethWalletIdentifier(wallet) ? wallet : null;
+}
+
+function trackedStethYieldLedgerEntry(
+  value: unknown,
+): StethYieldLedgerEntry | null {
+  if (!isRecord(value)) return null;
+  const wallet = trackedStethWalletIdentifier(value);
+  const token =
+    typeof value.token === "string" ? value.token.trim().toLowerCase() : null;
+  if (
+    numericField(value.chainId) !== RESERVE_YIELD_ETHEREUM_CHAIN_ID ||
+    token !== STETH_TOKEN_ADDRESS ||
+    wallet === null ||
+    !isTrackedStethWalletIdentifier(wallet)
+  ) {
+    return null;
+  }
+  const sampledAtTimestamp = bigintField(
+    value.sampledAtTimestamp,
+    "sampledAtTimestamp",
+  );
+  return {
+    wallet,
+    earnedYieldAmount: bigintField(
+      value.totalEarnedYieldAmount,
+      "totalEarnedYieldAmount",
+    ),
+    realizedYieldAmount: bigintField(
+      value.realizedYieldAmount,
+      "realizedYieldAmount",
+    ),
+    unrealizedYieldAmount: bigintField(
+      value.unrealizedYieldAmount,
+      "unrealizedYieldAmount",
+    ),
+    asOf: unixSecondsToIso(sampledAtTimestamp),
+  };
+}
+
 function parseStethYieldLedger(payload: unknown): StethYieldLedgerResult {
   if (!isRecord(payload)) {
     throw new Error("Hasura response was not an object");
@@ -155,32 +191,21 @@ function parseStethYieldLedger(payload: unknown): StethYieldLedgerResult {
   const data = isRecord(payload.data) ? payload.data : null;
   const rows = data ? asArray(data.StethYieldDailySnapshot) : [];
   const latestByWallet = new Map<string, StethYieldLedgerEntry>();
+  const seenTrackedWallets = new Set<string>();
 
   for (const value of rows) {
-    if (!isRecord(value)) continue;
-    const wallet =
-      typeof value.wallet === "string" ? value.wallet.toLowerCase() : null;
-    if (wallet === null || latestByWallet.has(wallet)) continue;
-    const sampledAtTimestamp = bigintField(
-      value.sampledAtTimestamp,
-      "sampledAtTimestamp",
-    );
-    latestByWallet.set(wallet, {
-      wallet,
-      earnedYieldAmount: bigintField(
-        value.totalEarnedYieldAmount,
-        "totalEarnedYieldAmount",
-      ),
-      realizedYieldAmount: bigintField(
-        value.realizedYieldAmount,
-        "realizedYieldAmount",
-      ),
-      unrealizedYieldAmount: bigintField(
-        value.unrealizedYieldAmount,
-        "unrealizedYieldAmount",
-      ),
-      asOf: unixSecondsToIso(sampledAtTimestamp),
-    });
+    const wallet = trackedStethWalletIdentifier(value);
+    if (wallet === null || seenTrackedWallets.has(wallet)) continue;
+    // The query is newest-first. An invalid newest identity must not expose an
+    // older snapshot as the current ledger entry for this tracked wallet.
+    seenTrackedWallets.add(wallet);
+    const entry = trackedStethYieldLedgerEntry(value);
+    if (entry === null) {
+      throw new Error(
+        `StethYieldDailySnapshot newest row for tracked wallet ${wallet} had an invalid chain or token`,
+      );
+    }
+    latestByWallet.set(entry.wallet, entry);
   }
 
   if (latestByWallet.size === 0) {
@@ -198,7 +223,7 @@ export async function fetchStethYieldLedger(
   fetchImpl: FetchImpl,
 ): Promise<StethYieldLedgerResult> {
   return fetchGraphql(fetchImpl, STETH_YIELD_LATEST_SNAPSHOTS_QUERY, {
-    chainId: STETH_CHAIN_ID,
+    chainId: RESERVE_YIELD_ETHEREUM_CHAIN_ID,
     limit: STETH_LATEST_SNAPSHOT_LIMIT,
   }).then(parseStethYieldLedger);
 }
@@ -221,7 +246,7 @@ function applyStethYieldLedger(
       if (warning !== null) warnings.push(warning);
       return holding;
     }
-    const wallet = holding.identifier!.toLowerCase();
+    const wallet = holding.identifier!.trim().toLowerCase();
     const entry = byWallet.get(wallet);
     if (!entry) {
       warnings.push(

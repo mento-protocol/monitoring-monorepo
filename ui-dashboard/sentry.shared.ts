@@ -181,15 +181,14 @@ export function filterAndStripSentryEvent<
   return stripAuthHeaders(event);
 }
 
-// Sample 20% of traces in production to stay within Sentry quota at scale;
-// keep 100% on preview + local where traffic is low and full fidelity is
-// useful for debugging. Tune once we have real volume data.
+// Sample 20% of traces in production and disable performance tracing on
+// preview and development deployments to preserve the Sentry quota.
 //
 // Exported as a pure function so the client config (which reads
 // NEXT_PUBLIC_VERCEL_ENV because plain VERCEL_ENV isn't exposed to the
 // browser bundle) can share the same table of rates.
 export function resolveTracesSampleRate(vercelEnv: string | undefined): number {
-  return vercelEnv === "production" ? 0.2 : 1.0;
+  return vercelEnv === "production" ? 0.2 : 0;
 }
 
 // Sentry recommends skipping `Sentry.init` entirely outside production-like

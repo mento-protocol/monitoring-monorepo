@@ -4,10 +4,10 @@
  * schema, and the pairing lint, and it is the only module anything outside this
  * directory should import.
  *
- * ORDER IS ROUTING. Arms are first-match within their group, so an arm's index
- * IS its precedence — moving one up or down changes what the gate schedules.
- * Nothing about a diff will tell you that; `gate-equality.test.mjs`, which
- * compares this table against the gate's live `case` arms, will.
+ * ORDER IS ROUTING. Arms match first-to-last within a group, so an arm's index
+ * is its precedence: move one and the gate schedules something else. Nothing
+ * checks that. `routing-table.test.mjs` pins only the GROUP order, against a
+ * written-out list.
  */
 
 /**
@@ -387,6 +387,21 @@ export const HEAD_GROUPS = [
             effects: [
               { command: "bash -n {path}", reason: "shell script changed" },
             ],
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: "babysit-repo-hook",
+    arms: [
+      {
+        patterns: [".claude/babysit-pr.sh", ".claude/babysit-pr.test.sh"],
+        why: "The babysit repo hook gates PR readiness for every babysit surface, and its fork refusal is fail-closed. `bash -n` above only parses it, so a hook or suite edit routes the behavioural suite. Unconditional on purpose: with the suite file missing, `bash` exits 127 and the gate still fails closed.",
+        effects: [
+          {
+            command: "bash .claude/babysit-pr.test.sh",
+            reason: "babysit repo hook changed",
           },
         ],
       },

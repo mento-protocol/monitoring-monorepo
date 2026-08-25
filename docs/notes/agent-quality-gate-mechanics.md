@@ -67,13 +67,78 @@ pnpm --filter @mento-protocol/ui-dashboard test:coverage
 
 Cross-layer/stateful UI work also applies
 [`docs/pr-checklists/stateful-data-ui.md`](../pr-checklists/stateful-data-ui.md).
-Indexer changes additionally route the protected
+The handler-invariant classifier in `scripts/agent-autoreview-core.mjs` routes
+selected indexer runtime, invariant-test, and test-support changes to the protected
 [`docs/pr-checklists/indexer-handler-invariants.md`](../pr-checklists/indexer-handler-invariants.md)
-policy into prepared autoreview bundles.
+policy in the local gate and prepared autoreview bundles. It returns one
+ordered `{path, route, owner}` decision per input path. Autoreview loads the
+classifier from its selected attested runtime and validates the complete batch
+before it selects routed paths. A wrapper-attested runtime is checked against
+its sealed identity and content manifest before and after classifier import and
+execution. A difference at either boundary fails before the wrapper uses the
+decisions. Prepared runtimes retain their existing trust boundary.
+
+That protected-main boundary creates deliberate version skew when a candidate
+changes `scripts/agent-autoreview-core.mjs`. The protected classifier cannot
+see a new exact owner or a false-to-true reclassification in the candidate.
+Therefore, a change to the core source itself selects the handler-invariant
+checklist in both autoreview and the local gate. This trigger intentionally
+routes unrelated core edits. Running the candidate classifier would weaken the
+trust boundary that the protected runtime provides.
+
+`getIndexerHandlerInvariantRoutingFamilies()` returns a detached, deeply
+frozen view of the same family data the classifier uses. Import-time validation
+rejects malformed families, overlapping exact owners, and paths that cannot
+stay literal in a Bash `case`. The routing
+table derives an excluded-first, routed-second checklist dispatch from this
+view. The live Bash case mirrors the derived patterns, and the routing-table
+equality test pins both copies. The checklist arms contain exact current paths
+only. Eighteen broad inventory patterns cover `.ts`, `.tsx`, `.mts`, `.cts`,
+`.js`, `.jsx`, `.mjs`, `.cjs`, and `.json` below `indexer-envio/src/` and
+`indexer-envio/test/`. The four JavaScript extensions match the package's
+`allowJs` TypeScript input set. JSON matches `resolveJsonModule`. Five more
+broad patterns cover `indexer-envio/abis/`, `indexer-envio/config/`, root
+`indexer-envio/config*.yaml` files, root `indexer-envio/vitest*` inputs, and
+`indexer-envio/scripts/test-*.mjs` wrappers. None of these broad patterns routes
+the checklist. The exact `indexer-envio/schema.graphql` and
+`indexer-envio/stryker.config.mjs` patterns complete the 25-pattern inventory.
+Exact owners also cover every current root config YAML, root Vitest input, and
+indexer test wrapper. The current exact arms contain 253 routed paths and 12
+excluded paths.
+
+The routed source boundary follows executable dependencies from the production
+handler entrypoint, registered handlers, RPC facades and effects, and self-heal
+stages. It includes modules that can change entity identities or fields,
+rollups, effect keys or targets, freshness, or phase behavior. The routed test
+boundary includes direct invariant tests and the fixtures, harness, and HTTP
+mock support that enforce hermetic multi-event and RPC behavior. It also
+includes test-runner inputs that set the timeout, fail-closed fixture, and
+hermetic RPC contract, or select the mutation-test and coverage scope. Explicit
+exclusions include type-only context modules, warning-only helpers, the
+console-only RPC logger adapter, the two vendored ABIs that no current runtime
+consumes, and tests that enforce a separate config-copy, script, or
+warning-format contract.
+
+The focused indexer parity test compares every current module with one of the
+nine supported JS, JSON, or TypeScript extensions below `src/` and `test/`. It
+also compares every current file below `abis/` and `config/`, every current root
+`config*.yaml` file, Vitest input, indexer test wrapper, Stryker configuration,
+and `schema.graphql` against the table. The focused external inventory contains
+45 inputs. The local gate runs it for all 25 inventory patterns. The indexer CI
+job runs it for every indexer change. A new module below `src/` or `test/` is
+classified as `future-module` with `route: false`. The inventory assertion
+requires the adding PR to give it an explicit owner. A new file below `abis/`
+or `config/`, a new root `config*.yaml` file, a new root `vitest*` input, or a
+new `scripts/test-*.mjs` wrapper also runs the inventory assertion without
+inheriting a checklist route. Other unlisted paths outside `src/` and `test/`
+stay outside this classifier.
+Core-only edits route the autoreview suite, the routing-table suite, and the
+gate self-test. The core is also an explicit freshness-signature input and a
+Turbo input beside the routing-table directory.
 
 The dry-run gate maps changed paths to package checks and PR checklists. That
-mapping is a Node engine now, cross-checked against the bash arms on every run —
-see [Where the plan comes from](#where-the-plan-comes-from-adr-0069) below. For a
+mapping is a Node engine reading a data table — see
+[Where the plan comes from](#where-the-plan-comes-from-adr-0069) below. For a
 routing-sensitive source, the shared classifier adds the offline
 `pnpm docs:navigation-eval -- --check-fixtures` check. It invokes no model or
 scheduled evaluation. Review the output, then run:
@@ -173,24 +238,26 @@ behavior. Both classes still set the package-script risk flag, so `--run`
 continues to refuse until `--allow-package-script-changes`, and `package.json`
 still gets a full-repo Trunk scan.
 
-`classify_root_package_json_changes` is lifted out of this script and re-run by
-`scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-probe.mjs`, which proves each alias still
-routes to the arm it is supposed to. The probe runs it with an empty `$PATH`
-under `set -r`, so the function must reach nothing but shell builtins, keywords
-and `json_change_paths` — no external command, and no output redirection, which
-restricted mode forbids. Its verdict must also be a function of the change paths
-alone, so it may not read anything the probe did not supply: `< <(json_change_paths …)`,
-heredocs and here-strings are fine, a redirection from a file is not. Editing it
-to need any of those fails the check with an explanation; change the probe in the
-same PR or keep the classifier free of them. D5c converts that probe to import
-the Node classifier directly instead of lifting the bash function, and re-asserts
-the same property — each alias routes to its intended arm, over a closed verdict
-set — before the function is deleted.
+The classifier is `classifyRootPackageJsonChanges` in
+`scripts/gate/mapping/facts.mjs`, and its trusted-alias allowlist is
+`TOOLING_SCRIPT_POINTERS` beside it.
+`scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-probe.mjs` imports it
+and proves each `sentry:*` alias still classifies as `root-tooling-scripts`, one
+pointer per call, over a closed verdict set: a class the classifier answers that
+is not one of the four fails the check rather than being stored as a
+plausible-looking string. Adding a class means re-reading every caller that
+compares a verdict to a literal.
+
+Until D5c the classifier was the bash function `classify_root_package_json_changes`,
+and the probe lifted it out of `agent-quality-gate.sh` and re-ran it under an
+empty `$PATH` in restricted mode with stubbed helpers. The lifting machinery
+survives in `check-sentry-suites-in-ci-gate-extract.mjs`, because ADR 0069's
+routing-table suite uses it to read `implementation_signature()` and to drive
+`/bin/bash` as the pattern oracle.
 
 ### Where the plan comes from ([ADR 0069](../adr/0069-gate-routing-table-as-data.md))
 
-Since D5b part 2 the routing is Node. After the bash `case` arms have run, the
-gate calls the mapping engine once and uses ITS plan:
+Routing is Node. The gate calls the mapping engine once and uses its plan:
 
 ```bash
 node "$script_source_dir/gate/mapping.mjs" \
@@ -204,8 +271,8 @@ other gate helper is, so a fixture run finds the real one. `--real-tree` is the
 gate's own `[[ "$script_source_dir" == "$repo_root/scripts" ]]` test, which
 fences the four repository-specific effects away from fixture repositories.
 The freshness signature follows the same root: mapper and routing-table runtime
-modules hash from `$script_source_dir`. Their suites and the parity harness hash
-from `$repo_root` because the gate runs them as mapped target-tree commands.
+modules hash from `$script_source_dir`. Their suites hash from `$repo_root`
+because the gate runs them as mapped target-tree commands.
 
 The engine answers on stdout in the TSV shape `write_command_plan` already
 emits, in this order and no other — the gate prints and the freshness stamp
@@ -219,11 +286,7 @@ checklist<TAB><path><TAB><reason>
 preflight|codegen|post-codegen|quality<TAB><command><TAB><reason>
 ```
 
-**The bash arms still run, and disagreement stops the run.** The gate renders
-its own plan in the same shape and byte-compares the two. This is the D5c soak
-guard: parity proven over whatever you actually changed, on your machine, rather
-than over a corpus someone assembled. Every failure around the seam refuses, and
-each message is greppable:
+**Every failure around the seam is a refusal**, and each message is greppable:
 
 | Message on stderr                                                                   | What happened                                                |
 | ----------------------------------------------------------------------------------- | ------------------------------------------------------------ |
@@ -232,32 +295,18 @@ each message is greppable:
 | `gate mapping engine produced an empty plan; refusing to run`                       | The mapper wrote nothing — most often a stubbed `node`.      |
 | `gate mapping engine emitted an unparsable record: …`                               | A record the gate cannot read. Never partially applied.      |
 | `gate mapping engine emitted an unknown flag record: …`                             | A `flag` record the gate does not know.                      |
-| `the gate mapping engine and the bash routing arms disagree.`                       | The guard fired. A unified diff follows, `-bash +engine`.    |
 
-Read that last diff by side: a `-` line is a command the arms produced and the
-engine did not, a `+` line the reverse. Either direction refuses, because a
-routing change landed on one side only — usually a new arm added to
-`agent-quality-gate.sh` without the matching entry in
-`scripts/gate/routing-table/`, which `gate-equality.test.mjs` also catches, or an
-engine change the arms do not have yet. Fix the side that is wrong. The guard
-has no bypass.
-
-To drive the guard over many path sets at once rather than the one you happen to
-have changed:
-
-```bash
-node scripts/gate/routing-parity.mjs --corpus multi     # 43 sets, ~1 minute
-node scripts/gate/routing-parity.mjs --corpus self-test # every run_gate set in the suite
-node scripts/gate/routing-parity.mjs                    # every tracked path, ~25 minutes
-```
-
-**What D5c removes.** The bash `case` arms and the verb helpers they call, the
-`plan_records_from_bash` renderer and the byte comparison, and
-`scripts/gate/routing-parity.mjs`. They are one mechanism and they go together:
-without the arms there is nothing to compare, and the harness's own diff becomes
-circular. What stays is the parser that reads the mapper's records — that is how
-the plan arrives — the `implementation_signature()` pins, and the engine's own
-suites. Measured, that removes about 2,644 raw lines.
+There is no fallback path. Before D5c the gate also ran the bash `case` arms,
+rendered their plan in the same shape and refused on a one-byte difference — the
+soak guard. That guard, the arms and the parity harness went together at D5c
+(issue 2020): without the arms there is nothing to compare, and the harness's own
+comparison would be the engine against itself. What routing correctness rests on
+now is `pnpm gate:routing-table:test` (the pairing lint, the staleness check, the
+`/bin/bash` pattern oracle, the closed verb set) and
+`node --test scripts/gate/mapping/engine.test.mjs` (dedupe and first-reason-wins,
+bucket order, the four post-passes, the root-manifest classifier). Both are
+routed by a change to the engine or the table, and the routing-table suite also
+runs in the required `ci` job.
 
 ### Scheduling contract (Refs #1802)
 
@@ -903,6 +952,11 @@ runtime is unchanged; they do not turn an untrusted checkout into trusted
 executable code. Merge-review provenance must not pass through the reviewed
 checkout's package manager, package scripts, or package-manager configuration.
 
+This preflight is **not merge-specific**. Any adapter call that trusts repository
+identity — `pr:feedback-state`, `pr:ready-state`, a gate, a review — needs it, so an
+ordinary babysit run binds identity before its first such call, not only when a conflict
+appears. The merge case adds the two review axes below; it does not own the preflight.
+
 For a same-repository merge review, bind repository identity before any
 repo-local adapter command. Require `origin` to have one effective canonical
 GitHub fetch URL. Normalize that URL and require its slug to equal the resolved
@@ -921,6 +975,35 @@ before and after every feedback-state, ready-state, gate, or review adapter
 call. Any error or drift stops the workflow and invalidates the result. Any
 refetch, including a conflict-triggered base refresh, restarts this preflight and
 refreshes both pins before another adapter call.
+
+### The two review axes
+
+A conflict repair is reviewed against **two** axes, because either alone can miss a
+regression the other catches. Pin both inputs as immutable commit IDs before merging:
+`base_oid` for the fetched base and `premerge_oid` for the published PR head as it stood
+before the merge. Merge the exact `base_oid`, resolve, validate, and create the merge
+commit locally without pushing it.
+
+Pin the result as `final_head`, require a clean worktree, and require both inputs to be
+its ancestors:
+
+```bash
+git merge-base --is-ancestor "$base_oid" "$final_head" || exit 1
+git merge-base --is-ancestor "$premerge_oid" "$final_head" || exit 1
+```
+
+Then run the mapped gate against **both** axes, not just the new base:
+
+```bash
+pnpm agent:quality-gate --base "$base_oid" --head HEAD --run
+pnpm agent:quality-gate --base "$premerge_oid" --head HEAD --run
+```
+
+`base_oid..final_head` shows what the branch adds to the new base. `premerge_oid..final_head`
+shows what the merge changed about the branch — the axis that catches a resolution which
+silently drops branch behaviour, since such a resolution looks clean against the new base.
+Prepare, verify, and post-verify a separate review bundle per axis. Only after both
+post-verifications pass, run the sequential suite as separate behaviour evidence, then push.
 
 For each review axis, compare its immutable base tree with the immutable final
 tree before any autoreview entrypoint runs. Treat the axis as runtime-sensitive

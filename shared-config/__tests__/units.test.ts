@@ -39,4 +39,15 @@ describe("toHumanUnits", () => {
     expect(toHumanUnits(0n, 18)).toBe(0);
     expect(toHumanUnits(0n, 6)).toBe(0);
   });
+
+  it("truncates fractional digits past the 6-digit cap", () => {
+    // The cap is deliberate (keeps the Number cast lossless), so pin the
+    // discard rather than leave it to a future reader to rediscover.
+    // 0.1234567 with 18 decimals renders as 0.123456 — the 7th digit is cut,
+    // not rounded.
+    expect(toHumanUnits(1_234_567n * 10n ** 11n, 18)).toBe(0.123456);
+    // A dust balance below the cap collapses to exactly 0, so callers must
+    // not treat a 0 result as proof the raw balance was 0.
+    expect(toHumanUnits(1n, 18)).toBe(0);
+  });
 });

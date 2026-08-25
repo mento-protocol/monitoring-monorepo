@@ -3,7 +3,7 @@ title: stETH actuals use a launch-aligned sub-daily wallet balance sampler
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-11
+last_verified: 2026-08-21
 scope: indexer-envio
 date: 2026-07
 doc_type: adr
@@ -13,7 +13,7 @@ garden_lane: adrs-architecture
 
 # ADR 0034 — stETH actuals use a launch-aligned sub-daily wallet balance sampler
 
-**Status:** Accepted (Jul 2026), in force.
+**Status:** Accepted (Jul 2026), in force. Its sUSDS event-only clause is superseded by [ADR 0071](0071-susds-launch-aligned-daily-sampler.md).
 **Scope:** indexer-envio (constrains ui-dashboard reserve-yield reads)
 
 ## Context
@@ -35,7 +35,7 @@ a bounded stETH sampler:
   `StethYieldDailySnapshot` rows.
 - Allocate future stETH earned yield to the wallet where it accrued, even when
   principal later moves between tracked reserve wallets.
-- Leave sUSDS event-only and do not reintroduce the historical sUSDS heartbeat.
+- Use the launch-aligned bounded sUSDS sampler from [ADR 0071](0071-susds-launch-aligned-daily-sampler.md). Do not reintroduce the historical every-block heartbeat.
 
 ## Alternatives considered
 
@@ -51,7 +51,7 @@ a bounded stETH sampler:
 
 ## Consequences
 
-- stETH has launch-aligned actual snapshots, while sUSDS remains event-only.
+- stETH and sUSDS have launch-aligned actual snapshots.
 - The dashboard reads Ethereum stETH snapshots per wallet and joins them to
   current reserve holdings by wallet, so it does not merge earnings from
   different reserve wallets into one token-level stream.
@@ -61,8 +61,16 @@ a bounded stETH sampler:
   to already exist.
 - If any later historical stETH balance read is unavailable, the sampler skips
   the affected snapshot batch instead of writing partial wallet actuals.
-- Hosted deploy verification for reserve-yield changes should check both
-  `SusdsYieldDailySnapshot` and `StethYieldDailySnapshot` rows.
+- Hosted deploy verification uses `SusdsYieldLaunchBaseline` in the exact
+  target commit schema as the sUSDS sampler capability marker. When the marker
+  exists, verification requires the immutable baseline and a post-launch daily
+  row. A target schema with `SusdsYieldSamplerProgress` proves heartbeat
+  freshness from that row. An older schema can use the daily row only when its
+  exact sUSDS handler has no event-time snapshot writer. A legacy rollback
+  schema without the launch marker omits all sUSDS sampler-only probes and
+  checks. An unreadable or inconsistent target schema or legacy handler fails
+  closed and retains all strict sampler requirements. The `stETH` core-row
+  probe checks `StethYieldSummary` and `StethYieldMovement`.
 
 ## Evidence
 

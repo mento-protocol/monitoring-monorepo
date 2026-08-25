@@ -997,6 +997,29 @@ type SusdsYieldSummary {
   lastUpdatedTimestamp: BigInt!
 }
 
+# Immutable launch anchor for the bounded sUSDS sampler. The daily row is
+# mutable because each sample updates the current UTC-day bucket.
+type SusdsYieldLaunchBaseline {
+  id: ID! # "{chainId}-susds-launch"
+  chainId: Int! @index
+  token: String!
+  launchBlock: BigInt!
+  launchTimestamp: BigInt!
+  sharePriceUsdWei: BigInt! @config(precision: 78)
+  sampledAtBlock: BigInt!
+  sampledAtTimestamp: BigInt!
+}
+
+# Heartbeat-only progress for the bounded sUSDS sampler. Event-time daily-row
+# refreshes must not update this entity.
+type SusdsYieldSamplerProgress {
+  id: ID! # "{chainId}-susds-sampler"
+  chainId: Int! @index
+  token: String!
+  sampledAtBlock: BigInt!
+  sampledAtTimestamp: BigInt!
+}
+
 type SusdsYieldDailySnapshot {
   id: ID! # "{chainId}-susds-{dayTimestamp}"
   chainId: Int! @index

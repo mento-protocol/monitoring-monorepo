@@ -2,15 +2,22 @@
 
 import assert from "node:assert/strict";
 import {
+  PRODUCTION_GRAPHQL_ENDPOINT,
+  PROBE_QUERY,
+  buildProbeQuery,
   buildSummary,
   extractJsonValue,
   parseArgs,
   parseJsonOutput,
+  queryGraphql,
   renderText,
   resolveDeployment,
   resolveProdDeployment,
+  resolveVerificationEndpoint,
   summarizeProbe,
   summarizeReplayIntegrity,
+  summarizeSusdsSamplerProgress,
+  summarizeSusdsLaunchBaselineSchema,
   summarizeStatus,
 } from "./deploy-indexer-verify.mjs";
 import {
@@ -40,6 +47,42 @@ function validPolygonPools() {
     healthBinarySeconds: "900",
   }));
 }
+
+function validSusdsLaunchBaseline() {
+  return {
+    id: "1-susds-launch",
+    chainId: 1,
+    token: "0xa3931d71877c0e7a3148cb7eb4463524fec27fbd",
+    launchBlock: "24573203",
+    launchTimestamp: "1772496000",
+    sharePriceUsdWei: "1100000000000000000",
+    sampledAtBlock: "24573203",
+    sampledAtTimestamp: "1772496000",
+  };
+}
+
+function validSusdsSamplerProgress(overrides = {}) {
+  return {
+    id: "1-susds-sampler",
+    sampledAtBlock: "24573803",
+    sampledAtTimestamp: String(NOW_SECONDS - 1_000),
+    ...overrides,
+  };
+}
+
+assert.match(
+  PROBE_QUERY,
+  /SusdsYieldLaunchBaseline[\s\S]*id: \{ _eq: "1-susds-launch" \}[\s\S]*sharePriceUsdWei/,
+);
+assert.match(PROBE_QUERY, /SusdsYieldDailySnapshot/);
+assert.match(
+  PROBE_QUERY,
+  /SusdsYieldSamplerProgress[\s\S]*id: \{ _eq: "1-susds-sampler" \}/,
+);
+assert.doesNotMatch(
+  buildProbeQuery({ includeSusdsSampler: false }),
+  /SusdsYield(?:LaunchBaseline|DailySnapshot|SamplerProgress)/,
+);
 
 const indexerJson = {
   data: {
@@ -125,6 +168,49 @@ assert.equal(
   null,
 );
 assert.equal(resolveProdDeployment(indexerJson)?.commit_hash, "abc1234");
+assert.equal(
+  resolveVerificationEndpoint(
+    {
+      commit_hash: "abc1234",
+      gql_endpoint: "",
+      endpoint: "https://indexer.hyperindex.xyz/per-deployment/v1/graphql",
+    },
+    { prod: true },
+  ),
+  PRODUCTION_GRAPHQL_ENDPOINT,
+);
+assert.equal(
+  resolveVerificationEndpoint(indexerJson.data.deployments[1]),
+  indexerJson.data.deployments[1].gql_endpoint,
+);
+
+let probedEndpoint = "";
+const graphqlProbe = await queryGraphql(
+  resolveVerificationEndpoint({ commit_hash: "abc1234" }, { prod: true }),
+  "query { __typename }",
+  async (endpoint) => {
+    probedEndpoint = endpoint;
+    return {
+      ok: true,
+      status: 200,
+      text: async () => '{"data":{"__typename":"query_root"}}',
+    };
+  },
+);
+assert.equal(probedEndpoint, PRODUCTION_GRAPHQL_ENDPOINT);
+assert.deepEqual(graphqlProbe, { data: { __typename: "query_root" } });
+await assert.rejects(
+  queryGraphql(
+    PRODUCTION_GRAPHQL_ENDPOINT,
+    "query { __typename }",
+    async () => ({
+      ok: false,
+      status: 503,
+      text: async () => "static endpoint unavailable",
+    }),
+  ),
+  /GraphQL probe returned HTTP 503: static endpoint unavailable/,
+);
 
 const validReplayIntegrity = summarizeReplayIntegrity(VALID_REPLAY_INTEGRITY);
 assert.equal(validReplayIntegrity.ok, true);
@@ -199,6 +285,19 @@ assert.deepEqual(
   },
 );
 
+for (const startBlock of [undefined, null, "", "invalid", -1, 1.5]) {
+  const status = summarizeStatus({
+    data: [
+      {
+        chain_id: 1,
+        start_block: startBlock,
+        timestamp_caught_up_to_head_or_endblock: "2026-07-03T12:00:00Z",
+      },
+    ],
+  });
+  assert.equal(status.chains[0].startBlock, null);
+}
+
 assert.equal(summarizePolygonPools(validPolygonPools(), NOW_SECONDS).ok, true);
 
 const missingPolygonPool = validPolygonPools().slice(1);
@@ -255,6 +354,7 @@ assert.deepEqual(
       Pool: [{ id: "pool" }],
       SusdsYieldSummary: [{ id: "susds" }],
       SusdsYieldMovement: [{ id: "susds-move" }],
+      SusdsYieldDailySnapshot: [],
       StethYieldSummary: [{ id: "steth" }],
       StethYieldMovement: [{ id: "steth-move" }],
     },
@@ -264,12 +364,43 @@ assert.deepEqual(
       Pool: 1,
       SusdsYieldSummary: 1,
       SusdsYieldMovement: 1,
+      SusdsYieldDailySnapshot: 0,
+      SusdsYieldSamplerProgress: 0,
       StethYieldSummary: 1,
       StethYieldMovement: 1,
     },
     errors: [],
     missingTables: [],
+    susdsSummaryNonzero: false,
     ok: true,
+  },
+);
+
+assert.deepEqual(
+  summarizeProbe({
+    data: {
+      Pool: [{ id: "pool" }],
+      SusdsYieldSummary: [{ id: "susds", currentShares: "1" }],
+      SusdsYieldMovement: [{ id: "susds-move" }],
+      SusdsYieldDailySnapshot: [],
+      StethYieldSummary: [{ id: "steth" }],
+      StethYieldMovement: [{ id: "steth-move" }],
+    },
+  }),
+  {
+    rowCounts: {
+      Pool: 1,
+      SusdsYieldSummary: 1,
+      SusdsYieldMovement: 1,
+      SusdsYieldDailySnapshot: 0,
+      SusdsYieldSamplerProgress: 0,
+      StethYieldSummary: 1,
+      StethYieldMovement: 1,
+    },
+    errors: [],
+    missingTables: ["SusdsYieldDailySnapshot", "SusdsYieldSamplerProgress"],
+    susdsSummaryNonzero: true,
+    ok: false,
   },
 );
 
@@ -283,6 +414,8 @@ assert.deepEqual(
       Pool: 0,
       SusdsYieldSummary: 0,
       SusdsYieldMovement: 0,
+      SusdsYieldDailySnapshot: 0,
+      SusdsYieldSamplerProgress: 0,
       StethYieldSummary: 0,
       StethYieldMovement: 0,
     },
@@ -294,6 +427,7 @@ assert.deepEqual(
       "StethYieldSummary",
       "StethYieldMovement",
     ],
+    susdsSummaryNonzero: false,
     ok: false,
   },
 );
@@ -321,6 +455,8 @@ const summary = buildSummary({
       PolygonPool: validPolygonPools(),
       SusdsYieldSummary: [{ id: "susds" }],
       SusdsYieldMovement: [{ id: "susds-move" }],
+      SusdsYieldLaunchBaseline: [validSusdsLaunchBaseline()],
+      SusdsYieldDailySnapshot: [{ id: "susds-day" }],
       StethYieldSummary: [{ id: "steth" }],
       StethYieldMovement: [{ id: "steth-move" }],
     },
@@ -332,6 +468,123 @@ const summary = buildSummary({
 assert.equal(summary.ok, true);
 assert.match(renderText(summary), /Result: verified/);
 assert.match(renderText(summary), /Polygon oracle freshness: v3\/v3/);
+
+const matchingProdIdentityInput = {
+  args: { allowSyncing: false, prod: true },
+  deployment: indexerJson.data.deployments[0],
+  endpoint: indexerJson.data.deployments[0].gql_endpoint,
+  endpointMode: "prod-static",
+  statusJson: {
+    data: [
+      {
+        chain_id: 1,
+        start_block: 10,
+        block_height: 20,
+        latest_processed_block: 20,
+        num_events_processed: 1,
+        timestamp_caught_up_to_head_or_endblock: "2026-07-03T12:00:00+00:00",
+      },
+    ],
+  },
+  metricsJson: { data: [] },
+  graphqlJson: {
+    data: {
+      _meta: [
+        {
+          chainId: 1,
+          readyAt: "2026-07-03T12:00:00.000Z",
+          startBlock: 10,
+        },
+      ],
+      Pool: [{ id: "pool" }],
+      PolygonPool: validPolygonPools(),
+      SusdsYieldSummary: [{ id: "susds" }],
+      SusdsYieldMovement: [{ id: "susds-move" }],
+      SusdsYieldLaunchBaseline: [validSusdsLaunchBaseline()],
+      SusdsYieldDailySnapshot: [{ id: "susds-day" }],
+      StethYieldSummary: [{ id: "steth" }],
+      StethYieldMovement: [{ id: "steth-move" }],
+    },
+  },
+  nowSeconds: NOW_SECONDS,
+  replayIntegrityInput: VALID_REPLAY_INTEGRITY,
+};
+const matchingProdIdentitySummary = buildSummary(matchingProdIdentityInput);
+assert.equal(matchingProdIdentitySummary.ok, true);
+assert.match(
+  renderText(matchingProdIdentitySummary),
+  /target _meta identity match: yes/,
+);
+
+for (const startBlock of [undefined, "invalid"]) {
+  const invalidTargetStartBlockSummary = buildSummary({
+    ...matchingProdIdentityInput,
+    statusJson: {
+      data: [
+        {
+          chain_id: 1,
+          start_block: startBlock,
+          block_height: 20,
+          latest_processed_block: 20,
+          num_events_processed: 1,
+          timestamp_caught_up_to_head_or_endblock: "2026-07-03T12:00:00+00:00",
+        },
+      ],
+    },
+  });
+  assert.equal(invalidTargetStartBlockSummary.ok, false);
+  assert.match(
+    invalidTargetStartBlockSummary.failures.join("\n"),
+    /target deployment status identity rows are invalid/,
+  );
+}
+
+const oldStaticIdentitySummary = buildSummary({
+  args: { allowSyncing: false, prod: true },
+  deployment: indexerJson.data.deployments[0],
+  endpoint: indexerJson.data.deployments[0].gql_endpoint,
+  endpointMode: "prod-static",
+  statusJson: {
+    data: [
+      {
+        chain_id: 1,
+        start_block: 10,
+        block_height: 20,
+        latest_processed_block: 20,
+        num_events_processed: 1,
+        timestamp_caught_up_to_head_or_endblock: "2026-07-03T12:00:00+00:00",
+      },
+    ],
+  },
+  metricsJson: { data: [] },
+  graphqlJson: {
+    data: {
+      Pool: [{ id: "pool" }],
+      PolygonPool: validPolygonPools(),
+      SusdsYieldSummary: [{ id: "susds" }],
+      SusdsYieldMovement: [{ id: "susds-move" }],
+      SusdsYieldLaunchBaseline: [validSusdsLaunchBaseline()],
+      SusdsYieldDailySnapshot: [{ id: "susds-day" }],
+      StethYieldSummary: [{ id: "steth" }],
+      StethYieldMovement: [{ id: "steth-move" }],
+      _meta: [
+        {
+          chainId: 1,
+          readyAt: "2026-07-01T00:00:00.000Z",
+          startBlock: 10,
+        },
+      ],
+    },
+  },
+  nowSeconds: NOW_SECONDS,
+  replayIntegrityInput: VALID_REPLAY_INTEGRITY,
+});
+assert.equal(oldStaticIdentitySummary.probe.ok, true);
+assert.equal(oldStaticIdentitySummary.ok, false);
+assert.match(
+  oldStaticIdentitySummary.failures.join("\n"),
+  /static production endpoint identity does not match target chain 1/,
+);
 
 const semanticFailureWhileSyncing = buildSummary({
   args: { allowSyncing: true },
@@ -356,6 +609,8 @@ const semanticFailureWhileSyncing = buildSummary({
       PolygonPool: missingPolygonPool,
       SusdsYieldSummary: [{ id: "susds" }],
       SusdsYieldMovement: [{ id: "susds-move" }],
+      SusdsYieldLaunchBaseline: [validSusdsLaunchBaseline()],
+      SusdsYieldDailySnapshot: [{ id: "susds-day" }],
       StethYieldSummary: [{ id: "steth" }],
       StethYieldMovement: [{ id: "steth-move" }],
     },
@@ -372,5 +627,443 @@ assert.doesNotMatch(
   semanticFailureWhileSyncing.failures.join("\n"),
   /not caught up/,
 );
+
+const missingSampler = buildSummary({
+  args: { allowSyncing: false },
+  deployment: indexerJson.data.deployments[0],
+  endpoint: indexerJson.data.deployments[0].gql_endpoint,
+  endpointMode: "prod-static",
+  statusJson: {
+    data: [
+      {
+        chain_id: 1,
+        block_height: 24_574_403,
+        latest_processed_block: 24_574_403,
+        num_events_processed: 1,
+        timestamp_caught_up_to_head_or_endblock: "2026-07-03T12:00:00Z",
+      },
+    ],
+  },
+  metricsJson: { data: [] },
+  graphqlJson: {
+    data: {
+      Pool: [{ id: "pool" }],
+      PolygonPool: validPolygonPools(),
+      SusdsYieldSummary: [
+        { id: "susds", currentShares: "1", lastUpdatedBlock: "24574403" },
+      ],
+      SusdsYieldMovement: [{ id: "susds-move", blockNumber: "24574403" }],
+      SusdsYieldLaunchBaseline: [validSusdsLaunchBaseline()],
+      SusdsYieldDailySnapshot: [],
+      StethYieldSummary: [{ id: "steth" }],
+      StethYieldMovement: [{ id: "steth-move" }],
+    },
+  },
+  nowSeconds: NOW_SECONDS,
+  replayIntegrityInput: VALID_REPLAY_INTEGRITY,
+});
+assert.equal(missingSampler.ok, false);
+const missingSamplerText = renderText(missingSampler);
+assert.match(
+  missingSamplerText,
+  /latest sampled block: -; processed Ethereum head: 24,574,403; block lag: -/,
+);
+assert.match(
+  missingSamplerText,
+  /latest sampled timestamp: -; age: - seconds; healthy: no/,
+);
+
+const baselineOnlySampler = buildSummary({
+  args: { allowSyncing: false },
+  deployment: indexerJson.data.deployments[0],
+  endpoint: indexerJson.data.deployments[0].gql_endpoint,
+  endpointMode: "prod-static",
+  statusJson: {
+    data: [
+      {
+        chain_id: 1,
+        block_height: 24_574_403,
+        latest_processed_block: 24_574_403,
+        num_events_processed: 1,
+        timestamp_caught_up_to_head_or_endblock: "2026-07-03T12:00:00Z",
+      },
+    ],
+  },
+  metricsJson: { data: [] },
+  graphqlJson: {
+    data: {
+      Pool: [{ id: "pool" }],
+      PolygonPool: validPolygonPools(),
+      SusdsYieldSummary: [
+        { id: "susds", currentShares: "1", lastUpdatedBlock: "24574403" },
+      ],
+      SusdsYieldMovement: [{ id: "susds-move", blockNumber: "24574403" }],
+      SusdsYieldLaunchBaseline: [validSusdsLaunchBaseline()],
+      SusdsYieldDailySnapshot: [
+        {
+          id: "susds-launch-day",
+          sampledAtBlock: "24573203",
+          sampledAtTimestamp: "1772496000",
+        },
+      ],
+      StethYieldSummary: [{ id: "steth" }],
+      StethYieldMovement: [{ id: "steth-move" }],
+    },
+  },
+  nowSeconds: NOW_SECONDS,
+  replayIntegrityInput: VALID_REPLAY_INTEGRITY,
+});
+assert.equal(baselineOnlySampler.ok, false);
+assert.equal(baselineOnlySampler.probe.rowCounts.SusdsYieldDailySnapshot, 1);
+assert.match(
+  baselineOnlySampler.failures.join("\n"),
+  /sUSDS sampler heartbeat progress row is missing/,
+);
+
+for (const lag of [0, 599]) {
+  const healthySampler = summarizeSusdsSamplerProgress({
+    summaryNonzero: true,
+    latestSnapshot: {
+      sampledAtBlock: "24573803",
+      sampledAtTimestamp: String(NOW_SECONDS - 1_000),
+    },
+    ethereumChain: {
+      processedBlock: 24_573_803 + lag,
+    },
+    nowSeconds: NOW_SECONDS,
+  });
+  assert.equal(healthySampler.ok, true);
+  assert.equal(healthySampler.blockLag, lag);
+  assert.equal(healthySampler.ageSeconds, 1_000);
+}
+
+for (const lag of [600, 601]) {
+  const staleSampler = summarizeSusdsSamplerProgress({
+    summaryNonzero: true,
+    latestSnapshot: {
+      sampledAtBlock: "24573803",
+      sampledAtTimestamp: String(NOW_SECONDS - 1_000),
+    },
+    ethereumChain: {
+      processedBlock: 24_573_803 + lag,
+    },
+    nowSeconds: NOW_SECONDS,
+  });
+  assert.equal(staleSampler.ok, false);
+  assert.match(staleSampler.failures.join("\n"), /sUSDS sampler is stale/);
+}
+
+const staleSampler = summarizeSusdsSamplerProgress({
+  summaryNonzero: true,
+  latestSnapshot: {
+    sampledAtBlock: "24573803",
+    sampledAtTimestamp: String(NOW_SECONDS - 1_000),
+  },
+  ethereumChain: {
+    processedBlock: 24_573_803 + 601,
+  },
+  nowSeconds: NOW_SECONDS,
+});
+assert.equal(staleSampler.ok, false);
+assert.match(staleSampler.failures.join("\n"), /sUSDS sampler is stale/);
+
+const healthySummaryInput = {
+  args: { allowSyncing: false },
+  deployment: indexerJson.data.deployments[0],
+  endpoint: indexerJson.data.deployments[0].gql_endpoint,
+  endpointMode: "prod-static",
+  statusJson: {
+    data: [
+      {
+        chain_id: 1,
+        block_height: 24_573_803,
+        latest_processed_block: 24_573_803,
+        num_events_processed: 1,
+        timestamp_caught_up_to_head_or_endblock: "2026-07-03T12:00:00Z",
+      },
+    ],
+  },
+  metricsJson: { data: [] },
+  graphqlJson: {
+    data: {
+      Pool: [{ id: "pool" }],
+      PolygonPool: validPolygonPools(),
+      SusdsYieldSummary: [{ id: "susds", currentShares: "1" }],
+      SusdsYieldMovement: [{ id: "susds-move" }],
+      SusdsYieldLaunchBaseline: [validSusdsLaunchBaseline()],
+      SusdsYieldDailySnapshot: [
+        {
+          id: "susds-sample",
+          sampledAtBlock: "24573803",
+          sampledAtTimestamp: String(NOW_SECONDS - 1_000),
+        },
+      ],
+      SusdsYieldSamplerProgress: [validSusdsSamplerProgress()],
+      StethYieldSummary: [{ id: "steth" }],
+      StethYieldMovement: [{ id: "steth-move" }],
+    },
+  },
+  nowSeconds: NOW_SECONDS,
+  replayIntegrityInput: VALID_REPLAY_INTEGRITY,
+};
+const healthySummary = buildSummary(healthySummaryInput);
+assert.equal(healthySummary.ok, true);
+assert.match(
+  renderText(healthySummary),
+  /latest sampled block: 24,573,803; processed Ethereum head: 24,573,803; block lag: 0/,
+);
+assert.match(
+  renderText(healthySummary),
+  /sUSDS launch baseline:[\s\S]*launch block: 24,573,203; sampled block: 24,573,203; healthy: yes/,
+);
+
+const recentEventRowWithStaleHeartbeat = buildSummary({
+  ...healthySummaryInput,
+  statusJson: {
+    data: [
+      {
+        ...healthySummaryInput.statusJson.data[0],
+        block_height: 24_574_403,
+        latest_processed_block: 24_574_403,
+      },
+    ],
+  },
+  graphqlJson: {
+    data: {
+      ...healthySummaryInput.graphqlJson.data,
+      SusdsYieldDailySnapshot: [
+        {
+          id: "susds-event-row",
+          sampledAtBlock: "24574403",
+          sampledAtTimestamp: String(NOW_SECONDS - 10),
+        },
+      ],
+      SusdsYieldSamplerProgress: [validSusdsSamplerProgress()],
+    },
+  },
+});
+assert.equal(recentEventRowWithStaleHeartbeat.ok, false);
+assert.equal(
+  recentEventRowWithStaleHeartbeat.susdsSampler.latestSampledAtBlock,
+  24_573_803,
+);
+assert.equal(recentEventRowWithStaleHeartbeat.susdsSampler.blockLag, 600);
+assert.match(
+  recentEventRowWithStaleHeartbeat.failures.join("\n"),
+  /sUSDS sampler is stale/,
+);
+
+const preProgressSamplerSchema = summarizeSusdsLaunchBaselineSchema(
+  {
+    value:
+      "type SusdsYieldLaunchBaseline { id: ID! } type SusdsYieldDailySnapshot { id: ID! }",
+    readError: "",
+  },
+  {
+    legacyHandlerInput: {
+      value: "await updateSummary(context, meta, sharePriceUsdWei);",
+      readError: "",
+    },
+  },
+);
+const preProgressRollbackSummary = buildSummary({
+  ...healthySummaryInput,
+  graphqlJson: {
+    data: {
+      ...healthySummaryInput.graphqlJson.data,
+      SusdsYieldSamplerProgress: undefined,
+    },
+  },
+  susdsLaunchBaselineSchema: preProgressSamplerSchema,
+});
+assert.equal(preProgressRollbackSummary.ok, true);
+assert.equal(preProgressSamplerSchema.required, true);
+assert.equal(preProgressSamplerSchema.samplerProgressRequired, false);
+assert.equal(
+  "SusdsYieldSamplerProgress" in preProgressRollbackSummary.probe.rowCounts,
+  false,
+);
+assert.equal(
+  preProgressRollbackSummary.susdsSampler.latestSampledAtBlock,
+  24_573_803,
+);
+
+const unsafePreProgressSamplerSchema = summarizeSusdsLaunchBaselineSchema(
+  {
+    value:
+      "type SusdsYieldLaunchBaseline { id: ID! } type SusdsYieldDailySnapshot { id: ID! }",
+    readError: "",
+  },
+  {
+    legacyHandlerInput: {
+      value: "await recordSusdsYieldEventDailySnapshot(context, meta);",
+      readError: "",
+    },
+  },
+);
+const unsafePreProgressRollbackSummary = buildSummary({
+  ...healthySummaryInput,
+  graphqlJson: {
+    data: {
+      ...healthySummaryInput.graphqlJson.data,
+      SusdsYieldSamplerProgress: undefined,
+    },
+  },
+  susdsLaunchBaselineSchema: unsafePreProgressSamplerSchema,
+});
+assert.equal(unsafePreProgressRollbackSummary.ok, false);
+assert.match(
+  unsafePreProgressRollbackSummary.failures.join("\n"),
+  /writes event-time daily snapshots without SusdsYieldSamplerProgress/,
+);
+
+const recentSnapshotWithoutLaunchBaseline = buildSummary({
+  ...healthySummaryInput,
+  graphqlJson: {
+    data: {
+      ...healthySummaryInput.graphqlJson.data,
+      SusdsYieldLaunchBaseline: [],
+    },
+  },
+});
+assert.equal(recentSnapshotWithoutLaunchBaseline.susdsSampler.ok, true);
+assert.equal(recentSnapshotWithoutLaunchBaseline.ok, false);
+assert.match(
+  recentSnapshotWithoutLaunchBaseline.failures.join("\n"),
+  /launch baseline row 1-susds-launch is missing/,
+);
+
+const preBaselineRollbackSummary = buildSummary({
+  ...healthySummaryInput,
+  graphqlJson: {
+    data: {
+      ...healthySummaryInput.graphqlJson.data,
+      SusdsYieldLaunchBaseline: undefined,
+      SusdsYieldDailySnapshot: undefined,
+    },
+  },
+  susdsLaunchBaselineSchema: summarizeSusdsLaunchBaselineSchema({
+    value: "type SusdsYieldDailySnapshot { id: ID! }",
+    readError: "",
+  }),
+});
+assert.equal(preBaselineRollbackSummary.ok, true);
+assert.equal(
+  preBaselineRollbackSummary.susdsLaunchBaselineSchema.required,
+  false,
+);
+assert.equal(
+  "SusdsYieldDailySnapshot" in preBaselineRollbackSummary.probe.rowCounts,
+  false,
+);
+assert.equal(preBaselineRollbackSummary.susdsSampler.ok, true);
+assert.doesNotMatch(
+  preBaselineRollbackSummary.failures.join("\n"),
+  /sUSDS sampler|launch baseline|SusdsYieldDailySnapshot/,
+);
+assert.match(
+  renderText(preBaselineRollbackSummary),
+  /sUSDS launch baseline:\n {2}required by target schema: no/,
+);
+assert.match(
+  renderText(preBaselineRollbackSummary),
+  /sUSDS sampler progress:\n {2}required by target schema: no/,
+);
+
+const prodPreBaselineRollbackSummary = buildSummary({
+  ...healthySummaryInput,
+  args: { allowSyncing: false, prod: true },
+  statusJson: {
+    data: [
+      {
+        ...healthySummaryInput.statusJson.data[0],
+        start_block: 0,
+      },
+    ],
+  },
+  graphqlJson: {
+    data: {
+      ...healthySummaryInput.graphqlJson.data,
+      _meta: [
+        {
+          chainId: 1,
+          readyAt: "2026-07-03T12:00:00.000Z",
+          startBlock: 0,
+        },
+      ],
+      SusdsYieldLaunchBaseline: undefined,
+      SusdsYieldDailySnapshot: undefined,
+    },
+  },
+  susdsLaunchBaselineSchema: summarizeSusdsLaunchBaselineSchema({
+    value: "type SusdsYieldDailySnapshot { id: ID! }",
+    readError: "",
+  }),
+});
+assert.equal(prodPreBaselineRollbackSummary.ok, true);
+assert.equal(prodPreBaselineRollbackSummary.deploymentIdentity.ok, true);
+
+const recentSnapshotWithInvalidLaunchBaseline = buildSummary({
+  ...healthySummaryInput,
+  graphqlJson: {
+    data: {
+      ...healthySummaryInput.graphqlJson.data,
+      SusdsYieldLaunchBaseline: [
+        {
+          ...validSusdsLaunchBaseline(),
+          launchBlock: "24573204",
+        },
+      ],
+    },
+  },
+});
+assert.equal(recentSnapshotWithInvalidLaunchBaseline.susdsSampler.ok, true);
+assert.equal(recentSnapshotWithInvalidLaunchBaseline.ok, false);
+assert.match(
+  recentSnapshotWithInvalidLaunchBaseline.failures.join("\n"),
+  /launch baseline launchBlock is 24573204; expected 24573203/,
+);
+
+const staleSamplerSummary = buildSummary({
+  args: { allowSyncing: false },
+  deployment: indexerJson.data.deployments[0],
+  endpoint: indexerJson.data.deployments[0].gql_endpoint,
+  endpointMode: "prod-static",
+  statusJson: {
+    data: [
+      {
+        chain_id: 1,
+        block_height: 24_574_403,
+        latest_processed_block: 24_574_403,
+        num_events_processed: 1,
+        timestamp_caught_up_to_head_or_endblock: "2026-07-03T12:00:00Z",
+      },
+    ],
+  },
+  metricsJson: { data: [] },
+  graphqlJson: {
+    data: {
+      Pool: [{ id: "pool" }],
+      PolygonPool: validPolygonPools(),
+      SusdsYieldSummary: [{ id: "susds", currentShares: "1" }],
+      SusdsYieldMovement: [{ id: "susds-move" }],
+      SusdsYieldLaunchBaseline: [validSusdsLaunchBaseline()],
+      SusdsYieldDailySnapshot: [
+        {
+          id: "susds-sample",
+          sampledAtBlock: "24573803",
+          sampledAtTimestamp: String(NOW_SECONDS - 1_000),
+        },
+      ],
+      SusdsYieldSamplerProgress: [validSusdsSamplerProgress()],
+      StethYieldSummary: [{ id: "steth" }],
+      StethYieldMovement: [{ id: "steth-move" }],
+    },
+  },
+  nowSeconds: NOW_SECONDS,
+  replayIntegrityInput: VALID_REPLAY_INTEGRITY,
+});
+assert.equal(staleSamplerSummary.ok, false);
+assert.match(staleSamplerSummary.failures.join("\n"), /sUSDS sampler is stale/);
 
 console.log("deploy-indexer-verify tests passed.");

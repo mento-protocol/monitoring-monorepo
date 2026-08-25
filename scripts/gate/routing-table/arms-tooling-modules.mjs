@@ -4,10 +4,10 @@
  * schema, and the pairing lint, and it is the only module anything outside this
  * directory should import.
  *
- * ORDER IS ROUTING. Arms are first-match within their group, so an arm's index
- * IS its precedence — moving one up or down changes what the gate schedules.
- * Nothing about a diff will tell you that; `gate-equality.test.mjs`, which
- * compares this table against the gate's live `case` arms, will.
+ * ORDER IS ROUTING. Arms match first-to-last within a group, so an arm's index
+ * is its precedence: move one and the gate schedules something else. Nothing
+ * checks that. `routing-table.test.mjs` pins only the GROUP order, against a
+ * written-out list.
  */
 
 /**
@@ -329,11 +329,21 @@ export const TOOLING_MODULE_ARMS = [
     patterns: [
       "scripts/deploy/deploy-indexer-verify.mjs",
       "scripts/deploy/deploy-indexer-verify.test.mjs",
+      "scripts/deploy/deploy-indexer-verify-analysis.mjs",
+      "scripts/deploy/deploy-indexer-verify-analysis.test.mjs",
+      "scripts/deploy/deploy-indexer-verify-status-identity.mjs",
       "scripts/*/deploy-indexer-verify.mjs",
       "scripts/*/deploy-indexer-verify.test.mjs",
+      "scripts/*/deploy-indexer-verify-analysis.mjs",
+      "scripts/*/deploy-indexer-verify-analysis.test.mjs",
+      "scripts/*/deploy-indexer-verify-status-identity.mjs",
     ],
     pairing: "paired",
     effects: [
+      {
+        command: "node scripts/deploy/deploy-indexer-verify-analysis.test.mjs",
+        reason: "indexer deploy verifier changed",
+      },
       {
         command: "node scripts/deploy/deploy-indexer-verify.test.mjs",
         reason: "indexer deploy verifier changed",

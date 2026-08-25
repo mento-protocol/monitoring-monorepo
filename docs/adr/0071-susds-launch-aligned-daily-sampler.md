@@ -1,0 +1,114 @@
+---
+title: sUSDS actuals use a launch-aligned bounded daily sampler
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-08-24
+scope: indexer-envio (constrains ui-dashboard reserve-yield reads)
+date: 2026-08
+doc_type: adr
+review_interval_days: 90
+garden_lane: adrs-architecture
+---
+
+# ADR 0071 — sUSDS actuals use a launch-aligned bounded daily sampler
+
+**Status:** Accepted (Aug 2026), in force.
+**Scope:** indexer-envio (constrains ui-dashboard reserve-yield reads)
+
+## Context
+
+The event-only sUSDS path recorded daily rows only when a tracked wallet moved
+shares. sUSDS share-price growth continues during quiet periods, so production
+could expose a nonzero `SusdsYieldSummary` with no daily rows. The dashboard
+then treated a stETH-only history as complete sUSDS reserve actuals.
+
+ADR 0012's sUSDS event-only clause and ADR 0034's matching exception are
+superseded by this decision. Their multichain and stETH decisions remain in
+force.
+
+## Decision
+
+- Keep Ethereum reserve-yield in the shared multichain Envio deployment.
+- Register one sUSDS launch baseline at Ethereum block `24573203`, the final
+  block before `2026-03-03T00:00:00Z`. Read the share price at that block and
+  write the baseline with the v3 launch timestamp. The launch-day daily yield
+  is therefore zero.
+- Register one sUSDS sampler every 600 produced Ethereum blocks from
+  `max(chain.startBlock, 24573203)`. The sampler reads the block timestamp and
+  share price through effects with the same key in preload and processing.
+- Cap each of the three Ethereum reserve-yield sampler RPC effects at four
+  dispatches per fixed one-second window. Envio applies limits per effect, so
+  this permits at most 12 top-level effect executions per worker in each
+  window. Retries and fallback requests inside an execution are additional
+  provider calls.
+- Fail the launch baseline when its exact timestamp or share-price read is
+  unavailable, so Envio retries it before post-launch writes. For later
+  sampler callbacks, skip before any entity write when the timestamp or share
+  price is unavailable; the next 600-block callback retries. Invalid non-null
+  values still fail. Preload never writes.
+- Update one UTC-day row by its deterministic `(chainId, token, day)` ID. Use
+  the launch row or latest earlier row as the delta baseline, including across
+  days with no intervening sample.
+- Refresh the current UTC-day row after each tracked sUSDS movement. Use the
+  event timestamp, the event-block share price, and the updated cumulative
+  totals. After launch day, skip an event that has no current-day or prior-day
+  row, so an event cannot invent incomplete history. This path adds no RPC
+  request.
+- Update the singleton `SusdsYieldSamplerProgress` row only after a successful
+  600-block heartbeat writes a daily row. Event-time refreshes never update this
+  row. It lets deployment verification prove heartbeat health independently of
+  recent movements.
+- Do not restore an every-block sUSDS heartbeat.
+- The dashboard requires an sUSDS snapshot source when current sUSDS holdings
+  or a nonzero earned signal exist. It keeps holdings and forecasts visible,
+  but marks reserve actuals unavailable with an explicit sUSDS reason.
+- The dashboard keeps the zero launch row and all historical sUSDS rows in
+  revenue delta accounting. It excludes the sUSDS aggregate from freshness only
+  when `susdsEarnedYieldUsd` is `null` or finite zero,
+  `reserveCurrentHoldingsClassificationFailed`, `hasUnindexedSusdsHolding`,
+  `susdsYieldSignalUnavailable`, and `susdsSnapshotSourceRequired` are
+  explicitly false, no top-level classification or coverage failure exists,
+  and no current sUSDS holding has exposure or earned yield. Historical
+  exposure does not keep an otherwise clean, exited source active. A missing
+  or legacy field, a nonzero or non-finite earned signal, positive or unknown
+  current exposure, classification failure, incomplete coverage, or an
+  unavailable yield signal keeps freshness active or makes actuals unavailable.
+- Deployment verification uses `SusdsYieldLaunchBaseline` in the exact target
+  commit schema as the sampler capability marker. When the marker exists, the
+  verifier requires the immutable launch baseline and the daily snapshot probe.
+  A target schema with `SusdsYieldSamplerProgress` must prove post-launch
+  progress and freshness from that heartbeat-only row. An older schema without
+  it can use the latest daily row only when the exact target
+  `susdsEvents.ts` is readable and has no event-time snapshot writer. A legacy
+  rollback schema without the launch marker omits all sampler-only probes and
+  checks. An unreadable or inconsistent target schema or legacy handler fails
+  closed and retains all strict sampler requirements.
+
+## Alternatives considered
+
+- **Keep sUSDS event-only** — rejected: quiet-period share-price growth has no
+  daily source and can produce false complete actuals.
+- **Restore an every-block heartbeat** — rejected: it recreates the hosted
+  replay cost and stall class that ADR 0012 removed.
+- **Use current reserve API data as historical actuals** — rejected: current
+  holdings do not prove the daily earned-yield path or its launch boundary.
+
+## Consequences
+
+- sUSDS and stETH both have launch-aligned bounded actual samplers.
+- Daily rows remain idempotent, with at most one row per UTC day. Bounded
+  heartbeats capture quiet growth. Event-time refreshes preserve realized-yield
+  attribution at UTC-day boundaries.
+- The heartbeat progress row prevents recent movements from masking a stalled
+  sampler during deployment verification.
+- A deployment can be caught up while reserve actuals are still incomplete;
+  the verifier and dashboard now fail closed for that state.
+
+## Evidence
+
+- Ethereum block `24573203` has timestamp `1772495999`; block `24573204` has
+  timestamp `1772496011`.
+- Focused sUSDS sampler tests cover launch baseline, quiet-period growth,
+  cross-day and event-time deltas, idempotent updates, null effects, and preload
+  no-write behavior.

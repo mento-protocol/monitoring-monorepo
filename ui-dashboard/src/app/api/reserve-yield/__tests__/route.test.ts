@@ -170,9 +170,15 @@ describe("GET /api/reserve-yield", () => {
       principalUsd: 3200,
       forecastPrincipalUsd: 3200,
       earnedYieldUsd: null,
+      susdsEarnedYieldUsd: null,
+      susdsEarnedYieldAsOf: null,
+      susdsSnapshotSourceRequired: true,
+      hasUnindexedSusdsHolding: false,
+      stethSnapshotSourceRequired: false,
       grossApyPercent: 5.33,
       expenseBps: 15,
       revenueShareBps: 8000,
+      reserveCurrentHoldingsClassificationFailed: false,
       holdingsError: null,
       rateError: null,
     });
@@ -222,6 +228,7 @@ describe("GET /api/reserve-yield", () => {
     expect(body.principalUsd).toBeCloseTo(420_495.97, 6);
     expect(body.forecastPrincipalUsd).toBeCloseTo(420_495.97, 6);
     expect(body.earnedYieldUsd).toBeNull();
+    expect(body.stethSnapshotSourceRequired).toBe(true);
     expect(body.annualRunRateUsd).toBeCloseTo(12_416.571115, 6);
     expect(body.next30dUsd).toBeCloseTo(1_020.540092, 6);
     expect(body.rateError).toBeNull();
@@ -237,6 +244,106 @@ describe("GET /api/reserve-yield", () => {
         "Lido stETH APR forecast; stETH mark-to-market changes are not counted as earned revenue",
     });
     expect(stethHolding.next365dUsd).toBeCloseTo(12_375.131115, 6);
+  });
+
+  it("does not require stETH history for explicit-zero current exposure", async () => {
+    const zeroStethAsset = {
+      ...RESERVE_WITH_STETH.collateral.assets[1],
+      balance: "0",
+      usd_value: 0,
+      sources: [
+        {
+          ...RESERVE_WITH_STETH.collateral.assets[1]!.sources[0],
+          balance: "0",
+          usd_value: 0,
+        },
+      ],
+    };
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({ collateral: { assets: [zeroStethAsset] } }),
+      )
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(Response.json(LIDO_STETH_APR_RESPONSE));
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.stethSnapshotSourceRequired).toBe(false);
+  });
+
+  it.each([
+    ["nonzero", { balance: "1", usd_value: 2_000 }],
+    ["invalid", { balance: "unknown", usd_value: "unknown" }],
+    ["missing", { balance: undefined, usd_value: undefined }],
+  ])(
+    "requires stETH history for %s raw asset exposure with zero-only sources",
+    async (_label, rawExposure) => {
+      const stethAsset = {
+        ...RESERVE_WITH_STETH.collateral.assets[1],
+        ...rawExposure,
+        sources: [
+          {
+            ...RESERVE_WITH_STETH.collateral.assets[1]!.sources[0],
+            balance: "0",
+            usd_value: 0,
+          },
+        ],
+      };
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          Response.json({ collateral: { assets: [stethAsset] } }),
+        )
+        .mockResolvedValueOnce(
+          new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+        )
+        .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+        .mockResolvedValueOnce(Response.json(LIDO_STETH_APR_RESPONSE));
+      const { GET } = await loadRoute();
+
+      const res = await GET();
+      const body = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(body.stethSnapshotSourceRequired).toBe(true);
+    },
+  );
+
+  it("reports incomplete stETH source coverage through the API", async () => {
+    const stethAsset = {
+      ...RESERVE_WITH_STETH.collateral.assets[1],
+      sources: [
+        RESERVE_WITH_STETH.collateral.assets[1]!.sources[0],
+        {
+          type: "wallet",
+          label: "Unpriced source",
+          identifier: "0x0000000000000000000000000000000000000001",
+          balance: "unknown",
+          usd_value: "unknown",
+        },
+      ],
+    };
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({ collateral: { assets: [stethAsset] } }),
+      )
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(Response.json(LIDO_STETH_APR_RESPONSE));
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.hasIncompleteStethSourceCoverage).toBe(true);
   });
 
   it("applies wallet-level stETH actuals from indexed snapshots", async () => {
@@ -305,6 +412,7 @@ describe("GET /api/reserve-yield", () => {
     expect(body.realizedYieldUsd).toBeCloseTo(0.5 * usdPerSteth, 6);
     expect(body.unrealizedYieldUsd).toBeCloseTo(1.5 * usdPerSteth, 6);
     expect(body.earnedYieldAsOf).toBe("2026-06-03T10:41:11.000Z");
+    expect(body.susdsEarnedYieldAsOf).toBeNull();
     expect(body.earnedYieldError).toBeNull();
     expect(stethHolding.earnedYieldUsd).toBeCloseTo(2 * usdPerSteth, 6);
     expect(stethHolding).toMatchObject({
@@ -464,12 +572,73 @@ describe("GET /api/reserve-yield", () => {
     );
     expect(graphqlBody.variables.id).toBe("1-susds");
     expect(body.earnedYieldUsd).toBeCloseTo(300, 6);
+    expect(body.susdsEarnedYieldUsd).toBeCloseTo(300, 6);
+    expect(body.susdsEarnedYieldAsOf).toBe("2026-06-03T10:41:11.000Z");
+    expect(body.susdsYieldSignalUnavailable).toBe(false);
     expect(body.realizedYieldUsd).toBeCloseTo(100, 6);
     expect(body.unrealizedYieldUsd).toBeCloseTo(200, 6);
     expect(body.earnedYieldAsOf).toBe("2026-06-03T10:41:11.000Z");
     expect(body.earnedYieldError).toBeNull();
     expect(body.holdings[0].assetSymbol).toBe("sUSDS");
     expect(body.holdings[0].earnedYieldUsd).toBeCloseTo(300, 6);
+  });
+
+  it("does not use a stETH timestamp as sUSDS closeout evidence", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({
+          collateral: {
+            assets: [
+              ...RESERVE_WITH_YIELD_COMPONENTS.collateral.assets,
+              RESERVE_WITH_STETH.collateral.assets[1],
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            SusdsYieldSummary: [
+              { ...SUSDS_LEDGER_SUMMARY, lastUpdatedTimestamp: "0" },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            StethYieldDailySnapshot: [
+              {
+                id: "1-steth-0xd0697f70e79476195b742d5afab14be50f98cc1e-1780444800",
+                chainId: 1,
+                token: "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+                wallet: "0xd0697f70e79476195b742d5afab14be50f98cc1e",
+                timestamp: "1780444800",
+                realizedYieldAmount: "500000000000000000",
+                unrealizedYieldAmount: "1500000000000000000",
+                totalEarnedYieldAmount: "2000000000000000000",
+                sampledAtTimestamp: "1780483271",
+              },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(Response.json(LIDO_STETH_APR_RESPONSE));
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.susdsEarnedYieldUsd).toBeCloseTo(300, 6);
+    expect(body.susdsEarnedYieldAsOf).toBeNull();
+    expect(body.earnedYieldAsOf).toBe("2026-06-03T10:41:11.000Z");
+    expect(body.earnedYieldError).toBeNull();
   });
 
   it("does not refresh sUSDS earned yield from reserve rows outside indexed wallets", async () => {
@@ -530,6 +699,7 @@ describe("GET /api/reserve-yield", () => {
     expect(body.realizedYieldUsd).toBeCloseTo(100, 6);
     expect(body.unrealizedYieldUsd).toBeCloseTo(100, 6);
     expect(body.earnedYieldError).toContain("outside indexed wallets");
+    expect(body.hasUnindexedSusdsHolding).toBe(true);
     expect(body.holdings).toHaveLength(3);
     expect(
       body.holdings.find(
@@ -543,6 +713,64 @@ describe("GET /api/reserve-yield", () => {
           holding.sourceLabel === "New Custodian",
       ).earnedYieldUsd,
     ).toBeNull();
+  });
+
+  it("reports incomplete sUSDS coverage when extraction drops an unknown source", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({
+          collateral: {
+            assets: [
+              {
+                symbol: "sUSDS",
+                chain: "ethereum",
+                balance: "2001",
+                usd_value: 2201,
+                sources: [
+                  {
+                    type: "wallet",
+                    label: "Reserve Safe",
+                    identifier: TRACKED_SUSDS_WALLET,
+                    balance: "2000",
+                    usd_value: 2200,
+                  },
+                  {
+                    type: "wallet",
+                    label: "Unpriced Safe",
+                    identifier: "0x0000000000000000000000000000000000000001",
+                    balance: "unknown",
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            SusdsYieldSummary: [SUSDS_LEDGER_SUMMARY],
+          },
+        }),
+      );
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.holdings).toHaveLength(1);
+    expect(body.holdings[0]).toMatchObject({
+      identifier: TRACKED_SUSDS_WALLET,
+      principalUsd: 2200,
+    });
+    expect(body.holdingsError).toContain("missing usable USD values");
+    expect(body.hasUnindexedSusdsHolding).toBe(true);
   });
 
   it("parses large sUSDS ledger wei without rounding before scaling", async () => {
@@ -619,6 +847,8 @@ describe("GET /api/reserve-yield", () => {
     expect(body.holdings).toEqual([]);
     expect(body.principalUsd).toBeNull();
     expect(body.holdingsError).toContain("without usable USD values");
+    expect(body.reserveCurrentHoldingsClassificationFailed).toBe(false);
+    expect(body.susdsSnapshotSourceRequired).toBe(true);
     expect(body.earnedYieldUsd).toBeCloseTo(200, 6);
     expect(body.realizedYieldUsd).toBeCloseTo(100, 6);
     expect(body.unrealizedYieldUsd).toBeCloseTo(100, 6);
@@ -744,6 +974,135 @@ describe("GET /api/reserve-yield", () => {
     expect(body.holdings[0].assetSymbol).toBe("AUSD");
     expect(body.earnedYieldUsd).toBeNull();
     expect(body.earnedYieldError).toBeNull();
+    expect(body.susdsYieldSignalUnavailable).toBe(true);
+  });
+
+  it("treats a clean empty sUSDS summary as an available zero signal", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json(RESERVE_WITH_ONLY_AUSD))
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(
+        Response.json({ data: { SusdsYieldSummary: [] } }),
+      );
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.earnedYieldError).toBeNull();
+    expect(body.susdsYieldSignalUnavailable).toBe(false);
+  });
+
+  it("fails closed for a malformed HTTP-200 sUSDS summary shape", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json(RESERVE_WITH_ONLY_AUSD))
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: { SusdsYieldSummary: { unexpected: true } },
+        }),
+      );
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.earnedYieldError).toBeNull();
+    expect(body.susdsYieldSignalUnavailable).toBe(true);
+  });
+
+  it("marks malformed HTTP-200 reserve shapes as classification failures", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({ collateral: { assets: { unexpected: true } } }),
+      )
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(
+        Response.json({ data: { SusdsYieldSummary: [] } }),
+      );
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.holdings).toEqual([]);
+    expect(body.principalUsd).toBeNull();
+    expect(body.holdingsError).toContain(
+      "did not contain a usable collateral.assets array",
+    );
+    expect(body.reserveCurrentHoldingsClassificationFailed).toBe(true);
+    expect(body.susdsYieldSignalUnavailable).toBe(false);
+  });
+
+  it("marks unclassifiable top-level reserve rows as classification failures", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ collateral: { assets: [null] } }))
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE));
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.holdingsError).toContain("asset rows without usable symbols");
+    expect(body.reserveCurrentHoldingsClassificationFailed).toBe(true);
+  });
+
+  it("keeps known stETH row errors out of the classification signal", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({
+          collateral: {
+            assets: [
+              {
+                symbol: "stETH",
+                chain: "ethereum",
+                balance: "250",
+                sources: [
+                  {
+                    type: "wallet",
+                    label: "Reserve Safe",
+                    balance: "250",
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE));
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.holdings).toEqual([]);
+    expect(body.holdingsError).toContain("without usable USD values");
+    expect(body.reserveCurrentHoldingsClassificationFailed).toBe(false);
+    expect(body.susdsSnapshotSourceRequired).toBe(false);
+    expect(body.stethSnapshotSourceRequired).toBe(true);
   });
 
   it("returns a clear empty holdings shape when the reserve has no yield-bearing rows", async () => {
@@ -783,6 +1142,8 @@ describe("GET /api/reserve-yield", () => {
     expect(body.forecastPrincipalUsd).toBeNull();
     expect(body.holdings).toEqual([]);
     expect(body.holdingsError).toContain("Reserve API");
+    expect(body.reserveCurrentHoldingsClassificationFailed).toBe(true);
+    expect(body.hasIncompleteStethSourceCoverage).toBe(false);
     expect(body.grossApyPercent).toBe(5.33);
     expect(body.skySavingsRateApyPercent).toBeCloseTo(SKY_SSR_APY_PERCENT, 12);
     expect(body.annualRunRateUsd).toBeNull();

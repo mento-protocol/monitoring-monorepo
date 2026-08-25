@@ -57,6 +57,21 @@ import { createEffect } from "./tracked-effect.js";
 import { fetchSusdsSharePriceUsdWei } from "./susds.js";
 import { fetchStethBalanceOf } from "./steth.js";
 
+// Envio enforces `rateLimit` per effect. These three effects share the same
+// Ethereum provider during reserve-yield preload, so their independent limits
+// must also have a bounded sum. Four dispatches per effect caps the combined
+// rate at 12 effect executions per worker per fixed one-second window. Retries
+// and fallback requests inside an execution are additional provider calls.
+export const RESERVE_YIELD_SAMPLER_RPC_EFFECT_COUNT = 3;
+export const RESERVE_YIELD_SAMPLER_EFFECT_DISPATCHES_PER_SECOND = 4;
+export const RESERVE_YIELD_SAMPLER_MAX_EFFECT_DISPATCHES_PER_SECOND =
+  RESERVE_YIELD_SAMPLER_RPC_EFFECT_COUNT *
+  RESERVE_YIELD_SAMPLER_EFFECT_DISPATCHES_PER_SECOND;
+const RESERVE_YIELD_SAMPLER_EFFECT_RATE_LIMIT = {
+  calls: RESERVE_YIELD_SAMPLER_EFFECT_DISPATCHES_PER_SECOND,
+  per: "second",
+} as const;
+
 // ---------------------------------------------------------------------------
 // Output schemas — defined once so they can be shared / referenced. Sury
 // re-exports from envio omit `S.literal`, so string-union types like
@@ -424,7 +439,7 @@ export const susdsSharePriceEffect = createEffect(
     name: "susdsSharePrice",
     input: { chainId: S.int32, tokenAddress: S.string, blockNumber: S.bigint },
     output: S.nullable(S.bigint),
-    rateLimit: { calls: 200, per: "second" },
+    rateLimit: RESERVE_YIELD_SAMPLER_EFFECT_RATE_LIMIT,
     cache: false,
   },
   async ({ input, context }) =>
@@ -436,14 +451,14 @@ export const susdsSharePriceEffect = createEffect(
     ),
 );
 
-// sUSDS daily heartbeat metadata is block-scoped. Keep it uncached for the
-// same reorg-safety reason as Group C effects.
+// Reserve-yield sampler block metadata is block-scoped. Keep it uncached for
+// the same reorg-safety reason as Group C effects.
 export const blockTimestampEffect = createEffect(
   {
     name: "blockTimestamp",
     input: { chainId: S.int32, blockNumber: S.bigint },
     output: S.nullable(S.bigint),
-    rateLimit: { calls: 200, per: "second" },
+    rateLimit: RESERVE_YIELD_SAMPLER_EFFECT_RATE_LIMIT,
     cache: false,
   },
   async ({ input, context }) => {
@@ -469,7 +484,7 @@ export const stethBalanceOfEffect = createEffect(
       blockNumber: S.bigint,
     },
     output: S.nullable(S.bigint),
-    rateLimit: { calls: 200, per: "second" },
+    rateLimit: RESERVE_YIELD_SAMPLER_EFFECT_RATE_LIMIT,
     cache: false,
   },
   async ({ input, context }) =>
