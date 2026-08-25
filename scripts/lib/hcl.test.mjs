@@ -148,4 +148,19 @@ assert.ok(
   `the real tree filled ${hclAnalysisCacheSize()} cache entries, close to the 4096 ceiling`,
 );
 
+// The overflow-clear branch itself: once the cache reaches the 4096 ceiling,
+// the next insert clears the whole cache rather than evicting one entry or
+// growing past it. Push enough unique text through to force several clear
+// cycles, then confirm the size stayed bounded — unbounded growth here would
+// mean the clear stopped running.
+withCache(true, () => {
+  for (let index = 0; index < 4096 * 2; index += 1) {
+    commentMaskedHcl(`resource "overflow" "probe${index}" {}\n`);
+  }
+  assert.ok(
+    hclAnalysisCacheSize() < 4096,
+    `cache held ${hclAnalysisCacheSize()} entries after forcing overflow; the clear-on-ceiling branch did not run`,
+  );
+});
+
 console.log("HCL scan cache tests passed");
