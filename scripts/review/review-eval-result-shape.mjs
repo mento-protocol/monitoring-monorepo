@@ -21,6 +21,11 @@ function readJson(file) {
   }
 }
 
+/** True for a plain object, the only shape the recompute below can read. */
+function isShape(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 /** Defect ids one condition can score, given the PRs its cells cover. */
 export function conditionScope({ contract, cells, condition }) {
   const prs = [
@@ -197,9 +202,20 @@ export function revalidateRow({
   );
   for (const [name, condition] of Object.entries(row.conditions ?? {})) {
     const label = `conditions.${name}`;
+    // `--validate` reads a row file it did not write, so every field here is
+    // untrusted. A missing one is a problem to report, not a stack trace that
+    // replaces the problem list the command promises.
+    if (!isShape(condition)) {
+      problems.push(`${label} is not an object; nothing to recompute`);
+      continue;
+    }
     const ids = Object.keys(condition.per_defect ?? {});
     if (ids.length === 0) {
       problems.push(`${label}.per_defect is empty`);
+      continue;
+    }
+    if (!isShape(condition.recall) || !isShape(condition.p1)) {
+      problems.push(`${label} is missing recall or p1; nothing to recompute`);
       continue;
     }
     const bits = ids.flatMap((id) => condition.per_defect[id]);

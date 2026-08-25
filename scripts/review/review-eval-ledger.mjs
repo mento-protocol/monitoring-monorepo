@@ -145,7 +145,19 @@ function validateCount(count, label, problems) {
   }
   checkInteger(count.matched, `${label}.matched`, problems);
   checkInteger(count.opportunities, `${label}.opportunities`, problems);
-  checkNumber(count.rate, `${label}.rate`, problems);
+  // `null` is the no-opportunity sentinel that `aggregateDraws` and
+  // `failedRow` emit. It is not 0: `verdict()` skips the `p1_recall_floor`
+  // check on a null rate rather than reading 0/0 as zero recall, so a numeric
+  // 0 there would red a condition that simply has no P1 defect to score.
+  if (count.rate === null) {
+    if (count.opportunities !== 0) {
+      problems.push(
+        `${label}.rate may be null only when ${label}.opportunities is 0`,
+      );
+    }
+  } else {
+    checkNumber(count.rate, `${label}.rate`, problems);
+  }
   if (
     Number.isSafeInteger(count.matched) &&
     Number.isSafeInteger(count.opportunities)

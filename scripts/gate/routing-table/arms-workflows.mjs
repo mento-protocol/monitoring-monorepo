@@ -111,10 +111,18 @@ export const WORKFLOW_ARMS = [
           },
           {
             patterns: [".github/workflows/review-eval-freshness.yml"],
-            why: "This workflow is the only automated reader of the review-skill evaluation contract and ledger. It runs the harness through its pnpm aliases, so an alias rename or a changed CLI mode reds here first. Same pairing as the documentation-garden arm above.",
+            why: "This workflow is the only automated reader of the review-skill evaluation contract and ledger. It runs the harness through its pnpm aliases, so an alias rename or a changed CLI mode reds here first. It queues every mode the workflow itself runs, the same way the documentation-garden arm above queues both of its workflow's commands.",
             effects: [
               {
                 command: "pnpm review:eval:test",
+                reason: "review skill evaluation freshness workflow changed",
+              },
+              {
+                command: "pnpm review:eval -- --check-fixtures --offline",
+                reason: "review skill evaluation freshness workflow changed",
+              },
+              {
+                command: "pnpm review:eval -- --check-ledger --require-base",
                 reason: "review skill evaluation freshness workflow changed",
               },
             ],

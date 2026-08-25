@@ -604,6 +604,35 @@ test("revalidateRow recomputes the verdict a row states about itself", () => {
   );
 });
 
+test("run-eval.sh inserts finder output into the handoff prompt verbatim", () => {
+  // The finder output is model text. `String.prototype.replace` reads $&, $`,
+  // $' and $1 in a *string* replacement, so a review containing one of those
+  // would rewrite the prompt the treatment under test receives. This runs the
+  // shell script's own node program to prove the replacement stays literal.
+  const shell = readFileSync(
+    path.join(repoRoot, "scripts/review/run-eval.sh"),
+    "utf8",
+  );
+  const program = shell.match(
+    /REVIEW_EVAL_OTHER="\$other_review" node -e '\n([\s\S]*?)\n {4}' "\$SPEC/,
+  )?.[1];
+  assert.ok(program, "the handoff prompt node program was not found");
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-handoff-"));
+  try {
+    const template = path.join(dir, "handoff.md");
+    writeFileSync(template, "before\n{{OTHER_REVIEW}}\nafter\n");
+    const other = "finding: the regex $& eats $`this$' and $1 too";
+    const result = spawnSync(process.execPath, ["-e", program, template], {
+      encoding: "utf8",
+      env: { ...process.env, REVIEW_EVAL_OTHER: other },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, `before\n${other}\nafter\n`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("--validate refuses a bad row and appends a good one", () => {
   const root = makeRoot();
   try {
@@ -622,6 +651,38 @@ test("--validate refuses a bad row and appends a good one", () => {
     assert.equal(good.status, 0, good.stderr);
     assert.equal(JSON.parse(good.stdout).appended, true);
     assert.equal(readLedger(path.join(root, ledgerRelative)).length, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--validate reports a malformed row as problems, not a stack trace", () => {
+  const root = makeRoot();
+  try {
+    const rowPath = path.join(root, "row.json");
+    const row = makeRow({ matchedIds: scorableIdsFor([1990, 1999]) });
+    // A hand-edited or truncated row file reaches `--validate` unvalidated.
+    // Dropping the counts the recompute reads must name the gap, not throw.
+    delete row.conditions.pipeline.recall;
+    delete row.conditions.pipeline.p1;
+    row.conditions.control = null;
+    writeFileSync(rowPath, JSON.stringify(row, null, 2));
+    const result = cli(["--validate", rowPath, "--json"], { root });
+    assert.equal(result.status, 1);
+    assert.doesNotMatch(result.stderr, /Cannot read properties/);
+    const problems = JSON.parse(result.stdout).problems;
+    assert.ok(
+      problems.some((problem) =>
+        /conditions\.pipeline is missing recall or p1/.test(problem),
+      ),
+      JSON.stringify(problems),
+    );
+    assert.ok(
+      problems.some((problem) =>
+        /conditions\.control is not an object/.test(problem),
+      ),
+      JSON.stringify(problems),
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

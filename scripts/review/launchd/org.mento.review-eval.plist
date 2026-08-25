@@ -6,7 +6,9 @@
   StartCalendarInterval on the next wake; cron drops it silently.
 
   Install: see "Install the scheduler" in docs/evals/review-skill.md.
-  Edit REPO_PATH below if the checkout is not at the default location.
+  A plist has no variable substitution, so every path below is literal. On a
+  machine that does not use these locations, edit the checkout path inside
+  ProgramArguments and both log paths (StandardOutPath, StandardErrorPath).
 -->
 <plist version="1.0">
   <dict>

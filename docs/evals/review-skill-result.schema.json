@@ -122,11 +122,14 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["matched", "opportunities", "rate"],
+      "description": "`rate` is null only when `opportunities` is 0. Null means \"not measured\", which the verdict rules skip; 0 would mean \"measured zero\" and would fail a recall floor.",
       "properties": {
         "matched": { "type": "integer", "minimum": 0 },
         "opportunities": { "type": "integer", "minimum": 0 },
-        "rate": { "type": "number", "minimum": 0, "maximum": 1 }
-      }
+        "rate": { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+      },
+      "if": { "properties": { "rate": { "type": "null" } } },
+      "then": { "properties": { "opportunities": { "const": 0 } } }
     },
     "condition": {
       "type": "object",

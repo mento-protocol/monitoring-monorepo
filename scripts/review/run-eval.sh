@@ -84,6 +84,12 @@ while [[ $# -gt 0 ]]; do
       ;;
     --deadline)
       require_value "$1" "${2:-}"
+      # The matrix loop compares this arithmetically. A word evaluates to 0
+      # there and silently ends the run before its first cell; a suffixed
+      # duration such as `6h` aborts on an arithmetic syntax error. Refuse
+      # both here, where the message can name the cause.
+      [[ $2 =~ ^[0-9]+$ && $2 -gt 0 ]] ||
+        fail "--deadline must be a positive whole number of seconds"
       DEADLINE="$2"
       shift 2
       ;;
@@ -290,11 +296,20 @@ stage_skill() {
 declare -a FIXTURE_PRS=()
 declare -a FIXTURE_PATHS=()
 
+# `fixture_path` answers in this global rather than on stdout. A command
+# substitution would run it in a subshell, where the two memo arrays below are
+# a discarded copy — every cell would then miss the memo and re-run the whole
+# `build-fixture.sh` leak verification for a fixture already on disk. The
+# per-cell `git reset --hard` and `git clean` live at the call site, so a memo
+# hit still gets a clean tree.
+FIXTURE_PATH=""
+
 fixture_path() {
   local pr="$1" index=0
+  FIXTURE_PATH=""
   for index in "${!FIXTURE_PRS[@]}"; do
     if [[ ${FIXTURE_PRS[$index]} == "$pr" ]]; then
-      printf '%s' "${FIXTURE_PATHS[$index]}"
+      FIXTURE_PATH="${FIXTURE_PATHS[$index]}"
       return 0
     fi
   done
@@ -316,7 +331,7 @@ fixture_path() {
   ' "$CONTRACT" "$pr" "$CACHE_DIR" "$REPO" "$SPEC")" || return 1
   FIXTURE_PRS+=("$pr")
   FIXTURE_PATHS+=("$built")
-  printf '%s' "$built"
+  FIXTURE_PATH="$built"
 }
 
 # --- the finder argv and the cell fingerprint --------------------------------
@@ -400,10 +415,11 @@ run_cell() {
   fi
 
   local fixture
-  fixture="$(fixture_path "$pr")" || {
+  fixture_path "$pr" || {
     log "  $cell_id FAILED — fixture"
     return 1
   }
+  fixture="$FIXTURE_PATH"
 
   local started other_review="" codex_chars=0
   started="$(date +%s)"
@@ -439,7 +455,12 @@ run_cell() {
     prompt="$(REVIEW_EVAL_OTHER="$other_review" node -e '
       const fs = require("node:fs");
       const template = fs.readFileSync(process.argv[1], "utf8");
-      process.stdout.write(template.replace("{{OTHER_REVIEW}}", process.env.REVIEW_EVAL_OTHER));
+      // The replacement is a function on purpose. A string replacement gives
+      // the finder output its own dollar-sign patterns, so a review that
+      // happens to contain one would silently rewrite the prompt around it.
+      process.stdout.write(
+        template.replace("{{OTHER_REVIEW}}", () => process.env.REVIEW_EVAL_OTHER),
+      );
     ' "$SPEC/scripts/review/prompts/handoff.md")"
   else
     prompt="$(cat "$SPEC/scripts/review/prompts/request.md")"

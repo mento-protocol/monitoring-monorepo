@@ -25,6 +25,7 @@ import {
   ROW_REQUIRED_KEYS,
   validateLedgerRow,
 } from "./review-eval-ledger.mjs";
+import { aggregateDraws } from "./review-eval-score.mjs";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const contract = JSON.parse(
@@ -172,6 +173,51 @@ test("a well-formed row validates", () => {
       }),
     ),
     [],
+  );
+});
+
+test("the no-opportunity rate the producers emit is a valid row", () => {
+  // `aggregateDraws` emits `rate: null` for a bucket with no opportunities,
+  // and `verdict()` reads that null as "not measured" and skips the
+  // p1_recall_floor check. A 0 there would read as measured zero recall, so
+  // the validator has to accept the sentinel rather than force the producers
+  // to lie. It is legal only at zero opportunities.
+  const aggregate = aggregateDraws({
+    scorableIds: [Number(scorable[0])],
+    p1Ids: [],
+    draws: [[Number(scorable[0])]],
+  });
+  assert.deepEqual(aggregate.p1, { matched: 0, opportunities: 0, rate: null });
+  assert.deepEqual(
+    validateLedgerRow(
+      row({
+        conditions: {
+          pipeline: condition({
+            draws: 1,
+            per_defect: { [scorable[0]]: [1] },
+            recall: { matched: 1, opportunities: 1, rate: 1 },
+            p1: aggregate.p1,
+          }),
+        },
+      }),
+    ),
+    [],
+  );
+  assert.ok(
+    validateLedgerRow(
+      row({
+        conditions: {
+          pipeline: condition({
+            draws: 1,
+            per_defect: { [scorable[0]]: [1] },
+            recall: { matched: 1, opportunities: 1, rate: null },
+            p1: { matched: 0, opportunities: 0, rate: null },
+          }),
+        },
+      }),
+    ).some((problem) =>
+      /recall\.rate may be null only when .*opportunities is 0/.test(problem),
+    ),
   );
 });
 

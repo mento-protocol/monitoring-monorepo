@@ -182,7 +182,7 @@ at the defect level, which is the whole point of freezing the fixtures.
 Every comparable input gets a digest, and comparison is refused across
 mismatched keys:
 
-```
+```text
 comparability_key = sha256(contract_digest ‖ request_prompt ‖ handoff_prompt ‖
                            scorer_digest ‖ judge_model)
 ```
