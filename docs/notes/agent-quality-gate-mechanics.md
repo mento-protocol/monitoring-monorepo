@@ -3,7 +3,7 @@ title: Agent Quality Gate — Mechanics
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-23
+last_verified: 2026-08-25
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -40,6 +40,11 @@ freshness stamp, so the next run cannot use `--skip-if-fresh`. Each run appends
 per-command JSON plus one `__run_total__` line to gitignored
 `.tmp/agent-quality-gate/durations.jsonl`. Targets: 3 minutes for common mapped
 sets and 8 minutes for the full workspace (Refs #1415).
+
+Every executing command emits a 20-second heartbeat with its elapsed time and
+command text, including serialized prerequisites and exclusive suites. Command
+output remains buffered until failure so concurrent logs stay readable; the
+heartbeat is the liveness signal while that buffer is quiet.
 
 If a sandboxed mapped run fails only because a command needs host capabilities,
 rerun the full mapped gate with host access on the same head. The gate reuses
@@ -1164,7 +1169,7 @@ concurrent logs do not interleave. The same dashboard `.next` serialization rule
 applies to prewarm.
 
 The Trunk pre-push hook delegates to this same path-aware gate with
-`--parallel 3 --skip-if-fresh`, so the independent quality-phase members run
+`--parallel 3 --skip-if-fresh --pre-push`, so the independent quality-phase members run
 concurrently (the heavy `test:coverage` suites and the gate self-test overlap
 instead of summing to the serial total), and it reuses a recent successful
 manual gate run when the fetched base commit, mapped command plan, gate
@@ -1182,6 +1187,14 @@ review the script/lifecycle diff first, then set
 `agent.qualityGate.allowPackageScriptChanges=true` in local git config (seen by
 both the manual warm run and the hook) so a just-passed acknowledged manual gate
 can satisfy the `--skip-if-fresh` check.
+
+Hosted setup also sets `agent.qualityGate.cloudPrePushRequireFresh=true`. The
+pre-push invocation identifies itself with `--pre-push`; on a cold or invalid
+stamp it exits before the run lock or any mapped command and tells the agent to
+fetch `origin/main`, run `pnpm agent:quality-gate --run` in the background, and
+retry the push. This keeps a long gate owned by an observable task instead of
+burying it inside a blocking cloud `git push`. Local setup does not set the
+option, so a developer's cold pre-push still runs the mapped gate normally.
 
 The whole-run stamp's signature is the same bound-input set described above;
 any change to it reruns the mapped commands immediately, while an unchanged

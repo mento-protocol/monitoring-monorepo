@@ -5,7 +5,7 @@ gate_start_ts="$(date +%s)"
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/agent-quality-gate.sh [--dry-run|--run] [--base <ref>] [--head <ref>] [--changed-paths-file <file>] [--allow-package-script-changes] [--fail-fast|--keep-going] [--skip-if-fresh] [--parallel <n>] [--full-local-tests]
+Usage: scripts/agent-quality-gate.sh [--dry-run|--run] [--base <ref>] [--head <ref>] [--changed-paths-file <file>] [--allow-package-script-changes] [--fail-fast|--keep-going] [--skip-if-fresh] [--pre-push] [--parallel <n>] [--full-local-tests]
 
 Maps changed paths to the local commands and PR checklists an agent should run
 before opening or updating a PR. Defaults to dry-run.
@@ -27,6 +27,8 @@ Options:
                  used the same base, changed paths, command plan, gate
                  implementation, and validated file content. Intended for the
                  pre-push hook only.
+  --pre-push     Mark this invocation as the git pre-push hook. Hosted setup
+                 uses this to refuse a cold gate inside a blocking git push.
   --parallel <n> With --run, execute independent quality commands with up to
                  n concurrent jobs. Default: auto, capped at 4. Fail-fast mode
                  stays sequential so it still stops before starting the next
@@ -78,6 +80,7 @@ changed_paths_input_file=""
 allow_package_script_changes="${AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES:-}"
 fail_fast="${AGENT_QUALITY_FAIL_FAST:-false}"
 skip_if_fresh="${AGENT_QUALITY_SKIP_IF_FRESH:-false}"
+pre_push="false"
 quality_parallelism="${AGENT_QUALITY_PARALLELISM:-auto}"
 full_local_tests="${AGENT_GATE_FULL_TESTS:-false}"
 # 900 was the bound until this gate's own self-test became the longest mapped
@@ -168,6 +171,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-if-fresh)
       skip_if_fresh="true"
+      shift
+      ;;
+    --pre-push)
+      pre_push="true"
       shift
       ;;
     --full-local-tests)
@@ -2286,6 +2293,16 @@ if [[ "$skip_if_fresh" == "1" || "$skip_if_fresh" == "true" ]]; then
   fi
 fi
 
+if [[ "$pre_push" == "1" || "$pre_push" == "true" ]]; then
+  cloud_pre_push_require_fresh="$(git config --bool --get agent.qualityGate.cloudPrePushRequireFresh 2>/dev/null || true)"
+  if [[ "$cloud_pre_push_require_fresh" == "true" ]]; then
+    echo "Cloud pre-push requires a fresh quality-gate stamp; no mapped command ran." >&2
+    echo "Run 'git fetch origin main', then run 'pnpm agent:quality-gate --run' in the background." >&2
+    echo "Retry the push after that command passes; --skip-if-fresh will then return immediately." >&2
+    exit 2
+  fi
+fi
+
 if [[ "$package_script_risk_changed" == true && "$allow_package_script_changes" != "1" && "$allow_package_script_changes" != "true" ]]; then
   echo "Refusing to run because package manifests, patches, or lockfile changed." >&2
   echo "Review package scripts, lifecycle hooks, and dependency install scripts first, then re-run with --allow-package-script-changes if they are safe." >&2
@@ -2464,7 +2481,7 @@ print_command_summary() {
   done
 }
 
-monitor_sequential_autoreview_progress() {
+monitor_sequential_progress() {
   local command="$1"
   local output_file="$2"
   local start_ts="$3"
@@ -2483,7 +2500,9 @@ monitor_sequential_autoreview_progress() {
     if [[ $((now_ts - last_heartbeat_ts)) -ge "$heartbeat_interval" ]]; then
       printf '⏳ still running after %s:\n' "$(format_duration $((now_ts - start_ts)))"
       printf '    · %s\n' "$command"
-      latest_autoreview_test_progress "$output_file"
+      if is_autoreview_test_command "$command"; then
+        latest_autoreview_test_progress "$output_file"
+      fi
       last_heartbeat_ts="$now_ts"
     fi
   done
@@ -2795,14 +2814,12 @@ run_mapped_command() {
   start_ts="$(date +%s)"
   echo
   echo "+ ${command}"
-  if is_autoreview_test_command "$command"; then
-    monitor_done_file="${output_file}.done"
-    tmpfiles+=("$monitor_done_file")
-    rm -f "$monitor_done_file"
-    monitor_sequential_autoreview_progress \
-      "$command" "$output_file" "$start_ts" "$monitor_done_file" "$gate_pid" &
-    monitor_pid="$!"
-  fi
+  monitor_done_file="${output_file}.done"
+  tmpfiles+=("$monitor_done_file")
+  rm -f "$monitor_done_file"
+  monitor_sequential_progress \
+    "$command" "$output_file" "$start_ts" "$monitor_done_file" "$gate_pid" &
+  monitor_pid="$!"
   set +e
   run_with_timeout "$command" > "$output_file" 2>&1
   exit_code=$?

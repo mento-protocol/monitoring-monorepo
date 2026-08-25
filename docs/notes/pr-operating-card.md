@@ -3,7 +3,7 @@ title: PR Operating Card
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-22
+last_verified: 2026-08-25
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -91,7 +91,9 @@ even when you never open an authority.
    server or browser suite alongside the gate; a second `--run` gate is handled
    for you — it takes a machine-wide lock and queues behind the first, naming
    the holder while it waits. Background the `--run` gate and the `git push`; a
-   600s foreground kill discards the freshness stamp. Authority:
+   600s foreground kill discards the freshness stamp. Hosted setup makes a cold
+   pre-push fail fast: warm the stamp with the background gate first, then push.
+   Authority:
    [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md).
 
 4. **Autoreview.** Freeze the scope baseline first — the initial request,

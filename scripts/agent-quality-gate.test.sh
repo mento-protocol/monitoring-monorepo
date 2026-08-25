@@ -4037,6 +4037,19 @@ STUB
     "$(( $(date +%s) - 2 * 60 * 60 - 1 ))" \
     "$stamp_value" \
     > "$stamp_file"
+  git config agent.qualityGate.cloudPrePushRequireFresh true
+  cold_pre_push_exit=0
+  COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --base "$base_ref" --run --skip-if-fresh --pre-push \
+      > "$output_file" 2>&1 || cold_pre_push_exit=$?
+  [[ "$cold_pre_push_exit" -eq 2 ]] ||
+    fail "cold hosted pre-push exited ${cold_pre_push_exit} instead of 2"
+  [[ "$(cat "$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "1" ]] ||
+    fail "cold hosted pre-push executed a mapped command"
+  grep -Fq -- "Cloud pre-push requires a fresh quality-gate stamp; no mapped command ran." "$output_file" ||
+    fail "cold hosted pre-push did not explain its fail-fast refusal"
+
   : > "$output_file"
   COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
     "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run --skip-if-fresh >> "$output_file" 2>&1
