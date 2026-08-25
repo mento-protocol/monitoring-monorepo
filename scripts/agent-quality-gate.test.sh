@@ -1148,8 +1148,8 @@ assert.match(
 );
 assert.match(
   source,
-  /if \[\[ "\$6" == 1 \]\]; then\n        exec 7>&-\n      fi\n      eval "\$2"/u,
-  "mapped commands must close fd 7 only when the coordinator reserved it",
+  /if \[\[ "\$6" == 1 \]\]; then\n        exec 7>&-\n      fi\n      if \[\[ "\$7" == 1 \]\]; then[\s\S]*?exec 17>&-\n      fi\n      eval "\$2"/u,
+  "mapped commands must close fd 7 and fd 17 only when their caller reserved them",
 );
 assert.match(
   source,
