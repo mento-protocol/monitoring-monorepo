@@ -18,6 +18,7 @@ import {
   updateProjectFields,
 } from "./issue-board-projects.mjs";
 import {
+  addIssueLabels,
   editIssueLabels,
   getIssue,
   listIssuesByLabels,
@@ -25,6 +26,7 @@ import {
 } from "./issue-board-transport.mjs";
 
 const SYNC_RECONCILE_ATTEMPTS = 3;
+const SYNC_COMPENSATE_ATTEMPTS = 3;
 const SYNC_VERIFY_ATTEMPTS = 3;
 const SYNC_VERIFY_SETTLE_MS = 250;
 
@@ -97,13 +99,10 @@ async function restoreProvisionalQueueLabel(
   operations,
 ) {
   const provisionalState = stateForQueueLabel(issue, provisionalQueueLabel);
-  if (!provisionalState) return { issue, provisionalQueueLabel: null };
+  if (!provisionalState) return issue;
 
   await operations.editIssueLabels(options, issue, provisionalState);
-  return {
-    issue: await operations.getIssue(options, issue.number),
-    provisionalQueueLabel,
-  };
+  return operations.getIssue(options, issue.number);
 }
 
 async function compensateProvisionalQueueLabel(
@@ -112,54 +111,78 @@ async function compensateProvisionalQueueLabel(
   provisionalQueueLabel,
   operations,
 ) {
-  if (!provisionalQueueLabel) return { issue, provisionalQueueLabel };
-  if (String(issue.state ?? "").toUpperCase() !== "OPEN") {
-    return { issue, provisionalQueueLabel: null };
-  }
-
-  const queueLabels = queueLabelsFromIssue(issue);
-  if (!queueLabels.includes(provisionalQueueLabel)) {
-    if (queueLabels.length === 0) {
-      return restoreProvisionalQueueLabel(
-        options,
-        issue,
-        provisionalQueueLabel,
-        operations,
-      );
+  let currentIssue = issue;
+  for (let attempt = 1; attempt <= SYNC_COMPENSATE_ATTEMPTS; attempt += 1) {
+    if (!provisionalQueueLabel) {
+      return { issue: currentIssue, provisionalQueueLabel };
     }
-    return { issue, provisionalQueueLabel: null };
-  }
-  if (queueLabels.length !== 2) {
-    return { issue, provisionalQueueLabel };
-  }
+    if (String(currentIssue.state ?? "").toUpperCase() !== "OPEN") {
+      return { issue: currentIssue, provisionalQueueLabel: null };
+    }
 
-  const concurrentLabel = queueLabels.find(
-    (label) => label !== provisionalQueueLabel,
-  );
-  const concurrentState = stateForQueueLabel(issue, concurrentLabel);
-  if (!concurrentState) return { issue, provisionalQueueLabel };
+    const queueLabels = queueLabelsFromIssue(currentIssue);
+    if (!queueLabels.includes(provisionalQueueLabel)) {
+      if (queueLabels.length === 0) {
+        currentIssue = await restoreProvisionalQueueLabel(
+          options,
+          currentIssue,
+          provisionalQueueLabel,
+          operations,
+        );
+        continue;
+      }
+      return { issue: currentIssue, provisionalQueueLabel: null };
+    }
+    if (queueLabels.length !== 2) {
+      return { issue: currentIssue, provisionalQueueLabel };
+    }
 
-  await operations.editIssueLabels(options, issue, concurrentState);
-  const verified = await operations.getIssue(options, issue.number);
-  if (
-    String(verified.state ?? "").toUpperCase() === "OPEN" &&
-    queueLabelsFromIssue(verified).length === 0
-  ) {
-    return restoreProvisionalQueueLabel(
-      options,
-      verified,
-      provisionalQueueLabel,
-      operations,
+    const concurrentLabel = queueLabels.find(
+      (label) => label !== provisionalQueueLabel,
     );
+    const concurrentState = stateForQueueLabel(currentIssue, concurrentLabel);
+    if (!concurrentState) {
+      return { issue: currentIssue, provisionalQueueLabel };
+    }
+
+    await operations.editIssueLabels(options, currentIssue, concurrentState);
+    currentIssue = await operations.getIssue(options, currentIssue.number);
   }
-  return {
-    issue: verified,
-    provisionalQueueLabel: queueLabelsFromIssue(verified).includes(
-      provisionalQueueLabel,
-    )
-      ? provisionalQueueLabel
-      : null,
-  };
+
+  return { issue: currentIssue, provisionalQueueLabel };
+}
+
+async function preserveRetryQueueLabels(
+  options,
+  issue,
+  retryQueueLabels,
+  operations,
+) {
+  let verified = await operations.getIssue(options, issue.number);
+  if (queueLabelsFromIssue(verified).length > 0) return verified;
+  if (retryQueueLabels.length === 0) {
+    throw new Error(`Issue #${issue.number} has no queue label to restore`);
+  }
+
+  await operations.addIssueLabels(options, verified, retryQueueLabels);
+  for (let attempt = 1; attempt <= SYNC_VERIFY_ATTEMPTS; attempt += 1) {
+    verified = await operations.getIssue(options, issue.number);
+    if (retryQueueLabels.length === 1) {
+      ({ issue: verified } = await compensateProvisionalQueueLabel(
+        options,
+        verified,
+        retryQueueLabels[0],
+        operations,
+      ));
+    }
+    if (queueLabelsFromIssue(verified).length > 0) return verified;
+    if (attempt < SYNC_VERIFY_ATTEMPTS) {
+      await operations.sleep(SYNC_VERIFY_SETTLE_MS);
+    }
+  }
+  throw new Error(
+    `Issue #${issue.number} has no queue label after retry-label restoration`,
+  );
 }
 
 export class IssueBoardSyncError extends AggregateError {
@@ -273,6 +296,7 @@ async function syncIssue(options, project, listedIssue, operations) {
       }
 
       const reopenState = restoreStateFromCloseoutIssue(closeoutIssue);
+      const retryQueueLabels = queueLabelsFromIssue(closeoutIssue);
       await operations.editIssueLabels(options, closeoutIssue, state);
       let verifiedIssue = await verifySyncCloseout(
         options,
@@ -288,13 +312,31 @@ async function syncIssue(options, project, listedIssue, operations) {
         if (!verifiedItemId) {
           return { number: issue.number, title: issue.title, state };
         }
-        await operations.updateProjectFields(
-          options,
-          project,
-          verifiedItemId,
-          state,
-          {},
-        );
+        try {
+          await operations.updateProjectFields(
+            options,
+            project,
+            verifiedItemId,
+            state,
+            {},
+          );
+        } catch (projectionError) {
+          try {
+            await preserveRetryQueueLabels(
+              options,
+              verifiedIssue,
+              retryQueueLabels,
+              operations,
+            );
+          } catch (retryError) {
+            throw new AggregateError(
+              [projectionError, retryError],
+              `Issue #${issue.number} late Done projection and retry-label restoration failed`,
+              { cause: retryError },
+            );
+          }
+          throw projectionError;
+        }
         verifiedIssue = await verifySyncCloseout(
           options,
           verifiedIssue,
@@ -375,6 +417,7 @@ async function syncIssue(options, project, listedIssue, operations) {
 
 export async function sync(options, dependencies = {}) {
   const operations = {
+    addIssueLabels,
     editIssueLabels,
     ensureProjectItem,
     findIssueProjectItem,

@@ -135,6 +135,25 @@ export async function editIssueLabels(options, issue, state) {
   await runGh(args, { dryRun: options.dryRun, mutates: true });
 }
 
+export async function addIssueLabels(options, issue, labels) {
+  const existingLabels = labelNames(issue);
+  const addLabels = labels.filter((label) => !existingLabels.has(label));
+  if (addLabels.length === 0) return;
+
+  await runGh(
+    [
+      "issue",
+      "edit",
+      String(issue.number),
+      "-R",
+      options.repo,
+      "--add-label",
+      addLabels.join(","),
+    ],
+    { dryRun: options.dryRun, mutates: true },
+  );
+}
+
 export async function ghJson(args, opts = {}) {
   const stdout = await runGh(args, opts);
   return stdout.trim() ? JSON.parse(stdout) : null;

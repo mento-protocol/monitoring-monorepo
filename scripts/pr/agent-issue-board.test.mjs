@@ -650,6 +650,129 @@ test("sync projects a Project item that appears after label cleanup", async () =
   ]);
 });
 
+test("sync restores retry labels when a late Done projection fails", async () => {
+  const listedIssue = {
+    number: 938,
+    title: "late Done retry",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+    projectItems: [],
+  };
+  let currentIssue = listedIssue;
+  let failLateDone = true;
+  let projectState = "review";
+  const restoredLabels = [];
+
+  const dependencies = {
+    getProject: async () => ({ id: "project" }),
+    listIssuesByLabels: async (_options, labels, { state }) =>
+      state === "all" &&
+      currentIssue.labels.some((label) => labels.includes(label.name))
+        ? [currentIssue]
+        : [],
+    getIssue: async () => currentIssue,
+    findIssueProjectItem: async (_options, issue) =>
+      issue.projectItems[0]?.id ?? null,
+    updateProjectFields: async (_options, _project, _item, state) => {
+      if (failLateDone) throw new Error("late Done projection failed");
+      projectState = state;
+    },
+    editIssueLabels: async (_options, _issue, state) => {
+      if (state !== "done") return;
+      currentIssue = {
+        ...currentIssue,
+        labels: [],
+        projectItems: [{ id: "item-938", project: { id: "project" } }],
+      };
+    },
+    addIssueLabels: async (_options, issue, labels) => {
+      assertDeepEqual(issue.labels, [], "fresh retry-label snapshot");
+      restoredLabels.push(...labels);
+      currentIssue = {
+        ...currentIssue,
+        labels: labels.map((name) => ({ name })),
+      };
+    },
+    sleep: async () => {
+      throw new Error("an immediately restored retry label must not wait");
+    },
+  };
+
+  await assertRejects(
+    () =>
+      sync(
+        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+        dependencies,
+      ),
+    /late Done projection failed/,
+  );
+  assertDeepEqual(restoredLabels, ["in-pr"]);
+  assertDeepEqual(currentIssue.labels, [{ name: "in-pr" }]);
+
+  failLateDone = false;
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    dependencies,
+  );
+
+  assertEqual(projectState, "done", "retried Project state");
+  assertDeepEqual(currentIssue.labels, []);
+  assertDeepEqual(results, [
+    { number: 938, title: "late Done retry", state: "done" },
+  ]);
+});
+
+test("sync preserves a concurrent retry label after late Done failure", async () => {
+  const listedIssue = {
+    number: 939,
+    title: "late Done concurrent reopen",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+    projectItems: [],
+  };
+  let currentIssue = listedIssue;
+  let addCalls = 0;
+
+  await assertRejects(
+    () =>
+      sync(
+        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+        {
+          getProject: async () => ({ id: "project" }),
+          listIssuesByLabels: async (_options, labels, { state }) =>
+            labels.includes("in-pr") && state === "all" ? [listedIssue] : [],
+          getIssue: async () => currentIssue,
+          findIssueProjectItem: async (_options, issue) =>
+            issue.projectItems[0]?.id ?? null,
+          updateProjectFields: async () => {
+            currentIssue = {
+              ...currentIssue,
+              state: "OPEN",
+              labels: [{ name: "agent-active" }],
+            };
+            throw new Error("late Done projection failed");
+          },
+          editIssueLabels: async (_options, _issue, state) => {
+            if (state !== "done") return;
+            currentIssue = {
+              ...currentIssue,
+              labels: [],
+              projectItems: [{ id: "item-939", project: { id: "project" } }],
+            };
+          },
+          addIssueLabels: async () => {
+            addCalls += 1;
+          },
+          sleep: async () => {},
+        },
+      ),
+    /late Done projection failed/,
+  );
+
+  assertEqual(addCalls, 0, "concurrent queue label restore calls");
+  assertDeepEqual(currentIssue.labels, [{ name: "agent-active" }]);
+});
+
 test("sync reprojects a reopen during the late Project write", async () => {
   const listedIssue = {
     number: 923,
@@ -1106,6 +1229,77 @@ test("sync restores provisional state when compensation loses a transition", asy
   assertEqual(reads, 8, "restore, compensation, repair, and projection reads");
   assertDeepEqual(results, [
     { number: 937, title: "compensation transition race", state: "review" },
+  ]);
+});
+
+test("sync compensates a conflict created by provisional repair", async () => {
+  const listedIssue = {
+    number: 940,
+    title: "provisional repair conflict",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+  };
+  let currentIssue = listedIssue;
+  const edits = [];
+  const updates = [];
+  let waits = 0;
+
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabels: async (_options, labels, { state }) =>
+        labels.includes("in-pr") && state === "all" ? [listedIssue] : [],
+      getIssue: async () => currentIssue,
+      findIssueProjectItem: async () => null,
+      ensureProjectItem: async () => "item-940",
+      updateProjectFields: async (_options, _project, _item, state) => {
+        updates.push(state);
+        if (state === "review") {
+          currentIssue = { ...listedIssue, state: "OPEN", labels: [] };
+        }
+      },
+      editIssueLabels: async (_options, issue, state) => {
+        edits.push(state);
+        if (edits.length === 1) {
+          currentIssue = { ...listedIssue, state: "OPEN", labels: [] };
+          return;
+        }
+        if (edits.length === 2) {
+          currentIssue = {
+            ...listedIssue,
+            state: "OPEN",
+            labels: [{ name: "in-pr" }],
+          };
+          return;
+        }
+        if (edits.length === 3) {
+          assertDeepEqual(issue.labels, [], "label-less repair snapshot");
+          currentIssue = {
+            ...listedIssue,
+            state: "OPEN",
+            labels: [{ name: "in-pr" }, { name: "agent-active" }],
+          };
+          return;
+        }
+        assertEqual(state, "active");
+        currentIssue = {
+          ...listedIssue,
+          state: "OPEN",
+          labels: [{ name: "agent-active" }],
+        };
+      },
+      sleep: async () => {
+        waits += 1;
+      },
+    },
+  );
+
+  assertDeepEqual(edits, ["done", "review", "review", "active"]);
+  assertDeepEqual(updates, ["review", "active"]);
+  assertEqual(waits, 2, "bounded outer reconciliation waits");
+  assertDeepEqual(results, [
+    { number: 940, title: "provisional repair conflict", state: "active" },
   ]);
 });
 
