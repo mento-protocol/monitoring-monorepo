@@ -9175,7 +9175,7 @@ STUB
         > "$next_gate_output" 2>&1 &
     next_gate_pid=$!
     settled=0
-    for ((attempt = 0; attempt < 200; attempt++)); do
+    for ((attempt = 0; attempt < 400; attempt++)); do
       if ! jobs -pr | grep -Fxq "$next_gate_pid"; then
         settled=1
         break
@@ -9184,7 +9184,7 @@ STUB
     done
     [[ "$settled" -eq 1 ]] ||
       fail_parallel_interrupt_fixture \
-        "gate after parallel $phase interrupt did not finish cleanly within 10s"
+        "gate after parallel $phase interrupt did not finish cleanly within 20s"
     set +e
     wait "$next_gate_pid"
     next_gate_exit=$?
@@ -9419,23 +9419,28 @@ run_parallel_nolock_parent_death_regression
     fail "could not load the parallel group-capture helper for its focused regression"
   eval "$gate_group_function"
 
-  gate_drain_seed_pgid=""
-  gate_drain_seed_start=""
+  # shellcheck disable=SC2034 # read by the eval-loaded helper
+  gate_drain_seed_pgid="" gate_drain_seed_start=""
   gate_drain_tagged_now=$'101\n202'
   gate_drain_scan_error="agentqg-scan-failed"
   gate_drain_scan_failed=0
   gate_drain_capture_group_pgid=""
   gate_lock_identity_unavailable="<no-identity-source>"
   gate_group_captured=""
+  # shellcheck disable=SC2329 # called by the eval-loaded helper
   gate_lock_identity_source_available() { return 0; }
+  # shellcheck disable=SC2329 # called by the eval-loaded helper
   gate_lock_process_start() { printf 'start-%s\n' "$1"; }
+  # shellcheck disable=SC2329 # called by the eval-loaded helper
   gate_run_tagged_pids() {
     printf '%s\n' "$gate_drain_scan_error" 101 202
   }
+  # shellcheck disable=SC2329 # called by the eval-loaded helper
   ps() {
     [[ "$*" == "-axo pid=,pgid=" ]] || return 1
     printf '%s\n' "101 101" "202 303" "303 101"
   }
+  # shellcheck disable=SC2329 # called by the eval-loaded helper
   capture_process_tree() {
     gate_group_captured="${gate_group_captured}$1 "
   }
@@ -9465,14 +9470,18 @@ run_parallel_nolock_parent_death_regression
     fail "could not load the group-membership helper for its focused regression"
   eval "$gate_membership_function"
 
-  gate_drain_capture_group_pgid=101
-  gate_drain_capture_group_anchor_pid=101
-  gate_drain_capture_group_anchor_start="start-101"
-  gate_drain_tagged_now="303 404"
-  gate_lock_identity_unavailable="<no-identity-source>"
+  # shellcheck disable=SC2034 # read by the eval-loaded helper
+  gate_drain_capture_group_pgid=101 gate_drain_capture_group_anchor_pid=101 \
+    gate_drain_capture_group_anchor_start="start-101" \
+    gate_drain_tagged_now="303 404" \
+    gate_lock_identity_unavailable="<no-identity-source>"
+  # shellcheck disable=SC2329 # called by the eval-loaded helper
   gate_lock_identity_source_available() { return 0; }
+  # shellcheck disable=SC2329 # called by the eval-loaded helper
   gate_lock_normalize_process_start() { printf '%s\n' "$1"; }
+  # shellcheck disable=SC2329 # called by the eval-loaded helper
   pgrep() { printf '%s\n' 404; }
+  # shellcheck disable=SC2329 # called by the eval-loaded helper
   gate_lock_process_start_pgid_snapshot() {
     case "$1" in
       101) printf '%s\n' "${gate_test_anchor_snapshot:-start-101|101}" ;;

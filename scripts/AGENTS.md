@@ -77,10 +77,9 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   `deploy/deploy-indexer-verify-status-identity.mjs` use one any-depth arm;
   both verifier tests run.
 - **Gate runtime pins.** Before `cd`, the gate loads `gate/run-handles.sh`. It
-  resolves coordinator adapters and coordinator modules from
-  `$script_source_dir`. Scheduler fixtures and coordinator tests hash from
-  `$repo_root`. Move each with its route, signature, and fixture (ADRs 0064 and
-  0071). It pins `docs/docs-navigation-eval-helpers.mjs` and
+  resolves coordinator files from `$script_source_dir`. Their fixtures and
+  tests hash from `$repo_root`. Move each with its route, signature, and fixture
+  (ADRs 0064 and 0072). It pins `docs/docs-navigation-eval-helpers.mjs` and
   `gate/lockfile-scope.mjs` from `$script_source_dir`; update all literals.
 - **Gate mapping pins.** The signature and three Turbo inputs pin
   `gate/routing-table/**`, `gate/mapping*`, and

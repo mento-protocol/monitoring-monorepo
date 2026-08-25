@@ -556,8 +556,8 @@ teardown_active_timeouts() {
     -n "${worker_drain_identities[*]-}" ||
     -n "${worker_start_identities[*]-}" ||
     -n "$timeout_drain_identity" ]] || return 0
-  if [[ "${#worker_pgids[@]}" -ne "${#worker_drain_identities[@]}" ||
-    "${#worker_pgids[@]}" -ne "${#worker_start_identities[@]}" ]]; then
+  if ! [[ "${#worker_pgids[@]}" -eq "${#worker_drain_identities[@]}" &&
+    "${#worker_pgids[@]}" -eq "${#worker_start_identities[@]}" ]]; then
     echo "error: parallel worker cleanup registry is inconsistent." >&2
     return 0
   fi
@@ -1692,6 +1692,7 @@ drain_condemned_run_commands() {
   local seed_pgid="${3:-}"
   local seed_start="${4:-}"
   local quiet_seed_only="${5:-0}"
+  local announce_captured_non_seed="${6:-0}"
   local wrapper entry pid recorded current alive alive_identities recycled unverified captured_file
   local captured_pid capture_has_non_seed=0
   local waited=0
@@ -1720,6 +1721,12 @@ drain_condemned_run_commands() {
   fi
   if [[ "$quiet_seed_only" != 0 && "$quiet_seed_only" != 1 ]]; then
     echo "error: mapped-command drain received an invalid quiet-sentinel flag." >&2
+    gate_drain_fail_for_context "$drain_context"
+    return $?
+  fi
+  if [[ "$announce_captured_non_seed" != 0 &&
+    "$announce_captured_non_seed" != 1 ]]; then
+    echo "error: mapped-command drain received an invalid early-announcement flag." >&2
     gate_drain_fail_for_context "$drain_context"
     return $?
   fi
@@ -1838,7 +1845,7 @@ drain_condemned_run_commands() {
     return $?
   fi
 
-  if [[ "$quiet_seed_only" -eq 1 ]]; then
+  if [[ "$quiet_seed_only" -eq 1 && "$announce_captured_non_seed" -eq 1 ]]; then
     while IFS='|' read -r captured_pid _; do
       [[ -z "$captured_pid" || "$captured_pid" == "$seed_pgid" ]] && continue
       capture_has_non_seed=1
@@ -1867,7 +1874,8 @@ EOF
       capture_process_tree "$wrapper"
     done
     gate_drain_capture_seed_group "$token"
-    if [[ "$quiet_seed_only" -eq 1 && "$announced" -eq 0 ]]; then
+    if [[ "$quiet_seed_only" -eq 1 &&
+      "$announce_captured_non_seed" -eq 1 && "$announced" -eq 0 ]]; then
       while IFS='|' read -r captured_pid _; do
         [[ -z "$captured_pid" || "$captured_pid" == "$seed_pgid" ]] && continue
         echo "$drain_start_message"
@@ -1947,6 +1955,23 @@ EOF
     done << EOF
 $gate_drain_capture
 EOF
+
+    # A no-lock sentinel polls its exact parent identity. A short-lived ps
+    # helper can enter the durable capture and be gone by this census. Report a
+    # leaked descendant only when a live or unverifiable non-sentinel process
+    # remains; the persisted capture and signal checks stay unchanged.
+    if [[ "$quiet_seed_only" -eq 1 && "$announced" -eq 0 ]]; then
+      for captured_pid in $alive $unverified $gate_drain_tagged_now; do
+        [[ "$captured_pid" == "$seed_pgid" ]] && continue
+        echo "$drain_start_message"
+        announced=1
+        break
+      done
+      if [[ "$announced" -eq 0 && "$gate_drain_scan_failed" -ne 0 ]]; then
+        echo "$drain_start_message"
+        announced=1
+      fi
+    fi
 
     # Unverifiable entries keep the drain open even though nothing is sent to
     # them: "we could not check" is not "it is gone". A scan that failed counts
@@ -2072,6 +2097,7 @@ drain_completed_command_identity() {
   local condemned_dir=""
   local coordinator_active=0
   local legacy_lock_active=0
+  local announce_captured_non_seed=0
   [[ -n "$token" ]] || return 0
 
   if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
@@ -2081,6 +2107,9 @@ drain_completed_command_identity() {
   if [[ -n "$gate_lock_dir" && -n "$gate_lock_root_dir" &&
     -n "$gate_lock_token" ]]; then
     legacy_lock_active=1
+  fi
+  if [[ "$coordinator_active" -eq 1 || "$legacy_lock_active" -eq 1 ]]; then
+    announce_captured_non_seed=1
   fi
 
   if [[ "$legacy_lock_active" -eq 1 ]]; then
@@ -2114,7 +2143,7 @@ drain_completed_command_identity() {
   # token must never race this one over its append-only capture file.
   drain_condemned_run_commands \
     "$token" active-command "$seed_pgid" "$seed_start" \
-    "$quiet_seed_only" || return $?
+    "$quiet_seed_only" "$announce_captured_non_seed" || return $?
   if [[ "$legacy_lock_active" -eq 1 ]]; then
     rm -f "${condemned_dir}/${token}"
   fi
@@ -5125,7 +5154,8 @@ run_mapped_entries_parallel() {
         [[ "$worker_action" == start ]] || exit 2
         rm -f "$wait_file"
         export AGENTQG_RUN="agentqg:${drain_identity}"
-        export AGENTQG_REQUEST="$(gate_run_request_tag)"
+        AGENTQG_REQUEST="$(gate_run_request_tag)" || exit 2
+        export AGENTQG_REQUEST
         run_mapped_command_to_files \
           "$command" "$output_file" "$status_file" "$elapsed_file" \
           "$timeout_file" "$infrastructure_file" "$lease_file" \
@@ -5138,8 +5168,12 @@ run_mapped_entries_parallel() {
         # must remain until the parent or a successor drains it. A no-lock run
         # has no successor. Its sentinel exits when this exact parent dies.
         if [[ "$worker_has_recovery_owner" -eq 1 ]]; then
+          # Bash can defer TERM while a blocking FIFO read has no writer. Poll
+          # the private descriptor so the trap runs promptly and normal command
+          # settlement does not wait for the four-second KILL escalation.
+          trap 'exit 0' HUP INT TERM
           while :; do
-            IFS= read -r _ <&17 || sleep 1
+            IFS= read -r -t 1 _ <&17 || true
           done
         else
           while parallel_worker_parent_is_live; do

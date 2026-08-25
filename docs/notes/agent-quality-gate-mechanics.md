@@ -354,7 +354,7 @@ bucket order, the four post-passes, the root-manifest classifier). Both are
 routed by a change to the engine or the table, and the routing-table suite also
 runs in the required `ci` job.
 
-### Scheduling contract (Refs #1802, #2006; [ADR 0071](../adr/0071-fair-quality-gate-coordinator.md))
+### Scheduling contract (Refs #1802, #2006; [ADR 0072](../adr/0072-fair-quality-gate-coordinator.md))
 
 `--run` requests share a transient machine-wide coordinator. The coordinator
 admits independent work from different worktrees under a weighted capacity. It
@@ -1123,7 +1123,10 @@ of them.
    a crash after result publication but before the parent starts capture. A
    descendant that starts a new session and also removes every inherited
    identity handle can still escape; the supported shell and operating-system
-   interfaces provide no durable selector for that process. Each drain pass
+   interfaces provide no durable selector for that process. The gate does not
+   support mapped commands that self-daemonize this way. Issue
+   [#2042](https://github.com/mento-protocol/monitoring-monorepo/issues/2042)
+   tracks portable containment or enforcement. Each drain pass
    asks argv, environment, descriptor, and the validated live group anchor for
    new processes. Every persisted process uses a PID/start pair, and every
    marker is unique, so neither can later name a stranger.
@@ -1736,9 +1739,10 @@ be provisioned.
 Each mapped command has a watchdog (default 1500 seconds; override with
 `--command-timeout <n>` or `AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS`). On timeout
 it TERM→KILLs the process tree, reports
-`Command timed out after <n>s: <command>`, and logs durations status `fail`. A
-self-daemonizing child can escape the tree (none do). The timeout never bounds
-the whole run.
+`Command timed out after <n>s: <command>`, and logs durations status `fail`. The
+gate does not support a self-daemonizing child that also discards every gate
+identity. Issue #2042 tracks portable containment or enforcement. The timeout
+never bounds the whole run.
 
 A failing command's captured output is printed inline, and its last 20 lines are
 repeated under `Failure output (last 20 lines per command):` next to the final

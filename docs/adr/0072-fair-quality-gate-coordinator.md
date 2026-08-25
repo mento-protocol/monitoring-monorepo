@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0071 — Fair local quality-gate coordination across worktrees
+# ADR 0072 — Fair local quality-gate coordination across worktrees
 
 **Status:** Accepted (Aug 2026). In force on branches that contain this change.
 **Scope:** ci/process
@@ -480,7 +480,9 @@ leader's PID/start/PGID identity after that candidate read. A stale numeric tag
 or parent PID cannot bypass this check. The drain persists each group member by
 PID/start, so it can remove a same-group descendant that closed all identity
 handles without later trusting a reusable bare PGID. It drains every descendant
-before it unregisters the worker or releases that command's scheduler lease. A
+captured before detachment or still discoverable through the registered worker
+group or a command, request, or generation identity before it unregisters the
+worker or releases that command's scheduler lease. A
 legacy run publishes its token-scoped obligation before the first signal. Each
 drain refresh captures newly tagged roots before it can declare the prior set
 empty. A failed drain keeps its recovery evidence and reports that the mapped
@@ -550,6 +552,12 @@ drainer acknowledges `processTreeEmpty=true`.
 - Capacity 3 is a safe initial default. Change it only with the benchmark from
   #2006: one full gate plus concurrent short package gates, including an
   all-capacity dashboard phase.
+- A descendant can escape recovery if it starts a new session before capture
+  and closes every inherited gate identity. The gate does not support mapped
+  commands that self-daemonize this way. Issue
+  [#2042](https://github.com/mento-protocol/monitoring-monorepo/issues/2042)
+  tracks portable containment or enforcement without signalling a reusable bare
+  PID or process-group ID.
 
 ## Benchmark result
 
@@ -561,16 +569,17 @@ short-plan tool waited 1,000 ms. This interval keeps both short commands live
 through normal process-start skew. The command was
 `node scripts/gate/agent-quality-gate-scheduler-benchmark.mjs`.
 
-| Mode        | Elapsed   | Maximum concurrency | All-capacity overlaps |
-| ----------- | --------- | ------------------- | --------------------- |
-| Legacy lock | 51,137 ms | 1                   | not scheduled         |
-| Coordinator | 43,072 ms | 3                   | 0                     |
+| Mode        | Elapsed    | Maximum mapped commands | Maximum active gate labels | Cross-gate overlaps | All-capacity overlaps |
+| ----------- | ---------- | ----------------------- | -------------------------- | ------------------- | --------------------- |
+| Legacy lock | 155,069 ms | 3                       | 1                          | 0                   | 0                     |
+| Coordinator | 111,947 ms | 3                       | 2                          | 3                   | 0                     |
 
 Both all-capacity commands in the coordinator plan had zero overlap with other
-mapped tools. Short package completion improved by 12,870 ms and 31,922 ms. The
-A/B label order depends on process scheduling. Total fixture time decreased by
-8,065 ms (15.8%). The full plan took longer because it shared capacity fairly
-and waited at its exclusive barriers while the short plans progressed.
+mapped tools. Short package completion improved by 116,885 ms and 77,358 ms.
+The A/B label order depends on process scheduling. Total fixture time decreased
+by 43,122 ms (27.8%). The short-plan queue delays fell from 118,840 ms and
+92,605 ms to 4,759 ms and 11,259 ms. The separate scheduler integration suite
+proves that three distinct worktrees can progress at the exact capacity of 3.
 
 Elapsed time runs from the full gate's first mapped-tool start to the last gate
 process exit. Short completion runs from short-gate launch to process exit.
