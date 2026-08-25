@@ -27,7 +27,8 @@ import { withFlushedMonitor } from "@/lib/sentry-cron";
 // sequences (intel + legacy) concurrently — intel_deep alone needs roughly
 // 8 sequential pages at its current ~11.8 MB / 734 fields (measured
 // 2026-08-25; it keeps growing), still a small fraction of the budget.
-// Plus 8 parallel blob uploads (one per hash + manifest).
+// Plus 7 parallel hash-blob uploads, then the manifest blob uploaded
+// afterward (it needs the hash uploads' resolved pathnames first).
 export const maxDuration = 300;
 export const BACKUP_MONITOR_MAX_RUNTIME_MINUTES = Math.ceil(maxDuration / 60);
 
