@@ -81,10 +81,11 @@ test("dedupe keeps the FIRST reason, not the last", () => {
   assert.equal(reasonOf(plan, "pnpm lint"), "first reason");
 });
 
-test("the two alias pairs share one dedupe key", () => {
+test("the alias pairs share one dedupe key", () => {
   for (const [alias, direct] of [
     ["pnpm agent:quality-gate:test", "bash scripts/agent-quality-gate.test.sh"],
     ["pnpm agent:autoreview:test", "bash scripts/agent-autoreview.test.sh"],
+    ["pnpm tf:test", "node scripts/tf-stacks.test.mjs"],
   ]) {
     assert.equal(
       commandDedupeKey(alias),
