@@ -529,6 +529,14 @@ publish_row() {
   # that matches nothing is not an error, and `$detail` matches on its own.
   add_argv=(docs/evals/review-skill-ledger.jsonl "$detail" ":(exclude)$detail/cells")
 
+  # The same pathspec goes on the commit, not just the add. The pre-flight only
+  # asks whether `$LEDGER` is dirty, and a --skill-ref candidate run skips even
+  # that, so the operator's index can hold unrelated staged work — and a
+  # pathless `git commit` sweeps the whole index into the ledger PR, publishing
+  # code or docs nobody meant to send. Naming the paths makes this a partial
+  # commit: only the ledger and the detail directory go in, and anything else
+  # the operator staged stays staged in their checkout.
+
   # The detail directory basename already identifies this run: date, the first
   # eight of the comparability key, the kind, and the skill digest. A date-only
   # branch collides the moment two runs finish on the same UTC day — which the
@@ -541,7 +549,7 @@ publish_row() {
   printf '\n----- ledger PR -----\n'
   printf 'git -C %q checkout -b %q\n' "$REPO" "$branch"
   printf 'git -C %q add %q %q %q\n' "$REPO" "${add_argv[@]}"
-  printf 'git -C %q commit -m %q\n' "$REPO" "chore(evals): review-skill eval $verdict"
+  printf 'git -C %q commit -m %q -- %q %q %q\n' "$REPO" "chore(evals): review-skill eval $verdict" "${add_argv[@]}"
   printf 'git -C %q push -u origin %q\n' "$REPO" "$branch"
   printf 'gh pr create --repo mento-protocol/monitoring-monorepo --title %q --body-file %q\n' \
     "$title" "$REPO/$detail/$body_file"
@@ -551,7 +559,7 @@ publish_row() {
     log "opening the ledger PR"
     if git -C "$REPO" checkout -b "$branch" &&
       git -C "$REPO" add "${add_argv[@]}" &&
-      git -C "$REPO" commit -m "chore(evals): review-skill eval $verdict" &&
+      git -C "$REPO" commit -m "chore(evals): review-skill eval $verdict" -- "${add_argv[@]}" &&
       git -C "$REPO" push -u origin "$branch" &&
       gh pr create --repo mento-protocol/monitoring-monorepo \
         --title "$title" --body-file "$REPO/$detail/$body_file"; then
@@ -630,9 +638,21 @@ mkdir -p "$SHIM/gh-empty"
 # cell cannot fetch the withheld fix commit with the operator's credentials.
 # This is defense in depth, not containment: the network stays open because the
 # model API must be reachable. Naming a withheld commit is a hard leak signal.
+#
+# `OLDPWD` goes with them, and it is the one that hands over a path rather than
+# a credential. Bash exports it, and `run_in_fixture` sets it by `cd`-ing from
+# the invocation directory — the repository root, per the runbook — into the
+# fixture, so the contestant inherits the source checkout's location. The answer
+# key lives there, frozen on main under docs/evals/review-skill-truth/, and a
+# cell that reads it copies out every defect while emitting no PR number,
+# reviewer login or withheld SHA for `leakSignals()` to catch: the run scores a
+# recall it never earned. A shell tool re-initializes `OLDPWD` for itself, but
+# `claude` and `codex` are not shells and carry the inherited value in their own
+# environment, so cut it at the boundary rather than lean on that.
+# `PWD` stays, because it is the fixture the cell is supposed to be reviewing.
 CELL_ENV=(env
   -u GH_TOKEN -u GITHUB_TOKEN -u GITHUB_PERSONAL_ACCESS_TOKEN
-  -u GH_ENTERPRISE_TOKEN
+  -u GH_ENTERPRISE_TOKEN -u OLDPWD
   GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
   GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=
   GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false GIT_ALLOW_PROTOCOL=file

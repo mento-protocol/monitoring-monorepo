@@ -549,6 +549,20 @@ export function planProvenanceProblems({ dir, row }) {
     "kind",
     "detail_dir",
   ]) {
+    // The one kind a plan can legitimately disagree about. No CLI mode plans a
+    // bridge — `--kind` takes `full` and `canary`, and `buildPlan` refuses
+    // anything else — so the model-retirement procedure in
+    // docs/evals/review-skill.md builds the bridge row by hand from the newer
+    // of the two full runs: it copies that run's `row.json`, changes only
+    // `kind`, and validates against that run's own detail directory. Demanding
+    // plan parity on `kind` therefore rejected every bridge row the runbook
+    // can produce, and `--revalidate-appended` is a required step of the
+    // ledger PR. Only `bridge` over a `full` plan is allowed: a bridge over a
+    // canary plan, or any other kind swap, is still an edit, and the other
+    // three fields plus `inputs` are still checked for a bridge row.
+    if (field === "kind" && row.kind === "bridge" && plan.kind === "full") {
+      continue;
+    }
     if (row[field] !== plan[field]) {
       problems.push(
         `row ${field} is ${JSON.stringify(row[field])}; plan.json in ${row.detail_dir} planned ${JSON.stringify(plan[field])}`,

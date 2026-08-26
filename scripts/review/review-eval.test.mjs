@@ -28,7 +28,12 @@ import {
   loadContract,
 } from "./review-eval-fixtures.mjs";
 import { readLedger, validateLedgerRow } from "./review-eval-ledger.mjs";
-import { baseLedgerRows, parseArgs, runScheduleIssue } from "./review-eval.mjs";
+import {
+  baseLedgerRows,
+  parseArgs,
+  planProvenanceProblems,
+  runScheduleIssue,
+} from "./review-eval.mjs";
 import { verdict } from "./review-eval-report.mjs";
 import {
   assertAuthorizedFreshnessWorkflow,
@@ -3185,6 +3190,59 @@ test("a scoring subprocess inherits no GitHub credential", () => {
   assert.equal(scrubbed.GIT_TERMINAL_PROMPT, "0");
 });
 
+test("a cell inherits no path back to the source checkout", () => {
+  // The answer key is frozen on main under docs/evals/review-skill-truth/, and
+  // the runbook starts a manual run from the repository root. `run_in_fixture`
+  // then `cd`s into the fixture, and bash exports the resulting `OLDPWD`: the
+  // contestant process — `claude` and `codex` are both ordinary programs, not
+  // shells — receives the source checkout's path in its environment. Reading
+  // the truth files through it costs nothing and emits no PR number, reviewer
+  // login or withheld SHA, so `leakSignals()` sees a clean transcript and the
+  // paid score is a fiction. `PWD` must survive; it is the fixture under
+  // review. The child here is the environment itself rather than a shell,
+  // because bash and zsh both re-initialize `OLDPWD` at startup and would hide
+  // the very variable this checks.
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-oldpwd-"));
+  try {
+    const fixture = path.join(dir, "fixture");
+    mkdirSync(fixture, { recursive: true });
+    const script = readFileSync(
+      path.join(repoRoot, "scripts/review/run-eval.sh"),
+      "utf8",
+    );
+    const cellEnv = script.match(/\nCELL_ENV=\(env\n[\s\S]*?\)\n/)?.[0];
+    assert.ok(cellEnv, "CELL_ENV was not found in run-eval.sh");
+    const harness = [
+      "set -uo pipefail",
+      `SHIM=${JSON.stringify(dir)}`,
+      cellEnv,
+      shellFunction("run_in_fixture"),
+      `run_in_fixture ${JSON.stringify(fixture)} env`,
+    ].join("\n");
+    const result = spawnSync("bash", ["-c", harness], {
+      cwd: repoRoot,
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const cellVars = result.stdout.split("\n").filter(Boolean);
+    assert.deepEqual(
+      cellVars.filter((line) => line.startsWith("OLDPWD=")),
+      [],
+    );
+    assert.ok(cellVars.includes(`PWD=${fixture}`), result.stdout);
+    // PATH legitimately carries whatever the operator's shell put there; every
+    // other variable must be free of the checkout.
+    assert.deepEqual(
+      cellVars.filter(
+        (line) => !line.startsWith("PATH=") && line.includes(repoRoot),
+      ),
+      [],
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("the orchestrator keeps its resume cache outside the spec worktree", () => {
   const script = readFileSync(
     path.join(repoRoot, "scripts/review/run-eval.sh"),
@@ -3254,6 +3312,74 @@ test("publishing a failed run keeps the cells a retry would reuse", () => {
     assert.match(
       failed.stdout,
       new RegExp(`git -C \\S+ add \\S+ \\S*${detail}\\S* \\S*exclude\\S*cells`),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the ledger commit leaves the operator's other staged work alone", () => {
+  // The pre-flight only asks whether the ledger file is dirty, and a
+  // --skill-ref candidate run skips even that, so unrelated staged changes can
+  // be sitting in the operator's index when a --pr run publishes hours later. A
+  // pathless `git commit` swept all of it into the ledger PR.
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-commit-"));
+  try {
+    const detail = "docs/evals/review-skill-runs/2026-09-08-dead-full-beef";
+    const repo = path.join(dir, "repo");
+    const git = (...args) =>
+      spawnSync("git", ["-C", repo, ...args], { encoding: "utf8" });
+    mkdirSync(path.join(repo, "docs/evals"), { recursive: true });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+    writeFileSync(path.join(repo, "docs/evals/review-skill-ledger.jsonl"), "");
+    writeFileSync(path.join(repo, "unrelated.ts"), "export const a = 1;\n");
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "base");
+
+    // What the operator staged and did not mean to publish.
+    writeFileSync(path.join(repo, "unrelated.ts"), "export const a = 2;\n");
+    git("add", "unrelated.ts");
+    // What the run produced.
+    mkdirSync(path.join(repo, detail, "cells"), { recursive: true });
+    writeFileSync(path.join(repo, detail, "report.md"), "# report\n");
+    writeFileSync(path.join(repo, detail, "cells", "c1.json"), "{}");
+    writeFileSync(
+      path.join(repo, "docs/evals/review-skill-ledger.jsonl"),
+      '{"executed_at":"2026-09-08T00:00:00Z"}\n',
+    );
+
+    // `push` fails with no remote, which is exactly the boundary this test
+    // wants: the commit has already happened, and nothing was published.
+    const harness = [
+      "set -uo pipefail",
+      `REPO=${JSON.stringify(repo)}`,
+      `RUN_DIR=${JSON.stringify(path.join(repo, detail))}`,
+      "OPEN_PR=1",
+      "KEEP_CELLS=0",
+      "PUBLISHED=0",
+      `json_field() { printf '%s' ${JSON.stringify(detail)}; }`,
+      "require_safe_detail() { :; }",
+      "keep_baseline_copy() { :; }",
+      `log() { printf '%s\\n' "$*"; }`,
+      shellFunction("publish_row"),
+      "publish_row GREEN report.md",
+    ].join("\n");
+    const result = spawnSync("bash", ["-c", harness], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+
+    const committed = git("show", "--name-only", "--format=", "HEAD")
+      .stdout.split("\n")
+      .filter(Boolean);
+    assert.deepEqual(committed.sort(), [
+      "docs/evals/review-skill-ledger.jsonl",
+      `${detail}/report.md`,
+    ]);
+    // Still the operator's to deal with, still not in the PR.
+    assert.equal(
+      git("diff", "--cached", "--name-only").stdout.trim(),
+      "unrelated.ts",
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -3631,6 +3757,25 @@ test("the freshness workflow watches the frozen input directories", () => {
   }
 });
 
+test("required CI routes the nested frozen inputs to the scripts job", () => {
+  const workflow = readFileSync(
+    path.join(repoRoot, ".github/workflows/ci.yml"),
+    "utf8",
+  );
+  // The freshness workflow above is advisory by design, so the only required
+  // check over the frozen inputs is the `scripts` job, reached through the
+  // `rootScripts` path filter. dorny/paths-filter matches with picomatch,
+  // where `docs/evals/review-skill*` stops at the path separator and a `**`
+  // glued to that prefix is no better: a PR editing only
+  // docs/evals/review-skill-truth/pr-1990.json left the filter false and the
+  // required `ci` sentinel allowed the job to skip, so a broken digest or
+  // scorable set could merge with no required contract check at all.
+  assert.match(workflow, /^ {14}- docs\/evals\/review-skill\*\/\*\*$/m);
+  // The flat inputs — review-skill.md, the fixtures, the ledger — still need
+  // the non-recursive form, which `*/**` does not match on its own.
+  assert.match(workflow, /^ {14}- docs\/evals\/review-skill\*$/m);
+});
+
 test("the ledger PR workflow recomputes the rows it appends", () => {
   const workflow = readFileSync(
     path.join(repoRoot, ".github/workflows/review-eval-freshness.yml"),
@@ -3940,6 +4085,67 @@ test("--revalidate-appended checks a row against its committed plan", () => {
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a hand-assembled bridge row keeps the full run's plan", () => {
+  // Model retirement (docs/evals/review-skill.md) copies the newer full run's
+  // row.json, changes `kind` to "bridge", and validates it against that run's
+  // own detail directory — the only way to get a bridge row, because no CLI
+  // mode plans one. Demanding plan parity on `kind` therefore failed the
+  // required `--revalidate-appended` step for every legitimate bridge row.
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-bridge-"));
+  try {
+    const row = makeRow({
+      matchedIds: scorableIdsFor([1990]),
+      fullMatrix: true,
+    });
+    const plan = {
+      contract_digest: row.contract_digest,
+      comparability_key: row.comparability_key,
+      kind: "full",
+      detail_dir: row.detail_dir,
+      inputs: row.inputs,
+    };
+    writeFileSync(path.join(dir, "plan.json"), JSON.stringify(plan));
+    assert.deepEqual(planProvenanceProblems({ dir, row }), []);
+    assert.deepEqual(
+      planProvenanceProblems({ dir, row: { ...row, kind: "bridge" } }),
+      [],
+    );
+
+    // Nothing else about a bridge row is waived. Re-keying it after the append
+    // still opens a lineage no run produced.
+    assert.match(
+      planProvenanceProblems({
+        dir,
+        row: { ...row, kind: "bridge", comparability_key: "9".repeat(64) },
+      }).join(" | "),
+      /row comparability_key is "9+"; plan\.json in .* planned/,
+    );
+
+    // And the waiver is only the documented transition: a canary plan relabeled
+    // as a bridge is still an edit, as is a canary row over a full plan.
+    writeFileSync(
+      path.join(dir, "plan.json"),
+      JSON.stringify({ ...plan, kind: "canary" }),
+    );
+    assert.match(
+      planProvenanceProblems({
+        dir,
+        row: { ...row, kind: "bridge" },
+      }).join(" | "),
+      /row kind is "bridge"; plan\.json in .* planned "canary"/,
+    );
+    writeFileSync(path.join(dir, "plan.json"), JSON.stringify(plan));
+    assert.match(
+      planProvenanceProblems({ dir, row: { ...row, kind: "canary" } }).join(
+        " | ",
+      ),
+      /row kind is "canary"; plan\.json in .* planned "full"/,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
