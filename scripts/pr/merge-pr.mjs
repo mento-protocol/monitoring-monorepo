@@ -439,6 +439,18 @@ export async function mergePullRequest({
     );
   }
 
+  // The merge below starts a fresh `gh`, which reads whatever credentials are
+  // active then — not the ones read before the prompt. A `gh auth switch` while
+  // the prompt was open would otherwise record one login in the ledger and
+  // merge as another, which is exactly the attribution the ledger exists to
+  // make true.
+  const confirmedLogin = await resolveLogin({ gh, host: repos.host });
+  if (confirmedLogin !== login) {
+    throw new MergeRefusal(
+      `the active GitHub login changed from ${login} to ${confirmedLogin} while you were confirming; re-run so the consent record names who is merging`,
+    );
+  }
+
   const record = buildConsentRecord({
     login,
     repo: repos.base,

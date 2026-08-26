@@ -198,6 +198,9 @@ function harness({
   // The base the pull request reports AFTER the merge. A retarget between the
   // final gate read and GitHub processing the merge shows up only here.
   mergedBaseRefName = null,
+  // Logins returned by successive `gh api user` calls; the second models a
+  // `gh auth switch` during the confirmation prompt.
+  logins = null,
   // The repository URL `gh repo view` reports, which carries the host.
   repoUrl = "https://github.com/mento-protocol/monitoring-monorepo",
   parent = null,
@@ -209,6 +212,7 @@ function harness({
     consents: [],
     prompts: [],
     readyStateReads: 0,
+    logins: 0,
   };
   let output = "";
 
@@ -221,7 +225,11 @@ function harness({
         url: repoUrl,
       });
     }
-    if (args[0] === "api" && args.includes("user")) return "chapati23\n";
+    if (args[0] === "api" && args.includes("user")) {
+      if (logins)
+        return `${logins[calls.logins++] ?? logins[logins.length - 1]}\n`;
+      return "chapati23\n";
+    }
     if (args[0] === "pr" && args[1] === "list") {
       return JSON.stringify([
         {
@@ -1595,6 +1603,24 @@ await test("an unchanged base reports no mismatch", async () => {
   assertEqual(result.baseMismatch, false);
   assertEqual(result.baseRefName, "main");
   assertEqual(exitCodeForResult(result), 0);
+});
+
+await test("a login switched during confirmation refuses", async () => {
+  // The merge starts a fresh gh, which reads whatever credentials are active
+  // then. Recording one login and merging as another would break exactly the
+  // attribution the ledger exists to provide.
+  const h = harness({ logins: ["chapati23", "someone-else"] });
+
+  await assertRefuses(h.run(), "login changed from chapati23 to someone-else");
+  assertEqual(h.calls.merges.length, 0, "nothing should have merged");
+  assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
+});
+
+await test("an unchanged login still merges", async () => {
+  const h = harness({ logins: ["chapati23", "chapati23"] });
+  const result = await h.run();
+  assertEqual(result.merged, true);
+  assertEqual(result.record.login, "chapati23");
 });
 
 await test("only a confirmed merge exits zero", async () => {
