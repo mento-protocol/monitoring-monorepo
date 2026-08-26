@@ -27,6 +27,18 @@ the claim lifecycle are canonical in
 
 ## Build The Roster
 
+**Check the GitHub surface before the first fetch.** Both fetches need the `gh`
+binary, and the second also needs GraphQL and `--slurp`. A Claude cloud session
+normally has neither: the container ships no `gh` by default and GraphQL stays
+blocked unless the full capability gate passes. Run that gate — `command -v gh`
+first — as
+[`github-tooling-surfaces.md`](../../../docs/notes/github-tooling-surfaces.md)
+prescribes. When it fails, hand the ranking back and say which capability was
+missing. The MCP workboard fallback documented there covers issue reads but not
+the cross-reference timeline query below, and a roster without that query cannot
+tell an owned issue from a free one, so a partial receipt would be worse than
+none.
+
 ```bash
 mkdir -p .rankings
 gh issue list --repo mento-protocol/monitoring-monorepo \
@@ -133,9 +145,13 @@ that applies: an owned issue is owned, never also "outside the queue", so the
 per-reason counts and the outside-queue count sum to the number dropped instead
 of double-counting the issues that satisfy both.
 
-- it has an assignee;
 - it carries `agent-active` or `in-pr` — this repo claims through labels and
-  Project fields, so an owned issue can still have no assignee;
+  Project fields, so an owned issue can still have no assignee, and an assignee
+  is not itself a claim. `listReadyIssues` queries
+  `label:agent-ready -label:agent-active -label:in-pr` with no assignee filter,
+  so an `agent-ready` issue assigned for triage or review is still claimable and
+  stays in the roster. Name the assignee in the reason where it bears on the
+  pick;
 - a cross-referencing pull request is `OPEN` **and** its `willCloseTarget` is
   true. An open `Refs #n` pull request is not a claim; note it in the reason if
   it bears on the pick, but do not drop the issue for it;
@@ -204,8 +220,9 @@ Three sections:
 
 1. **Method** — fetch timestamp, open-issue count, how many of those sat outside
    the queue, roster count, the per-reason drop counts, how many bodies were read
-   in full, how many issues were scored from the list line, and any cap that
-   applied to a whole class of issues.
+   in full, how many issues were scored from the list line, how many candidates
+   were held out because a truncated timeline could not be resolved, and any cap
+   that applied to a whole class of issues.
 2. **Top 15** — one table with the columns `Rank | Issue | Score | Reason`. The
    reason is one line: what the issue is, why it scores where it does, and the
    cap when one applied.
@@ -251,6 +268,16 @@ Append only. To un-park early, append a fresh entry for the same number with an
 `expires_at` already in the past — never edit or delete the old one. The ledger
 records what earlier runs decided, and rewriting it makes their receipts
 unreadable.
+
+**Serialize the append.** "Append" here is read the array, add an entry, write
+the file back, which is the same check-then-write race the receipt name has:
+two sessions parking different issues can both read the array and each write it
+back holding only its own entry, so one park is silently lost or the file is
+left mid-write and unparsable. Take a lock for the read-modify-write — create
+`.rankings/excluded.lock` exclusively, and retry once it clears — or re-read and
+compare before writing and retry on a change. A park that disappears brings the
+issue back at the top of the next run, which is exactly what the ledger exists
+to prevent.
 
 `.rankings/` is gitignored, so the ledger is local to one checkout. A permanent
 exclusion belongs on the issue itself, by closing it or moving it to

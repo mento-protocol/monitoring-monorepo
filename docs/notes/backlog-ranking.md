@@ -14,8 +14,8 @@ garden_lane: operator-runbooks
 
 This loop decides which open issue an agent picks up next, and writes the
 reasoning down. Without a written answer, every session re-derives one from
-whatever sits at the top of the issue list, and the reasoning dies with the
-session.
+whatever sits at the top of the issue list, and no session preserves its
+reasoning for the next one.
 
 The procedure is the `rank-backlog` skill
 ([`.agents/skills/rank-backlog/SKILL.md`](../../.agents/skills/rank-backlog/SKILL.md));
@@ -40,7 +40,9 @@ The loop reuses the workflow's terms and adds none:
   `needs-grooming` issue is a grooming prompt, and the receipt says so.
 - `agent-active` and `in-pr` — already owned, so dropped from the roster. This
   repo claims through labels and Project fields rather than assignees, so
-  neither state shows up in an assignee check.
+  neither state shows up in an assignee check — and the reverse holds too: an
+  assignee is not a claim. `listReadyIssues` applies no assignee filter, so an
+  `agent-ready` issue assigned for triage stays eligible.
 - **outside the queue** — an open issue carrying none of the four labels above.
   Workflows open these on their own: drift reports, supply-chain advisories,
   Sentry triage records. They are never ranked and never Selected; Method counts
@@ -61,7 +63,8 @@ section; the skill owns the field list and the retry mechanics.
 Two properties make a receipt worth keeping:
 
 - **Every reason in the table is grounded in a body actually read.** A reason
-  inferred from a title is a guess wearing a citation. Issues scored from the
+  inferred from a title alone is not supported by the issue it cites. Issues
+  scored from the
   list line alone are ranked but stay out of the table, and the Method section
   states how many bodies were read in full and how many were scored from the
   list line, so a reader can tell the two apart.
@@ -81,7 +84,10 @@ a valid receipt — the alternative is inventing a candidate to satisfy the form
 `{ "issue": <number>, "reason": "<what happened>", "excluded_at": "<ISO 8601>", "expires_at": "<ISO 8601>" }`.
 A run drops an issue while the newest entry for that number is unexpired. The
 file does not exist until the first park; a run reads a missing file as `[]`
-rather than failing or creating an empty one.
+rather than failing or creating an empty one. Appending is a read-modify-write,
+so it is serialized with a lock or a compare-and-retry: two sessions parking
+different issues concurrently would otherwise lose one entry or leave the file
+unparsable, and a lost park returns the issue at the top of the next run.
 
 It exists so a parked issue does not resurface at the top of every run and force
 the same decision again. Entries are appended, never edited or deleted: an
