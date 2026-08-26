@@ -231,8 +231,8 @@ type TroveLedgerEvent @index(fields: ["troveEntityId", "timestamp"]) {
   redemptionFeeCredited: BigInt # op 6 only, from RedemptionFeePaidToTrove
   isRebalance: Boolean # op 6 only, tx-target discriminator
   redemptionPrice: BigInt # op 6 only, from branch Redemption event
-  priceAtEvent: BigInt # block-close price from loadLiquityPrice; null when unavailable
-  icrAfterBps: Int # from priceAtEvent, so also block-close; null when price unavailable
+  priceAtEvent: BigInt # block-close price from loadLiquityPrice; never overwritten by event prices; null when unavailable
+  icrAfterBps: Int # from the event-carried price when one exists (op 5/6), else block-close priceAtEvent; null when neither
   timestamp: BigInt!
   blockNumber: BigInt!
   logIndex: Int! # numeric position for same-timestamp ordering
@@ -277,14 +277,16 @@ Writer notes:
   them through the existing batch-replay path, or leave them null with the
   UI's "—" rendering — production has zero batches today, so the seam is
   cheap either way. Collateral snapshots stay non-null.
-- Op 6 rows are written LAST, not from the `TroveOperation` handler:
-  `RedemptionFeePaidToTrove` follows `TroveOperation` in the same tx, so the
-  `TroveOperation` handler only stages the row in short-lived pending state
-  (the pattern the batch replay machinery already uses) and the
-  `RedemptionFeePaidToTrove` handler assembles and sets it once, complete
-  with the fee. `isRebalance` copies the existing tx-target check;
-  `redemptionPrice` copies from the branch `Redemption` row of the same tx,
-  staged the same way. One write per row, never a set-then-patch.
+- Op 6 rows are finalized LAST, by the branch `Redemption` handler: the
+  on-chain order within one tx is the per-trove loop (`TroveUpdated`,
+  `TroveOperation(6)`, `RedemptionFeePaidToTrove` per trove) and THEN one
+  branch `Redemption` aggregate carrying `_redemptionPrice`. So the
+  `TroveOperation` handler stages each hit's deltas, the fee handler stages
+  its fee, and the branch `Redemption` handler assembles and sets every
+  staged row of the tx once, complete with fee and price (the short-lived
+  pending pattern the batch replay machinery already uses). `isRebalance`
+  copies the existing tx-target check. One write per row, never a
+  set-then-patch.
 - Op 5: `debtChange/collChange` are `−entireDebt/−entireColl`; link the
   aggregate `LiquidationEvent` by `txHash` for the SP/redistribution context
   panel. Per-trove split of that aggregate stays a non-goal.
@@ -292,16 +294,20 @@ Writer notes:
   fetches, and label it honestly: an archive `eth_call` at the event's block
   observes post-block state, so the persisted value is the **block-close**
   price — a same-block oracle move after the operation can differ from the
-  operation-time price. Event-carried prices take precedence where they
-  exist (`redemptionPrice` on op 6, `Liquidation._price` on op 5); the UI
-  labels RPC-sampled ICR as at-block-close. There is no "later backfill"
-  option: every indexer deploy re-syncs from `start_block`
-  (`deploy-indexer` skill), so shipping the writer replays all history and
-  either pays the archive `eth_call`s during that sync or suppresses price
-  persistence during replay (fields stay null on historical rows). Forno
-  was observed dropping log ranges and receipts during the ticket
-  reconstruction, so the sync is a deliberate, monitored deploy either
-  way. Nullable-by-design is the degraded mode.
+  operation-time price. Event-carried prices are exact and win for
+  `icrAfterBps` where they exist (`redemptionPrice` on op 6;
+  `Liquidation._price` on op 5, read from the txHash-linked
+  `LiquidationEvent` — no extra field); they never overwrite
+  `priceAtEvent`, which stays the block-close sample, and the UI labels
+  block-close-derived ICR as such. On replay cost: the existing
+  `TroveUpdated` handler already calls `loadLiquityPrice` unconditionally
+  for `Trove.icrBps` (`troveManager.ts:269`), so a from-scratch sync pays
+  the archive `eth_call`s today regardless — "suppress price persistence"
+  only skips storing per-row values, and gating the existing read would
+  also degrade `Trove.icrBps`, a separate decision. Forno was observed
+  dropping log ranges and receipts during the ticket reconstruction, so
+  the sync is a deliberate, monitored deploy either way.
+  Nullable-by-design is the degraded mode.
 - Keep `applySystemDebtDelta` untouched; the new writer only appends rows.
 
 ### Small fixes alongside
@@ -350,7 +356,10 @@ graphql contract test, regenerated via `pnpm indexer:codegen` and
 - `CDP_TROVES_BY_OWNER(address)` — `Trove` rows across markets matching
   `_or: [{owner}, {previousOwner}]`, for the support entry path: close and
   liquidation zero `owner`, so `previousOwner` is how a closed trove is
-  found by the address a user supplies.
+  found by the address a user supplies. The same `limit + 1` sentinel rule
+  applies: an address with more troves than the render limit (a factory,
+  not a person) gets a visible "results capped" disclosure, never a
+  silently shortened list.
 - Timing: dashboard codegen and the GraphQL contract test validate every
   exported query against the in-repo `indexer-envio/schema.graphql`, so
   `CDP_TROVE_LEDGER` can only be added once slice 2's schema change is
@@ -421,7 +430,7 @@ today, so the new `troves/[troveId]/_components` rule lands with the page
 ├──────────────────────────────────────────────────────────────────┤
 │ Collateral & debt over time  [range pills]                       │
 │ step chart: coll (USDm), debt (GBPm), event markers;             │
-│ ICR series only where priceAtEvent exists                        │
+│ third % panel for ICR only where price data exists               │
 ├──────────────────────────────────────────────────────────────────┤
 │ Ledger (chronological)                                           │
 │ time·tx │ event badge │ Δdebt │ Δcoll │ fees │ debt→ │ coll→ │…  │
@@ -432,10 +441,14 @@ today, so the new `troves/[troveId]/_components` rule lands with the page
 - **Header card** reads `CDP_TROVE_BY_ID`. Status badge uses indexer
   vocabulary with tooltips ("zombie: debt below the market minimum after a
   redemption; unredeemable until adjusted"; "redeemed: fully redeemed to
-  zero"). ICR coloring reuses `icrTextClass` against live `mcrBps`. The debt
-  figure is honest about staleness: recorded-at-last-event plus timestamp. A
-  live `entireDebt` read via the existing `rpc-client.ts` is an optional
-  enhancement, decided at implementation (open question 1).
+  zero"). ICR coloring reuses `icrTextClass` against live `mcrBps`, and the
+  value carries the same "indexed as of <timestamp>, not a live oracle
+  read" disclosure the trove table already attaches (`trove-cells.tsx`) —
+  `Trove.icrBps` is the last event's snapshot, and the oracle has moved
+  since. The debt figure is honest about staleness the same way:
+  recorded-at-last-event plus timestamp. A live `entireDebt` read via the
+  existing `rpc-client.ts` is an optional enhancement, decided at
+  implementation (open question 1).
 - **Redemption impact** computes its totals from `Trove` cumulatives, so
   they work even before the ledger entity ships. Split user vs rebalance
   per the invariants note once per-hit rows exist; until then label totals
@@ -446,9 +459,12 @@ today, so the new `troves/[troveId]/_components` rule lands with the page
   the partial view. The one-line explainer carries the ticket's core
   lesson.
 - **Why me** reads the current rate ladder (open troves / brackets already
-  fetched on the market page): rank among open troves by effective rate, and
-  the sum of open debt at strictly lower rates ("shield"). States plainly
-  that historical rank is not tracked. When the open-trove fetch hits
+  fetched on the market page): rank among ACTIVE troves by effective rate,
+  and the sum of active debt at strictly lower rates ("shield"). Zombies
+  are excluded from both — they sit outside the sorted redemption queue and
+  their debt shields nobody (one nuance in prose: a `lastZombieTroveId`
+  remnant is redeemed first on the next redemption). States plainly that
+  historical rank is not tracked. When the open-trove fetch hits
   `CDP_TROVES_DETAIL_LIMIT` (1,000), the dataset is incomplete, so rank and
   shield are suppressed exactly as the market table already suppresses its
   rank column at the cap — never shown as a partial calculation.
@@ -460,8 +476,13 @@ today, so the new `troves/[troveId]/_components` rule lands with the page
   (`time-series-chart-card.tsx:283-323`), which would label GBPm/JPYm debt
   as dollars — either extend it with per-series unit formatting and
   subplot support or build a sibling two-panel chart component on the same
-  chrome. The chart reads the same bounded full-history query as the table
-  — one query, no pagination coupling — and renders only from the complete
+  chrome. An ICR series never shares those axes: it gets its own third
+  percentage panel, shown only when price data exists. The debt panel and
+  the interest residual additionally require every row's debt snapshot
+  non-null — a null batch-row snapshot switches them to an explicit "batch
+  data unavailable" state rather than a gapped or zero-coerced series. The
+  chart reads the same bounded full-history query as the table — one
+  query, no pagination coupling — and renders only from the complete
   ledger, never the partial view.
 - **Ledger table**: badge pills reuse `BADGE_STYLES`/`BADGE_LABELS` plus new
   kinds (`rebalanceRedemption` already exists; add `zombie`, `revived`,
@@ -491,10 +512,14 @@ today, so the new `troves/[troveId]/_components` rule lands with the page
    equal the sum of ledger rows of the matching kind — a mismatch is a bug
    surface, not a rendering choice (the ticket reconstruction validated to
    the wei; keep a test). The two reads are independent queries, so
-   reconcile only when they observe the same position — `Trove.
-lastUpdatedBlock` equals the ledger's newest `blockNumber` — and
-   refetch instead of flagging when an event landed between them. The
-   partial view and a truncated history skip this check by design.
+   reconcile only on a ledger-specific watermark: the ledger writer also
+   stamps `Trove.lastLedgerBlock`/`lastLedgerLogIndex`, and the check runs
+   only when that pair equals the newest ledger row's
+   (`blockNumber`, `logIndex`) — block number alone cannot distinguish two
+   same-block transactions, and `lastUpdatedBlock` advances on NFT
+   transfers that write no ledger row. Refetch instead of flagging on a
+   mismatch, and test two distinct same-block transactions. The partial
+   view and a truncated history skip this check by design.
 3. Total redemption figures are never presented as user activity;
    user-driven = total − rebalance.
 4. `priceAtEvent`/`icrAfterBps` are nullable; every consumer renders null as
