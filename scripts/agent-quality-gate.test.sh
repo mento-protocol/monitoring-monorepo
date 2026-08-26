@@ -11980,7 +11980,8 @@ run_parallel_nolock_parent_death_regression
   fi
 
   gate_drain_capture_group_pgid=""
-  gate_drain_membership_token="fixture.membership-505-123456789"
+  printf -v gate_drain_membership_token '%s' \
+    'fixture.membership-505-123456789'
   gate_drain_scan_error="agentqg-scan-failed"
   gate_drain_scan_failed=0
   gate_drain_tagged_now="505"
@@ -19461,7 +19462,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
   : > "$gate_race_log"
   if ! kill -0 1 2>/dev/null; then
-    race_unsignalable_token="fixture.unsignalable-1-1"
+    printf -v race_unsignalable_token '%s' 'fixture.unsignalable-1-1'
     mkdir -p "$gate_race_root/condemned.d"
     printf '%s\n' "$race_unsignalable_token" \
       > "$gate_race_root/condemned.d/$race_unsignalable_token"

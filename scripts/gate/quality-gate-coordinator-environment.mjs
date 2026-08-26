@@ -766,14 +766,14 @@ function pathResolvesTo(value, expected, workingDirectory) {
 function materialLocalBinPathMap(physicalRepoRoot) {
   return MATERIAL_PACKAGE_ROOTS.map((relativeRoot) => ({
     path: join(physicalRepoRoot, relativeRoot, "node_modules", ".bin"),
-    token: join(worktreeToken, relativeRoot, "node_modules", ".bin"),
+    replacement: join(worktreeToken, relativeRoot, "node_modules", ".bin"),
   }));
 }
 
 function normalizeMaterialLocalBinPath(value, paths, workingDirectory) {
   for (const entry of paths) {
     if (pathResolvesTo(value, entry.path, workingDirectory)) {
-      return entry.token;
+      return entry.replacement;
     }
   }
   return value;
