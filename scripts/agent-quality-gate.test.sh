@@ -2688,6 +2688,7 @@ if ! /bin/bash -c '
     fi
   }
 
+  unset TF_PLUGIN_CACHE_DIR
   while IFS="|" read -r capacity command weight all_capacity class resources; do
     [[ -n "$capacity" ]] || continue
     assert_command_policy \
@@ -2709,7 +2710,18 @@ if ! /bin/bash -c '
 3|pnpm dashboard:mutation|1|0|ordinary|none
 3|pnpm bridge:mutation|1|0|ordinary|none
 3|pnpm indexer:mutation|1|0|ordinary|none
+3|TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform init -backend=false -input=false|1|0|ordinary|none
 POLICY_ROWS
+
+  TF_PLUGIN_CACHE_DIR=/tmp/shared-terraform-plugin-cache
+  assert_command_policy \
+    3 \
+    "TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform init -backend=false -input=false" \
+    1 0 terraform-init terraform-plugin-cache || exit 1
+  assert_command_policy \
+    3 \
+    "TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform validate -no-color" \
+    1 0 ordinary none || exit 1
 ' quality-gate-command-policy \
   "$repo_root/scripts/gate/quality-gate-coordinator-support.sh"; then
   fail "quality-gate command scheduling classes are not minimal and explicit"

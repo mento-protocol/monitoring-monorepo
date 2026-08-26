@@ -369,7 +369,7 @@ gate_coordinator_before_command() {
   fi
   for resource in "${gate_coordinator_command_resources[@]+"${gate_coordinator_command_resources[@]}"}"; do
     case "$resource" in
-      browser-fixture-3211|playwright-install) ;;
+      browser-fixture-3211|playwright-install|terraform-plugin-cache) ;;
       *) echo "error: unknown coordinator resource: ${resource}" >&2
         gate_coordinator_report_no_work_failure 2 "command lease acquisition" "The mapped command did not run"; return 2 ;;
     esac

@@ -650,6 +650,12 @@ gate_coordinator_classify_command() {
       gate_coordinator_command_all_capacity=1
       gate_coordinator_command_class="dashboard-build"
       ;;
+    TF_DATA_DIR=*terraform\ -chdir=*\ init\ -backend=false\ -input=false)
+      if [[ -n "${TF_PLUGIN_CACHE_DIR:-}" ]]; then
+        gate_coordinator_command_resources+=("terraform-plugin-cache")
+        gate_coordinator_command_class="terraform-init"
+      fi
+      ;;
   esac
 }
 

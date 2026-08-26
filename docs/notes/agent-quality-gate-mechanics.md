@@ -425,8 +425,9 @@ keeps machine exclusion and never starts unrestricted mapped commands.
 
 Protocol, journal, and policy versions are explicit. An unsupported version,
 malformed state, or invalid resource name fails closed. The Bash adapter also
-rejects names outside its `browser-fixture-3211` and `playwright-install` policy
-allowlist. It never falls back to unrestricted execution.
+rejects names outside its `browser-fixture-3211`, `playwright-install`, and
+`terraform-plugin-cache` policy allowlist. It never falls back to unrestricted
+execution.
 
 The effective policy binds the hosting Node runtime identity and the production
 coordinator source signature. The runtime identity covers the resolved
@@ -534,9 +535,11 @@ bounds their aggregate concurrency.
 
 Browser work also claims `browser-fixture-3211`. Playwright installation claims
 `playwright-install` because every worktree mutates the shared
-`~/.cache/ms-playwright` browser store. Each named resource has capacity 1. Add
-a new resource or all-capacity class only with contention measurements and
-scheduler regression coverage.
+`~/.cache/ms-playwright` browser store. A mapped `terraform init` claims
+`terraform-plugin-cache` when `TF_PLUGIN_CACHE_DIR` is non-empty because
+Terraform does not guarantee that cache is safe for concurrent writes. Each
+named resource has capacity 1. Add a new resource or all-capacity class only
+with contention measurements and scheduler regression coverage.
 
 **One request per worktree.** The coordinator serializes complete requests that
 use the same resolved `git rev-parse --show-toplevel` path. It does not use the
@@ -806,9 +809,10 @@ scope. A successful signal probe also covers `CAP_KILL`. The scan compares each
 in-scope `/proc/<pid>/fd` target by device and inode. It requires the process
 start identity to remain equal before and after identity and fd enumeration.
 Process-exit races are empty observations. A restricted `hidepid` mount,
-unreadable in-scope process, or other incomplete scan is a scan failure. macOS
-and hosts without usable procfs use the witnessed `lsof` path. A host with
-neither scanner fails closed while a marker exists.
+unreadable in-scope process, or other incomplete scan is a scan failure. When
+`/proc/self/fd` exists, a failed procfs scan fails closed and never falls back to
+`lsof`. macOS and hosts without `/proc/self/fd` use the witnessed `lsof` path. A
+host with neither scanner fails closed while a marker exists.
 
 Adoption preserves the incoming owner record's group and other read bits so a
 legacy waiter with shared-root access can observe the barrier. The replacement

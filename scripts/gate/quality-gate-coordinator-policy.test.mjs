@@ -1272,6 +1272,23 @@ test("material environment binds package-local executables", async (t) => {
     materialEnvironmentDigest(second),
     "equivalent package-local executables must normalize across worktrees",
   );
+  assert.equal(
+    materialEnvironmentDigest(first, {
+      pathEntries: [
+        dirname(packageWrappers[0]),
+        first.localBin,
+        dirname(process.execPath),
+      ],
+    }),
+    materialEnvironmentDigest(second, {
+      pathEntries: [
+        dirname(packageWrappers[1]),
+        second.localBin,
+        dirname(process.execPath),
+      ],
+    }),
+    "package-local PATH entries must normalize across worktrees",
+  );
 
   const rogueWrapper = join(dirname(packageWrappers[1]), "rogue-shadow");
   await writeFile(rogueWrapper, "#!/bin/sh\nexit 9\n");

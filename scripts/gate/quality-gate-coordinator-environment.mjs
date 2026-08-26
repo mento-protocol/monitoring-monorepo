@@ -763,6 +763,22 @@ function pathResolvesTo(value, expected, workingDirectory) {
   }
 }
 
+function materialLocalBinPathMap(physicalRepoRoot) {
+  return MATERIAL_PACKAGE_ROOTS.map((relativeRoot) => ({
+    path: join(physicalRepoRoot, relativeRoot, "node_modules", ".bin"),
+    token: join(worktreeToken, relativeRoot, "node_modules", ".bin"),
+  }));
+}
+
+function normalizeMaterialLocalBinPath(value, paths, workingDirectory) {
+  for (const entry of paths) {
+    if (pathResolvesTo(value, entry.path, workingDirectory)) {
+      return entry.token;
+    }
+  }
+  return value;
+}
+
 function selectedEnvironmentEntries(environment) {
   return Object.entries(environment).filter(
     ([name]) =>
@@ -805,8 +821,7 @@ export function materialEnvironmentDigest({
   workingDirectory = process.cwd(),
 }) {
   const physicalRepoRoot = realpathSync(repoRoot);
-  const localBinPath = join(physicalRepoRoot, "node_modules", ".bin");
-  const localBinEntry = `${worktreeToken}/node_modules/.bin`;
+  const localBinPaths = materialLocalBinPathMap(physicalRepoRoot);
   const gateScratchPath = join(physicalRepoRoot, gateScratchRelativePath);
   const gateScratchEntry = `${worktreeToken}/${gateScratchRelativePath}`;
   const entries = selectedEnvironmentEntries(environment).map(
@@ -818,9 +833,11 @@ export function materialEnvironmentDigest({
           value
             .split(delimiter)
             .map((entry) =>
-              pathResolvesTo(entry, localBinPath, workingDirectory)
-                ? localBinEntry
-                : entry,
+              normalizeMaterialLocalBinPath(
+                entry,
+                localBinPaths,
+                workingDirectory,
+              ),
             )
             .join(delimiter),
         ];

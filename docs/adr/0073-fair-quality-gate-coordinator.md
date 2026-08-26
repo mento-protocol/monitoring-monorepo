@@ -79,8 +79,9 @@ It does not run mapped commands without exclusion.
 The protocol, journal schema, and scheduling policy have explicit versions. A
 client or coordinator rejects an unsupported version, malformed state, or
 invalid resource name before it starts work. The Bash adapter rejects resource
-names outside its policy allowlist. It never silently falls back to unrestricted
-execution.
+names outside its `browser-fixture-3211`, `playwright-install`, and
+`terraform-plugin-cache` policy allowlist. It never silently falls back to
+unrestricted execution.
 
 The effective policy also binds the hosting Node runtime identity and the
 production coordinator source signature. The runtime identity covers the
@@ -244,15 +245,16 @@ reads each process start identity before and after UID and descriptor
 enumeration. A changed identity makes that observation empty. A restricted
 `hidepid` mount or another incomplete in-scope scan fails closed.
 
-On hosts without usable procfs, the process scan never asks `lsof` to query the
-mutable shared marker pathname. It creates a mode-0700 private directory named
+When `/proc/self/fd` is unavailable, the process scan never asks `lsof` to query
+the mutable shared marker pathname. It creates a mode-0700 private directory named
 `.holder-lsof-witness.v1.<hostname-sha256>.<pid>.<nonce>`, hard-links the current
 marker into it, and validates that scan-time link as a current-UID, non-symlink
 regular file with the exact raw `<token>\n` body. `lsof` reads only the
 witnessed inode. Normal cleanup and invalid-snapshot cleanup remove only the
 private witness state. A host with neither scanner fails closed while a marker
-exists. A `SIGKILL` can leave the private hard link behind. No recovery scanner
-consumes it, and it grants no authority.
+exists. When `/proc/self/fd` exists, a failed or incomplete procfs scan fails
+closed and never falls back to `lsof`. A `SIGKILL` can leave the private hard
+link behind. No recovery scanner consumes it, and it grants no authority.
 
 The coordinator compatibility record leaves `start_utc=` blank so older Bash
 readers that fetch fields in separate snapshots fall back to PID liveness. It
@@ -404,9 +406,10 @@ bounds their aggregate concurrency.
 Browser work also claims the named `browser-fixture-3211` resource because the
 fixture server binds fixed loopback port 3211. Playwright installation claims
 the named `playwright-install` resource because every worktree mutates the
-shared `~/.cache/ms-playwright` browser store. Each named resource has capacity
-
-1.
+shared `~/.cache/ms-playwright` browser store. A mapped `terraform init` claims
+the named `terraform-plugin-cache` resource when `TF_PLUGIN_CACHE_DIR` is
+non-empty. Terraform does not guarantee concurrent writes to that shared cache.
+Each named resource has capacity 1.
 
 Resource names and weights are part of the versioned policy. A new exclusive
 class needs measured contention evidence and scheduler regression coverage.
