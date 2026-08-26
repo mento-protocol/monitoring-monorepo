@@ -332,9 +332,11 @@ graphql contract test, regenerated via `pnpm indexer:codegen` and
   the OLDEST rows drop, never the recent events being investigated. `id` is
   an unpadded string and never participates in ordering. Truncation is
   detected exactly, without aggregates (disabled on hosted Hasura): request
-  `limit + 1` rows, render `limit`, and disclose ("earliest history
-  truncated") only when the sentinel row came back — a history of exactly
-  `limit` rows is complete and says nothing.
+  `limit + 1` rows and render `limit`, keeping the render limit at least
+  one below the 1,000-row Hasura hard cap (render 999, request 1,000) so
+  the capped response can still carry the sentinel row. Disclose ("earliest
+  history truncated") only when the sentinel came back — a history of
+  exactly the render limit is complete and says nothing.
 - `CDP_TROVES_BY_OWNER(address)` — `Trove` rows across markets matching
   `_or: [{owner}, {previousOwner}]`, for the support entry path: close and
   liquidation zero `owner`, so `previousOwner` is how a closed trove is
@@ -496,7 +498,8 @@ today, so the new `troves/[troveId]/_components` rule lands with the page
 - History at the row cap: newest rows are kept (desc fetch, reversed
   client-side) and the page discloses "earliest history truncated" (cap
   detected by the `limit + 1` sentinel row, never by `length === limit`
-  alone).
+  alone; the render limit sits below the Hasura hard cap so the sentinel
+  request is never itself capped).
 
 ### Tests
 
