@@ -16395,13 +16395,13 @@ STUB
       wait "$decision_waiter" 2>/dev/null || true
       fail "${decision_field} revalidation case could not replace its decision field"
     }
-    grep -q "^pid=${decision_dead_pid}$" "$decision_taken_record" &&
-      grep -q '^start_utc=$' "$decision_taken_record" &&
-      grep -q "^token=${decision_token}$" "$decision_taken_record" || {
+    if ! grep -q "^pid=${decision_dead_pid}$" "$decision_taken_record" ||
+      ! grep -q '^start_utc=$' "$decision_taken_record" ||
+      ! grep -q "^token=${decision_token}$" "$decision_taken_record"; then
       : > "${decision_barrier}.release"
       wait "$decision_waiter" 2>/dev/null || true
       fail "${decision_field} replacement changed PID, token, or start identity"
-    }
+    fi
     : > "${decision_barrier}.release"
     wait "$decision_waiter"
     [[ "$(cat "$decision_status_file")" == "2" ]] ||
@@ -16411,10 +16411,11 @@ STUB
     grep -q "^${decision_field}=${decision_replacement_value}$" \
       "$gate_race_root/run.lock/owner" ||
       fail "${decision_field} replacement was not restored to the canonical owner"
-    grep -q "^pid=${decision_dead_pid}$" "$gate_race_root/run.lock/owner" &&
-      grep -q '^start_utc=$' "$gate_race_root/run.lock/owner" &&
-      grep -q "^token=${decision_token}$" "$gate_race_root/run.lock/owner" ||
+    if ! grep -q "^pid=${decision_dead_pid}$" "$gate_race_root/run.lock/owner" ||
+      ! grep -q '^start_utc=$' "$gate_race_root/run.lock/owner" ||
+      ! grep -q "^token=${decision_token}$" "$gate_race_root/run.lock/owner"; then
       fail "${decision_field} revalidation changed the preserved owner identity"
+    fi
     grep -q "reclaiming it" "$decision_output" &&
       fail "${decision_field} replacement was reclaimed under an obsolete verdict"
     [[ ! -e "$gate_race_root/condemned.d/${decision_token}" ]] ||

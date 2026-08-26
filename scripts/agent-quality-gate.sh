@@ -1037,6 +1037,7 @@ gate_lock_quarantine_pid_is_safe_integer() {
     return 0
   fi
   [[ "${#value}" -eq 16 ]] || return 1
+  # shellcheck disable=SC2071
   [[ "$value" == 9007199254740991 ||
     "$value" < 9007199254740991 ]]
 }
@@ -1080,6 +1081,7 @@ gate_lock_quarantine_creator_machine_verdict() {
 # by recovery. An unreadable timestamp returns no age and therefore cannot
 # authorize an unverified reclaim.
 gate_lock_private_directory_started_at() {
+  # shellcheck disable=SC2016
   node -e '
     const fs = require("node:fs");
     const path = process.argv[1];
