@@ -103,7 +103,16 @@ export const HEAD_GROUPS = [
         ],
       },
       {
-        patterns: ["AGENTS.md", "*/AGENTS.md", ".codex/config.toml"],
+        // `CLAUDE.md` is the root AGENTS.md symlink and carries its own pin
+        // block. Editing through the symlink shows up as `AGENTS.md`, but
+        // replacing or deleting the link shows up as `CLAUDE.md` — the exact
+        // change the pin exists to catch — so it routes here too.
+        patterns: [
+          "AGENTS.md",
+          "CLAUDE.md",
+          "*/AGENTS.md",
+          ".codex/config.toml",
+        ],
         effects: [
           { surface: "agent-context" },
           {

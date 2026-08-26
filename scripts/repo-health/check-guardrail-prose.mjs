@@ -19,6 +19,13 @@
 // turn every reword into a CI failure and train people to edit the pin without
 // reading it, which is the opposite of what this protects.
 //
+// Root CLAUDE.md is pinned separately even though it is a symlink to AGENTS.md
+// and `readFileSync` follows it, so both key blocks read the same bytes today.
+// CLAUDE.md is the path the Claude runtime actually loads, and nothing else in
+// the repository asserts it stays a symlink. The duplicated block costs four
+// lines and starts failing the moment that link is replaced by a divergent
+// regular file or dropped.
+//
 // NON-GOAL: this check does not pin script digests. The gate and helper scripts
 // in this repo are legitimately agent-maintained and change often; digest pins
 // there would be noise. This protects normative prose only.
@@ -64,6 +71,53 @@ export function normalizeProse(text) {
 }
 
 /**
+ * The top-level keys of a JSON object literal, in source order, duplicates kept.
+ *
+ * `JSON.parse` keeps only the last of two identical keys and reports nothing,
+ * so a pin file that repeats a path silently discards every pin in the earlier
+ * block. Nothing downstream can see it: the parsed object is well formed, the
+ * remaining pins all match, and the check exits 0 while protecting less than
+ * the file says it does. That is the one way this checker could fail open, so
+ * the collision is found in the raw text instead. A `JSON.parse` reviver cannot
+ * do it — the reviver walks the already-collapsed result and is handed the
+ * repeated key once.
+ *
+ * The scan consumes whole string literals, so a snippet containing `:` or a
+ * brace never registers as a key, and only depth 1 counts, so strings inside
+ * the snippet arrays are skipped. Callers run it after `JSON.parse` has
+ * succeeded and the root has been confirmed to be an object.
+ *
+ * @param {string} text raw JSON source
+ * @returns {string[]}
+ */
+export function topLevelKeys(text) {
+  const keys = [];
+  let depth = 0;
+  let index = 0;
+  while (index < text.length) {
+    const char = text[index];
+    if (char === '"') {
+      let end = index + 1;
+      while (end < text.length && text[end] !== '"') {
+        end += text[end] === "\\" ? 2 : 1;
+      }
+      const literal = text.slice(index, end + 1);
+      index = end + 1;
+      if (depth === 1) {
+        let probe = index;
+        while (probe < text.length && /\s/.test(text[probe])) probe += 1;
+        if (text[probe] === ":") keys.push(JSON.parse(literal));
+      }
+      continue;
+    }
+    if (char === "{" || char === "[") depth += 1;
+    else if (char === "}" || char === "]") depth -= 1;
+    index += 1;
+  }
+  return keys;
+}
+
+/**
  * Read and validate the pin file.
  *
  * Fails closed on any shape that is not `{ "<path>": ["<snippet>", ...] }` with
@@ -73,9 +127,11 @@ export function normalizeProse(text) {
  * @returns {{ pins: [string, string[]][], problems: string[] }}
  */
 export function loadPins(pinPath) {
+  let raw;
   let parsed;
   try {
-    parsed = JSON.parse(readFileSync(pinPath, "utf8"));
+    raw = readFileSync(pinPath, "utf8");
+    parsed = JSON.parse(raw);
   } catch (error) {
     return {
       pins: [],
@@ -89,6 +145,20 @@ export function loadPins(pinPath) {
       problems: [
         `pin file ${pinPath} must be an object mapping file paths to snippet arrays`,
       ],
+    };
+  }
+
+  const seen = topLevelKeys(raw);
+  const duplicated = [
+    ...new Set(seen.filter((key, at) => seen.indexOf(key) !== at)),
+  ];
+  if (duplicated.length > 0) {
+    return {
+      pins: [],
+      problems: duplicated.map(
+        (key) =>
+          `pin file ${pinPath}: ${key} is declared more than once; only the last block would be checked and the earlier pins would be dropped silently`,
+      ),
     };
   }
 

@@ -73,10 +73,11 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   `pnpm sentry:project:test` in the projection arm.
   `deploy/deploy-indexer-verify{,-analysis}{,.test}.mjs` and
   `deploy/deploy-indexer-verify-status-identity.mjs` use one any-depth arm;
-  both verifier tests run. The exact `pr/agent-issue-board.mjs`,
-  `pr/agent-issue-board.test.mjs`, and
+  both verifier tests run. The exact `pr/agent-issue-board{,.test}.mjs` and
   `pr/issue-board-{backfill,cli,commands,projects,state,sync,transport}.mjs` set
-  routes to `pnpm issue:board:test`.
+  routes to `pnpm issue:board:test`. Exact
+  `repo-health/check-guardrail-prose{,.test}.mjs` and
+  `repo-health/guardrail-prose.json` route to the guardrail suite.
 - **Gate runtime module pins.** Before `cd`, `agent-quality-gate.sh` loads
   `$script_source_dir/gate/run-handles.sh`; move it with its signature, self-test
   route, and missing-helper fixture. It also pins
@@ -99,19 +100,18 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   `.github/workflows/` pin a `scripts/` path, and `sentry-triage-agent.yml`
   stages an exact copy list at runtime; three Terraform filters instead
   copy the broad `workflowAdmissionPatterns` boundary from
-  `terraform.stacks.json`. A miss is silent — the job stops running while the
-  required `ci` sentinel stays green. The enumeration, the `routing.test.mjs`
-  equality contract, and when a module glob is the safer pin are in
+  `terraform.stacks.json`. A miss is silent: the job stops while the required
+  `ci` sentinel stays green. The enumeration, `routing.test.mjs`'s equality
+  contract, and when a module glob is the safer pin are in
   [ADR 0064](../docs/adr/0064-scripts-module-directories.md#sweep-checklist-for-a-move).
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.
 - **Trusted-validator probes.** `pr-description.yml` runs the validator from the
   PR's base ref via the base branch **name**, so it resolves to that branch's
-  tip, never a PR-time snapshot. One probe
-  path is enough once the target path is live on the base branch (issue 1904);
-  a move still needs a temporary dual probe for the commit that performs it.
-  ADR 0064 has the failure mode.
+  tip, never a PR-time snapshot. One probe path is enough once the target is
+  live on the base branch (issue 1904); the commit that performs a move still
+  needs a temporary dual probe. ADR 0064 has the failure mode.
 - **Production infrastructure contract pins.**
   `production-infra-identity-contract/workflow-inventory.mjs` pins exact script
   paths for the workflows it audits.

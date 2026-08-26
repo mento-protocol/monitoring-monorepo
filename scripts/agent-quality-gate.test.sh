@@ -3247,10 +3247,17 @@ assert_contains "- node scripts/repo-health/check-skills-mirror.test.mjs (skills
 assert_contains "- node scripts/repo-health/check-skills-mirror.mjs (skills mirror checker changed)"
 
 # The guardrail-prose pins route from BOTH directions: an edit to the checker or
-# its pin list, and an edit to either prose file the pins protect. The second is
+# its pin list, and an edit to any prose file the pins protect. The second is
 # the one that matters — a change dropping a pinned sentence must not reach a
 # push without the check having run.
 run_gate "AGENTS.md"
+assert_contains "- node scripts/repo-health/check-guardrail-prose.mjs (agent instruction file holding pinned guardrail prose changed)"
+
+# CLAUDE.md is the AGENTS.md symlink and carries its own pin block. An edit made
+# through the link reports as AGENTS.md, but replacing the link with a regular
+# file reports as CLAUDE.md — the case the pin block exists for — so it must
+# route the check too.
+run_gate "CLAUDE.md"
 assert_contains "- node scripts/repo-health/check-guardrail-prose.mjs (agent instruction file holding pinned guardrail prose changed)"
 
 run_gate "docs/notes/pr-operating-card.md"
