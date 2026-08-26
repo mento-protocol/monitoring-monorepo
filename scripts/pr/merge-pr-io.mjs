@@ -12,7 +12,14 @@
  */
 
 import { spawn } from "node:child_process";
-import { closeSync, constants, fstatSync, openSync, writeSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  ftruncateSync,
+  openSync,
+  writeSync,
+} from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
 
@@ -82,7 +89,12 @@ export async function promptLine({ stdin, stdout, question }) {
  * @param write injected only so the suite can simulate a short write; the
  *   default is the real `fs.writeSync`.
  */
-export async function appendConsentRecord({ record, git, write = writeSync }) {
+export async function appendConsentRecord({
+  record,
+  git,
+  write = writeSync,
+  truncateFd = ftruncateSync,
+}) {
   let repoRoot;
   try {
     repoRoot = (await git(["rev-parse", "--show-toplevel"])).trim();
@@ -152,8 +164,18 @@ export async function appendConsentRecord({ record, git, write = writeSync }) {
     // record behind a reported success.
     const written = write(fd, payload);
     if (written !== payload.length) {
+      // Refusing is not enough: the partial bytes carry no terminating newline,
+      // so the next successful append would continue the same physical line and
+      // leave one malformed record that a later merge reports as recorded
+      // consent. Roll the file back to the length it had before this attempt.
+      let rollback = "";
+      try {
+        truncateFd(fd, stats.size);
+      } catch (err) {
+        rollback = ` and the partial bytes could not be removed: ${err instanceof Error ? err.message : String(err)}`;
+      }
       throw new MergeRefusal(
-        `${target} accepted only ${written} of ${payload.length} bytes, so the consent record is incomplete; nothing was merged`,
+        `${target} accepted only ${written} of ${payload.length} bytes, so the consent record is incomplete; nothing was merged${rollback}`,
       );
     }
   } catch (err) {

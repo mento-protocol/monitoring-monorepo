@@ -284,33 +284,43 @@ export function formatBriefing({ summary, feedback, repo, notReadyReason }) {
  * costs a minute and shows the operator the state that actually exists.
  */
 export function gateSignature({ summary, feedback }) {
-  const blockers = (summary?.required?.blockers ?? [])
-    .map(
-      (blocker) =>
-        `blocker:${blocker?.kind ?? "?"}:${blocker?.name ?? "?"}:${blocker?.state ?? "?"}`,
-    )
-    .sort();
+  // Every field below is GitHub-controlled text. Pasting them together around
+  // a delimiter would let a check or thread whose name contains that delimiter
+  // spell a different set's signature, and the comparison would then call two
+  // genuinely different states equal. Each record is serialized on its own and
+  // sorted by that serialization, so no value can reach across its own field.
+  const canonical = (rows) => rows.map((row) => JSON.stringify(row)).sort();
+
+  const blockers = canonical(
+    (summary?.required?.blockers ?? []).map((blocker) => [
+      blocker?.kind ?? null,
+      blocker?.name ?? null,
+      blocker?.state ?? null,
+    ]),
+  );
 
   // Identities, not counts. One thread resolved while another appears leaves
   // every count identical, so a count-only signature would call that state
   // unchanged and merge it under a reason entered for the previous one. The
   // feedback projection already computes a stable per-finding `fingerprint`,
   // which is exactly the identity this needs.
-  const findings = (feedback?.findings ?? [])
-    .filter((finding) => finding?.blocking === true)
-    .map(
-      (finding) =>
-        `feedback:${finding?.fingerprint ?? `${finding?.source ?? "?"}:${finding?.sourceId ?? "?"}`}:${finding?.state ?? "?"}`,
-    )
-    .sort();
+  const findings = canonical(
+    (feedback?.findings ?? [])
+      .filter((finding) => finding?.blocking === true)
+      .map((finding) => [
+        finding?.fingerprint ?? null,
+        finding?.source ?? null,
+        finding?.sourceId ?? null,
+        finding?.state ?? null,
+      ]),
+  );
 
-  return [
-    `ready:${summary?.ready === true}`,
-    ...blockers,
-    `feedback:ready:${feedback?.ready === true}`,
-    `feedback:blocking:${findings.length}`,
-    ...findings,
-  ].join("\n");
+  return JSON.stringify({
+    ready: summary?.ready === true,
+    blockers,
+    feedbackReady: feedback?.ready === true,
+    findings,
+  });
 }
 
 /**

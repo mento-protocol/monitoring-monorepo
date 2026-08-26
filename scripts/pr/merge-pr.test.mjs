@@ -1328,6 +1328,93 @@ await test("a swapped feedback item refuses even though the counts match", async
   assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
 });
 
+await test("the gate signature cannot be spoofed through a blocker name", () => {
+  // Every field is GitHub-controlled text. With a delimiter-joined encoding a
+  // check whose name contains that delimiter can spell a different set's
+  // signature, and the confirmation comparison then treats two genuinely
+  // different states as equal.
+  // Crafted to be an exact forgery under the old encoding: the name supplies
+  // the trailing ":fail" of the first record, a record separator, and a whole
+  // second record. The probe in the negative control proves it really collided.
+  const withDelimiters = {
+    ready: false,
+    required: {
+      blockers: [
+        { kind: "check", name: "ci:fail\nblocker:check:x", state: "fail" },
+      ],
+    },
+  };
+  const plain = {
+    ready: false,
+    required: {
+      blockers: [
+        { kind: "check", name: "ci", state: "fail" },
+        { kind: "check", name: "x", state: "fail" },
+      ],
+    },
+  };
+  assert(
+    gateSignature({ summary: withDelimiters, feedback: null }) !==
+      gateSignature({ summary: plain, feedback: null }),
+    "a blocker name must not be able to spell another blocker set",
+  );
+
+  // Order must still not matter, or an unchanged state would refuse.
+  const reordered = {
+    ready: false,
+    required: { blockers: [...plain.required.blockers].reverse() },
+  };
+  assertEqual(
+    gateSignature({ summary: reordered, feedback: null }),
+    gateSignature({ summary: plain, feedback: null }),
+    "the signature must be order-independent",
+  );
+});
+
+await test("a short consent write leaves the ledger byte-identical", async () => {
+  // Refusing is not enough. The partial bytes have no terminating newline, so
+  // the next successful append continues the same physical line and produces
+  // one malformed record that a later merge reports as recorded consent.
+  const checkout = mkdtempSync(path.join(tmpdir(), "merge-consent-rollback-"));
+  try {
+    const ledger = path.join(checkout, CONSENT_LOG_BASENAME);
+    const existing = '{"timestamp":"2026-08-01T00:00:00.000Z","pr":1}\n';
+    writeFileSync(ledger, existing);
+
+    const record = buildConsentRecord({
+      login: "chapati23",
+      repo: "mento-protocol/monitoring-monorepo",
+      number: 2071,
+      headOid: HEAD_OID,
+      notReadyReason: null,
+      now: new Date("2026-08-26T00:00:00.000Z"),
+    });
+
+    await assertRefuses(
+      appendConsentRecord({
+        record,
+        git: async () => `${checkout}\n`,
+        write: (fd, payload) => fs.writeSync(fd, payload.subarray(0, 5)),
+      }),
+      "the consent record is incomplete",
+    );
+
+    assertEqual(
+      readFileSync(ledger, "utf8"),
+      existing,
+      "the partial bytes must be rolled back",
+    );
+
+    // The ledger must still accept a real append afterwards, on one clean line.
+    await appendConsentRecord({ record, git: async () => `${checkout}\n` });
+    const lines = readFileSync(ledger, "utf8").trimEnd().split("\n");
+    assertEqual(lines.length, 2, "the ledger should hold two records");
+    for (const line of lines) JSON.parse(line);
+  } finally {
+    rmSync(checkout, { recursive: true, force: true });
+  }
+});
+
 await test("only a confirmed merge exits zero", async () => {
   // The CLI's exit status is what `pnpm pr:merge && <post-merge closeout>`
   // branches on. Reporting success for a queued or unverified merge would run
