@@ -583,6 +583,11 @@ front of the queue. Total time: one page view.
 
 ## Rollout
 
+Execution is tracked by epic #2089; its child issues carry the slice
+numbers below (#2080 snapshot fix, #2081 indexes, #2082 ledger entity,
+#2083 page shell, #2084 queue panel, #2085 entry points, #2086 full ledger
+view, #2087 charts, #2088 impact panel).
+
 Sequenced per `docs/pr-checklists/stateful-data-ui.md`; each slice is one PR
 through the quality gate, with `pnpm indexer:codegen` /
 `pnpm dashboard:codegen` where schema or queries change, and the indexer
