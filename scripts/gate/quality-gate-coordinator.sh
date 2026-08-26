@@ -70,8 +70,15 @@ gate_coordinator_report_no_work_failure() {
 }
 
 gate_coordinator_print_shared_trunk_skip_warning() {
-  echo "warning: the shared coordinator execution skipped Trunk because the CLI could not be provisioned." >&2
-  echo "  The leader's provisioning probe failed, so this qualified success is not reusable." >&2
+  local reason="$1"
+  if [[ "$reason" == "downloads-unavailable" ]]; then
+    echo "warning: the shared coordinator execution skipped Trunk because its required downloads were blocked." >&2
+    echo "  The leader verified that Trunk reported no issues and only download failures." >&2
+  else
+    echo "warning: the shared coordinator execution skipped Trunk because the CLI could not be provisioned." >&2
+    echo "  The leader's provisioning probe failed." >&2
+  fi
+  echo "  This qualified success is not reusable." >&2
   echo "  CI still enforces Trunk on the PR (.github/workflows/trunk.yml)." >&2
 }
 
@@ -253,6 +260,7 @@ gate_coordinator_bootstrap_from_legacy() {
     --capacity "$gate_coordinator_capacity" \
     --legacy-lock-root "$gate_lock_root_dir" \
     --legacy-owner-token "$legacy_owner_token" \
+    --legacy-machine-identity "$gate_lock_machine_id_cached" \
     --startup-timeout-ms 10000)"
   rc=$?
   set -e
@@ -556,18 +564,23 @@ gate_coordinator_publish_result() {
 }
 
 gate_coordinator_publish_success() {
-  local trunk_provisioning_state="${1:-}"
-  case "$trunk_provisioning_state" in
-    ""|ok)
+  local trunk_environment_blocked="${1:-false}"
+  local trunk_environment_blocked_kind="${2:-}"
+  case "${trunk_environment_blocked}:${trunk_environment_blocked_kind}" in
+    false:)
       gate_coordinator_publish_result success \
         '{"source":"agent-quality-gate"}'
       ;;
-    blocked)
+    true:launcher)
       gate_coordinator_publish_result success \
         '{"source":"agent-quality-gate","qualified":true,"reusable":false,"skipped":[{"command":"trunk","reason":"provisioning-unavailable"}]}'
       ;;
+    true:linters)
+      gate_coordinator_publish_result success \
+        '{"source":"agent-quality-gate","qualified":true,"reusable":false,"skipped":[{"command":"trunk","reason":"downloads-unavailable"}]}'
+      ;;
     *)
-      echo "error: unknown Trunk provisioning state for coordinator success publication." >&2
+      echo "error: unknown Trunk environment-blocked state for coordinator success publication." >&2
       return 2
       ;;
   esac
@@ -580,7 +593,7 @@ gate_coordinator_publish_failure() {
 
 gate_coordinator_wait_for_shared_result() {
   local wait_file started finished rc result_json parsed found status fingerprint
-  local policy execution success_payload_known trunk_skipped
+  local policy execution success_payload_known trunk_skip_reason
   started="$(date +%s)"
   if [[ "$gate_coordinator_role" == "completed" ]]; then
     result_json="$gate_coordinator_completed_result_json"
@@ -628,27 +641,29 @@ gate_coordinator_wait_for_shared_result() {
     const ordinarySuccess = hasExactKeys(payload, ["source"]) &&
       payload.source === "agent-quality-gate";
     const skipped = Array.isArray(payload.skipped) ? payload.skipped : [];
-    const trunkSkipped = hasExactKeys(payload,
+    const trunkSkipReason = hasExactKeys(payload,
       ["source", "qualified", "reusable", "skipped"]) &&
       payload.source === "agent-quality-gate" && payload.qualified === true &&
       payload.reusable === false &&
       skipped.length === 1 &&
       hasExactKeys(skipped[0], ["command", "reason"]) &&
       skipped[0].command === "trunk" &&
-      skipped[0].reason === "provisioning-unavailable";
+      ["provisioning-unavailable", "downloads-unavailable"].includes(
+        skipped[0].reason,
+      ) ? skipped[0].reason : "";
     const successPayloadKnown = result.status !== "success" ||
-      ordinarySuccess || trunkSkipped;
+      ordinarySuccess || trunkSkipReason !== "";
     process.stdout.write([
       value.found === false ? "0" : "1", result.status ?? "",
       result.fingerprint ?? "", result.policyHash ?? "", result.executionId ?? "",
       successPayloadKnown ? "1" : "0",
-      trunkSkipped ? "1" : "0",
+      trunkSkipReason,
     ].join("\x1f"));
   ')" || {
     gate_coordinator_report_no_work_failure 2 "coalesced result handling" "No mapped command ran in this request"; return 2
   }
   IFS=$'\x1f' read -r found status fingerprint policy execution \
-    success_payload_known trunk_skipped <<< "$parsed"
+    success_payload_known trunk_skip_reason <<< "$parsed"
   [[ "$found" == "1" && "$fingerprint" == "$gate_coordinator_registration_fingerprint" &&
     "$policy" == "$gate_coordinator_policy_hash" &&
     "$execution" == "$gate_coordinator_execution_id" ]] || {
@@ -663,8 +678,8 @@ gate_coordinator_wait_for_shared_result() {
         "coalesced result handling" "No mapped command ran in this request"
       return 2
     fi
-    if [[ "$trunk_skipped" == "1" ]]; then
-      gate_coordinator_print_shared_trunk_skip_warning
+    if [[ -n "$trunk_skip_reason" ]]; then
+      gate_coordinator_print_shared_trunk_skip_warning "$trunk_skip_reason"
     fi
     echo "Shared coordinator execution passed; no mapped command ran in this request."
     return 0

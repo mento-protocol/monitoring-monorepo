@@ -51,6 +51,7 @@ export async function startCoordinator({
   ownerObserver = observeProcessIdentity,
   legacyLockRoot = null,
   legacyOwnerToken = null,
+  legacyMachineIdentity = "",
   readyFile = null,
   now = Date.now,
   coordinatorIdentity: suppliedCoordinatorIdentity = null,
@@ -502,6 +503,7 @@ export async function startCoordinator({
               expectedOwnerToken: legacyOwnerToken,
               generationToken,
               coordinatorIdentity,
+              machineIdentity: legacyMachineIdentity,
             })
           : null,
     );

@@ -3,7 +3,7 @@ title: Dashboard Local and Browser Verification
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-14
+last_verified: 2026-08-25
 doc_type: runbook
 scope: ui-dashboard
 review_interval_days: 90
@@ -60,6 +60,49 @@ Logged-out checks must use an isolated browser context or clear both
 Public pages show `Sign in`; protected pages (`/address-book` and its nested
 `/address-book/entities` section, `/integrations`, and `/revenue`) redirect to
 `/sign-in?callbackUrl=...` when auth is configured.
+
+When API proof needs an existing authenticated browser session, keep the page
+on the target origin and run a read-only same-origin request through page
+evaluation:
+
+```js
+async function authenticatedApiCheck() {
+  const response = await fetch("/api/...", {
+    cache: "no-store",
+    credentials: "same-origin",
+  });
+  const status = response.status;
+  const text = await response.text();
+  let body = null;
+  let parseError = null;
+  if (text !== "") {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      parseError = "invalid-json";
+    }
+  }
+  return {
+    status,
+    parseError,
+    fields:
+      body === null
+        ? null
+        : {
+            // Select only the non-sensitive fields needed for this check.
+            expectedField: body.expectedField,
+          },
+  };
+}
+```
+
+Keep the raw response text and the full parsed body local. Record only the
+status and the minimum non-sensitive fields that prove the acceptance criteria.
+Set `parseError` to the fixed `invalid-json` category when non-empty response
+text cannot be parsed. Do not include response text or parser details in it.
+Redact secrets, private labels, forensic reports, and personal data. Do not
+inspect cookies or browser storage. Do not use this path for a cross-origin
+request or a mutation.
 
 For a simulated authenticated session:
 

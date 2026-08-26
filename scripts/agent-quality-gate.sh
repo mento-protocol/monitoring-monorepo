@@ -1,5 +1,11 @@
-#!/usr/bin/env bash
+#!/bin/bash -p
+unset BASH_ENV ENV BASH_COMPAT CDPATH GLOBIGNORE
+set +o posix
+unset POSIXLY_CORRECT POSIX_PEDANTIC
 set -euo pipefail
+# Bash `-p` blocks startup files, imported functions, and inherited shell
+# options. The explicit reset above also removes startup controls that Bash can
+# still import or use after startup. It runs before path resolution or parsing.
 
 gate_start_ts="$(date +%s)"
 
@@ -78,6 +84,24 @@ Environment:
                       Directory holding the cross-run lock. Default:
                       $HOME/.cache/agent-quality-gate, falling back to
                       $TMPDIR/agent-quality-gate-<uid>.
+  AGENT_QUALITY_GATE_LOCK_MACHINE_ID
+                      Names the machine a lock record belongs to, in place of
+                      the hardware identity the gate reads for itself. Set it
+                      where that identity is unreadable and the lock root is
+                      shared between machines.
+  AGENT_QUALITY_GATE_LOCK_UNVERIFIED_MACHINE_GRACE_SECONDS
+                      How old a lock record whose machine cannot be
+                      established must be before a dead holder in it is
+                      reclaimed. Default: 600.
+  AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE
+                      Declares whether only this machine reaches the lock root.
+                      Unset, a root the gate resolved for itself is asked of
+                      the filesystem (df -l) and an AGENT_QUALITY_GATE_LOCK_DIR
+                      is assumed shared. Where the root may be shared, a lock
+                      record that cannot be tied to this machine is never
+                      reclaimed. Set 1 for an override directory this machine
+                      alone reaches; set 0 where this machine exports the lock
+                      root and another machine's gate locks in it.
 USAGE
 }
 
@@ -830,6 +854,9 @@ gate_lock_active_quarantine_pid=""
 gate_lock_active_quarantine_host=""
 gate_lock_local_host_name=""
 gate_lock_local_host_fingerprint=""
+gate_lock_local_machine_source=""
+gate_lock_local_machine_fingerprint=""
+gate_lock_no_machine_fingerprint=""
 gate_lock_claimed_quarantine=""
 # A marker cleanup that failed its exact-inode check must not be retried during
 # EXIT teardown. A later attempt could bind the changed inode as a new witness
@@ -927,22 +954,146 @@ gate_lock_current_host_fingerprint() {
 }
 
 gate_lock_ensure_local_host_fingerprint() {
-  local fingerprint host_name
+  local host_fingerprint host_name machine_fingerprint no_machine_fingerprint
+  local machine_identity machine_source
   if [[ -n "$gate_lock_local_host_name" &&
-    "$gate_lock_local_host_fingerprint" =~ ^[0-9a-f]{64}$ ]]; then
+    "$gate_lock_local_host_fingerprint" =~ ^[0-9a-f]{64}$ &&
+    "$gate_lock_local_machine_source" =~ ^(none|override|machineid|ioplatform|kernuuid)$ &&
+    "$gate_lock_local_machine_fingerprint" =~ ^[0-9a-f]{64}$ &&
+    "$gate_lock_no_machine_fingerprint" =~ ^[0-9a-f]{64}$ ]]; then
     return 0
   fi
   if ! host_name="$(uname -n 2>/dev/null)" ||
     [[ -z "$host_name" || "$host_name" == *$'\n'* ||
       "$host_name" == *$'\r'* ]] ||
-    ! fingerprint="$(gate_lock_current_host_fingerprint "$host_name")" ||
-    [[ ! "$fingerprint" =~ ^[0-9a-f]{64}$ ]]; then
+    ! host_fingerprint="$(gate_lock_current_host_fingerprint "$host_name")" ||
+    [[ ! "$host_fingerprint" =~ ^[0-9a-f]{64}$ ]] ||
+    ! no_machine_fingerprint="$(
+      gate_lock_current_host_fingerprint "<no-machine-identity>"
+    )" || [[ ! "$no_machine_fingerprint" =~ ^[0-9a-f]{64}$ ]]; then
     gate_lock_local_host_name=""
     gate_lock_local_host_fingerprint=""
+    gate_lock_local_machine_source=""
+    gate_lock_local_machine_fingerprint=""
+    gate_lock_no_machine_fingerprint=""
+    return 2
+  fi
+  gate_lock_resolve_machine_id
+  machine_identity="$gate_lock_machine_id_cached"
+  if [[ -n "$machine_identity" ]]; then
+    machine_source="${machine_identity%%:*}"
+  else
+    machine_source=none
+    machine_identity="<no-machine-identity>"
+  fi
+  if [[ ! "$machine_source" =~ ^(none|override|machineid|ioplatform|kernuuid)$ ]] ||
+    ! machine_fingerprint="$(gate_lock_current_host_fingerprint "$machine_identity")" ||
+    [[ ! "$machine_fingerprint" =~ ^[0-9a-f]{64}$ ]]; then
+    gate_lock_local_host_name=""
+    gate_lock_local_host_fingerprint=""
+    gate_lock_local_machine_source=""
+    gate_lock_local_machine_fingerprint=""
+    gate_lock_no_machine_fingerprint=""
     return 2
   fi
   gate_lock_local_host_name="$host_name"
-  gate_lock_local_host_fingerprint="$fingerprint"
+  gate_lock_local_host_fingerprint="$host_fingerprint"
+  gate_lock_local_machine_source="$machine_source"
+  gate_lock_local_machine_fingerprint="$machine_fingerprint"
+  gate_lock_no_machine_fingerprint="$no_machine_fingerprint"
+}
+
+# Owner quarantines name the process that CREATED the quarantine. That process
+# can differ from the owner whose record is inside it, so recovery must never
+# derive the creator's machine from the quarantined record. v2 binds the
+# creator's tagged machine source and identity digest, hostname digest,
+# creation time, and PID into the directory name. The digest keeps the stable
+# identity out of a pathname while preserving exact comparisons.
+gate_lock_owner_quarantine_template() {
+  local parent="$1"
+  local created_at
+  [[ -n "$parent" &&
+    "$gate_lock_local_machine_source" =~ ^(none|override|machineid|ioplatform|kernuuid)$ &&
+    "$gate_lock_local_machine_fingerprint" =~ ^[0-9a-f]{64}$ &&
+    "$gate_lock_local_host_fingerprint" =~ ^[0-9a-f]{64}$ ]] || return 2
+  if ! created_at="$(date +%s 2>/dev/null)" ||
+    [[ ! "$created_at" =~ ^[0-9]{1,12}$ ]]; then
+    return 2
+  fi
+  printf '%s/owner.reclaiming.quarantine.v2.%s.%s.%s.%s.%s.XXXXXX\n' \
+    "$parent" "$gate_lock_local_machine_source" \
+    "$gate_lock_local_machine_fingerprint" \
+    "$gate_lock_local_host_fingerprint" "$created_at" "$$"
+}
+
+# Node parses the quarantine creator PID as one JavaScript safe integer. Keep
+# Bash on the same positive range without feeding an attacker-sized decimal to
+# shell arithmetic. Equal-length ASCII decimal strings compare numerically.
+gate_lock_quarantine_pid_is_safe_integer() {
+  local value="$1"
+  local LC_ALL=C
+  [[ "$value" =~ ^[1-9][0-9]*$ ]] || return 1
+  if [[ "${#value}" -lt 16 ]]; then
+    return 0
+  fi
+  [[ "${#value}" -eq 16 ]] || return 1
+  [[ "$value" == 9007199254740991 ||
+    "$value" < 9007199254740991 ]]
+}
+
+# Compare the creator metadata in a v2 quarantine with this process. This is
+# the digest form of gate_lock_machine_verdict. A matching machine digest on a
+# possibly shared root still needs the hostname digest to match because cloned
+# machine IDs are common in containers.
+gate_lock_quarantine_creator_machine_verdict() {
+  local creator_machine_source="$1"
+  local creator_machine_fingerprint="$2"
+  local creator_host_fingerprint="$3"
+  local root_is_per_machine="$4"
+  if [[ "$creator_machine_source" != none &&
+    "$gate_lock_local_machine_source" != none ]]; then
+    if [[ "$creator_machine_source" == "$gate_lock_local_machine_source" &&
+      "$creator_machine_fingerprint" == "$gate_lock_local_machine_fingerprint" ]]; then
+      if [[ "$root_is_per_machine" -eq 1 ||
+        "$creator_host_fingerprint" == "$gate_lock_local_host_fingerprint" ]]; then
+        printf 'same\n'
+      else
+        printf 'unverified\n'
+      fi
+    elif [[ "$creator_machine_source" == "$gate_lock_local_machine_source" &&
+      "$root_is_per_machine" -ne 1 ]]; then
+      printf 'other\n'
+    else
+      printf 'unverified\n'
+    fi
+    return 0
+  fi
+  if [[ "$creator_host_fingerprint" == "$gate_lock_local_host_fingerprint" ]]; then
+    printf 'same\n'
+  else
+    printf 'unverified\n'
+  fi
+}
+
+# v1 owner quarantines do not carry a creation epoch. Read the directory mtime
+# only after validating the same current-user mode-0700 directory contract used
+# by recovery. An unreadable timestamp returns no age and therefore cannot
+# authorize an unverified reclaim.
+gate_lock_private_directory_started_at() {
+  node -e '
+    const fs = require("node:fs");
+    const path = process.argv[1];
+    const expectedUid = Number(process.argv[2]);
+    const stat = fs.lstatSync(path);
+    if (
+      !stat.isDirectory() ||
+      stat.isSymbolicLink() ||
+      stat.uid !== expectedUid ||
+      (stat.mode & 0o777) !== 0o700 ||
+      !Number.isFinite(stat.mtimeMs)
+    ) process.exit(1);
+    process.stdout.write(`${Math.floor(stat.mtimeMs / 1000)}\n`);
+  ' "$1" "$(id -u)" 2>/dev/null
 }
 
 gate_lock_path_matches_open_descriptor() {
@@ -986,7 +1137,8 @@ gate_lock_prepare_owner_quarantine() {
   local record="$1"
   local retention_state="${2:-Nothing has been executed.}"
   local raw_marker_token="${3:-}"
-  local parent quarantine quarantine_prefix="owner.reclaiming.quarantine.v1"
+  local parent quarantine quarantine_template
+  local quarantine_prefix="owner.reclaiming.quarantine.v1"
   gate_lock_clear_quarantine_state
   gate_lock_quarantine_retention_state="$retention_state"
   if [[ -n "$raw_marker_token" ]]; then
@@ -1003,7 +1155,13 @@ gate_lock_prepare_owner_quarantine() {
     gate_lock_clear_quarantine_state
     return 2
   fi
-  if ! quarantine="$(mktemp -d "${parent}/${quarantine_prefix}.${gate_lock_local_host_fingerprint}.$$.XXXXXX")"; then
+  if [[ -n "$raw_marker_token" ]]; then
+    quarantine_template="${parent}/${quarantine_prefix}.${gate_lock_local_host_fingerprint}.$$.XXXXXX"
+  elif ! quarantine_template="$(gate_lock_owner_quarantine_template "$parent")"; then
+    gate_lock_clear_quarantine_state
+    return 2
+  fi
+  if ! quarantine="$(mktemp -d "$quarantine_template")"; then
     gate_lock_clear_quarantine_state
     return 2
   fi
@@ -1540,12 +1698,14 @@ gate_lock_recover_owner_quarantine() {
 
 gate_lock_claim_owner_quarantine() {
   local source="$1"
-  local parent claimed claim_status
+  local parent claimed claim_status quarantine_template
   gate_lock_claimed_quarantine=""
   parent="${source%/*}"
   [[ -n "$parent" && "$parent" != "$source" ]] || return 2
   [[ "$gate_lock_local_host_fingerprint" =~ ^[0-9a-f]{64}$ ]] || return 2
-  claimed="$(mktemp -d "${parent}/owner.reclaiming.quarantine.v1.${gate_lock_local_host_fingerprint}.$$.XXXXXX")" ||
+  quarantine_template="$(gate_lock_owner_quarantine_template "$parent")" ||
+    return 2
+  claimed="$(mktemp -d "$quarantine_template")" ||
     return 2
   if ! chmod 700 "$claimed" ||
     ! gate_lock_private_quarantine_directory_is_safe "$claimed"; then
@@ -1719,8 +1879,12 @@ gate_lock_claim_owner_quarantine() {
 gate_lock_recover_hidden_record() {
   local lock="$1"
   local this_host="$2"
-  local remnant remnant_name creator_host_fingerprint creator_pid creator_nonce
-  local dead_quarantine claim_status pid host start prepare_status recovered=1
+  local remnant remnant_name creator_version creator_machine_source
+  local creator_machine_fingerprint creator_host_fingerprint creator_started_at
+  local creator_pid creator_nonce creator_machine_verdict creator_age
+  local creator_pid_is_local
+  local dead_quarantine claim_status pid host machine start started_at
+  local machine_verdict record_age prepare_status recovered=1
   local active_quarantine=0
   # Settle private quarantines before ordinary remnants. A crash after the
   # hard-link witness leaves both paths. Processing the ordinary remnant first
@@ -1737,42 +1901,98 @@ gate_lock_recover_hidden_record() {
     for remnant in "$lock"/owner.reclaiming.quarantine.*; do
       [[ -e "$remnant" || -L "$remnant" ]] || continue
       remnant_name="${remnant##*/}"
-      if [[ ! "$remnant_name" =~ ^owner\.reclaiming\.quarantine\.v1\.([0-9a-f]+)\.([1-9][0-9]*)\.([A-Za-z0-9][A-Za-z0-9.-]*)$ ]]; then
+      creator_version=""
+      creator_machine_source=none
+      creator_machine_fingerprint=""
+      creator_host_fingerprint=""
+      creator_started_at=""
+      creator_pid=""
+      creator_nonce=""
+      if [[ "$remnant_name" =~ ^owner\.reclaiming\.quarantine\.v2\.(none|override|machineid|ioplatform|kernuuid)\.([0-9a-f]+)\.([0-9a-f]+)\.([0-9]{1,12})\.([1-9][0-9]*)\.([A-Za-z0-9][A-Za-z0-9.-]*)$ ]]; then
+        creator_version=v2
+        creator_machine_source="${BASH_REMATCH[1]}"
+        creator_machine_fingerprint="${BASH_REMATCH[2]}"
+        creator_host_fingerprint="${BASH_REMATCH[3]}"
+        creator_started_at="${BASH_REMATCH[4]}"
+        creator_pid="${BASH_REMATCH[5]}"
+        creator_nonce="${BASH_REMATCH[6]}"
+      elif [[ "$remnant_name" =~ ^owner\.reclaiming\.quarantine\.v1\.([0-9a-f]+)\.([1-9][0-9]*)\.([A-Za-z0-9][A-Za-z0-9.-]*)$ ]]; then
+        creator_version=v1
+        creator_host_fingerprint="${BASH_REMATCH[1]}"
+        creator_pid="${BASH_REMATCH[2]}"
+        creator_nonce="${BASH_REMATCH[3]}"
+      else
         echo "error: the quality-gate owner quarantine has an invalid recovery name: ${remnant}." >&2
         echo "The quarantine was retained. Nothing has been executed." >&2
         gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
           "No mapped command ran in this request"
         exit 2
       fi
-      creator_host_fingerprint="${BASH_REMATCH[1]}"
-      creator_pid="${BASH_REMATCH[2]}"
-      creator_nonce="${BASH_REMATCH[3]}"
       if [[ "${#creator_host_fingerprint}" -ne 64 ||
-        "${#creator_nonce}" -lt 6 || "${#creator_nonce}" -gt 80 ]]; then
+        ( "$creator_version" == v2 && "${#creator_machine_fingerprint}" -ne 64 ) ||
+        ( "$creator_version" == v2 && "$creator_started_at" == 0* ) ||
+        ( "$creator_version" == v2 && "$creator_machine_source" == none &&
+          "$creator_machine_fingerprint" != "$gate_lock_no_machine_fingerprint" ) ||
+        "${#creator_nonce}" -lt 6 || "${#creator_nonce}" -gt 80 ]] ||
+        ! gate_lock_quarantine_pid_is_safe_integer "$creator_pid"; then
         echo "error: the quality-gate owner quarantine has an invalid recovery name: ${remnant}." >&2
         echo "The quarantine was retained. Nothing has been executed." >&2
         gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
           "No mapped command ran in this request"
         exit 2
       fi
-      if [[ "$creator_host_fingerprint" != "$gate_lock_local_host_fingerprint" ]] ||
-        gate_lock_holder_is_live "$creator_pid" ""; then
-        active_quarantine=1
-        [[ -n "$gate_lock_active_quarantine_pid" ]] ||
-          gate_lock_active_quarantine_pid="$creator_pid"
-        if [[ -z "$gate_lock_active_quarantine_host" ]]; then
-          if [[ "$creator_host_fingerprint" == "$gate_lock_local_host_fingerprint" ]]; then
-            gate_lock_active_quarantine_host="$this_host"
-          else
-            gate_lock_active_quarantine_host="foreign host ${creator_host_fingerprint:0:12}"
-          fi
+      if ! gate_lock_private_quarantine_directory_is_safe "$remnant"; then
+        echo "error: the quality-gate owner quarantine at ${remnant} is not a current-user mode-0700 directory." >&2
+        echo "The quarantine was retained. Nothing has been executed." >&2
+        gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+          "No mapped command ran in this request"
+        exit 2
+      fi
+      if [[ "$creator_version" == v1 ]]; then
+        creator_machine_source=none
+        creator_machine_fingerprint="$gate_lock_local_machine_fingerprint"
+        creator_started_at="$(gate_lock_private_directory_started_at "$remnant" || true)"
+      fi
+      creator_machine_verdict="$(
+        gate_lock_quarantine_creator_machine_verdict \
+          "$creator_machine_source" "$creator_machine_fingerprint" \
+          "$creator_host_fingerprint" "$gate_lock_root_is_per_machine"
+      )"
+      creator_age="$(gate_lock_record_age_seconds "$creator_started_at")"
+      creator_pid_is_local=0
+      if [[ "$creator_machine_verdict" == same ]]; then
+        creator_pid_is_local=1
+      elif [[ "$creator_machine_verdict" == unverified &&
+        "$gate_lock_root_is_per_machine" -eq 1 &&
+        -n "$creator_age" &&
+        "$creator_age" -ge "$gate_lock_unverified_machine_grace_seconds" ]]; then
+        creator_pid_is_local=1
+      fi
+      if [[ "$creator_pid_is_local" -eq 1 ]] &&
+        ! gate_lock_holder_is_live "$creator_pid" ""; then
+        [[ -n "$dead_quarantine" ]] || dead_quarantine="$remnant"
+        # Recover one dead quarantine at a time. Every other dead quarantine is
+        # also inactive, so it cannot turn this scan into a false busy verdict.
+        continue
+      fi
+      # `other` and shared-root `unverified` evidence never leads to a local PID
+      # lookup. Young or age-unknown unverified evidence on a per-machine root
+      # also remains active until the grace can establish a reclaimable case.
+      active_quarantine=1
+      [[ -n "$gate_lock_active_quarantine_pid" ]] ||
+        gate_lock_active_quarantine_pid="$creator_pid"
+      if [[ -z "$gate_lock_active_quarantine_host" ]]; then
+        if [[ "$creator_machine_verdict" == same ]]; then
+          gate_lock_active_quarantine_host="$this_host"
+        elif [[ "$creator_machine_verdict" == other ]]; then
+          gate_lock_active_quarantine_host="other machine ${creator_machine_source}:${creator_machine_fingerprint:0:12}"
+        else
+          gate_lock_active_quarantine_host="unverified machine ${creator_host_fingerprint:0:12}"
         fi
-      elif [[ -z "$dead_quarantine" ]]; then
-        dead_quarantine="$remnant"
       fi
     done
-    # Never mutate one quarantine while another live or foreign-host creator
-    # can still advance its phase in the same shared lock directory.
+    # Never mutate one quarantine while another live or non-local creator can
+    # still advance its phase in the same lock directory.
     [[ "$active_quarantine" -eq 0 ]] || return 4
     [[ -n "$dead_quarantine" ]] || break
     if ! gate_lock_wait_for_test_barrier_instance "$owner_quarantine_before_claim_test_barrier"; then
@@ -1836,11 +2056,23 @@ gate_lock_recover_hidden_record() {
     fi
     pid="$(gate_lock_field_from_file "$gate_lock_quarantine_anchor" pid)"
     host="$(gate_lock_field_from_file "$gate_lock_quarantine_anchor" host)"
+    machine="$(gate_lock_field_from_file "$gate_lock_quarantine_anchor" machine)"
     start="$(gate_lock_field_from_file "$gate_lock_quarantine_anchor" start_utc)"
-    # A PID from another host has no local meaning. Treat the record as live
-    # evidence, as the canonical-owner path does, until that host replaces or
-    # removes it through the shared root.
-    if [[ -n "$host" && "$host" != "$this_host" ]] ||
+    started_at="$(gate_lock_field_from_file "$gate_lock_quarantine_anchor" started_at)"
+    machine_verdict="$(
+      gate_lock_machine_verdict \
+        "$machine" "$host" "$gate_lock_machine_id_cached" "$this_host" \
+        "$gate_lock_root_is_per_machine"
+    )"
+    record_age="$(gate_lock_record_age_seconds "$started_at")"
+    # Only same-machine evidence reaches an immediate local PID lookup. An
+    # unverified record on per-machine storage reaches it after the grace.
+    # Other-machine and possibly-shared unverified evidence stays live without
+    # interpreting its PID in this process table.
+    if [[ "$machine_verdict" == other ]] ||
+      [[ "$machine_verdict" == unverified &&
+        ( "$gate_lock_root_is_per_machine" -ne 1 || -z "$record_age" ||
+          "$record_age" -lt "$gate_lock_unverified_machine_grace_seconds" ) ]] ||
       gate_lock_holder_is_live "$pid" "$start"; then
       # `ln` refuses an occupied path, so a record published while we were
       # reading loses nothing: ours is then the stale copy and just goes away.
@@ -1853,7 +2085,7 @@ gate_lock_recover_hidden_record() {
             "No mapped command ran in this request"
           exit 2
         fi
-        echo "Recovered the record of live holder pid ${pid} from an interrupted reclaim." >&2
+        echo "Recovered retained holder evidence for pid ${pid} from an interrupted reclaim." >&2
         recovered=0
       elif [[ ! -e "$lock/owner" && ! -L "$lock/owner" ]]; then
         # A shared root can expose another user's mode-0600 remnant while the
@@ -1962,6 +2194,44 @@ gate_lock_owner_grace_seconds="$(gate_lock_seconds_knob AGENT_QUALITY_GATE_LOCK_
 # the same reason as the grace — the self-test asserts that waiting happens,
 # not that it takes five seconds a round.
 gate_lock_poll_seconds="$(gate_lock_seconds_knob AGENT_QUALITY_GATE_LOCK_POLL_SECONDS 5)"
+# How old a record whose machine cannot be established has to be before a dead
+# holder in it may be reclaimed. Only records this gate did not write reach it:
+# one from a gate that predates the machine field, or one whose identity source
+# this run cannot reach. Ten minutes is long enough that a real run on a shared
+# lock root is never judged on this rule while it is starting up, and short
+# enough that a machine rename costs one wait of this length instead of the
+# whole 1800-second budget, every run, forever (GitHub issue #2055).
+gate_lock_unverified_machine_grace_seconds="$(
+  gate_lock_seconds_knob AGENT_QUALITY_GATE_LOCK_UNVERIFIED_MACHINE_GRACE_SECONDS 600
+)"
+# Whether this lock root sits on storage this machine mounts itself. It decides
+# how far a local PID lookup may be trusted, so it is established by evidence
+# rather than by where the path came from: `$HOME` is as likely to be a network
+# home directory as a local disk, and assuming otherwise would let a run
+# reclaim a lock whose holder is alive on another machine. Resolved against the
+# filesystem in acquire_gate_run_lock once the root is known; unanswerable
+# means "may be shared", which is the direction that keeps waiting.
+#
+# What this establishes is that the storage is not mounted FROM somewhere else,
+# which is the configuration a network home directory creates and the one a
+# developer machine can fall into without choosing it. It does not establish
+# that the directory is unreachable — a machine can export its own disk over
+# NFS or SMB and point another machine's gate at it. That is a deliberate act
+# of sharing, and the declaration below is how it is told: setting it to 0
+# keeps every reclaim on this path refused. Nothing in this repo asks for that
+# configuration; concurrent validation from another machine is documented as
+# running against its OWN checkout and its own lock.
+gate_lock_root_is_per_machine=0
+gate_lock_root_per_machine_override="${AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE:-}"
+case "$gate_lock_root_per_machine_override" in
+  "") ;;
+  1 | true | yes) gate_lock_root_per_machine_override=1 ;;
+  0 | false | no) gate_lock_root_per_machine_override=0 ;;
+  *)
+    echo "error: AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE must be 1 or 0; got '${gate_lock_root_per_machine_override}'." >&2
+    exit 2
+    ;;
+esac
 # The lock root, kept once resolved: outstanding obligations live beside the
 # lock rather than inside it, because the lock directory is what gets reclaimed
 # and the obligation has to outlive that.
@@ -2392,6 +2662,230 @@ gate_lock_process_start_legacy_wire() {
   TZ=UTC LC_ALL=C ps -o lstart= -p "$pid" 2>/dev/null | head -n1 || true
 }
 
+# A machine identity that survives a rename, recorded beside the hostname so a
+# waiter can tell "the same machine under a new name" from "another machine on
+# shared storage". The hostname alone could not: renaming a Mac from
+# `Workbook.local` to `Mac` made every later run read its own dead holder as a
+# live foreign one and wait out the whole `--lock-wait` budget with no
+# self-healing (GitHub issue #2055).
+#
+# The value is stored as `<source>:<id>`, and the source tag is load-bearing.
+# Two ids from the same source can be compared as machine identities: equal
+# means the same machine, different means a different one. Two ids from
+# DIFFERENT sources cannot — a run that read `ioplatform` and a run that fell
+# back to `kernuuid` are almost certainly the same machine, and reading their
+# unequal values as "another machine" would invent exactly the wedge this
+# exists to remove. So a source mismatch is not a verdict at all; it degrades
+# to the same unverified handling as a record with no machine field.
+#
+# The id is validated against the record's alphabet, never rewritten into it.
+# Rewriting would be lossy, and a lossy transform on an identity is a way to
+# make two machines look like one: stripping the unrepresentable characters
+# maps `machine/a` and `machinea` onto the same value, and truncating maps
+# every pair that first differs past the limit onto the same value too. Either
+# collision reads as `same` and authorises a reclaim on a PID lookup that
+# belongs to the other machine. So a value outside the alphabet is refused
+# instead, which costs an identity nobody can compare — the defined,
+# conservative state — rather than inventing one that compares equal to
+# somebody else's. `:` is outside the alphabet, so the split on the first `:`
+# is unambiguous; so is a newline, which would otherwise let an id forge a
+# second field in a record read line by line.
+gate_lock_machine_id_cached=""
+gate_lock_machine_id_resolved=0
+
+gate_lock_tag_machine_id() {
+  local source_tag="$1"
+  local value="$2"
+  # One rule, and nothing before it. Any normalisation here — trimming
+  # whitespace, deleting line breaks, truncating — is a many-to-one map, and a
+  # many-to-one map on an identity is exactly how two machines come to compare
+  # equal: deleting the break in `machine<LF>a` yields `machinea`, which is
+  # another machine's legitimate id. Distinct valid inputs must stay distinct,
+  # so the value is accepted as written or not at all. Every source below
+  # already yields a bare token; one that does not is a source this run cannot
+  # use, which is the defined conservative state.
+  [[ "$value" =~ ^[A-Za-z0-9._-]{1,128}$ ]] || return 1
+  printf '%s:%s\n' "$source_tag" "$value"
+}
+
+# Resolves into `gate_lock_machine_id_cached` rather than onto stdout, so the
+# answer survives: a function that printed it would be called through command
+# substitution, the cache would be set in a subshell, and every caller would
+# pay for the probe again. Sources are tried in a fixed order so one machine
+# cannot answer differently between two runs that both reach the same source.
+# An unavailable source is not an error: no identity at all is a defined state
+# that falls back to the hostname, which is what the gate did before this.
+gate_lock_resolve_machine_id() {
+  local raw=""
+  [[ "$gate_lock_machine_id_resolved" -eq 0 ]] || return 0
+  gate_lock_machine_id_resolved=1
+  gate_lock_machine_id_cached=""
+  # An explicit override first, so a container that hides every hardware
+  # identity — and the self-test, which has to simulate two machines on one —
+  # can still name the machine its lock root belongs to. A value this record
+  # cannot carry stops the run rather than falling through to a probed
+  # identity: the operator set this to name a machine, and continuing under a
+  # different identity than they asked for is how two machines end up comparing
+  # equal. Loud and refused, so it is fixed rather than silently ignored.
+  if [[ -n "${AGENT_QUALITY_GATE_LOCK_MACHINE_ID:-}" ]]; then
+    if ! gate_lock_machine_id_cached="$(
+      gate_lock_tag_machine_id override "${AGENT_QUALITY_GATE_LOCK_MACHINE_ID}"
+    )"; then
+      echo "error: AGENT_QUALITY_GATE_LOCK_MACHINE_ID must be 1-128 characters of A-Z a-z 0-9 . _ - and nothing else." >&2
+      echo "It names one machine in the lock records this gate writes, so it is never rewritten to fit — two values that differ must stay different." >&2
+      echo "Nothing has been executed. Fix that value, or unset it to let the gate read this machine's own identity." >&2
+      exit 2
+    fi
+  fi
+  if [[ -z "$gate_lock_machine_id_cached" ]]; then
+    # Linux. `/var/lib/dbus/machine-id` is conventionally the same file, so
+    # both carry one tag: reading either yields the same identity.
+    for raw in /etc/machine-id /var/lib/dbus/machine-id; do
+      [[ -r "$raw" ]] || continue
+      gate_lock_machine_id_cached="$(
+        gate_lock_tag_machine_id machineid "$(head -n1 "$raw" 2>/dev/null || true)" || true
+      )"
+      [[ -z "$gate_lock_machine_id_cached" ]] || break
+    done
+  fi
+  if [[ -z "$gate_lock_machine_id_cached" ]] && command -v ioreg > /dev/null 2>&1; then
+    # macOS. IOPlatformUUID is burned into the hardware and is what a rename
+    # cannot touch.
+    raw="$(
+      ioreg -rd1 -c IOPlatformExpertDevice 2>/dev/null |
+        awk -F'"' '/IOPlatformUUID/ { print $4; exit }' || true
+    )"
+    gate_lock_machine_id_cached="$(gate_lock_tag_machine_id ioplatform "$raw" || true)"
+  fi
+  if [[ -z "$gate_lock_machine_id_cached" ]] && command -v sysctl > /dev/null 2>&1; then
+    raw="$(sysctl -n kern.uuid 2>/dev/null || true)"
+    gate_lock_machine_id_cached="$(gate_lock_tag_machine_id kernuuid "$raw" || true)"
+  fi
+}
+
+# Which machine wrote a record, as far as this run can tell:
+#
+#   same        — this machine. PIDs in the record mean something here, so the
+#                 liveness rules decide, and a dead holder is reclaimed at once.
+#   other       — definitively a different machine. Its PIDs mean nothing here
+#                 and its holder may well be running, so this is never
+#                 reclaimed on any evidence available locally.
+#   unverified  — the machine cannot be established: a record from a gate that
+#                 predates the machine field, a source mismatch, or a host with
+#                 no identity source. Handled by the aged-and-dead rule at the
+#                 call site, never by a straight reclaim.
+#
+# The hostname decides only where a machine identity is missing on one side or
+# the other, which keeps the pre-existing behaviour intact for records this
+# gate did not write.
+#
+# `other` is reachable only where the root may be shared, and that restriction
+# is what keeps this from re-creating the wedge it exists to remove. A machine
+# identity is not immutable — `/etc/machine-id` is regenerated by an OS
+# reinstall or an image rebuild, and the override can simply be changed — so on
+# storage this machine mounts itself, a disagreeing identity is far more likely
+# to be this machine's own identity having moved, exactly as a rename moved its
+# hostname, than a second machine writing into the same directory. Reading it
+# as another machine would leave the record unreclaimable forever. Where the
+# root is on network storage there is no such reasoning available, and a
+# disagreeing identity has to be believed.
+#
+# The converse does not hold, and that asymmetry is why an AGREEING identity is
+# not by itself enough on a root that may be shared. A disagreeing id is proof
+# of two machines; an agreeing one is not proof of one, because ids are not
+# guaranteed unique. Containers built from a single base image famously carry
+# the same baked-in `/etc/machine-id`, so two of them mounting one lock
+# directory agree on their identity while having separate PID namespaces —
+# where a local `kill -0` on the other's holder reads "gone" and would reclaim
+# a live lock. So off proven-local storage the hostname has to agree as well;
+# where it does not, the pair is unverified and this path never reclaims it.
+# On storage this machine mounts itself no second machine is writing records in
+# the first place, and the hostname is the field the rename moved, so requiring
+# it there would refuse the very case this exists to fix.
+gate_lock_machine_verdict() {
+  local owner_machine="$1"
+  local owner_host="$2"
+  local this_machine="$3"
+  local this_host="$4"
+  local root_is_per_machine="$5"
+  if [[ -n "$owner_machine" && -n "$this_machine" ]]; then
+    if [[ "$owner_machine" == "$this_machine" ]]; then
+      if [[ "$root_is_per_machine" -eq 1 || -z "$owner_host" ||
+        "$owner_host" == "$this_host" ]]; then
+        printf 'same\n'
+      else
+        printf 'unverified\n'
+      fi
+    elif [[ "${owner_machine%%:*}" == "${this_machine%%:*}" &&
+      "$root_is_per_machine" -ne 1 ]]; then
+      printf 'other\n'
+    else
+      printf 'unverified\n'
+    fi
+    return 0
+  fi
+  # No machine identity on one side. A matching hostname is the same evidence
+  # the gate has always run on, and an absent hostname was never treated as
+  # foreign either.
+  if [[ -z "$owner_host" || "$owner_host" == "$this_host" ]]; then
+    printf 'same\n'
+  else
+    printf 'unverified\n'
+  fi
+}
+
+# Is this directory on a filesystem only this machine can reach? `df -l` lists
+# local filesystems and omits network ones — NFS, SMB, AFS, an autofs map — on
+# both the BSD and GNU implementations, so a path that still produces a row is
+# on local storage. The row, not the exit status, is the answer: both
+# implementations exit 0 for a remote path and simply print no row for it.
+#
+# Every failure means "no", because the question only ever widens what a local
+# PID lookup is allowed to conclude. No `df`, an unreadable path, an
+# implementation without `-l`: all of them leave the root treated as possibly
+# shared, which is the answer that keeps mutual exclusion across machines.
+gate_lock_path_is_local_filesystem() {
+  local dir="$1"
+  local row
+  [[ -n "$dir" ]] || return 1
+  command -v df > /dev/null 2>&1 || return 1
+  row="$(df -l -- "$dir" 2>/dev/null | tail -n +2 | tr -d '[:space:]' || true)"
+  [[ -n "$row" ]]
+}
+
+# Test-only, and gated the same way as the other lock-test hooks. This probe
+# decides whether a local PID lookup may authorise a reclaim, so the self-test
+# has to exercise it in BOTH directions — a check that only ever answers "local"
+# would pass every case above while proving nothing. Answering "not-local"
+# needs a path on a filesystem `df -l` omits, which the suite discovers from
+# the mount table rather than fabricates, so the probe is reachable here on its
+# own. Nothing else runs on this path: it answers and exits.
+if [[ -n "${AGENT_QUALITY_GATE_LOCK_PROBE_PATH:-}" ]]; then
+  if [[ "${NODE_ENV:-}" != "test" ]]; then
+    echo "error: the gate lock locality probe is allowed only with NODE_ENV=test." >&2
+    exit 2
+  fi
+  if gate_lock_path_is_local_filesystem "$AGENT_QUALITY_GATE_LOCK_PROBE_PATH"; then
+    printf 'local\n'
+  else
+    printf 'not-local\n'
+  fi
+  exit 0
+fi
+
+# How long ago a record was written, in whole seconds, or nothing when that
+# cannot be established. Nothing is the fail-closed answer: age only ever
+# unlocks a reclaim, so an unreadable or future-dated stamp keeps this run
+# waiting rather than letting an unknown age pass for an old one.
+gate_lock_record_age_seconds() {
+  local started_at="$1"
+  local now
+  [[ "$started_at" =~ ^[0-9]{1,12}$ ]] || return 0
+  now="$(date +%s)"
+  [[ "$now" -ge "$started_at" ]] || return 0
+  printf '%s\n' $((now - started_at))
+}
+
 # Read the kernel's start-time string and process state in one snapshot.
 # Comparing the start string avoids date parsing. Pin the formatting
 # environment because `ps` renders lstart in the caller's time zone and locale.
@@ -2508,7 +3002,11 @@ gate_lock_record_still_stale() {
   local decided_pid="$2"
   local decided_token="$3"
   local decided_start="$4"
+  local decided_host="$5"
+  local decided_machine="$6"
+  local decided_started_at="$7"
   local current_pid current_token_value current_start
+  local current_host current_machine current_started_at
   if ! gate_lock_record_is_readable_regular "$record"; then
     [[ ! -e "$record" && ! -L "$record" ]] && return 3
     return 2
@@ -2516,6 +3014,9 @@ gate_lock_record_still_stale() {
   current_pid="$(gate_lock_field_from_file "$record" pid)"
   current_token_value="$(gate_lock_authority_token_from_record "$record")"
   current_start="$(gate_lock_field_from_file "$record" start_utc)"
+  current_host="$(gate_lock_field_from_file "$record" host)"
+  current_machine="$(gate_lock_field_from_file "$record" machine)"
+  current_started_at="$(gate_lock_field_from_file "$record" started_at)"
   if ! gate_lock_record_is_readable_regular "$record"; then
     [[ ! -e "$record" && ! -L "$record" ]] && return 3
     return 2
@@ -2523,6 +3024,9 @@ gate_lock_record_still_stale() {
   [[ "$current_pid" == "$decided_pid" ]] || return 1
   [[ "$current_token_value" == "$decided_token" ]] || return 1
   [[ "$current_start" == "$decided_start" ]] || return 1
+  [[ "$current_host" == "$decided_host" ]] || return 1
+  [[ "$current_machine" == "$decided_machine" ]] || return 1
+  [[ "$current_started_at" == "$decided_started_at" ]] || return 1
   # A record with no token never finished being written, so it is not a claim
   # at all and its PID field may itself be a truncated value — asking whether
   # that PID is alive would be asking about a number nobody wrote. The grace
@@ -2548,6 +3052,9 @@ claim_gate_run_lock() {
   [[ -n "$gate_lock_local_host_name" ]] || return 2
   [[ "$claim_uid" =~ ^[0-9]+$ ]] || return 2
   gate_lock_token_is_wellformed "$token" || return 2
+  # Idempotent, and free after the first call. Here as well as in the wait loop
+  # so the record can never be published without the field a later reader needs.
+  gate_lock_resolve_machine_id
   # Registered before it exists, like every other file this path creates. Any
   # file already there was left by a dead process that happened to share our
   # PID, so it is ours to remove.
@@ -2557,6 +3064,11 @@ claim_gate_run_lock() {
     printf 'pid=%s\n' "$$"
     printf 'uid=%s\n' "$claim_uid"
     printf 'host=%s\n' "$gate_lock_local_host_name"
+    # Additive on purpose. A gate that predates this field ignores it and reads
+    # the record exactly as it always did, and this gate reads a record without
+    # it through the unverified path — so the two versions coexist on one
+    # machine without either misjudging the other's locks.
+    printf 'machine=%s\n' "$gate_lock_machine_id_cached"
     printf 'started_at=%s\n' "$(date +%s)"
     printf 'start_utc=%s\n' "$(gate_lock_process_start_legacy_wire $$)"
     printf 'worktree=%s\n' "$repo_root"
@@ -3708,6 +4220,7 @@ gate_lock_refuse_owner_publication() {
 
 acquire_gate_run_lock_legacy() {
   local root lock owner_pid owner_host owner_worktree owner_token_value owner_start
+  local owner_machine owner_started_at machine_verdict record_age unverified_detail
   local stale_reason owner_state nap remaining now_millis
   local coordinator_join_status owner_record taken_record record_status
   local hidden_recovery_status hidden_recovery_busy
@@ -3723,7 +4236,8 @@ acquire_gate_run_lock_legacy() {
   local last_beat=0
   local announced=0
   local ownerless_since=""
-  local this_host
+  local unverified_warned=0
+  local this_host this_machine
   case "$gate_lock_enabled" in
     0|false|no) return 0 ;;
   esac
@@ -3783,6 +4297,27 @@ acquire_gate_run_lock_legacy() {
       "No mapped command ran in this request"
     exit 2
   fi
+  gate_lock_resolve_machine_id
+  this_machine="$gate_lock_machine_id_cached"
+  # Evidence for the root this gate chose, a declaration for the root an
+  # operator chose. The default candidates are this user's own cache and temp
+  # directories, which nothing points at deliberately, so the only open
+  # question there is whether the storage under them is mounted from elsewhere
+  # — and the filesystem answers that. AGENT_QUALITY_GATE_LOCK_DIR is the
+  # opposite: resolve_gate_lock_root treats it as a coordination contract
+  # precisely because it can name a directory more than one machine reaches,
+  # and a local mount is no evidence against that — a machine can export its
+  # own disk. So an override is possibly-shared until its owner says otherwise,
+  # which is what the declaration is for.
+  if [[ -n "$gate_lock_root_per_machine_override" ]]; then
+    gate_lock_root_is_per_machine="$gate_lock_root_per_machine_override"
+  elif [[ -n "${AGENT_QUALITY_GATE_LOCK_DIR:-}" ]]; then
+    gate_lock_root_is_per_machine=0
+  elif gate_lock_path_is_local_filesystem "$root"; then
+    gate_lock_root_is_per_machine=1
+  else
+    gate_lock_root_is_per_machine=0
+  fi
   wait_started_at="$(gate_wall_millis)"
 
   while :; do
@@ -3829,9 +4364,11 @@ acquire_gate_run_lock_legacy() {
     gate_lock_require_safe_existing_owner_record "$owner_record"
     owner_pid="$(gate_lock_owner_field "$lock" pid)"
     owner_host="$(gate_lock_owner_field "$lock" host)"
+    owner_machine="$(gate_lock_owner_field "$lock" machine)"
     owner_worktree="$(gate_lock_owner_field "$lock" worktree)"
     owner_token_value="$(gate_lock_owner_field "$lock" token)"
     owner_start="$(gate_lock_owner_field "$lock" start_utc)"
+    owner_started_at="$(gate_lock_owner_field "$lock" started_at)"
     gate_lock_require_safe_existing_owner_record "$owner_record"
     if [[ -z "$owner_token_value" ]]; then
       # Before believing there is no holder, read the remnants of any reclaim
@@ -3840,9 +4377,11 @@ acquire_gate_run_lock_legacy() {
         gate_lock_require_safe_existing_owner_record "$owner_record"
         owner_pid="$(gate_lock_owner_field "$lock" pid)"
         owner_host="$(gate_lock_owner_field "$lock" host)"
+        owner_machine="$(gate_lock_owner_field "$lock" machine)"
         owner_worktree="$(gate_lock_owner_field "$lock" worktree)"
         owner_token_value="$(gate_lock_owner_field "$lock" token)"
         owner_start="$(gate_lock_owner_field "$lock" start_utc)"
+        owner_started_at="$(gate_lock_owner_field "$lock" started_at)"
         gate_lock_require_safe_existing_owner_record "$owner_record"
       else
         hidden_recovery_status=$?
@@ -3854,6 +4393,11 @@ acquire_gate_run_lock_legacy() {
         fi
       fi
     fi
+    machine_verdict="$(
+      gate_lock_machine_verdict \
+        "$owner_machine" "$owner_host" "$this_machine" "$this_host" \
+        "$gate_lock_root_is_per_machine"
+    )"
 
     stale_reason=""
     [[ -n "$owner_token_value" ]] && ownerless_since=""
@@ -3870,9 +4414,12 @@ acquire_gate_run_lock_legacy() {
       if [[ $(($(date +%s) - ownerless_since)) -ge "$gate_lock_owner_grace_seconds" ]]; then
         stale_reason="its holder never recorded a complete identity"
       fi
-    elif [[ -n "$owner_host" && "$owner_host" != "$this_host" ]]; then
-      # Only reachable if the lock root is on shared storage. Another host's
-      # PIDs mean nothing here, so wait it out rather than guess.
+    elif [[ "$machine_verdict" == other ]]; then
+      # Two machine identities from the same source that disagree, on a root
+      # this run could not prove local. There is no evidence available here
+      # that could overturn it — another machine's PIDs mean nothing locally —
+      # so this record is waited out however old it gets, and the wait expiry
+      # names the holder.
       :
     elif ! gate_lock_token_is_wellformed "$owner_token_value"; then
       # A token this gate would never generate. Reclaiming would later drain
@@ -3880,6 +4427,38 @@ acquire_gate_run_lock_legacy() {
       # — so the holder is assumed live and waited out; the timeout fails
       # closed with the holder line naming the record.
       :
+    elif [[ "$machine_verdict" == unverified ]]; then
+      # An unverified record does not authorize a local PID lookup on storage
+      # that may be shared. On per-machine storage, age must pass first. Only
+      # then can a dead local PID complete the reclaim verdict.
+      record_age="$(gate_lock_record_age_seconds "$owner_started_at")"
+      unverified_detail="it records host '${owner_host:-unknown}' machine '${owner_machine:-none}', and this run is host '${this_host}' machine '${this_machine:-none}'"
+      if [[ "$gate_lock_root_is_per_machine" -ne 1 ]]; then
+        if [[ "$unverified_warned" -eq 0 ]]; then
+          unverified_warned=1
+          echo "warning: the gate run lock record at ${lock} cannot be tied to this machine: ${unverified_detail}." >&2
+          echo "  This lock root is not established as storage only this machine reaches, so it may be shared and that record may belong to a live run elsewhere. Its PID is not read locally. This run waits it out." >&2
+          echo "  If that directory is this machine's alone, set AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1 to let an aged dead holder in it be reclaimed." >&2
+        fi
+      elif [[ -n "$record_age" &&
+        "$record_age" -ge "$gate_lock_unverified_machine_grace_seconds" ]] &&
+        ! gate_lock_holder_is_live "$owner_pid" "$owner_start"; then
+        owner_state="$(gate_lock_process_state "$owner_pid")"
+        if [[ "$owner_state" == Z* ]]; then
+          stale_reason="holder pid ${owner_pid} has exited and is awaiting reap"
+        elif kill -0 "$owner_pid" 2>/dev/null; then
+          stale_reason="pid ${owner_pid} now belongs to a different process"
+        else
+          stale_reason="holder pid ${owner_pid} is gone"
+        fi
+        if [[ "$unverified_warned" -eq 0 ]]; then
+          unverified_warned=1
+          echo "warning: the gate run lock record at ${lock} cannot be tied to this machine: ${unverified_detail}." >&2
+          echo "  This lock root is on storage this machine mounts itself, its ${stale_reason}, and it was written ${record_age}s ago (grace ${gate_lock_unverified_machine_grace_seconds}s), so this run reads it as this machine's own under a name or identity it has since changed, and reclaims it." >&2
+          echo "  If this directory is exported to other machines, set AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=0 to refuse this reclaim." >&2
+        fi
+        stale_reason="${stale_reason}; its record cannot be tied to this machine and is ${record_age}s old on per-machine storage"
+      fi
     elif ! gate_lock_holder_is_live "$owner_pid" "$owner_start"; then
       owner_state="$(gate_lock_process_state "$owner_pid")"
       if [[ "$owner_state" == Z* ]]; then
@@ -3969,7 +4548,8 @@ acquire_gate_run_lock_legacy() {
             gate_lock_reclaim_origin=""
             gate_lock_refuse_unsafe_owner_record "$taken_record"
           elif gate_lock_record_still_stale \
-            "$taken_record" "$owner_pid" "$owner_token_value" "$owner_start"; then
+            "$taken_record" "$owner_pid" "$owner_token_value" "$owner_start" \
+            "$owner_host" "$owner_machine" "$owner_started_at"; then
             echo "Gate run lock at ${lock} is stale (${stale_reason}); reclaiming it." >&2
             # The holder is gone, but a gate killed mid-command leaves that
             # command running. Write down whose it was — on disk, before taking
@@ -5179,6 +5759,15 @@ failure_output_tail_lines=20
 # Trunk launcher provisioning verdict for this run: "" (not probed yet), "ok",
 # or "blocked". Probed at most once, and only after a Trunk command failed.
 trunk_provisioning_state=""
+# True once any Trunk arm in this run was downgraded to "skipped" because the
+# environment blocked provisioning. Separate from trunk_provisioning_state
+# because the launcher probe answers a question about the LAUNCHER and is
+# cached, while a blocked linter download is classified per arm from that arm's
+# own output. Drives the closing note and the whole-run stamp guard.
+trunk_arm_environment_blocked=false
+# Which provisioning stage blocked the arm currently being classified:
+# "launcher" (no CLI at all) or "linters" (CLI ran, its downloads failed).
+trunk_environment_blocked_kind=""
 
 format_duration() {
   local seconds="$1"
@@ -5407,7 +5996,366 @@ trunk_provisioning_is_blocked() {
   [[ "$trunk_provisioning_state" == blocked ]]
 }
 
+# Trunk downloads more than its own CLI. The launcher self-installs the pinned
+# CLI from trunk.io; that CLI then fetches plugin sources from github.com and,
+# on every check, the hermetic runtimes and linter binaries the enabled linters
+# need (nodejs.org, each linter's release host). An environment that allowlists
+# trunk.io but not those hosts provisions the launcher — `--version` succeeds,
+# so the probe above reports "ok" — and still fails every `trunk check`.
+#
+# Classifying that from the check output has one hard requirement: a real lint
+# finding must never be excused as an environment failure. So the classifier
+# never infers "nothing was found"; it only accepts output in which Trunk
+# ITSELF states that it found nothing and that every failure it counted was a
+# download step. Anything it cannot account for exactly leaves the failure
+# standing.
+#
+# Trunk's own wording for a failed download, as recorded in the detail YAML the
+# failed step writes. Measured against Trunk 1.25.0 with the download forced to
+# fail three ways: connection refused, a 403-returning forward proxy (what an
+# egress allowlist does), and an unresolvable proxy host.
+#
+# Each entry is a whole measured phrase, never the bare `Curl Error:` prefix.
+# Trunk reports a removed or renamed artifact under that same prefix, and a 404
+# is a broken pin the operator has to fix, not an allowlist to widen — matching
+# the prefix would excuse it. A cause Trunk phrases some other way stays
+# unclassified on purpose: an unrecognized reason fails the gate rather than
+# being excused, and the fix is to measure it and add it here.
+trunk_network_failure_signatures=(
+  'Curl Error: Failure when receiving data from the peer'
+  'Curl Error: Could not resolve proxy name'
+  'Could resolve but could not establish connection to host of'
+)
+
+# True when any measured download-failure phrasing appears in the given text.
+trunk_text_has_network_failure_signature() {
+  local text="$1"
+  local signature
+
+  for signature in "${trunk_network_failure_signatures[@]}"; do
+    case "$text" in
+      *"$signature"*)
+        return 0
+        ;;
+    esac
+  done
+
+  return 1
+}
+
+# Read the `report:` lines of one Trunk failure-detail YAML and say whether the
+# reason it records is a download failure. The path comes from Trunk's own
+# output, so it is accepted only in the exact shape Trunk emits — a plain file
+# directly under .trunk/out — and never followed anywhere else.
+#
+# Scoped to `report:` and nothing else. This is one of the two checks that decide
+# whether a failure may be excused, and the classifier's rule is to verify
+# exactly rather than infer: a bullet under some other key must never be able to
+# supply the signature that `report:` did not. A `report:` block Trunk writes in
+# some other shape yields nothing here, which rejects.
+trunk_detail_yaml_reports_network_failure() {
+  local yaml_path="$1"
+  local report
+
+  is_trunk_detail_yaml_path "$yaml_path" || return 1
+  [[ -f "$yaml_path" ]] || return 1
+
+  report="$(trunk_detail_yaml_report_lines "$yaml_path")"
+  [[ -n "$report" ]] || return 1
+
+  trunk_text_has_network_failure_signature "$report"
+}
+
+# The bullet lines under this YAML's top-level `report:` key, in order. A
+# top-level key is one that starts in column 0, so the block ends at the next
+# one.
+trunk_detail_yaml_report_lines() {
+  local yaml_path="$1"
+
+  awk '
+    /^[^[:space:]]/ {
+      in_report = ($0 ~ /^report:[[:space:]]*$/)
+      next
+    }
+    in_report && /^[[:space:]]+-[[:space:]]/ { print }
+  ' "$yaml_path" 2>/dev/null || true
+}
+
+# True when the path is exactly the shape Trunk writes its failure details to:
+# a plain file directly under .trunk/out, with no traversal.
+is_trunk_detail_yaml_path() {
+  local yaml_path="$1"
+
+  [[ "$yaml_path" =~ ^\.trunk/out/[A-Za-z0-9._-]+\.yaml$ ]] || return 1
+  [[ "$yaml_path" == *".."* ]] && return 1
+  return 0
+}
+
+# Reduce a failed `trunk check` transcript to the facts the classifier needs.
+# Emits, on stdout, zero or more of:
+#   shape=tools           Trunk reported zero issues and N counted failures,
+#                         and exactly N rows were download steps naming a
+#                         detail YAML.
+#   yaml=<path>           one per such row.
+#   shape=plugin          every non-blank line was a plugin-download error.
+#   plugincause=<text>    one per such line.
+# It emits nothing when the transcript shows findings, an unexplained failure,
+# or any line it cannot account for.
+summarize_trunk_check_transcript() {
+  local output_file="$1"
+
+  awk '
+    function strip(s) {
+      gsub(/\033\[[0-9;?]*[a-zA-Z]/, "", s)
+      gsub(/\r/, "", s)
+      return s
+    }
+    BEGIN {
+      cross = "\342\234\226"
+      disqualified = 0
+      declared = -1
+      rows = 0
+      plugins = 0
+      nonblank = 0
+    }
+    {
+      line = strip($0)
+      sub(/[ \t]+$/, "", line)
+      if (line ~ /^[ \t]*$/) next
+      nonblank++
+
+      trimmed = line
+      sub(/^[ \t]+/, "", trimmed)
+
+      # These section headers appear only when Trunk has something to report
+      # about the code itself. Their presence alone disqualifies the run.
+      if (trimmed == "ISSUES" || trimmed == "AUTOFIXES") {
+        disqualified = 1
+        next
+      }
+
+      if (index(line, cross) == 1) {
+        rest = substr(line, length(cross) + 1)
+        sub(/^ /, "", rest)
+
+        if (rest ~ /^No issues, [0-9]+ failures?$/) {
+          if (declared >= 0) { disqualified = 1; next }
+          n = rest
+          sub(/^No issues, /, "", n)
+          sub(/ failures?$/, "", n)
+          declared = n + 0
+          next
+        }
+
+        if (rest ~ /^Unable to download plugin .+: .+$/) {
+          plugins++
+          # Kept whole: the URL names the host that has to be allowlisted, and
+          # the reason after it is what the signature check reads.
+          causes[plugins] = rest
+          pluginline[nonblank] = 1
+          next
+        }
+
+        # Any other verdict line is a claim about the code. Stop.
+        disqualified = 1
+        next
+      }
+
+      # A FAILURES-table row for a step that had to fetch something. The last
+      # field is the detail YAML Trunk wrote for it.
+      if (line ~ /^[ \t]/ &&
+          (index(line, "Installing hermetic tool ") > 0 ||
+           index(line, "Downloading hermetic ") > 0)) {
+        $0 = line
+        if ($NF ~ /^\.trunk\/out\/[A-Za-z0-9._-]+\.yaml$/) {
+          rows++
+          yamls[rows] = $NF
+          next
+        }
+      }
+    }
+    END {
+      if (disqualified) exit 0
+
+      # Shape 1: Trunk ran, found nothing, and every failure it counted is a
+      # download step we recognized. An unaccounted failure means rows < declared.
+      if (declared >= 1 && rows == declared) {
+        print "shape=tools"
+        for (i = 1; i <= rows; i++) print "yaml=" yamls[i]
+        exit 0
+      }
+
+      # Shape 2: Trunk could not fetch its plugin sources, so it never linted
+      # anything. Accepted only when the transcript holds nothing else at all.
+      if (plugins >= 1 && declared < 0 && rows == 0) {
+        for (i = 1; i <= nonblank; i++) {
+          if (!(i in pluginline)) exit 0
+        }
+        print "shape=plugin"
+        for (i = 1; i <= plugins; i++) print "plugincause=" causes[i]
+      }
+    }
+  ' "$output_file"
+}
+
+# True when a failed `trunk check` is provably an environment provisioning
+# failure with no lint findings behind it.
+trunk_check_output_is_environment_blocked() {
+  local output_file="$1"
+  local shape=""
+  local line
+  local value
+  local evidence=0
+
+  [[ -n "$output_file" && -s "$output_file" ]] || return 1
+
+  while IFS= read -r line; do
+    case "$line" in
+      shape=*)
+        shape="${line#shape=}"
+        ;;
+      yaml=*)
+        value="${line#yaml=}"
+        trunk_detail_yaml_reports_network_failure "$value" || return 1
+        evidence=$((evidence + 1))
+        ;;
+      plugincause=*)
+        value="${line#plugincause=}"
+        trunk_text_has_network_failure_signature "$value" || return 1
+        evidence=$((evidence + 1))
+        ;;
+    esac
+  done < <(summarize_trunk_check_transcript "$output_file")
+
+  [[ -n "$shape" && "$evidence" -ge 1 ]]
+}
+
+# The single question both run paths ask about a failed Trunk arm. Sets
+# trunk_environment_blocked_kind for the warning and latches the run-level flag
+# the closing note and the stamp guard read.
+trunk_arm_is_environment_blocked() {
+  local output_file="$1"
+
+  trunk_environment_blocked_kind=""
+
+  if trunk_provisioning_is_blocked; then
+    trunk_environment_blocked_kind=launcher
+  elif trunk_check_output_is_environment_blocked "$output_file"; then
+    trunk_environment_blocked_kind=linters
+  else
+    return 1
+  fi
+
+  trunk_arm_environment_blocked=true
+  return 0
+}
+
+# A parallel or sanitized command shell cannot mutate this parent shell's
+# cached launcher-probe state. Its authenticated result file carries that
+# verdict back. Prefer that verdict, then classify linter-download failures
+# from the command transcript in this process.
+trunk_arm_is_environment_blocked_with_launcher_verdict() {
+  local output_file="$1"
+  local launcher_blocked="$2"
+
+  if [[ "$launcher_blocked" == true ]]; then
+    trunk_provisioning_state=blocked
+    trunk_environment_blocked_kind=launcher
+    trunk_arm_environment_blocked=true
+    return 0
+  fi
+
+  # A false authenticated worker verdict means its in-lease launcher probe
+  # succeeded. Do not probe again after the command lease is released.
+  trunk_provisioning_state=ok
+  if trunk_check_output_is_environment_blocked "$output_file"; then
+    trunk_environment_blocked_kind=linters
+    trunk_arm_environment_blocked=true
+    return 0
+  fi
+
+  return 1
+}
+
 print_trunk_environment_blocked_warning() {
+  local command="$1"
+  local output_file="${2:-}"
+
+  if [[ "$trunk_environment_blocked_kind" == linters ]]; then
+    print_trunk_linter_environment_blocked_warning "$command" "$output_file"
+    return
+  fi
+
+  print_trunk_launcher_environment_blocked_warning "$command"
+}
+
+print_trunk_linter_environment_blocked_warning() {
+  local command="$1"
+  local output_file="$2"
+
+  echo "warning: skipping ${command} — Trunk could not provision its linters." >&2
+  echo "  The CLI itself is installed — the launcher probe succeeded — but Trunk downloads each" >&2
+  echo "  hermetic runtime and linter binary it needs, and every step that had to fetch one" >&2
+  echo "  failed with a download error. Trunk reported no issues, so no finding is being" >&2
+  echo "  discarded here; it never got a linter to run." >&2
+  echo "  This is what an environment that allows 'trunk.io' but not the download hosts does." >&2
+  echo "  Add the hosts named below to the environment's allowed domains to run it here." >&2
+  print_trunk_provisioning_failure_causes "$output_file"
+  echo "  CI still enforces Trunk on the PR (.github/workflows/trunk.yml)." >&2
+}
+
+# Replay what Trunk recorded for each failed download step. The step row names
+# only the step; the host and the reason live in the detail YAML, and without
+# them the warning cannot say which domain to allowlist. Bounded on every axis
+# because the text comes from a subprocess.
+print_trunk_provisioning_failure_causes() {
+  local output_file="$1"
+  local line
+  local yaml_path
+  local detail
+  local printed=0
+
+  [[ -n "$output_file" && -s "$output_file" ]] || return 0
+
+  while IFS= read -r line; do
+    [[ "$printed" -lt 8 ]] || break
+    case "$line" in
+      yaml=*)
+        yaml_path="${line#yaml=}"
+        ;;
+      plugincause=*)
+        printed=$((printed + 1))
+        printf '  %.240s\n' "  ${line#plugincause=}" >&2
+        continue
+        ;;
+      *)
+        continue
+        ;;
+    esac
+
+    is_trunk_detail_yaml_path "$yaml_path" || continue
+    [[ -f "$yaml_path" ]] || continue
+    while IFS= read -r detail; do
+      [[ "$printed" -lt 8 ]] || break
+      printed=$((printed + 1))
+      printf '  %.240s\n' "  ${detail}" >&2
+    done < <(
+      {
+        awk '/^title:/ { sub(/^title:[[:space:]]*/, ""); gsub(/^"|"$/, ""); print; exit }' \
+          "$yaml_path" 2>/dev/null || true
+        trunk_detail_yaml_report_lines "$yaml_path" |
+          sed -e 's/^[[:space:]]*-[[:space:]]*//' -e 's/^"//' -e 's/"$//'
+      } | head -n 4
+    )
+  done < <(summarize_trunk_check_transcript "$output_file")
+
+  # The parallel run path calls this under `set -e`, and it is not the last
+  # statement in its caller. A loop that ends on a failed match would otherwise
+  # abort the run at the exact moment the gate is trying to degrade gracefully.
+  return 0
+}
+
+print_trunk_launcher_environment_blocked_warning() {
   local command="$1"
   echo "warning: skipping ${command} — the Trunk CLI could not be provisioned." >&2
   echo "  The launcher self-downloads the pinned CLI from trunk.io and could not produce a" >&2
@@ -6057,6 +7005,7 @@ run_mapped_command() {
   local start_ts
   local elapsed
   local exit_code
+  local infrastructure_failed
   local trunk_provisioning_blocked
 
   if try_reuse_command "$command"; then
@@ -6083,6 +7032,7 @@ run_mapped_command() {
   exit_code=$?
   set -e
   local timed_out="$last_command_timed_out"
+  infrastructure_failed="$last_command_infrastructure_failed"
   trunk_provisioning_blocked="$last_command_trunk_provisioning_blocked"
   rm -f "$trunk_probe_handshake_file"
   if [[ -n "$monitor_pid" ]]; then
@@ -6107,11 +7057,12 @@ run_mapped_command() {
     return 0
   fi
 
-  if [[ "$timed_out" != true &&
-    "$trunk_provisioning_blocked" == true ]] &&
-    is_trunk_command "$command"; then
+  if [[ "$infrastructure_failed" != true && "$timed_out" != true ]] &&
+    is_trunk_command "$command" &&
+    trunk_arm_is_environment_blocked_with_launcher_verdict \
+      "$output_file" "$trunk_provisioning_blocked"; then
     record_command_summary "skipped" "$elapsed" "$command"
-    print_trunk_environment_blocked_warning "$command"
+    print_trunk_environment_blocked_warning "$command" "$output_file"
     rm -f "$output_file"
     return 0
   fi
@@ -6635,11 +7586,11 @@ run_mapped_entries_parallel() {
           print_autoreview_test_timings "$output_file"
         fi
         echo "✓ ${command} ($(format_duration "$elapsed"))"
-      elif [[ "$timed_out" != true &&
-        "$trunk_provisioning_blocked" == true ]] &&
-        is_trunk_command "$command"; then
+      elif [[ "$timed_out" != true ]] && is_trunk_command "$command" &&
+        trunk_arm_is_environment_blocked_with_launcher_verdict \
+          "$output_file" "$trunk_provisioning_blocked"; then
         record_command_summary "skipped" "$elapsed" "$command"
-        print_trunk_environment_blocked_warning "$command"
+        print_trunk_environment_blocked_warning "$command" "$output_file"
       else
         failures=$((failures + 1))
         record_command_summary "fail" "$elapsed" "$command"
@@ -7170,17 +8121,18 @@ if [[ "$failures" -gt 0 ]]; then
 fi
 
 if declare -F gate_coordinator_publish_success >/dev/null 2>&1; then
-  gate_coordinator_publish_success "$trunk_provisioning_state"
+  gate_coordinator_publish_success \
+    "$trunk_arm_environment_blocked" "$trunk_environment_blocked_kind"
 fi
 
 log_duration_line "ok" "$gate_total_elapsed" "__run_total__" "run" || true
 
 echo
 echo "All mapped commands passed."
-if [[ "$trunk_provisioning_state" == blocked ]]; then
-  echo "Note: the Trunk arm was skipped because the CLI could not be provisioned here; CI still enforces it."
+if [[ "$trunk_arm_environment_blocked" == true ]]; then
+  echo "Note: the Trunk arm was skipped because it could not be provisioned here; CI still enforces it."
 fi
-if [[ "${stamp_reuse_count:-0}" -eq 0 && "$trunk_provisioning_state" != "blocked" ]]; then
+if [[ "${stamp_reuse_count:-0}" -eq 0 && "$trunk_arm_environment_blocked" != true ]]; then
   # Only a fully-executed green run earns the whole-run fast-path stamp. A
   # resumed run reused work whose real age lives in the per-command stamps;
   # re-dating it here would let --skip-if-fresh extend validation reuse past

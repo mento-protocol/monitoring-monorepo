@@ -35,8 +35,15 @@ export const LEGACY_RUN_LOCK_INTEGRATION = Object.freeze({
 });
 
 const LEGACY_COORDINATOR_OWNER_IDENTITY = "coordinator-owner-v1";
-const OWNER_QUARANTINE_PREFIX = "owner.reclaiming.quarantine.v1";
+const OWNER_QUARANTINE_PREFIX = "owner.reclaiming.quarantine.v2";
 const HOLDER_QUARANTINE_PREFIX = "holder.reclaiming.quarantine.v1";
+const NO_MACHINE_IDENTITY = "<no-machine-identity>";
+const MACHINE_IDENTITY_PATTERN =
+  /^(?:override|machineid|ioplatform|kernuuid):[A-Za-z0-9._-]{1,128}$/u;
+const MACHINE_SOURCE_PATTERN =
+  /^(?:none|override|machineid|ioplatform|kernuuid)$/u;
+const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
+const QUARANTINE_NONCE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9.-]{5,79}$/u;
 
 function processSnapshot(pid) {
   try {
@@ -104,6 +111,249 @@ export function generatedToken(pid) {
 
 export function validateLegacyToken(token, label = "legacy token") {
   validateRunToken(token, label);
+}
+
+function validateLegacyMachineIdentity(identity) {
+  if (identity === "") return;
+  if (
+    typeof identity !== "string" ||
+    !MACHINE_IDENTITY_PATTERN.test(identity)
+  ) {
+    throw new CoordinatorError(
+      "INVALID_MACHINE_IDENTITY",
+      "legacy machine identity is not a tagged gate machine identity",
+    );
+  }
+}
+
+function sha256(value) {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function quarantineCreatorMachine(machineIdentity) {
+  validateLegacyMachineIdentity(machineIdentity);
+  if (machineIdentity === "") {
+    return {
+      source: "none",
+      fingerprint: sha256(NO_MACHINE_IDENTITY),
+    };
+  }
+  return {
+    source: machineIdentity.slice(0, machineIdentity.indexOf(":")),
+    fingerprint: sha256(machineIdentity),
+  };
+}
+
+export function legacyOwnerQuarantineName({
+  machineIdentity = "",
+  host = hostname(),
+  createdAtEpoch = Math.floor(Date.now() / 1_000),
+  pid = process.pid,
+  nonce = randomUUID(),
+} = {}) {
+  if (typeof host !== "string" || host.length === 0) {
+    throw new CoordinatorError(
+      "INVALID_QUARANTINE_IDENTITY",
+      "legacy owner quarantine host identity is empty",
+    );
+  }
+  if (
+    !Number.isSafeInteger(createdAtEpoch) ||
+    createdAtEpoch < 1 ||
+    createdAtEpoch > 999_999_999_999
+  ) {
+    throw new CoordinatorError(
+      "INVALID_QUARANTINE_IDENTITY",
+      "legacy owner quarantine creation epoch is invalid",
+    );
+  }
+  if (!Number.isSafeInteger(pid) || pid < 1) {
+    throw new CoordinatorError(
+      "INVALID_QUARANTINE_IDENTITY",
+      "legacy owner quarantine creator pid is invalid",
+    );
+  }
+  if (typeof nonce !== "string" || !QUARANTINE_NONCE_PATTERN.test(nonce)) {
+    throw new CoordinatorError(
+      "INVALID_QUARANTINE_IDENTITY",
+      "legacy owner quarantine nonce is invalid",
+    );
+  }
+  const machine = quarantineCreatorMachine(machineIdentity);
+  return [
+    OWNER_QUARANTINE_PREFIX,
+    machine.source,
+    machine.fingerprint,
+    sha256(host),
+    createdAtEpoch,
+    pid,
+    nonce,
+  ].join(".");
+}
+
+export function parseLegacyOwnerQuarantineName(name) {
+  if (typeof name !== "string" || name.includes("/")) return null;
+  const v2 = name.match(
+    /^owner\.reclaiming\.quarantine\.v2\.(none|override|machineid|ioplatform|kernuuid)\.([0-9a-f]{64})\.([0-9a-f]{64})\.([1-9][0-9]{0,11})\.([1-9][0-9]*)\.([A-Za-z0-9][A-Za-z0-9.-]{5,79})$/u,
+  );
+  if (v2) {
+    const evidence = {
+      version: 2,
+      machineSource: v2[1],
+      machineFingerprint: v2[2],
+      hostFingerprint: v2[3],
+      createdAtEpoch: Number(v2[4]),
+      pid: Number(v2[5]),
+      nonce: v2[6],
+    };
+    if (
+      !MACHINE_SOURCE_PATTERN.test(evidence.machineSource) ||
+      !SHA256_PATTERN.test(evidence.machineFingerprint) ||
+      !SHA256_PATTERN.test(evidence.hostFingerprint) ||
+      !Number.isSafeInteger(evidence.createdAtEpoch) ||
+      !Number.isSafeInteger(evidence.pid) ||
+      (evidence.machineSource === "none" &&
+        evidence.machineFingerprint !== sha256(NO_MACHINE_IDENTITY))
+    ) {
+      return null;
+    }
+    return evidence;
+  }
+  const v1 = name.match(
+    /^owner\.reclaiming\.quarantine\.v1\.([0-9a-f]{64})\.([1-9][0-9]*)\.([A-Za-z0-9][A-Za-z0-9.-]{5,79})$/u,
+  );
+  if (!v1) return null;
+  const evidence = {
+    version: 1,
+    machineSource: null,
+    machineFingerprint: null,
+    hostFingerprint: v1[1],
+    createdAtEpoch: null,
+    pid: Number(v1[2]),
+    nonce: v1[3],
+  };
+  return Number.isSafeInteger(evidence.pid) ? evidence : null;
+}
+
+function quarantineMachineVerdict(
+  evidence,
+  { machineIdentity, host, rootIsPerMachine },
+) {
+  const localMachine = quarantineCreatorMachine(machineIdentity);
+  const localHostFingerprint = sha256(host);
+  if (
+    evidence.version === 2 &&
+    evidence.machineSource !== "none" &&
+    localMachine.source !== "none"
+  ) {
+    if (
+      evidence.machineSource === localMachine.source &&
+      evidence.machineFingerprint === localMachine.fingerprint
+    ) {
+      return rootIsPerMachine ||
+        evidence.hostFingerprint === localHostFingerprint
+        ? "same"
+        : "unverified";
+    }
+    return evidence.machineSource === localMachine.source && !rootIsPerMachine
+      ? "other"
+      : "unverified";
+  }
+  return evidence.hostFingerprint === localHostFingerprint
+    ? "same"
+    : "unverified";
+}
+
+export function legacyOwnerQuarantineRecoveryDecision(
+  name,
+  {
+    machineIdentity = "",
+    host = hostname(),
+    rootIsPerMachine = false,
+    nowEpoch = Math.floor(Date.now() / 1_000),
+    unverifiedGraceSeconds = 600,
+    legacyCreatedAtEpoch = null,
+    creatorMayOwn = processMayOwnInertStage,
+  } = {},
+) {
+  const evidence = parseLegacyOwnerQuarantineName(name);
+  if (!evidence) {
+    return {
+      action: "retain",
+      machineVerdict: "invalid",
+      localPidChecked: false,
+      reason: "invalid-name",
+    };
+  }
+  validateLegacyMachineIdentity(machineIdentity);
+  if (typeof host !== "string" || host.length === 0) {
+    throw new CoordinatorError(
+      "INVALID_QUARANTINE_IDENTITY",
+      "legacy owner quarantine recovery host identity is empty",
+    );
+  }
+  if (
+    !Number.isSafeInteger(nowEpoch) ||
+    nowEpoch < 1 ||
+    !Number.isSafeInteger(unverifiedGraceSeconds) ||
+    unverifiedGraceSeconds < 0
+  ) {
+    throw new CoordinatorError(
+      "INVALID_QUARANTINE_IDENTITY",
+      "legacy owner quarantine recovery time is invalid",
+    );
+  }
+  const machineVerdict = quarantineMachineVerdict(evidence, {
+    machineIdentity,
+    host,
+    rootIsPerMachine: rootIsPerMachine === true,
+  });
+  if (machineVerdict === "other") {
+    return {
+      action: "retain",
+      machineVerdict,
+      localPidChecked: false,
+      reason: "other-machine",
+      evidence,
+    };
+  }
+  if (machineVerdict === "unverified" && rootIsPerMachine !== true) {
+    return {
+      action: "retain",
+      machineVerdict,
+      localPidChecked: false,
+      reason: "unverified-shared-root",
+      evidence,
+    };
+  }
+  if (machineVerdict === "unverified") {
+    const createdAtEpoch =
+      evidence.createdAtEpoch ?? legacyCreatedAtEpoch ?? null;
+    const ageSeconds =
+      Number.isSafeInteger(createdAtEpoch) &&
+      createdAtEpoch >= 1 &&
+      createdAtEpoch <= nowEpoch
+        ? nowEpoch - createdAtEpoch
+        : null;
+    if (ageSeconds === null || ageSeconds < unverifiedGraceSeconds) {
+      return {
+        action: "retain",
+        machineVerdict,
+        localPidChecked: false,
+        reason: ageSeconds === null ? "unverified-age" : "unverified-grace",
+        ageSeconds,
+        evidence,
+      };
+    }
+  }
+  const mayOwn = creatorMayOwn(evidence.pid);
+  return {
+    action: mayOwn ? "retain" : "recover",
+    machineVerdict,
+    localPidChecked: true,
+    reason: mayOwn ? "creator-live" : "creator-dead",
+    evidence,
+  };
 }
 
 function ownerFieldsFromText(value) {
@@ -295,6 +545,7 @@ export function legacyOwnerRecordText(record) {
     `pid=${record.pid}`,
     `uid=${record.uid ?? ""}`,
     `host=${record.host}`,
+    `machine=${record.machineIdentity ?? ""}`,
     `started_at=${record.startedAt}`,
     "start_utc=",
     `coordinator_start_utc=${record.startUtc}`,
@@ -402,6 +653,7 @@ function createOwnerQuarantine(
     ? BigInt(process.getuid())
     : null,
   quarantinePrefix = OWNER_QUARANTINE_PREFIX,
+  machineIdentity = "",
 ) {
   requireNoFollowSupport();
   if (!Number.isInteger(constants.O_DIRECTORY)) {
@@ -410,10 +662,11 @@ function createOwnerQuarantine(
       "this platform does not provide O_DIRECTORY for owner quarantine",
     );
   }
-  const path = join(
-    lockDirectory,
-    `${quarantinePrefix}.${quarantineHostFingerprint()}.${process.pid}.${randomUUID()}`,
-  );
+  const name =
+    quarantinePrefix === OWNER_QUARANTINE_PREFIX
+      ? legacyOwnerQuarantineName({ machineIdentity })
+      : `${quarantinePrefix}.${quarantineHostFingerprint()}.${process.pid}.${randomUUID()}`;
+  const path = join(lockDirectory, name);
   mkdirSync(path, { mode: 0o700 });
   let descriptor;
   try {
@@ -453,6 +706,7 @@ function quarantineAndDiscardOwner({
   beforeTake = null,
   afterTake = null,
   quarantinePrefix = OWNER_QUARANTINE_PREFIX,
+  machineIdentity = "",
 }) {
   const expectedToken =
     legacyOwnerAuthorityToken(expectedSnapshot.fields) ?? "";
@@ -463,6 +717,7 @@ function quarantineAndDiscardOwner({
     lockDirectory,
     expectedUid,
     quarantinePrefix,
+    machineIdentity,
   );
   const anchorPath = join(quarantine.path, "anchor");
   const takenPath = join(quarantine.path, "record");
@@ -610,6 +865,7 @@ function removeInertLegacyOwnerStages(
   {
     publisherMayOwn = processMayOwnInertStage,
     beforeWitnessedPublisherCheck = null,
+    machineIdentity = "",
   } = {},
 ) {
   let removed = false;
@@ -646,6 +902,7 @@ function removeInertLegacyOwnerStages(
       expectedSnapshot: ownerSnapshot,
       lockDirectory,
       phase: "inert owner stage cleanup",
+      machineIdentity,
       // Recheck after the hard-link witness binds the stage inode. A reused
       // PID can publish a new stage after the first liveness verdict.
       shouldTake: (context) => {
@@ -734,6 +991,7 @@ function restoreTakenOwner(
     quarantineDirectory = lockDirectory,
     sourceDirectory = lockDirectory,
     condemnOnConflict = true,
+    machineIdentity = "",
     ...discardHooks
   } = {},
 ) {
@@ -748,6 +1006,7 @@ function restoreTakenOwner(
     sourceDirectory,
     canonicalPath: () => (restored ? ownerPath : null),
     phase: "owner restoration cleanup",
+    machineIdentity,
     afterWitness: (context) => {
       try {
         // Publish from the verified hard-link witness. A replacement at the
@@ -792,6 +1051,7 @@ function takeExpectedOwner({
   ownerPath,
   expectedToken,
   phase,
+  machineIdentity = "",
 }) {
   const expectedSnapshot = currentUserOwnerSnapshot(ownerPath);
   if (legacyOwnerAuthorityToken(expectedSnapshot.fields) !== expectedToken) {
@@ -817,7 +1077,9 @@ function takeExpectedOwner({
   try {
     snapshot = currentUserOwnerSnapshot(takenPath);
   } catch (error) {
-    restoreTakenOwner(takenPath, ownerPath, lockDirectory, lockRoot);
+    restoreTakenOwner(takenPath, ownerPath, lockDirectory, lockRoot, null, {
+      machineIdentity,
+    });
     throw error;
   }
   if (
@@ -826,7 +1088,9 @@ function takeExpectedOwner({
   ) {
     return { path: takenPath, snapshot };
   }
-  restoreTakenOwner(takenPath, ownerPath, lockDirectory, lockRoot, snapshot);
+  restoreTakenOwner(takenPath, ownerPath, lockDirectory, lockRoot, snapshot, {
+    machineIdentity,
+  });
   throw new CoordinatorError(
     "LEGACY_HANDOFF_MISMATCH",
     `legacy owner changed during ${phase}`,
@@ -849,6 +1113,7 @@ export function adoptLegacyRunLock({
   expectedOwnerToken,
   generationToken,
   coordinatorIdentity,
+  machineIdentity = "",
   worktree = "quality-gate-coordinator",
   beforeOwnerStageModeSet = null,
   beforeOwnerPublish = null,
@@ -868,6 +1133,7 @@ export function adoptLegacyRunLock({
 }) {
   validateLegacyToken(expectedOwnerToken, "expected legacy owner token");
   validateLegacyToken(generationToken, "coordinator generation token");
+  validateLegacyMachineIdentity(machineIdentity);
   validateLegacyLockRoot(lockRoot);
   const lockDirectory = join(lockRoot, "run.lock");
   const stat = lstatSync(lockDirectory);
@@ -993,6 +1259,7 @@ export function adoptLegacyRunLock({
     pid: coordinatorIdentity.pid,
     uid: typeof process.getuid === "function" ? process.getuid() : null,
     host: hostname(),
+    machineIdentity,
     startedAt: Math.floor(Date.now() / 1000),
     startUtc: coordinatorIdentity.startUtc,
     worktree,
@@ -1011,6 +1278,7 @@ export function adoptLegacyRunLock({
       ownerPath,
       expectedToken: expectedOwnerToken,
       phase: "coordinator handoff",
+      machineIdentity,
     });
     takenOwner = taken;
     previousOwnerText = taken.snapshot.text;
@@ -1055,6 +1323,7 @@ export function adoptLegacyRunLock({
       lockDirectory,
       canonicalPath: ownerPath,
       phase: "coordinator owner stage cleanup",
+      machineIdentity,
     });
     const priorOwner = takenOwner;
     takenOwner = null;
@@ -1063,6 +1332,7 @@ export function adoptLegacyRunLock({
       expectedSnapshot: priorOwner.snapshot,
       lockDirectory,
       phase: "coordinator handoff owner cleanup",
+      machineIdentity,
       beforeTake: beforeOwnerDiscardTake,
       afterTake: afterOwnerDiscardTake,
     });
@@ -1076,6 +1346,7 @@ export function adoptLegacyRunLock({
           expectedSnapshot: stagedSnapshot,
           lockDirectory,
           phase: "failed coordinator owner stage cleanup",
+          machineIdentity,
         });
       }
       if (takenOwner && pathEntryExists(takenOwner.path)) {
@@ -1085,6 +1356,7 @@ export function adoptLegacyRunLock({
           lockDirectory,
           lockRoot,
           takenOwner.snapshot,
+          { machineIdentity },
         );
       }
     } catch (recoveryError) {
@@ -1187,6 +1459,7 @@ export function adoptLegacyRunLock({
         ownerPath,
         expectedToken: generationToken,
         phase: "startup rollback",
+        machineIdentity,
       });
       takenOwner = taken;
       linkSync(staged, ownerPath);
@@ -1212,6 +1485,7 @@ export function adoptLegacyRunLock({
         lockDirectory,
         canonicalPath: ownerPath,
         phase: "rollback owner stage cleanup",
+        machineIdentity,
       });
       const coordinatorOwner = takenOwner;
       takenOwner = null;
@@ -1220,6 +1494,7 @@ export function adoptLegacyRunLock({
         expectedSnapshot: coordinatorOwner.snapshot,
         lockDirectory,
         phase: "rollback coordinator owner cleanup",
+        machineIdentity,
       });
       closeMarker();
       if (pathEntryExists(markerPath)) {
@@ -1234,6 +1509,7 @@ export function adoptLegacyRunLock({
           lockDirectory,
           lockRoot,
           takenOwner.snapshot,
+          { machineIdentity },
         );
       }
       abandon();
@@ -1250,6 +1526,7 @@ export function adoptLegacyRunLock({
           expectedSnapshot: remainingStage,
           lockDirectory,
           phase: "rollback residual stage cleanup",
+          machineIdentity,
         });
       }
     }
@@ -1282,6 +1559,7 @@ export function adoptLegacyRunLock({
         expectedSnapshot: privateReleaseSnapshot,
         lockDirectory: releaseDirectory,
         phase,
+        machineIdentity,
       });
     };
     const settleSuccessorOwner = ({ ownerAlreadyDiscarded = false } = {}) => {
@@ -1325,6 +1603,7 @@ export function adoptLegacyRunLock({
           lockDirectory,
           lockRoot,
           visibleReleaseSnapshot,
+          { machineIdentity },
         );
         takenOwner = null;
         abandon();
@@ -1373,8 +1652,9 @@ export function adoptLegacyRunLock({
                   quarantineDirectory: releaseDirectory,
                   sourceDirectory: releaseDirectory,
                   condemnOnConflict: false,
+                  machineIdentity,
                 }
-              : {},
+              : { machineIdentity },
           );
           if (
             takenOwner.path === releaseOwner &&
@@ -1402,6 +1682,7 @@ export function adoptLegacyRunLock({
       removeInertLegacyOwnerStages(lockDirectory, {
         publisherMayOwn: inertStagePublisherMayOwn,
         beforeWitnessedPublisherCheck: beforeInertStagePublisherCheck,
+        machineIdentity,
       });
       rmdirSync(lockDirectory);
     } catch (error) {
@@ -1421,6 +1702,7 @@ export function adoptLegacyRunLock({
             quarantineDirectory: releaseDirectory,
             sourceDirectory: releaseDirectory,
             condemnOnConflict: false,
+            machineIdentity,
           },
         );
         if (!restored) {

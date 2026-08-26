@@ -161,17 +161,19 @@ prior snapshot. A replacement that wins before the move is detected and is
 restored or retained. Only the matching inode can enter a mode-0700 private
 release directory. The Node coordinator also requires the exact record text. A
 crash before validation leaves the moved record visible to the legacy recovery
-scan. That scan treats another host's record as live evidence. It also stops on
-an unreadable or unsafe remnant, or if a shared-root access rule prevents
-restoration while the canonical owner is absent. Release then removes only an
-empty lock directory. Before `rmdir`, it removes only known unpublished owner
-stages whose publishing PID is gone. A successor owner or live stage keeps the
-directory non-empty and remains untouched. A directory-removal failure restores
-the exact private owner through a hard-link witness. The coordinator then
-closes its holder marker descriptor, reports `release-failed`, and settles every
-close waiter. The next gate can recover the restored owner. Final cleanup
-quarantines and deletes only the bound private inode. A same-text replacement
-is retained and makes release fail closed.
+scan. That scan applies the machine verdict and lock-root locality before it
+uses a local PID. It retains another-machine evidence and unverified evidence
+on a root that may be shared. It also stops on an unreadable or unsafe remnant,
+or if a shared-root access rule prevents restoration while the canonical owner
+is absent. Release then removes only an empty lock directory. Before `rmdir`, it
+removes only known unpublished owner stages whose publishing PID is gone. A
+successor owner or live stage keeps the directory non-empty and remains
+untouched. A directory-removal failure restores the exact private owner through
+a hard-link witness. The coordinator then closes its holder marker descriptor,
+reports `release-failed`, and settles every close waiter. The next gate can
+recover the restored owner. Final cleanup quarantines and deletes only the
+bound private inode. A same-text replacement is retained and makes release fail
+closed.
 
 Node opens every mutable legacy owner or unpublished owner-stage path with
 `O_RDONLY | O_NOFOLLOW | O_NONBLOCK`. It uses `fstat` to require a current-UID
@@ -267,21 +269,34 @@ pathname beside the witness. It deletes only the private names after it
 verifies that they still name the witnessed inode. A path replacement is
 retained and stops the gate, even when it has the same text and authority token.
 
-The legacy owner `host=` field stores the gate's cached `uname -n` value. The
-owner-quarantine namespace uses its SHA-256 digest in names of the form
-`owner.reclaiming.quarantine.v1.<hostname-sha256>.<pid>.<nonce>`. A waiter does
-not apply a local PID verdict to evidence from another host. If `uname -n`
-changes after a crash, the waiter retains an old owner, release remnant, or
-quarantine as foreign-host evidence and exits with status 2.
-[#2006](https://github.com/mento-protocol/monitoring-monorepo/issues/2006)
-tracks a stable machine identity for these recovery paths. Before a waiter
-recovers a dead local quarantine, it atomically renames the whole directory over
-a verified empty mode-0700 placeholder that names the waiter. This claim orders
-recovery against a creator's orphaned file-move child
-and against other waiters. A waiter that loses the source-name race restarts
-the quarantine scan and observes the winner's new name before it examines
-ordinary remnants. A crash after the directory claim leaves the same versioned
-evidence for the next waiter.
+The legacy owner record stores the gate's cached `uname -n` value in `host=` and
+its resolved machine identity in `machine=`. The owner-quarantine namespace
+records the quarantine creator in names of the form
+`owner.reclaiming.quarantine.v2.<machine-source>.<machine-sha256>.<hostname-sha256>.<created-epoch>.<pid>.<nonce>`.
+The PID component is a positive decimal JavaScript safe integer from 1 through
+9,007,199,254,740,991. Bash and Node reject larger values before a liveness
+check.
+This metadata identifies the process that created or claimed the quarantine.
+It does not identify the owner record inside it. A waiter accepts historical
+`owner.reclaiming.quarantine.v1.<hostname-sha256>.<pid>.<nonce>` names for
+recovery, but the name alone does not decide which machine created the evidence.
+
+The waiter applies the machine verdict and lock-root locality rules before it
+uses a local PID. A same-machine creator is reclaimable when its PID is gone or
+is a zombie. It never applies a local PID verdict to another-machine evidence or
+to unverified evidence on a root that may be shared. It can reclaim unverified
+evidence on a proved or declared per-machine root only after the
+unverified-machine grace period and a dead or zombie PID. A v1 quarantine uses
+its directory modification time for the conservative age check because its
+name has no creation epoch.
+
+Before a waiter recovers a reclaimable quarantine, it atomically renames the
+whole directory over a verified empty mode-0700 placeholder that carries the
+waiter's v2 creator metadata. This claim orders recovery against a creator's
+orphaned file-move child and against other waiters. A waiter that loses the
+source-name race restarts the quarantine scan and observes the winner's new
+name before it examines ordinary remnants. A crash after the directory claim
+leaves the same versioned evidence for the next waiter.
 
 The Bash legacy path uses atomic pathname operations when it publishes initial
 quarantine and condemned-run state. It does not fsync those initial files or
@@ -472,13 +487,17 @@ never produces a success result for a waiter. Completed failures are delivered
 to current waiters, but only a verified success can satisfy later freshness
 reuse.
 
-A leader that skips an unprovisionable Trunk arm publishes a qualified
-success with `reusable: false` and the skip reason. Active followers receive that
-same terminal result. The coordinator does not index it for retained reuse and
-removes an older success index for the same fingerprint. A later
-`--skip-if-fresh` request must execute and retry Trunk. The post-failure
-provisioning probe runs under the failed command's identity and keeps its
-scheduler lease until the probe and all identified descendants drain.
+A leader can skip a Trunk arm only after a post-failure check classifies the
+environment as blocked. The launcher probe reports `provisioning-unavailable`
+when it cannot fetch the CLI. The fail-closed transcript classifier reports
+`downloads-unavailable` when the CLI cannot fetch a plugin source, runtime, or
+linter. The leader publishes either outcome as a qualified success with
+`reusable: false` and the exact skip reason. Active followers receive the same
+terminal result and matching warning. The coordinator does not index it for
+retained reuse and removes an older success index for the same fingerprint. A
+later `--skip-if-fresh` request must execute and retry Trunk. The scheduler
+lease stays reserved until classification, any launcher probe, and all
+identified descendants drain.
 
 The leader gate owns the worker. A follower disconnect only detaches that
 follower. A leader disconnect, cancellation, interrupt, or stale-owner verdict

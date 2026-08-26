@@ -29,6 +29,12 @@ pnpm agent:autoreview:test -- --jobs 1  # sequential full regression closeout fo
 The local-only gate never deploys or applies Terraform. Run it explicitly;
 do not assume the pre-push hook exists.
 
+The package command and Trunk hook execute `./scripts/agent-quality-gate.sh`
+directly. This preserves the script's Bash `-p` startup boundary; it does not
+grant operating-system privileges. The prologue clears the remaining inherited
+Bash controls before it resolves a path or parses an argument. Do not invoke the
+gate as `bash scripts/agent-quality-gate.sh`; that bypasses the shebang boundary.
+
 `pnpm agent:autoreview` reviews source only. `pnpm agent:autoreview:test` runs
 all families with at most three workers and bounded progress/timings, which the
 mapped gate preserves. `-- --jobs 1` changes only scheduling. CI uses that mode
@@ -49,9 +55,11 @@ stamp-eligible fresh successes and runs the blocked commands. A resumed run does
 not write a whole-run stamp. Within each leader execution, Trunk and the gate
 self-test are stamp-exempt and always run. This includes a later pre-push
 execution that becomes a leader. Trunk's one exception is an environment that
-cannot provision the CLI, where the arm is skipped. Other eligible successes
-keep per-command stamps, so the later gate can avoid repeating them. Running a
-command directly proves it but records no per-command stamp.
+blocks its downloads: the CLI, its plugin sources, or the linters that a check
+needs. The gate skips that arm. Other
+eligible successes keep per-command stamps, so the later gate can avoid
+repeating them. Running a command directly proves it but records no per-command
+stamp.
 
 For a manual full-repository reproduction of the server-side pre-push baseline,
 including when hooks are absent or uncertain, use:
@@ -199,13 +207,28 @@ targeted Trunk checks for faster local iteration. Deleted paths,
 Trunk/tooling changes, package-manager changes, pnpm patches, and
 package-manifest changes still run full-repo Trunk locally. CI also runs a
 required full-repo Trunk check on every
-PR. Where the environment blocks `trunk.io` — a Claude cloud container proxies
-egress and refuses any host outside its allowlist, so `./tools/trunk` cannot
-download the pinned CLI — the gate probes provisioning after the Trunk command
-fails, then reports the arm as `skipped` with a warning naming the allowlist fix
-instead of failing the run, matching the posture `.trunk/hooks` already takes.
-Only a provisioning failure degrades: a provisioned Trunk that finds real
-problems still fails the gate. Normal `--run` mode executes independent
+PR. Where the environment blocks Trunk's downloads — a Claude cloud container
+proxies egress and refuses any host outside its allowlist — the gate reports the
+arm as `skipped` with a warning naming the allowlist fix instead of failing the
+run, matching the posture `.trunk/hooks` already takes. Trunk downloads at two
+stages and the gate classifies both. If the launcher cannot fetch the pinned CLI
+from `trunk.io`, a probe run after the command fails
+(`TRUNK_LAUNCHER_QUIET=true ./tools/trunk --version`) answers that directly. If
+the launcher succeeds but the CLI cannot fetch its plugin sources or the
+hermetic runtimes and linter binaries a check needs — `trunk.io` allowlisted,
+`github.com` and `nodejs.org` not — the gate classifies the check transcript
+instead. That classification never infers "nothing was found": it accepts the
+transcript only when Trunk itself reported no issues, every failure Trunk
+counted is a download step, and the reason each step recorded in its
+`.trunk/out/*.yaml` detail file is one of Trunk's download-failure phrasings.
+The warning replays those reasons so it names the host to allowlist. Everything
+else fails the gate, including a partly-explained failure set and a download
+step that failed for a local reason. Only a provisioning failure degrades: a
+provisioned Trunk that finds real problems still fails the gate, and so does a
+run that mixes real findings with a blocked download. A run whose Trunk arm was
+skipped writes no whole-run success stamp, so the next `--skip-if-fresh` run
+retries Trunk instead of inheriting a pass it never earned. Normal `--run` mode
+executes independent
 quality-phase commands with
 bounded local parallelism (`--parallel <n>`, default `auto` capped at 4 workers,
 or `AGENT_QUALITY_PARALLELISM`). The machine-wide coordinator applies a second
@@ -571,14 +594,17 @@ Only a verified success can satisfy later freshness reuse. A run that neither
 executes nor reuses verified work never reports success, including through a
 pipe.
 
-A run can pass after it skips Trunk only when the post-failure provisioning
-probe confirms that the launcher cannot produce its CLI. The leader publishes
-that outcome as a success with `reusable: false` and the exact skip reason. An
-active follower receives the same qualified result and warning. The coordinator
-does not create a retained-success index for it and removes any older index for
-the same fingerprint. A later `--skip-if-fresh` request therefore leads a new
-execution and retries Trunk. The probe inherits the command identity and marker
-descriptors. Its command lease stays reserved until the probe and its
+A run can pass after it skips Trunk only when one of the post-failure checks
+classifies the environment as blocked. The launcher probe can report that it
+cannot fetch the CLI as `provisioning-unavailable`. The failed Trunk transcript
+can pass the fail-closed downstream-download classifier described above as
+`downloads-unavailable`. The leader publishes that outcome as a qualified
+success with `reusable: false` and the exact skip reason. An active follower
+receives the same qualified result and a matching blocked-download warning. The
+coordinator does not create a retained-success index for it and removes any
+older index for the same fingerprint. A later `--skip-if-fresh` request
+therefore leads a new execution and retries Trunk. The command lease stays
+reserved until the classification, any launcher probe, and all identified
 descendants drain.
 
 Each blocking RPC helper carries the request and coordinator process tags and
@@ -739,22 +765,37 @@ pathname beside the witness. It deletes only the private names after it
 verifies that they still name the witnessed inode. A path replacement is
 retained and stops the gate, even when it has the same text and authority token.
 
-The legacy owner `host=` field stores the gate's cached `uname -n` value. The
-owner-quarantine namespace uses its SHA-256 digest in names of the form
-`owner.reclaiming.quarantine.v1.<hostname-sha256>.<pid>.<nonce>`. A waiter does
-not apply a local PID verdict to evidence from another host. If `uname -n`
-changes after a crash, the waiter retains an old owner, release remnant, or
-quarantine as foreign-host evidence and exits with status 2. Issue #2006 tracks
-a stable machine identity for these recovery paths. Before a waiter recovers a
-dead local quarantine, it creates an empty mode-0700 placeholder with its own
-versioned name. One descriptor-bound Node
-operation validates both directories and atomically renames the whole source
-directory over that placeholder. It fsyncs the claimed directory and its
-parent. This claim orders recovery against a creator's orphaned `mv` child and
-against other waiters. A waiter that loses the source-name race removes only
-its empty placeholder, restarts the quarantine scan, and observes the winner's
-new name before it examines ordinary remnants. A crash after the directory
-claim leaves the same versioned evidence for the next waiter.
+The legacy owner record stores the gate's cached `uname -n` value in `host=` and
+its resolved machine identity in `machine=`. The owner-quarantine namespace
+records the quarantine creator in names of the form
+`owner.reclaiming.quarantine.v2.<machine-source>.<machine-sha256>.<hostname-sha256>.<created-epoch>.<pid>.<nonce>`.
+The PID component is a positive decimal JavaScript safe integer from 1 through
+9,007,199,254,740,991. Bash and Node reject larger values before a liveness
+check.
+This metadata identifies the process that created or claimed the quarantine.
+It does not identify the owner record inside it. A waiter accepts historical
+`owner.reclaiming.quarantine.v1.<hostname-sha256>.<pid>.<nonce>` names for
+recovery, but the name alone does not decide which machine created the evidence.
+
+The waiter applies the machine verdict and lock-root locality rules before it
+uses a local PID. A same-machine creator is live while its PID is live and is
+reclaimable as soon as its PID is gone or is a zombie. A creator from another
+machine is never checked in the local process table and is never reclaimed. An
+unverified creator on a root that may be shared is also never checked or
+reclaimed. An unverified creator on a proved or declared per-machine root is
+reclaimable only after the unverified-machine grace period and a dead or zombie
+PID. A v1 quarantine has no creation epoch, so its directory modification time
+supplies the conservative age check when that check is required.
+
+Before a waiter recovers a reclaimable quarantine, it creates an empty
+mode-0700 placeholder with its own v2 creator metadata. One descriptor-bound
+Node operation validates both directories and atomically renames the whole
+source directory over that placeholder. It fsyncs the claimed directory and
+its parent. This claim orders recovery against a creator's orphaned `mv` child
+and against other waiters. A waiter that loses the source-name race removes
+only its empty placeholder, restarts the quarantine scan, and observes the
+winner's new name before it examines ordinary remnants. A crash after the
+directory claim leaves the same versioned evidence for the next waiter.
 
 The Bash legacy path uses atomic pathname operations when it publishes initial
 quarantine and condemned-run state. It does not fsync those initial files or
@@ -844,7 +885,8 @@ A replacement that wins before the move is detected and restored or retained.
 It cannot enter private release state. The Node coordinator also requires the
 exact record text. A crash before validation leaves the record where legacy
 hidden-record recovery can restore a live successor. Recovery applies the
-canonical foreign-host rule before it reads a PID from the local process table.
+machine verdict and lock-root locality rules before it reads a PID from the
+local process table.
 If it cannot link a live remnant back and no canonical owner exists, it retains
 the remnant and stops the gate. After validation, release removes only
 current-UID regular files with the unpublished
@@ -953,6 +995,103 @@ whose identity read came back empty, since the process was already gone, and a
 host with no identity source at all records `<no-identity-source>` — the one
 case that still signals on PID alone, because nothing better exists there.
 
+**Which machine wrote the record is decided by a machine identity, not by the
+hostname** (GitHub issue #2055). Those liveness rules only mean anything about
+a record written on _this_ machine: another machine's PIDs say nothing here, so
+a record from one is waited out rather than judged. The gate used to answer
+"which machine" with `uname -n`, and a rename broke it — the record still named
+`Workbook.local`, the machine now answered to `Mac`, every run read its own
+dead holder as a live foreign one, and the dead-PID reclaim below that branch
+was never reached. Every session on the machine then burned its whole
+`--lock-wait` and none of them could heal it; a human had to delete the owner
+file. So the record now also carries `machine=<source>:<id>`, resolved once per
+run from `/etc/machine-id`, `ioreg`'s `IOPlatformUUID`, or `sysctl kern.uuid` —
+whichever answers first, in that order — and overridable with
+`AGENT_QUALITY_GATE_LOCK_MACHINE_ID`. The source tag is load-bearing: two ids
+from the same source are comparable machine identities, and two from
+_different_ sources are not, because a run that reached `ioreg` and a run that
+fell back to `kern.uuid` are almost certainly one machine and reading their
+unequal values as two would reinvent the wedge.
+
+**Where the lock root lives decides what a local PID lookup is allowed to
+conclude**, and how that is settled depends on who chose the root: evidence for
+the root the gate chose, a declaration for the root an operator chose.
+
+The default candidates — `$HOME/.cache/agent-quality-gate`, then
+`$TMPDIR/agent-quality-gate-<uid>` — are nobody's deliberate coordination
+point, so the only open question is whether the storage under them is mounted
+from elsewhere, and the filesystem answers it. `df -l` lists local filesystems
+and omits network ones — NFS, SMB, AFS, an autofs map — on both the BSD and GNU
+implementations, and the row it prints for a path, not its exit status, is the
+answer. Every failure to answer means "may be shared": no `df`, an unreadable
+path, an implementation without `-l`. That direction is the one that keeps
+waiting.
+
+`AGENT_QUALITY_GATE_LOCK_DIR` is the opposite case. `resolve_gate_lock_root`
+treats it as a coordination contract precisely because it can name a directory
+more than one machine reaches, and a local mount is no evidence against that —
+a machine can export its own disk. So an override is possibly-shared until its
+owner says otherwise, and every reclaim on this path is refused there.
+`AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE` is that declaration, and it
+overrides both branches: `1` where an override directory is this machine's
+alone, `0` where even a default root is exported to other machines.
+
+The verdict then has three values. **Same machine** — matching identities, or
+no identity on one side and a matching hostname — runs the liveness rules
+unchanged, so a dead holder is reclaimed at once whatever the record calls the
+host. **Another machine** — two identities from one source that disagree, on a
+root that may be shared — is definitive and nothing local may overturn it, so
+that record is waited out however old it gets and the expiry names its holder.
+**Unverified** covers everything else: no machine field (a record from a gate
+that predates it), a source mismatch, or a disagreeing identity on local
+storage.
+
+That last case is deliberate. A machine identity is not immutable —
+`/etc/machine-id` is regenerated by an OS reinstall or an image rebuild, and
+the override can simply be changed — so on storage the machine mounts itself, a
+disagreeing identity is far likelier to be this machine's identity having
+moved, exactly as a rename moved its hostname, than a second machine writing
+into the same directory. Reading it as another machine would leave the record
+unreclaimable forever, which is the wedge this whole rule exists to remove.
+
+**The converse does not hold**, and the asymmetry matters: a disagreeing id is
+proof of two machines, but an agreeing one is not proof of one, because ids are
+not guaranteed unique. Containers built from a single base image famously carry
+the same baked-in `/etc/machine-id`, so two of them mounting one lock directory
+agree on their identity while having separate PID namespaces — where a local
+`kill -0` on the other's holder reads "gone". So off proven-local storage the
+hostname has to agree as well; where it does not, the pair counts as unverified
+and nothing is reclaimed. On storage the machine mounts itself no second
+machine is writing records at all, and the hostname is the field the rename
+moved, so requiring it there would refuse the case this exists to fix.
+
+An unverified record is reclaimed only on local storage, and only with a dead
+PID and an age past
+`AGENT_QUALITY_GATE_LOCK_UNVERIFIED_MACHINE_GRACE_SECONDS` (600 by default).
+The grace bounds the exposure in the one configuration the probe cannot see —
+an exported lock root — because a holder there would have to be idle past it to
+be touched, and the declaration turns the branch off outright. On a root that
+may be shared it never reclaims at all. Either outcome is said on stderr: the
+reclaim names what it concluded and from what, and the refusal names the
+declaration that would change it.
+
+**An identity is validated, never rewritten.** The id must already be 1-128
+characters of `A-Za-z0-9._-`; anything else is refused, with no trimming,
+stripping, or truncation ahead of the check. Every such normalisation is a
+many-to-one map, and a many-to-one map on an identity is how two machines come
+to compare equal: stripping the unrepresentable character in `machine/a`, or
+deleting the line break in `machine<LF>a`, both yield `machinea`, which may be
+another machine's legitimate id. A refused probe source costs an identity
+nobody can compare, which is the conservative state; a refused
+`AGENT_QUALITY_GATE_LOCK_MACHINE_ID` stops the run, because the operator set it
+to name a machine and running under a different one is the failure being
+avoided.
+
+The field is additive in both directions: an older gate on the same machine
+ignores it and reads the record exactly as it always did, and this gate reads
+that older gate's record through the unverified path. Once both gates on a
+shared root write identities, that path is unreachable there.
+
 A killed holder cannot release its own lock, so recovery is explicit rather
 than time-based. A successor that finds the recorded coordinator or legacy gate
 gone takes the record away and claims it. `kill -9` therefore costs the next
@@ -1000,11 +1139,11 @@ cross a named-resource boundary.
 | after a quarantine creates `anchor`, before it records a fallback              | shared owner or remnant plus one private hard-link witness                                                          | a dead-creator recovery requires a second visible link, removes only the witness, and leaves the shared evidence intact                                                                          |
 | after a quarantine records its fallback, before it moves the shared pathname   | shared owner or remnant plus a private witness and fallback marker                                                  | the fallback proves a canonical link or condemned-run obligation exists; recovery can remove only the witnessed private evidence                                                                 |
 | after the shared pathname moves to the quarantine `record`                     | a replacement can occupy the shared path; the exact old inode remains as `anchor` and `record`                      | recovery verifies both private links name one current-UID inode; it retains any replacement and removes only the private links                                                                   |
-| while a waiter claims a dead local quarantine                                  | either the old quarantine name or the same directory under the waiter's versioned name                              | one whole-directory rename wins; source `ENOENT` during open, revalidation, or rename makes the loser remove its empty placeholder and rescan the winner                                         |
-| after a waiter claims a quarantine, before it recovers a phase                 | one versioned quarantine whose hostname hash and PID name the waiter                                                | a concurrent waiter treats that claimant as active; if the claimant dies, the next waiter claims and recovers the same directory                                                                 |
+| while a waiter claims a reclaimable quarantine                                 | either the old quarantine name or the same directory under the waiter's versioned name                              | one whole-directory rename wins; source `ENOENT` during open, revalidation, or rename makes the loser remove its empty placeholder and rescan the winner                                         |
+| after a waiter claims a quarantine, before it recovers a phase                 | one v2 quarantine whose machine source and hash, hostname hash, creation epoch, PID, and nonce name the claimant     | a concurrent waiter applies the machine and locality verdict to that claimant; if it becomes reclaimable, the next waiter claims and recovers the same directory                                 |
 | after judging a taken record stale, before the new record is published         | no canonical owner and the prior same-UID token under `condemned.d/`; exact old owner evidence can remain private   | drains that token before mapped work, then publishes its own owner; a failed or changed discard retains evidence and stops instead                                                               |
 | after a taken record is judged live, before it is put back                     | no canonical owner, an exact hard-link witness, and the recovery-visible remnant                                    | publishes the witnessed inode with an exclusive hard link; an occupied canonical path wins, and the old evidence remains until it has a published fallback                                       |
-| after `mv owner → owner.reclaiming.release.*`, before token validation         | ownerless lock, one recovery-visible release remnant, and the old marker                                            | restores a local-live or foreign-host successor as canonical; an unrestorable live remnant stops the gate; a spent local identity becomes a drain obligation before removal                      |
+| after `mv owner → owner.reclaiming.release.*`, before token validation         | ownerless lock, one recovery-visible release remnant, and the old marker                                            | restores a locally live successor; retains another-machine or unverified shared-root evidence; a spent reclaimable identity becomes a drain obligation before removal                           |
 | after validation and `mv remnant → <private-release>/owner`, before `rmdir`    | ownerless lock, an exact private owner snapshot, the open old marker, and possible unpublished owner stages         | release removes only known dead-publisher stages; a successor owner makes `rmdir` fail; restore and cleanup operate through exact hard-link witnesses                                            |
 | after `rmdir run.lock`, before private owner and marker cleanup                | no lock; the exact private owner witness and old holder marker remain outside the authority path                    | the next gate takes the lock normally; no recovery scan removes these top-level paths, so they remain inert and grant no authority                                                               |
 | after exclusive coordinator marker creation, before snapshot publication       | one current-user, token-specific marker inode held by an open coordinator descriptor                                | the crash closes the descriptor and runs no cleanup; the marker stays inert because the next coordinator uses a different generation token                                                       |
@@ -1196,9 +1335,12 @@ of them.
    file, or the directory holding them, that exists but cannot be read stops
    the run and is named in the output. Hidden-owner recovery has the same
    failure direction. An unreadable, symlinked, or non-regular remnant stays in
-   place and stops the gate. A remnant recorded on another host stays live
-   evidence; its PID is not checked on this host. If protected-hardlink policy
-   or another access error prevents restoration while the canonical owner is
+   place and stops the gate. Recovery applies the same machine verdict and
+   lock-root locality rule to a remnant. It does not check a local PID for
+   another-machine evidence or unverified evidence on a root that may be
+   shared. It can reclaim unverified evidence on a per-machine root only after
+   the grace period and a dead or zombie PID. If protected-hardlink policy or
+   another access error prevents restoration while the canonical owner is
    absent, the gate retains the remnant and exits before mapped work.
 
    **Obligation evidence is never rewritten in place.** A `>` redirection
@@ -1937,8 +2079,8 @@ quality commands are stamped. Prerequisite phases
 generated code, built packages) are invisible to the source fingerprint, so a
 stamp could skip them after their outputs were deleted. Within a leader
 execution, the Trunk check, gate self-test, and advisory ADR reminder also
-always re-run. The Trunk check is skipped, never reused, where the CLI cannot
-be provisioned.
+always re-run. The Trunk check is skipped, never reused, where Trunk's downloads
+are blocked: the CLI, its plugin sources, or the linters that a check needs.
 
 Each mapped command has a watchdog. The ordinary default is 1500 seconds. The
 gate self-test default is 2100 seconds. The current exact-head suite passed in

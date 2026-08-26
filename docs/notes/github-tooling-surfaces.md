@@ -129,6 +129,29 @@ the skills document the two native paths.
 | `gh issue edit` / labels / comments            | `issue_write`, `issue_read`, `add_issue_comment`                                                        |
 | `pnpm pr:ready-state --watch` foreground loop  | `subscribe_pr_activity` webhook events + scheduled self check-ins (e.g. `send_later`); never sleep-poll |
 
+## Exact workflow-run selection
+
+Resolve the expected workflow path to exactly one workflow database ID. Stop if
+the path has zero or multiple matches. Then resolve the full target commit SHA,
+select runs with both IDs, and bind every claim to the returned run
+`databaseId`:
+
+```bash
+gh workflow list --all --limit 1000 --json id,path,state \
+  --jq '.[] | select(.path == "<expected-workflow-path>")'
+gh run list --workflow <workflow-database-id> --all --commit <full-sha> \
+  --limit 1000 \
+  --json databaseId,headSha,workflowDatabaseId,status,conclusion,url
+gh run view <databaseId>
+gh run watch <databaseId> --exit-status
+```
+
+Use the unique workflow row's `id` as `<workflow-database-id>`. Require each
+run's `headSha` to equal the target SHA and `workflowDatabaseId` to equal that
+ID. A workflow display name, branch filter, or list position is not sufficient
+evidence because each can select an older or unrelated run. For pull requests,
+keep `pnpm pr:ready-state` and `gh pr checks` as the canonical probes.
+
 ## Issue workboard transitions
 
 `pnpm issue:claim`, `issue:review`, and `issue:release` shell out to gh —

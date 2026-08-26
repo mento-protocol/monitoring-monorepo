@@ -407,6 +407,8 @@ export async function runCli(argv) {
     }
     const root = parsed.values.get("--root") ?? defaultRoot();
     const legacyOwnerId = parsed.values.get("--legacy-owner-token") ?? null;
+    const legacyMachineIdentity =
+      parsed.values.get("--legacy-machine-identity") ?? "";
     const coordinator = await startCoordinator({
       root,
       policyHash,
@@ -415,6 +417,7 @@ export async function runCli(argv) {
       ownerSweepMs: integer(parsed, "--owner-sweep-ms", 1_000),
       legacyLockRoot: parsed.values.get("--legacy-lock-root") ?? null,
       legacyOwnerToken: legacyOwnerId,
+      legacyMachineIdentity,
       readyFile: parsed.values.get("--ready-file") ?? null,
       sourceAttestor,
     });

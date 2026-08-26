@@ -11,9 +11,16 @@
  * CI:  .github/workflows/ci.yml  (scripts job)
  */
 
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { checkSettingsContract } from "./check-settings-contract.mjs";
 
@@ -236,6 +243,8 @@ test("rejects unreviewed root and package-local bash script permissions", () => 
   for (const permission of [
     "Bash(bash scripts/*)",
     "Bash(bash ./scripts/*)",
+    "Bash(bash scripts/agent-quality-gate.sh:*)",
+    "Bash(bash ./scripts/agent-quality-gate.sh:*)",
     "Bash(bash ui-dashboard/scripts/check-react-doctor-other.sh:*)",
   ]) {
     assertFailureContains(
@@ -270,8 +279,7 @@ test("accepts every reviewed allowlist entry the settings file grants", () => {
   assertNoFailures(
     runContract({
       allow: [
-        "Bash(bash scripts/agent-quality-gate.sh:*)",
-        "Bash(bash ./scripts/agent-quality-gate.sh:*)",
+        "Bash(pnpm agent:quality-gate:*)",
         "Bash(bash scripts/agent-quality-gate.test.sh:*)",
         "Bash(bash ./scripts/agent-quality-gate.test.sh:*)",
         "Bash(bash scripts/bootstrap/agent-session-end-hook.sh:*)",
@@ -297,12 +305,58 @@ test("accepts every reviewed allowlist entry the settings file grants", () => {
   );
 });
 
-test("ignores non-Bash permissions and non-string entries", () => {
+// ── Claude WebFetch and unknown-kind policy ──────────────────────────────────
+//
+// Same control, other tool kinds. `WebFetch` gets its own reviewed set; every
+// remaining kind fails closed, so granting one is a deliberate edit here rather
+// than an entry that nothing grades.
+
+console.log("\nClaude WebFetch and unknown-kind policy");
+
+test("accepts the reviewed Claude WebFetch permission", () => {
   assertNoFailures(
-    runContract({
-      allow: ["Read(docs/**)", "WebFetch(domain:example.com)", 7],
-    }),
+    runContract({ allow: ["WebFetch(domain:monitoring.mento.org)"] }),
   );
+});
+
+test("rejects unreviewed Claude WebFetch permissions", () => {
+  for (const permission of [
+    "WebFetch(domain:example.com)",
+    // Neighbours of the reviewed host on both sides of the label boundary: a
+    // host-pattern check would have to rule on these, an exact set never sees
+    // them as anything but absent.
+    "WebFetch(domain:staging.monitoring.mento.org)",
+    "WebFetch(domain:monitoring.mento.org.example.com)",
+    "WebFetch(url:https://monitoring.mento.org/*)",
+    "WebFetch(*)",
+  ]) {
+    assertFailureContains(
+      runContract({ allow: [permission] }),
+      `.claude/settings.json: unexpected WebFetch permission; add the exact reviewed entry to the context-check allowlist: ${permission}`,
+    );
+  }
+});
+
+test("rejects permission kinds that have no reviewed allowlist", () => {
+  for (const permission of [
+    "Read(docs/**)",
+    "Edit(**)",
+    "WebSearch",
+    // A bare tool name is the widest grant of that tool. `Bash` without a
+    // specifier must not slip past a check keyed on the `Bash(` prefix.
+    "Bash",
+    "mcp__github__create_pull_request",
+    "",
+  ]) {
+    assertFailureContains(
+      runContract({ allow: [permission] }),
+      `.claude/settings.json: unreviewed permission kind; register it in scripts/context/check-settings-contract.mjs with its own reviewed allowlist before granting it: ${permission}`,
+    );
+  }
+});
+
+test("ignores non-string allow entries", () => {
+  assertNoFailures(runContract({ allow: [7, null, { Bash: "*" }] }));
 });
 
 test("rejects a permissions.allow that is not an array", () => {
@@ -315,6 +369,42 @@ test("rejects a permissions.allow that is not an array", () => {
     }),
     ".claude/settings.json: expected permissions.allow array",
   );
+});
+
+// ── tracked settings file invariant ──────────────────────────────────────────
+//
+// The reviewed sets are a verbatim copy of a tracked file, so cases that retype
+// entries only prove the copy agrees with itself. These read the real
+// `.claude/settings.json` and grade what it actually grants. The Bash case is
+// the standing invariant: widening the loop to other kinds must leave every
+// existing Bash grant validating exactly as before.
+
+console.log("\ntracked settings file invariant");
+
+const trackedAllow = JSON.parse(
+  readFileSync(
+    path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "../../.claude/settings.json",
+    ),
+    "utf8",
+  ),
+).permissions.allow;
+
+test("every Bash entry the tracked settings file grants still validates", () => {
+  const bashEntries = trackedAllow.filter(
+    (permission) =>
+      typeof permission === "string" && permission.startsWith("Bash("),
+  );
+  assert(
+    bashEntries.length > 0,
+    "expected the tracked settings file to grant Bash permissions",
+  );
+  assertNoFailures(runContract({ allow: bashEntries }));
+});
+
+test("every entry the tracked settings file grants validates", () => {
+  assertNoFailures(runContract({ allow: trackedAllow }));
 });
 
 // ── SessionEnd hook wiring ────────────────────────────────────────────────────

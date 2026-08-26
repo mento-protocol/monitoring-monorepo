@@ -18,7 +18,7 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { createConnection, createServer } from "node:net";
 import { basename, join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -43,6 +43,11 @@ import {
   startDetached,
   stateNamespace,
 } from "./quality-gate-coordinator.mjs";
+import {
+  legacyOwnerQuarantineName,
+  legacyOwnerQuarantineRecoveryDecision,
+  parseLegacyOwnerQuarantineName,
+} from "./quality-gate-coordinator-legacy.mjs";
 import {
   initialState,
   RECORD_SCHEMA_VERSION,
@@ -5435,6 +5440,287 @@ for (const [scenario, title] of [
   test(`${title} without blocking`, () => runLegacyFifoProbe(scenario));
 }
 
+test("legacy owner quarantine names bind their machine and host creator", () => {
+  const machineIdentity = "override:machine-a";
+  const host = "host-a.example";
+  const name = legacyOwnerQuarantineName({
+    machineIdentity,
+    host,
+    createdAtEpoch: 1_777_000_000,
+    pid: 4242,
+    nonce: "nonce-123",
+  });
+  assert.equal(
+    name,
+    [
+      "owner.reclaiming.quarantine.v2",
+      "override",
+      createHash("sha256").update(machineIdentity).digest("hex"),
+      createHash("sha256").update(host).digest("hex"),
+      "1777000000",
+      "4242",
+      "nonce-123",
+    ].join("."),
+  );
+  assert.deepEqual(parseLegacyOwnerQuarantineName(name), {
+    version: 2,
+    machineSource: "override",
+    machineFingerprint: createHash("sha256")
+      .update(machineIdentity)
+      .digest("hex"),
+    hostFingerprint: createHash("sha256").update(host).digest("hex"),
+    createdAtEpoch: 1_777_000_000,
+    pid: 4242,
+    nonce: "nonce-123",
+  });
+
+  const noIdentityName = legacyOwnerQuarantineName({
+    host,
+    createdAtEpoch: 1_777_000_001,
+    pid: 4243,
+    nonce: "nonce-124",
+  });
+  const noIdentity = parseLegacyOwnerQuarantineName(noIdentityName);
+  assert.equal(noIdentity.machineSource, "none");
+  assert.equal(
+    noIdentity.machineFingerprint,
+    createHash("sha256").update("<no-machine-identity>").digest("hex"),
+  );
+  assert.equal(
+    parseLegacyOwnerQuarantineName(
+      noIdentityName.replace(noIdentity.machineFingerprint, "0".repeat(64)),
+    ),
+    null,
+  );
+});
+
+test("legacy owner quarantine recovery checks local PIDs only for eligible creators", () => {
+  const creatorMachine = "override:machine-a";
+  const creatorHost = "creator-host";
+  const name = legacyOwnerQuarantineName({
+    machineIdentity: creatorMachine,
+    host: creatorHost,
+    createdAtEpoch: 1_777_000_000,
+    pid: 5252,
+    nonce: "nonce-200",
+  });
+  let pidChecks = 0;
+  const creatorIsDead = (pid) => {
+    pidChecks += 1;
+    assert.equal(pid, 5252);
+    return false;
+  };
+
+  assert.deepEqual(
+    legacyOwnerQuarantineRecoveryDecision(name, {
+      machineIdentity: creatorMachine,
+      host: creatorHost,
+      creatorMayOwn: creatorIsDead,
+    }),
+    {
+      action: "recover",
+      machineVerdict: "same",
+      localPidChecked: true,
+      reason: "creator-dead",
+      evidence: parseLegacyOwnerQuarantineName(name),
+    },
+  );
+  assert.equal(pidChecks, 1);
+
+  const clonedIdentity = legacyOwnerQuarantineRecoveryDecision(name, {
+    machineIdentity: creatorMachine,
+    host: "different-host",
+    rootIsPerMachine: false,
+    creatorMayOwn: creatorIsDead,
+  });
+  assert.equal(clonedIdentity.action, "retain");
+  assert.equal(clonedIdentity.machineVerdict, "unverified");
+  assert.equal(clonedIdentity.reason, "unverified-shared-root");
+  assert.equal(clonedIdentity.localPidChecked, false);
+  assert.equal(pidChecks, 1);
+
+  const otherMachine = legacyOwnerQuarantineRecoveryDecision(name, {
+    machineIdentity: "override:machine-b",
+    host: creatorHost,
+    rootIsPerMachine: false,
+    creatorMayOwn: creatorIsDead,
+  });
+  assert.equal(otherMachine.action, "retain");
+  assert.equal(otherMachine.machineVerdict, "other");
+  assert.equal(otherMachine.reason, "other-machine");
+  assert.equal(otherMachine.localPidChecked, false);
+  assert.equal(pidChecks, 1);
+
+  const rotatedTooYoung = legacyOwnerQuarantineRecoveryDecision(name, {
+    machineIdentity: "override:machine-b",
+    host: creatorHost,
+    rootIsPerMachine: true,
+    nowEpoch: 1_777_000_029,
+    unverifiedGraceSeconds: 30,
+    creatorMayOwn: creatorIsDead,
+  });
+  assert.equal(rotatedTooYoung.action, "retain");
+  assert.equal(rotatedTooYoung.machineVerdict, "unverified");
+  assert.equal(rotatedTooYoung.reason, "unverified-grace");
+  assert.equal(rotatedTooYoung.localPidChecked, false);
+  assert.equal(pidChecks, 1);
+
+  const rotatedOld = legacyOwnerQuarantineRecoveryDecision(name, {
+    machineIdentity: "override:machine-b",
+    host: creatorHost,
+    rootIsPerMachine: true,
+    nowEpoch: 1_777_000_030,
+    unverifiedGraceSeconds: 30,
+    creatorMayOwn: creatorIsDead,
+  });
+  assert.equal(rotatedOld.action, "recover");
+  assert.equal(rotatedOld.machineVerdict, "unverified");
+  assert.equal(rotatedOld.localPidChecked, true);
+  assert.equal(pidChecks, 2);
+});
+
+test("legacy v1 owner quarantine evidence keeps fail-closed compatibility", () => {
+  const creatorHost = "legacy-host";
+  const v1Name = [
+    "owner.reclaiming.quarantine.v1",
+    createHash("sha256").update(creatorHost).digest("hex"),
+    "6262",
+    "nonce-300",
+  ].join(".");
+  assert.deepEqual(parseLegacyOwnerQuarantineName(v1Name), {
+    version: 1,
+    machineSource: null,
+    machineFingerprint: null,
+    hostFingerprint: createHash("sha256").update(creatorHost).digest("hex"),
+    createdAtEpoch: null,
+    pid: 6262,
+    nonce: "nonce-300",
+  });
+  let pidChecks = 0;
+  const creatorIsDead = () => {
+    pidChecks += 1;
+    return false;
+  };
+  const sameHost = legacyOwnerQuarantineRecoveryDecision(v1Name, {
+    machineIdentity: "override:current-machine",
+    host: creatorHost,
+    rootIsPerMachine: false,
+    creatorMayOwn: creatorIsDead,
+  });
+  assert.equal(sameHost.action, "recover");
+  assert.equal(sameHost.machineVerdict, "same");
+  assert.equal(pidChecks, 1);
+
+  const sharedUnknown = legacyOwnerQuarantineRecoveryDecision(v1Name, {
+    machineIdentity: "override:current-machine",
+    host: "renamed-host",
+    rootIsPerMachine: false,
+    creatorMayOwn: creatorIsDead,
+  });
+  assert.equal(sharedUnknown.action, "retain");
+  assert.equal(sharedUnknown.reason, "unverified-shared-root");
+  assert.equal(sharedUnknown.localPidChecked, false);
+  assert.equal(pidChecks, 1);
+
+  const localYoung = legacyOwnerQuarantineRecoveryDecision(v1Name, {
+    machineIdentity: "override:current-machine",
+    host: "renamed-host",
+    rootIsPerMachine: true,
+    nowEpoch: 1_777_000_029,
+    legacyCreatedAtEpoch: 1_777_000_000,
+    unverifiedGraceSeconds: 30,
+    creatorMayOwn: creatorIsDead,
+  });
+  assert.equal(localYoung.action, "retain");
+  assert.equal(localYoung.reason, "unverified-grace");
+  assert.equal(pidChecks, 1);
+
+  const localOld = legacyOwnerQuarantineRecoveryDecision(v1Name, {
+    machineIdentity: "override:current-machine",
+    host: "renamed-host",
+    rootIsPerMachine: true,
+    nowEpoch: 1_777_000_030,
+    legacyCreatedAtEpoch: 1_777_000_000,
+    unverifiedGraceSeconds: 30,
+    creatorMayOwn: creatorIsDead,
+  });
+  assert.equal(localOld.action, "recover");
+  assert.equal(localOld.machineVerdict, "unverified");
+  assert.equal(localOld.localPidChecked, true);
+  assert.equal(pidChecks, 2);
+});
+
+test("a coordinator-owned rename crash leaves same-machine v2 recovery evidence", () => {
+  const root = mkdtempSync(join(tmpdir(), "quality-gate-v2-owner-crash-"));
+  fixtures.push({ root, coordinator: null });
+  const lockDirectory = join(root, "run.lock");
+  const ownerPath = join(lockDirectory, "owner");
+  mkdirSync(lockDirectory);
+  const legacyOwnerToken = `legacy-v2-crash-${process.pid}-7000`;
+  const generationToken = `coordinator-v2-crash-${process.pid}-7001`;
+  const machineIdentity = "override:v2-crash-machine";
+  writeFileSync(
+    ownerPath,
+    `pid=${process.pid}\nhost=${hostname()}\nstart_utc=\ntoken=${legacyOwnerToken}\n`,
+  );
+  const helperPath = join(root, "v2-owner-crash.mjs");
+  const legacyModuleUrl = new URL(
+    "./quality-gate-coordinator-legacy.mjs",
+    import.meta.url,
+  ).href;
+  writeFileSync(
+    helperPath,
+    [
+      `import { adoptLegacyRunLock } from ${JSON.stringify(legacyModuleUrl)};`,
+      "const [lockRoot, expectedOwnerToken, generationToken, machineIdentity] = process.argv.slice(2);",
+      "adoptLegacyRunLock({",
+      "  lockRoot,",
+      "  expectedOwnerToken,",
+      "  generationToken,",
+      "  machineIdentity,",
+      '  coordinatorIdentity: { pid: process.pid, startUtc: "v2-owner-crash" },',
+      '  afterOwnerDiscardTake: () => process.kill(process.pid, "SIGKILL"),',
+      "});",
+      "process.exit(91);",
+      "",
+    ].join("\n"),
+  );
+
+  const crashed = spawnSync(
+    process.execPath,
+    [helperPath, root, legacyOwnerToken, generationToken, machineIdentity],
+    { encoding: "utf8" },
+  );
+  assert.equal(crashed.signal, "SIGKILL", crashed.stderr);
+  assert.equal(ownerAuthorityToken(ownerPath), generationToken);
+  const quarantines = readdirSync(lockDirectory).filter((entry) =>
+    entry.startsWith("owner.reclaiming.quarantine."),
+  );
+  assert.equal(quarantines.length, 1);
+  const evidence = parseLegacyOwnerQuarantineName(quarantines[0]);
+  assert.equal(evidence.version, 2);
+  assert.equal(evidence.pid, crashed.pid);
+  assert.deepEqual(readdirSync(join(lockDirectory, quarantines[0])).sort(), [
+    "anchor",
+    "fallback-ready",
+    "record",
+  ]);
+  let checkedPid = null;
+  const decision = legacyOwnerQuarantineRecoveryDecision(quarantines[0], {
+    machineIdentity,
+    host: hostname(),
+    rootIsPerMachine: false,
+    creatorMayOwn: (pid) => {
+      checkedPid = pid;
+      return false;
+    },
+  });
+  assert.equal(decision.action, "recover");
+  assert.equal(decision.machineVerdict, "same");
+  assert.equal(decision.localPidChecked, true);
+  assert.equal(checkedPid, crashed.pid);
+});
+
 test("legacy handoff is safe for mixed Bash field reads and releases by token", () => {
   const root = mkdtempSync(join(tmpdir(), "quality-gate-legacy-"));
   fixtures.push({ root, coordinator: null });
@@ -5461,15 +5747,33 @@ test("legacy handoff is safe for mixed Bash field reads and releases by token", 
     startUtc: "Thu Aug 21 12:00:00 2026",
   };
   const generationId = `coordinator-host-${process.pid}-1001`;
+  assert.throws(
+    () =>
+      adoptLegacyRunLock({
+        lockRoot: root,
+        expectedOwnerToken: oldId,
+        generationToken: generationId,
+        coordinatorIdentity,
+        machineIdentity: "override:machine/a",
+      }),
+    (error) =>
+      error instanceof CoordinatorError &&
+      error.code === "INVALID_MACHINE_IDENTITY",
+  );
+  assert.equal(ownerAuthorityToken(join(lockDirectory, "owner")), oldId);
+  assert.deepEqual(readdirSync(lockDirectory), ["owner"]);
+  assert.equal(existsSync(join(root, `holder.${generationId}`)), false);
   const legacy = adoptLegacyRunLock({
     lockRoot: root,
     expectedOwnerToken: oldId,
     generationToken: generationId,
     coordinatorIdentity,
+    machineIdentity: "override:machine-a",
   });
   assert.equal(statSync(root).mode & 0o777, sharedRootMode);
   const current = ownerFields(join(lockDirectory, "owner"));
   assert.equal(current.uid, String(process.getuid?.() ?? ""));
+  assert.equal(current.machine, "override:machine-a");
   assert.equal(current.start_utc, "");
   assert.equal(current.coordinator_start_utc, coordinatorIdentity.startUtc);
   assert.equal(current.coordinator_token, generationId);
@@ -6017,6 +6321,7 @@ test("legacy handoff retains same-token replacements around quarantine", () => {
           lockRoot: root,
           expectedOwnerToken: legacyOwnerId,
           generationToken: generationId,
+          machineIdentity: "override:coordinator-quarantine-machine",
           coordinatorIdentity: {
             pid: process.pid,
             startUtc: `Thu Aug 21 12:00:${phase === "before-take" ? "40" : "50"} 2026`,
@@ -6032,6 +6337,16 @@ test("legacy handoff retains same-token replacements around quarantine", () => {
       entry.startsWith("owner.reclaiming.quarantine."),
     );
     assert.equal(quarantines.length, 1);
+    const quarantineEvidence = parseLegacyOwnerQuarantineName(quarantines[0]);
+    assert.equal(quarantineEvidence.version, 2);
+    assert.equal(quarantineEvidence.machineSource, "override");
+    assert.equal(
+      quarantineEvidence.machineFingerprint,
+      createHash("sha256")
+        .update("override:coordinator-quarantine-machine")
+        .digest("hex"),
+    );
+    assert.equal(quarantineEvidence.pid, process.pid);
     const quarantine = join(lockDirectory, quarantines[0]);
     assert.equal(statSync(quarantine).mode & 0o777, 0o700);
     assert.deepEqual(readdirSync(quarantine).sort(), [

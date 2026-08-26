@@ -45,6 +45,7 @@ paths_file="$(mktemp)"
 output_file="$(mktemp)"
 gate_cache_dir="$(mktemp -d)"
 turbo_facts_file="$(mktemp)"
+public_entry_bash_env_file="$(mktemp)"
 codex_hooks_backup="$(mktemp)"
 claude_settings_backup="$(mktemp)"
 codex_hooks_fixture="$(mktemp)"
@@ -75,6 +76,7 @@ cleanup_test_artifacts() {
   restore_hook_configs
   rm -rf "$gate_cache_dir" "$sentry_symlink_target_dir"
   rm -f "$paths_file" "$output_file" "$turbo_facts_file" \
+    "$public_entry_bash_env_file" \
     "$output_file.pnpm-args" "$untracked_skill_artifact" \
     "$sentry_symlink_probe" "$sentry_symlink_to_target" \
     "$codex_hooks_backup" "$claude_settings_backup" \
@@ -93,6 +95,9 @@ cleanup_test_artifacts() {
   fi
   if [[ -n "${linux_release_gate_copy:-}" ]]; then
     rm -f "$linux_release_gate_copy"
+  fi
+  if [[ -n "${trunk_blocked_linter_probe_count:-}" ]]; then
+    rm -f "$trunk_blocked_linter_probe_count"
   fi
 }
 trap cleanup_test_artifacts EXIT
@@ -1060,6 +1065,93 @@ assert_turbo_task_has_input "react-doctor:score" '$TURBO_ROOT$/.npmrc'
 assert_turbo_task_has_input "react-doctor:score" '$TURBO_ROOT$/.node-version'
 assert_turbo_task_has_input "react-doctor:score" '$TURBO_ROOT$/turbo.json'
 
+# The public command must reach the protected Bash shebang before any inherited
+# startup control can run. Pin both the prologue and the direct Trunk hook so a
+# later wrapper or explicit `bash` invocation cannot silently remove that
+# boundary while the dynamic cases below continue to pass for another reason.
+node - <<'NODE' ||
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const gate = fs.readFileSync("scripts/agent-quality-gate.sh", "utf8");
+const trunk = fs.readFileSync(".trunk/trunk.yaml", "utf8");
+const activeTrunkLines = trunk
+  .split("\n")
+  .filter((line) => !line.trimStart().startsWith("#"))
+  .join("\n");
+const prologue = [
+  "#!/bin/bash -p",
+  "unset BASH_ENV ENV BASH_COMPAT CDPATH GLOBIGNORE",
+  "set +o posix",
+  "unset POSIXLY_CORRECT POSIX_PEDANTIC",
+  "set -euo pipefail",
+  "",
+].join("\n");
+assert.ok(gate.startsWith(prologue), "quality-gate public Bash prologue drifted");
+assert.match(
+  activeTrunkLines,
+  /^[ \t]*run: git fetch --quiet origin main && \.\/scripts\/agent-quality-gate\.sh --run --parallel 3 --skip-if-fresh --base origin\/main[ \t]*$/mu,
+  "Trunk pre-push must execute the protected gate entry directly",
+);
+assert.doesNotMatch(
+  activeTrunkLines,
+  /(?:^|[^\w./])(?:(?:\/bin\/)?bash[ \t]+(?:\.\/)?scripts\/agent-quality-gate\.sh|scripts\/agent-quality-gate\.sh)/mu,
+  "Trunk pre-push must not bypass or CDPATH-resolve the protected gate entry",
+);
+NODE
+  fail "expected the public quality-gate entry contract to remain pinned"
+
+# The public pnpm entry executes the gate by its `#!/bin/bash -p` shebang. A
+# caller-controlled non-interactive startup file must not run before the gate
+# can validate its arguments. `exit 0` is the dangerous case: an ordinary Bash
+# launch would turn an invalid invocation into a false success with no usage
+# output.
+printf 'exit 0\n' > "$public_entry_bash_env_file"
+if BASH_ENV="$public_entry_bash_env_file" \
+  pnpm agent:quality-gate --review-invalid-flag > "$output_file" 2>&1; then
+  public_entry_status=0
+else
+  public_entry_status=$?
+fi
+[[ "$public_entry_status" -eq 2 ]] ||
+  fail "BASH_ENV bypassed the public quality-gate argument check (status $public_entry_status)"
+assert_contains "error: unknown argument: --review-invalid-flag"
+assert_contains "Usage: scripts/agent-quality-gate.sh"
+
+# Inherited xtrace starts before line one unless the shebang enables protected
+# startup. The gate scans raw environment records early, so xtrace on an
+# ordinary Bash launch could print a secret value during that scan.
+public_entry_secret_canary="qg-public-entry-secret-canary-2060"
+printf 'docs/README.md\n' > "$paths_file"
+if /usr/bin/env \
+  SHELLOPTS=xtrace \
+  QG_PUBLIC_ENTRY_SECRET_CANARY="$public_entry_secret_canary" \
+  pnpm agent:quality-gate --dry-run \
+    --changed-paths-file "$paths_file" \
+    --base HEAD > "$output_file" 2>&1; then
+  public_entry_status=0
+else
+  public_entry_status=$?
+fi
+[[ "$public_entry_status" -eq 0 ]] ||
+  fail "SHELLOPTS changed the public quality-gate dry-run status to $public_entry_status"
+assert_contains "Mode: dry-run"
+assert_not_contains "$public_entry_secret_canary"
+
+# POSIX mode controls also arrive before the script body. The public entry
+# disables that inherited mode before it applies the normal argument contract.
+if /usr/bin/env \
+  POSIXLY_CORRECT=1 \
+  POSIX_PEDANTIC=1 \
+  pnpm agent:quality-gate --review-invalid-flag > "$output_file" 2>&1; then
+  public_entry_status=0
+else
+  public_entry_status=$?
+fi
+[[ "$public_entry_status" -eq 2 ]] ||
+  fail "POSIX startup controls changed the public quality-gate invalid-argument status to $public_entry_status"
+assert_contains "error: unknown argument: --review-invalid-flag"
+assert_contains "Usage: scripts/agent-quality-gate.sh"
+
 printf 'scratch\n' > "$untracked_skill_artifact"
 node scripts/context/check-agent-context.mjs > "$output_file"
 assert_contains "Agent context check passed"
@@ -1165,6 +1257,18 @@ const support = require("node:fs").readFileSync(
   "scripts/gate/quality-gate-coordinator-support.sh",
   "utf8",
 );
+const coordinatorAdapter = require("node:fs").readFileSync(
+  "scripts/gate/quality-gate-coordinator.sh",
+  "utf8",
+);
+const coordinatorLegacy = require("node:fs").readFileSync(
+  "scripts/gate/quality-gate-coordinator-legacy.mjs",
+  "utf8",
+);
+const coordinatorServer = require("node:fs").readFileSync(
+  "scripts/gate/quality-gate-coordinator-server.mjs",
+  "utf8",
+);
 const runHandles = require("node:fs").readFileSync(
   "scripts/gate/run-handles.sh",
   "utf8",
@@ -1199,6 +1303,26 @@ assert.match(
   source,
   /read -r -d '' gate_bash_environment_record[\s\S]*?BASH_FUNC_\*%%\|BASH_FUNC_\*'\(\)'[\s\S]*?\(\) \{[\s\S]*?\/usr\/bin\/env -0[\s\S]*?agent-quality-gate-env-end[\s\S]*?gate_bash_environment_scan_complete[\s\S]*?gate_sanitized_bash_launcher\+=\(\/bin\/bash -p\)/u,
   "the sanitized launcher must remove exported functions and fail a truncated environment scan",
+);
+assert.match(
+  source,
+  /gate_coordinator_publish_success[\s\S]*?"\$trunk_arm_environment_blocked" "\$trunk_environment_blocked_kind"/u,
+  "coordinator publication must bind every Trunk environment-blocked path",
+);
+assert.match(
+  coordinatorAdapter,
+  /--legacy-machine-identity "\$gate_lock_machine_id_cached"/u,
+  "coordinator handoff must forward the resolved machine identity",
+);
+assert.match(
+  coordinatorLegacy,
+  /`machine=\$\{record\.machineIdentity \?\? ""\}`/u,
+  "the coordinator legacy owner must retain the machine identity",
+);
+assert.match(
+  coordinatorServer,
+  /machineIdentity: legacyMachineIdentity/u,
+  "the coordinator server must carry the machine identity into legacy adoption",
 );
 assert.match(
   source,
@@ -1333,7 +1457,7 @@ if ! /bin/bash -c '
   gate_coordinator_publish_result() {
     printf "%s\t%s\n" "$1" "$2" > "$payload_file"
   }
-  gate_coordinator_publish_success blocked
+  gate_coordinator_publish_success true launcher
   node -e '\''
     const assert = require("node:assert/strict");
     const fs = require("node:fs");
@@ -1350,7 +1474,9 @@ if ! /bin/bash -c '
       }],
     });
   '\'' "$payload_file"
-  gate_coordinator_publish_success ok
+  gate_coordinator_publish_success true linters
+  grep -Fxq $'\''success\t{"source":"agent-quality-gate","qualified":true,"reusable":false,"skipped":[{"command":"trunk","reason":"downloads-unavailable"}]}'\'' "$payload_file"
+  gate_coordinator_publish_success false ""
   grep -Fxq $'\''success\t{"source":"agent-quality-gate"}'\'' "$payload_file"
 ' coordinator-qualified-payload-test \
   "$repo_root" "$coordinator_qualified_payload"; then
@@ -1432,6 +1558,11 @@ if ! /bin/bash -c '
       shared-qualified)
         gate_coordinator_role="completed"
         gate_coordinator_completed_result_json="{\"result\":{\"status\":\"success\",\"fingerprint\":\"$gate_coordinator_registration_fingerprint\",\"policyHash\":\"$gate_coordinator_policy_hash\",\"executionId\":\"$gate_coordinator_execution_id\",\"payload\":{\"source\":\"agent-quality-gate\",\"qualified\":true,\"reusable\":false,\"skipped\":[{\"command\":\"trunk\",\"reason\":\"provisioning-unavailable\"}]}}}"
+        gate_coordinator_wait_for_shared_result
+        ;;
+      shared-downloads-qualified)
+        gate_coordinator_role="completed"
+        gate_coordinator_completed_result_json="{\"result\":{\"status\":\"success\",\"fingerprint\":\"$gate_coordinator_registration_fingerprint\",\"policyHash\":\"$gate_coordinator_policy_hash\",\"executionId\":\"$gate_coordinator_execution_id\",\"payload\":{\"source\":\"agent-quality-gate\",\"qualified\":true,\"reusable\":false,\"skipped\":[{\"command\":\"trunk\",\"reason\":\"downloads-unavailable\"}]}}}"
         gate_coordinator_wait_for_shared_result
         ;;
       shared-wrong-source)
@@ -1544,8 +1675,21 @@ if ! /bin/bash -c '
     "warning: the shared coordinator execution skipped Trunk because the CLI could not be provisioned." \
     "$scratch_dir/shared-qualified.stderr"
   grep -Fq -- \
-    "this qualified success is not reusable" \
+    "This qualified success is not reusable" \
     "$scratch_dir/shared-qualified.stderr"
+
+  run_pipeline_scenario shared-downloads-qualified \
+    > "$scratch_dir/shared-downloads-qualified.stdout" \
+    2> "$scratch_dir/shared-downloads-qualified.stderr"
+  grep -Fq -- \
+    "Shared coordinator execution passed; no mapped command ran in this request." \
+    "$scratch_dir/shared-downloads-qualified.stdout"
+  grep -Fq -- \
+    "warning: the shared coordinator execution skipped Trunk because its required downloads were blocked." \
+    "$scratch_dir/shared-downloads-qualified.stderr"
+  grep -Fq -- \
+    "This qualified success is not reusable" \
+    "$scratch_dir/shared-downloads-qualified.stderr"
 
   set +e
   set +o pipefail
@@ -8664,6 +8808,472 @@ rm -rf "$trunk_blocked_stamp_repo"
 assert_not_contains "skipping mapped commands"
 assert_contains "All mapped commands passed."
 assert_contains "Note: the Trunk arm was skipped"
+
+# The launcher is only Trunk's FIRST download. Once it has produced a CLI, that
+# CLI fetches plugin sources and, per check, the hermetic runtimes and linter
+# binaries the enabled linters need. An environment that allowlists trunk.io but
+# not those hosts answers the provisioning probe with a working `--version` and
+# still fails every check, which used to hard-fail the gate with no way out.
+#
+# Every transcript below is the real output of Trunk 1.25.0, captured by seeding
+# a hermetic TRUNK_CACHE with the CLI and then forcing its downloads to fail
+# (connection refused, a 403-returning forward proxy, an unresolvable proxy
+# host). The stubs replay it byte for byte, ANSI included, because the classifier
+# reads that text.
+trunk_blocked_linter_repo="$(mktemp -d)"
+trunk_blocked_linter_probe_count="$(mktemp)"
+export QG_TRUNK_VERSION_PROBE_COUNT_FILE="$trunk_blocked_linter_probe_count"
+(
+  cd "$trunk_blocked_linter_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools .trunk
+  # Trunk writes its failure details into .trunk/out, which every Trunk repo
+  # ignores (see this repo's .trunk/.gitignore). The fixture is run more than
+  # once, so it has to ignore them too or the second run would map a different
+  # command set than the first.
+  printf '*out\n' > .trunk/.gitignore
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+# A provisioned CLI: the launcher probe succeeds, so only the check verdict is
+# in question. The check then fails because it could not install a linter.
+if [[ "${1:-}" == "--version" ]]; then
+  printf 'probe\n' >> "${QG_TRUNK_VERSION_PROBE_COUNT_FILE:?}"
+  echo "1.25.0"
+  exit 0
+fi
+mkdir -p .trunk/out
+cat > .trunk/out/ERGzk.yaml <<'YAML'
+trunk_cli_version: 1.25.0
+title: "Error while executing: Installing hermetic tool shellcheck v0.11.0"
+report:
+  - "Curl Error: Failure when receiving data from the peer for https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.darwin.x86_64.tar.xz"
+YAML
+printf '\n\033[1m\033[30m\033[107m  FAILURES  \033[0m\n\n'
+printf ' \033[1mshellcheck\033[22m  \033[1mInstalling hermetic tool shellcheck v0.11.0\033[22m  .trunk/out/ERGzk.yaml\n'
+printf '\n\033[1m\033[30m\033[107m  NOTICES  \033[0m\n\n'
+printf ' A tool failed to run. You can open the details yaml file for more information.\n'
+printf '\nChecked 0 files\n'
+printf '\033[1m\033[91m\342\234\226 No issues, 1 failure\033[0m\n'
+exit 1
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+)
+assert_contains "warning: skipping ./tools/trunk check fixture.txt — Trunk could not provision its linters."
+assert_contains "The CLI itself is installed — the launcher probe succeeded"
+# The warning must say what it established and nothing more. Trunk stated it
+# found no issues, and that statement is why the downgrade is safe.
+assert_contains "Trunk reported no issues, so no finding is being"
+# The failure row names only the step; the host that has to be allowlisted lives
+# in the detail YAML, so the warning replays it or it names no fix at all.
+assert_contains "Error while executing: Installing hermetic tool shellcheck v0.11.0"
+assert_contains "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/"
+assert_contains "- skipped "
+assert_contains "All mapped commands passed."
+assert_contains "Note: the Trunk arm was skipped"
+assert_not_contains "mapped command(s) failed."
+[[ "$(wc -l < "$trunk_blocked_linter_probe_count" | tr -d '[:space:]')" == "1" ]] ||
+  fail "a failed parallel Trunk arm must run exactly one in-lease launcher probe"
+
+# Same degradation on the sequential path.
+(
+  cd "$trunk_blocked_linter_repo"
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run --fail-fast > "$output_file" 2>&1
+)
+assert_contains "warning: skipping ./tools/trunk check fixture.txt — Trunk could not provision its linters."
+assert_contains "All mapped commands passed."
+assert_not_contains "Stopping after first failed mapped command (--fail-fast)."
+[[ "$(wc -l < "$trunk_blocked_linter_probe_count" | tr -d '[:space:]')" == "2" ]] ||
+  fail "a failed sequential Trunk arm must run exactly one in-lease launcher probe"
+
+# A launcher probe must authenticate its recovery handshake before the gate can
+# classify the command transcript. This fixture prints an otherwise-qualified
+# download failure, then corrupts the probe's ready record from the provisioned
+# `--version` process. The sequential path must report scheduler infrastructure
+# failure. It must not downgrade the earlier transcript to a skipped Trunk arm.
+trunk_probe_handshake_repo="$(mktemp -d)"
+(
+  cd "$trunk_probe_handshake_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools .trunk
+  printf '*out\n' > .trunk/.gitignore
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  probe_handshake=""
+  for candidate in .tmp/agent-quality-gate/agentqg.*; do
+    [[ -f "$candidate" ]] || continue
+    if [[ "$(cat "$candidate" 2>/dev/null)" == ready ]]; then
+      [[ -z "$probe_handshake" ]] || exit 91
+      probe_handshake="$candidate"
+    fi
+  done
+  [[ -n "$probe_handshake" ]] || exit 92
+  printf 'invalid\n' > "$probe_handshake" || exit 93
+  : > "${QG_TRUNK_HANDSHAKE_CORRUPTED_FILE:?}"
+  echo "1.25.0"
+  exit 0
+fi
+mkdir -p .trunk/out
+cat > .trunk/out/handshake.yaml <<'YAML'
+trunk_cli_version: 1.25.0
+title: "Error while executing: Installing hermetic tool shellcheck v0.11.0"
+report:
+  - "Curl Error: Failure when receiving data from the peer for https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.darwin.x86_64.tar.xz"
+YAML
+printf ' shellcheck  Installing hermetic tool shellcheck v0.11.0  .trunk/out/handshake.yaml\n'
+printf 'Checked 0 files\n'
+printf '\342\234\226 No issues, 1 failure\n'
+exit 1
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  set +e
+  QG_TRUNK_HANDSHAKE_CORRUPTED_FILE="$PWD/probe-corrupted" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --fail-fast > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -eq 2 ]]
+  [[ -f probe-corrupted ]]
+)
+rm -rf "$trunk_probe_handshake_repo"
+assert_contains "error: command scheduler infrastructure failed for: ./tools/trunk check fixture.txt"
+assert_contains "The quality gate stops before it schedules another command."
+assert_not_contains "warning: skipping ./tools/trunk check fixture.txt"
+assert_not_contains "All mapped commands passed."
+
+# Same stamp rule as the launcher case: a run that skipped Trunk because its
+# linters could not be downloaded must not leave a clean whole-run stamp, or the
+# next --skip-if-fresh run would inherit a pass Trunk never gave.
+(
+  cd "$trunk_blocked_linter_repo"
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run --skip-if-fresh > "$output_file" 2>&1
+)
+rm -rf "$trunk_blocked_linter_repo"
+assert_not_contains "skipping mapped commands"
+assert_contains "All mapped commands passed."
+assert_contains "Note: the Trunk arm was skipped"
+[[ "$(wc -l < "$trunk_blocked_linter_probe_count" | tr -d '[:space:]')" == "3" ]] ||
+  fail "a retried Trunk arm must run exactly one in-lease launcher probe"
+unset QG_TRUNK_VERSION_PROBE_COUNT_FILE
+rm -f "$trunk_blocked_linter_probe_count"
+
+# Trunk aborts before linting anything when it cannot fetch its plugin sources,
+# so that transcript holds one error line and nothing else. Real output, exit 2.
+trunk_blocked_plugin_repo="$(mktemp -d)"
+(
+  cd "$trunk_blocked_plugin_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.25.0"
+  exit 0
+fi
+printf '\033[0G\033[2K\033[1m\033[31m\342\234\226 Unable to download plugin https://github.com/trunk-io/plugins/archive/v1.7.5.zip: Could resolve but could not establish connection to host of https://github.com/trunk-io/plugins/archive/v1.7.5.zip\033[0m\n'
+exit 2
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+)
+rm -rf "$trunk_blocked_plugin_repo"
+assert_contains "warning: skipping ./tools/trunk check fixture.txt — Trunk could not provision its linters."
+assert_contains "Unable to download plugin https://github.com/trunk-io/plugins/archive/v1.7.5.zip"
+assert_contains "All mapped commands passed."
+assert_not_contains "mapped command(s) failed."
+
+# The invariant, restated against the new path: a Trunk that found a real problem
+# must fail the gate even when a linter download failed in the same run. This is
+# the transcript that would break the invariant if the classifier inferred "no
+# findings" from the presence of a download failure instead of reading Trunk's
+# own verdict — here Trunk never says "No issues", and it reports both counts.
+trunk_mixed_failure_repo="$(mktemp -d)"
+(
+  cd "$trunk_mixed_failure_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.25.0"
+  exit 0
+fi
+mkdir -p .trunk/out
+cat > .trunk/out/DgQ3M.yaml <<'YAML'
+trunk_cli_version: 1.25.0
+title: "Error while executing: Installing hermetic tool shellcheck v0.11.0"
+report:
+  - "Curl Error: Failure when receiving data from the peer for https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.darwin.x86_64.tar.xz"
+YAML
+printf '\033[1m\033[30m\033[107m  ISSUES  \033[0m\n\nfixture.js\n'
+printf " -:-  fmt  trunk-real-problem, autoformat by running 'trunk fmt'  prettier\n"
+printf '\n\033[1m\033[30m\033[107m  FAILURES  \033[0m\n\n'
+printf ' shellcheck  Installing hermetic tool shellcheck v0.11.0  .trunk/out/DgQ3M.yaml\n'
+printf '\nChecked 1 file\n'
+printf '\033[1m\033[91m\342\234\226 1 unformatted file\033[0m\n'
+printf '\033[1m\033[91m\342\234\226 1 failure\033[0m\n'
+exit 1
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  set +e
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]]
+)
+rm -rf "$trunk_mixed_failure_repo"
+assert_contains "1 mapped command(s) failed."
+assert_contains "trunk-real-problem"
+assert_not_contains "- skipped "
+assert_not_contains "Trunk could not provision its linters."
+
+# Fail closed on anything the classifier cannot account for exactly. Trunk
+# counted two failures and only one of them is a download step, so the other is
+# an unexplained failure and the run must fail.
+trunk_partial_failure_repo="$(mktemp -d)"
+(
+  cd "$trunk_partial_failure_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.25.0"
+  exit 0
+fi
+mkdir -p .trunk/out
+cat > .trunk/out/ERGzk.yaml <<'YAML'
+trunk_cli_version: 1.25.0
+title: "Error while executing: Installing hermetic tool shellcheck v0.11.0"
+report:
+  - "Curl Error: Failure when receiving data from the peer for https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.darwin.x86_64.tar.xz"
+YAML
+printf '\033[1m\033[30m\033[107m  FAILURES  \033[0m\n\n'
+printf ' shellcheck    Installing hermetic tool shellcheck v0.11.0  .trunk/out/ERGzk.yaml\n'
+printf ' markdownlint  markdownlint exited with code 134            .trunk/out/zzzzz.yaml\n'
+printf '\nChecked 0 files\n'
+printf '\342\234\226 No issues, 2 failures\n'
+exit 1
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  set +e
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]]
+)
+rm -rf "$trunk_partial_failure_repo"
+assert_contains "1 mapped command(s) failed."
+assert_contains "markdownlint exited with code 134"
+assert_not_contains "- skipped "
+
+# Fail closed on a cause Trunk did not phrase as a download failure. The step is
+# a download step and Trunk found nothing, but a checksum mismatch is a local
+# problem the operator has to see, not an allowlist to widen.
+trunk_local_cause_repo="$(mktemp -d)"
+(
+  cd "$trunk_local_cause_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.25.0"
+  exit 0
+fi
+mkdir -p .trunk/out
+cat > .trunk/out/ERGzk.yaml <<'YAML'
+trunk_cli_version: 1.25.0
+title: "Error while executing: Installing hermetic tool shellcheck v0.11.0"
+report:
+  - "sha256 mismatch for shellcheck-v0.11.0.darwin.x86_64.tar.xz"
+YAML
+printf '\033[1m\033[30m\033[107m  FAILURES  \033[0m\n\n'
+printf ' shellcheck  Installing hermetic tool shellcheck v0.11.0  .trunk/out/ERGzk.yaml\n'
+printf '\nChecked 0 files\n'
+printf '\342\234\226 No issues, 1 failure\n'
+exit 1
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  set +e
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]]
+)
+rm -rf "$trunk_local_cause_repo"
+assert_contains "1 mapped command(s) failed."
+# The transcript is otherwise identical to the accepted one, so the only thing
+# that kept the failure standing is the cause recorded in the detail YAML.
+assert_contains "Installing hermetic tool shellcheck v0.11.0"
+assert_not_contains "- skipped "
+assert_not_contains "Trunk could not provision its linters."
+
+# Trunk reports a removed or renamed artifact under the same `Curl Error:`
+# prefix as a blocked connection. A 404 is a broken pin the operator has to fix,
+# so the accepted signatures are whole measured phrases and this one is not among
+# them: the run must fail.
+trunk_http_error_cause_repo="$(mktemp -d)"
+(
+  cd "$trunk_http_error_cause_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.25.0"
+  exit 0
+fi
+mkdir -p .trunk/out
+cat > .trunk/out/ERGzk.yaml <<'YAML'
+trunk_cli_version: 1.25.0
+title: "Error while executing: Installing hermetic tool shellcheck v0.11.0"
+report:
+  - "Curl Error: HTTP response code said error for https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.darwin.x86_64.tar.xz"
+YAML
+printf '\033[1m\033[30m\033[107m  FAILURES  \033[0m\n\n'
+printf ' shellcheck  Installing hermetic tool shellcheck v0.11.0  .trunk/out/ERGzk.yaml\n'
+printf '\nChecked 0 files\n'
+printf '\342\234\226 No issues, 1 failure\n'
+exit 1
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  set +e
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]]
+)
+rm -rf "$trunk_http_error_cause_repo"
+assert_contains "1 mapped command(s) failed."
+assert_not_contains "- skipped "
+assert_not_contains "Trunk could not provision its linters."
+
+# The signature has to come from the step's own recorded reason, so a bullet
+# under some other key must not be able to supply it. Same transcript as the
+# accepted case; the only difference is that the download-failure phrasing sits
+# under an unrelated list-valued key while `report:` records a local cause. The
+# run must fail.
+trunk_foreign_key_signature_repo="$(mktemp -d)"
+(
+  cd "$trunk_foreign_key_signature_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.25.0"
+  exit 0
+fi
+mkdir -p .trunk/out
+cat > .trunk/out/ERGzk.yaml <<'YAML'
+trunk_cli_version: 1.25.0
+title: "Error while executing: Installing hermetic tool shellcheck v0.11.0"
+related_files:
+  - "Curl Error: this bullet is not the recorded reason"
+report:
+  - "sha256 mismatch for shellcheck-v0.11.0.darwin.x86_64.tar.xz"
+YAML
+printf '\033[1m\033[30m\033[107m  FAILURES  \033[0m\n\n'
+printf ' shellcheck  Installing hermetic tool shellcheck v0.11.0  .trunk/out/ERGzk.yaml\n'
+printf '\nChecked 0 files\n'
+printf '\342\234\226 No issues, 1 failure\n'
+exit 1
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  set +e
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]]
+)
+rm -rf "$trunk_foreign_key_signature_repo"
+assert_contains "1 mapped command(s) failed."
+assert_not_contains "- skipped "
+assert_not_contains "Trunk could not provision its linters."
+
+# Fail closed on a plain non-zero exit that says nothing at all. No verdict, no
+# failure table, nothing to classify — the failure stands.
+trunk_silent_failure_repo="$(mktemp -d)"
+(
+  cd "$trunk_silent_failure_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.25.0"
+  exit 0
+fi
+echo "trunk-ambiguous-exit"
+exit 3
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  set +e
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]]
+)
+rm -rf "$trunk_silent_failure_repo"
+assert_contains "1 mapped command(s) failed."
+assert_contains "trunk-ambiguous-exit"
+assert_not_contains "- skipped "
 } # end family: failure-output
 
 # family: routing-docs
@@ -9327,6 +9937,9 @@ assert_contains "- pnpm issue:board:test (agent issue board helper changed)"
 run_gate "scripts/pr/issue-board-commands.mjs"
 assert_contains "- pnpm issue:board:test (agent issue board helper changed)"
 
+run_gate "scripts/pr/issue-board-sync.mjs"
+assert_contains "- pnpm issue:board:test (agent issue board helper changed)"
+
 run_gate "scripts/supply-chain/version-skew-check.mjs"
 assert_contains "- pnpm skew:check:test (version skew checker changed)"
 
@@ -9549,6 +10162,7 @@ assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- pnpm docs:garden:test (shared GitHub issue lifecycle module changed)"
 assert_contains "- pnpm docs:navigation-eval:test (shared GitHub issue lifecycle module changed)"
 assert_contains "- pnpm sentry:project:test (shared GitHub issue lifecycle module changed)"
+assert_contains "- pnpm issue:board:test (shared GitHub issue lifecycle module changed)"
 
 run_gate "docs/evals/documentation-navigation-fixtures.json"
 assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation contract changed)"
@@ -11688,6 +12302,271 @@ STUB
     [[ ! -d "$gate_lock_root/run.lock" ]] ||
       fail "a zombie holder must not retain the legacy lock"
   fi
+  # --- Machine identity, not hostname (GitHub issue #2055) -------------------
+  # A rename used to wedge the machine: the record still named the old
+  # hostname, the mismatch was read as a live holder on another host, and the
+  # dead-PID reclaim below it was never reached — so every run on the machine
+  # burned its whole --lock-wait and no run ever healed it. The record now
+  # carries a machine identity that a rename cannot touch, and the hostname
+  # decides only where no comparable identity exists on both sides.
+  #
+  # Both machines are simulated through the identity override, so these cases
+  # assert the decision rather than the hardware probe underneath it, and run
+  # the same way on a Linux runner as on the developer Mac that hit the bug.
+  #
+  # The locality of the lock root is declared for the same reason. In a real
+  # run the gate asks the filesystem whether the root is on storage only this
+  # machine reaches; this suite must keep pointing every case at its own temp
+  # root, whose answer would then depend on how the runner mounts $TMPDIR.
+  # Declaring it pins the decision under test instead of the runner's mount
+  # table. The possibly-shared cases below set it to 0.
+  export AGENT_QUALITY_GATE_LOCK_MACHINE_ID=machine-a
+  export AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1
+
+  write_machine_lock_owner() {
+    # pid, host, machine field value (empty writes no field at all, which is
+    # exactly what a gate predating this change leaves behind), started_at.
+    mkdir -p "$gate_lock_root/run.lock"
+    {
+      printf 'pid=%s\n' "$1"
+      printf 'host=%s\n' "$2"
+      [[ -z "$3" ]] || printf 'machine=%s\n' "$3"
+      printf 'started_at=%s\n' "$4"
+      printf 'worktree=%s\n' "$gate_lock_repo"
+      printf 'token=fixture-holder-1-1\n'
+    } > "$gate_lock_root/run.lock/owner"
+  }
+
+  # The bug itself. Same machine, renamed host, holder long dead — reclaimed at
+  # once on the strength of the machine identity, with no age gate involved and
+  # nothing said about an unverifiable host.
+  renamed_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the renamed-host case"
+  write_machine_lock_owner \
+    "$renamed_dead_pid" "Workbook.local" "override:machine-a" "$(date +%s)"
+  renamed_exit="$(run_locked_gate)"
+  [[ "$renamed_exit" == "0" ]] ||
+    fail "a dead holder recorded under this machine's old hostname must be reclaimed, got $renamed_exit"
+  assert_contains "is stale (holder pid ${renamed_dead_pid} is gone); reclaiming it."
+  assert_not_contains "cannot be tied to this machine"
+  [[ ! -d "$gate_lock_root/run.lock" ]] ||
+    fail "the run that reclaimed a renamed-host lock must release its own"
+
+  # The safety this replaces the hostname check with. On a root that may be
+  # shared, a disagreeing identity from the same source is another machine —
+  # definitive, its PIDs meaning nothing here, and no local evidence able to
+  # overturn it. A record two hours old whose PID reads dead locally is still
+  # waited out and left where it is.
+  foreign_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the foreign-machine case"
+  write_machine_lock_owner \
+    "$foreign_dead_pid" "other-host" "override:machine-b" "$(($(date +%s) - 7200))"
+  foreign_exit="$(AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=0 run_locked_gate)"
+  [[ "$foreign_exit" == "2" ]] ||
+    fail "a record from another machine must be waited out, got $foreign_exit"
+  assert_contains "timed out after"
+  assert_not_contains "reclaiming it."
+  [[ -d "$gate_lock_root/run.lock" ]] ||
+    fail "another machine's lock must never be reclaimed, however old"
+  rm -rf "$gate_lock_root/run.lock"
+
+  # The same record on a root proven local. Nothing else can have written it,
+  # so a disagreeing identity is not another machine — it is this machine's own
+  # identity having moved, which `/etc/machine-id` does on an OS reinstall or
+  # an image rebuild. Reading it as foreign here would leave the record
+  # unreclaimable forever, which is the wedge this whole change removes, so it
+  # lands on the aged-and-dead rule instead.
+  rotated_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the rotated-identity case"
+  write_machine_lock_owner \
+    "$rotated_dead_pid" "other-host" "override:machine-b" "$(($(date +%s) - 7200))"
+  rotated_exit="$(run_locked_gate)"
+  [[ "$rotated_exit" == "0" ]] ||
+    fail "a rotated machine identity on local storage must not wedge the lock, got $rotated_exit"
+  assert_contains "cannot be tied to this machine"
+  assert_contains "is stale (holder pid ${rotated_dead_pid} is gone"
+  [[ ! -d "$gate_lock_root/run.lock" ]] ||
+    fail "the run that reclaimed a rotated-identity record must release its own"
+
+  # An agreeing identity is not proof of one machine, only a disagreeing one is
+  # proof of two. Containers built from a single base image carry the same
+  # baked-in /etc/machine-id, so two of them mounting one lock directory agree
+  # on their identity while having separate PID namespaces — the other's holder
+  # PID reads "gone" here. Off proven-local storage the hostname has to agree
+  # too, and where it does not this record is left alone however old it is.
+  cloned_id_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the cloned-identity case"
+  write_machine_lock_owner \
+    "$cloned_id_dead_pid" "other-container" "override:machine-a" "$(($(date +%s) - 7200))"
+  cloned_id_exit="$(AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=0 run_locked_gate)"
+  [[ "$cloned_id_exit" == "2" ]] ||
+    fail "a shared machine id under a different hostname must be waited out on a shared root, got $cloned_id_exit"
+  assert_contains "timed out after"
+  assert_not_contains "reclaiming it."
+  [[ -d "$gate_lock_root/run.lock" ]] ||
+    fail "a duplicated machine id must not authorise reclaiming another host's lock"
+  rm -rf "$gate_lock_root/run.lock"
+
+  # The same record on storage this machine mounts itself. Nothing else is
+  # writing records there, and the hostname is exactly the field a rename
+  # moved, so requiring it to agree would refuse the case this all exists for.
+  renamed_local_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the local renamed-host case"
+  write_machine_lock_owner \
+    "$renamed_local_dead_pid" "other-container" "override:machine-a" "$(($(date +%s) - 7200))"
+  renamed_local_exit="$(run_locked_gate)"
+  [[ "$renamed_local_exit" == "0" ]] ||
+    fail "a matching identity on local storage must reclaim whatever the record calls the host, got $renamed_local_exit"
+  assert_contains "is stale (holder pid ${renamed_local_dead_pid} is gone); reclaiming it."
+  [[ ! -d "$gate_lock_root/run.lock" ]] ||
+    fail "the run that reclaimed under a matching local identity must release its own"
+
+  # A record written by a gate that predates the machine field, under a
+  # hostname this machine no longer answers to. The root is proven local, so
+  # nothing else wrote it; the reclaim still needs the dead PID and the grace,
+  # and the message names what it concluded and from what.
+  legacy_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the legacy-record case"
+  write_machine_lock_owner \
+    "$legacy_dead_pid" "Workbook.local" "" "$(($(date +%s) - 7200))"
+  legacy_exit="$(run_locked_gate)"
+  [[ "$legacy_exit" == "0" ]] ||
+    fail "an aged legacy record under a stale hostname must self-heal, got $legacy_exit"
+  assert_contains "cannot be tied to this machine"
+  assert_contains "This lock root is on storage this machine mounts itself"
+  assert_contains "under a name or identity it has since changed, and reclaims it"
+  assert_contains "its record cannot be tied to this machine and is"
+  [[ ! -d "$gate_lock_root/run.lock" ]] ||
+    fail "the run that reclaimed a legacy record must release its own"
+
+  # The same legacy record, still inside the grace. Age is the leg that keeps a
+  # run which really did start moments ago on another machine out of reach of
+  # that inference, so this one waits instead — the pre-issue-2055 behaviour,
+  # now bounded by the grace rather than permanent.
+  young_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the within-grace case"
+  write_machine_lock_owner "$young_dead_pid" "Workbook.local" "" "$(date +%s)"
+  young_exit="$(run_locked_gate)"
+  [[ "$young_exit" == "2" ]] ||
+    fail "a legacy foreign-host record inside the grace must be waited out, got $young_exit"
+  assert_contains "timed out after"
+  assert_not_contains "reclaiming it."
+  [[ -d "$gate_lock_root/run.lock" ]] ||
+    fail "a record still inside the grace must be left in place"
+
+  # …and the grace is the knob that decides it. The same record, same run, a
+  # grace of zero: reclaimed.
+  set +e
+  AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_lock_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_UNVERIFIED_MACHINE_GRACE_SECONDS=0 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 2 \
+    > "$output_file" 2>&1
+  grace_exit=$?
+  set -e
+  [[ "$grace_exit" == "0" ]] ||
+    fail "a zero grace must let the same legacy record be reclaimed, got $grace_exit"
+  assert_contains "cannot be tied to this machine"
+  [[ ! -d "$gate_lock_root/run.lock" ]] ||
+    fail "the run that reclaimed under a zero grace must release its own"
+
+  # Two identities from different sources are not two machines. A run that
+  # reached `ioreg` and a run that fell back to `kern.uuid` would otherwise
+  # read each other as foreign and reinvent the wedge, so a source mismatch is
+  # no verdict at all: it lands on the same aged-and-dead rule as a record with
+  # no machine field.
+  source_mismatch_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the source-mismatch case"
+  write_machine_lock_owner \
+    "$source_mismatch_pid" "Workbook.local" "kernuuid:machine-b" "$(($(date +%s) - 7200))"
+  source_mismatch_exit="$(run_locked_gate)"
+  [[ "$source_mismatch_exit" == "0" ]] ||
+    fail "a machine id from another source must not read as another machine, got $source_mismatch_exit"
+  assert_contains "cannot be tied to this machine"
+  [[ ! -d "$gate_lock_root/run.lock" ]] ||
+    fail "the run that reclaimed a source-mismatched record must release its own"
+
+  # The limit on all of that. Every reclaim above rests on the lock root being
+  # storage only this machine reaches. Where the filesystem says otherwise — a
+  # network home directory, or one whose type could not be read — a PID that
+  # reads dead here says nothing about a holder running on another machine.
+  # However old the record is, this run waits and names the declaration that
+  # would change the answer.
+  shared_root_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the shared-root case"
+  write_machine_lock_owner \
+    "$shared_root_dead_pid" "Workbook.local" "" "$(($(date +%s) - 7200))"
+  shared_root_exit="$(AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=0 run_locked_gate)"
+  [[ "$shared_root_exit" == "2" ]] ||
+    fail "an unverified record on a possibly shared lock root must be waited out, got $shared_root_exit"
+  assert_contains "not established as storage only this machine reaches"
+  assert_contains "AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1"
+  assert_not_contains "reclaiming it."
+  [[ -d "$gate_lock_root/run.lock" ]] ||
+    fail "a record on a possibly shared lock root must never be reclaimed"
+  rm -rf "$gate_lock_root/run.lock"
+
+  # An identity is validated against the record's alphabet, never rewritten to
+  # fit it. Every normalisation is a many-to-one map, and a many-to-one map on
+  # an identity is how two machines come to compare equal: stripping the
+  # unrepresentable character in `machine/a`, or deleting the line break in
+  # `machine<LF>a`, both yield `machinea` — another machine's legitimate id,
+  # which then reads as `same` and authorises a reclaim on its behalf. Both
+  # shapes must stop the run rather than be quietly reshaped, so both are
+  # asserted: one where the offending character is ordinary, one where it is a
+  # line break, because deleting line breaks is the normalisation a reader is
+  # most likely to think harmless.
+  for bad_machine_id in 'machine/a' 'machine:a' "$(printf 'machine\na')" "$(printf 'machine\ra')"; do
+    set +e
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_lock_root" \
+      AGENT_QUALITY_GATE_LOCK_MACHINE_ID="$bad_machine_id" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 2 \
+      > "$output_file" 2>&1
+    bad_machine_id_exit=$?
+    set -e
+    [[ "$bad_machine_id_exit" == "2" ]] ||
+      fail "machine id '${bad_machine_id}' is outside the record alphabet and must stop the run, got $bad_machine_id_exit"
+    assert_contains "AGENT_QUALITY_GATE_LOCK_MACHINE_ID must be 1-128 characters"
+    assert_contains "so it is never rewritten to fit"
+    assert_contains "Nothing has been executed."
+  done
+
+  # The probe itself, both ways, on paths whose answer is known independently
+  # of it. A directory on local storage must read as local; a path on a
+  # filesystem `df -l` omits — an autofs map, an NFS or SMB mount — must not,
+  # or the whole rule above rests on a check that only ever says yes. The
+  # non-local path is discovered from the mount table rather than assumed, and
+  # the case is skipped where the runner has no such mount to point at.
+  gate_lock_probe_local="$(
+    NODE_ENV=test \
+      AGENT_QUALITY_GATE_LOCK_PROBE_PATH="$gate_lock_root" \
+      "$repo_root/scripts/agent-quality-gate.sh" 2>&1
+  )" || true
+  [[ "$gate_lock_probe_local" == "local" ]] ||
+    fail "the locality probe must read a temp-dir lock root as local, got '$gate_lock_probe_local'"
+  gate_lock_nonlocal_path="$(
+    comm -23 \
+      <(df 2>/dev/null | tail -n +2 | awk 'NF { print $NF }' | sort) \
+      <(df -l 2>/dev/null | tail -n +2 | awk 'NF { print $NF }' | sort) |
+      head -n1
+  )"
+  if [[ -n "$gate_lock_nonlocal_path" && -d "$gate_lock_nonlocal_path" ]]; then
+    gate_lock_probe_remote="$(
+      NODE_ENV=test \
+        AGENT_QUALITY_GATE_LOCK_PROBE_PATH="$gate_lock_nonlocal_path" \
+        "$repo_root/scripts/agent-quality-gate.sh" 2>&1
+    )" || true
+    [[ "$gate_lock_probe_remote" == "not-local" ]] ||
+      fail "the locality probe must not read ${gate_lock_nonlocal_path} as local, got '$gate_lock_probe_remote'"
+  fi
+
+  unset AGENT_QUALITY_GATE_LOCK_MACHINE_ID
 )
 rm -rf "$gate_lock_repo" "$gate_lock_root"
 
@@ -13925,8 +14804,13 @@ STUB
     [[ -n "$active_quarantine_dir" ]] ||
       fail "${active_quarantine_phase}: creator did not publish its quarantine"
     active_quarantine_creator_identity="${active_quarantine_dir##*/owner.reclaiming.quarantine.}"
-    active_quarantine_creator_identity="${active_quarantine_creator_identity#v1.}"
-    active_quarantine_creator_identity="${active_quarantine_creator_identity#*.}"
+    [[ "$active_quarantine_creator_identity" == v2.* ]] ||
+      fail "${active_quarantine_phase}: creator did not publish a v2 owner quarantine"
+    active_quarantine_creator_identity="${active_quarantine_creator_identity#v2.}"
+    # source, machine digest, host digest, and creation epoch precede the PID.
+    for _ in 1 2 3 4; do
+      active_quarantine_creator_identity="${active_quarantine_creator_identity#*.}"
+    done
     active_quarantine_creator_pid="${active_quarantine_creator_identity%%.*}"
     kill -0 "$active_quarantine_creator_pid" 2>/dev/null ||
       fail "${active_quarantine_phase}: quarantine creator was not live"
@@ -14059,6 +14943,400 @@ STUB
   [[ -z "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
     fail "mapped work ran beside a foreign-host quarantine"
   rm -rf "$gate_race_root/run.lock"
+
+  # A v1 quarantine has no creation epoch in its name. Under a renamed host on
+  # per-machine storage, its directory mtime supplies the grace age. A young
+  # quarantine must stay untouched. The same exact evidence becomes recoverable
+  # after its mtime is old enough and its creator PID is confirmed dead.
+  race_dead_pid="$(fresh_dead_pid)" ||
+    fail "v1 mtime quarantine could not allocate a dead creator PID"
+  v1_mtime_source="$gate_race_root/run.lock/owner.reclaiming.v1-mtime"
+  v1_mtime_dir="$gate_race_root/run.lock/owner.reclaiming.quarantine.v1.${foreign_quarantine_host_fingerprint}.${race_dead_pid}.mtime01"
+  mkdir -p "$gate_race_root/run.lock"
+  {
+    printf 'pid=%s\n' "$race_dead_pid"
+    printf 'uid=%s\n' "$(id -u)"
+    printf 'host=%s\n' "$(uname -n)"
+    printf 'machine=override:machine-a\n'
+    printf 'started_at=%s\n' "$(($(date +%s) - 7200))"
+    printf 'start_utc=\n'
+    printf 'worktree=%s\n' "$gate_race_repo"
+    printf 'token=v1-mtime-quarantine-%s-1\n' "$race_dead_pid"
+  } > "$v1_mtime_source"
+  mkdir -m 700 "$v1_mtime_dir"
+  /bin/ln -P "$v1_mtime_source" "$v1_mtime_dir/anchor"
+  v1_mtime_anchor_identity="$(race_file_identity "$v1_mtime_dir/anchor")"
+  : > "$gate_race_log"
+  if AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1 \
+    AGENT_QUALITY_GATE_LOCK_MACHINE_ID=machine-a \
+    AGENT_QUALITY_GATE_LOCK_UNVERIFIED_MACHINE_GRACE_SECONDS=60 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 2 \
+    > "$gate_race_out/v1-mtime-quarantine-young.out" 2>&1; then
+    v1_mtime_young_status=0
+  else
+    v1_mtime_young_status=$?
+  fi
+  [[ "$v1_mtime_young_status" -eq 2 ]] ||
+    fail "a young renamed-host v1 quarantine did not block the waiter"
+  grep -q "timed out after .* waiting for the gate run lock" \
+    "$gate_race_out/v1-mtime-quarantine-young.out" ||
+    fail "a young renamed-host v1 quarantine did not produce a bounded wait"
+  [[ -d "$v1_mtime_dir" &&
+    "$(race_file_identity "$v1_mtime_dir/anchor")" == "$v1_mtime_anchor_identity" &&
+    "$v1_mtime_source" -ef "$v1_mtime_dir/anchor" ]] ||
+    fail "a young renamed-host v1 quarantine changed before its mtime grace"
+  [[ -z "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+    fail "mapped work ran beside a young renamed-host v1 quarantine"
+  v1_mtime_aged_epoch="$(($(date +%s) - 7200))"
+  node -e '
+    const fs = require("node:fs");
+    const epoch = Number(process.argv[2]);
+    fs.utimesSync(process.argv[1], epoch, epoch);
+  ' "$v1_mtime_dir" "$v1_mtime_aged_epoch" ||
+    fail "could not age the v1 quarantine directory mtime"
+  if AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1 \
+    AGENT_QUALITY_GATE_LOCK_MACHINE_ID=machine-a \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_UNVERIFIED_MACHINE_GRACE_SECONDS=60 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 5 \
+    > "$gate_race_out/v1-mtime-quarantine-aged.out" 2>&1; then
+    v1_mtime_aged_status=0
+  else
+    v1_mtime_aged_status=$?
+  fi
+  [[ "$v1_mtime_aged_status" -eq 0 ]] ||
+    fail "an aged renamed-host v1 quarantine on per-machine storage did not recover"
+  [[ ! -d "$gate_race_root/run.lock" ]] ||
+    fail "aged renamed-host v1 quarantine recovery left the lock behind"
+  [[ -n "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+    fail "aged renamed-host v1 quarantine recovery did not run mapped work"
+
+  # v2 names bind the quarantine CREATOR to a machine identity, separately
+  # from the owner record inside the directory. This lets a renamed machine
+  # recover its dead creator immediately on per-machine storage.
+  quarantine_machine_a_fingerprint="$(
+    node -e '
+      const { createHash } = require("node:crypto");
+      process.stdout.write(
+        createHash("sha256").update("override:machine-a", "utf8").digest("hex"),
+      );
+    '
+  )"
+  quarantine_machine_b_fingerprint="$(
+    node -e '
+      const { createHash } = require("node:crypto");
+      process.stdout.write(
+        createHash("sha256").update("override:machine-b", "utf8").digest("hex"),
+      );
+    '
+  )"
+  write_v2_quarantine_fixture() {
+    local source="$1"
+    local directory="$2"
+    local owner_pid="$3"
+    local owner_token_value="$4"
+    {
+      printf 'pid=%s\n' "$owner_pid"
+      printf 'uid=%s\n' "$(id -u)"
+      printf 'host=%s\n' "$(uname -n)"
+      printf 'machine=override:machine-a\n'
+      printf 'started_at=%s\n' "$(($(date +%s) - 7200))"
+      printf 'start_utc=\n'
+      printf 'worktree=%s\n' "$gate_race_repo"
+      printf 'token=%s\n' "$owner_token_value"
+    } > "$source"
+    mkdir -m 700 "$directory"
+    /bin/ln -P "$source" "$directory/anchor"
+  }
+
+  # Generate the directory name through the Node legacy-lock implementation,
+  # then recover it through the Bash parser. Cover both a tagged override and
+  # the exact sentinel digest used when the creator had no machine identity.
+  node_legacy_owner_quarantine_name() {
+    local machine_identity="$1"
+    local host="$2"
+    local created_at="$3"
+    local creator_pid="$4"
+    local nonce="$5"
+    node --input-type=module -e '
+      import { pathToFileURL } from "node:url";
+      const legacy = await import(pathToFileURL(process.argv[1]).href);
+      process.stdout.write(legacy.legacyOwnerQuarantineName({
+        machineIdentity: process.argv[2],
+        host: process.argv[3],
+        createdAtEpoch: Number(process.argv[4]),
+        pid: Number(process.argv[5]),
+        nonce: process.argv[6],
+      }));
+    ' "$repo_root/scripts/gate/quality-gate-coordinator-legacy.mjs" \
+      "$machine_identity" "$host" "$created_at" "$creator_pid" "$nonce"
+  }
+
+  for node_quarantine_kind in override none; do
+    race_dead_pid="$(fresh_dead_pid)" ||
+      fail "Node-generated ${node_quarantine_kind} quarantine could not allocate a dead creator PID"
+    if [[ "$node_quarantine_kind" == override ]]; then
+      node_quarantine_machine_identity="override:machine-a"
+      node_quarantine_nonce="nodeoverride01"
+    else
+      node_quarantine_machine_identity=""
+      node_quarantine_nonce="nodenone0001"
+    fi
+    node_quarantine_name="$(
+      node_legacy_owner_quarantine_name \
+        "$node_quarantine_machine_identity" "$(uname -n)" "$(date +%s)" \
+        "$race_dead_pid" "$node_quarantine_nonce"
+    )" || fail "Node could not generate the ${node_quarantine_kind} quarantine name"
+    [[ "$node_quarantine_name" == \
+      owner.reclaiming.quarantine.v2.${node_quarantine_kind}.* ]] ||
+      fail "Node generated an unexpected ${node_quarantine_kind} quarantine name"
+    node_quarantine_source="$gate_race_root/run.lock/owner.reclaiming.node-${node_quarantine_kind}"
+    node_quarantine_dir="$gate_race_root/run.lock/$node_quarantine_name"
+    mkdir -p "$gate_race_root/run.lock"
+    write_v2_quarantine_fixture \
+      "$node_quarantine_source" "$node_quarantine_dir" "$race_dead_pid" \
+      "node-${node_quarantine_kind}-quarantine-${race_dead_pid}-1"
+    : > "$gate_race_log"
+    if AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1 \
+      AGENT_QUALITY_GATE_LOCK_MACHINE_ID=machine-a \
+      AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 5 \
+      > "$gate_race_out/node-${node_quarantine_kind}-quarantine.out" 2>&1; then
+      node_quarantine_status=0
+    else
+      node_quarantine_status=$?
+    fi
+    [[ "$node_quarantine_status" -eq 0 ]] ||
+      fail "Bash did not recover the Node-generated ${node_quarantine_kind} quarantine"
+    [[ ! -d "$gate_race_root/run.lock" ]] ||
+      fail "Node-generated ${node_quarantine_kind} quarantine recovery left the lock behind"
+    [[ -n "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+      fail "Node-generated ${node_quarantine_kind} quarantine recovery did not run mapped work"
+  done
+
+  # Node and Bash must accept the same positive safe-integer range for creator
+  # PIDs. This name is otherwise valid, but its PID is one above that range.
+  # Reject it before any local liveness lookup and retain the exact evidence.
+  oversized_creator_pid=9007199254740992
+  oversized_pid_probe="$gate_race_out/oversized-creator-pid.probed"
+  oversized_pid_bin="$gate_race_out/oversized-creator-pid-bin"
+  oversized_pid_real_ps="$(command -v ps)"
+  mkdir -p "$oversized_pid_bin"
+  cat > "$oversized_pid_bin/ps" <<'STUB'
+#!/bin/bash -p
+set -eu
+for argument in "$@"; do
+  if [[ "$argument" == "${QG_OVERSIZED_CREATOR_PID:?}" ]]; then
+    : > "${QG_OVERSIZED_PID_PROBE:?}"
+    exit 99
+  fi
+done
+exec "${QG_REAL_PS:?}" "$@"
+STUB
+  chmod +x "$oversized_pid_bin/ps"
+  race_dead_pid="$(fresh_dead_pid)" ||
+    fail "oversized creator-PID quarantine could not allocate a dead owner PID"
+  oversized_pid_source="$gate_race_root/run.lock/owner.reclaiming.oversized-pid"
+  oversized_pid_dir="$gate_race_root/run.lock/owner.reclaiming.quarantine.v2.override.${quarantine_machine_a_fingerprint}.${active_quarantine_host_fingerprint}.$(date +%s).${oversized_creator_pid}.oversized01"
+  mkdir -p "$gate_race_root/run.lock"
+  write_v2_quarantine_fixture \
+    "$oversized_pid_source" "$oversized_pid_dir" "$race_dead_pid" \
+    "oversized-pid-quarantine-${race_dead_pid}-1"
+  oversized_pid_anchor_identity="$(race_file_identity "$oversized_pid_dir/anchor")"
+  rm -f "$oversized_pid_probe"
+  : > "$gate_race_log"
+  if PATH="$oversized_pid_bin:$PATH" \
+    QG_REAL_PS="$oversized_pid_real_ps" \
+    QG_OVERSIZED_CREATOR_PID="$oversized_creator_pid" \
+    QG_OVERSIZED_PID_PROBE="$oversized_pid_probe" \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1 \
+    AGENT_QUALITY_GATE_LOCK_MACHINE_ID=machine-a \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 2 \
+    > "$gate_race_out/oversized-creator-pid.out" 2>&1; then
+    oversized_pid_status=0
+  else
+    oversized_pid_status=$?
+  fi
+  [[ "$oversized_pid_status" -eq 2 ]] ||
+    fail "an oversized creator PID did not fail closed"
+  grep -q "owner quarantine has an invalid recovery name" \
+    "$gate_race_out/oversized-creator-pid.out" ||
+    fail "an oversized creator PID did not report its invalid recovery name"
+  [[ ! -e "$oversized_pid_probe" ]] ||
+    fail "an oversized creator PID reached a local liveness lookup"
+  [[ -d "$oversized_pid_dir" &&
+    "$(race_file_identity "$oversized_pid_dir/anchor")" == "$oversized_pid_anchor_identity" &&
+    "$oversized_pid_source" -ef "$oversized_pid_dir/anchor" ]] ||
+    fail "an oversized creator PID changed its retained quarantine evidence"
+  [[ -z "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+    fail "mapped work ran beside an oversized creator-PID quarantine"
+  rm -rf "$gate_race_root/run.lock"
+
+  race_dead_pid="$(fresh_dead_pid)" ||
+    fail "renamed-machine v2 quarantine could not allocate a dead creator PID"
+  renamed_v2_source="$gate_race_root/run.lock/owner.reclaiming.renamed-v2"
+  renamed_v2_dir="$gate_race_root/run.lock/owner.reclaiming.quarantine.v2.override.${quarantine_machine_a_fingerprint}.${foreign_quarantine_host_fingerprint}.$(date +%s).${race_dead_pid}.rename01"
+  mkdir -p "$gate_race_root/run.lock"
+  write_v2_quarantine_fixture \
+    "$renamed_v2_source" "$renamed_v2_dir" "$race_dead_pid" \
+    "renamed-v2-quarantine-1-1"
+  if AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1 \
+    AGENT_QUALITY_GATE_LOCK_MACHINE_ID=machine-a \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 5 \
+    > "$gate_race_out/renamed-v2-quarantine.out" 2>&1; then
+    renamed_v2_status=0
+  else
+    renamed_v2_status=$?
+  fi
+  [[ "$renamed_v2_status" -eq 0 ]] ||
+    fail "a renamed machine did not recover its dead v2 quarantine"
+  [[ ! -d "$gate_race_root/run.lock" ]] ||
+    fail "renamed-machine v2 quarantine recovery left the lock behind"
+
+  # A matching machine ID under another hostname is not enough on a root that
+  # may be shared. Two cloned containers can carry the same machine ID while
+  # using separate process tables, so this PID must not be checked locally.
+  race_dead_pid="$(fresh_dead_pid)" ||
+    fail "cloned-machine v2 quarantine could not allocate a dead local PID"
+  cloned_v2_source="$gate_race_root/run.lock/owner.reclaiming.cloned-v2"
+  cloned_v2_dir="$gate_race_root/run.lock/owner.reclaiming.quarantine.v2.override.${quarantine_machine_a_fingerprint}.${foreign_quarantine_host_fingerprint}.$(($(date +%s) - 7200)).${race_dead_pid}.clone001"
+  mkdir -p "$gate_race_root/run.lock"
+  write_v2_quarantine_fixture \
+    "$cloned_v2_source" "$cloned_v2_dir" "$race_dead_pid" \
+    "cloned-v2-quarantine-1-1"
+  if AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=0 \
+    AGENT_QUALITY_GATE_LOCK_MACHINE_ID=machine-a \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 2 \
+    > "$gate_race_out/cloned-v2-quarantine.out" 2>&1; then
+    cloned_v2_status=0
+  else
+    cloned_v2_status=$?
+  fi
+  [[ "$cloned_v2_status" -eq 2 ]] ||
+    fail "a cloned ID under another hostname did not retain shared v2 evidence"
+  [[ -d "$cloned_v2_dir" && -e "$cloned_v2_dir/anchor" ]] ||
+    fail "a cloned-ID shared v2 quarantine was changed"
+  rm -rf "$gate_race_root/run.lock"
+
+  # A rotated identity on per-machine storage remains unverified until its v2
+  # creation epoch passes the grace. The same evidence becomes reclaimable only
+  # after that age condition and a dead-PID check both pass.
+  race_dead_pid="$(fresh_dead_pid)" ||
+    fail "rotated-machine v2 quarantine could not allocate a dead creator PID"
+  rotated_v2_source="$gate_race_root/run.lock/owner.reclaiming.rotated-v2"
+  rotated_v2_dir="$gate_race_root/run.lock/owner.reclaiming.quarantine.v2.override.${quarantine_machine_b_fingerprint}.${foreign_quarantine_host_fingerprint}.$(date +%s).${race_dead_pid}.rotate01"
+  mkdir -p "$gate_race_root/run.lock"
+  write_v2_quarantine_fixture \
+    "$rotated_v2_source" "$rotated_v2_dir" "$race_dead_pid" \
+    "rotated-v2-quarantine-1-1"
+  if AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1 \
+    AGENT_QUALITY_GATE_LOCK_MACHINE_ID=machine-a \
+    AGENT_QUALITY_GATE_LOCK_UNVERIFIED_MACHINE_GRACE_SECONDS=60 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 2 \
+    > "$gate_race_out/rotated-v2-quarantine-young.out" 2>&1; then
+    rotated_v2_young_status=0
+  else
+    rotated_v2_young_status=$?
+  fi
+  [[ "$rotated_v2_young_status" -eq 2 && -d "$rotated_v2_dir" ]] ||
+    fail "a rotated v2 quarantine inside the grace was reclaimed"
+  if AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1 \
+    AGENT_QUALITY_GATE_LOCK_MACHINE_ID=machine-a \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_UNVERIFIED_MACHINE_GRACE_SECONDS=0 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 5 \
+    > "$gate_race_out/rotated-v2-quarantine-aged.out" 2>&1; then
+    rotated_v2_aged_status=0
+  else
+    rotated_v2_aged_status=$?
+  fi
+  [[ "$rotated_v2_aged_status" -eq 0 ]] ||
+    fail "an aged rotated v2 quarantine on per-machine storage did not recover"
+  [[ ! -d "$gate_race_root/run.lock" ]] ||
+    fail "aged rotated v2 quarantine recovery left the lock behind"
+
+  # More than one dead unverified quarantine can remain after related recovery
+  # processes crash. Every aged creator on per-machine storage is reclaimable.
+  # The scan must recover them one at a time instead of treating the second
+  # dead creator as active and blocking the first claim forever.
+  rotated_multi_pid_a="$(fresh_dead_pid)" ||
+    fail "multi-quarantine recovery could not allocate its first dead PID"
+  rotated_multi_pid_b="$(fresh_dead_pid)" ||
+    fail "multi-quarantine recovery could not allocate its second dead PID"
+  rotated_multi_source_a="$gate_race_root/run.lock/owner.reclaiming.rotated-multi-a"
+  rotated_multi_source_b="$gate_race_root/run.lock/owner.reclaiming.rotated-multi-b"
+  rotated_multi_dir_a="$gate_race_root/run.lock/owner.reclaiming.quarantine.v2.override.${quarantine_machine_b_fingerprint}.${foreign_quarantine_host_fingerprint}.$(date +%s).${rotated_multi_pid_a}.multia01"
+  rotated_multi_dir_b="$gate_race_root/run.lock/owner.reclaiming.quarantine.v2.override.${quarantine_machine_b_fingerprint}.${foreign_quarantine_host_fingerprint}.$(date +%s).${rotated_multi_pid_b}.multib01"
+  mkdir -p "$gate_race_root/run.lock"
+  write_v2_quarantine_fixture \
+    "$rotated_multi_source_a" "$rotated_multi_dir_a" "$rotated_multi_pid_a" \
+    "rotated-multi-a-${rotated_multi_pid_a}-1"
+  write_v2_quarantine_fixture \
+    "$rotated_multi_source_b" "$rotated_multi_dir_b" "$rotated_multi_pid_b" \
+    "rotated-multi-b-${rotated_multi_pid_b}-1"
+  : > "$gate_race_log"
+  if AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1 \
+    AGENT_QUALITY_GATE_LOCK_MACHINE_ID=machine-a \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_UNVERIFIED_MACHINE_GRACE_SECONDS=0 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 8 \
+    > "$gate_race_out/rotated-v2-multiple-aged.out" 2>&1; then
+    rotated_multi_status=0
+  else
+    rotated_multi_status=$?
+  fi
+  [[ "$rotated_multi_status" -eq 0 ]] ||
+    fail "multiple aged unverified quarantines did not recover in sequence"
+  [[ ! -d "$gate_race_root/run.lock" ]] ||
+    fail "multiple aged unverified quarantine recovery left the lock behind"
+  [[ -n "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+    fail "multiple aged unverified quarantine recovery did not run mapped work"
 
   # Two waiters can observe the same dead creator. Pause both after selection.
   # Let the first open the source and its placeholder, then pause it before
@@ -15003,6 +16281,149 @@ STUB
     rm -rf "$gate_race_root/run.lock"
   fi
 
+  # The stale verdict is formed before the canonical owner is moved. Replace
+  # the taken inode while the reclaimer is paused, but preserve PID, token, and
+  # start identity. Each field below participates in the machine/age verdict.
+  # The reclaimer must reject the obsolete decision, restore the changed record,
+  # and wait under the record's new semantics without condemning it.
+  replace_taken_owner_field() {
+    local record="$1"
+    local field="$2"
+    local value="$3"
+    local replacement="${record}.field-replacement"
+    if ! awk -v field="$field" -v value="$value" '
+      index($0, field "=") == 1 {
+        print field "=" value
+        replaced = 1
+        next
+      }
+      { print }
+      END { if (!replaced) exit 2 }
+    ' "$record" > "$replacement"; then
+      rm -f "$replacement"
+      return 2
+    fi
+    chmod 600 "$replacement" || {
+      rm -f "$replacement"
+      return 2
+    }
+    mv "$replacement" "$record"
+  }
+
+  for decision_field in host machine started_at; do
+    decision_dead_pid="$(fresh_dead_pid)" ||
+      fail "${decision_field} revalidation case could not allocate a dead PID"
+    decision_initial_host="$(uname -n)"
+    decision_initial_machine="override:machine-a"
+    decision_initial_started_at="$(date +%s)"
+    decision_root_is_per_machine=0
+    decision_replacement_value=""
+    case "$decision_field" in
+      host)
+        decision_replacement_value="fixture.remote.invalid"
+        ;;
+      machine)
+        decision_replacement_value="override:machine-b"
+        ;;
+      started_at)
+        decision_initial_host="fixture.previous.invalid"
+        decision_initial_machine="override:machine-b"
+        decision_initial_started_at="$(($(date +%s) - 7200))"
+        decision_root_is_per_machine=1
+        decision_replacement_value="$(date +%s)"
+        ;;
+    esac
+    decision_token="decision-${decision_field}-${decision_dead_pid}-1"
+    decision_barrier="$gate_race_out/decision-${decision_field}-taken"
+    decision_output="$gate_race_out/decision-${decision_field}.out"
+    decision_status_file="$gate_race_out/decision-${decision_field}.status"
+    rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+    rm -f "${decision_barrier}.ready" "${decision_barrier}.release" \
+      "$decision_status_file"
+    : > "$gate_race_log"
+    mkdir -p "$gate_race_root/run.lock"
+    {
+      printf 'pid=%s\n' "$decision_dead_pid"
+      printf 'uid=%s\n' "$(id -u)"
+      printf 'host=%s\n' "$decision_initial_host"
+      printf 'machine=%s\n' "$decision_initial_machine"
+      printf 'started_at=%s\n' "$decision_initial_started_at"
+      printf 'start_utc=\n'
+      printf 'worktree=%s\n' "$gate_race_repo"
+      printf 'token=%s\n' "$decision_token"
+    } > "$gate_race_root/run.lock/owner"
+    (
+      if env \
+        NODE_ENV=test \
+        AGENT_QUALITY_GATE_LOCK=1 \
+        AGENT_QUALITY_GATE_LOCK_HELD='' \
+        AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+        AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE="$decision_root_is_per_machine" \
+        AGENT_QUALITY_GATE_LOCK_MACHINE_ID=machine-a \
+        AGENT_QUALITY_GATE_LOCK_UNVERIFIED_MACHINE_GRACE_SECONDS=60 \
+        AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+        AGENT_QUALITY_GATE_TEST_LOCK_TAKEN_BARRIER="$decision_barrier" \
+        "$repo_root/scripts/agent-quality-gate.sh" \
+        --base HEAD --run --lock-wait 2 \
+        > "$decision_output" 2>&1; then
+        printf '0\n'
+      else
+        printf '%s\n' "$?"
+      fi
+    ) > "$decision_status_file" &
+    decision_waiter=$!
+    for _ in {1..600}; do
+      [[ -e "${decision_barrier}.ready" ]] && break
+      kill -0 "$decision_waiter" 2>/dev/null || break
+      sleep 0.05
+    done
+    [[ -e "${decision_barrier}.ready" ]] || {
+      : > "${decision_barrier}.release"
+      wait "$decision_waiter" 2>/dev/null || true
+      fail "${decision_field} revalidation case never reached its taken-record barrier"
+    }
+    decision_taken_record="$(find "$gate_race_root/run.lock" -maxdepth 1 \
+      -name 'owner.reclaiming.*' -type f -print | head -n1)"
+    [[ -n "$decision_taken_record" ]] || {
+      : > "${decision_barrier}.release"
+      wait "$decision_waiter" 2>/dev/null || true
+      fail "${decision_field} revalidation case did not expose its taken record"
+    }
+    replace_taken_owner_field \
+      "$decision_taken_record" "$decision_field" "$decision_replacement_value" || {
+      : > "${decision_barrier}.release"
+      wait "$decision_waiter" 2>/dev/null || true
+      fail "${decision_field} revalidation case could not replace its decision field"
+    }
+    grep -q "^pid=${decision_dead_pid}$" "$decision_taken_record" &&
+      grep -q '^start_utc=$' "$decision_taken_record" &&
+      grep -q "^token=${decision_token}$" "$decision_taken_record" || {
+      : > "${decision_barrier}.release"
+      wait "$decision_waiter" 2>/dev/null || true
+      fail "${decision_field} replacement changed PID, token, or start identity"
+    }
+    : > "${decision_barrier}.release"
+    wait "$decision_waiter"
+    [[ "$(cat "$decision_status_file")" == "2" ]] ||
+      fail "${decision_field} replacement did not invalidate the stale verdict"
+    grep -q "timed out after .* waiting for the gate run lock" "$decision_output" ||
+      fail "${decision_field} replacement was not restored as waiting owner evidence"
+    grep -q "^${decision_field}=${decision_replacement_value}$" \
+      "$gate_race_root/run.lock/owner" ||
+      fail "${decision_field} replacement was not restored to the canonical owner"
+    grep -q "^pid=${decision_dead_pid}$" "$gate_race_root/run.lock/owner" &&
+      grep -q '^start_utc=$' "$gate_race_root/run.lock/owner" &&
+      grep -q "^token=${decision_token}$" "$gate_race_root/run.lock/owner" ||
+      fail "${decision_field} revalidation changed the preserved owner identity"
+    grep -q "reclaiming it" "$decision_output" &&
+      fail "${decision_field} replacement was reclaimed under an obsolete verdict"
+    [[ ! -e "$gate_race_root/condemned.d/${decision_token}" ]] ||
+      fail "${decision_field} replacement was condemned under an obsolete verdict"
+    [[ -z "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+      fail "mapped work ran after the ${decision_field} stale verdict changed"
+  done
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+
   # A reclaim killed between taking a record and judging it parks that record
   # under owner.reclaiming.*, where nothing looks for it. When the record it
   # took belongs to a LIVE holder — its verdict was formed before another run
@@ -15031,7 +16452,7 @@ STUB
       "$repo_root/scripts/agent-quality-gate.sh" \
       --base HEAD --run --lock-wait 2 \
       > "$gate_race_out/hidden.out" 2>&1 || true
-    grep -q "Recovered the record of live holder pid $$" \
+    grep -Fqx "Recovered retained holder evidence for pid $$ from an interrupted reclaim." \
       "$gate_race_out/hidden.out" ||
       fail "a remnant naming a live holder must be recovered, not ignored"
     grep -q "reclaiming it" "$gate_race_out/hidden.out" &&
@@ -15067,7 +16488,7 @@ STUB
       "$repo_root/scripts/agent-quality-gate.sh" \
       --base HEAD --run --lock-wait 2 \
       > "$gate_race_out/foreign-release-remnant.out" 2>&1 || true
-    grep -q "Recovered the record of live holder pid ${race_dead_pid}" \
+    grep -Fqx "Recovered retained holder evidence for pid ${race_dead_pid} from an interrupted reclaim." \
       "$gate_race_out/foreign-release-remnant.out" ||
       fail "a foreign-host release remnant was not restored as live evidence"
     grep -q "timed out after .* waiting for the gate run lock" \
@@ -15662,7 +17083,8 @@ STUB
       printf 'token=dead-holder-record-1-1\n'
     } > "$gate_race_root/run.lock/owner.reclaiming.99998"
     race_waiter spent 0 0
-    grep -q "Recovered the record of live holder" "$gate_race_out/spent.out" &&
+    grep -Fq "Recovered retained holder evidence for pid" \
+      "$gate_race_out/spent.out" &&
       fail "a remnant naming a dead process must not be resurrected"
     [[ ! -d "$gate_race_root/run.lock" ]] ||
       fail "a lock left holding only a spent remnant must be reclaimed and released"

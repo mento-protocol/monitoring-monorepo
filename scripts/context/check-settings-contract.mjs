@@ -8,9 +8,12 @@
  * - the SessionEnd hook wiring for both runtimes, which must invoke
  *   `scripts/bootstrap/agent-session-end-hook.sh` through a derived repository
  *   root instead of a machine-local path;
- * - the verbatim copy of the `.claude/settings.json` Bash permission
- *   allowlist, which is an exact reviewed set so shell escaping or dynamic
- *   command construction cannot bypass a command-specific policy check.
+ * - the verbatim copies of the `.claude/settings.json` permission allowlists,
+ *   one per tool kind, each an exact reviewed set so shell escaping, dynamic
+ *   command construction, or a widened fetch specifier cannot bypass a
+ *   grant-specific policy check. Every string in `permissions.allow` grants
+ *   something, so a kind with no allowlist here fails closed instead of being
+ *   skipped.
  *
  * `check-agent-context.mjs` runs this module and folds the returned failures
  * into its own, so `pnpm agent:context-check` and the direct
@@ -69,8 +72,7 @@ function isClaudeSessionEndCommand(command) {
 // exact reviewed allowlist so shell escaping or dynamic command construction
 // cannot bypass a command-specific policy check.
 const allowedClaudeBashScriptPermissions = new Set([
-  "Bash(bash scripts/agent-quality-gate.sh:*)",
-  "Bash(bash ./scripts/agent-quality-gate.sh:*)",
+  "Bash(pnpm agent:quality-gate:*)",
   "Bash(bash scripts/agent-quality-gate.test.sh:*)",
   "Bash(bash ./scripts/agent-quality-gate.test.sh:*)",
   "Bash(bash scripts/bootstrap/agent-session-end-hook.sh:*)",
@@ -109,6 +111,14 @@ const allowedClaudeBashPermissions = new Set([
   ...allowedClaudeBashScriptPermissions,
   ...allowedClaudeSagPermissions,
   ...allowedClaudeOtherBashPermissions,
+]);
+
+// Keep this in sync with `.claude/settings.json`. A `WebFetch` grant is scoped
+// entirely by its specifier, so the reviewed set holds whole entries rather
+// than a host pattern: matching on a pattern would admit every specifier form
+// the pattern happens to cover, which is the review nobody performed.
+const allowedClaudeWebFetchPermissions = new Set([
+  "WebFetch(domain:monitoring.mento.org)",
 ]);
 
 // Root `scripts/` and package-local `<package>/scripts/` both count: the React
@@ -153,8 +163,29 @@ function validateClaudePermissions(settings, fail) {
   }
 
   for (const permission of allow) {
+    // A non-string entry cannot express a permission rule, so it grants
+    // nothing. Its shape is a JSON schema concern, not a permission one.
     if (typeof permission !== "string") continue;
-    if (!permission.startsWith("Bash(")) continue;
+
+    if (permission.startsWith("WebFetch(")) {
+      if (!allowedClaudeWebFetchPermissions.has(permission)) {
+        fail(
+          `.claude/settings.json: unexpected WebFetch permission; add the exact reviewed entry to the context-check allowlist: ${permission}`,
+        );
+      }
+      continue;
+    }
+
+    // Fail closed on every other kind. Each remaining string is a live grant of
+    // some tool, and no rule shape marks one as harmless, so a classifier that
+    // decided which strings to skip would itself become the bypass. Registering
+    // a kind here is the review step; skipping one is the bug this replaced.
+    if (!permission.startsWith("Bash(")) {
+      fail(
+        `.claude/settings.json: unreviewed permission kind; register it in scripts/context/check-settings-contract.mjs with its own reviewed allowlist before granting it: ${permission}`,
+      );
+      continue;
+    }
 
     if (
       isClaudeSagPermission(permission) &&

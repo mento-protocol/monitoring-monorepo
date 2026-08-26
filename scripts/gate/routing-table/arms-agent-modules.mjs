@@ -289,6 +289,10 @@ export const AGENT_MODULE_ARMS = [
         command: "pnpm sentry:project:test",
         reason: "shared GitHub issue lifecycle module changed",
       },
+      {
+        command: "pnpm issue:board:test",
+        reason: "shared GitHub issue lifecycle module changed",
+      },
     ],
   },
   {
@@ -424,11 +428,12 @@ export const AGENT_MODULE_ARMS = [
       "scripts/pr/issue-board-commands.mjs",
       "scripts/pr/issue-board-projects.mjs",
       "scripts/pr/issue-board-state.mjs",
+      "scripts/pr/issue-board-sync.mjs",
       "scripts/pr/issue-board-transport.mjs",
     ],
     effects: [
       {
-        why: "agent-issue-board.mjs is the entry point over six layers (cli, transport, state, projects, backfill, commands). The one suite covers the pure state machine through the entry's re-exports, so every layer routes to it.",
+        why: "agent-issue-board.mjs is the entry point over seven layers (cli, transport, state, projects, backfill, commands, sync). The one suite covers the pure state machine through the entry's re-exports, so every layer routes to it.",
         command: "pnpm issue:board:test",
         reason: "agent issue board helper changed",
       },
