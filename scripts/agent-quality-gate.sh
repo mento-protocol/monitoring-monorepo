@@ -2940,16 +2940,22 @@ trunk_text_has_network_failure_signature() {
 # before linting anything. The cause it prints is
 # `Unable to download plugin <url>: HTTP 403 '<url>'`.
 #
-# Two limits, both deliberate:
+# Three limits, all deliberate:
 #
 # - Plugin-scoped. The detail-YAML side was never measured with a 403, so adding
 #   `HTTP 403` to trunk_network_failure_signatures would excuse a shape nobody
 #   has seen. This acceptance reaches only `plugincause=` lines.
-# - 403 only, in the whole measured shape. This is the same rule that keeps the
-#   bare `Curl Error:` prefix out of the list above: a 404 — or any other status
-#   — is a removed or renamed artifact, a broken pin the operator has to fix, and
-#   must keep failing the gate rather than reading as an allowlist to widen.
-trunk_plugin_http_403_cause_pattern=$'^Unable to download plugin [^[:space:]]+: HTTP 403 \'[^[:space:]]+\'$'
+# - 403 only. This is the same rule that keeps the bare `Curl Error:` prefix out
+#   of the list above: a 404 — or any other status — is a removed or renamed
+#   artifact, a broken pin the operator has to fix, and must keep failing the
+#   gate rather than reading as an allowlist to widen.
+# - The measured plugin source only, which is the `uri:` .trunk/trunk.yaml pins
+#   (the `ref:` is the version in the path, so a ref bump still matches). A 403
+#   from some other plugin source is far more likely to be revoked credentials
+#   or a misconfigured private source than a session gate, and that has to stay
+#   visible. Both URLs in the phrase must be the same one, because that is the
+#   shape Trunk emits.
+trunk_plugin_http_403_cause_pattern=$'^Unable to download plugin (https://github\\.com/trunk-io/plugins/[^[:space:]]+): HTTP 403 \'([^[:space:]]+)\'$'
 
 # True when the inline cause Trunk printed for a failed plugin download is a
 # measured environment block.
@@ -2958,7 +2964,8 @@ trunk_plugin_cause_is_environment_blocked() {
 
   trunk_text_has_network_failure_signature "$cause" && return 0
 
-  [[ "$cause" =~ $trunk_plugin_http_403_cause_pattern ]]
+  [[ "$cause" =~ $trunk_plugin_http_403_cause_pattern ]] || return 1
+  [[ "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]]
 }
 
 # Read the `report:` lines of one Trunk failure-detail YAML and say whether the

@@ -217,9 +217,11 @@ before linting anything and states the cause inline, so the gate accepts those
 same phrasings plus the measured
 `Unable to download plugin <url>: HTTP 403 '<url>'` — what a session-gated
 `github.com` returns — and ignores the launcher's own progress lines, which lead
-the transcript on a cold cache. A 404 keeps failing the gate: a removed or
-renamed artifact is a broken pin the operator has to fix, not an allowlist to
-widen. The warning replays those reasons so it names the host to allowlist.
+the transcript on a cold cache. That 403 is pinned to the plugin source
+`.trunk/trunk.yaml` names, because a 403 from anywhere else is more likely
+revoked credentials than a session gate. A 404 keeps failing the gate too: a
+removed or renamed artifact is a broken pin the operator has to fix, not an
+allowlist to widen. The warning replays those reasons so it names the host to allowlist.
 Everything else fails the gate, including a partly-explained failure set and a
 download step that failed for a local reason. Only a provisioning failure
 degrades: a provisioned Trunk that finds real problems still fails the gate, and

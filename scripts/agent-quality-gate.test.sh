@@ -5186,6 +5186,46 @@ assert_contains "1 mapped command(s) failed."
 assert_not_contains "- skipped "
 assert_not_contains "Trunk could not provision its linters."
 
+# The acceptance is pinned to the plugin source .trunk/trunk.yaml names. A 403
+# from anywhere else is far more likely to be revoked credentials or a
+# misconfigured private source than a session gate, so it must stay visible.
+# Same for a phrase naming two different URLs, which is not a shape Trunk emits.
+for trunk_foreign_403_case in \
+  "https://plugins.example.invalid/archive/v1.7.5.zip|https://plugins.example.invalid/archive/v1.7.5.zip" \
+  "https://github.com/trunk-io/plugins/archive/v1.7.5.zip|https://github.com/trunk-io/plugins/archive/v9.9.9.zip"; do
+  trunk_foreign_403_repo="$(mktemp -d)"
+  (
+    cd "$trunk_foreign_403_repo"
+    git init -q
+    git config user.email test@example.invalid
+    git config user.name "Quality Gate Test"
+    printf 'fixture\n' > fixture.txt
+    mkdir -p tools
+    cat > tools/trunk <<STUB
+#!/usr/bin/env bash
+if [[ "\${1:-}" == "--version" ]]; then
+  echo "1.25.0"
+  exit 0
+fi
+printf "\\033[1m\\033[31m\\342\\234\\226 Unable to download plugin ${trunk_foreign_403_case%%|*}: HTTP 403 '${trunk_foreign_403_case##*|}'\\033[0m\\n"
+exit 2
+STUB
+    chmod +x tools/trunk
+    git add .
+    git commit -qm init
+    printf 'changed\n' >> fixture.txt
+    set +e
+    "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+    exit_code=$?
+    set -e
+    [[ "$exit_code" -ne 0 ]]
+  )
+  rm -rf "$trunk_foreign_403_repo"
+  assert_contains "1 mapped command(s) failed."
+  assert_not_contains "- skipped "
+  assert_not_contains "Trunk could not provision its linters."
+done
+
 # A launcher step that FAILED is not chrome, and it must not be swallowed as
 # such. Here the launcher never produced a CLI, so nothing downstream can be
 # classified: the run has to fail rather than read as a plugin block.
