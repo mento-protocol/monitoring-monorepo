@@ -630,12 +630,28 @@ so an interrupted reclaim puts the record back exactly as it found it.
 
 **That guarantee is local-storage-only**, and so is every row of the table
 below. It has to be: each of those recoveries is a reclaim, and a reclaim rests
-on evidence read through this kernel and this client. Off storage this machine
-mounts itself the gate refuses them all, so a crash there does not self-heal —
-the record or remnant stays where it is, every waiter burns its `--lock-wait`
-budget, and a human removes it. Nothing in this repo runs that way; the model is
-one lock root per machine, and the refusal names it on stderr. Read the rows
-below as "on a root this machine's own", and issue #2061 above for the rest.
+on evidence read through this kernel and this client. Where the root is not
+established as storage only this machine reaches, the gate refuses every one of
+them, so a crash there does not self-heal: the record or remnant stays, and each
+waiter burns its whole `--lock-wait` budget and exits. A shared root fails
+closed by design; the supported self-healing model is one lock root per machine.
+Read the rows below as "on a root this machine's own", and issue #2061 above for
+the rest.
+
+**Clearing such a lock by hand is the one operation that can break mutual
+exclusion**, so it is not a delete. The gate refused the record precisely
+because it could not tell a dead holder from a live one, and removing a live
+holder's record lets the next waiter publish its own beside work that is still
+running — the overlap this lock exists to prevent. Establish first, on the
+machine that wrote the record, that its `pid` is gone and that its mapped
+commands are gone with it: the holder is named by `pid` and `host`, and its
+commands are tagged with the record's `token`. Then check that nothing is still
+owed for it — `<root>/condemned.d` holds the tokens of runs whose commands the
+next holder must drain, and `<root>/captured.<token>` holds a captured process
+tree — and drain or clear those before the record goes, because deleting the
+record deletes the only handle to them. When the holder cannot be reached to be
+checked, the record stays: waiting costs a wait, and guessing costs the
+guarantee.
 
 #### Crash points
 
