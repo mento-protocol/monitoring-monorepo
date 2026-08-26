@@ -3,7 +3,7 @@ title: Agent Issue Workflow
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-21
+last_verified: 2026-08-25
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -70,11 +70,33 @@ Routing labels:
    the Project has an `In Review` status option. With the default GitHub status
    options, it falls back to `In Progress`.
 6. On merge, GitHub closes issues referenced with closing keywords. Run
-   `pnpm issue:board sync` after merge, or on a schedule, to move those closed
-   `in-pr` issues on Project #12 to `Done` and clear the queue label. When Done
-   means still requires post-merge production proof, use `Refs`, keep the issue
-   open and `in-pr`, and retain its current owner through the live checks. Close
-   the issue and run board sync only after its live acceptance criteria pass.
+   `pnpm issue:board sync` after merge, or on a schedule, to move closed
+   queue-labeled Project #12 items to `Done` and clear all queue labels. The
+   helper also clears queue labels from closed issues that have no Project item.
+   It re-reads and reclassifies each issue before it changes the Project item or
+   labels. After each open-state projection, it re-reads the issue and
+   reprojects bounded concurrent state changes. After a Done transition, it
+   verifies that the issue remains closed and has no queue label. If the issue
+   reopened, it restores a queue label confirmed immediately before cleanup and
+   projects the open state. If the confirmed state is ambiguous, or if only an
+   older enumerated queue label is known, it uses `needs-grooming`. If a
+   post-cleanup check or Done projection fails, it makes bounded attempts to
+   restore this retry state before exit. This keeps the issue visible without
+   granting stale claim, review, or release authority. A concurrent conflict
+   with a fallback `needs-grooming` label stays visible and fails closed for
+   manual resolution.
+   It fails if a closed issue retains a queue label or if state does not settle
+   within the bounded attempts. A per-issue failure does not stop later issues.
+   The command exits nonzero after it lists the successful and failed issue
+   numbers. When Done means still requires post-merge production proof, use
+   `Refs`, keep the issue open and `in-pr`, and retain its current owner through
+   the live checks. Close the issue and run board sync only after its live
+   acceptance criteria pass.
+   When the closed issue is listed in an editable canonical parent or tracker,
+   update that body in the same closeout. Mark its checklist item complete and
+   remove nearby status text that still treats the child as open. Preserve a
+   generated or explicitly immutable body; record its terminal evidence in a
+   comment or linked follow-up instead.
 7. If the PR closes unmerged, run `pnpm issue:release --issue <issue>` and
    restore `agent-ready` only when the remaining work is still clear; otherwise
    run `pnpm issue:release --issue <issue> --needs-grooming`.

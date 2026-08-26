@@ -24,21 +24,19 @@ maintenance utilities.
 [ADR 0064](../docs/adr/0064-scripts-module-directories.md) governs these
 subdirectories.
 
-| Directory       | Holds                                  |
-| --------------- | -------------------------------------- |
-| `deploy/`       | deploy wrappers and their Node helpers |
-| `workflows/`    | scripts backing Actions workflow jobs  |
-| `bootstrap/`    | container and hosted-session setup     |
-| `context/`      | agent context, budget, doc catalog     |
-| `docs/`         | audit planner, garden, navigation eval |
-| `pr/`           | PR and issue state projections         |
-| `supply-chain/` | lockfile, audit, pin, skew gates       |
-| `mcp/`          | MCP broker, launcher, config rendering |
-| `alerts/`       | alert-rule lint, peg-policy checks     |
-| `repo-health/`  | code-health, file-size, lint wrappers  |
-| `terraform/`    | movable Terraform guards and helpers   |
-| `gate/`         | gate routing engine + helpers          |
-| `sentry/`       | triage/autofix/gate/broker/ci-wiring   |
+- `deploy/`: deploy wrappers and their Node helpers
+- `workflows/`: scripts backing Actions workflow jobs
+- `bootstrap/`: container and hosted-session setup
+- `context/`: agent context, budget, doc catalog
+- `docs/`: audit planner, garden, navigation eval
+- `pr/`: PR and issue state projections
+- `supply-chain/`: lockfile, audit, pin, skew gates
+- `mcp/`: MCP broker, launcher, config rendering
+- `alerts/`: alert-rule lint, peg-policy checks
+- `repo-health/`: code-health, file-size, lint wrappers
+- `terraform/`: movable Terraform guards and helpers
+- `gate/`: gate routing engine + helpers
+- `sentry/`: triage/autofix/gate/broker/ci-wiring
 
 `lib/` and `production-infra-identity-contract/` predate the reorganization.
 `.config/wt.toml` and eight docs pin flat `setup.sh`.
@@ -75,7 +73,10 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   `pnpm sentry:project:test` in the projection arm.
   `deploy/deploy-indexer-verify{,-analysis}{,.test}.mjs` and
   `deploy/deploy-indexer-verify-status-identity.mjs` use one any-depth arm;
-  both verifier tests run.
+  both verifier tests run. The exact `pr/agent-issue-board.mjs`,
+  `pr/agent-issue-board.test.mjs`, and
+  `pr/issue-board-{backfill,cli,commands,projects,state,sync,transport}.mjs` set
+  routes to `pnpm issue:board:test`.
 - **Gate runtime module pins.** Before `cd`, `agent-quality-gate.sh` loads
   `$script_source_dir/gate/run-handles.sh`; move it with its signature, self-test
   route, and missing-helper fixture. It also pins
