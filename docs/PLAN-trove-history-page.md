@@ -277,11 +277,14 @@ Writer notes:
   them through the existing batch-replay path, or leave them null with the
   UI's "—" rendering — production has zero batches today, so the seam is
   cheap either way. Collateral snapshots stay non-null.
-- Op 6 enrichment: `RedemptionFeePaidToTrove` follows `TroveOperation` in the
-  same tx; carry the fee onto the ledger row (same short-lived pending
-  pattern the batch replay machinery already uses). `isRebalance` copies the
-  existing tx-target check; `redemptionPrice` copies from the branch
-  `Redemption` row of the same tx.
+- Op 6 rows are written LAST, not from the `TroveOperation` handler:
+  `RedemptionFeePaidToTrove` follows `TroveOperation` in the same tx, so the
+  `TroveOperation` handler only stages the row in short-lived pending state
+  (the pattern the batch replay machinery already uses) and the
+  `RedemptionFeePaidToTrove` handler assembles and sets it once, complete
+  with the fee. `isRebalance` copies the existing tx-target check;
+  `redemptionPrice` copies from the branch `Redemption` row of the same tx,
+  staged the same way. One write per row, never a set-then-patch.
 - Op 5: `debtChange/collChange` are `−entireDebt/−entireColl`; link the
   aggregate `LiquidationEvent` by `txHash` for the SP/redistribution context
   panel. Per-trove split of that aggregate stays a non-goal.
@@ -445,7 +448,10 @@ today, so the new `troves/[troveId]/_components` rule lands with the page
 - **Why me** reads the current rate ladder (open troves / brackets already
   fetched on the market page): rank among open troves by effective rate, and
   the sum of open debt at strictly lower rates ("shield"). States plainly
-  that historical rank is not tracked.
+  that historical rank is not tracked. When the open-trove fetch hits
+  `CDP_TROVES_DETAIL_LIMIT` (1,000), the dataset is incomplete, so rank and
+  shield are suppressed exactly as the market table already suppresses its
+  rank column at the cap — never shown as a partial calculation.
 - **Chart**: two stacked single-unit panels — collateral (USDm) and debt
   (debt-token units) — never one dual-axis plot, with series built from
   ledger `collAfter`/`debtAfter` (step interpolation), `sortedCopy` for
@@ -477,8 +483,11 @@ today, so the new `troves/[troveId]/_components` rule lands with the page
    `timestamp`, and a unique `id`; ordering is deterministic on the numeric
    triple (`timestamp`, `blockNumber`, `logIndex`). The unpadded string
    `id` never participates in ordering (`_10` sorts before `_2`).
-2. The ledger is append-only; the `Trove` entity remains the only mutable
-   trove state. In complete-ledger mode, cumulatives shown on the page must
+2. The ledger is append-only: each row is assembled from its transaction's
+   own events (pending state within the tx is fine) and never mutated after
+   that transaction is processed — the batch-replay patch for batched debt
+   snapshots is the one named exception. The `Trove` entity remains the
+   only mutable trove state. In complete-ledger mode, cumulatives shown on the page must
    equal the sum of ledger rows of the matching kind — a mismatch is a bug
    surface, not a rendering choice (the ticket reconstruction validated to
    the wei; keep a test). The two reads are independent queries, so
