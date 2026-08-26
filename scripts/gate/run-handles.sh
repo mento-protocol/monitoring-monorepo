@@ -349,6 +349,7 @@ gate_run_proc_marker_pids() {
   local token="$1"
   local marker="$2"
   local found status
+  # shellcheck disable=SC2016 # the single-quoted program contains JavaScript templates
   found="$(node -e '
     const fs = require("node:fs");
     const { constants } = fs;

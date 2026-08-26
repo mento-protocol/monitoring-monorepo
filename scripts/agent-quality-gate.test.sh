@@ -12027,21 +12027,27 @@ run_parallel_nolock_parent_death_regression
     fail "group membership accepted a reused parent outside the pinned group"
   fi
 
+  # shellcheck disable=SC2034 # read by the eval-loaded helper
   gate_drain_capture_group_pgid=""
+  # shellcheck disable=SC2034 # read by the eval-loaded helper
   printf -v gate_drain_membership_token '%s' \
     'fixture.membership-505-123456789'
   gate_drain_scan_error="agentqg-scan-failed"
   gate_drain_scan_failed=0
+  # shellcheck disable=SC2034 # read by the eval-loaded helper
   gate_drain_tagged_now="505"
+  # shellcheck disable=SC2329 # called by the eval-loaded helper
   gate_run_tagged_pids() { return 0; }
   if gate_drain_membership_holds 505 "" "start-505"; then
     fail "non-group membership trusted a cached PID after its handle disappeared"
   fi
+  # shellcheck disable=SC2329 # called by the eval-loaded helper
   gate_lock_process_runtime_start() {
     case "$1" in
       202) printf '%s\n' "${gate_test_parent_start:-replacement-202}" ;;
     esac
   }
+  # shellcheck disable=SC2329 # called by the eval-loaded helper
   pgrep() {
     [[ "$*" == "-P 202" ]] || return 2
     printf '505\n'
@@ -12052,6 +12058,7 @@ run_parallel_nolock_parent_death_regression
   gate_test_parent_start="start-202"
   gate_drain_membership_holds 505 202 "start-505" "start-202" ||
     fail "non-group membership rejected a child of an exact pinned parent"
+  # shellcheck disable=SC2329 # called by the eval-loaded helper
   gate_run_tagged_pids() { printf '505\n'; }
   gate_drain_membership_holds 505 "" "start-505" ||
     fail "non-group membership rejected an exact post-identity handle rescan"
@@ -19329,6 +19336,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   race_symlink_output="$(
     gate_drain_scan_error="agentqg-scan-failed"
     gate_lock_root_dir="$gate_race_root"
+    # shellcheck disable=SC2030 # this subshell sources and uses the value
     gate_lock_local_host_fingerprint="$(node -e '
       const { createHash } = require("node:crypto");
       process.stdout.write(createHash("sha256")
@@ -19381,6 +19389,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   race_valid_lsof_output="$(
     gate_drain_scan_error="agentqg-scan-failed"
     gate_lock_root_dir="$gate_race_root"
+    # shellcheck disable=SC2030 # this subshell sources and uses the value
     gate_lock_local_host_fingerprint="$(node -e '
       const { createHash } = require("node:crypto");
       process.stdout.write(createHash("sha256")

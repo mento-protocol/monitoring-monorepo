@@ -3818,6 +3818,7 @@ drain_condemned_run_commands() {
         continue
       fi
       if [[ "$captured_line" =~ ^${gate_drain_capture_runtime_prefix}\|[1-9][0-9]*\|[^\|]+$ ]]; then
+        # shellcheck disable=SC2034 # the validated prefix is intentionally discarded
         IFS='|' read -r captured_line_extra captured_line_pid captured_line_start << EOF
 $captured_line
 EOF
