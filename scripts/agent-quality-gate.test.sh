@@ -16333,7 +16333,7 @@ STUB
         decision_replacement_value="$(date +%s)"
         ;;
     esac
-    decision_token="decision-${decision_field}-${decision_dead_pid}-1"
+    decision_owner_id="decision-${decision_field}-${decision_dead_pid}-1"
     decision_barrier="$gate_race_out/decision-${decision_field}-taken"
     decision_output="$gate_race_out/decision-${decision_field}.out"
     decision_status_file="$gate_race_out/decision-${decision_field}.status"
@@ -16350,7 +16350,7 @@ STUB
       printf 'started_at=%s\n' "$decision_initial_started_at"
       printf 'start_utc=\n'
       printf 'worktree=%s\n' "$gate_race_repo"
-      printf 'token=%s\n' "$decision_token"
+      printf 'token=%s\n' "$decision_owner_id"
     } > "$gate_race_root/run.lock/owner"
     (
       if env \
@@ -16397,7 +16397,7 @@ STUB
     }
     if ! grep -q "^pid=${decision_dead_pid}$" "$decision_taken_record" ||
       ! grep -q '^start_utc=$' "$decision_taken_record" ||
-      ! grep -q "^token=${decision_token}$" "$decision_taken_record"; then
+      ! grep -q "^token=${decision_owner_id}$" "$decision_taken_record"; then
       : > "${decision_barrier}.release"
       wait "$decision_waiter" 2>/dev/null || true
       fail "${decision_field} replacement changed PID, token, or start identity"
@@ -16413,12 +16413,12 @@ STUB
       fail "${decision_field} replacement was not restored to the canonical owner"
     if ! grep -q "^pid=${decision_dead_pid}$" "$gate_race_root/run.lock/owner" ||
       ! grep -q '^start_utc=$' "$gate_race_root/run.lock/owner" ||
-      ! grep -q "^token=${decision_token}$" "$gate_race_root/run.lock/owner"; then
+      ! grep -q "^token=${decision_owner_id}$" "$gate_race_root/run.lock/owner"; then
       fail "${decision_field} revalidation changed the preserved owner identity"
     fi
     grep -q "reclaiming it" "$decision_output" &&
       fail "${decision_field} replacement was reclaimed under an obsolete verdict"
-    [[ ! -e "$gate_race_root/condemned.d/${decision_token}" ]] ||
+    [[ ! -e "$gate_race_root/condemned.d/${decision_owner_id}" ]] ||
       fail "${decision_field} replacement was condemned under an obsolete verdict"
     [[ -z "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
       fail "mapped work ran after the ${decision_field} stale verdict changed"

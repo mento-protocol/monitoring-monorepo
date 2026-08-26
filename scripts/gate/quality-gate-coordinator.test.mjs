@@ -5656,12 +5656,12 @@ test("a coordinator-owned rename crash leaves same-machine v2 recovery evidence"
   const lockDirectory = join(root, "run.lock");
   const ownerPath = join(lockDirectory, "owner");
   mkdirSync(lockDirectory);
-  const legacyOwnerToken = `legacy-v2-crash-${process.pid}-7000`;
-  const generationToken = `coordinator-v2-crash-${process.pid}-7001`;
+  const legacyOwnerId = `legacy-v2-crash-${process.pid}-7000`;
+  const generationId = `coordinator-v2-crash-${process.pid}-7001`;
   const machineIdentity = "override:v2-crash-machine";
   writeFileSync(
     ownerPath,
-    `pid=${process.pid}\nhost=${hostname()}\nstart_utc=\ntoken=${legacyOwnerToken}\n`,
+    `pid=${process.pid}\nhost=${hostname()}\nstart_utc=\ntoken=${legacyOwnerId}\n`,
   );
   const helperPath = join(root, "v2-owner-crash.mjs");
   const legacyModuleUrl = new URL(
@@ -5688,11 +5688,11 @@ test("a coordinator-owned rename crash leaves same-machine v2 recovery evidence"
 
   const crashed = spawnSync(
     process.execPath,
-    [helperPath, root, legacyOwnerToken, generationToken, machineIdentity],
+    [helperPath, root, legacyOwnerId, generationId, machineIdentity],
     { encoding: "utf8" },
   );
   assert.equal(crashed.signal, "SIGKILL", crashed.stderr);
-  assert.equal(ownerAuthorityToken(ownerPath), generationToken);
+  assert.equal(ownerAuthorityToken(ownerPath), generationId);
   const quarantines = readdirSync(lockDirectory).filter((entry) =>
     entry.startsWith("owner.reclaiming.quarantine."),
   );
