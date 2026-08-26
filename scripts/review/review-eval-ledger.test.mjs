@@ -400,10 +400,29 @@ const firstFixture = contract.fixtures[0];
 const wholeFixture = (bits = [1, 0]) =>
   Object.fromEntries(firstFixture.scorable_ids.map((id) => [String(id), bits]));
 
+// The other half of it: a `kind: "full"`, `status: "complete"` row claims the
+// whole matrix, which `planCells` builds as pipeline and control over every
+// fixture and replay over the grid fixtures.
+const idsFor = (fixtures, bits) =>
+  Object.fromEntries(
+    fixtures.flatMap((fixture) =>
+      fixture.scorable_ids.map((id) => [String(id), bits]),
+    ),
+  );
+const everyFixture = (bits = [1, 0]) => idsFor(contract.fixtures, bits);
+const everyGridFixture = (bits = [1, 0]) =>
+  idsFor(
+    contract.fixtures.filter((fixture) => fixture.grid === true),
+    bits,
+  );
+const fullMatrix = () => ({
+  pipeline: condition({ per_defect: everyFixture() }),
+  replay: condition({ per_defect: everyGridFixture() }),
+  control: condition({ per_defect: everyFixture() }),
+});
+
 test("checkLedger validates rows, contract scope, and append-only history", () => {
-  const good = row({
-    conditions: { pipeline: condition({ per_defect: wholeFixture() }) },
-  });
+  const good = row({ conditions: fullMatrix() });
   const history = row({ contract_digest: DIGEST_B, executed_at: daysAgo(400) });
   withTempLedger(jsonl(history, good), (file) => {
     const checked = checkLedger({
@@ -471,7 +490,10 @@ test("checkLedger refuses a row that drops a frozen defect from a scored PR", ()
   // to 4/8 and takes the defect out of the McNemar denominator with it. Every
   // other check in the pipeline reads the ids the row itself lists, so this is
   // the only place the frozen denominator is enforced.
+  // A partial run, so the omission below is the row's only fault: a complete
+  // full run owes the whole matrix, which the next test pins separately.
   const laundered = row({
+    status: "partial",
     conditions: { pipeline: condition({ per_defect: shrunk }) },
   });
   assert.deepEqual(validateLedgerRow(laundered), []);
@@ -493,6 +515,7 @@ test("checkLedger refuses a row that drops a frozen defect from a scored PR", ()
   // A PR the row never scored is not an omission: a canary runs the grid alone,
   // and a partial run scores only the PRs whose cells completed.
   const untouched = row({
+    status: "partial",
     conditions: { pipeline: condition({ per_defect: whole }) },
   });
   withTempLedger(jsonl(untouched), (file) => {
@@ -501,6 +524,72 @@ test("checkLedger refuses a row that drops a frozen defect from a scored PR", ()
       [],
     );
   });
+});
+
+test("checkLedger requires a complete full row to carry the whole matrix", () => {
+  // A complete full row is the score of record: it refreshes the full-run
+  // clock and `resolveBaseline` anchors on it. Dropping a condition or a PR
+  // from one claims that whole matrix on a subset, and every other check reads
+  // only the conditions and ids the row itself lists.
+  const conditions = fullMatrix();
+  for (const [name, expected] of [
+    ["pipeline", /scores no pipeline condition/],
+    ["replay", /scores no replay condition/],
+    ["control", /scores no control condition/],
+  ]) {
+    const missing = { ...conditions };
+    delete missing[name];
+    withTempLedger(jsonl(row({ conditions: missing })), (file) => {
+      const checked = checkLedger({
+        path: file,
+        contract,
+        contractDigest: DIGEST_A,
+      });
+      assert.equal(checked.ok, false);
+      assert.match(checked.problems.join(" | "), expected);
+    });
+  }
+
+  // A condition that is present but covers only one of the contract's PRs is
+  // the same claim made a different way.
+  const oneFixture = row({
+    conditions: {
+      ...conditions,
+      control: condition({ per_defect: wholeFixture() }),
+    },
+  });
+  withTempLedger(jsonl(oneFixture), (file) => {
+    const checked = checkLedger({
+      path: file,
+      contract,
+      contractDigest: DIGEST_A,
+    });
+    assert.equal(checked.ok, false);
+    assert.match(
+      checked.problems.join(" | "),
+      /conditions\.control is a complete full run but scores no defect from PR/,
+    );
+  });
+
+  // A canary and a partial run owe nothing here, and neither does a row from a
+  // retired contract.
+  for (const overrides of [
+    { kind: "canary" },
+    { status: "partial" },
+    { contract_digest: DIGEST_B },
+  ]) {
+    const subset = row({
+      conditions: { pipeline: condition({ per_defect: wholeFixture() }) },
+      ...overrides,
+    });
+    withTempLedger(jsonl(subset), (file) => {
+      assert.deepEqual(
+        checkLedger({ path: file, contract, contractDigest: DIGEST_A })
+          .problems,
+        [],
+      );
+    });
+  }
 });
 
 test("the committed ledger passes its own contract check", () => {
@@ -578,6 +667,23 @@ test("freshness ages the ledger from executed_at alone", () => {
         full(1, {
           judge_calibration: { agreement: 37, total: 40 },
           verdict: "AMBER",
+        }),
+      ],
+      level: "red",
+      reasons: [/no full run in 121 days \(full_red 120\)/],
+    },
+    {
+      name: "a full run with a suspected leak does not restart it either",
+      // The third gate that reads a row's score as untrusted: `verdict()` caps
+      // it at AMBER, `resolveBaseline` refuses to anchor on it, and
+      // `comparable()` refuses it as an explicit baseline. A clock it could
+      // still move would send `resolveKind` back to canaries for a whole
+      // cadence window on bits that may have come from the answer key.
+      rows: [
+        full(121),
+        full(1, {
+          verdict: "AMBER",
+          notes: "leak suspected: pr-1990-pipeline-1 names the fix commit",
         }),
       ],
       level: "red",

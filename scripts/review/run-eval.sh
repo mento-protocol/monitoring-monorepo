@@ -38,10 +38,11 @@
 # reserved for the judge pass, which is itself bounded.
 #
 # Default is --no-pr: the branch, push and gh pr create commands are printed,
-# not executed. A run that fails appends a status:failed row to the checkout's
-# ledger, so it publishes that row the same way — and exits non-zero when it
-# could only print the commands, because until they are run the next run refuses
-# to start against a ledger with uncommitted changes.
+# not executed. Every run appends its row to the checkout's ledger — a scored
+# one and the status:failed row of a run that fails alike — so both publish the
+# same way, and both exit non-zero when the run could only print the commands.
+# Until they are run the next run refuses to start against a ledger with
+# uncommitted changes, and the scheduled job runs without --pr.
 
 set -euo pipefail
 
@@ -123,7 +124,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h | --help)
-      sed -n '2,44p' "$0"
+      sed -n '2,45p' "$0"
       exit 0
       ;;
     *) fail "unknown argument: $1" ;;
@@ -292,18 +293,23 @@ remaining_seconds() {
   printf '%s' "$left"
 }
 
-# Run one command with a wall-clock bound, stdout to $1. macOS ships no
-# `timeout`, so the bound is a watchdog subshell: TERM at the limit, KILL ten
-# seconds later for a child that ignores it. Returns the command's own status,
-# or 124 when the bound stopped it. The watchdog signals the child it started,
-# so a grandchild that outlives its parent is not covered; the point is that a
-# stalled cell can no longer outlive the run.
+# Run one command with a wall-clock bound, stdout to $1, stderr to "$1.err".
+# macOS ships no `timeout`, so the bound is a watchdog subshell: TERM at the
+# limit, KILL ten seconds later for a child that ignores it. Returns the
+# command's own status, or 124 when the bound stopped it. The watchdog signals
+# the child it started, so a grandchild that outlives its parent is not covered;
+# the point is that a stalled cell can no longer outlive the run.
+#
+# stderr is captured rather than discarded: it is the only place a finder, a
+# contestant or the scorer says why it exited, and every failure path below is a
+# log line that would otherwise carry a bare exit status. The caller removes the
+# file with the stdout file it named.
 run_bounded() {
   local out_file="$1" limit="$2"
   shift 2
   local marker="${out_file}.deadline"
   rm -f "$marker"
-  "$@" >"$out_file" 2>/dev/null &
+  "$@" >"$out_file" 2>"${out_file}.err" &
   local pid=$!
   (
     local waited=0
@@ -327,6 +333,18 @@ run_bounded() {
     return 124
   fi
   return "$status"
+}
+
+# Log the tail of a captured stderr file, one log line per line, so a failure
+# names its cause instead of only its exit status. Silent when nothing was
+# written, and bounded so a megabyte of model chatter cannot flood the log.
+log_stderr_tail() {
+  local err_file="$1" line
+  [[ -s $err_file ]] || return 0
+  log "  stderr tail of ${err_file##*/}:"
+  while IFS= read -r line; do
+    log "    $line"
+  done < <(tail -c 4000 "$err_file" | tail -n 20)
 }
 
 # --- a failed run still leaves a trace ---------------------------------------
@@ -360,6 +378,35 @@ write_failed_row() {
   log "appended a status:failed ledger row — $reason"
 }
 
+# Refuse a detail_dir that must never reach `rm -rf "$REPO/$detail"`.
+#
+# `json_field` prints `String(doc[key])`, so a missing key arrives as the word
+# "undefined" and a JSON null as "null" — neither is empty, and both would name
+# a directory in the checkout root. An empty value is worse: it makes the
+# removal target `$REPO/` and deletes the checkout before `cp` can fail. The
+# check is on path components, so a legitimate name that merely contains ".."
+# passes while a component that climbs out of the checkout does not.
+# It runs in the current shell, never in a command substitution: `fail` exits,
+# and inside `$(...)` that would exit the subshell and let the caller continue.
+require_safe_detail() {
+  local value="$1" component
+  local -a parts
+  case "$value" in
+    "" | undefined | null)
+      fail "row.json has no usable detail_dir (got '$value'); refusing to touch $REPO"
+      ;;
+    /*)
+      fail "detail_dir must be relative to the checkout, not absolute: $value"
+      ;;
+  esac
+  IFS=/ read -r -a parts <<<"$value"
+  for component in "${parts[@]}"; do
+    if [[ $component == ".." ]]; then
+      fail "detail_dir must not climb out of the checkout: $value"
+    fi
+  done
+}
+
 # Copy the run detail into the checkout and publish the row, or print the
 # commands that would. Sets PUBLISHED=1 only when a PR was actually opened.
 # $1 is the verdict the branch and commit are named for; $2 is the body file
@@ -370,6 +417,7 @@ publish_row() {
   local verdict="$1" body_file="$2" detail branch title
   PUBLISHED=0
   detail="$(json_field "$RUN_DIR/row.json" detail_dir)"
+  require_safe_detail "$detail"
   mkdir -p "$REPO/$(dirname "$detail")"
   if [[ "$RUN_DIR" != "$REPO/$detail" ]]; then
     rm -rf "${REPO:?}/$detail"
@@ -697,19 +745,25 @@ run_cell() {
     run_bounded "$finder_out" "$(remaining_seconds "$MATRIX_DEADLINE")" \
       run_in_fixture "$fixture" "${FINDER_ARGV[@]}" || finder_status=$?
     other_review="$(tail -c 30000 "$finder_out")"
-    rm -f "$finder_out"
     if [[ $finder_status -eq 124 ]]; then
       log "  $cell_id FAILED — the finder hit the run deadline; not cached"
+      log_stderr_tail "$finder_out.err"
+      rm -f "$finder_out" "$finder_out.err"
       return 1
     fi
     if [[ $finder_status -ne 0 ]]; then
       log "  $cell_id FAILED — the finder exited $finder_status; not cached"
+      log_stderr_tail "$finder_out.err"
+      rm -f "$finder_out" "$finder_out.err"
       return 1
     fi
     if [[ -z ${other_review//[[:space:]]/} ]]; then
       log "  $cell_id FAILED — the finder produced nothing; not cached"
+      log_stderr_tail "$finder_out.err"
+      rm -f "$finder_out" "$finder_out.err"
       return 1
     fi
+    rm -f "$finder_out" "$finder_out.err"
   elif [[ $condition == "replay" ]]; then
     # The frozen report is the whole treatment for this condition. Reading it
     # is verified once by --check-fixtures, but the spec worktree is the live
@@ -759,13 +813,14 @@ run_cell() {
   run_bounded "$raw" "$(remaining_seconds "$MATRIX_DEADLINE")" \
     run_in_fixture "$fixture" claude "${claude_args[@]}" || claude_status=$?
   if [[ $claude_status -ne 0 ]]; then
-    rm -f "$raw" "$other_file"
     purge_skill "$fixture"
     if [[ $claude_status -eq 124 ]]; then
       log "  $cell_id FAILED — claude hit the run deadline; not cached"
     else
       log "  $cell_id FAILED — claude exited $claude_status; not cached"
     fi
+    log_stderr_tail "$raw.err"
+    rm -f "$raw" "$raw.err" "$other_file"
     return 1
   fi
   purge_skill "$fixture"
@@ -807,11 +862,12 @@ run_cell() {
       }, null, 1)}\n`);
     ' "$raw" "$other_file" "$out_dir/result.json"; then
     rm -rf "$out_dir"
-    rm -f "$raw" "$other_file"
     log "  $cell_id FAILED — claude reported an error; not cached"
+    log_stderr_tail "$raw.err"
+    rm -f "$raw" "$raw.err" "$other_file"
     return 1
   fi
-  rm -f "$raw" "$other_file"
+  rm -f "$raw" "$raw.err" "$other_file"
   log "  $cell_id ok $(($(date +%s) - started))s"
   return 0
 }
@@ -906,7 +962,14 @@ run_bounded "$SCORE_OUT" "$(remaining_seconds "$DEADLINE")" \
   node "$CLI" --root "$SPEC" --ledger "$LEDGER" --score "$RUN_DIR" \
   "${AGAINST_ARGS[@]+"${AGAINST_ARGS[@]}"}" --json || SCORE_STATUS=$?
 cat "$SCORE_OUT"
-rm -f "$SCORE_OUT"
+# The harness prints why it refused on stderr — a digest mismatch, an
+# unreadable plan, a judge that never answered. The failure row records only
+# "scoring failed", so without this the one line that says what happened is
+# gone by the time anyone reads the log.
+if [[ $SCORE_STATUS -ne 0 ]]; then
+  log_stderr_tail "$SCORE_OUT.err"
+fi
+rm -f "$SCORE_OUT" "$SCORE_OUT.err"
 if [[ $SCORE_STATUS -eq 124 ]]; then
   abort "scoring hit the run deadline of ${DEADLINE}s"
 elif [[ $SCORE_STATUS -ne 0 ]]; then
@@ -932,4 +995,14 @@ log "verdict $VERDICT"
 publish_row "$VERDICT" report.md
 
 cat "$REPORT"
+
+# A scored row wedges the schedule exactly the way a failed one does. It is in
+# the checkout's ledger now, `--validate --append` put it there, and the
+# installed launchd job runs without --pr. Exiting zero here would report a
+# clean run while no PR carries the result and the next scheduled run refuses to
+# start against a ledger with uncommitted changes. Exit zero only when a PR
+# actually carries the row; otherwise the commands printed above finish the job.
+if [[ $PUBLISHED -ne 1 ]]; then
+  fail "the run scored $VERDICT, the row was appended to $LEDGER, and no PR carries it yet; run the commands above (or re-run with --pr) — the next run refuses to start while that ledger has uncommitted changes"
+fi
 exit 0

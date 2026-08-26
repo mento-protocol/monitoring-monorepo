@@ -589,6 +589,31 @@ function resolveEvalTag({
 }
 
 /**
+ * The frozen files the contract pins by sha256, rechecked against their bytes
+ * on disk: both prompts, every truth file, every frozen finder report.
+ *
+ * `--check-fixtures` covers these once, before the matrix starts. A full run
+ * then takes hours, and under `--skill-ref` the spec worktree is the live
+ * checkout the operator keeps editing, so the bytes a cell read are not
+ * guaranteed to be the bytes that check passed. No git and no network here:
+ * this is the subset `--score` can afford to re-run before it spends a judge.
+ */
+export function frozenInputProblems({ contract, repoRoot = process.cwd() }) {
+  if (!isObject(contract)) return ["contract must be a JSON object"];
+  const problems = [];
+  checkPrompts({ repoRoot, contract, problems });
+  const seenReportFiles = new Set();
+  for (const fixture of contract.fixtures ?? []) {
+    if (!isObject(fixture) || !Number.isSafeInteger(fixture.pr)) continue;
+    if (typeof fixture.truth_file === "string") {
+      checkTruthFile({ repoRoot, fixture, problems });
+    }
+    checkFinderReports({ repoRoot, fixture, seenReportFiles, problems });
+  }
+  return problems;
+}
+
+/**
  * Validate the contract against the bytes it pins. Offline is the CI mode and
  * needs no network and no model. Every problem is collected: a check that
  * stops at the first failure hides the rest of a broken contract.

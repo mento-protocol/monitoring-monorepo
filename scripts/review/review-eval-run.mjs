@@ -30,14 +30,11 @@ import {
 } from "./review-eval-fixtures.mjs";
 import { freshness } from "./review-eval-ledger.mjs";
 import {
+  buildVsBaseline,
   conditionScope,
   resolveBaseline,
 } from "./review-eval-result-shape.mjs";
-import {
-  compareConditions,
-  headlineCondition,
-  verdict,
-} from "./review-eval-report.mjs";
+import { verdict } from "./review-eval-report.mjs";
 import {
   aggregateDraws,
   classifyNovel,
@@ -848,47 +845,6 @@ function foldCondition({ contract, cells, condition, scored }) {
     ...(zeroFindingPrs.size ? { zero_finding_prs: zeroFindingPrs.size } : {}),
     per_defect: aggregate.per_defect,
   };
-}
-
-/**
- * The stored pairing against the baseline. `--against` may name a row from a
- * different comparability key, which measures something else: that pairing is
- * recorded with a null McNemar rather than with numbers nothing may read.
- */
-function buildVsBaseline({ row, baselineRow }) {
-  if (!baselineRow) return null;
-  const paired =
-    row.comparability_key === baselineRow.comparability_key ||
-    row.kind === "bridge";
-  if (!paired) {
-    return {
-      baseline_executed_at: baselineRow.executed_at,
-      baseline_comparability_key: baselineRow.comparability_key,
-      mcnemar: null,
-    };
-  }
-  const { name, condition } = headlineCondition(row);
-  const baseCondition = baselineRow.conditions?.[name];
-  const flips = baseCondition
-    ? compareConditions(baseCondition, condition)
-    : { b: 0, c: 0 };
-  const vs = {
-    baseline_executed_at: baselineRow.executed_at,
-    baseline_comparability_key: baselineRow.comparability_key,
-    mcnemar: { b: flips.b, c: flips.c, delta: flips.b - flips.c },
-  };
-  if (row.conditions.control && baselineRow.conditions?.control) {
-    const control = compareConditions(
-      baselineRow.conditions.control,
-      row.conditions.control,
-    );
-    vs.control_mcnemar = {
-      b: control.b,
-      c: control.c,
-      delta: control.b - control.c,
-    };
-  }
-  return vs;
 }
 
 /** The dollars one Claude CLI envelope reports, or 0 when it carries none. */

@@ -156,6 +156,19 @@ export function leakSuspected(row) {
 
 function comparable(row, baselineRow) {
   if (!baselineRow) return { usable: false, reason: null };
+  // The same standing `resolveBaseline` requires of an anchor. A canary is a
+  // floor test on a two-cell subset and a partial or failed run is a matrix
+  // with cells that never ran, so neither carries the per-defect bits a flip
+  // count needs: pairing against one would read defects the baseline never had
+  // the chance to find as gains, and produce a RED or PROMOTE verdict from
+  // non-ranking evidence. `resolveBaseline` never selects such a row; this
+  // refuses one named explicitly with `--against`.
+  if (baselineRow.kind !== "full" || baselineRow.status !== "complete") {
+    return {
+      usable: false,
+      reason: `baseline is a ${baselineRow.kind} row with status ${baselineRow.status}; comparison refused (a baseline must be a complete full run)`,
+    };
+  }
   // The baseline supplies `baseHeadline`, every flip count derived from it and
   // the wrong-claims denominator. A baseline whose own judge failed calibration
   // would rank a calibrated candidate on numbers the runbook calls unusable, so

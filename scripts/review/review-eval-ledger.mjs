@@ -15,7 +15,10 @@
 
 import { appendFileSync, readFileSync } from "node:fs";
 
-import { judgeCalibrationPasses } from "./review-eval-report.mjs";
+import {
+  judgeCalibrationPasses,
+  leakSuspected,
+} from "./review-eval-report.mjs";
 
 export const LEDGER_SCHEMA_VERSION = 1;
 export const LEDGER_KINDS = ["full", "canary", "bridge"];
@@ -517,6 +520,69 @@ export function contractScorableIdsByPr(contract) {
 }
 
 /**
+ * The conditions a run of this kind must carry, and the PRs each one covers.
+ * `planCells` builds a full run as pipeline and control over every fixture and
+ * replay over the grid fixtures; a canary is replay over the grid fixtures
+ * alone. Derived from the contract here so the two cannot drift apart.
+ */
+function contractMatrix(contract, kind) {
+  const fixtures = contract?.fixtures ?? [];
+  const all = fixtures.map((fixture) => fixture.pr);
+  const grid = fixtures
+    .filter((fixture) => fixture.grid === true)
+    .map((fixture) => fixture.pr);
+  if (kind === "canary") return new Map([["replay", grid]]);
+  return new Map([
+    ["pipeline", all],
+    ["replay", grid],
+    ["control", all],
+  ]);
+}
+
+/**
+ * What a `kind: "full"`, `status: "complete"` row must cover. Every other row
+ * returns no problems: a partial or failed run is a matrix with cells that
+ * never ran, and a canary is a two-cell floor test.
+ *
+ * `checkLedger` already refuses a condition that scored a PR but dropped one of
+ * that PR's frozen ids. This is the other half of the same denominator: a
+ * complete full run scores every contract PR under pipeline and control and
+ * every grid PR under replay, so a row that carries only one of them claims a
+ * whole matrix on a subset. Nothing downstream would notice — the freshness
+ * clock, `resolveKind` and `resolveBaseline` all read `kind` and `status`, and
+ * `revalidateRow` recomputes over the conditions the row happens to list.
+ */
+export function fullMatrixProblems({ contract, row, label = "row" }) {
+  if (row?.kind !== "full" || row?.status !== "complete") return [];
+  const problems = [];
+  const scorableByPr = contractScorableIdsByPr(contract);
+  for (const [name, prs] of contractMatrix(contract, row.kind)) {
+    if (prs.length === 0) continue;
+    const condition = row.conditions?.[name];
+    const scored = new Set(
+      condition && typeof condition.per_defect === "object"
+        ? Object.keys(condition.per_defect)
+        : [],
+    );
+    if (scored.size === 0) {
+      problems.push(
+        `${label} is a complete full run but scores no ${name} condition; a complete full run carries ${[...contractMatrix(contract, "full").keys()].join(", ")}`,
+      );
+      continue;
+    }
+    const missing = prs.filter(
+      (pr) => !(scorableByPr.get(pr) ?? []).some((id) => scored.has(id)),
+    );
+    if (missing.length) {
+      problems.push(
+        `${label}.conditions.${name} is a complete full run but scores no defect from PR ${missing.join(", ")}; the contract puts ${prs.length} PR(s) in that condition`,
+      );
+    }
+  }
+  return problems;
+}
+
+/**
  * Append-only comparison against the rows at a base ref. Rows may only be
  * added; an edited or removed row is a contract violation the caller reports.
  */
@@ -589,6 +655,10 @@ export function checkLedger({ path, contract, contractDigest, baseRows }) {
         }
       }
     }
+    // The other half of the frozen denominator: which conditions and which PRs
+    // a complete full run must have scored at all. Reported after the per-id
+    // checks above, which name the narrower fault when a row breaks both.
+    problems.push(...fullMatrixProblems({ contract, row, label }));
   });
 
   if (baseRows) {
@@ -680,12 +750,17 @@ export function freshness({
   // `verdict()` caps it at AMBER and `resolveBaseline` refuses to anchor on it,
   // so letting it move this clock would keep the guard green and pick canaries
   // for a whole cadence window on a score nothing may rank on.
+  //
+  // A run whose notes record a suspected leak is refused by the same three
+  // gates for the same reason — its bits may have come from the answer key
+  // rather than from the review — so it may not move this clock either.
   const lastFull = newestInstant(
     eligible,
     (row) =>
       row.kind === "full" &&
       row.status === "complete" &&
-      judgeCalibrationPasses(row),
+      judgeCalibrationPasses(row) &&
+      !leakSuspected(row),
     evaluatedAt,
   );
 

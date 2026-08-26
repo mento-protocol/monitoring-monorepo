@@ -21,12 +21,14 @@ import {
 import {
   checkFixtures,
   DEFAULT_CONTRACT_PATH,
+  frozenInputProblems,
   loadContract,
 } from "./review-eval-fixtures.mjs";
 import {
   appendRow,
   checkLedger,
   freshness,
+  fullMatrixProblems,
   readLedger,
 } from "./review-eval-ledger.mjs";
 import {
@@ -503,6 +505,22 @@ async function modeScore(options, context) {
       `plan was written against contract ${plan.contract_digest.slice(0, 8)}; this contract is ${context.contractDigest.slice(0, 8)}`,
     );
   }
+  // The contract digest covers the contract JSON, not the files it pins by
+  // sha256. `--check-fixtures` verified those before the matrix started, and
+  // under `--skill-ref` the spec worktree is the live checkout the operator
+  // keeps editing for the hours the matrix runs. `scoreOneCell` reads the truth
+  // files here, and the cells above already read the prompts and the frozen
+  // finder reports, so an edit during the run would score against different
+  // bytes under the planned comparability key. Recheck them before the judge.
+  const frozen = frozenInputProblems({
+    contract: context.contract,
+    repoRoot: context.repoRoot,
+  });
+  if (frozen.length) {
+    throw new Error(
+      `a frozen input changed after planning; the run is not scorable against this contract:\n${frozen.join("\n")}`,
+    );
+  }
   // The plan's `comparability_key` already hashed a calibration set. Scoring
   // with a different one would produce an agreement number, and through it a
   // verdict, from pairs that key never saw, and the row would still be paired
@@ -609,6 +627,14 @@ async function modeValidate(options, context) {
       `row contract_digest ${row.contract_digest?.slice(0, 8)} is not the current contract`,
     );
   }
+  // `revalidateRow` recomputes the conditions the row lists. What it cannot see
+  // is a condition that is not there: a `kind: "full"`, `status: "complete"`
+  // row with `control` deleted claims a whole matrix on a subset, and appending
+  // it would refresh the full-run clock and make it an automatic baseline. The
+  // committed ledger is checked the same way by `--check-ledger`.
+  problems.push(
+    ...fullMatrixProblems({ contract: context.contract, row, label: "row" }),
+  );
   let appended = false;
   if (problems.length === 0 && options.append) {
     appendRow(ledgerPath, row);
@@ -631,13 +657,33 @@ async function modeValidate(options, context) {
 
 async function modeReport(options, context) {
   const rows = readLedger(path.resolve(context.repoRoot, options.ledgerPath));
+  // The ledger is append-only, so a fixture or model contract refresh leaves
+  // the rows it scored in place as history. Their bits were produced against a
+  // different truth index and different verdict thresholds, so reporting one
+  // under this contract recomputes a verdict the run never had and prints it
+  // as current. The default selection takes the newest row of this contract,
+  // and a row named explicitly must be one too — report an older row by
+  // passing the contract it was scored against with `--contract`.
+  const named = resolveRowReference({
+    reference: options.rowPath,
+    rows,
+    repoRoot: context.repoRoot,
+  });
+  if (named && named.contract_digest !== context.contractDigest) {
+    throw new Error(
+      `the named row was scored against contract ${String(named.contract_digest).slice(0, 8)}; this contract is ${context.contractDigest.slice(0, 8)}; pass --contract with the archived contract to report it`,
+    );
+  }
   const row =
-    resolveRowReference({
-      reference: options.rowPath,
-      rows,
-      repoRoot: context.repoRoot,
-    }) ?? rows.at(-1);
-  if (!row) throw new Error("the ledger has no row to report");
+    named ??
+    rows
+      .filter((entry) => entry.contract_digest === context.contractDigest)
+      .at(-1);
+  if (!row) {
+    throw new Error(
+      `the ledger has no row for contract ${context.contractDigest.slice(0, 8)} to report`,
+    );
+  }
   const baselineRow =
     resolveRowReference({
       reference: options.against,

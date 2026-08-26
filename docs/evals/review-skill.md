@@ -104,6 +104,13 @@ falls back to the `origin/main` tip when no merge base resolves. CI and the
 gate add `--require-base`, which fails the check when the base ref does not
 resolve at all, so the guard can never turn itself into a silent no-op.
 
+Both the ledger check and `--validate --append` hold the frozen denominator. A
+condition that scored a PR at all carries every defect that PR froze, and a
+`kind: full`, `status: complete` row carries the whole matrix: `pipeline` and
+`control` over every fixture, `replay` over the grid fixtures. A complete full
+row is the score of record — it refreshes the full-run clock and becomes the
+automatic baseline — so it may not claim that matrix on a subset of it.
+
 Then plan and run. `--plan` prints the matrix and the cost estimate without
 spending anything.
 
@@ -152,8 +159,14 @@ candidate**, then name that row as the candidate's baseline with `--against`:
 pnpm review:eval:run -- --kind full --pr    # publish the installed row first
 git -C . checkout main                      # the candidate run branches from here
 pnpm review:eval:run -- --kind full --skill-ref ~/work/review-candidate \
-  --against 2026-09-08 --pr
+  --against <installed-row-executed-at> --pr
 ```
+
+`<installed-row-executed-at>` is the `executed_at` of the row the first command
+just published, read from `docs/evals/review-skill-ledger.jsonl` or from that
+run's `row.json`. It is never a date typed from memory: `--against` resolves
+against rows the ledger already holds, so a value no row carries fails the
+pre-flight before the candidate spends anything.
 
 Publish first, or both rows land in one working tree and only one of them
 reaches a PR: each run appends to the same ledger file, and the candidate's
@@ -175,10 +188,11 @@ reads the twenty-line report and approves.
 A run that fails publishes the same way. Its `status: failed` row is already in
 the checkout's ledger, and a run that leaves it there uncommitted wedges the
 schedule: the next run refuses to start against a ledger with uncommitted
-changes, and nothing reaches the freshness workflow. With `--pr` the failure row
-gets its own PR and the run exits zero; without it the run prints the publish
-commands and exits non-zero, so launchd records that a human still has to
-finish the job.
+changes, and nothing reaches the freshness workflow. A scored row wedges it the
+same way, and the installed job runs without `--pr`, so both endings follow one
+rule: with `--pr` the row gets its own PR and the run exits zero; without it the
+run prints the publish commands and exits non-zero, so launchd records that a
+human still has to finish the job.
 
 ### Install the scheduler
 
@@ -223,6 +237,11 @@ the numbers under it are untrusted or partial, and a run whose numbers are
 untrusted may not be escalated on them any more than it may pass on them: a
 subset that missed its P1 cells is not a P1 regression to open an issue about.
 
+All three keep the row off the full-run freshness clock as well. A full run
+nothing may rank on did not verify the operating point, so the quarterly clock
+keeps running and the next scheduled run asks for a full run again instead of
+dropping back to canaries for another cadence window.
+
 A canary is a floor test, never a ranking: RED when `replay` matches fewer
 than nine of the twenty-two grid defects, or any run emits no parseable
 finding.
@@ -265,10 +284,22 @@ derived from as directly as a prompt does. An edit to any of them re-anchors the
 series, which is the conservative direction: a refused comparison is visible,
 a silently paired one is not.
 
+`--score` rechecks the bytes the contract pins by `sha256` — both prompts, every
+truth file, every frozen finder report — before it calls the judge, and refuses
+the pass when one of them moved. `--check-fixtures` covers them once, before the
+matrix starts; under `--skill-ref` the spec worktree is the live checkout for
+the two hours in between, and the contract digest alone would not notice.
+
 `--report` refuses to compute McNemar across rows with different
 `comparability_key` unless the row is a bridge run, and `--score --against`
 stores `vs_baseline.mcnemar: null` for such a pair rather than numbers nobody
 may read. Rows with different keys are different series and plot separately.
+
+`--report` reads rows of the current `contract_digest` only. The ledger keeps
+the rows a retired contract scored, and reporting one under today's contract
+would recompute its verdict against a truth index and thresholds the run never
+saw. The default selection is the newest row of this contract, and `--row` on an
+older one is refused; pass `--contract` with the archived contract to read it.
 
 | drift vector      | control                                                                                       |
 | ----------------- | --------------------------------------------------------------------------------------------- |
@@ -307,11 +338,15 @@ the contract, so each of those is an ordinary full run against its own
 The bridge row is assembled by hand from the newer of the two runs: copy its
 `row.json`, set `kind` to `"bridge"`, and record the retiring run's
 `executed_at`, its `comparability_key`, and the McNemar delta between the two
-in `vs_baseline`. `--validate ROW --detail-dir RUNDIR --append` re-derives
-every recorded number from the run detail before appending, but it does not
-recompute the `vs_baseline` of a hand-assembled row, so the reviewer of the
-ledger PR checks those two numbers against the two run reports. Then re-anchor
-the baseline to the new model. Never swap a model and keep comparing against
+in `vs_baseline`. `--validate ROW --detail-dir RUNDIR --append --against
+RETIRING_ROW` re-derives every recorded number from the run detail before
+appending, `vs_baseline` included: the McNemar counts are recomputed from the
+two rows' `per_defect` vectors and a stated `baseline_executed_at`,
+`baseline_comparability_key` or delta that does not match is a validation
+problem. Name the retiring row with `--against`, or there is no baseline to
+recompute against and the reviewer of the ledger PR checks those two numbers
+against the two run reports by hand. Then re-anchor the baseline to the new
+model. Never swap a model and keep comparing against
 the old baseline. A judge retirement follows the same procedure, and a human
 re-audits the calibration set before the new judge's labels are trusted.
 

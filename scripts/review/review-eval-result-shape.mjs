@@ -12,6 +12,8 @@ import path from "node:path";
 
 import { fixtureForPr } from "./review-eval-fixtures.mjs";
 import {
+  compareConditions,
+  headlineCondition,
   judgeCalibrationPasses,
   leakSuspected,
   verdict,
@@ -145,6 +147,52 @@ export function resolveBaseline({ rows, row }) {
   return reAnchored ?? eligible[0];
 }
 
+/**
+ * The stored pairing against the baseline. `--against` may name a row from a
+ * different comparability key, which measures something else: that pairing is
+ * recorded with a null McNemar rather than with numbers nothing may read.
+ *
+ * It lives beside `revalidateRow` rather than beside the scorer that first
+ * calls it, because the recompute is the point: a stored pairing nobody
+ * re-derives is a claim, and `--validate` re-derives it from the same two
+ * `per_defect` vectors the scorer read.
+ */
+export function buildVsBaseline({ row, baselineRow }) {
+  if (!baselineRow) return null;
+  const paired =
+    row.comparability_key === baselineRow.comparability_key ||
+    row.kind === "bridge";
+  if (!paired) {
+    return {
+      baseline_executed_at: baselineRow.executed_at,
+      baseline_comparability_key: baselineRow.comparability_key,
+      mcnemar: null,
+    };
+  }
+  const { name, condition } = headlineCondition(row);
+  const baseCondition = baselineRow.conditions?.[name];
+  const flips = baseCondition
+    ? compareConditions(baseCondition, condition)
+    : { b: 0, c: 0 };
+  const vs = {
+    baseline_executed_at: baselineRow.executed_at,
+    baseline_comparability_key: baselineRow.comparability_key,
+    mcnemar: { b: flips.b, c: flips.c, delta: flips.b - flips.c },
+  };
+  if (row.conditions.control && baselineRow.conditions?.control) {
+    const control = compareConditions(
+      baselineRow.conditions.control,
+      row.conditions.control,
+    );
+    vs.control_mcnemar = {
+      b: control.b,
+      c: control.c,
+      delta: control.b - control.c,
+    };
+  }
+  return vs;
+}
+
 /** Read one row from a file path, or from the ledger by executed_at prefix. */
 export function resolveRowReference({ reference, rows, repoRoot }) {
   if (!reference) return null;
@@ -234,6 +282,16 @@ function recomputeFromDetail({ dir, condition, ids, prForId }) {
 function checkClose(stated, found, tolerance, label, digits, problems) {
   if (typeof stated !== "number" || !Number.isFinite(stated)) {
     problems.push(`${label} is not a number; the run detail gives ${found}`);
+    return;
+  }
+  // `Number("")`, `Number("2.4 usd")` and a missing nested field all reach here
+  // as NaN, and every comparison with NaN is false: without this the sum of a
+  // corrupt cell record would silently accept whatever the row stated. An
+  // unusable sum is a validation problem about the detail, not a pass.
+  if (!Number.isFinite(found)) {
+    problems.push(
+      `${label} cannot be checked; the run detail sums to ${found}, so at least one cell record carries a value that is not a finite number`,
+    );
     return;
   }
   if (Math.abs(stated - found) > tolerance) {
@@ -365,6 +423,83 @@ function checkCalibration({ dir, row, calibrationSet, problems }) {
   if (stated.agreement !== agreement) {
     problems.push(
       `judge_calibration.agreement is ${stated.agreement}; calibration.json gives ${agreement}`,
+    );
+  }
+}
+
+function mcnemarText(value) {
+  return isShape(value)
+    ? `b=${value.b} c=${value.c} delta=${value.delta}`
+    : String(value);
+}
+
+function checkMcnemar(stated, expected, label, problems) {
+  const same =
+    isShape(stated) && isShape(expected)
+      ? stated.b === expected.b &&
+        stated.c === expected.c &&
+        stated.delta === expected.delta
+      : (stated ?? null) === (expected ?? null);
+  if (!same) {
+    problems.push(
+      `${label} is ${mcnemarText(stated)}; the baseline's bits give ${mcnemarText(expected)}`,
+    );
+  }
+}
+
+/**
+ * Recompute the stored pairing from the baseline this row is validated against.
+ *
+ * `verdict()` never reads `vs_baseline` — it pairs the two rows itself — so
+ * these are recorded numbers in the same class as `usd` and `seconds`: printed
+ * in the committed report and, until now, taken on the row's own say-so. A row
+ * could name a baseline it was never scored on, or state a delta its bits do
+ * not give, and still append. The recompute needs a baseline row, so a pairing
+ * with nothing to check it against — the hand-assembled bridge row validated
+ * without `--against` — is still left to the reviewer of the ledger PR.
+ *
+ * A row that records no pairing at all is not a problem here: it under-claims,
+ * and the verdict is derived from the baseline directly either way.
+ */
+function checkVsBaseline({ row, baseline, problems }) {
+  const stated = row.vs_baseline ?? null;
+  if (!baseline || stated === null) return;
+  if (!isShape(stated)) {
+    problems.push("row.vs_baseline is neither null nor an object");
+    return;
+  }
+  const expected = buildVsBaseline({ row, baselineRow: baseline });
+  if (stated.baseline_executed_at !== expected.baseline_executed_at) {
+    // Everything below is about a different pair of runs, so recomputing it
+    // against this baseline would report differences that are not errors.
+    problems.push(
+      `row.vs_baseline.baseline_executed_at is ${stated.baseline_executed_at}; this row is validated against ${expected.baseline_executed_at}`,
+    );
+    return;
+  }
+  if (
+    Object.hasOwn(stated, "baseline_comparability_key") &&
+    stated.baseline_comparability_key !== expected.baseline_comparability_key
+  ) {
+    problems.push(
+      `row.vs_baseline.baseline_comparability_key is ${stated.baseline_comparability_key}; the baseline row carries ${expected.baseline_comparability_key}`,
+    );
+    return;
+  }
+  checkMcnemar(
+    stated.mcnemar,
+    expected.mcnemar,
+    "row.vs_baseline.mcnemar",
+    problems,
+  );
+  // The control pairing is optional on the row. Stated, it is checked; absent,
+  // there is no claim to check.
+  if (Object.hasOwn(stated, "control_mcnemar")) {
+    checkMcnemar(
+      stated.control_mcnemar,
+      expected.control_mcnemar ?? null,
+      "row.vs_baseline.control_mcnemar",
+      problems,
     );
   }
 }
@@ -541,6 +676,7 @@ export function revalidateRow({
   }
   const baseline =
     baselineRow ?? resolveBaseline({ rows: ledgerRows ?? [], row });
+  checkVsBaseline({ row, baseline, problems });
   let recomputed = null;
   try {
     recomputed = verdict({ contract, row, baselineRow: baseline }).verdict;

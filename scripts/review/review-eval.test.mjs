@@ -45,6 +45,7 @@ import {
   scrubbedEnv,
 } from "./review-eval-run.mjs";
 import {
+  buildVsBaseline,
   failedRow,
   resolveBaseline,
   revalidateRow,
@@ -117,8 +118,15 @@ function makeRow({
   matchedIds = [],
   key = comparabilityKey({ contract, contractDigest }),
   verdict: statedVerdict = null,
+  // The rest of the matrix a complete full run owes: replay over the grid
+  // fixtures and control over every fixture, on the same bits as the pipeline.
+  // Off by default, because most tests here are about one condition's numbers.
+  fullMatrix = false,
 } = {}) {
   const prs = contract.fixtures.map((fixture) => fixture.pr);
+  const gridPrs = contract.fixtures
+    .filter((fixture) => fixture.grid === true)
+    .map((fixture) => fixture.pr);
   const ids = scorableIdsFor(prs);
   const p1 = new Set(p1IdsFor(prs));
   const matched = new Set(matchedIds.map(String));
@@ -130,9 +138,25 @@ function makeRow({
     return {
       matched: hit,
       opportunities: subset.length,
-      rate: Number((hit / subset.length).toFixed(3)),
+      rate:
+        subset.length === 0 ? null : Number((hit / subset.length).toFixed(3)),
     };
   };
+  const conditionOver = (subset) => ({
+    model: "claude-opus-5",
+    effort: "high",
+    finder: "gpt-5.6-sol@high",
+    draws: 1,
+    recall: count(subset),
+    p1: count(subset.filter((id) => p1.has(id))),
+    novel_real: 1,
+    wrong_claims: 0,
+    usd: 4.2,
+    seconds: 600,
+    per_defect: Object.fromEntries(
+      subset.map((id) => [id, [matched.has(id) ? 1 : 0]]),
+    ),
+  });
   const built = {
     schema_version: 1,
     kind,
@@ -170,6 +194,10 @@ function makeRow({
     detail_dir: "docs/evals/review-skill-runs/2026-09-08-deadbeef",
     notes: "",
   };
+  if (fullMatrix) {
+    built.conditions.replay = conditionOver(scorableIdsFor(gridPrs));
+    built.conditions.control = conditionOver(ids);
+  }
   built.verdict = statedVerdict ?? verdict({ contract, row: built }).verdict;
   return built;
 }
@@ -303,7 +331,10 @@ test("--check-ledger accepts a valid row and rejects a foreign defect id", () =>
   const root = makeRoot();
   try {
     const ledger = path.join(root, ledgerRelative);
-    const row = makeRow({ matchedIds: scorableIdsFor([1990]) });
+    const row = makeRow({
+      matchedIds: scorableIdsFor([1990]),
+      fullMatrix: true,
+    });
     writeFileSync(ledger, `${JSON.stringify(row)}\n`);
     const good = cli(["--check-ledger", "--json"], { root });
     assert.equal(good.status, 0, good.stderr);
@@ -758,6 +789,292 @@ test("revalidateRow recomputes the verdict a row states about itself", () => {
   );
 });
 
+test("revalidateRow recomputes vs_baseline instead of trusting it", () => {
+  // `verdict()` never reads `vs_baseline`; it pairs the two rows itself. That
+  // left the stored pairing — the McNemar counts printed in the committed
+  // report — as the row's own say-so, retypeable by hand.
+  const baselineRow = makeRow({
+    executedAt: "2026-09-08T10:00:00Z",
+    matchedIds: scorableIdsFor([1990, 1999]),
+  });
+  const row = makeRow({
+    executedAt: "2026-12-08T10:00:00Z",
+    matchedIds: scorableIdsFor([1990]),
+  });
+  row.vs_baseline = buildVsBaseline({ row, baselineRow });
+  row.verdict = verdict({ contract, row, baselineRow }).verdict;
+  assert.ok(row.vs_baseline.mcnemar.b > 0, "the fixture pair must flip");
+  assert.deepEqual(
+    revalidateRow({ contract, row, repoRoot, baselineRow }).problems,
+    [],
+  );
+
+  const flattened = {
+    ...row,
+    vs_baseline: { ...row.vs_baseline, mcnemar: { b: 0, c: 0, delta: 0 } },
+  };
+  const caught = revalidateRow({
+    contract,
+    row: flattened,
+    repoRoot,
+    baselineRow,
+  });
+  assert.equal(caught.ok, false);
+  assert.ok(
+    caught.problems.some((problem) =>
+      problem.startsWith("row.vs_baseline.mcnemar is b=0 c=0 delta=0;"),
+    ),
+    JSON.stringify(caught.problems),
+  );
+
+  const misnamed = {
+    ...row,
+    vs_baseline: {
+      ...row.vs_baseline,
+      baseline_executed_at: "2020-01-01T00:00:00Z",
+    },
+  };
+  const named = revalidateRow({
+    contract,
+    row: misnamed,
+    repoRoot,
+    baselineRow,
+  });
+  assert.equal(named.ok, false);
+  assert.ok(
+    named.problems.some((problem) =>
+      problem.startsWith(
+        "row.vs_baseline.baseline_executed_at is 2020-01-01T00:00:00Z;",
+      ),
+    ),
+    JSON.stringify(named.problems),
+  );
+
+  // A row that records no pairing under-claims, which is not a problem: there
+  // is no baseline row to recompute against when `--validate` is handed none.
+  assert.deepEqual(
+    revalidateRow({ contract, row: { ...row, vs_baseline: null }, repoRoot })
+      .problems,
+    [],
+  );
+});
+
+test("an explicit baseline must be a complete full run", () => {
+  // `--against` reaches `comparable()` with whatever row it names. A canary is
+  // a two-cell floor test and a partial run is a matrix with cells that never
+  // ran, so neither carries the bits a flip count needs.
+  const row = makeRow({
+    executedAt: "2026-12-08T10:00:00Z",
+    matchedIds: scorableIdsFor([1990]),
+  });
+  const ranking = makeRow({
+    executedAt: "2026-09-08T10:00:00Z",
+    matchedIds: scorableIdsFor([1990, 1999]),
+  });
+  // The same pair, ranked: the flip count is what a partial or canary baseline
+  // must not be allowed to produce.
+  assert.match(
+    verdict({ contract, row, baselineRow: ranking }).reasons.join(" | "),
+    /lost a net \d+ defects against the baseline/,
+  );
+  const unpaired = verdict({ contract, row, baselineRow: null });
+  for (const baseline of [
+    makeRow({
+      executedAt: "2026-09-08T10:00:00Z",
+      status: "partial",
+      matchedIds: scorableIdsFor([1990, 1999]),
+    }),
+    makeRow({
+      executedAt: "2026-09-08T10:00:00Z",
+      kind: "canary",
+      matchedIds: scorableIdsFor([1990, 1999]),
+    }),
+  ]) {
+    const decision = verdict({ contract, row, baselineRow: baseline });
+    assert.match(
+      decision.reasons.join(" | "),
+      /comparison refused \(a baseline must be a complete full run\)/,
+    );
+    // A refused baseline contributes nothing: no flip count, no reason drawn
+    // from one, and the same verdict the row gets with no baseline at all.
+    assert.doesNotMatch(
+      decision.reasons.join(" | "),
+      /against the baseline|noise floor/,
+    );
+    assert.equal(decision.verdict, unpaired.verdict);
+  }
+});
+
+test("revalidateRow refuses a detail sum that is not a finite number", () => {
+  const detail = mkdtempSync(path.join(tmpdir(), "review-eval-nonfinite-"));
+  try {
+    const row = makeRow({ matchedIds: [] });
+    // `Number("about $2")` is NaN and every comparison with NaN is false, so a
+    // corrupt cell record used to let any stated cost pass the recompute.
+    writeFileSync(
+      path.join(detail, "result-1990-pipeline-1.json"),
+      JSON.stringify({
+        pr: 1990,
+        condition: "pipeline",
+        draw: 1,
+        matched_ids: [],
+        claims: ["one"],
+        novel: { novelWrong: 0, novelReal: 1 },
+        usd: "about $2",
+        seconds: 600,
+      }),
+    );
+    const result = revalidateRow({
+      contract,
+      row,
+      repoRoot,
+      detailDir: detail,
+    });
+    assert.equal(result.ok, false);
+    assert.ok(
+      result.problems.some((problem) =>
+        problem.startsWith(
+          "conditions.pipeline.usd cannot be checked; the run detail sums to NaN",
+        ),
+      ),
+      JSON.stringify(result.problems),
+    );
+  } finally {
+    rmSync(detail, { recursive: true, force: true });
+  }
+});
+
+test("run-eval.sh refuses a detail_dir before it can delete the checkout", () => {
+  // `json_field` prints `String(doc[key])`: a missing key arrives as the word
+  // "undefined" and a JSON null as "null". An empty value is the dangerous one
+  // — it makes `rm -rf "$REPO/$detail"` target the checkout itself.
+  const shell = readFileSync(
+    path.join(repoRoot, "scripts/review/run-eval.sh"),
+    "utf8",
+  );
+  const guard = shell.match(
+    /\nrequire_safe_detail\(\) \{\n[\s\S]*?\n\}\n/,
+  )?.[0];
+  assert.ok(guard, "require_safe_detail was not found in run-eval.sh");
+  const harness = [
+    "set -euo pipefail",
+    'REPO="/tmp/review-eval-checkout"',
+    `fail() { printf 'FATAL: %s\\n' "$*" >&2; exit 1; }`,
+    guard,
+    'require_safe_detail "$1"',
+  ].join("\n");
+  const check = (value) =>
+    spawnSync("bash", ["-c", harness, "bash", value], { encoding: "utf8" });
+  for (const bad of [
+    "",
+    "undefined",
+    "null",
+    "/etc",
+    "docs/../../evals/runs",
+    "..",
+  ]) {
+    assert.equal(
+      check(bad).status,
+      1,
+      `detail_dir ${JSON.stringify(bad)} was accepted`,
+    );
+  }
+  for (const good of [
+    "docs/evals/review-skill-runs/2026-09-08-deadbeef-full-abc",
+    // Two dots inside a component are a name, not a climb.
+    "docs/evals/review-skill-runs/2026-09-08..deadbeef",
+  ]) {
+    const run = check(good);
+    assert.equal(run.status, 0, `${good}: ${run.stderr}`);
+  }
+});
+
+test("run-eval.sh exits non-zero when no PR carries the row", () => {
+  // Both endings append a row to the checkout's ledger — the scored one and the
+  // status:failed trace alike — and the installed launchd job runs without
+  // --pr. Exiting zero while only the publish commands were printed reports a
+  // clean run while the next scheduled run refuses to start against a ledger
+  // with uncommitted changes.
+  const shell = readFileSync(
+    path.join(repoRoot, "scripts/review/run-eval.sh"),
+    "utf8",
+  );
+  const guard = shell.match(
+    /\nif \[\[ \$PUBLISHED -ne 1 \]\]; then\n[\s\S]*?\nfi\nexit 0\n/,
+  )?.[0];
+  assert.ok(guard, "the success path does not check PUBLISHED");
+  const harness = (published) =>
+    [
+      "set -uo pipefail",
+      `fail() { printf 'FATAL: %s\\n' "$*" >&2; exit 1; }`,
+      'VERDICT="GREEN"',
+      'LEDGER="/tmp/ledger.jsonl"',
+      `PUBLISHED=${published}`,
+      guard,
+    ].join("\n");
+  const unpublished = spawnSync("bash", ["-c", harness(0)], {
+    encoding: "utf8",
+  });
+  assert.equal(unpublished.status, 1);
+  assert.match(unpublished.stderr, /no PR carries it yet/);
+  assert.equal(
+    spawnSync("bash", ["-c", harness(1)], { encoding: "utf8" }).status,
+    0,
+  );
+
+  // The failure path has carried the same rule since it was written.
+  assert.match(shell, /if \[\[ \$PUBLISHED -eq 1 \]\]; then\n\s*exit 0\n\s*fi/);
+});
+
+test("run-eval.sh keeps the stderr of a bounded command it had to fail", () => {
+  // A finder, a contestant or the scorer says why it exited on stderr, and
+  // every failure path logs only an exit status. Discarding stderr left the
+  // one line that explains the failure unreachable.
+  const shell = readFileSync(
+    path.join(repoRoot, "scripts/review/run-eval.sh"),
+    "utf8",
+  );
+  const parts = ["run_bounded", "log_stderr_tail"].map((name) => {
+    const source = shell.match(
+      new RegExp(`\\n${name}\\(\\) \\{\\n[\\s\\S]*?\\n\\}\\n`),
+    )?.[0];
+    assert.ok(source, `${name} was not found in run-eval.sh`);
+    return source;
+  });
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-stderr-"));
+  try {
+    const out = path.join(dir, "out");
+    const harness = [
+      "set -uo pipefail",
+      `log() { printf '%s\\n' "$*"; }`,
+      ...parts,
+      "status=0",
+      `run_bounded "${out}" 30 bash -c 'printf hello; printf "boom: session limit reached\\n" >&2; exit 7' || status=$?`,
+      `printf 'status=%s\\n' "$status"`,
+      `log_stderr_tail "${out}.err"`,
+    ].join("\n");
+    const run = spawnSync("bash", ["-c", harness], { encoding: "utf8" });
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /status=7/);
+    assert.equal(readFileSync(out, "utf8"), "hello");
+    assert.match(readFileSync(`${out}.err`, "utf8"), /boom: session limit/);
+    // The tail reaches the log, which is the only place a scheduled run's
+    // failure is ever read.
+    assert.match(run.stdout, /boom: session limit reached/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  // Every failure path that follows a bounded command logs that tail.
+  for (const pattern of [
+    /the finder exited \$finder_status; not cached"\n\s*log_stderr_tail "\$finder_out\.err"/,
+    /claude exited \$claude_status; not cached"\n\s*fi\n\s*log_stderr_tail "\$raw\.err"/,
+    /if \[\[ \$SCORE_STATUS -ne 0 \]\]; then\n\s*log_stderr_tail "\$SCORE_OUT\.err"/,
+  ]) {
+    assert.match(shell, pattern);
+  }
+});
+
 test("run-eval.sh inserts finder output into the handoff prompt verbatim", () => {
   // The finder output is model text. `String.prototype.replace` reads $&, $`,
   // $' and $1 in a *string* replacement, so a review containing one of those
@@ -791,7 +1108,12 @@ test("--validate refuses a bad row and appends a good one", () => {
   const root = makeRoot();
   try {
     const rowPath = path.join(root, "row.json");
-    const row = makeRow({ matchedIds: scorableIdsFor([1990, 1999]) });
+    // A row `--append` may actually accept: a complete full run owes the whole
+    // matrix, so the appended one carries pipeline, replay and control.
+    const row = makeRow({
+      matchedIds: scorableIdsFor([1990, 1999]),
+      fullMatrix: true,
+    });
     row.conditions.pipeline.p1.matched += 1;
     writeFileSync(rowPath, JSON.stringify(row, null, 2));
     const bad = cli(["--validate", rowPath, "--append", "--json"], { root });
@@ -910,12 +1232,14 @@ test("--validate --against rechecks the verdict on the named baseline", () => {
     const baselineRow = makeRow({
       executedAt: "2026-08-08T10:00:00Z",
       matchedIds: scorableIdsFor([1990, 1999]),
+      fullMatrix: true,
     });
     const baselinePath = path.join(root, "baseline.json");
     writeFileSync(baselinePath, JSON.stringify(baselineRow, null, 2));
     const row = makeRow({
       executedAt: "2026-12-08T10:00:00Z",
       matchedIds: scorableIdsFor([1990, 1999]),
+      fullMatrix: true,
     });
     row.verdict = verdict({ contract, row, baselineRow }).verdict;
     const rowPath = path.join(root, "row.json");
@@ -928,6 +1252,144 @@ test("--validate --against rechecks the verdict on the named baseline", () => {
     const output = JSON.parse(result.stdout);
     assert.equal(output.appended, true);
     assert.equal(output.recomputed_verdict, row.verdict);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--validate --append refuses a complete full row missing a condition", () => {
+  const root = makeRoot();
+  try {
+    const rowPath = path.join(root, "row.json");
+    for (const name of ["pipeline", "replay", "control"]) {
+      // `revalidateRow` recomputes the conditions a row lists, so a condition
+      // deleted from an uncommitted row is invisible to it. Appending such a
+      // row refreshes the full-run clock and makes it an automatic baseline
+      // even though the live pipeline or the model-drift control never ran.
+      const row = makeRow({
+        matchedIds: scorableIdsFor([1990, 1999]),
+        fullMatrix: true,
+      });
+      delete row.conditions[name];
+      row.verdict = verdict({ contract, row }).verdict;
+      writeFileSync(rowPath, JSON.stringify(row, null, 2));
+      const result = cli(["--validate", rowPath, "--append", "--json"], {
+        root,
+      });
+      assert.equal(result.status, 1);
+      const output = JSON.parse(result.stdout);
+      assert.equal(output.appended, false);
+      assert.match(
+        output.problems.join(" | "),
+        new RegExp(`complete full run but scores no ${name} condition`),
+      );
+      assert.equal(readLedger(path.join(root, ledgerRelative)).length, 0);
+    }
+
+    // A condition present but scoring only one PR is the same claim made a
+    // different way: pipeline and control cover every fixture in a full run.
+    const narrow = makeRow({
+      matchedIds: scorableIdsFor([1990]),
+      fullMatrix: true,
+    });
+    for (const id of scorableIdsFor([2001])) {
+      delete narrow.conditions.control.per_defect[id];
+    }
+    narrow.conditions.control.recall.opportunities -= scorableIdsFor([
+      2001,
+    ]).length;
+    narrow.conditions.control.p1.opportunities -= p1IdsFor([2001]).length;
+    narrow.conditions.control.recall.rate = Number(
+      (
+        narrow.conditions.control.recall.matched /
+        narrow.conditions.control.recall.opportunities
+      ).toFixed(3),
+    );
+    narrow.conditions.control.p1.rate = Number(
+      (
+        narrow.conditions.control.p1.matched /
+        narrow.conditions.control.p1.opportunities
+      ).toFixed(3),
+    );
+    narrow.verdict = verdict({ contract, row: narrow }).verdict;
+    writeFileSync(rowPath, JSON.stringify(narrow, null, 2));
+    const result = cli(["--validate", rowPath, "--append", "--json"], { root });
+    assert.equal(result.status, 1);
+    assert.match(
+      JSON.parse(result.stdout).problems.join(" | "),
+      /conditions\.control is a complete full run but scores no defect from PR 2001/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--score refuses a frozen input edited after planning", () => {
+  const root = makeRoot();
+  try {
+    const planDir = path.join(root, "plan");
+    mkdirSync(planDir, { recursive: true });
+    buildPlan({
+      contract,
+      contractDigest,
+      kind: "canary",
+      repoRoot: root,
+      outDir: planDir,
+      env: planEnv,
+    });
+    // The contract digest covers the contract JSON, not the files it pins by
+    // sha256. Under `--skill-ref` the spec worktree is the live checkout, and a
+    // truth file edited during the hours the matrix runs would be scored
+    // against under the planned comparability key.
+    const truth = path.join(root, contract.fixtures[0].truth_file);
+    writeFileSync(truth, `${readFileSync(truth, "utf8")} `);
+    const result = cli(["--score", planDir], { root });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /a frozen input changed after planning/);
+    assert.match(result.stderr, /truth does not match its frozen sha256/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--report refuses a row scored against another contract", () => {
+  const root = makeRoot();
+  try {
+    const ledger = path.join(root, ledgerRelative);
+    const current = makeRow({
+      executedAt: "2026-09-08T10:00:00Z",
+      matchedIds: scorableIdsFor([1990, 1999]),
+    });
+    // The ledger is append-only, so a contract refresh leaves the rows it
+    // scored in place. Their bits came from a different truth index and
+    // different thresholds, and the newest row is not necessarily this
+    // contract's.
+    const archived = {
+      ...makeRow({
+        executedAt: "2026-12-08T10:00:00Z",
+        matchedIds: scorableIdsFor([1990]),
+      }),
+      contract_digest: "9".repeat(64),
+    };
+    writeFileSync(
+      ledger,
+      `${JSON.stringify(current)}\n${JSON.stringify(archived)}\n`,
+    );
+    const markdown = cli(["--report"], { root });
+    assert.equal(markdown.status, 0, markdown.stderr);
+    assert.match(markdown.stdout, /Review-skill eval — 2026-09-08 \(full\)/);
+
+    // Naming the archived row explicitly is refused rather than silently
+    // recomputed under this contract.
+    const named = cli(["--report", "--row", "2026-12-08"], { root });
+    assert.equal(named.status, 1);
+    assert.match(named.stderr, /was scored against contract 99999999/);
+
+    // A ledger with no row of this contract has nothing to report.
+    writeFileSync(ledger, `${JSON.stringify(archived)}\n`);
+    const empty = cli(["--report", "--json"], { root });
+    assert.equal(empty.status, 1);
+    assert.match(empty.stderr, /has no row for contract/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
