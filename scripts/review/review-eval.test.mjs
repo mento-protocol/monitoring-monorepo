@@ -3177,6 +3177,49 @@ test("--check-ledger --revalidate-appended catches an edited appended row", () =
   }
 });
 
+test("--revalidate-appended treats a base without a ledger as all-appended", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+    // The bootstrap PR: the base commit predates the ledger file entirely, so
+    // every row on the branch is appended — zero rows included. This is the
+    // state the suite's first CI run sees, and it must pass, not error.
+    rmSync(path.join(root, ledgerRelative));
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "pre-ledger base");
+    writeFileSync(path.join(root, ledgerRelative), "");
+    const flags = ["--base-ref", "HEAD", "--require-base", "--json"];
+    const boot = cli(["--check-ledger", "--revalidate-appended", ...flags], {
+      root,
+    });
+    assert.equal(boot.status, 0, boot.stdout + boot.stderr);
+    assert.equal(JSON.parse(boot.stdout).revalidated_rows, 0);
+
+    const row = makeRow({
+      matchedIds: scorableIdsFor([1990]),
+      fullMatrix: true,
+    });
+    mkdirSync(path.join(root, row.detail_dir), { recursive: true });
+    const rowPath = path.join(root, "row.json");
+    writeFileSync(rowPath, JSON.stringify(row, null, 2));
+    assert.equal(
+      cli(["--validate", rowPath, "--append", "--json"], { root }).status,
+      0,
+    );
+    const one = cli(["--check-ledger", "--revalidate-appended", ...flags], {
+      root,
+    });
+    assert.equal(one.status, 0, one.stdout + one.stderr);
+    assert.equal(JSON.parse(one.stdout).revalidated_rows, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a scheduled run refuses a checkout that is not at origin/main", () => {
   const script = readFileSync(
     path.join(repoRoot, "scripts/review/run-eval.sh"),

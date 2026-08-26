@@ -502,17 +502,18 @@ async function modeCheckLedger(options, context) {
 function revalidateAppendedRows({ options, context, result, base }) {
   const problems = [];
   const rows = result.rows;
-  // Which rows are new is the base comparison's answer. Without it this flag
-  // would either recompute the whole history — including rows of retired
-  // contracts it cannot judge — or check nothing, and a guard that silently
-  // no-ops is worse than no guard.
-  if (!base.rows) {
+  // Which rows are new is the base comparison's answer. An unresolvable base
+  // ref leaves that unanswerable — recomputing the whole history would judge
+  // rows of retired contracts, and checking nothing is a guard that silently
+  // no-ops. A base that resolves but carries no ledger is the bootstrap case:
+  // every row on this branch is appended, zero rows included.
+  if (!base.rows && !base.resolved) {
     result.problems.push(
       `--revalidate-appended cannot tell which rows are new: ${base.reason}`,
     );
     return { ok: false, checked: null, unpaired: null };
   }
-  const appended = rows.slice(base.rows.length);
+  const appended = base.rows ? rows.slice(base.rows.length) : rows;
   const calibrationFile = path.resolve(
     context.repoRoot,
     options.calibrationPath,
