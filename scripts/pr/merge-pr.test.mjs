@@ -1177,6 +1177,112 @@ await test("a short consent write refuses instead of reporting success", async (
   }
 });
 
+await test("a short consent write never truncates the shared ledger", async () => {
+  // Truncating back would race another pr:merge appending a complete record
+  // and delete their consent. The partial bytes stay; nothing else is lost.
+  const checkout = mkdtempSync(path.join(tmpdir(), "merge-consent-short-"));
+  try {
+    const ledger = path.join(checkout, CONSENT_LOG_BASENAME);
+    const existing = '{"timestamp":"2026-08-01T00:00:00.000Z","pr":1}\n';
+    writeFileSync(ledger, existing);
+
+    const record = buildConsentRecord({
+      login: "chapati23",
+      repo: "mento-protocol/monitoring-monorepo",
+      number: 2071,
+      headOid: HEAD_OID,
+      notReadyReason: null,
+      now: new Date("2026-08-26T00:00:00.000Z"),
+    });
+
+    const error = await assertRefuses(
+      appendConsentRecord({
+        record,
+        git: async () => `${checkout}\n`,
+        write: (fd, payload) => fs.writeSync(fd, payload.subarray(0, 5)),
+      }),
+      "the consent record is incomplete",
+    );
+    assert(
+      error.message.includes("left in place"),
+      `the refusal should say the bytes stay, got: ${error.message}`,
+    );
+
+    const after = readFileSync(ledger, "utf8");
+    assert(
+      after.startsWith(existing),
+      "the pre-existing record must be untouched",
+    );
+    assert(
+      after.length > existing.length,
+      "the partial bytes should still be there, not truncated away",
+    );
+  } finally {
+    rmSync(checkout, { recursive: true, force: true });
+  }
+});
+
+await test("a later append steps over an unterminated partial record", async () => {
+  // The reason truncation is not needed: a record with no trailing newline
+  // cannot swallow the next one, because the next append starts its own line.
+  const checkout = mkdtempSync(path.join(tmpdir(), "merge-consent-partial-"));
+  try {
+    const ledger = path.join(checkout, CONSENT_LOG_BASENAME);
+    const good = '{"timestamp":"2026-08-01T00:00:00.000Z","pr":1}\n';
+    const partial = '{"timestamp":"2026-08-02T00:00';
+    writeFileSync(ledger, good + partial);
+
+    const record = buildConsentRecord({
+      login: "chapati23",
+      repo: "mento-protocol/monitoring-monorepo",
+      number: 2071,
+      headOid: HEAD_OID,
+      notReadyReason: null,
+      now: new Date("2026-08-26T00:00:00.000Z"),
+    });
+    await appendConsentRecord({ record, git: async () => `${checkout}\n` });
+
+    const lines = readFileSync(ledger, "utf8").split("\n").filter(Boolean);
+    assertEqual(lines.length, 3, "the partial record must stay its own line");
+    assertEqual(
+      lines[1],
+      partial,
+      "the broken line is left visible, not merged",
+    );
+    const parsed = JSON.parse(lines[2]);
+    assertEqual(parsed.pr, 2071, "the new record must be intact and parseable");
+  } finally {
+    rmSync(checkout, { recursive: true, force: true });
+  }
+});
+
+await test("a ledger ending in a newline gains no blank line", async () => {
+  const checkout = mkdtempSync(path.join(tmpdir(), "merge-consent-clean-"));
+  try {
+    const ledger = path.join(checkout, CONSENT_LOG_BASENAME);
+    writeFileSync(ledger, '{"pr":1}\n');
+
+    const record = buildConsentRecord({
+      login: "chapati23",
+      repo: "mento-protocol/monitoring-monorepo",
+      number: 2071,
+      headOid: HEAD_OID,
+      notReadyReason: null,
+      now: new Date("2026-08-26T00:00:00.000Z"),
+    });
+    await appendConsentRecord({ record, git: async () => `${checkout}\n` });
+
+    const raw = readFileSync(ledger, "utf8");
+    assert(
+      !raw.includes("\n\n"),
+      `no blank line expected, got: ${JSON.stringify(raw)}`,
+    );
+    assertEqual(raw.split("\n").filter(Boolean).length, 2);
+  } finally {
+    rmSync(checkout, { recursive: true, force: true });
+  }
+});
+
 await test("an enqueued pull request is not reported as merged", async () => {
   // `gh pr merge` exits 0 after enqueueing on a merge-queue base. Reporting
   // that as merged would let callers run post-merge closeout while the pull
@@ -1402,50 +1508,6 @@ await test("the gate signature cannot be spoofed through a blocker name", () => 
   );
 });
 
-await test("a short consent write leaves the ledger byte-identical", async () => {
-  // Refusing is not enough. The partial bytes have no terminating newline, so
-  // the next successful append continues the same physical line and produces
-  // one malformed record that a later merge reports as recorded consent.
-  const checkout = mkdtempSync(path.join(tmpdir(), "merge-consent-rollback-"));
-  try {
-    const ledger = path.join(checkout, CONSENT_LOG_BASENAME);
-    const existing = '{"timestamp":"2026-08-01T00:00:00.000Z","pr":1}\n';
-    writeFileSync(ledger, existing);
-
-    const record = buildConsentRecord({
-      login: "chapati23",
-      repo: "mento-protocol/monitoring-monorepo",
-      number: 2071,
-      headOid: HEAD_OID,
-      notReadyReason: null,
-      now: new Date("2026-08-26T00:00:00.000Z"),
-    });
-
-    await assertRefuses(
-      appendConsentRecord({
-        record,
-        git: async () => `${checkout}\n`,
-        write: (fd, payload) => fs.writeSync(fd, payload.subarray(0, 5)),
-      }),
-      "the consent record is incomplete",
-    );
-
-    assertEqual(
-      readFileSync(ledger, "utf8"),
-      existing,
-      "the partial bytes must be rolled back",
-    );
-
-    // The ledger must still accept a real append afterwards, on one clean line.
-    await appendConsentRecord({ record, git: async () => `${checkout}\n` });
-    const lines = readFileSync(ledger, "utf8").trimEnd().split("\n");
-    assertEqual(lines.length, 2, "the ledger should hold two records");
-    for (const line of lines) JSON.parse(line);
-  } finally {
-    rmSync(checkout, { recursive: true, force: true });
-  }
-});
-
 await test("refuses an implicit target while GH_REPO is set", async () => {
   // GH_REPO redirects every gh command that would otherwise read the local
   // repository. Which one wins here depends on gh's precedence rules, and this
@@ -1508,61 +1570,6 @@ await test("a base retargeted during the merge itself is reported", async () => 
     h.output().includes("not the main you approved"),
     `the operator must be told, got:\n${h.output()}`,
   );
-});
-
-await test("a concurrent append survives a short-write rollback", async () => {
-  // Two pr:merge runs can share the ledger. If the other one appends a
-  // complete record between our fstat and our short write, truncating back to
-  // the remembered length would delete their consent along with our partial
-  // bytes. Leave the mess rather than destroy their record.
-  const checkout = mkdtempSync(
-    path.join(tmpdir(), "merge-consent-concurrent-"),
-  );
-  try {
-    const ledger = path.join(checkout, CONSENT_LOG_BASENAME);
-    const existing = '{"timestamp":"2026-08-01T00:00:00.000Z","pr":1}\n';
-    writeFileSync(ledger, existing);
-    const theirs = '{"timestamp":"2026-08-26T11:59:00.000Z","pr":2070}\n';
-
-    const record = buildConsentRecord({
-      login: "chapati23",
-      repo: "mento-protocol/monitoring-monorepo",
-      number: 2071,
-      headOid: HEAD_OID,
-      notReadyReason: null,
-      now: new Date("2026-08-26T00:00:00.000Z"),
-    });
-
-    const error = await assertRefuses(
-      appendConsentRecord({
-        record,
-        git: async () => `${checkout}\n`,
-        write: (fd, payload) => {
-          // Another process lands a complete record first, then our write is
-          // cut short by the filesystem.
-          fs.appendFileSync(ledger, theirs);
-          return fs.writeSync(fd, payload.subarray(0, 5));
-        },
-      }),
-      "the consent record is incomplete",
-    );
-    assert(
-      error.message.includes("another writer appended concurrently"),
-      `the refusal should explain why nothing was rolled back, got: ${error.message}`,
-    );
-
-    const contents = readFileSync(ledger, "utf8");
-    assert(
-      contents.includes(theirs.trim()),
-      "the concurrent writer's record must survive",
-    );
-    assert(
-      contents.startsWith(existing),
-      "the pre-existing record must survive",
-    );
-  } finally {
-    rmSync(checkout, { recursive: true, force: true });
-  }
 });
 
 await test("a MERGED state with no base is not a confirmed merge", async () => {

@@ -16,8 +16,8 @@ import {
   closeSync,
   constants,
   fstatSync,
-  ftruncateSync,
   openSync,
+  readSync,
   writeSync,
 } from "node:fs";
 import path from "node:path";
@@ -93,8 +93,8 @@ export async function appendConsentRecord({
   record,
   git,
   write = writeSync,
-  truncateFd = ftruncateSync,
   statFd = fstatSync,
+  readFd = readSync,
 }) {
   let repoRoot;
   try {
@@ -129,7 +129,7 @@ export async function appendConsentRecord({
   try {
     fd = openSync(
       target,
-      constants.O_WRONLY |
+      constants.O_RDWR |
         constants.O_APPEND |
         constants.O_CREAT |
         constants.O_NOFOLLOW |
@@ -159,37 +159,37 @@ export async function appendConsentRecord({
       );
     }
 
-    const payload = Buffer.from(`${JSON.stringify(record)}\n`, "utf8");
+    // A previous run can have died mid-write and left a record with no
+    // terminating newline. Appending straight onto it would splice the two into
+    // one malformed line that parses as neither. Start a fresh line instead:
+    // the broken record stays broken and visible, and this one is intact.
+    //
+    // This is why the short write below never truncates. The ledger is shared
+    // and `O_APPEND`, so any check-then-truncate is a race — another
+    // `pr:merge` can append a complete record between the check and the
+    // truncate, and truncating would delete their consent to tidy up our
+    // failure. Losing somebody else's approval record is worse than leaving a
+    // partial line that the next append steps over and the operator can see.
+    let leadingNewline = false;
+    if (stats.size > 0) {
+      const tail = Buffer.alloc(1);
+      const read = readFd(fd, tail, 0, 1, stats.size - 1);
+      leadingNewline = read === 1 && tail[0] !== 0x0a;
+    }
+
+    const payload = Buffer.from(
+      `${leadingNewline ? "\n" : ""}${JSON.stringify(record)}\n`,
+      "utf8",
+    );
     // A full disk or an exhausted quota can make `writeSync` return a short
-    // count rather than throw. Ignoring it would leave a truncated, unparsable
-    // record behind a reported success.
+    // count rather than throw. Ignoring it would report recorded consent for a
+    // truncated, unparsable record.
     const written = write(fd, payload);
     if (written !== payload.length) {
-      // Refusing is not enough: the partial bytes carry no terminating newline,
-      // so the next successful append would continue the same physical line and
-      // leave one malformed record that a later merge reports as recorded
-      // consent. Roll the file back to the length it had before this attempt.
-      let rollback = "";
-      try {
-        // Only roll back when nothing else has touched the file. The ledger is
-        // opened `O_APPEND` and a second `pr:merge` can append a complete
-        // record between the `fstat` above and this write, in which case
-        // truncating to the remembered length would delete that record along
-        // with these partial bytes. An append-only ledger must never lose
-        // somebody else's consent to tidy up our own failure.
-        const after = statFd(fd);
-        if (after.size === stats.size + written) {
-          truncateFd(fd, stats.size);
-        } else {
-          rollback =
-            ` and the partial bytes were left in place because another writer appended concurrently;` +
-            ` remove the trailing partial record by hand`;
-        }
-      } catch (err) {
-        rollback = ` and the partial bytes could not be removed: ${err instanceof Error ? err.message : String(err)}`;
-      }
       throw new MergeRefusal(
-        `${target} accepted only ${written} of ${payload.length} bytes, so the consent record is incomplete; nothing was merged${rollback}`,
+        `${target} accepted only ${written} of ${payload.length} bytes, so the consent record is incomplete; nothing was merged. ` +
+          `The partial bytes are left in place because truncating a shared append-only ledger could delete another run's record; ` +
+          `the next append starts a new line, and the partial line can be removed by hand`,
       );
     }
   } catch (err) {
