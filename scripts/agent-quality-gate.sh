@@ -2930,6 +2930,37 @@ trunk_text_has_network_failure_signature() {
   return 1
 }
 
+# Trunk states a failed PLUGIN download inline, in the check output itself, and
+# never writes a detail YAML for it. That inline cause has its own measured
+# phrasing, so it gets its own acceptance rather than widening the shared list.
+#
+# Measured 2026-08-26 in a real Claude cloud container (Trunk 1.25.0, cold
+# TRUNK_CACHE): the platform's credential proxy intercepts github.com and gates
+# it per session, so Trunk's plugin archive comes back 403 and the CLI aborts
+# before linting anything. The cause it prints is
+# `Unable to download plugin <url>: HTTP 403 '<url>'`.
+#
+# Two limits, both deliberate:
+#
+# - Plugin-scoped. The detail-YAML side was never measured with a 403, so adding
+#   `HTTP 403` to trunk_network_failure_signatures would excuse a shape nobody
+#   has seen. This acceptance reaches only `plugincause=` lines.
+# - 403 only, in the whole measured shape. This is the same rule that keeps the
+#   bare `Curl Error:` prefix out of the list above: a 404 — or any other status
+#   — is a removed or renamed artifact, a broken pin the operator has to fix, and
+#   must keep failing the gate rather than reading as an allowlist to widen.
+trunk_plugin_http_403_cause_pattern=$'^Unable to download plugin [^[:space:]]+: HTTP 403 \'[^[:space:]]+\'$'
+
+# True when the inline cause Trunk printed for a failed plugin download is a
+# measured environment block.
+trunk_plugin_cause_is_environment_blocked() {
+  local cause="$1"
+
+  trunk_text_has_network_failure_signature "$cause" && return 0
+
+  [[ "$cause" =~ $trunk_plugin_http_403_cause_pattern ]]
+}
+
 # Read the `report:` lines of one Trunk failure-detail YAML and say whether the
 # reason it records is a download failure. The path comes from Trunk's own
 # output, so it is accepted only in the exact shape Trunk emits — a plain file
@@ -2984,7 +3015,8 @@ is_trunk_detail_yaml_path() {
 #                         and exactly N rows were download steps naming a
 #                         detail YAML.
 #   yaml=<path>           one per such row.
-#   shape=plugin          every non-blank line was a plugin-download error.
+#   shape=plugin          every line that was not launcher progress chrome was a
+#                         plugin-download error.
 #   plugincause=<text>    one per such line.
 # It emits nothing when the transcript shows findings, an unexplained failure,
 # or any line it cannot account for.
@@ -3009,6 +3041,20 @@ summarize_trunk_check_transcript() {
       line = strip($0)
       sub(/[ \t]+$/, "", line)
       if (line ~ /^[ \t]*$/) next
+
+      # tools/trunk is the launcher, and on a cold cache it installs the pinned
+      # CLI before running it, so the check transcript opens with the launcher
+      # progress lines. They are chrome, not a claim about the code, and the
+      # shape-2 rule below requires the transcript to hold nothing else.
+      #
+      # Ignored only in the exact grammar tools/trunk emits (mark, one of its
+      # own step messages, ellipsis, optional " done"). A launcher step that
+      # FAILED does not match and still disqualifies; the launcher probe is what
+      # covers that case.
+      if (line ~ ("^[^ ]+ (Downloading Trunk [^ ]+|Verifying Trunk sha256|" \
+        "Unpacking Trunk|Downloading latest Trunk Flaky Tests CLI|" \
+        "Unpacking Trunk Flaky Tests CLI)\\.\\.\\.( done)?$")) next
+
       nonblank++
 
       trimmed = line
@@ -3073,7 +3119,8 @@ summarize_trunk_check_transcript() {
       }
 
       # Shape 2: Trunk could not fetch its plugin sources, so it never linted
-      # anything. Accepted only when the transcript holds nothing else at all.
+      # anything. Accepted only when the transcript holds nothing else at all,
+      # launcher progress chrome aside.
       if (plugins >= 1 && declared < 0 && rows == 0) {
         for (i = 1; i <= nonblank; i++) {
           if (!(i in pluginline)) exit 0
@@ -3108,7 +3155,7 @@ trunk_check_output_is_environment_blocked() {
         ;;
       plugincause=*)
         value="${line#plugincause=}"
-        trunk_text_has_network_failure_signature "$value" || return 1
+        trunk_plugin_cause_is_environment_blocked "$value" || return 1
         evidence=$((evidence + 1))
         ;;
     esac

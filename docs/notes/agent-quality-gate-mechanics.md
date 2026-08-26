@@ -199,24 +199,32 @@ Trunk/tooling changes, package-manager changes, pnpm patches, and
 package-manifest changes still run full-repo Trunk locally. CI also runs a
 required full-repo Trunk check on every
 PR. Where the environment blocks Trunk's downloads — a Claude cloud container
-proxies egress and refuses any host outside its allowlist — the gate reports the
+proxies egress and refuses any host outside its allowlist, and its credential
+proxy gates `github.com` per session on top of that — the gate reports the
 arm as `skipped` with a warning naming the allowlist fix instead of failing the
 run, matching the posture `.trunk/hooks` already takes. Trunk downloads at two
 stages and the gate classifies both. If the launcher cannot fetch the pinned CLI
 from `trunk.io`, a probe run after the command fails
 (`TRUNK_LAUNCHER_QUIET=true ./tools/trunk --version`) answers that directly. If
 the launcher succeeds but the CLI cannot fetch its plugin sources or the
-hermetic runtimes and linter binaries a check needs — `trunk.io` allowlisted,
-`github.com` and `nodejs.org` not — the gate classifies the check transcript
-instead. That classification never infers "nothing was found": it accepts the
-transcript only when Trunk itself reported no issues, every failure Trunk
-counted is a download step, and the reason each step recorded in its
-`.trunk/out/*.yaml` detail file is one of Trunk's download-failure phrasings.
-The warning replays those reasons so it names the host to allowlist. Everything
-else fails the gate, including a partly-explained failure set and a download
-step that failed for a local reason. Only a provisioning failure degrades: a
-provisioned Trunk that finds real problems still fails the gate, and so does a
-run that mixes real findings with a blocked download. A run whose Trunk arm was
+hermetic runtimes and linter binaries a check needs, the gate classifies the
+check transcript instead. That classification never infers "nothing was found".
+For a blocked runtime or linter install it accepts the transcript only when
+Trunk itself reported no issues, every failure Trunk counted is a download step,
+and the reason each step recorded in its `.trunk/out/*.yaml` detail file is one
+of Trunk's download-failure phrasings. For a blocked plugin source Trunk aborts
+before linting anything and states the cause inline, so the gate accepts those
+same phrasings plus the measured
+`Unable to download plugin <url>: HTTP 403 '<url>'` — what a session-gated
+`github.com` returns — and ignores the launcher's own progress lines, which lead
+the transcript on a cold cache. A 404 keeps failing the gate: a removed or
+renamed artifact is a broken pin the operator has to fix, not an allowlist to
+widen. The warning replays those reasons so it names the host to allowlist.
+Everything else fails the gate, including a partly-explained failure set and a
+download step that failed for a local reason. Only a provisioning failure
+degrades: a provisioned Trunk that finds real problems still fails the gate, and
+so does a run that mixes real findings with a blocked download. A run whose
+Trunk arm was
 skipped writes no whole-run success stamp, so the next `--skip-if-fresh` run
 retries Trunk instead of inheriting a pass it never earned. Normal `--run` mode
 executes independent
