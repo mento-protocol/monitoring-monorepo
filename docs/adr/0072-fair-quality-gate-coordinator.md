@@ -426,6 +426,36 @@ entry that resolves exactly to the current worktree's `node_modules/.bin`, a
 `PNPM_SCRIPT_SRC_DIR` or `INIT_CWD` that resolves exactly to the current
 worktree root, and `TMPDIR`, `TMP`, or `TEMP` when it resolves exactly to the
 gate-owned `.tmp/agent-quality-gate` directory. Other values remain exact.
+Selected values include standard proxy settings, GitHub base-event inputs,
+parent-consumed quality-gate self-test controls, and nonsecret tool controls.
+Different selected values prevent shared execution and retained-result reuse.
+The mapped-command launcher removes child-only test and validator injections,
+including `ESLINT_BASELINE_INPUT`, inherited `ESLINT_BASELINE_MAIN`, alert-rule
+fixture paths, validator root overrides, focused child-test controls, and
+ambient cloud-provider credentials that the autoreview tests can forward.
+These values stay outside the shared key because no mapped descendant can read
+them. An assignment inside a mapped command still applies after the launcher
+removes the inherited value. CI package lint jobs do not use this launcher, so
+their `ESLINT_BASELINE_MAIN` assignment remains active. Legacy lock-test
+controls that the parent gate consumes stay in the outer key, but the launcher
+removes them from mapped descendants. The nested gate marker
+`AGENT_QUALITY_GATE_LOCK_HELD` remains available to the self-test. The launcher
+also removes inherited Trunk launcher identity and quiet controls, plus
+credential-bearing `CURL_FLAGS` and `WGET_FLAGS`. The mapped Trunk wrapper
+supplies its own identity. The provisioning probe sets quiet mode inside its
+sanitized child. Normal mapped commands inherit the gate-owned `CI=true`, which
+makes the Trunk wrapper quiet. The gate removes inherited `GIT_*` controls
+before its first Git probe and from mapped descendants.
+Stable content digests for ignored `.env` and `.env.*` files in workspace roots
+bind values that Envio, Next.js, and other tools load after registration.
+Tracked `.env.*.example` files stay outside this manifest.
+Turbo lint, build, and fixture-build keys declare the corresponding environment
+and dotenv inputs that the gate can reach, so inner cache reuse preserves the
+same boundary.
+The digest binds selected external tool and configuration locations by their
+literal values. It does not recursively hash the contents of system tool,
+certificate, HOME, or XDG paths. Do not use a retained result after content at
+one of those external paths changes without its path changing.
 The gate removes caller-controlled Bash startup files, option sets,
 compatibility controls, and exported function records before it starts an
 internal Bash control shell or mapped command. It uses privileged Bash mode for

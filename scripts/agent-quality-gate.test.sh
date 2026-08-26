@@ -765,6 +765,8 @@ classifier_missing_helper_dir="$(mktemp -d)"
 cp scripts/agent-quality-gate.sh "$classifier_missing_helper_dir/agent-quality-gate.sh"
 mkdir -p "$classifier_missing_helper_dir/gate"
 cp scripts/gate/run-handles.sh "$classifier_missing_helper_dir/gate/run-handles.sh"
+cp scripts/gate/quality-gate-coordinator-environment.mjs \
+  "$classifier_missing_helper_dir/gate/quality-gate-coordinator-environment.mjs"
 printf 'ui-dashboard/src/app/page.tsx\n' > "$paths_file"
 classifier_missing_helper_exit=0
 if AGENT_QUALITY_GATE_COORDINATOR=0 \
@@ -880,6 +882,7 @@ rm -rf "$lockfile_scope_probe_dir"
 
 write_turbo_facts
 
+assert_turbo_task_has_env "lint" "ESLINT_USE_FLAT_CONFIG"
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/shared-config/src/**'
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/shared-config/*.json'
 assert_turbo_task_has_input "build" "postcss.config.*"
@@ -891,6 +894,9 @@ assert_turbo_task_has_input "build" '$TURBO_ROOT$/pnpm-workspace.yaml'
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/.npmrc'
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/.node-version'
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/turbo.json'
+assert_turbo_task_has_input "build" ".env*"
+assert_turbo_task_has_env "build" "BROWSERSLIST"
+assert_turbo_task_has_env "build" "VERCEL"
 assert_turbo_task_has_env "build" "VERCEL_ENV"
 assert_turbo_task_has_env "build" "VERCEL_DEPLOYMENT_ID"
 assert_turbo_task_has_env "build" "VERCEL_GIT_COMMIT_SHA"
@@ -1026,6 +1032,9 @@ assert_turbo_task_has_output "fixture-build" ".next-fixture/**"
 assert_turbo_task_has_input "fixture-build" "scripts/fixture-build.mjs"
 assert_turbo_task_has_input "fixture-build" "scripts/fixture-constants.mjs"
 assert_turbo_task_has_input "fixture-build" "scripts/fixture-identity.mjs"
+assert_turbo_task_has_input "fixture-build" ".env*"
+assert_turbo_task_has_env "fixture-build" "BROWSERSLIST"
+assert_turbo_task_has_env "fixture-build" "VERCEL"
 assert_turbo_task_has_env "fixture-build" "NEXT_PUBLIC_BROWSER_TEST_FIXTURES"
 assert_turbo_task_has_env "fixture-build" "NEXT_PUBLIC_HASURA_URL"
 assert_turbo_task_has_env "fixture-build" "NEXT_DIST_DIR"
@@ -1301,6 +1310,21 @@ assert.match(
 );
 assert.match(
   source,
+  /gate_environment_helper="\$script_source_dir\/gate\/quality-gate-coordinator-environment\.mjs"[\s\S]*?gate_mapped_child_scrub_policy_hash=""[\s\S]*?agent-quality-gate-scrub-end[\s\S]*?agent-quality-gate-scrub-policy=[\s\S]*?gate_mapped_child_scrub_policy_hash="\$\{gate_scrub_environment_name#\*=\}"[\s\S]*?--mapped-child-scrubbed-names[\s\S]*?gate_scrub_environment_scan_complete[\s\S]*?gate_mapped_child_scrub_policy_hash.*\^\[a-f0-9\].*64/u,
+  "the sanitized launcher must load and bind the centralized caller-control scrub policy",
+);
+assert.match(
+  source,
+  /if \[\[ "\$gate_scrub_environment_name" == GIT_\* \]\]; then\n    unset "\$gate_scrub_environment_name"[\s\S]*?repo_root="\$\(git rev-parse --show-toplevel\)"/u,
+  "the centralized policy must scrub parent Git controls before the first Git probe",
+);
+assert.ok(
+  source.indexOf('unset "$gate_scrub_environment_name"') <
+    source.search(/\bgit (?:config|rev-parse|diff|ls-files)\b/u),
+  "no parent Git probe may run before centralized Git-control scrubbing",
+);
+assert.match(
+  source,
   /read -r -d '' gate_bash_environment_record[\s\S]*?BASH_FUNC_\*%%\|BASH_FUNC_\*'\(\)'[\s\S]*?\(\) \{[\s\S]*?\/usr\/bin\/env -0[\s\S]*?agent-quality-gate-env-end[\s\S]*?gate_bash_environment_scan_complete[\s\S]*?gate_sanitized_bash_launcher\+=\(\/bin\/bash -p\)/u,
   "the sanitized launcher must remove exported functions and fail a truncated environment scan",
 );
@@ -1415,6 +1439,69 @@ NODE
 then
   fail "quality-gate coordinator Bash source contracts failed"
 fi
+validator_scrub_launcher=(/usr/bin/env)
+validator_scrub_scan_complete=0
+validator_scrub_policy_hash=""
+while IFS= read -r -d '' validator_scrub_name; do
+  if [[ "$validator_scrub_name" == agent-quality-gate-scrub-end ]]; then
+    validator_scrub_scan_complete=1
+    continue
+  fi
+  if [[ "$validator_scrub_name" == agent-quality-gate-scrub-policy=* ]]; then
+    validator_scrub_policy_hash="${validator_scrub_name#*=}"
+    continue
+  fi
+  validator_scrub_launcher+=(-u "$validator_scrub_name")
+done < <(
+  ESLINT_BASELINE_INPUT=ambient \
+    ALERT_RULES_LINT_RULES_DIR=ambient \
+    GIT_DIR=ambient \
+    node scripts/gate/quality-gate-coordinator-environment.mjs \
+      --mapped-child-scrubbed-names
+)
+if [[ "$validator_scrub_scan_complete" -ne 1 ||
+  ! "$validator_scrub_policy_hash" =~ ^[a-f0-9]{64}$ ]] ||
+  ! ESLINT_BASELINE_INPUT=ambient \
+    ALERT_RULES_LINT_RULES_DIR=ambient \
+    GIT_DIR=ambient \
+    "${validator_scrub_launcher[@]}" /bin/bash -p -c '
+      [[ -z "${ESLINT_BASELINE_INPUT+x}" ]]
+      [[ -z "${ALERT_RULES_LINT_RULES_DIR+x}" ]]
+      [[ -z "${GIT_DIR+x}" ]]
+      ESLINT_BASELINE_INPUT=command-local /bin/bash -c \
+        '\''[[ "$ESLINT_BASELINE_INPUT" == command-local ]]'\''
+    '; then
+  fail "mapped-child validator injection scrub contract failed"
+fi
+unset validator_scrub_launcher validator_scrub_scan_complete
+unset validator_scrub_name validator_scrub_policy_hash
+scrub_policy_runtime="$(mktemp -d)"
+mkdir -p "$scrub_policy_runtime/gate"
+cp scripts/gate/quality-gate-coordinator-environment.mjs \
+  "$scrub_policy_runtime/gate/quality-gate-coordinator-environment.mjs"
+if ! /bin/bash -c '
+  set -euo pipefail
+  repo_root="$1"
+  script_source_dir="$2"
+  source "$repo_root/scripts/gate/quality-gate-coordinator-support.sh"
+  gate_mapped_child_scrub_policy_hash="$(
+    node "$script_source_dir/gate/quality-gate-coordinator-environment.mjs" \
+      --mapped-child-scrub-policy-digest
+  )"
+  gate_coordinator_assert_scrub_policy_current
+  sed '\''s/"ESLINT_BASELINE_INPUT"/"ESLINT_BASELINE_INPUT_CHANGED"/'\'' \
+    "$script_source_dir/gate/quality-gate-coordinator-environment.mjs" \
+    > "$script_source_dir/gate/quality-gate-coordinator-environment.next.mjs"
+  mv "$script_source_dir/gate/quality-gate-coordinator-environment.next.mjs" \
+    "$script_source_dir/gate/quality-gate-coordinator-environment.mjs"
+  if gate_coordinator_assert_scrub_policy_current 2>/dev/null; then
+    exit 1
+  fi
+' scrub-policy-race-test "$repo_root" "$scrub_policy_runtime"; then
+  rm -rf "$scrub_policy_runtime"
+  fail "mapped-child scrub policy drift did not fail closed"
+fi
+rm -rf "$scrub_policy_runtime"
 coordinator_adapter_probe="$(mktemp)"
 rm -f "$coordinator_adapter_probe"
 if ! /bin/bash -c '
@@ -2460,6 +2547,38 @@ fi
 grep -Fq 'POLICY_IDENTITY_CHANGED' "$loaded_adapter_mismatch_output" ||
   fail "quality-gate policy did not report a loaded adapter identity mismatch"
 rm -f "$loaded_adapter_mismatch_output"
+
+for loaded_adapter_side in main support; do
+  loaded_adapter_partial_output="$(mktemp)"
+  if gate_coordinator_entry="$repo_root/scripts/gate/quality-gate-coordinator.mjs" \
+    gate_coordinator_capacity=3 \
+    /bin/bash -c '
+      set -u
+      if [[ "$2" == "main" ]]; then
+        gate_coordinator_loaded_adapter_main_hash=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      else
+        gate_coordinator_loaded_adapter_support_hash=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+      fi
+      source "$1"
+      gate_coordinator_effective_policy_hash
+    ' quality-gate-loaded-adapter-partial \
+      "$repo_root/scripts/gate/quality-gate-coordinator-support.sh" \
+      "$loaded_adapter_side" \
+      > "$loaded_adapter_partial_output" 2>&1; then
+    fail "quality-gate policy accepted only the $loaded_adapter_side adapter hash"
+  else
+    loaded_adapter_partial_status=$?
+  fi
+  [[ "$loaded_adapter_partial_status" -eq 2 ]] ||
+    fail "quality-gate partial adapter identity returned $loaded_adapter_partial_status instead of 2"
+  grep -Fq 'loaded coordinator adapter identity is malformed' \
+    "$loaded_adapter_partial_output" ||
+    fail "quality-gate partial adapter identity did not report a malformed identity"
+  if grep -Fq 'unbound variable' "$loaded_adapter_partial_output"; then
+    fail "quality-gate partial adapter identity read an unset variable"
+  fi
+  rm -f "$loaded_adapter_partial_output"
+done
 
 coordinator_drain_scratch="$(mktemp -d)"
 coordinator_drain_ack="$coordinator_drain_scratch/acknowledged"
@@ -7663,7 +7782,7 @@ STUB
   }
 
   coordinated_fresh_gate '-C debuginfo=0'
-  grep -q '^stamp=v3.*coordinatorContext=[a-f0-9]\{64\}$' \
+  grep -q '^stamp=v4.*scrubPolicy=[a-f0-9]\{64\}.*coordinatorContext=[a-f0-9]\{64\}$' \
     "$stamp_file" ||
     fail "coordinated success did not write the strengthened freshness stamp"
   grep -q '^execution_fingerprint=[a-f0-9]\{64\}$' \

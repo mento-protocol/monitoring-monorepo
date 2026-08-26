@@ -181,9 +181,6 @@ gate_lock_seconds_knob() {
 }
 
 gate_lock_wait_seconds="$(gate_lock_seconds_knob AGENT_QUALITY_GATE_LOCK_WAIT_SECONDS 1800)"
-if [[ -z "$allow_package_script_changes" ]]; then
-  allow_package_script_changes="$(git config --bool --get agent.qualityGate.allowPackageScriptChanges 2>/dev/null || true)"
-fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -330,36 +327,15 @@ fi
 # shellcheck source=scripts/gate/run-handles.sh
 source "$run_handles_path"
 
-repo_root="$(git rev-parse --show-toplevel)"
-cd "$repo_root"
-
-# Use a repo-local scratch dir for tmpfiles so we don't depend on TMPDIR
-# being writable — pre-push hooks fork off trunk's daemon, which may carry
-# a TMPDIR that's outside a host sandbox's writable allowlist. Select and
-# export the effective directory before the coordinator adapter copy so the
-# default coordinator and dry-run paths use the same validated fallback.
-# Mapped subprocesses (e.g. agent-quality-gate.test.sh's bare `mktemp -d`)
-# inherit this path instead of falling back to an unwritable system default.
-scratch_dir="$repo_root/.tmp/agent-quality-gate"
-mkdir -p "$scratch_dir"
-# Avoid overriding a usable TMPDIR: Terraform providers use go-plugin grpc on
-# a socket in TMPDIR, and repo-local paths can be blocked by agent seatbelts.
-# Trunk hooks can strip TMPDIR entirely, so prefer the system temp directory
-# before falling back to the repo scratch dir.
-tmpdir_candidate="${TMPDIR:-${TMP:-${TEMP:-/tmp}}}"
-if [[ -d "$tmpdir_candidate" && -w "$tmpdir_candidate" ]]; then
-  export TMPDIR="$tmpdir_candidate"
-else
-  export TMPDIR="$scratch_dir"
-fi
-
-# Caller-controlled Bash startup state must not affect an internal control
-# shell or the mapped-command tree. Keep every ordinary environment value, but
-# remove startup files, inherited option sets, compatibility controls, and
-# exported function records. Privileged mode makes the receiving Bash ignore
-# the same controls while it starts. The filtered environment then propagates
-# to every mapped-command descendant. Prepare this launcher before coordinator
-# mode selection so legacy and explicit no-lock runs use the same boundary.
+# Caller-controlled Bash startup state, Git controls, and test-only validator
+# injections must not affect a parent Git probe, internal control shell, or the
+# mapped-command tree. Keep every ordinary environment value, but remove
+# startup files, inherited option sets, compatibility controls, Git controls,
+# test overrides, and exported function records. Privileged mode makes the
+# receiving Bash ignore the same startup controls while it starts. The filtered
+# environment then propagates to every mapped-command descendant. Prepare this
+# launcher before the first Git probe so parent and mapped commands use the same
+# policy. Legacy and explicit no-lock runs also use this boundary.
 if [[ ! -x /usr/bin/env || ! -x /bin/bash ]]; then
   echo "error: the quality gate requires /usr/bin/env and /bin/bash." >&2
   exit 2
@@ -376,6 +352,41 @@ gate_sanitized_bash_launcher=(
   -u POSIXLY_CORRECT
   -u POSIX_PEDANTIC
 )
+gate_environment_helper="$script_source_dir/gate/quality-gate-coordinator-environment.mjs"
+if [[ -L "$gate_environment_helper" || ! -f "$gate_environment_helper" ||
+  ! -r "$gate_environment_helper" ]]; then
+  echo "error: the quality-gate environment policy is unavailable: ${gate_environment_helper}" >&2
+  exit 2
+fi
+gate_scrub_environment_scan_complete=0
+gate_mapped_child_scrub_policy_hash=""
+while IFS= read -r -d '' gate_scrub_environment_name; do
+  if [[ "$gate_scrub_environment_name" == agent-quality-gate-scrub-end ]]; then
+    gate_scrub_environment_scan_complete=1
+    continue
+  fi
+  if [[ "$gate_scrub_environment_name" == agent-quality-gate-scrub-policy=* ]]; then
+    [[ -z "$gate_mapped_child_scrub_policy_hash" ]] || {
+      echo "error: the quality-gate environment policy returned duplicate identity." >&2
+      exit 2
+    }
+    gate_mapped_child_scrub_policy_hash="${gate_scrub_environment_name#*=}"
+    continue
+  fi
+  gate_sanitized_bash_launcher+=(
+    -u "$gate_scrub_environment_name"
+  )
+  if [[ "$gate_scrub_environment_name" == GIT_* ]]; then
+    unset "$gate_scrub_environment_name"
+  fi
+done < <(
+  node "$gate_environment_helper" --mapped-child-scrubbed-names
+)
+if [[ "$gate_scrub_environment_scan_complete" -ne 1 ||
+  ! "$gate_mapped_child_scrub_policy_hash" =~ ^[a-f0-9]{64}$ ]]; then
+  echo "error: could not inspect caller controls for the quality gate." >&2
+  exit 2
+fi
 gate_bash_environment_scan_complete=0
 while IFS= read -r -d '' gate_bash_environment_record; do
   if [[ "$gate_bash_environment_record" == agent-quality-gate-env-end ]]; then
@@ -412,6 +423,34 @@ fi
 gate_sanitized_bash_launcher+=(/bin/bash -p)
 unset gate_bash_environment_record gate_bash_environment_name
 unset gate_bash_environment_value gate_bash_environment_scan_complete
+unset gate_environment_helper gate_scrub_environment_name
+unset gate_scrub_environment_scan_complete
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+if [[ -z "$allow_package_script_changes" ]]; then
+  allow_package_script_changes="$(git config --bool --get agent.qualityGate.allowPackageScriptChanges 2>/dev/null || true)"
+fi
+
+# Use a repo-local scratch dir for tmpfiles so we don't depend on TMPDIR
+# being writable — pre-push hooks fork off trunk's daemon, which may carry
+# a TMPDIR that's outside a host sandbox's writable allowlist. Select and
+# export the effective directory before the coordinator adapter copy so the
+# default coordinator and dry-run paths use the same validated fallback.
+# Mapped subprocesses (e.g. agent-quality-gate.test.sh's bare `mktemp -d`)
+# inherit this path instead of falling back to an unwritable system default.
+scratch_dir="$repo_root/.tmp/agent-quality-gate"
+mkdir -p "$scratch_dir"
+# Avoid overriding a usable TMPDIR: Terraform providers use go-plugin grpc on
+# a socket in TMPDIR, and repo-local paths can be blocked by agent seatbelts.
+# Trunk hooks can strip TMPDIR entirely, so prefer the system temp directory
+# before falling back to the repo scratch dir.
+tmpdir_candidate="${TMPDIR:-${TMP:-${TEMP:-/tmp}}}"
+if [[ -d "$tmpdir_candidate" && -w "$tmpdir_candidate" ]]; then
+  export TMPDIR="$tmpdir_candidate"
+else
+  export TMPDIR="$scratch_dir"
+fi
 
 # Print the current changed-path set. Capture each Git probe before printing
 # any output so one failed probe cannot be hidden by a later successful probe.
@@ -5435,6 +5474,8 @@ gate_coordinator_execution_head=""
 gate_coordinator_freshness_context_hash() {
   local os_name os_arch node_path node_version pnpm_path pnpm_version
   local env_digest policy_hash runtime_hash repository_identity
+  [[ "$gate_mapped_child_scrub_policy_hash" =~ ^[a-f0-9]{64}$ ]] || return 1
+  gate_coordinator_assert_scrub_policy_current || return 1
   os_name="$(uname -s)" || return 1
   os_arch="$(uname -m)" || return 1
   node_path="$(command -v node)" || return 1
@@ -5455,13 +5496,14 @@ gate_coordinator_freshness_context_hash() {
     "os=${os_name}" "arch=${os_arch}" "nodePath=${node_path}" \
     "node=${node_version}" "pnpmPath=${pnpm_path}" \
     "pnpm=${pnpm_version}" "policy=${policy_hash}" \
-    "runtime=${runtime_hash}" "environment=${env_digest}" |
+    "runtime=${runtime_hash}" "environment=${env_digest}" \
+    "mappedChildScrubPolicy=${gate_mapped_child_scrub_policy_hash}" |
     hash_stream
 }
 
 stamp_line() {
   if [[ -n "$gate_coordinator_freshness_context" ]]; then
-    printf 'v3\tbase=%s\tpaths=%s\tplan=%s\timplementation=%s\tcontent=%s\tpackageRisk=%s\tallowPackageScripts=%s\tcoordinatorContext=%s\n' \
+    printf 'v4\tbase=%s\tpaths=%s\tplan=%s\timplementation=%s\tcontent=%s\tpackageRisk=%s\tallowPackageScripts=%s\tscrubPolicy=%s\tcoordinatorContext=%s\n' \
       "$base_oid" \
       "$changed_paths_hash" \
       "$command_plan_hash" \
@@ -5469,17 +5511,19 @@ stamp_line() {
       "$validated_content_hash" \
       "$package_script_risk_changed" \
       "$stamp_allow_package_scripts" \
+      "$gate_mapped_child_scrub_policy_hash" \
       "$gate_coordinator_freshness_context"
     return
   fi
-  printf 'v2\tbase=%s\tpaths=%s\tplan=%s\timplementation=%s\tcontent=%s\tpackageRisk=%s\tallowPackageScripts=%s\n' \
+  printf 'v3\tbase=%s\tpaths=%s\tplan=%s\timplementation=%s\tcontent=%s\tpackageRisk=%s\tallowPackageScripts=%s\tscrubPolicy=%s\n' \
     "$base_oid" \
     "$changed_paths_hash" \
     "$command_plan_hash" \
     "$implementation_hash" \
     "$validated_content_hash" \
     "$package_script_risk_changed" \
-    "$stamp_allow_package_scripts"
+    "$stamp_allow_package_scripts" \
+    "$gate_mapped_child_scrub_policy_hash"
 }
 
 current_stamp=""
@@ -5506,15 +5550,17 @@ recomputed_stamp_line() {
   rm -f "$fresh_paths_file" "$fresh_plan_file"
   if [[ -n "$gate_coordinator_freshness_context" ]]; then
     fresh_coordinator_context="$(gate_coordinator_freshness_context_hash)" || return 1
-    printf 'v3\tbase=%s\tpaths=%s\tplan=%s\timplementation=%s\tcontent=%s\tpackageRisk=%s\tallowPackageScripts=%s\tcoordinatorContext=%s\n' \
+    printf 'v4\tbase=%s\tpaths=%s\tplan=%s\timplementation=%s\tcontent=%s\tpackageRisk=%s\tallowPackageScripts=%s\tscrubPolicy=%s\tcoordinatorContext=%s\n' \
       "$fresh_base" "$fresh_paths" "$fresh_plan" "$fresh_implementation" \
       "$fresh_content" "$package_script_risk_changed" \
-      "$stamp_allow_package_scripts" "$fresh_coordinator_context"
+      "$stamp_allow_package_scripts" "$gate_mapped_child_scrub_policy_hash" \
+      "$fresh_coordinator_context"
     return
   fi
-  printf 'v2\tbase=%s\tpaths=%s\tplan=%s\timplementation=%s\tcontent=%s\tpackageRisk=%s\tallowPackageScripts=%s\n' \
+  printf 'v3\tbase=%s\tpaths=%s\tplan=%s\timplementation=%s\tcontent=%s\tpackageRisk=%s\tallowPackageScripts=%s\tscrubPolicy=%s\n' \
     "$fresh_base" "$fresh_paths" "$fresh_plan" "$fresh_implementation" \
-    "$fresh_content" "$package_script_risk_changed" "$stamp_allow_package_scripts"
+    "$fresh_content" "$package_script_risk_changed" \
+    "$stamp_allow_package_scripts" "$gate_mapped_child_scrub_policy_hash"
 }
 
 is_fresh_success_stamp() {
@@ -5907,7 +5953,6 @@ trunk_provisioning_probe() {
   # shellcheck disable=SC2016
   AGENTQG_RUN="$command_tag" \
     AGENTQG_REQUEST="$request_tag" \
-    TRUNK_LAUNCHER_QUIET=true \
     "${gate_sanitized_bash_launcher[@]}" -c '
       command_marker="$1"
       request_marker="$2"
@@ -5936,6 +5981,7 @@ trunk_provisioning_probe() {
         exec 17>&-
       fi
       printf "%s\n" ready > "$handshake_file" || exit 125
+      export TRUNK_LAUNCHER_QUIET=true
       exec ./tools/trunk --version
     ' trunk-provisioning-probe \
       "$command_marker" "$request_marker" "$coordinator_marker" \

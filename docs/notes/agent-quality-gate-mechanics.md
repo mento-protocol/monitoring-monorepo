@@ -556,6 +556,35 @@ exactly to the current worktree root. It also binds the effective `TMPDIR` and
 each visible `TMP` or `TEMP` value. The gate-owned
 `.tmp/agent-quality-gate` fallback uses a worktree token so equivalent fallback
 paths can coalesce across worktrees. Other temp paths remain exact. The
+selected values include standard proxy settings, GitHub base-event inputs,
+parent-consumed quality-gate self-test controls, and nonsecret tool controls.
+Different selected values cannot share a mapped verdict. The mapped-command
+launcher removes child-only test and validator injections. This includes
+`ESLINT_BASELINE_INPUT`, inherited `ESLINT_BASELINE_MAIN`, alert-rule fixture
+paths, validator root overrides, focused child-test controls, and ambient
+cloud-provider credentials that the autoreview tests can forward. These values
+stay outside the shared key because mapped descendants cannot read them. An
+assignment inside a mapped command still applies. CI package lint jobs run
+outside this launcher, so their `ESLINT_BASELINE_MAIN` assignment remains
+active. Legacy lock-test controls that the parent gate consumes stay in the
+outer key, but the launcher removes them from mapped descendants. The nested
+gate marker `AGENT_QUALITY_GATE_LOCK_HELD` remains available to the self-test.
+The launcher also removes inherited Trunk launcher identity and quiet
+controls, plus credential-bearing `CURL_FLAGS` and `WGET_FLAGS`. The mapped
+Trunk wrapper supplies its own identity. The provisioning probe sets quiet mode
+inside its sanitized child. Normal mapped commands inherit the gate-owned
+`CI=true`, which makes the Trunk wrapper quiet. The gate removes inherited
+`GIT_*` controls before its first Git probe and from mapped descendants. The
+digest also binds stable content snapshots of ignored `.env` and `.env.*` files
+in workspace roots. It excludes tracked `.env.*.example` files.
+The Turbo lint, build, and fixture-build keys declare the matching environment
+and dotenv inputs that the gate can reach. A new outer coordinator key cannot
+reuse an inner Turbo result that validated different inputs. The digest binds
+selected external tool and configuration locations by their literal values. It
+does not recursively hash system tool, certificate, HOME, or XDG path contents.
+Do not use retained reuse after content at one of those external paths changes
+without its path changing.
+The
 gate removes `BASH_ENV`, `ENV`, `SHELLOPTS`, `BASHOPTS`, `BASH_COMPAT`,
 `CDPATH`, `GLOBIGNORE`, `POSIXLY_CORRECT`, `POSIX_PEDANTIC`, and exported Bash
 function records

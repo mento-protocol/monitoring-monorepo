@@ -68,8 +68,14 @@ function expiredResult(path, now, retentionMs) {
   return Number.isFinite(completedAt) && age >= 0 && age > retentionMs;
 }
 
-function expiredArtifact(path, now, retentionMs) {
-  const metadata = lstatSync(path);
+function expiredArtifact(path, now, retentionMs, lstatFile) {
+  let metadata;
+  try {
+    metadata = lstatFile(path);
+  } catch (error) {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  }
   if (!metadata.isFile() || metadata.isSymbolicLink()) return false;
   if (typeof process.getuid === "function" && metadata.uid !== process.getuid())
     return false;
@@ -77,15 +83,31 @@ function expiredArtifact(path, now, retentionMs) {
   return Number.isFinite(metadata.mtimeMs) && age >= 0 && age > retentionMs;
 }
 
-function pruneArtifacts(directory, matches, now, retentionMs) {
+export function unlinkIfPresent(path) {
+  try {
+    unlinkSync(path);
+    return true;
+  } catch (error) {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+function pruneArtifacts(
+  directory,
+  matches,
+  now,
+  retentionMs,
+  unlinkFile = unlinkIfPresent,
+  lstatFile = lstatSync,
+) {
   if (!existsSync(directory)) return 0;
   let removed = 0;
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     if (!entry.isFile() || !matches(entry.name)) continue;
     const path = join(directory, entry.name);
-    if (!expiredArtifact(path, now, retentionMs)) continue;
-    unlinkSync(path);
-    removed += 1;
+    if (!expiredArtifact(path, now, retentionMs, lstatFile)) continue;
+    if (unlinkFile(path)) removed += 1;
   }
   if (removed) syncDirectory(directory);
   return removed;
@@ -115,6 +137,8 @@ export function prunePersistentRecords({
   state,
   now,
   retentionMs = RECORD_RETENTION_MS,
+  unlinkFile = unlinkIfPresent,
+  lstatFile = lstatSync,
 }) {
   assertOwnedDirectory(stateDirectory);
   assertOwnedDirectory(requestsDirectory);
@@ -138,8 +162,7 @@ export function prunePersistentRecords({
   for (const path of jsonFiles(requestsDirectory)) {
     const requestId = path.slice(path.lastIndexOf("/") + 1, -5);
     if (activeRequests.has(requestId)) continue;
-    unlinkSync(path);
-    requestRecords += 1;
+    if (unlinkFile(path)) requestRecords += 1;
   }
   if (requestRecords) syncDirectory(requestsDirectory);
 
@@ -148,12 +171,16 @@ export function prunePersistentRecords({
     (name) => isAtomicWriteTemporaryName(name, "journal.json"),
     now,
     retentionMs,
+    unlinkFile,
+    lstatFile,
   );
   temporaryRecords += pruneArtifacts(
     requestsDirectory,
     isImmutableWriteStagingName,
     now,
     retentionMs,
+    unlinkFile,
+    lstatFile,
   );
 
   let resultRecords = 0;
@@ -172,9 +199,10 @@ export function prunePersistentRecords({
     for (const resultPath of jsonFiles(path)) {
       if (activeResultPaths.has(resultPath)) continue;
       if (!expiredResult(resultPath, now, retentionMs)) continue;
-      unlinkSync(resultPath);
-      resultRecords += 1;
-      directoryResultRecords += 1;
+      if (unlinkFile(resultPath)) {
+        resultRecords += 1;
+        directoryResultRecords += 1;
+      }
     }
     if (directoryResultRecords) syncDirectory(path);
     temporaryRecords += pruneArtifacts(
@@ -182,6 +210,8 @@ export function prunePersistentRecords({
       isImmutableWriteStagingName,
       now,
       retentionMs,
+      unlinkFile,
+      lstatFile,
     );
     try {
       rmdirSync(path);

@@ -16,17 +16,18 @@ gate_coordinator_node_runtime_hash() {
 }
 
 gate_coordinator_effective_policy_hash() {
+  local loaded_main_hash="${gate_coordinator_loaded_adapter_main_hash:-}"
+  local loaded_support_hash="${gate_coordinator_loaded_adapter_support_hash:-}"
   local arguments=(policy-hash --capacity "$gate_coordinator_capacity")
-  if [[ -n "${gate_coordinator_loaded_adapter_main_hash:-}" ||
-    -n "${gate_coordinator_loaded_adapter_support_hash:-}" ]]; then
-    [[ "$gate_coordinator_loaded_adapter_main_hash" =~ ^[a-f0-9]{64}$ &&
-      "$gate_coordinator_loaded_adapter_support_hash" =~ ^[a-f0-9]{64}$ ]] || {
+  if [[ -n "$loaded_main_hash" || -n "$loaded_support_hash" ]]; then
+    [[ "$loaded_main_hash" =~ ^[a-f0-9]{64}$ &&
+      "$loaded_support_hash" =~ ^[a-f0-9]{64}$ ]] || {
       echo "error: loaded coordinator adapter identity is malformed." >&2
       return 2
     }
     arguments+=(
-      --loaded-adapter-main-hash "$gate_coordinator_loaded_adapter_main_hash"
-      --loaded-adapter-support-hash "$gate_coordinator_loaded_adapter_support_hash"
+      --loaded-adapter-main-hash "$loaded_main_hash"
+      --loaded-adapter-support-hash "$loaded_support_hash"
     )
   fi
   node "$gate_coordinator_entry" "${arguments[@]}"
@@ -58,6 +59,21 @@ gate_coordinator_material_env_digest() {
     return 2
   }
   node "$environment_helper" "$physical_repo_root"
+}
+
+gate_coordinator_assert_scrub_policy_current() {
+  local current_scrub_policy environment_helper
+  environment_helper="${script_source_dir:-}/gate/quality-gate-coordinator-environment.mjs"
+  [[ -r "$environment_helper" ]] || return 2
+  current_scrub_policy="$(
+    node "$environment_helper" --mapped-child-scrub-policy-digest
+  )" || return 2
+  [[ "$current_scrub_policy" =~ ^[a-f0-9]{64}$ ]] || return 2
+  [[ "$current_scrub_policy" == \
+    "${gate_mapped_child_scrub_policy_hash:-}" ]] || {
+    echo "error: mapped-child environment policy changed after launcher preparation." >&2
+    return 2
+  }
 }
 
 gate_coordinator_current_changed_paths_hash() {
@@ -93,6 +109,8 @@ gate_coordinator_recompute_fingerprint() {
   local fresh_plan fresh_plan_hash fresh_base fresh_head fresh_paths
   local fresh_implementation fresh_content os_name os_arch node_path node_version
   local pnpm_path pnpm_version env_digest policy_hash runtime_hash repository_identity
+  [[ "${gate_mapped_child_scrub_policy_hash:-}" =~ ^[a-f0-9]{64}$ ]] || return 1
+  gate_coordinator_assert_scrub_policy_current || return 1
   fresh_plan="$(mktemp "$scratch_dir/coordinator-plan.XXXXXX")" || return 1
   if ! write_command_plan "$fresh_plan"; then
     rm -f "$fresh_plan"
@@ -131,7 +149,8 @@ gate_coordinator_recompute_fingerprint() {
     "os=${os_name}" "arch=${os_arch}" "nodePath=${node_path}" \
     "node=${node_version}" "pnpmPath=${pnpm_path}" \
     "pnpm=${pnpm_version}" "policy=${policy_hash}" \
-    "runtime=${runtime_hash}" "environment=${env_digest}" |
+    "runtime=${runtime_hash}" "environment=${env_digest}" \
+    "mappedChildScrubPolicy=${gate_mapped_child_scrub_policy_hash}" |
     hash_stream
 }
 

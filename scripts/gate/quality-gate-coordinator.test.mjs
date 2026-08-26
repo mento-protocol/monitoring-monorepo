@@ -6,6 +6,7 @@ import {
   chmodSync,
   existsSync,
   linkSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -56,7 +57,11 @@ import {
   writeAtomicJson,
   writeImmutable,
 } from "./quality-gate-coordinator-state.mjs";
-import { pruneInactiveNamespaces } from "./quality-gate-coordinator-retention.mjs";
+import {
+  pruneInactiveNamespaces,
+  prunePersistentRecords,
+  unlinkIfPresent,
+} from "./quality-gate-coordinator-retention.mjs";
 
 const fixtures = [];
 
@@ -3406,6 +3411,70 @@ test("retention removes only expired exact writer artifacts", async () => {
   assert.equal(statSync(resultPath).nlink, 1);
 });
 
+test("retention tolerates files removed after directory enumeration", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "qg-retention-race-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const requestsDirectory = join(root, "requests");
+  const resultsDirectory = join(root, "results");
+  const resultDirectory = join(resultsDirectory, "a".repeat(64));
+  mkdirSync(requestsDirectory);
+  mkdirSync(resultsDirectory);
+  mkdirSync(resultDirectory);
+
+  const now = Date.parse("2026-08-21T13:26:00.000Z");
+  const expiredAt = now - RECORD_RETENTION_MS - 1;
+  const requestPath = join(requestsDirectory, "vanished-request.json");
+  const statRaceTemporary = atomicTemporaryPath(root, "journal.json");
+  const unlinkRaceTemporary = immutableStagingPath(
+    requestsDirectory,
+    "vanished-stage",
+  );
+  const resultPath = join(resultDirectory, "vanished-result.json");
+  writeFileSync(requestPath, "{}\n");
+  for (const path of [statRaceTemporary, unlinkRaceTemporary]) {
+    writeFileSync(path, "partial writer bytes\n");
+    setModifiedAt(path, expiredAt);
+  }
+  writeFileSync(
+    resultPath,
+    `${JSON.stringify({ completedAt: new Date(expiredAt).toISOString() })}\n`,
+  );
+  const racingPaths = new Set([requestPath, unlinkRaceTemporary, resultPath]);
+  let statRaceObserved = false;
+
+  const pruned = prunePersistentRecords({
+    stateDirectory: root,
+    requestsDirectory,
+    resultsDirectory,
+    state: { requests: {}, successIndex: {} },
+    now,
+    unlinkFile(path) {
+      if (racingPaths.delete(path)) unlinkSync(path);
+      return unlinkIfPresent(path);
+    },
+    lstatFile(path) {
+      if (path === statRaceTemporary) {
+        statRaceObserved = true;
+        unlinkSync(path);
+      }
+      return lstatSync(path);
+    },
+  });
+
+  assert.deepEqual(pruned, {
+    changed: false,
+    requestRecords: 0,
+    resultRecords: 0,
+    temporaryRecords: 0,
+  });
+  assert.equal(racingPaths.size, 0);
+  assert.equal(statRaceObserved, true);
+  assert.throws(
+    () => unlinkIfPresent(root),
+    (error) => error.code !== "ENOENT",
+  );
+});
+
 test("recovery and retention accept staging files whose valid IDs contain the staging marker", async () => {
   let clock = Date.parse("2026-08-21T13:27:00.000Z");
   const fixture = await createFixture({ now: () => clock });
@@ -6462,7 +6531,7 @@ test("legacy handoff preserves shared owner read permissions through rollback", 
   assert.equal(existsSync(legacy.markerPath), false);
 });
 
-test("legacy release failure settles every close caller after restoring ownership", async () => {
+test("legacy release failure settles every close caller after restoring ownership", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "qg-close-release-"));
   const legacyRoot = join(root, "legacy");
   const lockDirectory = join(legacyRoot, "run.lock");
@@ -6491,15 +6560,40 @@ test("legacy release failure settles every close caller after restoring ownershi
   const socketPath = fixture.coordinator.socketPath;
   const markerPath = fixture.coordinator.metadata.markerPath;
   const adoptedOwner = readFileSync(ownerPath, "utf8");
-  const markerHolders = () => {
-    const result = spawnSync("lsof", ["-w", "-t", "--", markerPath], {
+  const currentProcessHoldsPath = (path) => {
+    const procDescriptors = "/proc/self/fd";
+    if (process.platform === "linux" && existsSync(procDescriptors)) {
+      const target = statSync(path, { bigint: true });
+      return readdirSync(procDescriptors).some((descriptor) => {
+        try {
+          const held = statSync(join(procDescriptors, descriptor), {
+            bigint: true,
+          });
+          return held.dev === target.dev && held.ino === target.ino;
+        } catch (error) {
+          if (error.code === "ENOENT") return false;
+          throw error;
+        }
+      });
+    }
+    const result = spawnSync("lsof", ["-w", "-t", "--", path], {
       encoding: "utf8",
     });
+    if (result.error?.code === "ENOENT") return null;
     assert.equal(result.error, undefined);
     assert.ok([0, 1].includes(result.status));
-    return result.stdout.trim().split(/\s+/).filter(Boolean);
+    return result.stdout
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .includes(String(process.pid));
   };
-  assert.ok(markerHolders().includes(String(process.pid)));
+  const initiallyHeld = currentProcessHoldsPath(markerPath);
+  if (initiallyHeld === null) {
+    t.diagnostic("descriptor checks require /proc/self/fd or lsof");
+  } else {
+    assert.equal(initiallyHeld, true);
+  }
   const retainedEntries = [
     "inert",
     "owner.claiming.0",
@@ -6539,7 +6633,9 @@ test("legacy release failure settles every close caller after restoring ownershi
   for (const name of retainedEntries) {
     assert.equal(existsSync(join(lockDirectory, name)), true);
   }
-  assert.deepEqual(markerHolders(), []);
+  if (initiallyHeld !== null) {
+    assert.equal(currentProcessHoldsPath(markerPath), false);
+  }
 });
 
 test("legacy release never removes a successor owner", () => {

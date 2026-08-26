@@ -19,6 +19,8 @@ import { fileURLToPath } from "node:url";
 
 import {
   LOCAL_BIN_MAX_FILE_BYTES,
+  mappedChildScrubbedEnvironmentName,
+  materialEnvironmentDigest as computeMaterialEnvironmentDigest,
   normalizedLocalBinManifest,
   normalizedLocalBinManifestForTest,
 } from "./quality-gate-coordinator-environment.mjs";
@@ -291,8 +293,9 @@ test("source identity rejects equal-length bytes that change between snapshots",
   );
 });
 
-test("detached serve rejects policy drift before it creates state", async () => {
+test("detached serve rejects policy drift before it creates state", async (t) => {
   const parent = await mkdtemp(join(tmpdir(), "quality-gate-policy-attest-"));
+  t.after(() => rm(parent, { recursive: true, force: true }));
   const root = join(parent, "coordinator-root");
   const preparedEnvironment = { ...process.env, NODE_OPTIONS: "--no-warnings" };
   delete preparedEnvironment.AGENT_QUALITY_GATE_REQUEST_CAPABILITY;
@@ -636,6 +639,270 @@ test("material environment normalizes only worktree lifecycle roots", async (t) 
       initCwd: join(second.root, "nested-package"),
     }),
     "a non-root INIT_CWD must remain raw",
+  );
+});
+
+test("material environment binds mapped-command controls", async (t) => {
+  const fixture = await materialEnvironmentFixture("mapped-controls");
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const digest = (extraEnvironment = {}) =>
+    computeMaterialEnvironmentDigest({
+      repoRoot: fixture.root,
+      workingDirectory: fixture.root,
+      environment: {
+        LANG: "C",
+        LC_ALL: "C",
+        PATH: [fixture.localBin, dirname(process.execPath), "/usr/bin"].join(
+          delimiter,
+        ),
+        INIT_CWD: fixture.root,
+        PNPM_SCRIPT_SRC_DIR: fixture.root,
+        ...extraEnvironment,
+      },
+    });
+  const baseline = digest();
+  const materialNames = [
+    "AGENT_AUTOREVIEW_GH_DEADLINE_SECONDS",
+    "AGENT_QUALITY_GATE_LOCK_TEST_READY_FILE",
+    "AGENT_QUALITY_GATE_TEST_WORKER_REGISTRATION_BARRIER",
+    "ALL_PROXY",
+    "AUTOREVIEW_HEARTBEAT_SECONDS",
+    "BROWSERSLIST",
+    "COREPACK_HOME",
+    "CURL_CA_BUNDLE",
+    "DOCS_NAVIGATION_EVAL_REPO",
+    "DYLD_FALLBACK_LIBRARY_PATH",
+    "DYLD_INSERT_LIBRARIES",
+    "DYLD_LIBRARY_PATH",
+    "ESBUILD_BINARY_PATH",
+    "ESLINT_USE_FLAT_CONFIG",
+    "GLIBC_TUNABLES",
+    "GITHUB_ACTIONS",
+    "GITHUB_BASE_REF",
+    "GITHUB_EVENT_BEFORE",
+    "GITHUB_EVENT_NAME",
+    "GITHUB_REPOSITORY",
+    "HASURA_FIXTURE_SCENARIO",
+    "HASURA_URL",
+    "HOME",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "INDEXER_PERF",
+    "INDEXER_PERF_LOG_INTERVAL_EVENTS",
+    "LD_LIBRARY_PATH",
+    "LD_PRELOAD",
+    "METADATA_SERVER_DETECTION",
+    "NODE_EXTRA_CA_CERTS",
+    "NODE_TLS_REJECT_UNAUTHORIZED",
+    "NO_PROXY",
+    "OPENSSL_CONF",
+    "OPENSSL_ENGINES",
+    "OPENSSL_MODULES",
+    "PEG_POLICY_AUTH_MODE",
+    "PEG_POLICY_BASE_REF",
+    "PEG_POLICY_URL",
+    "POLL_INTERVAL_MS",
+    "PORT",
+    "REBALANCE_PROBE_TIMEOUT_MS",
+    "REQUESTS_CA_BUNDLE",
+    "RESERVE_YIELD_EVENT_TESTS",
+    "SOURCE_DATE_EPOCH",
+    "SSL_CERT_DIR",
+    "SSL_CERT_FILE",
+    "STRYKER_MUTATOR",
+    "TRUNK_CACHE",
+    "TRUNK_CLI_VERSION",
+    "VERCEL",
+    "XDG_CACHE_HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_STATE_HOME",
+    "all_proxy",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+  ];
+  for (const name of materialNames) {
+    assert.notEqual(
+      digest({ [name]: `fixture-${name}` }),
+      baseline,
+      `${name} must change the material environment digest`,
+    );
+  }
+  const scrubbedNames = [
+    "AGENT_CONTEXT_CLAUDE_SETTINGS_FILE",
+    "AGENT_CONTEXT_CODEX_HOOKS_FILE",
+    "ALERT_RULES_LINT_RULES_DIR",
+    "ANTHROPIC_VERTEX_PROJECT_ID",
+    "AUTOREVIEW_FAKE_MUTATE_REPO",
+    "AUTOREVIEW_TEST_FOCUS",
+    "AWS_CONFIG_FILE",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+    "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+    "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+    "AWS_EC2_METADATA_DISABLED",
+    "AWS_ROLE_ARN",
+    "AWS_ROLE_SESSION_NAME",
+    "AWS_SDK_LOAD_CONFIG",
+    "AWS_SHARED_CREDENTIALS_FILE",
+    "AWS_WEB_IDENTITY_TOKEN_FILE",
+    "CURL_FLAGS",
+    "ESLINT_BASELINE_INPUT",
+    "ESLINT_BASELINE_MAIN",
+    "GATE_TEST_FOCUS",
+    "GIT_CONFIG_GLOBAL",
+    "GITHUB_ACTION_PINS_ROOT",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "LOCKFILE_LINT_ROOT",
+    "SENTRY_SUITE_GATE_ROOT",
+    "SKEW_CHECK_ROOT",
+    "SKILLS_MIRROR_ROOT_A",
+    "TRUNK_LAUNCHER_DEBUG",
+    "TRUNK_LAUNCHER_PATH",
+    "TRUNK_LAUNCHER_QUIET",
+    "TRUNK_LAUNCHER_VERSION",
+    "TRUNK_QUIET",
+    "WGET_FLAGS",
+  ];
+  for (const name of scrubbedNames) {
+    assert.equal(
+      mappedChildScrubbedEnvironmentName(name),
+      true,
+      `${name} must stay in the mapped-child scrub policy`,
+    );
+    assert.equal(
+      digest({ [name]: `fixture-${name}` }),
+      baseline,
+      `${name} must stay outside the key because mapped commands scrub it`,
+    );
+  }
+  const parentMaterialScrubbedNames = [
+    "AGENT_QUALITY_GATE_LOCK_CLAIM_DELAY_SECONDS",
+    "AGENT_QUALITY_GATE_LOCK_CRASH_AT",
+    "AGENT_QUALITY_GATE_LOCK_DISCARD_DELAY_SECONDS",
+    "AGENT_QUALITY_GATE_LOCK_DRAIN_UNLINK_DELAY_SECONDS",
+    "AGENT_QUALITY_GATE_LOCK_HELD_DELAY_SECONDS",
+    "AGENT_QUALITY_GATE_LOCK_PROBE_PATH",
+    "AGENT_QUALITY_GATE_LOCK_RECLAIM_DELAY_SECONDS",
+    "AGENT_QUALITY_GATE_LOCK_RELEASE_AFTER_TAKE_DELAY_SECONDS",
+    "AGENT_QUALITY_GATE_LOCK_RELEASE_BEFORE_TAKE_DELAY_SECONDS",
+    "AGENT_QUALITY_GATE_LOCK_TAKEN_DELAY_SECONDS",
+  ];
+  for (const name of parentMaterialScrubbedNames) {
+    assert.equal(
+      mappedChildScrubbedEnvironmentName(name),
+      true,
+      `${name} must stay in the mapped-child scrub policy`,
+    );
+    assert.notEqual(
+      digest({ [name]: `fixture-${name}` }),
+      baseline,
+      `${name} must remain material to the parent coordinator key`,
+    );
+  }
+  assert.equal(
+    mappedChildScrubbedEnvironmentName("AGENT_QUALITY_GATE_LOCK_HELD"),
+    false,
+    "the nested gate lock marker must reach mapped self-tests",
+  );
+  assert.equal(
+    mappedChildScrubbedEnvironmentName(
+      "AGENT_QUALITY_GATE_LOCK_TEST_READY_FILE",
+    ),
+    true,
+  );
+  assert.equal(
+    mappedChildScrubbedEnvironmentName(
+      "AGENT_QUALITY_GATE_TEST_WORKER_REGISTRATION_BARRIER",
+    ),
+    true,
+  );
+  assert.equal(mappedChildScrubbedEnvironmentName("GITHUB_BASE_REF"), false);
+  assert.equal(
+    digest({ UNRELATED_GATE_TEST_VALUE: "ignored" }),
+    baseline,
+    "unrelated environment values must stay outside the shared key",
+  );
+});
+
+test("material environment binds ignored env files", async (t) => {
+  const first = await materialEnvironmentFixture("env-file-first");
+  const second = await materialEnvironmentFixture("env-file-second");
+  t.after(async () => {
+    await Promise.all([
+      rm(first.root, { recursive: true, force: true }),
+      rm(second.root, { recursive: true, force: true }),
+    ]);
+  });
+  for (const fixture of [first, second]) {
+    await Promise.all([
+      mkdir(join(fixture.root, "indexer-envio"), { recursive: true }),
+      mkdir(join(fixture.root, "ui-dashboard"), { recursive: true }),
+    ]);
+  }
+
+  await Promise.all(
+    [first, second].map((fixture) =>
+      writeFile(join(fixture.root, "indexer-envio", ".env"), "RPC=value\n"),
+    ),
+  );
+  assert.equal(
+    materialEnvironmentDigest(first),
+    materialEnvironmentDigest(second),
+    "equivalent ignored env files must normalize across worktrees",
+  );
+  await writeFile(
+    join(second.root, "indexer-envio", ".env"),
+    "RPC=different\n",
+  );
+  assert.notEqual(
+    materialEnvironmentDigest(first),
+    materialEnvironmentDigest(second),
+    "different Envio dotenv content must change the shared key",
+  );
+
+  await writeFile(join(second.root, "indexer-envio", ".env"), "RPC=value\n");
+  await Promise.all(
+    [first, second].map((fixture) =>
+      writeFile(
+        join(fixture.root, "ui-dashboard", ".env.local"),
+        "NEXT_PUBLIC_HASURA_URL=http://fixture\n",
+      ),
+    ),
+  );
+  assert.equal(
+    materialEnvironmentDigest(first),
+    materialEnvironmentDigest(second),
+  );
+  await writeFile(
+    join(second.root, "ui-dashboard", ".env.local"),
+    "NEXT_PUBLIC_HASURA_URL=http://different\n",
+  );
+  assert.notEqual(
+    materialEnvironmentDigest(first),
+    materialEnvironmentDigest(second),
+    "different Next dotenv content must change the shared key",
+  );
+
+  await writeFile(
+    join(second.root, "ui-dashboard", ".env.local"),
+    "NEXT_PUBLIC_HASURA_URL=http://fixture\n",
+  );
+  await Promise.all([
+    writeFile(
+      join(first.root, "ui-dashboard", ".env.production.local.example"),
+      "EXAMPLE=first\n",
+    ),
+    writeFile(
+      join(second.root, "ui-dashboard", ".env.production.local.example"),
+      "EXAMPLE=second\n",
+    ),
+  ]);
+  assert.equal(
+    materialEnvironmentDigest(first),
+    materialEnvironmentDigest(second),
+    "tracked env examples must stay outside the ignored env manifest",
   );
 });
 

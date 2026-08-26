@@ -19,6 +19,8 @@ import {
   intervalMetrics,
   waitUntil,
 } from "./agent-quality-gate-scheduler-fixture.mjs";
+import { directAncestor } from "./agent-quality-gate-fixture-processes.mjs";
+import { makeGateHandle } from "./agent-quality-gate-scheduler-fixture-support.mjs";
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
 const sourceRoot = resolve(moduleDirectory, "../..");
@@ -33,37 +35,12 @@ function assertPassed(result) {
   );
 }
 
-function observedProcess(child, label) {
-  let stdout = "";
-  let stderr = "";
-  let settled = false;
-  child.stdout.on("data", (chunk) => {
-    stdout += chunk;
-  });
-  child.stderr.on("data", (chunk) => {
-    stderr += chunk;
-  });
-  const done = new Promise((resolveProcess, rejectProcess) => {
-    child.once("error", rejectProcess);
-    child.once("close", (code, signal) => {
-      settled = true;
-      resolveProcess({ label, code, signal, stdout, stderr });
-    });
-  });
-  return {
-    child,
-    done,
-    get stdout() {
-      return stdout;
-    },
-    get stderr() {
-      return stderr;
-    },
-    get settled() {
-      return settled;
-    },
-  };
-}
+test("directAncestor reports a vanished process as unproven ancestry", async () => {
+  await assert.rejects(
+    directAncestor(2_147_483_647, process.pid),
+    /2147483647 is not a descendant of/u,
+  );
+});
 
 async function copyCoordinatorRuntime(worktree) {
   const targetScripts = join(worktree, "scripts");
@@ -182,7 +159,7 @@ async function startLocalRuntimeGate({ worktree, scenario, label }) {
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
-  return observedProcess(child, label);
+  return makeGateHandle(child, { label });
 }
 
 async function replayGateOwnerIdentityAfterExit(scenario) {
@@ -476,12 +453,40 @@ test("the real quality gate uses scheduler concurrency and recovery", async (t) 
     );
 
     await t.test(
-      "public pnpm keeps material environment differences in the shared key",
+      "public pnpm scrubs validator injections before shared execution",
       async () => {
         const scenario = fixture.scenarioPaths("public-pnpm-environment");
+        const scrubbedEnvironment = (label) => ({
+          AGENT_CONTEXT_CLAUDE_SETTINGS_FILE: `claude-${label}`,
+          AGENT_CONTEXT_CODEX_HOOKS_FILE: `codex-${label}`,
+          AGENT_QUALITY_GATE_LOCK_CLAIM_DELAY_SECONDS: "0",
+          AGENT_QUALITY_GATE_LOCK_TEST_POISON: "same-parent-lock-control",
+          AGENT_QUALITY_GATE_TEST_POISON: "same-parent-control",
+          ALERT_RULES_LINT_RULES_DIR: `rules-${label}`,
+          AUTOREVIEW_FAKE_MUTATE_REPO: `autoreview-mutation-${label}`,
+          AUTOREVIEW_TEST_FOCUS: `autoreview-${label}`,
+          AWS_CONFIG_FILE: `missing-aws-config-${label}`,
+          CURL_FLAGS: `--header=fixture-${label}`,
+          ESLINT_BASELINE_INPUT: `eslint-input-${label}`,
+          ESLINT_BASELINE_MAIN: `eslint-main-${label}`,
+          GATE_TEST_FOCUS: `gate-${label}`,
+          GIT_DIR: `missing-git-dir-${label}`,
+          GITHUB_ACTION_PINS_ROOT: `actions-${label}`,
+          LOCKFILE_LINT_ROOT: `lockfile-${label}`,
+          SENTRY_SUITE_GATE_ROOT: `sentry-${label}`,
+          SKEW_CHECK_ROOT: `skew-${label}`,
+          SKILLS_MIRROR_ROOT_A: `skills-${label}`,
+          TRUNK_LAUNCHER_DEBUG: `debug-${label}`,
+          TRUNK_LAUNCHER_PATH: `launcher-${label}`,
+          TRUNK_LAUNCHER_QUIET: label === "a" ? "true" : "false",
+          TRUNK_LAUNCHER_VERSION: `version-${label}`,
+          TRUNK_QUIET: label === "a" ? "1" : "0",
+          WGET_FLAGS: `--header=fixture-${label}`,
+        });
         const worktrees = await Promise.all([
           fixture.addWorktree("public-pnpm-environment-a"),
           fixture.addWorktree("public-pnpm-environment-b"),
+          fixture.addWorktree("public-pnpm-environment-cached"),
         ]);
         const handles = await Promise.all([
           fixture.startPnpmGate({
@@ -491,7 +496,8 @@ test("the real quality gate uses scheduler concurrency and recovery", async (t) 
             label: "public-pnpm-environment-a",
             defaultDelayMs: 1_000,
             extraEnvironment: {
-              TURBO_CACHE_DIR: join(scenario.directory, "turbo-cache-a"),
+              QG_FIXTURE_ASSERT_SANITIZED_ENV: "1",
+              ...scrubbedEnvironment("a"),
             },
           }),
           fixture.startPnpmGate({
@@ -501,20 +507,42 @@ test("the real quality gate uses scheduler concurrency and recovery", async (t) 
             label: "public-pnpm-environment-b",
             defaultDelayMs: 1_000,
             extraEnvironment: {
-              TURBO_CACHE_DIR: join(scenario.directory, "turbo-cache-b"),
+              QG_FIXTURE_ASSERT_SANITIZED_ENV: "1",
+              ...scrubbedEnvironment("b"),
             },
           }),
         ]);
         const results = await Promise.all(handles.map((handle) => handle.done));
         results.forEach(assertPassed);
+        const starts = (await fixture.events(scenario)).filter(
+          (event) => event.event === "start",
+        );
+        assert.equal(starts.length, 1, JSON.stringify(starts));
+        assert.ok(results.some((result) => /role leader/u.test(result.stdout)));
+        assert.ok(
+          results.some((result) => /role follower/u.test(result.stdout)),
+        );
+
+        const cached = await fixture.startPnpmGate({
+          worktree: worktrees[2],
+          changedPath: "fixture-same.txt",
+          scenario,
+          label: "public-pnpm-environment-cached",
+          defaultDelayMs: 1_000,
+          skipIfFresh: true,
+          extraEnvironment: {
+            QG_FIXTURE_ASSERT_SANITIZED_ENV: "1",
+            ...scrubbedEnvironment("cached"),
+          },
+        });
+        const cachedResult = await cached.done;
+        assertPassed(cachedResult);
+        assert.match(cachedResult.stdout, /role completed/u);
         assert.equal(
           (await fixture.events(scenario)).filter(
             (event) => event.event === "start",
           ).length,
-          2,
-        );
-        results.forEach((result) =>
-          assert.match(result.stdout, /role leader/u),
+          1,
         );
       },
     );

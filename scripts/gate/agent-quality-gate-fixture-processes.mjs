@@ -58,8 +58,13 @@ export async function childrenOf(pid) {
 }
 
 async function parentOf(pid) {
-  const { stdout } = await run("ps", ["-o", "ppid=", "-p", String(pid)]);
-  return Number(stdout.trim());
+  try {
+    const { stdout } = await run("ps", ["-o", "ppid=", "-p", String(pid)]);
+    return Number(stdout.trim());
+  } catch (error) {
+    if (error.code === 1) return null;
+    throw error;
+  }
 }
 
 export async function directAncestor(descendantPid, rootPid) {

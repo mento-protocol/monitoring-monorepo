@@ -18,15 +18,28 @@ import { TextDecoder } from "node:util";
 export const LOCAL_BIN_MAX_ENTRIES = 8_192;
 export const LOCAL_BIN_MAX_FILE_BYTES = 64 * 1024 * 1024;
 export const LOCAL_BIN_MAX_TOTAL_BYTES = 256 * 1024 * 1024;
+const ENV_FILE_MAX_BYTES = 1024 * 1024;
+const ENV_FILE_MAX_TOTAL_BYTES = 16 * 1024 * 1024;
+const ENV_FILE_MAX_NAMES_PER_ROOT = 128;
 
 const exactEnvironmentNames = new Set([
+  "ALL_PROXY",
+  "BROWSERSLIST",
   "CC",
   "CFLAGS",
   "CGO_ENABLED",
   "CI",
+  "CLAUDE_CONFIG_DIR",
+  "CODEX_HOME",
   "CPPFLAGS",
+  "CURL_CA_BUNDLE",
   "CXX",
   "CXXFLAGS",
+  "DYLD_FALLBACK_LIBRARY_PATH",
+  "DYLD_INSERT_LIBRARIES",
+  "DYLD_LIBRARY_PATH",
+  "ESLINT_USE_FLAT_CONFIG",
+  "GLIBC_TUNABLES",
   "GOARCH",
   "GOENV",
   "GOFLAGS",
@@ -35,47 +48,154 @@ const exactEnvironmentNames = new Set([
   "GOPATH",
   "GOROOT",
   "GOTOOLCHAIN",
+  "GITHUB_ACTIONS",
+  "GITHUB_BASE_REF",
+  "GITHUB_EVENT_BEFORE",
+  "GITHUB_EVENT_NAME",
+  "GITHUB_REPOSITORY",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "HASURA_URL",
+  "HOME",
+  "INDEXER_PERF",
+  "INDEXER_PERF_LOG_INTERVAL_EVENTS",
   "INIT_CWD",
   "LANG",
   "LC_ALL",
   "LDFLAGS",
+  "LD_LIBRARY_PATH",
+  "LD_PRELOAD",
+  "METADATA_SERVER_DETECTION",
   "NODE_ENV",
+  "NODE_EXTRA_CA_CERTS",
   "NODE_OPTIONS",
   "NODE_PATH",
+  "NODE_TLS_REJECT_UNAUTHORIZED",
+  "NO_PROXY",
+  "OPENSSL_CONF",
+  "OPENSSL_ENGINES",
+  "OPENSSL_MODULES",
   "PATH",
+  "PEG_POLICY_AUTH_MODE",
+  "PEG_POLICY_BASE_REF",
+  "PEG_POLICY_URL",
+  "POLL_INTERVAL_MS",
+  "PORT",
+  "REQUESTS_CA_BUNDLE",
+  "RESERVE_YIELD_EVENT_TESTS",
   "RUSTFLAGS",
+  "SOURCE_DATE_EPOCH",
+  "SSL_CERT_DIR",
+  "SSL_CERT_FILE",
   "TEMP",
   "TMP",
   "TMPDIR",
   "TZ",
   "PLAYWRIGHT_BROWSERS_PATH",
   "TURBO_CACHE_DIR",
+  "VERCEL",
   "VERCEL_DEPLOYMENT_ID",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  "XDG_STATE_HOME",
   "AGENT_GATE_FULL_TESTS",
   "AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES",
   "AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS",
   "AGENT_QUALITY_FAIL_FAST",
   "AGENT_QUALITY_PARALLELISM",
+  "all_proxy",
+  "http_proxy",
+  "https_proxy",
+  "no_proxy",
 ]);
 const environmentPrefixes = [
+  "AGENT_AUTOREVIEW_",
+  "AGENT_QUALITY_GATE_LOCK_TEST_",
+  "AGENT_QUALITY_GATE_TEST_",
   "AUTH_",
+  "AUTOREVIEW_",
   "CARGO_",
+  "COREPACK_",
+  "DOCS_NAVIGATION_EVAL_",
   "ENVIO_",
+  "ESBUILD_",
   "FOUNDRY_",
+  "HASURA_FIXTURE_",
+  "DYLD_",
+  "LD_",
   "NEXT_",
   "NEXT_PUBLIC_",
   "NPM_CONFIG_",
   "PLAYWRIGHT_",
   "PNPM_",
   "REACT_DOCTOR_",
+  "REBALANCE_PROBE_",
   "RUST_",
   "SENTRY_",
   "SOLC_",
+  "STRYKER_",
   "TF_",
+  "TRUNK_",
   "TURBO_",
   "VERCEL_",
   "VITEST_",
   "npm_config_",
+];
+const mappedChildScrubbedExactNames = new Set([
+  "AGENT_CONTEXT_CLAUDE_SETTINGS_FILE",
+  "AGENT_CONTEXT_CODEX_HOOKS_FILE",
+  "ANTHROPIC_VERTEX_PROJECT_ID",
+  "AWS_CONFIG_FILE",
+  "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+  "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+  "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+  "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+  "AWS_EC2_METADATA_DISABLED",
+  "AWS_ROLE_ARN",
+  "AWS_ROLE_SESSION_NAME",
+  "AWS_SDK_LOAD_CONFIG",
+  "AWS_SHARED_CREDENTIALS_FILE",
+  "AWS_WEB_IDENTITY_TOKEN_FILE",
+  "CURL_FLAGS",
+  "ESLINT_BASELINE_INPUT",
+  "ESLINT_BASELINE_MAIN",
+  "GOOGLE_APPLICATION_CREDENTIALS",
+  "SENTRY_SUITE_GATE_ROOT",
+  "TRUNK_LAUNCHER_DEBUG",
+  "TRUNK_LAUNCHER_PATH",
+  "TRUNK_LAUNCHER_QUIET",
+  "TRUNK_LAUNCHER_VERSION",
+  "TRUNK_QUIET",
+  "WGET_FLAGS",
+]);
+const parentMaterialMappedChildScrubbedExactNames = new Set([
+  "AGENT_QUALITY_GATE_LOCK_CLAIM_DELAY_SECONDS",
+  "AGENT_QUALITY_GATE_LOCK_CRASH_AT",
+  "AGENT_QUALITY_GATE_LOCK_DISCARD_DELAY_SECONDS",
+  "AGENT_QUALITY_GATE_LOCK_DRAIN_UNLINK_DELAY_SECONDS",
+  "AGENT_QUALITY_GATE_LOCK_HELD_DELAY_SECONDS",
+  "AGENT_QUALITY_GATE_LOCK_PROBE_PATH",
+  "AGENT_QUALITY_GATE_LOCK_RECLAIM_DELAY_SECONDS",
+  "AGENT_QUALITY_GATE_LOCK_RELEASE_AFTER_TAKE_DELAY_SECONDS",
+  "AGENT_QUALITY_GATE_LOCK_RELEASE_BEFORE_TAKE_DELAY_SECONDS",
+  "AGENT_QUALITY_GATE_LOCK_TAKEN_DELAY_SECONDS",
+]);
+const fingerprintExcludedScrubbedPrefixes = [
+  "ALERT_RULES_LINT_",
+  "AUTOREVIEW_FAKE_",
+  "AUTOREVIEW_TEST_",
+  "GATE_TEST_",
+  "GIT_",
+  "GITHUB_ACTION_PINS_",
+  "LOCKFILE_LINT_",
+  "SKEW_CHECK_",
+  "SKILLS_MIRROR_ROOT_",
+];
+const mappedChildScrubbedPrefixes = [
+  "AGENT_QUALITY_GATE_LOCK_TEST_",
+  "AGENT_QUALITY_GATE_TEST_",
+  ...fingerprintExcludedScrubbedPrefixes,
 ];
 const stableFields = [
   "dev",
@@ -89,6 +209,19 @@ const stableFields = [
 ];
 const worktreeToken = "<WORKTREE_ROOT>";
 const gateScratchRelativePath = join(".tmp", "agent-quality-gate");
+const environmentFileRoots = [
+  "",
+  "aegis",
+  join("alerts", "infra", "oncall-announcer"),
+  join("alerts", "infra", "onchain-event-handler"),
+  join("alerts", "infra", "sentry-ingest-watcher"),
+  "governance-watchdog",
+  "indexer-envio",
+  "integration-probes",
+  "metrics-bridge",
+  "shared-config",
+  "ui-dashboard",
+];
 const productionLocalBinLimits = Object.freeze({
   maxEntries: LOCAL_BIN_MAX_ENTRIES,
   maxFileBytes: LOCAL_BIN_MAX_FILE_BYTES,
@@ -99,6 +232,18 @@ function manifestError(message) {
   const error = new Error(message);
   error.code = "LOCAL_BIN_MANIFEST_INVALID";
   return error;
+}
+
+function environmentError(message) {
+  const error = new Error(message);
+  error.code = "MATERIAL_ENVIRONMENT_INVALID";
+  return error;
+}
+
+function boundedSnapshotError(subject, message) {
+  return subject === "local executable"
+    ? manifestError(`${subject} ${message}`)
+    : environmentError(`${subject} ${message}`);
 }
 
 function sameIdentity(left, right) {
@@ -237,16 +382,20 @@ function declaredEntryByteCount(
   return Number(declaredBytes);
 }
 
-function readBoundedRegularFile(path, expected, { maxFileBytes, noFollow }) {
+function readBoundedRegularFile(
+  path,
+  expected,
+  { maxFileBytes, noFollow, subject = "local executable" },
+) {
   const noFollowFlag = noFollow ? (constants.O_NOFOLLOW ?? 0) : 0;
   const descriptor = openSync(path, constants.O_RDONLY | noFollowFlag);
   try {
     const before = fstatSync(descriptor, { bigint: true });
     if (!before.isFile() || !sameIdentity(before, expected)) {
-      throw manifestError("local executable changed before it was read");
+      throw boundedSnapshotError(subject, "changed before it was read");
     }
     if (before.size > BigInt(maxFileBytes)) {
-      throw manifestError("local executable exceeds the per-file size limit");
+      throw boundedSnapshotError(subject, "exceeds the per-file size limit");
     }
     const bytes = Buffer.alloc(Number(before.size));
     let offset = 0;
@@ -259,18 +408,16 @@ function readBoundedRegularFile(path, expected, { maxFileBytes, noFollow }) {
         offset,
       );
       if (count === 0) {
-        throw manifestError(
-          "local executable became shorter while it was read",
-        );
+        throw boundedSnapshotError(subject, "became shorter while it was read");
       }
       offset += count;
     }
     if (readSync(descriptor, Buffer.alloc(1), 0, 1, offset) !== 0) {
-      throw manifestError("local executable became longer while it was read");
+      throw boundedSnapshotError(subject, "became longer while it was read");
     }
     const after = fstatSync(descriptor, { bigint: true });
     if (!sameIdentity(before, after)) {
-      throw manifestError("local executable changed while it was read");
+      throw boundedSnapshotError(subject, "changed while it was read");
     }
     return bytes;
   } finally {
@@ -442,6 +589,139 @@ export function normalizedLocalBinManifestForTest(repoRoot, overrides) {
   );
 }
 
+function environmentFileName(name) {
+  return (
+    (name === ".env" || name.startsWith(".env.")) && !name.endsWith(".example")
+  );
+}
+
+function environmentNamesInRoot(path, relativeRoot) {
+  let rootBefore;
+  try {
+    rootBefore = lstatSync(path, { bigint: true });
+  } catch (error) {
+    if (error.code === "ENOENT") return { identity: null, names: [] };
+    throw error;
+  }
+  if (rootBefore.isSymbolicLink() || !rootBefore.isDirectory()) {
+    throw environmentError(
+      `material environment root is not a real directory: ${relativeRoot || "."}`,
+    );
+  }
+  const names = boundedSortedNames(path, LOCAL_BIN_MAX_ENTRIES).filter(
+    environmentFileName,
+  );
+  if (names.length > ENV_FILE_MAX_NAMES_PER_ROOT) {
+    throw environmentError(
+      `material environment root has too many env files: ${relativeRoot || "."}`,
+    );
+  }
+  return { identity: rootBefore, names };
+}
+
+function snapshotEnvironmentFile(path, relativePath, remainingBytes) {
+  const subject = `material environment file ${relativePath}`;
+  const before = lstatSync(path, { bigint: true });
+  const type = entryType(before);
+  let linkBytes = Buffer.alloc(0);
+  let targetMode = "";
+  let content;
+  let contentSize;
+  if (type === "file") {
+    contentSize = before.size;
+    content = readBoundedRegularFile(path, before, {
+      maxFileBytes: Math.min(ENV_FILE_MAX_BYTES, remainingBytes),
+      noFollow: true,
+      subject,
+    });
+  } else if (type === "symlink") {
+    linkBytes = readlinkSync(path, { encoding: "buffer" });
+    const targetBefore = statSync(path, { bigint: true });
+    if (!targetBefore.isFile()) {
+      throw environmentError(`${subject} does not resolve to a regular file`);
+    }
+    targetMode = targetBefore.mode.toString(8);
+    contentSize = targetBefore.size;
+    content = readBoundedRegularFile(path, targetBefore, {
+      maxFileBytes: Math.min(ENV_FILE_MAX_BYTES, remainingBytes),
+      noFollow: false,
+      subject,
+    });
+    const targetAfter = statSync(path, { bigint: true });
+    if (!sameIdentity(targetBefore, targetAfter)) {
+      throw environmentError(`${subject} target changed while it was hashed`);
+    }
+    if (!linkBytes.equals(readlinkSync(path, { encoding: "buffer" }))) {
+      throw environmentError(`${subject} link changed while it was hashed`);
+    }
+  } else {
+    throw environmentError(`${subject} is not a regular file or symlink`);
+  }
+  if (contentSize > BigInt(remainingBytes)) {
+    throw environmentError(
+      "material environment files exceed their byte limit",
+    );
+  }
+  const after = lstatSync(path, { bigint: true });
+  if (!sameIdentity(before, after)) {
+    throw environmentError(`${subject} changed while it was hashed`);
+  }
+  const hash = createHash("sha256");
+  hash.update("material-environment-file-v1\0");
+  updateField(hash, "path", relativePath);
+  updateField(hash, "type", type);
+  updateField(hash, "mode", before.mode.toString(8));
+  updateField(hash, "link", linkBytes);
+  updateField(hash, "target-mode", targetMode);
+  updateField(hash, "content", content);
+  return { byteCount: Number(contentSize), digest: hash.digest("hex") };
+}
+
+function materialEnvironmentFileSnapshot(physicalRepoRoot) {
+  const hash = createHash("sha256");
+  hash.update("material-environment-files-v1\0");
+  let totalBytes = 0;
+  for (const relativeRoot of environmentFileRoots) {
+    const root = join(physicalRepoRoot, relativeRoot);
+    const before = environmentNamesInRoot(root, relativeRoot);
+    updateField(hash, "root", relativeRoot || ".");
+    for (const name of before.names) {
+      const relativePath = join(relativeRoot, name);
+      const snapshot = snapshotEnvironmentFile(
+        join(root, name),
+        relativePath,
+        ENV_FILE_MAX_TOTAL_BYTES - totalBytes,
+      );
+      totalBytes += snapshot.byteCount;
+      updateField(hash, "file", snapshot.digest);
+    }
+    const after = environmentNamesInRoot(root, relativeRoot);
+    if (
+      (before.identity === null) !== (after.identity === null) ||
+      (before.identity !== null &&
+        !sameIdentity(before.identity, after.identity)) ||
+      before.names.length !== after.names.length ||
+      before.names.some((name, index) => name !== after.names[index])
+    ) {
+      throw environmentError(
+        `material environment root changed while it was hashed: ${relativeRoot || "."}`,
+      );
+    }
+  }
+  return hash.digest("hex");
+}
+
+function materialEnvironmentFileManifest(physicalRepoRoot) {
+  const first = materialEnvironmentFileSnapshot(physicalRepoRoot);
+  const second = materialEnvironmentFileSnapshot(physicalRepoRoot);
+  if (first !== second) {
+    throw environmentError(
+      "material environment files changed between snapshots",
+    );
+  }
+  return second;
+}
+
 function pathResolvesTo(value, expected, workingDirectory) {
   if (typeof value !== "string" || value.length === 0) return false;
   const candidate = resolve(workingDirectory, value);
@@ -457,9 +737,37 @@ function pathResolvesTo(value, expected, workingDirectory) {
 function selectedEnvironmentEntries(environment) {
   return Object.entries(environment).filter(
     ([name]) =>
-      exactEnvironmentNames.has(name) ||
-      environmentPrefixes.some((prefix) => name.startsWith(prefix)),
+      !mappedChildScrubbedExactNames.has(name) &&
+      !fingerprintExcludedScrubbedPrefixes.some((prefix) =>
+        name.startsWith(prefix),
+      ) &&
+      (exactEnvironmentNames.has(name) ||
+        parentMaterialMappedChildScrubbedExactNames.has(name) ||
+        environmentPrefixes.some((prefix) => name.startsWith(prefix))),
   );
+}
+
+export function mappedChildScrubbedEnvironmentName(name) {
+  return (
+    mappedChildScrubbedExactNames.has(name) ||
+    parentMaterialMappedChildScrubbedExactNames.has(name) ||
+    mappedChildScrubbedPrefixes.some((prefix) => name.startsWith(prefix))
+  );
+}
+
+export function mappedChildScrubPolicyDigest() {
+  const hash = createHash("sha256");
+  hash.update("mapped-child-scrub-policy-v1\0");
+  for (const name of [...mappedChildScrubbedExactNames].sort()) {
+    updateField(hash, "exact", name);
+  }
+  for (const name of [...parentMaterialMappedChildScrubbedExactNames].sort()) {
+    updateField(hash, "parent-material-exact", name);
+  }
+  for (const prefix of [...mappedChildScrubbedPrefixes].sort()) {
+    updateField(hash, "prefix", prefix);
+  }
+  return hash.digest("hex");
 }
 
 export function materialEnvironmentDigest({
@@ -507,9 +815,13 @@ export function materialEnvironmentDigest({
     "__AGENT_QUALITY_GATE_LOCAL_BIN_MANIFEST__",
     normalizedLocalBinManifest(physicalRepoRoot),
   ]);
+  entries.push([
+    "__AGENT_QUALITY_GATE_ENV_FILE_MANIFEST__",
+    materialEnvironmentFileManifest(physicalRepoRoot),
+  ]);
   entries.sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
   const hash = createHash("sha256");
-  hash.update("material-environment-v3\0");
+  hash.update("material-environment-v4\0");
   for (const [name, value] of entries) {
     hash.update(name);
     hash.update("\0");
@@ -520,6 +832,30 @@ export function materialEnvironmentDigest({
 }
 
 function main() {
+  if (
+    process.argv.length === 3 &&
+    process.argv[2] === "--mapped-child-scrub-policy-digest"
+  ) {
+    process.stdout.write(mappedChildScrubPolicyDigest());
+    return;
+  }
+  if (
+    process.argv.length === 3 &&
+    process.argv[2] === "--mapped-child-scrubbed-names"
+  ) {
+    for (const name of Object.keys(process.env)
+      .filter(mappedChildScrubbedEnvironmentName)
+      .sort((left, right) =>
+        Buffer.compare(Buffer.from(left), Buffer.from(right)),
+      )) {
+      process.stdout.write(`${name}\0`);
+    }
+    process.stdout.write(
+      `agent-quality-gate-scrub-policy=${mappedChildScrubPolicyDigest()}\0`,
+    );
+    process.stdout.write("agent-quality-gate-scrub-end\0");
+    return;
+  }
   if (process.argv.length !== 3) {
     process.stderr.write(
       "error: material environment hashing requires one repository root.\n",
@@ -541,7 +877,7 @@ function main() {
 
 if (
   process.argv[1] &&
-  resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))
+  pathResolvesTo(process.argv[1], fileURLToPath(import.meta.url), process.cwd())
 ) {
   main();
 }

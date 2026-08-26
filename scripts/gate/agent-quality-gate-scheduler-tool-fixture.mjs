@@ -8,6 +8,27 @@ start_barrier="\${QG_FIXTURE_START_BARRIER:-}"
 delay_ms="\${QG_FIXTURE_DEFAULT_DELAY_MS:-250}"
 trunk_argv="$*"
 
+if [[ "\${QG_FIXTURE_ASSERT_SANITIZED_ENV:-}" == 1 ]]; then
+  for name in AGENT_CONTEXT_CLAUDE_SETTINGS_FILE \
+    AGENT_CONTEXT_CODEX_HOOKS_FILE \
+    AGENT_QUALITY_GATE_LOCK_CLAIM_DELAY_SECONDS \
+    AGENT_QUALITY_GATE_LOCK_TEST_POISON AGENT_QUALITY_GATE_TEST_POISON \
+    AWS_CONFIG_FILE CURL_FLAGS \
+    ESLINT_BASELINE_INPUT ESLINT_BASELINE_MAIN \
+    ALERT_RULES_LINT_RULES_DIR AUTOREVIEW_FAKE_MUTATE_REPO \
+    AUTOREVIEW_TEST_FOCUS GATE_TEST_FOCUS \
+    GIT_DIR GITHUB_ACTION_PINS_ROOT LOCKFILE_LINT_ROOT \
+    SENTRY_SUITE_GATE_ROOT \
+    SKEW_CHECK_ROOT SKILLS_MIRROR_ROOT_A TRUNK_LAUNCHER_DEBUG \
+    TRUNK_LAUNCHER_PATH \
+    TRUNK_LAUNCHER_QUIET TRUNK_LAUNCHER_VERSION TRUNK_QUIET WGET_FLAGS; do
+    if declare -p "$name" >/dev/null 2>&1; then
+      printf 'fixture validator injection survived: %s\n' "$name" >&2
+      exit 97
+    fi
+  done
+fi
+
 case " $* " in
   *" fixture-full.txt "*) delay_ms="\${QG_FIXTURE_FULL_DELAY_MS:-4000}" ;;
   *" fixture-short-a.txt "*|*" fixture-short-b.txt "*)
