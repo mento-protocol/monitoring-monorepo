@@ -728,11 +728,15 @@ pathname beside the witness. It deletes only the private names after it
 verifies that they still name the witnessed inode. A path replacement is
 retained and stops the gate, even when it has the same text and authority token.
 
-The owner-quarantine namespace uses names of the form
-`owner.reclaiming.quarantine.v1.<hostname-sha256>.<pid>.<nonce>`. A waiter treats
-a quarantine from another host as active. It does not apply a local PID verdict
-to it. Before a waiter recovers a dead local quarantine, it creates an empty
-mode-0700 placeholder with its own versioned name. One descriptor-bound Node
+The legacy owner `host=` field stores the gate's cached `uname -n` value. The
+owner-quarantine namespace uses its SHA-256 digest in names of the form
+`owner.reclaiming.quarantine.v1.<hostname-sha256>.<pid>.<nonce>`. A waiter does
+not apply a local PID verdict to evidence from another host. If `uname -n`
+changes after a crash, the waiter retains an old owner, release remnant, or
+quarantine as foreign-host evidence and exits with status 2. Issue #2006 tracks
+a stable machine identity for these recovery paths. Before a waiter recovers a
+dead local quarantine, it creates an empty mode-0700 placeholder with its own
+versioned name. One descriptor-bound Node
 operation validates both directories and atomically renames the whole source
 directory over that placeholder. It fsyncs the claimed directory and its
 parent. This claim orders recovery against a creator's orphaned `mv` child and

@@ -11669,7 +11669,31 @@ gate_race_root="$(mktemp -d)"
 gate_race_out="$(mktemp -d)"
 gate_race_log="$gate_race_out/race.log"
 gate_race_sync="$(mktemp -d)"
+# macOS can change its reported host name while this long fixture runs. Pin
+# only `uname -n` inside the fixture so its records and nested gates use one
+# host identity. Explicit fingerprints still exercise foreign-host recovery.
+gate_race_real_uname="$(command -v uname)" ||
+  fail "the lock-race fixture could not resolve uname"
+[[ "$gate_race_real_uname" == /* && -x "$gate_race_real_uname" ]] ||
+  fail "the lock-race fixture requires uname to resolve to an executable path"
+gate_race_test_bin="$gate_race_out/test-bin"
+mkdir -p "$gate_race_test_bin"
+cat > "$gate_race_test_bin/uname" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$#" -eq 1 && "$1" == "-n" ]]; then
+  printf 'quality-gate-lock-fixture.local\n'
+  exit 0
+fi
+exec "${GATE_RACE_REAL_UNAME:?}" "$@"
+STUB
+chmod +x "$gate_race_test_bin/uname"
 (
+  export GATE_RACE_REAL_UNAME="$gate_race_real_uname"
+  export PATH="$gate_race_test_bin:$PATH"
+  [[ "$(uname -n)" == "quality-gate-lock-fixture.local" ]] ||
+    fail "the lock-race fixture could not stabilize its host identity"
+  [[ "$(uname -s)" == "$("$gate_race_real_uname" -s)" ]] ||
+    fail "the lock-race fixture uname shim did not delegate non-hostname queries"
   gate_test_capture_current_shell_pid "$gate_race_sync/race-shell.pid" ||
     fail "could not capture the lock-race subshell PID under Bash 3.2"
   gate_test_signal_shell_pid="$gate_test_captured_shell_pid"
