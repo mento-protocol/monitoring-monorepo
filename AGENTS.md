@@ -45,14 +45,9 @@ rule are in
 
 ## Safety Boundaries
 
-- **Never weaken a control that blocks your own work.** Do not widen, disable,
-  or soften the quality gate, the sandbox or permission config, branch
-  protection, or a safety-boundary rule to unblock the change you are making
-  now — an agent that can widen its own gate has no gate. Hand the control
-  change to an independent session through a brief or an agent-ready issue,
-  with the operator's recorded consent. Changing a control stays allowed when it
-  is its own claimed task and does not unblock the same session's current work;
-  reclassifying the blocking change as a separate task does not qualify.
+- **Never weaken a control that blocks your own work** — an agent that can
+  widen its own gate has no gate. The exception and the hand-off procedure are
+  in the [operating card](docs/notes/pr-operating-card.md).
 - **Secrets are IaC-owned.** Never create, rotate, or overwrite secrets with
   `gh secret set`, `vercel env add`, `gcloud secrets versions add`, or another
   one-off provider command. Model them in the owning Terraform/integration path

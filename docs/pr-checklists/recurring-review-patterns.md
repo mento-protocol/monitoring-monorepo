@@ -24,8 +24,12 @@ link are inline-canonical and are candidates for future extraction.
 Applies to every pattern below, in any repository, sandboxed or not. A sandbox
 lowers the cost of being wrong; it does not lower the standard of evidence.
 
-- Establish the baseline before changing anything, so breakage can be
-  attributed.
+- Where a claim rests on a measurement — a benchmark, a fuzz run, a coverage or
+  timing number — establish the baseline before changing anything, so breakage
+  can be attributed. During a read-only review pass, where the change already
+  exists, the equivalent is a deterministic comparison against the parent
+  revision; a baseline that could only have been taken earlier is not a finding
+  against the PR.
 - Settle each candidate fix against the code, not on paper: apply it when you
   are implementing, and check it against the code you are reading when the pass
   is read-only, such as the closeout review this checklist is loaded into.

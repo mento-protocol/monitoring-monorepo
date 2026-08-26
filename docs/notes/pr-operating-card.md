@@ -103,7 +103,15 @@ even when you never open an authority.
 4. **Autoreview.** Freeze the scope baseline first — the initial request,
    target/owner, changed-file set, and non-test changed-line count — as the
    reference Babysit (step 6) checks new additions against. Then, for a
-   non-trivial completed batch, run the closeout review. Outside an active
+   non-trivial completed batch, run the closeout review.
+
+   **Test the validation claims against what the run actually establishes.**
+   On a re-run for an open PR that is its `## Validation` section; on the first
+   pass there is no PR yet, so apply the same test to the claims you are about
+   to write. Either way every claim names the evidence behind it and the
+   nearest stronger claim that evidence does not support, and an unexplained
+   strengthening of a claim is a finding. This lives here rather than in one
+   engine's command wrapper, because every review engine reaches this step. Outside an active
    Codex session — the standalone helper or `--engine claude` — a bare
    `pnpm agent:autoreview` is the closeout, matching root
    [`AGENTS.md`](../../AGENTS.md). The skill routers defer to this step rather
@@ -386,7 +394,8 @@ These bind regardless of which step you are on:
   control change to an independent session through a brief or an agent-ready
   issue, with the operator's recorded consent. Routine control maintenance
   stays allowed when it is its own claimed task and does not unblock the same
-  session's current work.
+  session's current work; reclassifying the blocking change as a separate task
+  does not qualify.
 - **Package-script, package-manager, and lockfile changes require explicit
   acknowledgement** through the gate; never bypass the refusal.
 - **Background long `--run` gates and pushes**; do not run them in a 600s
