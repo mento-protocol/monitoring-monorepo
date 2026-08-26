@@ -19554,8 +19554,10 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   # `tr` and `grep` calls here made a no-op drain launch thousands of processes
   # on a busy runner. A longer token must not match the requested token.
   if [[ -d /proc/self/fd ]]; then
-    race_proc_env_token="fixture-proc-env-${gate_test_outer_pid}-${gate_race_fixture_epoch}"
-    race_proc_env_long_token="${race_proc_env_token}.long-${gate_test_outer_pid}-${gate_race_fixture_epoch}"
+    printf -v race_proc_env_token 'fixture-proc-env-%s-%s' \
+      "$gate_test_outer_pid" "$gate_race_fixture_epoch"
+    printf -v race_proc_env_long_token '%s.long-%s-%s' \
+      "$race_proc_env_token" "$gate_test_outer_pid" "$gate_race_fixture_epoch"
     race_proc_env_run_ready="$gate_race_out/proc-env-run-ready"
     race_proc_env_request_ready="$gate_race_out/proc-env-request-ready"
     race_proc_env_long_ready="$gate_race_out/proc-env-long-ready"
