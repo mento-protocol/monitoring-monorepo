@@ -645,6 +645,17 @@ test("material environment normalizes only worktree lifecycle roots", async (t) 
     firstDigest,
     "a non-lifecycle worktree path must remain raw",
   );
+  for (const relativeEntry of ["", ".", join(".tmp", "bin")]) {
+    assert.notEqual(
+      materialEnvironmentDigest(first, {
+        pathEntries: [relativeEntry, dirname(process.execPath), "/usr/bin"],
+      }),
+      materialEnvironmentDigest(second, {
+        pathEntries: [relativeEntry, dirname(process.execPath), "/usr/bin"],
+      }),
+      `${relativeEntry || "empty"} PATH entries must bind the physical worktree`,
+    );
+  }
   assert.notEqual(
     materialEnvironmentDigest(second, {
       pnpmScriptSource: join(second.root, "nested-package"),
@@ -1288,6 +1299,16 @@ test("material environment binds package-local executables", async (t) => {
       ],
     }),
     "package-local PATH entries must normalize across worktrees",
+  );
+  const relativePackageBin = join("ui-dashboard", "node_modules", ".bin");
+  assert.equal(
+    materialEnvironmentDigest(first, {
+      pathEntries: [relativePackageBin, dirname(process.execPath)],
+    }),
+    materialEnvironmentDigest(second, {
+      pathEntries: [relativePackageBin, dirname(process.execPath)],
+    }),
+    "relative package-local PATH entries must normalize across worktrees",
   );
 
   const rogueWrapper = join(dirname(packageWrappers[1]), "rogue-shadow");

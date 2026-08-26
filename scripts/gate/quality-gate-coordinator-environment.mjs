@@ -11,7 +11,7 @@ import {
   realpathSync,
   statSync,
 } from "node:fs";
-import { delimiter, join, normalize, resolve } from "node:path";
+import { delimiter, isAbsolute, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { TextDecoder } from "node:util";
 
@@ -776,6 +776,9 @@ function normalizeMaterialLocalBinPath(value, paths, workingDirectory) {
       return entry.replacement;
     }
   }
+  if (typeof value === "string" && !isAbsolute(value)) {
+    return resolve(workingDirectory, value || ".");
+  }
   return value;
 }
 
@@ -821,6 +824,7 @@ export function materialEnvironmentDigest({
   workingDirectory = process.cwd(),
 }) {
   const physicalRepoRoot = realpathSync(repoRoot);
+  const physicalWorkingDirectory = realpathSync(workingDirectory);
   const localBinPaths = materialLocalBinPathMap(physicalRepoRoot);
   const gateScratchPath = join(physicalRepoRoot, gateScratchRelativePath);
   const gateScratchEntry = `${worktreeToken}/${gateScratchRelativePath}`;
@@ -836,7 +840,7 @@ export function materialEnvironmentDigest({
               normalizeMaterialLocalBinPath(
                 entry,
                 localBinPaths,
-                workingDirectory,
+                physicalWorkingDirectory,
               ),
             )
             .join(delimiter),

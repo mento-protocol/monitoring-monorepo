@@ -105,28 +105,42 @@ export function probeSocket(path) {
 
 export function rejectWhileStarting(socket) {
   socket.setEncoding("utf8");
+  let input = "";
   let timer = setTimeout(() => socket.destroy(), 1_000);
   socket.once("close", () => clearTimeout(timer));
-  socket.once("data", (chunk) => {
+
+  function reject(id, error) {
     clearTimeout(timer);
+    socket.off("data", readRequest);
+    timer = setTimeout(() => socket.destroy(), 1_000);
+    socket.end(`${JSON.stringify({ id, ok: false, error })}\n`);
+  }
+
+  function readRequest(chunk) {
+    input += chunk;
+    if (Buffer.byteLength(input) > maximumMessageBytes) {
+      reject("oversize", {
+        code: "MESSAGE_TOO_LARGE",
+        message: "message exceeds 1 MiB",
+      });
+      return;
+    }
+    const newline = input.indexOf("\n");
+    if (newline < 0) return;
+
     let id = "starting";
     try {
-      id = JSON.parse(chunk.slice(0, chunk.indexOf("\n"))).id ?? id;
+      id = JSON.parse(input.slice(0, newline)).id ?? id;
     } catch {
-      // Keep the fallback response ID for a partial or malformed request.
+      // Keep the fallback response ID for a malformed request.
     }
-    socket.end(
-      `${JSON.stringify({
-        id,
-        ok: false,
-        error: {
-          code: "COORDINATOR_STARTING",
-          message: "coordinator has not acquired legacy authority",
-        },
-      })}\n`,
-    );
-    timer = setTimeout(() => socket.destroy(), 1_000);
-  });
+    reject(id, {
+      code: "COORDINATOR_STARTING",
+      message: "coordinator has not acquired legacy authority",
+    });
+  }
+
+  socket.on("data", readRequest);
 }
 
 export async function closeBoundServer(server, socketPath, sockets) {

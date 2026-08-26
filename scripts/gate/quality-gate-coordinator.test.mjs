@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { once } from "node:events";
+import { EventEmitter, once } from "node:events";
 import {
   chmodSync,
   existsSync,
@@ -62,6 +62,7 @@ import {
   prunePersistentRecords,
   unlinkIfPresent,
 } from "./quality-gate-coordinator-retention.mjs";
+import { rejectWhileStarting } from "./quality-gate-coordinator-socket.mjs";
 
 const fixtures = [];
 
@@ -315,6 +316,25 @@ async function resetCoordinatorConnection(path, payload) {
   });
   socket.destroy();
   await closed;
+}
+
+class StartupRejectSocket extends EventEmitter {
+  destroyed = false;
+  output = "";
+
+  setEncoding(encoding) {
+    assert.equal(encoding, "utf8");
+  }
+
+  end(payload) {
+    this.output += payload;
+    this.emit("close");
+  }
+
+  destroy() {
+    this.destroyed = true;
+    this.emit("close");
+  }
 }
 
 function assertWithinCapacity(snapshot) {
@@ -7865,6 +7885,36 @@ test("detached start rejects ready metadata without live child authority", async
   );
   assert.equal(unrefCalled, false);
   assert.equal(existsSync(readyFile), false);
+});
+
+test("startup rejection buffers a fragmented request line", () => {
+  const socket = new StartupRejectSocket();
+  const requestId = "fragmented-startup-request";
+  const request = `${JSON.stringify({
+    id: requestId,
+    protocol: PROTOCOL_VERSION,
+    policyHash: DEFAULT_POLICY_HASH,
+    action: "ping",
+    params: {},
+  })}\n`;
+  const splitAt = Math.floor(request.length / 2);
+
+  rejectWhileStarting(socket);
+  socket.emit("data", request.slice(0, splitAt));
+  assert.equal(socket.output, "");
+  socket.emit("data", request.slice(splitAt));
+
+  const response = JSON.parse(socket.output.trim());
+  assert.equal(response.id, requestId);
+  assert.equal(response.ok, false);
+  assert.equal(response.error.code, "COORDINATOR_STARTING");
+
+  const oversized = new StartupRejectSocket();
+  rejectWhileStarting(oversized);
+  oversized.emit("data", "x".repeat(1024 * 1024 + 1));
+  const oversizedResponse = JSON.parse(oversized.output.trim());
+  assert.equal(oversizedResponse.id, "oversize");
+  assert.equal(oversizedResponse.error.code, "MESSAGE_TOO_LARGE");
 });
 
 test(
