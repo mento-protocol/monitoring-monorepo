@@ -3,7 +3,7 @@ title: Quick Commands
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-25
+last_verified: 2026-08-26
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -73,6 +73,12 @@ pnpm agent:context-budget --strict # Enforce root, scoped-file, and aggregate-ro
 # /pr-ready-override gate=codex-description-approval head=<full-head-sha> reason=<why this is safe>
 pnpm --silent pr:feedback-state --pr 123 --json  # Normalize unresolved/reply-required feedback before all-clear
 pnpm pr:ready-state --pr 123 --json              # Final current-head required-readiness probe
+# The only sanctioned merge path, and human-only: it refuses outside an
+# interactive terminal, re-runs the ready-state oracle, makes the operator type
+# the PR number back, and records consent in gitignored .merge-consents.jsonl
+# before calling gh. Agents must never run it.
+pnpm pr:merge --pr 123                           # Merge one PR after interactive human confirmation
+pnpm pr:merge --pr 123 --not-ready-reason "<why>"  # Same, recording why a not-ready PR was merged anyway
 node scripts/pr/review-process-metrics.mjs --prs <pr1,pr2,...> --output <result.json>  # Collect a new cohort; define its boundary and tracking issue first
 pnpm lockfile:lint                 # Fail-closed integrity + registry + override-floor check; no install needed
 pnpm skew:check                    # Fail on dependency version skew vs the pnpm catalog; no install needed

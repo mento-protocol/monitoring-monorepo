@@ -51,6 +51,7 @@
       "WebFetch(domain:monitoring.mento.org)"
     ],
     "deny": [
+      "Bash(gh pr merge:*)",
       "Read(**/node_modules/**)",
       "Read(**/generated/**)",
       "Read(**/.envio/build/**)",

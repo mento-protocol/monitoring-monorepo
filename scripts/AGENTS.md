@@ -76,7 +76,8 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   both verifier tests run. The exact `pr/agent-issue-board.mjs`,
   `pr/agent-issue-board.test.mjs`, and
   `pr/issue-board-{backfill,cli,commands,projects,state,sync,transport}.mjs` set
-  routes to `pnpm issue:board:test`.
+  routes to `pnpm issue:board:test`. `pr/merge-pr{,.test}.mjs` and
+  ready-state route `pnpm pr:merge:test`.
 - **Gate runtime module pins.** Before `cd`, `agent-quality-gate.sh` loads
   `$script_source_dir/gate/run-handles.sh`; move it with its signature, self-test
   route, and missing-helper fixture. It also pins

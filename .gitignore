@@ -61,3 +61,8 @@ CLAUDE.md
 # Arkham marathon — output JSONLs (raw API responses, progress checkpoints).
 # Persisted to disk + Vercel Blob; never committed.
 .intel-marathon/
+
+# `pnpm pr:merge` consent ledger — one JSON line per approved merge, naming the
+# operator's GitHub login and the head commit they approved. It is a local
+# record of who pressed the button on this machine, not shared repository state.
+.merge-consents.jsonl
