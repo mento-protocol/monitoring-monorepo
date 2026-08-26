@@ -26,7 +26,9 @@ lowers the cost of being wrong; it does not lower the standard of evidence.
 
 - Establish the baseline before changing anything, so breakage can be
   attributed.
-- Apply each candidate fix to the code instead of arguing it on paper.
+- Settle each candidate fix against the code, not on paper: apply it when you
+  are implementing, and check it against the code you are reading when the pass
+  is read-only, such as the closeout review this checklist is loaded into.
 - Classify failures rather than counting them.
 - Pin boundaries deterministically rather than quoting a fuzz counterexample.
 - State what a measurement does not establish.
