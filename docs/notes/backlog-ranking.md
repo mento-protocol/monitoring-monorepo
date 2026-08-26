@@ -12,9 +12,10 @@ garden_lane: operator-runbooks
 
 # Backlog Ranking
 
-Which open issue should an agent pick up next? Without a written answer, every
-session re-derives one from whatever sits at the top of the issue list, and the
-reasoning dies with the session. This loop writes the reasoning down.
+This loop decides which open issue an agent picks up next, and writes the
+reasoning down. Without a written answer, every session re-derives one from
+whatever sits at the top of the issue list, and the reasoning dies with the
+session.
 
 The procedure is the `rank-backlog` skill
 ([`.agents/skills/rank-backlog/SKILL.md`](../../.agents/skills/rank-backlog/SKILL.md));
@@ -40,30 +41,44 @@ The loop reuses the workflow's terms and adds none:
 - `agent-active` and `in-pr` — already owned, so dropped from the roster. This
   repo claims through labels and Project fields rather than assignees, so
   neither state shows up in an assignee check.
+- **outside the queue** — an open issue carrying none of those labels. Workflows
+  open these on their own: drift reports, supply-chain advisories, Sentry triage
+  records. They are never ranked and never Selected; Method counts them so a
+  reader can see the gap between open issues and the roster.
 - **claim** — `pnpm issue:claim`, run by the operator after reading the receipt.
 
 ## The receipt
 
-`.rankings/ranking-<YYYY-MM-DD>.md`, one per run, never overwritten. It carries
-Method, a Top 15 table, and a Selected section; the skill owns the field list.
+`.rankings/ranking-<YYYY-MM-DD>.md`, one per run, never overwritten. The date is
+UTC, and a second run the same day appends the lowest unused suffix — `-2`, then
+`-3`. Each name is claimed by an exclusive create, so two runs in one checkout
+cannot pick the same one. It carries Method, a Top 15 table, and a Selected
+section; the skill owns the field list and the retry mechanics.
 
 Two properties make a receipt worth keeping:
 
-- **Every reason is grounded in a body actually read.** A reason inferred from a
-  title is a guess wearing a citation. The Method section states how many bodies
-  were read in full and how many issues were scored from the list line, so a
-  reader can tell the two apart.
+- **Every reason in the table is grounded in a body actually read.** A reason
+  inferred from a title is a guess wearing a citation. Issues scored from the
+  list line alone are ranked but stay out of the table, and the Method section
+  states how many bodies were read in full and how many were scored from the
+  list line, so a reader can tell the two apart.
 - **Fit is capped by authority, and the cap is stated.** An issue that needs a
-  product decision, a credential, or a human approval cannot be finished by the
-  loop however good the issue is. Scoring it down silently reads as a judgement
-  on the issue. Naming the cap keeps those two separate and tells a human
-  exactly what would lift it.
+  product decision, a credential, or an issue-specific human approval cannot be
+  finished by the loop however good the issue is. Scoring it down silently reads
+  as a judgement on the issue. Naming the cap keeps those two separate and tells
+  a human exactly what would lift it. The merge approval every PR needs is not a
+  cap: it applies to all work equally, so scoring on it would say nothing.
+
+A run whose ready queue is empty writes `Selected: none` and the reason. That is
+a valid receipt — the alternative is inventing a candidate to satisfy the format.
 
 ## The exclusion ledger
 
 `.rankings/excluded.json` is an append-only array of
 `{ "issue": <number>, "reason": "<what happened>", "excluded_at": "<ISO 8601>", "expires_at": "<ISO 8601>" }`.
-A run drops an issue while the newest entry for that number is unexpired.
+A run drops an issue while the newest entry for that number is unexpired. The
+file does not exist until the first park; a run reads a missing file as `[]`
+rather than failing or creating an empty one.
 
 It exists so a parked issue does not resurface at the top of every run and force
 the same decision again. Entries are appended, never edited or deleted: an

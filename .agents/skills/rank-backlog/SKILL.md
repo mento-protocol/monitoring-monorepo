@@ -54,6 +54,7 @@ query($owner: String!, $repo: String!, $endCursor: String) {
           pageInfo { hasPreviousPage startCursor }
           nodes {
             ... on CrossReferencedEvent {
+              willCloseTarget
               source { ... on PullRequest { number state } }
             }
           }
@@ -91,6 +92,7 @@ query($owner: String!, $repo: String!, $number: Int!, $endCursor: String) {
         pageInfo { hasNextPage endCursor }
         nodes {
           ... on CrossReferencedEvent {
+            willCloseTarget
             source { ... on PullRequest { number state } }
           }
         }
@@ -104,16 +106,31 @@ Say in Method how many issues needed that second pass. A cross-referencing
 pull request does not guarantee that `agent-active` or `in-pr` was applied, so
 the label check is a second net here, not a substitute for this one.
 
+`willCloseTarget` is what separates a claim from a mention. It is true only when
+the referencing pull request closes the issue on merge — `Closes #n`. The repo
+requires `Refs #n` instead whenever the issue's Done means is not fully
+satisfied, so dependency, exploratory, and partial-work pull requests
+cross-reference issues nobody has claimed. Treating every open cross-reference
+as ownership hides exactly those.
+
 Drop a candidate for any of the following, and keep the count dropped for each
 reason:
 
+- it carries neither `agent-ready` nor `needs-grooming` — the queue is those two
+  labels. This repo's workflows open issues outside it: drift reports,
+  supply-chain advisories, and Sentry triage records, none of which a ranking run
+  can select. Count them in Method as outside the queue rather than ranking them
+  into slots a workable issue should hold;
 - it has an assignee;
 - it carries `agent-active` or `in-pr` — this repo claims through labels and
   Project fields, so an owned issue can still have no assignee;
-- a cross-referencing pull request is `OPEN`;
+- a cross-referencing pull request is `OPEN` **and** its `willCloseTarget` is
+  true. An open `Refs #n` pull request is not a claim; note it in the reason if
+  it bears on the pick, but do not drop the issue for it;
 - the newest `.rankings/excluded.json` entry for its number has not expired yet
   — see the ledger contract under Stop There. A lapsed or superseded entry is
-  not a drop: that issue belongs back in the roster.
+  not a drop: that issue belongs back in the roster. A missing file is an empty
+  ledger, not an error: on the first run there is nothing to exclude.
 
 Keep `needs-grooming` issues in the roster. They score badly on ease and fit on
 their own merits, and seeing where they land is the point. Never Select one:
@@ -137,8 +154,13 @@ Cap fit, and name the cap in the reason:
   **fit at most 8**;
 - needs credentials, a provider console, or an account the loop cannot reach —
   **fit at most 8**;
-- needs a human approval inside the loop (Terraform apply, secret rotation,
-  indexer promote, merge) — **fit at most 12**.
+- needs an issue-specific human approval before the work is even ready to review
+  (Terraform apply, secret rotation, indexer promote) — **fit at most 12**.
+
+The merge approval every PR in this repo needs is not that cap. It applies
+equally to every issue, so capping on it would flatten the factor to a constant
+and stop it distinguishing anything. Cap only where an approval blocks the work
+itself, ahead of normal PR readiness.
 
 A capped issue can still be strong work. Say that plainly instead of quietly
 scoring it down: name the cap, and name what would lift it.
@@ -151,17 +173,32 @@ whose reason rests on its title alone does not belong in the table.
 
 Write `.rankings/ranking-<YYYY-MM-DD>.md` in UTC. If that name is taken, append
 the lowest number not yet used that day — `-2`, then `-3`, and on — so a third
-run never lands on the second run's file. Never overwrite a receipt. Three
-sections:
+run never lands on the second run's file. Never overwrite a receipt.
 
-1. **Method** — fetch timestamp, open-issue count, roster count, the per-reason
-   drop counts, how many bodies were read in full, and any cap that applied to a
-   whole class of issues.
+Claim the name by creating the file exclusively, and treat a collision as the
+answer rather than an error: under `set -o noclobber`, `: > "$name"` fails when
+the file already exists, so move to the next suffix and try again. Checking that
+a name is free and then writing it are two steps, and two runs in the same
+checkout can both pass the check before either writes — the later write would
+then destroy the earlier receipt the audit trail depends on.
+
+Three sections:
+
+1. **Method** — fetch timestamp, open-issue count, how many of those sat outside
+   the queue, roster count, the per-reason drop counts, how many bodies were read
+   in full, how many issues were scored from the list line, and any cap that
+   applied to a whole class of issues.
 2. **Top 15** — one table with the columns `Rank | Issue | Score | Reason`. The
    reason is one line: what the issue is, why it scores where it does, and the
    cap when one applied.
 3. **Selected** — one issue, its number and title, and why it beats the
    runner-up. State the first concrete step and what would make it stop.
+
+**An empty ready queue is a result, not a failure.** When no `agent-ready`
+candidate survives the drops — every one claimed, parked, or awaiting grooming —
+write `Selected: none` with the reason, and skip the runner-up comparison there
+is nothing to make. Method and the table still carry the run. Never groom, claim,
+or invent a candidate to fill the section.
 
 Print the Selected section, the top five rows, and the receipt path to the
 terminal. The receipt is the artifact; the terminal output is its summary.
@@ -188,6 +225,9 @@ Record a parked issue in `.rankings/excluded.json` so the next run skips it:
 Every entry carries an `expires_at`, because every park here is time-boxed. A
 run drops an issue only while the **newest** entry for that number is still
 unexpired; once it expires the issue returns to the roster on its own.
+
+The file is absent until the first park. Read a missing file as `[]` and rank
+the whole roster; do not create an empty one to make the read succeed.
 
 Append only. To un-park early, append a fresh entry for the same number with an
 `expires_at` already in the past — never edit or delete the old one. The ledger
