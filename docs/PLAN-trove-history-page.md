@@ -115,7 +115,11 @@ Semantics the page depends on:
   change only. Resulting debt = previous recorded debt + accrued interest +
   `_debtIncreaseFromRedist` + `_debtIncreaseFromUpfrontFee` + the signed
   change. Accrued interest is the one term events never carry; it is the
-  residual between consecutive snapshots.
+  residual between consecutive snapshots. Any before/after pair derived from
+  this arithmetic is therefore defined as **post-accrual**: `before` is the
+  recorded debt with accrued interest already folded in, immediately before
+  the operation's own change; `after − evented terms` recovers exactly that
+  value, never the pre-accrual figure.
 - A redemption hit emits, per trove in one tx: `TroveUpdated` (or
   `BatchedTroveUpdated`) with the reduced totals, `TroveOperation(op=6,
 −boldLot, −collLot)`, and `RedemptionFeePaidToTrove(fee)`. The fee stays in
@@ -205,7 +209,7 @@ existing `TroveOperation` handler from data it already receives:
 
 ```graphql
 type TroveLedgerEvent @index(fields: ["troveEntityId", "timestamp"]) {
-  id: ID! # eventId(chainId, block, logIndex)
+  id: ID! # eventId(chainId, block, logIndex) — an UNPADDED string; never sort by it
   chainId: Int!
   instanceId: String! @index
   troveEntityId: String! # makeTroveId(collateralId, troveId)
@@ -218,8 +222,8 @@ type TroveLedgerEvent @index(fields: ["troveEntityId", "timestamp"]) {
   debtIncreaseFromRedist: BigInt!
   collIncreaseFromRedist: BigInt!
   annualInterestRate: BigInt!
-  debtBefore: BigInt!
-  debtAfter: BigInt!
+  debtBefore: BigInt # post-accrual, pre-operation; null on batch-op rows until replay
+  debtAfter: BigInt # null on batch-op rows until replay
   collBefore: BigInt!
   collAfter: BigInt!
   statusBefore: String!
@@ -231,6 +235,7 @@ type TroveLedgerEvent @index(fields: ["troveEntityId", "timestamp"]) {
   icrAfterBps: Int # null when price unavailable
   timestamp: BigInt!
   blockNumber: BigInt!
+  logIndex: Int! # numeric position for same-timestamp ordering
   txHash: String!
 }
 ```
@@ -245,12 +250,33 @@ writer in a handler that already loads every input.
 
 Writer notes:
 
-- Capture `debtBefore/collBefore/statusBefore` correctly. The robust source
-  is arithmetic, both here and in the fix for the existing snapshot bug:
-  the paired `TroveUpdated`/`BatchedTroveUpdated` in the same tx gives the
+- Capture `debtBefore/collBefore` correctly. The robust source is
+  arithmetic, both here and in the fix for the existing snapshot bug: the
+  paired `TroveUpdated`/`BatchedTroveUpdated` in the same tx gives the
   resulting state, and `after − (sum of evented deltas) = before`, with
   accrued interest landing as an explicit residual term. Direction matters:
   derive `before` from `after`, never `after` from a pre-captured `before`.
+  These snapshots are **post-accrual, pre-operation** (semantics section
+  above): `after − evented terms` recovers the debt with accrued interest
+  already folded in, so the pair is self-consistent and the client-side
+  interest residual falls between rows, never inside one. Tests must cover
+  both zero elapsed interest (open, same-block ops) and non-zero elapsed
+  interest (an op days after the last touch).
+- `statusBefore` is NOT recoverable arithmetically: by the time
+  `TroveOperation` is handled, the `TroveUpdated` handler has already
+  classified and persisted the resulting status, and numeric deltas cannot
+  distinguish active/zombie/redeemed or the pre-open placeholder. Capture
+  the prior status into same-tx pending state in the
+  `TroveUpdated`/`BatchedTroveUpdated` handler before it mutates the
+  `Trove`, and let the ledger writer read it from there (the short-lived
+  pending pattern the batch replay machinery already uses).
+- Batch-op rows (ops 7-9 and in-batch adjusts/applies) cannot fill debt
+  snapshots from this handler: `BatchedTroveUpdated` carries shares and
+  collateral, and per-trove debt only becomes derivable when `BatchUpdated`
+  is replayed. Write those rows with null `debtBefore/debtAfter` and patch
+  them through the existing batch-replay path, or leave them null with the
+  UI's "—" rendering — production has zero batches today, so the seam is
+  cheap either way. Collateral snapshots stay non-null.
 - Op 6 enrichment: `RedemptionFeePaidToTrove` follows `TroveOperation` in the
   same tx; carry the fee onto the ledger row (same short-lived pending
   pattern the batch replay machinery already uses). `isRebalance` copies the
@@ -273,8 +299,15 @@ Writer notes:
 - Fix `TroveOperationEvent.debtBefore/debtAfter/collBefore/collAfter`
   (gap 3) with the same arithmetic derivation, in its own slice with its own
   test proving the open row reads `before = 0`.
-- Add `@index(fields: ["troveId", "timestamp"])` to `TroveOperationEvent`
-  (gap 5) so the interim owner/trove filters stop scanning.
+- Add `@index(fields: ["instanceId", "troveId", "timestamp"])` to
+  `TroveOperationEvent` (gap 5) so the interim per-trove filter stops
+  scanning. The raw `troveId` alone is NOT market-unique: it is
+  `keccak(owner, ownerIndex)`, so the same owner and index produce the same
+  id on every branch — every per-trove filter scopes by `instanceId` too.
+- Index `Trove.previousOwner`: the NFT burn handler zeroes `owner` on close
+  and liquidation and moves the last owner into `previousOwner`
+  (`troveNFT.ts`), so an owner lookup over `owner` alone cannot find exactly
+  the closed troves support asks about.
 
 ### Deferred, with seams
 
@@ -294,23 +327,37 @@ graphql contract test, regenerated via `pnpm indexer:codegen` and
 - `CDP_TROVE_BY_ID(troveEntityId)` — one `Trove` row (header card), plus its
   `LiquityCollateral` params.
 - `CDP_TROVE_LEDGER(troveEntityId, limit)` — `TroveLedgerEvent`
-  `order_by: [{timestamp: asc}, {id: asc}]`. A trove's whole life fits far
-  under the 1,000-row Hasura cap in every observed case; still detect
-  `length === limit` and disclose ("history truncated") per the row-cap
-  discipline.
-- `CDP_TROVES_BY_OWNER(owner)` — `Trove` rows across markets (owner is
-  indexed), for the support entry path.
-- The ledger query ships introspection-gated like the existing
-  `CDP_TROVE_OP_SNAPSHOTS` pattern: the page detects `TroveLedgerEvent` in
-  the schema and falls back to the interim assembly (below) while the
-  indexer rollout is in flight.
+  `order_by: [{timestamp: desc}, {blockNumber: desc}, {logIndex: desc}]`,
+  reversed client-side, so if a trove ever exceeds the 1,000-row Hasura cap
+  the OLDEST rows drop, never the recent events being investigated. `id` is
+  an unpadded string and never participates in ordering. Detect
+  `length === limit` and disclose ("earliest history truncated") per the
+  row-cap discipline.
+- `CDP_TROVES_BY_OWNER(address)` — `Trove` rows across markets matching
+  `_or: [{owner}, {previousOwner}]`, for the support entry path: close and
+  liquidation zero `owner`, so `previousOwner` is how a closed trove is
+  found by the address a user supplies.
+- Timing: dashboard codegen and the GraphQL contract test validate every
+  exported query against the in-repo `indexer-envio/schema.graphql`, so
+  `CDP_TROVE_LEDGER` can only be added once slice 2's schema change is
+  merged — it is not an optional-query exclusion. The runtime introspection
+  gate (the `CDP_TROVE_OP_SNAPSHOTS` pattern) covers the remaining window
+  where the schema is merged but hosted Hasura has not yet promoted: the
+  page detects `TroveLedgerEvent` in the live schema and falls back to the
+  interim assembly (below) until it appears.
 
 Interim assembly (works against today's schema, ships first): merge
-`TroveOperationEvent` filtered by `troveId` (user ops) with `Trove`
-cumulatives (redemption/liquidation totals). This yields a partial ledger —
-user actions plus lifetime redemption totals with a visible "per-redemption
-detail pending indexer rollout" notice. It answers half the ticket
-immediately and exercises the whole UI shell.
+`TroveOperationEvent` filtered by `instanceId` AND `troveId` (user ops; raw
+`troveId` collides across markets) with `Trove` cumulatives
+(redemption/liquidation lifetime totals). This is an explicitly **partial**
+view and must say so: protocol rows (redemptions, liquidation, op 4) are
+missing, so the interest-residual estimate, the debt/coll chart, the
+net-equity figure, and the cumulatives-reconciliation check are all
+suppressed — deriving any of them from user ops alone would misclassify
+missing redemption deltas as interest. The partial view shows the header,
+the raw lifetime totals, and the user-op list with a visible
+"per-redemption detail pending indexer rollout" notice. It answers half the
+ticket immediately and exercises the whole UI shell.
 
 ## UI design
 
@@ -343,7 +390,7 @@ today, so the new `troves/[troveId]/_components` rule lands with the page
 
 ### Layout
 
-```
+```text
 ┌──────────────────────────────────────────────────────────────────┐
 │ GBPm · Trove 0x8abc…0d7d          [active] [Manage in app ↗]     │
 │ Owner 0xcca0…d3bb   Opened 2026-08-06 (tx)   Rate 1.6% (#2 in    │
@@ -375,38 +422,55 @@ today, so the new `troves/[troveId]/_components` rule lands with the page
   figure is honest about staleness: recorded-at-last-event plus timestamp. A
   live `entireDebt` read via the existing `rpc-client.ts` is an optional
   enhancement, decided at implementation (open question 1).
-- **Redemption impact** computes from `Trove` cumulatives, so it works even
-  before the ledger entity ships. Split user vs rebalance per the invariants
-  note once per-hit rows exist; until then label totals as totals. The
-  one-line explainer carries the ticket's core lesson.
+- **Redemption impact** computes its totals from `Trove` cumulatives, so
+  they work even before the ledger entity ships. Split user vs rebalance
+  per the invariants note once per-hit rows exist; until then label totals
+  as totals. The net-equity line requires per-hit `redemptionPrice` — a
+  trove redeemed at different FX prices cannot be valued from lifetime
+  sums, and pricing it at the current rate would fabricate the core support
+  answer — so it renders only from complete ledger rows and is absent in
+  the partial view. The one-line explainer carries the ticket's core
+  lesson.
 - **Why me** reads the current rate ladder (open troves / brackets already
   fetched on the market page): rank among open troves by effective rate, and
   the sum of open debt at strictly lower rates ("shield"). States plainly
   that historical rank is not tracked.
-- **Chart**: `TimeSeriesChartCard` with series built from ledger
-  `collAfter`/`debtAfter` (step interpolation), `sortedCopy` for ordering,
-  `escapePlotText` on any dynamic text. The chart reads the same bounded
-  full-history query as the table — one query, no pagination coupling.
+- **Chart**: two stacked single-unit panels — collateral (USDm) and debt
+  (debt-token units) — never one dual-axis plot, with series built from
+  ledger `collAfter`/`debtAfter` (step interpolation), `sortedCopy` for
+  ordering, `escapePlotText` on any dynamic text. `TimeSeriesChartCard`
+  exposes one y-axis and hardcodes dollar-prefixed hover formatting
+  (`time-series-chart-card.tsx:283-323`), which would label GBPm/JPYm debt
+  as dollars — either extend it with per-series unit formatting and
+  subplot support or build a sibling two-panel chart component on the same
+  chrome. The chart reads the same bounded full-history query as the table
+  — one query, no pagination coupling — and renders only from the complete
+  ledger, never the partial view.
 - **Ledger table**: badge pills reuse `BADGE_STYLES`/`BADGE_LABELS` plus new
   kinds (`rebalanceRedemption` already exists; add `zombie`, `revived`,
   `interest`). Signed deltas use `formatSignedWei`; unsigned totals use
   `formatTokenAmount` — per-field semantics, exactly as the invariants note
   requires. Synthetic, clearly-marked "interest accrued ≈ +X" rows render
   the residual between consecutive rows' recorded debt after subtracting the
-  evented terms; they are derived client-side, labeled as estimates, and
-  excluded from sums. Status flips render from
-  `statusBefore`/`statusAfter`. Default order chronological ascending, id
-  tiebreaker, newest visible via reverse toggle; local-only state
-  (intentional scope: single bounded dataset, no URL pagination).
+  evented terms; they are derived client-side, labeled as estimates,
+  excluded from sums, and rendered only in complete-ledger mode (the
+  partial view suppresses them). Status flips render from
+  `statusBefore`/`statusAfter`. Default order chronological ascending with
+  the `blockNumber`, `logIndex` tiebreakers, newest visible via reverse
+  toggle; local-only state (intentional scope: single bounded dataset, no
+  URL pagination).
 
 ### Invariants (stateful-data-ui checklist, defined up front)
 
-1. Every ledger row persists `txHash`, `blockNumber`, `timestamp`, and a
-   unique `id`; ordering is deterministic (`timestamp`, `id`).
+1. Every ledger row persists `txHash`, `blockNumber`, `logIndex`,
+   `timestamp`, and a unique `id`; ordering is deterministic on the numeric
+   triple (`timestamp`, `blockNumber`, `logIndex`). The unpadded string
+   `id` never participates in ordering (`_10` sorts before `_2`).
 2. The ledger is append-only; the `Trove` entity remains the only mutable
-   trove state. Cumulatives shown on the page must equal the sum of ledger
-   rows of the matching kind — a mismatch is a bug surface, not a rendering
-   choice (the ticket reconstruction validated to the wei; keep a test).
+   trove state. In complete-ledger mode, cumulatives shown on the page must
+   equal the sum of ledger rows of the matching kind — a mismatch is a bug
+   surface, not a rendering choice (the ticket reconstruction validated to
+   the wei; keep a test). The partial view skips this check by design.
 3. Total redemption figures are never presented as user activity;
    user-driven = total − rebalance.
 4. `priceAtEvent`/`icrAfterBps` are nullable; every consumer renders null as
@@ -417,24 +481,29 @@ today, so the new `troves/[troveId]/_components` rule lands with the page
 
 ### Degraded modes
 
-- `TroveLedgerEvent` absent from schema (pre-rollout, or rollback): page
-  renders header + cumulative cards + user-ops-only ledger with a visible
-  "protocol events pending" notice. No silent gaps.
+- `TroveLedgerEvent` absent from schema (pre-rollout, or rollback): the
+  partial view — header, raw cumulative totals, user-ops-only list, visible
+  "protocol events pending" notice; interest estimates, the chart, net
+  equity, and reconciliation stay off. No silent gaps.
 - Ledger query fails with header loaded: cards render, table shows the error
   state with retry; distinct loading vs empty vs error per `swr-state`
   helpers.
 - Unknown trove id: explicit "not indexed" state with an explorer address
   link fallback, no redirect loop.
 - Old rows without price fields: chart drops the ICR series and says so.
-- History at the row cap: "truncated" disclosure (invariant: cap detected by
-  `length === limit`).
+- History at the row cap: newest rows are kept (desc fetch, reversed
+  client-side) and the page discloses "earliest history truncated" (cap
+  detected by `length === limit`).
 
 ### Tests
 
-- Indexer: handler tests proving open rows read `before = 0`, redemption
-  rows carry fee/isRebalance/price, status flips produce correct
-  before/after, and the split-redemption case (one instance redemption, two
-  troves) yields two rows whose sums match the branch event.
+- Indexer: handler tests proving open rows read `before = 0`, snapshots are
+  correct with both zero and non-zero elapsed interest since the last touch,
+  redemption rows carry fee/isRebalance/price, status flips produce correct
+  before/after (including the pending-state capture across the
+  `TroveUpdated` → `TroveOperation` ordering), and the split-redemption case
+  (one instance redemption, two troves) yields two rows whose sums match the
+  branch event.
 - Dashboard: colocated unit tests for ledger merge/derivation (interest
   residual, badge mapping, formatter choice), the three degraded modes, and
   entry-link resolution. Fixture-server browser scenario for the route;
@@ -474,8 +543,12 @@ promote):
 4. **Entry points** (dashboard) — trove-table links, owner lookup on
    `/cdps`, docs/index updates.
 
-Slices 3 and 4 can ship before 2 completes (interim assembly); the page
-upgrades itself when the schema lands, by design of the introspection gate.
+Slices 3 and 4 can ship before 2 completes, but only with the interim
+queries: `CDP_TROVE_LEDGER` cannot be added until slice 2's schema change is
+merged, because dashboard codegen and the contract test validate against the
+in-repo `schema.graphql`. Once both are in, the runtime introspection gate
+covers the deploy window and the page upgrades itself when hosted Hasura
+serves the new entity.
 
 ## Open questions
 
