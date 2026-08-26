@@ -335,6 +335,51 @@ function jobBody(workflow, jobId) {
 }
 
 /**
+ * The lines of the one step running `command`, or null when no step does.
+ *
+ * A step opens with `      - ` and its remaining keys sit at eight spaces, so
+ * the block runs from that list item to the next one or the end of the job.
+ */
+function stepBlockFor(jobLines, command) {
+  const at = jobLines.findIndex((line) => line.trim() === `run: ${command}`);
+  if (at === -1) return null;
+  let start = at;
+  while (start > 0 && !/^ {6}- /.test(jobLines[start])) start -= 1;
+  let end = at + 1;
+  while (end < jobLines.length && !/^ {6}- /.test(jobLines[end])) end += 1;
+  return jobLines.slice(start, end);
+}
+
+/**
+ * Ways a step can still be present and still gate nothing.
+ *
+ * Asserting that a `run:` line exists proves the command is written down, not
+ * that its failure stops the job. A step-level `if:` makes it skip, and
+ * `continue-on-error` makes its failure advisory; either leaves the required
+ * `ci` sentinel green over a guardrail that no longer holds. The job-level
+ * `if:` checked separately is only the coarsest version of the same move.
+ *
+ * @returns {string[]} empty when the step runs and can fail the job
+ */
+function stepEnforcementProblems(jobLines, jobId, command) {
+  const step = stepBlockFor(jobLines, command);
+  if (!step) return [`the \`${jobId}\` job no longer runs \`${command}\``];
+
+  const problems = [];
+  if (step.some((line) => /^ {8}if:/.test(line))) {
+    problems.push(
+      `the \`${command}\` step in \`${jobId}\` carries a step-level \`if:\`, so it can skip while the job still passes`,
+    );
+  }
+  if (step.some((line) => /^ {8}continue-on-error:/.test(line))) {
+    problems.push(
+      `the \`${command}\` step in \`${jobId}\` sets \`continue-on-error\`, so its failure would not fail the job`,
+    );
+  }
+  return problems;
+}
+
+/**
  * The second host that keeps the wiring assertion from dying with its subject.
  *
  * The assertion below runs inside `guardrail-prose`, so on its own it is
@@ -351,12 +396,12 @@ function jobBody(workflow, jobId) {
 function suiteHostProblems(workflow) {
   const host = jobBody(workflow, SUITE_HOST_JOB);
   if (!host) return [`ci.yml defines no \`${SUITE_HOST_JOB}\` job`];
-  if (!host.some((line) => line.trim() === `run: ${SUITE_COMMAND}`)) {
+  if (!stepBlockFor(host, SUITE_COMMAND)) {
     return [
       `the \`${SUITE_HOST_JOB}\` job no longer runs \`${SUITE_COMMAND}\`, leaving \`${GUARDRAIL_JOB}\` as the only witness to its own wiring`,
     ];
   }
-  return [];
+  return stepEnforcementProblems(host, SUITE_HOST_JOB, SUITE_COMMAND);
 }
 
 /**
@@ -380,12 +425,13 @@ function guardrailWiringProblems(workflow) {
       `the \`${GUARDRAIL_JOB}\` job carries a job-level \`if:\`; a skipped required check counts as satisfied`,
     );
   }
+  if (job.some((line) => /^ {4}continue-on-error:/.test(line))) {
+    problems.push(
+      `the \`${GUARDRAIL_JOB}\` job sets \`continue-on-error\`, so it reports success however it ends`,
+    );
+  }
   for (const command of GUARDRAIL_COMMANDS) {
-    if (!job.some((line) => line.trim() === `run: ${command}`)) {
-      problems.push(
-        `the \`${GUARDRAIL_JOB}\` job no longer runs \`${command}\``,
-      );
-    }
+    problems.push(...stepEnforcementProblems(job, GUARDRAIL_JOB, command));
   }
 
   const sentinel = jobBody(workflow, "ci");
@@ -468,6 +514,44 @@ test("the wiring assertion reds on each way that wiring could rot", () => {
           "      - name: Deviation threshold drift suite\n",
         ),
       /the `scripts` job no longer runs/,
+    ],
+    [
+      // A step present but skipped is the cheaper version of deleting it, and
+      // the job-level `if:` control above does not cover it.
+      "the checker step is gated behind a step-level if",
+      (text) =>
+        text.replace(
+          "      - name: Guardrail prose pins\n        run: node scripts/repo-health/check-guardrail-prose.mjs\n",
+          "      - name: Guardrail prose pins\n        if: false\n        run: node scripts/repo-health/check-guardrail-prose.mjs\n",
+        ),
+      /carries a step-level `if:`/,
+    ],
+    [
+      "the suite step is made advisory with continue-on-error",
+      (text) =>
+        text.replace(
+          "      - name: Guardrail prose pins\n        run: node scripts/repo-health/check-guardrail-prose.mjs\n      - name: Guardrail prose pin suite\n        run: node scripts/repo-health/check-guardrail-prose.test.mjs\n",
+          "      - name: Guardrail prose pins\n        run: node scripts/repo-health/check-guardrail-prose.mjs\n      - name: Guardrail prose pin suite\n        continue-on-error: true\n        run: node scripts/repo-health/check-guardrail-prose.test.mjs\n",
+        ),
+      /sets `continue-on-error`/,
+    ],
+    [
+      "the second host's step is gated behind a step-level if",
+      (text) =>
+        text.replace(
+          "      - name: Guardrail prose pin suite\n        run: node scripts/repo-health/check-guardrail-prose.test.mjs\n      - name: Deviation threshold drift suite\n",
+          "      - name: Guardrail prose pin suite\n        if: false\n        run: node scripts/repo-health/check-guardrail-prose.test.mjs\n      - name: Deviation threshold drift suite\n",
+        ),
+      /step in `scripts` carries a step-level `if:`/,
+    ],
+    [
+      "the whole job is made advisory with continue-on-error",
+      (text) =>
+        text.replace(
+          "  guardrail-prose:\n    name: Guardrail prose pins\n",
+          "  guardrail-prose:\n    name: Guardrail prose pins\n    continue-on-error: true\n",
+        ),
+      /job sets `continue-on-error`/,
     ],
     [
       "the sentinel stops needing it",

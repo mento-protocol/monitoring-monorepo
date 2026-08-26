@@ -91,6 +91,16 @@ in one commit still passes — no check can outlive its own removal — but that
 edit is visible in a single diff, which is the property being bought throughout
 this record. The cost is one duplicate sub-second run on `scripts/**` diffs.
 
+**Present is not the same as enforcing.** A `run:` line proves the command is
+written down, not that its failure stops the job. A step-level `if:` makes the
+step skip, and `continue-on-error` makes its failure advisory; either leaves the
+required `ci` context green over a guardrail that no longer holds, and the
+job-level `if:` above is only the coarsest version of the same move. The suite
+therefore rejects step-level `if:` and `continue-on-error` on every guardrail
+step in both hosts, and `continue-on-error` on the job itself, each with its own
+negative control. Ten controls now mutate the real `ci.yml`, and each asserts
+the mutation changed the file before asserting the check reds.
+
 **`CLAUDE.md` carries its own pin block.** It is a symlink to `AGENTS.md` and
 `readFileSync` follows it, so both blocks read the same bytes and the
 duplication is free today. It is also the path the Claude runtime loads, and
