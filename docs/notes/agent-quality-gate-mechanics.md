@@ -805,10 +805,14 @@ type, and exact `<token>\n` body, and holds that descriptor through the scan.
 It probes signal permission and reads the real, effective, saved-set, and
 filesystem UIDs from `/proc/<pid>/status`. A sender real/effective match with a
 target real/saved-set UID keeps a policy-confined or set-ID descendant in
-scope. A successful signal probe also covers `CAP_KILL`. The scan reads the
-bounded common header of each `/proc/<pid>/fdinfo` record as an inode prefilter.
-It runs the exact device-and-inode stat only for possible matches. The exact
-stat remains authoritative. The scan requires the process start identity to
+scope. A successful signal probe also covers `CAP_KILL`. A full discovery scan
+reads each proc-fd target. It skips only non-absolute targets such as pipes,
+sockets, and anonymous inodes. The regular-file marker always has an absolute
+target. The scan compares the exact device and inode for every absolute target.
+It stops scanning a process after a match. Handle revalidation after a process
+identity or process-group snapshot limits the procfs environment and descriptor
+checks to the observed PID. Full refreshes still scan all PIDs to discover new
+or reparented descendants. The scan requires the process start identity to
 remain equal before and after identity and fd enumeration. Process-exit races
 are empty observations. A restricted `hidepid` mount, unreadable in-scope
 process, or other incomplete scan is a scan failure. When `/proc/self/fd`
@@ -1565,7 +1569,9 @@ of them.
    path — this loop runs once per process on the host — but it is not the
    guard, because permission bits are not what the kernel decides on. The scan
    reads NUL-delimited records with Bash builtins and compares each complete
-   record. It does not start `tr` or `grep` for each visible PID.
+   record. It does not start `tr` or `grep` for each visible PID. An exact-PID
+   revalidation reads only that PID's environment. Full refreshes retain the
+   host-wide scan that discovers new descendants.
 
 8. **Elapsed time comes from the clock, not from counting sleeps.** A loop that
    adds its own poll interval per iteration is measuring what it asked for. Any

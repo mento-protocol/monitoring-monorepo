@@ -3422,9 +3422,12 @@ gate_drain_membership_holds() {
   # Re-scan exact inherited handles after reading this PID's start identity.
   # A cached numeric match can exit and be reused between discovery and this
   # check. The replacement would then be recorded under its own valid start
-  # identity and could pass every later signal guard.
+  # identity and could pass every later signal guard. This is an exact-PID
+  # revalidation. Full refreshes on both sides still discover new descendants.
   if [[ -n "$gate_drain_membership_token" ]]; then
-    tagged_after="$(gate_run_tagged_pids "$gate_drain_membership_token")"
+    tagged_after="$(
+      gate_run_tagged_pids "$gate_drain_membership_token" "$pid"
+    )"
     for candidate in $tagged_after; do
       if [[ "$candidate" == "$gate_drain_scan_error" ]]; then
         gate_drain_scan_failed=1
@@ -3578,6 +3581,7 @@ gate_drain_capture_seed_group() {
   local group_anchor_start group_anchors=""
   local seed_current seed_snapshot_pgid
   local tagged_start tagged_current tagged_after tagged_after_clean=""
+  local tagged_probe tagged_confirmed
   local tagged_candidate tagged_identities=""
   local identity_source_available=0
   [[ "$gate_drain_seed_pgid" =~ ^[1-9][0-9]*$ ||
@@ -3603,18 +3607,38 @@ gate_drain_capture_seed_group() {
     gate_drain_scan_failed=1
     return 0
   fi
-  # Re-read the handles after the group snapshot. A tagged PID can seed a
-  # group only if the same process held the token on both sides of the
-  # snapshot. Keep this list local. The caller captures newly tagged roots on
-  # its next pass.
-  tagged_after="$(gate_run_tagged_pids "$token")"
-  for tagged_candidate in $tagged_after; do
-    if [[ "$tagged_candidate" == "$gate_drain_scan_error" ]]; then
-      gate_drain_scan_failed=1
-      continue
-    fi
-    tagged_after_clean="${tagged_after_clean}${tagged_candidate} "
-  done
+  # Re-read the observed PIDs' handles after the group snapshot. A tagged PID
+  # can seed a group only if the same process held the token on both sides of
+  # the snapshot. Linux exact-PID scans avoid a second full procfs census. The
+  # lsof fallback keeps one witnessed scan because lsof still performs a host
+  # census for each PID filter. The caller captures new roots on its next full
+  # refresh.
+  if gate_run_proc_marker_scan_available; then
+    for tagged in $gate_drain_tagged_now; do
+      [[ "$tagged" =~ ^[1-9][0-9]*$ ]] || continue
+      tagged_confirmed=0
+      tagged_probe="$(gate_run_tagged_pids "$token" "$tagged")"
+      for tagged_candidate in $tagged_probe; do
+        if [[ "$tagged_candidate" == "$gate_drain_scan_error" ]]; then
+          gate_drain_scan_failed=1
+          continue
+        fi
+        [[ "$tagged_candidate" == "$tagged" ]] && tagged_confirmed=1
+      done
+      if [[ "$tagged_confirmed" -eq 1 ]]; then
+        tagged_after_clean="${tagged_after_clean}${tagged} "
+      fi
+    done
+  else
+    tagged_probe="$(gate_run_tagged_pids "$token")"
+    for tagged_candidate in $tagged_probe; do
+      if [[ "$tagged_candidate" == "$gate_drain_scan_error" ]]; then
+        gate_drain_scan_failed=1
+        continue
+      fi
+      tagged_after_clean="${tagged_after_clean}${tagged_candidate} "
+    done
+  fi
   tagged_after="$tagged_after_clean"
   if [[ "$gate_drain_seed_pgid" =~ ^[1-9][0-9]*$ &&
     -n "$gate_drain_seed_start" ]]; then

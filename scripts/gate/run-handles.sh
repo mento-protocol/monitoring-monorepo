@@ -298,7 +298,12 @@ gate_run_drop_lsof_marker_witness() {
 gate_run_lsof_marker_pids() {
   local token="$1"
   local marker="$2"
+  local target_pid="${3:-}"
   local witness_dir witness found status
+  if [[ -n "$target_pid" && ! "$target_pid" =~ ^[1-9][0-9]*$ ]]; then
+    printf '%s\n' "$gate_drain_scan_error"
+    return 0
+  fi
   if [[ ! "${gate_lock_local_host_fingerprint:-}" =~ ^[0-9a-f]{64}$ ]]; then
     if ! declare -F gate_lock_ensure_local_host_fingerprint >/dev/null 2>&1 ||
       ! gate_lock_ensure_local_host_fingerprint; then
@@ -331,7 +336,12 @@ gate_run_lsof_marker_pids() {
     printf '%s\n' "$gate_drain_scan_error"
     return 0
   fi
-  found="$(lsof -w -t -- "$witness" 2>/dev/null)" && status=0 || status=$?
+  if [[ -n "$target_pid" ]]; then
+    found="$(lsof -w -a -p "$target_pid" -t -- "$witness" 2>/dev/null)" &&
+      status=0 || status=$?
+  else
+    found="$(lsof -w -t -- "$witness" 2>/dev/null)" && status=0 || status=$?
+  fi
   [[ "$status" -le 1 ]] || printf '%s\n' "$gate_drain_scan_error"
   [[ -z "$found" ]] || printf '%s\n' "$found"
   if ! gate_run_private_marker_directory_is_safe "$witness_dir" ||
@@ -348,12 +358,18 @@ gate_run_proc_marker_scan_available() {
 gate_run_proc_marker_pids() {
   local token="$1"
   local marker="$2"
+  local target_pid="${3:-}"
   local found status
+  if [[ -n "$target_pid" && ! "$target_pid" =~ ^[1-9][0-9]*$ ]]; then
+    printf '%s\n' "$gate_drain_scan_error"
+    return 0
+  fi
   # shellcheck disable=SC2016 # the single-quoted program contains JavaScript templates
   found="$(node -e '
     const fs = require("node:fs");
     const { constants } = fs;
-    const [markerPath, expectedToken, uidText] = process.argv.slice(1);
+    const [markerPath, expectedToken, uidText, targetPid] =
+      process.argv.slice(1);
     const expectedUid = BigInt(uidText);
     const signalScopeUids = new Set([
       BigInt(process.getuid()),
@@ -378,33 +394,6 @@ gate_run_proc_marker_pids() {
         0,
       );
       return read === body.length && body.equals(expectedBody);
-    };
-    const readFdInfoInode = (path) => {
-      const descriptor = fs.openSync(
-        path,
-        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-      );
-      try {
-        // Type-specific fdinfo data can be large. The common header, including
-        // ino on kernels that provide it, appears before that data.
-        const prefix = Buffer.alloc(1024);
-        const bytesRead = fs.readSync(
-          descriptor,
-          prefix,
-          0,
-          prefix.length,
-          0,
-        );
-        const value = prefix.subarray(0, bytesRead).toString("utf8");
-        const inodeLines = value
-          .split("\n")
-          .filter((line) => line.startsWith("ino:"));
-        if (inodeLines.length !== 1) return null;
-        const match = /^ino:[ \t]+([0-9]+)[ \t]*$/u.exec(inodeLines[0]);
-        return match ? BigInt(match[1]) : null;
-      } finally {
-        fs.closeSync(descriptor);
-      }
     };
     const processStart = (pid) => {
       let value;
@@ -486,20 +475,12 @@ gate_run_proc_marker_pids() {
       ) {
         throw new Error("unsafe marker snapshot");
       }
-      let markerFdInfoInode = null;
-      try {
-        const candidate = readFdInfoInode(
-          `/proc/self/fdinfo/${markerDescriptor}`,
-        );
-        if (candidate === markerBefore.ino) markerFdInfoInode = candidate;
-      } catch {
-        // Exact descriptor stats remain the compatibility path when this
-        // kernel does not provide a usable common fdinfo inode field.
-      }
       assertCompleteProcEnumeration();
       fs.readdirSync("/proc/self/fd");
       const found = [];
-      for (const pid of fs.readdirSync("/proc")) {
+      const processIds =
+        targetPid === "" ? fs.readdirSync("/proc") : [targetPid];
+      for (const pid of processIds) {
         if (!/^[1-9][0-9]*$/u.test(pid) || pid === String(process.pid)) {
           continue;
         }
@@ -549,25 +530,13 @@ gate_run_proc_marker_pids() {
         for (const descriptor of descriptors) {
           if (!/^[0-9]+$/u.test(descriptor)) continue;
           try {
-            if (markerFdInfoInode !== null) {
-              let heldFdInfoInode = null;
-              try {
-                heldFdInfoInode = readFdInfoInode(
-                  `/proc/${pid}/fdinfo/${descriptor}`,
-                );
-              } catch (error) {
-                if (ignoredRaceCodes.has(error?.code)) continue;
-                // A failed prefilter is not an empty observation. Fall through
-                // to the authoritative descriptor stat.
-              }
-              if (
-                heldFdInfoInode !== null &&
-                heldFdInfoInode !== markerBefore.ino
-              ) {
-                continue;
-              }
-            }
-            const held = fs.statSync(`/proc/${pid}/fd/${descriptor}`, {
+            const heldPath = `/proc/${pid}/fd/${descriptor}`;
+            const heldTarget = fs.readlinkSync(heldPath);
+            // The marker is a regular file. Linux renders its proc-fd target
+            // as an absolute path. Pipe, socket, and anon-inode targets are
+            // non-absolute and cannot match its validated inode.
+            if (!heldTarget.startsWith("/")) continue;
+            const held = fs.statSync(heldPath, {
               bigint: true,
             });
             if (sameInode(markerBefore, held)) {
@@ -603,7 +572,8 @@ gate_run_proc_marker_pids() {
     } finally {
       if (markerDescriptor !== undefined) fs.closeSync(markerDescriptor);
     }
-  ' "$marker" "$token" "$(id -u)" 2>/dev/null)" && status=0 || status=$?
+  ' "$marker" "$token" "$(id -u)" "$target_pid" 2>/dev/null)" &&
+    status=0 || status=$?
   if [[ "$status" -ne 0 ]]; then
     printf '%s\n' "$gate_drain_scan_error"
     return 0
@@ -613,7 +583,9 @@ gate_run_proc_marker_pids() {
 
 gate_run_tagged_pids() {
   local token="$1"
+  local target_pid="${2:-}"
   local environ environ_entry environ_match pid marker found pattern status
+  local -a environ_paths=()
   # A token read back from a lock record names processes (through this
   # pattern) and files (holder.*), and on a shared root it can be another
   # user's writing. One that does not have the gate-generated shape is never
@@ -623,6 +595,11 @@ gate_run_tagged_pids() {
   # instead.
   if ! gate_lock_token_is_wellformed "$token"; then
     echo "error: malformed run token in a lock record; refusing to match processes with it." >&2
+    printf '%s\n' "$gate_drain_scan_error"
+    return 0
+  fi
+  if [[ -n "$target_pid" && ! "$target_pid" =~ ^[1-9][0-9]*$ ]]; then
+    echo "error: invalid target PID for the run-handle scan." >&2
     printf '%s\n' "$gate_drain_scan_error"
     return 0
   fi
@@ -639,9 +616,23 @@ gate_run_tagged_pids() {
   fi
   found="$(pgrep -f "(^| )agentqg:${pattern}( |\$)" 2>/dev/null)" && status=0 || status=$?
   [[ "$status" -le 1 ]] || printf '%s\n' "$gate_drain_scan_error"
-  [[ -z "$found" ]] || printf '%s\n' "$found"
+  if [[ -n "$target_pid" ]]; then
+    for pid in $found; do
+      if [[ "$pid" == "$target_pid" ]]; then
+        printf '%s\n' "$pid"
+        break
+      fi
+    done
+  elif [[ -n "$found" ]]; then
+    printf '%s\n' "$found"
+  fi
   if [[ -d /proc ]]; then
-    for environ in /proc/[0-9]*/environ; do
+    if [[ -n "$target_pid" ]]; then
+      environ_paths=("/proc/${target_pid}/environ")
+    else
+      environ_paths=(/proc/[0-9]*/environ)
+    fi
+    for environ in "${environ_paths[@]}"; do
       # A builtin test first, because this loop runs once per process on the
       # host: `-r` false means the read cannot succeed, and skipping there
       # costs nothing. It is not the whole guard — `-r` answers from the
@@ -688,9 +679,9 @@ gate_run_tagged_pids() {
   if [[ -n "$gate_lock_root_dir" &&
     ( -e "$marker" || -L "$marker" ) ]]; then
     if gate_run_proc_marker_scan_available; then
-      gate_run_proc_marker_pids "$token" "$marker"
+      gate_run_proc_marker_pids "$token" "$marker" "$target_pid"
     elif command -v lsof > /dev/null 2>&1; then
-      gate_run_lsof_marker_pids "$token" "$marker"
+      gate_run_lsof_marker_pids "$token" "$marker" "$target_pid"
     else
       printf '%s\n' "$gate_drain_scan_error"
     fi

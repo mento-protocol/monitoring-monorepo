@@ -1565,18 +1565,33 @@ assert.match(
 );
 assert.match(
   runHandles,
-  /const readFdInfoInode = \(path\)[\s\S]*?Buffer\.alloc\(1024\)[\s\S]*?\^ino:[\s\S]*?BigInt/u,
-  "the proc descriptor scan must read a bounded decimal fdinfo inode prefix",
+  /const processIds =\s*targetPid === "" \? fs\.readdirSync\("\/proc"\) : \[targetPid\]/u,
+  "the proc descriptor scan must support an exact-PID revalidation",
 );
 assert.match(
   runHandles,
-  /const candidate = readFdInfoInode\([\s\S]*?if \(candidate === markerBefore\.ino\) markerFdInfoInode = candidate/u,
-  "the proc descriptor scan must validate the marker fdinfo inode before enabling its prefilter",
+  /const heldPath = `\/proc\/\$\{pid\}\/fd\/\$\{descriptor\}`;[\s\S]*?fs\.readlinkSync\(heldPath\)[\s\S]*?!heldTarget\.startsWith\("\/"\)[\s\S]*?continue;[\s\S]*?fs\.statSync\(heldPath,[\s\S]*?sameInode\(markerBefore, held\)[\s\S]*?break;/u,
+  "the proc descriptor scan must skip non-file targets, retain exact device-and-inode authority, and stop after a match",
+);
+assert.doesNotMatch(
+  runHandles,
+  /fdinfo|readFdInfoInode|markerFdInfoInode/u,
+  "the proc descriptor scan must not add an open-read-close prefilter before the exact stat",
 );
 assert.match(
   runHandles,
-  /heldFdInfoInode = readFdInfoInode\([\s\S]*?heldFdInfoInode !== markerBefore\.ino[\s\S]*?continue;[\s\S]*?const held = fs\.statSync\([\s\S]*?sameInode\(markerBefore, held\)/u,
-  "the proc descriptor scan must prefilter mismatches and retain exact device-and-inode authority",
+  /gate_run_tagged_pids\(\)[\s\S]*?target_pid="\$\{2:-\}"[\s\S]*?\^\[1-9\]\[0-9\]\*\$[\s\S]*?environ_paths=\("\/proc\/\$\{target_pid\}\/environ"\)/u,
+  "an exact-PID run-handle scan must validate and limit its proc environment path",
+);
+assert.match(
+  source,
+  /gate_run_tagged_pids "\$gate_drain_membership_token" "\$pid"/u,
+  "post-identity membership must revalidate only its exact PID",
+);
+assert.match(
+  source,
+  /for tagged in \$gate_drain_tagged_now; do[\s\S]*?gate_run_tagged_pids "\$token" "\$tagged"/u,
+  "post-snapshot group membership must revalidate each observed PID without a full scan",
 );
 assert.ok(
   runHandles.includes(
@@ -2276,7 +2291,9 @@ STUB
   legacy_stderr="$coordinator_gate_pipeline_repo/legacy-stderr"
   legacy_fd7_output="$coordinator_gate_pipeline_repo/legacy-fd7-output"
   holder_pid=""
+  holder_start=""
   joiner_pid=""
+  joiner_start=""
   real_cp_command="$(command -v cp)"
   real_date_command="$(command -v date)"
   real_id_command="$(command -v id)"
@@ -2286,18 +2303,43 @@ STUB
   export REAL_ID_COMMAND="$real_id_command"
   export REAL_MV_COMMAND="$real_mv_command"
 
+  gate_test_stop_and_reap_pipeline_child() {
+    local label="$1"
+    local pid="$2"
+    local expected_start="$3"
+    [[ "$pid" =~ ^[1-9][0-9]*$ && -n "$expected_start" ]] || return 2
+
+    if ! gate_test_process_identity_is_settled "$pid" "$expected_start"; then
+      gate_test_signal_with_current_parent \
+        "$label" TERM "$pid" "$expected_start" || true
+      if ! gate_test_wait_for_process_exit "$pid" "$expected_start" 20; then
+        gate_test_signal_with_current_parent \
+          "$label" KILL "$pid" "$expected_start" || true
+        if ! gate_test_wait_for_process_exit \
+          "$pid" "$expected_start" 100; then
+          printf 'error: %s %s did not stop after TERM and KILL.\n' \
+            "$label" "$pid" >&2
+          return 1
+        fi
+      fi
+    fi
+    wait "$pid" 2>/dev/null || true
+  }
+
   # shellcheck disable=SC2329
   cleanup_gate_pipeline_fixture() {
     : > "$holder_release"
-    if [[ "$joiner_pid" =~ ^[1-9][0-9]*$ ]]; then
-      kill -TERM "$joiner_pid" 2>/dev/null || true
-      wait "$joiner_pid" 2>/dev/null || true
+    if [[ "$joiner_pid" =~ ^[1-9][0-9]*$ && -n "$joiner_start" ]]; then
+      gate_test_stop_and_reap_pipeline_child \
+        "pipeline fixture joiner" "$joiner_pid" "$joiner_start" || true
       joiner_pid=""
+      joiner_start=""
     fi
-    if [[ "$holder_pid" =~ ^[1-9][0-9]*$ ]]; then
-      kill -TERM "$holder_pid" 2>/dev/null || true
-      wait "$holder_pid" 2>/dev/null || true
+    if [[ "$holder_pid" =~ ^[1-9][0-9]*$ && -n "$holder_start" ]]; then
+      gate_test_stop_and_reap_pipeline_child \
+        "pipeline fixture holder" "$holder_pid" "$holder_start" || true
       holder_pid=""
+      holder_start=""
     fi
     gate_test_stop_coordinators_in_root \
       "pipeline fixture coordinator" "$coordinator_gate_pipeline_lock"
@@ -2505,6 +2547,14 @@ STUB
       --base HEAD --run --parallel 1 --lock-wait 30 \
       > "$holder_output" 2>&1 &
   holder_pid=$!
+  for ((attempt = 0; attempt < 100; attempt++)); do
+    holder_start="$(gate_test_process_start "$holder_pid")"
+    [[ -n "$holder_start" ]] && break
+    kill -0 "$holder_pid" 2>/dev/null || break
+    sleep 0.01
+  done
+  [[ -n "$holder_start" ]] ||
+    fail_gate_pipeline_fixture "could not identify the pipeline holder process"
 
   holder_ready=0
   for ((attempt = 0; attempt < gate_test_coordinator_observer_attempts; attempt++)); do
@@ -2561,6 +2611,14 @@ STUB
         --base HEAD --run --parallel 1 --lock-wait 30
   ) > "$joiner_output" 2>&1 &
   joiner_pid=$!
+  for ((attempt = 0; attempt < 100; attempt++)); do
+    joiner_start="$(gate_test_process_start "$joiner_pid")"
+    [[ -n "$joiner_start" ]] && break
+    kill -0 "$joiner_pid" 2>/dev/null || break
+    sleep 0.01
+  done
+  [[ -n "$joiner_start" ]] ||
+    fail_gate_pipeline_fixture "could not identify the pipeline joiner process"
   joiner_finished=0
   for ((attempt = 0; attempt < gate_test_coordinator_observer_attempts; attempt++)); do
     joiner_state="$(gate_test_process_state "$joiner_pid")"
@@ -2578,6 +2636,7 @@ STUB
   joiner_status=$?
   set -e
   joiner_pid=""
+  joiner_start=""
   [[ "$joiner_status" -eq 0 ]] ||
     fail_gate_pipeline_fixture "existing-coordinator joiner did not finish successfully"
   kill -0 "$holder_pid" 2>/dev/null ||
@@ -2651,6 +2710,7 @@ STUB
   holder_status=$?
   set -e
   holder_pid=""
+  holder_start=""
   [[ "$holder_status" -eq 0 ]] ||
     fail_gate_pipeline_fixture "end-to-end pipeline holder did not finish successfully"
 
@@ -12022,8 +12082,13 @@ run_parallel_nolock_parent_death_regression
   # shellcheck disable=SC2329 # called by the eval-loaded helper
   gate_lock_process_runtime_start() { printf 'start-%s\n' "$1"; }
   # shellcheck disable=SC2329 # called by the eval-loaded helper
+  gate_run_proc_marker_scan_available() { return 0; }
+  # shellcheck disable=SC2329 # called by the eval-loaded helper
   gate_run_tagged_pids() {
-    printf '%s\n' "$gate_drain_scan_error" 101 202
+    case "${2:-}" in
+      101 | 202) printf '%s\n' "$gate_drain_scan_error" "$2" ;;
+      *) printf '%s\n' "$gate_drain_scan_error" ;;
+    esac
   }
   # shellcheck disable=SC2329 # called by the eval-loaded helper
   ps() {
@@ -12101,7 +12166,10 @@ run_parallel_nolock_parent_death_regression
   # shellcheck disable=SC2034 # read by the eval-loaded helper
   gate_drain_tagged_now="505"
   # shellcheck disable=SC2329 # called by the eval-loaded helper
-  gate_run_tagged_pids() { return 0; }
+  gate_run_tagged_pids() {
+    [[ "${2:-}" == 505 ]] || printf '%s\n' "$gate_drain_scan_error"
+    return 0
+  }
   if gate_drain_membership_holds 505 "" "start-505"; then
     fail "non-group membership trusted a cached PID after its handle disappeared"
   fi
@@ -12123,7 +12191,10 @@ run_parallel_nolock_parent_death_regression
   gate_drain_membership_holds 505 202 "start-505" "start-202" ||
     fail "non-group membership rejected a child of an exact pinned parent"
   # shellcheck disable=SC2329 # called by the eval-loaded helper
-  gate_run_tagged_pids() { printf '505\n'; }
+  gate_run_tagged_pids() {
+    [[ "${2:-}" == 505 ]] || return 0
+    printf '505\n'
+  }
   gate_drain_membership_holds 505 "" "start-505" ||
     fail "non-group membership rejected an exact post-identity handle rescan"
 )
@@ -19385,6 +19456,37 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   [[ ! -e "$race_pattern_pgrep_called" ]] ||
     fail "a failed run-token pattern build still called pgrep"
 
+  # Exact-PID revalidation can keep the cheap argv census global, but it must
+  # emit only the requested PID. It must reject an invalid PID before pgrep.
+  race_target_pgrep_called="$gate_race_out/target-pgrep-called"
+  rm -f "$race_target_pgrep_called"
+  race_target_output="$(
+    gate_drain_scan_error="agentqg-scan-failed"
+    gate_lock_root_dir=""
+    source "$repo_root/scripts/gate/run-handles.sh"
+    pgrep() {
+      printf '%s\n' 101 202
+      return 0
+    }
+    gate_run_tagged_pids "fixture.host-1-1" 202
+  )"
+  [[ "$race_target_output" == "202" ]] ||
+    fail "an exact-PID argv revalidation emitted another process"
+  race_invalid_target_output="$(
+    gate_drain_scan_error="agentqg-scan-failed"
+    gate_lock_root_dir=""
+    source "$repo_root/scripts/gate/run-handles.sh"
+    pgrep() {
+      : > "$race_target_pgrep_called"
+      return 1
+    }
+    gate_run_tagged_pids "fixture.host-1-1" 0
+  )" 2> "$gate_race_out/invalid-target.err"
+  [[ "$race_invalid_target_output" == "agentqg-scan-failed" ]] ||
+    fail "an invalid exact-PID revalidation did not fail closed"
+  [[ ! -e "$race_target_pgrep_called" ]] ||
+    fail "an invalid exact-PID revalidation reached pgrep"
+
   # lsof follows a symlink passed as a pathname on macOS. A shared-root marker
   # symlink must fail before lsof can return an unrelated PID. The scan creates
   # and validates only a private hard-link witness.
@@ -19502,16 +19604,20 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     rm -f "$race_proc_marker" "$race_proc_ready"
     printf '%s\n' "$race_proc_token" > "$race_proc_marker"
     chmod 600 "$race_proc_marker"
-    env -i PATH=/usr/bin:/bin "$(command -v node)" -e '
+    env -i PATH=/usr/bin:/bin /bin/bash -c '
+      exec 9< "$1"
+      shift
+      exec "$@"
+    ' proc-marker-holder "$race_proc_marker" "$(command -v node)" -e '
       const fs = require("node:fs");
-      const [marker, ready] = process.argv.slice(1);
-      const descriptors = [fs.openSync(marker, "r")];
+      const [ready] = process.argv.slice(1);
+      const descriptors = [];
       for (let index = 0; index < 256; index += 1) {
         descriptors.push(fs.openSync("/dev/null", "r"));
       }
       fs.writeFileSync(ready, "");
       setInterval(() => {}, 1000);
-    ' "$race_proc_marker" "$race_proc_ready" &
+    ' "$race_proc_ready" &
     race_proc_pid=$!
     gate_test_capture_identity "$race_proc_pid" "$gate_test_signal_shell_pid" ||
       fail "the proc marker fixture could not bind its descriptor holder"
@@ -19524,6 +19630,12 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     done
     [[ -e "$race_proc_ready" ]] ||
       fail "the proc marker fixture did not open its inherited descriptor"
+    race_bound_launch_command "proc marker non-holder" 30 \
+      "$(command -v sleep)" 60 ||
+      fail "the proc marker fixture could not bind its non-holder"
+    race_proc_nonholder_pid="$race_bound_pid"
+    race_proc_nonholder_start="$race_bound_start"
+    race_proc_nonholder_parent="$race_bound_parent"
     race_proc_output="$(
       gate_drain_scan_error="agentqg-scan-failed"
       gate_lock_root_dir="$gate_race_root"
@@ -19533,6 +19645,32 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     )"
     [[ "$race_proc_output" == "$race_proc_pid" ]] ||
       fail "the proc marker scan did not emit only its untagged descriptor holder"
+    race_proc_target_output="$(
+      gate_drain_scan_error="agentqg-scan-failed"
+      gate_lock_root_dir="$gate_race_root"
+      source "$repo_root/scripts/gate/run-handles.sh"
+      pgrep() { return 1; }
+      gate_run_tagged_pids "$race_proc_token" "$race_proc_pid"
+    )"
+    [[ "$race_proc_target_output" == "$race_proc_pid" ]] ||
+      fail "the exact-PID proc marker scan lost its descriptor holder"
+    race_proc_nonholder_output="$(
+      gate_drain_scan_error="agentqg-scan-failed"
+      gate_lock_root_dir="$gate_race_root"
+      source "$repo_root/scripts/gate/run-handles.sh"
+      pgrep() { return 1; }
+      gate_run_tagged_pids "$race_proc_token" "$race_proc_nonholder_pid"
+    )"
+    [[ -z "$race_proc_nonholder_output" ]] ||
+      fail "the exact-PID proc marker scan selected a non-holder"
+    race_proc_invalid_target_output="$(
+      gate_drain_scan_error="agentqg-scan-failed"
+      gate_lock_root_dir="$gate_race_root"
+      source "$repo_root/scripts/gate/run-handles.sh"
+      gate_run_proc_marker_pids "$race_proc_token" "$race_proc_marker" 0
+    )"
+    [[ "$race_proc_invalid_target_output" == "agentqg-scan-failed" ]] ||
+      fail "the proc marker scan did not reject an invalid exact target"
     race_proc_failure_output="$(
       gate_drain_scan_error="agentqg-scan-failed"
       gate_lock_root_dir="$gate_race_root"
@@ -19546,6 +19684,11 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
       "proc marker holder" "$race_proc_pid" \
       "$race_proc_start" "$race_proc_parent" ||
       fail "the proc marker fixture could not clean its descriptor holder"
+    race_drain_kill_and_reap_direct_wrapper \
+      "proc marker non-holder" "$race_proc_nonholder_pid" \
+      "$race_proc_nonholder_start" "$race_proc_nonholder_parent" ||
+      fail "the proc marker fixture could not clean its non-holder"
+    race_bound_prune_completed
     rm -f "$race_proc_marker" "$race_proc_ready"
   fi
 
@@ -19638,6 +19781,26 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
       fail "the proc environment scan did not emit only its exact run and request tags"
     [[ ! -e "$race_proc_env_tools_called" ]] ||
       fail "the proc environment scan launched tr or grep for a PID"
+    race_proc_env_target_output="$(
+      gate_drain_scan_error="agentqg-scan-failed"
+      gate_lock_root_dir="$gate_race_root"
+      source "$repo_root/scripts/gate/run-handles.sh"
+      pgrep() { return 1; }
+      gate_run_tagged_pids \
+        "$race_proc_env_token" "$race_proc_env_request_pid"
+    )"
+    [[ "$race_proc_env_target_output" == "$race_proc_env_request_pid" ]] ||
+      fail "the exact-PID environment scan lost its request tag"
+    race_proc_env_long_output="$(
+      gate_drain_scan_error="agentqg-scan-failed"
+      gate_lock_root_dir="$gate_race_root"
+      source "$repo_root/scripts/gate/run-handles.sh"
+      pgrep() { return 1; }
+      gate_run_tagged_pids \
+        "$race_proc_env_token" "$race_proc_env_long_pid"
+    )"
+    [[ -z "$race_proc_env_long_output" ]] ||
+      fail "the exact-PID environment scan accepted a longer token"
 
     race_drain_kill_and_reap_direct_wrapper \
       "proc environment run tag" "$race_proc_env_run_pid" \

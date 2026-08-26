@@ -241,12 +241,16 @@ that descriptor while it scans signal-scope `/proc/<pid>/fd` entries by device
 and inode. It probes signal permission, including `CAP_KILL`.
 It also compares the sender real/effective UIDs with each target's
 real/saved-set UIDs so a policy-confined or set-ID descendant stays in scope
-after an `EPERM` probe. It reads the bounded common header of each fdinfo record
-as an inode prefilter. It runs the exact device-and-inode stat only for possible
-matches. The exact stat remains authoritative. It reads each process start
-identity before and after UID and descriptor enumeration. A changed identity
-makes that observation empty. A restricted `hidepid` mount or another
-incomplete in-scope scan fails closed.
+after an `EPERM` probe. A full discovery scan reads each proc-fd target. It skips
+only non-absolute targets such as pipes, sockets, and anonymous inodes. The
+regular-file marker always has an absolute target. The scan compares the exact
+device and inode for every absolute target. It stops scanning a process after a
+match. Handle revalidation after a process identity or process-group snapshot
+limits the procfs environment and descriptor checks to the observed PID. Full
+refreshes still scan all PIDs to discover new or reparented descendants. The
+scan reads each process start identity before and after UID and descriptor
+enumeration. A changed identity makes that observation empty. A restricted
+`hidepid` mount or another incomplete in-scope scan fails closed.
 
 When `/proc/self/fd` is unavailable, the process scan never asks `lsof` to query
 the mutable shared marker pathname. It creates a mode-0700 private directory named
