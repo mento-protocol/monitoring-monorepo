@@ -460,10 +460,28 @@ function checkShape({ contract, problems }) {
   if (!isObject(contract.sut)) {
     problems.push("contract sut must be an object");
   } else {
+    // Provenance the matrix spends quota under, not decoration. `planCells`
+    // copies each role's `model` and `effort` into `plan.json`, the
+    // orchestrator reads them out of the matrix line and hands the effort to
+    // the CLI, and the scored row records the pair as the condition it
+    // measured; `tool` is what `checkFinderArgv` pins argv[0] against and what
+    // each contestant declares itself to be. Only `model` was checked here, so
+    // a contract that dropped `sut.verifier.effort` passed the offline check
+    // and reached the shell as the literal string "undefined" — a run executed
+    // and recorded under provenance the contract never validly declared.
+    // Refuse it here, while the check is still free.
     for (const role of ["finder", "verifier", "control"]) {
       const entry = contract.sut[role];
-      if (!isObject(entry) || typeof entry.model !== "string") {
-        problems.push(`contract sut.${role} must name a model`);
+      if (!isObject(entry)) {
+        problems.push(`contract sut.${role} must be an object`);
+        continue;
+      }
+      for (const field of ["tool", "model", "effort"]) {
+        if (typeof entry[field] !== "string" || entry[field].length === 0) {
+          problems.push(
+            `contract sut.${role}.${field} must be a non-empty string`,
+          );
+        }
       }
     }
     checkFinderArgv({ finder: contract.sut.finder, problems });

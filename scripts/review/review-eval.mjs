@@ -6,7 +6,7 @@
 // (`run-eval.sh`) invokes it.
 
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { parseArgs as parseNodeArgs } from "node:util";
@@ -173,6 +173,16 @@ export function parseArgs(argv, env = process.env) {
     repo: values.repo ?? env.GITHUB_REPOSITORY ?? DEFAULT_REVIEW_EVAL_REPO,
     dryRun: values["dry-run"] === true,
     date: values.date ?? new Date().toISOString().slice(0, 10),
+    // The instant freshness is evaluated at, which is not the start of
+    // `--date`. The scheduled workflow runs mid-morning UTC, and a row merged
+    // earlier the same day is dated after midnight: `freshness()` counts such a
+    // row as future-dated and lets no clock read it, so the workflow stays red
+    // and keeps a staleness issue open over a run that is already there. An
+    // explicit `--date` is the dated-test case and keeps naming that midnight.
+    now:
+      values.date === undefined
+        ? new Date().toISOString()
+        : `${values.date}T00:00:00Z`,
     json: values.json === true,
   };
   if (mode === "plan") {
@@ -355,7 +365,7 @@ export async function runScheduleIssue(options, context, deps = {}) {
     authorize = assertAuthorizedFreshnessWorkflow,
     ensureLabels = ensureLabelsExist,
     createIssue = defaultCreateIssue,
-    now = new Date(`${options.date}T00:00:00Z`),
+    now = new Date(options.now ?? `${options.date}T00:00:00Z`),
   } = deps;
   const rows = readLedger(path.resolve(context.repoRoot, options.ledgerPath));
   const age = freshness({
@@ -488,6 +498,73 @@ async function modeCheckLedger(options, context) {
   if (!result.ok) process.exitCode = 1;
 }
 
+/** Whether a detail directory holds any scored cell result. */
+function holdsCellResults(dir) {
+  try {
+    return readdirSync(dir).some(
+      (name) => name.startsWith("result-") && name.endsWith(".json"),
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The row's provenance, checked against the plan that produced it.
+ *
+ * `revalidateRow` re-derives every number a row states from the cell records
+ * beside it, and nothing else. The fields that say which run those records
+ * belong to — the contract, the comparability key, the kind, the recorded
+ * inputs and the detail directory — it takes from the row. Editing one after
+ * the local append therefore survived CI: a changed `comparability_key` on the
+ * first full row keeps its no-baseline GREEN verdict, opens a lineage no run
+ * produced, and `resolveBaseline` anchors every later run on it.
+ *
+ * `plan.json` is committed in the same directory as the cell records and is
+ * written before the matrix spends anything, so it is the run's own statement
+ * of what it was. A directory that holds cell results must hold it: deleting
+ * the file cannot buy back the check, exactly as with `calibration.json`. A
+ * detail directory with no cell results — the hand-assembled bridge row — is
+ * left to the reviewer of the ledger PR, as it already is elsewhere.
+ */
+export function planProvenanceProblems({ dir, row }) {
+  const file = path.join(dir, "plan.json");
+  if (!existsSync(file)) {
+    return holdsCellResults(dir)
+      ? [
+          `${dir} carries cell results but no plan.json; the row's provenance cannot be checked against the run that produced it`,
+        ]
+      : [];
+  }
+  let plan;
+  try {
+    plan = readJson(file);
+  } catch (error) {
+    return [error instanceof Error ? error.message : String(error)];
+  }
+  const problems = [];
+  for (const field of [
+    "contract_digest",
+    "comparability_key",
+    "kind",
+    "detail_dir",
+  ]) {
+    if (row[field] !== plan[field]) {
+      problems.push(
+        `row ${field} is ${JSON.stringify(row[field])}; plan.json in ${row.detail_dir} planned ${JSON.stringify(plan[field])}`,
+      );
+    }
+  }
+  // The inputs are the skill, argv, orchestrator and CLI provenance the scorer
+  // copies out of the plan verbatim, so any difference is an edit.
+  if (JSON.stringify(row.inputs) !== JSON.stringify(plan.inputs)) {
+    problems.push(
+      `row inputs do not match the inputs plan.json in ${row.detail_dir} recorded`,
+    );
+  }
+  return problems;
+}
+
 /**
  * Recompute every row this branch appends, from the detail the same branch
  * commits. `checkLedger` proves a ledger PR is schema-valid, covers the frozen
@@ -550,17 +627,30 @@ function revalidateAppendedRows({ options, context, result, base }) {
         ? null
         : (rows.find((candidate) => candidate.executed_at === recordedAt) ??
           null);
-    if (recordedAt !== null && baselineRow === null) unpaired += 1;
+    const baselineMissing = recordedAt !== null && baselineRow === null;
+    if (baselineMissing) unpaired += 1;
     const check = revalidateRow({
       contract: context.contract,
       row,
       repoRoot: context.repoRoot,
       detailDir: dir,
-      ledgerRows: recordedAt !== null && baselineRow === null ? [] : rows,
+      ledgerRows: baselineMissing ? [] : rows,
       baselineRow,
+      // Half the verdict is the pairing: a regression and a promotion are both
+      // read out of the flip counts against the anchor. Recomputing an unpaired
+      // row without one turns a recorded RED or PROMOTE into GREEN and fails
+      // the ledger PR for it, over a row the runbook says only counts toward
+      // `unpaired_baselines`. The detail checks above are unaffected — they
+      // read the row's own bits and its own cell records — so they still run.
+      baselineMissing,
       calibrationSet,
     });
     problems.push(...check.problems.map((problem) => `${label}: ${problem}`));
+    problems.push(
+      ...planProvenanceProblems({ dir, row }).map(
+        (problem) => `${label}: ${problem}`,
+      ),
+    );
   }
   result.problems.push(...problems);
   return { ok: problems.length === 0, checked: appended.length, unpaired };

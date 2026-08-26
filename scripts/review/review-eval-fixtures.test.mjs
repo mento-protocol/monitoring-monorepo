@@ -911,3 +911,42 @@ test("a build report that contradicts the contract is rejected", () => {
     rmSync(source.dir, { recursive: true, force: true });
   }
 });
+
+test("the contract must declare a tool, a model and an effort for every role", () => {
+  // Only `model` was checked here. `planCells` copies each role's `model` and
+  // `effort` into `plan.json`, the orchestrator reads them out of the matrix
+  // line and hands the effort to the CLI, so a contract that dropped one
+  // passed the offline check and reached the shell as the string "undefined":
+  // a run executed and recorded under provenance the contract never declared.
+  for (const role of ["finder", "verifier", "control"]) {
+    for (const field of ["tool", "model", "effort"]) {
+      const tampered = clone(committed.contract);
+      delete tampered.sut[role][field];
+      const result = checkFixtures({ contract: tampered, repoRoot });
+      assert.equal(result.ok, false, `sut.${role}.${field} was accepted`);
+      assert.ok(
+        result.problems.some((problem) =>
+          new RegExp(
+            `sut\\.${role}\\.${field} must be a non-empty string`,
+          ).test(problem),
+        ),
+        result.problems.join("\n"),
+      );
+    }
+    const empty = clone(committed.contract);
+    empty.sut[role].effort = "";
+    assert.ok(
+      checkFixtures({ contract: empty, repoRoot }).problems.some((problem) =>
+        new RegExp(`sut\\.${role}\\.effort must be a non-empty string`).test(
+          problem,
+        ),
+      ),
+    );
+  }
+  assert.deepEqual(
+    checkFixtures({ contract: committed.contract, repoRoot }).problems.filter(
+      (problem) => /sut\./.test(problem),
+    ),
+    [],
+  );
+});

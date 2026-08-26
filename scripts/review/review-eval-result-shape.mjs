@@ -511,6 +511,8 @@ function checkVsBaseline({ row, baseline, problems }) {
  *
  * The verdict is recomputed the same way, against the baseline the ledger
  * rows resolve to, because the verdict is the one field a human reads first.
+ * `baselineMissing` suppresses that one check, and only it, when the caller
+ * knows the baseline of record is not in this checkout.
  */
 export function revalidateRow({
   contract,
@@ -519,6 +521,7 @@ export function revalidateRow({
   detailDir = null,
   ledgerRows = [],
   baselineRow = null,
+  baselineMissing = false,
   calibrationSet = null,
 }) {
   const problems = [];
@@ -677,6 +680,25 @@ export function revalidateRow({
   const baseline =
     baselineRow ?? resolveBaseline({ rows: ledgerRows ?? [], row });
   checkVsBaseline({ row, baseline, problems });
+  // The verdict is a function of the row and its baseline together: a net loss
+  // of flips is RED and a net gain is PROMOTE, both read against the anchor.
+  // `baselineMissing` says the caller knows the row was scored against a
+  // baseline this checkout does not carry — the candidate paired with an
+  // installed row whose own ledger PR has not merged. Recomputing without one
+  // does not check that verdict, it computes a different row's: the unpaired
+  // recompute gives GREEN and would fail a correctly recorded RED or PROMOTE.
+  // The unpaired state is reported instead, and every check above — the bits,
+  // the counters, the calibration, the cell records — has already run.
+  if (baselineMissing) {
+    return {
+      ok: problems.length === 0,
+      problems,
+      detail_dir: dir,
+      verdict: null,
+      baseline_executed_at: null,
+      baseline_missing: true,
+    };
+  }
   let recomputed = null;
   try {
     recomputed = verdict({ contract, row, baselineRow: baseline }).verdict;
@@ -696,5 +718,6 @@ export function revalidateRow({
     detail_dir: dir,
     verdict: recomputed,
     baseline_executed_at: baseline?.executed_at ?? null,
+    baseline_missing: false,
   };
 }

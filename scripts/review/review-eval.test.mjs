@@ -3560,8 +3560,12 @@ test("--check-ledger --revalidate-appended catches an edited appended row", () =
     const ledgerPath = path.join(root, ledgerRelative);
     const [committed] = readLedger(ledgerPath);
     const target = Object.keys(committed.conditions.pipeline.per_defect)[0];
+    // The vector keeps its length. Dropping a draw from one PR is a different
+    // forgery, and `checkLedger` refuses that one without this flag.
+    const vector = committed.conditions.pipeline.per_defect[target];
     committed.conditions.pipeline.per_defect[target] = [
-      committed.conditions.pipeline.per_defect[target][0] === 1 ? 0 : 1,
+      vector[0] === 1 ? 0 : 1,
+      ...vector.slice(1),
     ];
     writeFileSync(ledgerPath, `${JSON.stringify(committed)}\n`);
     const dirty = cli(["--check-ledger", "--revalidate-appended", ...flags], {
@@ -3677,4 +3681,272 @@ test("the launchd template carries placeholders the runbook install step rewrite
       `${token} is not rewritten by the documented install step`,
     );
   }
+});
+
+test("--revalidate-appended leaves an unpaired row's verdict alone", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "base");
+    const flags = [
+      "--check-ledger",
+      "--revalidate-appended",
+      "--base-ref",
+      "HEAD",
+      "--json",
+    ];
+
+    // The documented same-sitting candidate: scored against an installed
+    // baseline whose own ledger PR has not merged, so this branch does not
+    // carry the row it names. Its verdict came out of the flip counts against
+    // that baseline; recomputing it here without one gives GREEN and would
+    // fail the PR over a row the runbook only counts as unpaired.
+    const row = makeRow({
+      matchedIds: scorableIdsFor([1990, 1995]),
+      fullMatrix: true,
+      verdict: "PROMOTE",
+    });
+    row.vs_baseline = {
+      baseline_executed_at: "2026-08-01T09:00:00Z",
+      baseline_comparability_key: row.comparability_key,
+      mcnemar: { b: 0, c: 6, delta: -6 },
+    };
+    mkdirSync(path.join(root, row.detail_dir), { recursive: true });
+    const ledgerPath = path.join(root, ledgerRelative);
+    writeFileSync(ledgerPath, `${JSON.stringify(row)}\n`);
+    const unpaired = cli(flags, { root });
+    assert.equal(unpaired.status, 0, unpaired.stdout + unpaired.stderr);
+    const report = JSON.parse(unpaired.stdout);
+    assert.equal(report.unpaired_baselines, 1);
+    assert.equal(report.revalidated_rows, 1);
+
+    // The suppression is only for the row whose recorded baseline is missing.
+    // A row that records no pairing at all is still recomputed, so a forged
+    // verdict on it fails exactly as before.
+    const forged = makeRow({
+      matchedIds: scorableIdsFor(contract.fixtures.map((f) => f.pr)),
+      fullMatrix: true,
+      verdict: "RED",
+    });
+    writeFileSync(ledgerPath, `${JSON.stringify(forged)}\n`);
+    const failed = cli(flags, { root });
+    assert.equal(failed.status, 1);
+    assert.match(
+      JSON.parse(failed.stdout).problems.join(" | "),
+      /row\.verdict is RED; the row's own numbers give GREEN/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended checks a row against its committed plan", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "base");
+    const flags = [
+      "--check-ledger",
+      "--revalidate-appended",
+      "--base-ref",
+      "HEAD",
+      "--json",
+    ];
+
+    const row = makeRow({
+      matchedIds: scorableIdsFor([1990]),
+      fullMatrix: true,
+    });
+    const detail = path.join(root, row.detail_dir);
+    mkdirSync(detail, { recursive: true });
+    writeFileSync(
+      path.join(detail, "plan.json"),
+      JSON.stringify({
+        contract_digest: row.contract_digest,
+        comparability_key: row.comparability_key,
+        kind: row.kind,
+        detail_dir: row.detail_dir,
+        inputs: row.inputs,
+      }),
+    );
+    const rowPath = path.join(root, "row.json");
+    writeFileSync(rowPath, JSON.stringify(row, null, 2));
+    assert.equal(
+      cli(["--validate", rowPath, "--append", "--json"], { root }).status,
+      0,
+    );
+    const clean = cli(flags, { root });
+    assert.equal(clean.status, 0, clean.stdout + clean.stderr);
+
+    // Re-keying a first full row after the local append leaves its no-baseline
+    // GREEN verdict, its bits and its counters all intact, and opens a lineage
+    // no run produced — which `resolveBaseline` would then anchor on.
+    const ledgerPath = path.join(root, ledgerRelative);
+    const [committed] = readLedger(ledgerPath);
+    committed.comparability_key = "9".repeat(64);
+    writeFileSync(ledgerPath, `${JSON.stringify(committed)}\n`);
+    const rekeyed = cli(flags, { root });
+    assert.equal(rekeyed.status, 1);
+    assert.match(
+      JSON.parse(rekeyed.stdout).problems.join(" | "),
+      /row comparability_key is "9+"; plan\.json in .* planned/,
+    );
+
+    // Deleting the plan does not buy the check back: a directory that holds
+    // cell results must hold the plan that produced them.
+    writeFileSync(ledgerPath, `${JSON.stringify(row)}\n`);
+    rmSync(path.join(detail, "plan.json"));
+    writeFileSync(
+      path.join(detail, "result-x.json"),
+      JSON.stringify({ pr: 1990, draw: 1, matched_ids: [], claims: [] }),
+    );
+    const deleted = cli(flags, { root });
+    assert.equal(deleted.status, 1);
+    assert.match(
+      JSON.parse(deleted.stdout).problems.join(" | "),
+      /carries cell results but no plan\.json/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the scheduler ages the ledger at the instant it runs", () => {
+  const root = makeRoot();
+  try {
+    // A row merged at 09:00 UTC on the day the 09:23 workflow fires. Aged from
+    // midnight it is future-dated, which `freshness()` refuses to let run any
+    // clock: the workflow goes red and files a staleness issue over a run that
+    // is already committed. `parseArgs` records the actual instant instead, and
+    // reserves midnight for an explicitly dated `--date`.
+    const row = makeRow({
+      executedAt: "2027-06-01T09:00:00Z",
+      matchedIds: scorableIdsFor([1990]),
+      fullMatrix: true,
+    });
+    writeFileSync(path.join(root, ledgerRelative), `${JSON.stringify(row)}\n`);
+    const options = {
+      ledgerPath: ledgerRelative,
+      repo: "mento-protocol/monitoring-monorepo",
+      date: "2027-06-01",
+      dryRun: false,
+    };
+    const context = { repoRoot: root, contract, contractDigest };
+    const deps = {
+      listIssues: async () => [],
+      authorize: async () => {},
+      ensureLabels: async () => {},
+      createIssue: async () => {},
+    };
+    return Promise.all([
+      runScheduleIssue(
+        { ...options, now: "2027-06-01T09:23:00Z" },
+        context,
+        deps,
+      ),
+      runScheduleIssue(options, context, deps),
+    ]).then(([atRunTime, atMidnight]) => {
+      assert.equal(atRunTime.action, "skip-fresh");
+      assert.equal(atRunTime.level, "green");
+      // The bug, pinned: the same ledger aged from midnight ignores the row.
+      assert.equal(atMidnight.level, "red");
+      assert.match(
+        atMidnight.reasons.join(" | "),
+        /dated after the evaluation/,
+      );
+      // The CLI takes the current instant unless --date names a day.
+      assert.equal(
+        parseArgs(["--schedule-issue", "--date", "2027-06-01"]).now,
+        "2027-06-01T00:00:00Z",
+      );
+      const live = parseArgs(["--schedule-issue"]);
+      assert.match(live.now, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+      assert.ok(new Date(live.now).valueOf() > Date.now() - 60_000);
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("run-eval.sh resets a fixture to the commit the contract pins", () => {
+  // Cells run with bypassPermissions and a real Bash tool. An argument-free
+  // `git reset --hard` restores whatever HEAD names now, so a contestant that
+  // committed its own edits — or a prompt-injected commit out of the diff under
+  // review — makes that commit the fixture for every later cell of the PR, for
+  // the novelty judge and for the pre-judge login snapshot.
+  const shell = readFileSync(
+    path.join(repoRoot, "scripts/review/run-eval.sh"),
+    "utf8",
+  );
+  const reset = shell.match(/\nreset_fixture\(\) \{\n[\s\S]*?\n\}\n/)?.[0];
+  assert.ok(reset, "reset_fixture was not found in run-eval.sh");
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-reset-"));
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+    writeFileSync(path.join(dir, "reviewed.txt"), "the change under review\n");
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "first head");
+    const pinned = git("rev-parse", "HEAD").stdout.trim();
+
+    // What a cell can do to the checkout: edit the tree, drop an untracked
+    // file, and commit the result so HEAD no longer names the pinned commit.
+    writeFileSync(path.join(dir, "reviewed.txt"), "rewritten by a cell\n");
+    writeFileSync(path.join(dir, "scratch.txt"), "left behind\n");
+    git("add", "reviewed.txt");
+    git("commit", "--quiet", "-m", "a contestant commit");
+    assert.notEqual(git("rev-parse", "HEAD").stdout.trim(), pinned);
+
+    const harness = [
+      "set -euo pipefail",
+      reset,
+      'reset_fixture "$1" "$2"',
+    ].join("\n");
+    const run = spawnSync("bash", ["-c", harness, "bash", dir, pinned], {
+      encoding: "utf8",
+    });
+    assert.equal(run.status, 0, run.stderr);
+    assert.equal(git("rev-parse", "HEAD").stdout.trim(), pinned);
+    assert.equal(
+      readFileSync(path.join(dir, "reviewed.txt"), "utf8"),
+      "the change under review\n",
+    );
+    assert.equal(existsSync(path.join(dir, "scratch.txt")), false);
+
+    // A commit the fixture does not carry fails the cell instead of leaving it
+    // to review whatever tree happened to be there.
+    const missing = spawnSync(
+      "bash",
+      ["-c", harness, "bash", dir, "0".repeat(40)],
+      { encoding: "utf8" },
+    );
+    assert.notEqual(missing.status, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("every cell resets its fixture through reset_fixture", () => {
+  const shell = readFileSync(
+    path.join(repoRoot, "scripts/review/run-eval.sh"),
+    "utf8",
+  );
+  // The pinned head travels beside the path, and no bare reset survives: an
+  // argument-free one is the whole defect.
+  assert.match(shell, /reset_fixture "\$fixture" "\$fixture_head"/);
+  assert.doesNotMatch(shell, /reset --hard --quiet\n/);
+  assert.match(shell, /FIXTURE_HEAD="\$\{FIXTURE_HEADS\[\$index\]\}"/);
 });

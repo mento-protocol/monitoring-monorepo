@@ -601,6 +601,38 @@ test("checkLedger requires a complete row to carry its whole matrix", () => {
     );
   });
 
+  // `draws` is one number for the whole condition, so a matrix shortened for a
+  // single PR keeps it: the other PRs still ran draw 2. That row's vectors, its
+  // recall and the cell records `revalidateRow` reads all agree with each other
+  // on one draw for the omitted PR, and it would still claim the whole matrix,
+  // refresh the freshness clock and become a baseline. The per-PR sample is the
+  // vector length, and it is compared with the planned cell.
+  const shortForOnePr = row({
+    conditions: {
+      ...conditions,
+      pipeline: condition({
+        per_defect: {
+          ...everyFixture(),
+          ...idsFor([contract.fixtures[0]], [1]),
+        },
+      }),
+    },
+  });
+  withTempLedger(jsonl(shortForOnePr), (file) => {
+    const checked = checkLedger({
+      path: file,
+      contract,
+      contractDigest: DIGEST_A,
+    });
+    assert.equal(checked.ok, false);
+    assert.match(
+      checked.problems.join(" | "),
+      new RegExp(
+        `conditions\\.pipeline carries 1 draw\\(s\\) for PR ${contract.fixtures[0].pr}; a complete full run plans 2`,
+      ),
+    );
+  });
+
   // A complete canary owes its own matrix: replay over every grid PR. It never
   // ranks, but `canaryVerdict` reads its matched count against the floor, so a
   // canary that ran one grid PR passes that floor on a third of the evidence.

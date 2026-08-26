@@ -726,25 +726,32 @@ stage_skill() {
 
 declare -a FIXTURE_PRS=()
 declare -a FIXTURE_PATHS=()
+declare -a FIXTURE_HEADS=()
 
-# `fixture_path` answers in this global rather than on stdout. A command
-# substitution would run it in a subshell, where the two memo arrays below are
-# a discarded copy — every cell would then miss the memo and re-run the whole
+# `fixture_path` answers in these globals rather than on stdout. A command
+# substitution would run it in a subshell, where the memo arrays below are a
+# discarded copy — every cell would then miss the memo and re-run the whole
 # `build-fixture.sh` leak verification for a fixture already on disk. The
-# per-cell `git reset --hard` and `git clean` live at the call site, so a memo
-# hit still gets a clean tree.
+# per-cell `reset_fixture` lives at the call site, so a memo hit still gets a
+# clean tree at the pinned commit.
 FIXTURE_PATH=""
+FIXTURE_HEAD=""
 
 fixture_path() {
   local pr="$1" index=0
   FIXTURE_PATH=""
+  FIXTURE_HEAD=""
   for index in "${!FIXTURE_PRS[@]}"; do
     if [[ ${FIXTURE_PRS[$index]} == "$pr" ]]; then
       FIXTURE_PATH="${FIXTURE_PATHS[$index]}"
+      FIXTURE_HEAD="${FIXTURE_HEADS[$index]}"
       return 0
     fi
   done
-  local built
+  # The head comes back beside the path because the per-cell reset targets it
+  # explicitly. `materializeFixture` already refuses a build whose head is not
+  # the contract's `first_head`, so this is the pinned commit by construction.
+  local built head
   # shellcheck disable=SC2016  # the single-quoted block is node source
   built="$(node --input-type=module -e '
     const [contractPath, pr, cacheDir, srcRepo, repoRoot] = process.argv.slice(1);
@@ -754,15 +761,42 @@ fixture_path() {
       const report = m.materializeFixture({
         contract, pr: Number(pr), cacheDir, srcRepo, repoRoot,
       });
-      process.stdout.write(report.path);
+      process.stdout.write(`${report.path}\n${report.head}\n`);
     })().catch((error) => {
       process.stderr.write(`${error.message}\n`);
       process.exit(1);
     });
   ' "$CONTRACT" "$pr" "$CACHE_DIR" "$REPO" "$SPEC")" || return 1
+  head="${built##*$'\n'}"
+  built="${built%%$'\n'*}"
+  if [[ -z $built || ! $head =~ ^[0-9a-f]{40}$ ]]; then
+    printf 'FATAL: fixture for PR %s reported no pinned head\n' "$pr" >&2
+    return 1
+  fi
   FIXTURE_PRS+=("$pr")
   FIXTURE_PATHS+=("$built")
+  FIXTURE_HEADS+=("$head")
   FIXTURE_PATH="$built"
+  FIXTURE_HEAD="$head"
+}
+
+# Return one fixture to the commit the contract pins, before every cell.
+#
+# Cells share one fixture per PR and run with bypassPermissions and a real Bash
+# tool, so the tree has to be restored between them. An argument-free
+# `git reset --hard` restores whatever `HEAD` names now, which is the one thing
+# a contestant can move: committing its own edits — or a prompt-injected commit
+# from the diff under review — makes that commit the fixture. Every later cell
+# for the PR then reviews the contestant's tree, and so does the novelty judge
+# and the pre-judge login snapshot, which is how a corrupted condition score
+# becomes the run of record. The reset names the pinned commit, and `HEAD` is
+# read back afterwards so a reset that did not land fails the cell instead.
+reset_fixture() {
+  local fixture="$1" head="$2"
+  git -C "$fixture" checkout --quiet --force --detach "$head" &&
+    git -C "$fixture" reset --hard --quiet "$head" &&
+    git -C "$fixture" clean -xdffq &&
+    [[ "$(git -C "$fixture" rev-parse --verify --quiet HEAD)" == "$head" ]]
 }
 
 # --- the finder argv and the cell fingerprint --------------------------------
@@ -869,22 +903,22 @@ run_cell() {
     fi
   fi
 
-  local fixture
+  local fixture fixture_head
   fixture_path "$pr" || {
     log "  $cell_id FAILED — fixture"
     return 1
   }
   fixture="$FIXTURE_PATH"
+  fixture_head="$FIXTURE_HEAD"
 
   local started other_review="" codex_chars=0
   started="$(date +%s)"
   purge_skill "$fixture"
-  # Cells share one fixture per PR and run with bypassPermissions, so the tree
-  # is returned to its checked-out state before every cell. Without this a cell
-  # reviews the previous cell's edits, and control reviews a mutated tree.
-  if ! git -C "$fixture" reset --hard --quiet ||
-    ! git -C "$fixture" clean -xdffq; then
-    log "  $cell_id FAILED — the fixture could not be reset"
+  # Without this a cell reviews the previous cell's edits, and control reviews
+  # a mutated tree. The pinned commit is named rather than implied; see
+  # `reset_fixture`.
+  if ! reset_fixture "$fixture" "$fixture_head"; then
+    log "  $cell_id FAILED — the fixture could not be reset to $fixture_head"
     return 1
   fi
 

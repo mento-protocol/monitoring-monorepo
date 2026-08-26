@@ -539,8 +539,11 @@ export function contractScorableIdsByPr(contract) {
  *
  * The draw count is checked because it is the other axis of the same claim:
  * a `kind: "full"` row with `draws: 1` under pipeline has half the planned
- * sample, and it still refreshes the full-run clock and becomes a baseline.
- * Which PRs a draw covers is left to `revalidateRow`, which reads the cells.
+ * sample, and it still refreshes the full-run clock and becomes a baseline. It
+ * is checked per planned PR as well as per condition, because `draws` is one
+ * number for the whole condition: a matrix that dropped one PR's second draw
+ * keeps it and shortens only that PR's vectors, which every other check reads
+ * as the run's own sample rather than as a missing cell.
  */
 export function completeMatrixProblems({ contract, row, label = "row" }) {
   if (row?.status !== "complete") return [];
@@ -580,6 +583,28 @@ export function completeMatrixProblems({ contract, row, label = "row" }) {
       problems.push(
         `${label}.conditions.${name}.draws is ${condition.draws}; a complete ${row.kind} run plans ${drawsPlanned}`,
       );
+    }
+    // `condition.draws` is one number for the whole condition, so the check
+    // above only catches a matrix shortened everywhere at once. A run that
+    // dropped pipeline draw 2 for a single PR keeps `draws: 2` — the other PRs
+    // still ran it — and every other check agrees with it: the vectors of the
+    // omitted PR carry one bit each, `recall` is recomputed from those bits,
+    // and `revalidateRow` finds the same single draw in the cell records. The
+    // row then claims a whole matrix while missing a planned cell, refreshes
+    // the freshness clock and becomes a baseline. The per-PR sample is the
+    // vector length, so each planned cell is compared with the PR's own bits.
+    for (const cell of cells) {
+      const ids = scorableByPr.get(cell.pr) ?? [];
+      const short = ids.filter((id) => {
+        const vector = condition?.per_defect?.[id];
+        return Array.isArray(vector) && vector.length !== cell.draws;
+      });
+      if (short.length) {
+        const found = condition.per_defect[short[0]].length;
+        problems.push(
+          `${label}.conditions.${name} carries ${found} draw(s) for PR ${cell.pr}; a complete ${row.kind} run plans ${cell.draws}`,
+        );
+      }
     }
   }
   return problems;
