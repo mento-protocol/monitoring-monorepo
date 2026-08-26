@@ -398,9 +398,13 @@ distinct from the request-specific inputs in the execution fingerprint. Those
 inputs bind the request's Node and pnpm toolchain and material command
 environment.
 
-The gate materializes the two Bash adapter files in one private directory. It
-checks their hashes against stable source snapshots before and after the copy,
-then sources only those copies. The prepared policy binds the loaded hashes.
+Before it materializes the adapter, the gate selects its effective `TMPDIR`.
+It keeps a caller path only when that path is a writable directory. Otherwise,
+it uses the repo-owned `.tmp/agent-quality-gate` scratch directory. This
+fallback also applies to dry runs. The gate then materializes the two Bash
+adapter files in one private directory. It checks their hashes against stable
+source snapshots before and after the copy, then sources only those copies. The
+prepared policy binds the loaded hashes.
 The adapter rechecks that policy after it acquires the legacy lock. The parent
 and detached child each derive and verify the current Node and source identity
 again. The child repeats that check before root setup, stale-socket removal and

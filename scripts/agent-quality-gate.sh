@@ -309,6 +309,26 @@ source "$run_handles_path"
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+# Use a repo-local scratch dir for tmpfiles so we don't depend on TMPDIR
+# being writable — pre-push hooks fork off trunk's daemon, which may carry
+# a TMPDIR that's outside a host sandbox's writable allowlist. Select and
+# export the effective directory before the coordinator adapter copy so the
+# default coordinator and dry-run paths use the same validated fallback.
+# Mapped subprocesses (e.g. agent-quality-gate.test.sh's bare `mktemp -d`)
+# inherit this path instead of falling back to an unwritable system default.
+scratch_dir="$repo_root/.tmp/agent-quality-gate"
+mkdir -p "$scratch_dir"
+# Avoid overriding a usable TMPDIR: Terraform providers use go-plugin grpc on
+# a socket in TMPDIR, and repo-local paths can be blocked by agent seatbelts.
+# Trunk hooks can strip TMPDIR entirely, so prefer the system temp directory
+# before falling back to the repo scratch dir.
+tmpdir_candidate="${TMPDIR:-${TMP:-${TEMP:-/tmp}}}"
+if [[ -d "$tmpdir_candidate" && -w "$tmpdir_candidate" ]]; then
+  export TMPDIR="$tmpdir_candidate"
+else
+  export TMPDIR="$scratch_dir"
+fi
+
 # Print the current changed-path set. Capture each Git probe before printing
 # any output so one failed probe cannot be hidden by a later successful probe.
 collect_current_changed_paths() {
@@ -407,14 +427,6 @@ case "$gate_coordinator_enabled" in
     gate_coordinator_support="$script_source_dir/gate/quality-gate-coordinator-support.sh"
     ;;
 esac
-# Use a repo-local scratch dir for tmpfiles so we don't depend on TMPDIR
-# being writable — pre-push hooks fork off trunk's daemon, which may carry
-# a TMPDIR that's outside a host sandbox's writable allowlist. Also export
-# TMPDIR so mapped subprocesses (e.g. agent-quality-gate.test.sh's bare
-# `mktemp -d`) inherit a writable scratch path instead of falling back to
-# the system default (which sandboxed shells often cannot write to).
-scratch_dir="$repo_root/.tmp/agent-quality-gate"
-mkdir -p "$scratch_dir"
 durations_file="$scratch_dir/durations.jsonl"
 success_stamp_file="$scratch_dir/last-success.stamp"
 # Per-command success stamps (GitHub issue #1410): lets a killed run or a run
@@ -425,17 +437,6 @@ command_stamps_file="$scratch_dir/command-stamps.tsv"
 # for the slowest mapped suites. Keep this fixed rather than environment-
 # configurable so callers cannot extend validation reuse beyond two hours.
 success_stamp_ttl_seconds=$((2 * 60 * 60))
-# Avoid overriding a usable TMPDIR: Terraform providers use go-plugin grpc on
-# a socket in TMPDIR, and repo-local paths can be blocked by agent seatbelts.
-# Trunk hooks can strip TMPDIR entirely, so prefer the system temp directory
-# before falling back to the repo scratch dir.
-tmpdir_candidate="${TMPDIR:-${TMP:-${TEMP:-/tmp}}}"
-if [[ -d "$tmpdir_candidate" && -w "$tmpdir_candidate" ]]; then
-  export TMPDIR="$tmpdir_candidate"
-else
-  export TMPDIR="$scratch_dir"
-fi
-
 # Trunk's pre-push hook callback runs the gate without a TTY and strips most
 # env vars from the calling shell. Re-assert non-interactive markers so the
 # mapped commands (e.g. pnpm install) take the CI codepath instead of asking

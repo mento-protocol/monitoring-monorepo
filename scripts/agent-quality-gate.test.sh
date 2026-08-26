@@ -735,6 +735,22 @@ assert_script_occurrences 1 'changed_paths_file="$(make_tmpfile)"'
 assert_script_occurrences 0 "trap 'rm -f \"\$changed_paths_file\"' EXIT"
 assert_script_occurrences 1 'Avoid overriding a usable TMPDIR'
 assert_script_occurrences 1 'tmpdir_candidate="${TMPDIR:-${TMP:-${TEMP:-/tmp}}}"'
+unusable_gate_tmpdir="$gate_cache_dir/not-a-directory"
+printf 'not a directory\n' > "$unusable_gate_tmpdir"
+printf 'docs/README.md\n' > "$paths_file"
+if ! TMPDIR="$unusable_gate_tmpdir" \
+  AGENT_QUALITY_GATE_COORDINATOR=1 \
+  bash "$repo_root/scripts/agent-quality-gate.sh" \
+    --dry-run \
+    --changed-paths-file "$paths_file" \
+    --base HEAD \
+    > "$output_file" 2>&1; then
+  fail "default coordinator dry run did not fall back from an unusable inherited TMPDIR"
+fi
+assert_contains "Mode: dry-run"
+assert_contains "- pnpm docs:index --check (tracked documentation changed)"
+[[ -f "$unusable_gate_tmpdir" ]] ||
+  fail "default coordinator dry run changed the unusable inherited TMPDIR path"
 assert_script_occurrences 1 "command -v sha256sum"
 assert_script_occurrences 1 "command -v shasum"
 assert_script_occurrences 0 "shasum -a 256 | awk"
