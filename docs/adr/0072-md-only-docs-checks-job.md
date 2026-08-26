@@ -1,5 +1,5 @@
 ---
-title: Markdown-only PRs run a small docs-checks CI job instead of the full scripts job
+title: The Markdown globs route to a small docs-checks CI job instead of the scripts job
 status: active
 owner: eng
 canonical: true
@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0072 — a Markdown-only diff runs `docs-checks`, not the 25-minute `scripts` job
+# ADR 0072 — the Markdown globs route to `docs-checks`, not the 25-minute `scripts` job
 
 **Status:** Accepted (Aug 2026), in force.
 **Scope:** ci/process
@@ -49,7 +49,7 @@ this decision. Two are carried into the new job:
   to the ten `AGENTS.md` route directories that exist today
   (`scripts/context/agent-context-budget.test.mjs:33,349`). Adding
   `docs/AGENTS.md`, or deleting `alerts/AGENTS.md`, is a Markdown-only diff
-  that reds it. `agent:context-budget --strict` would not catch that: it
+  that fails it. `agent:context-budget --strict` would not catch that: it
   enforces byte caps, not the route list.
 - `docs:navigation-eval:test` loads the live inventory at module scope and
   asserts which accepted route is cheapest in real document bytes
@@ -83,14 +83,14 @@ branch on a real tracked document, `docs/deployment.md`
 (`scripts/agent-quality-gate.test.sh:5372-5384`); the contrast case at
 `:5506-5509` runs the gate over `docs/deleted.md` and expects `--all`, so the
 branch turns on worktree existence alone. Deleting or renaming
-`docs/deployment.md` is therefore a Markdown-only diff that reds this suite. It
+`docs/deployment.md` is therefore a Markdown-only diff that fails this suite. It
 is not carried into the new job, because that same file is one of the routing
 table's staleness subjects (`scripts/gate/routing-table/groups-head.mjs:129`),
-so `gate:routing-table:test` reds first on exactly that diff.
+so `gate:routing-table:test` fails first on exactly that diff.
 
 Eleven steps in the `scripts` job read the Markdown corpus, then. Nine move into
 the new job. The other two — `docs:index:test` and `agent:quality-gate:test` —
-red only on a diff that also reds a check the new job carries, so they stay
+fail only on a diff that also fails a check the new job carries, so they stay
 where they are.
 
 [ADR 0062](0062-sentry-suites-self-run-gate.md) split a check family out of this
@@ -186,17 +186,17 @@ or non-regular runtime document is rejected by
 `loadClaudeRuntimeDocumentRegistry`
 (`scripts/context/claude-runtime-document-registry.mjs:312-333`), which both
 `docs:index --check` and `agent:context-check` import. No Markdown-only diff
-was found that reds `docs:index:test` while every check in this job stays
+was found that fails `docs:index:test` while every check in this job stays
 green, so it is subsumed rather than synthetic. The other two,
 `agent:context-budget:test` and `docs:navigation-eval:test`, are carried: each
 was verified to read this checkout, and each has a concrete Markdown-only diff
-that reds it on `main` while every other check in this job stays green. Leaving
+that fails it on `main` while every other check in this job stays green. Leaving
 them out would let such a PR merge and break the `scripts` job for the next
 unrelated code PR.
 
 **Carry `agent:quality-gate:test` too.** Rejected: it is an 11,000-line shell
 suite that drives the whole quality gate, and the single Markdown-only diff
-that reds it — deleting or renaming `docs/deployment.md` — already reds
+that fails it — deleting or renaming `docs/deployment.md` — already fails
 `gate:routing-table:test`, which this job does run. The cover is transitive,
 which is why it is stated here and in the job comment rather than left implicit:
 drop `docs/deployment.md` from the routing table in a later `scripts/**` PR —
@@ -206,7 +206,7 @@ nothing to announce it. A maintainer who does that should carry
 
 **Leave `gate:routing-table:test` in `scripts` only and accept the gap.**
 Rejected: renaming `docs/pr-checklists/mutation-testing.md` and regenerating
-`docs/README.md` is a Markdown-only diff. Today it reds the staleness check;
+`docs/README.md` is a Markdown-only diff. Today it fails the staleness check;
 without this step in `docs-checks` it would merge green with the gate naming a
 document that no longer exists — the quietest failure the check exists to
 prevent, and squarely the docs-gardening workload this change is meant to
@@ -240,7 +240,7 @@ costs a duplicate run on mixed diffs and nothing else.
   step to `scripts` that does so, without also adding it here, reopens the gap
   this decision closes, and no check will say so.
 - **One of the eleven is covered transitively, not structurally.**
-  `agent:quality-gate:test` stays in `scripts`, and the diff that reds it —
+  `agent:quality-gate:test` stays in `scripts`, and the diff that fails it —
   removing `docs/deployment.md` — is caught here only because that path is also
   a routing-table staleness subject. Removing it from the routing table would
   fire `rootScripts`, pass at the time, and silently open the gap.
@@ -267,14 +267,14 @@ costs a duplicate run on mixed diffs and nothing else.
   fixtures, all of which stay in `rootScripts` unchanged, so a diff that can
   affect them still fires `scripts`.
 - **A skipped `docs-checks` satisfies the `ci` sentinel**, exactly like a
-  skipped `scripts`. Adding it to `needs` without `allowed-skips` would turn
-  the required check red on every non-Markdown PR. That pairing is convention
+  skipped `scripts`. Adding it to `needs` without `allowed-skips` would fail
+  the required check on every non-Markdown PR. That pairing is convention
   plus alls-green semantics, not a machine check:
   `check-sentry-suites-in-ci-core.mjs` enforces `allowed-skips` membership only
   for entries in `TRUSTED_JOBS`, which holds one job mapped to `null`, and the
   guard reads `trusted.get(name) != null`. Removing `docs-checks` from
-  `allowed-skips` would fail no test — it would turn the required `ci` context
-  red on every non-Markdown PR instead.
+  `allowed-skips` would fail no test — it would fail the required `ci` context
+  on every non-Markdown PR instead.
 
 ## Evidence
 

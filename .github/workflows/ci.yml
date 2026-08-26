@@ -310,8 +310,8 @@ jobs:
               # that used to sit here now live in the `docs` filter below
               # (ADR 0072): a Markdown-only diff runs the small `docs-checks`
               # job, which carries nine of the eleven checks in this job that
-              # read the Markdown corpus — the two left behind red only when a
-              # carried check reds. Markdown that arrives alongside any path
+              # read the Markdown corpus — the two left behind fail only when a
+              # carried check fails. Markdown that arrives alongside any path
               # above still sets both filters, and both jobs run — including a
               # Markdown-only edit under `.agents/**` or `.claude/skills/**`,
               # which those globs still route here for their non-Markdown
@@ -1223,13 +1223,13 @@ jobs:
     #     empty. That is a strict subset of `pnpm docs:index --check` below,
     #     which fails on errors OR warnings OR broken links, and a deleted or
     #     non-regular runtime document is rejected by the runtime registry
-    #     that both carried checks import. No Markdown-only diff reds it while
+    #     that both carried checks import. No Markdown-only diff fails it while
     #     everything in this job stays green.
     #   - agent:quality-gate:test pins the targeted-Trunk branch on the
     #     tracked file docs/deployment.md, which flips to `--all` once that
     #     path leaves the worktree. docs/deployment.md is also one of the
     #     routing table's staleness subjects, so the gate routing-table step
-    #     below reds first on the rename or delete that would break it. That
+    #     below fails first on the rename or delete that would break it. That
     #     coupling is transitive, not structural: drop docs/deployment.md from
     #     the routing table and this suite loses its cover.
     # Splitting these out lets a Markdown-only PR finish in
@@ -1278,7 +1278,7 @@ jobs:
         # trackedInstructionFiles(repoRoot) against this checkout and pins the
         # route list to the ten AGENTS.md directories that exist today. Adding
         # docs/AGENTS.md or deleting alerts/AGENTS.md is a Markdown-only diff
-        # that reds it, and the --strict run below would not catch that: it
+        # that fails it, and the --strict run below would not catch that: it
         # only enforces byte caps.
         run: pnpm agent:context-budget:test
       - name: Enforce agent context budgets
