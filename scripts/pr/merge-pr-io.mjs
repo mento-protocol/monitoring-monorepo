@@ -148,7 +148,7 @@ export async function appendConsentRecord({ record, git, write = writeSync }) {
 
     const payload = Buffer.from(`${JSON.stringify(record)}\n`, "utf8");
     // A full disk or an exhausted quota can make `writeSync` return a short
-    // count rather than throw. Ignoring it would leave a truncated, unparseable
+    // count rather than throw. Ignoring it would leave a truncated, unparsable
     // record behind a reported success.
     const written = write(fd, payload);
     if (written !== payload.length) {
