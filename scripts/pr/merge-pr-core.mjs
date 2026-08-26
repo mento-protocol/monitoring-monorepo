@@ -303,6 +303,19 @@ export function gateSignature({ summary, feedback }) {
 }
 
 /**
+ * The process exit status for one {@link mergePullRequest} result.
+ *
+ * Only a confirmed merge is a success. A queued pull request and an unreadable
+ * outcome both exit non-zero, so `pnpm pr:merge && <post-merge closeout>` does
+ * not run the closeout on a merge the wrapper could not confirm — the shell
+ * would otherwise read the wrapper's own refusal to claim success as success.
+ */
+export function exitCodeForResult(result) {
+  if (result?.help === true) return 0;
+  return result?.merged === true ? 0 : 1;
+}
+
+/**
  * The host a repository reference belongs to, or null for github.com.
  *
  * `gh` defaults every `--repo owner/name` and every `gh api` call to

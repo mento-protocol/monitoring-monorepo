@@ -48,6 +48,7 @@ import {
   MergeRefusal,
   PR_NUMBER_PATTERN,
   buildConsentRecord,
+  exitCodeForResult,
   formatBriefing,
   gateSignature,
   hostFromRepoUrl,
@@ -73,6 +74,7 @@ export {
   NON_INTERACTIVE_REFUSAL,
   buildConsentRecord,
   countRequiredCheckStates,
+  exitCodeForResult,
   formatBriefing,
   gateSignature,
   interactiveSessionRefusal,
@@ -471,7 +473,14 @@ export async function mergePullRequest({
 
 async function main() {
   try {
-    await mergePullRequest({ argv: process.argv.slice(2) });
+    const result = await mergePullRequest({ argv: process.argv.slice(2) });
+    const code = exitCodeForResult(result);
+    if (code !== 0) {
+      process.stderr.write(
+        "merge-pr: the merge was not confirmed; not reporting success\n",
+      );
+      process.exitCode = code;
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     process.stderr.write(`merge-pr: ${message}\n`);

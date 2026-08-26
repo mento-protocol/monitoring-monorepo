@@ -31,6 +31,7 @@ import {
   countRequiredCheckStates,
   formatBriefing,
   interactiveSessionRefusal,
+  exitCodeForResult,
   mergePullRequest,
   parseArgs,
   sanitizeTerminalText,
@@ -1266,6 +1267,30 @@ await test("an explicit host-qualified --repo reaches gh verbatim", async () => 
     (args) => args[0] === "api" && args.includes("user"),
   );
   assertEqual(login[login.indexOf("--hostname") + 1], "ghe.example.com");
+});
+
+await test("only a confirmed merge exits zero", async () => {
+  // The CLI's exit status is what `pnpm pr:merge && <post-merge closeout>`
+  // branches on. Reporting success for a queued or unverified merge would run
+  // the closeout on exactly the states this wrapper refused to call a merge.
+  assertEqual(exitCodeForResult({ merged: true, verified: true }), 0);
+  assertEqual(exitCodeForResult({ merged: false, queued: true }), 1);
+  assertEqual(exitCodeForResult({ merged: false, verified: false }), 1);
+  assertEqual(exitCodeForResult(undefined), 1);
+  // `--help` is not a merge and must not read as a failure.
+  assertEqual(exitCodeForResult({ merged: false, help: true }), 0);
+
+  // Bound to the real results the wrapper returns, so the two cannot drift.
+  const queued = await harness({ mergedState: "OPEN" }).run();
+  assertEqual(exitCodeForResult(queued), 1, "a queued merge must exit nonzero");
+  const unverified = await harness({ mergeOutcomeError: "gh exploded" }).run();
+  assertEqual(
+    exitCodeForResult(unverified),
+    1,
+    "an unverified merge must exit nonzero",
+  );
+  const merged = await harness().run();
+  assertEqual(exitCodeForResult(merged), 0, "a confirmed merge must exit zero");
 });
 
 await test("the wrapper's own modules stay under the 600-line soft cap", () => {
