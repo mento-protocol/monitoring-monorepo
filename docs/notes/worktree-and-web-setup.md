@@ -3,7 +3,7 @@ title: New Worktree / Clone Setup and Claude Code on the Web Setup
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-29
+last_verified: 2026-08-26
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -86,14 +86,38 @@ each run, so a failed or degraded bootstrap leaves a diagnosable trace on
 disk even though the hook still routes that same output only to stderr to
 keep it out of the agent's context.
 
+### Measured host reality in a hosted container
+
+Measured on 2026-08-26 in a live cloud session (issue #2057), with `trunk.io`,
+`*.trunk.io`, and `cdn.playwright.dev` added to the Custom allowlist on top of
+the Trusted defaults:
+
+- `trunk.io`, `nodejs.org`, and `registry.npmjs.org` answer 200. Trunk's
+  hermetic runtimes and its npm-sourced linters download normally.
+- `github.com` does not. The platform's credential proxy intercepts it and
+  gates it per session, answering 403 with "GitHub access to this repository
+  is not enabled for this session". No allowlist entry lifts that.
+- That reaches Trunk's plugin archive (`github.com/trunk-io/plugins`) and its
+  GitHub-release linters. A cold Trunk cache therefore fails the check with
+  `Unable to download plugin <url>: HTTP 403 '<url>'`. The image ships a
+  prewarmed cache holding both, which masks the block on a warm run.
+  `tools/trunk` reads `$TRUNK_CACHE`, else `$XDG_CACHE_HOME/trunk`, else
+  `~/.cache/trunk`, so prewarming only the last one misses a session that sets
+  either override.
+- The quality gate classifies that cold-cache 403 as environment-blocked and
+  skips its Trunk arm instead of hard-failing; a 404 stays a hard failure. See
+  [agent-quality-gate-mechanics.md](agent-quality-gate-mechanics.md).
+
 If the container's Node major is older than the repo's `.node-version` (for
 example, an image shipping Node v22 against a `.node-version` of `24`), the
 bootstrap does not attempt to switch the running interpreter — corepack only
 manages package-manager shims, not Node itself, and `pnpm env use --global`
-would need `nodejs.org` network access this environment does not grant, plus
-it would not reach the agent's later, separate shell invocations even if it
-succeeded. The script instead prints one clear WARN naming the mismatch and
-how to fix it env-side (rebuild/select a Node-24 container image); the
+would install that Node under `PNPM_HOME` rather than change the running
+interpreter. A later shell picks it up only when its `PATH` carries the
+pnpm-managed bin directory, and nothing here puts it there, so the agent's
+separate Bash tool shells keep the image's Node. The download itself would work
+— `nodejs.org` is reachable, per the measurements above. The script instead
+prints one clear WARN naming the mismatch and how to fix it env-side (rebuild/select a Node-24 container image); the
 mismatch itself only produces non-fatal pnpm engine-range warnings, since no
 root `.npmrc` sets `engine-strict`.
 

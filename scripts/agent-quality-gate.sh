@@ -5814,8 +5814,13 @@ trunk_provisioning_state=""
 # own output. Drives the closing note and the whole-run stamp guard.
 trunk_arm_environment_blocked=false
 # Which provisioning stage blocked the arm currently being classified:
-# "launcher" (no CLI at all) or "linters" (CLI ran, its downloads failed).
+# "launcher" (no CLI at all), "plugin" (CLI ran, could not fetch its plugin
+# sources, never reached a linter), or "linters" (CLI ran and linted, its
+# runtime or linter downloads failed). Each names a different remedy.
 trunk_environment_blocked_kind=""
+# The transcript shape trunk_check_output_is_environment_blocked accepted, which
+# is what separates the last two.
+trunk_check_blocked_shape=""
 
 format_duration() {
   local seconds="$1"
@@ -6091,6 +6096,44 @@ trunk_text_has_network_failure_signature() {
   return 1
 }
 
+# Trunk states a failed PLUGIN download inline, in the check output itself, and
+# never writes a detail YAML for it. That inline cause has its own measured
+# phrasing, so it gets its own acceptance rather than widening the shared list.
+#
+# Measured 2026-08-26 in a real Claude cloud container (Trunk 1.25.0, cold
+# TRUNK_CACHE): the platform's credential proxy intercepts github.com and gates
+# it per session, so Trunk's plugin archive comes back 403 and the CLI aborts
+# before linting anything. The cause it prints is
+# `Unable to download plugin <url>: HTTP 403 '<url>'`.
+#
+# Three limits, all deliberate:
+#
+# - Plugin-scoped. The detail-YAML side was never measured with a 403, so adding
+#   `HTTP 403` to trunk_network_failure_signatures would excuse a shape nobody
+#   has seen. This acceptance reaches only `plugincause=` lines.
+# - 403 only. This is the same rule that keeps the bare `Curl Error:` prefix out
+#   of the list above: a 404 — or any other status — is a removed or renamed
+#   artifact, a broken pin the operator has to fix, and must keep failing the
+#   gate rather than reading as an allowlist to widen.
+# - The measured plugin source only, which is the `uri:` .trunk/trunk.yaml pins
+#   (the `ref:` is the version in the path, so a ref bump still matches). A 403
+#   from some other plugin source is far more likely to be revoked credentials
+#   or a misconfigured private source than a session gate, and that has to stay
+#   visible. Both URLs in the phrase must be the same one, because that is the
+#   shape Trunk emits.
+trunk_plugin_http_403_cause_pattern=$'^Unable to download plugin (https://github\\.com/trunk-io/plugins/[^[:space:]]+): HTTP 403 \'([^[:space:]]+)\'$'
+
+# True when the inline cause Trunk printed for a failed plugin download is a
+# measured environment block.
+trunk_plugin_cause_is_environment_blocked() {
+  local cause="$1"
+
+  trunk_text_has_network_failure_signature "$cause" && return 0
+
+  [[ "$cause" =~ $trunk_plugin_http_403_cause_pattern ]] || return 1
+  [[ "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]]
+}
+
 # Read the `report:` lines of one Trunk failure-detail YAML and say whether the
 # reason it records is a download failure. The path comes from Trunk's own
 # output, so it is accepted only in the exact shape Trunk emits — a plain file
@@ -6145,7 +6188,8 @@ is_trunk_detail_yaml_path() {
 #                         and exactly N rows were download steps naming a
 #                         detail YAML.
 #   yaml=<path>           one per such row.
-#   shape=plugin          every non-blank line was a plugin-download error.
+#   shape=plugin          every line that was not launcher progress chrome was a
+#                         plugin-download error.
 #   plugincause=<text>    one per such line.
 # It emits nothing when the transcript shows findings, an unexplained failure,
 # or any line it cannot account for.
@@ -6158,8 +6202,29 @@ summarize_trunk_check_transcript() {
       gsub(/\r/, "", s)
       return s
     }
+    # True for a tools/trunk progress line, and nothing else. Both halves are
+    # read off that tracked script: the mark is one it emits for a step in
+    # progress or a step that succeeded, and the message is one of its own,
+    # closed by the ellipsis it appends and an optional " done".
+    #
+    # The mark set is why the failure mark is absent: a launcher step that
+    # FAILED is not chrome, and it must keep disqualifying the transcript.
+    function is_launcher_progress(l,   i, rest) {
+      for (i = 1; i <= launcher_mark_count; i++) {
+        if (index(l, launcher_marks[i]) != 1) continue
+        rest = substr(l, length(launcher_marks[i]) + 1)
+        if (rest ~ ("^ (Downloading Trunk [^ ]+|Verifying Trunk sha256|" \
+          "Unpacking Trunk|Downloading latest Trunk Flaky Tests CLI|" \
+          "Unpacking Trunk Flaky Tests CLI)\\.\\.\\.( done)?$")) return 1
+      }
+      return 0
+    }
     BEGIN {
       cross = "\342\234\226"
+      # tools/trunk SUCCESS_MARK, then the eight PROGRESS_MARKS it cycles.
+      launcher_mark_count = split("\342\234\224 \342\241\277 \342\242\277 " \
+        "\342\243\273 \342\243\275 \342\243\276 \342\243\267 \342\243\257 " \
+        "\342\243\237", launcher_marks, " ")
       disqualified = 0
       declared = -1
       rows = 0
@@ -6170,6 +6235,13 @@ summarize_trunk_check_transcript() {
       line = strip($0)
       sub(/[ \t]+$/, "", line)
       if (line ~ /^[ \t]*$/) next
+
+      # tools/trunk is the launcher, and on a cold cache it installs the pinned
+      # CLI before running it, so the check transcript opens with the launcher
+      # progress lines. They are chrome, not a claim about the code, and the
+      # shape-2 rule below requires the transcript to hold nothing else.
+      if (is_launcher_progress(line)) next
+
       nonblank++
 
       trimmed = line
@@ -6234,7 +6306,8 @@ summarize_trunk_check_transcript() {
       }
 
       # Shape 2: Trunk could not fetch its plugin sources, so it never linted
-      # anything. Accepted only when the transcript holds nothing else at all.
+      # anything. Accepted only when the transcript holds nothing else at all,
+      # launcher progress chrome aside.
       if (plugins >= 1 && declared < 0 && rows == 0) {
         for (i = 1; i <= nonblank; i++) {
           if (!(i in pluginline)) exit 0
@@ -6247,13 +6320,16 @@ summarize_trunk_check_transcript() {
 }
 
 # True when a failed `trunk check` is provably an environment provisioning
-# failure with no lint findings behind it.
+# failure with no lint findings behind it. Publishes the accepted shape in
+# trunk_check_blocked_shape, because the two shapes need different remedies.
 trunk_check_output_is_environment_blocked() {
   local output_file="$1"
   local shape=""
   local line
   local value
   local evidence=0
+
+  trunk_check_blocked_shape=""
 
   [[ -n "$output_file" && -s "$output_file" ]] || return 1
 
@@ -6269,13 +6345,15 @@ trunk_check_output_is_environment_blocked() {
         ;;
       plugincause=*)
         value="${line#plugincause=}"
-        trunk_text_has_network_failure_signature "$value" || return 1
+        trunk_plugin_cause_is_environment_blocked "$value" || return 1
         evidence=$((evidence + 1))
         ;;
     esac
   done < <(summarize_trunk_check_transcript "$output_file")
 
-  [[ -n "$shape" && "$evidence" -ge 1 ]]
+  [[ -n "$shape" && "$evidence" -ge 1 ]] || return 1
+  trunk_check_blocked_shape="$shape"
+  return 0
 }
 
 # The single question both run paths ask about a failed Trunk arm. Sets
@@ -6289,7 +6367,14 @@ trunk_arm_is_environment_blocked() {
   if trunk_provisioning_is_blocked; then
     trunk_environment_blocked_kind=launcher
   elif trunk_check_output_is_environment_blocked "$output_file"; then
-    trunk_environment_blocked_kind=linters
+    # The plugin shape gets its own warning: Trunk aborted before it downloaded
+    # a single linter, so the linter warning would describe the wrong failure
+    # and name a remedy that does not apply.
+    if [[ "$trunk_check_blocked_shape" == plugin ]]; then
+      trunk_environment_blocked_kind=plugin
+    else
+      trunk_environment_blocked_kind=linters
+    fi
   else
     return 1
   fi
@@ -6329,12 +6414,38 @@ print_trunk_environment_blocked_warning() {
   local command="$1"
   local output_file="${2:-}"
 
+  if [[ "$trunk_environment_blocked_kind" == plugin ]]; then
+    print_trunk_plugin_environment_blocked_warning "$command" "$output_file"
+    return
+  fi
+
   if [[ "$trunk_environment_blocked_kind" == linters ]]; then
     print_trunk_linter_environment_blocked_warning "$command" "$output_file"
     return
   fi
 
   print_trunk_launcher_environment_blocked_warning "$command"
+}
+
+# Trunk fetches its plugin sources before it lints anything, so this failure
+# happened before any linter existed to run. The remedy differs too: the
+# measured cloud case is a credential proxy gating github.com per session, and
+# widening the environment's allowed domains cannot lift that.
+print_trunk_plugin_environment_blocked_warning() {
+  local command="$1"
+  local output_file="$2"
+
+  echo "warning: skipping ${command} — Trunk could not fetch its plugin sources." >&2
+  echo "  The CLI itself is installed — the launcher probe succeeded — but Trunk downloads the" >&2
+  echo "  linter definitions it needs before it lints anything, and that download failed. It" >&2
+  echo "  aborted before running a single linter, so no finding is being discarded here." >&2
+  echo "  Where the host below is simply not allowlisted, add it to the environment's allowed" >&2
+  echo "  domains. A Claude cloud session is the exception: its credential proxy gates" >&2
+  echo "  github.com per session and answers HTTP 403, and no allowed-domains entry lifts that." >&2
+  echo "  There the fix is a prewarmed Trunk cache — \$TRUNK_CACHE, else \$XDG_CACHE_HOME/trunk," >&2
+  echo "  else ~/.cache/trunk — or CI." >&2
+  print_trunk_provisioning_failure_causes "$output_file"
+  echo "  CI still enforces Trunk on the PR (.github/workflows/trunk.yml)." >&2
 }
 
 print_trunk_linter_environment_blocked_warning() {

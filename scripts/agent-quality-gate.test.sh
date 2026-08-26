@@ -9117,10 +9117,197 @@ STUB
   "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
 )
 rm -rf "$trunk_blocked_plugin_repo"
-assert_contains "warning: skipping ./tools/trunk check fixture.txt — Trunk could not provision its linters."
+# The plugin shape gets its own warning. Trunk never reached a linter here, so
+# the linter warning would describe a failure that did not happen.
+assert_contains "warning: skipping ./tools/trunk check fixture.txt — Trunk could not fetch its plugin sources."
+assert_contains "aborted before running a single linter"
+assert_not_contains "Trunk could not provision its linters."
 assert_contains "Unable to download plugin https://github.com/trunk-io/plugins/archive/v1.7.5.zip"
 assert_contains "All mapped commands passed."
 assert_not_contains "mapped command(s) failed."
+
+# The same shape as measured in a real Claude cloud container on 2026-08-26
+# (issue #2057): the platform's credential proxy gates github.com per session,
+# so Trunk's plugin archive answers 403 and the CLI aborts. Two things about
+# this transcript are what the fixture exists to pin:
+#
+# - The cause is `HTTP 403 '<url>'`, which matches none of the `Curl Error:`
+#   phrasings the detail-YAML side records.
+# - The cache was cold, so tools/trunk installed the CLI first and its progress
+#   lines lead the transcript. The shape-2 rule requires the transcript to hold
+#   nothing but plugin errors, so that chrome has to be recognized as chrome.
+trunk_cloud_plugin_403_repo="$(mktemp -d)"
+(
+  cd "$trunk_cloud_plugin_403_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.25.0"
+  exit 0
+fi
+printf '\342\241\277 Downloading Trunk 1.25.0...\n'
+printf '\033[1F\033[0K\342\242\277 Downloading Trunk 1.25.0...\n'
+printf '\033[1F\033[0K\033[0;32m\342\234\224\033[0m Downloading Trunk 1.25.0... done\n'
+printf '\342\241\277 Unpacking Trunk...\n'
+printf '\033[1F\033[0K\033[0;32m\342\234\224\033[0m Unpacking Trunk... done\n'
+printf '\n'
+printf "\033[0G\033[2K\033[1m\033[31m\342\234\226 Unable to download plugin https://github.com/trunk-io/plugins/archive/v1.7.5.zip: HTTP 403 'https://github.com/trunk-io/plugins/archive/v1.7.5.zip'\033[0m\n"
+exit 2
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+)
+assert_contains "warning: skipping ./tools/trunk check fixture.txt — Trunk could not fetch its plugin sources."
+# The warning has to replay the cause, or it names neither the host to allowlist
+# nor the status that made this an environment block rather than a broken pin.
+assert_contains "Unable to download plugin https://github.com/trunk-io/plugins/archive/v1.7.5.zip: HTTP 403"
+# And it has to name a remedy that can work. Widening the allowed domains cannot
+# lift a credential proxy that gates the host per session.
+assert_contains "no allowed-domains entry lifts that"
+assert_contains "- skipped "
+assert_contains "All mapped commands passed."
+assert_not_contains "mapped command(s) failed."
+
+# Same stamp rule as every other blocked-Trunk path: a skipped arm leaves no
+# clean whole-run stamp, so the next --skip-if-fresh run retries Trunk.
+(
+  cd "$trunk_cloud_plugin_403_repo"
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run --skip-if-fresh > "$output_file" 2>&1
+)
+rm -rf "$trunk_cloud_plugin_403_repo"
+assert_not_contains "skipping mapped commands"
+assert_contains "All mapped commands passed."
+assert_contains "Note: the Trunk arm was skipped"
+
+# The 403 acceptance is scoped to that one measured status on purpose. A 404 is
+# a removed or renamed plugin archive — a broken pin the operator has to fix —
+# and it must keep failing the gate. The transcript is otherwise byte-identical
+# to the accepted one, so the status is the only thing deciding the verdict.
+trunk_cloud_plugin_404_repo="$(mktemp -d)"
+(
+  cd "$trunk_cloud_plugin_404_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.25.0"
+  exit 0
+fi
+printf '\033[0;32m\342\234\224\033[0m Downloading Trunk 1.25.0...\n'
+printf '\033[1F\033[0K\033[0;32m\342\234\224\033[0m Downloading Trunk 1.25.0... done\n'
+printf '\033[0;32m\342\234\224\033[0m Unpacking Trunk...\n'
+printf '\033[1F\033[0K\033[0;32m\342\234\224\033[0m Unpacking Trunk... done\n'
+printf '\n'
+printf "\033[0G\033[2K\033[1m\033[31m\342\234\226 Unable to download plugin https://github.com/trunk-io/plugins/archive/v1.7.5.zip: HTTP 404 'https://github.com/trunk-io/plugins/archive/v1.7.5.zip'\033[0m\n"
+exit 2
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  set +e
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]]
+)
+rm -rf "$trunk_cloud_plugin_404_repo"
+assert_contains "1 mapped command(s) failed."
+assert_not_contains "- skipped "
+assert_not_contains "Trunk could not provision its linters."
+
+# The acceptance is pinned to the plugin source .trunk/trunk.yaml names. A 403
+# from anywhere else is far more likely to be revoked credentials or a
+# misconfigured private source than a session gate, so it must stay visible.
+# Same for a phrase naming two different URLs, which is not a shape Trunk emits.
+for trunk_foreign_403_case in \
+  "https://plugins.example.invalid/archive/v1.7.5.zip|https://plugins.example.invalid/archive/v1.7.5.zip" \
+  "https://github.com/trunk-io/plugins/archive/v1.7.5.zip|https://github.com/trunk-io/plugins/archive/v9.9.9.zip"; do
+  trunk_foreign_403_repo="$(mktemp -d)"
+  (
+    cd "$trunk_foreign_403_repo"
+    git init -q
+    git config user.email test@example.invalid
+    git config user.name "Quality Gate Test"
+    printf 'fixture\n' > fixture.txt
+    mkdir -p tools
+    cat > tools/trunk <<STUB
+#!/usr/bin/env bash
+if [[ "\${1:-}" == "--version" ]]; then
+  echo "1.25.0"
+  exit 0
+fi
+printf "\\033[1m\\033[31m\\342\\234\\226 Unable to download plugin ${trunk_foreign_403_case%%|*}: HTTP 403 '${trunk_foreign_403_case##*|}'\\033[0m\\n"
+exit 2
+STUB
+    chmod +x tools/trunk
+    git add .
+    git commit -qm init
+    printf 'changed\n' >> fixture.txt
+    set +e
+    "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+    exit_code=$?
+    set -e
+    [[ "$exit_code" -ne 0 ]]
+  )
+  rm -rf "$trunk_foreign_403_repo"
+  assert_contains "1 mapped command(s) failed."
+  assert_not_contains "- skipped "
+  assert_not_contains "Trunk could not provision its linters."
+done
+
+# Only the launcher's OWN marks make a line chrome. A failed launcher step keeps
+# disqualifying the transcript, and so does a line that merely carries the same
+# progress text behind an unrecognized mark — otherwise any unaccounted line
+# could dress itself as chrome and let a following plugin 403 skip the arm.
+for trunk_not_chrome_line in \
+  '\033[0;31m\342\234\230\033[0m Downloading Trunk 1.25.0... FAILED (see /tmp/launcher-download.log)' \
+  'ERROR Downloading Trunk 1.25.0... done'; do
+  trunk_not_chrome_repo="$(mktemp -d)"
+  (
+    cd "$trunk_not_chrome_repo"
+    git init -q
+    git config user.email test@example.invalid
+    git config user.name "Quality Gate Test"
+    printf 'fixture\n' > fixture.txt
+    mkdir -p tools
+    cat > tools/trunk <<STUB
+#!/usr/bin/env bash
+if [[ "\${1:-}" == "--version" ]]; then
+  echo "1.25.0"
+  exit 0
+fi
+printf '${trunk_not_chrome_line}\\n'
+printf "\\033[1m\\033[31m\\342\\234\\226 Unable to download plugin https://github.com/trunk-io/plugins/archive/v1.7.5.zip: HTTP 403 'https://github.com/trunk-io/plugins/archive/v1.7.5.zip'\\033[0m\\n"
+exit 2
+STUB
+    chmod +x tools/trunk
+    git add .
+    git commit -qm init
+    printf 'changed\n' >> fixture.txt
+    set +e
+    "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+    exit_code=$?
+    set -e
+    [[ "$exit_code" -ne 0 ]]
+  )
+  rm -rf "$trunk_not_chrome_repo"
+  assert_contains "1 mapped command(s) failed."
+  assert_contains "Downloading Trunk 1.25.0..."
+  assert_not_contains "- skipped "
+done
 
 # The invariant, restated against the new path: a Trunk that found a real problem
 # must fail the gate even when a linter download failed in the same run. This is
