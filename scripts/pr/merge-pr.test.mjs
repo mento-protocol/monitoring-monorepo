@@ -1481,6 +1481,61 @@ await test("a base retargeted during the merge itself is reported", async () => 
   );
 });
 
+await test("a concurrent append survives a short-write rollback", async () => {
+  // Two pr:merge runs can share the ledger. If the other one appends a
+  // complete record between our fstat and our short write, truncating back to
+  // the remembered length would delete their consent along with our partial
+  // bytes. Leave the mess rather than destroy their record.
+  const checkout = mkdtempSync(
+    path.join(tmpdir(), "merge-consent-concurrent-"),
+  );
+  try {
+    const ledger = path.join(checkout, CONSENT_LOG_BASENAME);
+    const existing = '{"timestamp":"2026-08-01T00:00:00.000Z","pr":1}\n';
+    writeFileSync(ledger, existing);
+    const theirs = '{"timestamp":"2026-08-26T11:59:00.000Z","pr":2070}\n';
+
+    const record = buildConsentRecord({
+      login: "chapati23",
+      repo: "mento-protocol/monitoring-monorepo",
+      number: 2071,
+      headOid: HEAD_OID,
+      notReadyReason: null,
+      now: new Date("2026-08-26T00:00:00.000Z"),
+    });
+
+    const error = await assertRefuses(
+      appendConsentRecord({
+        record,
+        git: async () => `${checkout}\n`,
+        write: (fd, payload) => {
+          // Another process lands a complete record first, then our write is
+          // cut short by the filesystem.
+          fs.appendFileSync(ledger, theirs);
+          return fs.writeSync(fd, payload.subarray(0, 5));
+        },
+      }),
+      "the consent record is incomplete",
+    );
+    assert(
+      error.message.includes("another writer appended concurrently"),
+      `the refusal should explain why nothing was rolled back, got: ${error.message}`,
+    );
+
+    const contents = readFileSync(ledger, "utf8");
+    assert(
+      contents.includes(theirs.trim()),
+      "the concurrent writer's record must survive",
+    );
+    assert(
+      contents.startsWith(existing),
+      "the pre-existing record must survive",
+    );
+  } finally {
+    rmSync(checkout, { recursive: true, force: true });
+  }
+});
+
 await test("a MERGED state with no base is not a confirmed merge", async () => {
   // GitHub said MERGED but named no destination. Treating that as success
   // would chain post-merge steps on an outcome this run never confirmed.

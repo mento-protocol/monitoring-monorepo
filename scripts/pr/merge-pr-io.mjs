@@ -94,6 +94,7 @@ export async function appendConsentRecord({
   git,
   write = writeSync,
   truncateFd = ftruncateSync,
+  statFd = fstatSync,
 }) {
   let repoRoot;
   try {
@@ -142,7 +143,7 @@ export async function appendConsentRecord({
   }
 
   try {
-    const stats = fstatSync(fd);
+    const stats = statFd(fd);
     if (!stats.isFile()) {
       throw new MergeRefusal(
         `${target} is not a regular file; refusing to record consent through it`,
@@ -170,7 +171,20 @@ export async function appendConsentRecord({
       // consent. Roll the file back to the length it had before this attempt.
       let rollback = "";
       try {
-        truncateFd(fd, stats.size);
+        // Only roll back when nothing else has touched the file. The ledger is
+        // opened `O_APPEND` and a second `pr:merge` can append a complete
+        // record between the `fstat` above and this write, in which case
+        // truncating to the remembered length would delete that record along
+        // with these partial bytes. An append-only ledger must never lose
+        // somebody else's consent to tidy up our own failure.
+        const after = statFd(fd);
+        if (after.size === stats.size + written) {
+          truncateFd(fd, stats.size);
+        } else {
+          rollback =
+            ` and the partial bytes were left in place because another writer appended concurrently;` +
+            ` remove the trailing partial record by hand`;
+        }
       } catch (err) {
         rollback = ` and the partial bytes could not be removed: ${err instanceof Error ? err.message : String(err)}`;
       }
