@@ -75,11 +75,15 @@ wrapper says so in its own header rather than implying otherwise:
 - A local process running as the operator can allocate a pseudo-terminal and
   clear the environment markers. Any local signal a local caller can synthesize
   is not proof of a human.
-- The permission deny is command-level. It does not cover the same merge issued
-  as `gh api --method PUT repos/{owner}/{repo}/pulls/{n}/merge`, and no
-  permission pattern reliably spells every form of that call. A pattern that
-  caught one spelling would read as broader cover than it gives, which is worse
-  than a documented gap.
+- The permission deny is a list of command patterns, so it covers the spellings
+  someone enumerated. `gh pr merge` and its repository-qualified forms
+  (`gh -R X pr merge`, `gh pr --repo X merge`, and the `=` variants) are denied
+  — all six were confirmed to parse in gh 2.96.0, and the bare `-R` form was
+  confirmed to bypass the original single pattern. It does not cover the same
+  merge issued as `gh api --method PUT repos/{owner}/{repo}/pulls/{n}/merge`,
+  through a `gh alias`, or with other global flags interleaved. No pattern list
+  closes that space, and one that read as though it did would be worse than a
+  documented gap.
 - **The approved base cannot be bound atomically.** `--match-head-commit` pins
   the head, and the merge endpoint's only matching parameter is `sha`, for the
   head — there is no base equivalent. A retarget landing between the final gate

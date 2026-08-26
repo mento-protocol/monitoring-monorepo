@@ -370,11 +370,14 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    unreadable head, or a `gh` error. A not-ready PR or an unclean feedback
    ledger needs `--not-ready-reason "<why>"`, which is recorded with the
    consent and does not carry over to blockers that appear later.
-   `.claude/settings.json` denies the raw `gh pr merge` command for Claude
-   sessions, which removes the obvious shortcut past the wrapper. That deny is
-   command-level: it does not cover the same merge issued as
-   `gh api --method PUT repos/{owner}/{repo}/pulls/{n}/merge`, and it covers
-   Claude's Bash tool only. Neither layer is an unforgeable boundary — a local
+   `.claude/settings.json` denies `gh pr merge` for Claude sessions, along with
+   its repository-qualified spellings (`gh -R X pr merge`,
+   `gh pr --repo X merge`, and the `=` forms), which removes the obvious
+   shortcuts past the wrapper. That deny is a list of command patterns: it
+   covers the spellings enumerated there, not the same merge issued as
+   `gh api --method PUT repos/{owner}/{repo}/pulls/{n}/merge`, through an alias,
+   or with other global flags interleaved — and it covers Claude's Bash tool
+   only. Neither layer is an unforgeable boundary — a local
    process running as the operator can synthesize any local signal — so the
    approval rule above stays the binding control, and the durable boundary
    belongs on GitHub's side of the wire.

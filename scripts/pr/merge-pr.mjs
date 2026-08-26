@@ -26,11 +26,14 @@
  *
  * Agents must never invoke this script. Be honest about what makes that true.
  * The interactive-session refusal stops an agent that runs this command the
- * ordinary way, and `.claude/settings.json` denies the raw `gh pr merge`
- * command so the obvious shortcut is gone too. Neither is an unforgeable
- * boundary: a caller on this machine can allocate a pseudo-terminal and clear
- * the markers, and the deny is command-level, so it does not cover the same
- * merge issued as `gh api --method PUT repos/{owner}/{repo}/pulls/{n}/merge`.
+ * ordinary way, and `.claude/settings.json` denies `gh pr merge` along with the
+ * repository-qualified spellings of it (`gh -R X pr merge`, `gh pr --repo X
+ * merge`, and the `=` forms), so the obvious shortcuts are gone too. Neither is
+ * an unforgeable boundary: a caller on this machine can allocate a
+ * pseudo-terminal and clear the markers, and the deny is a command-pattern
+ * list, so it covers the spellings someone thought to enumerate and not the
+ * same merge issued as `gh api --method PUT repos/{owner}/{repo}/pulls/{n}/merge`,
+ * through an alias, or with other global flags interleaved.
  * A local process running as the operator can synthesize any local signal, so
  * no check in this file can be one. What the wrapper does provide is a default
  * that refuses, a briefing the operator must read, a confirmation they must
