@@ -1222,7 +1222,7 @@ assert.match(
 );
 assert.match(
   source,
-  /command_timeout_overridden=false[\s\S]*?AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS[\s\S]*?command_timeout_overridden=true[\s\S]*?gate_selftest_timeout_seconds=1800/u,
+  /command_timeout_overridden=false[\s\S]*?AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS[\s\S]*?command_timeout_overridden=true[\s\S]*?gate_selftest_timeout_seconds=2100/u,
   "the self-test must receive a bounded default without widening ordinary command timeouts",
 );
 assert.match(
@@ -9793,14 +9793,14 @@ timeout_selector="$({
 eval "$timeout_selector"
 command_timeout_seconds=1500
 # shellcheck disable=SC2034 # read by the eval-loaded production selector
-gate_selftest_timeout_seconds=1800
+gate_selftest_timeout_seconds=2100
 [[ "$(mapped_command_timeout_seconds "pnpm lint:scripts")" == 1500 ]] ||
   fail "ordinary mapped commands did not retain the 1500-second default"
 for selftest_command in \
   "pnpm agent:quality-gate:test" \
   "bash scripts/agent-quality-gate.test.sh"; do
-  [[ "$(mapped_command_timeout_seconds "$selftest_command")" == 1800 ]] ||
-    fail "${selftest_command} did not receive the 1800-second default"
+  [[ "$(mapped_command_timeout_seconds "$selftest_command")" == 2100 ]] ||
+    fail "${selftest_command} did not receive the 2100-second default"
 done
 command_timeout_seconds=7
 # shellcheck disable=SC2034 # read by the eval-loaded production selector

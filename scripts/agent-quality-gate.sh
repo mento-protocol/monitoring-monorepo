@@ -39,7 +39,7 @@ Options:
   --command-timeout <n>
                  With --run, kill any single mapped command that runs longer
                  than n seconds and report it as a failure. Default: 1500. The
-                 gate self-test uses 1800 unless this option overrides it. A
+                 gate self-test uses 2100 unless this option overrides it. A
                  timeout is per command, never for the whole run.
   --lock-wait <n>
                  With --run, wait at most n seconds for scheduler admission,
@@ -63,7 +63,7 @@ Environment:
                       Same behavior as --full-local-tests when set to 1 or true.
   AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS
                       Same behavior as --command-timeout. Default: 1500; an
-                      explicit value also overrides the 1800-second gate
+                      explicit value also overrides the 2100-second gate
                       self-test default.
   AGENT_QUALITY_GATE_LOCK
                       Set to 0 or false for the same effect as --no-lock.
@@ -91,16 +91,16 @@ skip_if_fresh="${AGENT_QUALITY_SKIP_IF_FRESH:-false}"
 quality_parallelism="${AGENT_QUALITY_PARALLELISM:-auto}"
 full_local_tests="${AGENT_GATE_FULL_TESTS:-false}"
 # The gate self-test is the only mapped command that needs more than the
-# ordinary 1500-second watchdog. It passed at 1452 seconds, then reached the
-# unchanged watchdog at 1504 seconds after its coordinator recovery coverage
-# grew. Give that command a bounded 20% margin. An explicit global override
+# ordinary 1500-second watchdog. The current exact-head suite passed in 1710
+# seconds after the old watchdog stopped an earlier run at 1504 seconds. Give
+# that command 390 seconds of measured headroom. An explicit global override
 # still applies to every command, including the self-test.
 command_timeout_overridden=false
 if [[ -n "${AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS:-}" ]]; then
   command_timeout_overridden=true
 fi
 command_timeout_seconds="${AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS:-1500}"
-gate_selftest_timeout_seconds=1800
+gate_selftest_timeout_seconds=2100
 gate_lock_enabled="${AGENT_QUALITY_GATE_LOCK:-1}"
 gate_coordinator_enabled="${AGENT_QUALITY_GATE_COORDINATOR-1}"
 gate_coordinator_capacity="${AGENT_QUALITY_GATE_CAPACITY-3}"

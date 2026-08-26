@@ -1922,9 +1922,10 @@ always re-run. The Trunk check is skipped, never reused, where the CLI cannot
 be provisioned.
 
 Each mapped command has a watchdog. The ordinary default is 1500 seconds. The
-gate self-test default is 1800 seconds because measured exact-head runs took
-1452 seconds and then reached the old 1500-second bound at 1504 seconds after
-the coordinator recovery suite grew. `--command-timeout <n>` or
+gate self-test default is 2100 seconds. The current exact-head suite passed in
+1710 seconds after an earlier run reached the old 1500-second bound at 1504
+seconds. This leaves 390 seconds of measured headroom.
+`--command-timeout <n>` or
 `AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS` replaces both defaults. The resolved
 ordinary and self-test bounds are part of the coordinated execution identity.
 On timeout the watchdog TERM→KILLs the process tree, reports
