@@ -86,6 +86,13 @@ wrapper says so in its own header rather than implying otherwise:
   through a `gh alias`, or with other global flags interleaved. No pattern list
   closes that space, and one that read as though it did would be worse than a
   documented gap.
+- **The squash subject is not pinned.** A title edited in the same window can
+  reach the merge commit. `gh pr merge --subject` would pin it, but this
+  repository sets `squash_merge_commit_title=COMMIT_OR_PR_TITLE`: GitHub uses
+  the single commit's subject when a PR has one, and appends `(#N)`. A fixed
+  `--subject` would replace both behaviours on every merge, so the title is
+  bound in the confirmation signature and the residual window is accepted
+  rather than changing how every merge commit is titled.
 - **The approved base cannot be bound atomically.** `--match-head-commit` pins
   the head, and the merge endpoint's only matching parameter is `sha`, for the
   head — there is no base equivalent. A retarget landing between the final gate

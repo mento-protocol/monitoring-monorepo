@@ -18,11 +18,17 @@
  * an operator who has to re-run one command loses a minute, and a merge nobody
  * approved cannot be taken back.
  *
- * One race is detected rather than prevented, because GitHub offers no way to
- * prevent it: `--match-head-commit` pins the head, and the merge endpoint has
- * no base equivalent, so a retarget between the final gate read and the merge
- * request itself can still land on another branch. The wrapper re-reads the
- * base afterwards and fails loudly when it moved.
+ * Two races are detected rather than prevented. `--match-head-commit` pins the
+ * head, and the merge endpoint has no base equivalent, so a retarget between
+ * the final gate read and the merge request itself can still land on another
+ * branch; the wrapper re-reads the base afterwards and fails loudly when it
+ * moved. A title edited in that same window can likewise reach the squash
+ * subject. `--subject` would pin it, but this repository sets
+ * `squash_merge_commit_title=COMMIT_OR_PR_TITLE`, so GitHub uses the single
+ * commit's subject when there is one and appends `(#N)` — behaviour a fixed
+ * `--subject` would replace on every merge. Changing how every merge commit is
+ * titled, to close a sub-second window, is the worse trade; the title is bound
+ * in the confirmation signature instead.
  *
  * Agents must never invoke this script. Be honest about what makes that true.
  * The interactive-session refusal stops an agent that runs this command the
