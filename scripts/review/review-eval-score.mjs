@@ -60,17 +60,29 @@ const PLACEHOLDER_PATTERN = /\{\{([A-Z_]+)\}\}/g;
 
 const promptDir = fileURLToPath(new URL("./prompts", import.meta.url));
 const scriptPath = fileURLToPath(import.meta.url);
-// Every module that can change a recorded number or a recorded verdict. The
+// Every file that can change a recorded number or a recorded verdict. The
 // extraction and the matcher live here, the per-condition fold and the leak
 // signal live in `review-eval-run.mjs`, the recompute lives in
 // `review-eval-result-shape.mjs`, and the verdict rules live in
-// `review-eval-report.mjs`. Editing any of them changes what a row means, so
-// all of them are hashed into `matcher_digest` and comparison is refused
-// across the change.
+// `review-eval-report.mjs`.
+//
+// The two fixture helpers are hashed for the same reason. `gridFixtures()`
+// chooses the matrix, `fixtureForPr()` selects the truth file and the recall
+// denominator, and `forbiddenShasForFixture()` gates the leak verdict, so an
+// edit there moves recorded numbers without touching any other scoring file.
+// `build-fixture.sh` materializes the checkout the contestant reviews and
+// carries the tree-hash and forbidden-sha checks that verify it, so an edit
+// there changes what was reviewed — or weakens the check that proves it — and
+// the drift table's `fixture content` row is only as strong as those bytes.
+//
+// Editing any of them changes what a row means, so all of them are hashed into
+// `matcher_digest` and comparison is refused across the change.
 export const SCORING_MODULES = [
   "review-eval-run.mjs",
   "review-eval-result-shape.mjs",
   "review-eval-report.mjs",
+  "review-eval-fixtures.mjs",
+  "build-fixture.sh",
 ].map((name) => fileURLToPath(new URL(`./${name}`, import.meta.url)));
 const promptCache = new Map();
 
@@ -496,6 +508,24 @@ export async function classifyNovel({
       { raw: JSON.stringify(parsed).slice(0, 2000) },
     );
   }
+  // The counter below reads `verdict.class`, so a verdict that is not an
+  // object is unparsable however plausible its contents. `{"1": "wrong"}`
+  // carries a valid class name but `verdict.class` is `undefined`, so the
+  // claim would land in no bucket and `novel_wrong` would stay at zero — the
+  // same silent understatement of `wrong_claims` the class check exists to
+  // prevent. Reject the shape before any class is read.
+  const misshaped = Object.entries(parsed.verdicts).filter(
+    ([, verdict]) => !isObject(verdict),
+  );
+  if (misshaped.length) {
+    throw new JudgeOutputError(
+      `novel judge returned ${misshaped.length} non-object verdict(s): ` +
+        misshaped
+          .map(([key, verdict]) => `${key}=${JSON.stringify(verdict)}`)
+          .join(", "),
+      { raw: JSON.stringify(parsed).slice(0, 2000) },
+    );
+  }
   // A class outside the four the prompt promises is an unparsable reply, not a
   // fifth bucket. Counted as `unknownClass` it was dropped by `foldCondition`:
   // a judge that misspelled or invented a class recorded neither a real nor a
@@ -503,7 +533,7 @@ export async function classifyNovel({
   // one of the two counters that can turn a row RED on its own — and no number
   // anywhere said the verdict was missing.
   const offContract = Object.entries(parsed.verdicts)
-    .map(([key, verdict]) => [key, isObject(verdict) ? verdict.class : verdict])
+    .map(([key, verdict]) => [key, verdict.class])
     .filter(([, cls]) => !NOVEL_CLASSES.includes(cls));
   if (offContract.length) {
     throw new JudgeOutputError(

@@ -583,6 +583,46 @@ export function fullMatrixProblems({ contract, row, label = "row" }) {
 }
 
 /**
+ * The frozen denominator, per id. Every producer builds a condition's vectors
+ * from `conditionScope`, which takes a covered PR's whole `scorable_ids` list,
+ * so a condition that scored a PR at all carries every defect that PR froze.
+ * Dropping one shrinks `opportunities`, which lifts recall and the McNemar
+ * denominator with it, and nothing else would notice: `revalidateRow`
+ * recomputes over the ids the row lists, and `fullMatrixProblems` only asks
+ * whether some id from each required PR is present.
+ *
+ * Applies to every kind and status. A partial run may leave a PR out entirely,
+ * but a PR it did score is scored whole.
+ */
+export function frozenDefectProblems({ contract, row, label = "row" }) {
+  const problems = [];
+  const scorable = contractScorableIds(contract);
+  const scorableByPr = contractScorableIdsByPr(contract);
+  for (const name of CONDITION_NAMES) {
+    const condition = row?.conditions?.[name];
+    if (!condition || typeof condition.per_defect !== "object") continue;
+    const scored = new Set(Object.keys(condition.per_defect));
+    for (const id of scored) {
+      if (!scorable.has(id)) {
+        problems.push(
+          `${label}.conditions.${name}.per_defect has ${id}, which the contract does not score`,
+        );
+      }
+    }
+    for (const [pr, ids] of scorableByPr) {
+      if (!ids.some((id) => scored.has(id))) continue;
+      const dropped = ids.filter((id) => !scored.has(id));
+      if (dropped.length) {
+        problems.push(
+          `${label}.conditions.${name}.per_defect scored PR ${pr} but omits ${dropped.join(", ")}; the contract freezes ${ids.length} defect(s) for that PR`,
+        );
+      }
+    }
+  }
+  return problems;
+}
+
+/**
  * Append-only comparison against the rows at a base ref. Rows may only be
  * added; an edited or removed row is a contract violation the caller reports.
  */
@@ -620,41 +660,13 @@ export function checkLedger({ path, contract, contractDigest, baseRows }) {
     return { ok: false, problems, rows: [], comparableRows: [] };
   }
 
-  const scorable = contractScorableIds(contract);
-  const scorableByPr = contractScorableIdsByPr(contract);
   rows.forEach((row, index) => {
     const label = `ledger row ${index + 1}`;
     const rowProblems = validateLedgerRow(row, label);
     problems.push(...rowProblems);
     if (rowProblems.length) return;
     if (contractDigest && row.contract_digest !== contractDigest) return;
-    for (const name of CONDITION_NAMES) {
-      const condition = row.conditions[name];
-      if (!condition) continue;
-      const scored = new Set(Object.keys(condition.per_defect));
-      for (const id of scored) {
-        if (!scorable.has(id)) {
-          problems.push(
-            `${label}.conditions.${name}.per_defect has ${id}, which the contract does not score`,
-          );
-        }
-      }
-      // The denominator is frozen per PR. Every producer builds a condition's
-      // vectors from `conditionScope`, which takes a covered PR's whole
-      // `scorable_ids` list, so a condition that scored a PR at all carries
-      // every defect that PR froze. Dropping one shrinks `opportunities`, which
-      // lifts recall and the McNemar denominator with it, and nothing else
-      // would notice: `revalidateRow` recomputes over the ids the row lists.
-      for (const [pr, ids] of scorableByPr) {
-        if (!ids.some((id) => scored.has(id))) continue;
-        const dropped = ids.filter((id) => !scored.has(id));
-        if (dropped.length) {
-          problems.push(
-            `${label}.conditions.${name}.per_defect scored PR ${pr} but omits ${dropped.join(", ")}; the contract freezes ${ids.length} defect(s) for that PR`,
-          );
-        }
-      }
-    }
+    problems.push(...frozenDefectProblems({ contract, row, label }));
     // The other half of the frozen denominator: which conditions and which PRs
     // a complete full run must have scored at all. Reported after the per-id
     // checks above, which name the narrower fault when a row breaks both.

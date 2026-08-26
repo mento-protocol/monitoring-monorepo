@@ -416,6 +416,38 @@ test("classifyNovel refuses a class outside the contract", async () => {
   }
 });
 
+test("classifyNovel refuses a verdict that is not an object", async () => {
+  // The counter reads `verdict.class`. A bare string carrying a valid class
+  // name passes any check that only looks at the class value, then folds as
+  // `undefined` into no bucket at all: `novel_wrong` stays zero and a
+  // hallucinated claim disappears past the wrong-claims RED ceiling.
+  for (const scalar of ["wrong", "real", 3, true, ["wrong"]]) {
+    const exec = stubExec([
+      JSON.stringify({
+        verdicts: {
+          1: { class: "real", why: "read the file" },
+          2: scalar,
+        },
+      }),
+    ]);
+    await assert.rejects(
+      classifyNovel({
+        claims: ["a", "b"],
+        matchedIds: [101],
+        truthFindings,
+        fixturePath: "/tmp/fx-1990",
+        exec,
+      }),
+      (error) => {
+        assert.equal(error.name, "JudgeOutputError");
+        assert.match(error.message, /non-object verdict/);
+        return true;
+      },
+      `verdict ${JSON.stringify(scalar)} was scored instead of refused`,
+    );
+  }
+});
+
 test("classifyNovel short-circuits an empty claim list", async () => {
   const exec = stubExec([]);
   const result = await classifyNovel({ claims: [], truthFindings, exec });
@@ -653,11 +685,16 @@ test("scorerDigest is a stable sha256 over the scorer and its prompts", () => {
 
 test("scorerDigest covers every module that can move a recorded number", () => {
   // The per-condition fold, the recompute and the verdict rules live outside
-  // this module, so an edit to one of them must break the pairing too.
+  // this module, so an edit to one of them must break the pairing too. So do
+  // the fixture helpers: `review-eval-fixtures.mjs` chooses the matrix, the
+  // truth file and the recall denominator, and `build-fixture.sh` materializes
+  // the checkout the contestant reviews and carries the checks that verify it.
   for (const name of [
     "review-eval-run.mjs",
     "review-eval-result-shape.mjs",
     "review-eval-report.mjs",
+    "review-eval-fixtures.mjs",
+    "build-fixture.sh",
   ]) {
     assert.ok(
       SCORING_MODULES.some((module) => module.endsWith(name)),

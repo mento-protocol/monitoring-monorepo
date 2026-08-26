@@ -79,7 +79,17 @@ jobs:
         # Schema, append-only against the merge base, and baseline immutability.
         # --require-base fails the step when origin/main does not resolve, so a
         # checkout change can never turn the append-only guard into a no-op.
-        run: pnpm review:eval -- --check-ledger --require-base
+        #
+        # --revalidate-appended recomputes every row this branch adds from the
+        # detail the same branch commits. Without it a ledger PR could edit its
+        # row's verdict, its counters or a per_defect bit after the local
+        # `--validate --append` and still pass every check here, because schema,
+        # id coverage and append-only history all stay satisfied while the
+        # committed report is no longer backed by its cell and calibration
+        # evidence. It calls no model: the recompute reads the committed
+        # `result-*.json` and `calibration.json` files, and this job holds no
+        # model credential.
+        run: pnpm review:eval -- --check-ledger --require-base --revalidate-appended
 
   freshness:
     # autofix-ci-trust: this job runs only on `schedule` — the `if:` below

@@ -296,9 +296,23 @@ remaining_seconds() {
 # Run one command with a wall-clock bound, stdout to $1, stderr to "$1.err".
 # macOS ships no `timeout`, so the bound is a watchdog subshell: TERM at the
 # limit, KILL ten seconds later for a child that ignores it. Returns the
-# command's own status, or 124 when the bound stopped it. The watchdog signals
-# the child it started, so a grandchild that outlives its parent is not covered;
-# the point is that a stalled cell can no longer outlive the run.
+# command's own status, or 124 when the bound stopped it.
+#
+# The bounded command is started in a process group of its own and the watchdog
+# signals the whole group, because every command run here spawns model calls as
+# grandchildren: the scoring pass is `node review-eval.mjs`, which spawns up to
+# four `claude` judges, and a cell is a shell function that spawns the finder or
+# the contestant. Signalling the direct child alone left those grandchildren
+# running against their own one-hour timeouts, spending quota long after the run
+# reported failure and removed the worktrees they were reading. Monitor mode is
+# what gives the job its own group; it is switched off again immediately, and
+# the group id is read back so a shell that gave the job no group of its own
+# falls back to the bare pid rather than signalling this script's own group.
+#
+# Standard input comes from /dev/null. In its own process group a child that
+# reads the controlling terminal takes SIGTTIN and stops, which would turn a
+# stalled read into a hung run; every prompt here is passed in argv, so nothing
+# wants a terminal.
 #
 # stderr is captured rather than discarded: it is the only place a finder, a
 # contestant or the scorer says why it exited, and every failure path below is a
@@ -309,8 +323,21 @@ run_bounded() {
   shift 2
   local marker="${out_file}.deadline"
   rm -f "$marker"
-  "$@" >"$out_file" 2>"${out_file}.err" &
+  local monitor_off=0
+  case "$-" in
+    *m*) : ;;
+    *) monitor_off=1 ;;
+  esac
+  set -m
+  "$@" </dev/null >"$out_file" 2>"${out_file}.err" &
   local pid=$!
+  ((monitor_off)) && set +m
+  local own_pgid child_pgid target="$pid"
+  own_pgid="$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')"
+  child_pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')"
+  if [[ -n $child_pgid && -n $own_pgid && $child_pgid != "$own_pgid" ]]; then
+    target="-$child_pgid"
+  fi
   (
     local waited=0
     while ((waited < limit)); do
@@ -319,9 +346,9 @@ run_bounded() {
       kill -0 "$pid" 2>/dev/null || exit 0
     done
     : >"$marker"
-    kill -TERM "$pid" 2>/dev/null || exit 0
+    kill -TERM "$target" 2>/dev/null || exit 0
     sleep 10
-    kill -KILL "$pid" 2>/dev/null || true
+    kill -KILL "$target" 2>/dev/null || true
   ) &
   local watcher=$!
   local status=0
@@ -452,10 +479,39 @@ publish_row() {
       gh pr create --repo mento-protocol/monitoring-monorepo \
         --title "$title" --body-file "$REPO/$detail/$body_file"; then
       PUBLISHED=1
+      keep_baseline_copy
     else
       log "the ledger PR could not be opened; the commands above are the recovery path"
     fi
   fi
+}
+
+# The candidate procedure runs the installed skill and the candidate in one
+# sitting and compares them with --against. Publishing leaves the checkout on
+# the eval branch, and the candidate run must branch from main instead — but
+# both the appended ledger row and the detail directory live only on that eval
+# branch, so `git checkout main` deletes them and an --against that names the
+# row's executed_at then resolves against a ledger that no longer holds it. The
+# candidate's pre-flight aborts before the candidate spends anything, which is
+# the right failure and still a wasted installed run.
+#
+# --against also takes a row file, and a row carries every bit the comparison
+# reads: `buildVsBaseline` pairs the two `per_defect` vectors and needs no
+# detail directory of its own. So keep one copy outside the checkout, where no
+# branch switch can reach it, and print the exact argument to pass.
+keep_baseline_copy() {
+  local kept="$TMPROOT/review-eval-installed-row.json"
+  # Only an installed run is ever the baseline, and only a complete one. A
+  # candidate run writing here would overwrite the anchor of its own sitting.
+  if [[ -n $SKILL_REF ]] ||
+    [[ $(json_field "$RUN_DIR/row.json" status) != "complete" ]]; then
+    return 0
+  fi
+  cp "$RUN_DIR/row.json" "$kept" || {
+    log "could not keep a baseline copy of the row at $kept"
+    return 0
+  }
+  log "baseline copy for a same-sitting candidate run: --against $kept"
 }
 
 abort() {

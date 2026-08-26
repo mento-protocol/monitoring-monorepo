@@ -1324,6 +1324,63 @@ test("--validate --append refuses a complete full row missing a condition", () =
   }
 });
 
+test("--validate --append refuses a row that dropped a scored PR's frozen defects", () => {
+  const root = makeRoot();
+  try {
+    const rowPath = path.join(root, "row.json");
+    // The matrix check only asks whether *some* id from each required PR is
+    // present, and `revalidateRow` recomputes over the ids the row lists, so a
+    // condition that keeps one id per PR reads as a whole matrix whose numbers
+    // agree with its own bits — on a recall and McNemar denominator that has
+    // quietly shrunk. Only `--check-ledger` refused this, which reports the
+    // fault after the row is already committed.
+    const allIds = scorableIdsFor(
+      contract.fixtures.map((fixture) => fixture.pr),
+    );
+    const p1 = new Set(
+      p1IdsFor(contract.fixtures.map((fixture) => fixture.pr)),
+    );
+    const row = makeRow({
+      matchedIds: scorableIdsFor([1990, 1999]),
+      fullMatrix: true,
+    });
+    const control = row.conditions.control;
+    for (const id of scorableIdsFor([1982]).slice(1)) {
+      delete control.per_defect[id];
+    }
+    // Re-derive the condition's own numbers from the bits it still carries, so
+    // the shrunken denominator is the only fault the row has left.
+    const tally = (ids) => {
+      const matched = ids.reduce(
+        (total, id) => total + control.per_defect[id][0],
+        0,
+      );
+      return {
+        matched,
+        opportunities: ids.length,
+        rate:
+          ids.length === 0 ? null : Number((matched / ids.length).toFixed(3)),
+      };
+    };
+    const kept = allIds.filter((id) => Object.hasOwn(control.per_defect, id));
+    control.recall = tally(kept);
+    control.p1 = tally(kept.filter((id) => p1.has(id)));
+    row.verdict = verdict({ contract, row }).verdict;
+    writeFileSync(rowPath, JSON.stringify(row, null, 2));
+    const result = cli(["--validate", rowPath, "--append", "--json"], { root });
+    assert.equal(result.status, 1);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.appended, false);
+    assert.match(
+      output.problems.join(" | "),
+      /conditions\.control\.per_defect scored PR 1982 but omits .*; the contract freezes 5 defect\(s\) for that PR/,
+    );
+    assert.equal(readLedger(path.join(root, ledgerRelative)).length, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("--score refuses a frozen input edited after planning", () => {
   const root = makeRoot();
   try {
@@ -2761,6 +2818,36 @@ test("the orchestrator carries one baseline through score, validate and report",
   }
 });
 
+test("the installed baseline survives the checkout the candidate needs", () => {
+  const script = readFileSync(
+    path.join(repoRoot, "scripts/review/run-eval.sh"),
+    "utf8",
+  );
+  const doc = readFileSync(
+    path.join(repoRoot, "docs/evals/review-skill.md"),
+    "utf8",
+  );
+  // Publishing commits the row and its detail on the new eval branch and
+  // leaves the checkout there. The candidate run must branch from main, and
+  // `git checkout main` deletes both, so an --against naming the row's
+  // executed_at resolves against a ledger that no longer holds it and the
+  // candidate's pre-flight aborts on a run the installed one already paid for.
+  // One copy outside the checkout is what makes the documented same-sitting
+  // comparison run at all.
+  const kept = "review-eval-installed-row.json";
+  assert.match(script, new RegExp(`local kept="\\$TMPROOT/${kept}"`));
+  assert.match(script, /PUBLISHED=1\n\s+keep_baseline_copy/);
+  // A candidate run publishes too, and a failed run publishes an INCOMPLETE
+  // row; neither is ever the baseline.
+  assert.match(script, /if \[\[ -n \$SKILL_REF \]\] \|\|/);
+  assert.match(
+    script,
+    /json_field "\$RUN_DIR\/row\.json" status\) != "complete"/,
+  );
+  // The runbook's own command block passes that file, not a timestamp.
+  assert.match(doc, new RegExp(`--against "\\$\\{TMPDIR:-/tmp\\}/${kept}"`));
+});
+
 test("the ledger branch names one run, not one day", () => {
   const script = readFileSync(
     path.join(repoRoot, "scripts/review/run-eval.sh"),
@@ -2840,11 +2927,74 @@ test("the run deadline bounds the cell subprocesses and the judge pass", () => {
     /run_bounded "\$SCORE_OUT" "\$\(remaining_seconds "\$DEADLINE"\)"/,
   );
   // The watchdog escalates: a child that ignores TERM is killed.
-  assert.match(script, /kill -TERM "\$pid"/);
-  assert.match(script, /kill -KILL "\$pid"/);
+  assert.match(script, /kill -TERM "\$target"/);
+  assert.match(script, /kill -KILL "\$target"/);
   // A cell that hit the bound fails the cell; it is never cached as a review.
   assert.match(script, /the finder hit the run deadline; not cached/);
   assert.match(script, /claude hit the run deadline; not cached/);
+});
+
+test("the deadline terminates the whole subprocess tree, not only its parent", () => {
+  // Every command the bounded runner starts spends quota through
+  // grandchildren: the scoring pass is `node review-eval.mjs`, which spawns up
+  // to four `claude` judges, and a cell is a shell function that spawns the
+  // finder or the contestant. Signalling the direct child alone left those
+  // running against their own one-hour timeouts, billing long after the run
+  // reported failure and removed the worktrees they were reading.
+  //
+  // Run the committed function itself rather than grepping it: whether a
+  // grandchild dies is a property of the process group, which no pattern in the
+  // source can assert.
+  const script = readFileSync(
+    path.join(repoRoot, "scripts/review/run-eval.sh"),
+    "utf8",
+  );
+  const definition = script.match(/^run_bounded\(\) \{\n[\s\S]*?^\}$/m);
+  assert.ok(definition, "run_bounded is not defined at column zero");
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-bounded-"));
+  let grandchild = null;
+  try {
+    const harness = path.join(dir, "harness.sh");
+    const outFile = path.join(dir, "out");
+    writeFileSync(
+      harness,
+      [
+        "#!/usr/bin/env bash",
+        "set -uo pipefail",
+        definition[0],
+        "status=0",
+        // The direct child leaves a background process behind and then stalls
+        // past the bound, exactly like a judge pass that hangs on a session
+        // limit. It `exec`s so that it dies on the group's TERM rather than on
+        // the KILL ten seconds later, which keeps the case under five seconds.
+        `run_bounded ${JSON.stringify(outFile)} 3 bash -c 'sleep 120 & echo "$!"; exec sleep 120' || status=$?`,
+        'echo "status=$status"',
+      ].join("\n"),
+    );
+    const result = spawnSync("bash", [harness], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /status=124/);
+    grandchild = Number(readFileSync(outFile, "utf8").trim());
+    assert.ok(Number.isInteger(grandchild) && grandchild > 1);
+    // The group signal is delivered with the parent's; give the kernel a beat
+    // before asking whether the grandchild is gone.
+    spawnSync("sleep", ["1"]);
+    assert.throws(
+      () => process.kill(grandchild, 0),
+      /ESRCH/,
+      `grandchild ${grandchild} outlived the deadline`,
+    );
+    grandchild = null;
+  } finally {
+    if (grandchild !== null) {
+      try {
+        process.kill(grandchild, "SIGKILL");
+      } catch {
+        // Already gone; nothing to clean up.
+      }
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("the orchestrator refuses to run bytes the row would not record", () => {
@@ -2935,6 +3085,95 @@ test("the freshness workflow watches the frozen input directories", () => {
   ).scripts;
   for (const alias of aliases) {
     assert.ok(scripts[alias], `package.json has no ${alias} script`);
+  }
+});
+
+test("the ledger PR workflow recomputes the rows it appends", () => {
+  const workflow = readFileSync(
+    path.join(repoRoot, ".github/workflows/review-eval-freshness.yml"),
+    "utf8",
+  );
+  // Schema, id coverage and append-only history all stay satisfied when a
+  // ledger PR edits its own row's verdict, counters or per_defect bits after
+  // the local `--validate --append`. The only PR workflow there is has to
+  // recompute the row from the detail the same branch commits, or the committed
+  // report is backed by nothing a reader can check.
+  assert.match(workflow, /--check-ledger --require-base --revalidate-appended/);
+  // The recompute reads committed JSON. This job must stay credential-free.
+  assert.doesNotMatch(workflow, /ANTHROPIC|OPENAI|api[_-]?key/i);
+});
+
+test("--check-ledger --revalidate-appended catches an edited appended row", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "base");
+    const flags = ["--base-ref", "HEAD", "--json"];
+
+    // A row that passed `--validate --append` locally, with its detail
+    // committed on the same branch, then had one bit edited before the PR was
+    // opened. Its schema, its frozen ids and its append-only history are all
+    // still intact afterwards.
+    const rowPath = path.join(root, "row.json");
+    const row = makeRow({
+      matchedIds: scorableIdsFor([1990]),
+      fullMatrix: true,
+    });
+    mkdirSync(path.join(root, row.detail_dir), { recursive: true });
+    writeFileSync(rowPath, JSON.stringify(row, null, 2));
+    assert.equal(
+      cli(["--validate", rowPath, "--append", "--json"], { root }).status,
+      0,
+    );
+    const clean = cli(["--check-ledger", "--revalidate-appended", ...flags], {
+      root,
+    });
+    assert.equal(clean.status, 0, clean.stdout + clean.stderr);
+    assert.equal(JSON.parse(clean.stdout).revalidated_rows, 1);
+
+    const ledgerPath = path.join(root, ledgerRelative);
+    const [committed] = readLedger(ledgerPath);
+    const target = Object.keys(committed.conditions.pipeline.per_defect)[0];
+    committed.conditions.pipeline.per_defect[target] = [
+      committed.conditions.pipeline.per_defect[target][0] === 1 ? 0 : 1,
+    ];
+    writeFileSync(ledgerPath, `${JSON.stringify(committed)}\n`);
+    const dirty = cli(["--check-ledger", "--revalidate-appended", ...flags], {
+      root,
+    });
+    assert.equal(dirty.status, 1);
+    assert.match(
+      JSON.parse(dirty.stdout).problems.join(" | "),
+      /appended row [^|]*conditions\.pipeline\.recall\.matched/,
+    );
+    // Without the flag the same edited ledger reads as clean, which is the gap.
+    assert.equal(cli(["--check-ledger", ...flags], { root }).status, 0);
+
+    // The flag never silently checks nothing: without a base it cannot tell
+    // which rows are new, and it says so instead of passing.
+    const noBase = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "refs/heads/no-such-base",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(noBase.status, 1);
+    assert.equal(JSON.parse(noBase.stdout).revalidated_rows, null);
+    assert.match(
+      JSON.parse(noBase.stdout).problems.join(" | "),
+      /--revalidate-appended cannot tell which rows are new/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

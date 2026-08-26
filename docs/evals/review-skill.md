@@ -104,6 +104,19 @@ falls back to the `origin/main` tip when no merge base resolves. CI and the
 gate add `--require-base`, which fails the check when the base ref does not
 resolve at all, so the guard can never turn itself into a silent no-op.
 
+CI also adds `--revalidate-appended`, which recomputes every row the branch
+adds from the detail the same branch commits. Schema, id coverage and
+append-only history all stay satisfied when a ledger PR edits its own row's
+verdict, counters or `per_defect` bits after the local `--validate --append`,
+and this is the only PR workflow there is. Like `--require-base` it refuses to
+no-op: with no base it cannot tell which rows are new, and it says so instead
+of passing. It calls no model — the recompute reads the committed
+`result-*.json` and `calibration.json` files — so the workflow stays free of
+model credentials. A row whose recorded baseline is not committed on the same
+branch, which is the candidate row of a sitting whose installed ledger PR has
+not merged yet, is recomputed against its own bits and detail and counted in
+`unpaired_baselines` rather than failed.
+
 Both the ledger check and `--validate --append` hold the frozen denominator. A
 condition that scored a PR at all carries every defect that PR froze, and a
 `kind: full`, `status: complete` row carries the whole matrix: `pipeline` and
@@ -159,14 +172,25 @@ candidate**, then name that row as the candidate's baseline with `--against`:
 pnpm review:eval:run -- --kind full --pr    # publish the installed row first
 git -C . checkout main                      # the candidate run branches from here
 pnpm review:eval:run -- --kind full --skill-ref ~/work/review-candidate \
-  --against <installed-row-executed-at> --pr
+  --against "${TMPDIR:-/tmp}/review-eval-installed-row.json" --pr
 ```
 
-`<installed-row-executed-at>` is the `executed_at` of the row the first command
-just published, read from `docs/evals/review-skill-ledger.jsonl` or from that
-run's `row.json`. It is never a date typed from memory: `--against` resolves
-against rows the ledger already holds, so a value no row carries fails the
-pre-flight before the candidate spends anything.
+The baseline is that file, not the installed row's `executed_at`. Publishing
+commits the row and its detail directory on the new `eval/review-skill-*`
+branch and leaves the checkout there; `git checkout main` then deletes both,
+because neither exists on local main. An `--against` naming the `executed_at`
+would resolve against a ledger that no longer holds the row and the candidate's
+pre-flight would abort — the right failure, and still a wasted installed run.
+So a successful `--pr` on an installed run keeps one copy of `row.json` outside
+the checkout, where no branch switch reaches it, and logs the exact `--against`
+argument. A row carries every bit the comparison reads, so no detail directory
+is needed for the baseline.
+
+Naming the `executed_at` is correct once the installed PR is merged and main is
+pulled, because the row is then in the checkout's ledger. It is never a date
+typed from memory: `--against` resolves against rows the ledger already holds,
+so a value no row carries fails the pre-flight before the candidate spends
+anything.
 
 Publish first, or both rows land in one working tree and only one of them
 reaches a PR: each run appends to the same ledger file, and the candidate's
@@ -274,9 +298,13 @@ comparability_key = sha256(contract_digest ‖ request_prompt ‖ handoff_prompt
                            orchestrator_digest ‖ judge_model)
 ```
 
-`scorer_digest` covers every module that can move a recorded number or a
-recorded verdict — the scorer, the per-condition fold, the recompute and the
-verdict rules — not the extraction alone. `orchestrator_digest` is `run-eval.sh`
+`scorer_digest` covers every file that can move a recorded number or a recorded
+verdict — the scorer, the per-condition fold, the recompute and the verdict
+rules — not the extraction alone. It also covers the two fixture helpers:
+`review-eval-fixtures.mjs` picks the matrix, the truth file and the recall
+denominator, and `build-fixture.sh` materializes the checkout the contestant
+reviews and carries the checks that verify it, so an edit to either moves what
+was reviewed or what it was scored against. `orchestrator_digest` is `run-eval.sh`
 itself, which fixes the contestant's allowed tools, its turn limit, how the
 skill is staged into the fixture, how far the finder report is truncated and
 what environment a cell runs in: it shapes the transcript every number is
@@ -301,20 +329,20 @@ would recompute its verdict against a truth index and thresholds the run never
 saw. The default selection is the newest row of this contract, and `--row` on an
 older one is refused; pass `--contract` with the archived contract to read it.
 
-| drift vector      | control                                                                                       |
-| ----------------- | --------------------------------------------------------------------------------------------- |
-| fixture content   | eval tags plus a tree-hash check in `build-fixture.sh`                                        |
-| truth content     | committed verbatim, per-file `sha256`, never re-derived from the API                          |
-| scorable set      | explicit frozen id list in the contract                                                       |
-| run prompts       | frozen files with `sha256` in the contract                                                    |
-| scoring pipeline  | `scorerDigest()` over the scorer, run, result-shape and report modules and every judge prompt |
-| judge model       | model id and CLI version in the row, plus 40 calibration pairs every run                      |
-| calibration set   | its `sha256` is bound into `comparability_key`                                                |
-| reviewed model    | isolated by the `control` condition; model id and CLI version recorded                        |
-| skill text        | `skill_digest` over `SKILL.md` and `references/**` — this is the treatment                    |
-| finder command    | `argv` pinned in the contract; `finder_argv_digest` records what a cell spawned               |
-| orchestrator      | `orchestrator_digest` over `run-eval.sh`: in the key and in every cell fingerprint            |
-| machine and shell | host, CLI versions, `--setting-sources ""`, clean worktree of `origin/main`                   |
+| drift vector      | control                                                                                              |
+| ----------------- | ---------------------------------------------------------------------------------------------------- |
+| fixture content   | eval tags plus a tree-hash check in `build-fixture.sh`, whose bytes are in `scorerDigest()`          |
+| truth content     | committed verbatim, per-file `sha256`, never re-derived from the API                                 |
+| scorable set      | explicit frozen id list in the contract                                                              |
+| run prompts       | frozen files with `sha256` in the contract                                                           |
+| scoring pipeline  | `scorerDigest()` over the scorer, run, result-shape, report and fixture files and every judge prompt |
+| judge model       | model id and CLI version in the row, plus 40 calibration pairs every run                             |
+| calibration set   | its `sha256` is bound into `comparability_key`                                                       |
+| reviewed model    | isolated by the `control` condition; model id and CLI version recorded                               |
+| skill text        | `skill_digest` over `SKILL.md` and `references/**` — this is the treatment                           |
+| finder command    | `argv` pinned in the contract; `finder_argv_digest` records what a cell spawned                      |
+| orchestrator      | `orchestrator_digest` over `run-eval.sh`: in the key and in every cell fingerprint                   |
+| machine and shell | host, CLI versions, `--setting-sources ""`, clean worktree of `origin/main`                          |
 
 **Judge calibration runs before every scoring pass.** Forty frozen
 `(claim, defect, verdict)` pairs replay through the current judge. Agreement

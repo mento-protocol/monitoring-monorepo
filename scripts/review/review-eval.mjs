@@ -28,6 +28,7 @@ import {
   appendRow,
   checkLedger,
   freshness,
+  frozenDefectProblems,
   fullMatrixProblems,
   readLedger,
 } from "./review-eval-ledger.mjs";
@@ -62,7 +63,7 @@ export const DEFAULT_REVIEW_EVAL_REPO = "mento-protocol/monitoring-monorepo";
 
 const MODE_OPTIONS = {
   "check-fixtures": ["offline", "src-repo"],
-  "check-ledger": ["base-ref", "require-base"],
+  "check-ledger": ["base-ref", "require-base", "revalidate-appended"],
   plan: ["kind", "skill-ref", "out", "runs-dir"],
   score: ["against", "calibration"],
   validate: ["append", "against", "calibration", "detail-dir"],
@@ -82,6 +83,7 @@ const OPTION_SPEC = {
   "src-repo": { type: "string" },
   "base-ref": { type: "string" },
   "require-base": { type: "boolean" },
+  "revalidate-appended": { type: "boolean" },
   kind: { type: "string" },
   "skill-ref": { type: "string" },
   out: { type: "string" },
@@ -157,6 +159,7 @@ export function parseArgs(argv, env = process.env) {
     srcRepo: values["src-repo"] ?? null,
     baseRef: values["base-ref"] ?? "origin/main",
     requireBase: values["require-base"] === true,
+    revalidateAppended: values["revalidate-appended"] === true,
     kind: values.kind ?? null,
     skillRef: values["skill-ref"] ?? null,
     outDir: values.out ?? null,
@@ -206,6 +209,8 @@ Options:
   --src-repo PATH        Resolve eval tags from a local clone
   --base-ref REF         Append-only comparison base (default: origin/main)
   --require-base         Fail when the base ref does not resolve (--check-ledger)
+  --revalidate-appended  Recompute every row this branch appends from its
+                         committed detail (--check-ledger); calls no model
   --kind full|canary|auto  Run matrix to plan (default: auto, read from ledger)
   --skill-ref PATH       Evaluate a candidate skill directory; stamps dirty
   --out DIR              Plan directory (default: the run's detail directory)
@@ -448,6 +453,10 @@ async function modeCheckLedger(options, context) {
     result.problems.push(base.reason);
     result.ok = false;
   }
+  const revalidated = options.revalidateAppended
+    ? revalidateAppendedRows({ options, context, result, base })
+    : null;
+  if (revalidated && !revalidated.ok) result.ok = false;
   const age = freshness({
     rows: result.rows,
     contract: context.contract,
@@ -469,11 +478,90 @@ async function modeCheckLedger(options, context) {
         days_since_full: age.daysSinceFull,
         reasons: age.reasons,
       },
+      revalidated_rows: revalidated?.checked ?? null,
+      unpaired_baselines: revalidated?.unpaired ?? null,
       problems: result.problems,
     },
     options.json,
   );
   if (!result.ok) process.exitCode = 1;
+}
+
+/**
+ * Recompute every row this branch appends, from the detail the same branch
+ * commits. `checkLedger` proves a ledger PR is schema-valid, covers the frozen
+ * ids and adds rows without editing older ones — and nothing more. Editing a
+ * committed row's `verdict`, its counters or a `per_defect` bit before opening
+ * the PR left all three checks green while the committed report no longer
+ * matched its own cell and calibration evidence, and `--validate` ran only on
+ * the operator's machine before the commit.
+ *
+ * No model is called: `revalidateRow` reads the committed `result-*.json` and
+ * `calibration.json` files. The job that runs this holds no model credential.
+ */
+function revalidateAppendedRows({ options, context, result, base }) {
+  const problems = [];
+  const rows = result.rows;
+  // Which rows are new is the base comparison's answer. Without it this flag
+  // would either recompute the whole history — including rows of retired
+  // contracts it cannot judge — or check nothing, and a guard that silently
+  // no-ops is worse than no guard.
+  if (!base.rows) {
+    result.problems.push(
+      `--revalidate-appended cannot tell which rows are new: ${base.reason}`,
+    );
+    return { ok: false, checked: null, unpaired: null };
+  }
+  const appended = rows.slice(base.rows.length);
+  const calibrationFile = path.resolve(
+    context.repoRoot,
+    options.calibrationPath,
+  );
+  const calibrationSet = existsSync(calibrationFile)
+    ? readJson(calibrationFile)
+    : null;
+  let unpaired = 0;
+  for (const row of appended) {
+    const label = `appended row ${row.executed_at}`;
+    if (!row.detail_dir) {
+      problems.push(`${label} carries no detail_dir to recompute from`);
+      continue;
+    }
+    const dir = path.resolve(context.repoRoot, row.detail_dir);
+    if (!existsSync(dir)) {
+      problems.push(
+        `${label} names detail_dir ${row.detail_dir}, which this branch does not commit`,
+      );
+      continue;
+    }
+    // The recorded pairing is rechecked against the row it actually names, not
+    // against whatever anchor this ledger would resolve on its own — those are
+    // two different pairs of runs, and comparing the wrong one reports
+    // differences that are not errors. A candidate row scored against an
+    // installed row whose own ledger PR has not merged yet names a row this
+    // branch does not carry; that pairing cannot be rechecked here, so the row
+    // is recomputed against its own bits and detail alone and counted as
+    // unpaired rather than failed.
+    const recordedAt = row.vs_baseline?.baseline_executed_at ?? null;
+    const baselineRow =
+      recordedAt === null
+        ? null
+        : (rows.find((candidate) => candidate.executed_at === recordedAt) ??
+          null);
+    if (recordedAt !== null && baselineRow === null) unpaired += 1;
+    const check = revalidateRow({
+      contract: context.contract,
+      row,
+      repoRoot: context.repoRoot,
+      detailDir: dir,
+      ledgerRows: recordedAt !== null && baselineRow === null ? [] : rows,
+      baselineRow,
+      calibrationSet,
+    });
+    problems.push(...check.problems.map((problem) => `${label}: ${problem}`));
+  }
+  result.problems.push(...problems);
+  return { ok: problems.length === 0, checked: appended.length, unpaired };
 }
 
 async function modePlan(options, context) {
@@ -627,12 +715,18 @@ async function modeValidate(options, context) {
       `row contract_digest ${row.contract_digest?.slice(0, 8)} is not the current contract`,
     );
   }
-  // `revalidateRow` recomputes the conditions the row lists. What it cannot see
-  // is a condition that is not there: a `kind: "full"`, `status: "complete"`
-  // row with `control` deleted claims a whole matrix on a subset, and appending
-  // it would refresh the full-run clock and make it an automatic baseline. The
-  // committed ledger is checked the same way by `--check-ledger`.
+  // `revalidateRow` recomputes the conditions the row lists, and over the ids
+  // each one lists. What it cannot see is what is not there. A condition that
+  // is absent: a `kind: "full"`, `status: "complete"` row with `control`
+  // deleted claims a whole matrix on a subset, and appending it would refresh
+  // the full-run clock and make it an automatic baseline. And a defect that is
+  // absent: a condition that kept one frozen id per PR passes the matrix check,
+  // which only asks whether some id from each required PR is present, while its
+  // recall and McNemar denominators have quietly shrunk. `--check-ledger`
+  // applies both to the committed ledger; append must apply both before the row
+  // gets in, or the committed ledger is where the fault is first reported.
   problems.push(
+    ...frozenDefectProblems({ contract: context.contract, row, label: "row" }),
     ...fullMatrixProblems({ contract: context.contract, row, label: "row" }),
   );
   let appended = false;
