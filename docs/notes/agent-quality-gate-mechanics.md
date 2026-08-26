@@ -225,7 +225,8 @@ allowlist to widen. Each shape gets its own warning, and both replay Trunk's
 recorded reasons so they name the host. The plugin warning says Trunk never
 reached a linter, and that a credential proxy gating the host per session is not
 something an allowed-domains entry can lift — there the remedy is a prewarmed
-`~/.cache/trunk` or CI.
+Trunk cache (`$TRUNK_CACHE`, else `$XDG_CACHE_HOME/trunk`, else
+`~/.cache/trunk`) or CI.
 Everything else fails the gate, including a partly-explained failure set and a
 download step that failed for a local reason. Only a provisioning failure
 degrades: a provisioned Trunk that finds real problems still fails the gate, and

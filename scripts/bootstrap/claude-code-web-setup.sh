@@ -52,8 +52,10 @@ echo "==> Prewarming Trunk CLI and linters"
 # it per session, answering 403 "GitHub access to this repository is not enabled
 # for this session". No allowlist entry lifts that. It reaches Trunk's plugin
 # archive (github.com/trunk-io/plugins) and its GitHub-release linters, so a
-# COLD ~/.cache/trunk fails `trunk check` outright; the image ships a prewarmed
-# cache holding both, which is what masks the block on a warm run.
+# COLD Trunk cache fails `trunk check` outright; the image ships a prewarmed
+# cache holding both, which is what masks the block on a warm run. The prewarm
+# below fills whichever cache tools/trunk resolves — $TRUNK_CACHE, else
+# $XDG_CACHE_HOME/trunk, else ~/.cache/trunk.
 # Non-fatal: if trunk.io is still blocked the hooks degrade gracefully (see
 # .trunk/hooks) and CI still enforces Trunk on the PR, so warn and continue
 # rather than aborting the whole bootstrap.

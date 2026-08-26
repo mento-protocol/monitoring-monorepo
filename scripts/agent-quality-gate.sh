@@ -3254,7 +3254,8 @@ print_trunk_plugin_environment_blocked_warning() {
   echo "  Where the host below is simply not allowlisted, add it to the environment's allowed" >&2
   echo "  domains. A Claude cloud session is the exception: its credential proxy gates" >&2
   echo "  github.com per session and answers HTTP 403, and no allowed-domains entry lifts that." >&2
-  echo "  There the fix is the container image's prewarmed ~/.cache/trunk, or CI." >&2
+  echo "  There the fix is a prewarmed Trunk cache — \$TRUNK_CACHE, else \$XDG_CACHE_HOME/trunk," >&2
+  echo "  else ~/.cache/trunk — or CI." >&2
   print_trunk_provisioning_failure_causes "$output_file"
   echo "  CI still enforces Trunk on the PR (.github/workflows/trunk.yml)." >&2
 }

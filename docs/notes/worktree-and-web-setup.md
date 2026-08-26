@@ -98,9 +98,12 @@ the Trusted defaults:
   gates it per session, answering 403 with "GitHub access to this repository
   is not enabled for this session". No allowlist entry lifts that.
 - That reaches Trunk's plugin archive (`github.com/trunk-io/plugins`) and its
-  GitHub-release linters. A cold `~/.cache/trunk` therefore fails the check
-  with `Unable to download plugin <url>: HTTP 403 '<url>'`. The image ships a
+  GitHub-release linters. A cold Trunk cache therefore fails the check with
+  `Unable to download plugin <url>: HTTP 403 '<url>'`. The image ships a
   prewarmed cache holding both, which masks the block on a warm run.
+  `tools/trunk` reads `$TRUNK_CACHE`, else `$XDG_CACHE_HOME/trunk`, else
+  `~/.cache/trunk`, so prewarming only the last one misses a session that sets
+  either override.
 - The quality gate classifies that cold-cache 403 as environment-blocked and
   skips its Trunk arm instead of hard-failing; a 404 stays a hard failure. See
   [agent-quality-gate-mechanics.md](agent-quality-gate-mechanics.md).
