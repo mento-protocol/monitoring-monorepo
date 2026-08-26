@@ -107,6 +107,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0071](0071-susds-launch-aligned-daily-sampler.md)       | sUSDS actuals use a launch-aligned bounded daily sampler                                                                 |
 | [0039](0039-multistrategy-pools-historical-fx-volume.md) | Pool strategies are many-to-many; same-currency swaps use historical FX crosses                                          |
 | [0046](0046-event-sourced-oracle-freshness.md)           | Oracle freshness is reconstructed from persisted report events                                                           |
+| [0073](0073-trove-ledger-parallel-append-only-entity.md) | Trove history is a parallel append-only `TroveLedgerEvent`, not a widened `TroveOperationEvent`                          |
 
 ### ui-dashboard
 

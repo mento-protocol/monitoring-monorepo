@@ -2807,6 +2807,141 @@ export type PendingStabilityPoolConsumptionSourceBoolExp = {
   readonly txHash?: ComparisonExp<string>;
 };
 
+export type PendingTroveLedgerEventSelectColumn =
+  | "annualInterestRate"
+  | "blockNumber"
+  | "chainId"
+  | "collAfter"
+  | "collateralId"
+  | "collBefore"
+  | "collChange"
+  | "collIncreaseFromRedist"
+  | "debtAfter"
+  | "debtBefore"
+  | "debtChange"
+  | "debtIncreaseFromRedist"
+  | "debtIncreaseFromUpfrontFee"
+  | "id"
+  | "instanceId"
+  | "kind"
+  | "ledgerEventId"
+  | "logIndex"
+  | "operation"
+  | "owner"
+  | "redemptionFeeCredited"
+  | "statusAfter"
+  | "statusBefore"
+  | "timestamp"
+  | "troveEntityId"
+  | "troveId"
+  | "txHash";
+
+export type PendingTroveLedgerEventOrderBy = {
+  readonly annualInterestRate?: OrderBy;
+  readonly blockNumber?: OrderBy;
+  readonly chainId?: OrderBy;
+  readonly collAfter?: OrderBy;
+  readonly collateralId?: OrderBy;
+  readonly collBefore?: OrderBy;
+  readonly collChange?: OrderBy;
+  readonly collIncreaseFromRedist?: OrderBy;
+  readonly debtAfter?: OrderBy;
+  readonly debtBefore?: OrderBy;
+  readonly debtChange?: OrderBy;
+  readonly debtIncreaseFromRedist?: OrderBy;
+  readonly debtIncreaseFromUpfrontFee?: OrderBy;
+  readonly id?: OrderBy;
+  readonly instanceId?: OrderBy;
+  readonly kind?: OrderBy;
+  readonly ledgerEventId?: OrderBy;
+  readonly logIndex?: OrderBy;
+  readonly operation?: OrderBy;
+  readonly owner?: OrderBy;
+  readonly redemptionFeeCredited?: OrderBy;
+  readonly statusAfter?: OrderBy;
+  readonly statusBefore?: OrderBy;
+  readonly timestamp?: OrderBy;
+  readonly troveEntityId?: OrderBy;
+  readonly troveId?: OrderBy;
+  readonly txHash?: OrderBy;
+};
+
+export type PendingTroveLedgerEventBoolExp = {
+  readonly _and?:
+    | PendingTroveLedgerEventBoolExp
+    | ReadonlyArray<PendingTroveLedgerEventBoolExp>;
+  readonly _or?:
+    | PendingTroveLedgerEventBoolExp
+    | ReadonlyArray<PendingTroveLedgerEventBoolExp>;
+  readonly _not?: PendingTroveLedgerEventBoolExp;
+  readonly annualInterestRate?: ComparisonExp<string>;
+  readonly blockNumber?: ComparisonExp<string>;
+  readonly chainId?: ComparisonExp<number>;
+  readonly collAfter?: ComparisonExp<string>;
+  readonly collateralId?: ComparisonExp<string>;
+  readonly collBefore?: ComparisonExp<string>;
+  readonly collChange?: ComparisonExp<string>;
+  readonly collIncreaseFromRedist?: ComparisonExp<string>;
+  readonly debtAfter?: ComparisonExp<string>;
+  readonly debtBefore?: ComparisonExp<string>;
+  readonly debtChange?: ComparisonExp<string>;
+  readonly debtIncreaseFromRedist?: ComparisonExp<string>;
+  readonly debtIncreaseFromUpfrontFee?: ComparisonExp<string>;
+  readonly id?: ComparisonExp<string>;
+  readonly instanceId?: ComparisonExp<string>;
+  readonly kind?: ComparisonExp<string>;
+  readonly ledgerEventId?: ComparisonExp<string>;
+  readonly logIndex?: ComparisonExp<number>;
+  readonly operation?: ComparisonExp<number>;
+  readonly owner?: ComparisonExp<string>;
+  readonly redemptionFeeCredited?: ComparisonExp<string>;
+  readonly statusAfter?: ComparisonExp<string>;
+  readonly statusBefore?: ComparisonExp<string>;
+  readonly timestamp?: ComparisonExp<string>;
+  readonly troveEntityId?: ComparisonExp<string>;
+  readonly troveId?: ComparisonExp<string>;
+  readonly txHash?: ComparisonExp<string>;
+};
+
+export type PendingTroveStatusCaptureSelectColumn =
+  | "batched"
+  | "blockNumber"
+  | "collateralId"
+  | "id"
+  | "statusBefore"
+  | "timestamp"
+  | "troveId"
+  | "txHash";
+
+export type PendingTroveStatusCaptureOrderBy = {
+  readonly batched?: OrderBy;
+  readonly blockNumber?: OrderBy;
+  readonly collateralId?: OrderBy;
+  readonly id?: OrderBy;
+  readonly statusBefore?: OrderBy;
+  readonly timestamp?: OrderBy;
+  readonly troveId?: OrderBy;
+  readonly txHash?: OrderBy;
+};
+
+export type PendingTroveStatusCaptureBoolExp = {
+  readonly _and?:
+    | PendingTroveStatusCaptureBoolExp
+    | ReadonlyArray<PendingTroveStatusCaptureBoolExp>;
+  readonly _or?:
+    | PendingTroveStatusCaptureBoolExp
+    | ReadonlyArray<PendingTroveStatusCaptureBoolExp>;
+  readonly _not?: PendingTroveStatusCaptureBoolExp;
+  readonly batched?: ComparisonExp<boolean>;
+  readonly blockNumber?: ComparisonExp<string>;
+  readonly collateralId?: ComparisonExp<string>;
+  readonly id?: ComparisonExp<string>;
+  readonly statusBefore?: ComparisonExp<string>;
+  readonly timestamp?: ComparisonExp<string>;
+  readonly troveId?: ComparisonExp<string>;
+  readonly txHash?: ComparisonExp<string>;
+};
+
 export type PoolSelectColumn =
   | "breachCount"
   | "breakerTripped"
@@ -5058,6 +5193,8 @@ export type TroveSelectColumn =
   | "id"
   | "interestBatchId"
   | "interestRate"
+  | "lastLedgerBlock"
+  | "lastLedgerLogIndex"
   | "lastUpdatedAt"
   | "lastUpdatedBlock"
   | "lastUpdatedTxHash"
@@ -5094,6 +5231,8 @@ export type TroveOrderBy = {
   readonly id?: OrderBy;
   readonly interestBatchId?: OrderBy;
   readonly interestRate?: OrderBy;
+  readonly lastLedgerBlock?: OrderBy;
+  readonly lastLedgerLogIndex?: OrderBy;
   readonly lastUpdatedAt?: OrderBy;
   readonly lastUpdatedBlock?: OrderBy;
   readonly lastUpdatedTxHash?: OrderBy;
@@ -5134,6 +5273,8 @@ export type TroveBoolExp = {
   readonly id?: ComparisonExp<string>;
   readonly interestBatchId?: ComparisonExp<string>;
   readonly interestRate?: ComparisonExp<string>;
+  readonly lastLedgerBlock?: ComparisonExp<string>;
+  readonly lastLedgerLogIndex?: ComparisonExp<number>;
   readonly lastUpdatedAt?: ComparisonExp<string>;
   readonly lastUpdatedBlock?: ComparisonExp<string>;
   readonly lastUpdatedTxHash?: ComparisonExp<string>;
@@ -5155,6 +5296,105 @@ export type TroveBoolExp = {
   readonly stake?: ComparisonExp<string>;
   readonly status?: ComparisonExp<string>;
   readonly troveId?: ComparisonExp<string>;
+};
+
+export type TroveLedgerEventSelectColumn =
+  | "annualInterestRate"
+  | "blockNumber"
+  | "chainId"
+  | "collAfter"
+  | "collBefore"
+  | "collChange"
+  | "collIncreaseFromRedist"
+  | "debtAfter"
+  | "debtBefore"
+  | "debtChange"
+  | "debtIncreaseFromRedist"
+  | "debtIncreaseFromUpfrontFee"
+  | "icrAfterBps"
+  | "id"
+  | "instanceId"
+  | "isRebalance"
+  | "logIndex"
+  | "operation"
+  | "owner"
+  | "priceAtEvent"
+  | "redemptionFeeCredited"
+  | "redemptionPrice"
+  | "statusAfter"
+  | "statusBefore"
+  | "timestamp"
+  | "troveEntityId"
+  | "troveId"
+  | "txHash";
+
+export type TroveLedgerEventOrderBy = {
+  readonly annualInterestRate?: OrderBy;
+  readonly blockNumber?: OrderBy;
+  readonly chainId?: OrderBy;
+  readonly collAfter?: OrderBy;
+  readonly collBefore?: OrderBy;
+  readonly collChange?: OrderBy;
+  readonly collIncreaseFromRedist?: OrderBy;
+  readonly debtAfter?: OrderBy;
+  readonly debtBefore?: OrderBy;
+  readonly debtChange?: OrderBy;
+  readonly debtIncreaseFromRedist?: OrderBy;
+  readonly debtIncreaseFromUpfrontFee?: OrderBy;
+  readonly icrAfterBps?: OrderBy;
+  readonly id?: OrderBy;
+  readonly instanceId?: OrderBy;
+  readonly isRebalance?: OrderBy;
+  readonly logIndex?: OrderBy;
+  readonly operation?: OrderBy;
+  readonly owner?: OrderBy;
+  readonly priceAtEvent?: OrderBy;
+  readonly redemptionFeeCredited?: OrderBy;
+  readonly redemptionPrice?: OrderBy;
+  readonly statusAfter?: OrderBy;
+  readonly statusBefore?: OrderBy;
+  readonly timestamp?: OrderBy;
+  readonly troveEntityId?: OrderBy;
+  readonly troveId?: OrderBy;
+  readonly txHash?: OrderBy;
+};
+
+export type TroveLedgerEventBoolExp = {
+  readonly _and?:
+    | TroveLedgerEventBoolExp
+    | ReadonlyArray<TroveLedgerEventBoolExp>;
+  readonly _or?:
+    | TroveLedgerEventBoolExp
+    | ReadonlyArray<TroveLedgerEventBoolExp>;
+  readonly _not?: TroveLedgerEventBoolExp;
+  readonly annualInterestRate?: ComparisonExp<string>;
+  readonly blockNumber?: ComparisonExp<string>;
+  readonly chainId?: ComparisonExp<number>;
+  readonly collAfter?: ComparisonExp<string>;
+  readonly collBefore?: ComparisonExp<string>;
+  readonly collChange?: ComparisonExp<string>;
+  readonly collIncreaseFromRedist?: ComparisonExp<string>;
+  readonly debtAfter?: ComparisonExp<string>;
+  readonly debtBefore?: ComparisonExp<string>;
+  readonly debtChange?: ComparisonExp<string>;
+  readonly debtIncreaseFromRedist?: ComparisonExp<string>;
+  readonly debtIncreaseFromUpfrontFee?: ComparisonExp<string>;
+  readonly icrAfterBps?: ComparisonExp<number>;
+  readonly id?: ComparisonExp<string>;
+  readonly instanceId?: ComparisonExp<string>;
+  readonly isRebalance?: ComparisonExp<boolean>;
+  readonly logIndex?: ComparisonExp<number>;
+  readonly operation?: ComparisonExp<number>;
+  readonly owner?: ComparisonExp<string>;
+  readonly priceAtEvent?: ComparisonExp<string>;
+  readonly redemptionFeeCredited?: ComparisonExp<string>;
+  readonly redemptionPrice?: ComparisonExp<string>;
+  readonly statusAfter?: ComparisonExp<string>;
+  readonly statusBefore?: ComparisonExp<string>;
+  readonly timestamp?: ComparisonExp<string>;
+  readonly troveEntityId?: ComparisonExp<string>;
+  readonly troveId?: ComparisonExp<string>;
+  readonly txHash?: ComparisonExp<string>;
 };
 
 export type TroveOperationEventSelectColumn =

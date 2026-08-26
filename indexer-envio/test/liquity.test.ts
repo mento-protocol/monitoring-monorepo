@@ -2367,6 +2367,11 @@ describe("Liquity CDP helpers", () => {
         get: async () => undefined,
         deleteUnsafe: () => undefined,
       },
+      TroveLedgerEvent: { set: () => undefined },
+      PendingTroveLedgerEvent: {
+        get: async () => undefined,
+        deleteUnsafe: () => undefined,
+      },
     };
 
     const nextInstance = await replayBatchedTroveUpdate(context as never, {
@@ -2498,6 +2503,11 @@ describe("Liquity CDP helpers", () => {
         get: async () => undefined,
         deleteUnsafe: () => undefined,
       },
+      TroveLedgerEvent: { set: () => undefined },
+      PendingTroveLedgerEvent: {
+        get: async () => undefined,
+        deleteUnsafe: () => undefined,
+      },
     };
 
     const nextInstance = await replayBatchedTroveUpdate(context as never, {
@@ -2612,6 +2622,11 @@ describe("Liquity CDP helpers", () => {
         get: async (id: string) =>
           pendingRedemptions.has(id) ? { id } : undefined,
         deleteUnsafe: (id: string) => pendingRedemptions.delete(id),
+      },
+      TroveLedgerEvent: { set: () => undefined },
+      PendingTroveLedgerEvent: {
+        get: async () => undefined,
+        deleteUnsafe: () => undefined,
       },
     };
 
