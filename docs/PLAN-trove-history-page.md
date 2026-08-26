@@ -118,8 +118,8 @@ Semantics the page depends on:
   residual between consecutive snapshots. Any before/after pair derived from
   this arithmetic is therefore defined as **post-accrual**: `before` is the
   recorded debt with accrued interest already folded in, immediately before
-  the operation's own change; `after − evented terms` recovers exactly that
-  value, never the pre-accrual figure.
+  the operation's own change; subtracting the terms the events carry from
+  `after` recovers exactly that value, never the pre-accrual figure.
 - A redemption hit emits, per trove in one tx: `TroveUpdated` (or
   `BatchedTroveUpdated`) with the reduced totals, `TroveOperation(op=6,
 −boldLot, −collLot)`, and `RedemptionFeePaidToTrove(fee)`. The fee stays in
@@ -253,11 +253,11 @@ Writer notes:
 - Capture `debtBefore/collBefore` correctly. The robust source is
   arithmetic, both here and in the fix for the existing snapshot bug: the
   paired `TroveUpdated`/`BatchedTroveUpdated` in the same tx gives the
-  resulting state, and `after − (sum of evented deltas) = before`, with
+  resulting state, and `after − (sum of the event-carried deltas) = before`, with
   accrued interest landing as an explicit residual term. Direction matters:
   derive `before` from `after`, never `after` from a pre-captured `before`.
   These snapshots are **post-accrual, pre-operation** (semantics section
-  above): `after − evented terms` recovers the debt with accrued interest
+  above): subtracting the event-carried terms recovers the debt with accrued interest
   already folded in, so the pair is self-consistent and the client-side
   interest residual falls between rows, never inside one. Tests must cover
   both zero elapsed interest (open, same-block ops) and non-zero elapsed
@@ -330,9 +330,11 @@ graphql contract test, regenerated via `pnpm indexer:codegen` and
   `order_by: [{timestamp: desc}, {blockNumber: desc}, {logIndex: desc}]`,
   reversed client-side, so if a trove ever exceeds the 1,000-row Hasura cap
   the OLDEST rows drop, never the recent events being investigated. `id` is
-  an unpadded string and never participates in ordering. Detect
-  `length === limit` and disclose ("earliest history truncated") per the
-  row-cap discipline.
+  an unpadded string and never participates in ordering. Truncation is
+  detected exactly, without aggregates (disabled on hosted Hasura): request
+  `limit + 1` rows, render `limit`, and disclose ("earliest history
+  truncated") only when the sentinel row came back — a history of exactly
+  `limit` rows is complete and says nothing.
 - `CDP_TROVES_BY_OWNER(address)` — `Trove` rows across markets matching
   `_or: [{owner}, {previousOwner}]`, for the support entry path: close and
   liquidation zero `owner`, so `previousOwner` is how a closed trove is
@@ -452,7 +454,7 @@ today, so the new `troves/[troveId]/_components` rule lands with the page
   `formatTokenAmount` — per-field semantics, exactly as the invariants note
   requires. Synthetic, clearly-marked "interest accrued ≈ +X" rows render
   the residual between consecutive rows' recorded debt after subtracting the
-  evented terms; they are derived client-side, labeled as estimates,
+  event-carried terms; they are derived client-side, labeled as estimates,
   excluded from sums, and rendered only in complete-ledger mode (the
   partial view suppresses them). Status flips render from
   `statusBefore`/`statusAfter`. Default order chronological ascending with
@@ -493,7 +495,8 @@ today, so the new `troves/[troveId]/_components` rule lands with the page
 - Old rows without price fields: chart drops the ICR series and says so.
 - History at the row cap: newest rows are kept (desc fetch, reversed
   client-side) and the page discloses "earliest history truncated" (cap
-  detected by `length === limit`).
+  detected by the `limit + 1` sentinel row, never by `length === limit`
+  alone).
 
 ### Tests
 
