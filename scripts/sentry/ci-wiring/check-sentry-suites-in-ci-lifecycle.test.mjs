@@ -50,60 +50,71 @@ function exactRunIndexes(job, command) {
     .filter((index) => index >= 0);
 }
 
-test("the `scripts` job validates pins before pnpm-install and any trusted alias", () => {
-  // The validator makes two surfaces safe only by running first: before
-  // pnpm-install (so a root lifecycle hook is rejected before install runs it,
-  // Codex 3754887736) and before any trusted `pnpm <alias>` step (so a drifted
-  // alias is rejected before it runs an appended command, Codex 3754887737).
-  assert.deepEqual(
-    pinValidationOrderBlockers(
-      CI,
-      "scripts",
-      PIN_VALIDATOR_COMMAND,
-      TRUSTED_ALIASES,
-      INSTALL_ACTION,
-    ),
-    [],
-    "the `scripts` job runs pnpm-install or a trusted alias before the pin validator",
-  );
+// Every job that runs `pnpm install` and then a trusted alias carries its own
+// copy of the validator, so every one of them needs the ordering pinned. ADR
+// 0072 added the second: `docs-checks` runs the same install action and the
+// same `agent:context-*` / `docs:*` aliases on a Markdown-only diff, where the
+// `scripts` job does not run at all.
+const PIN_ORDER_JOBS = ["scripts", "docs-checks"];
 
-  // Probe 1: drop the validator step entirely.
-  const withoutValidator = structuredClone(CI);
-  withoutValidator.jobs.scripts.steps =
-    withoutValidator.jobs.scripts.steps.filter(
+for (const job of PIN_ORDER_JOBS) {
+  test(`the \`${job}\` job validates pins before pnpm-install and any trusted alias`, () => {
+    // The validator makes two surfaces safe only by running first: before
+    // pnpm-install (so a root lifecycle hook is rejected before install runs it,
+    // Codex 3754887736) and before any trusted `pnpm <alias>` step (so a drifted
+    // alias is rejected before it runs an appended command, Codex 3754887737).
+    assert.deepEqual(
+      pinValidationOrderBlockers(
+        CI,
+        job,
+        PIN_VALIDATOR_COMMAND,
+        TRUSTED_ALIASES,
+        INSTALL_ACTION,
+      ),
+      [],
+      `the \`${job}\` job runs pnpm-install or a trusted alias before the pin validator`,
+    );
+
+    // Probe 1: drop the validator step entirely.
+    const withoutValidator = structuredClone(CI);
+    withoutValidator.jobs[job].steps = withoutValidator.jobs[job].steps.filter(
       (step) => step.run !== VALIDATOR_RUN,
     );
-  assert.notDeepEqual(
-    pinValidationOrderBlockers(
-      withoutValidator,
-      "scripts",
-      PIN_VALIDATOR_COMMAND,
-      TRUSTED_ALIASES,
-      INSTALL_ACTION,
-    ),
-    [],
-    "the order check accepts a `scripts` job with no pin validator step",
-  );
+    assert.notDeepEqual(
+      pinValidationOrderBlockers(
+        withoutValidator,
+        job,
+        PIN_VALIDATOR_COMMAND,
+        TRUSTED_ALIASES,
+        INSTALL_ACTION,
+      ),
+      [],
+      `the order check accepts a \`${job}\` job with no pin validator step`,
+    );
 
-  // Probe 2: move the validator to the end, after install and the aliases.
-  const reordered = structuredClone(CI);
-  const steps = reordered.jobs.scripts.steps;
-  const at = steps.findIndex((step) => step.run === VALIDATOR_RUN);
-  assert.ok(at >= 0, "pin validator step is gone — probe would prove nothing");
-  const [validator] = steps.splice(at, 1);
-  steps.push(validator);
-  assert.notDeepEqual(
-    pinValidationOrderBlockers(
-      reordered,
-      "scripts",
-      PIN_VALIDATOR_COMMAND,
-      TRUSTED_ALIASES,
-      INSTALL_ACTION,
-    ),
-    [],
-    "the order check accepts a validator that runs after pnpm-install and the aliases",
-  );
-});
+    // Probe 2: move the validator to the end, after install and the aliases.
+    const reordered = structuredClone(CI);
+    const steps = reordered.jobs[job].steps;
+    const at = steps.findIndex((step) => step.run === VALIDATOR_RUN);
+    assert.ok(
+      at >= 0,
+      "pin validator step is gone — probe would prove nothing",
+    );
+    const [validator] = steps.splice(at, 1);
+    steps.push(validator);
+    assert.notDeepEqual(
+      pinValidationOrderBlockers(
+        reordered,
+        job,
+        PIN_VALIDATOR_COMMAND,
+        TRUSTED_ALIASES,
+        INSTALL_ACTION,
+      ),
+      [],
+      "the order check accepts a validator that runs after pnpm-install and the aliases",
+    );
+  });
+}
 
 test("required CI independently pins the quality-gate contract suite", () => {
   // This assertion lives in the independently invoked Sentry CI-wiring suite,
