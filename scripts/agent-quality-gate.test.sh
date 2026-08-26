@@ -7562,6 +7562,11 @@ STUB
   assert_contains "not established as storage only this machine reaches"
   assert_contains "AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1"
   assert_not_contains "reclaiming it."
+  # This is a refusal on where the root lives, so the wait owes the same
+  # answer as the guard below it: the holder PID read as gone on this pass, and
+  # sending an operator to let it finish is a wait that never ends.
+  assert_contains "Nothing was reclaimed:"
+  assert_not_contains "is still alive; let it finish"
   [[ -d "$gate_lock_root/run.lock" ]] ||
     fail "a record on a possibly shared lock root must never be reclaimed"
   rm -rf "$gate_lock_root/run.lock"

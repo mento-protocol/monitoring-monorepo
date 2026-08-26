@@ -1978,6 +1978,11 @@ acquire_gate_run_lock() {
             echo "  This lock root is not established as storage only this machine reaches, so it may be shared and that record may belong to a live run elsewhere. This run waits it out." >&2
             echo "  If that directory is this machine's alone, set AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1 to let a dead holder in it be reclaimed." >&2
           fi
+          # This is a refusal on where the root lives, exactly like the guard
+          # below, so it owes the timeout the same answer. Without this the
+          # reason stays empty and the wait ends on "holder pid N is still
+          # alive; let it finish" — for a PID this pass just read as gone.
+          nonlocal_refusal_reason="$stale_reason"
           stale_reason=""
         elif [[ -n "$record_age" &&
           "$record_age" -ge "$gate_lock_unverified_machine_grace_seconds" ]]; then
