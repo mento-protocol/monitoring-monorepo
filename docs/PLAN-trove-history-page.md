@@ -231,8 +231,8 @@ type TroveLedgerEvent @index(fields: ["troveEntityId", "timestamp"]) {
   redemptionFeeCredited: BigInt # op 6 only, from RedemptionFeePaidToTrove
   isRebalance: Boolean # op 6 only, tx-target discriminator
   redemptionPrice: BigInt # op 6 only, from branch Redemption event
-  priceAtEvent: BigInt # from loadLiquityPrice; null when unavailable
-  icrAfterBps: Int # null when price unavailable
+  priceAtEvent: BigInt # block-close price from loadLiquityPrice; null when unavailable
+  icrAfterBps: Int # from priceAtEvent, so also block-close; null when price unavailable
   timestamp: BigInt!
   blockNumber: BigInt!
   logIndex: Int! # numeric position for same-timestamp ordering
@@ -286,12 +286,19 @@ Writer notes:
   aggregate `LiquidationEvent` by `txHash` for the SP/redistribution context
   panel. Per-trove split of that aggregate stays a non-goal.
 - `priceAtEvent`/`icrAfterBps`: persist what `loadLiquityPrice` already
-  fetches. Incremental cost for new events is zero; historical rows need a
-  full resync that re-issues archive `eth_call`s from block 60,668,167 —
-  forno was observed dropping log ranges and receipts during the ticket
-  reconstruction, so treat backfill as a deliberate, monitored deploy
-  (`deploy-indexer` skill), and let the fields stay null on old rows if the
-  resync is deferred. Nullable-by-design is the degraded mode.
+  fetches, and label it honestly: an archive `eth_call` at the event's block
+  observes post-block state, so the persisted value is the **block-close**
+  price — a same-block oracle move after the operation can differ from the
+  operation-time price. Event-carried prices take precedence where they
+  exist (`redemptionPrice` on op 6, `Liquidation._price` on op 5); the UI
+  labels RPC-sampled ICR as at-block-close. There is no "later backfill"
+  option: every indexer deploy re-syncs from `start_block`
+  (`deploy-indexer` skill), so shipping the writer replays all history and
+  either pays the archive `eth_call`s during that sync or suppresses price
+  persistence during replay (fields stay null on historical rows). Forno
+  was observed dropping log ranges and receipts during the ticket
+  reconstruction, so the sync is a deliberate, monitored deploy either
+  way. Nullable-by-design is the degraded mode.
 - Keep `applySystemDebtDelta` untouched; the new writer only appends rows.
 
 ### Small fixes alongside
@@ -474,7 +481,11 @@ today, so the new `troves/[troveId]/_components` rule lands with the page
    trove state. In complete-ledger mode, cumulatives shown on the page must
    equal the sum of ledger rows of the matching kind — a mismatch is a bug
    surface, not a rendering choice (the ticket reconstruction validated to
-   the wei; keep a test). The partial view skips this check by design.
+   the wei; keep a test). The two reads are independent queries, so
+   reconcile only when they observe the same position — `Trove.
+lastUpdatedBlock` equals the ledger's newest `blockNumber` — and
+   refetch instead of flagging when an event landed between them. The
+   partial view and a truncated history skip this check by design.
 3. Total redemption figures are never presented as user activity;
    user-driven = total − rebalance.
 4. `priceAtEvent`/`icrAfterBps` are nullable; every consumer renders null as
@@ -499,7 +510,9 @@ today, so the new `troves/[troveId]/_components` rule lands with the page
   client-side) and the page discloses "earliest history truncated" (cap
   detected by the `limit + 1` sentinel row, never by `length === limit`
   alone; the render limit sits below the Hasura hard cap so the sentinel
-  request is never itself capped).
+  request is never itself capped). A truncated history counts as partial
+  for the derivation gates: interest estimates, net equity, and
+  reconciliation need the full ledger and stay off.
 
 ### Tests
 
@@ -538,10 +551,12 @@ promote):
 1. **Fix the existing snapshot bug** (indexer) — independent, user-visible
    today in the market transaction tables. Requires resync to repair
    historical rows; the deploy is the backfill.
-2. **`TroveLedgerEvent` + indexes** (indexer) — new entity, writers, tests;
-   decide at implementation whether the price backfill resync rides along or
-   old rows stay null. If the entity-vs-widening choice is judged to
-   constrain future work, record the ADR in this PR.
+2. **`TroveLedgerEvent` + indexes** (indexer) — new entity, writers, tests.
+   The deploy's from-scratch sync replays all history, so decide here
+   whether it pays the archive price `eth_call`s or suppresses price
+   persistence during replay (historical rows stay null). If the
+   entity-vs-widening choice is judged to constrain future work, record the
+   ADR in this PR.
 3. **Trove history page** (dashboard) — route, header/cards/chart/ledger,
    introspection-gated ledger query with the interim assembly fallback,
    dependency-cruiser rules, tests, browser verification per
@@ -562,9 +577,10 @@ serves the new entity.
    indexed-recorded values only with an honest timestamp? (Recommend
    indexed-only v1; RPC read as a follow-up if support asks for to-the-second
    numbers.)
-2. Is the price/ICR backfill worth a monitored full resync now, or do old
-   ledger rows stay price-less until the next scheduled resync? (Recommend
-   defer; the ticket-class questions don't need historical ICR.)
+2. During slice 2's from-scratch sync, pay the archive price `eth_call`s
+   for historical rows, or suppress price persistence during replay and
+   leave them null? (Recommend suppress; the ticket-class questions don't
+   need historical ICR, and forno's archive path is the flakiest leg.)
 3. Owner lookup placement: `/cdps` overview search vs a dedicated
    `/cdps/troves?owner=` route. (Recommend overview search; one less route.)
 4. Should the history tab's closed troves link through to the page from day
