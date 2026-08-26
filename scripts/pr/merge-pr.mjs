@@ -202,12 +202,18 @@ export async function resolveTargetNumber({ prArg, repos, gh, git }) {
 }
 
 async function resolveLogin({ gh, host }) {
-  // `gh api` defaults to github.com. On an Enterprise target that would either
-  // refuse an Enterprise-only account or, with both hosts authenticated, record
-  // the wrong operator in the consent ledger.
-  const args = ["api"];
-  if (host !== null && host !== undefined) args.push("--hostname", host);
-  args.push("user", "--jq", ".login");
+  // Always name the host. `gh api` defaults to github.com, but that default is
+  // itself overridable through `GH_HOST`, so an unqualified call could read the
+  // login from a host this merge has nothing to do with and write it into the
+  // consent ledger as the approving operator. The flag beats the environment.
+  const args = [
+    "api",
+    "--hostname",
+    host ?? "github.com",
+    "user",
+    "--jq",
+    ".login",
+  ];
 
   let login;
   try {
@@ -279,6 +285,18 @@ export async function mergePullRequest({
 
   const refusal = interactiveSessionRefusal({ stdin, stdout, env });
   if (refusal !== null) throw new MergeRefusal(refusal);
+
+  // `GH_REPO` redirects every `gh` command that would otherwise read the local
+  // repository. Measured on gh 2.96.0: an explicit `--repo` beats it, and
+  // `gh repo view` ignores it outright — but the checkout identity would then
+  // rest on one CLI version's precedence rules, and this command decides what
+  // gets merged. Name the target explicitly or clear the variable.
+  if (repoArg === null && (env?.GH_REPO ?? "") !== "") {
+    throw new MergeRefusal(
+      "GH_REPO is set, so which repository this resolves depends on `gh`'s own precedence; " +
+        "unset it, or pass --repo <[host/]owner/name> to name the target outright",
+    );
+  }
 
   const repos = await resolveRepositories({ repoArg, gh });
   const login = await resolveLogin({ gh, host: repos.host });

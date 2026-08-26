@@ -1236,17 +1236,15 @@ await test("an Enterprise checkout keeps its host on every call", async () => {
   );
 });
 
-await test("a github.com checkout passes no --hostname", async () => {
+await test("a github.com checkout still names github.com explicitly", async () => {
+  // The host is always named, so GH_HOST cannot redirect the login read.
   const h = harness({ argv: [] });
   await h.run();
 
   const login = h.calls.gh.find(
     (args) => args[0] === "api" && args.includes("user"),
   );
-  assert(
-    !login.includes("--hostname"),
-    `github.com needs no hostname flag, got: ${login.join(" ")}`,
-  );
+  assertEqual(login[login.indexOf("--hostname") + 1], "github.com");
   const merged = h.calls.merges[0];
   assertEqual(
     merged[merged.indexOf("--repo") + 1],
@@ -1413,6 +1411,48 @@ await test("a short consent write leaves the ledger byte-identical", async () =>
   } finally {
     rmSync(checkout, { recursive: true, force: true });
   }
+});
+
+await test("refuses an implicit target while GH_REPO is set", async () => {
+  // GH_REPO redirects every gh command that would otherwise read the local
+  // repository. Which one wins here depends on gh's precedence rules, and this
+  // command decides what gets merged, so an unnamed target refuses.
+  const h = harness({ argv: [], env: { GH_REPO: "cli/cli" } });
+  await assertRefuses(h.run(), "GH_REPO is set");
+  assertEqual(h.calls.merges.length, 0, "nothing should have merged");
+  assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
+  assertEqual(
+    h.calls.gh.length,
+    0,
+    "the refusal must precede every GitHub call",
+  );
+});
+
+await test("an explicit --repo is allowed even with GH_REPO set", async () => {
+  // The explicit flag beats the environment in gh, so naming the target
+  // resolves the ambiguity rather than needing the variable cleared.
+  const h = harness({
+    argv: ["--pr", "2071", "--repo", "mento-protocol/monitoring-monorepo"],
+    env: { GH_REPO: "cli/cli" },
+  });
+  const result = await h.run();
+  assertEqual(result.merged, true, "an explicitly named target should merge");
+});
+
+await test("the login is always read from a named host", async () => {
+  // Without --hostname, gh api defaults to github.com — but that default is
+  // itself overridable through GH_HOST, which would record the wrong operator
+  // in the consent ledger.
+  const h = harness({ argv: ["--pr", "2071"] });
+  await h.run();
+  const login = h.calls.gh.find(
+    (args) => args[0] === "api" && args.includes("user"),
+  );
+  assert(
+    login.includes("--hostname"),
+    `the login call must name its host, got: ${login.join(" ")}`,
+  );
+  assertEqual(login[login.indexOf("--hostname") + 1], "github.com");
 });
 
 await test("only a confirmed merge exits zero", async () => {
