@@ -2956,21 +2956,55 @@ gate_lock_process_start() {
   gate_lock_normalize_process_start "${snapshot% *}"
 }
 
-# Read start identity and process-group ID from one process-table row. Group
-# capture uses the pair so a PID replacement between two independent `ps`
-# calls cannot supply one field from each process.
-gate_lock_process_start_pgid_snapshot() {
+# Use the kernel start tick for live in-process relations on Linux. Persisted
+# records keep the historical lstart wire value for mixed-version readers.
+# macOS has no procfs, so it retains the narrow lstart check used by the signal
+# path and fails closed when that identity is unreadable.
+gate_lock_process_runtime_start() {
   local pid="$1"
-  local snapshot start pgid
-  [[ -n "$pid" ]] || return 0
-  snapshot="$(TZ=UTC LC_ALL=C ps -o lstart= -o pgid= -p "$pid" 2>/dev/null |
-    head -n1 | sed 's/^[[:blank:]]*//; s/[[:blank:]]*$//' || true)"
-  [[ "$snapshot" == *" "* ]] || return 0
-  pgid="${snapshot##* }"
+  local stat_line remainder start_tick
+  local -a stat_fields
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 0
+  if [[ -e /proc/self/stat ]]; then
+    stat_line="$(cat "/proc/${pid}/stat" 2>/dev/null || true)"
+    [[ -n "$stat_line" && "$stat_line" == *") "* ]] || return 0
+    remainder="${stat_line##*) }"
+    read -r -a stat_fields <<< "$remainder"
+    start_tick="${stat_fields[19]:-}"
+    [[ "$start_tick" =~ ^[0-9]+$ ]] || return 0
+    printf 'proc:%s\n' "$start_tick"
+    return 0
+  fi
+  gate_lock_process_start "$pid"
+}
+
+gate_lock_process_runtime_start_pgid_snapshot() {
+  local pid="$1"
+  local start_before start_after pgid
+  start_before="$(gate_lock_process_runtime_start "$pid")"
+  [[ -n "$start_before" ]] || return 0
+  pgid="$(TZ=UTC LC_ALL=C ps -o pgid= -p "$pid" 2>/dev/null |
+    head -n1 | tr -d '[:space:]' || true)"
   [[ "$pgid" =~ ^[1-9][0-9]*$ ]] || return 0
-  start="$(gate_lock_normalize_process_start "${snapshot% *}")"
-  [[ -n "$start" ]] || return 0
-  printf '%s|%s\n' "$start" "$pgid"
+  start_after="$(gate_lock_process_runtime_start "$pid")"
+  [[ "$start_after" == "$start_before" ]] || return 0
+  printf '%s|%s\n' "$start_after" "$pgid"
+}
+
+gate_lock_process_signal_probe() {
+  local pid="$1"
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 2
+  node -e '
+    const pid = Number(process.argv[1]);
+    try {
+      process.kill(pid, 0);
+      process.stdout.write("live");
+    } catch (error) {
+      if (error?.code === "ESRCH") process.stdout.write("gone");
+      else if (error?.code === "EPERM") process.stdout.write("denied");
+      else process.stdout.write("error");
+    }
+  ' "$pid" 2>/dev/null
 }
 
 gate_lock_process_state() {
@@ -3152,14 +3186,19 @@ claim_gate_run_lock() {
 # the identity now is what lets the drain tell "this PID is still the process
 # we condemned" from "this PID was reused while we worked".
 gate_drain_capture=""
-# PIDs already recorded this drain, so a re-walk can tell "found something new"
-# from "found the same tree again".
+# Exact live generations paired with the legacy capture lines. The on-disk
+# journal keeps `pid|lstart` for old readers and follows it with a metadata line
+# whose first field is not a PID, so those readers skip it safely.
+gate_drain_capture_runtime_prefix="runtime-v2"
+# Exact PID/runtime generations already recorded this drain. A re-walk can
+# distinguish a new generation from the same process tree.
 gate_drain_seen=""
 # Where the captured tree is written down, if anywhere. Set before capturing
 # starts, so each process is recorded as it is discovered.
 gate_drain_capture_file=""
-# Set when an append to that file failed, so the drain can refuse to signal
-# with nothing durable behind it.
+# Set when the drain could not publish a complete valid identity pair. This
+# includes an append failure and a legacy/runtime pair that fails validation.
+# The drain refuses to signal without valid durable evidence.
 gate_drain_capture_unpersisted=0
 # Set when a discovery scan failed rather than came back empty, so an
 # unanswered question is never read as "nothing left running". The scan itself
@@ -3192,6 +3231,57 @@ gate_drain_capture_group_anchor_start=""
 # identity. A confirmed out-of-group PID can be skipped; an ambiguous one must
 # remain as fail-closed evidence.
 gate_drain_membership_unverified=0
+gate_drain_membership_token=""
+
+gate_drain_capture_set_entry() {
+  local target_pid="$1"
+  local legacy_start="$2"
+  local runtime_start="$3"
+  local line line_pid filtered=""
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    line_pid="${line%%|*}"
+    [[ "$line_pid" == "$target_pid" ]] && continue
+    filtered="${filtered}${line}
+"
+  done << EOF
+$gate_drain_capture
+EOF
+  gate_drain_capture="${filtered}${target_pid}|${legacy_start}|${runtime_start}
+"
+}
+
+gate_drain_seen_has_identity() {
+  local target_pid="$1"
+  local target_runtime="$2"
+  local seen_pid seen_runtime extra
+  while IFS='|' read -r seen_pid seen_runtime extra; do
+    [[ -z "$extra" && "$seen_pid" == "$target_pid" &&
+      "$seen_runtime" == "$target_runtime" ]] && return 0
+  done << EOF
+$gate_drain_seen
+EOF
+  return 1
+}
+
+gate_drain_runtime_identity_matches_wire() {
+  local legacy_start="$1"
+  local runtime_start="$2"
+  local normalized_legacy
+  if [[ "$legacy_start" == "$gate_lock_identity_unavailable" ||
+    "$runtime_start" == "$gate_lock_identity_unavailable" ]]; then
+    [[ "$legacy_start" == "$gate_lock_identity_unavailable" &&
+      "$runtime_start" == "$gate_lock_identity_unavailable" ]]
+    return $?
+  fi
+  [[ -n "$legacy_start" && -n "$runtime_start" ]] || return 1
+  if [[ -e /proc/self/stat ]]; then
+    [[ "$runtime_start" =~ ^proc:[0-9]+$ ]]
+    return $?
+  fi
+  normalized_legacy="$(gate_lock_normalize_process_start "$legacy_start")"
+  [[ -n "$normalized_legacy" && "$runtime_start" == "$normalized_legacy" ]]
+}
 
 # Recorded in place of a start time on a host that cannot produce one at all —
 # a sandbox without `ps`. It has to be distinguishable from an empty identity,
@@ -3255,7 +3345,11 @@ gate_drain_membership_holds() {
   local pid="$1"
   local parent="${2:-}"
   local recorded_start="${3:-}"
+  local recorded_parent_start="${4:-}"
   local candidate candidate_snapshot candidate_start candidate_pgid
+  local candidate_probe
+  local tagged_after=""
+  local parent_before parent_after parent_children parent_scan_status
   local anchor_snapshot anchor_start anchor_pgid
   gate_drain_membership_unverified=0
 
@@ -3269,9 +3363,14 @@ gate_drain_membership_holds() {
       candidate_pgid="$(ps -o pgid= -p "$pid" 2>/dev/null |
         head -n1 | tr -d '[:space:]' || true)"
     else
-      candidate_snapshot="$(gate_lock_process_start_pgid_snapshot "$pid")"
+      candidate_snapshot="$(
+        gate_lock_process_runtime_start_pgid_snapshot "$pid"
+      )"
       if [[ "$candidate_snapshot" != *"|"* ]]; then
-        kill -0 "$pid" 2>/dev/null && gate_drain_membership_unverified=1
+        candidate_probe="$(gate_lock_process_signal_probe "$pid")" ||
+          candidate_probe="error"
+        [[ "$candidate_probe" == "gone" ]] ||
+          gate_drain_membership_unverified=1
         return 1
       fi
       candidate_start="${candidate_snapshot%|*}"
@@ -3303,7 +3402,7 @@ gate_drain_membership_holds() {
         return 1
       fi
     else
-      anchor_snapshot="$(gate_lock_process_start_pgid_snapshot \
+      anchor_snapshot="$(gate_lock_process_runtime_start_pgid_snapshot \
         "$gate_drain_capture_group_anchor_pid")"
       if [[ "$anchor_snapshot" != *"|"* ]]; then
         gate_drain_membership_unverified=1
@@ -3320,35 +3419,87 @@ gate_drain_membership_holds() {
     return 0
   fi
 
-  for candidate in ${gate_drain_tagged_now}; do
-    [[ "$candidate" == "$pid" ]] && return 0
-  done
-  if [[ -n "$parent" ]]; then
-    for candidate in $(pgrep -P "$parent" 2>/dev/null || true); do
+  # Re-scan exact inherited handles after reading this PID's start identity.
+  # A cached numeric match can exit and be reused between discovery and this
+  # check. The replacement would then be recorded under its own valid start
+  # identity and could pass every later signal guard.
+  if [[ -n "$gate_drain_membership_token" ]]; then
+    tagged_after="$(gate_run_tagged_pids "$gate_drain_membership_token")"
+    for candidate in $tagged_after; do
+      if [[ "$candidate" == "$gate_drain_scan_error" ]]; then
+        gate_drain_scan_failed=1
+        gate_drain_membership_unverified=1
+        continue
+      fi
+      [[ "$candidate" == "$pid" ]] && return 0
+    done
+  else
+    for candidate in ${gate_drain_tagged_now}; do
+      [[ "$candidate" == "$pid" ]] && return 0
+    done
+  fi
+  if [[ -n "$parent" && -n "$recorded_parent_start" ]]; then
+    if [[ "$recorded_parent_start" == "$gate_lock_identity_unavailable" ]]; then
+      gate_drain_membership_unverified=1
+      return 1
+    fi
+    recorded_parent_start="$(
+      gate_lock_normalize_process_start "$recorded_parent_start"
+    )"
+    parent_before="$(gate_lock_process_runtime_start "$parent")"
+    [[ -n "$recorded_parent_start" &&
+      "$parent_before" == "$recorded_parent_start" ]] || return 1
+    parent_children="$(pgrep -P "$parent" 2>/dev/null)" &&
+      parent_scan_status=0 || parent_scan_status=$?
+    if [[ "$parent_scan_status" -gt 1 ]]; then
+      gate_drain_scan_failed=1
+      gate_drain_membership_unverified=1
+      return 1
+    fi
+    parent_after="$(gate_lock_process_runtime_start "$parent")"
+    [[ "$parent_after" == "$recorded_parent_start" ]] || return 1
+    for candidate in $parent_children; do
       [[ "$candidate" == "$pid" ]] && return 0
     done
   fi
   return 1
 }
 
-# fewer than it had already committed to. Since a capture always completes
-# before the first signal, anything already signalled is already on disk.
+# Append each identity before any signal. A crash cannot truncate an earlier
+# entry or leave fewer identities than the drain already committed to. Since a
+# capture completes before the first signal, anything already signalled is on
+# disk.
 capture_process_tree() {
   local root_pid="$1"
   local from_parent="${2:-}"
-  local child entry start
+  local from_parent_start="${3:-}"
+  local child children child_scan_status entry runtime_entry start
+  local membership_start capture_runtime seen_runtime identity_probe
+  local root_start_for_children
   # Children first, and always re-walked even for a process already recorded:
   # a command that survives TERM can fork again afterwards, so discovery has to
   # keep looking as long as anything is alive to fork. Only the recording is
   # skipped for a PID already in the list, which is what lets a pass that adds
   # nothing be recognised as one.
-  for child in $(pgrep -P "$root_pid" 2>/dev/null || true); do
-    capture_process_tree "$child" "$root_pid"
-  done
-  case " ${gate_drain_seen} " in
-    *" ${root_pid} "*) return 0 ;;
-  esac
+  root_start_for_children="$(gate_lock_process_runtime_start "$root_pid")"
+  if [[ -z "$root_start_for_children" ]] &&
+    ! gate_lock_identity_source_available; then
+    root_start_for_children="$gate_lock_identity_unavailable"
+  fi
+  if [[ -n "$root_start_for_children" ]]; then
+    children="$(pgrep -P "$root_pid" 2>/dev/null)" &&
+      child_scan_status=0 || child_scan_status=$?
+    if [[ "$child_scan_status" -gt 1 ]]; then
+      gate_drain_scan_failed=1
+    else
+      for child in $children; do
+        capture_process_tree \
+          "$child" "$root_pid" "$root_start_for_children"
+      done
+    fi
+  fi
   start="$(gate_lock_process_start_legacy_wire "$root_pid")"
+  membership_start="$(gate_lock_process_runtime_start "$root_pid")"
   if [[ -z "$start" ]]; then
     if gate_lock_identity_source_available; then
       # The walk saw it, the identity read did not: it exited in between. A
@@ -3358,7 +3509,21 @@ capture_process_tree() {
       return 0
     fi
     start="$gate_lock_identity_unavailable"
-  elif ! gate_drain_membership_holds "$root_pid" "$from_parent" "$start"; then
+    membership_start="$gate_lock_identity_unavailable"
+  elif [[ -z "$membership_start" ]]; then
+    # The legacy read succeeded and the exact runtime read did not. If the PID
+    # is still live, retain the legacy identity as an unverified obligation. It
+    # lets a later census discharge a confirmed zombie, but the missing runtime
+    # identity still forbids signalling a live process. If it exited, a later
+    # exact-handle scan can rediscover any replacement that belongs to the run.
+    identity_probe="$(gate_lock_process_signal_probe "$root_pid")" ||
+      identity_probe="error"
+    [[ "$identity_probe" == "gone" ]] && return 0
+  fi
+  if [[ -n "$start" && "$start" != "$gate_lock_identity_unavailable" ]] &&
+    ! gate_drain_membership_holds \
+      "$root_pid" "$from_parent" "$membership_start" \
+      "$from_parent_start"; then
     # Enumeration and identity are two reads with a gap between them, and a PID
     # recycled inside it would be recorded under a stranger's identity that
     # every later check then confirms. Re-asking whether this PID is still one
@@ -3369,19 +3534,41 @@ capture_process_tree() {
       "$gate_drain_membership_unverified" -eq 0 ]]; then
       return 0
     fi
-    start=""
+    # Keep a readable legacy identity when the exact runtime read itself was
+    # the ambiguous step. The entry remains unsignalable without runtime
+    # metadata, but a confirmed zombie can later be discharged. If this capture
+    # had an exact runtime identity and then lost membership, retain no identity
+    # because that evidence now belongs to an unconfirmed process.
+    [[ -z "$membership_start" ]] || start=""
   fi
-  entry="${root_pid}|${start}"
-  gate_drain_seen="${gate_drain_seen}${root_pid} "
-  gate_drain_capture="${gate_drain_capture}${entry}
+  if [[ "$start" == "$gate_lock_identity_unavailable" ]]; then
+    capture_runtime="$gate_lock_identity_unavailable"
+  elif [[ -n "$start" ]]; then
+    capture_runtime="$membership_start"
+  else
+    capture_runtime=""
+  fi
+  seen_runtime="${capture_runtime:-<runtime-unverified>}"
+  gate_drain_seen_has_identity "$root_pid" "$seen_runtime" && return 0
+  gate_drain_seen="${gate_drain_seen}${root_pid}|${seen_runtime}
 "
+  gate_drain_capture_set_entry "$root_pid" "$start" "$capture_runtime"
+  entry="${root_pid}|${start}"
+  runtime_entry="${gate_drain_capture_runtime_prefix}|${root_pid}|${capture_runtime}"
   # One `printf` of a short line through an append-mode descriptor is a single
   # write, so concurrent or interrupted appends cannot interleave a half line.
-  # A write that fails is remembered rather than ignored: the caller checks it
-  # before signalling, because signalling is what destroys the alternative.
-  if [[ -n "$gate_drain_capture_file" ]] &&
-    ! printf '%s\n' "$entry" >> "$gate_drain_capture_file" 2>/dev/null; then
-    gate_drain_capture_unpersisted=1
+  # An append failure or invalid identity pair is remembered. The caller checks
+  # it before signalling, because signalling destroys the alternative handle.
+  if [[ -n "$gate_drain_capture_file" ]]; then
+    if ! printf '%s\n' "$entry" >> "$gate_drain_capture_file" 2>/dev/null; then
+      gate_drain_capture_unpersisted=1
+    fi
+    if [[ -n "$capture_runtime" ]] && {
+      ! gate_drain_runtime_identity_matches_wire "$start" "$capture_runtime" ||
+        ! printf '%s\n' "$runtime_entry" >> "$gate_drain_capture_file" 2>/dev/null
+    }; then
+      gate_drain_capture_unpersisted=1
+    fi
   fi
 }
 
@@ -3404,7 +3591,7 @@ gate_drain_capture_seed_group() {
   # recovery anchor.
   for tagged in $gate_drain_tagged_now; do
     [[ "$tagged" =~ ^[1-9][0-9]*$ ]] || continue
-    tagged_start="$(gate_lock_process_start "$tagged")"
+    tagged_start="$(gate_lock_process_runtime_start "$tagged")"
     if [[ -z "$tagged_start" ]]; then
       [[ "$identity_source_available" -eq 0 ]] || continue
       tagged_start="$gate_lock_identity_unavailable"
@@ -3434,7 +3621,7 @@ gate_drain_capture_seed_group() {
     seed_snapshot_pgid="$(awk -v target="$gate_drain_seed_pgid" \
       '$1 == target && NF == 2 { print $2; exit }' <<< "$snapshot")"
     if [[ "$seed_snapshot_pgid" == "$gate_drain_seed_pgid" ]]; then
-      seed_current="$(gate_lock_process_start "$gate_drain_seed_pgid")"
+      seed_current="$(gate_lock_process_runtime_start "$gate_drain_seed_pgid")"
       if [[ "$seed_current" == "$gate_drain_seed_start" ]] || {
         [[ "$gate_drain_seed_start" == "$gate_lock_identity_unavailable" ]] &&
           ! gate_lock_identity_source_available &&
@@ -3458,7 +3645,7 @@ gate_drain_capture_seed_group() {
     tagged_pgid="$(awk -v target="$tagged" \
       '$1 == target && NF == 2 { print $2; exit }' <<< "$snapshot")"
     [[ "$tagged_pgid" =~ ^[1-9][0-9]*$ ]] || continue
-    tagged_current="$(gate_lock_process_start "$tagged")"
+    tagged_current="$(gate_lock_process_runtime_start "$tagged")"
     if [[ "$tagged_start" == "$gate_lock_identity_unavailable" ]]; then
       [[ "$identity_source_available" -eq 0 ]] || continue
     elif [[ -z "$tagged_current" || "$tagged_current" != "$tagged_start" ]]; then
@@ -3502,8 +3689,12 @@ drain_condemned_run_commands() {
   local seed_start="${4:-}"
   local quiet_seed_only="${5:-0}"
   local announce_captured_non_seed="${6:-0}"
-  local wrapper entry pid recorded current alive alive_identities recycled unverified captured_file
+  local wrapper entry pid recorded current runtime_recorded runtime_current
+  local signal_probe
+  local alive alive_identities recycled unverified captured_file
   local captured_pid capture_has_non_seed=0
+  local raw_capture captured_line captured_line_pid captured_line_start
+  local captured_line_extra pending_pid="" pending_start=""
   local waited=0
   local drain_started_at
   local announced=0
@@ -3541,6 +3732,7 @@ drain_condemned_run_commands() {
   fi
   gate_drain_seed_pgid="$seed_pgid"
   gate_drain_seed_start="$seed_start"
+  gate_drain_membership_token="$token"
   drain_started_at="$(date +%s)"
 
   # Enumerate before signalling anything. Only the wrapper carries the tag, so
@@ -3609,8 +3801,49 @@ drain_condemned_run_commands() {
       gate_drain_obligation_unreadable "$captured_file" "$drain_context" ||
         return $?
     fi
-    gate_drain_capture="$(cat "$captured_file" 2>/dev/null)
-"
+    raw_capture="$(cat "$captured_file" 2>/dev/null)" || {
+      gate_drain_obligation_unreadable "$captured_file" "$drain_context" ||
+        return $?
+    }
+    while IFS= read -r captured_line; do
+      [[ -n "$captured_line" ]] || continue
+      if [[ "$captured_line" =~ ^[1-9][0-9]*\|[^\|]*$ ]]; then
+        if [[ -n "$pending_pid" ]]; then
+          gate_drain_capture_set_entry "$pending_pid" "$pending_start" ""
+        fi
+        captured_line_pid="${captured_line%%|*}"
+        captured_line_start="${captured_line#*|}"
+        pending_pid="$captured_line_pid"
+        pending_start="$captured_line_start"
+        continue
+      fi
+      if [[ "$captured_line" =~ ^${gate_drain_capture_runtime_prefix}\|[1-9][0-9]*\|[^\|]+$ ]]; then
+        IFS='|' read -r captured_line_extra captured_line_pid captured_line_start << EOF
+$captured_line
+EOF
+        if [[ -z "$pending_pid" || "$captured_line_pid" != "$pending_pid" ]]; then
+          gate_drain_obligation_unreadable "$captured_file" "$drain_context" ||
+            return $?
+        fi
+        if ! gate_drain_runtime_identity_matches_wire \
+          "$pending_start" "$captured_line_start"; then
+          gate_drain_obligation_unreadable "$captured_file" "$drain_context" ||
+            return $?
+        fi
+        gate_drain_capture_set_entry \
+          "$pending_pid" "$pending_start" "$captured_line_start"
+        pending_pid=""
+        pending_start=""
+        continue
+      fi
+      gate_drain_obligation_unreadable "$captured_file" "$drain_context" ||
+        return $?
+    done << EOF
+$raw_capture
+EOF
+    if [[ -n "$pending_pid" ]]; then
+      gate_drain_capture_set_entry "$pending_pid" "$pending_start" ""
+    fi
   fi
   # Walked twice, with a pause between. A tree walk is a snapshot, and a
   # snapshot can catch a wrapper in the instant before its child is visible —
@@ -3645,9 +3878,9 @@ drain_condemned_run_commands() {
   # capture that could not be persisted stops the run here, before the handle
   # is destroyed and while the processes are still findable by tag.
   if [[ "$gate_drain_capture_unpersisted" -ne 0 ]]; then
-    echo "error: could not write the captured process list to ${captured_file}." >&2
-    echo "Signalling now would destroy the tag those processes are still findable by, with nothing on disk to hand on." >&2
-    echo "${drain_failure_prefix} Fix that path — permissions, or free space — then re-run." >&2
+    echo "error: could not publish a complete valid captured process list at ${captured_file}." >&2
+    echo "Signalling now would destroy the tag those processes are still findable by, without valid durable evidence to hand on." >&2
+    echo "${drain_failure_prefix} Check the process identities and that path, then re-run." >&2
     if [[ "$drain_context" == "stale-run" ]]; then
       gate_report_coordinated_no_work_failure 2 "$drain_failure_phase" \
         "$drain_failure_verdict"
@@ -3701,7 +3934,7 @@ EOF
       gate_drain_fail_for_context "$drain_context"
       return $?
     fi
-    while IFS='|' read -r pid recorded; do
+    while IFS='|' read -r pid recorded runtime_recorded; do
       [[ -n "$pid" ]] || continue
       # Only signal something that reads as a PID. Appends are single short
       # writes so a half-written line should be impossible, and this is the
@@ -3709,7 +3942,21 @@ EOF
       # some unrelated process, and killing a stranger is worse than missing a
       # survivor the tag scan would find anyway.
       [[ "$pid" =~ ^[0-9]+$ ]] || continue
-      kill -0 "$pid" 2>/dev/null || continue
+      if ! kill -0 "$pid" 2>/dev/null; then
+        signal_probe="$(gate_lock_process_signal_probe "$pid")" ||
+          signal_probe="error"
+        [[ "$signal_probe" == "gone" ]] && continue
+        # `kill -0` also returns EPERM for a live process. Never read that as
+        # exit. A credential-changing or policy-confined descendant stays an
+        # unverifiable drain obligation and is never signalled by PID alone.
+        [[ "$signal_probe" == "denied" || "$signal_probe" == "live" ]] ||
+          gate_drain_scan_failed=1
+        case " ${unverified} " in
+          *" ${pid} "*) : ;;
+          *) unverified="${unverified}${pid} " ;;
+        esac
+        continue
+      fi
       if [[ "$recorded" == "$gate_lock_identity_unavailable" ]]; then
         # This host cannot identify processes at all, so a handle it still
         # carries is the only selector there is. Signalling on PID alone would
@@ -3717,12 +3964,19 @@ EOF
         # any of this run's handles is therefore left alone and named, and it
         # keeps the drain open rather than discharging it.
         if gate_drain_membership_holds "$pid" ""; then
+          if [[ "$runtime_recorded" != "$gate_lock_identity_unavailable" ]]; then
+            case " ${unverified} " in
+              *" ${pid} "*) : ;;
+              *) unverified="${unverified}${pid} " ;;
+            esac
+            continue
+          fi
           alive="${alive}${pid} "
           # Queued for the signal loop too — it consumes alive_identities, and
           # an entry only in `alive` would be waited on but never signalled,
           # holding the drain to its bound for nothing. The loop re-checks
           # membership under the sentinel before sending anything.
-          alive_identities="${alive_identities}${pid}|${gate_lock_identity_unavailable}
+          alive_identities="${alive_identities}${pid}|${gate_lock_identity_unavailable}|${gate_lock_identity_unavailable}
 "
         else
           case " ${unverified} " in
@@ -3760,8 +4014,30 @@ EOF
       if gate_lock_process_is_confirmed_zombie "$pid" "$recorded"; then
         continue
       fi
+      if [[ -z "$runtime_recorded" ]]; then
+        case " ${unverified} " in
+          *" ${pid} "*) : ;;
+          *) unverified="${unverified}${pid} " ;;
+        esac
+        continue
+      fi
+      runtime_current="$(gate_lock_process_runtime_start "$pid")"
+      if [[ -z "$runtime_current" || "$runtime_current" != "$runtime_recorded" ]]; then
+        if [[ -n "$runtime_current" ]]; then
+          case " ${recycled} " in
+            *" ${pid} "*) : ;;
+            *) recycled="${recycled}${pid} " ;;
+          esac
+          continue
+        fi
+        case " ${unverified} " in
+          *" ${pid} "*) : ;;
+          *) unverified="${unverified}${pid} " ;;
+        esac
+        continue
+      fi
       alive="${alive}${pid} "
-      alive_identities="${alive_identities}${pid}|${recorded}
+      alive_identities="${alive_identities}${pid}|${recorded}|${runtime_recorded}
 "
     done << EOF
 $gate_drain_capture
@@ -3812,9 +4088,9 @@ EOF
     # not write it down must not be followed by another signal round, which
     # would kill that child's parent and leave it unrecorded.
     if [[ "$gate_drain_capture_unpersisted" -ne 0 ]]; then
-      echo "error: could not write the captured process list to ${captured_file} while draining." >&2
+      echo "error: could not publish a complete valid captured process list at ${captured_file} while draining." >&2
       echo "error: still alive: ${alive:-none}${unverified:+, unverified: ${unverified}}" >&2
-      echo "${drain_failure_prefix} Investigate those processes, fix that path, then re-run." >&2
+      echo "${drain_failure_prefix} Investigate those processes and that path, then re-run." >&2
       if [[ "$drain_context" == "stale-run" ]]; then
         gate_report_coordinated_no_work_failure 2 "$drain_failure_phase" \
           "$drain_failure_verdict"
@@ -3827,7 +4103,7 @@ EOF
     # two are separated by the whole census, the bound check and the persist
     # check, and a PID recycled inside that gap would be signalled on the
     # strength of a check that passed for a process which no longer exists.
-    while IFS='|' read -r pid recorded; do
+    while IFS='|' read -r pid recorded runtime_recorded; do
       [[ -n "$pid" ]] || continue
       if [[ "$recorded" != "$gate_lock_identity_unavailable" ]]; then
         recorded="$(gate_lock_normalize_process_start "$recorded")"
@@ -3839,6 +4115,17 @@ EOF
         fi
       elif ! gate_drain_membership_holds "$pid" ""; then
         continue
+      fi
+      if [[ "$runtime_recorded" == "$gate_lock_identity_unavailable" ]]; then
+        gate_drain_membership_holds "$pid" "" || continue
+      else
+        # Keep the exact Linux start tick as the last generation check before
+        # the portable numeric signal. macOS falls back to its lstart identity.
+        runtime_current="$(gate_lock_process_runtime_start "$pid")"
+        if [[ -z "$runtime_recorded" ||
+          "$runtime_current" != "$runtime_recorded" ]]; then
+          continue
+        fi
       fi
       if [[ "$escalated" -eq 1 ]]; then
         kill -KILL "$pid" 2>/dev/null || true
@@ -3870,10 +4157,11 @@ EOF
     # can fork a child at any point before the KILL escalation reaches it, and
     # a child discovered after its parent was recorded is exactly the one that
     # would otherwise outlive this drain. Repeating the walk drives discovery
-    # to a fixpoint: each pass either adds PIDs or does not, the list only
-    # grows, PIDs are recorded once, and the whole loop is bounded — so it ends
-    # either when a pass adds nothing and everything found is gone, or at the
-    # bound, which fails closed.
+    # to a fixpoint. Each pass either adds an exact PID/runtime generation or
+    # does not. The append-only journal grows, and each exact generation is
+    # recorded once. A recycled PID can add a new generation. The bounded loop
+    # ends when a pass adds nothing and everything found is gone, or it fails
+    # closed at the bound.
     #
     # Re-asked of the token as well, not only of the survivors: a command that
     # forks a replacement and then exits leaves nothing to walk down from, and
@@ -7995,7 +8283,7 @@ run_mapped_entries_parallel() {
       worker_start=""
       worker_pgid=""
       for ((worker_identity_attempt = 0; worker_identity_attempt < 100; worker_identity_attempt++)); do
-        worker_start="$(gate_lock_process_start "$pid")"
+        worker_start="$(gate_lock_process_runtime_start "$pid")"
         worker_pgid="$(TZ=UTC LC_ALL=C ps -o pgid= -p "$pid" 2>/dev/null |
           head -n1 | tr -d '[:space:]' || true)"
         if [[ "$worker_pgid" == "$pid" ]] && {

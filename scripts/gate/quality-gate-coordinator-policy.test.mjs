@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   LOCAL_BIN_MAX_FILE_BYTES,
+  MATERIAL_PACKAGE_ROOTS,
   mappedChildScrubbedEnvironmentName,
   materialEnvironmentDigest as computeMaterialEnvironmentDigest,
   normalizedLocalBinManifest,
@@ -42,6 +43,26 @@ const coordinatorSupport = join(
 );
 const productionModulePattern =
   /^quality-gate-coordinator(?!.*\.test\.mjs$).*\.mjs$/u;
+const repositoryRoot = join(gateDirectory, "..", "..");
+
+test("local executable roots cover every tracked package", () => {
+  const tracked = spawnSync(
+    "git",
+    ["ls-files", "package.json", "*/package.json"],
+    {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+    },
+  );
+  assert.equal(tracked.status, 0, tracked.stderr);
+  const packageRoots = tracked.stdout
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((path) => (path === "package.json" ? "" : dirname(path)))
+    .sort();
+  assert.deepEqual([...MATERIAL_PACKAGE_ROOTS].sort(), packageRoots);
+});
 
 async function copyCoordinatorRuntime(targetDirectory) {
   await mkdir(targetDirectory, { recursive: true });
@@ -1221,12 +1242,70 @@ test("material environment binds local wrappers and other selected values", asyn
   );
 });
 
+test("material environment binds package-local executables", async (t) => {
+  const first = await materialEnvironmentFixture("package-bin-first");
+  const second = await materialEnvironmentFixture("package-bin-second");
+  t.after(async () => {
+    await Promise.all([
+      rm(first.root, { recursive: true, force: true }),
+      rm(second.root, { recursive: true, force: true }),
+    ]);
+  });
+
+  const packageWrappers = await Promise.all(
+    [first, second].map(async (fixture) => {
+      const localBin = join(
+        fixture.root,
+        "ui-dashboard",
+        "node_modules",
+        ".bin",
+      );
+      const wrapper = join(localBin, "package-tool");
+      await mkdir(localBin, { recursive: true });
+      await writeFile(wrapper, pnpmShellShim(fixture.physicalRoot));
+      await chmod(wrapper, 0o755);
+      return wrapper;
+    }),
+  );
+  assert.equal(
+    materialEnvironmentDigest(first),
+    materialEnvironmentDigest(second),
+    "equivalent package-local executables must normalize across worktrees",
+  );
+
+  const rogueWrapper = join(dirname(packageWrappers[1]), "rogue-shadow");
+  await writeFile(rogueWrapper, "#!/bin/sh\nexit 9\n");
+  await chmod(rogueWrapper, 0o755);
+  assert.notEqual(
+    materialEnvironmentDigest(first),
+    materialEnvironmentDigest(second),
+    "an unexpected package-local executable must remain material",
+  );
+  await rm(rogueWrapper);
+
+  await writeFile(packageWrappers[1], "#!/bin/sh\nexit 9\n");
+  assert.notEqual(
+    materialEnvironmentDigest(first),
+    materialEnvironmentDigest(second),
+    "package-local executable bytes must remain material",
+  );
+  await rm(dirname(packageWrappers[1]), { recursive: true });
+  assert.notEqual(
+    materialEnvironmentDigest(first),
+    materialEnvironmentDigest(second),
+    "a missing package-local executable root must remain material without setup",
+  );
+});
+
 test("local executable manifests reject unsafe roots and oversized files", async (t) => {
   const symlinkedRoot = await materialEnvironmentFixture("symlinked-root");
+  const symlinkedPackage =
+    await materialEnvironmentFixture("symlinked-package");
   const oversized = await materialEnvironmentFixture("oversized");
   t.after(async () => {
     await Promise.all([
       rm(symlinkedRoot.root, { recursive: true, force: true }),
+      rm(symlinkedPackage.root, { recursive: true, force: true }),
       rm(oversized.root, { recursive: true, force: true }),
     ]);
   });
@@ -1237,6 +1316,19 @@ test("local executable manifests reject unsafe roots and oversized files", async
   await symlink("real-bin", symlinkedRoot.localBin);
   assert.throws(
     () => normalizedLocalBinManifest(symlinkedRoot.root),
+    /must be a real directory/u,
+  );
+
+  const packageNodeModules = join(
+    symlinkedPackage.root,
+    "ui-dashboard",
+    "node_modules",
+  );
+  const packageRealBin = join(packageNodeModules, "real-bin");
+  await mkdir(packageRealBin, { recursive: true });
+  await symlink("real-bin", join(packageNodeModules, ".bin"));
+  assert.throws(
+    () => normalizedLocalBinManifest(symlinkedPackage.root),
     /must be a real directory/u,
   );
 
@@ -1264,6 +1356,21 @@ test("local executable manifests enforce entry and aggregate work bounds", async
   );
   assert.throws(
     () => normalizedLocalBinManifestForTest(entryBound.root, { maxEntries: 1 }),
+    /entry limit/u,
+  );
+  const packageBin = join(
+    entryBound.root,
+    "ui-dashboard",
+    "node_modules",
+    ".bin",
+  );
+  await mkdir(packageBin, { recursive: true });
+  await writeFile(join(packageBin, "package-tool"), "package tool\n");
+  assert.doesNotThrow(() =>
+    normalizedLocalBinManifestForTest(entryBound.root, { maxEntries: 3 }),
+  );
+  assert.throws(
+    () => normalizedLocalBinManifestForTest(entryBound.root, { maxEntries: 2 }),
     /entry limit/u,
   );
 

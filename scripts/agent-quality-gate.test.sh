@@ -154,6 +154,23 @@ legacy_process_start() {
   TZ=UTC LC_ALL=C ps -o lstart= -p "$1" 2>/dev/null | head -n1 || true
 }
 
+runtime_process_start() {
+  local pid="$1"
+  local stat_line remainder start_tick
+  local -a stat_fields
+  if [[ -e /proc/self/stat ]]; then
+    stat_line="$(cat "/proc/${pid}/stat" 2>/dev/null || true)"
+    [[ -n "$stat_line" && "$stat_line" == *") "* ]] || return 0
+    remainder="${stat_line##*) }"
+    read -r -a stat_fields <<< "$remainder"
+    start_tick="${stat_fields[19]:-}"
+    [[ "$start_tick" =~ ^[0-9]+$ ]] || return 0
+    printf 'proc:%s\n' "$start_tick"
+    return 0
+  fi
+  normalized_process_start "$pid"
+}
+
 run_gate() {
   : > "$paths_file"
   local path
@@ -1167,6 +1184,56 @@ printf 'scratch\n' > "$untracked_skill_artifact"
 node scripts/context/check-agent-context.mjs > "$output_file"
 assert_contains "Agent context check passed"
 rm -f "$untracked_skill_artifact"
+
+process_signal_probe="$(
+  sed -n '/^gate_lock_process_signal_probe() {$/,/^}$/p' \
+    scripts/agent-quality-gate.sh
+)"
+if ! /bin/bash -p -c '
+  set -euo pipefail
+  eval "$1"
+  [[ "$(gate_lock_process_signal_probe $$)" == live ]]
+  [[ "$(gate_lock_process_signal_probe 9999999)" == gone ]]
+' quality-gate-process-signal-probe "$process_signal_probe"; then
+  fail "process signal probe did not distinguish a live PID from ESRCH"
+fi
+unset process_signal_probe
+
+runtime_wire_matcher="$(
+  {
+    sed -n '/^gate_lock_normalize_process_start() {$/,/^}$/p' \
+      scripts/agent-quality-gate.sh
+    sed -n '/^gate_drain_runtime_identity_matches_wire() {$/,/^}$/p' \
+      scripts/agent-quality-gate.sh
+  }
+)"
+if ! /bin/bash -p -c '
+  set -euo pipefail
+  eval "$1"
+  gate_lock_identity_unavailable="<no-identity-source>"
+  gate_drain_runtime_identity_matches_wire \
+    "$gate_lock_identity_unavailable" "$gate_lock_identity_unavailable"
+  if gate_drain_runtime_identity_matches_wire \
+    "legacy-start" "$gate_lock_identity_unavailable"; then
+    exit 1
+  fi
+  if [[ -e /proc/self/stat ]]; then
+    gate_drain_runtime_identity_matches_wire "legacy-start" "proc:123"
+    if gate_drain_runtime_identity_matches_wire "legacy-start" "garbage"; then
+      exit 1
+    fi
+  else
+    gate_drain_runtime_identity_matches_wire \
+      "  Mon Jan  1 00:00:00 2024  " "Mon Jan  1 00:00:00 2024"
+    if gate_drain_runtime_identity_matches_wire \
+      "Mon Jan  1 00:00:00 2024" "Mon Jan  1 00:00:01 2024"; then
+      exit 1
+    fi
+  fi
+' quality-gate-runtime-wire "$runtime_wire_matcher"; then
+  fail "runtime capture metadata accepted an invalid legacy/runtime pair"
+fi
+unset runtime_wire_matcher
 } # end family: gate-contract
 
 # family: coordinator
@@ -1210,6 +1277,45 @@ gate_test_process_has_live_start() {
   [[ -z "$current_state" || "$current_state" != Z* ]]
 }
 
+gate_test_process_identity_is_settled() {
+  local pid="$1"
+  local expected_start="$2"
+  local current_start current_state signal_probe
+  [[ "$pid" =~ ^[1-9][0-9]*$ && -n "$expected_start" ]] || return 2
+  current_start="$(gate_test_process_start "$pid")"
+  if [[ -n "$current_start" ]]; then
+    [[ "$current_start" != "$expected_start" ]] && return 0
+    current_state="$(gate_test_process_state "$pid")"
+    [[ "$current_state" == Z* ]] && return 0
+    [[ -n "$current_state" ]] && return 1
+  fi
+  # An unreadable process-table row is not proof of exit. A live PID stays
+  # unsettled so cleanup cannot remove state that process may still mutate.
+  signal_probe="$(node -e '
+    try {
+      process.kill(Number(process.argv[1]), 0);
+      process.stdout.write("live");
+    } catch (error) {
+      process.stdout.write(error?.code === "ESRCH" ? "gone" : "unsettled");
+    }
+  ' "$pid" 2>/dev/null)" || return 1
+  [[ "$signal_probe" == "gone" ]]
+}
+
+gate_test_wait_for_process_exit() {
+  local pid="$1"
+  local expected_start="$2"
+  local attempts="$3"
+  local attempt=0
+  [[ "$pid" =~ ^[1-9][0-9]*$ && -n "$expected_start" &&
+    "$attempts" =~ ^[1-9][0-9]*$ ]] || return 2
+  while ! gate_test_process_identity_is_settled "$pid" "$expected_start"; do
+    [[ "$attempt" -lt "$attempts" ]] || return 1
+    sleep 0.05
+    attempt=$((attempt + 1))
+  done
+}
+
 # shellcheck disable=SC2329 # called through the EXIT-trap cleanup helper below
 gate_test_signal_with_current_parent() {
   local _label="$1"
@@ -1240,23 +1346,82 @@ gate_test_coordinator_observer_attempts=900
 gate_test_stop_coordinators_in_root() {
   local label="$1"
   local lock_root="$2"
-  local metadata coordinator_pid coordinator_start
+  local metadata metadata_paths metadata_record
+  local coordinator_pid coordinator_start stop_failed=0
   [[ -d "$lock_root" ]] || return 0
+  metadata_paths="$(
+    find "$lock_root" -type f -name coordinator.json -print 2>/dev/null
+  )" || {
+    printf 'error: cannot enumerate %s metadata under %s.\n' \
+      "$label" "$lock_root" >&2
+    return 1
+  }
   while IFS= read -r metadata; do
-    [[ -f "$metadata" ]] || continue
-    IFS=$'\t' read -r coordinator_pid coordinator_start <<< "$(node -e '
+    [[ -n "$metadata" && -f "$metadata" ]] || continue
+    if ! metadata_record="$(node -e '
       const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
       process.stdout.write([
         String(value.coordinatorIdentity?.pid ?? ""),
         value.coordinatorIdentity?.startUtc ?? "",
       ].join("\t"));
-    ' "$metadata" 2>/dev/null || true)"
-    if [[ "$coordinator_pid" =~ ^[1-9][0-9]*$ && -n "$coordinator_start" ]]; then
-      gate_test_signal_with_current_parent "$label" TERM \
-        "$coordinator_pid" "$coordinator_start" || true
+    ' "$metadata" 2>/dev/null)"; then
+      printf 'error: cannot read %s metadata: %s.\n' \
+        "$label" "$metadata" >&2
+      stop_failed=1
+      continue
     fi
-  done < <(find "$lock_root" -type f -name coordinator.json -print 2>/dev/null)
+    IFS=$'\t' read -r coordinator_pid coordinator_start <<< "$metadata_record"
+    if [[ ! "$coordinator_pid" =~ ^[1-9][0-9]*$ ||
+      -z "$coordinator_start" ]]; then
+      printf 'error: %s metadata has no exact process identity: %s.\n' \
+        "$label" "$metadata" >&2
+      stop_failed=1
+      continue
+    fi
+    if ! gate_test_process_has_live_start \
+      "$coordinator_pid" "$coordinator_start"; then
+      if gate_test_process_identity_is_settled \
+        "$coordinator_pid" "$coordinator_start"; then
+        continue
+      fi
+    fi
+    gate_test_signal_with_current_parent "$label" TERM \
+      "$coordinator_pid" "$coordinator_start" || true
+    if gate_test_wait_for_process_exit \
+      "$coordinator_pid" "$coordinator_start" 200; then
+      continue
+    fi
+    gate_test_signal_with_current_parent "$label" KILL \
+      "$coordinator_pid" "$coordinator_start" || true
+    if ! gate_test_wait_for_process_exit \
+      "$coordinator_pid" "$coordinator_start" 100; then
+      printf 'error: %s %s did not stop after TERM and KILL.\n' \
+        "$label" "$coordinator_pid" >&2
+      stop_failed=1
+    fi
+  done <<< "$metadata_paths"
+  [[ "$stop_failed" -eq 0 ]]
 }
+
+(
+  gate_test_process_start() { return 0; }
+  gate_test_process_state() { return 0; }
+  if gate_test_wait_for_process_exit "$$" "unreadable-live-start" 1; then
+    fail "coordinator cleanup treated an unreadable live PID as exited"
+  fi
+)
+
+coordinator_cleanup_contract_root="$(mktemp -d)"
+mkdir -p "$coordinator_cleanup_contract_root/qgc-v1-test"
+printf '{invalid coordinator metadata\n' \
+  > "$coordinator_cleanup_contract_root/qgc-v1-test/coordinator.json"
+if gate_test_stop_coordinators_in_root \
+  "invalid coordinator cleanup fixture" \
+  "$coordinator_cleanup_contract_root" > "$output_file" 2>&1; then
+  rm -rf "$coordinator_cleanup_contract_root"
+  fail "coordinator cleanup accepted unreadable lifecycle metadata"
+fi
+rm -rf "$coordinator_cleanup_contract_root"
 
 if ! node - <<'NODE'
 const assert = require("node:assert/strict");
@@ -1366,6 +1531,33 @@ assert.match(
   "the request marker must use the fail-closed identity marker creator",
 );
 assert.match(
+  runHandles,
+  /const processUids = \(pid, directoryOwner\)[\s\S]*?\^Uid:\\s\+[\s\S]*?processUidSet\[0\], processUidSet\[2\][\s\S]*?process\.kill\(Number\(pid\), 0\)/u,
+  "the proc descriptor scan must use kill-compatible real and saved-set UID scope plus the signal probe",
+);
+assert.doesNotMatch(
+  runHandles,
+  /processIdentity\.uid !== expectedUid/u,
+  "proc directory ownership must not replace kill-compatible UID scope",
+);
+assert.match(
+  runHandles,
+  /assertCompleteProcEnumeration[\s\S]*?hidepid=[\s\S]*?procfs PID enumeration is restricted/u,
+  "restricted procfs enumeration must fail closed",
+);
+const signalScopeMatches = (sender, target) =>
+  [target[0], target[2]].some((uid) => sender.includes(uid));
+assert.equal(
+  signalScopeMatches([1000, 1000], [1000, 0, 1000, 0]),
+  true,
+  "a set-ID target with matching real and saved-set UIDs remains in scope",
+);
+assert.equal(
+  signalScopeMatches([1000, 1000], [0, 1000, 0, 1000]),
+  false,
+  "matching target effective and filesystem UIDs alone do not grant kill permission",
+);
+assert.match(
   source,
   /gate_lock_obligation_unwritable\(\)[\s\S]*?gate_report_coordinated_no_work_failure 2 "stale-obligation recovery"/u,
   "coordinated legacy-obligation refusal must emit a stdout no-work verdict",
@@ -1390,6 +1582,36 @@ assert.match(
   /ps -o lstart= -o stat=.*\|\n    head -n1 \| sed 's\/\^\[\[:blank:\]\]\*\/\/; s\/\[\[:blank:\]\]\*\$\/\/'/u,
   "Bash and Node must compare one normalized process-start and state snapshot",
 );
+assert.match(
+  source,
+  /gate_lock_process_runtime_start\(\)[\s\S]*?\/proc\/\$\{pid\}\/stat[\s\S]*?stat_fields\[19\]/u,
+  "Linux live drain identities must use the kernel process start tick",
+);
+assert.match(
+  source,
+  /gate_lock_process_runtime_start_pgid_snapshot\(\)[\s\S]*?gate_lock_process_runtime_start "\$pid"[\s\S]*?ps -o pgid=[\s\S]*?gate_lock_process_runtime_start "\$pid"/u,
+  "process-group snapshots must bracket the PGID read with one runtime identity",
+);
+assert.match(
+  source,
+  /while IFS='\|' read -r pid recorded runtime_recorded; do[\s\S]*?runtime_current="\$\(gate_lock_process_runtime_start "\$pid"\)"[\s\S]*?"\$runtime_current" != "\$runtime_recorded"[\s\S]*?kill -KILL "\$pid"[\s\S]*?kill -TERM "\$pid"/u,
+  "the signal loop must recheck the exact runtime generation before numeric signals",
+);
+assert.match(
+  source,
+  /entry="\$\{root_pid\}\|\$\{start\}"[\s\S]*?runtime_entry="\$\{gate_drain_capture_runtime_prefix\}\|\$\{root_pid\}\|\$\{capture_runtime\}"[\s\S]*?printf '%s\\n' "\$entry"[\s\S]*?gate_drain_runtime_identity_matches_wire "\$start" "\$capture_runtime"[\s\S]*?printf '%s\\n' "\$runtime_entry"/u,
+  "the capture journal must retain the legacy line and append validated runtime metadata before signalling",
+);
+assert.match(
+  source,
+  /gate_drain_runtime_identity_matches_wire\(\)[\s\S]*?\^proc:\[0-9\]\+\$[\s\S]*?gate_lock_normalize_process_start[\s\S]*?"\$runtime_start" == "\$normalized_legacy"/u,
+  "runtime metadata must use a Linux start tick or the exact normalized portable identity",
+);
+assert.match(
+  source,
+  /candidate_snapshot="\$\([\s\S]*?gate_lock_process_runtime_start_pgid_snapshot[\s\S]*?candidate_probe="\$\(gate_lock_process_signal_probe "\$pid"\)"[\s\S]*?"\$candidate_probe" == "gone"[\s\S]*?gate_drain_membership_unverified=1/u,
+  "an unreadable group member identity must treat EPERM and probe errors as unverified",
+);
 for (const refName of ["base", "head"]) {
   assert.match(
     support,
@@ -1406,6 +1628,11 @@ assert.match(
   source,
   /"commandTimeout=\$\{command_timeout_seconds\}"[\s\S]*?"gateSelftestTimeout=\$\{gate_selftest_timeout_seconds\}"[\s\S]*?"gateLockWait=\$\{gate_lock_wait_seconds\}"[\s\S]*?"qualityParallelism=\$\{quality_parallelism\}" "failFast=\$\{fail_fast\}"/u,
   "coordinated freshness must bind command, scheduler-wait, parallelism, and fail-fast controls",
+);
+assert.match(
+  support,
+  /gate_coordinator_material_env_digest\(\)[\s\S]*?node "\$environment_helper" "\$physical_repo_root"/u,
+  "every material-environment digest must bind the current executable manifests",
 );
 assert.match(
   source,
@@ -3053,6 +3280,10 @@ STUB
     done
     [[ "$settled" -eq 1 ]] ||
       fail_worker_loss_fixture "the drained worker-loss coordinator did not release its socket and legacy lock"
+    gate_test_stop_coordinators_in_root \
+      "worker-loss fixture coordinator" "$fixture_lock_root" ||
+      fail_worker_loss_fixture \
+        "the drained worker-loss coordinator did not exit before fixture cleanup"
     trap - EXIT
   )
   rm -rf "$fixture_repo" "$fixture_lock_root"
@@ -3159,6 +3390,10 @@ STUB
     done
     [[ "$settled" -eq 1 ]] ||
       fail_release_failure_fixture "parallel release failure left the coordinator lock held"
+    gate_test_stop_coordinators_in_root \
+      "release-failure fixture coordinator" "$fixture_lock_root" ||
+      fail_release_failure_fixture \
+        "the release-failure coordinator did not exit before fixture cleanup"
     trap - EXIT
   )
   rm -rf "$fixture_repo" "$fixture_lock_root"
@@ -3323,6 +3558,10 @@ STUB
     done
     [[ "$settled" -eq 1 ]] ||
       fail_stale_failure_fixture "stale-failure coordinator did not settle after cancellation"
+    gate_test_stop_coordinators_in_root \
+      "stale-failure fixture coordinator" "$fixture_lock_root" ||
+      fail_stale_failure_fixture \
+        "the stale-failure coordinator did not exit before fixture cleanup"
     trap - EXIT
   )
   rm -rf "$fixture_repo" "$fixture_lock_root"
@@ -3442,24 +3681,8 @@ STUB
       fi
       wait "$holder_pid" 2>/dev/null || true
       wait "$contender_pid" 2>/dev/null || true
-      coordinator_metadata="$({
-        find "$fixture_lock_root" -type f -name coordinator.json -print 2>/dev/null
-      } | head -n1)"
-      if [[ -f "$coordinator_metadata" ]]; then
-        IFS=$'\t' read -r coordinator_pid coordinator_start <<< "$(node -e '
-          const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
-          process.stdout.write([
-            String(value.coordinatorIdentity?.pid ?? ""),
-            value.coordinatorIdentity?.startUtc ?? "",
-          ].join("\t"));
-        ' "$coordinator_metadata" 2>/dev/null || true)"
-        if [[ "$coordinator_pid" =~ ^[1-9][0-9]*$ && -n "$coordinator_start" ]] &&
-          gate_test_process_has_live_start "$coordinator_pid" "$coordinator_start"; then
-          gate_test_signal_with_current_parent \
-            "sequential descendant coordinator" TERM \
-            "$coordinator_pid" "$coordinator_start" || true
-        fi
-      fi
+      gate_test_stop_coordinators_in_root \
+        "sequential descendant coordinator" "$fixture_lock_root"
     }
     fail_sequential_descendant_fixture() {
       {
@@ -4051,6 +4274,9 @@ STUB
       fail_sequential_descendant_fixture \
         "the legacy recovery gate left its run lock behind"
     descendant_pid=""
+    cleanup_sequential_descendant_fixture ||
+      fail_sequential_descendant_fixture \
+        "the sequential descendant coordinator did not exit before fixture cleanup"
     trap - EXIT
   )
   rm -rf "$fixture_repo" "$fixture_lock_root"
@@ -7637,37 +7863,156 @@ arm_suite_abort_trap
 
 # Focused freshness runs do not execute the coordinator family's cleanup
 # helpers. Bind each cleanup signal to the metadata PID and start time here.
-gate_test_stop_coordinators_in_root() {
+gate_test_process_start() {
+  local pid="$1"
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  TZ=UTC LC_ALL=C LANG=C ps -p "$pid" -o lstart= 2>/dev/null |
+    head -n1 |
+    sed 's/^[[:space:]]*//; s/[[:space:]]*$//' || true
+}
+
+gate_test_process_parent() {
+  local pid="$1"
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  TZ=UTC LC_ALL=C LANG=C ps -p "$pid" -o ppid= 2>/dev/null |
+    awk 'NF { print $1; exit }' || true
+}
+
+gate_test_process_state() {
+  local pid="$1"
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  TZ=UTC LC_ALL=C LANG=C ps -p "$pid" -o stat= 2>/dev/null |
+    awk 'NF { print $1; exit }' || true
+}
+
+gate_test_process_has_live_start() {
+  local pid="$1"
+  local expected_start="$2"
+  local current_start current_state
+  [[ "$pid" =~ ^[0-9]+$ && -n "$expected_start" ]] || return 1
+  current_start="$(gate_test_process_start "$pid")"
+  [[ -n "$current_start" && "$current_start" == "$expected_start" ]] ||
+    return 1
+  current_state="$(gate_test_process_state "$pid")"
+  [[ -z "$current_state" || "$current_state" != Z* ]]
+}
+
+gate_test_process_identity_is_settled() {
+  local pid="$1"
+  local expected_start="$2"
+  local current_start current_state signal_probe
+  [[ "$pid" =~ ^[1-9][0-9]*$ && -n "$expected_start" ]] || return 2
+  current_start="$(gate_test_process_start "$pid")"
+  if [[ -n "$current_start" ]]; then
+    [[ "$current_start" != "$expected_start" ]] && return 0
+    current_state="$(gate_test_process_state "$pid")"
+    [[ "$current_state" == Z* ]] && return 0
+    [[ -n "$current_state" ]] && return 1
+  fi
+  signal_probe="$(node -e '
+    try {
+      process.kill(Number(process.argv[1]), 0);
+      process.stdout.write("live");
+    } catch (error) {
+      process.stdout.write(error?.code === "ESRCH" ? "gone" : "unsettled");
+    }
+  ' "$pid" 2>/dev/null)" || return 1
+  [[ "$signal_probe" == "gone" ]]
+}
+
+gate_test_wait_for_process_exit() {
+  local pid="$1"
+  local expected_start="$2"
+  local attempts="$3"
+  local attempt=0
+  [[ "$pid" =~ ^[1-9][0-9]*$ && -n "$expected_start" &&
+    "$attempts" =~ ^[1-9][0-9]*$ ]] || return 2
+  while ! gate_test_process_identity_is_settled "$pid" "$expected_start"; do
+    [[ "$attempt" -lt "$attempts" ]] || return 1
+    sleep 0.05
+    attempt=$((attempt + 1))
+  done
+}
+
+gate_test_signal_with_current_parent() {
   local _label="$1"
-  local lock_root="$2"
-  local metadata coordinator_pid coordinator_start
+  local signal="$2"
+  local pid="$3"
+  local expected_start="$4"
   local current_start current_parent verified_parent
+  case "$signal" in
+    TERM|KILL) ;;
+    *) return 2 ;;
+  esac
+  [[ "$pid" =~ ^[1-9][0-9]*$ && "$pid" != "$$" && "$pid" != "$PPID" &&
+    -n "$expected_start" ]] || return 2
+  current_parent="$(gate_test_process_parent "$pid")"
+  current_start="$(gate_test_process_start "$pid")"
+  verified_parent="$(gate_test_process_parent "$pid")"
+  [[ -n "$current_start" && "$current_start" == "$expected_start" &&
+    "$current_parent" =~ ^[0-9]+$ &&
+    "$current_parent" == "$verified_parent" ]] || return 2
+  kill "-$signal" "$pid" 2>/dev/null || return 1
+}
+
+gate_test_stop_coordinators_in_root() {
+  local label="$1"
+  local lock_root="$2"
+  local metadata metadata_paths metadata_record
+  local coordinator_pid coordinator_start stop_failed=0
   [[ -d "$lock_root" ]] || return 0
+  metadata_paths="$(
+    find "$lock_root" -type f -name coordinator.json -print 2>/dev/null
+  )" || {
+    printf 'error: cannot enumerate %s metadata under %s.\n' \
+      "$label" "$lock_root" >&2
+    return 1
+  }
   while IFS= read -r metadata; do
-    [[ -f "$metadata" ]] || continue
-    IFS=$'\t' read -r coordinator_pid coordinator_start <<< "$(node -e '
+    [[ -n "$metadata" && -f "$metadata" ]] || continue
+    if ! metadata_record="$(node -e '
       const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
       process.stdout.write([
         String(value.coordinatorIdentity?.pid ?? ""),
         value.coordinatorIdentity?.startUtc ?? "",
       ].join("\t"));
-    ' "$metadata" 2>/dev/null || true)"
-    [[ "$coordinator_pid" =~ ^[1-9][0-9]*$ &&
-      "$coordinator_pid" != "$$" && "$coordinator_pid" != "$PPID" &&
-      -n "$coordinator_start" ]] || continue
-    current_parent="$(TZ=UTC LC_ALL=C LANG=C \
-      ps -p "$coordinator_pid" -o ppid= 2>/dev/null |
-      awk 'NF { print $1; exit }' || true)"
-    current_start="$(TZ=UTC LC_ALL=C LANG=C \
-      ps -p "$coordinator_pid" -o lstart= 2>/dev/null | head -n1 || true)"
-    verified_parent="$(TZ=UTC LC_ALL=C LANG=C \
-      ps -p "$coordinator_pid" -o ppid= 2>/dev/null |
-      awk 'NF { print $1; exit }' || true)"
-    if [[ -n "$current_start" && "$current_start" == "$coordinator_start" &&
-      "$current_parent" =~ ^[0-9]+$ && "$current_parent" == "$verified_parent" ]]; then
-      kill -TERM "$coordinator_pid" 2>/dev/null || true
+    ' "$metadata" 2>/dev/null)"; then
+      printf 'error: cannot read %s metadata: %s.\n' \
+        "$label" "$metadata" >&2
+      stop_failed=1
+      continue
     fi
-  done < <(find "$lock_root" -type f -name coordinator.json -print 2>/dev/null)
+    IFS=$'\t' read -r coordinator_pid coordinator_start <<< "$metadata_record"
+    if [[ ! "$coordinator_pid" =~ ^[1-9][0-9]*$ ||
+      -z "$coordinator_start" ]]; then
+      printf 'error: %s metadata has no exact process identity: %s.\n' \
+        "$label" "$metadata" >&2
+      stop_failed=1
+      continue
+    fi
+    if ! gate_test_process_has_live_start \
+      "$coordinator_pid" "$coordinator_start"; then
+      if gate_test_process_identity_is_settled \
+        "$coordinator_pid" "$coordinator_start"; then
+        continue
+      fi
+    fi
+    gate_test_signal_with_current_parent "$label" TERM \
+      "$coordinator_pid" "$coordinator_start" || true
+    if gate_test_wait_for_process_exit \
+      "$coordinator_pid" "$coordinator_start" 200; then
+      continue
+    fi
+    gate_test_signal_with_current_parent "$label" KILL \
+      "$coordinator_pid" "$coordinator_start" || true
+    if ! gate_test_wait_for_process_exit \
+      "$coordinator_pid" "$coordinator_start" 100; then
+      printf 'error: %s %s did not stop after TERM and KILL.\n' \
+        "$label" "$coordinator_pid" >&2
+      stop_failed=1
+    fi
+  done <<< "$metadata_paths"
+  [[ "$stop_failed" -eq 0 ]]
 }
 
 # Both freshness callers place the recomputation inside an assignment followed
@@ -11078,6 +11423,26 @@ run_parallel_interrupt_regression() {
   local signal="$2"
   local expected_exit="$3"
   local parallel_interrupt_repo
+  parallel_interrupt_group_has_live_member() {
+    local snapshot
+    snapshot="$(TZ=UTC LC_ALL=C ps -axo pgid=,stat= 2>/dev/null)" ||
+      return 0
+    awk -v target="$1" '
+      $1 == target && $2 !~ /^Z/ { found = 1 }
+      END { exit(found ? 0 : 1) }
+    ' <<< "$snapshot"
+  }
+  parallel_interrupt_pid_is_live() {
+    local pid="$1"
+    local expected_start="$2"
+    local current_start state
+    current_start="$(normalized_process_start "$pid")"
+    [[ -n "$current_start" && "$current_start" == "$expected_start" ]] ||
+      return 1
+    state="$(TZ=UTC LC_ALL=C ps -o stat= -p "$pid" 2>/dev/null |
+      awk 'NF { print $1; exit }' || true)"
+    [[ -n "$state" && "$state" != Z* ]]
+  }
   parallel_interrupt_repo="$(mktemp -d)"
   (
     cd "$parallel_interrupt_repo"
@@ -11129,7 +11494,9 @@ STUB
     local next_gate_pid=""
     local worker_pgid=""
     local victim_pid=""
+    local victim_start=""
     local descendant_pid=""
+    local descendant_start=""
     local launched=0
     local settled=0
     local attempt
@@ -11197,7 +11564,9 @@ STUB
 
     worker_pgid="$(cat "${barrier}.ready")"
     victim_pid="$(cat "$victim_pid_file")"
+    victim_start="$(normalized_process_start "$victim_pid")"
     descendant_pid="$(cat "$descendant_pid_file")"
+    descendant_start="$(normalized_process_start "$descendant_pid")"
     [[ "$worker_pgid" =~ ^[1-9][0-9]*$ ]] ||
       fail_parallel_interrupt_fixture \
         "parallel $phase interrupt fixture recorded an invalid worker PGID"
@@ -11244,17 +11613,17 @@ STUB
         "parallel $phase interrupt exited $interrupt_exit, expected $expected_exit"
 
     for ((attempt = 0; attempt < 100; attempt++)); do
-      if ! kill -0 -- "-$worker_pgid" 2>/dev/null; then
+      if ! parallel_interrupt_group_has_live_member "$worker_pgid"; then
         break
       fi
       sleep 0.05
     done
-    if kill -0 -- "-$worker_pgid" 2>/dev/null; then
+    if parallel_interrupt_group_has_live_member "$worker_pgid"; then
       fail_parallel_interrupt_fixture \
-        "parallel $phase interrupt left the registered worker group running"
+        "parallel $phase interrupt left a live registered worker-group member"
     fi
-    if kill -0 "$victim_pid" 2>/dev/null ||
-      kill -0 "$descendant_pid" 2>/dev/null; then
+    if parallel_interrupt_pid_is_live "$victim_pid" "$victim_start" ||
+      parallel_interrupt_pid_is_live "$descendant_pid" "$descendant_start"; then
       fail_parallel_interrupt_fixture \
         "parallel $phase interrupt left a TERM-ignoring descendant running"
     fi
@@ -11527,7 +11896,7 @@ run_parallel_nolock_parent_death_regression
   # shellcheck disable=SC2329 # called by the eval-loaded helper
   gate_lock_identity_source_available() { return 0; }
   # shellcheck disable=SC2329 # called by the eval-loaded helper
-  gate_lock_process_start() { printf 'start-%s\n' "$1"; }
+  gate_lock_process_runtime_start() { printf 'start-%s\n' "$1"; }
   # shellcheck disable=SC2329 # called by the eval-loaded helper
   gate_run_tagged_pids() {
     printf '%s\n' "$gate_drain_scan_error" 101 202
@@ -11579,7 +11948,7 @@ run_parallel_nolock_parent_death_regression
   # shellcheck disable=SC2329 # called by the eval-loaded helper
   pgrep() { printf '%s\n' 404; }
   # shellcheck disable=SC2329 # called by the eval-loaded helper
-  gate_lock_process_start_pgid_snapshot() {
+  gate_lock_process_runtime_start_pgid_snapshot() {
     case "$1" in
       101) printf '%s\n' "${gate_test_anchor_snapshot:-start-101|101}" ;;
       303) printf '%s\n' 'start-303|101' ;;
@@ -11597,6 +11966,34 @@ run_parallel_nolock_parent_death_regression
   if gate_drain_membership_holds 404 202 "start-404"; then
     fail "group membership accepted a reused parent outside the pinned group"
   fi
+
+  gate_drain_capture_group_pgid=""
+  gate_drain_membership_token="fixture.membership-505-123456789"
+  gate_drain_scan_error="agentqg-scan-failed"
+  gate_drain_scan_failed=0
+  gate_drain_tagged_now="505"
+  gate_run_tagged_pids() { return 0; }
+  if gate_drain_membership_holds 505 "" "start-505"; then
+    fail "non-group membership trusted a cached PID after its handle disappeared"
+  fi
+  gate_lock_process_runtime_start() {
+    case "$1" in
+      202) printf '%s\n' "${gate_test_parent_start:-replacement-202}" ;;
+    esac
+  }
+  pgrep() {
+    [[ "$*" == "-P 202" ]] || return 2
+    printf '505\n'
+  }
+  if gate_drain_membership_holds 505 202 "start-505" "start-202"; then
+    fail "non-group membership trusted a child of a reused numeric parent"
+  fi
+  gate_test_parent_start="start-202"
+  gate_drain_membership_holds 505 202 "start-505" "start-202" ||
+    fail "non-group membership rejected a child of an exact pinned parent"
+  gate_run_tagged_pids() { printf '505\n'; }
+  gate_drain_membership_holds 505 "" "start-505" ||
+    fail "non-group membership rejected an exact post-identity handle rescan"
 )
 
 # A mapped command can detach into a new session and leave its worker PGID.
@@ -11650,7 +12047,7 @@ const detachedChild = spawn(
   [process.env.QG_DETACHED_CHILD, process.env.QG_DETACHED_READY],
   {
     detached: true,
-    env: process.env,
+    env: { PATH: process.env.PATH },
     stdio: inheritedStdio,
   },
 );
@@ -18053,6 +18450,12 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   [[ -n "$race_drain_legacy_capture_start" &&
     "$race_drain_legacy_capture_start" == "$(legacy_process_start "$race_drain_orphan")" ]] ||
     fail "a current captured identity is not byte-compatible with the historical macOS drainer"
+  race_drain_runtime_capture_start="$(awk -F '|' -v pid="$race_drain_orphan" '
+    $1 == "runtime-v2" && $2 == pid { print $3; exit }
+  ' "$race_captured_file")"
+  [[ -n "$race_drain_runtime_capture_start" &&
+    "$race_drain_runtime_capture_start" == "$(runtime_process_start "$race_drain_orphan")" ]] ||
+    fail "a current captured identity did not persist the exact runtime generation"
   # Keep C's mapped command held too. Its entry is now the proof point: the
   # release file stays absent until C has drained A's command and reached it.
   [[ ! -e "$race_drain_violation_file" && ! -L "$race_drain_violation_file" ]] ||
@@ -18246,6 +18649,10 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     "$race_padded_capture_pid" \
     "$(normalized_process_start "$race_padded_capture_pid")" \
     > "$gate_race_root/captured.$race_padded_capture_id"
+  printf 'runtime-v2|%s|%s\n' \
+    "$race_padded_capture_pid" \
+    "$(runtime_process_start "$race_padded_capture_pid")" \
+    >> "$gate_race_root/captured.$race_padded_capture_id"
   race_waiter padded-captured 0 0 0
   [[ "$(cat "$gate_race_out/padded-captured.status")" == "0" ]] ||
     fail "the padded captured-process drain did not complete"
@@ -18271,6 +18678,142 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     fail "the padded captured-process evidence was not removed"
   [[ -n "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
     fail "mapped work did not start after the padded captured process drained"
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -f "$gate_race_root"/captured.*
+
+  # A legacy-only capture lacks the current exact-runtime attestation. On
+  # Linux, its calendar start string cannot distinguish generations within the
+  # same second. Current readers keep the obligation and fail closed without
+  # signalling the process or starting mapped work.
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -f "$gate_race_root"/captured.*
+  : > "$gate_race_log"
+  race_bound_launch_command "legacy-only captured process" 30 \
+    node -e 'setInterval(() => {}, 1_000)' ||
+    fail "the legacy-only captured-process case could not bind its direct child"
+  race_legacy_only_pid="$race_bound_pid"
+  race_legacy_only_start="$race_bound_start"
+  race_legacy_only_parent="$race_bound_parent"
+  race_legacy_only_id="fixture-legacy-only-capture-$$-1"
+  mkdir -p "$gate_race_root/condemned.d"
+  printf '%s\n' "$race_legacy_only_id" \
+    > "$gate_race_root/condemned.d/$race_legacy_only_id"
+  printf '%s|%s\n' \
+    "$race_legacy_only_pid" \
+    "$(legacy_process_start "$race_legacy_only_pid")" \
+    > "$gate_race_root/captured.$race_legacy_only_id"
+  set +e
+  AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=0 \
+    race_waiter legacy-only-captured 0 0 0
+  set -e
+  [[ "$(cat "$gate_race_out/legacy-only-captured.status")" == "2" ]] ||
+    fail "a live legacy-only capture must fail closed"
+  gate_test_process_is_expected \
+    "$race_legacy_only_pid" "$race_legacy_only_start" \
+    "$race_legacy_only_parent" ||
+    fail "the legacy-only captured process was signalled or changed identity"
+  grep -q "could not be identified" \
+    "$gate_race_out/legacy-only-captured.out" ||
+    fail "a live legacy-only capture must report its unverifiable process"
+  [[ -z "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+    fail "mapped work started while a live legacy-only capture was unresolved"
+  race_drain_kill_and_reap_direct_wrapper \
+    "legacy-only captured process" "$race_legacy_only_pid" \
+    "$race_legacy_only_start" "$race_legacy_only_parent" ||
+    fail "the legacy-only captured-process case could not safely reap its child"
+  race_bound_prune_completed
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -f "$gate_race_root"/captured.*
+
+  if [[ -e /proc/self/stat ]]; then
+    # A valid Linux runtime record can disagree with the process that still
+    # owns the same legacy second-level start string. That mismatch is PID
+    # reuse evidence. Leave the unrelated process alone and continue.
+    : > "$gate_race_log"
+    race_bound_launch_command "runtime-mismatched captured process" 30 \
+      node -e 'setInterval(() => {}, 1_000)' ||
+      fail "the runtime-mismatch case could not bind its direct child"
+    race_runtime_mismatch_pid="$race_bound_pid"
+    race_runtime_mismatch_start="$race_bound_start"
+    race_runtime_mismatch_parent="$race_bound_parent"
+    race_runtime_mismatch_current="$(runtime_process_start "$race_runtime_mismatch_pid")"
+    [[ "$race_runtime_mismatch_current" =~ ^proc:([0-9]+)$ ]] ||
+      fail "the runtime-mismatch case could not read the Linux start tick"
+    race_runtime_mismatch_tick="${BASH_REMATCH[1]}"
+    race_runtime_mismatch_recorded="proc:$((race_runtime_mismatch_tick + 1))"
+    race_runtime_mismatch_id="fixture-runtime-mismatch-capture-$$-1"
+    mkdir -p "$gate_race_root/condemned.d"
+    printf '%s\n' "$race_runtime_mismatch_id" \
+      > "$gate_race_root/condemned.d/$race_runtime_mismatch_id"
+    printf '%s|%s\n' \
+      "$race_runtime_mismatch_pid" \
+      "$(legacy_process_start "$race_runtime_mismatch_pid")" \
+      > "$gate_race_root/captured.$race_runtime_mismatch_id"
+    printf 'runtime-v2|%s|%s\n' \
+      "$race_runtime_mismatch_pid" "$race_runtime_mismatch_recorded" \
+      >> "$gate_race_root/captured.$race_runtime_mismatch_id"
+    race_waiter runtime-mismatched-captured 0 0 0
+    [[ "$(cat "$gate_race_out/runtime-mismatched-captured.status")" == "0" ]] ||
+      fail "a mismatched exact runtime generation must be classified as recycled"
+    gate_test_process_is_expected \
+      "$race_runtime_mismatch_pid" "$race_runtime_mismatch_start" \
+      "$race_runtime_mismatch_parent" ||
+      fail "the runtime-mismatched captured process was signalled or changed identity"
+    grep -q "Left alone: pid(s).*now belong to unrelated processes" \
+      "$gate_race_out/runtime-mismatched-captured.out" ||
+      fail "a mismatched exact runtime generation must report the recycled PID"
+    [[ -n "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+      fail "mapped work did not start after the recycled PID was left alone"
+    race_drain_kill_and_reap_direct_wrapper \
+      "runtime-mismatched captured process" "$race_runtime_mismatch_pid" \
+      "$race_runtime_mismatch_start" "$race_runtime_mismatch_parent" ||
+      fail "the runtime-mismatch case could not safely reap its child"
+    race_bound_prune_completed
+    rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+    rm -f "$gate_race_root"/captured.*
+  fi
+
+  # The unavailable-identity sentinel is valid only when both records carry
+  # it. Pairing it with a readable legacy identity makes the journal
+  # impossible. Refuse the complete obligation before any process is signalled
+  # or mapped work starts.
+  : > "$gate_race_log"
+  race_bound_launch_command "malformed runtime-pair captured process" 30 \
+    node -e 'setInterval(() => {}, 1_000)' ||
+    fail "the malformed runtime-pair case could not bind its direct child"
+  race_malformed_pair_pid="$race_bound_pid"
+  race_malformed_pair_start="$race_bound_start"
+  race_malformed_pair_parent="$race_bound_parent"
+  race_malformed_pair_id="fixture-malformed-runtime-pair-$$-1"
+  mkdir -p "$gate_race_root/condemned.d"
+  printf '%s\n' "$race_malformed_pair_id" \
+    > "$gate_race_root/condemned.d/$race_malformed_pair_id"
+  printf '%s|%s\n' \
+    "$race_malformed_pair_pid" \
+    "$(legacy_process_start "$race_malformed_pair_pid")" \
+    > "$gate_race_root/captured.$race_malformed_pair_id"
+  printf 'runtime-v2|%s|%s\n' \
+    "$race_malformed_pair_pid" '<no-identity-source>' \
+    >> "$gate_race_root/captured.$race_malformed_pair_id"
+  set +e
+  race_waiter malformed-runtime-pair 0 0 0
+  set -e
+  [[ "$(cat "$gate_race_out/malformed-runtime-pair.status")" == "2" ]] ||
+    fail "an impossible legacy/runtime pair must fail closed"
+  gate_test_process_is_expected \
+    "$race_malformed_pair_pid" "$race_malformed_pair_start" \
+    "$race_malformed_pair_parent" ||
+    fail "the malformed runtime-pair process was signalled or changed identity"
+  grep -q "exists but cannot be read" \
+    "$gate_race_out/malformed-runtime-pair.out" ||
+    fail "an impossible legacy/runtime pair must report unreadable evidence"
+  [[ -z "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+    fail "mapped work started after an impossible legacy/runtime pair"
+  race_drain_kill_and_reap_direct_wrapper \
+    "malformed runtime-pair captured process" "$race_malformed_pair_pid" \
+    "$race_malformed_pair_start" "$race_malformed_pair_parent" ||
+    fail "the malformed runtime-pair case could not safely reap its child"
+  race_bound_prune_completed
   rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
   rm -f "$gate_race_root"/captured.*
 
@@ -18731,6 +19274,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
         .update(process.argv[1], "utf8").digest("hex"));
     ' "$(uname -n)")"
     source "$repo_root/scripts/gate/run-handles.sh"
+    gate_run_proc_marker_scan_available() { return 1; }
     pgrep() { return 1; }
     lsof() {
       : > "$race_symlink_lsof_called"
@@ -18748,6 +19292,16 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   [[ -z "$(find "$gate_race_root" -maxdepth 1 -type d \
     -name '.holder-lsof-witness.v1.*' -print -quit)" ]] ||
     fail "a rejected symlink marker leaked its private scan witness"
+  if [[ -d /proc/self/fd ]]; then
+    race_symlink_proc_output="$(
+      gate_drain_scan_error="agentqg-scan-failed"
+      gate_lock_root_dir="$gate_race_root"
+      source "$repo_root/scripts/gate/run-handles.sh"
+      gate_run_proc_marker_pids "$race_symlink_token" "$race_symlink_marker"
+    )"
+    [[ "$race_symlink_proc_output" == "agentqg-scan-failed" ]] ||
+      fail "the proc descriptor scan followed a shared marker symlink"
+  fi
   rm -f "$race_symlink_marker" "$race_symlink_target"
   rm -rf "$gate_race_root"/.holder-lsof-witness.*
 
@@ -18772,6 +19326,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
         .update(process.argv[1], "utf8").digest("hex"));
     ' "$(uname -n)")"
     source "$repo_root/scripts/gate/run-handles.sh"
+    gate_run_proc_marker_scan_available() { return 1; }
     pgrep() { return 1; }
     lsof() {
       local path=""
@@ -18801,6 +19356,59 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     -name '.holder-lsof-witness.v1.*' -print -quit)" ]] ||
     fail "a valid marker scan leaked its private lsof witness"
   rm -f "$race_valid_lsof_marker" "$race_valid_lsof_facts"
+
+  # Linux procfs must retain descriptor discovery when lsof is unavailable.
+  # The child starts a new process with no AGENTQG environment or argv tag and
+  # keeps only the marker descriptor as its run identity.
+  if [[ -d /proc/self/fd ]]; then
+    printf -v race_proc_token '%s' \
+      'fixture.proc-marker-424243-123456789'
+    race_proc_marker="$gate_race_root/holder.${race_proc_token}"
+    race_proc_ready="$gate_race_out/proc-marker-ready"
+    rm -f "$race_proc_marker" "$race_proc_ready"
+    printf '%s\n' "$race_proc_token" > "$race_proc_marker"
+    chmod 600 "$race_proc_marker"
+    env -i PATH=/usr/bin:/bin /bin/bash -c '
+      exec 9< "$1"
+      : > "$2"
+      exec /bin/sleep 30
+    ' proc-marker-holder "$race_proc_marker" "$race_proc_ready" &
+    race_proc_pid=$!
+    gate_test_capture_identity "$race_proc_pid" "$gate_test_signal_shell_pid" ||
+      fail "the proc marker fixture could not bind its descriptor holder"
+    race_proc_start="$gate_test_captured_start"
+    race_proc_parent="$gate_test_captured_parent"
+    race_waited=0
+    while [[ ! -e "$race_proc_ready" && "$race_waited" -lt 100 ]]; do
+      sleep 0.05
+      race_waited=$((race_waited + 1))
+    done
+    [[ -e "$race_proc_ready" ]] ||
+      fail "the proc marker fixture did not open its inherited descriptor"
+    race_proc_output="$(
+      gate_drain_scan_error="agentqg-scan-failed"
+      gate_lock_root_dir="$gate_race_root"
+      source "$repo_root/scripts/gate/run-handles.sh"
+      pgrep() { return 1; }
+      gate_run_tagged_pids "$race_proc_token"
+    )"
+    [[ "$race_proc_output" == "$race_proc_pid" ]] ||
+      fail "the proc marker scan did not emit only its untagged descriptor holder"
+    race_proc_failure_output="$(
+      gate_drain_scan_error="agentqg-scan-failed"
+      gate_lock_root_dir="$gate_race_root"
+      source "$repo_root/scripts/gate/run-handles.sh"
+      node() { return 2; }
+      gate_run_proc_marker_pids "$race_proc_token" "$race_proc_marker"
+    )"
+    [[ "$race_proc_failure_output" == "agentqg-scan-failed" ]] ||
+      fail "an incomplete proc descriptor scan did not fail closed"
+    race_drain_kill_and_reap_direct_wrapper \
+      "proc marker holder" "$race_proc_pid" \
+      "$race_proc_start" "$race_proc_parent" ||
+      fail "the proc marker fixture could not clean its descriptor holder"
+    rm -f "$race_proc_marker" "$race_proc_ready"
+  fi
 
   # A scan that fails is not a scan that finds nothing. With `pgrep` exiting 2
   # — a real failure, not "no match" — a run inheriting an obligation cannot
@@ -18841,6 +19449,34 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
   : > "$gate_race_log"
   if ! kill -0 1 2>/dev/null; then
+    race_unsignalable_token="fixture.unsignalable-1-1"
+    mkdir -p "$gate_race_root/condemned.d"
+    printf '%s\n' "$race_unsignalable_token" \
+      > "$gate_race_root/condemned.d/$race_unsignalable_token"
+    printf '1|%s\n' "$(normalized_process_start 1)" \
+      > "$gate_race_root/captured.$race_unsignalable_token"
+    printf '%s\n' "$race_unsignalable_token" \
+      > "$gate_race_root/holder.$race_unsignalable_token"
+    set +e
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=1 \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 6 \
+      > "$gate_race_out/unsignalable-descendant.out" 2>&1
+    race_unsignalable_exit=$?
+    set -e
+    [[ "$race_unsignalable_exit" -eq 2 ]] ||
+      fail "a live unsignalable captured descendant did not fail closed"
+    grep -q "could not be identified" \
+      "$gate_race_out/unsignalable-descendant.out" ||
+      fail "an unsignalable captured descendant omitted its fail-closed diagnosis"
+    rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+    rm -f "$gate_race_root/captured.$race_unsignalable_token" \
+      "$gate_race_root/holder.$race_unsignalable_token"
+
     mkdir -p "$gate_race_root/run.lock"
     {
       printf 'pid=1\n'

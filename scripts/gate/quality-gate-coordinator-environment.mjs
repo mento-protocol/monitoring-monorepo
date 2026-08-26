@@ -210,7 +210,7 @@ const stableFields = [
 ];
 const worktreeToken = "<WORKTREE_ROOT>";
 const gateScratchRelativePath = join(".tmp", "agent-quality-gate");
-const environmentFileRoots = [
+export const MATERIAL_PACKAGE_ROOTS = Object.freeze([
   "",
   "aegis",
   join("alerts", "infra", "oncall-announcer"),
@@ -222,7 +222,7 @@ const environmentFileRoots = [
   "metrics-bridge",
   "shared-config",
   "ui-dashboard",
-];
+]);
 const productionLocalBinLimits = Object.freeze({
   maxEntries: LOCAL_BIN_MAX_ENTRIES,
   maxFileBytes: LOCAL_BIN_MAX_FILE_BYTES,
@@ -511,7 +511,9 @@ function localBinSnapshot(localBinPath, physicalRepoRoot, limits) {
   try {
     rootBefore = lstatSync(localBinPath, { bigint: true });
   } catch (error) {
-    if (error?.code === "ENOENT") return "missing";
+    if (error?.code === "ENOENT") {
+      return { byteCount: 0, digest: "missing", entryCount: 0 };
+    }
     throw error;
   }
   if (rootBefore.isSymbolicLink() || !rootBefore.isDirectory()) {
@@ -547,16 +549,42 @@ function localBinSnapshot(localBinPath, physicalRepoRoot, limits) {
   updateField(hash, "root-type", "directory");
   updateField(hash, "root-mode", rootBefore.mode.toString(8));
   for (const digest of entries) updateField(hash, "entry", digest);
+  return {
+    byteCount: totalBytes,
+    digest: hash.digest("hex"),
+    entryCount: names.length,
+  };
+}
+
+function localBinRootsSnapshot(physicalRepoRoot, limits) {
+  const hash = createHash("sha256");
+  hash.update("local-bin-roots-v1\0");
+  let totalBytes = 0;
+  let totalEntries = 0;
+  for (const relativeRoot of MATERIAL_PACKAGE_ROOTS) {
+    const snapshot = localBinSnapshot(
+      join(physicalRepoRoot, relativeRoot, "node_modules", ".bin"),
+      physicalRepoRoot,
+      {
+        ...limits,
+        maxEntries: limits.maxEntries - totalEntries,
+        maxTotalBytes: limits.maxTotalBytes - totalBytes,
+      },
+    );
+    totalBytes += snapshot.byteCount;
+    totalEntries += snapshot.entryCount;
+    updateField(hash, "root", relativeRoot || ".");
+    updateField(hash, "manifest", snapshot.digest);
+  }
   return hash.digest("hex");
 }
 
 function normalizedLocalBinManifestWithLimits(repoRoot, limits) {
   const physicalRepoRoot = realpathSync(repoRoot);
-  const localBinPath = join(physicalRepoRoot, "node_modules", ".bin");
-  const first = localBinSnapshot(localBinPath, physicalRepoRoot, limits);
-  const second = localBinSnapshot(localBinPath, physicalRepoRoot, limits);
+  const first = localBinRootsSnapshot(physicalRepoRoot, limits);
+  const second = localBinRootsSnapshot(physicalRepoRoot, limits);
   if (first !== second) {
-    throw manifestError("local executable manifest changed between snapshots");
+    throw manifestError("local executable manifests changed between snapshots");
   }
   return second;
 }
@@ -682,7 +710,7 @@ function materialEnvironmentFileSnapshot(physicalRepoRoot) {
   const hash = createHash("sha256");
   hash.update("material-environment-files-v1\0");
   let totalBytes = 0;
-  for (const relativeRoot of environmentFileRoots) {
+  for (const relativeRoot of MATERIAL_PACKAGE_ROOTS) {
     const root = join(physicalRepoRoot, relativeRoot);
     const before = environmentNamesInRoot(root, relativeRoot);
     updateField(hash, "root", relativeRoot || ".");
@@ -822,7 +850,7 @@ export function materialEnvironmentDigest({
   ]);
   entries.sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
   const hash = createHash("sha256");
-  hash.update("material-environment-v4\0");
+  hash.update("material-environment-v5\0");
   for (const [name, value] of entries) {
     hash.update(name);
     hash.update("\0");
@@ -857,7 +885,10 @@ function main() {
     process.stdout.write("agent-quality-gate-scrub-end\0");
     return;
   }
-  if (process.argv.length !== 3) {
+  let repoRoot;
+  if (process.argv.length === 3) {
+    repoRoot = process.argv[2];
+  } else {
     process.stderr.write(
       "error: material environment hashing requires one repository root.\n",
     );
@@ -865,9 +896,7 @@ function main() {
     return;
   }
   try {
-    process.stdout.write(
-      materialEnvironmentDigest({ repoRoot: process.argv[2] }),
-    );
+    process.stdout.write(materialEnvironmentDigest({ repoRoot }));
   } catch (error) {
     process.stderr.write(
       `error: cannot hash the material environment: ${error.message}\n`,

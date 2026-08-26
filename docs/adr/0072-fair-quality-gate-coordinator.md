@@ -234,14 +234,25 @@ otherwise successful status to 2 when marker or lock release fails and preserves
 an earlier non-zero status. A `SIGKILL` can leave a top-level holder quarantine;
 no recovery scan consumes it, and it grants no authority.
 
-The process scan never asks `lsof` to query the mutable shared marker pathname.
-It creates a mode-0700 private directory named
+On Linux, the process scan opens the shared marker with `O_NOFOLLOW`. It
+requires a current-UID regular file with the exact `<token>\n` body. It holds
+that descriptor while it scans signal-scope `/proc/<pid>/fd` entries by device
+and inode. It probes signal permission, including `CAP_KILL`. It also compares
+the sender real/effective UIDs with each target's real/saved-set UIDs so a
+policy-confined or set-ID descendant stays in scope after an `EPERM` probe. It
+reads each process start identity before and after UID and descriptor
+enumeration. A changed identity makes that observation empty. A restricted
+`hidepid` mount or another incomplete in-scope scan fails closed.
+
+On hosts without usable procfs, the process scan never asks `lsof` to query the
+mutable shared marker pathname. It creates a mode-0700 private directory named
 `.holder-lsof-witness.v1.<hostname-sha256>.<pid>.<nonce>`, hard-links the current
 marker into it, and validates that scan-time link as a current-UID, non-symlink
 regular file with the exact raw `<token>\n` body. `lsof` reads only the
 witnessed inode. Normal cleanup and invalid-snapshot cleanup remove only the
-private witness state. A `SIGKILL` can leave the private hard link behind. No
-recovery scanner consumes it, and it grants no authority.
+private witness state. A host with neither scanner fails closed while a marker
+exists. A `SIGKILL` can leave the private hard link behind. No recovery scanner
+consumes it, and it grants no authority.
 
 The coordinator compatibility record leaves `start_utc=` blank so older Bash
 readers that fetch fields in separate snapshots fall back to PID liveness. It
@@ -462,20 +473,31 @@ internal Bash control shell or mapped command. It uses privileged Bash mode for
 those shells. The filtered environment propagates to mapped descendants. This
 boundary prevents caller startup controls from changing a shared result through
 an internal control shell or mapped-command tree.
-The local-bin token binds a bounded manifest of entry names, modes, types, and
-wrapper bytes. For a symlink entry, it also binds the link and the resolved
-regular file's mode and bytes. A symlinked local-bin root, unsupported entry,
-unstable snapshot, or exceeded size limit fails closed. A link path replaces the
-physical worktree root only when the complete target equals that root or starts
-with that root plus `/`. The complete path must equal its lexical canonical form
-and contain no `.` or `..` traversal. Wrapper and dereferenced target bytes
-remain exact unless they are valid UTF-8 pnpm shell shims that start with
-`#!/bin/sh` and contain exactly one `# cmd-shim-target=` sentinel. In a
-recognized shim, the manifest replaces only canonical complete root or
-root-descendant paths in the sentinel and in colon-delimited segments of exact
-assignments that start with two spaces followed by `export NODE_PATH="..."`.
-It preserves all other bytes and line endings. All other link paths, PATH
-entries, and selected environment values also remain exact.
+The local-bin token binds bounded manifests for the repository root and every
+known mapped package root. Each manifest binds its root label, missing or
+present state, entry names, modes, types, and wrapper bytes. For a symlink
+entry, it also binds the link and the resolved regular file's mode and bytes.
+All manifests share one entry and byte budget. A symlinked local-bin root,
+unsupported entry, unstable snapshot, or exceeded size limit fails closed. A
+link path replaces the physical worktree root only when the complete target
+equals that root or starts with that root plus `/`. The complete path must equal
+its lexical canonical form and contain no `.` or `..` traversal. Wrapper and
+dereferenced target bytes remain exact unless they are valid UTF-8 pnpm shell
+shims that start with `#!/bin/sh` and contain exactly one
+`# cmd-shim-target=` sentinel. In a recognized shim, the manifest replaces only
+canonical complete root or root-descendant paths in the sentinel and in
+colon-delimited segments of exact assignments that start with two spaces
+followed by `export NODE_PATH="..."`. It preserves all other bytes and line
+endings. All other link paths, PATH entries, and selected environment values
+also remain exact.
+
+A frozen install does not replace the local-bin manifests with an expected
+post-install token. pnpm can retain an unexpected executable in `.bin`, and
+that executable remains on a package script's `PATH`. Registration, first
+dispatch, and result publication therefore bind the current root and package
+manifests. If dependency setup changes one of those manifests, terminal
+reattestation cancels shared publication. A later run binds the resulting
+post-install state.
 
 The manifest reads at most one entry beyond its entry limit and stops before it
 sorts names. Before it reads each regular wrapper or symlink target, it checks
@@ -660,6 +682,15 @@ leader's PID/start/PGID identity after that candidate read. A stale numeric tag
 or parent PID cannot bypass this check. The drain persists each group member by
 PID/start, so it can remove a same-group descendant that closed all identity
 handles without later trusting a reusable bare PGID. It drains every descendant
+captured through a non-group tree walk only after it brackets a fresh child
+query with the exact parent PID/start identity. Linux uses the kernel start
+tick for live group, parent, candidate, and final pre-signal checks. Each
+append-only capture retains the legacy `pid|lstart` line, then adds a
+`runtime-v2|pid|start` metadata line that an old reader skips because its first
+field is not a PID. A current reader requires that exact generation before it
+signals. An interrupted legacy-only Linux capture stays unverified unless a
+fresh handle or pinned relation reauthorizes it. macOS uses the calendar value
+as its runtime generation. It drains every descendant
 captured before detachment or still discoverable through the registered worker
 group or a command, request, or generation identity before it unregisters the
 worker or releases that command's scheduler lease. A
@@ -719,9 +750,10 @@ drainer acknowledges `processTreeEmpty=true`.
   drains.
 - Exact matching requests execute once. Their queue and execution results stay
   bound to one source, plan, environment, toolchain, and policy identity.
-- Older worktrees remain safe during rollout because they still observe the
-  legacy lock. They do not receive the new concurrency benefit while a legacy
-  gate owns it.
+- Older worktrees still observe the legacy lock during rollout. They do not
+  receive the new concurrency benefit while a legacy gate owns it. A historical
+  drainer also ignores the new runtime metadata and retains its calendar-time
+  PID-reuse limit until rollout completes.
 - The coordinator becomes part of the local gate trust boundary. Protocol,
   journal, fairness, coalescing, disconnect, crash, PID-reuse, and descendant
   drain cases require focused regression tests.
@@ -738,6 +770,12 @@ drainer acknowledges `processTreeEmpty=true`.
   [#2042](https://github.com/mento-protocol/monitoring-monorepo/issues/2042)
   tracks portable containment or enforcement without signalling a reusable bare
   PID or process-group ID.
+- The Bash drain rechecks the exact process identity immediately before each
+  numeric `kill`, but the identity read and signal remain separate system calls.
+  A PID can be reused in that final gap. Linux uses the kernel start tick to
+  avoid coarse calendar collisions before the signal. macOS retains the exact
+  calendar value. Issue #2042 also tracks a kernel-backed selector or containment
+  boundary that removes this portable check-to-signal gap.
 
 ## Benchmark result
 

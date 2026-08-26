@@ -226,16 +226,23 @@ gate_lock_test_ready_and_wait_for_release() {
 # Every process still carrying a run's handle. The argv tag names only the
 # wrapper and dies with it, which is why two inherited handles back it up: the
 # environment, readable on a host with /proc, and the open descriptor on the
-# run's marker file, readable wherever lsof exists. Both survive a command
+# run's marker file, readable through Linux procfs or lsof. Both survive a command
 # that forks a replacement and then exits — the replacement is reparented, has
 # no tagged ancestor, and is invisible to a tree walk. The environment entry
 # has the run's unique token. The marker scan binds and validates a private
-# hard-link witness before lsof can select a process.
+# hard-link witness before lsof can select a process. The procfs scanner opens
+# and validates the marker itself and holds that exact descriptor through its
+# complete inode scan.
 #
-# Only this user's processes are scanned, which is the same scope the rest of
-# this path can signal, and duplicates cost nothing: the capture records a PID
-# once. Where neither inherited handle is readable the argv tag stands alone,
-# which is the pre-existing behaviour.
+# The procfs path probes signal permission and also compares this process's real
+# and effective UIDs with each target's real and saved-set UIDs. The signal
+# probe includes `CAP_KILL`. The UID record keeps a policy-confined or set-ID
+# descendant in scope when `kill -0` returns `EPERM`. `/proc/<pid>` ownership is
+# not an authority because it follows the target's effective owner. The lsof
+# fallback queries only the validated witnessed inode. Later PID/start checks
+# still decide whether a process can receive a signal. Duplicates cost nothing:
+# the capture records a PID once. Where neither inherited handle is readable
+# the argv tag stands alone, which is the pre-existing behaviour.
 # A token names processes (through a pgrep pattern) and files (holder.*,
 # captured.*, condemned.d/*), and on a shared lock root it arrives from
 # records other users can write. Only the gate-generated shape is accepted
@@ -334,6 +341,217 @@ gate_run_lsof_marker_pids() {
   fi
 }
 
+gate_run_proc_marker_scan_available() {
+  [[ -d /proc/self/fd ]]
+}
+
+gate_run_proc_marker_pids() {
+  local token="$1"
+  local marker="$2"
+  local found status
+  found="$(node -e '
+    const fs = require("node:fs");
+    const { constants } = fs;
+    const [markerPath, expectedToken, uidText] = process.argv.slice(1);
+    const expectedUid = BigInt(uidText);
+    const signalScopeUids = new Set([
+      BigInt(process.getuid()),
+      BigInt(process.geteuid()),
+    ]);
+    const expectedBody = Buffer.from(`${expectedToken}\n`, "utf8");
+    const ignoredRaceCodes = new Set(["EBADF", "ENOENT", "ESRCH"]);
+    let markerDescriptor;
+
+    const sameInode = (left, right) =>
+      left.dev === right.dev && left.ino === right.ino;
+    const validMarker = (stat) =>
+      stat.isFile() && !stat.isSymbolicLink() && stat.uid === expectedUid;
+    const markerBodyIsExact = (descriptor, stat) => {
+      if (stat.size !== BigInt(expectedBody.length)) return false;
+      const body = Buffer.alloc(expectedBody.length);
+      const read = fs.readSync(
+        descriptor,
+        body,
+        0,
+        body.length,
+        0,
+      );
+      return read === body.length && body.equals(expectedBody);
+    };
+    const processStart = (pid) => {
+      let value;
+      try {
+        value = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+      } catch (error) {
+        if (ignoredRaceCodes.has(error?.code)) return null;
+        throw error;
+      }
+      const close = value.lastIndexOf(")");
+      if (close < 0) throw new Error("malformed proc process identity");
+      const fields = value.slice(close + 1).trim().split(/\s+/u);
+      const start = fields[19];
+      if (!/^[0-9]+$/u.test(start ?? "")) {
+        throw new Error("malformed proc process start identity");
+      }
+      return start;
+    };
+    const processUids = (pid, directoryOwner) => {
+      let value;
+      try {
+        value = fs.readFileSync(`/proc/${pid}/status`, "utf8");
+      } catch (error) {
+        if (ignoredRaceCodes.has(error?.code)) return null;
+        if (error?.code === "EACCES" || error?.code === "EPERM") {
+          if (directoryOwner !== expectedUid) {
+            try {
+              process.kill(Number(pid), 0);
+            } catch (probeError) {
+              if (probeError?.code === "ESRCH") return null;
+              if (probeError?.code === "EPERM") return [];
+              throw probeError;
+            }
+          }
+          // A status that is unreadable for a process this user can signal is
+          // ambiguous. It can be a credential-changing descendant that still
+          // carries the marker descriptor.
+        }
+        throw error;
+      }
+      const match = /^Uid:\s+([0-9]+)\s+([0-9]+)\s+([0-9]+)\s+([0-9]+)\s*$/mu.exec(
+        value,
+      );
+      if (!match) throw new Error("malformed proc process UID identity");
+      return match.slice(1).map((uid) => BigInt(uid));
+    };
+    const assertCompleteProcEnumeration = () => {
+      const mounts = fs
+        .readFileSync("/proc/mounts", "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => line.trim().split(/\s+/u))
+        .filter(
+          (fields) => fields[1] === "/proc" && fields[2] === "proc",
+        );
+      if (mounts.length !== 1) {
+        throw new Error("cannot identify the procfs mount policy");
+      }
+      const hidepid = mounts[0][3]
+        .split(",")
+        .find((option) => option.startsWith("hidepid="));
+      if (hidepid && hidepid !== "hidepid=0" && hidepid !== "hidepid=off") {
+        throw new Error("procfs PID enumeration is restricted");
+      }
+    };
+
+    try {
+      markerDescriptor = fs.openSync(
+        markerPath,
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      );
+      const markerBefore = fs.fstatSync(markerDescriptor, { bigint: true });
+      const pathBefore = fs.lstatSync(markerPath, { bigint: true });
+      if (
+        !validMarker(markerBefore) ||
+        !validMarker(pathBefore) ||
+        !sameInode(markerBefore, pathBefore) ||
+        !markerBodyIsExact(markerDescriptor, markerBefore)
+      ) {
+        throw new Error("unsafe marker snapshot");
+      }
+      assertCompleteProcEnumeration();
+      fs.readdirSync("/proc/self/fd");
+      const found = [];
+      for (const pid of fs.readdirSync("/proc")) {
+        if (!/^[1-9][0-9]*$/u.test(pid) || pid === String(process.pid)) {
+          continue;
+        }
+        let processIdentity;
+        try {
+          processIdentity = fs.lstatSync(`/proc/${pid}`, { bigint: true });
+        } catch (error) {
+          if (ignoredRaceCodes.has(error?.code)) continue;
+          throw error;
+        }
+        if (!processIdentity.isDirectory()) {
+          continue;
+        }
+        const startBefore = processStart(pid);
+        if (startBefore === null) continue;
+        const processUidSet = processUids(pid, processIdentity.uid);
+        if (processUidSet === null) continue;
+        const identityStartAfter = processStart(pid);
+        if (
+          identityStartAfter === null ||
+          identityStartAfter !== startBefore
+        ) {
+          continue;
+        }
+        const uidAuthorizesSignal = [processUidSet[0], processUidSet[2]].some(
+          (uid) => signalScopeUids.has(uid),
+        );
+        let signalProbeSucceeded = false;
+        try {
+          process.kill(Number(pid), 0);
+          signalProbeSucceeded = true;
+        } catch (error) {
+          if (ignoredRaceCodes.has(error?.code)) continue;
+          if (error?.code !== "EPERM") throw error;
+        }
+        if (!signalProbeSucceeded && !uidAuthorizesSignal) {
+          continue;
+        }
+        let descriptors;
+        try {
+          descriptors = fs.readdirSync(`/proc/${pid}/fd`);
+        } catch (error) {
+          if (ignoredRaceCodes.has(error?.code)) continue;
+          throw error;
+        }
+        let matches = false;
+        for (const descriptor of descriptors) {
+          if (!/^[0-9]+$/u.test(descriptor)) continue;
+          try {
+            const held = fs.statSync(`/proc/${pid}/fd/${descriptor}`, {
+              bigint: true,
+            });
+            if (sameInode(markerBefore, held)) matches = true;
+          } catch (error) {
+            if (ignoredRaceCodes.has(error?.code)) continue;
+            throw error;
+          }
+        }
+        const startAfter = processStart(pid);
+        if (matches && startAfter !== null && startAfter === startBefore) {
+          found.push(pid);
+        }
+      }
+      const markerAfter = fs.fstatSync(markerDescriptor, { bigint: true });
+      const pathAfter = fs.lstatSync(markerPath, { bigint: true });
+      if (
+        !validMarker(markerAfter) ||
+        !validMarker(pathAfter) ||
+        !sameInode(markerBefore, markerAfter) ||
+        !sameInode(markerAfter, pathAfter) ||
+        !markerBodyIsExact(markerDescriptor, markerAfter)
+      ) {
+        throw new Error("marker changed during proc descriptor scan");
+      }
+      found
+        .sort((left, right) => Number(left) - Number(right))
+        .forEach((pid) => process.stdout.write(`${pid}\n`));
+    } catch {
+      process.exitCode = 2;
+    } finally {
+      if (markerDescriptor !== undefined) fs.closeSync(markerDescriptor);
+    }
+  ' "$marker" "$token" "$(id -u)" 2>/dev/null)" && status=0 || status=$?
+  if [[ "$status" -ne 0 ]]; then
+    printf '%s\n' "$gate_drain_scan_error"
+    return 0
+  fi
+  [[ -z "$found" ]] || printf '%s\n' "$found"
+}
+
 gate_run_tagged_pids() {
   local token="$1"
   local environ environ_entries pid marker found pattern status
@@ -410,8 +628,13 @@ gate_run_tagged_pids() {
   fi
   marker="${gate_lock_root_dir}/holder.${token}"
   if [[ -n "$gate_lock_root_dir" &&
-    ( -e "$marker" || -L "$marker" ) ]] &&
-    command -v lsof > /dev/null 2>&1; then
-    gate_run_lsof_marker_pids "$token" "$marker"
+    ( -e "$marker" || -L "$marker" ) ]]; then
+    if gate_run_proc_marker_scan_available; then
+      gate_run_proc_marker_pids "$token" "$marker"
+    elif command -v lsof > /dev/null 2>&1; then
+      gate_run_lsof_marker_pids "$token" "$marker"
+    else
+      printf '%s\n' "$gate_drain_scan_error"
+    fi
   fi
 }

@@ -607,11 +607,13 @@ before it starts any internal Bash control shell or mapped command. It starts
 those shells in privileged mode. The filtered environment reaches mapped
 descendants. This boundary prevents caller startup controls from changing a
 shared result through an internal control shell or mapped-command tree. The
-normalized local bin entry binds a
-bounded, stable manifest of its names, modes, types, and wrapper bytes. A
-symlink entry also binds its link and the resolved regular file's mode and
-bytes. A symlinked local-bin root, unsupported entry, unstable snapshot, or
-exceeded size limit stops the gate. A link path replaces the physical worktree
+normalized local-bin entry binds bounded, stable manifests for the repository
+root and each known mapped package root. Each manifest binds its root label,
+missing or present state, names, modes, types, and wrapper bytes. A symlink
+entry also binds its link and the resolved regular file's mode and bytes. The
+roots share one entry and byte budget. A symlinked local-bin root, unsupported
+entry, unstable snapshot, or exceeded size limit stops the gate. A link path
+replaces the physical worktree
 root only when the complete target equals that root or starts with that root
 plus `/`. The complete path must equal its lexical canonical form and contain no
 `.` or `..` traversal. Wrapper and dereferenced target bytes remain exact unless
@@ -621,6 +623,12 @@ complete root or root-descendant paths in the sentinel and in colon-delimited
 segments of exact assignments that start with two spaces followed by
 `export NODE_PATH="..."` are replaced. All other bytes and line endings remain
 exact. Every other link path and selected environment value also remains exact.
+A frozen install does not exempt the current local-bin manifests. pnpm can
+retain an unexpected `.bin` executable, and package scripts can still resolve
+that executable from `PATH`. Registration, first dispatch, and result
+publication bind the actual root and package manifests. If dependency setup
+changes one of them, terminal reattestation cancels shared publication. A later
+run binds the resulting post-install state.
 
 The manifest reads at most one entry beyond its entry limit and stops before it
 sorts names. Before it reads each regular wrapper or symlink target, it checks
@@ -787,6 +795,20 @@ regular file with the exact raw `<token>\n` body. `lsof` reads only that
 witnessed inode. Normal cleanup and invalid-snapshot cleanup remove only the
 private link and directory. A `SIGKILL` can leave the private hard link behind.
 No recovery scanner consumes it, and it grants no authority.
+
+On Linux, procfs is the primary marker-descriptor scanner. It opens the shared
+marker with `O_NOFOLLOW`, requires the current UID, exact inode, regular-file
+type, and exact `<token>\n` body, and holds that descriptor through the scan.
+It probes signal permission and reads the real, effective, saved-set, and
+filesystem UIDs from `/proc/<pid>/status`. A sender real/effective match with a
+target real/saved-set UID keeps a policy-confined or set-ID descendant in
+scope. A successful signal probe also covers `CAP_KILL`. The scan compares each
+in-scope `/proc/<pid>/fd` target by device and inode. It requires the process
+start identity to remain equal before and after identity and fd enumeration.
+Process-exit races are empty observations. A restricted `hidepid` mount,
+unreadable in-scope process, or other incomplete scan is a scan failure. macOS
+and hosts without usable procfs use the witnessed `lsof` path. A host with
+neither scanner fails closed while a marker exists.
 
 Adoption preserves the incoming owner record's group and other read bits so a
 legacy waiter with shared-root access can observe the barrier. The replacement
@@ -1005,7 +1027,19 @@ which errs toward waiting rather than evicting.
 Owner and captured-process publishers retain the historical padded
 `ps -o lstart=` wire value. Gates that predate normalization compare that value
 byte-for-byte. Current gates normalize it only when they compare identities.
-This keeps both old-to-new and new-to-old worktree transitions safe.
+This keeps the record readable in both rollout directions. A historical reader
+still uses calendar-resolution identity and retains its same-second PID-reuse
+limit. Current readers require the exact runtime metadata described below.
+
+Live drain checks use a more exact runtime identity where the host provides it.
+Linux reads the kernel start tick from `/proc/<pid>/stat` for group anchors,
+parent-child relations, candidates, and the final pre-signal check. macOS uses
+the normalized calendar value. The append-only capture keeps each legacy
+`pid|lstart` line and follows it with `runtime-v2|pid|start`. An old reader skips
+the metadata line because its first field is not a PID. A current reader
+requires the exact runtime generation before it signals. A legacy-only Linux
+capture stays unverified unless a fresh exact handle or pinned relation
+reauthorizes the process.
 
 A coordinator legacy record intentionally writes a blank `start_utc=` and the
 real identity in `coordinator_start_utc=`. Older Bash readers fetch fields in
@@ -1479,14 +1513,20 @@ of them.
    tracks portable containment or enforcement. Each drain pass
    asks argv, environment, descriptor, and the validated live group anchor for
    new processes. Every persisted process uses a PID/start pair, and every
-   marker is unique, so neither can later name a stranger.
+   marker is unique. The drain rechecks the live identity before every numeric
+   signal. That identity read and `kill` are separate system calls, so a PID can
+   still be reused in the final gap. Linux uses the kernel start tick to avoid
+   coarse calendar collisions before that signal. Issue #2042 also tracks a
+   kernel-backed selector or containment boundary that closes the portable gap.
 
    Everything a PID authorises is re-checked at the moment it is used, because
    every one of these answers goes stale. Enumeration and the identity read are
    two calls with a gap, so a PID recorded from a walk is confirmed to still be
-   one of ours — still carrying a handle, or still a child of the process the
-   walk reached it through — and one that cannot be confirmed is recorded with
-   no identity, which is never signalled and holds the drain open. The census
+   one of ours — still carrying a handle, or still a child of the exact
+   PID/start identity the walk reached it through. Linux uses the kernel start
+   tick for this live parent relation. The parent identity brackets the fresh
+   child query. A child that cannot be confirmed is recorded with no identity,
+   which is never signalled and holds the drain open. The census
    and the signal are separated by the bound and persist checks, so identity is
    read again immediately before each `kill` rather than trusted from the
    census. On a host with no identity source at all, a captured PID is signalled
@@ -1496,9 +1536,10 @@ of them.
    belonging to the next one, recording it under no identity check at all.
 
    **A scan that failed is not a scan that found nothing.** `pgrep` and `lsof`
-   both exit 1 for "no match" and above that for a real failure, and reading
-   the second as the first would discharge an obligation on the strength of a
-   question that was never answered. A failed scan keeps the drain open exactly
+   both exit 1 for "no match" and above that for a real failure. Procfs
+   enumeration applies the same rule. Reading a failed scan as empty would
+   discharge an obligation on the strength of a question that was never
+   answered. A failed scan keeps the drain open exactly
    as an unverifiable process does, and fails closed at the bound with its own
    line. Skipping an unreadable `/proc/<pid>/environ` is deliberately **not**
    that case. It happens three ways — another user's process, a process the
@@ -1507,7 +1548,7 @@ of them.
    be a process this run started, because everything it starts keeps this user's
    credentials and this run's environment. Where that reasoning is stretched by
    a credential-changing descendant, the argv-tag and marker-descriptor scans
-   still name it; neither reads the environment. Counting an unreadable
+   still name it or fail closed; neither reads the environment. Counting an unreadable
    environment as a failed scan would instead fail every crash recovery closed
    on any host that has one such process, which every GitHub runner does. The
    read is wrapped in a group carrying its own `2>/dev/null`, because a
