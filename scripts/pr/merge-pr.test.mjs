@@ -8,14 +8,24 @@
  * still wrote or still merged would be worse than no wrapper at all.
  */
 
-import { readFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
   AUTOMATION_ENV_MARKERS,
+  CONSENT_LOG_BASENAME,
   MergeRefusal,
   NON_INTERACTIVE_REFUSAL,
+  appendConsentRecord,
   buildConsentRecord,
   countRequiredCheckStates,
   formatBriefing,
@@ -790,6 +800,68 @@ await test("the briefing says so when no required-check list exists", () => {
   assertEqual(countRequiredCheckStates(summary), null);
   assert(briefing.includes("Required checks: unavailable"), briefing);
   assert(!briefing.includes("0 passing"), briefing);
+});
+
+await test("the consent ledger refuses a planted symlink", async () => {
+  // The ledger is gitignored, so the agent this wrapper constrains can create
+  // the path first. Following a symlink there would append to a file outside
+  // the repository that the operator's own account can write.
+  const root = mkdtempSync(path.join(tmpdir(), "merge-consent-"));
+  try {
+    const outside = path.join(root, "outside.txt");
+    writeFileSync(outside, "original\n", "utf8");
+    const checkout = path.join(root, "checkout");
+    mkdirSync(checkout);
+    symlinkSync(outside, path.join(checkout, CONSENT_LOG_BASENAME));
+
+    const record = buildConsentRecord({
+      login: "chapati23",
+      repo: "mento-protocol/monitoring-monorepo",
+      number: 2071,
+      headOid: HEAD_OID,
+      notReadyReason: null,
+      now: new Date("2026-08-26T12:00:00.000Z"),
+    });
+
+    await assertRefuses(
+      appendConsentRecord({ record, git: async () => `${checkout}\n` }),
+      "unable to record consent",
+    );
+    assertEqual(
+      readFileSync(outside, "utf8"),
+      "original\n",
+      "the symlink target must be untouched",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+await test("the consent ledger appends to a regular file", async () => {
+  // Negative control: the refusal above must come from the symlink, not from
+  // the new open flags rejecting the ordinary case.
+  const checkout = mkdtempSync(path.join(tmpdir(), "merge-consent-ok-"));
+  try {
+    const record = buildConsentRecord({
+      login: "chapati23",
+      repo: "mento-protocol/monitoring-monorepo",
+      number: 2071,
+      headOid: HEAD_OID,
+      notReadyReason: null,
+      now: new Date("2026-08-26T12:00:00.000Z"),
+    });
+    const target = await appendConsentRecord({
+      record,
+      git: async () => `${checkout}\n`,
+    });
+    assertEqual(target, path.join(checkout, CONSENT_LOG_BASENAME));
+    await appendConsentRecord({ record, git: async () => `${checkout}\n` });
+    const lines = readFileSync(target, "utf8").trimEnd().split("\n");
+    assertEqual(lines.length, 2, "appends must accumulate");
+    assertEqual(JSON.parse(lines[0]).pr, 2071);
+  } finally {
+    rmSync(checkout, { recursive: true, force: true });
+  }
 });
 
 await test("the automation markers cover every Codex marker autoreview checks", () => {

@@ -16,19 +16,24 @@
  * merging: an operator who has to re-run one command loses a minute, and a
  * merge nobody approved cannot be taken back.
  *
- * Agents must never invoke this script. The interactive-session refusal below
- * is what enforces that. `.claude/settings.json` denies the raw `gh pr merge`
- * command as a second layer, which is a command-level deny and not an
- * endpoint-level one: the same merge is reachable through
- * `gh api --method PUT repos/{owner}/{repo}/pulls/{n}/merge`, and no permission
- * pattern spells every form of that call. The refusal below is the control; the
- * deny only removes the obvious shortcut.
+ * Agents must never invoke this script. Be honest about what makes that true.
+ * The interactive-session refusal below stops an agent that runs this command
+ * the ordinary way, and `.claude/settings.json` denies the raw `gh pr merge`
+ * command so the obvious shortcut is gone too. Neither is an unforgeable
+ * boundary: a caller on this machine can allocate a pseudo-terminal and clear
+ * the markers, and the deny is command-level, so it does not cover the same
+ * merge issued as `gh api --method PUT repos/{owner}/{repo}/pulls/{n}/merge`.
+ * A local process running as the operator can synthesize any local signal, so
+ * no check in this file can be one. What the wrapper does provide is a default
+ * that refuses, a briefing the operator must read, a confirmation they must
+ * type, and an append-only consent record naming who approved which head. The
+ * approval rule itself remains the binding control.
  *
  * Tests: scripts/pr/merge-pr.test.mjs
  */
 
 import { spawn } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, openSync, writeSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
@@ -413,7 +418,7 @@ export function buildConsentRecord({
   return record;
 }
 
-async function appendConsentRecord({ record, git }) {
+export async function appendConsentRecord({ record, git }) {
   let repoRoot;
   try {
     repoRoot = (await git(["rev-parse", "--show-toplevel"])).trim();
@@ -429,12 +434,51 @@ async function appendConsentRecord({ record, git }) {
   }
 
   const target = path.join(repoRoot, CONSENT_LOG_BASENAME);
+
+  // The ledger is gitignored, so the agent this wrapper constrains can create
+  // the path before a human ever runs the command. A plain append would follow
+  // a symlink planted there and write into whatever file the operator's own
+  // account can reach. `O_NOFOLLOW` refuses a symlinked final component,
+  // `O_NONBLOCK` keeps a planted FIFO from hanging the open, and the `fstat`
+  // on the descriptor we actually hold rejects anything that is not a regular
+  // file. Fail closed if the platform cannot express `O_NOFOLLOW` at all.
+  if (typeof constants.O_NOFOLLOW !== "number") {
+    throw new MergeRefusal(
+      `unable to open ${target} without following symlinks on this platform`,
+    );
+  }
+
+  let fd;
   try {
-    appendFileSync(target, `${JSON.stringify(record)}\n`, "utf8");
+    fd = openSync(
+      target,
+      constants.O_WRONLY |
+        constants.O_APPEND |
+        constants.O_CREAT |
+        constants.O_NOFOLLOW |
+        constants.O_NONBLOCK,
+      0o600,
+    );
   } catch (err) {
     throw new MergeRefusal(
       `unable to record consent in ${target}: ${err instanceof Error ? err.message : String(err)}`,
     );
+  }
+
+  try {
+    if (!fstatSync(fd).isFile()) {
+      throw new MergeRefusal(
+        `${target} is not a regular file; refusing to record consent through it`,
+      );
+    }
+    writeSync(fd, `${JSON.stringify(record)}\n`);
+  } catch (err) {
+    if (err instanceof MergeRefusal) throw err;
+    throw new MergeRefusal(
+      `unable to record consent in ${target}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  } finally {
+    closeSync(fd);
   }
   return target;
 }

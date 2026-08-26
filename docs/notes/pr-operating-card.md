@@ -366,9 +366,12 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    sessions, which removes the obvious shortcut past the wrapper. That deny is
    command-level: it does not cover the same merge issued as
    `gh api --method PUT repos/{owner}/{repo}/pulls/{n}/merge`, and it covers
-   Claude's Bash tool only. The wrapper's own refusal, not the deny, is the
-   control. The Dependabot auto-merge workflow runs in CI, not an agent
-   session, and is unaffected. The approval rule above is
+   Claude's Bash tool only. Neither layer is an unforgeable boundary — a local
+   process running as the operator can synthesize any local signal — so the
+   approval rule above stays the binding control. The wrapper makes refusing
+   the default and leaves a consent record naming who approved which head. The
+   Dependabot auto-merge workflow runs in CI, not an agent session, and is
+   unaffected. The approval rule above is
    unchanged — the wrapper mechanizes it, and its refusal is what makes "agents
    never merge" a control rather than a habit. If the merge itself satisfies Done
    means, sync the issue state and workboard afterward per
