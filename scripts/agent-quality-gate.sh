@@ -2337,6 +2337,15 @@ failure_output_tail_lines=20
 # Trunk launcher provisioning verdict for this run: "" (not probed yet), "ok",
 # or "blocked". Probed at most once, and only after a Trunk command failed.
 trunk_provisioning_state=""
+# True once any Trunk arm in this run was downgraded to "skipped" because the
+# environment blocked provisioning. Separate from trunk_provisioning_state
+# because the launcher probe answers a question about the LAUNCHER and is
+# cached, while a blocked linter download is classified per arm from that arm's
+# own output. Drives the closing note and the whole-run stamp guard.
+trunk_arm_environment_blocked=false
+# Which provisioning stage blocked the arm currently being classified:
+# "launcher" (no CLI at all) or "linters" (CLI ran, its downloads failed).
+trunk_environment_blocked_kind=""
 
 format_duration() {
   local seconds="$1"
@@ -2495,7 +2504,339 @@ trunk_provisioning_is_blocked() {
   [[ "$trunk_provisioning_state" == blocked ]]
 }
 
+# Trunk downloads more than its own CLI. The launcher self-installs the pinned
+# CLI from trunk.io; that CLI then fetches plugin sources from github.com and,
+# on every check, the hermetic runtimes and linter binaries the enabled linters
+# need (nodejs.org, each linter's release host). An environment that allowlists
+# trunk.io but not those hosts provisions the launcher — `--version` succeeds,
+# so the probe above reports "ok" — and still fails every `trunk check`.
+#
+# Classifying that from the check output has one hard requirement: a real lint
+# finding must never be excused as an environment failure. So the classifier
+# never infers "nothing was found"; it only accepts output in which Trunk
+# ITSELF states that it found nothing and that every failure it counted was a
+# download step. Anything it cannot account for exactly leaves the failure
+# standing.
+#
+# Trunk's own wording for a failed download, as recorded in the detail YAML the
+# failed step writes. Measured against Trunk 1.25.0 with the download forced to
+# fail three ways: connection refused, a 403-returning forward proxy (what an
+# egress allowlist does), and an unresolvable proxy host.
+#
+# Each entry is a whole measured phrase, never the bare `Curl Error:` prefix.
+# Trunk reports a removed or renamed artifact under that same prefix, and a 404
+# is a broken pin the operator has to fix, not an allowlist to widen — matching
+# the prefix would excuse it. A cause Trunk phrases some other way stays
+# unclassified on purpose: an unrecognized reason fails the gate rather than
+# being excused, and the fix is to measure it and add it here.
+trunk_network_failure_signatures=(
+  'Curl Error: Failure when receiving data from the peer'
+  'Curl Error: Could not resolve proxy name'
+  'Could resolve but could not establish connection to host of'
+)
+
+# True when any measured download-failure phrasing appears in the given text.
+trunk_text_has_network_failure_signature() {
+  local text="$1"
+  local signature
+
+  for signature in "${trunk_network_failure_signatures[@]}"; do
+    case "$text" in
+      *"$signature"*)
+        return 0
+        ;;
+    esac
+  done
+
+  return 1
+}
+
+# Read the `report:` lines of one Trunk failure-detail YAML and say whether the
+# reason it records is a download failure. The path comes from Trunk's own
+# output, so it is accepted only in the exact shape Trunk emits — a plain file
+# directly under .trunk/out — and never followed anywhere else.
+#
+# Scoped to `report:` and nothing else. This is one of the two checks that decide
+# whether a failure may be excused, and the classifier's rule is to verify
+# exactly rather than infer: a bullet under some other key must never be able to
+# supply the signature that `report:` did not. A `report:` block Trunk writes in
+# some other shape yields nothing here, which rejects.
+trunk_detail_yaml_reports_network_failure() {
+  local yaml_path="$1"
+  local report
+
+  is_trunk_detail_yaml_path "$yaml_path" || return 1
+  [[ -f "$yaml_path" ]] || return 1
+
+  report="$(trunk_detail_yaml_report_lines "$yaml_path")"
+  [[ -n "$report" ]] || return 1
+
+  trunk_text_has_network_failure_signature "$report"
+}
+
+# The bullet lines under this YAML's top-level `report:` key, in order. A
+# top-level key is one that starts in column 0, so the block ends at the next
+# one.
+trunk_detail_yaml_report_lines() {
+  local yaml_path="$1"
+
+  awk '
+    /^[^[:space:]]/ {
+      in_report = ($0 ~ /^report:[[:space:]]*$/)
+      next
+    }
+    in_report && /^[[:space:]]+-[[:space:]]/ { print }
+  ' "$yaml_path" 2>/dev/null || true
+}
+
+# True when the path is exactly the shape Trunk writes its failure details to:
+# a plain file directly under .trunk/out, with no traversal.
+is_trunk_detail_yaml_path() {
+  local yaml_path="$1"
+
+  [[ "$yaml_path" =~ ^\.trunk/out/[A-Za-z0-9._-]+\.yaml$ ]] || return 1
+  [[ "$yaml_path" == *".."* ]] && return 1
+  return 0
+}
+
+# Reduce a failed `trunk check` transcript to the facts the classifier needs.
+# Emits, on stdout, zero or more of:
+#   shape=tools           Trunk reported zero issues and N counted failures,
+#                         and exactly N rows were download steps naming a
+#                         detail YAML.
+#   yaml=<path>           one per such row.
+#   shape=plugin          every non-blank line was a plugin-download error.
+#   plugincause=<text>    one per such line.
+# It emits nothing when the transcript shows findings, an unexplained failure,
+# or any line it cannot account for.
+summarize_trunk_check_transcript() {
+  local output_file="$1"
+
+  awk '
+    function strip(s) {
+      gsub(/\033\[[0-9;?]*[a-zA-Z]/, "", s)
+      gsub(/\r/, "", s)
+      return s
+    }
+    BEGIN {
+      cross = "\342\234\226"
+      disqualified = 0
+      declared = -1
+      rows = 0
+      plugins = 0
+      nonblank = 0
+    }
+    {
+      line = strip($0)
+      sub(/[ \t]+$/, "", line)
+      if (line ~ /^[ \t]*$/) next
+      nonblank++
+
+      trimmed = line
+      sub(/^[ \t]+/, "", trimmed)
+
+      # These section headers appear only when Trunk has something to report
+      # about the code itself. Their presence alone disqualifies the run.
+      if (trimmed == "ISSUES" || trimmed == "AUTOFIXES") {
+        disqualified = 1
+        next
+      }
+
+      if (index(line, cross) == 1) {
+        rest = substr(line, length(cross) + 1)
+        sub(/^ /, "", rest)
+
+        if (rest ~ /^No issues, [0-9]+ failures?$/) {
+          if (declared >= 0) { disqualified = 1; next }
+          n = rest
+          sub(/^No issues, /, "", n)
+          sub(/ failures?$/, "", n)
+          declared = n + 0
+          next
+        }
+
+        if (rest ~ /^Unable to download plugin .+: .+$/) {
+          plugins++
+          # Kept whole: the URL names the host that has to be allowlisted, and
+          # the reason after it is what the signature check reads.
+          causes[plugins] = rest
+          pluginline[nonblank] = 1
+          next
+        }
+
+        # Any other verdict line is a claim about the code. Stop.
+        disqualified = 1
+        next
+      }
+
+      # A FAILURES-table row for a step that had to fetch something. The last
+      # field is the detail YAML Trunk wrote for it.
+      if (line ~ /^[ \t]/ &&
+          (index(line, "Installing hermetic tool ") > 0 ||
+           index(line, "Downloading hermetic ") > 0)) {
+        $0 = line
+        if ($NF ~ /^\.trunk\/out\/[A-Za-z0-9._-]+\.yaml$/) {
+          rows++
+          yamls[rows] = $NF
+          next
+        }
+      }
+    }
+    END {
+      if (disqualified) exit 0
+
+      # Shape 1: Trunk ran, found nothing, and every failure it counted is a
+      # download step we recognized. An unaccounted failure means rows < declared.
+      if (declared >= 1 && rows == declared) {
+        print "shape=tools"
+        for (i = 1; i <= rows; i++) print "yaml=" yamls[i]
+        exit 0
+      }
+
+      # Shape 2: Trunk could not fetch its plugin sources, so it never linted
+      # anything. Accepted only when the transcript holds nothing else at all.
+      if (plugins >= 1 && declared < 0 && rows == 0) {
+        for (i = 1; i <= nonblank; i++) {
+          if (!(i in pluginline)) exit 0
+        }
+        print "shape=plugin"
+        for (i = 1; i <= plugins; i++) print "plugincause=" causes[i]
+      }
+    }
+  ' "$output_file"
+}
+
+# True when a failed `trunk check` is provably an environment provisioning
+# failure with no lint findings behind it.
+trunk_check_output_is_environment_blocked() {
+  local output_file="$1"
+  local shape=""
+  local line
+  local value
+  local evidence=0
+
+  [[ -n "$output_file" && -s "$output_file" ]] || return 1
+
+  while IFS= read -r line; do
+    case "$line" in
+      shape=*)
+        shape="${line#shape=}"
+        ;;
+      yaml=*)
+        value="${line#yaml=}"
+        trunk_detail_yaml_reports_network_failure "$value" || return 1
+        evidence=$((evidence + 1))
+        ;;
+      plugincause=*)
+        value="${line#plugincause=}"
+        trunk_text_has_network_failure_signature "$value" || return 1
+        evidence=$((evidence + 1))
+        ;;
+    esac
+  done < <(summarize_trunk_check_transcript "$output_file")
+
+  [[ -n "$shape" && "$evidence" -ge 1 ]]
+}
+
+# The single question both run paths ask about a failed Trunk arm. Sets
+# trunk_environment_blocked_kind for the warning and latches the run-level flag
+# the closing note and the stamp guard read.
+trunk_arm_is_environment_blocked() {
+  local output_file="$1"
+
+  trunk_environment_blocked_kind=""
+
+  if trunk_provisioning_is_blocked; then
+    trunk_environment_blocked_kind=launcher
+  elif trunk_check_output_is_environment_blocked "$output_file"; then
+    trunk_environment_blocked_kind=linters
+  else
+    return 1
+  fi
+
+  trunk_arm_environment_blocked=true
+  return 0
+}
+
 print_trunk_environment_blocked_warning() {
+  local command="$1"
+  local output_file="${2:-}"
+
+  if [[ "$trunk_environment_blocked_kind" == linters ]]; then
+    print_trunk_linter_environment_blocked_warning "$command" "$output_file"
+    return
+  fi
+
+  print_trunk_launcher_environment_blocked_warning "$command"
+}
+
+print_trunk_linter_environment_blocked_warning() {
+  local command="$1"
+  local output_file="$2"
+
+  echo "warning: skipping ${command} — Trunk could not provision its linters." >&2
+  echo "  The CLI itself is installed — the launcher probe succeeded — but Trunk downloads each" >&2
+  echo "  hermetic runtime and linter binary it needs, and every step that had to fetch one" >&2
+  echo "  failed with a download error. Trunk reported no issues, so no finding is being" >&2
+  echo "  discarded here; it never got a linter to run." >&2
+  echo "  This is what an environment that allows 'trunk.io' but not the download hosts does." >&2
+  echo "  Add the hosts named below to the environment's allowed domains to run it here." >&2
+  print_trunk_provisioning_failure_causes "$output_file"
+  echo "  CI still enforces Trunk on the PR (.github/workflows/trunk.yml)." >&2
+}
+
+# Replay what Trunk recorded for each failed download step. The step row names
+# only the step; the host and the reason live in the detail YAML, and without
+# them the warning cannot say which domain to allowlist. Bounded on every axis
+# because the text comes from a subprocess.
+print_trunk_provisioning_failure_causes() {
+  local output_file="$1"
+  local line
+  local yaml_path
+  local detail
+  local printed=0
+
+  [[ -n "$output_file" && -s "$output_file" ]] || return 0
+
+  while IFS= read -r line; do
+    [[ "$printed" -lt 8 ]] || break
+    case "$line" in
+      yaml=*)
+        yaml_path="${line#yaml=}"
+        ;;
+      plugincause=*)
+        printed=$((printed + 1))
+        printf '  %.240s\n' "  ${line#plugincause=}" >&2
+        continue
+        ;;
+      *)
+        continue
+        ;;
+    esac
+
+    is_trunk_detail_yaml_path "$yaml_path" || continue
+    [[ -f "$yaml_path" ]] || continue
+    while IFS= read -r detail; do
+      [[ "$printed" -lt 8 ]] || break
+      printed=$((printed + 1))
+      printf '  %.240s\n' "  ${detail}" >&2
+    done < <(
+      {
+        awk '/^title:/ { sub(/^title:[[:space:]]*/, ""); gsub(/^"|"$/, ""); print; exit }' \
+          "$yaml_path" 2>/dev/null || true
+        trunk_detail_yaml_report_lines "$yaml_path" |
+          sed -e 's/^[[:space:]]*-[[:space:]]*//' -e 's/^"//' -e 's/"$//'
+      } | head -n 4
+    )
+  done < <(summarize_trunk_check_transcript "$output_file")
+
+  # The parallel run path calls this under `set -e`, and it is not the last
+  # statement in its caller. A loop that ends on a failed match would otherwise
+  # abort the run at the exact moment the gate is trying to degrade gracefully.
+  return 0
+}
+
+print_trunk_launcher_environment_blocked_warning() {
   local command="$1"
   echo "warning: skipping ${command} — the Trunk CLI could not be provisioned." >&2
   echo "  The launcher self-downloads the pinned CLI from trunk.io and could not produce a" >&2
@@ -2956,9 +3297,9 @@ run_mapped_command() {
   fi
 
   if [[ "$timed_out" != true ]] && is_trunk_command "$command" &&
-    trunk_provisioning_is_blocked; then
+    trunk_arm_is_environment_blocked "$output_file"; then
     record_command_summary "skipped" "$elapsed" "$command"
-    print_trunk_environment_blocked_warning "$command"
+    print_trunk_environment_blocked_warning "$command" "$output_file"
     rm -f "$output_file"
     return 0
   fi
@@ -3277,9 +3618,9 @@ run_mapped_entries_parallel() {
         fi
         echo "✓ ${command} ($(format_duration "$elapsed"))"
       elif [[ "$timed_out" != true ]] && is_trunk_command "$command" &&
-        trunk_provisioning_is_blocked; then
+        trunk_arm_is_environment_blocked "$output_file"; then
         record_command_summary "skipped" "$elapsed" "$command"
-        print_trunk_environment_blocked_warning "$command"
+        print_trunk_environment_blocked_warning "$command" "$output_file"
       else
         failures=$((failures + 1))
         record_command_summary "fail" "$elapsed" "$command"
@@ -3460,10 +3801,10 @@ log_duration_line "ok" "$gate_total_elapsed" "__run_total__" "run" || true
 
 echo
 echo "All mapped commands passed."
-if [[ "$trunk_provisioning_state" == blocked ]]; then
-  echo "Note: the Trunk arm was skipped because the CLI could not be provisioned here; CI still enforces it."
+if [[ "$trunk_arm_environment_blocked" == true ]]; then
+  echo "Note: the Trunk arm was skipped because it could not be provisioned here; CI still enforces it."
 fi
-if [[ "${stamp_reuse_count:-0}" -eq 0 && "$trunk_provisioning_state" != "blocked" ]]; then
+if [[ "${stamp_reuse_count:-0}" -eq 0 && "$trunk_arm_environment_blocked" != true ]]; then
   # Only a fully-executed green run earns the whole-run fast-path stamp. A
   # resumed run reused work whose real age lives in the per-command stamps;
   # re-dating it here would let --skip-if-fresh extend validation reuse past
