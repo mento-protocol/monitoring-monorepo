@@ -50,8 +50,9 @@ rule are in
   protection, or a safety-boundary rule to unblock the change you are making
   now — an agent that can widen its own gate has no gate. Hand the control
   change to an independent session through a brief or an agent-ready issue,
-  with the operator's recorded consent. Changing a control as its own claimed
-  task stays allowed.
+  with the operator's recorded consent. Changing a control stays allowed when it
+  is its own claimed task and does not unblock the same session's current work;
+  reclassifying the blocking change as a separate task does not qualify.
 - **Secrets are IaC-owned.** Never create, rotate, or overwrite secrets with
   `gh secret set`, `vercel env add`, `gcloud secrets versions add`, or another
   one-off provider command. Model them in the owning Terraform/integration path
