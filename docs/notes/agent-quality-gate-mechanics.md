@@ -3,7 +3,7 @@ title: Agent Quality Gate — Mechanics
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-25
+last_verified: 2026-08-26
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -989,7 +989,7 @@ cross a named-resource boundary.
 | after a quarantine creates `anchor`, before it records a fallback              | shared owner or remnant plus one private hard-link witness                                                          | a dead-creator recovery requires a second visible link, removes only the witness, and leaves the shared evidence intact                                                                          |
 | after a quarantine records its fallback, before it moves the shared pathname   | shared owner or remnant plus a private witness and fallback marker                                                  | the fallback proves a canonical link or condemned-run obligation exists; recovery can remove only the witnessed private evidence                                                                 |
 | after the shared pathname moves to the quarantine `record`                     | a replacement can occupy the shared path; the exact old inode remains as `anchor` and `record`                      | recovery verifies both private links name one current-UID inode; it retains any replacement and removes only the private links                                                                   |
-| while a waiter claims a dead local quarantine                                  | either the old quarantine name or the same directory under the waiter's versioned name                              | atomic directory rename gives one waiter the exact state; a loser restarts the quarantine scan and observes the winner's live name                                                               |
+| while a waiter claims a dead local quarantine                                  | either the old quarantine name or the same directory under the waiter's versioned name                              | one whole-directory rename wins; source `ENOENT` during open, revalidation, or rename makes the loser remove its empty placeholder and rescan the winner                                         |
 | after a waiter claims a quarantine, before it recovers a phase                 | one versioned quarantine whose hostname hash and PID name the waiter                                                | a concurrent waiter treats that claimant as active; if the claimant dies, the next waiter claims and recovers the same directory                                                                 |
 | after judging a taken record stale, before the new record is published         | no canonical owner and the prior same-UID token under `condemned.d/`; exact old owner evidence can remain private   | drains that token before mapped work, then publishes its own owner; a failed or changed discard retains evidence and stops instead                                                               |
 | after a taken record is judged live, before it is put back                     | no canonical owner, an exact hard-link witness, and the recovery-visible remnant                                    | publishes the witnessed inode with an exclusive hard link; an occupied canonical path wins, and the old evidence remains until it has a published fallback                                       |
@@ -1372,9 +1372,13 @@ active control.
   pathname is validated.
 - `AGENT_QUALITY_GATE_TEST_MARKER_WITNESS_BARRIER` pauses after the raw run
   marker has a hard-link witness.
-- `AGENT_QUALITY_GATE_TEST_QUARANTINE_BEFORE_CLAIM_BARRIER` and
-  `AGENT_QUALITY_GATE_TEST_QUARANTINE_AFTER_CLAIM_BARRIER` pause before and after
-  an atomic whole-directory quarantine claim.
+- `AGENT_QUALITY_GATE_TEST_QUARANTINE_BEFORE_CLAIM_BARRIER` pauses after a
+  waiter selects a quarantine and before it starts the claim.
+- `AGENT_QUALITY_GATE_TEST_QUARANTINE_CLAIM_OPEN_BARRIER` pauses after the claim
+  helper opens the source and placeholder and before it revalidates the source
+  pathname.
+- `AGENT_QUALITY_GATE_TEST_QUARANTINE_AFTER_CLAIM_BARRIER` pauses after an atomic
+  whole-directory quarantine claim.
 - `AGENT_QUALITY_GATE_TEST_OWNER_RESTORE_LINK_FAILURE=1` forces a live remnant's
   canonical hard-link restoration to fail.
 - `AGENT_QUALITY_GATE_TEST_RELEASE_VALIDATED_BARRIER` pauses after the

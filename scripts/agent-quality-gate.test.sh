@@ -14020,17 +14020,26 @@ STUB
     fail "mapped work ran beside a foreign-host quarantine"
   rm -rf "$gate_race_root/run.lock"
 
-  # Two waiters can observe the same dead creator. Pause both after selection,
-  # then release them together. One whole-directory rename wins. The loser must
-  # rescan the winner's new basename before it can inspect ordinary remnants.
+  # Two waiters can observe the same dead creator. Pause both after selection.
+  # Let the first open the source and its placeholder, then pause it before
+  # source-path revalidation. The second renames the source. The first must
+  # classify its later source ENOENT as a lost claim, remove only its empty
+  # placeholder, and rescan the winner before it inspects ordinary remnants.
   race_dead_pid="$(fresh_dead_pid)" ||
     fail "two-waiter quarantine claim could not allocate a dead creator PID"
   claim_race_source="$gate_race_root/run.lock/owner.reclaiming.claim-race"
   claim_race_dir="$gate_race_root/run.lock/owner.reclaiming.quarantine.v1.${active_quarantine_host_fingerprint}.${race_dead_pid}.claimrace"
-  claim_race_barrier="$gate_race_out/quarantine-before-claim"
+  claim_race_first_barrier="$gate_race_out/quarantine-before-claim-first"
+  claim_race_second_barrier="$gate_race_out/quarantine-before-claim-second"
+  claim_race_open_barrier="$gate_race_out/quarantine-claim-open-first"
   claim_race_after_barrier="$gate_race_out/quarantine-after-claim-two-waiter"
   rm -rf "$gate_race_root/run.lock"
-  rm -f "$claim_race_barrier".ready.* "${claim_race_barrier}.release" \
+  rm -f "$claim_race_first_barrier".ready.* \
+    "${claim_race_first_barrier}.release" \
+    "$claim_race_second_barrier".ready.* \
+    "${claim_race_second_barrier}.release" \
+    "$claim_race_open_barrier".ready.* \
+    "${claim_race_open_barrier}.release" \
     "${claim_race_after_barrier}.ready" \
     "${claim_race_after_barrier}.release"
   mkdir -p "$gate_race_root/run.lock"
@@ -14039,6 +14048,13 @@ STUB
   /bin/ln -P "$claim_race_source" "$claim_race_dir/anchor"
   : > "$gate_race_log"
   for claim_race_label in first second; do
+    if [[ "$claim_race_label" == "first" ]]; then
+      claim_race_before_barrier="$claim_race_first_barrier"
+      claim_race_claim_open_barrier="$claim_race_open_barrier"
+    else
+      claim_race_before_barrier="$claim_race_second_barrier"
+      claim_race_claim_open_barrier=""
+    fi
     (
       if env \
         NODE_ENV=test \
@@ -14048,7 +14064,8 @@ STUB
         AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
         AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
         AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
-        AGENT_QUALITY_GATE_TEST_QUARANTINE_BEFORE_CLAIM_BARRIER="$claim_race_barrier" \
+        AGENT_QUALITY_GATE_TEST_QUARANTINE_BEFORE_CLAIM_BARRIER="$claim_race_before_barrier" \
+        AGENT_QUALITY_GATE_TEST_QUARANTINE_CLAIM_OPEN_BARRIER="$claim_race_claim_open_barrier" \
         AGENT_QUALITY_GATE_TEST_QUARANTINE_AFTER_CLAIM_BARRIER="$claim_race_after_barrier" \
         "$repo_root/scripts/agent-quality-gate.sh" \
         --base HEAD --run --lock-wait 45 \
@@ -14064,29 +14081,42 @@ STUB
       claim_race_second=$!
     fi
   done
-  claim_race_deadline=$(( $(date +%s) + 20 ))
-  while [[ "$(find "$gate_race_out" -maxdepth 1 -name 'quarantine-before-claim.ready.*' -type f | wc -l | tr -d ' ')" -lt 2 &&
-    "$(date +%s)" -lt "$claim_race_deadline" ]]; do
-    sleep 0.05
-  done
-  [[ "$(find "$gate_race_out" -maxdepth 1 -name 'quarantine-before-claim.ready.*' -type f | wc -l | tr -d ' ')" -eq 2 ]] || {
-    : > "${claim_race_barrier}.release"
+  claim_race_fail() {
+    : > "${claim_race_first_barrier}.release"
+    : > "${claim_race_second_barrier}.release"
+    : > "${claim_race_open_barrier}.release"
+    : > "${claim_race_after_barrier}.release"
     wait "$claim_race_first" 2>/dev/null || true
     wait "$claim_race_second" 2>/dev/null || true
-    fail "both quarantine claim waiters did not reach the selection barrier"
+    fail "$1"
   }
-  : > "${claim_race_barrier}.release"
+  claim_race_wait_for_instance_barrier() {
+    local barrier="$1"
+    local deadline
+    deadline=$(( $(date +%s) + 20 ))
+    while [[ -z "$(find "$gate_race_out" -maxdepth 1 \
+      -name "${barrier##*/}.ready.*" -type f -print -quit)" &&
+      "$(date +%s)" -lt "$deadline" ]]; do
+      sleep 0.05
+    done
+    [[ -n "$(find "$gate_race_out" -maxdepth 1 \
+      -name "${barrier##*/}.ready.*" -type f -print -quit)" ]]
+  }
+  claim_race_wait_for_instance_barrier "$claim_race_first_barrier" ||
+    claim_race_fail "the first quarantine claimant did not reach the selection barrier"
+  claim_race_wait_for_instance_barrier "$claim_race_second_barrier" ||
+    claim_race_fail "the second quarantine claimant did not reach the selection barrier"
+  : > "${claim_race_first_barrier}.release"
+  claim_race_wait_for_instance_barrier "$claim_race_open_barrier" ||
+    claim_race_fail "the first quarantine claimant did not open the selected source"
+  : > "${claim_race_second_barrier}.release"
   claim_race_deadline=$(( $(date +%s) + 20 ))
   while [[ ! -e "${claim_race_after_barrier}.ready" &&
     "$(date +%s)" -lt "$claim_race_deadline" ]]; do
     sleep 0.05
   done
-  [[ -e "${claim_race_after_barrier}.ready" ]] || {
-    : > "${claim_race_after_barrier}.release"
-    wait "$claim_race_first" 2>/dev/null || true
-    wait "$claim_race_second" 2>/dev/null || true
-    fail "the quarantine claim winner did not reach the post-claim barrier"
-  }
+  [[ -e "${claim_race_after_barrier}.ready" ]] ||
+    claim_race_fail "the quarantine claim winner did not reach the post-claim barrier"
   claim_race_claimed=""
   for claim_race_candidate in \
     "$gate_race_root/run.lock"/owner.reclaiming.quarantine.*; do
@@ -14096,32 +14126,30 @@ STUB
     break
   done
   [[ -n "$claim_race_claimed" && -d "$claim_race_claimed" ]] ||
-    fail "the quarantine claim winner did not publish its claimed basename"
+    claim_race_fail "the quarantine claim winner did not publish its claimed basename"
   [[ "$claim_race_claimed" != "$claim_race_dir" ]] ||
-    fail "the quarantine claim winner did not rename the selected basename"
+    claim_race_fail "the quarantine claim winner did not rename the selected basename"
+  : > "${claim_race_open_barrier}.release"
   claim_race_deadline=$(( $(date +%s) + 20 ))
   while ! grep -q " in owner cleanup" \
-    "$gate_race_out/quarantine-claim-first.out" \
-    "$gate_race_out/quarantine-claim-second.out" 2>/dev/null &&
+    "$gate_race_out/quarantine-claim-first.out" 2>/dev/null &&
     [[ "$(date +%s)" -lt "$claim_race_deadline" ]]; do
     sleep 0.05
   done
-  claim_race_waiting_count=0
-  for claim_race_label in first second; do
-    if grep -q " in owner cleanup" \
-      "$gate_race_out/quarantine-claim-${claim_race_label}.out"; then
-      claim_race_waiting_count=$((claim_race_waiting_count + 1))
-    fi
-  done
-  [[ "$claim_race_waiting_count" -eq 1 ]] ||
-    fail "the losing quarantine claimant did not rescan and wait on the claimed basename"
+  grep -q " in owner cleanup" \
+    "$gate_race_out/quarantine-claim-first.out" ||
+    claim_race_fail "the losing quarantine claimant did not rescan and wait on the claimed basename"
   [[ ! -s "$gate_race_out/quarantine-claim-first.status" &&
     ! -s "$gate_race_out/quarantine-claim-second.status" ]] ||
-    fail "a quarantine claimant completed while the winning basename was paused"
+    claim_race_fail "a quarantine claimant completed while the winning basename was paused"
   [[ -d "$claim_race_claimed" ]] ||
-    fail "the losing quarantine claimant removed the paused winning basename"
+    claim_race_fail "the losing quarantine claimant removed the paused winning basename"
+  claim_race_quarantine_count="$(find "$gate_race_root/run.lock" -maxdepth 1 \
+    -name 'owner.reclaiming.quarantine.*' -type d | wc -l | tr -d ' ')"
+  [[ "$claim_race_quarantine_count" -eq 1 ]] ||
+    claim_race_fail "the losing quarantine claimant left its empty placeholder"
   [[ -z "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
-    fail "mapped work ran while the winning quarantine claim was paused"
+    claim_race_fail "mapped work ran while the winning quarantine claim was paused"
   : > "${claim_race_after_barrier}.release"
   wait "$claim_race_first" 2>/dev/null || true
   wait "$claim_race_second" 2>/dev/null || true
@@ -14131,7 +14159,12 @@ STUB
   assert_runs_did_not_overlap "atomic quarantine claim, two waiters" 2
   [[ -z "$(find "$gate_race_root" -name 'owner.reclaiming.quarantine.*' -print -quit)" ]] ||
     fail "two-waiter quarantine claim left recovery evidence"
-  rm -f "$claim_race_barrier".ready.* "${claim_race_barrier}.release" \
+  rm -f "$claim_race_first_barrier".ready.* \
+    "${claim_race_first_barrier}.release" \
+    "$claim_race_second_barrier".ready.* \
+    "${claim_race_second_barrier}.release" \
+    "$claim_race_open_barrier".ready.* \
+    "${claim_race_open_barrier}.release" \
     "${claim_race_after_barrier}.ready" \
     "${claim_race_after_barrier}.release"
 

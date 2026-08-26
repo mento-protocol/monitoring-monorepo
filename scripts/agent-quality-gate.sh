@@ -548,6 +548,11 @@ if [[ -n "$owner_quarantine_before_claim_test_barrier" && "${NODE_ENV:-}" != "te
   echo "AGENT_QUALITY_GATE_TEST_QUARANTINE_BEFORE_CLAIM_BARRIER: test-only override requires NODE_ENV=test" >&2
   exit 2
 fi
+owner_quarantine_claim_open_test_barrier="${AGENT_QUALITY_GATE_TEST_QUARANTINE_CLAIM_OPEN_BARRIER:-}"
+if [[ -n "$owner_quarantine_claim_open_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
+  echo "AGENT_QUALITY_GATE_TEST_QUARANTINE_CLAIM_OPEN_BARRIER: test-only override requires NODE_ENV=test" >&2
+  exit 2
+fi
 owner_quarantine_after_claim_test_barrier="${AGENT_QUALITY_GATE_TEST_QUARANTINE_AFTER_CLAIM_BARRIER:-}"
 if [[ -n "$owner_quarantine_after_claim_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
   echo "AGENT_QUALITY_GATE_TEST_QUARANTINE_AFTER_CLAIM_BARRIER: test-only override requires NODE_ENV=test" >&2
@@ -1492,7 +1497,8 @@ gate_lock_claim_owner_quarantine() {
   if node -e '
     const fs = require("node:fs");
     const { constants } = fs;
-    const [source, target, parent, uidText] = process.argv.slice(1);
+    const [source, target, parent, uidText, claimOpenBarrier] =
+      process.argv.slice(1);
     const expectedUid = BigInt(uidText);
     let sourceDescriptor;
     let targetDescriptor;
@@ -1532,6 +1538,20 @@ gate_lock_claim_owner_quarantine() {
       }
     }
 
+    function waitForTestBarrierInstance(barrier) {
+      if (!barrier) return;
+      const ready = `${barrier}.ready.${process.pid}`;
+      const release = `${barrier}.release`;
+      const sleeper = new Int32Array(new SharedArrayBuffer(4));
+      fs.writeFileSync(ready, "", { flag: "wx", mode: 0o600 });
+      for (let waited = 0; !pathEntryExists(release); waited += 1) {
+        if (waited >= 600) {
+          throw new Error("quarantine claim open barrier timed out");
+        }
+        Atomics.wait(sleeper, 0, 0, 50);
+      }
+    }
+
     try {
       if (
         !Number.isInteger(constants.O_DIRECTORY) ||
@@ -1560,17 +1580,9 @@ gate_lock_claim_owner_quarantine() {
         const targetStat = fs.fstatSync(targetDescriptor, { bigint: true });
         requirePrivateDirectory(sourceStat, "source quarantine");
         requirePrivateDirectory(targetStat, "claim placeholder");
-        requirePathIdentity(source, sourceStat, "source quarantine");
-        requirePathIdentity(target, targetStat, "claim placeholder");
-        if (fs.readdirSync(target).length !== 0) {
-          throw new Error("claim placeholder is not empty");
-        }
-        parentDescriptor = fs.openSync(
-          parent,
-          constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
-        );
+        waitForTestBarrierInstance(claimOpenBarrier);
         try {
-          fs.renameSync(source, target);
+          requirePathIdentity(source, sourceStat, "source quarantine");
         } catch (error) {
           if (error.code === "ENOENT" && !pathEntryExists(source)) {
             status = 3;
@@ -1579,18 +1591,37 @@ gate_lock_claim_owner_quarantine() {
           }
         }
         if (status === 0) {
-          fs.fsyncSync(parentDescriptor);
-          claimedDescriptor = fs.openSync(
-            target,
+          requirePathIdentity(target, targetStat, "claim placeholder");
+          if (fs.readdirSync(target).length !== 0) {
+            throw new Error("claim placeholder is not empty");
+          }
+          parentDescriptor = fs.openSync(
+            parent,
             constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
           );
-          const claimedStat = fs.fstatSync(claimedDescriptor, { bigint: true });
-          requirePrivateDirectory(claimedStat, "claimed quarantine");
-          if (!sameInode(claimedStat, sourceStat)) {
-            throw new Error("claimed quarantine does not match the source inode");
+          try {
+            fs.renameSync(source, target);
+          } catch (error) {
+            if (error.code === "ENOENT" && !pathEntryExists(source)) {
+              status = 3;
+            } else {
+              throw error;
+            }
           }
-          requirePathIdentity(target, claimedStat, "claimed quarantine");
-          fs.fsyncSync(claimedDescriptor);
+          if (status === 0) {
+            fs.fsyncSync(parentDescriptor);
+            claimedDescriptor = fs.openSync(
+              target,
+              constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+            );
+            const claimedStat = fs.fstatSync(claimedDescriptor, { bigint: true });
+            requirePrivateDirectory(claimedStat, "claimed quarantine");
+            if (!sameInode(claimedStat, sourceStat)) {
+              throw new Error("claimed quarantine does not match the source inode");
+            }
+            requirePathIdentity(target, claimedStat, "claimed quarantine");
+            fs.fsyncSync(claimedDescriptor);
+          }
         }
       }
     } catch (error) {
@@ -1603,7 +1634,8 @@ gate_lock_claim_owner_quarantine() {
       if (sourceDescriptor !== undefined) fs.closeSync(sourceDescriptor);
     }
     process.exitCode = status;
-  ' "$source" "$claimed" "$parent" "$(id -u)"; then
+  ' "$source" "$claimed" "$parent" "$(id -u)" \
+    "$owner_quarantine_claim_open_test_barrier"; then
     if ! gate_lock_wait_for_test_barrier "$owner_quarantine_after_claim_test_barrier"; then
       echo "error: the claimed quality-gate owner quarantine barrier failed." >&2
       return 2
