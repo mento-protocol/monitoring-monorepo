@@ -290,15 +290,26 @@ export function gateSignature({ summary, feedback }) {
         `blocker:${blocker?.kind ?? "?"}:${blocker?.name ?? "?"}:${blocker?.state ?? "?"}`,
     )
     .sort();
-  const counts = feedback?.counts ?? {};
+
+  // Identities, not counts. One thread resolved while another appears leaves
+  // every count identical, so a count-only signature would call that state
+  // unchanged and merge it under a reason entered for the previous one. The
+  // feedback projection already computes a stable per-finding `fingerprint`,
+  // which is exactly the identity this needs.
+  const findings = (feedback?.findings ?? [])
+    .filter((finding) => finding?.blocking === true)
+    .map(
+      (finding) =>
+        `feedback:${finding?.fingerprint ?? `${finding?.source ?? "?"}:${finding?.sourceId ?? "?"}`}:${finding?.state ?? "?"}`,
+    )
+    .sort();
+
   return [
     `ready:${summary?.ready === true}`,
     ...blockers,
     `feedback:ready:${feedback?.ready === true}`,
-    `feedback:blockers:${counts.requiredFeedbackBlockers ?? 0}`,
-    `feedback:threads:${counts.unresolvedReviewThreads ?? 0}`,
-    `feedback:rootComments:${counts.unrepliedRootReviewComments ?? 0}`,
-    `feedback:botComments:${counts.blockingTopLevelBotComments ?? 0}`,
+    `feedback:blocking:${findings.length}`,
+    ...findings,
   ].join("\n");
 }
 

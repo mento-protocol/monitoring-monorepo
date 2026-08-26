@@ -32,6 +32,7 @@ import {
   formatBriefing,
   interactiveSessionRefusal,
   exitCodeForResult,
+  gateSignature,
   mergePullRequest,
   parseArgs,
   sanitizeTerminalText,
@@ -41,6 +42,7 @@ import {
   groupStatusChecks,
   splitRequiredAndOptionalChecks,
 } from "./pr-ready-state-core.mjs";
+import { summarizeFeedbackState } from "./pr-feedback-state-core.mjs";
 
 /** The repository's file-size soft cap (docs/adr/0065-...). */
 const SOFT_CAP = 600;
@@ -1267,6 +1269,63 @@ await test("an explicit host-qualified --repo reaches gh verbatim", async () => 
     (args) => args[0] === "api" && args.includes("user"),
   );
   assertEqual(login[login.indexOf("--hostname") + 1], "ghe.example.com");
+});
+
+await test("a swapped feedback item refuses even though the counts match", async () => {
+  // One thread resolved while a different one appears leaves every count
+  // identical. A count-only signature would call that unchanged and merge it
+  // under a reason the operator entered for the previous feedback set.
+  const before = readySummary();
+  before.unresolvedReviewThreads = [
+    {
+      id: "PRRT_before",
+      path: "scripts/pr/merge-pr.mjs",
+      line: 10,
+      isResolved: false,
+      comments: [{ author: { login: "coderabbitai" }, body: "a finding" }],
+    },
+  ];
+
+  const after = readySummary();
+  after.unresolvedReviewThreads = [
+    {
+      id: "PRRT_after",
+      path: "scripts/pr/merge-pr-io.mjs",
+      line: 10,
+      isResolved: false,
+      comments: [{ author: { login: "coderabbitai" }, body: "a finding" }],
+    },
+  ];
+
+  const beforeFeedback = summarizeFeedbackState(before);
+  const afterFeedback = summarizeFeedbackState(after);
+  assertEqual(
+    JSON.stringify(beforeFeedback.counts),
+    JSON.stringify(afterFeedback.counts),
+    "the fixtures must have identical counts or this proves nothing",
+  );
+  assert(
+    gateSignature({ summary: before, feedback: beforeFeedback }) !==
+      gateSignature({ summary: after, feedback: afterFeedback }),
+    "the signature must distinguish a swapped feedback item",
+  );
+
+  const h = harness({
+    argv: [
+      "--pr",
+      "2071",
+      "--not-ready-reason",
+      "the first thread is answered",
+    ],
+    summary: before,
+    summaryAfterConfirmation: after,
+  });
+  await assertRefuses(
+    h.run(),
+    "changed its readiness or feedback state while you were confirming",
+  );
+  assertEqual(h.calls.merges.length, 0, "nothing should have merged");
+  assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
 });
 
 await test("only a confirmed merge exits zero", async () => {
