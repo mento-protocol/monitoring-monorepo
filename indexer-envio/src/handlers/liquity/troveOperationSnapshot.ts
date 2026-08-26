@@ -1,13 +1,19 @@
 import type { Trove, TroveOperationEvent } from "envio";
 import { asAddress, eventId } from "../../helpers.js";
-import { computeTroveOperationSnapshot } from "./math.js";
 import { OP } from "./operations.js";
 
 /** Capture the trove fields needed for a TroveOperationEvent snapshot
- *  before any handler branch mutates the entity. The 5 user-initiated
- *  ops we persist don't touch debt/coll in the TroveOperation handler
- *  (those land in TroveUpdated / BatchUpdated), so reading directly off
- *  the entity here yields the true pre-operation values.
+ *  before any handler branch in the parent TroveOperation handler mutates
+ *  the entity further.
+ *
+ *  These are NOT pre-operation values: on-chain, every TroveManager
+ *  function emits `TroveUpdated` before `TroveOperation` for the same op,
+ *  so by the time Envio's ordered event processing reaches this handler,
+ *  the `TroveUpdated` handler has already applied the post-operation
+ *  debt/coll to the `Trove` entity. `trove.debt`/`trove.coll` here are the
+ *  AFTER snapshot; the BEFORE snapshot is derived arithmetically in
+ *  `maybeRecordTroveOperation` from the event's own delta fields, never
+ *  from a second read of the (already-mutated) entity.
  *
  *  OPEN_TROVE owner race: on-chain log order is TroveNFT.Transfer (mint)
  *  → TroveOperation, so under normal Envio ordering `trove.owner` is
@@ -22,13 +28,49 @@ import { OP } from "./operations.js";
  *  (which would cost an extra getWhere on every mint). */
 export function captureTroveOperationSnapshotState(trove: Trove): {
   owner: string;
-  prevDebt: bigint;
-  prevColl: bigint;
+  debtAfter: bigint;
+  collAfter: bigint;
 } {
   return {
     owner: trove.owner,
-    prevDebt: trove.debt,
-    prevColl: trove.coll,
+    debtAfter: trove.debt,
+    collAfter: trove.coll,
+  };
+}
+
+/** Recover the trove's debt/coll immediately BEFORE this `TroveOperation`
+ *  applied, given the already-correct AFTER values and every signed/
+ *  unsigned delta the ABI exposes:
+ *
+ *    debtBefore = debtAfter − debtChange − upfrontFee − debtFromRedist
+ *    collBefore = collAfter − collChange − collFromRedist
+ *
+ *  Direction matters: `after` comes from the entity (true post-operation
+ *  state, since `TroveUpdated` ran first — see `captureTroveOperationSnapshotState`),
+ *  and `before` is always derived FROM `after`, never the reverse. Floors
+ *  at zero defensively, matching the on-chain invariant that a trove's
+ *  debt/coll cannot go negative; only a future ABI revision or an
+ *  unexpected event sequence could otherwise underflow the signed bigint
+ *  arithmetic here. */
+function deriveTroveOperationBeforeSnapshot(params: {
+  debtAfter: bigint;
+  collAfter: bigint;
+  debtChange: bigint;
+  debtIncreaseFromUpfrontFee: bigint;
+  debtIncreaseFromRedist: bigint;
+  collChange: bigint;
+  collIncreaseFromRedist: bigint;
+}): { debtBefore: bigint; collBefore: bigint } {
+  const debtBefore =
+    params.debtAfter -
+    params.debtChange -
+    params.debtIncreaseFromUpfrontFee -
+    params.debtIncreaseFromRedist;
+  const collBefore =
+    params.collAfter - params.collChange - params.collIncreaseFromRedist;
+  return {
+    debtBefore: debtBefore > 0n ? debtBefore : 0n,
+    collBefore: collBefore > 0n ? collBefore : 0n,
   };
 }
 
@@ -54,11 +96,12 @@ export type TroveOperationLogEvent = {
  *  they already have dedicated event entities; APPLY_PENDING_DEBT is
  *  protocol-forced and isn't a user action.
  *
- *  `debtBefore` / `collBefore` come from the trove entity (captured before
- *  any mutation in the parent handler); `debtAfter` / `collAfter` are
- *  computed arithmetically from the ABI deltas via
- *  `computeTroveOperationSnapshot`. The `owner` field is denormalized off
- *  the trove so the UI can filter by owner without a join. */
+ *  `debtAfter` / `collAfter` come from the trove entity (captured in the
+ *  parent handler, already correct — see `captureTroveOperationSnapshotState`);
+ *  `debtBefore` / `collBefore` are derived arithmetically from the ABI
+ *  deltas via `deriveTroveOperationBeforeSnapshot`, never from a second
+ *  entity read. The `owner` field is denormalized off the trove so the UI
+ *  can filter by owner without a join. */
 export function maybeRecordTroveOperation(args: {
   context: {
     TroveOperationEvent: { set: (entity: TroveOperationEvent) => void };
@@ -67,7 +110,7 @@ export function maybeRecordTroveOperation(args: {
   event: TroveOperationLogEvent;
   instanceId: string;
   troveId: string;
-  snapshotState: { owner: string; prevDebt: bigint; prevColl: bigint };
+  snapshotState: { owner: string; debtAfter: bigint; collAfter: bigint };
   blockNumber: bigint;
   blockTimestamp: bigint;
 }): void {
@@ -78,10 +121,10 @@ export function maybeRecordTroveOperation(args: {
     op === OP.APPLY_PENDING_DEBT
   )
     return;
-  const { owner, prevDebt, prevColl } = snapshotState;
-  const { debtAfter, collAfter } = computeTroveOperationSnapshot({
-    debtBefore: prevDebt,
-    collBefore: prevColl,
+  const { owner, debtAfter, collAfter } = snapshotState;
+  const { debtBefore, collBefore } = deriveTroveOperationBeforeSnapshot({
+    debtAfter,
+    collAfter,
     debtChange: event.params._debtChangeFromOperation,
     debtIncreaseFromUpfrontFee: event.params._debtIncreaseFromUpfrontFee,
     debtIncreaseFromRedist: event.params._debtIncreaseFromRedist,
@@ -97,9 +140,9 @@ export function maybeRecordTroveOperation(args: {
     operation: op,
     collChange: event.params._collChangeFromOperation,
     debtChange: event.params._debtChangeFromOperation,
-    debtBefore: prevDebt,
+    debtBefore,
     debtAfter,
-    collBefore: prevColl,
+    collBefore,
     collAfter,
     annualInterestRate: event.params._annualInterestRate,
     debtIncreaseFromUpfrontFee: event.params._debtIncreaseFromUpfrontFee,
