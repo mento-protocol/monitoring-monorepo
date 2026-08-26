@@ -328,6 +328,10 @@ export function gateSignature({ summary, feedback }) {
 
   return JSON.stringify({
     ready: summary?.ready === true,
+    // The title is on the briefing, and on a repository that derives squash
+    // subjects from it the title is also what the merge commit says. An edit
+    // during the prompt changes what the operator approved.
+    title: summary?.pr?.title ?? null,
     blockers,
     requiredChecks,
     feedbackReady: feedback?.ready === true,

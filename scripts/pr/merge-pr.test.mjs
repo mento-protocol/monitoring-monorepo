@@ -892,7 +892,9 @@ await test("the consent ledger appends to a regular file", async () => {
     });
     assertEqual(target, path.join(checkout, CONSENT_LOG_BASENAME));
     await appendConsentRecord({ record, git: async () => `${checkout}\n` });
-    const lines = readFileSync(target, "utf8").trimEnd().split("\n");
+    // Records are separated by blank lines, since each one opens with a
+    // newline rather than reading the previous byte to decide.
+    const lines = readFileSync(target, "utf8").split("\n").filter(Boolean);
     assertEqual(lines.length, 2, "appends must accumulate");
     assertEqual(JSON.parse(lines[0]).pr, 2071);
   } finally {
@@ -1176,9 +1178,23 @@ await test("a short consent write refuses instead of reporting success", async (
       path.join(checkout, CONSENT_LOG_BASENAME),
       "utf8",
     );
-    assert(
-      !ledger.includes("\n"),
-      `a truncated record must not be left as a ledger line, got: ${JSON.stringify(ledger)}`,
+    // The bytes remain by design; what must not exist is a line that reads as
+    // a consent record.
+    const parseable = ledger
+      .split("\n")
+      .filter(Boolean)
+      .filter((line) => {
+        try {
+          JSON.parse(line);
+          return true;
+        } catch {
+          return false;
+        }
+      });
+    assertEqual(
+      parseable.length,
+      0,
+      `a truncated record must not parse as a consent record, got: ${JSON.stringify(ledger)}`,
     );
   } finally {
     rmSync(checkout, { recursive: true, force: true });
@@ -1264,7 +1280,9 @@ await test("a later append steps over an unterminated partial record", async () 
   }
 });
 
-await test("a ledger ending in a newline gains no blank line", async () => {
+await test("every record lands on its own line, blank lines and all", async () => {
+  // The leading newline is unconditional: deciding it from the last byte would
+  // race another run short-writing between the read and the write.
   const checkout = mkdtempSync(path.join(tmpdir(), "merge-consent-clean-"));
   try {
     const ledger = path.join(checkout, CONSENT_LOG_BASENAME);
@@ -1279,13 +1297,11 @@ await test("a ledger ending in a newline gains no blank line", async () => {
       now: new Date("2026-08-26T00:00:00.000Z"),
     });
     await appendConsentRecord({ record, git: async () => `${checkout}\n` });
+    await appendConsentRecord({ record, git: async () => `${checkout}\n` });
 
-    const raw = readFileSync(ledger, "utf8");
-    assert(
-      !raw.includes("\n\n"),
-      `no blank line expected, got: ${JSON.stringify(raw)}`,
-    );
-    assertEqual(raw.split("\n").filter(Boolean).length, 2);
+    const lines = readFileSync(ledger, "utf8").split("\n").filter(Boolean);
+    assertEqual(lines.length, 3, "three records, blank lines skipped");
+    for (const line of lines) JSON.parse(line);
   } finally {
     rmSync(checkout, { recursive: true, force: true });
   }
@@ -1621,6 +1637,43 @@ await test("an unchanged login still merges", async () => {
   const result = await h.run();
   assertEqual(result.merged, true);
   assertEqual(result.record.login, "chapati23");
+});
+
+await test("refuses a bare target while GH_HOST is set", async () => {
+  // GH_HOST picks the host when one was not provided, so a bare owner/name
+  // target would read and merge on an Enterprise host while the login call
+  // names github.com outright and the briefing shows neither.
+  const h = harness({
+    argv: ["--pr", "2071"],
+    env: { GH_HOST: "ghe.example.com" },
+  });
+  await assertRefuses(h.run(), "GH_HOST is set");
+  assertEqual(h.calls.merges.length, 0, "nothing should have merged");
+  assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
+});
+
+await test("a host-qualified target is allowed with GH_HOST set", async () => {
+  // The host was provided, so GH_HOST does not choose it.
+  const h = harness({
+    argv: ["--pr", "2071", "--repo", "ghe.example.com/acme/widgets"],
+    env: { GH_HOST: "ghe.example.com" },
+  });
+  const result = await h.run();
+  assertEqual(result.merged, true);
+});
+
+await test("a title edited during confirmation refuses", async () => {
+  // The title is on the briefing, and on a repository that derives squash
+  // subjects from it the title is what the merge commit ends up saying.
+  const renamed = readySummary();
+  renamed.pr = { ...renamed.pr, title: "feat: something else entirely" };
+
+  const h = harness({ summaryAfterConfirmation: renamed });
+  await assertRefuses(
+    h.run(),
+    "changed its readiness or feedback state while you were confirming",
+  );
+  assertEqual(h.calls.merges.length, 0, "nothing should have merged");
 });
 
 await test("only a confirmed merge exits zero", async () => {

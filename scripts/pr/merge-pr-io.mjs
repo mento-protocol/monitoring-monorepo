@@ -12,14 +12,7 @@
  */
 
 import { spawn } from "node:child_process";
-import {
-  closeSync,
-  constants,
-  fstatSync,
-  openSync,
-  readSync,
-  writeSync,
-} from "node:fs";
+import { closeSync, constants, fstatSync, openSync, writeSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
 
@@ -94,7 +87,6 @@ export async function appendConsentRecord({
   git,
   write = writeSync,
   statFd = fstatSync,
-  readFd = readSync,
 }) {
   let repoRoot;
   try {
@@ -129,7 +121,7 @@ export async function appendConsentRecord({
   try {
     fd = openSync(
       target,
-      constants.O_RDWR |
+      constants.O_WRONLY |
         constants.O_APPEND |
         constants.O_CREAT |
         constants.O_NOFOLLOW |
@@ -159,28 +151,23 @@ export async function appendConsentRecord({
       );
     }
 
-    // A previous run can have died mid-write and left a record with no
-    // terminating newline. Appending straight onto it would splice the two into
-    // one malformed line that parses as neither. Start a fresh line instead:
-    // the broken record stays broken and visible, and this one is intact.
+    // Always open with a newline, unconditionally.
     //
-    // This is why the short write below never truncates. The ledger is shared
-    // and `O_APPEND`, so any check-then-truncate is a race — another
-    // `pr:merge` can append a complete record between the check and the
-    // truncate, and truncating would delete their consent to tidy up our
-    // failure. Losing somebody else's approval record is worse than leaving a
-    // partial line that the next append steps over and the operator can see.
-    let leadingNewline = false;
-    if (stats.size > 0) {
-      const tail = Buffer.alloc(1);
-      const read = readFd(fd, tail, 0, 1, stats.size - 1);
-      leadingNewline = read === 1 && tail[0] !== 0x0a;
-    }
-
-    const payload = Buffer.from(
-      `${leadingNewline ? "\n" : ""}${JSON.stringify(record)}\n`,
-      "utf8",
-    );
+    // A previous run can have died mid-write and left a record with no
+    // terminating newline; appending straight onto it would splice the two into
+    // one line that parses as neither. Reading the last byte first to decide
+    // would be a race of its own — another `pr:merge` can short-write between
+    // that read and this write, so the byte read is not the byte appended to.
+    // A leading newline needs no read and is correct under every interleaving:
+    // one `O_APPEND` write is atomic against other appenders, so this record
+    // always lands whole and always begins its own line. The cost is a blank
+    // line between records, which every JSONL reader here skips.
+    //
+    // It is also why the short write below never truncates. Any
+    // check-then-truncate could delete a complete record another run appended
+    // in between, and losing somebody else's consent to tidy up our own failure
+    // is worse than leaving a partial line the next append steps over.
+    const payload = Buffer.from(`\n${JSON.stringify(record)}\n`, "utf8");
     // A full disk or an exhausted quota can make `writeSync` return a short
     // count rather than throw. Ignoring it would report recorded consent for a
     // truncated, unparsable record.

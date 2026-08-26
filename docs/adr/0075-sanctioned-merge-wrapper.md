@@ -78,8 +78,10 @@ wrapper says so in its own header rather than implying otherwise:
 - The permission deny is a list of command patterns, so it covers the spellings
   someone enumerated. `gh pr merge` and its repository-qualified forms
   (`gh -R X pr merge`, `gh pr --repo X merge`, and the `=` variants) are denied
-  — all six were confirmed to parse in gh 2.96.0, and the bare `-R` form was
-  confirmed to bypass the original single pattern. It does not cover the same
+  — eight patterns, covering `-R` and `--repo`, separated and `=` joined,
+  before and after `pr`. Six of those spellings were run against gh 2.96.0 and
+  all six parse; the bare `-R` form was confirmed to bypass the original single
+  pattern. It does not cover the same
   merge issued as `gh api --method PUT repos/{owner}/{repo}/pulls/{n}/merge`,
   through a `gh alias`, or with other global flags interleaved. No pattern list
   closes that space, and one that read as though it did would be worse than a

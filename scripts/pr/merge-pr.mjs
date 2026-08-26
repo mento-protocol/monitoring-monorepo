@@ -310,6 +310,18 @@ export async function mergePullRequest({
   }
 
   const repos = await resolveRepositories({ repoArg, gh });
+
+  // `GH_HOST` picks the host whenever one was not provided, so a bare
+  // `owner/name` target would send the readiness reads and the merge to an
+  // Enterprise host while the login call, which names github.com outright,
+  // read a different one — and the briefing would show neither. A target
+  // carrying its own host is unaffected, because the host was provided.
+  if (repos.host === null && (env?.GH_HOST ?? "") !== "") {
+    throw new MergeRefusal(
+      `GH_HOST is set, so ${repos.base} does not name the host this would merge on; ` +
+        `unset it, or pass --repo <host/owner/name> to name the target outright`,
+    );
+  }
   const login = await resolveLogin({ gh, host: repos.host });
   const number = await resolveTargetNumber({ prArg, repos, gh, git });
 
