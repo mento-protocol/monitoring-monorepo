@@ -613,7 +613,7 @@ gate_run_proc_marker_pids() {
 
 gate_run_tagged_pids() {
   local token="$1"
-  local environ environ_entries pid marker found pattern status
+  local environ environ_entry environ_match pid marker found pattern status
   # A token read back from a lock record names processes (through this
   # pattern) and files (holder.*), and on a shared root it can be another
   # user's writing. One that does not have the gate-generated shape is never
@@ -648,17 +648,24 @@ gate_run_tagged_pids() {
       # permission bits, and the kernel refuses `/proc/<pid>/environ` for a
       # process that changed credentials whatever those say.
       [[ -r "$environ" ]] || continue
-      # The redirection is inside a group with its own stderr redirect. A
-      # redirection that cannot open its target is reported by the shell
-      # itself, before the `2>/dev/null` beside it applies, so the bare form
-      # printed `/proc/<pid>/environ: Permission denied` into the output of
-      # every drain on a runner (GitHub issue 1919); the group's redirect is
-      # already in place when the inner one is attempted. NULs are translated
-      # before the capture because command substitution cannot hold them, and
-      # the exact-entry match below depends on the separators surviving.
-      environ_entries="$({ tr '\0' '\n' < "$environ"; } 2>/dev/null)" ||
-        environ_entries=""
-      if [[ -z "$environ_entries" ]]; then
+      # Read the kernel records with the shell builtin. Spawning `tr` and up to
+      # two `grep` processes for every PID made each drain proportional to the
+      # host process count in process launches. The group redirect is active
+      # before the inner file redirect, so an unreadable or vanished record
+      # stays quiet.
+      environ_match=0
+      environ_entry=""
+      {
+        while IFS= read -r -d '' environ_entry || [[ -n "$environ_entry" ]]; do
+          if [[ "$environ_entry" == "AGENTQG_RUN=agentqg:${token}" ||
+            "$environ_entry" == "AGENTQG_REQUEST=agentqg:${token}" ]]; then
+            environ_match=1
+            break
+          fi
+          environ_entry=""
+        done < "$environ"
+      } 2>/dev/null || environ_match=0
+      if [[ "$environ_match" -ne 1 ]]; then
         # Past the `-r` test and still nothing: the kernel refused the read for
         # a process that changed credentials, the process exited between the
         # listing and the read, or its environment is genuinely empty. None
@@ -671,14 +678,6 @@ gate_run_tagged_pids() {
         # has one — and counting it as a failed scan would fail every crash
         # recovery on such a host closed, rather than only the ones with work
         # left to do.
-        continue
-      fi
-      # Exact entry, not substring: environ is NUL-separated, and a substring
-      # match would let one token select an environment carrying a longer one.
-      if ! printf '%s\n' "$environ_entries" |
-        grep -qxF "AGENTQG_RUN=agentqg:${token}" &&
-        ! printf '%s\n' "$environ_entries" |
-          grep -qxF "AGENTQG_REQUEST=agentqg:${token}"; then
         continue
       fi
       pid="${environ#/proc/}"

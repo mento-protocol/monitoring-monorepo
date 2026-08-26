@@ -1563,7 +1563,9 @@ of them.
    `/proc/<pid>/environ: Permission denied` into every drain's output on a
    runner (GitHub issue #1919). The `-r` test stays in front of it as a fast
    path — this loop runs once per process on the host — but it is not the
-   guard, because permission bits are not what the kernel decides on.
+   guard, because permission bits are not what the kernel decides on. The scan
+   reads NUL-delimited records with Bash builtins and compares each complete
+   record. It does not start `tr` or `grep` for each visible PID.
 
 8. **Elapsed time comes from the clock, not from counting sleeps.** A loop that
    adds its own poll interval per iteration is measuring what it asked for. Any
@@ -2165,7 +2167,9 @@ exactly, and whose age is within the same two-hour TTL. Every
 other outcome — parse error, missing file, fingerprint mismatch, TTL expiry —
 fails toward rerun. Any edit to a validated file invalidates every per-command
 stamp, and a start-of-run prune drops non-matching and expired entries. Only
-quality commands are stamped. Prerequisite phases
+quality commands are stamped. Before it dispatches a mapped command, the gate
+snapshots and atomically replaces an existing cache with the pruned copy. A
+read, write, or replacement failure stops the gate. Prerequisite phases
 (install/codegen/quality-setup) always re-run: their outputs (node_modules,
 generated code, built packages) are invisible to the source fingerprint, so a
 stamp could skip them after their outputs were deleted. Within a leader

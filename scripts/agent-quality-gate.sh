@@ -7434,7 +7434,7 @@ prune_command_stamps() {
     [[ $((now - created_at)) -le "$success_stamp_ttl_seconds" ]] || continue
     printf '%s\n' "$line" >> "$tmp" || return 1
   done < "$input_tmp" || return 1
-  mv -f "$tmp" "$command_stamps_file" 2>/dev/null || true
+  mv -f "$tmp" "$command_stamps_file" 2>/dev/null || return 1
 }
 
 # Prints the reuse marker and records a `reused` summary entry (NOT counted as

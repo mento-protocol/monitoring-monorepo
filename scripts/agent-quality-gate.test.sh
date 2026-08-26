@@ -1534,6 +1534,11 @@ assert.match(
   "pre-dispatch command-stamp failures must emit a coordinated stdout verdict",
 );
 assert.match(
+  source,
+  /prune_command_stamps\(\)[\s\S]*?mv -f "\$tmp" "\$command_stamps_file" 2>\/dev\/null \|\| return 1\n\}/u,
+  "command-stamp replacement failures must stop the pre-dispatch prune",
+);
+assert.match(
   runHandles,
   /gate_run_create_marker_for_identity\(\)[\s\S]*?gate_report_coordinated_no_work_failure 2 "run-marker preparation"/u,
   "coordinated run-marker refusal must emit a stdout no-work verdict",
@@ -1572,6 +1577,22 @@ assert.match(
   runHandles,
   /heldFdInfoInode = readFdInfoInode\([\s\S]*?heldFdInfoInode !== markerBefore\.ino[\s\S]*?continue;[\s\S]*?const held = fs\.statSync\([\s\S]*?sameInode\(markerBefore, held\)/u,
   "the proc descriptor scan must prefilter mismatches and retain exact device-and-inode authority",
+);
+assert.ok(
+  runHandles.includes(
+    "while IFS= read -r -d '' environ_entry || [[ -n \"$environ_entry\" ]]; do",
+  ),
+  "the proc environment scan must read complete NUL-delimited records with Bash builtins",
+);
+assert.match(
+  runHandles,
+  /"\$environ_entry" == "AGENTQG_RUN=agentqg:\$\{token\}"[\s\S]*?"\$environ_entry" == "AGENTQG_REQUEST=agentqg:\$\{token\}"/u,
+  "the proc environment scan must compare both run tags as exact records",
+);
+assert.equal(
+  occurrences(runHandles, "environ_entries="),
+  0,
+  "the proc environment scan must not capture per-PID tr output",
 );
 assert.match(
   runHandles,
@@ -2177,6 +2198,15 @@ if [[ "${QG_FAIL_COMMAND_STAMP_READ:-}" == 1 &&
 fi
 exec "${REAL_CP_COMMAND:?}" "$@"
 STUB
+  cat > bin/mv <<'STUB'
+#!/usr/bin/env bash
+destination="${!#}"
+if [[ "${QG_FAIL_COMMAND_STAMP_REPLACE:-}" == 1 &&
+  "$destination" == */.tmp/agent-quality-gate/command-stamps.tsv ]]; then
+  exit 94
+fi
+exec "${REAL_MV_COMMAND:?}" "$@"
+STUB
   cat > bin/id <<'STUB'
 #!/usr/bin/env bash
 if [[ "${1:-}" == "-u" ]]; then
@@ -2206,7 +2236,7 @@ if [[ -n "${QG_LSOF_PATH_RECORD:-}" ]]; then
 fi
 exit 1
 STUB
-  chmod +x bin/cp bin/date bin/id bin/lsof bin/pnpm bin/uname tools/trunk
+  chmod +x bin/cp bin/date bin/id bin/lsof bin/mv bin/pnpm bin/uname tools/trunk
   git add .
   git commit -qm init
   git worktree add --detach -q "$coordinator_gate_pipeline_joiner_repo" HEAD
@@ -2250,9 +2280,11 @@ STUB
   real_cp_command="$(command -v cp)"
   real_date_command="$(command -v date)"
   real_id_command="$(command -v id)"
+  real_mv_command="$(command -v mv)"
   real_uname_command="$(command -v uname)"
   export REAL_DATE_COMMAND="$real_date_command"
   export REAL_ID_COMMAND="$real_id_command"
+  export REAL_MV_COMMAND="$real_mv_command"
 
   # shellcheck disable=SC2329
   cleanup_gate_pipeline_fixture() {
@@ -2669,40 +2701,47 @@ STUB
     fail_gate_pipeline_fixture "serial-to-parallel marker failure reported an inaccurate no-work verdict"
 
   mkdir -p .tmp/agent-quality-gate
-  printf 'invalid fixture stamp\n' > .tmp/agent-quality-gate/command-stamps.tsv
-  set +e
-  set +o pipefail
-  AGENT_QUALITY_GATE_LOCK=1 \
-    AGENT_QUALITY_GATE_LOCK_HELD='' \
-    AGENT_QUALITY_GATE_LOCK_DIR="$coordinator_gate_pipeline_lock" \
-    AGENT_QUALITY_GATE_COORDINATOR=1 \
-    AGENT_QUALITY_GATE_CAPACITY=3 \
-    NODE_ENV=test \
-    QG_CONTENDER_COMMAND_MARKER="$prune_command_marker" \
-    QG_FAIL_COMMAND_STAMP_READ=1 \
-    REAL_CP_COMMAND="$real_cp_command" \
-    REAL_UNAME_COMMAND="$real_uname_command" \
-    PATH="$coordinator_gate_pipeline_repo/bin:$PATH" \
-    /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
-      --changed-paths-file contender-paths.txt \
-      --base HEAD --run --parallel 1 --lock-wait 30 \
-      2> "$prune_stderr" | cat > "$prune_stdout"
-  prune_statuses=("${PIPESTATUS[@]}")
-  set -o pipefail
-  set -e
-  [[ "${prune_statuses[0]}" -eq 2 ]] ||
-    fail_gate_pipeline_fixture "piped command-stamp pruning failure did not exit 2"
-  [[ "${prune_statuses[1]}" -eq 0 ]] ||
-    fail_gate_pipeline_fixture "command-stamp pruning pipeline reader did not exit 0"
-  grep -Fq -- \
-    "Quality-gate coordinator command-stamp pruning failed. No mapped command ran in this request; this gate exits 2." \
-    "$prune_stdout" ||
-    fail_gate_pipeline_fixture "command-stamp pruning failure omitted its stdout verdict"
-  grep -Fq -- "could not read or prune the per-command stamp cache before first dispatch" \
-    "$prune_stderr" ||
-    fail_gate_pipeline_fixture "command-stamp pruning failure omitted its stderr diagnosis"
-  [[ ! -e "$prune_command_marker" ]] ||
-    fail_gate_pipeline_fixture "command-stamp pruning failure ran a mapped command"
+  for prune_failure_kind in read replace; do
+    printf 'invalid fixture stamp\n' > .tmp/agent-quality-gate/command-stamps.tsv
+    rm -f "$prune_command_marker"
+    case "$prune_failure_kind" in
+      read) prune_failure_assignment="QG_FAIL_COMMAND_STAMP_READ=1" ;;
+      replace) prune_failure_assignment="QG_FAIL_COMMAND_STAMP_REPLACE=1" ;;
+    esac
+    set +e
+    set +o pipefail
+    env "$prune_failure_assignment" \
+      AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$coordinator_gate_pipeline_lock" \
+      AGENT_QUALITY_GATE_COORDINATOR=1 \
+      AGENT_QUALITY_GATE_CAPACITY=3 \
+      NODE_ENV=test \
+      QG_CONTENDER_COMMAND_MARKER="$prune_command_marker" \
+      REAL_CP_COMMAND="$real_cp_command" \
+      REAL_UNAME_COMMAND="$real_uname_command" \
+      PATH="$coordinator_gate_pipeline_repo/bin:$PATH" \
+      /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+        --changed-paths-file contender-paths.txt \
+        --base HEAD --run --parallel 1 --lock-wait 30 \
+        2> "$prune_stderr" | cat > "$prune_stdout"
+    prune_statuses=("${PIPESTATUS[@]}")
+    set -o pipefail
+    set -e
+    [[ "${prune_statuses[0]}" -eq 2 ]] ||
+      fail_gate_pipeline_fixture "piped command-stamp ${prune_failure_kind} failure did not exit 2"
+    [[ "${prune_statuses[1]}" -eq 0 ]] ||
+      fail_gate_pipeline_fixture "command-stamp ${prune_failure_kind} pipeline reader did not exit 0"
+    grep -Fq -- \
+      "Quality-gate coordinator command-stamp pruning failed. No mapped command ran in this request; this gate exits 2." \
+      "$prune_stdout" ||
+      fail_gate_pipeline_fixture "command-stamp ${prune_failure_kind} failure omitted its stdout verdict"
+    grep -Fq -- "could not read or prune the per-command stamp cache before first dispatch" \
+      "$prune_stderr" ||
+      fail_gate_pipeline_fixture "command-stamp ${prune_failure_kind} failure omitted its stderr diagnosis"
+    [[ ! -e "$prune_command_marker" ]] ||
+      fail_gate_pipeline_fixture "command-stamp ${prune_failure_kind} failure ran a mapped command"
+  done
 
   set +e
   AGENT_QUALITY_GATE_LOCK=0 \
@@ -19508,6 +19547,111 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
       "$race_proc_start" "$race_proc_parent" ||
       fail "the proc marker fixture could not clean its descriptor holder"
     rm -f "$race_proc_marker" "$race_proc_ready"
+  fi
+
+  # The environment census runs once per visible Linux process on every drain
+  # pass. It must use shell builtins and compare complete NUL records. External
+  # `tr` and `grep` calls here made a no-op drain launch thousands of processes
+  # on a busy runner. A longer token must not match the requested token.
+  if [[ -d /proc/self/fd ]]; then
+    race_proc_env_token="fixture-proc-env-${gate_test_outer_pid}-${gate_race_fixture_epoch}"
+    race_proc_env_long_token="${race_proc_env_token}.long-${gate_test_outer_pid}-${gate_race_fixture_epoch}"
+    race_proc_env_run_ready="$gate_race_out/proc-env-run-ready"
+    race_proc_env_request_ready="$gate_race_out/proc-env-request-ready"
+    race_proc_env_long_ready="$gate_race_out/proc-env-long-ready"
+    race_proc_env_tools_called="$gate_race_out/proc-env-tools-called"
+    race_proc_env_env="$(command -v env)"
+    race_proc_env_sleep="$(command -v sleep)"
+    [[ "$race_proc_env_env" == /* && -x "$race_proc_env_env" &&
+      "$race_proc_env_sleep" == /* && -x "$race_proc_env_sleep" ]] ||
+      fail "the proc environment fixture requires absolute env and sleep commands"
+    rm -f "$race_proc_env_run_ready" "$race_proc_env_request_ready" \
+      "$race_proc_env_long_ready" "$race_proc_env_tools_called"
+
+    race_bound_launch_command "proc environment run tag" 30 \
+      "$race_proc_env_env" -i PATH=/usr/bin:/bin \
+      "AGENTQG_RUN=agentqg:${race_proc_env_token}" \
+      /bin/sh -c ': > "$1"; exec "$2" 60' \
+      proc-env-run "$race_proc_env_run_ready" "$race_proc_env_sleep" ||
+      fail "the proc environment fixture could not bind its run-tag child"
+    race_proc_env_run_pid="$race_bound_pid"
+    race_proc_env_run_start="$race_bound_start"
+    race_proc_env_run_parent="$race_bound_parent"
+
+    race_bound_launch_command "proc environment request tag" 30 \
+      "$race_proc_env_env" -i PATH=/usr/bin:/bin \
+      "AGENTQG_REQUEST=agentqg:${race_proc_env_token}" \
+      /bin/sh -c ': > "$1"; exec "$2" 60' \
+      proc-env-request "$race_proc_env_request_ready" "$race_proc_env_sleep" ||
+      fail "the proc environment fixture could not bind its request-tag child"
+    race_proc_env_request_pid="$race_bound_pid"
+    race_proc_env_request_start="$race_bound_start"
+    race_proc_env_request_parent="$race_bound_parent"
+
+    race_bound_launch_command "proc environment longer tag" 30 \
+      "$race_proc_env_env" -i PATH=/usr/bin:/bin \
+      "AGENTQG_REQUEST=agentqg:${race_proc_env_long_token}" \
+      /bin/sh -c ': > "$1"; exec "$2" 60' \
+      proc-env-long "$race_proc_env_long_ready" "$race_proc_env_sleep" ||
+      fail "the proc environment fixture could not bind its longer-token child"
+    race_proc_env_long_pid="$race_bound_pid"
+    race_proc_env_long_start="$race_bound_start"
+    race_proc_env_long_parent="$race_bound_parent"
+
+    race_waited=0
+    while [[ ( ! -e "$race_proc_env_run_ready" ||
+      ! -e "$race_proc_env_request_ready" ||
+      ! -e "$race_proc_env_long_ready") && "$race_waited" -lt 100 ]]; do
+      sleep 0.05
+      race_waited=$((race_waited + 1))
+    done
+    [[ -e "$race_proc_env_run_ready" &&
+      -e "$race_proc_env_request_ready" &&
+      -e "$race_proc_env_long_ready" ]] ||
+      fail "the proc environment children did not publish readiness"
+
+    race_proc_env_output="$(
+      gate_drain_scan_error="agentqg-scan-failed"
+      gate_lock_root_dir="$gate_race_root"
+      source "$repo_root/scripts/gate/run-handles.sh"
+      pgrep() { return 1; }
+      # shellcheck disable=SC2329 # invoked indirectly by gate_run_tagged_pids
+      tr() {
+        : > "$race_proc_env_tools_called"
+        return 97
+      }
+      # shellcheck disable=SC2329 # invoked indirectly by gate_run_tagged_pids
+      grep() {
+        : > "$race_proc_env_tools_called"
+        return 97
+      }
+      gate_run_tagged_pids "$race_proc_env_token"
+    )"
+    race_proc_env_expected="$(
+      printf '%s\n' "$race_proc_env_run_pid" "$race_proc_env_request_pid" |
+        sort -n
+    )"
+    race_proc_env_actual="$(printf '%s\n' "$race_proc_env_output" | sort -n)"
+    [[ "$race_proc_env_actual" == "$race_proc_env_expected" ]] ||
+      fail "the proc environment scan did not emit only its exact run and request tags"
+    [[ ! -e "$race_proc_env_tools_called" ]] ||
+      fail "the proc environment scan launched tr or grep for a PID"
+
+    race_drain_kill_and_reap_direct_wrapper \
+      "proc environment run tag" "$race_proc_env_run_pid" \
+      "$race_proc_env_run_start" "$race_proc_env_run_parent" ||
+      fail "the proc environment fixture could not reap its run-tag child"
+    race_drain_kill_and_reap_direct_wrapper \
+      "proc environment request tag" "$race_proc_env_request_pid" \
+      "$race_proc_env_request_start" "$race_proc_env_request_parent" ||
+      fail "the proc environment fixture could not reap its request-tag child"
+    race_drain_kill_and_reap_direct_wrapper \
+      "proc environment longer tag" "$race_proc_env_long_pid" \
+      "$race_proc_env_long_start" "$race_proc_env_long_parent" ||
+      fail "the proc environment fixture could not reap its longer-token child"
+    race_bound_prune_completed
+    rm -f "$race_proc_env_run_ready" "$race_proc_env_request_ready" \
+      "$race_proc_env_long_ready" "$race_proc_env_tools_called"
   fi
 
   # A scan that fails is not a scan that finds nothing. With `pgrep` exiting 2
