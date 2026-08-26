@@ -9,6 +9,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -1226,6 +1227,33 @@ test("--validate --append refuses a row that overstates its own verdict", () => 
   }
 });
 
+test("--validate applies the schema check without --append", () => {
+  const root = makeRoot();
+  try {
+    const rowPath = path.join(root, "row.json");
+    // `validateLedgerRow` used to run only inside `appendRow`, so a row the
+    // ledger would refuse was reported `ok: true` by the mode whose whole job
+    // is to say whether the row is sound.
+    const row = makeRow({ matchedIds: scorableIdsFor([1990, 1999]) });
+    delete row.inputs.codex_cli;
+    writeFileSync(rowPath, JSON.stringify(row, null, 2));
+    const result = cli(["--validate", rowPath, "--json"], { root });
+    assert.equal(result.status, 1);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.ok, false);
+    assert.match(output.problems.join(" | "), /inputs.*codex_cli/);
+    // And the same row still fails with --append, without being written.
+    const appended = cli(["--validate", rowPath, "--append", "--json"], {
+      root,
+    });
+    assert.equal(appended.status, 1);
+    assert.equal(JSON.parse(appended.stdout).appended, false);
+    assert.equal(readLedger(path.join(root, ledgerRelative)).length, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("--validate --against rechecks the verdict on the named baseline", () => {
   const root = makeRoot();
   try {
@@ -2015,7 +2043,16 @@ function stubExec({ matchAll = true } = {}) {
         return JSON.stringify(["claim one", "claim two"]);
       }
       if (prompt.startsWith("You are matching a code review")) {
-        const indexes = [...prompt.matchAll(/^\s*(\d+)\.\s/gm)].map((match) =>
+        // Only the DEFECTS block numbers defects. Scanning the whole prompt
+        // also picks up numbered lines inside a defect's detail or inside the
+        // review, and answering with an index the prompt never offered is what
+        // `requireMatches` now refuses — a stub must not need that licence.
+        const defects = prompt.slice(
+          prompt.indexOf("<<<DEFECTS"),
+          prompt.indexOf("\nDEFECTS\n"),
+        );
+        // `defectBlock` writes each header as `N. [severity] path:line — title`.
+        const indexes = [...defects.matchAll(/^(\d+)\. \[/gm)].map((match) =>
           Number(match[1]),
         );
         return JSON.stringify({
@@ -2775,6 +2812,130 @@ test("the orchestrator keeps its resume cache outside the spec worktree", () => 
   // plan directory inside it takes every completed cell down with it.
   assert.match(script, /RUN_DIR="\$REPO\/\$DETAIL_DIR"/);
   assert.match(script, /--out "\$RUN_DIR"/);
+});
+
+/** Extract one shell function from run-eval.sh, or fail the test. */
+function shellFunction(name) {
+  const script = readFileSync(
+    path.join(repoRoot, "scripts/review/run-eval.sh"),
+    "utf8",
+  );
+  const source = script.match(
+    new RegExp(`\\n${name}\\(\\) \\{\\n[\\s\\S]*?\\n\\}\\n`),
+  )?.[0];
+  assert.ok(source, `${name} was not found in run-eval.sh`);
+  return source;
+}
+
+test("publishing a failed run keeps the cells a retry would reuse", () => {
+  // The run directory IS the resume cache and is normally the very directory
+  // being published, so an unconditional `rm -rf $detail/cells` made a retry
+  // re-spend the whole paid matrix. The cells stay out of the commit through an
+  // exclude pathspec instead.
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-publish-"));
+  try {
+    const detail = "docs/evals/review-skill-runs/2026-09-08-dead-full-beef";
+    const run = (keepCells) => {
+      const repo = path.join(dir, `repo-${keepCells}`);
+      mkdirSync(path.join(repo, detail, "cells", "c1"), { recursive: true });
+      writeFileSync(
+        path.join(repo, detail, "cells", "c1", "result.json"),
+        "{}",
+      );
+      const harness = [
+        "set -uo pipefail",
+        `REPO=${JSON.stringify(repo)}`,
+        `RUN_DIR=${JSON.stringify(path.join(repo, detail))}`,
+        "OPEN_PR=0",
+        `KEEP_CELLS=${keepCells}`,
+        `json_field() { printf '%s' ${JSON.stringify(detail)}; }`,
+        "require_safe_detail() { :; }",
+        `log() { printf '%s\\n' "$*"; }`,
+        shellFunction("publish_row"),
+        "publish_row INCOMPLETE failure.md",
+      ].join("\n");
+      const result = spawnSync("bash", ["-c", harness], { encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr);
+      return {
+        stdout: result.stdout,
+        cells: existsSync(
+          path.join(repo, detail, "cells", "c1", "result.json"),
+        ),
+      };
+    };
+    const failed = run(1);
+    assert.equal(failed.cells, true, "a failed run lost its resume cache");
+    assert.match(failed.stdout, /keeping the resume cache/);
+    // A scored run has nothing left to resume, so its cells still go.
+    assert.equal(run(0).cells, false);
+    // Either way the commit excludes them.
+    assert.match(
+      failed.stdout,
+      new RegExp(`git -C \\S+ add \\S+ \\S*${detail}\\S* \\S*exclude\\S*cells`),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("one review eval at a time may hold the shared fixture cache", () => {
+  // Every cell resets and cleans the shared per-PR checkout and stages `.skill`
+  // in it. Two overlapping runs — the launchd job starting under a manual run,
+  // or two manual runs — take turns rewriting the tree the other is reviewing.
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-lock-"));
+  try {
+    const harness = [
+      "set -uo pipefail",
+      `CACHE_DIR=${JSON.stringify(dir)}`,
+      'LOCK_DIR=""',
+      `fail() { printf 'FATAL: %s\\n' "$*" >&2; exit 1; }`,
+      `log() { printf '%s\\n' "$*"; }`,
+      shellFunction("acquire_run_lock"),
+      'acquire_run_lock; printf "held %s\\n" "$LOCK_DIR"',
+    ].join("\n");
+    const lock = path.join(dir, "run.lock");
+
+    const free = spawnSync("bash", ["-c", harness], { encoding: "utf8" });
+    assert.equal(free.status, 0, free.stderr);
+    assert.match(free.stdout, new RegExp(`held ${lock}`));
+    assert.equal(
+      readFileSync(path.join(lock, "pid"), "utf8").trim().length > 0,
+      true,
+    );
+
+    // A live holder is a real conflict, and the run refuses before it spends.
+    writeFileSync(path.join(lock, "pid"), `${process.pid}\n`);
+    const busy = spawnSync("bash", ["-c", harness], { encoding: "utf8" });
+    assert.equal(busy.status, 1);
+    assert.match(busy.stderr, /another review eval \(pid \d+\) holds/);
+
+    // A lock left behind by a SIGKILL is reclaimed rather than wedging the job.
+    const dead = spawnSync("bash", ["-c", "exit 0"]);
+    writeFileSync(path.join(lock, "pid"), `${dead.pid}\n`);
+    const reclaimed = spawnSync("bash", ["-c", harness], { encoding: "utf8" });
+    assert.equal(reclaimed.status, 0, reclaimed.stderr);
+    assert.match(reclaimed.stdout, /reclaiming a run lock/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the run lock is taken before anything touches the fixtures", () => {
+  const script = readFileSync(
+    path.join(repoRoot, "scripts/review/run-eval.sh"),
+    "utf8",
+  );
+  // Taken before the spec worktree, the plan and the matrix, and released by
+  // the EXIT trap so an interrupted run does not wedge the next one.
+  assert.ok(
+    script.indexOf("\nacquire_run_lock\n") <
+      script.indexOf("# --- the spec worktree"),
+    "the run lock is taken after the spec worktree is added",
+  );
+  assert.match(
+    script,
+    /if \[\[ -n \$LOCK_DIR \]\]; then\n\s*rm -rf "\$LOCK_DIR"/,
+  );
 });
 
 test("the orchestrator rejects a cell whose finder or report failed", () => {

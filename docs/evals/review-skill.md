@@ -141,7 +141,12 @@ commands cut still come from the checkout the script runs in, so a run without
 `--skill-ref` refuses to start unless that checkout is at `origin/main` with an
 unmodified ledger — on a feature branch it would plan against a ledger missing
 newer rows and offer to commit the row on top of unrelated work. The scheduled
-launchd job runs the same code path. The skill under test is snapshotted once, before the first
+launchd job runs the same code path. Only one run at a time may hold the
+fixture cache: every cell resets, cleans and stages `.skill` into the shared
+per-PR checkout, so a scheduled run starting under a manual one would rewrite
+the tree the other is reviewing. The script takes a `run.lock` directory under
+the cache and refuses to start while another live run holds it; a lock left
+behind by a killed run is reclaimed. The skill under test is snapshotted once, before the first
 cell, and every cell stages from that snapshot: the plan records one skill
 digest for the whole matrix, and two hours is long enough to edit the installed
 skill under a running evaluation. A snapshot that no longer matches the planned
@@ -154,7 +159,10 @@ fingerprint — skill digest, kind, contract digest, the two CLI versions, the
 finder argv digest and the orchestrator digest — matches the current run,
 and the run directory carries the kind and the skill digest in its name, so an
 aborted run followed by a skill edit re-runs instead of scoring the old skill
-under the new digest. The six-hour deadline bounds the whole run: three quarters
+under the new digest. A run that ends before it scores keeps its cells on disk
+for that retry — publishing strips them from the commit with an exclude
+pathspec rather than deleting them — and only a run that reached a score
+removes them, having nothing left to resume. The six-hour deadline bounds the whole run: three quarters
 of it start cells and bound each finder and contestant process, the rest bounds
 the judge pass, and a run that reaches either bound reports a partial matrix
 rather than a table with quietly missing cells. A stalled process is killed

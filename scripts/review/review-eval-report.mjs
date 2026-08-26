@@ -192,6 +192,19 @@ function comparable(row, baselineRow) {
         "baseline notes record a suspected leak; comparison refused (its bits are not trusted)",
     };
   }
+  // `resolveBaseline` only ever anchors on a row that precedes the candidate.
+  // A later row named with `--against` reverses the pairing: its bits become
+  // the base, so the defects the candidate found and the later row did not are
+  // counted as lost and the ones it gained as gains. The delta then reads
+  // backwards, and a regression can print PROMOTE. Instants are ISO-8601 UTC —
+  // `checkInstant` refuses any other form — so a string compare orders them,
+  // the same compare `resolveBaseline` uses.
+  if (!(baselineRow.executed_at < row.executed_at)) {
+    return {
+      usable: false,
+      reason: `baseline executed_at ${baselineRow.executed_at} does not precede this row's ${row.executed_at}; comparison refused (a baseline must be the earlier run)`,
+    };
+  }
   if (row.comparability_key === baselineRow.comparability_key) {
     return { usable: true, reason: null };
   }

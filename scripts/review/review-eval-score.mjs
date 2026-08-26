@@ -205,14 +205,36 @@ export function parseJudgeJson(
  * matched defects, and only one of them is a result. A silent empty set records
  * every candidate as missed, which can flip a regression or turn a row RED.
  * `classifyNovel` refuses a missing `verdicts` object for the same reason.
+ *
+ * The entries carry the same weight as the array itself. `{"matches":[99]}` or
+ * `{"matches":["unknown"]}` is not a shorter match list — it is a judge that
+ * answered about defects nobody asked it about, and dropping those entries
+ * quietly records every candidate as missed. `candidateCount` is the 1-based
+ * range the prompt offered, so every entry is checked against it and a reply
+ * that leaves it poisons the scoring pass instead. A numeric string is still
+ * accepted — a judge that writes `"1"` for `1` answered the question — but
+ * nothing else is.
  */
-function requireMatches(parsed, label) {
+function requireMatches(parsed, label, candidateCount) {
   if (!Array.isArray(parsed?.matches)) {
     throw new JudgeOutputError(`${label} returned no matches array`, {
       raw: JSON.stringify(parsed ?? null),
     });
   }
-  return parsed.matches;
+  const indices = [];
+  for (const entry of parsed.matches) {
+    const numeric = typeof entry === "number" || typeof entry === "string";
+    const index = numeric ? Number(entry) : Number.NaN;
+    if (!Number.isInteger(index) || index < 1 || index > candidateCount) {
+      throw new JudgeOutputError(
+        `${label} returned match entry ${JSON.stringify(entry ?? null)}, ` +
+          `which is not a defect index in 1..${candidateCount}`,
+        { raw: JSON.stringify(parsed) },
+      );
+    }
+    indices.push(index);
+  }
+  return indices;
 }
 
 let blindCwd = null;
@@ -328,6 +350,11 @@ function selectScorable(truthFindings, scorableIds) {
  * Model-driven on purpose: a regex over headings and bullets scored reviews by
  * formatting rather than content — one contestant that wrote findings as bold
  * numbered paragraphs extracted zero claims from a review containing several.
+ *
+ * Every element must be a string. `String({})` is `"[object Object]"`, a
+ * non-empty claim that survives the filter below, reads as vague to the novel
+ * judge, and — because the review no longer extracts to zero claims — hides the
+ * zero-finding RED gate. A malformed extractor reply poisons the pass instead.
  */
 export async function extractClaims({
   transcript,
@@ -346,8 +373,16 @@ export async function extractClaims({
     "claim extraction",
     "array",
   );
+  for (const claim of parsed) {
+    if (typeof claim !== "string") {
+      throw new JudgeOutputError(
+        `claim extraction returned a non-string claim ${JSON.stringify(claim ?? null)}`,
+        { raw: JSON.stringify(parsed) },
+      );
+    }
+  }
   return parsed
-    .map((claim) => String(claim).slice(0, MAX_CLAIM_CHARS))
+    .map((claim) => claim.slice(0, MAX_CLAIM_CHARS))
     .filter((claim) => claim.trim().length > 0)
     .slice(0, MAX_CLAIMS);
 }
@@ -397,17 +432,9 @@ export async function matchClaims({
     "match judge",
     "object",
   );
-  const matches = requireMatches(parsed, "match judge");
+  const matches = requireMatches(parsed, "match judge", candidates.length);
   const matchedIds = [
-    ...new Set(
-      matches
-        .map((entry) => Number(entry))
-        .filter(
-          (entry) =>
-            Number.isInteger(entry) && entry >= 1 && entry <= candidates.length,
-        )
-        .map((entry) => candidates[entry - 1].finding.id),
-    ),
+    ...new Set(matches.map((entry) => candidates[entry - 1].finding.id)),
   ].sort((a, b) => a - b);
   // bench2 keyed reasoning by candidate index, which is meaningless once the
   // candidate list is gone. Key it by defect id so a ledger detail file stays
@@ -731,8 +758,14 @@ export async function runCalibration({
         `calibration ${record.record_id}`,
         "object",
       );
-      const matches = requireMatches(parsed, `calibration ${record.record_id}`);
-      const actual = matches.map(Number).includes(1) ? "matched" : "unmatched";
+      // A calibration prompt carries exactly one defect, so 1 is the only
+      // index the judge may name.
+      const matches = requireMatches(
+        parsed,
+        `calibration ${record.record_id}`,
+        1,
+      );
+      const actual = matches.includes(1) ? "matched" : "unmatched";
       return {
         record_id: record.record_id,
         defect_id: record.defect_id,

@@ -31,6 +31,7 @@ import {
   frozenDefectProblems,
   fullMatrixProblems,
   readLedger,
+  validateLedgerRow,
 } from "./review-eval-ledger.mjs";
 import {
   parseLeadingReviewEvalMarkers,
@@ -726,7 +727,13 @@ async function modeValidate(options, context) {
   // recall and McNemar denominators have quietly shrunk. `--check-ledger`
   // applies both to the committed ledger; append must apply both before the row
   // gets in, or the committed ledger is where the fault is first reported.
+  // The schema check runs here rather than only inside `appendRow`. Without
+  // it a `--validate FILE` with no `--append` reports `ok: true` for a row
+  // missing required `inputs` fields or carrying an out-of-schema kind, status
+  // or verdict — the mode whose whole job is to say whether the row is sound,
+  // answering yes about a row the ledger would refuse.
   problems.push(
+    ...validateLedgerRow(row, "row"),
     ...frozenDefectProblems({ contract: context.contract, row, label: "row" }),
     ...fullMatrixProblems({ contract: context.contract, row, label: "row" }),
   );

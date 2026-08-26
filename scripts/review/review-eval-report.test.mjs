@@ -450,6 +450,37 @@ test("an uncalibrated baseline is refused before it ranks anything", () => {
   );
 });
 
+test("a baseline that postdates the candidate is refused", () => {
+  // `resolveBaseline` only ever anchors on an earlier row. Pairing against a
+  // later one reverses the reading: what the candidate found and the later row
+  // did not is counted as lost, so a regression can print PROMOTE.
+  const later = baseline({ executed_at: "2027-01-08T10:41:07Z" });
+  const regressed = verdict({
+    contract,
+    row: row({ conditions: { pipeline: condition({ found: 14 }) } }),
+    baselineRow: later,
+  });
+  assert.equal(regressed.verdict, "AMBER", JSON.stringify(regressed.reasons));
+  assert.match(
+    regressed.reasons.join("\n"),
+    /baseline executed_at 2027-01-08T10:41:07Z does not precede this row's 2026-12-08T10:41:07Z/,
+  );
+  // A row named as its own baseline is the same fault: every flip is zero.
+  assert.equal(
+    verdict({
+      contract,
+      row: row(),
+      baselineRow: baseline({ executed_at: "2026-12-08T10:41:07Z" }),
+    }).verdict,
+    "AMBER",
+  );
+  // The report reads the same pairing, so it prints no McNemar line either.
+  assert.match(
+    renderReport({ contract, row: row(), baselineRow: later, truth }),
+    /No paired baseline comparison for this row\./,
+  );
+});
+
 test("verdict refuses to rank a pair sharing fewer than three defects", () => {
   const twoDefects = { ids: allIds.slice(0, 2), found: 2 };
   const paired = verdict({

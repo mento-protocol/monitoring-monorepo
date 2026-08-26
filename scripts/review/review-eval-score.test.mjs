@@ -207,10 +207,30 @@ test("extractClaims throws when the splitter emits no array", async () => {
   );
 });
 
+test("extractClaims throws when an array element is not a string", async () => {
+  // `String({})` is "[object Object]" — a non-empty claim that survives the
+  // empty filter, reads as vague to the novel judge, and stops the review from
+  // counting as zero-finding, which is what the RED gate is watching for.
+  for (const reply of [
+    JSON.stringify([{}]),
+    JSON.stringify([["nested"]]),
+    JSON.stringify(["fine", 7]),
+    JSON.stringify([null]),
+  ]) {
+    await assert.rejects(
+      extractClaims({ transcript: "review", exec: stubExec([reply]) }),
+      (error) =>
+        error instanceof JudgeOutputError &&
+        /returned a non-string claim/.test(error.message),
+      reply,
+    );
+  }
+});
+
 test("matchClaims maps judge numbers back to defect ids and keys reasoning by id", async () => {
   const exec = stubExec([
     JSON.stringify({
-      matches: [2, 1, 2, 9],
+      matches: [2, 1, 2],
       reasoning: {
         1: "names the same split",
         2: "same inverted threshold",
@@ -332,6 +352,43 @@ test("matchClaims poisons the cell when the reply carries no matches array", asy
     exec: stubExec([JSON.stringify({ matches: [], reasoning: {} })]),
   });
   assert.deepEqual(empty.matchedIds, []);
+});
+
+test("matchClaims poisons the cell when a match entry is not a defect index", async () => {
+  // Filtering these out is the same fault as accepting a missing array: the
+  // candidates the judge never ruled on are recorded as missed, so a reply that
+  // names defect 99 or the word "unknown" can flip a regression or turn a row
+  // RED instead of failing the scoring pass.
+  for (const reply of [
+    JSON.stringify({ matches: [99], reasoning: {} }),
+    JSON.stringify({ matches: ["unknown"], reasoning: {} }),
+    JSON.stringify({ matches: [1, 0], reasoning: {} }),
+    JSON.stringify({ matches: [1.5], reasoning: {} }),
+    JSON.stringify({ matches: [null], reasoning: {} }),
+  ]) {
+    await assert.rejects(
+      matchClaims({
+        claims: [],
+        truthFindings,
+        scorableIds: [101],
+        transcript: "pr-ready-state-core.mjs:750 is wrong",
+        exec: stubExec([reply]),
+      }),
+      (error) =>
+        error instanceof JudgeOutputError &&
+        /is not a defect index in 1\.\.1/.test(error.message),
+      reply,
+    );
+  }
+  // A judge that writes the index as a string still answered the question.
+  const stringy = await matchClaims({
+    claims: [],
+    truthFindings,
+    scorableIds: [101],
+    transcript: "pr-ready-state-core.mjs:750 is wrong",
+    exec: stubExec([JSON.stringify({ matches: ["1"], reasoning: {} })]),
+  });
+  assert.deepEqual(stringy.matchedIds, [101]);
 });
 
 test("matchClaims poisons the cell when the judge call itself fails", async () => {

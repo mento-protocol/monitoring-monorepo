@@ -21,6 +21,12 @@
 # never cached: a session-limit error returns in seconds and, cached, would
 # permanently score as a zero-recall review. A cached cell is reused only when
 # its fingerprint — skill digest, kind, contract digest — matches this run.
+# A run that ends before it scores keeps those cells so the retry reuses them;
+# they never reach the PR.
+#
+# One run at a time. The fixture cache and the ledger are shared, so the script
+# takes a lock under --cache-dir and refuses to start while another run holds
+# it, rather than letting two runs rewrite each other's fixture checkouts.
 #
 # Usage:
 #   run-eval.sh [--kind full|canary|auto] [--skill-ref PATH] [--pr] [--no-pr]
@@ -57,6 +63,7 @@ SPEC=""
 SPEC_TEMP=0
 SHIM=""
 SKILL_SNAPSHOT=""
+LOCK_DIR=""
 RUN_DIR=""
 PLAN_JSON=""
 STARTED=0
@@ -124,7 +131,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h | --help)
-      sed -n '2,45p' "$0"
+      sed -n '2,51p' "$0"
       exit 0
       ;;
     *) fail "unknown argument: $1" ;;
@@ -162,9 +169,55 @@ cleanup() {
   if [[ -n $SKILL_SNAPSHOT ]]; then
     rm -rf "$SKILL_SNAPSHOT"
   fi
+  if [[ -n $LOCK_DIR ]]; then
+    rm -rf "$LOCK_DIR"
+  fi
   return "$code"
 }
 trap cleanup EXIT
+
+# --- the run lock ------------------------------------------------------------
+
+# One fixture cache, one ledger, one run at a time. Every cell resets and cleans
+# the shared per-PR checkout, stages or purges `.skill` in it, and then runs a
+# model inside it. Two runs that overlap — the launchd job starting while a
+# manual run is mid-matrix, or two manual runs — take turns rewriting the same
+# tree, so one scores a review of the other's skill state and neither result
+# means anything. Both also append to the same ledger.
+#
+# mkdir is the lock: it is atomic on every filesystem this runs on and needs no
+# flock, which macOS does not ship. The holder's pid goes inside so a lock left
+# behind by a SIGKILL can be told from a live run and reclaimed. The pid is
+# written before LOCK_DIR is set — the holder must be identifiable the instant
+# the directory exists, or a second run arriving in that window reads no pid and
+# reclaims a live lock. The read side waits for it for the same reason.
+# `kill -0` on a recycled pid can keep a stale lock held; that fails closed, and
+# the message names the directory to remove.
+acquire_run_lock() {
+  local lock="$CACHE_DIR/run.lock" holder="" waited=0
+  mkdir -p "$CACHE_DIR" || fail "the fixture cache $CACHE_DIR is not writable"
+  if ! mkdir "$lock" 2>/dev/null; then
+    while ((waited < 5)); do
+      waited=$((waited + 1))
+      holder="$(cat "$lock/pid" 2>/dev/null || true)"
+      if [[ $holder =~ ^[0-9]+$ ]]; then
+        break
+      fi
+      sleep 0.2
+    done
+    if [[ $holder =~ ^[0-9]+$ ]] && kill -0 "$holder" 2>/dev/null; then
+      fail "another review eval (pid $holder) holds $lock; a run rewrites the shared fixtures, so wait for it to finish"
+    fi
+    log "reclaiming a run lock left behind by pid ${holder:-unknown}"
+    rm -rf "$lock"
+    mkdir "$lock" 2>/dev/null ||
+      fail "could not take the run lock at $lock; remove it if no eval is running"
+  fi
+  printf '%s\n' "$$" >"$lock/pid"
+  LOCK_DIR="$lock"
+}
+
+acquire_run_lock
 
 # --- the spec worktree -------------------------------------------------------
 
@@ -440,8 +493,18 @@ require_safe_detail() {
 # inside the detail directory.
 PUBLISHED=0
 
+# The raw cells never belong in the PR — they are megabytes of model transcript
+# — but the run directory IS the resume cache, and normally it is the very
+# directory being published. Deleting `cells` there makes a retry re-spend the
+# whole paid matrix. So the cells are kept out of the commit with an exclude
+# pathspec instead, and removed from disk only once the run they belong to can
+# no longer be resumed. `abort` sets this to 1: that run ended before it scored,
+# and its completed cells are exactly what the retry must reuse.
+KEEP_CELLS=0
+
 publish_row() {
   local verdict="$1" body_file="$2" detail branch title
+  local -a add_argv
   PUBLISHED=0
   detail="$(json_field "$RUN_DIR/row.json" detail_dir)"
   require_safe_detail "$detail"
@@ -449,8 +512,16 @@ publish_row() {
   if [[ "$RUN_DIR" != "$REPO/$detail" ]]; then
     rm -rf "${REPO:?}/$detail"
     cp -R "$RUN_DIR" "$REPO/$detail"
+    # The copy is not the cache, so its cells go whatever this run's fate.
+    rm -rf "${REPO:?}/$detail/cells"
+  elif [[ $KEEP_CELLS -eq 0 ]]; then
+    rm -rf "${REPO:?}/$detail/cells"
+  else
+    log "keeping the resume cache at $REPO/$detail/cells for a retry"
   fi
-  rm -rf "${REPO:?}/$detail/cells"
+  # Excluded whether or not the directory is still there: a negative pathspec
+  # that matches nothing is not an error, and `$detail` matches on its own.
+  add_argv=(docs/evals/review-skill-ledger.jsonl "$detail" ":(exclude)$detail/cells")
 
   # The detail directory basename already identifies this run: date, the first
   # eight of the comparability key, the kind, and the skill digest. A date-only
@@ -463,7 +534,7 @@ publish_row() {
 
   printf '\n----- ledger PR -----\n'
   printf 'git -C %q checkout -b %q\n' "$REPO" "$branch"
-  printf 'git -C %q add docs/evals/review-skill-ledger.jsonl %q\n' "$REPO" "$detail"
+  printf 'git -C %q add %q %q %q\n' "$REPO" "${add_argv[@]}"
   printf 'git -C %q commit -m %q\n' "$REPO" "chore(evals): review-skill eval $verdict"
   printf 'git -C %q push -u origin %q\n' "$REPO" "$branch"
   printf 'gh pr create --repo mento-protocol/monitoring-monorepo --title %q --body-file %q\n' \
@@ -473,7 +544,7 @@ publish_row() {
   if [[ $OPEN_PR -eq 1 ]]; then
     log "opening the ledger PR"
     if git -C "$REPO" checkout -b "$branch" &&
-      git -C "$REPO" add docs/evals/review-skill-ledger.jsonl "$detail" &&
+      git -C "$REPO" add "${add_argv[@]}" &&
       git -C "$REPO" commit -m "chore(evals): review-skill eval $verdict" &&
       git -C "$REPO" push -u origin "$branch" &&
       gh pr create --repo mento-protocol/monitoring-monorepo \
@@ -521,6 +592,9 @@ abort() {
   # ever reaches a PR or the freshness workflow. Publish the row the way a
   # scored one is published, and exit zero only when a PR actually carries it.
   # Otherwise exit non-zero with the commands that finish the job printed above.
+  # This run never scored, so its completed cells are still worth money and are
+  # the only thing that makes a retry cheap. Publishing must not delete them.
+  KEEP_CELLS=1
   write_failed_row "$1" ||
     fail "the run failed and the failure row could not be appended: $1"
   # shellcheck disable=SC2016  # the backticks are markdown in the PR body
