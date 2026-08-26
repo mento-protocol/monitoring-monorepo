@@ -214,12 +214,13 @@ longer-than-normal sync, derive a quantitative update from later samples. For
 each chain, report processed height, head height, remaining gap, gap change,
 net gap-closure rate, and rough gap ETA. Treat a zero gap as a gap ETA of zero
 for that sample. It does not establish sync completion. A stable or growing
-positive gap has no finite ETA. If any chain has such a gap, that chain blocks
-completion and the overall gap ETA is unknown. Otherwise, the limiting chain is
-the incomplete chain with the largest credible gap ETA. When no positive gap
-remains, report an overall gap ETA of zero. Continue waiting until every chain
-has a non-empty `timestamp_caught_up_to_head_or_endblock`; the wrapper's
-terminal `caught_up` state uses the same signal. When present, use
+positive gap on an incomplete chain has no finite ETA. Such a chain blocks
+completion and makes the overall gap ETA unknown. Otherwise, the limiting chain
+is the incomplete chain with the largest credible gap ETA. When no incomplete
+chain has a positive gap, report an overall gap ETA of zero. Continue waiting
+until every chain has a non-empty
+`timestamp_caught_up_to_head_or_endblock`; the wrapper's terminal `caught_up`
+state uses the same signal. When present, use
 `latest_fetched_block_number` to distinguish a fetch backlog from a processing
 backlog, but do not claim a root cause without runtime metrics or logs. Send
 short updates at the runtime's required progress cadence. Include this full

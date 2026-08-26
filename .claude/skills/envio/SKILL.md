@@ -144,12 +144,12 @@ For slow-sync analysis, compare two timestamped status samples. Define the
 remaining gap as `max(0, block_height - latest_processed_block)`. The net
 gap-closure rate is the gap decrease divided by elapsed time. Estimate ETA as
 the current gap divided by that positive rate. Treat a zero gap as a gap ETA of
-zero for that sample. It does not establish sync completion. Report gap ETA as
-unknown when a positive gap is stable or grows. Any chain with such a gap
-blocks completion, and the overall gap ETA is unknown. Otherwise, the limiting
-chain is the incomplete chain with the largest credible gap ETA. When no
-positive gap remains, report an overall gap ETA of zero and continue waiting
-until every chain has a non-empty
+zero for that sample. It does not establish sync completion. For an incomplete
+chain, report gap ETA as unknown when a positive gap is stable or grows. Such a
+chain blocks completion and makes the overall gap ETA unknown. Otherwise, the
+limiting chain is the incomplete chain with the largest credible gap ETA. When
+no incomplete chain has a positive gap, report an overall gap ETA of zero and
+continue waiting until every chain has a non-empty
 `timestamp_caught_up_to_head_or_endblock`. When present, use
 `latest_fetched_block_number` to distinguish fetch and processing backlogs.
 Check runtime metrics and logs before assigning a cause. During a long watch,
