@@ -5541,13 +5541,31 @@ recomputed_stamp_line() {
     rm -f "$fresh_paths_file" "$fresh_plan_file"
     return 1
   fi
-  write_command_plan "$fresh_plan_file"
-  fresh_base="$(ref_oid "$base_ref")"
-  fresh_paths="$(hash_file "$fresh_paths_file")"
-  fresh_plan="$(hash_file "$fresh_plan_file")"
-  fresh_implementation="$(implementation_hash_value)"
-  fresh_content="$(validation_content_signature)"
-  rm -f "$fresh_paths_file" "$fresh_plan_file"
+  write_command_plan "$fresh_plan_file" || {
+    rm -f "$fresh_paths_file" "$fresh_plan_file"
+    return 1
+  }
+  fresh_base="$(ref_oid "$base_ref")" || {
+    rm -f "$fresh_paths_file" "$fresh_plan_file"
+    return 1
+  }
+  fresh_paths="$(hash_file "$fresh_paths_file")" || {
+    rm -f "$fresh_paths_file" "$fresh_plan_file"
+    return 1
+  }
+  fresh_plan="$(hash_file "$fresh_plan_file")" || {
+    rm -f "$fresh_paths_file" "$fresh_plan_file"
+    return 1
+  }
+  fresh_implementation="$(implementation_hash_value)" || {
+    rm -f "$fresh_paths_file" "$fresh_plan_file"
+    return 1
+  }
+  fresh_content="$(validation_content_signature)" || {
+    rm -f "$fresh_paths_file" "$fresh_plan_file"
+    return 1
+  }
+  rm -f "$fresh_paths_file" "$fresh_plan_file" || return 1
   if [[ -n "$gate_coordinator_freshness_context" ]]; then
     fresh_coordinator_context="$(gate_coordinator_freshness_context_hash)" || return 1
     printf 'v4\tbase=%s\tpaths=%s\tplan=%s\timplementation=%s\tcontent=%s\tpackageRisk=%s\tallowPackageScripts=%s\tscrubPolicy=%s\tcoordinatorContext=%s\n' \

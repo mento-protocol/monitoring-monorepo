@@ -5692,6 +5692,7 @@ mkdir -p "$lockfile_scope_missing_dir/gate"
 for lockfile_scope_gate_entry in "$repo_root"/scripts/gate/*; do
   lockfile_scope_gate_entry_name="$(basename "$lockfile_scope_gate_entry")"
   if [[ "$lockfile_scope_gate_entry_name" != "lockfile-scope.mjs" &&
+    "$lockfile_scope_gate_entry_name" != "quality-gate-coordinator-environment.mjs" &&
     "$lockfile_scope_gate_entry_name" != "run-handles.sh" ]]; then
     ln -s "$lockfile_scope_gate_entry" \
       "$lockfile_scope_missing_dir/gate/$lockfile_scope_gate_entry_name"
@@ -5699,6 +5700,8 @@ for lockfile_scope_gate_entry in "$repo_root"/scripts/gate/*; do
 done
 cp "$repo_root/scripts/gate/run-handles.sh" \
   "$lockfile_scope_missing_dir/gate/run-handles.sh"
+cp "$repo_root/scripts/gate/quality-gate-coordinator-environment.mjs" \
+  "$lockfile_scope_missing_dir/gate/quality-gate-coordinator-environment.mjs"
 lockfile_scope_missing_repo="$(mktemp -d)"
 (
   cd "$lockfile_scope_missing_repo"
@@ -5736,8 +5739,8 @@ assert_not_contains "- cd aegis && forge test (workspace dependency/config chang
 # have looked like resilience; the refusal is what has to survive the deletion.
 #
 # Same mirror trick as the classifier case above, one level deeper: every
-# scripts/ entry is symlinked, and `gate` is rebuilt as a real directory whose
-# contents are symlinks minus mapping.mjs.
+# scripts/ entry is symlinked, and `gate` is rebuilt as a real directory. Copy
+# the startup dependencies that reject symlinks, and omit only mapping.mjs.
 mapper_missing_dir="$(mktemp -d)"
 for mapper_sibling in "$repo_root"/scripts/*; do
   mapper_sibling_name="$(basename "$mapper_sibling")"
@@ -5748,11 +5751,15 @@ done
 mkdir -p "$mapper_missing_dir/gate"
 for mapper_gate_entry in "$repo_root"/scripts/gate/*; do
   mapper_gate_entry_name="$(basename "$mapper_gate_entry")"
-  if [[ "$mapper_gate_entry_name" != "mapping.mjs" && "$mapper_gate_entry_name" != "run-handles.sh" ]]; then
+  if [[ "$mapper_gate_entry_name" != "mapping.mjs" &&
+    "$mapper_gate_entry_name" != "quality-gate-coordinator-environment.mjs" &&
+    "$mapper_gate_entry_name" != "run-handles.sh" ]]; then
     ln -s "$mapper_gate_entry" "$mapper_missing_dir/gate/$mapper_gate_entry_name"
   fi
 done
 cp "$repo_root/scripts/gate/run-handles.sh" "$mapper_missing_dir/gate/run-handles.sh"
+cp "$repo_root/scripts/gate/quality-gate-coordinator-environment.mjs" \
+  "$mapper_missing_dir/gate/quality-gate-coordinator-environment.mjs"
 mapper_missing_repo="$(mktemp -d)"
 (
   cd "$mapper_missing_repo"
@@ -7663,6 +7670,128 @@ gate_test_stop_coordinators_in_root() {
   done < <(find "$lock_root" -type f -name coordinator.json -print 2>/dev/null)
 }
 
+# Both freshness callers place the recomputation inside an assignment followed
+# by `||`. Bash therefore disables implicit errexit inside the substituted
+# function. Extract the production function and make every load-bearing probe
+# return bytes before failure. Each explicit guard must still reach the caller's
+# failure branch with inherit_errexit both disabled and enabled when supported.
+recomputed_stamp_function="$(mktemp)"
+recomputed_stamp_scratch="$(mktemp -d)"
+if ! node --input-type=module - \
+  "$repo_root/scripts/agent-quality-gate.sh" \
+  "$repo_root/scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.mjs" \
+  > "$recomputed_stamp_function" <<'NODE'
+import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+
+const [gatePath, extractorPath] = process.argv.slice(2);
+const { bashFunctionSource } = await import(pathToFileURL(extractorPath).href);
+process.stdout.write(
+  bashFunctionSource(
+    readFileSync(gatePath, "utf8"),
+    "recomputed_stamp_line",
+    gatePath,
+  ),
+);
+NODE
+then
+  rm -f "$recomputed_stamp_function"
+  rm -rf "$recomputed_stamp_scratch"
+  fail "could not extract recomputed_stamp_line for failure propagation tests"
+fi
+recomputed_stamp_inherit_modes=(off)
+if /bin/bash -c 'shopt -s inherit_errexit' 2>/dev/null; then
+  recomputed_stamp_inherit_modes+=(on)
+fi
+for recomputed_stamp_inherit_mode in "${recomputed_stamp_inherit_modes[@]}"; do
+  for recomputed_stamp_caller in initial post-wait; do
+    for recomputed_stamp_failure in \
+      write-plan ref-oid hash-paths hash-plan implementation content \
+      coordinator-context; do
+      if ! /bin/bash -c '
+        set -euo pipefail
+        inherit_mode="$1"
+        function_source="$2"
+        scratch_dir="$3"
+        caller="$4"
+        failure_mode="$5"
+        if [[ "$inherit_mode" == on ]]; then
+          shopt -s inherit_errexit
+          shopt -q inherit_errexit
+        else
+          shopt -u inherit_errexit 2>/dev/null || true
+        fi
+        source "$function_source"
+        base_ref=HEAD
+        gate_coordinator_freshness_context=fixture-context
+        package_script_risk_changed=false
+        stamp_allow_package_scripts=n/a
+        gate_mapped_child_scrub_policy_hash="$(printf "%064d" 0)"
+        collect_current_changed_paths() {
+          printf "fixture.txt\n"
+        }
+        write_command_plan() {
+          printf "fixture plan\n" > "$1"
+          [[ "$failure_mode" != write-plan ]] || return 91
+        }
+        ref_oid() {
+          printf "%040d\n" 1
+          [[ "$failure_mode" != ref-oid ]] || return 91
+        }
+        hash_file() {
+          local probe
+          case "$1" in
+            *fresh-paths.*) probe=hash-paths ;;
+            *fresh-plan.*) probe=hash-plan ;;
+            *) return 98 ;;
+          esac
+          printf "%064d\n" 2
+          [[ "$failure_mode" != "$probe" ]] || return 91
+        }
+        implementation_hash_value() {
+          printf "%064d\n" 3
+          [[ "$failure_mode" != implementation ]] || return 91
+        }
+        validation_content_signature() {
+          printf "%064d\n" 4
+          [[ "$failure_mode" != content ]] || return 91
+        }
+        gate_coordinator_freshness_context_hash() {
+          printf "%064d\n" 5
+          [[ "$failure_mode" != coordinator-context ]] || return 91
+        }
+        caller_failure_seen=0
+        case "$caller" in
+          initial)
+            verified_freshness_stamp="$(recomputed_stamp_line)" ||
+              caller_failure_seen=1
+            ;;
+          post-wait)
+            post_wait_stamp="$(recomputed_stamp_line)" ||
+              caller_failure_seen=1
+            ;;
+          *) exit 99 ;;
+        esac
+        [[ "$caller_failure_seen" -eq 1 ]]
+      ' recomputed-stamp-failure \
+        "$recomputed_stamp_inherit_mode" \
+        "$recomputed_stamp_function" \
+        "$recomputed_stamp_scratch" \
+        "$recomputed_stamp_caller" \
+        "$recomputed_stamp_failure"; then
+        rm -f "$recomputed_stamp_function"
+        rm -rf "$recomputed_stamp_scratch"
+        fail "${recomputed_stamp_caller}/${recomputed_stamp_inherit_mode}: ${recomputed_stamp_failure} was masked during freshness recomputation"
+      fi
+    done
+  done
+done
+rm -f "$recomputed_stamp_function"
+rm -rf "$recomputed_stamp_scratch"
+unset recomputed_stamp_caller recomputed_stamp_failure
+unset recomputed_stamp_function recomputed_stamp_inherit_mode
+unset recomputed_stamp_inherit_modes recomputed_stamp_scratch
+
 fresh_stamp_repo="$(mktemp -d)"
 (
   cd "$fresh_stamp_repo"
@@ -7872,14 +8001,15 @@ fi
 printf '%s\n' "$((count + 1))" > "$counter_file"
 STUB
   # The stub exists to make the MAPPED commands free, not to break the gate's
-  # own Node helpers. Those are the `--input-type=module` heredocs and, since
-  # D5b part 2, the mapping engine the gate runs to build its plan at all — a
-  # stubbed-out mapper produces an empty plan and the gate refuses the run,
+  # own Node helpers. Those are the `--input-type=module` heredocs, the caller
+  # environment policy, and, since D5b part 2, the mapping engine the gate runs
+  # to build its plan at all. A stubbed-out helper makes the gate refuse the run,
   # which is the guard working, not the fixture.
   cat > bin/node <<'STUB'
 #!/usr/bin/env bash
 if [[ "${1:-}" == "--input-type=module" ||
   "${1:-}" == */quality-gate-coordinator.mjs ||
+  "${1:-}" == */quality-gate-coordinator-environment.mjs ||
   ( "${1:-}" == -e && "${2:-}" == *'digest(process.argv[1])'* ) ]]; then
   exec "${REAL_NODE:?}" "$@"
 fi
