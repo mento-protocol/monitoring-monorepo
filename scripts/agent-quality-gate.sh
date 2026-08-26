@@ -550,6 +550,17 @@ gate_lock_recover_hidden_record() {
       # If the link failed the canonical path already holds something. This
       # copy still names a live process, so it stays: a record naming a live
       # holder is evidence, and only a verified-dead one may be deleted.
+    elif [[ "$gate_lock_root_is_local_storage" -ne 1 ]]; then
+      # Off storage this machine mounts itself, "dead" above is not a verdict:
+      # the PID was looked up in this kernel, and the process may be running on
+      # another machine that reaches the same root (GitHub issue #2061).
+      # Deleting the remnant would destroy the only copy of a live holder's
+      # record and leave the lock ownerless — and an ownerless lock is exactly
+      # what a root like this can no longer reclaim, so the wedge would be
+      # permanent rather than healed after the owner grace. The remnant stays
+      # where it is: waiters refuse this lock anyway, and the record is what
+      # the holder that owns it, and the operator who has to clean up, need.
+      :
     else
       # Dead holder — but "dead run" is not the same as "nothing running". Its
       # commands outlive it, and this record is the last thing that names them.
@@ -1800,6 +1811,12 @@ acquire_gate_run_lock() {
   # for the root an operator named as much as for the one the gate chose,
   # because the question is about the storage rather than about who picked the
   # path. Unanswerable means "may be shared", the direction that keeps waiting.
+  # `df -l` narrows the answer without proving it: it says the storage is not
+  # mounted FROM elsewhere, not that nothing else reaches it. A machine can
+  # export its own disk, and a host bind mount or Docker volume reads local
+  # inside every container sharing it. Those are deliberate acts of sharing,
+  # and the declaration below is how they are told; nothing readable from here
+  # can detect them.
   #
   # Is the root established as this machine's alone? That is strictly stronger,
   # and it is what the unverified-record rule below needs, because that rule
@@ -2094,7 +2111,16 @@ acquire_gate_run_lock() {
 
     if [[ "$waited" -ge "$gate_lock_wait_seconds" ]]; then
       echo "error: timed out after ${waited}s waiting for the gate run lock at ${lock}." >&2
-      echo "Holder pid ${owner_pid:-unknown} is still alive; let it finish, then retry." >&2
+      if [[ "$nonlocal_root_warned" -eq 1 ]]; then
+        # This wait ended because a reclaim was refused, not because a holder
+        # was seen running. Telling the operator to let that holder finish
+        # would send them to wait on a process this run already read as gone,
+        # and the wait would never end. Say what actually happened instead.
+        echo "Nothing was reclaimed: the recorded holder could not be judged from this machine, and this lock root is not established as storage only this machine reaches." >&2
+        echo "If no run holds it, remove ${lock} by hand. Then give each machine its own AGENT_QUALITY_GATE_LOCK_DIR on that machine's local storage, or declare this root with AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1." >&2
+      else
+        echo "Holder pid ${owner_pid:-unknown} is still alive; let it finish, then retry." >&2
+      fi
       echo "Running the gate directly? --no-lock starts anyway and accepts the contention." >&2
       # The pre-push hook passes a fixed command line and Trunk strips the
       # environment, so neither escape hatch is reachable from a failed push.

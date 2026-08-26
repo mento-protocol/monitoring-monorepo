@@ -7688,6 +7688,11 @@ STUB
     assert_contains "Self-healing is disabled on such a root"
     assert_contains "Give each machine its own AGENT_QUALITY_GATE_LOCK_DIR"
     assert_contains "timed out after"
+    # The wait ended because a reclaim was refused, not because a holder was
+    # seen running. Repeating the usual line would send an operator to wait on
+    # a process this very run read as gone, and that wait never ends.
+    assert_contains "Nothing was reclaimed:"
+    assert_not_contains "is still alive; let it finish"
     assert_not_contains "reclaiming it."
     [[ -d "$gate_lock_root/run.lock" ]] ||
       fail "a record on a shared lock root must be left where it is (round ${shared_storage_round})"
@@ -7714,6 +7719,60 @@ STUB
   assert_not_contains "reclaiming it."
   [[ -d "$gate_lock_root/run.lock" ]] ||
     fail "an ownerless lock on a shared root must be left where it is"
+  rm -rf "$gate_lock_root/run.lock"
+
+  # A remnant from an interrupted reclaim is classified by the same local PID
+  # lookup, so off local storage it cannot be called dead either. Deleting it
+  # would destroy the only copy of a possibly-live holder's record and leave
+  # the lock ownerless — the one state this root can no longer reclaim — so the
+  # wedge would be permanent instead of healed after the owner grace. Both
+  # directions are asserted, because a check that only ever preserves would
+  # pass while proving nothing about the rule.
+  write_remnant_record() {
+    mkdir -p "$gate_lock_root/run.lock"
+    rm -f "$gate_lock_root/run.lock/owner"
+    {
+      printf 'pid=%s\n' "$1"
+      printf 'host=%s\n' "$(uname -n)"
+      printf 'machine=override:machine-a\n'
+      printf 'started_at=%s\n' "$(($(date +%s) - 7200))"
+      printf 'worktree=%s\n' "$gate_lock_repo"
+      printf 'token=fixture-holder-1-1\n'
+    } > "$gate_lock_root/run.lock/owner.reclaiming.9999"
+  }
+
+  remnant_shared_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the shared-root remnant case"
+  write_remnant_record "$remnant_shared_pid"
+  remnant_shared_exit="$(
+    NODE_ENV=test \
+      AGENT_QUALITY_GATE_LOCK_TEST_FORCE_NOT_LOCAL=1 \
+      AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE='' \
+      AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=0 \
+      run_locked_gate
+  )"
+  [[ "$remnant_shared_exit" == "2" ]] ||
+    fail "a remnant on a shared lock root must be waited out, got $remnant_shared_exit"
+  [[ -e "$gate_lock_root/run.lock/owner.reclaiming.9999" ]] ||
+    fail "a remnant on a shared lock root must not be deleted"
+  assert_contains "refuses to reclaim it."
+  rm -rf "$gate_lock_root/run.lock"
+
+  # The control: the same remnant on storage this machine mounts itself is a
+  # verified-dead record, and the pre-existing path deletes it and heals the
+  # lock.
+  remnant_local_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the local remnant case"
+  write_remnant_record "$remnant_local_pid"
+  remnant_local_exit="$(
+    AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE='' \
+      AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=0 \
+      run_locked_gate
+  )"
+  [[ "$remnant_local_exit" == "0" ]] ||
+    fail "a dead remnant on local storage must still heal the lock, got $remnant_local_exit"
+  [[ ! -e "$gate_lock_root/run.lock/owner.reclaiming.9999" ]] ||
+    fail "a verified-dead remnant on local storage must still be discarded"
   rm -rf "$gate_lock_root/run.lock"
 
   # The limit of the refusal, and the reason it turns on the storage rather

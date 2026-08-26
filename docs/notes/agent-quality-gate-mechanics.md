@@ -574,6 +574,19 @@ so a freshly written owner file can stay invisible to another client for longer
 than the `AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS` that would otherwise
 authorise taking the lock away.
 
+A remnant left by an interrupted reclaim is left alone there too, rather than
+deleted. `gate_lock_recover_hidden_record` classifies remnants by the same local
+PID lookup, so off local storage it cannot call one dead; deleting it would
+destroy the only copy of a possibly-live holder's record and leave the lock
+ownerless, which is precisely the state such a root can no longer reclaim. A
+remnant naming a locally-live holder is still linked back to the canonical
+path — that direction only restores evidence.
+
+The refusal also owns the wait's ending. A run that timed out because a reclaim
+was refused is told that nothing was reclaimed and that the record may need
+removing by hand, instead of the usual "holder is still alive; let it finish" —
+which would send an operator to wait on a process this run already read as gone.
+
 The cost is that a lock root on network storage no longer self-heals — a holder
 killed there wedges the root until a human removes the record — and that is the
 trade this repo already assumes. One lock root per machine is the documented
@@ -581,6 +594,18 @@ model: concurrent validation from another machine runs against its own checkout
 and its own lock. An operator who really does share a root, and has satisfied
 themselves that no second machine writes into it, restores self-healing with
 `AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1`.
+
+**`df -l` narrows the hazard; it does not prove exclusivity.** It answers
+whether the storage is mounted _from_ elsewhere, not whether anything else
+reaches it. A machine that exports its own disk sees that disk locally, and a
+host bind mount or Docker volume reads local inside every container sharing it —
+so cloned identities in two containers on one host still compare equal on a root
+both read as local. Nothing readable from a single machine detects either case;
+that is the premise issue #2061 starts from. What changed is the remedy: before
+this, `AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=0` only turned off the
+unverified-record reclaim, and a cloned identity under a cloned hostname was
+reclaimed anyway. It now refuses every reclaim on that root, so an operator who
+deliberately shares one has a declaration that actually holds.
 
 **An operator-supplied directory on local storage keeps self-healing.** The
 refusal turns on the storage, never on who named the path. Refusing on every
