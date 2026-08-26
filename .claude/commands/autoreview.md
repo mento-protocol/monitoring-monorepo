@@ -16,6 +16,11 @@ pnpm agent:autoreview $ARGUMENTS
 bundle preparation/verification, runtime-change refusal handling, and other
 adapter mechanics. Follow it rather than duplicating those rules here.
 
+Check the PR's Validation section against what the run actually establishes.
+Every claim names the evidence behind it and the nearest stronger claim that
+evidence does not support. Raise an unexplained strengthening of a claim as a
+finding.
+
 Verify every accepted finding before editing. If fixes are made, rerun focused
 checks and autoreview for that batch. Do not pause solely for cycle count before
 five review-triggered patch cycles are complete; pause for scope

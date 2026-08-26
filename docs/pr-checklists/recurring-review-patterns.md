@@ -19,6 +19,19 @@ link are inline-canonical and are candidates for future extraction.
 
 ## Patterns
 
+### Rigour floor
+
+Applies to every pattern below, in any repository, sandboxed or not. A sandbox
+lowers the cost of being wrong; it does not lower the standard of evidence.
+
+- Establish the baseline before changing anything, so breakage can be
+  attributed.
+- Apply each candidate fix to the code instead of arguing it on paper.
+- Classify failures rather than counting them.
+- Pin boundaries deterministically rather than quoting a fuzz counterexample.
+- State what a measurement does not establish.
+- When a test passes, check that it passed for the reason claimed.
+
 ### Architecture decisions — [checklist](architecture-decisions.md)
 
 tldr: if a PR makes an architectural decision (constrains future work · had a

@@ -379,6 +379,14 @@ These bind regardless of which step you are on:
 - **`Closes #N` only when Done means is fully met**, else `Refs #N`.
 - **Knowingly deferred work needs a GitHub issue first**, linked from
   `## Deferrals`. An evidence-backed won't-fix is not a deferral.
+- **Never weaken a control that is blocking your own work.** Do not widen,
+  disable, or soften the quality gate, the sandbox or permission config, branch
+  protection, or a safety-boundary rule to unblock the change you are making
+  now — an agent that can widen its own gate has no gate. Stop and hand the
+  control change to an independent session through a brief or an agent-ready
+  issue, with the operator's recorded consent. Routine control maintenance
+  stays allowed when it is its own claimed task and does not unblock the same
+  session's current work.
 - **Package-script, package-manager, and lockfile changes require explicit
   acknowledgement** through the gate; never bypass the refusal.
 - **Background long `--run` gates and pushes**; do not run them in a 600s
