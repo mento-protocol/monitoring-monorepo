@@ -115,7 +115,9 @@ echo ""
 
 if (( DEPLOYMENT_COUNT >= ENVIO_MAX_DEPLOYMENTS )); then
   echo "Envio already has $DEPLOYMENT_COUNT live deployments."
-  echo "Delete a stale non-prod deployment first, then rerun rollback before pushing:"
+  echo "Run the Deployment Cleanup Inventory in docs/deployment.md."
+  echo "Obtain exact-id approval, then re-fetch and reclassify every live deployment immediately before deletion."
+  echo "After approved cleanup, rerun rollback before pushing:"
   echo "  https://envio.dev/app/$ENVIO_ORG/$ENVIO_INDEXER"
   exit 1
 fi

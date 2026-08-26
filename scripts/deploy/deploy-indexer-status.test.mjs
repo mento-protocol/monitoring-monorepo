@@ -468,6 +468,10 @@ assert.ok(
   "the timeout block must still name the deployment-slot cause first",
 );
 assert.ok(
+  timedOutLines.some((line) => line.includes("deployment cleanup inventory")),
+  "the timeout block must route deletion through the cleanup workflow",
+);
+assert.ok(
   timedOutLines.some((l) => l.includes("envio.dev/app/mento-protocol")),
 );
 
@@ -475,6 +479,10 @@ const warning = slowRegistrationWarning("abc1234", 210, 600);
 assert.equal(warning[0], "", "the warning opens with a blank line");
 assert.equal(warning.at(-1), "", "and closes with one");
 assert.match(warning[1], /still unregistered after 210s/);
+assert.ok(
+  warning.some((line) => line.includes("deployment cleanup inventory")),
+  "the capacity warning must route deletion through the cleanup workflow",
+);
 assert.match(warning.at(-2), /Will keep polling until 600s then give up/);
 
 // --- end to end, with the CLI stubbed --------------------------------------
