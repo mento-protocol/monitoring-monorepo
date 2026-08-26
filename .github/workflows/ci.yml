@@ -1052,6 +1052,14 @@ jobs:
         run: node scripts/repo-health/check-hermetic-vitest-setup.mjs
       - name: Hermetic Vitest setup consistency suite
         run: node scripts/repo-health/check-hermetic-vitest-setup.test.mjs
+      - name: Guardrail prose pins
+        # The repo's strongest rules live only as prose in AGENTS.md and
+        # docs/notes/pr-operating-card.md. This runs in the required `ci`
+        # sentinel, not only in the local pre-push gate, because the local gate
+        # is the thing an edit that drops one of those sentences would skip.
+        run: node scripts/repo-health/check-guardrail-prose.mjs
+      - name: Guardrail prose pin suite
+        run: node scripts/repo-health/check-guardrail-prose.test.mjs
       - name: Deviation threshold drift suite
         run: node scripts/alerts/check-deviation-threshold-drift.test.mjs
       - name: Agent context checker unit tests

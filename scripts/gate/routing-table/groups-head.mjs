@@ -110,6 +110,23 @@ export const HEAD_GROUPS = [
             command: "pnpm agent:context-budget --strict",
             reason: "agent instruction budget input changed",
           },
+          {
+            command: "node scripts/repo-health/check-guardrail-prose.mjs",
+            reason:
+              "agent instruction file holding pinned guardrail prose changed",
+          },
+        ],
+      },
+      {
+        // The operating card carries the Non-negotiables the pin list protects.
+        // It reaches no arm above, so this is the only route that runs the
+        // guardrail-prose check when the card itself is edited.
+        patterns: ["docs/notes/pr-operating-card.md"],
+        effects: [
+          {
+            command: "node scripts/repo-health/check-guardrail-prose.mjs",
+            reason: "operating card holding pinned guardrail prose changed",
+          },
         ],
       },
     ],
