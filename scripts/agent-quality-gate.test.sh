@@ -7775,6 +7775,56 @@ STUB
     fail "a verified-dead remnant on local storage must still be discarded"
   rm -rf "$gate_lock_root/run.lock"
 
+  # The refusal is re-decided every pass, so a record published after one is
+  # judged on its own terms. A creator that stalls between taking the lock
+  # directory and writing its record leaves the lock ownerless past the grace
+  # and is refused — and then publishes a perfectly live record. The timeout
+  # has to name that live holder; telling the operator to remove a lock
+  # somebody is holding is the one piece of advice this diagnosis must never
+  # give. The early refusal is asserted too, so the case cannot pass by never
+  # reaching the branch it is about.
+  mkdir -p "$gate_lock_root/run.lock"
+  rm -f "$gate_lock_root/run.lock/owner"
+  sleep 60 &
+  late_holder_pid=$!
+  (
+    # Published by rename, so the waiter never reads a half-written record and
+    # mistakes it for the ownerless state this case starts from.
+    sleep 3
+    {
+      printf 'pid=%s\n' "$late_holder_pid"
+      printf 'host=%s\n' "$(uname -n)"
+      printf 'machine=override:machine-a\n'
+      printf 'started_at=%s\n' "$(date +%s)"
+      printf 'worktree=%s\n' "$gate_lock_repo"
+      printf 'token=fixture-holder-1-1\n'
+    } > "$gate_lock_root/run.lock/owner.staged"
+    mv "$gate_lock_root/run.lock/owner.staged" "$gate_lock_root/run.lock/owner"
+  ) &
+  late_publisher_pid=$!
+  set +e
+  NODE_ENV=test \
+    AGENT_QUALITY_GATE_LOCK_TEST_FORCE_NOT_LOCAL=1 \
+    AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE='' \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=0 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_lock_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 8 \
+    > "$output_file" 2>&1
+  late_publish_exit=$?
+  set -e
+  wait "$late_publisher_pid" 2>/dev/null || true
+  kill "$late_holder_pid" 2>/dev/null || true
+  [[ "$late_publish_exit" == "2" ]] ||
+    fail "a live holder published after a refusal must still be waited out, got $late_publish_exit"
+  assert_contains "refuses to reclaim it."
+  assert_contains "Holder pid ${late_holder_pid} is still alive; let it finish"
+  assert_not_contains "Nothing was reclaimed:"
+  rm -rf "$gate_lock_root/run.lock"
+
   # The limit of the refusal, and the reason it turns on the storage rather
   # than on who named the directory. This suite's root IS an
   # AGENT_QUALITY_GATE_LOCK_DIR, and it is on local storage. Refusing there

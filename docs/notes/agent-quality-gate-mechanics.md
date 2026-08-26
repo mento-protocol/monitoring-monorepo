@@ -582,10 +582,16 @@ ownerless, which is precisely the state such a root can no longer reclaim. A
 remnant naming a locally-live holder is still linked back to the canonical
 path — that direction only restores evidence.
 
-The refusal also owns the wait's ending. A run that timed out because a reclaim
-was refused is told that nothing was reclaimed and that the record may need
-removing by hand, instead of the usual "holder is still alive; let it finish" —
-which would send an operator to wait on a process this run already read as gone.
+The refusal also owns the wait's ending. A run that timed out on a record it
+refused is told that nothing was reclaimed, which state it refused, and that the
+lock may need removing by hand — instead of the usual "holder is still alive;
+let it finish", which would send an operator to wait on a process this run
+already read as gone. That diagnosis is decided per pass, not once per
+acquisition: a creator that stalls past the owner grace is refused and then
+publishes a live record, and the timeout has to name that live holder rather
+than advise removing a lock somebody is holding. It names the lock's state
+rather than its holder, because the states it covers include a lock with no
+holder recorded at all.
 
 The cost is that a lock root on network storage no longer self-heals — a holder
 killed there wedges the root until a human removes the record — and that is the

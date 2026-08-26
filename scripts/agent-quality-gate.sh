@@ -1775,6 +1775,15 @@ acquire_gate_run_lock() {
   local ownerless_since=""
   local unverified_warned=0
   local nonlocal_root_warned=0
+  # Why THIS pass refused to act on the record it is looking at now, or empty.
+  # Re-decided every pass, unlike the warned flag beside it: that one is sticky
+  # because its job is to say the thing once, and this one feeds the timeout
+  # diagnosis, which has to describe the lock as it stands when the budget runs
+  # out. A refusal early in the wait says nothing about a record published
+  # afterwards — a stalled creator can leave the lock ownerless past the grace,
+  # be refused, and then publish a perfectly live record — and a sticky flag
+  # would answer for that live holder with "remove it by hand".
+  local nonlocal_refusal_reason=""
   local this_host this_machine
   case "$gate_lock_enabled" in
     0|false|no) return 0 ;;
@@ -1897,6 +1906,7 @@ acquire_gate_run_lock() {
     )"
 
     stale_reason=""
+    nonlocal_refusal_reason=""
     [[ -n "$owner_token_value" ]] && ownerless_since=""
     if [[ -z "$owner_token_value" ]]; then
       # No complete record: either no file at all, or one a run was killed
@@ -2014,6 +2024,7 @@ acquire_gate_run_lock() {
         echo "  Its root ${root} is not established as storage only this machine reaches, and on a shared root that evidence proves nothing: a machine identity and a hostname can both be cloned — two containers built from one image carry the same values — so a holder alive on another machine reads as a dead PID here. Self-healing is disabled on such a root; this run waits out its lock budget instead." >&2
         echo "  Give each machine its own AGENT_QUALITY_GATE_LOCK_DIR on that machine's local storage. If this root really is this machine's alone, declare it with AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1." >&2
       fi
+      nonlocal_refusal_reason="$stale_reason"
       stale_reason=""
     fi
 
@@ -2111,12 +2122,14 @@ acquire_gate_run_lock() {
 
     if [[ "$waited" -ge "$gate_lock_wait_seconds" ]]; then
       echo "error: timed out after ${waited}s waiting for the gate run lock at ${lock}." >&2
-      if [[ "$nonlocal_root_warned" -eq 1 ]]; then
-        # This wait ended because a reclaim was refused, not because a holder
-        # was seen running. Telling the operator to let that holder finish
-        # would send them to wait on a process this run already read as gone,
-        # and the wait would never end. Say what actually happened instead.
-        echo "Nothing was reclaimed: the recorded holder could not be judged from this machine, and this lock root is not established as storage only this machine reaches." >&2
+      if [[ -n "$nonlocal_refusal_reason" ]]; then
+        # This wait ended on a record this run refused to act on, not on a
+        # holder it saw running. Repeating the line below would send the
+        # operator to wait for a process this pass already read as gone, and
+        # that wait never ends. The refusal names the lock's state rather than
+        # its holder, because the state it covers includes a lock with no
+        # holder recorded at all.
+        echo "Nothing was reclaimed: this run refused to act on the lock (${nonlocal_refusal_reason}), because its root is not established as storage only this machine reaches." >&2
         echo "If no run holds it, remove ${lock} by hand. Then give each machine its own AGENT_QUALITY_GATE_LOCK_DIR on that machine's local storage, or declare this root with AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1." >&2
       else
         echo "Holder pid ${owner_pid:-unknown} is still alive; let it finish, then retry." >&2
