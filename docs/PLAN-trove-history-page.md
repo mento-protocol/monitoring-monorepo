@@ -442,8 +442,8 @@ today, so the new `troves/[troveId]/_components` rule lands with the page
   vocabulary with tooltips ("zombie: debt below the market minimum after a
   redemption; unredeemable until adjusted"; "redeemed: fully redeemed to
   zero"). ICR coloring reuses `icrTextClass` against live `mcrBps`, and the
-  value carries the same "indexed as of <timestamp>, not a live oracle
-  read" disclosure the trove table already attaches (`trove-cells.tsx`) —
+  value carries the same indexed-as-of-timestamp, not-a-live-oracle-read
+  disclosure the trove table already attaches (`trove-cells.tsx`) —
   `Trove.icrBps` is the last event's snapshot, and the oracle has moved
   since. The debt figure is honest about staleness the same way:
   recorded-at-last-event plus timestamp. A live `entireDebt` read via the
