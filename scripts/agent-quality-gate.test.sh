@@ -7358,6 +7358,272 @@ STUB
   assert_contains "is stale (holder pid ${dead_holder_pid} is gone); reclaiming it."
   [[ ! -d "$gate_lock_root/run.lock" ]] ||
     fail "a successful run must release the lock it acquired"
+
+  # --- Machine identity, not hostname (GitHub issue #2055) -------------------
+  # A rename used to wedge the machine: the record still named the old
+  # hostname, the mismatch was read as a live holder on another host, and the
+  # dead-PID reclaim below it was never reached — so every run on the machine
+  # burned its whole --lock-wait and no run ever healed it. The record now
+  # carries a machine identity that a rename cannot touch, and the hostname
+  # decides only where no comparable identity exists on both sides.
+  #
+  # Both machines are simulated through the identity override, so these cases
+  # assert the decision rather than the hardware probe underneath it, and run
+  # the same way on a Linux runner as on the developer Mac that hit the bug.
+  #
+  # The locality of the lock root is declared for the same reason. In a real
+  # run the gate asks the filesystem whether the root is on storage only this
+  # machine reaches; this suite must keep pointing every case at its own temp
+  # root, whose answer would then depend on how the runner mounts $TMPDIR.
+  # Declaring it pins the decision under test instead of the runner's mount
+  # table. The possibly-shared cases below set it to 0.
+  export AGENT_QUALITY_GATE_LOCK_MACHINE_ID=machine-a
+  export AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1
+
+  write_machine_lock_owner() {
+    # pid, host, machine field value (empty writes no field at all, which is
+    # exactly what a gate predating this change leaves behind), started_at.
+    mkdir -p "$gate_lock_root/run.lock"
+    {
+      printf 'pid=%s\n' "$1"
+      printf 'host=%s\n' "$2"
+      [[ -z "$3" ]] || printf 'machine=%s\n' "$3"
+      printf 'started_at=%s\n' "$4"
+      printf 'worktree=%s\n' "$gate_lock_repo"
+      printf 'token=fixture-holder-1-1\n'
+    } > "$gate_lock_root/run.lock/owner"
+  }
+
+  # The bug itself. Same machine, renamed host, holder long dead — reclaimed at
+  # once on the strength of the machine identity, with no age gate involved and
+  # nothing said about an unverifiable host.
+  renamed_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the renamed-host case"
+  write_machine_lock_owner \
+    "$renamed_dead_pid" "Workbook.local" "override:machine-a" "$(date +%s)"
+  renamed_exit="$(run_locked_gate)"
+  [[ "$renamed_exit" == "0" ]] ||
+    fail "a dead holder recorded under this machine's old hostname must be reclaimed, got $renamed_exit"
+  assert_contains "is stale (holder pid ${renamed_dead_pid} is gone); reclaiming it."
+  assert_not_contains "cannot be tied to this machine"
+  [[ ! -d "$gate_lock_root/run.lock" ]] ||
+    fail "the run that reclaimed a renamed-host lock must release its own"
+
+  # The safety this replaces the hostname check with. On a root that may be
+  # shared, a disagreeing identity from the same source is another machine —
+  # definitive, its PIDs meaning nothing here, and no local evidence able to
+  # overturn it. A record two hours old whose PID reads dead locally is still
+  # waited out and left where it is.
+  foreign_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the foreign-machine case"
+  write_machine_lock_owner \
+    "$foreign_dead_pid" "other-host" "override:machine-b" "$(($(date +%s) - 7200))"
+  foreign_exit="$(AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=0 run_locked_gate)"
+  [[ "$foreign_exit" == "2" ]] ||
+    fail "a record from another machine must be waited out, got $foreign_exit"
+  assert_contains "timed out after"
+  assert_not_contains "reclaiming it."
+  [[ -d "$gate_lock_root/run.lock" ]] ||
+    fail "another machine's lock must never be reclaimed, however old"
+  rm -rf "$gate_lock_root/run.lock"
+
+  # The same record on a root proven local. Nothing else can have written it,
+  # so a disagreeing identity is not another machine — it is this machine's own
+  # identity having moved, which `/etc/machine-id` does on an OS reinstall or
+  # an image rebuild. Reading it as foreign here would leave the record
+  # unreclaimable forever, which is the wedge this whole change removes, so it
+  # lands on the aged-and-dead rule instead.
+  rotated_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the rotated-identity case"
+  write_machine_lock_owner \
+    "$rotated_dead_pid" "other-host" "override:machine-b" "$(($(date +%s) - 7200))"
+  rotated_exit="$(run_locked_gate)"
+  [[ "$rotated_exit" == "0" ]] ||
+    fail "a rotated machine identity on local storage must not wedge the lock, got $rotated_exit"
+  assert_contains "cannot be tied to this machine"
+  assert_contains "is stale (holder pid ${rotated_dead_pid} is gone"
+  [[ ! -d "$gate_lock_root/run.lock" ]] ||
+    fail "the run that reclaimed a rotated-identity record must release its own"
+
+  # An agreeing identity is not proof of one machine, only a disagreeing one is
+  # proof of two. Containers built from a single base image carry the same
+  # baked-in /etc/machine-id, so two of them mounting one lock directory agree
+  # on their identity while having separate PID namespaces — the other's holder
+  # PID reads "gone" here. Off proven-local storage the hostname has to agree
+  # too, and where it does not this record is left alone however old it is.
+  cloned_id_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the cloned-identity case"
+  write_machine_lock_owner \
+    "$cloned_id_dead_pid" "other-container" "override:machine-a" "$(($(date +%s) - 7200))"
+  cloned_id_exit="$(AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=0 run_locked_gate)"
+  [[ "$cloned_id_exit" == "2" ]] ||
+    fail "a shared machine id under a different hostname must be waited out on a shared root, got $cloned_id_exit"
+  assert_contains "timed out after"
+  assert_not_contains "reclaiming it."
+  [[ -d "$gate_lock_root/run.lock" ]] ||
+    fail "a duplicated machine id must not authorise reclaiming another host's lock"
+  rm -rf "$gate_lock_root/run.lock"
+
+  # The same record on storage this machine mounts itself. Nothing else is
+  # writing records there, and the hostname is exactly the field a rename
+  # moved, so requiring it to agree would refuse the case this all exists for.
+  renamed_local_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the local renamed-host case"
+  write_machine_lock_owner \
+    "$renamed_local_dead_pid" "other-container" "override:machine-a" "$(($(date +%s) - 7200))"
+  renamed_local_exit="$(run_locked_gate)"
+  [[ "$renamed_local_exit" == "0" ]] ||
+    fail "a matching identity on local storage must reclaim whatever the record calls the host, got $renamed_local_exit"
+  assert_contains "is stale (holder pid ${renamed_local_dead_pid} is gone); reclaiming it."
+  [[ ! -d "$gate_lock_root/run.lock" ]] ||
+    fail "the run that reclaimed under a matching local identity must release its own"
+
+  # A record written by a gate that predates the machine field, under a
+  # hostname this machine no longer answers to. The root is proven local, so
+  # nothing else wrote it; the reclaim still needs the dead PID and the grace,
+  # and the message names what it concluded and from what.
+  legacy_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the legacy-record case"
+  write_machine_lock_owner \
+    "$legacy_dead_pid" "Workbook.local" "" "$(($(date +%s) - 7200))"
+  legacy_exit="$(run_locked_gate)"
+  [[ "$legacy_exit" == "0" ]] ||
+    fail "an aged legacy record under a stale hostname must self-heal, got $legacy_exit"
+  assert_contains "cannot be tied to this machine"
+  assert_contains "This lock root is on storage this machine mounts itself"
+  assert_contains "under a name or identity it has since changed, and reclaims it"
+  assert_contains "its record cannot be tied to this machine and is"
+  [[ ! -d "$gate_lock_root/run.lock" ]] ||
+    fail "the run that reclaimed a legacy record must release its own"
+
+  # The same legacy record, still inside the grace. Age is the leg that keeps a
+  # run which really did start moments ago on another machine out of reach of
+  # that inference, so this one waits instead — the pre-issue-2055 behaviour,
+  # now bounded by the grace rather than permanent.
+  young_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the within-grace case"
+  write_machine_lock_owner "$young_dead_pid" "Workbook.local" "" "$(date +%s)"
+  young_exit="$(run_locked_gate)"
+  [[ "$young_exit" == "2" ]] ||
+    fail "a legacy foreign-host record inside the grace must be waited out, got $young_exit"
+  assert_contains "timed out after"
+  assert_not_contains "reclaiming it."
+  [[ -d "$gate_lock_root/run.lock" ]] ||
+    fail "a record still inside the grace must be left in place"
+
+  # …and the grace is the knob that decides it. The same record, same run, a
+  # grace of zero: reclaimed.
+  set +e
+  AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_lock_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_UNVERIFIED_MACHINE_GRACE_SECONDS=0 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 2 \
+    > "$output_file" 2>&1
+  grace_exit=$?
+  set -e
+  [[ "$grace_exit" == "0" ]] ||
+    fail "a zero grace must let the same legacy record be reclaimed, got $grace_exit"
+  assert_contains "cannot be tied to this machine"
+  [[ ! -d "$gate_lock_root/run.lock" ]] ||
+    fail "the run that reclaimed under a zero grace must release its own"
+
+  # Two identities from different sources are not two machines. A run that
+  # reached `ioreg` and a run that fell back to `kern.uuid` would otherwise
+  # read each other as foreign and reinvent the wedge, so a source mismatch is
+  # no verdict at all: it lands on the same aged-and-dead rule as a record with
+  # no machine field.
+  source_mismatch_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the source-mismatch case"
+  write_machine_lock_owner \
+    "$source_mismatch_pid" "Workbook.local" "kernuuid:machine-b" "$(($(date +%s) - 7200))"
+  source_mismatch_exit="$(run_locked_gate)"
+  [[ "$source_mismatch_exit" == "0" ]] ||
+    fail "a machine id from another source must not read as another machine, got $source_mismatch_exit"
+  assert_contains "cannot be tied to this machine"
+  [[ ! -d "$gate_lock_root/run.lock" ]] ||
+    fail "the run that reclaimed a source-mismatched record must release its own"
+
+  # The limit on all of that. Every reclaim above rests on the lock root being
+  # storage only this machine reaches. Where the filesystem says otherwise — a
+  # network home directory, or one whose type could not be read — a PID that
+  # reads dead here says nothing about a holder running on another machine.
+  # However old the record is, this run waits and names the declaration that
+  # would change the answer.
+  shared_root_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the shared-root case"
+  write_machine_lock_owner \
+    "$shared_root_dead_pid" "Workbook.local" "" "$(($(date +%s) - 7200))"
+  shared_root_exit="$(AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=0 run_locked_gate)"
+  [[ "$shared_root_exit" == "2" ]] ||
+    fail "an unverified record on a possibly shared lock root must be waited out, got $shared_root_exit"
+  assert_contains "not established as storage only this machine reaches"
+  assert_contains "AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1"
+  assert_not_contains "reclaiming it."
+  [[ -d "$gate_lock_root/run.lock" ]] ||
+    fail "a record on a possibly shared lock root must never be reclaimed"
+  rm -rf "$gate_lock_root/run.lock"
+
+  # An identity is validated against the record's alphabet, never rewritten to
+  # fit it. Every normalisation is a many-to-one map, and a many-to-one map on
+  # an identity is how two machines come to compare equal: stripping the
+  # unrepresentable character in `machine/a`, or deleting the line break in
+  # `machine<LF>a`, both yield `machinea` — another machine's legitimate id,
+  # which then reads as `same` and authorises a reclaim on its behalf. Both
+  # shapes must stop the run rather than be quietly reshaped, so both are
+  # asserted: one where the offending character is ordinary, one where it is a
+  # line break, because deleting line breaks is the normalisation a reader is
+  # most likely to think harmless.
+  for bad_machine_id in 'machine/a' 'machine:a' "$(printf 'machine\na')" "$(printf 'machine\ra')"; do
+    set +e
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_lock_root" \
+      AGENT_QUALITY_GATE_LOCK_MACHINE_ID="$bad_machine_id" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 2 \
+      > "$output_file" 2>&1
+    bad_machine_id_exit=$?
+    set -e
+    [[ "$bad_machine_id_exit" == "2" ]] ||
+      fail "machine id '${bad_machine_id}' is outside the record alphabet and must stop the run, got $bad_machine_id_exit"
+    assert_contains "AGENT_QUALITY_GATE_LOCK_MACHINE_ID must be 1-128 characters"
+    assert_contains "so it is never rewritten to fit"
+    assert_contains "Nothing has been executed."
+  done
+
+  # The probe itself, both ways, on paths whose answer is known independently
+  # of it. A directory on local storage must read as local; a path on a
+  # filesystem `df -l` omits — an autofs map, an NFS or SMB mount — must not,
+  # or the whole rule above rests on a check that only ever says yes. The
+  # non-local path is discovered from the mount table rather than assumed, and
+  # the case is skipped where the runner has no such mount to point at.
+  gate_lock_probe_local="$(
+    NODE_ENV=test \
+      AGENT_QUALITY_GATE_LOCK_PROBE_PATH="$gate_lock_root" \
+      "$repo_root/scripts/agent-quality-gate.sh" 2>&1
+  )" || true
+  [[ "$gate_lock_probe_local" == "local" ]] ||
+    fail "the locality probe must read a temp-dir lock root as local, got '$gate_lock_probe_local'"
+  gate_lock_nonlocal_path="$(
+    comm -23 \
+      <(df 2>/dev/null | tail -n +2 | awk 'NF { print $NF }' | sort) \
+      <(df -l 2>/dev/null | tail -n +2 | awk 'NF { print $NF }' | sort) |
+      head -n1
+  )"
+  if [[ -n "$gate_lock_nonlocal_path" && -d "$gate_lock_nonlocal_path" ]]; then
+    gate_lock_probe_remote="$(
+      NODE_ENV=test \
+        AGENT_QUALITY_GATE_LOCK_PROBE_PATH="$gate_lock_nonlocal_path" \
+        "$repo_root/scripts/agent-quality-gate.sh" 2>&1
+    )" || true
+    [[ "$gate_lock_probe_remote" == "not-local" ]] ||
+      fail "the locality probe must not read ${gate_lock_nonlocal_path} as local, got '$gate_lock_probe_remote'"
+  fi
+
+  unset AGENT_QUALITY_GATE_LOCK_MACHINE_ID
 )
 rm -rf "$gate_lock_repo" "$gate_lock_root"
 
