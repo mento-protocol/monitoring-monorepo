@@ -12,10 +12,17 @@
  * repository and the target pull request unambiguously, run the ready-state
  * oracle and the feedback ledger, show the operator exactly what they are about
  * to merge, make them type the pull-request number back, re-read every gate,
- * append the consent record, merge, and confirm the merge actually landed.
+ * append the consent record, merge, and confirm the merge actually landed on
+ * the head and base the operator approved.
  * Every unreadable, ambiguous, or unexpected state refuses instead of merging:
  * an operator who has to re-run one command loses a minute, and a merge nobody
  * approved cannot be taken back.
+ *
+ * One race is detected rather than prevented, because GitHub offers no way to
+ * prevent it: `--match-head-commit` pins the head, and the merge endpoint has
+ * no base equivalent, so a retarget between the final gate read and the merge
+ * request itself can still land on another branch. The wrapper re-reads the
+ * base afterwards and fails loudly when it moved.
  *
  * Agents must never invoke this script. Be honest about what makes that true.
  * The interactive-session refusal stops an agent that runs this command the
@@ -246,12 +253,13 @@ async function readMergeOutcome({ gh, repo, number }) {
       "--repo",
       repo,
       "--json",
-      "state,mergeCommit",
+      "state,mergeCommit,baseRefName",
     ]),
   );
   return {
     state: String(parsed?.state ?? "").toUpperCase(),
     mergeCommit: parsed?.mergeCommit?.oid ?? null,
+    baseRefName: String(parsed?.baseRefName ?? ""),
   };
 }
 
@@ -479,10 +487,28 @@ export async function mergePullRequest({
     };
   }
 
+  // `--match-head-commit` pins the head, and the merge API offers nothing that
+  // pins the base: its only matching parameter is `sha`, for the head. So a
+  // retarget landing between the final gate read and GitHub processing the
+  // merge cannot be prevented here — it can only be detected and said out
+  // loud, which is what this does. `exitCodeForResult` fails on it.
+  const baseMismatch =
+    outcome.baseRefName !== "" && outcome.baseRefName !== approved.baseRefName;
+  if (baseMismatch) {
+    stdout.write(
+      `WARNING: ${repos.base}#${number} merged into ${outcome.baseRefName}, ` +
+        `not the ${approved.baseRefName} you approved. The pull request was ` +
+        `retargeted between the final check and the merge. Review ` +
+        `${outcome.baseRefName} now — this merge was not the one consented to.\n`,
+    );
+  }
+
   return {
     merged: true,
     verified: true,
+    baseMismatch,
     state: outcome.state,
+    baseRefName: outcome.baseRefName,
     mergeCommit: outcome.mergeCommit,
     record,
     consentPath,

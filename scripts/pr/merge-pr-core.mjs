@@ -333,6 +333,9 @@ export function gateSignature({ summary, feedback }) {
  */
 export function exitCodeForResult(result) {
   if (result?.help === true) return 0;
+  // A merge that landed on a base the operator never approved is a failure
+  // even though it merged, so the shell must not chain past it either.
+  if (result?.baseMismatch === true) return 1;
   return result?.merged === true ? 0 : 1;
 }
 

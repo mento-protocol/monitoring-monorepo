@@ -80,6 +80,13 @@ wrapper says so in its own header rather than implying otherwise:
   permission pattern reliably spells every form of that call. A pattern that
   caught one spelling would read as broader cover than it gives, which is worse
   than a documented gap.
+- **The approved base cannot be bound atomically.** `--match-head-commit` pins
+  the head, and the merge endpoint's only matching parameter is `sha`, for the
+  head — there is no base equivalent. A retarget landing between the final gate
+  read and GitHub processing the merge therefore cannot be prevented here. The
+  wrapper re-reads the base afterwards, says plainly that the merge did not go
+  where the operator approved, and exits non-zero. That is detection, not
+  prevention, and the window is a few hundred milliseconds wide.
 
 The durable boundary is on GitHub's side of the wire — branch protection, or
 credentials that cannot merge — and is tracked separately as follow-up.

@@ -195,6 +195,9 @@ function harness({
   // the pull request OPEN even though `gh pr merge` exited 0.
   mergedState = "MERGED",
   mergeOutcomeError = null,
+  // The base the pull request reports AFTER the merge. A retarget between the
+  // final gate read and GitHub processing the merge shows up only here.
+  mergedBaseRefName = null,
   // The repository URL `gh repo view` reports, which carries the host.
   repoUrl = "https://github.com/mento-protocol/monitoring-monorepo",
   parent = null,
@@ -232,6 +235,7 @@ function harness({
       return JSON.stringify({
         state: mergedState,
         mergeCommit: mergedState === "MERGED" ? { oid: "b".repeat(40) } : null,
+        baseRefName: mergedBaseRefName ?? "main",
       });
     }
     throw new Error(`unexpected gh call: ${args.join(" ")}`);
@@ -1453,6 +1457,35 @@ await test("the login is always read from a named host", async () => {
     `the login call must name its host, got: ${login.join(" ")}`,
   );
   assertEqual(login[login.indexOf("--hostname") + 1], "github.com");
+});
+
+await test("a base retargeted during the merge itself is reported", async () => {
+  // `--match-head-commit` pins the head, and GitHub's merge API has no
+  // parameter that pins the base — its only matching field is `sha`. So this
+  // race cannot be prevented in the wrapper; it must be detected and said
+  // plainly rather than reported as a clean merge.
+  const h = harness({ mergedBaseRefName: "release/v2" });
+
+  const result = await h.run();
+  assertEqual(result.merged, true, "GitHub did merge it");
+  assertEqual(result.baseMismatch, true, "the base was not the approved one");
+  assertEqual(result.baseRefName, "release/v2");
+  assertEqual(
+    exitCodeForResult(result),
+    1,
+    "the shell must not chain past an unapproved base",
+  );
+  assert(
+    h.output().includes("not the main you approved"),
+    `the operator must be told, got:\n${h.output()}`,
+  );
+});
+
+await test("an unchanged base reports no mismatch", async () => {
+  const result = await harness().run();
+  assertEqual(result.baseMismatch, false);
+  assertEqual(result.baseRefName, "main");
+  assertEqual(exitCodeForResult(result), 0);
 });
 
 await test("only a confirmed merge exits zero", async () => {
