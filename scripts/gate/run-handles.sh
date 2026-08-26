@@ -379,6 +379,33 @@ gate_run_proc_marker_pids() {
       );
       return read === body.length && body.equals(expectedBody);
     };
+    const readFdInfoInode = (path) => {
+      const descriptor = fs.openSync(
+        path,
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      );
+      try {
+        // Type-specific fdinfo data can be large. The common header, including
+        // ino on kernels that provide it, appears before that data.
+        const prefix = Buffer.alloc(1024);
+        const bytesRead = fs.readSync(
+          descriptor,
+          prefix,
+          0,
+          prefix.length,
+          0,
+        );
+        const value = prefix.subarray(0, bytesRead).toString("utf8");
+        const inodeLines = value
+          .split("\n")
+          .filter((line) => line.startsWith("ino:"));
+        if (inodeLines.length !== 1) return null;
+        const match = /^ino:[ \t]+([0-9]+)[ \t]*$/u.exec(inodeLines[0]);
+        return match ? BigInt(match[1]) : null;
+      } finally {
+        fs.closeSync(descriptor);
+      }
+    };
     const processStart = (pid) => {
       let value;
       try {
@@ -459,6 +486,16 @@ gate_run_proc_marker_pids() {
       ) {
         throw new Error("unsafe marker snapshot");
       }
+      let markerFdInfoInode = null;
+      try {
+        const candidate = readFdInfoInode(
+          `/proc/self/fdinfo/${markerDescriptor}`,
+        );
+        if (candidate === markerBefore.ino) markerFdInfoInode = candidate;
+      } catch {
+        // Exact descriptor stats remain the compatibility path when this
+        // kernel does not provide a usable common fdinfo inode field.
+      }
       assertCompleteProcEnumeration();
       fs.readdirSync("/proc/self/fd");
       const found = [];
@@ -512,10 +549,31 @@ gate_run_proc_marker_pids() {
         for (const descriptor of descriptors) {
           if (!/^[0-9]+$/u.test(descriptor)) continue;
           try {
+            if (markerFdInfoInode !== null) {
+              let heldFdInfoInode = null;
+              try {
+                heldFdInfoInode = readFdInfoInode(
+                  `/proc/${pid}/fdinfo/${descriptor}`,
+                );
+              } catch (error) {
+                if (ignoredRaceCodes.has(error?.code)) continue;
+                // A failed prefilter is not an empty observation. Fall through
+                // to the authoritative descriptor stat.
+              }
+              if (
+                heldFdInfoInode !== null &&
+                heldFdInfoInode !== markerBefore.ino
+              ) {
+                continue;
+              }
+            }
             const held = fs.statSync(`/proc/${pid}/fd/${descriptor}`, {
               bigint: true,
             });
-            if (sameInode(markerBefore, held)) matches = true;
+            if (sameInode(markerBefore, held)) {
+              matches = true;
+              break;
+            }
           } catch (error) {
             if (ignoredRaceCodes.has(error?.code)) continue;
             throw error;

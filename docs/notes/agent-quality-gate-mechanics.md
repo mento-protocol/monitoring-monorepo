@@ -805,14 +805,16 @@ type, and exact `<token>\n` body, and holds that descriptor through the scan.
 It probes signal permission and reads the real, effective, saved-set, and
 filesystem UIDs from `/proc/<pid>/status`. A sender real/effective match with a
 target real/saved-set UID keeps a policy-confined or set-ID descendant in
-scope. A successful signal probe also covers `CAP_KILL`. The scan compares each
-in-scope `/proc/<pid>/fd` target by device and inode. It requires the process
-start identity to remain equal before and after identity and fd enumeration.
-Process-exit races are empty observations. A restricted `hidepid` mount,
-unreadable in-scope process, or other incomplete scan is a scan failure. When
-`/proc/self/fd` exists, a failed procfs scan fails closed and never falls back to
-`lsof`. macOS and hosts without `/proc/self/fd` use the witnessed `lsof` path. A
-host with neither scanner fails closed while a marker exists.
+scope. A successful signal probe also covers `CAP_KILL`. The scan reads the
+bounded common header of each `/proc/<pid>/fdinfo` record as an inode prefilter.
+It runs the exact device-and-inode stat only for possible matches. The exact
+stat remains authoritative. The scan requires the process start identity to
+remain equal before and after identity and fd enumeration. Process-exit races
+are empty observations. A restricted `hidepid` mount, unreadable in-scope
+process, or other incomplete scan is a scan failure. When `/proc/self/fd`
+exists, a failed procfs scan fails closed and never falls back to `lsof`. macOS
+and hosts without `/proc/self/fd` use the witnessed `lsof` path. A host with
+neither scanner fails closed while a marker exists.
 
 Adoption preserves the incoming owner record's group and other read bits so a
 legacy waiter with shared-root access can observe the barrier. The replacement

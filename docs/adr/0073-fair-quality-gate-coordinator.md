@@ -238,12 +238,15 @@ no recovery scan consumes it, and it grants no authority.
 On Linux, the process scan opens the shared marker with `O_NOFOLLOW`. It
 requires a current-UID regular file with the exact `<token>\n` body. It holds
 that descriptor while it scans signal-scope `/proc/<pid>/fd` entries by device
-and inode. It probes signal permission, including `CAP_KILL`. It also compares
-the sender real/effective UIDs with each target's real/saved-set UIDs so a
-policy-confined or set-ID descendant stays in scope after an `EPERM` probe. It
-reads each process start identity before and after UID and descriptor
-enumeration. A changed identity makes that observation empty. A restricted
-`hidepid` mount or another incomplete in-scope scan fails closed.
+and inode. It probes signal permission, including `CAP_KILL`.
+It also compares the sender real/effective UIDs with each target's
+real/saved-set UIDs so a policy-confined or set-ID descendant stays in scope
+after an `EPERM` probe. It reads the bounded common header of each fdinfo record
+as an inode prefilter. It runs the exact device-and-inode stat only for possible
+matches. The exact stat remains authoritative. It reads each process start
+identity before and after UID and descriptor enumeration. A changed identity
+makes that observation empty. A restricted `hidepid` mount or another
+incomplete in-scope scan fails closed.
 
 When `/proc/self/fd` is unavailable, the process scan never asks `lsof` to query
 the mutable shared marker pathname. It creates a mode-0700 private directory named

@@ -1558,6 +1558,26 @@ assert.match(
   /assertCompleteProcEnumeration[\s\S]*?hidepid=[\s\S]*?procfs PID enumeration is restricted/u,
   "restricted procfs enumeration must fail closed",
 );
+assert.match(
+  runHandles,
+  /const readFdInfoInode = \(path\)[\s\S]*?Buffer\.alloc\(1024\)[\s\S]*?\^ino:[\s\S]*?BigInt/u,
+  "the proc descriptor scan must read a bounded decimal fdinfo inode prefix",
+);
+assert.match(
+  runHandles,
+  /const candidate = readFdInfoInode\([\s\S]*?if \(candidate === markerBefore\.ino\) markerFdInfoInode = candidate/u,
+  "the proc descriptor scan must validate the marker fdinfo inode before enabling its prefilter",
+);
+assert.match(
+  runHandles,
+  /heldFdInfoInode = readFdInfoInode\([\s\S]*?heldFdInfoInode !== markerBefore\.ino[\s\S]*?continue;[\s\S]*?const held = fs\.statSync\([\s\S]*?sameInode\(markerBefore, held\)/u,
+  "the proc descriptor scan must prefilter mismatches and retain exact device-and-inode authority",
+);
+assert.match(
+  runHandles,
+  /if gate_run_proc_marker_scan_available; then\n\s+gate_run_proc_marker_pids[\s\S]*?elif command -v lsof/u,
+  "procfs marker scans must take precedence over lsof when procfs is available",
+);
 const signalScopeMatches = (sender, target) =>
   [target[0], target[2]].some((uid) => sender.includes(uid));
 assert.equal(
@@ -2094,6 +2114,12 @@ coordinator_gate_pipeline_lock="$(mktemp -d /tmp/qgp.XXXXXX)"
 if [[ -n "${QG_CONTENDER_COMMAND_MARKER:-}" ]]; then
   : > "$QG_CONTENDER_COMMAND_MARKER"
 fi
+if [[ -n "${QG_HOLDER_STARTED:-}" ]]; then
+  : > "${QG_HOLDER_STARTED:?}"
+  while [[ ! -e "${QG_HOLDER_RELEASE:?}" ]]; do
+    sleep 0.05
+  done
+fi
 if [[ -n "${QG_SERIAL_DONE:-}" ]]; then
   [[ -e "$QG_SERIAL_DONE" ]] || {
     echo "parallel trunk command started before the serialized command completed"
@@ -2127,12 +2153,6 @@ if [[ "$*" == "gate:routing-table:test" && -n "${QG_SERIAL_DONE:-}" ]]; then
 fi
 if [[ -n "${QG_INHERITED_FD7_MESSAGE:-}" ]]; then
   printf '%s\n' "$QG_INHERITED_FD7_MESSAGE" >&7
-fi
-if [[ "$*" == "agent:prewarm:test" && -n "${QG_HOLDER_STARTED:-}" ]]; then
-  : > "${QG_HOLDER_STARTED:?}"
-  while [[ ! -e "${QG_HOLDER_RELEASE:?}" ]]; do
-    sleep 0.05
-  done
 fi
 exit 0
 STUB
@@ -2540,13 +2560,18 @@ STUB
     fail_gate_pipeline_fixture "distinct coordinator joiner emitted the marker scan sentinel"
   ! grep -Fq -- "processes kept failing" "$joiner_output" ||
     fail_gate_pipeline_fixture "distinct coordinator joiner failed its marker scans"
-  [[ -s "$joiner_lsof_path" ]] ||
-    fail_gate_pipeline_fixture "distinct coordinator joiner did not scan its private marker witness"
-  joiner_lsof_witness="$(cat "$joiner_lsof_path")"
-  case "$joiner_lsof_witness" in
-    "$coordinator_gate_pipeline_lock"/.holder-lsof-witness.v1.*/marker) ;;
-    *) fail_gate_pipeline_fixture "distinct coordinator joiner passed lsof a non-private marker path" ;;
-  esac
+  if [[ -d /proc/self/fd ]]; then
+    [[ ! -e "$joiner_lsof_path" ]] ||
+      fail_gate_pipeline_fixture "distinct Linux joiner used lsof instead of procfs"
+  else
+    [[ -s "$joiner_lsof_path" ]] ||
+      fail_gate_pipeline_fixture "distinct coordinator joiner did not scan its private marker witness"
+    joiner_lsof_witness="$(cat "$joiner_lsof_path")"
+    case "$joiner_lsof_witness" in
+      "$coordinator_gate_pipeline_lock"/.holder-lsof-witness.v1.*/marker) ;;
+      *) fail_gate_pipeline_fixture "distinct coordinator joiner passed lsof a non-private marker path" ;;
+    esac
+  fi
   [[ -z "$(find "$coordinator_gate_pipeline_lock" -maxdepth 1 -type d \
     -name '.holder-lsof-witness.v1.*' -print -quit)" ]] ||
     fail_gate_pipeline_fixture "distinct coordinator joiner leaked its private lsof witness"
@@ -19427,7 +19452,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     fail "a valid marker scan leaked its private lsof witness"
   rm -f "$race_valid_lsof_marker" "$race_valid_lsof_facts"
 
-  # Linux procfs must retain descriptor discovery when lsof is unavailable.
+  # Linux procfs routing must retain descriptor discovery when lsof is present.
   # The child starts a new process with no AGENTQG environment or argv tag and
   # keeps only the marker descriptor as its run identity.
   if [[ -d /proc/self/fd ]]; then
@@ -19438,11 +19463,16 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     rm -f "$race_proc_marker" "$race_proc_ready"
     printf '%s\n' "$race_proc_token" > "$race_proc_marker"
     chmod 600 "$race_proc_marker"
-    env -i PATH=/usr/bin:/bin /bin/bash -c '
-      exec 9< "$1"
-      : > "$2"
-      exec /bin/sleep 30
-    ' proc-marker-holder "$race_proc_marker" "$race_proc_ready" &
+    env -i PATH=/usr/bin:/bin "$(command -v node)" -e '
+      const fs = require("node:fs");
+      const [marker, ready] = process.argv.slice(1);
+      const descriptors = [fs.openSync(marker, "r")];
+      for (let index = 0; index < 256; index += 1) {
+        descriptors.push(fs.openSync("/dev/null", "r"));
+      }
+      fs.writeFileSync(ready, "");
+      setInterval(() => {}, 1000);
+    ' "$race_proc_marker" "$race_proc_ready" &
     race_proc_pid=$!
     gate_test_capture_identity "$race_proc_pid" "$gate_test_signal_shell_pid" ||
       fail "the proc marker fixture could not bind its descriptor holder"
