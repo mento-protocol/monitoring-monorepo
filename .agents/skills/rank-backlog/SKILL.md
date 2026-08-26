@@ -75,12 +75,18 @@ so make the window's edge visible rather than trusting it: `totalCount` and
 `pageInfo.hasPreviousPage` say whether an issue's timeline was cut off. An
 older open pull request can hide behind a cut-off edge.
 
-**A truncated timeline never yields a Selected issue.** When
-`hasPreviousPage` is true for a candidate that could otherwise be Selected,
-walk that one issue's timeline in full before it is eligible. Walk it
-**forwards**: `--paginate` follows `hasNextPage`/`endCursor` only, so a query
-written with `before`/`startCursor` returns its first page and stops, which
-looks like a complete answer and is not one.
+**A truncated timeline is resolved before the issue is ranked, not just before
+it is Selected.** When `hasPreviousPage` is true for a candidate, walk that one
+issue's timeline in full before it enters the Top 15, stands as the runner-up,
+or is Selected. Gating only the Selection step is not enough: the pull request
+hiding behind the cut-off edge may be the one that closes the issue, so an
+already-owned issue could hold a ranked slot and distort the very comparison the
+Selected section is built on. Where the full walk is genuinely not possible,
+keep the issue out of all three outputs and count it in Method as unresolved
+rather than ranking it on a timeline you know is partial. Walk it **forwards**:
+`--paginate` follows `hasNextPage`/`endCursor` only, so a query written with
+`before`/`startCursor` returns its first page and stops, which looks like a
+complete answer and is not one.
 
 ```bash
 gh api graphql --paginate --slurp -f query='
