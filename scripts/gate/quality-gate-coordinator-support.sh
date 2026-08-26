@@ -126,6 +126,7 @@ gate_coordinator_recompute_fingerprint() {
     "allowPackageScripts=${stamp_allow_package_scripts}" \
     "commandTimeout=${command_timeout_seconds}" \
     "gateSelftestTimeout=${gate_selftest_timeout_seconds}" \
+    "gateLockWait=${gate_lock_wait_seconds}" \
     "qualityParallelism=${quality_parallelism}" "failFast=${fail_fast}" \
     "os=${os_name}" "arch=${os_arch}" "nodePath=${node_path}" \
     "node=${node_version}" "pnpmPath=${pnpm_path}" \
@@ -499,7 +500,7 @@ gate_coordinator_wait_cli() {
   # coordinator ends an orphaned wait when its owner sweep removes that request.
   AGENTQG_RUN="$run_tag" AGENTQG_REQUEST="$request_tag" \
     AGENT_QUALITY_GATE_REQUEST_CAPABILITY="$gate_coordinator_request_capability" \
-    bash -c '
+    "${gate_sanitized_bash_launcher[@]}" -c '
       request_tag="$1"
       run_marker="$2"
       coordinator_marker="$3"

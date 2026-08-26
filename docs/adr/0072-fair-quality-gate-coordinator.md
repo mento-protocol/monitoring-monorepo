@@ -401,8 +401,8 @@ Requests coalesce when their complete execution keys match. The key binds:
   `.trunk/trunk.yaml` content;
 - OS and architecture, plus the resolved Node and pnpm executable paths and
   versions;
-- the effective per-command timeout, resolved local parallelism, and fail-fast
-  policy;
+- the effective per-command timeout, effective `--lock-wait` scheduler budget,
+  resolved local parallelism, and fail-fast policy;
 - material, command-specific environment inputs, represented by safe digests
   rather than raw secret-bearing values.
 
@@ -411,6 +411,12 @@ entry that resolves exactly to the current worktree's `node_modules/.bin`, a
 `PNPM_SCRIPT_SRC_DIR` or `INIT_CWD` that resolves exactly to the current
 worktree root, and `TMPDIR`, `TMP`, or `TEMP` when it resolves exactly to the
 gate-owned `.tmp/agent-quality-gate` directory. Other values remain exact.
+The gate removes caller-controlled Bash startup files, option sets,
+compatibility controls, and exported function records before it starts an
+internal Bash control shell or mapped command. It uses privileged Bash mode for
+those shells. The filtered environment propagates to mapped descendants. This
+boundary prevents caller startup controls from changing a shared result through
+an internal control shell or mapped-command tree.
 The local-bin token binds a bounded manifest of entry names, modes, types, and
 wrapper bytes. For a symlink entry, it also binds the link and the resolved
 regular file's mode and bytes. A symlinked local-bin root, unsupported entry,
@@ -453,8 +459,8 @@ HEAD OID. The stamp also records the exact HEAD and coordinator fingerprint.
 An unchanged HEAD requires that exact fingerprint to match. A changed HEAD can
 reuse the stamp only when the base, paths, plan, validated bytes and modes,
 implementation, toolchain, timeout, local parallelism, fail-fast policy,
-runtime policy, OS, architecture, and material environment still match. This
-narrow exception
+effective `--lock-wait` budget, runtime policy, OS, architecture, and material
+environment still match. This narrow exception
 keeps a gate run made before a commit valid after that commit records the same
 validated bytes. Coordinator singleflight and retained-result reuse remain
 bound to the complete key, including HEAD.

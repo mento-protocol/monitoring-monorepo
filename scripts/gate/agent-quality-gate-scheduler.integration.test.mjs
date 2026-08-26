@@ -520,6 +520,76 @@ test("the real quality gate uses scheduler concurrency and recovery", async (t) 
     );
 
     await t.test(
+      "public pnpm clears Bash startup controls from shared mapped execution",
+      async () => {
+        const scenario = fixture.scenarioPaths("public-pnpm-bash-env");
+        const worktrees = await Promise.all([
+          fixture.addWorktree("public-pnpm-bash-env-a"),
+          fixture.addWorktree("public-pnpm-bash-env-b"),
+          fixture.addWorktree("public-pnpm-bash-env-cached"),
+        ]);
+        const startupFiles = worktrees.map((_, index) =>
+          join(scenario.directory, `bash-env-${index + 1}.sh`),
+        );
+        await mkdir(scenario.directory, { recursive: true });
+        await Promise.all(
+          startupFiles.map((path, index) =>
+            writeFile(
+              path,
+              `# distinct startup file ${index + 1}\ncase "$0" in\n  agentqg:*) exit 0 ;;\nesac\n`,
+            ),
+          ),
+        );
+
+        const handles = await Promise.all(
+          worktrees.slice(0, 2).map((worktree, index) =>
+            fixture.startPnpmGate({
+              worktree,
+              changedPath: "fixture-same.txt",
+              scenario,
+              label: `public-pnpm-bash-env-${index + 1}`,
+              defaultDelayMs: 1_000,
+              extraEnvironment: { BASH_ENV: startupFiles[index] },
+            }),
+          ),
+        );
+        const results = await Promise.all(handles.map((handle) => handle.done));
+        results.forEach(assertPassed);
+        const startsAfterSharedRun = (await fixture.events(scenario)).filter(
+          (event) => event.event === "start",
+        );
+        assert.equal(
+          startsAfterSharedRun.length,
+          1,
+          JSON.stringify(startsAfterSharedRun),
+        );
+        assert.ok(results.some((result) => /role leader/u.test(result.stdout)));
+        assert.ok(
+          results.some((result) => /role follower/u.test(result.stdout)),
+        );
+
+        const cached = await fixture.startPnpmGate({
+          worktree: worktrees[2],
+          changedPath: "fixture-same.txt",
+          scenario,
+          label: "public-pnpm-bash-env-cached",
+          defaultDelayMs: 1_000,
+          skipIfFresh: true,
+          extraEnvironment: { BASH_ENV: startupFiles[2] },
+        });
+        const cachedResult = await cached.done;
+        assertPassed(cachedResult);
+        assert.match(cachedResult.stdout, /role completed/u);
+        assert.equal(
+          (await fixture.events(scenario)).filter(
+            (event) => event.event === "start",
+          ).length,
+          1,
+        );
+      },
+    );
+
+    await t.test(
       "public pnpm binds effective temp directories in the shared key",
       async () => {
         const scenario = fixture.scenarioPaths("public-pnpm-temp-environment");
@@ -607,6 +677,104 @@ test("the real quality gate uses scheduler concurrency and recovery", async (t) 
         3,
       );
     });
+
+    await t.test(
+      "mixed scheduler wait budgets keep independent request lifetimes",
+      async () => {
+        const scenario = fixture.scenarioPaths("mixed-lock-wait-budgets");
+        const holderBarrier = join(scenario.directory, "holder-barrier");
+        const worktrees = await Promise.all([
+          fixture.addWorktree("mixed-lock-wait-holder"),
+          fixture.addWorktree("mixed-lock-wait-short"),
+          fixture.addWorktree("mixed-lock-wait-long"),
+        ]);
+        const capacityOne = { AGENT_QUALITY_GATE_CAPACITY: "1" };
+        let holderReleased = false;
+        const releaseHolder = async () => {
+          if (holderReleased) return;
+          await writeFile(`${holderBarrier}.release`, "release\n");
+          holderReleased = true;
+        };
+        const holder = await fixture.startGate({
+          worktree: worktrees[0],
+          changedPath: "fixture-a.txt",
+          scenario,
+          label: "mixed-lock-wait-holder",
+          defaultDelayMs: 100,
+          lockWaitSeconds: 30,
+          extraEnvironment: {
+            ...capacityOne,
+            QG_FIXTURE_START_BARRIER: holderBarrier,
+          },
+        });
+        let shortHandle;
+        let longHandle;
+        let shortResult;
+        try {
+          await fixture.waitForEvent(
+            scenario,
+            (event) =>
+              event.event === "start" &&
+              event.label === "mixed-lock-wait-holder",
+            "the capacity holder to start",
+          );
+          shortHandle = await fixture.startGate({
+            worktree: worktrees[1],
+            changedPath: "fixture-same.txt",
+            scenario,
+            label: "mixed-lock-wait-short",
+            defaultDelayMs: 100,
+            lockWaitSeconds: 5,
+            extraEnvironment: capacityOne,
+          });
+          await waitUntil(() => /role leader/u.test(shortHandle.stdout), {
+            timeoutMs: observerTimeoutMs,
+            message: "the short-budget request to register as leader",
+          });
+          longHandle = await fixture.startGate({
+            worktree: worktrees[2],
+            changedPath: "fixture-same.txt",
+            scenario,
+            label: "mixed-lock-wait-long",
+            defaultDelayMs: 100,
+            lockWaitSeconds: 30,
+            extraEnvironment: capacityOne,
+          });
+          await waitUntil(
+            () => /role (?:leader|follower)/u.test(longHandle.stdout),
+            {
+              timeoutMs: observerTimeoutMs,
+              message: "the long-budget request to register",
+            },
+          );
+          shortResult = await shortHandle.done;
+        } finally {
+          await releaseHolder();
+        }
+
+        assert.equal(
+          shortResult?.code,
+          2,
+          `short-budget request did not time out:\n${shortResult?.stdout ?? ""}\n${shortResult?.stderr ?? ""}`,
+        );
+        assert.match(shortResult.stderr, /command scheduler wait failed/u);
+        const [holderResult, longResult] = await Promise.all([
+          holder.done,
+          longHandle.done,
+        ]);
+        assertPassed(holderResult);
+        assertPassed(longResult);
+        assert.match(longResult.stdout, /role leader/u);
+        const startedLabels = (await fixture.events(scenario))
+          .filter((event) => event.event === "start")
+          .map((event) => event.label)
+          .sort();
+        assert.deepEqual(startedLabels, [
+          "mixed-lock-wait-holder",
+          "mixed-lock-wait-long",
+        ]);
+      },
+    );
 
     await t.test(
       "changed-path recomputation fails when a later Git probe succeeds",

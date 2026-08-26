@@ -329,6 +329,66 @@ else
   export TMPDIR="$scratch_dir"
 fi
 
+# Caller-controlled Bash startup state must not affect an internal control
+# shell or the mapped-command tree. Keep every ordinary environment value, but
+# remove startup files, inherited option sets, compatibility controls, and
+# exported function records. Privileged mode makes the receiving Bash ignore
+# the same controls while it starts. The filtered environment then propagates
+# to every mapped-command descendant. Prepare this launcher before coordinator
+# mode selection so legacy and explicit no-lock runs use the same boundary.
+if [[ ! -x /usr/bin/env || ! -x /bin/bash ]]; then
+  echo "error: the quality gate requires /usr/bin/env and /bin/bash." >&2
+  exit 2
+fi
+gate_sanitized_bash_launcher=(
+  /usr/bin/env
+  -u BASH_ENV
+  -u ENV
+  -u SHELLOPTS
+  -u BASHOPTS
+  -u BASH_COMPAT
+  -u CDPATH
+  -u GLOBIGNORE
+  -u POSIXLY_CORRECT
+  -u POSIX_PEDANTIC
+)
+gate_bash_environment_scan_complete=0
+while IFS= read -r -d '' gate_bash_environment_record; do
+  if [[ "$gate_bash_environment_record" == agent-quality-gate-env-end ]]; then
+    gate_bash_environment_scan_complete=1
+    continue
+  fi
+  [[ "$gate_bash_environment_record" == *=* ]] || continue
+  gate_bash_environment_name="${gate_bash_environment_record%%=*}"
+  gate_bash_environment_value="${gate_bash_environment_record#*=}"
+  case "$gate_bash_environment_name" in
+    BASH_FUNC_*%%|BASH_FUNC_*'()')
+      gate_sanitized_bash_launcher+=(
+        -u "$gate_bash_environment_name"
+      )
+      ;;
+    *)
+      if [[ "$gate_bash_environment_name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ &&
+        "$gate_bash_environment_value" == '() {'* ]]; then
+        gate_sanitized_bash_launcher+=(
+          -u "$gate_bash_environment_name"
+        )
+      fi
+      ;;
+  esac
+done < <(
+  if /usr/bin/env -0; then
+    printf '%s\0' agent-quality-gate-env-end
+  fi
+)
+if [[ "$gate_bash_environment_scan_complete" -ne 1 ]]; then
+  echo "error: could not inspect Bash startup controls for the quality gate." >&2
+  exit 2
+fi
+gate_sanitized_bash_launcher+=(/bin/bash -p)
+unset gate_bash_environment_record gate_bash_environment_name
+unset gate_bash_environment_value gate_bash_environment_scan_complete
+
 # Print the current changed-path set. Capture each Git probe before printing
 # any output so one failed probe cannot be hidden by a later successful probe.
 collect_current_changed_paths() {
@@ -4808,6 +4868,7 @@ gate_coordinator_freshness_context_hash() {
     "schema=v1" "repository=${repository_identity}" \
     "commandTimeout=${command_timeout_seconds}" \
     "gateSelftestTimeout=${gate_selftest_timeout_seconds}" \
+    "gateLockWait=${gate_lock_wait_seconds}" \
     "qualityParallelism=${quality_parallelism}" "failFast=${fail_fast}" \
     "os=${os_name}" "arch=${os_arch}" "nodePath=${node_path}" \
     "node=${node_version}" "pnpmPath=${pnpm_path}" \
@@ -5251,10 +5312,12 @@ trunk_provisioning_probe() {
     return 2
   fi
 
+  # The sanitized launcher executes this Bash body.
+  # shellcheck disable=SC2016
   AGENTQG_RUN="$command_tag" \
     AGENTQG_REQUEST="$request_tag" \
     TRUNK_LAUNCHER_QUIET=true \
-    bash -c '
+    "${gate_sanitized_bash_launcher[@]}" -c '
       command_marker="$1"
       request_marker="$2"
       coordinator_marker="$3"
@@ -5629,9 +5692,11 @@ run_with_timeout() {
   if declare -p gate_coordinator_recovery_drain_context >/dev/null 2>&1; then
     gate_coordinator_recovery_drain_context="active-command"
   fi
+  # The sanitized launcher executes this Bash body.
+  # shellcheck disable=SC2016
   AGENTQG_RUN="$command_tag" \
     AGENTQG_REQUEST="$request_tag" \
-    bash -c '
+    "${gate_sanitized_bash_launcher[@]}" -c '
       if [[ -n "$3" ]]; then
         # A marker this wrapper was given but cannot hold open is a refusal,
         # not a shrug: without the descriptor, a replacement this command
@@ -5679,7 +5744,9 @@ run_with_timeout() {
   # sees EOF after the gate exits. exec drops that close-on-exec fd; the command
   # above already execs, which is why only the watchdog needed this. The tree
   # kill is inlined because bash -c cannot see this script's functions.
-  bash -c '
+  # The sanitized launcher executes this Bash body.
+  # shellcheck disable=SC2016
+  "${gate_sanitized_bash_launcher[@]}" -c '
     exec 7>&-
     if [[ "$6" == 1 ]]; then
       exec 17>&-

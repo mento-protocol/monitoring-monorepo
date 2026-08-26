@@ -519,8 +519,8 @@ one leader execution. The key binds repository identity, the base and HEAD
 OIDs, changed paths, validated file bytes and modes, normalized command plan,
 gate/coordinator/policy signatures, OS and architecture, resolved Node and pnpm
 executable paths and versions, the effective per-command timeout, resolved
-local parallelism, fail-fast policy, and safe digests of material environment
-inputs. The implementation
+local parallelism, fail-fast policy, the effective `--lock-wait` scheduler
+budget, and safe digests of material environment inputs. The implementation
 signature includes `.trunk/trunk.yaml`; it does not probe the installed Trunk
 version. The leader revalidates the key before its first command and before it
 publishes the result. Each waiter revalidates its local key before it accepts
@@ -533,6 +533,13 @@ exactly to the current worktree root. It also binds the effective `TMPDIR` and
 each visible `TMP` or `TEMP` value. The gate-owned
 `.tmp/agent-quality-gate` fallback uses a worktree token so equivalent fallback
 paths can coalesce across worktrees. Other temp paths remain exact. The
+gate removes `BASH_ENV`, `ENV`, `SHELLOPTS`, `BASHOPTS`, `BASH_COMPAT`,
+`CDPATH`, `GLOBIGNORE`, `POSIXLY_CORRECT`, `POSIX_PEDANTIC`, and exported Bash
+function records
+before it starts any internal Bash control shell or mapped command. It starts
+those shells in privileged mode. The filtered environment reaches mapped
+descendants. This boundary prevents caller startup controls from changing a
+shared result through an internal control shell or mapped-command tree. The
 normalized local bin entry binds a
 bounded, stable manifest of its names, modes, types, and wrapper bytes. A
 symlink entry also binds its link and the resolved regular file's mode and
@@ -1889,12 +1896,12 @@ Its v3 freshness key binds every complete-key input except HEAD. It also records
 the exact HEAD and coordinator fingerprint. An unchanged HEAD requires that
 fingerprint to match. If HEAD changed, reuse still requires the same repository,
 base, paths, plan, validated bytes and modes, implementation, timeout,
-fail-fast policy, OS, architecture, Node and pnpm identities, coordinator
-policy and runtime, and material environment. This exception lets a warm run
-made before a commit satisfy the pre-push hook after the commit records the same
-validated bytes. Legacy and explicit no-lock runs retain the v2 stamp. Any
-other change reruns the mapped commands. An unchanged stamp still expires after
-two hours to avoid masking drift.
+effective `--lock-wait` budget, fail-fast policy, OS, architecture, Node and
+pnpm identities, coordinator policy and runtime, and material environment. This
+exception lets a warm run made before a commit satisfy the pre-push hook after
+the commit records the same validated bytes. Legacy and explicit no-lock runs
+retain the v2 stamp. Any other change reruns the mapped commands. An unchanged
+stamp still expires after two hours to avoid masking drift.
 
 Validated file content is bound by each path's bytes, its worktree file mode,
 and the `git diff --summary` lines for it — minus the `create mode` lines,

@@ -1169,6 +1169,7 @@ const runHandles = require("node:fs").readFileSync(
   "scripts/gate/run-handles.sh",
   "utf8",
 );
+const occurrences = (value, needle) => value.split(needle).length - 1;
 assert.match(
   source,
   /if gate_coordinator_requested; then\n  exec 7>&1\n  gate_coordinator_stdout_reserved=1\n  if ! gate_lock_ensure_local_host_fingerprint; then[\s\S]*?if ! gate_run_ensure_token; then[\s\S]*?if ! gate_coordinator_prepare_registration_fingerprint; then/u,
@@ -1178,6 +1179,26 @@ assert.match(
   source,
   /if \[\[ "\$6" == 1 \]\]; then\n        exec 7>&-\n      fi\n      if \[\[ "\$7" == 1 \]\]; then[\s\S]*?exec 17>&-\n      fi\n      eval "\$2"/u,
   "mapped commands must close fd 7 and fd 17 only when their caller reserved them",
+);
+assert.equal(
+  occurrences(source, '"${gate_sanitized_bash_launcher[@]}" -c \''),
+  3,
+  "every nested Bash control or command shell must use the sanitized launcher",
+);
+assert.equal(
+  occurrences(support, '"${gate_sanitized_bash_launcher[@]}" -c \''),
+  1,
+  "every coordinator wait shell must use the sanitized launcher",
+);
+assert.match(
+  source,
+  /gate_sanitized_bash_launcher=\([\s\S]*?-u BASH_ENV[\s\S]*?-u ENV[\s\S]*?-u SHELLOPTS[\s\S]*?-u BASHOPTS[\s\S]*?-u BASH_COMPAT[\s\S]*?-u CDPATH[\s\S]*?-u GLOBIGNORE[\s\S]*?-u POSIXLY_CORRECT[\s\S]*?-u POSIX_PEDANTIC[\s\S]*?\)/u,
+  "the sanitized launcher must remove fixed Bash startup controls",
+);
+assert.match(
+  source,
+  /read -r -d '' gate_bash_environment_record[\s\S]*?BASH_FUNC_\*%%\|BASH_FUNC_\*'\(\)'[\s\S]*?\(\) \{[\s\S]*?\/usr\/bin\/env -0[\s\S]*?agent-quality-gate-env-end[\s\S]*?gate_bash_environment_scan_complete[\s\S]*?gate_sanitized_bash_launcher\+=\(\/bin\/bash -p\)/u,
+  "the sanitized launcher must remove exported functions and fail a truncated environment scan",
 );
 assert.match(
   source,
@@ -1228,13 +1249,13 @@ for (const refName of ["base", "head"]) {
 }
 assert.match(
   support,
-  /"commandTimeout=\$\{command_timeout_seconds\}"[\s\S]*?"gateSelftestTimeout=\$\{gate_selftest_timeout_seconds\}"[\s\S]*?"qualityParallelism=\$\{quality_parallelism\}" "failFast=\$\{fail_fast\}"/u,
-  "shared executions must bind ordinary and self-test timeouts, parallelism, and fail-fast controls",
+  /"commandTimeout=\$\{command_timeout_seconds\}"[\s\S]*?"gateSelftestTimeout=\$\{gate_selftest_timeout_seconds\}"[\s\S]*?"gateLockWait=\$\{gate_lock_wait_seconds\}"[\s\S]*?"qualityParallelism=\$\{quality_parallelism\}" "failFast=\$\{fail_fast\}"/u,
+  "shared executions must bind command, scheduler-wait, parallelism, and fail-fast controls",
 );
 assert.match(
   source,
-  /"commandTimeout=\$\{command_timeout_seconds\}"[\s\S]*?"gateSelftestTimeout=\$\{gate_selftest_timeout_seconds\}"[\s\S]*?"qualityParallelism=\$\{quality_parallelism\}" "failFast=\$\{fail_fast\}"/u,
-  "coordinated freshness must bind ordinary and self-test timeouts, parallelism, and fail-fast controls",
+  /"commandTimeout=\$\{command_timeout_seconds\}"[\s\S]*?"gateSelftestTimeout=\$\{gate_selftest_timeout_seconds\}"[\s\S]*?"gateLockWait=\$\{gate_lock_wait_seconds\}"[\s\S]*?"qualityParallelism=\$\{quality_parallelism\}" "failFast=\$\{fail_fast\}"/u,
+  "coordinated freshness must bind command, scheduler-wait, parallelism, and fail-fast controls",
 );
 assert.match(
   source,
@@ -1345,6 +1366,7 @@ if ! /bin/bash -c '
   scratch_dir="$2"
   script_source_dir="$repo_root/scripts"
   durations_file="$scratch_dir/durations.jsonl"
+  gate_sanitized_bash_launcher=(/bin/bash -p)
   source "$repo_root/scripts/gate/quality-gate-coordinator.sh"
 
   gate_coordinator_active=1
