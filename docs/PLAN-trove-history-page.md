@@ -469,7 +469,12 @@ today, so the new `troves/[troveId]/_components` rule lands with the page
   historical rank is not tracked. When the open-trove fetch hits
   `CDP_TROVES_DETAIL_LIMIT` (1,000), the dataset is incomplete, so rank and
   shield are suppressed exactly as the market table already suppresses its
-  rank column at the cap — never shown as a partial calculation.
+  rank column at the cap — never shown as a partial calculation. The ladder
+  renders with column headers — "Interest rate", "Debt at this rate"
+  (spanning the bar and its figure), "Queue position" — and the footnote
+  states that bar length is proportional to the debt at each rate; without
+  them the ladder reads as an unlabeled chart (user feedback on the
+  mockup).
 - **Chart**: two stacked single-unit panels — collateral (USDm) and debt
   (debt-token units) — never one dual-axis plot, with series built from
   ledger `collAfter`/`debtAfter` (step interpolation), `sortedCopy` for
