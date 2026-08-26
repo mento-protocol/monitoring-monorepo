@@ -315,9 +315,21 @@ export function gateSignature({ summary, feedback }) {
       ]),
   );
 
+  // The briefing shows every required check's state, so the confirmation has
+  // to bind them too. A required check going `pass` to `skipped`, or the
+  // required set itself changing, moves nothing in the blocker list — both
+  // states are non-blocking — yet the operator approved the first one.
+  const requiredChecks = canonical(
+    (summary?.requiredChecks ?? []).map((check) => [
+      check?.name ?? null,
+      check?.state ?? null,
+    ]),
+  );
+
   return JSON.stringify({
     ready: summary?.ready === true,
     blockers,
+    requiredChecks,
     feedbackReady: feedback?.ready === true,
     findings,
   });

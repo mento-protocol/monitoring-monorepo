@@ -1330,6 +1330,35 @@ await test("a swapped feedback item refuses even though the counts match", async
   assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
 });
 
+await test("a required check that changes to skipped refuses", async () => {
+  // Both pass and skipped are non-blocking, so the blocker list does not move.
+  // The briefing showed the operator the first state, so the confirmation has
+  // to bind it.
+  const after = readySummary();
+  after.requiredChecks = after.requiredChecks.map((check, index) =>
+    index === 0 ? { ...check, state: "skipped" } : check,
+  );
+
+  assertEqual(
+    JSON.stringify(readySummary().required.blockers),
+    JSON.stringify(after.required.blockers),
+    "the blocker lists must match or this proves nothing",
+  );
+  assert(
+    gateSignature({ summary: readySummary(), feedback: null }) !==
+      gateSignature({ summary: after, feedback: null }),
+    "the signature must notice a required check changing state",
+  );
+
+  const h = harness({ summaryAfterConfirmation: after });
+  await assertRefuses(
+    h.run(),
+    "changed its readiness or feedback state while you were confirming",
+  );
+  assertEqual(h.calls.merges.length, 0, "nothing should have merged");
+  assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
+});
+
 await test("the gate signature cannot be spoofed through a blocker name", () => {
   // Every field is GitHub-controlled text. With a delimiter-joined encoding a
   // check whose name contains that delimiter can spell a different set's
