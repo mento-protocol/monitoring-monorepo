@@ -7787,10 +7787,24 @@ STUB
   rm -f "$gate_lock_root/run.lock/owner"
   sleep 60 &
   late_holder_pid=$!
+  # Truncated before the publisher starts watching it, because earlier cases in
+  # this family wrote the same refusal line into this file and a stale match
+  # would let the publisher fire before the gate had looked at anything.
+  : > "$output_file"
   (
     # Published by rename, so the waiter never reads a half-written record and
-    # mistakes it for the ownerless state this case starts from.
-    sleep 3
+    # mistakes it for the ownerless state this case starts from. Ordered
+    # against the gate's own output rather than a fixed sleep: the point of the
+    # case is a record published AFTER a refusal, and a slow runner that had
+    # not reached the refusal yet would fail it with no defect to show for it.
+    # A publisher that never sees the refusal exits non-zero and fails the case
+    # rather than publishing anyway and asserting against a sequence that never
+    # happened.
+    late_deadline=$(($(date +%s) + 8))
+    until grep -Fq "refuses to reclaim it." "$output_file"; do
+      [[ "$(date +%s)" -lt "$late_deadline" ]] || exit 1
+      sleep 1
+    done
     {
       printf 'pid=%s\n' "$late_holder_pid"
       printf 'host=%s\n' "$(uname -n)"
@@ -7812,12 +7826,15 @@ STUB
     AGENT_QUALITY_GATE_LOCK_DIR="$gate_lock_root" \
     AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
     "$repo_root/scripts/agent-quality-gate.sh" \
-    --base HEAD --run --lock-wait 8 \
+    --base HEAD --run --lock-wait 12 \
     > "$output_file" 2>&1
   late_publish_exit=$?
+  wait "$late_publisher_pid"
+  late_publisher_exit=$?
   set -e
-  wait "$late_publisher_pid" 2>/dev/null || true
   kill "$late_holder_pid" 2>/dev/null || true
+  [[ "$late_publisher_exit" == "0" ]] ||
+    fail "the gate never printed a refusal for the publisher to follow, so this case proved nothing"
   [[ "$late_publish_exit" == "2" ]] ||
     fail "a live holder published after a refusal must still be waited out, got $late_publish_exit"
   assert_contains "refuses to reclaim it."

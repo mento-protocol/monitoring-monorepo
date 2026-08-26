@@ -628,6 +628,15 @@ needs a hand: the temp path a reclaim renames into is registered with the exit
 trap **before** the rename creates it, and cleanup restores rather than deletes,
 so an interrupted reclaim puts the record back exactly as it found it.
 
+**That guarantee is local-storage-only**, and so is every row of the table
+below. It has to be: each of those recoveries is a reclaim, and a reclaim rests
+on evidence read through this kernel and this client. Off storage this machine
+mounts itself the gate refuses them all, so a crash there does not self-heal —
+the record or remnant stays where it is, every waiter burns its `--lock-wait`
+budget, and a human removes it. Nothing in this repo runs that way; the model is
+one lock root per machine, and the refusal names it on stderr. Read the rows
+below as "on a root this machine's own", and issue #2061 above for the rest.
+
 #### Crash points
 
 A signal can land between any two of the filesystem operations above, and a
@@ -635,7 +644,9 @@ A signal can land between any two of the filesystem operations above, and a
 made per boundary rather than per function. The boundaries are finite; this is
 all of them. Safe means: at most one process believes it holds the lock, no
 record naming a live holder is invisible to the next reader, and no state
-requires manual cleanup.
+requires manual cleanup. The first two hold on any root. The third is the one
+the qualification above withdraws off local storage: mutual exclusion is what
+the refusal protects, and it protects it by leaving cleanup to a human.
 
 | Crash lands                                                                       | State left behind                                                                                                                   | Next run                                                                                                                                    |
 | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
