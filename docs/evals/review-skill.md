@@ -145,12 +145,14 @@ commands cut still come from the checkout the script runs in, so a run without
 `--skill-ref` refuses to start unless that checkout is at `origin/main` with an
 unmodified ledger — on a feature branch it would plan against a ledger missing
 newer rows and offer to commit the row on top of unrelated work. The scheduled
-launchd job runs the same code path. Only one run at a time may hold the
-fixture cache: every cell resets, cleans and stages `.skill` into the shared
-per-PR checkout, so a scheduled run starting under a manual one would rewrite
-the tree the other is reviewing. The script takes a `run.lock` directory under
-the cache and refuses to start while another live run holds it; a lock left
-behind by a killed run is reclaimed. The skill under test is snapshotted once, before the first
+launchd job runs the same code path. Only one run at a time may hold the shared
+state: every cell resets, cleans and stages `.skill` into the shared per-PR
+checkout, and every run appends to the ledger, so a scheduled run starting
+under a manual one would rewrite the tree the other is reviewing. The script
+takes a `run.lock` directory under both the checkout's git directory and the
+fixture cache — they move independently, under `--repo` and `--cache-dir` — and
+refuses to start while another live run holds either; a lock left behind by a
+killed run is reclaimed. The skill under test is snapshotted once, before the first
 cell, and every cell stages from that snapshot: the plan records one skill
 digest for the whole matrix, and two hours is long enough to edit the installed
 skill under a running evaluation. A snapshot that no longer matches the planned

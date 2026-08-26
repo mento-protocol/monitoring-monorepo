@@ -759,18 +759,39 @@ export function claudeExec({
 }
 
 /**
- * Return one fixture to its pinned head before a judge looks at it.
+ * Return one fixture to the commit the contract pins, before a judge looks.
  *
  * The cells ran with `Write`, `Edit` and `Bash`, and the novel judge itself
  * runs with `Bash` inside the same checkout, so without this the judge would
  * verify a claim against the previous model's edits instead of against the
  * PR head. A fixture that cannot be reset is a scoring failure, not a number:
  * the cells stay cached, so the run resumes and re-scores.
+ *
+ * The reset names the pinned head rather than trusting the one `HEAD` carries
+ * now, for the same reason the shell's per-cell reset does. `HEAD` is the one
+ * thing a contestant can move: the last cell for a PR can commit its own edits
+ * — or a commit the diff under review prompt-injected — or simply check out the
+ * fixture's `base` branch, and an argument-free `git reset --hard` then makes
+ * that tree the fixture. The pre-judge login snapshot and the novelty judge
+ * would both run against it, so every scored claim for the PR comes from the
+ * wrong tree. `HEAD` is read back afterwards so a reset that did not land fails
+ * scoring instead of quietly scoring the contestant's commit.
  */
-export function resetFixture({ fixturePath, cellId, runGit = defaultRunGit }) {
+export function resetFixture({
+  fixturePath,
+  head,
+  cellId,
+  runGit = defaultRunGit,
+}) {
   if (!fixturePath || !existsSync(fixturePath)) return false;
+  if (!/^[0-9a-f]{40}$/.test(head ?? "")) {
+    throw new Error(
+      `fixture ${fixturePath} cannot be reset before scoring ${cellId}: no pinned head`,
+    );
+  }
   for (const args of [
-    ["reset", "--hard", "--quiet"],
+    ["checkout", "--quiet", "--force", "--detach", head],
+    ["reset", "--hard", "--quiet", head],
     ["clean", "-xdffq"],
   ]) {
     const result = runGit({ args, cwd: fixturePath });
@@ -779,6 +800,15 @@ export function resetFixture({ fixturePath, cellId, runGit = defaultRunGit }) {
         `fixture ${fixturePath} could not be reset before scoring ${cellId}: git ${args[0]} exited ${result.status}`,
       );
     }
+  }
+  const landed = runGit({
+    args: ["rev-parse", "--verify", "--quiet", "HEAD"],
+    cwd: fixturePath,
+  });
+  if (landed.status !== 0 || landed.stdout.trim() !== head) {
+    throw new Error(
+      `fixture ${fixturePath} is at ${landed.stdout.trim() || "an unreadable HEAD"} after the reset before scoring ${cellId}, not the pinned ${head}`,
+    );
   }
   return true;
 }
@@ -805,7 +835,12 @@ async function scoreOneCell({
   // calling the retired model.
   const model = contract.judge.model;
   const fixturePath = cellResult.fixture_path ?? "";
-  resetFixture({ fixturePath, cellId: cell.cell_id, runGit });
+  resetFixture({
+    fixturePath,
+    head: fixture.first_head,
+    cellId: cell.cell_id,
+    runGit,
+  });
   // Snapshot the logins the fixture already carries while the tree is still the
   // one `resetFixture` just restored. The exclusion list exists so a reviewer
   // login that is genuine fixture content is not read as a leak, and the novel

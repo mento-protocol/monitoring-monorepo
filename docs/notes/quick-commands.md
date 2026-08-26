@@ -67,10 +67,10 @@ pnpm docs:navigation-eval -- --check-fixtures  # Validate fresh-agent navigation
 pnpm docs:navigation-eval -- --prompt          # Print the bounded read-only evaluation prompt; never invokes a model
 pnpm docs:navigation-eval -- --prompt --base-commit <full-sha>  # Pin a committed result to a reachable default-branch ancestor
 pnpm docs:navigation-eval -- --validate <result.json>  # Recompute authority, evidence, route, and context scores
-pnpm review:eval -- --check-fixtures --offline  # Validate the frozen review-skill contract: eval tags, truth digests, scorable ids; no network, no model
-pnpm review:eval -- --check-ledger              # Validate ledger schema, append-only history, and baseline immutability
-pnpm review:eval -- --report                    # Print the McNemar table and verdict for the newest ledger row
-pnpm review:eval:run                            # Execute the paid evaluation locally; spends model quota and appends a ledger row
+pnpm review:eval -- --check-fixtures --offline  # Frozen review-skill contract: eval tags, truth digests, scorable ids; no network or model
+pnpm review:eval -- --check-ledger   # Ledger schema, append-only history, baseline immutability
+pnpm review:eval -- --report         # McNemar table and verdict for the newest ledger row
+pnpm review:eval:run                 # Run the paid evaluation locally; spends model quota, appends a ledger row
 pnpm agent:context-budget --strict # Enforce root, scoped-file, and aggregate-route AGENTS byte caps
 # Run feedback-state first. Final all-clear needs the current-head Codex
 # PR-description +1 or this exact-head human override:

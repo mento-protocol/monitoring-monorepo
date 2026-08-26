@@ -2435,12 +2435,18 @@ function stubExec({ matchAll = true } = {}) {
  */
 function stubGit({ failOn = null } = {}) {
   const calls = [];
+  // A real checkout answers `rev-parse HEAD` with whatever the last checkout
+  // landed on, and the scoring reset reads that back to prove it landed, so
+  // the stub has to model the head rather than answer the empty string.
+  let head = "";
   return {
     calls,
     runGit: ({ args, cwd }) => {
       calls.push({ args, cwd });
       const status = args[0] === failOn ? 128 : args[0] === "grep" ? 1 : 0;
-      return { status, stdout: "", stderr: "" };
+      if (args[0] === "checkout" && status === 0) head = args.at(-1);
+      const stdout = args[0] === "rev-parse" ? `${head}\n` : "";
+      return { status, stdout, stderr: "" };
     },
   };
 }
@@ -2549,7 +2555,11 @@ test("the login exclusions are snapshotted before the tool-bearing judge", async
       if (request.cwd === root) judged = true;
       return answer;
     };
+    let head = "";
     const runGit = ({ args }) => {
+      if (args[0] === "checkout") head = args.at(-1);
+      if (args[0] === "rev-parse")
+        return { status: 0, stdout: `${head}\n`, stderr: "" };
       if (args[0] !== "grep") return { status: 0, stdout: "", stderr: "" };
       return { status: judged ? 0 : 1, stdout: "", stderr: "" };
     };
@@ -3109,9 +3119,53 @@ test("scoring resets each fixture, uses the contract judge, and totals its cost"
     // before the novel judge reads the tree with Bash.
     const resets = git.calls.filter((call) => call.args[0] === "reset");
     const cleans = git.calls.filter((call) => call.args[0] === "clean");
+    const checkouts = git.calls.filter((call) => call.args[0] === "checkout");
     assert.equal(resets.length, plan.cells.length);
     assert.equal(cleans.length, plan.cells.length);
+    assert.equal(checkouts.length, plan.cells.length);
     assert.ok(resets.every((call) => call.cwd === root));
+    // And it resets to the head the contract pins, not to whatever `HEAD`
+    // names now: the last cell ran with Bash and could have committed its own
+    // edits, or checked out the fixture's `base`, making that tree the fixture
+    // for the login snapshot and the novelty judge of every cell after it.
+    for (const cell of plan.cells) {
+      const pinned = contract.fixtures.find(
+        (candidate) => candidate.pr === cell.pr,
+      ).first_head;
+      assert.ok(
+        checkouts.some((call) => call.args.at(-1) === pinned),
+        `no scoring checkout named the pinned head ${pinned}`,
+      );
+      assert.ok(resets.some((call) => call.args.at(-1) === pinned));
+    }
+
+    // A reset that does not land on the pinned head fails scoring rather than
+    // scoring the contestant's tree.
+    const drifting = stubGit();
+    const driftGit = ({ args, cwd }) => {
+      const answer = drifting.runGit({ args, cwd });
+      if (args[0] === "rev-parse")
+        return { ...answer, stdout: `${"0".repeat(40)}\n` };
+      return answer;
+    };
+    await assert.rejects(
+      scorePlan({
+        plan,
+        contract,
+        contractDigest,
+        repoRoot: root,
+        planDir: plan.plan_dir,
+        exec,
+        runGit: driftGit,
+        calibrationSet: JSON.parse(
+          readFileSync(
+            path.join(root, "docs/evals/review-skill-judge-calibration.json"),
+            "utf8",
+          ),
+        ),
+      }),
+      /not the pinned/,
+    );
 
     // A fixture that cannot be reset is a scoring failure, never a number.
     await assert.rejects(
@@ -3211,12 +3265,17 @@ test("a cell inherits no path back to the source checkout", () => {
       "utf8",
     );
     const cellEnv = script.match(
-      /\nCELL_ENV=\(env\n[\s\S]*?PATH="\$SHIM:\$PATH"\)\n/,
+      /\nCELL_ENV=\(env\n[\s\S]*?PATH="\$CELL_PATH"\)\n/,
     )?.[0];
     assert.ok(cellEnv, "CELL_ENV was not found in run-eval.sh");
     const harness = [
       "set -uo pipefail",
       `SHIM=${JSON.stringify(dir)}`,
+      `REPO=${JSON.stringify(repoRoot)}`,
+      `fail() { printf 'FATAL: %s\\n' "$*" >&2; exit 1; }`,
+      // pnpm prepends the checkout's bin directory to PATH before running a
+      // script, so the cell PATH rebuild has to have something to drop.
+      `export PATH=${JSON.stringify(`${path.join(repoRoot, "node_modules/.bin")}:${process.env.PATH}`)}`,
       // The documented invocation is `pnpm review:eval:run`, and pnpm exports
       // these into every script it runs; make them present so the dynamic
       // scrub is exercised whether or not this suite itself runs under pnpm.
@@ -3238,14 +3297,21 @@ test("a cell inherits no path back to the source checkout", () => {
       [],
     );
     assert.ok(cellVars.includes(`PWD=${fixture}`), result.stdout);
-    // PATH legitimately carries whatever the operator's shell put there; every
-    // other variable must be free of the checkout.
+    // Including PATH. It survives the scrub because a cell needs node, git and
+    // the model CLIs, and under pnpm it carries `<checkout>/node_modules/.bin`
+    // — the same route to the answer key the INIT_CWD scrub just removed, and
+    // one a Bash-enabled contestant can walk with no leak signal to catch it.
     assert.deepEqual(
-      cellVars.filter(
-        (line) => !line.startsWith("PATH=") && line.includes(repoRoot),
-      ),
+      cellVars.filter((line) => line.includes(repoRoot)),
       [],
     );
+    const cellPath = cellVars
+      .find((line) => line.startsWith("PATH="))
+      ?.slice("PATH=".length);
+    // The shim stays first, so the refusing `gh` still shadows the real one,
+    // and the system directories a cell needs are still there.
+    assert.equal(cellPath.split(":")[0], dir);
+    assert.ok(cellPath.split(":").includes("/usr/bin"), cellPath);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -3394,26 +3460,38 @@ test("the ledger commit leaves the operator's other staged work alone", () => {
   }
 });
 
-test("one review eval at a time may hold the shared fixture cache", () => {
+test("one review eval at a time may hold the shared run state", () => {
   // Every cell resets and cleans the shared per-PR checkout and stages `.skill`
-  // in it. Two overlapping runs — the launchd job starting under a manual run,
-  // or two manual runs — take turns rewriting the tree the other is reviewing.
+  // in it, and every run appends to the checkout's ledger. Two overlapping
+  // runs — the launchd job starting under a manual run, or two manual runs —
+  // take turns rewriting the tree the other is reviewing and race the ledger.
+  // The two shared roots move independently, so both are locked: a manual run
+  // that passes its own `--cache-dir` still contends for the checkout.
   const dir = mkdtempSync(path.join(tmpdir(), "review-eval-lock-"));
   try {
-    const harness = [
-      "set -uo pipefail",
-      `CACHE_DIR=${JSON.stringify(dir)}`,
-      'LOCK_DIR=""',
-      `fail() { printf 'FATAL: %s\\n' "$*" >&2; exit 1; }`,
-      `log() { printf '%s\\n' "$*"; }`,
-      shellFunction("acquire_run_lock"),
-      'acquire_run_lock; printf "held %s\\n" "$LOCK_DIR"',
-    ].join("\n");
-    const lock = path.join(dir, "run.lock");
+    const lockRoot = path.join(dir, "git");
+    const harness = (cacheDir) =>
+      [
+        "set -uo pipefail",
+        `LOCK_ROOT=${JSON.stringify(lockRoot)}`,
+        `CACHE_DIR=${JSON.stringify(cacheDir)}`,
+        "LOCK_DIRS=()",
+        `fail() { printf 'FATAL: %s\\n' "$*" >&2; exit 1; }`,
+        `log() { printf '%s\\n' "$*"; }`,
+        shellFunction("acquire_one_lock"),
+        shellFunction("acquire_run_lock"),
+        'acquire_run_lock; printf "held %s\\n" "${LOCK_DIRS[@]}"',
+      ].join("\n");
+    const cache = path.join(dir, "cache");
+    const lock = path.join(lockRoot, "run.lock");
+    const cacheLock = path.join(cache, "run.lock");
 
-    const free = spawnSync("bash", ["-c", harness], { encoding: "utf8" });
+    const free = spawnSync("bash", ["-c", harness(cache)], {
+      encoding: "utf8",
+    });
     assert.equal(free.status, 0, free.stderr);
     assert.match(free.stdout, new RegExp(`held ${lock}`));
+    assert.match(free.stdout, new RegExp(`held ${cacheLock}`));
     assert.equal(
       readFileSync(path.join(lock, "pid"), "utf8").trim().length > 0,
       true,
@@ -3421,14 +3499,29 @@ test("one review eval at a time may hold the shared fixture cache", () => {
 
     // A live holder is a real conflict, and the run refuses before it spends.
     writeFileSync(path.join(lock, "pid"), `${process.pid}\n`);
-    const busy = spawnSync("bash", ["-c", harness], { encoding: "utf8" });
+    const busy = spawnSync("bash", ["-c", harness(cache)], {
+      encoding: "utf8",
+    });
     assert.equal(busy.status, 1);
     assert.match(busy.stderr, /another review eval \(pid \d+\) holds/);
+
+    // And it refuses even when the second run picks its own `--cache-dir`: the
+    // ledger and the detail directory are shared no matter what the cache is.
+    const elsewhere = spawnSync(
+      "bash",
+      ["-c", harness(path.join(dir, "other-cache"))],
+      { encoding: "utf8" },
+    );
+    assert.equal(elsewhere.status, 1);
+    assert.match(elsewhere.stderr, new RegExp(`holds ${lock}`));
 
     // A lock left behind by a SIGKILL is reclaimed rather than wedging the job.
     const dead = spawnSync("bash", ["-c", "exit 0"]);
     writeFileSync(path.join(lock, "pid"), `${dead.pid}\n`);
-    const reclaimed = spawnSync("bash", ["-c", harness], { encoding: "utf8" });
+    writeFileSync(path.join(cacheLock, "pid"), `${dead.pid}\n`);
+    const reclaimed = spawnSync("bash", ["-c", harness(cache)], {
+      encoding: "utf8",
+    });
     assert.equal(reclaimed.status, 0, reclaimed.stderr);
     assert.match(reclaimed.stdout, /reclaiming a run lock/);
   } finally {
@@ -3450,7 +3543,17 @@ test("the run lock is taken before anything touches the fixtures", () => {
   );
   assert.match(
     script,
-    /if \[\[ -n \$LOCK_DIR \]\]; then\n\s*rm -rf "\$LOCK_DIR"/,
+    /for lock_dir in \$\{LOCK_DIRS\[@\]\+"\$\{LOCK_DIRS\[@\]\}"\}; do\n\s*rm -rf "\$lock_dir"/,
+  );
+  // The checkout half is anchored to the git directory, which no option moves,
+  // and it is taken first so the ordering between the two roots is fixed.
+  assert.match(
+    script,
+    /LOCK_ROOT="\$\(git -C "\$REPO" rev-parse --absolute-git-dir/,
+  );
+  assert.ok(
+    script.indexOf('acquire_one_lock "$LOCK_ROOT"') <
+      script.indexOf('acquire_one_lock "$CACHE_DIR"'),
   );
 });
 

@@ -30,9 +30,11 @@
 # next name and seeds its cells from the old one instead of overwriting a row's
 # plan, results, report and publication branch.
 #
-# One run at a time. The fixture cache and the ledger are shared, so the script
-# takes a lock under --cache-dir and refuses to start while another run holds
-# it, rather than letting two runs rewrite each other's fixture checkouts.
+# One run at a time. The fixture cache and the ledger are shared but move
+# independently — the cache with --cache-dir, the ledger and the detail
+# directory with --repo — so the script locks both roots and refuses to start
+# while another run holds either, rather than letting two runs rewrite each
+# other's fixture checkouts or race the same ledger appends.
 #
 # Usage:
 #   run-eval.sh [--kind full|canary|auto] [--skill-ref PATH] [--pr] [--no-pr]
@@ -69,7 +71,7 @@ SPEC=""
 SPEC_TEMP=0
 SHIM=""
 SKILL_SNAPSHOT=""
-LOCK_DIR=""
+LOCK_DIRS=()
 RUN_DIR=""
 PLAN_JSON=""
 STARTED=0
@@ -157,6 +159,15 @@ fi
 LEDGER="$REPO/docs/evals/review-skill-ledger.jsonl"
 [[ -f $LEDGER ]] || fail "ledger $LEDGER is missing"
 
+# Where the checkout half of the run lock lives. The ledger and the detail
+# directory belong to this checkout no matter what `--cache-dir` says, so the
+# lock that protects them has to be anchored here too. The git directory is the
+# anchor: it is one per checkout — a linked worktree gets its own — it is never
+# a tracked path, so a lock in it cannot dirty the ledger commit, and it lives
+# exactly as long as the checkout does.
+LOCK_ROOT="$(git -C "$REPO" rev-parse --absolute-git-dir 2>/dev/null)" ||
+  fail "$REPO has no git directory to anchor the run lock"
+
 command -v claude >/dev/null 2>&1 || fail "claude CLI is not on PATH"
 command -v codex >/dev/null 2>&1 || fail "codex CLI is not on PATH"
 command -v node >/dev/null 2>&1 || fail "node is not on PATH"
@@ -175,9 +186,10 @@ cleanup() {
   if [[ -n $SKILL_SNAPSHOT ]]; then
     rm -rf "$SKILL_SNAPSHOT"
   fi
-  if [[ -n $LOCK_DIR ]]; then
-    rm -rf "$LOCK_DIR"
-  fi
+  local lock_dir
+  for lock_dir in ${LOCK_DIRS[@]+"${LOCK_DIRS[@]}"}; do
+    rm -rf "$lock_dir"
+  done
   return "$code"
 }
 trap cleanup EXIT
@@ -191,17 +203,25 @@ trap cleanup EXIT
 # tree, so one scores a review of the other's skill state and neither result
 # means anything. Both also append to the same ledger.
 #
+# Two things are shared, and they vary independently. The fixture cache moves
+# with `--cache-dir`; the ledger and the detail directory move with `--repo`. A
+# single lock under the cache let a manual run with its own `--cache-dir` start
+# under the scheduled run and race the same ledger appends and detail
+# directory, so both roots are locked, always checkout first and cache second.
+# A fixed order means two runs contending on both cannot each hold one and wait
+# — the loser fails immediately and the EXIT trap frees whatever it took.
+#
 # mkdir is the lock: it is atomic on every filesystem this runs on and needs no
 # flock, which macOS does not ship. The holder's pid goes inside so a lock left
 # behind by a SIGKILL can be told from a live run and reclaimed. The pid is
-# written before LOCK_DIR is set — the holder must be identifiable the instant
-# the directory exists, or a second run arriving in that window reads no pid and
-# reclaims a live lock. The read side waits for it for the same reason.
-# `kill -0` on a recycled pid can keep a stale lock held; that fails closed, and
-# the message names the directory to remove.
-acquire_run_lock() {
-  local lock="$CACHE_DIR/run.lock" holder="" waited=0
-  mkdir -p "$CACHE_DIR" || fail "the fixture cache $CACHE_DIR is not writable"
+# written before the directory is recorded in LOCK_DIRS — the holder must be
+# identifiable the instant the directory exists, or a second run arriving in
+# that window reads no pid and reclaims a live lock. The read side waits for it
+# for the same reason. `kill -0` on a recycled pid can keep a stale lock held;
+# that fails closed, and the message names the directory to remove.
+acquire_one_lock() {
+  local root="$1" what="$2" lock="$1/run.lock" holder="" waited=0
+  mkdir -p "$root" || fail "the $what $root is not writable"
   if ! mkdir "$lock" 2>/dev/null; then
     while ((waited < 5)); do
       waited=$((waited + 1))
@@ -212,7 +232,7 @@ acquire_run_lock() {
       sleep 0.2
     done
     if [[ $holder =~ ^[0-9]+$ ]] && kill -0 "$holder" 2>/dev/null; then
-      fail "another review eval (pid $holder) holds $lock; a run rewrites the shared fixtures, so wait for it to finish"
+      fail "another review eval (pid $holder) holds $lock; a run rewrites the shared fixtures and appends to the shared ledger, so wait for it to finish"
     fi
     log "reclaiming a run lock left behind by pid ${holder:-unknown}"
     rm -rf "$lock"
@@ -220,7 +240,12 @@ acquire_run_lock() {
       fail "could not take the run lock at $lock; remove it if no eval is running"
   fi
   printf '%s\n' "$$" >"$lock/pid"
-  LOCK_DIR="$lock"
+  LOCK_DIRS+=("$lock")
+}
+
+acquire_run_lock() {
+  acquire_one_lock "$LOCK_ROOT" "run state directory"
+  acquire_one_lock "$CACHE_DIR" "fixture cache"
 }
 
 acquire_run_lock
@@ -661,11 +686,46 @@ CELL_ENV=(env
 while IFS= read -r cell_env_var; do
   CELL_ENV+=(-u "$cell_env_var")
 done < <(compgen -e | grep -E '^(npm_|PNPM_|INIT_CWD$|NODE_PATH$)' || true)
+
+# `PATH` is the last path-bearing variable, and it survives the scrub above
+# because a cell still needs node, git and the model CLIs. Under
+# `pnpm review:eval:run` pnpm prepends `<checkout>/node_modules/.bin` to it, so
+# passing the caller's `PATH` through verbatim hands every Bash-enabled
+# contestant the checkout root the INIT_CWD scrub just took away — and the
+# answer key sits in it, under docs/evals/review-skill-truth/, readable with no
+# PR number, reviewer login or withheld SHA for `leakSignals()` to catch.
+# Rebuild it instead: the shim first, then every inherited entry that does not
+# resolve inside the source checkout. Entries are compared canonically, because
+# a symlinked `node_modules/.bin` passes a string comparison and still lands in
+# the repository.
+CELL_PATH="$SHIM"
+REPO_REAL="$(cd "$REPO" && pwd -P)"
+while IFS= read -r cell_path_entry; do
+  [[ -n $cell_path_entry ]] || continue
+  cell_path_real="$(cd "$cell_path_entry" 2>/dev/null && pwd -P)" ||
+    cell_path_real="$cell_path_entry"
+  [[ $cell_path_real == "$REPO_REAL" || $cell_path_real == "$REPO_REAL"/* ]] &&
+    continue
+  [[ $cell_path_entry == "$REPO" || $cell_path_entry == "$REPO"/* ]] && continue
+  CELL_PATH="$CELL_PATH:$cell_path_entry"
+done < <(printf '%s\n' "${PATH//:/$'\n'}")
+
 CELL_ENV+=(
   GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
   GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=
   GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false GIT_ALLOW_PROTOCOL=file
-  GH_CONFIG_DIR="$SHIM/gh-empty" PATH="$SHIM:$PATH")
+  GH_CONFIG_DIR="$SHIM/gh-empty" PATH="$CELL_PATH")
+
+# A cell that cannot start its own tools is a failed run, not a safer one, and
+# dropping checkout entries is the only thing that can cause it. Check the tools
+# a cell actually needs against the rebuilt PATH, in a subshell so the
+# operator's own PATH is untouched.
+for cell_path_tool in claude codex node git; do
+  (
+    PATH="$CELL_PATH"
+    command -v "$cell_path_tool" >/dev/null 2>&1
+  ) || fail "$cell_path_tool resolves only inside $REPO; a cell must not be given a PATH into the source checkout, so install it outside the checkout"
+done
 
 # One scrubbed model call inside one fixture. `run_bounded` needs a command it
 # can start in the background and signal, which a `(cd … && …)` subshell inside
