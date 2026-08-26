@@ -8,7 +8,9 @@
  * still wrote or still merged would be worse than no wrapper at all.
  */
 
+import * as fs from "node:fs";
 import {
+  linkSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
@@ -25,18 +27,22 @@ import {
   CONSENT_LOG_BASENAME,
   MergeRefusal,
   NON_INTERACTIVE_REFUSAL,
-  appendConsentRecord,
   buildConsentRecord,
   countRequiredCheckStates,
   formatBriefing,
   interactiveSessionRefusal,
   mergePullRequest,
   parseArgs,
+  sanitizeTerminalText,
 } from "./merge-pr.mjs";
+import { appendConsentRecord } from "./merge-pr-io.mjs";
 import {
   groupStatusChecks,
   splitRequiredAndOptionalChecks,
 } from "./pr-ready-state-core.mjs";
+
+/** The repository's file-size soft cap (docs/adr/0065-...). */
+const SOFT_CAP = 600;
 
 let passed = 0;
 let failed = 0;
@@ -182,6 +188,13 @@ function harness({
   // The second element, when present, is what the post-confirmation re-read
   // returns; without it both reads see the same state.
   summaryAfterConfirmation = null,
+  // What the post-merge confirmation read reports. A merge-queue base leaves
+  // the pull request OPEN even though `gh pr merge` exited 0.
+  mergedState = "MERGED",
+  mergeOutcomeError = null,
+  // The repository URL `gh repo view` reports, which carries the host.
+  repoUrl = "https://github.com/mento-protocol/monitoring-monorepo",
+  parent = null,
 } = {}) {
   const calls = {
     gh: [],
@@ -198,10 +211,11 @@ function harness({
     if (args[0] === "repo" && args[1] === "view") {
       return JSON.stringify({
         nameWithOwner: "mento-protocol/monitoring-monorepo",
-        parent: null,
+        parent,
+        url: repoUrl,
       });
     }
-    if (args[0] === "api" && args[1] === "user") return "chapati23\n";
+    if (args[0] === "api" && args.includes("user")) return "chapati23\n";
     if (args[0] === "pr" && args[1] === "list") {
       return JSON.stringify([
         {
@@ -209,6 +223,13 @@ function harness({
           headRepositoryOwner: { login: "mento-protocol" },
         },
       ]);
+    }
+    if (args[0] === "pr" && args[1] === "view") {
+      if (mergeOutcomeError) throw new Error(mergeOutcomeError);
+      return JSON.stringify({
+        state: mergedState,
+        mergeCommit: mergedState === "MERGED" ? { oid: "b".repeat(40) } : null,
+      });
     }
     throw new Error(`unexpected gh call: ${args.join(" ")}`);
   };
@@ -893,6 +914,379 @@ await test("the automation markers cover every Codex marker autoreview checks", 
       `AUTOMATION_ENV_MARKERS is missing ${marker}, which agent-autoreview.sh treats as a Codex session`,
     );
   }
+});
+
+await test("the briefing neutralizes terminal control sequences in the title", () => {
+  // A pull-request title is contributor-controlled. Printed verbatim it can
+  // erase the head, base and readiness lines directly above it and forge new
+  // ones, so the operator would confirm against text the author composed.
+  const hostile = readySummary();
+  // Written as escapes: a literal control byte would make this file binary
+  // to Git and to every reviewer's diff.
+  hostile.pr.title =
+    "\u001b[2Ktidy\rAbout to merge safe/repo#1\u202e evil \u200b";
+  const briefing = formatBriefing({
+    summary: hostile,
+    feedback: { ready: true, counts: {} },
+    repo: "mento-protocol/monitoring-monorepo",
+    notReadyReason: null,
+  });
+
+  for (const forbidden of ["\u001b", "\r", "\u202e", "\u200b"]) {
+    assert(
+      !briefing.includes(forbidden),
+      `the briefing still carries ${JSON.stringify(forbidden)}`,
+    );
+  }
+  assert(
+    briefing.includes("\ufffd"),
+    "the stripped characters should stay visible as replacement characters",
+  );
+  // The trusted lines must survive intact.
+  assert(briefing.includes(`  Head:  ${HEAD_OID}`), "the head line was lost");
+  assert(briefing.includes("  Base:  main"), "the base line was lost");
+});
+
+await test("sanitizeTerminalText keeps ordinary text and reports empty values", () => {
+  assertEqual(sanitizeTerminalText("feat: add a thing"), "feat: add a thing");
+  assertEqual(sanitizeTerminalText(""), "(unknown)");
+  assertEqual(sanitizeTerminalText(null), "(unknown)");
+  assertEqual(sanitizeTerminalText(undefined), "(unknown)");
+});
+
+await test("refuses when the base branch is retargeted mid-confirmation", async () => {
+  // `--match-head-commit` binds the head only, so a retarget keeps the same
+  // SHA and would merge into a branch the operator was never shown.
+  const retargeted = readySummary();
+  retargeted.pr = { ...retargeted.pr, baseRefName: "release/v2" };
+  const h = harness({ summaryAfterConfirmation: retargeted });
+
+  await assertRefuses(h.run(), "was retargeted from main to release/v2");
+  assertEqual(h.calls.merges.length, 0, "nothing should have merged");
+  assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
+});
+
+await test("an override reason does not carry through a newly failing check", async () => {
+  // The reason was entered for the state in the briefing. A blocker that
+  // appears while the operator is at the prompt is not covered by it.
+  const worsened = notReadySummary();
+  worsened.required = {
+    ready: false,
+    blockers: [
+      ...worsened.required.blockers,
+      { kind: "review", name: "Codex review", state: "CHANGES_REQUESTED" },
+    ],
+  };
+  const h = harness({
+    argv: ["--pr", "2071", "--not-ready-reason", "docs-only follow-up"],
+    summary: notReadySummary(),
+    summaryAfterConfirmation: worsened,
+  });
+
+  await assertRefuses(
+    h.run(),
+    "changed its readiness or feedback state while you were confirming",
+  );
+  assertEqual(h.calls.merges.length, 0, "nothing should have merged");
+  assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
+});
+
+await test("an unchanged not-ready state still merges under one override", async () => {
+  // The guard above must not break the documented override path.
+  const h = harness({
+    argv: ["--pr", "2071", "--not-ready-reason", "docs-only follow-up"],
+    summary: notReadySummary(),
+  });
+
+  const result = await h.run();
+  assertEqual(result.merged, true, "the override should still merge");
+});
+
+await test("refuses a pull request whose feedback ledger is not clean", async () => {
+  // `pr:ready-state` does not project actionable review feedback into its
+  // blockers; `pr:feedback-state` owns that ledger. Reading only the oracle
+  // would merge a pull request the repository's own all-clear refuses.
+  const withFeedback = readySummary();
+  withFeedback.unresolvedReviewThreads = [
+    {
+      id: "PRRT_1",
+      path: "scripts/pr/merge-pr.mjs",
+      line: 10,
+      isResolved: false,
+      comments: [{ author: { login: "coderabbitai" }, body: "a finding" }],
+    },
+  ];
+  const h = harness({ summary: withFeedback });
+
+  await assertRefuses(h.run(), "is not ready");
+  assertEqual(h.calls.merges.length, 0, "nothing should have merged");
+  assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
+});
+
+await test("the feedback ledger blocks even when the oracle reports ready", async () => {
+  // Proves the two projections are read independently: `ready` is true here.
+  const withFeedback = readySummary();
+  withFeedback.unrepliedRootReviewComments = [
+    { id: "IC_1", author: { login: "coderabbitai" }, body: "a finding" },
+  ];
+  assertEqual(withFeedback.ready, true, "the oracle should still report ready");
+
+  const h = harness({ summary: withFeedback });
+  const error = await assertRefuses(h.run(), "is not ready");
+  assert(
+    /feedback/i.test(error.message),
+    `the refusal should name the feedback ledger, got: ${error.message}`,
+  );
+});
+
+await test("a recorded reason overrides an unclean feedback ledger", async () => {
+  const withFeedback = readySummary();
+  withFeedback.unresolvedReviewThreads = [
+    {
+      id: "PRRT_1",
+      path: "scripts/pr/merge-pr.mjs",
+      line: 10,
+      isResolved: false,
+      comments: [{ author: { login: "coderabbitai" }, body: "a finding" }],
+    },
+  ];
+  const h = harness({
+    argv: ["--pr", "2071", "--not-ready-reason", "threads answered inline"],
+    summary: withFeedback,
+  });
+
+  const result = await h.run();
+  assertEqual(result.merged, true, "the override should merge");
+  assertEqual(
+    result.record.notReadyReason,
+    "threads answered inline",
+    "the reason belongs in the consent record",
+  );
+});
+
+await test("the briefing reports the feedback ledger", async () => {
+  const withFeedback = readySummary();
+  withFeedback.unresolvedReviewThreads = [
+    {
+      id: "PRRT_1",
+      path: "scripts/pr/merge-pr.mjs",
+      line: 10,
+      isResolved: false,
+      comments: [{ author: { login: "coderabbitai" }, body: "a finding" }],
+    },
+  ];
+  const h = harness({
+    argv: ["--pr", "2071", "--not-ready-reason", "threads answered inline"],
+    summary: withFeedback,
+  });
+  await h.run();
+
+  assert(
+    h.output().includes("Feedback ledger: NEEDS ATTENTION"),
+    `the briefing should report the ledger, got:\n${h.output()}`,
+  );
+  assert(
+    h.output().includes("1 unresolved threads"),
+    `the briefing should count the threads, got:\n${h.output()}`,
+  );
+});
+
+await test("a clean ledger is reported as clear", async () => {
+  const h = harness();
+  await h.run();
+  assert(
+    h.output().includes("Feedback ledger: CLEAR"),
+    `the briefing should report a clear ledger, got:\n${h.output()}`,
+  );
+});
+
+await test("the consent ledger refuses a hard-linked file", async () => {
+  // `O_NOFOLLOW` rejects a symlink, but a hard link is the same inode under a
+  // second name and passes every other check, so `ln` would work where
+  // `ln -s` does not.
+  const checkout = mkdtempSync(path.join(tmpdir(), "merge-consent-hard-"));
+  try {
+    const victim = path.join(checkout, "victim.txt");
+    writeFileSync(victim, "important\n");
+    linkSync(victim, path.join(checkout, CONSENT_LOG_BASENAME));
+
+    const record = buildConsentRecord({
+      login: "chapati23",
+      repo: "mento-protocol/monitoring-monorepo",
+      number: 2071,
+      headOid: HEAD_OID,
+      notReadyReason: null,
+      now: new Date("2026-08-26T00:00:00.000Z"),
+    });
+
+    await assertRefuses(
+      appendConsentRecord({ record, git: async () => `${checkout}\n` }),
+      "hard links",
+    );
+    assertEqual(
+      readFileSync(victim, "utf8"),
+      "important\n",
+      "the linked file must be untouched",
+    );
+  } finally {
+    rmSync(checkout, { recursive: true, force: true });
+  }
+});
+
+await test("a short consent write refuses instead of reporting success", async () => {
+  // A quota or a full filesystem can make `writeSync` return a short count
+  // rather than throw, leaving a truncated record behind a reported success.
+  const checkout = mkdtempSync(path.join(tmpdir(), "merge-consent-short-"));
+  try {
+    const record = buildConsentRecord({
+      login: "chapati23",
+      repo: "mento-protocol/monitoring-monorepo",
+      number: 2071,
+      headOid: HEAD_OID,
+      notReadyReason: null,
+      now: new Date("2026-08-26T00:00:00.000Z"),
+    });
+
+    await assertRefuses(
+      appendConsentRecord({
+        record,
+        git: async () => `${checkout}\n`,
+        // Accept only the first five bytes, as a full filesystem would.
+        write: (fd, payload) => fs.writeSync(fd, payload.subarray(0, 5)),
+      }),
+      "the consent record is incomplete",
+    );
+
+    const ledger = readFileSync(
+      path.join(checkout, CONSENT_LOG_BASENAME),
+      "utf8",
+    );
+    assert(
+      !ledger.includes("\n"),
+      `a truncated record must not be left as a ledger line, got: ${JSON.stringify(ledger)}`,
+    );
+  } finally {
+    rmSync(checkout, { recursive: true, force: true });
+  }
+});
+
+await test("an enqueued pull request is not reported as merged", async () => {
+  // `gh pr merge` exits 0 after enqueueing on a merge-queue base. Reporting
+  // that as merged would let callers run post-merge closeout while the pull
+  // request is still open and the queue is still retesting it.
+  const h = harness({ mergedState: "OPEN" });
+
+  const result = await h.run();
+  assertEqual(result.merged, false, "an enqueued request is not merged");
+  assertEqual(result.queued, true, "it should be reported as queued");
+  assertEqual(result.verified, true, "the state was read successfully");
+  assert(
+    h.output().includes("not merged"),
+    `the operator should be told, got:\n${h.output()}`,
+  );
+});
+
+await test("an unreadable post-merge state is reported as unverified", async () => {
+  const h = harness({ mergeOutcomeError: "gh exploded" });
+
+  const result = await h.run();
+  assertEqual(result.merged, false, "an unconfirmed merge is not merged");
+  assertEqual(result.verified, false, "the state could not be read");
+  assert(
+    h.output().includes("Could not confirm the merge landed"),
+    `the operator should be told, got:\n${h.output()}`,
+  );
+});
+
+await test("a confirmed merge reports the merge commit", async () => {
+  const h = harness();
+  const result = await h.run();
+  assertEqual(result.merged, true);
+  assertEqual(result.verified, true);
+  assertEqual(result.mergeCommit, "b".repeat(40));
+});
+
+await test("an Enterprise checkout keeps its host on every call", async () => {
+  // `gh repo view --json nameWithOwner` returns a bare owner/name even on an
+  // Enterprise host, and `gh` defaults a bare `--repo` to github.com — so
+  // losing the host would inspect and merge an unrelated public repository.
+  const h = harness({
+    argv: [],
+    repoUrl: "https://ghe.example.com/mento-protocol/monitoring-monorepo",
+  });
+  await h.run();
+
+  const merged = h.calls.merges[0];
+  assertEqual(
+    merged[merged.indexOf("--repo") + 1],
+    "ghe.example.com/mento-protocol/monitoring-monorepo",
+    "the merge must target the Enterprise host",
+  );
+
+  const login = h.calls.gh.find(
+    (args) => args[0] === "api" && args.includes("user"),
+  );
+  assertEqual(
+    login[login.indexOf("--hostname") + 1],
+    "ghe.example.com",
+    "the login must be read from the Enterprise host",
+  );
+});
+
+await test("a github.com checkout passes no --hostname", async () => {
+  const h = harness({ argv: [] });
+  await h.run();
+
+  const login = h.calls.gh.find(
+    (args) => args[0] === "api" && args.includes("user"),
+  );
+  assert(
+    !login.includes("--hostname"),
+    `github.com needs no hostname flag, got: ${login.join(" ")}`,
+  );
+  const merged = h.calls.merges[0];
+  assertEqual(
+    merged[merged.indexOf("--repo") + 1],
+    "mento-protocol/monitoring-monorepo",
+  );
+});
+
+await test("an explicit host-qualified --repo reaches gh verbatim", async () => {
+  const h = harness({
+    argv: ["--pr", "2071", "--repo", "ghe.example.com/acme/widgets"],
+  });
+  await h.run();
+
+  const merged = h.calls.merges[0];
+  assertEqual(
+    merged[merged.indexOf("--repo") + 1],
+    "ghe.example.com/acme/widgets",
+  );
+  const login = h.calls.gh.find(
+    (args) => args[0] === "api" && args.includes("user"),
+  );
+  assertEqual(login[login.indexOf("--hostname") + 1], "ghe.example.com");
+});
+
+await test("the wrapper's own modules stay under the 600-line soft cap", () => {
+  // `scripts/` has no `max-lines` lint rule and the file-size watchlist only
+  // reports, monthly, against `main` (ADR 0065) — so without this assertion a
+  // follow-up can regrow the wrapper past the cap with every per-PR check
+  // green. The wrapper was split at 638 lines for exactly that reason.
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  // ADR 0065 scopes the cap to source, not suites, so the suite is not listed.
+  const files = ["merge-pr.mjs", "merge-pr-core.mjs", "merge-pr-io.mjs"];
+  const over = files
+    .map((file) => ({
+      file,
+      lines: readFileSync(path.join(here, file), "utf8").split("\n").length,
+    }))
+    .filter(({ lines }) => lines > SOFT_CAP);
+  assertEqual(
+    JSON.stringify(over),
+    "[]",
+    `these files crossed the ${SOFT_CAP}-line soft cap; move code into a focused sibling module`,
+  );
 });
 
 if (failed > 0) {

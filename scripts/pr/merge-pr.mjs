@@ -10,15 +10,16 @@
  *
  * The order is fixed: refuse outside an interactive human terminal, resolve the
  * repository and the target pull request unambiguously, run the ready-state
- * oracle, show the operator exactly what they are about to merge, make them
- * type the pull-request number back, append the consent record, and only then
- * merge. Every unreadable, ambiguous, or unexpected state refuses instead of
- * merging: an operator who has to re-run one command loses a minute, and a
- * merge nobody approved cannot be taken back.
+ * oracle and the feedback ledger, show the operator exactly what they are about
+ * to merge, make them type the pull-request number back, re-read every gate,
+ * append the consent record, merge, and confirm the merge actually landed.
+ * Every unreadable, ambiguous, or unexpected state refuses instead of merging:
+ * an operator who has to re-run one command loses a minute, and a merge nobody
+ * approved cannot be taken back.
  *
  * Agents must never invoke this script. Be honest about what makes that true.
- * The interactive-session refusal below stops an agent that runs this command
- * the ordinary way, and `.claude/settings.json` denies the raw `gh pr merge`
+ * The interactive-session refusal stops an agent that runs this command the
+ * ordinary way, and `.claude/settings.json` denies the raw `gh pr merge`
  * command so the obvious shortcut is gone too. Neither is an unforgeable
  * boundary: a caller on this machine can allocate a pseudo-terminal and clear
  * the markers, and the deny is command-level, so it does not cover the same
@@ -27,224 +28,80 @@
  * no check in this file can be one. What the wrapper does provide is a default
  * that refuses, a briefing the operator must read, a confirmation they must
  * type, and an append-only consent record naming who approved which head. The
- * approval rule itself remains the binding control.
+ * approval rule itself remains the binding control, and the only unforgeable
+ * boundary would live on GitHub's side of the wire;
+ * `docs/adr/0072-sanctioned-merge-wrapper.md` records that decision and its
+ * residual risk.
+ *
+ * The pure decision logic lives in `scripts/pr/merge-pr-core.mjs` and the side
+ * effects in `scripts/pr/merge-pr-io.mjs`; both are re-exported here so callers
+ * keep one entry point.
  *
  * Tests: scripts/pr/merge-pr.test.mjs
  */
 
-import { spawn } from "node:child_process";
-import { closeSync, constants, fstatSync, openSync, writeSync } from "node:fs";
-import path from "node:path";
-import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 
+import {
+  COMMIT_OID_PATTERN,
+  MERGE_METHOD_FLAG,
+  MergeRefusal,
+  PR_NUMBER_PATTERN,
+  buildConsentRecord,
+  formatBriefing,
+  gateSignature,
+  hostFromRepoUrl,
+  interactiveSessionRefusal,
+  parseArgs as parseArgsCore,
+  qualifyRepo,
+  usage,
+} from "./merge-pr-core.mjs";
+import {
+  appendConsentRecord,
+  promptLine,
+  runGhInherit,
+  runGit,
+} from "./merge-pr-io.mjs";
+import { summarizeFeedbackState } from "./pr-feedback-state-core.mjs";
 import { fetchReadyState, runGh, splitRepo } from "./pr-ready-state.mjs";
 
-/**
- * The repository allows squash merges only; `gh api repos/<owner>/<name>`
- * reports `allow_merge_commit` and `allow_rebase_merge` false. Re-check before
- * changing this, because a merge method the repository rejects fails at the
- * API rather than here, after consent is already recorded.
- */
-export const MERGE_METHOD_FLAG = "--squash";
+export {
+  AUTOMATION_ENV_MARKERS,
+  CONSENT_LOG_BASENAME,
+  MERGE_METHOD_FLAG,
+  MergeRefusal,
+  NON_INTERACTIVE_REFUSAL,
+  buildConsentRecord,
+  countRequiredCheckStates,
+  formatBriefing,
+  gateSignature,
+  interactiveSessionRefusal,
+  sanitizeTerminalText,
+  usage,
+} from "./merge-pr-core.mjs";
+export { appendConsentRecord } from "./merge-pr-io.mjs";
 
-export const CONSENT_LOG_BASENAME = ".merge-consents.jsonl";
-
-export const NON_INTERACTIVE_REFUSAL =
-  "merging requires an interactive human session; agents must never merge";
-
-/**
- * Environment markers that identify an automated session. A pseudo-terminal
- * makes `isTTY` true for a program an agent drives, so the TTY test alone is
- * not a human test; these markers close the gap for the runtimes this
- * repository actually uses. Any non-empty value refuses.
- */
-export const AUTOMATION_ENV_MARKERS = [
-  "AI_AGENT",
-  "CI",
-  "CLAUDECODE",
-  "CLAUDE_CODE_ENTRYPOINT",
-  "CLAUDE_CODE_SESSION_ID",
-  // `CODEX_SANDBOX` alone misses a Codex session run with the sandbox
-  // bypassed, so both markers are needed. Keep this pair identical to
-  // `running_inside_codex_sandbox()` in scripts/agent-autoreview.sh; a Codex
-  // session has no `.claude/settings.json` deny behind it, so this list is one
-  // of only two gates it ever meets.
-  "CODEX_SANDBOX",
-  "CODEX_THREAD_ID",
-  "GITHUB_ACTIONS",
-];
-
-const PR_NUMBER_PATTERN = /^[1-9][0-9]{0,9}$/;
-const COMMIT_OID_PATTERN = /^[0-9a-f]{40}$/;
-// eslint-disable-next-line no-control-regex -- a control byte would split the JSONL ledger record.
-const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/;
-
-/** A refusal is an expected outcome, not a crash; `main` prints it plainly. */
-export class MergeRefusal extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "MergeRefusal";
-  }
-}
-
-export function usage() {
-  return `Usage: pnpm pr:merge [--pr <number>] [--repo <[host/]owner/name>] [--not-ready-reason "<why>"]
-       pnpm pr:merge --help
-
-Merges one pull request after an interactive human confirmation. Agents must
-never run this. With no --pr, the single open pull request for the current
-branch is used; zero or several refuse.
-`;
-}
-
-function readFlagValue(rest, flag) {
-  const flagIndex = rest.indexOf(flag);
-  if (flagIndex < 0) return null;
-
-  const value = rest[flagIndex + 1];
-  if (value === undefined || value.startsWith("--")) {
-    throw new MergeRefusal(`${flag} requires a value\n${usage()}`);
-  }
-
-  rest.splice(flagIndex, 2);
-  return value;
-}
-
-export function parseArgs(argv) {
-  if (argv.includes("--help") || argv.includes("-h")) {
-    return { help: true, prArg: null, repoArg: null, notReadyReason: null };
-  }
-
-  const rest = [...argv];
-  const repoArg = readFlagValue(rest, "--repo");
-  const prArg = readFlagValue(rest, "--pr");
-  const notReadyReason = readFlagValue(rest, "--not-ready-reason");
-
-  if (rest.length > 0) {
-    throw new MergeRefusal(`unexpected argument: ${rest[0]}\n${usage()}`);
-  }
-
-  if (prArg !== null && !PR_NUMBER_PATTERN.test(prArg)) {
-    throw new MergeRefusal(
-      `--pr takes a pull-request number, not "${prArg}"\n${usage()}`,
-    );
-  }
-
-  if (repoArg !== null) {
-    // Reject a malformed value here rather than letting it reach `gh --repo`.
-    splitRepo(repoArg);
-  }
-
-  if (notReadyReason !== null) {
-    if (notReadyReason.trim() === "") {
-      throw new MergeRefusal("--not-ready-reason must not be empty");
-    }
-    if (CONTROL_CHARACTER_PATTERN.test(notReadyReason)) {
-      throw new MergeRefusal(
-        "--not-ready-reason must not contain control characters",
-      );
-    }
-  }
-
-  return {
-    help: false,
-    prArg: prArg === null ? null : Number(prArg),
-    repoArg,
-    notReadyReason: notReadyReason === null ? null : notReadyReason.trim(),
-  };
-}
-
-/**
- * @returns {string|null} the refusal message, or null when the session is an
- *   interactive human terminal.
- */
-export function interactiveSessionRefusal({ stdin, stdout, env }) {
-  if (stdin?.isTTY !== true) {
-    return `${NON_INTERACTIVE_REFUSAL} (stdin is not a terminal)`;
-  }
-  if (stdout?.isTTY !== true) {
-    return `${NON_INTERACTIVE_REFUSAL} (stdout is not a terminal)`;
-  }
-
-  const marker = AUTOMATION_ENV_MARKERS.find(
-    (name) => (env?.[name] ?? "") !== "",
-  );
-  if (marker !== undefined) {
-    return `${NON_INTERACTIVE_REFUSAL} (${marker} is set, so this is an automated session)`;
-  }
-
-  return null;
-}
-
-function runCommand(command, args, { spawnFn = spawn } = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawnFn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk;
-    });
-    child.on("error", (err) => {
-      reject(new Error(`${command} ${args.join(" ")} failed: ${err.message}`));
-    });
-    child.on("close", (code) => {
-      if (code === 0) {
-        resolve(stdout);
-        return;
-      }
-      reject(
-        new Error(
-          `${command} ${args.join(" ")} failed with exit ${code}:\n${stderr}`,
-        ),
-      );
-    });
-  });
-}
-
-const runGit = (args) => runCommand("git", args);
-
-/** The merge itself streams to the operator's terminal instead of a buffer. */
-function runGhInherit(args, { spawnFn = spawn } = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawnFn("gh", args, { stdio: "inherit" });
-    child.on("error", (err) => {
-      reject(new Error(`gh ${args.join(" ")} failed: ${err.message}`));
-    });
-    child.on("close", (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      reject(new Error(`gh ${args.join(" ")} failed with exit ${code}`));
-    });
-  });
-}
-
-async function promptLine({ stdin, stdout, question }) {
-  const rl = createInterface({ input: stdin, output: stdout });
-  try {
-    return await rl.question(question);
-  } finally {
-    rl.close();
-  }
-}
+/** Validate `--repo` through the ready-state oracle's own repository parser. */
+export const parseArgs = (argv) =>
+  parseArgsCore(argv, { validateRepo: splitRepo });
 
 /**
  * Resolve the checkout's own repository and the repository the pull request
  * lives in. A fork checkout merges into its parent, so the two differ there and
  * a bare `origin` is never a substitute for the parent.
+ *
+ * `gh repo view --json nameWithOwner` returns a bare `owner/name` even on a
+ * GitHub Enterprise checkout, and `gh` defaults every bare `--repo` and every
+ * `gh api` call to github.com — so a lost host silently retargets the whole run
+ * at a same-named public repository. The host therefore comes from the
+ * repository URL and rides on every later call. An explicit `--repo` is used
+ * exactly as given, including whichever host it names.
  */
 export async function resolveRepositories({ repoArg, gh }) {
   let parsed;
   try {
     parsed = JSON.parse(
-      await gh(["repo", "view", "--json", "nameWithOwner,parent"]),
+      await gh(["repo", "view", "--json", "nameWithOwner,parent,url"]),
     );
   } catch (err) {
     throw new MergeRefusal(
@@ -257,9 +114,17 @@ export async function resolveRepositories({ repoArg, gh }) {
     throw new MergeRefusal("`gh repo view` returned no repository name");
   }
 
+  const checkoutHost = hostFromRepoUrl(parsed?.url);
   const parent = parsed?.parent?.nameWithOwner ?? null;
-  const base = repoArg ?? (typeof parent === "string" ? parent : current);
-  return { current, base, currentOwner: splitRepo(current).owner };
+  const inferred = typeof parent === "string" ? parent : current;
+  const base = repoArg ?? qualifyRepo(inferred, checkoutHost);
+
+  return {
+    current: qualifyRepo(current, checkoutHost),
+    base,
+    host: splitRepo(base).host,
+    currentOwner: splitRepo(current).owner,
+  };
 }
 
 /**
@@ -334,159 +199,17 @@ export async function resolveTargetNumber({ prArg, repos, gh, git }) {
   return Number(number);
 }
 
-/**
- * Count the ready-state oracle's required checks by state.
- *
- * `summary.statusChecks` groups every check the pull request has and carries no
- * `required` flag at all, so filtering it on one is a permanent zero.
- * `summary.requiredChecks` is the list the oracle derives its own blockers
- * from, which keeps this briefing and those blockers describing the same set.
- *
- * @returns {null} when the oracle produced no required-check list, so the
- *   briefing reports that rather than printing a confident zero over it.
- */
-export function countRequiredCheckStates(summary) {
-  const checks = summary?.requiredChecks;
-  if (!Array.isArray(checks)) return null;
+async function resolveLogin({ gh, host }) {
+  // `gh api` defaults to github.com. On an Enterprise target that would either
+  // refuse an Enterprise-only account or, with both hosts authenticated, record
+  // the wrong operator in the consent ledger.
+  const args = ["api"];
+  if (host !== null && host !== undefined) args.push("--hostname", host);
+  args.push("user", "--jq", ".login");
 
-  const counts = { pass: 0, fail: 0, pending: 0, total: checks.length };
-  for (const check of checks) {
-    const state = String(check?.state ?? "");
-    if (state === "pass" || state === "fail" || state === "pending") {
-      counts[state] += 1;
-    }
-  }
-  return counts;
-}
-
-function formatRequiredCheckLine(summary) {
-  const counts = countRequiredCheckStates(summary);
-  if (counts === null) {
-    return "  Required checks: unavailable — the ready-state oracle returned no required-check list";
-  }
-  // The total is printed too: a required check in any other state (skipped,
-  // for instance) is then visible as the gap instead of silently vanishing.
-  return `  Required checks: ${counts.pass} passing, ${counts.fail} failing, ${counts.pending} pending (of ${counts.total} required)`;
-}
-
-export function formatBriefing({ summary, repo, notReadyReason }) {
-  const pr = summary?.pr ?? {};
-  const blockers = summary?.required?.blockers ?? [];
-
-  const lines = [
-    "",
-    `About to merge ${repo}#${pr.number} with ${MERGE_METHOD_FLAG.replace("--", "")}.`,
-    "",
-    `  Title: ${pr.title ?? "(unknown)"}`,
-    `  Head:  ${pr.headRefOid ?? "(unknown)"} (${pr.headRefName ?? "(unknown)"})`,
-    `  Base:  ${pr.baseRefName ?? "(unknown)"}`,
-    formatRequiredCheckLine(summary),
-    `  Ready state: ${summary?.ready === true ? "READY" : "NOT READY"}`,
-  ];
-
-  if (blockers.length > 0) {
-    lines.push("  Blockers:");
-    for (const blocker of blockers) {
-      lines.push(`    - ${blocker.name} (${blocker.state})`);
-    }
-  }
-
-  if (notReadyReason) {
-    lines.push(`  Recorded override reason: ${notReadyReason}`);
-  }
-
-  lines.push("");
-  return `${lines.join("\n")}\n`;
-}
-
-export function buildConsentRecord({
-  login,
-  repo,
-  number,
-  headOid,
-  notReadyReason,
-  now,
-}) {
-  const record = {
-    timestamp: now.toISOString(),
-    login,
-    repo,
-    pr: number,
-    headOid,
-  };
-  if (notReadyReason) record.notReadyReason = notReadyReason;
-  return record;
-}
-
-export async function appendConsentRecord({ record, git }) {
-  let repoRoot;
-  try {
-    repoRoot = (await git(["rev-parse", "--show-toplevel"])).trim();
-  } catch (err) {
-    throw new MergeRefusal(
-      `unable to resolve the repository root for the consent record: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-  if (!repoRoot) {
-    throw new MergeRefusal(
-      "unable to resolve the repository root for the consent record",
-    );
-  }
-
-  const target = path.join(repoRoot, CONSENT_LOG_BASENAME);
-
-  // The ledger is gitignored, so the agent this wrapper constrains can create
-  // the path before a human ever runs the command. A plain append would follow
-  // a symlink planted there and write into whatever file the operator's own
-  // account can reach. `O_NOFOLLOW` refuses a symlinked final component,
-  // `O_NONBLOCK` keeps a planted FIFO from hanging the open, and the `fstat`
-  // on the descriptor we actually hold rejects anything that is not a regular
-  // file. Fail closed if the platform cannot express `O_NOFOLLOW` at all.
-  if (typeof constants.O_NOFOLLOW !== "number") {
-    throw new MergeRefusal(
-      `unable to open ${target} without following symlinks on this platform`,
-    );
-  }
-
-  let fd;
-  try {
-    fd = openSync(
-      target,
-      constants.O_WRONLY |
-        constants.O_APPEND |
-        constants.O_CREAT |
-        constants.O_NOFOLLOW |
-        constants.O_NONBLOCK,
-      0o600,
-    );
-  } catch (err) {
-    throw new MergeRefusal(
-      `unable to record consent in ${target}: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-
-  try {
-    if (!fstatSync(fd).isFile()) {
-      throw new MergeRefusal(
-        `${target} is not a regular file; refusing to record consent through it`,
-      );
-    }
-    writeSync(fd, `${JSON.stringify(record)}\n`);
-  } catch (err) {
-    if (err instanceof MergeRefusal) throw err;
-    throw new MergeRefusal(
-      `unable to record consent in ${target}: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  } finally {
-    closeSync(fd);
-  }
-  return target;
-}
-
-async function resolveLogin({ gh }) {
   let login;
   try {
-    login = (await gh(["api", "user", "--jq", ".login"])).trim();
+    login = (await gh(args)).trim();
   } catch (err) {
     throw new MergeRefusal(
       `unable to establish the active GitHub login: ${err instanceof Error ? err.message : String(err)}`,
@@ -496,6 +219,32 @@ async function resolveLogin({ gh }) {
     throw new MergeRefusal("unable to establish the active GitHub login");
   }
   return login;
+}
+
+/**
+ * Ask GitHub whether the pull request is actually merged.
+ *
+ * `gh pr merge` exits 0 on a merge-queue base after only ENQUEUEING the pull
+ * request, and the queue may rebuild and retest it before any merge happens. A
+ * bare success would then leave a consent record bound to the pre-queue head
+ * while callers ran post-merge closeout against a pull request still open.
+ */
+async function readMergeOutcome({ gh, repo, number }) {
+  const parsed = JSON.parse(
+    await gh([
+      "pr",
+      "view",
+      String(number),
+      "--repo",
+      repo,
+      "--json",
+      "state,mergeCommit",
+    ]),
+  );
+  return {
+    state: String(parsed?.state ?? "").toUpperCase(),
+    mergeCommit: parsed?.mergeCommit?.oid ?? null,
+  };
 }
 
 /**
@@ -511,6 +260,7 @@ export async function mergePullRequest({
 } = {}) {
   const {
     fetchReadyState: readyState = fetchReadyState,
+    summarizeFeedback = summarizeFeedbackState,
     gh = runGh,
     git = runGit,
     merge = runGhInherit,
@@ -529,7 +279,7 @@ export async function mergePullRequest({
   if (refusal !== null) throw new MergeRefusal(refusal);
 
   const repos = await resolveRepositories({ repoArg, gh });
-  const login = await resolveLogin({ gh });
+  const login = await resolveLogin({ gh, host: repos.host });
   const number = await resolveTargetNumber({ prArg, repos, gh, git });
 
   const readGatedReadyState = async () => {
@@ -538,6 +288,9 @@ export async function mergePullRequest({
       summary = await readyState({
         prArg: String(number),
         repoArg: repos.base,
+        // The feedback ledger is derived from this same read; asking for the
+        // detail here is what makes the feedback gate below possible at all.
+        includeFeedbackDetails: true,
       });
     } catch (err) {
       throw new MergeRefusal(
@@ -559,19 +312,67 @@ export async function mergePullRequest({
       );
     }
 
-    if (summary?.ready !== true && notReadyReason === null) {
+    const baseRefName = String(summary?.pr?.baseRefName ?? "");
+    if (baseRefName === "") {
       throw new MergeRefusal(
-        `${repos.base}#${number} is not ready: ${summary?.summary ?? "the ready-state oracle reported blockers"}\n` +
+        `${repos.base}#${number} reports no base branch; refusing to merge into an unidentified branch`,
+      );
+    }
+
+    // `pr:ready-state` deliberately does not project actionable top-level bot
+    // feedback into its required blockers — `pr:feedback-state` owns that
+    // ledger (docs/notes/pr-ready-state.md). Reading only the oracle would let
+    // this wrapper merge a pull request the repository's own all-clear still
+    // refuses.
+    let feedback;
+    try {
+      feedback = summarizeFeedback(summary);
+    } catch (err) {
+      throw new MergeRefusal(
+        `unable to read the feedback ledger of ${repos.base}#${number}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    if (
+      (summary?.ready !== true || feedback?.ready !== true) &&
+      notReadyReason === null
+    ) {
+      const reasons = [];
+      if (summary?.ready !== true) {
+        reasons.push(
+          summary?.summary ?? "the ready-state oracle reported blockers",
+        );
+      }
+      if (feedback?.ready !== true) {
+        reasons.push(
+          feedback?.summary ?? "the feedback ledger has outstanding items",
+        );
+      }
+      throw new MergeRefusal(
+        `${repos.base}#${number} is not ready: ${reasons.join(" ")}\n` +
           `Re-run with --not-ready-reason "<why this merge is safe anyway>" to record an override.`,
       );
     }
 
-    return { summary, headOid };
+    return {
+      summary,
+      feedback,
+      headOid,
+      baseRefName,
+      signature: gateSignature({ summary, feedback }),
+    };
   };
 
-  const { summary, headOid } = await readGatedReadyState();
+  const approved = await readGatedReadyState();
 
-  stdout.write(formatBriefing({ summary, repo: repos.base, notReadyReason }));
+  stdout.write(
+    formatBriefing({
+      summary: approved.summary,
+      feedback: approved.feedback,
+      repo: repos.base,
+      notReadyReason,
+    }),
+  );
 
   const answer = await prompt({
     stdin,
@@ -586,13 +387,24 @@ export async function mergePullRequest({
   }
 
   // The prompt has no time limit, and `--match-head-commit` only notices a new
-  // head commit. A dismissed review, a rerun check, or any other same-SHA
-  // readiness change during the wait would otherwise merge on a briefing the
-  // operator can no longer see, so the gates run once more against live state.
+  // head commit. A dismissed review, a rerun check, a retargeted base, or new
+  // blocking feedback during the wait would otherwise merge on a briefing the
+  // operator can no longer see, so every gate runs once more against live
+  // state and any difference refuses.
   const confirmed = await readGatedReadyState();
-  if (confirmed.headOid !== headOid) {
+  if (confirmed.headOid !== approved.headOid) {
     throw new MergeRefusal(
-      `${repos.base}#${number} moved from ${headOid} to ${confirmed.headOid} while you were confirming; re-run to review the new head`,
+      `${repos.base}#${number} moved from ${approved.headOid} to ${confirmed.headOid} while you were confirming; re-run to review the new head`,
+    );
+  }
+  if (confirmed.baseRefName !== approved.baseRefName) {
+    throw new MergeRefusal(
+      `${repos.base}#${number} was retargeted from ${approved.baseRefName} to ${confirmed.baseRefName} while you were confirming; re-run to review the new base`,
+    );
+  }
+  if (confirmed.signature !== approved.signature) {
+    throw new MergeRefusal(
+      `${repos.base}#${number} changed its readiness or feedback state while you were confirming; re-run to review it`,
     );
   }
 
@@ -600,7 +412,7 @@ export async function mergePullRequest({
     login,
     repo: repos.base,
     number,
-    headOid,
+    headOid: approved.headOid,
     notReadyReason,
     now: now(),
   });
@@ -617,10 +429,44 @@ export async function mergePullRequest({
     // Bind the merge to the head the operator was shown, so a push between the
     // briefing and the confirmation cannot merge a commit nobody approved.
     "--match-head-commit",
-    headOid,
+    approved.headOid,
   ]);
 
-  return { merged: true, record, consentPath };
+  let outcome;
+  try {
+    outcome = await readMergeOutcome({ gh, repo: repos.base, number });
+  } catch (err) {
+    stdout.write(
+      `Could not confirm the merge landed: ${err instanceof Error ? err.message : String(err)}\n` +
+        `Check ${repos.base}#${number} before running any post-merge step.\n`,
+    );
+    return { merged: false, verified: false, record, consentPath };
+  }
+
+  if (outcome.state !== "MERGED") {
+    stdout.write(
+      `${repos.base}#${number} is ${outcome.state || "in an unreadable state"}, not merged — ` +
+        `a merge-queue base accepts the request without merging it. ` +
+        `Do not run post-merge steps until it reports MERGED.\n`,
+    );
+    return {
+      merged: false,
+      verified: true,
+      queued: true,
+      state: outcome.state,
+      record,
+      consentPath,
+    };
+  }
+
+  return {
+    merged: true,
+    verified: true,
+    state: outcome.state,
+    mergeCommit: outcome.mergeCommit,
+    record,
+    consentPath,
+  };
 }
 
 async function main() {

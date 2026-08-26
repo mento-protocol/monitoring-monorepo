@@ -34,6 +34,11 @@ export const TOOLING_MODULE_ARMS = [
         command: "pnpm pr:feedback-state:test",
         reason: "PR feedback-state helper changed",
       },
+      {
+        command: "pnpm pr:merge:test",
+        reason:
+          "the sanctioned merge wrapper gates merges on the feedback ledger this helper computes",
+      },
     ],
   },
   {
@@ -58,7 +63,12 @@ export const TOOLING_MODULE_ARMS = [
   },
   {
     why: "The merge wrapper reads the ready-state helper, so the ready-state arm above already routes its own suite; this arm covers a change to the wrapper or its suite alone.",
-    patterns: ["scripts/pr/merge-pr.mjs", "scripts/pr/merge-pr.test.mjs"],
+    patterns: [
+      "scripts/pr/merge-pr.mjs",
+      "scripts/pr/merge-pr-core.mjs",
+      "scripts/pr/merge-pr-io.mjs",
+      "scripts/pr/merge-pr.test.mjs",
+    ],
     effects: [
       {
         command: "pnpm pr:merge:test",

@@ -356,19 +356,30 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    ```
 
    `scripts/pr/merge-pr.mjs` refuses outside an interactive human session,
-   re-runs the step 7 ready-state oracle, prints the title, head SHA, base and
-   required-check state, makes the operator type the pull-request number back,
+   re-runs **both** step 7 projections — the ready-state oracle and the
+   feedback ledger, since `pr:ready-state` does not project actionable review
+   feedback into its blockers — prints the title, head SHA, base, required-check
+   state and ledger state, makes the operator type the pull-request number back,
    and appends the consent to gitignored `.merge-consents.jsonl` before it calls
-   `gh`. It merges nothing on any ambiguous state — no PR, several PRs, a
-   closed or merged PR, an unreadable head, or a `gh` error. A not-ready PR
-   needs `--not-ready-reason "<why>"`, which is recorded with the consent.
+   `gh`. Every gate is read again after the confirmation: a moved head, a
+   retargeted base, or any change to the blockers or feedback counts refuses
+   rather than merging on a briefing the operator can no longer see. After
+   `gh` returns it confirms the PR actually reached `MERGED`, because a
+   merge-queue base accepts the request without merging it. It merges nothing
+   on any ambiguous state — no PR, several PRs, a closed or merged PR, an
+   unreadable head, or a `gh` error. A not-ready PR or an unclean feedback
+   ledger needs `--not-ready-reason "<why>"`, which is recorded with the
+   consent and does not carry over to blockers that appear later.
    `.claude/settings.json` denies the raw `gh pr merge` command for Claude
    sessions, which removes the obvious shortcut past the wrapper. That deny is
    command-level: it does not cover the same merge issued as
    `gh api --method PUT repos/{owner}/{repo}/pulls/{n}/merge`, and it covers
    Claude's Bash tool only. Neither layer is an unforgeable boundary — a local
    process running as the operator can synthesize any local signal — so the
-   approval rule above stays the binding control. The wrapper makes refusing
+   approval rule above stays the binding control, and the durable boundary
+   belongs on GitHub's side of the wire.
+   [ADR 0072](../adr/0072-sanctioned-merge-wrapper.md) records that decision,
+   its alternatives, and the residual risk. The wrapper makes refusing
    the default and leaves a consent record naming who approved which head. The
    Dependabot auto-merge workflow runs in CI, not an agent session, and is
    unaffected. The approval rule above is
