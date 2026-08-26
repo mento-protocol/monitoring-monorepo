@@ -5,7 +5,7 @@ title: Envio Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-08-26
 allowed-tools: Bash, Read, Grep, Glob, WebFetch
 doc_type: skill
 scope: repo-wide
@@ -54,8 +54,8 @@ Docs: <https://docs.envio.dev/docs/HyperIndex/hosted-service>
 2. **Build** produces a new deployment keyed by a commit-hash prefix. In this
    repo registration normally takes 2–3 minutes; the deploy skill warns at
    three and uses a five-minute ceiling. Until registration, deployment status
-   is unavailable. If `data.deployments[]` already has three entries, delete,
-   or ask the user to delete, an obsolete non-prod deployment before retrying.
+   is unavailable. If `data.deployments[]` already has three entries, complete
+   the cleanup inventory below before retrying.
 3. **Sync** — the new deployment re-indexes from `start_block`. The previous deployment keeps serving the GraphQL endpoint with zero downtime.
 4. **Promote** — when sync completes, call `deployment promote` to swap `prod_status` to `prod`. Only then does the public GraphQL endpoint point at the new deployment.
 
@@ -63,6 +63,46 @@ Each new deployment performs a full re-index. Use
 `pnpm deploy:indexer:rollback <last-good-sha> --dry-run` and then the guarded
 rollback wrapper; direct promotion is only its fast path when the old
 deployment is still retained.
+
+### Deployment cleanup inventory
+
+Before any hosted deployment deletion, list every live deployment. Record its
+stored id, resolved commit when available, production status, creation time,
+per-chain sync state, canonical `main` or `envio` reachability, and operational
+role. The role is one of target, current production, rollback candidate,
+obsolete non-prod, or unknown. Record the subtype and deletion reason
+separately for an obsolete non-prod deployment. Envio registry data does not
+identify the actor or source branch. Attribute either only from matching GitHub
+commit, ref, or timeline evidence.
+
+Before the initial classification, verify that `origin` is the canonical
+`mento-protocol/monitoring-monorepo` remote and refresh both reachability refs:
+
+```bash
+git fetch origin \
+  "refs/heads/main:refs/remotes/origin/main" \
+  "+refs/heads/envio:refs/remotes/origin/envio"
+```
+
+The forced `envio` refspec is required because the deploy workflow
+force-updates that branch. Stop if `origin` is not canonical or either ref
+cannot refresh. Use the freshly fetched refs for classification.
+
+Never delete the current production deployment, the active target, a known-good
+rollback candidate, an unclassified deployment, or a deployment with unresolved
+provenance. Group the remaining obsolete non-prod deployments. Ask once for
+approval to delete one exact bounded set, with the id, classification, and
+reason for each deployment.
+Immediately before starting the approved deletion batch, repeat the two-ref
+canonical fetch, then re-fetch the full registry and the status of every live
+deployment. Reclassify every deployment. Stop without deleting if either ref
+cannot refresh. Stop and request new approval if any change affects an id,
+production status, classification-relevant sync state, reachability, role, or
+retained set. During the batch, repeat this full canonical-ref, registry, and
+status check before each later deletion. Treat the absence of ids already
+deleted in this batch as the only expected inventory change. Stop and request
+new approval for any other difference. Delete only the remaining exact approved
+ids while the fresh state matches the expected batch state.
 
 ### Static vs per-deployment endpoint URLs
 
@@ -99,6 +139,24 @@ The repo status wrapper owns blocking agent watches; use raw
 `--watch-till-synced` only outside that workflow.
 
 Progress math for a per-chain % estimate: `(latest_processed_block - start_block) / (block_height - start_block)`.
+
+For slow-sync analysis, compare two timestamped status samples. Define the
+remaining gap as `max(0, block_height - latest_processed_block)`. The net
+gap-closure rate is the gap decrease divided by elapsed time. Estimate ETA as
+the current gap divided by that positive rate. Treat a zero gap as a gap ETA of
+zero for that sample. It does not establish sync completion. For an incomplete
+chain, report gap ETA as unknown when a positive gap is stable or grows. Such a
+chain blocks completion and makes the overall gap ETA unknown. Otherwise, the
+limiting chain is the incomplete chain with the largest credible gap ETA. When
+no incomplete chain has a positive gap, report an overall gap ETA of zero and
+continue waiting until every chain has a non-empty
+`timestamp_caught_up_to_head_or_endblock`. When present, use
+`latest_fetched_block_number` to distinguish fetch and processing backlogs.
+Check runtime metrics and logs before assigning a cause. During a long watch,
+send short updates at the runtime's required cadence and a complete per-chain
+rate and ETA summary at least every five minutes. Compare with a prior
+successful deployment only when the recorded chain and configuration are
+comparable.
 
 ## Logs
 
@@ -143,7 +201,7 @@ has the run commands, the metrics to watch first, and the profiler notes.
 ## Gotchas
 
 - **Hasura silently caps queries at 1000 rows.** Aggregate functions are disabled on the hosted service. For large pulls, use the offset-pagination helper (`ui-dashboard/src/lib/network-fetcher/fetch.ts` exports `fetchAllFeeSnapshotPages`) or do rollups indexer-side — do not rely on `limit: 10000` working.
-- **Hosted deployment cap is three live deployments.** `envio-cloud indexer get mento mento-protocol -o json` shows the full `data.deployments[]` list. If it already contains three entries, a new push can fail to register because Envio has no capacity for another deployment. Keep the `prod_status == "prod"` deployment and remove an obsolete non-prod deployment before retrying.
+- **Hosted deployment cap is three live deployments.** `envio-cloud indexer get mento mento-protocol -o json` shows the full `data.deployments[]` list. If it already contains three entries, a new push can fail to register because Envio has no capacity for another deployment. Apply the deployment cleanup inventory before deleting any non-prod deployment.
 - **Re-index on every new deployment.** Schema changes, handler edits, ABI
   bumps, and config tweaks all require replay. Do not promise a fixed duration;
   monitor the exact commit with the status wrapper.

@@ -308,9 +308,11 @@ test("root CLAUDE.md is pinned and still resolves to AGENTS.md", () => {
 
 const CI_WORKFLOW = path.join(REPO_ROOT, ".github/workflows/ci.yml");
 const GUARDRAIL_JOB = "guardrail-prose";
+const SUITE_HOST_JOB = "scripts";
+const SUITE_COMMAND = "node scripts/repo-health/check-guardrail-prose.test.mjs";
 const GUARDRAIL_COMMANDS = [
   "node scripts/repo-health/check-guardrail-prose.mjs",
-  "node scripts/repo-health/check-guardrail-prose.test.mjs",
+  SUITE_COMMAND,
 ];
 
 /**
@@ -333,6 +335,31 @@ function jobBody(workflow, jobId) {
 }
 
 /**
+ * The second host that keeps the wiring assertion from dying with its subject.
+ *
+ * The assertion below runs inside `guardrail-prose`, so on its own it is
+ * self-referential: the one edit that deletes that job deletes its only witness
+ * and leaves the required `ci` sentinel green over nothing. The path-gated
+ * `scripts` job runs the same suite for that reason. Its `rootScripts` filter
+ * includes `.github/workflows/**`, so every edit able to remove the
+ * unconditional job admits `scripts` and reds there instead. Pinning that step
+ * here closes the reverse direction: dropping the second host reds in the first.
+ * Only deleting both at once still passes, and that edit is visible in one diff.
+ *
+ * @returns {string[]} empty when the second host still runs the suite
+ */
+function suiteHostProblems(workflow) {
+  const host = jobBody(workflow, SUITE_HOST_JOB);
+  if (!host) return [`ci.yml defines no \`${SUITE_HOST_JOB}\` job`];
+  if (!host.some((line) => line.trim() === `run: ${SUITE_COMMAND}`)) {
+    return [
+      `the \`${SUITE_HOST_JOB}\` job no longer runs \`${SUITE_COMMAND}\`, leaving \`${GUARDRAIL_JOB}\` as the only witness to its own wiring`,
+    ];
+  }
+  return [];
+}
+
+/**
  * Every way the guardrail check could stop running without anyone noticing.
  *
  * The pins protect prose; nothing protected the job that reads them. A later
@@ -344,10 +371,10 @@ function jobBody(workflow, jobId) {
  * @returns {string[]} empty when the wiring is intact
  */
 function guardrailWiringProblems(workflow) {
+  const problems = suiteHostProblems(workflow);
   const job = jobBody(workflow, GUARDRAIL_JOB);
-  if (!job) return [`ci.yml defines no \`${GUARDRAIL_JOB}\` job`];
+  if (!job) return [...problems, `ci.yml defines no \`${GUARDRAIL_JOB}\` job`];
 
-  const problems = [];
   if (job.some((line) => /^ {4}if:/.test(line))) {
     problems.push(
       `the \`${GUARDRAIL_JOB}\` job carries a job-level \`if:\`; a skipped required check counts as satisfied`,
@@ -422,13 +449,25 @@ test("the wiring assertion reds on each way that wiring could rot", () => {
       /carries a job-level `if:`/,
     ],
     [
-      "a run step is dropped",
+      // Anchored on the checker step that precedes it, because the suite step
+      // alone now appears twice: `String.replace` takes the first match, which
+      // is the `scripts` copy, and that mutation reds for the other reason.
+      "a run step is dropped from the unconditional job",
       (text) =>
         text.replace(
-          "      - name: Guardrail prose pin suite\n        run: node scripts/repo-health/check-guardrail-prose.test.mjs\n",
-          "",
+          "      - name: Guardrail prose pins\n        run: node scripts/repo-health/check-guardrail-prose.mjs\n      - name: Guardrail prose pin suite\n        run: node scripts/repo-health/check-guardrail-prose.test.mjs\n",
+          "      - name: Guardrail prose pins\n        run: node scripts/repo-health/check-guardrail-prose.mjs\n",
         ),
-      /no longer runs `node scripts\/repo-health\/check-guardrail-prose\.test\.mjs`/,
+      /the `guardrail-prose` job no longer runs `node scripts\/repo-health\/check-guardrail-prose\.test\.mjs`/,
+    ],
+    [
+      "the second host stops running the suite",
+      (text) =>
+        text.replace(
+          "      - name: Guardrail prose pin suite\n        run: node scripts/repo-health/check-guardrail-prose.test.mjs\n      - name: Deviation threshold drift suite\n",
+          "      - name: Deviation threshold drift suite\n",
+        ),
+      /the `scripts` job no longer runs/,
     ],
     [
       "the sentinel stops needing it",

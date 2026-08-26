@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0072 — normative guardrail sentences are pinned in CI, and scripts are not
+# ADR 0073 — normative guardrail sentences are pinned in CI, and scripts are not
 
 **Status:** Accepted (Aug 2026), in force.
 **Scope:** ci/process
@@ -77,6 +77,19 @@ sentence skipped the check entirely while `ci` stayed green. The Sentry suites
 were moved out of that same job for the same reason. The suite pins its own
 wiring: the job id, both `run:` strings, the sentinel's `needs`, and the absence
 of an allowed-skip, each with a negative control that mutates the real workflow.
+
+**The wiring assertion runs from two jobs, so neither is its own only witness.**
+Read alone, the paragraph above is circular: the assertion that `guardrail-prose`
+still exists lived only inside `guardrail-prose`, so the single edit deleting
+that job and its sentinel entry deleted the assertion too and left `ci` green
+over nothing. The suite therefore also runs as a step of the path-gated
+`scripts` job. That job's `rootScripts` filter includes `.github/workflows/**`,
+so any edit able to remove the unconditional job admits `scripts` and reds
+there; and the suite asserts that second host as well, so dropping the extra
+step reds in the unconditional job. Each is the other's witness. Deleting both
+in one commit still passes — no check can outlive its own removal — but that
+edit is visible in a single diff, which is the property being bought throughout
+this record. The cost is one duplicate sub-second run on `scripts/**` diffs.
 
 **`CLAUDE.md` carries its own pin block.** It is a symlink to `AGENTS.md` and
 `readFileSync` follows it, so both blocks read the same bytes and the

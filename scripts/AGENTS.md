@@ -46,10 +46,9 @@ subdirectories.
 `lib/` holds cores that multiple clusters read: `hcl.mjs` for Terraform HCL,
 `workflow-yaml.mjs` for Actions and shell parsing,
 `pnpm-override-selector.mjs` for pnpm overrides, and
-`gh-issue-lifecycle.mjs` for shared GitHub issue and label mechanics.
-Doc schedulers use it. Local projection keeps only
-`agent-ready` on create and all lifecycle labels on closed repair. ADR 0064
-lists readers.
+`gh-issue-lifecycle.mjs` for shared GitHub issue and label mechanics, which doc
+schedulers also read. Local projection keeps only `agent-ready` on create and
+all lifecycle labels on closed repair. ADR 0064 lists readers.
 `peg-policy-digest.mjs` defines the peg version-digest contract for both
 validators. Inventories, pinned hashes, and identities stay with their domain.
 
@@ -77,7 +76,9 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   `pr/issue-board-{backfill,cli,commands,projects,state,sync,transport}.mjs` set
   routes to `pnpm issue:board:test`. Exact
   `repo-health/check-guardrail-prose{,.test}.mjs` and
-  `repo-health/guardrail-prose.json` route to the guardrail suite.
+  `repo-health/guardrail-prose.json` route to the guardrail suite. `ci.yml` pins
+  both paths in two jobs, quick-commands names the checker, and the manifest's
+  keys pin `AGENTS.md`, `CLAUDE.md` and the operating card. ADR 0073 has it.
 - **Gate runtime module pins.** Before `cd`, `agent-quality-gate.sh` loads
   `$script_source_dir/gate/run-handles.sh`; move it with its signature, self-test
   route, and missing-helper fixture. It also pins
@@ -88,7 +89,7 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   `gate/routing-table/**`, `gate/mapping*`, and external
   `agent-autoreview-core.mjs`. Runtime hashes use `$script_source_dir`; suites
   use `$repo_root`. Core-only edits route both gate suites. A missing pin
-  freezes the stamp ([ADR 0069](../docs/adr/0069-gate-routing-table-as-data.md)).
+  freezes the stamp (ADR 0069).
 - **Evaluation fixture forbidden lists.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names the navigation
   eval's own implementation.
@@ -101,17 +102,16 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   stages an exact copy list at runtime; three Terraform filters instead
   copy the broad `workflowAdmissionPatterns` boundary from
   `terraform.stacks.json`. A miss is silent: the job stops while the required
-  `ci` sentinel stays green. The enumeration, `routing.test.mjs`'s equality
-  contract, and when a module glob is the safer pin are in
-  [ADR 0064](../docs/adr/0064-scripts-module-directories.md#sweep-checklist-for-a-move).
+  `ci` sentinel stays green. ADR 0064 has the enumeration, `routing.test.mjs`'s
+  equality contract, and when a module glob is the safer pin.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.
 - **Trusted-validator probes.** `pr-description.yml` runs the validator from the
-  PR's base ref via the base branch **name**, so it resolves to that branch's
-  tip, never a PR-time snapshot. One probe path is enough once the target is
-  live on the base branch (issue 1904); the commit that performs a move still
-  needs a temporary dual probe. ADR 0064 has the failure mode.
+  PR's base branch **name**, so it resolves to that branch's tip, never a
+  PR-time snapshot. One probe path is enough once the target is live on the base
+  branch (issue 1904); a move commit still needs a temporary dual probe.
+  ADR 0064 has the failure mode.
 - **Production infrastructure contract pins.**
   `production-infra-identity-contract/workflow-inventory.mjs` pins exact script
   paths for the workflows it audits.
@@ -119,7 +119,7 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   `bootstrap/codex-cloud-setup.sh` and
   `bootstrap/codex-cloud-maintenance.sh`; Claude Code web resolves
   `bootstrap/claude-code-web-setup.sh` through `.claude/hooks/session-start.sh`.
-  A move needs an operator edit because repo grep cannot reach that console.
+  A move needs an operator edit; repo grep cannot reach it.
 - **Reviewed-artifact byte pins.** `.gitattributes` pins the Upstash launcher
   EOL and `UPSTASH_MCP_LAUNCHER_SHA256` hashes it. A move changes both. See
   [`docs/notes/upstash-mcp-operator.md`](../docs/notes/upstash-mcp-operator.md).

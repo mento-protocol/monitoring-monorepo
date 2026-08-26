@@ -81,7 +81,8 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0068](0068-sentry-fixture-authoring-policy.md)             | Adversarial fixtures are authored to scan clean; no value or line registry           |
 | [0069](0069-gate-routing-table-as-data.md)                  | The gate's routing table is data, compiled by the repo's own bash-`case` translator  |
 | [0070](0070-sentry-requeue-settlement-sentinel.md)          | The archive's terminal label is withheld from the re-queue's shed and read back      |
-| [0072](0072-guardrail-prose-pinned-in-ci.md)                | Normative guardrail sentences are pinned in CI; script digests deliberately are not  |
+| [0072](0072-md-only-docs-checks-job.md)                     | The Markdown globs route to a small `docs-checks` job; some Markdown runs both jobs  |
+| [0073](0073-guardrail-prose-pinned-in-ci.md)                | Normative guardrail sentences are pinned in CI; script digests deliberately are not  |
 
 ### shared-config
 
