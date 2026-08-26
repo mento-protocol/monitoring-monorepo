@@ -73,11 +73,10 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   `pnpm sentry:project:test` in the projection arm.
   `deploy/deploy-indexer-verify{,-analysis}{,.test}.mjs` and
   `deploy/deploy-indexer-verify-status-identity.mjs` use one any-depth arm;
-  both verifier tests run. The exact `pr/agent-issue-board.mjs`,
-  `pr/agent-issue-board.test.mjs`, and
+  both verifier tests run. The exact `pr/agent-issue-board{,.test}.mjs` and
   `pr/issue-board-{backfill,cli,commands,projects,state,sync,transport}.mjs` set
-  routes to `pnpm issue:board:test`. `pr/merge-pr{,.test}.mjs` and
-  ready-state route `pnpm pr:merge:test`.
+  routes to `pnpm issue:board:test`. `pr/merge-pr*`, ready-state, and
+  `agent-autoreview.sh` (Codex markers) route `pnpm pr:merge:test`.
 - **Gate runtime module pins.** Before `cd`, `agent-quality-gate.sh` loads
   `$script_source_dir/gate/run-handles.sh`; move it with its signature, self-test
   route, and missing-helper fixture. It also pins

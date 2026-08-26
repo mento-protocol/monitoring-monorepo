@@ -8,16 +8,25 @@
  * still wrote or still merged would be worse than no wrapper at all.
  */
 
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import {
   AUTOMATION_ENV_MARKERS,
   MergeRefusal,
   NON_INTERACTIVE_REFUSAL,
   buildConsentRecord,
+  countRequiredCheckStates,
   formatBriefing,
   interactiveSessionRefusal,
   mergePullRequest,
   parseArgs,
 } from "./merge-pr.mjs";
+import {
+  groupStatusChecks,
+  splitRequiredAndOptionalChecks,
+} from "./pr-ready-state-core.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -70,17 +79,56 @@ async function assertRefuses(promise, expectedSubstring) {
 
 const HEAD_OID = "a".repeat(40);
 
+const REQUIRED_STATUS_CONTEXTS = ["ci", "Code Quality"];
+
+function checkRun(name, conclusion) {
+  return {
+    __typename: "CheckRun",
+    name,
+    status: conclusion === null ? "IN_PROGRESS" : "COMPLETED",
+    conclusion,
+  };
+}
+
+/**
+ * Build the check-shaped half of a summary through the ready-state oracle's own
+ * functions rather than by hand. A hand-written fixture can invent a field the
+ * oracle never emits, and then the suite validates a contract that does not
+ * exist — which is exactly how the briefing shipped counting a `required` flag
+ * `groupStatusChecks()` has never set.
+ */
+function summaryChecks(statusCheckRollup) {
+  return {
+    statusChecks: groupStatusChecks(statusCheckRollup),
+    requiredChecks: splitRequiredAndOptionalChecks(
+      statusCheckRollup,
+      REQUIRED_STATUS_CONTEXTS,
+    ).required,
+  };
+}
+
+function requiredBlockersFrom(requiredChecks) {
+  return requiredChecks.filter((check) =>
+    ["fail", "pending"].includes(check.state),
+  );
+}
+
+const PASSING_ROLLUP = [
+  checkRun("ci", "SUCCESS"),
+  checkRun("Code Quality", "SUCCESS"),
+];
+
+const FAILING_ROLLUP = [
+  checkRun("ci", "FAILURE"),
+  checkRun("Code Quality", "SUCCESS"),
+];
+
 function readySummary(overrides = {}) {
   return {
     ready: true,
     summary: "Ready.",
     required: { ready: true, blockers: [] },
-    statusChecks: {
-      pass: [{ name: "ci", state: "pass", required: true }],
-      fail: [],
-      pending: [],
-      skipped: [],
-    },
+    ...summaryChecks(PASSING_ROLLUP),
     pr: {
       number: 2071,
       title: "feat(pr): sanctioned merge wrapper",
@@ -95,19 +143,15 @@ function readySummary(overrides = {}) {
 }
 
 function notReadySummary() {
-  const summary = readySummary();
+  const checks = summaryChecks(FAILING_ROLLUP);
   return {
-    ...summary,
+    ...readySummary(),
+    ...checks,
     ready: false,
-    summary: "1 required check is failing.",
+    summary: "1 required blocker(s) remain.",
     required: {
       ready: false,
-      blockers: [{ kind: "check", name: "ci", state: "fail", required: true }],
-    },
-    statusChecks: {
-      ...summary.statusChecks,
-      pass: [],
-      fail: [{ name: "ci", state: "fail", required: true }],
+      blockers: requiredBlockersFrom(checks.requiredChecks),
     },
   };
 }
@@ -696,10 +740,87 @@ await test("the briefing lists required-check counts and blockers", () => {
     repo: "mento-protocol/monitoring-monorepo",
     notReadyReason: "hotfix",
   });
-  assert(briefing.includes("0 passing, 1 failing, 0 pending"), briefing);
+  assert(
+    briefing.includes("1 passing, 1 failing, 0 pending (of 2 required)"),
+    briefing,
+  );
   assert(briefing.includes("NOT READY"), briefing);
   assert(briefing.includes("- ci (fail)"), briefing);
   assert(briefing.includes("hotfix"), briefing);
+});
+
+await test("the briefing counts real oracle output, not a zero", () => {
+  // Every state at once, plus an optional check, all shaped by the oracle. The
+  // briefing must count the three required ones and ignore the optional one.
+  const rollup = [
+    checkRun("ci", "SUCCESS"),
+    checkRun("Code Quality", "FAILURE"),
+    checkRun("Vercel", null),
+    checkRun("CodeRabbit", "SUCCESS"),
+  ];
+  const checks = summaryChecks(rollup);
+  const counts = countRequiredCheckStates({
+    ...checks,
+    requiredChecks: splitRequiredAndOptionalChecks(rollup, [
+      ...REQUIRED_STATUS_CONTEXTS,
+      "Vercel",
+    ]).required,
+  });
+  assertEqual(counts.pass, 1, "one required check passes");
+  assertEqual(counts.fail, 1, "one required check fails");
+  assertEqual(counts.pending, 1, "one required check is pending");
+  assertEqual(counts.total, 3, "the optional check is not required");
+
+  // The grouped list the briefing used to read carries no `required` flag at
+  // all, so counting it would have reported zero of everything.
+  assert(
+    checks.statusChecks.pass.every((check) => check.required === undefined),
+    "groupStatusChecks() must not be assumed to flag required checks",
+  );
+});
+
+await test("the briefing says so when no required-check list exists", () => {
+  const summary = notReadySummary();
+  delete summary.requiredChecks;
+  const briefing = formatBriefing({
+    summary,
+    repo: "mento-protocol/monitoring-monorepo",
+    notReadyReason: null,
+  });
+  assertEqual(countRequiredCheckStates(summary), null);
+  assert(briefing.includes("Required checks: unavailable"), briefing);
+  assert(!briefing.includes("0 passing"), briefing);
+});
+
+await test("the automation markers cover every Codex marker autoreview checks", () => {
+  // `running_inside_codex_sandbox()` in agent-autoreview.sh is this repository's
+  // established Codex-session detector. The two must not drift: a marker it
+  // knows and this list does not is a merge gate a Codex agent walks through.
+  const autoreview = readFileSync(
+    path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "agent-autoreview.sh",
+    ),
+    "utf8",
+  );
+  // The body ends at a line that is exactly `}`; a `}` inside `${VAR:-}` is not
+  // the closing brace.
+  const body = /running_inside_codex_sandbox\(\) \{\n([\s\S]*?)\n\}\n/.exec(
+    autoreview,
+  );
+  assert(body !== null, "running_inside_codex_sandbox() was not found");
+
+  const markers = [...body[1].matchAll(/\$\{([A-Z0-9_]+):-\}/g)].map(
+    (match) => match[1],
+  );
+  assert(markers.length > 0, "no environment markers parsed from the detector");
+  for (const marker of markers) {
+    assert(
+      AUTOMATION_ENV_MARKERS.includes(marker),
+      `AUTOMATION_ENV_MARKERS is missing ${marker}, which agent-autoreview.sh treats as a Codex session`,
+    );
+  }
 });
 
 if (failed > 0) {

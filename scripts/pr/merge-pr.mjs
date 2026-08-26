@@ -17,8 +17,12 @@
  * merge nobody approved cannot be taken back.
  *
  * Agents must never invoke this script. The interactive-session refusal below
- * is what enforces that, and `.claude/settings.json` denies the raw
- * `gh pr merge` command so the wrapper is not simply stepped around.
+ * is what enforces that. `.claude/settings.json` denies the raw `gh pr merge`
+ * command as a second layer, which is a command-level deny and not an
+ * endpoint-level one: the same merge is reachable through
+ * `gh api --method PUT repos/{owner}/{repo}/pulls/{n}/merge`, and no permission
+ * pattern spells every form of that call. The refusal below is the control; the
+ * deny only removes the obvious shortcut.
  *
  * Tests: scripts/pr/merge-pr.test.mjs
  */
@@ -56,7 +60,13 @@ export const AUTOMATION_ENV_MARKERS = [
   "CLAUDECODE",
   "CLAUDE_CODE_ENTRYPOINT",
   "CLAUDE_CODE_SESSION_ID",
+  // `CODEX_SANDBOX` alone misses a Codex session run with the sandbox
+  // bypassed, so both markers are needed. Keep this pair identical to
+  // `running_inside_codex_sandbox()` in scripts/agent-autoreview.sh; a Codex
+  // session has no `.claude/settings.json` deny behind it, so this list is one
+  // of only two gates it ever meets.
   "CODEX_SANDBOX",
+  "CODEX_THREAD_ID",
   "GITHUB_ACTIONS",
 ];
 
@@ -319,13 +329,43 @@ export async function resolveTargetNumber({ prArg, repos, gh, git }) {
   return Number(number);
 }
 
-function countRequired(checks = []) {
-  return checks.filter((check) => check?.required === true).length;
+/**
+ * Count the ready-state oracle's required checks by state.
+ *
+ * `summary.statusChecks` groups every check the pull request has and carries no
+ * `required` flag at all, so filtering it on one is a permanent zero.
+ * `summary.requiredChecks` is the list the oracle derives its own blockers
+ * from, which keeps this briefing and those blockers describing the same set.
+ *
+ * @returns {null} when the oracle produced no required-check list, so the
+ *   briefing reports that rather than printing a confident zero over it.
+ */
+export function countRequiredCheckStates(summary) {
+  const checks = summary?.requiredChecks;
+  if (!Array.isArray(checks)) return null;
+
+  const counts = { pass: 0, fail: 0, pending: 0, total: checks.length };
+  for (const check of checks) {
+    const state = String(check?.state ?? "");
+    if (state === "pass" || state === "fail" || state === "pending") {
+      counts[state] += 1;
+    }
+  }
+  return counts;
+}
+
+function formatRequiredCheckLine(summary) {
+  const counts = countRequiredCheckStates(summary);
+  if (counts === null) {
+    return "  Required checks: unavailable — the ready-state oracle returned no required-check list";
+  }
+  // The total is printed too: a required check in any other state (skipped,
+  // for instance) is then visible as the gap instead of silently vanishing.
+  return `  Required checks: ${counts.pass} passing, ${counts.fail} failing, ${counts.pending} pending (of ${counts.total} required)`;
 }
 
 export function formatBriefing({ summary, repo, notReadyReason }) {
   const pr = summary?.pr ?? {};
-  const statusChecks = summary?.statusChecks ?? {};
   const blockers = summary?.required?.blockers ?? [];
 
   const lines = [
@@ -335,7 +375,7 @@ export function formatBriefing({ summary, repo, notReadyReason }) {
     `  Title: ${pr.title ?? "(unknown)"}`,
     `  Head:  ${pr.headRefOid ?? "(unknown)"} (${pr.headRefName ?? "(unknown)"})`,
     `  Base:  ${pr.baseRefName ?? "(unknown)"}`,
-    `  Required checks: ${countRequired(statusChecks.pass)} passing, ${countRequired(statusChecks.fail)} failing, ${countRequired(statusChecks.pending)} pending`,
+    formatRequiredCheckLine(summary),
     `  Ready state: ${summary?.ready === true ? "READY" : "NOT READY"}`,
   ];
 

@@ -362,9 +362,13 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    `gh`. It merges nothing on any ambiguous state — no PR, several PRs, a
    closed or merged PR, an unreadable head, or a `gh` error. A not-ready PR
    needs `--not-ready-reason "<why>"`, which is recorded with the consent.
-   `.claude/settings.json` denies raw `gh pr merge` for Claude sessions so the
-   wrapper is not stepped around; the Dependabot auto-merge workflow runs in
-   CI, not an agent session, and is unaffected. The approval rule above is
+   `.claude/settings.json` denies the raw `gh pr merge` command for Claude
+   sessions, which removes the obvious shortcut past the wrapper. That deny is
+   command-level: it does not cover the same merge issued as
+   `gh api --method PUT repos/{owner}/{repo}/pulls/{n}/merge`, and it covers
+   Claude's Bash tool only. The wrapper's own refusal, not the deny, is the
+   control. The Dependabot auto-merge workflow runs in CI, not an agent
+   session, and is unaffected. The approval rule above is
    unchanged — the wrapper mechanizes it, and its refusal is what makes "agents
    never merge" a control rather than a habit. If the merge itself satisfies Done
    means, sync the issue state and workboard afterward per
