@@ -5,7 +5,7 @@ title: Deploy Indexer Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-24
+last_verified: 2026-08-26
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -53,10 +53,15 @@ In parallel:
   exactly `mento-protocol/monitoring-monorepo` before trusting it:
   ```bash
   gh repo view "$(git remote get-url "$CANONICAL_REMOTE")" --json nameWithOwner --jq .nameWithOwner
-  git fetch "$CANONICAL_REMOTE" main:refs/remotes/"$CANONICAL_REMOTE"/main
+  git fetch "$CANONICAL_REMOTE" \
+    "refs/heads/main:refs/remotes/$CANONICAL_REMOTE/main" \
+    "+refs/heads/envio:refs/remotes/$CANONICAL_REMOTE/envio"
   ```
-  Capture that fetched ref as `CANONICAL_MAIN_REF`. Stop if no verified remote
-  exists. In any Claude cloud session skip the `gh repo view` check — the
+  Capture those fetched refs as `CANONICAL_MAIN_REF` and
+  `CANONICAL_ENVIO_REF`. The forced `envio` refspec is required because the
+  deploy wrapper force-updates that branch. Stop if no verified remote exists
+  or either ref cannot refresh. In any Claude cloud session skip the
+  `gh repo view` check — the
   remote is the credential-proxy URL, which gh cannot map to a repository
   even when the capability gate passes
   ([`docs/notes/github-tooling-surfaces.md`](../../../docs/notes/github-tooling-surfaces.md));
@@ -78,8 +83,9 @@ In parallel:
   ```bash
   pnpm exec envio-cloud indexer get mento mento-protocol -o json
   ```
-  At the current three-deployment limit, retain prod and remove—or ask the user
-  to remove—an obsolete non-prod deployment before creating another.
+  At the current three-deployment limit, a full registry blocks a new
+  deployment. Do not select a deletion from the count alone. Classify the
+  inventory after resolving the target commit below.
 - In normal mode, `git rev-parse HEAD` supplies the full `TARGET_COMMIT`. In
   resume mode, resolve the supplied commit to a full SHA and compare its
   `indexer-envio/` tree with the freshly fetched canonical main ref:
@@ -90,6 +96,31 @@ In parallel:
   the current `main` commit through the normal full pipeline.
   Skip Phase 1 in resume mode; Phase 2 must still reconfirm that the registered
   candidate is caught up before Phase 3.
+- If the registry is full, or any deletion is under consideration, inventory
+  every live deployment before requesting or performing cleanup. Repeat the
+  two-ref canonical fetch above immediately before the initial classification
+  and use those fresh refs. Stop if either ref cannot refresh. Record the stored
+  deployment id, resolved commit when available, `prod_status`, creation time,
+  per-chain sync state, canonical `main` or `envio` reachability, and its role
+  as target, current production, rollback candidate, obsolete non-prod, or
+  unknown. Record the subtype and deletion reason separately for an obsolete
+  non-prod deployment. Envio registry data does not identify the deploying
+  actor or source branch. Attribute either only when GitHub commit, ref, or
+  timeline evidence proves it. Retain the production deployment, the target,
+  every known-good rollback candidate, and every deployment with unresolved
+  provenance. Group the remaining obsolete non-prod deployments and request one
+  explicit approval that lists each exact deployment id, classification, and
+  deletion reason. Immediately before starting the approved deletion batch,
+  repeat the two-ref canonical fetch, then re-fetch the full registry and the
+  status of every live deployment. Reclassify every deployment. Stop without
+  deleting if either ref cannot refresh. Stop and request new approval if any
+  change affects an id, production status, classification-relevant sync state,
+  reachability, role, or retained set. During the batch, repeat the two-ref
+  canonical fetch and the full registry and status check before each later
+  deletion. Treat the absence of ids already deleted in this batch as the only
+  expected inventory change. Stop and request new approval for any other
+  difference. Delete only the remaining exact approved ids while the fresh
+  state matches the expected batch state.
 - Use `git rev-parse --short=7 "$TARGET_COMMIT"` only as `TARGET_DISPLAY`:
   seven is a minimum, not a guaranteed output width. The wrappers resolve full
   SHAs against Envio's stored commit prefix; raw queries must test whether the
@@ -147,12 +178,12 @@ up to chain head. They fail for different reasons and want different responses.
 Normal registration completes 2-3 min after the `envio` push. If the deployment
 hasn't appeared in Envio's API by ~5 min, check the active deployment count
 first. **Three live deployments means Envio has no room to create another
-deployment**; delete, or ask the user to delete, an obsolete non-prod deployment
-before pushing a fresh SHA. If there are fewer than three deployments, then
-treat the miss as an Envio-side webhook/build problem (their app missed the push
-event, their build queue is jammed, or — the silent failure mode —
-`pnpm deploy:indexer` no-op'd because the deploy branch was already at HEAD).
-Waiting longer rarely recovers; investigate now.
+deployment**. Reuse the Phase 0 inventory. Delete only an explicitly approved
+obsolete non-prod deployment before pushing a fresh SHA. If there are fewer
+than three deployments, then treat the miss as an Envio-side webhook/build
+problem (their app missed the push event, their build queue is jammed, or — the
+silent failure mode — `pnpm deploy:indexer` no-op'd because the deploy branch
+was already at HEAD). Waiting longer rarely recovers; investigate now.
 
 Run the registration probe in the **foreground** with a tight ceiling:
 
@@ -177,6 +208,26 @@ report caught-up.
 Watch sync in the active rollout/session and do not leave a background process
 running when you finish. The wrapper has no 90-minute sync timeout; the agent or
 monitor must enforce that wall-clock ceiling and interrupt the watch.
+
+Capture the first per-chain status sample when registration succeeds. For a
+longer-than-normal sync, derive a quantitative update from later samples. For
+each chain, report processed height, head height, remaining gap, gap change,
+net gap-closure rate, and rough gap ETA. Treat a zero gap as a gap ETA of zero
+for that sample. It does not establish sync completion. A stable or growing
+positive gap on an incomplete chain has no finite ETA. Such a chain blocks
+completion and makes the overall gap ETA unknown. Otherwise, the limiting chain
+is the incomplete chain with the largest credible gap ETA. When no incomplete
+chain has a positive gap, report an overall gap ETA of zero. Continue waiting
+until every chain has a non-empty
+`timestamp_caught_up_to_head_or_endblock`; the wrapper's terminal `caught_up`
+state uses the same signal. When present, use
+`latest_fetched_block_number` to distinguish a fetch backlog from a processing
+backlog, but do not claim a root cause without runtime metrics or logs. Send
+short updates at the runtime's required progress cadence. Include this full
+quantitative summary at least every five minutes and on material state changes.
+Compare with a prior successful production run only when timestamped evidence
+exists for the same chain and comparable configuration; otherwise state that no
+valid baseline is available.
 
 The Envio Cloud deployment id is the short Git commit hash (for example
 `b92ff93b`). Once the deployment is registered, this id stays stable.

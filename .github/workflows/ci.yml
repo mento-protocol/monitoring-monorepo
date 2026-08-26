@@ -63,6 +63,7 @@ jobs:
       terraform: ${{ steps.filter.outputs.terraform }}
       codeHealth: ${{ steps.filter.outputs.codeHealth }}
       rootScripts: ${{ steps.filter.outputs.rootScripts }}
+      docs: ${{ steps.filter.outputs.docs }}
       autoreviewSuite: ${{ steps.filter.outputs.autoreviewSuite }}
       autoreviewRootRuntime: ${{ steps.filter.outputs.autoreviewRootRuntime }}
       versionSkew: ${{ steps.filter.outputs.versionSkew }}
@@ -317,20 +318,42 @@ jobs:
               # job's baseline-diff semantic suite must re-run when the
               # producing action changes.
               - .github/actions/resolve-eslint-baseline/**
-              # Documentation catalog + context-check inputs. The catalog
-              # covers every tracked Markdown file (except runtime mirrors),
-              # while the context checker discovers canonical files and
-              # validates SessionEnd hooks + skill parity. Markdown changes
-              # therefore run this cheap root-scripts job regardless of path.
-              - "*.md"
-              - "**/*.md"
-              # Skill parity and hook checks also consume non-Markdown assets
-              # under the runtime-specific directories.
+              # Skill parity and hook checks consume non-Markdown assets
+              # under the runtime-specific directories. The two Markdown globs
+              # that used to sit here now live in the `docs` filter below
+              # (ADR 0072): a Markdown-only diff runs the small `docs-checks`
+              # job, which carries nine of the eleven checks in this job that
+              # read the Markdown corpus — the two left behind fail only when a
+              # carried check fails. Markdown that arrives alongside any path
+              # above still sets both filters, and both jobs run — including a
+              # Markdown-only edit under `.agents/**` or `.claude/skills/**`,
+              # which those globs still route here for their non-Markdown
+              # contents.
               - ".agents/**"
               - ".claude/skills/**"
               - .claude/settings.json
               - .codex/config.toml
               - .codex/hooks.json
+            # Markdown corpus, plus the two non-Markdown inputs the
+            # `docs-checks` job itself is built from. The Markdown globs are
+            # the ones relocated out of `rootScripts` above, byte-identical, so
+            # they match exactly what they matched there: `**/*.md` covers
+            # documents in dot-directories such as `.github/`, and
+            # dorny/paths-filter reports added, modified, renamed and deleted
+            # files alike, so a removed or renamed document still fires the
+            # job. ci.yml holds the job definition and pnpm-install is the
+            # composite its steps run on: without those two entries a PR that
+            # edits the job — its fetch-depth, its permissions, a step command
+            # — would set only `rootScripts`, and the edited job would ship
+            # without ever having run. Every other filter in this file lists
+            # ci.yml for that same reason. Beyond those two, keep this filter
+            # to Markdown: any other non-Markdown input belongs in the filter
+            # of the job that consumes it.
+            docs:
+              - "*.md"
+              - "**/*.md"
+              - .github/workflows/ci.yml
+              - .github/actions/pnpm-install/**
             # The adversarial autoreview suite is intentionally isolated from
             # the broader root-scripts job: it is expensive, path-specific,
             # and runs sequentially in CI for deterministic fixture/process
@@ -1197,6 +1220,122 @@ jobs:
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
 
+  docs-checks:
+    name: Documentation corpus checks
+    needs: changes
+    # ADR 0072. The nine checks below are the ones in the `scripts` job above
+    # whose outcome a Markdown-only diff can change. Six read the live tracked
+    # Markdown tree through `git ls-files`; two are unit suites that look like
+    # fixture tests but assert against the real tree as well
+    # (agent:context-budget:test pins the ten AGENTS.md routes,
+    # docs:navigation-eval:test picks the cheapest route by live document
+    # bytes); and the gate routing-table suite asserts that the 23 Markdown
+    # paths its table names still exist.
+    # Three suites stay in `scripts` because they cannot be affected by a
+    # Markdown edit at all: docs:audit:test, docs:garden:test and
+    # check-agent-context.test.mjs build their fixtures in a temporary
+    # repository or stub their inputs.
+    # Two more read this checkout and stay in `scripts` anyway, for a reason
+    # worth writing down:
+    #   - docs:index:test has one live-tree case that builds the inventory
+    #     over the tracked Markdown tree and asserts inventory.errors is
+    #     empty. That is a strict subset of `pnpm docs:index --check` below,
+    #     which fails on errors OR warnings OR broken links, and a deleted or
+    #     non-regular runtime document is rejected by the runtime registry
+    #     that both carried checks import. No Markdown-only diff fails it while
+    #     everything in this job stays green.
+    #   - agent:quality-gate:test pins the targeted-Trunk branch on the
+    #     tracked file docs/deployment.md, which flips to `--all` once that
+    #     path leaves the worktree. docs/deployment.md is also one of the
+    #     routing table's staleness subjects, so the gate routing-table step
+    #     below fails first on the rename or delete that would break it. That
+    #     coupling is transitive, not structural: drop docs/deployment.md from
+    #     the routing table and this suite loses its cover.
+    # Splitting these out lets a Markdown-only PR finish in
+    # minutes instead of waiting on a job capped at 25. Each `run:` string here
+    # is byte-identical to its counterpart in `scripts`, and the steps are NOT
+    # removed from there: a change to the documentation tooling must still run
+    # them against the corpus. A mixed diff runs both jobs and pays for one
+    # duplicate pass, which is the accepted cost of the split.
+    if: needs.changes.outputs.docs == 'true'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Baseline validation reads source blobs from its claimed pre-baseline
+          # commit so results remain reproducible after later doc changes. That
+          # commit is over a thousand commits behind main, so the default
+          # shallow checkout would not hold the object and `git show` would
+          # fail outright rather than degrade.
+          fetch-depth: 0
+      - name: Validate trusted package-script pins
+        # The `scripts` job runs this first for two reasons that apply here
+        # unchanged: `pnpm install` below executes the root lifecycle hooks,
+        # and every step after it invokes a trusted `pnpm` alias
+        # (`agent:context-*`, `docs:*`). Validating first rejects an
+        # unsanctioned `postinstall` before install would run it, and a drifted
+        # alias command before it executes. This job needs its own copy — on a
+        # Markdown-only diff the `scripts` job no longer runs at all.
+        # check-sentry-suites-in-ci.test.mjs pins this ordering for this job by
+        # name, exactly as it does for `scripts`, so moving pnpm-install or an
+        # alias above this step fails required CI.
+        run: node scripts/check-agent-quality-gate-package-scripts.mjs
+      - uses: ./.github/actions/pnpm-install
+      - name: Agent context checker
+        # Discovers canonical files from the tracked tree, so an added, renamed
+        # or removed document changes which files it validates.
+        run: pnpm agent:context-check
+      - name: Documentation catalog drift and link check
+        run: pnpm docs:index --check
+      - name: Agent context budget tests
+        # Not a pure fixture suite: its last case builds the report from
+        # trackedInstructionFiles(repoRoot) against this checkout and pins the
+        # route list to the ten AGENTS.md directories that exist today. Adding
+        # docs/AGENTS.md or deleting alerts/AGENTS.md is a Markdown-only diff
+        # that fails it, and the --strict run below would not catch that: it
+        # only enforces byte caps.
+        run: pnpm agent:context-budget:test
+      - name: Enforce agent context budgets
+        # Corpus-dependent for AGENTS.md and AGENTS.override.md specifically:
+        # it measures their byte sizes per file and per route.
+        run: pnpm agent:context-budget --strict
+      - name: Documentation audit planner dry run
+        run: pnpm docs:audit --dry-run
+      - name: Documentation navigation evaluation tests
+        # Also not a pure fixture suite: it loads the live inventory and
+        # asserts which accepted route is cheapest in real document bytes, so a
+        # content-only edit that grows one document past another flips it. The
+        # --check-fixtures run below only rejects paths missing from the
+        # inventory, so it would not catch that.
+        run: pnpm docs:navigation-eval:test
+      - name: Documentation navigation fixture contract
+        run: pnpm docs:navigation-eval -- --check-fixtures
+      - name: Documentation navigation committed baseline
+        run: >-
+          pnpm docs:navigation-eval -- --validate
+          docs/evals/documentation-navigation-baseline.json
+          --fixtures docs/evals/documentation-navigation-baseline-fixtures.json
+      - name: Gate routing-table suite
+        # ADR 0069's table names 799 repository paths, 23 of them Markdown:
+        # eleven of the twelve docs/pr-checklists/*.md (all but
+        # review-prompt-exclusions.md), README.md, AGENTS.md, BACKLOG.md,
+        # SPEC.md, two ADRs and more. Its staleness check asserts each still
+        # exists, so renaming or deleting one of those documents is a
+        # Markdown-only diff that breaks the gate. Without this step here, such
+        # a PR would merge green and leave the gate pointing reviewers at a
+        # document that is not there. This is one of the two non-documentation
+        # steps of `scripts` that read the Markdown corpus; it also covers the
+        # other one, agent:quality-gate:test, whose docs/deployment.md
+        # assertion depends on a path this staleness check already names.
+        run: pnpm gate:routing-table:test
+      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
+        if: always()
+
   production-infra-contract:
     name: Production infrastructure contract
     # This required job is deliberately unconditional: tf:test validates
@@ -1408,6 +1547,7 @@ jobs:
         terraform,
         deps,
         scripts,
+        docs-checks,
         production-infra-contract,
         sentry-suites,
         autoreview-suite,
@@ -1424,6 +1564,6 @@ jobs:
       - uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: shared,ui,indexer,bridge,integration-probes,aegis,alerts,gov-watchdog,terraform,deps,scripts,autoreview-suite,autoreview-root-runtime,version-skew
+          allowed-skips: shared,ui,indexer,bridge,integration-probes,aegis,alerts,gov-watchdog,terraform,deps,scripts,docs-checks,autoreview-suite,autoreview-root-runtime,version-skew
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
