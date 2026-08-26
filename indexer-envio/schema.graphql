@@ -1363,7 +1363,7 @@ type Trove
   collateralId: String! @index
   troveId: String! @index
   owner: String! @index
-  previousOwner: String!
+  previousOwner: String! @index
   status: String! @index
   debt: BigInt!
   coll: BigInt!
@@ -1830,7 +1830,8 @@ type StabilityPoolOperationEvent
 # switch happen without a re-sync.
 type TroveOperationEvent
   @index(fields: ["instanceId", "timestamp"])
-  @index(fields: ["chainId", "owner"]) {
+  @index(fields: ["chainId", "owner"])
+  @index(fields: ["instanceId", "troveId", "timestamp"]) {
   id: ID!
   chainId: Int!
   instanceId: String! @index
