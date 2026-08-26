@@ -119,10 +119,14 @@ not merged yet, is recomputed against its own bits and detail and counted in
 
 Both the ledger check and `--validate --append` hold the frozen denominator. A
 condition that scored a PR at all carries every defect that PR froze, and a
-`kind: full`, `status: complete` row carries the whole matrix: `pipeline` and
-`control` over every fixture, `replay` over the grid fixtures. A complete full
+`status: complete` row carries the whole matrix of its own kind: a full run is
+`pipeline` over every fixture in two draws, `replay` over the grid fixtures in
+one draw per frozen finder report and `control` over every fixture in one draw;
+a canary is `replay` over every grid fixture in one draw. Both axes are checked,
+which PRs each condition scored and how many draws it recorded. A complete full
 row is the score of record — it refreshes the full-run clock and becomes the
-automatic baseline — so it may not claim that matrix on a subset of it.
+automatic baseline — and a complete canary is read against
+`canary_min_matched_grid`, so neither may claim its matrix on a subset of it.
 
 Then plan and run. `--plan` prints the matrix and the cost estimate without
 spending anything.
@@ -162,7 +166,15 @@ aborted run followed by a skill edit re-runs instead of scoring the old skill
 under the new digest. A run that ends before it scores keeps its cells on disk
 for that retry — publishing strips them from the commit with an exclude
 pathspec rather than deleting them — and only a run that reached a score
-removes them, having nothing left to resume. The six-hour deadline bounds the whole run: three quarters
+removes them, having nothing left to resume. The directory belongs to one
+execution: a run killed before it recorded anything is retried into it, but once
+a ledger row points at it the next execution takes the next name and copies
+those cells across, because a second run writing there would overwrite the plan,
+results, row and report the earlier row still claims and reuse its publication
+branch. Seeded cells are fingerprint-checked one by one like any other. The
+skill directory itself may hold no symlink: `cp -R` would stage the link, so the
+contestant would read bytes `skill_digest` never covered and an edit to that
+target mid-run would change the treatment. The six-hour deadline bounds the whole run: three quarters
 of it start cells and bound each finder and contestant process, the rest bounds
 the judge pass, and a run that reaches either bound reports a partial matrix
 rather than a table with quietly missing cells. A stalled process is killed
@@ -306,6 +318,17 @@ comparability_key = sha256(contract_digest ‖ request_prompt ‖ handoff_prompt
                            orchestrator_digest ‖ judge_model)
 ```
 
+The two CLI versions are deliberately outside the key. They are recorded on
+every row, they are part of every cell fingerprint so one resumed run never
+mixes runtimes, and a pair that straddles an upgrade is labelled in the verdict
+reasons and the report — "a flip may come from the runtime rather than the
+skill". Keying on them would be worse than that: `claude` and `codex` ship far
+more often than this suite runs, so every upgrade would start a fresh lineage,
+every later run would resolve no baseline, and the flip rules that make a
+regression visible would never fire again. The key binds what this repository
+controls; a runtime change large enough to move the score shows up as a flip
+against the anchor with the version drift named beside it.
+
 `scorer_digest` covers every file that can move a recorded number or a recorded
 verdict — the scorer, the per-condition fold, the recompute and the verdict
 rules — not the extraction alone. It also covers the two fixture helpers:
@@ -347,10 +370,11 @@ older one is refused; pass `--contract` with the archived contract to read it.
 | judge model       | model id and CLI version in the row, plus 40 calibration pairs every run                             |
 | calibration set   | its `sha256` is bound into `comparability_key`                                                       |
 | reviewed model    | isolated by the `control` condition; model id and CLI version recorded                               |
-| skill text        | `skill_digest` over `SKILL.md` and `references/**` — this is the treatment                           |
+| skill text        | `skill_digest` over `SKILL.md` and `references/**`, symlinks refused — this is the treatment         |
 | finder command    | `argv` pinned in the contract; `finder_argv_digest` records what a cell spawned                      |
 | orchestrator      | `orchestrator_digest` over `run-eval.sh`: in the key and in every cell fingerprint                   |
 | machine and shell | host, CLI versions, `--setting-sources ""`, clean worktree of `origin/main`                          |
+| CLI upgrade       | versions in every cell fingerprint; a pair across one is labelled in the verdict, not in the key     |
 
 **Judge calibration runs before every scoring pass.** Forty frozen
 `(claim, defect, verdict)` pairs replay through the current judge. Agreement

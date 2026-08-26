@@ -24,6 +24,12 @@
 # A run that ends before it scores keeps those cells so the retry reuses them;
 # they never reach the PR.
 #
+# The detail directory belongs to one execution. A run killed before it recorded
+# anything is retried into the same directory and reuses its cells; once a ledger
+# row points at that directory it is evidence, so the next execution takes the
+# next name and seeds its cells from the old one instead of overwriting a row's
+# plan, results, report and publication branch.
+#
 # One run at a time. The fixture cache and the ledger are shared, so the script
 # takes a lock under --cache-dir and refuses to start while another run holds
 # it, rather than letting two runs rewrite each other's fixture checkouts.
@@ -819,6 +825,30 @@ cell_reuse_refusal() {
   return 0
 }
 
+# --- the resume cache --------------------------------------------------------
+
+# Cells are what a run pays for, and the plan hands this execution its own
+# detail directory as soon as a ledger row records the previous one. That older
+# directory still holds paid cells, so they are copied in once — and then
+# re-checked one at a time against this run's fingerprint, exactly as a cell
+# found in place is, so a cell produced under an edited skill, contract,
+# orchestrator or CLI is refused and re-run. Nothing is copied over cells this
+# run already has.
+RESUME_FROM="$(json_field "$PLAN_OUT" resume_from)"
+case "$RESUME_FROM" in
+  "" | undefined | null) RESUME_FROM="" ;;
+  *) require_safe_detail "$RESUME_FROM" ;;
+esac
+if [[ -n $RESUME_FROM && -d "$REPO/$RESUME_FROM/cells" && ! -d "$RUN_DIR/cells" ]]; then
+  mkdir -p "$RUN_DIR"
+  if cp -R "$REPO/$RESUME_FROM/cells" "$RUN_DIR/cells"; then
+    log "seeded the resume cache from $RESUME_FROM"
+  else
+    rm -rf "${RUN_DIR:?}/cells"
+    log "could not seed the resume cache from $RESUME_FROM; every cell re-runs"
+  fi
+fi
+
 # --- one cell ----------------------------------------------------------------
 
 CLAUDE_TOOLS=(Read Write Edit Bash Grep Glob Agent TodoWrite)
@@ -1114,10 +1144,37 @@ node "$CLI" --root "$SPEC" --ledger "$LEDGER" --validate "$RUN_DIR/row.json" \
   --detail-dir "$RUN_DIR" "${AGAINST_ARGS[@]+"${AGAINST_ARGS[@]}"}" --append --json ||
   abort "the scored row did not revalidate; nothing was appended"
 
+# Past this point the row is in the checkout's ledger. `set -e` exiting here
+# would leave the schedule wedged exactly the way an unpublished row does: the
+# ledger is dirty, the next run refuses to start against it, and no PR and no
+# recovery commands were ever printed. So everything between the append and
+# `publish_row` reports its own failure and carries on to publication — and
+# never through `abort`, which would append a second row for the same run.
+#
+# The report is the PR body, and it can fail on its own: `--report` re-reads the
+# ledger and the baseline, and a same-sitting `--against` file under /tmp can be
+# gone by now. A stub body publishes the row and names what to re-run.
 REPORT="$RUN_DIR/report.md"
+REPORT_OUT="$(mktemp "$TMPROOT/review-eval-report.XXXXXX")"
+REPORT_STATUS=0
 node "$CLI" --root "$SPEC" --ledger "$LEDGER" --report \
-  "${AGAINST_ARGS[@]+"${AGAINST_ARGS[@]}"}" >"$REPORT"
-VERDICT="$(json_field "$RUN_DIR/row.json" verdict)"
+  "${AGAINST_ARGS[@]+"${AGAINST_ARGS[@]}"}" >"$REPORT_OUT" 2>"$REPORT_OUT.err" ||
+  REPORT_STATUS=$?
+VERDICT="$(json_field "$RUN_DIR/row.json" verdict)" || VERDICT=""
+# `json_field` prints `String(doc[key])`, so a missing key arrives as the word
+# "undefined". Neither it nor an empty read may name a commit.
+case "$VERDICT" in "" | undefined | null) VERDICT="UNKNOWN" ;; esac
+if [[ $REPORT_STATUS -eq 0 ]]; then
+  mv "$REPORT_OUT" "$REPORT"
+else
+  log "the report could not be generated (exit $REPORT_STATUS); publishing the appended row with a stub body"
+  log_stderr_tail "$REPORT_OUT.err"
+  # shellcheck disable=SC2016  # the backticks are markdown in the PR body
+  printf '# Review-skill eval: %s\n\nThe row was scored and appended to `%s`, and the report could not be generated (`--report` exited %s). The row and the run detail in this commit are the evidence; re-run `pnpm review:eval -- --report` against this ledger to produce the table.\n' \
+    "$VERDICT" "docs/evals/review-skill-ledger.jsonl" "$REPORT_STATUS" >"$REPORT"
+  rm -f "$REPORT_OUT"
+fi
+rm -f "$REPORT_OUT.err"
 log "verdict $VERDICT"
 
 # --- publish -----------------------------------------------------------------

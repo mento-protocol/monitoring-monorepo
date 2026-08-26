@@ -26,6 +26,7 @@ import {
   fixtureForPr,
   forbiddenShasForFixture,
   gridFixtures,
+  PIPELINE_DRAWS,
   scorableTotals,
 } from "./review-eval-fixtures.mjs";
 import { freshness } from "./review-eval-ledger.mjs";
@@ -107,6 +108,18 @@ function walkFiles(dir, base = dir, found = []) {
   )) {
     if (entry.name === ".git" || entry.name === ".DS_Store") continue;
     const full = path.join(dir, entry.name);
+    // A symlink is neither a file nor a directory to `readdirSync`, so it would
+    // be walked past silently: nothing under it reaches the digest, while
+    // `run-eval.sh` snapshots the skill with `cp -R`, which stages the link
+    // itself. The contestant would then read target bytes no digest keys, and an
+    // edit to that target during a two-hour run would change the treatment after
+    // the snapshot was checked against the plan. Refuse it here, before the run
+    // spends anything, rather than measure content the row cannot freeze.
+    if (entry.isSymbolicLink()) {
+      throw new Error(
+        `skill file ${path.relative(base, full)} is a symlink; the digest cannot freeze what it points at, so the staged skill would carry unkeyed bytes. Replace it with a regular file.`,
+      );
+    }
     if (entry.isDirectory()) walkFiles(full, base, found);
     else if (entry.isFile()) found.push(path.relative(base, full));
   }
@@ -116,6 +129,7 @@ function walkFiles(dir, base = dir, found = []) {
 /**
  * Digest over a skill directory: `SKILL.md` plus every bundled reference. This
  * is the treatment under test, so it is hashed by content and not by ref name.
+ * A symlink anywhere under it refuses the digest: see `walkFiles`.
  */
 export function skillDigest(dir) {
   const root = expandHome(dir);
@@ -146,6 +160,19 @@ export function fileDigest(file) {
  * truncated, and the environment a cell runs in. Editing any of that changes
  * what the number measures exactly as editing a prompt does, and without the
  * digest two such runs would stay paired under one key.
+ *
+ * The two CLI versions are deliberately NOT in the key. They are recorded on
+ * every row, they are part of the cell fingerprint, so one resumed run never
+ * mixes runtimes, and `comparable()` prints the drift beside the verdict when a
+ * pair straddles an upgrade. But `claude` and `codex` ship far more often than
+ * this suite runs: keyed here, an upgrade would start a fresh lineage, every
+ * later run would resolve no baseline, and the flip rules that make a regression
+ * visible would never fire again. A pairing across a CLI upgrade, labelled as
+ * one, is weaker evidence than a pairing under one runtime; no pairing at all is
+ * not evidence. What the key must bind is what this repository controls — the
+ * prompts, the scorer, the calibration set, the orchestrator and the judge
+ * model — and a runtime change big enough to move the score shows up as a flip
+ * against the anchor with the version drift named next to it.
  */
 export function comparabilityKey({
   contract,
@@ -259,7 +286,7 @@ export function planCells({ contract, kind }) {
   }
 
   for (const fixture of contract.fixtures) {
-    for (const draw of [1, 2]) {
+    for (let draw = 1; draw <= PIPELINE_DRAWS; draw += 1) {
       push(fixture, "pipeline", draw, {
         model: verifier.model,
         effort: verifier.effort,
@@ -290,6 +317,45 @@ export function planCells({ contract, kind }) {
   return cells;
 }
 
+// How many executions of one date, key, kind and skill the runs directory may
+// hold before the plan refuses to name another. Reaching it means a script is
+// re-running the same matrix in a loop, which is a bug worth stopping on.
+const MAX_RUNS_PER_NAME = 50;
+
+/**
+ * The detail directory this execution owns, and the one it may resume from.
+ *
+ * The base name — date, comparability key, kind, skill digest — is the resume
+ * cache: an execution killed before it recorded anything is retried by running
+ * the same command, and it must land on its own cells rather than re-spend the
+ * matrix. But that directory is also the evidence a ledger row points at, so
+ * once a row records it the next execution must not write there: it would
+ * overwrite the plan, the scored results, the row and the report the earlier row
+ * still claims, and reuse that row's publication branch name. So the name is
+ * taken as soon as a row records it, and this execution takes the next one and
+ * names the directory it superseded, whose paid cells the orchestrator seeds
+ * from — every one of them is re-checked against this run's fingerprint.
+ */
+export function resolveDetailDir({ runsDir, base, ledgerRows = [] }) {
+  const taken = new Set(
+    (ledgerRows ?? []).map((row) => String(row?.detail_dir ?? "")),
+  );
+  let previous = null;
+  for (let attempt = 1; attempt <= MAX_RUNS_PER_NAME; attempt += 1) {
+    const candidate = path.posix.join(
+      runsDir,
+      attempt === 1 ? base : `${base}-${attempt}`,
+    );
+    if (!taken.has(candidate)) {
+      return { detailDir: candidate, resumeFrom: previous };
+    }
+    previous = candidate;
+  }
+  throw new Error(
+    `the ledger already records ${MAX_RUNS_PER_NAME} runs named ${path.posix.join(runsDir, base)}; refusing to plan another`,
+  );
+}
+
 /**
  * Build the plan and write `plan.json`. The plan is the only thing the money
  * spending orchestrator reads, so it carries every digest the ledger row needs.
@@ -302,6 +368,7 @@ export function buildPlan({
   outDir = null,
   skillRef = null,
   runsDir = DEFAULT_RUNS_DIR,
+  ledgerRows = [],
   now = new Date(),
   env = process.env,
   write = true,
@@ -327,10 +394,11 @@ export function buildPlan({
   // The skill under test and the kind are part of the directory name because
   // the directory is also the resume cache: two runs of the same contract with
   // different skills must never land on each other's cells.
-  const detailDir = path.posix.join(
+  const { detailDir, resumeFrom } = resolveDetailDir({
     runsDir,
-    `${date}-${key.slice(0, 8)}-${kind}-${String(inputs.skill_digest).slice(0, 8)}`,
-  );
+    base: `${date}-${key.slice(0, 8)}-${kind}-${String(inputs.skill_digest).slice(0, 8)}`,
+    ledgerRows,
+  });
   const planDir = outDir
     ? path.resolve(outDir)
     : path.resolve(repoRoot, detailDir);
@@ -355,6 +423,10 @@ export function buildPlan({
     comparability_key: key,
     judge: { ...contract.judge },
     detail_dir: detailDir,
+    // The directory of the previous execution under this name, whose cells this
+    // one may seed from, or null when this is the first. Never the directory
+    // this run writes to: a recorded row's evidence is not overwritten.
+    resume_from: resumeFrom,
     plan_dir: planDir,
     inputs,
     totals: scorableTotals(contract),

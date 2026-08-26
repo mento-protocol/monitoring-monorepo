@@ -154,6 +154,31 @@ export function leakSuspected(row) {
   return LEAK_NOTE_PATTERN.test(row?.notes ?? "");
 }
 
+/**
+ * The note a pair that straddles a CLI upgrade carries, or null.
+ *
+ * `comparability_key` deliberately omits the two CLI versions: they move far
+ * more often than this suite runs, so keying on them would end the lineage at
+ * every upgrade and leave every later run with no baseline and no flip rule to
+ * fire. The pairing therefore stands, and the drift is named beside the verdict
+ * instead — a flip counted across an upgrade may be the runtime's defaults, tool
+ * behaviour or model resolution rather than the skill, and the reader deciding
+ * on a RED or a PROMOTE is the one who must know that.
+ */
+function runtimeDrift(row, baselineRow) {
+  const moved = ["claude_cli", "codex_cli"].filter(
+    (field) => row?.inputs?.[field] !== baselineRow?.inputs?.[field],
+  );
+  if (moved.length === 0) return null;
+  return `the baseline ran under ${moved
+    .map(
+      (field) => `${field.replace("_cli", "")} ${baselineRow?.inputs?.[field]}`,
+    )
+    .join(", ")} and this run under ${moved
+    .map((field) => `${field.replace("_cli", "")} ${row?.inputs?.[field]}`)
+    .join(", ")}; a flip may come from the runtime rather than the skill`;
+}
+
 function comparable(row, baselineRow) {
   if (!baselineRow) return { usable: false, reason: null };
   // The same standing `resolveBaseline` requires of an anchor. A canary is a
@@ -206,7 +231,7 @@ function comparable(row, baselineRow) {
     };
   }
   if (row.comparability_key === baselineRow.comparability_key) {
-    return { usable: true, reason: null };
+    return { usable: true, reason: runtimeDrift(row, baselineRow) };
   }
   if (row.kind === "bridge") {
     return {

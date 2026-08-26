@@ -26,6 +26,8 @@ import {
   ROW_REQUIRED_KEYS,
   validateLedgerRow,
 } from "./review-eval-ledger.mjs";
+import { plannedMatrix } from "./review-eval-fixtures.mjs";
+import { planCells } from "./review-eval-run.mjs";
 import { aggregateDraws } from "./review-eval-score.mjs";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -400,25 +402,30 @@ const firstFixture = contract.fixtures[0];
 const wholeFixture = (bits = [1, 0]) =>
   Object.fromEntries(firstFixture.scorable_ids.map((id) => [String(id), bits]));
 
-// The other half of it: a `kind: "full"`, `status: "complete"` row claims the
-// whole matrix, which `planCells` builds as pipeline and control over every
-// fixture and replay over the grid fixtures.
+// The other half of it: a `status: "complete"` row claims the whole matrix of
+// its own kind. `planCells` builds a full run as pipeline over every fixture in
+// two draws, replay over the grid fixtures in one draw per frozen finder
+// report, and control over every fixture in one draw; a canary is replay over
+// the grid fixtures in one draw.
 const idsFor = (fixtures, bits) =>
   Object.fromEntries(
     fixtures.flatMap((fixture) =>
       fixture.scorable_ids.map((id) => [String(id), bits]),
     ),
   );
+const gridFixtureList = contract.fixtures.filter(
+  (fixture) => fixture.grid === true,
+);
 const everyFixture = (bits = [1, 0]) => idsFor(contract.fixtures, bits);
-const everyGridFixture = (bits = [1, 0]) =>
-  idsFor(
-    contract.fixtures.filter((fixture) => fixture.grid === true),
-    bits,
-  );
+const everyGridFixture = (bits = [1, 0]) => idsFor(gridFixtureList, bits);
 const fullMatrix = () => ({
   pipeline: condition({ per_defect: everyFixture() }),
   replay: condition({ per_defect: everyGridFixture() }),
-  control: condition({ per_defect: everyFixture() }),
+  // One control cell per PR, so one bit per defect.
+  control: condition({ per_defect: everyFixture([1]), draws: 1 }),
+});
+const canaryMatrix = () => ({
+  replay: condition({ per_defect: everyGridFixture([1]), draws: 1 }),
 });
 
 test("checkLedger validates rows, contract scope, and append-only history", () => {
@@ -526,7 +533,7 @@ test("checkLedger refuses a row that drops a frozen defect from a scored PR", ()
   });
 });
 
-test("checkLedger requires a complete full row to carry the whole matrix", () => {
+test("checkLedger requires a complete row to carry its whole matrix", () => {
   // A complete full row is the score of record: it refreshes the full-run
   // clock and `resolveBaseline` anchors on it. Dropping a condition or a PR
   // from one claims that whole matrix on a subset, and every other check reads
@@ -555,7 +562,7 @@ test("checkLedger requires a complete full row to carry the whole matrix", () =>
   const oneFixture = row({
     conditions: {
       ...conditions,
-      control: condition({ per_defect: wholeFixture() }),
+      control: condition({ per_defect: wholeFixture([1]), draws: 1 }),
     },
   });
   withTempLedger(jsonl(oneFixture), (file) => {
@@ -571,10 +578,67 @@ test("checkLedger requires a complete full row to carry the whole matrix", () =>
     );
   });
 
-  // A canary and a partial run owe nothing here, and neither does a row from a
-  // retired contract.
+  // The draw count is the other axis of the same claim. A full row that ran
+  // only pipeline draw 1 has half the planned sample, and it would still
+  // refresh the full-run clock and become the baseline every later run is
+  // paired against.
+  const oneDraw = row({
+    conditions: {
+      ...conditions,
+      pipeline: condition({ per_defect: everyFixture([1]), draws: 1 }),
+    },
+  });
+  withTempLedger(jsonl(oneDraw), (file) => {
+    const checked = checkLedger({
+      path: file,
+      contract,
+      contractDigest: DIGEST_A,
+    });
+    assert.equal(checked.ok, false);
+    assert.match(
+      checked.problems.join(" | "),
+      /conditions\.pipeline\.draws is 1; a complete full run plans 2/,
+    );
+  });
+
+  // A complete canary owes its own matrix: replay over every grid PR. It never
+  // ranks, but `canaryVerdict` reads its matched count against the floor, so a
+  // canary that ran one grid PR passes that floor on a third of the evidence.
+  withTempLedger(
+    jsonl(row({ kind: "canary", conditions: canaryMatrix() })),
+    (file) => {
+      assert.deepEqual(
+        checkLedger({ path: file, contract, contractDigest: DIGEST_A })
+          .problems,
+        [],
+      );
+    },
+  );
+  const shortCanary = row({
+    kind: "canary",
+    conditions: {
+      replay: condition({
+        per_defect: idsFor([gridFixtureList[0]], [1]),
+        draws: 1,
+      }),
+    },
+  });
+  withTempLedger(jsonl(shortCanary), (file) => {
+    const checked = checkLedger({
+      path: file,
+      contract,
+      contractDigest: DIGEST_A,
+    });
+    assert.equal(checked.ok, false);
+    assert.match(
+      checked.problems.join(" | "),
+      /conditions\.replay is a complete canary run but scores no defect from PR/,
+    );
+  });
+
+  // A partial run owes nothing here, and neither does a row from a retired
+  // contract.
   for (const overrides of [
-    { kind: "canary" },
     { status: "partial" },
     { contract_digest: DIGEST_B },
   ]) {
@@ -589,6 +653,28 @@ test("checkLedger requires a complete full row to carry the whole matrix", () =>
         [],
       );
     });
+  }
+});
+
+test("plannedMatrix is the matrix planCells actually builds", () => {
+  // The matrix check above asks what a complete run owed without importing the
+  // planner. The two would drift the moment a condition or a draw moved, and
+  // the drift would loosen a validator rather than fail anything, so they are
+  // derived from each other here.
+  for (const kind of ["full", "canary"]) {
+    const planned = new Map();
+    for (const cell of planCells({ contract, kind })) {
+      const byPr = planned.get(cell.condition) ?? new Map();
+      byPr.set(cell.pr, Math.max(byPr.get(cell.pr) ?? 0, cell.draw));
+      planned.set(cell.condition, byPr);
+    }
+    const fromContract = new Map(
+      [...plannedMatrix(contract, kind)].map(([name, cells]) => [
+        name,
+        new Map(cells.map((cell) => [cell.pr, cell.draws])),
+      ]),
+    );
+    assert.deepEqual(fromContract, planned, `the ${kind} matrix drifted`);
   }
 });
 

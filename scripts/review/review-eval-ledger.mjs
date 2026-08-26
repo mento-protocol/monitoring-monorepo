@@ -15,6 +15,7 @@
 
 import { appendFileSync, readFileSync } from "node:fs";
 
+import { plannedMatrix } from "./review-eval-fixtures.mjs";
 import {
   judgeCalibrationPasses,
   leakSuspected,
@@ -520,44 +521,35 @@ export function contractScorableIdsByPr(contract) {
 }
 
 /**
- * The conditions a run of this kind must carry, and the PRs each one covers.
- * `planCells` builds a full run as pipeline and control over every fixture and
- * replay over the grid fixtures; a canary is replay over the grid fixtures
- * alone. Derived from the contract here so the two cannot drift apart.
- */
-function contractMatrix(contract, kind) {
-  const fixtures = contract?.fixtures ?? [];
-  const all = fixtures.map((fixture) => fixture.pr);
-  const grid = fixtures
-    .filter((fixture) => fixture.grid === true)
-    .map((fixture) => fixture.pr);
-  if (kind === "canary") return new Map([["replay", grid]]);
-  return new Map([
-    ["pipeline", all],
-    ["replay", grid],
-    ["control", all],
-  ]);
-}
-
-/**
- * What a `kind: "full"`, `status: "complete"` row must cover. Every other row
- * returns no problems: a partial or failed run is a matrix with cells that
- * never ran, and a canary is a two-cell floor test.
+ * What a `status: "complete"` row must cover, for its own kind. A partial or
+ * failed row returns no problems: it is a matrix with cells that never ran.
  *
  * `checkLedger` already refuses a condition that scored a PR but dropped one of
  * that PR's frozen ids. This is the other half of the same denominator: a
- * complete full run scores every contract PR under pipeline and control and
- * every grid PR under replay, so a row that carries only one of them claims a
- * whole matrix on a subset. Nothing downstream would notice — the freshness
- * clock, `resolveKind` and `resolveBaseline` all read `kind` and `status`, and
- * `revalidateRow` recomputes over the conditions the row happens to list.
+ * complete run scores every cell `plannedMatrix` puts in its kind, so a row that
+ * carries a subset claims a whole matrix on part of one. Nothing downstream
+ * would notice — the freshness clock, `resolveKind` and `resolveBaseline` all
+ * read `kind` and `status`, and `revalidateRow` recomputes over the conditions
+ * and the draws the row happens to list.
+ *
+ * A canary is checked too. It is a floor test rather than a score of record, but
+ * `canaryVerdict` reads its matched count against `canary_min_matched_grid`, so
+ * a canary that ran one of the three grid PRs and calls itself complete passes
+ * that floor on a third of the evidence it claims.
+ *
+ * The draw count is checked because it is the other axis of the same claim:
+ * a `kind: "full"` row with `draws: 1` under pipeline has half the planned
+ * sample, and it still refreshes the full-run clock and becomes a baseline.
+ * Which PRs a draw covers is left to `revalidateRow`, which reads the cells.
  */
-export function fullMatrixProblems({ contract, row, label = "row" }) {
-  if (row?.kind !== "full" || row?.status !== "complete") return [];
+export function completeMatrixProblems({ contract, row, label = "row" }) {
+  if (row?.status !== "complete") return [];
+  if (!LEDGER_KINDS.includes(row?.kind) || row.kind === "bridge") return [];
   const problems = [];
   const scorableByPr = contractScorableIdsByPr(contract);
-  for (const [name, prs] of contractMatrix(contract, row.kind)) {
-    if (prs.length === 0) continue;
+  const planned = plannedMatrix(contract, row.kind);
+  for (const [name, cells] of planned) {
+    if (cells.length === 0) continue;
     const condition = row.conditions?.[name];
     const scored = new Set(
       condition && typeof condition.per_defect === "object"
@@ -566,16 +558,27 @@ export function fullMatrixProblems({ contract, row, label = "row" }) {
     );
     if (scored.size === 0) {
       problems.push(
-        `${label} is a complete full run but scores no ${name} condition; a complete full run carries ${[...contractMatrix(contract, "full").keys()].join(", ")}`,
+        `${label} is a complete ${row.kind} run but scores no ${name} condition; a complete ${row.kind} run carries ${[...planned.keys()].join(", ")}`,
       );
       continue;
     }
-    const missing = prs.filter(
-      (pr) => !(scorableByPr.get(pr) ?? []).some((id) => scored.has(id)),
-    );
+    const missing = cells
+      .map((cell) => cell.pr)
+      .filter(
+        (pr) => !(scorableByPr.get(pr) ?? []).some((id) => scored.has(id)),
+      );
     if (missing.length) {
       problems.push(
-        `${label}.conditions.${name} is a complete full run but scores no defect from PR ${missing.join(", ")}; the contract puts ${prs.length} PR(s) in that condition`,
+        `${label}.conditions.${name} is a complete ${row.kind} run but scores no defect from PR ${missing.join(", ")}; the contract puts ${cells.length} PR(s) in that condition`,
+      );
+    }
+    const drawsPlanned = Math.max(...cells.map((cell) => cell.draws));
+    if (
+      Number.isSafeInteger(condition?.draws) &&
+      condition.draws !== drawsPlanned
+    ) {
+      problems.push(
+        `${label}.conditions.${name}.draws is ${condition.draws}; a complete ${row.kind} run plans ${drawsPlanned}`,
       );
     }
   }
@@ -588,7 +591,7 @@ export function fullMatrixProblems({ contract, row, label = "row" }) {
  * so a condition that scored a PR at all carries every defect that PR froze.
  * Dropping one shrinks `opportunities`, which lifts recall and the McNemar
  * denominator with it, and nothing else would notice: `revalidateRow`
- * recomputes over the ids the row lists, and `fullMatrixProblems` only asks
+ * recomputes over the ids the row lists, and `completeMatrixProblems` only asks
  * whether some id from each required PR is present.
  *
  * Applies to every kind and status. A partial run may leave a PR out entirely,
@@ -667,10 +670,10 @@ export function checkLedger({ path, contract, contractDigest, baseRows }) {
     if (rowProblems.length) return;
     if (contractDigest && row.contract_digest !== contractDigest) return;
     problems.push(...frozenDefectProblems({ contract, row, label }));
-    // The other half of the frozen denominator: which conditions and which PRs
-    // a complete full run must have scored at all. Reported after the per-id
-    // checks above, which name the narrower fault when a row breaks both.
-    problems.push(...fullMatrixProblems({ contract, row, label }));
+    // The other half of the frozen denominator: which conditions, which PRs and
+    // how many draws a complete run must have scored at all. Reported after the
+    // per-id checks above, which name the narrower fault when a row breaks both.
+    problems.push(...completeMatrixProblems({ contract, row, label }));
   });
 
   if (baseRows) {

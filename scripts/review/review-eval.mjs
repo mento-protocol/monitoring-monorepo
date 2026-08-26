@@ -27,9 +27,9 @@ import {
 import {
   appendRow,
   checkLedger,
+  completeMatrixProblems,
   freshness,
   frozenDefectProblems,
-  fullMatrixProblems,
   readLedger,
   validateLedgerRow,
 } from "./review-eval-ledger.mjs";
@@ -583,6 +583,9 @@ async function modePlan(options, context) {
     outDir: options.outDir,
     skillRef: options.skillRef,
     runsDir: options.runsDir,
+    // The rows decide which detail directory this execution may own: one a row
+    // already points at holds that row's evidence and is never written again.
+    ledgerRows: rows,
   });
   printObject(plan, options.json);
 }
@@ -735,7 +738,11 @@ async function modeValidate(options, context) {
   problems.push(
     ...validateLedgerRow(row, "row"),
     ...frozenDefectProblems({ contract: context.contract, row, label: "row" }),
-    ...fullMatrixProblems({ contract: context.contract, row, label: "row" }),
+    ...completeMatrixProblems({
+      contract: context.contract,
+      row,
+      label: "row",
+    }),
   );
   let appended = false;
   if (problems.length === 0 && options.append) {

@@ -8,7 +8,9 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,6 +19,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  canonicalPath,
   checkFinderArgv,
   checkFixtures,
   DEFAULT_CONTRACT_PATH,
@@ -754,6 +757,41 @@ test("the fixture cache may not live inside the source repository", () => {
     );
   } finally {
     rmSync(source.dir, { recursive: true, force: true });
+  }
+});
+
+test("a cache directory that reaches the repository through a symlink is refused", () => {
+  // The lexical comparison this replaced accepted any path whose text sat
+  // outside the checkout. A `--cache-dir` behind a symlink — or one whose own
+  // parent is a link, so the check runs before the directory exists — then put
+  // the fixture physically inside the repository, where a cell running with
+  // Bash walks up to the frozen truth and scores without a leak signal.
+  const source = buildSourceRepo();
+  const outside = temp("outside");
+  try {
+    const link = path.join(outside, "cache");
+    symlinkSync(path.join(source.dir, ".cache"), link);
+    for (const cacheDir of [link, path.join(link, "fixtures")]) {
+      assert.throws(
+        () =>
+          materializeFixture({
+            contract: syntheticContract(source),
+            pr: source.pr,
+            cacheDir,
+            srcRepo: source.dir,
+          }),
+        /inside the source repository/,
+        `${cacheDir} was accepted`,
+      );
+    }
+    // A link that stays outside the checkout is not the problem this refuses.
+    assert.equal(
+      canonicalPath(path.join(outside, "elsewhere", "fixtures")),
+      path.join(realpathSync(outside), "elsewhere", "fixtures"),
+    );
+  } finally {
+    rmSync(source.dir, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
   }
 });
 

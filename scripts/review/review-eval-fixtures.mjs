@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, readlinkSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -41,6 +41,43 @@ function sha256(bytes) {
 
 function readBytes(repoRoot, relativePath) {
   return readFileSync(path.resolve(repoRoot, relativePath));
+}
+
+// Symlink hops one path may take before it is treated as a loop.
+const MAX_LINK_HOPS = 40;
+
+/**
+ * The path with every symlink resolved, including a path that does not exist
+ * yet: each component is canonicalized against its resolved parent, and a
+ * dangling link is followed by hand.
+ *
+ * `path.resolve` is lexical, so it reports `~/.cache/eval` as outside the
+ * checkout even when `~/.cache` is a symlink into it. That is the whole
+ * isolation boundary between a contestant cell and the frozen truth, so it is
+ * decided on canonical paths. A link that points at a directory nobody has
+ * created yet counts: `mkdir -p` follows it, so the fixture would still land
+ * where the link points.
+ */
+export function canonicalPath(target, hops = 0) {
+  const resolved = path.resolve(target);
+  try {
+    return realpathSync(resolved);
+  } catch {
+    // Some component does not exist yet; resolve what does, below.
+  }
+  const parent = path.dirname(resolved);
+  if (parent === resolved) return resolved;
+  const child = path.join(canonicalPath(parent, hops), path.basename(resolved));
+  // A cycle of dangling links resolves to itself rather than to a stack
+  // overflow. The comparison then falls back to the last name reached.
+  if (hops >= MAX_LINK_HOPS) return child;
+  let link;
+  try {
+    link = readlinkSync(child);
+  } catch {
+    return child;
+  }
+  return canonicalPath(path.resolve(path.dirname(child), link), hops + 1);
 }
 
 export function defaultRunGit({ args, cwd = process.cwd() }) {
@@ -94,6 +131,37 @@ export function fixtureForPr(contract, pr) {
 
 export function gridFixtures(contract) {
   return (contract?.fixtures || []).filter((fixture) => fixture.grid === true);
+}
+
+// Draws the pipeline condition takes per PR. The finder samples, so one draw
+// carries no variance signal; `planCells` spawns exactly this many.
+export const PIPELINE_DRAWS = 2;
+
+/**
+ * The cells a run of one kind plans, as condition -> [{ pr, draws }].
+ *
+ * `planCells` in `review-eval-run.mjs` builds exactly this matrix with the
+ * model, effort and report file each cell needs. This is the same shape without
+ * any of that, so the ledger validator can ask what a complete run owed without
+ * importing the planner — `review-eval-ledger.test.mjs` cross-checks the two
+ * against each other so they cannot drift apart silently.
+ */
+export function plannedMatrix(contract, kind) {
+  const fixtures = contract?.fixtures ?? [];
+  const grid = gridFixtures(contract);
+  const replay = grid.map((fixture) => ({
+    pr: fixture.pr,
+    draws: kind === "canary" ? 1 : (fixture.finder_reports ?? []).length,
+  }));
+  if (kind === "canary") return new Map([["replay", replay]]);
+  return new Map([
+    [
+      "pipeline",
+      fixtures.map((fixture) => ({ pr: fixture.pr, draws: PIPELINE_DRAWS })),
+    ],
+    ["replay", replay],
+    ["control", fixtures.map((fixture) => ({ pr: fixture.pr, draws: 1 }))],
+  ]);
 }
 
 export function scorableTotals(contract) {
@@ -716,12 +784,20 @@ export function materializeFixture({
   if (!srcRepo) throw new Error("materializeFixture requires a srcRepo");
   const absoluteCache = path.resolve(cacheDir);
   const absoluteSource = path.resolve(srcRepo);
+  // Compared canonically, never lexically. A `--cache-dir` that reaches the
+  // checkout through a symlink — or through one on an ancestor that does not
+  // exist yet — passes a `path.resolve` comparison while the fixture is
+  // physically created inside the repository, where a cell running with Bash
+  // can walk up to the frozen truth files. That defeats the answer-key
+  // isolation and produces contaminated scores with no leak signal.
+  const canonicalCache = canonicalPath(absoluteCache);
+  const canonicalSource = canonicalPath(absoluteSource);
   if (
-    absoluteCache === absoluteSource ||
-    absoluteCache.startsWith(`${absoluteSource}${path.sep}`)
+    canonicalCache === canonicalSource ||
+    canonicalCache.startsWith(`${canonicalSource}${path.sep}`)
   ) {
     throw new Error(
-      `cacheDir ${absoluteCache} is inside the source repository, where the reviewed agent can reach the frozen truth`,
+      `cacheDir ${absoluteCache} resolves to ${canonicalCache}, inside the source repository, where the reviewed agent can reach the frozen truth`,
     );
   }
   const forbiddenShas =

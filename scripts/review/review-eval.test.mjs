@@ -14,6 +14,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -40,8 +41,10 @@ import {
   ORCHESTRATOR_FILE,
   planCells,
   planStalenessIssueSync,
+  resolveDetailDir,
   resolveKind,
   scorePlan,
+  skillDigest,
   SCRUBBED_ENV_VARS,
   scrubbedEnv,
 } from "./review-eval-run.mjs";
@@ -131,31 +134,42 @@ function makeRow({
   const ids = scorableIdsFor(prs);
   const p1 = new Set(p1IdsFor(prs));
   const matched = new Set(matchedIds.map(String));
+  // The draws each condition plans, which a complete row of this kind must
+  // carry: pipeline samples the finder twice, replay replays both frozen
+  // reports, control runs once. A draw repeats the same bit here — these rows
+  // are about the counters, not about between-draw variance.
+  const bitsFor = (id, draws) =>
+    Array.from({ length: draws }, () => (matched.has(id) ? 1 : 0));
+  const pipelineDraws = kind === "canary" ? 1 : 2;
   const perDefect = Object.fromEntries(
-    ids.map((id) => [id, [matched.has(id) ? 1 : 0]]),
+    ids.map((id) => [id, bitsFor(id, pipelineDraws)]),
   );
-  const count = (subset) => {
-    const hit = subset.filter((id) => matched.has(id)).length;
+  const count = (subset, draws = pipelineDraws) => {
+    const hit = subset.filter((id) => matched.has(id)).length * draws;
+    const opportunities = subset.length * draws;
     return {
       matched: hit,
-      opportunities: subset.length,
+      opportunities,
       rate:
-        subset.length === 0 ? null : Number((hit / subset.length).toFixed(3)),
+        opportunities === 0 ? null : Number((hit / opportunities).toFixed(3)),
     };
   };
-  const conditionOver = (subset) => ({
+  const conditionOver = (subset, draws) => ({
     model: "claude-opus-5",
     effort: "high",
     finder: "gpt-5.6-sol@high",
-    draws: 1,
-    recall: count(subset),
-    p1: count(subset.filter((id) => p1.has(id))),
+    draws,
+    recall: count(subset, draws),
+    p1: count(
+      subset.filter((id) => p1.has(id)),
+      draws,
+    ),
     novel_real: 1,
     wrong_claims: 0,
     usd: 4.2,
     seconds: 600,
     per_defect: Object.fromEntries(
-      subset.map((id) => [id, [matched.has(id) ? 1 : 0]]),
+      subset.map((id) => [id, bitsFor(id, draws)]),
     ),
   });
   const built = {
@@ -180,7 +194,7 @@ function makeRow({
         model: "claude-opus-5",
         effort: "high",
         finder: "gpt-5.6-sol@high",
-        draws: 1,
+        draws: pipelineDraws,
         recall: count(ids),
         p1: count(ids.filter((id) => p1.has(id))),
         novel_real: 1,
@@ -196,8 +210,8 @@ function makeRow({
     notes: "",
   };
   if (fullMatrix) {
-    built.conditions.replay = conditionOver(scorableIdsFor(gridPrs));
-    built.conditions.control = conditionOver(ids);
+    built.conditions.replay = conditionOver(scorableIdsFor(gridPrs), 2);
+    built.conditions.control = conditionOver(ids, 1);
   }
   built.verdict = statedVerdict ?? verdict({ contract, row: built }).verdict;
   return built;
@@ -707,6 +721,129 @@ test("the detail directory separates two skills under one contract", () => {
   assert.match(a.detail_dir, /-canary-[0-9a-f]{8}$/);
 });
 
+test("a detail directory a ledger row records is never planned again", () => {
+  // The directory is the resume cache, so a run killed before it recorded
+  // anything is retried into it and reuses its paid cells. It is also the
+  // evidence a row points at: a second execution on the same day, with the same
+  // key, kind and skill, used to overwrite the earlier row's plan, results, row
+  // and report, and reuse its publication branch name.
+  const plan = () =>
+    buildPlan({
+      contract,
+      contractDigest,
+      kind: "canary",
+      repoRoot,
+      write: false,
+      env: planEnv,
+      ledgerRows: recorded,
+    });
+  const recorded = [];
+  const first = plan();
+  assert.equal(first.resume_from, null);
+  // Nothing recorded yet: the retry lands on the same cells.
+  assert.equal(plan().detail_dir, first.detail_dir);
+
+  recorded.push({ detail_dir: first.detail_dir });
+  const second = plan();
+  assert.equal(second.detail_dir, `${first.detail_dir}-2`);
+  assert.equal(second.resume_from, first.detail_dir);
+
+  recorded.push({ detail_dir: second.detail_dir });
+  const third = plan();
+  assert.equal(third.detail_dir, `${first.detail_dir}-3`);
+  assert.equal(third.resume_from, second.detail_dir);
+
+  // A row from another run never moves this name.
+  assert.equal(
+    resolveDetailDir({
+      runsDir: "runs",
+      base: "b",
+      ledgerRows: [{ detail_dir: "runs/other" }, { detail_dir: null }],
+    }).detailDir,
+    "runs/b",
+  );
+  assert.throws(
+    () =>
+      resolveDetailDir({
+        runsDir: "runs",
+        base: "b",
+        ledgerRows: Array.from({ length: 60 }, (_unused, index) => ({
+          detail_dir: index === 0 ? "runs/b" : `runs/b-${index + 1}`,
+        })),
+      }),
+    /refusing to plan another/,
+  );
+});
+
+test("a symlink in the skill directory refuses the digest", () => {
+  // `readdirSync` calls a symlink neither a file nor a directory, so it was
+  // walked past silently: nothing under it reached `skill_digest`, while
+  // `run-eval.sh` stages the skill with `cp -R`, which keeps the link. The
+  // contestant would read target bytes no digest keys, and an edit to that
+  // target mid-run would change the treatment under the recorded digest.
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-skill-"));
+  const outside = mkdtempSync(path.join(tmpdir(), "review-eval-outside-"));
+  try {
+    writeFileSync(path.join(dir, "SKILL.md"), "# review\n");
+    const clean = skillDigest(dir);
+    assert.match(clean, /^[0-9a-f]{64}$/);
+
+    writeFileSync(path.join(outside, "playbook.md"), "the real instructions\n");
+    symlinkSync(path.join(outside, "playbook.md"), path.join(dir, "refs.md"));
+    assert.throws(() => skillDigest(dir), /refs\.md is a symlink/);
+
+    // A directory link escapes the same way, and used to be skipped too.
+    rmSync(path.join(dir, "refs.md"));
+    symlinkSync(outside, path.join(dir, "references"));
+    assert.throws(() => skillDigest(dir), /references is a symlink/);
+    rmSync(path.join(dir, "references"));
+    assert.equal(skillDigest(dir), clean);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test("a baseline from another CLI version is paired and labelled", () => {
+  // The comparability key deliberately omits the CLI versions: they ship far
+  // more often than this suite runs, so keying on them would end the lineage at
+  // every upgrade and leave every later run with no baseline and no flip rule.
+  // The pairing therefore stands, and the drift is named beside the verdict.
+  const baselineRow = makeRow({
+    executedAt: "2026-09-01T10:00:00Z",
+    matchedIds: scorableIdsFor([1990]),
+    fullMatrix: true,
+  });
+  const row = makeRow({
+    executedAt: "2026-09-08T10:00:00Z",
+    matchedIds: scorableIdsFor([1990]),
+    fullMatrix: true,
+  });
+  row.inputs = { ...row.inputs, claude_cli: "2.2.0" };
+  const decision = verdict({ contract, row, baselineRow });
+  const reasons = decision.reasons.join(" | ");
+  assert.match(reasons, /baseline ran under claude 2\.1\.14/);
+  assert.match(reasons, /this run under claude 2\.2\.0/);
+  assert.match(
+    reasons,
+    /a flip may come from the runtime rather than the skill/,
+  );
+  // Labelled, not refused: the flip counts still come from the pair.
+  assert.notEqual(buildVsBaseline({ row, baselineRow })?.mcnemar, null);
+  assert.deepEqual(
+    verdict({
+      contract,
+      row: makeRow({
+        executedAt: "2026-09-08T10:00:00Z",
+        matchedIds: scorableIdsFor([1990]),
+        fullMatrix: true,
+      }),
+      baselineRow,
+    }).reasons.filter((reason) => reason.includes("runtime")),
+    [],
+  );
+});
+
 test("failedRow is schema-valid and never ranks", () => {
   const plan = buildPlan({
     contract,
@@ -1025,6 +1162,129 @@ test("run-eval.sh exits non-zero when no PR carries the row", () => {
 
   // The failure path has carried the same rule since it was written.
   assert.match(shell, /if \[\[ \$PUBLISHED -eq 1 \]\]; then\n\s*exit 0\n\s*fi/);
+});
+
+test("run-eval.sh seeds a fresh run directory from the cells it superseded", () => {
+  // Once a ledger row records a detail directory the plan hands the next
+  // execution its own. The cells in the old one are paid for, so they are
+  // copied across — and re-checked one by one against this run's fingerprint,
+  // exactly as cells found in place are.
+  const shell = readFileSync(
+    path.join(repoRoot, "scripts/review/run-eval.sh"),
+    "utf8",
+  );
+  const block = shell.match(
+    /\nRESUME_FROM="\$\(json_field "\$PLAN_OUT" resume_from\)"\n[\s\S]*?\nfi\n/,
+  )?.[0];
+  assert.ok(block, "the resume-cache step was not found in run-eval.sh");
+  const guard = shell.match(
+    /\nrequire_safe_detail\(\) \{\n[\s\S]*?\n\}\n/,
+  )?.[0];
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-resume-"));
+  try {
+    const runs = "docs/evals/review-skill-runs";
+    const previous = path.join(dir, runs, "2026-09-08-key-full-skill");
+    mkdirSync(path.join(previous, "cells", "pr-1990-pipeline-draw1"), {
+      recursive: true,
+    });
+    writeFileSync(
+      path.join(previous, "cells", "pr-1990-pipeline-draw1", "result.json"),
+      '{"ok":true}\n',
+    );
+    const runDir = path.join(dir, runs, "2026-09-08-key-full-skill-2");
+    const harness = (resumeFrom) =>
+      [
+        "set -euo pipefail",
+        `REPO=${JSON.stringify(dir)}`,
+        `RUN_DIR=${JSON.stringify(runDir)}`,
+        `PLAN_OUT=${JSON.stringify(path.join(dir, "plan.json"))}`,
+        `fail() { printf 'FATAL: %s\\n' "$*" >&2; exit 1; }`,
+        `log() { printf '%s\\n' "$*"; }`,
+        `json_field() { printf '%s' ${JSON.stringify(resumeFrom)}; }`,
+        guard,
+        block,
+      ].join("\n");
+    const seeded = spawnSync(
+      "bash",
+      ["-c", harness(`${runs}/2026-09-08-key-full-skill`)],
+      { encoding: "utf8" },
+    );
+    assert.equal(seeded.status, 0, seeded.stderr);
+    assert.match(seeded.stdout, /seeded the resume cache/);
+    assert.ok(
+      existsSync(
+        path.join(runDir, "cells", "pr-1990-pipeline-draw1", "result.json"),
+      ),
+    );
+
+    // A first run has nothing to seed from, and a resume_from that climbs out
+    // of the checkout is refused before anything is copied.
+    rmSync(runDir, { recursive: true, force: true });
+    const first = spawnSync("bash", ["-c", harness("null")], {
+      encoding: "utf8",
+    });
+    assert.equal(first.status, 0, first.stderr);
+    assert.equal(existsSync(path.join(runDir, "cells")), false);
+    const escaping = spawnSync("bash", ["-c", harness("../../etc")], {
+      encoding: "utf8",
+    });
+    assert.equal(escaping.status, 1);
+    assert.match(escaping.stderr, /must not climb out of the checkout/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("run-eval.sh publishes the appended row when the report fails", () => {
+  // `--validate --append` has already put the row in the checkout's ledger by
+  // the time the report is generated. `set -e` exiting on a failed `--report`
+  // — a same-sitting `--against` file under /tmp that is gone by now is enough
+  // — printed no PR and no recovery commands, and the next scheduled run then
+  // refuses to start against the dirty ledger it left behind.
+  const shell = readFileSync(
+    path.join(repoRoot, "scripts/review/run-eval.sh"),
+    "utf8",
+  );
+  const block = shell.match(
+    /\nREPORT="\$RUN_DIR\/report\.md"\n[\s\S]*?\nlog "verdict \$VERDICT"\n/,
+  )?.[0];
+  assert.ok(block, "the report step was not found in run-eval.sh");
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-report-"));
+  try {
+    const runDir = path.join(dir, "run");
+    mkdirSync(runDir);
+    writeFileSync(
+      path.join(runDir, "row.json"),
+      JSON.stringify({ verdict: "AMBER" }),
+    );
+    const harness = [
+      "set -euo pipefail",
+      `TMPROOT=${JSON.stringify(dir)}`,
+      `RUN_DIR=${JSON.stringify(runDir)}`,
+      // A CLI path that is not there: `node` exits non-zero, which is every
+      // way `--report` can fail as far as this step is concerned.
+      `CLI=${JSON.stringify(path.join(dir, "no-such-cli.mjs"))}`,
+      `SPEC=${JSON.stringify(dir)}`,
+      `LEDGER=${JSON.stringify(path.join(dir, "ledger.jsonl"))}`,
+      "AGAINST_ARGS=()",
+      `log() { printf '%s\\n' "$*"; }`,
+      `log_stderr_tail() { [[ -s $1 ]] && printf 'stderr: seen\\n'; }`,
+      // shellcheck-clean stand-in for the real reader, which spawns node.
+      `json_field() { node -e 'process.stdout.write(String(JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"))[process.argv[2]]))' "$1" "$2"; }`,
+      block,
+      'printf "reached-publish %s\\n" "$VERDICT"',
+    ].join("\n");
+    const run = spawnSync("bash", ["-c", harness], { encoding: "utf8" });
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /reached-publish AMBER/);
+    assert.match(run.stdout, /the report could not be generated/);
+    assert.match(run.stdout, /stderr: seen/);
+    const body = readFileSync(path.join(runDir, "report.md"), "utf8");
+    assert.match(body, /Review-skill eval: AMBER/);
+    assert.match(body, /re-run `pnpm review:eval -- --report`/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("run-eval.sh keeps the stderr of a bounded command it had to fail", () => {
