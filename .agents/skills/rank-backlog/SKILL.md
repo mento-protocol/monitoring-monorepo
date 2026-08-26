@@ -120,13 +120,11 @@ cross-reference issues nobody has claimed. Treating every open cross-reference
 as ownership hides exactly those.
 
 Drop a candidate for any of the following, and keep the count dropped for each
-reason:
+reason. The rules are ordered, and an issue is counted under the **first** one
+that applies: an owned issue is owned, never also "outside the queue", so the
+per-reason counts and the outside-queue count sum to the number dropped instead
+of double-counting the issues that satisfy both.
 
-- it carries neither `agent-ready` nor `needs-grooming` — the queue is those two
-  labels. This repo's workflows open issues outside it: drift reports,
-  supply-chain advisories, and Sentry triage records, none of which a ranking run
-  can select. Count them in Method as outside the queue rather than ranking them
-  into slots a workable issue should hold;
 - it has an assignee;
 - it carries `agent-active` or `in-pr` — this repo claims through labels and
   Project fields, so an owned issue can still have no assignee;
@@ -136,7 +134,13 @@ reason:
 - the newest `.rankings/excluded.json` entry for its number has not expired yet
   — see the ledger contract under Stop There. A lapsed or superseded entry is
   not a drop: that issue belongs back in the roster. A missing file is an empty
-  ledger, not an error: on the first run there is nothing to exclude.
+  ledger, not an error: on the first run there is nothing to exclude;
+- it carries no queue-state label at all — none of `agent-ready`,
+  `needs-grooming`, `agent-active`, or `in-pr`. This repo's workflows open
+  issues outside the queue: drift reports, supply-chain advisories, and Sentry
+  triage records, none of which a ranking run can select. Count these in Method
+  as outside the queue rather than ranking them into slots a workable issue
+  should hold.
 
 Keep `needs-grooming` issues in the roster. They score badly on ease and fit on
 their own merits, and seeing where they land is the point. Never Select one:

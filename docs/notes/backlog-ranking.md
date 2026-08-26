@@ -41,10 +41,13 @@ The loop reuses the workflow's terms and adds none:
 - `agent-active` and `in-pr` — already owned, so dropped from the roster. This
   repo claims through labels and Project fields rather than assignees, so
   neither state shows up in an assignee check.
-- **outside the queue** — an open issue carrying none of those labels. Workflows
-  open these on their own: drift reports, supply-chain advisories, Sentry triage
-  records. They are never ranked and never Selected; Method counts them so a
-  reader can see the gap between open issues and the roster.
+- **outside the queue** — an open issue carrying none of the four labels above.
+  Workflows open these on their own: drift reports, supply-chain advisories,
+  Sentry triage records. They are never ranked and never Selected; Method counts
+  them so a reader can see the gap between open issues and the roster. An owned
+  issue is never one of these: the drop rules are ordered and each issue counts
+  under the first that applies, so ownership and outside-the-queue cannot both
+  claim it.
 - **claim** — `pnpm issue:claim`, run by the operator after reading the receipt.
 
 ## The receipt
