@@ -3620,6 +3620,10 @@ gate_drain_capture_unpersisted=0
 # the wrapper that reads that output is what sets the flag.
 gate_drain_scan_failed=0
 gate_drain_scan_error="agentqg-scan-failed"
+# Linux full scans after mapped commands can exclude process generations that
+# existed before any mapped command could inherit its marker. Stale recovery
+# and exact-PID checks leave this boundary empty and retain their full scope.
+gate_active_command_proc_start_floor=""
 # The PIDs this run's handles named on the current pass, read by the
 # membership check deep inside the recursive walk.
 gate_drain_tagged_now=""
@@ -3737,8 +3741,9 @@ gate_lock_identity_source_available() {
 # subshell.
 gate_drain_refresh_tagged() {
   local token="$1"
+  local full_scan_start_floor="${2:-}"
   local raw candidate normalized=""
-  raw="$(gate_run_tagged_pids "$token")"
+  raw="$(gate_run_tagged_pids "$token" "" "$full_scan_start_floor")"
   for candidate in $raw; do
     if [[ "$candidate" == "$gate_drain_scan_error" ]]; then
       gate_drain_scan_failed=1
@@ -4142,6 +4147,7 @@ drain_condemned_run_commands() {
   local drain_failure_prefix="Nothing has been executed."
   local drain_failure_phase="stale-obligation recovery"
   local drain_failure_verdict="No mapped command ran in this request"
+  local full_scan_start_floor=""
   if [[ "$drain_context" == "active-command" ]]; then
     drain_subject="completed mapped command"
     drain_start_message="A completed mapped command left descendants running; stopping them before releasing its scheduler lease."
@@ -4149,6 +4155,7 @@ drain_condemned_run_commands() {
     drain_failure_prefix="The mapped command finished, but descendant cleanup did not complete."
     drain_failure_phase="command descendant cleanup"
     drain_failure_verdict="A mapped command ran, but its descendants were not confirmed gone"
+    full_scan_start_floor="${gate_active_command_proc_start_floor:-}"
   fi
   [[ -n "$token" ]] || return 0
   if [[ -n "$seed_pgid" && ! "$seed_pgid" =~ ^[1-9][0-9]*$ ]]; then
@@ -4290,13 +4297,13 @@ EOF
   # first signal kills the tagged wrapper and with it the only handle to
   # anything the walk did not already record. Two walks are not a proof, but
   # they cost 200ms on a path that runs only after a crash.
-  gate_drain_refresh_tagged "$token"
+  gate_drain_refresh_tagged "$token" "$full_scan_start_floor"
   for wrapper in $gate_drain_tagged_now; do
     capture_process_tree "$wrapper"
   done
   gate_drain_capture_seed_group "$token"
   sleep 0.2
-  gate_drain_refresh_tagged "$token"
+  gate_drain_refresh_tagged "$token" "$full_scan_start_floor"
   for wrapper in $gate_drain_tagged_now; do
     capture_process_tree "$wrapper"
   done
@@ -4348,7 +4355,7 @@ EOF
     alive_identities=""
     unverified=""
     gate_drain_scan_failed=0
-    gate_drain_refresh_tagged "$token"
+    gate_drain_refresh_tagged "$token" "$full_scan_start_floor"
     # A tagged replacement can appear after the previous bottom-of-loop walk
     # and after its captured parent exits. Persist every fresh tagged root
     # before deciding that the old capture is empty.
@@ -4604,7 +4611,7 @@ EOF
     # Re-asked of the token as well, not only of the survivors: a command that
     # forks a replacement and then exits leaves nothing to walk down from, and
     # the replacement is discoverable only by the token it inherited.
-    gate_drain_refresh_tagged "$token"
+    gate_drain_refresh_tagged "$token" "$full_scan_start_floor"
     for pid in $alive $gate_drain_tagged_now; do
       capture_process_tree "$pid"
     done
@@ -9106,6 +9113,21 @@ fi
 # and this stops. The publications that can still land are duplicates of
 # obligations this run already drained, whose processes are already gone.
 assert_gate_run_lock_still_ours
+
+# Capture this boundary after scheduler registration and stale recovery, but
+# before the first mapped command. A process older than this Linux start tick
+# cannot have inherited a mapped command's marker. The active-command
+# descriptor census can skip it before reading UID or fd state.
+if gate_run_proc_marker_scan_available; then
+  if ! gate_active_command_proc_start_floor="$(
+    gate_run_capture_proc_start_floor
+  )" || [[ ! "$gate_active_command_proc_start_floor" =~ ^[0-9]+$ ]]; then
+    echo "error: could not capture the Linux process-start boundary before mapped commands." >&2
+    gate_report_coordinated_no_work_failure 2 "run-handle preparation" \
+      "No mapped command ran in this request"
+    exit 2
+  fi
+fi
 
 run_prerequisite_phase "preflight" "${preflight_commands[@]+"${preflight_commands[@]}"}"
 run_prerequisite_phase "codegen" "${codegen_commands[@]+"${codegen_commands[@]}"}"

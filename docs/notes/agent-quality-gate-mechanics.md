@@ -837,14 +837,22 @@ It stops scanning a process after a match. Handle revalidation after a process
 identity or process-group snapshot reads the observed PID's NUL-delimited
 `/proc/<pid>/cmdline` records directly. It also limits the procfs environment
 and descriptor checks to that PID. This exact-PID path does not repeat the
-host-wide `pgrep` scan. Full refreshes still scan all PIDs to discover new or
-reparented descendants. The scan requires the process start identity to remain
-equal before and after identity and fd enumeration. Process-exit races are
-empty observations. A restricted `hidepid` mount, unreadable in-scope process,
-or other incomplete scan is a scan failure. When `/proc/self/fd` exists, a
-failed procfs scan fails closed and never falls back to `lsof`. macOS and hosts
-without `/proc/self/fd` use the witnessed `lsof` path. A host with neither
-scanner fails closed while a marker exists.
+host-wide `pgrep` scan. Full refreshes enumerate all PIDs to discover new or
+reparented descendants. Immediately before the first mapped command, a Linux
+run records the start tick of a new helper process. Active-command full
+refreshes read each candidate's start identity first. They skip a generation
+whose start tick is strictly older than that boundary before they read its UID
+or fd state. Such a process existed before mapped work could inherit the
+command marker. A generation with an equal or newer tick stays in scope.
+Stale-run recovery and exact-PID revalidation do not use the boundary. A Linux
+run that cannot record the boundary fails before it starts mapped work. The
+scan requires the process start identity to remain equal before and after
+identity and fd enumeration. Process-exit races are empty observations. A
+restricted `hidepid` mount, unreadable in-scope process, or other incomplete
+scan is a scan failure. When `/proc/self/fd` exists, a failed procfs scan fails
+closed and never falls back to `lsof`. macOS and hosts without
+`/proc/self/fd` use the witnessed `lsof` path. A host with neither scanner
+fails closed while a marker exists.
 
 Adoption preserves the incoming owner record's group and other read bits so a
 legacy waiter with shared-root access can observe the barrier. The replacement

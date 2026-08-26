@@ -1588,6 +1588,21 @@ assert.match(
 );
 assert.match(
   runHandles,
+  /const startBefore = processStart\(pid\);[\s\S]*?BigInt\(startBefore\) < BigInt\(startFloor\)[\s\S]*?const processUidSet = processUids/u,
+  "a full proc descriptor scan must skip pre-command generations before UID and fd inspection",
+);
+assert.match(
+  source,
+  /gate_active_command_proc_start_floor=""[\s\S]*?if \[\[ "\$drain_context" == "active-command" \]\]; then[\s\S]*?full_scan_start_floor="\$\{gate_active_command_proc_start_floor:-\}"[\s\S]*?gate_drain_refresh_tagged "\$token" "\$full_scan_start_floor"/u,
+  "only active-command full scans may use the pre-command process-start floor",
+);
+assert.match(
+  source,
+  /if gate_run_proc_marker_scan_available; then[\s\S]*?gate_run_capture_proc_start_floor[\s\S]*?could not capture the Linux process-start boundary before mapped commands/u,
+  "Linux runs must capture the active-command process-start floor before mapped work",
+);
+assert.match(
+  runHandles,
   /const heldPath = `\/proc\/\$\{pid\}\/fd\/\$\{descriptor\}`;[\s\S]*?fs\.readlinkSync\(heldPath\)[\s\S]*?!heldTarget\.startsWith\("\/"\)[\s\S]*?continue;[\s\S]*?fs\.statSync\(heldPath,[\s\S]*?sameInode\(markerBefore, held\)[\s\S]*?break;/u,
   "the proc descriptor scan must skip non-file targets, retain exact device-and-inode authority, and stop after a match",
 );
@@ -2304,6 +2319,7 @@ STUB
   contender_command_marker="$coordinator_gate_pipeline_repo/contender-command-ran"
   joiner_output="$coordinator_gate_pipeline_repo/joiner-output"
   joiner_lsof_path="$coordinator_gate_pipeline_repo/joiner-lsof-path"
+  joiner_command_marker="$coordinator_gate_pipeline_repo/joiner-command-ran"
   marker_transition_output="$coordinator_gate_pipeline_repo/marker-transition-output"
   marker_transition_serial_done="$coordinator_gate_pipeline_repo/marker-transition-serial-done"
   marker_transition_trunk_ran="$coordinator_gate_pipeline_repo/marker-transition-trunk-ran"
@@ -2750,6 +2766,7 @@ STUB
       AGENT_QUALITY_GATE_CAPACITY=3 \
       NODE_ENV=test \
       QG_LSOF_PATH_RECORD="$joiner_lsof_path" \
+      QG_CONTENDER_COMMAND_MARKER="$joiner_command_marker" \
       REAL_CP_COMMAND="$real_cp_command" \
       REAL_UNAME_COMMAND="$real_uname_command" \
       PATH="$coordinator_gate_pipeline_joiner_repo/bin:$PATH" \
@@ -2794,6 +2811,8 @@ STUB
     fail_gate_pipeline_fixture "distinct coordinator joiner did not lead its own execution"
   grep -Fq -- "All mapped commands passed." "$joiner_output" ||
     fail_gate_pipeline_fixture "distinct coordinator joiner did not execute mapped work"
+  [[ -e "$joiner_command_marker" ]] ||
+    fail_gate_pipeline_fixture "distinct coordinator joiner did not run its mapped command"
   ! grep -Fq -- "agentqg-scan-failed" "$joiner_output" ||
     fail_gate_pipeline_fixture "distinct coordinator joiner emitted the marker scan sentinel"
   ! grep -Fq -- "processes kept failing" "$joiner_output" ||
@@ -20480,6 +20499,97 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     done
     [[ -e "$race_proc_ready" ]] ||
       fail "the proc marker fixture did not open its inherited descriptor"
+    race_proc_floor_identity="$(runtime_process_start "$race_proc_pid")"
+    race_proc_old_identity="$(runtime_process_start "$gate_test_outer_pid")"
+    race_proc_floor="${race_proc_floor_identity#proc:}"
+    race_proc_old_start="${race_proc_old_identity#proc:}"
+    [[ "$race_proc_floor_identity" == proc:* &&
+      "$race_proc_old_identity" == proc:* &&
+      "$race_proc_floor" =~ ^[0-9]+$ &&
+      "$race_proc_old_start" =~ ^[0-9]+$ &&
+      "$race_proc_old_start" -lt "$race_proc_floor" ]] ||
+      fail "the proc start-floor fixture did not bind an older process generation"
+    race_proc_preload="$gate_race_out/proc-start-floor-preload.cjs"
+    race_proc_old_trace="$gate_race_out/proc-start-floor-old.trace"
+    race_proc_new_trace="$gate_race_out/proc-start-floor-new.trace"
+    race_proc_real_node="$(command -v node)"
+    : > "$race_proc_old_trace"
+    : > "$race_proc_new_trace"
+    cat > "$race_proc_preload" <<'NODE'
+const fs = require("node:fs");
+const realReadFileSync = fs.readFileSync.bind(fs);
+const realReaddirSync = fs.readdirSync.bind(fs);
+const ids = new Set(
+  (process.env.QG_PROC_IDS ?? "").split(",").filter(Boolean),
+);
+const hazards = new Set(
+  (process.env.QG_PROC_HAZARDS ?? "").split(",").filter(Boolean),
+);
+const trace = process.env.QG_PROC_TRACE;
+
+fs.readFileSync = (path, ...args) => {
+  const match = /^\/proc\/([1-9][0-9]*)\/status$/u.exec(String(path));
+  if (match && ids.has(match[1])) {
+    fs.appendFileSync(trace, `status:${match[1]}\n`);
+  }
+  return realReadFileSync(path, ...args);
+};
+fs.readdirSync = (path, ...args) => {
+  const text = String(path);
+  if (text === "/proc") return [...ids];
+  const match = /^\/proc\/([1-9][0-9]*)\/fd$/u.exec(text);
+  if (match && hazards.has(match[1])) {
+    fs.appendFileSync(trace, `fd:${match[1]}\n`);
+    const error = new Error("injected proc fd denial");
+    error.code = "EACCES";
+    throw error;
+  }
+  return realReaddirSync(path, ...args);
+};
+NODE
+
+    # A process that predates mapped work cannot inherit its marker. Skip that
+    # generation before an unreadable UID or fd entry can poison the full scan.
+    race_proc_old_floor_output="$(
+      gate_drain_scan_error="agentqg-scan-failed"
+      gate_lock_root_dir="$gate_race_root"
+      source "$repo_root/scripts/gate/run-handles.sh"
+      node() {
+        /usr/bin/env -u NODE_OPTIONS -u NODE_PATH \
+          QG_PROC_IDS="$gate_test_outer_pid" \
+          QG_PROC_HAZARDS="$gate_test_outer_pid" \
+          QG_PROC_TRACE="$race_proc_old_trace" \
+          "$race_proc_real_node" --require "$race_proc_preload" "$@"
+      }
+      gate_run_proc_marker_pids \
+        "$race_proc_token" "$race_proc_marker" "" "$race_proc_floor"
+    )"
+    [[ -z "$race_proc_old_floor_output" &&
+      ! -s "$race_proc_old_trace" ]] ||
+      fail "the active-command proc floor inspected an older process"
+
+    # Equal and newer generations remain in scope. An unreadable post-floor
+    # descriptor directory must still fail the active-command scan closed.
+    race_proc_new_floor_output="$(
+      gate_drain_scan_error="agentqg-scan-failed"
+      gate_lock_root_dir="$gate_race_root"
+      source "$repo_root/scripts/gate/run-handles.sh"
+      node() {
+        /usr/bin/env -u NODE_OPTIONS -u NODE_PATH \
+          QG_PROC_IDS="$race_proc_pid" \
+          QG_PROC_HAZARDS="$race_proc_pid" \
+          QG_PROC_TRACE="$race_proc_new_trace" \
+          "$race_proc_real_node" --require "$race_proc_preload" "$@"
+      }
+      gate_run_proc_marker_pids \
+        "$race_proc_token" "$race_proc_marker" "" "$race_proc_floor"
+    )"
+    [[ "$race_proc_new_floor_output" == "agentqg-scan-failed" ]] ||
+      fail "a post-floor proc denial did not fail closed"
+    [[ "$(cat "$race_proc_new_trace")" == \
+      $'status:'"$race_proc_pid"$'\nfd:'"$race_proc_pid" ]] ||
+      fail "the post-floor proc denial did not reach UID and fd inspection"
+
     race_bound_launch_command "proc marker non-holder" 30 \
       "$(command -v sleep)" 60 ||
       fail "the proc marker fixture could not bind its non-holder"
@@ -20491,7 +20601,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
       gate_lock_root_dir="$gate_race_root"
       source "$repo_root/scripts/gate/run-handles.sh"
       pgrep() { return 1; }
-      gate_run_tagged_pids "$race_proc_token"
+      gate_run_tagged_pids "$race_proc_token" "" "$race_proc_floor"
     )"
     [[ "$race_proc_output" == "$race_proc_pid" ]] ||
       fail "the proc marker scan did not emit only its untagged descriptor holder"
@@ -20539,7 +20649,8 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
       "$race_proc_nonholder_start" "$race_proc_nonholder_parent" ||
       fail "the proc marker fixture could not clean its non-holder"
     race_bound_prune_completed
-    rm -f "$race_proc_marker" "$race_proc_ready"
+    rm -f "$race_proc_marker" "$race_proc_ready" "$race_proc_preload" \
+      "$race_proc_old_trace" "$race_proc_new_trace"
   fi
 
   # The environment census runs once per visible Linux process on every drain

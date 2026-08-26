@@ -248,11 +248,18 @@ device and inode for every absolute target. It stops scanning a process after a
 match. Handle revalidation after a process identity or process-group snapshot
 reads the observed PID's NUL-delimited `/proc/<pid>/cmdline` records directly.
 It also limits the procfs environment and descriptor checks to that PID. This
-exact-PID path does not repeat the host-wide `pgrep` scan. Full refreshes still
-scan all PIDs to discover new or reparented descendants. The scan reads each
-process start identity before and after UID and descriptor enumeration. A
-changed identity makes that observation empty. A restricted `hidepid` mount or
-another incomplete in-scope scan fails closed.
+exact-PID path does not repeat the host-wide `pgrep` scan. Full refreshes
+enumerate all PIDs to discover new or reparented descendants. Immediately
+before the first mapped command, a Linux client records the start tick of a new
+helper process. An active-command full refresh reads each process start
+identity first. It skips a generation whose tick is strictly older than that
+boundary before it reads UID or descriptor state. Such a generation existed
+before mapped work could inherit the command marker. Equal and newer ticks stay
+in scope. Stale-obligation recovery and exact-PID revalidation do not use this
+boundary. A client that cannot record the boundary fails before mapped work.
+The scan reads each in-scope process start identity before and after UID and
+descriptor enumeration. A changed identity makes that observation empty. A
+restricted `hidepid` mount or another incomplete in-scope scan fails closed.
 
 When `/proc/self/fd` is unavailable, the process scan never asks `lsof` to query
 the mutable shared marker pathname. It creates a mode-0700 private directory named

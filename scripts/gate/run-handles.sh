@@ -355,6 +355,24 @@ gate_run_proc_marker_scan_available() {
   [[ -d /proc/self/fd ]]
 }
 
+gate_run_capture_proc_start_floor() {
+  # The helper process starts after coordinator registration and before mapped
+  # work. Its Linux start tick is therefore a conservative lower bound for
+  # processes that could inherit a later command marker. Equal ticks stay in
+  # scope because procfs start times have finite resolution.
+  # shellcheck disable=SC2016 # the single-quoted program contains JavaScript templates
+  node -e '
+    const fs = require("node:fs");
+    const value = fs.readFileSync("/proc/self/stat", "utf8");
+    const close = value.lastIndexOf(")");
+    if (close < 0) process.exit(2);
+    const fields = value.slice(close + 1).trim().split(/\s+/u);
+    const start = fields[19];
+    if (!/^[0-9]+$/u.test(start ?? "")) process.exit(2);
+    process.stdout.write(`${start}\n`);
+  ' 2>/dev/null
+}
+
 gate_run_proc_argv_scan_available() {
   [[ -r /proc/self/cmdline ]]
 }
@@ -388,8 +406,17 @@ gate_run_proc_marker_pids() {
   local token="$1"
   local marker="$2"
   local target_pid="${3:-}"
+  local full_scan_start_floor="${4:-}"
   local found status
   if [[ -n "$target_pid" && ! "$target_pid" =~ ^[1-9][0-9]*$ ]]; then
+    printf '%s\n' "$gate_drain_scan_error"
+    return 0
+  fi
+  if [[ -n "$target_pid" && -n "$full_scan_start_floor" ]]; then
+    printf '%s\n' "$gate_drain_scan_error"
+    return 0
+  elif [[ -n "$full_scan_start_floor" &&
+    ! "$full_scan_start_floor" =~ ^[0-9]+$ ]]; then
     printf '%s\n' "$gate_drain_scan_error"
     return 0
   fi
@@ -397,7 +424,7 @@ gate_run_proc_marker_pids() {
   found="$(node -e '
     const fs = require("node:fs");
     const { constants } = fs;
-    const [markerPath, expectedToken, uidText, targetPid] =
+    const [markerPath, expectedToken, uidText, targetPid, startFloor] =
       process.argv.slice(1);
     const expectedUid = BigInt(uidText);
     const signalScopeUids = new Set([
@@ -525,6 +552,12 @@ gate_run_proc_marker_pids() {
         }
         const startBefore = processStart(pid);
         if (startBefore === null) continue;
+        if (
+          startFloor !== "" &&
+          BigInt(startBefore) < BigInt(startFloor)
+        ) {
+          continue;
+        }
         const processUidSet = processUids(pid, processIdentity.uid);
         if (processUidSet === null) continue;
         const identityStartAfter = processStart(pid);
@@ -601,7 +634,8 @@ gate_run_proc_marker_pids() {
     } finally {
       if (markerDescriptor !== undefined) fs.closeSync(markerDescriptor);
     }
-  ' "$marker" "$token" "$(id -u)" "$target_pid" 2>/dev/null)" &&
+  ' "$marker" "$token" "$(id -u)" "$target_pid" \
+    "$full_scan_start_floor" 2>/dev/null)" &&
     status=0 || status=$?
   if [[ "$status" -ne 0 ]]; then
     printf '%s\n' "$gate_drain_scan_error"
@@ -613,6 +647,7 @@ gate_run_proc_marker_pids() {
 gate_run_tagged_pids() {
   local token="$1"
   local target_pid="${2:-}"
+  local full_scan_start_floor="${3:-}"
   local environ environ_entry environ_match pid marker found pattern status
   local -a environ_paths=()
   # A token read back from a lock record names processes (through this
@@ -629,6 +664,16 @@ gate_run_tagged_pids() {
   fi
   if [[ -n "$target_pid" && ! "$target_pid" =~ ^[1-9][0-9]*$ ]]; then
     echo "error: invalid target PID for the run-handle scan." >&2
+    printf '%s\n' "$gate_drain_scan_error"
+    return 0
+  fi
+  if [[ -n "$target_pid" && -n "$full_scan_start_floor" ]]; then
+    echo "error: a process-start floor cannot limit exact-PID revalidation." >&2
+    printf '%s\n' "$gate_drain_scan_error"
+    return 0
+  elif [[ -n "$full_scan_start_floor" &&
+    ! "$full_scan_start_floor" =~ ^[0-9]+$ ]]; then
+    echo "error: invalid process-start floor for the run-handle scan." >&2
     printf '%s\n' "$gate_drain_scan_error"
     return 0
   fi
@@ -724,7 +769,8 @@ gate_run_tagged_pids() {
   if [[ -n "$gate_lock_root_dir" &&
     ( -e "$marker" || -L "$marker" ) ]]; then
     if gate_run_proc_marker_scan_available; then
-      gate_run_proc_marker_pids "$token" "$marker" "$target_pid"
+      gate_run_proc_marker_pids \
+        "$token" "$marker" "$target_pid" "$full_scan_start_floor"
     elif command -v lsof > /dev/null 2>&1; then
       gate_run_lsof_marker_pids "$token" "$marker" "$target_pid"
     else
