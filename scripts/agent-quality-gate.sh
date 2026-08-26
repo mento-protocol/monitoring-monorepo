@@ -67,7 +67,10 @@ Environment:
   AGENT_QUALITY_GATE_LOCK_DIR
                       Directory holding the cross-run lock. Default:
                       $HOME/.cache/agent-quality-gate, falling back to
-                      $TMPDIR/agent-quality-gate-<uid>.
+                      $TMPDIR/agent-quality-gate-<uid>. Give each machine its
+                      own: on a root the filesystem reports as network storage
+                      the gate reclaims nothing, so a lock left behind there is
+                      waited out rather than healed.
   AGENT_QUALITY_GATE_LOCK_MACHINE_ID
                       Names the machine a lock record belongs to, in place of
                       the hardware identity the gate reads for itself. Set it
@@ -78,14 +81,16 @@ Environment:
                       established must be before a dead holder in it is
                       reclaimed. Default: 600.
   AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE
-                      Declares whether only this machine reaches the lock root.
-                      Unset, a root the gate resolved for itself is asked of
-                      the filesystem (df -l) and an AGENT_QUALITY_GATE_LOCK_DIR
-                      is assumed shared. Where the root may be shared, a lock
-                      record that cannot be tied to this machine is never
-                      reclaimed. Set 1 for an override directory this machine
-                      alone reaches; set 0 where this machine exports the lock
-                      root and another machine's gate locks in it.
+                      Declares whether only this machine reaches the lock root,
+                      in place of what the filesystem says about it. Unset,
+                      every root is asked of the filesystem (df -l), and off
+                      local storage no lock record is reclaimed at all; on
+                      local storage a record that cannot be tied to this
+                      machine is reclaimed only where the root is not an
+                      AGENT_QUALITY_GATE_LOCK_DIR, which is assumed shared. Set
+                      1 for a directory this machine alone reaches; set 0 where
+                      this machine exports the lock root and another machine's
+                      gate locks in it.
 USAGE
 }
 
@@ -630,6 +635,26 @@ case "$gate_lock_root_per_machine_override" in
     exit 2
     ;;
 esac
+# Whether the storage under the lock root is this machine's own, kept apart
+# from the question above because the two authorise different things. This one
+# is the weaker claim and the wider gate: without it, no reclaim on this root
+# is sound at all, because every reason a record looks reclaimable is read
+# through this kernel and this client (GitHub issue #2061). Resolved in
+# acquire_gate_run_lock once the root is known; 0 until then, which is the
+# direction that keeps waiting.
+gate_lock_root_is_local_storage=0
+# Test-only, gated like the other lock-test hooks. The refusal this drives
+# turns on what `df -l` says about the lock root, and a self-test cannot mount
+# a network filesystem to make it say the interesting thing, so this makes the
+# probe answer "not local" for every path. It only ever withdraws a reclaim —
+# there is no setting of it that authorises one — so the failure it can cause
+# is a wait, not an overlap. Refused outside NODE_ENV=test all the same, so it
+# is never a quiet way to change how a real run behaves.
+gate_lock_test_force_not_local="${AGENT_QUALITY_GATE_LOCK_TEST_FORCE_NOT_LOCAL:-}"
+if [[ -n "$gate_lock_test_force_not_local" && "${NODE_ENV:-}" != "test" ]]; then
+  echo "error: AGENT_QUALITY_GATE_LOCK_TEST_FORCE_NOT_LOCAL is a test-only override and requires NODE_ENV=test." >&2
+  exit 2
+fi
 # The lock root, kept once resolved: outstanding obligations live beside the
 # lock rather than inside it, because the lock directory is what gets reclaimed
 # and the obligation has to outlive that.
@@ -1080,6 +1105,7 @@ gate_lock_machine_verdict() {
 gate_lock_path_is_local_filesystem() {
   local dir="$1"
   local row
+  [[ -z "$gate_lock_test_force_not_local" ]] || return 1
   [[ -n "$dir" ]] || return 1
   command -v df > /dev/null 2>&1 || return 1
   row="$(df -l -- "$dir" 2>/dev/null | tail -n +2 | tr -d '[:space:]' || true)"
@@ -1737,6 +1763,7 @@ acquire_gate_run_lock() {
   local announced=0
   local ownerless_since=""
   local unverified_warned=0
+  local nonlocal_root_warned=0
   local this_host this_machine
   case "$gate_lock_enabled" in
     0|false|no) return 0 ;;
@@ -1765,24 +1792,39 @@ acquire_gate_run_lock() {
   this_host="$(uname -n)"
   gate_lock_resolve_machine_id
   this_machine="$gate_lock_machine_id_cached"
-  # Evidence for the root this gate chose, a declaration for the root an
-  # operator chose. The default candidates are this user's own cache and temp
-  # directories, which nothing points at deliberately, so the only open
-  # question there is whether the storage under them is mounted from elsewhere
-  # — and the filesystem answers that. AGENT_QUALITY_GATE_LOCK_DIR is the
-  # opposite: resolve_gate_lock_root treats it as a coordination contract
-  # precisely because it can name a directory more than one machine reaches,
-  # and a local mount is no evidence against that — a machine can export its
-  # own disk. So an override is possibly-shared until its owner says otherwise,
-  # which is what the declaration is for.
+  # Two questions about the root, answered from different evidence.
+  #
+  # Is the storage under it this machine's own? Every reason a record can look
+  # reclaimable is read through this kernel and this client, so nothing on this
+  # root is safe to take away without it, and the filesystem is what answers —
+  # for the root an operator named as much as for the one the gate chose,
+  # because the question is about the storage rather than about who picked the
+  # path. Unanswerable means "may be shared", the direction that keeps waiting.
+  #
+  # Is the root established as this machine's alone? That is strictly stronger,
+  # and it is what the unverified-record rule below needs, because that rule
+  # reclaims a record it cannot attribute at all. An
+  # AGENT_QUALITY_GATE_LOCK_DIR cannot earn it from the filesystem: a machine
+  # can export its own local disk, and resolve_gate_lock_root treats the
+  # override as a coordination contract precisely because it can name a
+  # directory more than one machine reaches. So an override stays
+  # possibly-shared until its owner says otherwise.
+  #
+  # The declaration answers both, since "only this machine reaches it" implies
+  # "this machine mounts the storage".
+  if [[ -n "$gate_lock_root_per_machine_override" ]]; then
+    gate_lock_root_is_local_storage="$gate_lock_root_per_machine_override"
+  elif gate_lock_path_is_local_filesystem "$root"; then
+    gate_lock_root_is_local_storage=1
+  else
+    gate_lock_root_is_local_storage=0
+  fi
   if [[ -n "$gate_lock_root_per_machine_override" ]]; then
     gate_lock_root_is_per_machine="$gate_lock_root_per_machine_override"
   elif [[ -n "${AGENT_QUALITY_GATE_LOCK_DIR:-}" ]]; then
     gate_lock_root_is_per_machine=0
-  elif gate_lock_path_is_local_filesystem "$root"; then
-    gate_lock_root_is_per_machine=1
   else
-    gate_lock_root_is_per_machine=0
+    gate_lock_root_is_per_machine="$gate_lock_root_is_local_storage"
   fi
   wait_started_at="$(gate_wall_millis)"
 
@@ -1925,6 +1967,37 @@ acquire_gate_run_lock() {
           stale_reason=""
         fi
       fi
+    fi
+
+    # The last word on every reclaim above, and the one that does not depend on
+    # reading the record right. Each of those reasons is evidence gathered
+    # locally — a PID looked up in this kernel, a record this client cannot see
+    # — and each is worth only as much as the claim that the record was written
+    # here. That claim rests on the record's own machine identity and hostname,
+    # and both can be cloned: two containers built from one image carry the
+    # same `/etc/machine-id` and the same hostname, so on a root they share
+    # each reads the other's record as its own, finds the holder's PID absent
+    # from its own PID namespace, and reclaims a lock whose holder is running
+    # next door — the overlap the lock exists to prevent (GitHub issue #2061).
+    # Nothing available locally tells those two apart, so the reclaim is
+    # refused wherever the storage is not this machine's own, and the run waits
+    # out its lock budget instead. Refusing the reclaim rather than the lock is
+    # deliberate: waiting is still correct on a shared root, and a run that
+    # simply queued is a run that still validated.
+    #
+    # This covers the record with no holder at all as well. A network client's
+    # view of a directory is cached, so "no complete record here" is as local a
+    # reading as a PID lookup: NFS attribute caching can hide a freshly written
+    # owner file from another client for longer than the grace that authorises
+    # taking it.
+    if [[ -n "$stale_reason" && "$gate_lock_root_is_local_storage" -ne 1 ]]; then
+      if [[ "$nonlocal_root_warned" -eq 0 ]]; then
+        nonlocal_root_warned=1
+        echo "warning: the gate run lock at ${lock} looks reclaimable (${stale_reason}), and this run refuses to reclaim it." >&2
+        echo "  Its root ${root} is not established as storage only this machine reaches, and on a shared root that evidence proves nothing: a machine identity and a hostname can both be cloned — two containers built from one image carry the same values — so a holder alive on another machine reads as a dead PID here. Self-healing is disabled on such a root; this run waits out its lock budget instead." >&2
+        echo "  Give each machine its own AGENT_QUALITY_GATE_LOCK_DIR on that machine's local storage. If this root really is this machine's alone, declare it with AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1." >&2
+      fi
+      stale_reason=""
     fi
 
     if [[ -n "$stale_reason" ]]; then

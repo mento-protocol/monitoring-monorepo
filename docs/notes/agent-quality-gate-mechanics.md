@@ -462,28 +462,30 @@ _different_ sources are not, because a run that reached `ioreg` and a run that
 fell back to `kern.uuid` are almost certainly one machine and reading their
 unequal values as two would reinvent the wedge.
 
-**Where the lock root lives decides what a local PID lookup is allowed to
-conclude**, and how that is settled depends on who chose the root: evidence for
-the root the gate chose, a declaration for the root an operator chose.
+**Where the lock root lives decides what a local reading is allowed to
+conclude**, and the root is asked two questions from two kinds of evidence.
 
-The default candidates — `$HOME/.cache/agent-quality-gate`, then
-`$TMPDIR/agent-quality-gate-<uid>` — are nobody's deliberate coordination
-point, so the only open question is whether the storage under them is mounted
-from elsewhere, and the filesystem answers it. `df -l` lists local filesystems
-and omits network ones — NFS, SMB, AFS, an autofs map — on both the BSD and GNU
-implementations, and the row it prints for a path, not its exit status, is the
-answer. Every failure to answer means "may be shared": no `df`, an unreadable
-path, an implementation without `-l`. That direction is the one that keeps
-waiting.
+_Is the storage under it this machine's own?_ The filesystem answers that, for
+every root — the one an operator named as much as the one the gate resolved for
+itself — because the question is about the storage and not about who chose the
+path. `df -l` lists local filesystems and omits network ones — NFS, SMB, AFS,
+an autofs map — on both the BSD and GNU implementations, and the row it prints
+for a path, not its exit status, is the answer. Every failure to answer means
+"may be shared": no `df`, an unreadable path, an implementation without `-l`.
+That direction is the one that keeps waiting.
 
+_Is the root established as this machine's alone?_ That is strictly stronger,
+and only the unverified-record rule below needs it. The default candidates —
+`$HOME/.cache/agent-quality-gate`, then `$TMPDIR/agent-quality-gate-<uid>` —
+are nobody's deliberate coordination point, so local storage settles it there.
 `AGENT_QUALITY_GATE_LOCK_DIR` is the opposite case. `resolve_gate_lock_root`
 treats it as a coordination contract precisely because it can name a directory
 more than one machine reaches, and a local mount is no evidence against that —
 a machine can export its own disk. So an override is possibly-shared until its
-owner says otherwise, and every reclaim on this path is refused there.
+owner says otherwise, and the unverified-record reclaim is refused there.
 `AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE` is that declaration, and it
-overrides both branches: `1` where an override directory is this machine's
-alone, `0` where even a default root is exported to other machines.
+answers both questions: `1` where a directory is this machine's alone, `0`
+where even a default root is exported to other machines.
 
 The verdict then has three values. **Same machine** — matching identities, or
 no identity on one side and a matching hostname — runs the liveness rules
@@ -540,6 +542,52 @@ The field is additive in both directions: an older gate on the same machine
 ignores it and reads the record exactly as it always did, and this gate reads
 that older gate's record through the unverified path. Once both gates on a
 shared root write identities, that path is unreachable there.
+
+**Off storage the machine mounts itself, nothing is reclaimed at all** (GitHub
+issue #2061). Every rule above answers "was this record written here?" from the
+record's own machine identity and hostname, and both of those fields can be
+cloned. Two containers built from one image carry the same `/etc/machine-id`
+_and_ the same hostname; on a lock root they share, each reads the other's
+record as its own, finds the holder's PID absent from its own PID namespace,
+and authorises the overlap the lock exists to prevent. Every field the
+comparison could use is self-reported, and a PID lookup only answers about this
+kernel, so nothing available locally separates that case from a machine that
+renamed itself.
+
+So the locality of the root is the last word on every reclaim, not only on the
+unverified one. Where `df -l` cannot show the root as local storage and no
+declaration says otherwise, a record that looks reclaimable is left where it is
+and the run waits out its `--lock-wait` budget. The refusal says so on stderr:
+the root is not established as this machine's, self-healing is off there, and
+each machine should be given its own `AGENT_QUALITY_GATE_LOCK_DIR` on its own
+local storage.
+
+It refuses the reclaim, not the lock. Taking the lock on a shared root is still
+sound — a waiter queueing behind a live holder is what the lock is for — and
+failing acquisition outright would turn a working configuration into a hard
+error over a hazard that only bites when a holder dies. The one operation that
+acts on local evidence about a process elsewhere is the one that stops.
+
+That covers the record with no holder at all. "No complete record here" is as
+local a reading as a PID lookup: a network client caches directory attributes,
+so a freshly written owner file can stay invisible to another client for longer
+than the `AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS` that would otherwise
+authorise taking the lock away.
+
+The cost is that a lock root on network storage no longer self-heals — a holder
+killed there wedges the root until a human removes the record — and that is the
+trade this repo already assumes. One lock root per machine is the documented
+model: concurrent validation from another machine runs against its own checkout
+and its own lock. An operator who really does share a root, and has satisfied
+themselves that no second machine writes into it, restores self-healing with
+`AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1`.
+
+**An operator-supplied directory on local storage keeps self-healing.** The
+refusal turns on the storage, never on who named the path. Refusing on every
+`AGENT_QUALITY_GATE_LOCK_DIR` would take the dead-holder reclaim away from
+ordinary single-machine use of the override — a worktree pointing runs at a
+shared cache directory, a CI job placing the lock somewhere writable — and
+that is the wedge class issue #2055 removed.
 
 A killed holder cannot release its own lock, so recovery is explicit rather
 than time-based: a waiter that finds the recorded holder gone takes the record

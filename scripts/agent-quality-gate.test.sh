@@ -7623,6 +7623,119 @@ STUB
       fail "the locality probe must not read ${gate_lock_nonlocal_path} as local, got '$gate_lock_probe_remote'"
   fi
 
+  # --- A shared lock root refuses every reclaim (GitHub issue #2061) ---------
+  # The forcing hook first, because every case below rests on it. It has to
+  # reach the same probe the refusal reads, or those cases would pass for some
+  # other reason; the unforced reading of this very directory is asserted
+  # `local` above, so the pair is two-sided.
+  gate_lock_probe_forced="$(
+    NODE_ENV=test \
+      AGENT_QUALITY_GATE_LOCK_TEST_FORCE_NOT_LOCAL=1 \
+      AGENT_QUALITY_GATE_LOCK_PROBE_PATH="$gate_lock_root" \
+      "$repo_root/scripts/agent-quality-gate.sh" 2>&1
+  )" || true
+  [[ "$gate_lock_probe_forced" == "not-local" ]] ||
+    fail "the forced locality probe must answer not-local, got '$gate_lock_probe_forced'"
+
+  # …and it is refused outside the self-test, like every other test-only hook,
+  # so it can never quietly change how a real run behaves.
+  set +e
+  AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_lock_root" \
+    NODE_ENV='' \
+    AGENT_QUALITY_GATE_LOCK_TEST_FORCE_NOT_LOCAL=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 2 \
+    > "$output_file" 2>&1
+  forced_probe_outside_test_exit=$?
+  set -e
+  [[ "$forced_probe_outside_test_exit" == "2" ]] ||
+    fail "the locality forcing hook outside NODE_ENV=test must exit 2, got $forced_probe_outside_test_exit"
+  assert_contains "AGENT_QUALITY_GATE_LOCK_TEST_FORCE_NOT_LOCAL is a test-only override and requires NODE_ENV=test"
+
+  # The residual PR 2060 left. A machine identity and a hostname are the two
+  # fields that say a record was written here, and both can be cloned: two
+  # containers built from one image carry the same /etc/machine-id and the same
+  # hostname. On a lock root they share, each reads the other's record as its
+  # own, finds the holder's PID absent from its own PID namespace, and used to
+  # reclaim a lock whose holder was running next door. Nothing available
+  # locally tells those two apart, so off storage this machine mounts itself no
+  # record is reclaimed at all, however old it is and however dead its PID
+  # reads.
+  #
+  # Both containers are simulated with one identity override and this machine's
+  # real hostname — the indistinguishable pair the issue describes — and the
+  # only field that differs between them is the holder PID, which is exactly
+  # the field that reads wrong across the boundary. So the case runs in both
+  # directions: each container in turn is the one reading the other's record,
+  # and neither takes it.
+  for shared_storage_round in 1 2; do
+    shared_storage_dead_pid="$(fresh_dead_pid)" ||
+      fail "could not obtain a reaped PID that reads as dead for cloned-machine round ${shared_storage_round}"
+    write_machine_lock_owner \
+      "$shared_storage_dead_pid" "$(uname -n)" "override:machine-a" \
+      "$(($(date +%s) - 7200))"
+    shared_storage_exit="$(
+      NODE_ENV=test \
+        AGENT_QUALITY_GATE_LOCK_TEST_FORCE_NOT_LOCAL=1 \
+        AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE='' \
+        run_locked_gate
+    )"
+    [[ "$shared_storage_exit" == "2" ]] ||
+      fail "a cloned machine must wait out the other's dead-looking record (round ${shared_storage_round}), got $shared_storage_exit"
+    assert_contains "looks reclaimable (holder pid ${shared_storage_dead_pid} is gone), and this run refuses to reclaim it."
+    assert_contains "Self-healing is disabled on such a root"
+    assert_contains "Give each machine its own AGENT_QUALITY_GATE_LOCK_DIR"
+    assert_contains "timed out after"
+    assert_not_contains "reclaiming it."
+    [[ -d "$gate_lock_root/run.lock" ]] ||
+      fail "a record on a shared lock root must be left where it is (round ${shared_storage_round})"
+    rm -rf "$gate_lock_root/run.lock"
+  done
+
+  # The refusal covers the record with no holder at all, for the same reason:
+  # "no complete record here" is as local a reading as a PID lookup. A network
+  # client caches directory attributes, so a freshly written owner file can
+  # stay invisible to another client for longer than the grace that would
+  # otherwise authorise taking the lock away.
+  mkdir -p "$gate_lock_root/run.lock"
+  rm -f "$gate_lock_root/run.lock/owner"
+  ownerless_shared_exit="$(
+    NODE_ENV=test \
+      AGENT_QUALITY_GATE_LOCK_TEST_FORCE_NOT_LOCAL=1 \
+      AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE='' \
+      AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=0 \
+      run_locked_gate
+  )"
+  [[ "$ownerless_shared_exit" == "2" ]] ||
+    fail "an ownerless lock on a shared root must be waited out, got $ownerless_shared_exit"
+  assert_contains "looks reclaimable (its holder never recorded a complete identity), and this run refuses to reclaim it."
+  assert_not_contains "reclaiming it."
+  [[ -d "$gate_lock_root/run.lock" ]] ||
+    fail "an ownerless lock on a shared root must be left where it is"
+  rm -rf "$gate_lock_root/run.lock"
+
+  # The limit of the refusal, and the reason it turns on the storage rather
+  # than on who named the directory. This suite's root IS an
+  # AGENT_QUALITY_GATE_LOCK_DIR, and it is on local storage. Refusing there
+  # too would take self-healing away from every operator-supplied root and
+  # bring back the wedge class issue #2055 removed, so the same record — same
+  # cloned identity, same hostname, same dead PID — is reclaimed once the
+  # storage is the machine's own.
+  local_override_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the local-override case"
+  write_machine_lock_owner \
+    "$local_override_dead_pid" "$(uname -n)" "override:machine-a" \
+    "$(($(date +%s) - 7200))"
+  local_override_exit="$(AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE='' run_locked_gate)"
+  [[ "$local_override_exit" == "0" ]] ||
+    fail "an operator lock dir on local storage must keep self-healing, got $local_override_exit"
+  assert_contains "is stale (holder pid ${local_override_dead_pid} is gone); reclaiming it."
+  assert_not_contains "refuses to reclaim it"
+  [[ ! -d "$gate_lock_root/run.lock" ]] ||
+    fail "the run that reclaimed on a local operator root must release its own"
+
   unset AGENT_QUALITY_GATE_LOCK_MACHINE_ID
 )
 rm -rf "$gate_lock_repo" "$gate_lock_root"
