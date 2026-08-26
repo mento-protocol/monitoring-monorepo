@@ -256,6 +256,7 @@ jobs:
               # this entry the whole scripts job skips and the pin never runs.
               - .coderabbit.yaml
               - docs/evals/documentation-navigation-*.json
+              - docs/evals/review-skill*
               - .lighthouserc.cjs
               - "**/vitest.hermetic-setup.ts"
               - "**/vitest.config.ts"
@@ -1087,6 +1088,12 @@ jobs:
           pnpm docs:navigation-eval -- --validate
           docs/evals/documentation-navigation-baseline.json
           --fixtures docs/evals/documentation-navigation-baseline-fixtures.json
+      - name: Review skill evaluation tests
+        run: pnpm review:eval:test
+      - name: Review skill fixture contract
+        run: pnpm review:eval -- --check-fixtures --offline
+      - name: Review skill committed ledger
+        run: pnpm review:eval -- --check-ledger --require-base
       - name: Agent context budget tests
         run: pnpm agent:context-budget:test
       - name: Enforce agent context budgets

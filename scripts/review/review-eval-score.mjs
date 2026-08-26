@@ -102,15 +102,21 @@ export function loadPrompt(name, { dir = promptDir } = {}) {
   return promptCache.get(key);
 }
 
+// The unfilled-placeholder guard scans the TEMPLATE, never the rendered output.
+// Every value substituted here is content the harness declares untrusted — a
+// contestant transcript, an extracted claim, a truth title — so a `{{TOKEN}}`
+// inside a value must pass through as literal text. Scanning the rendered text
+// turned any such token into a one-token denial of scoring for a whole matrix.
 export function renderPrompt(template, values) {
-  const rendered = template.replace(PLACEHOLDER_PATTERN, (match, key) =>
+  const missing = template
+    .match(PLACEHOLDER_PATTERN)
+    ?.find((token) => !Object.hasOwn(values, token.slice(2, -2)));
+  if (missing) {
+    throw new Error(`prompt placeholder ${missing} has no value`);
+  }
+  return template.replace(PLACEHOLDER_PATTERN, (match, key) =>
     Object.hasOwn(values, key) ? String(values[key]) : match,
   );
-  const missing = rendered.match(PLACEHOLDER_PATTERN);
-  if (missing) {
-    throw new Error(`prompt placeholder ${missing[0]} has no value`);
-  }
-  return rendered;
 }
 
 // Digest over the whole scoring pipeline and its prompts. It is the

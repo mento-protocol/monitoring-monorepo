@@ -227,7 +227,7 @@ includes an unknown amount of model drift.
 
 The run ends by printing the branch, commit and `gh pr create` commands for the
 ledger PR. Pass `--pr` to execute them instead. There is no auto-merge; a human
-reads the twenty-line report and approves.
+reads the forty-line report and approves.
 
 A run that fails publishes the same way. Its `status: failed` row is already in
 the checkout's ledger, and a run that leaves it there uncommitted wedges the
@@ -370,7 +370,7 @@ older one is refused; pass `--contract` with the archived contract to read it.
 | judge model       | model id and CLI version in the row, plus 40 calibration pairs every run                             |
 | calibration set   | its `sha256` is bound into `comparability_key`                                                       |
 | reviewed model    | isolated by the `control` condition; model id and CLI version recorded                               |
-| skill text        | `skill_digest` over `SKILL.md` and `references/**`, symlinks refused — this is the treatment         |
+| skill text        | `skill_digest` over every file in the skill directory, symlinks refused — this is the treatment      |
 | finder command    | `argv` pinned in the contract; `finder_argv_digest` records what a cell spawned                      |
 | orchestrator      | `orchestrator_digest` over `run-eval.sh`: in the key and in every cell fingerprint                   |
 | machine and shell | host, CLI versions, `--setting-sources ""`, clean worktree of `origin/main`                          |

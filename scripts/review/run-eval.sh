@@ -137,7 +137,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h | --help)
-      sed -n '2,51p' "$0"
+      sed -n '2,57p' "$0"
       exit 0
       ;;
     *) fail "unknown argument: $1" ;;
@@ -695,21 +695,37 @@ purge_skill() {
   fi
 }
 
+# The first instruction line of a SKILL.md, frontmatter stripped. It is the one
+# byte sequence a correctly staged preamble must carry, so it is what verifies
+# the staging below.
+skill_body_head() {
+  awk 'NR==1 && /^---$/ {front=1; next} front && /^---$/ {front=0; next}
+    !front && NF {print; exit}' "$1"
+}
+
 # The preamble mirrors the benchmark's staging exactly: frontmatter stripped,
 # bundled files listed by their .skill/ path. Both halves are load-bearing —
 # a skill whose references are unreachable measures a different treatment.
+#
+# The call site takes this on stdout inside a command substitution, so a failed
+# `cp -R` would be discarded twice over and the framing printfs alone would
+# still render a plausible, empty preamble. That cell would run, exit 0, cache,
+# and be folded in as the skill's score. Both halves are checked here instead:
+# a non-zero copy and a preamble that does not carry the snapshot's own first
+# instruction line each return non-zero, and the caller fails the cell.
 stage_skill() {
   local fixture="$1"
   purge_skill "$fixture"
-  cp -R "$SKILL_DIR" "$fixture/.skill"
+  cp -R "$SKILL_DIR" "$fixture/.skill" || return 1
   chmod -R u+rwX "$fixture/.skill"
-  {
+  local head preamble
+  head="$(skill_body_head "$SKILL_DIR/SKILL.md")"
+  preamble="$(
     printf 'A skill has been loaded for this task. Treat it as authoritative.\n\n'
     printf '<skill-instructions>\n'
     awk 'NR==1 && /^---$/ {front=1; next} front && /^---$/ {front=0; next} !front' \
       "$fixture/.skill/SKILL.md"
     printf '</skill-instructions>\n'
-    local extra
     extra="$(cd "$fixture/.skill" && find . -type f ! -name SKILL.md |
       sed 's|^\./|  - .skill/|' | LC_ALL=C sort)"
     if [[ -n $extra ]]; then
@@ -719,7 +735,9 @@ stage_skill() {
       printf 'directory; a relative path in the instructions resolves to `.skill/<path>`:\n'
       printf '%s\n' "$extra"
     fi
-  }
+  )"
+  [[ -n $head && $preamble == *"$head"* ]] || return 1
+  printf '%s\n' "$preamble"
 }
 
 # --- fixtures ----------------------------------------------------------------
@@ -994,7 +1012,13 @@ run_cell() {
     --permission-mode bypassPermissions
     --allowed-tools "${CLAUDE_TOOLS[@]}" --max-turns 80)
   if [[ $condition != "control" ]]; then
-    claude_args+=(--append-system-prompt "$(stage_skill "$fixture")")
+    local preamble
+    if ! preamble="$(stage_skill "$fixture")"; then
+      log "  $cell_id FAILED — the skill did not stage into the fixture; not cached"
+      purge_skill "$fixture"
+      return 1
+    fi
+    claude_args+=(--append-system-prompt "$preamble")
   fi
 
   local raw other_file claude_status=0

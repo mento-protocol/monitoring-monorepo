@@ -34,6 +34,7 @@ import {
   buildPlan,
   cellFingerprint,
   cellReuseDecision,
+  claudeArgv,
   comparabilityKey,
   fileDigest,
   leakSignals,
@@ -54,7 +55,11 @@ import {
   resolveBaseline,
   revalidateRow,
 } from "./review-eval-result-shape.mjs";
-import { scorerDigest } from "./review-eval-score.mjs";
+import {
+  BLIND_JUDGE_MAX_TURNS,
+  BLIND_JUDGE_TOOLS,
+  scorerDigest,
+} from "./review-eval-score.mjs";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const scriptPath = fileURLToPath(new URL("./review-eval.mjs", import.meta.url));
@@ -1334,6 +1339,91 @@ test("run-eval.sh keeps the stderr of a bounded command it had to fail", () => {
   ]) {
     assert.match(shell, pattern);
   }
+});
+
+test("run-eval.sh refuses a skill staging that did not land", () => {
+  // The preamble is taken in a command substitution, so a failed `cp -R` and a
+  // preamble missing the instructions both used to render as a plausible,
+  // empty treatment that the cell was scored on.
+  const shell = readFileSync(
+    path.join(repoRoot, "scripts/review/run-eval.sh"),
+    "utf8",
+  );
+  const parts = ["purge_skill", "skill_body_head", "stage_skill"].map(
+    (name) => {
+      const source = shell.match(
+        new RegExp(`\\n${name}\\(\\) \\{\\n[\\s\\S]*?\\n\\}\\n`),
+      )?.[0];
+      assert.ok(source, `${name} was not found in run-eval.sh`);
+      return source;
+    },
+  );
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-stage-"));
+  try {
+    const skill = path.join(dir, "skill");
+    mkdirSync(path.join(skill, "references"), { recursive: true });
+    writeFileSync(
+      path.join(skill, "SKILL.md"),
+      "---\nname: review\n---\n\nReview the change sceptically.\n",
+    );
+    writeFileSync(path.join(skill, "references/checks.md"), "checks\n");
+    const fixture = path.join(dir, "fixture");
+    mkdirSync(fixture, { recursive: true });
+    const harness = (extra) =>
+      [`set -uo pipefail`, `SKILL_DIR="${skill}"`, ...parts, extra].join("\n");
+
+    const ok = spawnSync(
+      "bash",
+      ["-c", harness(`stage_skill "${fixture}" || printf 'STATUS=%s\\n' "$?"`)],
+      { encoding: "utf8" },
+    );
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.doesNotMatch(ok.stdout, /STATUS=/);
+    assert.match(ok.stdout, /Review the change sceptically\./);
+    assert.match(ok.stdout, /- \.skill\/references\/checks\.md/);
+    // The frontmatter never reaches the model.
+    assert.doesNotMatch(ok.stdout, /name: review/);
+
+    // A copy that fails outright fails the staging.
+    const noSource = spawnSync(
+      "bash",
+      [
+        "-c",
+        harness(
+          `SKILL_DIR="${dir}/absent"\nstage_skill "${fixture}" >/dev/null 2>&1 || printf 'STATUS=%s\\n' "$?"`,
+        ),
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(noSource.status, 0, noSource.stderr);
+    assert.match(noSource.stdout, /STATUS=1/);
+
+    // A copy that reports success but leaves no instructions behind fails too:
+    // the preamble would otherwise be framing printfs around nothing.
+    const partial = spawnSync(
+      "bash",
+      [
+        "-c",
+        harness(
+          [
+            `cp() { mkdir -p "$3" && : >"$3/SKILL.md"; }`,
+            `stage_skill "${fixture}" >/dev/null 2>&1 || printf 'STATUS=%s\\n' "$?"`,
+          ].join("\n"),
+        ),
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(partial.status, 0, partial.stderr);
+    assert.match(partial.stdout, /STATUS=1/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  // The caller fails the cell rather than scoring the empty treatment.
+  assert.match(
+    shell,
+    /if ! preamble="\$\(stage_skill "\$fixture"\)"; then\n\s*log "\s*\$cell_id FAILED — the skill did not stage into the fixture; not cached"/,
+  );
 });
 
 test("run-eval.sh inserts finder output into the handoff prompt verbatim", () => {
@@ -3036,6 +3126,34 @@ test("scoring resets each fixture, uses the contract judge, and totals its cost"
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("a blind judge keeps its turn bound and emits no --allowed-tools", () => {
+  const blind = claudeArgv({
+    prompt: "judge this",
+    model: "claude-opus-5",
+    effort: "high",
+    allowedTools: BLIND_JUDGE_TOOLS,
+    maxTurns: BLIND_JUDGE_MAX_TURNS,
+  });
+  // An empty `--allowed-tools` makes the CLI eat the next flag and its value as
+  // tool names, which silently unbounds the judge. The flag must be absent.
+  assert.equal(blind.includes("--allowed-tools"), false);
+  const turnsAt = blind.indexOf("--max-turns");
+  assert.notEqual(turnsAt, -1);
+  assert.equal(blind[turnsAt + 1], "1");
+
+  const tooled = claudeArgv({
+    prompt: "review this",
+    model: "claude-opus-5",
+    effort: "high",
+    allowedTools: ["Read", "Grep"],
+    maxTurns: 60,
+  });
+  const toolsAt = tooled.indexOf("--allowed-tools");
+  assert.notEqual(toolsAt, -1);
+  assert.deepEqual(tooled.slice(toolsAt + 1, toolsAt + 3), ["Read", "Grep"]);
+  assert.deepEqual(tooled.slice(toolsAt + 3), ["--max-turns", "60"]);
 });
 
 test("a scoring subprocess inherits no GitHub credential", () => {

@@ -666,16 +666,14 @@ export function scrubbedEnv({
  * so every one of those calls would queue behind the last one and the
  * configured concurrency would buy nothing.
  */
-export function claudeExec({
+export function claudeArgv({
   prompt,
   model,
   effort,
-  cwd = process.cwd(),
   allowedTools = CLAUDE_TOOLS,
   maxTurns = CLAUDE_MAX_TURNS,
-  env = scrubbedEnv(),
 }) {
-  const args = [
+  return [
     "-p",
     prompt,
     "--model",
@@ -688,11 +686,26 @@ export function claudeExec({
     "json",
     "--permission-mode",
     "bypassPermissions",
-    "--allowed-tools",
-    ...allowedTools,
+    // `--allowed-tools` is a required variadic option. Emitting it with an
+    // empty list makes the CLI swallow the following `--max-turns 1` as two
+    // tool names, so every blind judge and calibration replay would run
+    // unbounded. Omit the flag when there are no tools to allow.
+    ...(allowedTools.length > 0 ? ["--allowed-tools", ...allowedTools] : []),
     "--max-turns",
     String(maxTurns),
   ];
+}
+
+export function claudeExec({
+  prompt,
+  model,
+  effort,
+  cwd = process.cwd(),
+  allowedTools = CLAUDE_TOOLS,
+  maxTurns = CLAUDE_MAX_TURNS,
+  env = scrubbedEnv(),
+}) {
+  const args = claudeArgv({ prompt, model, effort, allowedTools, maxTurns });
   return new Promise((resolve, reject) => {
     const child = spawn("claude", args, {
       cwd,

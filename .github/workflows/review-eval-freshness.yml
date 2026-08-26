@@ -121,9 +121,10 @@ jobs:
           node-version-file: .node-version
       - name: Synchronize the review-skill evaluation staleness issue
         env:
+          # `--schedule-issue` takes the repository from GITHUB_REPOSITORY,
+          # which Actions sets, and arms its one mutating step from the absence
+          # of `--dry-run`. It reads no other variable, so none is set here.
           GH_TOKEN: ${{ github.token }}
-          REVIEW_EVAL_REPO: ${{ github.repository }}
-          REVIEW_EVAL_DRY_RUN: "false"
         # Age comes from each row's `executed_at`, never from a file mtime,
         # which git does not preserve. The command creates or retains exactly
         # one issue, then exits non-zero when the ledger has crossed a red

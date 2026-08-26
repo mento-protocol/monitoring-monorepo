@@ -170,6 +170,17 @@ test("renderPrompt refuses a template with an unfilled placeholder", () => {
   );
 });
 
+test("renderPrompt passes a {{TOKEN}} inside a value through as text", () => {
+  // Values are untrusted content: a transcript that quotes a prompt template
+  // must render, not abort a paid scoring pass.
+  assert.equal(
+    renderPrompt("p {{REVIEW}} s", {
+      REVIEW: "writes {{OTHER_REVIEW}} into the prompt",
+    }),
+    "p writes {{OTHER_REVIEW}} into the prompt s",
+  );
+});
+
 test("extractClaims parses the claim array and caps its size", async () => {
   const exec = stubExec([JSON.stringify(["claim one", "claim two", "  "])]);
   const claims = await extractClaims({ transcript: "a review", exec });
