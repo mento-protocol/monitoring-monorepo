@@ -253,7 +253,8 @@ assert.equal(
 assert.deepEqual(rowsOf({}), []);
 assert.deepEqual(rowsOf({ data: [1] }), [1]);
 
-// A head that has not advanced past start must not divide by zero.
+// A head that has not advanced past start must not divide by zero. A zero
+// arithmetic gap does not establish caught-up without Envio's timestamp.
 const flat = {
   start_block: 1000,
   block_height: 1000,
@@ -261,27 +262,48 @@ const flat = {
 };
 assert.equal(progressParts(flat).denominator, 1);
 assert.equal(percentOf(flat), 0);
-assert.equal(isCaughtUp(flat), true);
+assert.equal(isCaughtUp(flat), false);
 
-// Processed beyond head is clamped, so catch-up cannot exceed 100%.
+// Processed beyond head is clamped, so progress cannot exceed 100%. It remains
+// syncing until Envio reports the caught-up timestamp.
 const ahead = {
   start_block: 100,
   block_height: 200,
   latest_processed_block: 999,
 };
 assert.equal(percentOf(ahead), 100);
-assert.equal(isCaughtUp(ahead), true);
+assert.equal(isCaughtUp(ahead), false);
 
-// Missing fields read as zero rather than NaN.
+// Missing arithmetic fields read as zero rather than NaN. A missing timestamp
+// is not caught up.
 assert.equal(percentOf({}), 0);
-assert.equal(isCaughtUp({}), true);
+assert.equal(isCaughtUp({}), false);
+
+const timestampedFlat = {
+  ...flat,
+  timestamp_caught_up_to_head_or_endblock: "2026-08-19T04:05:06.789Z",
+};
+assert.equal(isCaughtUp(timestampedFlat), true);
+
+// The caught-up timestamp remains authoritative after the live head advances.
+// Completion must not require a simultaneous zero arithmetic gap.
+const timestampedBehind = {
+  chain_id: 1,
+  start_block: 100,
+  block_height: 250,
+  latest_processed_block: 200,
+  num_events_processed: 7,
+  timestamp_caught_up_to_head_or_endblock: "2026-08-19T04:05:06.789Z",
+};
+assert.equal(isCaughtUp(timestampedBehind), true);
 
 // An empty chain list is never "caught up" — there is nothing to be caught up.
 assert.equal(allCaughtUp([]), false);
-assert.equal(allCaughtUp([flat]), true);
+assert.equal(allCaughtUp([timestampedFlat]), true);
+assert.equal(allCaughtUp([timestampedBehind]), true);
 assert.equal(
   allCaughtUp([
-    flat,
+    timestampedFlat,
     { start_block: 0, block_height: 10, latest_processed_block: 5 },
   ]),
   false,
@@ -332,6 +354,33 @@ assert.equal(table.lines.at(-1), "Status: syncing");
 // Thousands separators and a missing sync timestamp rendered as a dash.
 assert.match(table.lines[2], /4,567,890/);
 assert.match(table.lines[2], /-\s*$/);
+
+const zeroGapWaiting = {
+  data: [
+    {
+      chain_id: 1,
+      start_block: 10,
+      block_height: 20,
+      latest_processed_block: 20,
+      num_events_processed: 7,
+      timestamp_caught_up_to_head_or_endblock: null,
+    },
+  ],
+};
+const zeroGapTable = renderTable(zeroGapWaiting);
+assert.equal(zeroGapTable.status, STILL_SYNCING);
+assert.equal(zeroGapTable.lines.at(-1), "Status: syncing");
+const zeroGapCompact = renderCompact(zeroGapWaiting);
+assert.equal(zeroGapCompact.status, STILL_SYNCING);
+assert.match(zeroGapCompact.line, /^status=syncing /);
+
+const timestampedBehindStatus = { data: [timestampedBehind] };
+const timestampedBehindTable = renderTable(timestampedBehindStatus);
+assert.equal(timestampedBehindTable.status, 0);
+assert.equal(timestampedBehindTable.lines.at(-1), "Status: caught up");
+const timestampedBehindCompact = renderCompact(timestampedBehindStatus);
+assert.equal(timestampedBehindCompact.status, 0);
+assert.match(timestampedBehindCompact.line, /^status=caught_up /);
 
 const caughtUp = {
   data: [
@@ -468,6 +517,15 @@ assert.ok(
   "the timeout block must still name the deployment-slot cause first",
 );
 assert.ok(
+  timedOutLines.some(
+    (line) =>
+      line.includes("deployment cleanup inventory") &&
+      line.includes("exact-ID approval") &&
+      line.includes("before deleting anything"),
+  ),
+  "the timeout block must route deletion through the cleanup workflow",
+);
+assert.ok(
   timedOutLines.some((l) => l.includes("envio.dev/app/mento-protocol")),
 );
 
@@ -475,6 +533,15 @@ const warning = slowRegistrationWarning("abc1234", 210, 600);
 assert.equal(warning[0], "", "the warning opens with a blank line");
 assert.equal(warning.at(-1), "", "and closes with one");
 assert.match(warning[1], /still unregistered after 210s/);
+assert.ok(
+  warning.some(
+    (line) =>
+      line.includes("deployment cleanup inventory") &&
+      line.includes("exact-ID approval") &&
+      line.includes("before deleting anything"),
+  ),
+  "the capacity warning must route deletion through the cleanup workflow",
+);
 assert.match(warning.at(-2), /Will keep polling until 600s then give up/);
 
 // --- end to end, with the CLI stubbed --------------------------------------
@@ -562,7 +629,8 @@ const oneShotDone = runCommand(["abc1234"], { status: caughtUpStatus });
 assert.equal(oneShotDone.status, 0);
 assert.match(oneShotDone.stdout, /Status: caught up/);
 
-// Watch keeps the sentinel's meaning: it returns only once caught up.
+// Watch keeps the sentinel's meaning: it returns only after every chain has
+// Envio's authoritative caught-up timestamp.
 const watched = runCommand(["abc1234", "--watch"], { status: caughtUpStatus });
 assert.equal(watched.status, 0);
 assert.match(watched.stdout, /Status: caught up/);

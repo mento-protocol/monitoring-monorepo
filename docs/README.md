@@ -197,7 +197,8 @@ Authority: canonical
 - [`docs/adr/0069-gate-routing-table-as-data.md`](adr/0069-gate-routing-table-as-data.md) — The quality gate's routing table is data, compiled by the repo's own bash-case translator
 - [`docs/adr/0070-sentry-requeue-settlement-sentinel.md`](adr/0070-sentry-requeue-settlement-sentinel.md) — A withheld terminal label serializes the Sentry archive settlement against the triage re-queue
 - [`docs/adr/0071-susds-launch-aligned-daily-sampler.md`](adr/0071-susds-launch-aligned-daily-sampler.md) — sUSDS actuals use a launch-aligned bounded daily sampler
-- [`docs/adr/0072-sanctioned-merge-wrapper.md`](adr/0072-sanctioned-merge-wrapper.md) — One sanctioned merge wrapper gates merges locally, and the binding control stays human
+- [`docs/adr/0072-md-only-docs-checks-job.md`](adr/0072-md-only-docs-checks-job.md) — The Markdown globs route to a small docs-checks CI job instead of the scripts job
+- [`docs/adr/0073-sanctioned-merge-wrapper.md`](adr/0073-sanctioned-merge-wrapper.md) — One sanctioned merge wrapper gates merges locally, and the binding control stays human
 
 Authority: non-canonical
 
@@ -241,3 +242,4 @@ Authority: non-canonical
 - [`docs/notes/terraform-cicd-hardening-decisions-2026-05.md`](notes/terraform-cicd-hardening-decisions-2026-05.md) (archived)
 - [`docs/notes/ui-dashboard-performance-plan.md`](notes/ui-dashboard-performance-plan.md) (archived)
 - [`docs/PLAN-ai-review-process.md`](PLAN-ai-review-process.md) (archived)
+- [`docs/PLAN-trove-history-page.md`](PLAN-trove-history-page.md)

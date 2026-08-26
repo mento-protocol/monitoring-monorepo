@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0072 — The sanctioned merge wrapper, and what it does not prove
+# ADR 0073 — The sanctioned merge wrapper, and what it does not prove
 
 **Status:** Accepted (Aug 2026), in force.
 **Scope:** ci/process

@@ -37,18 +37,25 @@ pnpm --version
 echo "==> Prewarming Trunk CLI and linters"
 # Trunk powers the git pre-commit/pre-push hooks (.trunk/hooks) and `trunk fmt`.
 # The launcher self-downloads the pinned CLI from trunk.io, which is NOT in the
-# default Trusted allowlist for Claude Code on the web. Everything else Trunk
-# needs (node/python runtimes, prettier/markdownlint via npm, checkov/codespell/
-# yamllint via PyPI, trufflehog/osv-scanner/actionlint via GitHub releases, tool
-# binaries on *.amazonaws.com) is already covered by the Trusted defaults. The
-# current operating allowlist beyond the Trusted defaults is trunk.io,
-# *.trunk.io, and (optional, for the Playwright Chromium fallback download
-# below when the image has no /opt/pw-browsers preinstall) cdn.playwright.dev.
-# In the environment's network settings choose "Custom", keep "include
-# defaults", and add:
+# default Trusted allowlist for Claude Code on the web. The current operating
+# allowlist beyond the Trusted defaults is trunk.io, *.trunk.io, and (optional,
+# for the Playwright Chromium fallback download below when the image has no
+# /opt/pw-browsers preinstall) cdn.playwright.dev. In the environment's network
+# settings choose "Custom", keep "include defaults", and add:
 #     trunk.io
 #     *.trunk.io
 #     cdn.playwright.dev   # optional; see the Playwright step below
+# Measured in a live cloud container on 2026-08-26 with that allowlist in force
+# (issue #2057): trunk.io, nodejs.org and registry.npmjs.org all answer 200, so
+# Trunk's hermetic runtimes and its npm-sourced linters download normally.
+# github.com does not — the platform's credential proxy intercepts it and gates
+# it per session, answering 403 "GitHub access to this repository is not enabled
+# for this session". No allowlist entry lifts that. It reaches Trunk's plugin
+# archive (github.com/trunk-io/plugins) and its GitHub-release linters, so a
+# COLD Trunk cache fails `trunk check` outright; the image ships a prewarmed
+# cache holding both, which is what masks the block on a warm run. The prewarm
+# below fills whichever cache tools/trunk resolves — $TRUNK_CACHE, else
+# $XDG_CACHE_HOME/trunk, else ~/.cache/trunk.
 # Non-fatal: if trunk.io is still blocked the hooks degrade gracefully (see
 # .trunk/hooks) and CI still enforces Trunk on the PR, so warn and continue
 # rather than aborting the whole bootstrap.
@@ -74,18 +81,14 @@ echo "==> Checking Node major version against .node-version"
 #   - corepack only manages package-manager shims (pnpm/yarn/npm), never the
 #     Node runtime itself, so it has no lever here.
 #   - `pnpm env use --global <major>` downloads a full Node build from
-#     nodejs.org. That host is not part of this bootstrap's documented
-#     network reality (see the Trunk section above and
-#     docs/notes/worktree-and-web-setup.md for the full allowlist), so the
-#     call would predictably fail with a network block in the standard
-#     hosted-session profile.
-#   - Even where the download succeeded, it would only repoint the `node`
-#     resolved inside pnpm's own managed area for THIS subprocess. It would
-#     not retroactively change the Node binary already on PATH for the
-#     agent's later, separate Bash tool invocations in the same session —
-#     those are independent shells, not children of this script — so a
-#     switch performed here would not reliably reach the place the mismatch
-#     actually matters.
+#     nodejs.org. That host is reachable (see the Trunk section above), so the
+#     download itself would work — the reason below is what rules it out.
+#   - It installs that Node under PNPM_HOME rather than changing the running
+#     interpreter, and a later shell picks it up only when its PATH carries the
+#     pnpm-managed bin directory. Nothing here puts it there, so the agent's
+#     later, separate Bash tool invocations — independent shells, not children
+#     of this script — keep the image's Node, and a switch performed here would
+#     not reach the place the mismatch actually matters.
 # Given both levers are either absent or illusory for the surface that
 # matters, attempting an automatic switch would be speculative rather than
 # robust. Warn once with a precise, actionable message instead, and never

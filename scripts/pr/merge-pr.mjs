@@ -30,7 +30,7 @@
  * type, and an append-only consent record naming who approved which head. The
  * approval rule itself remains the binding control, and the only unforgeable
  * boundary would live on GitHub's side of the wire;
- * `docs/adr/0072-sanctioned-merge-wrapper.md` records that decision and its
+ * `docs/adr/0073-sanctioned-merge-wrapper.md` records that decision and its
  * residual risk.
  *
  * The pure decision logic lives in `scripts/pr/merge-pr-core.mjs` and the side

@@ -378,7 +378,7 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    process running as the operator can synthesize any local signal — so the
    approval rule above stays the binding control, and the durable boundary
    belongs on GitHub's side of the wire.
-   [ADR 0072](../adr/0072-sanctioned-merge-wrapper.md) records that decision,
+   [ADR 0073](../adr/0073-sanctioned-merge-wrapper.md) records that decision,
    its alternatives, and the residual risk. The wrapper makes refusing
    the default and leaves a consent record naming who approved which head. The
    Dependabot auto-merge workflow runs in CI, not an agent session, and is
