@@ -81,7 +81,7 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   from `$script_source_dir`; move it with its signature, self-test route, and
   missing-helper fixture. Coordinator files resolve there; fixtures/tests hash
   from `$repo_root`. Move each with its route, signature, and fixture (ADRs 0064
-  and 0072). `docs/docs-navigation-eval-helpers.mjs` and
+  and 0073). `docs/docs-navigation-eval-helpers.mjs` and
   `gate/lockfile-scope.mjs` also resolve there; update all literals.
 - **Gate mapping pins.** The signature and three Turbo inputs pin
   `gate/routing-table/**`, `gate/mapping*`, and

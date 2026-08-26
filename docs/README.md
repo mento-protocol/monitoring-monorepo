@@ -197,7 +197,7 @@ Authority: canonical
 - [`docs/adr/0069-gate-routing-table-as-data.md`](adr/0069-gate-routing-table-as-data.md) — The quality gate's routing table is data, compiled by the repo's own bash-case translator
 - [`docs/adr/0070-sentry-requeue-settlement-sentinel.md`](adr/0070-sentry-requeue-settlement-sentinel.md) — A withheld terminal label serializes the Sentry archive settlement against the triage re-queue
 - [`docs/adr/0071-susds-launch-aligned-daily-sampler.md`](adr/0071-susds-launch-aligned-daily-sampler.md) — sUSDS actuals use a launch-aligned bounded daily sampler
-- [`docs/adr/0072-fair-quality-gate-coordinator.md`](adr/0072-fair-quality-gate-coordinator.md) — Fair local quality-gate coordination across worktrees
+- [`docs/adr/0073-fair-quality-gate-coordinator.md`](adr/0073-fair-quality-gate-coordinator.md) — Fair local quality-gate coordination across worktrees
 
 Authority: non-canonical
 
