@@ -3,7 +3,7 @@ title: Agent Quality Gate — Mechanics
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-23
+last_verified: 2026-08-26
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -201,7 +201,7 @@ required full-repo Trunk check on every
 PR. Where the environment blocks Trunk's downloads — a Claude cloud container
 proxies egress and refuses any host outside its allowlist, and its credential
 proxy gates `github.com` per session on top of that — the gate reports the
-arm as `skipped` with a warning naming the allowlist fix instead of failing the
+arm as `skipped` with a warning naming a remedy instead of failing the
 run, matching the posture `.trunk/hooks` already takes. Trunk downloads at two
 stages and the gate classifies both. If the launcher cannot fetch the pinned CLI
 from `trunk.io`, a probe run after the command fails
@@ -221,7 +221,11 @@ the transcript on a cold cache. That 403 is pinned to the plugin source
 `.trunk/trunk.yaml` names, because a 403 from anywhere else is more likely
 revoked credentials than a session gate. A 404 keeps failing the gate too: a
 removed or renamed artifact is a broken pin the operator has to fix, not an
-allowlist to widen. The warning replays those reasons so it names the host to allowlist.
+allowlist to widen. Each shape gets its own warning, and both replay Trunk's
+recorded reasons so they name the host. The plugin warning says Trunk never
+reached a linter, and that a credential proxy gating the host per session is not
+something an allowed-domains entry can lift — there the remedy is a prewarmed
+`~/.cache/trunk` or CI.
 Everything else fails the gate, including a partly-explained failure set and a
 download step that failed for a local reason. Only a provisioning failure
 degrades: a provisioned Trunk that finds real problems still fails the gate, and

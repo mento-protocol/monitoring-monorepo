@@ -3,7 +3,7 @@ title: New Worktree / Clone Setup and Claude Code on the Web Setup
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-29
+last_verified: 2026-08-26
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -109,11 +109,12 @@ If the container's Node major is older than the repo's `.node-version` (for
 example, an image shipping Node v22 against a `.node-version` of `24`), the
 bootstrap does not attempt to switch the running interpreter — corepack only
 manages package-manager shims, not Node itself, and `pnpm env use --global`
-would only repoint the `node` inside pnpm's managed area for that subprocess,
-never reaching the agent's later, separate shell invocations. The download
-itself would work — `nodejs.org` is reachable, per the measurements above. The
-script instead prints one clear WARN naming the mismatch and how to fix it
-env-side (rebuild/select a Node-24 container image); the
+would install that Node under `PNPM_HOME` rather than change the running
+interpreter. A later shell picks it up only when its `PATH` carries the
+pnpm-managed bin directory, and nothing here puts it there, so the agent's
+separate Bash tool shells keep the image's Node. The download itself would work
+— `nodejs.org` is reachable, per the measurements above. The script instead
+prints one clear WARN naming the mismatch and how to fix it env-side (rebuild/select a Node-24 container image); the
 mismatch itself only produces non-fatal pnpm engine-range warnings, since no
 root `.npmrc` sets `engine-strict`.
 

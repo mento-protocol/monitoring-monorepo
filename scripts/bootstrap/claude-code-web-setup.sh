@@ -81,12 +81,12 @@ echo "==> Checking Node major version against .node-version"
 #   - `pnpm env use --global <major>` downloads a full Node build from
 #     nodejs.org. That host is reachable (see the Trunk section above), so the
 #     download itself would work — the reason below is what rules it out.
-#   - The download would only repoint the `node` resolved inside pnpm's own
-#     managed area for THIS subprocess. It would not retroactively change the
-#     Node binary already on PATH for the agent's later, separate Bash tool
-#     invocations in the same session — those are independent shells, not
-#     children of this script — so a switch performed here would not reliably
-#     reach the place the mismatch actually matters.
+#   - It installs that Node under PNPM_HOME rather than changing the running
+#     interpreter, and a later shell picks it up only when its PATH carries the
+#     pnpm-managed bin directory. Nothing here puts it there, so the agent's
+#     later, separate Bash tool invocations — independent shells, not children
+#     of this script — keep the image's Node, and a switch performed here would
+#     not reach the place the mismatch actually matters.
 # Given both levers are either absent or illusory for the surface that
 # matters, attempting an automatic switch would be speculative rather than
 # robust. Warn once with a precise, actionable message instead, and never

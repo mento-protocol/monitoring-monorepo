@@ -5083,7 +5083,11 @@ STUB
   "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
 )
 rm -rf "$trunk_blocked_plugin_repo"
-assert_contains "warning: skipping ./tools/trunk check fixture.txt — Trunk could not provision its linters."
+# The plugin shape gets its own warning. Trunk never reached a linter here, so
+# the linter warning would describe a failure that did not happen.
+assert_contains "warning: skipping ./tools/trunk check fixture.txt — Trunk could not fetch its plugin sources."
+assert_contains "aborted before running a single linter"
+assert_not_contains "Trunk could not provision its linters."
 assert_contains "Unable to download plugin https://github.com/trunk-io/plugins/archive/v1.7.5.zip"
 assert_contains "All mapped commands passed."
 assert_not_contains "mapped command(s) failed."
@@ -5112,9 +5116,10 @@ if [[ "${1:-}" == "--version" ]]; then
   echo "1.25.0"
   exit 0
 fi
-printf '\033[0;32m\342\234\224\033[0m Downloading Trunk 1.25.0...\n'
+printf '\342\241\277 Downloading Trunk 1.25.0...\n'
+printf '\033[1F\033[0K\342\242\277 Downloading Trunk 1.25.0...\n'
 printf '\033[1F\033[0K\033[0;32m\342\234\224\033[0m Downloading Trunk 1.25.0... done\n'
-printf '\033[0;32m\342\234\224\033[0m Unpacking Trunk...\n'
+printf '\342\241\277 Unpacking Trunk...\n'
 printf '\033[1F\033[0K\033[0;32m\342\234\224\033[0m Unpacking Trunk... done\n'
 printf '\n'
 printf "\033[0G\033[2K\033[1m\033[31m\342\234\226 Unable to download plugin https://github.com/trunk-io/plugins/archive/v1.7.5.zip: HTTP 403 'https://github.com/trunk-io/plugins/archive/v1.7.5.zip'\033[0m\n"
@@ -5126,10 +5131,13 @@ STUB
   printf 'changed\n' >> fixture.txt
   "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
 )
-assert_contains "warning: skipping ./tools/trunk check fixture.txt — Trunk could not provision its linters."
+assert_contains "warning: skipping ./tools/trunk check fixture.txt — Trunk could not fetch its plugin sources."
 # The warning has to replay the cause, or it names neither the host to allowlist
 # nor the status that made this an environment block rather than a broken pin.
 assert_contains "Unable to download plugin https://github.com/trunk-io/plugins/archive/v1.7.5.zip: HTTP 403"
+# And it has to name a remedy that can work. Widening the allowed domains cannot
+# lift a credential proxy that gates the host per session.
+assert_contains "no allowed-domains entry lifts that"
 assert_contains "- skipped "
 assert_contains "All mapped commands passed."
 assert_not_contains "mapped command(s) failed."
@@ -5226,41 +5234,46 @@ STUB
   assert_not_contains "Trunk could not provision its linters."
 done
 
-# A launcher step that FAILED is not chrome, and it must not be swallowed as
-# such. Here the launcher never produced a CLI, so nothing downstream can be
-# classified: the run has to fail rather than read as a plugin block.
-trunk_launcher_failed_line_repo="$(mktemp -d)"
-(
-  cd "$trunk_launcher_failed_line_repo"
-  git init -q
-  git config user.email test@example.invalid
-  git config user.name "Quality Gate Test"
-  printf 'fixture\n' > fixture.txt
-  mkdir -p tools
-  cat > tools/trunk <<'STUB'
+# Only the launcher's OWN marks make a line chrome. A failed launcher step keeps
+# disqualifying the transcript, and so does a line that merely carries the same
+# progress text behind an unrecognized mark — otherwise any unaccounted line
+# could dress itself as chrome and let a following plugin 403 skip the arm.
+for trunk_not_chrome_line in \
+  '\033[0;31m\342\234\230\033[0m Downloading Trunk 1.25.0... FAILED (see /tmp/launcher-download.log)' \
+  'ERROR Downloading Trunk 1.25.0... done'; do
+  trunk_not_chrome_repo="$(mktemp -d)"
+  (
+    cd "$trunk_not_chrome_repo"
+    git init -q
+    git config user.email test@example.invalid
+    git config user.name "Quality Gate Test"
+    printf 'fixture\n' > fixture.txt
+    mkdir -p tools
+    cat > tools/trunk <<STUB
 #!/usr/bin/env bash
-if [[ "${1:-}" == "--version" ]]; then
+if [[ "\${1:-}" == "--version" ]]; then
   echo "1.25.0"
   exit 0
 fi
-printf '\033[0;31m\342\234\230\033[0m Downloading Trunk 1.25.0... FAILED (see /tmp/launcher-download.log)\n'
-printf "\033[1m\033[31m\342\234\226 Unable to download plugin https://github.com/trunk-io/plugins/archive/v1.7.5.zip: HTTP 403 'https://github.com/trunk-io/plugins/archive/v1.7.5.zip'\033[0m\n"
+printf '${trunk_not_chrome_line}\\n'
+printf "\\033[1m\\033[31m\\342\\234\\226 Unable to download plugin https://github.com/trunk-io/plugins/archive/v1.7.5.zip: HTTP 403 'https://github.com/trunk-io/plugins/archive/v1.7.5.zip'\\033[0m\\n"
 exit 2
 STUB
-  chmod +x tools/trunk
-  git add .
-  git commit -qm init
-  printf 'changed\n' >> fixture.txt
-  set +e
-  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
-  exit_code=$?
-  set -e
-  [[ "$exit_code" -ne 0 ]]
-)
-rm -rf "$trunk_launcher_failed_line_repo"
-assert_contains "1 mapped command(s) failed."
-assert_contains "Downloading Trunk 1.25.0... FAILED"
-assert_not_contains "- skipped "
+    chmod +x tools/trunk
+    git add .
+    git commit -qm init
+    printf 'changed\n' >> fixture.txt
+    set +e
+    "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+    exit_code=$?
+    set -e
+    [[ "$exit_code" -ne 0 ]]
+  )
+  rm -rf "$trunk_not_chrome_repo"
+  assert_contains "1 mapped command(s) failed."
+  assert_contains "Downloading Trunk 1.25.0..."
+  assert_not_contains "- skipped "
+done
 
 # The invariant, restated against the new path: a Trunk that found a real problem
 # must fail the gate even when a linter download failed in the same run. This is
