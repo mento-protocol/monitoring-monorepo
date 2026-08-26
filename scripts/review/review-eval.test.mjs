@@ -15,6 +15,7 @@ import {
   readFileSync,
   rmSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -798,10 +799,13 @@ test("a symlink in the skill directory refuses the digest", () => {
     assert.throws(() => skillDigest(dir), /refs\.md is a symlink/);
 
     // A directory link escapes the same way, and used to be skipped too.
-    rmSync(path.join(dir, "refs.md"));
+    // unlinkSync, not rmSync: Linux rmSync stats through a directory symlink
+    // and refuses with ERR_FS_EISDIR, while unlink removes the link itself on
+    // every platform.
+    unlinkSync(path.join(dir, "refs.md"));
     symlinkSync(outside, path.join(dir, "references"));
     assert.throws(() => skillDigest(dir), /references is a symlink/);
-    rmSync(path.join(dir, "references"));
+    unlinkSync(path.join(dir, "references"));
     assert.equal(skillDigest(dir), clean);
   } finally {
     rmSync(dir, { recursive: true, force: true });
