@@ -29,10 +29,18 @@ the claim lifecycle are canonical in
 
 ```bash
 mkdir -p .rankings
-gh issue list --state open --limit 1000 \
+gh issue list --repo mento-protocol/monitoring-monorepo \
+  --state open --limit 1000 \
   --json number,title,url,labels,assignees,updatedAt \
   > .rankings/roster-raw.json
 ```
+
+**Every fetch names the repository explicitly.** This skill ranks one backlog,
+and the linked-pull-request query below is pinned to the same repository. A bare
+`gh issue list` instead infers one from the checkout's remote, so running it in a
+fork would join that fork's issue numbers to upstream ownership data — silently
+keeping an issue that already has a closing pull request, or dropping an
+unrelated issue that happens to share a number. Two fetches, one repository.
 
 `--limit` is a ceiling, not a page size: `gh` pages up to it. If that file ever
 comes back holding exactly the limit, the backlog outgrew one fetch and the
