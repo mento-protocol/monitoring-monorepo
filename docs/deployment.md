@@ -95,20 +95,34 @@ obsolete non-prod deployment. Envio registry data does not prove who triggered
 a deployment or which branch created it. Attribute either only from matching
 GitHub evidence.
 
+Before the initial classification, verify that `origin` is the canonical
+`mento-protocol/monitoring-monorepo` remote and refresh both reachability refs:
+
+```bash
+git fetch origin \
+  "refs/heads/main:refs/remotes/origin/main" \
+  "+refs/heads/envio:refs/remotes/origin/envio"
+```
+
+The forced `envio` refspec is required because the deploy workflow
+force-updates that branch. Stop if `origin` is not canonical or either ref
+cannot refresh. Use the freshly fetched refs for classification.
+
 Retain the current production deployment, the active target, each known-good
 rollback candidate, and every deployment with unresolved provenance. Group the
 remaining obsolete non-prod deployments. Ask once for approval to delete one
 exact bounded set, with the id, classification, and deletion reason for each
 deployment.
-Immediately before starting the approved deletion batch, re-fetch the full
-registry and the status of every live deployment. Reclassify every deployment.
-Stop and request new approval if any change affects an id, production status,
-classification-relevant sync state, reachability, role, or retained set. During
-the batch, repeat the full check before each later deletion. Treat the absence
-of ids already deleted in this batch as the only expected inventory change.
-Stop and request new approval for any other difference. Delete only the
-remaining exact approved ids while the fresh state matches the expected batch
-state.
+Immediately before starting the approved deletion batch, repeat the two-ref
+canonical fetch, then re-fetch the full registry and the status of every live
+deployment. Reclassify every deployment. Stop without deleting if either ref
+cannot refresh. Stop and request new approval if any change affects an id,
+production status, classification-relevant sync state, reachability, role, or
+retained set. During the batch, repeat this full canonical-ref, registry, and
+status check before each later deletion. Treat the absence of ids already
+deleted in this batch as the only expected inventory change. Stop and request
+new approval for any other difference. Delete only the remaining exact approved
+ids while the fresh state matches the expected batch state.
 
 ### Force Retrigger Without Code Changes
 
@@ -122,7 +136,7 @@ pnpm deploy:indexer --yes
 
 ### After Redeployment Checklist
 
-1. Wait for the deployed commit to register and catch up to the chain head (`pnpm deploy:indexer:status "$COMMIT" --watch --compact` for low-noise agent output, `pnpm deploy:indexer:status "$COMMIT" --watch` for the full terminal table, or [envio.dev/app](https://envio.dev/app)). For a long sync, compare timestamped status samples. Report each chain's processed height, head height, remaining gap, net gap-closure rate, rough ETA, and whether fetch or processing is behind. Treat a zero gap as complete with ETA zero. A stable or growing positive gap blocks completion and makes the overall ETA unknown. Otherwise, report the incomplete chain with the largest credible ETA as the limiting chain. When no positive gap remains, sync is complete. Send short updates at the runtime's required cadence and this full quantitative summary at least every five minutes. Compare against a prior successful production run only when recorded evidence exists for the same chain and comparable configuration.
+1. Wait for the deployed commit to register and catch up to the chain head (`pnpm deploy:indexer:status "$COMMIT" --watch --compact` for low-noise agent output, `pnpm deploy:indexer:status "$COMMIT" --watch` for the full terminal table, or [envio.dev/app](https://envio.dev/app)). For a long sync, compare timestamped status samples. Report each chain's processed height, head height, remaining gap, net gap-closure rate, rough gap ETA, and whether fetch or processing is behind. Treat a zero gap as a gap ETA of zero for that sample. It does not establish sync completion. A stable or growing positive gap blocks completion and makes the overall gap ETA unknown. Otherwise, report the incomplete chain with the largest credible gap ETA as the limiting chain. When no positive gap remains, report an overall gap ETA of zero. Continue waiting until every chain has a non-empty `timestamp_caught_up_to_head_or_endblock`; the status wrapper's terminal `caught_up` state uses the same signal. Send short updates at the runtime's required cadence and this full quantitative summary at least every five minutes. Compare against a prior successful production run only when recorded evidence exists for the same chain and comparable configuration.
 2. Inspect build logs and explicitly marked runtime errors with commit-scoped commands (`pnpm deploy:indexer:logs "$COMMIT" --build` and `pnpm deploy:indexer:logs "$COMMIT" --errors-only --since 2h`). Use `--level warn` separately when warnings are relevant; Envio can carry them as stdout records. Error-only inspection owns Envio's 100-record limit and fails closed when the page is full; narrow `--since` and retry until the result is complete.
 3. Capture a combined status/metrics/log snapshot for comparison (`pnpm deploy:indexer:perf "$COMMIT"`).
 4. Verify sync, metrics, endpoint resolution, core rows, sUSDS post-launch sampler progress/freshness, and fail-closed Polygon replay semantics (`pnpm deploy:indexer:verify "$COMMIT"`). The verifier reads `indexer-envio/schema.graphql` from the exact deployment commit. It uses `SusdsYieldLaunchBaseline` as the sUSDS sampler capability marker. When the marker exists, the verifier requires the exact immutable launch row and the daily snapshot probe. A target schema with `SusdsYieldSamplerProgress` must prove post-launch freshness from that heartbeat-only row, so a recent movement cannot hide a stalled sampler. An older schema without the progress entity can use the latest daily row only when the exact target `indexer-envio/src/handlers/susdsEvents.ts` is readable and has no event-time snapshot writer. A legacy rollback schema without the launch marker omits all sampler-only probes and checks. An unreadable or inconsistent target schema or legacy handler fails closed and retains all strict sampler requirements. The sUSDS sampler rejects a lag of 600 blocks or more and samples older than 24 hours. The baseline check prevents a recent legacy daily row from passing without the launch-aligned sampler on deployments that implement the baseline contract. The verifier also reads `indexer-envio/config/replay-integrity.json` from that exact commit, so a pre-invariant replay cannot pass merely because later rows look healthy. A caught-up status alone is only `SYNCED_PENDING_DATA_VERIFY`.

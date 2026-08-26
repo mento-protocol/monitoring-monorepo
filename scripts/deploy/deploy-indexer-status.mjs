@@ -257,9 +257,7 @@ export function percentOf(row) {
 }
 
 export function isCaughtUp(row) {
-  return (
-    Number(row.latest_processed_block ?? 0) >= Number(row.block_height ?? 0)
-  );
+  return Boolean(row.timestamp_caught_up_to_head_or_endblock);
 }
 
 export function allCaughtUp(rows) {
@@ -426,7 +424,7 @@ export function slowRegistrationWarning(target, elapsed, timeoutSeconds) {
     "",
     `⚠️  Deployment ${target} still unregistered after ${elapsed}s — that's past the normal P50 of ~2 min.`,
     "   Likely causes (check before waiting longer):",
-    "     • Envio already has 3 live deployments; run the deployment cleanup inventory and obtain exact-id approval before deleting anything",
+    "     • Envio already has 3 live deployments; run the deployment cleanup inventory and obtain exact-ID approval before deleting anything",
     "     • Envio Cloud's webhook receiver lost the push event (their side, opaque to us)",
     "     • Push was a no-op (same SHA already on the deploy branch — see deploy-indexer.sh warning)",
     "     • Envio's build queue is backed up",
@@ -440,7 +438,7 @@ export function registrationTimeoutLines(target, timeoutSeconds) {
   return [
     `❌ Deployment ${target} did not register within ${Math.trunc(timeoutSeconds / 60)} minutes.`,
     "   First check active deployment count: 3 live deployments means Envio has no room for a new one.",
-    "   If the registry is full, run the deployment cleanup inventory and obtain exact-id approval before deleting anything.",
+    "   If the registry is full, run the deployment cleanup inventory and obtain exact-ID approval before deleting anything.",
     "   If fewer than 3 deployments exist, treat this as an Envio-side issue (broken webhook, stuck build queue).",
     "   The push to the deploy branch succeeded — verify on GitHub and check Envio's UI:",
     `   https://envio.dev/app/${ENVIO_ORG}/${ENVIO_INDEXER}`,

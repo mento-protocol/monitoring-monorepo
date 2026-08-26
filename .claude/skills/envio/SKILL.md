@@ -75,20 +75,34 @@ separately for an obsolete non-prod deployment. Envio registry data does not
 identify the actor or source branch. Attribute either only from matching GitHub
 commit, ref, or timeline evidence.
 
+Before the initial classification, verify that `origin` is the canonical
+`mento-protocol/monitoring-monorepo` remote and refresh both reachability refs:
+
+```bash
+git fetch origin \
+  "refs/heads/main:refs/remotes/origin/main" \
+  "+refs/heads/envio:refs/remotes/origin/envio"
+```
+
+The forced `envio` refspec is required because the deploy workflow
+force-updates that branch. Stop if `origin` is not canonical or either ref
+cannot refresh. Use the freshly fetched refs for classification.
+
 Never delete the current production deployment, the active target, a known-good
 rollback candidate, an unclassified deployment, or a deployment with unresolved
 provenance. Group the remaining obsolete non-prod deployments. Ask once for
 approval to delete one exact bounded set, with the id, classification, and
 reason for each deployment.
-Immediately before starting the approved deletion batch, re-fetch the full
-registry and the status of every live deployment. Reclassify every deployment.
-Stop and request new approval if any change affects an id, production status,
-classification-relevant sync state, reachability, role, or retained set. During
-the batch, repeat the full check before each later deletion. Treat the absence
-of ids already deleted in this batch as the only expected inventory change.
-Stop and request new approval for any other difference. Delete only the
-remaining exact approved ids while the fresh state matches the expected batch
-state.
+Immediately before starting the approved deletion batch, repeat the two-ref
+canonical fetch, then re-fetch the full registry and the status of every live
+deployment. Reclassify every deployment. Stop without deleting if either ref
+cannot refresh. Stop and request new approval if any change affects an id,
+production status, classification-relevant sync state, reachability, role, or
+retained set. During the batch, repeat this full canonical-ref, registry, and
+status check before each later deletion. Treat the absence of ids already
+deleted in this batch as the only expected inventory change. Stop and request
+new approval for any other difference. Delete only the remaining exact approved
+ids while the fresh state matches the expected batch state.
 
 ### Static vs per-deployment endpoint URLs
 
@@ -129,11 +143,14 @@ Progress math for a per-chain % estimate: `(latest_processed_block - start_block
 For slow-sync analysis, compare two timestamped status samples. Define the
 remaining gap as `max(0, block_height - latest_processed_block)`. The net
 gap-closure rate is the gap decrease divided by elapsed time. Estimate ETA as
-the current gap divided by that positive rate. Treat a zero gap as complete
-with ETA zero. Report ETA as unknown when a positive gap is stable or grows.
-Any chain with such a gap blocks completion, and the overall ETA is unknown.
-Otherwise, the limiting chain is the incomplete chain with the largest credible
-ETA. When no positive gap remains, sync is complete. When present, use
+the current gap divided by that positive rate. Treat a zero gap as a gap ETA of
+zero for that sample. It does not establish sync completion. Report gap ETA as
+unknown when a positive gap is stable or grows. Any chain with such a gap
+blocks completion, and the overall gap ETA is unknown. Otherwise, the limiting
+chain is the incomplete chain with the largest credible gap ETA. When no
+positive gap remains, report an overall gap ETA of zero and continue waiting
+until every chain has a non-empty
+`timestamp_caught_up_to_head_or_endblock`. When present, use
 `latest_fetched_block_number` to distinguish fetch and processing backlogs.
 Check runtime metrics and logs before assigning a cause. During a long watch,
 send short updates at the runtime's required cadence and a complete per-chain

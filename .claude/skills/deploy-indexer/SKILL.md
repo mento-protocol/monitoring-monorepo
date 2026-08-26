@@ -53,10 +53,15 @@ In parallel:
   exactly `mento-protocol/monitoring-monorepo` before trusting it:
   ```bash
   gh repo view "$(git remote get-url "$CANONICAL_REMOTE")" --json nameWithOwner --jq .nameWithOwner
-  git fetch "$CANONICAL_REMOTE" main:refs/remotes/"$CANONICAL_REMOTE"/main
+  git fetch "$CANONICAL_REMOTE" \
+    "refs/heads/main:refs/remotes/$CANONICAL_REMOTE/main" \
+    "+refs/heads/envio:refs/remotes/$CANONICAL_REMOTE/envio"
   ```
-  Capture that fetched ref as `CANONICAL_MAIN_REF`. Stop if no verified remote
-  exists. In any Claude cloud session skip the `gh repo view` check — the
+  Capture those fetched refs as `CANONICAL_MAIN_REF` and
+  `CANONICAL_ENVIO_REF`. The forced `envio` refspec is required because the
+  deploy wrapper force-updates that branch. Stop if no verified remote exists
+  or either ref cannot refresh. In any Claude cloud session skip the
+  `gh repo view` check — the
   remote is the credential-proxy URL, which gh cannot map to a repository
   even when the capability gate passes
   ([`docs/notes/github-tooling-surfaces.md`](../../../docs/notes/github-tooling-surfaces.md));
@@ -92,10 +97,12 @@ In parallel:
   Skip Phase 1 in resume mode; Phase 2 must still reconfirm that the registered
   candidate is caught up before Phase 3.
 - If the registry is full, or any deletion is under consideration, inventory
-  every live deployment before requesting or performing cleanup. Record the
-  stored deployment id, resolved commit when available, `prod_status`, creation
-  time, per-chain sync state, canonical `main` or `envio` reachability, and its
-  role as target, current production, rollback candidate, obsolete non-prod, or
+  every live deployment before requesting or performing cleanup. Repeat the
+  two-ref canonical fetch above immediately before the initial classification
+  and use those fresh refs. Stop if either ref cannot refresh. Record the stored
+  deployment id, resolved commit when available, `prod_status`, creation time,
+  per-chain sync state, canonical `main` or `envio` reachability, and its role
+  as target, current production, rollback candidate, obsolete non-prod, or
   unknown. Record the subtype and deletion reason separately for an obsolete
   non-prod deployment. Envio registry data does not identify the deploying
   actor or source branch. Attribute either only when GitHub commit, ref, or
@@ -104,10 +111,12 @@ In parallel:
   provenance. Group the remaining obsolete non-prod deployments and request one
   explicit approval that lists each exact deployment id, classification, and
   deletion reason. Immediately before starting the approved deletion batch,
-  re-fetch the full registry and the status of every live deployment. Reclassify
-  every deployment. Stop and request new approval if any change affects an id,
-  production status, classification-relevant sync state, reachability, role, or
-  retained set. During the batch, repeat the full check before each later
+  repeat the two-ref canonical fetch, then re-fetch the full registry and the
+  status of every live deployment. Reclassify every deployment. Stop without
+  deleting if either ref cannot refresh. Stop and request new approval if any
+  change affects an id, production status, classification-relevant sync state,
+  reachability, role, or retained set. During the batch, repeat the two-ref
+  canonical fetch and the full registry and status check before each later
   deletion. Treat the absence of ids already deleted in this batch as the only
   expected inventory change. Stop and request new approval for any other
   difference. Delete only the remaining exact approved ids while the fresh
@@ -203,11 +212,14 @@ monitor must enforce that wall-clock ceiling and interrupt the watch.
 Capture the first per-chain status sample when registration succeeds. For a
 longer-than-normal sync, derive a quantitative update from later samples. For
 each chain, report processed height, head height, remaining gap, gap change,
-net gap-closure rate, and rough ETA. Treat a zero gap as complete with ETA zero.
-A stable or growing positive gap has no finite ETA. If any chain has such a
-gap, that chain blocks completion and the overall ETA is unknown. Otherwise,
-the limiting chain is the incomplete chain with the largest credible ETA. When
-no positive gap remains, sync is complete. When present, use
+net gap-closure rate, and rough gap ETA. Treat a zero gap as a gap ETA of zero
+for that sample. It does not establish sync completion. A stable or growing
+positive gap has no finite ETA. If any chain has such a gap, that chain blocks
+completion and the overall gap ETA is unknown. Otherwise, the limiting chain is
+the incomplete chain with the largest credible gap ETA. When no positive gap
+remains, report an overall gap ETA of zero. Continue waiting until every chain
+has a non-empty `timestamp_caught_up_to_head_or_endblock`; the wrapper's
+terminal `caught_up` state uses the same signal. When present, use
 `latest_fetched_block_number` to distinguish a fetch backlog from a processing
 backlog, but do not claim a root cause without runtime metrics or logs. Send
 short updates at the runtime's required progress cadence. Include this full
