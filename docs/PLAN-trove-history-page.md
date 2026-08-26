@@ -59,7 +59,8 @@ query. That gap defines the indexer work below.
    redemptions (user vs rebalance), liquidation, zombie transitions, close.
 2. Each ledger row shows signed debt/coll deltas, fees, the resulting
    debt/coll after the row, and a tx link.
-3. A redemption-impact summary and a "why me" panel explain the mechanism
+3. A redemption-impact summary and a "Redemption queue" panel explain the
+   mechanism
    (queue position by interest rate) in product terms.
 4. The page answers ticket-#0754-class questions with zero RPC archaeology.
 
@@ -420,8 +421,8 @@ today, so the new `troves/[troveId]/_components` rule lands with the page
 │ Coll 44,791 USDm    Debt 28,081 GBPm†   ICR 117.1% (MCR 110%)    │
 │ † recorded at last event, 2026-08-26 10:38 UTC; interest accrues │
 ├──────────────────────────────────────────────────────────────────┤
-│ Redemption impact              │ Why this trove                  │
-│ 5 hits · −18,451 GBPm debt     │ Redemptions repay the lowest-   │
+│ Redemption impact              │ Redemption queue                │
+│ 5 redemptions · −18,451 GBPm   │ Redemptions repay the lowest-   │
 │ −25,164 USDm coll · +12.59     │ rate troves first. Current      │
 │ USDm fees kept · net equity    │ rate 1.6% = rank #2 of 14;      │
 │ +11 USDm at oracle prices      │ 6,200 GBPm of lower-rate debt   │
@@ -458,7 +459,8 @@ today, so the new `troves/[troveId]/_components` rule lands with the page
   answer — so it renders only from complete ledger rows and is absent in
   the partial view. The one-line explainer carries the ticket's core
   lesson.
-- **Why me** reads the current rate ladder (open troves / brackets already
+- **Redemption queue** (the panel that answers the user's "why me?"): reads
+  the current rate ladder (open troves / brackets already
   fetched on the market page): rank among ACTIVE troves by effective rate,
   and the sum of active debt at strictly lower rates ("shield"). Zombies
   are excluded from both — they sit outside the sorted redemption queue and
@@ -567,12 +569,12 @@ today, so the new `troves/[troveId]/_components` rule lands with the page
 
 Support pastes the owner address → owner lookup → one GBPm trove → header
 shows active, 44,791 USDm / 28,081 GBPm, ICR 117.1%. The impact card reads
-"5 redemption hits on 2026-08-25: −18,451 GBPm debt, −25,164 USDm collateral,
+"5 redemptions on 2026-08-25: −18,451 GBPm debt, −25,164 USDm collateral,
 +12.59 USDm fees kept, net equity +11 USDm — exchanged at oracle par." The
 chart shows the cliff at 18:13 UTC and the rebuild next morning. The ledger
 lists the five rebalance-redemption rows with tx links and the user's three
-follow-up ops. The why-me panel explains the 0.5% rate sat at the front of
-the redemption queue. Total time: one page view.
+follow-up ops. The Redemption queue panel explains the 0.5% rate sat at the
+front of the queue. Total time: one page view.
 
 ## Rollout
 
