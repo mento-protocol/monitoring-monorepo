@@ -652,7 +652,16 @@ mkdir -p "$SHIM/gh-empty"
 # `PWD` stays, because it is the fixture the cell is supposed to be reviewing.
 CELL_ENV=(env
   -u GH_TOKEN -u GITHUB_TOKEN -u GITHUB_PERSONAL_ACCESS_TOKEN
-  -u GH_ENTERPRISE_TOKEN -u OLDPWD
+  -u GH_ENTERPRISE_TOKEN -u OLDPWD)
+# The documented invocation is `pnpm review:eval:run`, and pnpm exports its own
+# family of path-bearing variables into every script it runs — INIT_CWD,
+# PNPM_SCRIPT_SRC_DIR, npm_package_json, npm_config_local_prefix and more, each
+# carrying the checkout the answer key lives in. The family is open-ended, so
+# scrub it by name pattern from the live environment instead of enumerating.
+while IFS= read -r cell_env_var; do
+  CELL_ENV+=(-u "$cell_env_var")
+done < <(compgen -e | grep -E '^(npm_|PNPM_|INIT_CWD$|NODE_PATH$)' || true)
+CELL_ENV+=(
   GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
   GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=
   GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false GIT_ALLOW_PROTOCOL=file

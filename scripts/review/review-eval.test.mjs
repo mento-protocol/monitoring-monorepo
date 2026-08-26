@@ -3210,11 +3210,19 @@ test("a cell inherits no path back to the source checkout", () => {
       path.join(repoRoot, "scripts/review/run-eval.sh"),
       "utf8",
     );
-    const cellEnv = script.match(/\nCELL_ENV=\(env\n[\s\S]*?\)\n/)?.[0];
+    const cellEnv = script.match(
+      /\nCELL_ENV=\(env\n[\s\S]*?PATH="\$SHIM:\$PATH"\)\n/,
+    )?.[0];
     assert.ok(cellEnv, "CELL_ENV was not found in run-eval.sh");
     const harness = [
       "set -uo pipefail",
       `SHIM=${JSON.stringify(dir)}`,
+      // The documented invocation is `pnpm review:eval:run`, and pnpm exports
+      // these into every script it runs; make them present so the dynamic
+      // scrub is exercised whether or not this suite itself runs under pnpm.
+      `export INIT_CWD=${JSON.stringify(repoRoot)}`,
+      `export npm_package_json=${JSON.stringify(path.join(repoRoot, "package.json"))}`,
+      `export PNPM_SCRIPT_SRC_DIR=${JSON.stringify(repoRoot)}`,
       cellEnv,
       shellFunction("run_in_fixture"),
       `run_in_fixture ${JSON.stringify(fixture)} env`,
