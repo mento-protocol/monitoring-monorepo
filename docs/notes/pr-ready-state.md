@@ -3,7 +3,7 @@ title: PR Ready State
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-21
+last_verified: 2026-08-26
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -407,11 +407,13 @@ Field expectations:
    review-triggered patch cycles are complete. Pause for reclassification before
    starting a sixth.
 3. Before invoking the gate, ensure that no direct validation, dashboard server,
-   or browser suite is active on the same machine. From invocation until it
-   exits, do not start any of them there. Use same-machine spare workers only
-   for read-only work. Run
-   `pnpm agent:quality-gate --run` once for the batch; it owns test execution.
-   Run concurrent validation from a fully hydrated checkout on another machine.
+   or browser suite outside the coordinator is active on the same machine.
+   Concurrent `--run` gates from other worktrees can continue through the
+   coordinator. They share weighted machine capacity. From invocation until
+   this gate exits, do not start uncoordinated work there. Use same-machine spare
+   workers only for read-only work. Run `pnpm agent:quality-gate --run` once for
+   the batch. Run validation outside the coordinator from a fully hydrated
+   checkout on another machine.
 4. For non-trivial behavioral, workflow, security, data-flow, or UI batches,
    run `pnpm agent:autoreview` as a structured source-review closeout at the
    batch boundary rather than as an inner loop. Verify accepted findings before
