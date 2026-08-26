@@ -5314,8 +5314,8 @@ const scenario = process.argv[2];
 const root = process.argv[3];
 const lockDirectory = join(root, "run.lock");
 const ownerPath = join(lockDirectory, "owner");
-const legacyOwnerToken = "legacy-fifo-" + process.pid + "-1000";
-const generationToken = "coordinator-fifo-" + process.pid + "-1001";
+const legacyOwnerToken = ["legacy", "fifo", process.pid, "1000"].join("-");
+const generationToken = ["coordinator", "fifo", process.pid, "1001"].join("-");
 let fifoPath = ownerPath;
 let replaceOwnerDuringRead = false;
 
@@ -5798,12 +5798,12 @@ test("coordinator marker cleanup crashes leave only inert top-level holder quara
       const fixtureScripts = join(fixtureRepo, "scripts");
       const fixtureGateScripts = join(fixtureScripts, "gate");
       const expectedOwnerToken = runToken(
-        `legacy-marker-crash-${randomUUID()}`,
+        ["legacy", "marker", "crash", randomUUID()].join("-"),
         deadOwnerPid,
         1_770_000_100,
       );
       const generationToken = runToken(
-        `coordinator-marker-crash-${randomUUID()}`,
+        ["coordinator", "marker", "crash", randomUUID()].join("-"),
         process.pid,
         1_770_000_101,
       );

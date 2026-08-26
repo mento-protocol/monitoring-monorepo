@@ -249,10 +249,10 @@ reads that field from one record snapshot.
 Adoption preserves the incoming owner record's group and other read bits so a
 legacy waiter with shared-root access can observe the barrier. The replacement
 record remains writable only by its owner. It stores the real coordinator
-generation in `coordinator_token=`. It stores `coordinator-owner-v1` in the
-historical `token=` field. That value is outside the historical run-token
+generation in the `coordinator_token` field. It stores `coordinator-owner-v1`
+in the historical `token` field. That value is outside the historical run-token
 grammar, so a historical gate waits and does not attempt a coordinator drain it
-cannot understand. A current gate prefers `coordinator_token=`. Before it
+cannot understand. A current gate prefers the `coordinator_token` field. Before it
 discards stale owner evidence, it requires the recorded `uid=`, when present,
 and the file owner to match its current UID. A current gate can wait on another
 user's live owner. It retains a stale foreign owner's record and generation

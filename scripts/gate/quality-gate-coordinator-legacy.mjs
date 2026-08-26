@@ -34,7 +34,7 @@ export const LEGACY_RUN_LOCK_INTEGRATION = Object.freeze({
   markerHeldOpen: true,
 });
 
-const LEGACY_COORDINATOR_OWNER_TOKEN = "coordinator-owner-v1";
+const LEGACY_COORDINATOR_OWNER_IDENTITY = "coordinator-owner-v1";
 const OWNER_QUARANTINE_PREFIX = "owner.reclaiming.quarantine.v1";
 const HOLDER_QUARANTINE_PREFIX = "holder.reclaiming.quarantine.v1";
 
@@ -300,7 +300,7 @@ export function legacyOwnerRecordText(record) {
     `coordinator_start_utc=${record.startUtc}`,
     `worktree=${record.worktree}`,
     `coordinator_token=${record.token}`,
-    `token=${LEGACY_COORDINATOR_OWNER_TOKEN}`,
+    `token=${LEGACY_COORDINATOR_OWNER_IDENTITY}`,
     "",
   ].join("\n");
 }

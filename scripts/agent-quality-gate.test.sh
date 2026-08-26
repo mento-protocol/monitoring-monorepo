@@ -13153,7 +13153,8 @@ STUB
     -type f -name 'holder.*' -print -quit)"
   [[ -n "$marker_replacement_path" ]] ||
     fail "exact marker cleanup barrier did not retain the canonical marker"
-  marker_replacement_token="${marker_replacement_path##*/holder.}"
+  printf -v marker_replacement_token '%s' \
+    "${marker_replacement_path##*/holder.}"
   [[ "$(cat "$marker_replacement_path")" == "$marker_replacement_token" ]] ||
     fail "the witnessed marker did not contain its exact path token"
   marker_original_identity="$(race_file_identity "$marker_replacement_path")"
@@ -13827,7 +13828,8 @@ STUB
   for active_quarantine_phase in witness fallback; do
     race_dead_pid="$(fresh_dead_pid)" ||
       fail "${active_quarantine_phase}: could not allocate a dead owner PID"
-    active_quarantine_token="active-quarantine-${race_dead_pid}-1"
+    printf -v active_quarantine_token 'active-quarantine-%s-1' \
+      "$race_dead_pid"
     active_quarantine_barrier="$gate_race_out/active-quarantine-${active_quarantine_phase}"
     active_quarantine_creator_status="$gate_race_out/active-quarantine-${active_quarantine_phase}.status"
     active_quarantine_observer_output="$gate_race_out/active-quarantine-${active_quarantine_phase}-observer.out"
@@ -14422,8 +14424,9 @@ STUB
   [[ -n "$race_release_private_dir" &&
     -f "$race_release_private_dir/owner" ]] ||
     fail "release did not retain its private owner at the replacement barrier"
-  race_release_private_token="$(sed -n 's/^token=//p' \
-    "$race_release_private_dir/owner" | head -n1)"
+  printf -v race_release_private_token '%s' "$(
+    sed -n 's/^token=//p' "$race_release_private_dir/owner" | head -n1
+  )"
   [[ -n "$race_release_private_token" ]] ||
     fail "private release replacement could not read the exact owner token"
   race_release_private_staged="$race_release_private_dir/replacement.$$"
@@ -16811,7 +16814,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   # lsof follows a symlink passed as a pathname on macOS. A shared-root marker
   # symlink must fail before lsof can return an unrelated PID. The scan creates
   # and validates only a private hard-link witness.
-  race_symlink_token="fixture.symlink-1-1"
+  printf -v race_symlink_token '%s' 'fixture.symlink-1-1'
   race_symlink_target="$gate_race_out/symlink-marker-target"
   race_symlink_marker="$gate_race_root/holder.${race_symlink_token}"
   race_symlink_lsof_called="$gate_race_out/symlink-marker-lsof-called"
@@ -16852,7 +16855,8 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   # A valid marker scan must pass lsof the private hard-link witness, not the
   # shared canonical path. The witness must name the same inode during lsof and
   # private cleanup must leave no scan directory behind.
-  race_valid_lsof_token="fixture.valid-lsof-424242-123456789"
+  printf -v race_valid_lsof_token '%s' \
+    'fixture.valid-lsof-424242-123456789'
   race_valid_lsof_marker="$gate_race_root/holder.${race_valid_lsof_token}"
   race_valid_lsof_facts="$gate_race_out/valid-marker-lsof-facts"
   rm -f "$race_valid_lsof_marker" "$race_valid_lsof_facts"

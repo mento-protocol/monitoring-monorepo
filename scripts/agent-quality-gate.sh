@@ -3714,7 +3714,7 @@ acquire_gate_run_lock_legacy() {
       "No mapped command ran in this request"
     exit 2
   fi
-  claim_token="${this_host}-$$-${claim_epoch}"
+  printf -v claim_token '%s-%s-%s' "$this_host" "$$" "$claim_epoch"
   if ! gate_lock_token_is_wellformed "$claim_token"; then
     echo "error: could not derive a safe legacy owner claim token." >&2
     echo "Nothing has been executed." >&2
