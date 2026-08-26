@@ -153,6 +153,7 @@ gate_coordinator_parse_registration() {
 
 gate_coordinator_wait_for_admission() {
   local wait_file wait_started wait_finished rc admission_state found
+  local had_errexit=0
   [[ "$gate_coordinator_registration_admission" == "queued" ]] || return 0
   if [[ "$gate_lock_wait_seconds" -eq 0 ]]; then
     echo "error: quality-gate request is queued for its worktree and --lock-wait is 0." >&2
@@ -163,6 +164,7 @@ gate_coordinator_wait_for_admission() {
     "${gate_coordinator_registration_blocker:-unknown}" >&7
   wait_started="$(date +%s)"
   wait_file="$(mktemp "$scratch_dir/coordinator-admission.XXXXXX")" || { gate_coordinator_report_no_work_failure 2 "worktree admission" "No mapped command ran in this request"; return 2; }
+  case "$-" in *e*) had_errexit=1 ;; esac
   set +e
   gate_coordinator_wait_cli "still waiting for worktree admission" "$wait_file" \
     wait-admission \
@@ -171,7 +173,7 @@ gate_coordinator_wait_for_admission() {
     --owner-start-utc "$gate_coordinator_owner_start" \
     --timeout-ms "$((gate_lock_wait_seconds * 1000))"
   rc=$?
-  set -e
+  [[ "$had_errexit" -eq 1 ]] && set -e
   wait_finished="$(date +%s)"
   gate_coordinator_log_duration \
     "$([[ "$rc" -eq 0 ]] && printf ok || printf fail)" \
@@ -193,11 +195,12 @@ gate_coordinator_wait_for_admission() {
 }
 
 gate_coordinator_register() {
-  local registration_json rc success_max_age_ms=0
+  local registration_json rc success_max_age_ms=0 had_errexit=0
   gate_coordinator_recover_stale_obligations || { gate_coordinator_report_no_work_failure 2 "registration" "No mapped command ran in this request"; return 2; }
   if [[ "$skip_if_fresh" == "1" || "$skip_if_fresh" == "true" ]]; then
     success_max_age_ms=$((success_stamp_ttl_seconds * 1000))
   fi
+  case "$-" in *e*) had_errexit=1 ;; esac
   set +e
   gate_coordinator_start_bound_registration \
     --request-id "$gate_coordinator_request_id" \
@@ -210,7 +213,7 @@ gate_coordinator_register() {
     --metadata-json "{\"client\":\"agent-quality-gate.sh\",\"capacity\":${gate_coordinator_capacity}}"
   rc=$?
   registration_json="$gate_coordinator_bound_registration_json"
-  set -e
+  [[ "$had_errexit" -eq 1 ]] && set -e
   if [[ "$rc" -ne 0 ]]; then
     echo "error: compatible coordinator rejected quality-gate registration." >&2
     gate_coordinator_report_no_work_failure 2 "registration" "No mapped command ran in this request"; return 2
@@ -228,13 +231,14 @@ gate_coordinator_register() {
 }
 
 gate_coordinator_try_join_existing() {
-  local authority_json rc
+  local authority_json rc had_errexit=0
   [[ -n "$gate_coordinator_root" && -n "$gate_coordinator_policy_hash" ]] || return 1
   gate_coordinator_is_active && return 0
+  case "$-" in *e*) had_errexit=1 ;; esac
   set +e
   authority_json="$(gate_coordinator_cli authority 2>/dev/null)"
   rc=$?
-  set -e
+  [[ "$had_errexit" -eq 1 ]] && set -e
   [[ "$rc" -eq 0 ]] || return 1
   gate_coordinator_apply_authority_json "$authority_json"
   rc=$?
@@ -248,13 +252,14 @@ gate_coordinator_try_join_existing() {
 }
 
 gate_coordinator_bootstrap_from_legacy() {
-  local legacy_owner_token metadata rc
+  local legacy_owner_token metadata rc had_errexit=0
   legacy_owner_token="$gate_lock_token"
   gate_coordinator_assert_prepared_policy_current || { gate_coordinator_report_no_work_failure 2 "startup" "No mapped command ran in this request"; return 2; }
   # A dead coordinator leaves the shared marker as the aggregate discovery
   # handle for all of its workers. Drain legacy obligations before the
   # successor recovers and acknowledges its journal leases.
   drain_condemned_runs
+  case "$-" in *e*) had_errexit=1 ;; esac
   set +e
   metadata="$(gate_coordinator_cli start \
     --capacity "$gate_coordinator_capacity" \
@@ -263,7 +268,7 @@ gate_coordinator_bootstrap_from_legacy() {
     --legacy-machine-identity "$gate_lock_machine_id_cached" \
     --startup-timeout-ms 10000)"
   rc=$?
-  set -e
+  [[ "$had_errexit" -eq 1 ]] && set -e
   [[ "$rc" -eq 0 ]] || { gate_coordinator_report_no_work_failure 2 "startup" "No mapped command ran in this request"; return 2; }
   gate_coordinator_apply_authority_json "$(printf '%s' "$metadata" | node -e '
     const value = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
@@ -593,7 +598,7 @@ gate_coordinator_publish_failure() {
 
 gate_coordinator_wait_for_shared_result() {
   local wait_file started finished rc result_json parsed found status fingerprint
-  local policy execution success_payload_known trunk_skip_reason
+  local policy execution success_payload_known trunk_skip_reason had_errexit=0
   started="$(date +%s)"
   if [[ "$gate_coordinator_role" == "completed" ]]; then
     result_json="$gate_coordinator_completed_result_json"
@@ -605,6 +610,7 @@ gate_coordinator_wait_for_shared_result() {
     printf 'Coalesced wait: request %s follows execution %s.\n' \
       "$gate_coordinator_request_id" "$gate_coordinator_execution_id" >&7
     wait_file="$(mktemp "$scratch_dir/coordinator-result.XXXXXX")" || { gate_coordinator_report_no_work_failure 2 "coalesced result wait" "No mapped command ran in this request"; return 2; }
+    case "$-" in *e*) had_errexit=1 ;; esac
     set +e
     gate_coordinator_wait_cli "still waiting for coalesced execution" "$wait_file" \
       wait-result --fingerprint "$gate_coordinator_registration_fingerprint" \
@@ -614,7 +620,7 @@ gate_coordinator_wait_for_shared_result() {
       --owner-start-utc "$gate_coordinator_owner_start" \
       --timeout-ms "$((gate_lock_wait_seconds * 1000))"
     rc=$?
-    set -e
+    [[ "$had_errexit" -eq 1 ]] && set -e
     if [[ "$rc" -ne 0 ]]; then
       rm -f "$wait_file"
       gate_coordinator_report_no_work_failure 2 "coalesced result wait" "No mapped command ran in this request"; return 2

@@ -1505,6 +1505,19 @@ assert.match(
   /--legacy-machine-identity "\$gate_lock_machine_id_cached"/u,
   "coordinator handoff must forward the resolved machine identity",
 );
+assert.doesNotMatch(
+  coordinatorAdapter,
+  /^\s*set -e\s*$/mu,
+  "the source-only coordinator adapter must not enable caller errexit unconditionally",
+);
+assert.equal(
+  occurrences(coordinatorAdapter, "set +e"),
+  occurrences(
+    coordinatorAdapter,
+    '[[ "$had_errexit" -eq 1 ]] && set -e',
+  ),
+  "every coordinator adapter errexit suspension must restore only an enabled caller state",
+);
 assert.match(
   coordinatorLegacy,
   /`machine=\$\{record\.machineIdentity \?\? ""\}`/u,
@@ -1762,6 +1775,41 @@ if ! /bin/bash -c '
   fail "quality-gate coordinator adapter release-failure test failed"
 fi
 rm -f "$coordinator_adapter_probe"
+
+if ! /bin/bash -c '
+  repo_root="$1"
+  script_source_dir="$repo_root/scripts"
+  source "$repo_root/scripts/gate/quality-gate-coordinator.sh"
+  gate_coordinator_root="errexit-state-root"
+  gate_coordinator_policy_hash="errexit-state-policy"
+  gate_coordinator_cli() { printf "{}\n"; }
+  gate_coordinator_apply_authority_json() {
+    gate_coordinator_active=1
+    return 0
+  }
+  gate_coordinator_register() { return 0; }
+
+  verify_errexit_state() {
+    local expected="$1"
+    gate_coordinator_active=0
+    if [[ "$expected" == enabled ]]; then
+      set -e
+    else
+      set +e
+    fi
+    gate_coordinator_try_join_existing
+    if [[ "$expected" == enabled ]]; then
+      [[ "$-" == *e* ]] || return 1
+    else
+      [[ "$-" != *e* ]] || return 1
+    fi
+  }
+
+  verify_errexit_state disabled
+  verify_errexit_state enabled
+' coordinator-adapter-errexit-test "$repo_root"; then
+  fail "quality-gate coordinator adapter changed the caller errexit state"
+fi
 
 coordinator_qualified_payload="$(mktemp)"
 if ! /bin/bash -c '
