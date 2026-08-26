@@ -334,8 +334,11 @@ export function gateSignature({ summary, feedback }) {
 export function exitCodeForResult(result) {
   if (result?.help === true) return 0;
   // A merge that landed on a base the operator never approved is a failure
-  // even though it merged, so the shell must not chain past it either.
+  // even though it merged, so the shell must not chain past it either — and
+  // neither must one this run could not confirm at all. Success here means
+  // "GitHub said MERGED, onto the approved base", nothing weaker.
   if (result?.baseMismatch === true) return 1;
+  if (result?.verified !== true) return 1;
   return result?.merged === true ? 0 : 1;
 }
 

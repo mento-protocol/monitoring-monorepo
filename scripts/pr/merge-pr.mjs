@@ -37,7 +37,7 @@
  * type, and an append-only consent record naming who approved which head. The
  * approval rule itself remains the binding control, and the only unforgeable
  * boundary would live on GitHub's side of the wire;
- * `docs/adr/0073-sanctioned-merge-wrapper.md` records that decision and its
+ * `docs/adr/0075-sanctioned-merge-wrapper.md` records that decision and its
  * residual risk.
  *
  * The pure decision logic lives in `scripts/pr/merge-pr-core.mjs` and the side
@@ -492,8 +492,24 @@ export async function mergePullRequest({
   // retarget landing between the final gate read and GitHub processing the
   // merge cannot be prevented here — it can only be detected and said out
   // loud, which is what this does. `exitCodeForResult` fails on it.
-  const baseMismatch =
-    outcome.baseRefName !== "" && outcome.baseRefName !== approved.baseRefName;
+  if (outcome.baseRefName === "") {
+    stdout.write(
+      `${repos.base}#${number} reports MERGED but names no base branch, so this ` +
+        `run cannot confirm it landed on ${approved.baseRefName}. ` +
+        `Check it before running any post-merge step.\n`,
+    );
+    return {
+      merged: true,
+      verified: false,
+      baseRefName: null,
+      state: outcome.state,
+      mergeCommit: outcome.mergeCommit,
+      record,
+      consentPath,
+    };
+  }
+
+  const baseMismatch = outcome.baseRefName !== approved.baseRefName;
   if (baseMismatch) {
     stdout.write(
       `WARNING: ${repos.base}#${number} merged into ${outcome.baseRefName}, ` +

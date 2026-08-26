@@ -1481,6 +1481,24 @@ await test("a base retargeted during the merge itself is reported", async () => 
   );
 });
 
+await test("a MERGED state with no base is not a confirmed merge", async () => {
+  // GitHub said MERGED but named no destination. Treating that as success
+  // would chain post-merge steps on an outcome this run never confirmed.
+  const h = harness({ mergedBaseRefName: "" });
+
+  const result = await h.run();
+  assertEqual(result.verified, false, "the base was never confirmed");
+  assertEqual(
+    exitCodeForResult(result),
+    1,
+    "an unconfirmed base must not exit zero",
+  );
+  assert(
+    h.output().includes("names no base branch"),
+    `the operator must be told, got:\n${h.output()}`,
+  );
+});
+
 await test("an unchanged base reports no mismatch", async () => {
   const result = await harness().run();
   assertEqual(result.baseMismatch, false);
