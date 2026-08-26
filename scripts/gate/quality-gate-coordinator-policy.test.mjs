@@ -668,6 +668,8 @@ test("material environment binds mapped-command controls", async (t) => {
     "ALL_PROXY",
     "AUTOREVIEW_HEARTBEAT_SECONDS",
     "BROWSERSLIST",
+    "BROWSERSLIST_CONFIG",
+    "BROWSERSLIST_ENV",
     "COREPACK_HOME",
     "CURL_CA_BUNDLE",
     "DOCS_NAVIGATION_EVAL_REPO",

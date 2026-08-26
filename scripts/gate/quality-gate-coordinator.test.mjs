@@ -3462,11 +3462,13 @@ test("retention tolerates files removed after directory enumeration", (t) => {
   });
 
   assert.deepEqual(pruned, {
-    changed: false,
+    changed: true,
     requestRecords: 0,
+    resultDirectories: 1,
     resultRecords: 0,
     temporaryRecords: 0,
   });
+  assert.equal(existsSync(resultDirectory), false);
   assert.equal(racingPaths.size, 0);
   assert.equal(statRaceObserved, true);
   assert.throws(

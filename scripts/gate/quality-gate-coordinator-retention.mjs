@@ -223,8 +223,10 @@ export function prunePersistentRecords({
   if (resultRecords || resultDirectories) syncDirectory(resultsDirectory);
 
   return {
-    changed: requestRecords + resultRecords + temporaryRecords > 0,
+    changed:
+      requestRecords + resultRecords + resultDirectories + temporaryRecords > 0,
     requestRecords,
+    resultDirectories,
     resultRecords,
     temporaryRecords,
   };

@@ -115,6 +115,7 @@ const environmentPrefixes = [
   "AGENT_QUALITY_GATE_TEST_",
   "AUTH_",
   "AUTOREVIEW_",
+  "BROWSERSLIST_",
   "CARGO_",
   "COREPACK_",
   "DOCS_NAVIGATION_EVAL_",

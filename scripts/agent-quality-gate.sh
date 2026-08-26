@@ -5470,7 +5470,7 @@ gate_coordinator_execution_head=""
 # bytes. Build a separate compatibility context from every execution-fingerprint
 # input except HEAD; stamp_line already carries base, paths, plan,
 # implementation, content, and package-risk policy. Equality therefore means
-# that only HEAD can differ. Legacy and --no-lock runs keep the v2 stamp.
+# that only HEAD can differ. Legacy and --no-lock runs keep the v3 stamp.
 gate_coordinator_freshness_context_hash() {
   local os_name os_arch node_path node_version pnpm_path pnpm_version
   local env_digest policy_hash runtime_hash repository_identity
@@ -5586,7 +5586,7 @@ is_fresh_success_stamp() {
       [[ "$stamped_execution_fingerprint" == \
         "$gate_coordinator_registration_fingerprint" ]] || return 1
     fi
-    # If HEAD changed after a warm run, the matching v3 stamp above proves
+    # If HEAD changed after a warm run, the matching v4 stamp above proves
     # equality for every other execution input and permits only that transition.
   fi
   [[ "$stamped_at" =~ ^[0-9]+$ ]] || return 1

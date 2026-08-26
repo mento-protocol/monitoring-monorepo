@@ -2063,7 +2063,7 @@ before result publication. A waiter recomputes it before accepting a shared
 success.
 
 The worktree-local whole-run stamp can exit before coordinator registration.
-Its v3 freshness key binds every complete-key input except HEAD. It also records
+Its v4 freshness key binds every complete-key input except HEAD. It also records
 the exact HEAD and coordinator fingerprint. An unchanged HEAD requires that
 fingerprint to match. If HEAD changed, reuse still requires the same repository,
 base, paths, plan, validated bytes and modes, implementation, timeout,
@@ -2071,7 +2071,7 @@ effective `--lock-wait` budget, fail-fast policy, OS, architecture, Node and
 pnpm identities, coordinator policy and runtime, and material environment. This
 exception lets a warm run made before a commit satisfy the pre-push hook after
 the commit records the same validated bytes. Legacy and explicit no-lock runs
-retain the v2 stamp. Any other change reruns the mapped commands. An unchanged
+retain the v3 stamp. Any other change reruns the mapped commands. An unchanged
 stamp still expires after two hours to avoid masking drift.
 
 Validated file content is bound by each path's bytes, its worktree file mode,
