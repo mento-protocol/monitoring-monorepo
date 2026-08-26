@@ -2130,7 +2130,14 @@ acquire_gate_run_lock() {
         # its holder, because the state it covers includes a lock with no
         # holder recorded at all.
         echo "Nothing was reclaimed: this run refused to act on the lock (${nonlocal_refusal_reason}), because its root is not established as storage only this machine reaches." >&2
-        echo "If no run holds it, remove ${lock} by hand. Then give each machine its own AGENT_QUALITY_GATE_LOCK_DIR on that machine's local storage, or declare this root with AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1." >&2
+        # Deliberately not "delete it and move on". Removing the directory
+        # removes the record, and the record's token is the handle the next run
+        # would have used to find and stop the dead holder's mapped commands —
+        # which outlive their gate shell. So a delete on a still-running holder
+        # both starts this run beside that work and throws away the only way to
+        # notice. Name the checks, and point at the note that owns them.
+        echo "Clearing it by hand is not a plain delete: on the machine that wrote the record, confirm its holder pid is gone AND that its mapped commands are gone with it — they carry the tag agentqg:<the record's token> — because deleting the record discards that token and the next run then starts beside whatever it named." >&2
+        echo "docs/notes/agent-quality-gate-mechanics.md has the full procedure. Then give each machine its own AGENT_QUALITY_GATE_LOCK_DIR on that machine's local storage, or declare this root with AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1." >&2
       else
         echo "Holder pid ${owner_pid:-unknown} is still alive; let it finish, then retry." >&2
       fi

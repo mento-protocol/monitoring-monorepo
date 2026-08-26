@@ -645,13 +645,22 @@ holder's record lets the next waiter publish its own beside work that is still
 running — the overlap this lock exists to prevent. Establish first, on the
 machine that wrote the record, that its `pid` is gone and that its mapped
 commands are gone with it: the holder is named by `pid` and `host`, and its
-commands are tagged with the record's `token`. Then check that nothing is still
-owed for it — `<root>/condemned.d` holds the tokens of runs whose commands the
-next holder must drain, and `<root>/captured.<token>` holds a captured process
-tree — and drain or clear those before the record goes, because deleting the
-record deletes the only handle to them. When the holder cannot be reached to be
-checked, the record stays: waiting costs a wait, and guessing costs the
-guarantee.
+commands carry the tag `agentqg:<token>` from the record's `token` field. That
+token is the reason this is not a plain delete — a gate shell's mapped commands
+outlive it, and the record is the only thing naming them until some run condemns
+it, so removing the record while they run discards the handle as well as the
+exclusion.
+
+The obligations already written for a run are a separate matter, and they are
+not at risk from removing the record: `<root>/condemned.d` and
+`<root>/captured.<token>` sit beside the lock rather than inside it, exactly so
+they outlive the reclaim, and `drain_condemned_runs` finds them by scanning that
+directory rather than by following any record. They are the durable evidence, so
+the hazard runs the other way — clear one only after its processes are confirmed
+gone, and never as part of tidying up the lock.
+
+When the holder cannot be reached to be checked, the record stays: waiting costs
+a wait, and guessing costs the guarantee.
 
 #### Crash points
 
