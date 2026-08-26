@@ -536,10 +536,12 @@ bounds their aggregate concurrency.
 Browser work also claims `browser-fixture-3211`. Playwright installation claims
 `playwright-install` because every worktree mutates the shared
 `~/.cache/ms-playwright` browser store. A mapped `terraform init` claims
-`terraform-plugin-cache` when `TF_PLUGIN_CACHE_DIR` is non-empty because
-Terraform does not guarantee that cache is safe for concurrent writes. Each
-named resource has capacity 1. Add a new resource or all-capacity class only
-with contention measurements and scheduler regression coverage.
+`terraform-plugin-cache` unconditionally. Terraform CLI configuration can
+enable a shared cache after request registration or while a request waits.
+Terraform does not guarantee that this cache is safe for concurrent writes.
+The unconditional resource claim closes that configuration race. Each named
+resource has capacity 1. Add a new resource or all-capacity class only with
+contention measurements and scheduler regression coverage.
 
 **One request per worktree.** The coordinator serializes complete requests that
 use the same resolved `git rev-parse --show-toplevel` path. It does not use the
@@ -567,8 +569,8 @@ version. The leader revalidates the key before its first command and before it
 publishes the result. Each waiter revalidates its local key before it accepts
 that result.
 
-The environment digest preserves PATH order and duplicates. It normalizes only
-the PATH entry that resolves exactly to the current worktree's
+The environment digest preserves PATH order and duplicates. It normalizes each
+PATH entry that resolves exactly to a material package root's
 `node_modules/.bin` and a `PNPM_SCRIPT_SRC_DIR` or `INIT_CWD` that resolves
 exactly to the current worktree root. It also binds the effective `TMPDIR` and
 each visible `TMP` or `TEMP` value. The gate-owned
@@ -595,6 +597,28 @@ inside its sanitized child. Normal mapped commands inherit the gate-owned
 `GIT_*` controls before its first Git probe and from mapped descendants. The
 digest also binds stable content snapshots of ignored `.env` and `.env.*` files
 in workspace roots. It excludes tracked `.env.*.example` files.
+It also binds a bounded installed-dependency manifest. The gate snapshots
+`node_modules/.modules.yaml`, `.package-map.json`,
+`.pnpm-workspace-state-v1.json`, and `.pnpm/lock.yaml`. It removes only pnpm's
+volatile prune and validation timestamps. It normalizes exact worktree-root
+paths in JSON keys and values. For every material package root, it enumerates
+direct unscoped and scoped package links. It binds each link's bytes,
+normalized real target, modes, and linked `package.json` bytes. For each unique
+direct package, it hashes the names, types, modes, and sizes of top-level
+entries. It resolves exact paths declared by `main`, `module`, `types`,
+`typings`, `bin`, `browser`, `exports`, and `imports`. It hashes the complete
+resolved file through 512 KiB. It also binds implicit package-root index
+fallbacks and any nested `package.json` used during directory resolution. For a
+larger file, it hashes the size and the first and last 64 KiB. Symlink
+entrypoints also bind their link and resolved target. The manifest fails closed
+on an unsupported entry, dangling link, concurrent change, more than 16,384
+entries, a metadata file larger than 8 MiB, or more than 32 MiB of read content.
+Each file, link, and directory revalidates its identity before the manifest
+returns. This bounded identity detects a
+missing direct link or a changed bound payload without walking the complete
+package trees. Missing pnpm metadata or a missing linked `package.json` stops
+registration. Unrelated deep package files, wildcard export targets, and the
+unsampled middle of a large entrypoint stay outside this identity.
 The Turbo lint, build, and fixture-build keys declare the matching environment
 and dotenv inputs that the gate can reach. A new outer coordinator key cannot
 reuse an inner Turbo result that validated different inputs. The digest binds
@@ -810,15 +834,17 @@ reads each proc-fd target. It skips only non-absolute targets such as pipes,
 sockets, and anonymous inodes. The regular-file marker always has an absolute
 target. The scan compares the exact device and inode for every absolute target.
 It stops scanning a process after a match. Handle revalidation after a process
-identity or process-group snapshot limits the procfs environment and descriptor
-checks to the observed PID. Full refreshes still scan all PIDs to discover new
-or reparented descendants. The scan requires the process start identity to
-remain equal before and after identity and fd enumeration. Process-exit races
-are empty observations. A restricted `hidepid` mount, unreadable in-scope
-process, or other incomplete scan is a scan failure. When `/proc/self/fd`
-exists, a failed procfs scan fails closed and never falls back to `lsof`. macOS
-and hosts without `/proc/self/fd` use the witnessed `lsof` path. A host with
-neither scanner fails closed while a marker exists.
+identity or process-group snapshot reads the observed PID's NUL-delimited
+`/proc/<pid>/cmdline` records directly. It also limits the procfs environment
+and descriptor checks to that PID. This exact-PID path does not repeat the
+host-wide `pgrep` scan. Full refreshes still scan all PIDs to discover new or
+reparented descendants. The scan requires the process start identity to remain
+equal before and after identity and fd enumeration. Process-exit races are
+empty observations. A restricted `hidepid` mount, unreadable in-scope process,
+or other incomplete scan is a scan failure. When `/proc/self/fd` exists, a
+failed procfs scan fails closed and never falls back to `lsof`. macOS and hosts
+without `/proc/self/fd` use the witnessed `lsof` path. A host with neither
+scanner fails closed while a marker exists.
 
 Adoption preserves the incoming owner record's group and other read bits so a
 legacy waiter with shared-root access can observe the barrier. The replacement
@@ -1570,8 +1596,9 @@ of them.
    guard, because permission bits are not what the kernel decides on. The scan
    reads NUL-delimited records with Bash builtins and compares each complete
    record. It does not start `tr` or `grep` for each visible PID. An exact-PID
-   revalidation reads only that PID's environment. Full refreshes retain the
-   host-wide scan that discovers new descendants.
+   revalidation reads only that PID's argv and environment records. It does not
+   run the host-wide `pgrep` query. Full refreshes retain the host-wide scan
+   that discovers new descendants.
 
 8. **Elapsed time comes from the clock, not from counting sleeps.** A loop that
    adds its own poll interval per iteration is measuring what it asked for. Any
@@ -1668,6 +1695,12 @@ no other gate, dashboard server, browser fixture, or mapped command can overlap.
 A completed parallel worker still waits as a live group anchor while its
 no-lock parent drains it. The worker tracks the parent's exact PID/start
 identity and exits if that parent dies, because no successor owns its cleanup.
+If the normal no-lock drain fails, the parent uses its recorded direct-child,
+worker-group, and drain-capture identities for a bounded TERM/KILL settlement
+attempt. It rechecks each generation before it sends a signal. It keeps the
+original failure status because this fallback cannot prove that an unobserved
+detached process is absent. Failed teardown changes an otherwise successful
+`EXIT` status to 2.
 
 `AGENT_QUALITY_GATE_LOCK_HELD` remains an internal self-test path. The self-test
 exports `AGENT_QUALITY_GATE_LOCK=0` because its isolated fixture repositories

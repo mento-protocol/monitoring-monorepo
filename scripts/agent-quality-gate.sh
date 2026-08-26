@@ -606,7 +606,9 @@ parallel_command_sequence=0
 # background sleeps. Sequential commands run in the gate process; parallel
 # members run in their own process-group worker subshells, each maintaining its
 # own copy — which the parent's signal traps cannot see.
-active_timeout_pids=()
+# Each entry is PID|exact-start for one direct command/watchdog child. One
+# array assignment publishes the complete registry to the signal trap.
+active_timeout_records=()
 active_timeout_drain_identity=""
 
 # Process-group IDs of the in-flight parallel workers. Non-interactive Bash job
@@ -727,31 +729,316 @@ collect_process_tree() {
   echo "$pid"
 }
 
+# Return 0 only while PID still names the recorded runtime generation and is
+# still this shell's direct child. Return 1 after that generation is gone or the
+# PID was recycled. Return 2 when a live process cannot be identified safely.
+gate_active_timeout_direct_child_status() {
+  local pid="$1"
+  local expected_runtime="$2"
+  local parent_before parent_after current_runtime signal_probe
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 2
+  if [[ -z "$expected_runtime" ]]; then
+    signal_probe="$(gate_lock_process_signal_probe "$pid")" ||
+      signal_probe="error"
+    [[ "$signal_probe" == "gone" ]] && return 1
+    return 2
+  fi
+  parent_before="$(
+    ps -o ppid= -p "$pid" 2>/dev/null |
+      awk 'NF { print $1; exit }' || true
+  )"
+  current_runtime="$(gate_lock_process_runtime_start "$pid")"
+  parent_after="$(
+    ps -o ppid= -p "$pid" 2>/dev/null |
+      awk 'NF { print $1; exit }' || true
+  )"
+  if [[ "$current_runtime" != "$expected_runtime" ]]; then
+    if [[ -z "$current_runtime" ]]; then
+      signal_probe="$(gate_lock_process_signal_probe "$pid")" ||
+        signal_probe="error"
+      [[ "$signal_probe" == "gone" ]] || return 2
+    fi
+    return 1
+  fi
+  [[ "$parent_before" == "$$" && "$parent_after" == "$$" ]] || return 2
+}
+
+# Best-effort settlement for an explicit no-lock run after its complete
+# inherited-handle drain fails. Each argument group is KIND PID START. A root
+# must still be this shell's direct child. A worker must also remain the leader
+# of its recorded process group. The fallback snapshots exact start identities
+# before TERM and rechecks each identity before KILL. It never proves that an
+# unobserved detached descendant is absent, so its caller still returns the
+# original drain failure.
+teardown_no_lock_settle_known_processes() {
+  local kind pid expected_start
+  local current_start current_runtime current_parent verified_parent current_pgid
+  local snapshot candidate candidate_pgid candidate_start
+  local record signal_probe state
+  local attempt unsettled=0 fallback_status=0
+  local -a captured_records=()
+  local -a captured_runtime_records=()
+  local -a direct_children=()
+  [[ "$#" -gt 0 ]] || return 2
+
+  while [[ "$#" -ge 3 ]]; do
+    kind="$1"
+    pid="$2"
+    expected_start="$3"
+    shift 3
+    if [[ ! "$pid" =~ ^[1-9][0-9]*$ || -z "$expected_start" ]]; then
+      fallback_status=2
+      continue
+    fi
+    if [[ "$kind" == "captured" ]]; then
+      current_runtime="$(gate_lock_process_runtime_start "$pid")"
+      if [[ "$current_runtime" == "$expected_start" ]]; then
+        captured_runtime_records+=("${pid}|${expected_start}")
+      elif [[ -z "$current_runtime" ]]; then
+        signal_probe="$(gate_lock_process_signal_probe "$pid")" ||
+          signal_probe="error"
+        [[ "$signal_probe" == "gone" ]] || fallback_status=2
+      fi
+      continue
+    fi
+    current_parent="$(
+      ps -o ppid= -p "$pid" 2>/dev/null |
+        awk 'NF { print $1; exit }' || true
+    )"
+    current_start="$(gate_lock_process_runtime_start "$pid")"
+    verified_parent="$(
+      ps -o ppid= -p "$pid" 2>/dev/null |
+        awk 'NF { print $1; exit }' || true
+    )"
+    if [[ "$current_start" != "$expected_start" ]]; then
+      # A different generation is not ours. An empty read is safe only when
+      # the process is confirmed gone.
+      if [[ -z "$current_start" ]]; then
+        signal_probe="$(gate_lock_process_signal_probe "$pid")" ||
+          signal_probe="error"
+        [[ "$signal_probe" == "gone" ]] || fallback_status=2
+      fi
+      continue
+    fi
+    if [[ "$current_parent" != "$$" || "$verified_parent" != "$$" ]]; then
+      fallback_status=2
+      continue
+    fi
+    case "$kind" in
+      root)
+        # Register this exact direct child in the signal set before it can
+        # enter the reap set. A direct child is waitable only after the
+        # fallback has also recorded the generation that it will signal.
+        captured_records+=("${pid}|${expected_start}")
+        direct_children+=("$pid")
+        while IFS= read -r candidate; do
+          [[ "$candidate" =~ ^[1-9][0-9]*$ ]] || continue
+          [[ "$candidate" != "$pid" ]] || continue
+          candidate_start="$(gate_lock_process_runtime_start "$candidate")"
+          if [[ -n "$candidate_start" ]]; then
+            captured_records+=("${candidate}|${candidate_start}")
+          else
+            signal_probe="$(gate_lock_process_signal_probe "$candidate")" ||
+              signal_probe="error"
+            [[ "$signal_probe" == "gone" ]] || fallback_status=2
+          fi
+        done < <(collect_process_tree "$pid")
+        ;;
+      worker)
+        current_pgid="$(
+          ps -o pgid= -p "$pid" 2>/dev/null |
+            awk 'NF { print $1; exit }' || true
+        )"
+        if [[ "$current_pgid" != "$pid" ]]; then
+          fallback_status=2
+          continue
+        fi
+        if ! snapshot="$(ps -axo pid=,pgid= 2>/dev/null)"; then
+          fallback_status=2
+          continue
+        fi
+        # The PGID and complete snapshot are prerequisites for treating this
+        # direct child as a worker-group anchor. Do not wait on a rejected or
+        # unverifiable worker that this fallback did not record for signalling.
+        captured_records+=("${pid}|${expected_start}")
+        direct_children+=("$pid")
+        while read -r candidate candidate_pgid; do
+          [[ "$candidate" =~ ^[1-9][0-9]*$ &&
+            "$candidate_pgid" == "$pid" ]] || continue
+          [[ "$candidate" != "$pid" ]] || continue
+          candidate_start="$(gate_lock_process_runtime_start "$candidate")"
+          if [[ -n "$candidate_start" ]]; then
+            captured_records+=("${candidate}|${candidate_start}")
+          else
+            signal_probe="$(gate_lock_process_signal_probe "$candidate")" ||
+              signal_probe="error"
+            [[ "$signal_probe" == "gone" ]] || fallback_status=2
+          fi
+        done <<< "$snapshot"
+        ;;
+      *)
+        fallback_status=2
+        ;;
+    esac
+  done
+  [[ "$#" -eq 0 ]] || fallback_status=2
+
+  for record in "${captured_records[@]+"${captured_records[@]}"}"; do
+    pid="${record%%|*}"
+    expected_start="${record#*|}"
+    current_start="$(gate_lock_process_runtime_start "$pid")"
+    [[ -n "$current_start" && "$current_start" == "$expected_start" ]] ||
+      continue
+    kill -TERM "$pid" 2>/dev/null || {
+      signal_probe="$(gate_lock_process_signal_probe "$pid")" ||
+        signal_probe="error"
+      [[ "$signal_probe" == "gone" ]] || fallback_status=2
+    }
+  done
+  for record in "${captured_runtime_records[@]+"${captured_runtime_records[@]}"}"; do
+    pid="${record%%|*}"
+    expected_start="${record#*|}"
+    current_runtime="$(gate_lock_process_runtime_start "$pid")"
+    [[ -n "$current_runtime" && "$current_runtime" == "$expected_start" ]] ||
+      continue
+    kill -TERM "$pid" 2>/dev/null || {
+      signal_probe="$(gate_lock_process_signal_probe "$pid")" ||
+        signal_probe="error"
+      [[ "$signal_probe" == "gone" ]] || fallback_status=2
+    }
+  done
+  sleep 1
+  for record in "${captured_records[@]+"${captured_records[@]}"}"; do
+    pid="${record%%|*}"
+    expected_start="${record#*|}"
+    current_start="$(gate_lock_process_runtime_start "$pid")"
+    [[ -n "$current_start" && "$current_start" == "$expected_start" ]] ||
+      continue
+    state="$(
+      ps -o stat= -p "$pid" 2>/dev/null |
+        awk 'NF { print $1; exit }' || true
+    )"
+    [[ "$state" == Z* ]] && continue
+    current_start="$(gate_lock_process_runtime_start "$pid")"
+    [[ "$current_start" == "$expected_start" ]] || continue
+    kill -KILL "$pid" 2>/dev/null || {
+      signal_probe="$(gate_lock_process_signal_probe "$pid")" ||
+        signal_probe="error"
+      [[ "$signal_probe" == "gone" ]] || fallback_status=2
+    }
+  done
+  for record in "${captured_runtime_records[@]+"${captured_runtime_records[@]}"}"; do
+    pid="${record%%|*}"
+    expected_start="${record#*|}"
+    current_runtime="$(gate_lock_process_runtime_start "$pid")"
+    [[ -n "$current_runtime" && "$current_runtime" == "$expected_start" ]] ||
+      continue
+    state="$(
+      ps -o stat= -p "$pid" 2>/dev/null |
+        awk 'NF { print $1; exit }' || true
+    )"
+    [[ "$state" == Z* ]] && continue
+    current_runtime="$(gate_lock_process_runtime_start "$pid")"
+    [[ "$current_runtime" == "$expected_start" ]] || continue
+    kill -KILL "$pid" 2>/dev/null || {
+      signal_probe="$(gate_lock_process_signal_probe "$pid")" ||
+        signal_probe="error"
+      [[ "$signal_probe" == "gone" ]] || fallback_status=2
+    }
+  done
+
+  for ((attempt = 0; attempt < 40; attempt++)); do
+    unsettled=0
+    for record in "${captured_records[@]+"${captured_records[@]}"}"; do
+      pid="${record%%|*}"
+      expected_start="${record#*|}"
+      current_start="$(gate_lock_process_runtime_start "$pid")"
+      [[ -n "$current_start" && "$current_start" == "$expected_start" ]] ||
+        continue
+      state="$(
+        ps -o stat= -p "$pid" 2>/dev/null |
+          awk 'NF { print $1; exit }' || true
+      )"
+      [[ "$state" == Z* ]] && continue
+      unsettled=1
+      break
+    done
+    if [[ "$unsettled" -eq 0 ]]; then
+      for record in "${captured_runtime_records[@]+"${captured_runtime_records[@]}"}"; do
+        pid="${record%%|*}"
+        expected_start="${record#*|}"
+        current_runtime="$(gate_lock_process_runtime_start "$pid")"
+        [[ -n "$current_runtime" && "$current_runtime" == "$expected_start" ]] ||
+          continue
+        state="$(
+          ps -o stat= -p "$pid" 2>/dev/null |
+            awk 'NF { print $1; exit }' || true
+        )"
+        [[ "$state" == Z* ]] && continue
+        unsettled=1
+        break
+      done
+    fi
+    [[ "$unsettled" -eq 1 ]] || break
+    sleep 0.05
+  done
+  [[ "$unsettled" -eq 0 ]] || fallback_status=2
+  if [[ "$unsettled" -eq 0 ]]; then
+    for pid in "${direct_children[@]+"${direct_children[@]}"}"; do
+      wait "$pid" 2>/dev/null || true
+    done
+  fi
+  [[ "$fallback_status" -eq 0 ]] || {
+    echo "error: the no-lock fallback could not settle every recorded process identity." >&2
+  }
+  return "$fallback_status"
+}
+
 teardown_active_timeouts() {
   local pid
   local pgid
   local drain_identity
+  local drain_status=0
+  local record root_runtime captured_pid _captured_legacy captured_runtime
   local worker_start
   local clear_request_marker=0
   local timeout_drain_identity="$active_timeout_drain_identity"
-  local -a roots=("${active_timeout_pids[@]+"${active_timeout_pids[@]}"}")
+  local -a timeout_records=("${active_timeout_records[@]+"${active_timeout_records[@]}"}")
+  local -a roots=()
   local -a worker_pgids=("${active_worker_pgids[@]+"${active_worker_pgids[@]}"}")
   local -a worker_drain_identities=("${active_worker_drain_identities[@]+"${active_worker_drain_identities[@]}"}")
   local -a worker_start_identities=("${active_worker_start_identities[@]+"${active_worker_start_identities[@]}"}")
-  active_timeout_pids=()
-  active_timeout_drain_identity=""
-  active_worker_pgids=()
-  active_worker_drain_identities=()
-  active_worker_start_identities=()
-  [[ -n "${roots[*]-}" || -n "${worker_pgids[*]-}" ||
+  local -a fallback_args=()
+  for record in "${timeout_records[@]+"${timeout_records[@]}"}"; do
+    pid="${record%%|*}"
+    root_runtime="${record#*|}"
+    if [[ "$record" != *"|"* || ! "$pid" =~ ^[1-9][0-9]*$ ]]; then
+      echo "error: direct-child cleanup registry is inconsistent." >&2
+      return 2
+    fi
+    roots+=("$record")
+    fallback_args+=(root "$pid" "$root_runtime")
+  done
+  [[ -n "${timeout_records[*]-}" || -n "${worker_pgids[*]-}" ||
     -n "${worker_drain_identities[*]-}" ||
     -n "${worker_start_identities[*]-}" ||
     -n "$timeout_drain_identity" ]] || return 0
   if ! [[ "${#worker_pgids[@]}" -eq "${#worker_drain_identities[@]}" &&
     "${#worker_pgids[@]}" -eq "${#worker_start_identities[@]}" ]]; then
     echo "error: parallel worker cleanup registry is inconsistent." >&2
-    return 0
+    case "$gate_lock_enabled" in
+      0|false|no)
+        teardown_no_lock_settle_known_processes \
+          "${fallback_args[@]+"${fallback_args[@]}"}" || true
+        ;;
+    esac
+    return 2
   fi
+  local worker_index=0
+  for pgid in "${worker_pgids[@]+"${worker_pgids[@]}"}"; do
+    fallback_args+=(worker "$pgid" "${worker_start_identities[$worker_index]}")
+    worker_index=$((worker_index + 1))
+  done
 
   # Persist and drain every exact command identity before any signal can
   # destroy its last discoverable ancestor. A failed drain retains
@@ -761,19 +1048,43 @@ teardown_active_timeouts() {
     if [[ "$timeout_drain_identity" == "${gate_run_id:-$gate_lock_token}" ]]; then
       clear_request_marker=1
     fi
-    if ! drain_completed_command_identity \
-      "$timeout_drain_identity" "$clear_request_marker"; then
-      return 0
+    drain_completed_command_identity \
+      "$timeout_drain_identity" "$clear_request_marker" || drain_status=$?
+    if [[ "$drain_status" -ne 0 ]]; then
+      case "$gate_lock_enabled" in
+        0|false|no)
+          while IFS='|' read -r captured_pid _captured_legacy captured_runtime; do
+            [[ "$captured_pid" =~ ^[1-9][0-9]*$ &&
+              -n "$captured_runtime" ]] || continue
+            fallback_args+=(captured "$captured_pid" "$captured_runtime")
+          done <<< "$gate_drain_capture"
+          teardown_no_lock_settle_known_processes \
+            "${fallback_args[@]+"${fallback_args[@]}"}" || true
+          ;;
+      esac
+      return "$drain_status"
     fi
   fi
-  local worker_index=0
+  worker_index=0
   for drain_identity in "${worker_drain_identities[@]+"${worker_drain_identities[@]}"}"; do
     pgid="${worker_pgids[$worker_index]}"
     worker_start="${worker_start_identities[$worker_index]}"
     worker_index=$((worker_index + 1))
-    if ! drain_completed_parallel_command \
-      "$drain_identity" "$pgid" "$worker_start"; then
-      return 0
+    drain_completed_parallel_command \
+      "$drain_identity" "$pgid" "$worker_start" || drain_status=$?
+    if [[ "$drain_status" -ne 0 ]]; then
+      case "$gate_lock_enabled" in
+        0|false|no)
+          while IFS='|' read -r captured_pid _captured_legacy captured_runtime; do
+            [[ "$captured_pid" =~ ^[1-9][0-9]*$ &&
+              -n "$captured_runtime" ]] || continue
+            fallback_args+=(captured "$captured_pid" "$captured_runtime")
+          done <<< "$gate_drain_capture"
+          teardown_no_lock_settle_known_processes \
+            "${fallback_args[@]+"${fallback_args[@]}"}" || true
+          ;;
+      esac
+      return "$drain_status"
     fi
   done
   # Snapshot every descendant BEFORE signalling: TERM kills intermediate
@@ -783,22 +1094,67 @@ teardown_active_timeouts() {
   # folded into each command identity's durable capture above.
   local -a tree=()
   local -a tree_identities=()
-  local host_identities=""
-  # Probing our own PID answers whether this host can identify processes at
-  # all. Without that probe, "no identity recorded" would be indistinguishable
-  # from "host cannot record identities", and the KILL pass below would either
-  # skip every survivor on an identity-less host or trust bare PIDs on a host
-  # that could have done better.
-  [[ -z "$(gate_lock_process_start $$)" ]] || host_identities=1
-  for pid in "${roots[@]+"${roots[@]}"}"; do
+  local -a tree_direct_roots=()
+  local teardown_idx=0
+  local teardown_recorded teardown_current teardown_root_status
+  local teardown_validation_status=0
+  local signal_probe
+  for record in "${roots[@]+"${roots[@]}"}"; do
+    pid="${record%%|*}"
+    root_runtime="${record#*|}"
+    if gate_active_timeout_direct_child_status "$pid" "$root_runtime"; then
+      :
+    else
+      teardown_root_status=$?
+      [[ "$teardown_root_status" -eq 1 ]] || teardown_validation_status=2
+      continue
+    fi
     while IFS= read -r child_pid; do
       if [[ -n "$child_pid" ]]; then
+        teardown_current="$(gate_lock_process_runtime_start "$child_pid")"
+        if [[ -z "$teardown_current" ]]; then
+          signal_probe="$(gate_lock_process_signal_probe "$child_pid")" ||
+            signal_probe="error"
+          [[ "$signal_probe" == "gone" ]] || teardown_validation_status=2
+          continue
+        fi
         tree+=("$child_pid")
-        tree_identities+=("$(gate_lock_process_start "$child_pid")")
+        if [[ "$child_pid" == "$pid" ]]; then
+          # Bind the root to the registry generation, not to a PID that could
+          # have been recycled while the process-tree walk ran.
+          tree_identities+=("$root_runtime")
+          tree_direct_roots+=(1)
+        else
+          tree_identities+=("$teardown_current")
+          tree_direct_roots+=(0)
+        fi
       fi
     done < <(collect_process_tree "$pid")
   done
-  for pid in "${tree[@]+"${tree[@]}"}"; do
+  for teardown_idx in "${!tree[@]}"; do
+    pid="${tree[$teardown_idx]}"
+    teardown_recorded="${tree_identities[$teardown_idx]-}"
+    if [[ "${tree_direct_roots[$teardown_idx]-}" -eq 1 ]]; then
+      if gate_active_timeout_direct_child_status \
+        "$pid" "$teardown_recorded"; then
+        :
+      else
+        teardown_root_status=$?
+        [[ "$teardown_root_status" -eq 1 ]] || teardown_validation_status=2
+        continue
+      fi
+    else
+      teardown_current="$(gate_lock_process_runtime_start "$pid")"
+      if [[ -z "$teardown_recorded" ||
+        "$teardown_current" != "$teardown_recorded" ]]; then
+        if [[ -z "$teardown_current" ]]; then
+          signal_probe="$(gate_lock_process_signal_probe "$pid")" ||
+            signal_probe="error"
+          [[ "$signal_probe" == "gone" ]] || teardown_validation_status=2
+        fi
+        continue
+      fi
+    fi
     kill "-TERM" "$pid" 2>/dev/null || true
   done
   # Same TERM-then-KILL grace as run_with_timeout's watchdog: a manual
@@ -806,23 +1162,29 @@ teardown_active_timeouts() {
   # mapped command (or descendant) running just because it wasn't the
   # timeout path that tore it down.
   sleep 3
-  local teardown_idx=0
-  local teardown_recorded teardown_current
-  for pid in "${tree[@]+"${tree[@]}"}"; do
+  for teardown_idx in "${!tree[@]}"; do
+    pid="${tree[$teardown_idx]}"
     teardown_recorded="${tree_identities[$teardown_idx]-}"
-    teardown_idx=$((teardown_idx + 1))
-    if [[ -n "$host_identities" ]]; then
-      # Three seconds is long enough for a PID to be recycled, and KILL cannot
-      # be taken back. The number must still name the process captured above:
-      # an empty recorded identity means it was already gone at the snapshot,
-      # and a mismatch means it is somebody else now — either way this signal
-      # is not ours to send. Where the host has no identity source at all, the
-      # PID is the only selector there is, and these are this run's own
-      # children inside a three-second window, so PID alone is the lesser
-      # risk there.
-      [[ -n "$teardown_recorded" ]] || continue
-      teardown_current="$(gate_lock_process_start "$pid")"
-      [[ "$teardown_current" == "$teardown_recorded" ]] || continue
+    if [[ "${tree_direct_roots[$teardown_idx]-}" -eq 1 ]]; then
+      if gate_active_timeout_direct_child_status \
+        "$pid" "$teardown_recorded"; then
+        :
+      else
+        teardown_root_status=$?
+        [[ "$teardown_root_status" -eq 1 ]] || teardown_validation_status=2
+        continue
+      fi
+    else
+      teardown_current="$(gate_lock_process_runtime_start "$pid")"
+      if [[ -z "$teardown_recorded" ||
+        "$teardown_current" != "$teardown_recorded" ]]; then
+        if [[ -z "$teardown_current" ]]; then
+          signal_probe="$(gate_lock_process_signal_probe "$pid")" ||
+            signal_probe="error"
+          [[ "$signal_probe" == "gone" ]] || teardown_validation_status=2
+        fi
+        continue
+      fi
     fi
     kill "-KILL" "$pid" 2>/dev/null || true
   done
@@ -832,6 +1194,20 @@ teardown_active_timeouts() {
   for pgid in "${worker_pgids[@]+"${worker_pgids[@]}"}"; do
     wait "$pgid" 2>/dev/null || true
   done
+  if [[ "$teardown_validation_status" -ne 0 ]]; then
+    echo "error: active direct-child cleanup could not revalidate every recorded process identity." >&2
+    return 2
+  fi
+  # Clear the shared registries only after every exact drain and fallback tree
+  # teardown succeeds. A failed active drain can return through run_with_timeout
+  # and reach the EXIT trap. Retaining the same identities lets that trap retry
+  # the drain. This is required for --no-lock, which has no durable owner that a
+  # later gate can use to recover leaked descendants.
+  active_timeout_records=()
+  active_timeout_drain_identity=""
+  active_worker_pgids=()
+  active_worker_drain_identities=()
+  active_worker_start_identities=()
 }
 
 # ---------------------------------------------------------------------------
@@ -5103,9 +5479,10 @@ release_gate_run_lock() {
 
 cleanup_tmpfiles() {
   local original_status=$?
+  local teardown_status=0
   local marker_status=0
   local release_status=0
-  teardown_active_timeouts
+  teardown_active_timeouts || teardown_status=$?
   if [[ ${#tmpfiles[@]} -gt 0 ]]; then
     rm -f "${tmpfiles[@]+"${tmpfiles[@]}"}"
   fi
@@ -5153,7 +5530,8 @@ cleanup_tmpfiles() {
     release_status=$?
   fi
   if [[ "$original_status" -eq 0 ]] && {
-    [[ "$marker_status" -ne 0 ]] || [[ "$release_status" -ne 0 ]]
+    [[ "$teardown_status" -ne 0 ]] ||
+      [[ "$marker_status" -ne 0 ]] || [[ "$release_status" -ne 0 ]]
   }; then
     trap - EXIT
     exit 2
@@ -5163,6 +5541,7 @@ trap cleanup_tmpfiles EXIT
 
 on_terminating_signal() {
   local signal="$1"
+  local teardown_status=0
   if [[ "$worker_registration_in_progress" -eq 1 ||
     "$worker_settlement_in_progress" -eq 1 ]]; then
     [[ -n "$pending_terminating_signal" ]] ||
@@ -5170,7 +5549,10 @@ on_terminating_signal() {
     return 0
   fi
   trap '' INT TERM
-  teardown_active_timeouts
+  teardown_active_timeouts || teardown_status=$?
+  if [[ "$teardown_status" -ne 0 ]]; then
+    echo "error: active process teardown returned ${teardown_status}; forwarding ${signal} after the no-lock fallback and durable recovery handling." >&2
+  fi
   trap - "$signal"
   kill "-${signal}" "$$" 2>/dev/null || exit 143
 }
@@ -6271,6 +6653,7 @@ trunk_provisioning_probe() {
   local close_parallel_worker_control_fd="${7:-0}"
   local handshake_file="${8:-}"
   local pid
+  local pid_start
   local waited=0
   local had_errexit=0
   local rc
@@ -6328,7 +6711,8 @@ trunk_provisioning_probe() {
   # INT/TERM cleanup must see the probe while its command identity and
   # scheduler lease remain active. The private readiness file distinguishes a
   # launcher failure from a wrapper that never retained the recovery handles.
-  active_timeout_pids=("$pid")
+  pid_start="$(gate_lock_process_runtime_start "$pid")"
+  active_timeout_records=("${pid}|${pid_start}")
   while kill -0 "$pid" 2>/dev/null &&
     [[ "$waited" -lt "$trunk_provisioning_probe_timeout_seconds" ]]; do
     sleep 1
@@ -6344,7 +6728,7 @@ trunk_provisioning_probe() {
     rc=$?
     [[ "$rc" -le 128 ]] || rc=0
   fi
-  active_timeout_pids=()
+  active_timeout_records=()
 
   if ! read_parallel_worker_result_value "$handshake_file" ready \
     >/dev/null 2>&1; then
@@ -6999,7 +7383,9 @@ run_with_timeout() {
   local command_drain_identity="${3:-}"
   local trunk_probe_handshake_file="${4:-}"
   local cmd_pid
+  local cmd_start
   local watchdog_pid
+  local watchdog_start
   local rc
   local release_rc=0
   local drain_rc=0
@@ -7261,7 +7647,12 @@ EOF_KILL
     "$cmd_pid" "$effective_command_timeout_seconds" "$timeout_marker" "$$" \
     "$close_parallel_worker_control_fd" >/dev/null 2>&1 &
   watchdog_pid=$!
-  active_timeout_pids=("$cmd_pid" "$watchdog_pid")
+  cmd_start="$(gate_lock_process_runtime_start "$cmd_pid")"
+  watchdog_start="$(gate_lock_process_runtime_start "$watchdog_pid")"
+  active_timeout_records=(
+    "${cmd_pid}|${cmd_start}"
+    "${watchdog_pid}|${watchdog_start}"
+  )
 
   wait "$cmd_pid"
   rc=$?
@@ -7277,7 +7668,7 @@ EOF_KILL
     kill_process_tree "$watchdog_pid" TERM
     wait "$watchdog_pid" 2>/dev/null
   fi
-  active_timeout_pids=()
+  active_timeout_records=()
   # A failed Trunk command is not downgraded until the launcher proves that it
   # cannot provision its CLI. Treat that probe as part of the same mapped
   # command: it inherits the command's tags and marker handles, and the exact
@@ -7599,9 +7990,13 @@ run_mapped_command_to_files() {
 
 fail_command_scheduler_infrastructure() {
   local command="$1"
+  local teardown_status=0
   echo "error: command scheduler infrastructure failed for: ${command}" >&2
   echo "The quality gate stops before it schedules another command." >&2
-  teardown_active_timeouts
+  teardown_active_timeouts || teardown_status=$?
+  if [[ "$teardown_status" -ne 0 ]]; then
+    echo "error: active command teardown after scheduler failure did not complete." >&2
+  fi
   if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
     gate_coordinator_is_active &&
     declare -F gate_coordinator_cancel_and_ack >/dev/null 2>&1; then
@@ -7685,9 +8080,13 @@ release_parallel_worker_lease() {
 fail_parallel_worker_infrastructure() {
   local command="$1"
   local field="$2"
+  local teardown_status=0
   echo "error: parallel worker left an invalid ${field} result for: ${command}" >&2
   echo "The quality gate cannot trust this worker completion and stops scheduling." >&2
-  teardown_active_timeouts
+  teardown_active_timeouts || teardown_status=$?
+  if [[ "$teardown_status" -ne 0 ]]; then
+    echo "error: active command teardown after worker failure did not complete." >&2
+  fi
   if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
     gate_coordinator_is_active &&
     declare -F gate_coordinator_cancel_and_ack >/dev/null 2>&1; then

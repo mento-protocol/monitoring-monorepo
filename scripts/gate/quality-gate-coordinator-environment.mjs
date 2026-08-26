@@ -11,19 +11,32 @@ import {
   realpathSync,
   statSync,
 } from "node:fs";
-import { delimiter, isAbsolute, join, normalize, resolve } from "node:path";
+import {
+  delimiter,
+  isAbsolute,
+  join,
+  normalize,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { fileURLToPath } from "node:url";
 import { TextDecoder } from "node:util";
 
 export const LOCAL_BIN_MAX_ENTRIES = 8_192;
 export const LOCAL_BIN_MAX_FILE_BYTES = 64 * 1024 * 1024;
 export const LOCAL_BIN_MAX_TOTAL_BYTES = 256 * 1024 * 1024;
+export const INSTALLED_DEPENDENCY_MAX_ENTRIES = 16_384;
+export const INSTALLED_DEPENDENCY_MAX_FILE_BYTES = 8 * 1024 * 1024;
+export const INSTALLED_DEPENDENCY_MAX_PAYLOAD_FILE_BYTES = 512 * 1024;
+export const INSTALLED_DEPENDENCY_MAX_TOTAL_BYTES = 32 * 1024 * 1024;
 const ENV_FILE_MAX_BYTES = 1024 * 1024;
 const ENV_FILE_MAX_TOTAL_BYTES = 16 * 1024 * 1024;
 const ENV_FILE_MAX_NAMES_PER_ROOT = 128;
 
 const exactEnvironmentNames = new Set([
   "ALL_PROXY",
+  "APPDATA",
   "BROWSERSLIST",
   "CC",
   "CFLAGS",
@@ -88,6 +101,7 @@ const exactEnvironmentNames = new Set([
   "SSL_CERT_DIR",
   "SSL_CERT_FILE",
   "TEMP",
+  "TERRAFORM_CONFIG",
   "TMP",
   "TMPDIR",
   "TZ",
@@ -228,6 +242,34 @@ const productionLocalBinLimits = Object.freeze({
   maxFileBytes: LOCAL_BIN_MAX_FILE_BYTES,
   maxTotalBytes: LOCAL_BIN_MAX_TOTAL_BYTES,
 });
+const installedDependencyMetadata = Object.freeze([
+  Object.freeze({
+    relativePath: ".modules.yaml",
+    ignoredRootFields: Object.freeze(["prunedAt"]),
+    json: true,
+  }),
+  Object.freeze({
+    relativePath: ".package-map.json",
+    ignoredRootFields: Object.freeze([]),
+    json: true,
+  }),
+  Object.freeze({
+    relativePath: ".pnpm-workspace-state-v1.json",
+    ignoredRootFields: Object.freeze(["lastValidatedTimestamp"]),
+    json: true,
+  }),
+  Object.freeze({
+    relativePath: join(".pnpm", "lock.yaml"),
+    ignoredRootFields: Object.freeze([]),
+    json: false,
+  }),
+]);
+const productionInstalledDependencyLimits = Object.freeze({
+  maxEntries: INSTALLED_DEPENDENCY_MAX_ENTRIES,
+  maxFileBytes: INSTALLED_DEPENDENCY_MAX_FILE_BYTES,
+  maxPayloadFileBytes: INSTALLED_DEPENDENCY_MAX_PAYLOAD_FILE_BYTES,
+  maxTotalBytes: INSTALLED_DEPENDENCY_MAX_TOTAL_BYTES,
+});
 
 function manifestError(message) {
   const error = new Error(message);
@@ -241,10 +283,20 @@ function environmentError(message) {
   return error;
 }
 
+function installedDependencyError(message) {
+  const error = new Error(message);
+  error.code = "INSTALLED_DEPENDENCY_MANIFEST_INVALID";
+  return error;
+}
+
 function boundedSnapshotError(subject, message) {
-  return subject === "local executable"
-    ? manifestError(`${subject} ${message}`)
-    : environmentError(`${subject} ${message}`);
+  if (subject === "local executable") {
+    return manifestError(`${subject} ${message}`);
+  }
+  if (subject.startsWith("installed dependency")) {
+    return installedDependencyError(`${subject} ${message}`);
+  }
+  return environmentError(`${subject} ${message}`);
 }
 
 function sameIdentity(left, right) {
@@ -287,7 +339,7 @@ function boundedSortedNames(path, maxEntries) {
 function normalizeRootPathText(path, physicalRepoRoot) {
   if (normalize(path) !== path) return path;
   if (path === physicalRepoRoot) return worktreeToken;
-  if (!path.startsWith(`${physicalRepoRoot}/`)) return path;
+  if (!path.startsWith(`${physicalRepoRoot}${sep}`)) return path;
   return `${worktreeToken}${path.slice(physicalRepoRoot.length)}`;
 }
 
@@ -618,6 +670,1096 @@ export function normalizedLocalBinManifestForTest(repoRoot, overrides) {
   );
 }
 
+function compareUtf8(left, right) {
+  return Buffer.compare(Buffer.from(left), Buffer.from(right));
+}
+
+function canonicalInstalledJson(
+  value,
+  physicalRepoRoot,
+  ignoredRootFields,
+  depth = 0,
+) {
+  if (Array.isArray(value)) {
+    return `[${value
+      .map((entry) =>
+        canonicalInstalledJson(
+          entry,
+          physicalRepoRoot,
+          ignoredRootFields,
+          depth + 1,
+        ),
+      )
+      .join(",")}]`;
+  }
+  if (value !== null && typeof value === "object") {
+    const normalizedEntries = Object.entries(value)
+      .filter(([name]) => depth !== 0 || !ignoredRootFields.includes(name))
+      .map(([name, entry]) => [
+        normalizeRootPathText(name, physicalRepoRoot),
+        canonicalInstalledJson(
+          entry,
+          physicalRepoRoot,
+          ignoredRootFields,
+          depth + 1,
+        ),
+      ])
+      .sort(([left], [right]) => compareUtf8(left, right));
+    for (let index = 1; index < normalizedEntries.length; index += 1) {
+      if (normalizedEntries[index - 1][0] === normalizedEntries[index][0]) {
+        throw installedDependencyError(
+          "installed dependency metadata has duplicate normalized keys",
+        );
+      }
+    }
+    return `{${normalizedEntries
+      .map(([name, entry]) => `${JSON.stringify(name)}:${entry}`)
+      .join(",")}}`;
+  }
+  if (typeof value === "string") {
+    return JSON.stringify(normalizeRootPathText(value, physicalRepoRoot));
+  }
+  return JSON.stringify(value);
+}
+
+function normalizedInstalledMetadataBytes(bytes, descriptor, physicalRepoRoot) {
+  if (!descriptor.json) return bytes;
+  const text = exactUtf8Text(bytes);
+  if (text === null) {
+    throw installedDependencyError(
+      `installed dependency metadata is not UTF-8 JSON: ${descriptor.relativePath}`,
+    );
+  }
+  let value;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw installedDependencyError(
+      `installed dependency metadata is not valid JSON: ${descriptor.relativePath}`,
+    );
+  }
+  return Buffer.from(
+    canonicalInstalledJson(
+      value,
+      physicalRepoRoot,
+      descriptor.ignoredRootFields,
+    ),
+  );
+}
+
+function consumeInstalledDependencyBytes(budget, byteCount, limits) {
+  if (byteCount > limits.maxTotalBytes - budget.bytes) {
+    throw installedDependencyError(
+      "installed dependency manifest exceeds its byte limit",
+    );
+  }
+  budget.bytes += byteCount;
+}
+
+function consumeInstalledDependencyEntries(budget, count, limits) {
+  budget.entries += count;
+  if (budget.entries > limits.maxEntries) {
+    throw installedDependencyError(
+      "installed dependency manifest exceeds its entry limit",
+    );
+  }
+}
+
+function installedMetadataFileSnapshot(
+  nodeModulesPath,
+  descriptor,
+  physicalRepoRoot,
+  budget,
+  limits,
+) {
+  consumeInstalledDependencyEntries(budget, 1, limits);
+  const path = join(nodeModulesPath, descriptor.relativePath);
+  let before;
+  try {
+    before = lstatSync(path, { bigint: true });
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      throw installedDependencyError(
+        `installed dependency metadata is missing: ${descriptor.relativePath}`,
+      );
+    }
+    throw error;
+  }
+  if (!before.isFile()) {
+    throw installedDependencyError(
+      `installed dependency metadata is not a regular file: ${descriptor.relativePath}`,
+    );
+  }
+  if (before.size > BigInt(limits.maxFileBytes)) {
+    throw installedDependencyError(
+      `installed dependency metadata exceeds the per-file size limit: ${descriptor.relativePath}`,
+    );
+  }
+  consumeInstalledDependencyBytes(budget, Number(before.size), limits);
+  const bytes = readBoundedRegularFile(path, before, {
+    maxFileBytes: limits.maxFileBytes,
+    noFollow: true,
+    subject: `installed dependency metadata ${descriptor.relativePath}`,
+  });
+  const hash = createHash("sha256");
+  hash.update("installed-dependency-metadata-v1\0");
+  updateField(hash, "path", descriptor.relativePath);
+  updateField(hash, "mode", before.mode.toString(8));
+  updateField(
+    hash,
+    "content",
+    normalizedInstalledMetadataBytes(bytes, descriptor, physicalRepoRoot),
+  );
+  return hash.digest("hex");
+}
+
+function boundedInstalledDependencyNames(path, remainingEntries) {
+  const directory = opendirSync(path);
+  const names = [];
+  try {
+    for (;;) {
+      const entry = directory.readSync();
+      if (entry === null) break;
+      names.push(entry.name);
+      if (names.length > remainingEntries) {
+        throw installedDependencyError(
+          "installed dependency manifest exceeds its entry limit",
+        );
+      }
+    }
+  } finally {
+    directory.closeSync();
+  }
+  return names.sort(compareUtf8);
+}
+
+function installedDependencyPackageJsonSnapshot(
+  packagePath,
+  relativePath,
+  physicalRepoRoot,
+  budget,
+  limits,
+) {
+  const path = join(packagePath, "package.json");
+  let before;
+  try {
+    before = lstatSync(path, { bigint: true });
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      throw installedDependencyError(
+        `installed dependency package manifest is missing: ${relativePath}`,
+      );
+    }
+    throw error;
+  }
+  let linkBytes = Buffer.alloc(0);
+  let targetMode = "";
+  let content;
+  let contentSize;
+  if (before.isFile()) {
+    contentSize = before.size;
+    content = readBoundedRegularFile(path, before, {
+      maxFileBytes: limits.maxFileBytes,
+      noFollow: true,
+      subject: `installed dependency package manifest ${relativePath}`,
+    });
+  } else if (before.isSymbolicLink()) {
+    linkBytes = readlinkSync(path, { encoding: "buffer" });
+    const targetBefore = statSync(path, { bigint: true });
+    if (!targetBefore.isFile()) {
+      throw installedDependencyError(
+        `installed dependency package manifest does not resolve to a regular file: ${relativePath}`,
+      );
+    }
+    targetMode = targetBefore.mode.toString(8);
+    contentSize = targetBefore.size;
+    content = readBoundedRegularFile(path, targetBefore, {
+      maxFileBytes: limits.maxFileBytes,
+      noFollow: false,
+      subject: `installed dependency package manifest ${relativePath}`,
+    });
+    if (!sameIdentity(targetBefore, statSync(path, { bigint: true }))) {
+      throw installedDependencyError(
+        `installed dependency package manifest target changed while read: ${relativePath}`,
+      );
+    }
+    if (!linkBytes.equals(readlinkSync(path, { encoding: "buffer" }))) {
+      throw installedDependencyError(
+        `installed dependency package manifest link changed while read: ${relativePath}`,
+      );
+    }
+  } else {
+    throw installedDependencyError(
+      `installed dependency package manifest has an unsupported type: ${relativePath}`,
+    );
+  }
+  if (contentSize > BigInt(limits.maxFileBytes)) {
+    throw installedDependencyError(
+      `installed dependency package manifest exceeds the per-file size limit: ${relativePath}`,
+    );
+  }
+  consumeInstalledDependencyBytes(
+    budget,
+    Number(contentSize) + linkBytes.length,
+    limits,
+  );
+  if (!sameIdentity(before, lstatSync(path, { bigint: true }))) {
+    throw installedDependencyError(
+      `installed dependency package manifest changed while read: ${relativePath}`,
+    );
+  }
+  const hash = createHash("sha256");
+  hash.update("installed-dependency-package-json-v1\0");
+  updateField(hash, "type", entryType(before));
+  updateField(hash, "mode", before.mode.toString(8));
+  updateField(hash, "link", normalizeLinkPath(linkBytes, physicalRepoRoot));
+  updateField(hash, "target-mode", targetMode);
+  updateField(hash, "content", content);
+  const manifestText = exactUtf8Text(content);
+  if (manifestText === null) {
+    throw installedDependencyError(
+      `installed dependency package manifest is not UTF-8 JSON: ${relativePath}`,
+    );
+  }
+  let manifest;
+  try {
+    manifest = JSON.parse(manifestText);
+  } catch {
+    throw installedDependencyError(
+      `installed dependency package manifest is not valid JSON: ${relativePath}`,
+    );
+  }
+  if (
+    manifest === null ||
+    typeof manifest !== "object" ||
+    Array.isArray(manifest)
+  ) {
+    throw installedDependencyError(
+      `installed dependency package manifest is not a JSON object: ${relativePath}`,
+    );
+  }
+  return { digest: hash.digest("hex"), manifest };
+}
+
+function installedDependencyPayloadTopologyEntrySnapshot(
+  path,
+  relativePath,
+  physicalRepoRoot,
+  budget,
+  limits,
+) {
+  const before = lstatSync(path, { bigint: true });
+  const hash = createHash("sha256");
+  hash.update("installed-dependency-payload-entry-v1\0");
+  updateField(hash, "path", relativePath);
+  updateField(hash, "type", entryType(before));
+  updateField(hash, "mode", before.mode.toString(8));
+
+  if (before.isFile()) {
+    updateField(hash, "size", before.size.toString());
+  } else if (before.isSymbolicLink()) {
+    const linkBytes = readlinkSync(path, { encoding: "buffer" });
+    consumeInstalledDependencyBytes(budget, linkBytes.length, limits);
+    updateField(hash, "link", normalizeLinkPath(linkBytes, physicalRepoRoot));
+    if (
+      !sameIdentity(before, lstatSync(path, { bigint: true })) ||
+      !linkBytes.equals(readlinkSync(path, { encoding: "buffer" }))
+    ) {
+      throw installedDependencyError(
+        `installed dependency payload link changed while read: ${relativePath}`,
+      );
+    }
+    return hash.digest("hex");
+  } else if (before.isDirectory()) {
+    return hash.digest("hex");
+  } else {
+    throw installedDependencyError(
+      `installed dependency payload has an unsupported type: ${relativePath}`,
+    );
+  }
+
+  if (!sameIdentity(before, lstatSync(path, { bigint: true }))) {
+    throw installedDependencyError(
+      `installed dependency payload file changed while read: ${relativePath}`,
+    );
+  }
+  return hash.digest("hex");
+}
+
+function installedDependencyPayloadFileSnapshot(
+  path,
+  expected,
+  relativePath,
+  budget,
+  limits,
+  noFollow,
+) {
+  const maxExactBytes = limits.maxPayloadFileBytes;
+  if (expected.size <= BigInt(maxExactBytes)) {
+    consumeInstalledDependencyBytes(budget, Number(expected.size), limits);
+    return {
+      kind: "content",
+      value: readBoundedRegularFile(path, expected, {
+        maxFileBytes: maxExactBytes,
+        noFollow,
+        subject: `installed dependency payload ${relativePath}`,
+      }),
+    };
+  }
+
+  const sampleBytes = Math.min(64 * 1024, maxExactBytes);
+  const descriptor = openSync(
+    path,
+    constants.O_RDONLY | (noFollow ? (constants.O_NOFOLLOW ?? 0) : 0),
+  );
+  try {
+    const before = fstatSync(descriptor, { bigint: true });
+    if (!before.isFile() || !sameIdentity(before, expected)) {
+      throw installedDependencyError(
+        `installed dependency payload changed before it was sampled: ${relativePath}`,
+      );
+    }
+    const first = Buffer.alloc(sampleBytes);
+    const last = Buffer.alloc(sampleBytes);
+    const firstCount = readSync(descriptor, first, 0, sampleBytes, 0);
+    const lastOffset = Number(before.size) - sampleBytes;
+    const lastCount = readSync(descriptor, last, 0, sampleBytes, lastOffset);
+    if (firstCount !== sampleBytes || lastCount !== sampleBytes) {
+      throw installedDependencyError(
+        `installed dependency payload changed while it was sampled: ${relativePath}`,
+      );
+    }
+    const after = fstatSync(descriptor, { bigint: true });
+    if (!sameIdentity(before, after)) {
+      throw installedDependencyError(
+        `installed dependency payload changed while it was sampled: ${relativePath}`,
+      );
+    }
+    consumeInstalledDependencyBytes(budget, first.length + last.length, limits);
+    return {
+      kind: "sample",
+      value: Buffer.concat([first, last]),
+    };
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function installedDependencyResolvedPayloadSnapshot(
+  path,
+  relativePath,
+  physicalRepoRoot,
+  budget,
+  limits,
+) {
+  const before = lstatSync(path, { bigint: true });
+  const hash = createHash("sha256");
+  hash.update("installed-dependency-resolved-payload-v1\0");
+  updateField(hash, "path", relativePath);
+  updateField(hash, "type", entryType(before));
+  updateField(hash, "mode", before.mode.toString(8));
+  if (before.isFile()) {
+    const snapshot = installedDependencyPayloadFileSnapshot(
+      path,
+      before,
+      relativePath,
+      budget,
+      limits,
+      true,
+    );
+    updateField(hash, "size", before.size.toString());
+    updateField(hash, snapshot.kind, snapshot.value);
+  } else if (before.isSymbolicLink()) {
+    const linkBytes = readlinkSync(path, { encoding: "buffer" });
+    const targetBefore = statSync(path, { bigint: true });
+    consumeInstalledDependencyBytes(budget, linkBytes.length, limits);
+    updateField(hash, "link", normalizeLinkPath(linkBytes, physicalRepoRoot));
+    updateField(hash, "target-type", entryType(targetBefore));
+    updateField(hash, "target-mode", targetBefore.mode.toString(8));
+    if (targetBefore.isFile()) {
+      const snapshot = installedDependencyPayloadFileSnapshot(
+        path,
+        targetBefore,
+        relativePath,
+        budget,
+        limits,
+        false,
+      );
+      updateField(hash, "target-size", targetBefore.size.toString());
+      updateField(hash, `target-${snapshot.kind}`, snapshot.value);
+    }
+    if (
+      !sameIdentity(targetBefore, statSync(path, { bigint: true })) ||
+      !linkBytes.equals(readlinkSync(path, { encoding: "buffer" }))
+    ) {
+      throw installedDependencyError(
+        `installed dependency payload link target changed while read: ${relativePath}`,
+      );
+    }
+  } else if (!before.isDirectory()) {
+    throw installedDependencyError(
+      `installed dependency payload has an unsupported type: ${relativePath}`,
+    );
+  }
+  if (!sameIdentity(before, lstatSync(path, { bigint: true }))) {
+    throw installedDependencyError(
+      `installed dependency payload changed while read: ${relativePath}`,
+    );
+  }
+  return hash.digest("hex");
+}
+
+function installedDependencyPayloadPath(value, packagePath, allowBare) {
+  if (typeof value !== "string" || value.length === 0) return null;
+  if (!allowBare && !value.startsWith(".")) return null;
+  if (value.includes("*")) return null;
+  const candidate = resolve(packagePath, value);
+  if (
+    candidate === packagePath ||
+    !candidate.startsWith(`${packagePath}${sep}`)
+  ) {
+    return null;
+  }
+  return candidate;
+}
+
+function collectInstalledDependencyPayloadPaths(
+  value,
+  packagePath,
+  paths,
+  allowBare,
+) {
+  if (typeof value === "string") {
+    const path = installedDependencyPayloadPath(value, packagePath, allowBare);
+    if (path !== null) paths.add(path);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      collectInstalledDependencyPayloadPaths(
+        entry,
+        packagePath,
+        paths,
+        allowBare,
+      );
+    }
+    return;
+  }
+  if (value === null || typeof value !== "object") return;
+  for (const entry of Object.values(value)) {
+    collectInstalledDependencyPayloadPaths(
+      entry,
+      packagePath,
+      paths,
+      allowBare,
+    );
+  }
+}
+
+function installedDependencyDeclaredPayloadPaths(manifest, packagePath) {
+  const paths = new Set();
+  for (const field of ["module", "types", "typings"]) {
+    collectInstalledDependencyPayloadPaths(
+      manifest[field],
+      packagePath,
+      paths,
+      true,
+    );
+  }
+  collectInstalledDependencyPayloadPaths(
+    manifest.bin,
+    packagePath,
+    paths,
+    true,
+  );
+  collectInstalledDependencyPayloadPaths(
+    manifest.browser,
+    packagePath,
+    paths,
+    typeof manifest.browser === "string",
+  );
+  for (const field of ["exports", "imports"]) {
+    collectInstalledDependencyPayloadPaths(
+      manifest[field],
+      packagePath,
+      paths,
+      false,
+    );
+  }
+  return [...paths].sort(compareUtf8);
+}
+
+function installedDependencyExistingPayloadPath(candidates) {
+  for (const candidate of candidates) {
+    try {
+      return {
+        metadata: lstatSync(candidate, { bigint: true }),
+        path: candidate,
+      };
+    } catch (error) {
+      if (error?.code !== "ENOENT" && error?.code !== "ENOTDIR") throw error;
+    }
+  }
+  return null;
+}
+
+function resolveInstalledDependencyPayloadPathInternal(
+  path,
+  packagePath,
+  physicalRepoRoot,
+  budget,
+  limits,
+  hash,
+  depth = 0,
+) {
+  if (depth > 4) return null;
+  const exact = installedDependencyExistingPayloadPath([path]);
+  if (exact !== null && !exact.metadata.isDirectory()) {
+    if (!exact.metadata.isSymbolicLink()) return exact.path;
+    const linkBytes = readlinkSync(exact.path, { encoding: "buffer" });
+    const target = statSync(exact.path, { bigint: true });
+    consumeInstalledDependencyBytes(budget, linkBytes.length, limits);
+    updateField(
+      hash,
+      "directory-link",
+      normalizeLinkPath(linkBytes, physicalRepoRoot),
+    );
+    updateField(hash, "directory-link-target-type", entryType(target));
+    updateField(hash, "directory-link-target-mode", target.mode.toString(8));
+    if (!target.isDirectory()) return exact.path;
+  }
+  const file = installedDependencyExistingPayloadPath([
+    `${path}.js`,
+    `${path}.json`,
+    `${path}.node`,
+  ]);
+  if (file !== null && !file.metadata.isDirectory()) {
+    updateField(hash, "extension-candidate", relative(packagePath, file.path));
+    return file.path;
+  }
+  if (exact === null) return null;
+
+  const nestedManifestPath = join(path, "package.json");
+  const nestedManifest = installedDependencyExistingPayloadPath([
+    nestedManifestPath,
+  ]);
+  if (nestedManifest?.metadata.isFile()) {
+    const bytes = readBoundedRegularFile(
+      nestedManifestPath,
+      nestedManifest.metadata,
+      {
+        maxFileBytes: limits.maxFileBytes,
+        noFollow: true,
+        subject: `installed dependency nested package manifest ${nestedManifestPath}`,
+      },
+    );
+    consumeInstalledDependencyBytes(budget, bytes.length, limits);
+    updateField(
+      hash,
+      "nested-package-json-path",
+      relative(packagePath, nestedManifestPath),
+    );
+    updateField(hash, "nested-package-json", bytes);
+    const text = exactUtf8Text(bytes);
+    if (text !== null) {
+      let manifest = null;
+      try {
+        manifest = JSON.parse(text);
+      } catch {
+        // Node falls through to index files for an invalid nested manifest.
+      }
+      if (typeof manifest?.main === "string") {
+        const nested = resolveInstalledDependencyPayloadPathInternal(
+          resolve(path, manifest.main),
+          packagePath,
+          physicalRepoRoot,
+          budget,
+          limits,
+          hash,
+          depth + 1,
+        );
+        if (nested !== null) return nested;
+      }
+    }
+  }
+  const index = installedDependencyExistingPayloadPath([
+    join(path, "index.js"),
+    join(path, "index.json"),
+    join(path, "index.node"),
+  ]);
+  if (index !== null) {
+    updateField(hash, "index-candidate", relative(packagePath, index.path));
+  }
+  return index?.path ?? null;
+}
+
+function resolveInstalledDependencyPayloadPath(
+  path,
+  packagePath,
+  physicalRepoRoot,
+  budget,
+  limits,
+) {
+  const hash = createHash("sha256");
+  hash.update("installed-dependency-payload-resolution-v1\0");
+  const resolvedPath = resolveInstalledDependencyPayloadPathInternal(
+    path,
+    packagePath,
+    physicalRepoRoot,
+    budget,
+    limits,
+    hash,
+  );
+  updateField(
+    hash,
+    "resolved",
+    resolvedPath === null ? "missing" : relative(packagePath, resolvedPath),
+  );
+  return { digest: hash.digest("hex"), path: resolvedPath };
+}
+
+function resolveInstalledDependencyPackageDefault(
+  packagePath,
+  manifest,
+  physicalRepoRoot,
+  budget,
+  limits,
+) {
+  const hash = createHash("sha256");
+  hash.update("installed-dependency-package-default-v1\0");
+  if (typeof manifest.main === "string") {
+    const mainPath = resolve(packagePath, manifest.main);
+    if (
+      mainPath !== packagePath &&
+      mainPath.startsWith(`${packagePath}${sep}`)
+    ) {
+      const main = resolveInstalledDependencyPayloadPath(
+        mainPath,
+        packagePath,
+        physicalRepoRoot,
+        budget,
+        limits,
+      );
+      updateField(hash, "main-resolution", main.digest);
+      if (main.path !== null) {
+        updateField(hash, "resolved", relative(packagePath, main.path));
+        return { digest: hash.digest("hex"), path: main.path };
+      }
+    }
+  }
+  const index = installedDependencyExistingPayloadPath([
+    join(packagePath, "index.js"),
+    join(packagePath, "index.json"),
+    join(packagePath, "index.node"),
+  ]);
+  updateField(
+    hash,
+    "resolved",
+    index === null ? "missing" : relative(packagePath, index.path),
+  );
+  return { digest: hash.digest("hex"), path: index?.path ?? null };
+}
+
+function installedDependencyShallowPayloadSnapshot(
+  packagePath,
+  relativePath,
+  manifest,
+  physicalRepoRoot,
+  budget,
+  limits,
+) {
+  const before = lstatSync(packagePath, { bigint: true });
+  if (before.isSymbolicLink() || !before.isDirectory()) {
+    throw installedDependencyError(
+      `installed dependency payload root is not a real directory: ${relativePath}`,
+    );
+  }
+  const names = boundedInstalledDependencyNames(
+    packagePath,
+    limits.maxEntries - budget.entries,
+  );
+  consumeInstalledDependencyEntries(budget, names.length, limits);
+  const hash = createHash("sha256");
+  hash.update("installed-dependency-shallow-payload-v1\0");
+  const resolvedPayloadDigests = new Map();
+  for (const name of names) {
+    if (name === "node_modules" || name === "package.json") continue;
+    updateField(hash, "name", name);
+    updateField(
+      hash,
+      "entry",
+      installedDependencyPayloadTopologyEntrySnapshot(
+        join(packagePath, name),
+        join(relativePath, name),
+        physicalRepoRoot,
+        budget,
+        limits,
+      ),
+    );
+  }
+  const defaultResolution = resolveInstalledDependencyPackageDefault(
+    packagePath,
+    manifest,
+    physicalRepoRoot,
+    budget,
+    limits,
+  );
+  updateField(hash, "default-resolution", defaultResolution.digest);
+  if (defaultResolution.path !== null) {
+    const defaultRelativePath = relative(packagePath, defaultResolution.path);
+    consumeInstalledDependencyEntries(budget, 1, limits);
+    const defaultDigest = installedDependencyResolvedPayloadSnapshot(
+      defaultResolution.path,
+      join(relativePath, defaultRelativePath),
+      physicalRepoRoot,
+      budget,
+      limits,
+    );
+    resolvedPayloadDigests.set(defaultResolution.path, defaultDigest);
+    updateField(hash, "default-path", defaultRelativePath);
+    updateField(hash, "default-entry", defaultDigest);
+  }
+  for (const declaredPath of installedDependencyDeclaredPayloadPaths(
+    manifest,
+    packagePath,
+  )) {
+    const resolution = resolveInstalledDependencyPayloadPath(
+      declaredPath,
+      packagePath,
+      physicalRepoRoot,
+      budget,
+      limits,
+    );
+    const path = resolution.path;
+    const declaredRelativePath = relative(packagePath, declaredPath);
+    updateField(hash, "declared-path", declaredRelativePath);
+    updateField(hash, "declared-resolution", resolution.digest);
+    if (path === null) {
+      updateField(hash, "declared-entry", "missing");
+      continue;
+    }
+    const resolvedRelativePath = relative(packagePath, path);
+    updateField(hash, "resolved-path", resolvedRelativePath);
+    let digest = resolvedPayloadDigests.get(path);
+    if (digest === undefined) {
+      consumeInstalledDependencyEntries(budget, 1, limits);
+      digest = installedDependencyResolvedPayloadSnapshot(
+        path,
+        join(relativePath, resolvedRelativePath),
+        physicalRepoRoot,
+        budget,
+        limits,
+      );
+      resolvedPayloadDigests.set(path, digest);
+    }
+    updateField(hash, "declared-entry", digest);
+  }
+  const finalNames = boundedInstalledDependencyNames(packagePath, names.length);
+  if (
+    names.length !== finalNames.length ||
+    names.some((name, index) => name !== finalNames[index]) ||
+    !sameIdentity(before, lstatSync(packagePath, { bigint: true }))
+  ) {
+    throw installedDependencyError(
+      `installed dependency payload root changed while read: ${relativePath}`,
+    );
+  }
+  return hash.digest("hex");
+}
+
+function installedDependencyPayloadSnapshot(
+  packagePath,
+  relativePath,
+  manifest,
+  budget,
+  limits,
+  payloadDigests,
+  physicalRepoRoot,
+) {
+  const physicalPackagePath = realpathSync(packagePath);
+  const repoRelativePath = relative(physicalRepoRoot, physicalPackagePath);
+  if (
+    repoRelativePath !== "" &&
+    !repoRelativePath.startsWith(`..${sep}`) &&
+    repoRelativePath !== ".." &&
+    !isAbsolute(repoRelativePath) &&
+    !repoRelativePath.split(sep).includes("node_modules")
+  ) {
+    return "workspace-source";
+  }
+  const cached = payloadDigests.get(physicalPackagePath);
+  if (cached !== undefined) return cached;
+  const digest = installedDependencyShallowPayloadSnapshot(
+    physicalPackagePath,
+    relativePath,
+    manifest,
+    physicalRepoRoot,
+    budget,
+    limits,
+  );
+  payloadDigests.set(physicalPackagePath, digest);
+  return digest;
+}
+
+function installedDependencyLinkSnapshot(
+  nodeModulesPath,
+  relativePath,
+  physicalRepoRoot,
+  budget,
+  limits,
+  payloadDigests,
+) {
+  const path = join(nodeModulesPath, relativePath);
+  const before = lstatSync(path, { bigint: true });
+  if (!before.isSymbolicLink()) {
+    throw installedDependencyError(
+      `installed dependency package entry is not a symlink: ${relativePath}`,
+    );
+  }
+  const linkBytes = readlinkSync(path, { encoding: "buffer" });
+  consumeInstalledDependencyBytes(budget, linkBytes.length, limits);
+  const targetBefore = statSync(path, { bigint: true });
+  if (!targetBefore.isDirectory()) {
+    throw installedDependencyError(
+      `installed dependency package link does not resolve to a directory: ${relativePath}`,
+    );
+  }
+  const target = normalizeRootPathText(realpathSync(path), physicalRepoRoot);
+  const packageJson = installedDependencyPackageJsonSnapshot(
+    path,
+    relativePath,
+    physicalRepoRoot,
+    budget,
+    limits,
+  );
+  const payload = installedDependencyPayloadSnapshot(
+    path,
+    relativePath,
+    packageJson.manifest,
+    budget,
+    limits,
+    payloadDigests,
+    physicalRepoRoot,
+  );
+  if (!sameIdentity(targetBefore, statSync(path, { bigint: true }))) {
+    throw installedDependencyError(
+      `installed dependency package target changed while read: ${relativePath}`,
+    );
+  }
+  if (!linkBytes.equals(readlinkSync(path, { encoding: "buffer" }))) {
+    throw installedDependencyError(
+      `installed dependency package link changed while read: ${relativePath}`,
+    );
+  }
+  if (!sameIdentity(before, lstatSync(path, { bigint: true }))) {
+    throw installedDependencyError(
+      `installed dependency package entry changed while read: ${relativePath}`,
+    );
+  }
+  const hash = createHash("sha256");
+  hash.update("installed-dependency-link-v1\0");
+  updateField(hash, "path", relativePath);
+  updateField(hash, "mode", before.mode.toString(8));
+  updateField(hash, "link", normalizeLinkPath(linkBytes, physicalRepoRoot));
+  updateField(hash, "target", target);
+  updateField(hash, "target-mode", targetBefore.mode.toString(8));
+  updateField(hash, "package-json", packageJson.digest);
+  updateField(hash, "payload-generation", payload);
+  return hash.digest("hex");
+}
+
+function installedDependencyScopeSnapshot(
+  nodeModulesPath,
+  name,
+  physicalRepoRoot,
+  budget,
+  limits,
+  payloadDigests,
+) {
+  const path = join(nodeModulesPath, name);
+  const before = lstatSync(path, { bigint: true });
+  if (before.isSymbolicLink() || !before.isDirectory()) {
+    throw installedDependencyError(
+      `installed dependency scope is not a real directory: ${name}`,
+    );
+  }
+  const names = boundedInstalledDependencyNames(
+    path,
+    limits.maxEntries - budget.entries,
+  );
+  consumeInstalledDependencyEntries(budget, names.length, limits);
+  const hash = createHash("sha256");
+  hash.update("installed-dependency-scope-v1\0");
+  updateField(hash, "name", name);
+  updateField(hash, "mode", before.mode.toString(8));
+  for (const packageName of names) {
+    if (packageName.startsWith(".")) continue;
+    updateField(
+      hash,
+      "package",
+      installedDependencyLinkSnapshot(
+        nodeModulesPath,
+        join(name, packageName),
+        physicalRepoRoot,
+        budget,
+        limits,
+        payloadDigests,
+      ),
+    );
+  }
+  const finalNames = boundedInstalledDependencyNames(path, names.length);
+  if (
+    names.length !== finalNames.length ||
+    names.some((entry, index) => entry !== finalNames[index]) ||
+    !sameIdentity(before, lstatSync(path, { bigint: true }))
+  ) {
+    throw installedDependencyError(
+      `installed dependency scope changed while read: ${name}`,
+    );
+  }
+  return hash.digest("hex");
+}
+
+function installedDependencyRootSnapshot(
+  physicalRepoRoot,
+  relativeRoot,
+  budget,
+  limits,
+  payloadDigests,
+) {
+  const nodeModulesPath = join(physicalRepoRoot, relativeRoot, "node_modules");
+  let before;
+  try {
+    before = lstatSync(nodeModulesPath, { bigint: true });
+  } catch (error) {
+    if (error?.code === "ENOENT") return "missing";
+    throw error;
+  }
+  if (before.isSymbolicLink() || !before.isDirectory()) {
+    throw installedDependencyError(
+      `installed dependency root is not a real directory: ${relativeRoot || "."}`,
+    );
+  }
+  const names = boundedInstalledDependencyNames(
+    nodeModulesPath,
+    limits.maxEntries - budget.entries,
+  );
+  consumeInstalledDependencyEntries(budget, names.length, limits);
+  const hash = createHash("sha256");
+  hash.update("installed-dependency-root-v1\0");
+  updateField(hash, "root", relativeRoot || ".");
+  updateField(hash, "mode", before.mode.toString(8));
+  for (const name of names) {
+    if (name.startsWith(".")) continue;
+    const digest = name.startsWith("@")
+      ? installedDependencyScopeSnapshot(
+          nodeModulesPath,
+          name,
+          physicalRepoRoot,
+          budget,
+          limits,
+          payloadDigests,
+        )
+      : installedDependencyLinkSnapshot(
+          nodeModulesPath,
+          name,
+          physicalRepoRoot,
+          budget,
+          limits,
+          payloadDigests,
+        );
+    updateField(hash, "entry", digest);
+  }
+  const finalNames = boundedInstalledDependencyNames(
+    nodeModulesPath,
+    names.length,
+  );
+  if (
+    names.length !== finalNames.length ||
+    names.some((entry, index) => entry !== finalNames[index]) ||
+    !sameIdentity(before, lstatSync(nodeModulesPath, { bigint: true }))
+  ) {
+    throw installedDependencyError(
+      `installed dependency root changed while read: ${relativeRoot || "."}`,
+    );
+  }
+  return hash.digest("hex");
+}
+
+function installedDependencySnapshot(physicalRepoRoot, limits) {
+  const budget = { bytes: 0, entries: 0 };
+  const payloadDigests = new Map();
+  const hash = createHash("sha256");
+  hash.update("installed-dependency-state-v1\0");
+  const rootNodeModules = join(physicalRepoRoot, "node_modules");
+  for (const descriptor of installedDependencyMetadata) {
+    updateField(hash, "metadata", descriptor.relativePath);
+    updateField(
+      hash,
+      "metadata-state",
+      installedMetadataFileSnapshot(
+        rootNodeModules,
+        descriptor,
+        physicalRepoRoot,
+        budget,
+        limits,
+      ),
+    );
+  }
+  for (const relativeRoot of MATERIAL_PACKAGE_ROOTS) {
+    updateField(hash, "root", relativeRoot || ".");
+    updateField(
+      hash,
+      "root-state",
+      installedDependencyRootSnapshot(
+        physicalRepoRoot,
+        relativeRoot,
+        budget,
+        limits,
+        payloadDigests,
+      ),
+    );
+  }
+  return hash.digest("hex");
+}
+
+function normalizedInstalledDependencyManifestWithLimits(repoRoot, limits) {
+  const physicalRepoRoot = realpathSync(repoRoot);
+  return installedDependencySnapshot(physicalRepoRoot, limits);
+}
+
+function installedDependencyLimits(overrides) {
+  for (const name of Object.keys(overrides)) {
+    if (!Object.hasOwn(productionInstalledDependencyLimits, name)) {
+      throw new TypeError(`unknown installed dependency limit: ${name}`);
+    }
+  }
+  const limits = { ...productionInstalledDependencyLimits, ...overrides };
+  for (const [name, value] of Object.entries(limits)) {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new TypeError(`${name} must be a non-negative safe integer`);
+    }
+  }
+  return Object.freeze(limits);
+}
+
+export function normalizedInstalledDependencyManifest(repoRoot) {
+  return normalizedInstalledDependencyManifestWithLimits(
+    repoRoot,
+    productionInstalledDependencyLimits,
+  );
+}
+
+export function normalizedInstalledDependencyManifestForTest(
+  repoRoot,
+  overrides,
+) {
+  return normalizedInstalledDependencyManifestWithLimits(
+    repoRoot,
+    installedDependencyLimits(overrides),
+  );
+}
+
 function environmentFileName(name) {
   return (
     (name === ".env" || name.startsWith(".env.")) && !name.endsWith(".example")
@@ -866,12 +2008,16 @@ export function materialEnvironmentDigest({
     normalizedLocalBinManifest(physicalRepoRoot),
   ]);
   entries.push([
+    "__AGENT_QUALITY_GATE_INSTALLED_DEPENDENCY_MANIFEST__",
+    normalizedInstalledDependencyManifest(physicalRepoRoot),
+  ]);
+  entries.push([
     "__AGENT_QUALITY_GATE_ENV_FILE_MANIFEST__",
     materialEnvironmentFileManifest(physicalRepoRoot),
   ]);
   entries.sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
   const hash = createHash("sha256");
-  hash.update("material-environment-v5\0");
+  hash.update("material-environment-v6\0");
   for (const [name, value] of entries) {
     hash.update(name);
     hash.update("\0");

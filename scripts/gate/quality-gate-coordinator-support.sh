@@ -651,10 +651,11 @@ gate_coordinator_classify_command() {
       gate_coordinator_command_class="dashboard-build"
       ;;
     TF_DATA_DIR=*terraform\ -chdir=*\ init\ -backend=false\ -input=false)
-      if [[ -n "${TF_PLUGIN_CACHE_DIR:-}" ]]; then
-        gate_coordinator_command_resources+=("terraform-plugin-cache")
-        gate_coordinator_command_class="terraform-init"
-      fi
+      # Terraform CLI configuration can enable a shared plugin cache after a
+      # request registers or while it waits. Always reserve the cache resource
+      # so that mutable user configuration cannot bypass serialization.
+      gate_coordinator_command_resources+=("terraform-plugin-cache")
+      gate_coordinator_command_class="terraform-init"
       ;;
   esac
 }

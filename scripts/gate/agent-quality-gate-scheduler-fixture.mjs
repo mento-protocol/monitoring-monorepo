@@ -159,6 +159,20 @@ async function initializeRepository(repository) {
   });
 }
 
+async function prepareInstalledDependencyState(worktree) {
+  const nodeModules = join(worktree, "node_modules");
+  await mkdir(join(nodeModules, ".pnpm"), { recursive: true });
+  await Promise.all([
+    writeFile(join(nodeModules, ".modules.yaml"), "{}\n"),
+    writeFile(join(nodeModules, ".package-map.json"), "{}\n"),
+    writeFile(join(nodeModules, ".pnpm-workspace-state-v1.json"), "{}\n"),
+    writeFile(
+      join(nodeModules, ".pnpm", "lock.yaml"),
+      "lockfileVersion: '9.0'\n",
+    ),
+  ]);
+}
+
 async function coordinatorMetadata(lockRoot) {
   if (!(await pathExists(lockRoot))) return [];
   const entries = await readdir(lockRoot, { withFileTypes: true });
@@ -266,6 +280,7 @@ export async function createGateFixture() {
       await run("git", ["worktree", "add", "-q", "--detach", path, "HEAD"], {
         cwd: repository,
       });
+      await prepareInstalledDependencyState(path);
       worktrees.push(path);
       return path;
     });

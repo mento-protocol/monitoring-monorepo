@@ -355,6 +355,35 @@ gate_run_proc_marker_scan_available() {
   [[ -d /proc/self/fd ]]
 }
 
+gate_run_proc_argv_scan_available() {
+  [[ -r /proc/self/cmdline ]]
+}
+
+gate_run_proc_pid_has_argv_tag() {
+  local pid="$1"
+  local expected_tag="$2"
+  local argument=""
+  local matched=1
+  [[ "$pid" =~ ^[1-9][0-9]*$ && -n "$expected_tag" ]] || return 1
+  if [[ ! -r "/proc/${pid}/cmdline" ]]; then
+    [[ -d "/proc/${pid}" ]] && return 2
+    return 1
+  fi
+  if ! {
+    while IFS= read -r -d '' argument || [[ -n "$argument" ]]; do
+      if [[ "$argument" == "$expected_tag" ]]; then
+        matched=0
+        break
+      fi
+      argument=""
+    done < "/proc/${pid}/cmdline"
+  } 2>/dev/null; then
+    [[ -d "/proc/${pid}" ]] && return 2
+    return 1
+  fi
+  return "$matched"
+}
+
 gate_run_proc_marker_pids() {
   local token="$1"
   local marker="$2"
@@ -609,22 +638,38 @@ gate_run_tagged_pids() {
   # Anchored on both sides: the tag is one whole argv element, and an
   # unanchored match would let one token select another that merely extends
   # it. The escape keeps hostname dots literal inside the anchors.
-  if ! pattern="$(gate_lock_token_pattern "$token")" || [[ -z "$pattern" ]]; then
-    echo "error: could not build a match pattern for the run token; refusing to scan." >&2
-    printf '%s\n' "$gate_drain_scan_error"
-    return 0
-  fi
-  found="$(pgrep -f "(^| )agentqg:${pattern}( |\$)" 2>/dev/null)" && status=0 || status=$?
-  [[ "$status" -le 1 ]] || printf '%s\n' "$gate_drain_scan_error"
-  if [[ -n "$target_pid" ]]; then
-    for pid in $found; do
-      if [[ "$pid" == "$target_pid" ]]; then
-        printf '%s\n' "$pid"
-        break
+  if [[ -n "$target_pid" ]] && gate_run_proc_argv_scan_available; then
+    # Linux exact-PID revalidation must stay exact. A global pgrep here made
+    # every candidate check repeat a host-wide argv census during descendant
+    # cleanup. Read this process's NUL-delimited argv records directly instead.
+    local argv_status=0
+    if gate_run_proc_pid_has_argv_tag "$target_pid" "agentqg:${token}"; then
+      printf '%s\n' "$target_pid"
+    else
+      argv_status=$?
+      if [[ "$argv_status" -ne 1 ]]; then
+        echo "error: could not scan /proc/${target_pid}/cmdline for the run token." >&2
+        printf '%s\n' "$gate_drain_scan_error"
       fi
-    done
-  elif [[ -n "$found" ]]; then
-    printf '%s\n' "$found"
+    fi
+  else
+    if ! pattern="$(gate_lock_token_pattern "$token")" || [[ -z "$pattern" ]]; then
+      echo "error: could not build a match pattern for the run token; refusing to scan." >&2
+      printf '%s\n' "$gate_drain_scan_error"
+      return 0
+    fi
+    found="$(pgrep -f "(^| )agentqg:${pattern}( |\$)" 2>/dev/null)" && status=0 || status=$?
+    [[ "$status" -le 1 ]] || printf '%s\n' "$gate_drain_scan_error"
+    if [[ -n "$target_pid" ]]; then
+      for pid in $found; do
+        if [[ "$pid" == "$target_pid" ]]; then
+          printf '%s\n' "$pid"
+          break
+        fi
+      done
+    elif [[ -n "$found" ]]; then
+      printf '%s\n' "$found"
+    fi
   fi
   if [[ -d /proc ]]; then
     if [[ -n "$target_pid" ]]; then

@@ -99,6 +99,9 @@ cleanup_test_artifacts() {
   if [[ -n "${trunk_blocked_linter_probe_count:-}" ]]; then
     rm -f "$trunk_blocked_linter_probe_count"
   fi
+  if [[ -n "${no_lock_fallback_fixture_dir:-}" ]]; then
+    rm -rf "$no_lock_fallback_fixture_dir"
+  fi
 }
 trap cleanup_test_artifacts EXIT
 
@@ -112,6 +115,21 @@ fail() {
     sed 's/^/  /' "$output_file"
   } | tee /dev/stderr
   exit 1
+}
+
+write_installed_dependency_fixture() {
+  local fixture_root="$1"
+  local node_modules="$fixture_root/node_modules"
+  mkdir -p "$node_modules/.pnpm"
+  printf '{}\n' > "$node_modules/.modules.yaml"
+  printf '{}\n' > "$node_modules/.package-map.json"
+  printf '{}\n' > "$node_modules/.pnpm-workspace-state-v1.json"
+  printf "lockfileVersion: '9.0'\n" > "$node_modules/.pnpm/lock.yaml"
+  git -C "$fixture_root" add -f \
+    node_modules/.modules.yaml \
+    node_modules/.package-map.json \
+    node_modules/.pnpm-workspace-state-v1.json \
+    node_modules/.pnpm/lock.yaml
 }
 
 # A PID that is dead at the moment a fixture writes it into a lock record.
@@ -1584,6 +1602,11 @@ assert.match(
   "an exact-PID run-handle scan must validate and limit its proc environment path",
 );
 assert.match(
+  runHandles,
+  /if \[\[ -n "\$target_pid" \]\] && gate_run_proc_argv_scan_available; then[\s\S]*?gate_run_proc_pid_has_argv_tag "\$target_pid" "agentqg:\$\{token\}"/u,
+  "an exact-PID Linux run-handle scan must read only that process's argv records",
+);
+assert.match(
   source,
   /gate_run_tagged_pids "\$gate_drain_membership_token" "\$pid"/u,
   "post-identity membership must revalidate only its exact PID",
@@ -2252,6 +2275,7 @@ fi
 exit 1
 STUB
   chmod +x bin/cp bin/date bin/id bin/lsof bin/mv bin/pnpm bin/uname tools/trunk
+  write_installed_dependency_fixture "$PWD"
   git add .
   git commit -qm init
   git worktree add --detach -q "$coordinator_gate_pipeline_joiner_repo" HEAD
@@ -2326,18 +2350,107 @@ STUB
     wait "$pid" 2>/dev/null || true
   }
 
+  gate_test_stop_and_reap_direct_pipeline_child() {
+    local label="$1"
+    local pid="$2"
+    local current_parent verified_parent current_state
+    local attempt=0
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 2
+
+    for ((attempt = 0; attempt < 20; attempt++)); do
+      current_parent="$(gate_test_process_parent "$pid")"
+      verified_parent="$(gate_test_process_parent "$pid")"
+      if jobs -pr | grep -Fxq "$pid" &&
+        [[ "$current_parent" =~ ^[1-9][0-9]*$ &&
+          "$current_parent" == "$verified_parent" ]]; then
+        break
+      fi
+      jobs -pr | grep -Fxq "$pid" || break
+      sleep 0.05
+    done
+    if ! jobs -pr | grep -Fxq "$pid" ||
+      [[ ! "$current_parent" =~ ^[1-9][0-9]*$ ||
+        "$current_parent" != "$verified_parent" ]]; then
+      # The direct child can settle before cleanup observes it. Reap only a
+      # shell job here. Never signal a PID after its parent identity changed.
+      jobs -pr | grep -Fxq "$pid" || {
+        wait "$pid" 2>/dev/null || true
+        return 0
+      }
+      printf 'error: %s %s is no longer a direct fixture child.\n' \
+        "$label" "$pid" >&2
+      return 2
+    fi
+    kill -TERM "$pid" 2>/dev/null || true
+    attempt=0
+    while [[ "$attempt" -lt 20 ]]; do
+      current_state="$(gate_test_process_state "$pid")"
+      [[ -z "$current_state" || "$current_state" == Z* ]] && break
+      current_parent="$(gate_test_process_parent "$pid")"
+      verified_parent="$(gate_test_process_parent "$pid")"
+      [[ "$current_parent" =~ ^[1-9][0-9]*$ &&
+        "$current_parent" == "$verified_parent" ]] || return 2
+      sleep 0.05
+      attempt=$((attempt + 1))
+    done
+    current_state="$(gate_test_process_state "$pid")"
+    if [[ -n "$current_state" && "$current_state" != Z* ]]; then
+      current_parent="$(gate_test_process_parent "$pid")"
+      verified_parent="$(gate_test_process_parent "$pid")"
+      jobs -pr | grep -Fxq "$pid" || return 2
+      [[ "$current_parent" =~ ^[1-9][0-9]*$ &&
+        "$current_parent" == "$verified_parent" ]] || return 2
+      kill -KILL "$pid" 2>/dev/null || true
+    fi
+    wait "$pid" 2>/dev/null || true
+  }
+
+  gate_test_print_pipeline_process_tree() {
+    local root_pid="$1"
+    local pending="$root_pid"
+    local observed=""
+    local pid child
+    while [[ -n "$pending" ]]; do
+      pid="${pending%% *}"
+      if [[ "$pending" == *" "* ]]; then
+        pending="${pending#* }"
+      else
+        pending=""
+      fi
+      case " $observed " in
+        *" $pid "*) continue ;;
+      esac
+      observed="${observed}${pid} "
+      ps -o pid=,ppid=,pgid=,stat=,etime=,comm= -p "$pid" 2>/dev/null || true
+      while IFS= read -r child; do
+        [[ "$child" =~ ^[1-9][0-9]*$ ]] || continue
+        pending="${pending}${pending:+ }${child}"
+      done < <(pgrep -P "$pid" 2>/dev/null || true)
+    done
+  }
+
   # shellcheck disable=SC2329
   cleanup_gate_pipeline_fixture() {
     : > "$holder_release"
-    if [[ "$joiner_pid" =~ ^[1-9][0-9]*$ && -n "$joiner_start" ]]; then
-      gate_test_stop_and_reap_pipeline_child \
-        "pipeline fixture joiner" "$joiner_pid" "$joiner_start" || true
+    if [[ "$joiner_pid" =~ ^[1-9][0-9]*$ ]]; then
+      if [[ -n "$joiner_start" ]]; then
+        gate_test_stop_and_reap_pipeline_child \
+          "pipeline fixture joiner" "$joiner_pid" "$joiner_start" || true
+      else
+        gate_test_stop_and_reap_direct_pipeline_child \
+          "pipeline fixture joiner" "$joiner_pid" || true
+      fi
       joiner_pid=""
       joiner_start=""
     fi
-    if [[ "$holder_pid" =~ ^[1-9][0-9]*$ && -n "$holder_start" ]]; then
-      gate_test_stop_and_reap_pipeline_child \
-        "pipeline fixture holder" "$holder_pid" "$holder_start" || true
+    if [[ "$holder_pid" =~ ^[1-9][0-9]*$ ]]; then
+      if [[ -n "$holder_start" ]]; then
+        gate_test_stop_and_reap_pipeline_child \
+          "pipeline fixture holder" "$holder_pid" "$holder_start" || true
+      else
+        gate_test_stop_and_reap_direct_pipeline_child \
+          "pipeline fixture holder" "$holder_pid" || true
+      fi
       holder_pid=""
       holder_start=""
     fi
@@ -2360,6 +2473,10 @@ STUB
       sed 's/^/contender stdout: /' "$contender_stdout" 2>/dev/null || true
       sed 's/^/contender stderr: /' "$contender_stderr" 2>/dev/null || true
       sed 's/^/joiner: /' "$joiner_output" 2>/dev/null || true
+      if [[ "$joiner_pid" =~ ^[1-9][0-9]*$ ]]; then
+        echo "joiner process snapshot: pid ppid pgid stat elapsed command"
+        gate_test_print_pipeline_process_tree "$joiner_pid"
+      fi
       sed 's/^/marker transition: /' "$marker_transition_output" 2>/dev/null || true
       sed 's/^/prune stdout: /' "$prune_stdout" 2>/dev/null || true
       sed 's/^/prune stderr: /' "$prune_stderr" 2>/dev/null || true
@@ -2370,6 +2487,36 @@ STUB
     fail "$*"
   }
   trap cleanup_gate_pipeline_fixture EXIT
+
+  # Cleanup must still reap a direct fixture child when the start-time probe
+  # failed before the test recorded it. Use a controlled shell-job fixture so
+  # the test pins the two matching PPID reads, TERM, and wait without exposing
+  # a real bare PID to a deliberately failed identity probe.
+  pipeline_cleanup_probe_trace="$coordinator_gate_pipeline_repo/pipeline-cleanup-trace"
+  : > "$pipeline_cleanup_probe_trace"
+  (
+    joiner_pid=4242
+    joiner_start=""
+    holder_pid=""
+    holder_start=""
+    jobs() { printf '4242\n'; }
+    gate_test_process_parent() { printf '31337\n'; }
+    gate_test_process_state() {
+      grep -Fq 'TERM 4242' "$pipeline_cleanup_probe_trace" && printf 'Z\n' || printf 'S\n'
+    }
+    kill() { printf '%s %s\n' "$1" "$2" >> "$pipeline_cleanup_probe_trace"; }
+    # shellcheck disable=SC2329 # invoked through cleanup_gate_pipeline_fixture
+    wait() { printf 'wait %s\n' "$1" >> "$pipeline_cleanup_probe_trace"; }
+    gate_test_stop_coordinators_in_root() { return 0; }
+    cleanup_gate_pipeline_fixture
+    [[ -z "$joiner_pid" && -z "$joiner_start" ]]
+  ) || fail_gate_pipeline_fixture \
+    "pipeline cleanup fallback did not reap its direct fixture child"
+  grep -Fq -- '-TERM 4242' "$pipeline_cleanup_probe_trace" ||
+    fail_gate_pipeline_fixture "pipeline cleanup fallback did not send TERM"
+  grep -Fq -- 'wait 4242' "$pipeline_cleanup_probe_trace" ||
+    fail_gate_pipeline_fixture "pipeline cleanup fallback did not wait for its child"
+  rm -f "$holder_release"
 
   set +e
   set +o pipefail
@@ -2840,8 +2987,10 @@ if ! /bin/bash -c '
     local capacity="$1" command="$2" expected_weight="$3"
     local expected_all_capacity="$4" expected_class="$5"
     local expected_resources="$6" actual_resources
+    local classifier_home="${policy_assert_home-${policy_home:-}}"
     gate_coordinator_capacity="$capacity"
-    gate_coordinator_classify_command "$command"
+    HOME="$classifier_home" APPDATA="${policy_appdata:-}" \
+      gate_coordinator_classify_command "$command"
     actual_resources="${gate_coordinator_command_resources[*]:-}"
     [[ "$expected_resources" != none ]] || expected_resources=""
     if [[ "$gate_coordinator_command_weight" != "$expected_weight" ||
@@ -2860,7 +3009,6 @@ if ! /bin/bash -c '
     fi
   }
 
-  unset TF_PLUGIN_CACHE_DIR
   while IFS="|" read -r capacity command weight all_capacity class resources; do
     [[ -n "$capacity" ]] || continue
     assert_command_policy \
@@ -2882,14 +3030,9 @@ if ! /bin/bash -c '
 3|pnpm dashboard:mutation|1|0|ordinary|none
 3|pnpm bridge:mutation|1|0|ordinary|none
 3|pnpm indexer:mutation|1|0|ordinary|none
-3|TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform init -backend=false -input=false|1|0|ordinary|none
+3|TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform init -backend=false -input=false|1|0|terraform-init|terraform-plugin-cache
 POLICY_ROWS
 
-  TF_PLUGIN_CACHE_DIR=/tmp/shared-terraform-plugin-cache
-  assert_command_policy \
-    3 \
-    "TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform init -backend=false -input=false" \
-    1 0 terraform-init terraform-plugin-cache || exit 1
   assert_command_policy \
     3 \
     "TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform validate -no-color" \
@@ -3180,6 +3323,7 @@ fi
 exec "${REAL_CP_COMMAND:?}" "$@"
 STUB
   chmod +x bin/cp tools/trunk
+  write_installed_dependency_fixture "$PWD"
   git add .
   git commit -qm init
   printf 'changed\n' >> fixture.txt
@@ -3288,6 +3432,7 @@ printf 'pnpm %s\n' "$*" >> "${QG_WORKER_STARTED:?}"
 exec sleep 45
 STUB
     chmod +x bin/pnpm tools/trunk
+    write_installed_dependency_fixture "$PWD"
     git add .
     git commit -qm init
     printf 'scripts/gate/agent-prewarm.mjs\nscripts/context/agent-context-budget.mjs\n' \
@@ -3390,7 +3535,12 @@ STUB
       fail_worker_loss_fixture "killing one worker process group also killed the gate parent"
     kill -CONT "$gate_pid"
 
-    for ((attempt = 0; attempt < 200; attempt++)); do
+    # Recovery first drains the killed worker's exact command identity. Failure
+    # cleanup then drains the still-live sibling under the bounded TERM/KILL and
+    # marker-revalidation path. Loaded CI has crossed the old 20-second observer
+    # bound while both drains completed normally. Keep the observer below the
+    # fixture command's 45-second natural exit, but allow the full cleanup path.
+    for ((attempt = 0; attempt < 400; attempt++)); do
       kill -0 "$gate_pid" 2>/dev/null || {
         settled=1
         break
@@ -3501,6 +3651,7 @@ printf 'pnpm %s\n' "$*" >> "${QG_RELEASE_STARTED:?}"
 sleep 0.2
 STUB
     chmod +x bin/pnpm tools/trunk
+    write_installed_dependency_fixture "$PWD"
     git add .
     git commit -qm init
     printf 'scripts/gate/agent-prewarm.mjs\nscripts/context/agent-context-budget.mjs\n' \
@@ -3616,6 +3767,7 @@ fi
 exit 0
 STUB
     chmod +x bin/pnpm tools/trunk
+    write_installed_dependency_fixture "$PWD"
     git add .
     git commit -qm init
     printf 'scripts/gate/agent-prewarm.mjs\n' > changed-paths.txt
@@ -3806,6 +3958,7 @@ fi
 exit 0
 STUB
     chmod +x bin/pnpm bin/qg-sequential-descendant tools/trunk
+    write_installed_dependency_fixture "$PWD"
     git add .
     git commit -qm init
     printf 'scripts/gate/agent-prewarm.mjs\n' > holder-paths.txt
@@ -4457,6 +4610,70 @@ STUB
     [[ ! -e "$fixture_lock_root/run.lock" ]] ||
       fail_sequential_descendant_fixture \
         "the legacy recovery gate left its run lock behind"
+
+    # An explicit no-lock run has no successor that can use a retained marker.
+    # Force every pgrep-backed drain scan to fail after the marker census has
+    # captured the mapped descendant. The EXIT fallback must validate the
+    # captured runtime identity and terminate it, while the gate still exits 2
+    # because the failed scan could not prove complete absence.
+    cat > bin/pgrep <<'STUB'
+#!/usr/bin/env bash
+exit 2
+STUB
+    chmod +x bin/pgrep
+    holder_output="$fixture_repo/no-lock-failed-drain-output"
+    rm -f "$descendant_pid_file"
+    holder_start=""
+    descendant_start=""
+    ready=0
+
+    AGENT_QUALITY_GATE_LOCK=0 \
+      AGENT_QUALITY_GATE_COORDINATOR=0 \
+      AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=0 \
+      NODE_ENV=test \
+      QG_GATE_ROLE=holder \
+      QG_DESCENDANT_PID_FILE="$descendant_pid_file" \
+      PATH="$fixture_repo/bin:$PATH" \
+      /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+        --changed-paths-file holder-paths.txt \
+        --base HEAD --run --parallel 1 --no-lock \
+        > "$holder_output" 2>&1 &
+    holder_pid=$!
+    holder_start="$(gate_test_process_start "$holder_pid")"
+    [[ -n "$holder_start" ]] ||
+      fail_sequential_descendant_fixture \
+        "could not identify the no-lock failed-drain gate"
+    for ((attempt = 0; attempt < gate_test_coordinator_observer_attempts; attempt++)); do
+      if [[ -s "$descendant_pid_file" ]]; then
+        ready=1
+        break
+      fi
+      gate_test_process_has_live_start "$holder_pid" "$holder_start" || break
+      sleep 0.05
+    done
+    [[ "$ready" -eq 1 ]] ||
+      fail_sequential_descendant_fixture \
+        "the no-lock failed-drain command did not fork its descendant"
+    descendant_pid="$(cat "$descendant_pid_file")"
+    descendant_start="$(gate_test_process_start "$descendant_pid")"
+    [[ "$descendant_pid" =~ ^[1-9][0-9]*$ && -n "$descendant_start" ]] ||
+      fail_sequential_descendant_fixture \
+        "the no-lock failed-drain fixture recorded an invalid descendant"
+
+    set +e
+    wait "$holder_pid"
+    holder_exit=$?
+    set -e
+    holder_pid=""
+    [[ "$holder_exit" -eq 2 ]] ||
+      fail_sequential_descendant_fixture \
+        "the no-lock failed drain returned ${holder_exit} instead of 2"
+    gate_test_process_has_live_start "$descendant_pid" "$descendant_start" &&
+      fail_sequential_descendant_fixture \
+        "the no-lock failed drain leaked its captured mapped descendant"
+    grep -Fq "kept failing" "$holder_output" ||
+      fail_sequential_descendant_fixture \
+        "the no-lock failed drain did not report its incomplete scan"
     descendant_pid=""
     cleanup_sequential_descendant_fixture ||
       fail_sequential_descendant_fixture \
@@ -4557,6 +4774,7 @@ fi
 exit 0
 STUB
       chmod +x bin/pnpm bin/qg-trunk-probe-descendant tools/trunk
+      write_installed_dependency_fixture "$PWD"
       git add .
       git commit -qm init
       git worktree add --detach -q "$fixture_joiner_repo" HEAD
@@ -13113,6 +13331,379 @@ fi
 # protocol and integration coverage and must not change these lock fixtures.
 # shellcheck disable=SC2031 # this family intentionally sets its own legacy mode
 export AGENT_QUALITY_GATE_COORDINATOR=0
+
+# Exercise the real no-lock fallback in a separate Bash process. Its children
+# must have that process's $$ as PPID. A parenthesized Bash 3.2 subshell keeps
+# the outer $$ value and cannot prove the direct-child boundary used here.
+no_lock_fallback_fixture_dir="$(mktemp -d)"
+cat > "$no_lock_fallback_fixture_dir/process-fixture.cjs" <<'NODE'
+const fs = require("node:fs");
+const { spawn } = require("node:child_process");
+
+const [mode, label, tracePath, childPidPath, readyPath, memberReadyPath, lifetime] =
+  process.argv.slice(2);
+
+function trace(event) {
+  fs.appendFileSync(tracePath, `${label}:${event}\n`);
+}
+
+process.on("exit", () => trace("EXIT"));
+
+if (mode === "member") {
+  process.on("SIGTERM", () => {
+    trace("TERM");
+    process.exit(0);
+  });
+  fs.writeFileSync(readyPath, "ready\n");
+  setInterval(() => {}, 1000);
+} else if (mode === "leaf") {
+  process.on("SIGTERM", () => trace("TERM"));
+  fs.writeFileSync(readyPath, "ready\n");
+  setTimeout(() => process.exit(0), Number(lifetime));
+} else if (mode === "parent") {
+  process.on("SIGTERM", () => trace("TERM"));
+  const member = spawn(
+    process.execPath,
+    [
+      __filename,
+      "member",
+      `${label}-member`,
+      tracePath,
+      "unused",
+      memberReadyPath,
+      "unused",
+      "unused",
+    ],
+    { stdio: "ignore" },
+  );
+  process.on("SIGUSR1", () => {
+    member.kill("SIGTERM");
+    setTimeout(() => process.exit(0), 100);
+  });
+  fs.writeFileSync(childPidPath, `${member.pid}\n`);
+  fs.writeFileSync(readyPath, "ready\n");
+  setInterval(() => {}, 1000);
+} else {
+  throw new Error(`unknown fixture mode: ${mode}`);
+}
+NODE
+
+cat > "$no_lock_fallback_fixture_dir/harness.sh" <<'HARNESS'
+#!/usr/bin/env bash
+set -euo pipefail
+
+gate_source="$1"
+scratch="$2"
+fixture="$scratch/process-fixture.cjs"
+node_path="$(node -p 'process.execPath')"
+[[ -x "$node_path" ]] || exit 2
+root_pid=""
+root_runtime=""
+root_member_pid=""
+root_member_runtime=""
+plain_pid=""
+plain_runtime=""
+worker_pid=""
+worker_runtime=""
+worker_member_pid=""
+worker_member_runtime=""
+
+extract_gate_function() {
+  local function_name="$1"
+  sed -n "/^${function_name}() {$/,/^}$/p" "$gate_source"
+}
+
+extracted_functions="$scratch/extracted-functions.sh"
+: > "$extracted_functions"
+for function_name in \
+  collect_process_tree \
+  gate_lock_process_snapshot \
+  gate_lock_normalize_process_start \
+  gate_lock_process_start \
+  gate_lock_process_runtime_start \
+  gate_lock_process_signal_probe \
+  teardown_no_lock_settle_known_processes; do
+  extract_gate_function "$function_name" >> "$extracted_functions"
+done
+# shellcheck disable=SC1090 # the test extracts these functions from the gate under test
+source "$extracted_functions"
+
+test_fail() {
+  printf 'no-lock fallback regression failed: %s\n' "$*" >&2
+  exit 1
+}
+
+process_parent() {
+  ps -o ppid= -p "$1" 2>/dev/null | awk 'NF { print $1; exit }' || true
+}
+
+process_group() {
+  ps -o pgid= -p "$1" 2>/dev/null | awk 'NF { print $1; exit }' || true
+}
+
+process_state() {
+  ps -o stat= -p "$1" 2>/dev/null | awk 'NF { print $1; exit }' || true
+}
+
+process_has_live_runtime() {
+  local pid="$1"
+  local expected_runtime="$2"
+  local current_runtime state
+  current_runtime="$(gate_lock_process_runtime_start "$pid")"
+  [[ -n "$current_runtime" && "$current_runtime" == "$expected_runtime" ]] || return 1
+  state="$(process_state "$pid")"
+  [[ -z "$state" || "$state" != Z* ]]
+}
+
+wait_for_file() {
+  local path="$1"
+  local attempt=0
+  while [[ ! -e "$path" && "$attempt" -lt 200 ]]; do
+    sleep 0.05
+    attempt=$((attempt + 1))
+  done
+  [[ -e "$path" ]] || test_fail "fixture did not create ${path}"
+}
+
+wait_until_not_live() {
+  local label="$1"
+  local pid="$2"
+  local expected_runtime="$3"
+  local attempt=0
+  while process_has_live_runtime "$pid" "$expected_runtime" &&
+    [[ "$attempt" -lt 80 ]]; do
+    sleep 0.05
+    attempt=$((attempt + 1))
+  done
+  ! process_has_live_runtime "$pid" "$expected_runtime" ||
+    test_fail "${label} leaked its recorded process generation"
+}
+
+assert_live() {
+  local label="$1"
+  local pid="$2"
+  local expected_runtime="$3"
+  process_has_live_runtime "$pid" "$expected_runtime" ||
+    test_fail "${label} lost its recorded process generation"
+}
+
+assert_trace() {
+  local path="$1"
+  local expected="$2"
+  grep -Fxq "$expected" "$path" ||
+    test_fail "${path} does not contain ${expected}"
+}
+
+assert_no_trace() {
+  local path="$1"
+  local unexpected="$2"
+  ! grep -Fxq "$unexpected" "$path" 2>/dev/null ||
+    test_fail "${path} unexpectedly contains ${unexpected}"
+}
+
+signal_exact_direct_child() {
+  local signal="$1"
+  local pid="$2"
+  local expected_runtime="$3"
+  local parent_before parent_after current_runtime
+  [[ "$pid" =~ ^[1-9][0-9]*$ && -n "$expected_runtime" ]] || return 1
+  parent_before="$(process_parent "$pid")"
+  current_runtime="$(gate_lock_process_runtime_start "$pid")"
+  parent_after="$(process_parent "$pid")"
+  [[ "$current_runtime" == "$expected_runtime" &&
+    "$parent_before" == "$$" && "$parent_after" == "$$" ]] || return 1
+  kill "-${signal}" "$pid" 2>/dev/null
+}
+
+cleanup_pair() {
+  local parent_pid="$1"
+  local parent_runtime="$2"
+  local member_pid="$3"
+  local member_runtime="$4"
+  local member_parent_before member_parent_after member_current_runtime
+  [[ -n "$parent_pid" && -n "$parent_runtime" ]] || return 0
+  if [[ -n "$member_pid" && -n "$member_runtime" ]] &&
+    process_has_live_runtime "$parent_pid" "$parent_runtime"; then
+    member_parent_before="$(process_parent "$member_pid")"
+    member_current_runtime="$(gate_lock_process_runtime_start "$member_pid")"
+    member_parent_after="$(process_parent "$member_pid")"
+    if [[ "$member_current_runtime" == "$member_runtime" &&
+      "$member_parent_before" == "$parent_pid" &&
+      "$member_parent_after" == "$parent_pid" ]]; then
+      kill -TERM "$member_pid" 2>/dev/null || true
+    fi
+  fi
+  signal_exact_direct_child USR1 "$parent_pid" "$parent_runtime" || true
+  for _ in {1..20}; do
+    process_has_live_runtime "$parent_pid" "$parent_runtime" || break
+    sleep 0.05
+  done
+  signal_exact_direct_child KILL "$parent_pid" "$parent_runtime" || true
+  wait "$parent_pid" 2>/dev/null || true
+}
+
+cleanup_harness() {
+  local status=$?
+  trap - EXIT
+  set +e
+  cleanup_pair \
+    "$root_pid" "$root_runtime" "$root_member_pid" "$root_member_runtime"
+  cleanup_pair \
+    "$worker_pid" "$worker_runtime" "$worker_member_pid" "$worker_member_runtime"
+  signal_exact_direct_child KILL "$plain_pid" "$plain_runtime" || true
+  [[ -n "$plain_pid" ]] && wait "$plain_pid" 2>/dev/null || true
+  exit "$status"
+}
+trap cleanup_harness EXIT
+
+for function_name in \
+  collect_process_tree \
+  gate_lock_process_runtime_start \
+  gate_lock_process_signal_probe \
+  teardown_no_lock_settle_known_processes; do
+  declare -F "$function_name" >/dev/null ||
+    test_fail "could not extract ${function_name}"
+done
+
+# A wrong root generation and a live non-direct descendant must remain
+# untouched. The valid root then exercises the tree snapshot, TERM, KILL,
+# direct-child reap, and exact-generation settlement.
+root_trace="$scratch/root.trace"
+root_child_pid_file="$scratch/root-child.pid"
+root_ready="$scratch/root.ready"
+root_member_ready="$scratch/root-member.ready"
+: > "$root_trace"
+"$node_path" "$fixture" parent root "$root_trace" "$root_child_pid_file" \
+  "$root_ready" "$root_member_ready" unused &
+root_pid=$!
+wait_for_file "$root_ready"
+wait_for_file "$root_member_ready"
+root_member_pid="$(cat "$root_child_pid_file")"
+root_runtime="$(gate_lock_process_runtime_start "$root_pid")"
+root_member_runtime="$(gate_lock_process_runtime_start "$root_member_pid")"
+[[ -n "$root_runtime" && -n "$root_member_runtime" ]] ||
+  test_fail "could not capture the root fixture runtime identities"
+root_parent="$(process_parent "$root_pid")"
+root_member_parent="$(process_parent "$root_member_pid")"
+[[ "$root_parent" == "$$" ]] ||
+  test_fail "root fixture parent is ${root_parent:-missing}, expected $$"
+[[ "$root_member_parent" == "$root_pid" ]] ||
+  test_fail "root fixture member parent is ${root_member_parent:-missing}, expected $root_pid"
+
+set +e
+teardown_no_lock_settle_known_processes \
+  root "$root_pid" "${root_runtime}-wrong" \
+  root "$root_member_pid" "$root_member_runtime" \
+  2> "$scratch/root-rejected.err"
+root_rejected_status=$?
+set -e
+[[ "$root_rejected_status" -eq 2 ]] ||
+  test_fail "runtime/direct-child rejection returned ${root_rejected_status}"
+assert_live "rejected root" "$root_pid" "$root_runtime"
+assert_live "rejected root member" "$root_member_pid" "$root_member_runtime"
+assert_no_trace "$root_trace" "root:TERM"
+assert_no_trace "$root_trace" "root-member:TERM"
+
+teardown_no_lock_settle_known_processes root "$root_pid" "$root_runtime"
+assert_trace "$root_trace" "root:TERM"
+assert_trace "$root_trace" "root-member:TERM"
+assert_trace "$root_trace" "root-member:EXIT"
+assert_no_trace "$root_trace" "root:EXIT"
+wait_until_not_live "root" "$root_pid" "$root_runtime"
+wait_until_not_live "root member" "$root_member_pid" "$root_member_runtime"
+
+# A direct child in the harness process group is not a worker-group leader.
+# The fallback must reject it and return within its bound without waiting for
+# the untouched child to exit.
+plain_trace="$scratch/plain.trace"
+plain_ready="$scratch/plain.ready"
+: > "$plain_trace"
+set +m
+"$node_path" "$fixture" leaf plain "$plain_trace" unused "$plain_ready" \
+  unused 30000 &
+plain_pid=$!
+wait_for_file "$plain_ready"
+plain_runtime="$(gate_lock_process_runtime_start "$plain_pid")"
+[[ -n "$plain_runtime" ]] || test_fail "could not capture the plain worker runtime"
+[[ "$(process_parent "$plain_pid")" == "$$" ]] ||
+  test_fail "plain worker fixture is not a direct harness child"
+[[ "$(process_group "$plain_pid")" != "$plain_pid" ]] ||
+  test_fail "plain worker fixture unexpectedly owns a process group"
+plain_started_at="$(date +%s)"
+set +e
+teardown_no_lock_settle_known_processes worker "$plain_pid" "$plain_runtime" \
+  2> "$scratch/plain-rejected.err"
+plain_rejected_status=$?
+set -e
+plain_elapsed=$(($(date +%s) - plain_started_at))
+[[ "$plain_rejected_status" -eq 2 ]] ||
+  test_fail "worker-group rejection returned ${plain_rejected_status}"
+[[ "$plain_elapsed" -le 5 ]] ||
+  test_fail "worker-group rejection blocked for ${plain_elapsed}s"
+assert_live "plain worker" "$plain_pid" "$plain_runtime"
+assert_no_trace "$plain_trace" "plain:TERM"
+signal_exact_direct_child KILL "$plain_pid" "$plain_runtime" ||
+  test_fail "could not clean up the rejected plain worker"
+wait "$plain_pid" 2>/dev/null || true
+wait_until_not_live "plain worker" "$plain_pid" "$plain_runtime"
+plain_pid=""
+plain_runtime=""
+
+# Job control gives this direct child a process group whose ID is its PID. Its
+# member inherits that group. A wrong generation leaves the group untouched;
+# the valid record settles both exact generations and reaps the direct leader.
+worker_trace="$scratch/worker.trace"
+worker_child_pid_file="$scratch/worker-child.pid"
+worker_ready="$scratch/worker.ready"
+worker_member_ready="$scratch/worker-member.ready"
+: > "$worker_trace"
+set -m
+"$node_path" "$fixture" parent worker "$worker_trace" "$worker_child_pid_file" \
+  "$worker_ready" "$worker_member_ready" unused &
+worker_pid=$!
+set +m
+wait_for_file "$worker_ready"
+wait_for_file "$worker_member_ready"
+worker_member_pid="$(cat "$worker_child_pid_file")"
+worker_runtime="$(gate_lock_process_runtime_start "$worker_pid")"
+worker_member_runtime="$(gate_lock_process_runtime_start "$worker_member_pid")"
+[[ -n "$worker_runtime" && -n "$worker_member_runtime" ]] ||
+  test_fail "could not capture the worker fixture runtime identities"
+worker_parent="$(process_parent "$worker_pid")"
+worker_member_parent="$(process_parent "$worker_member_pid")"
+[[ "$worker_parent" == "$$" ]] ||
+  test_fail "worker fixture parent is ${worker_parent:-missing}, expected $$"
+[[ "$(process_group "$worker_pid")" == "$worker_pid" ]] ||
+  test_fail "worker fixture does not own its process group"
+[[ "$(process_group "$worker_member_pid")" == "$worker_pid" ]] ||
+  test_fail "worker fixture member is outside the recorded process group (parent ${worker_member_parent:-missing})"
+
+teardown_no_lock_settle_known_processes \
+  worker "$worker_pid" "${worker_runtime}-wrong"
+assert_live "wrong-generation worker" "$worker_pid" "$worker_runtime"
+assert_live \
+  "wrong-generation worker member" "$worker_member_pid" "$worker_member_runtime"
+assert_no_trace "$worker_trace" "worker:TERM"
+assert_no_trace "$worker_trace" "worker-member:TERM"
+
+teardown_no_lock_settle_known_processes worker "$worker_pid" "$worker_runtime"
+assert_trace "$worker_trace" "worker:TERM"
+assert_trace "$worker_trace" "worker-member:TERM"
+assert_trace "$worker_trace" "worker-member:EXIT"
+assert_no_trace "$worker_trace" "worker:EXIT"
+wait_until_not_live "worker" "$worker_pid" "$worker_runtime"
+wait_until_not_live \
+  "worker member" "$worker_member_pid" "$worker_member_runtime"
+HARNESS
+chmod +x "$no_lock_fallback_fixture_dir/harness.sh"
+if ! /bin/bash "$no_lock_fallback_fixture_dir/harness.sh" \
+  "$repo_root/scripts/agent-quality-gate.sh" \
+  "$no_lock_fallback_fixture_dir" > "$output_file" 2>&1; then
+  fail "controlled no-lock fallback regressions failed"
+fi
+rm -rf "$no_lock_fallback_fixture_dir"
+no_lock_fallback_fixture_dir=""
+
 # --- Cross-run mutual exclusion (GitHub issue #1802) -------------------------
 # Two gate runs on one machine starve each other, and the pre-push hook starts
 # one of its own while a manual run is still going, so `--run` takes a
@@ -19456,14 +20047,16 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   [[ ! -e "$race_pattern_pgrep_called" ]] ||
     fail "a failed run-token pattern build still called pgrep"
 
-  # Exact-PID revalidation can keep the cheap argv census global, but it must
-  # emit only the requested PID. It must reject an invalid PID before pgrep.
+  # A host without readable proc argv records falls back to pgrep. That
+  # fallback must emit only the requested PID. An invalid PID must fail before
+  # either scanner runs.
   race_target_pgrep_called="$gate_race_out/target-pgrep-called"
   rm -f "$race_target_pgrep_called"
   race_target_output="$(
     gate_drain_scan_error="agentqg-scan-failed"
     gate_lock_root_dir=""
     source "$repo_root/scripts/gate/run-handles.sh"
+    gate_run_proc_argv_scan_available() { return 1; }
     pgrep() {
       printf '%s\n' 101 202
       return 0
@@ -19472,6 +20065,19 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   )"
   [[ "$race_target_output" == "202" ]] ||
     fail "an exact-PID argv revalidation emitted another process"
+  race_target_proc_error_output="$(
+    gate_drain_scan_error="agentqg-scan-failed"
+    gate_lock_root_dir=""
+    source "$repo_root/scripts/gate/run-handles.sh"
+    gate_run_proc_argv_scan_available() { return 0; }
+    gate_run_proc_pid_has_argv_tag() { return 2; }
+    gate_run_tagged_pids "fixture.host-1-1" "$$"
+  )" 2> "$gate_race_out/target-proc-error.err"
+  [[ "$race_target_proc_error_output" == "agentqg-scan-failed" ]] ||
+    fail "an exact-PID proc argv scan error did not fail closed"
+  grep -Fq -- "could not scan /proc/$$/cmdline" \
+    "$gate_race_out/target-proc-error.err" ||
+    fail "an exact-PID proc argv scan error omitted its diagnosis"
   race_invalid_target_output="$(
     gate_drain_scan_error="agentqg-scan-failed"
     gate_lock_root_dir=""
@@ -19649,11 +20255,11 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
       gate_drain_scan_error="agentqg-scan-failed"
       gate_lock_root_dir="$gate_race_root"
       source "$repo_root/scripts/gate/run-handles.sh"
-      pgrep() { return 1; }
+      pgrep() { return 2; }
       gate_run_tagged_pids "$race_proc_token" "$race_proc_pid"
     )"
     [[ "$race_proc_target_output" == "$race_proc_pid" ]] ||
-      fail "the exact-PID proc marker scan lost its descriptor holder"
+      fail "the exact-PID proc scan lost its descriptor holder or ran a global argv census"
     race_proc_nonholder_output="$(
       gate_drain_scan_error="agentqg-scan-failed"
       gate_lock_root_dir="$gate_race_root"

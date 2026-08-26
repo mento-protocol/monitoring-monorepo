@@ -10,6 +10,7 @@ import {
   rm,
   symlink,
   truncate,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -18,10 +19,13 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  INSTALLED_DEPENDENCY_MAX_FILE_BYTES,
   LOCAL_BIN_MAX_FILE_BYTES,
   MATERIAL_PACKAGE_ROOTS,
   mappedChildScrubbedEnvironmentName,
   materialEnvironmentDigest as computeMaterialEnvironmentDigest,
+  normalizedInstalledDependencyManifest,
+  normalizedInstalledDependencyManifestForTest,
   normalizedLocalBinManifest,
   normalizedLocalBinManifestForTest,
 } from "./quality-gate-coordinator-environment.mjs";
@@ -120,6 +124,8 @@ function childExit(child) {
   return new Promise((resolveExit) => child.once("exit", resolveExit));
 }
 
+const stableFixtureTime = new Date("2024-01-01T00:00:00.000Z");
+
 function pnpmShellShim(
   physicalRoot,
   {
@@ -153,13 +159,115 @@ async function materialEnvironmentFixture(label) {
   const localBin = join(root, "node_modules", ".bin");
   const wrapper = join(localBin, "fixture-tool");
   await mkdir(localBin, { recursive: true });
+  const packageRoot = join(
+    root,
+    "node_modules",
+    ".pnpm",
+    "fixture-tool",
+    "node_modules",
+    "fixture-tool",
+  );
+  await mkdir(packageRoot, { recursive: true });
+  await writeFile(
+    join(packageRoot, "package.json"),
+    '{"name":"fixture-tool","version":"1.0.0"}\n',
+  );
+  await utimes(
+    join(packageRoot, "package.json"),
+    stableFixtureTime,
+    stableFixtureTime,
+  );
+  await symlink(
+    join(".pnpm", "fixture-tool", "node_modules", "fixture-tool"),
+    join(root, "node_modules", "fixture-tool"),
+  );
   await writeFile(wrapper, pnpmShellShim(physicalRoot));
   await chmod(wrapper, 0o755);
   const target = join(root, "node_modules", "fixture-tool", "bin", "tool.mjs");
   await mkdir(dirname(target), { recursive: true });
   await writeFile(target, "#!/usr/bin/env node\n// fixture tool\n");
   await chmod(target, 0o755);
-  return { root, physicalRoot, localBin, wrapper, target };
+  await utimes(target, stableFixtureTime, stableFixtureTime);
+  const fixture = { root, physicalRoot, localBin, wrapper, target };
+  await writeInstalledDependencyMetadata(fixture, "stable-install-time");
+  return fixture;
+}
+
+async function writeInstalledDependencyMetadata(fixture, timestamp) {
+  const nodeModules = join(fixture.root, "node_modules");
+  await Promise.all([
+    writeFile(
+      join(nodeModules, ".modules.yaml"),
+      JSON.stringify({
+        layoutVersion: 5,
+        nodeLinker: "isolated",
+        packageManager: "pnpm@11.9.0",
+        prunedAt: timestamp,
+        storeDir: "/shared/pnpm/store/v11",
+        virtualStoreDir: ".pnpm",
+      }),
+    ),
+    writeFile(
+      join(nodeModules, ".package-map.json"),
+      JSON.stringify({
+        packages: {
+          ".": {
+            dependencies: { react: "react@19.2.0" },
+            url: "..",
+          },
+          "react@19.2.0": {
+            dependencies: { react: "react@19.2.0" },
+            url: "./.pnpm/react@19.2.0/node_modules/react",
+          },
+        },
+      }),
+    ),
+    writeFile(
+      join(nodeModules, ".pnpm-workspace-state-v1.json"),
+      JSON.stringify({
+        lastValidatedTimestamp: timestamp,
+        projects: {
+          [fixture.physicalRoot]: {
+            name: "fixture-root",
+          },
+        },
+        settings: {
+          patchedDependencies: {
+            react: join(fixture.physicalRoot, "patches", "react.patch"),
+          },
+        },
+      }),
+    ),
+    writeFile(
+      join(nodeModules, ".pnpm", "lock.yaml"),
+      "lockfileVersion: '9.0'\nreact: 19.2.0\n",
+    ),
+  ]);
+}
+
+async function addInstalledReactLink(fixture) {
+  const target = join(
+    fixture.physicalRoot,
+    "node_modules",
+    ".pnpm",
+    "react@19.2.0",
+    "node_modules",
+    "react",
+  );
+  const packageRoot = join(fixture.root, "ui-dashboard", "node_modules");
+  await mkdir(target, { recursive: true });
+  await writeFile(
+    join(target, "package.json"),
+    '{"name":"react","version":"19.2.0","main":"index.js"}\n',
+  );
+  await writeFile(join(target, "index.js"), "export const fixture = true;\n");
+  await Promise.all([
+    utimes(join(target, "package.json"), stableFixtureTime, stableFixtureTime),
+    utimes(join(target, "index.js"), stableFixtureTime, stableFixtureTime),
+  ]);
+  await mkdir(packageRoot, { recursive: true });
+  await symlink(target, join(packageRoot, "react"));
+  return { link: join(packageRoot, "react"), target };
 }
 
 function materialEnvironmentDigest(
@@ -698,6 +806,7 @@ test("material environment binds mapped-command controls", async (t) => {
     "AGENT_QUALITY_GATE_LOCK_TEST_READY_FILE",
     "AGENT_QUALITY_GATE_TEST_WORKER_REGISTRATION_BARRIER",
     "ALL_PROXY",
+    "APPDATA",
     "AUTOREVIEW_HEARTBEAT_SECONDS",
     "BROWSERSLIST",
     "BROWSERSLIST_CONFIG",
@@ -744,6 +853,7 @@ test("material environment binds mapped-command controls", async (t) => {
     "SSL_CERT_DIR",
     "SSL_CERT_FILE",
     "STRYKER_MUTATOR",
+    "TERRAFORM_CONFIG",
     "TRUNK_CACHE",
     "TRUNK_CLI_VERSION",
     "VERCEL",
@@ -1332,6 +1442,354 @@ test("material environment binds package-local executables", async (t) => {
     materialEnvironmentDigest(first),
     materialEnvironmentDigest(second),
     "a missing package-local executable root must remain material without setup",
+  );
+});
+
+test("material environment binds installed dependency state and package links", async (t) => {
+  const first = await materialEnvironmentFixture("dependency-first");
+  const second = await materialEnvironmentFixture("dependency-second");
+  t.after(async () => {
+    await Promise.all([
+      rm(first.root, { recursive: true, force: true }),
+      rm(second.root, { recursive: true, force: true }),
+    ]);
+  });
+  await Promise.all([
+    writeInstalledDependencyMetadata(first, "first-install-time"),
+    writeInstalledDependencyMetadata(second, "second-install-time"),
+  ]);
+  const [firstReact, secondReact] = await Promise.all([
+    addInstalledReactLink(first),
+    addInstalledReactLink(second),
+  ]);
+
+  assert.equal(
+    normalizedInstalledDependencyManifest(second.root),
+    normalizedInstalledDependencyManifest(first.root),
+    "equivalent installed dependency manifests must normalize across worktrees",
+  );
+  const baseline = materialEnvironmentDigest(first);
+  assert.equal(
+    materialEnvironmentDigest(second),
+    baseline,
+    "equivalent metadata and absolute package links must normalize across worktrees",
+  );
+
+  await rm(secondReact.link);
+  assert.notEqual(
+    materialEnvironmentDigest(second),
+    baseline,
+    "a missing package-local dependency link must change the shared key",
+  );
+  await symlink(secondReact.target, secondReact.link);
+  assert.equal(materialEnvironmentDigest(second), baseline);
+
+  await writeFile(
+    join(secondReact.target, "package.json"),
+    '{"name":"react","version":"19.2.1","main":"index.js"}\n',
+  );
+  await utimes(
+    join(secondReact.target, "package.json"),
+    stableFixtureTime,
+    stableFixtureTime,
+  );
+  assert.notEqual(
+    materialEnvironmentDigest(second),
+    baseline,
+    "changed installed package metadata must change the shared key",
+  );
+  await writeFile(
+    join(secondReact.target, "package.json"),
+    '{"name":"react","version":"19.2.0","main":"index.js"}\n',
+  );
+  await utimes(
+    join(secondReact.target, "package.json"),
+    stableFixtureTime,
+    stableFixtureTime,
+  );
+  assert.equal(materialEnvironmentDigest(second), baseline);
+
+  await writeFile(
+    join(secondReact.target, "index.js"),
+    "export const fixture = null;\n",
+  );
+  assert.notEqual(
+    materialEnvironmentDigest(second),
+    baseline,
+    "a same-size installed payload mutation must change its generation",
+  );
+  await writeFile(
+    join(secondReact.target, "index.js"),
+    "export const fixture = true;\n",
+  );
+  await utimes(
+    join(secondReact.target, "index.js"),
+    stableFixtureTime,
+    stableFixtureTime,
+  );
+  assert.equal(materialEnvironmentDigest(second), baseline);
+
+  await writeFile(
+    join(secondReact.target, "package.json"),
+    '{"name":"react","version":"19.2.0"}\n',
+  );
+  const defaultEntrypointBaseline = materialEnvironmentDigest(second);
+  await writeFile(
+    join(secondReact.target, "index.js"),
+    "export const fixture = null;\n",
+  );
+  assert.notEqual(
+    materialEnvironmentDigest(second),
+    defaultEntrypointBaseline,
+    "a package without main must bind its implicit index file",
+  );
+  await writeFile(
+    join(secondReact.target, "index.js"),
+    "export const fixture = true;\n",
+  );
+  await writeFile(
+    join(secondReact.target, "package.json"),
+    '{"name":"react","version":"19.2.0","main":"missing"}\n',
+  );
+  const missingMainBaseline = materialEnvironmentDigest(second);
+  await writeFile(
+    join(secondReact.target, "index.js"),
+    "export const fixture = null;\n",
+  );
+  assert.notEqual(
+    materialEnvironmentDigest(second),
+    missingMainBaseline,
+    "an unresolved main must bind the implicit index fallback",
+  );
+  await writeFile(
+    join(secondReact.target, "index.js"),
+    "export const fixture = true;\n",
+  );
+
+  await writeFile(
+    join(secondReact.target, "package.json"),
+    '{"name":"react","version":"19.2.0","browser":"browser.js"}\n',
+  );
+  await writeFile(
+    join(secondReact.target, "browser.js"),
+    "export const fixture = true;\n",
+  );
+  const bareBrowserEntrypointBaseline = materialEnvironmentDigest(second);
+  await writeFile(
+    join(secondReact.target, "browser.js"),
+    "export const fixture = null;\n",
+  );
+  assert.notEqual(
+    materialEnvironmentDigest(second),
+    bareBrowserEntrypointBaseline,
+    "a bare browser entrypoint must bind its payload bytes",
+  );
+  await rm(join(secondReact.target, "browser.js"));
+
+  await writeFile(
+    join(secondReact.target, "package.json"),
+    '{"name":"react","version":"19.2.0","main":"lib"}\n',
+  );
+  await mkdir(join(secondReact.target, "lib"));
+  await writeFile(
+    join(secondReact.target, "lib", "index.js"),
+    "export const fixture = true;\n",
+  );
+  const directoryEntrypointBaseline = materialEnvironmentDigest(second);
+  await writeFile(
+    join(secondReact.target, "lib", "index.js"),
+    "export const fixture = null;\n",
+  );
+  assert.notEqual(
+    materialEnvironmentDigest(second),
+    directoryEntrypointBaseline,
+    "a directory main must bind the index file Node resolves",
+  );
+  await rm(join(secondReact.target, "lib"), { recursive: true });
+
+  await mkdir(join(secondReact.target, "entry-directory"));
+  await writeFile(
+    join(secondReact.target, "entry-directory", "package.json"),
+    '{"type":"module"}\n',
+  );
+  await writeFile(
+    join(secondReact.target, "entry-directory", "index.js"),
+    "export const fixture = true;\n",
+  );
+  await symlink("entry-directory", join(secondReact.target, "entry-link"));
+  await writeFile(
+    join(secondReact.target, "package.json"),
+    '{"name":"react","version":"19.2.0","main":"entry-link"}\n',
+  );
+  const directorySymlinkBaseline = materialEnvironmentDigest(second);
+  await writeFile(
+    join(secondReact.target, "entry-directory", "index.js"),
+    "export const fixture = null;\n",
+  );
+  assert.notEqual(
+    materialEnvironmentDigest(second),
+    directorySymlinkBaseline,
+    "a directory symlink entrypoint must bind its resolved index file",
+  );
+  await writeFile(
+    join(secondReact.target, "entry-directory", "index.js"),
+    "export const fixture = true;\n",
+  );
+  await writeFile(
+    join(secondReact.target, "entry-directory", "package.json"),
+    '{"type":"commonjs"}\n',
+  );
+  assert.notEqual(
+    materialEnvironmentDigest(second),
+    directorySymlinkBaseline,
+    "directory resolution must bind the nested package manifest",
+  );
+  await Promise.all([
+    rm(join(secondReact.target, "entry-link")),
+    rm(join(secondReact.target, "entry-directory"), { recursive: true }),
+  ]);
+
+  await writeFile(
+    join(secondReact.target, "package.json"),
+    '{"name":"react","version":"19.2.0","main":"dist/entry"}\n',
+  );
+  await mkdir(join(secondReact.target, "dist"));
+  const extensionPayload = "export const fixture = true;\n";
+  await writeFile(
+    join(secondReact.target, "dist", "entry.js"),
+    extensionPayload,
+  );
+  const extensionBaseline = materialEnvironmentDigest(second);
+  await rm(join(secondReact.target, "dist", "entry.js"));
+  await writeFile(
+    join(secondReact.target, "dist", "entry.json"),
+    extensionPayload,
+  );
+  assert.notEqual(
+    materialEnvironmentDigest(second),
+    extensionBaseline,
+    "the resolved entrypoint extension must remain material",
+  );
+  await rm(join(secondReact.target, "dist"), { recursive: true });
+
+  await writeFile(
+    join(secondReact.target, "package.json"),
+    '{"name":"react","version":"19.2.0","main":"entry-link.js"}\n',
+  );
+  await writeFile(
+    join(secondReact.target, "entry-target.js"),
+    "export const fixture = true;\n",
+  );
+  await symlink("entry-target.js", join(secondReact.target, "entry-link.js"));
+  const symlinkEntrypointBaseline = materialEnvironmentDigest(second);
+  await writeFile(
+    join(secondReact.target, "entry-target.js"),
+    "export const fixture = null;\n",
+  );
+  assert.notEqual(
+    materialEnvironmentDigest(second),
+    symlinkEntrypointBaseline,
+    "a symlink entrypoint must bind its target content",
+  );
+  await Promise.all([
+    rm(join(secondReact.target, "entry-link.js")),
+    rm(join(secondReact.target, "entry-target.js")),
+  ]);
+  await writeFile(
+    join(secondReact.target, "package.json"),
+    '{"name":"react","version":"19.2.0","main":"index.js"}\n',
+  );
+  assert.equal(materialEnvironmentDigest(second), baseline);
+
+  await rm(join(secondReact.target, "index.js"));
+  assert.notEqual(
+    materialEnvironmentDigest(second),
+    baseline,
+    "a missing installed package payload must change the shared key",
+  );
+  await writeFile(
+    join(secondReact.target, "index.js"),
+    "export const fixture = true;\n",
+  );
+  await utimes(
+    join(secondReact.target, "index.js"),
+    stableFixtureTime,
+    stableFixtureTime,
+  );
+  assert.equal(materialEnvironmentDigest(second), baseline);
+
+  await rm(join(secondReact.target, "package.json"));
+  assert.throws(
+    () => materialEnvironmentDigest(second),
+    /installed dependency package manifest is missing/u,
+    "a package link without package.json must fail closed",
+  );
+  await writeFile(
+    join(secondReact.target, "package.json"),
+    '{"name":"react","version":"19.2.0","main":"index.js"}\n',
+  );
+  await utimes(
+    join(secondReact.target, "package.json"),
+    stableFixtureTime,
+    stableFixtureTime,
+  );
+  assert.equal(materialEnvironmentDigest(second), baseline);
+
+  await rm(join(second.root, "node_modules", ".modules.yaml"));
+  assert.throws(
+    () => materialEnvironmentDigest(second),
+    /installed dependency metadata is missing/u,
+    "missing pnpm installation metadata must fail closed",
+  );
+  await writeInstalledDependencyMetadata(second, "second-install-time");
+  assert.equal(materialEnvironmentDigest(second), baseline);
+
+  await writeFile(
+    join(second.root, "node_modules", ".package-map.json"),
+    JSON.stringify({ packages: { ".": { dependencies: {} } } }),
+  );
+  assert.notEqual(
+    materialEnvironmentDigest(second),
+    baseline,
+    "changed pnpm installation metadata must change the shared key",
+  );
+  assert.equal(
+    await realpath(firstReact.link),
+    firstReact.target,
+    "the first dependency link must remain usable after hashing",
+  );
+});
+
+test("installed dependency manifests enforce entry and file bounds", async (t) => {
+  const fixture = await materialEnvironmentFixture("dependency-bounds");
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+
+  assert.doesNotThrow(() =>
+    normalizedInstalledDependencyManifestForTest(fixture.root, {
+      maxEntries: 12,
+    }),
+  );
+  assert.throws(
+    () =>
+      normalizedInstalledDependencyManifestForTest(fixture.root, {
+        maxEntries: 11,
+      }),
+    /entry limit/u,
+  );
+  assert.throws(
+    () =>
+      normalizedInstalledDependencyManifestForTest(fixture.root, {
+        maxTotalBytes: 1,
+      }),
+    /manifest exceeds its byte limit/u,
+  );
+  await writeFile(
+    join(fixture.root, "node_modules", ".package-map.json"),
+    "x".repeat(INSTALLED_DEPENDENCY_MAX_FILE_BYTES + 1),
+  );
+  assert.throws(
+    () => normalizedInstalledDependencyManifestForTest(fixture.root, {}),
+    /per-file size limit/u,
   );
 });
 

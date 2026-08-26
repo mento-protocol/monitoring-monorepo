@@ -3,7 +3,7 @@ title: Fair local quality-gate coordination across worktrees
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-25
+last_verified: 2026-08-26
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -246,11 +246,13 @@ only non-absolute targets such as pipes, sockets, and anonymous inodes. The
 regular-file marker always has an absolute target. The scan compares the exact
 device and inode for every absolute target. It stops scanning a process after a
 match. Handle revalidation after a process identity or process-group snapshot
-limits the procfs environment and descriptor checks to the observed PID. Full
-refreshes still scan all PIDs to discover new or reparented descendants. The
-scan reads each process start identity before and after UID and descriptor
-enumeration. A changed identity makes that observation empty. A restricted
-`hidepid` mount or another incomplete in-scope scan fails closed.
+reads the observed PID's NUL-delimited `/proc/<pid>/cmdline` records directly.
+It also limits the procfs environment and descriptor checks to that PID. This
+exact-PID path does not repeat the host-wide `pgrep` scan. Full refreshes still
+scan all PIDs to discover new or reparented descendants. The scan reads each
+process start identity before and after UID and descriptor enumeration. A
+changed identity makes that observation empty. A restricted `hidepid` mount or
+another incomplete in-scope scan fails closed.
 
 When `/proc/self/fd` is unavailable, the process scan never asks `lsof` to query
 the mutable shared marker pathname. It creates a mode-0700 private directory named
@@ -414,9 +416,11 @@ Browser work also claims the named `browser-fixture-3211` resource because the
 fixture server binds fixed loopback port 3211. Playwright installation claims
 the named `playwright-install` resource because every worktree mutates the
 shared `~/.cache/ms-playwright` browser store. A mapped `terraform init` claims
-the named `terraform-plugin-cache` resource when `TF_PLUGIN_CACHE_DIR` is
-non-empty. Terraform does not guarantee concurrent writes to that shared cache.
-Each named resource has capacity 1.
+the named `terraform-plugin-cache` resource. Terraform CLI configuration can
+enable a shared plugin cache after request registration or while a request
+waits. Terraform does not guarantee concurrent writes to that cache. The
+unconditional resource claim closes this configuration race. Each named
+resource has capacity 1.
 
 Resource names and weights are part of the versioned policy. A new exclusive
 class needs measured contention evidence and scheduler regression coverage.
@@ -443,7 +447,7 @@ Requests coalesce when their complete execution keys match. The key binds:
   rather than raw secret-bearing values.
 
 The environment digest keeps PATH entry order and duplicates. It normalizes an
-entry that resolves exactly to the current worktree's `node_modules/.bin`, a
+entry that resolves exactly to a material package root's `node_modules/.bin`, a
 `PNPM_SCRIPT_SRC_DIR` or `INIT_CWD` that resolves exactly to the current
 worktree root, and `TMPDIR`, `TMP`, or `TEMP` when it resolves exactly to the
 gate-owned `.tmp/agent-quality-gate` directory. Other values remain exact.
@@ -470,6 +474,23 @@ before its first Git probe and from mapped descendants.
 Stable content digests for ignored `.env` and `.env.*` files in workspace roots
 bind values that Envio, Next.js, and other tools load after registration.
 Tracked `.env.*.example` files stay outside this manifest.
+The digest also binds a bounded pnpm installation manifest.
+It hashes pnpm's installed-state metadata and every direct package link under
+each material package root. Each link binds its normalized target, mode, and
+linked `package.json`. For each unique direct package, it hashes the names,
+types, modes, and sizes of top-level entries. It resolves exact paths declared
+by `main`, `module`, `types`, `typings`, `bin`, `browser`, `exports`, and
+`imports`. It also binds implicit package-root index fallbacks and any nested
+`package.json` used during directory resolution. It hashes the complete
+resolved file through 512 KiB. For a larger file, it hashes the size and the
+first and last 64 KiB. Symlink entrypoints also bind their link and resolved
+target. A missing or retargeted dependency or a
+changed bound payload changes the execution key. Missing pnpm metadata or a
+missing linked `package.json` stops registration. Each file, link, and directory
+revalidates its identity before the manifest returns. An unsupported entry,
+dangling link, or exceeded bound stops registration. Unrelated deep package
+files, wildcard export targets, and the unsampled middle of a large entrypoint
+stay outside this bounded identity.
 Turbo lint, build, and fixture-build keys declare the corresponding environment
 and dotenv inputs that the gate can reach, so inner cache reuse preserves the
 same boundary.
@@ -707,7 +728,13 @@ worker or releases that command's scheduler lease. A
 legacy run publishes its token-scoped obligation before the first signal. Each
 drain refresh captures newly tagged roots before it can declare the prior set
 empty. A failed drain keeps its recovery evidence and reports that the mapped
-command ran.
+command ran. An explicit no-lock run has no successor recovery owner. If its
+normal drain fails, it uses the recorded direct-child, worker-group, and drain
+capture identities for a bounded TERM/KILL settlement attempt. It rechecks each
+process generation before it sends a signal. This fallback cannot prove that an
+unobserved detached process is absent, so the gate keeps the original failure
+status. `EXIT` changes an otherwise successful status to 2 when this teardown
+fails.
 All obligations for one request share one request-scoped drain claim. A
 different process cannot acknowledge a sibling obligation while that claim is
 live. PID reuse, a matching zombie owner, an unreadable identity, an unreadable
