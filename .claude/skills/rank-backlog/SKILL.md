@@ -1,0 +1,199 @@
+---
+name: rank-backlog
+description: "[repo-skill] Rank the open monitoring-monorepo issue backlog into an auditable receipt under `.rankings/` and recommend one issue to work next. Use when asked to rank the backlog, decide what an agent loop should pick up next, or produce a ranking receipt. It recommends only: it never claims an issue and never starts implementation."
+title: Rank Backlog Skill
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-08-26
+doc_type: skill
+scope: repo-wide
+review_interval_days: 90
+garden_lane: agent-entry-points
+---
+
+# Rank Backlog
+
+Score the open backlog in one pass, leave the score sheet on disk, and
+recommend one issue. This skill recommends; the operator picks. It stops at the
+recommendation: claiming is `pnpm issue:claim`, and it happens after a human has
+read the receipt.
+
+Receipt format, the exclusion-ledger contract, and the staging plan are
+canonical in
+[`backlog-ranking.md`](../../../docs/notes/backlog-ranking.md). Queue labels and
+the claim lifecycle are canonical in
+[`agent-issue-workflow.md`](../../../docs/notes/agent-issue-workflow.md).
+
+## Build The Roster
+
+```bash
+mkdir -p .rankings
+gh issue list --state open --limit 1000 \
+  --json number,title,url,labels,assignees,updatedAt \
+  > .rankings/roster-raw.json
+```
+
+`--limit` is a ceiling, not a page size: `gh` pages up to it. If that file ever
+comes back holding exactly the limit, the backlog outgrew one fetch and the
+roster is silently short. Raise the limit and refetch. Never rank a roster you
+know is truncated — record the returned count in Method so a reader can check.
+
+Linked pull requests are not on that projection. Fetch them separately:
+
+```bash
+gh api graphql --paginate --slurp -f query='
+query($owner: String!, $repo: String!, $endCursor: String) {
+  repository(owner: $owner, name: $repo) {
+    issues(states: OPEN, first: 50, after: $endCursor) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        number
+        timelineItems(last: 100, itemTypes: [CROSS_REFERENCED_EVENT]) {
+          totalCount
+          pageInfo { hasPreviousPage startCursor }
+          nodes {
+            ... on CrossReferencedEvent {
+              source { ... on PullRequest { number state } }
+            }
+          }
+        }
+      }
+    }
+  }
+}' -F owner=mento-protocol -F repo=monitoring-monorepo \
+  > .rankings/linked-prs.json
+```
+
+`--slurp` makes that file one JSON array with a page per element. Without it
+`--paginate` writes the pages back to back, which parses only while the backlog
+fits in a single page and breaks once it does not.
+
+`last: 100` reads the newest 100 cross-references per issue. That is a window,
+so make the window's edge visible rather than trusting it: `totalCount` and
+`pageInfo.hasPreviousPage` say whether an issue's timeline was cut off. An
+older open pull request can hide behind a cut-off edge.
+
+**A truncated timeline never yields a Selected issue.** When
+`hasPreviousPage` is true for a candidate that could otherwise be Selected,
+walk that one issue's timeline in full before it is eligible. Walk it
+**forwards**: `--paginate` follows `hasNextPage`/`endCursor` only, so a query
+written with `before`/`startCursor` returns its first page and stops, which
+looks like a complete answer and is not one.
+
+```bash
+gh api graphql --paginate --slurp -f query='
+query($owner: String!, $repo: String!, $number: Int!, $endCursor: String) {
+  repository(owner: $owner, name: $repo) {
+    issue(number: $number) {
+      timelineItems(first: 100, after: $endCursor,
+                    itemTypes: [CROSS_REFERENCED_EVENT]) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          ... on CrossReferencedEvent {
+            source { ... on PullRequest { number state } }
+          }
+        }
+      }
+    }
+  }
+}' -F owner=mento-protocol -F repo=monitoring-monorepo -F number=<n>
+```
+
+Say in Method how many issues needed that second pass. A cross-referencing
+pull request does not guarantee that `agent-active` or `in-pr` was applied, so
+the label check is a second net here, not a substitute for this one.
+
+Drop a candidate for any of the following, and keep the count dropped for each
+reason:
+
+- it has an assignee;
+- it carries `agent-active` or `in-pr` — this repo claims through labels and
+  Project fields, so an owned issue can still have no assignee;
+- a cross-referencing pull request is `OPEN`;
+- the newest `.rankings/excluded.json` entry for its number has not expired yet
+  — see the ledger contract under Stop There. A lapsed or superseded entry is
+  not a drop: that issue belongs back in the roster.
+
+Keep `needs-grooming` issues in the roster. They score badly on ease and fit on
+their own merits, and seeing where they land is the point. Never Select one:
+recommend the top `agent-ready` candidate instead, and say in the Selected
+section when a higher-scoring issue was passed over for that reason.
+
+## Score Each Candidate
+
+Four factors, 0-25 each, 100 total. Break ties alphabetically by title.
+
+| Factor            | 0-25 for                                                                                                                |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Ease              | Can one agent loop plausibly finish it? Named files, stated acceptance criteria, and a verification command beat prose. |
+| Benefit           | User-facing correctness and money-path accuracy beat cosmetics: a wrong number on a dashboard outranks a spacing fix.   |
+| Dependency effect | Does closing it unblock other open issues, or is it a leaf?                                                             |
+| Fit               | Can it be done with the code, docs, and access this loop holds?                                                         |
+
+Cap fit, and name the cap in the reason:
+
+- needs a product, design, or policy decision this repo does not own —
+  **fit at most 8**;
+- needs credentials, a provider console, or an account the loop cannot reach —
+  **fit at most 8**;
+- needs a human approval inside the loop (Terraform apply, secret rotation,
+  indexer promote, merge) — **fit at most 12**.
+
+A capped issue can still be strong work. Say that plainly instead of quietly
+scoring it down: name the cap, and name what would lift it.
+
+Read the full body of every issue that can plausibly reach the top 15. Score the
+rest from the list line. A reason must come from a body actually read; an issue
+whose reason rests on its title alone does not belong in the table.
+
+## Write The Receipt
+
+Write `.rankings/ranking-<YYYY-MM-DD>.md` in UTC. If that name is taken, append
+the lowest number not yet used that day — `-2`, then `-3`, and on — so a third
+run never lands on the second run's file. Never overwrite a receipt. Three
+sections:
+
+1. **Method** — fetch timestamp, open-issue count, roster count, the per-reason
+   drop counts, how many bodies were read in full, and any cap that applied to a
+   whole class of issues.
+2. **Top 15** — one table with the columns `Rank | Issue | Score | Reason`. The
+   reason is one line: what the issue is, why it scores where it does, and the
+   cap when one applied.
+3. **Selected** — one issue, its number and title, and why it beats the
+   runner-up. State the first concrete step and what would make it stop.
+
+Print the Selected section, the top five rows, and the receipt path to the
+terminal. The receipt is the artifact; the terminal output is its summary.
+
+## Stop There
+
+Ranking ends at the recommendation. Do not claim, do not branch, do not edit
+code. Hand the receipt path to the operator and stop.
+`pnpm issue:claim --issue <n> --agent <name>` is theirs to run.
+
+Record a parked issue in `.rankings/excluded.json` so the next run skips it:
+
+```json
+[
+  {
+    "issue": 1936,
+    "reason": "parked until the alert-noise measurement re-runs",
+    "excluded_at": "2026-08-26T09:14:00Z",
+    "expires_at": "2026-09-03T00:00:00Z"
+  }
+]
+```
+
+Every entry carries an `expires_at`, because every park here is time-boxed. A
+run drops an issue only while the **newest** entry for that number is still
+unexpired; once it expires the issue returns to the roster on its own.
+
+Append only. To un-park early, append a fresh entry for the same number with an
+`expires_at` already in the past — never edit or delete the old one. The ledger
+records what earlier runs decided, and rewriting it makes their receipts
+unreadable.
+
+`.rankings/` is gitignored, so the ledger is local to one checkout. A permanent
+exclusion belongs on the issue itself, by closing it or moving it to
+`needs-grooming`.

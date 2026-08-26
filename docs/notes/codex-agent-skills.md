@@ -3,7 +3,7 @@ title: Codex Agent Skills
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-10
+last_verified: 2026-08-26
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -143,6 +143,12 @@ The `doc-garden` skill uses the same exact-mirror contract. It turns a generated
 bounded packet into evidence-backed dispositions, guarded semantic edits,
 link/catalog repair, and normal PR closeout. The cadence and queue contract live
 in [`documentation-gardening.md`](documentation-gardening.md).
+
+The `rank-backlog` skill uses the same exact-mirror contract. It scores the open
+issue backlog in one pass, writes a dated receipt under gitignored `.rankings/`,
+and recommends one issue to work next. It stops at the recommendation; claiming
+stays with the operator. The receipt format and the exclusion-ledger contract
+live in [`backlog-ranking.md`](backlog-ranking.md).
 
 The `.agents/skills/` ↔ `.claude/skills/` mirror is enforced, not just
 documented: `scripts/repo-health/check-skills-mirror.mjs` byte-compares the two

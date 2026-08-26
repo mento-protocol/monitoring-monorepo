@@ -61,3 +61,8 @@ CLAUDE.md
 # Arkham marathon — output JSONLs (raw API responses, progress checkpoints).
 # Persisted to disk + Vercel Blob; never committed.
 .intel-marathon/
+
+# Backlog ranking receipts and the local exclusion ledger. One run writes one
+# dated receipt; committing them would add a file per run and make the ledger
+# a merge conflict. See `docs/notes/backlog-ranking.md`.
+.rankings/
