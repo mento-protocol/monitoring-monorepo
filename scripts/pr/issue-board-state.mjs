@@ -6,6 +6,10 @@
  * offline suite (`pnpm issue:board:test`) exercises end to end.
  */
 
+import { ISSUE_STATE_LABELS } from "../lib/gh-issue-lifecycle.mjs";
+
+export { ISSUE_STATE_LABELS };
+
 export const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
 export const DEFAULT_PROJECT_OWNER = "mento-protocol";
 export const DEFAULT_PROJECT_NUMBER = 12;
@@ -33,7 +37,7 @@ const STATE_TRANSITIONS = {
   },
   done: {
     addLabels: [],
-    removeLabels: ["agent-ready", "agent-active", "in-pr", "needs-grooming"],
+    removeLabels: ISSUE_STATE_LABELS,
     statusOptions: ["Done"],
   },
 };
@@ -78,7 +82,12 @@ export function labelNames(issue) {
 
 export function stateFromLabels(issue) {
   const labels = labelNames(issue);
-  if (issue.state === "CLOSED" && labels.has("in-pr")) return "done";
+  if (
+    String(issue.state ?? "").toUpperCase() === "CLOSED" &&
+    ISSUE_STATE_LABELS.some((label) => labels.has(label))
+  ) {
+    return "done";
+  }
   if (labels.has("in-pr")) return "review";
   if (labels.has("agent-active")) return "active";
   if (labels.has("agent-ready")) return "ready";
@@ -92,7 +101,8 @@ export function isClaimable(issue) {
     issue.state === "OPEN" &&
     labels.has("agent-ready") &&
     !labels.has("agent-active") &&
-    !labels.has("in-pr")
+    !labels.has("in-pr") &&
+    !labels.has("needs-grooming")
   );
 }
 

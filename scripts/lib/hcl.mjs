@@ -37,7 +37,7 @@ function isTemplateExpressionStart(contents, index) {
   return markerCount % 2 === 1;
 }
 
-function analyzeHcl(contents) {
+function scanHcl(contents) {
   const commentMasked = contents.split("");
   const structural = contents.split("");
   const delimiters = contents.split("");
@@ -172,6 +172,54 @@ function analyzeHcl(contents) {
       contexts.length > 1 ? contexts.at(-1).type : undefined,
     unterminatedBlockComment: blockComment,
   };
+}
+
+/**
+ * Scan results, keyed by the exact source text that produced them.
+ *
+ * `scanHcl` is a pure function of `contents`, and the contract suites ask for
+ * the same text over and over: `commentMaskedHcl`, `structuralHcl` and
+ * `delimiterHcl` each re-scan the whole file for one of the three views, and
+ * every block helper re-scans its own slice on top of that. Re-running the
+ * scanner can only rebuild the strings the first run already produced, so the
+ * cache is an identity, not an approximation.
+ *
+ * In-process only, so nothing survives the process that filled it and no stale
+ * result can be read back from disk. `HCL_ANALYSIS_CACHE=0` bypasses it, which
+ * is how the memoized and unmemoized paths are diffed against each other.
+ *
+ * The results never escape this module: callers see the derived strings, and
+ * `unterminatedHeredoc` is only ever read. Sharing one result between callers
+ * is therefore invisible to them.
+ */
+const analysisCache = new Map();
+
+/**
+ * Entry ceiling, so a caller that feeds unique text in a loop cannot grow the
+ * cache without bound. Clearing beats evicting one entry: every suite in this
+ * repo stays an order of magnitude under the ceiling (hcl.test.mjs pins that),
+ * so it only ever trips for a caller the cache was not built for, and such a
+ * caller has no reuse to lose.
+ */
+const ANALYSIS_CACHE_LIMIT = 4096;
+
+/** Read per call so a test can turn the cache off and back on in process. */
+const cacheDisabled = () => process.env.HCL_ANALYSIS_CACHE === "0";
+
+/**
+ * Entries currently held. Exported for the cache's own test, which is the only
+ * thing that may look at it; nothing routes on the number.
+ */
+export const hclAnalysisCacheSize = () => analysisCache.size;
+
+function analyzeHcl(contents) {
+  if (cacheDisabled()) return scanHcl(contents);
+  const cached = analysisCache.get(contents);
+  if (cached) return cached;
+  const analysis = scanHcl(contents);
+  if (analysisCache.size >= ANALYSIS_CACHE_LIMIT) analysisCache.clear();
+  analysisCache.set(contents, analysis);
+  return analysis;
 }
 
 export function commentMaskedHcl(contents) {

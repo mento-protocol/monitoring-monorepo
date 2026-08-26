@@ -1,5 +1,5 @@
 /**
- * Issue-board commands: claim, review, release, sync, and backfill.
+ * Issue-board commands: claim, review, release, and backfill.
  *
  * Each command drives one label transition, projects it onto the workboard,
  * and posts the matching issue comment. Label edits happen first and roll back
@@ -13,7 +13,6 @@ import {
   isReleasable,
   isReviewable,
   labelNames,
-  labelsForState,
   shouldRollbackFailedTransition,
   stateFromLabels,
 } from "./issue-board-state.mjs";
@@ -31,11 +30,11 @@ import {
 } from "./issue-board-projects.mjs";
 import {
   ensurePrExists,
+  editIssueLabels,
   getGitBranch,
   getIssue,
   getPrIssues,
   listIssueComments,
-  listIssuesByLabel,
   listReadyIssues,
   runGh,
   sleep,
@@ -43,27 +42,6 @@ import {
 import { backfillIssue } from "./issue-board-backfill.mjs";
 
 const CLAIM_SETTLE_MS = 1500;
-
-async function editIssueLabels(options, issue, state) {
-  const transition = labelsForState(state);
-  const existingLabels = labelNames(issue);
-  const addLabels = transition.addLabels.filter(
-    (label) => !existingLabels.has(label),
-  );
-  const removeLabels = transition.removeLabels.filter((label) =>
-    existingLabels.has(label),
-  );
-  if (addLabels.length === 0 && removeLabels.length === 0) return;
-
-  const args = ["issue", "edit", String(issue.number), "-R", options.repo];
-  if (addLabels.length > 0) {
-    args.push("--add-label", addLabels.join(","));
-  }
-  if (removeLabels.length > 0) {
-    args.push("--remove-label", removeLabels.join(","));
-  }
-  await runGh(args, { dryRun: options.dryRun, mutates: true });
-}
 
 export function buildClaimComment(metadata, issue) {
   const lines = [
@@ -152,7 +130,7 @@ async function claimIssue(options, project, issue, metadata) {
   requireClaimIdField(project);
   if (!isClaimable(issue)) {
     throw new Error(
-      `Issue #${issue.number} is not claimable; expected open agent-ready without agent-active/in-pr`,
+      `Issue #${issue.number} is not claimable; expected open agent-ready without agent-active/in-pr/needs-grooming`,
     );
   }
   const itemId = await transitionIssue(
@@ -169,13 +147,15 @@ async function claimIssue(options, project, issue, metadata) {
   await sleep(CLAIM_SETTLE_MS);
   await verifyClaimOwnership(options, project, itemId, issue, metadata);
   const verified = await getIssue(options, issue.number);
-  if (!labelNames(verified).has("agent-active")) {
-    throw new Error(`Issue #${issue.number} did not retain agent-active`);
-  }
   if (
-    labelNames(verified).has("agent-ready") ||
-    labelNames(verified).has("in-pr")
+    String(verified.state ?? "").toUpperCase() !== "OPEN" ||
+    !labelNames(verified).has("agent-active")
   ) {
+    throw new Error(
+      `Issue #${issue.number} did not retain agent-active on an open issue`,
+    );
+  }
+  if (!isReviewable(verified)) {
     throw new Error(`Issue #${issue.number} has conflicting state labels`);
   }
   await commentOnIssue(
@@ -316,43 +296,6 @@ export async function release(options) {
       title: issue.title,
       state: options.releaseState,
     });
-  }
-  return results;
-}
-
-export async function sync(options) {
-  const project = await getProject(options);
-  const byNumber = new Map();
-  for (const label of [
-    "agent-ready",
-    "agent-active",
-    "in-pr",
-    "needs-grooming",
-  ]) {
-    for (const issue of await listIssuesByLabel(options, label)) {
-      byNumber.set(issue.number, issue);
-    }
-  }
-  for (const issue of await listIssuesByLabel(options, "in-pr", {
-    state: "closed",
-  })) {
-    byNumber.set(issue.number, issue);
-  }
-
-  const results = [];
-  for (const issue of byNumber.values()) {
-    const state = stateFromLabels(issue);
-    if (!state) continue;
-    const itemId =
-      state === "done"
-        ? await findIssueProjectItem(options, issue, project)
-        : await ensureProjectItem(options, project, issue);
-    if (!itemId) continue;
-    await updateProjectFields(options, project, itemId, state, {});
-    if (state === "done") {
-      await editIssueLabels(options, issue, state);
-    }
-    results.push({ number: issue.number, title: issue.title, state });
   }
   return results;
 }

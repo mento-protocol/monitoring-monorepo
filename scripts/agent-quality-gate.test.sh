@@ -4685,6 +4685,12 @@ quiet_failure_repo="$(mktemp -d)"
   mkdir -p tools
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
+# `--version` answers the gate's provisioning probe: this stub models a Trunk
+# that IS installed and found real problems, so the gate must still fail.
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.0.0-fixture"
+  exit 0
+fi
 echo "[RPC_FAILURE] expected fixture failure that should be filtered"
 echo "real failure line"
 exit 1
@@ -4715,6 +4721,10 @@ quiet_stack_repo="$(mktemp -d)"
   mkdir -p tools
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.0.0-fixture"
+  exit 0
+fi
 echo "[address-labels] expected API failure"
 echo "Command failed at step 3"
 echo "    at Object.fixture (/tmp/fixture.js:1:1)"
@@ -4824,6 +4834,533 @@ rename_repo="$(mktemp -d)"
 rm -rf "$rename_repo"
 assert_contains "Refusing to run because package manifests, patches, or lockfile changed."
 assert_contains "dependency install scripts"
+
+# The Trunk arm is stamp-exempt, so a launcher that cannot download the pinned
+# CLI used to hard-fail every run in a container that blocks trunk.io — the gate
+# could never exit 0 there. A PROVISIONING failure now degrades the way
+# .trunk/hooks already does: warn, name the allowlist fix, skip. The stub prints
+# nothing and exits non-zero for every argument, `--version` included, which is
+# what a launcher whose download 403s looks like from outside.
+trunk_unprovisionable_repo="$(mktemp -d)"
+(
+  cd "$trunk_unprovisionable_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 1
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+)
+assert_contains "warning: skipping ./tools/trunk check fixture.txt — the Trunk CLI could not be provisioned."
+assert_contains "Add 'trunk.io' and '*.trunk.io' to the environment's allowed domains to run it here."
+# The probe answers "can the launcher produce a CLI at all", not "is the network
+# blocked", so the warning must not assert a cause it did not establish: it
+# names the common one, admits a local one prints the same, and hands over the
+# command that shows the launcher's own error.
+assert_contains "The probe reports that it failed, not why."
+assert_contains "A local cause — a corrupt or unwritable launcher cache — prints this same warning."
+assert_contains "Run './tools/trunk --version' to see the launcher's own error."
+assert_contains "- skipped "
+assert_contains "All mapped commands passed."
+assert_contains "Note: the Trunk arm was skipped"
+assert_not_contains "mapped command(s) failed."
+
+# Same degradation on the sequential path: --fail-fast must not stop on an arm
+# the environment blocked.
+(
+  cd "$trunk_unprovisionable_repo"
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run --fail-fast > "$output_file" 2>&1
+)
+rm -rf "$trunk_unprovisionable_repo"
+assert_contains "warning: skipping ./tools/trunk check fixture.txt — the Trunk CLI could not be provisioned."
+assert_contains "All mapped commands passed."
+assert_not_contains "Stopping after first failed mapped command (--fail-fast)."
+
+# The invariant the degradation must not break: a Trunk that IS provisioned and
+# finds real problems still fails the gate. The stub answers the provisioning
+# probe, so only its `check` verdict is in question — and the last lines of what
+# it printed are replayed next to the verdict, because in a parallel run the
+# inline dump can sit far above it (and a quiet launcher leaves none at all).
+trunk_provisioned_failure_repo="$(mktemp -d)"
+(
+  cd "$trunk_provisioned_failure_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.0.0-fixture"
+  exit 0
+fi
+echo "trunk-oldest-line"
+for filler in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25; do
+  echo "trunk-filler ${filler}"
+done
+echo "trunk-real-problem fixture lint failure"
+exit 1
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  set +e
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]]
+)
+rm -rf "$trunk_provisioned_failure_repo"
+assert_contains "1 mapped command(s) failed."
+assert_contains "Failure output (last 20 lines per command):"
+assert_contains "- fail "
+assert_not_contains "- skipped "
+# Once inline, once in the replayed tail.
+assert_occurrences 2 "trunk-real-problem fixture lint failure"
+# ...and the replay is a tail: the 27th-from-last line stays inline-only.
+assert_occurrences 1 "trunk-oldest-line"
+
+# The whole-run success stamp carries no record of a blocked Trunk arm, so it
+# must not be written on a run that skipped one: a later --skip-if-fresh run
+# with an identical stamp fingerprint would otherwise trust that stamp and
+# never retry Trunk, even after it becomes provisionable. Nothing else about
+# the fixture changes between the two runs, so an unfixed gate would compute
+# the same stamp both times and skip the second run outright.
+trunk_blocked_stamp_repo="$(mktemp -d)"
+(
+  cd "$trunk_blocked_stamp_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 1
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+)
+(
+  cd "$trunk_blocked_stamp_repo"
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+)
+assert_contains "All mapped commands passed."
+assert_contains "Note: the Trunk arm was skipped"
+
+(
+  cd "$trunk_blocked_stamp_repo"
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run --skip-if-fresh > "$output_file" 2>&1
+)
+rm -rf "$trunk_blocked_stamp_repo"
+assert_not_contains "skipping mapped commands"
+assert_contains "All mapped commands passed."
+assert_contains "Note: the Trunk arm was skipped"
+
+# The launcher is only Trunk's FIRST download. Once it has produced a CLI, that
+# CLI fetches plugin sources and, per check, the hermetic runtimes and linter
+# binaries the enabled linters need. An environment that allowlists trunk.io but
+# not those hosts answers the provisioning probe with a working `--version` and
+# still fails every check, which used to hard-fail the gate with no way out.
+#
+# Every transcript below is the real output of Trunk 1.25.0, captured by seeding
+# a hermetic TRUNK_CACHE with the CLI and then forcing its downloads to fail
+# (connection refused, a 403-returning forward proxy, an unresolvable proxy
+# host). The stubs replay it byte for byte, ANSI included, because the classifier
+# reads that text.
+trunk_blocked_linter_repo="$(mktemp -d)"
+(
+  cd "$trunk_blocked_linter_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools .trunk
+  # Trunk writes its failure details into .trunk/out, which every Trunk repo
+  # ignores (see this repo's .trunk/.gitignore). The fixture is run more than
+  # once, so it has to ignore them too or the second run would map a different
+  # command set than the first.
+  printf '*out\n' > .trunk/.gitignore
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+# A provisioned CLI: the launcher probe succeeds, so only the check verdict is
+# in question. The check then fails because it could not install a linter.
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.25.0"
+  exit 0
+fi
+mkdir -p .trunk/out
+cat > .trunk/out/ERGzk.yaml <<'YAML'
+trunk_cli_version: 1.25.0
+title: "Error while executing: Installing hermetic tool shellcheck v0.11.0"
+report:
+  - "Curl Error: Failure when receiving data from the peer for https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.darwin.x86_64.tar.xz"
+YAML
+printf '\n\033[1m\033[30m\033[107m  FAILURES  \033[0m\n\n'
+printf ' \033[1mshellcheck\033[22m  \033[1mInstalling hermetic tool shellcheck v0.11.0\033[22m  .trunk/out/ERGzk.yaml\n'
+printf '\n\033[1m\033[30m\033[107m  NOTICES  \033[0m\n\n'
+printf ' A tool failed to run. You can open the details yaml file for more information.\n'
+printf '\nChecked 0 files\n'
+printf '\033[1m\033[91m\342\234\226 No issues, 1 failure\033[0m\n'
+exit 1
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+)
+assert_contains "warning: skipping ./tools/trunk check fixture.txt — Trunk could not provision its linters."
+assert_contains "The CLI itself is installed — the launcher probe succeeded"
+# The warning must say what it established and nothing more. Trunk stated it
+# found no issues, and that statement is why the downgrade is safe.
+assert_contains "Trunk reported no issues, so no finding is being"
+# The failure row names only the step; the host that has to be allowlisted lives
+# in the detail YAML, so the warning replays it or it names no fix at all.
+assert_contains "Error while executing: Installing hermetic tool shellcheck v0.11.0"
+assert_contains "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/"
+assert_contains "- skipped "
+assert_contains "All mapped commands passed."
+assert_contains "Note: the Trunk arm was skipped"
+assert_not_contains "mapped command(s) failed."
+
+# Same degradation on the sequential path.
+(
+  cd "$trunk_blocked_linter_repo"
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run --fail-fast > "$output_file" 2>&1
+)
+assert_contains "warning: skipping ./tools/trunk check fixture.txt — Trunk could not provision its linters."
+assert_contains "All mapped commands passed."
+assert_not_contains "Stopping after first failed mapped command (--fail-fast)."
+
+# Same stamp rule as the launcher case: a run that skipped Trunk because its
+# linters could not be downloaded must not leave a clean whole-run stamp, or the
+# next --skip-if-fresh run would inherit a pass Trunk never gave.
+(
+  cd "$trunk_blocked_linter_repo"
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run --skip-if-fresh > "$output_file" 2>&1
+)
+rm -rf "$trunk_blocked_linter_repo"
+assert_not_contains "skipping mapped commands"
+assert_contains "All mapped commands passed."
+assert_contains "Note: the Trunk arm was skipped"
+
+# Trunk aborts before linting anything when it cannot fetch its plugin sources,
+# so that transcript holds one error line and nothing else. Real output, exit 2.
+trunk_blocked_plugin_repo="$(mktemp -d)"
+(
+  cd "$trunk_blocked_plugin_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.25.0"
+  exit 0
+fi
+printf '\033[0G\033[2K\033[1m\033[31m\342\234\226 Unable to download plugin https://github.com/trunk-io/plugins/archive/v1.7.5.zip: Could resolve but could not establish connection to host of https://github.com/trunk-io/plugins/archive/v1.7.5.zip\033[0m\n'
+exit 2
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+)
+rm -rf "$trunk_blocked_plugin_repo"
+assert_contains "warning: skipping ./tools/trunk check fixture.txt — Trunk could not provision its linters."
+assert_contains "Unable to download plugin https://github.com/trunk-io/plugins/archive/v1.7.5.zip"
+assert_contains "All mapped commands passed."
+assert_not_contains "mapped command(s) failed."
+
+# The invariant, restated against the new path: a Trunk that found a real problem
+# must fail the gate even when a linter download failed in the same run. This is
+# the transcript that would break the invariant if the classifier inferred "no
+# findings" from the presence of a download failure instead of reading Trunk's
+# own verdict — here Trunk never says "No issues", and it reports both counts.
+trunk_mixed_failure_repo="$(mktemp -d)"
+(
+  cd "$trunk_mixed_failure_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.25.0"
+  exit 0
+fi
+mkdir -p .trunk/out
+cat > .trunk/out/DgQ3M.yaml <<'YAML'
+trunk_cli_version: 1.25.0
+title: "Error while executing: Installing hermetic tool shellcheck v0.11.0"
+report:
+  - "Curl Error: Failure when receiving data from the peer for https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.darwin.x86_64.tar.xz"
+YAML
+printf '\033[1m\033[30m\033[107m  ISSUES  \033[0m\n\nfixture.js\n'
+printf " -:-  fmt  trunk-real-problem, autoformat by running 'trunk fmt'  prettier\n"
+printf '\n\033[1m\033[30m\033[107m  FAILURES  \033[0m\n\n'
+printf ' shellcheck  Installing hermetic tool shellcheck v0.11.0  .trunk/out/DgQ3M.yaml\n'
+printf '\nChecked 1 file\n'
+printf '\033[1m\033[91m\342\234\226 1 unformatted file\033[0m\n'
+printf '\033[1m\033[91m\342\234\226 1 failure\033[0m\n'
+exit 1
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  set +e
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]]
+)
+rm -rf "$trunk_mixed_failure_repo"
+assert_contains "1 mapped command(s) failed."
+assert_contains "trunk-real-problem"
+assert_not_contains "- skipped "
+assert_not_contains "Trunk could not provision its linters."
+
+# Fail closed on anything the classifier cannot account for exactly. Trunk
+# counted two failures and only one of them is a download step, so the other is
+# an unexplained failure and the run must fail.
+trunk_partial_failure_repo="$(mktemp -d)"
+(
+  cd "$trunk_partial_failure_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.25.0"
+  exit 0
+fi
+mkdir -p .trunk/out
+cat > .trunk/out/ERGzk.yaml <<'YAML'
+trunk_cli_version: 1.25.0
+title: "Error while executing: Installing hermetic tool shellcheck v0.11.0"
+report:
+  - "Curl Error: Failure when receiving data from the peer for https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.darwin.x86_64.tar.xz"
+YAML
+printf '\033[1m\033[30m\033[107m  FAILURES  \033[0m\n\n'
+printf ' shellcheck    Installing hermetic tool shellcheck v0.11.0  .trunk/out/ERGzk.yaml\n'
+printf ' markdownlint  markdownlint exited with code 134            .trunk/out/zzzzz.yaml\n'
+printf '\nChecked 0 files\n'
+printf '\342\234\226 No issues, 2 failures\n'
+exit 1
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  set +e
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]]
+)
+rm -rf "$trunk_partial_failure_repo"
+assert_contains "1 mapped command(s) failed."
+assert_contains "markdownlint exited with code 134"
+assert_not_contains "- skipped "
+
+# Fail closed on a cause Trunk did not phrase as a download failure. The step is
+# a download step and Trunk found nothing, but a checksum mismatch is a local
+# problem the operator has to see, not an allowlist to widen.
+trunk_local_cause_repo="$(mktemp -d)"
+(
+  cd "$trunk_local_cause_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.25.0"
+  exit 0
+fi
+mkdir -p .trunk/out
+cat > .trunk/out/ERGzk.yaml <<'YAML'
+trunk_cli_version: 1.25.0
+title: "Error while executing: Installing hermetic tool shellcheck v0.11.0"
+report:
+  - "sha256 mismatch for shellcheck-v0.11.0.darwin.x86_64.tar.xz"
+YAML
+printf '\033[1m\033[30m\033[107m  FAILURES  \033[0m\n\n'
+printf ' shellcheck  Installing hermetic tool shellcheck v0.11.0  .trunk/out/ERGzk.yaml\n'
+printf '\nChecked 0 files\n'
+printf '\342\234\226 No issues, 1 failure\n'
+exit 1
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  set +e
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]]
+)
+rm -rf "$trunk_local_cause_repo"
+assert_contains "1 mapped command(s) failed."
+# The transcript is otherwise identical to the accepted one, so the only thing
+# that kept the failure standing is the cause recorded in the detail YAML.
+assert_contains "Installing hermetic tool shellcheck v0.11.0"
+assert_not_contains "- skipped "
+assert_not_contains "Trunk could not provision its linters."
+
+# Trunk reports a removed or renamed artifact under the same `Curl Error:`
+# prefix as a blocked connection. A 404 is a broken pin the operator has to fix,
+# so the accepted signatures are whole measured phrases and this one is not among
+# them: the run must fail.
+trunk_http_error_cause_repo="$(mktemp -d)"
+(
+  cd "$trunk_http_error_cause_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.25.0"
+  exit 0
+fi
+mkdir -p .trunk/out
+cat > .trunk/out/ERGzk.yaml <<'YAML'
+trunk_cli_version: 1.25.0
+title: "Error while executing: Installing hermetic tool shellcheck v0.11.0"
+report:
+  - "Curl Error: HTTP response code said error for https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.darwin.x86_64.tar.xz"
+YAML
+printf '\033[1m\033[30m\033[107m  FAILURES  \033[0m\n\n'
+printf ' shellcheck  Installing hermetic tool shellcheck v0.11.0  .trunk/out/ERGzk.yaml\n'
+printf '\nChecked 0 files\n'
+printf '\342\234\226 No issues, 1 failure\n'
+exit 1
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  set +e
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]]
+)
+rm -rf "$trunk_http_error_cause_repo"
+assert_contains "1 mapped command(s) failed."
+assert_not_contains "- skipped "
+assert_not_contains "Trunk could not provision its linters."
+
+# The signature has to come from the step's own recorded reason, so a bullet
+# under some other key must not be able to supply it. Same transcript as the
+# accepted case; the only difference is that the download-failure phrasing sits
+# under an unrelated list-valued key while `report:` records a local cause. The
+# run must fail.
+trunk_foreign_key_signature_repo="$(mktemp -d)"
+(
+  cd "$trunk_foreign_key_signature_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.25.0"
+  exit 0
+fi
+mkdir -p .trunk/out
+cat > .trunk/out/ERGzk.yaml <<'YAML'
+trunk_cli_version: 1.25.0
+title: "Error while executing: Installing hermetic tool shellcheck v0.11.0"
+related_files:
+  - "Curl Error: this bullet is not the recorded reason"
+report:
+  - "sha256 mismatch for shellcheck-v0.11.0.darwin.x86_64.tar.xz"
+YAML
+printf '\033[1m\033[30m\033[107m  FAILURES  \033[0m\n\n'
+printf ' shellcheck  Installing hermetic tool shellcheck v0.11.0  .trunk/out/ERGzk.yaml\n'
+printf '\nChecked 0 files\n'
+printf '\342\234\226 No issues, 1 failure\n'
+exit 1
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  set +e
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]]
+)
+rm -rf "$trunk_foreign_key_signature_repo"
+assert_contains "1 mapped command(s) failed."
+assert_not_contains "- skipped "
+assert_not_contains "Trunk could not provision its linters."
+
+# Fail closed on a plain non-zero exit that says nothing at all. No verdict, no
+# failure table, nothing to classify — the failure stands.
+trunk_silent_failure_repo="$(mktemp -d)"
+(
+  cd "$trunk_silent_failure_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  echo "1.25.0"
+  exit 0
+fi
+echo "trunk-ambiguous-exit"
+exit 3
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  set +e
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]]
+)
+rm -rf "$trunk_silent_failure_repo"
+assert_contains "1 mapped command(s) failed."
+assert_contains "trunk-ambiguous-exit"
+assert_not_contains "- skipped "
 } # end family: failure-output
 
 # family: routing-docs
@@ -5487,6 +6024,9 @@ assert_contains "- pnpm issue:board:test (agent issue board helper changed)"
 run_gate "scripts/pr/issue-board-commands.mjs"
 assert_contains "- pnpm issue:board:test (agent issue board helper changed)"
 
+run_gate "scripts/pr/issue-board-sync.mjs"
+assert_contains "- pnpm issue:board:test (agent issue board helper changed)"
+
 run_gate "scripts/supply-chain/version-skew-check.mjs"
 assert_contains "- pnpm skew:check:test (version skew checker changed)"
 
@@ -5709,6 +6249,7 @@ assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- pnpm docs:garden:test (shared GitHub issue lifecycle module changed)"
 assert_contains "- pnpm docs:navigation-eval:test (shared GitHub issue lifecycle module changed)"
 assert_contains "- pnpm sentry:project:test (shared GitHub issue lifecycle module changed)"
+assert_contains "- pnpm issue:board:test (shared GitHub issue lifecycle module changed)"
 
 run_gate "docs/evals/documentation-navigation-fixtures.json"
 assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation contract changed)"
@@ -6817,6 +7358,272 @@ STUB
   assert_contains "is stale (holder pid ${dead_holder_pid} is gone); reclaiming it."
   [[ ! -d "$gate_lock_root/run.lock" ]] ||
     fail "a successful run must release the lock it acquired"
+
+  # --- Machine identity, not hostname (GitHub issue #2055) -------------------
+  # A rename used to wedge the machine: the record still named the old
+  # hostname, the mismatch was read as a live holder on another host, and the
+  # dead-PID reclaim below it was never reached — so every run on the machine
+  # burned its whole --lock-wait and no run ever healed it. The record now
+  # carries a machine identity that a rename cannot touch, and the hostname
+  # decides only where no comparable identity exists on both sides.
+  #
+  # Both machines are simulated through the identity override, so these cases
+  # assert the decision rather than the hardware probe underneath it, and run
+  # the same way on a Linux runner as on the developer Mac that hit the bug.
+  #
+  # The locality of the lock root is declared for the same reason. In a real
+  # run the gate asks the filesystem whether the root is on storage only this
+  # machine reaches; this suite must keep pointing every case at its own temp
+  # root, whose answer would then depend on how the runner mounts $TMPDIR.
+  # Declaring it pins the decision under test instead of the runner's mount
+  # table. The possibly-shared cases below set it to 0.
+  export AGENT_QUALITY_GATE_LOCK_MACHINE_ID=machine-a
+  export AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1
+
+  write_machine_lock_owner() {
+    # pid, host, machine field value (empty writes no field at all, which is
+    # exactly what a gate predating this change leaves behind), started_at.
+    mkdir -p "$gate_lock_root/run.lock"
+    {
+      printf 'pid=%s\n' "$1"
+      printf 'host=%s\n' "$2"
+      [[ -z "$3" ]] || printf 'machine=%s\n' "$3"
+      printf 'started_at=%s\n' "$4"
+      printf 'worktree=%s\n' "$gate_lock_repo"
+      printf 'token=fixture-holder-1-1\n'
+    } > "$gate_lock_root/run.lock/owner"
+  }
+
+  # The bug itself. Same machine, renamed host, holder long dead — reclaimed at
+  # once on the strength of the machine identity, with no age gate involved and
+  # nothing said about an unverifiable host.
+  renamed_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the renamed-host case"
+  write_machine_lock_owner \
+    "$renamed_dead_pid" "Workbook.local" "override:machine-a" "$(date +%s)"
+  renamed_exit="$(run_locked_gate)"
+  [[ "$renamed_exit" == "0" ]] ||
+    fail "a dead holder recorded under this machine's old hostname must be reclaimed, got $renamed_exit"
+  assert_contains "is stale (holder pid ${renamed_dead_pid} is gone); reclaiming it."
+  assert_not_contains "cannot be tied to this machine"
+  [[ ! -d "$gate_lock_root/run.lock" ]] ||
+    fail "the run that reclaimed a renamed-host lock must release its own"
+
+  # The safety this replaces the hostname check with. On a root that may be
+  # shared, a disagreeing identity from the same source is another machine —
+  # definitive, its PIDs meaning nothing here, and no local evidence able to
+  # overturn it. A record two hours old whose PID reads dead locally is still
+  # waited out and left where it is.
+  foreign_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the foreign-machine case"
+  write_machine_lock_owner \
+    "$foreign_dead_pid" "other-host" "override:machine-b" "$(($(date +%s) - 7200))"
+  foreign_exit="$(AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=0 run_locked_gate)"
+  [[ "$foreign_exit" == "2" ]] ||
+    fail "a record from another machine must be waited out, got $foreign_exit"
+  assert_contains "timed out after"
+  assert_not_contains "reclaiming it."
+  [[ -d "$gate_lock_root/run.lock" ]] ||
+    fail "another machine's lock must never be reclaimed, however old"
+  rm -rf "$gate_lock_root/run.lock"
+
+  # The same record on a root proven local. Nothing else can have written it,
+  # so a disagreeing identity is not another machine — it is this machine's own
+  # identity having moved, which `/etc/machine-id` does on an OS reinstall or
+  # an image rebuild. Reading it as foreign here would leave the record
+  # unreclaimable forever, which is the wedge this whole change removes, so it
+  # lands on the aged-and-dead rule instead.
+  rotated_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the rotated-identity case"
+  write_machine_lock_owner \
+    "$rotated_dead_pid" "other-host" "override:machine-b" "$(($(date +%s) - 7200))"
+  rotated_exit="$(run_locked_gate)"
+  [[ "$rotated_exit" == "0" ]] ||
+    fail "a rotated machine identity on local storage must not wedge the lock, got $rotated_exit"
+  assert_contains "cannot be tied to this machine"
+  assert_contains "is stale (holder pid ${rotated_dead_pid} is gone"
+  [[ ! -d "$gate_lock_root/run.lock" ]] ||
+    fail "the run that reclaimed a rotated-identity record must release its own"
+
+  # An agreeing identity is not proof of one machine, only a disagreeing one is
+  # proof of two. Containers built from a single base image carry the same
+  # baked-in /etc/machine-id, so two of them mounting one lock directory agree
+  # on their identity while having separate PID namespaces — the other's holder
+  # PID reads "gone" here. Off proven-local storage the hostname has to agree
+  # too, and where it does not this record is left alone however old it is.
+  cloned_id_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the cloned-identity case"
+  write_machine_lock_owner \
+    "$cloned_id_dead_pid" "other-container" "override:machine-a" "$(($(date +%s) - 7200))"
+  cloned_id_exit="$(AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=0 run_locked_gate)"
+  [[ "$cloned_id_exit" == "2" ]] ||
+    fail "a shared machine id under a different hostname must be waited out on a shared root, got $cloned_id_exit"
+  assert_contains "timed out after"
+  assert_not_contains "reclaiming it."
+  [[ -d "$gate_lock_root/run.lock" ]] ||
+    fail "a duplicated machine id must not authorise reclaiming another host's lock"
+  rm -rf "$gate_lock_root/run.lock"
+
+  # The same record on storage this machine mounts itself. Nothing else is
+  # writing records there, and the hostname is exactly the field a rename
+  # moved, so requiring it to agree would refuse the case this all exists for.
+  renamed_local_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the local renamed-host case"
+  write_machine_lock_owner \
+    "$renamed_local_dead_pid" "other-container" "override:machine-a" "$(($(date +%s) - 7200))"
+  renamed_local_exit="$(run_locked_gate)"
+  [[ "$renamed_local_exit" == "0" ]] ||
+    fail "a matching identity on local storage must reclaim whatever the record calls the host, got $renamed_local_exit"
+  assert_contains "is stale (holder pid ${renamed_local_dead_pid} is gone); reclaiming it."
+  [[ ! -d "$gate_lock_root/run.lock" ]] ||
+    fail "the run that reclaimed under a matching local identity must release its own"
+
+  # A record written by a gate that predates the machine field, under a
+  # hostname this machine no longer answers to. The root is proven local, so
+  # nothing else wrote it; the reclaim still needs the dead PID and the grace,
+  # and the message names what it concluded and from what.
+  legacy_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the legacy-record case"
+  write_machine_lock_owner \
+    "$legacy_dead_pid" "Workbook.local" "" "$(($(date +%s) - 7200))"
+  legacy_exit="$(run_locked_gate)"
+  [[ "$legacy_exit" == "0" ]] ||
+    fail "an aged legacy record under a stale hostname must self-heal, got $legacy_exit"
+  assert_contains "cannot be tied to this machine"
+  assert_contains "This lock root is on storage this machine mounts itself"
+  assert_contains "under a name or identity it has since changed, and reclaims it"
+  assert_contains "its record cannot be tied to this machine and is"
+  [[ ! -d "$gate_lock_root/run.lock" ]] ||
+    fail "the run that reclaimed a legacy record must release its own"
+
+  # The same legacy record, still inside the grace. Age is the leg that keeps a
+  # run which really did start moments ago on another machine out of reach of
+  # that inference, so this one waits instead — the pre-issue-2055 behaviour,
+  # now bounded by the grace rather than permanent.
+  young_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the within-grace case"
+  write_machine_lock_owner "$young_dead_pid" "Workbook.local" "" "$(date +%s)"
+  young_exit="$(run_locked_gate)"
+  [[ "$young_exit" == "2" ]] ||
+    fail "a legacy foreign-host record inside the grace must be waited out, got $young_exit"
+  assert_contains "timed out after"
+  assert_not_contains "reclaiming it."
+  [[ -d "$gate_lock_root/run.lock" ]] ||
+    fail "a record still inside the grace must be left in place"
+
+  # …and the grace is the knob that decides it. The same record, same run, a
+  # grace of zero: reclaimed.
+  set +e
+  AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_lock_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_UNVERIFIED_MACHINE_GRACE_SECONDS=0 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 2 \
+    > "$output_file" 2>&1
+  grace_exit=$?
+  set -e
+  [[ "$grace_exit" == "0" ]] ||
+    fail "a zero grace must let the same legacy record be reclaimed, got $grace_exit"
+  assert_contains "cannot be tied to this machine"
+  [[ ! -d "$gate_lock_root/run.lock" ]] ||
+    fail "the run that reclaimed under a zero grace must release its own"
+
+  # Two identities from different sources are not two machines. A run that
+  # reached `ioreg` and a run that fell back to `kern.uuid` would otherwise
+  # read each other as foreign and reinvent the wedge, so a source mismatch is
+  # no verdict at all: it lands on the same aged-and-dead rule as a record with
+  # no machine field.
+  source_mismatch_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the source-mismatch case"
+  write_machine_lock_owner \
+    "$source_mismatch_pid" "Workbook.local" "kernuuid:machine-b" "$(($(date +%s) - 7200))"
+  source_mismatch_exit="$(run_locked_gate)"
+  [[ "$source_mismatch_exit" == "0" ]] ||
+    fail "a machine id from another source must not read as another machine, got $source_mismatch_exit"
+  assert_contains "cannot be tied to this machine"
+  [[ ! -d "$gate_lock_root/run.lock" ]] ||
+    fail "the run that reclaimed a source-mismatched record must release its own"
+
+  # The limit on all of that. Every reclaim above rests on the lock root being
+  # storage only this machine reaches. Where the filesystem says otherwise — a
+  # network home directory, or one whose type could not be read — a PID that
+  # reads dead here says nothing about a holder running on another machine.
+  # However old the record is, this run waits and names the declaration that
+  # would change the answer.
+  shared_root_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the shared-root case"
+  write_machine_lock_owner \
+    "$shared_root_dead_pid" "Workbook.local" "" "$(($(date +%s) - 7200))"
+  shared_root_exit="$(AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=0 run_locked_gate)"
+  [[ "$shared_root_exit" == "2" ]] ||
+    fail "an unverified record on a possibly shared lock root must be waited out, got $shared_root_exit"
+  assert_contains "not established as storage only this machine reaches"
+  assert_contains "AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1"
+  assert_not_contains "reclaiming it."
+  [[ -d "$gate_lock_root/run.lock" ]] ||
+    fail "a record on a possibly shared lock root must never be reclaimed"
+  rm -rf "$gate_lock_root/run.lock"
+
+  # An identity is validated against the record's alphabet, never rewritten to
+  # fit it. Every normalisation is a many-to-one map, and a many-to-one map on
+  # an identity is how two machines come to compare equal: stripping the
+  # unrepresentable character in `machine/a`, or deleting the line break in
+  # `machine<LF>a`, both yield `machinea` — another machine's legitimate id,
+  # which then reads as `same` and authorises a reclaim on its behalf. Both
+  # shapes must stop the run rather than be quietly reshaped, so both are
+  # asserted: one where the offending character is ordinary, one where it is a
+  # line break, because deleting line breaks is the normalisation a reader is
+  # most likely to think harmless.
+  for bad_machine_id in 'machine/a' 'machine:a' "$(printf 'machine\na')" "$(printf 'machine\ra')"; do
+    set +e
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_lock_root" \
+      AGENT_QUALITY_GATE_LOCK_MACHINE_ID="$bad_machine_id" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 2 \
+      > "$output_file" 2>&1
+    bad_machine_id_exit=$?
+    set -e
+    [[ "$bad_machine_id_exit" == "2" ]] ||
+      fail "machine id '${bad_machine_id}' is outside the record alphabet and must stop the run, got $bad_machine_id_exit"
+    assert_contains "AGENT_QUALITY_GATE_LOCK_MACHINE_ID must be 1-128 characters"
+    assert_contains "so it is never rewritten to fit"
+    assert_contains "Nothing has been executed."
+  done
+
+  # The probe itself, both ways, on paths whose answer is known independently
+  # of it. A directory on local storage must read as local; a path on a
+  # filesystem `df -l` omits — an autofs map, an NFS or SMB mount — must not,
+  # or the whole rule above rests on a check that only ever says yes. The
+  # non-local path is discovered from the mount table rather than assumed, and
+  # the case is skipped where the runner has no such mount to point at.
+  gate_lock_probe_local="$(
+    NODE_ENV=test \
+      AGENT_QUALITY_GATE_LOCK_PROBE_PATH="$gate_lock_root" \
+      "$repo_root/scripts/agent-quality-gate.sh" 2>&1
+  )" || true
+  [[ "$gate_lock_probe_local" == "local" ]] ||
+    fail "the locality probe must read a temp-dir lock root as local, got '$gate_lock_probe_local'"
+  gate_lock_nonlocal_path="$(
+    comm -23 \
+      <(df 2>/dev/null | tail -n +2 | awk 'NF { print $NF }' | sort) \
+      <(df -l 2>/dev/null | tail -n +2 | awk 'NF { print $NF }' | sort) |
+      head -n1
+  )"
+  if [[ -n "$gate_lock_nonlocal_path" && -d "$gate_lock_nonlocal_path" ]]; then
+    gate_lock_probe_remote="$(
+      NODE_ENV=test \
+        AGENT_QUALITY_GATE_LOCK_PROBE_PATH="$gate_lock_nonlocal_path" \
+        "$repo_root/scripts/agent-quality-gate.sh" 2>&1
+    )" || true
+    [[ "$gate_lock_probe_remote" == "not-local" ]] ||
+      fail "the locality probe must not read ${gate_lock_nonlocal_path} as local, got '$gate_lock_probe_remote'"
+  fi
+
+  unset AGENT_QUALITY_GATE_LOCK_MACHINE_ID
 )
 rm -rf "$gate_lock_repo" "$gate_lock_root"
 

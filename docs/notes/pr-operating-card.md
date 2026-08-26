@@ -43,6 +43,8 @@ even when you never open an authority.
    an architecture change that constrains future work records an ADR in the
    same PR. When a change adds or alters a command, script, env var, hook, or
    ordered runbook, audit every live entry point and runbook in the same PR.
+   Adding, renaming, or removing a doc needs `pnpm docs:index --write` in
+   the same PR, or the gate's `docs:index --check` fails.
    Before touching or moving docs, read
    [`../context-standards.md`](../context-standards.md).
 
@@ -87,11 +89,15 @@ even when you never open an authority.
    deploys and never applies Terraform. It **refuses package-script,
    package-manager, or lockfile changes until their lifecycle risk is reviewed
    and explicitly acknowledged** — do not bypass the refusal; review the surface
-   and pass `--allow-package-script-changes`. Do not run a competing dashboard
-   server or browser suite alongside the gate; a second `--run` gate is handled
-   for you — it takes a machine-wide lock and queues behind the first, naming
-   the holder while it waits. Background the `--run` gate and the `git push`; a
-   600s foreground kill discards the freshness stamp. Authority:
+   and pass `--allow-package-script-changes`. Before invoking a full gate,
+   ensure that no direct validation, dashboard server, or browser suite is
+   active on the same machine. From invocation until the gate exits, do not
+   start any of them there. Use same-machine spare workers only for read-only
+   work; run concurrent validation from a fully hydrated checkout on another
+   machine. A second `--run` gate takes a machine-wide lock and queues behind
+   the first, naming the holder while it waits. Background the `--run` gate and
+   the `git push`; a 600s foreground kill discards the freshness stamp.
+   Authority:
    [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md).
 
 4. **Autoreview.** Freeze the scope baseline first — the initial request,
@@ -102,7 +108,9 @@ even when you never open an authority.
    `pnpm agent:autoreview` is the closeout, matching root
    [`AGENTS.md`](../../AGENTS.md). The skill routers defer to this step rather
    than defining the choice themselves, so do not read the agreement between them
-   as a second source. Inside an active Codex session, a bare
+   as a second source. With no codex CLI (Claude cloud) it falls back to
+   `--engine claude` itself. Inside an active
+   Codex session, a bare
    invocation silently selects the local deterministic engine — the `ship`
    skill's bare closeout is NOT sufficient there; use the prepared-bundle
    fresh-context flow so a separate reviewer inspects every pass:
@@ -147,9 +155,10 @@ even when you never open an authority.
    `scripts/pr/check-pr-description.mjs` enforces the first two sections and
    their order in CI; raw HTML other than comments and code blocks do not
    satisfy its opening-content check. PRs open **ready for
-   review, never as drafts** — a draft suppresses the automated AI reviews
-   this workflow depends on; drafting is skipping review, not a staging
-   step. A ship that updates an **existing draft** converts it to ready once
+   review, never as drafts** — a draft silently disables CodeRabbit
+   auto-review (`.coderabbit.yaml` keeps `reviews.auto_review.drafts` false)
+   and the `pr-description.yml` CI check, which skips draft PRs; drafting is
+   skipping review, not a staging step. A ship that updates an **existing draft** converts it to ready once
    the gate passes — `pr:ready-state` holds draft state as a required blocker,
    so an unconverted draft never reaches all-clear. Use or keep draft only
    when the user asks or required validation is intentionally pending, and
@@ -340,7 +349,16 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    present the evidence, then stop and ask. If the merge itself satisfies Done
    means, sync the issue state and workboard afterward per
    [`agent-issue-workflow.md`](agent-issue-workflow.md). If live proof remains,
-   continue to production closeout first.
+   continue to production closeout first. After a partial merge, keep the issue
+   open. Before `issue:release` restores `agent-ready`, update the issue body:
+   mark merged work complete, isolate the remaining acceptance criteria, and
+   restate the current Done means. Use `needs-grooming` instead when the
+   remaining scope is unclear. Generated documentation-garden packets are the
+   exception: do not edit their immutable issue bodies or restore
+   `agent-ready`. Set `needs-grooming`. A human can resume the frozen packet or
+   create a linked ordinary follow-up before closing it. Record merged work in
+   issue comments and PR links, not in the generated body. Authority:
+   [`documentation-gardening.md`](documentation-gardening.md).
 
 9. **Production closeout when required.** When Done means includes deployed or
    live behavior, merge is an intermediate state. Monitor the owning deployment
@@ -364,9 +382,12 @@ These bind regardless of which step you are on:
 - **Package-script, package-manager, and lockfile changes require explicit
   acknowledgement** through the gate; never bypass the refusal.
 - **Background long `--run` gates and pushes**; do not run them in a 600s
-  foreground that a kill would truncate, and do not start a dashboard server or
-  browser suite alongside a gate. A second `--run` gate queues on the gate's own
-  machine-wide lock instead of racing.
+  foreground that a kill would truncate. Before invoking a full gate, ensure
+  that no direct validation, dashboard server, or browser suite is active on
+  the same machine. From invocation until the gate exits, do not start any of
+  them there. Use same-machine spare workers only for read-only work. Run
+  concurrent validation from another machine. A second `--run` gate queues on
+  the gate's own machine-wide lock instead of racing.
 - **Secrets are IaC-owned and Terraform apply needs human approval** — plan
   first, never one-off `gh secret set` / `vercel env add` /
   `gcloud secrets versions add`.

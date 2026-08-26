@@ -8,7 +8,12 @@
 
 import { spawn } from "node:child_process";
 
-import { splitRepo, validateOpenPr } from "./issue-board-state.mjs";
+import {
+  labelNames,
+  labelsForState,
+  splitRepo,
+  validateOpenPr,
+} from "./issue-board-state.mjs";
 
 const GH_OUTPUT_MAX_BYTES = 20 * 1024 * 1024;
 // A bounded traversal must fail rather than use an incomplete comment history.
@@ -109,6 +114,46 @@ export function runGh(args, { dryRun = false, mutates = false } = {}) {
   });
 }
 
+export async function editIssueLabels(options, issue, state) {
+  const transition = labelsForState(state);
+  const existingLabels = labelNames(issue);
+  const addLabels = transition.addLabels.filter(
+    (label) => !existingLabels.has(label),
+  );
+  const removeLabels = transition.removeLabels.filter((label) =>
+    existingLabels.has(label),
+  );
+  if (addLabels.length === 0 && removeLabels.length === 0) return;
+
+  const args = ["issue", "edit", String(issue.number), "-R", options.repo];
+  if (addLabels.length > 0) {
+    args.push("--add-label", addLabels.join(","));
+  }
+  if (removeLabels.length > 0) {
+    args.push("--remove-label", removeLabels.join(","));
+  }
+  await runGh(args, { dryRun: options.dryRun, mutates: true });
+}
+
+export async function addIssueLabels(options, issue, labels) {
+  const existingLabels = labelNames(issue);
+  const addLabels = labels.filter((label) => !existingLabels.has(label));
+  if (addLabels.length === 0) return;
+
+  await runGh(
+    [
+      "issue",
+      "edit",
+      String(issue.number),
+      "-R",
+      options.repo,
+      "--add-label",
+      addLabels.join(","),
+    ],
+    { dryRun: options.dryRun, mutates: true },
+  );
+}
+
 export async function ghJson(args, opts = {}) {
   const stdout = await runGh(args, opts);
   return stdout.trim() ? JSON.parse(stdout) : null;
@@ -176,18 +221,21 @@ export async function listReadyIssues(options) {
   return issues ?? [];
 }
 
-export async function listIssuesByLabel(
+export async function listIssuesByLabels(
   options,
-  label,
-  { state = "open" } = {},
+  labels,
+  { state = "open", json = ghJson } = {},
 ) {
-  const issues = await ghJson([
+  const stateQualifier = state === "all" ? "" : ` is:${state}`;
+  const issues = await json([
     "issue",
     "list",
     "-R",
     options.repo,
+    "--state",
+    state,
     "--search",
-    `is:issue is:${state} label:${label}`,
+    `is:issue${stateQualifier} label:${labels.join(",")}`,
     "--limit",
     "1000",
     "--json",

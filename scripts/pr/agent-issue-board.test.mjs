@@ -10,6 +10,8 @@ import {
   isReleasable,
   isRecoverableClaimRaceError,
   isReviewable,
+  IssueBoardSyncError,
+  ISSUE_STATE_LABELS,
   labelsForState,
   parseArgs,
   parseIssueNumbers,
@@ -20,13 +22,17 @@ import {
   selectStatusOption,
   shouldRollbackFailedTransition,
   stateFromLabels,
+  sync,
   validateOpenPr,
 } from "./agent-issue-board.mjs";
 import {
   readBackfillProjectFields,
   writeBackfillProjectFields,
 } from "./issue-board-projects.mjs";
-import { listIssueComments } from "./issue-board-transport.mjs";
+import {
+  listIssueComments,
+  listIssuesByLabels,
+} from "./issue-board-transport.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -153,6 +159,38 @@ test("project scope failures name the read-write gh refresh command", () => {
     hint.includes("`read:project` alone"),
     "missing read-only scope warning",
   );
+});
+
+test("queue-label issue lists use one all-state OR query", async () => {
+  const calls = [];
+  await listIssuesByLabels(
+    { repo: "mento-protocol/monitoring-monorepo" },
+    ISSUE_STATE_LABELS,
+    {
+      state: "all",
+      json: async (args) => {
+        calls.push(args);
+        return [];
+      },
+    },
+  );
+
+  assertDeepEqual(calls, [
+    [
+      "issue",
+      "list",
+      "-R",
+      "mento-protocol/monitoring-monorepo",
+      "--state",
+      "all",
+      "--search",
+      `is:issue label:${ISSUE_STATE_LABELS.join(",")}`,
+      "--limit",
+      "1000",
+      "--json",
+      "id,number,title,url,labels,state,projectItems",
+    ],
+  ]);
 });
 
 test("project mutation scope failures receive the same guidance", () => {
@@ -368,19 +406,1898 @@ test("active label transition claims the issue and removes stale state", () => {
   });
 });
 
-test("closed in-pr issues sync to done and clear state labels", () => {
-  assertEqual(
-    stateFromLabels({
-      state: "CLOSED",
-      labels: [{ name: "in-pr" }],
-    }),
-    "done",
-  );
+test("closed issues with any queue label sync to done", () => {
+  for (const label of ISSUE_STATE_LABELS) {
+    assertEqual(
+      stateFromLabels({
+        state: "CLOSED",
+        labels: [{ name: label }],
+      }),
+      "done",
+      label,
+    );
+  }
   assertDeepEqual(labelsForState("done"), {
     addLabels: [],
-    removeLabels: ["agent-ready", "agent-active", "in-pr", "needs-grooming"],
+    removeLabels: ISSUE_STATE_LABELS,
     statusOptions: ["Done"],
   });
+});
+
+test("sync clears every closed queue label without requiring a Project item", async () => {
+  const queries = [];
+  const edits = [];
+  const reads = new Map();
+  const closedIssues = new Map(
+    ISSUE_STATE_LABELS.map((label, index) => [
+      label,
+      {
+        number: 900 + index,
+        title: `closed ${label}`,
+        state: "CLOSED",
+        labels: [{ name: label }],
+      },
+    ]),
+  );
+
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabels: async (_options, labels, { state }) => {
+        queries.push(`${state}:${labels.join(",")}`);
+        return state === "all" ? [...closedIssues.values()] : [];
+      },
+      findIssueProjectItem: async () => null,
+      updateProjectFields: async () => {
+        throw new Error("closed issues without Project items must still sync");
+      },
+      editIssueLabels: async (_options, issue, state) => {
+        edits.push({ number: issue.number, state });
+      },
+      getIssue: async (_options, number) => {
+        const issue = [...closedIssues.values()].find(
+          (candidate) => candidate.number === number,
+        );
+        const read = (reads.get(number) ?? 0) + 1;
+        reads.set(number, read);
+        return read <= 2 ? issue : { ...issue, labels: [] };
+      },
+      sleep: async () => {
+        throw new Error("an immediately satisfied postcondition must not wait");
+      },
+    },
+  );
+
+  assertDeepEqual(queries, [`all:${ISSUE_STATE_LABELS.join(",")}`]);
+  assertDeepEqual(
+    results.map(({ number, state }) => ({ number, state })),
+    ISSUE_STATE_LABELS.map((_label, index) => ({
+      number: 900 + index,
+      state: "done",
+    })),
+  );
+  assertDeepEqual(
+    edits,
+    ISSUE_STATE_LABELS.map((_label, index) => ({
+      number: 900 + index,
+      state: "done",
+    })),
+  );
+  assertDeepEqual(
+    [...reads.values()],
+    ISSUE_STATE_LABELS.map(() => 3),
+  );
+});
+
+test("sync uses refreshed Project visibility before closed-item cleanup", async () => {
+  const listedIssue = {
+    number: 920,
+    title: "closed review item",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+    projectItems: [],
+  };
+  const refreshedIssue = {
+    ...listedIssue,
+    projectItems: [{ id: "item-920", project: { id: "project" } }],
+  };
+  const events = [];
+  let reads = 0;
+
+  await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabels: async (_options, labels, { state }) =>
+        labels.includes("in-pr") && state === "all" ? [listedIssue] : [],
+      findIssueProjectItem: async (_options, issue) => {
+        events.push(issue.projectItems[0] ? "find:visible" : "find:missing");
+        return issue.projectItems[0]?.id ?? null;
+      },
+      updateProjectFields: async () => events.push("project"),
+      editIssueLabels: async () => events.push("labels"),
+      getIssue: async () => {
+        reads += 1;
+        events.push(
+          reads === 1 ? "refresh" : reads === 2 ? "pre-cleanup" : "verify",
+        );
+        if (reads === 1) return listedIssue;
+        return reads === 2 ? refreshedIssue : { ...refreshedIssue, labels: [] };
+      },
+      sleep: async () => events.push("sleep"),
+    },
+  );
+
+  assertDeepEqual(events, [
+    "refresh",
+    "find:missing",
+    "pre-cleanup",
+    "find:visible",
+    "project",
+    "labels",
+    "verify",
+    "find:visible",
+    "project",
+    "verify",
+  ]);
+});
+
+test("sync reapplies Done to the same Project item before label cleanup", async () => {
+  const issue = {
+    number: 921,
+    title: "closed item with a concurrent Project write",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+    projectItems: [{ id: "item-921", project: { id: "project" } }],
+  };
+  const events = [];
+  let reads = 0;
+
+  await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabels: async (_options, labels, { state }) =>
+        labels.includes("in-pr") && state === "all" ? [issue] : [],
+      findIssueProjectItem: async () => {
+        events.push("find");
+        return "item-921";
+      },
+      updateProjectFields: async () => events.push("project"),
+      editIssueLabels: async () => events.push("labels"),
+      getIssue: async () => {
+        reads += 1;
+        events.push(`read:${reads}`);
+        return reads < 3 ? issue : { ...issue, labels: [] };
+      },
+      sleep: async () => {
+        throw new Error("an immediately satisfied postcondition must not wait");
+      },
+    },
+  );
+
+  assertDeepEqual(events, [
+    "read:1",
+    "find",
+    "project",
+    "read:2",
+    "find",
+    "project",
+    "labels",
+    "read:3",
+    "find",
+    "project",
+    "read:4",
+  ]);
+});
+
+test("sync projects a Project item that appears after label cleanup", async () => {
+  const listedIssue = {
+    number: 922,
+    title: "closed item with late Project visibility",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+    projectItems: [],
+  };
+  const verifiedIssue = {
+    ...listedIssue,
+    labels: [],
+    projectItems: [{ id: "item-922", project: { id: "project" } }],
+  };
+  const reads = [listedIssue, listedIssue, verifiedIssue, verifiedIssue];
+  const events = [];
+
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabels: async (_options, labels, { state }) =>
+        labels.includes("in-pr") && state === "all" ? [listedIssue] : [],
+      findIssueProjectItem: async (_options, issue) => {
+        events.push(issue.projectItems[0] ? "find:visible" : "find:missing");
+        return issue.projectItems[0]?.id ?? null;
+      },
+      updateProjectFields: async () => events.push("project"),
+      editIssueLabels: async () => events.push("labels"),
+      getIssue: async () => {
+        events.push("read");
+        return reads.shift();
+      },
+      sleep: async () => {
+        throw new Error("an immediately satisfied postcondition must not wait");
+      },
+    },
+  );
+
+  assertDeepEqual(events, [
+    "read",
+    "find:missing",
+    "read",
+    "find:missing",
+    "labels",
+    "read",
+    "find:visible",
+    "project",
+    "read",
+  ]);
+  assertDeepEqual(results, [
+    {
+      number: 922,
+      title: "closed item with late Project visibility",
+      state: "done",
+    },
+  ]);
+});
+
+test("sync restores retry labels when a late Done projection fails", async () => {
+  const listedIssue = {
+    number: 938,
+    title: "late Done retry",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+    projectItems: [],
+  };
+  let currentIssue = listedIssue;
+  let failLateDone = true;
+  let projectState = "review";
+  const restoredLabels = [];
+
+  const dependencies = {
+    getProject: async () => ({ id: "project" }),
+    listIssuesByLabels: async (_options, labels, { state }) =>
+      state === "all" &&
+      currentIssue.labels.some((label) => labels.includes(label.name))
+        ? [currentIssue]
+        : [],
+    getIssue: async () => currentIssue,
+    findIssueProjectItem: async (_options, issue) =>
+      issue.projectItems[0]?.id ?? null,
+    updateProjectFields: async (_options, _project, _item, state) => {
+      if (failLateDone) throw new Error("late Done projection failed");
+      projectState = state;
+    },
+    editIssueLabels: async (_options, _issue, state) => {
+      if (state !== "done") return;
+      currentIssue = {
+        ...currentIssue,
+        labels: [],
+        projectItems: [{ id: "item-938", project: { id: "project" } }],
+      };
+    },
+    addIssueLabels: async (_options, issue, labels) => {
+      assertDeepEqual(issue.labels, [], "fresh retry-label snapshot");
+      restoredLabels.push(...labels);
+      currentIssue = {
+        ...currentIssue,
+        labels: labels.map((name) => ({ name })),
+      };
+    },
+    sleep: async () => {
+      throw new Error("an immediately restored retry label must not wait");
+    },
+  };
+
+  await assertRejects(
+    () =>
+      sync(
+        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+        dependencies,
+      ),
+    /late Done projection failed/,
+  );
+  assertDeepEqual(restoredLabels, ["in-pr"]);
+  assertDeepEqual(currentIssue.labels, [{ name: "in-pr" }]);
+
+  failLateDone = false;
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    dependencies,
+  );
+
+  assertEqual(projectState, "done", "retried Project state");
+  assertDeepEqual(currentIssue.labels, []);
+  assertDeepEqual(results, [
+    { number: 938, title: "late Done retry", state: "done" },
+  ]);
+});
+
+test("sync quarantines ambiguous retry labels after late Done failure", async () => {
+  const listedIssue = {
+    number: 944,
+    title: "ambiguous late Done retry",
+    state: "CLOSED",
+    labels: [{ name: "agent-active" }, { name: "in-pr" }],
+    projectItems: [],
+  };
+  let currentIssue = listedIssue;
+  const restoredLabels = [];
+
+  await assertRejects(
+    () =>
+      sync(
+        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+        {
+          getProject: async () => ({ id: "project" }),
+          listIssuesByLabels: async (_options, labels, { state }) =>
+            state === "all" &&
+            currentIssue.labels.some((label) => labels.includes(label.name))
+              ? [currentIssue]
+              : [],
+          getIssue: async () => currentIssue,
+          findIssueProjectItem: async (_options, issue) =>
+            issue.projectItems[0]?.id ?? null,
+          updateProjectFields: async () => {
+            throw new Error("ambiguous late Done projection failed");
+          },
+          editIssueLabels: async (_options, _issue, state) => {
+            if (state !== "done") return;
+            currentIssue = {
+              ...currentIssue,
+              labels: [],
+              projectItems: [{ id: "item-944", project: { id: "project" } }],
+            };
+          },
+          addIssueLabels: async (_options, _issue, labels) => {
+            restoredLabels.push(...labels);
+            currentIssue = {
+              ...currentIssue,
+              labels: labels.map((name) => ({ name })),
+            };
+          },
+          sleep: async () => {
+            throw new Error("an immediately restored quarantine must not wait");
+          },
+        },
+      ),
+    /ambiguous late Done projection failed/,
+  );
+
+  assertDeepEqual(restoredLabels, ["needs-grooming"]);
+  assertDeepEqual(currentIssue.labels, [{ name: "needs-grooming" }]);
+  assertEqual(isClaimable(currentIssue), false, "ambiguous retry claimability");
+  assertEqual(
+    isReviewable(currentIssue),
+    false,
+    "ambiguous retry reviewability",
+  );
+  assertEqual(
+    isReleasable(currentIssue),
+    false,
+    "ambiguous retry releasability",
+  );
+});
+
+test("sync retries transient retry-label recovery failures", async () => {
+  const listedIssue = {
+    number: 941,
+    title: "transient retry-label recovery",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+    projectItems: [],
+  };
+  let currentIssue = listedIssue;
+  let recovering = false;
+  let recoveryReads = 0;
+  let addCalls = 0;
+  let waits = 0;
+
+  await assertRejects(
+    () =>
+      sync(
+        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+        {
+          getProject: async () => ({ id: "project" }),
+          listIssuesByLabels: async (_options, labels, { state }) =>
+            labels.includes("in-pr") && state === "all" ? [listedIssue] : [],
+          getIssue: async () => {
+            if (recovering && recoveryReads++ === 0) {
+              throw new Error("transient recovery read failure");
+            }
+            return currentIssue;
+          },
+          findIssueProjectItem: async (_options, issue) =>
+            issue.projectItems[0]?.id ?? null,
+          updateProjectFields: async () => {
+            recovering = true;
+            throw new Error("late Done projection failed");
+          },
+          editIssueLabels: async (_options, _issue, state) => {
+            if (state !== "done") return;
+            currentIssue = {
+              ...currentIssue,
+              labels: [],
+              projectItems: [{ id: "item-941", project: { id: "project" } }],
+            };
+          },
+          addIssueLabels: async (_options, _issue, labels) => {
+            addCalls += 1;
+            if (addCalls === 1) {
+              throw new Error("retry-label add failed before mutation");
+            }
+            currentIssue = {
+              ...currentIssue,
+              labels: labels.map((name) => ({ name })),
+            };
+            throw new Error("ambiguous retry-label add failure");
+          },
+          sleep: async () => {
+            waits += 1;
+          },
+        },
+      ),
+    /late Done projection failed/,
+  );
+
+  assertEqual(recoveryReads, 5, "bounded recovery reads");
+  assertEqual(addCalls, 2, "bounded recovery label additions");
+  assertEqual(waits, 2, "bounded recovery waits");
+  assertDeepEqual(currentIssue.labels, [{ name: "in-pr" }]);
+});
+
+test("sync restores retry state after post-cleanup verification fails", async () => {
+  const listedIssue = {
+    number: 945,
+    title: "post-cleanup verification retry",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+    projectItems: [],
+  };
+  let currentIssue = listedIssue;
+  let cleanupApplied = false;
+  let failVerification = true;
+  let addCalls = 0;
+  const updates = [];
+
+  const dependencies = {
+    getProject: async () => ({ id: "project" }),
+    listIssuesByLabels: async (_options, labels, { state }) =>
+      state === "all" &&
+      currentIssue.labels.some((label) => labels.includes(label.name))
+        ? [currentIssue]
+        : [],
+    getIssue: async () => {
+      if (cleanupApplied && failVerification) {
+        failVerification = false;
+        throw new Error("post-cleanup verification read failed");
+      }
+      return currentIssue;
+    },
+    findIssueProjectItem: async () => null,
+    ensureProjectItem: async () => "item-945",
+    updateProjectFields: async (_options, _project, _item, state) => {
+      updates.push(state);
+    },
+    editIssueLabels: async (_options, _issue, state) => {
+      if (state !== "done") return;
+      cleanupApplied = true;
+      currentIssue = { ...currentIssue, state: "OPEN", labels: [] };
+    },
+    addIssueLabels: async (_options, _issue, labels) => {
+      addCalls += 1;
+      currentIssue = {
+        ...currentIssue,
+        labels: labels.map((name) => ({ name })),
+      };
+    },
+    sleep: async () => {
+      throw new Error("an immediately restored retry state must not wait");
+    },
+  };
+
+  await assertRejects(
+    () =>
+      sync(
+        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+        dependencies,
+      ),
+    /post-cleanup verification read failed/,
+  );
+
+  assertEqual(addCalls, 1, "post-cleanup retry-label additions");
+  assertDeepEqual(currentIssue.labels, [{ name: "in-pr" }]);
+
+  cleanupApplied = false;
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    dependencies,
+  );
+  assertDeepEqual(updates, ["review"]);
+  assertDeepEqual(results, [
+    {
+      number: 945,
+      title: "post-cleanup verification retry",
+      state: "review",
+    },
+  ]);
+});
+
+test("sync restores retry state when reopen refresh fails", async () => {
+  const listedIssue = {
+    number: 948,
+    title: "reopen refresh retry",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+    projectItems: [],
+  };
+  let currentIssue = listedIssue;
+  let reads = 0;
+  let addCalls = 0;
+
+  await assertRejects(
+    () =>
+      sync(
+        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+        {
+          getProject: async () => ({ id: "project" }),
+          listIssuesByLabels: async (_options, labels, { state }) =>
+            labels.includes("in-pr") && state === "all" ? [listedIssue] : [],
+          getIssue: async () => {
+            reads += 1;
+            if (reads === 4) throw new Error("reopen refresh failed");
+            return currentIssue;
+          },
+          findIssueProjectItem: async () => null,
+          editIssueLabels: async (_options, _issue, state) => {
+            if (state === "done") {
+              currentIssue = { ...currentIssue, state: "OPEN", labels: [] };
+            }
+          },
+          addIssueLabels: async (_options, _issue, labels) => {
+            addCalls += 1;
+            currentIssue = {
+              ...currentIssue,
+              labels: labels.map((name) => ({ name })),
+            };
+          },
+          sleep: async () => {
+            throw new Error("an immediately restored reopen must not wait");
+          },
+        },
+      ),
+    /reopen refresh failed/,
+  );
+
+  assertEqual(reads, 6, "reopen refresh and recovery reads");
+  assertEqual(addCalls, 1, "reopen refresh retry-label additions");
+  assertDeepEqual(currentIssue.labels, [{ name: "in-pr" }]);
+});
+
+test("sync restores retry state after an ambiguous cleanup failure", async () => {
+  const listedIssue = {
+    number: 946,
+    title: "ambiguous cleanup retry",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+    projectItems: [],
+  };
+  let currentIssue = listedIssue;
+  let addCalls = 0;
+
+  await assertRejects(
+    () =>
+      sync(
+        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+        {
+          getProject: async () => ({ id: "project" }),
+          listIssuesByLabels: async (_options, labels, { state }) =>
+            state === "all" &&
+            currentIssue.labels.some((label) => labels.includes(label.name))
+              ? [currentIssue]
+              : [],
+          getIssue: async () => currentIssue,
+          findIssueProjectItem: async () => null,
+          editIssueLabels: async (_options, _issue, state) => {
+            if (state !== "done") return;
+            currentIssue = { ...currentIssue, state: "OPEN", labels: [] };
+            throw new Error("cleanup failed after mutation");
+          },
+          addIssueLabels: async (_options, _issue, labels) => {
+            addCalls += 1;
+            currentIssue = {
+              ...currentIssue,
+              labels: labels.map((name) => ({ name })),
+            };
+          },
+          sleep: async () => {
+            throw new Error(
+              "an immediately restored cleanup retry must not wait",
+            );
+          },
+        },
+      ),
+    /cleanup failed after mutation/,
+  );
+
+  assertEqual(addCalls, 1, "ambiguous cleanup retry-label additions");
+  assertDeepEqual(currentIssue.labels, [{ name: "in-pr" }]);
+});
+
+test("sync quarantines stale queue evidence after late Done failure", async () => {
+  const listedIssue = {
+    number: 942,
+    title: "stale enumerated retry label",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+    projectItems: [],
+  };
+  let currentIssue = { ...listedIssue, labels: [] };
+  let firstEnumeration = true;
+  let failLateDone = true;
+  let projectState = "review";
+  const restoredLabels = [];
+
+  const dependencies = {
+    getProject: async () => ({ id: "project" }),
+    listIssuesByLabels: async (_options, labels, { state }) => {
+      if (state !== "all") return [];
+      if (firstEnumeration) {
+        firstEnumeration = false;
+        return [listedIssue];
+      }
+      return currentIssue.labels.some((label) => labels.includes(label.name))
+        ? [currentIssue]
+        : [];
+    },
+    getIssue: async () => currentIssue,
+    findIssueProjectItem: async (_options, issue) =>
+      issue.projectItems[0]?.id ?? null,
+    updateProjectFields: async (_options, _project, _item, state) => {
+      if (failLateDone) throw new Error("late Done projection failed");
+      projectState = state;
+    },
+    editIssueLabels: async (_options, _issue, state) => {
+      if (state !== "done") return;
+      currentIssue = {
+        ...currentIssue,
+        labels: [],
+        projectItems: [{ id: "item-942", project: { id: "project" } }],
+      };
+    },
+    addIssueLabels: async (_options, issue, labels) => {
+      assertDeepEqual(issue.labels, [], "stale recovery snapshot");
+      restoredLabels.push(...labels);
+      currentIssue = {
+        ...currentIssue,
+        state: "OPEN",
+        labels: labels.map((name) => ({ name })),
+      };
+    },
+    sleep: async () => {
+      throw new Error("an immediately restored stale label must not wait");
+    },
+  };
+
+  await assertRejects(
+    () =>
+      sync(
+        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+        dependencies,
+      ),
+    /late Done projection failed/,
+  );
+  assertDeepEqual(restoredLabels, ["needs-grooming"]);
+  assertDeepEqual(currentIssue.labels, [{ name: "needs-grooming" }]);
+  assertEqual(isClaimable(currentIssue), false, "stale retry claimability");
+  assertEqual(isReviewable(currentIssue), false, "stale retry reviewability");
+  assertEqual(isReleasable(currentIssue), false, "stale retry releasability");
+
+  failLateDone = false;
+  currentIssue = { ...currentIssue, state: "CLOSED" };
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    dependencies,
+  );
+
+  assertEqual(projectState, "done", "retried stale Project state");
+  assertDeepEqual(currentIssue.labels, []);
+  assertDeepEqual(results, [
+    { number: 942, title: "stale enumerated retry label", state: "done" },
+  ]);
+});
+
+test("sync leaves a successful stale-quarantine race fail-closed", async () => {
+  const listedIssue = {
+    number: 947,
+    title: "stale quarantine transition",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+    projectItems: [],
+  };
+  let currentIssue = { ...listedIssue, labels: [] };
+  let addCalls = 0;
+  const edits = [];
+
+  await assertRejects(
+    () =>
+      sync(
+        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+        {
+          getProject: async () => ({ id: "project" }),
+          listIssuesByLabels: async (_options, labels, { state }) =>
+            labels.includes("in-pr") && state === "all" ? [listedIssue] : [],
+          getIssue: async () => currentIssue,
+          findIssueProjectItem: async (_options, issue) =>
+            issue.projectItems[0]?.id ?? null,
+          updateProjectFields: async () => {
+            throw new Error("stale quarantine projection failed");
+          },
+          editIssueLabels: async (_options, _issue, state) => {
+            edits.push(state);
+            if (state === "done") {
+              currentIssue = {
+                ...currentIssue,
+                labels: [],
+                projectItems: [{ id: "item-947", project: { id: "project" } }],
+              };
+            }
+          },
+          addIssueLabels: async (_options, _issue, labels) => {
+            addCalls += 1;
+            currentIssue = {
+              ...currentIssue,
+              state: "OPEN",
+              labels: [
+                ...labels.map((name) => ({ name })),
+                { name: "agent-ready" },
+              ],
+            };
+          },
+          sleep: async () => {},
+        },
+      ),
+    /stale quarantine projection failed/,
+  );
+
+  assertEqual(addCalls, 1, "stale quarantine additions");
+  assertDeepEqual(edits, ["done"]);
+  assertDeepEqual(currentIssue.labels, [
+    { name: "needs-grooming" },
+    { name: "agent-ready" },
+  ]);
+  assertEqual(isClaimable(currentIssue), false, "successful race claimability");
+  assertEqual(
+    isReviewable(currentIssue),
+    false,
+    "successful race reviewability",
+  );
+  assertEqual(
+    isReleasable(currentIssue),
+    false,
+    "successful race releasability",
+  );
+});
+
+test("sync leaves an ambiguous add failure conflict quarantined", async () => {
+  const listedIssue = {
+    number: 949,
+    title: "ambiguous quarantine add",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+    projectItems: [],
+  };
+  let currentIssue = { ...listedIssue, labels: [] };
+  let addCalls = 0;
+  const edits = [];
+
+  await assertRejects(
+    () =>
+      sync(
+        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+        {
+          getProject: async () => ({ id: "project" }),
+          listIssuesByLabels: async (_options, labels, { state }) =>
+            labels.includes("in-pr") && state === "all" ? [listedIssue] : [],
+          getIssue: async () => currentIssue,
+          findIssueProjectItem: async (_options, issue) =>
+            issue.projectItems[0]?.id ?? null,
+          updateProjectFields: async () => {
+            throw new Error("ambiguous quarantine projection failed");
+          },
+          editIssueLabels: async (_options, _issue, state) => {
+            edits.push(state);
+            if (state === "done") {
+              currentIssue = {
+                ...currentIssue,
+                labels: [],
+                projectItems: [{ id: "item-949", project: { id: "project" } }],
+              };
+            }
+          },
+          addIssueLabels: async () => {
+            addCalls += 1;
+            currentIssue = {
+              ...currentIssue,
+              state: "OPEN",
+              labels: [{ name: "needs-grooming" }, { name: "agent-ready" }],
+            };
+            throw new Error("quarantine add failed before mutation");
+          },
+          sleep: async () => {},
+        },
+      ),
+    /ambiguous quarantine projection failed/,
+  );
+
+  assertEqual(addCalls, 1, "ambiguous quarantine additions");
+  assertDeepEqual(edits, ["done"]);
+  assertDeepEqual(currentIssue.labels, [
+    { name: "needs-grooming" },
+    { name: "agent-ready" },
+  ]);
+  assertEqual(isClaimable(currentIssue), false, "ambiguous add claimability");
+});
+
+test("sync preserves a pre-existing quarantine conflict", async () => {
+  const listedIssue = {
+    number: 943,
+    title: "label-less reopen during historical recovery",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+    projectItems: [],
+  };
+  let currentIssue = { ...listedIssue, labels: [] };
+  let addCalls = 0;
+
+  await assertRejects(
+    () =>
+      sync(
+        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+        {
+          getProject: async () => ({ id: "project" }),
+          listIssuesByLabels: async (_options, labels, { state }) =>
+            labels.includes("in-pr") && state === "all" ? [listedIssue] : [],
+          getIssue: async () => currentIssue,
+          findIssueProjectItem: async (_options, issue) =>
+            issue.projectItems[0]?.id ?? null,
+          updateProjectFields: async () => {
+            currentIssue = {
+              ...currentIssue,
+              state: "OPEN",
+              labels: [{ name: "needs-grooming" }, { name: "agent-ready" }],
+            };
+            throw new Error("late Done projection failed");
+          },
+          editIssueLabels: async (_options, _issue, state) => {
+            if (state === "done") {
+              currentIssue = {
+                ...currentIssue,
+                labels: [],
+                projectItems: [{ id: "item-943", project: { id: "project" } }],
+              };
+            }
+          },
+          addIssueLabels: async () => {
+            addCalls += 1;
+          },
+          sleep: async () => {
+            throw new Error("same-label compensation must not wait");
+          },
+        },
+      ),
+    /late Done projection failed/,
+  );
+
+  assertEqual(addCalls, 0, "historical restore attempts");
+  assertDeepEqual(currentIssue.state, "OPEN");
+  assertDeepEqual(currentIssue.labels, [
+    { name: "needs-grooming" },
+    { name: "agent-ready" },
+  ]);
+  assertEqual(isClaimable(currentIssue), false, "conflict claimability");
+  assertEqual(isReviewable(currentIssue), false, "conflict reviewability");
+  assertEqual(isReleasable(currentIssue), false, "conflict releasability");
+});
+
+test("sync preserves a concurrent retry label after late Done failure", async () => {
+  const listedIssue = {
+    number: 939,
+    title: "late Done concurrent reopen",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+    projectItems: [],
+  };
+  let currentIssue = listedIssue;
+  let addCalls = 0;
+
+  await assertRejects(
+    () =>
+      sync(
+        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+        {
+          getProject: async () => ({ id: "project" }),
+          listIssuesByLabels: async (_options, labels, { state }) =>
+            labels.includes("in-pr") && state === "all" ? [listedIssue] : [],
+          getIssue: async () => currentIssue,
+          findIssueProjectItem: async (_options, issue) =>
+            issue.projectItems[0]?.id ?? null,
+          updateProjectFields: async () => {
+            throw new Error("late Done projection failed");
+          },
+          editIssueLabels: async (_options, _issue, state) => {
+            if (state === "done") {
+              currentIssue = {
+                ...currentIssue,
+                labels: [],
+                projectItems: [{ id: "item-939", project: { id: "project" } }],
+              };
+            }
+            if (state === "active") {
+              currentIssue = {
+                ...currentIssue,
+                state: "OPEN",
+                labels: [{ name: "agent-active" }],
+              };
+            }
+          },
+          addIssueLabels: async (_options, issue, labels) => {
+            assertDeepEqual(issue.labels, [], "pre-add retry snapshot");
+            addCalls += 1;
+            currentIssue = {
+              ...currentIssue,
+              state: "OPEN",
+              labels: [
+                ...labels.map((name) => ({ name })),
+                { name: "agent-active" },
+              ],
+            };
+          },
+          sleep: async () => {},
+        },
+      ),
+    /late Done projection failed/,
+  );
+
+  assertEqual(addCalls, 1, "add-only retry-label restoration call");
+  assertDeepEqual(currentIssue.labels, [{ name: "agent-active" }]);
+});
+
+test("sync reprojects a reopen during the late Project write", async () => {
+  const listedIssue = {
+    number: 923,
+    title: "reopen during late Project projection",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+    projectItems: [],
+  };
+  const clearedIssue = {
+    ...listedIssue,
+    labels: [],
+    projectItems: [{ id: "item-923", project: { id: "project" } }],
+  };
+  const activeIssue = {
+    ...listedIssue,
+    state: "OPEN",
+    labels: [{ name: "agent-active" }],
+    projectItems: clearedIssue.projectItems,
+  };
+  let currentIssue = listedIssue;
+  let reads = 0;
+  const updates = [];
+
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabels: async (_options, labels, { state }) =>
+        labels.includes("in-pr") && state === "all" ? [listedIssue] : [],
+      getIssue: async () => {
+        reads += 1;
+        return currentIssue;
+      },
+      findIssueProjectItem: async (_options, issue) =>
+        issue.projectItems[0]?.id ?? null,
+      ensureProjectItem: async () => "item-923",
+      updateProjectFields: async (_options, _project, _item, state) => {
+        updates.push(state);
+        if (state === "done") currentIssue = activeIssue;
+      },
+      editIssueLabels: async (_options, _issue, state) => {
+        if (state === "done") currentIssue = clearedIssue;
+      },
+      sleep: async () => {},
+    },
+  );
+
+  assertDeepEqual(updates, ["done", "active"]);
+  assertEqual(reads, 5, "closed verification and reopened projection reads");
+  assertDeepEqual(results, [
+    {
+      number: 923,
+      title: "reopen during late Project projection",
+      state: "active",
+    },
+  ]);
+});
+
+test("sync reclassifies an issue that reopened after enumeration", async () => {
+  const listedIssue = {
+    number: 925,
+    title: "reopened review item",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+  };
+  const reopenedIssue = {
+    ...listedIssue,
+    state: "OPEN",
+    labels: [{ name: "agent-active" }],
+  };
+  const updates = [];
+  let edits = 0;
+
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabels: async (_options, labels, { state }) =>
+        labels.includes("in-pr") && state === "all" ? [listedIssue] : [],
+      getIssue: async () => reopenedIssue,
+      findIssueProjectItem: async () => {
+        throw new Error("a reopened issue must not take the Done path");
+      },
+      ensureProjectItem: async () => "item-925",
+      updateProjectFields: async (_options, _project, _item, state) => {
+        updates.push(state);
+      },
+      editIssueLabels: async () => {
+        edits += 1;
+      },
+    },
+  );
+
+  assertDeepEqual(results, [
+    { number: 925, title: "reopened review item", state: "active" },
+  ]);
+  assertDeepEqual(updates, ["active"]);
+  assertEqual(edits, 0, "reopened issue label edits");
+});
+
+test("sync reclassifies a reopen before the Done label edit", async () => {
+  const closedIssue = {
+    number: 924,
+    title: "reopen before cleanup",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+  };
+  const activeIssue = {
+    ...closedIssue,
+    state: "OPEN",
+    labels: [{ name: "agent-active" }],
+  };
+  const reads = [closedIssue, activeIssue, activeIssue];
+  const updates = [];
+  let edits = 0;
+
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabels: async (_options, labels, { state }) =>
+        labels.includes("in-pr") && state === "all" ? [closedIssue] : [],
+      getIssue: async () => reads.shift(),
+      findIssueProjectItem: async () => null,
+      ensureProjectItem: async () => "item-924",
+      updateProjectFields: async (_options, _project, _item, state) => {
+        updates.push(state);
+      },
+      editIssueLabels: async () => {
+        edits += 1;
+      },
+      sleep: async () => {},
+    },
+  );
+
+  assertDeepEqual(updates, ["active"]);
+  assertEqual(edits, 0, "stale Done label edits");
+  assertDeepEqual(results, [
+    { number: 924, title: "reopen before cleanup", state: "active" },
+  ]);
+});
+
+test("sync reprojects a concurrent claim after an open Project write", async () => {
+  const readyIssue = {
+    number: 926,
+    title: "concurrent claim",
+    state: "OPEN",
+    labels: [{ name: "agent-ready" }],
+  };
+  const activeIssue = {
+    ...readyIssue,
+    labels: [{ name: "agent-active" }],
+  };
+  const reads = [readyIssue, activeIssue, activeIssue];
+  const updates = [];
+  let waits = 0;
+
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabels: async (_options, labels, { state }) =>
+        labels.includes("agent-ready") && state === "all" ? [readyIssue] : [],
+      getIssue: async () => reads.shift(),
+      ensureProjectItem: async () => "item-926",
+      updateProjectFields: async (_options, _project, _item, state) => {
+        updates.push(state);
+      },
+      sleep: async () => {
+        waits += 1;
+      },
+    },
+  );
+
+  assertDeepEqual(updates, ["ready", "active"]);
+  assertEqual(waits, 1, "claim drift wait");
+  assertDeepEqual(results, [
+    { number: 926, title: "concurrent claim", state: "active" },
+  ]);
+});
+
+test("sync bounds repeated open-state projection drift", async () => {
+  const readyIssue = {
+    number: 929,
+    title: "oscillating claim",
+    state: "OPEN",
+    labels: [{ name: "agent-ready" }],
+  };
+  const activeIssue = {
+    ...readyIssue,
+    labels: [{ name: "agent-active" }],
+  };
+  const reads = [readyIssue, activeIssue, readyIssue, activeIssue];
+  const updates = [];
+  let waits = 0;
+
+  await assertRejects(
+    () =>
+      sync(
+        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+        {
+          getProject: async () => ({ id: "project" }),
+          listIssuesByLabels: async (_options, labels, { state }) =>
+            labels.includes("agent-ready") && state === "all"
+              ? [readyIssue]
+              : [],
+          getIssue: async () => reads.shift(),
+          ensureProjectItem: async () => "item-929",
+          updateProjectFields: async (_options, _project, _item, state) => {
+            updates.push(state);
+          },
+          sleep: async () => {
+            waits += 1;
+          },
+        },
+      ),
+    /Issue #929 did not stabilize during sync after 3 attempts; last projection drift was ready -> active/,
+  );
+
+  assertDeepEqual(updates, ["ready", "active", "ready"]);
+  assertEqual(waits, 2, "bounded open-state drift waits");
+});
+
+test("sync attempts later issues and reports partial results after a failure", async () => {
+  const failingIssue = {
+    number: 931,
+    title: "failed projection",
+    state: "OPEN",
+    labels: [{ name: "agent-ready" }],
+  };
+  const successfulIssue = {
+    number: 932,
+    title: "successful projection",
+    state: "OPEN",
+    labels: [{ name: "agent-ready" }],
+  };
+  const updates = [];
+  let observed;
+
+  try {
+    await sync(
+      { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+      {
+        getProject: async () => ({ id: "project" }),
+        listIssuesByLabels: async (_options, labels, { state }) =>
+          labels.includes("agent-ready") && state === "all"
+            ? [failingIssue, successfulIssue]
+            : [],
+        getIssue: async (_options, number) =>
+          number === failingIssue.number ? failingIssue : successfulIssue,
+        ensureProjectItem: async (_options, _project, issue) =>
+          `item-${issue.number}`,
+        updateProjectFields: async (_options, _project, item) => {
+          updates.push(item);
+          if (item === "item-931") throw new Error("Project write failed");
+        },
+      },
+    );
+  } catch (error) {
+    observed = error;
+  }
+
+  assert(observed instanceof IssueBoardSyncError, "aggregate sync error type");
+  assertDeepEqual(updates, ["item-931", "item-932"]);
+  assertDeepEqual(observed.results, [
+    { number: 932, title: "successful projection", state: "ready" },
+  ]);
+  assertDeepEqual(observed.failures, [
+    {
+      number: 931,
+      title: "failed projection",
+      message: "Project write failed",
+    },
+  ]);
+  assert(
+    observed.message.includes("Succeeded: #932."),
+    "success summary in aggregate error",
+  );
+  assert(
+    observed.message.includes("Failed: #931: Project write failed."),
+    "failure summary in aggregate error",
+  );
+});
+
+test("sync reprojects Done when an issue closes after an open Project write", async () => {
+  const reviewIssue = {
+    number: 928,
+    title: "concurrent close",
+    state: "OPEN",
+    labels: [{ name: "in-pr" }],
+  };
+  const closedIssue = {
+    ...reviewIssue,
+    state: "CLOSED",
+    labels: [],
+  };
+  const reads = [
+    reviewIssue,
+    closedIssue,
+    closedIssue,
+    closedIssue,
+    closedIssue,
+  ];
+  const updates = [];
+
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabels: async (_options, labels, { state }) =>
+        labels.includes("in-pr") && state === "all" ? [reviewIssue] : [],
+      getIssue: async () => reads.shift(),
+      ensureProjectItem: async () => "item-928",
+      findIssueProjectItem: async () => "item-928",
+      updateProjectFields: async (_options, _project, _item, state) => {
+        updates.push(state);
+      },
+      editIssueLabels: async () => {},
+      sleep: async () => {},
+    },
+  );
+
+  assertDeepEqual(updates, ["review", "done", "done", "done"]);
+  assertDeepEqual(results, [
+    { number: 928, title: "concurrent close", state: "done" },
+  ]);
+});
+
+test("sync compensates for a concurrent queue transition after the restore read", async () => {
+  const listedIssue = {
+    number: 927,
+    title: "concurrent reopen",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+  };
+  let currentIssue = listedIssue;
+  let reads = 0;
+  const edits = [];
+  const updates = [];
+
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabels: async (_options, labels, { state }) =>
+        labels.includes("in-pr") && state === "all" ? [listedIssue] : [],
+      getIssue: async () => {
+        reads += 1;
+        return currentIssue;
+      },
+      findIssueProjectItem: async () => null,
+      ensureProjectItem: async () => "item-927",
+      updateProjectFields: async (_options, _project, _item, state) => {
+        updates.push(state);
+      },
+      editIssueLabels: async (_options, issue, state) => {
+        edits.push(state);
+        if (state === "done") {
+          currentIssue = { ...listedIssue, state: "OPEN", labels: [] };
+        } else if (state === "review") {
+          assertDeepEqual(
+            issue.labels,
+            [],
+            "fresh label-less restore snapshot",
+          );
+          currentIssue = {
+            ...listedIssue,
+            state: "OPEN",
+            labels: [{ name: "in-pr" }, { name: "agent-active" }],
+          };
+        } else {
+          currentIssue = {
+            ...listedIssue,
+            state: "OPEN",
+            labels: [{ name: "agent-active" }],
+          };
+        }
+      },
+      sleep: async () => {},
+    },
+  );
+
+  assertDeepEqual(edits, ["done", "review", "active"]);
+  assertDeepEqual(updates, ["active"]);
+  assertEqual(reads, 7, "restore, compensation, and projection reads");
+  assertDeepEqual(results, [
+    { number: 927, title: "concurrent reopen", state: "active" },
+  ]);
+});
+
+test("sync restores provisional state when compensation loses a transition", async () => {
+  const listedIssue = {
+    number: 937,
+    title: "compensation transition race",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+  };
+  let currentIssue = listedIssue;
+  let reads = 0;
+  const edits = [];
+  const updates = [];
+
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabels: async (_options, labels, { state }) =>
+        labels.includes("in-pr") && state === "all" ? [listedIssue] : [],
+      getIssue: async () => {
+        reads += 1;
+        return currentIssue;
+      },
+      findIssueProjectItem: async () => null,
+      ensureProjectItem: async () => "item-937",
+      updateProjectFields: async (_options, _project, _item, state) => {
+        updates.push(state);
+      },
+      editIssueLabels: async (_options, issue, state) => {
+        edits.push(state);
+        if (edits.length === 1) {
+          assertEqual(state, "done");
+          currentIssue = { ...listedIssue, state: "OPEN", labels: [] };
+          return;
+        }
+        if (edits.length === 2) {
+          assertEqual(state, "review");
+          assertDeepEqual(issue.labels, [], "fresh restore snapshot");
+          currentIssue = {
+            ...listedIssue,
+            state: "OPEN",
+            labels: [{ name: "in-pr" }, { name: "agent-active" }],
+          };
+          return;
+        }
+        if (edits.length === 3) {
+          assertEqual(state, "active");
+          currentIssue = { ...listedIssue, state: "OPEN", labels: [] };
+          return;
+        }
+        assertEqual(state, "review");
+        assertDeepEqual(issue.labels, [], "label-less compensation snapshot");
+        currentIssue = {
+          ...listedIssue,
+          state: "OPEN",
+          labels: [{ name: "in-pr" }],
+        };
+      },
+      sleep: async () => {},
+    },
+  );
+
+  assertDeepEqual(edits, ["done", "review", "active", "review"]);
+  assertDeepEqual(updates, ["review"]);
+  assertEqual(reads, 8, "restore, compensation, repair, and projection reads");
+  assertDeepEqual(results, [
+    { number: 937, title: "compensation transition race", state: "review" },
+  ]);
+});
+
+test("sync compensates a conflict created by provisional repair", async () => {
+  const listedIssue = {
+    number: 940,
+    title: "provisional repair conflict",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+  };
+  let currentIssue = listedIssue;
+  const edits = [];
+  const updates = [];
+  let waits = 0;
+
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabels: async (_options, labels, { state }) =>
+        labels.includes("in-pr") && state === "all" ? [listedIssue] : [],
+      getIssue: async () => currentIssue,
+      findIssueProjectItem: async () => null,
+      ensureProjectItem: async () => "item-940",
+      updateProjectFields: async (_options, _project, _item, state) => {
+        updates.push(state);
+        if (state === "review") {
+          currentIssue = { ...listedIssue, state: "OPEN", labels: [] };
+        }
+      },
+      editIssueLabels: async (_options, issue, state) => {
+        edits.push(state);
+        if (edits.length === 1) {
+          currentIssue = { ...listedIssue, state: "OPEN", labels: [] };
+          return;
+        }
+        if (edits.length === 2) {
+          currentIssue = {
+            ...listedIssue,
+            state: "OPEN",
+            labels: [{ name: "in-pr" }],
+          };
+          return;
+        }
+        if (edits.length === 3) {
+          assertDeepEqual(issue.labels, [], "label-less repair snapshot");
+          currentIssue = {
+            ...listedIssue,
+            state: "OPEN",
+            labels: [{ name: "in-pr" }, { name: "agent-active" }],
+          };
+          return;
+        }
+        assertEqual(state, "active");
+        currentIssue = {
+          ...listedIssue,
+          state: "OPEN",
+          labels: [{ name: "agent-active" }],
+        };
+      },
+      sleep: async () => {
+        waits += 1;
+      },
+    },
+  );
+
+  assertDeepEqual(edits, ["done", "review", "review", "active"]);
+  assertDeepEqual(updates, ["review", "active"]);
+  assertEqual(waits, 2, "bounded outer reconciliation waits");
+  assertDeepEqual(results, [
+    { number: 940, title: "provisional repair conflict", state: "active" },
+  ]);
+});
+
+test("sync carries restore compensation through Project verification", async () => {
+  const listedIssue = {
+    number: 935,
+    title: "transition after restored projection",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+  };
+  let currentIssue = listedIssue;
+  let reads = 0;
+  let waits = 0;
+  const edits = [];
+  const updates = [];
+
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabels: async (_options, labels, { state }) =>
+        labels.includes("in-pr") && state === "all" ? [listedIssue] : [],
+      getIssue: async () => {
+        reads += 1;
+        return currentIssue;
+      },
+      findIssueProjectItem: async () => null,
+      ensureProjectItem: async () => "item-935",
+      updateProjectFields: async (_options, _project, _item, state) => {
+        updates.push(state);
+        if (state === "review") {
+          currentIssue = {
+            ...listedIssue,
+            state: "OPEN",
+            labels: [{ name: "in-pr" }, { name: "agent-active" }],
+          };
+        }
+      },
+      editIssueLabels: async (_options, _issue, state) => {
+        edits.push(state);
+        currentIssue = {
+          ...listedIssue,
+          state: "OPEN",
+          labels:
+            state === "done"
+              ? []
+              : [{ name: state === "review" ? "in-pr" : "agent-active" }],
+        };
+      },
+      sleep: async () => {
+        waits += 1;
+      },
+    },
+  );
+
+  assertDeepEqual(edits, ["done", "review", "active"]);
+  assertDeepEqual(updates, ["review", "active"]);
+  assertEqual(reads, 8, "restore and later Project verification reads");
+  assertEqual(waits, 2, "bounded projection retries");
+  assertDeepEqual(results, [
+    {
+      number: 935,
+      title: "transition after restored projection",
+      state: "active",
+    },
+  ]);
+});
+
+test("sync fails closed for ambiguous labels after reopen restore", async () => {
+  const listedIssue = {
+    number: 936,
+    title: "ambiguous transition after restore",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+  };
+  let currentIssue = listedIssue;
+  let reads = 0;
+  let waits = 0;
+  const edits = [];
+
+  await assertRejects(
+    () =>
+      sync(
+        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+        {
+          getProject: async () => ({ id: "project" }),
+          listIssuesByLabels: async (_options, labels, { state }) =>
+            labels.includes("in-pr") && state === "all" ? [listedIssue] : [],
+          getIssue: async () => {
+            reads += 1;
+            return currentIssue;
+          },
+          findIssueProjectItem: async () => null,
+          ensureProjectItem: async () => {
+            throw new Error("sync must not project an ambiguous state");
+          },
+          editIssueLabels: async (_options, _issue, state) => {
+            edits.push(state);
+            currentIssue = {
+              ...listedIssue,
+              state: "OPEN",
+              labels:
+                state === "done"
+                  ? []
+                  : [
+                      { name: "in-pr" },
+                      { name: "agent-active" },
+                      { name: "agent-ready" },
+                    ],
+            };
+          },
+          sleep: async () => {
+            waits += 1;
+          },
+        },
+      ),
+    /Issue #936 retained conflicting queue labels after 3 attempts: agent-ready, agent-active, in-pr/,
+  );
+
+  assertDeepEqual(edits, ["done", "review"]);
+  assertEqual(reads, 6, "bounded ambiguous-state reads");
+  assertEqual(waits, 2, "bounded ambiguous-state waits");
+});
+
+test("sync quarantines an ambiguous closed queue state", async () => {
+  const listedIssue = {
+    number: 937,
+    title: "ambiguous closed state",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }, { name: "agent-active" }],
+  };
+  let currentIssue = listedIssue;
+  let reads = 0;
+  let waits = 0;
+  const edits = [];
+  const updates = [];
+
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabels: async (_options, labels, { state }) =>
+        labels.includes("in-pr") &&
+        labels.includes("agent-active") &&
+        state === "all"
+          ? [listedIssue]
+          : [],
+      getIssue: async () => {
+        reads += 1;
+        return currentIssue;
+      },
+      findIssueProjectItem: async () => null,
+      ensureProjectItem: async () => "item-937",
+      updateProjectFields: async (_options, _project, _item, state) => {
+        updates.push(state);
+      },
+      editIssueLabels: async (_options, _issue, state) => {
+        edits.push(state);
+        currentIssue =
+          state === "done"
+            ? { ...listedIssue, state: "OPEN", labels: [] }
+            : {
+                ...listedIssue,
+                state: "OPEN",
+                labels: [{ name: "needs-grooming" }],
+              };
+      },
+      sleep: async () => {
+        waits += 1;
+      },
+    },
+  );
+
+  assertDeepEqual(results, [
+    { number: 937, title: "ambiguous closed state", state: "grooming" },
+  ]);
+  assertDeepEqual(edits, ["done", "grooming"]);
+  assertDeepEqual(updates, ["grooming"]);
+  assertEqual(reads, 6, "ambiguous-source recovery reads");
+  assertEqual(waits, 1, "ambiguous-source recovery waits");
+});
+
+test("sync leaves a normal fallback reopen race fail-closed", async () => {
+  const listedIssue = {
+    number: 950,
+    title: "normal fallback reopen race",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }, { name: "agent-active" }],
+  };
+  let currentIssue = listedIssue;
+  let reads = 0;
+  let waits = 0;
+  const edits = [];
+
+  await assertRejects(
+    () =>
+      sync(
+        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+        {
+          getProject: async () => ({ id: "project" }),
+          listIssuesByLabels: async (_options, labels, { state }) =>
+            labels.includes("in-pr") &&
+            labels.includes("agent-active") &&
+            state === "all"
+              ? [listedIssue]
+              : [],
+          getIssue: async () => {
+            reads += 1;
+            return currentIssue;
+          },
+          findIssueProjectItem: async () => null,
+          ensureProjectItem: async () => {
+            throw new Error("sync must not project a fallback conflict");
+          },
+          editIssueLabels: async (_options, _issue, state) => {
+            edits.push(state);
+            currentIssue =
+              state === "done"
+                ? { ...listedIssue, state: "OPEN", labels: [] }
+                : {
+                    ...listedIssue,
+                    state: "OPEN",
+                    labels: [
+                      { name: "needs-grooming" },
+                      { name: "agent-ready" },
+                    ],
+                  };
+          },
+          sleep: async () => {
+            waits += 1;
+          },
+        },
+      ),
+    /Issue #950 retained conflicting queue labels after 3 attempts: needs-grooming, agent-ready/,
+  );
+
+  assertDeepEqual(edits, ["done", "grooming"]);
+  assertEqual(reads, 6, "normal fallback conflict reads");
+  assertEqual(waits, 2, "normal fallback conflict waits");
+  assertDeepEqual(currentIssue.labels, [
+    { name: "needs-grooming" },
+    { name: "agent-ready" },
+  ]);
+  assertEqual(isClaimable(currentIssue), false, "normal race claimability");
+});
+
+test("sync preserves a concurrent queue transition before reopen restore", async () => {
+  const listedIssue = {
+    number: 933,
+    title: "transition during restore",
+    state: "CLOSED",
+    labels: [{ name: "in-pr" }],
+  };
+  const labelLessIssue = { ...listedIssue, state: "OPEN", labels: [] };
+  const activeIssue = {
+    ...listedIssue,
+    state: "OPEN",
+    labels: [{ name: "agent-active" }],
+  };
+  const reads = [
+    listedIssue,
+    listedIssue,
+    labelLessIssue,
+    activeIssue,
+    activeIssue,
+  ];
+  const edits = [];
+  const updates = [];
+
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabels: async (_options, labels, { state }) =>
+        labels.includes("in-pr") && state === "all" ? [listedIssue] : [],
+      getIssue: async () => reads.shift(),
+      findIssueProjectItem: async () => null,
+      ensureProjectItem: async () => "item-933",
+      updateProjectFields: async (_options, _project, _item, state) => {
+        updates.push(state);
+      },
+      editIssueLabels: async (_options, _issue, state) => {
+        edits.push(state);
+      },
+      sleep: async () => {},
+    },
+  );
+
+  assertDeepEqual(edits, ["done"]);
+  assertDeepEqual(updates, ["active"]);
+  assertDeepEqual(results, [
+    { number: 933, title: "transition during restore", state: "active" },
+  ]);
+});
+
+test("sync fails closed while an open queue-label conflict persists", async () => {
+  const issue = {
+    number: 934,
+    title: "release in progress",
+    state: "OPEN",
+    labels: [{ name: "in-pr" }, { name: "agent-ready" }],
+  };
+  let reads = 0;
+  let waits = 0;
+
+  await assertRejects(
+    () =>
+      sync(
+        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+        {
+          getProject: async () => ({ id: "project" }),
+          listIssuesByLabels: async (_options, labels, { state }) =>
+            labels.includes("in-pr") &&
+            labels.includes("agent-ready") &&
+            state === "all"
+              ? [issue]
+              : [],
+          getIssue: async () => {
+            reads += 1;
+            return issue;
+          },
+          editIssueLabels: async () => {
+            throw new Error("sync must not select one conflicting label");
+          },
+          ensureProjectItem: async () => {
+            throw new Error("sync must not project an ambiguous state");
+          },
+          sleep: async () => {
+            waits += 1;
+          },
+        },
+      ),
+    /Issue #934 retained conflicting queue labels after 3 attempts: agent-ready, in-pr/,
+  );
+
+  assertEqual(reads, 3, "bounded conflict reads");
+  assertEqual(waits, 2, "bounded conflict waits");
+});
+
+test("sync fails when a closed issue retains a queue label", async () => {
+  const issue = {
+    number: 930,
+    title: "stale closed claim",
+    state: "CLOSED",
+    labels: [{ name: "agent-active" }],
+  };
+  let waits = 0;
+
+  await assertRejects(
+    () =>
+      sync(
+        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+        {
+          getProject: async () => ({ id: "project" }),
+          listIssuesByLabels: async (_options, labels, { state }) =>
+            labels.includes("agent-active") && state === "all" ? [issue] : [],
+          findIssueProjectItem: async () => null,
+          editIssueLabels: async () => {},
+          getIssue: async () => issue,
+          sleep: async () => {
+            waits += 1;
+          },
+        },
+      ),
+    /Issue #930 retained queue label\(s\) after sync: agent-active/,
+  );
+  assertEqual(waits, 2, "bounded verification waits");
+});
+
+test("sync dry-run refreshes once and skips the unapplied postcondition", async () => {
+  const issue = {
+    number: 940,
+    title: "dry-run closed item",
+    state: "CLOSED",
+    labels: [{ name: "needs-grooming" }],
+  };
+  let edits = 0;
+  let reads = 0;
+
+  const results = await sync(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: true },
+    {
+      getProject: async () => ({ id: "project" }),
+      listIssuesByLabels: async (_options, labels, { state }) =>
+        labels.includes("needs-grooming") && state === "all" ? [issue] : [],
+      findIssueProjectItem: async () => null,
+      editIssueLabels: async () => {
+        edits += 1;
+      },
+      getIssue: async () => {
+        reads += 1;
+        return issue;
+      },
+    },
+  );
+
+  assertEqual(edits, 1, "dry-run label plan");
+  assertEqual(reads, 1, "dry-run refresh reads");
+  assertEqual(results[0].state, "done", "dry-run result state");
 });
 
 test("claim guard only accepts open agent-ready issues", () => {
@@ -395,6 +2312,13 @@ test("claim guard only accepts open agent-ready issues", () => {
     isClaimable({
       state: "OPEN",
       labels: [{ name: "agent-ready" }, { name: "agent-active" }],
+    }),
+    false,
+  );
+  assertEqual(
+    isClaimable({
+      state: "OPEN",
+      labels: [{ name: "agent-ready" }, { name: "needs-grooming" }],
     }),
     false,
   );
@@ -419,6 +2343,13 @@ test("review guard only accepts open agent-active issues", () => {
     isReviewable({
       state: "OPEN",
       labels: [{ name: "agent-ready" }],
+    }),
+    false,
+  );
+  assertEqual(
+    isReviewable({
+      state: "OPEN",
+      labels: [{ name: "agent-active" }, { name: "needs-grooming" }],
     }),
     false,
   );

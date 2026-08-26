@@ -45,9 +45,12 @@ If a sandboxed mapped run fails only because a command needs host capabilities,
 rerun the full mapped gate with host access on the same head. The gate reuses
 stamp-eligible fresh successes and runs the blocked commands. A resumed run does
 not write a whole-run stamp. Trunk and the gate self-test are stamp-exempt and
-always run, including during the later pre-push gate. Other eligible successes
-keep per-command stamps, so the later gate can avoid repeating them. Running a
-command directly proves it but records no per-command stamp.
+always run, including during the later pre-push gate; Trunk's one exception is
+an environment that blocks its downloads — the CLI, its plugin sources, or the
+linters a check needs — where the arm is skipped. Other
+eligible successes keep per-command stamps, so the later gate can avoid
+repeating them. Running a command directly proves it but records no per-command
+stamp.
 
 For a manual full-repository reproduction of the server-side pre-push baseline,
 including when hooks are absent or uncertain, use:
@@ -147,7 +150,10 @@ scheduled evaluation. Review the output, then run:
 pnpm agent:quality-gate --run
 ```
 
-Every non-empty candidate change set also runs `pnpm tf:test`. The required
+Every non-empty candidate change set also runs the Terraform-stack suite. The
+gate spells it `pnpm tf:test`, unless a root-tooling `package.json` edit already
+scheduled the identical `node scripts/tf-stacks.test.mjs`; the two share one
+dedupe key, so the suite runs once however many arms ask for it. The required
 `Production infrastructure contract` CI job runs the same command without a
 path condition, so production-infrastructure and deployment contracts cannot
 skip on an unrelated path.
@@ -192,7 +198,29 @@ targeted Trunk checks for faster local iteration. Deleted paths,
 Trunk/tooling changes, package-manager changes, pnpm patches, and
 package-manifest changes still run full-repo Trunk locally. CI also runs a
 required full-repo Trunk check on every
-PR. Normal `--run` mode executes independent quality-phase commands with
+PR. Where the environment blocks Trunk's downloads — a Claude cloud container
+proxies egress and refuses any host outside its allowlist — the gate reports the
+arm as `skipped` with a warning naming the allowlist fix instead of failing the
+run, matching the posture `.trunk/hooks` already takes. Trunk downloads at two
+stages and the gate classifies both. If the launcher cannot fetch the pinned CLI
+from `trunk.io`, a probe run after the command fails
+(`TRUNK_LAUNCHER_QUIET=true ./tools/trunk --version`) answers that directly. If
+the launcher succeeds but the CLI cannot fetch its plugin sources or the
+hermetic runtimes and linter binaries a check needs — `trunk.io` allowlisted,
+`github.com` and `nodejs.org` not — the gate classifies the check transcript
+instead. That classification never infers "nothing was found": it accepts the
+transcript only when Trunk itself reported no issues, every failure Trunk
+counted is a download step, and the reason each step recorded in its
+`.trunk/out/*.yaml` detail file is one of Trunk's download-failure phrasings.
+The warning replays those reasons so it names the host to allowlist. Everything
+else fails the gate, including a partly-explained failure set and a download
+step that failed for a local reason. Only a provisioning failure degrades: a
+provisioned Trunk that finds real problems still fails the gate, and so does a
+run that mixes real findings with a blocked download. A run whose Trunk arm was
+skipped writes no whole-run success stamp, so the next `--skip-if-fresh` run
+retries Trunk instead of inheriting a pass it never earned. Normal `--run` mode
+executes independent
+quality-phase commands with
 bounded parallelism (`--parallel <n>`, default `auto` capped at 4 workers, or
 `AGENT_QUALITY_PARALLELISM`). Preflight, codegen, post-codegen install,
 Terraform init/validate chains, shared-config build setup, and the package
@@ -314,6 +342,15 @@ The gate owns the machine while it runs. Two rules make that true, and both
 exist because contention — not flakiness — produced the failures in issue
 #1802.
 
+Before invoking a full gate, wait for all direct validation, dashboard servers,
+and browser suites on the same machine to finish. From invocation until the
+gate exits, do not start any of them there. The gate owns dependency setup and
+local validation parallelism. Concurrent package-manager processes in the same
+worktree can recreate or invalidate `node_modules`. Validation from another
+worktree on the same machine can still starve the gate of CPU and memory. Use
+spare workers for read-only work. Run concurrent validation only from a fully
+hydrated checkout on another machine.
+
 **One `--run` gate at a time, machine-wide.** `--run` takes a mkdir lock
 (`$HOME/.cache/agent-quality-gate/run.lock`, falling back to
 `$TMPDIR/agent-quality-gate-<uid>`; override with
@@ -406,6 +443,103 @@ recoverable and a stranger's killed process is not. A capture drops entries
 whose identity read came back empty, since the process was already gone, and a
 host with no identity source at all records `<no-identity-source>` — the one
 case that still signals on PID alone, because nothing better exists there.
+
+**Which machine wrote the record is decided by a machine identity, not by the
+hostname** (GitHub issue #2055). Those liveness rules only mean anything about
+a record written on _this_ machine: another machine's PIDs say nothing here, so
+a record from one is waited out rather than judged. The gate used to answer
+"which machine" with `uname -n`, and a rename broke it — the record still named
+`Workbook.local`, the machine now answered to `Mac`, every run read its own
+dead holder as a live foreign one, and the dead-PID reclaim below that branch
+was never reached. Every session on the machine then burned its whole
+`--lock-wait` and none of them could heal it; a human had to delete the owner
+file. So the record now also carries `machine=<source>:<id>`, resolved once per
+run from `/etc/machine-id`, `ioreg`'s `IOPlatformUUID`, or `sysctl kern.uuid` —
+whichever answers first, in that order — and overridable with
+`AGENT_QUALITY_GATE_LOCK_MACHINE_ID`. The source tag is load-bearing: two ids
+from the same source are comparable machine identities, and two from
+_different_ sources are not, because a run that reached `ioreg` and a run that
+fell back to `kern.uuid` are almost certainly one machine and reading their
+unequal values as two would reinvent the wedge.
+
+**Where the lock root lives decides what a local PID lookup is allowed to
+conclude**, and how that is settled depends on who chose the root: evidence for
+the root the gate chose, a declaration for the root an operator chose.
+
+The default candidates — `$HOME/.cache/agent-quality-gate`, then
+`$TMPDIR/agent-quality-gate-<uid>` — are nobody's deliberate coordination
+point, so the only open question is whether the storage under them is mounted
+from elsewhere, and the filesystem answers it. `df -l` lists local filesystems
+and omits network ones — NFS, SMB, AFS, an autofs map — on both the BSD and GNU
+implementations, and the row it prints for a path, not its exit status, is the
+answer. Every failure to answer means "may be shared": no `df`, an unreadable
+path, an implementation without `-l`. That direction is the one that keeps
+waiting.
+
+`AGENT_QUALITY_GATE_LOCK_DIR` is the opposite case. `resolve_gate_lock_root`
+treats it as a coordination contract precisely because it can name a directory
+more than one machine reaches, and a local mount is no evidence against that —
+a machine can export its own disk. So an override is possibly-shared until its
+owner says otherwise, and every reclaim on this path is refused there.
+`AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE` is that declaration, and it
+overrides both branches: `1` where an override directory is this machine's
+alone, `0` where even a default root is exported to other machines.
+
+The verdict then has three values. **Same machine** — matching identities, or
+no identity on one side and a matching hostname — runs the liveness rules
+unchanged, so a dead holder is reclaimed at once whatever the record calls the
+host. **Another machine** — two identities from one source that disagree, on a
+root that may be shared — is definitive and nothing local may overturn it, so
+that record is waited out however old it gets and the expiry names its holder.
+**Unverified** covers everything else: no machine field (a record from a gate
+that predates it), a source mismatch, or a disagreeing identity on local
+storage.
+
+That last case is deliberate. A machine identity is not immutable —
+`/etc/machine-id` is regenerated by an OS reinstall or an image rebuild, and
+the override can simply be changed — so on storage the machine mounts itself, a
+disagreeing identity is far likelier to be this machine's identity having
+moved, exactly as a rename moved its hostname, than a second machine writing
+into the same directory. Reading it as another machine would leave the record
+unreclaimable forever, which is the wedge this whole rule exists to remove.
+
+**The converse does not hold**, and the asymmetry matters: a disagreeing id is
+proof of two machines, but an agreeing one is not proof of one, because ids are
+not guaranteed unique. Containers built from a single base image famously carry
+the same baked-in `/etc/machine-id`, so two of them mounting one lock directory
+agree on their identity while having separate PID namespaces — where a local
+`kill -0` on the other's holder reads "gone". So off proven-local storage the
+hostname has to agree as well; where it does not, the pair counts as unverified
+and nothing is reclaimed. On storage the machine mounts itself no second
+machine is writing records at all, and the hostname is the field the rename
+moved, so requiring it there would refuse the case this exists to fix.
+
+An unverified record is reclaimed only on local storage, and only with a dead
+PID and an age past
+`AGENT_QUALITY_GATE_LOCK_UNVERIFIED_MACHINE_GRACE_SECONDS` (600 by default).
+The grace bounds the exposure in the one configuration the probe cannot see —
+an exported lock root — because a holder there would have to be idle past it to
+be touched, and the declaration turns the branch off outright. On a root that
+may be shared it never reclaims at all. Either outcome is said on stderr: the
+reclaim names what it concluded and from what, and the refusal names the
+declaration that would change it.
+
+**An identity is validated, never rewritten.** The id must already be 1-128
+characters of `A-Za-z0-9._-`; anything else is refused, with no trimming,
+stripping, or truncation ahead of the check. Every such normalisation is a
+many-to-one map, and a many-to-one map on an identity is how two machines come
+to compare equal: stripping the unrepresentable character in `machine/a`, or
+deleting the line break in `machine<LF>a`, both yield `machinea`, which may be
+another machine's legitimate id. A refused probe source costs an identity
+nobody can compare, which is the conservative state; a refused
+`AGENT_QUALITY_GATE_LOCK_MACHINE_ID` stops the run, because the operator set it
+to name a machine and running under a different one is the failure being
+avoided.
+
+The field is additive in both directions: an older gate on the same machine
+ignores it and reads the record exactly as it always did, and this gate reads
+that older gate's record through the unverified path. Once both gates on a
+shared root write identities, that path is unreachable there.
 
 A killed holder cannot release its own lock, so recovery is explicit rather
 than time-based: a waiter that finds the recorded holder gone takes the record
@@ -824,13 +958,16 @@ also executes that shell fixture in CI.
 
 The [PR operating card](pr-operating-card.md#the-loop) owns ordinary gate and
 closeout sequencing. A second `--run` gate no longer needs a convention: the
-run lock above queues it behind the first one, on any worktree. What is still
-yours to avoid is a dashboard server or browser suite you started yourself
-alongside a gate — the lock does not know about those. Browser tests and
-size-limit both run `next build` and can rewrite `next-env.d.ts`; run focused
-checks first, then let one gate own the mapped batch. For a non-trivial batch, freeze the card's scope baseline
-and run autoreview after the gate; after accepted fixes, rerun focused checks
-and autoreview.
+run lock above queues it behind the first one, on any worktree. Before invoking
+a full gate, ensure that no direct validation, dashboard server, or browser
+suite is active on the same machine. From invocation until the gate exits, do
+not start any of them there — the lock does not know about those processes.
+Browser tests and size-limit both run `next build` and can rewrite
+`next-env.d.ts` in the same worktree; validation in another worktree can still
+starve the gate. Run focused checks first, then let one gate own the mapped
+batch. Run concurrent validation only on another machine. For a non-trivial
+batch, freeze the card's scope baseline and run autoreview after the gate; after
+accepted fixes, rerun focused checks and autoreview.
 
 **Stage timing and capture deadlines.** The wrapper and helper append
 best-effort stage JSONL to `.tmp/agent-autoreview/durations.jsonl`; override
@@ -1220,7 +1357,9 @@ quality/serialized/parallel commands are stamped. Prerequisite phases
 (install/codegen/quality-setup) always re-run: their outputs (node_modules,
 generated code, built packages) are invisible to the source fingerprint, so a
 stamp could skip them after their outputs were deleted. The Trunk check, the
-gate self-test, and the advisory ADR reminder also always re-run.
+gate self-test, and the advisory ADR reminder also always re-run — the Trunk
+check is skipped, never reused, where Trunk's downloads are blocked (the CLI,
+its plugin sources, or the linters a check needs).
 
 Each mapped command has a watchdog (default 1500 seconds; override with
 `--command-timeout <n>` or `AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS`). On timeout
@@ -1228,6 +1367,13 @@ it TERM→KILLs the process tree, reports
 `Command timed out after <n>s: <command>`, and logs durations status `fail`. A
 self-daemonizing child can escape the tree (none do). The timeout never bounds
 the whole run.
+
+A failing command's captured output is printed inline, and its last 20 lines are
+repeated under `Failure output (last 20 lines per command):` next to the final
+verdict. In a parallel run the inline dump can sit thousands of lines above that
+verdict, and a command that fails while printing nothing — a launcher that
+redirects its own errors away — reads as `(no output captured)` there instead
+of leaving no trace at all.
 
 That default was 900 until this gate's own self-test became the longest mapped
 command: it runs 525s alone and past 900s inside a full gate run, where it

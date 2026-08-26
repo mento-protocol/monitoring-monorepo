@@ -40,11 +40,15 @@ echo "==> Prewarming Trunk CLI and linters"
 # default Trusted allowlist for Claude Code on the web. Everything else Trunk
 # needs (node/python runtimes, prettier/markdownlint via npm, checkov/codespell/
 # yamllint via PyPI, trufflehog/osv-scanner/actionlint via GitHub releases, tool
-# binaries on *.amazonaws.com) is already covered by the Trusted defaults, so the
-# ONLY host to add is trunk.io. In the environment's network settings choose
-# "Custom", keep "include defaults", and add:
+# binaries on *.amazonaws.com) is already covered by the Trusted defaults. The
+# current operating allowlist beyond the Trusted defaults is trunk.io,
+# *.trunk.io, and (optional, for the Playwright Chromium fallback download
+# below when the image has no /opt/pw-browsers preinstall) cdn.playwright.dev.
+# In the environment's network settings choose "Custom", keep "include
+# defaults", and add:
 #     trunk.io
 #     *.trunk.io
+#     cdn.playwright.dev   # optional; see the Playwright step below
 # Non-fatal: if trunk.io is still blocked the hooks degrade gracefully (see
 # .trunk/hooks) and CI still enforces Trunk on the PR, so warn and continue
 # rather than aborting the whole bootstrap.
@@ -58,6 +62,45 @@ else
   echo "WARN: git pre-commit/pre-push hooks will be skipped this session." >&2
   echo "WARN: Add 'trunk.io' and '*.trunk.io' to the env's Allowed domains (Custom" >&2
   echo "WARN: network access, keep defaults) to enable local Trunk fmt/lint hooks." >&2
+fi
+
+echo "==> Checking Node major version against .node-version"
+# The container image can ship an older Node than the repo pins (observed:
+# container Node v22 vs. a repo .node-version of 24), which makes pnpm print
+# engine-range warnings for indexer-envio and metrics-bridge (both declare
+# "node": ">=24"). This is a warning, not a failure: no root .npmrc sets
+# engine-strict, so pnpm continues past the mismatch. Investigated and
+# rejected as unreliable for this bootstrap step:
+#   - corepack only manages package-manager shims (pnpm/yarn/npm), never the
+#     Node runtime itself, so it has no lever here.
+#   - `pnpm env use --global <major>` downloads a full Node build from
+#     nodejs.org. That host is not part of this bootstrap's documented
+#     network reality (see the Trunk section above and
+#     docs/notes/worktree-and-web-setup.md for the full allowlist), so the
+#     call would predictably fail with a network block in the standard
+#     hosted-session profile.
+#   - Even where the download succeeded, it would only repoint the `node`
+#     resolved inside pnpm's own managed area for THIS subprocess. It would
+#     not retroactively change the Node binary already on PATH for the
+#     agent's later, separate Bash tool invocations in the same session —
+#     those are independent shells, not children of this script — so a
+#     switch performed here would not reliably reach the place the mismatch
+#     actually matters.
+# Given both levers are either absent or illusory for the surface that
+# matters, attempting an automatic switch would be speculative rather than
+# robust. Warn once with a precise, actionable message instead, and never
+# fail the bootstrap over this.
+if [ -f "$REPO_ROOT/.node-version" ]; then
+  required_node_major="$(tr -dc '0-9' <<<"$(cut -d. -f1 "$REPO_ROOT/.node-version")")"
+  running_node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo "")"
+  if [[ -n "$required_node_major" && -n "$running_node_major" && "$running_node_major" -lt "$required_node_major" ]]; then
+    echo "WARN: container Node major is v${running_node_major}, but .node-version pins ${required_node_major}." >&2
+    echo "WARN: pnpm will print (non-fatal) engine-range warnings for packages requiring" >&2
+    echo "WARN: node >=${required_node_major} (indexer-envio, metrics-bridge). To fix env-side," >&2
+    echo "WARN: rebuild/select the hosted container image with a Node ${required_node_major}.x base," >&2
+    echo "WARN: or set the platform's Node-version override if one is offered — this bootstrap" >&2
+    echo "WARN: script cannot switch the interpreter for the agent's later shell invocations." >&2
+  fi
 fi
 
 echo "==> Installing workspace dependencies"
@@ -138,18 +181,64 @@ fi
 install_marker_write "$codegen_marker" "$codegen_hash"
 
 echo "==> Installing Playwright Chromium for dashboard browser tests"
-# Non-fatal: hosted environments often restrict outbound network access
-# (cdn.playwright.dev returns 403 "Host not in allowlist") or run without sudo
-# (so `--with-deps` cannot install OS packages). Browser tests are optional for
-# most agent flows; warn and continue so the rest of the bootstrap (codegen,
-# context-check) still completes. `--with-deps` mirrors the repo CI workflows
-# (`.github/workflows/ci.yml` and `update-snapshots.yml`) so a successful
-# bootstrap leaves the container actually able to run the browser fixtures.
+# Prefer the container image's preinstalled Chromium under /opt/pw-browsers
+# when present and non-empty: it avoids a network fetch entirely and works
+# even when the download path is unavailable. Checked with `find`/`test`
+# rather than `ls` so the detection stays robust under this repo's sandbox
+# read-deny rules for directory listings (see the node_modules workaround
+# note in docs/notes/worktree-and-web-setup.md — the same `test -d`/`test -f`
+# preference applies here).
+PW_PREINSTALLED_DIR="/opt/pw-browsers"
+used_preinstalled_pw_dir=false
+if [ -d "$PW_PREINSTALLED_DIR" ] &&
+  find "$PW_PREINSTALLED_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null | grep -q .; then
+  export PLAYWRIGHT_BROWSERS_PATH="$PW_PREINSTALLED_DIR"
+  used_preinstalled_pw_dir=true
+  echo "Using preinstalled Playwright browsers at $PW_PREINSTALLED_DIR (PLAYWRIGHT_BROWSERS_PATH set)."
+  echo "WARN: this PLAYWRIGHT_BROWSERS_PATH export covers only this bootstrap" >&2
+  echo "WARN: subprocess (including the 'playwright install' verification below)." >&2
+  echo "WARN: claude-code-web-setup.sh has no shell-profile persistence mechanism" >&2
+  echo "WARN: (unlike codex-cloud-setup.sh's persist_user_path_entry for PATH), so a" >&2
+  echo "WARN: later 'test:browser' run in a fresh Bash tool shell will not inherit it." >&2
+  echo "WARN: If that shell's default Playwright cache is empty, prefix the command with" >&2
+  echo "WARN: PLAYWRIGHT_BROWSERS_PATH=$PW_PREINSTALLED_DIR, or set it as a persistent env" >&2
+  echo "WARN: var in the platform's environment settings if one is offered." >&2
+else
+  echo "No usable preinstalled Playwright browsers at $PW_PREINSTALLED_DIR; falling back to download."
+fi
+# Non-fatal: even with cdn.playwright.dev now allowlisted in this environment
+# (see the network-access comment above), hosted sessions may still run
+# without sudo (so `--with-deps` cannot install OS packages), or the fallback
+# download itself may be blocked in a given environment variant. Browser
+# tests are optional for most agent flows; warn and continue so the rest of
+# the bootstrap (codegen, context-check) still completes. `--with-deps`
+# mirrors the repo CI workflows (`.github/workflows/ci.yml` and
+# `update-snapshots.yml`) so a successful bootstrap leaves the container
+# actually able to run the browser fixtures. With a preinstalled dir already
+# exported above, this call is expected to verify/no-op rather than download.
 if ! pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium; then
-  echo "WARN: Playwright Chromium install failed." >&2
-  echo "WARN: 'pnpm --filter @mento-protocol/ui-dashboard test:browser' will not work" >&2
-  echo "WARN: until the environment allows access to cdn.playwright.dev and can" >&2
-  echo "WARN: install OS dependencies (sudo apt-get) for Chromium." >&2
+  pw_install_failed=true
+  if [ "$used_preinstalled_pw_dir" = true ]; then
+    # The preinstalled dir only proved non-empty above, not that it holds the
+    # revision this Playwright package expects, and it is typically
+    # image-owned (not writable by this session). A missing revision there
+    # turns a viable download-to-default-cache fallback into a nonfatal
+    # failure; unset the override and retry against the normal (writable)
+    # cache before giving up.
+    echo "WARN: install against the preinstalled dir failed (missing revision and/or" >&2
+    echo "WARN: read-only image path); retrying against the default Playwright cache." >&2
+    unset PLAYWRIGHT_BROWSERS_PATH
+    if pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium; then
+      pw_install_failed=false
+    fi
+  fi
+  if [ "$pw_install_failed" = true ]; then
+    echo "WARN: Playwright Chromium install failed." >&2
+    echo "WARN: 'pnpm --filter @mento-protocol/ui-dashboard test:browser' will not work" >&2
+    echo "WARN: until the environment provides a usable /opt/pw-browsers preinstall or" >&2
+    echo "WARN: allows access to cdn.playwright.dev, and can install OS dependencies" >&2
+    echo "WARN: (sudo apt-get) for Chromium." >&2
+  fi
 fi
 
 echo "==> Validating repo-visible agent context"
@@ -162,9 +251,11 @@ echo "==> Configuring GitHub integration mode"
 # credential proxy intercepts github.com/api.github.com independently of the
 # environment network allowlist (GitHub-host allowlist entries are inert),
 # overrides any client Authorization header (a GH_TOKEN is ignored), serves
-# only /user and /rate_limit, and 403s every /repos/* path and GraphQL query —
-# so `gh auth status` succeeds while pr:ready-state still cannot work
-# (empirical map: docs/notes/github-tooling-surfaces.md). The GitHub MCP server
+# only /user and /rate_limit reliably, and blocks GraphQL — REST /repos/*
+# behavior has been observed to vary by session and is not a fixed blanket
+# block (empirical map: docs/notes/github-tooling-surfaces.md). Either way,
+# `gh auth status` succeeds while pr:ready-state still cannot work, because it
+# rides on GraphQL. The GitHub MCP server
 # is the supported API path in these sessions. The token-gated gh install below
 # is kept as a best-effort for environment variants whose proxy does serve repo
 # API paths; the capability gate that matters is REST + GraphQL + --slurp
@@ -224,8 +315,9 @@ if [[ -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ]]; then
     echo "    gh api repos/<owner>/<repo> --jq .full_name"
     echo "    gh api graphql -f query='query{viewer{login}}'"
     echo "    gh api --help | grep -- --slurp"
-    echo "In Claude cloud sessions the credential proxy 403s /repos/* and GraphQL regardless of"
-    echo "GH_TOKEN; if that call fails, use the GitHub MCP server (docs/notes/github-tooling-surfaces.md)."
+    echo "In Claude cloud sessions the credential proxy blocks GraphQL regardless of GH_TOKEN, and"
+    echo "REST /repos/* behavior varies by session; if either call fails, use the GitHub MCP server"
+    echo "(docs/notes/github-tooling-surfaces.md)."
     echo "Reminder: pass --repo <owner/name> (or set GH_REPO) — the git remote is the local proxy, not a GitHub host."
   else
     echo "WARN: gh is installed but not authenticated — check the GH_TOKEN scopes/org approval." >&2
@@ -234,7 +326,8 @@ if [[ -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ]]; then
 else
   echo "No GH_TOKEN set: using the GitHub MCP server for PR/API work (the supported path here)."
   echo "Note: setting GH_TOKEN does NOT enable gh-backed flows in Claude cloud sessions — the"
-  echo "credential proxy overrides Authorization and blocks /repos/* and GraphQL either way."
+  echo "credential proxy overrides Authorization and blocks GraphQL either way; REST /repos/*"
+  echo "behavior varies by session (docs/notes/github-tooling-surfaces.md)."
   echo "See docs/notes/github-tooling-surfaces.md for the gh->MCP mapping."
 fi
 
