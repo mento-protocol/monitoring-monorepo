@@ -72,9 +72,11 @@ import {
   CDP_MARKETS,
   CDP_TROVE_BY_ID,
   CDP_TROVE_BY_ID_WITHOUT_TX,
+  CDP_TROVE_LEDGER,
   CDP_TROVE_OPERATIONS,
   CDP_TROVE_SCHEMA_FIELDS,
 } from "@/lib/queries";
+import type { CdpTroveLedgerEventRow } from "../../_lib/ledger";
 import { TroveDetailClient } from "../trove-detail-client";
 
 const TROVE_SCHEMA_WITH_TX = {
@@ -82,6 +84,18 @@ const TROVE_SCHEMA_WITH_TX = {
 };
 const TROVE_SCHEMA_WITHOUT_TX = {
   TroveType: { fields: [{ name: "owner" }] },
+};
+// Post-#2082 live schema: the TroveLedgerEvent entity AND the Trove
+// watermark columns are served, so the ledger introspection gate opens.
+const TROVE_SCHEMA_WITH_LEDGER = {
+  TroveType: {
+    fields: [
+      { name: "lastUpdatedTxHash" },
+      { name: "lastLedgerBlock" },
+      { name: "lastLedgerLogIndex" },
+    ],
+  },
+  TroveLedgerEventType: { fields: [{ name: "id" }] },
 };
 
 const NOW = 1_767_225_600;
@@ -164,6 +178,37 @@ function op(
   };
 }
 
+function ledgerEvent(
+  overrides: Partial<CdpTroveLedgerEventRow> = {},
+): CdpTroveLedgerEventRow {
+  return {
+    id: "42220_100_1",
+    operation: 2,
+    collChange: "0",
+    debtChange: "0",
+    debtIncreaseFromUpfrontFee: "0",
+    debtIncreaseFromRedist: "0",
+    collIncreaseFromRedist: "0",
+    annualInterestRate: "0",
+    debtBefore: wei(1_000),
+    debtAfter: wei(1_000),
+    collBefore: wei(500),
+    collAfter: wei(500),
+    statusBefore: "active",
+    statusAfter: "active",
+    redemptionFeeCredited: null,
+    isRebalance: null,
+    redemptionPrice: null,
+    priceAtEvent: null,
+    icrAfterBps: null,
+    timestamp: "1000",
+    blockNumber: "100",
+    logIndex: 1,
+    txHash: "0xledgertx",
+    ...overrides,
+  };
+}
+
 function marketsData(collaterals: CdpCollateral[] = [collateral()]) {
   return { LiquityCollateral: collaterals, LiquityInstance: [], Trove: [] };
 }
@@ -214,13 +259,18 @@ describe("TroveDetailClient", () => {
     troveSchema = TROVE_SCHEMA_WITH_TX,
     interestBatchRows,
     interestBatchError = null,
+    ledgerRows,
+    ledgerError = null,
   }: {
     markets?: ReturnType<typeof marketsData>;
     marketsError?: Error | null;
     troveRows?: CdpTrove[];
     troveError?: Error | null;
     operationRows?: CdpTroveOperationEventRow[];
-    troveSchema?: typeof TROVE_SCHEMA_WITH_TX | typeof TROVE_SCHEMA_WITHOUT_TX;
+    troveSchema?:
+      | typeof TROVE_SCHEMA_WITH_TX
+      | typeof TROVE_SCHEMA_WITHOUT_TX
+      | typeof TROVE_SCHEMA_WITH_LEDGER;
     /** `undefined` (default) simulates "never resolved" (loading, or a
      *  failure with nothing cached) — `data` stays `undefined`, matching
      *  real SWR semantics. Pass `[]` for "resolved, no matching batch row"
@@ -233,6 +283,10 @@ describe("TroveDetailClient", () => {
       updatedAt: string;
     }>;
     interestBatchError?: Error | null;
+    /** Same never-resolved convention as `interestBatchRows`. Only consulted
+     *  when `troveSchema` opens the ledger gate. */
+    ledgerRows?: CdpTroveLedgerEventRow[];
+    ledgerError?: Error | null;
   } = {}) {
     mockUseGQL.mockImplementation((query: string | null) => {
       if (query === CDP_MARKETS) {
@@ -262,6 +316,21 @@ describe("TroveDetailClient", () => {
         return {
           data: { TroveOperationEvent: operationRows },
           error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_TROVE_LEDGER) {
+        return {
+          data:
+            ledgerRows === undefined
+              ? undefined
+              : {
+                  LedgerWatermark: [
+                    { lastLedgerBlock: "100", lastLedgerLogIndex: 1 },
+                  ],
+                  TroveLedgerEvent: ledgerRows,
+                },
+          error: ledgerError,
           isLoading: false,
         };
       }
@@ -852,5 +921,119 @@ describe("TroveDetailClient", () => {
     expect(handle!.container.querySelector('[role="alert"]')).not.toBeNull();
     expect(text).toContain("Trove data refresh failed");
     expect(text).toContain("upgraded trove query failed");
+  });
+
+  it("renders the interim assembly while the schema does not serve TroveLedgerEvent", () => {
+    mockQueries(); // TROVE_SCHEMA_WITH_TX: no TroveLedgerEventType → gate closed.
+    render(handle!);
+
+    const text = handle!.container.textContent ?? "";
+    expect(text).toContain("Trove operations");
+    expect(text).toContain("Per-redemption detail pending indexer rollout");
+    expect(text).not.toContain("Trove ledger");
+    expect(mockUseGQL.mock.calls.some(([q]) => q === CDP_TROVE_LEDGER)).toBe(
+      false,
+    );
+  });
+
+  it("renders the complete ledger — and disables the interim query — once the gate opens", () => {
+    mockQueries({
+      troveSchema: TROVE_SCHEMA_WITH_LEDGER,
+      ledgerRows: [
+        ledgerEvent({
+          operation: 6,
+          isRebalance: true,
+          debtChange: `-${wei(400)}`,
+          debtBefore: wei(1_000),
+          debtAfter: wei(600),
+          redemptionFeeCredited: wei(2),
+        }),
+      ],
+    });
+    render(handle!);
+
+    const text = handle!.container.textContent ?? "";
+    expect(text).toContain("Trove ledger");
+    expect(text).toContain("Rebalance Redemption");
+    // The interim view and its partial-data notice are fully superseded.
+    expect(text).not.toContain("Per-redemption detail pending indexer rollout");
+    expect(
+      mockUseGQL.mock.calls.some(([q]) => q === CDP_TROVE_OPERATIONS),
+    ).toBe(false);
+    const ledgerCall = mockUseGQL.mock.calls.find(
+      ([q]) => q === CDP_TROVE_LEDGER,
+    );
+    expect(ledgerCall?.[1]).toEqual({
+      troveEntityId: "gbpm-0x8abc",
+      limit: 1000,
+    });
+  });
+
+  it("upgrades from interim to full ledger when a probe poll finds the entity — a re-evaluation, not a latch", () => {
+    // Cold load against a pre-rollout schema: interim assembly.
+    mockQueries();
+    render(handle!);
+    expect(handle!.container.textContent).toContain(
+      "Per-redemption detail pending indexer rollout",
+    );
+
+    // Hosted Hasura promotes mid-session; the 300s probe re-poll now finds
+    // the entity. Same mounted client must swap to the ledger view.
+    mockQueries({
+      troveSchema: TROVE_SCHEMA_WITH_LEDGER,
+      ledgerRows: [ledgerEvent()],
+    });
+    render(handle!);
+    const text = handle!.container.textContent ?? "";
+    expect(text).toContain("Trove ledger");
+    expect(text).not.toContain("Per-redemption detail pending indexer rollout");
+
+    // And a rollback re-closes the gate: honest fallback to the interim
+    // view, protocol-rows-pending notice included.
+    mockQueries();
+    render(handle!);
+    expect(handle!.container.textContent).toContain(
+      "Per-redemption detail pending indexer rollout",
+    );
+  });
+
+  it("keeps the header cards rendered when the ledger query fails on first load", () => {
+    mockQueries({
+      troveSchema: TROVE_SCHEMA_WITH_LEDGER,
+      // ledgerRows omitted → never resolved; the error is a first-load one.
+      ledgerError: new Error("ledger backend down"),
+    });
+    render(handle!);
+
+    const text = handle!.container.textContent ?? "";
+    // Header still renders from its own healthy queries.
+    expect(text).toContain("Trove 0x8abc");
+    expect(text).toContain("Active");
+    // The ledger section shows its own hard error — no silent fallback to
+    // the interim view, whose user-ops-only rows would misrepresent
+    // protocol history as absent.
+    expect(text).toContain("Failed to load the trove ledger");
+    expect(text).toContain("ledger backend down");
+    expect(text).not.toContain("Per-redemption detail pending indexer rollout");
+  });
+
+  it("discloses ledger truncation and suppresses interest estimates for a capped history", () => {
+    const cappedRows = Array.from({ length: 1000 }, (_, i) =>
+      ledgerEvent({
+        id: `42220_${9_999 - i}_0`,
+        timestamp: String(9_999 - i),
+        blockNumber: String(9_999 - i),
+        logIndex: 0,
+      }),
+    );
+    mockQueries({
+      troveSchema: TROVE_SCHEMA_WITH_LEDGER,
+      ledgerRows: cappedRows,
+    });
+    render(handle!);
+
+    const text = handle!.container.textContent ?? "";
+    expect(text).toContain("Earliest history truncated");
+    expect(text).not.toContain("Interest accrued");
   });
 });

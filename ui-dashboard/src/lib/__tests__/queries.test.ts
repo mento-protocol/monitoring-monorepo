@@ -80,6 +80,7 @@ const EXPECTED_EXPORT_NAMES = [
   "CDP_INTEREST_BATCH_BY_ID",
   "CDP_TROVE_BY_ID",
   "CDP_TROVE_BY_ID_WITHOUT_TX",
+  "CDP_TROVE_LEDGER",
   "CDP_TROVE_OPERATIONS",
   "CDP_TROVE_SCHEMA_FIELDS",
   "CDP_TROVE_OP_SNAPSHOTS",
@@ -740,9 +741,58 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
               name
             }
           }
+          TroveLedgerEventType: __type(name: "TroveLedgerEvent") {
+            fields {
+              name
+            }
+          }
         }
       `),
     );
+  });
+
+  it("CDP_TROVE_LEDGER orders by the numeric triple and bundles the gated watermark", () => {
+    const query = normalize(queries.CDP_TROVE_LEDGER);
+    expect(query).toContain("query CdpTroveLedger");
+    expect(query).toContain("troveEntityId: { _eq: $troveEntityId }");
+    // The numeric triple is the ONLY ordering — the unpadded string id
+    // never participates ("_10" sorts before "_2" as text).
+    expect(query).toContain(
+      "order_by: [{ timestamp: desc }, { blockNumber: desc }, { logIndex: desc }]",
+    );
+    expect(query).not.toContain("{ id: desc }");
+    expect(query).not.toContain("{ id: asc }");
+    // The Trove watermark rides inside this GATED query only.
+    expect(query).toContain(
+      "LedgerWatermark: Trove(where: { id: { _eq: $troveEntityId } }, limit: 1)",
+    );
+    expect(query).toContain("lastLedgerBlock lastLedgerLogIndex");
+    // Full row payload the ledger table and later derivation slices need.
+    expect(query).toContain("debtIncreaseFromRedist collIncreaseFromRedist");
+    expect(query).toContain("debtBefore debtAfter collBefore collAfter");
+    expect(query).toContain("statusBefore statusAfter");
+    expect(query).toContain("redemptionFeeCredited isRebalance");
+  });
+
+  it("keeps the ledger watermark columns out of every UNGATED Trove selection", () => {
+    // `Trove.lastLedgerBlock`/`lastLedgerLogIndex` are newer columns: one
+    // unknown field fails a whole query at parse time on a schema-lagged
+    // hosted Hasura, so they may only ever be selected behind the
+    // TroveLedgerEvent introspection gate (CDP_TROVE_LEDGER above). The
+    // header variants and all four market-detail variants share
+    // CDP_TROVE_ROW_FIELDS[_WITH_TX], so one slip here would take down six
+    // queries at once.
+    for (const query of [
+      queries.CDP_TROVE_BY_ID,
+      queries.CDP_TROVE_BY_ID_WITHOUT_TX,
+      queries.CDP_MARKET_DETAIL,
+      queries.CDP_MARKET_DETAIL_WITH_TROVE_TX,
+      queries.CDP_MARKET_DETAIL_WITH_SP_SOURCE,
+      queries.CDP_MARKET_DETAIL_WITH_TROVE_TX_AND_SP_SOURCE,
+    ]) {
+      expect(query).not.toContain("lastLedgerBlock");
+      expect(query).not.toContain("lastLedgerLogIndex");
+    }
   });
 
   it("CDP_TROVE_BY_ID_WITHOUT_TX omits lastUpdatedTxHash for the schema-lag fallback", () => {

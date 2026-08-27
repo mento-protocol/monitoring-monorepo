@@ -43,6 +43,11 @@ export const CDP_TROVE_SCHEMA_FIELDS = `
         name
       }
     }
+    TroveLedgerEventType: __type(name: "TroveLedgerEvent") {
+      fields {
+        name
+      }
+    }
   }
 `;
 
@@ -494,6 +499,48 @@ export const CDP_TROVE_OPERATIONS = `
       id troveId operation collChange debtChange
       annualInterestRate debtIncreaseFromUpfrontFee
       timestamp blockNumber txHash
+    }
+  }
+`;
+
+// Trove history page complete ledger (docs/PLAN-trove-history-page.md,
+// "GraphQL contract → CDP_TROVE_LEDGER"): every TroveOperation ordinal
+// including redemptions/liquidations/interest folds, superseding the interim
+// `CDP_TROVE_OPERATIONS` assembly once hosted Hasura serves the entity. The
+// caller gates on `CDP_TROVE_SCHEMA_FIELDS` finding both `TroveLedgerEvent`
+// and the `Trove` watermark columns — this query is never fired ungated,
+// which is also why `lastLedgerBlock`/`lastLedgerLogIndex` live HERE (aliased
+// `LedgerWatermark` branch) and never in `CDP_TROVE_ROW_FIELDS[_WITH_TX]`:
+// those constants feed the ungated market-detail and trove-header queries,
+// and one unknown column fails a whole request at parse time on a
+// schema-lagged deploy. Fetching the watermark alongside the ledger rows also
+// keeps the reconciliation pair (#2088) reading one response, not two skewed
+// polls.
+//
+// Ordering is the numeric triple — `TroveLedgerEvent` has a queryable
+// `logIndex`, unlike `TroveOperationEvent`, so the server tiebreaks
+// correctly and no row can be dropped at the cap boundary by the string-id
+// workaround this route needs for the interim query. The unpadded string
+// `id` never participates in ordering. Fetched newest-first so the OLDEST
+// rows drop at the cap; the caller reverses to chronological and detects
+// truncation via the limit+1 sentinel (render 999, request 1000 — aggregates
+// are disabled on hosted Hasura, and the render limit sits below the
+// 1,000-row hard cap so a capped response still carries the sentinel).
+export const CDP_TROVE_LEDGER = `
+  query CdpTroveLedger($troveEntityId: String!, $limit: Int!) {
+    LedgerWatermark: Trove(where: { id: { _eq: $troveEntityId } }, limit: 1) {
+      lastLedgerBlock lastLedgerLogIndex
+    }
+    TroveLedgerEvent(
+      where: { troveEntityId: { _eq: $troveEntityId } }
+      order_by: [{ timestamp: desc }, { blockNumber: desc }, { logIndex: desc }]
+      limit: $limit
+    ) {
+      id operation collChange debtChange debtIncreaseFromUpfrontFee
+      debtIncreaseFromRedist collIncreaseFromRedist annualInterestRate
+      debtBefore debtAfter collBefore collAfter statusBefore statusAfter
+      redemptionFeeCredited isRebalance redemptionPrice priceAtEvent
+      icrAfterBps timestamp blockNumber logIndex txHash
     }
   }
 `;
