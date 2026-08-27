@@ -5566,6 +5566,28 @@ gate_run_ensure_token() {
   fi
 }
 
+prepare_explicit_no_lock_run_handles() {
+  local handle_root="${scratch_dir}/no-lock-handles"
+  case "$gate_lock_enabled" in
+    0 | false | no) ;;
+    *) return 0 ;;
+  esac
+
+  # An explicit no-lock run has no legacy or coordinator root, but detached
+  # descendants still need an inherited marker that macOS can find after the
+  # tagged wrapper exits. Keep those handles in a private repo-local directory
+  # so an unusable configured lock root does not disable the escape hatch.
+  if [[ ! -e "$handle_root" && ! -L "$handle_root" ]]; then
+    (umask 077 && mkdir "$handle_root") 2>/dev/null || true
+  fi
+  if ! gate_run_private_marker_directory_is_safe "$handle_root"; then
+    echo "error: could not prepare the private no-lock handle directory at ${handle_root}." >&2
+    return 2
+  fi
+  gate_lock_root_dir="$handle_root"
+  gate_run_ensure_token
+}
+
 acquire_gate_run_lock() {
   local coordinator_join_status
   if ! gate_coordinator_requested; then
@@ -6615,6 +6637,15 @@ if declare -F gate_coordinator_is_follower >/dev/null 2>&1 &&
   gate_coordinator_is_follower; then
   gate_coordinator_wait_for_shared_result
   exit $?
+fi
+# Legacy lock acquisition and coordinator registration already prepare their
+# run handles. Explicit no-lock runs need private handles before mapped work.
+# Without them, descendant cleanup can report a false success.
+if ! prepare_explicit_no_lock_run_handles; then
+  echo "Nothing has been executed." >&2
+  gate_report_coordinated_no_work_failure 2 "run-handle preparation" \
+    "No mapped command ran in this request"
+  exit 2
 fi
 # The run marker is written here, while the gate's own stderr is still live
 # and the exit is unambiguously the gate's: inside run_with_timeout the

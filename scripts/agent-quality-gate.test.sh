@@ -690,10 +690,10 @@ dispatch_gate_test_families() {
   # so a marker exported empty reads the same as one that was never exported:
   #
   # - AGENTQG_RUN, which the gate puts on the argv of every mapped command it
-  #   runs, in every mode. This is the one that has to be here: the lock marker
-  #   below is absent under `--no-lock` and AGENT_QUALITY_GATE_LOCK=0, because
-  #   acquire_gate_run_lock returns before exporting it, so a focus would have
-  #   survived into the self-test of exactly the runs that skip the lock.
+  #   runs, in every mode. This is the one that has to be here. Explicit no-lock
+  #   runs create a private process handle, but they export no global lock or
+  #   coordinator state. Without this environment marker, a focus could survive
+  #   into the self-test of exactly the runs that skip those shared controls.
   # - AGENT_QUALITY_GATE_LOCK_HELD, exported by a `--run` holding the
   #   machine-wide lock and inherited by nested runs. Kept as a second key on the
   #   same door.
@@ -2258,6 +2258,17 @@ if [[ "${1:-}" == "-n" ]]; then
 fi
 exec "${REAL_UNAME_COMMAND:?}" "$@"
 STUB
+  cat > bin/node <<'STUB'
+#!/usr/bin/env bash
+# Linux normally replaces the hostname fallback with a safe proc-bound prefix.
+# Force only that probe to fail so the invalid-fallback regression stays
+# equivalent across Linux and non-Linux hosts.
+if [[ "${QG_FAIL_LINUX_MARKER_PREFIX:-}" == 1 &&
+  "${1:-}" == "-e" && "${2:-}" == *'/proc/${creatorPid}/stat'* ]]; then
+  exit 95
+fi
+exec "${REAL_NODE_COMMAND:?}" "$@"
+STUB
   cat > bin/cp <<'STUB'
 #!/usr/bin/env bash
 if [[ "${QG_FAIL_COMMAND_STAMP_READ:-}" == 1 &&
@@ -2304,7 +2315,7 @@ if [[ -n "${QG_LSOF_PATH_RECORD:-}" ]]; then
 fi
 exit 1
 STUB
-  chmod +x bin/cp bin/date bin/id bin/lsof bin/mv bin/pnpm bin/uname tools/trunk
+  chmod +x bin/cp bin/date bin/id bin/lsof bin/mv bin/node bin/pnpm bin/uname tools/trunk
   write_installed_dependency_fixture "$PWD"
   git add .
   git commit -qm init
@@ -2353,10 +2364,12 @@ STUB
   real_date_command="$(command -v date)"
   real_id_command="$(command -v id)"
   real_mv_command="$(command -v mv)"
+  real_node_command="$(command -v node)"
   real_uname_command="$(command -v uname)"
   export REAL_DATE_COMMAND="$real_date_command"
   export REAL_ID_COMMAND="$real_id_command"
   export REAL_MV_COMMAND="$real_mv_command"
+  export REAL_NODE_COMMAND="$real_node_command"
 
   gate_test_stop_and_reap_pipeline_child() {
     local label="$1"
@@ -2557,6 +2570,7 @@ STUB
     AGENT_QUALITY_GATE_COORDINATOR=1 \
     AGENT_QUALITY_GATE_CAPACITY=3 \
     NODE_ENV=test \
+    QG_FAIL_LINUX_MARKER_PREFIX=1 \
     QG_INVALID_HOSTNAME=1 \
     QG_CONTENDER_COMMAND_MARKER="$contender_command_marker" \
     REAL_CP_COMMAND="$real_cp_command" \
@@ -4653,9 +4667,13 @@ STUB
     # captured the mapped descendant. The EXIT fallback must validate the
     # captured runtime identity and terminate it, while the gate still exits 2
     # because the failed scan could not prove complete absence.
+    real_pgrep_command="$(command -v pgrep)"
     cat > bin/pgrep <<'STUB'
 #!/usr/bin/env bash
-exit 2
+if [[ -s "${QG_DESCENDANT_PID_FILE:-}" ]]; then
+  exit 2
+fi
+exec "${REAL_PGREP_COMMAND:?}" "$@"
 STUB
     chmod +x bin/pgrep
     holder_output="$fixture_repo/no-lock-failed-drain-output"
@@ -4670,6 +4688,7 @@ STUB
       NODE_ENV=test \
       QG_GATE_ROLE=holder \
       QG_DESCENDANT_PID_FILE="$descendant_pid_file" \
+      REAL_PGREP_COMMAND="$real_pgrep_command" \
       PATH="$fixture_repo/bin:$PATH" \
       /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
         --changed-paths-file holder-paths.txt \
@@ -20465,7 +20484,9 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   chmod 600 "$race_valid_lsof_marker"
   race_valid_lsof_identity="$(race_file_identity "$race_valid_lsof_marker")"
   race_valid_lsof_output="$(
+    # shellcheck disable=SC2030 # this subshell sources and uses the value
     gate_drain_scan_error="agentqg-scan-failed"
+    # shellcheck disable=SC2030 # this subshell sources and uses the value
     gate_lock_root_dir="$gate_race_root"
     # shellcheck disable=SC2030 # this subshell sources and uses the value
     gate_lock_local_host_fingerprint="$(node -e '
@@ -20560,8 +20581,8 @@ GATE_PARENT
     race_proc_token_floor=""
     race_proc_origin_hash_value=""
     if [[ "$race_proc_prefix" =~ ^lp1\.[0-9a-f]{64}\.[0-9]{1,20}\.[0-9a-f]{64}\.coordinator$ ]]; then
-      IFS='.' read -r race_proc_version race_proc_boot_hash \
-        race_proc_token_floor race_proc_origin_hash_value race_proc_label \
+      IFS='.' read -r _ _ \
+        race_proc_token_floor race_proc_origin_hash_value _ \
         <<< "$race_proc_prefix"
       [[ "$race_proc_origin_hash_value" == "$race_proc_origin_hash" ]] ||
         fail "the Linux marker fixture changed its origin fingerprint"

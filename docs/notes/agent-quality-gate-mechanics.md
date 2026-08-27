@@ -283,7 +283,12 @@ that closed every identity handle. INT/TERM waits for worker registration and
 uses the same exact drain. The parent reaps the sentinel and releases the lease
 only after the capture is empty. A no-lock sentinel exits only after its exact
 parent identity changes, becomes a zombie, or disappears. It retries an empty
-process-identity read while the parent PID still exists. It then fills another pool slot. A failed drain
+process-identity read while the parent PID still exists. Before an explicit
+no-lock run starts mapped work, it creates a request token and marker in the
+private repo-local `.tmp/agent-quality-gate/no-lock-handles` directory. This
+handle does not reserve coordinator capacity or acquire a lock. It lets the
+same no-lock parent find a detached descendant after its tagged wrapper exits,
+including on macOS. It then fills another pool slot. A failed drain
 or lease release keeps that lease unresolved, stops all new dispatch, and
 cancels the request through normal drain recovery.
 In sequential mode, the gate waits for the wrapper and watchdog, refreshes the
@@ -1848,6 +1853,11 @@ capacity, its worktree lease, its named resources, and legacy-version
 exclusion. They are exceptional unsafe diagnostics. Do not use them to avoid a
 normal queue or to make a push proceed. Use them only when you have proved that
 no other gate, dashboard server, browser fixture, or mapped command can overlap.
+They still create a request token and a marker in the private repo-local
+`.tmp/agent-quality-gate/no-lock-handles` directory. This handle supports local
+descendant cleanup. It does not serialize runs or use
+`AGENT_QUALITY_GATE_LOCK_DIR`, so an unusable configured lock root does not
+disable the explicit escape hatch.
 A completed parallel worker still waits as a live group anchor while its
 no-lock parent drains it. The worker tracks the parent's exact PID/start
 identity and exits if that parent dies, because no successor owns its cleanup.
@@ -2481,10 +2491,9 @@ Rules that keep the focus honest:
   non-empty `GATE_TEST_FOCUS` exits 2 when any of `AGENTQG_RUN`,
   `AGENT_QUALITY_GATE_LOCK_HELD`, or `GITHUB_ACTIONS` holds a non-empty value,
   so an exported focus cannot shrink the gate's self-test or CI's run.
-  `AGENTQG_RUN` is the load-bearing one: the gate puts it on the argv of every
-  mapped command in every mode, while the lock marker is absent under
-  `--no-lock` and `AGENT_QUALITY_GATE_LOCK=0`, where `acquire_gate_run_lock`
-  returns before exporting it.
+  `AGENTQG_RUN` is the load-bearing one because the gate puts it on the argv of
+  every mapped command in every mode. Explicit no-lock runs create a private
+  process handle, but they still export no global lock or coordinator state.
 - **The partition is checked, not assumed.** `verify_gate_family_partition`
   runs before the family definitions, reading the suite file through the path
   resolved at startup. It reds the suite when a test line sits outside every

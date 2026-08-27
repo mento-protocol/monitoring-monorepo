@@ -734,6 +734,11 @@ retries an empty parent-identity read while that PID still exists. A crash after
 registration leaves request, command, and generation recovery handles where
 their lock modes provide them.
 
+Before an explicit no-lock run starts mapped work, it creates a request token
+and marker under `.tmp/agent-quality-gate/no-lock-handles`. This private
+repo-local directory carries process handles only. It grants no coordinator
+capacity, worktree lease, named resource, or legacy lock authority.
+
 A successor coordinator reads the journal before it reuses any lease. It drops
 queued command leases because their wait connections ended with the old
 coordinator. It converts each granted lease to a drain obligation and keeps its
