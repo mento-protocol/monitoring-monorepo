@@ -295,40 +295,22 @@ Phase 7 checks for the affected production API, dashboard page, and browser
 console. Promotion alone does not complete the rollout.
 
 Replay-integrity v3 replaces traffic-scaled exact `medianTimestamp` reads with
-a persisted, event-sourced `OracleFeedState`. On the first tracked
-`OracleReported` or `OracleReportRemoved`, processing performs one
-exact-boundary `getTimestamps` bootstrap and obtains raw/effective expiry
-configuration from that same boundary. It validates the
-reporter/timestamp arrays, computes SortedOracles' upper median, then applies
-`OracleReported` upserts and `OracleReportRemoved` deletions in block/log order.
-`MedianUpdated` consumes that state but does not renew freshness itself. When
-no currently referencing pool row predates the initialization block, exact
-block-close state absorbs that block's logs so a report before deployment or
-feed self-heal cannot be stranded outside a parent snapshot; later blocks use
-log order. `OracleExpiryState` stores raw global/token and effective expiry at
-the same bootstrap boundary, then applies both expiry events by block/log
-cursor. A zero token value derives the persisted global fallback without a
-block-close RPC inside the event, and never-tracked feeds create no state.
-Missing or malformed bootstrap data fails before entity writes. This is a
+a persisted, event-sourced `OracleFeedState` plus `OracleExpiryState`. The
+bootstrap boundary, ordered apply rules, zero-token expiry fallback, and
+fail-before-write conditions are owned by
+[ADR 0046](../docs/adr/0046-event-sourced-oracle-freshness.md). This is a
 full-replay boundary: v1 and v2 candidates are incompatible with v3 even when
 their final pool rows happen to look healthy.
 
 The inherited replay-integrity v2 requirement still applies: effect eligibility
-must be derived independently in both Envio passes. Never carry preload
-decisions in any module-scoped mutable marker because hosted preload and
-processing workers, and restarted processes, do not share that memory. The
-code-health invariant follows every `onEvent`, `onBlock`, and
-`contractRegister` callback plus imported helpers. It rejects direct and
-symbol-propagated assignment, update, deletion, object/record write, and native
-collection/array mutator forms for top-level bindings, including primitive,
-object, array, native-collection, and factory-result state. Returned module-
-state aliases and custom receiver methods that mutate through `this` remain a
-manual-review requirement tracked in
-[#1462](https://github.com/mento-protocol/monitoring-monorepo/issues/1462).
-Narrow processing-only exceptions require an adjacent `phase-state-exempt`
-reason and tracking issue at each mutation. Rebuildable optimization caches
-whose loss can only repeat authoritative/idempotent work use an adjacent
-`phase-state-cache` reason at each write.
+must be derived independently in both Envio passes, because hosted preload and
+processing workers, and restarted processes, do not share memory. The blocking
+code-health invariant over handler callbacks and imported helpers, its
+`phase-state-exempt` and `phase-state-cache` call-site escape hatches, and the
+manual-review gap tracked in
+[#1462](https://github.com/mento-protocol/monitoring-monorepo/issues/1462) are
+owned by
+[`indexer-handler-invariants.md`](../docs/pr-checklists/indexer-handler-invariants.md#rpc-cache-and-freshness).
 
 The `mento` project on Envio Cloud watches this branch. Envio registers
 deployments under the short commit hash, and the registration can lag the Git
