@@ -919,6 +919,147 @@ describe("TroveLedgerEvent — append-only per-trove ledger", () => {
     assert.equal(trove?.lastLedgerLogIndex, 2);
   });
 
+  it("batched redemption rows take statusAfter and debtAfter from the replayed entity, not the stale staged classification", async () => {
+    let mockDb = MockDb.createMockDb();
+    seedLoadedCollateral(mockDb);
+    const troveId = 13n;
+    const batchManager = "0x00000000000000000000000000000000000000dd";
+    mockDb = await openTrove(mockDb, {
+      troveId,
+      debt: 1_000n * D18,
+      coll: 500n * D18,
+      annualInterestRate: 5n * 10n ** 16n,
+      blockNumber: 820,
+      blockTimestamp: 690_000,
+      txHash: "0xopen13",
+    });
+    const joinTx = {
+      blockNumber: 821,
+      blockTimestamp: 700_000,
+      txHash: "0xjoin13",
+    };
+    mockDb = await processMockEvents({
+      mockDb,
+      events: [
+        LiquityTroveManager.BatchedTroveUpdated.createMockEvent({
+          _troveId: troveId,
+          _interestBatchManager: batchManager,
+          _batchDebtShares: 1_000n * D18,
+          _coll: 500n * D18,
+          _stake: 500n * D18,
+          _snapshotOfTotalCollRedist: 0n,
+          _snapshotOfTotalDebtRedist: 0n,
+          mockEventData: mockEventData({ ...joinTx, logIndex: 1 }),
+        }),
+        troveOperationEvent({
+          ...joinTx,
+          troveId,
+          operation: OP.SET_INTEREST_BATCH_MANAGER,
+          annualInterestRate: 6n * 10n ** 16n,
+          logIndex: 2,
+        }),
+        LiquityTroveManager.BatchUpdated.createMockEvent({
+          _interestBatchManager: batchManager,
+          _operation: 0n,
+          _debt: 1_000n * D18,
+          _coll: 500n * D18,
+          _annualInterestRate: 6n * 10n ** 16n,
+          _annualManagementFee: 0n,
+          _totalDebtShares: 1_000n * D18,
+          _debtIncreaseFromUpfrontFee: 0n,
+          mockEventData: mockEventData({ ...joinTx, logIndex: 3 }),
+        }),
+      ],
+    });
+
+    // Real per-trove redemption order on a batched trove
+    // (`_applySingleRedemption`): BatchedTroveUpdated → TroveOperation(6)
+    // → BatchUpdated → fee, then the aggregate Redemption after the loop.
+    // 950 of 1_000 debt is redeemed; the replayed share-derived debt (50)
+    // sits under minDebt (100), so the replay classifies the trove zombie
+    // while the staged row was classified from stale pre-replay debt.
+    const redeemTx = {
+      blockNumber: 822,
+      blockTimestamp: 710_000,
+      txHash: "0xredeem13",
+    };
+    mockDb = await processMockEvents({
+      mockDb,
+      events: [
+        LiquityTroveManager.BatchedTroveUpdated.createMockEvent({
+          _troveId: troveId,
+          _interestBatchManager: batchManager,
+          _batchDebtShares: 1_000n * D18,
+          _coll: 25n * D18,
+          _stake: 25n * D18,
+          _snapshotOfTotalCollRedist: 0n,
+          _snapshotOfTotalDebtRedist: 0n,
+          mockEventData: mockEventData({ ...redeemTx, logIndex: 1 }),
+        }),
+        troveOperationEvent({
+          ...redeemTx,
+          troveId,
+          operation: OP.REDEEM_COLLATERAL,
+          debtChangeFromOperation: -950n * D18,
+          collChangeFromOperation: -475n * D18,
+          logIndex: 2,
+        }),
+        LiquityTroveManager.BatchUpdated.createMockEvent({
+          _interestBatchManager: batchManager,
+          _operation: 0n,
+          _debt: 50n * D18,
+          _coll: 25n * D18,
+          _annualInterestRate: 6n * 10n ** 16n,
+          _annualManagementFee: 0n,
+          _totalDebtShares: 1_000n * D18,
+          _debtIncreaseFromUpfrontFee: 0n,
+          mockEventData: mockEventData({ ...redeemTx, logIndex: 3 }),
+        }),
+        redemptionFeeEvent({
+          ...redeemTx,
+          troveId,
+          fee: 1n * D18,
+          logIndex: 4,
+        }),
+        redemptionEvent({
+          ...redeemTx,
+          actualBoldAmount: 950n * D18,
+          ethFee: 1n * D18,
+          redemptionPrice: 2_000n * D18,
+          logIndex: 5,
+        }),
+      ],
+    });
+
+    const row = ledgerRow(mockDb, 822, 2);
+    assert.ok(row, "aggregate Redemption finalizes the staged batched row");
+    assert.equal(row.operation, OP.REDEEM_COLLATERAL);
+    assert.equal(row.statusBefore, "active");
+    assert.equal(
+      row.statusAfter,
+      "zombie",
+      "statusAfter is the replayed classification, not the stale staged one",
+    );
+    assert.equal(
+      row.debtAfter,
+      50n * D18,
+      "debtAfter fills from the entity's replayed share-derived debt",
+    );
+    assert.equal(
+      row.debtBefore,
+      undefined,
+      "batched debtBefore stays null permanently",
+    );
+    assert.equal(row.collBefore, 500n * D18);
+    assert.equal(row.collAfter, 25n * D18);
+    assert.equal(row.redemptionPrice, 2_000n * D18);
+    assert.equal(row.redemptionFeeCredited, 1n * D18);
+    const trove = mockDb.entities.Trove.get(makeTroveId(collateralId, "0xd"));
+    assert.equal(trove?.status, "zombie");
+    assert.equal(trove?.lastLedgerBlock, 822n, "watermark stamps at finalize");
+    assert.equal(trove?.lastLedgerLogIndex, 2);
+  });
+
   it("zombie transition and revival surface as statusBefore/statusAfter flips against live SystemParams minDebt", async () => {
     let mockDb = MockDb.createMockDb();
     seedLoadedCollateral(mockDb);

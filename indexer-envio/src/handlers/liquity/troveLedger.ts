@@ -317,7 +317,16 @@ export type TroveLedgerFinalizeContext = {
  * complete, stamps the trove's ledger watermark, and deletes the staged
  * row so a second aggregate in the same transaction can never re-consume
  * it. The event price wins for `icrAfterBps`; `priceAtEvent` stays the
- * block-close sample (null when suppressed or unavailable). */
+ * block-close sample (null when suppressed or unavailable).
+ *
+ * The aggregate fires after every per-trove event in its transaction —
+ * for batch-managed troves that includes the `BatchUpdated` replay — so
+ * the `Trove` entity holds the post-operation truth the staged row may
+ * lack: `statusAfter` comes from the entity (the staged value was
+ * classified from stale pre-replay debt on batched troves), and a null
+ * staged `debtAfter` (batch staging) is filled from the entity's
+ * replayed share-derived debt. `debtBefore` on batched rows stays null
+ * permanently, per the batch-row snapshot rule. */
 export async function finalizeStagedTroveLedgerRows(
   context: TroveLedgerFinalizeContext,
   args: {
@@ -340,6 +349,9 @@ export async function finalizeStagedTroveLedgerRows(
   for (const pending of staged) {
     if (pending.collateralId !== args.collateralId) continue;
     if (pending.kind !== args.kind) continue;
+    const trove = await context.Trove.get(pending.troveEntityId);
+    const statusAfter = trove?.status ?? pending.statusAfter;
+    const debtAfter = pending.debtAfter ?? trove?.debt;
     context.TroveLedgerEvent.set({
       id: pending.ledgerEventId,
       chainId: pending.chainId,
@@ -355,11 +367,11 @@ export async function finalizeStagedTroveLedgerRows(
       collIncreaseFromRedist: pending.collIncreaseFromRedist,
       annualInterestRate: pending.annualInterestRate,
       debtBefore: pending.debtBefore,
-      debtAfter: pending.debtAfter,
+      debtAfter,
       collBefore: pending.collBefore,
       collAfter: pending.collAfter,
       statusBefore: pending.statusBefore,
-      statusAfter: pending.statusAfter,
+      statusAfter,
       redemptionFeeCredited: isRedemption
         ? (pending.redemptionFeeCredited ?? 0n)
         : undefined,
@@ -368,7 +380,7 @@ export async function finalizeStagedTroveLedgerRows(
       priceAtEvent: args.blockClosePrice ?? undefined,
       icrAfterBps: toLedgerIcrBps(
         pending.collAfter,
-        pending.debtAfter,
+        debtAfter,
         args.eventPrice,
       ),
       timestamp: pending.timestamp,
@@ -376,7 +388,6 @@ export async function finalizeStagedTroveLedgerRows(
       logIndex: pending.logIndex,
       txHash: pending.txHash,
     });
-    const trove = await context.Trove.get(pending.troveEntityId);
     if (trove !== undefined) {
       context.Trove.set({
         ...trove,
