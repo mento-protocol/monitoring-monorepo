@@ -87,8 +87,9 @@ import {
   runGit,
 } from "./merge-pr-io.mjs";
 import {
+  readAutoMergeRequest,
   readBaseBranchRuleTypes,
-  readMergeOutcome,
+  reconcileMergeOutcome,
   resolveLogin,
   resolveRepositories,
   resolveTargetNumber,
@@ -284,6 +285,28 @@ export async function mergePullRequest({
         `Refusing, because a merge-queue base would accept a request this command cannot take back.`,
     );
   }
+  let standingAutoMerge;
+  try {
+    standingAutoMerge = await readAutoMergeRequest({
+      gh,
+      repo: repos.base,
+      number,
+    });
+  } catch (err) {
+    throw new MergeRefusal(
+      `unable to read the auto-merge state of ${repos.base}#${number}: ` +
+        `${err instanceof Error ? err.message : String(err)}. ` +
+        `Refusing, because this command must not cancel a request it did not create.`,
+    );
+  }
+  if (standingAutoMerge !== null) {
+    throw new MergeRefusal(
+      `${repos.base}#${number} already has auto-merge enabled, so GitHub is already ` +
+        `holding a merge for it. This command will not merge over that or cancel it — ` +
+        `someone asked for that merge outside these gates. Resolve it first.`,
+    );
+  }
+
   if (baseRuleTypes.includes("merge_queue")) {
     throw new MergeRefusal(
       `${approved.baseRefName} in ${repos.base} uses a merge queue. ` +
@@ -382,45 +405,9 @@ export async function mergePullRequest({
   const consentPath = await appendConsent({ record, git });
   stdout.write(`Recorded consent in ${consentPath}\n`);
 
-  // Any outcome other than a confirmed merge may have left a standing request:
-  // `gh pr merge` enqueues when the required checks pass and enables auto-merge
-  // when they do not, and `--not-ready-reason` reaches that second path. GitHub
-  // can complete such a request minutes or hours later, with none of the gates
-  // above — the merge nobody approved, arriving late. So every path from here
-  // reconciles rather than just reporting.
-  const cancelPendingMerge = async () => {
-    try {
-      await gh([
-        "pr",
-        "merge",
-        String(number),
-        "--repo",
-        repos.base,
-        "--disable-auto",
-      ]);
-      // `--disable-auto` turns off auto-merge. It does NOT remove a pull
-      // request already sitting in a merge queue, so this is not proof the
-      // request is gone. Report the state actually observed afterwards rather
-      // than claiming success, and name the case that still needs a hand.
-      return (
-        `Auto-merge has been disabled for this pull request. That does not ` +
-        `remove a merge-queue entry: if the base uses a merge queue, dequeue ` +
-        `it by hand and confirm, because a queued entry can still merge later ` +
-        `without any of the gates above.`
-      );
-    } catch (err) {
-      return (
-        `A pending merge request could NOT be cancelled: ` +
-        `${err instanceof Error ? err.message : String(err)}. ` +
-        `Cancel it by hand — until you do, this pull request can still merge ` +
-        `later without any of the gates above.`
-      );
-    }
-  };
-
   // The merge command itself can fail after the request reached GitHub — a
   // transport error, a truncated response — so its failure is an ambiguous
-  // outcome, not a clean abort. Hold it and let the read below decide.
+  // outcome, not a clean abort. Hold it and let the reconciliation decide.
   let mergeError = null;
   try {
     await merge([
@@ -440,135 +427,16 @@ export async function mergePullRequest({
     mergeError = err instanceof Error ? err.message : String(err);
   }
 
-  let outcome = null;
-  let outcomeError = null;
-  try {
-    outcome = await readMergeOutcome({ gh, repo: repos.base, number });
-  } catch (err) {
-    outcomeError = err instanceof Error ? err.message : String(err);
-  }
-
-  if (outcome === null) {
-    // Neither confirmed nor refuted. Cancel first, report second.
-    const cancellation = await cancelPendingMerge();
-    stdout.write(
-      `Could not confirm the merge landed: ${outcomeError}\n` +
-        (mergeError ? `The merge command also failed: ${mergeError}\n` : "") +
-        `${cancellation}\n` +
-        `Check ${repos.base}#${number} before running any post-merge step.\n`,
-    );
-    return { merged: false, verified: false, record, consentPath };
-  }
-
-  if (outcome.state !== "MERGED") {
-    const cancellation = await cancelPendingMerge();
-    stdout.write(
-      `${repos.base}#${number} is ${outcome.state || "in an unreadable state"}, not merged — ` +
-        `a queued or auto-merge target accepts the request without merging it. ` +
-        (mergeError ? `The merge command also failed: ${mergeError}. ` : "") +
-        `${cancellation}\n` +
-        `Do not run post-merge steps until it reports MERGED.\n`,
-    );
-    return {
-      merged: false,
-      verified: true,
-      queued: true,
-      state: outcome.state,
-      record,
-      consentPath,
-    };
-  }
-
-  // MERGED alone does not mean this run's merge landed. If the head moved after
-  // the final gate read and something else merged the new one, our
-  // `--match-head-commit` request fails while this read still says MERGED —
-  // and the consent record would then name a commit GitHub never merged.
-  if (outcome.headRefOid === "") {
-    stdout.write(
-      `${repos.base}#${number} reports MERGED but names no head commit, so this ` +
-        `run cannot confirm it merged ${approved.headOid}. ` +
-        `Check it before running any post-merge step.\n`,
-    );
-    return {
-      merged: true,
-      verified: false,
-      state: outcome.state,
-      baseRefName: outcome.baseRefName,
-      record,
-      consentPath,
-    };
-  }
-
-  if (outcome.headRefOid !== approved.headOid.toLowerCase()) {
-    stdout.write(
-      `WARNING: ${repos.base}#${number} is MERGED at ${outcome.headRefOid}, not the ` +
-        `${approved.headOid} you approved. Something else merged a newer head. ` +
-        `The consent record names the head you saw, which is not what landed — ` +
-        `review ${outcome.baseRefName} now.\n`,
-    );
-    return {
-      merged: true,
-      verified: false,
-      headMismatch: true,
-      state: outcome.state,
-      baseRefName: outcome.baseRefName,
-      mergedHeadOid: outcome.headRefOid,
-      record,
-      consentPath,
-    };
-  }
-
-  // GitHub says MERGED, so a failing merge command was a reporting failure
-  // rather than a merge failure. Say so instead of hiding it.
-  if (mergeError) {
-    stdout.write(
-      `The merge command reported an error (${mergeError}) but ${repos.base}#${number} ` +
-        `is MERGED, so the merge itself landed.\n`,
-    );
-  }
-
-  // `--match-head-commit` pins the head, and the merge API offers nothing that
-  // pins the base: its only matching parameter is `sha`, for the head. So a
-  // retarget landing between the final gate read and GitHub processing the
-  // merge cannot be prevented here — it can only be detected and said out
-  // loud, which is what this does. `exitCodeForResult` fails on it.
-  if (outcome.baseRefName === "") {
-    stdout.write(
-      `${repos.base}#${number} reports MERGED but names no base branch, so this ` +
-        `run cannot confirm it landed on ${approved.baseRefName}. ` +
-        `Check it before running any post-merge step.\n`,
-    );
-    return {
-      merged: true,
-      verified: false,
-      baseRefName: null,
-      state: outcome.state,
-      mergeCommit: outcome.mergeCommit,
-      record,
-      consentPath,
-    };
-  }
-
-  const baseMismatch = outcome.baseRefName !== approved.baseRefName;
-  if (baseMismatch) {
-    stdout.write(
-      `WARNING: ${repos.base}#${number} merged into ${outcome.baseRefName}, ` +
-        `not the ${approved.baseRefName} you approved. The pull request was ` +
-        `retargeted between the final check and the merge. Review ` +
-        `${outcome.baseRefName} now — this merge was not the one consented to.\n`,
-    );
-  }
-
-  return {
-    merged: true,
-    verified: true,
-    baseMismatch,
-    state: outcome.state,
-    baseRefName: outcome.baseRefName,
-    mergeCommit: outcome.mergeCommit,
+  return reconcileMergeOutcome({
+    gh,
+    repo: repos.base,
+    number,
+    approved,
+    mergeError,
     record,
     consentPath,
-  };
+    write: (text) => stdout.write(text),
+  });
 }
 
 async function main() {

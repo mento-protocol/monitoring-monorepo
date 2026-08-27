@@ -57,18 +57,26 @@ The ordered gates in `scripts/pr/merge-pr.mjs`:
    back. Every GitHub-sourced field is stripped of terminal control and
    bidirectional formatting characters first.
 5. Re-read every gate after the confirmation. A moved head, a retargeted base,
-   or any change to the blocker set or feedback counts refuses.
+   an edited title, a changed login, a merge queue that appeared, or any change
+   to the blocker set, the required-check states, or the individual blocking
+   feedback items refuses. The comparison uses identities, not counts, and
+   serializes each record on its own so no field can spell another's value.
 6. Append the consent record — login, timestamp, pull request, head commit,
    any override reason — to gitignored `.merge-consents.jsonl`, opened
    `O_NOFOLLOW | O_NONBLOCK` with an `fstat` regular-file and single-hard-link
    check, and a short-write refusal.
-7. Refuse a merge-queue base before sending anything. `gh pr merge` enqueues
+7. Refuse a pull request that already has an auto-merge request standing on it.
+   GitHub is then already holding a merge that someone asked for outside these
+   gates; merging over it or cancelling it are both wrong, and the wrapper
+   cannot tell its own compensation from interference with another operator's
+   state. Refusing also makes the post-merge cleanup provably its own.
+8. Refuse a merge-queue base before sending anything. `gh pr merge` enqueues
    such a base and returns success, and nothing the wrapper can call removes a
    queue entry — `--disable-auto` turns off auto-merge only — so merging first
    would leave a standing request it cannot take back, which GitHub could
    complete later outside every gate above. An unreadable branch-rules answer
    refuses too.
-8. Merge with `--squash --match-head-commit`, then confirm with GitHub that the
+9. Merge with `--squash --match-head-commit`, then confirm with GitHub that the
    pull request actually reached `MERGED`, on the approved base and the
    approved head. Any other outcome — including a failed merge command, which
    may still have reached GitHub — cancels auto-merge and exits non-zero.

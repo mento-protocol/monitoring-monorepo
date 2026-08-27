@@ -202,6 +202,9 @@ function harness({
   baseRuleTypes = ["pull_request", "required_status_checks"],
   baseRulesError = null,
   baseRuleTypesAfterConfirmation = null,
+  // An auto-merge request already standing on the PR before this run.
+  standingAutoMerge = null,
+  autoMergeError = null,
   // The base the pull request reports AFTER the merge. A retarget between the
   // final gate read and GitHub processing the merge shows up only here.
   mergedBaseRefName = null,
@@ -266,6 +269,16 @@ function harness({
     ) {
       if (disableAutoError) throw new Error(disableAutoError);
       return "";
+    }
+    // The pre-merge auto-merge read and the post-merge outcome read are both
+    // `pr view`; only their fields tell them apart.
+    if (
+      args[0] === "pr" &&
+      args[1] === "view" &&
+      args.includes("autoMergeRequest")
+    ) {
+      if (autoMergeError) throw new Error(autoMergeError);
+      return JSON.stringify({ autoMergeRequest: standingAutoMerge });
     }
     if (args[0] === "pr" && args[1] === "view") {
       if (mergeOutcomeError) throw new Error(mergeOutcomeError);
@@ -1933,6 +1946,55 @@ await test("a merge queue switched on during confirmation refuses", async () => 
   );
   assertEqual(h.calls.merges.length, 0, "no merge request may be sent");
   assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
+});
+
+await test("a pull request that already has auto-merge enabled refuses", async () => {
+  // Someone asked GitHub to merge it outside these gates. This command must
+  // neither merge over that nor cancel it — its own cleanup could not tell
+  // compensation from interference.
+  const h = harness({
+    standingAutoMerge: { enabledAt: "2026-08-26T00:00:00Z" },
+  });
+
+  await assertRefuses(h.run(), "already has auto-merge enabled");
+  assertEqual(h.calls.merges.length, 0, "no merge request may be sent");
+  assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
+  const cancel = h.calls.gh.find(
+    (args) => args[0] === "pr" && args.includes("--disable-auto"),
+  );
+  assertEqual(
+    cancel,
+    undefined,
+    "another operator's request must be left alone",
+  );
+});
+
+await test("an unreadable auto-merge state refuses", async () => {
+  // Not knowing whether a request already stands is the case where cleanup
+  // could cancel somebody else's.
+  const h = harness({ autoMergeError: "403 Forbidden" });
+
+  await assertRefuses(h.run(), "unable to read the auto-merge state");
+  assertEqual(h.calls.merges.length, 0, "no merge request may be sent");
+});
+
+await test("the cleanup only ever cancels a request this run created", async () => {
+  // The refusal above is what makes this true: with no standing request before
+  // the merge, anything --disable-auto turns off was created by this run.
+  const h = harness({ mergedState: "OPEN" });
+  await h.run();
+
+  const autoRead = h.calls.gh.find(
+    (args) => args[0] === "pr" && args.includes("autoMergeRequest"),
+  );
+  assert(
+    autoRead !== undefined,
+    "the pre-merge auto-merge read is what licenses the cleanup",
+  );
+  const cancel = h.calls.gh.find(
+    (args) => args[0] === "pr" && args.includes("--disable-auto"),
+  );
+  assert(cancel !== undefined, "this run's own request is still cancelled");
 });
 
 await test("only a confirmed merge exits zero", async () => {
