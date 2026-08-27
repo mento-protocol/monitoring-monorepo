@@ -367,7 +367,6 @@ PATH="\${QG_FIXTURE_ORIGINAL_PATH}" exec git "$@"
   }) {
     await mkdir(scenario.directory, { recursive: true });
     await mkdir(scenario.lockRoot, { recursive: true });
-    lockRoots.add(scenario.lockRoot);
     sequence += 1;
     const pathsFile = join(scenario.directory, `paths-${sequence}.txt`);
     await writeFile(pathsFile, `${changedPath}\n`);
@@ -391,6 +390,11 @@ PATH="\${QG_FIXTURE_ORIGINAL_PATH}" exec git "$@"
       QG_FIXTURE_SHORT_DELAY_MS: String(shortDelayMs),
       ...extraEnvironment,
     };
+    const effectiveLockRoot = gateEnvironment.AGENT_QUALITY_GATE_LOCK_DIR;
+    if (typeof effectiveLockRoot !== "string" || !effectiveLockRoot) {
+      throw new Error("fixture gate lock root must be a non-empty path");
+    }
+    lockRoots.add(resolve(worktree, effectiveLockRoot));
     // The parent Bash suite disables locking, and a parent quality gate exports
     // its own held token. Neither authority applies to this isolated lock root.
     delete gateEnvironment.AGENT_QUALITY_GATE_LOCK_HELD;

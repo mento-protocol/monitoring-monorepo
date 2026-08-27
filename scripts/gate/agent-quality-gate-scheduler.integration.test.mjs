@@ -35,6 +35,32 @@ function assertPassed(result) {
   );
 }
 
+function assertPassedOrSafelyDisplaced(result) {
+  if (result.code === 0) return true;
+  assert.equal(
+    result.code,
+    2,
+    `${result.label} failed unexpectedly:\n${result.stdout}\n${result.stderr}`,
+  );
+  const errorLines = result.stderr
+    .split("\n")
+    .filter((line) => line.startsWith("error:"));
+  assert.equal(errorLines.length, 1);
+  assert.match(
+    errorLines[0],
+    /^error: this run no longer holds the gate run lock at .+\.$/u,
+  );
+  assert.match(
+    result.stderr,
+    /Another run took it over before this one reached its mapped commands\./u,
+  );
+  assert.match(
+    result.stderr,
+    /Nothing has been executed\. Re-run, and it will queue behind the current holder\./u,
+  );
+  return false;
+}
+
 test("directAncestor reports a vanished process as unproven ancestry", async () => {
   await assert.rejects(
     directAncestor(2_147_483_647, process.pid),
@@ -1314,6 +1340,7 @@ test("an overlong socket path falls back to serialized legacy gates", async () =
   try {
     const scenario = fixture.scenarioPaths("long-socket-path");
     const longLockRoot = join(scenario.directory, "x".repeat(100));
+    const startBarrier = join(scenario.directory, "first-command");
     await mkdir(longLockRoot, { recursive: true });
     const worktrees = await Promise.all([
       fixture.addWorktree("long-path-a"),
@@ -1329,6 +1356,7 @@ test("an overlong socket path falls back to serialized legacy gates", async () =
           shortDelayMs: 500,
           extraEnvironment: {
             AGENT_QUALITY_GATE_LOCK_DIR: longLockRoot,
+            QG_FIXTURE_START_BARRIER: startBarrier,
           },
         }),
       ),
@@ -1345,9 +1373,45 @@ test("an overlong socket path falls back to serialized legacy gates", async () =
     const ownerToken = ownerRecord.match(/^token=(.+)$/mu)?.[1];
     assert.ok(ownerToken);
     assert.ok((await readdir(longLockRoot)).includes(`holder.${ownerToken}`));
-    const results = await Promise.all(handles.map((handle) => handle.done));
-    results.forEach(assertPassed);
-    for (const result of results) {
+    await writeFile(`${startBarrier}.release`, "release\n");
+    const initialResults = await Promise.all(
+      handles.map((handle) => handle.done),
+    );
+    // The legacy backstop can stop a contender whose owner record changed.
+    // Accept only its exact no-work verdict, then retry after the winner exits.
+    const displacedResults = initialResults.filter(
+      (result) => !assertPassedOrSafelyDisplaced(result),
+    );
+    const initialEvents = await fixture.events(scenario);
+    for (const displaced of displacedResults) {
+      assert.ok(
+        !initialEvents.some(
+          (event) => event.event === "start" && event.label === displaced.label,
+        ),
+        `${displaced.label} reported no work after starting a mapped command`,
+      );
+    }
+    assert.ok(
+      initialResults.some((result) => result.code === 0),
+      "at least one serialized legacy contender must complete",
+    );
+    const retryResults = [];
+    for (const displaced of displacedResults) {
+      const retry = await fixture.startGate({
+        worktree: displaced.worktree,
+        changedPath: displaced.changedPath,
+        scenario,
+        label: `${displaced.label}-retry`,
+        shortDelayMs: 500,
+        extraEnvironment: {
+          AGENT_QUALITY_GATE_LOCK_DIR: longLockRoot,
+        },
+      });
+      const retryResult = await retry.done;
+      assertPassed(retryResult);
+      retryResults.push(retryResult);
+    }
+    for (const result of [...initialResults, ...retryResults]) {
       assert.match(
         result.stderr,
         /coordinator socket path is too long; this run uses the serialized legacy lock/u,
