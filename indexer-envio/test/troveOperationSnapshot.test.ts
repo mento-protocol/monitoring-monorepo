@@ -29,6 +29,11 @@ import {
   makeCollateralId,
 } from "../src/handlers/liquity/config";
 import { OP } from "../src/handlers/liquity/operations";
+import {
+  captureTroveOperationSnapshotState,
+  maybeRecordTroveOperation,
+  type TroveOperationLogEvent,
+} from "../src/handlers/liquity/troveOperationSnapshot";
 import { makeTroveId } from "../src/handlers/liquity/troves";
 import {
   indexerTestHelpers,
@@ -418,5 +423,90 @@ describe("TroveOperationEvent before/after snapshot (issue #2080)", () => {
       0n,
       "collBefore derives arithmetically from the corrected collAfter",
     );
+  });
+});
+
+/** Direct unit coverage for the snapshot module's edges the harness tests
+ * above cannot reach: the defensive zero floors in the before-derivations
+ * (an event sequence that would underflow must clamp, per the on-chain
+ * invariant) and the skip guard for ops that own dedicated event entities. */
+describe("troveOperationSnapshot unit edges", () => {
+  const makeEvent = (
+    overrides: Partial<TroveOperationLogEvent["params"]> = {},
+  ): TroveOperationLogEvent => ({
+    chainId: market.chainId,
+    block: { number: 42 },
+    logIndex: 7,
+    transaction: { hash: "0xunit" },
+    params: {
+      _collChangeFromOperation: 0n,
+      _debtChangeFromOperation: 0n,
+      _annualInterestRate: 0n,
+      _debtIncreaseFromUpfrontFee: 0n,
+      _debtIncreaseFromRedist: 0n,
+      _collIncreaseFromRedist: 0n,
+      ...overrides,
+    },
+  });
+
+  it("captures owner and the entity's post-update debt/coll as the AFTER snapshot", () => {
+    const state = captureTroveOperationSnapshotState({
+      owner: "0x00000000000000000000000000000000000000AA",
+      debt: 500n,
+      coll: 900n,
+    } as Trove);
+    assert.deepEqual(state, {
+      owner: "0x00000000000000000000000000000000000000AA",
+      debtAfter: 500n,
+      collAfter: 900n,
+    });
+  });
+
+  it("floors derived before-values at zero when event deltas exceed the after state", () => {
+    const rows: TroveOperationEvent[] = [];
+    maybeRecordTroveOperation({
+      context: { TroveOperationEvent: { set: (row) => rows.push(row) } },
+      op: OP.ADJUST_TROVE,
+      event: makeEvent({
+        _debtChangeFromOperation: 800n,
+        _debtIncreaseFromUpfrontFee: 5n,
+        _collChangeFromOperation: 1_000n,
+      }),
+      instanceId: "instance-1",
+      troveId: "0x1",
+      snapshotState: { owner: "0xaa", debtAfter: 700n, collAfter: 950n },
+      pendingBatchedTroveUpdate: undefined,
+      blockNumber: 42n,
+      blockTimestamp: 1_000n,
+    });
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]!.debtBefore, 0n, "700 - 805 floors at zero");
+    assert.equal(rows[0]!.collBefore, 0n, "950 - 1000 floors at zero");
+    assert.equal(rows[0]!.debtAfter, 700n);
+    assert.equal(rows[0]!.collAfter, 950n);
+  });
+
+  it("writes no row for ops that own dedicated event entities or are protocol-forced", () => {
+    for (const op of [
+      OP.LIQUIDATE,
+      OP.REDEEM_COLLATERAL,
+      OP.APPLY_PENDING_DEBT,
+    ]) {
+      maybeRecordTroveOperation({
+        context: {
+          TroveOperationEvent: {
+            set: () => assert.fail(`op ${op} must not write a row`),
+          },
+        },
+        op,
+        event: makeEvent(),
+        instanceId: "instance-1",
+        troveId: "0x1",
+        snapshotState: { owner: "0xaa", debtAfter: 1n, collAfter: 1n },
+        pendingBatchedTroveUpdate: undefined,
+        blockNumber: 42n,
+        blockTimestamp: 1_000n,
+      });
+    }
   });
 });
