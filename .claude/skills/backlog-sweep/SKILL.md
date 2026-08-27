@@ -24,7 +24,10 @@ edits no source file, and merges nothing.
 
 The loop, the boundaries, the report contract, and the resilience duties are
 canonical in
-[`backlog-sweep.md`](../../../docs/notes/backlog-sweep.md). Ranking is the
+[`backlog-sweep.md`](../../../docs/notes/backlog-sweep.md), and
+[ADR 0077](../../../docs/adr/0077-operator-triggered-backlog-sweep.md) records
+why this operating model was chosen over shared checkouts and cron autonomy.
+Ranking is the
 `rank-backlog` skill and its contracts in
 [`backlog-ranking.md`](../../../docs/notes/backlog-ranking.md). Queue labels,
 claiming, and release stay canonical in
@@ -39,9 +42,20 @@ already claimed and a worker is mid-gate.
 
 ```bash
 git fetch origin main
-git status --porcelain    # must print nothing
-gh auth status            # must report an authenticated account
+git status --porcelain            # must print nothing
+gh auth status                    # must report an authenticated account
+git remote get-url --push origin  # must serve mento-protocol/monitoring-monorepo
 ```
+
+**A fork checkout is a stop, before anything is claimed.** The operating card
+refuses every fork head and tells a fork checkout to stop rather than
+first-publish, because a cross-repository PR is one that workflow can never
+drive to ready
+([`pr-operating-card.md`](../../../docs/notes/pr-operating-card.md)). Workers
+inherit this checkout's remote, so a sweep started from a fork would claim
+upstream issues, implement and gate all of them, and only then discover that
+none of them can open a PR. Check the push URL here, where it costs one
+command.
 
 A dirty session worktree is a stop, not a warning. The orchestrator does not
 commit, so nothing it does would clear those changes, and a sweep that runs
@@ -115,9 +129,15 @@ Take the top N — default 2 — that satisfy **all** of:
 - **`agent-ready`.** Never `needs-grooming`. `rank-backlog` ranks grooming
   issues and never Selects one; a sweep that claimed one would be doing the
   grooming itself, unattended, on the operator's behalf.
-- **`risk:low`.** The batch runs without a human reading the diff before it is
-  pushed. `risk:medium` and `risk:high` issues are exactly the ones where that
-  gap matters, and the label is the repo's own judgement of which those are.
+- **Exactly one `risk:*` label, and it is `risk:low`.** The batch runs without
+  a human reading the diff before it is pushed. `risk:medium` and `risk:high`
+  issues are exactly the ones where that gap matters, and the label is the
+  repo's own judgement of which those are. Test for the whole set, not for the
+  presence of `risk:low`: only state labels are mutually exclusive
+  ([`agent-issue-workflow.md`](../../../docs/notes/agent-issue-workflow.md)),
+  so an issue can carry `risk:low` and `risk:high` together, and a
+  presence-only check would admit it while the sentence above excludes it. Two
+  risk labels is also a grooming signal, not a tie to break.
 - **Fit not authority-capped.** `rank-backlog` caps fit and names the cap when
   an issue needs a product decision, a credential the loop cannot reach, or an
   issue-specific human approval ahead of normal PR readiness. A capped issue
@@ -126,6 +146,12 @@ Take the top N — default 2 — that satisfy **all** of:
   a cap — it applies to the whole batch equally.
 - **Not blocked.** Not projected to `Blocked` on the workboard, and not waiting
   on an external dependency named in its body.
+- **Carries a `pkg:*` label at all.** An issue with no package area makes the
+  independence test below vacuous: it shares no label with anything, so two
+  such issues both pass and then edit the same package. Nothing else rejects
+  the gap — the Agent Task form starts an issue at `needs-grooming`, and
+  `issue:claim` validates queue state rather than routing labels. Treat a
+  missing or ambiguous package area as ineligible rather than as independence.
 - **Mutually independent.** No two issues in one batch share a `pkg:*` label —
   `pkg:dashboard`, `pkg:indexer`, `pkg:alerts`, `pkg:terraform`, `pkg:tooling`,
   listed in
@@ -248,9 +274,14 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   fi
   ```
 
-  `clone_url` is the orchestrator's own `git remote get-url origin`, fixed once
-  and passed to every worker beside `sweep_id`. Do not hard-code the public
-  HTTPS URL. A worker must **push**, not merely clone, and the transport that
+  `clone_url` is the orchestrator's own `git remote get-url --push origin`,
+  fixed once and passed to every worker beside `sweep_id`. Take the **push**
+  URL specifically: `git clone` copies no remote config, `pushurl` included, so
+  where a checkout's fetch and push URLs differ a worker cloned from the fetch
+  URL gates cleanly and then pushes somewhere nobody is watching. `--push`
+  returns `pushurl` when one is set and the fetch URL otherwise, so it is right
+  either way. Do not hard-code the public HTTPS URL. A worker must push, not
+  merely clone, and the transport that
   already authenticates on this machine is the one the operator's checkout is
   using — often SSH, while `gh auth status` says nothing about git's credential
   helper. Cloning over a transport nobody has credentials for succeeds on a
@@ -335,11 +366,25 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   configuration, or `patches/**`, that invocation exits 2 before running any
   check: `Refusing to run because package manifests, patches, or lockfile
 changed.` Review the lifecycle and install scripts in the diff first, then
-  re-run with `--allow-package-script-changes`. This is the gate's own designed
-  path for that change class, so it is not the blocked-control hand-off in the
-  boundaries below — the flag acknowledges a diff the worker has read, and
-  passing it without reading one is the thing that would be dishonest. Without
-  this step a `risk:low` issue that edits a manifest can never finish.
+  record the acknowledgement in local git config and re-run:
+
+  ```bash
+  git config agent.qualityGate.allowPackageScriptChanges true
+  bash scripts/agent-quality-gate.sh --run --lock-wait 3600
+  ```
+
+  The **config**, not the `--allow-package-script-changes` flag, is what lets
+  the push through. The pre-push hook runs the gate without that flag
+  (`.trunk/trunk.yaml`), and on a package-risk push the acknowledgement is part
+  of the freshness key — so a run acknowledged only on the command line cannot
+  be reused by the hook, which then refuses the push with the same message.
+  Local git config is read by both the manual run and the hook
+  ([`agent-quality-gate-mechanics.md`](../../../docs/notes/agent-quality-gate-mechanics.md)).
+  This is the gate's own designed path for that change class, so it is not the
+  blocked-control hand-off in the boundaries below: the acknowledgement records
+  a diff the worker has read, and setting it without reading one is the
+  dishonest version. Without this step a `risk:low` issue that edits a manifest
+  can never finish — it gates, then cannot push, and `--no-verify` is forbidden.
 
   **Background it with the runtime's own mechanism, then poll within the
   turn.** The command above is written foreground; do not run it that way for a
@@ -472,8 +517,15 @@ crossed without anyone watching.
   where it stopped, and what a human would need to decide. A silent release
   sends the next run straight back into the same wall.
 
-  **Only while the issue is still `agent-active`.** Once the worker has opened
-  its PR and run `pnpm issue:review`, the issue is `in-pr`, and releasing it
+  **Only while the issue is still `agent-active` and has no open PR.** Check
+  both. A worker can open its PR and stall before `pnpm issue:review` runs, so
+  the label still reads `agent-active` while a PR is already up for review; a
+  label-only test releases it and the next sweep duplicates that work.
+  `gh pr list --head <worker-branch> --state open` settles it, and an open PR
+  is handled exactly like the `in-pr` case below.
+
+  Once the worker has opened its PR and run `pnpm issue:review`, the issue is
+  `in-pr`, and releasing it
   then returns it to the ready queue while the PR is still open — a later sweep
   claims it and duplicates work that is already up for review, because
   `rank-backlog` deliberately does not read a `Refs` cross-reference as
@@ -535,7 +587,15 @@ its report would lose the whole night's record.
 
 Six parts. The receipt line and the refused claims are the orchestrator's own —
 a refused claim never got a worker, so no report-back can carry it. The rest is
-assembled from the workers' closing messages:
+assembled from the workers' closing messages.
+
+**Every claimed issue gets a row, reported back or not.** A worker can end
+without its closing message and without answering the request for one. That
+does not remove the row: write it from what the orchestrator does know — the
+issue, the branch, and the PR if one exists — say plainly that the worker did
+not report, and list it under the operator's decisions. A silently missing row
+would read as an issue that was never claimed, while the claim is still on the
+board.
 
 1. **The receipt.** The path of the `rank-backlog` receipt this batch was
    selected from, and the batch size the operator asked for.

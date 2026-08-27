@@ -22,7 +22,9 @@ This is stage 2 of the ranked-backlog loop in its **operator-triggered** form.
 receipt, and the exclusion ledger — and a sweep never re-derives any of it. The
 procedure is the `backlog-sweep` skill
 ([`.agents/skills/backlog-sweep/SKILL.md`](../../.agents/skills/backlog-sweep/SKILL.md));
-this note owns the contracts it produces against. Queue labels, claiming, and
+this note owns the contracts it produces against, and
+[ADR 0077](../adr/0077-operator-triggered-backlog-sweep.md) records why the
+operating model is shaped this way. Queue labels, claiming, and
 release stay canonical in [`agent-issue-workflow.md`](agent-issue-workflow.md);
 every worker's PR loop is
 [`pr-operating-card.md`](pr-operating-card.md) steps 2-7.
@@ -133,9 +135,12 @@ An issue enters a batch only when all of the following hold:
 - **`agent-ready`** — never `needs-grooming`. Ranking scores grooming issues
   and never Selects one; a sweep that claimed one would be grooming unattended
   on the operator's behalf.
-- **`risk:low`** — the batch is implemented and pushed with no human reading
-  the diff first. The risk label is this repo's own judgement about where that
-  gap matters.
+- **Exactly one `risk:*` label, and it is `risk:low`** — the batch is
+  implemented and pushed with no human reading the diff first, and the risk
+  label is this repo's own judgement about where that gap matters. Only state
+  labels are mutually exclusive, so an issue can carry `risk:low` beside
+  `risk:high`; testing the set rather than the presence of `risk:low` is what
+  keeps that issue out.
 - **Fit not authority-capped** — ranking caps fit and names the cap when an
   issue needs a product decision, a credential the loop cannot reach, or an
   issue-specific human approval before the work is even ready to review. A
@@ -144,6 +149,10 @@ An issue enters a batch only when all of the following hold:
   a cap; it applies to the whole batch equally and so distinguishes nothing.
 - **Not blocked** — not projected to `Blocked` on the workboard, and not
   waiting on an external dependency named in its body.
+- **Carries a `pkg:*` label** — an issue with no package area satisfies the
+  independence test vacuously and can then collide with a sibling in the same
+  package. Nothing else catches it: the Agent Task form starts at
+  `needs-grooming`, and `issue:claim` checks queue state, not routing labels.
 - **Mutually independent** — no two issues in one batch share a `pkg:*` label.
   That label is the repo's existing ownership area
   ([`agent-issue-workflow.md`](agent-issue-workflow.md)), so "same subsystem" is
@@ -239,7 +248,11 @@ while it runs:
   qualify.
 - **Never bypass hooks.** No `--no-verify`, no hook-skipping environment
   variable, no push that dodges the pre-push gate.
-- **Release a bad pick honestly, while it is still `agent-active`.** A
+- **Release a bad pick honestly, while it is still `agent-active` and has no
+  open PR.** Both halves are checked: a worker can open its PR and stall before
+  `issue:review` runs, leaving the label at `agent-active` while a PR is
+  already up for review, so a label-only test would release it and hand the
+  next sweep duplicate work. A
   misgroomed issue, or a worker that stalls before opening a PR, runs
   `pnpm issue:release --issue <n>` — `--needs-grooming` when clarity is what is
   missing — and comments what it learned: what it tried, where it stopped, what
@@ -277,8 +290,11 @@ sitting there. The same summary is printed to the terminal.
 The receipt line and the refused claims are the orchestrator's own — a refused
 claim never got a worker, so nothing can report it back. Every other fact
 reaches the report through a worker's closing message, and the orchestrator
-observes none of those directly, so a worker that ends without reporting back
-leaves a hole nothing on disk fills.
+observes none of those directly. A worker that ends without reporting back, and
+without answering the request for one, still gets its row: written from the
+issue, branch, and any PR the orchestrator can see, marked as not reported, and
+listed under the operator's decisions. A missing row would read as an issue
+that was never claimed while its claim is still on the board.
 
 Two properties make the table worth reading:
 
