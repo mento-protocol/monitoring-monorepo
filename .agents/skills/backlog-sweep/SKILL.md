@@ -133,9 +133,16 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   `issue` holding the number:
 
   ```bash
+  root=/private/tmp/claude          # or "$TMPDIR" where that root is unwritable
+  mkdir -p "$root"
   git clone https://github.com/mento-protocol/monitoring-monorepo \
-    "/private/tmp/claude/sweep-${issue}"
+    "$root/sweep-${issue}"
   ```
+
+  Create the parent first. `git clone` does not create intermediate
+  directories, and the sweep root is not guaranteed on a fresh machine or in
+  the Codex runtime this skill is also mirrored into — so a missing parent
+  fails the very first command of every worker.
 
   Subagents inherit the parent session's Bash worktree pin, so git in a sibling
   worktree under `.claude/worktrees/` is refused for them. The tmp clone is not
@@ -296,13 +303,20 @@ pnpm pr:merge --pr <number>
 The operator runs those from their own terminal. Listing a command is not
 approval to run it, and this skill runs none of them.
 
-Finally, if the spoken nudge is available, send one line and move on:
+Finally, send one spoken line saying the report is ready, through the fallback
+ladder in
+[`spoken-attention-nudge.md`](../../../docs/notes/spoken-attention-nudge.md).
+That note owns the command, the key-file rule, and the `say`/`spd-say`
+fallbacks; do not re-derive them here. Run the nudge with escalated execution
+rather than inside the workspace sandbox — `sag` needs the network and the local
+audio device, and a sandboxed attempt fails in a way that looks like a missing
+command.
 
-```bash
-if command -v sag >/dev/null 2>&1 && [ -r "$HOME/.config/elevenlabs_api_key" ]; then
-  sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "backlog sweep report is ready"
-fi
-```
+Keep the spoken text fixed and low-information: no issue numbers, PR numbers,
+paths, or findings. It goes to a third-party service, and the report on disk is
+where the detail belongs.
 
-When `sag` is absent, skip it silently. A missing nudge is not a failure of the
-sweep, and the report is on disk either way.
+When every spoken path fails, **say so in the report** instead of skipping
+quietly. A sweep that finished overnight and could not announce itself is a
+different situation from one the operator was told about, and only the written
+line distinguishes them.

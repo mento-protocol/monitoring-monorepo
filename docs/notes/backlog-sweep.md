@@ -191,10 +191,15 @@ pnpm pr:merge --pr <number>
 Listing them is not approval to run them. The operator runs them from their own
 terminal, and the wrapper asks again there.
 
-If the spoken nudge is available — `sag` on `PATH` and a readable API-key file,
-per [`spoken-attention-nudge.md`](spoken-attention-nudge.md) — the sweep sends
-one line saying the report is ready. Where it is not available it skips
-silently; the report is on disk either way.
+The sweep then announces the report through the fallback ladder in
+[`spoken-attention-nudge.md`](spoken-attention-nudge.md), which owns the
+command and its key-file rule. The nudge runs with escalated execution, not
+inside the workspace sandbox: it needs the network and the local audio device,
+and a sandboxed attempt fails in a way indistinguishable from a missing
+command. The spoken text stays fixed and low-information — it goes to a
+third-party service, and the detail belongs in the report. When every spoken
+path fails, the report says so rather than leaving the operator to assume they
+were told.
 
 ## Staging
 
