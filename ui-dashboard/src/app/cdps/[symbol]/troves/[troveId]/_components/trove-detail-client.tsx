@@ -35,6 +35,7 @@ import {
   type TroveLedgerState,
 } from "../_lib/use-trove-ledger";
 import { useTroveQueue, type TroveQueueState } from "../_lib/use-trove-queue";
+import { TroveBalanceChart } from "./trove-balance-chart";
 import { TroveDetailSkeleton } from "./trove-detail-skeleton";
 import {
   NotIndexedNotice,
@@ -497,7 +498,13 @@ function TroveSummaryPanels({
  *  the interim view's own partial-data notices) on a rollback. A ledger
  *  QUERY failure does not fall back: the gate still holds, so the ledger
  *  table renders its own error state instead of silently downgrading to a
- *  view that would misrepresent protocol rows as absent. */
+ *  view that would misrepresent protocol rows as absent.
+ *
+ *  In complete-ledger mode the balance chart mounts ABOVE the table (the
+ *  plan's layout slot between the panels row and the ledger), reading the
+ *  same one bounded `useTroveLedger` result — never its own query. The
+ *  interim view renders no chart at all: user-ops-only data would plot
+ *  redemption deltas as unexplained cliffs. */
 function TroveEventHistory({
   ledger,
   collateral,
@@ -515,18 +522,29 @@ function TroveEventHistory({
 }) {
   if (ledger.supported) {
     return (
-      <TroveLedgerTable
-        rows={ledger.rows}
-        truncated={ledger.truncated}
-        complete={ledger.complete}
-        debtSnapshotsComplete={ledger.debtSnapshotsComplete}
-        isLoading={ledger.isLoading}
-        error={ledger.error}
-        hasLoadedOnce={ledger.hasLoadedOnce}
-        chainId={collateral.chainId}
-        debtSymbol={collateral.symbol}
-        mcrBps={collateral.mcrBps}
-      />
+      <>
+        <TroveBalanceChart
+          rows={ledger.rows}
+          truncated={ledger.truncated}
+          debtSnapshotsComplete={ledger.debtSnapshotsComplete}
+          isLoading={ledger.isLoading}
+          error={ledger.error}
+          hasLoadedOnce={ledger.hasLoadedOnce}
+          debtSymbol={collateral.symbol}
+        />
+        <TroveLedgerTable
+          rows={ledger.rows}
+          truncated={ledger.truncated}
+          complete={ledger.complete}
+          debtSnapshotsComplete={ledger.debtSnapshotsComplete}
+          isLoading={ledger.isLoading}
+          error={ledger.error}
+          hasLoadedOnce={ledger.hasLoadedOnce}
+          chainId={collateral.chainId}
+          debtSymbol={collateral.symbol}
+          mcrBps={collateral.mcrBps}
+        />
+      </>
     );
   }
   return (

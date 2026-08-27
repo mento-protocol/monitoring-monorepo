@@ -11,17 +11,39 @@ import { TableSkeleton } from "@/components/skeletons";
 // lives on the trailing skeleton block so we don't nest live regions
 // (mirrors address-book/[address]/loading.tsx).
 //
-// Three post-header blocks, matching the sections the loaded view can show:
+// Four post-header blocks, matching the sections the loaded view can show:
 // the TroveLifetimeTotals | TroveRedemptionQueuePanel two-up row (the totals
 // card conditional — only for a trove with redemption/liquidation history —
-// and the queue panel always present) and TroveOperationsList (always
-// present). Which trove this is isn't known until data resolves, so the
-// totals block is reserved unconditionally; a trove without that history
-// loses a modest placeholder when it resolves, which is a smaller mismatch
-// than the alternative — a whole card appearing with no skeleton
-// anticipating it.
+// and the queue panel always present), the TroveBalanceChart card
+// (complete-ledger mode only), and the history section (always present).
+// Which trove this is — and whether the live schema serves the complete
+// ledger — isn't known until data resolves, so the totals and chart blocks
+// are reserved unconditionally; a trove without that history (or an interim
+// view without a chart) loses a placeholder when it resolves, which is a
+// smaller mismatch than the alternative — a whole card appearing with no
+// skeleton anticipating it.
 
 const SHIMMER = "animate-pulse rounded bg-slate-800/50";
+
+/** TroveBalanceChart: title + range-pill row, then the fixed-height plot
+ *  area (380px — mirrors TROVE_CHART_HEIGHT_PX in trove-balance-chart.tsx,
+ *  which keeps that height for both its two- and three-panel layouts). No
+ *  live region — the trailing history block announces loading for the
+ *  whole page. */
+function ChartCardSkeleton() {
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-1.5">
+          <div className={`h-4 w-48 ${SHIMMER}`} />
+          <div className={`h-3 w-72 max-w-full ${SHIMMER}`} />
+        </div>
+        <div className={`h-6 w-40 ${SHIMMER}`} />
+      </div>
+      <div className={`mt-4 ${SHIMMER}`} style={{ height: 380 }} />
+    </div>
+  );
+}
 
 export function TroveDetailSkeleton() {
   return (
@@ -109,6 +131,7 @@ export function TroveDetailSkeleton() {
           </div>
         </div>
       </div>
+      <ChartCardSkeleton />
       <div
         className="space-y-3"
         role="status"

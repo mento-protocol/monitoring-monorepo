@@ -67,6 +67,20 @@ vi.mock("@/components/tx-hash-cell", () => ({
   TxHashCell: ({ txHash }: { txHash: string }) => <td>{txHash}</td>,
 }));
 
+// The chart pulls in next/dynamic + Plotly; its own rendering is covered by
+// trove-balance-chart.test.tsx. Here only its mounting contract matters:
+// present in complete-ledger mode, absent from the interim view, fed by the
+// same ledger read as the table.
+vi.mock("../trove-balance-chart", () => ({
+  TroveBalanceChart: (props: { truncated: boolean; debtSymbol: string }) => (
+    <div
+      data-chart-mock="trove-balance"
+      data-truncated={String(props.truncated)}
+      data-debt-symbol={props.debtSymbol}
+    />
+  ),
+}));
+
 import {
   CDP_INTEREST_BATCH_BY_ID,
   CDP_MARKETS,
@@ -1033,6 +1047,39 @@ describe("TroveDetailClient", () => {
     expect(handle!.container.textContent).toContain(
       "Per-redemption detail pending indexer rollout",
     );
+  });
+
+  it("mounts the balance chart above the ledger table once the gate opens", () => {
+    mockQueries({
+      troveSchema: TROVE_SCHEMA_WITH_LEDGER,
+      ledgerRows: [ledgerEvent()],
+    });
+    render(handle!);
+
+    const chart = handle!.container.querySelector(
+      '[data-chart-mock="trove-balance"]',
+    );
+    expect(chart).not.toBeNull();
+    expect(chart?.getAttribute("data-truncated")).toBe("false");
+    expect(chart?.getAttribute("data-debt-symbol")).toBe("GBPm");
+    // Layout slot per the plan sketch: chart between the panels row and the
+    // ledger table.
+    const ledgerHeading = Array.from(
+      handle!.container.querySelectorAll("h2"),
+    ).find((node) => node.textContent === "Trove ledger");
+    expect(ledgerHeading).toBeDefined();
+    expect(
+      chart!.compareDocumentPosition(ledgerHeading!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("never mounts the balance chart in the interim view", () => {
+    mockQueries(); // Gate closed: user-ops-only data must not chart.
+    render(handle!);
+    expect(
+      handle!.container.querySelector('[data-chart-mock="trove-balance"]'),
+    ).toBeNull();
   });
 
   it("keeps the header cards rendered when the ledger query fails on first load", () => {

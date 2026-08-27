@@ -59,6 +59,19 @@ describe("TroveDetailSkeleton", () => {
     expect(grid?.children.length).toBe(2);
   });
 
+  it("reserves the chart card between the two-up row and the history block", () => {
+    // The loaded view mounts TroveBalanceChart (complete-ledger mode) in
+    // this slot with a fixed 380px plot area — the skeleton reserves the
+    // same card so the ledger section doesn't jump up and back down while
+    // data resolves.
+    handle = render(<TroveDetailSkeleton />);
+    const grid = handle.container.querySelector(".grid.gap-6.lg\\:grid-cols-2");
+    const chartCard = grid?.nextElementSibling;
+    expect(chartCard?.className).toContain("rounded-lg");
+    const plotArea = chartCard?.querySelector<HTMLElement>('[style*="height"]');
+    expect(plotArea?.style.height).toBe("380px");
+  });
+
   it("renders the operations section as a table-shaped skeleton, not generic bars", () => {
     // Route-level fallback must match TroveOperationsList's own loading
     // branch (TableSkeleton) — a Playwright/table element or the fixed

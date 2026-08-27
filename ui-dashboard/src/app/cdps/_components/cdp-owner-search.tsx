@@ -75,7 +75,7 @@ function useOwnerSearchUrlState() {
     typeof window !== "undefined"
       ? new URLSearchParams(window.location.search)
       : searchParams;
-  const [ownerInput, setOwnerInputState] = useState(
+  const [ownerInput, setOwnerInputState] = useState(() =>
     readOwnerParam(initialParams),
   );
 
@@ -90,6 +90,7 @@ function useOwnerSearchUrlState() {
     if (typeof window === "undefined") return;
     const current = new URLSearchParams(window.location.search);
     const next = readOwnerParam(current);
+    // react-doctor-disable-next-line effect/no-initialize-state -- the URL canonicalization must run post-hydration (the SSR pass renders the raw param; initializing with the canonical value would mismatch), same contract as useCanonicalOverviewFilterUrl
     setOwnerInputState((prev) => (prev === next ? prev : next));
     const raw = current.get(CDP_OWNER_QUERY_PARAM);
     if (raw != null && raw !== next) writeOwnerParamUrl(next);
