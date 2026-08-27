@@ -3,7 +3,7 @@ title: Quick Commands
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-25
+last_verified: 2026-08-26
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -77,6 +77,7 @@ pnpm agent:context-budget --strict # Enforce root, scoped-file, and aggregate-ro
 # /pr-ready-override gate=codex-description-approval head=<full-head-sha> reason=<why this is safe>
 pnpm --silent pr:feedback-state --pr 123 --json  # Normalize unresolved/reply-required feedback before all-clear
 pnpm pr:ready-state --pr 123 --json              # Final current-head required-readiness probe
+pnpm pr:merge --pr 123   # Human-only sanctioned merge; --not-ready-reason "<why>" overrides
 node scripts/pr/review-process-metrics.mjs --prs <pr1,pr2,...> --output <result.json>  # New cohort; define boundary + tracking issue first
 pnpm lockfile:lint                 # Fail-closed integrity + registry + override-floor check; no install needed
 pnpm skew:check                    # Fail on dependency version skew vs the pnpm catalog; no install needed
