@@ -12,7 +12,8 @@ garden_lane: agent-entry-points
 
 # AGENTS.md — Shared Config
 
-> **Architecture decisions** for this package live in [`docs/adr/`](../docs/adr/README.md) (scope: `shared-config`) — read the relevant ADR before changing how something here is built; it records why the code is built that way.
+Read the relevant [`docs/adr/`](../docs/adr/README.md) record before changing
+this package's build architecture.
 
 ## Scope
 
@@ -29,17 +30,19 @@ garden_lane: agent-entry-points
   `oracle-reporters.json` synchronized with this package. If the FX calendar
   changes, also verify trading-seconds assumptions in dashboard and indexer
   code paths.
-- Do not hand-edit `dist/` as the source of truth. Update `src/` or JSON inputs,
-  then run the package build. The build removes `dist/` before TypeScript emits
-  current output.
-- Avoid importing runtime-heavy packages here. `shared-config` is consumed by client bundle code and should stay low-dependency.
-- Public npm releases are tag-driven through `.github/workflows/publish-config.yml`; publish tags must be `config-v<shared-config/package.json version>` and reference a commit reachable from `origin/main`. Manual `workflow_dispatch` runs validate and pack the package but do not publish. Keep the publish job on GitHub-hosted runners because npm trusted publishing does not support self-hosted or third-party runners.
+- Do not hand-edit `dist/`. Update `src/` or JSON inputs, then build. The build
+  removes `dist/` before TypeScript emits current output.
+- Avoid runtime-heavy dependencies; client bundles consume `shared-config`.
+- Public npm releases use `.github/workflows/publish-config.yml`. Tags must match
+  `config-v<shared-config/package.json version>` and reference `origin/main`
+  history. Manual `workflow_dispatch` validates and packs without publishing.
+  Keep the publish job on GitHub-hosted runners; npm trusted publishing does
+  not support self-hosted or third-party runners.
 - The package's Node engine follows the repo `.node-version` throughout the pre-1.0 release line. Do not lower the engine floor without adding a matching consumer and publish verification matrix.
 
 ## Verification
 
-Run `pnpm agent:quality-gate --run`. Its shared-config mapping covers package
-lint, typecheck, tests, coverage, knip, build, direct-consumer typechecks, the
-dashboard bundle-size limit, and conditional indexer mirror checks.
-Consumer-only mappings also build this package before a command can load its
-ignored `dist/` output.
+Run `pnpm agent:quality-gate --run`. Its shared-config mapping covers lint,
+typecheck, tests, coverage, knip, clean build, direct-consumer typechecks,
+dashboard bundle size, and conditional indexer mirror checks. Consumer-only
+mappings clean-build this package before loading its ignored `dist/` output.

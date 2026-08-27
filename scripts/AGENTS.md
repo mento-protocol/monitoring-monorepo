@@ -79,18 +79,17 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   `repo-health/guardrail-prose.json` route to the guardrail suite. `ci.yml` pins
   both paths in two jobs, quick-commands names the checker, and the manifest's
   keys pin `AGENTS.md`, `CLAUDE.md` and the operating card. ADR 0073 has it.
-- **Gate runtime module pins.** Before `cd`, `agent-quality-gate.sh` loads
-  `$script_source_dir/gate/run-handles.sh`; move it with its signature,
-  self-test route, and missing-helper fixture. Coordinator files resolve there;
-  fixtures and tests hash them from `$repo_root`. Move each file with its route,
-  signature, and fixture (ADRs 0064 and 0074). The gate also resolves
-  `docs/docs-navigation-eval-helpers.mjs` and `gate/lockfile-scope.mjs` from
-  `$script_source_dir`; update all literals (ADR 0064).
+- **Gate runtime pins.** Before `cd`, `agent-quality-gate.sh` resolves
+  `gate/run-handles.sh`, coordinator files,
+  `docs/docs-navigation-eval-helpers.mjs`, and `gate/lockfile-scope.mjs` from
+  `$script_source_dir`; tests hash them from `$repo_root`. Move each path with
+  its routes, signatures, fixtures, and literals (ADRs 0064 and
+  0074).
 - **Gate mapping pins.** The signature and three Turbo inputs pin
   `gate/routing-table/**`, `gate/mapping*`, and
   `agent-autoreview-core.mjs`. Runtime hashes use `$script_source_dir`; suites
   use `$repo_root`. Core edits route both suites; missing pins freeze the stamp
-  ([ADR 0069](../docs/adr/0069-gate-routing-table-as-data.md)).
+  (ADR 0069).
 - **Evaluation fixture forbidden lists.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names the navigation
   eval's own implementation.
