@@ -143,15 +143,31 @@ Work the batch **sequentially**: claim one issue, brief its worker, then move
 to the next. Claiming ahead of the briefing would park the whole batch in
 `agent-active` while only one worker exists to move it.
 
-**Claim the specific number, never a count:**
+**Re-read eligibility immediately before each claim.** Claims are sequential,
+so minutes pass between the ranking that selected the last issue and the moment
+it is claimed. `issue:claim` checks only that the issue is open and carries a
+claimable queue label; it does not know about `risk:low`, `Blocked`, a
+dependency added to the body, or an authority cap. Run the same
+`gh issue view` read from the eligibility step again, against this issue, right
+before claiming it. An issue that stopped qualifying is dropped, not claimed —
+say so in the report and move to the next receipt entry.
+
+**Claim the specific number, never a count, and name the branch:**
 
 ```bash
-pnpm issue:claim --issue <n> --agent <name>
+pnpm issue:claim --issue <n> --agent <name> --branch <worker-branch>
 ```
 
 `--count` claims whatever the ready queue holds at that moment, which is not
 the set the receipt selected — a race with any other session silently swaps an
 issue in, and the report would then cite a receipt that never chose it.
+
+`--branch` is not optional here. Without it the helper falls back to the
+current checkout's branch, and the orchestrator runs this command from its own
+session — so every claim would file the orchestrator's branch in the Project
+`Branch` field and in the permanent claim comment, pointing every human at one
+checkout that owns none of the work. Decide the worker's branch name before
+claiming and pass it.
 
 `<name>` is the runtime actually running the sweep — `claude` or `codex`. This
 skill is mirrored to both stores, so a hard-coded name would file every Codex
@@ -174,25 +190,39 @@ printed: the printed batch is the audit record of what this sweep worked on,
 and an unannounced substitute makes that record wrong. When the receipt is
 exhausted, finish with the smaller batch.
 
+**A claim the sweep cannot staff is released at once.** Spawning a worker can
+fail — a runtime's concurrent-agent limit, a transient error — and the issue is
+already `agent-active` by then. Release it immediately with
+`pnpm issue:release --issue <n>`, comment why, and record it in the report.
+Leaving a claimed issue with no worker parks it where nothing will pick it up.
+This is also the reason the batch is claimed one issue at a time: the failure
+costs one release rather than the whole batch.
+
 Then spawn one worker subagent per issue. Give each a brief containing:
 
 - **Its own checkout.** Clone to `/private/tmp/claude/sweep-<issue>`, with
   `issue` holding the number:
 
   ```bash
-  root=/private/tmp/claude          # or "$TMPDIR" where that root is unwritable
-  mkdir -p "$root"
+  repo=https://github.com/mento-protocol/monitoring-monorepo
+  root=/private/tmp/claude
+  if ! mkdir -p "$root" 2>/dev/null || [ ! -w "$root" ]; then
+    root="${TMPDIR:-/tmp}/claude-sweep"   # unwritable default: fall back
+    mkdir -p "$root" || exit 1
+  fi
   dir="$root/sweep-${issue}"
 
   if [ -e "$dir/.git/sweep-owner" ] &&
      [ "$(cat "$dir/.git/sweep-owner")" = "$sweep_id" ]; then
     :                               # this sweep's own checkout: resume in it
-  elif [ -e "$dir" ]; then
-    dir="$dir-$(date +%s)"          # someone else's or unproven: fresh path
-    git clone https://github.com/mento-protocol/monitoring-monorepo "$dir"
-    printf '%s\n' "$sweep_id" > "$dir/.git/sweep-owner"
   else
-    git clone https://github.com/mento-protocol/monitoring-monorepo "$dir"
+    if [ -e "$dir" ]; then          # someone else's or unproven: fresh path
+      for n in $(seq 2 50); do
+        if mkdir "$dir-$n" 2>/dev/null; then dir="$dir-$n"; break; fi
+        [ "$n" -lt 50 ] || exit 1   # never reuse a path you did not allocate
+      done
+    fi
+    git clone "$repo" "$dir"
     printf '%s\n' "$sweep_id" > "$dir/.git/sweep-owner"
   fi
   ```
@@ -203,19 +233,30 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   after the clone: the marker is what the next run reads, so a clone that
   skipped this step can never be resumed, only abandoned for a fresh path.
 
-  Create the parent first. `git clone` does not create intermediate
-  directories, and the sweep root is not guaranteed on a fresh machine or in
-  the Codex runtime this skill is also mirrored into — so a missing parent
-  fails the very first command of every worker.
+  Create the parent first, and prove it writable rather than assuming it.
+  `git clone` does not create intermediate directories, and the sweep root is
+  not guaranteed on a fresh machine or in the Codex runtime this skill is also
+  mirrored into — so a missing or read-only parent fails the very first command
+  of every worker. `mkdir -p` alone does not settle it: it succeeds on a
+  directory that already exists and cannot be written.
+
+  The fresh path is allocated with `mkdir`, not stamped with a timestamp. Two
+  workers displaced in the same second would derive the same `-$(date +%s)`
+  name, and `mkdir` is the atomic claim that makes the loser take the next
+  suffix instead.
 
   In Claude Code, subagents inherit the parent session's Bash worktree pin, so
   git in a sibling worktree under `.claude/worktrees/` is refused for them, and
   a tmp clone is the only checkout those workers can use. The general rule
   outlives that specific block: every worker gets an isolated checkout — a
   clone or a worktree — that its own runtime can actually write to, because two
-  workers in one checkout is the failure this is preventing. Then
-  `pnpm install --frozen-lockfile` unsandboxed, and `./scripts/setup.sh` when
-  hooks require it. Branch from `origin/main`.
+  workers in one checkout is the failure this is preventing. Then run
+  `./scripts/setup.sh` unsandboxed in **every** new clone, not conditionally.
+  It is what sets `core.hooksPath` to `.trunk/hooks`, so a clone that only ran
+  `pnpm install` has no pre-push hook — and a worker there could push without
+  the gate the boundaries below forbid bypassing. It also owns codegen and the
+  browser dependencies, and skips its own work when the inputs are unchanged.
+  Branch from `origin/main`.
 
   **The path is deterministic, so check it before cloning.** The same issue
   number produces the same directory, and `git clone` fails outright into one
@@ -251,17 +292,29 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   what covers the rest, since it spans scheduler admission, a command lease, a
   coalesced result, and an older legacy holder.
 
-  **Poll within the turn.** A worker that ends its turn to wait for the gate
-  never wakes: subagents die at turn end, and a backgrounded process they were
-  waiting on has no one left to notice it finished. Loop on the process inside
-  the same turn until it exits.
+  **Background it with the runtime's own mechanism, then poll within the
+  turn.** The command above is written foreground; do not run it that way for a
+  full gate. Start it the way the runtime backgrounds work — in Claude Code the
+  Bash tool's background mode, not a trailing `&` — and poll it to completion
+  inside the same turn. Judge the run by its exit status, never by the tail of
+  its log. A worker that instead ends its turn to wait never wakes: subagents
+  die at turn end, and a backgrounded process they were waiting on has no one
+  left to notice it finished.
 
-- **The closeout:** bare `pnpm agent:autoreview`. When the codex engine is
-  unavailable, fall back to `pnpm agent:autoreview --engine claude`, with the
-  `claude` CLI's install directory prepended to `PATH` — a worker subagent does
-  not always inherit the interactive shell's `PATH`, and the fallback engine
-  then reports as unavailable too. Address the real findings; an unexplained
-  strengthening of a validation claim is itself a finding.
+- **The closeout**, chosen by the runtime the worker is in. Outside an active
+  Codex session, bare `pnpm agent:autoreview`; when the codex engine is
+  unavailable, `pnpm agent:autoreview --engine claude`, with the `claude` CLI's
+  install directory prepended to `PATH` — a worker subagent does not always
+  inherit the interactive shell's `PATH`, and the fallback engine then reports
+  as unavailable too. **Inside an active Codex session the bare command is not
+  the closeout**: it silently selects the local deterministic engine, so no
+  separate reviewer sees the bundle. Use the prepared-bundle fresh-context flow
+  with its manifest checks before and after review, which
+  [`pr-operating-card.md`](../../../docs/notes/pr-operating-card.md) owns — this
+  skill defers to it rather than carrying a second copy of the commands.
+  Address the real findings; an unexplained strengthening of a validation claim
+  is itself a finding, and testing those claims is the worker's own job, not
+  the bundled reviewer's.
 - **The ship:** full repo PR template, all four sections, **ready for review,
   never a draft**. A draft disables CodeRabbit auto-review and the PR
   description check, so it is skipping review rather than staging it. Then
@@ -328,10 +381,15 @@ limit to reset, then wake the existing worker where it stopped.
 
 **Direct a reclassification after five review-triggered patch cycles.** The
 operating card allows five and requires a pause before a sixth. At that point
-tell the worker to stop patching: answer the remaining findings as
-evidence-backed won't-fix, or file deferral issues and link them from
-`## Deferrals`. A converging bot loop costs a review round per push and does
-not end on its own.
+tell the worker to stop patching and classify what is left, honestly, in one of
+three ways: an evidence-backed won't-fix; a deferral with its issue filed and
+linked from `## Deferrals`; or — for a finding that is valid, in scope, and
+genuinely still required — a hand-off. A required fix is neither a won't-fix
+nor a deferral, and mislabelling it to end the loop is the failure this rule
+exists to prevent. A handed-off PR goes in the report as an operator decision
+and is **not** reported as READY, whatever its ready-state line says. A
+converging bot loop costs a review round per push and does not end on its own,
+but neither does an unfixed defect.
 
 ## Hard Boundaries
 

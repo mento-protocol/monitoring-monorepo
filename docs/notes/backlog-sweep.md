@@ -42,10 +42,21 @@ then holds about 60 seconds — a cheap abort for an operator still watching —
 on a wait that ends by itself. It never blocks on an answer, which would strand
 every batch started by an operator who is no longer there.
 
+Claims are sequential, so eligibility is re-read against each issue immediately
+before it is claimed rather than trusted from the ranking: `issue:claim` checks
+only that the issue is open and queue-claimable, and `risk:low`, `Blocked`, a
+new dependency, or an authority cap can all have changed in between. Each claim
+also passes `--branch` with the worker's branch name — without it the helper
+falls back to the orchestrator's own branch and files that in the Project
+`Branch` field and the claim comment, pointing every reader at a checkout that
+owns none of the work.
+
 A claim can lose a race to another session between ranking and claiming, so
 each claim result is read before its worker is briefed. Only a successful claim
 gets a worker; a refused one is recorded in the report, and an exhausted receipt
-finishes with a smaller batch. A replacement drawn from the next eligible
+finishes with a smaller batch. A claim the sweep then cannot staff — a spawn
+that fails on a runtime's concurrency limit or any other error — is released
+immediately rather than left parked in `agent-active` with no worker. A replacement drawn from the next eligible
 receipt entry is printed before it is claimed, like the original batch — the
 printed batch is the record of what the sweep worked on, and an unannounced
 substitute makes that record wrong.
@@ -78,10 +89,17 @@ abandoned for a fresh path. Remote and branch are not that
 proof: a second
 sweep of the same issue reproduces both, so matching on them alone also accepts
 a checkout another live worker is committing from. Anything else yields a fresh
-unique path plus a line in the report. A checkout
-whose contents have not been established is never deleted; it can hold
-uncommitted work, and nothing available to the sweep tells that apart from
-litter.
+path plus a line in the report, and that path is allocated with `mkdir` rather
+than stamped with a timestamp — two workers displaced in the same second would
+derive the same name, and the atomic claim is what sends the loser to the next
+suffix. A checkout whose contents have not been established is never deleted;
+it can hold uncommitted work, and nothing available to the sweep tells that
+apart from litter.
+
+Every new clone runs `./scripts/setup.sh`, unconditionally. That script sets
+`core.hooksPath`, so a clone that only ran `pnpm install` has no pre-push hook
+— and a worker there could push without the gate these boundaries forbid
+bypassing.
 
 The split exists because subagents cannot wait across turns. A subagent that
 ends its turn to wait for a gate stalls permanently — nothing re-invokes it,
@@ -187,10 +205,13 @@ survive the night:
   re-claims an issue already `agent-active`, re-runs a passed gate, and can
   open a second PR on the same branch.
 - **Reclassify after five review-triggered patch cycles.** The operating card
-  allows five and requires a pause before a sixth. At that point the worker
-  stops patching and answers the rest as evidence-backed won't-fix or as
-  deferrals with issues filed. A converging bot loop costs a review round per
-  push and does not end on its own.
+  allows five and requires a pause before a sixth. The worker then stops
+  patching and classifies what is left as an evidence-backed won't-fix, a
+  deferral with its issue filed, or — when the finding is valid, in scope, and
+  still required — a hand-off that goes in the report as an operator decision
+  and is not reported as READY. A required fix is neither a won't-fix nor a
+  deferral. A converging bot loop costs a review round per push and does not
+  end on its own; neither does an unfixed defect.
 
 ## Boundaries
 
