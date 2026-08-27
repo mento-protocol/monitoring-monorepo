@@ -13,13 +13,13 @@ export const TROVE_STATUSES = [
   "redeemed",
 ] as const;
 
-export type TroveStatus = (typeof TROVE_STATUSES)[number];
+type TroveStatus = (typeof TROVE_STATUSES)[number];
 
-export function isKnownTroveStatus(status: string): status is TroveStatus {
+function isKnownTroveStatus(status: string): status is TroveStatus {
   return (TROVE_STATUSES as readonly string[]).includes(status);
 }
 
-export const TROVE_STATUS_LABELS: Record<TroveStatus, string> = {
+const TROVE_STATUS_LABELS: Record<TroveStatus, string> = {
   active: "Active",
   zombie: "Zombie",
   closed: "Closed",
@@ -30,7 +30,7 @@ export const TROVE_STATUS_LABELS: Record<TroveStatus, string> = {
 // Tooltip copy for the two non-obvious states is the design doc's own
 // language (PLAN-trove-history-page.md:443-445); active/closed/liquidated are
 // spelled out to match that same plain, one-sentence register.
-export const TROVE_STATUS_TOOLTIPS: Record<TroveStatus, string> = {
+const TROVE_STATUS_TOOLTIPS: Record<TroveStatus, string> = {
   active: "Open with debt at or above the market minimum.",
   zombie:
     "Debt below the market minimum after a redemption; unredeemable until adjusted.",
@@ -41,7 +41,7 @@ export const TROVE_STATUS_TOOLTIPS: Record<TroveStatus, string> = {
     "Fully redeemed to zero. Stays a zombie on-chain; the indexer distinguishes it because no debt remains.",
 };
 
-export const TROVE_STATUS_BADGE_CLASSES: Record<TroveStatus, string> = {
+const TROVE_STATUS_BADGE_CLASSES: Record<TroveStatus, string> = {
   active: "bg-emerald-500/10 text-emerald-300 border-emerald-700/40",
   zombie: "bg-amber-500/10 text-amber-300 border-amber-700/40",
   closed: "bg-slate-500/10 text-slate-300 border-slate-600/40",

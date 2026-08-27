@@ -78,14 +78,6 @@ export function TroveHeaderCard({
   trove: CdpTrove;
   collateral: CdpCollateral;
 }) {
-  const icrTimestamp = formatTimestamp(trove.lastUpdatedAt);
-  const icrTitle =
-    trove.icrBps < 0
-      ? `Indexed ICR unavailable. Row last updated at ${icrTimestamp}.`
-      : `Indexed ICR as of ${icrTimestamp}.\nNot a live RPC or oracle read.`;
-  const endedAt = trove.closedAt ?? null;
-  const endedTxHash = trove.closedTxHash ?? null;
-
   return (
     <header className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -107,79 +99,102 @@ export function TroveHeaderCard({
         </a>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-3 lg:grid-cols-6">
-        <div>
-          <StatLabel>Owner</StatLabel>
-          <StatValue>
-            <AddressLink address={trove.owner} chainId={collateral.chainId} />
-          </StatValue>
-        </div>
-        <div>
-          <StatLabel>Opened</StatLabel>
-          <StatValue>
-            <EventTimeLink
-              timestamp={trove.openedAt}
-              txHash={trove.openedTxHash}
-              chainId={collateral.chainId}
-              prefix="Opened at"
-            />
-          </StatValue>
-        </div>
-        <div>
-          <StatLabel>{endedAt == null ? "Last updated" : "Closed"}</StatLabel>
-          <StatValue>
-            <EventTimeLink
-              timestamp={endedAt ?? trove.lastUpdatedAt}
-              txHash={endedTxHash ?? trove.lastUpdatedTxHash}
-              chainId={collateral.chainId}
-              prefix={endedAt == null ? "Updated at" : "Closed at"}
-            />
-          </StatValue>
-        </div>
-        <div>
-          <StatLabel>Rate</StatLabel>
-          <StatValue>
-            {formatInterestRate(trove.interestRate)}
-            {trove.interestBatchId != null && (
-              <span className="ml-1 text-[10px] text-slate-500">Batch</span>
-            )}
-          </StatValue>
-        </div>
-        <div>
-          <StatLabel>Collateral</StatLabel>
-          <StatValue>{formatTokenAmount(trove.coll, "USDm")}</StatValue>
-        </div>
-        <div>
-          <StatLabel>
-            Debt
-            <Tooltip
-              content={`Recorded at the last indexed event (${icrTimestamp}). Interest has accrued since — this is not a live contract read.`}
-              label="About the debt figure's staleness"
-            />
-          </StatLabel>
-          <StatValue>
-            {formatTokenAmount(trove.debt, collateral.symbol)}
-          </StatValue>
-        </div>
-        <div>
-          <StatLabel>ICR</StatLabel>
-          <StatValue>
-            <Tooltip content={icrTitle} asChild>
-              <span className={icrTextClass(trove.icrBps, collateral.mcrBps)}>
-                {formatBpsPercent(trove.icrBps)}
-              </span>
-            </Tooltip>
-            <span className="ml-1 text-[10px] text-slate-500">
-              (MCR {formatBpsPercent(collateral.mcrBps)})
-            </span>
-          </StatValue>
-        </div>
-      </div>
+      <TroveHeaderStats trove={trove} collateral={collateral} />
 
       <p className="mt-4 text-xs text-slate-500">
         Values shown are indexed as of the last recorded event (
         {relativeTime(trove.lastUpdatedAt)}) — not a live RPC or oracle read.
       </p>
     </header>
+  );
+}
+
+/** The stat grid (owner/opened/closed-or-updated/rate/coll/debt/ICR) — split
+ *  out of {@link TroveHeaderCard} to stay under the file's max-lines-per-
+ *  function lint budget. */
+function TroveHeaderStats({
+  trove,
+  collateral,
+}: {
+  trove: CdpTrove;
+  collateral: CdpCollateral;
+}) {
+  const icrTimestamp = formatTimestamp(trove.lastUpdatedAt);
+  const icrTitle =
+    trove.icrBps < 0
+      ? `Indexed ICR unavailable. Row last updated at ${icrTimestamp}.`
+      : `Indexed ICR as of ${icrTimestamp}.\nNot a live RPC or oracle read.`;
+  const endedAt = trove.closedAt ?? null;
+  const endedTxHash = trove.closedTxHash ?? null;
+
+  return (
+    <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-3 lg:grid-cols-6">
+      <div>
+        <StatLabel>Owner</StatLabel>
+        <StatValue>
+          <AddressLink address={trove.owner} chainId={collateral.chainId} />
+        </StatValue>
+      </div>
+      <div>
+        <StatLabel>Opened</StatLabel>
+        <StatValue>
+          <EventTimeLink
+            timestamp={trove.openedAt}
+            txHash={trove.openedTxHash}
+            chainId={collateral.chainId}
+            prefix="Opened at"
+          />
+        </StatValue>
+      </div>
+      <div>
+        <StatLabel>{endedAt == null ? "Last updated" : "Closed"}</StatLabel>
+        <StatValue>
+          <EventTimeLink
+            timestamp={endedAt ?? trove.lastUpdatedAt}
+            txHash={endedTxHash ?? trove.lastUpdatedTxHash}
+            chainId={collateral.chainId}
+            prefix={endedAt == null ? "Updated at" : "Closed at"}
+          />
+        </StatValue>
+      </div>
+      <div>
+        <StatLabel>Rate</StatLabel>
+        <StatValue>
+          {formatInterestRate(trove.interestRate)}
+          {trove.interestBatchId != null && (
+            <span className="ml-1 text-[10px] text-slate-500">Batch</span>
+          )}
+        </StatValue>
+      </div>
+      <div>
+        <StatLabel>Collateral</StatLabel>
+        <StatValue>{formatTokenAmount(trove.coll, "USDm")}</StatValue>
+      </div>
+      <div>
+        <StatLabel>
+          Debt
+          <Tooltip
+            content={`Recorded at the last indexed event (${icrTimestamp}). Interest has accrued since — this is not a live contract read.`}
+            label="About the debt figure's staleness"
+          />
+        </StatLabel>
+        <StatValue>
+          {formatTokenAmount(trove.debt, collateral.symbol)}
+        </StatValue>
+      </div>
+      <div>
+        <StatLabel>ICR</StatLabel>
+        <StatValue>
+          <Tooltip content={icrTitle} asChild>
+            <span className={icrTextClass(trove.icrBps, collateral.mcrBps)}>
+              {formatBpsPercent(trove.icrBps)}
+            </span>
+          </Tooltip>
+          <span className="ml-1 text-[10px] text-slate-500">
+            (MCR {formatBpsPercent(collateral.mcrBps)})
+          </span>
+        </StatValue>
+      </div>
+    </div>
   );
 }
