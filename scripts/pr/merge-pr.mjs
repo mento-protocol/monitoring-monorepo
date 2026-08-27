@@ -407,6 +407,32 @@ export async function mergePullRequest({
     };
   }
 
+  // MERGED alone does not mean this run's merge landed. If the head moved after
+  // the final gate read and something else merged the new one, our
+  // `--match-head-commit` request fails while this read still says MERGED —
+  // and the consent record would then name a commit GitHub never merged.
+  if (
+    outcome.headRefOid !== "" &&
+    outcome.headRefOid !== approved.headOid.toLowerCase()
+  ) {
+    stdout.write(
+      `WARNING: ${repos.base}#${number} is MERGED at ${outcome.headRefOid}, not the ` +
+        `${approved.headOid} you approved. Something else merged a newer head. ` +
+        `The consent record names the head you saw, which is not what landed — ` +
+        `review ${outcome.baseRefName} now.\n`,
+    );
+    return {
+      merged: true,
+      verified: false,
+      headMismatch: true,
+      state: outcome.state,
+      baseRefName: outcome.baseRefName,
+      mergedHeadOid: outcome.headRefOid,
+      record,
+      consentPath,
+    };
+  }
+
   // GitHub says MERGED, so a failing merge command was a reporting failure
   // rather than a merge failure. Say so instead of hiding it.
   if (mergeError) {

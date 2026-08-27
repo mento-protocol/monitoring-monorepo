@@ -182,12 +182,13 @@ export async function readMergeOutcome({ gh, repo, number }) {
       "--repo",
       repo,
       "--json",
-      "state,mergeCommit,baseRefName",
+      "state,mergeCommit,baseRefName,headRefOid",
     ]),
   );
   return {
     state: String(parsed?.state ?? "").toUpperCase(),
     mergeCommit: parsed?.mergeCommit?.oid ?? null,
     baseRefName: String(parsed?.baseRefName ?? ""),
+    headRefOid: String(parsed?.headRefOid ?? "").toLowerCase(),
   };
 }

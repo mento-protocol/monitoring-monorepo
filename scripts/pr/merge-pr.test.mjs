@@ -197,6 +197,7 @@ function harness({
   mergeOutcomeError = null,
   disableAutoError = null,
   mergeCommandError = null,
+  mergedHeadOid = null,
   // The base the pull request reports AFTER the merge. A retarget between the
   // final gate read and GitHub processing the merge shows up only here.
   mergedBaseRefName = null,
@@ -254,6 +255,7 @@ function harness({
         state: mergedState,
         mergeCommit: mergedState === "MERGED" ? { oid: "b".repeat(40) } : null,
         baseRefName: mergedBaseRefName ?? "main",
+        headRefOid: mergedHeadOid ?? HEAD_OID,
       });
     }
     throw new Error(`unexpected gh call: ${args.join(" ")}`);
@@ -1792,6 +1794,23 @@ await test("an unreadable outcome cancels any pending request", async () => {
       args.includes("--disable-auto"),
   );
   assert(cancel !== undefined, "an unreadable outcome must still cancel");
+});
+
+await test("a merge of a head nobody approved is not a verified merge", async () => {
+  // If the head moved and something else merged the new one, our
+  // --match-head-commit request fails while the PR still reads MERGED. The
+  // consent record would then name a commit GitHub never merged.
+  const h = harness({ mergedHeadOid: "c".repeat(40) });
+  const result = await h.run();
+
+  assertEqual(result.merged, true, "GitHub did merge something");
+  assertEqual(result.verified, false, "but not the approved head");
+  assertEqual(result.headMismatch, true);
+  assertEqual(exitCodeForResult(result), 1, "the shell must not chain past it");
+  assert(
+    h.output().includes("not the " + HEAD_OID + " you approved"),
+    `the operator must be told, got:\n${h.output()}`,
+  );
 });
 
 await test("only a confirmed merge exits zero", async () => {
