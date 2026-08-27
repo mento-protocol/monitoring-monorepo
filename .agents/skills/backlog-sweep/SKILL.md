@@ -115,12 +115,17 @@ to the next. Claiming ahead of the briefing would park the whole batch in
 **Claim the specific number, never a count:**
 
 ```bash
-pnpm issue:claim --issue <n> --agent claude
+pnpm issue:claim --issue <n> --agent <name>
 ```
 
 `--count` claims whatever the ready queue holds at that moment, which is not
 the set the receipt selected — a race with any other session silently swaps an
 issue in, and the report would then cite a receipt that never chose it.
+
+`<name>` is the runtime actually running the sweep — `claude` or `codex`. This
+skill is mirrored to both stores, so a hard-coded name would file every Codex
+sweep's claim under the wrong owner, and the claim comment and Project `Agent`
+field are what a human reads to find the session holding an issue.
 
 Then spawn one worker subagent per issue. Give each a brief containing:
 
@@ -137,6 +142,16 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   a preference; it is the only checkout a worker can use. Then
   `pnpm install --frozen-lockfile` unsandboxed, and `./scripts/setup.sh` when
   hooks require it. Branch from `origin/main`.
+
+  **The path is deterministic, so check it before cloning.** The same issue
+  number produces the same directory, and `git clone` fails outright into one
+  that already exists — from an interrupted run, or from an earlier sweep of an
+  issue that was released and later re-selected. When the directory is there,
+  read it: a clone whose `origin` is this repository and whose branch belongs to
+  this issue is resumable, and the worker continues in it. Anything else gets a
+  fresh unique path, and the conflict is named in the report. **Never delete a
+  checkout whose contents you have not established** — it may hold another
+  session's uncommitted work, and nothing here can tell that apart from litter.
 
 - **The loop:** [`pr-operating-card.md`](../../../docs/notes/pr-operating-card.md)
   steps 2-7, end to end. Implement surgically — touch only what the issue

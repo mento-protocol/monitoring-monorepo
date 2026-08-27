@@ -48,6 +48,15 @@ PR. Workers never share a checkout: a repair applied through another worker's
 clone lands on the wrong branch, and the worker that owns that branch has no
 way to notice.
 
+A worker's clone path is derived from its issue number, so it is deterministic
+and can already exist — an interrupted run leaves one behind, and a released
+issue can be selected again later. An existing directory is inspected rather
+than assumed: one whose remote and branch match this issue is resumed, and
+anything else yields a fresh unique path plus a line in the report. A checkout
+whose contents have not been established is never deleted; it can hold
+uncommitted work, and nothing available to the sweep tells that apart from
+litter.
+
 The split exists because subagents cannot wait. A subagent that ends its turn
 to wait for a gate stalls permanently — nothing re-invokes it, and the
 background process it was waiting on has no one left to observe it. The
