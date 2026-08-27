@@ -402,7 +402,7 @@ bucket order, the five post-passes, the root-manifest classifier). Both are
 routed by a change to the engine or the table, and the routing-table suite also
 runs in the required `ci` job.
 
-### Scheduling contract (Refs #1802, #2006; [ADR 0073](../adr/0073-fair-quality-gate-coordinator.md))
+### Scheduling contract (Refs #1802, #2006; [ADR 0074](../adr/0074-fair-quality-gate-coordinator.md))
 
 `--run` requests share a transient machine-wide coordinator. The coordinator
 admits independent work from different worktrees under a weighted capacity. It
@@ -577,15 +577,21 @@ budget, and safe digests of material environment inputs. The implementation
 signature includes `.trunk/trunk.yaml`; it does not probe the installed Trunk
 version. The leader revalidates the key before its first command and before it
 publishes the result. Each waiter revalidates its local key before it accepts
-that result.
+that result. A plan that runs the Aegis Forge tests also binds the expected and
+actual checkout state of the tracked Aegis submodules. It distinguishes missing
+and uninitialized checkouts. It rejects dirty submodule worktrees and hidden
+index states such as `assume-unchanged` and `skip-worktree`.
 
 The environment digest preserves PATH order and duplicates. It normalizes each
-PATH entry that resolves exactly to a material package root's
+absolute PATH entry that resolves exactly to a material package root's
 `node_modules/.bin` and a `PNPM_SCRIPT_SRC_DIR` or `INIT_CWD` that resolves
 exactly to the current worktree root. It also binds the effective `TMPDIR` and
 each visible `TMP` or `TEMP` value. The gate-owned
 `.tmp/agent-quality-gate` fallback uses a worktree token so equivalent fallback
 paths can coalesce across worktrees. Other temp paths remain exact. The
+digest preserves relative PATH entries and selected relative path settings. It
+also binds their physical working directory. This rule covers selected repo,
+loader, tool configuration, structured, lifecycle-root, and temp values. The
 selected values include standard proxy settings, GitHub base-event inputs,
 parent-consumed quality-gate self-test controls, and nonsecret tool controls.
 Different selected values cannot share a mapped verdict. The mapped-command

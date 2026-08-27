@@ -6340,6 +6340,7 @@ gate_coordinator_execution_head=""
 gate_coordinator_freshness_context_hash() {
   local os_name os_arch node_path node_version pnpm_path pnpm_version
   local env_digest policy_hash runtime_hash repository_identity
+  local submodule_state
   [[ "$gate_mapped_child_scrub_policy_hash" =~ ^[a-f0-9]{64}$ ]] || return 1
   gate_coordinator_assert_scrub_policy_current || return 1
   os_name="$(uname -s)" || return 1
@@ -6353,8 +6354,11 @@ gate_coordinator_freshness_context_hash() {
   [[ "$policy_hash" =~ ^[a-f0-9]{64}$ ]] || return 1
   runtime_hash="$(gate_coordinator_runtime_signature)" || return 1
   repository_identity="$(gate_coordinator_repository_identity)" || return 1
+  submodule_state="$(
+    gate_coordinator_submodule_state_hash "$command_plan_file"
+  )" || return 1
   printf '%s\n' \
-    "schema=v1" "repository=${repository_identity}" \
+    "schema=v2" "repository=${repository_identity}" \
     "commandTimeout=${command_timeout_seconds}" \
     "gateSelftestTimeout=${gate_selftest_timeout_seconds}" \
     "gateLockWait=${gate_lock_wait_seconds}" \
@@ -6363,6 +6367,7 @@ gate_coordinator_freshness_context_hash() {
     "node=${node_version}" "pnpmPath=${pnpm_path}" \
     "pnpm=${pnpm_version}" "policy=${policy_hash}" \
     "runtime=${runtime_hash}" "environment=${env_digest}" \
+    "submodules=${submodule_state}" \
     "mappedChildScrubPolicy=${gate_mapped_child_scrub_policy_hash}" |
     hash_stream
 }
@@ -7280,11 +7285,13 @@ trunk_arm_is_environment_blocked() {
 
 # A parallel or sanitized command shell cannot mutate this parent shell's
 # cached launcher-probe state. Its authenticated result file carries that
-# verdict back. Prefer that verdict, then classify linter-download failures
+# verdict back. Prefer that verdict, then classify download failures
 # from the command transcript in this process.
 trunk_arm_is_environment_blocked_with_launcher_verdict() {
   local output_file="$1"
   local launcher_blocked="$2"
+
+  trunk_environment_blocked_kind=""
 
   if [[ "$launcher_blocked" == true ]]; then
     trunk_provisioning_state=blocked
@@ -7297,7 +7304,11 @@ trunk_arm_is_environment_blocked_with_launcher_verdict() {
   # succeeded. Do not probe again after the command lease is released.
   trunk_provisioning_state=ok
   if trunk_check_output_is_environment_blocked "$output_file"; then
-    trunk_environment_blocked_kind=linters
+    if [[ "$trunk_check_blocked_shape" == plugin ]]; then
+      trunk_environment_blocked_kind=plugin
+    else
+      trunk_environment_blocked_kind=linters
+    fi
     trunk_arm_environment_blocked=true
     return 0
   fi

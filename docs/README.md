@@ -198,7 +198,7 @@ Authority: canonical
 - [`docs/adr/0070-sentry-requeue-settlement-sentinel.md`](adr/0070-sentry-requeue-settlement-sentinel.md) — A withheld terminal label serializes the Sentry archive settlement against the triage re-queue
 - [`docs/adr/0071-susds-launch-aligned-daily-sampler.md`](adr/0071-susds-launch-aligned-daily-sampler.md) — sUSDS actuals use a launch-aligned bounded daily sampler
 - [`docs/adr/0072-md-only-docs-checks-job.md`](adr/0072-md-only-docs-checks-job.md) — The Markdown globs route to a small docs-checks CI job instead of the scripts job
-- [`docs/adr/0073-fair-quality-gate-coordinator.md`](adr/0073-fair-quality-gate-coordinator.md) — Fair local quality-gate coordination across worktrees
+- [`docs/adr/0074-fair-quality-gate-coordinator.md`](adr/0074-fair-quality-gate-coordinator.md) — Fair local quality-gate coordination across worktrees
 
 Authority: non-canonical
 

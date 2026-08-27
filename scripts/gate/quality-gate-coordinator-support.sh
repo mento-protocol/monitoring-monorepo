@@ -91,6 +91,79 @@ gate_coordinator_repository_identity() {
   (cd "$common_dir" 2>/dev/null && pwd -P) | hash_stream
 }
 
+gate_coordinator_reject_hidden_index_state() {
+  local checkout="$1" label="$2" index_state hidden
+  index_state="$(git -C "$checkout" ls-files -v -- 2>/dev/null)" || { echo "error: Aegis submodule index state could not be read: ${label}" >&2; return 1; }
+  hidden="$(LC_ALL=C awk 'substr($0, 1, 1) == "S" || substr($0, 1, 1) ~ /^[a-z]$/ { found=1 } END { if (found) print "yes" }' <<< "$index_state")" || return 1
+  [[ "$hidden" != yes ]] || { echo "error: Aegis submodule checkout has hidden index state: ${label}" >&2; return 1; }
+}
+
+gate_coordinator_aegis_submodule_snapshot() {
+  local path index_entry mode expected_oid stage indexed_path extra absolute_path
+  local physical_path top_level actual_oid dirty_status nested_status first_entry
+  local nested_line nested_prefix nested_oid nested_path
+  printf 'aegis-submodule-state-v1\n'
+  for path in aegis/lib/forge-std aegis/lib/prb-math; do
+    index_entry="$(git -C "$repo_root" ls-files --stage -- "$path")" || return 1
+    IFS=$' \t' read -r mode expected_oid stage indexed_path extra <<< "$index_entry"
+    if [[ "$mode" != 160000 || ! "$expected_oid" =~ ^[a-f0-9]{40}([a-f0-9]{24})?$ ||
+      "$stage" != 0 || "$indexed_path" != "$path" || -n "$extra" || "$index_entry" == *$'\n'* ]]; then
+      echo "error: indexed Aegis submodule entry is malformed: ${path}" >&2; return 1
+    fi
+    printf 'path=%s expected=%s ' "$path" "$expected_oid"
+    absolute_path="$repo_root/$path"
+    if [[ ! -e "$absolute_path" && ! -L "$absolute_path" ]]; then printf 'state=missing\n'; continue; fi
+    if [[ -L "$absolute_path" ]]; then echo "error: Aegis submodule path is a symlink: ${path}" >&2; return 1; fi
+    if [[ ! -d "$absolute_path" ]]; then echo "error: Aegis submodule path is not a directory: ${path}" >&2; return 1; fi
+    if [[ ! -e "$absolute_path/.git" && ! -L "$absolute_path/.git" ]]; then
+      first_entry="$(find "$absolute_path" -mindepth 1 -maxdepth 1 -print -quit)" || {
+        echo "error: uninitialized Aegis submodule path could not be read: ${path}" >&2; return 1
+      }
+      if [[ -n "$first_entry" ]]; then echo "error: uninitialized Aegis submodule path is not empty: ${path}" >&2; return 1; fi
+      printf 'state=uninitialized\n'; continue
+    fi
+    physical_path="$(cd "$absolute_path" 2>/dev/null && pwd -P)" || return 1
+    top_level="$(git -C "$absolute_path" rev-parse --show-toplevel 2>/dev/null)" || { echo "error: Aegis submodule checkout is invalid: ${path}" >&2; return 1; }
+    top_level="$(cd "$top_level" 2>/dev/null && pwd -P)" || return 1
+    if [[ "$top_level" != "$physical_path" ]]; then echo "error: Aegis submodule checkout resolves outside its path: ${path}" >&2; return 1; fi
+    actual_oid="$(git -C "$absolute_path" rev-parse --verify 'HEAD^{commit}' 2>/dev/null)" || { echo "error: Aegis submodule HEAD is invalid: ${path}" >&2; return 1; }
+    [[ "$actual_oid" =~ ^[a-f0-9]{40}([a-f0-9]{24})?$ ]] || return 1
+    gate_coordinator_reject_hidden_index_state "$absolute_path" "$path" || return 1
+    dirty_status="$(git -C "$absolute_path" status --porcelain=v2 --untracked-files=all \
+      --ignore-submodules=none 2>/dev/null)" || {
+      echo "error: Aegis submodule status could not be read: ${path}" >&2; return 1
+    }
+    if [[ -n "$dirty_status" ]]; then echo "error: Aegis submodule checkout is dirty: ${path}" >&2; return 1; fi
+    printf 'state=initialized actual=%s\n' "$actual_oid"
+    nested_status="$(git -C "$absolute_path" submodule status --recursive 2>/dev/null)" || {
+      echo "error: nested Aegis submodule status could not be read: ${path}" >&2; return 1
+    }
+    while IFS= read -r nested_line; do
+      [[ -n "$nested_line" ]] || continue
+      nested_prefix="${nested_line:0:1}"
+      read -r nested_oid nested_path _ <<< "${nested_line:1}"
+      case "$nested_prefix" in ' ' | - | + | U) ;; *) echo "error: nested Aegis submodule state is malformed: ${path}" >&2; return 1 ;; esac
+      if [[ ! "$nested_oid" =~ ^[a-f0-9]{40}([a-f0-9]{24})?$ ||
+        ! "$nested_path" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+        echo "error: nested Aegis submodule state is malformed: ${path}" >&2; return 1
+      fi
+      if [[ "$nested_prefix" != - ]]; then gate_coordinator_reject_hidden_index_state "$absolute_path/$nested_path" "$path/$nested_path" || return 1; fi
+      printf 'nested-parent=%s state=%s actual=%s path=%s\n' "$path" "$nested_prefix" "$nested_oid" "$nested_path"
+    done <<< "$nested_status"
+  done
+}
+
+gate_coordinator_submodule_state_hash() {
+  local plan_file="$1" consumes_aegis first_snapshot second_snapshot
+  [[ -f "$plan_file" ]] || { echo "error: coordinator submodule hashing requires a command plan." >&2; return 1; }
+  consumes_aegis="$(awk -F '\t' '$2 == "cd aegis && forge test" { print "yes"; exit }' "$plan_file")" || return 1
+  if [[ "$consumes_aegis" != yes ]]; then printf 'aegis-submodule-state-v1 unused\n' | hash_stream; return; fi
+  first_snapshot="$(gate_coordinator_aegis_submodule_snapshot)" || return 1
+  second_snapshot="$(gate_coordinator_aegis_submodule_snapshot)" || return 1
+  if [[ "$first_snapshot" != "$second_snapshot" ]]; then echo "error: Aegis submodule state changed while it was hashed." >&2; return 1; fi
+  printf '%s' "$second_snapshot" | hash_stream
+}
+
 gate_coordinator_socket_path_is_supported() {
   node --input-type=module -e '
     import { pathToFileURL } from "node:url";
@@ -109,6 +182,7 @@ gate_coordinator_recompute_fingerprint() {
   local fresh_plan fresh_plan_hash fresh_base fresh_head fresh_paths
   local fresh_implementation fresh_content os_name os_arch node_path node_version
   local pnpm_path pnpm_version env_digest policy_hash runtime_hash repository_identity
+  local submodule_state
   [[ "${gate_mapped_child_scrub_policy_hash:-}" =~ ^[a-f0-9]{64}$ ]] || return 1
   gate_coordinator_assert_scrub_policy_current || return 1
   fresh_plan="$(mktemp "$scratch_dir/coordinator-plan.XXXXXX")" || return 1
@@ -117,6 +191,10 @@ gate_coordinator_recompute_fingerprint() {
     return 1
   fi
   fresh_plan_hash="$(hash_file "$fresh_plan")" || {
+    rm -f "$fresh_plan"
+    return 1
+  }
+  submodule_state="$(gate_coordinator_submodule_state_hash "$fresh_plan")" || {
     rm -f "$fresh_plan"
     return 1
   }
@@ -137,7 +215,7 @@ gate_coordinator_recompute_fingerprint() {
   runtime_hash="$(gate_coordinator_runtime_signature)" || return 1
   repository_identity="$(gate_coordinator_repository_identity)" || return 1
   printf '%s\n' \
-    "schema=v2" "repository=${repository_identity}" \
+    "schema=v3" "repository=${repository_identity}" \
     "base=${fresh_base}" "head=${fresh_head}" "paths=${fresh_paths}" \
     "plan=${fresh_plan_hash}" "implementation=${fresh_implementation}" \
     "content=${fresh_content}" "packageRisk=${package_script_risk_changed}" \
@@ -150,6 +228,7 @@ gate_coordinator_recompute_fingerprint() {
     "node=${node_version}" "pnpmPath=${pnpm_path}" \
     "pnpm=${pnpm_version}" "policy=${policy_hash}" \
     "runtime=${runtime_hash}" "environment=${env_digest}" \
+    "submodules=${submodule_state}" \
     "mappedChildScrubPolicy=${gate_mapped_child_scrub_policy_hash}" |
     hash_stream
 }

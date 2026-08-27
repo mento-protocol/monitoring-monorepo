@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0073 — Fair local quality-gate coordination across worktrees
+# ADR 0074 — Fair local quality-gate coordination across worktrees
 
 **Status:** Accepted (Aug 2026). In force on branches that contain this change.
 **Scope:** ci/process
@@ -469,7 +469,9 @@ scheduler's capacity and named-resource controls.
 Requests coalesce when their complete execution keys match. The key binds:
 
 - repository identity, the base and HEAD OIDs, changed paths, validated file
-  bytes and modes, and the normalized command plan;
+  bytes and modes, and the normalized command plan. A plan that runs the Aegis
+  Forge tests also binds the expected and actual checkout state of each tracked
+  Aegis submodule;
 - the gate, coordinator, and policy implementation signatures, including the
   `.trunk/trunk.yaml` content;
 - OS and architecture, plus the resolved Node and pnpm executable paths and
@@ -484,6 +486,9 @@ entry that resolves exactly to a material package root's `node_modules/.bin`, a
 `PNPM_SCRIPT_SRC_DIR` or `INIT_CWD` that resolves exactly to the current
 worktree root, and `TMPDIR`, `TMP`, or `TEMP` when it resolves exactly to the
 gate-owned `.tmp/agent-quality-gate` directory. Other values remain exact.
+For selected relative path-bearing values, the digest also binds the physical
+working directory. Two equal relative values from different directories cannot
+share a result unless their configured normalization makes them equivalent.
 Selected values include standard proxy settings, GitHub base-event inputs,
 parent-consumed quality-gate self-test controls, and nonsecret tool controls.
 Different selected values prevent shared execution and retained-result reuse.

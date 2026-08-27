@@ -157,6 +157,208 @@ const environmentPrefixes = [
   "VITEST_",
   "npm_config_",
 ];
+export const MATERIAL_SINGLE_PATH_ENVIRONMENT_NAMES = Object.freeze([
+  "AGENT_AUTOREVIEW_DURATIONS_DIR",
+  "AGENT_AUTOREVIEW_MANIFEST_COUNTER_FILE",
+  "APPDATA",
+  "AUTOREVIEW_CAPTURE",
+  "AUTOREVIEW_HELPER",
+  "AUTOREVIEW_MUTATE_PATH",
+  "AUTOREVIEW_PROGRESS_MARKER",
+  "AUTOREVIEW_SNAPSHOT_HELPER",
+  "BROWSERSLIST_CONFIG",
+  "BROWSERSLIST_STATS",
+  "CARGO_BUILD_DEP_INFO_BASEDIR",
+  "CARGO_BUILD_RUSTC",
+  "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER",
+  "CARGO_BUILD_RUSTC_WRAPPER",
+  "CARGO_BUILD_RUSTDOC",
+  "CARGO_BUILD_TARGET_DIR",
+  "CARGO_HOME",
+  "CARGO_HTTP_CAINFO",
+  "CARGO_INSTALL_ROOT",
+  "CARGO_TARGET_DIR",
+  "CLAUDE_CONFIG_DIR",
+  "CODEX_HOME",
+  "COREPACK_ENV_FILE",
+  "COREPACK_HOME",
+  "CURL_CA_BUNDLE",
+  "DOCS_NAVIGATION_EVAL_REPO",
+  "DYLD_PRINT_TO_FILE",
+  "DYLD_SHARED_CACHE_DIR",
+  "ENVIO_LOG_ARGS_FILE",
+  "ESBUILD_BINARY_PATH",
+  "FOUNDRY_BROADCAST",
+  "FOUNDRY_BUILD_INFO_PATH",
+  "FOUNDRY_CACHE_PATH",
+  "FOUNDRY_ETH_RPC_JWT",
+  "FOUNDRY_OUT",
+  "FOUNDRY_SCRIPT",
+  "FOUNDRY_SNAPSHOTS",
+  "FOUNDRY_SRC",
+  "FOUNDRY_TEST",
+  "FOUNDRY_TEST_FAILURES_FILE",
+  "GOENV",
+  "GOROOT",
+  "HOME",
+  "INIT_CWD",
+  "LD_DEBUG_OUTPUT",
+  "LD_ORIGIN_PATH",
+  "LD_PROFILE",
+  "LD_PROFILE_OUTPUT",
+  "NEXT_DIST_DIR",
+  "NODE_EXTRA_CA_CERTS",
+  "NPM_CONFIG_CACHE_DIR",
+  "NPM_CONFIG_CAFILE",
+  "NPM_CONFIG_CACHE",
+  "NPM_CONFIG_CONFIG_DIR",
+  "NPM_CONFIG_GLOBAL_BIN_DIR",
+  "NPM_CONFIG_GLOBAL_DIR",
+  "NPM_CONFIG_GLOBAL_PNPMFILE",
+  "NPM_CONFIG_GLOBAL_VIRTUAL_STORE_DIR",
+  "NPM_CONFIG_GLOBALCONFIG",
+  "NPM_CONFIG_HOOKS_DIR",
+  "NPM_CONFIG_INIT_MODULE",
+  "NPM_CONFIG_LOCKFILE_DIR",
+  "NPM_CONFIG_LOCKFILE_DIRECTORY",
+  "NPM_CONFIG_MODULES_DIR",
+  "NPM_CONFIG_NODE_GYP",
+  "NPM_CONFIG_PNPMFILE",
+  "NPM_CONFIG_PREFIX",
+  "NPM_CONFIG_SCRIPT_SHELL",
+  "NPM_CONFIG_STATE_DIR",
+  "NPM_CONFIG_STORE_DIR",
+  "NPM_CONFIG_USERCONFIG",
+  "NPM_CONFIG_VIRTUAL_STORE_DIR",
+  "NPM_CONFIG_WORKSPACE_DIR",
+  "OPENSSL_CONF",
+  "OPENSSL_ENGINES",
+  "OPENSSL_MODULES",
+  "PLAYWRIGHT_BROWSERS_PATH",
+  "PLAYWRIGHT_STUB_LOG",
+  "PNPM_ARGS_FILE",
+  "PNPM_HOME",
+  "PNPM_SCRIPT_SRC_DIR",
+  "REQUESTS_CA_BUNDLE",
+  "SENTRY_MCP_BROKER_READY_FILE",
+  "SENTRY_PROPERTIES",
+  "SSL_CERT_FILE",
+  "TEMP",
+  "TERRAFORM_CONFIG",
+  "TF_CLI_CONFIG_FILE",
+  "TF_DATA_DIR",
+  "TF_LOG_PATH",
+  "TF_LOG_SDK_PROTO_DATA_DIR",
+  "TF_PLUGIN_CACHE_DIR",
+  "TMP",
+  "TMPDIR",
+  "TRUNK_CACHE",
+  "TURBO_BINARY_PATH",
+  "TURBO_CACHE_DIR",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  "XDG_STATE_HOME",
+  "npm_config_cache_dir",
+  "npm_config_cafile",
+  "npm_config_cache",
+  "npm_config_config_dir",
+  "npm_config_global_bin_dir",
+  "npm_config_global_dir",
+  "npm_config_global_pnpmfile",
+  "npm_config_global_virtual_store_dir",
+  "npm_config_globalconfig",
+  "npm_config_hooks_dir",
+  "npm_config_init_module",
+  "npm_config_lockfile_dir",
+  "npm_config_lockfile_directory",
+  "npm_config_modules_dir",
+  "npm_config_node_gyp",
+  "npm_config_pnpmfile",
+  "npm_config_prefix",
+  "npm_config_script_shell",
+  "npm_config_state_dir",
+  "npm_config_store_dir",
+  "npm_config_userconfig",
+  "npm_config_virtual_store_dir",
+  "npm_config_workspace_dir",
+]);
+export const MATERIAL_PATH_LIST_ENVIRONMENT_NAMES = Object.freeze([
+  "DYLD_FALLBACK_FRAMEWORK_PATH",
+  "DYLD_FALLBACK_LIBRARY_PATH",
+  "DYLD_FRAMEWORK_PATH",
+  "DYLD_INSERT_LIBRARIES",
+  "DYLD_LIBRARY_PATH",
+  "DYLD_ROOT_PATH",
+  "DYLD_VERSIONED_FRAMEWORK_PATH",
+  "DYLD_VERSIONED_LIBRARY_PATH",
+  "GOPATH",
+  "LD_AUDIT",
+  "LD_LIBRARY_PATH",
+  "LD_PRELOAD",
+  "LD_RUN_PATH",
+  "NODE_PATH",
+  "PATH",
+  "SSL_CERT_DIR",
+]);
+export const MATERIAL_JSON_PATH_LIST_ENVIRONMENT_NAMES = Object.freeze([
+  "FOUNDRY_ALLOW_PATHS",
+  "FOUNDRY_INCLUDE_PATHS",
+  "FOUNDRY_LIBS",
+]);
+export const MATERIAL_EMPTY_COMPONENT_CWD_PATH_LIST_ENVIRONMENT_NAMES =
+  Object.freeze([
+    "DYLD_FALLBACK_FRAMEWORK_PATH",
+    "DYLD_FALLBACK_LIBRARY_PATH",
+    "DYLD_FRAMEWORK_PATH",
+    "DYLD_LIBRARY_PATH",
+    "DYLD_ROOT_PATH",
+    "DYLD_VERSIONED_FRAMEWORK_PATH",
+    "DYLD_VERSIONED_LIBRARY_PATH",
+    "LD_LIBRARY_PATH",
+    "LD_RUN_PATH",
+  ]);
+export const MATERIAL_STRUCTURED_PATH_ENVIRONMENT_NAMES = Object.freeze([
+  "FOUNDRY_FS_PERMISSIONS",
+  "FOUNDRY_LIBRARIES",
+  "FOUNDRY_REMAPPINGS",
+]);
+export const MATERIAL_CWD_BOUND_ENVIRONMENT_NAMES = Object.freeze([
+  "CC",
+  "CFLAGS",
+  "CPPFLAGS",
+  "CXX",
+  "CXXFLAGS",
+  "GOFLAGS",
+  "LDFLAGS",
+  "NODE_OPTIONS",
+  "PLAYWRIGHT_NEXT_COMMAND",
+  "RUSTFLAGS",
+]);
+const materialSinglePathEnvironmentNames = new Set(
+  MATERIAL_SINGLE_PATH_ENVIRONMENT_NAMES,
+);
+const materialSinglePathEnvironmentNamePatterns = [
+  /^AGENT_QUALITY_GATE_LOCK_TEST_(?:READY|RELEASE)_FILE$/u,
+  /^AGENT_QUALITY_GATE_TEST_[A-Z0-9_]+_BARRIER$/u,
+  /^CARGO_TARGET_[A-Z0-9_]+_(?:LINKER|RUNNER)$/u,
+  /^TF_STACKS_TEST_[A-Z0-9_]+_LOG$/u,
+];
+const materialPathListEnvironmentNames = new Set(
+  MATERIAL_PATH_LIST_ENVIRONMENT_NAMES,
+);
+const materialEmptyComponentCwdPathListEnvironmentNames = new Set(
+  MATERIAL_EMPTY_COMPONENT_CWD_PATH_LIST_ENVIRONMENT_NAMES,
+);
+const materialJsonPathListEnvironmentNames = new Set(
+  MATERIAL_JSON_PATH_LIST_ENVIRONMENT_NAMES,
+);
+const materialStructuredPathEnvironmentNames = new Set(
+  MATERIAL_STRUCTURED_PATH_ENVIRONMENT_NAMES,
+);
+const materialCwdBoundEnvironmentNames = new Set(
+  MATERIAL_CWD_BOUND_ENVIRONMENT_NAMES,
+);
 const mappedChildScrubbedExactNames = new Set([
   "AGENT_CONTEXT_CLAUDE_SETTINGS_FILE",
   "AGENT_CONTEXT_CODEX_HOOKS_FILE",
@@ -1912,16 +2114,135 @@ function materialLocalBinPathMap(physicalRepoRoot) {
   }));
 }
 
-function normalizeMaterialLocalBinPath(value, paths, workingDirectory) {
+function materialLocalBinPathReplacement(value, paths, workingDirectory) {
   for (const entry of paths) {
     if (pathResolvesTo(value, entry.path, workingDirectory)) {
       return entry.replacement;
     }
   }
-  if (typeof value === "string" && !isAbsolute(value)) {
-    return resolve(workingDirectory, value || ".");
+  return null;
+}
+
+function materialPathValueIsSentinel(name, value) {
+  return (
+    (name === "COREPACK_ENV_FILE" && value === "0") ||
+    (name === "GOENV" && value === "off") ||
+    (name === "PLAYWRIGHT_BROWSERS_PATH" && value === "0")
+  );
+}
+
+function materialSinglePathEnvironmentName(name) {
+  return (
+    materialSinglePathEnvironmentNames.has(name) ||
+    materialSinglePathEnvironmentNamePatterns.some((pattern) =>
+      pattern.test(name),
+    )
+  );
+}
+
+function materialPathListComponents(name, value) {
+  if (name === "LD_PRELOAD") {
+    return value
+      .split(/\s+/u)
+      .flatMap((component) => component.split(delimiter));
   }
-  return value;
+  return value.split(delimiter);
+}
+
+function materialPathListHasRelativeComponent(name, value) {
+  if (value.length === 0) return false;
+  return materialPathListComponents(name, value).some((component) =>
+    component.length === 0
+      ? materialEmptyComponentCwdPathListEnvironmentNames.has(name)
+      : !isAbsolute(component),
+  );
+}
+
+function materialJsonPathListHasRelativeComponent(value) {
+  if (value.length === 0) return false;
+  let components;
+  try {
+    components = JSON.parse(value);
+  } catch {
+    return true;
+  }
+  if (!Array.isArray(components)) return true;
+  return components.some(
+    (component) =>
+      typeof component !== "string" ||
+      (component.length > 0 && !isAbsolute(component)),
+  );
+}
+
+function foundrySolcValueIsRelativePath(value) {
+  if (value.length === 0 || isAbsolute(value) || value === "auto") return false;
+  return !/^(?:solc:)?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u.test(
+    value,
+  );
+}
+
+function foundryRemappingsHaveRelativePath(value) {
+  if (value.length === 0) return false;
+  return value.split(/\r?\n/u).some((entry) => {
+    if (entry.length === 0) return false;
+    const separator = entry.indexOf("=");
+    if (separator < 0) return true;
+    const target = entry.slice(separator + 1);
+    return target.length === 0 || !isAbsolute(target);
+  });
+}
+
+function foundryLibrariesHaveRelativePath(value) {
+  if (value.length === 0) return false;
+  return value.split(",").some((entry) => {
+    const addressSeparator = entry.lastIndexOf(":");
+    const nameSeparator = entry.lastIndexOf(":", addressSeparator - 1);
+    if (nameSeparator <= 0 || addressSeparator <= nameSeparator + 1)
+      return true;
+    const sourcePath = entry.slice(0, nameSeparator);
+    return !isAbsolute(sourcePath);
+  });
+}
+
+function foundryFsPermissionsHaveRelativePath(value) {
+  if (value.length === 0) return false;
+  try {
+    const permissions = JSON.parse(value);
+    if (!Array.isArray(permissions)) return true;
+    return permissions.some(
+      (permission) =>
+        permission === null ||
+        typeof permission !== "object" ||
+        typeof permission.path !== "string" ||
+        permission.path.length === 0 ||
+        !isAbsolute(permission.path),
+    );
+  } catch {
+    const paths = [...value.matchAll(/\bpath\s*=\s*["']([^"']+)["']/gu)].map(
+      (match) => match[1],
+    );
+    return paths.length === 0 || paths.some((path) => !isAbsolute(path));
+  }
+}
+
+function materialStructuredPathHasRelativeComponent(name, value) {
+  if (name === "FOUNDRY_REMAPPINGS") {
+    return foundryRemappingsHaveRelativePath(value);
+  }
+  if (name === "FOUNDRY_LIBRARIES") {
+    return foundryLibrariesHaveRelativePath(value);
+  }
+  if (name === "FOUNDRY_FS_PERMISSIONS") {
+    return foundryFsPermissionsHaveRelativePath(value);
+  }
+  return false;
+}
+
+function materialCwdBoundEnvironmentName(name) {
+  return (
+    materialCwdBoundEnvironmentNames.has(name) ||
+    /^TF_CLI_ARGS(?:_[A-Za-z0-9_]+)?$/u.test(name)
+  );
 }
 
 function selectedEnvironmentEntries(environment) {
@@ -1970,39 +2291,75 @@ export function materialEnvironmentDigest({
   const localBinPaths = materialLocalBinPathMap(physicalRepoRoot);
   const gateScratchPath = join(physicalRepoRoot, gateScratchRelativePath);
   const gateScratchEntry = `${worktreeToken}/${gateScratchRelativePath}`;
+  let bindsPhysicalWorkingDirectory = false;
   const entries = selectedEnvironmentEntries(environment).map(
     ([name, rawValue]) => {
       const value = rawValue ?? "";
       if (name === "PATH") {
-        return [
-          name,
-          value
-            .split(delimiter)
-            .map((entry) =>
-              normalizeMaterialLocalBinPath(
-                entry,
-                localBinPaths,
-                physicalWorkingDirectory,
-              ),
-            )
-            .join(delimiter),
-        ];
+        const pathEntries = value.split(delimiter);
+        const normalizedPathEntries = pathEntries.map((entry) => {
+          const replacement = materialLocalBinPathReplacement(
+            entry,
+            localBinPaths,
+            physicalWorkingDirectory,
+          );
+          if (replacement !== null) return replacement;
+          if (!isAbsolute(entry)) bindsPhysicalWorkingDirectory = true;
+          return entry;
+        });
+        return [name, normalizedPathEntries.join(delimiter)];
+      }
+      if (name === "INIT_CWD" || name === "PNPM_SCRIPT_SRC_DIR") {
+        if (pathResolvesTo(value, physicalRepoRoot, physicalWorkingDirectory)) {
+          return [name, worktreeToken];
+        }
+      }
+      if (name === "TMPDIR" || name === "TMP" || name === "TEMP") {
+        if (pathResolvesTo(value, gateScratchPath, physicalWorkingDirectory)) {
+          return [name, gateScratchEntry];
+        }
       }
       if (
-        (name === "INIT_CWD" || name === "PNPM_SCRIPT_SRC_DIR") &&
-        pathResolvesTo(value, physicalRepoRoot, workingDirectory)
+        value.length > 0 &&
+        materialSinglePathEnvironmentName(name) &&
+        !materialPathValueIsSentinel(name, value) &&
+        !isAbsolute(value)
       ) {
-        return [name, worktreeToken];
+        bindsPhysicalWorkingDirectory = true;
       }
       if (
-        (name === "TMPDIR" || name === "TMP" || name === "TEMP") &&
-        pathResolvesTo(value, gateScratchPath, workingDirectory)
+        materialPathListEnvironmentNames.has(name) &&
+        materialPathListHasRelativeComponent(name, value)
       ) {
-        return [name, gateScratchEntry];
+        bindsPhysicalWorkingDirectory = true;
+      }
+      if (
+        materialJsonPathListEnvironmentNames.has(name) &&
+        materialJsonPathListHasRelativeComponent(value)
+      ) {
+        bindsPhysicalWorkingDirectory = true;
+      }
+      if (name === "FOUNDRY_SOLC" && foundrySolcValueIsRelativePath(value)) {
+        bindsPhysicalWorkingDirectory = true;
+      }
+      if (
+        materialStructuredPathEnvironmentNames.has(name) &&
+        materialStructuredPathHasRelativeComponent(name, value)
+      ) {
+        bindsPhysicalWorkingDirectory = true;
+      }
+      if (value.length > 0 && materialCwdBoundEnvironmentName(name)) {
+        bindsPhysicalWorkingDirectory = true;
       }
       return [name, value];
     },
   );
+  if (bindsPhysicalWorkingDirectory) {
+    entries.push([
+      "__AGENT_QUALITY_GATE_RELATIVE_ENVIRONMENT_CWD__",
+      physicalWorkingDirectory,
+    ]);
+  }
   entries.push([
     "__AGENT_QUALITY_GATE_LOCAL_BIN_MANIFEST__",
     normalizedLocalBinManifest(physicalRepoRoot),
@@ -2017,7 +2374,7 @@ export function materialEnvironmentDigest({
   ]);
   entries.sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
   const hash = createHash("sha256");
-  hash.update("material-environment-v6\0");
+  hash.update("material-environment-v7\0");
   for (const [name, value] of entries) {
     hash.update(name);
     hash.update("\0");

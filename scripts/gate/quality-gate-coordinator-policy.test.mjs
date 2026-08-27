@@ -21,7 +21,13 @@ import { fileURLToPath } from "node:url";
 import {
   INSTALLED_DEPENDENCY_MAX_FILE_BYTES,
   LOCAL_BIN_MAX_FILE_BYTES,
+  MATERIAL_CWD_BOUND_ENVIRONMENT_NAMES,
+  MATERIAL_EMPTY_COMPONENT_CWD_PATH_LIST_ENVIRONMENT_NAMES,
+  MATERIAL_JSON_PATH_LIST_ENVIRONMENT_NAMES,
   MATERIAL_PACKAGE_ROOTS,
+  MATERIAL_PATH_LIST_ENVIRONMENT_NAMES,
+  MATERIAL_SINGLE_PATH_ENVIRONMENT_NAMES,
+  MATERIAL_STRUCTURED_PATH_ENVIRONMENT_NAMES,
   mappedChildScrubbedEnvironmentName,
   materialEnvironmentDigest as computeMaterialEnvironmentDigest,
   normalizedInstalledDependencyManifest,
@@ -342,6 +348,26 @@ function materialEnvironmentDigest(
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^[a-f0-9]{64}$/u);
   return result.stdout;
+}
+
+function directMaterialEnvironmentDigest(fixture, extraEnvironment = {}) {
+  return computeMaterialEnvironmentDigest({
+    repoRoot: fixture.root,
+    workingDirectory: fixture.root,
+    environment: {
+      LANG: "C",
+      LC_ALL: "C",
+      PATH: [
+        fixture.localBin,
+        dirname(process.execPath),
+        "/usr/bin",
+        fixture.localBin,
+      ].join(delimiter),
+      INIT_CWD: fixture.root,
+      PNPM_SCRIPT_SRC_DIR: fixture.root,
+      ...extraEnvironment,
+    },
+  });
 }
 
 function syntheticSnapshot() {
@@ -760,6 +786,269 @@ test("material environment normalizes only worktree lifecycle roots", async (t) 
     }),
     "visible TEMP values must remain material",
   );
+  assert.equal(
+    materialEnvironmentDigest(first, {
+      extraEnvironment: { TMPDIR: join(".tmp", "agent-quality-gate") },
+    }),
+    materialEnvironmentDigest(second, {
+      extraEnvironment: { TMPDIR: join(".tmp", "agent-quality-gate") },
+    }),
+    "the relative gate temp fallback must normalize across worktrees",
+  );
+
+  for (const name of MATERIAL_SINGLE_PATH_ENVIRONMENT_NAMES) {
+    assert.notEqual(
+      directMaterialEnvironmentDigest(first, {
+        [name]: join("..", "material-input"),
+      }),
+      directMaterialEnvironmentDigest(second, {
+        [name]: join("..", "material-input"),
+      }),
+      `a relative ${name} must bind the physical worktree`,
+    );
+    assert.equal(
+      directMaterialEnvironmentDigest(first, {
+        [name]: "/tmp/shared-material-input",
+      }),
+      directMaterialEnvironmentDigest(second, {
+        [name]: "/tmp/shared-material-input",
+      }),
+      `an absolute ${name} may coalesce across worktrees`,
+    );
+  }
+  for (const name of [
+    "AGENT_QUALITY_GATE_LOCK_TEST_READY_FILE",
+    "AGENT_QUALITY_GATE_LOCK_TEST_RELEASE_FILE",
+    "AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER",
+    "AGENT_QUALITY_GATE_TEST_WORKER_REGISTRATION_BARRIER",
+    "CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER",
+    "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER",
+    "TF_STACKS_TEST_GIT_LOG",
+    "TF_STACKS_TEST_PLAN_MODE_LOG",
+    "TF_STACKS_TEST_TERRAFORM_CWD_LOG",
+    "TF_STACKS_TEST_TERRAFORM_ENV_LOG",
+    "TF_STACKS_TEST_TERRAFORM_LOG",
+  ]) {
+    assert.notEqual(
+      directMaterialEnvironmentDigest(first, {
+        [name]: join("..", "pattern-material-input"),
+      }),
+      directMaterialEnvironmentDigest(second, {
+        [name]: join("..", "pattern-material-input"),
+      }),
+      `a relative pattern-classified ${name} must bind the physical worktree`,
+    );
+    assert.equal(
+      directMaterialEnvironmentDigest(first, {
+        [name]: "/tmp/shared-pattern-material-input",
+      }),
+      directMaterialEnvironmentDigest(second, {
+        [name]: "/tmp/shared-pattern-material-input",
+      }),
+      `an absolute pattern-classified ${name} may coalesce across worktrees`,
+    );
+  }
+  for (const name of MATERIAL_PATH_LIST_ENVIRONMENT_NAMES.filter(
+    (entry) => entry !== "PATH",
+  )) {
+    const relativeList = [
+      "/tmp/shared-material-a",
+      join("..", "material-input"),
+      "/tmp/shared-material-b",
+    ].join(delimiter);
+    const absoluteList = [
+      "/tmp/shared-material-a",
+      "/tmp/shared-material-input",
+      "/tmp/shared-material-b",
+    ].join(delimiter);
+    assert.notEqual(
+      directMaterialEnvironmentDigest(first, { [name]: relativeList }),
+      directMaterialEnvironmentDigest(second, { [name]: relativeList }),
+      `a relative ${name} component must bind the physical worktree`,
+    );
+    assert.equal(
+      directMaterialEnvironmentDigest(first, { [name]: absoluteList }),
+      directMaterialEnvironmentDigest(second, { [name]: absoluteList }),
+      `absolute ${name} components may coalesce across worktrees`,
+    );
+  }
+  assert.notEqual(
+    directMaterialEnvironmentDigest(first, {
+      LD_PRELOAD: "/tmp/shared-preload relative-preload.so",
+    }),
+    directMaterialEnvironmentDigest(second, {
+      LD_PRELOAD: "/tmp/shared-preload relative-preload.so",
+    }),
+    "a whitespace-separated relative LD_PRELOAD component must bind the physical worktree",
+  );
+  for (const name of MATERIAL_EMPTY_COMPONENT_CWD_PATH_LIST_ENVIRONMENT_NAMES) {
+    const listWithEmptyComponent = [
+      "/tmp/shared-loader-a",
+      "",
+      "/tmp/shared-loader-b",
+    ].join(delimiter);
+    assert.notEqual(
+      directMaterialEnvironmentDigest(first, {
+        [name]: listWithEmptyComponent,
+      }),
+      directMaterialEnvironmentDigest(second, {
+        [name]: listWithEmptyComponent,
+      }),
+      `an empty ${name} component must bind the physical worktree`,
+    );
+  }
+  for (const name of ["DYLD_INSERT_LIBRARIES", "LD_AUDIT", "LD_PRELOAD"]) {
+    const listWithIgnoredEmptyComponent = [
+      "/tmp/shared-loader-a",
+      "",
+      "/tmp/shared-loader-b",
+    ].join(delimiter);
+    assert.equal(
+      directMaterialEnvironmentDigest(first, {
+        [name]: listWithIgnoredEmptyComponent,
+      }),
+      directMaterialEnvironmentDigest(second, {
+        [name]: listWithIgnoredEmptyComponent,
+      }),
+      `an empty ${name} file-list component must remain ignored`,
+    );
+  }
+  for (const name of MATERIAL_JSON_PATH_LIST_ENVIRONMENT_NAMES) {
+    const relativeList = JSON.stringify([
+      "/tmp/shared-material-a",
+      join("..", "material-input"),
+    ]);
+    const absoluteList = JSON.stringify([
+      "/tmp/shared-material-a",
+      "/tmp/shared-material-b",
+    ]);
+    assert.notEqual(
+      directMaterialEnvironmentDigest(first, { [name]: relativeList }),
+      directMaterialEnvironmentDigest(second, { [name]: relativeList }),
+      `a relative ${name} member must bind the physical worktree`,
+    );
+    assert.equal(
+      directMaterialEnvironmentDigest(first, { [name]: absoluteList }),
+      directMaterialEnvironmentDigest(second, { [name]: absoluteList }),
+      `absolute ${name} members may coalesce across worktrees`,
+    );
+  }
+  const structuredPathCases = {
+    FOUNDRY_FS_PERMISSIONS: {
+      absolute: JSON.stringify([
+        { access: "read", path: "/tmp/shared-foundry-data" },
+      ]),
+      relative: JSON.stringify([{ access: "read", path: "../foundry-data" }]),
+    },
+    FOUNDRY_LIBRARIES: {
+      absolute:
+        "/tmp/Shared.sol:Shared:0x0000000000000000000000000000000000000001",
+      relative:
+        "../Shared.sol:Shared:0x0000000000000000000000000000000000000001",
+    },
+    FOUNDRY_REMAPPINGS: {
+      absolute: "shared/=/tmp/shared-foundry-lib/",
+      relative: "shared/=../shared-foundry-lib/",
+    },
+  };
+  assert.deepEqual(
+    Object.keys(structuredPathCases).sort(),
+    [...MATERIAL_STRUCTURED_PATH_ENVIRONMENT_NAMES].sort(),
+  );
+  for (const [name, values] of Object.entries(structuredPathCases)) {
+    assert.notEqual(
+      directMaterialEnvironmentDigest(first, { [name]: values.relative }),
+      directMaterialEnvironmentDigest(second, { [name]: values.relative }),
+      `a relative ${name} member must bind the physical worktree`,
+    );
+    assert.equal(
+      directMaterialEnvironmentDigest(first, { [name]: values.absolute }),
+      directMaterialEnvironmentDigest(second, { [name]: values.absolute }),
+      `absolute ${name} members may coalesce across worktrees`,
+    );
+  }
+  assert.notEqual(
+    directMaterialEnvironmentDigest(first, {
+      FOUNDRY_FS_PERMISSIONS: '[{ access = "read", path = "../foundry-data" }]',
+    }),
+    directMaterialEnvironmentDigest(second, {
+      FOUNDRY_FS_PERMISSIONS: '[{ access = "read", path = "../foundry-data" }]',
+    }),
+    "a TOML-style relative FOUNDRY_FS_PERMISSIONS path must bind the physical worktree",
+  );
+  for (const name of MATERIAL_CWD_BOUND_ENVIRONMENT_NAMES) {
+    assert.notEqual(
+      directMaterialEnvironmentDigest(first, {
+        [name]: "--fixture ../material-input",
+      }),
+      directMaterialEnvironmentDigest(second, {
+        [name]: "--fixture ../material-input",
+      }),
+      `a nonempty ${name} must conservatively bind the physical worktree`,
+    );
+    assert.equal(
+      directMaterialEnvironmentDigest(first, { [name]: "" }),
+      directMaterialEnvironmentDigest(second, { [name]: "" }),
+      `an empty ${name} must not bind the physical worktree`,
+    );
+  }
+  for (const name of ["TF_CLI_ARGS", "TF_CLI_ARGS_plan"]) {
+    assert.notEqual(
+      directMaterialEnvironmentDigest(first, { [name]: "-chdir=../terraform" }),
+      directMaterialEnvironmentDigest(second, {
+        [name]: "-chdir=../terraform",
+      }),
+      `a nonempty ${name} must conservatively bind the physical worktree`,
+    );
+  }
+  for (const value of [join("..", "bin", "solc"), "local-solc"]) {
+    assert.notEqual(
+      directMaterialEnvironmentDigest(first, { FOUNDRY_SOLC: value }),
+      directMaterialEnvironmentDigest(second, { FOUNDRY_SOLC: value }),
+      `relative FOUNDRY_SOLC=${value} must bind the physical worktree`,
+    );
+  }
+  assert.equal(
+    directMaterialEnvironmentDigest(first, {
+      FOUNDRY_SOLC: "/tmp/shared-solc",
+    }),
+    directMaterialEnvironmentDigest(second, {
+      FOUNDRY_SOLC: "/tmp/shared-solc",
+    }),
+    "an absolute FOUNDRY_SOLC may coalesce across worktrees",
+  );
+  for (const value of [
+    "auto",
+    "0.8.24",
+    "solc:0.8.24",
+    "0.8.24+commit.e11b9ed9",
+  ]) {
+    assert.equal(
+      directMaterialEnvironmentDigest(first, { FOUNDRY_SOLC: value }),
+      directMaterialEnvironmentDigest(second, { FOUNDRY_SOLC: value }),
+      `FOUNDRY_SOLC=${value} must remain a compiler selector`,
+    );
+  }
+  for (const [name, value] of [
+    ["COREPACK_ENV_FILE", "0"],
+    ["GOENV", "off"],
+    ["PLAYWRIGHT_BROWSERS_PATH", "0"],
+  ]) {
+    assert.equal(
+      directMaterialEnvironmentDigest(first, { [name]: value }),
+      directMaterialEnvironmentDigest(second, { [name]: value }),
+      `${name}=${value} must remain a non-path sentinel`,
+    );
+  }
+  assert.equal(
+    directMaterialEnvironmentDigest(first, {
+      NEXT_PUBLIC_ASSET_PATH: join("..", "asset"),
+    }),
+    directMaterialEnvironmentDigest(second, {
+      NEXT_PUBLIC_ASSET_PATH: join("..", "asset"),
+    }),
+    "an arbitrary prefix-selected scalar must remain raw",
+  );
 
   assert.notEqual(
     materialEnvironmentDigest(first, {
@@ -796,12 +1085,22 @@ test("material environment normalizes only worktree lifecycle roots", async (t) 
       `${relativeEntry || "empty"} PATH entries must bind the physical worktree`,
     );
   }
+  assert.equal(
+    materialEnvironmentDigest(first, { pnpmScriptSource: "." }),
+    materialEnvironmentDigest(second, { pnpmScriptSource: "." }),
+    "a relative root PNPM_SCRIPT_SRC_DIR must normalize across worktrees",
+  );
   assert.notEqual(
     materialEnvironmentDigest(second, {
       pnpmScriptSource: join(second.root, "nested-package"),
     }),
     firstDigest,
     "a non-root PNPM_SCRIPT_SRC_DIR must remain raw",
+  );
+  assert.equal(
+    materialEnvironmentDigest(first, { initCwd: "." }),
+    materialEnvironmentDigest(second, { initCwd: "." }),
+    "a relative root INIT_CWD must normalize across worktrees",
   );
   assert.notEqual(
     materialEnvironmentDigest(first, {

@@ -3448,6 +3448,10 @@ if ! node --test scripts/gate/quality-gate-coordinator-policy.test.mjs \
   > "$output_file" 2>&1; then
   fail "quality-gate coordinator policy tests failed"
 fi
+if ! node --test scripts/gate/quality-gate-coordinator-submodule-state.test.mjs \
+  > "$output_file" 2>&1; then
+  fail "quality-gate coordinator submodule-state tests failed"
+fi
 if ! node --test scripts/gate/agent-quality-gate-scheduler.integration.test.mjs \
   > "$output_file" 2>&1; then
   fail "quality-gate scheduler integration tests failed"
