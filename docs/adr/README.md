@@ -30,13 +30,14 @@ altitude.
 
 ## Lifecycle
 
-Frontmatter `status` follows the repo metadata contract (`active` = in force;
-`archived` = superseded/deprecated). The ADR's own lifecycle (Accepted /
-Superseded by ADR-NNNN) lives in the body's **Status** line. In-force ADRs are
-`canonical: true` and enrolled in the 90-day re-verification check — that is the
-enforcement behind "is this still true?". Supersede an ADR by adding a new one
-and flipping the old one to `status: archived` with a `superseded_by:` pointer;
-do not silently rewrite history.
+Frontmatter `status` follows the repo metadata contract (`draft` = proposed and
+not in force; `active` = in force; `archived` = superseded/deprecated). The ADR's
+own lifecycle (Proposed / Accepted / Superseded by ADR-NNNN) lives in the body's
+**Status** line. In-force ADRs are `canonical: true` and enrolled in the 90-day
+re-verification check — that is the enforcement behind "is this still true?".
+Supersede an ADR by adding a new one and flipping the old one to
+`status: archived` with a `superseded_by:` pointer; do not silently rewrite
+history.
 
 ## Adding an ADR
 
@@ -84,6 +85,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0072](0072-md-only-docs-checks-job.md)                     | The Markdown globs route to a small `docs-checks` job; some Markdown runs both jobs  |
 | [0073](0073-guardrail-prose-pinned-in-ci.md)                | Normative guardrail sentences are pinned in CI; script digests deliberately are not  |
 | [0075](0075-pr-merge.md)                                    | One sanctioned merge wrapper gates merges locally; the binding control stays human   |
+| [0076](0076-fair-quality-gate-coordinator.md)               | Fair weighted coordination replaces machine-wide full-run gate exclusion             |
 
 ### shared-config
 

@@ -109,14 +109,21 @@ fi
 echo "==> Installing workspace dependencies"
 # Skip the (~15s) reinstall when neither the lockfile nor the shared-config build
 # inputs changed since the last bootstrap. shared-config is built by the root
-# postinstall (tsc -> shared-config/dist), which other packages import from, so a
-# shared-config/src edit must bust the marker even when pnpm-lock.yaml is
-# unchanged. The marker lives inside the gitignored node_modules, so it is
+# postinstall, which other packages import from. A source, manifest, compiler
+# config, or clean-build wrapper edit must bust the marker even when
+# pnpm-lock.yaml is unchanged. The marker lives inside the gitignored node_modules, so it is
 # discarded whenever the dependency tree is. Marker semantics are shared with
 # scripts/setup.sh through scripts/lib/install-marker.sh: a hashing miss yields
 # an empty hash, which never matches, so the work reruns.
 deps_marker="node_modules/.web-bootstrap-deps.sha256"
-deps_hash="$(install_marker_hash_inputs pnpm-lock.yaml shared-config/src shared-config/package.json shared-config/tsconfig.json || true)"
+deps_hash="$(
+  install_marker_hash_inputs \
+    pnpm-lock.yaml \
+    shared-config/src \
+    shared-config/package.json \
+    shared-config/scripts/build.mjs \
+    shared-config/tsconfig.json || true
+)"
 if [ -d node_modules ] &&
   install_marker_matches "$deps_marker" "$deps_hash"; then
   echo "deps + shared-config unchanged since last bootstrap; skipping pnpm install."

@@ -72,8 +72,7 @@ function isClaudeSessionEndCommand(command) {
 // exact reviewed allowlist so shell escaping or dynamic command construction
 // cannot bypass a command-specific policy check.
 const allowedClaudeBashScriptPermissions = new Set([
-  "Bash(bash scripts/agent-quality-gate.sh:*)",
-  "Bash(bash ./scripts/agent-quality-gate.sh:*)",
+  "Bash(./scripts/agent-quality-gate.sh:*)",
   "Bash(bash scripts/agent-quality-gate.test.sh:*)",
   "Bash(bash ./scripts/agent-quality-gate.test.sh:*)",
   "Bash(bash scripts/bootstrap/agent-session-end-hook.sh:*)",

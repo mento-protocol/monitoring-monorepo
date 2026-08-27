@@ -1,5 +1,11 @@
-#!/usr/bin/env bash
+#!/bin/bash -p
+unset BASH_ENV ENV BASH_COMPAT CDPATH GLOBIGNORE
+set +o posix
+unset POSIXLY_CORRECT POSIX_PEDANTIC
 set -euo pipefail
+# Bash `-p` blocks startup files, imported functions, and inherited shell
+# options. The explicit reset above also removes startup controls that Bash can
+# still import or use after startup. It runs before path resolution or parsing.
 
 gate_start_ts="$(date +%s)"
 
@@ -25,7 +31,8 @@ Options:
   --skip-if-fresh
                  With --run, skip execution when the previous successful run
                  used the same base, changed paths, command plan, gate
-                 implementation, and validated file content. Intended for the
+                 implementation, validated file content, toolchain, material
+                 environment, runtime, and scheduler policy. Intended for the
                  pre-push hook only.
   --parallel <n> With --run, execute independent quality commands with up to
                  n concurrent jobs. Default: auto, capped at 4. Fail-fast mode
@@ -38,12 +45,14 @@ Options:
   --command-timeout <n>
                  With --run, kill any single mapped command that runs longer
                  than n seconds and report it as a failure. Default: 1500. The
+                 gate self-test uses 2100 unless this option overrides it. A
                  timeout is per command, never for the whole run.
   --lock-wait <n>
-                 With --run, wait at most n seconds for another gate run on
-                 this machine to finish before starting. Default: 1800.
-  --no-lock      With --run, skip cross-run mutual exclusion and start even
-                 while another gate run is executing mapped commands.
+                 With --run, wait at most n seconds for scheduler admission,
+                 a command lease, a coalesced result, or a legacy holder.
+                 Default: 1800.
+  --no-lock      With --run, bypass the scheduler and legacy compatibility
+                 lock. Mapped commands then run without machine coordination.
   -h, --help     Show this help.
 
 Environment:
@@ -59,11 +68,18 @@ Environment:
   AGENT_GATE_FULL_TESTS
                       Same behavior as --full-local-tests when set to 1 or true.
   AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS
-                      Same behavior as --command-timeout. Default: 1500.
+                      Same behavior as --command-timeout. Default: 1500; an
+                      explicit value also overrides the 2100-second gate
+                      self-test default.
   AGENT_QUALITY_GATE_LOCK
                       Set to 0 or false for the same effect as --no-lock.
   AGENT_QUALITY_GATE_LOCK_WAIT_SECONDS
                       Same behavior as --lock-wait. Default: 1800.
+  AGENT_QUALITY_GATE_COORDINATOR
+                      Internal compatibility switch. Set to 0, false, or no
+                      only in legacy-lock tests. The serialized lock remains.
+  AGENT_QUALITY_GATE_CAPACITY
+                      Global coordinator capacity. Default: 3. Range: 1-64.
   AGENT_QUALITY_GATE_LOCK_DIR
                       Directory holding the cross-run lock. Default:
                       $HOME/.cache/agent-quality-gate, falling back to
@@ -103,16 +119,47 @@ fail_fast="${AGENT_QUALITY_FAIL_FAST:-false}"
 skip_if_fresh="${AGENT_QUALITY_SKIP_IF_FRESH:-false}"
 quality_parallelism="${AGENT_QUALITY_PARALLELISM:-auto}"
 full_local_tests="${AGENT_GATE_FULL_TESTS:-false}"
-# 900 was the bound until this gate's own self-test became the longest mapped
-# command. That suite spends most of its time asserting that runs queue rather
-# than race, so its length is load-bearing rather than slack: measured at 525s
-# alone and past 900s inside a full gate run, where it competes with everything
-# else on the machine. The cap is a backstop against a hung command, not a
-# performance budget, so it moves to the smallest number that clears the
-# measurement with room — the durations log is where a command that has grown
-# too slow gets noticed.
+# The gate self-test is the only mapped command that needs more than the
+# ordinary 1500-second watchdog. The current exact-head suite passed in 1710
+# seconds after the old watchdog stopped an earlier run at 1504 seconds. Give
+# that command 390 seconds of measured headroom. An explicit global override
+# still applies to every command, including the self-test.
+command_timeout_overridden=false
+if [[ -n "${AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS:-}" ]]; then
+  command_timeout_overridden=true
+fi
 command_timeout_seconds="${AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS:-1500}"
+gate_selftest_timeout_seconds=2100
 gate_lock_enabled="${AGENT_QUALITY_GATE_LOCK:-1}"
+gate_coordinator_enabled="${AGENT_QUALITY_GATE_COORDINATOR-1}"
+gate_coordinator_capacity="${AGENT_QUALITY_GATE_CAPACITY-3}"
+if [[ ! "$gate_coordinator_capacity" =~ ^(0|[1-9][0-9]*)$ ||
+  "$gate_coordinator_capacity" -lt 1 ||
+  "$gate_coordinator_capacity" -gt 64 ]]; then
+  echo "error: AGENT_QUALITY_GATE_CAPACITY must be an integer from 1 through 64." >&2
+  exit 2
+fi
+case "$gate_coordinator_enabled" in
+  0|false|no|1|true|yes) ;;
+  *)
+    echo "error: AGENT_QUALITY_GATE_COORDINATOR must be 0, false, no, 1, true, or yes." >&2
+    exit 2
+    ;;
+esac
+
+# The coordinator reserves fd 7 as the original stdout before it can enter a
+# no-work failure path. Legacy runs never reserve it. This guard lets shared
+# legacy-drain helpers report a coordinated refusal without changing their
+# legacy output contract or failing when the descriptor is closed.
+gate_coordinator_stdout_reserved=0
+gate_report_coordinated_no_work_failure() {
+  local status="$1" phase="$2" work_verdict="$3"
+  declare -F gate_coordinator_report_no_work_failure >/dev/null 2>&1 || return 0
+  if [[ "$gate_coordinator_stdout_reserved" -eq 1 ]] &&
+    { : >&7; } 2>/dev/null; then
+    gate_coordinator_report_no_work_failure "$status" "$phase" "$work_verdict"
+  fi
+}
 
 # Reads one of the lock's tunable numbers. An override that is set but EMPTY is
 # an error rather than a silent fall back to the default: `${VAR:-default}`
@@ -139,9 +186,6 @@ gate_lock_seconds_knob() {
 }
 
 gate_lock_wait_seconds="$(gate_lock_seconds_knob AGENT_QUALITY_GATE_LOCK_WAIT_SECONDS 1800)"
-if [[ -z "$allow_package_script_changes" ]]; then
-  allow_package_script_changes="$(git config --bool --get agent.qualityGate.allowPackageScriptChanges 2>/dev/null || true)"
-fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -203,6 +247,7 @@ while [[ $# -gt 0 ]]; do
         echo "error: --command-timeout requires a positive integer" >&2
         exit 2
       fi
+      command_timeout_overridden=true
       shift 2
       ;;
     --lock-wait)
@@ -266,6 +311,9 @@ if [[ ! "$command_timeout_seconds" =~ ^[0-9]+$ || "$command_timeout_seconds" -lt
   echo "error: --command-timeout requires a positive integer" >&2
   exit 2
 fi
+if [[ "$command_timeout_overridden" == true ]]; then
+  gate_selftest_timeout_seconds="$command_timeout_seconds"
+fi
 
 if [[ ! "$gate_lock_wait_seconds" =~ ^[0-9]+$ ]]; then
   echo "error: --lock-wait requires a non-negative integer" >&2
@@ -284,27 +332,138 @@ fi
 # shellcheck source=scripts/gate/run-handles.sh
 source "$run_handles_path"
 
+# Caller-controlled Bash startup state, Git controls, and test-only validator
+# injections must not affect a parent Git probe, internal control shell, or the
+# mapped-command tree. Keep every ordinary environment value, but remove
+# startup files, inherited option sets, compatibility controls, Git controls,
+# test overrides, and exported function records. Privileged mode makes the
+# receiving Bash ignore the same startup controls while it starts. The filtered
+# environment then propagates to every mapped-command descendant. Prepare this
+# launcher before the first Git probe so parent and mapped commands use the same
+# policy. Legacy and explicit no-lock runs also use this boundary.
+if [[ ! -x /usr/bin/env || ! -x /usr/bin/awk || ! -x /bin/bash ]]; then
+  echo "error: the quality gate requires /usr/bin/env, /usr/bin/awk, and /bin/bash." >&2
+  exit 2
+fi
+gate_sanitized_bash_launcher=(
+  /usr/bin/env
+  -u BASH_ENV
+  -u ENV
+  -u SHELLOPTS
+  -u BASHOPTS
+  -u BASH_COMPAT
+  -u CDPATH
+  -u GLOBIGNORE
+  -u POSIXLY_CORRECT
+  -u POSIX_PEDANTIC
+)
+gate_environment_helper="$script_source_dir/gate/quality-gate-coordinator-environment.mjs"
+if [[ -L "$gate_environment_helper" || ! -f "$gate_environment_helper" ||
+  ! -r "$gate_environment_helper" ]]; then
+  echo "error: the quality-gate environment policy is unavailable: ${gate_environment_helper}" >&2
+  exit 2
+fi
+gate_scrub_environment_scan_complete=0
+gate_mapped_child_scrub_policy_hash=""
+while IFS= read -r -d '' gate_scrub_environment_name; do
+  if [[ "$gate_scrub_environment_name" == agent-quality-gate-scrub-end ]]; then
+    gate_scrub_environment_scan_complete=1
+    continue
+  fi
+  if [[ "$gate_scrub_environment_name" == agent-quality-gate-scrub-policy=* ]]; then
+    [[ -z "$gate_mapped_child_scrub_policy_hash" ]] || {
+      echo "error: the quality-gate environment policy returned duplicate identity." >&2
+      exit 2
+    }
+    gate_mapped_child_scrub_policy_hash="${gate_scrub_environment_name#*=}"
+    continue
+  fi
+  gate_sanitized_bash_launcher+=(
+    -u "$gate_scrub_environment_name"
+  )
+  if [[ "$gate_scrub_environment_name" == GIT_* ]]; then
+    unset "$gate_scrub_environment_name"
+  fi
+done < <(
+  node "$gate_environment_helper" --mapped-child-scrubbed-names
+)
+if [[ "$gate_scrub_environment_scan_complete" -ne 1 ||
+  ! "$gate_mapped_child_scrub_policy_hash" =~ ^[a-f0-9]{64}$ ]]; then
+  echo "error: could not inspect caller controls for the quality gate." >&2
+  exit 2
+fi
+gate_bash_environment_scan_complete=0
+while IFS= read -r -d '' gate_bash_environment_record; do
+  if [[ "$gate_bash_environment_record" == agent-quality-gate-env-end ]]; then
+    gate_bash_environment_scan_complete=1
+    continue
+  fi
+  [[ "$gate_bash_environment_record" == *=* ]] || continue
+  gate_bash_environment_name="${gate_bash_environment_record%%=*}"
+  gate_bash_environment_value="${gate_bash_environment_record#*=}"
+  case "$gate_bash_environment_name" in
+    BASH_FUNC_*%%|BASH_FUNC_*'()')
+      gate_sanitized_bash_launcher+=(
+        -u "$gate_bash_environment_name"
+      )
+      ;;
+    *)
+      if [[ "$gate_bash_environment_name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ &&
+        "$gate_bash_environment_value" == '() {'* ]]; then
+        gate_sanitized_bash_launcher+=(
+          -u "$gate_bash_environment_name"
+        )
+      fi
+      ;;
+  esac
+done < <(
+  set -- "${LC_ALL+x}" "${LC_ALL-}"
+  LC_ALL=C /usr/bin/env \
+    "agent-quality-gate-env-scan-lc-all-set=$1" \
+    "agent-quality-gate-env-scan-lc-all-value=$2" \
+    /usr/bin/awk '
+    BEGIN {
+      for (name in ENVIRON) {
+        if (name == "LC_ALL" ||
+            name == "agent-quality-gate-env-scan-lc-all-set" ||
+            name == "agent-quality-gate-env-scan-lc-all-value") {
+          continue
+        }
+        printf "%s=%s%c", name, ENVIRON[name], 0
+      }
+      if (ENVIRON["agent-quality-gate-env-scan-lc-all-set"] != "") {
+        printf "LC_ALL=%s%c", \
+          ENVIRON["agent-quality-gate-env-scan-lc-all-value"], 0
+      }
+      printf "%s%c", "agent-quality-gate-env-end", 0
+    }
+  '
+)
+if [[ "$gate_bash_environment_scan_complete" -ne 1 ]]; then
+  echo "error: could not inspect Bash startup controls for the quality gate." >&2
+  exit 2
+fi
+gate_sanitized_bash_launcher+=(/bin/bash -p)
+unset gate_bash_environment_record gate_bash_environment_name
+unset gate_bash_environment_value gate_bash_environment_scan_complete
+unset gate_environment_helper gate_scrub_environment_name
+unset gate_scrub_environment_scan_complete
+
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
+if [[ -z "$allow_package_script_changes" ]]; then
+  allow_package_script_changes="$(git config --bool --get agent.qualityGate.allowPackageScriptChanges 2>/dev/null || true)"
+fi
 
 # Use a repo-local scratch dir for tmpfiles so we don't depend on TMPDIR
 # being writable — pre-push hooks fork off trunk's daemon, which may carry
-# a TMPDIR that's outside a host sandbox's writable allowlist. Also export
-# TMPDIR so mapped subprocesses (e.g. agent-quality-gate.test.sh's bare
-# `mktemp -d`) inherit a writable scratch path instead of falling back to
-# the system default (which sandboxed shells often cannot write to).
+# a TMPDIR that's outside a host sandbox's writable allowlist. Select and
+# export the effective directory before the coordinator adapter copy so the
+# default coordinator and dry-run paths use the same validated fallback.
+# Mapped subprocesses (e.g. agent-quality-gate.test.sh's bare `mktemp -d`)
+# inherit this path instead of falling back to an unwritable system default.
 scratch_dir="$repo_root/.tmp/agent-quality-gate"
 mkdir -p "$scratch_dir"
-durations_file="$scratch_dir/durations.jsonl"
-success_stamp_file="$scratch_dir/last-success.stamp"
-# Per-command success stamps (GitHub issue #1410): lets a killed run or a run
-# that lost one flaky check resume the commands that already passed instead of
-# re-executing everything. Bounded by prune_command_stamps below.
-command_stamps_file="$scratch_dir/command-stamps.tsv"
-# An exact-signature success may cover the manual-run-to-pre-push interval even
-# for the slowest mapped suites. Keep this fixed rather than environment-
-# configurable so callers cannot extend validation reuse beyond two hours.
-success_stamp_ttl_seconds=$((2 * 60 * 60))
 # Avoid overriding a usable TMPDIR: Terraform providers use go-plugin grpc on
 # a socket in TMPDIR, and repo-local paths can be blocked by agent seatbelts.
 # Trunk hooks can strip TMPDIR entirely, so prefer the system temp directory
@@ -316,6 +475,114 @@ else
   export TMPDIR="$scratch_dir"
 fi
 
+# Print the current changed-path set. Capture each Git probe before printing
+# any output so one failed probe cannot be hidden by a later successful probe.
+collect_current_changed_paths() {
+  local committed_paths unstaged_paths staged_paths untracked_paths
+  if [[ -n "$changed_paths_input_file" ]]; then
+    sed '/^$/d' "$changed_paths_input_file"
+    return
+  fi
+  if ! committed_paths="$(git diff --name-only --no-renames "${base_ref}...${head_ref}" 2>/dev/null)"; then
+    committed_paths="$(git diff --name-only --no-renames "$base_ref" "$head_ref")" || return 1
+  fi
+  printf '%s\n' "$committed_paths"
+  if [[ "$head_ref" == "HEAD" ]]; then
+    unstaged_paths="$(git diff --name-only --no-renames)" || return 1
+    staged_paths="$(git diff --cached --name-only --no-renames)" || return 1
+    untracked_paths="$(git ls-files --others --exclude-standard --exclude='.tmp/agent-quality-gate/')" || return 1
+    printf '%s\n' "$unstaged_paths" "$staged_paths" "$untracked_paths"
+  fi
+}
+
+gate_coordinator_helper="$script_source_dir/gate/quality-gate-coordinator.sh"
+gate_coordinator_entry="$script_source_dir/gate/quality-gate-coordinator.mjs"
+gate_coordinator_adapter_copy_dir=""
+
+cleanup_gate_coordinator_adapter_copy() {
+  local copy_dir="${gate_coordinator_adapter_copy_dir:-}"
+  [[ -n "$copy_dir" ]] || return 0
+  /bin/rm -f -- \
+    "$copy_dir/quality-gate-coordinator.sh" \
+    "$copy_dir/quality-gate-coordinator-support.sh" || return 1
+  /bin/rmdir -- "$copy_dir" || return 1
+  gate_coordinator_adapter_copy_dir=""
+}
+
+materialize_gate_coordinator_adapter() {
+  local before after copied copy_parent main_hash support_hash extra
+  before="$(node "$gate_coordinator_entry" adapter-hashes)" || return 1
+  copy_parent="${TMPDIR:-/tmp}"
+  copy_parent="${copy_parent%/}"
+  gate_coordinator_adapter_copy_dir="$(
+    mktemp -d "$copy_parent/agent-quality-gate-adapter.XXXXXX"
+  )" || return 1
+  chmod 700 "$gate_coordinator_adapter_copy_dir" || return 1
+  cp "$gate_coordinator_helper" \
+    "$gate_coordinator_adapter_copy_dir/quality-gate-coordinator.sh" || return 1
+  cp "$script_source_dir/gate/quality-gate-coordinator-support.sh" \
+    "$gate_coordinator_adapter_copy_dir/quality-gate-coordinator-support.sh" || return 1
+  chmod 600 \
+    "$gate_coordinator_adapter_copy_dir/quality-gate-coordinator.sh" \
+    "$gate_coordinator_adapter_copy_dir/quality-gate-coordinator-support.sh" || return 1
+  # `${...}` below is JavaScript template interpolation.
+  # shellcheck disable=SC2016
+  copied="$(node -e '
+    const { createHash } = require("node:crypto");
+    const { readFileSync } = require("node:fs");
+    const digest = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
+    process.stdout.write(`${digest(process.argv[1])} ${digest(process.argv[2])}`);
+  ' "$gate_coordinator_adapter_copy_dir/quality-gate-coordinator.sh" \
+    "$gate_coordinator_adapter_copy_dir/quality-gate-coordinator-support.sh")" || return 1
+  after="$(node "$gate_coordinator_entry" adapter-hashes)" || return 1
+  [[ "$before" == "$copied" && "$copied" == "$after" ]] || return 1
+  read -r main_hash support_hash extra <<< "$copied"
+  [[ -z "${extra:-}" && "$main_hash" =~ ^[a-f0-9]{64}$ &&
+    "$support_hash" =~ ^[a-f0-9]{64}$ ]] || return 1
+  gate_coordinator_loaded_adapter_main_hash="$main_hash"
+  gate_coordinator_loaded_adapter_support_hash="$support_hash"
+  gate_coordinator_helper="$gate_coordinator_adapter_copy_dir/quality-gate-coordinator.sh"
+  gate_coordinator_support="$gate_coordinator_adapter_copy_dir/quality-gate-coordinator-support.sh"
+}
+
+case "$gate_coordinator_enabled" in
+  0|false|no)
+    ;;
+  1|true|yes)
+    if [[ ! -r "$gate_coordinator_helper" ]]; then
+      echo "error: quality-gate coordinator adapter is missing: ${gate_coordinator_helper}" >&2
+      echo "Set AGENT_QUALITY_GATE_COORDINATOR=0 only to run the legacy lock compatibility tests." >&2
+      exit 2
+    fi
+    if ! materialize_gate_coordinator_adapter; then
+      cleanup_gate_coordinator_adapter_copy || true
+      echo "error: could not load one stable quality-gate coordinator adapter." >&2
+      exit 2
+    fi
+    # shellcheck source=scripts/gate/quality-gate-coordinator.sh
+    if ! source "$gate_coordinator_helper"; then
+      cleanup_gate_coordinator_adapter_copy || true
+      echo "error: could not source the verified quality-gate coordinator adapter." >&2
+      exit 2
+    fi
+    if ! cleanup_gate_coordinator_adapter_copy; then
+      echo "error: could not remove the private coordinator adapter copy." >&2
+      exit 2
+    fi
+    gate_coordinator_helper="$script_source_dir/gate/quality-gate-coordinator.sh"
+    gate_coordinator_support="$script_source_dir/gate/quality-gate-coordinator-support.sh"
+    ;;
+esac
+durations_file="$scratch_dir/durations.jsonl"
+success_stamp_file="$scratch_dir/last-success.stamp"
+# Per-command success stamps (GitHub issue #1410): lets a killed run or a run
+# that lost one flaky check resume the commands that already passed instead of
+# re-executing everything. Bounded by prune_command_stamps below.
+command_stamps_file="$scratch_dir/command-stamps.tsv"
+# An exact-signature success may cover the manual-run-to-pre-push interval even
+# for the slowest mapped suites. Keep this fixed rather than environment-
+# configurable so callers cannot extend validation reuse beyond two hours.
+success_stamp_ttl_seconds=$((2 * 60 * 60))
 # Trunk's pre-push hook callback runs the gate without a TTY and strips most
 # env vars from the calling shell. Re-assert non-interactive markers so the
 # mapped commands (e.g. pnpm install) take the CI codepath instead of asking
@@ -349,29 +616,117 @@ tmpfiles=()
 # Set by run_with_timeout for the most recent mapped command so callers can tell
 # a timeout apart from an ordinary non-zero exit. Read only right after the call.
 last_command_timed_out=false
+last_command_execution_seconds=0
+last_command_infrastructure_failed=false
+last_command_trunk_provisioning_blocked=false
 # Monotonic counter for unique per-command timeout marker paths.
 timeout_seq=0
+# Monotonic across all parallel phases so no command drain identity is reused
+# within one gate invocation.
+parallel_command_sequence=0
 # PIDs (command + watchdog) of any in-flight timed command in THIS process, so a
 # wrapper SIGINT/SIGTERM tears them down instead of leaking the watchdog's
 # background sleeps. Sequential commands run in the gate process; parallel
 # members run in their own process-group worker subshells, each maintaining its
 # own copy — which the parent's signal traps cannot see.
-active_timeout_pids=()
+# Each entry is PID|exact-start for one direct command/watchdog child. One
+# array assignment publishes the complete registry to the signal trap.
+active_timeout_records=()
+active_timeout_drain_identity=""
 
 # Process-group IDs of the in-flight parallel workers. Non-interactive Bash job
 # control gives each worker a dedicated group whose ID equals its leader PID.
 # Group tracking survives the leader exiting and descendants reparenting, unlike
 # a process-tree walk rooted at that leader.
 active_worker_pgids=()
+# Drain identities align one-for-one with active_worker_pgids. A parallel
+# command can detach into a new process group, so the group alone is not a
+# complete cleanup handle.
+active_worker_drain_identities=()
+# Exact leader start identities align with the same registry. They let the
+# active parent validate a live no-lock sentinel without trusting a bare PGID.
+active_worker_start_identities=()
 
 # A signal can arrive after Bash creates a parallel worker but before the parent
 # records its process group. Defer INT/TERM handling across that short registry
 # update, then replay the first pending signal after the group is reachable.
 worker_registration_in_progress=0
+worker_settlement_in_progress=0
 pending_terminating_signal=""
 worker_registration_test_barrier="${AGENT_QUALITY_GATE_TEST_WORKER_REGISTRATION_BARRIER:-}"
 if [[ -n "$worker_registration_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
   echo "AGENT_QUALITY_GATE_TEST_WORKER_REGISTRATION_BARRIER: test-only override requires NODE_ENV=test" >&2
+  exit 2
+fi
+drain_refresh_test_barrier="${AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER:-}"
+if [[ -n "$drain_refresh_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
+  echo "AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER: test-only override requires NODE_ENV=test" >&2
+  exit 2
+fi
+parallel_release_failure_at="${AGENT_QUALITY_GATE_TEST_PARALLEL_RELEASE_FAILURE_AT:-}"
+parallel_release_attempt=0
+if [[ -n "$parallel_release_failure_at" ]] && {
+  [[ "${NODE_ENV:-}" != "test" ]] ||
+    [[ ! "$parallel_release_failure_at" =~ ^[1-9][0-9]*$ ]];
+}; then
+  echo "AGENT_QUALITY_GATE_TEST_PARALLEL_RELEASE_FAILURE_AT: test-only override requires NODE_ENV=test and a positive integer" >&2
+  exit 2
+fi
+owner_discard_test_barrier="${AGENT_QUALITY_GATE_TEST_OWNER_DISCARD_BARRIER:-}"
+if [[ -n "$owner_discard_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
+  echo "AGENT_QUALITY_GATE_TEST_OWNER_DISCARD_BARRIER: test-only override requires NODE_ENV=test" >&2
+  exit 2
+fi
+owner_quarantined_test_barrier="${AGENT_QUALITY_GATE_TEST_OWNER_QUARANTINED_BARRIER:-}"
+if [[ -n "$owner_quarantined_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
+  echo "AGENT_QUALITY_GATE_TEST_OWNER_QUARANTINED_BARRIER: test-only override requires NODE_ENV=test" >&2
+  exit 2
+fi
+owner_witness_test_barrier="${AGENT_QUALITY_GATE_TEST_OWNER_WITNESS_BARRIER:-}"
+if [[ -n "$owner_witness_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
+  echo "AGENT_QUALITY_GATE_TEST_OWNER_WITNESS_BARRIER: test-only override requires NODE_ENV=test" >&2
+  exit 2
+fi
+marker_witness_test_barrier="${AGENT_QUALITY_GATE_TEST_MARKER_WITNESS_BARRIER:-}"
+if [[ -n "$marker_witness_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
+  echo "AGENT_QUALITY_GATE_TEST_MARKER_WITNESS_BARRIER: test-only override requires NODE_ENV=test" >&2
+  exit 2
+fi
+owner_quarantine_before_claim_test_barrier="${AGENT_QUALITY_GATE_TEST_QUARANTINE_BEFORE_CLAIM_BARRIER:-}"
+if [[ -n "$owner_quarantine_before_claim_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
+  echo "AGENT_QUALITY_GATE_TEST_QUARANTINE_BEFORE_CLAIM_BARRIER: test-only override requires NODE_ENV=test" >&2
+  exit 2
+fi
+owner_quarantine_claim_open_test_barrier="${AGENT_QUALITY_GATE_TEST_QUARANTINE_CLAIM_OPEN_BARRIER:-}"
+if [[ -n "$owner_quarantine_claim_open_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
+  echo "AGENT_QUALITY_GATE_TEST_QUARANTINE_CLAIM_OPEN_BARRIER: test-only override requires NODE_ENV=test" >&2
+  exit 2
+fi
+owner_quarantine_after_claim_test_barrier="${AGENT_QUALITY_GATE_TEST_QUARANTINE_AFTER_CLAIM_BARRIER:-}"
+if [[ -n "$owner_quarantine_after_claim_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
+  echo "AGENT_QUALITY_GATE_TEST_QUARANTINE_AFTER_CLAIM_BARRIER: test-only override requires NODE_ENV=test" >&2
+  exit 2
+fi
+owner_restore_link_failure="${AGENT_QUALITY_GATE_TEST_OWNER_RESTORE_LINK_FAILURE:-}"
+if [[ -n "$owner_restore_link_failure" ]] && {
+  [[ "${NODE_ENV:-}" != "test" ]] || [[ "$owner_restore_link_failure" != "1" ]];
+}; then
+  echo "AGENT_QUALITY_GATE_TEST_OWNER_RESTORE_LINK_FAILURE: test-only override requires NODE_ENV=test and value 1" >&2
+  exit 2
+fi
+release_validated_test_barrier="${AGENT_QUALITY_GATE_TEST_RELEASE_VALIDATED_BARRIER:-}"
+if [[ -n "$release_validated_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
+  echo "AGENT_QUALITY_GATE_TEST_RELEASE_VALIDATED_BARRIER: test-only override requires NODE_ENV=test" >&2
+  exit 2
+fi
+release_private_test_barrier="${AGENT_QUALITY_GATE_TEST_RELEASE_PRIVATE_BARRIER:-}"
+if [[ -n "$release_private_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
+  echo "AGENT_QUALITY_GATE_TEST_RELEASE_PRIVATE_BARRIER: test-only override requires NODE_ENV=test" >&2
+  exit 2
+fi
+lock_taken_test_barrier="${AGENT_QUALITY_GATE_TEST_LOCK_TAKEN_BARRIER:-}"
+if [[ -n "$lock_taken_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
+  echo "AGENT_QUALITY_GATE_TEST_LOCK_TAKEN_BARRIER: test-only override requires NODE_ENV=test" >&2
   exit 2
 fi
 
@@ -397,108 +752,521 @@ collect_process_tree() {
   echo "$pid"
 }
 
+# Return 0 only while PID still names the recorded runtime generation and is
+# still this shell's direct child. Return 1 after that generation is gone or the
+# PID was recycled. Return 2 when a live process cannot be identified safely.
+gate_active_timeout_direct_child_status() {
+  local pid="$1"
+  local expected_runtime="$2"
+  local parent_before parent_after current_runtime signal_probe
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 2
+  if [[ -z "$expected_runtime" ]]; then
+    signal_probe="$(gate_lock_process_signal_probe "$pid")" ||
+      signal_probe="error"
+    [[ "$signal_probe" == "gone" ]] && return 1
+    return 2
+  fi
+  parent_before="$(
+    ps -o ppid= -p "$pid" 2>/dev/null |
+      awk 'NF { print $1; exit }' || true
+  )"
+  current_runtime="$(gate_lock_process_runtime_start "$pid")"
+  parent_after="$(
+    ps -o ppid= -p "$pid" 2>/dev/null |
+      awk 'NF { print $1; exit }' || true
+  )"
+  if [[ "$current_runtime" != "$expected_runtime" ]]; then
+    if [[ -z "$current_runtime" ]]; then
+      signal_probe="$(gate_lock_process_signal_probe "$pid")" ||
+        signal_probe="error"
+      [[ "$signal_probe" == "gone" ]] || return 2
+    fi
+    return 1
+  fi
+  [[ "$parent_before" == "$$" && "$parent_after" == "$$" ]] || return 2
+}
+
+# Best-effort settlement for an explicit no-lock run after its complete
+# inherited-handle drain fails. Each argument group is KIND PID START. A root
+# must still be this shell's direct child. A worker must also remain the leader
+# of its recorded process group. The fallback snapshots exact start identities
+# before TERM and rechecks each identity before KILL. It never proves that an
+# unobserved detached descendant is absent, so its caller still returns the
+# original drain failure.
+teardown_no_lock_settle_known_processes() {
+  local kind pid expected_start
+  local current_start current_runtime current_parent verified_parent current_pgid
+  local snapshot candidate candidate_pgid candidate_start
+  local record signal_probe state
+  local attempt unsettled=0 fallback_status=0
+  local -a captured_records=()
+  local -a captured_runtime_records=()
+  local -a direct_children=()
+  [[ "$#" -gt 0 ]] || return 2
+
+  while [[ "$#" -ge 3 ]]; do
+    kind="$1"
+    pid="$2"
+    expected_start="$3"
+    shift 3
+    if [[ ! "$pid" =~ ^[1-9][0-9]*$ || -z "$expected_start" ]]; then
+      fallback_status=2
+      continue
+    fi
+    if [[ "$kind" == "captured" ]]; then
+      current_runtime="$(gate_lock_process_runtime_start "$pid")"
+      if [[ "$current_runtime" == "$expected_start" ]]; then
+        captured_runtime_records+=("${pid}|${expected_start}")
+      elif [[ -z "$current_runtime" ]]; then
+        signal_probe="$(gate_lock_process_signal_probe "$pid")" ||
+          signal_probe="error"
+        [[ "$signal_probe" == "gone" ]] || fallback_status=2
+      fi
+      continue
+    fi
+    current_parent="$(
+      ps -o ppid= -p "$pid" 2>/dev/null |
+        awk 'NF { print $1; exit }' || true
+    )"
+    current_start="$(gate_lock_process_runtime_start "$pid")"
+    verified_parent="$(
+      ps -o ppid= -p "$pid" 2>/dev/null |
+        awk 'NF { print $1; exit }' || true
+    )"
+    if [[ "$current_start" != "$expected_start" ]]; then
+      # A different generation is not ours. An empty read is safe only when
+      # the process is confirmed gone.
+      if [[ -z "$current_start" ]]; then
+        signal_probe="$(gate_lock_process_signal_probe "$pid")" ||
+          signal_probe="error"
+        [[ "$signal_probe" == "gone" ]] || fallback_status=2
+      fi
+      continue
+    fi
+    if [[ "$current_parent" != "$$" || "$verified_parent" != "$$" ]]; then
+      fallback_status=2
+      continue
+    fi
+    case "$kind" in
+      root)
+        # Register this exact direct child in the signal set before it can
+        # enter the reap set. A direct child is waitable only after the
+        # fallback has also recorded the generation that it will signal.
+        captured_records+=("${pid}|${expected_start}")
+        direct_children+=("$pid")
+        while IFS= read -r candidate; do
+          [[ "$candidate" =~ ^[1-9][0-9]*$ ]] || continue
+          [[ "$candidate" != "$pid" ]] || continue
+          candidate_start="$(gate_lock_process_runtime_start "$candidate")"
+          if [[ -n "$candidate_start" ]]; then
+            captured_records+=("${candidate}|${candidate_start}")
+          else
+            signal_probe="$(gate_lock_process_signal_probe "$candidate")" ||
+              signal_probe="error"
+            [[ "$signal_probe" == "gone" ]] || fallback_status=2
+          fi
+        done < <(collect_process_tree "$pid")
+        ;;
+      worker)
+        current_pgid="$(
+          ps -o pgid= -p "$pid" 2>/dev/null |
+            awk 'NF { print $1; exit }' || true
+        )"
+        if [[ "$current_pgid" != "$pid" ]]; then
+          fallback_status=2
+          continue
+        fi
+        if ! snapshot="$(ps -axo pid=,pgid= 2>/dev/null)"; then
+          fallback_status=2
+          continue
+        fi
+        # The PGID and complete snapshot are prerequisites for treating this
+        # direct child as a worker-group anchor. Do not wait on a rejected or
+        # unverifiable worker that this fallback did not record for signalling.
+        captured_records+=("${pid}|${expected_start}")
+        direct_children+=("$pid")
+        while read -r candidate candidate_pgid; do
+          [[ "$candidate" =~ ^[1-9][0-9]*$ &&
+            "$candidate_pgid" == "$pid" ]] || continue
+          [[ "$candidate" != "$pid" ]] || continue
+          candidate_start="$(gate_lock_process_runtime_start "$candidate")"
+          if [[ -n "$candidate_start" ]]; then
+            captured_records+=("${candidate}|${candidate_start}")
+          else
+            signal_probe="$(gate_lock_process_signal_probe "$candidate")" ||
+              signal_probe="error"
+            [[ "$signal_probe" == "gone" ]] || fallback_status=2
+          fi
+        done <<< "$snapshot"
+        ;;
+      *)
+        fallback_status=2
+        ;;
+    esac
+  done
+  [[ "$#" -eq 0 ]] || fallback_status=2
+
+  for record in "${captured_records[@]+"${captured_records[@]}"}"; do
+    pid="${record%%|*}"
+    expected_start="${record#*|}"
+    current_start="$(gate_lock_process_runtime_start "$pid")"
+    [[ -n "$current_start" && "$current_start" == "$expected_start" ]] ||
+      continue
+    kill -TERM "$pid" 2>/dev/null || {
+      signal_probe="$(gate_lock_process_signal_probe "$pid")" ||
+        signal_probe="error"
+      [[ "$signal_probe" == "gone" ]] || fallback_status=2
+    }
+  done
+  for record in "${captured_runtime_records[@]+"${captured_runtime_records[@]}"}"; do
+    pid="${record%%|*}"
+    expected_start="${record#*|}"
+    current_runtime="$(gate_lock_process_runtime_start "$pid")"
+    [[ -n "$current_runtime" && "$current_runtime" == "$expected_start" ]] ||
+      continue
+    kill -TERM "$pid" 2>/dev/null || {
+      signal_probe="$(gate_lock_process_signal_probe "$pid")" ||
+        signal_probe="error"
+      [[ "$signal_probe" == "gone" ]] || fallback_status=2
+    }
+  done
+  sleep 1
+  for record in "${captured_records[@]+"${captured_records[@]}"}"; do
+    pid="${record%%|*}"
+    expected_start="${record#*|}"
+    current_start="$(gate_lock_process_runtime_start "$pid")"
+    [[ -n "$current_start" && "$current_start" == "$expected_start" ]] ||
+      continue
+    state="$(
+      ps -o stat= -p "$pid" 2>/dev/null |
+        awk 'NF { print $1; exit }' || true
+    )"
+    [[ "$state" == Z* ]] && continue
+    current_start="$(gate_lock_process_runtime_start "$pid")"
+    [[ "$current_start" == "$expected_start" ]] || continue
+    kill -KILL "$pid" 2>/dev/null || {
+      signal_probe="$(gate_lock_process_signal_probe "$pid")" ||
+        signal_probe="error"
+      [[ "$signal_probe" == "gone" ]] || fallback_status=2
+    }
+  done
+  for record in "${captured_runtime_records[@]+"${captured_runtime_records[@]}"}"; do
+    pid="${record%%|*}"
+    expected_start="${record#*|}"
+    current_runtime="$(gate_lock_process_runtime_start "$pid")"
+    [[ -n "$current_runtime" && "$current_runtime" == "$expected_start" ]] ||
+      continue
+    state="$(
+      ps -o stat= -p "$pid" 2>/dev/null |
+        awk 'NF { print $1; exit }' || true
+    )"
+    [[ "$state" == Z* ]] && continue
+    current_runtime="$(gate_lock_process_runtime_start "$pid")"
+    [[ "$current_runtime" == "$expected_start" ]] || continue
+    kill -KILL "$pid" 2>/dev/null || {
+      signal_probe="$(gate_lock_process_signal_probe "$pid")" ||
+        signal_probe="error"
+      [[ "$signal_probe" == "gone" ]] || fallback_status=2
+    }
+  done
+
+  for ((attempt = 0; attempt < 40; attempt++)); do
+    unsettled=0
+    for record in "${captured_records[@]+"${captured_records[@]}"}"; do
+      pid="${record%%|*}"
+      expected_start="${record#*|}"
+      current_start="$(gate_lock_process_runtime_start "$pid")"
+      [[ -n "$current_start" && "$current_start" == "$expected_start" ]] ||
+        continue
+      state="$(
+        ps -o stat= -p "$pid" 2>/dev/null |
+          awk 'NF { print $1; exit }' || true
+      )"
+      [[ "$state" == Z* ]] && continue
+      unsettled=1
+      break
+    done
+    if [[ "$unsettled" -eq 0 ]]; then
+      for record in "${captured_runtime_records[@]+"${captured_runtime_records[@]}"}"; do
+        pid="${record%%|*}"
+        expected_start="${record#*|}"
+        current_runtime="$(gate_lock_process_runtime_start "$pid")"
+        [[ -n "$current_runtime" && "$current_runtime" == "$expected_start" ]] ||
+          continue
+        state="$(
+          ps -o stat= -p "$pid" 2>/dev/null |
+            awk 'NF { print $1; exit }' || true
+        )"
+        [[ "$state" == Z* ]] && continue
+        unsettled=1
+        break
+      done
+    fi
+    [[ "$unsettled" -eq 1 ]] || break
+    sleep 0.05
+  done
+  [[ "$unsettled" -eq 0 ]] || fallback_status=2
+  if [[ "$unsettled" -eq 0 ]]; then
+    for pid in "${direct_children[@]+"${direct_children[@]}"}"; do
+      wait "$pid" 2>/dev/null || true
+    done
+  fi
+  [[ "$fallback_status" -eq 0 ]] || {
+    echo "error: the no-lock fallback could not settle every recorded process identity." >&2
+  }
+  return "$fallback_status"
+}
+
 teardown_active_timeouts() {
   local pid
   local pgid
-  local -a roots=("${active_timeout_pids[@]+"${active_timeout_pids[@]}"}")
+  local drain_identity
+  local drain_status=0
+  local record root_runtime captured_pid _captured_legacy captured_runtime
+  local worker_start
+  local clear_request_marker=0
+  local timeout_drain_identity="$active_timeout_drain_identity"
+  local -a timeout_records=("${active_timeout_records[@]+"${active_timeout_records[@]}"}")
+  local -a roots=()
   local -a worker_pgids=("${active_worker_pgids[@]+"${active_worker_pgids[@]}"}")
-  active_timeout_pids=()
-  active_worker_pgids=()
-  [[ -n "${roots[*]-}" || -n "${worker_pgids[*]-}" ]] || return 0
+  local -a worker_drain_identities=("${active_worker_drain_identities[@]+"${active_worker_drain_identities[@]}"}")
+  local -a worker_start_identities=("${active_worker_start_identities[@]+"${active_worker_start_identities[@]}"}")
+  local -a fallback_args=()
+  for record in "${timeout_records[@]+"${timeout_records[@]}"}"; do
+    pid="${record%%|*}"
+    root_runtime="${record#*|}"
+    if [[ "$record" != *"|"* || ! "$pid" =~ ^[1-9][0-9]*$ ]]; then
+      echo "error: direct-child cleanup registry is inconsistent." >&2
+      return 2
+    fi
+    roots+=("$record")
+    fallback_args+=(root "$pid" "$root_runtime")
+  done
+  [[ -n "${timeout_records[*]-}" || -n "${worker_pgids[*]-}" ||
+    -n "${worker_drain_identities[*]-}" ||
+    -n "${worker_start_identities[*]-}" ||
+    -n "$timeout_drain_identity" ]] || return 0
+  if ! [[ "${#worker_pgids[@]}" -eq "${#worker_drain_identities[@]}" &&
+    "${#worker_pgids[@]}" -eq "${#worker_start_identities[@]}" ]]; then
+    echo "error: parallel worker cleanup registry is inconsistent." >&2
+    case "$gate_lock_enabled" in
+      0|false|no)
+        teardown_no_lock_settle_known_processes \
+          "${fallback_args[@]+"${fallback_args[@]}"}" || true
+        ;;
+    esac
+    return 2
+  fi
+  local worker_index=0
+  for pgid in "${worker_pgids[@]+"${worker_pgids[@]}"}"; do
+    fallback_args+=(worker "$pgid" "${worker_start_identities[$worker_index]}")
+    worker_index=$((worker_index + 1))
+  done
+
+  # Persist and drain every exact command identity before any signal can
+  # destroy its last discoverable ancestor. A failed drain retains
+  # its recovery evidence. In that case, leave all remaining processes to the
+  # preserved legacy owner or coordinator obligations.
+  if [[ -n "$timeout_drain_identity" ]]; then
+    if [[ "$timeout_drain_identity" == "${gate_run_id:-$gate_lock_token}" ]]; then
+      clear_request_marker=1
+    fi
+    drain_completed_command_identity \
+      "$timeout_drain_identity" "$clear_request_marker" || drain_status=$?
+    if [[ "$drain_status" -ne 0 ]]; then
+      case "$gate_lock_enabled" in
+        0|false|no)
+          while IFS='|' read -r captured_pid _captured_legacy captured_runtime; do
+            [[ "$captured_pid" =~ ^[1-9][0-9]*$ &&
+              -n "$captured_runtime" ]] || continue
+            fallback_args+=(captured "$captured_pid" "$captured_runtime")
+          done <<< "$gate_drain_capture"
+          teardown_no_lock_settle_known_processes \
+            "${fallback_args[@]+"${fallback_args[@]}"}" || true
+          ;;
+      esac
+      return "$drain_status"
+    fi
+  fi
+  worker_index=0
+  for drain_identity in "${worker_drain_identities[@]+"${worker_drain_identities[@]}"}"; do
+    pgid="${worker_pgids[$worker_index]}"
+    worker_start="${worker_start_identities[$worker_index]}"
+    worker_index=$((worker_index + 1))
+    drain_completed_parallel_command \
+      "$drain_identity" "$pgid" "$worker_start" || drain_status=$?
+    if [[ "$drain_status" -ne 0 ]]; then
+      case "$gate_lock_enabled" in
+        0|false|no)
+          while IFS='|' read -r captured_pid _captured_legacy captured_runtime; do
+            [[ "$captured_pid" =~ ^[1-9][0-9]*$ &&
+              -n "$captured_runtime" ]] || continue
+            fallback_args+=(captured "$captured_pid" "$captured_runtime")
+          done <<< "$gate_drain_capture"
+          teardown_no_lock_settle_known_processes \
+            "${fallback_args[@]+"${fallback_args[@]}"}" || true
+          ;;
+      esac
+      return "$drain_status"
+    fi
+  done
   # Snapshot every descendant BEFORE signalling: TERM kills intermediate
   # subshells first, which reparents a SIGTERM-ignoring survivor away from the
   # tree, so a post-TERM re-walk would miss it. The KILL pass targets the
-  # saved pid list, not a fresh walk. Parallel workers do not need a snapshot:
-  # their registered process groups remain addressable after reparenting.
+  # saved pid list, not a fresh walk. Parallel worker groups were already
+  # folded into each command identity's durable capture above.
   local -a tree=()
   local -a tree_identities=()
-  local host_identities=""
-  # Probing our own PID answers whether this host can identify processes at
-  # all. Without that probe, "no identity recorded" would be indistinguishable
-  # from "host cannot record identities", and the KILL pass below would either
-  # skip every survivor on an identity-less host or trust bare PIDs on a host
-  # that could have done better.
-  [[ -z "$(gate_lock_process_start $$)" ]] || host_identities=1
-  for pid in "${roots[@]+"${roots[@]}"}"; do
+  local -a tree_direct_roots=()
+  local teardown_idx=0
+  local teardown_recorded teardown_current teardown_root_status
+  local teardown_validation_status=0
+  local signal_probe
+  for record in "${roots[@]+"${roots[@]}"}"; do
+    pid="${record%%|*}"
+    root_runtime="${record#*|}"
+    if gate_active_timeout_direct_child_status "$pid" "$root_runtime"; then
+      :
+    else
+      teardown_root_status=$?
+      [[ "$teardown_root_status" -eq 1 ]] || teardown_validation_status=2
+      continue
+    fi
     while IFS= read -r child_pid; do
       if [[ -n "$child_pid" ]]; then
+        teardown_current="$(gate_lock_process_runtime_start "$child_pid")"
+        if [[ -z "$teardown_current" ]]; then
+          signal_probe="$(gate_lock_process_signal_probe "$child_pid")" ||
+            signal_probe="error"
+          [[ "$signal_probe" == "gone" ]] || teardown_validation_status=2
+          continue
+        fi
         tree+=("$child_pid")
-        tree_identities+=("$(gate_lock_process_start "$child_pid")")
+        if [[ "$child_pid" == "$pid" ]]; then
+          # Bind the root to the registry generation, not to a PID that could
+          # have been recycled while the process-tree walk ran.
+          tree_identities+=("$root_runtime")
+          tree_direct_roots+=(1)
+        else
+          tree_identities+=("$teardown_current")
+          tree_direct_roots+=(0)
+        fi
       fi
     done < <(collect_process_tree "$pid")
   done
-  for pid in "${tree[@]+"${tree[@]}"}"; do
+  for teardown_idx in "${!tree[@]}"; do
+    pid="${tree[$teardown_idx]}"
+    teardown_recorded="${tree_identities[$teardown_idx]-}"
+    if [[ "${tree_direct_roots[$teardown_idx]-}" -eq 1 ]]; then
+      if gate_active_timeout_direct_child_status \
+        "$pid" "$teardown_recorded"; then
+        :
+      else
+        teardown_root_status=$?
+        [[ "$teardown_root_status" -eq 1 ]] || teardown_validation_status=2
+        continue
+      fi
+    else
+      teardown_current="$(gate_lock_process_runtime_start "$pid")"
+      if [[ -z "$teardown_recorded" ||
+        "$teardown_current" != "$teardown_recorded" ]]; then
+        if [[ -z "$teardown_current" ]]; then
+          signal_probe="$(gate_lock_process_signal_probe "$pid")" ||
+            signal_probe="error"
+          [[ "$signal_probe" == "gone" ]] || teardown_validation_status=2
+        fi
+        continue
+      fi
+    fi
     kill "-TERM" "$pid" 2>/dev/null || true
-  done
-  for pgid in "${worker_pgids[@]+"${worker_pgids[@]}"}"; do
-    kill -TERM -- "-$pgid" 2>/dev/null || true
   done
   # Same TERM-then-KILL grace as run_with_timeout's watchdog: a manual
   # interrupt (Ctrl-C/TERM to the gate) must not leave a SIGTERM-ignoring
   # mapped command (or descendant) running just because it wasn't the
   # timeout path that tore it down.
-  sleep 3
-  local teardown_idx=0
-  local teardown_recorded teardown_current
-  for pid in "${tree[@]+"${tree[@]}"}"; do
+  if [[ -n "${tree[0]+x}" ]]; then
+    sleep 3
+  fi
+  for teardown_idx in "${!tree[@]}"; do
+    pid="${tree[$teardown_idx]}"
     teardown_recorded="${tree_identities[$teardown_idx]-}"
-    teardown_idx=$((teardown_idx + 1))
-    if [[ -n "$host_identities" ]]; then
-      # Three seconds is long enough for a PID to be recycled, and KILL cannot
-      # be taken back. The number must still name the process captured above:
-      # an empty recorded identity means it was already gone at the snapshot,
-      # and a mismatch means it is somebody else now — either way this signal
-      # is not ours to send. Where the host has no identity source at all, the
-      # PID is the only selector there is, and these are this run's own
-      # children inside a three-second window, so PID alone is the lesser
-      # risk there.
-      [[ -n "$teardown_recorded" ]] || continue
-      teardown_current="$(gate_lock_process_start "$pid")"
-      [[ "$teardown_current" == "$teardown_recorded" ]] || continue
+    if [[ "${tree_direct_roots[$teardown_idx]-}" -eq 1 ]]; then
+      if gate_active_timeout_direct_child_status \
+        "$pid" "$teardown_recorded"; then
+        :
+      else
+        teardown_root_status=$?
+        [[ "$teardown_root_status" -eq 1 ]] || teardown_validation_status=2
+        continue
+      fi
+    else
+      teardown_current="$(gate_lock_process_runtime_start "$pid")"
+      if [[ -z "$teardown_recorded" ||
+        "$teardown_current" != "$teardown_recorded" ]]; then
+        if [[ -z "$teardown_current" ]]; then
+          signal_probe="$(gate_lock_process_signal_probe "$pid")" ||
+            signal_probe="error"
+          [[ "$signal_probe" == "gone" ]] || teardown_validation_status=2
+        fi
+        continue
+      fi
     fi
     kill "-KILL" "$pid" 2>/dev/null || true
   done
-  # The group pass stays PID-group-only by design: a group id is not a
-  # process, so it has no start time to pin, and skipping the group KILL when
-  # its leader has died would orphan exactly the reparented survivors this
-  # pass exists to reach. Reuse needs the recycled pid to become a group
-  # LEADER inside the same three seconds, a strictly narrower window than the
-  # per-PID case above.
+  # Every worker group was folded into its command identity's durable capture
+  # and drained above. A bare PGID is reusable and has no start identity, so do
+  # not signal it after the exact drain has proved the group empty.
   for pgid in "${worker_pgids[@]+"${worker_pgids[@]}"}"; do
-    kill -KILL -- "-$pgid" 2>/dev/null || true
-    # The group leader is the direct child the gate can reap. If it already
-    # exited, wait returns immediately; the negative-PGID signals above still
-    # reached any surviving reparented descendants.
     wait "$pgid" 2>/dev/null || true
   done
+  if [[ "$teardown_validation_status" -ne 0 ]]; then
+    echo "error: active direct-child cleanup could not revalidate every recorded process identity." >&2
+    return 2
+  fi
+  # Clear the shared registries only after every exact drain and fallback tree
+  # teardown succeeds. A failed active drain can return through run_with_timeout
+  # and reach the EXIT trap. Retaining the same identities lets that trap retry
+  # the drain. This is required for --no-lock, which has no durable owner that a
+  # later gate can use to recover leaked descendants.
+  active_timeout_records=()
+  active_timeout_drain_identity=""
+  active_worker_pgids=()
+  active_worker_drain_identities=()
+  active_worker_start_identities=()
 }
 
 # ---------------------------------------------------------------------------
-# Cross-run mutual exclusion (GitHub issue #1802).
+# Legacy compatibility and crash-recovery lock (GitHub issue #1802).
 #
-# Two gate runs on one machine oversubscribe it, and that is the normal case
-# here: several agents share this host, and the pre-push hook starts a run of
-# its own while a manual warm-up run is still going. The suites that lost were
-# the ones holding a wall-clock budget (ui-dashboard's browser-api-policy lint
-# runner) or a bound port, but the contention itself is machine-wide, so the
-# remedy is machine-wide: only one `--run` gate executes mapped commands at a
-# time. The intra-run half of the same problem is the exclusive phase in
-# run_quality_phase; a lock alone cannot help a suite starved inside ONE run.
+# The original remedy for machine oversubscription and fixed-port collisions
+# allowed one complete `--run` gate at a time. The coordinator now schedules
+# commands from multiple worktrees under weighted capacity and named resources.
+# It retains this lock as a mixed-version barrier, and this Bash path remains
+# the election and recovery mechanism for legacy holders and dead coordinators.
 #
-# mkdir(2), O_EXCL and rename(2) are the primitives: all three are atomic,
-# flock(1) does not exist on macOS, and the repo's floor is Bash 3.2. Renaming
-# is used on the owner *file* only — `mv src dir` when dir exists moves src
-# *inside* it instead of failing, so a rename can never be a conditional claim
-# on a directory here, but renaming a regular file away fails with ENOENT for
-# everyone who arrives second, which is exactly the test-and-set the reclaim
-# path needs. The invariant the code below keeps is: at every instant at most
-# one process believes it holds the lock, and no waiter ever removes or renames
-# a lock directory. A holder is made by two atomic steps — win `mkdir` on the
-# lock path, then create the owner file with O_EXCL — and a reclaimer takes a
-# dead record away by rename before it may write its own.
+# mkdir(2), link(2), O_EXCL, and rename(2) are the atomic primitives. flock(1)
+# does not exist on macOS, and the repo's floor is Bash 3.2. Owner records move
+# by exact file rename. Recovery freezes a dead private quarantine with one
+# Node rename over a verified empty placeholder; it never uses `mv src dir`,
+# whose directory-destination behavior is not a conditional claim. The
+# invariant is: at most one process believes it holds the lock, and no waiter
+# deletes a shared owner pathname. A holder wins `mkdir`, then publishes its
+# owner with O_EXCL. A reclaimer binds each record or quarantine inode before it
+# can retire private evidence.
 # ---------------------------------------------------------------------------
 gate_lock_dir=""
 gate_lock_token=""
+# The request token identifies one gate invocation. The lock token identifies
+# the legacy owner. They are the same in legacy mode. Coordinator mode keeps
+# them separate so every worker inherits both the request handle and the shared
+# coordinator handle that an older gate knows how to drain.
+gate_run_id=""
+# An active sequential-command drain keeps the marker for a successor until it
+# confirms every descendant is gone. If a legacy run cannot first persist that
+# recovery obligation, it also leaves its owner record in place so the next run
+# must reclaim and condemn it before executing work.
+gate_active_command_drain_in_progress=0
+gate_cleanup_preserve_legacy_lock=0
 # Locals holding a record's token field are named *_token_value, not *_token:
 # the repo's review scanner reads a name ending in _token as a credential key
 # and refuses to bundle the diff. Keep the suffix if you rename these.
@@ -508,6 +1276,32 @@ gate_lock_token=""
 # and it can never name another run's file.
 gate_lock_reclaim_tmp=""
 gate_lock_reclaim_origin=""
+# Owner records are never unlinked through a shared pathname. A discard first
+# creates a hard-link witness in a fresh mode-0700 directory beside the record,
+# establishes a canonical-owner or condemned-run fallback, then atomically
+# moves the shared name beside that witness. Only those private names are
+# removed. These globals join the two phases without passing delimiter-bearing
+# record content through positional arguments.
+gate_lock_quarantine_dir=""
+gate_lock_quarantine_origin=""
+gate_lock_quarantine_anchor=""
+gate_lock_quarantine_taken=""
+gate_lock_quarantine_fallback=""
+gate_lock_quarantine_authority_value=""
+gate_lock_quarantine_raw_marker_token=""
+gate_lock_quarantine_retention_state="Nothing has been executed."
+gate_lock_active_quarantine_pid=""
+gate_lock_active_quarantine_host=""
+gate_lock_local_host_name=""
+gate_lock_local_host_fingerprint=""
+gate_lock_local_machine_source=""
+gate_lock_local_machine_fingerprint=""
+gate_lock_no_machine_fingerprint=""
+gate_lock_claimed_quarantine=""
+# A marker cleanup that failed its exact-inode check must not be retried during
+# EXIT teardown. A later attempt could bind the changed inode as a new witness
+# and delete the evidence that the first attempt restored or retained.
+gate_run_marker_cleanup_refused_tokens=""
 # Private file a claim builds its record in before publishing it. Same rule:
 # PID-suffixed, so registering it before creation is safe.
 gate_lock_claim_tmp=""
@@ -524,28 +1318,1231 @@ gate_lock_claim_tmp=""
 # obligation before the evidence goes — never after, because "after" is a
 # window a signal can land in. Same failure direction as the rest of this path:
 # condemning a run with nothing left alive costs one drain that finds nothing.
-gate_lock_condemn_before_discard() {
+gate_lock_record_is_readable_regular() {
   local record="$1"
-  local record_token_value
-  record_token_value="$(gate_lock_field_from_file "$record" token)"
-  [[ -n "$record_token_value" ]] || return 0
-  record_condemned_run "$record_token_value"
+  [[ ! -L "$record" && -f "$record" && -r "$record" ]]
+}
+
+gate_lock_refuse_unsafe_owner_record() {
+  local record="$1"
+  echo "error: the quality-gate owner record at ${record} is not a readable regular file." >&2
+  echo "The record was retained. Nothing has been executed." >&2
+  gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+    "No mapped command ran in this request"
+  exit 2
+}
+
+gate_lock_require_safe_existing_owner_record() {
+  local record="$1"
+  gate_lock_record_is_readable_regular "$record" && return 0
+  # A legitimate owner can release the lock between the existence and type
+  # checks. A dangling symlink remains unsafe because -L stays true.
+  [[ ! -e "$record" && ! -L "$record" ]] && return 0
+  gate_lock_refuse_unsafe_owner_record "$record"
+}
+
+gate_lock_clear_quarantine_state() {
+  gate_lock_quarantine_dir=""
+  gate_lock_quarantine_origin=""
+  gate_lock_quarantine_anchor=""
+  gate_lock_quarantine_taken=""
+  gate_lock_quarantine_fallback=""
+  gate_lock_quarantine_authority_value=""
+  gate_lock_quarantine_raw_marker_token=""
+  gate_lock_quarantine_retention_state="Nothing has been executed."
+}
+
+gate_lock_quarantine_authority_from_record() {
+  local record="$1"
+  if [[ -n "$gate_lock_quarantine_raw_marker_token" ]]; then
+    gate_run_marker_snapshot_is_exact \
+      "$record" "$gate_lock_quarantine_raw_marker_token" || return 1
+    printf '%s\n' "$gate_lock_quarantine_raw_marker_token"
+    return 0
+  fi
+  gate_lock_current_user_authority_token_from_record "$record"
+}
+
+gate_lock_private_quarantine_directory_is_safe() {
+  local directory="$1"
+  node -e '
+    const fs = require("node:fs");
+    const path = process.argv[1];
+    const expectedUid = Number(process.argv[2]);
+    const stat = fs.lstatSync(path);
+    process.exit(
+      stat.isDirectory() &&
+      !stat.isSymbolicLink() &&
+      stat.uid === expectedUid &&
+      (stat.mode & 0o777) === 0o700
+        ? 0
+        : 1,
+    );
+  ' "$directory" "$(id -u)" 2>/dev/null
+}
+
+gate_lock_current_host_fingerprint() {
+  local host_name="$1"
+  [[ -n "$host_name" && "$host_name" != *$'\n'* &&
+    "$host_name" != *$'\r'* ]] || return 2
+  node -e '
+    const { createHash } = require("node:crypto");
+    process.stdout.write(
+      createHash("sha256").update(process.argv[1], "utf8").digest("hex"),
+    );
+  ' "$host_name" 2>/dev/null
+}
+
+gate_lock_ensure_local_host_fingerprint() {
+  local host_fingerprint host_name machine_fingerprint no_machine_fingerprint
+  local machine_identity machine_source
+  if [[ -n "$gate_lock_local_host_name" &&
+    "$gate_lock_local_host_fingerprint" =~ ^[0-9a-f]{64}$ &&
+    "$gate_lock_local_machine_source" =~ ^(none|override|machineid|ioplatform|kernuuid)$ &&
+    "$gate_lock_local_machine_fingerprint" =~ ^[0-9a-f]{64}$ &&
+    "$gate_lock_no_machine_fingerprint" =~ ^[0-9a-f]{64}$ ]]; then
+    return 0
+  fi
+  if ! host_name="$(uname -n 2>/dev/null)" ||
+    [[ -z "$host_name" || "$host_name" == *$'\n'* ||
+      "$host_name" == *$'\r'* ]] ||
+    ! host_fingerprint="$(gate_lock_current_host_fingerprint "$host_name")" ||
+    [[ ! "$host_fingerprint" =~ ^[0-9a-f]{64}$ ]] ||
+    ! no_machine_fingerprint="$(
+      gate_lock_current_host_fingerprint "<no-machine-identity>"
+    )" || [[ ! "$no_machine_fingerprint" =~ ^[0-9a-f]{64}$ ]]; then
+    gate_lock_local_host_name=""
+    gate_lock_local_host_fingerprint=""
+    gate_lock_local_machine_source=""
+    gate_lock_local_machine_fingerprint=""
+    gate_lock_no_machine_fingerprint=""
+    return 2
+  fi
+  gate_lock_resolve_machine_id
+  machine_identity="$gate_lock_machine_id_cached"
+  if [[ -n "$machine_identity" ]]; then
+    machine_source="${machine_identity%%:*}"
+  else
+    machine_source=none
+    machine_identity="<no-machine-identity>"
+  fi
+  if [[ ! "$machine_source" =~ ^(none|override|machineid|ioplatform|kernuuid)$ ]] ||
+    ! machine_fingerprint="$(gate_lock_current_host_fingerprint "$machine_identity")" ||
+    [[ ! "$machine_fingerprint" =~ ^[0-9a-f]{64}$ ]]; then
+    gate_lock_local_host_name=""
+    gate_lock_local_host_fingerprint=""
+    gate_lock_local_machine_source=""
+    gate_lock_local_machine_fingerprint=""
+    gate_lock_no_machine_fingerprint=""
+    return 2
+  fi
+  gate_lock_local_host_name="$host_name"
+  gate_lock_local_host_fingerprint="$host_fingerprint"
+  gate_lock_local_machine_source="$machine_source"
+  gate_lock_local_machine_fingerprint="$machine_fingerprint"
+  gate_lock_no_machine_fingerprint="$no_machine_fingerprint"
+}
+
+# Owner quarantines name the process that CREATED the quarantine. That process
+# can differ from the owner whose record is inside it, so recovery must never
+# derive the creator's machine from the quarantined record. v2 binds the
+# creator's tagged machine source and identity digest, hostname digest,
+# creation time, and PID into the directory name. The digest keeps the stable
+# identity out of a pathname while preserving exact comparisons.
+gate_lock_owner_quarantine_template() {
+  local parent="$1"
+  local created_at
+  [[ -n "$parent" &&
+    "$gate_lock_local_machine_source" =~ ^(none|override|machineid|ioplatform|kernuuid)$ &&
+    "$gate_lock_local_machine_fingerprint" =~ ^[0-9a-f]{64}$ &&
+    "$gate_lock_local_host_fingerprint" =~ ^[0-9a-f]{64}$ ]] || return 2
+  if ! created_at="$(date +%s 2>/dev/null)" ||
+    [[ ! "$created_at" =~ ^[0-9]{1,12}$ ]]; then
+    return 2
+  fi
+  printf '%s/owner.reclaiming.quarantine.v2.%s.%s.%s.%s.%s.XXXXXX\n' \
+    "$parent" "$gate_lock_local_machine_source" \
+    "$gate_lock_local_machine_fingerprint" \
+    "$gate_lock_local_host_fingerprint" "$created_at" "$$"
+}
+
+# Node parses the quarantine creator PID as one JavaScript safe integer. Keep
+# Bash on the same positive range without feeding an attacker-sized decimal to
+# shell arithmetic. Equal-length ASCII decimal strings compare numerically.
+gate_lock_quarantine_pid_is_safe_integer() {
+  local value="$1"
+  local LC_ALL=C
+  [[ "$value" =~ ^[1-9][0-9]*$ ]] || return 1
+  if [[ "${#value}" -lt 16 ]]; then
+    return 0
+  fi
+  [[ "${#value}" -eq 16 ]] || return 1
+  # shellcheck disable=SC2071
+  [[ "$value" == 9007199254740991 ||
+    "$value" < 9007199254740991 ]]
+}
+
+# Compare the creator metadata in a v2 quarantine with this process. This is
+# the digest form of gate_lock_machine_verdict. A matching machine digest on a
+# possibly shared root still needs the hostname digest to match because cloned
+# machine IDs are common in containers.
+gate_lock_quarantine_creator_machine_verdict() {
+  local creator_machine_source="$1"
+  local creator_machine_fingerprint="$2"
+  local creator_host_fingerprint="$3"
+  local root_is_per_machine="$4"
+  if [[ "$creator_machine_source" != none &&
+    "$gate_lock_local_machine_source" != none ]]; then
+    if [[ "$creator_machine_source" == "$gate_lock_local_machine_source" &&
+      "$creator_machine_fingerprint" == "$gate_lock_local_machine_fingerprint" ]]; then
+      if [[ "$root_is_per_machine" -eq 1 ||
+        "$creator_host_fingerprint" == "$gate_lock_local_host_fingerprint" ]]; then
+        printf 'same\n'
+      else
+        printf 'unverified\n'
+      fi
+    elif [[ "$creator_machine_source" == "$gate_lock_local_machine_source" &&
+      "$root_is_per_machine" -ne 1 ]]; then
+      printf 'other\n'
+    else
+      printf 'unverified\n'
+    fi
+    return 0
+  fi
+  if [[ "$creator_host_fingerprint" == "$gate_lock_local_host_fingerprint" ]]; then
+    printf 'same\n'
+  else
+    printf 'unverified\n'
+  fi
+}
+
+# v1 owner quarantines do not carry a creation epoch. Read the directory mtime
+# only after validating the same current-user mode-0700 directory contract used
+# by recovery. An unreadable timestamp returns no age and therefore cannot
+# authorize an unverified reclaim.
+gate_lock_private_directory_started_at() {
+  # shellcheck disable=SC2016
+  node -e '
+    const fs = require("node:fs");
+    const path = process.argv[1];
+    const expectedUid = Number(process.argv[2]);
+    const stat = fs.lstatSync(path);
+    if (
+      !stat.isDirectory() ||
+      stat.isSymbolicLink() ||
+      stat.uid !== expectedUid ||
+      (stat.mode & 0o777) !== 0o700 ||
+      !Number.isFinite(stat.mtimeMs)
+    ) process.exit(1);
+    process.stdout.write(`${Math.floor(stat.mtimeMs / 1000)}\n`);
+  ' "$1" "$(id -u)" 2>/dev/null
+}
+
+gate_lock_path_matches_open_descriptor() {
+  local path="$1"
+  local descriptor="$2"
+  node -e '
+    const fs = require("node:fs");
+    const path = process.argv[1];
+    const descriptor = Number(process.argv[2]);
+    const expectedUid = Number(process.argv[3]);
+    const pathStat = fs.lstatSync(path, { bigint: true });
+    const descriptorStat = fs.fstatSync(descriptor, { bigint: true });
+    process.exit(
+      pathStat.isFile() &&
+      !pathStat.isSymbolicLink() &&
+      descriptorStat.isFile() &&
+      pathStat.uid === BigInt(expectedUid) &&
+      descriptorStat.uid === BigInt(expectedUid) &&
+      pathStat.dev === descriptorStat.dev &&
+      pathStat.ino === descriptorStat.ino
+        ? 0
+        : 1,
+    );
+  ' "$path" "$descriptor" "$(id -u)" 2>/dev/null
+}
+
+gate_lock_retain_quarantine() {
+  local reason="$1"
+  local retention_state="$gate_lock_quarantine_retention_state"
+  echo "error: ${reason}" >&2
+  if [[ -n "$gate_lock_quarantine_dir" ]]; then
+    echo "The owner quarantine was retained at ${gate_lock_quarantine_dir}. ${retention_state}" >&2
+  else
+    echo "The owner evidence was retained. ${retention_state}" >&2
+  fi
+  gate_lock_clear_quarantine_state
+  return 2
+}
+
+gate_lock_prepare_owner_quarantine() {
+  local record="$1"
+  local retention_state="${2:-Nothing has been executed.}"
+  local raw_marker_token="${3:-}"
+  local parent quarantine quarantine_template
+  local quarantine_prefix="owner.reclaiming.quarantine.v1"
+  gate_lock_clear_quarantine_state
+  gate_lock_quarantine_retention_state="$retention_state"
+  if [[ -n "$raw_marker_token" ]]; then
+    if ! gate_lock_token_is_wellformed "$raw_marker_token"; then
+      gate_lock_clear_quarantine_state
+      return 2
+    fi
+    gate_lock_quarantine_raw_marker_token="$raw_marker_token"
+    quarantine_prefix="holder.reclaiming.quarantine.v1"
+  fi
+  parent="${record%/*}"
+  if [[ -z "$parent" || "$parent" == "$record" ||
+    ! "$gate_lock_local_host_fingerprint" =~ ^[0-9a-f]{64}$ ]]; then
+    gate_lock_clear_quarantine_state
+    return 2
+  fi
+  if [[ -n "$raw_marker_token" ]]; then
+    quarantine_template="${parent}/${quarantine_prefix}.${gate_lock_local_host_fingerprint}.$$.XXXXXX"
+  elif ! quarantine_template="$(gate_lock_owner_quarantine_template "$parent")"; then
+    gate_lock_clear_quarantine_state
+    return 2
+  fi
+  if ! quarantine="$(mktemp -d "$quarantine_template")"; then
+    gate_lock_clear_quarantine_state
+    return 2
+  fi
+  if ! chmod 700 "$quarantine" ||
+    ! gate_lock_private_quarantine_directory_is_safe "$quarantine"; then
+    rmdir "$quarantine" 2>/dev/null || true
+    gate_lock_clear_quarantine_state
+    return 2
+  fi
+  gate_lock_quarantine_dir="$quarantine"
+  gate_lock_quarantine_origin="$record"
+  gate_lock_quarantine_anchor="${quarantine}/anchor"
+  gate_lock_quarantine_taken="${quarantine}/record"
+  gate_lock_quarantine_fallback="${quarantine}/fallback-ready"
+  # `-P` is required on macOS. Without it, ln follows a source symlink and the
+  # witness can name the symlink target instead of the shared directory entry.
+  if ! /bin/ln -P "$record" "$gate_lock_quarantine_anchor" 2>/dev/null; then
+    rmdir "$quarantine" 2>/dev/null || true
+    gate_lock_clear_quarantine_state
+    [[ ! -e "$record" && ! -L "$record" ]] && return 1
+    return 2
+  fi
+  if ! gate_lock_quarantine_authority_value="$(
+    gate_lock_quarantine_authority_from_record "$gate_lock_quarantine_anchor"
+  )"; then
+    gate_lock_report_foreign_owner_recovery \
+      "$record" "$gate_lock_quarantine_retention_state"
+    gate_lock_retain_quarantine \
+      "the quality-gate owner witness is foreign or unsafe"
+    return 2
+  fi
+  if ! gate_lock_wait_for_test_barrier "$owner_witness_test_barrier"; then
+    gate_lock_retain_quarantine \
+      "the quality-gate owner witness barrier failed"
+    return 2
+  fi
+  gate_lock_test_crash after-owner-quarantine-anchor
+}
+
+gate_lock_mark_quarantine_fallback() {
+  [[ -n "$gate_lock_quarantine_fallback" ]] || return 2
+  if ! gate_lock_private_quarantine_directory_is_safe "$gate_lock_quarantine_dir" ||
+    ! gate_lock_record_is_readable_regular "$gate_lock_quarantine_anchor" ||
+    ! printf '%s\n' "$gate_lock_quarantine_authority_value" \
+      > "$gate_lock_quarantine_fallback" ||
+    ! chmod 600 "$gate_lock_quarantine_fallback"; then
+    gate_lock_retain_quarantine \
+      "could not record the quality-gate owner quarantine fallback"
+    return 2
+  fi
+  gate_lock_test_crash after-owner-quarantine-fallback
+}
+
+gate_lock_quarantine_fallback_is_valid() {
+  local value
+  [[ -f "$gate_lock_quarantine_fallback" &&
+    ! -L "$gate_lock_quarantine_fallback" &&
+    -O "$gate_lock_quarantine_fallback" ]] || return 1
+  value="$(sed -n '1p' "$gate_lock_quarantine_fallback" 2>/dev/null)" ||
+    return 1
+  [[ "$value" == "$gate_lock_quarantine_authority_value" ]]
+}
+
+gate_lock_cancel_prepared_quarantine() {
+  if ! gate_lock_private_quarantine_directory_is_safe "$gate_lock_quarantine_dir" ||
+    [[ -e "$gate_lock_quarantine_taken" || -L "$gate_lock_quarantine_taken" ]] ||
+    [[ -e "$gate_lock_quarantine_fallback" || -L "$gate_lock_quarantine_fallback" ]] ||
+    ! gate_lock_record_is_readable_regular "$gate_lock_quarantine_origin" ||
+    ! gate_lock_record_is_readable_regular "$gate_lock_quarantine_anchor" ||
+    [[ ! "$gate_lock_quarantine_origin" -ef "$gate_lock_quarantine_anchor" ]] ||
+    ! /bin/rm -f "$gate_lock_quarantine_anchor" ||
+    ! /bin/rmdir "$gate_lock_quarantine_dir"; then
+    gate_lock_retain_quarantine \
+      "could not cancel the prepared quality-gate owner quarantine"
+    return 2
+  fi
+  gate_lock_clear_quarantine_state
+}
+
+gate_lock_take_prepared_quarantine() {
+  local observed_authority_value
+  [[ -n "$gate_lock_quarantine_dir" &&
+    -n "$gate_lock_quarantine_origin" &&
+    -n "$gate_lock_quarantine_anchor" &&
+    -n "$gate_lock_quarantine_taken" &&
+    -n "$gate_lock_quarantine_fallback" ]] || return 2
+  gate_lock_quarantine_fallback_is_valid || return 2
+  if ! gate_lock_wait_for_test_barrier "$owner_discard_test_barrier"; then
+    gate_lock_retain_quarantine \
+      "the quality-gate owner discard barrier failed"
+    return 2
+  fi
+  gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_DISCARD_DELAY_SECONDS:-}"
+  if ! gate_lock_private_quarantine_directory_is_safe "$gate_lock_quarantine_dir" ||
+    ! gate_lock_quarantine_fallback_is_valid ||
+    [[ -e "$gate_lock_quarantine_taken" || -L "$gate_lock_quarantine_taken" ]]; then
+    gate_lock_retain_quarantine \
+      "the quality-gate owner path could not enter its private quarantine"
+    return 2
+  fi
+  if ! /bin/mv "$gate_lock_quarantine_origin" \
+    "$gate_lock_quarantine_taken" 2>/dev/null; then
+    # An active releaser can move a recovery-visible remnant after this gate
+    # hard-links its exact inode and establishes the canonical fallback. The
+    # missing source is a completed competing move, not changed evidence.
+    [[ ! -e "$gate_lock_quarantine_origin" &&
+      ! -L "$gate_lock_quarantine_origin" ]] && return 1
+    gate_lock_retain_quarantine \
+      "the quality-gate owner path could not enter its private quarantine"
+    return 2
+  fi
+  gate_lock_test_crash after-owner-quarantine-take
+  if ! gate_lock_record_is_readable_regular "$gate_lock_quarantine_taken" ||
+    [[ ! "$gate_lock_quarantine_taken" -ef "$gate_lock_quarantine_anchor" ]]; then
+    gate_lock_retain_quarantine \
+      "the quality-gate owner inode changed before quarantine"
+    return 2
+  fi
+  if ! observed_authority_value="$(
+    gate_lock_quarantine_authority_from_record "$gate_lock_quarantine_taken"
+  )" || [[ "$observed_authority_value" != "$gate_lock_quarantine_authority_value" ]]; then
+    gate_lock_retain_quarantine \
+      "the quality-gate owner authority changed before quarantine"
+    return 2
+  fi
+  if ! gate_lock_wait_for_test_barrier "$owner_quarantined_test_barrier"; then
+    gate_lock_retain_quarantine \
+      "the quarantined quality-gate owner barrier failed"
+    return 2
+  fi
+  if [[ -e "$gate_lock_quarantine_origin" || -L "$gate_lock_quarantine_origin" ]]; then
+    gate_lock_retain_quarantine \
+      "replacement quality-gate owner evidence appeared after quarantine"
+    return 2
+  fi
+}
+
+gate_lock_drop_private_quarantine() {
+  local observed_authority_value
+  if ! gate_lock_private_quarantine_directory_is_safe "$gate_lock_quarantine_dir" ||
+    ! gate_lock_quarantine_fallback_is_valid ||
+    ! gate_lock_record_is_readable_regular "$gate_lock_quarantine_anchor" ||
+    ! gate_lock_record_is_readable_regular "$gate_lock_quarantine_taken" ||
+    [[ ! "$gate_lock_quarantine_taken" -ef "$gate_lock_quarantine_anchor" ]] ||
+    ! observed_authority_value="$(
+      gate_lock_quarantine_authority_from_record "$gate_lock_quarantine_taken"
+    )" || [[ "$observed_authority_value" != "$gate_lock_quarantine_authority_value" ]]; then
+    gate_lock_retain_quarantine \
+      "the private quality-gate owner evidence changed before deletion"
+    return 2
+  fi
+  if ! /bin/rm -f "$gate_lock_quarantine_taken" ||
+    ! /bin/rm -f "$gate_lock_quarantine_anchor" ||
+    ! /bin/rm -f "$gate_lock_quarantine_fallback" ||
+    ! /bin/rmdir "$gate_lock_quarantine_dir"; then
+    gate_lock_retain_quarantine \
+      "could not remove the private quality-gate owner quarantine"
+    return 2
+  fi
+  gate_lock_clear_quarantine_state
+}
+
+gate_lock_drop_prepared_quarantine_without_taken() {
+  local observed_authority_value
+  if ! gate_lock_private_quarantine_directory_is_safe "$gate_lock_quarantine_dir" ||
+    ! gate_lock_quarantine_fallback_is_valid ||
+    ! gate_lock_record_is_readable_regular "$gate_lock_quarantine_anchor" ||
+    [[ -e "$gate_lock_quarantine_taken" || -L "$gate_lock_quarantine_taken" ]] ||
+    [[ -e "$gate_lock_quarantine_origin" || -L "$gate_lock_quarantine_origin" ]] ||
+    ! observed_authority_value="$(
+      gate_lock_quarantine_authority_from_record "$gate_lock_quarantine_anchor"
+    )" || [[ "$observed_authority_value" != "$gate_lock_quarantine_authority_value" ]]; then
+    gate_lock_retain_quarantine \
+      "the moved quality-gate owner evidence changed before private cleanup"
+    return 2
+  fi
+  if ! /bin/rm -f "$gate_lock_quarantine_anchor" ||
+    ! /bin/rm -f "$gate_lock_quarantine_fallback" ||
+    ! /bin/rmdir "$gate_lock_quarantine_dir"; then
+    gate_lock_retain_quarantine \
+      "could not remove the prepared quality-gate owner quarantine"
+    return 2
+  fi
+  gate_lock_clear_quarantine_state
+}
+
+gate_run_restore_quarantined_marker() {
+  local marker="$1"
+  local taken="$2"
+  local quarantine="$3"
+  local expected_token_value="$4"
+  if [[ ! -e "$taken" && ! -L "$taken" ]]; then
+    echo "error: run-marker cleanup retained ${quarantine}; no moved marker was available to restore." >&2
+    return 2
+  fi
+  if ! gate_run_marker_snapshot_is_exact "$taken" "$expected_token_value"; then
+    echo "error: the moved run marker is unsafe or has changed bytes; it remains only in ${quarantine}." >&2
+    return 2
+  fi
+  if /bin/ln -P "$taken" "$marker" 2>/dev/null; then
+    if [[ "$marker" -ef "$taken" ]] &&
+      gate_run_marker_snapshot_is_exact "$taken" "$expected_token_value" &&
+      gate_run_marker_snapshot_is_exact "$marker" "$expected_token_value"; then
+      echo "error: a changed run marker was restored at ${marker}; its quarantine was retained at ${quarantine}." >&2
+      return 2
+    fi
+    echo "error: run-marker cleanup published an unverified canonical link at ${marker}; ${quarantine} was retained." >&2
+    return 2
+  fi
+  if [[ -e "$marker" || -L "$marker" ]]; then
+    if [[ "$marker" -ef "$taken" ]]; then
+      echo "error: a changed run marker remains visible at ${marker}; its quarantine was retained at ${quarantine}." >&2
+    else
+      echo "error: could not restore the changed run marker at ${marker} because that path is occupied; ${quarantine} was retained." >&2
+    fi
+  else
+    echo "error: could not restore the changed run marker at ${marker}; ${quarantine} was retained." >&2
+  fi
+  return 2
+}
+
+gate_run_marker_cleanup_was_refused() {
+  local expected_token_value="$1"
+  case " ${gate_run_marker_cleanup_refused_tokens} " in
+    *" ${expected_token_value} "*) return 0 ;;
+  esac
+  return 1
+}
+
+gate_run_stop_marker_cleanup_retries() {
+  local marker="$1"
+  local expected_token_value="$2"
+  if ! gate_run_marker_cleanup_was_refused "$expected_token_value"; then
+    if [[ -n "$gate_run_marker_cleanup_refused_tokens" ]]; then
+      gate_run_marker_cleanup_refused_tokens="${gate_run_marker_cleanup_refused_tokens} ${expected_token_value}"
+    else
+      gate_run_marker_cleanup_refused_tokens="$expected_token_value"
+    fi
+  fi
+  if [[ "$marker" == "$gate_run_marker_file" ]]; then
+    gate_run_marker_file=""
+  fi
+}
+
+gate_run_discard_marker_exact() {
+  local expected_token_value="$1"
+  local retention_state="${2:-Nothing has been executed.}"
+  local marker prepare_status take_status drop_status
+  local quarantine anchor taken
+  gate_lock_token_is_wellformed "$expected_token_value" || return 2
+  gate_run_marker_cleanup_was_refused "$expected_token_value" && return 2
+  marker="$(gate_run_marker_path "$expected_token_value")" || return 0
+  if gate_lock_prepare_owner_quarantine \
+    "$marker" "$retention_state" "$expected_token_value"; then
+    :
+  else
+    prepare_status=$?
+    [[ "$prepare_status" -eq 1 && ! -e "$marker" && ! -L "$marker" ]] &&
+      return 0
+    gate_run_stop_marker_cleanup_retries "$marker" "$expected_token_value"
+    return 2
+  fi
+  quarantine="$gate_lock_quarantine_dir"
+  anchor="$gate_lock_quarantine_anchor"
+  taken="$gate_lock_quarantine_taken"
+  if ! gate_run_marker_snapshot_is_exact "$anchor" "$expected_token_value"; then
+    gate_lock_retain_quarantine \
+      "the run-marker witness has unsafe ownership, changed bytes, or a changed inode" || true
+    gate_run_stop_marker_cleanup_retries "$marker" "$expected_token_value"
+    return 2
+  fi
+  if [[ -n "$marker_witness_test_barrier" &&
+    "$marker" == "$gate_run_marker_file" ]]; then
+    if ! gate_lock_wait_for_test_barrier "$marker_witness_test_barrier"; then
+      gate_lock_retain_quarantine \
+        "the run-marker witness barrier failed" || true
+      gate_run_stop_marker_cleanup_retries "$marker" "$expected_token_value"
+      return 2
+    fi
+  fi
+  gate_lock_test_crash after-run-marker-quarantine-anchor
+  if ! gate_lock_mark_quarantine_fallback; then
+    gate_run_stop_marker_cleanup_retries "$marker" "$expected_token_value"
+    return 2
+  fi
+  if gate_lock_take_prepared_quarantine; then
+    if ! gate_run_marker_snapshot_is_exact "$taken" "$expected_token_value"; then
+      gate_lock_retain_quarantine \
+        "the run marker changed after its exact witness was bound" || true
+      gate_run_restore_quarantined_marker \
+        "$marker" "$taken" "$quarantine" "$expected_token_value" || true
+      gate_run_stop_marker_cleanup_retries "$marker" "$expected_token_value"
+      return 2
+    fi
+    if gate_lock_drop_private_quarantine; then
+      return 0
+    else
+      drop_status=$?
+    fi
+    gate_run_stop_marker_cleanup_retries "$marker" "$expected_token_value"
+    return "$drop_status"
+  else
+    take_status=$?
+  fi
+  if [[ "$take_status" -eq 1 ]]; then
+    if ! gate_run_marker_snapshot_is_exact "$anchor" "$expected_token_value"; then
+      gate_lock_retain_quarantine \
+        "the run-marker witness changed after a competing cleanup" || true
+      gate_run_stop_marker_cleanup_retries "$marker" "$expected_token_value"
+      return 2
+    fi
+    if gate_lock_drop_prepared_quarantine_without_taken; then
+      return 0
+    else
+      drop_status=$?
+    fi
+    gate_run_stop_marker_cleanup_retries "$marker" "$expected_token_value"
+    return "$drop_status"
+  fi
+  if [[ -e "$taken" || -L "$taken" ]]; then
+    gate_run_restore_quarantined_marker \
+      "$marker" "$taken" "$quarantine" "$expected_token_value" || true
+  fi
+  gate_run_stop_marker_cleanup_retries "$marker" "$expected_token_value"
+  return 2
+}
+
+gate_lock_finish_canonical_quarantine() {
+  local canonical="$1"
+  local expected_token_value="$2"
+  local canonical_authority_value take_status quarantine_has_taken=0
+  if gate_lock_take_prepared_quarantine; then
+    quarantine_has_taken=1
+  else
+    take_status=$?
+    [[ "$take_status" -eq 1 ]] || return 2
+  fi
+  if ! canonical_authority_value="$(
+    gate_lock_current_user_authority_token_from_record "$canonical"
+  )" || [[ "$canonical_authority_value" != "$expected_token_value" ]] ||
+    [[ ! "$canonical" -ef "$gate_lock_quarantine_anchor" ]]; then
+    gate_lock_retain_quarantine \
+      "the canonical quality-gate owner changed during private cleanup"
+    return 2
+  fi
+  if [[ "$quarantine_has_taken" -eq 1 ]]; then
+    gate_lock_drop_private_quarantine
+  else
+    gate_lock_drop_prepared_quarantine_without_taken
+  fi
+}
+
+gate_lock_discard_inert_owner_stage() {
+  local record="$1"
+  local publisher_pid="$2"
+  local retention_state="${3:-Nothing has been executed.}"
+  local prepare_status take_status
+  if gate_lock_prepare_owner_quarantine "$record" "$retention_state"; then
+    :
+  else
+    prepare_status=$?
+    [[ "$prepare_status" -eq 1 && ! -e "$record" && ! -L "$record" ]] &&
+      return 0
+    return 2
+  fi
+  # Bind the stage inode before the final PID check. A reused publisher PID can
+  # replace the same stage pathname after an earlier liveness verdict. A live
+  # publisher keeps its stage; a replacement inode is retained by the take.
+  if gate_lock_holder_is_live "$publisher_pid" ""; then
+    gate_lock_cancel_prepared_quarantine
+    return $?
+  fi
+  gate_lock_mark_quarantine_fallback || return 2
+  if gate_lock_take_prepared_quarantine; then
+    gate_lock_drop_private_quarantine
+  else
+    take_status=$?
+    [[ "$take_status" -eq 1 ]] || return 2
+    gate_lock_drop_prepared_quarantine_without_taken
+  fi
+}
+
+gate_lock_condemn_prepared_quarantine() {
+  local obligation_status take_status
+  if [[ -n "$gate_lock_quarantine_authority_value" ]]; then
+    if record_condemned_run "$gate_lock_quarantine_authority_value"; then
+      :
+    else
+      obligation_status=$?
+      gate_lock_cancel_prepared_quarantine || return 2
+      return "$obligation_status"
+    fi
+  fi
+  gate_lock_mark_quarantine_fallback || return 2
+  if gate_lock_take_prepared_quarantine; then
+    gate_lock_drop_private_quarantine
+  else
+    take_status=$?
+    [[ "$take_status" -eq 1 ]] || return 2
+    gate_lock_drop_prepared_quarantine_without_taken
+  fi
+}
+
+gate_lock_condemn_and_discard() {
+  local record="$1"
+  if ! gate_lock_prepare_owner_quarantine "$record"; then
+    [[ -z "$gate_lock_quarantine_dir" ]] || gate_lock_clear_quarantine_state
+    return 2
+  fi
+  gate_lock_condemn_prepared_quarantine
+}
+
+gate_lock_discard_matching_duplicate() {
+  local record="$1"
+  local expected_token_value="$2"
+  local canonical="$3"
+  local canonical_authority_value
+  gate_lock_prepare_owner_quarantine "$record" || return 2
+  if ! canonical_authority_value="$(
+    gate_lock_current_user_authority_token_from_record "$canonical"
+  )" || [[ "$canonical_authority_value" != "$expected_token_value" ]] ||
+    [[ "$gate_lock_quarantine_authority_value" != "$expected_token_value" ]] ||
+    [[ ! "$canonical" -ef "$gate_lock_quarantine_anchor" ]]; then
+    gate_lock_retain_quarantine \
+      "the canonical quality-gate owner does not match the duplicate inode"
+    return 2
+  fi
+  gate_lock_mark_quarantine_fallback || return 2
+  gate_lock_finish_canonical_quarantine "$canonical" "$expected_token_value"
+}
+
+gate_lock_report_foreign_owner_recovery() {
+  local record="$1"
+  local retention_state="${2:-Nothing has been executed.}"
+  echo "error: the stale quality-gate owner record at ${record} belongs to another user or has inconsistent uid metadata." >&2
+  echo "This gate can wait on that shared owner, but it cannot safely inspect or signal the prior user's surviving commands." >&2
+  echo "The owner and generation evidence were retained. ${retention_state}" >&2
+  echo "Have the owning user or an administrator recover the stale generation." >&2
+}
+
+gate_lock_refuse_foreign_owner_recovery() {
+  gate_lock_report_foreign_owner_recovery "$1"
+  gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+    "No mapped command ran in this request"
+  exit 2
+}
+
+gate_lock_regular_file_link_count() {
+  # The dollar expression below is a JavaScript template literal.
+  # shellcheck disable=SC2016
+  node -e '
+    const fs = require("node:fs");
+    const stat = fs.lstatSync(process.argv[1]);
+    if (!stat.isFile() || stat.isSymbolicLink()) process.exit(1);
+    process.stdout.write(`${stat.nlink}\n`);
+  ' "$1" 2>/dev/null
+}
+
+gate_lock_recover_owner_quarantine() {
+  local quarantine="$1"
+  local anchor="${quarantine}/anchor"
+  local taken="${quarantine}/record"
+  local fallback="${quarantine}/fallback-ready"
+  local extra authority_value taken_authority_value fallback_value link_count
+  if ! gate_lock_private_quarantine_directory_is_safe "$quarantine"; then
+    [[ ! -e "$quarantine" && ! -L "$quarantine" ]] && return 0
+    echo "error: the quality-gate owner quarantine at ${quarantine} is not a current-user mode-0700 directory." >&2
+    return 2
+  fi
+  extra="$(
+    find "$quarantine" -mindepth 1 -maxdepth 1 \
+      ! -name anchor ! -name record ! -name fallback-ready \
+      -print -quit 2>/dev/null
+  )"
+  if [[ -n "$extra" ]]; then
+    echo "error: the quality-gate owner quarantine at ${quarantine} contains unexpected evidence: ${extra}." >&2
+    return 2
+  fi
+  if [[ ! -e "$anchor" && ! -L "$anchor" ]]; then
+    if [[ -e "$taken" || -L "$taken" ]]; then
+      echo "error: the quality-gate owner quarantine at ${quarantine} lost its inode witness." >&2
+      return 2
+    fi
+    if [[ -e "$fallback" || -L "$fallback" ]]; then
+      [[ -f "$fallback" && ! -L "$fallback" && -O "$fallback" ]] || return 2
+      /bin/rm -f "$fallback" || return 2
+    fi
+    /bin/rmdir "$quarantine"
+    return
+  fi
+  if ! authority_value="$(
+    gate_lock_current_user_authority_token_from_record "$anchor"
+  )"; then
+    gate_lock_report_foreign_owner_recovery "$anchor"
+    return 2
+  fi
+  if [[ ! -e "$fallback" && ! -L "$fallback" ]]; then
+    [[ ! -e "$taken" && ! -L "$taken" ]] || {
+      echo "error: the quality-gate owner quarantine at ${quarantine} moved evidence before it recorded a fallback." >&2
+      return 2
+    }
+    link_count="$(gate_lock_regular_file_link_count "$anchor")" || return 2
+    if [[ ! "$link_count" =~ ^[0-9]+$ ]] || [[ "$link_count" -lt 2 ]]; then
+      echo "error: the pre-fallback quality-gate owner witness at ${anchor} has no visible sibling link." >&2
+      return 2
+    fi
+    /bin/rm -f "$anchor" || return 2
+    /bin/rmdir "$quarantine"
+    return
+  fi
+  if [[ ! -f "$fallback" || -L "$fallback" || ! -O "$fallback" ]]; then
+    echo "error: the quality-gate owner quarantine fallback at ${fallback} is unsafe." >&2
+    return 2
+  fi
+  fallback_value="$(sed -n '1p' "$fallback" 2>/dev/null)" || return 2
+  [[ "$fallback_value" == "$authority_value" ]] || {
+    echo "error: the quality-gate owner quarantine fallback at ${fallback} names different authority." >&2
+    return 2
+  }
+  if [[ -e "$taken" || -L "$taken" ]]; then
+    if ! taken_authority_value="$(
+      gate_lock_current_user_authority_token_from_record "$taken"
+    )" || [[ "$taken_authority_value" != "$authority_value" ]] ||
+      [[ ! "$taken" -ef "$anchor" ]]; then
+      echo "error: the quality-gate owner quarantine at ${quarantine} retained an inode replacement." >&2
+      return 2
+    fi
+    /bin/rm -f "$taken" || return 2
+  fi
+  /bin/rm -f "$anchor" || return 2
+  /bin/rm -f "$fallback" || return 2
+  /bin/rmdir "$quarantine"
+}
+
+gate_lock_claim_owner_quarantine() {
+  local source="$1"
+  local parent claimed claim_status quarantine_template
+  gate_lock_claimed_quarantine=""
+  parent="${source%/*}"
+  [[ -n "$parent" && "$parent" != "$source" ]] || return 2
+  [[ "$gate_lock_local_host_fingerprint" =~ ^[0-9a-f]{64}$ ]] || return 2
+  quarantine_template="$(gate_lock_owner_quarantine_template "$parent")" ||
+    return 2
+  claimed="$(mktemp -d "$quarantine_template")" ||
+    return 2
+  if ! chmod 700 "$claimed" ||
+    ! gate_lock_private_quarantine_directory_is_safe "$claimed"; then
+    /bin/rmdir "$claimed" 2>/dev/null || true
+    return 2
+  fi
+  gate_lock_claimed_quarantine="$claimed"
+  # The dollar expressions below are JavaScript template literals.
+  # shellcheck disable=SC2016
+  if node -e '
+    const fs = require("node:fs");
+    const { constants } = fs;
+    const [source, target, parent, uidText, claimOpenBarrier] =
+      process.argv.slice(1);
+    const expectedUid = BigInt(uidText);
+    let sourceDescriptor;
+    let targetDescriptor;
+    let parentDescriptor;
+    let claimedDescriptor;
+    let status = 0;
+
+    function sameInode(first, second) {
+      return first.dev === second.dev && first.ino === second.ino;
+    }
+
+    function requirePrivateDirectory(stat, label) {
+      if (
+        !stat.isDirectory() ||
+        stat.uid !== expectedUid ||
+        (stat.mode & 0o777n) !== 0o700n
+      ) {
+        throw new Error(`${label} is not a current-user mode-0700 directory`);
+      }
+    }
+
+    function requirePathIdentity(path, expected, label) {
+      const observed = fs.lstatSync(path, { bigint: true });
+      requirePrivateDirectory(observed, label);
+      if (observed.isSymbolicLink() || !sameInode(observed, expected)) {
+        throw new Error(`${label} pathname changed before its atomic claim`);
+      }
+    }
+
+    function pathEntryExists(path) {
+      try {
+        fs.lstatSync(path);
+        return true;
+      } catch (error) {
+        if (error.code === "ENOENT") return false;
+        throw error;
+      }
+    }
+
+    function waitForTestBarrierInstance(barrier) {
+      if (!barrier) return;
+      const ready = `${barrier}.ready.${process.pid}`;
+      const release = `${barrier}.release`;
+      const sleeper = new Int32Array(new SharedArrayBuffer(4));
+      fs.writeFileSync(ready, "", { flag: "wx", mode: 0o600 });
+      for (let waited = 0; !pathEntryExists(release); waited += 1) {
+        if (waited >= 600) {
+          throw new Error("quarantine claim open barrier timed out");
+        }
+        Atomics.wait(sleeper, 0, 0, 50);
+      }
+    }
+
+    try {
+      if (
+        !Number.isInteger(constants.O_DIRECTORY) ||
+        !Number.isInteger(constants.O_NOFOLLOW)
+      ) {
+        throw new Error("directory no-follow support is unavailable");
+      }
+      try {
+        sourceDescriptor = fs.openSync(
+          source,
+          constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+        );
+      } catch (error) {
+        if (error.code === "ENOENT") {
+          status = 3;
+        } else {
+          throw error;
+        }
+      }
+      if (status === 0) {
+        targetDescriptor = fs.openSync(
+          target,
+          constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+        );
+        const sourceStat = fs.fstatSync(sourceDescriptor, { bigint: true });
+        const targetStat = fs.fstatSync(targetDescriptor, { bigint: true });
+        requirePrivateDirectory(sourceStat, "source quarantine");
+        requirePrivateDirectory(targetStat, "claim placeholder");
+        waitForTestBarrierInstance(claimOpenBarrier);
+        try {
+          requirePathIdentity(source, sourceStat, "source quarantine");
+        } catch (error) {
+          if (error.code === "ENOENT" && !pathEntryExists(source)) {
+            status = 3;
+          } else {
+            throw error;
+          }
+        }
+        if (status === 0) {
+          requirePathIdentity(target, targetStat, "claim placeholder");
+          if (fs.readdirSync(target).length !== 0) {
+            throw new Error("claim placeholder is not empty");
+          }
+          parentDescriptor = fs.openSync(
+            parent,
+            constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+          );
+          try {
+            fs.renameSync(source, target);
+          } catch (error) {
+            if (error.code === "ENOENT" && !pathEntryExists(source)) {
+              status = 3;
+            } else {
+              throw error;
+            }
+          }
+          if (status === 0) {
+            fs.fsyncSync(parentDescriptor);
+            claimedDescriptor = fs.openSync(
+              target,
+              constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+            );
+            const claimedStat = fs.fstatSync(claimedDescriptor, { bigint: true });
+            requirePrivateDirectory(claimedStat, "claimed quarantine");
+            if (!sameInode(claimedStat, sourceStat)) {
+              throw new Error("claimed quarantine does not match the source inode");
+            }
+            requirePathIdentity(target, claimedStat, "claimed quarantine");
+            fs.fsyncSync(claimedDescriptor);
+          }
+        }
+      }
+    } catch (error) {
+      process.stderr.write(`quality-gate quarantine claim failed: ${error.message}\n`);
+      status = 2;
+    } finally {
+      if (claimedDescriptor !== undefined) fs.closeSync(claimedDescriptor);
+      if (parentDescriptor !== undefined) fs.closeSync(parentDescriptor);
+      if (targetDescriptor !== undefined) fs.closeSync(targetDescriptor);
+      if (sourceDescriptor !== undefined) fs.closeSync(sourceDescriptor);
+    }
+    process.exitCode = status;
+  ' "$source" "$claimed" "$parent" "$(id -u)" \
+    "$owner_quarantine_claim_open_test_barrier"; then
+    if ! gate_lock_wait_for_test_barrier "$owner_quarantine_after_claim_test_barrier"; then
+      echo "error: the claimed quality-gate owner quarantine barrier failed." >&2
+      return 2
+    fi
+    return 0
+  else
+    claim_status=$?
+  fi
+  if [[ "$claim_status" -eq 3 ]]; then
+    if gate_lock_recover_owner_quarantine "$claimed"; then
+      gate_lock_claimed_quarantine=""
+      return 1
+    fi
+  fi
+  echo "error: could not atomically claim the quality-gate owner quarantine at ${source}." >&2
+  echo "The source and claim evidence were retained. Nothing has been executed." >&2
+  return 2
 }
 
 gate_lock_recover_hidden_record() {
   local lock="$1"
-  local remnant pid start recovered=1
+  local this_host="$2"
+  local remnant remnant_name creator_version creator_machine_source
+  local creator_machine_fingerprint creator_host_fingerprint creator_started_at
+  local creator_pid creator_nonce creator_machine_verdict creator_age
+  local creator_pid_is_local
+  local dead_quarantine claim_status pid host machine start started_at
+  local machine_verdict record_age prepare_status recovered=1
+  local active_quarantine=0
+  # Settle private quarantines before ordinary remnants. A crash after the
+  # hard-link witness leaves both paths. Processing the ordinary remnant first
+  # can retire that inode and reduce the older witness to one link before its
+  # pre-fallback recovery check. A dead creator can still have an orphaned
+  # `/bin/mv` child in flight. Rename the whole directory to this waiter's
+  # identity before reading a phase. The directory rename orders recovery with
+  # that child and with every other waiter.
+  while :; do
+    active_quarantine=0
+    dead_quarantine=""
+    gate_lock_active_quarantine_pid=""
+    gate_lock_active_quarantine_host=""
+    for remnant in "$lock"/owner.reclaiming.quarantine.*; do
+      [[ -e "$remnant" || -L "$remnant" ]] || continue
+      remnant_name="${remnant##*/}"
+      creator_version=""
+      creator_machine_source=none
+      creator_machine_fingerprint=""
+      creator_host_fingerprint=""
+      creator_started_at=""
+      creator_pid=""
+      creator_nonce=""
+      if [[ "$remnant_name" =~ ^owner\.reclaiming\.quarantine\.v2\.(none|override|machineid|ioplatform|kernuuid)\.([0-9a-f]+)\.([0-9a-f]+)\.([0-9]{1,12})\.([1-9][0-9]*)\.([A-Za-z0-9][A-Za-z0-9.-]*)$ ]]; then
+        creator_version=v2
+        creator_machine_source="${BASH_REMATCH[1]}"
+        creator_machine_fingerprint="${BASH_REMATCH[2]}"
+        creator_host_fingerprint="${BASH_REMATCH[3]}"
+        creator_started_at="${BASH_REMATCH[4]}"
+        creator_pid="${BASH_REMATCH[5]}"
+        creator_nonce="${BASH_REMATCH[6]}"
+      elif [[ "$remnant_name" =~ ^owner\.reclaiming\.quarantine\.v1\.([0-9a-f]+)\.([1-9][0-9]*)\.([A-Za-z0-9][A-Za-z0-9.-]*)$ ]]; then
+        creator_version=v1
+        creator_host_fingerprint="${BASH_REMATCH[1]}"
+        creator_pid="${BASH_REMATCH[2]}"
+        creator_nonce="${BASH_REMATCH[3]}"
+      else
+        echo "error: the quality-gate owner quarantine has an invalid recovery name: ${remnant}." >&2
+        echo "The quarantine was retained. Nothing has been executed." >&2
+        gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+          "No mapped command ran in this request"
+        exit 2
+      fi
+      if [[ "${#creator_host_fingerprint}" -ne 64 ||
+        ( "$creator_version" == v2 && "${#creator_machine_fingerprint}" -ne 64 ) ||
+        ( "$creator_version" == v2 && "$creator_started_at" == 0* ) ||
+        ( "$creator_version" == v2 && "$creator_machine_source" == none &&
+          "$creator_machine_fingerprint" != "$gate_lock_no_machine_fingerprint" ) ||
+        "${#creator_nonce}" -lt 6 || "${#creator_nonce}" -gt 80 ]] ||
+        ! gate_lock_quarantine_pid_is_safe_integer "$creator_pid"; then
+        echo "error: the quality-gate owner quarantine has an invalid recovery name: ${remnant}." >&2
+        echo "The quarantine was retained. Nothing has been executed." >&2
+        gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+          "No mapped command ran in this request"
+        exit 2
+      fi
+      if ! gate_lock_private_quarantine_directory_is_safe "$remnant"; then
+        echo "error: the quality-gate owner quarantine at ${remnant} is not a current-user mode-0700 directory." >&2
+        echo "The quarantine was retained. Nothing has been executed." >&2
+        gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+          "No mapped command ran in this request"
+        exit 2
+      fi
+      if [[ "$creator_version" == v1 ]]; then
+        creator_machine_source=none
+        creator_machine_fingerprint="$gate_lock_local_machine_fingerprint"
+        creator_started_at="$(gate_lock_private_directory_started_at "$remnant" || true)"
+      fi
+      creator_machine_verdict="$(
+        gate_lock_quarantine_creator_machine_verdict \
+          "$creator_machine_source" "$creator_machine_fingerprint" \
+          "$creator_host_fingerprint" "$gate_lock_root_is_per_machine"
+      )"
+      creator_age="$(gate_lock_record_age_seconds "$creator_started_at")"
+      creator_pid_is_local=0
+      if [[ "$creator_machine_verdict" == same ]]; then
+        creator_pid_is_local=1
+      elif [[ "$creator_machine_verdict" == unverified &&
+        "$gate_lock_root_is_per_machine" -eq 1 &&
+        -n "$creator_age" &&
+        "$creator_age" -ge "$gate_lock_unverified_machine_grace_seconds" ]]; then
+        creator_pid_is_local=1
+      fi
+      if [[ "$creator_pid_is_local" -eq 1 ]] &&
+        ! gate_lock_holder_is_live "$creator_pid" ""; then
+        [[ -n "$dead_quarantine" ]] || dead_quarantine="$remnant"
+        # Recover one dead quarantine at a time. Every other dead quarantine is
+        # also inactive, so it cannot turn this scan into a false busy verdict.
+        continue
+      fi
+      # `other` and shared-root `unverified` evidence never leads to a local PID
+      # lookup. Young or age-unknown unverified evidence on a per-machine root
+      # also remains active until the grace can establish a reclaimable case.
+      active_quarantine=1
+      [[ -n "$gate_lock_active_quarantine_pid" ]] ||
+        gate_lock_active_quarantine_pid="$creator_pid"
+      if [[ -z "$gate_lock_active_quarantine_host" ]]; then
+        if [[ "$creator_machine_verdict" == same ]]; then
+          gate_lock_active_quarantine_host="$this_host"
+        elif [[ "$creator_machine_verdict" == other ]]; then
+          gate_lock_active_quarantine_host="other machine ${creator_machine_source}:${creator_machine_fingerprint:0:12}"
+        else
+          gate_lock_active_quarantine_host="unverified machine ${creator_host_fingerprint:0:12}"
+        fi
+      fi
+    done
+    # Never mutate one quarantine while another live or non-local creator can
+    # still advance its phase in the same lock directory.
+    [[ "$active_quarantine" -eq 0 ]] || return 4
+    [[ -n "$dead_quarantine" ]] || break
+    if ! gate_lock_wait_for_test_barrier_instance "$owner_quarantine_before_claim_test_barrier"; then
+      echo "error: the quality-gate owner quarantine claim barrier failed." >&2
+      gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+        "No mapped command ran in this request"
+      exit 2
+    fi
+    if gate_lock_claim_owner_quarantine "$dead_quarantine"; then
+      if gate_lock_recover_owner_quarantine "$gate_lock_claimed_quarantine"; then
+        gate_lock_claimed_quarantine=""
+        recovered=0
+        continue
+      fi
+      echo "The claimed quarantine was retained. Nothing has been executed." >&2
+      gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+        "No mapped command ran in this request"
+      exit 2
+    else
+      claim_status=$?
+    fi
+    if [[ "$claim_status" -eq 1 ]]; then
+      # Another waiter claimed the old basename. Restart the glob so this pass
+      # sees and waits on that waiter's new basename before ordinary recovery.
+      recovered=0
+      continue
+    fi
+    echo "The quarantine was retained. Nothing has been executed." >&2
+    gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+      "No mapped command ran in this request"
+    exit 2
+  done
   for remnant in "$lock"/owner.reclaiming.*; do
-    [[ -e "$remnant" ]] || continue
-    pid="$(gate_lock_field_from_file "$remnant" pid)"
-    start="$(gate_lock_field_from_file "$remnant" start_utc)"
-    if gate_lock_holder_is_live "$pid" "$start"; then
+    [[ -e "$remnant" || -L "$remnant" ]] || continue
+    [[ "${remnant##*/}" == owner.reclaiming.quarantine.* ]] && continue
+    if ! gate_lock_record_is_readable_regular "$remnant"; then
+      # Another waiter can restore or remove this remnant after the glob saw
+      # it. Treat that release race as absent, while retaining dangling links.
+      [[ ! -e "$remnant" && ! -L "$remnant" ]] && continue
+      # A shared root can expose another user's mode-0600 record. Empty field
+      # reads are not evidence that its holder is dead. Unknown file types are
+      # equally unsafe because legitimate remnants are regular files.
+      echo "error: the hidden quality-gate owner record at ${remnant} is not a readable regular file." >&2
+      echo "The record was retained. Nothing has been executed." >&2
+      gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+        "No mapped command ran in this request"
+      exit 2
+    fi
+    if gate_lock_prepare_owner_quarantine "$remnant"; then
+      :
+    else
+      prepare_status=$?
+      if [[ "$prepare_status" -eq 1 &&
+        ! -e "$remnant" && ! -L "$remnant" ]]; then
+        continue
+      fi
+      gate_lock_report_foreign_owner_recovery "$remnant"
+      gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+        "No mapped command ran in this request"
+      exit 2
+    fi
+    pid="$(gate_lock_field_from_file "$gate_lock_quarantine_anchor" pid)"
+    host="$(gate_lock_field_from_file "$gate_lock_quarantine_anchor" host)"
+    machine="$(gate_lock_field_from_file "$gate_lock_quarantine_anchor" machine)"
+    start="$(gate_lock_field_from_file "$gate_lock_quarantine_anchor" start_utc)"
+    started_at="$(gate_lock_field_from_file "$gate_lock_quarantine_anchor" started_at)"
+    machine_verdict="$(
+      gate_lock_machine_verdict \
+        "$machine" "$host" "$gate_lock_machine_id_cached" "$this_host" \
+        "$gate_lock_root_is_per_machine"
+    )"
+    record_age="$(gate_lock_record_age_seconds "$started_at")"
+    # Only same-machine evidence reaches an immediate local PID lookup. An
+    # unverified record on per-machine storage reaches it after the grace.
+    # Other-machine and possibly-shared unverified evidence stays live without
+    # interpreting its PID in this process table.
+    if [[ "$machine_verdict" == other ]] ||
+      [[ "$machine_verdict" == unverified &&
+        ( "$gate_lock_root_is_per_machine" -ne 1 || -z "$record_age" ||
+          "$record_age" -lt "$gate_lock_unverified_machine_grace_seconds" ) ]] ||
+      gate_lock_holder_is_live "$pid" "$start"; then
       # `ln` refuses an occupied path, so a record published while we were
       # reading loses nothing: ours is then the stale copy and just goes away.
-      if ln "$remnant" "$lock/owner" 2>/dev/null; then
-        echo "Recovered the record of live holder pid ${pid} from an interrupted reclaim." >&2
-        rm -f "$remnant"
+      if [[ "$owner_restore_link_failure" != "1" ]] &&
+        /bin/ln -P "$gate_lock_quarantine_anchor" "$lock/owner" 2>/dev/null; then
+        if ! gate_lock_mark_quarantine_fallback ||
+          ! gate_lock_finish_canonical_quarantine \
+            "$lock/owner" "$gate_lock_quarantine_authority_value"; then
+          gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+            "No mapped command ran in this request"
+          exit 2
+        fi
+        echo "Recovered retained holder evidence for pid ${pid} from an interrupted reclaim." >&2
         recovered=0
+      elif [[ ! -e "$lock/owner" && ! -L "$lock/owner" ]]; then
+        # A shared root can expose another user's mode-0600 remnant while the
+        # platform's protected-hardlink policy refuses our link. With no
+        # canonical owner, continuing would turn that access error into an
+        # ownerless claim beside a live holder.
+        echo "error: could not restore the live quality-gate owner record at ${remnant}." >&2
+        echo "The canonical owner is still absent. Nothing has been executed." >&2
+        gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+          "No mapped command ran in this request"
+        exit 2
+      elif ! gate_lock_cancel_prepared_quarantine; then
+        gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+          "No mapped command ran in this request"
+        exit 2
       fi
       # If the link failed the canonical path already holds something. This
       # copy still names a live process, so it stays: a record naming a live
@@ -565,8 +2562,15 @@ gate_lock_recover_hidden_record() {
       # Dead holder — but "dead run" is not the same as "nothing running". Its
       # commands outlive it, and this record is the last thing that names them.
       # So the delete happens only once the obligation is written down.
-      gate_lock_condemn_before_discard "$remnant" || gate_lock_obligation_unwritable
-      rm -f "$remnant"
+      if gate_lock_condemn_prepared_quarantine; then
+        :
+      else
+        recovered=$?
+        [[ "$recovered" -ne 1 ]] || gate_lock_obligation_unwritable
+        gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+          "No mapped command ran in this request"
+        exit 2
+      fi
     fi
   done
   return "$recovered"
@@ -578,11 +2582,40 @@ gate_lock_recover_hidden_record() {
 restore_gate_lock_record() {
   [[ -n "$gate_lock_reclaim_tmp" ]] || return 0
   if [[ -e "$gate_lock_reclaim_tmp" && -n "$gate_lock_reclaim_origin" ]]; then
-    if ! ln "$gate_lock_reclaim_tmp" "$gate_lock_reclaim_origin" 2>/dev/null; then
+    if gate_lock_prepare_owner_quarantine "$gate_lock_reclaim_tmp"; then
+      :
+    else
+      # A mismatched recorded uid is untrusted input, but restoring an exact
+      # hard link is non-destructive. Keep the recovery-visible remnant and any
+      # private witness as evidence; only publish the same inode back into an
+      # empty canonical slot.
+      if /bin/ln -P "$gate_lock_reclaim_tmp" \
+        "$gate_lock_reclaim_origin" 2>/dev/null; then
+        echo "error: restored untrusted quality-gate owner evidence at ${gate_lock_reclaim_origin}; retained ${gate_lock_reclaim_tmp}." >&2
+      elif [[ -e "$gate_lock_reclaim_origin" || -L "$gate_lock_reclaim_origin" ]]; then
+        echo "error: retained untrusted quality-gate owner evidence at ${gate_lock_reclaim_tmp}; the canonical slot is occupied." >&2
+      else
+        echo "error: retained changed or foreign evidence at ${gate_lock_reclaim_tmp}; could not restore it safely." >&2
+      fi
+      gate_lock_reclaim_tmp=""
+      gate_lock_reclaim_origin=""
+      return 1
+    fi
+    if /bin/ln -P "$gate_lock_quarantine_anchor" \
+      "$gate_lock_reclaim_origin" 2>/dev/null; then
+      if ! gate_lock_mark_quarantine_fallback ||
+        ! gate_lock_finish_canonical_quarantine \
+          "$gate_lock_reclaim_origin" "$gate_lock_quarantine_authority_value"; then
+        echo "error: restored ${gate_lock_reclaim_origin}, but retained changed or foreign evidence at ${gate_lock_reclaim_tmp}." >&2
+        gate_lock_reclaim_tmp=""
+        gate_lock_reclaim_origin=""
+        return 1
+      fi
+    elif [[ -e "$gate_lock_reclaim_origin" || -L "$gate_lock_reclaim_origin" ]]; then
       # The slot is occupied, so this copy is superseded and about to be
       # dropped rather than put back. It can still name a run whose commands
       # are alive, so the obligation is written down before it goes.
-      if ! gate_lock_condemn_before_discard "$gate_lock_reclaim_tmp"; then
+      if ! gate_lock_condemn_prepared_quarantine; then
         # Nowhere to write it down, so the record itself has to survive: it is
         # the only thing naming that run's commands, and the next run's
         # hidden-record recovery reads it from exactly where it lies. This runs
@@ -592,9 +2625,15 @@ restore_gate_lock_record() {
         gate_lock_reclaim_origin=""
         return 1
       fi
+    else
+      echo "error: could not restore ${gate_lock_reclaim_tmp}; retained its private witness." >&2
+      gate_lock_retain_quarantine \
+        "the canonical quality-gate owner remained absent during restoration" || true
+      gate_lock_reclaim_tmp=""
+      gate_lock_reclaim_origin=""
+      return 1
     fi
   fi
-  rm -f "$gate_lock_reclaim_tmp"
   gate_lock_reclaim_tmp=""
   gate_lock_reclaim_origin=""
 }
@@ -670,9 +2709,10 @@ fi
 # lock rather than inside it, because the lock directory is what gets reclaimed
 # and the obligation has to outlive that.
 gate_lock_root_dir=""
-# A staged obligation this process has written but not yet published. Named
-# with our PID and registered with the exit trap before it is created, so
-# cleanup can never race the write nor name another run's file.
+gate_lock_drained_tokens=""
+# A staged obligation this shell has written but not yet published. mktemp
+# gives parallel coordinator clients distinct names even though Bash 3.2 gives
+# their subshells the same $$ value.
 gate_lock_condemn_tmp=""
 
 # One file per outstanding run rather than one shared list. A shared list has
@@ -694,12 +2734,9 @@ gate_lock_condemned_dir() {
 # draining leaves the previous run's survivors with nobody who knows about
 # them. On disk, the next run inherits the obligation instead.
 #
-# Written inside the reclaim election, which is already serialised by the
-# rename test-and-set: whoever won the record is the only writer here. The file
-# is built under a private per-PID name and moved into place, so a reader sees
-# the whole token or no file at all. Duplicates are harmless — draining a token
-# whose processes are already gone is a no-op — which is the right failure
-# direction for the crash between this write and the publish it precedes.
+# Legacy reclaim serializes this write. Coordinator recovery holds an atomic
+# token claim before it writes. A private mktemp name also keeps an interrupted
+# write invisible; the published token path is stable across retries.
 #
 # The write failing is a different matter from crashing after it. A crash still
 # leaves the record this obligation was derived from, because that record is
@@ -718,9 +2755,7 @@ record_condemned_run() {
   gate_lock_token_is_wellformed "$token" || return 1
   dir="$(gate_lock_condemned_dir)" || return 1
   mkdir -p "$dir" 2>/dev/null || return 1
-  # Registered before it exists: the name carries our PID, so cleanup can see
-  # it whether or not the write got that far, and can never name another run's.
-  gate_lock_condemn_tmp="${dir}/.staging.$$"
+  gate_lock_condemn_tmp="$(mktemp "${dir}/.staging.XXXXXX")" || return 1
   printf '%s\n' "$token" > "$gate_lock_condemn_tmp" 2>/dev/null || {
     rm -f "$gate_lock_condemn_tmp"
     gate_lock_condemn_tmp=""
@@ -745,6 +2780,8 @@ gate_lock_obligation_unwritable() {
   echo "error: could not record the previous run's commands as outstanding in ${gate_lock_root_dir:-unknown}/condemned.d." >&2
   echo "Nothing would drain them, so this run would execute alongside them." >&2
   echo "Nothing has been executed. Fix that path — permissions, or free space — then re-run." >&2
+  gate_report_coordinated_no_work_failure 2 "stale-obligation recovery" \
+    "No mapped command ran in this request"
   exit 2
 }
 
@@ -752,7 +2789,30 @@ gate_lock_obligation_unreadable() {
   echo "error: the outstanding-commands record at ${1} exists but cannot be read." >&2
   echo "It names commands a dead run left behind, and skipping it would start this run alongside them." >&2
   echo "Nothing has been executed. Fix that path — permissions — then re-run." >&2
+  gate_report_coordinated_no_work_failure 2 "stale-obligation recovery" \
+    "No mapped command ran in this request"
   exit 2
+}
+
+gate_drain_fail_for_context() {
+  local drain_context="${1:-stale-run}"
+  if [[ "$drain_context" == "active-command" ]]; then
+    return 2
+  fi
+  exit 2
+}
+
+gate_drain_obligation_unreadable() {
+  local path="$1"
+  local drain_context="${2:-stale-run}"
+  if [[ "$drain_context" != "active-command" ]]; then
+    gate_lock_obligation_unreadable "$path"
+  fi
+  echo "error: the command-descendant record at ${path} exists but cannot be read." >&2
+  echo "It names processes from a completed mapped command. Releasing the scheduler lease without it could start conflicting work." >&2
+  echo "The mapped command finished, but descendant cleanup did not complete. Fix that path — permissions — then re-run." >&2
+  gate_drain_fail_for_context "$drain_context"
+  return $?
 }
 
 # Every run drains the whole outstanding set before executing anything, not
@@ -804,6 +2864,8 @@ drain_condemned_runs() {
       if [[ ! -O "$claimed" ]]; then
         echo "error: obligation record ${claimed} is not owned by this user." >&2
         echo "Nothing has been executed. Inspect and remove that record, then re-run." >&2
+        gate_report_coordinated_no_work_failure 2 "stale-obligation recovery" \
+          "No mapped command ran in this request"
         exit 2
       fi
       entry_token_value="$(head -n1 "$claimed" 2>/dev/null || true)"
@@ -818,9 +2880,12 @@ drain_condemned_runs() {
         # that does neither.
         echo "error: obligation record ${claimed} names a malformed run token." >&2
         echo "Nothing has been executed. Inspect and remove that record, then re-run." >&2
+        gate_report_coordinated_no_work_failure 2 "stale-obligation recovery" \
+          "No mapped command ran in this request"
         exit 2
       fi
       drain_condemned_run_commands "$entry_token_value"
+      gate_lock_drained_tokens="${gate_lock_drained_tokens} ${entry_token_value}"
       # Removed only here, with every process confirmed gone, and by a name
       # only this drainer can have created. A drain that cannot confirm exits
       # instead, leaving the rest for whoever comes next.
@@ -851,13 +2916,50 @@ gate_lock_test_delay() {
   sleep "$seconds"
 }
 
+gate_lock_wait_for_test_barrier() {
+  local barrier="${1:-}"
+  local waited=0
+  [[ -n "$barrier" ]] || return 0
+  : > "${barrier}.ready" || return 2
+  while [[ ! -e "${barrier}.release" ]]; do
+    [[ "$waited" -lt 600 ]] || return 2
+    sleep 0.05
+    waited=$((waited + 1))
+  done
+}
+
+gate_lock_wait_for_test_barrier_instance() {
+  local barrier="${1:-}"
+  local waited=0
+  [[ -n "$barrier" ]] || return 0
+  : > "${barrier}.ready.$$" || return 2
+  while [[ ! -e "${barrier}.release" ]]; do
+    [[ "$waited" -lt 600 ]] || return 2
+    sleep 0.05
+    waited=$((waited + 1))
+  done
+}
+
 # Test-only. Names the write boundaries a crash can land between, so the
-# self-test can kill a run at each one and assert the next run recovers. SIGKILL
-# rather than exit, because the point is to skip the exit trap the way a real
-# `kill -9`, an OOM kill or a power loss would. Unset in normal operation.
+# self-test can kill a run at each one and assert the next run recovers. Use
+# SIGKILL rather than exit to skip the exit trap, as `kill -9` or an OOM kill
+# does. This hook tests process-death recovery only. Unset in normal operation.
 gate_lock_test_crash() {
   [[ "${AGENT_QUALITY_GATE_LOCK_CRASH_AT:-}" == "$1" ]] || return 0
   kill -9 $$
+}
+
+gate_drain_test_refresh_barrier() {
+  local barrier="$drain_refresh_test_barrier"
+  local attempt
+  [[ -n "$barrier" && ! -e "${barrier}.used" ]] || return 0
+  : > "${barrier}.used" || return 2
+  : > "${barrier}.ready" || return 2
+  for ((attempt = 0; attempt < 1000; attempt++)); do
+    [[ ! -e "${barrier}.release" ]] || return 0
+    sleep 0.02
+  done
+  return 2
 }
 
 resolve_gate_lock_root() {
@@ -904,7 +3006,99 @@ gate_lock_field_from_file() {
   sed -n "s/^${field}=//p" "$record" 2>/dev/null | head -n1 || true
 }
 
+gate_lock_authority_token_from_record() {
+  local record="$1"
+  local value
+  value="$(gate_lock_field_from_file "$record" coordinator_token)"
+  if [[ -z "$value" ]]; then
+    value="$(gate_lock_field_from_file "$record" token)"
+  fi
+  printf '%s\n' "$value"
+}
+
+gate_lock_field_from_text() {
+  local text="$1"
+  local field="$2"
+  printf '%s\n' "$text" | sed -n "s/^${field}=//p" | head -n1 || true
+}
+
+gate_lock_current_user_authority_token_from_snapshot() {
+  local snapshot="$1"
+  local recorded_uid current_uid uid_count coordinator_count token_count value
+  uid_count="$(printf '%s\n' "$snapshot" | grep -c '^uid=' || true)"
+  coordinator_count="$(printf '%s\n' "$snapshot" | grep -c '^coordinator_token=' || true)"
+  token_count="$(printf '%s\n' "$snapshot" | grep -c '^token=' || true)"
+  [[ "$uid_count" =~ ^[0-9]+$ && "$coordinator_count" =~ ^[0-9]+$ &&
+    "$token_count" =~ ^[0-9]+$ ]] || return 1
+  [[ "$uid_count" -le 1 && "$coordinator_count" -le 1 && "$token_count" -le 1 ]] ||
+    return 1
+  if [[ "$uid_count" -eq 1 ]]; then
+    recorded_uid="$(gate_lock_field_from_text "$snapshot" uid)"
+    [[ "$recorded_uid" =~ ^[0-9]+$ ]] || return 1
+    current_uid="$(id -u 2>/dev/null)" || return 1
+    [[ "$current_uid" =~ ^[0-9]+$ && "$recorded_uid" == "$current_uid" ]] ||
+      return 1
+  fi
+  value="$(gate_lock_field_from_text "$snapshot" coordinator_token)"
+  if [[ -z "$value" ]]; then
+    value="$(gate_lock_field_from_text "$snapshot" token)"
+  fi
+  printf '%s\n' "$value"
+}
+
+gate_lock_current_user_authority_token_from_record() {
+  local record="$1"
+  local snapshot
+  gate_lock_record_is_readable_regular "$record" || return 1
+  if ! exec 15< "$record"; then
+    return 1
+  fi
+  if [[ ! -f /dev/fd/15 || ! -O /dev/fd/15 ]]; then
+    exec 15<&-
+    return 1
+  fi
+  snapshot="$(cat <&15)" || {
+    exec 15<&-
+    return 1
+  }
+  if [[ ! -f /dev/fd/15 || ! -O /dev/fd/15 ]]; then
+    exec 15<&-
+    return 1
+  fi
+  exec 15<&-
+  gate_lock_current_user_authority_token_from_snapshot "$snapshot"
+}
+
+gate_lock_current_user_authority_token_from_release_descriptor() {
+  local snapshot
+  # Linux exposes /dev/fd/N as a symlink. Duplicate the already-open release
+  # descriptor instead of sending that pseudo-path through the shared-path
+  # no-symlink guard. The descriptor target must still be a current-user
+  # regular file before and after its bytes are read.
+  if ! exec 15<&14; then
+    return 1
+  fi
+  if [[ ! -f /dev/fd/15 || ! -O /dev/fd/15 ]]; then
+    exec 15<&-
+    return 1
+  fi
+  snapshot="$(cat <&15)" || {
+    exec 15<&-
+    return 1
+  }
+  if [[ ! -f /dev/fd/15 || ! -O /dev/fd/15 ]]; then
+    exec 15<&-
+    return 1
+  fi
+  exec 15<&-
+  gate_lock_current_user_authority_token_from_snapshot "$snapshot"
+}
+
 gate_lock_owner_field() {
+  if [[ "$2" == "token" ]]; then
+    gate_lock_authority_token_from_record "$1/owner"
+    return
+  fi
   gate_lock_field_from_file "$1/owner" "$2"
 }
 
@@ -929,6 +3123,16 @@ gate_wall_millis() {
       ;;
   esac
   printf '%s000\n' "$(date +%s)"
+}
+
+# Older gates persist and compare `ps -o lstart=` output byte-for-byte. Keep
+# that padded wire value when publishing owner and captured-process records so
+# an old worktree can identify a live new run. Current readers normalize only
+# at comparison boundaries.
+gate_lock_process_start_legacy_wire() {
+  local pid="$1"
+  [[ -n "$pid" ]] || return 0
+  TZ=UTC LC_ALL=C ps -o lstart= -p "$pid" 2>/dev/null | head -n1 || true
 }
 
 # A machine identity that survives a rename, recorded beside the hostname so a
@@ -1156,46 +3360,109 @@ gate_lock_record_age_seconds() {
   printf '%s\n' $((now - started_at))
 }
 
-# The kernel's own start-time string for a PID, used verbatim. Comparing it as
-# a string keeps this free of date parsing; what makes that sound is pinning
-# the formatting environment, because `ps` renders lstart in the caller's TZ
-# and locale — `TZ=America/New_York` moves the clock, and a non-C LC_ALL
-# rewrites the whole format ("Mi. 12 Aug."). Two runs with different
-# environments would otherwise read one live process as two identities and
-# reclaim a lock out from under it. Recorded under the same pin it is compared
-# with, and stored as `start_utc` so a record from a gate that predates this
-# pinning is simply not read as one (see gate_lock_holder_is_live).
-gate_lock_process_start() {
+# Read the kernel's start-time string and process state in one snapshot.
+# Comparing the start string avoids date parsing. Pin the formatting
+# environment because `ps` renders lstart in the caller's time zone and locale.
+# The state field also identifies an exited child that its parent has not reaped.
+gate_lock_process_snapshot() {
   local pid="$1"
   [[ -n "$pid" ]] || return 0
   # Asking about a process is allowed to come back empty, and must not be an
   # error: every caller here is racing the process it asks about, so `ps` fails
   # the moment that process exits. Under `set -e` with `pipefail` this pipeline
-  # would then abort the whole gate from inside a command substitution —
-  # silently, losing whatever stdout was still buffered.
-  TZ=UTC LC_ALL=C ps -o lstart= -p "$pid" 2>/dev/null | head -n1 || true
+  # would then abort the whole gate from inside a command substitution.
+  # macOS pads these fields. Normalize both edges so Bash and Node compare the
+  # same snapshot.
+  TZ=UTC LC_ALL=C ps -o lstart= -o stat= -p "$pid" 2>/dev/null |
+    head -n1 | sed 's/^[[:blank:]]*//; s/[[:blank:]]*$//' || true
+}
+
+gate_lock_normalize_process_start() {
+  printf '%s\n' "$1" |
+    sed 's/^[[:blank:]]*//; s/[[:blank:]]*$//'
+}
+
+gate_lock_process_start() {
+  local snapshot
+  snapshot="$(gate_lock_process_snapshot "$1")"
+  [[ "$snapshot" == *" "* ]] || return 0
+  gate_lock_normalize_process_start "${snapshot% *}"
+}
+
+# Use the kernel start tick for live in-process relations on Linux. Persisted
+# records keep the historical lstart wire value for mixed-version readers.
+# macOS has no procfs, so it retains the narrow lstart check used by the signal
+# path and fails closed when that identity is unreadable.
+gate_lock_process_runtime_start() {
+  local pid="$1"
+  local stat_line remainder start_tick
+  local -a stat_fields
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 0
+  if [[ -e /proc/self/stat ]]; then
+    stat_line="$(cat "/proc/${pid}/stat" 2>/dev/null || true)"
+    [[ -n "$stat_line" && "$stat_line" == *") "* ]] || return 0
+    remainder="${stat_line##*) }"
+    read -r -a stat_fields <<< "$remainder"
+    start_tick="${stat_fields[19]:-}"
+    [[ "$start_tick" =~ ^[0-9]+$ ]] || return 0
+    printf 'proc:%s\n' "$start_tick"
+    return 0
+  fi
+  gate_lock_process_start "$pid"
+}
+
+gate_lock_process_runtime_start_pgid_snapshot() {
+  local pid="$1"
+  local start_before start_after pgid
+  start_before="$(gate_lock_process_runtime_start "$pid")"
+  [[ -n "$start_before" ]] || return 0
+  pgid="$(TZ=UTC LC_ALL=C ps -o pgid= -p "$pid" 2>/dev/null |
+    head -n1 | tr -d '[:space:]' || true)"
+  [[ "$pgid" =~ ^[1-9][0-9]*$ ]] || return 0
+  start_after="$(gate_lock_process_runtime_start "$pid")"
+  [[ "$start_after" == "$start_before" ]] || return 0
+  printf '%s|%s\n' "$start_after" "$pgid"
+}
+
+gate_lock_process_signal_probe() {
+  local pid="$1"
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 2
+  node -e '
+    const pid = Number(process.argv[1]);
+    try {
+      process.kill(pid, 0);
+      process.stdout.write("live");
+    } catch (error) {
+      if (error?.code === "ESRCH") process.stdout.write("gone");
+      else if (error?.code === "EPERM") process.stdout.write("denied");
+      else process.stdout.write("error");
+    }
+  ' "$pid" 2>/dev/null
 }
 
 gate_lock_process_state() {
-  local pid="$1"
-  [[ -n "$pid" ]] || return 0
-  TZ=UTC LC_ALL=C LANG=C ps -p "$pid" -o stat= 2>/dev/null |
-    awk 'NF { print $1; exit }' || true
+  local snapshot
+  snapshot="$(gate_lock_process_snapshot "$1")"
+  [[ "$snapshot" == *" "* ]] || return 0
+  printf '%s\n' "${snapshot##* }"
 }
 
 # A zombie has exited and cannot execute, fork, or retain file descriptors. PID
 # 1 can keep its process-table record indefinitely, so kill -0 and lstart alone
 # cannot decide whether a condemned command can still overlap the next run.
-# Re-read the exact identity after the state probe. Empty or unreadable state
-# remains fail-closed because only a confirmed Z state returns success.
+# Read state and start time from one snapshot. Empty or unreadable state remains
+# fail-closed because only a confirmed matching zombie returns success.
 gate_lock_process_is_confirmed_zombie() {
   local pid="$1"
   local recorded_start="$2"
-  local current_start current_state
+  local snapshot current_start current_state
+  recorded_start="$(gate_lock_normalize_process_start "$recorded_start")"
   [[ -n "$pid" && -n "$recorded_start" ]] || return 1
-  current_state="$(gate_lock_process_state "$pid")"
+  snapshot="$(gate_lock_process_snapshot "$pid")"
+  [[ "$snapshot" == *" "* ]] || return 1
+  current_state="${snapshot##* }"
   [[ "$current_state" == Z* ]] || return 1
-  current_start="$(gate_lock_process_start "$pid")"
+  current_start="$(gate_lock_normalize_process_start "${snapshot% *}")"
   [[ -n "$current_start" && "$current_start" == "$recorded_start" ]]
 }
 
@@ -1212,19 +3479,26 @@ gate_lock_process_is_confirmed_zombie() {
 gate_lock_holder_is_live() {
   local pid="$1"
   local recorded_start="$2"
-  local current_start
+  local snapshot current_start current_state
+  recorded_start="$(gate_lock_normalize_process_start "$recorded_start")"
   [[ -n "$pid" ]] || return 1
   # `kill -0` fails two ways that mean opposite things: no such process, and a
   # live process this user may not signal. A lock root shared between users
   # makes the second ordinary, and reading it as "gone" would reclaim a lock
   # whose holder is still running. `ps` answers existence across users, so it
   # decides, and `kill -0` only spares the `ps` call in the common case.
-  if ! kill -0 "$pid" 2>/dev/null; then
-    ps -p "$pid" > /dev/null 2>&1 || return 1
+  snapshot="$(gate_lock_process_snapshot "$pid")"
+  if [[ -z "$snapshot" ]]; then
+    if ! kill -0 "$pid" 2>/dev/null; then
+      ps -p "$pid" > /dev/null 2>&1 || return 1
+    fi
+    return 0
   fi
+  [[ "$snapshot" == *" "* ]] || return 0
+  current_state="${snapshot##* }"
+  [[ "$current_state" != Z* ]] || return 1
   [[ -n "$recorded_start" ]] || return 0
-  current_start="$(gate_lock_process_start "$pid")"
-  [[ -n "$current_start" ]] || return 0
+  current_start="$(gate_lock_normalize_process_start "${snapshot% *}")"
   [[ "$current_start" == "$recorded_start" ]]
 }
 
@@ -1236,13 +3510,31 @@ gate_lock_record_still_stale() {
   local decided_pid="$2"
   local decided_token="$3"
   local decided_start="$4"
+  local decided_host="$5"
+  local decided_machine="$6"
+  local decided_started_at="$7"
   local current_pid current_token_value current_start
+  local current_host current_machine current_started_at
+  if ! gate_lock_record_is_readable_regular "$record"; then
+    [[ ! -e "$record" && ! -L "$record" ]] && return 3
+    return 2
+  fi
   current_pid="$(gate_lock_field_from_file "$record" pid)"
-  current_token_value="$(gate_lock_field_from_file "$record" token)"
+  current_token_value="$(gate_lock_authority_token_from_record "$record")"
   current_start="$(gate_lock_field_from_file "$record" start_utc)"
+  current_host="$(gate_lock_field_from_file "$record" host)"
+  current_machine="$(gate_lock_field_from_file "$record" machine)"
+  current_started_at="$(gate_lock_field_from_file "$record" started_at)"
+  if ! gate_lock_record_is_readable_regular "$record"; then
+    [[ ! -e "$record" && ! -L "$record" ]] && return 3
+    return 2
+  fi
   [[ "$current_pid" == "$decided_pid" ]] || return 1
   [[ "$current_token_value" == "$decided_token" ]] || return 1
   [[ "$current_start" == "$decided_start" ]] || return 1
+  [[ "$current_host" == "$decided_host" ]] || return 1
+  [[ "$current_machine" == "$decided_machine" ]] || return 1
+  [[ "$current_started_at" == "$decided_started_at" ]] || return 1
   # A record with no token never finished being written, so it is not a claim
   # at all and its PID field may itself be a truncated value — asking whether
   # that PID is alive would be asking about a number nobody wrote. The grace
@@ -1262,8 +3554,12 @@ gate_lock_record_still_stale() {
 claim_gate_run_lock() {
   local lock="$1"
   local token="$2"
+  local claim_uid="$3"
   local staged="$lock/owner.claiming.$$"
   local published=0
+  [[ -n "$gate_lock_local_host_name" ]] || return 2
+  [[ "$claim_uid" =~ ^[0-9]+$ ]] || return 2
+  gate_lock_token_is_wellformed "$token" || return 2
   # Idempotent, and free after the first call. Here as well as in the wait loop
   # so the record can never be published without the field a later reader needs.
   gate_lock_resolve_machine_id
@@ -1274,14 +3570,15 @@ claim_gate_run_lock() {
   rm -f "$staged"
   if {
     printf 'pid=%s\n' "$$"
-    printf 'host=%s\n' "$(uname -n)"
+    printf 'uid=%s\n' "$claim_uid"
+    printf 'host=%s\n' "$gate_lock_local_host_name"
     # Additive on purpose. A gate that predates this field ignores it and reads
     # the record exactly as it always did, and this gate reads a record without
     # it through the unverified path — so the two versions coexist on one
     # machine without either misjudging the other's locks.
     printf 'machine=%s\n' "$gate_lock_machine_id_cached"
     printf 'started_at=%s\n' "$(date +%s)"
-    printf 'start_utc=%s\n' "$(gate_lock_process_start $$)"
+    printf 'start_utc=%s\n' "$(gate_lock_process_start_legacy_wire $$)"
     printf 'worktree=%s\n' "$repo_root"
     # Written last on purpose: a record without a token is one whose write did
     # not finish, and readers below treat it as no record at all.
@@ -1297,6 +3594,7 @@ claim_gate_run_lock() {
   [[ "$(gate_lock_owner_field "$lock" token)" == "$token" ]] || return 1
   gate_lock_dir="$lock"
   gate_lock_token="$token"
+  [[ -n "$gate_run_id" ]] || gate_run_id="$token"
   export AGENT_QUALITY_GATE_LOCK_HELD="$token"
   return 0
 }
@@ -1321,14 +3619,19 @@ claim_gate_run_lock() {
 # the identity now is what lets the drain tell "this PID is still the process
 # we condemned" from "this PID was reused while we worked".
 gate_drain_capture=""
-# PIDs already recorded this drain, so a re-walk can tell "found something new"
-# from "found the same tree again".
+# Exact live generations paired with the legacy capture lines. The on-disk
+# journal keeps `pid|lstart` for old readers and follows it with a metadata line
+# whose first field is not a PID, so those readers skip it safely.
+gate_drain_capture_runtime_prefix="runtime-v2"
+# Exact PID/runtime generations already recorded this drain. A re-walk can
+# distinguish a new generation from the same process tree.
 gate_drain_seen=""
 # Where the captured tree is written down, if anywhere. Set before capturing
 # starts, so each process is recorded as it is discovered.
 gate_drain_capture_file=""
-# Set when an append to that file failed, so the drain can refuse to signal
-# with nothing durable behind it.
+# Set when the drain could not publish a complete valid identity pair. This
+# includes an append failure and a legacy/runtime pair that fails validation.
+# The drain refuses to signal without valid durable evidence.
 gate_drain_capture_unpersisted=0
 # Set when a discovery scan failed rather than came back empty, so an
 # unanswered question is never read as "nothing left running". The scan itself
@@ -1337,9 +3640,85 @@ gate_drain_capture_unpersisted=0
 # the wrapper that reads that output is what sets the flag.
 gate_drain_scan_failed=0
 gate_drain_scan_error="agentqg-scan-failed"
+# Linux active-command full scans add a boundary captured before mapped work.
+# Stale recovery leaves this explicit value empty and derives its conservative
+# boundary from a same-boot marker token. Exact-PID checks stay unbounded.
+gate_active_command_proc_start_floor=""
 # The PIDs this run's handles named on the current pass, read by the
 # membership check deep inside the recursive walk.
 gate_drain_tagged_now=""
+# A live parallel parent can also seed the drain from its registered worker
+# process group. This captures a same-group descendant that closed every
+# inherited identity handle before the first signal destroys its ancestor.
+gate_drain_seed_pgid=""
+# The active parent records the worker leader's start identity at fork time.
+# This lets a no-lock drain validate its live group anchor without handles.
+gate_drain_seed_start=""
+# Set only while a snapshot tied to a live token holder is being folded into
+# the durable capture. It lets sibling group members prove membership without
+# treating a bare, reusable PGID as an identity on later passes.
+gate_drain_capture_group_pgid=""
+# The group leader whose exact start identity authorised the current group
+# snapshot. Every candidate membership check revalidates this anchor after it
+# observes the candidate. This prevents a dead group ID from being reused
+# between the snapshot and capture.
+gate_drain_capture_group_anchor_pid=""
+gate_drain_capture_group_anchor_start=""
+# Set when a group membership check cannot distinguish exit from an unreadable
+# identity. A confirmed out-of-group PID can be skipped; an ambiguous one must
+# remain as fail-closed evidence.
+gate_drain_membership_unverified=0
+gate_drain_membership_token=""
+
+gate_drain_capture_set_entry() {
+  local target_pid="$1"
+  local legacy_start="$2"
+  local runtime_start="$3"
+  local line line_pid filtered=""
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    line_pid="${line%%|*}"
+    [[ "$line_pid" == "$target_pid" ]] && continue
+    filtered="${filtered}${line}
+"
+  done << EOF
+$gate_drain_capture
+EOF
+  gate_drain_capture="${filtered}${target_pid}|${legacy_start}|${runtime_start}
+"
+}
+
+gate_drain_seen_has_identity() {
+  local target_pid="$1"
+  local target_runtime="$2"
+  local seen_pid seen_runtime extra
+  while IFS='|' read -r seen_pid seen_runtime extra; do
+    [[ -z "$extra" && "$seen_pid" == "$target_pid" &&
+      "$seen_runtime" == "$target_runtime" ]] && return 0
+  done << EOF
+$gate_drain_seen
+EOF
+  return 1
+}
+
+gate_drain_runtime_identity_matches_wire() {
+  local legacy_start="$1"
+  local runtime_start="$2"
+  local normalized_legacy
+  if [[ "$legacy_start" == "$gate_lock_identity_unavailable" ||
+    "$runtime_start" == "$gate_lock_identity_unavailable" ]]; then
+    [[ "$legacy_start" == "$gate_lock_identity_unavailable" &&
+      "$runtime_start" == "$gate_lock_identity_unavailable" ]]
+    return $?
+  fi
+  [[ -n "$legacy_start" && -n "$runtime_start" ]] || return 1
+  if [[ -e /proc/self/stat ]]; then
+    [[ "$runtime_start" =~ ^proc:[0-9]+$ ]]
+    return $?
+  fi
+  normalized_legacy="$(gate_lock_normalize_process_start "$legacy_start")"
+  [[ -n "$normalized_legacy" && "$runtime_start" == "$normalized_legacy" ]]
+}
 
 # Recorded in place of a start time on a host that cannot produce one at all —
 # a sandbox without `ps`. It has to be distinguishable from an empty identity,
@@ -1382,13 +3761,17 @@ gate_lock_identity_source_available() {
 # subshell.
 gate_drain_refresh_tagged() {
   local token="$1"
-  gate_drain_tagged_now="$(gate_run_tagged_pids "$token")"
-  case " ${gate_drain_tagged_now} " in
-    *" ${gate_drain_scan_error} "*)
+  local full_scan_start_floor="${2:-}"
+  local raw candidate normalized=""
+  raw="$(gate_run_tagged_pids "$token" "" "$full_scan_start_floor")"
+  for candidate in $raw; do
+    if [[ "$candidate" == "$gate_drain_scan_error" ]]; then
       gate_drain_scan_failed=1
-      gate_drain_tagged_now="${gate_drain_tagged_now//${gate_drain_scan_error}/}"
-      ;;
-  esac
+      continue
+    fi
+    normalized="${normalized}${candidate} "
+  done
+  gate_drain_tagged_now="$normalized"
 }
 
 # Is this PID still one of ours, asked after its identity was read? Two answers
@@ -1399,35 +3782,165 @@ gate_drain_refresh_tagged() {
 gate_drain_membership_holds() {
   local pid="$1"
   local parent="${2:-}"
-  local candidate
-  for candidate in ${gate_drain_tagged_now}; do
-    [[ "$candidate" == "$pid" ]] && return 0
-  done
-  [[ -n "$parent" ]] || return 1
-  for candidate in $(pgrep -P "$parent" 2>/dev/null || true); do
-    [[ "$candidate" == "$pid" ]] && return 0
-  done
+  local recorded_start="${3:-}"
+  local recorded_parent_start="${4:-}"
+  local candidate candidate_snapshot candidate_start candidate_pgid
+  local candidate_probe
+  local tagged_after=""
+  local parent_before parent_after parent_children parent_scan_status
+  local anchor_snapshot anchor_start anchor_pgid
+  gate_drain_membership_unverified=0
+
+  if [[ "$gate_drain_capture_group_pgid" =~ ^[1-9][0-9]*$ ]]; then
+    # A group snapshot is authorised by one live, exact group leader. Do not
+    # accept the cached numeric tag or parent relation until both this
+    # candidate and that leader are revalidated. The leader can otherwise exit
+    # and its PID/PGID can be reused between the snapshot and this capture.
+    if [[ "$recorded_start" == "$gate_lock_identity_unavailable" ]]; then
+      gate_lock_identity_source_available && return 1
+      candidate_pgid="$(ps -o pgid= -p "$pid" 2>/dev/null |
+        head -n1 | tr -d '[:space:]' || true)"
+    else
+      candidate_snapshot="$(
+        gate_lock_process_runtime_start_pgid_snapshot "$pid"
+      )"
+      if [[ "$candidate_snapshot" != *"|"* ]]; then
+        candidate_probe="$(gate_lock_process_signal_probe "$pid")" ||
+          candidate_probe="error"
+        [[ "$candidate_probe" == "gone" ]] ||
+          gate_drain_membership_unverified=1
+        return 1
+      fi
+      candidate_start="${candidate_snapshot%|*}"
+      candidate_pgid="${candidate_snapshot##*|}"
+      recorded_start="$(gate_lock_normalize_process_start "$recorded_start")"
+      [[ -n "$recorded_start" && "$candidate_start" == "$recorded_start" ]] ||
+        return 1
+    fi
+
+    # Group recovery covers only current members of the pinned worker group.
+    # A child relation through a snapshot PID is not enough here: that parent
+    # PID can exit and be reused before the recursive walk observes its child.
+    # Descendants outside the group remain discoverable through inherited
+    # command/request handles; a detached process that drops every handle is
+    # outside this recovery guarantee.
+    [[ "$candidate_pgid" == "$gate_drain_capture_group_pgid" ]] || return 1
+
+    if [[ "$gate_drain_capture_group_anchor_start" == "$gate_lock_identity_unavailable" ]]; then
+      gate_lock_identity_source_available && return 1
+      if ! kill -0 "$gate_drain_capture_group_anchor_pid" 2>/dev/null; then
+        gate_drain_membership_unverified=1
+        return 1
+      fi
+      anchor_pgid="$(ps -o pgid= \
+        -p "$gate_drain_capture_group_anchor_pid" 2>/dev/null |
+        head -n1 | tr -d '[:space:]' || true)"
+      if [[ "$anchor_pgid" != "$gate_drain_capture_group_pgid" ]]; then
+        gate_drain_membership_unverified=1
+        return 1
+      fi
+    else
+      anchor_snapshot="$(gate_lock_process_runtime_start_pgid_snapshot \
+        "$gate_drain_capture_group_anchor_pid")"
+      if [[ "$anchor_snapshot" != *"|"* ]]; then
+        gate_drain_membership_unverified=1
+        return 1
+      fi
+      anchor_start="${anchor_snapshot%|*}"
+      anchor_pgid="${anchor_snapshot##*|}"
+      if [[ "$anchor_start" != "$gate_drain_capture_group_anchor_start" ||
+        "$anchor_pgid" != "$gate_drain_capture_group_pgid" ]]; then
+        gate_drain_membership_unverified=1
+        return 1
+      fi
+    fi
+    return 0
+  fi
+
+  # Re-scan exact inherited handles after reading this PID's start identity.
+  # A cached numeric match can exit and be reused between discovery and this
+  # check. The replacement would then be recorded under its own valid start
+  # identity and could pass every later signal guard. This is an exact-PID
+  # revalidation. Full refreshes on both sides still discover new descendants.
+  if [[ -n "$gate_drain_membership_token" ]]; then
+    tagged_after="$(
+      gate_run_tagged_pids "$gate_drain_membership_token" "$pid"
+    )"
+    for candidate in $tagged_after; do
+      if [[ "$candidate" == "$gate_drain_scan_error" ]]; then
+        gate_drain_scan_failed=1
+        gate_drain_membership_unverified=1
+        continue
+      fi
+      [[ "$candidate" == "$pid" ]] && return 0
+    done
+  else
+    for candidate in ${gate_drain_tagged_now}; do
+      [[ "$candidate" == "$pid" ]] && return 0
+    done
+  fi
+  if [[ -n "$parent" && -n "$recorded_parent_start" ]]; then
+    if [[ "$recorded_parent_start" == "$gate_lock_identity_unavailable" ]]; then
+      gate_drain_membership_unverified=1
+      return 1
+    fi
+    recorded_parent_start="$(
+      gate_lock_normalize_process_start "$recorded_parent_start"
+    )"
+    parent_before="$(gate_lock_process_runtime_start "$parent")"
+    [[ -n "$recorded_parent_start" &&
+      "$parent_before" == "$recorded_parent_start" ]] || return 1
+    parent_children="$(pgrep -P "$parent" 2>/dev/null)" &&
+      parent_scan_status=0 || parent_scan_status=$?
+    if [[ "$parent_scan_status" -gt 1 ]]; then
+      gate_drain_scan_failed=1
+      gate_drain_membership_unverified=1
+      return 1
+    fi
+    parent_after="$(gate_lock_process_runtime_start "$parent")"
+    [[ "$parent_after" == "$recorded_parent_start" ]] || return 1
+    for candidate in $parent_children; do
+      [[ "$candidate" == "$pid" ]] && return 0
+    done
+  fi
   return 1
 }
 
-# fewer than it had already committed to. Since a capture always completes
-# before the first signal, anything already signalled is already on disk.
+# Append each identity before any signal. A crash cannot truncate an earlier
+# entry or leave fewer identities than the drain already committed to. Since a
+# capture completes before the first signal, anything already signalled is on
+# disk.
 capture_process_tree() {
   local root_pid="$1"
   local from_parent="${2:-}"
-  local child entry start
+  local from_parent_start="${3:-}"
+  local child children child_scan_status entry runtime_entry start
+  local membership_start capture_runtime seen_runtime identity_probe
+  local root_start_for_children
   # Children first, and always re-walked even for a process already recorded:
   # a command that survives TERM can fork again afterwards, so discovery has to
   # keep looking as long as anything is alive to fork. Only the recording is
   # skipped for a PID already in the list, which is what lets a pass that adds
   # nothing be recognised as one.
-  for child in $(pgrep -P "$root_pid" 2>/dev/null || true); do
-    capture_process_tree "$child" "$root_pid"
-  done
-  case " ${gate_drain_seen} " in
-    *" ${root_pid} "*) return 0 ;;
-  esac
-  start="$(gate_lock_process_start "$root_pid")"
+  root_start_for_children="$(gate_lock_process_runtime_start "$root_pid")"
+  if [[ -z "$root_start_for_children" ]] &&
+    ! gate_lock_identity_source_available; then
+    root_start_for_children="$gate_lock_identity_unavailable"
+  fi
+  if [[ -n "$root_start_for_children" ]]; then
+    children="$(pgrep -P "$root_pid" 2>/dev/null)" &&
+      child_scan_status=0 || child_scan_status=$?
+    if [[ "$child_scan_status" -gt 1 ]]; then
+      gate_drain_scan_failed=1
+    else
+      for child in $children; do
+        capture_process_tree \
+          "$child" "$root_pid" "$root_start_for_children"
+      done
+    fi
+  fi
+  start="$(gate_lock_process_start_legacy_wire "$root_pid")"
+  membership_start="$(gate_lock_process_runtime_start "$root_pid")"
   if [[ -z "$start" ]]; then
     if gate_lock_identity_source_available; then
       # The walk saw it, the identity read did not: it exited in between. A
@@ -1437,37 +3950,253 @@ capture_process_tree() {
       return 0
     fi
     start="$gate_lock_identity_unavailable"
-  elif ! gate_drain_membership_holds "$root_pid" "$from_parent"; then
+    membership_start="$gate_lock_identity_unavailable"
+  elif [[ -z "$membership_start" ]]; then
+    # The legacy read succeeded and the exact runtime read did not. If the PID
+    # is still live, retain the legacy identity as an unverified obligation. It
+    # lets a later census discharge a confirmed zombie, but the missing runtime
+    # identity still forbids signalling a live process. If it exited, a later
+    # exact-handle scan can rediscover any replacement that belongs to the run.
+    identity_probe="$(gate_lock_process_signal_probe "$root_pid")" ||
+      identity_probe="error"
+    [[ "$identity_probe" == "gone" ]] && return 0
+  fi
+  if [[ -n "$start" && "$start" != "$gate_lock_identity_unavailable" ]] &&
+    ! gate_drain_membership_holds \
+      "$root_pid" "$from_parent" "$membership_start" \
+      "$from_parent_start"; then
     # Enumeration and identity are two reads with a gap between them, and a PID
     # recycled inside it would be recorded under a stranger's identity that
     # every later check then confirms. Re-asking whether this PID is still one
     # of ours closes that in the direction the rest of this path uses: an
     # answer that cannot be confirmed is recorded with no identity, which is
     # never signalled and holds the drain open rather than discharging it.
-    start=""
+    if [[ "$gate_drain_capture_group_pgid" =~ ^[1-9][0-9]*$ &&
+      "$gate_drain_membership_unverified" -eq 0 ]]; then
+      return 0
+    fi
+    # Keep a readable legacy identity when the exact runtime read itself was
+    # the ambiguous step. The entry remains unsignalable without runtime
+    # metadata, but a confirmed zombie can later be discharged. If this capture
+    # had an exact runtime identity and then lost membership, retain no identity
+    # because that evidence now belongs to an unconfirmed process.
+    [[ -z "$membership_start" ]] || start=""
   fi
-  entry="${root_pid}|${start}"
-  gate_drain_seen="${gate_drain_seen}${root_pid} "
-  gate_drain_capture="${gate_drain_capture}${entry}
+  if [[ "$start" == "$gate_lock_identity_unavailable" ]]; then
+    capture_runtime="$gate_lock_identity_unavailable"
+  elif [[ -n "$start" ]]; then
+    capture_runtime="$membership_start"
+  else
+    capture_runtime=""
+  fi
+  seen_runtime="${capture_runtime:-<runtime-unverified>}"
+  gate_drain_seen_has_identity "$root_pid" "$seen_runtime" && return 0
+  gate_drain_seen="${gate_drain_seen}${root_pid}|${seen_runtime}
 "
+  gate_drain_capture_set_entry "$root_pid" "$start" "$capture_runtime"
+  entry="${root_pid}|${start}"
+  runtime_entry="${gate_drain_capture_runtime_prefix}|${root_pid}|${capture_runtime}"
   # One `printf` of a short line through an append-mode descriptor is a single
   # write, so concurrent or interrupted appends cannot interleave a half line.
-  # A write that fails is remembered rather than ignored: the caller checks it
-  # before signalling, because signalling is what destroys the alternative.
-  if [[ -n "$gate_drain_capture_file" ]] &&
-    ! printf '%s\n' "$entry" >> "$gate_drain_capture_file" 2>/dev/null; then
-    gate_drain_capture_unpersisted=1
+  # An append failure or invalid identity pair is remembered. The caller checks
+  # it before signalling, because signalling destroys the alternative handle.
+  if [[ -n "$gate_drain_capture_file" ]]; then
+    if ! printf '%s\n' "$entry" >> "$gate_drain_capture_file" 2>/dev/null; then
+      gate_drain_capture_unpersisted=1
+    fi
+    if [[ -n "$capture_runtime" ]] && {
+      ! gate_drain_runtime_identity_matches_wire "$start" "$capture_runtime" ||
+        ! printf '%s\n' "$runtime_entry" >> "$gate_drain_capture_file" 2>/dev/null
+    }; then
+      gate_drain_capture_unpersisted=1
+    fi
   fi
+}
+
+gate_drain_capture_seed_group() {
+  local token="$1"
+  local snapshot pid pgid remainder tagged tagged_pgid groups="" group
+  local group_anchor_start group_anchors=""
+  local seed_current seed_snapshot_pgid
+  local tagged_start tagged_current tagged_after tagged_after_clean=""
+  local tagged_probe tagged_confirmed
+  local tagged_candidate tagged_identities=""
+  local identity_source_available=0
+  [[ "$gate_drain_seed_pgid" =~ ^[1-9][0-9]*$ ||
+    -n "${gate_drain_tagged_now//[[:space:]]/}" ]] || return 0
+  if gate_lock_identity_source_available; then
+    identity_source_available=1
+  fi
+  # Pin each tagged PID before the process-group snapshot. A tag scan and a
+  # later `ps` row are independent observations. Without the start identity
+  # between them, PID reuse can make an unrelated group leader look like the
+  # recovery anchor.
+  for tagged in $gate_drain_tagged_now; do
+    [[ "$tagged" =~ ^[1-9][0-9]*$ ]] || continue
+    tagged_start="$(gate_lock_process_runtime_start "$tagged")"
+    if [[ -z "$tagged_start" ]]; then
+      [[ "$identity_source_available" -eq 0 ]] || continue
+      tagged_start="$gate_lock_identity_unavailable"
+    fi
+    tagged_identities="${tagged_identities}${tagged}|${tagged_start}
+"
+  done
+  if ! snapshot="$(TZ=UTC LC_ALL=C ps -axo pid=,pgid= 2>/dev/null)"; then
+    gate_drain_scan_failed=1
+    return 0
+  fi
+  # Re-read the observed PIDs' handles after the group snapshot. A tagged PID
+  # can seed a group only if the same process held the token on both sides of
+  # the snapshot. Linux exact-PID scans avoid a second full procfs census. The
+  # lsof fallback keeps one witnessed scan because lsof still performs a host
+  # census for each PID filter. The caller captures new roots on its next full
+  # refresh.
+  if gate_run_proc_marker_scan_available; then
+    for tagged in $gate_drain_tagged_now; do
+      [[ "$tagged" =~ ^[1-9][0-9]*$ ]] || continue
+      tagged_confirmed=0
+      tagged_probe="$(gate_run_tagged_pids "$token" "$tagged")"
+      for tagged_candidate in $tagged_probe; do
+        if [[ "$tagged_candidate" == "$gate_drain_scan_error" ]]; then
+          gate_drain_scan_failed=1
+          continue
+        fi
+        [[ "$tagged_candidate" == "$tagged" ]] && tagged_confirmed=1
+      done
+      if [[ "$tagged_confirmed" -eq 1 ]]; then
+        tagged_after_clean="${tagged_after_clean}${tagged} "
+      fi
+    done
+  else
+    tagged_probe="$(gate_run_tagged_pids "$token")"
+    for tagged_candidate in $tagged_probe; do
+      if [[ "$tagged_candidate" == "$gate_drain_scan_error" ]]; then
+        gate_drain_scan_failed=1
+        continue
+      fi
+      tagged_after_clean="${tagged_after_clean}${tagged_candidate} "
+    done
+  fi
+  tagged_after="$tagged_after_clean"
+  if [[ "$gate_drain_seed_pgid" =~ ^[1-9][0-9]*$ &&
+    -n "$gate_drain_seed_start" ]]; then
+    seed_snapshot_pgid="$(awk -v target="$gate_drain_seed_pgid" \
+      '$1 == target && NF == 2 { print $2; exit }' <<< "$snapshot")"
+    if [[ "$seed_snapshot_pgid" == "$gate_drain_seed_pgid" ]]; then
+      seed_current="$(gate_lock_process_runtime_start "$gate_drain_seed_pgid")"
+      if [[ "$seed_current" == "$gate_drain_seed_start" ]] || {
+        [[ "$gate_drain_seed_start" == "$gate_lock_identity_unavailable" ]] &&
+          ! gate_lock_identity_source_available &&
+          kill -0 "$gate_drain_seed_pgid" 2>/dev/null
+      }; then
+        groups="${gate_drain_seed_pgid} "
+        group_anchors="${gate_drain_seed_pgid}|${gate_drain_seed_start}
+"
+      fi
+    fi
+  fi
+  # Crash recovery has no parent registry, so it derives a group only from a
+  # tagged group leader whose PID/start identity survived the complete
+  # snapshot. The active parent uses the separately validated explicit seed.
+  while IFS='|' read -r tagged tagged_start; do
+    [[ "$tagged" =~ ^[1-9][0-9]*$ && -n "$tagged_start" ]] || continue
+    case " ${tagged_after} " in
+      *" ${tagged} "*) : ;;
+      *) continue ;;
+    esac
+    tagged_pgid="$(awk -v target="$tagged" \
+      '$1 == target && NF == 2 { print $2; exit }' <<< "$snapshot")"
+    [[ "$tagged_pgid" =~ ^[1-9][0-9]*$ ]] || continue
+    tagged_current="$(gate_lock_process_runtime_start "$tagged")"
+    if [[ "$tagged_start" == "$gate_lock_identity_unavailable" ]]; then
+      [[ "$identity_source_available" -eq 0 ]] || continue
+    elif [[ -z "$tagged_current" || "$tagged_current" != "$tagged_start" ]]; then
+      continue
+    fi
+    if [[ "$tagged_pgid" == "$tagged" ]]; then
+      case " ${groups} " in
+        *" ${tagged_pgid} "*) : ;;
+        *)
+          groups="${groups}${tagged_pgid} "
+          group_anchors="${group_anchors}${tagged_pgid}|${tagged_start}
+"
+          ;;
+      esac
+    fi
+  done << EOF
+$tagged_identities
+EOF
+  while IFS='|' read -r group group_anchor_start; do
+    [[ "$group" =~ ^[1-9][0-9]*$ && -n "$group_anchor_start" ]] || continue
+    gate_drain_capture_group_pgid="$group"
+    gate_drain_capture_group_anchor_pid="$group"
+    gate_drain_capture_group_anchor_start="$group_anchor_start"
+    while read -r pid pgid remainder; do
+      [[ -z "$remainder" && "$pid" =~ ^[1-9][0-9]*$ &&
+        "$pgid" == "$group" ]] || continue
+      capture_process_tree "$pid"
+    done <<< "$snapshot"
+    gate_drain_capture_group_pgid=""
+    gate_drain_capture_group_anchor_pid=""
+    gate_drain_capture_group_anchor_start=""
+  done << EOF
+$group_anchors
+EOF
 }
 
 drain_condemned_run_commands() {
   local token="$1"
-  local wrapper entry pid recorded current alive alive_identities recycled unverified captured_file
+  local drain_context="${2:-stale-run}"
+  local seed_pgid="${3:-}"
+  local seed_start="${4:-}"
+  local quiet_seed_only="${5:-0}"
+  local announce_captured_non_seed="${6:-0}"
+  local wrapper entry pid recorded current runtime_recorded runtime_current
+  local signal_probe
+  local alive alive_identities recycled unverified captured_file
+  local captured_pid capture_has_non_seed=0
+  local raw_capture captured_line captured_line_pid captured_line_start
+  local captured_line_extra pending_pid="" pending_start=""
   local waited=0
   local drain_started_at
   local announced=0
   local escalated=0
+  local drain_subject="previous run"
+  local drain_start_message="The run this lock was taken from left commands running; stopping them before starting anything."
+  local drain_done_message="Previous run's commands are gone; continuing."
+  local drain_failure_prefix="Nothing has been executed."
+  local drain_failure_phase="stale-obligation recovery"
+  local drain_failure_verdict="No mapped command ran in this request"
+  local full_scan_start_floor=""
+  if [[ "$drain_context" == "active-command" ]]; then
+    drain_subject="completed mapped command"
+    drain_start_message="A completed mapped command left descendants running; stopping them before releasing its scheduler lease."
+    drain_done_message="The completed mapped command's descendants are gone; releasing its scheduler lease."
+    drain_failure_prefix="The mapped command finished, but descendant cleanup did not complete."
+    drain_failure_phase="command descendant cleanup"
+    drain_failure_verdict="A mapped command ran, but its descendants were not confirmed gone"
+    full_scan_start_floor="${gate_active_command_proc_start_floor:-}"
+  fi
   [[ -n "$token" ]] || return 0
+  if [[ -n "$seed_pgid" && ! "$seed_pgid" =~ ^[1-9][0-9]*$ ]]; then
+    echo "error: mapped-command drain received an invalid worker process group." >&2
+    gate_drain_fail_for_context "$drain_context"
+    return $?
+  fi
+  if [[ "$quiet_seed_only" != 0 && "$quiet_seed_only" != 1 ]]; then
+    echo "error: mapped-command drain received an invalid quiet-sentinel flag." >&2
+    gate_drain_fail_for_context "$drain_context"
+    return $?
+  fi
+  if [[ "$announce_captured_non_seed" != 0 &&
+    "$announce_captured_non_seed" != 1 ]]; then
+    echo "error: mapped-command drain received an invalid early-announcement flag." >&2
+    gate_drain_fail_for_context "$drain_context"
+    return $?
+  fi
+  gate_drain_seed_pgid="$seed_pgid"
+  gate_drain_seed_start="$seed_start"
+  gate_drain_membership_token="$token"
   drain_started_at="$(date +%s)"
 
   # Enumerate before signalling anything. Only the wrapper carries the tag, so
@@ -1489,14 +4218,16 @@ drain_condemned_run_commands() {
     # regular files, and appending through a planted link would write
     # whatever it points at with this user's permissions.
     if [[ -L "$captured_file" ]]; then
-      gate_lock_obligation_unreadable "$captured_file"
+      gate_drain_obligation_unreadable "$captured_file" "$drain_context" ||
+        return $?
     fi
     if [[ ! -e "$captured_file" ]]; then
       # Created exclusively before the first append, so every later >> lands
       # in a regular file this run made; noclobber refuses a path planted
       # between the check above and here, symlinks included.
       if ! (set -C && : > "$captured_file") 2>/dev/null; then
-        gate_lock_obligation_unreadable "$captured_file"
+        gate_drain_obligation_unreadable "$captured_file" "$drain_context" ||
+          return $?
       fi
     fi
   fi
@@ -1518,16 +4249,66 @@ drain_condemned_run_commands() {
     if [[ ! -O "$captured_file" ]]; then
       echo "error: ${captured_file} is not owned by this user, so it is not this gate's evidence." >&2
       echo "On a shared lock root that is a fabricated snapshot; killing by it could signal a stranger." >&2
-      echo "Nothing has been executed. Inspect and remove that file, then re-run." >&2
-      exit 2
+      echo "${drain_failure_prefix} Inspect and remove that file, then re-run." >&2
+      if [[ "$drain_context" == "stale-run" ]]; then
+        gate_report_coordinated_no_work_failure 2 "$drain_failure_phase" \
+          "$drain_failure_verdict"
+      fi
+      gate_drain_fail_for_context "$drain_context"
+      return $?
     fi
     # Unreadable is not empty. Starting from nothing here would lose the
     # descendants an interrupted drain recorded, and their tagged wrapper is
     # already dead by then — so the tag scan below would come back empty and
     # this run would call the job done with those processes still running.
-    [[ -r "$captured_file" ]] || gate_lock_obligation_unreadable "$captured_file"
-    gate_drain_capture="$(cat "$captured_file" 2>/dev/null)
-"
+    if [[ ! -r "$captured_file" ]]; then
+      gate_drain_obligation_unreadable "$captured_file" "$drain_context" ||
+        return $?
+    fi
+    raw_capture="$(cat "$captured_file" 2>/dev/null)" || {
+      gate_drain_obligation_unreadable "$captured_file" "$drain_context" ||
+        return $?
+    }
+    while IFS= read -r captured_line; do
+      [[ -n "$captured_line" ]] || continue
+      if [[ "$captured_line" =~ ^[1-9][0-9]*\|[^\|]*$ ]]; then
+        if [[ -n "$pending_pid" ]]; then
+          gate_drain_capture_set_entry "$pending_pid" "$pending_start" ""
+        fi
+        captured_line_pid="${captured_line%%|*}"
+        captured_line_start="${captured_line#*|}"
+        pending_pid="$captured_line_pid"
+        pending_start="$captured_line_start"
+        continue
+      fi
+      if [[ "$captured_line" =~ ^${gate_drain_capture_runtime_prefix}\|[1-9][0-9]*\|[^\|]+$ ]]; then
+        # shellcheck disable=SC2034 # the validated prefix is intentionally discarded
+        IFS='|' read -r captured_line_extra captured_line_pid captured_line_start << EOF
+$captured_line
+EOF
+        if [[ -z "$pending_pid" || "$captured_line_pid" != "$pending_pid" ]]; then
+          gate_drain_obligation_unreadable "$captured_file" "$drain_context" ||
+            return $?
+        fi
+        if ! gate_drain_runtime_identity_matches_wire \
+          "$pending_start" "$captured_line_start"; then
+          gate_drain_obligation_unreadable "$captured_file" "$drain_context" ||
+            return $?
+        fi
+        gate_drain_capture_set_entry \
+          "$pending_pid" "$pending_start" "$captured_line_start"
+        pending_pid=""
+        pending_start=""
+        continue
+      fi
+      gate_drain_obligation_unreadable "$captured_file" "$drain_context" ||
+        return $?
+    done << EOF
+$raw_capture
+EOF
+    if [[ -n "$pending_pid" ]]; then
+      gate_drain_capture_set_entry "$pending_pid" "$pending_start" ""
+    fi
   fi
   # Walked twice, with a pause between. A tree walk is a snapshot, and a
   # snapshot can catch a wrapper in the instant before its child is visible —
@@ -1536,18 +4317,22 @@ drain_condemned_run_commands() {
   # first signal kills the tagged wrapper and with it the only handle to
   # anything the walk did not already record. Two walks are not a proof, but
   # they cost 200ms on a path that runs only after a crash.
-  gate_drain_refresh_tagged "$token"
+  gate_drain_refresh_tagged "$token" "$full_scan_start_floor"
   for wrapper in $gate_drain_tagged_now; do
     capture_process_tree "$wrapper"
   done
+  gate_drain_capture_seed_group "$token"
   sleep 0.2
-  gate_drain_refresh_tagged "$token"
+  gate_drain_refresh_tagged "$token" "$full_scan_start_floor"
   for wrapper in $gate_drain_tagged_now; do
     capture_process_tree "$wrapper"
   done
+  gate_drain_capture_seed_group "$token"
   if [[ -z "${gate_drain_capture//[[:space:]]/}" && "$gate_drain_scan_failed" -eq 0 ]]; then
     [[ -z "$captured_file" ]] || rm -f "$captured_file"
-    [[ -z "$gate_lock_root_dir" ]] || rm -f "${gate_lock_root_dir}/holder.${token}"
+    gate_run_discard_marker_exact "$token" \
+      "The prior command identity was drained, but its marker cleanup failed." ||
+      return $?
     return 0
   fi
 
@@ -1558,14 +4343,31 @@ drain_condemned_run_commands() {
   # capture that could not be persisted stops the run here, before the handle
   # is destroyed and while the processes are still findable by tag.
   if [[ "$gate_drain_capture_unpersisted" -ne 0 ]]; then
-    echo "error: could not write the captured process list to ${captured_file}." >&2
-    echo "Signalling now would destroy the tag those processes are still findable by, with nothing on disk to hand on." >&2
-    echo "Nothing has been executed. Fix that path — permissions, or free space — then re-run." >&2
-    exit 2
+    echo "error: could not publish a complete valid captured process list at ${captured_file}." >&2
+    echo "Signalling now would destroy the tag those processes are still findable by, without valid durable evidence to hand on." >&2
+    echo "${drain_failure_prefix} Check the process identities and that path, then re-run." >&2
+    if [[ "$drain_context" == "stale-run" ]]; then
+      gate_report_coordinated_no_work_failure 2 "$drain_failure_phase" \
+        "$drain_failure_verdict"
+    fi
+    gate_drain_fail_for_context "$drain_context"
+    return $?
   fi
 
-  echo "The run this lock was taken from left commands running; stopping them before starting anything."
-  announced=1
+  if [[ "$quiet_seed_only" -eq 1 && "$announce_captured_non_seed" -eq 1 ]]; then
+    while IFS='|' read -r captured_pid _; do
+      [[ -z "$captured_pid" || "$captured_pid" == "$seed_pgid" ]] && continue
+      capture_has_non_seed=1
+      break
+    done << EOF
+$gate_drain_capture
+EOF
+  fi
+  if [[ "$quiet_seed_only" -eq 0 || "$capture_has_non_seed" -eq 1 ||
+    "$gate_drain_scan_failed" -ne 0 ]]; then
+    echo "$drain_start_message"
+    announced=1
+  fi
   recycled=""
 
   while :; do
@@ -1573,8 +4375,31 @@ drain_condemned_run_commands() {
     alive_identities=""
     unverified=""
     gate_drain_scan_failed=0
-    gate_drain_refresh_tagged "$token"
-    while IFS='|' read -r pid recorded; do
+    gate_drain_refresh_tagged "$token" "$full_scan_start_floor"
+    # A tagged replacement can appear after the previous bottom-of-loop walk
+    # and after its captured parent exits. Persist every fresh tagged root
+    # before deciding that the old capture is empty.
+    for wrapper in $gate_drain_tagged_now; do
+      capture_process_tree "$wrapper"
+    done
+    gate_drain_capture_seed_group "$token"
+    if [[ "$quiet_seed_only" -eq 1 &&
+      "$announce_captured_non_seed" -eq 1 && "$announced" -eq 0 ]]; then
+      while IFS='|' read -r captured_pid _; do
+        [[ -z "$captured_pid" || "$captured_pid" == "$seed_pgid" ]] && continue
+        echo "$drain_start_message"
+        announced=1
+        break
+      done << EOF
+$gate_drain_capture
+EOF
+    fi
+    if ! gate_drain_test_refresh_barrier; then
+      echo "error: the test-only drain refresh barrier did not release." >&2
+      gate_drain_fail_for_context "$drain_context"
+      return $?
+    fi
+    while IFS='|' read -r pid recorded runtime_recorded; do
       [[ -n "$pid" ]] || continue
       # Only signal something that reads as a PID. Appends are single short
       # writes so a half-written line should be impossible, and this is the
@@ -1582,7 +4407,21 @@ drain_condemned_run_commands() {
       # some unrelated process, and killing a stranger is worse than missing a
       # survivor the tag scan would find anyway.
       [[ "$pid" =~ ^[0-9]+$ ]] || continue
-      kill -0 "$pid" 2>/dev/null || continue
+      if ! kill -0 "$pid" 2>/dev/null; then
+        signal_probe="$(gate_lock_process_signal_probe "$pid")" ||
+          signal_probe="error"
+        [[ "$signal_probe" == "gone" ]] && continue
+        # `kill -0` also returns EPERM for a live process. Never read that as
+        # exit. A credential-changing or policy-confined descendant stays an
+        # unverifiable drain obligation and is never signalled by PID alone.
+        [[ "$signal_probe" == "denied" || "$signal_probe" == "live" ]] ||
+          gate_drain_scan_failed=1
+        case " ${unverified} " in
+          *" ${pid} "*) : ;;
+          *) unverified="${unverified}${pid} " ;;
+        esac
+        continue
+      fi
       if [[ "$recorded" == "$gate_lock_identity_unavailable" ]]; then
         # This host cannot identify processes at all, so a handle it still
         # carries is the only selector there is. Signalling on PID alone would
@@ -1590,12 +4429,19 @@ drain_condemned_run_commands() {
         # any of this run's handles is therefore left alone and named, and it
         # keeps the drain open rather than discharging it.
         if gate_drain_membership_holds "$pid" ""; then
+          if [[ "$runtime_recorded" != "$gate_lock_identity_unavailable" ]]; then
+            case " ${unverified} " in
+              *" ${pid} "*) : ;;
+              *) unverified="${unverified}${pid} " ;;
+            esac
+            continue
+          fi
           alive="${alive}${pid} "
           # Queued for the signal loop too — it consumes alive_identities, and
           # an entry only in `alive` would be waited on but never signalled,
           # holding the drain to its bound for nothing. The loop re-checks
           # membership under the sentinel before sending anything.
-          alive_identities="${alive_identities}${pid}|${gate_lock_identity_unavailable}
+          alive_identities="${alive_identities}${pid}|${gate_lock_identity_unavailable}|${gate_lock_identity_unavailable}
 "
         else
           case " ${unverified} " in
@@ -1605,6 +4451,7 @@ drain_condemned_run_commands() {
         fi
         continue
       fi
+      recorded="$(gate_lock_normalize_process_start "$recorded")"
       current="$(gate_lock_process_start "$pid")"
       if [[ -z "$recorded" || -z "$current" ]]; then
         # An identity we cannot read is not an identity that matches. Empty
@@ -1632,48 +4479,99 @@ drain_condemned_run_commands() {
       if gate_lock_process_is_confirmed_zombie "$pid" "$recorded"; then
         continue
       fi
+      if [[ -z "$runtime_recorded" ]]; then
+        case " ${unverified} " in
+          *" ${pid} "*) : ;;
+          *) unverified="${unverified}${pid} " ;;
+        esac
+        continue
+      fi
+      runtime_current="$(gate_lock_process_runtime_start "$pid")"
+      if [[ -z "$runtime_current" || "$runtime_current" != "$runtime_recorded" ]]; then
+        if [[ -n "$runtime_current" ]]; then
+          case " ${recycled} " in
+            *" ${pid} "*) : ;;
+            *) recycled="${recycled}${pid} " ;;
+          esac
+          continue
+        fi
+        case " ${unverified} " in
+          *" ${pid} "*) : ;;
+          *) unverified="${unverified}${pid} " ;;
+        esac
+        continue
+      fi
       alive="${alive}${pid} "
-      alive_identities="${alive_identities}${pid}|${recorded}
+      alive_identities="${alive_identities}${pid}|${recorded}|${runtime_recorded}
 "
     done << EOF
 $gate_drain_capture
 EOF
 
+    # A no-lock sentinel polls its exact parent identity. A short-lived ps
+    # helper can enter the durable capture and be gone by this census. Report a
+    # leaked descendant only when a live or unverifiable non-sentinel process
+    # remains; the persisted capture and signal checks stay unchanged.
+    if [[ "$quiet_seed_only" -eq 1 && "$announced" -eq 0 ]]; then
+      for captured_pid in $alive $unverified $gate_drain_tagged_now; do
+        [[ "$captured_pid" == "$seed_pgid" ]] && continue
+        echo "$drain_start_message"
+        announced=1
+        break
+      done
+      if [[ "$announced" -eq 0 && "$gate_drain_scan_failed" -ne 0 ]]; then
+        echo "$drain_start_message"
+        announced=1
+      fi
+    fi
+
     # Unverifiable entries keep the drain open even though nothing is sent to
     # them: "we could not check" is not "it is gone". A scan that failed counts
     # the same way — an unanswered question is not an empty answer.
-    [[ -n "$alive" || -n "$unverified" || "$gate_drain_scan_failed" -ne 0 ]] || break
+    [[ -n "$alive" || -n "$unverified" || -n "$gate_drain_tagged_now" ||
+      "$gate_drain_scan_failed" -ne 0 ]] || break
 
     if [[ "$waited" -ge "$gate_lock_orphan_drain_bound_seconds" ]]; then
       # Refusing to run is the whole point: proceeding here is exactly the
       # cross-run overlap the lock exists to prevent.
       [[ -z "$alive" ]] ||
-        echo "error: commands from the previous run are still alive after ${waited}s: ${alive}" >&2
+        echo "error: commands from the ${drain_subject} are still alive after ${waited}s: ${alive}" >&2
       [[ -z "$unverified" ]] ||
-        echo "error: processes from the previous run could not be identified after ${waited}s, so none were signalled: ${unverified}" >&2
+        echo "error: processes from the ${drain_subject} could not be identified after ${waited}s, so none were signalled: ${unverified}" >&2
       [[ "$gate_drain_scan_failed" -eq 0 ]] ||
-        echo "error: the scan for the previous run's processes kept failing after ${waited}s, so it is not known whether any are left." >&2
-      echo "Nothing has been executed. Investigate those processes, then re-run." >&2
-      exit 2
+        echo "error: the scan for the ${drain_subject}'s processes kept failing after ${waited}s, so it is not known whether any are left." >&2
+      echo "${drain_failure_prefix} Investigate those processes, then re-run." >&2
+      if [[ "$drain_context" == "stale-run" ]]; then
+        gate_report_coordinated_no_work_failure 2 "$drain_failure_phase" \
+          "$drain_failure_verdict"
+      fi
+      gate_drain_fail_for_context "$drain_context"
+      return $?
     fi
 
     # Same rule between passes: a re-walk that found a forked child but could
     # not write it down must not be followed by another signal round, which
     # would kill that child's parent and leave it unrecorded.
     if [[ "$gate_drain_capture_unpersisted" -ne 0 ]]; then
-      echo "error: could not write the captured process list to ${captured_file} while draining." >&2
+      echo "error: could not publish a complete valid captured process list at ${captured_file} while draining." >&2
       echo "error: still alive: ${alive:-none}${unverified:+, unverified: ${unverified}}" >&2
-      echo "Nothing has been executed. Investigate those processes, fix that path, then re-run." >&2
-      exit 2
+      echo "${drain_failure_prefix} Investigate those processes and that path, then re-run." >&2
+      if [[ "$drain_context" == "stale-run" ]]; then
+        gate_report_coordinated_no_work_failure 2 "$drain_failure_phase" \
+          "$drain_failure_verdict"
+      fi
+      gate_drain_fail_for_context "$drain_context"
+      return $?
     fi
 
     # Identity is re-read here rather than trusted from the census above. The
     # two are separated by the whole census, the bound check and the persist
     # check, and a PID recycled inside that gap would be signalled on the
     # strength of a check that passed for a process which no longer exists.
-    while IFS='|' read -r pid recorded; do
+    while IFS='|' read -r pid recorded runtime_recorded; do
       [[ -n "$pid" ]] || continue
       if [[ "$recorded" != "$gate_lock_identity_unavailable" ]]; then
+        recorded="$(gate_lock_normalize_process_start "$recorded")"
         current="$(gate_lock_process_start "$pid")"
         if [[ -z "$current" || "$current" != "$recorded" ]]; then
           # Gone, or somebody else now. Either way this signal is not ours to
@@ -1682,6 +4580,17 @@ EOF
         fi
       elif ! gate_drain_membership_holds "$pid" ""; then
         continue
+      fi
+      if [[ "$runtime_recorded" == "$gate_lock_identity_unavailable" ]]; then
+        gate_drain_membership_holds "$pid" "" || continue
+      else
+        # Keep the exact Linux start tick as the last generation check before
+        # the portable numeric signal. macOS falls back to its lstart identity.
+        runtime_current="$(gate_lock_process_runtime_start "$pid")"
+        if [[ -z "$runtime_recorded" ||
+          "$runtime_current" != "$runtime_recorded" ]]; then
+          continue
+        fi
       fi
       if [[ "$escalated" -eq 1 ]]; then
         kill -KILL "$pid" 2>/dev/null || true
@@ -1694,7 +4603,14 @@ EOF
     # After the first pass the tag carrier is usually dead, which is exactly
     # the state a successor has to be able to inherit.
     [[ "$waited" -ne 0 ]] || gate_lock_test_crash after-drain-term
-    sleep 1
+    if [[ "$quiet_seed_only" -eq 1 && "$announced" -eq 0 ]]; then
+      # A completed parallel worker stays alive only as the exact group anchor.
+      # TERM should end that single blocked shell immediately. Poll quickly so
+      # the safety sentinel does not add one second to every mapped command.
+      sleep 0.05
+    else
+      sleep 1
+    fi
     # Clock, not the sum of requested sleeps: a drain that is descheduled
     # should notice that its budget went with the time, and should print the
     # time that actually passed.
@@ -1706,35 +4622,127 @@ EOF
     # can fork a child at any point before the KILL escalation reaches it, and
     # a child discovered after its parent was recorded is exactly the one that
     # would otherwise outlive this drain. Repeating the walk drives discovery
-    # to a fixpoint: each pass either adds PIDs or does not, the list only
-    # grows, PIDs are recorded once, and the whole loop is bounded — so it ends
-    # either when a pass adds nothing and everything found is gone, or at the
-    # bound, which fails closed.
+    # to a fixpoint. Each pass either adds an exact PID/runtime generation or
+    # does not. The append-only journal grows, and each exact generation is
+    # recorded once. A recycled PID can add a new generation. The bounded loop
+    # ends when a pass adds nothing and everything found is gone, or it fails
+    # closed at the bound.
     #
     # Re-asked of the token as well, not only of the survivors: a command that
     # forks a replacement and then exits leaves nothing to walk down from, and
     # the replacement is discoverable only by the token it inherited.
-    gate_drain_refresh_tagged "$token"
+    gate_drain_refresh_tagged "$token" "$full_scan_start_floor"
     for pid in $alive $gate_drain_tagged_now; do
       capture_process_tree "$pid"
     done
+    gate_drain_capture_seed_group "$token"
   done
 
   # Discharged: every process in the captured set is gone or belongs to
   # somebody else now, so the list has nothing left to hand on.
   [[ -z "$captured_file" ]] || rm -f "$captured_file"
-  [[ -z "$gate_lock_root_dir" ]] || rm -f "${gate_lock_root_dir}/holder.${token}"
+  gate_run_discard_marker_exact "$token" \
+    "The prior command identity was drained, but its marker cleanup failed." ||
+    return $?
 
   if [[ -n "$recycled" ]]; then
     echo "Left alone: pid(s) ${recycled}now belong to unrelated processes."
   fi
   if [[ "$announced" -eq 1 ]]; then
-    echo "Previous run's commands are gone; continuing."
+    echo "$drain_done_message"
     echo
   fi
 }
 
-assert_gate_run_lock_still_ours() {
+drain_completed_command_identity() {
+  local token="$1"
+  local clear_request_marker="${2:-0}"
+  local seed_pgid="${3:-}"
+  local seed_start="${4:-}"
+  local quiet_seed_only="${5:-0}"
+  local condemned_dir=""
+  local coordinator_active=0
+  local legacy_lock_active=0
+  local announce_captured_non_seed=0
+  [[ -n "$token" ]] || return 0
+
+  if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+    gate_coordinator_is_active; then
+    coordinator_active=1
+  fi
+  if [[ -n "$gate_lock_dir" && -n "$gate_lock_root_dir" &&
+    -n "$gate_lock_token" ]]; then
+    legacy_lock_active=1
+  fi
+  if [[ "$coordinator_active" -eq 1 || "$legacy_lock_active" -eq 1 ]]; then
+    announce_captured_non_seed=1
+  fi
+
+  if [[ "$legacy_lock_active" -eq 1 ]]; then
+    # One assignment-only command closes the signal window between the two
+    # guards: cleanup must preserve both the marker and the legacy owner until
+    # the recovery obligation exists on disk.
+    gate_active_command_drain_in_progress=1 gate_cleanup_preserve_legacy_lock=1
+    if ! record_condemned_run "$token"; then
+      echo "error: could not record the completed command's descendants in ${gate_lock_root_dir:-unknown}/condemned.d." >&2
+      echo "The legacy lock stays in place so a later run must reclaim and drain this run before executing work." >&2
+      echo "The mapped command finished, but descendant cleanup did not start. Fix that path — permissions, or free space — then re-run." >&2
+      return 2
+    fi
+    condemned_dir="$(gate_lock_condemned_dir)" || {
+      echo "error: could not resolve the completed command's recovery directory." >&2
+      return 2
+    }
+    gate_cleanup_preserve_legacy_lock=0
+  elif [[ "$coordinator_active" -eq 1 ]]; then
+    # The coordinator journal already contains this request's drain token and
+    # lease. Preserve its marker until normal cleanup or recovery succeeds.
+    gate_active_command_drain_in_progress=1
+  else
+    # An explicit --no-lock run has no durable recovery owner. It still drains
+    # its exact live identity before returning, but it has no lock record to
+    # preserve or obligation directory to publish into.
+    gate_active_command_drain_in_progress=1
+  fi
+
+  # The active drain stays in the gate process. A second drainer for the same
+  # token must never race this one over its append-only capture file.
+  drain_condemned_run_commands \
+    "$token" active-command "$seed_pgid" "$seed_start" \
+    "$quiet_seed_only" "$announce_captured_non_seed" || return $?
+  if [[ "$legacy_lock_active" -eq 1 ]]; then
+    rm -f "${condemned_dir}/${token}"
+  fi
+  # The drain removes holder.<token>. A sequential command uses the request
+  # marker itself, so clear that cached path. Parallel commands use their own
+  # markers and leave the request-wide recovery marker in place.
+  if [[ "$clear_request_marker" -eq 1 ]]; then
+    gate_run_marker_file=""
+  fi
+  gate_active_command_drain_in_progress=0
+}
+
+drain_completed_sequential_command() {
+  local token="${gate_run_id:-$gate_lock_token}"
+  local clear_request_marker=1
+  if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+    gate_coordinator_is_active &&
+    [[ -n "${gate_coordinator_active_drain_identity:-}" ]]; then
+    token="$gate_coordinator_active_drain_identity"
+    clear_request_marker=0
+  fi
+  drain_completed_command_identity "$token" "$clear_request_marker"
+}
+
+drain_completed_parallel_command() {
+  local drain_identity="$1"
+  local worker_pgid="${2:-}"
+  local worker_start="${3:-}"
+  drain_completed_command_identity \
+    "$drain_identity" 0 "$worker_pgid" "$worker_start" 1
+}
+
+assert_gate_run_lock_still_ours_legacy() {
   local recorded
   [[ -n "$gate_lock_dir" ]] || return 0
   recorded="$(gate_lock_owner_field "$gate_lock_dir" token)"
@@ -1745,23 +4753,272 @@ assert_gate_run_lock_still_ours() {
   exit 2
 }
 
-release_gate_run_lock() {
-  local recorded
+release_gate_run_lock_legacy() {
+  local recorded release_dir release_taken release_owner moved_owner_identity moved_owner_matches
+  local private_owner_identity private_owner_matches inert_stage inert_name inert_pid
+  local release_prepare_status release_take_status restored_owner_identity
   [[ -n "$gate_lock_dir" ]] || return 0
   recorded="$(gate_lock_owner_field "$gate_lock_dir" token)"
-  # Our lock may have been reclaimed as stale and re-taken by another run while
-  # this one was stopped (SIGSTOP, a long swap). Deleting by path would then
-  # delete somebody else's lock, so release only what still names us.
-  if [[ "$recorded" == "$gate_lock_token" ]]; then
-    rm -rf "$gate_lock_dir"
+  # A token check followed by recursive deletion is not an ownership proof.
+  # Another run can publish between those two operations. Take the exact owner
+  # record by atomic rename, validate the copy, and remove only an empty lock
+  # directory. A successor owner makes rmdir fail and remains untouched.
+  if [[ "$recorded" != "$gate_lock_token" ]]; then
+    gate_lock_dir=""
+    return 0
+  fi
+  release_dir="$(mktemp -d "${gate_lock_root_dir}/owner-release.XXXXXX")" || {
+    echo "error: could not create private state for quality-gate lock release; leaving the lock for stale recovery." >&2
+    gate_lock_dir=""
+    return 2
+  }
+  chmod 700 "$release_dir" || {
+    rmdir "$release_dir" 2>/dev/null || true
+    echo "error: could not protect private state for quality-gate lock release; leaving the lock for stale recovery." >&2
+    gate_lock_dir=""
+    return 2
+  }
+  # Keep the original owner inode open across the test delay and atomic take.
+  # A replacement can copy this run's token, so token equality alone does not
+  # authorize release. Node compares the moved path to this descriptor's
+  # device and inode because macOS exposes /dev/fd on a different st_dev.
+  if ! exec 14< "$gate_lock_dir/owner"; then
+    rmdir "$release_dir" 2>/dev/null || true
+    gate_lock_dir=""
+    return 0
+  fi
+  if ! recorded="$(
+    gate_lock_current_user_authority_token_from_release_descriptor
+  )" || [[ "$recorded" != "$gate_lock_token" ]]; then
+    exec 14<&-
+    rmdir "$release_dir" 2>/dev/null || true
+    echo "error: the quality-gate owner changed or became unsafe before release; leaving it in place." >&2
+    gate_lock_dir=""
+    return 2
+  fi
+  # The unique private-directory basename also gives the in-lock take a name
+  # no other releaser can own. Keep the record recovery-visible until its token
+  # is validated. A SIGKILL before that check must not hide a live successor in
+  # private state where the next waiter cannot find it.
+  release_taken="${gate_lock_dir}/owner.reclaiming.release.${release_dir##*/}"
+  release_owner="$release_dir/owner"
+  gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_RELEASE_BEFORE_TAKE_DELAY_SECONDS:-}"
+  if ! mv "$gate_lock_dir/owner" "$release_taken" 2>/dev/null; then
+    exec 14<&-
+    rmdir "$release_dir" 2>/dev/null || true
+    gate_lock_dir=""
+    return 0
+  fi
+  gate_lock_test_crash after-release-visible-take
+  moved_owner_identity="$(gate_lock_current_user_authority_token_from_record "$release_taken")" ||
+    moved_owner_identity=""
+  moved_owner_matches=0
+  gate_lock_path_matches_open_descriptor "$release_taken" 14 &&
+    moved_owner_matches=1
+  if [[ "$moved_owner_identity" != "$gate_lock_token" ||
+    "$moved_owner_matches" -ne 1 ]]; then
+    exec 14<&-
+    if /bin/ln -P "$release_taken" "$gate_lock_dir/owner" 2>/dev/null; then
+      if ! gate_lock_discard_matching_duplicate \
+        "$release_taken" "$moved_owner_identity" "$gate_lock_dir/owner"; then
+        echo "error: the displaced quality-gate owner changed before duplicate cleanup; retained ${release_taken}." >&2
+        gate_lock_dir=""
+        return 2
+      fi
+    elif gate_lock_condemn_and_discard "$release_taken"; then
+      :
+    else
+      echo "error: could not restore or preserve the displaced quality-gate owner; retained ${release_taken}." >&2
+      gate_lock_dir=""
+      return 2
+    fi
+    rmdir "$release_dir" 2>/dev/null || true
+    gate_lock_dir=""
+    return 0
+  fi
+  if ! gate_lock_wait_for_test_barrier "$release_validated_test_barrier"; then
+    exec 14<&-
+    echo "error: the quality-gate release validation barrier failed; retained ${release_taken}." >&2
+    gate_lock_dir=""
+    return 2
+  fi
+  if ! mv "$release_taken" "$release_owner" 2>/dev/null; then
+    exec 14<&-
+    # Recovery can restore a live record while this process is descheduled.
+    # Yield to the canonical owner if that happened. Otherwise retain the
+    # in-lock remnant so the next waiter can recover it.
+    rmdir "$release_dir" 2>/dev/null || true
+    if [[ -e "$gate_lock_dir/owner" || -L "$gate_lock_dir/owner" ]]; then
+      gate_lock_dir=""
+      return 0
+    fi
+    echo "error: could not move the validated quality-gate owner into private release state; retained ${release_taken}." >&2
+    gate_lock_dir=""
+    return 2
+  fi
+  private_owner_identity="$(
+    gate_lock_current_user_authority_token_from_record "$release_owner"
+  )" || private_owner_identity=""
+  private_owner_matches=0
+  gate_lock_path_matches_open_descriptor "$release_owner" 14 &&
+    private_owner_matches=1
+  if [[ "$private_owner_identity" != "$gate_lock_token" ||
+    "$private_owner_matches" -ne 1 ]]; then
+    exec 14<&-
+    if /bin/ln -P "$release_owner" "$gate_lock_dir/owner" 2>/dev/null; then
+      echo "error: restored a replacement quality-gate owner after the private release move; retained ${release_owner}." >&2
+    elif [[ -e "$gate_lock_dir/owner" || -L "$gate_lock_dir/owner" ]]; then
+      echo "error: a successor owns the canonical quality-gate path; retained replacement evidence at ${release_owner}." >&2
+    else
+      echo "error: the private quality-gate owner changed during release; retained ${release_owner}." >&2
+    fi
+    gate_lock_dir=""
+    return 2
+  fi
+  # A gate killed while it built or published an owner can leave a private
+  # staging link in run.lock. These exact names never grant authority and no
+  # reader consumes them. Remove them only after the canonical owner has been
+  # taken and validated and their publishing PID is gone. A live handoff or
+  # rollback still needs its stage, so it must block rmdir and make this
+  # release restore or yield its owner.
+  for inert_stage in \
+    "$gate_lock_dir"/owner.claiming.* \
+    "$gate_lock_dir"/owner.coordinator.* \
+    "$gate_lock_dir"/owner.rollback.*; do
+    inert_name="${inert_stage##*/}"
+    [[ "$inert_name" =~ ^owner\.(claiming|coordinator|rollback)\.[1-9][0-9]*$ ]] || continue
+    [[ -f "$inert_stage" && ! -L "$inert_stage" && -O "$inert_stage" ]] || continue
+    inert_pid="${inert_name##*.}"
+    if ! gate_lock_discard_inert_owner_stage "$inert_stage" "$inert_pid" \
+      "Mapped work passed, but exact lock release did not complete."; then
+      echo "error: could not remove stale quality-gate owner stage ${inert_stage}; restoring the owner." >&2
+      break
+    fi
+  done
+
+  # Bind the exact private owner before the release delay. A same-token inode
+  # can replace the predictable `owner` path while this process is paused. The
+  # quarantine anchor remains the original descriptor-bound inode. After the
+  # delay, the quarantine take moves the current pathname into private state
+  # and rejects it unless it is that same inode.
+  if gate_lock_prepare_owner_quarantine "$release_owner" \
+    "Mapped work passed, but exact lock release did not complete."; then
+    :
+  else
+    release_prepare_status=$?
+    exec 14<&-
+    echo "error: could not witness the exact private quality-gate owner before release cleanup (status ${release_prepare_status}); retained ${release_dir}." >&2
+    gate_lock_dir=""
+    return 2
+  fi
+  if [[ "$gate_lock_quarantine_authority_value" != "$gate_lock_token" ]] ||
+    ! gate_lock_path_matches_open_descriptor \
+      "$gate_lock_quarantine_anchor" 14 ||
+    [[ ! "$release_owner" -ef "$gate_lock_quarantine_anchor" ]]; then
+    exec 14<&-
+    gate_lock_retain_quarantine \
+      "the private quality-gate owner witness does not match the released inode" || true
+    gate_lock_dir=""
+    return 2
+  fi
+  exec 14<&-
+
+  gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_RELEASE_AFTER_TAKE_DELAY_SECONDS:-}"
+  if ! gate_lock_wait_for_test_barrier "$release_private_test_barrier"; then
+    gate_lock_retain_quarantine \
+      "the private quality-gate owner release barrier failed" || true
+    gate_lock_dir=""
+    return 2
+  fi
+  if ! gate_lock_mark_quarantine_fallback; then
+    gate_lock_dir=""
+    return 2
+  fi
+  if gate_lock_take_prepared_quarantine; then
+    :
+  else
+    release_take_status=$?
+    [[ -z "$gate_lock_quarantine_dir" ]] ||
+      gate_lock_retain_quarantine \
+        "the private quality-gate owner changed before exact release cleanup" || true
+    gate_lock_dir=""
+    [[ "$release_take_status" -eq 1 ]] && return 2
+    return "$release_take_status"
+  fi
+
+  if rmdir "$gate_lock_dir" 2>/dev/null; then
+    if ! gate_lock_drop_private_quarantine; then
+      gate_lock_dir=""
+      return 2
+    fi
+    if ! rmdir "$release_dir" 2>/dev/null; then
+      echo "error: private quality-gate release state changed after exact lock removal; retained ${release_dir}." >&2
+      gate_lock_dir=""
+      return 2
+    fi
+    gate_lock_dir=""
+    return 0
+  fi
+  if [[ -e "$gate_lock_dir/owner" || -L "$gate_lock_dir/owner" ]]; then
+    # A successor published while this release held the old record. Its
+    # canonical owner blocks rmdir, so only our private record is obsolete.
+    if ! gate_lock_drop_private_quarantine; then
+      gate_lock_dir=""
+      return 2
+    fi
+  elif /bin/ln -P "$gate_lock_quarantine_anchor" \
+    "$gate_lock_dir/owner" 2>/dev/null; then
+    if ! restored_owner_identity="$(
+      gate_lock_current_user_authority_token_from_record \
+        "$gate_lock_dir/owner"
+    )" || [[ "$restored_owner_identity" != "$gate_lock_token" ]] ||
+      [[ ! "$gate_lock_dir/owner" -ef "$gate_lock_quarantine_anchor" ]]; then
+      gate_lock_retain_quarantine \
+        "the restored quality-gate owner does not match the exact release inode" || true
+      gate_lock_dir=""
+      return 2
+    fi
+    if ! gate_lock_drop_private_quarantine; then
+      gate_lock_dir=""
+      return 2
+    fi
+  elif [[ -e "$gate_lock_dir/owner" || -L "$gate_lock_dir/owner" ]]; then
+    # A successor won the canonical path between the check and exclusive link.
+    # Preserve it and discard only this run's private release record.
+    if ! gate_lock_drop_private_quarantine; then
+      gate_lock_dir=""
+      return 2
+    fi
+  else
+    gate_lock_retain_quarantine \
+      "could not restore the exact quality-gate owner after lock release failed" || true
+    gate_lock_dir=""
+    return 2
+  fi
+  if ! rmdir "$release_dir" 2>/dev/null; then
+    echo "error: private quality-gate release state changed during cleanup; retained ${release_dir}." >&2
+    gate_lock_dir=""
+    return 2
   fi
   gate_lock_dir=""
+  return 0
 }
 
-acquire_gate_run_lock() {
+gate_lock_refuse_owner_publication() {
+  echo "error: could not publish a complete, validated legacy owner identity." >&2
+  echo "Nothing has been executed." >&2
+  gate_report_coordinated_no_work_failure 2 "legacy owner publication" \
+    "No mapped command ran in this request"
+  exit 2
+}
+
+acquire_gate_run_lock_legacy() {
   local root lock owner_pid owner_host owner_worktree owner_token_value owner_start
   local owner_machine owner_started_at machine_verdict record_age unverified_detail
-  local stale_reason nap remaining now_millis
+  local stale_reason owner_state nap remaining now_millis
+  local coordinator_join_status owner_record taken_record record_status
+  local hidden_recovery_status hidden_recovery_busy
+  local claim_uid claim_epoch claim_prefix claim_token claim_status
   # Elapsed time comes from the clock, never from adding up requested sleeps.
   # A shell that is descheduled or SIGSTOPped sleeps far longer than it asked
   # to, and counting the request would let a run outlive the budget it printed
@@ -1805,11 +5062,55 @@ acquire_gate_run_lock() {
     echo "error: no writable lock directory, so this run cannot take the gate run lock." >&2
     echo "Set AGENT_QUALITY_GATE_LOCK_DIR to a writable path, or re-run with --no-lock to accept the contention." >&2
     echo "Nothing has been executed." >&2
+    gate_report_coordinated_no_work_failure 2 "startup" \
+      "No mapped command ran in this request"
     exit 2
   fi
   lock="$root/run.lock"
+  owner_record="$lock/owner"
   gate_lock_root_dir="$root"
-  this_host="$(uname -n)"
+  if ! gate_lock_ensure_local_host_fingerprint; then
+    echo "error: could not derive the local host identity for safe owner quarantine recovery." >&2
+    echo "Nothing has been executed." >&2
+    gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+      "No mapped command ran in this request"
+    exit 2
+  fi
+  this_host="$gate_lock_local_host_name"
+  if ! claim_uid="$(id -u 2>/dev/null)" ||
+    [[ ! "$claim_uid" =~ ^[0-9]+$ ]]; then
+    echo "error: could not derive the current user identity for safe legacy owner publication." >&2
+    echo "Nothing has been executed." >&2
+    gate_report_coordinated_no_work_failure 2 "legacy owner publication" \
+      "No mapped command ran in this request"
+    exit 2
+  fi
+  if ! claim_epoch="$(date +%s 2>/dev/null)" ||
+    [[ ! "$claim_epoch" =~ ^[0-9]{1,12}$ ]]; then
+    echo "error: could not derive a safe legacy owner claim token." >&2
+    echo "Nothing has been executed." >&2
+    gate_report_coordinated_no_work_failure 2 "legacy owner publication" \
+      "No mapped command ran in this request"
+    exit 2
+  fi
+  if ! claim_prefix="$(
+    gate_run_marker_identity_prefix \
+      "$this_host" "legacy" "$gate_lock_local_host_fingerprint" "$$"
+  )"; then
+    echo "error: could not derive a safe legacy owner claim token." >&2
+    echo "Nothing has been executed." >&2
+    gate_report_coordinated_no_work_failure 2 "legacy owner publication" \
+      "No mapped command ran in this request"
+    exit 2
+  fi
+  printf -v claim_token '%s-%s-%s' "$claim_prefix" "$$" "$claim_epoch"
+  if ! gate_lock_token_is_wellformed "$claim_token"; then
+    echo "error: could not derive a safe legacy owner claim token." >&2
+    echo "Nothing has been executed." >&2
+    gate_report_coordinated_no_work_failure 2 "legacy owner publication" \
+      "No mapped command ran in this request"
+    exit 2
+  fi
   gate_lock_resolve_machine_id
   this_machine="$gate_lock_machine_id_cached"
   # Two questions about the root, answered from different evidence.
@@ -1855,6 +5156,19 @@ acquire_gate_run_lock() {
   wait_started_at="$(gate_wall_millis)"
 
   while :; do
+    hidden_recovery_busy=0
+    # A coordinator can finish adopting the legacy owner while this waiter is
+    # in the legacy loop. Probe before each claim attempt so a new client joins
+    # it instead of waiting for its intentionally long-lived compatibility
+    # lock. Legacy-only runs never define this function.
+    if declare -F gate_coordinator_try_join_existing >/dev/null 2>&1; then
+      if gate_coordinator_try_join_existing; then
+        return 0
+      else
+        coordinator_join_status=$?
+        [[ "$coordinator_join_status" -eq 1 ]] || return "$coordinator_join_status"
+      fi
+    fi
     now_millis="$(gate_wall_millis)"
     # A clock stepped backwards mid-wait — this is a wall clock, and NTP steps
     # it — would otherwise make every later delta smaller than the budget, so
@@ -1866,12 +5180,15 @@ acquire_gate_run_lock() {
     if mkdir "$lock" 2>/dev/null; then
       gate_lock_test_crash after-mkdir
       gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_CLAIM_DELAY_SECONDS:-}"
-      if claim_gate_run_lock "$lock" "${this_host}-$$-$(date +%s)"; then
+      if claim_gate_run_lock "$lock" "$claim_token" "$claim_uid"; then
         if [[ "$announced" -eq 1 ]]; then
           echo "Acquired the gate run lock after ${waited}s."
           echo
         fi
         return 0
+      else
+        claim_status=$?
+        [[ "$claim_status" -ne 2 ]] || gate_lock_refuse_owner_publication
       fi
       # We created the directory but never recorded ownership: a waiter
       # reclaimed it while this process was descheduled, and it is that run's
@@ -1879,6 +5196,7 @@ acquire_gate_run_lock() {
       echo "Another run recorded ownership of ${lock} first; queueing behind it." >&2
     fi
 
+    gate_lock_require_safe_existing_owner_record "$owner_record"
     owner_pid="$(gate_lock_owner_field "$lock" pid)"
     owner_host="$(gate_lock_owner_field "$lock" host)"
     owner_machine="$(gate_lock_owner_field "$lock" machine)"
@@ -1886,10 +5204,12 @@ acquire_gate_run_lock() {
     owner_token_value="$(gate_lock_owner_field "$lock" token)"
     owner_start="$(gate_lock_owner_field "$lock" start_utc)"
     owner_started_at="$(gate_lock_owner_field "$lock" started_at)"
+    gate_lock_require_safe_existing_owner_record "$owner_record"
     if [[ -z "$owner_token_value" ]]; then
       # Before believing there is no holder, read the remnants of any reclaim
       # that was killed mid-take. One of them may be the holder's own record.
-      if gate_lock_recover_hidden_record "$lock"; then
+      if gate_lock_recover_hidden_record "$lock" "$this_host"; then
+        gate_lock_require_safe_existing_owner_record "$owner_record"
         owner_pid="$(gate_lock_owner_field "$lock" pid)"
         owner_host="$(gate_lock_owner_field "$lock" host)"
         owner_machine="$(gate_lock_owner_field "$lock" machine)"
@@ -1897,6 +5217,15 @@ acquire_gate_run_lock() {
         owner_token_value="$(gate_lock_owner_field "$lock" token)"
         owner_start="$(gate_lock_owner_field "$lock" start_utc)"
         owner_started_at="$(gate_lock_owner_field "$lock" started_at)"
+        gate_lock_require_safe_existing_owner_record "$owner_record"
+      else
+        hidden_recovery_status=$?
+        if [[ "$hidden_recovery_status" -eq 4 ]]; then
+          hidden_recovery_busy=1
+          owner_pid="${gate_lock_active_quarantine_pid:-unknown}"
+          owner_host="${gate_lock_active_quarantine_host:-$this_host}"
+          owner_worktree="owner cleanup"
+        fi
       fi
     fi
     machine_verdict="$(
@@ -1908,7 +5237,9 @@ acquire_gate_run_lock() {
     stale_reason=""
     nonlocal_refusal_reason=""
     [[ -n "$owner_token_value" ]] && ownerless_since=""
-    if [[ -z "$owner_token_value" ]]; then
+    if [[ -z "$owner_token_value" && "$hidden_recovery_busy" -eq 1 ]]; then
+      ownerless_since=""
+    elif [[ -z "$owner_token_value" ]]; then
       # No complete record: either no file at all, or one a run was killed
       # part-way through writing. The token is written last, so its absence
       # means the write never finished and nothing in the file can be trusted
@@ -1932,72 +5263,50 @@ acquire_gate_run_lock() {
       # — so the holder is assumed live and waited out; the timeout fails
       # closed with the holder line naming the record.
       :
+    elif [[ "$machine_verdict" == unverified ]]; then
+      # An unverified record does not authorize a local PID lookup on storage
+      # that may be shared. On per-machine storage, age must pass first. Only
+      # then can a dead local PID complete the reclaim verdict.
+      record_age="$(gate_lock_record_age_seconds "$owner_started_at")"
+      unverified_detail="it records host '${owner_host:-unknown}' machine '${owner_machine:-none}', and this run is host '${this_host}' machine '${this_machine:-none}'"
+      if [[ "$gate_lock_root_is_per_machine" -ne 1 ]]; then
+        if [[ "$unverified_warned" -eq 0 ]]; then
+          unverified_warned=1
+          echo "warning: the gate run lock record at ${lock} cannot be tied to this machine: ${unverified_detail}." >&2
+          echo "  This lock root is not established as storage only this machine reaches, so it may be shared and that record may belong to a live run elsewhere. Its PID is not read locally. This run waits it out." >&2
+          echo "  If that directory is this machine's alone, set AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1 to let an aged dead holder in it be reclaimed." >&2
+        fi
+        # This pass deliberately did not read the record's PID in the local
+        # namespace. Keep that refusal as the timeout diagnosis so the fallback
+        # does not claim that an unverified holder was seen alive.
+        nonlocal_refusal_reason="its record cannot be tied to this machine, so its PID was not used as local liveness evidence"
+      elif [[ -n "$record_age" &&
+        "$record_age" -ge "$gate_lock_unverified_machine_grace_seconds" ]] &&
+        ! gate_lock_holder_is_live "$owner_pid" "$owner_start"; then
+        owner_state="$(gate_lock_process_state "$owner_pid")"
+        if [[ "$owner_state" == Z* ]]; then
+          stale_reason="holder pid ${owner_pid} has exited and is awaiting reap"
+        elif kill -0 "$owner_pid" 2>/dev/null; then
+          stale_reason="pid ${owner_pid} now belongs to a different process"
+        else
+          stale_reason="holder pid ${owner_pid} is gone"
+        fi
+        if [[ "$unverified_warned" -eq 0 ]]; then
+          unverified_warned=1
+          echo "warning: the gate run lock record at ${lock} cannot be tied to this machine: ${unverified_detail}." >&2
+          echo "  This lock root is on storage this machine mounts itself, its ${stale_reason}, and it was written ${record_age}s ago (grace ${gate_lock_unverified_machine_grace_seconds}s), so this run reads it as this machine's own under a name or identity it has since changed, and reclaims it." >&2
+          echo "  If this directory is exported to other machines, set AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=0 to refuse this reclaim." >&2
+        fi
+        stale_reason="${stale_reason}; its record cannot be tied to this machine and is ${record_age}s old on per-machine storage"
+      fi
     elif ! gate_lock_holder_is_live "$owner_pid" "$owner_start"; then
-      if kill -0 "$owner_pid" 2>/dev/null; then
+      owner_state="$(gate_lock_process_state "$owner_pid")"
+      if [[ "$owner_state" == Z* ]]; then
+        stale_reason="holder pid ${owner_pid} has exited and is awaiting reap"
+      elif kill -0 "$owner_pid" 2>/dev/null; then
         stale_reason="pid ${owner_pid} now belongs to a different process"
       else
         stale_reason="holder pid ${owner_pid} is gone"
-      fi
-      if [[ "$machine_verdict" == unverified ]]; then
-        # The record cannot be tied to a machine: it predates the machine
-        # field, or its identity came from a source this run did not reach, or
-        # it disagrees on a root nothing else can reach. From here "this
-        # machine under a name or identity it has since changed" and "another
-        # machine sharing this root" look the same, and what settles it is the
-        # root rather than the record.
-        #
-        # On storage this machine mounts itself, a dead holder in the record is
-        # this machine's own history under a name or identity it has since
-        # changed, and reclaiming it is the whole point of issue #2055. A root
-        # on a network filesystem, or one whose filesystem could not be read,
-        # may be mounted from another machine, and there this branch never
-        # reclaims: a dead local PID says nothing about a holder on another
-        # machine, and elapsed time does not turn it into liveness evidence.
-        #
-        # Two further legs apply even on local storage. The PID must read dead,
-        # and the record must have outlived the grace. The grace is what bounds
-        # the exposure in the one configuration the probe cannot see — a
-        # machine that EXPORTS its own disk and lets another machine's gate
-        # lock in it — because a holder there would have to be idle past the
-        # grace to be touched, and the declaration turns this branch off
-        # outright for anyone who set that up deliberately. The reclaim says
-        # out loud what it concluded and from what, because it is the one
-        # reclaim on this path resting on where the root lives rather than on
-        # an identity that matched.
-        record_age="$(gate_lock_record_age_seconds "$owner_started_at")"
-        # Stated as the two identities rather than as a mismatch of either
-        # field. `unverified` is reached in several ways — no machine field, a
-        # source mismatch, a rotated identity under an unchanged hostname — and
-        # naming a host mismatch would contradict the record in the cases where
-        # the hostname is the part that still agrees.
-        unverified_detail="it records host '${owner_host:-unknown}' machine '${owner_machine:-none}', and this run is host '${this_host}' machine '${this_machine:-none}'"
-        if [[ "$gate_lock_root_is_per_machine" -ne 1 ]]; then
-          if [[ "$unverified_warned" -eq 0 ]]; then
-            unverified_warned=1
-            echo "warning: the gate run lock record at ${lock} cannot be tied to this machine: ${unverified_detail}." >&2
-            echo "  This lock root is not established as storage only this machine reaches, so it may be shared and that record may belong to a live run elsewhere. This run waits it out." >&2
-            echo "  If that directory is this machine's alone, set AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=1 to let a dead holder in it be reclaimed." >&2
-          fi
-          # This is a refusal on where the root lives, exactly like the guard
-          # below, so it owes the timeout the same answer. Without this the
-          # reason stays empty and the wait ends on "holder pid N is still
-          # alive; let it finish" — for a PID this pass just read as gone.
-          nonlocal_refusal_reason="$stale_reason"
-          stale_reason=""
-        elif [[ -n "$record_age" &&
-          "$record_age" -ge "$gate_lock_unverified_machine_grace_seconds" ]]; then
-          if [[ "$unverified_warned" -eq 0 ]]; then
-            unverified_warned=1
-            echo "warning: the gate run lock record at ${lock} cannot be tied to this machine: ${unverified_detail}." >&2
-            echo "  This lock root is on storage this machine mounts itself, its ${stale_reason}, and it was written ${record_age}s ago (grace ${gate_lock_unverified_machine_grace_seconds}s), so this run reads it as this machine's own under a name or identity it has since changed, and reclaims it." >&2
-            echo "  If this directory is exported to other machines and one of them locks in it, set AGENT_QUALITY_GATE_LOCK_DIR_IS_PER_MACHINE=0 to refuse this reclaim." >&2
-          fi
-          stale_reason="${stale_reason}; its record cannot be tied to this machine and is ${record_age}s old on storage this machine mounts itself"
-        else
-          # Either too young to judge or of unknowable age. Wait, which is
-          # what this path did for every host mismatch before issue #2055.
-          stale_reason=""
-        fi
       fi
     fi
 
@@ -2039,21 +5348,40 @@ acquire_gate_run_lock() {
       # right here, because a record in flight under a remnant means an empty
       # canonical path is not evidence that the lock is free. If that restores
       # a live holder, this verdict is void and we go back to waiting.
-      if gate_lock_recover_hidden_record "$lock"; then
+      gate_lock_require_safe_existing_owner_record "$owner_record"
+      hidden_recovery_status=1
+      if gate_lock_recover_hidden_record "$lock" "$this_host"; then
+        hidden_recovery_status=0
+        gate_lock_require_safe_existing_owner_record "$owner_record"
         owner_pid="$(gate_lock_owner_field "$lock" pid)"
         owner_host="$(gate_lock_owner_field "$lock" host)"
         owner_worktree="$(gate_lock_owner_field "$lock" worktree)"
-      elif [[ ! -e "$lock/owner" ]]; then
+      else
+        hidden_recovery_status=$?
+        if [[ "$hidden_recovery_status" -eq 4 ]]; then
+          owner_pid="${gate_lock_active_quarantine_pid:-unknown}"
+          owner_host="${gate_lock_active_quarantine_host:-$this_host}"
+          owner_worktree="owner cleanup"
+        fi
+      fi
+      if [[ "$hidden_recovery_status" -eq 4 ]]; then
+        :
+      elif [[ "$hidden_recovery_status" -eq 0 ]]; then
+        :
+      elif [[ ! -e "$owner_record" && ! -L "$owner_record" ]]; then
         # Nothing in the way: publishing the record is the whole contest.
         # Whoever links it into place first holds the lock; everyone else,
         # including the creator that stalled, finds their publish refused.
-        if claim_gate_run_lock "$lock" "${this_host}-$$-$(date +%s)"; then
+        if claim_gate_run_lock "$lock" "$claim_token" "$claim_uid"; then
           echo "Gate run lock at ${lock} is stale (${stale_reason}); reclaiming it." >&2
           if [[ "$announced" -eq 1 ]]; then
             echo "Acquired the gate run lock after ${waited}s."
             echo
           fi
           return 0
+        else
+          claim_status=$?
+          [[ "$claim_status" -ne 2 ]] || gate_lock_refuse_owner_publication
         fi
       else
         # Something is in the way: a dead holder's record, or one a killed run
@@ -2066,11 +5394,34 @@ acquire_gate_run_lock() {
         # PID, so cleanup can never race the rename, nor name another run.
         gate_lock_reclaim_origin="$lock/owner"
         gate_lock_reclaim_tmp="${lock}/owner.reclaiming.$$"
-        if mv "$lock/owner" "$gate_lock_reclaim_tmp" 2>/dev/null; then
+        gate_lock_require_safe_existing_owner_record "$owner_record"
+        if [[ -e "$owner_record" || -L "$owner_record" ]] &&
+          [[ ! -O "$owner_record" ]]; then
+          gate_lock_reclaim_tmp=""
+          gate_lock_reclaim_origin=""
+          gate_lock_refuse_foreign_owner_recovery "$owner_record"
+        fi
+        if mv "$owner_record" "$gate_lock_reclaim_tmp" 2>/dev/null; then
           gate_lock_test_crash after-take
+          if ! gate_lock_wait_for_test_barrier "$lock_taken_test_barrier"; then
+            restore_gate_lock_record || true
+            gate_report_coordinated_no_work_failure 2 \
+              "legacy owner recovery" \
+              "No mapped command ran in this request"
+            exit 2
+          fi
           gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_TAKEN_DELAY_SECONDS:-}"
-          if gate_lock_record_still_stale \
-            "$gate_lock_reclaim_tmp" "$owner_pid" "$owner_token_value" "$owner_start"; then
+          taken_record="$gate_lock_reclaim_tmp"
+          if [[ ! -e "$taken_record" && ! -L "$taken_record" ]]; then
+            gate_lock_reclaim_tmp=""
+            gate_lock_reclaim_origin=""
+          elif ! gate_lock_record_is_readable_regular "$taken_record"; then
+            gate_lock_reclaim_tmp=""
+            gate_lock_reclaim_origin=""
+            gate_lock_refuse_unsafe_owner_record "$taken_record"
+          elif gate_lock_record_still_stale \
+            "$taken_record" "$owner_pid" "$owner_token_value" "$owner_start" \
+            "$owner_host" "$owner_machine" "$owner_started_at"; then
             echo "Gate run lock at ${lock} is stale (${stale_reason}); reclaiming it." >&2
             # The holder is gone, but a gate killed mid-command leaves that
             # command running. Write down whose it was — on disk, before taking
@@ -2082,26 +5433,45 @@ acquire_gate_run_lock() {
             # this run publishes its own. So the obligation is written first,
             # and a write that fails puts the record back and stops the run
             # rather than taking over with no successor for those commands.
-            if ! record_condemned_run "$owner_token_value"; then
+            if gate_lock_condemn_and_discard "$taken_record"; then
+              :
+            else
+              record_status=$?
               restore_gate_lock_record || true
-              gate_lock_obligation_unwritable
+              [[ "$record_status" -ne 1 ]] || gate_lock_obligation_unwritable
+              gate_report_coordinated_no_work_failure 2 \
+                "legacy owner recovery" \
+                "No mapped command ran in this request"
+              exit 2
             fi
-            rm -f "$gate_lock_reclaim_tmp"
             gate_lock_reclaim_tmp=""
             gate_lock_reclaim_origin=""
-            if claim_gate_run_lock "$lock" "${this_host}-$$-$(date +%s)"; then
+            if claim_gate_run_lock "$lock" "$claim_token" "$claim_uid"; then
               if [[ "$announced" -eq 1 ]]; then
                 echo "Acquired the gate run lock after ${waited}s."
                 echo
               fi
               return 0
+            else
+              claim_status=$?
+              [[ "$claim_status" -ne 2 ]] || gate_lock_refuse_owner_publication
             fi
           else
-            # We took a record that is not the one we judged — another run
-            # reclaimed the lock while we decided. Put it back and wait. If it
-            # could not be put back or written down it stays where it is, named
-            # in the output, for the next run's hidden-record recovery.
-            restore_gate_lock_record || true
+            record_status=$?
+            if [[ "$record_status" -eq 2 ]]; then
+              gate_lock_reclaim_tmp=""
+              gate_lock_reclaim_origin=""
+              gate_lock_refuse_unsafe_owner_record "$taken_record"
+            elif [[ "$record_status" -eq 3 ]]; then
+              gate_lock_reclaim_tmp=""
+              gate_lock_reclaim_origin=""
+            else
+              # We took a record that is not the one we judged — another run
+              # reclaimed the lock while we decided. Put it back and wait. If
+              # it could not be put back or written down it stays where it is,
+              # named in the output, for the next hidden-record recovery.
+              restore_gate_lock_record || true
+            fi
           fi
         fi
         gate_lock_reclaim_tmp=""
@@ -2181,8 +5551,129 @@ acquire_gate_run_lock() {
   done
 }
 
+gate_coordinator_requested() {
+  case "$gate_coordinator_enabled" in
+    1|true|yes) ;;
+    *) return 1 ;;
+  esac
+  case "$gate_lock_enabled" in
+    0|false|no) return 1 ;;
+  esac
+  [[ -z "${AGENT_QUALITY_GATE_LOCK_HELD:-}" ]]
+}
+
+gate_run_ensure_token() {
+  local token_prefix
+  if [[ -z "$gate_run_id" ]]; then
+    if [[ -z "$gate_lock_local_host_name" ]] &&
+      ! gate_lock_ensure_local_host_fingerprint; then
+      echo "error: this gate could not create a safe scheduler drain token." >&2
+      return 2
+    fi
+    if ! token_prefix="$(
+      gate_run_marker_identity_prefix \
+        "$gate_lock_local_host_name" "request" \
+        "$gate_lock_local_host_fingerprint" "$$"
+    )"; then
+      echo "error: this gate could not create a safe scheduler drain token." >&2
+      return 2
+    fi
+    gate_run_id="${token_prefix}-$$-$(date +%s)"
+  fi
+  if ! gate_lock_token_is_wellformed "$gate_run_id"; then
+    echo "error: this gate could not create a safe scheduler drain token." >&2
+    return 2
+  fi
+}
+
+prepare_explicit_no_lock_run_handles() {
+  local handle_root="${scratch_dir}/no-lock-handles"
+  case "$gate_lock_enabled" in
+    0 | false | no) ;;
+    *) return 0 ;;
+  esac
+
+  # An explicit no-lock run has no legacy or coordinator root, but detached
+  # descendants still need an inherited marker that macOS can find after the
+  # tagged wrapper exits. Keep those handles in a private repo-local directory
+  # so an unusable configured lock root does not disable the escape hatch.
+  if [[ ! -e "$handle_root" && ! -L "$handle_root" ]]; then
+    (umask 077 && mkdir "$handle_root") 2>/dev/null || true
+  fi
+  if ! gate_run_private_marker_directory_is_safe "$handle_root"; then
+    echo "error: could not prepare the private no-lock handle directory at ${handle_root}." >&2
+    return 2
+  fi
+  gate_lock_root_dir="$handle_root"
+  gate_run_ensure_token
+}
+
+acquire_gate_run_lock() {
+  local coordinator_join_status
+  if ! gate_coordinator_requested; then
+    acquire_gate_run_lock_legacy
+    return
+  fi
+
+  if ! gate_lock_ensure_local_host_fingerprint; then
+    echo "error: could not derive the local host identity for safe coordinator marker recovery." >&2
+    echo "Nothing has been executed." >&2
+    gate_report_coordinated_no_work_failure 2 "coordinator startup" \
+      "No mapped command ran in this request"
+    return 2
+  fi
+  gate_run_ensure_token || return 2
+  if gate_coordinator_try_join_existing; then
+    return 0
+  else
+    coordinator_join_status=$?
+    [[ "$coordinator_join_status" -eq 1 ]] || return "$coordinator_join_status"
+  fi
+
+  acquire_gate_run_lock_legacy
+  # The legacy wait loop probes again on every pass. Another gate can finish
+  # coordinator startup while this request waits, in which case that probe has
+  # already registered this request and no second bootstrap is permitted.
+  if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+    gate_coordinator_is_active; then
+    return 0
+  fi
+  if ! gate_coordinator_bootstrap_from_legacy; then
+    echo "error: the quality-gate coordinator could not adopt the legacy run lock." >&2
+    echo "No mapped command ran. Re-run after the current coordinator or legacy holder exits." >&2
+    return 2
+  fi
+}
+
+assert_gate_run_lock_still_ours() {
+  if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+    gate_coordinator_is_active; then
+    gate_coordinator_assert_authority
+    return
+  fi
+  assert_gate_run_lock_still_ours_legacy
+}
+
+release_gate_run_lock() {
+  if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+    gate_coordinator_is_active; then
+    # The coordinator retains and releases the legacy lock after all requests,
+    # leases, and drain obligations settle. A client must never delete it.
+    gate_lock_dir=""
+    return 0
+  fi
+  if [[ "$gate_cleanup_preserve_legacy_lock" -eq 1 ]]; then
+    return 0
+  fi
+  release_gate_run_lock_legacy
+}
+
 cleanup_tmpfiles() {
-  teardown_active_timeouts
+  local original_status=$?
+  local teardown_status=0
+  local marker_status=0
+  local release_status=0
+  teardown_active_timeouts || teardown_status=$?
   if [[ ${#tmpfiles[@]} -gt 0 ]]; then
     rm -f "${tmpfiles[@]+"${tmpfiles[@]}"}"
   fi
@@ -2206,28 +5697,53 @@ cleanup_tmpfiles() {
     rm -f "$gate_lock_condemn_tmp"
     gate_lock_condemn_tmp=""
   fi
+  if declare -F gate_coordinator_cleanup >/dev/null 2>&1; then
+    gate_coordinator_cleanup || true
+  fi
   # Dropped after the workers are down, so it is gone only once nothing of ours
   # is left holding it. A run that dies before this leaves it behind on
   # purpose: that is the handle its successor needs.
-  if [[ -n "$gate_run_marker_file" ]]; then
-    rm -f "$gate_run_marker_file"
-    gate_run_marker_file=""
+  if [[ -n "$gate_run_marker_file" &&
+    "$gate_active_command_drain_in_progress" -eq 0 ]]; then
+    if gate_run_discard_marker_exact \
+      "${gate_run_id:-$gate_lock_token}" \
+      "This gate stopped, but its run-marker cleanup failed."; then
+      gate_run_marker_file=""
+    else
+      marker_status=$?
+    fi
   fi
   # Released last: the lock must outlive worker teardown, or the next run
   # starts while this one's mapped commands are still dying.
-  release_gate_run_lock
+  if release_gate_run_lock; then
+    release_status=0
+  else
+    release_status=$?
+  fi
+  if [[ "$original_status" -eq 0 ]] && {
+    [[ "$teardown_status" -ne 0 ]] ||
+      [[ "$marker_status" -ne 0 ]] || [[ "$release_status" -ne 0 ]]
+  }; then
+    trap - EXIT
+    exit 2
+  fi
 }
 trap cleanup_tmpfiles EXIT
 
 on_terminating_signal() {
   local signal="$1"
-  if [[ "$worker_registration_in_progress" -eq 1 ]]; then
+  local teardown_status=0
+  if [[ "$worker_registration_in_progress" -eq 1 ||
+    "$worker_settlement_in_progress" -eq 1 ]]; then
     [[ -n "$pending_terminating_signal" ]] ||
       pending_terminating_signal="$signal"
     return 0
   fi
   trap '' INT TERM
-  teardown_active_timeouts
+  teardown_active_timeouts || teardown_status=$?
+  if [[ "$teardown_status" -ne 0 ]]; then
+    echo "error: active process teardown returned ${teardown_status}; forwarding ${signal} after the no-lock fallback and durable recovery handling." >&2
+  fi
   trap - "$signal"
   kill "-${signal}" "$$" 2>/dev/null || exit 143
 }
@@ -2242,15 +5758,16 @@ finish_worker_registration() {
   fi
 }
 
-drain_worker_process_group() {
-  local pgid="$1"
-  if kill -0 -- "-$pgid" 2>/dev/null; then
-    kill -TERM -- "-$pgid" 2>/dev/null || true
-    sleep 3
-    kill -KILL -- "-$pgid" 2>/dev/null || true
+finish_worker_settlement() {
+  local signal
+  worker_settlement_in_progress=0
+  if [[ -n "$pending_terminating_signal" ]]; then
+    signal="$pending_terminating_signal"
+    pending_terminating_signal=""
+    on_terminating_signal "$signal"
   fi
-  wait "$pgid" 2>/dev/null || true
 }
+
 trap 'on_terminating_signal INT' INT
 trap 'on_terminating_signal TERM' TERM
 
@@ -2268,24 +5785,11 @@ if [[ -n "$changed_paths_input_file" ]]; then
     echo "error: changed paths file not found: ${changed_paths_input_file}" >&2
     exit 2
   fi
-  sed '/^$/d' "$changed_paths_input_file" | sort -u > "$changed_paths_file"
-else
-  {
-    if ! git diff --name-only --no-renames "${base_ref}...${head_ref}" 2>/dev/null; then
-      git diff --name-only --no-renames "$base_ref" "$head_ref"
-    fi
-
-    if [[ "$head_ref" == "HEAD" ]]; then
-      git diff --name-only --no-renames
-      git diff --cached --name-only --no-renames
-      # The scratch dir is created at line 110 *before* this collection runs.
-      # In a repo where .tmp/ isn't gitignored (e.g. the fresh fixture repos
-      # built by scripts/agent-quality-gate.test.sh), the gate's own tmpfiles
-      # would otherwise be reported as untracked user changes and bleed into
-      # downstream args (e.g. the docs-only `./tools/trunk check` builder).
-      git ls-files --others --exclude-standard --exclude='.tmp/agent-quality-gate/'
-    fi
-  } | sed '/^$/d' | sort -u > "$changed_paths_file"
+fi
+if ! collect_current_changed_paths |
+  sed '/^$/d' | LC_ALL=C sort -u > "$changed_paths_file"; then
+  echo "error: failed to collect the current changed paths." >&2
+  exit 2
 fi
 
 if [[ ! -s "$changed_paths_file" ]]; then
@@ -2430,10 +5934,9 @@ mapper_status=0
 node "${mapper_args[@]}" > "$mapper_plan_file" || mapper_status=$?
 if [[ "$mapper_status" -ne 0 ]]; then
   echo "error: gate mapping engine failed (exit ${mapper_status}); refusing to run on a plan it did not produce" >&2
-  # Exit 2, not the mapper's own code. 2 is this gate's refusal status, and the
-  # bash routing classifier already collapses its own 3 into a 2. Forwarding 1
-  # or 3 here would make a mapper crash look like a different failure class to
-  # anything reading the gate's status.
+  # Exit 2, not the mapper's own code. 2 is this gate's refusal status.
+  # Forwarding 1 or 3 would make a mapper crash look like a different failure
+  # class to anything reading the gate's status.
   exit 2
 fi
 if [[ ! -s "$mapper_plan_file" ]]; then
@@ -2523,7 +6026,23 @@ hash_stream() {
 }
 
 hash_file() {
-  hash_sha256 "$1" | awk '{ print $1 }'
+  local output digest
+  output="$(hash_sha256 "$1")" || return 1
+  digest="${output%%[[:space:]]*}"
+  printf '%s\n' "$digest"
+}
+
+checked_file_digest() {
+  local path="$1" digest
+  digest="$(hash_file "$path")" || {
+    echo "error: could not hash required implementation file: ${path}" >&2
+    return 1
+  }
+  if [[ ! "$digest" =~ ^[a-f0-9]{64}$ ]]; then
+    echo "error: implementation hash output is malformed for: ${path}" >&2
+    return 1
+  fi
+  printf '%s\n' "$digest"
 }
 
 write_command_plan() {
@@ -2562,7 +6081,9 @@ write_command_plan() {
 }
 
 implementation_signature() {
-  local implementation_path path
+  local output_file="$1"
+  local implementation_path path canonical_path digest discovered_paths status=0
+  : > "$output_file" || return 1
   for path in \
     scripts/agent-quality-gate.sh \
     scripts/agent-quality-gate.test.sh \
@@ -2599,6 +6120,8 @@ implementation_signature() {
     scripts/gate/routing-table/pins.test.mjs \
     scripts/gate/routing-table/routing-table.test.mjs \
     scripts/gate/routing-table/schema.mjs \
+    scripts/gate/quality-gate-coordinator.sh \
+    scripts/gate/quality-gate-coordinator-support.sh \
     scripts/terraform/terraform-fmt-check.mjs \
     scripts/terraform/terraform-fmt-check.test.mjs \
     turbo.json \
@@ -2608,22 +6131,113 @@ implementation_signature() {
   # executes. The mapper and routing-table suites are mapped commands from the
   # repository under test, so they stay anchored there.
   case "$path" in
-      scripts/gate/mapping/*.test.mjs | scripts/gate/routing-table/*.test.mjs)
+    scripts/gate/mapping/*.test.mjs | scripts/gate/routing-table/*.test.mjs)
         implementation_path="$repo_root/$path"
         ;;
-      scripts/agent-quality-gate.sh | scripts/agent-autoreview-core.mjs | scripts/docs/docs-navigation-eval-helpers.mjs | scripts/gate/lockfile-scope.mjs | scripts/gate/run-handles.sh | scripts/gate/mapping.mjs | scripts/gate/mapping/*.mjs | scripts/gate/routing-table/*.mjs)
+      scripts/agent-quality-gate.sh | scripts/agent-autoreview-core.mjs | scripts/docs/docs-navigation-eval-helpers.mjs | scripts/gate/lockfile-scope.mjs | scripts/gate/run-handles.sh | scripts/gate/mapping.mjs | scripts/gate/mapping/*.mjs | scripts/gate/routing-table/*.mjs | scripts/gate/quality-gate-coordinator.sh | scripts/gate/quality-gate-coordinator-support.sh)
         implementation_path="$script_source_dir/${path#scripts/}"
         ;;
       *)
         implementation_path="$repo_root/$path"
         ;;
     esac
-    if [[ -f "$implementation_path" ]]; then
-      printf '%s %s\n' "$path" "$(hash_file "$implementation_path")"
+    if [[ -L "$implementation_path" ]]; then
+      echo "error: required implementation path is a symlink: ${implementation_path}" >&2
+      return 1
+    elif [[ -f "$implementation_path" ]]; then
+      digest="$(checked_file_digest "$implementation_path")" || return 1
+      printf '%s %s\n' "$path" "$digest" >> "$output_file" || return 1
+    elif [[ -e "$implementation_path" ]]; then
+      echo "error: required implementation path is not a regular file: ${implementation_path}" >&2
+      return 1
     else
-      printf '%s __missing__\n' "$path"
+      printf '%s __missing__\n' "$path" >> "$output_file" || return 1
     fi
-  done | hash_stream
+  done
+
+  # Discover production coordinator modules from the checkout that the gate
+  # loaded. A new module must invalidate local freshness and shared execution
+  # before another caller learns its exact filename.
+  discovered_paths="$(mktemp "$scratch_dir/implementation-runtime-paths.XXXXXX")" || return 1
+  if ! find "$script_source_dir/gate" -maxdepth 1 \
+    -name 'quality-gate-coordinator*.mjs' ! -name '*.test.mjs' -print \
+    > "$discovered_paths" 2>/dev/null; then
+    rm -f "$discovered_paths"
+    return 1
+  fi
+  if ! LC_ALL=C sort -o "$discovered_paths" "$discovered_paths"; then
+    rm -f "$discovered_paths"
+    return 1
+  fi
+  while IFS= read -r implementation_path; do
+    canonical_path="scripts/gate/${implementation_path##*/}"
+    if [[ -L "$implementation_path" || ! -f "$implementation_path" ]]; then
+      echo "error: discovered implementation path is not a regular file: ${implementation_path}" >&2
+      status=1
+      break
+    fi
+    digest="$(checked_file_digest "$implementation_path")" || {
+      status=1
+      break
+    }
+    if ! printf '%s %s\n' "$canonical_path" "$digest" >> "$output_file"; then
+      status=1
+      break
+    fi
+  done < "$discovered_paths"
+  rm -f "$discovered_paths"
+  [[ "$status" -eq 0 ]] || return 1
+
+  # Coordinator tests and scheduler fixtures execute from the repository under
+  # test. Keep their physical root separate from the loaded runtime root.
+  if [[ -d "$repo_root/scripts/gate" ]]; then
+    discovered_paths="$(mktemp "$scratch_dir/implementation-test-paths.XXXXXX")" || return 1
+    if ! find "$repo_root/scripts/gate" -maxdepth 1 \
+      \( -name 'quality-gate-coordinator*.test.mjs' -o \
+      -name 'agent-quality-gate-scheduler*.mjs' -o \
+      -name 'agent-quality-gate-fixture-processes.mjs' \) -print \
+      > "$discovered_paths" 2>/dev/null; then
+      rm -f "$discovered_paths"
+      return 1
+    fi
+    if ! LC_ALL=C sort -o "$discovered_paths" "$discovered_paths"; then
+      rm -f "$discovered_paths"
+      return 1
+    fi
+    while IFS= read -r implementation_path; do
+      canonical_path="scripts/gate/${implementation_path##*/}"
+      if [[ -L "$implementation_path" || ! -f "$implementation_path" ]]; then
+        echo "error: discovered implementation path is not a regular file: ${implementation_path}" >&2
+        status=1
+        break
+      fi
+      digest="$(checked_file_digest "$implementation_path")" || {
+        status=1
+        break
+      }
+      if ! printf '%s %s\n' "$canonical_path" "$digest" >> "$output_file"; then
+        status=1
+        break
+      fi
+    done < "$discovered_paths"
+    rm -f "$discovered_paths"
+    [[ "$status" -eq 0 ]] || return 1
+  fi
+}
+
+implementation_hash_value() {
+  local manifest digest
+  manifest="$(mktemp "$scratch_dir/implementation-signature.XXXXXX")" || return 1
+  if ! implementation_signature "$manifest"; then
+    rm -f "$manifest"
+    return 1
+  fi
+  digest="$(checked_file_digest "$manifest")" || {
+    rm -f "$manifest"
+    return 1
+  }
+  rm -f "$manifest"
+  printf '%s\n' "$digest"
 }
 
 # The mode of a path, read from the worktree rather than from the index, so the
@@ -2645,18 +6259,49 @@ gate_worktree_filemode() {
   fi
 }
 
+gate_symlink_target_hash() {
+  local path="$1"
+  [[ -L "$path" ]] || return 1
+  readlink "$path" | hash_stream
+}
+
+gate_resolved_filemode() {
+  local path="$1"
+  if [[ -x "$path" ]]; then
+    printf '100755'
+  else
+    printf '100644'
+  fi
+}
+
 validation_content_signature() {
-  local path
+  local path link_hash resolved_digest
 
   {
     while IFS= read -r path; do
       printf 'path %s\0' "$path"
-      if [[ -f "$path" ]]; then
+      if [[ -L "$path" ]]; then
+        link_hash="$(gate_symlink_target_hash "$path")" || return 1
+        printf 'symlink %s\0' "$link_hash"
+        if [[ -f "$path" ]]; then
+          resolved_digest="$(hash_file "$path")" || return 1
+          printf 'resolved-file %s\0' "$resolved_digest"
+          printf 'resolved-mode %s\0' "$(gate_resolved_filemode "$path")"
+        elif [[ -d "$path" ]]; then
+          # A directory target has no bounded content digest. Keep the gate
+          # valid, but bind the physical worktree so another worktree cannot
+          # reuse a result for different directory contents behind the same
+          # relative link.
+          printf 'resolved-directory-worktree %s\0' "$repo_root"
+        elif [[ -e "$path" ]]; then
+          printf 'resolved-other-worktree %s\0' "$repo_root"
+        else
+          printf 'resolved-missing\0'
+        fi
+      elif [[ -f "$path" ]]; then
         printf 'file %s\0' "$(hash_file "$path")"
-        # The executable bit and symlink-ness are not in the content hash, and
-        # they are the part of the summary line below that says something about
-        # the file rather than about the index. Read from the worktree, so
-        # `git add` cannot move it.
+        # The executable bit is not in the content hash. Read it from the
+        # worktree so `git add` cannot move it.
         printf 'mode %s\0' "$(gate_worktree_filemode "$path")"
       elif [[ -d "$path" ]]; then
         printf 'directory\0'
@@ -2687,7 +6332,7 @@ write_command_plan "$command_plan_file"
 base_oid="$(ref_oid "$base_ref")"
 changed_paths_hash="$(hash_file "$changed_paths_file")"
 command_plan_hash="$(hash_file "$command_plan_file")"
-implementation_hash="$(implementation_signature)"
+implementation_hash="$(implementation_hash_value)"
 validated_content_hash="$(validation_content_signature)"
 
 # `allow_package_script_changes` only gates the pre-run package-script refusal,
@@ -2703,27 +6348,156 @@ else
   stamp_allow_package_scripts="n/a"
 fi
 
+gate_coordinator_freshness_context=""
+gate_coordinator_execution_head=""
+
+# The coordinator execution fingerprint binds HEAD. The pre-push workflow must
+# also accept a warm run made immediately before committing the same validated
+# bytes. Build a separate compatibility context from every execution-fingerprint
+# input except HEAD; stamp_line already carries base, paths, plan,
+# implementation, content, and package-risk policy. Equality therefore means
+# that only HEAD can differ. Legacy and --no-lock runs keep the v3 stamp.
+gate_coordinator_freshness_context_hash() {
+  local os_name os_arch node_path node_version pnpm_path pnpm_version
+  local env_digest policy_hash runtime_hash repository_identity
+  local submodule_state
+  [[ "$gate_mapped_child_scrub_policy_hash" =~ ^[a-f0-9]{64}$ ]] || return 1
+  gate_coordinator_assert_scrub_policy_current || return 1
+  os_name="$(uname -s)" || return 1
+  os_arch="$(uname -m)" || return 1
+  node_path="$(command -v node)" || return 1
+  node_version="$(node --version 2>/dev/null)" || return 1
+  pnpm_path="$(command -v pnpm)" || return 1
+  pnpm_version="$(pnpm --version 2>/dev/null)" || return 1
+  env_digest="$(gate_coordinator_material_env_digest)" || return 1
+  policy_hash="${gate_coordinator_policy_hash:-}"
+  [[ "$policy_hash" =~ ^[a-f0-9]{64}$ ]] || return 1
+  runtime_hash="$(gate_coordinator_runtime_signature)" || return 1
+  repository_identity="$(gate_coordinator_repository_identity)" || return 1
+  submodule_state="$(
+    gate_coordinator_submodule_state_hash "$command_plan_file"
+  )" || return 1
+  printf '%s\n' \
+    "schema=v2" "repository=${repository_identity}" \
+    "commandTimeout=${command_timeout_seconds}" \
+    "gateSelftestTimeout=${gate_selftest_timeout_seconds}" \
+    "gateLockWait=${gate_lock_wait_seconds}" \
+    "qualityParallelism=${quality_parallelism}" "failFast=${fail_fast}" \
+    "os=${os_name}" "arch=${os_arch}" "nodePath=${node_path}" \
+    "node=${node_version}" "pnpmPath=${pnpm_path}" \
+    "pnpm=${pnpm_version}" "policy=${policy_hash}" \
+    "runtime=${runtime_hash}" "environment=${env_digest}" \
+    "submodules=${submodule_state}" \
+    "mappedChildScrubPolicy=${gate_mapped_child_scrub_policy_hash}" |
+    hash_stream
+}
+
 stamp_line() {
-  printf 'v2\tbase=%s\tpaths=%s\tplan=%s\timplementation=%s\tcontent=%s\tpackageRisk=%s\tallowPackageScripts=%s\n' \
+  if [[ -n "$gate_coordinator_freshness_context" ]]; then
+    printf 'v4\tbase=%s\tpaths=%s\tplan=%s\timplementation=%s\tcontent=%s\tpackageRisk=%s\tallowPackageScripts=%s\tscrubPolicy=%s\tcoordinatorContext=%s\n' \
+      "$base_oid" \
+      "$changed_paths_hash" \
+      "$command_plan_hash" \
+      "$implementation_hash" \
+      "$validated_content_hash" \
+      "$package_script_risk_changed" \
+      "$stamp_allow_package_scripts" \
+      "$gate_mapped_child_scrub_policy_hash" \
+      "$gate_coordinator_freshness_context"
+    return
+  fi
+  printf 'v3\tbase=%s\tpaths=%s\tplan=%s\timplementation=%s\tcontent=%s\tpackageRisk=%s\tallowPackageScripts=%s\tscrubPolicy=%s\n' \
     "$base_oid" \
     "$changed_paths_hash" \
     "$command_plan_hash" \
     "$implementation_hash" \
     "$validated_content_hash" \
     "$package_script_risk_changed" \
-    "$stamp_allow_package_scripts"
+    "$stamp_allow_package_scripts" \
+    "$gate_mapped_child_scrub_policy_hash"
 }
 
-current_stamp="$(stamp_line)"
+current_stamp=""
+
+recomputed_stamp_line() {
+  local fresh_paths_file fresh_plan_file fresh_base fresh_paths fresh_plan
+  local fresh_implementation fresh_content fresh_coordinator_context
+  fresh_paths_file="$(mktemp "$scratch_dir/fresh-paths.XXXXXX")" || return 1
+  fresh_plan_file="$(mktemp "$scratch_dir/fresh-plan.XXXXXX")" || {
+    rm -f "$fresh_paths_file"
+    return 1
+  }
+  if ! collect_current_changed_paths |
+    sed '/^$/d' | LC_ALL=C sort -u > "$fresh_paths_file"; then
+    rm -f "$fresh_paths_file" "$fresh_plan_file"
+    return 1
+  fi
+  write_command_plan "$fresh_plan_file" || {
+    rm -f "$fresh_paths_file" "$fresh_plan_file"
+    return 1
+  }
+  fresh_base="$(ref_oid "$base_ref")" || {
+    rm -f "$fresh_paths_file" "$fresh_plan_file"
+    return 1
+  }
+  fresh_paths="$(hash_file "$fresh_paths_file")" || {
+    rm -f "$fresh_paths_file" "$fresh_plan_file"
+    return 1
+  }
+  fresh_plan="$(hash_file "$fresh_plan_file")" || {
+    rm -f "$fresh_paths_file" "$fresh_plan_file"
+    return 1
+  }
+  fresh_implementation="$(implementation_hash_value)" || {
+    rm -f "$fresh_paths_file" "$fresh_plan_file"
+    return 1
+  }
+  fresh_content="$(validation_content_signature)" || {
+    rm -f "$fresh_paths_file" "$fresh_plan_file"
+    return 1
+  }
+  rm -f "$fresh_paths_file" "$fresh_plan_file" || return 1
+  if [[ -n "$gate_coordinator_freshness_context" ]]; then
+    fresh_coordinator_context="$(gate_coordinator_freshness_context_hash)" || return 1
+    printf 'v4\tbase=%s\tpaths=%s\tplan=%s\timplementation=%s\tcontent=%s\tpackageRisk=%s\tallowPackageScripts=%s\tscrubPolicy=%s\tcoordinatorContext=%s\n' \
+      "$fresh_base" "$fresh_paths" "$fresh_plan" "$fresh_implementation" \
+      "$fresh_content" "$package_script_risk_changed" \
+      "$stamp_allow_package_scripts" "$gate_mapped_child_scrub_policy_hash" \
+      "$fresh_coordinator_context"
+    return
+  fi
+  printf 'v3\tbase=%s\tpaths=%s\tplan=%s\timplementation=%s\tcontent=%s\tpackageRisk=%s\tallowPackageScripts=%s\tscrubPolicy=%s\n' \
+    "$fresh_base" "$fresh_paths" "$fresh_plan" "$fresh_implementation" \
+    "$fresh_content" "$package_script_risk_changed" \
+    "$stamp_allow_package_scripts" "$gate_mapped_child_scrub_policy_hash"
+}
 
 is_fresh_success_stamp() {
   local stamped_at
   local stamped_value
+  local stamped_execution_fingerprint
+  local stamped_execution_head
   local now
   [[ -f "$success_stamp_file" ]] || return 1
   stamped_at="$(sed -n '1s/^created_at=//p' "$success_stamp_file")"
   stamped_value="$(sed -n '2s/^stamp=//p' "$success_stamp_file")"
   [[ "$stamped_value" == "$current_stamp" ]] || return 1
+  if [[ -n "$gate_coordinator_freshness_context" ]]; then
+    stamped_execution_fingerprint="$(
+      sed -n '3s/^execution_fingerprint=//p' "$success_stamp_file"
+    )"
+    stamped_execution_head="$(
+      sed -n '4s/^execution_head=//p' "$success_stamp_file"
+    )"
+    [[ "$stamped_execution_fingerprint" =~ ^[a-f0-9]{64}$ ]] || return 1
+    [[ "$stamped_execution_head" =~ ^[a-f0-9]{40}([a-f0-9]{24})?$ ]] || return 1
+    if [[ "$stamped_execution_head" == "$gate_coordinator_execution_head" ]]; then
+      [[ "$stamped_execution_fingerprint" == \
+        "$gate_coordinator_registration_fingerprint" ]] || return 1
+    fi
+    # If HEAD changed after a warm run, the matching v4 stamp above proves
+    # equality for every other execution input and permits only that transition.
+  fi
   [[ "$stamped_at" =~ ^[0-9]+$ ]] || return 1
   now="$(date +%s)"
   # Reject future-dated stamps (clock stepped backward after stamping): a
@@ -2782,6 +6556,86 @@ if [[ "$mode" == "dry-run" ]]; then
   exit 0
 fi
 
+# A coordinated zero-work success must first derive the same source, plan,
+# toolchain, material environment, runtime, and policy identity used for
+# registration. The second full fingerprint read brackets the compatible
+# headless context and fails closed if any execution input moves during it.
+if gate_coordinator_requested; then
+  exec 7>&1
+  gate_coordinator_stdout_reserved=1
+  if ! gate_lock_ensure_local_host_fingerprint; then
+    echo "error: could not derive the local host identity for safe coordinator marker recovery." >&2
+    gate_coordinator_report_no_work_failure 2 "registration preparation" \
+      "No mapped command ran in this request"
+    exit 2
+  fi
+  if ! gate_run_ensure_token; then
+    gate_coordinator_report_no_work_failure 2 "registration preparation" "No mapped command ran in this request"
+    exit 2
+  fi
+  if ! gate_coordinator_prepare_registration_fingerprint; then
+    gate_coordinator_report_no_work_failure 2 "registration preparation" "No mapped command ran in this request"
+    exit 2
+  fi
+  if ! gate_coordinator_requested; then
+    exec 7>&-
+    gate_coordinator_stdout_reserved=0
+  fi
+fi
+if gate_coordinator_requested; then
+  gate_coordinator_freshness_context="$(
+    gate_coordinator_freshness_context_hash
+  )" || {
+    echo "error: could not compute the coordinated freshness context." >&2
+    gate_coordinator_report_no_work_failure 2 "freshness identity preparation" \
+      "No mapped command ran in this request"
+    exit 2
+  }
+  gate_coordinator_execution_head="$(ref_oid "$head_ref")" || {
+    echo "error: could not resolve HEAD for coordinated freshness reuse." >&2
+    gate_coordinator_report_no_work_failure 2 "freshness identity preparation" \
+      "No mapped command ran in this request"
+    exit 2
+  }
+  verified_coordinator_fingerprint="$(
+    gate_coordinator_recompute_fingerprint
+  )" || {
+    echo "error: could not verify the coordinator fingerprint before freshness reuse." >&2
+    gate_coordinator_report_no_work_failure 2 "freshness identity preparation" \
+      "No mapped command ran in this request"
+    exit 2
+  }
+  if [[ "$verified_coordinator_fingerprint" != \
+    "$gate_coordinator_registration_fingerprint" ]]; then
+    echo "error: quality-gate inputs changed while the coordinated freshness identity was prepared." >&2
+    gate_coordinator_report_no_work_failure 2 "freshness identity preparation" \
+      "No mapped command ran in this request"
+    exit 2
+  fi
+  unset verified_coordinator_fingerprint
+fi
+current_stamp="$(stamp_line)" || {
+  echo "error: could not compute the quality-gate freshness stamp." >&2
+  gate_report_coordinated_no_work_failure 2 "freshness identity preparation" \
+    "No mapped command ran in this request"
+  exit 2
+}
+if [[ -n "$gate_coordinator_freshness_context" ]]; then
+  verified_freshness_stamp="$(recomputed_stamp_line)" || {
+    echo "error: could not verify repository state before coordinated freshness reuse." >&2
+    gate_coordinator_report_no_work_failure 2 "freshness identity preparation" \
+      "No mapped command ran in this request"
+    exit 2
+  }
+  if [[ "$verified_freshness_stamp" != "$current_stamp" ]]; then
+    echo "error: repository or execution inputs changed while the coordinated freshness identity was prepared." >&2
+    gate_coordinator_report_no_work_failure 2 "freshness identity preparation" \
+      "No mapped command ran in this request"
+    exit 2
+  fi
+  unset verified_freshness_stamp
+fi
+
 if [[ "$skip_if_fresh" == "1" || "$skip_if_fresh" == "true" ]]; then
   if is_fresh_success_stamp; then
     echo "Previous successful agent quality gate run is still fresh; skipping mapped commands."
@@ -2792,13 +6646,32 @@ fi
 if [[ "$package_script_risk_changed" == true && "$allow_package_script_changes" != "1" && "$allow_package_script_changes" != "true" ]]; then
   echo "Refusing to run because package manifests, patches, or lockfile changed." >&2
   echo "Review package scripts, lifecycle hooks, and dependency install scripts first, then re-run with --allow-package-script-changes if they are safe." >&2
+  if gate_coordinator_requested; then
+    gate_coordinator_report_no_work_failure 2 "pre-execution policy" \
+      "No mapped command ran in this request"
+  fi
   exit 2
 fi
 
 # Take the machine's run lock only once this run is definitely going to execute
 # something: a dry run, a fresh-stamp skip, and a package-script refusal all
-# exit above without ever competing for the machine.
+# exit above without ever competing for the machine. Coordinated runs have
+# already prepared the identity that acquisition registers.
 acquire_gate_run_lock
+if declare -F gate_coordinator_is_follower >/dev/null 2>&1 &&
+  gate_coordinator_is_follower; then
+  gate_coordinator_wait_for_shared_result
+  exit $?
+fi
+# Legacy lock acquisition and coordinator registration already prepare their
+# run handles. Explicit no-lock runs need private handles before mapped work.
+# Without them, descendant cleanup can report a false success.
+if ! prepare_explicit_no_lock_run_handles; then
+  echo "Nothing has been executed." >&2
+  gate_report_coordinated_no_work_failure 2 "run-handle preparation" \
+    "No mapped command ran in this request"
+  exit 2
+fi
 # The run marker is written here, while the gate's own stderr is still live
 # and the exit is unambiguously the gate's: inside run_with_timeout the
 # per-command capture would swallow the message, and a parallel worker's exit
@@ -2825,10 +6698,22 @@ gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_HELD_DELAY_SECONDS:-}"
 # this exact fingerprint while we waited — the pre-push hook queued behind the
 # manual warm-up run is precisely that case — and re-running its work would
 # throw away the reason the hook passes --skip-if-fresh at all.
-if [[ "$skip_if_fresh" == "1" || "$skip_if_fresh" == "true" ]]; then
-  if is_fresh_success_stamp; then
-    echo "A concurrent agent quality gate run left a fresh success stamp; skipping mapped commands."
-    exit 0
+if ! declare -F gate_coordinator_is_active >/dev/null 2>&1 ||
+  ! gate_coordinator_is_active; then
+  if [[ "$skip_if_fresh" == "1" || "$skip_if_fresh" == "true" ]]; then
+    post_wait_stamp="$(recomputed_stamp_line)" || {
+      echo "error: could not recompute the quality-gate stamp after the lock wait." >&2
+      exit 2
+    }
+    if [[ "$post_wait_stamp" != "$current_stamp" ]]; then
+      echo "error: repository state changed while this gate waited for the run lock." >&2
+      echo "No mapped command ran. Re-run so routing and validation use the new state." >&2
+      exit 2
+    fi
+    if is_fresh_success_stamp; then
+      echo "A concurrent agent quality gate run left a fresh success stamp; skipping mapped commands."
+      exit 0
+    fi
   fi
 fi
 
@@ -2964,7 +6849,16 @@ trunk_provisioning_probe_timeout_seconds=15
 # answer within its budget is torn down and reported as NOT blocked, so an
 # unanswerable question leaves the original failure standing.
 trunk_provisioning_probe() {
+  local command_tag="${1:-}"
+  local request_tag="${2:-}"
+  local command_marker="${3:-}"
+  local request_marker="${4:-}"
+  local coordinator_marker="${5:-}"
+  local close_coordinator_stdout_fd="${6:-0}"
+  local close_parallel_worker_control_fd="${7:-0}"
+  local handshake_file="${8:-}"
   local pid
+  local pid_start
   local waited=0
   local had_errexit=0
   local rc
@@ -2974,8 +6868,56 @@ trunk_provisioning_probe() {
   esac
   set +e
 
-  TRUNK_LAUNCHER_QUIET=true ./tools/trunk --version >/dev/null 2>&1 &
+  if [[ -z "$handshake_file" ]] || ! rm -f "$handshake_file"; then
+    [[ "$had_errexit" == 1 ]] && set -e
+    return 2
+  fi
+
+  # The sanitized launcher executes this Bash body.
+  # shellcheck disable=SC2016
+  AGENTQG_RUN="$command_tag" \
+    AGENTQG_REQUEST="$request_tag" \
+    "${gate_sanitized_bash_launcher[@]}" -c '
+      command_marker="$1"
+      request_marker="$2"
+      coordinator_marker="$3"
+      close_coordinator_stdout_fd="$4"
+      close_parallel_worker_control_fd="$5"
+      handshake_file="$6"
+      if [[ -n "$command_marker" ]]; then
+        [[ -r "$command_marker" ]] || exit 125
+        exec 9< "$command_marker" || exit 125
+      fi
+      if [[ -n "$request_marker" && "$request_marker" != "$command_marker" ]]; then
+        [[ -r "$request_marker" ]] || exit 125
+        exec 8< "$request_marker" || exit 125
+      fi
+      if [[ -n "$coordinator_marker" &&
+        "$coordinator_marker" != "$command_marker" &&
+        "$coordinator_marker" != "$request_marker" ]]; then
+        [[ -r "$coordinator_marker" ]] || exit 125
+        exec 6< "$coordinator_marker" || exit 125
+      fi
+      if [[ "$close_coordinator_stdout_fd" == 1 ]]; then
+        exec 7>&-
+      fi
+      if [[ "$close_parallel_worker_control_fd" == 1 ]]; then
+        exec 17>&-
+      fi
+      printf "%s\n" ready > "$handshake_file" || exit 125
+      export TRUNK_LAUNCHER_QUIET=true
+      exec ./tools/trunk --version
+    ' trunk-provisioning-probe \
+      "$command_marker" "$request_marker" "$coordinator_marker" \
+      "$close_coordinator_stdout_fd" \
+      "$close_parallel_worker_control_fd" "$handshake_file" \
+      >/dev/null 2>&1 &
   pid=$!
+  # INT/TERM cleanup must see the probe while its command identity and
+  # scheduler lease remain active. The private readiness file distinguishes a
+  # launcher failure from a wrapper that never retained the recovery handles.
+  pid_start="$(gate_lock_process_runtime_start "$pid")"
+  active_timeout_records=("${pid}|${pid_start}")
   while kill -0 "$pid" 2>/dev/null &&
     [[ "$waited" -lt "$trunk_provisioning_probe_timeout_seconds" ]]; do
     sleep 1
@@ -2991,21 +6933,36 @@ trunk_provisioning_probe() {
     rc=$?
     [[ "$rc" -le 128 ]] || rc=0
   fi
+  active_timeout_records=()
+
+  if ! read_parallel_worker_result_value "$handshake_file" ready \
+    >/dev/null 2>&1; then
+    rc=2
+  elif [[ "$rc" -ne 0 ]]; then
+    rc=1
+  fi
 
   [[ "$had_errexit" == 1 ]] && set -e
   return "$rc"
 }
 
 trunk_provisioning_is_blocked() {
+  local probe_status
   # A missing or non-executable launcher is a real failure, not an environment
   # one: tools/trunk is tracked, so its absence means the checkout is broken.
   [[ -x ./tools/trunk ]] || return 1
 
   if [[ -z "$trunk_provisioning_state" ]]; then
-    if trunk_provisioning_probe; then
+    if trunk_provisioning_probe "$@"; then
       trunk_provisioning_state=ok
     else
-      trunk_provisioning_state=blocked
+      probe_status=$?
+      if [[ "$probe_status" -eq 1 ]]; then
+        trunk_provisioning_state=blocked
+      else
+        echo "error: the Trunk provisioning probe could not retain the mapped command's recovery identity." >&2
+        return 2
+      fi
     fi
   fi
 
@@ -3346,6 +7303,39 @@ trunk_arm_is_environment_blocked() {
   return 0
 }
 
+# A parallel or sanitized command shell cannot mutate this parent shell's
+# cached launcher-probe state. Its authenticated result file carries that
+# verdict back. Prefer that verdict, then classify download failures
+# from the command transcript in this process.
+trunk_arm_is_environment_blocked_with_launcher_verdict() {
+  local output_file="$1"
+  local launcher_blocked="$2"
+
+  trunk_environment_blocked_kind=""
+
+  if [[ "$launcher_blocked" == true ]]; then
+    trunk_provisioning_state=blocked
+    trunk_environment_blocked_kind=launcher
+    trunk_arm_environment_blocked=true
+    return 0
+  fi
+
+  # A false authenticated worker verdict means its in-lease launcher probe
+  # succeeded. Do not probe again after the command lease is released.
+  trunk_provisioning_state=ok
+  if trunk_check_output_is_environment_blocked "$output_file"; then
+    if [[ "$trunk_check_blocked_shape" == plugin ]]; then
+      trunk_environment_blocked_kind=plugin
+    else
+      trunk_environment_blocked_kind=linters
+    fi
+    trunk_arm_environment_blocked=true
+    return 0
+  fi
+
+  return 1
+}
+
 print_trunk_environment_blocked_warning() {
   local command="$1"
   local output_file="${2:-}"
@@ -3509,12 +7499,21 @@ log_duration_line() {
   local command="$3"
   local line_mode="$4"
   local ts
-  local escaped_command
 
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)" || return 0
-  escaped_command="$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' -- "$command" 2>/dev/null)" || return 0
-  printf '{"ts":"%s","command":%s,"status":"%s","seconds":%s,"mode":"%s"}\n' \
-    "$ts" "$escaped_command" "$status" "$elapsed" "$line_mode" >> "$durations_file" 2>/dev/null || true
+  # This single-quoted program is JavaScript.
+  # shellcheck disable=SC2016
+  node -e '
+    const [ts, command, status, seconds, mode, requestId, sequence, role] = process.argv.slice(1);
+    process.stdout.write(`${JSON.stringify({
+      ts, command, status, seconds: Number(seconds), mode,
+      requestId: requestId || undefined,
+      sequence: sequence ? Number(sequence) : undefined,
+      role: role || undefined,
+    })}\n`);
+  ' "$ts" "$command" "$status" "$elapsed" "$line_mode" \
+    "${gate_coordinator_request_id:-}" "${gate_coordinator_sequence:-}" \
+    "${gate_coordinator_role:-}" >> "$durations_file" 2>/dev/null || true
 }
 
 record_command_summary() {
@@ -3578,13 +7577,43 @@ monitor_sequential_autoreview_progress() {
 # processes (pnpm -> node, etc.) do not survive. Sets last_command_timed_out and
 # returns the command's exit status; a signal-death is remapped to a normal
 # failure code (see below). Applies per command only, never to the whole run.
+mapped_command_timeout_seconds() {
+  case "$1" in
+    "pnpm agent:quality-gate:test"|"bash scripts/agent-quality-gate.test.sh")
+      printf '%s\n' "$gate_selftest_timeout_seconds"
+      ;;
+    *)
+      printf '%s\n' "$command_timeout_seconds"
+      ;;
+  esac
+}
+
 run_with_timeout() {
   local command="$1"
+  local deferred_lease_file="${2:-}"
+  local command_drain_identity="${3:-}"
+  local trunk_probe_handshake_file="${4:-}"
   local cmd_pid
+  local cmd_start
   local watchdog_pid
+  local watchdog_start
   local rc
+  local release_rc=0
+  local drain_rc=0
+  local provisioning_probe_rc=0
   local timeout_marker
   local had_errexit=0
+  local command_started_at
+  local command_finished_at
+  local effective_command_timeout_seconds
+  local coordinator_marker="${gate_coordinator_marker_file:-}"
+  local request_marker command_marker command_tag request_tag
+  local coordinator_release_deferred=0
+  local close_parallel_worker_control_fd=0
+
+  if [[ -n "$deferred_lease_file" ]]; then
+    close_parallel_worker_control_fd=1
+  fi
 
   # A `wait` that reaps a SIGTERM/SIGKILL-killed child makes bash re-raise that
   # signal at the next `return`, which would kill the gate. Run the reaping with
@@ -3595,7 +7624,43 @@ run_with_timeout() {
   esac
   set +e
 
+  effective_command_timeout_seconds="$(mapped_command_timeout_seconds "$command")"
+
   last_command_timed_out=false
+  last_command_execution_seconds=0
+  last_command_infrastructure_failed=false
+  last_command_trunk_provisioning_blocked=false
+  if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+    gate_coordinator_is_active && [[ -z "$command_drain_identity" ]]; then
+    parallel_command_sequence=$((parallel_command_sequence + 1))
+    if ! command_drain_identity="$(make_parallel_command_drain_identity "$parallel_command_sequence")"; then
+      echo "error: could not create a safe command drain identity." >&2
+      last_command_infrastructure_failed=true
+      [[ "$had_errexit" == 1 ]] && set -e
+      return 2
+    fi
+  fi
+  if declare -F gate_coordinator_before_command >/dev/null 2>&1; then
+    gate_coordinator_before_command "$command" "$command_drain_identity"
+    rc=$?
+    if [[ "$rc" -ne 0 ]]; then
+      last_command_infrastructure_failed=true
+      [[ "$had_errexit" == 1 ]] && set -e
+      return "$rc"
+    fi
+    if [[ -n "$deferred_lease_file" ]] &&
+      declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+      gate_coordinator_is_active; then
+      if [[ -z "${gate_coordinator_active_lease_id:-}" ]] ||
+        ! printf '%s\n' "$gate_coordinator_active_lease_id" > "$deferred_lease_file"; then
+        gate_coordinator_abandon_active_lease || true
+        last_command_infrastructure_failed=true
+        [[ "$had_errexit" == 1 ]] && set -e
+        return 2
+      fi
+      coordinator_release_deferred=1
+    fi
+  fi
   timeout_seq=$((timeout_seq + 1))
   # mktemp guarantees a unique path even across concurrent parallel-pool
   # subshells (BASHPID would too, but stock macOS Bash 3.2 does not define it
@@ -3613,24 +7678,98 @@ run_with_timeout() {
   # wrapper: the token in the environment, and an open descriptor on the run's
   # marker file. A command that forks a replacement and then exits leaves that
   # replacement reparented with no tagged ancestor to walk from, and only
-  # something inherited can still name it. Both are keyed to this run's token,
-  # so neither can come to name a stranger.
-  gate_run_ensure_marker
-  AGENTQG_RUN="$(gate_run_command_tag)" \
-    bash -c '
-      if [[ -n "$2" ]]; then
+  # something inherited can still name it. Both are keyed to this run's token.
+  # Descriptor-bound validation and a private hard-link witness prevent a
+  # replaced shared marker from selecting a stranger.
+  gate_run_ensure_marker \
+    "The mapped command did not run" \
+    "The mapped command did not start."
+  request_marker="$gate_run_marker_file"
+  request_tag="$(gate_run_request_tag)"
+  command_marker="$request_marker"
+  command_tag="$(gate_run_command_tag)"
+  if [[ -n "$command_drain_identity" ]]; then
+    if ! gate_lock_token_is_wellformed "$command_drain_identity"; then
+      echo "error: the parallel command drain identity is malformed." >&2
+      last_command_infrastructure_failed=true
+      [[ "$had_errexit" == 1 ]] && set -e
+      return 2
+    fi
+    if ! gate_run_create_marker_for_identity \
+      "$command_drain_identity" \
+      "The mapped command did not run" \
+      "The mapped command did not start." 0; then
+      if declare -F gate_coordinator_abandon_active_lease >/dev/null 2>&1; then
+        gate_coordinator_abandon_active_lease || true
+      fi
+      last_command_infrastructure_failed=true
+      [[ "$had_errexit" == 1 ]] && set -e
+      return 2
+    fi
+    command_marker="$gate_run_created_marker_file"
+    if declare -p gate_coordinator_active_drain_marker >/dev/null 2>&1; then
+      gate_coordinator_active_drain_marker="$command_marker"
+    fi
+    command_tag="agentqg:${command_drain_identity}"
+    if [[ -n "$deferred_lease_file" && -n "$command_marker" ]] &&
+      ! exec 18< "$command_marker"; then
+      echo "error: could not retain the parallel command marker." >&2
+      if declare -F gate_coordinator_abandon_active_lease >/dev/null 2>&1; then
+        gate_coordinator_abandon_active_lease || true
+      fi
+      last_command_infrastructure_failed=true
+      [[ "$had_errexit" == 1 ]] && set -e
+      return 2
+    fi
+  fi
+  active_timeout_drain_identity="${command_drain_identity:-${gate_run_id:-$gate_lock_token}}"
+  command_started_at="$(date +%s)"
+  if declare -p gate_coordinator_recovery_drain_context >/dev/null 2>&1; then
+    gate_coordinator_recovery_drain_context="active-command"
+  fi
+  # The sanitized launcher executes this Bash body.
+  # shellcheck disable=SC2016
+  AGENTQG_RUN="$command_tag" \
+    AGENTQG_REQUEST="$request_tag" \
+    "${gate_sanitized_bash_launcher[@]}" -c '
+      if [[ -n "$3" ]]; then
         # A marker this wrapper was given but cannot hold open is a refusal,
         # not a shrug: without the descriptor, a replacement this command
         # forks is invisible to the next run.
-        if [[ ! -r "$2" ]]; then
-          echo "error: cannot open the run marker $2; refusing to start the command" >&2
+        if [[ ! -r "$3" ]]; then
+          echo "error: cannot open the run marker $3; refusing to start the command" >&2
           exit 127
         fi
-        exec 9< "$2"
+        exec 9< "$3"
       fi
-      eval "$1"
+      if [[ -n "$4" && "$4" != "$3" ]]; then
+        if [[ ! -r "$4" ]]; then
+          echo "error: cannot open the request marker $4; refusing to start the command" >&2
+          exit 127
+        fi
+        exec 8< "$4"
+      fi
+      if [[ -n "$5" && "$5" != "$3" && "$5" != "$4" ]]; then
+        if [[ ! -r "$5" ]]; then
+          echo "error: cannot open the coordinator marker $5; refusing to start the command" >&2
+          exit 127
+        fi
+        exec 6< "$5"
+      fi
+      if [[ "$6" == 1 ]]; then
+        exec 7>&-
+      fi
+      if [[ "$7" == 1 ]]; then
+        # fd17 is the private parallel-worker launch/sentinel pipe. Mapped
+        # code must never inherit a writer that can release its group anchor.
+        exec 17>&-
+      fi
+      eval "$2"
       exit $?
-    ' "$(gate_run_command_tag)" "$command" "$gate_run_marker_file" &
+    ' "$command_tag" "$request_tag" \
+      "$command" "$command_marker" "$request_marker" "$coordinator_marker" \
+      "$gate_coordinator_stdout_reserved" \
+      "$close_parallel_worker_control_fd" &
   cmd_pid=$!
   # Run the watchdog via `bash -c` (which execs) rather than a `( … ) &`
   # subshell. A forked subshell inherits bash's saved copy of the caller's
@@ -3640,11 +7779,18 @@ run_with_timeout() {
   # sees EOF after the gate exits. exec drops that close-on-exec fd; the command
   # above already execs, which is why only the watchdog needed this. The tree
   # kill is inlined because bash -c cannot see this script's functions.
-  bash -c '
-    cmd_pid="$1"
-    timeout_secs="$2"
-    marker="$3"
-    gate_pid="$4"
+  # The sanitized launcher executes this Bash body.
+  # shellcheck disable=SC2016
+  "${gate_sanitized_bash_launcher[@]}" -c '
+    exec 7>&-
+    if [[ "$6" == 1 ]]; then
+      exec 17>&-
+    fi
+    request_tag="$1"
+    cmd_pid="$2"
+    timeout_secs="$3"
+    marker="$4"
+    gate_pid="$5"
     collect_tree() {
       local pid="$1"
       local child
@@ -3708,9 +7854,16 @@ EOF_KILL
     # re-walk would miss it. The KILL pass targets the saved list.
     kill_tree "$cmd_pid"
     exit 0
-  ' "$(gate_run_command_tag)" "$cmd_pid" "$command_timeout_seconds" "$timeout_marker" "$$" >/dev/null 2>&1 &
+  ' "$command_tag" "$request_tag" \
+    "$cmd_pid" "$effective_command_timeout_seconds" "$timeout_marker" "$$" \
+    "$close_parallel_worker_control_fd" >/dev/null 2>&1 &
   watchdog_pid=$!
-  active_timeout_pids=("$cmd_pid" "$watchdog_pid")
+  cmd_start="$(gate_lock_process_runtime_start "$cmd_pid")"
+  watchdog_start="$(gate_lock_process_runtime_start "$watchdog_pid")"
+  active_timeout_records=(
+    "${cmd_pid}|${cmd_start}"
+    "${watchdog_pid}|${watchdog_start}"
+  )
 
   wait "$cmd_pid"
   rc=$?
@@ -3726,7 +7879,58 @@ EOF_KILL
     kill_process_tree "$watchdog_pid" TERM
     wait "$watchdog_pid" 2>/dev/null
   fi
-  active_timeout_pids=()
+  active_timeout_records=()
+  # A failed Trunk command is not downgraded until the launcher proves that it
+  # cannot provision its CLI. Treat that probe as part of the same mapped
+  # command: it inherits the command's tags and marker handles, and the exact
+  # descendant drain below runs before the scheduler lease is released.
+  if [[ "$rc" -ne 0 && ! -s "$timeout_marker" ]] &&
+    is_trunk_command "$command"; then
+    if trunk_provisioning_is_blocked \
+      "$command_tag" "$request_tag" "$command_marker" "$request_marker" \
+      "$coordinator_marker" "$gate_coordinator_stdout_reserved" \
+      "$close_parallel_worker_control_fd" "$trunk_probe_handshake_file"; then
+      last_command_trunk_provisioning_blocked=true
+    else
+      provisioning_probe_rc=$?
+    fi
+  fi
+  if [[ -z "$deferred_lease_file" ]]; then
+    # A sequential wrapper can exit after it reparents a descendant. Keep the
+    # scheduler lease until inherited handles prove that no process from this
+    # command remains. Parallel workers defer the same identity drain and lease
+    # release to their parent after the registered worker group settles.
+    drain_completed_sequential_command || drain_rc=$?
+    if [[ "$drain_rc" -eq 0 ]]; then
+      active_timeout_drain_identity=""
+    fi
+  else
+    # The parallel parent owns the registered identity and lease settlement.
+    # Do not let this worker's EXIT trap race that parent drain.
+    active_timeout_drain_identity=""
+  fi
+  command_finished_at="$(date +%s)"
+  last_command_execution_seconds=$((command_finished_at - command_started_at))
+
+  if [[ "$drain_rc" -ne 0 ]]; then
+    # The command finished, but its descendants were not confirmed gone. Keep
+    # the active lease and recovery marker. The caller prints the captured
+    # diagnostics before it returns this infrastructure failure.
+    last_command_infrastructure_failed=true
+    rm -f "$timeout_marker"
+    [[ "$had_errexit" == 1 ]] && set -e
+    return "$drain_rc"
+  fi
+
+  if [[ "$provisioning_probe_rc" -eq 2 ]]; then
+    # The probe might have started work that only its inherited handles can
+    # identify. The drain above settled that identity, but an unclassified
+    # launcher failure must not release capacity or become a cloud skip.
+    last_command_infrastructure_failed=true
+    rm -f "$timeout_marker"
+    [[ "$had_errexit" == 1 ]] && set -e
+    return 2
+  fi
 
   if [[ -s "$timeout_marker" ]]; then
     last_command_timed_out=true
@@ -3735,6 +7939,16 @@ EOF_KILL
     rc=1
   fi
   rm -f "$timeout_marker"
+
+  if [[ "$coordinator_release_deferred" -eq 0 ]] &&
+    declare -F gate_coordinator_after_command >/dev/null 2>&1; then
+    gate_coordinator_after_command "$command"
+    release_rc=$?
+    if [[ "$release_rc" -ne 0 ]]; then
+      last_command_infrastructure_failed=true
+      rc=2
+    fi
+  fi
 
   [[ "$had_errexit" == 1 ]] && set -e
   return "$rc"
@@ -3800,9 +8014,9 @@ record_command_stamp() {
   # Prerequisite outputs (node_modules, generated code) are invisible to the
   # source fingerprint, so prerequisite commands are never stamped or reused.
   # Quality-setup commands (shared-config build, Terraform init/validate) get
-  # the same treatment by classification, not phase bookkeeping: the
-  # --parallel 1 / --fail-fast sequential branch never enters
-  # run_prerequisite_phase, so the phase flag alone would miss them there.
+  # the same treatment by command classification as well as phase bookkeeping.
+  # This keeps the stamp policy tied to command semantics if a caller or phase
+  # arrangement changes later.
   [[ "${in_prerequisite_phase:-false}" == true ]] && return 0
   is_quality_setup_command "$command" && return 0
   is_stamp_exempt_command "$command" && return 0
@@ -3821,14 +8035,21 @@ prune_command_stamps() {
   [[ -f "$command_stamps_file" ]] || return 0
   local now
   local tmp
+  local input_tmp
   local line
   local created_at
   local rest
   local fingerprint
 
-  now="$(date +%s)"
-  tmp="$(make_tmpfile)"
-  : > "$tmp"
+  now="$(date +%s)" || return 1
+  tmp="$(mktemp "$scratch_dir/agentqg.XXXXXX")" || return 1
+  [[ -n "$tmp" ]] || return 1
+  tmpfiles+=("$tmp")
+  input_tmp="$(mktemp "$scratch_dir/agentqg.XXXXXX")" || return 1
+  [[ -n "$input_tmp" ]] || return 1
+  tmpfiles+=("$input_tmp")
+  : > "$tmp" || return 1
+  cp "$command_stamps_file" "$input_tmp" || return 1
   while IFS= read -r line || [[ -n "$line" ]]; do
     created_at="${line%%$'\t'*}"
     [[ "$created_at" =~ ^[0-9]+$ ]] || continue
@@ -3837,9 +8058,9 @@ prune_command_stamps() {
     [[ "$fingerprint" == "$current_stamp" ]] || continue
     [[ "$created_at" -le "$now" ]] || continue
     [[ $((now - created_at)) -le "$success_stamp_ttl_seconds" ]] || continue
-    printf '%s\n' "$line" >> "$tmp"
-  done < "$command_stamps_file"
-  mv -f "$tmp" "$command_stamps_file" 2>/dev/null || true
+    printf '%s\n' "$line" >> "$tmp" || return 1
+  done < "$input_tmp" || return 1
+  mv -f "$tmp" "$command_stamps_file" 2>/dev/null || return 1
 }
 
 # Prints the reuse marker and records a `reused` summary entry (NOT counted as
@@ -3848,6 +8069,13 @@ prune_command_stamps() {
 # skips execution), 1 when the command must run.
 try_reuse_command() {
   local command="$1"
+  # Coordinator fingerprints bind toolchain and material environment inputs
+  # that the legacy per-command stamp does not. A coordinator leader must
+  # execute rather than promote a weaker local stamp into a shared verdict.
+  if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+    gate_coordinator_is_active; then
+    return 1
+  fi
   [[ "${in_prerequisite_phase:-false}" == true ]] && return 1
   is_quality_setup_command "$command" && return 1
   is_stamp_exempt_command "$command" && return 1
@@ -3862,19 +8090,23 @@ try_reuse_command() {
 run_mapped_command() {
   local command="$1"
   local output_file
+  local trunk_probe_handshake_file
   local gate_pid="$$"
   local monitor_done_file=""
   local monitor_pid=""
   local start_ts
-  local end_ts
   local elapsed
   local exit_code
+  local infrastructure_failed
+  local trunk_provisioning_blocked
 
   if try_reuse_command "$command"; then
     return 0
   fi
 
   output_file="$(make_tmpfile)"
+  trunk_probe_handshake_file="$(make_tmpfile)"
+  tmpfiles+=("$trunk_probe_handshake_file")
   start_ts="$(date +%s)"
   echo
   echo "+ ${command}"
@@ -3887,19 +8119,26 @@ run_mapped_command() {
     monitor_pid="$!"
   fi
   set +e
-  run_with_timeout "$command" > "$output_file" 2>&1
+  run_with_timeout "$command" "" "" "$trunk_probe_handshake_file" \
+    > "$output_file" 2>&1
   exit_code=$?
   set -e
   local timed_out="$last_command_timed_out"
+  infrastructure_failed="$last_command_infrastructure_failed"
+  trunk_provisioning_blocked="$last_command_trunk_provisioning_blocked"
+  rm -f "$trunk_probe_handshake_file"
   if [[ -n "$monitor_pid" ]]; then
     : > "$monitor_done_file"
     wait "$monitor_pid" 2>/dev/null || true
     rm -f "$monitor_done_file"
   fi
-  end_ts="$(date +%s)"
-  elapsed=$((end_ts - start_ts))
+  elapsed="$last_command_execution_seconds"
 
   if [[ "$exit_code" -eq 0 ]]; then
+    sed -n \
+      -e '/^A completed mapped command left descendants running; stopping them before releasing its scheduler lease\.$/p' \
+      -e "/^The completed mapped command's descendants are gone; releasing its scheduler lease\.$/p" \
+      "$output_file"
     record_command_summary "ok" "$elapsed" "$command"
     record_command_stamp "$command"
     if is_autoreview_test_command "$command"; then
@@ -3910,8 +8149,10 @@ run_mapped_command() {
     return 0
   fi
 
-  if [[ "$timed_out" != true ]] && is_trunk_command "$command" &&
-    trunk_arm_is_environment_blocked "$output_file"; then
+  if [[ "$infrastructure_failed" != true && "$timed_out" != true ]] &&
+    is_trunk_command "$command" &&
+    trunk_arm_is_environment_blocked_with_launcher_verdict \
+      "$output_file" "$trunk_provisioning_blocked"; then
     record_command_summary "skipped" "$elapsed" "$command"
     print_trunk_environment_blocked_warning "$command" "$output_file"
     rm -f "$output_file"
@@ -3920,7 +8161,7 @@ run_mapped_command() {
 
   record_command_summary "fail" "$elapsed" "$command"
   if [[ "$timed_out" == true ]]; then
-    echo "Command timed out after ${command_timeout_seconds}s: ${command}" >&2
+    echo "Command timed out after $(mapped_command_timeout_seconds "$command")s: ${command}" >&2
   else
     echo "Command failed after $(format_duration "$elapsed"): ${command}" >&2
   fi
@@ -3936,22 +8177,136 @@ run_mapped_command_to_files() {
   local status_file="$3"
   local elapsed_file="$4"
   local timeout_file="$5"
-  local start_ts
-  local end_ts
+  local infrastructure_file="$6"
+  local trunk_provisioning_file="$7"
+  local lease_file="$8"
+  local command_drain_identity="$9"
   local elapsed
   local exit_code
 
-  start_ts="$(date +%s)"
   set +e
-  run_with_timeout "$command" > "$output_file" 2>&1
+  run_with_timeout "$command" "$lease_file" "$command_drain_identity" \
+    "$trunk_provisioning_file" > "$output_file" 2>&1
   exit_code=$?
   set -e
-  end_ts="$(date +%s)"
-  elapsed=$((end_ts - start_ts))
+  elapsed="$last_command_execution_seconds"
 
   printf '%s\n' "$exit_code" > "$status_file"
   printf '%s\n' "$elapsed" > "$elapsed_file"
   printf '%s\n' "$last_command_timed_out" > "$timeout_file"
+  printf '%s\n' "$last_command_infrastructure_failed" > "$infrastructure_file"
+  printf '%s\n' "$last_command_trunk_provisioning_blocked" \
+    > "$trunk_provisioning_file"
+}
+
+fail_command_scheduler_infrastructure() {
+  local command="$1"
+  local teardown_status=0
+  echo "error: command scheduler infrastructure failed for: ${command}" >&2
+  echo "The quality gate stops before it schedules another command." >&2
+  teardown_active_timeouts || teardown_status=$?
+  if [[ "$teardown_status" -ne 0 ]]; then
+    echo "error: active command teardown after scheduler failure did not complete." >&2
+  fi
+  if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+    gate_coordinator_is_active &&
+    declare -F gate_coordinator_cancel_and_ack >/dev/null 2>&1; then
+    if ! gate_coordinator_cancel_and_ack \
+      "command scheduler infrastructure failure" active-command; then
+      echo "error: coordinator request cancellation after scheduler failure did not complete." >&2
+    fi
+  fi
+  return 2
+}
+
+read_parallel_worker_result_value() {
+  local file="$1"
+  local field_type="$2"
+  local value
+  local byte_count
+  local expected_bytes
+  local maximum
+
+  [[ -f "$file" && ! -L "$file" && -r "$file" ]] || return 1
+  value="$(cat "$file" 2>/dev/null)" || return 1
+  case "$field_type" in
+    status|elapsed)
+      [[ "$value" =~ ^[0-9]+$ ]] || return 1
+      ;;
+    boolean)
+      [[ "$value" == true || "$value" == false ]] || return 1
+      ;;
+    lease)
+      [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || return 1
+      ;;
+    ready)
+      [[ "$value" == ready ]] || return 1
+      ;;
+    *) return 1 ;;
+  esac
+  byte_count="$(LC_ALL=C wc -c < "$file" 2>/dev/null | tr -d '[:space:]')" ||
+    return 1
+  [[ "$byte_count" =~ ^[0-9]+$ ]] || return 1
+  expected_bytes=$((${#value} + 1))
+  [[ "$byte_count" -eq "$expected_bytes" ]] || return 1
+  if [[ "$field_type" == status || "$field_type" == elapsed ]]; then
+    while [[ "${#value}" -gt 1 && "$value" == 0* ]]; do
+      value="${value#0}"
+    done
+    if [[ "$field_type" == status ]]; then
+      maximum=255
+    else
+      # Keep later Bash arithmetic within the signed 32-bit range on every
+      # supported host. A command cannot legitimately run for 68 years.
+      maximum=2147483647
+    fi
+    [[ "${#value}" -le "${#maximum}" ]] || return 1
+    [[ "$value" -le "$maximum" ]] || return 1
+  fi
+  printf '%s\n' "$value"
+}
+
+release_parallel_worker_lease() {
+  local command="$1"
+  local lease_file="$2"
+  local lease_id
+  if ! declare -F gate_coordinator_is_active >/dev/null 2>&1 ||
+    ! gate_coordinator_is_active; then
+    [[ ! -s "$lease_file" ]] || return 2
+    return 0
+  fi
+  [[ -z "${gate_coordinator_active_lease_id:-}" ]] || return 2
+  lease_id="$(read_parallel_worker_result_value "$lease_file" lease)" || return 2
+  gate_coordinator_active_lease_id="$lease_id"
+  parallel_release_attempt=$((parallel_release_attempt + 1))
+  if [[ -n "$parallel_release_failure_at" &&
+    "$parallel_release_attempt" -eq "$parallel_release_failure_at" ]]; then
+    gate_coordinator_infrastructure_failed=1
+    echo "error: injected parallel coordinator lease-release failure." >&2
+    return 2
+  fi
+  gate_coordinator_after_command "$command"
+}
+
+fail_parallel_worker_infrastructure() {
+  local command="$1"
+  local field="$2"
+  local teardown_status=0
+  echo "error: parallel worker left an invalid ${field} result for: ${command}" >&2
+  echo "The quality gate cannot trust this worker completion and stops scheduling." >&2
+  teardown_active_timeouts || teardown_status=$?
+  if [[ "$teardown_status" -ne 0 ]]; then
+    echo "error: active command teardown after worker failure did not complete." >&2
+  fi
+  if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+    gate_coordinator_is_active &&
+    declare -F gate_coordinator_cancel_and_ack >/dev/null 2>&1; then
+    if ! gate_coordinator_cancel_and_ack \
+      "parallel worker infrastructure failure (${field})" active-command; then
+      echo "error: coordinator request cancellation after worker failure did not complete." >&2
+    fi
+  fi
+  return 2
 }
 
 is_quality_setup_command() {
@@ -4058,6 +8413,9 @@ run_mapped_entries_sequential() {
     command="${entry%%|*}"
     if ! run_mapped_command "$command"; then
       failures=$((failures + 1))
+      if [[ "$last_command_infrastructure_failed" == true ]]; then
+        fail_command_scheduler_infrastructure "$command" || return $?
+      fi
       if [[ "$fail_fast" == "1" || "$fail_fast" == "true" ]]; then
         echo
         echo "Stopping after first failed mapped command (--fail-fast)." >&2
@@ -4068,6 +8426,55 @@ run_mapped_entries_sequential() {
       fi
     fi
   done
+}
+
+make_parallel_command_drain_identity() {
+  local sequence="$1"
+  local digest now label prefix identity
+  digest="$(printf '%s' "${gate_run_id:-nolock-$$}:${sequence}" | hash_stream)" ||
+    return 1
+  if gate_run_proc_marker_scan_available &&
+    [[ ! "$gate_lock_local_host_fingerprint" =~ ^[0-9a-f]{64}$ ]] &&
+    ! gate_lock_ensure_local_host_fingerprint; then
+    return 1
+  fi
+  label="cmd${digest:0:20}"
+  prefix="$(
+    gate_run_marker_identity_prefix \
+      "$label" "$label" "$gate_lock_local_host_fingerprint" "$$"
+  )" || return 1
+  now="$(date +%s)" || return 1
+  identity="${prefix}-$$-${now}"
+  gate_lock_token_is_wellformed "$identity" || return 1
+  printf '%s\n' "$identity"
+}
+
+unregister_active_parallel_worker() {
+  local target_pgid="$1"
+  local target_identity="$2"
+  local target_start="$3"
+  local index found=0
+  local -a kept_pgids=()
+  local -a kept_identities=()
+  local -a kept_starts=()
+  [[ "${#active_worker_pgids[@]}" -eq "${#active_worker_drain_identities[@]}" &&
+    "${#active_worker_pgids[@]}" -eq "${#active_worker_start_identities[@]}" ]] ||
+    return 2
+  for index in "${!active_worker_pgids[@]}"; do
+    if [[ "${active_worker_pgids[$index]}" == "$target_pgid" &&
+      "${active_worker_drain_identities[$index]}" == "$target_identity" &&
+      "${active_worker_start_identities[$index]}" == "$target_start" ]]; then
+      found=1
+      continue
+    fi
+    kept_pgids+=("${active_worker_pgids[$index]}")
+    kept_identities+=("${active_worker_drain_identities[$index]}")
+    kept_starts+=("${active_worker_start_identities[$index]}")
+  done
+  [[ "$found" -eq 1 ]] || return 2
+  active_worker_pgids=("${kept_pgids[@]+"${kept_pgids[@]}"}")
+  active_worker_drain_identities=("${kept_identities[@]+"${kept_identities[@]}"}")
+  active_worker_start_identities=("${kept_starts[@]+"${kept_starts[@]}"}")
 }
 
 run_mapped_entries_parallel() {
@@ -4084,12 +8491,26 @@ run_mapped_entries_parallel() {
   local active_status_files=()
   local active_elapsed_files=()
   local active_timeout_files=()
+  local active_infrastructure_files=()
+  local active_trunk_provisioning_files=()
+  local active_lease_files=()
+  local active_ready_files=()
+  local active_wait_files=()
+  local active_drain_identities=()
+  local active_start_identities=()
   local next_active_pids=()
   local next_active_commands=()
   local next_active_output_files=()
   local next_active_status_files=()
   local next_active_elapsed_files=()
   local next_active_timeout_files=()
+  local next_active_infrastructure_files=()
+  local next_active_trunk_provisioning_files=()
+  local next_active_lease_files=()
+  local next_active_ready_files=()
+  local next_active_wait_files=()
+  local next_active_drain_identities=()
+  local next_active_start_identities=()
   local running_pids=()
   local entry
   local command
@@ -4097,12 +8518,30 @@ run_mapped_entries_parallel() {
   local status_file
   local elapsed_file
   local timeout_file
+  local infrastructure_file
+  local trunk_provisioning_file
+  local lease_file
+  local ready_file
+  local ready_staging_file
+  local wait_file
+  local request_marker_open
+  local coordinator_marker_open
+  local drain_identity
+  local worker_start
+  local worker_pgid
+  local worker_parent_pid
+  local worker_parent_start
+  local worker_has_recovery_owner
+  local worker_identity_attempt
   local pid
   local i
   local status
   local elapsed
   local timed_out
-  local phase_start_ts last_heartbeat_ts now_ts hb_cmd
+  local infrastructure_failed
+  local trunk_provisioning_blocked
+  local worker_ready
+  local phase_start_ts last_heartbeat_ts last_coordinator_recovery_ts now_ts hb_cmd
   local heartbeat_interval=20
   local had_monitor=0
 
@@ -4115,12 +8554,197 @@ run_mapped_entries_parallel() {
     return
   fi
 
+  # No-lock workers have no successor that can reap their live sentinel. Bind
+  # them to this exact parent so they can leave after a fatal parent exit.
+  # Locked workers retain the same identity for the launch handshake, which
+  # stops work from starting before the parent records the worker.
+  worker_parent_pid="$$"
+  worker_parent_start="$(gate_lock_process_start "$worker_parent_pid")"
+  if [[ -z "$worker_parent_start" ]]; then
+    if gate_lock_identity_source_available; then
+      echo "error: could not identify the parallel worker parent." >&2
+      fail_command_scheduler_infrastructure "parallel worker launch" || return $?
+    fi
+    worker_parent_start="$gate_lock_identity_unavailable"
+  fi
+
   echo
   echo "Running ${phase} commands with parallelism ${max_parallel}."
   phase_start_ts="$(date +%s)"
   last_heartbeat_ts="$phase_start_ts"
+  last_coordinator_recovery_ts="$phase_start_ts"
 
   while [[ "$completed" -lt "$total" ]]; do
+    running_pids=()
+    while IFS= read -r pid; do
+      [[ -n "$pid" ]] && running_pids+=("$pid")
+    done < <(jobs -pr || true)
+    next_active_pids=()
+    next_active_commands=()
+    next_active_output_files=()
+    next_active_status_files=()
+    next_active_elapsed_files=()
+    next_active_timeout_files=()
+    next_active_infrastructure_files=()
+    next_active_trunk_provisioning_files=()
+    next_active_lease_files=()
+    next_active_ready_files=()
+    next_active_wait_files=()
+    next_active_drain_identities=()
+    next_active_start_identities=()
+
+    for i in "${!active_pids[@]}"; do
+      pid="${active_pids[$i]}"
+      ready_file="${active_ready_files[$i]}"
+      worker_ready=0
+      if read_parallel_worker_result_value "$ready_file" ready >/dev/null 2>&1; then
+        worker_ready=1
+      fi
+      if [[ "$worker_ready" -eq 0 && ! -s "$ready_file" ]] &&
+        list_contains_word "$pid" "${running_pids[@]+"${running_pids[@]}"}"; then
+        next_active_pids+=("$pid")
+        next_active_commands+=("${active_commands[$i]}")
+        next_active_output_files+=("${active_output_files[$i]}")
+        next_active_status_files+=("${active_status_files[$i]}")
+        next_active_elapsed_files+=("${active_elapsed_files[$i]}")
+        next_active_timeout_files+=("${active_timeout_files[$i]}")
+        next_active_infrastructure_files+=("${active_infrastructure_files[$i]}")
+        next_active_trunk_provisioning_files+=("${active_trunk_provisioning_files[$i]}")
+        next_active_lease_files+=("${active_lease_files[$i]}")
+        next_active_ready_files+=("$ready_file")
+        next_active_wait_files+=("${active_wait_files[$i]}")
+        next_active_drain_identities+=("${active_drain_identities[$i]}")
+        next_active_start_identities+=("${active_start_identities[$i]}")
+        continue
+      fi
+
+      command="${active_commands[$i]}"
+      drain_identity="${active_drain_identities[$i]}"
+      worker_start="${active_start_identities[$i]}"
+      output_file="${active_output_files[$i]}"
+      status_file="${active_status_files[$i]}"
+      elapsed_file="${active_elapsed_files[$i]}"
+      timeout_file="${active_timeout_files[$i]}"
+      infrastructure_file="${active_infrastructure_files[$i]}"
+      trunk_provisioning_file="${active_trunk_provisioning_files[$i]}"
+      lease_file="${active_lease_files[$i]}"
+      wait_file="${active_wait_files[$i]}"
+      worker_settlement_in_progress=1
+      # Capture and drain the exact command identity before signalling the
+      # worker or its descendants. A detached child can leave the worker group.
+      # The drain retains durable evidence for every process while signals run.
+      if ! drain_completed_parallel_command \
+        "$drain_identity" "$pid" "$worker_start"; then
+        finish_worker_settlement
+        rm -f "$output_file" "$status_file" "$elapsed_file" "$timeout_file" \
+          "$infrastructure_file" "$trunk_provisioning_file" "$lease_file" \
+          "$ready_file" \
+          "${ready_file}.publishing" "$wait_file"
+        fail_command_scheduler_infrastructure "$command" || return $?
+      fi
+      # The worker remains as the live group leader until this exact drain
+      # captures every same-group member. Reap it only after the drain is empty.
+      wait "$pid" 2>/dev/null || true
+      if ! unregister_active_parallel_worker \
+        "$pid" "$drain_identity" "$worker_start"; then
+        finish_worker_settlement
+        fail_parallel_worker_infrastructure "$command" "drain registry" || return $?
+      fi
+      finish_worker_settlement
+      if ! read_parallel_worker_result_value "$ready_file" ready >/dev/null; then
+        fail_parallel_worker_infrastructure "$command" readiness || return $?
+      fi
+      if ! status="$(read_parallel_worker_result_value "$status_file" status)"; then
+        fail_parallel_worker_infrastructure "$command" status || return $?
+      fi
+      if ! elapsed="$(read_parallel_worker_result_value "$elapsed_file" elapsed)"; then
+        fail_parallel_worker_infrastructure "$command" elapsed || return $?
+      fi
+      if ! timed_out="$(read_parallel_worker_result_value "$timeout_file" boolean)"; then
+        fail_parallel_worker_infrastructure "$command" timeout || return $?
+      fi
+      if ! infrastructure_failed="$(read_parallel_worker_result_value "$infrastructure_file" boolean)"; then
+        fail_parallel_worker_infrastructure "$command" infrastructure || return $?
+      fi
+      if ! trunk_provisioning_blocked="$(read_parallel_worker_result_value "$trunk_provisioning_file" boolean)"; then
+        fail_parallel_worker_infrastructure "$command" \
+          "Trunk provisioning classification" || return $?
+      fi
+
+      if [[ "$infrastructure_failed" == true ]]; then
+        rm -f "$output_file" "$status_file" "$elapsed_file" "$timeout_file" \
+          "$infrastructure_file" "$trunk_provisioning_file" "$lease_file" \
+          "$ready_file" \
+          "${ready_file}.publishing" "$wait_file"
+        fail_command_scheduler_infrastructure "$command" || return $?
+      fi
+      if [[ "$trunk_provisioning_blocked" == true ]]; then
+        trunk_provisioning_state=blocked
+      fi
+      if ! release_parallel_worker_lease "$command" "$lease_file"; then
+        rm -f "$output_file" "$status_file" "$elapsed_file" "$timeout_file" \
+          "$infrastructure_file" "$trunk_provisioning_file" "$lease_file" \
+          "$ready_file" \
+          "${ready_file}.publishing" "$wait_file"
+        fail_command_scheduler_infrastructure "$command" || return $?
+      fi
+
+      if [[ "$status" -eq 0 ]]; then
+        record_command_summary "ok" "$elapsed" "$command"
+        record_command_stamp "$command"
+        if is_autoreview_test_command "$command"; then
+          print_autoreview_test_timings "$output_file"
+        fi
+        echo "✓ ${command} ($(format_duration "$elapsed"))"
+      elif [[ "$timed_out" != true ]] && is_trunk_command "$command" &&
+        trunk_arm_is_environment_blocked_with_launcher_verdict \
+          "$output_file" "$trunk_provisioning_blocked"; then
+        record_command_summary "skipped" "$elapsed" "$command"
+        print_trunk_environment_blocked_warning "$command" "$output_file"
+      else
+        failures=$((failures + 1))
+        record_command_summary "fail" "$elapsed" "$command"
+        if [[ "$timed_out" == true ]]; then
+          echo "Command timed out after $(mapped_command_timeout_seconds "$command")s: ${command}" >&2
+        else
+          echo "Command failed after $(format_duration "$elapsed"): ${command}" >&2
+        fi
+        filter_expected_output < "$output_file" >&2
+        record_failure_output "$command" "$output_file"
+      fi
+
+      rm -f "$output_file" "$status_file" "$elapsed_file" "$timeout_file" \
+        "$infrastructure_file" "$trunk_provisioning_file" "$lease_file" \
+        "$ready_file" \
+        "${ready_file}.publishing" "$wait_file"
+      completed=$((completed + 1))
+    done
+
+    # INT/TERM must see either the old complete cleanup registry or the new
+    # complete one. A trap between these aligned assignments would otherwise
+    # clear a mismatched registry and leave its worker outside EXIT cleanup.
+    worker_settlement_in_progress=1
+    active_pids=("${next_active_pids[@]+"${next_active_pids[@]}"}")
+    active_worker_pgids=("${next_active_pids[@]+"${next_active_pids[@]}"}")
+    active_commands=("${next_active_commands[@]+"${next_active_commands[@]}"}")
+    active_output_files=("${next_active_output_files[@]+"${next_active_output_files[@]}"}")
+    active_status_files=("${next_active_status_files[@]+"${next_active_status_files[@]}"}")
+    active_elapsed_files=("${next_active_elapsed_files[@]+"${next_active_elapsed_files[@]}"}")
+    active_timeout_files=("${next_active_timeout_files[@]+"${next_active_timeout_files[@]}"}")
+    active_infrastructure_files=("${next_active_infrastructure_files[@]+"${next_active_infrastructure_files[@]}"}")
+    active_trunk_provisioning_files=("${next_active_trunk_provisioning_files[@]+"${next_active_trunk_provisioning_files[@]}"}")
+    active_lease_files=("${next_active_lease_files[@]+"${next_active_lease_files[@]}"}")
+    active_ready_files=("${next_active_ready_files[@]+"${next_active_ready_files[@]}"}")
+    active_wait_files=("${next_active_wait_files[@]+"${next_active_wait_files[@]}"}")
+    active_drain_identities=("${next_active_drain_identities[@]+"${next_active_drain_identities[@]}"}")
+    active_start_identities=("${next_active_start_identities[@]+"${next_active_start_identities[@]}"}")
+    active_worker_drain_identities=("${next_active_drain_identities[@]+"${next_active_drain_identities[@]}"}")
+    active_worker_start_identities=("${next_active_start_identities[@]+"${next_active_start_identities[@]}"}")
+    finish_worker_settlement
+
+    # Process every completion observed above before opening another pool slot.
+    # A completed worker can report a failed coordinator lease release. Starting
+    # a replacement first would let that command run beside an unresolved lease.
     while [[ "$next_index" -lt "$total" && "${#active_pids[@]}" -lt "$max_parallel" ]]; do
       entry="${entries[$next_index]}"
       command="${entry%%|*}"
@@ -4133,32 +8757,273 @@ run_mapped_entries_parallel() {
         continue
       fi
 
+      # A completed serialized command drains and removes its marker. Create
+      # the request-wide recovery marker in this parent before forking. The
+      # worker creates its command marker after its scheduler lease exists.
+      gate_run_ensure_marker \
+        "The parallel command batch did not run" \
+        "The parallel command batch did not start."
+
       output_file="$(make_tmpfile)"
       status_file="$(make_tmpfile)"
       elapsed_file="$(make_tmpfile)"
       timeout_file="$(make_tmpfile)"
+      infrastructure_file="$(make_tmpfile)"
+      trunk_provisioning_file="$(make_tmpfile)"
+      lease_file="$(make_tmpfile)"
+      ready_file="$(make_tmpfile)"
+      ready_staging_file="${ready_file}.publishing"
+      wait_file="${ready_file}.wait"
+      tmpfiles+=(
+        "$output_file" "$status_file" "$elapsed_file" "$timeout_file"
+        "$infrastructure_file" "$trunk_provisioning_file" "$lease_file"
+        "$ready_file"
+        "$ready_staging_file" "$wait_file"
+      )
+      # The ready path must be absent until the worker atomically publishes a
+      # complete result. The sibling FIFO lets the worker wait without spawning
+      # a child that would look like a leaked mapped-command descendant.
+      rm -f "$ready_file"
+      if ! mkfifo "$wait_file"; then
+        echo "error: could not create the parallel worker sentinel pipe." >&2
+        fail_command_scheduler_infrastructure "$command" || return $?
+      fi
+      parallel_command_sequence=$((parallel_command_sequence + 1))
+      if ! drain_identity="$(make_parallel_command_drain_identity "$parallel_command_sequence")"; then
+        echo "error: could not create a safe parallel command drain identity." >&2
+        fail_command_scheduler_infrastructure "$command" || return $?
+      fi
 
       echo
       echo "+ ${command}"
       worker_registration_in_progress=1
+      request_marker_open=0
+      coordinator_marker_open=0
+      worker_has_recovery_owner=0
+      if [[ -n "$gate_run_marker_file" ]]; then
+        if ! gate_run_marker_matches_identity \
+          "${gate_run_id:-$gate_lock_token}" "$gate_run_marker_file" ||
+          ! exec 19< "$gate_run_marker_file"; then
+          rm -f "$wait_file"
+          finish_worker_registration
+          echo "error: could not prepare the parallel worker's inherited request handle." >&2
+          fail_command_scheduler_infrastructure "$command" || return $?
+        fi
+        request_marker_open=1
+        # Explicit no-lock markers are private discovery handles. No successor
+        # can recover them after this parent dies, so their sentinels must keep
+        # watching the exact parent instead of waiting for a recovery owner.
+        case "$gate_lock_enabled" in
+          0|false|no) ;;
+          *) worker_has_recovery_owner=1 ;;
+        esac
+      fi
+      # The coordinator generation marker is the compatibility handle an
+      # older legacy gate knows how to drain after it reclaims run.lock. Keep
+      # it in the worker itself; the mapped wrapper that also holds this marker
+      # exits before the worker sentinel does.
+      if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+        gate_coordinator_is_active; then
+        if [[ -z "${gate_coordinator_generation_token:-}" ||
+          -z "${gate_coordinator_marker_file:-}" ]] ||
+          ! gate_run_marker_matches_identity \
+            "$gate_coordinator_generation_token" \
+            "$gate_coordinator_marker_file" ||
+          ! exec 16< "$gate_coordinator_marker_file"; then
+          [[ "$request_marker_open" -eq 0 ]] || exec 19<&-
+          rm -f "$wait_file"
+          finish_worker_registration
+          echo "error: could not prepare the parallel worker's inherited coordinator generation handle." >&2
+          fail_command_scheduler_infrastructure "$command" || return $?
+        fi
+        coordinator_marker_open=1
+        worker_has_recovery_owner=1
+      fi
+      # Open the control FIFO in the parent before fork. The child cannot run
+      # mapped work until this parent writes `start`, after it has bound the
+      # worker's PID/start/PGID identity and inserted every cleanup registry.
+      # O_RDWR avoids either FIFO open blocking before the other process exists.
+      if ! exec 17<> "$wait_file"; then
+        [[ "$coordinator_marker_open" -eq 0 ]] || exec 16<&-
+        [[ "$request_marker_open" -eq 0 ]] || exec 19<&-
+        rm -f "$wait_file"
+        finish_worker_registration
+        echo "error: could not open the parallel worker launch pipe." >&2
+        fail_command_scheduler_infrastructure "$command" || return $?
+      fi
       had_monitor=0
       case "$-" in
         *m*) had_monitor=1 ;;
       esac
       # macOS has no setsid(1). Bash job control is available in stock Bash
       # 3.2 and gives this background worker a dedicated process group whose ID
-      # is the worker PID, so the parent can tear down the group after the
-      # leader exits or its descendants reparent.
+      # is the worker PID. The worker stays alive as that group's validated
+      # leader until the parent captures and drains every member.
       set -m
       (
+        # A Bash subshell inherits the parent's trap handlers and their state.
+        # This worker starts while registration_in_progress=1, so keeping that
+        # handler would defer the drain's TERM forever. The parent owns cleanup.
+        trap - EXIT INT TERM HUP
+        worker_registration_in_progress=0
+        worker_settlement_in_progress=0
+        pending_terminating_signal=""
         # The parent needs monitor mode only to create this worker group. Turn
         # it back off inside the worker so run_with_timeout's command and
         # watchdog children stay in that group instead of becoming new jobs.
         set +m
+        parallel_worker_parent_is_live() {
+          local current_parent_start
+          if [[ "$worker_parent_start" == "$gate_lock_identity_unavailable" ]]; then
+            kill -0 "$worker_parent_pid" 2>/dev/null
+            return $?
+          fi
+          current_parent_start="$(gate_lock_process_start "$worker_parent_pid")"
+          if [[ -z "$current_parent_start" ]]; then
+            # One unreadable process-table sample is not proof that the exact
+            # parent died. Keep the only live group anchor while its PID still
+            # exists, then retry the identity read on the next poll.
+            kill -0 "$worker_parent_pid" 2>/dev/null
+            return $?
+          fi
+          [[ "$current_parent_start" == "$worker_parent_start" ]] || return 1
+          ! gate_lock_process_is_confirmed_zombie \
+            "$worker_parent_pid" "$worker_parent_start"
+        }
+        # The request marker and this FIFO were opened by the parent before
+        # fork. Wait until the parent has recorded the exact worker identity.
+        # If the parent dies before that point, leave without running work.
+        worker_action=""
+        while :; do
+          if IFS= read -r -t 1 worker_action <&17; then
+            break
+          fi
+          parallel_worker_parent_is_live || exit 2
+        done
+        [[ "$worker_action" == start ]] || exit 2
+        rm -f "$wait_file"
+        export AGENTQG_RUN="agentqg:${drain_identity}"
+        AGENTQG_REQUEST="$(gate_run_request_tag)" || exit 2
+        export AGENTQG_REQUEST
         run_mapped_command_to_files \
-          "$command" "$output_file" "$status_file" "$elapsed_file" "$timeout_file"
+          "$command" "$output_file" "$status_file" "$elapsed_file" \
+          "$timeout_file" "$infrastructure_file" \
+          "$trunk_provisioning_file" "$lease_file" "$drain_identity"
+        if ! printf '%s\n' ready > "$ready_staging_file" ||
+          ! mv -f "$ready_staging_file" "$ready_file"; then
+          exit 2
+        fi
+        # A locked run has a durable recovery owner, so this live group anchor
+        # must remain until the parent or a successor drains it. A no-lock run
+        # has no successor. Its sentinel exits when this exact parent dies.
+        if [[ "$worker_has_recovery_owner" -eq 1 ]]; then
+          # Bash can defer TERM while a blocking FIFO read has no writer. Poll
+          # the private descriptor so the trap runs promptly and normal command
+          # settlement does not wait for the four-second KILL escalation.
+          trap 'exit 0' HUP INT TERM
+          while :; do
+            IFS= read -r -t 1 _ <&17 || true
+          done
+        else
+          while parallel_worker_parent_is_live; do
+            IFS= read -r -t 1 _ <&17 || true
+          done
+        fi
       ) </dev/null &
       pid="$!"
+      worker_start=""
+      worker_pgid=""
+      for ((worker_identity_attempt = 0; worker_identity_attempt < 100; worker_identity_attempt++)); do
+        worker_start="$(gate_lock_process_runtime_start "$pid")"
+        worker_pgid="$(TZ=UTC LC_ALL=C ps -o pgid= -p "$pid" 2>/dev/null |
+          head -n1 | tr -d '[:space:]' || true)"
+        if [[ "$worker_pgid" == "$pid" ]] && {
+          [[ -n "$worker_start" ]] || ! gate_lock_identity_source_available
+        }; then
+          break
+        fi
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 0.01 || true
+      done
+      if [[ -z "$worker_start" ]] && ! gate_lock_identity_source_available; then
+        worker_start="$gate_lock_identity_unavailable"
+      fi
+      if [[ -z "$worker_start" || "$worker_pgid" != "$pid" ]]; then
+        # The worker is still behind the launch barrier. Ask it to leave
+        # voluntarily. Do not signal a bare PID or the assumed `-$pid` group:
+        # the failed reads did not establish either identity.
+        printf '%s\n' abort >&17 2>/dev/null || true
+        exec 17>&-
+        [[ "$coordinator_marker_open" -eq 0 ]] || exec 16<&-
+        [[ "$request_marker_open" -eq 0 ]] || exec 19<&-
+        wait "$pid" 2>/dev/null || true
+        rm -f "$ready_file" "$ready_staging_file" "$wait_file"
+        if [[ "$had_monitor" -eq 0 ]]; then
+          set +m
+        fi
+        finish_worker_registration
+        echo "error: could not bind the parallel worker to its PID, start identity, and dedicated process group." >&2
+        fail_command_scheduler_infrastructure "$command" || return $?
+      fi
+
+      # A coordinator journal already maps this command identity to its
+      # request. A pure legacy run has no such journal, so publish the command
+      # token as a legacy drain obligation before the worker can create its
+      # command marker or run work. Normal settlement removes the obligation.
+      # After SIGKILL, the next legacy holder can drain the command marker and
+      # remove it instead of leaving an unreferenced holder file forever.
+      if { ! declare -F gate_coordinator_is_active >/dev/null 2>&1 ||
+        ! gate_coordinator_is_active; } &&
+        [[ -n "$gate_lock_dir" && -n "$gate_lock_root_dir" &&
+          -n "$gate_lock_token" ]] &&
+        ! record_condemned_run "$drain_identity"; then
+        printf '%s\n' abort >&17 2>/dev/null || true
+        exec 17>&-
+        [[ "$coordinator_marker_open" -eq 0 ]] || exec 16<&-
+        [[ "$request_marker_open" -eq 0 ]] || exec 19<&-
+        wait "$pid" 2>/dev/null || true
+        rm -f "$ready_file" "$ready_staging_file" "$wait_file"
+        if [[ "$had_monitor" -eq 0 ]]; then
+          set +m
+        fi
+        finish_worker_registration
+        echo "error: could not persist the legacy parallel command drain identity." >&2
+        fail_command_scheduler_infrastructure "$command" || return $?
+      fi
+
+      # Register every cleanup view before the worker can start mapped work.
+      # A deferred INT/TERM therefore sees either no worker or this complete
+      # aligned record. SIGKILL recovery uses the inherited request handle.
+      active_pids+=("$pid")
+      active_worker_pgids+=("$worker_pgid")
+      active_worker_drain_identities+=("$drain_identity")
+      active_worker_start_identities+=("$worker_start")
+      active_commands+=("$command")
+      active_output_files+=("$output_file")
+      active_status_files+=("$status_file")
+      active_elapsed_files+=("$elapsed_file")
+      active_timeout_files+=("$timeout_file")
+      active_infrastructure_files+=("$infrastructure_file")
+      active_trunk_provisioning_files+=("$trunk_provisioning_file")
+      active_lease_files+=("$lease_file")
+      active_ready_files+=("$ready_file")
+      active_wait_files+=("$wait_file")
+      active_drain_identities+=("$drain_identity")
+      active_start_identities+=("$worker_start")
+      if ! printf '%s\n' start >&17; then
+        exec 17>&-
+        [[ "$coordinator_marker_open" -eq 0 ]] || exec 16<&-
+        [[ "$request_marker_open" -eq 0 ]] || exec 19<&-
+        if [[ "$had_monitor" -eq 0 ]]; then
+          set +m
+        fi
+        finish_worker_registration
+        echo "error: could not release the registered parallel worker launch barrier." >&2
+        fail_command_scheduler_infrastructure "$command" || return $?
+      fi
+      exec 17>&-
+      [[ "$coordinator_marker_open" -eq 0 ]] || exec 16<&-
+      [[ "$request_marker_open" -eq 0 ]] || exec 19<&-
       if [[ "$had_monitor" -eq 0 ]]; then
         set +m
       fi
@@ -4166,6 +9031,7 @@ run_mapped_entries_parallel() {
       # Private deterministic barrier for the signal-registration regression.
       # It is inert unless the test suite opts in.
       if [[ -n "$worker_registration_test_barrier" ]]; then
+        printf '%s\n' "$pid" >> "${worker_registration_test_barrier}.workers"
         if [[ ! -e "${worker_registration_test_barrier}.ready" ]]; then
           printf '%s\n' "$pid" > "${worker_registration_test_barrier}.ready"
         fi
@@ -4174,95 +9040,25 @@ run_mapped_entries_parallel() {
         done
       fi
 
-      active_pids+=("$pid")
-      active_worker_pgids+=("$pid")
       finish_worker_registration
-      active_commands+=("$command")
-      active_output_files+=("$output_file")
-      active_status_files+=("$status_file")
-      active_elapsed_files+=("$elapsed_file")
-      active_timeout_files+=("$timeout_file")
     done
 
-    running_pids=()
-    while IFS= read -r pid; do
-      [[ -n "$pid" ]] && running_pids+=("$pid")
-    done < <(jobs -pr || true)
-    next_active_pids=()
-    next_active_commands=()
-    next_active_output_files=()
-    next_active_status_files=()
-    next_active_elapsed_files=()
-    next_active_timeout_files=()
-
-    for i in "${!active_pids[@]}"; do
-      pid="${active_pids[$i]}"
-      if list_contains_word "$pid" "${running_pids[@]+"${running_pids[@]}"}"; then
-        next_active_pids+=("$pid")
-        next_active_commands+=("${active_commands[$i]}")
-        next_active_output_files+=("${active_output_files[$i]}")
-        next_active_status_files+=("${active_status_files[$i]}")
-        next_active_elapsed_files+=("${active_elapsed_files[$i]}")
-        next_active_timeout_files+=("${active_timeout_files[$i]}")
-        continue
-      fi
-
-      if ! wait "$pid"; then
-        :
-      fi
-      # A worker normally leaves an empty group because run_with_timeout reaps
-      # its command and watchdog. If the leader exited unexpectedly, drain any
-      # surviving same-group descendants before unregistering the PGID.
-      drain_worker_process_group "$pid"
-
-      command="${active_commands[$i]}"
-      output_file="${active_output_files[$i]}"
-      status_file="${active_status_files[$i]}"
-      elapsed_file="${active_elapsed_files[$i]}"
-      timeout_file="${active_timeout_files[$i]}"
-      status="$(cat "$status_file" 2>/dev/null || echo 127)"
-      elapsed="$(cat "$elapsed_file" 2>/dev/null || echo 0)"
-      timed_out="$(cat "$timeout_file" 2>/dev/null || echo false)"
-
-      if [[ "$status" -eq 0 ]]; then
-        record_command_summary "ok" "$elapsed" "$command"
-        record_command_stamp "$command"
-        if is_autoreview_test_command "$command"; then
-          print_autoreview_test_timings "$output_file"
-        fi
-        echo "✓ ${command} ($(format_duration "$elapsed"))"
-      elif [[ "$timed_out" != true ]] && is_trunk_command "$command" &&
-        trunk_arm_is_environment_blocked "$output_file"; then
-        record_command_summary "skipped" "$elapsed" "$command"
-        print_trunk_environment_blocked_warning "$command" "$output_file"
-      else
-        failures=$((failures + 1))
-        record_command_summary "fail" "$elapsed" "$command"
-        if [[ "$timed_out" == true ]]; then
-          echo "Command timed out after ${command_timeout_seconds}s: ${command}" >&2
-        else
-          echo "Command failed after $(format_duration "$elapsed"): ${command}" >&2
-        fi
-        filter_expected_output < "$output_file" >&2
-        record_failure_output "$command" "$output_file"
-      fi
-
-      rm -f "$output_file" "$status_file" "$elapsed_file" "$timeout_file"
-      completed=$((completed + 1))
-    done
-
-    active_pids=("${next_active_pids[@]+"${next_active_pids[@]}"}")
-    active_worker_pgids=("${next_active_pids[@]+"${next_active_pids[@]}"}")
-    active_commands=("${next_active_commands[@]+"${next_active_commands[@]}"}")
-    active_output_files=("${next_active_output_files[@]+"${next_active_output_files[@]}"}")
-    active_status_files=("${next_active_status_files[@]+"${next_active_status_files[@]}"}")
-    active_elapsed_files=("${next_active_elapsed_files[@]+"${next_active_elapsed_files[@]}"}")
-    active_timeout_files=("${next_active_timeout_files[@]+"${next_active_timeout_files[@]}"}")
-
-    # Heartbeat: while commands are still in flight, emit a periodic liveness
-    # line naming what is running so a slow member is visibly working, not hung.
+    # Only this parent drains stale coordinator obligations. Parallel workers
+    # share shell state and capture files, so letting each queued lease waiter
+    # drain would race their capture and unlink operations.
     if [[ ${#active_pids[@]} -gt 0 ]]; then
       now_ts="$(date +%s)"
+      if [[ $((now_ts - last_coordinator_recovery_ts)) -ge 5 ]] &&
+        declare -F gate_coordinator_recover_stale_obligations >/dev/null 2>&1; then
+        if ! gate_coordinator_recover_stale_obligations; then
+          echo "error: scheduler stale-worker recovery failed during the parallel pool." >&2
+          return 2
+        fi
+        last_coordinator_recovery_ts="$now_ts"
+      fi
+
+      # Heartbeat: while commands are still in flight, emit a periodic liveness
+      # line naming what is running so a slow member is visibly working, not hung.
       if [[ $((now_ts - last_heartbeat_ts)) -ge "$heartbeat_interval" ]]; then
         printf '⏳ still running after %s (%d/%d done):\n' \
           "$(format_duration $((now_ts - phase_start_ts)))" "$completed" "$total"
@@ -4369,19 +9165,40 @@ run_quality_phase() {
 # Drop per-command stamps that don't match this run's fingerprint (any changed
 # validated file invalidates all of them) or that aged past the TTL, so the file
 # stays bounded and only genuine resume candidates remain.
-prune_command_stamps
+if ! prune_command_stamps; then
+  echo "error: could not read or prune the per-command stamp cache before first dispatch." >&2
+  gate_report_coordinated_no_work_failure 2 "command-stamp pruning" \
+    "No mapped command ran in this request"
+  exit 2
+fi
+
+# Queue time can be long. Bind the first dispatch to the same source, plan,
+# toolchain, environment digest, runtime, and resource policy that registration
+# used. A changed key cancels the request before any mapped command starts.
+if declare -F gate_coordinator_verify_registration_fingerprint >/dev/null 2>&1; then
+  gate_coordinator_verify_registration_fingerprint "before first dispatch"
+fi
 
 # Last thing before anything is executed: confirm this run still holds the lock
 # it took. Mapping and stamp work happen between acquiring and here, which is
 # room enough for another run to have taken it over.
 assert_gate_run_lock_still_ours
 
-# This run took the lock from a holder that died. That holder's mapped commands
-# may still be running — commands are backgrounded and outlive their shell — so
-# confirm they are gone before executing anything. Asked of the machine, not of
-# a clock: the watchdogs that would clean them up can be descheduled by the same
-# pressure that killed the gate, or suspended along with the laptop.
-drain_condemned_runs
+# A legacy holder drains every condemned run under its exclusive lock. A
+# coordinator client first claims each drain token, so only one gate parent can
+# capture and unlink its process evidence while other clients keep scheduling
+# against the stale lease's reserved capacity and named resources.
+if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+  gate_coordinator_is_active; then
+  if ! gate_coordinator_recover_stale_obligations; then
+    echo "error: scheduler stale-worker recovery failed before first dispatch." >&2
+    gate_coordinator_report_no_work_failure 2 "stale-obligation recovery" \
+      "No mapped command ran in this request"
+    exit 2
+  fi
+else
+  drain_condemned_runs
+fi
 
 # Asked again, and this is what orders the drain against publishers rather than
 # hoping they are quiet. Publishing an obligation is not synchronised with the
@@ -4394,6 +9211,21 @@ drain_condemned_runs
 # obligations this run already drained, whose processes are already gone.
 assert_gate_run_lock_still_ours
 
+# Capture this boundary after scheduler registration and stale recovery, but
+# before the first mapped command. A process older than this Linux start tick
+# cannot have inherited a mapped command's marker. The active-command
+# descriptor census can skip it before reading UID or fd state.
+if gate_run_proc_marker_scan_available; then
+  if ! gate_active_command_proc_start_floor="$(
+    gate_run_capture_proc_start_floor
+  )" || [[ ! "$gate_active_command_proc_start_floor" =~ ^[0-9]+$ ]]; then
+    echo "error: could not capture the Linux process-start boundary before mapped commands." >&2
+    gate_report_coordinated_no_work_failure 2 "run-handle preparation" \
+      "No mapped command ran in this request"
+    exit 2
+  fi
+fi
+
 run_prerequisite_phase "preflight" "${preflight_commands[@]+"${preflight_commands[@]}"}"
 run_prerequisite_phase "codegen" "${codegen_commands[@]+"${codegen_commands[@]}"}"
 run_prerequisite_phase "post-codegen" "${post_codegen_commands[@]+"${post_codegen_commands[@]}"}"
@@ -4403,12 +9235,25 @@ print_command_summary
 
 gate_total_elapsed=$(( $(date +%s) - gate_start_ts ))
 
+if declare -F gate_coordinator_verify_registration_fingerprint >/dev/null 2>&1; then
+  gate_coordinator_verify_registration_fingerprint \
+    "before terminal result publication"
+fi
+
 if [[ "$failures" -gt 0 ]]; then
+  if declare -F gate_coordinator_publish_failure >/dev/null 2>&1; then
+    gate_coordinator_publish_failure "$failures" || true
+  fi
   log_duration_line "fail" "$gate_total_elapsed" "__run_total__" "run" || true
   print_failed_command_output
   echo
   echo "${failures} mapped command(s) failed." >&2
   exit 1
+fi
+
+if declare -F gate_coordinator_publish_success >/dev/null 2>&1; then
+  gate_coordinator_publish_success \
+    "$trunk_arm_environment_blocked" "$trunk_environment_blocked_kind"
 fi
 
 log_duration_line "ok" "$gate_total_elapsed" "__run_total__" "run" || true
@@ -4430,8 +9275,15 @@ if [[ "${stamp_reuse_count:-0}" -eq 0 && "$trunk_arm_environment_blocked" != tru
   # provisionable — would trust the stamp and never attempt it. Withholding
   # the stamp here forces the next run to actually retry Trunk instead of
   # inheriting a pass it never earned.
-  {
+  if ! {
     printf 'created_at=%s\n' "$(date +%s)"
     printf 'stamp=%s\n' "$current_stamp"
-  } > "$success_stamp_file"
+    if [[ -n "$gate_coordinator_freshness_context" ]]; then
+      printf 'execution_fingerprint=%s\n' \
+        "$gate_coordinator_registration_fingerprint"
+      printf 'execution_head=%s\n' "$gate_coordinator_execution_head"
+    fi
+  } > "$success_stamp_file"; then
+    echo "warning: the gate passed, but its local success stamp could not be written." >&2
+  fi
 fi

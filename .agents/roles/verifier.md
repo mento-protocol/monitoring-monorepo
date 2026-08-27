@@ -3,7 +3,7 @@ title: Verifier Role
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-08-26
 doc_type: role
 scope: repo-wide
 review_interval_days: 90
@@ -20,10 +20,13 @@ Run diff-scoped verification and report only actionable results.
 2. Run `pnpm agent:quality-gate --dry-run` and confirm mapped commands/checklists match changed surfaces.
 3. Unless the requester asked for dry verification only, run
    `pnpm agent:quality-gate --run` as a background task. Before invoking it,
-   ensure that no direct validation, dashboard server, or browser suite is
-   active on the same machine. From invocation until it exits, do not start any
-   of them there. Use same-machine spare workers only for read-only work. Run
-   concurrent validation from a fully hydrated checkout on another machine.
+   ensure that no direct validation, dashboard server, or browser suite outside
+   the coordinator is active on the same machine. Concurrent `--run` gates from
+   other worktrees can continue through the coordinator. They share weighted
+   machine capacity. From invocation until this gate exits, do not start
+   uncoordinated work there. Use same-machine spare workers only for read-only
+   work. Run validation outside the coordinator from a fully hydrated checkout
+   on another machine.
 4. Report every failed or skipped command, the relevant output, and the
    smallest next fix.
 

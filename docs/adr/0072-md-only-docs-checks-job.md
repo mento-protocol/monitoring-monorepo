@@ -3,7 +3,7 @@ title: The Markdown globs route to a small docs-checks CI job instead of the scr
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-26
+last_verified: 2026-08-27
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0072 — the Markdown globs route to `docs-checks`, not the 25-minute `scripts` job
+# ADR 0072 — the Markdown globs route to `docs-checks`, not the long-running `scripts` job
 
 **Status:** Accepted (Aug 2026), in force.
 **Scope:** ci/process
@@ -19,7 +19,7 @@ garden_lane: adrs-architecture
 ## Context
 
 The `rootScripts` paths-filter carried `*.md` and `**/*.md`, so any Markdown
-edit fired the `scripts` job: 43 steps, `timeout-minutes: 25`, a full-history
+edit fired the `scripts` job: 44 steps, a long timeout, a full-history
 checkout, and a whole-workspace `pnpm install`. A one-line typo fix in a note
 under `docs/notes/` paid the same CI bill as a rewrite of the quality gate.
 
@@ -154,10 +154,10 @@ over a Markdown-only diff was two cosmetic wording findings across eleven PRs,
 and neither came from a CI step.
 
 **Make the `scripts` job faster instead.** Rejected: it is not slow by
-accident. Its 43 steps are load-bearing regression suites for gate routing,
+accident. Its 44 steps are load-bearing regression suites for gate routing,
 supply-chain policy, workflow trust, and alert rules, and its own comment
-records that the exact-identity lock suite alone reached 14m45s. Cutting the
-job to fit Markdown PRs would weaken it for the code PRs it exists to guard.
+records that the quality-gate routing regression suite reached 24m37s. Cutting
+the job to fit Markdown PRs would weaken it for the code PRs it exists to guard.
 
 **Put a workflow-level `paths:` filter on `ci.yml`, or promote a separate
 required `docs` workflow with one.** Rejected by
@@ -215,8 +215,8 @@ costs a duplicate run on mixed diffs and nothing else.
 
 ## Consequences
 
-- **A Markdown-only PR runs a ten-minute-capped job instead of a
-  twenty-five-minute-capped one.** The checks that can actually fail on a
+- **A Markdown-only PR runs a ten-minute-capped job instead of the long-running
+  `scripts` job.** The checks that can actually fail on a
   Markdown edit are exactly the ones that still run.
 - **A new Markdown-triggered check now has two candidate jobs, not one.**
   Whoever adds one must decide where it belongs: if it reads the tracked
@@ -247,7 +247,7 @@ costs a duplicate run on mixed diffs and nothing else.
 - **A Markdown-only edit under a path that stays in `rootScripts` now costs
   more, not less.** `.agents/**`, `.claude/skills/**`, `alerts/infra/**` and
   the other non-Markdown globs keep routing their own Markdown to `scripts`,
-  and such a diff now sets both filters: the unchanged 25-minute job runs
+  and such a diff now sets both filters: the long-running job runs
   exactly as today, plus a second runner repeating nine of its steps. That is
   about one tracked Markdown file in five — 43 of 201, of which 17 sit under
   `.agents/` and 15 under `.claude/skills/`, the skills mirror this repo
@@ -278,8 +278,8 @@ costs a duplicate run on mixed diffs and nothing else.
 
 ## Evidence
 
-- `.github/workflows/ci.yml`: the `scripts` job carries 43 steps and
-  `timeout-minutes: 25`; `docs-checks` carries 13 steps and
+- `.github/workflows/ci.yml`: the `scripts` job carries 44 steps and
+  `timeout-minutes: 40`; `docs-checks` carries 13 steps and
   `timeout-minutes: 10`.
 - `stalenessSubjects(ROUTING_GROUPS)` from `scripts/gate/routing-table/`
   returns 799 path subjects, 631 distinct, of which 23 are Markdown files —

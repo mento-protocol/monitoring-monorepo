@@ -989,12 +989,12 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rootScripts == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    # The expanded exact-identity lock suite reached 14m45s on this runner
-    # after earlier job setup. The prior 15-minute cap cancelled it before
+    # The quality-gate routing regression suite reached 24m37s on this runner
+    # after earlier job setup. The prior 25-minute cap cancelled it before
     # later steps could run. The waits bind real queue, cleanup, and no-signal
-    # guarantees, so keep a bounded 10-minute margin for completion and runner
-    # variance instead of weakening those assertions.
-    timeout-minutes: 25
+    # guarantees, so keep a bounded 15-minute margin for the remaining steps
+    # and runner variance instead of weakening those assertions.
+    timeout-minutes: 40
     permissions:
       checks: write
       contents: read
@@ -1283,7 +1283,8 @@ jobs:
     #     coupling is transitive, not structural: drop docs/deployment.md from
     #     the routing table and this suite loses its cover.
     # Splitting these out lets a Markdown-only PR finish in
-    # minutes instead of waiting on a job capped at 25. Each `run:` string here
+    # minutes instead of waiting on the long-running scripts job. Each `run:`
+    # string here
     # is byte-identical to its counterpart in `scripts`, and the steps are NOT
     # removed from there: a change to the documentation tooling must still run
     # them against the corpus. A mixed diff runs both jobs and pays for one

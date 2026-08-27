@@ -38,6 +38,7 @@ import { Facts } from "./facts.mjs";
 import { BUCKETS, Plan, commandDedupeKey } from "./plan.mjs";
 import {
   addTrunkCheckCommand,
+  addWorkspaceConfigBuild,
   applyScopedTestCommands,
   compactTurboQualityCommands,
   scopedIsNonSourcePath,
@@ -377,7 +378,60 @@ test("an unrecognised codegen command keeps its position after the known ones", 
   ]);
 });
 
-// ── Post-pass 3: Turbo compaction ──────────────────────────────────────────
+// ── Post-pass 3: workspace dependency setup ────────────────────────────────
+
+test("full and reduced config-consumer plans build shared-config exactly once", () => {
+  const consumers = [
+    "@mento-protocol/ui-dashboard",
+    "@mento-protocol/metrics-bridge",
+    "@mento-protocol/integration-probes",
+  ];
+  const builders = [
+    verbs.addPackageQualityCommands,
+    verbs.addPackageVitestTypecheckCommands,
+  ];
+  for (const packageName of consumers) {
+    for (const buildPlan of builders) {
+      const plan = new Plan();
+      buildPlan(plan, packageName, "consumer changed");
+      addWorkspaceConfigBuild(plan);
+      addWorkspaceConfigBuild(plan);
+      assert.equal(
+        commandsOf(plan).filter(
+          (command) => command === "pnpm --filter @mento-protocol/config build",
+        ).length,
+        1,
+        `${buildPlan.name} for ${packageName} must schedule one config build`,
+      );
+    }
+  }
+});
+
+test("peg registry checks build shared-config before loading its exports", () => {
+  for (const command of [
+    "node scripts/alerts/check-peg-registry-integrity.mjs",
+    "node scripts/alerts/check-peg-registry-integrity.test.mjs",
+  ]) {
+    const plan = new Plan();
+    plan.addCommand(command, "registry changed");
+    addWorkspaceConfigBuild(plan);
+    assert.ok(
+      commandsOf(plan).includes("pnpm --filter @mento-protocol/config build"),
+      `${command} must receive the config setup prerequisite`,
+    );
+  }
+});
+
+test("a plan with no config consumer does not build shared-config", () => {
+  const plan = new Plan();
+  verbs.addAegisQualityCommands(plan, "aegis changed");
+  addWorkspaceConfigBuild(plan);
+  assert.ok(
+    !commandsOf(plan).includes("pnpm --filter @mento-protocol/config build"),
+  );
+});
+
+// ── Post-pass 4: Turbo compaction ──────────────────────────────────────────
 
 test("same-task Turbo commands coalesce into one invocation", () => {
   const plan = new Plan();
@@ -447,7 +501,7 @@ test("a non-Turbo command is left exactly as it was", () => {
   assert.deepEqual(commandsOf(plan), ["pnpm code-health:deps"]);
 });
 
-// ── Post-pass 4: scoped tests ──────────────────────────────────────────────
+// ── Post-pass 5: scoped tests ──────────────────────────────────────────────
 
 const COVERAGE = "pnpm --filter @mento-protocol/ui-dashboard test:coverage";
 const scopedPlan = () => {

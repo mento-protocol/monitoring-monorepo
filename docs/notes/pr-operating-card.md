@@ -90,13 +90,18 @@ even when you never open an authority.
    package-manager, or lockfile changes until their lifecycle risk is reviewed
    and explicitly acknowledged** — do not bypass the refusal; review the surface
    and pass `--allow-package-script-changes`. Before invoking a full gate,
-   ensure that no direct validation, dashboard server, or browser suite is
-   active on the same machine. From invocation until the gate exits, do not
-   start any of them there. Use same-machine spare workers only for read-only
-   work; run concurrent validation from a fully hydrated checkout on another
-   machine. A second `--run` gate takes a machine-wide lock and queues behind
-   the first, naming the holder while it waits. Background the `--run` gate and
-   the `git push`; a 600s foreground kill discards the freshness stamp.
+   ensure that no direct validation, dashboard server, or browser suite outside
+   the coordinator is active on the same machine. From invocation until the
+   gate exits, do not start uncoordinated work there. Use same-machine spare
+   workers only for read-only work. Run concurrent validation outside the
+   coordinator from a fully hydrated checkout on another machine. Concurrent
+   `--run` gates from different worktrees share weighted machine capacity. The
+   default capacity is 3. Evidence-backed heavy dashboard commands form fair
+   barriers and run alone. Requests from the same worktree remain serialized.
+   Exact matching requests share one exact terminal result. A Trunk-qualified
+   result reaches active followers but is never retained or
+   reused. Background the `--run` gate and the `git push`; a 600s foreground
+   kill discards the freshness stamp.
    Authority:
    [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md).
 
@@ -440,12 +445,12 @@ These bind regardless of which step you are on:
 - **Package-script, package-manager, and lockfile changes require explicit
   acknowledgement** through the gate; never bypass the refusal.
 - **Background long `--run` gates and pushes**; do not run them in a 600s
-  foreground that a kill would truncate. Before invoking a full gate, ensure
-  that no direct validation, dashboard server, or browser suite is active on
-  the same machine. From invocation until the gate exits, do not start any of
-  them there. Use same-machine spare workers only for read-only work. Run
-  concurrent validation from another machine. A second `--run` gate queues on
-  the gate's own machine-wide lock instead of racing.
+  foreground that a kill would truncate, and do not start an uncoordinated
+  direct validation command, dashboard server, or browser suite alongside a
+  gate. Use same-machine spare workers only for read-only work. Run concurrent
+  validation outside the coordinator from another machine. Let the gate
+  coordinator schedule concurrent gate work. Do not use `--no-lock` to bypass
+  its capacity, worktree lease, or named resources.
 - **Secrets are IaC-owned and Terraform apply needs human approval** — plan
   first, never one-off `gh secret set` / `vercel env add` /
   `gcloud secrets versions add`.

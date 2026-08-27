@@ -1,14 +1,15 @@
 /**
- * The four whole-set passes that run AFTER every changed path has been routed.
+ * The five whole-set passes that run AFTER every changed path has been routed.
  *
  * They are separate from the verbs because they cannot be decided per path:
  * each reads the complete changed set or the complete command list. Their order
  * is fixed and is itself contract — Trunk is prepended first so it lands at the
- * head, codegen is sorted before the plan is written, Turbo compaction rewrites
- * the quality bucket, and scoped tests rewrite it again afterwards using the
- * final escalation flag.
+ * head, codegen is sorted before the plan is written, workspace dependency
+ * setup is added from the complete command list, Turbo compaction rewrites the
+ * quality bucket, and scoped tests rewrite it again afterwards.
  *
- *   addTrunkCheckCommand → sortCodegenCommands → compactTurbo → applyScopedTests
+ *   addTrunkCheckCommand → sortCodegenCommands → addWorkspaceConfigBuild →
+ *   compactTurbo → applyScopedTests
  */
 
 import { shellQuote } from "./shell-quote.mjs";
@@ -100,7 +101,54 @@ export function sortCodegenCommands(plan) {
   plan.codegen = sorted;
 }
 
-// ── 3. Turbo compaction ────────────────────────────────────────────────────
+// ── 3. Workspace dependency setup ─────────────────────────────────────────
+
+const WORKSPACE_CONFIG_BUILD = "pnpm --filter @mento-protocol/config build";
+const WORKSPACE_CONFIG_CONSUMERS = [
+  "@mento-protocol/ui-dashboard",
+  "@mento-protocol/metrics-bridge",
+  "@mento-protocol/integration-probes",
+];
+const WORKSPACE_CONFIG_ALIASES = [
+  "pnpm dashboard:",
+  "pnpm bridge:",
+  "pnpm integrations:",
+];
+const WORKSPACE_CONFIG_SCRIPTS = [
+  "node scripts/alerts/check-peg-registry-integrity.mjs",
+  "node scripts/alerts/check-peg-registry-integrity.test.mjs",
+];
+
+function commandConsumesWorkspaceConfig(command) {
+  return (
+    WORKSPACE_CONFIG_CONSUMERS.some((name) => command.includes(name)) ||
+    WORKSPACE_CONFIG_ALIASES.some((prefix) => command.startsWith(prefix)) ||
+    WORKSPACE_CONFIG_SCRIPTS.some(
+      (script) => command === script || command.startsWith(`${script} `),
+    )
+  );
+}
+
+/**
+ * Build ignored shared-config output before any mapped command can load it.
+ *
+ * Workspace links are source-bound in the coordinator fingerprint because a
+ * build can rewrite their ignored `dist/` output during the run. Every plan
+ * that consumes this package must normalize that output as a non-reusable
+ * setup command instead of binding its pre-setup bytes.
+ */
+export function addWorkspaceConfigBuild(plan) {
+  const consumesConfig = [...plan.buckets.values()].some((entries) =>
+    entries.some((entry) => commandConsumesWorkspaceConfig(entry.command)),
+  );
+  if (!consumesConfig) return;
+  plan.addCommand(
+    WORKSPACE_CONFIG_BUILD,
+    "mapped consumer requires current shared-config output",
+  );
+}
+
+// ── 4. Turbo compaction ────────────────────────────────────────────────────
 
 const TURBO_COMMAND =
   /^pnpm exec turbo run (\S+) --filter=(@mento-protocol\/\S+) --cache=local:rw$/;
@@ -148,7 +196,7 @@ export function compactTurboQualityCommands(plan) {
   });
 }
 
-// ── 4. Scoped tests ────────────────────────────────────────────────────────
+// ── 5. Scoped tests ────────────────────────────────────────────────────────
 
 /** Package → importer directory. An unmapped package can never be scoped. */
 const SCOPED_PACKAGE_DIR = new Map([

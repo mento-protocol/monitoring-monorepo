@@ -477,6 +477,12 @@ test("fixture byte budgets can contain every cheapest accepted route", () => {
     validateFixtureSuite(reserveTooHigh, context.inventory).join("\n"),
     /cheapest accepted route union leaves .* bytes of headroom/,
   );
+  assert.doesNotMatch(
+    validateFixtureSuite(reserveTooHigh, context.inventory, {
+      enforceHeadroomReserve: false,
+    }).join("\n"),
+    /cheapest accepted route union leaves .* bytes of headroom/,
+  );
 });
 
 test("answer artifacts include future run outputs but exclude contracts", () => {

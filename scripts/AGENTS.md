@@ -35,7 +35,7 @@ subdirectories.
 - `alerts/`: alert-rule lint, peg-policy checks
 - `repo-health/`: code-health, file-size, lint
 - `terraform/`: movable Terraform guards/helpers
-- `gate/`: gate routing engine + helpers
+- `gate/`: routing engine + coordinator
 - `sentry/`: triage/autofix/gate/broker/ci-wiring
 
 `lib/` and `production-infra-identity-contract/` predate the reorg.
@@ -81,17 +81,17 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   keys pin `AGENTS.md`, `CLAUDE.md` and the operating card. ADR 0073 has it.
   `pr/merge-pr*`, both PR-state helpers, and `agent-autoreview.sh` (Codex
   markers) route `pnpm pr:merge:test`.
-- **Gate runtime module pins.** Before `cd`, `agent-quality-gate.sh` loads
-  `$script_source_dir/gate/run-handles.sh`; move it with its signature, self-test
-  route, and missing-helper fixture. It also pins
-  `docs/docs-navigation-eval-helpers.mjs` to `$script_source_dir`; since D5c the
-  mapping engine resolves `gate/lockfile-scope.mjs` the same way. Update both
-  literals (ADR 0064).
+- **Gate runtime pins.** Before `cd`, `agent-quality-gate.sh` resolves
+  `gate/run-handles.sh`, coordinator files,
+  `docs/docs-navigation-eval-helpers.mjs`, and `gate/lockfile-scope.mjs` from
+  `$script_source_dir`; tests hash them from `$repo_root`. Move each path with
+  its routes, signatures, fixtures, and literals (ADRs 0064 and
+  0076).
 - **Gate mapping pins.** The signature and three Turbo inputs pin
-  `gate/routing-table/**`, `gate/mapping*`, and external
+  `gate/routing-table/**`, `gate/mapping*`, and
   `agent-autoreview-core.mjs`. Runtime hashes use `$script_source_dir`; suites
-  use `$repo_root`. Core-only edits route both gate suites. A missing pin
-  freezes the stamp (ADR 0069).
+  use `$repo_root`. Core edits route both suites; missing pins freeze the stamp
+  (ADR 0069).
 - **Evaluation fixture forbidden lists.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names the navigation
   eval's own implementation.
