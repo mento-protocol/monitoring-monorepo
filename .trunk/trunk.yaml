@@ -28,6 +28,20 @@ lint:
         # responses that contain harmless misspellings + are not formatted
         # for human review).
         - "**/.intel-marathon/**"
+    - linters: [ALL]
+      paths:
+        # Byte-frozen inputs of the review-skill eval. The contract pins a
+        # sha256 for every truth file, finder report and run prompt, and the
+        # contract's own bytes are the digest every ledger row is compared
+        # across. A formatter rewrite here is not cosmetic: it fails
+        # `review:eval -- --check-fixtures` and breaks comparability. Observed:
+        # prettier rewrote `__tests__` to `**tests**` inside a frozen report.
+        - docs/evals/review-skill-fixtures.json
+        - docs/evals/review-skill-judge-calibration.json
+        - docs/evals/review-skill-truth/**
+        - docs/evals/review-skill-finder-reports/**
+        - docs/evals/review-skill-runs/**
+        - scripts/review/prompts/**
     - linters: [markdownlint]
       paths:
         # LLM prompt payloads (e.g. the Sentry triage-agent prompt), not rendered

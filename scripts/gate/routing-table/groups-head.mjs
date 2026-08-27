@@ -11,10 +11,11 @@
  */
 
 /**
- * The six groups that run before the big per-tree group: the documentation
- * surface, the documentation contracts, the Upstash MCP transport pin, the
- * manifest and package-manager routes, the shell-syntax route, and the Vitest
- * configuration routes.
+ * The eight groups that run before the big per-tree group: the documentation
+ * surface, the documentation contracts, the review-skill evaluation contracts,
+ * the Upstash MCP transport pin, the manifest and package-manager routes, the
+ * shell-syntax route, the babysit repo hook, and the Vitest configuration
+ * routes.
  *
  * They are separate `case` statements rather than arms of one, and that is
  * load-bearing: every group runs for every path, so a `.md` file reaches the
@@ -135,6 +136,48 @@ export const HEAD_GROUPS = [
           {
             command: "node scripts/repo-health/check-guardrail-prose.mjs",
             reason: "operating card holding pinned guardrail prose changed",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: "review-eval-contracts",
+    arms: [
+      {
+        patterns: ["docs/evals/review-skill*"],
+        why: "The review-skill evaluation is comparable only while its contract holds: frozen truth digests, an explicit scorable-id list, frozen finder-report and prompt digests, and an append-only ledger. All three checks are hermetic — no model, no network — so the gate can prove a contract edit before it reaches CI. `*` matches `/` in a bash `case`, so this one pattern also covers `review-skill-truth/` and `review-skill-finder-reports/`.",
+        effects: [
+          { surface: "docs" },
+          {
+            command: "pnpm review:eval:test",
+            reason: "review skill evaluation contract changed",
+          },
+          {
+            command: "pnpm review:eval -- --check-fixtures --offline",
+            reason: "review skill evaluation contract changed",
+          },
+          {
+            command: "pnpm review:eval -- --check-ledger --require-base",
+            reason: "review skill evaluation contract changed",
+          },
+        ],
+      },
+      {
+        patterns: ["scripts/review/*"],
+        why: "The harness scores itself, so a scorer, matcher, or prompt edit moves the comparability key and can silently change every later number. Same three hermetic checks as the contract arm; the surface comes from the `scripts/` arm in the tree group.",
+        effects: [
+          {
+            command: "pnpm review:eval:test",
+            reason: "review skill evaluation harness changed",
+          },
+          {
+            command: "pnpm review:eval -- --check-fixtures --offline",
+            reason: "review skill evaluation harness changed",
+          },
+          {
+            command: "pnpm review:eval -- --check-ledger --require-base",
+            reason: "review skill evaluation harness changed",
           },
         ],
       },

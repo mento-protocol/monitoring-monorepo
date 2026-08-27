@@ -74,10 +74,26 @@ export function parseDocumentationMetadata(file, content) {
   return marker ? parseFieldList(marker[1]) : null;
 }
 
+// Markdown that is machine payload rather than a navigable document. The
+// catalog indexes every Markdown surface an agent might navigate to, and
+// docs/README.md is a bootstrap source of the navigation evaluation, so every
+// entry spends the shared context reserve. These three trees are not documents:
+// the review evaluation's finder reports are frozen contestant transcripts kept
+// as evidence, its run directories accumulate one generated report per paid run
+// — an unbounded drip of catalog entries — and its prompts are the payloads the
+// judges are sent, pinned by digest in the contract. None of them tell a reader
+// how anything works; docs/evals/review-skill.md does, and it stays indexed.
+const NON_DOCUMENT_TREES = [
+  "docs/evals/review-skill-finder-reports/",
+  "docs/evals/review-skill-runs/",
+  "scripts/review/prompts/",
+];
+
 export function isDocumentationPath(file) {
   if (!file.endsWith(".md")) return false;
   if (path.posix.basename(file) === "CLAUDE.md") return false;
   if (file.startsWith(".claude/skills/")) return false;
+  if (NON_DOCUMENT_TREES.some((tree) => file.startsWith(tree))) return false;
   return true;
 }
 

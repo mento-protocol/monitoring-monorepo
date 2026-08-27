@@ -257,6 +257,19 @@ jobs:
               # this entry the whole scripts job skips and the pin never runs.
               - .coderabbit.yaml
               - docs/evals/documentation-navigation-*.json
+              # Two lines, because the frozen review-skill inputs are both flat
+              # files and directories. dorny/paths-filter matches with
+              # picomatch, where neither `*` nor a `**` glued to a prefix
+              # crosses a path separator: `review-skill*` alone matches
+              # `review-skill.md` and nothing under `review-skill-truth/`, so a
+              # PR editing only a frozen truth file left `rootScripts` false
+              # and the required `ci` sentinel let the `scripts` job skip. The
+              # `*/**` form is the one that reaches inside those directories.
+              # (review-eval-freshness.yml can write `review-skill**` because
+              # a workflow `paths:` trigger uses GitHub's own glob syntax,
+              # where `**` does cross separators. Different engine.)
+              - docs/evals/review-skill*
+              - docs/evals/review-skill*/**
               - .lighthouserc.cjs
               - "**/vitest.hermetic-setup.ts"
               - "**/vitest.config.ts"
@@ -1121,6 +1134,12 @@ jobs:
           pnpm docs:navigation-eval -- --validate
           docs/evals/documentation-navigation-baseline.json
           --fixtures docs/evals/documentation-navigation-baseline-fixtures.json
+      - name: Review skill evaluation tests
+        run: pnpm review:eval:test
+      - name: Review skill fixture contract
+        run: pnpm review:eval -- --check-fixtures --offline
+      - name: Review skill committed ledger
+        run: pnpm review:eval -- --check-ledger --require-base
       - name: Agent context budget tests
         run: pnpm agent:context-budget:test
       - name: Enforce agent context budgets

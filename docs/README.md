@@ -77,6 +77,7 @@ Authority: canonical
 - [`alerts/rules/README.md`](../alerts/rules/README.md)
 - [`docs/deployment.md`](deployment.md)
 - [`docs/evals/documentation-navigation.md`](evals/documentation-navigation.md)
+- [`docs/evals/review-skill.md`](evals/review-skill.md)
 - [`docs/notes/agent-issue-workflow.md`](notes/agent-issue-workflow.md)
 - [`docs/notes/agent-quality-gate-mechanics.md`](notes/agent-quality-gate-mechanics.md)
 - [`docs/notes/backlog-ranking.md`](notes/backlog-ranking.md)

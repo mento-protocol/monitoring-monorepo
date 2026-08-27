@@ -1,0 +1,132 @@
+name: Review Skill Eval Freshness
+
+# Deterministic guard for the recurring review-skill evaluation. The evaluation
+# itself runs on an operator machine and commits its ledger; this workflow only
+# proves that the committed contract is internally consistent and that the
+# ledger is still fresh. It never stores a model credential, invokes a model,
+# edits repository content, opens a PR, merges, deploys, or touches production
+# state. Issues are the only mutable resource, and only on the schedule.
+#
+# Cadence SLO: the staleness thresholds this guard serves are 45, 60, 90, and
+# 120 days, so a weekly check detects a crossing well inside the shortest
+# window. A faster cadence would boot a runner for no extra signal.
+#
+# Advisory by design. The job is deliberately not a required check: an operator
+# vacation must not block unrelated merges. A red scheduled run plus an open
+# issue is the intended pressure.
+
+on:
+  schedule:
+    # Tuesday morning UTC, off the hour and away from the 08:47 documentation
+    # garden slot, so the two issue synchronizers never contend.
+    - cron: 23 9 * * 2
+  pull_request:
+    paths:
+      # `**`, not `*`: a single star stops at a path separator, so
+      # `review-skill*` alone matches `review-skill.md` but nothing inside
+      # `docs/evals/review-skill-truth/` or the other frozen input
+      # directories, and a PR touching only those would skip both checks.
+      - docs/evals/review-skill**
+      - scripts/review/**
+      # Every step below runs a `review:eval*` alias. A PR that renames or
+      # removes one breaks this workflow's own commands while touching neither
+      # path above, and nothing would notice until the next scheduled run.
+      - package.json
+  workflow_dispatch:
+
+permissions: read-all
+
+concurrency:
+  group: review-eval-freshness-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  contract:
+    name: Check the evaluation contract and ledger
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # --check-ledger compares the committed rows against the merge base
+          # of origin/main and HEAD, and falls back to the origin/main tip when
+          # no merge base resolves. --check-fixtures resolves every
+          # `eval/review-skill/v1/*` tag to the SHA the contract names. Both
+          # need full history; the tag check also needs the tags, which a
+          # shallow checkout omits.
+          fetch-depth: 0
+          fetch-tags: true
+          # Nothing here writes to the repository. Leaving the checkout token in
+          # .git/config would hand it to every later command in the job.
+          persist-credentials: false
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      # No `pnpm install`. The evaluation harness is Node standard library only,
+      # so `pnpm <alias>` needs nothing from node_modules. Same reasoning as the
+      # lockfile job in supply-chain.yml, and it keeps the job under a minute.
+      - name: Harness unit tests
+        run: pnpm review:eval:test
+      - name: Check the frozen fixture contract
+        # --offline forbids every network call. Tag reachability, truth digests,
+        # the scorable-id set, and the finder-report digests are all read from
+        # the local object store the checkout above already carries.
+        run: pnpm review:eval -- --check-fixtures --offline
+      - name: Check the ledger
+        # Schema, append-only against the merge base, and baseline immutability.
+        # --require-base fails the step when origin/main does not resolve, so a
+        # checkout change can never turn the append-only guard into a no-op.
+        #
+        # --revalidate-appended recomputes every row this branch adds from the
+        # detail the same branch commits. Without it a ledger PR could edit its
+        # row's verdict, its counters or a per_defect bit after the local
+        # `--validate --append` and still pass every check here, because schema,
+        # id coverage and append-only history all stay satisfied while the
+        # committed report is no longer backed by its cell and calibration
+        # evidence. It calls no model: the recompute reads the committed
+        # `result-*.json` and `calibration.json` files, and this job holds no
+        # model credential.
+        run: pnpm review:eval -- --check-ledger --require-base --revalidate-appended
+
+  freshness:
+    # autofix-ci-trust: this job runs only on `schedule` — the `if:` below
+    # refuses every other event, including `pull_request`. A machine-authored
+    # sentry-autofix PR therefore cannot reach it, and it holds no secret
+    # beyond the workflow-scoped GITHUB_TOKEN it uses to synchronize one issue.
+    # See scripts/workflows/check-autofix-ci-trust.mjs.
+    name: Synchronize the staleness issue
+    needs: contract
+    # Schedule only. A pull request checks the contract; it must not open or
+    # touch an issue.
+    if: github.event_name == 'schedule'
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # Issues are the only mutable resource. This job holds no model
+      # credential and writes nothing else.
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The freshness computation reads only the ledger at HEAD, so the
+          # default shallow checkout is enough.
+          persist-credentials: false
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - name: Synchronize the review-skill evaluation staleness issue
+        env:
+          # `--schedule-issue` takes the repository from GITHUB_REPOSITORY,
+          # which Actions sets, and arms its one mutating step from the absence
+          # of `--dry-run`. It reads no other variable, so none is set here.
+          GH_TOKEN: ${{ github.token }}
+        # Age comes from each row's `executed_at`, never from a file mtime,
+        # which git does not preserve. The command creates or retains exactly
+        # one issue, then exits non-zero when the ledger has crossed a red
+        # threshold, so a stale evaluation turns this scheduled job red.
+        run: pnpm review:eval -- --schedule-issue --json

@@ -99,13 +99,13 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   keys are exact repo-relative paths, reconciled against `findSentrySuites()`
   by set equality both ways. A moved or renamed suite fails the gate closed.
   `sentry/fixture-scan-canary.test.mjs` re-pins four; ADR 0068 has the policy.
-- **Enumerated workflow pins.** 22 of 32 files in
+- **Enumerated workflow pins.** 23 of 33 files in
   `.github/workflows/` pin a `scripts/` path, and `sentry-triage-agent.yml`
   stages an exact copy list at runtime; three Terraform filters instead
   copy the broad `workflowAdmissionPatterns` boundary from
-  `terraform.stacks.json`. A miss is silent: the job stops while the required
-  `ci` sentinel stays green. ADR 0064 has the enumeration, `routing.test.mjs`'s
-  equality contract, and when a module glob is the safer pin.
+  `terraform.stacks.json`. A miss is silent: the job stops while `ci` stays
+  green. ADR 0064 has the enumeration, the `routing.test.mjs` equality
+  contract, and glob rules. Review-eval pins: `docs/evals/review-skill.md`.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.
