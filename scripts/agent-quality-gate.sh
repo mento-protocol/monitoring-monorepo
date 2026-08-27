@@ -417,9 +417,10 @@ while IFS= read -r -d '' gate_bash_environment_record; do
       ;;
   esac
 done < <(
+  set -- "${LC_ALL+x}" "${LC_ALL-}"
   LC_ALL=C /usr/bin/env \
-    "agent-quality-gate-env-scan-lc-all-set=${LC_ALL+x}" \
-    "agent-quality-gate-env-scan-lc-all-value=${LC_ALL-}" \
+    "agent-quality-gate-env-scan-lc-all-set=$1" \
+    "agent-quality-gate-env-scan-lc-all-value=$2" \
     /usr/bin/awk '
     BEGIN {
       for (name in ENVIRON) {
