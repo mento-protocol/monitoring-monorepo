@@ -137,16 +137,16 @@ route-level smoke sequence and points here for the assertions.
 
 ### Polygon coverage
 
-- `/pools` and `/volume`: select Polygon, verify the URL contains `chain=137`, only Polygon rows/series remain, refresh preserves the selection, and selecting All removes the default query parameter without an RSC refetch.
-- Polygon pool detail: EURm/EUROP renders every active strategy (Open and Reserve once the promoted schema/data are available); during schema rollout, the page degrades to the legacy pointer without blanking the rest of the pool.
-- `/stables`: Polygon USDm and EURm appear as distinct chain-qualified burning-mode supplies rather than being merged with another chain's token row.
-- `/integrations`: Polygon appears for every configured adapter and empty/error states remain distinct from unsupported coverage.
+- `/pools` and `/volume`: select Polygon, verify `chain=137` in the URL, only Polygon rows/series remain, refresh keeps the selection, and selecting All removes the default query parameter without an RSC refetch.
+- Polygon pool detail: EURm/EUROP renders each active strategy (Open and Reserve once promoted schema/data exist); during schema rollout, the page degrades to the legacy pointer without blanking the rest of the pool.
+- `/stables`: Polygon USDm and EURm appear as distinct chain-qualified supplies not merged with another chain's token row.
+- `/integrations`: Polygon appears per configured adapter; empty/error states stay distinct from unsupported coverage.
 
 ### `/bridge-flows`
 
-- **KPI row (3 tiles):** `Total Bridge Transfers` (BreakdownTile w/ 24h/7d/30d breakdown), `Pending` (number or "1,000+"), `Avg deliver time` (h/m/s). None should be "—" or "…" on a healthy load.
-- **Charts row (3 columns):** `Bridged Volume (USD)` time-series chart with 7d/30d/all range buttons, `Token Breakdown` donut, `Top Bridgers` ranked list with address links.
-- **Recent transfers table (25 rows):** columns Provider, Route, Status, Token, Amount (USD), Amount, Sender, Receiver, Txs, Time. Per-cell click targets:
+- **KPI row (3 tiles):** `Total Bridge Transfers` (BreakdownTile, 24h/7d/30d), `Pending` (count or "1,000+"), `Avg deliver time` (h/m/s). None should be "—" or "…" on a healthy load.
+- **Charts row (3 columns):** `Bridged Volume (USD)` time-series with 7d/30d/all buttons, `Token Breakdown` donut, `Top Bridgers` ranked list with address links.
+- **Recent transfers table (25 rows):** columns Provider, Route, Status, Token, Amount (USD/native), Sender, Receiver, Txs, Time. Per-cell click targets:
   - **Wormholescan** (`wormholescan.io/#/tx/{sentTxHash}`): Provider badge, Amount (USD), Amount, and the `wh` pill in the Txs column
   - **Chain explorer** (Celoscan / Monadscan / Polygonscan): Token cell (`token contract`), Sender, Receiver, and the `src` pill in the Txs column
 - **Key interactions to spot-check:**
