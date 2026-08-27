@@ -8710,6 +8710,7 @@ fi
 exit 0
 STUB
   chmod +x bin/pnpm tools/trunk
+  write_installed_dependency_fixture "$PWD"
   git add .
   git commit -qm init
   base_ref="$(git rev-parse --verify HEAD)"
@@ -12643,6 +12644,7 @@ fi
 exec "${QG_DETACHED_CHECK:?}" "holder pnpm $*"
 STUB
     chmod +x bin/pnpm bin/qg-detached-check tools/trunk
+    write_installed_dependency_fixture "$PWD"
     git add .
     git commit -qm init
     printf 'scripts/gate/agent-prewarm.mjs\nscripts/context/agent-context-budget.mjs\n' \
@@ -12669,6 +12671,7 @@ fi
 exec "${QG_DETACHED_CHECK:?}" "external pnpm $*"
 STUB
       chmod +x bin/pnpm tools/trunk
+      write_installed_dependency_fixture "$PWD"
       git add .
       git commit -qm init
       printf 'scripts/context/agent-context-budget.mjs\n' > changed-paths.txt
