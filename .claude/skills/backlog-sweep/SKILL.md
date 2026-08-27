@@ -72,10 +72,20 @@ got a refusal, not a quiet 4.
 
 ## Rank And Pick The Batch
 
-Run the `rank-backlog` skill end to end and let it write its normal receipt.
-Do not shortcut it to a quick issue list: the receipt is the audit trail this
-sweep's report cites, and a batch picked without one cannot be reviewed after
-the fact.
+Run the `rank-backlog` skill's ranking end to end and let it write its normal
+receipt. Do not shortcut it to a quick issue list: the receipt is the audit
+trail this sweep's report cites, and a batch picked without one cannot be
+reviewed after the fact.
+
+**Its `Stop There` section does not stop the sweep.** That section ends a
+_standalone_ ranking at the recommendation — it hands the receipt to the
+operator and leaves `pnpm issue:claim` to them, because nothing else in that
+skill is authorized to claim. Here the operator has already authorized the
+batch by invoking this skill, which owns the claiming, so ranking hands its
+receipt back to the sweep and the sweep continues at the next section. Read
+`Stop There` as the boundary of the ranking skill's own authority, not as a
+halt for whatever invoked it. A sweep that stopped there would rank all night
+and ship nothing.
 
 **The receipt does not carry eligibility.** Its Top 15 table is
 `Rank | Issue | Score | Reason`, and it ranks `needs-grooming` issues beside
@@ -84,12 +94,21 @@ a batch verdict — the Selected issue can fail any rule below. So walk the Top
 15 in order and read each candidate directly, stopping once N qualify:
 
 ```bash
-gh issue view <n> --json number,title,labels,body,projectItems
+gh issue view <n> --repo mento-protocol/monitoring-monorepo \
+  --json number,title,state,labels,body,projectItems
 ```
 
 `labels` settles `agent-ready`, `risk:low`, and the `pkg:*` area;
 `projectItems[].status.name` settles `Blocked`; `body` is where an external
 dependency is named. Only the fit cap comes from the receipt.
+
+`state` must read `OPEN`, and `--repo` is not decoration. A closed issue
+otherwise passes every rule below and is refused only later by `issue:claim`,
+after it has already been printed as part of the batch. An unqualified
+`gh issue view` resolves against the current checkout's remote or `GH_REPO`, so
+from a fork or a redirected environment it would grade a same-numbered issue in
+a different repository while the receipt and the claim helper both target this
+one.
 
 Take the top N — default 2 — that satisfy **all** of:
 
@@ -148,9 +167,10 @@ so minutes pass between the ranking that selected the last issue and the moment
 it is claimed. `issue:claim` checks only that the issue is open and carries a
 claimable queue label; it does not know about `risk:low`, `Blocked`, a
 dependency added to the body, or an authority cap. Run the same
-`gh issue view` read from the eligibility step again, against this issue, right
-before claiming it. An issue that stopped qualifying is dropped, not claimed —
-say so in the report and move to the next receipt entry.
+`gh issue view --repo … --json number,title,state,labels,body,projectItems`
+read from the eligibility step again, against this issue, right before claiming
+it. An issue that stopped qualifying — closed included — is dropped, not
+claimed: say so in the report and move to the next receipt entry.
 
 **Claim the specific number, never a count, and name the branch:**
 
@@ -204,7 +224,7 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   `issue` holding the number:
 
   ```bash
-  repo=https://github.com/mento-protocol/monitoring-monorepo
+  repo="$clone_url"                 # the orchestrator's own origin URL
   root=/private/tmp/claude
   if ! mkdir -p "$root" 2>/dev/null || [ ! -w "$root" ]; then
     root="${TMPDIR:-/tmp}/claude-sweep"   # unwritable default: fall back
@@ -226,6 +246,15 @@ Then spawn one worker subagent per issue. Give each a brief containing:
     printf '%s\n' "$sweep_id" > "$dir/.git/sweep-owner"
   fi
   ```
+
+  `clone_url` is the orchestrator's own `git remote get-url origin`, fixed once
+  and passed to every worker beside `sweep_id`. Do not hard-code the public
+  HTTPS URL. A worker must **push**, not merely clone, and the transport that
+  already authenticates on this machine is the one the operator's checkout is
+  using — often SSH, while `gh auth status` says nothing about git's credential
+  helper. Cloning over a transport nobody has credentials for succeeds on a
+  public repository and then fails at the push, after the whole issue has been
+  implemented and gated.
 
   `sweep_id` is one value the orchestrator fixes before the first claim and
   passes to every worker — this session's id is the obvious choice, and any
@@ -299,6 +328,17 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   worktrees run together under that capacity; the hour-long `--lock-wait` is
   what covers the rest, since it spans scheduler admission, a command lease, a
   coalesced result, and an older legacy holder.
+
+  **A package-manifest change needs the gate's acknowledgement, not a
+  hand-off.** When the issue touches a package manifest, `pnpm-lock.yaml`, pnpm
+  configuration, or `patches/**`, that invocation exits 2 before running any
+  check: `Refusing to run because package manifests, patches, or lockfile
+changed.` Review the lifecycle and install scripts in the diff first, then
+  re-run with `--allow-package-script-changes`. This is the gate's own designed
+  path for that change class, so it is not the blocked-control hand-off in the
+  boundaries below — the flag acknowledges a diff the worker has read, and
+  passing it without reading one is the thing that would be dishonest. Without
+  this step a `risk:low` issue that edits a manifest can never finish.
 
   **Background it with the runtime's own mechanism, then poll within the
   turn.** The command above is written foreground; do not run it that way for a
@@ -431,6 +471,18 @@ crossed without anyone watching.
   where it stopped, and what a human would need to decide. A silent release
   sends the next run straight back into the same wall.
 
+  **Only while the issue is still `agent-active`.** Once the worker has opened
+  its PR and run `pnpm issue:review`, the issue is `in-pr`, and releasing it
+  then returns it to the ready queue while the PR is still open — a later sweep
+  claims it and duplicates work that is already up for review, because
+  `rank-backlog` deliberately does not read a `Refs` cross-reference as
+  ownership. `issue:release` accepts `in-pr` and will not stop you. The
+  canonical lifecycle in
+  [`agent-issue-workflow.md`](../../../docs/notes/agent-issue-workflow.md)
+  releases _after_ an unmerged PR closes. So a worker that stalls with a PR
+  already open keeps the issue `in-pr` and hands the PR to the operator as a
+  decision item; releasing is what the operator does after they close it.
+
 - **MUST file an issue before deferring.** Every knowingly deferred follow-up
   gets a GitHub issue, linked from the PR's `## Deferrals` section. An
   evidence-backed won't-fix is not a deferral and needs no issue.
@@ -480,8 +532,9 @@ reservation leaves an empty file in place, so a plain `>` under `noclobber`
 refuses it — and a sweep that reserved a name and then silently failed to write
 its report would lose the whole night's record.
 
-Six parts. Only the first is the orchestrator's own; the rest are assembled
-from the workers' report-backs:
+Six parts. The receipt line and the refused claims are the orchestrator's own —
+a refused claim never got a worker, so no report-back can carry it. The rest is
+assembled from the workers' closing messages:
 
 1. **The receipt.** The path of the `rank-backlog` receipt this batch was
    selected from, and the batch size the operator asked for.

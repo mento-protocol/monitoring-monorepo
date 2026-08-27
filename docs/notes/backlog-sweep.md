@@ -114,10 +114,19 @@ A sweep is narrower than the ranking that feeds it, and the ranking receipt
 does not carry the difference: its Top 15 is `Rank | Issue | Score | Reason`,
 and it scores `needs-grooming` issues beside `agent-ready` ones. Selection by
 `rank-backlog` is a ranking verdict, not a batch verdict. So each candidate is
-read directly — `gh issue view <n> --json number,title,labels,body,projectItems`,
-where `labels` settles the state, risk, and `pkg:*` area,
-`projectItems[].status.name` settles `Blocked`, and `body` is where an external
-dependency is named. Only the fit cap comes from the receipt.
+read directly — `gh issue view <n> --repo mento-protocol/monitoring-monorepo
+--json number,title,state,labels,body,projectItems`, where `labels` settles the
+queue state, risk, and `pkg:*` area, `projectItems[].status.name` settles
+`Blocked`, and `body` is where an external dependency is named. Only the fit cap
+comes from the receipt. `state` must read `OPEN`, since a closed issue passes
+every rule below and is refused only later by `issue:claim`; `--repo` is
+explicit because an unqualified read resolves against the current checkout's
+remote or `GH_REPO` and could grade a same-numbered issue elsewhere.
+
+The ranking skill's `Stop There` section ends a standalone ranking at the
+recommendation, where nothing is authorized to claim. It does not halt a sweep:
+the operator authorized this batch by starting the sweep, the sweep owns the
+claiming, and ranking hands its receipt back rather than ending the run.
 
 An issue enters a batch only when all of the following hold:
 
@@ -230,13 +239,20 @@ while it runs:
   qualify.
 - **Never bypass hooks.** No `--no-verify`, no hook-skipping environment
   variable, no push that dodges the pre-push gate.
-- **Release a bad pick honestly.** A misgroomed issue, or a worker that stalls
-  with no path forward, runs `pnpm issue:release --issue <n>` —
-  `--needs-grooming` when clarity is what is missing — and comments what it
-  learned: what it tried, where it stopped, what a human must decide. A silent
-  release sends the next run into the same wall. Deferred follow-ups get GitHub
-  issues, linked from the PR's `## Deferrals` section; an evidence-backed
-  won't-fix is not a deferral.
+- **Release a bad pick honestly, while it is still `agent-active`.** A
+  misgroomed issue, or a worker that stalls before opening a PR, runs
+  `pnpm issue:release --issue <n>` — `--needs-grooming` when clarity is what is
+  missing — and comments what it learned: what it tried, where it stopped, what
+  a human must decide. A silent release sends the next run into the same wall.
+  Once `issue:review` has moved the issue to `in-pr`, releasing it returns it to
+  the ready queue with the PR still open, and a later sweep duplicates work
+  already up for review — `rank-backlog` does not read a `Refs` cross-reference
+  as ownership, and `issue:release` accepts `in-pr` without objecting. The
+  lifecycle in [`agent-issue-workflow.md`](agent-issue-workflow.md) releases
+  after an unmerged PR closes, so a stall with an open PR keeps `in-pr` and
+  hands the PR to the operator instead. Deferred follow-ups get GitHub issues,
+  linked from the PR's `## Deferrals` section; an evidence-backed won't-fix is
+  not a deferral.
 
 ## The report
 
@@ -258,9 +274,11 @@ A checkout conflict line names the taken path and the fresh one: the taken path
 is never inspected or deleted, so the line is the only record that something is
 sitting there. The same summary is printed to the terminal.
 
-Every one of those facts reaches the report through a worker's closing message.
-The orchestrator writes the report and observes none of it directly, so a
-worker that ends without reporting back leaves a hole nothing on disk fills.
+The receipt line and the refused claims are the orchestrator's own — a refused
+claim never got a worker, so nothing can report it back. Every other fact
+reaches the report through a worker's closing message, and the orchestrator
+observes none of those directly, so a worker that ends without reporting back
+leaves a hole nothing on disk fills.
 
 Two properties make the table worth reading:
 
