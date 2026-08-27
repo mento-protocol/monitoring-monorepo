@@ -24,7 +24,7 @@ maintenance utilities.
 [ADR 0064](../docs/adr/0064-scripts-module-directories.md) governs these
 subdirectories.
 
-- `deploy/`: deploy wrappers and their Node helpers
+- `deploy/`: deploy wrappers and Node helpers
 - `workflows/`: scripts backing Actions workflow jobs
 - `bootstrap/`: container and hosted-session setup
 - `context/`: agent context, budget, doc catalog
@@ -33,12 +33,12 @@ subdirectories.
 - `supply-chain/`: lockfile, audit, pin, skew gates
 - `mcp/`: MCP broker, launcher, config rendering
 - `alerts/`: alert-rule lint, peg-policy checks
-- `repo-health/`: code-health, file-size, lint wrappers
-- `terraform/`: movable Terraform guards and helpers
+- `repo-health/`: code-health, file-size, lint
+- `terraform/`: movable Terraform guards/helpers
 - `gate/`: gate routing engine + helpers
 - `sentry/`: triage/autofix/gate/broker/ci-wiring
 
-`lib/` and `production-infra-identity-contract/` predate the reorganization.
+`lib/` and `production-infra-identity-contract/` predate the reorg.
 `.config/wt.toml` and eight docs pin flat `setup.sh`.
 `redrive-onchain-deadletter.{mjs,test.mjs}` stays flat under
 `alerts/infra/`; ADR 0064 gives the lint reason.
@@ -79,6 +79,8 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   `repo-health/guardrail-prose.json` route to the guardrail suite. `ci.yml` pins
   both paths in two jobs, quick-commands names the checker, and the manifest's
   keys pin `AGENTS.md`, `CLAUDE.md` and the operating card. ADR 0073 has it.
+  `pr/merge-pr*`, both PR-state helpers, and `agent-autoreview.sh` (Codex
+  markers) route `pnpm pr:merge:test`.
 - **Gate runtime module pins.** Before `cd`, `agent-quality-gate.sh` loads
   `$script_source_dir/gate/run-handles.sh`; move it with its signature, self-test
   route, and missing-helper fixture. It also pins
@@ -130,7 +132,7 @@ the next move.
 ## Sweep Checklist for a Move
 
 Apply every item in
-[ADR 0064's eleven-surface move checklist](../docs/adr/0064-scripts-module-directories.md#sweep-checklist-for-a-move)
+[ADR 0064's move checklist](../docs/adr/0064-scripts-module-directories.md#sweep-checklist-for-a-move)
 in the same PR.
 
 ## Operating Rules
@@ -139,8 +141,8 @@ in the same PR.
   `ERR` trap needs inheritance. Source-only helpers leave shell options to their
   caller.
 - Parse JSON with Node, jq, or structured tooling, never grep or sed.
-- Compact/watch scripts must keep machine state and cadence metadata separate
-  from display strings. Gate emissions on stable fields, not volatile counters,
+- Compact/watch scripts keep machine state and cadence metadata separate from
+  display strings. Gate emissions on stable fields, not volatile counters,
   block heights, or progress lines.
 - Wrappers that deploy local checkout state source `scripts/lib/deploy-guard.sh`
   before mutation. `deploy-indexer:promote` acts on a registered remote
@@ -149,22 +151,23 @@ in the same PR.
 - Do not add `--no-verify` to normal Git commands. `deploy-indexer.sh` uses it
   only for `envio` trigger-ref pushes, which intentionally skip redundant
   pre-push hooks; never generalize it.
-- New deploy scripts must print target, commit, and rollback or verification command around mutation.
+- New deploy scripts print target, commit, and rollback/verification around
+  mutation.
 - New Node root scripts need `pnpm lint:scripts` coverage; new shell scripts must
   pass `bash -n`. Add a focused command to `scripts/agent-quality-gate.sh` for
-  behavior syntax and lint checks cannot verify.
+  behavior syntax and lint cannot verify.
 - No ESLint `max-lines` reaches this tree. The file-size watchlist reports it
   instead — tests aside, three trust-root files exempt:
   [ADR 0065](../docs/adr/0065-scripts-file-size-watchlist-scope.md).
 - `pnpm tf plan/apply platform` owns one private saved plan. Never accept a
-  caller plan path, or print, upload, or cache either plan form. The wrapper
-  mechanism and its deploy-only bootstrap exception are in
+  caller plan path, or print, upload, or cache either plan form. Mechanism and
+  deploy-only bootstrap exception:
   [ADR 0061](../docs/adr/0061-exact-plan-guard-for-manual-platform-applies.md).
 - `pnpm tf:test` enforces the deployment source-staging contract. Never add a
   deploy callsite, an indirect or dynamic deploy form, or a CLI service-account
   override; keep inert examples in `scripts/deploy-staging-contract.test.mjs`.
   [ADR 0053](../docs/adr/0053-explicit-deployment-source-staging.md) owns the
-  contract, the allowed callsites, and its proof limits.
+  contract, callsites, and proof limits.
 
 ## Verification
 
