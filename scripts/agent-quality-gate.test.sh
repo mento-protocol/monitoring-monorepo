@@ -1949,6 +1949,8 @@ if ! /bin/bash -c '
   '\'' "$payload_file"
   gate_coordinator_publish_success true linters
   grep -Fxq $'\''success\t{"source":"agent-quality-gate","qualified":true,"reusable":false,"skipped":[{"command":"trunk","reason":"downloads-unavailable"}]}'\'' "$payload_file"
+  gate_coordinator_publish_success true plugin
+  grep -Fxq $'\''success\t{"source":"agent-quality-gate","qualified":true,"reusable":false,"skipped":[{"command":"trunk","reason":"downloads-unavailable"}]}'\'' "$payload_file"
   gate_coordinator_publish_success false ""
   grep -Fxq $'\''success\t{"source":"agent-quality-gate"}'\'' "$payload_file"
 ' coordinator-qualified-payload-test \

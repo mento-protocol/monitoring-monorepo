@@ -580,7 +580,7 @@ gate_coordinator_publish_success() {
       gate_coordinator_publish_result success \
         '{"source":"agent-quality-gate","qualified":true,"reusable":false,"skipped":[{"command":"trunk","reason":"provisioning-unavailable"}]}'
       ;;
-    true:linters)
+    true:plugin | true:linters)
       gate_coordinator_publish_result success \
         '{"source":"agent-quality-gate","qualified":true,"reusable":false,"skipped":[{"command":"trunk","reason":"downloads-unavailable"}]}'
       ;;
