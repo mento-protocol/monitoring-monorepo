@@ -1510,8 +1510,13 @@ assert.ok(
 );
 assert.match(
   source,
-  /read -r -d '' gate_bash_environment_record[\s\S]*?BASH_FUNC_\*%%\|BASH_FUNC_\*'\(\)'[\s\S]*?\(\) \{[\s\S]*?\/usr\/bin\/env -0[\s\S]*?agent-quality-gate-env-end[\s\S]*?gate_bash_environment_scan_complete[\s\S]*?gate_sanitized_bash_launcher\+=\(\/bin\/bash -p\)/u,
+  /read -r -d '' gate_bash_environment_record[\s\S]*?BASH_FUNC_\*%%\|BASH_FUNC_\*'\(\)'[\s\S]*?\(\) \{[\s\S]*?--nul-delimited-environment-records[\s\S]*?gate_bash_environment_scan_complete[\s\S]*?gate_sanitized_bash_launcher\+=\(\/bin\/bash -p\)/u,
   "the sanitized launcher must remove exported functions and fail a truncated environment scan",
+);
+assert.doesNotMatch(
+  source,
+  /\/usr\/bin\/env\s+-0/u,
+  "the environment scan must not require the non-portable env -0 option",
 );
 assert.match(
   source,

@@ -2447,6 +2447,19 @@ export function materialEnvironmentDigest({
   return hash.digest("hex");
 }
 
+export function nulDelimitedEnvironmentRecords(environment = process.env) {
+  const records = [];
+  for (const name of Object.keys(environment).sort((left, right) =>
+    Buffer.compare(Buffer.from(left), Buffer.from(right)),
+  )) {
+    const value = environment[name];
+    if (value === undefined) continue;
+    records.push(Buffer.from(`${name}=${value}\0`));
+  }
+  records.push(Buffer.from("agent-quality-gate-env-end\0"));
+  return Buffer.concat(records);
+}
+
 function main() {
   if (
     process.argv.length === 3 &&
@@ -2470,6 +2483,13 @@ function main() {
       `agent-quality-gate-scrub-policy=${mappedChildScrubPolicyDigest()}\0`,
     );
     process.stdout.write("agent-quality-gate-scrub-end\0");
+    return;
+  }
+  if (
+    process.argv.length === 3 &&
+    process.argv[2] === "--nul-delimited-environment-records"
+  ) {
+    process.stdout.write(nulDelimitedEnvironmentRecords());
     return;
   }
   let repoRoot;

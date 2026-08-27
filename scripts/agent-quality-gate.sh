@@ -417,9 +417,7 @@ while IFS= read -r -d '' gate_bash_environment_record; do
       ;;
   esac
 done < <(
-  if /usr/bin/env -0; then
-    printf '%s\0' agent-quality-gate-env-end
-  fi
+  node "$gate_environment_helper" --nul-delimited-environment-records
 )
 if [[ "$gate_bash_environment_scan_complete" -ne 1 ]]; then
   echo "error: could not inspect Bash startup controls for the quality gate." >&2
