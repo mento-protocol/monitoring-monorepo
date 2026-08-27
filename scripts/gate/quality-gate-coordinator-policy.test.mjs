@@ -23,6 +23,7 @@ import {
   LOCAL_BIN_MAX_FILE_BYTES,
   MATERIAL_CWD_BOUND_ENVIRONMENT_NAMES,
   MATERIAL_EMPTY_COMPONENT_CWD_PATH_LIST_ENVIRONMENT_NAMES,
+  MATERIAL_FOUNDRY_SOLC_ENVIRONMENT_NAMES,
   MATERIAL_JSON_PATH_LIST_ENVIRONMENT_NAMES,
   MATERIAL_PACKAGE_ROOTS,
   MATERIAL_PATH_LIST_ENVIRONMENT_NAMES,
@@ -816,6 +817,24 @@ test("material environment normalizes only worktree lifecycle roots", async (t) 
       `an absolute ${name} may coalesce across worktrees`,
     );
   }
+  assert.notEqual(
+    directMaterialEnvironmentDigest(first, {
+      NODE_ICU_DATA: join("..", "shared-icu-data"),
+    }),
+    directMaterialEnvironmentDigest(second, {
+      NODE_ICU_DATA: join("..", "shared-icu-data"),
+    }),
+    "a relative NODE_ICU_DATA must bind the physical worktree",
+  );
+  assert.notEqual(
+    directMaterialEnvironmentDigest(first, {
+      NODE_ICU_DATA: "/tmp/shared-icu-data-a",
+    }),
+    directMaterialEnvironmentDigest(first, {
+      NODE_ICU_DATA: "/tmp/shared-icu-data-b",
+    }),
+    "different absolute NODE_ICU_DATA values must remain material",
+  );
   for (const name of [
     "AGENT_QUALITY_GATE_LOCK_TEST_READY_FILE",
     "AGENT_QUALITY_GATE_LOCK_TEST_RELEASE_FILE",
@@ -992,6 +1011,21 @@ test("material environment normalizes only worktree lifecycle roots", async (t) 
       `an empty ${name} must not bind the physical worktree`,
     );
   }
+  assert.notEqual(
+    directMaterialEnvironmentDigest(first, { VITEST_DEBUG_DUMP: "true" }),
+    directMaterialEnvironmentDigest(second, { VITEST_DEBUG_DUMP: "true" }),
+    "VITEST_DEBUG_DUMP=true must conservatively bind the physical worktree",
+  );
+  for (const name of [
+    "FOUNDRY_IGNORED_ERROR_CODES_FROM",
+    "FOUNDRY_IGNORED_WARNINGS_FROM",
+  ]) {
+    assert.notEqual(
+      directMaterialEnvironmentDigest(first, { [name]: "[]" }),
+      directMaterialEnvironmentDigest(second, { [name]: "[]" }),
+      `a nonempty ${name} must conservatively bind the physical worktree`,
+    );
+  }
   for (const name of ["TF_CLI_ARGS", "TF_CLI_ARGS_plan"]) {
     assert.notEqual(
       directMaterialEnvironmentDigest(first, { [name]: "-chdir=../terraform" }),
@@ -1001,33 +1035,31 @@ test("material environment normalizes only worktree lifecycle roots", async (t) 
       `a nonempty ${name} must conservatively bind the physical worktree`,
     );
   }
-  for (const value of [join("..", "bin", "solc"), "local-solc"]) {
-    assert.notEqual(
-      directMaterialEnvironmentDigest(first, { FOUNDRY_SOLC: value }),
-      directMaterialEnvironmentDigest(second, { FOUNDRY_SOLC: value }),
-      `relative FOUNDRY_SOLC=${value} must bind the physical worktree`,
-    );
-  }
-  assert.equal(
-    directMaterialEnvironmentDigest(first, {
-      FOUNDRY_SOLC: "/tmp/shared-solc",
-    }),
-    directMaterialEnvironmentDigest(second, {
-      FOUNDRY_SOLC: "/tmp/shared-solc",
-    }),
-    "an absolute FOUNDRY_SOLC may coalesce across worktrees",
-  );
-  for (const value of [
-    "auto",
-    "0.8.24",
-    "solc:0.8.24",
-    "0.8.24+commit.e11b9ed9",
-  ]) {
+  for (const name of MATERIAL_FOUNDRY_SOLC_ENVIRONMENT_NAMES) {
+    for (const value of [join("..", "bin", "solc"), "local-solc"]) {
+      assert.notEqual(
+        directMaterialEnvironmentDigest(first, { [name]: value }),
+        directMaterialEnvironmentDigest(second, { [name]: value }),
+        `relative ${name}=${value} must bind the physical worktree`,
+      );
+    }
     assert.equal(
-      directMaterialEnvironmentDigest(first, { FOUNDRY_SOLC: value }),
-      directMaterialEnvironmentDigest(second, { FOUNDRY_SOLC: value }),
-      `FOUNDRY_SOLC=${value} must remain a compiler selector`,
+      directMaterialEnvironmentDigest(first, { [name]: "/tmp/shared-solc" }),
+      directMaterialEnvironmentDigest(second, { [name]: "/tmp/shared-solc" }),
+      `an absolute ${name} may coalesce across worktrees`,
     );
+    for (const value of [
+      "auto",
+      "0.8.24",
+      "solc:0.8.24",
+      "0.8.24+commit.e11b9ed9",
+    ]) {
+      assert.equal(
+        directMaterialEnvironmentDigest(first, { [name]: value }),
+        directMaterialEnvironmentDigest(second, { [name]: value }),
+        `${name}=${value} must remain a compiler selector`,
+      );
+    }
   }
   for (const [name, value] of [
     ["COREPACK_ENV_FILE", "0"],
