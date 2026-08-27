@@ -57,12 +57,17 @@ lock="${AGENT_QUALITY_GATE_LOCK_DIR:-$HOME/.cache/agent-quality-gate}/run.lock"
 ```
 
 The record names `started_at` in epoch seconds, plus the holding pid, machine,
-and worktree. When a holder has held the lock for more than ten minutes,
-**report it and stop**: name the pid and the worktree so the operator can find
-the session, and do not start. A long-held lock means another session is
-mid-gate, and queueing a whole batch behind it turns a two-issue night into
-one late PR. Never pass `--no-lock` and never delete the lock directory to get
-past this — the gate owns its own reclaim rules, and a lock that looks stale
+and worktree. Age alone does not settle it. Confirm the holder is alive first —
+on the recorded machine, `ps -p <pid>` — because a crashed gate leaves its
+record behind, and treating that record as a live holder would stop every later
+sweep for good. When a **live** holder has held the lock for more than ten
+minutes, **report it and stop**: name the pid and the worktree so the operator
+can find the session, and do not start. A long-held lock means another session
+is mid-gate, and queueing a whole batch behind it turns a two-issue night into
+one late PR. When the recorded pid is gone, or the record belongs to another
+machine, leave the lock alone and let the gate apply its own reclaim rules on
+the next run. Never pass `--no-lock` and never delete the lock directory to get
+past this — the gate owns those reclaim rules, and a lock that looks stale
 from outside is routinely a live holder inside a long browser suite.
 
 **State the usage reality before starting.** One shipped PR costs roughly 3% of

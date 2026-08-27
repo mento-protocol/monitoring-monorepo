@@ -118,11 +118,15 @@ clean session worktree, working `gh` auth, and the gate's machine lock.
 The lock check is the one that is easy to skip and expensive to skip. Gate runs
 are serialized machine-wide, and a sweep takes that lock once per issue and
 again for every patch cycle. When another session has held
-`<lock-root>/run.lock` for more than ten minutes, the sweep **reports the
-holding pid and worktree and stops**. It does not wait the batch out behind an
-unknown holder, and it never passes `--no-lock` or deletes the lock directory:
-the gate owns its own reclaim rules, and a lock that looks stale from outside is
-routinely a live holder inside a long browser suite.
+`<lock-root>/run.lock` for more than ten minutes **and its recorded pid is
+still alive on this machine**, the sweep **reports the holding pid and worktree
+and stops**. Liveness is part of the test: a crashed gate leaves its owner
+record behind, and a sweep that read age alone would stop itself permanently on
+a holder that no longer exists. A dead or foreign record is left untouched for
+the gate to reclaim on its next run. The sweep does not wait the batch out
+behind a live holder, and it never passes `--no-lock` or deletes the lock
+directory: the gate owns those reclaim rules, and a lock that looks stale from
+outside is routinely a live holder inside a long browser suite.
 
 ## Resilience duties
 
