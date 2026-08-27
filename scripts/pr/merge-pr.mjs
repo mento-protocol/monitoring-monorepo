@@ -382,6 +382,32 @@ export async function mergePullRequest({
     );
   }
 
+  // Same reasoning for auto-merge. The pre-briefing read is what licenses the
+  // post-merge cleanup to call anything it cancels its own, and that licence
+  // expires the moment another operator can act — which the unbounded prompt
+  // gives them. Re-read it, or the cleanup could turn off a request enabled
+  // while the operator was reading.
+  let confirmedAutoMerge;
+  try {
+    confirmedAutoMerge = await readAutoMergeRequest({
+      gh,
+      repo: repos.base,
+      number,
+    });
+  } catch (err) {
+    throw new MergeRefusal(
+      `unable to re-read the auto-merge state of ${repos.base}#${number}: ` +
+        `${err instanceof Error ? err.message : String(err)}. ` +
+        `Refusing, because this command must not cancel a request it did not create.`,
+    );
+  }
+  if (confirmedAutoMerge !== null) {
+    throw new MergeRefusal(
+      `${repos.base}#${number} gained an auto-merge request while you were confirming; ` +
+        `re-run — this command will not merge over it or cancel it.`,
+    );
+  }
+
   // The merge below starts a fresh `gh`, which reads whatever credentials are
   // active then — not the ones read before the prompt. A `gh auth switch` while
   // the prompt was open would otherwise record one login in the ledger and

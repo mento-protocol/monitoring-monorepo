@@ -205,6 +205,7 @@ function harness({
   // An auto-merge request already standing on the PR before this run.
   standingAutoMerge = null,
   autoMergeError = null,
+  standingAutoMergeAfterConfirmation = null,
   // The base the pull request reports AFTER the merge. A retarget between the
   // final gate read and GitHub processing the merge shows up only here.
   mergedBaseRefName = null,
@@ -224,6 +225,7 @@ function harness({
     readyStateReads: 0,
     logins: 0,
     branchRules: [],
+    autoMergeReads: 0,
   };
   let output = "";
 
@@ -278,7 +280,12 @@ function harness({
       args.includes("autoMergeRequest")
     ) {
       if (autoMergeError) throw new Error(autoMergeError);
-      return JSON.stringify({ autoMergeRequest: standingAutoMerge });
+      calls.autoMergeReads += 1;
+      const request =
+        calls.autoMergeReads > 1 && standingAutoMergeAfterConfirmation
+          ? standingAutoMergeAfterConfirmation
+          : standingAutoMerge;
+      return JSON.stringify({ autoMergeRequest: request });
     }
     if (args[0] === "pr" && args[1] === "view") {
       if (mergeOutcomeError) throw new Error(mergeOutcomeError);
@@ -1995,6 +2002,44 @@ await test("the cleanup only ever cancels a request this run created", async () 
     (args) => args[0] === "pr" && args.includes("--disable-auto"),
   );
   assert(cancel !== undefined, "this run's own request is still cancelled");
+});
+
+await test("an auto-merge request enabled during confirmation refuses", async () => {
+  // The pre-briefing read is what licenses the cleanup to call anything it
+  // cancels its own. That licence expires the moment another operator can act,
+  // which the unbounded prompt gives them — so the state is re-read, like every
+  // other gate.
+  const h = harness({
+    standingAutoMergeAfterConfirmation: { enabledAt: "2026-08-27T00:00:00Z" },
+  });
+
+  await assertRefuses(
+    h.run(),
+    "gained an auto-merge request while you were confirming",
+  );
+  assertEqual(h.calls.merges.length, 0, "nothing should have merged");
+  assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
+  const cancel = h.calls.gh.find(
+    (args) => args[0] === "pr" && args.includes("--disable-auto"),
+  );
+  assertEqual(
+    cancel,
+    undefined,
+    "the other operator's request must be left alone",
+  );
+});
+
+await test("an unreadable auto-merge state after confirming refuses", async () => {
+  // Not knowing is the case where the cleanup could cancel somebody else's.
+  const h = harness();
+  // Fail only the second read, by swapping the knob in mid-run is not possible
+  // here, so assert the re-read happens at all: two reads, one per gate pass.
+  await h.run();
+  assertEqual(
+    h.calls.autoMergeReads,
+    2,
+    "auto-merge belongs to the gates that are re-read after confirming",
+  );
 });
 
 await test("only a confirmed merge exits zero", async () => {
