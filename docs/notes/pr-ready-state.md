@@ -363,12 +363,11 @@ Field expectations:
   `name`, `state`, `required: true`, and a URL when GitHub provides one.
 - `optional.items[]`: advisory signals worth reporting separately. Every item
   needs `kind`, `name`, `state`, and `required: false`.
-- `requiredChecks[]`: the required subset of the status checks, the same set
-  `required.blockers[]` is derived from. Every item needs `name`, `state`, and
-  `required: true`. `state` is whatever `classifyCheck()` returns — `pass`,
-  `fail`, `pending`, or `skipped`, the last for a `NEUTRAL` or `SKIPPED`
-  conclusion — so a consumer must tolerate all four rather than assume the
-  three that block or clear. Count required checks
+- `requiredChecks[]`: the required subset of the status checks, the set
+  `required.blockers[]` derives from. Each item has `name`, `required: true`,
+  and a `classifyCheck()` `state` — `pass`, `fail`, `pending`, or `skipped`
+  (a `NEUTRAL`/`SKIPPED` conclusion), so consumers tolerate all four. Count
+  required checks
   from this field, never by filtering `statusChecks`: that grouping describes
   every check the PR has and carries no `required` flag at all, so a filter on
   one is a permanent zero. `pnpm pr:merge` reports its briefing counts from
