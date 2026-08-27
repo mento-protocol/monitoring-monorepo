@@ -16,7 +16,7 @@ import {
 } from "./config.js";
 import { flushLiquitySnapshots, touchLiquityInstance } from "./instance.js";
 import { pendingTroveKey } from "./keys.js";
-import { computeTroveIcrBps, negativeToPositive } from "./math.js";
+import { computeTroveIcrBps } from "./math.js";
 import { loadLiquityPrice } from "./priceFeed.js";
 import {
   classifyKnownPendingStabilityPoolConsumptionSource,
@@ -38,17 +38,10 @@ import {
   moveTroveUpdatedInterestRateBracketDebt,
   removesFromBatch,
 } from "./troveUpdates.js";
-import { OP, isBatchMembershipOperation } from "./operations.js";
-import {
-  setPendingBatchMembershipOperation,
-  setPendingRedemption,
-} from "./pendingOperations.js";
 import { getOrLoadSystemParams, preloadSystemParams } from "./systemParams.js";
 import {
+  applyTroveOperationTransition,
   isForcedOperation,
-  transitionClosedTrove,
-  transitionLiquidatedTrove,
-  transitionOpenedTrove,
 } from "./troveManagerTransitions.js";
 import {
   TROVE_STATUS,
@@ -123,67 +116,39 @@ indexer.onEvent(
     const prevTroveState = { status: trove.status, debt: trove.debt };
     // See `captureTroveOperationSnapshotState` for why we capture these now.
     const snapshotState = captureTroveOperationSnapshotState(trove);
+    // `BatchedTroveUpdated` (never `TroveUpdated`) fires before
+    // `TroveOperation` for a batch-managed op and stages this row keyed by
+    // tx+trove — its presence is how `maybeRecordTroveOperation` knows
+    // `snapshotState.debtAfter` above is stale. See that function's doc.
+    const pendingBatchedTroveUpdate =
+      await context.PendingBatchedTroveUpdate.get(
+        pendingTroveKey(
+          event.chainId,
+          event.transaction.hash,
+          collateralId,
+          troveId,
+        ),
+      );
 
     const op = Number(event.params._operation);
     const forced = isForcedOperation(op);
 
-    if (op === OP.OPEN_TROVE || op === OP.OPEN_TROVE_AND_JOIN_BATCH) {
-      ({ trove, instance } = transitionOpenedTrove(trove, instance, {
-        blockTimestamp,
-        blockNumber,
+    ({ trove, instance } = await applyTroveOperationTransition(
+      context,
+      trove,
+      instance,
+      {
+        op,
+        chainId: event.chainId,
         txHash: event.transaction.hash,
-      }));
-    } else if (op === OP.CLOSE_TROVE) {
-      ({ trove, instance } = transitionClosedTrove(trove, instance, {
-        blockTimestamp,
-        blockNumber,
-        txHash: event.transaction.hash,
-      }));
-    } else if (op === OP.LIQUIDATE) {
-      ({ trove, instance } = transitionLiquidatedTrove(trove, instance, {
+        collateralId,
+        annualInterestRate: event.params._annualInterestRate,
         collChange: event.params._collChangeFromOperation,
         debtChange: event.params._debtChangeFromOperation,
         blockTimestamp,
         blockNumber,
-        txHash: event.transaction.hash,
-      }));
-    } else if (op === OP.REDEEM_COLLATERAL) {
-      trove = {
-        ...trove,
-        redemptionCount: trove.redemptionCount + 1,
-        redeemedColl:
-          trove.redeemedColl +
-          negativeToPositive(event.params._collChangeFromOperation),
-        redeemedDebt:
-          trove.redeemedDebt +
-          negativeToPositive(event.params._debtChangeFromOperation),
-      };
-      const collateral = await context.LiquityCollateral.get(collateralId);
-      const nextStatus = statusFromCollateral(trove.debt, collateral);
-      const transitioned = transitionTroveStatus(trove, nextStatus, instance);
-      trove = transitioned.trove;
-      instance = transitioned.instance;
-      setPendingRedemption(context, {
-        chainId: event.chainId,
-        txHash: event.transaction.hash,
-        collateralId,
-        troveId: trove.troveId,
-        timestamp: blockTimestamp,
-        blockNumber,
-      });
-    } else if (isBatchMembershipOperation(op)) {
-      setPendingBatchMembershipOperation(context, {
-        chainId: event.chainId,
-        txHash: event.transaction.hash,
-        collateralId,
-        troveId: trove.troveId,
-        operation: op,
-        annualInterestRate: event.params._annualInterestRate,
-        interestBatchId: trove.interestBatchId,
-        timestamp: blockTimestamp,
-        blockNumber,
-      });
-    }
+      },
+    ));
 
     if (!forced) trove = { ...trove, lastUserActionAt: blockTimestamp };
     instance = await recordBorrowingFeeAndApplyCum(
@@ -217,6 +182,7 @@ indexer.onEvent(
       instanceId: instance.id,
       troveId,
       snapshotState,
+      pendingBatchedTroveUpdate,
       blockNumber,
       blockTimestamp,
     });
