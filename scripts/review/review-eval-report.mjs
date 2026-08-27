@@ -155,6 +155,32 @@ export function leakSuspected(row) {
 }
 
 /**
+ * Whether this row measured the installed review skill.
+ *
+ * A `--skill-ref` run stamps `skill_ref` with the candidate directory and
+ * `dirty: true`, and what it measured is a working copy nobody has to keep: a
+ * rejected candidate leaves the installed skill untouched. Two selections are
+ * about the installed lineage and must not read such a row as one of its runs —
+ * the freshness clock that says when the operating point was last verified, and
+ * the automatic baseline every later run is paired against. A complete
+ * candidate experiment would otherwise reset `daysSinceFull`, hold
+ * `resolveKind` on canaries for a whole cadence window and suppress the
+ * staleness issue while the installed skill has not scored in months, and it
+ * could become the anchor whose bits are the denominator of every flip counted
+ * after it. Candidate rows stay in the ledger as comparison evidence, and a
+ * promoted candidate re-enters both selections through the next installed run.
+ *
+ * Both markers are required, so a row carrying neither is left out of the
+ * installed lineage rather than counted into it: that direction ages a clock
+ * and drops an anchor, which is the failure a reader sees.
+ */
+export function installedSkillRun(row) {
+  const inputs = row?.inputs;
+  if (!isObject(inputs)) return false;
+  return inputs.dirty !== true && inputs.skill_ref === "installed";
+}
+
+/**
  * The note a pair that straddles a CLI upgrade carries, or null.
  *
  * `comparability_key` deliberately omits the two CLI versions: they move far

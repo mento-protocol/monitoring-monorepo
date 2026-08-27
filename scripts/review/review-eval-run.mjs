@@ -15,6 +15,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   writeFileSync,
 } from "node:fs";
 import { hostname, tmpdir } from "node:os";
@@ -621,6 +622,80 @@ export const SCRUBBED_ENV_VARS = [
   "GH_ENTERPRISE_TOKEN",
 ];
 
+// The path-bearing variables a judge must never inherit. `run-eval.sh` scrubs
+// the same family per cell: pnpm exports `INIT_CWD`, `PNPM_SCRIPT_SRC_DIR`,
+// `npm_config_local_prefix` and more into every script it runs, each naming the
+// checkout the frozen answer key lives in, and the family is open-ended, so it
+// is matched by name pattern rather than enumerated. `OLDPWD` and `PWD` hand
+// over a directory the same way: `claude` is not a shell, so it carries the
+// inherited value rather than re-deriving it from the `cwd` it was spawned in.
+const SOURCE_PATH_ENV_PATTERN = /^(?:npm_|PNPM_)/;
+const SOURCE_PATH_ENV_VARS = ["INIT_CWD", "NODE_PATH", "OLDPWD", "PWD"];
+
+// This module's own checkout. Under the documented `pnpm review:eval:run` the
+// scoring pass reads its harness out of the spec worktree, and that worktree
+// carries `docs/evals/review-skill-truth/` — so the tree this file was loaded
+// from is the first path a judge must not be handed.
+const MODULE_ROOT = fileURLToPath(new URL("../../", import.meta.url));
+
+function realOrSelf(target) {
+  const resolved = path.resolve(String(target));
+  try {
+    return realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
+/**
+ * The checkouts a scoring subprocess must not be given a path into: this
+ * module's own tree, plus whatever the pnpm variables named before they were
+ * dropped. A caller that knows another root — `--root` naming a third checkout
+ * — passes it as `roots`.
+ */
+export function sourceCheckouts({ env = process.env, roots = [] } = {}) {
+  return [
+    ...new Set(
+      [
+        MODULE_ROOT,
+        env.INIT_CWD,
+        env.npm_config_local_prefix,
+        env.PNPM_SCRIPT_SRC_DIR,
+        ...roots,
+      ]
+        .filter(Boolean)
+        .map(realOrSelf),
+    ),
+  ];
+}
+
+/**
+ * `PATH` minus every entry that resolves inside one of those checkouts.
+ *
+ * It is the last path-bearing variable, and it survives the scrub above because
+ * a judge still needs node and git: under `pnpm review:eval:run` pnpm prepends
+ * `<checkout>/node_modules/.bin`, which hands a `Bash`-enabled judge the
+ * checkout root the variable scrub just took away. Entries are compared
+ * canonically as well as literally, because a symlinked `node_modules/.bin`
+ * passes a string comparison and still lands in the repository.
+ */
+export function scrubPath(value, checkouts = sourceCheckouts()) {
+  return String(value ?? "")
+    .split(path.delimiter)
+    .filter((entry) => {
+      if (!entry) return false;
+      const real = realOrSelf(entry);
+      return !checkouts.some(
+        (root) =>
+          real === root ||
+          real.startsWith(`${root}${path.sep}`) ||
+          entry === root ||
+          entry.startsWith(`${root}${path.sep}`),
+      );
+    })
+    .join(path.delimiter);
+}
+
 let scrubbedGhConfigDir = null;
 
 /** An empty `gh` config directory, created once per process. */
@@ -637,15 +712,33 @@ function emptyGhConfigDir() {
  * directory, and a git with no credential helper, no prompt, no askpass and
  * no protocol but `file`. The model API stays reachable, so this is defense in
  * depth against prompt-injected fixture content, not containment.
+ *
+ * The same shell's source-path treatment applies here too, and for the same
+ * reason: `classifyNovel` gives its judge `Bash` inside the fixture, so a
+ * prompt-injected claim that follows an inherited `INIT_CWD` or a
+ * `node_modules/.bin` entry on `PATH` reaches `docs/evals/review-skill-truth/`
+ * and contaminates `novel_real` and `wrong_claims` — and unlike contestant
+ * output, a judge's reading of the key passes through no `leakSignals()`.
  */
 export function scrubbedEnv({
   env = process.env,
   ghConfigDir = emptyGhConfigDir(),
+  roots = [],
 } = {}) {
   const scrubbed = { ...env };
   for (const name of SCRUBBED_ENV_VARS) delete scrubbed[name];
+  const checkouts = sourceCheckouts({ env, roots });
+  for (const name of Object.keys(scrubbed)) {
+    if (
+      SOURCE_PATH_ENV_PATTERN.test(name) ||
+      SOURCE_PATH_ENV_VARS.includes(name)
+    ) {
+      delete scrubbed[name];
+    }
+  }
   return {
     ...scrubbed,
+    PATH: scrubPath(env.PATH, checkouts),
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_CONFIG_SYSTEM: "/dev/null",
     GIT_CONFIG_COUNT: "1",

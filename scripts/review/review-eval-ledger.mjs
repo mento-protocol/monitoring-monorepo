@@ -17,6 +17,7 @@ import { appendFileSync, readFileSync } from "node:fs";
 
 import { plannedMatrix } from "./review-eval-fixtures.mjs";
 import {
+  installedSkillRun,
   judgeCalibrationPasses,
   leakSuspected,
 } from "./review-eval-report.mjs";
@@ -794,11 +795,20 @@ export function freshness({
   // A run whose notes record a suspected leak is refused by the same three
   // gates for the same reason — its bits may have come from the answer key
   // rather than from the review — so it may not move this clock either.
+  //
+  // A `--skill-ref` candidate run verified nothing about the installed skill:
+  // it measured a working copy that may have been rejected the same afternoon.
+  // This clock is what `resolveKind` and the staleness issue read as "the
+  // operating point was checked", so a candidate row moving it would buy the
+  // installed skill a whole cadence window of canaries on an experiment.
+  // `daysSinceAny` and `daysSinceComplete` still count it: those say the
+  // harness ran and produced a complete matrix, which a candidate run does.
   const lastFull = newestInstant(
     eligible,
     (row) =>
       row.kind === "full" &&
       row.status === "complete" &&
+      installedSkillRun(row) &&
       judgeCalibrationPasses(row) &&
       !leakSuspected(row),
     evaluatedAt,

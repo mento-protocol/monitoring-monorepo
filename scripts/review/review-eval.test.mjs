@@ -12,6 +12,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -1966,6 +1967,42 @@ test("resolveBaseline refuses a row whose notes record a leak", () => {
   );
 });
 
+test("resolveBaseline refuses a candidate row as the installed anchor", () => {
+  // A `--skill-ref` run measured a working copy, and a rejected candidate
+  // leaves the installed skill untouched. Anchoring on it would make that
+  // experiment the denominator of every flip counted for the installed skill
+  // after it. The runbook's comparison — candidate against installed — is what
+  // `--against` names explicitly; automatic selection stays on the lineage.
+  const asCandidate = (base) => ({
+    ...base,
+    inputs: {
+      ...base.inputs,
+      skill_ref: "/Users/eng/skills/review-candidate",
+      dirty: true,
+    },
+  });
+  const candidate = asCandidate(
+    makeRow({ executedAt: "2026-09-08T10:00:00Z" }),
+  );
+  const row = makeRow({ executedAt: "2026-12-08T10:00:00Z" });
+  assert.equal(resolveBaseline({ rows: [candidate], row }), null);
+
+  const installed = makeRow({ executedAt: "2026-10-08T10:00:00Z" });
+  assert.equal(
+    resolveBaseline({ rows: [candidate, installed], row }).executed_at,
+    installed.executed_at,
+  );
+  // Nor may it re-anchor as a PROMOTE row.
+  const promoted = asCandidate(
+    makeRow({ executedAt: "2026-11-08T10:00:00Z", verdict: "PROMOTE" }),
+  );
+  assert.equal(
+    resolveBaseline({ rows: [candidate, installed, promoted], row })
+      .executed_at,
+    installed.executed_at,
+  );
+});
+
 test("--validate reports a malformed per_defect vector instead of throwing", () => {
   const root = makeRoot();
   try {
@@ -3244,6 +3281,56 @@ test("a scoring subprocess inherits no GitHub credential", () => {
   assert.equal(scrubbed.GIT_TERMINAL_PROMPT, "0");
 });
 
+test("a scoring judge inherits no path back to a source checkout", () => {
+  // `classifyNovel` runs its judge with `Bash` inside the fixture, so the
+  // checkout paths pnpm exports — INIT_CWD, npm_config_local_prefix and the
+  // rest — and the `<checkout>/node_modules/.bin` entry it prepends to `PATH`
+  // are a route to docs/evals/review-skill-truth/ for a prompt-injected claim.
+  // A judge reading the answer key passes through no `leakSignals()`, so it
+  // gets the same treatment `run-eval.sh` gives a contestant cell.
+  const checkout = mkdtempSync(path.join(tmpdir(), "review-eval-checkout-"));
+  try {
+    const bin = path.join(checkout, "node_modules/.bin");
+    mkdirSync(bin, { recursive: true });
+    const scrubbed = scrubbedEnv({
+      env: {
+        PATH: `${bin}:/usr/bin:${checkout}`,
+        INIT_CWD: checkout,
+        npm_config_local_prefix: checkout,
+        npm_package_json: path.join(checkout, "package.json"),
+        PNPM_SCRIPT_SRC_DIR: checkout,
+        NODE_PATH: path.join(checkout, "node_modules"),
+        OLDPWD: checkout,
+        PWD: checkout,
+        ANTHROPIC_API_KEY: "kept",
+      },
+      ghConfigDir: "/tmp/empty-gh",
+    });
+    for (const name of [
+      "INIT_CWD",
+      "npm_config_local_prefix",
+      "npm_package_json",
+      "PNPM_SCRIPT_SRC_DIR",
+      "NODE_PATH",
+      "OLDPWD",
+      "PWD",
+    ]) {
+      assert.equal(scrubbed[name], undefined, name);
+    }
+    // The model API stays reachable, and the entries a judge needs survive.
+    assert.equal(scrubbed.ANTHROPIC_API_KEY, "kept");
+    assert.equal(scrubbed.PATH, "/usr/bin");
+    assert.deepEqual(
+      Object.entries(scrubbed).filter(([, value]) =>
+        String(value).includes(checkout),
+      ),
+      [],
+    );
+  } finally {
+    rmSync(checkout, { recursive: true, force: true });
+  }
+});
+
 test("a cell inherits no path back to the source checkout", () => {
   // The answer key is frozen on main under docs/evals/review-skill-truth/, and
   // the runbook starts a manual run from the repository root. `run_in_fixture`
@@ -3326,6 +3413,72 @@ test("the orchestrator keeps its resume cache outside the spec worktree", () => 
   // plan directory inside it takes every completed cell down with it.
   assert.match(script, /RUN_DIR="\$REPO\/\$DETAIL_DIR"/);
   assert.match(script, /--out "\$RUN_DIR"/);
+});
+
+test("the spec worktree is not created where a cell can list it", () => {
+  // The spec is a second checkout of origin/main, so it carries the whole
+  // frozen answer key. Under `$TMPROOT` a Bash-enabled contestant finds it by
+  // listing the TMPDIR it inherits and copies the defect bodies out, emitting
+  // no PR number, reviewer login or withheld SHA for `leakSignals()` to catch.
+  // Permissions cannot help — a cell runs as the same user — so it goes under
+  // the git directory, which nothing hands a cell a path to.
+  const script = readFileSync(
+    path.join(repoRoot, "scripts/review/run-eval.sh"),
+    "utf8",
+  );
+  assert.match(script, /SPEC="\$\(mktemp -d "\$LOCK_ROOT\/review-eval-spec/);
+  assert.equal(/mktemp -d "\$TMPROOT\/review-eval-spec/.test(script), false);
+  // `$TMPDIR` is swept by the OS and the git directory is not, so a removal
+  // that did not land must not leave a checkout of main sitting in `.git`.
+  const cleanup = shellFunction("cleanup");
+  assert.match(cleanup, /worktree remove --force "\$SPEC"/);
+  assert.match(cleanup, /rm -rf "\$SPEC"/);
+});
+
+test("a failed run publishes no partial scoring artifacts", () => {
+  // `--score` writes calibration.json before the first cell and one result
+  // file per cell it scores. A judge that dies mid-pass, or a scored row that
+  // fails `--validate`, leaves those beside the zero placeholders `failedRow`
+  // publishes, and `--revalidate-appended` recomputes the row from exactly
+  // those files and rejects the failure PR. The paid `cells/` cache stays.
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-partial-"));
+  try {
+    const run = path.join(dir, "run");
+    mkdirSync(path.join(run, "cells", "pr-1990-pipeline-draw1"), {
+      recursive: true,
+    });
+    for (const file of [
+      "calibration.json",
+      "result-1990-pipeline-1.json",
+      "result-1999-control-1.json",
+    ]) {
+      writeFileSync(path.join(run, file), "{}\n");
+    }
+    writeFileSync(
+      path.join(run, "cells", "pr-1990-pipeline-draw1", "result.json"),
+      "{}\n",
+    );
+    writeFileSync(path.join(run, "plan.json"), "{}\n");
+    const harness = [
+      "set -uo pipefail",
+      `RUN_DIR=${JSON.stringify(run)}`,
+      shellFunction("clear_scoring_artifacts"),
+      "clear_scoring_artifacts",
+    ].join("\n");
+    const result = spawnSync("bash", ["-c", harness], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(readdirSync(run).sort(), ["cells", "plan.json"]);
+    assert.equal(
+      existsSync(path.join(run, "cells", "pr-1990-pipeline-draw1/result.json")),
+      true,
+      "the paid resume cache was deleted",
+    );
+    // And the failed-row writer is what calls it, so no abort path publishes
+    // a row whose detail disagrees with it.
+    assert.match(shellFunction("write_failed_row"), /clear_scoring_artifacts/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 /** Extract one shell function from run-eval.sh, or fail the test. */

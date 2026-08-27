@@ -94,7 +94,7 @@ function row(overrides = {}) {
     contract_digest: CONTRACT_DIGEST,
     inputs: {
       skill_digest: "d".repeat(64),
-      skill_ref: "origin/main",
+      skill_ref: "installed",
       finder_argv_digest: "e".repeat(64),
       orchestrator_digest: "f".repeat(64),
       claude_cli: "2.1.14",

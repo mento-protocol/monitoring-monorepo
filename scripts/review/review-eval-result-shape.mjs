@@ -14,6 +14,7 @@ import { fixtureForPr } from "./review-eval-fixtures.mjs";
 import {
   compareConditions,
   headlineCondition,
+  installedSkillRun,
   judgeCalibrationPasses,
   leakSuspected,
   verdict,
@@ -127,6 +128,13 @@ export function failedRow({
  * of every flip count after it: anchoring on answer-key-contaminated bits would
  * score each later clean run as a regression against defects the anchor may
  * have read rather than found.
+ *
+ * A `--skill-ref` candidate row is refused as well. The runbook pairs a
+ * candidate against the installed skill, which is the comparison a candidate
+ * experiment exists to make, so an anchor picked automatically has to be an
+ * installed run — otherwise a rejected candidate becomes the denominator every
+ * later installed run is scored against. `--against` still names any row
+ * explicitly, which is how a candidate is compared on purpose.
  */
 export function resolveBaseline({ rows, row }) {
   const eligible = (rows ?? [])
@@ -134,6 +142,7 @@ export function resolveBaseline({ rows, row }) {
       (candidate) =>
         candidate.kind === "full" &&
         candidate.status === "complete" &&
+        installedSkillRun(candidate) &&
         judgeCalibrationPasses(candidate) &&
         !leakSuspected(candidate) &&
         candidate.comparability_key === row.comparability_key &&

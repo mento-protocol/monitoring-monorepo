@@ -179,6 +179,10 @@ cleanup() {
   local code=$?
   if [[ $SPEC_TEMP -eq 1 && -n $SPEC ]]; then
     git -C "$REPO" worktree remove --force "$SPEC" >/dev/null 2>&1 || true
+    # The spec lives under the git directory rather than under `$TMPDIR`, so no
+    # OS sweep ever collects what a failed removal leaves behind.
+    rm -rf "$SPEC"
+    git -C "$REPO" worktree prune >/dev/null 2>&1 || true
   fi
   if [[ -n $SHIM ]]; then
     rm -rf "$SHIM"
@@ -274,7 +278,17 @@ else
     ! git -C "$REPO" diff --cached --quiet -- "$LEDGER"; then
     fail "$LEDGER has uncommitted changes; a run appends to it, so commit or discard them first"
   fi
-  SPEC="$(mktemp -d "$TMPROOT/review-eval-spec.XXXXXX")"
+  # The spec worktree is a second checkout of origin/main, so it carries the
+  # whole frozen answer key under docs/evals/review-skill-truth/. Under
+  # `$TMPROOT` a `Bash`-enabled contestant finds it by listing the `TMPDIR` it
+  # inherits, reads the defect bodies straight out of it, and can then write a
+  # review that names no PR number, no reviewer login and no withheld SHA, so
+  # `leakSignals()` records nothing and the run scores a recall it never earned.
+  # Permissions cannot help — a cell runs as the same user — so the spec goes
+  # where the source checkout itself is: under the git directory, which is not a
+  # tracked path, is not on any cell's `PATH` or in its environment, and is only
+  # reachable by someone who already knows where the checkout is.
+  SPEC="$(mktemp -d "$LOCK_ROOT/review-eval-spec.XXXXXX")"
   rm -rf "$SPEC"
   git -C "$REPO" worktree add --detach "$SPEC" origin/main --quiet
   SPEC_TEMP=1
@@ -460,11 +474,28 @@ log_stderr_tail() {
 
 # --- a failed run still leaves a trace ---------------------------------------
 
+# The scoring artifacts a failed run must not publish beside its row.
+#
+# `--score` writes `calibration.json` before the first cell and one
+# `result-<pr>-<condition>-<draw>.json` per cell it scores, and both survive the
+# failure that follows: a judge that dies mid-pass leaves the cells already
+# scored, and a scored row that then fails `--validate` leaves the whole set.
+# `failedRow` publishes zero placeholders for the conditions, the calibration
+# and the cost, so the freshness workflow's `--revalidate-appended` job — which
+# recomputes a row from exactly these files — reads the leftovers as this run's
+# real numbers and rejects the failure PR. Clear them. `cells/` stays: it is the
+# paid resume cache a retry seeds from, and `KEEP_CELLS` keeps it out of the
+# commit rather than off the disk.
+clear_scoring_artifacts() {
+  rm -f "$RUN_DIR"/calibration.json "$RUN_DIR"/result-*.json
+}
+
 # Appends the status:failed trace row. Returns non-zero when the row was not
 # recorded, which is the one case the caller must not report as a clean run.
 write_failed_row() {
   local reason="$1"
   local row="$RUN_DIR/row.json"
+  clear_scoring_artifacts
   # shellcheck disable=SC2016  # the single-quoted block is node source
   node --input-type=module -e '
     const [planPath, contractPath, spec, ledger, rowPath, reason] = process.argv.slice(1);

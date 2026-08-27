@@ -102,7 +102,7 @@ function row(overrides = {}) {
     contract_digest: DIGEST_A,
     inputs: {
       skill_digest: "d".repeat(64),
-      skill_ref: "origin/main",
+      skill_ref: "installed",
       finder_argv_digest: "e".repeat(64),
       orchestrator_digest: "f".repeat(64),
       claude_cli: "2.1.14",
@@ -881,6 +881,39 @@ test("freshness reports the clocks and the rows it excluded", () => {
   // these against `executed_at` by string.
   assert.equal(result.evaluatedAt, "2026-12-01T00:00:00Z");
   assert.equal(result.level, "green");
+});
+
+test("a candidate run never restarts the installed-skill clock", () => {
+  // A `--skill-ref` row measured a candidate directory, not the installed
+  // review skill, and a rejected candidate leaves that skill exactly as stale
+  // as it was. Moving `daysSinceFull` would send `resolveKind` back to canaries
+  // for a whole cadence window and suppress the staleness issue on an
+  // experiment nobody kept. The other two clocks still count it: they say the
+  // harness ran and produced a complete matrix, which it did.
+  const result = freshness({
+    rows: [
+      row({ executed_at: daysAgo(200) }),
+      row({
+        executed_at: daysAgo(2),
+        inputs: {
+          ...row().inputs,
+          skill_ref: "/Users/eng/skills/review-candidate",
+          dirty: true,
+        },
+      }),
+    ],
+    contract,
+    now: NOW,
+    contractDigest: DIGEST_A,
+  });
+  assert.equal(result.daysSinceAny, 2);
+  assert.equal(result.daysSinceComplete, 2);
+  assert.equal(result.daysSinceFull, 200);
+  assert.equal(result.lastFullAt, daysAgo(200));
+  assert.ok(
+    result.reasons.some((reason) => /no full run in 200 days/.test(reason)),
+    JSON.stringify(result.reasons),
+  );
 });
 
 test("a future-dated row runs no freshness clock", () => {
