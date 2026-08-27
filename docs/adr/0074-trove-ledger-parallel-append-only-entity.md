@@ -54,7 +54,15 @@ event-carried deltas` from the same-transaction resulting state — never
   recorded debt is pre-accrual); the `BatchUpdated` replay fills
   `debtAfter` (share math) and `statusAfter` (replayed classification)
   once at finalize. Op-5/6 rows on batched troves finalize in their own
-  handlers with both debt snapshots null.
+  aggregate handlers, which fire after every per-trove event in the
+  transaction — the replay included — so they take `statusAfter` and the
+  missing `debtAfter` from the `Trove` entity's replayed state rather
+  than the staged pre-replay classification.
+- `REMOVE_FROM_BATCH` (op 9) is excluded from batch classification: its
+  paired update is an ordinary `TroveUpdated` carrying the trove's full
+  individual debt and collateral, so its row writes directly with
+  complete snapshots. Its exit `BatchUpdated` replays no trove rows, so
+  a staged batch row would never finalize.
 - `priceAtEvent` persists the block-close `loadLiquityPrice` sample only
   for rows at or after a fixed calendar cutoff (2026-08-26T00:00:00Z, the
   design-approval date); replayed history keeps it null, so a re-sync is
