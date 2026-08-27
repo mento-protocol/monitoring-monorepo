@@ -78,6 +78,7 @@ import {
   gateSignature,
   interactiveSessionRefusal,
   parseArgs as parseArgsCore,
+  sanitizeTerminalText,
   usage,
 } from "./merge-pr-core.mjs";
 import {
@@ -280,7 +281,7 @@ export async function mergePullRequest({
     });
   } catch (err) {
     throw new MergeRefusal(
-      `unable to read the branch rules for ${approved.baseRefName} in ${repos.base}: ` +
+      `unable to read the branch rules for ${sanitizeTerminalText(approved.baseRefName)} in ${repos.base}: ` +
         `${err instanceof Error ? err.message : String(err)}. ` +
         `Refusing, because a merge-queue base would accept a request this command cannot take back.`,
     );
@@ -309,7 +310,7 @@ export async function mergePullRequest({
 
   if (baseRuleTypes.includes("merge_queue")) {
     throw new MergeRefusal(
-      `${approved.baseRefName} in ${repos.base} uses a merge queue. ` +
+      `${sanitizeTerminalText(approved.baseRefName)} in ${repos.base} uses a merge queue. ` +
         `\`gh pr merge\` would enqueue this pull request and return success, and nothing ` +
         `this command can call removes a queue entry, so the merge would sit outside ` +
         `every gate above. Merge it through the queue deliberately instead.`,
@@ -350,7 +351,7 @@ export async function mergePullRequest({
   }
   if (confirmed.baseRefName !== approved.baseRefName) {
     throw new MergeRefusal(
-      `${repos.base}#${number} was retargeted from ${approved.baseRefName} to ${confirmed.baseRefName} while you were confirming; re-run to review the new base`,
+      `${repos.base}#${number} was retargeted from ${sanitizeTerminalText(approved.baseRefName)} to ${sanitizeTerminalText(confirmed.baseRefName)} while you were confirming; re-run to review the new base`,
     );
   }
   if (confirmed.signature !== approved.signature) {
@@ -370,14 +371,14 @@ export async function mergePullRequest({
     });
   } catch (err) {
     throw new MergeRefusal(
-      `unable to re-read the branch rules for ${confirmed.baseRefName} in ${repos.base}: ` +
+      `unable to re-read the branch rules for ${sanitizeTerminalText(confirmed.baseRefName)} in ${repos.base}: ` +
         `${err instanceof Error ? err.message : String(err)}. ` +
         `Refusing, because a merge-queue base would accept a request this command cannot take back.`,
     );
   }
   if (confirmedRuleTypes.includes("merge_queue")) {
     throw new MergeRefusal(
-      `${confirmed.baseRefName} in ${repos.base} gained a merge queue while you were confirming; ` +
+      `${sanitizeTerminalText(confirmed.baseRefName)} in ${repos.base} gained a merge queue while you were confirming; ` +
         `re-run — this command cannot take back a queued request.`,
     );
   }

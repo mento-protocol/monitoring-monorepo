@@ -206,6 +206,8 @@ function harness({
   standingAutoMerge = null,
   autoMergeError = null,
   standingAutoMergeAfterConfirmation = null,
+  autoMergeErrorAfterConfirmation = null,
+  baseRulesErrorAfterConfirmation = null,
   // The base the pull request reports AFTER the merge. A retarget between the
   // final gate read and GitHub processing the merge shows up only here.
   mergedBaseRefName = null,
@@ -244,6 +246,9 @@ function harness({
     ) {
       if (baseRulesError) throw new Error(baseRulesError);
       calls.branchRules.push(args);
+      if (calls.branchRules.length > 1 && baseRulesErrorAfterConfirmation) {
+        throw new Error(baseRulesErrorAfterConfirmation);
+      }
       const types =
         calls.branchRules.length > 1 && baseRuleTypesAfterConfirmation
           ? baseRuleTypesAfterConfirmation
@@ -281,6 +286,9 @@ function harness({
     ) {
       if (autoMergeError) throw new Error(autoMergeError);
       calls.autoMergeReads += 1;
+      if (calls.autoMergeReads > 1 && autoMergeErrorAfterConfirmation) {
+        throw new Error(autoMergeErrorAfterConfirmation);
+      }
       const request =
         calls.autoMergeReads > 1 && standingAutoMergeAfterConfirmation
           ? standingAutoMergeAfterConfirmation
@@ -2030,16 +2038,32 @@ await test("an auto-merge request enabled during confirmation refuses", async ()
 });
 
 await test("an unreadable auto-merge state after confirming refuses", async () => {
-  // Not knowing is the case where the cleanup could cancel somebody else's.
+  // The post-confirmation error paths get their own knobs, so every refusal
+  // branch is asserted with no consent and no merge — the suite's contract.
+  const h = harness({ autoMergeErrorAfterConfirmation: "500 Server Error" });
+
+  await assertRefuses(h.run(), "unable to re-read the auto-merge state");
+  assertEqual(h.calls.merges.length, 0, "nothing should have merged");
+  assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
+});
+
+await test("unreadable branch rules after confirming refuse", async () => {
+  const h = harness({ baseRulesErrorAfterConfirmation: "500 Server Error" });
+
+  await assertRefuses(h.run(), "unable to re-read the branch rules");
+  assertEqual(h.calls.merges.length, 0, "nothing should have merged");
+  assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
+});
+
+await test("both post-confirmation reads happen on the ordinary path", async () => {
   const h = harness();
-  // Fail only the second read, by swapping the knob in mid-run is not possible
-  // here, so assert the re-read happens at all: two reads, one per gate pass.
   await h.run();
   assertEqual(
     h.calls.autoMergeReads,
     2,
-    "auto-merge belongs to the gates that are re-read after confirming",
+    "auto-merge is read once per gate pass",
   );
+  assertEqual(h.calls.branchRules.length, 2, "so are the branch rules");
 });
 
 await test("a closed pull request is not reported as queued", async () => {
@@ -2096,6 +2120,25 @@ await test("a genuine cancellation failure still escalates", async () => {
     `a real failure must still escalate, got:\n${h.output()}`,
   );
   assert(h.output().includes("can still merge later"), "and name the risk");
+});
+
+await test("refusal and warning messages sanitize GitHub-sourced text", async () => {
+  // The briefing routes contributor-controlled text through the sanitizer;
+  // these messages print at the same trust boundary and must match. A ref name
+  // cannot hold ASCII control bytes but can hold bidi overrides, which is the
+  // class the sanitizer exists for.
+  const hostile = readySummary();
+  hostile.pr = { ...hostile.pr, baseRefName: "main\u202eevil" };
+
+  const h = harness({ summary: hostile, mergedBaseRefName: "release\u202ex" });
+  const result = await h.run();
+
+  assertEqual(result.baseMismatch, true, "the fixture must reach the warning");
+  assert(
+    !h.output().includes("\u202e"),
+    `no bidi override may reach the terminal, got: ${JSON.stringify(h.output())}`,
+  );
+  assert(h.output().includes("\ufffd"), "it should be visibly replaced");
 });
 
 await test("only a confirmed merge exits zero", async () => {

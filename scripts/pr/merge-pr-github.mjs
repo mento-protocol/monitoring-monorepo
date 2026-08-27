@@ -15,6 +15,7 @@ import {
   PR_NUMBER_PATTERN,
   hostFromRepoUrl,
   qualifyRepo,
+  sanitizeTerminalText,
 } from "./merge-pr-core.mjs";
 import { splitRepo } from "./pr-ready-state.mjs";
 
@@ -281,7 +282,10 @@ export async function reconcileMergeOutcome({
         `without any of the gates above.`
       );
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = sanitizeTerminalText(
+        err instanceof Error ? err.message : String(err),
+        "(no message)",
+      );
       // `gh` fails this call when there is no auto-merge request to turn off,
       // which is the ordinary case when the merge never reached GitHub. Saying
       // "this can still merge later" there would be the same over-claiming the
@@ -359,7 +363,7 @@ export async function reconcileMergeOutcome({
   if (outcome.baseRefName === "") {
     write(
       `${repo}#${number} reports MERGED but names no base branch, so this run ` +
-        `cannot confirm it landed on ${approved.baseRefName}. ` +
+        `cannot confirm it landed on ${sanitizeTerminalText(approved.baseRefName)}. ` +
         `Check it before running any post-merge step.\n`,
     );
     return {
@@ -398,7 +402,7 @@ export async function reconcileMergeOutcome({
       `WARNING: ${repo}#${number} is MERGED at ${outcome.headRefOid}, not the ` +
         `${approved.headOid} you approved. Something else merged a newer head. ` +
         `The consent record names the head you saw, which is not what landed — ` +
-        `review ${outcome.baseRefName} now.\n`,
+        `review ${sanitizeTerminalText(outcome.baseRefName)} now.\n`,
     );
     return {
       merged: true,
@@ -428,10 +432,10 @@ export async function reconcileMergeOutcome({
   const baseMismatch = outcome.baseRefName !== approved.baseRefName;
   if (baseMismatch) {
     write(
-      `WARNING: ${repo}#${number} merged into ${outcome.baseRefName}, ` +
-        `not the ${approved.baseRefName} you approved. The pull request was ` +
+      `WARNING: ${repo}#${number} merged into ${sanitizeTerminalText(outcome.baseRefName)}, ` +
+        `not the ${sanitizeTerminalText(approved.baseRefName)} you approved. The pull request was ` +
         `retargeted between the final check and the merge. Review ` +
-        `${outcome.baseRefName} now — this merge was not the one consented to.\n`,
+        `${sanitizeTerminalText(outcome.baseRefName)} now — this merge was not the one consented to.\n`,
     );
   }
 
