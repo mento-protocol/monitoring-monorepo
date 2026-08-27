@@ -32,21 +32,23 @@ every worker's PR loop is
 Preflight. Rank. Pick the eligible top N. Show the batch. Claim each by number.
 Hand each to a worker. Keep the workers awake. Write the report. Stop at READY.
 
-Showing the batch is a real step, not a courtesy. The operator triggers a sweep
-and names a batch size; the issues themselves come from a ranking they have not
-read. Printing the selected numbers before the first claim is what makes the
-trigger consent for these specific issues, and it is the last cheap moment to
-stop a bad pick. The sweep prints and proceeds rather than waiting for an
-answer — an operator starts a sweep in order to walk away, and blocking here
-would strand the batch.
+Showing the batch is a real step, not a courtesy — but it is an audit line with
+an abort window, not a consent step. The operator names a batch size; the
+issues come from a ranking that has only just finished running, and a full
+`rank-backlog` pass separates their keypress from the print, so they have most
+likely walked away by the time the batch appears. Printing the selected numbers
+before the first claim is what makes the run reviewable afterwards. The sweep
+then holds about 60 seconds — a cheap abort for an operator still watching —
+on a wait that ends by itself. It never blocks on an answer, which would strand
+every batch started by an operator who is no longer there.
 
 A claim can lose a race to another session between ranking and claiming, so
 each claim result is read before its worker is briefed. Only a successful claim
 gets a worker; a refused one is recorded in the report, and an exhausted receipt
 finishes with a smaller batch. A replacement drawn from the next eligible
 receipt entry is printed before it is claimed, like the original batch — the
-displayed batch is the authorization boundary, so an unannounced substitute
-would route around it.
+printed batch is the record of what the sweep worked on, and an unannounced
+substitute makes that record wrong.
 
 Stopping at READY is the design, and it is the same reason stage 1 stopped at
 the recommendation. The operator gets finished PRs with their evidence and
@@ -81,15 +83,26 @@ whose contents have not been established is never deleted; it can hold
 uncommitted work, and nothing available to the sweep tells that apart from
 litter.
 
-The split exists because subagents cannot wait. A subagent that ends its turn
-to wait for a gate stalls permanently — nothing re-invokes it, and the
-background process it was waiting on has no one left to observe it. The
-orchestrator holds the wall clock so the workers never have to.
+The split exists because subagents cannot wait across turns. A subagent that
+ends its turn to wait for a gate stalls permanently — nothing re-invokes it,
+and the background process it was waiting on has no one left to observe it. So
+a worker polls its own gate and push inside the turn that started them, and the
+orchestrator exists for the residue: re-invoking a worker that went quiet
+anyway, and collecting the facts only workers can see.
 
 ## Eligibility
 
 A sweep is narrower than the ranking that feeds it. An issue enters a batch
 only when all of the following hold:
+
+The ranking receipt does not carry these facts: its Top 15 is
+`Rank | Issue | Score | Reason`, and it scores `needs-grooming` issues beside
+`agent-ready` ones. Selection by `rank-backlog` is a ranking verdict, not a
+batch verdict. So each candidate is read directly —
+`gh issue view <n> --json number,title,labels,body,projectItems`, where
+`labels` settles the state, risk, and `pkg:*` area, `projectItems[].status.name`
+settles `Blocked`, and `body` is where an external dependency is named. Only
+the fit cap comes from the receipt.
 
 - **`agent-ready`** — never `needs-grooming`. Ranking scores grooming issues
   and never Selects one; a sweep that claimed one would be grooming unattended
@@ -105,9 +118,11 @@ only when all of the following hold:
   a cap; it applies to the whole batch equally and so distinguishes nothing.
 - **Not blocked** — not projected to `Blocked` on the workboard, and not
   waiting on an external dependency named in its body.
-- **Mutually independent** — no two issues in one batch touch the same
-  subsystem. Otherwise the second PR pays for a merge, a re-gate, and a fresh
-  review round caused only by its sibling.
+- **Mutually independent** — no two issues in one batch share a `pkg:*` label.
+  That label is the repo's existing ownership area
+  ([`agent-issue-workflow.md`](agent-issue-workflow.md)), so "same subsystem" is
+  a lookup rather than a per-batch judgement. Otherwise the second PR pays for
+  a merge, a re-gate, and a fresh review round caused only by its sibling.
 
 Fewer qualifying issues than the batch size is a normal result: take fewer and
 say so. Zero is also a result — write the report with an empty table rather
@@ -127,30 +142,44 @@ the number of rounds it will take.
 ## Preflight
 
 The orchestrator verifies, before anything is claimed: `origin/main` fetched, a
-clean session worktree, working `gh` auth, and the gate's machine lock.
+clean session worktree, and working `gh` auth. It does **not** probe the gate's
+lock.
 
-The lock check is the one that is easy to skip and expensive to skip. Gate runs
-are serialized machine-wide, and a sweep takes that lock once per issue and
-again for every patch cycle. When another session has held
-`<lock-root>/run.lock` for more than ten minutes **and its recorded pid is
-still alive on this machine**, the sweep **reports the holding pid and worktree
-and stops**. Liveness is part of the test: a crashed gate leaves its owner
-record behind, and a sweep that read age alone would stop itself permanently on
-a holder that no longer exists. A dead or foreign record is left untouched for
-the gate to reclaim on its next run. The sweep does not wait the batch out
-behind a live holder, and it never passes `--no-lock` or deletes the lock
-directory: the gate owns those reclaim rules, and a lock that looks stale from
-outside is routinely a live holder inside a long browser suite.
+That omission is deliberate. Gate `--run` requests share a transient
+machine-wide coordinator that admits independent work from different worktrees
+under a weighted capacity, and a new gate joins a compatible coordinator rather
+than queueing behind it
+([`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md)). The
+coordinator adopts the legacy `run.lock` while scheduled or recovery work
+exists, so `run.lock/owner` names a live pid for as long as anyone on the
+machine is gating — hours at a time under ordinary parallel work. A sweep that
+treated that record as a busy signal would refuse to start in the normal case.
+Workers wait instead, with `--lock-wait 3600`, which spans scheduler admission,
+a command lease, a coalesced result, and an older legacy holder. No sweep
+passes `--no-lock` or deletes the lock directory: the gate owns its reclaim
+rules, and a record that looks stale from outside is routinely a live holder
+inside a long browser suite.
 
 ## Resilience duties
 
 These belong to the orchestrator, and they are what makes an unattended run
 survive the night:
 
-- **Wake loop.** Watch each long process — gate, push — with a background
-  `kill -0` watcher on its pid, and message the worker when it exits. Watch the
-  process, not its log: a buffered or truncated log looks exactly like a
-  running one.
+- **Wake a quiet worker.** Workers poll their own gate and push in-turn, so the
+  orchestrator carries no timers and never learns a worker's pids. Its duty is
+  the residue: a worker parked at a turn end, or silent while its siblings
+  advance, gets a message naming where it stopped and what comes next.
+- **Collect the report-backs.** Five of the report's facts — the verbatim
+  ready-state line, the release form and reason, the deferral issues, the
+  operator-decision items, and any checkout conflict — exist only inside a
+  worker's turn. The orchestrator records each closing message as it arrives
+  and asks for what is missing before writing the report.
+- **Gate concurrency within the coordinator's capacity.** Worker gates are
+  scheduled by the gate coordinator and count against its capacity, 3 by
+  default, so a batch of 4 runs at most three at once. Non-gate worker work
+  stays outside the coordinator, which is safe on the `node_modules` axis
+  because no two workers share a checkout, and bounded on CPU and memory only
+  by the batch cap and that capacity.
 - **Serialized instructions.** One checkout per worker, and no instruction ever
   names another worker's path.
 - **Resume, never restart, after a usage-limit interruption.** The worker's
@@ -200,16 +229,26 @@ than the machine that produced it.
 
 It carries the receipt path and requested batch size, a disposition table of
 `Issue | PR | Disposition`, the claims this sweep lost to another session, the
-deferral issues filed, and anything needing the operator's decision. A refused
-claim gets its own line rather than a table row — no work was done on it — and
-without that line a shrunken batch would look like the batch that was asked
-for. The same summary is printed to the terminal.
+deferral issues filed, the checkout conflicts, and anything needing the
+operator's decision. A refused claim gets its own line rather than a table row
+— no work was done on it — and without that line a shrunken batch would look
+like the batch that was asked for. It names the holder by the `Claim ID` left
+on the issue, because the refusal itself reports only the label state it found.
+A checkout conflict line names the taken path and the fresh one: the taken path
+is never inspected or deleted, so the line is the only record that something is
+sitting there. The same summary is printed to the terminal.
+
+Every one of those facts reaches the report through a worker's closing message.
+The orchestrator writes the report and observes none of it directly, so a
+worker that ends without reporting back leaves a hole nothing on disk fills.
 
 Two properties make the table worth reading:
 
-- **A shipped row quotes its final `pr:ready-state` line verbatim.** A
-  paraphrase of a readiness verdict is not evidence of one, and the operator is
-  about to decide a merge from this table.
+- **A shipped row quotes its final `pr:ready-state` line verbatim**, taken from
+  `--compact`, the mode that emits one quotable line. A paraphrase of a
+  readiness verdict is not evidence of one, and the operator is about to decide
+  a merge from this table. The operating card's `--json` remains the
+  machine-readable form and does not go in a cell.
 - **A released row states the reason and which release form was used.** The two
   forms mean different things to the next run: the default returns the issue to
   the ready queue, `--needs-grooming` takes it out of reach until a human
@@ -237,8 +276,10 @@ were told.
 ## Staging
 
 **Delivered: operator-triggered sweeps.** A human starts each run and reads the
-report. That trigger is the trust gate: the operator sees the batch before it
-starts and the PRs before they merge.
+report. That trigger is the trust gate, and it rests on two things a sweep
+cannot skip: the batch is printed with a short abort window before the first
+claim, and every PR stops at READY for the operator to read before anything
+merges.
 
 **Future work: cron-triggered autonomy.** A sweep that starts itself on a
 schedule needs answers this note does not have — what wakes it, what stops a

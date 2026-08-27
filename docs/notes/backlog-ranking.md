@@ -148,5 +148,6 @@ this was deferred.
 
 **Still future work: cron-triggered autonomy.** A sweep that starts itself on a
 schedule is not in scope for the operator-triggered form and is not required by
-it. The operator invoking each run is the trust gate — they see the batch before
-it starts and the PRs before any merge.
+it. The operator invoking each run is the trust gate — the batch is printed with
+a short abort window before the first claim, and every PR stops at READY for
+them to read before any merge.
