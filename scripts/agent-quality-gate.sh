@@ -341,8 +341,8 @@ source "$run_handles_path"
 # environment then propagates to every mapped-command descendant. Prepare this
 # launcher before the first Git probe so parent and mapped commands use the same
 # policy. Legacy and explicit no-lock runs also use this boundary.
-if [[ ! -x /usr/bin/env || ! -x /bin/bash ]]; then
-  echo "error: the quality gate requires /usr/bin/env and /bin/bash." >&2
+if [[ ! -x /usr/bin/env || ! -x /usr/bin/awk || ! -x /bin/bash ]]; then
+  echo "error: the quality gate requires /usr/bin/env, /usr/bin/awk, and /bin/bash." >&2
   exit 2
 fi
 gate_sanitized_bash_launcher=(
@@ -417,7 +417,26 @@ while IFS= read -r -d '' gate_bash_environment_record; do
       ;;
   esac
 done < <(
-  node "$gate_environment_helper" --nul-delimited-environment-records
+  LC_ALL=C /usr/bin/env \
+    "agent-quality-gate-env-scan-lc-all-set=${LC_ALL+x}" \
+    "agent-quality-gate-env-scan-lc-all-value=${LC_ALL-}" \
+    /usr/bin/awk '
+    BEGIN {
+      for (name in ENVIRON) {
+        if (name == "LC_ALL" ||
+            name == "agent-quality-gate-env-scan-lc-all-set" ||
+            name == "agent-quality-gate-env-scan-lc-all-value") {
+          continue
+        }
+        printf "%s=%s%c", name, ENVIRON[name], 0
+      }
+      if (ENVIRON["agent-quality-gate-env-scan-lc-all-set"] != "") {
+        printf "LC_ALL=%s%c", \
+          ENVIRON["agent-quality-gate-env-scan-lc-all-value"], 0
+      }
+      printf "%s%c", "agent-quality-gate-env-end", 0
+    }
+  '
 )
 if [[ "$gate_bash_environment_scan_complete" -ne 1 ]]; then
   echo "error: could not inspect Bash startup controls for the quality gate." >&2

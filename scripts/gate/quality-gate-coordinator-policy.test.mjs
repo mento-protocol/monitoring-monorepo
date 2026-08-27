@@ -35,7 +35,6 @@ import {
   normalizedInstalledDependencyManifestForTest,
   normalizedLocalBinManifest,
   normalizedLocalBinManifestForTest,
-  nulDelimitedEnvironmentRecords,
 } from "./quality-gate-coordinator-environment.mjs";
 import {
   coordinatorSourceSnapshot,
@@ -56,54 +55,6 @@ const coordinatorSupport = join(
 const productionModulePattern =
   /^quality-gate-coordinator(?!.*\.test\.mjs$).*\.mjs$/u;
 const repositoryRoot = join(gateDirectory, "..", "..");
-
-test("environment records preserve values and end with a sentinel", () => {
-  const records = nulDelimitedEnvironmentRecords({
-    "BASH_FUNC_fixture%%": "() { echo fixture;\n}",
-    EMPTY: "",
-    "INVALID-NAME": "line one\nline two=value",
-    LEGACY_FUNCTION: "() { echo legacy;\n}",
-    ORDINARY: "left=right",
-    "agent-quality-gate-env-end": "caller-value",
-  })
-    .toString("utf8")
-    .split("\0");
-
-  assert.deepEqual(records, [
-    "BASH_FUNC_fixture%%=() { echo fixture;\n}",
-    "EMPTY=",
-    "INVALID-NAME=line one\nline two=value",
-    "LEGACY_FUNCTION=() { echo legacy;\n}",
-    "ORDINARY=left=right",
-    "agent-quality-gate-env-end=caller-value",
-    "agent-quality-gate-env-end",
-    "",
-  ]);
-});
-
-test("environment record CLI emits the helper format", () => {
-  const helper = join(
-    gateDirectory,
-    "quality-gate-coordinator-environment.mjs",
-  );
-  const result = spawnSync(
-    process.execPath,
-    [helper, "--nul-delimited-environment-records"],
-    {
-      encoding: "buffer",
-      env: {
-        "BASH_FUNC_fixture()": "() { echo fixture; }",
-        "INVALID-NAME": "line one\nline two=value",
-      },
-    },
-  );
-
-  assert.equal(result.status, 0, result.stderr.toString("utf8"));
-  const records = result.stdout.toString("utf8").split("\0");
-  assert.ok(records.includes("BASH_FUNC_fixture()=() { echo fixture; }"));
-  assert.ok(records.includes("INVALID-NAME=line one\nline two=value"));
-  assert.deepEqual(records.slice(-2), ["agent-quality-gate-env-end", ""]);
-});
 
 test("local executable roots cover every tracked package", () => {
   const tracked = spawnSync(

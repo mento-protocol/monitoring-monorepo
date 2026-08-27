@@ -1441,6 +1441,103 @@ if gate_test_stop_coordinators_in_root \
 fi
 rm -rf "$coordinator_cleanup_contract_root"
 
+gate_raw_function_name=$'BASH_FUNC_gate_invalid_utf8_fixture_\377%%'
+gate_raw_function_value='() { :; }'
+gate_raw_function_record="${gate_raw_function_name}=${gate_raw_function_value}"
+gate_raw_scan_complete=0
+gate_raw_function_seen=0
+gate_raw_empty_seen=0
+gate_raw_multiline_seen=0
+gate_raw_lc_all_seen=0
+gate_raw_sentinel_collision_seen=0
+gate_raw_helper_leaked=0
+gate_raw_sanitized_launcher=(/usr/bin/env)
+while IFS= read -r -d '' gate_raw_environment_record; do
+  if [[ "$gate_raw_environment_record" == agent-quality-gate-env-end ]]; then
+    gate_raw_scan_complete=1
+    continue
+  fi
+  case "$gate_raw_environment_record" in
+    "$gate_raw_function_record") gate_raw_function_seen=1 ;;
+    'EMPTY=') gate_raw_empty_seen=1 ;;
+    $'MULTILINE=line one\nline two=value') gate_raw_multiline_seen=1 ;;
+    'LC_ALL=() { :; }') gate_raw_lc_all_seen=1 ;;
+    'agent-quality-gate-env-end=caller-value')
+      gate_raw_sentinel_collision_seen=1
+      ;;
+    agent-quality-gate-env-scan-lc-all-*) gate_raw_helper_leaked=1 ;;
+  esac
+  [[ "$gate_raw_environment_record" == *=* ]] || continue
+  gate_raw_environment_name="${gate_raw_environment_record%%=*}"
+  gate_raw_environment_value="${gate_raw_environment_record#*=}"
+  case "$gate_raw_environment_name" in
+    BASH_FUNC_*%%|BASH_FUNC_*'()')
+      gate_raw_sanitized_launcher+=(-u "$gate_raw_environment_name")
+      ;;
+    *)
+      if [[ "$gate_raw_environment_name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ &&
+        "$gate_raw_environment_value" == '() {'* ]]; then
+        gate_raw_sanitized_launcher+=(-u "$gate_raw_environment_name")
+      fi
+      ;;
+  esac
+done < <(
+  /usr/bin/env -i \
+    "$gate_raw_function_record" \
+    'EMPTY=' \
+    $'MULTILINE=line one\nline two=value' \
+    'agent-quality-gate-env-end=caller-value' \
+    'agent-quality-gate-env-scan-lc-all-set=x' \
+    'agent-quality-gate-env-scan-lc-all-value=() { :; }' \
+    'LC_ALL=C' \
+    /usr/bin/awk '
+      BEGIN {
+        for (name in ENVIRON) {
+          if (name == "LC_ALL" ||
+              name == "agent-quality-gate-env-scan-lc-all-set" ||
+              name == "agent-quality-gate-env-scan-lc-all-value") {
+            continue
+          }
+          printf "%s=%s%c", name, ENVIRON[name], 0
+        }
+        if (ENVIRON["agent-quality-gate-env-scan-lc-all-set"] != "") {
+          printf "LC_ALL=%s%c", \
+            ENVIRON["agent-quality-gate-env-scan-lc-all-value"], 0
+        }
+        printf "%s%c", "agent-quality-gate-env-end", 0
+      }
+    '
+)
+if [[ "$gate_raw_scan_complete" -ne 1 ||
+  "$gate_raw_function_seen" -ne 1 ||
+  "$gate_raw_empty_seen" -ne 1 ||
+  "$gate_raw_multiline_seen" -ne 1 ||
+  "$gate_raw_lc_all_seen" -ne 1 ||
+  "$gate_raw_sentinel_collision_seen" -ne 1 ||
+  "$gate_raw_helper_leaked" -ne 0 ]]; then
+  fail "byte-faithful environment scan lost or changed a raw record"
+fi
+if ! /usr/bin/env -i \
+  "$gate_raw_function_record" \
+  'LC_ALL=() { :; }' \
+  'EMPTY=' \
+  "${gate_raw_sanitized_launcher[@]}" \
+  /bin/bash --noprofile --norc -c '
+    [[ -z "${LC_ALL+x}" ]]
+    [[ -n "${EMPTY+x}" && -z "$EMPTY" ]]
+    if declare -F | /usr/bin/grep -q "gate_invalid_utf8_fixture_"; then
+      exit 1
+    fi
+  '; then
+  fail "byte-faithful environment scan did not scrub raw function records"
+fi
+unset gate_raw_function_name gate_raw_function_value gate_raw_function_record
+unset gate_raw_scan_complete gate_raw_function_seen gate_raw_empty_seen
+unset gate_raw_multiline_seen gate_raw_lc_all_seen
+unset gate_raw_sentinel_collision_seen gate_raw_helper_leaked
+unset gate_raw_sanitized_launcher gate_raw_environment_record
+unset gate_raw_environment_name gate_raw_environment_value
+
 if ! node - <<'NODE'
 const assert = require("node:assert/strict");
 const source = require("node:fs").readFileSync(
@@ -1510,7 +1607,7 @@ assert.ok(
 );
 assert.match(
   source,
-  /read -r -d '' gate_bash_environment_record[\s\S]*?BASH_FUNC_\*%%\|BASH_FUNC_\*'\(\)'[\s\S]*?\(\) \{[\s\S]*?--nul-delimited-environment-records[\s\S]*?gate_bash_environment_scan_complete[\s\S]*?gate_sanitized_bash_launcher\+=\(\/bin\/bash -p\)/u,
+  /read -r -d '' gate_bash_environment_record[\s\S]*?BASH_FUNC_\*%%\|BASH_FUNC_\*'\(\)'[\s\S]*?\(\) \{[\s\S]*?LC_ALL=C \/usr\/bin\/env[\s\S]*?agent-quality-gate-env-scan-lc-all-set[\s\S]*?agent-quality-gate-env-scan-lc-all-value[\s\S]*?\/usr\/bin\/awk[\s\S]*?for \(name in ENVIRON\)[\s\S]*?printf "LC_ALL=%s%c"[\s\S]*?agent-quality-gate-env-end[\s\S]*?gate_bash_environment_scan_complete[\s\S]*?gate_sanitized_bash_launcher\+=\(\/bin\/bash -p\)/u,
   "the sanitized launcher must remove exported functions and fail a truncated environment scan",
 );
 assert.doesNotMatch(
