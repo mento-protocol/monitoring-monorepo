@@ -192,3 +192,27 @@ export async function readMergeOutcome({ gh, repo, number }) {
     headRefOid: String(parsed?.headRefOid ?? "").toLowerCase(),
   };
 }
+
+/**
+ * The rule types GitHub applies to one branch, from every active ruleset and
+ * branch-protection source.
+ *
+ * Used to refuse a merge-queue base before the merge request exists. `gh pr
+ * merge` enqueues such a base and returns success, and `--disable-auto` does
+ * not remove a queue entry — so merging first would create a standing request
+ * this wrapper cannot take back, which GitHub could complete later with none
+ * of the gates. Checking first is the only fail-closed order.
+ */
+export async function readBaseBranchRuleTypes({ gh, repo, branch }) {
+  const { owner, name } = splitRepo(repo);
+  const parsed = JSON.parse(
+    await gh([
+      "api",
+      `repos/${owner}/${name}/rules/branches/${encodeURIComponent(branch)}`,
+    ]),
+  );
+  if (!Array.isArray(parsed)) {
+    throw new Error("the branch-rules response was not a list");
+  }
+  return parsed.map((rule) => String(rule?.type ?? ""));
+}

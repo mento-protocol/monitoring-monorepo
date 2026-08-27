@@ -198,6 +198,9 @@ function harness({
   disableAutoError = null,
   mergeCommandError = null,
   mergedHeadOid = null,
+  // Rule types GitHub reports for the base branch, and a read failure knob.
+  baseRuleTypes = ["pull_request", "required_status_checks"],
+  baseRulesError = null,
   // The base the pull request reports AFTER the merge. A retarget between the
   // final gate read and GitHub processing the merge shows up only here.
   mergedBaseRefName = null,
@@ -227,6 +230,13 @@ function harness({
         parent,
         url: repoUrl,
       });
+    }
+    if (
+      args[0] === "api" &&
+      String(args[1] ?? "").includes("/rules/branches/")
+    ) {
+      if (baseRulesError) throw new Error(baseRulesError);
+      return JSON.stringify(baseRuleTypes.map((type) => ({ type })));
     }
     if (args[0] === "api" && args.includes("user")) {
       if (logins)
@@ -1829,6 +1839,39 @@ await test("a MERGED state with no head OID is not a verified merge", async () =
     h.output().includes("names no head commit"),
     `the operator must be told, got:\n${h.output()}`,
   );
+});
+
+await test("a merge-queue base refuses before anything is sent", async () => {
+  // gh enqueues such a base and returns success, and nothing this command can
+  // call removes a queue entry — so the merge must not be attempted at all.
+  const h = harness({
+    baseRuleTypes: ["pull_request", "merge_queue", "required_status_checks"],
+  });
+
+  await assertRefuses(h.run(), "uses a merge queue");
+  assertEqual(h.calls.merges.length, 0, "no merge request may be sent");
+  assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
+  assertEqual(
+    h.calls.prompts.length,
+    0,
+    "the operator is not asked to confirm",
+  );
+});
+
+await test("unreadable branch rules refuse rather than guess", async () => {
+  // This is the last gate before an irreversible action; "probably no queue"
+  // is not a gate.
+  const h = harness({ baseRulesError: "403 Forbidden" });
+
+  await assertRefuses(h.run(), "unable to read the branch rules");
+  assertEqual(h.calls.merges.length, 0, "no merge request may be sent");
+  assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
+});
+
+await test("an ordinary protected base still merges", async () => {
+  const h = harness();
+  const result = await h.run();
+  assertEqual(result.merged, true);
 });
 
 await test("only a confirmed merge exits zero", async () => {

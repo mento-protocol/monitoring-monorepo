@@ -18,6 +18,11 @@
  * an operator who has to re-run one command loses a minute, and a merge nobody
  * approved cannot be taken back.
  *
+ * A merge-queue base is refused outright, before any request is sent: `gh pr
+ * merge` enqueues such a base and returns success, and nothing this wrapper can
+ * call removes a queue entry, so merging first would leave a standing request
+ * it cannot take back. An unreadable branch-rules answer refuses too.
+ *
  * Two races are detected rather than prevented. `--match-head-commit` pins the
  * head, and the merge endpoint has no base equivalent, so a retarget between
  * the final gate read and the merge request itself can still land on another
@@ -78,6 +83,7 @@ import {
   runGit,
 } from "./merge-pr-io.mjs";
 import {
+  readBaseBranchRuleTypes,
   readMergeOutcome,
   resolveLogin,
   resolveRepositories,
@@ -252,6 +258,36 @@ export async function mergePullRequest({
   };
 
   const approved = await readGatedReadyState();
+
+  // Refuse a merge-queue base before anything is sent. `gh pr merge` enqueues
+  // such a base and returns success, and nothing this wrapper can call removes
+  // a queue entry — so merging first would leave a standing request GitHub
+  // could complete later with none of the gates above. The base is bound
+  // across the confirmation below, so checking it here is checking the base
+  // that gets merged. An unreadable answer refuses too: this is the last gate
+  // before an irreversible action, and "probably no queue" is not a gate.
+  let baseRuleTypes;
+  try {
+    baseRuleTypes = await readBaseBranchRuleTypes({
+      gh,
+      repo: repos.base,
+      branch: approved.baseRefName,
+    });
+  } catch (err) {
+    throw new MergeRefusal(
+      `unable to read the branch rules for ${approved.baseRefName} in ${repos.base}: ` +
+        `${err instanceof Error ? err.message : String(err)}. ` +
+        `Refusing, because a merge-queue base would accept a request this command cannot take back.`,
+    );
+  }
+  if (baseRuleTypes.includes("merge_queue")) {
+    throw new MergeRefusal(
+      `${approved.baseRefName} in ${repos.base} uses a merge queue. ` +
+        `\`gh pr merge\` would enqueue this pull request and return success, and nothing ` +
+        `this command can call removes a queue entry, so the merge would sit outside ` +
+        `every gate above. Merge it through the queue deliberately instead.`,
+    );
+  }
 
   stdout.write(
     formatBriefing({

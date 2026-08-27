@@ -62,9 +62,16 @@ The ordered gates in `scripts/pr/merge-pr.mjs`:
    any override reason — to gitignored `.merge-consents.jsonl`, opened
    `O_NOFOLLOW | O_NONBLOCK` with an `fstat` regular-file and single-hard-link
    check, and a short-write refusal.
-7. Merge with `--squash --match-head-commit`, then confirm with GitHub that the
-   pull request actually reached `MERGED` — a merge-queue base accepts the
-   request without merging it.
+7. Refuse a merge-queue base before sending anything. `gh pr merge` enqueues
+   such a base and returns success, and nothing the wrapper can call removes a
+   queue entry — `--disable-auto` turns off auto-merge only — so merging first
+   would leave a standing request it cannot take back, which GitHub could
+   complete later outside every gate above. An unreadable branch-rules answer
+   refuses too.
+8. Merge with `--squash --match-head-commit`, then confirm with GitHub that the
+   pull request actually reached `MERGED`, on the approved base and the
+   approved head. Any other outcome — including a failed merge command, which
+   may still have reached GitHub — cancels auto-merge and exits non-zero.
 
 `.claude/settings.json` denies the raw `Bash(gh pr merge:*)` command, removing
 the obvious shortcut past the wrapper for a Claude session.
