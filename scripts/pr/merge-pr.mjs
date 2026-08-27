@@ -470,8 +470,13 @@ async function main() {
     const result = await mergePullRequest({ argv: process.argv.slice(2) });
     const code = exitCodeForResult(result);
     if (code !== 0) {
+      // A base mismatch IS a confirmed merge — it just landed somewhere the
+      // operator never approved, and `reconcileMergeOutcome` already said so
+      // above. Repeating "not confirmed" here would contradict that warning.
       process.stderr.write(
-        "merge-pr: the merge was not confirmed; not reporting success\n",
+        result?.merged === true
+          ? "merge-pr: not reporting success; see the outcome above\n"
+          : "merge-pr: the merge was not confirmed; not reporting success\n",
       );
       process.exitCode = code;
     }

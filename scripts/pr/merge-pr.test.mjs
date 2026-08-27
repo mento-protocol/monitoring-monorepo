@@ -2067,6 +2067,37 @@ await test("a closed pull request is not reported as queued", async () => {
   );
 });
 
+await test("nothing-to-cancel is not reported as a failed cancellation", async () => {
+  // gh fails --disable-auto when there is no request to turn off, which is the
+  // ordinary case when the merge never reached GitHub. Claiming "this can still
+  // merge later" there is the same over-claiming the CLOSED branch avoids.
+  const h = harness({
+    mergedState: "OPEN",
+    disableAutoError: "X auto-merge is not enabled for this pull request",
+  });
+  await h.run();
+
+  assert(
+    h.output().includes("no auto-merge request to cancel"),
+    `expected the benign wording, got:\n${h.output()}`,
+  );
+  assert(
+    !h.output().includes("can still merge later"),
+    "nothing reached GitHub, so nothing can merge later",
+  );
+});
+
+await test("a genuine cancellation failure still escalates", async () => {
+  const h = harness({ mergedState: "OPEN", disableAutoError: "403 Forbidden" });
+  await h.run();
+
+  assert(
+    h.output().includes("could NOT be cancelled"),
+    `a real failure must still escalate, got:\n${h.output()}`,
+  );
+  assert(h.output().includes("can still merge later"), "and name the risk");
+});
+
 await test("only a confirmed merge exits zero", async () => {
   // The CLI's exit status is what `pnpm pr:merge && <post-merge closeout>`
   // branches on. Reporting success for a queued or unverified merge would run

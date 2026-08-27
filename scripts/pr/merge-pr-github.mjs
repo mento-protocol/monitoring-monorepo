@@ -281,9 +281,16 @@ export async function reconcileMergeOutcome({
         `without any of the gates above.`
       );
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // `gh` fails this call when there is no auto-merge request to turn off,
+      // which is the ordinary case when the merge never reached GitHub. Saying
+      // "this can still merge later" there would be the same over-claiming the
+      // CLOSED branch avoids.
+      if (/auto-merge is not enabled|not enabled for/i.test(message)) {
+        return "There was no auto-merge request to cancel.";
+      }
       return (
-        `A pending merge request could NOT be cancelled: ` +
-        `${err instanceof Error ? err.message : String(err)}. ` +
+        `A pending merge request could NOT be cancelled: ${message}. ` +
         `Cancel it by hand — until you do, this pull request can still merge ` +
         `later without any of the gates above.`
       );
