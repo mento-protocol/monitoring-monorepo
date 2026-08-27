@@ -296,7 +296,7 @@ already holds the ranking receipts, so the two artifacts of one night sit
 together. If the name is taken, append the lowest unused suffix — `-2`, then
 `-3` — and never overwrite an earlier report.
 
-Four parts:
+Five parts:
 
 1. **The receipt.** The path of the `rank-backlog` receipt this batch was
    selected from, and the batch size the operator asked for.
