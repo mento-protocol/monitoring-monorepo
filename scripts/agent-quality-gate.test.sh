@@ -8830,17 +8830,16 @@ if [[ -f "$counter_file" ]]; then
 fi
 printf '%s\n' "$((count + 1))" > "$counter_file"
 STUB
-  # The stub exists to make the MAPPED commands free, not to break the gate's
-  # own Node helpers. Those are the `--input-type=module` heredocs, the caller
-  # environment policy, and, since D5b part 2, the mapping engine the gate runs
-  # to build its plan at all. A stubbed-out helper makes the gate refuse the run,
-  # which is the guard working, not the fixture.
+  # The stub makes mapped commands free. It must still delegate every inline
+  # Node helper and gate module used to build and execute the plan. A stubbed-out
+  # helper makes the gate refuse the run, which is the guard working, not the
+  # fixture.
   cat > bin/node <<'STUB'
 #!/usr/bin/env bash
 if [[ "${1:-}" == "--input-type=module" ||
+  "${1:-}" == -e ||
   "${1:-}" == */quality-gate-coordinator.mjs ||
-  "${1:-}" == */quality-gate-coordinator-environment.mjs ||
-  ( "${1:-}" == -e && "${2:-}" == *'digest(process.argv[1])'* ) ]]; then
+  "${1:-}" == */quality-gate-coordinator-environment.mjs ]]; then
   exec "${REAL_NODE:?}" "$@"
 fi
 case "${1:-}" in
