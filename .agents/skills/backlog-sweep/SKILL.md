@@ -334,14 +334,21 @@ retry the next suffix when the reservation fails:
 ```bash
 set -o noclobber
 until { : > "$candidate"; } 2>/dev/null; do
-  candidate=<next suffix>
+  candidate=<next suffix>          # reservation lost: try the next one
 done
+set +o noclobber                   # or write with >| below
+printf '%s\n' "$report" > "$candidate"
 ```
 
 Checking that a name is free and then writing it are two steps, and two sweeps
 finishing on the same UTC date can both pass the check before either writes.
 The reservation is what makes "never overwrite an earlier report" true rather
 than merely intended.
+
+Turn `noclobber` back off, or write with `>|`, before filling the file. The
+reservation leaves an empty file in place, so a plain `>` under `noclobber`
+refuses it — and a sweep that reserved a name and then silently failed to write
+its report would lose the whole night's record.
 
 Five parts:
 
