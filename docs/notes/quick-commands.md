@@ -23,9 +23,9 @@ repo commands.
 pnpm install
 
 # Indexer
-pnpm indexer:codegen              # Generate types from schema (multichain mainnet: Ethereum reserve-yield + Celo + Monad + Polygon)
-pnpm indexer:dev                   # Start indexer (multichain mainnet: Ethereum reserve-yield + Celo + Monad + Polygon)
-pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test    # Codegen mainnet config, run sUSDS/stETH tests, restore mainnet codegen
+pnpm indexer:codegen              # Generate types from schema (mainnet: Ethereum reserve-yield + Celo + Monad + Polygon)
+pnpm indexer:dev                   # Start indexer (mainnet: Ethereum reserve-yield + Celo + Monad + Polygon)
+pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test    # Codegen mainnet config, run sUSDS/stETH tests, restore codegen
 pnpm indexer:mutation              # Targeted StrykerJS baseline for indexer pure logic
 pnpm deploy:indexer                # Push HEAD to envio branch and trigger hosted reindex
 pnpm deploy:indexer:status <commit> --watch --compact  # Low-noise wait for registration + sync
@@ -33,9 +33,9 @@ pnpm deploy:indexer:logs <commit> --errors-only --since 2h  # Explicit errors; n
 pnpm deploy:indexer:metrics <commit>  # Per-chain hosted indexing progress
 pnpm deploy:indexer:info <commit>     # Hosted deployment info/cache state
 pnpm deploy:indexer:perf <commit>     # Combined status/metrics/log snapshot for perf comparisons
-pnpm deploy:indexer:verify <commit>   # Gate promotion on sync, core rows, schema-compatible sUSDS baseline/sampler integrity, and Polygon replay
+pnpm deploy:indexer:verify <commit>   # Gate promotion on sync, core rows, sUSDS baseline/sampler integrity, Polygon replay
 pnpm deploy:indexer:promote <commit>  # Promote a synced deployment to prod
-pnpm deploy:indexer:verify <commit> --prod  # After propagation, match fixed-endpoint _meta identity to the target and verify semantic data
+pnpm deploy:indexer:verify <commit> --prod  # After propagation, match _meta identity to the target and verify semantic data
 pnpm deploy:indexer:rollback <last-good-sha>  # Roll prod back: re-promote if still registered, else rebuild + resync
 
 # Code health (CodeScene-equivalent OSS checks)
@@ -54,8 +54,8 @@ pnpm agent:quality-gate --run      # Execute the mapped local-only checks
 pnpm agent:quality-gate --run --allow-package-script-changes
 pnpm agent:context-check           # Validate repo-visible agent instructions, links, and routing
 pnpm agent:review-materiality      # Classify review depth + context-update signals for current diff
-pnpm agent:autoreview              # Isolated closeout review; multi-pass uses --prepare-bundle-dir DIR + one fresh-context reviewer; quality gate owns tests
-pnpm agent:autoreview:test         # Full autoreview regression families; defaults to up to 3 workers with progress + timings
+pnpm agent:autoreview              # Isolated closeout review; multi-pass: --prepare-bundle-dir DIR + one fresh-context reviewer
+pnpm agent:autoreview:test         # Full autoreview regression families; up to 3 workers with progress
 pnpm agent:autoreview:test -- --jobs 1  # Sequential full closeout for autoreview runtime changes
 pnpm agent:autoreview --verify-bundle-dir DIR  # Pre-review rehash; retain the printed manifest digest
 pnpm agent:autoreview --verify-bundle-dir DIR --expected-bundle-manifest DIGEST  # Bound post-review rehash
@@ -74,18 +74,18 @@ pnpm agent:context-budget --strict # Enforce root, scoped-file, and aggregate-ro
 pnpm --silent pr:feedback-state --pr 123 --json  # Normalize unresolved/reply-required feedback before all-clear
 pnpm pr:ready-state --pr 123 --json              # Final current-head required-readiness probe
 pnpm pr:merge --pr 123   # Human-only sanctioned merge; --not-ready-reason "<why>" overrides
-node scripts/pr/review-process-metrics.mjs --prs <pr1,pr2,...> --output <result.json>  # Collect a new cohort; define its boundary and tracking issue first
+node scripts/pr/review-process-metrics.mjs --prs <pr1,pr2,...> --output <result.json>  # New cohort; define its boundary and tracking issue first
 pnpm lockfile:lint                 # Fail-closed integrity + registry + override-floor check; no install needed
 pnpm skew:check                    # Fail on dependency version skew vs the pnpm catalog; no install needed
 pnpm sanitize:test                 # Fixture tests for scripts/sanitize-terraform-output.sh (terraform output secret redaction)
-pnpm deploy-staging:test           # ADR 0053 deployment source-staging contract on its own; `pnpm tf:test` also imports it
-pnpm override:prune-report          # pnpm.overrides + minimumReleaseAgeExclude pruning report (advisory; no install needed)
-pnpm adr:check                      # Advisory ADR reminder for architectural changes (new package/stack/workflow); --strict to hard-gate
+pnpm deploy-staging:test           # ADR 0053 source-staging contract alone; `pnpm tf:test` also imports it
+pnpm override:prune-report          # Overrides pruning report (advisory; no install needed)
+pnpm adr:check                      # Advisory ADR reminder for architectural changes; --strict to hard-gate
 pnpm adr:check:test                 # Offline tests for the ADR reminder trigger logic
 node scripts/workflows/check-github-action-pins.mjs  # Verify workflow/composite-action `uses:` refs are SHA-pinned
 node scripts/repo-health/check-hermetic-vitest-setup.mjs  # Verify all workspace Vitest network guards are byte-identical
-node scripts/repo-health/check-guardrail-prose.mjs  # Verify the guardrail sentences pinned in scripts/repo-health/guardrail-prose.json still appear in AGENTS.md and the operating card
-node scripts/repo-health/file-size-watchlist.mjs  # Refresh source file-size watchlist (package src/ trees + scripts/); use --format issue for GitHub Issues, not BACKLOG.md
+node scripts/repo-health/check-guardrail-prose.mjs  # Verify pinned guardrail sentences still appear in AGENTS.md and the operating card
+node scripts/repo-health/file-size-watchlist.mjs  # Refresh file-size watchlist (src/ trees + scripts/); --format issue for GitHub Issues
 pnpm indexer:testnet:codegen       # Generate types (multichain testnet: Celo Sepolia + Monad testnet + Polygon Amoy)
 pnpm indexer:testnet:dev           # Start indexer (multichain testnet)
 
@@ -94,8 +94,8 @@ pnpm dashboard:dev            # Dev server; see docs/notes/dashboard-verificatio
 pnpm dashboard:codegen        # Generate dashboard GraphQL operation types from indexer-envio/schema.graphql
 pnpm dashboard:build          # Production build
 pnpm dashboard:size-limit     # Check bundle size against budgets (run after build)
-pnpm dashboard:lighthouse:pool-fixture # Production-build canonical pool Lighthouse: deterministic fixture, delayed breaker revalidation, blocking 1 700 ms median LCP
-pnpm --filter @mento-protocol/ui-dashboard test:browser                   # Fixture browser + visual snapshot tests against a cached next build served by next start
+pnpm dashboard:lighthouse:pool-fixture # Production-build pool Lighthouse: deterministic fixture, breaker revalidation, 1 700 ms median LCP gate
+pnpm --filter @mento-protocol/ui-dashboard test:browser                   # Fixture browser + visual snapshot tests against a cached next-start build
 pnpm --filter @mento-protocol/ui-dashboard test:browser:production        # Same, but force a fresh fixture build first
 pnpm --filter @mento-protocol/ui-dashboard test:browser:update-snapshots # Re-baseline visual snapshots after a legitimate UI change
 pnpm dashboard:mutation       # Targeted StrykerJS baseline for dashboard pure logic
@@ -112,7 +112,7 @@ pnpm integrations:probe:test   # Unit tests for probe adapters/parsers
 pnpm issue:claim --count 3 --agent codex       # Claim ready issues and move them to In Progress
 pnpm issue:review --pr 123 --issue 901         # Move claimed issue to in-pr / review
 pnpm issue:release --issue 901                 # Release a mistaken claim back to agent-ready
-pnpm issue:board sync                          # Re-project open labels, mark closed board items Done, and verify closed queue labels clear
+pnpm issue:board sync                          # Re-project open labels, mark closed items Done, verify closed queue labels clear
 pnpm issue:board backfill --issue 901 --dry-run # Preview fill-only ownership-field recovery from a trusted claim comment
 pnpm issue:board:test                          # Offline tests for the issue-board helper
 
@@ -121,7 +121,7 @@ pnpm sentry:ingest --dry-run                   # Print queue-issue mutations wit
 pnpm sentry:ingest:test                        # Offline tests for the ingest helper (docs/notes/sentry-triage-pipeline.md)
 pnpm sentry:digest:test                        # Offline tests for the per-run Slack verdict-digest collector
 pnpm sentry:broker:test                        # Offline tests for the triage agent's loopback credential broker (ADR 0056)
-SENTRY_TRIAGE_ISSUES='[123]' pnpm sentry:digest --channel '#sentry-triage'  # Print the Slack digest payload for a batch (needs gh auth; does not post)
+SENTRY_TRIAGE_ISSUES='[123]' pnpm sentry:digest --channel '#sentry-triage'  # Print a batch's Slack digest payload (gh auth; does not post)
 
 # Public config package
 pnpm --filter @mento-protocol/config build     # Build the public protocol metadata package
