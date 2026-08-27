@@ -150,45 +150,51 @@ function resolveDisplayedInterestRate(
   return resolvedBatchRate ?? null;
 }
 
-/** Only disclose a batch-rate refresh failure via the "last confirmed
- *  state" wording once a rate was actually confirmed and is still on
- *  screen (mirrors the markets/trove notices, which are only reachable
- *  past `hasErrorWithoutData`, i.e. with data present) — that specific
- *  wording would misstate a first-attempt failure as stale data.
- *  {@link resolveInterestBatchFirstLoadError} covers the complementary
- *  case: a first-load failure is still real information (Codex correctly
- *  flagged that collapsing it into the same silent dash as "still
- *  loading" hides that the query failed, not just hasn't resolved yet). */
-function resolveInterestBatchNoticeError(
-  resolvedBatchRate: string | null | undefined,
-  error: Error | undefined,
-): Error | undefined {
-  return resolvedBatchRate != null ? error : undefined;
-}
-
-/** The complementary first-load case: an error with nothing ever
- *  confirmed. Distinct from {@link resolveInterestBatchNoticeError} so the
- *  two never both fire for the same render — exactly one, or neither. */
-function resolveInterestBatchFirstLoadError(
-  resolvedBatchRate: string | null | undefined,
-  error: Error | undefined,
-): Error | undefined {
-  return resolvedBatchRate == null ? error : undefined;
-}
-
 /** True only once the batch join has RESOLVED successfully with no matching
  *  row (`InterestBatch: []`) — distinct from still loading (`data ==
- *  null`) and from a failed request (already covered by
- *  {@link resolveInterestBatchFirstLoadError}). Both a loading and a
- *  successful-empty join otherwise collapse to the same `undefined` rate;
- *  without this, a confirmed-missing batch row reads as "still loading"
- *  forever instead of the explicit "Batch missing" state the market table
- *  already shows for it (`trove-cells.tsx`). */
+ *  null`) and from a failed request. Both a loading and a successful-empty
+ *  join otherwise collapse to the same `undefined` rate; without this, a
+ *  confirmed-missing batch row reads as "still loading" forever instead of
+ *  the explicit "Batch missing" state the market table already shows for
+ *  it (`trove-cells.tsx`). */
 function resolveInterestBatchMissing(
   joinBatchId: string | null,
   data: CdpInterestBatchByIdResponse | undefined,
 ): boolean {
   return joinBatchId != null && data != null && data.InterestBatch.length === 0;
+}
+
+/** Only disclose a batch-rate refresh failure via the "last confirmed
+ *  state" wording once SOMETHING was actually confirmed and is still on
+ *  screen — a resolved rate OR a resolved-missing verdict (mirrors the
+ *  markets/trove notices, which are only reachable past
+ *  `hasErrorWithoutData`, i.e. with data present) — that specific wording
+ *  would misstate a first-attempt failure as stale data.
+ *  {@link resolveInterestBatchFirstLoadError} covers the complementary
+ *  case: a first-load failure is still real information (Codex correctly
+ *  flagged that collapsing it into the same silent dash as "still
+ *  loading" hides that the query failed, not just hasn't resolved yet).
+ *  `batchMissing` must be included here too — a poll failure after a
+ *  confirmed-missing verdict is a refresh failure, not a first-load one,
+ *  same class of bug as the trove-lookup fix below. */
+function resolveInterestBatchNoticeError(
+  resolvedBatchRate: string | null | undefined,
+  batchMissing: boolean,
+  error: Error | undefined,
+): Error | undefined {
+  return resolvedBatchRate != null || batchMissing ? error : undefined;
+}
+
+/** The complementary first-load case: an error with nothing ever
+ *  confirmed — neither a rate nor a confirmed-missing verdict. Distinct
+ *  from {@link resolveInterestBatchNoticeError} so the two never both fire
+ *  for the same render — exactly one, or neither. */
+function resolveInterestBatchFirstLoadError(
+  resolvedBatchRate: string | null | undefined,
+  batchMissing: boolean,
+  error: Error | undefined,
+): Error | undefined {
+  return resolvedBatchRate == null && !batchMissing ? error : undefined;
 }
 
 type BatchRateProps = {
@@ -211,6 +217,10 @@ function resolveBatchRateProps(
 ): BatchRateProps {
   const resolvedBatchRate =
     interestBatch.data?.InterestBatch[0]?.annualInterestRate;
+  const batchMissing = resolveInterestBatchMissing(
+    joinBatchId,
+    interestBatch.data,
+  );
   return {
     displayedInterestRate: resolveDisplayedInterestRate(
       trove,
@@ -219,17 +229,19 @@ function resolveBatchRateProps(
     ),
     interestBatchError: resolveInterestBatchNoticeError(
       resolvedBatchRate,
+      batchMissing,
       interestBatch.error,
     ),
     interestBatchFirstLoadError: resolveInterestBatchFirstLoadError(
       resolvedBatchRate,
+      batchMissing,
       interestBatch.error,
     ),
     batchRateTimestamp:
       joinBatchId == null
         ? null
         : (interestBatch.data?.InterestBatch[0]?.updatedAt ?? null),
-    batchMissing: resolveInterestBatchMissing(joinBatchId, interestBatch.data),
+    batchMissing,
   };
 }
 
@@ -394,6 +406,7 @@ function TroveDetailView({
         collateral={collateral}
         symbol={symbol}
         network={network}
+        troveError={troveById.error}
       />
     );
   }
@@ -491,14 +504,29 @@ function NotIndexedNotice({
   collateral,
   symbol,
   network,
+  troveError,
 }: {
   troveId: string;
   collateral: CdpCollateral;
   symbol: string;
   network: Network;
+  /** By the time this component renders, `troveById.data` is guaranteed
+   *  non-null (the earlier `isLoadingWithoutData`/`hasErrorWithoutData`
+   *  guards already returned for a still-loading or first-load-failed
+   *  request) — so any error here is necessarily a REFRESH failure on top
+   *  of an already-confirmed empty `Trove: []` response, never a
+   *  first-load failure. During indexer catch-up the trove may have
+   *  appeared since that last successful lookup; silently keeping the
+   *  "not indexed" claim on a failed refresh would misstate it as current. */
+  troveError: Error | undefined;
 }) {
   return (
     <div className="space-y-3">
+      <StaleRefreshNotice
+        subject="Trove data"
+        error={troveError}
+        className=""
+      />
       <EmptyBox
         message={`Trove ${troveId} is not indexed for ${collateral.symbol}. Verify the id, or it may not exist on this market.`}
       />

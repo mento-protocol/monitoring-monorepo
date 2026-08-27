@@ -326,6 +326,24 @@ describe("TroveDetailClient", () => {
     expect(link).not.toBeNull();
   });
 
+  it("discloses a failed refresh on the not-indexed state, instead of silently keeping a stale 'not indexed' claim", () => {
+    // Once the lookup has confirmed `Trove: []`, a later poll failure is a
+    // refresh failure on top of that confirmed verdict — not a first-load
+    // failure. During indexer catch-up the trove may have appeared since
+    // the last successful lookup, so silence here would be misleading.
+    mockQueries({
+      troveRows: [],
+      troveError: new Error("trove lookup revalidation stalled"),
+    });
+    render(handle!);
+
+    const text = handle!.container.textContent ?? "";
+    expect(text).toContain("not indexed");
+    expect(text).toContain("Trove data refresh failed");
+    expect(text).toContain("showing the last confirmed state");
+    expect(text).toContain("trove lookup revalidation stalled");
+  });
+
   it("shows 'Unknown CDP market' for a symbol with no matching collateral", () => {
     mockQueries();
     render(handle!, "ZZZm");
@@ -668,6 +686,26 @@ describe("TroveDetailClient", () => {
     });
     render(handle!);
     expect(handle!.container.textContent).toContain("Batch missing");
+  });
+
+  it("discloses a stale-refresh notice (not the harsh first-load error) when a poll fails after the batch was confirmed missing", () => {
+    // A poll failure after `batchMissing` was already confirmed is a
+    // refresh failure on top of confirmed information — same "resolved
+    // empty, not the same as never-loaded" class as the trove-lookup and
+    // operations-list fixes, just for the batch join.
+    mockQueries({
+      troveRows: [trove({ status: "active", interestBatchId: "batch-1" })],
+      interestBatchRows: [], // confirmed missing...
+      interestBatchError: new Error("batch revalidation stalled"), // ...then a later poll fails.
+    });
+    render(handle!);
+
+    const text = handle!.container.textContent ?? "";
+    expect(text).toContain("Batch missing");
+    expect(text).not.toContain("Batch rate unavailable");
+    expect(text).toContain("Batch rate refresh failed");
+    expect(text).toContain("showing the last confirmed state");
+    expect(text).toContain("batch revalidation stalled");
   });
 
   it("timestamps a resolved batch rate with the batch's own updatedAt, distinct from the trove's timestamp", () => {
