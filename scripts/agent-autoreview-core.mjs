@@ -2676,6 +2676,7 @@ const INDEXER_HANDLER_INVARIANT_FAMILIES =
         "indexer-envio/test/startBlockInvariant.test.ts",
         "indexer-envio/test/tradingLimitConfigChange.test.ts",
         "indexer-envio/test/tradingLimits.test.ts",
+        "indexer-envio/test/troveOperationSnapshot.test.ts",
         "indexer-envio/test/upsertPoolIdempotency.test.ts",
         "indexer-envio/test/upsertPoolStages.test.ts",
         "indexer-envio/test/usd.test.ts",

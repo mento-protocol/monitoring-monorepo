@@ -6877,8 +6877,8 @@ export type CdpTroveOpSnapshotsQuery = {
   readonly TroveOperationEvent: ReadonlyArray<{
     readonly id: string;
     readonly owner: string;
-    readonly debtBefore: string;
-    readonly debtAfter: string;
+    readonly debtBefore: string | null;
+    readonly debtAfter: string | null;
     readonly collBefore: string;
     readonly collAfter: string;
   }>;
@@ -6952,8 +6952,8 @@ export type AllCdpTroveOpSnapshotsQuery = {
   readonly TroveOperationEvent: ReadonlyArray<{
     readonly id: string;
     readonly owner: string;
-    readonly debtBefore: string;
-    readonly debtAfter: string;
+    readonly debtBefore: string | null;
+    readonly debtAfter: string | null;
     readonly collBefore: string;
     readonly collAfter: string;
   }>;

@@ -144,6 +144,19 @@ indexer.onEvent(
     const ledgerPrice = persistLedgerPrice
       ? await loadLiquityPrice(context, market, blockNumber)
       : null;
+    // `BatchedTroveUpdated` (never `TroveUpdated`) fires before
+    // `TroveOperation` for a batch-managed op and stages this row keyed by
+    // tx+trove — its presence is how `maybeRecordTroveOperation` knows
+    // `snapshotState.debtAfter` above is stale. See that function's doc.
+    const pendingBatchedTroveUpdate =
+      await context.PendingBatchedTroveUpdate.get(
+        pendingTroveKey(
+          event.chainId,
+          event.transaction.hash,
+          collateralId,
+          troveId,
+        ),
+      );
 
     const op = Number(event.params._operation);
     const forced = isForcedOperation(op);
@@ -183,8 +196,8 @@ indexer.onEvent(
       entryState: {
         owner: snapshotState.owner,
         status: prevTroveState.status,
-        debt: snapshotState.prevDebt,
-        coll: snapshotState.prevColl,
+        debt: snapshotState.debtAfter,
+        coll: snapshotState.collAfter,
         interestBatchId: entryInterestBatchId,
       },
       event,
@@ -210,6 +223,7 @@ indexer.onEvent(
       instanceId: instance.id,
       troveId,
       snapshotState,
+      pendingBatchedTroveUpdate,
       blockNumber,
       blockTimestamp,
     });
