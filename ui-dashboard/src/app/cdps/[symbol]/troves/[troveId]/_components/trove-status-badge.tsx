@@ -23,16 +23,18 @@ export function TroveStatusBadge({ status }: { status: string }) {
   }
   return (
     <Tooltip content={tooltip} label={`${label}: ${tooltip}`} asChild>
-      {/* `asChild` clones this child as-is (see @/components/tooltip.tsx) —
-          a plain span isn't reachable by Tab, so keyboard users could never
-          open the tooltip. `tabIndex={0}` makes it a focusable trigger like
-          the component's default `<button>` trigger. */}
-      <span
-        tabIndex={0}
+      {/* `button`, not `span` — `asChild` clones this element as-is as the
+          tooltip's focus trigger (see @/components/tooltip.tsx). A plain
+          span isn't reachable by Tab, so keyboard users could never open
+          the tooltip; a native interactive element is focusable without an
+          explicit tabIndex (which jsx-a11y/no-noninteractive-tabindex
+          rejects on a non-interactive element like a bare span). */}
+      <button
+        type="button"
         className={`inline-block rounded border px-2 py-0.5 text-xs font-medium uppercase tracking-wide ${troveStatusBadgeClasses(status)}`}
       >
         {label}
-      </span>
+      </button>
     </Tooltip>
   );
 }

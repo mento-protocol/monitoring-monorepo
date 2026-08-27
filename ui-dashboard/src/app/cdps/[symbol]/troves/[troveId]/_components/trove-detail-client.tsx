@@ -65,6 +65,29 @@ function isOpenTroveStatus(status: string): boolean {
   return (CDP_TROVE_OPEN_STATUSES as readonly string[]).includes(status);
 }
 
+/** Schema-lag fallback (same pattern as the market page's
+ *  `cdp-detail-client.tsx`): picks the `Trove` query variant that matches
+ *  what the schema probe actually found support for. */
+function resolveTroveByIdQuery(
+  troveEntityId: string | null,
+  supportsTroveLastUpdatedTxHash: boolean,
+): string | null {
+  if (troveEntityId == null) return null;
+  return supportsTroveLastUpdatedTxHash
+    ? CDP_TROVE_BY_ID
+    : CDP_TROVE_BY_ID_WITHOUT_TX;
+}
+
+/** Batch-rate join target (mirrors `buildRankedOpenRows` in the market
+ *  page's `trove-row-data.ts`): only for a currently-open trove, since a
+ *  closed/liquidated/redeemed trove's rate is a historical snapshot, not a
+ *  live obligation — joining a closed trove to the batch's CURRENT rate
+ *  would misrepresent what it actually paid. */
+function resolveJoinBatchId(trove: CdpTrove | undefined): string | null {
+  if (trove?.interestBatchId == null) return null;
+  return isOpenTroveStatus(trove.status) ? trove.interestBatchId : null;
+}
+
 export function TroveDetailClient({
   symbol,
   troveId,
@@ -103,26 +126,12 @@ export function TroveDetailClient({
   const troveEntityId =
     collateral == null ? null : makeTroveEntityId(collateral.id, troveId);
   const troveById = useGQL<CdpTroveByIdResponse>(
-    troveEntityId == null
-      ? null
-      : supportsTroveLastUpdatedTxHash
-        ? CDP_TROVE_BY_ID
-        : CDP_TROVE_BY_ID_WITHOUT_TX,
+    resolveTroveByIdQuery(troveEntityId, supportsTroveLastUpdatedTxHash),
     troveEntityId == null ? undefined : { troveEntityId },
     { timeoutMs: HASURA_TIMEOUT_MS },
   );
   const trove = troveById.data?.Trove[0];
-  // Batch-rate join (mirrors `buildRankedOpenRows` in the market page's
-  // `trove-row-data.ts`): only for a currently-open trove, since a
-  // closed/liquidated/redeemed trove's rate is a historical snapshot, not a
-  // live obligation — joining a closed trove to the batch's CURRENT rate
-  // would misrepresent what it actually paid.
-  const joinBatchId =
-    trove != null &&
-    trove.interestBatchId != null &&
-    isOpenTroveStatus(trove.status)
-      ? trove.interestBatchId
-      : null;
+  const joinBatchId = resolveJoinBatchId(trove);
   const interestBatch = useGQL<CdpInterestBatchByIdResponse>(
     joinBatchId == null ? null : CDP_INTEREST_BATCH_BY_ID,
     joinBatchId == null ? undefined : { batchId: joinBatchId },
@@ -149,6 +158,55 @@ export function TroveDetailClient({
       <EmptyBox message="CDP markets are only deployed on Celo mainnet." />
     );
   }
+  return (
+    <TroveDetailView
+      symbol={symbol}
+      troveId={troveId}
+      network={network}
+      markets={markets}
+      collateral={collateral}
+      troveById={troveById}
+      trove={trove}
+      batchAnnualInterestRate={
+        interestBatch.data?.InterestBatch[0]?.annualInterestRate
+      }
+      operations={operations}
+      operationRows={operationRows}
+      truncated={truncated}
+    />
+  );
+}
+
+/** All post-network-guard rendering (loading/error/not-indexed/content) —
+ *  split out of {@link TroveDetailClient} to stay under the file's
+ *  max-lines/complexity lint budget; mirrors `CdpDetailState` in the market
+ *  page's `cdp-detail-client.tsx`. Takes already-fetched hook results as
+ *  props rather than fetching itself. */
+function TroveDetailView({
+  symbol,
+  troveId,
+  network,
+  markets,
+  collateral,
+  troveById,
+  trove,
+  batchAnnualInterestRate,
+  operations,
+  operationRows,
+  truncated,
+}: {
+  symbol: string;
+  troveId: string;
+  network: Network;
+  markets: ReturnType<typeof useGQL<CdpMarketsResponse>>;
+  collateral: CdpCollateral | undefined;
+  troveById: ReturnType<typeof useGQL<CdpTroveByIdResponse>>;
+  trove: CdpTrove | undefined;
+  batchAnnualInterestRate: string | null | undefined;
+  operations: ReturnType<typeof useGQL<CdpTroveOperationsResponse>>;
+  operationRows: CdpTroveOperationEventRow[];
+  truncated: boolean;
+}) {
   if (isLoadingWithoutData(markets.isLoading, markets.data)) {
     return <TroveDetailSkeleton />;
   }
@@ -206,9 +264,7 @@ export function TroveDetailClient({
       <TroveHeaderCard
         trove={trove}
         collateral={collateral}
-        batchAnnualInterestRate={
-          interestBatch.data?.InterestBatch[0]?.annualInterestRate
-        }
+        batchAnnualInterestRate={batchAnnualInterestRate}
       />
       <TroveLifetimeTotals trove={trove} debtSymbol={collateral.symbol} />
       <TroveOperationsList

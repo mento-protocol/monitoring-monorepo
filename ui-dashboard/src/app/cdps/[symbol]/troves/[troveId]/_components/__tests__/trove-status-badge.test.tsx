@@ -71,10 +71,10 @@ describe("TroveStatusBadge", () => {
     expect(handle.container.querySelector("[aria-describedby]")).toBeNull();
   });
 
-  it("is keyboard-focusable — asChild clones a plain span, which needs an explicit tabIndex to be Tab-reachable", () => {
+  it("is keyboard-focusable — asChild clones a native <button>, reachable by Tab without an explicit tabIndex", () => {
     handle = render(<TroveStatusBadge status="active" />);
     const trigger = handle.container.querySelector("[aria-describedby]");
-    expect(trigger?.tagName).toBe("SPAN");
-    expect(trigger?.getAttribute("tabindex")).toBe("0");
+    expect(trigger?.tagName).toBe("BUTTON");
+    expect((trigger as HTMLButtonElement).tabIndex).toBe(0);
   });
 });

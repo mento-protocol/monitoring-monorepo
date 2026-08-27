@@ -207,12 +207,17 @@ function TroveHeaderStats({
         <StatLabel>ICR</StatLabel>
         <StatValue>
           <Tooltip content={icrTitle} asChild>
-            <span
-              tabIndex={0}
+            {/* `button`, not `span` — `asChild` clones this element as the
+                tooltip's focus trigger (see @/components/tooltip.tsx), and a
+                non-interactive element needs an ARIA role or a native
+                interactive tag to be a valid keyboard-focus target; `span
+                tabIndex` alone trips jsx-a11y/no-noninteractive-tabindex. */}
+            <button
+              type="button"
               className={icrTextClass(trove.icrBps, collateral.mcrBps)}
             >
               {formatBpsPercent(trove.icrBps)}
-            </span>
+            </button>
           </Tooltip>
           <span className="ml-1 text-[10px] text-slate-500">
             (MCR {formatBpsPercent(collateral.mcrBps)})

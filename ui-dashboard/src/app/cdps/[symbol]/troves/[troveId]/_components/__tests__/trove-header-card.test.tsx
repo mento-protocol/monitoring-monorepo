@@ -254,20 +254,20 @@ describe("TroveHeaderCard", () => {
     expect(link?.getAttribute("href")).toBe("mock-address://0xliveowner");
   });
 
-  it("is keyboard-focusable on every span-based tooltip trigger (status badge + ICR)", () => {
+  it("is keyboard-focusable on every asChild tooltip trigger (status badge + ICR)", () => {
     handle = render(
       <TroveHeaderCard trove={trove()} collateral={collateral()} />,
     );
-    // The Debt stat's tooltip uses the default `<button>` trigger (already
-    // focusable). The status badge and ICR stat both clone a plain `<span>`
-    // via `asChild` — neither is reachable by Tab without an explicit
-    // tabIndex.
-    const spanTriggers = handle.container.querySelectorAll(
-      "span[aria-describedby]",
-    );
-    expect(spanTriggers.length).toBeGreaterThan(0);
-    for (const trigger of spanTriggers) {
-      expect(trigger.getAttribute("tabindex")).toBe("0");
+    // The Debt stat's tooltip uses the default `<button>` trigger. The
+    // status badge and ICR stat both clone a `<button>` via `asChild` too
+    // (not a plain `<span>`, which jsx-a11y/no-noninteractive-tabindex
+    // rejects as a tabIndex target) — every tooltip trigger on this card is
+    // reachable by Tab.
+    const triggers = handle.container.querySelectorAll("[aria-describedby]");
+    expect(triggers.length).toBeGreaterThan(0);
+    for (const trigger of triggers) {
+      expect(trigger.tagName).toBe("BUTTON");
+      expect((trigger as HTMLButtonElement).tabIndex).toBe(0);
     }
   });
 
