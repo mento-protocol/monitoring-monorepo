@@ -27,6 +27,13 @@
  * request still enqueues. Closing it means merging through an operation that
  * cannot enqueue at all; issue 2092 carries that change.
  *
+ * An interrupt during the merge call is a third residual: SIGINT or SIGTERM
+ * reaches this process too, so it can exit before the reconciliation below
+ * runs, leaving a request GitHub might complete later. The pre-send refusals
+ * shrink that to a base with no merge queue, no standing auto-merge request,
+ * and an override reason in play — and issue 2092 removes it outright, since
+ * an operation that cannot enqueue leaves nothing standing to reconcile.
+ *
  * Two races are detected rather than prevented. `--match-head-commit` pins the
  * head, and the merge endpoint has no base equivalent, so a retarget between
  * the final gate read and the merge request itself can still land on another

@@ -122,6 +122,14 @@ wrapper says so in its own header rather than implying otherwise:
   `sha` — which is a change to the wrapper's central call and is tracked in
   issue 2092. `main` has no `merge_queue` rule today, so the hazard is latent
   here rather than active.
+- **An interrupt during the merge call skips reconciliation.** SIGINT or
+  SIGTERM reaches this process as well as `gh`, so the wrapper can exit after
+  GitHub accepted a request but before the post-merge reconciliation runs,
+  leaving something standing. The pre-send refusals shrink this to a base with
+  no merge queue, no standing auto-merge request, and `--not-ready-reason` in
+  play. Trapping and forwarding signals around the merge call would narrow it
+  further; issue 2092 removes it outright, because an operation that cannot
+  enqueue or enable auto-merge leaves nothing to reconcile.
 - **The squash subject is not pinned.** A title edited in the same window can
   reach the merge commit. `gh pr merge --subject` would pin it, but this
   repository sets `squash_merge_commit_title=COMMIT_OR_PR_TITLE`: GitHub uses
