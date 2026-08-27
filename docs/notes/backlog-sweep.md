@@ -29,8 +29,16 @@ every worker's PR loop is
 
 ## The loop
 
-Preflight. Rank. Pick the eligible top N. Claim each by number. Hand each to a
-worker. Keep the workers awake. Write the report. Stop at READY.
+Preflight. Rank. Pick the eligible top N. Show the batch. Claim each by number.
+Hand each to a worker. Keep the workers awake. Write the report. Stop at READY.
+
+Showing the batch is a real step, not a courtesy. The operator triggers a sweep
+and names a batch size; the issues themselves come from a ranking they have not
+read. Printing the selected numbers before the first claim is what makes the
+trigger consent for these specific issues, and it is the last cheap moment to
+stop a bad pick. The sweep prints and proceeds rather than waiting for an
+answer — an operator starts a sweep in order to walk away, and blocking here
+would strand the batch.
 
 A claim can lose a race to another session between ranking and claiming, so
 each claim result is read before its worker is briefed. Only a successful claim

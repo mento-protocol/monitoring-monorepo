@@ -113,6 +113,17 @@ stop.
 
 ## Hand Each Issue To A Worker
 
+**Print the batch before the first claim.** List every selected issue by number
+and title, with the receipt position that put it there, and say plainly that the
+sweep is about to claim them and open a PR for each. This is the step the trust
+model rests on: the operator triggered the sweep, but they chose a batch size,
+not a set of issues — the set comes from a ranking they have not seen yet. They
+are still at the terminal at this point, so showing the batch is what turns the
+trigger into consent for these specific issues, and it is their moment to stop
+the run. Do not wait on a reply: the operator starts a sweep to leave it
+running, and blocking on input here would strand the batch the first time they
+walk away. Print, then proceed.
+
 Work the batch **sequentially**: claim one issue, brief its worker, then move
 to the next. Claiming ahead of the briefing would park the whole batch in
 `agent-active` while only one worker exists to move it.
