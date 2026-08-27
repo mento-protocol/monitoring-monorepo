@@ -8034,9 +8034,21 @@ printf '%s\n' \
   'AUTOREVIEW_TEST_PROGRESS family=adapter elapsed=2s'
 : > "${AUTOREVIEW_PROGRESS_MARKER:?}"
 echo 'successful autoreview noise that should stay quiet'
-# Keep this command active while the parallel parent settles its two fast
-# siblings, so the next synthetic heartbeat can relay the published progress.
-/bin/sleep 6
+# Stay in flight until the gate has actually emitted the heartbeat that relays
+# the published progress, then finish. The parent reaches that heartbeat only
+# after settling this command's siblings, and each settlement walks the process
+# table, so its cost is a property of the machine rather than a constant: the
+# fixed six-second sleep this replaces held on Linux and expired mid-settlement
+# on macOS, leaving nothing in flight to relay (issue 2108). Waiting on the
+# heartbeat removes the timing assumption. The bound only decides how long a
+# genuinely broken relay takes to report, and expiring still fails the
+# assertions below rather than hanging the suite.
+for _ in {1..1200}; do
+  if grep -q 'still running after' "${AUTOREVIEW_PROGRESS_OUTPUT:?}"; then
+    break
+  fi
+  /bin/sleep 0.1
+done
 printf '%s\n' \
   'AUTOREVIEW_TEST_TIMING family=target-selection status=ok elapsed=3s' \
   'AUTOREVIEW_TEST_TIMING family=adapter status=ok elapsed=4s'
@@ -8083,7 +8095,12 @@ STUB
   git commit -qm init
   printf 'scripts/agent-autoreview.test.sh\n' > changed-paths.txt
   rm -f "$autoreview_progress_marker"
+  # The mapped command reads this run's stdout while the gate writes it. That
+  # is the handshake, not an accident: one writer, one reader that only ever
+  # greps to EOF, so SC2094's clobber case cannot arise here.
+  # shellcheck disable=SC2094
   AUTOREVIEW_PROGRESS_MARKER="$autoreview_progress_marker" \
+    AUTOREVIEW_PROGRESS_OUTPUT="$output_file" \
     DATE_COUNTER_FILE="$autoreview_progress_repo/date-counter" \
     PATH="$autoreview_progress_repo/bin:$PATH" \
     "$repo_root/scripts/agent-quality-gate.sh" \
@@ -8111,7 +8128,10 @@ for sequential_mode in parallel-one fail-fast; do
     # autoreview test on later runs, so drop the stamps to force re-execution.
     rm -f "$autoreview_progress_repo/.tmp/agent-quality-gate/command-stamps.tsv"
     rm -f "$autoreview_progress_marker"
+    # Same deliberate read-while-write handshake as the parallel case above.
+    # shellcheck disable=SC2094
     AUTOREVIEW_PROGRESS_MARKER="$autoreview_progress_marker" \
+      AUTOREVIEW_PROGRESS_OUTPUT="$output_file" \
       DATE_COUNTER_FILE="$autoreview_progress_repo/date-counter" \
       PATH="$autoreview_progress_repo/bin:$PATH" \
       "$repo_root/scripts/agent-quality-gate.sh" \
