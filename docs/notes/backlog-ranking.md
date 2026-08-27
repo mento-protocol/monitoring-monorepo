@@ -43,6 +43,11 @@ The loop reuses the workflow's terms and adds none:
   neither state shows up in an assignee check — and the reverse holds too: an
   assignee is not a claim. `listReadyIssues` applies no assignee filter, so an
   `agent-ready` issue assigned for triage stays eligible.
+- **conflicting queue state** — an issue carrying both `agent-ready` and
+  `needs-grooming`. The lifecycle treats them as mutually exclusive and the
+  board reports the conflict, but a snapshot taken mid-repair can see both. Such
+  an issue is held out as unresolved and named in Method rather than ranked,
+  because ready and grooming give the selection rules opposite answers.
 - **outside the queue** — an open issue carrying none of the four labels above.
   Workflows open these on their own: drift reports, supply-chain advisories,
   Sentry triage records. They are never ranked and never Selected; Method counts
@@ -85,9 +90,13 @@ a valid receipt — the alternative is inventing a candidate to satisfy the form
 A run drops an issue while the newest entry for that number is unexpired. The
 file does not exist until the first park; a run reads a missing file as `[]`
 rather than failing or creating an empty one. Appending is a read-modify-write,
-so it is serialized with a lock or a compare-and-retry: two sessions parking
-different issues concurrently would otherwise lose one entry or leave the file
-unparsable, and a lost park returns the issue at the top of the next run.
+so a lock is held across the whole of it and released only after the write
+lands, removed on failure too, and broken only after confirming its owner is
+gone. Re-reading and comparing before the write is not an accepted substitute:
+both runs can re-read, both see no change, and both write, losing an entry just
+the same. Two sessions parking different issues concurrently would otherwise
+lose one park or leave the file unparsable, and a lost park returns that issue
+at the top of the next run.
 
 It exists so a parked issue does not resurface at the top of every run and force
 the same decision again. Entries are appended, never edited or deleted: an

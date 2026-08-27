@@ -40,12 +40,26 @@ tell an owned issue from a free one, so a partial receipt would be worse than
 none.
 
 ```bash
-mkdir -p .rankings
+run=".rankings/run-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+mkdir -p "$run"
 gh issue list --repo mento-protocol/monitoring-monorepo \
   --state open --limit 1000 \
-  --json number,title,url,labels,assignees,updatedAt \
-  > .rankings/roster-raw.json
+  --json number,title,url,labels,assignees,updatedAt,blocking \
+  > "$run/roster-raw.json"
 ```
+
+**Staging files are per run.** Both fetches write under `$run`, not a fixed
+`.rankings/roster-raw.json`. The receipt and ledger rules below both assume two
+sessions can overlap in one checkout, and shared staging names contradict that:
+one run would truncate a file while the other reads it, producing a parse error
+or, worse, a receipt built from two different snapshots. The `$$` keeps the name
+unique even within the same second.
+
+`blocking` is in the field list because Dependency effect is worth 25 points and
+an issue scored from its list line would otherwise look like a leaf. GitHub's
+structured relationships are the only place that link lives, so without this
+field a blocker could score low enough to never earn the body read that would
+have revealed it.
 
 **Every fetch names the repository explicitly.** This skill ranks one backlog,
 and the linked-pull-request query below is pinned to the same repository. A bare
@@ -83,7 +97,7 @@ query($owner: String!, $repo: String!, $endCursor: String) {
     }
   }
 }' -F owner=mento-protocol -F repo=monitoring-monorepo \
-  > .rankings/linked-prs.json
+  > "$run/linked-prs.json"
 ```
 
 `--slurp` makes that file one JSON array with a page per element. Without it
@@ -166,6 +180,20 @@ of double-counting the issues that satisfy both.
   as outside the queue rather than ranking them into slots a workable issue
   should hold.
 
+**An issue carrying both `agent-ready` and `needs-grooming` is held out as
+unresolved, not ranked.** The lifecycle treats the two as mutually exclusive and
+`issue-board-state.mjs` reports "has conflicting state labels", so a ranking
+snapshot taken mid-repair can see both at once. Ranking it would make the rules
+contradict each other: ready says it can be Selected, grooming says it cannot.
+Count it in Method as unresolved and say which issue it was, so the conflict gets
+fixed on the issue rather than silently resolved by whichever rule ran first.
+
+Ownership is read from labels. `pnpm issue:claim` removes `agent-ready`, adds
+`agent-active`, and writes the Project `Claim ID` in the same operation, so the
+label is the signal every queue consumer keys on — `listReadyIssues` included.
+This skill only recommends; the operator's claim re-validates ownership through
+the helper's own Claim ID guard before any work starts.
+
 Keep `needs-grooming` issues in the roster. They score badly on ease and fit on
 their own merits, and seeing where they land is the point. Never Select one:
 recommend the top `agent-ready` candidate instead, and say in the Selected
@@ -203,6 +231,15 @@ Read the full body of every issue that can plausibly reach the top 15. Score the
 rest from the list line. A reason must come from a body actually read; an issue
 whose reason rests on its title alone does not belong in the table.
 
+**Read the eventual Selected issue and its runner-up in full whatever their
+rank.** Top 15 is not the right cutoff for that pair, because only `agent-ready`
+issues can be Selected while `needs-grooming` issues are ranked alongside them.
+Fifteen higher-scoring grooming issues would push the best ready candidate and
+its runner-up off the table, and the Selected section still has to name a first
+concrete step and say why one beats the other — neither of which a list line
+supports. Read both before writing that section, even when the table never shows
+them.
+
 ## Write The Receipt
 
 Write `.rankings/ranking-<YYYY-MM-DD>.md` in UTC. If that name is taken, append
@@ -221,8 +258,9 @@ Three sections:
 1. **Method** — fetch timestamp, open-issue count, how many of those sat outside
    the queue, roster count, the per-reason drop counts, how many bodies were read
    in full, how many issues were scored from the list line, how many candidates
-   were held out because a truncated timeline could not be resolved, and any cap
-   that applied to a whole class of issues.
+   were held out — truncated timelines that could not be resolved, and issues
+   carrying conflicting queue-state labels, named — and any cap that applied to a
+   whole class of issues.
 2. **Top 15** — one table with the columns `Rank | Issue | Score | Reason`. The
    reason is one line: what the issue is, why it scores where it does, and the
    cap when one applied.
@@ -269,15 +307,22 @@ Append only. To un-park early, append a fresh entry for the same number with an
 records what earlier runs decided, and rewriting it makes their receipts
 unreadable.
 
-**Serialize the append.** "Append" here is read the array, add an entry, write
-the file back, which is the same check-then-write race the receipt name has:
-two sessions parking different issues can both read the array and each write it
-back holding only its own entry, so one park is silently lost or the file is
-left mid-write and unparsable. Take a lock for the read-modify-write — create
-`.rankings/excluded.lock` exclusively, and retry once it clears — or re-read and
-compare before writing and retry on a change. A park that disappears brings the
-issue back at the top of the next run, which is exactly what the ledger exists
-to prevent.
+**Hold a lock across the whole append.** "Append" here is read the array, add an
+entry, write the file back: two sessions parking different issues can both read
+the array and each write it back holding only its own entry, so one park is
+silently lost or the file is left mid-write and unparsable. Create
+`.rankings/excluded.lock` exclusively — `set -o noclobber` again — and hold it
+across the read, the edit, and the write, releasing it only after the write
+lands. Remove it on exit, including on failure, or the next run blocks forever
+on an owner that is gone; a lock whose holder no longer exists is stale and may
+be broken after re-checking that the process is really absent.
+
+Re-reading and comparing before the write is **not** a substitute. Both runs can
+re-read, both see no change since their first read, and both then write — the
+compare narrows the window without closing it, which is the same
+check-then-write shape the lock exists to remove. Only holding the lock across
+the full read-modify-write prevents a lost update, and a lost park returns that
+issue at the top of the next run, which is what the ledger exists to prevent.
 
 `.rankings/` is gitignored, so the ledger is local to one checkout. A permanent
 exclusion belongs on the issue itself, by closing it or moving it to
