@@ -224,6 +224,22 @@ test("react-doctor:diff carries the base ref AND its resolved oid", () => {
   );
 });
 
+// The gate's freshness stamp binds the merge-base rather than the base tip, so
+// the plan text is what keeps a tip-reading command honest across an advance of
+// the base. Assert the text really does move with the OID: were it to carry
+// only the ref NAME, the command-plan hash would be identical on both sides of
+// a fetch and a warm stamp would hide a stale react-doctor answer.
+test("react-doctor:diff command text moves when the base OID moves", () => {
+  const commandFor = (baseOid) => {
+    const plan = new Plan();
+    verbs.addUiReactDoctorDiff(plan, "r", stubFacts({ baseOid }));
+    return commandsOf(plan)[0];
+  };
+  const before = commandFor("1111111111111111111111111111111111111111");
+  const after = commandFor("2222222222222222222222222222222222222222");
+  assert.notEqual(before, after);
+});
+
 test("the ADR reminder is fed the gate's own base, head and path set", () => {
   const plan = new Plan();
   verbs.addAdrReminder(plan, "r", stubFacts());
@@ -744,6 +760,50 @@ function manifestRepo(mutate) {
   );
   return dir;
 }
+
+// The freshness stamp binds the merge-base; `facts.baseOid` deliberately does
+// not. It is the base ref's TIP, and the gate keeps tip binding for any plan
+// whose text carries it. Pin that difference: if this ever became the
+// merge-base, react-doctor's Turbo cache key would stop moving when the base
+// moved and a stale diff answer could survive a fetch.
+test("facts.baseOid resolves the base ref's tip, not the merge-base", () => {
+  const dir = mkdtempSync(join(tmpdir(), "engine-base-oid-"));
+  const git = (...args) =>
+    execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim();
+  mkdirSync(join(dir, "empty-hooks"), { recursive: true });
+  writeFileSync(join(dir, "fixture.txt"), "fixture\n");
+  git("init", "-q");
+  git("config", "user.email", "engine-test@example.invalid");
+  git("config", "user.name", "engine test");
+  git("config", "commit.gpgsign", "false");
+  git("config", "core.hooksPath", join(dir, "empty-hooks"));
+  git("add", "-A");
+  git("commit", "-qm", "fixture");
+  // A same-tree child of HEAD that HEAD itself does not contain: the base tip
+  // advances while the merge-base stays where it was.
+  const mergeBase = git("rev-parse", "--verify", "HEAD");
+  const tip = git(
+    "commit-tree",
+    git("rev-parse", "--verify", "HEAD^{tree}"),
+    "-p",
+    mergeBase,
+    "-m",
+    "base advance",
+  );
+  git("update-ref", "refs/remotes/origin/main", tip);
+  assert.equal(git("merge-base", "origin/main", "HEAD"), mergeBase);
+  assert.notEqual(tip, mergeBase);
+
+  const facts = new Facts({
+    repoRoot: dir,
+    baseRef: "origin/main",
+    headRef: "HEAD",
+    changedPathsFile: join(dir, "paths"),
+    isRealTree: false,
+    scriptSourceDir: join(dir, "scripts"),
+  });
+  assert.equal(facts.baseOid, tip);
+});
 
 const classOf = (dir) =>
   new Facts({

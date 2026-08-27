@@ -3,7 +3,7 @@ title: PR Operating Card
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-28
+last_verified: 2026-08-30
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -82,10 +82,12 @@ even when you never open an authority.
    serves the fork, so an `origin/...` base diffs the wrong repository and
    real changes skip their mapped checks. Fetch every base the gate will diff
    against first — `git fetch <base-remote> main`, plus `<baseRefName>` for a
-   stacked PR, whose tracking ref is otherwise stale or absent: the
-   base commit is part of the freshness stamp, the hook fetches before it runs
-   the gate, and a stamp warmed against a stale base is invalidated by that
-   fetch, so the push pays for the full gate a second time. A bare invocation
+   stacked PR, whose tracking ref is otherwise stale or absent: an unfetched
+   base diffs against history the branch has already moved past, and the hook
+   fetches before it runs the gate in any case. The freshness stamp binds the
+   **merge-base**, not the base tip, so an advance of `main` that leaves the
+   merge-base alone keeps a warm stamp; a rebase moves the merge-base and
+   still costs a full re-run. A bare invocation
    diffs against `origin/main`; a fork checkout must pass
    `--base <base-remote>/main`, and a stacked PR (base not `main`) must
    resolve `baseRefName` and pass `--base <base-remote>/<baseRefName>` — a
