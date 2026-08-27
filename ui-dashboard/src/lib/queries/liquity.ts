@@ -431,3 +431,37 @@ export const ALL_CDP_TROVE_OP_SNAPSHOTS = `
     }
   }
 `;
+
+// Trove history page (/cdps/[symbol]/troves/[troveId]) header card. `id` is
+// the composite entity id (`${collateralId}-${troveId}`, see the indexer's
+// `makeTroveId`) resolved client-side from the route's symbol + on-chain
+// troveId — never passed in raw from the URL.
+export const CDP_TROVE_BY_ID = `
+  query CdpTroveById($troveEntityId: String!) {
+    Trove(where: { id: { _eq: $troveEntityId } }, limit: 1) {
+${CDP_TROVE_ROW_FIELDS_WITH_TX}
+    }
+  }
+`;
+
+// Trove history page interim assembly (docs/PLAN-trove-history-page.md,
+// "GraphQL contract → interim assembly"): the page merges these user-op
+// rows with `Trove` cumulatives until `TroveLedgerEvent` ships (M4 child,
+// #2086) and adds the full per-redemption ledger. Filtered by BOTH
+// instanceId and troveId — the raw on-chain troveId collides across
+// markets, so instanceId scopes it to one. `limit` is the caller's
+// request size (render limit + 1) so the page can detect truncation via
+// the sentinel row without a Hasura aggregate (disabled on hosted Hasura).
+export const CDP_TROVE_OPERATIONS = `
+  query CdpTroveOperations($instanceId: String!, $troveId: String!, $limit: Int!) {
+    TroveOperationEvent(
+      where: { instanceId: { _eq: $instanceId }, troveId: { _eq: $troveId } }
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+    ) {
+      id troveId operation collChange debtChange
+      annualInterestRate debtIncreaseFromUpfrontFee
+      timestamp blockNumber txHash
+    }
+  }
+`;
