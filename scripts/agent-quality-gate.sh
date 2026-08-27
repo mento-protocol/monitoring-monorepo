@@ -3620,9 +3620,9 @@ gate_drain_capture_unpersisted=0
 # the wrapper that reads that output is what sets the flag.
 gate_drain_scan_failed=0
 gate_drain_scan_error="agentqg-scan-failed"
-# Linux full scans after mapped commands can exclude process generations that
-# existed before any mapped command could inherit its marker. Stale recovery
-# and exact-PID checks leave this boundary empty and retain their full scope.
+# Linux active-command full scans add a boundary captured before mapped work.
+# Stale recovery leaves this explicit value empty and derives its conservative
+# boundary from a same-boot marker token. Exact-PID checks stay unbounded.
 gate_active_command_proc_start_floor=""
 # The PIDs this run's handles named on the current pass, read by the
 # membership check deep inside the recursive walk.
@@ -4998,7 +4998,7 @@ acquire_gate_run_lock_legacy() {
   local stale_reason owner_state nap remaining now_millis
   local coordinator_join_status owner_record taken_record record_status
   local hidden_recovery_status hidden_recovery_busy
-  local claim_uid claim_epoch claim_token claim_status
+  local claim_uid claim_epoch claim_prefix claim_token claim_status
   # Elapsed time comes from the clock, never from adding up requested sleeps.
   # A shell that is descheduled or SIGSTOPped sleeps far longer than it asked
   # to, and counting the request would let a run outlive the budget it printed
@@ -5073,7 +5073,17 @@ acquire_gate_run_lock_legacy() {
       "No mapped command ran in this request"
     exit 2
   fi
-  printf -v claim_token '%s-%s-%s' "$this_host" "$$" "$claim_epoch"
+  if ! claim_prefix="$(
+    gate_run_marker_identity_prefix \
+      "$this_host" "legacy" "$gate_lock_local_host_fingerprint" "$$"
+  )"; then
+    echo "error: could not derive a safe legacy owner claim token." >&2
+    echo "Nothing has been executed." >&2
+    gate_report_coordinated_no_work_failure 2 "legacy owner publication" \
+      "No mapped command ran in this request"
+    exit 2
+  fi
+  printf -v claim_token '%s-%s-%s' "$claim_prefix" "$$" "$claim_epoch"
   if ! gate_lock_token_is_wellformed "$claim_token"; then
     echo "error: could not derive a safe legacy owner claim token." >&2
     echo "Nothing has been executed." >&2
@@ -5533,13 +5543,22 @@ gate_coordinator_requested() {
 }
 
 gate_run_ensure_token() {
+  local token_prefix
   if [[ -z "$gate_run_id" ]]; then
     if [[ -z "$gate_lock_local_host_name" ]] &&
       ! gate_lock_ensure_local_host_fingerprint; then
       echo "error: this gate could not create a safe scheduler drain token." >&2
       return 2
     fi
-    gate_run_id="${gate_lock_local_host_name}-$$-$(date +%s)"
+    if ! token_prefix="$(
+      gate_run_marker_identity_prefix \
+        "$gate_lock_local_host_name" "request" \
+        "$gate_lock_local_host_fingerprint" "$$"
+    )"; then
+      echo "error: this gate could not create a safe scheduler drain token." >&2
+      return 2
+    fi
+    gate_run_id="${token_prefix}-$$-$(date +%s)"
   fi
   if ! gate_lock_token_is_wellformed "$gate_run_id"; then
     echo "error: this gate could not create a safe scheduler drain token." >&2
@@ -7933,9 +7952,9 @@ record_command_stamp() {
   # Prerequisite outputs (node_modules, generated code) are invisible to the
   # source fingerprint, so prerequisite commands are never stamped or reused.
   # Quality-setup commands (shared-config build, Terraform init/validate) get
-  # the same treatment by classification, not phase bookkeeping: the
-  # --parallel 1 / --fail-fast sequential branch never enters
-  # run_prerequisite_phase, so the phase flag alone would miss them there.
+  # the same treatment by command classification as well as phase bookkeeping.
+  # This keeps the stamp policy tied to command semantics if a caller or phase
+  # arrangement changes later.
   [[ "${in_prerequisite_phase:-false}" == true ]] && return 0
   is_quality_setup_command "$command" && return 0
   is_stamp_exempt_command "$command" && return 0
@@ -8349,11 +8368,21 @@ run_mapped_entries_sequential() {
 
 make_parallel_command_drain_identity() {
   local sequence="$1"
-  local digest now identity
+  local digest now label prefix identity
   digest="$(printf '%s' "${gate_run_id:-nolock-$$}:${sequence}" | hash_stream)" ||
     return 1
+  if gate_run_proc_marker_scan_available &&
+    [[ ! "$gate_lock_local_host_fingerprint" =~ ^[0-9a-f]{64}$ ]] &&
+    ! gate_lock_ensure_local_host_fingerprint; then
+    return 1
+  fi
+  label="cmd${digest:0:20}"
+  prefix="$(
+    gate_run_marker_identity_prefix \
+      "$label" "$label" "$gate_lock_local_host_fingerprint" "$$"
+  )" || return 1
   now="$(date +%s)" || return 1
-  identity="cmd${digest:0:20}-$$-${now}"
+  identity="${prefix}-$$-${now}"
   gate_lock_token_is_wellformed "$identity" || return 1
   printf '%s\n' "$identity"
 }

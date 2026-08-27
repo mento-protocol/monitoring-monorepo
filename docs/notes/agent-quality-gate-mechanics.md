@@ -251,8 +251,9 @@ weighted bound. `AGENT_QUALITY_GATE_CAPACITY` accepts 1 through 64 and defaults
 to 3. Local parallelism cannot increase that capacity. The gate self-test uses
 weight 2 when capacity is at least 2 and weight 1 at capacity 1. Preflight,
 codegen, post-codegen install,
-Terraform init/validate chains, shared-config build setup, and the package
-script pin validator remain ordered prerequisites on every path — including
+Terraform init/validate chains, shared-config build setup for mapped config
+consumers, and the package script pin validator remain ordered prerequisites
+on every execution path — including
 `--parallel 1` and keep-going runs, where they previously degraded to ordinary
 keep-going commands and let their dependents run after a
 failure. Playwright installation uses one named resource. Dashboard browser,
@@ -388,7 +389,7 @@ comparison would be the engine against itself. What routing correctness rests on
 now is `pnpm gate:routing-table:test` (the pairing lint, the staleness check, the
 `/bin/bash` pattern oracle, the closed verb set) and
 `node --test scripts/gate/mapping/engine.test.mjs` (dedupe and first-reason-wins,
-bucket order, the four post-passes, the root-manifest classifier). Both are
+bucket order, the five post-passes, the root-manifest classifier). Both are
 routed by a change to the engine or the table, and the routing-table suite also
 runs in the required `ci` job.
 
@@ -603,13 +604,19 @@ It also binds a bounded installed-dependency manifest. The gate snapshots
 volatile prune and validation timestamps. It normalizes exact worktree-root
 paths in JSON keys and values. For every material package root, it enumerates
 direct unscoped and scoped package links. It binds each link's bytes,
-normalized real target, modes, and linked `package.json` bytes. For each unique
-direct package, it hashes the names, types, modes, and sizes of top-level
-entries. It resolves exact paths declared by `main`, `module`, `types`,
-`typings`, `bin`, `browser`, `exports`, and `imports`. It hashes the complete
-resolved file through 512 KiB. It also binds implicit package-root index
-fallbacks and any nested `package.json` used during directory resolution. For a
-larger file, it hashes the size and the first and last 64 KiB. Symlink
+normalized real target, modes, and linked `package.json` bytes. A link back into
+a workspace package is source-bound. Generated and ignored workspace output
+stays outside this digest because setup can rewrite it during the run. Every
+mapped command that can load `@mento-protocol/config` schedules its build as a
+non-reusable quality-setup prerequisite. That build removes `dist/` before it
+emits current output, so missing, stale, and orphaned files converge to one
+state. For each unique external direct package, the manifest hashes the names,
+types, modes, and sizes of top-level entries. It resolves exact paths declared
+by `main`, `module`,
+`types`, `typings`, `bin`, `browser`, `exports`, and `imports`. It hashes the
+complete resolved file through 512 KiB. It also binds implicit package-root
+index fallbacks and any nested `package.json` used during directory resolution.
+For a larger file, it hashes the size and the first and last 64 KiB. Symlink
 entrypoints also bind their link and resolved target. The manifest fails closed
 on an unsupported entry, dangling link, concurrent change, more than 16,384
 entries, a metadata file larger than 8 MiB, or more than 32 MiB of read content.
@@ -838,21 +845,45 @@ identity or process-group snapshot reads the observed PID's NUL-delimited
 `/proc/<pid>/cmdline` records directly. It also limits the procfs environment
 and descriptor checks to that PID. This exact-PID path does not repeat the
 host-wide `pgrep` scan. Full refreshes enumerate all PIDs to discover new or
-reparented descendants. Immediately before the first mapped command, a Linux
-run records the start tick of a new helper process. Active-command full
-refreshes read each candidate's start identity first. They skip a generation
-whose start tick is strictly older than that boundary before they read its UID
-or fd state. Such a process existed before mapped work could inherit the
-command marker. A generation with an equal or newer tick stays in scope.
-Stale-run recovery and exact-PID revalidation do not use the boundary. A Linux
-run that cannot record the boundary fails before it starts mapped work. The
-scan requires the process start identity to remain equal before and after
-identity and fd enumeration. Process-exit races are empty observations. A
+reparented descendants.
+
+Linux-created marker tokens can start with
+`lp1.<boot-sha256>.<start-tick>.<origin-sha256>.<label>`. Bash captures the
+outer gate process start tick for request, legacy, and command markers. This
+process exists before it can create or pass the marker to a descendant. The
+Node coordinator uses its own start tick because it holds the generation
+marker. The value bounds inherited marker holders and mapped processes. The
+origin hash keeps the prefix fixed in size; it does not authenticate code that
+runs as the same UID.
+
+A gate client can predate a coordinator and open its generation marker before
+it forks a parallel worker. That descriptor is the launch anchor for the gap
+between the last recovery scan and the worker fork. A coordinator-marker scan
+keeps this older gate parent in scope. It accepts the truncated Linux process
+name `agent-quality-g` for a direct script launch. For an explicit Bash launch,
+it requires one complete `scripts/agent-quality-gate.sh` argv record. An
+unreadable ambiguous Bash argv record fails closed for a same-UID candidate.
+The scan skips a foreign UID before it reads that process's argv. The normal
+UID, signal, and descriptor checks still decide whether the process holds the
+marker.
+
+A full refresh uses the token boundary only when the versioned prefix is exact
+and its boot hash matches the current Linux boot. Immediately before the first
+mapped command, a Linux run also records the start tick of a new helper process.
+An active-command refresh uses the later of this boundary and the token
+boundary. Legacy tokens, malformed provenance, an unreadable boot identity, and
+tokens from a different boot retain the unbounded scan. Exact-PID revalidation
+is always unbounded. Full refreshes read each candidate's start identity first.
+They skip a generation whose start tick is strictly older than the effective
+boundary before they read its UID or fd state. The older coordinator gate
+parent above stays in scope. Equal and newer ticks stay in scope. The scan
+requires the process start identity to remain equal before and after identity
+and fd enumeration. Process-exit races are empty observations. A
 restricted `hidepid` mount, unreadable in-scope process, or other incomplete
 scan is a scan failure. When `/proc/self/fd` exists, a failed procfs scan fails
 closed and never falls back to `lsof`. macOS and hosts without
-`/proc/self/fd` use the witnessed `lsof` path. A host with neither scanner
-fails closed while a marker exists.
+`/proc/self/fd` use the witnessed `lsof` path. A host with neither scanner fails
+closed while a marker exists.
 
 Adoption preserves the incoming owner record's group and other read bits so a
 legacy waiter with shared-root access can observe the barrier. The replacement

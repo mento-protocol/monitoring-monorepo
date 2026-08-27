@@ -122,7 +122,7 @@ pnpm sentry:broker:test                        # Offline tests for the triage ag
 SENTRY_TRIAGE_ISSUES='[123]' pnpm sentry:digest --channel '#sentry-triage'  # Print the Slack digest payload for a batch (needs gh auth; does not post)
 
 # Public config package
-pnpm --filter @mento-protocol/config build     # Build the public protocol metadata package
+pnpm --filter @mento-protocol/config build     # Clean-build the public protocol metadata package
 npm pack ./shared-config --dry-run             # Inspect the files that would publish to npm
 # First-time bootstrap: an npm maintainer must seed @mento-protocol/config once,
 # then configure trusted publishing for workflow filename `publish-config.yml`

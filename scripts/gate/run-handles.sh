@@ -246,20 +246,22 @@ gate_lock_test_ready_and_wait_for_release() {
 # A token names processes (through a pgrep pattern) and files (holder.*,
 # captured.*, condemned.d/*), and on a shared lock root it arrives from
 # records other users can write. Only the gate-generated shape is accepted
-# where one is read back: an alphanumeric start, then hostname characters,
-# digits, dots and dashes. No slash can pass, so no derived path can leave
-# the lock root; no leading dash, so no value can read as an option.
+# where one is read back: a bounded opaque prefix that starts with an
+# alphanumeric character, then the final creator PID and epoch fields. The
+# prefix can carry versioned Linux process-boundary evidence. No slash can pass,
+# so no derived path can leave the lock root; no leading dash, so no value can
+# read as an option.
 gate_lock_token_is_wellformed() {
   local token="$1"
-  # The full generated structure — host, dash, PID, dash, epoch — not merely
-  # a path-safe string. A looser shape would let a crafted record carry a
-  # PREFIX of a real token, and combined with an unanchored match a prefix
-  # is enough to select a live run's processes.
+  # The full generated structure — bounded prefix, PID, and epoch — not merely
+  # a path-safe string. A looser shape would let a crafted record carry a PREFIX
+  # of a real token. Combined with an unanchored match, a prefix is enough to
+  # select a live run's processes.
   [[ "$token" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,180}-[0-9]{1,10}-[0-9]{1,12}$ ]]
 }
 
 # ERE-escape a token for pgrep: validation keeps a token benign as a path,
-# but hostname dots would still match any character as a pattern, and only
+# but token dots would still match any character as a pattern, and only
 # escaping makes the match literal.
 gate_lock_token_pattern() {
   printf '%s' "$1" | sed 's/[][\.*^$+?(){}|\\]/\\&/g'
@@ -355,6 +357,57 @@ gate_run_proc_marker_scan_available() {
   [[ -d /proc/self/fd ]]
 }
 
+gate_run_marker_identity_prefix() {
+  local fallback_prefix="$1"
+  local linux_label="$2"
+  local origin_hash="$3"
+  local creator_pid="$4"
+  local linux_prefix
+  if ! gate_run_proc_marker_scan_available; then
+    printf '%s\n' "$fallback_prefix"
+    return 0
+  fi
+  [[ "$linux_label" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,22}$ &&
+    "$origin_hash" =~ ^[0-9a-f]{64}$ &&
+    "$creator_pid" =~ ^[1-9][0-9]*$ ]] || return 2
+  # The outer gate process exists before it can create or pass the related
+  # Bash-created marker to a descendant. Its Linux start tick therefore bounds
+  # every cooperative marker holder. Equal ticks remain in scope.
+  # shellcheck disable=SC2016 # the single-quoted program contains JavaScript templates
+  if linux_prefix="$(node -e '
+    const { createHash } = require("node:crypto");
+    const fs = require("node:fs");
+    const [label, originHash, creatorPid] = process.argv.slice(1);
+    if (!/^[1-9][0-9]*$/u.test(creatorPid ?? "")) process.exit(2);
+    const bootId = fs
+      .readFileSync("/proc/sys/kernel/random/boot_id", "utf8")
+      .trim()
+      .toLowerCase();
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(
+        bootId,
+      )
+    ) {
+      process.exit(2);
+    }
+    const value = fs.readFileSync(`/proc/${creatorPid}/stat`, "utf8");
+    const close = value.lastIndexOf(")");
+    if (close < 0) process.exit(2);
+    const fields = value.slice(close + 1).trim().split(/\s+/u);
+    const start = fields[19];
+    if (!/^[0-9]{1,20}$/u.test(start ?? "")) process.exit(2);
+    const bootHash = createHash("sha256").update(bootId, "utf8").digest("hex");
+    const prefix = `lp1.${bootHash}.${start}.${originHash}.${label}`;
+    if (prefix.length > 181) process.exit(2);
+    process.stdout.write(`${prefix}\n`);
+  ' "$linux_label" "$origin_hash" "$creator_pid" 2>/dev/null)" &&
+    [[ -n "$linux_prefix" ]]; then
+    printf '%s\n' "$linux_prefix"
+  else
+    printf '%s\n' "$fallback_prefix"
+  fi
+}
+
 gate_run_capture_proc_start_floor() {
   # The helper process starts after coordinator registration and before mapped
   # work. Its Linux start tick is therefore a conservative lower bound for
@@ -422,6 +475,7 @@ gate_run_proc_marker_pids() {
   fi
   # shellcheck disable=SC2016 # the single-quoted program contains JavaScript templates
   found="$(node -e '
+    const { createHash } = require("node:crypto");
     const fs = require("node:fs");
     const { constants } = fs;
     const [markerPath, expectedToken, uidText, targetPid, startFloor] =
@@ -433,6 +487,8 @@ gate_run_proc_marker_pids() {
     ]);
     const expectedBody = Buffer.from(`${expectedToken}\n`, "utf8");
     const ignoredRaceCodes = new Set(["EBADF", "ENOENT", "ESRCH"]);
+    const provenancePattern =
+      /^lp1\.([0-9a-f]{64})\.([0-9]{1,20})\.[0-9a-f]{64}\.([A-Za-z0-9][A-Za-z0-9._-]{0,22})-[0-9]{1,10}-[0-9]{1,12}$/u;
     let markerDescriptor;
 
     const sameInode = (left, right) =>
@@ -451,7 +507,7 @@ gate_run_proc_marker_pids() {
       );
       return read === body.length && body.equals(expectedBody);
     };
-    const processStart = (pid) => {
+    const processRuntimeIdentity = (pid) => {
       let value;
       try {
         value = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
@@ -461,13 +517,18 @@ gate_run_proc_marker_pids() {
       }
       const close = value.lastIndexOf(")");
       if (close < 0) throw new Error("malformed proc process identity");
+      const open = value.indexOf("(");
+      if (open < 0 || open >= close) {
+        throw new Error("malformed proc process command identity");
+      }
       const fields = value.slice(close + 1).trim().split(/\s+/u);
       const start = fields[19];
       if (!/^[0-9]+$/u.test(start ?? "")) {
         throw new Error("malformed proc process start identity");
       }
-      return start;
+      return { start, commandName: value.slice(open + 1, close) };
     };
+    const processStart = (pid) => processRuntimeIdentity(pid)?.start ?? null;
     const processUids = (pid, directoryOwner) => {
       let value;
       try {
@@ -515,6 +576,56 @@ gate_run_proc_marker_pids() {
         throw new Error("procfs PID enumeration is restricted");
       }
     };
+    const tokenProvenance = () => {
+      if (targetPid !== "") return null;
+      const match = provenancePattern.exec(expectedToken);
+      if (!match) return null;
+      let bootId;
+      try {
+        bootId = fs
+          .readFileSync("/proc/sys/kernel/random/boot_id", "utf8")
+          .trim()
+          .toLowerCase();
+      } catch {
+        return null;
+      }
+      if (
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(
+          bootId,
+        )
+      ) {
+        return null;
+      }
+      const bootHash = createHash("sha256")
+        .update(bootId, "utf8")
+        .digest("hex");
+      return bootHash === match[1]
+        ? { start: match[2], label: match[3] }
+        : null;
+    };
+    const isCoordinatorGateParent = (pid, commandName) => {
+      // Linux truncates an executable script name to TASK_COMM_LEN - 1.
+      // An explicit `/bin/bash scripts/agent-quality-gate.sh` launch keeps
+      // `bash` as comm, so validate one complete NUL-delimited argv element.
+      if (commandName === "agent-quality-g") return true;
+      if (commandName !== "bash") return false;
+      let commandLine;
+      try {
+        commandLine = fs.readFileSync(`/proc/${pid}/cmdline`);
+      } catch (error) {
+        if (ignoredRaceCodes.has(error?.code)) return false;
+        throw error;
+      }
+      return commandLine
+        .toString("utf8")
+        .split("\0")
+        .some(
+          (argument) =>
+            argument === "scripts/agent-quality-gate.sh" ||
+            argument === "./scripts/agent-quality-gate.sh" ||
+            argument.endsWith("/scripts/agent-quality-gate.sh"),
+        );
+    };
 
     try {
       markerDescriptor = fs.openSync(
@@ -533,6 +644,13 @@ gate_run_proc_marker_pids() {
       }
       assertCompleteProcEnumeration();
       fs.readdirSync("/proc/self/fd");
+      const provenance = tokenProvenance();
+      const provenanceFloor = provenance?.start ?? "";
+      const effectiveStartFloor =
+        provenanceFloor !== "" &&
+        (startFloor === "" || BigInt(provenanceFloor) > BigInt(startFloor))
+          ? provenanceFloor
+          : startFloor;
       const found = [];
       const processIds =
         targetPid === "" ? fs.readdirSync("/proc") : [targetPid];
@@ -550,13 +668,26 @@ gate_run_proc_marker_pids() {
         if (!processIdentity.isDirectory()) {
           continue;
         }
-        const startBefore = processStart(pid);
-        if (startBefore === null) continue;
+        const runtimeBefore = processRuntimeIdentity(pid);
+        if (runtimeBefore === null) continue;
+        const startBefore = runtimeBefore.start;
         if (
-          startFloor !== "" &&
-          BigInt(startBefore) < BigInt(startFloor)
+          effectiveStartFloor !== "" &&
+          BigInt(startBefore) < BigInt(effectiveStartFloor)
         ) {
-          continue;
+          // A gate parent can predate a coordinator that it bootstraps or
+          // joins, then open the generation marker before it forks a worker.
+          // That descriptor is the launch anchor which closes the final-scan
+          // to worker-fork gap. Retain this bounded class of older holders.
+          // Other mapped processes for this generation start at or after the
+          // coordinator or active-command boundary.
+          if (
+            provenance?.label !== "coordinator" ||
+            processIdentity.uid !== expectedUid ||
+            !isCoordinatorGateParent(pid, runtimeBefore.commandName)
+          ) {
+            continue;
+          }
         }
         const processUidSet = processUids(pid, processIdentity.uid);
         if (processUidSet === null) continue;

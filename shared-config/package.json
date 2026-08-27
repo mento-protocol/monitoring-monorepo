@@ -78,7 +78,7 @@
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "node ../scripts/eslint-baseline-diff.mjs check",
     "lint:baseline:update": "node ../scripts/eslint-baseline-diff.mjs update",

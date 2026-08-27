@@ -101,12 +101,53 @@ export function currentProcessIdentity() {
   return { pid: process.pid, startUtc };
 }
 
+function linuxMarkerIdentityPrefix(pid) {
+  if (!existsSync("/proc/self/fd")) return null;
+  try {
+    const bootId = readFileSync("/proc/sys/kernel/random/boot_id", "utf8")
+      .trim()
+      .toLowerCase();
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(
+        bootId,
+      )
+    ) {
+      throw new Error("malformed Linux boot identity");
+    }
+    const value = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const close = value.lastIndexOf(")");
+    if (close < 0) throw new Error("malformed Linux process identity");
+    const fields = value
+      .slice(close + 1)
+      .trim()
+      .split(/\s+/u);
+    const start = fields[19];
+    if (!/^[0-9]{1,20}$/u.test(start ?? "")) {
+      throw new Error("malformed Linux process start identity");
+    }
+    const bootHash = createHash("sha256").update(bootId, "utf8").digest("hex");
+    const originHash = createHash("sha256")
+      .update(hostname(), "utf8")
+      .digest("hex");
+    return `lp1.${bootHash}.${start}.${originHash}.coordinator`;
+  } catch {
+    return null;
+  }
+}
+
 export function generatedToken(pid) {
+  if (!Number.isSafeInteger(pid) || pid < 1) {
+    throw new CoordinatorError(
+      "INVALID_ARGUMENT",
+      "coordinator token PID must be a positive safe integer",
+    );
+  }
   const host =
     hostname()
       .replace(/[^A-Za-z0-9._-]/g, "-")
       .slice(0, 150) || "localhost";
-  return `${host}-${pid}-${Math.floor(Date.now() / 1000)}`;
+  const prefix = linuxMarkerIdentityPrefix(pid) ?? host;
+  return `${prefix}-${pid}-${Math.floor(Date.now() / 1000)}`;
 }
 
 export function validateLegacyToken(token, label = "legacy token") {

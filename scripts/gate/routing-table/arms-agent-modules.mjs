@@ -365,7 +365,7 @@ export const AGENT_MODULE_ARMS = [
     ],
   },
   {
-    why: "The Node mapping engine (ADR 0069). This IS the routing: the gate builds its plan from the engine and executes it, so a change here changes what every gate run does. D5c retired the bash `case` arms, the in-gate byte comparison and the parity harness together (issue 2020), which leaves `engine.test.mjs` as the only thing pinning the verbs, the four post-passes and the root-manifest classifier. The arm also carries the gate self-test and the prewarm contract: both parse the stdout this module produces.",
+    why: "The Node mapping engine (ADR 0069). This IS the routing: the gate builds its plan from the engine and executes it, so a change here changes what every gate run does. D5c retired the bash `case` arms, the in-gate byte comparison and the parity harness together (issue 2020), which leaves `engine.test.mjs` as the only thing pinning the verbs, the five post-passes and the root-manifest classifier. The arm also carries the gate self-test and the prewarm contract: both parse the stdout this module produces.",
     patterns: ["scripts/gate/mapping.mjs", "scripts/gate/mapping/*.mjs"],
     effects: [
       {

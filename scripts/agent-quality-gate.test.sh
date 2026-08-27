@@ -1571,11 +1571,6 @@ assert.match(
   /const processUids = \(pid, directoryOwner\)[\s\S]*?\^Uid:\\s\+[\s\S]*?processUidSet\[0\], processUidSet\[2\][\s\S]*?process\.kill\(Number\(pid\), 0\)/u,
   "the proc descriptor scan must use kill-compatible real and saved-set UID scope plus the signal probe",
 );
-assert.doesNotMatch(
-  runHandles,
-  /processIdentity\.uid !== expectedUid/u,
-  "proc directory ownership must not replace kill-compatible UID scope",
-);
 assert.match(
   runHandles,
   /assertCompleteProcEnumeration[\s\S]*?hidepid=[\s\S]*?procfs PID enumeration is restricted/u,
@@ -1588,18 +1583,38 @@ assert.match(
 );
 assert.match(
   runHandles,
-  /const startBefore = processStart\(pid\);[\s\S]*?BigInt\(startBefore\) < BigInt\(startFloor\)[\s\S]*?const processUidSet = processUids/u,
-  "a full proc descriptor scan must skip pre-command generations before UID and fd inspection",
+  /const runtimeBefore = processRuntimeIdentity\(pid\);[\s\S]*?const startBefore = runtimeBefore\.start;[\s\S]*?BigInt\(startBefore\) < BigInt\(effectiveStartFloor\)[\s\S]*?const processUidSet = processUids/u,
+  "a full proc descriptor scan must skip generations below its effective boundary before UID and fd inspection",
 );
 assert.match(
   source,
   /gate_active_command_proc_start_floor=""[\s\S]*?if \[\[ "\$drain_context" == "active-command" \]\]; then[\s\S]*?full_scan_start_floor="\$\{gate_active_command_proc_start_floor:-\}"[\s\S]*?gate_drain_refresh_tagged "\$token" "\$full_scan_start_floor"/u,
-  "only active-command full scans may use the pre-command process-start floor",
+  "active-command full scans must add the pre-command process-start floor",
 );
 assert.match(
   source,
   /if gate_run_proc_marker_scan_available; then[\s\S]*?gate_run_capture_proc_start_floor[\s\S]*?could not capture the Linux process-start boundary before mapped commands/u,
   "Linux runs must capture the active-command process-start floor before mapped work",
+);
+assert.match(
+  runHandles,
+  /gate_run_marker_identity_prefix\(\)[\s\S]*?local creator_pid="\$4"[\s\S]*?`\/proc\/\$\{creatorPid\}\/stat`[\s\S]*?lp1\.\$\{bootHash\}\.\$\{start\}\.\$\{originHash\}\.\$\{label\}[\s\S]*?const tokenProvenance = \(\)[\s\S]*?\{ start: match\[2\], label: match\[3\] \}[\s\S]*?const effectiveStartFloor/u,
+  "Linux marker tokens must carry a same-boot full-scan boundary",
+);
+assert.match(
+  runHandles,
+  /const isCoordinatorGateParent = \(pid, commandName\)[\s\S]*?commandName === "agent-quality-g"[\s\S]*?commandName !== "bash"[\s\S]*?agent-quality-gate\.sh[\s\S]*?provenance\?\.label !== "coordinator"[\s\S]*?processIdentity\.uid !== expectedUid[\s\S]*?!isCoordinatorGateParent\(pid, runtimeBefore\.commandName\)/u,
+  "a coordinator boundary must retain older gate parents that can hold its launch anchor",
+);
+assert.match(
+  source,
+  /claim_prefix="\$\([\s\S]*?gate_run_marker_identity_prefix[\s\S]*?"legacy"[\s\S]*?"\$\$"[\s\S]*?gate_run_ensure_token\(\)[\s\S]*?gate_run_marker_identity_prefix[\s\S]*?"request"[\s\S]*?"\$\$"[\s\S]*?make_parallel_command_drain_identity\(\)[\s\S]*?gate_run_marker_identity_prefix[\s\S]*?"\$\$"/u,
+  "legacy, request, and command marker tokens must use the outer gate process boundary",
+);
+assert.match(
+  coordinatorLegacy,
+  /function linuxMarkerIdentityPrefix\(pid\)[\s\S]*?lp1\.\$\{bootHash\}\.\$\{start\}\.\$\{originHash\}\.coordinator[\s\S]*?linuxMarkerIdentityPrefix\(pid\) \?\? host/u,
+  "the coordinator generation marker must use its Linux process boundary",
 );
 assert.match(
   runHandles,
@@ -2743,14 +2758,17 @@ STUB
   holder_expected_host="$("$real_uname_command" -n)"
   [[ -n "$holder_owner_host" && "$holder_owner_host" == "$holder_expected_host" ]] ||
     fail_gate_pipeline_fixture "coordinator owner record did not use the validated cached hostname"
-  case "$holder_owner_token" in
-    "${holder_owner_host}-"*) ;;
-    *) fail_gate_pipeline_fixture "coordinator owner token did not use the owner record hostname" ;;
-  esac
-  holder_marker="$(find "$coordinator_gate_pipeline_lock" -maxdepth 1 -type f \
-    -name "holder.${holder_owner_host}-*" -print -quit)"
-  [[ -n "$holder_marker" ]] ||
-    fail_gate_pipeline_fixture "coordinator holder marker did not use the validated cached hostname"
+  if [[ "$holder_owner_token" =~ ^lp1\.[0-9a-f]{64}\.[0-9]{1,20}\.[0-9a-f]{64}\.coordinator-[0-9]{1,10}-[0-9]{1,12}$ ]]; then
+    :
+  else
+    case "$holder_owner_token" in
+      "${holder_owner_host}-"*) ;;
+      *) fail_gate_pipeline_fixture "coordinator owner token did not use its safe fallback hostname" ;;
+    esac
+  fi
+  holder_marker="$coordinator_gate_pipeline_lock/holder.${holder_owner_token}"
+  [[ -f "$holder_marker" ]] ||
+    fail_gate_pipeline_fixture "coordinator holder marker did not match its owner token"
 
   # The second worktree cannot acquire the holder's legacy lock. It must join
   # the existing coordinator, execute a distinct command under spare capacity,
@@ -5409,6 +5427,18 @@ for marker_consumer in scripts/setup.sh scripts/bootstrap/claude-code-web-setup.
   grep -q 'install_marker_hash_inputs' "$marker_consumer" ||
     fail "$marker_consumer no longer uses the shared install-marker hash"
 done
+
+setup_shared_config_marker_block="$(
+  sed -n '/^shared_config_hash=/,/^)"$/p' scripts/setup.sh
+)"
+grep -q 'shared-config/scripts/build.mjs' <<<"$setup_shared_config_marker_block" ||
+  fail "scripts/setup.sh no longer invalidates its shared-config build marker when the clean-build wrapper changes"
+
+web_deps_marker_block="$(
+  sed -n '/^deps_hash=/,/^)"$/p' scripts/bootstrap/claude-code-web-setup.sh
+)"
+grep -q 'shared-config/scripts/build.mjs' <<<"$web_deps_marker_block" ||
+  fail "scripts/bootstrap/claude-code-web-setup.sh no longer invalidates its dependency marker when the clean-build wrapper changes"
 
 validator_repo="$(mktemp -d)"
 (
@@ -8138,8 +8168,10 @@ quality_setup_repo="$(mktemp -d)"
   git init -q
   git config user.email test@example.invalid
   git config user.name "Quality Gate Test"
-  mkdir -p bin shared-config/src tools
-  printf 'export const fixture = true;\n' > shared-config/src/config.ts
+  mkdir -p bin shared-config/dist shared-config/src tools ui-dashboard/src
+  printf 'shared-config/dist/\n' > .gitignore
+  printf 'obsolete\n' > shared-config/dist/obsolete.js
+  printf 'export const fixture = true;\n' > ui-dashboard/src/config.ts
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
 exit 0
@@ -8150,11 +8182,22 @@ args="$*"
 case "$args" in
   "--filter @mento-protocol/config build")
     sleep 0.2
+    rm -rf shared-config/dist
+    mkdir -p shared-config/dist
+    printf 'fresh\n' > shared-config/dist/config.js
     : > "${BUILD_MARKER:?}"
     ;;
-  "--filter @mento-protocol/ui-dashboard typecheck")
+  exec\ turbo\ run\ typecheck*--filter=@mento-protocol/ui-dashboard*)
     if [[ ! -f "${BUILD_MARKER:?}" ]]; then
       echo "consumer typecheck started before shared-config build"
+      exit 1
+    fi
+    if [[ "$(cat shared-config/dist/config.js 2>/dev/null)" != "fresh" ]]; then
+      echo "consumer typecheck did not receive rebuilt shared-config output"
+      exit 1
+    fi
+    if [[ -e shared-config/dist/obsolete.js ]]; then
+      echo "consumer typecheck received obsolete shared-config output"
       exit 1
     fi
     ;;
@@ -8163,7 +8206,7 @@ STUB
   chmod +x bin/pnpm tools/trunk
   git add .
   git commit -qm init
-  printf 'shared-config/src/config.ts\n' > changed-paths.txt
+  printf 'ui-dashboard/src/config.ts\n' > changed-paths.txt
   BUILD_MARKER="$quality_setup_repo/build-marker" \
     PATH="$quality_setup_repo/bin:$PATH" \
     "$repo_root/scripts/agent-quality-gate.sh" \
@@ -8175,7 +8218,7 @@ STUB
 )
 rm -rf "$quality_setup_repo"
 assert_contains "+ pnpm --filter @mento-protocol/config build"
-grep -Fq -- "+ pnpm --filter @mento-protocol/ui-dashboard typecheck" "$output_file" ||
+grep -Fq -- "+ pnpm exec turbo run typecheck --filter=@mento-protocol/ui-dashboard --cache=local:rw" "$output_file" ||
   fail "expected direct shared-config consumer typecheck to run"
 assert_contains "All mapped commands passed."
 assert_not_contains "consumer typecheck started before shared-config build"
@@ -13076,7 +13119,8 @@ STUB
       "$gate_output" ||
       fail_parallel_detached_fixture "parallel command did not report its detached-child drain"
     [[ -z "$(find "$fixture_lock_root" -type f \
-      -name 'holder.cmd*' -print 2>/dev/null)" ]] ||
+      \( -name 'holder.cmd*' -o -name 'holder.lp1.*.cmd*' \) \
+      -print 2>/dev/null)" ]] ||
       fail_parallel_detached_fixture "parallel command left its drain marker behind"
     detached_pid=""
     detached_start=""
@@ -13150,10 +13194,9 @@ STUB
   done
   [[ "$(wc -l < "$prereq_reuse_repo/install-side-effect" | tr -d ' ')" == "2" ]] ||
     fail "expected the preflight install to run on BOTH runs (prerequisites are never reused)"
-  # PR 1492 review: the --parallel 1 sequential branch bypasses
-  # run_prerequisite_phase, so setup exemption must come from the command
-  # classification — the shared-config build (a quality-setup command whose
-  # dist/ output the fingerprint cannot see) must also run on BOTH runs.
+  # The shared-config build is a quality-setup command whose dist/ output the
+  # fingerprint cannot see. Phase handling and command classification both
+  # keep it outside stamp reuse, so it must run on BOTH runs.
   [[ "$(wc -l < "$prereq_reuse_repo/build-side-effect" | tr -d ' ')" == "2" ]] ||
     fail "expected the quality-setup config build to run on BOTH runs (setup commands are never reused)"
   [[ "$(wc -l < "$prereq_reuse_repo/skew-side-effect" | tr -d ' ')" == "1" ]] ||
@@ -20466,13 +20509,119 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   # The child starts a new process with no AGENTQG environment or argv tag and
   # keeps only the marker descriptor as its run identity.
   if [[ -d /proc/self/fd ]]; then
-    printf -v race_proc_token '%s' \
-      'fixture.proc-marker-424243-123456789'
+    race_proc_origin_hash="$(node -e '
+      const { createHash } = require("node:crypto");
+      process.stdout.write(createHash("sha256")
+        .update(process.argv[1], "utf8").digest("hex"));
+    ' "$(uname -n)")"
+    race_proc_gate_parent_root="$gate_race_out/proc-old-gate-parent"
+    race_proc_gate_parent_marker_record="$gate_race_out/proc-old-gate-parent.marker"
+    race_proc_gate_parent_ready="$gate_race_out/proc-old-gate-parent.ready"
+    race_proc_gate_parent_hold="$gate_race_out/proc-old-gate-parent.hold"
+    mkdir -p "$race_proc_gate_parent_root/scripts"
+    mkfifo "$race_proc_gate_parent_hold"
+    cat > "$race_proc_gate_parent_root/scripts/agent-quality-gate.sh" <<'GATE_PARENT'
+#!/usr/bin/env bash
+set -euo pipefail
+marker_record="$1"
+ready_file="$2"
+hold_fifo="$3"
+while [[ ! -s "$marker_record" ]]; do
+  sleep 0.01
+done
+IFS= read -r marker < "$marker_record"
+exec 9< "$marker"
+: > "$ready_file"
+exec 8<> "$hold_fifo"
+IFS= read -r _ <&8
+GATE_PARENT
+    race_bound_launch_command "old coordinator gate parent" 30 \
+      /bin/bash "$race_proc_gate_parent_root/scripts/agent-quality-gate.sh" \
+      "$race_proc_gate_parent_marker_record" "$race_proc_gate_parent_ready" \
+      "$race_proc_gate_parent_hold" ||
+      fail "the old coordinator gate parent fixture could not bind its identity"
+    race_proc_gate_parent_pid="$race_bound_pid"
+    race_proc_gate_parent_start="$race_bound_start"
+    race_proc_gate_parent_parent="$race_bound_parent"
+    sleep 0.05
+    race_bound_launch_command "coordinator token boundary" 30 \
+      "$(command -v sleep)" 60 ||
+      fail "the coordinator token boundary fixture could not bind its identity"
+    race_proc_boundary_pid="$race_bound_pid"
+    race_proc_boundary_start="$race_bound_start"
+    race_proc_boundary_parent="$race_bound_parent"
+    race_proc_prefix="$(
+      source "$repo_root/scripts/gate/run-handles.sh"
+      gate_run_marker_identity_prefix \
+        "fixture.proc-marker" "coordinator" "$race_proc_origin_hash" \
+        "$race_proc_boundary_pid"
+    )"
+    race_proc_has_provenance=0
+    race_proc_token_floor=""
+    race_proc_origin_hash_value=""
+    if [[ "$race_proc_prefix" =~ ^lp1\.[0-9a-f]{64}\.[0-9]{1,20}\.[0-9a-f]{64}\.coordinator$ ]]; then
+      IFS='.' read -r race_proc_version race_proc_boot_hash \
+        race_proc_token_floor race_proc_origin_hash_value race_proc_label \
+        <<< "$race_proc_prefix"
+      [[ "$race_proc_origin_hash_value" == "$race_proc_origin_hash" ]] ||
+        fail "the Linux marker fixture changed its origin fingerprint"
+      race_proc_has_provenance=1
+    else
+      [[ "$race_proc_prefix" == "fixture.proc-marker" ]] ||
+        fail "the Linux marker fixture produced an invalid fallback prefix"
+    fi
+    race_proc_boundary_identity="$(runtime_process_start "$race_proc_boundary_pid")"
+    race_proc_boundary_floor="${race_proc_boundary_identity#proc:}"
+    [[ "$race_proc_boundary_identity" == proc:* &&
+      "$race_proc_boundary_floor" =~ ^[0-9]+$ ]] ||
+      fail "the Linux marker fixture could not read its creator boundary"
+    if [[ "$race_proc_has_provenance" -eq 1 ]]; then
+      [[ "$race_proc_token_floor" == "$race_proc_boundary_floor" ]] ||
+        fail "the Linux marker token did not use its named creator boundary"
+    fi
+    race_drain_kill_and_reap_direct_wrapper \
+      "coordinator token boundary" "$race_proc_boundary_pid" \
+      "$race_proc_boundary_start" "$race_proc_boundary_parent" ||
+      fail "the coordinator token boundary fixture could not be cleaned"
+    race_bound_prune_completed
+    printf -v race_proc_token '%s-%s-%s' \
+      "$race_proc_prefix" 424243 123456789
     race_proc_marker="$gate_race_root/holder.${race_proc_token}"
     race_proc_ready="$gate_race_out/proc-marker-ready"
     rm -f "$race_proc_marker" "$race_proc_ready"
     printf '%s\n' "$race_proc_token" > "$race_proc_marker"
     chmod 600 "$race_proc_marker"
+    printf '%s\n' "$race_proc_marker" > "$race_proc_gate_parent_marker_record"
+    race_waited=0
+    while [[ ! -e "$race_proc_gate_parent_ready" && "$race_waited" -lt 100 ]]; do
+      sleep 0.05
+      race_waited=$((race_waited + 1))
+    done
+    [[ -e "$race_proc_gate_parent_ready" ]] ||
+      fail "the old coordinator gate parent did not retain its marker"
+    race_proc_gate_parent_identity="$(
+      runtime_process_start "$race_proc_gate_parent_pid"
+    )"
+    race_proc_gate_parent_floor="${race_proc_gate_parent_identity#proc:}"
+    [[ "$race_proc_gate_parent_identity" == proc:* &&
+      "$race_proc_gate_parent_floor" =~ ^[0-9]+$ ]] ||
+      fail "the coordinator gate parent lost its process identity"
+    if [[ "$race_proc_has_provenance" -eq 1 ]]; then
+      [[ "$race_proc_gate_parent_floor" -lt "$race_proc_token_floor" ]] ||
+        fail "the coordinator gate parent did not predate its generation floor"
+    fi
+    race_proc_gate_parent_output="$(
+      gate_drain_scan_error="agentqg-scan-failed"
+      gate_lock_root_dir="$gate_race_root"
+      source "$repo_root/scripts/gate/run-handles.sh"
+      gate_run_proc_marker_pids "$race_proc_token" "$race_proc_marker"
+    )"
+    [[ "$race_proc_gate_parent_output" == "$race_proc_gate_parent_pid" ]] ||
+      fail "the proc scan skipped its gate-parent marker holder"
+    race_drain_kill_and_reap_direct_wrapper \
+      "old coordinator gate parent" "$race_proc_gate_parent_pid" \
+      "$race_proc_gate_parent_start" "$race_proc_gate_parent_parent" ||
+      fail "the coordinator gate parent fixture could not clean its marker holder"
     env -i PATH=/usr/bin:/bin /bin/bash -c '
       exec 9< "$1"
       shift
@@ -20506,33 +20655,68 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     [[ "$race_proc_floor_identity" == proc:* &&
       "$race_proc_old_identity" == proc:* &&
       "$race_proc_floor" =~ ^[0-9]+$ &&
-      "$race_proc_old_start" =~ ^[0-9]+$ &&
-      "$race_proc_old_start" -lt "$race_proc_floor" ]] ||
-      fail "the proc start-floor fixture did not bind an older process generation"
+      "$race_proc_old_start" =~ ^[0-9]+$ ]] ||
+      fail "the proc start-floor fixture lost a process generation"
+    if [[ "$race_proc_has_provenance" -eq 1 ]]; then
+      [[ "$race_proc_old_start" -lt "$race_proc_token_floor" &&
+        "$race_proc_token_floor" -le "$race_proc_floor" ]] ||
+        fail "the proc start-floor fixture did not bind an older process generation"
+    fi
     race_proc_preload="$gate_race_out/proc-start-floor-preload.cjs"
     race_proc_old_trace="$gate_race_out/proc-start-floor-old.trace"
     race_proc_new_trace="$gate_race_out/proc-start-floor-new.trace"
+    race_proc_unbounded_trace="$gate_race_out/proc-start-floor-unbounded.trace"
     race_proc_real_node="$(command -v node)"
     : > "$race_proc_old_trace"
     : > "$race_proc_new_trace"
+    : > "$race_proc_unbounded_trace"
     cat > "$race_proc_preload" <<'NODE'
 const fs = require("node:fs");
 const realReadFileSync = fs.readFileSync.bind(fs);
 const realReaddirSync = fs.readdirSync.bind(fs);
+const realLstatSync = fs.lstatSync.bind(fs);
 const ids = new Set(
   (process.env.QG_PROC_IDS ?? "").split(",").filter(Boolean),
 );
 const hazards = new Set(
   (process.env.QG_PROC_HAZARDS ?? "").split(",").filter(Boolean),
 );
+const cmdlineHazards = new Set(
+  (process.env.QG_PROC_CMDLINE_HAZARDS ?? "").split(",").filter(Boolean),
+);
+const foreignIds = new Set(
+  (process.env.QG_PROC_FOREIGN_IDS ?? "").split(",").filter(Boolean),
+);
 const trace = process.env.QG_PROC_TRACE;
 
 fs.readFileSync = (path, ...args) => {
-  const match = /^\/proc\/([1-9][0-9]*)\/status$/u.exec(String(path));
-  if (match && ids.has(match[1])) {
-    fs.appendFileSync(trace, `status:${match[1]}\n`);
+  const text = String(path);
+  const statusMatch = /^\/proc\/([1-9][0-9]*)\/status$/u.exec(text);
+  if (statusMatch && ids.has(statusMatch[1])) {
+    fs.appendFileSync(trace, `status:${statusMatch[1]}\n`);
+  }
+  const cmdlineMatch = /^\/proc\/([1-9][0-9]*)\/cmdline$/u.exec(text);
+  if (cmdlineMatch && cmdlineHazards.has(cmdlineMatch[1])) {
+    fs.appendFileSync(trace, `cmdline:${cmdlineMatch[1]}\n`);
+    const error = new Error("injected proc cmdline denial");
+    error.code = "EACCES";
+    throw error;
   }
   return realReadFileSync(path, ...args);
+};
+fs.lstatSync = (path, ...args) => {
+  const result = realLstatSync(path, ...args);
+  const match = /^\/proc\/([1-9][0-9]*)$/u.exec(String(path));
+  if (!match || !foreignIds.has(match[1])) return result;
+  return new Proxy(result, {
+    get(target, property) {
+      if (property === "uid") {
+        return typeof target.uid === "bigint" ? target.uid + 1n : target.uid + 1;
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
 };
 fs.readdirSync = (path, ...args) => {
   const text = String(path);
@@ -20548,8 +20732,9 @@ fs.readdirSync = (path, ...args) => {
 };
 NODE
 
-    # A process that predates mapped work cannot inherit its marker. Skip that
-    # generation before an unreadable UID or fd entry can poison the full scan.
+    # With provenance, a foreign-UID process below the floor cannot be the
+    # same-UID gate parent exception. Skip it before an unreadable argv or fd
+    # entry can poison the full scan. A fallback token stays unbounded.
     race_proc_old_floor_output="$(
       gate_drain_scan_error="agentqg-scan-failed"
       gate_lock_root_dir="$gate_race_root"
@@ -20558,18 +20743,26 @@ NODE
         /usr/bin/env -u NODE_OPTIONS -u NODE_PATH \
           QG_PROC_IDS="$gate_test_outer_pid" \
           QG_PROC_HAZARDS="$gate_test_outer_pid" \
+          QG_PROC_CMDLINE_HAZARDS="$gate_test_outer_pid" \
+          QG_PROC_FOREIGN_IDS="$gate_test_outer_pid" \
           QG_PROC_TRACE="$race_proc_old_trace" \
           "$race_proc_real_node" --require "$race_proc_preload" "$@"
       }
-      gate_run_proc_marker_pids \
-        "$race_proc_token" "$race_proc_marker" "" "$race_proc_floor"
+      gate_run_proc_marker_pids "$race_proc_token" "$race_proc_marker"
     )"
-    [[ -z "$race_proc_old_floor_output" &&
-      ! -s "$race_proc_old_trace" ]] ||
-      fail "the active-command proc floor inspected an older process"
+    if [[ "$race_proc_has_provenance" -eq 1 ]]; then
+      [[ -z "$race_proc_old_floor_output" &&
+        ! -s "$race_proc_old_trace" ]] ||
+        fail "the coordinator floor inspected an older foreign-UID process"
+    else
+      [[ "$race_proc_old_floor_output" == "agentqg-scan-failed" &&
+        "$(cat "$race_proc_old_trace")" == \
+        $'status:'"$gate_test_outer_pid"$'\nfd:'"$gate_test_outer_pid" ]] ||
+        fail "the fallback marker token did not retain the unbounded proc scan"
+    fi
 
     # Equal and newer generations remain in scope. An unreadable post-floor
-    # descriptor directory must still fail the active-command scan closed.
+    # descriptor directory must still fail the stale-run scan closed.
     race_proc_new_floor_output="$(
       gate_drain_scan_error="agentqg-scan-failed"
       gate_lock_root_dir="$gate_race_root"
@@ -20581,14 +20774,90 @@ NODE
           QG_PROC_TRACE="$race_proc_new_trace" \
           "$race_proc_real_node" --require "$race_proc_preload" "$@"
       }
-      gate_run_proc_marker_pids \
-        "$race_proc_token" "$race_proc_marker" "" "$race_proc_floor"
+      gate_run_proc_marker_pids "$race_proc_token" "$race_proc_marker"
     )"
     [[ "$race_proc_new_floor_output" == "agentqg-scan-failed" ]] ||
       fail "a post-floor proc denial did not fail closed"
     [[ "$(cat "$race_proc_new_trace")" == \
       $'status:'"$race_proc_pid"$'\nfd:'"$race_proc_pid" ]] ||
       fail "the post-floor proc denial did not reach UID and fd inspection"
+
+    # A legacy token has no temporal evidence. It must retain the unbounded
+    # fail-closed scan instead of borrowing another marker's boundary.
+    race_proc_legacy_identity='fixture.legacy-proc-marker-424244-123456789'
+    race_proc_legacy_marker="$gate_race_root/holder.${race_proc_legacy_identity}"
+    printf '%s\n' "$race_proc_legacy_identity" > "$race_proc_legacy_marker"
+    chmod 600 "$race_proc_legacy_marker"
+    : > "$race_proc_unbounded_trace"
+    race_proc_legacy_output="$(
+      gate_drain_scan_error="agentqg-scan-failed"
+      gate_lock_root_dir="$gate_race_root"
+      source "$repo_root/scripts/gate/run-handles.sh"
+      node() {
+        /usr/bin/env -u NODE_OPTIONS -u NODE_PATH \
+          QG_PROC_IDS="$gate_test_outer_pid" \
+          QG_PROC_HAZARDS="$gate_test_outer_pid" \
+          QG_PROC_TRACE="$race_proc_unbounded_trace" \
+          "$race_proc_real_node" --require "$race_proc_preload" "$@"
+      }
+      gate_run_proc_marker_pids \
+        "$race_proc_legacy_identity" "$race_proc_legacy_marker"
+    )"
+    [[ "$race_proc_legacy_output" == "agentqg-scan-failed" &&
+      "$(cat "$race_proc_unbounded_trace")" == \
+      $'status:'"$gate_test_outer_pid"$'\nfd:'"$gate_test_outer_pid" ]] ||
+      fail "a legacy marker token did not retain the unbounded proc scan"
+
+    # A boundary from another boot cannot constrain the current process table.
+    # Treat it as legacy evidence and retain the same unbounded scan.
+    race_proc_other_boot_hash="$(printf '%064d' 0)"
+    race_proc_other_boot_floor="${race_proc_token_floor:-$race_proc_floor}"
+    race_proc_other_boot_origin="${race_proc_origin_hash_value:-$race_proc_origin_hash}"
+    race_proc_other_boot_identity="lp1.${race_proc_other_boot_hash}.${race_proc_other_boot_floor}.${race_proc_other_boot_origin}.coordinator-424245-123456789"
+    race_proc_other_boot_marker="$gate_race_root/holder.${race_proc_other_boot_identity}"
+    printf '%s\n' "$race_proc_other_boot_identity" > "$race_proc_other_boot_marker"
+    chmod 600 "$race_proc_other_boot_marker"
+    : > "$race_proc_unbounded_trace"
+    race_proc_other_boot_output="$(
+      gate_drain_scan_error="agentqg-scan-failed"
+      gate_lock_root_dir="$gate_race_root"
+      source "$repo_root/scripts/gate/run-handles.sh"
+      node() {
+        /usr/bin/env -u NODE_OPTIONS -u NODE_PATH \
+          QG_PROC_IDS="$gate_test_outer_pid" \
+          QG_PROC_HAZARDS="$gate_test_outer_pid" \
+          QG_PROC_TRACE="$race_proc_unbounded_trace" \
+          "$race_proc_real_node" --require "$race_proc_preload" "$@"
+      }
+      gate_run_proc_marker_pids \
+        "$race_proc_other_boot_identity" "$race_proc_other_boot_marker"
+    )"
+    [[ "$race_proc_other_boot_output" == "agentqg-scan-failed" &&
+      "$(cat "$race_proc_unbounded_trace")" == \
+      $'status:'"$gate_test_outer_pid"$'\nfd:'"$gate_test_outer_pid" ]] ||
+      fail "a different-boot marker token constrained the current proc scan"
+
+    # Exact-PID revalidation must ignore the token boundary. The observed PID
+    # can be older because the check binds an already captured generation.
+    : > "$race_proc_unbounded_trace"
+    race_proc_exact_old_output="$(
+      gate_drain_scan_error="agentqg-scan-failed"
+      gate_lock_root_dir="$gate_race_root"
+      source "$repo_root/scripts/gate/run-handles.sh"
+      node() {
+        /usr/bin/env -u NODE_OPTIONS -u NODE_PATH \
+          QG_PROC_IDS="$gate_test_outer_pid" \
+          QG_PROC_HAZARDS="$gate_test_outer_pid" \
+          QG_PROC_TRACE="$race_proc_unbounded_trace" \
+          "$race_proc_real_node" --require "$race_proc_preload" "$@"
+      }
+      gate_run_proc_marker_pids \
+        "$race_proc_token" "$race_proc_marker" "$gate_test_outer_pid"
+    )"
+    [[ "$race_proc_exact_old_output" == "agentqg-scan-failed" &&
+      "$(cat "$race_proc_unbounded_trace")" == \
+      $'status:'"$gate_test_outer_pid"$'\nfd:'"$gate_test_outer_pid" ]] ||
+      fail "an exact-PID proc scan used the marker token boundary"
 
     race_bound_launch_command "proc marker non-holder" 30 \
       "$(command -v sleep)" 60 ||
@@ -20601,7 +20870,7 @@ NODE
       gate_lock_root_dir="$gate_race_root"
       source "$repo_root/scripts/gate/run-handles.sh"
       pgrep() { return 1; }
-      gate_run_tagged_pids "$race_proc_token" "" "$race_proc_floor"
+      gate_run_tagged_pids "$race_proc_token"
     )"
     [[ "$race_proc_output" == "$race_proc_pid" ]] ||
       fail "the proc marker scan did not emit only its untagged descriptor holder"
@@ -20649,8 +20918,12 @@ NODE
       "$race_proc_nonholder_start" "$race_proc_nonholder_parent" ||
       fail "the proc marker fixture could not clean its non-holder"
     race_bound_prune_completed
-    rm -f "$race_proc_marker" "$race_proc_ready" "$race_proc_preload" \
-      "$race_proc_old_trace" "$race_proc_new_trace"
+    rm -f "$race_proc_marker" "$race_proc_legacy_marker" \
+      "$race_proc_other_boot_marker" "$race_proc_ready" \
+      "$race_proc_preload" "$race_proc_old_trace" "$race_proc_new_trace" \
+      "$race_proc_unbounded_trace" "$race_proc_gate_parent_marker_record" \
+      "$race_proc_gate_parent_ready" "$race_proc_gate_parent_hold"
+    rm -rf "$race_proc_gate_parent_root"
   fi
 
   # The environment census runs once per visible Linux process on every drain

@@ -91,6 +91,7 @@ legacy_deps_hash="$(
     ./*/package.json \
     alerts/infra/*/package.json \
     shared-config/src \
+    shared-config/scripts/build.mjs \
     shared-config/tsconfig.json || true
 )"
 if [ -d node_modules ] &&
@@ -114,7 +115,12 @@ fi
 
 echo "▶ Building shared-config when needed..."
 shared_config_marker="node_modules/.setup-shared-config.sha256"
-shared_config_hash="$(install_marker_hash_inputs shared-config/src shared-config/tsconfig.json || true)"
+shared_config_hash="$(
+  install_marker_hash_inputs \
+    shared-config/src \
+    shared-config/scripts/build.mjs \
+    shared-config/tsconfig.json || true
+)"
 if [ -s shared-config/dist/chains.js ] &&
   install_marker_matches "$shared_config_marker" "$shared_config_hash"; then
   echo "  shared-config build is up to date; skipping"

@@ -249,14 +249,40 @@ match. Handle revalidation after a process identity or process-group snapshot
 reads the observed PID's NUL-delimited `/proc/<pid>/cmdline` records directly.
 It also limits the procfs environment and descriptor checks to that PID. This
 exact-PID path does not repeat the host-wide `pgrep` scan. Full refreshes
-enumerate all PIDs to discover new or reparented descendants. Immediately
-before the first mapped command, a Linux client records the start tick of a new
-helper process. An active-command full refresh reads each process start
-identity first. It skips a generation whose tick is strictly older than that
-boundary before it reads UID or descriptor state. Such a generation existed
-before mapped work could inherit the command marker. Equal and newer ticks stay
-in scope. Stale-obligation recovery and exact-PID revalidation do not use this
-boundary. A client that cannot record the boundary fails before mapped work.
+enumerate all PIDs to discover new or reparented descendants.
+
+Linux-created marker tokens can use the bounded prefix
+`lp1.<boot-sha256>.<start-tick>.<origin-sha256>.<label>`. Bash records the outer
+gate process start tick for a request, legacy claim, or command marker. This
+process exists before it can create or pass the marker to a descendant. The
+Node coordinator records its own start tick because it holds the generation
+marker. These values bound inherited marker holders and mapped processes. The
+origin hash keeps the prefix fixed in size. It does not extend the trust
+boundary to hostile code that runs as the same UID.
+
+A coordinator client can start before the coordinator and later open the
+generation marker as a worker-launch anchor. A full coordinator-marker scan
+therefore keeps an older canonical gate parent in scope. Linux identifies a
+direct script launch by the truncated `agent-quality-g` process name. It
+identifies an explicit Bash launch by one complete
+`scripts/agent-quality-gate.sh` argument. An unreadable ambiguous Bash command
+line fails the scan closed for a same-UID candidate. The scan skips a foreign
+UID before it reads that process's command line. The gate parent remains in the
+UID, signal, and descriptor checks. This exception closes the
+final-scan-to-worker-fork gap. Other processes older than the effective
+boundary cannot execute mapped work for that generation under the cooperative
+same-UID gate contract.
+
+A full refresh uses the token boundary only when the versioned prefix is exact
+and its boot hash matches the current Linux boot. Immediately before the first
+mapped command, a Linux client also records the start tick of a new helper
+process. An active-command refresh uses the later of that boundary and the token
+boundary. Legacy tokens, malformed provenance, an unreadable boot identity, and
+tokens from a different boot keep the unbounded scan. Exact-PID revalidation is
+always unbounded. A full refresh reads each process start identity first. It
+skips a generation whose tick is strictly older than the effective boundary
+before it reads UID or descriptor state, except for the older coordinator gate
+parent above. Equal and newer ticks stay in scope.
 The scan reads each in-scope process start identity before and after UID and
 descriptor enumeration. A changed identity makes that observation empty. A
 restricted `hidepid` mount or another incomplete in-scope scan fails closed.
@@ -484,14 +510,21 @@ Tracked `.env.*.example` files stay outside this manifest.
 The digest also binds a bounded pnpm installation manifest.
 It hashes pnpm's installed-state metadata and every direct package link under
 each material package root. Each link binds its normalized target, mode, and
-linked `package.json`. For each unique direct package, it hashes the names,
+linked `package.json`. A package link that resolves back into the workspace is
+source-bound. Its generated and ignored output stays outside the environment
+digest because setup can rewrite that output during the run. Every mapped
+command that can load `@mento-protocol/config` schedules its build as a
+non-reusable quality-setup prerequisite. That build removes `dist/` before it
+emits current output, so missing, stale, and orphaned files converge to one
+state. For each unique external direct package, the digest hashes the names,
 types, modes, and sizes of top-level entries. It resolves exact paths declared
-by `main`, `module`, `types`, `typings`, `bin`, `browser`, `exports`, and
-`imports`. It also binds implicit package-root index fallbacks and any nested
-`package.json` used during directory resolution. It hashes the complete
-resolved file through 512 KiB. For a larger file, it hashes the size and the
-first and last 64 KiB. Symlink entrypoints also bind their link and resolved
-target. A missing or retargeted dependency or a
+by `main`,
+`module`, `types`, `typings`, `bin`, `browser`, `exports`, and `imports`. It also
+binds implicit package-root index fallbacks and any nested `package.json` used
+during directory resolution. It hashes the complete resolved file through 512
+KiB. For a larger file, it hashes the size and the first and last 64 KiB.
+Symlink entrypoints also bind their link and resolved target. A missing or
+retargeted dependency or a
 changed bound payload changes the execution key. Missing pnpm metadata or a
 missing linked `package.json` stops registration. Each file, link, and directory
 revalidates its identity before the manifest returns. An unsupported entry,

@@ -270,6 +270,38 @@ async function addInstalledReactLink(fixture) {
   return { link: join(packageRoot, "react"), target };
 }
 
+async function addWorkspacePackageLink(fixture) {
+  const target = join(fixture.physicalRoot, "shared-config");
+  const dist = join(target, "dist");
+  const scope = join(fixture.root, "ui-dashboard", "node_modules", "@fixture");
+  await Promise.all([
+    mkdir(dist, { recursive: true }),
+    mkdir(scope, { recursive: true }),
+  ]);
+  await Promise.all([
+    writeFile(
+      join(target, "package.json"),
+      `${JSON.stringify({
+        name: "@fixture/workspace",
+        exports: {
+          "./generated": {
+            types: "./dist/generated.d.ts",
+            default: "./dist/generated.js",
+          },
+        },
+      })}\n`,
+    ),
+    writeFile(join(dist, "generated.js"), "export const fixture = true;\n"),
+    writeFile(
+      join(dist, "generated.d.ts"),
+      "export declare const fixture: true;\n",
+    ),
+  ]);
+  const link = join(scope, "workspace");
+  await symlink(target, link);
+  return { dist, link, target };
+}
+
 function materialEnvironmentDigest(
   fixture,
   {
@@ -1462,6 +1494,10 @@ test("material environment binds installed dependency state and package links", 
     addInstalledReactLink(first),
     addInstalledReactLink(second),
   ]);
+  const [firstWorkspace, secondWorkspace] = await Promise.all([
+    addWorkspacePackageLink(first),
+    addWorkspacePackageLink(second),
+  ]);
 
   assert.equal(
     normalizedInstalledDependencyManifest(second.root),
@@ -1474,6 +1510,33 @@ test("material environment binds installed dependency state and package links", 
     baseline,
     "equivalent metadata and absolute package links must normalize across worktrees",
   );
+
+  await writeFile(
+    join(secondWorkspace.dist, "generated.js"),
+    "export const fixture = null;\n",
+  );
+  assert.equal(
+    materialEnvironmentDigest(second),
+    baseline,
+    "workspace setup output must stay outside the pre-setup shared key",
+  );
+  await writeFile(
+    join(secondWorkspace.dist, "generated.js"),
+    "export const fixture = true;\n",
+  );
+  assert.equal(materialEnvironmentDigest(second), baseline);
+
+  await rm(join(secondWorkspace.dist, "generated.d.ts"));
+  assert.equal(
+    materialEnvironmentDigest(second),
+    baseline,
+    "a missing workspace setup output must stay outside the pre-setup shared key",
+  );
+  await writeFile(
+    join(secondWorkspace.dist, "generated.d.ts"),
+    "export declare const fixture: true;\n",
+  );
+  assert.equal(materialEnvironmentDigest(second), baseline);
 
   await rm(secondReact.link);
   assert.notEqual(
@@ -1757,6 +1820,11 @@ test("material environment binds installed dependency state and package links", 
     await realpath(firstReact.link),
     firstReact.target,
     "the first dependency link must remain usable after hashing",
+  );
+  assert.equal(
+    await realpath(firstWorkspace.link),
+    firstWorkspace.target,
+    "the first workspace dependency link must remain usable after hashing",
   );
 });
 

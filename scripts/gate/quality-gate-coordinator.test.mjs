@@ -45,6 +45,7 @@ import {
   stateNamespace,
 } from "./quality-gate-coordinator.mjs";
 import {
+  generatedToken,
   legacyOwnerQuarantineName,
   legacyOwnerQuarantineRecoveryDecision,
   parseLegacyOwnerQuarantineName,
@@ -2233,6 +2234,45 @@ test("equivalent immutable result reuse returns the exact persisted record", asy
 });
 
 test("run tokens use the shared Bash-compatible bounded shape", async () => {
+  const generated = generatedToken(process.pid);
+  assert.match(
+    generated,
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,180}-[0-9]{1,10}-[0-9]{1,12}$/u,
+  );
+  const provenance =
+    /^lp1\.([0-9a-f]{64})\.([0-9]{1,20})\.([0-9a-f]{64})\.coordinator-[0-9]{1,10}-[0-9]{1,12}$/u.exec(
+      generated,
+    );
+  if (provenance) {
+    assert.equal(existsSync("/proc/self/fd"), true);
+    const bootId = readFileSync("/proc/sys/kernel/random/boot_id", "utf8")
+      .trim()
+      .toLowerCase();
+    assert.equal(
+      provenance[1],
+      createHash("sha256").update(bootId, "utf8").digest("hex"),
+    );
+    const processStat = readFileSync(`/proc/${process.pid}/stat`, "utf8");
+    const close = processStat.lastIndexOf(")");
+    assert.ok(close >= 0);
+    assert.equal(
+      provenance[2],
+      processStat
+        .slice(close + 1)
+        .trim()
+        .split(/\s+/u)[19],
+    );
+    assert.equal(
+      provenance[3],
+      createHash("sha256").update(hostname(), "utf8").digest("hex"),
+    );
+  } else {
+    const host =
+      hostname()
+        .replace(/[^A-Za-z0-9._-]/gu, "-")
+        .slice(0, 150) || "localhost";
+    assert.ok(generated.startsWith(`${host}-`), generated);
+  }
   const fixture = await createFixture();
   const requestOwner = owner(218);
   const longestValid = `${"a".repeat(181)}-1234567890-123456789012`;
