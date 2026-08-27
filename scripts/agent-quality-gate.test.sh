@@ -20417,6 +20417,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   race_pattern_pgrep_called="$gate_race_out/pattern-pgrep-called"
   rm -f "$race_pattern_pgrep_called"
   race_pattern_output="$(
+    exec 2> "$gate_race_out/pattern-failure.err"
     gate_drain_scan_error="agentqg-scan-failed"
     gate_lock_root_dir="$gate_race_root"
     source "$repo_root/scripts/gate/run-handles.sh"
@@ -20426,7 +20427,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
       return 1
     }
     gate_run_tagged_pids "fixture.host-1-1"
-  )" 2> "$gate_race_out/pattern-failure.err"
+  )"
   [[ "$race_pattern_output" == "agentqg-scan-failed" ]] ||
     fail "a failed run-token pattern build did not emit only the scan-error sentinel"
   [[ ! -e "$race_pattern_pgrep_called" ]] ||
@@ -20451,19 +20452,21 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   [[ "$race_target_output" == "202" ]] ||
     fail "an exact-PID argv revalidation emitted another process"
   race_target_proc_error_output="$(
+    exec 2> "$gate_race_out/target-proc-error.err"
     gate_drain_scan_error="agentqg-scan-failed"
     gate_lock_root_dir=""
     source "$repo_root/scripts/gate/run-handles.sh"
     gate_run_proc_argv_scan_available() { return 0; }
     gate_run_proc_pid_has_argv_tag() { return 2; }
     gate_run_tagged_pids "fixture.host-1-1" "$$"
-  )" 2> "$gate_race_out/target-proc-error.err"
+  )"
   [[ "$race_target_proc_error_output" == "agentqg-scan-failed" ]] ||
     fail "an exact-PID proc argv scan error did not fail closed"
   grep -Fq -- "could not scan /proc/$$/cmdline" \
     "$gate_race_out/target-proc-error.err" ||
     fail "an exact-PID proc argv scan error omitted its diagnosis"
   race_invalid_target_output="$(
+    exec 2> "$gate_race_out/invalid-target.err"
     gate_drain_scan_error="agentqg-scan-failed"
     gate_lock_root_dir=""
     source "$repo_root/scripts/gate/run-handles.sh"
@@ -20472,7 +20475,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
       return 1
     }
     gate_run_tagged_pids "fixture.host-1-1" 0
-  )" 2> "$gate_race_out/invalid-target.err"
+  )"
   [[ "$race_invalid_target_output" == "agentqg-scan-failed" ]] ||
     fail "an invalid exact-PID revalidation did not fail closed"
   [[ ! -e "$race_target_pgrep_called" ]] ||
