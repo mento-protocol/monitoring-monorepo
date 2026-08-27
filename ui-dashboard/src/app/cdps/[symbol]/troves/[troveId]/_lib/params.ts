@@ -87,10 +87,10 @@ function parseEventIdOrdinal(id: string): [bigint, bigint] {
 }
 
 function compareEventIdOrdinal(a: string, b: string): number {
-  const [aBlock, aLog] = parseEventIdOrdinal(a);
-  const [bBlock, bLog] = parseEventIdOrdinal(b);
-  if (aBlock !== bBlock) return aBlock < bBlock ? -1 : 1;
-  if (aLog !== bLog) return aLog < bLog ? -1 : 1;
+  const [blockA, logIndexA] = parseEventIdOrdinal(a);
+  const [blockB, logIndexB] = parseEventIdOrdinal(b);
+  if (blockA !== blockB) return blockA < blockB ? -1 : 1;
+  if (logIndexA !== logIndexB) return logIndexA < logIndexB ? -1 : 1;
   return 0;
 }
 
