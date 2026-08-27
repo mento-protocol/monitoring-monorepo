@@ -195,6 +195,7 @@ function harness({
   // the pull request OPEN even though `gh pr merge` exited 0.
   mergedState = "MERGED",
   mergeOutcomeError = null,
+  disableAutoError = null,
   // The base the pull request reports AFTER the merge. A retarget between the
   // final gate read and GitHub processing the merge shows up only here.
   mergedBaseRefName = null,
@@ -237,6 +238,14 @@ function harness({
           headRepositoryOwner: { login: "mento-protocol" },
         },
       ]);
+    }
+    if (
+      args[0] === "pr" &&
+      args[1] === "merge" &&
+      args.includes("--disable-auto")
+    ) {
+      if (disableAutoError) throw new Error(disableAutoError);
+      return "";
     }
     if (args[0] === "pr" && args[1] === "view") {
       if (mergeOutcomeError) throw new Error(mergeOutcomeError);
@@ -1692,6 +1701,46 @@ await test("a login with unsafe characters still refuses", async () => {
   assertEqual(h.calls.merges.length, 0, "nothing should have merged");
 });
 
+await test("an enqueued merge has its pending request cancelled", async () => {
+  // gh enqueues when required checks pass and enables auto-merge when they do
+  // not. Either leaves a standing request GitHub can complete later, with none
+  // of the gates — the merge nobody approved.
+  const h = harness({ mergedState: "OPEN" });
+  const result = await h.run();
+
+  assertEqual(result.merged, false);
+  const cancel = h.calls.gh.find(
+    (args) =>
+      args[0] === "pr" &&
+      args[1] === "merge" &&
+      args.includes("--disable-auto"),
+  );
+  assert(cancel !== undefined, "the pending merge request must be cancelled");
+  assertEqual(
+    cancel[cancel.indexOf("--repo") + 1],
+    "mento-protocol/monitoring-monorepo",
+  );
+  assert(
+    h.output().includes("has been cancelled"),
+    `the operator should be told, got:\n${h.output()}`,
+  );
+});
+
+await test("a failed cancellation is reported, not swallowed", async () => {
+  const h = harness({ mergedState: "OPEN", disableAutoError: "gh refused" });
+  const result = await h.run();
+
+  assertEqual(result.merged, false);
+  assert(
+    h.output().includes("could NOT be cancelled"),
+    `the operator must be warned, got:\n${h.output()}`,
+  );
+  assert(
+    h.output().includes("without any of the gates"),
+    "the warning should say what the risk is",
+  );
+});
+
 await test("only a confirmed merge exits zero", async () => {
   // The CLI's exit status is what `pnpm pr:merge && <post-merge closeout>`
   // branches on. Reporting success for a queued or unverified merge would run
@@ -1723,7 +1772,12 @@ await test("the wrapper's own modules stay under the 600-line soft cap", () => {
   // green. The wrapper was split at 638 lines for exactly that reason.
   const here = path.dirname(fileURLToPath(import.meta.url));
   // ADR 0065 scopes the cap to source, not suites, so the suite is not listed.
-  const files = ["merge-pr.mjs", "merge-pr-core.mjs", "merge-pr-io.mjs"];
+  const files = [
+    "merge-pr.mjs",
+    "merge-pr-core.mjs",
+    "merge-pr-io.mjs",
+    "merge-pr-github.mjs",
+  ];
   const over = files
     .map((file) => ({
       file,

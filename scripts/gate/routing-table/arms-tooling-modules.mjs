@@ -67,6 +67,7 @@ export const TOOLING_MODULE_ARMS = [
       "scripts/pr/merge-pr.mjs",
       "scripts/pr/merge-pr-core.mjs",
       "scripts/pr/merge-pr-io.mjs",
+      "scripts/pr/merge-pr-github.mjs",
       "scripts/pr/merge-pr.test.mjs",
     ],
     effects: [
