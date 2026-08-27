@@ -319,38 +319,13 @@ export async function mergePullRequest({
   const consentPath = await appendConsent({ record, git });
   stdout.write(`Recorded consent in ${consentPath}\n`);
 
-  await merge([
-    "pr",
-    "merge",
-    String(number),
-    "--repo",
-    repos.base,
-    MERGE_METHOD_FLAG,
-    // Bind the merge to the head the operator was shown, so a push between the
-    // briefing and the confirmation cannot merge a commit nobody approved.
-    "--match-head-commit",
-    approved.headOid,
-  ]);
-
-  let outcome;
-  try {
-    outcome = await readMergeOutcome({ gh, repo: repos.base, number });
-  } catch (err) {
-    stdout.write(
-      `Could not confirm the merge landed: ${err instanceof Error ? err.message : String(err)}\n` +
-        `Check ${repos.base}#${number} before running any post-merge step.\n`,
-    );
-    return { merged: false, verified: false, record, consentPath };
-  }
-
-  if (outcome.state !== "MERGED") {
-    // Returning failure is not enough. `gh pr merge` enqueues when the required
-    // checks pass and enables auto-merge when they do not, and either leaves a
-    // standing request that GitHub can complete minutes or hours later —
-    // without the ready-state read, the feedback ledger, the briefing, or the
-    // typed confirmation. That is precisely the merge nobody approved. Cancel
-    // the standing request, and say plainly when the cancellation itself fails.
-    let cancellation;
+  // Any outcome other than a confirmed merge may have left a standing request:
+  // `gh pr merge` enqueues when the required checks pass and enables auto-merge
+  // when they do not, and `--not-ready-reason` reaches that second path. GitHub
+  // can complete such a request minutes or hours later, with none of the gates
+  // above — the merge nobody approved, arriving late. So every path from here
+  // reconciles rather than just reporting.
+  const cancelPendingMerge = async () => {
     try {
       await gh([
         "pr",
@@ -360,18 +335,65 @@ export async function mergePullRequest({
         repos.base,
         "--disable-auto",
       ]);
-      cancellation = "The pending merge request has been cancelled.";
+      return "Any pending merge request has been cancelled.";
     } catch (err) {
-      cancellation =
-        `The pending merge request could NOT be cancelled: ` +
+      return (
+        `A pending merge request could NOT be cancelled: ` +
         `${err instanceof Error ? err.message : String(err)}. ` +
         `Cancel it by hand — until you do, this pull request can still merge ` +
-        `later without any of the gates above.`;
+        `later without any of the gates above.`
+      );
     }
+  };
 
+  // The merge command itself can fail after the request reached GitHub — a
+  // transport error, a truncated response — so its failure is an ambiguous
+  // outcome, not a clean abort. Hold it and let the read below decide.
+  let mergeError = null;
+  try {
+    await merge([
+      "pr",
+      "merge",
+      String(number),
+      "--repo",
+      repos.base,
+      MERGE_METHOD_FLAG,
+      // Bind the merge to the head the operator was shown, so a push between
+      // the briefing and the confirmation cannot merge a commit nobody
+      // approved.
+      "--match-head-commit",
+      approved.headOid,
+    ]);
+  } catch (err) {
+    mergeError = err instanceof Error ? err.message : String(err);
+  }
+
+  let outcome = null;
+  let outcomeError = null;
+  try {
+    outcome = await readMergeOutcome({ gh, repo: repos.base, number });
+  } catch (err) {
+    outcomeError = err instanceof Error ? err.message : String(err);
+  }
+
+  if (outcome === null) {
+    // Neither confirmed nor refuted. Cancel first, report second.
+    const cancellation = await cancelPendingMerge();
+    stdout.write(
+      `Could not confirm the merge landed: ${outcomeError}\n` +
+        (mergeError ? `The merge command also failed: ${mergeError}\n` : "") +
+        `${cancellation}\n` +
+        `Check ${repos.base}#${number} before running any post-merge step.\n`,
+    );
+    return { merged: false, verified: false, record, consentPath };
+  }
+
+  if (outcome.state !== "MERGED") {
+    const cancellation = await cancelPendingMerge();
     stdout.write(
       `${repos.base}#${number} is ${outcome.state || "in an unreadable state"}, not merged — ` +
         `a queued or auto-merge target accepts the request without merging it. ` +
+        (mergeError ? `The merge command also failed: ${mergeError}. ` : "") +
         `${cancellation}\n` +
         `Do not run post-merge steps until it reports MERGED.\n`,
     );
@@ -383,6 +405,15 @@ export async function mergePullRequest({
       record,
       consentPath,
     };
+  }
+
+  // GitHub says MERGED, so a failing merge command was a reporting failure
+  // rather than a merge failure. Say so instead of hiding it.
+  if (mergeError) {
+    stdout.write(
+      `The merge command reported an error (${mergeError}) but ${repos.base}#${number} ` +
+        `is MERGED, so the merge itself landed.\n`,
+    );
   }
 
   // `--match-head-commit` pins the head, and the merge API offers nothing that

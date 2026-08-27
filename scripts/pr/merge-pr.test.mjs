@@ -196,6 +196,7 @@ function harness({
   mergedState = "MERGED",
   mergeOutcomeError = null,
   disableAutoError = null,
+  mergeCommandError = null,
   // The base the pull request reports AFTER the merge. A retarget between the
   // final gate read and GitHub processing the merge shows up only here.
   mergedBaseRefName = null,
@@ -289,6 +290,7 @@ function harness({
         },
         merge: async (args) => {
           calls.merges.push(args);
+          if (mergeCommandError) throw new Error(mergeCommandError);
         },
         prompt: async ({ question }) => {
           calls.prompts.push(question);
@@ -1739,6 +1741,57 @@ await test("a failed cancellation is reported, not swallowed", async () => {
     h.output().includes("without any of the gates"),
     "the warning should say what the risk is",
   );
+});
+
+await test("a failing merge command still reconciles the pull request", async () => {
+  // The request may have reached GitHub before the command failed, so its
+  // failure is ambiguous rather than a clean abort.
+  const h = harness({
+    mergeCommandError: "connection reset",
+    mergedState: "OPEN",
+  });
+  const result = await h.run();
+
+  assertEqual(result.merged, false);
+  const cancel = h.calls.gh.find(
+    (args) =>
+      args[0] === "pr" &&
+      args[1] === "merge" &&
+      args.includes("--disable-auto"),
+  );
+  assert(cancel !== undefined, "a pending request must still be cancelled");
+  assert(
+    h.output().includes("connection reset"),
+    `the command failure must be surfaced, got:\n${h.output()}`,
+  );
+});
+
+await test("a failing merge command on an already-merged PR reports the merge", async () => {
+  // GitHub says MERGED, so the command failure was a reporting failure.
+  const h = harness({ mergeCommandError: "connection reset" });
+  const result = await h.run();
+
+  assertEqual(result.merged, true, "the merge did land");
+  assert(
+    h.output().includes("the merge itself landed"),
+    `the operator should be told, got:\n${h.output()}`,
+  );
+});
+
+await test("an unreadable outcome cancels any pending request", async () => {
+  // Neither confirmed nor refuted: cancel first, report second.
+  const h = harness({ mergeOutcomeError: "gh exploded" });
+  const result = await h.run();
+
+  assertEqual(result.merged, false);
+  assertEqual(result.verified, false);
+  const cancel = h.calls.gh.find(
+    (args) =>
+      args[0] === "pr" &&
+      args[1] === "merge" &&
+      args.includes("--disable-auto"),
+  );
+  assert(cancel !== undefined, "an unreadable outcome must still cancel");
 });
 
 await test("only a confirmed merge exits zero", async () => {
