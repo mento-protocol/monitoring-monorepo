@@ -18314,7 +18314,7 @@ STUB
     decision_initial_host="$(uname -n)"
     decision_initial_machine="override:machine-a"
     decision_initial_started_at="$(date +%s)"
-    decision_root_is_per_machine=0
+    decision_root_is_per_machine=""
     decision_replacement_value=""
     case "$decision_field" in
       host)
