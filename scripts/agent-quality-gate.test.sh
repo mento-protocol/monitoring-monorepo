@@ -18736,9 +18736,25 @@ STUB
     # A current gate must use coordinator_token= to recover a same-user dead
     # coordinator. Rejecting every versioned owner would preserve foreign
     # evidence, but it would also wedge the owning user's normal recovery path.
-    same_uid_dead_pid="$(fresh_dead_pid)" ||
-      fail "could not allocate a dead pid for the same-uid coordinator fixture"
-    same_uid_owner_id="same-uid-owner-${same_uid_dead_pid}-1"
+    same_uid_owner_identity="$(
+      node --input-type=module -e '
+        import { pathToFileURL } from "node:url";
+        const { generatedToken } = await import(pathToFileURL(process.argv[1]).href);
+        process.stdout.write(`${process.pid}\t${generatedToken(process.pid)}\n`);
+      ' "$repo_root/scripts/gate/quality-gate-coordinator-legacy.mjs"
+    )" || fail "could not generate the same-uid coordinator fixture identity"
+    [[ "$same_uid_owner_identity" != *$'\n'* ]] ||
+      fail "the same-uid coordinator fixture produced multiple identity lines"
+    IFS=$'\t' read -r same_uid_dead_pid same_uid_owner_id same_uid_owner_extra \
+      <<< "$same_uid_owner_identity"
+    [[ "$same_uid_dead_pid" =~ ^[1-9][0-9]*$ &&
+      "$same_uid_owner_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,180}-${same_uid_dead_pid}-[0-9]{1,12}$ &&
+      -z "$same_uid_owner_extra" ]] ||
+      fail "the same-uid coordinator fixture produced a malformed identity"
+    if kill -0 "$same_uid_dead_pid" 2>/dev/null ||
+      ps -p "$same_uid_dead_pid" >/dev/null 2>&1; then
+      fail "the same-uid coordinator fixture PID is still live after generation"
+    fi
     rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
     rm -f "$gate_race_root/holder.${same_uid_owner_id}"
     mkdir -p "$gate_race_root/run.lock"
