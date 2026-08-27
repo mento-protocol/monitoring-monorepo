@@ -350,6 +350,22 @@ describe("TroveDetailClient", () => {
     expect(handle!.container.textContent).toContain("Unknown CDP market.");
   });
 
+  it("discloses a failed refresh on the unknown-market state, instead of silently keeping a stale claim", () => {
+    // Once markets has confirmed a response lacking this symbol, a later
+    // poll failure is a refresh failure on top of that confirmed (if
+    // symbol-less) response — not a first-load failure. The symbol may
+    // have appeared since the last successful poll (indexer catch-up, a
+    // market rollout).
+    mockQueries({ marketsError: new Error("markets revalidation stalled") });
+    render(handle!, "ZZZm");
+
+    const text = handle!.container.textContent ?? "";
+    expect(text).toContain("Unknown CDP market.");
+    expect(text).toContain("Market data refresh failed");
+    expect(text).toContain("showing the last confirmed state");
+    expect(text).toContain("markets revalidation stalled");
+  });
+
   it("only serves CDP markets on Celo mainnet", () => {
     networkState.network = { ...networkState.network, chainId: 137 };
     mockQueries();

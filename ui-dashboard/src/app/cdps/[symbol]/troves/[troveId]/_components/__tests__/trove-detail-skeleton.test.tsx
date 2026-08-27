@@ -36,6 +36,18 @@ describe("TroveDetailSkeleton", () => {
     expect(headerGrid?.children.length).toBe(7);
   });
 
+  it("reserves the totals card's maximum shape (7 cells), not just the redemption-only 4", () => {
+    // TroveLifetimeTotals can render 4 redemption stats + 2 liquidation
+    // stats + the optional collateral-surplus cell simultaneously (a trove
+    // partially redeemed and later liquidated) — reserving fewer
+    // under-counts that combined case.
+    handle = render(<TroveDetailSkeleton />);
+    const totalsGrid = handle.container.querySelector(
+      ".grid.grid-cols-2.gap-x-4.gap-y-3.sm\\:grid-cols-4",
+    );
+    expect(totalsGrid?.children.length).toBe(7);
+  });
+
   it("renders the operations section as a table-shaped skeleton, not generic bars", () => {
     // Route-level fallback must match TroveOperationsList's own loading
     // branch (TableSkeleton) — a Playwright/table element or the fixed

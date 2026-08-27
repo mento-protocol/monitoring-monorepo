@@ -389,7 +389,7 @@ function TroveDetailView({
     );
   }
   if (collateral == null) {
-    return <EmptyBox message="Unknown CDP market." />;
+    return <UnknownMarketNotice marketsError={markets.error} />;
   }
   if (isLoadingWithoutData(troveById.isLoading, troveById.data)) {
     return <TroveDetailSkeleton />;
@@ -496,6 +496,31 @@ function TroveDetailNotices({
         </div>
       )}
     </>
+  );
+}
+
+/** By the time this renders, `hasErrorWithoutData` above has already
+ *  returned for a first-load failure, so `markets.data` is guaranteed
+ *  non-null — any `marketsError` here is necessarily a refresh failure on
+ *  a confirmed (just symbol-less) response, same class as
+ *  `NotIndexedNotice` below. During indexer catch-up or a market rollout,
+ *  this symbol may have appeared since the last successful poll — split
+ *  out of {@link TroveDetailView} to keep it under the file's
+ *  max-lines-per-function budget. */
+function UnknownMarketNotice({
+  marketsError,
+}: {
+  marketsError: Error | undefined;
+}) {
+  return (
+    <div className="space-y-3">
+      <StaleRefreshNotice
+        subject="Market data"
+        error={marketsError}
+        className=""
+      />
+      <EmptyBox message="Unknown CDP market." />
+    </div>
   );
 }
 

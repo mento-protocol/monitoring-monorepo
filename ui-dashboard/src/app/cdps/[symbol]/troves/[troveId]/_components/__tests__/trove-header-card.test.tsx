@@ -177,6 +177,36 @@ describe("TroveHeaderCard", () => {
     expect(icrTooltip).toContain("ownership transfer");
   });
 
+  function debtTooltipTextFor(status: CdpTrove["status"]): string | undefined {
+    handle = render(
+      <TroveHeaderCard
+        trove={trove({ status })}
+        collateral={collateral()}
+        displayedInterestRate={DEFAULT_RATE}
+      />,
+    );
+    const tooltipTexts = Array.from(
+      handle.container.querySelectorAll('[role="tooltip"]'),
+    ).map((el) => el.textContent ?? "");
+    return tooltipTexts.find((t) => t.includes("debt change"));
+  }
+
+  it.each(["active", "zombie"] as const)(
+    "claims interest still accrues on the Debt tooltip for an open trove (%s)",
+    (status) => {
+      expect(debtTooltipTextFor(status)).toContain("Interest has accrued");
+    },
+  );
+
+  it.each(["closed", "liquidated", "redeemed"] as const)(
+    "does not claim interest still accrues on the Debt tooltip for a %s trove",
+    (status) => {
+      const debtTooltip = debtTooltipTextFor(status);
+      expect(debtTooltip).not.toContain("Interest has accrued");
+      expect(debtTooltip).toContain("no longer accrues interest");
+    },
+  );
+
   it("shows 'Closed' with the closing tx for a closed/liquidated/redeemed trove", () => {
     handle = render(
       <TroveHeaderCard

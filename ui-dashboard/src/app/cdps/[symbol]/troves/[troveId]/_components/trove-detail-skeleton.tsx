@@ -71,7 +71,12 @@ export function TroveDetailSkeleton() {
           <div className={`h-3 w-1/2 max-w-xs ${SHIMMER}`} />
         </div>
         <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
-          {Array.from({ length: 4 }, (_, i) => (
+          {/* 7 cells: the loaded card's maximum shape, not its minimum — 4
+              redemption stats + 2 liquidation stats + the optional
+              collateral-surplus cell, all of which can render together for
+              a trove that was partially redeemed and later liquidated.
+              Reserving fewer would still under-count that combined case. */}
+          {Array.from({ length: 7 }, (_, i) => (
             // react-doctor-disable-next-line react-doctor/no-array-index-as-key
             <div key={`trove-totals-skel-${i}`}>
               <div className={`h-3 w-20 ${SHIMMER}`} />

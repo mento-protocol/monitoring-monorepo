@@ -4,7 +4,11 @@ import { Tooltip } from "@/components/tooltip";
 import { formatTimestamp, relativeTime } from "@/lib/format";
 import { NETWORKS, networkIdForChainId } from "@/lib/networks";
 import { explorerTxUrl } from "@/lib/tokens";
-import type { CdpCollateral, CdpTrove } from "../../../../_lib/types";
+import {
+  CDP_TROVE_OPEN_STATUSES,
+  type CdpCollateral,
+  type CdpTrove,
+} from "../../../../_lib/types";
 import { formatTokenAmount } from "../../../../_lib/format";
 import {
   formatBpsPercent,
@@ -77,6 +81,22 @@ function EventTimeLink({
       </a>
     </Tooltip>
   );
+}
+
+function isOpenTroveStatus(status: string): boolean {
+  return (CDP_TROVE_OPEN_STATUSES as readonly string[]).includes(status);
+}
+
+/** Only an open (active/zombie) trove keeps accruing interest — a closed,
+ *  liquidated, or redeemed trove's debt is final. Claiming otherwise tells
+ *  someone investigating a historical position that a settled figure is
+ *  still moving. */
+function debtStalenessTooltip(status: string, icrTimestamp: string): string {
+  const base = `As of the last indexed event (${icrTimestamp}), which can be a plain ownership transfer rather than a debt change — this figure may be older.`;
+  const accrualNote = isOpenTroveStatus(status)
+    ? "Interest has accrued since either way; not a live contract read."
+    : "This position is closed and no longer accrues interest; not a live contract read.";
+  return `${base} ${accrualNote}`;
 }
 
 function StatLabel({ children }: { children: ReactNode }) {
@@ -347,7 +367,7 @@ function TroveHeaderStats({
         <StatLabel>
           Debt
           <Tooltip
-            content={`As of the last indexed event (${icrTimestamp}), which can be a plain ownership transfer rather than a debt change — this figure may be older. Interest has accrued since either way; not a live contract read.`}
+            content={debtStalenessTooltip(trove.status, icrTimestamp)}
             label="About the debt figure's staleness"
           />
         </StatLabel>
