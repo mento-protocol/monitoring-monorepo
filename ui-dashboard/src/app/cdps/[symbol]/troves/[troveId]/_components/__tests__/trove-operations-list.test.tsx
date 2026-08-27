@@ -271,6 +271,56 @@ describe("TroveOperationsList", () => {
     expect(handle.container.textContent).not.toContain("9.99%");
   });
 
+  it("labels openTroveAndJoinBatch (op 7) distinctly from a plain open and shows its rate", () => {
+    // Op 7 shares badgeKindFor's "troveOpen" kind with plain opens (op 0),
+    // so without special-casing it renders an identical "Open Trove" label
+    // with the batch join and its rate invisible.
+    handle = render(
+      <TroveOperationsList
+        rows={[
+          op({
+            id: "evt-open-join",
+            operation: 7, // openTroveAndJoinBatch
+            debtChange: "1000000000000000000",
+            annualInterestRate: rateWei(320),
+          }),
+        ]}
+        truncated={false}
+        isLoading={false}
+        error={undefined}
+        chainId={42220}
+        debtSymbol="GBPm"
+      />,
+    );
+    const text = handle.container.textContent ?? "";
+    expect(text).toContain("Open & Join Batch");
+    expect(text).not.toContain("Open Trove");
+    expect(text).toContain("3.20%");
+  });
+
+  it("does not show a rate for a plain open (op 0) — its deltas already tell the story", () => {
+    handle = render(
+      <TroveOperationsList
+        rows={[
+          op({
+            id: "evt-open-plain",
+            operation: 0,
+            debtChange: "1000000000000000000",
+            annualInterestRate: rateWei(320),
+          }),
+        ]}
+        truncated={false}
+        isLoading={false}
+        error={undefined}
+        chainId={42220}
+        debtSymbol="GBPm"
+      />,
+    );
+    const text = handle.container.textContent ?? "";
+    expect(text).toContain("Open Trove");
+    expect(text).not.toContain("3.20%");
+  });
+
   it("makes the row's exact timestamp reachable without a mouse, via a focusable tooltip", () => {
     handle = render(
       <TroveOperationsList

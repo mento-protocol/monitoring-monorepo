@@ -124,9 +124,20 @@ export function TroveHeaderCard({
         <h1 className="flex flex-wrap items-center gap-2 text-lg font-semibold text-white">
           <span>{collateral.symbol}</span>
           <span className="text-slate-600">·</span>
-          <span className="font-mono text-base" title={trove.troveId}>
-            Trove {shortenHex(trove.troveId)}
-          </span>
+          {/* `Tooltip`, not a plain `title` — the last `title=` left in this
+              route (swept for the others: EventTimeLink and OperationRow's
+              timestamp cell already use this pattern). A `title` on a
+              non-focusable `<span>` hides the full id from keyboard/touch
+              users, who may need it to disambiguate two ids sharing the
+              same shortened prefix/suffix. */}
+          <Tooltip
+            content={trove.troveId}
+            label={`Full trove id: ${trove.troveId}`}
+          >
+            <span className="font-mono text-base">
+              Trove {shortenHex(trove.troveId)}
+            </span>
+          </Tooltip>
           <TroveStatusBadge status={trove.status} />
         </h1>
         <a

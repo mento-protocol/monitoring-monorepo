@@ -27,24 +27,40 @@ const RATE_VISIBLE_BADGES = new Set<BadgeKind>([
   "troveBatch",
 ]);
 
-// Liquity v2 OP enum values for the two batch-membership operations (see
-// CdpTroveOperationEventRow's `operation` doc) — opposite actions that
-// `badgeKindFor` both map to the single "troveBatch" kind.
+// Liquity v2 OP enum values relevant to this table (indexer-envio/src/
+// handlers/liquity/operations.ts's full `OP` has 10 members; APPLY_PENDING_DEBT
+// (4), LIQUIDATE (5), and REDEEM_COLLATERAL (6) early-return before writing a
+// TroveOperationEvent row — see `troveOperationSnapshot.ts` — so only these
+// seven ever reach this component. Each needs a distinct, truthful label:
+// - 0 openTrove / 1 closeTrove / 2 adjustTrove: `BADGE_LABELS[kind]` as-is —
+//   their debt/coll deltas already tell the story.
+// - 3 adjustInterestRate: `BADGE_LABELS[kind]` + rate (RATE_VISIBLE_BADGES).
+// - 7 openTroveAndJoinBatch shares `badgeKindFor`'s "troveOpen" kind with
+//   plain opens (0), so without special-casing it here it would render an
+//   identical "Open Trove" label with the batch join and its rate invisible.
+// - 8 setBatchManager / 9 removeFromBatch share the "troveBatch" kind —
+//   opposite actions that would otherwise render the same "Batch Membership"
+//   text.
+const OP_OPEN_AND_JOIN_BATCH = 7;
 const OP_SET_BATCH_MANAGER = 8;
 const OP_REMOVE_FROM_BATCH = 9;
 
-/** `BADGE_LABELS[kind]` is too coarse for `troveBatch`: operations 8
- *  (setBatchManager, joining/switching batch manager) and 9
- *  (removeFromBatch, leaving) are opposite actions that both map to the
- *  same badge kind — showing the shared "Batch Membership" label for both
- *  leaves the direction unrecoverable even with the rate now shown next to
- *  it. */
 function operationBadgeLabel(kind: BadgeKind, operation: number): string {
+  if (operation === OP_OPEN_AND_JOIN_BATCH) return "Open & Join Batch";
   if (kind === "troveBatch") {
     if (operation === OP_SET_BATCH_MANAGER) return "Joined Batch";
     if (operation === OP_REMOVE_FROM_BATCH) return "Left Batch";
   }
   return BADGE_LABELS[kind];
+}
+
+/** Whether to show `annualInterestRate` next to the badge: the two
+ *  badge-kind cases in {@link RATE_VISIBLE_BADGES}, plus operation 7
+ *  specifically — it shares `troveOpen`'s kind with plain opens (whose rate
+ *  isn't shown, since their debt/coll deltas already tell the story), but
+ *  still needs its own batch-join rate surfaced. */
+function shouldShowOperationRate(kind: BadgeKind, operation: number): boolean {
+  return RATE_VISIBLE_BADGES.has(kind) || operation === OP_OPEN_AND_JOIN_BATCH;
 }
 
 /** The indexer's actual debt-position math is `debtAfter = debtBefore +
@@ -80,7 +96,7 @@ function OperationRow({
         >
           {operationBadgeLabel(kind, row.operation)}
         </span>
-        {RATE_VISIBLE_BADGES.has(kind) && (
+        {shouldShowOperationRate(kind, row.operation) && (
           <span className="ml-1 text-[10px] text-slate-500">
             → {formatInterestRate(row.annualInterestRate)}
           </span>

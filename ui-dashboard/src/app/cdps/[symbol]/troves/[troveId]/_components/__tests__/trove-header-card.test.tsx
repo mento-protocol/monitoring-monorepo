@@ -373,6 +373,24 @@ describe("TroveHeaderCard", () => {
     expect(link?.getAttribute("href")).toBe("mock-address://0xliveowner");
   });
 
+  it("makes the full trove id reachable without a mouse, via a focusable tooltip", () => {
+    // The heading only ever shows the shortened id (shortenHex) — the full
+    // value must not live solely in a `title` on a non-focusable span, or
+    // keyboard/touch users can't disambiguate two ids sharing a prefix/suffix.
+    handle = render(
+      <TroveHeaderCard
+        trove={trove({ troveId: "0xabcdef0123456789" })}
+        collateral={collateral()}
+        displayedInterestRate={DEFAULT_RATE}
+      />,
+    );
+    const trigger = handle.container.querySelector(
+      "h1 button[aria-describedby]",
+    );
+    expect(trigger).not.toBeNull();
+    expect(trigger?.getAttribute("aria-label")).toContain("0xabcdef0123456789");
+  });
+
   it("is keyboard-focusable on every tooltip trigger (status badge, ICR, event-time links)", () => {
     handle = render(
       <TroveHeaderCard
