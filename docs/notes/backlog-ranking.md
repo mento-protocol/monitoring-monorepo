@@ -151,3 +151,8 @@ schedule is not in scope for the operator-triggered form and is not required by
 it. The operator invoking each run is the trust gate — the batch is printed with
 a short abort window before the first claim, and every PR stops at READY for
 them to read before any merge.
+
+Issue #2071 tracked stage 2 and closes with the operator-triggered form its
+grooming decisions chose. Cron autonomy carries no tracking issue by design: it
+is an idea the operator descoped, not work this loop deferred, and it gets a
+fresh issue if it is ever wanted.

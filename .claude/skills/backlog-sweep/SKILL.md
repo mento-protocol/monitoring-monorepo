@@ -222,7 +222,7 @@ Then spawn one worker subagent per issue. Give each a brief containing:
         [ "$n" -lt 50 ] || exit 1   # never reuse a path you did not allocate
       done
     fi
-    git clone "$repo" "$dir"
+    git clone "$repo" "$dir" || exit 1  # never mark a clone that failed
     printf '%s\n' "$sweep_id" > "$dir/.git/sweep-owner"
   fi
   ```
@@ -232,6 +232,14 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   string is fine as long as one sweep never reuses another's. Write it right
   after the clone: the marker is what the next run reads, so a clone that
   skipped this step can never be resumed, only abandoned for a fresh path.
+
+  Write it only after a clone that **succeeded**, which is what the `|| exit 1`
+  buys. The existence check and the clone are two steps, so another sweep can
+  take the same deterministic path in between; this clone then fails into a
+  directory that is not empty, and an unconditional marker write would stamp
+  this sweep's id over the owner file of a checkout someone else's live worker
+  is committing from — handing away the tree the rest of this section exists to
+  protect.
 
   Create the parent first, and prove it writable rather than assuming it.
   `git clone` does not create intermediate directories, and the sweep root is
