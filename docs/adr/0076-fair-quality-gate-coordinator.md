@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0074 — Fair local quality-gate coordination across worktrees
+# ADR 0076 — Fair local quality-gate coordination across worktrees
 
 **Status:** Accepted (Aug 2026). In force on branches that contain this change.
 **Scope:** ci/process

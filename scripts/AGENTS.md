@@ -86,7 +86,7 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   `docs/docs-navigation-eval-helpers.mjs`, and `gate/lockfile-scope.mjs` from
   `$script_source_dir`; tests hash them from `$repo_root`. Move each path with
   its routes, signatures, fixtures, and literals (ADRs 0064 and
-  0074).
+  0076).
 - **Gate mapping pins.** The signature and three Turbo inputs pin
   `gate/routing-table/**`, `gate/mapping*`, and
   `agent-autoreview-core.mjs`. Runtime hashes use `$script_source_dir`; suites

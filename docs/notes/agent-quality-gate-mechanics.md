@@ -402,7 +402,7 @@ bucket order, the five post-passes, the root-manifest classifier). Both are
 routed by a change to the engine or the table, and the routing-table suite also
 runs in the required `ci` job.
 
-### Scheduling contract (Refs #1802, #2006; [ADR 0074](../adr/0074-fair-quality-gate-coordinator.md))
+### Scheduling contract (Refs #1802, #2006; [ADR 0076](../adr/0076-fair-quality-gate-coordinator.md))
 
 `--run` requests share a transient machine-wide coordinator. The coordinator
 admits independent work from different worktrees under a weighted capacity. It
