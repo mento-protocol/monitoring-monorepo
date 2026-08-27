@@ -266,6 +266,22 @@ describe("TroveHeaderCard", () => {
     expect(text).toContain("Batch");
   });
 
+  it("announces the plain 'Batch' annotation as a live status region", () => {
+    // The batch query can resolve after mount/poll, so this label is
+    // dynamic — assistive tech must be told when it appears.
+    handle = render(
+      <TroveHeaderCard
+        trove={trove({ interestBatchId: "batch-1" })}
+        collateral={collateral()}
+        displayedInterestRate={null}
+      />,
+    );
+    const notice = Array.from(
+      handle.container.querySelectorAll('[role="status"]'),
+    ).find((el) => el.textContent === "Batch");
+    expect(notice).toBeDefined();
+  });
+
   it("shows an explicit 'Batch missing' instead of a bare dash when the batch join resolved with no matching row", () => {
     handle = render(
       <TroveHeaderCard
@@ -276,6 +292,10 @@ describe("TroveHeaderCard", () => {
       />,
     );
     expect(handle.container.textContent).toContain("Batch missing");
+    const notice = Array.from(
+      handle.container.querySelectorAll('[role="status"]'),
+    ).find((el) => el.textContent === "Batch missing");
+    expect(notice).toBeDefined();
   });
 
   it("does not show 'Batch missing' while the join is merely pending (not yet resolved-empty)", () => {
@@ -310,6 +330,12 @@ describe("TroveHeaderCard", () => {
       tooltipTexts.some((t) => t.includes("batch's own last update")),
     ).toBe(true);
     expect(handle.container.textContent).toContain("timestamped separately");
+    // Dynamic (resolves after the batch query settles), so it's a live
+    // status region too, same as the plain/missing "Batch" states.
+    const statusNotice = Array.from(
+      handle.container.querySelectorAll('[role="status"]'),
+    ).find((el) => el.textContent?.includes("Batch"));
+    expect(statusNotice).toBeDefined();
   });
 
   it("links the owner to previousOwner when the NFT has burned (owner zeroed)", () => {

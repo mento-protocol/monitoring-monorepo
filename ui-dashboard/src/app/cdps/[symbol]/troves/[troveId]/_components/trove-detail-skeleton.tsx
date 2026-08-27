@@ -1,3 +1,5 @@
+import { TableSkeleton } from "@/components/skeletons";
+
 // Header card + totals + op-list skeleton matching the loaded grid
 // (trove-header-card.tsx / trove-lifetime-totals.tsx / trove-operations-list.tsx).
 // Single source of truth for this route's loading geometry: the route's
@@ -57,16 +59,21 @@ export function TroveDetailSkeleton() {
         </div>
       </div>
       <div
-        className="rounded-lg border border-slate-800 bg-slate-900/30 p-5 space-y-2"
+        className="space-y-3"
         role="status"
         aria-live="polite"
         aria-label="Loading trove"
       >
         <div className={`h-5 w-40 ${SHIMMER}`} />
-        {Array.from({ length: 5 }, (_, i) => (
-          // react-doctor-disable-next-line react-doctor/no-array-index-as-key
-          <div key={`trove-op-skel-${i}`} className={`h-10 ${SHIMMER}`} />
-        ))}
+        <div className={`h-3 w-full max-w-lg ${SHIMMER}`} />
+        {/* Mirrors TroveOperationsList's own loading branch exactly
+            (TableSkeleton, variant="rows") — this route-level fallback and
+            that component's post-hydration loading state must render the
+            same shape, or navigation swaps structurally different subtrees
+            right before the real table appears. `presentational`: the
+            surrounding `role="status"` above already covers this block, so
+            it doesn't announce a second nested live region. */}
+        <TableSkeleton rows={4} variant="rows" presentational />
       </div>
     </div>
   );

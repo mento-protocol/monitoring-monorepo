@@ -89,7 +89,12 @@ function resolveTroveByIdQuery(
  *  market page's `useStableCdpDetail` (`cdp-detail-client.tsx`): substitute
  *  back the last successful response for the SAME entity id while the new
  *  key's fetch is in flight or has failed, so a query-variant swap is
- *  invisible to the reader. */
+ *  invisible to the reader. Keeps `troveById.error` intact rather than
+ *  clearing it: if the UPGRADED query itself then fails, that's a real
+ *  revalidation failure behind the cached row — the caller's stale-refresh
+ *  notice needs `error` populated (with `data` non-null) to disclose it,
+ *  not silence. Only `data`/`isLoading` are the query-swap artifacts this
+ *  substitutes away. */
 function useStableTroveById(
   troveById: ReturnType<typeof useGQL<CdpTroveByIdResponse>>,
   troveEntityId: string | null,
@@ -110,7 +115,6 @@ function useStableTroveById(
   return {
     ...troveById,
     data: previous.current.data,
-    error: undefined,
     isLoading: false,
   };
 }

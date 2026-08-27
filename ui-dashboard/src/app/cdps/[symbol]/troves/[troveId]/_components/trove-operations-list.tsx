@@ -3,15 +3,74 @@
 import { EmptyBox, ErrorBox, StaleRefreshNotice } from "@/components/feedback";
 import { TableSkeleton } from "@/components/skeletons";
 import { Row, Table, Td, Th } from "@/components/table";
+import { Tooltip } from "@/components/tooltip";
 import { TxHashCell } from "@/components/tx-hash-cell";
 import { formatTimestamp, relativeTime } from "@/lib/format";
 import {
   BADGE_LABELS,
   BADGE_STYLES,
   badgeKindFor,
+  type BadgeKind,
 } from "../../../../_lib/transactions";
 import { formatSignedWei } from "../../../../_lib/format";
 import type { CdpTroveOperationEventRow } from "../../../../_lib/types";
+import { formatInterestRate } from "../_lib/format";
+
+// Operation codes 3 (adjustInterestRate), 8 (setBatchManager), and 9
+// (removeFromBatch) — see CdpTroveOperationEventRow's `operation` doc —
+// legitimately have zero debt/collateral change, so the badge alone doesn't
+// say what the operation actually did. `annualInterestRate` is already
+// fetched for every row; only these two badge kinds show it next to the
+// badge.
+const RATE_VISIBLE_BADGES = new Set<BadgeKind>([
+  "troveInterestRateChange",
+  "troveBatch",
+]);
+
+/** One operations-table row — split out of {@link TroveOperationsList} to
+ *  keep it under the file's max-lines-per-function budget. */
+function OperationRow({
+  row,
+  chainId,
+  debtSymbol,
+}: {
+  row: CdpTroveOperationEventRow;
+  chainId: number;
+  debtSymbol: string;
+}) {
+  const kind = badgeKindFor({ kind: "troveOp", ...row });
+  return (
+    <Row>
+      <Td>
+        <span
+          className={`inline-block rounded border px-2 py-0.5 text-xs ${BADGE_STYLES[kind]}`}
+        >
+          {BADGE_LABELS[kind]}
+        </span>
+        {RATE_VISIBLE_BADGES.has(kind) && (
+          <span className="ml-1 text-[10px] text-slate-500">
+            → {formatInterestRate(row.annualInterestRate)}
+          </span>
+        )}
+      </Td>
+      <Td align="right" mono>
+        {formatSignedWei(row.debtChange, debtSymbol)}
+      </Td>
+      <Td align="right" mono>
+        {formatSignedWei(row.collChange, "USDm")}
+      </Td>
+      <TxHashCell txHash={row.txHash} chainId={chainId} />
+      <Td small muted>
+        {/* `Tooltip`, not a plain `title` — a `title` alone on a `<td>` is
+            unreachable without a mouse; mirrors the header's
+            `EventTimeLink` fix for the same gap. */}
+        <Tooltip content={formatTimestamp(row.timestamp)}>
+          <span>{relativeTime(row.timestamp)}</span>
+        </Tooltip>
+      </Td>
+    </Row>
+  );
+}
 
 /** Interim ledger (docs/PLAN-trove-history-page.md, "GraphQL contract →
  *  interim assembly"): user-initiated trove operations only. Protocol rows
@@ -96,30 +155,14 @@ export function TroveOperationsList({
               </Row>
             </thead>
             <tbody>
-              {rows.map((row) => {
-                const kind = badgeKindFor({ kind: "troveOp", ...row });
-                return (
-                  <Row key={row.id}>
-                    <Td>
-                      <span
-                        className={`inline-block rounded border px-2 py-0.5 text-xs ${BADGE_STYLES[kind]}`}
-                      >
-                        {BADGE_LABELS[kind]}
-                      </span>
-                    </Td>
-                    <Td align="right" mono>
-                      {formatSignedWei(row.debtChange, debtSymbol)}
-                    </Td>
-                    <Td align="right" mono>
-                      {formatSignedWei(row.collChange, "USDm")}
-                    </Td>
-                    <TxHashCell txHash={row.txHash} chainId={chainId} />
-                    <Td small muted title={formatTimestamp(row.timestamp)}>
-                      {relativeTime(row.timestamp)}
-                    </Td>
-                  </Row>
-                );
-              })}
+              {rows.map((row) => (
+                <OperationRow
+                  key={row.id}
+                  row={row}
+                  chainId={chainId}
+                  debtSymbol={debtSymbol}
+                />
+              ))}
             </tbody>
           </Table>
           {truncated && (

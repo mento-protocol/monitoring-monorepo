@@ -12,6 +12,12 @@ vi.mock("@/components/tx-hash-cell", () => ({
 
 import { TroveOperationsList } from "../trove-operations-list";
 
+const D18 = BigInt(10) ** BigInt(18);
+
+function rateWei(bps: number): string {
+  return ((BigInt(bps) * D18) / BigInt(10_000)).toString();
+}
+
 function op(
   overrides: Partial<CdpTroveOperationEventRow> = {},
 ): CdpTroveOperationEventRow {
@@ -106,6 +112,91 @@ describe("TroveOperationsList", () => {
     expect(text).toContain("1.00 GBPm");
     expect(text).toContain("-0.50 USDm");
     expect(text).toContain("0xabc");
+  });
+
+  it("shows the new rate for a rate-only interest-rate-change operation (debt/coll deltas are both zero)", () => {
+    handle = render(
+      <TroveOperationsList
+        rows={[
+          op({
+            id: "evt-rate",
+            operation: 3, // adjustInterestRate
+            debtChange: "0",
+            collChange: "0",
+            annualInterestRate: rateWei(250),
+          }),
+        ]}
+        truncated={false}
+        isLoading={false}
+        error={undefined}
+        chainId={42220}
+        debtSymbol="GBPm"
+      />,
+    );
+    const text = handle.container.textContent ?? "";
+    expect(text).toContain("Change Interest Rate");
+    expect(text).toContain("2.50%");
+  });
+
+  it("shows the new rate for a batch-membership operation", () => {
+    handle = render(
+      <TroveOperationsList
+        rows={[
+          op({
+            id: "evt-batch",
+            operation: 8, // setBatchManager
+            debtChange: "0",
+            collChange: "0",
+            annualInterestRate: rateWei(175),
+          }),
+        ]}
+        truncated={false}
+        isLoading={false}
+        error={undefined}
+        chainId={42220}
+        debtSymbol="GBPm"
+      />,
+    );
+    const text = handle.container.textContent ?? "";
+    expect(text).toContain("Batch Membership");
+    expect(text).toContain("1.75%");
+  });
+
+  it("does not show a rate annotation for a regular adjust/open/close operation", () => {
+    handle = render(
+      <TroveOperationsList
+        rows={[
+          op({
+            id: "evt-adjust",
+            operation: 2,
+            annualInterestRate: rateWei(999),
+          }),
+        ]}
+        truncated={false}
+        isLoading={false}
+        error={undefined}
+        chainId={42220}
+        debtSymbol="GBPm"
+      />,
+    );
+    expect(handle.container.textContent).not.toContain("9.99%");
+  });
+
+  it("makes the row's exact timestamp reachable without a mouse, via a focusable tooltip", () => {
+    handle = render(
+      <TroveOperationsList
+        rows={[op()]}
+        truncated={false}
+        isLoading={false}
+        error={undefined}
+        chainId={42220}
+        debtSymbol="GBPm"
+      />,
+    );
+    const trigger = handle.container.querySelector(
+      "td button[aria-describedby]",
+    );
+    expect(trigger).not.toBeNull();
   });
 
   it("discloses truncation only when the sentinel row was present (caller-supplied flag)", () => {

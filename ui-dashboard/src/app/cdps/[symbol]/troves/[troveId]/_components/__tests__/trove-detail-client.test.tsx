@@ -741,4 +741,62 @@ describe("TroveDetailClient", () => {
     expect(handle!.container.textContent).toContain("Trove 0x8abc");
     expect(handle!.container.querySelector('[role="alert"]')).toBeNull();
   });
+
+  it("discloses a stale-refresh notice — not silence — when the UPGRADED query fails after a query-variant swap", () => {
+    // Same setup as the swap-in-flight test, but this time the upgraded
+    // query settles with a real error instead of staying in flight. The
+    // cached fallback row must still show (no blank skeleton, no hard
+    // error), but the failure must not be silently swallowed either.
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_MARKETS) {
+        return { data: marketsData(), error: null, isLoading: false };
+      }
+      if (query === CDP_TROVE_SCHEMA_FIELDS) {
+        return { data: TROVE_SCHEMA_WITHOUT_TX, error: null, isLoading: false };
+      }
+      if (query === CDP_TROVE_BY_ID_WITHOUT_TX) {
+        return { data: { Trove: [trove()] }, error: null, isLoading: false };
+      }
+      if (query === CDP_TROVE_OPERATIONS) {
+        return {
+          data: { TroveOperationEvent: [op()] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+    render(handle!);
+    expect(handle!.container.textContent).toContain("Trove 0x8abc");
+
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_MARKETS) {
+        return { data: marketsData(), error: null, isLoading: false };
+      }
+      if (query === CDP_TROVE_SCHEMA_FIELDS) {
+        return { data: TROVE_SCHEMA_WITH_TX, error: null, isLoading: false };
+      }
+      if (query === CDP_TROVE_BY_ID) {
+        return {
+          data: undefined,
+          error: new Error("upgraded trove query failed"),
+          isLoading: false,
+        };
+      }
+      if (query === CDP_TROVE_OPERATIONS) {
+        return {
+          data: { TroveOperationEvent: [op()] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+    render(handle!);
+    const text = handle!.container.textContent ?? "";
+    expect(text).toContain("Trove 0x8abc");
+    expect(handle!.container.querySelector('[role="alert"]')).not.toBeNull();
+    expect(text).toContain("Trove data refresh failed");
+    expect(text).toContain("upgraded trove query failed");
+  });
 });

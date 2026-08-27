@@ -167,11 +167,13 @@ export function TroveHeaderCard({
 
 /** The Rate stat's "Batch" annotation — split out of {@link TroveHeaderStats}
  *  to keep it under the file's max-lines-per-function budget. Three states:
- *  not batch-managed (nothing), batch-managed with the join resolved
- *  (timestamped tooltip), and batch-managed with the join confirmed missing
- *  (an explicit "Batch missing", matching the market table's convention in
+ *  not batch-managed (nothing — a static fact for this render, no live
+ *  region needed), batch-managed with the join resolved (timestamped
+ *  tooltip), and batch-managed with the join confirmed missing (an explicit
+ *  "Batch missing", matching the market table's convention in
  *  `trove-cells.tsx`) — never a bare dash that reads the same as "still
- *  loading". */
+ *  loading". The latter two are dynamic (the batch query can resolve after
+ *  mount/poll), so both carry `role="status"` — mirrors `TroveStatusBadge`. */
 function BatchRateLabel({
   interestBatchId,
   batchRateTimestamp,
@@ -184,19 +186,37 @@ function BatchRateLabel({
   if (interestBatchId == null) return null;
   if (batchMissing) {
     return (
-      <span className="ml-1 text-[10px] text-amber-400">Batch missing</span>
+      <span
+        role="status"
+        aria-live="polite"
+        className="ml-1 text-[10px] text-amber-400"
+      >
+        Batch missing
+      </span>
     );
   }
   if (batchRateTimestamp == null) {
-    return <span className="ml-1 text-[10px] text-slate-500">Batch</span>;
+    return (
+      <span
+        role="status"
+        aria-live="polite"
+        className="ml-1 text-[10px] text-slate-500"
+      >
+        Batch
+      </span>
+    );
   }
   return (
-    <Tooltip
-      content={`Rate as of the batch's own last update (${formatTimestamp(batchRateTimestamp)}) — separate from this trove's own timestamp in the footer below.`}
-      label="About the batch rate's timestamp"
-    >
-      <span className="ml-1 text-[10px] text-slate-500 cursor-help">Batch</span>
-    </Tooltip>
+    <span role="status" aria-live="polite">
+      <Tooltip
+        content={`Rate as of the batch's own last update (${formatTimestamp(batchRateTimestamp)}) — separate from this trove's own timestamp in the footer below.`}
+        label="About the batch rate's timestamp"
+      >
+        <span className="ml-1 text-[10px] text-slate-500 cursor-help">
+          Batch
+        </span>
+      </Tooltip>
+    </span>
   );
 }
 
