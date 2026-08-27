@@ -123,6 +123,19 @@ indexer.onEvent(
     const prevTroveState = { status: trove.status, debt: trove.debt };
     // See `captureTroveOperationSnapshotState` for why we capture these now.
     const snapshotState = captureTroveOperationSnapshotState(trove);
+    // `BatchedTroveUpdated` (never `TroveUpdated`) fires before
+    // `TroveOperation` for a batch-managed op and stages this row keyed by
+    // tx+trove — its presence is how `maybeRecordTroveOperation` knows
+    // `snapshotState.debtAfter` above is stale. See that function's doc.
+    const pendingBatchedTroveUpdate =
+      await context.PendingBatchedTroveUpdate.get(
+        pendingTroveKey(
+          event.chainId,
+          event.transaction.hash,
+          collateralId,
+          troveId,
+        ),
+      );
 
     const op = Number(event.params._operation);
     const forced = isForcedOperation(op);
@@ -217,6 +230,7 @@ indexer.onEvent(
       instanceId: instance.id,
       troveId,
       snapshotState,
+      pendingBatchedTroveUpdate,
       blockNumber,
       blockTimestamp,
     });

@@ -347,4 +347,76 @@ describe("TroveOperationEvent before/after snapshot (issue #2080)", () => {
     );
     assert.equal(row?.collAfter, 0n);
   });
+
+  it("open-and-join-batch (issue found in review of #2095): debtBefore/debtAfter are null — BatchedTroveUpdated stages only debt SHARES, not the real per-trove debt — and collAfter reads the staged coll, not the not-yet-mutated Trove entity", async () => {
+    let mockDb = MockDb.createMockDb();
+    seedLoadedCollateral(mockDb);
+    const troveId = 9n;
+    const txHash = "0xopenjoinbatch";
+
+    mockDb = await processMockEvents({
+      mockDb,
+      events: [
+        // Real on-chain order for a batch-managed op: `BatchedTroveUpdated`
+        // (never `TroveUpdated`) fires before `TroveOperation`, same tx.
+        // It stages the real resulting coll (500) but only debt SHARES
+        // (1_000n) — the per-trove debt figure needs the batch's total debt
+        // and total shares, only known once `BatchUpdated` replays.
+        LiquityTroveManager.BatchedTroveUpdated.createMockEvent({
+          _troveId: troveId,
+          _interestBatchManager: "0x000000000000000000000000000000000000b0b0",
+          _batchDebtShares: 1_000n,
+          _coll: 500n * 10n ** 18n,
+          _stake: 500n * 10n ** 18n,
+          _snapshotOfTotalCollRedist: 0n,
+          _snapshotOfTotalDebtRedist: 0n,
+          mockEventData: {
+            chainId: market.chainId,
+            srcAddress: market.troveManager,
+            logIndex: 1,
+            block: { number: 200, timestamp: 2_000 },
+            transaction: { hash: txHash },
+          },
+        }),
+        troveOperationEvent({
+          troveId,
+          operation: OP.OPEN_TROVE_AND_JOIN_BATCH,
+          debtChangeFromOperation: 1_000n * 10n ** 18n,
+          collChangeFromOperation: 500n * 10n ** 18n,
+          blockNumber: 200,
+          blockTimestamp: 2_000,
+          logIndex: 2,
+          txHash,
+        }),
+      ],
+    });
+
+    const row = mockDb.entities.TroveOperationEvent.get(
+      `${market.chainId}_200_2`,
+    );
+    assert.ok(
+      row,
+      "TroveOperationEvent row is written for OPEN_TROVE_AND_JOIN_BATCH",
+    );
+    assert.equal(
+      row?.debtBefore,
+      undefined,
+      "regression: debtBefore is null, not a number derived from the stale pre-tx Trove.debt",
+    );
+    assert.equal(
+      row?.debtAfter,
+      undefined,
+      "regression: debtAfter is null — BatchedTroveUpdated never wrote the real per-trove debt to the Trove entity",
+    );
+    assert.equal(
+      row?.collAfter,
+      500n * 10n ** 18n,
+      "collAfter reads BatchedTroveUpdated's staged (absolute) coll, not the not-yet-mutated Trove entity",
+    );
+    assert.equal(
+      row?.collBefore,
+      0n,
+      "collBefore derives arithmetically from the corrected collAfter",
+    );
+  });
 });

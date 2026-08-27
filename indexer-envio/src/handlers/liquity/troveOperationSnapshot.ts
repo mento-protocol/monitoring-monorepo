@@ -38,40 +38,48 @@ export function captureTroveOperationSnapshotState(trove: Trove): {
   };
 }
 
-/** Recover the trove's debt/coll immediately BEFORE this `TroveOperation`
- *  applied, given the already-correct AFTER values and every signed/
- *  unsigned delta the ABI exposes:
+/** Recover the trove's collateral immediately BEFORE this `TroveOperation`
+ *  applied, given the already-correct AFTER value and the signed/unsigned
+ *  coll deltas the ABI exposes:
  *
- *    debtBefore = debtAfter − debtChange − upfrontFee − debtFromRedist
  *    collBefore = collAfter − collChange − collFromRedist
  *
- *  Direction matters: `after` comes from the entity (true post-operation
- *  state, since `TroveUpdated` ran first — see `captureTroveOperationSnapshotState`),
- *  and `before` is always derived FROM `after`, never the reverse. Floors
- *  at zero defensively, matching the on-chain invariant that a trove's
- *  debt/coll cannot go negative; only a future ABI revision or an
+ *  Direction matters: `after` is always the true post-operation state (see
+ *  `maybeRecordTroveOperation` for where it comes from on batch-managed vs.
+ *  ordinary troves), and `before` is always derived FROM `after`, never the
+ *  reverse. Floors at zero defensively, matching the on-chain invariant that
+ *  a trove's coll cannot go negative; only a future ABI revision or an
  *  unexpected event sequence could otherwise underflow the signed bigint
  *  arithmetic here. */
-function deriveTroveOperationBeforeSnapshot(params: {
-  debtAfter: bigint;
+function deriveCollBefore(params: {
   collAfter: bigint;
+  collChange: bigint;
+  collIncreaseFromRedist: bigint;
+}): bigint {
+  const collBefore =
+    params.collAfter - params.collChange - params.collIncreaseFromRedist;
+  return collBefore > 0n ? collBefore : 0n;
+}
+
+/** Same derivation as `deriveCollBefore`, for debt:
+ *
+ *    debtBefore = debtAfter − debtChange − upfrontFee − debtFromRedist
+ *
+ *  Only valid when `debtAfter` is the trove's true post-operation debt —
+ *  never call this for a batch-managed-trove row (see
+ *  `maybeRecordTroveOperation`). */
+function deriveDebtBefore(params: {
+  debtAfter: bigint;
   debtChange: bigint;
   debtIncreaseFromUpfrontFee: bigint;
   debtIncreaseFromRedist: bigint;
-  collChange: bigint;
-  collIncreaseFromRedist: bigint;
-}): { debtBefore: bigint; collBefore: bigint } {
+}): bigint {
   const debtBefore =
     params.debtAfter -
     params.debtChange -
     params.debtIncreaseFromUpfrontFee -
     params.debtIncreaseFromRedist;
-  const collBefore =
-    params.collAfter - params.collChange - params.collIncreaseFromRedist;
-  return {
-    debtBefore: debtBefore > 0n ? debtBefore : 0n,
-    collBefore: collBefore > 0n ? collBefore : 0n,
-  };
+  return debtBefore > 0n ? debtBefore : 0n;
 }
 
 export type TroveOperationLogEvent = {
@@ -96,12 +104,30 @@ export type TroveOperationLogEvent = {
  *  they already have dedicated event entities; APPLY_PENDING_DEBT is
  *  protocol-forced and isn't a user action.
  *
- *  `debtAfter` / `collAfter` come from the trove entity (captured in the
- *  parent handler, already correct — see `captureTroveOperationSnapshotState`);
- *  `debtBefore` / `collBefore` are derived arithmetically from the ABI
- *  deltas via `deriveTroveOperationBeforeSnapshot`, never from a second
- *  entity read. The `owner` field is denormalized off the trove so the UI
- *  can filter by owner without a join. */
+ *  `debtAfter` / `collAfter` normally come from the trove entity (captured
+ *  in the parent handler, already correct — see
+ *  `captureTroveOperationSnapshotState`); `debtBefore` / `collBefore` are
+ *  derived arithmetically from the ABI deltas, never from a second entity
+ *  read.
+ *
+ *  Batch-managed exception: for ops 7-9 and any ordinary adjustment made
+ *  while the trove is batch-managed, on-chain `BatchedTroveUpdated` fires
+ *  instead of `TroveUpdated` — so by the time this handler runs, the `Trove`
+ *  entity still holds this op's PRIOR debt/coll (`replayBatchedTroveUpdate`
+ *  only writes the real post-op values once the later `BatchUpdated` event
+ *  is processed). `pendingBatchedTroveUpdate` is the same-tx
+ *  `PendingBatchedTroveUpdate` row `BatchedTroveUpdated` staged before this
+ *  handler ran (it fires first — same ordering guarantee as `TroveUpdated`);
+ *  its presence is the discriminator. It carries the real resulting
+ *  collateral directly (not share-based), so `collAfter` is sourced from it
+ *  and `collBefore` derives correctly. It carries only debt SHARES — the
+ *  per-trove debt figure needs the batch's total debt and total shares,
+ *  known only at `BatchUpdated` time — so `debtBefore`/`debtAfter` are
+ *  recorded null rather than a confidently wrong number. Production has zero
+ *  batches today; the seam is cheap either way.
+ *
+ *  The `owner` field is denormalized off the trove so the UI can filter by
+ *  owner without a join. */
 export function maybeRecordTroveOperation(args: {
   context: {
     TroveOperationEvent: { set: (entity: TroveOperationEvent) => void };
@@ -111,26 +137,45 @@ export function maybeRecordTroveOperation(args: {
   instanceId: string;
   troveId: string;
   snapshotState: { owner: string; debtAfter: bigint; collAfter: bigint };
+  pendingBatchedTroveUpdate: { coll: bigint } | undefined;
   blockNumber: bigint;
   blockTimestamp: bigint;
 }): void {
-  const { context, op, event, instanceId, troveId, snapshotState } = args;
+  const {
+    context,
+    op,
+    event,
+    instanceId,
+    troveId,
+    snapshotState,
+    pendingBatchedTroveUpdate,
+  } = args;
   if (
     op === OP.LIQUIDATE ||
     op === OP.REDEEM_COLLATERAL ||
     op === OP.APPLY_PENDING_DEBT
   )
     return;
-  const { owner, debtAfter, collAfter } = snapshotState;
-  const { debtBefore, collBefore } = deriveTroveOperationBeforeSnapshot({
-    debtAfter,
+  const { owner } = snapshotState;
+  const collAfter = pendingBatchedTroveUpdate?.coll ?? snapshotState.collAfter;
+  const collBefore = deriveCollBefore({
     collAfter,
-    debtChange: event.params._debtChangeFromOperation,
-    debtIncreaseFromUpfrontFee: event.params._debtIncreaseFromUpfrontFee,
-    debtIncreaseFromRedist: event.params._debtIncreaseFromRedist,
     collChange: event.params._collChangeFromOperation,
     collIncreaseFromRedist: event.params._collIncreaseFromRedist,
   });
+  const debtAfter =
+    pendingBatchedTroveUpdate === undefined
+      ? snapshotState.debtAfter
+      : undefined;
+  const debtBefore =
+    pendingBatchedTroveUpdate === undefined
+      ? deriveDebtBefore({
+          debtAfter: snapshotState.debtAfter,
+          debtChange: event.params._debtChangeFromOperation,
+          debtIncreaseFromUpfrontFee: event.params._debtIncreaseFromUpfrontFee,
+          debtIncreaseFromRedist: event.params._debtIncreaseFromRedist,
+        })
+      : undefined;
   context.TroveOperationEvent.set({
     id: eventId(event.chainId, event.block.number, event.logIndex),
     chainId: event.chainId,

@@ -1839,8 +1839,8 @@ type TroveOperationEvent
   operation: Int!
   collChange: BigInt!
   debtChange: BigInt!
-  debtBefore: BigInt!
-  debtAfter: BigInt!
+  debtBefore: BigInt # null on batch-managed-trove rows; see troveOperationSnapshot.ts
+  debtAfter: BigInt # null on batch-managed-trove rows; see troveOperationSnapshot.ts
   collBefore: BigInt!
   collAfter: BigInt!
   annualInterestRate: BigInt!
