@@ -74,9 +74,11 @@ import {
   CDP_TROVE_BY_ID_WITHOUT_TX,
   CDP_TROVE_LEDGER,
   CDP_TROVE_OPERATIONS,
+  CDP_TROVE_QUEUE,
   CDP_TROVE_SCHEMA_FIELDS,
 } from "@/lib/queries";
 import type { CdpTroveLedgerEventRow } from "../../_lib/ledger";
+import type { CdpTroveQueueResponse } from "../../_lib/queue";
 import { TroveDetailClient } from "../trove-detail-client";
 
 const TROVE_SCHEMA_WITH_TX = {
@@ -213,6 +215,32 @@ function marketsData(collaterals: CdpCollateral[] = [collateral()]) {
   return { LiquityCollateral: collaterals, LiquityInstance: [], Trove: [] };
 }
 
+function queueResponse(
+  overrides: Partial<CdpTroveQueueResponse> = {},
+): CdpTroveQueueResponse {
+  return {
+    LiquityInstance: [{ id: "gbpm", isShutDown: false, shutDownAt: null }],
+    OpenTrove: [
+      {
+        id: "gbpm-0x8abc",
+        status: "active",
+        debt: wei(28_081),
+        interestRate: rateWei(50),
+        interestBatchId: null,
+      },
+      {
+        id: "gbpm-0x9",
+        status: "active",
+        debt: wei(6_200),
+        interestRate: rateWei(20),
+        interestBatchId: null,
+      },
+    ],
+    InterestBatch: [],
+    ...overrides,
+  };
+}
+
 type Handle = { container: HTMLElement; root: Root };
 
 function setup(): Handle {
@@ -261,6 +289,8 @@ describe("TroveDetailClient", () => {
     interestBatchError = null,
     ledgerRows,
     ledgerError = null,
+    queueData,
+    queueError = null,
   }: {
     markets?: ReturnType<typeof marketsData>;
     marketsError?: Error | null;
@@ -287,6 +317,10 @@ describe("TroveDetailClient", () => {
      *  when `troveSchema` opens the ledger gate. */
     ledgerRows?: CdpTroveLedgerEventRow[];
     ledgerError?: Error | null;
+    /** Same never-resolved convention: `undefined` leaves the queue panel
+     *  in its loading state. */
+    queueData?: CdpTroveQueueResponse;
+    queueError?: Error | null;
   } = {}) {
     mockUseGQL.mockImplementation((query: string | null) => {
       if (query === CDP_MARKETS) {
@@ -318,6 +352,9 @@ describe("TroveDetailClient", () => {
           error: null,
           isLoading: false,
         };
+      }
+      if (query === CDP_TROVE_QUEUE) {
+        return { data: queueData, error: queueError, isLoading: false };
       }
       if (query === CDP_TROVE_LEDGER) {
         return {
@@ -564,6 +601,7 @@ describe("TroveDetailClient", () => {
       CDP_TROVE_BY_ID,
       CDP_INTEREST_BATCH_BY_ID,
       CDP_TROVE_OPERATIONS,
+      CDP_TROVE_QUEUE,
     ]) {
       const call = callsByQuery.get(query);
       expect(call, `expected a useGQL call for: ${query}`).toBeDefined();
@@ -1015,6 +1053,43 @@ describe("TroveDetailClient", () => {
     expect(text).toContain("Failed to load the trove ledger");
     expect(text).toContain("ledger backend down");
     expect(text).not.toContain("Per-redemption detail pending indexer rollout");
+  });
+
+  it("fetches the redemption queue with the resolved collateral id and renders this trove's position", () => {
+    mockQueries({ queueData: queueResponse() });
+    render(handle!);
+
+    const call = mockUseGQL.mock.calls.find(([q]) => q === CDP_TROVE_QUEUE);
+    expect(call?.[1]).toEqual({ collateralId: "gbpm" });
+
+    const text = handle!.container.textContent ?? "";
+    expect(text).toContain("Redemption queue");
+    // This trove (0.50%) queues behind the 0.20% trove's 6,200 GBPm.
+    expect(text).toContain("queue position #2 of 2 rate levels");
+    expect(text).toContain(
+      "6,200.00 GBPm of active debt at lower rates shields this trove today",
+    );
+    expect(text).toContain("#2 · this trove");
+  });
+
+  it("replaces the queue ladder with the shutdown notice while the market is shut down", () => {
+    mockQueries({
+      queueData: queueResponse({
+        LiquityInstance: [
+          { id: "gbpm", isShutDown: true, shutDownAt: String(NOW - 500) },
+        ],
+      }),
+    });
+    render(handle!);
+
+    const text = handle!.container.textContent ?? "";
+    expect(text).toContain("This market is shut down");
+    expect(text).toContain("rate order does not decide");
+    expect(
+      handle!.container.querySelector(
+        'table[aria-label="Redemption queue ladder"]',
+      ),
+    ).toBeNull();
   });
 
   it("discloses ledger truncation and suppresses interest estimates for a capped history", () => {

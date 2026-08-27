@@ -503,6 +503,45 @@ export const CDP_TROVE_OPERATIONS = `
   }
 `;
 
+// Trove history page redemption-queue panel (docs/PLAN-trove-history-page.md,
+// "UI design → Redemption queue"): the market's current rate ladder plus the
+// shutdown flag, fetched by the trove page ITSELF — a direct page load must
+// render the ladder without the market page's cache being warm, so this owns
+// its fetch instead of reading `CDP_MARKET_DETAIL`'s. Same `OpenTrove` shape
+// and cap as that query (active + zombie, `CDP_TROVES_DETAIL_LIMIT`) so the
+// panel's cap suppression triggers exactly where the market table hides its
+// rank column; zombies are excluded client-side (they sit outside the sorted
+// queue and shield nothing), which keeps the exclusion unit-testable and the
+// cap semantics identical. Per-row payload is minimal — the ladder needs only
+// status/debt/rate/batch join; `InterestBatch` resolves the CURRENT rate for
+// batch-managed troves (`Trove.interestRate` can be a stale copy). While
+// `isShutDown` is true redemptions are urgent-mode and rate order no longer
+// decides, so the panel swaps the ladder for a shutdown notice.
+export const CDP_TROVE_QUEUE = `
+  query CdpTroveQueue($collateralId: String!) {
+    LiquityInstance(where: { collateralId: { _eq: $collateralId } }, limit: 1) {
+      id isShutDown shutDownAt
+    }
+    OpenTrove: Trove(
+      where: {
+        collateralId: { _eq: $collateralId }
+        status: { _in: [${OPEN_STATUS_LIST}] }
+      }
+      order_by: [{ interestRate: asc }, { troveId: asc }, { id: asc }]
+      limit: ${CDP_TROVES_DETAIL_LIMIT}
+    ) {
+      id status debt interestRate interestBatchId
+    }
+    InterestBatch(
+      where: { collateralId: { _eq: $collateralId } }
+      order_by: [{ annualInterestRate: asc }, { id: asc }]
+      limit: ${CDP_TROVES_DETAIL_LIMIT}
+    ) {
+      id annualInterestRate
+    }
+  }
+`;
+
 // Trove history page complete ledger (docs/PLAN-trove-history-page.md,
 // "GraphQL contract → CDP_TROVE_LEDGER"): every TroveOperation ordinal
 // including redemptions/liquidations/interest folds, superseding the interim

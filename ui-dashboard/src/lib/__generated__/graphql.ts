@@ -7064,6 +7064,29 @@ export type CdpTroveOperationsQuery = {
   }>;
 };
 
+// queries/liquity.CDP_TROVE_QUEUE
+export type CdpTroveQueueQueryVariables = {
+  readonly collateralId: string;
+};
+export type CdpTroveQueueQuery = {
+  readonly LiquityInstance: ReadonlyArray<{
+    readonly id: string;
+    readonly isShutDown: boolean;
+    readonly shutDownAt: string | null;
+  }>;
+  readonly OpenTrove: ReadonlyArray<{
+    readonly id: string;
+    readonly status: string;
+    readonly debt: string;
+    readonly interestRate: string;
+    readonly interestBatchId: string | null;
+  }>;
+  readonly InterestBatch: ReadonlyArray<{
+    readonly id: string;
+    readonly annualInterestRate: string;
+  }>;
+};
+
 // queries/liquity.CDP_TROVE_LEDGER
 export type CdpTroveLedgerQueryVariables = {
   readonly troveEntityId: string;

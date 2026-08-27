@@ -34,6 +34,7 @@ import {
   useTroveLedger,
   type TroveLedgerState,
 } from "../_lib/use-trove-ledger";
+import { useTroveQueue, type TroveQueueState } from "../_lib/use-trove-queue";
 import { TroveDetailSkeleton } from "./trove-detail-skeleton";
 import {
   NotIndexedNotice,
@@ -47,6 +48,7 @@ import {
   TroveLifetimeTotals,
 } from "./trove-lifetime-totals";
 import { TroveOperationsList } from "./trove-operations-list";
+import { TroveRedemptionQueuePanel } from "./trove-redemption-queue";
 
 const CELO_MAINNET_CHAIN_ID = 42220;
 
@@ -313,6 +315,9 @@ export function TroveDetailClient({
   // loading the gate fails closed, so the interim query fires first on a
   // cold load and hands over once the probe confirms the entity.
   const ledger = useTroveLedger(troveEntityId);
+  // The redemption-queue panel's own ladder fetch (#2084) — never the market
+  // page's cache, so a direct deep-link renders the ladder cold.
+  const queue = useTroveQueue(collateral, troveEntityId);
   const operations = useGQL<CdpTroveOperationsResponse>(
     collateral == null || ledger.supported ? null : CDP_TROVE_OPERATIONS,
     collateral == null || ledger.supported
@@ -348,8 +353,9 @@ export function TroveDetailClient({
       collateral={collateral}
       troveById={troveById}
       trove={trove}
-      {...resolveBatchRateProps(trove, joinBatchId, interestBatch)}
+      batch={resolveBatchRateProps(trove, joinBatchId, interestBatch)}
       ledger={ledger}
+      queue={queue}
       operations={operations}
       operationRows={operationRows}
       truncated={truncated}
@@ -370,12 +376,9 @@ function TroveDetailView({
   collateral,
   troveById,
   trove,
-  displayedInterestRate,
-  interestBatchError,
-  interestBatchFirstLoadError,
-  batchRateTimestamp,
-  batchMissing,
+  batch,
   ledger,
+  queue,
   operations,
   operationRows,
   truncated,
@@ -387,12 +390,9 @@ function TroveDetailView({
   collateral: CdpCollateral | undefined;
   troveById: ReturnType<typeof useGQL<CdpTroveByIdResponse>>;
   trove: CdpTrove | undefined;
-  displayedInterestRate: string | null;
-  interestBatchError: Error | undefined;
-  interestBatchFirstLoadError: Error | undefined;
-  batchRateTimestamp: string | null;
-  batchMissing: boolean;
+  batch: BatchRateProps;
   ledger: TroveLedgerState;
+  queue: TroveQueueState;
   operations: ReturnType<typeof useGQL<CdpTroveOperationsResponse>>;
   operationRows: CdpTroveOperationEventRow[];
   truncated: boolean;
@@ -441,17 +441,17 @@ function TroveDetailView({
       <TroveDetailNotices
         marketsError={markets.error}
         troveError={troveById.error}
-        interestBatchError={interestBatchError}
-        interestBatchFirstLoadError={interestBatchFirstLoadError}
+        interestBatchError={batch.interestBatchError}
+        interestBatchFirstLoadError={batch.interestBatchFirstLoadError}
       />
       <TroveHeaderCard
         trove={trove}
         collateral={collateral}
-        displayedInterestRate={displayedInterestRate}
-        batchRateTimestamp={batchRateTimestamp}
-        batchMissing={batchMissing}
+        displayedInterestRate={batch.displayedInterestRate}
+        batchRateTimestamp={batch.batchRateTimestamp}
+        batchMissing={batch.batchMissing}
       />
-      <TroveLifetimeTotals trove={trove} debtSymbol={collateral.symbol} />
+      <TroveSummaryPanels trove={trove} collateral={collateral} queue={queue} />
       <TroveEventHistory
         ledger={ledger}
         collateral={collateral}
@@ -459,6 +459,31 @@ function TroveDetailView({
         operations={operations}
         operationRows={operationRows}
         truncated={truncated}
+      />
+    </div>
+  );
+}
+
+/** The impact | queue two-up row from the plan's layout sketch. The
+ *  lifetime-totals card (the impact panel's seed, #2088) self-nulls for a
+ *  trove with no redemption/liquidation history — the queue panel then
+ *  takes the first cell alone. */
+function TroveSummaryPanels({
+  trove,
+  collateral,
+  queue,
+}: {
+  trove: CdpTrove;
+  collateral: CdpCollateral;
+  queue: TroveQueueState;
+}) {
+  return (
+    <div className="grid gap-6 lg:grid-cols-2">
+      <TroveLifetimeTotals trove={trove} debtSymbol={collateral.symbol} />
+      <TroveRedemptionQueuePanel
+        queue={queue}
+        troveStatus={trove.status}
+        debtSymbol={collateral.symbol}
       />
     </div>
   );

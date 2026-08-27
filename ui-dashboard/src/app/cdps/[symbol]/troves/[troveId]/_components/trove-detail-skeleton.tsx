@@ -11,13 +11,15 @@ import { TableSkeleton } from "@/components/skeletons";
 // lives on the trailing skeleton block so we don't nest live regions
 // (mirrors address-book/[address]/loading.tsx).
 //
-// Two post-header blocks, matching the two sections the loaded view can
-// show: TroveLifetimeTotals (conditional — only for a trove with
-// redemption/liquidation history) and TroveOperationsList (always present).
-// Which trove this is isn't known until data resolves, so the totals block
-// is reserved unconditionally; a trove without that history loses a modest
-// placeholder when it resolves, which is a smaller mismatch than the
-// alternative — a whole card appearing with no skeleton anticipating it.
+// Three post-header blocks, matching the sections the loaded view can show:
+// the TroveLifetimeTotals | TroveRedemptionQueuePanel two-up row (the totals
+// card conditional — only for a trove with redemption/liquidation history —
+// and the queue panel always present) and TroveOperationsList (always
+// present). Which trove this is isn't known until data resolves, so the
+// totals block is reserved unconditionally; a trove without that history
+// loses a modest placeholder when it resolves, which is a smaller mismatch
+// than the alternative — a whole card appearing with no skeleton
+// anticipating it.
 
 const SHIMMER = "animate-pulse rounded bg-slate-800/50";
 
@@ -62,27 +64,49 @@ export function TroveDetailSkeleton() {
           <div className={`h-3 w-2/3 max-w-md ${SHIMMER}`} />
         </div>
       </div>
-      <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 space-y-3">
-        <div className={`h-4 w-56 ${SHIMMER}`} />
-        {/* TroveLifetimeTotals's description is three sentences — two lines
-            approximates its wrapped height better than one. */}
-        <div className="space-y-1.5">
-          <div className={`h-3 w-full max-w-md ${SHIMMER}`} />
-          <div className={`h-3 w-1/2 max-w-xs ${SHIMMER}`} />
+      {/* Mirrors the loaded view's totals | queue two-up grid exactly, so
+          the row splits into two columns at the same breakpoint loading and
+          loaded. */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 space-y-3">
+          <div className={`h-4 w-56 ${SHIMMER}`} />
+          {/* TroveLifetimeTotals's description is three sentences — two lines
+              approximates its wrapped height better than one. */}
+          <div className="space-y-1.5">
+            <div className={`h-3 w-full max-w-md ${SHIMMER}`} />
+            <div className={`h-3 w-1/2 max-w-xs ${SHIMMER}`} />
+          </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+            {/* 7 cells: the loaded card's maximum shape, not its minimum — 4
+                redemption stats + 2 liquidation stats + the optional
+                collateral-surplus cell, all of which can render together for
+                a trove that was partially redeemed and later liquidated.
+                Reserving fewer would still under-count that combined case. */}
+            {Array.from({ length: 7 }, (_, i) => (
+              // react-doctor-disable-next-line react-doctor/no-array-index-as-key
+              <div key={`trove-totals-skel-${i}`}>
+                <div className={`h-3 w-20 ${SHIMMER}`} />
+                <div className={`mt-1 h-4 w-16 ${SHIMMER}`} />
+              </div>
+            ))}
+          </div>
         </div>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
-          {/* 7 cells: the loaded card's maximum shape, not its minimum — 4
-              redemption stats + 2 liquidation stats + the optional
-              collateral-surplus cell, all of which can render together for
-              a trove that was partially redeemed and later liquidated.
-              Reserving fewer would still under-count that combined case. */}
-          {Array.from({ length: 7 }, (_, i) => (
-            // react-doctor-disable-next-line react-doctor/no-array-index-as-key
-            <div key={`trove-totals-skel-${i}`}>
-              <div className={`h-3 w-20 ${SHIMMER}`} />
-              <div className={`mt-1 h-4 w-16 ${SHIMMER}`} />
-            </div>
-          ))}
+        {/* TroveRedemptionQueuePanel: title, two-line explainer, and a
+            ladder-shaped block (the panel's own post-hydration loading state
+            renders the same bar rhythm). No live region here — the trailing
+            operations block below announces loading for the whole page. */}
+        <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 space-y-3">
+          <div className={`h-4 w-40 ${SHIMMER}`} />
+          <div className="space-y-1.5">
+            <div className={`h-3 w-full max-w-md ${SHIMMER}`} />
+            <div className={`h-3 w-2/3 max-w-xs ${SHIMMER}`} />
+          </div>
+          <div className="space-y-2">
+            <div className={`h-3 w-full max-w-sm ${SHIMMER}`} />
+            <div className={`h-3 w-full ${SHIMMER}`} />
+            <div className={`h-3 w-5/6 ${SHIMMER}`} />
+            <div className={`h-3 w-2/3 ${SHIMMER}`} />
+          </div>
         </div>
       </div>
       <div

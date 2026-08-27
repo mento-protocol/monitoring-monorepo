@@ -82,6 +82,7 @@ const EXPECTED_EXPORT_NAMES = [
   "CDP_TROVE_BY_ID_WITHOUT_TX",
   "CDP_TROVE_LEDGER",
   "CDP_TROVE_OPERATIONS",
+  "CDP_TROVE_QUEUE",
   "CDP_TROVE_SCHEMA_FIELDS",
   "CDP_TROVE_OP_SNAPSHOTS",
   "STETH_YIELD_DAILY_SNAPSHOTS",
@@ -785,6 +786,7 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     for (const query of [
       queries.CDP_TROVE_BY_ID,
       queries.CDP_TROVE_BY_ID_WITHOUT_TX,
+      queries.CDP_TROVE_QUEUE,
       queries.CDP_MARKET_DETAIL,
       queries.CDP_MARKET_DETAIL_WITH_TROVE_TX,
       queries.CDP_MARKET_DETAIL_WITH_SP_SOURCE,
@@ -793,6 +795,27 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
       expect(query).not.toContain("lastLedgerBlock");
       expect(query).not.toContain("lastLedgerLogIndex");
     }
+  });
+
+  it("CDP_TROVE_QUEUE reads the rate ladder with the market-table cap and the shutdown flag", () => {
+    const query = normalize(queries.CDP_TROVE_QUEUE);
+    expect(query).toContain("query CdpTroveQueue");
+    // Same open-trove population and cap as CDP_MARKET_DETAIL's OpenTrove
+    // branch, so the panel's cap suppression fires exactly where the market
+    // table hides its rank column. Zombie exclusion is client-side.
+    expect(query).toContain('status: { _in: ["active", "zombie"] }');
+    expect(query).toContain("limit: 1000");
+    // Shutdown flag: while true the ladder yields to an urgent-redemption
+    // notice.
+    expect(query).toContain("id isShutDown shutDownAt");
+    // Batch join input for effective rates.
+    expect(query).toContain("InterestBatch(");
+    expect(query).toContain("annualInterestRate");
+    // Panel-sized payload — no heavy trove fields piggybacking, and never
+    // the gated watermark columns.
+    expect(query).toContain("id status debt interestRate interestBatchId");
+    expect(query).not.toContain("redemptionFeePaidCum");
+    expect(query).not.toContain("lastLedgerBlock");
   });
 
   it("CDP_TROVE_BY_ID_WITHOUT_TX omits lastUpdatedTxHash for the schema-lag fallback", () => {

@@ -48,6 +48,17 @@ describe("TroveDetailSkeleton", () => {
     expect(totalsGrid?.children.length).toBe(7);
   });
 
+  it("reserves the totals | queue two-up row matching the loaded grid", () => {
+    // The loaded view renders TroveLifetimeTotals and the redemption-queue
+    // panel side by side in a `lg:grid-cols-2` row — the skeleton reserves
+    // both cards inside the same grid so the row splits at the same
+    // breakpoint loading and loaded.
+    handle = render(<TroveDetailSkeleton />);
+    const grid = handle.container.querySelector(".grid.gap-6.lg\\:grid-cols-2");
+    expect(grid).not.toBeNull();
+    expect(grid?.children.length).toBe(2);
+  });
+
   it("renders the operations section as a table-shaped skeleton, not generic bars", () => {
     // Route-level fallback must match TroveOperationsList's own loading
     // branch (TableSkeleton) — a Playwright/table element or the fixed
