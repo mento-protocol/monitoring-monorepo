@@ -150,6 +150,14 @@ and recommends one issue to work next. It stops at the recommendation; claiming
 stays with the operator. The receipt format and the exclusion-ledger contract
 live in [`backlog-ranking.md`](backlog-ranking.md).
 
+The `backlog-sweep` skill uses the same exact-mirror contract. It is the
+operator-triggered batch on top of that ranking: it picks the eligible top N
+from a receipt, claims each issue by number, and hands each to its own worker
+subagent that ships a ready-for-review PR. It never merges — it stops at READY
+and prints the operator's `pnpm pr:merge` commands. The loop, eligibility rules,
+boundaries, and report contract live in
+[`backlog-sweep.md`](backlog-sweep.md).
+
 The `.agents/skills/` ↔ `.claude/skills/` mirror is enforced, not just
 documented: `scripts/repo-health/check-skills-mirror.mjs` byte-compares the two
 trees and fails on any drift, and the Agent Quality Gate runs it automatically
