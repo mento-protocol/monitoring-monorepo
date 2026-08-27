@@ -84,6 +84,7 @@ const EXPECTED_EXPORT_NAMES = [
   "CDP_TROVE_OPERATIONS",
   "CDP_TROVE_QUEUE",
   "CDP_TROVE_SCHEMA_FIELDS",
+  "CDP_TROVES_BY_OWNER",
   "CDP_TROVE_OP_SNAPSHOTS",
   "STETH_YIELD_DAILY_SNAPSHOTS",
   "STETH_YIELD_LATEST_SNAPSHOTS_QUERY",
@@ -787,6 +788,7 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
       queries.CDP_TROVE_BY_ID,
       queries.CDP_TROVE_BY_ID_WITHOUT_TX,
       queries.CDP_TROVE_QUEUE,
+      queries.CDP_TROVES_BY_OWNER,
       queries.CDP_MARKET_DETAIL,
       queries.CDP_MARKET_DETAIL_WITH_TROVE_TX,
       queries.CDP_MARKET_DETAIL_WITH_SP_SOURCE,
@@ -816,6 +818,31 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(query).toContain("id status debt interestRate interestBatchId");
     expect(query).not.toContain("redemptionFeePaidCum");
     expect(query).not.toContain("lastLedgerBlock");
+  });
+
+  it("CDP_TROVES_BY_OWNER matches owner OR previousOwner with the sentinel limit", () => {
+    const query = normalize(queries.CDP_TROVES_BY_OWNER);
+    expect(query).toContain("query CdpTrovesByOwner");
+    // Chain-scoped: Liquity is indexed on multiple chains, and this lookup
+    // spans every market on one chain.
+    expect(query).toContain("chainId: { _eq: $chainId }");
+    // The NFT burn handler zeroes `owner` on close and liquidation, so
+    // `previousOwner` is how the closed troves support asks about are found
+    // by the address a user supplies.
+    expect(query).toContain(
+      "_or: [{ owner: { _eq: $address } }, { previousOwner: { _eq: $address } }]",
+    );
+    // Deterministic order with the unique entity id as tiebreaker; the cap
+    // drops the least recently updated troves. `$limit` is render limit + 1
+    // so a capped result is detected via the sentinel row, never a Hasura
+    // aggregate (disabled on hosted Hasura) and never `length === limit`.
+    expect(query).toContain("order_by: [{ lastUpdatedAt: desc }, { id: asc }]");
+    expect(query).toContain("limit: $limit");
+    // Panel-sized payload — no heavy trove fields piggybacking.
+    expect(query).toContain(
+      "id collateralId troveId status debt coll lastUpdatedAt",
+    );
+    expect(query).not.toContain("redemptionFeePaidCum");
   });
 
   it("CDP_TROVE_BY_ID_WITHOUT_TX omits lastUpdatedTxHash for the schema-lag fallback", () => {

@@ -503,6 +503,32 @@ export const CDP_TROVE_OPERATIONS = `
   }
 `;
 
+// Owner lookup on the /cdps overview (docs/PLAN-trove-history-page.md,
+// "GraphQL contract → CDP_TROVES_BY_OWNER"): every trove an address owns or
+// owned, across all markets on one chain. The NFT burn handler zeroes
+// `owner` on close and liquidation and stashes the last owner in
+// `previousOwner`, so matching `owner` alone would miss exactly the closed
+// troves support asks about — hence the `_or`. Chain-scoped because Liquity
+// is indexed on multiple chains. `$limit` is the caller's request size
+// (render limit + 1) so a capped result is detected via the sentinel row,
+// never a Hasura aggregate (disabled on hosted Hasura); ordering is
+// newest-updated-first with the unique entity id as tiebreaker, so the cap
+// drops the least recently touched troves.
+export const CDP_TROVES_BY_OWNER = `
+  query CdpTrovesByOwner($chainId: Int!, $address: String!, $limit: Int!) {
+    Trove(
+      where: {
+        chainId: { _eq: $chainId }
+        _or: [{ owner: { _eq: $address } }, { previousOwner: { _eq: $address } }]
+      }
+      order_by: [{ lastUpdatedAt: desc }, { id: asc }]
+      limit: $limit
+    ) {
+      id collateralId troveId status debt coll lastUpdatedAt
+    }
+  }
+`;
+
 // Trove history page redemption-queue panel (docs/PLAN-trove-history-page.md,
 // "UI design → Redemption queue"): the market's current rate ladder plus the
 // shutdown flag, fetched by the trove page ITSELF — a direct page load must

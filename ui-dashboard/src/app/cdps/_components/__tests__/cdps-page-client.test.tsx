@@ -47,6 +47,7 @@ vi.mock("@/components/network-provider", () => ({
 }));
 
 vi.mock("@/lib/graphql", () => ({
+  HASURA_TIMEOUT_MS: 5000,
   useGQL: (...args: unknown[]) => mockUseGQL(...args),
 }));
 
@@ -435,7 +436,7 @@ describe("CdpsPageClient", () => {
     );
   });
 
-  it("loading skeleton mirrors the loaded page's section structure (header + 3 cards + digest + table skeleton)", () => {
+  it("loading skeleton mirrors the loaded page's section structure (header + owner search + 3 cards + digest + table skeleton)", () => {
     mockUseGQL.mockImplementation((query: string | null) =>
       query === CDP_MARKETS
         ? { data: undefined, error: null, isLoading: true }
@@ -450,19 +451,25 @@ describe("CdpsPageClient", () => {
     );
     expect(liveRegions).toHaveLength(1);
 
-    // Real header stays mounted (no data dependency) so it never moves
-    // between the loading and loaded phases.
+    // Real header and owner-search input stay mounted (no market-data
+    // dependency) so they never move between the loading and loaded phases.
     expect(handle!.container.querySelector("header h1")?.textContent).toBe(
       "CDPs",
     );
+    expect(
+      handle!.container.querySelector(
+        'input[aria-label="Find troves by owner address"]',
+      ),
+    ).not.toBeNull();
 
-    // Top-level sections, in order: header, market-card grid, activity
-    // digest, transactions section — same 4 sections the loaded page renders.
+    // Top-level sections, in order: header, owner search, market-card grid,
+    // activity digest, transactions section — same 5 sections the loaded
+    // page renders.
     const sections = Array.from(
       handle!.container.firstElementChild!.children,
     ) as HTMLElement[];
-    expect(sections).toHaveLength(4);
-    const [, grid, digest, transactionsSection] = sections;
+    expect(sections).toHaveLength(5);
+    const [, , grid, digest, transactionsSection] = sections;
 
     // Market-card grid: same 3-column shape as the loaded grid, 3 cards.
     expect(grid!.className).toContain("grid-cols-1");
@@ -528,9 +535,10 @@ describe("CdpsPageClient", () => {
     const loadedSectionCount =
       handle!.container.firstElementChild!.children.length;
 
-    // header, market-card grid, activity digest, transactions section
-    expect(loadingSectionCount).toBe(4);
-    expect(loadedSectionCount).toBe(4);
+    // header, owner search, market-card grid, activity digest,
+    // transactions section
+    expect(loadingSectionCount).toBe(5);
+    expect(loadedSectionCount).toBe(5);
   });
 
   it("renders market cards with health, derived open troves, and transactions", () => {
