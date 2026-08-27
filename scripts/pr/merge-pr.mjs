@@ -18,10 +18,14 @@
  * an operator who has to re-run one command loses a minute, and a merge nobody
  * approved cannot be taken back.
  *
- * A merge-queue base is refused outright, before any request is sent: `gh pr
- * merge` enqueues such a base and returns success, and nothing this wrapper can
- * call removes a queue entry, so merging first would leave a standing request
- * it cannot take back. An unreadable branch-rules answer refuses too.
+ * A merge-queue base is refused outright, before any request is sent, and again
+ * after the confirmation: `gh pr merge` enqueues such a base and returns
+ * success, and nothing this wrapper can call removes a queue entry, so merging
+ * first would leave a standing request it cannot take back. An unreadable
+ * branch-rules answer refuses too. Those reads narrow the window but cannot
+ * close it — a queue enabled between the last read and GitHub handling the
+ * request still enqueues. Closing it means merging through an operation that
+ * cannot enqueue at all; issue 2092 carries that change.
  *
  * Two races are detected rather than prevented. `--match-head-commit` pins the
  * head, and the merge endpoint has no base equivalent, so a retarget between

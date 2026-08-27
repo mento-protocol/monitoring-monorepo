@@ -93,6 +93,16 @@ wrapper says so in its own header rather than implying otherwise:
   through a `gh alias`, or with other global flags interleaved. No pattern list
   closes that space, and one that read as though it did would be worse than a
   documented gap.
+- **A merge queue enabled in the final window still enqueues.** The base's rule
+  types are read before the briefing and again after the confirmation, and a
+  `merge_queue` rule refuses both times. Neither read closes the gap between the
+  last one and GitHub handling the request: `gh pr merge` enqueues rather than
+  merging, and `--disable-auto` cannot remove a queue entry, so the wrapper
+  would be left unable to take back a request it created. Closing this needs a
+  merge operation that cannot enqueue — the REST endpoint with the approved
+  `sha` — which is a change to the wrapper's central call and is tracked in
+  issue 2092. `main` has no `merge_queue` rule today, so the hazard is latent
+  here rather than active.
 - **The squash subject is not pinned.** A title edited in the same window can
   reach the merge commit. `gh pr merge --subject` would pin it, but this
   repository sets `squash_merge_commit_title=COMMIT_OR_PR_TITLE`: GitHub uses
