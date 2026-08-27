@@ -145,11 +145,16 @@ field are what a human reads to find the session holding an issue.
 
 **Read the claim result before briefing anyone.** The claim can lose a race —
 another session can take the issue between the ranking that selected it and
-this command. Spawn the worker only for a claim that succeeded. On a refused
-claim, leave the issue alone, move to the next eligible entry on the receipt,
-and record the loss and its new owner in the report; when the receipt is
-exhausted, finish with the smaller batch. A worker briefed on an issue this
-sweep does not hold duplicates whatever its real owner is already doing.
+this command. Spawn the worker only for a claim that succeeded. A worker briefed
+on an issue this sweep does not hold duplicates whatever its real owner is
+already doing.
+
+On a refused claim, leave the issue alone and record the loss and its new owner
+in the report. A replacement from the next eligible receipt entry is allowed,
+but **print it before claiming it**, exactly as the batch was printed: the
+displayed batch is the authorization boundary, and quietly swapping in an issue
+the operator never saw would route around the step that makes the trigger
+consent. When the receipt is exhausted, finish with the smaller batch.
 
 Then spawn one worker subagent per issue. Give each a brief containing:
 
@@ -322,6 +327,21 @@ Write `.rankings/sweep-<YYYY-MM-DD>.md` in UTC. `.rankings/` is gitignored and
 already holds the ranking receipts, so the two artifacts of one night sit
 together. If the name is taken, append the lowest unused suffix — `-2`, then
 `-3` — and never overwrite an earlier report.
+
+Reserve the name atomically, with `set -o noclobber` or `mkdir` on a lock, and
+retry the next suffix when the reservation fails:
+
+```bash
+set -o noclobber
+until { : > "$candidate"; } 2>/dev/null; do
+  candidate=<next suffix>
+done
+```
+
+Checking that a name is free and then writing it are two steps, and two sweeps
+finishing on the same UTC date can both pass the check before either writes.
+The reservation is what makes "never overwrite an earlier report" true rather
+than merely intended.
 
 Five parts:
 

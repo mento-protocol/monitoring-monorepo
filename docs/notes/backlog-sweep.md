@@ -42,8 +42,11 @@ would strand the batch.
 
 A claim can lose a race to another session between ranking and claiming, so
 each claim result is read before its worker is briefed. Only a successful claim
-gets a worker; a refused one moves to the next eligible receipt entry and is
-recorded in the report, and an exhausted receipt finishes with a smaller batch.
+gets a worker; a refused one is recorded in the report, and an exhausted receipt
+finishes with a smaller batch. A replacement drawn from the next eligible
+receipt entry is printed before it is claimed, like the original batch — the
+displayed batch is the authorization boundary, so an unannounced substitute
+would route around it.
 
 Stopping at READY is the design, and it is the same reason stage 1 stopped at
 the recommendation. The operator gets finished PRs with their evidence and
@@ -189,7 +192,9 @@ while it runs:
 ## The report
 
 `.rankings/sweep-<YYYY-MM-DD>.md`, UTC, never overwritten; a second run the
-same day appends the lowest unused suffix. `.rankings/` is gitignored, so a
+same day appends the lowest unused suffix, reserving each candidate atomically
+rather than checking and then writing — two sweeps finishing on one date can
+otherwise both find the same name free. `.rankings/` is gitignored, so a
 sweep report sits beside the ranking receipt it cites and travels no further
 than the machine that produced it.
 
