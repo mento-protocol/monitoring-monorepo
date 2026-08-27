@@ -98,6 +98,15 @@ the same. Two sessions parking different issues concurrently would otherwise
 lose one park or leave the file unparsable, and a lost park returns that issue
 at the top of the next run.
 
+The lock records its owner — a PID and a token generated for that run — because a
+lock holding nothing cannot be recovered safely: breaking it would be a guess,
+and a PID on its own can match an unrelated process once the number is reused.
+The rewrite is published by writing a temporary file in the same directory and
+renaming it over the ledger while the lock is still held. The lock serializes
+writers, and ranking runs read the ledger without taking it, so only the atomic
+rename keeps a reader from seeing half a file — or a killed writer from
+truncating the ledger for good.
+
 It exists so a parked issue does not resurface at the top of every run and force
 the same decision again. Entries are appended, never edited or deleted: an
 edited ledger makes earlier receipts unreadable, because the roster they were

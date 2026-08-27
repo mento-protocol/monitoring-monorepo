@@ -40,8 +40,8 @@ tell an owned issue from a free one, so a partial receipt would be worse than
 none.
 
 ```bash
-run=".rankings/run-$(date -u +%Y%m%dT%H%M%SZ)-$$"
-mkdir -p "$run"
+mkdir -p .rankings
+run="$(mktemp -d ".rankings/run-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX")"
 echo "$run"   # note this path; later commands need it verbatim
 gh issue list --repo mento-protocol/monitoring-monorepo \
   --state open --limit 1000 \
@@ -53,8 +53,11 @@ gh issue list --repo mento-protocol/monitoring-monorepo \
 `.rankings/roster-raw.json`. The receipt and ledger rules below both assume two
 sessions can overlap in one checkout, and shared staging names contradict that:
 one run would truncate a file while the other reads it, producing a parse error
-or, worse, a receipt built from two different snapshots. The `$$` keeps the name
-unique even within the same second.
+or, worse, a receipt built from two different snapshots. `mktemp -d` creates the
+directory as it names it, so the name cannot be handed to two runs; `mkdir -p`
+would accept an existing directory silently and report success either way. The
+timestamp stays in the name because it is what makes a leftover directory
+readable later.
 
 **Carry that printed path forward verbatim.** Most agent runtimes run each
 command in a fresh shell, so `$run` does not survive into the second fetch on
@@ -248,6 +251,18 @@ concrete step and say why one beats the other — neither of which a list line
 supports. Read both before writing that section, even when the table never shows
 them.
 
+**Rescore from those reads, then re-check the order.** A body read exists to
+change a score, and a changed score can change which ready issue leads, so
+selecting on the list-line ranking that chose the pair would discard the evidence
+just gathered. If the rescore promotes a different ready issue above them, read
+that one in full too and settle the comparison on read bodies. In practice this
+settles in one pass, because a full read only moves candidates already near the
+top — but neither name the Selected section prints may rest on a list-line score.
+
+**One surviving candidate has no runner-up.** Write `Runner-up: none` and skip
+the comparison, the same way an empty ready queue writes `Selected: none`. The
+empty-queue rule covers zero candidates; this covers one.
+
 ## Write The Receipt
 
 Write `.rankings/ranking-<YYYY-MM-DD>.md` in UTC. If that name is taken, append
@@ -260,6 +275,13 @@ the file already exists, so move to the next suffix and try again. Checking that
 a name is free and then writing it are two steps, and two runs in the same
 checkout can both pass the check before either writes — the later write would
 then destroy the earlier receipt the audit trail depends on.
+
+**Scope `noclobber` to the claim.** Clear it as soon as the claim succeeds
+(`set +o noclobber`), or write the receipt body through `>|`. While the option is
+set every `>` fails on a file that already exists, and the file this run just
+reserved is precisely that — so leaving it on would stop the run filling in its
+own receipt. The same applies to the ledger below: `noclobber` is how the lock is
+taken, not how `excluded.json` is rewritten.
 
 Three sections:
 
@@ -322,8 +344,24 @@ silently lost or the file is left mid-write and unparsable. Create
 `.rankings/excluded.lock` exclusively — `set -o noclobber` again — and hold it
 across the read, the edit, and the write, releasing it only after the write
 lands. Remove it on exit, including on failure, or the next run blocks forever
-on an owner that is gone; a lock whose holder no longer exists is stale and may
-be broken after re-checking that the process is really absent.
+on an owner that is gone.
+
+**Write the owner into the lock.** An empty lock file makes the stale-lock rule
+impossible to follow: there is nothing to check, so the only choices left are
+blocking forever or deleting a lock that may belong to a live writer. Record the
+PID and a random token generated for this run, and break a lock only after
+reading both back and finding the PID absent **and** the token equal to what the
+file holds. The token is what makes the check safe: PIDs are reused, so a bare
+PID can match an unrelated process that started later and read as live.
+
+**Publish the rewrite by rename.** Ranking runs read `excluded.json` without
+taking this lock — it serializes writers, not readers — so rewriting the file in
+place exposes partial JSON to them, and a writer killed mid-write leaves the
+ledger truncated for good. Write the complete updated array to a temporary file
+in the same directory and `mv` it over the ledger while still holding the lock. A
+rename within one filesystem is atomic, so a reader sees the old array or the new
+one and never a half-written one. The lock stops writers losing each other's
+entries; the rename is what protects readers. Neither substitutes for the other.
 
 Re-reading and comparing before the write is **not** a substitute. Both runs can
 re-read, both see no change since their first read, and both then write — the
