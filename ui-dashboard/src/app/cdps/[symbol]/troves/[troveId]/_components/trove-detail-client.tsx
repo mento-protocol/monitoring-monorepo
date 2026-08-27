@@ -44,11 +44,11 @@ import {
 } from "./trove-detail-states";
 import { TroveHeaderCard } from "./trove-header-card";
 import { TroveLedgerTable } from "./trove-ledger-table";
+import { TroveOperationsList } from "./trove-operations-list";
 import {
   hasTroveLifetimeTotals,
-  TroveLifetimeTotals,
-} from "./trove-lifetime-totals";
-import { TroveOperationsList } from "./trove-operations-list";
+  TroveRedemptionImpact,
+} from "./trove-redemption-impact";
 import { TroveRedemptionQueuePanel } from "./trove-redemption-queue";
 
 const CELO_MAINNET_CHAIN_ID = 42220;
@@ -452,7 +452,12 @@ function TroveDetailView({
         batchRateTimestamp={batch.batchRateTimestamp}
         batchMissing={batch.batchMissing}
       />
-      <TroveSummaryPanels trove={trove} collateral={collateral} queue={queue} />
+      <TroveSummaryPanels
+        trove={trove}
+        collateral={collateral}
+        queue={queue}
+        ledger={ledger}
+      />
       <TroveEventHistory
         ledger={ledger}
         collateral={collateral}
@@ -465,22 +470,28 @@ function TroveDetailView({
   );
 }
 
-/** The impact | queue two-up row from the plan's layout sketch. The
- *  lifetime-totals card (the impact panel's seed, #2088) self-nulls for a
- *  trove with no redemption/liquidation history — the queue panel then
- *  takes the first cell alone. */
+/** The impact | queue two-up row from the plan's layout sketch (#2088 left
+ *  slot). The impact panel reads the same one bounded `useTroveLedger`
+ *  result as the table and chart — its totals come from cumulatives, so it
+ *  renders meaningfully in the interim view too. */
 function TroveSummaryPanels({
   trove,
   collateral,
   queue,
+  ledger,
 }: {
   trove: CdpTrove;
   collateral: CdpCollateral;
   queue: TroveQueueState;
+  ledger: TroveLedgerState;
 }) {
   return (
     <div className="grid gap-6 lg:grid-cols-2">
-      <TroveLifetimeTotals trove={trove} debtSymbol={collateral.symbol} />
+      <TroveRedemptionImpact
+        trove={trove}
+        debtSymbol={collateral.symbol}
+        ledger={ledger}
+      />
       <TroveRedemptionQueuePanel
         queue={queue}
         troveStatus={trove.status}
@@ -536,6 +547,7 @@ function TroveEventHistory({
           rows={ledger.rows}
           truncated={ledger.truncated}
           complete={ledger.complete}
+          anchored={ledger.anchored}
           debtSnapshotsComplete={ledger.debtSnapshotsComplete}
           isLoading={ledger.isLoading}
           error={ledger.error}

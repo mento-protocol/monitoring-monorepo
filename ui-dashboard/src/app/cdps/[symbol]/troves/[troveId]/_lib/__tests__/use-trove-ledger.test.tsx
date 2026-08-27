@@ -22,6 +22,7 @@ import {
   CdpTroveLedgerSchema,
   type CdpTroveLedgerEventRow,
   type CdpTroveLedgerResponse,
+  type TroveLedgerAnchorRow,
 } from "../ledger";
 import { useTroveLedger, type TroveLedgerState } from "../use-trove-ledger";
 
@@ -71,11 +72,23 @@ function ledgerRow(
   };
 }
 
+function anchorRow(
+  overrides: Partial<TroveLedgerAnchorRow> = {},
+): TroveLedgerAnchorRow {
+  return {
+    lastLedgerBlock: "100",
+    lastLedgerLogIndex: 1,
+    redemptionCount: 0,
+    redeemedDebt: "0",
+    redeemedColl: "0",
+    redemptionFeePaidCum: "0",
+    ...overrides,
+  };
+}
+
 function ledgerData(
   rows: CdpTroveLedgerEventRow[],
-  watermark: Array<{ lastLedgerBlock: string; lastLedgerLogIndex: number }> = [
-    { lastLedgerBlock: "100", lastLedgerLogIndex: 1 },
-  ],
+  watermark: TroveLedgerAnchorRow[] = [anchorRow()],
 ): CdpTroveLedgerResponse {
   return { LedgerWatermark: watermark, TroveLedgerEvent: rows };
 }
@@ -227,7 +240,14 @@ describe("useTroveLedger", () => {
             logIndex: 1,
           }),
         ],
-        [{ lastLedgerBlock: "100", lastLedgerLogIndex: 10 }],
+        [
+          anchorRow({
+            lastLedgerBlock: "100",
+            lastLedgerLogIndex: 10,
+            redemptionCount: 2,
+            redeemedDebt: "500",
+          }),
+        ],
       ),
     });
     render(handle!);
@@ -241,10 +261,72 @@ describe("useTroveLedger", () => {
     expect(latest!.complete).toBe(true);
     expect(latest!.debtSnapshotsComplete).toBe(true);
     expect(latest!.hasLoadedOnce).toBe(true);
-    expect(latest!.watermark).toEqual({
+    expect(latest!.watermark).toMatchObject({
       lastLedgerBlock: "100",
       lastLedgerLogIndex: 10,
     });
+    // The watermark equals the newest row's (blockNumber, logIndex) —
+    // anchored — and the same-response cumulatives ride along for the
+    // impact panel's reconciliation.
+    expect(latest!.anchored).toBe(true);
+    expect(latest!.cumulatives).toMatchObject({
+      redemptionCount: 2,
+      redeemedDebt: "500",
+    });
+  });
+
+  it("reports un-anchored when the watermark trails the newest row — logIndex separates same-block transactions", () => {
+    // Two rows in the SAME block: the watermark points at logIndex 5 while
+    // the newest fetched row is logIndex 9 — block number alone would
+    // wrongly call this anchored.
+    mockQueries({
+      ledger: ledgerData(
+        [
+          ledgerRow({ id: "42220_100_9", logIndex: 9 }),
+          ledgerRow({ id: "42220_100_5", logIndex: 5 }),
+        ],
+        [anchorRow({ lastLedgerBlock: "100", lastLedgerLogIndex: 5 })],
+      ),
+    });
+    render(handle!);
+    expect(latest!.anchored).toBe(false);
+
+    // Same block, matching logIndex: anchored.
+    mockQueries({
+      ledger: ledgerData(
+        [
+          ledgerRow({ id: "42220_100_9", logIndex: 9 }),
+          ledgerRow({ id: "42220_100_5", logIndex: 5 }),
+        ],
+        [anchorRow({ lastLedgerBlock: "100", lastLedgerLogIndex: 9 })],
+      ),
+    });
+    render(handle!);
+    expect(latest!.anchored).toBe(true);
+  });
+
+  it("exposes a refetch that revalidates the ledger query via SWR mutate", async () => {
+    const mutate = vi.fn().mockResolvedValue(undefined);
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_TROVE_SCHEMA_FIELDS) {
+        return { data: PROBE_WITH_LEDGER, error: null, isLoading: false };
+      }
+      if (query === CDP_TROVE_LEDGER) {
+        return {
+          data: ledgerData([ledgerRow()]),
+          error: null,
+          isLoading: false,
+          mutate,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+    render(handle!);
+
+    await act(async () => {
+      await latest!.refetch();
+    });
+    expect(mutate).toHaveBeenCalledTimes(1);
   });
 
   it("marks a sentinel-capped fetch truncated and NOT complete (derivations stay off)", () => {

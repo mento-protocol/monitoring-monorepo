@@ -152,12 +152,12 @@ export function TroveOperationsList({
    *  loaded-vs-never-loaded distinction — most tests — don't need to pass
    *  it explicitly. */
   hasLoadedOnce?: boolean;
-  /** Whether `TroveLifetimeTotals` actually rendered its card for this
-   *  trove — that card returns `null` for the normal case of an untouched
-   *  active trove (no redemption/liquidation history), so the partial-view
-   *  notice below must not unconditionally point to a section that doesn't
-   *  exist. Optional/defaults to `false` (omit the reference) so callers
-   *  indifferent to it — most tests — don't need to pass it. */
+  /** Whether the redemption-impact panel above has lifetime totals to show
+   *  for this trove (`hasTroveLifetimeTotals`) — the normal case of an
+   *  untouched active trove has none, and the partial-view notice below
+   *  must not point the reader at totals that aren't there. Optional/
+   *  defaults to `false` (omit the reference) so callers indifferent to it
+   *  — most tests — don't need to pass it. */
   hasLifetimeTotals?: boolean;
   chainId: number;
   debtSymbol: string;
@@ -171,7 +171,7 @@ export function TroveOperationsList({
         Per-redemption detail pending indexer rollout — this list shows only
         this trove&apos;s own borrow/repay/adjust operations. Redemptions and
         liquidations that touched this trove are not yet attributable here
-        {hasLifetimeTotals ? "; see the lifetime totals above." : "."}
+        {hasLifetimeTotals ? "; see the redemption impact totals above." : "."}
       </p>
       {/* Mirrors the parent view's other three notices (markets/trove/batch
           rate): once the fetch has resolved at least once, a later poll

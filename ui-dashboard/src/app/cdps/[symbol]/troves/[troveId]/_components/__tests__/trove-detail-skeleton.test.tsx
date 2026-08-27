@@ -36,20 +36,23 @@ describe("TroveDetailSkeleton", () => {
     expect(headerGrid?.children.length).toBe(7);
   });
 
-  it("reserves the totals card's maximum shape (7 cells), not just the redemption-only 4", () => {
-    // TroveLifetimeTotals can render 4 redemption stats + 2 liquidation
-    // stats + the optional collateral-surplus cell simultaneously (a trove
-    // partially redeemed and later liquidated) — reserving fewer
-    // under-counts that combined case.
+  it("reserves the impact card's maximum shape: 5 redemption figures plus the 3-cell liquidation block", () => {
+    // TroveRedemptionImpact's reconciled mode renders 5 redemption figures
+    // (count, debt repaid, collateral taken, fees kept, net equity) and can
+    // additionally show the liquidation block (2 stats + the optional
+    // collateral-surplus cell) for a trove partially redeemed and later
+    // liquidated — reserving fewer under-counts that combined case.
     handle = render(<TroveDetailSkeleton />);
-    const totalsGrid = handle.container.querySelector(
+    const grids = handle.container.querySelectorAll(
       ".grid.grid-cols-2.gap-x-4.gap-y-3.sm\\:grid-cols-4",
     );
-    expect(totalsGrid?.children.length).toBe(7);
+    expect(grids.length).toBe(2);
+    expect(grids[0]?.children.length).toBe(5);
+    expect(grids[1]?.children.length).toBe(3);
   });
 
-  it("reserves the totals | queue two-up row matching the loaded grid", () => {
-    // The loaded view renders TroveLifetimeTotals and the redemption-queue
+  it("reserves the impact | queue two-up row matching the loaded grid", () => {
+    // The loaded view renders TroveRedemptionImpact and the redemption-queue
     // panel side by side in a `lg:grid-cols-2` row — the skeleton reserves
     // both cards inside the same grid so the row splits at the same
     // breakpoint loading and loaded.

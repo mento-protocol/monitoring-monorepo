@@ -371,13 +371,27 @@ describe("TroveDetailClient", () => {
         return { data: queueData, error: queueError, isLoading: false };
       }
       if (query === CDP_TROVE_LEDGER) {
+        // The anchor branch mirrors the trove row: watermark pinned at the
+        // default ledgerEvent's (blockNumber, logIndex) so single-row
+        // fixtures are anchored, and cumulatives copied from the header
+        // trove so consistent fixtures reconcile instead of triggering the
+        // impact panel's refetch machinery.
+        const headerTrove = troveRows[0];
         return {
           data:
             ledgerRows === undefined
               ? undefined
               : {
                   LedgerWatermark: [
-                    { lastLedgerBlock: "100", lastLedgerLogIndex: 1 },
+                    {
+                      lastLedgerBlock: "100",
+                      lastLedgerLogIndex: 1,
+                      redemptionCount: headerTrove?.redemptionCount ?? 0,
+                      redeemedDebt: headerTrove?.redeemedDebt ?? "0",
+                      redeemedColl: headerTrove?.redeemedColl ?? "0",
+                      redemptionFeePaidCum:
+                        headerTrove?.redemptionFeePaidCum ?? "0",
+                    },
                   ],
                   TroveLedgerEvent: ledgerRows,
                 },
@@ -991,6 +1005,16 @@ describe("TroveDetailClient", () => {
   it("renders the complete ledger — and disables the interim query — once the gate opens", () => {
     mockQueries({
       troveSchema: TROVE_SCHEMA_WITH_LEDGER,
+      // Header cumulatives match the one op-6 row so the impact panel's
+      // reconciliation passes (the mock's anchor branch copies them).
+      troveRows: [
+        trove({
+          redemptionCount: 1,
+          redeemedDebt: wei(400),
+          redeemedColl: "0",
+          redemptionFeePaidCum: wei(2),
+        }),
+      ],
       ledgerRows: [
         ledgerEvent({
           operation: 6,
@@ -1080,6 +1104,81 @@ describe("TroveDetailClient", () => {
     expect(
       handle!.container.querySelector('[data-chart-mock="trove-balance"]'),
     ).toBeNull();
+  });
+
+  it("mounts the redemption impact panel in the left summary slot, before the queue panel", () => {
+    mockQueries({ queueData: queueResponse() });
+    render(handle!);
+
+    const headings = Array.from(handle!.container.querySelectorAll("h2")).map(
+      (node) => node.textContent ?? "",
+    );
+    const impactIndex = headings.indexOf("Redemption impact");
+    const queueIndex = headings.indexOf("Redemption queue");
+    expect(impactIndex).toBeGreaterThanOrEqual(0);
+    expect(queueIndex).toBeGreaterThanOrEqual(0);
+    expect(impactIndex).toBeLessThan(queueIndex);
+  });
+
+  it("shows cumulative redemption totals — labeled as totals — in the interim view", () => {
+    // Half the ticket's answer works before the ledger entity ships: the
+    // figures come from Trove cumulatives, with the per-hit derivations
+    // (split, oracle valuation) explicitly pending.
+    mockQueries({
+      troveRows: [
+        trove({
+          redemptionCount: 2,
+          redeemedDebt: wei(1_000),
+          redeemedColl: wei(1_365),
+          redemptionFeePaidCum: wei(3),
+        }),
+      ],
+    });
+    render(handle!);
+
+    const text = handle!.container.textContent ?? "";
+    expect(text).toContain("Redemption impact");
+    expect(text).toContain("Lifetime totals from the trove");
+    expect(text).toContain("-1,000.00 GBPm");
+    expect(text).toContain("-1,365.00 USDm");
+    // Fees are credited TO the trove: positive.
+    expect(text).toContain("+3.00 USDm");
+    expect(text).not.toContain("all rebalancing");
+  });
+
+  it("splits user vs rebalance and shows net equity only from the reconciled complete ledger", () => {
+    mockQueries({
+      troveSchema: TROVE_SCHEMA_WITH_LEDGER,
+      troveRows: [
+        trove({
+          redemptionCount: 1,
+          redeemedDebt: wei(400),
+          redeemedColl: wei(495),
+          redemptionFeePaidCum: wei(5),
+        }),
+      ],
+      ledgerRows: [
+        ledgerEvent({
+          operation: 6,
+          isRebalance: true,
+          debtChange: `-${wei(400)}`,
+          collChange: `-${wei(495)}`,
+          debtBefore: wei(1_000),
+          debtAfter: wei(600),
+          redemptionFeeCredited: wei(5),
+          // 0.8 debt per collateral: 400 debt is worth 500 collateral, 495
+          // taken → net equity +5.
+          redemptionPrice: ((BigInt(8) * D18) / BigInt(10)).toString(),
+        }),
+      ],
+    });
+    render(handle!);
+
+    const text = handle!.container.textContent ?? "";
+    expect(text).toContain("all rebalancing");
+    expect(text).toContain("Net equity at oracle prices");
+    expect(text).toContain("+5.00 USDm");
+    expect(text).not.toContain("Ledger reconciliation failed");
   });
 
   it("keeps the header cards rendered when the ledger query fails on first load", () => {

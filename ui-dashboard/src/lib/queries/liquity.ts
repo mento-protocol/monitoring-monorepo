@@ -580,7 +580,12 @@ export const CDP_TROVE_QUEUE = `
 // and one unknown column fails a whole request at parse time on a
 // schema-lagged deploy. Fetching the watermark alongside the ledger rows also
 // keeps the reconciliation pair (#2088) reading one response, not two skewed
-// polls.
+// polls — and the same branch carries the redemption cumulatives the impact
+// panel reconciles against, so cumulatives, watermark, and rows are all one
+// snapshot: comparing the header query's (independently polled) cumulatives
+// to this response's rows would re-open exactly the skew the watermark
+// exists to close. The cumulative columns are long-deployed and safe here;
+// only the two watermark columns are gate-dependent.
 //
 // Ordering is the numeric triple — `TroveLedgerEvent` has a queryable
 // `logIndex`, unlike `TroveOperationEvent`, so the server tiebreaks
@@ -595,6 +600,7 @@ export const CDP_TROVE_LEDGER = `
   query CdpTroveLedger($troveEntityId: String!, $limit: Int!) {
     LedgerWatermark: Trove(where: { id: { _eq: $troveEntityId } }, limit: 1) {
       lastLedgerBlock lastLedgerLogIndex
+      redemptionCount redeemedDebt redeemedColl redemptionFeePaidCum
     }
     TroveLedgerEvent(
       where: { troveEntityId: { _eq: $troveEntityId } }

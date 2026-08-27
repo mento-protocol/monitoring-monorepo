@@ -418,13 +418,26 @@ describe("hasCompleteDebtSnapshots", () => {
 });
 
 describe("resolveLedgerWatermark", () => {
-  it("extracts the watermark pair from the gated response", () => {
+  it("extracts the anchor row — watermark pair plus cumulatives — from the gated response", () => {
     expect(
       resolveLedgerWatermark({
-        LedgerWatermark: [{ lastLedgerBlock: "300", lastLedgerLogIndex: 2 }],
+        LedgerWatermark: [
+          {
+            lastLedgerBlock: "300",
+            lastLedgerLogIndex: 2,
+            redemptionCount: 1,
+            redeemedDebt: "400",
+            redeemedColl: "500",
+            redemptionFeePaidCum: "2",
+          },
+        ],
         TroveLedgerEvent: [],
       }),
-    ).toEqual({ lastLedgerBlock: "300", lastLedgerLogIndex: 2 });
+    ).toMatchObject({
+      lastLedgerBlock: "300",
+      lastLedgerLogIndex: 2,
+      redemptionCount: 1,
+    });
   });
 
   it("is null while unresolved or when the trove itself is not indexed", () => {
@@ -438,10 +451,28 @@ describe("resolveLedgerWatermark", () => {
 describe("CdpTroveLedgerSchema (rollout drift guard)", () => {
   it("accepts the shape the query selects", () => {
     const result = CdpTroveLedgerSchema.safeParse({
-      LedgerWatermark: [{ lastLedgerBlock: "0", lastLedgerLogIndex: 0 }],
+      LedgerWatermark: [
+        {
+          lastLedgerBlock: "0",
+          lastLedgerLogIndex: 0,
+          redemptionCount: 0,
+          redeemedDebt: "0",
+          redeemedColl: "0",
+          redemptionFeePaidCum: "0",
+        },
+      ],
       TroveLedgerEvent: [ledgerRow()],
     });
     expect(result.success).toBe(true);
+  });
+
+  it("rejects an anchor row missing its reconciliation cumulatives", () => {
+    expect(
+      CdpTroveLedgerSchema.safeParse({
+        LedgerWatermark: [{ lastLedgerBlock: "0", lastLedgerLogIndex: 0 }],
+        TroveLedgerEvent: [],
+      }).success,
+    ).toBe(false);
   });
 
   it("rejects a drifted response instead of feeding it to BigInt arithmetic", () => {

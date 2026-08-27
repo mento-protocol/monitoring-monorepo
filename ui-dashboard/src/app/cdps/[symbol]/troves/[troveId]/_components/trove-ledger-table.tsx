@@ -350,6 +350,7 @@ export function TroveLedgerTable({
   rows,
   truncated,
   complete,
+  anchored,
   debtSnapshotsComplete,
   isLoading,
   error,
@@ -362,8 +363,15 @@ export function TroveLedgerTable({
   rows: CdpTroveLedgerEventRow[];
   truncated: boolean;
   /** Derivation gate: loaded and not truncated. Interest estimates render
-   *  only when this AND `debtSnapshotsComplete` hold. */
+   *  only when this AND `anchored` AND `debtSnapshotsComplete` hold. */
   complete: boolean;
+  /** The trove's ledger watermark equals the newest row's (blockNumber,
+   *  logIndex) pair — same gate the impact panel's reconciliation uses
+   *  (#2088). An un-anchored response may be a mid-write read whose
+   *  snapshots aren't yet finalized, so even the row-only interest residual
+   *  stays off; the next poll re-anchors, so no notice — unlike truncation
+   *  and batch rows, this state cannot persist on a healthy indexer. */
+  anchored: boolean;
   debtSnapshotsComplete: boolean;
   isLoading: boolean;
   error: Error | undefined;
@@ -381,10 +389,10 @@ export function TroveLedgerTable({
   const [newestFirst, setNewestFirst] = useState(false);
   const displayRows = useMemo(() => {
     const ascending = buildTroveLedgerDisplayRows(rows, {
-      synthesizeInterest: complete && debtSnapshotsComplete,
+      synthesizeInterest: complete && anchored && debtSnapshotsComplete,
     });
     return newestFirst ? [...ascending].reverse() : ascending;
-  }, [rows, complete, debtSnapshotsComplete, newestFirst]);
+  }, [rows, complete, anchored, debtSnapshotsComplete, newestFirst]);
 
   return (
     <section>

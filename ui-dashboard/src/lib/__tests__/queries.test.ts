@@ -769,6 +769,12 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
       "LedgerWatermark: Trove(where: { id: { _eq: $troveEntityId } }, limit: 1)",
     );
     expect(query).toContain("lastLedgerBlock lastLedgerLogIndex");
+    // The redemption cumulatives ride in the SAME branch so the impact
+    // panel's reconciliation compares cumulatives, watermark, and rows from
+    // one response — the header query's independent poll can skew.
+    expect(query).toContain(
+      "redemptionCount redeemedDebt redeemedColl redemptionFeePaidCum",
+    );
     // Full row payload the ledger table and later derivation slices need.
     expect(query).toContain("debtIncreaseFromRedist collIncreaseFromRedist");
     expect(query).toContain("debtBefore debtAfter collBefore collAfter");

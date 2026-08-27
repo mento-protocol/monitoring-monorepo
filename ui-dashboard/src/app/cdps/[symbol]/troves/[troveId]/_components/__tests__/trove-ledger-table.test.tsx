@@ -57,6 +57,7 @@ function ledgerRow(
 const BASE_PROPS = {
   truncated: false,
   complete: true,
+  anchored: true,
   debtSnapshotsComplete: true,
   isLoading: false,
   error: undefined,
@@ -296,6 +297,14 @@ describe("TroveLedgerTable", () => {
 
     // A truncated (or otherwise partial) ledger suppresses the estimates.
     render({ rows, complete: false, truncated: true });
+    expect(text()).not.toContain("Interest accrued");
+    expect(rowTexts()).toHaveLength(2);
+
+    // An un-anchored response (watermark ≠ newest row — possibly a
+    // mid-write read whose snapshots aren't finalized) suppresses them too,
+    // even for a complete, snapshot-complete page (#2088 requirement: the
+    // residual gates on the same complete-rows + watermark conditions).
+    render({ rows, complete: true, anchored: false });
     expect(text()).not.toContain("Interest accrued");
     expect(rowTexts()).toHaveLength(2);
   });

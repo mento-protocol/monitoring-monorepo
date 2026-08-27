@@ -7,7 +7,7 @@
 // ledger query (docs/PLAN-trove-history-page.md, invariant 5: charts read
 // the full bounded history query, never a paginated slice).
 
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { HASURA_TIMEOUT_MS, useGQL } from "@/lib/graphql";
 import { CDP_TROVE_LEDGER, CDP_TROVE_SCHEMA_FIELDS } from "@/lib/queries";
 import { paginateTroveOperations } from "./params";
@@ -16,6 +16,7 @@ import {
   CDP_TROVE_LEDGER_REQUEST_LIMIT,
   CdpTroveLedgerSchema,
   hasCompleteDebtSnapshots,
+  ledgerWatermarkMatchesNewestRow,
   resolveLedgerWatermark,
   sortTroveLedgerRowsDesc,
   supportsTroveLedger,
@@ -23,6 +24,7 @@ import {
   type CdpTroveLedgerResponse,
   type CdpTroveLedgerSchemaProbe,
   type TroveLedgerWatermark,
+  type TroveRedemptionCumulatives,
 } from "./ledger";
 
 export type TroveLedgerState = {
@@ -58,12 +60,28 @@ export type TroveLedgerState = {
    *  The #2088 reconciliation compares this against the newest row's
    *  (blockNumber, logIndex) pair before trusting cumulative sums. */
   watermark: TroveLedgerWatermark | null;
+  /** True only when the watermark equals the newest fetched row's
+   *  (blockNumber, logIndex) pair — the response caught the trove and its
+   *  ledger at one indexed position. Two same-block transactions differ in
+   *  `logIndex`, which is why the pair, never the block alone. Both the
+   *  cumulatives reconciliation AND the interest-residual synthesis gate on
+   *  this: an un-anchored response may have been read mid-write, so even
+   *  row-only derivations don't trust it. False with zero rows. */
+  anchored: boolean;
+  /** The trove's redemption cumulatives from the SAME response as the rows
+   *  (the `LedgerWatermark` branch) — the only cumulatives the
+   *  reconciliation may compare against; the header query's independently
+   *  polled copy can skew. Null while unsupported/loading/not indexed. */
+  cumulatives: TroveRedemptionCumulatives | null;
   isLoading: boolean;
   error: Error | undefined;
   /** `data != null`, captured before any `?? []` fallback collapses "never
    *  loaded" and "loaded, confirmed empty" (a fresh trove can have a
    *  legitimately empty ledger). */
   hasLoadedOnce: boolean;
+  /** One bounded revalidation of the ledger query — the reconciliation's
+   *  refetch-once-on-mismatch step. Resolves when the revalidation settles. */
+  refetch: () => Promise<void>;
 };
 
 export function useTroveLedger(troveEntityId: string | null): TroveLedgerState {
@@ -97,17 +115,28 @@ export function useTroveLedger(troveEntityId: string | null): TroveLedgerState {
     () => hasCompleteDebtSnapshots(rows),
     [rows],
   );
+  // Typed as possibly-undefined: component tests mock `useGQL` with plain
+  // `{ data, error, isLoading }` objects, and the wrapper must stay callable
+  // against them.
+  const mutate: (() => Promise<unknown>) | undefined = ledger.mutate;
+  const refetch = useCallback(async () => {
+    await mutate?.();
+  }, [mutate]);
 
   const hasLoadedOnce = ledger.data != null;
+  const anchor = resolveLedgerWatermark(ledger.data);
   return {
     supported,
     rows,
     truncated,
     complete: hasLoadedOnce && !truncated,
     debtSnapshotsComplete,
-    watermark: resolveLedgerWatermark(ledger.data),
+    watermark: anchor,
+    anchored: ledgerWatermarkMatchesNewestRow(anchor, rows),
+    cumulatives: anchor,
     isLoading: ledger.isLoading,
     error: ledger.error,
     hasLoadedOnce,
+    refetch,
   };
 }

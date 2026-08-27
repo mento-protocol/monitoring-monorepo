@@ -7114,6 +7114,10 @@ export type CdpTroveLedgerQuery = {
   readonly LedgerWatermark: ReadonlyArray<{
     readonly lastLedgerBlock: string;
     readonly lastLedgerLogIndex: number;
+    readonly redemptionCount: number;
+    readonly redeemedDebt: string;
+    readonly redeemedColl: string;
+    readonly redemptionFeePaidCum: string;
   }>;
   readonly TroveLedgerEvent: ReadonlyArray<{
     readonly id: string;

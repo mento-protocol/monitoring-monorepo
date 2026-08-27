@@ -71,8 +71,28 @@ export type TroveLedgerWatermark = {
   lastLedgerLogIndex: number;
 };
 
+/** The trove's redemption lifetime cumulatives, as maintained by the indexer
+ *  (`troveManagerTransitions.ts` accumulates the RAW op-6 event deltas —
+ *  |debtChange| / |collChange|, fee via `RedemptionFeePaidToTrove`). The
+ *  impact panel's reconciliation sums ledger rows with exactly the same
+ *  terms, so equality is exact, never approximate. */
+export type TroveRedemptionCumulatives = {
+  redemptionCount: number;
+  redeemedDebt: string;
+  redeemedColl: string;
+  redemptionFeePaidCum: string;
+};
+
+/** The `LedgerWatermark` branch row of `CDP_TROVE_LEDGER`: the watermark
+ *  pair plus the redemption cumulatives read in the SAME response as the
+ *  ledger rows — the reconciliation (#2088) must compare cumulatives and
+ *  row sums at one indexed position, and the header query's independently
+ *  polled `Trove` row cannot guarantee that. */
+export type TroveLedgerAnchorRow = TroveLedgerWatermark &
+  TroveRedemptionCumulatives;
+
 export type CdpTroveLedgerResponse = {
-  LedgerWatermark: TroveLedgerWatermark[];
+  LedgerWatermark: TroveLedgerAnchorRow[];
   TroveLedgerEvent: CdpTroveLedgerEventRow[];
 };
 
@@ -113,6 +133,10 @@ export const CdpTroveLedgerSchema = z.object({
     z.object({
       lastLedgerBlock: z.string(),
       lastLedgerLogIndex: z.number(),
+      redemptionCount: z.number(),
+      redeemedDebt: z.string(),
+      redeemedColl: z.string(),
+      redemptionFeePaidCum: z.string(),
     }),
   ),
   TroveLedgerEvent: z.array(TroveLedgerEventRowSchema),
@@ -148,8 +172,34 @@ export function supportsTroveLedger(
 
 export function resolveLedgerWatermark(
   data: CdpTroveLedgerResponse | undefined,
-): TroveLedgerWatermark | null {
+): TroveLedgerAnchorRow | null {
   return data?.LedgerWatermark[0] ?? null;
+}
+
+/** The reconciliation trigger (docs/PLAN-trove-history-page.md, invariant
+ *  2): true only when the trove's stamped ledger watermark equals the newest
+ *  fetched ledger row's (blockNumber, logIndex) pair. Block number alone is
+ *  NOT enough — two distinct transactions can share a block, and only
+ *  `logIndex` separates them; `lastUpdatedBlock` would be wrong twice over,
+ *  since it also advances on NFT transfers that write no ledger row. Rows
+ *  are the hook's chronological (oldest-first) page, so the newest row is
+ *  the LAST element — it survives truncation (the desc fetch drops the
+ *  OLDEST rows), which is why truncation is gated separately. BigInt
+ *  comparison, not string equality: Hasura's numeric serialization is not
+ *  contractually canonical. */
+export function ledgerWatermarkMatchesNewestRow(
+  watermark: TroveLedgerWatermark | null,
+  ascendingRows: readonly Pick<
+    CdpTroveLedgerEventRow,
+    "blockNumber" | "logIndex"
+  >[],
+): boolean {
+  if (watermark == null || ascendingRows.length === 0) return false;
+  const newest = ascendingRows[ascendingRows.length - 1]!;
+  return (
+    BigInt(watermark.lastLedgerBlock) === BigInt(newest.blockNumber) &&
+    watermark.lastLedgerLogIndex === newest.logIndex
+  );
 }
 
 function compareBigIntStringsAsc(a: string, b: string): number {
