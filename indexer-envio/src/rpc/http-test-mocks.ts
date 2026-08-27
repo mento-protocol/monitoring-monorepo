@@ -46,6 +46,21 @@ const GET_BREAKERS_ABI = [
   },
 ] as const;
 
+// FXPriceFeed.fetchPrice — mirrors `abis/liquity/FXPriceFeed.json` so Liquity
+// ledger/ICR tests can mock the block-close price via `setHttpRpcMock`.
+// Unmocked calls now fail with "no mock" instead of "no ABI entry"; both
+// resolve to a null price in `loadLiquityPrice`, so existing tests keep
+// their prior behavior.
+const FX_PRICE_FEED_FETCH_PRICE_ABI = [
+  {
+    type: "function",
+    name: "fetchPrice",
+    inputs: [],
+    outputs: [{ name: "price", type: "uint256" }],
+    stateMutability: "nonpayable",
+  },
+] as const;
+
 // BreakerBox dependency-graph getters (#712) — the array-walk getter and the
 // `getRateFeeds()` control read used by `fetchRateFeedDependencies`.
 const RATE_FEED_DEPS_ABI = [
@@ -78,6 +93,7 @@ const TEST_RPC_ABI = [
   ...MEDIAN_DELTA_BREAKER_ABI,
   ...VALUE_DELTA_BREAKER_ABI,
   ...GET_BREAKERS_ABI,
+  ...FX_PRICE_FEED_FETCH_PRICE_ABI,
   ...RATE_FEED_DEPS_ABI,
   ...SUSDS_CONVERT_TO_ASSETS_ABI,
   ...(SortedOraclesContract.abi as Abi),

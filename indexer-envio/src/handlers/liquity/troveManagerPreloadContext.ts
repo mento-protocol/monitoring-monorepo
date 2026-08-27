@@ -26,6 +26,7 @@ export type TroveManagerPreloadContext = Parameters<
       get: (id: string) => Promise<PendingRedemption | undefined>;
     };
     PendingBatchedTroveUpdate: {
+      get: (id: string) => Promise<PendingBatchedTroveUpdate | undefined>;
       getWhere: (args: { txHash: { _eq: string } }) => Promise<
         Array<{
           collateralId: string;

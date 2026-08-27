@@ -145,7 +145,7 @@ assert.ok(
 
 test("the derived exact arms keep the current route counts", () => {
   assert.equal(indexerInvariantExcludedArm.patterns.length, 12);
-  assert.equal(indexerInvariantRoutedArm.patterns.length, 253);
+  assert.equal(indexerInvariantRoutedArm.patterns.length, 256);
 });
 const matchesAny = (patterns, candidatePath) =>
   patterns.some((pattern) => casePatternToRegExp(pattern).test(candidatePath));
@@ -187,7 +187,7 @@ test("the table and core agree on every current indexer module path", () => {
     ...walkIndexerModuleFiles(`${REPO}/indexer-envio/src`),
     ...walkIndexerModuleFiles(`${REPO}/indexer-envio/test`),
   ].sort();
-  assert.equal(paths.length, 220, "current module inventory changed");
+  assert.equal(paths.length, 223, "current module inventory changed");
   const decisions = getIndexerHandlerInvariantChecklistDecisions(paths);
   for (const decision of decisions) {
     assert.equal(

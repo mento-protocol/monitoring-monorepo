@@ -65,8 +65,8 @@ const currentIndexerSources = walkModuleFiles(
   .sort();
 
 for (const [label, paths, routed, excluded] of [
-  ["source", currentIndexerSources, 126, 5],
-  ["test", currentIndexerTests, 84, 5],
+  ["source", currentIndexerSources, 127, 5],
+  ["test", currentIndexerTests, 86, 5],
 ]) {
   const decisions = getIndexerHandlerInvariantChecklistDecisions(paths);
   assert.equal(decisions.length, paths.length, `${label} decision count`);
@@ -98,10 +98,10 @@ for (const [label, paths, routed, excluded] of [
 }
 assert.equal(
   currentIndexerSources.length,
-  131,
+  132,
   "current source module inventory",
 );
-assert.equal(currentIndexerTests.length, 89, "current test module inventory");
+assert.equal(currentIndexerTests.length, 91, "current test module inventory");
 
 for (const [candidatePath, route, owner] of [
   ["indexer-envio/src/swap.ts", true, "source-runtime"],

@@ -37,6 +37,7 @@ Authority: canonical
 - [`.agents/skills/forensic-report/SKILL.md`](../.agents/skills/forensic-report/SKILL.md)
 - [`.agents/skills/forensic-report/template.md`](../.agents/skills/forensic-report/template.md)
 - [`.agents/skills/monorepo-import/SKILL.md`](../.agents/skills/monorepo-import/SKILL.md)
+- [`.agents/skills/rank-backlog/SKILL.md`](../.agents/skills/rank-backlog/SKILL.md)
 - [`.agents/skills/ship/SKILL.md`](../.agents/skills/ship/SKILL.md)
 - [`aegis/AGENTS.md`](../aegis/AGENTS.md)
 - [`AGENTS.md`](../AGENTS.md)
@@ -78,6 +79,7 @@ Authority: canonical
 - [`docs/evals/documentation-navigation.md`](evals/documentation-navigation.md)
 - [`docs/notes/agent-issue-workflow.md`](notes/agent-issue-workflow.md)
 - [`docs/notes/agent-quality-gate-mechanics.md`](notes/agent-quality-gate-mechanics.md)
+- [`docs/notes/backlog-ranking.md`](notes/backlog-ranking.md)
 - [`docs/notes/codex-agent-skills.md`](notes/codex-agent-skills.md)
 - [`docs/notes/codex-cloud-setup.md`](notes/codex-cloud-setup.md)
 - [`docs/notes/cross-protocol-context.md`](notes/cross-protocol-context.md)
@@ -198,6 +200,9 @@ Authority: canonical
 - [`docs/adr/0070-sentry-requeue-settlement-sentinel.md`](adr/0070-sentry-requeue-settlement-sentinel.md) — A withheld terminal label serializes the Sentry archive settlement against the triage re-queue
 - [`docs/adr/0071-susds-launch-aligned-daily-sampler.md`](adr/0071-susds-launch-aligned-daily-sampler.md) — sUSDS actuals use a launch-aligned bounded daily sampler
 - [`docs/adr/0072-md-only-docs-checks-job.md`](adr/0072-md-only-docs-checks-job.md) — The Markdown globs route to a small docs-checks CI job instead of the scripts job
+- [`docs/adr/0073-guardrail-prose-pinned-in-ci.md`](adr/0073-guardrail-prose-pinned-in-ci.md) — Normative guardrail sentences are pinned in CI, and scripts are not
+- [`docs/adr/0074-trove-ledger-parallel-append-only-entity.md`](adr/0074-trove-ledger-parallel-append-only-entity.md) — TroveLedgerEvent is a parallel append-only entity, not a widened TroveOperationEvent
+- [`docs/adr/0075-pr-merge.md`](adr/0075-pr-merge.md) — One sanctioned human-only merge path
 
 Authority: non-canonical
 
