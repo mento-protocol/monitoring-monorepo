@@ -56,8 +56,10 @@ way to notice.
 A worker's clone path is derived from its issue number, so it is deterministic
 and can already exist — an interrupted run leaves one behind, and a released
 issue can be selected again later. An existing directory is resumed only on
-proof that it belongs to this sweep — a `.sweep-owner` file written at clone
-time and naming this session. Remote and branch are not that proof: a second
+proof that it belongs to this sweep — a `.git/sweep-owner` file written at
+clone time and naming this session, kept inside `.git/` so it never shows up as
+untracked state a gate or a push can trip over. Remote and branch are not that
+proof: a second
 sweep of the same issue reproduces both, so matching on them alone also accepts
 a checkout another live worker is committing from. Anything else yields a fresh
 unique path plus a line in the report. A checkout
@@ -177,8 +179,11 @@ sweep report sits beside the ranking receipt it cites and travels no further
 than the machine that produced it.
 
 It carries the receipt path and requested batch size, a disposition table of
-`Issue | PR | Disposition`, the deferral issues filed, and anything needing the
-operator's decision. The same summary is printed to the terminal.
+`Issue | PR | Disposition`, the claims this sweep lost to another session, the
+deferral issues filed, and anything needing the operator's decision. A refused
+claim gets its own line rather than a table row — no work was done on it — and
+without that line a shrunken batch would look like the batch that was asked
+for. The same summary is printed to the terminal.
 
 Two properties make the table worth reading:
 

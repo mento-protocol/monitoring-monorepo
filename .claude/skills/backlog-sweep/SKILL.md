@@ -162,11 +162,14 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   number produces the same directory, and `git clone` fails outright into one
   that already exists — from an interrupted run, or from an earlier sweep of an
   issue that was released and later re-selected. Resume it only on proof it is
-  this sweep's own: write `.sweep-owner` holding the sweep's session id at clone
+  this sweep's own: write the sweep's session id to `.git/sweep-owner` at clone
   time, and continue in the directory only when that file names this session.
-  Remote and branch are not proof — a second sweep of the same issue reproduces
-  both, so that test also accepts a checkout a live worker is committing from,
-  and two workers would then push from one tree. Anything else gets a
+  Keep the marker inside `.git/` — a file at the clone root would be untracked
+  in every worker checkout, where a clean-worktree check can refuse the gate or
+  the push and broad staging can commit the marker into the PR. Remote and
+  branch are not proof — a second sweep of the same issue reproduces both, so
+  that test also accepts a checkout a live worker is committing from, and two
+  workers would then push from one tree. Anything else gets a
   fresh unique path, and the conflict is named in the report. **Never delete a
   checkout whose contents you have not established** — it may hold another
   session's uncommitted work, and nothing here can tell that apart from litter.
@@ -297,8 +300,12 @@ Four parts:
    **final `pr:ready-state` line verbatim** — copied, not summarized, because a
    paraphrase of a readiness verdict is not evidence of one. For an issue that
    was released, it holds the release reason and which release form was used.
-3. **Deferral issues filed**, by number, each with the PR it came from.
-4. **Anything needing the operator's decision** — a blocked control, a
+3. **Claims this sweep did not get**, one line per refused claim, naming the
+   issue, the session that holds it, and the receipt entry taken instead. A
+   refused claim never becomes a disposition row, because no work was done on
+   it; omitting it entirely would hide that the batch shrank.
+4. **Deferral issues filed**, by number, each with the PR it came from.
+5. **Anything needing the operator's decision** — a blocked control, a
    misgroomed issue, a finding the worker could not adjudicate.
 
 Print the same summary to the terminal; the file is the artifact, the terminal
