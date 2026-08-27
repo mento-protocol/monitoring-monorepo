@@ -56,10 +56,10 @@ each claim result is read before its worker is briefed. Only a successful claim
 gets a worker; a refused one is recorded in the report, and an exhausted receipt
 finishes with a smaller batch. A claim the sweep then cannot staff — a spawn
 that fails on a runtime's concurrency limit or any other error — is released
-immediately rather than left parked in `agent-active` with no worker. A replacement drawn from the next eligible
-receipt entry is printed before it is claimed, like the original batch — the
-printed batch is the record of what the sweep worked on, and an unannounced
-substitute makes that record wrong.
+immediately rather than left parked in `agent-active` with no worker. A
+replacement drawn from the next eligible receipt entry is printed before it is
+claimed, like the original batch — the printed batch is the record of what the
+sweep worked on, and an unannounced substitute makes that record wrong.
 
 Stopping at READY is the design, and it is the same reason stage 1 stopped at
 the recommendation. The operator gets finished PRs with their evidence and
@@ -110,17 +110,16 @@ anyway, and collecting the facts only workers can see.
 
 ## Eligibility
 
-A sweep is narrower than the ranking that feeds it. An issue enters a batch
-only when all of the following hold:
+A sweep is narrower than the ranking that feeds it, and the ranking receipt
+does not carry the difference: its Top 15 is `Rank | Issue | Score | Reason`,
+and it scores `needs-grooming` issues beside `agent-ready` ones. Selection by
+`rank-backlog` is a ranking verdict, not a batch verdict. So each candidate is
+read directly — `gh issue view <n> --json number,title,labels,body,projectItems`,
+where `labels` settles the state, risk, and `pkg:*` area,
+`projectItems[].status.name` settles `Blocked`, and `body` is where an external
+dependency is named. Only the fit cap comes from the receipt.
 
-The ranking receipt does not carry these facts: its Top 15 is
-`Rank | Issue | Score | Reason`, and it scores `needs-grooming` issues beside
-`agent-ready` ones. Selection by `rank-backlog` is a ranking verdict, not a
-batch verdict. So each candidate is read directly —
-`gh issue view <n> --json number,title,labels,body,projectItems`, where
-`labels` settles the state, risk, and `pkg:*` area, `projectItems[].status.name`
-settles `Blocked`, and `body` is where an external dependency is named. Only
-the fit cap comes from the receipt.
+An issue enters a batch only when all of the following hold:
 
 - **`agent-ready`** — never `needs-grooming`. Ranking scores grooming issues
   and never Selects one; a sweep that claimed one would be grooming unattended
