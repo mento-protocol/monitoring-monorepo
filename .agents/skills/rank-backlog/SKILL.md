@@ -42,6 +42,7 @@ none.
 ```bash
 run=".rankings/run-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 mkdir -p "$run"
+echo "$run"   # note this path; later commands need it verbatim
 gh issue list --repo mento-protocol/monitoring-monorepo \
   --state open --limit 1000 \
   --json number,title,url,labels,assignees,updatedAt,blocking \
@@ -54,6 +55,13 @@ sessions can overlap in one checkout, and shared staging names contradict that:
 one run would truncate a file while the other reads it, producing a parse error
 or, worse, a receipt built from two different snapshots. The `$$` keeps the name
 unique even within the same second.
+
+**Carry that printed path forward verbatim.** Most agent runtimes run each
+command in a fresh shell, so `$run` does not survive into the second fetch on
+its own: it would expand to nothing and redirect to `/linked-prs.json`. Paste the
+literal directory into every later command, or re-assign `run` to the same value
+first. Two different `$run` directories inside one ranking recreates the
+split-snapshot problem this rule exists to prevent.
 
 `blocking` is in the field list because Dependency effect is worth 25 points and
 an issue scored from its list line would otherwise look like a leaf. GitHub's
