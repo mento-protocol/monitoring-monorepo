@@ -199,7 +199,7 @@ Authority: canonical
 - [`docs/adr/0071-susds-launch-aligned-daily-sampler.md`](adr/0071-susds-launch-aligned-daily-sampler.md) — sUSDS actuals use a launch-aligned bounded daily sampler
 - [`docs/adr/0072-md-only-docs-checks-job.md`](adr/0072-md-only-docs-checks-job.md) — The Markdown globs route to a small docs-checks CI job instead of the scripts job
 - [`docs/adr/0073-guardrail-prose-pinned-in-ci.md`](adr/0073-guardrail-prose-pinned-in-ci.md) — Normative guardrail sentences are pinned in CI, and scripts are not
-- [`docs/adr/0075-sanctioned-merge-wrapper.md`](adr/0075-sanctioned-merge-wrapper.md) — One sanctioned merge wrapper gates merges locally, and the binding control stays human
+- [`docs/adr/0075-pr-merge.md`](adr/0075-pr-merge.md) — One sanctioned human-only merge path
 
 Authority: non-canonical
 

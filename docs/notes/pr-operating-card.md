@@ -377,7 +377,7 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    unforgeable boundary — a local process running as the operator can
    synthesize any local signal — so the approval rule above stays the binding
    control, and the durable boundary belongs on GitHub's side of the wire.
-   [ADR 0075](../adr/0075-sanctioned-merge-wrapper.md) owns the ordered gates,
+   [ADR 0075](../adr/0075-pr-merge.md) owns the ordered gates,
    the alternatives, and every residual, including what the deny does not
    cover. The Dependabot auto-merge workflow runs in CI, not an agent session,
    and is unaffected. The approval rule above is

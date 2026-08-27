@@ -1,5 +1,5 @@
 ---
-title: One sanctioned merge wrapper gates merges locally, and the binding control stays human
+title: One sanctioned human-only merge path
 status: active
 owner: eng
 canonical: true
