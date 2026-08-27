@@ -207,6 +207,7 @@ function harness({
   autoMergeError = null,
   standingAutoMergeAfterConfirmation = null,
   autoMergeErrorAfterConfirmation = null,
+  openPullRequestCount = 1,
   baseRulesErrorAfterConfirmation = null,
   // The base the pull request reports AFTER the merge. A retarget between the
   // final gate read and GitHub processing the merge shows up only here.
@@ -262,12 +263,14 @@ function harness({
       return "chapati23\n";
     }
     if (args[0] === "pr" && args[1] === "list") {
-      return JSON.stringify([
-        {
-          number: 2071,
-          headRepositoryOwner: { login: "mento-protocol" },
-        },
-      ]);
+      return JSON.stringify(
+        Array.from({ length: openPullRequestCount }, (_, index) => ({
+          number: index === 0 ? 2071 : 9000 + index,
+          headRepositoryOwner: {
+            login: index === 0 ? "mento-protocol" : "somebody-else",
+          },
+        })),
+      );
     }
     if (
       args[0] === "pr" &&
@@ -1706,7 +1709,10 @@ await test("refuses a bare target while GH_HOST is set", async () => {
     argv: ["--pr", "2071"],
     env: { GH_HOST: "ghe.example.com" },
   });
-  await assertRefuses(h.run(), "GH_HOST is set");
+  await assertRefuses(
+    h.run(),
+    "GH_HOST is ghe.example.com but this would merge on github.com",
+  );
   assertEqual(h.calls.merges.length, 0, "nothing should have merged");
   assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
 });
@@ -2139,6 +2145,56 @@ await test("refusal and warning messages sanitize GitHub-sourced text", async ()
     `no bidi override may reach the terminal, got: ${JSON.stringify(h.output())}`,
   );
   assert(h.output().includes("\ufffd"), "it should be visibly replaced");
+});
+
+await test("a host-qualified github.com target still refuses a foreign GH_HOST", async () => {
+  // Naming the host in --repo is not enough: the ready-state oracle normalizes
+  // github.com back to "no host" and omits --hostname, so GH_HOST would send
+  // the readiness reads to another host while the merge went to github.com.
+  const h = harness({
+    argv: [
+      "--pr",
+      "2071",
+      "--repo",
+      "github.com/mento-protocol/monitoring-monorepo",
+    ],
+    env: { GH_HOST: "ghe.example.com" },
+  });
+
+  await assertRefuses(h.run(), "this would merge on github.com");
+  assertEqual(h.calls.merges.length, 0, "nothing should have merged");
+});
+
+await test("GH_HOST naming the merge host is coherent and allowed", async () => {
+  const h = harness({
+    argv: ["--pr", "2071", "--repo", "ghe.example.com/acme/widgets"],
+    env: { GH_HOST: "ghe.example.com" },
+  });
+  const result = await h.run();
+  assertEqual(result.merged, true, "a matching host is the one coherent case");
+});
+
+await test("an untruncatable candidate list is required for an implicit target", async () => {
+  // gh pr list truncates silently. A hidden second candidate would turn the
+  // ambiguity refusal into a confident pick of the wrong pull request.
+  const h = harness({ argv: [], openPullRequestCount: 100 });
+
+  await assertRefuses(h.run(), "cannot be enumerated reliably");
+  assertEqual(h.calls.merges.length, 0, "nothing should have merged");
+});
+
+await test("the implicit-target listing asks for more than the gh default", async () => {
+  const h = harness({ argv: [] });
+  await h.run();
+
+  const list = h.calls.gh.find(
+    (args) => args[0] === "pr" && args[1] === "list",
+  );
+  assert(list.includes("--limit"), "the 30-item default is not enough");
+  assert(
+    Number(list[list.indexOf("--limit") + 1]) > 30,
+    "the limit must exceed gh's default",
+  );
 });
 
 await test("only a confirmed merge exits zero", async () => {

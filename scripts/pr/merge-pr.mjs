@@ -168,15 +168,20 @@ export async function mergePullRequest({
 
   const repos = await resolveRepositories({ repoArg, gh });
 
-  // `GH_HOST` picks the host whenever one was not provided, so a bare
-  // `owner/name` target would send the readiness reads and the merge to an
-  // Enterprise host while the login call, which names github.com outright,
-  // read a different one — and the briefing would show neither. A target
-  // carrying its own host is unaffected, because the host was provided.
-  if (repos.host === null && (env?.GH_HOST ?? "") !== "") {
+  // `GH_HOST` picks the host for every call that did not name one. Naming the
+  // host in `--repo` is not enough to be safe from it: the ready-state oracle
+  // normalizes github.com back to "no host" and then omits `--hostname`, so a
+  // `github.com/owner/name` target reads its readiness and feedback from
+  // whatever `GH_HOST` points at while the merge still goes to github.com —
+  // approving one repository's gates and merging another's. The only state
+  // that is coherent is `GH_HOST` naming the very host being merged on.
+  const targetHost = repos.host ?? "github.com";
+  const ghHost = env?.GH_HOST ?? "";
+  if (ghHost !== "" && ghHost !== targetHost) {
     throw new MergeRefusal(
-      `GH_HOST is set, so ${repos.base} does not name the host this would merge on; ` +
-        `unset it, or pass --repo <host/owner/name> to name the target outright`,
+      `GH_HOST is ${ghHost} but this would merge on ${targetHost} (${repos.base}), ` +
+        `so the readiness reads and the merge could target different hosts; ` +
+        `unset GH_HOST, or point it at the host you are merging on`,
     );
   }
   const login = await resolveLogin({ gh, host: repos.host });

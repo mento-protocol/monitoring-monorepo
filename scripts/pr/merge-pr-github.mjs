@@ -20,6 +20,13 @@ import {
 import { splitRepo } from "./pr-ready-state.mjs";
 
 /**
+ * How many open pull requests to consider when resolving an implicit target.
+ * Reaching this many refuses rather than guessing: `gh pr list` truncates
+ * silently, and a hidden second candidate would defeat the ambiguity gate.
+ */
+const PR_LIST_LIMIT = 100;
+
+/**
  * Resolve the checkout's own repository and the repository the pull request
  * lives in. A fork checkout merges into its parent, so the two differ there and
  * a bare `origin` is never a substitute for the parent.
@@ -96,6 +103,12 @@ export async function resolveTargetNumber({ prArg, repos, gh, git }) {
         branch,
         "--state",
         "open",
+        // `gh pr list` defaults to 30. A candidate past that cutoff is
+        // invisible, which does not merely lose a match — it can hide the
+        // SECOND candidate and turn the ambiguity refusal below into a
+        // confident pick of the wrong pull request.
+        "--limit",
+        String(PR_LIST_LIMIT),
         "--json",
         "number,headRepositoryOwner",
       ]),
@@ -103,6 +116,15 @@ export async function resolveTargetNumber({ prArg, repos, gh, git }) {
   } catch (err) {
     throw new MergeRefusal(
       `unable to list pull requests for ${branch}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  // Hitting the cap means the candidate set may be truncated, so neither a
+  // single match nor the ambiguity refusal can be trusted. Name the target.
+  if (Array.isArray(listed) && listed.length >= PR_LIST_LIMIT) {
+    throw new MergeRefusal(
+      `${repos.base} has at least ${PR_LIST_LIMIT} open pull requests, so the ` +
+        `candidates for ${branch} cannot be enumerated reliably; pass --pr <number>`,
     );
   }
 
