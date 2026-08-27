@@ -1166,7 +1166,9 @@ teardown_active_timeouts() {
   # interrupt (Ctrl-C/TERM to the gate) must not leave a SIGTERM-ignoring
   # mapped command (or descendant) running just because it wasn't the
   # timeout path that tore it down.
-  sleep 3
+  if [[ -n "${tree[0]+x}" ]]; then
+    sleep 3
+  fi
   for teardown_idx in "${!tree[@]}"; do
     pid="${tree[$teardown_idx]}"
     teardown_recorded="${tree_identities[$teardown_idx]-}"

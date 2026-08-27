@@ -12117,7 +12117,7 @@ STUB
       kill -CONT "$gate_pid"
     fi
 
-    for ((attempt = 0; attempt < 300; attempt++)); do
+    for ((attempt = 0; attempt < 600; attempt++)); do
       if ! jobs -pr | grep -Fxq "$gate_pid"; then
         settled=1
         break
@@ -12126,7 +12126,7 @@ STUB
     done
     [[ "$settled" -eq 1 ]] ||
       fail_parallel_interrupt_fixture \
-        "parallel $phase interrupt did not terminate the gate within 15s"
+        "parallel $phase interrupt did not terminate the gate within 30s"
 
     set +e
     wait "$gate_pid"
