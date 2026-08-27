@@ -1,0 +1,20 @@
+{
+  "AGENTS.md": [
+    "Never merge without the user's explicit approval for that specific merge.",
+    "**Secrets are IaC-owned.** Never create, rotate, or overwrite secrets",
+    "**Terraform apply requires explicit human approval.** Plan first.",
+    "**Forensic drafts stay local.** Use the `forensic-report` skill"
+  ],
+  "CLAUDE.md": [
+    "Never merge without the user's explicit approval for that specific merge.",
+    "**Secrets are IaC-owned.** Never create, rotate, or overwrite secrets",
+    "**Terraform apply requires explicit human approval.** Plan first.",
+    "**Forensic drafts stay local.** Use the `forensic-report` skill"
+  ],
+  "docs/notes/pr-operating-card.md": [
+    "**Never merge a PR without the user's explicit, direct approval of that specific merge.**",
+    "**Never merge without explicit approval** for that specific merge",
+    "**Knowingly deferred work needs a GitHub issue first**, linked from `## Deferrals`.",
+    "**Package-script, package-manager, and lockfile changes require explicit acknowledgement** through the gate; never bypass the refusal."
+  ]
+}

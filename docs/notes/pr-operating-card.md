@@ -103,7 +103,18 @@ even when you never open an authority.
 4. **Autoreview.** Freeze the scope baseline first — the initial request,
    target/owner, changed-file set, and non-test changed-line count — as the
    reference Babysit (step 6) checks new additions against. Then, for a
-   non-trivial completed batch, run the closeout review. Outside an active
+   non-trivial completed batch, run the closeout review.
+
+   **Test the validation claims against what the run actually establishes.**
+   On a re-run for an open PR that is its `## Validation` section; on the first
+   pass there is no PR yet, so apply the same test to the claims you are about
+   to write. Either way every claim names the evidence behind it and the
+   nearest stronger claim that evidence does not support, and an unexplained
+   strengthening of a claim is a finding. **This is the running agent's job,
+   not the bundled reviewer's**: the prepared bundle carries the diff and the
+   selected checklists, not the PR body or the command output behind a claim,
+   so a reviewer confined to it cannot see the claims to test. Do it where the
+   claims and their evidence are both in hand. Outside an active
    Codex session — the standalone helper or `--engine claude` — a bare
    `pnpm agent:autoreview` is the closeout, matching root
    [`AGENTS.md`](../../AGENTS.md). The skill routers defer to this step rather
@@ -379,6 +390,27 @@ These bind regardless of which step you are on:
 - **`Closes #N` only when Done means is fully met**, else `Refs #N`.
 - **Knowingly deferred work needs a GitHub issue first**, linked from
   `## Deferrals`. An evidence-backed won't-fix is not a deferral.
+- **Never weaken a control that is blocking your own work.** Do not widen,
+  disable, or soften the quality gate, the sandbox or permission config, branch
+  protection, or a safety-boundary rule to unblock the change you are making
+  now — an agent that can widen its own gate has no gate. Stop and hand the
+  control change to an independent session through a brief or an agent-ready
+  issue, with the operator's recorded consent. Routine control maintenance
+  stays allowed when it is its own claimed task and does not unblock the same
+  session's current work; reclassifying the blocking change as a separate task
+  does not qualify.
+
+  **When the control blocks its own repair** — broken branch protection
+  rejecting the PR that fixes it, a gate whose own bug fails every run — the
+  hand-off alone deadlocks: the receiving session is blocked by the same
+  control, and its fix would unblock its own task. That case needs the
+  operator's explicit consent to the specific repair, recorded on the issue or
+  PR, and the repair stays narrowly scoped to restoring the control. It is
+  still reviewed: use the last independently reviewed pre-change runtime for
+  the gate, or an independent reviewer for the diff. Widening the control
+  beyond the repair, or using this path for anything the control was correctly
+  refusing, is the thing this rule exists to prevent.
+
 - **Package-script, package-manager, and lockfile changes require explicit
   acknowledgement** through the gate; never bypass the refusal.
 - **Background long `--run` gates and pushes**; do not run them in a 600s

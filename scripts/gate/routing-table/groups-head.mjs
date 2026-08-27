@@ -104,12 +104,38 @@ export const HEAD_GROUPS = [
         ],
       },
       {
-        patterns: ["AGENTS.md", "*/AGENTS.md", ".codex/config.toml"],
+        // `CLAUDE.md` is the root AGENTS.md symlink and carries its own pin
+        // block. Editing through the symlink shows up as `AGENTS.md`, but
+        // replacing or deleting the link shows up as `CLAUDE.md` — the exact
+        // change the pin exists to catch — so it routes here too.
+        patterns: [
+          "AGENTS.md",
+          "CLAUDE.md",
+          "*/AGENTS.md",
+          ".codex/config.toml",
+        ],
         effects: [
           { surface: "agent-context" },
           {
             command: "pnpm agent:context-budget --strict",
             reason: "agent instruction budget input changed",
+          },
+          {
+            command: "node scripts/repo-health/check-guardrail-prose.mjs",
+            reason:
+              "agent instruction file holding pinned guardrail prose changed",
+          },
+        ],
+      },
+      {
+        // The operating card carries the Non-negotiables the pin list protects.
+        // It reaches no arm above, so this is the only route that runs the
+        // guardrail-prose check when the card itself is edited.
+        patterns: ["docs/notes/pr-operating-card.md"],
+        effects: [
+          {
+            command: "node scripts/repo-health/check-guardrail-prose.mjs",
+            reason: "operating card holding pinned guardrail prose changed",
           },
         ],
       },

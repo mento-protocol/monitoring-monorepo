@@ -54,7 +54,7 @@ pnpm agent:quality-gate --run      # Execute the mapped local-only checks
 pnpm agent:quality-gate --run --allow-package-script-changes
 pnpm agent:context-check           # Validate repo-visible agent instructions, links, and routing
 pnpm agent:review-materiality      # Classify review depth + context-update signals for current diff
-pnpm agent:autoreview              # Isolated closeout review; multi-pass uses --prepare-bundle-dir DIR + one fresh-context reviewer; quality gate owns tests
+pnpm agent:autoreview              # Isolated closeout review; multi-pass: --prepare-bundle-dir DIR + one fresh-context reviewer
 pnpm agent:autoreview:test         # Full autoreview regression families; defaults to up to 3 workers with progress + timings
 pnpm agent:autoreview:test -- --jobs 1  # Sequential full closeout for autoreview runtime changes
 pnpm agent:autoreview --verify-bundle-dir DIR  # Pre-review rehash; retain the printed manifest digest
@@ -67,17 +67,17 @@ pnpm docs:navigation-eval -- --check-fixtures  # Validate fresh-agent navigation
 pnpm docs:navigation-eval -- --prompt          # Print the bounded read-only evaluation prompt; never invokes a model
 pnpm docs:navigation-eval -- --prompt --base-commit <full-sha>  # Pin a committed result to a reachable default-branch ancestor
 pnpm docs:navigation-eval -- --validate <result.json>  # Recompute authority, evidence, route, and context scores
-pnpm review:eval -- --check-fixtures --offline  # Frozen review-skill contract: eval tags, truth digests, scorable ids; no network or model
-pnpm review:eval -- --check-ledger   # Ledger schema, append-only history, baseline immutability
-pnpm review:eval -- --report         # McNemar table and verdict for the newest ledger row
-pnpm review:eval:run                 # Run the paid evaluation locally; spends model quota, appends a ledger row
+pnpm review:eval -- --check-fixtures --offline  # Frozen review-skill contract, no model
+pnpm review:eval -- --check-ledger   # Ledger schema and append-only history
+pnpm review:eval -- --report         # Verdict for the newest ledger row
+pnpm review:eval:run                 # Paid local run; docs/evals/review-skill.md
 pnpm agent:context-budget --strict # Enforce root, scoped-file, and aggregate-route AGENTS byte caps
 # Run feedback-state first. Final all-clear needs the current-head Codex
 # PR-description +1 or this exact-head human override:
 # /pr-ready-override gate=codex-description-approval head=<full-head-sha> reason=<why this is safe>
 pnpm --silent pr:feedback-state --pr 123 --json  # Normalize unresolved/reply-required feedback before all-clear
 pnpm pr:ready-state --pr 123 --json              # Final current-head required-readiness probe
-node scripts/pr/review-process-metrics.mjs --prs <pr1,pr2,...> --output <result.json>  # Collect a new cohort; define its boundary and tracking issue first
+node scripts/pr/review-process-metrics.mjs --prs <pr1,pr2,...> --output <result.json>  # New cohort; define boundary + tracking issue first
 pnpm lockfile:lint                 # Fail-closed integrity + registry + override-floor check; no install needed
 pnpm skew:check                    # Fail on dependency version skew vs the pnpm catalog; no install needed
 pnpm sanitize:test                 # Fixture tests for scripts/sanitize-terraform-output.sh (terraform output secret redaction)
@@ -87,7 +87,8 @@ pnpm adr:check                      # Advisory ADR reminder for architectural ch
 pnpm adr:check:test                 # Offline tests for the ADR reminder trigger logic
 node scripts/workflows/check-github-action-pins.mjs  # Verify workflow/composite-action `uses:` refs are SHA-pinned
 node scripts/repo-health/check-hermetic-vitest-setup.mjs  # Verify all workspace Vitest network guards are byte-identical
-node scripts/repo-health/file-size-watchlist.mjs  # Refresh source file-size watchlist (package src/ trees + scripts/); use --format issue for GitHub Issues, not BACKLOG.md
+node scripts/repo-health/check-guardrail-prose.mjs  # Verify pinned guardrail sentences (guardrail-prose.json) still appear in AGENTS.md/CLAUDE.md/operating card
+node scripts/repo-health/file-size-watchlist.mjs  # Refresh file-size watchlist (src/ trees + scripts/); --format issue for GitHub
 pnpm indexer:testnet:codegen       # Generate types (multichain testnet: Celo Sepolia + Monad testnet + Polygon Amoy)
 pnpm indexer:testnet:dev           # Start indexer (multichain testnet)
 
@@ -96,8 +97,8 @@ pnpm dashboard:dev            # Dev server; see docs/notes/dashboard-verificatio
 pnpm dashboard:codegen        # Generate dashboard GraphQL operation types from indexer-envio/schema.graphql
 pnpm dashboard:build          # Production build
 pnpm dashboard:size-limit     # Check bundle size against budgets (run after build)
-pnpm dashboard:lighthouse:pool-fixture # Production-build canonical pool Lighthouse: deterministic fixture, delayed breaker revalidation, blocking 1 700 ms median LCP
-pnpm --filter @mento-protocol/ui-dashboard test:browser                   # Fixture browser + visual snapshot tests against a cached next build served by next start
+pnpm dashboard:lighthouse:pool-fixture # Production-build pool Lighthouse: deterministic fixture, delayed breaker revalidation
+pnpm --filter @mento-protocol/ui-dashboard test:browser  # Fixture browser + visual snapshot tests vs cached next build
 pnpm --filter @mento-protocol/ui-dashboard test:browser:production        # Same, but force a fresh fixture build first
 pnpm --filter @mento-protocol/ui-dashboard test:browser:update-snapshots # Re-baseline visual snapshots after a legitimate UI change
 pnpm dashboard:mutation       # Targeted StrykerJS baseline for dashboard pure logic
