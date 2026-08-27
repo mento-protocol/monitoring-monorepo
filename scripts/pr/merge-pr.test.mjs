@@ -1725,8 +1725,12 @@ await test("an enqueued merge has its pending request cancelled", async () => {
     "mento-protocol/monitoring-monorepo",
   );
   assert(
-    h.output().includes("has been cancelled"),
+    h.output().includes("Auto-merge has been disabled"),
     `the operator should be told, got:\n${h.output()}`,
+  );
+  assert(
+    h.output().includes("does not remove a merge-queue entry"),
+    "the report must not overstate what --disable-auto did",
   );
 });
 
@@ -1809,6 +1813,20 @@ await test("a merge of a head nobody approved is not a verified merge", async ()
   assertEqual(exitCodeForResult(result), 1, "the shell must not chain past it");
   assert(
     h.output().includes("not the " + HEAD_OID + " you approved"),
+    `the operator must be told, got:\n${h.output()}`,
+  );
+});
+
+await test("a MERGED state with no head OID is not a verified merge", async () => {
+  // Same shape as the missing base: an unreadable field must not read as
+  // confirmation of the thing it was supposed to confirm.
+  const h = harness({ mergedHeadOid: "" });
+  const result = await h.run();
+
+  assertEqual(result.verified, false, "the head was never confirmed");
+  assertEqual(exitCodeForResult(result), 1);
+  assert(
+    h.output().includes("names no head commit"),
     `the operator must be told, got:\n${h.output()}`,
   );
 });

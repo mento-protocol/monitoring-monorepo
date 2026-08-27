@@ -335,7 +335,16 @@ export async function mergePullRequest({
         repos.base,
         "--disable-auto",
       ]);
-      return "Any pending merge request has been cancelled.";
+      // `--disable-auto` turns off auto-merge. It does NOT remove a pull
+      // request already sitting in a merge queue, so this is not proof the
+      // request is gone. Report the state actually observed afterwards rather
+      // than claiming success, and name the case that still needs a hand.
+      return (
+        `Auto-merge has been disabled for this pull request. That does not ` +
+        `remove a merge-queue entry: if the base uses a merge queue, dequeue ` +
+        `it by hand and confirm, because a queued entry can still merge later ` +
+        `without any of the gates above.`
+      );
     } catch (err) {
       return (
         `A pending merge request could NOT be cancelled: ` +
@@ -411,10 +420,23 @@ export async function mergePullRequest({
   // the final gate read and something else merged the new one, our
   // `--match-head-commit` request fails while this read still says MERGED —
   // and the consent record would then name a commit GitHub never merged.
-  if (
-    outcome.headRefOid !== "" &&
-    outcome.headRefOid !== approved.headOid.toLowerCase()
-  ) {
+  if (outcome.headRefOid === "") {
+    stdout.write(
+      `${repos.base}#${number} reports MERGED but names no head commit, so this ` +
+        `run cannot confirm it merged ${approved.headOid}. ` +
+        `Check it before running any post-merge step.\n`,
+    );
+    return {
+      merged: true,
+      verified: false,
+      state: outcome.state,
+      baseRefName: outcome.baseRefName,
+      record,
+      consentPath,
+    };
+  }
+
+  if (outcome.headRefOid !== approved.headOid.toLowerCase()) {
     stdout.write(
       `WARNING: ${repos.base}#${number} is MERGED at ${outcome.headRefOid}, not the ` +
         `${approved.headOid} you approved. Something else merged a newer head. ` +
