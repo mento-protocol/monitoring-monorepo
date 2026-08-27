@@ -35,6 +35,10 @@ grant operating-system privileges. The prologue clears the remaining inherited
 Bash controls before it resolves a path or parses an argument. Do not invoke the
 gate as `bash scripts/agent-quality-gate.sh`; that bypasses the shebang boundary.
 
+The checked-in Claude permission grants approval-free execution only for
+`./scripts/agent-quality-gate.sh`. It does not grant the `pnpm` package alias
+because the active branch controls that alias before the gate can validate it.
+
 `pnpm agent:autoreview` reviews source only. `pnpm agent:autoreview:test` runs
 all families with at most three workers and bounded progress/timings, which the
 mapped gate preserves. `-- --jobs 1` changes only scheduling. CI uses that mode

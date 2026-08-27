@@ -217,6 +217,7 @@ test("accepts the reviewed single-command Claude sag permissions", () => {
 
 test("rejects every unreviewed Claude Bash permission", () => {
   const permissions = [
+    "Bash(pnpm agent:quality-gate:*)",
     'Bash(cmd=sag; "$cmd" --api-key-file /tmp/other-key -v Charlie "hey")',
     "Bash(echo sagacious)",
   ];
@@ -279,7 +280,7 @@ test("accepts every reviewed allowlist entry the settings file grants", () => {
   assertNoFailures(
     runContract({
       allow: [
-        "Bash(pnpm agent:quality-gate:*)",
+        "Bash(./scripts/agent-quality-gate.sh:*)",
         "Bash(bash scripts/agent-quality-gate.test.sh:*)",
         "Bash(bash ./scripts/agent-quality-gate.test.sh:*)",
         "Bash(bash scripts/bootstrap/agent-session-end-hook.sh:*)",

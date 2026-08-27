@@ -10682,6 +10682,11 @@ run_context_check_expect_failure
 assert_contains ".claude/settings.json: must not allow deploy/promote scripts: Bash(bash ./scripts/deploy/deploy-dashboard.sh:*)"
 restore_hook_configs
 
+append_claude_allow "Bash(pnpm agent:quality-gate:*)"
+run_context_check_expect_failure
+assert_contains ".claude/settings.json: unexpected Bash permission; add the exact reviewed entry to the context-check allowlist: Bash(pnpm agent:quality-gate:*)"
+restore_hook_configs
+
 run_gate "docs/deleted.md"
 assert_contains "- docs"
 assert_contains "- ./tools/trunk check --all (changed paths require full-repo Trunk checks)"
