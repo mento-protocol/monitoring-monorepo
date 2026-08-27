@@ -184,8 +184,10 @@ credentials that cannot merge — and is tracked separately as follow-up.
   operator, not an audit log anyone else can read, and an attacker with local
   write can still delete it. It is deliberately not pushed anywhere.
 - The wrapper is split across `merge-pr.mjs` (ordering), `merge-pr-core.mjs`
-  (pure decisions) and `merge-pr-io.mjs` (side effects) so each stays under the
-  600-line soft cap, with a test asserting that.
+  (pure decisions), `merge-pr-io.mjs` (local side effects) and
+  `merge-pr-github.mjs` (GitHub calls) so each stays under the 600-line soft
+  cap. The suite asserts the cap over all four, which is the only per-PR
+  enforcement: `scripts/` has no `max-lines` rule.
 - The `gh api` merge route and CI tokens remain outside this control's reach.
 
 ## Evidence
