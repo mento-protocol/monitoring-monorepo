@@ -346,10 +346,18 @@ export async function finalizeStagedTroveLedgerRows(
     txHash: { _eq: args.txHash },
   });
   const isRedemption = args.kind === TROVE_LEDGER_KIND.REDEMPTION;
-  for (const pending of staged) {
-    if (pending.collateralId !== args.collateralId) continue;
-    if (pending.kind !== args.kind) continue;
-    const trove = await context.Trove.get(pending.troveEntityId);
+  const matching = staged.filter(
+    (pending) =>
+      pending.collateralId === args.collateralId && pending.kind === args.kind,
+  );
+  // One aggregate can cover many troves (batch liquidations); read them
+  // all up front instead of one await per row. Safe: within one
+  // transaction and kind, no two staged rows share a trove.
+  const troves = await Promise.all(
+    matching.map((pending) => context.Trove.get(pending.troveEntityId)),
+  );
+  matching.forEach((pending, i) => {
+    const trove = troves[i];
     const statusAfter = trove?.status ?? pending.statusAfter;
     const debtAfter = pending.debtAfter ?? trove?.debt;
     context.TroveLedgerEvent.set({
@@ -396,7 +404,7 @@ export async function finalizeStagedTroveLedgerRows(
       });
     }
     context.PendingTroveLedgerEvent.deleteUnsafe(pending.id);
-  }
+  });
 }
 
 /** Finalize one staged batch-kind row from the `BatchUpdated` replay — the
