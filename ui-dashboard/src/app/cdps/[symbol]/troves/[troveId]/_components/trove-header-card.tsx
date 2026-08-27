@@ -41,26 +41,41 @@ function EventTimeLink({
   }
   const label = relativeTime(timestamp);
   const exact = formatTimestamp(timestamp);
+  // `Tooltip` (not a plain `title`) for the no-destination branches: a
+  // `title` attribute alone is unreachable without a mouse, and this exact
+  // timestamp is the only place that precision is available — most notably
+  // while the schema-lag fallback omits `lastUpdatedTxHash` entirely.
+  // Mirrors the sibling market table's `EventTimeValue` (trove-cells.tsx).
   if (!txHash) {
-    return <span title={`${prefix} ${exact}.`}>{label}</span>;
+    return (
+      <Tooltip content={`${prefix} ${exact}.`}>
+        <span>{label}</span>
+      </Tooltip>
+    );
   }
   const networkId = networkIdForChainId(chainId);
   const network = networkId ? NETWORKS[networkId] : null;
   if (network == null) {
     return (
-      <span title={`${prefix} ${exact}. Transaction: ${txHash}.`}>{label}</span>
+      <Tooltip content={`${prefix} ${exact}. Transaction: ${txHash}.`}>
+        <span>{label}</span>
+      </Tooltip>
     );
   }
   return (
-    <a
-      href={explorerTxUrl(network, txHash)}
-      target="_blank"
-      rel="noopener noreferrer"
-      title={`${prefix} ${exact}. Opens transaction ${txHash}.`}
-      className="text-slate-300 transition-colors hover:text-indigo-300"
+    <Tooltip
+      content={`${prefix} ${exact}. Opens transaction ${txHash}.`}
+      asChild
     >
-      {label}
-    </a>
+      <a
+        href={explorerTxUrl(network, txHash)}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-slate-300 transition-colors hover:text-indigo-300"
+      >
+        {label}
+      </a>
+    </Tooltip>
   );
 }
 
@@ -76,6 +91,8 @@ export function TroveHeaderCard({
   trove,
   collateral,
   displayedInterestRate,
+  batchRateTimestamp = null,
+  batchMissing = false,
 }: {
   trove: CdpTrove;
   collateral: CdpCollateral;
@@ -87,6 +104,19 @@ export function TroveHeaderCard({
    *  came back empty. Never `trove.interestRate` as a stand-in for an
    *  unresolved join — that could present a stale copied rate as current. */
   displayedInterestRate: string | null;
+  /** The joined `InterestBatch.updatedAt`, only when a batch join actually
+   *  applies and resolved. A batch manager can change the batch rate
+   *  without touching this trove, so this can be newer than
+   *  `trove.lastUpdatedAt` — the footer below must not claim the batch rate
+   *  as observed at the trove's own timestamp. Optional/defaults to `null`
+   *  (no batch timestamp) so callers indifferent to batch state — most
+   *  tests — don't need to pass it. */
+  batchRateTimestamp?: string | null;
+  /** True once the batch join has resolved successfully but found no
+   *  matching `InterestBatch` row — distinct from still loading or failed,
+   *  both of which already have their own disclosure. Optional/defaults to
+   *  `false`. */
+  batchMissing?: boolean;
 }) {
   return (
     <header className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
@@ -113,6 +143,8 @@ export function TroveHeaderCard({
         trove={trove}
         collateral={collateral}
         displayedInterestRate={displayedInterestRate}
+        batchRateTimestamp={batchRateTimestamp}
+        batchMissing={batchMissing}
       />
 
       <p className="mt-4 text-xs text-slate-500">
@@ -120,8 +152,95 @@ export function TroveHeaderCard({
         {relativeTime(trove.lastUpdatedAt)}), which can be a plain ownership
         transfer rather than a debt or price change — not a live RPC or oracle
         read.
+        {batchRateTimestamp != null && (
+          <>
+            {" "}
+            The batch-managed rate above is timestamped separately — see its
+            tooltip — since a batch manager can update it without touching this
+            trove.
+          </>
+        )}
       </p>
     </header>
+  );
+}
+
+/** The Rate stat's "Batch" annotation — split out of {@link TroveHeaderStats}
+ *  to keep it under the file's max-lines-per-function budget. Three states:
+ *  not batch-managed (nothing), batch-managed with the join resolved
+ *  (timestamped tooltip), and batch-managed with the join confirmed missing
+ *  (an explicit "Batch missing", matching the market table's convention in
+ *  `trove-cells.tsx`) — never a bare dash that reads the same as "still
+ *  loading". */
+function BatchRateLabel({
+  interestBatchId,
+  batchRateTimestamp,
+  batchMissing,
+}: {
+  interestBatchId: string | null;
+  batchRateTimestamp: string | null;
+  batchMissing: boolean;
+}) {
+  if (interestBatchId == null) return null;
+  if (batchMissing) {
+    return (
+      <span className="ml-1 text-[10px] text-amber-400">Batch missing</span>
+    );
+  }
+  if (batchRateTimestamp == null) {
+    return <span className="ml-1 text-[10px] text-slate-500">Batch</span>;
+  }
+  return (
+    <Tooltip
+      content={`Rate as of the batch's own last update (${formatTimestamp(batchRateTimestamp)}) — separate from this trove's own timestamp in the footer below.`}
+      label="About the batch rate's timestamp"
+    >
+      <span className="ml-1 text-[10px] text-slate-500 cursor-help">Batch</span>
+    </Tooltip>
+  );
+}
+
+/** The ICR stat's tooltip-wrapped value — split out of
+ *  {@link TroveHeaderStats} to keep it under the file's max-lines-per-
+ *  function budget. */
+function IcrStat({
+  trove,
+  collateral,
+  icrTimestamp,
+}: {
+  trove: CdpTrove;
+  collateral: CdpCollateral;
+  icrTimestamp: string;
+}) {
+  // `lastUpdatedAt` (behind `icrTimestamp`) is bumped by a pure NFT
+  // ownership transfer too (indexer-envio/src/handlers/liquity/troveNFT.ts),
+  // not only by a debt/collateral-changing event — so it's an upper bound
+  // on how old the ICR actually is, never a guarantee it was captured at
+  // exactly this time. Say so rather than implying more precision than the
+  // field carries.
+  const icrTitle =
+    trove.icrBps < 0
+      ? `Indexed ICR unavailable. Row last updated at ${icrTimestamp}.`
+      : `Indexed ICR as of the last indexed event (${icrTimestamp}), which can be a plain ownership transfer rather than a price/debt change.\nNot a live RPC or oracle read.`;
+  return (
+    <StatValue>
+      <Tooltip content={icrTitle} asChild>
+        {/* `button`, not `span` — `asChild` clones this element as the
+            tooltip's focus trigger (see @/components/tooltip.tsx), and a
+            non-interactive element needs an ARIA role or a native
+            interactive tag to be a valid keyboard-focus target; `span
+            tabIndex` alone trips jsx-a11y/no-noninteractive-tabindex. */}
+        <button
+          type="button"
+          className={icrTextClass(trove.icrBps, collateral.mcrBps)}
+        >
+          {formatBpsPercent(trove.icrBps)}
+        </button>
+      </Tooltip>
+      <span className="ml-1 text-[10px] text-slate-500">
+        (MCR {formatBpsPercent(collateral.mcrBps)})
+      </span>
+    </StatValue>
   );
 }
 
@@ -132,22 +251,16 @@ function TroveHeaderStats({
   trove,
   collateral,
   displayedInterestRate,
+  batchRateTimestamp,
+  batchMissing,
 }: {
   trove: CdpTrove;
   collateral: CdpCollateral;
   displayedInterestRate: string | null;
+  batchRateTimestamp: string | null;
+  batchMissing: boolean;
 }) {
   const icrTimestamp = formatTimestamp(trove.lastUpdatedAt);
-  // `lastUpdatedAt` is bumped by a pure NFT ownership transfer too
-  // (indexer-envio/src/handlers/liquity/troveNFT.ts), not only by a
-  // debt/collateral-changing event — so it's an upper bound on how old
-  // debt/ICR actually are, never a guarantee they were captured at exactly
-  // this time. Say so rather than implying more precision than the field
-  // carries.
-  const icrTitle =
-    trove.icrBps < 0
-      ? `Indexed ICR unavailable. Row last updated at ${icrTimestamp}.`
-      : `Indexed ICR as of the last indexed event (${icrTimestamp}), which can be a plain ownership transfer rather than a price/debt change.\nNot a live RPC or oracle read.`;
   const endedAt = trove.closedAt ?? null;
   const endedTxHash = trove.closedTxHash ?? null;
 
@@ -188,9 +301,11 @@ function TroveHeaderStats({
         <StatLabel>Rate</StatLabel>
         <StatValue>
           {formatInterestRate(displayedInterestRate)}
-          {trove.interestBatchId != null && (
-            <span className="ml-1 text-[10px] text-slate-500">Batch</span>
-          )}
+          <BatchRateLabel
+            interestBatchId={trove.interestBatchId}
+            batchRateTimestamp={batchRateTimestamp}
+            batchMissing={batchMissing}
+          />
         </StatValue>
       </div>
       <div>
@@ -211,24 +326,11 @@ function TroveHeaderStats({
       </div>
       <div>
         <StatLabel>ICR</StatLabel>
-        <StatValue>
-          <Tooltip content={icrTitle} asChild>
-            {/* `button`, not `span` — `asChild` clones this element as the
-                tooltip's focus trigger (see @/components/tooltip.tsx), and a
-                non-interactive element needs an ARIA role or a native
-                interactive tag to be a valid keyboard-focus target; `span
-                tabIndex` alone trips jsx-a11y/no-noninteractive-tabindex. */}
-            <button
-              type="button"
-              className={icrTextClass(trove.icrBps, collateral.mcrBps)}
-            >
-              {formatBpsPercent(trove.icrBps)}
-            </button>
-          </Tooltip>
-          <span className="ml-1 text-[10px] text-slate-500">
-            (MCR {formatBpsPercent(collateral.mcrBps)})
-          </span>
-        </StatValue>
+        <IcrStat
+          trove={trove}
+          collateral={collateral}
+          icrTimestamp={icrTimestamp}
+        />
       </div>
     </div>
   );

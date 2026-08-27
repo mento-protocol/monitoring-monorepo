@@ -1,6 +1,8 @@
 // Route params + interim-assembly constants for the trove history page
 // (docs/PLAN-trove-history-page.md, "UI design → Route and entry points").
 
+import { sortedCopy } from "@/lib/immutable-sort";
+
 // The on-chain hex trove id: `0x` + up to 64 hex digits (a uint256), lowercase
 // once normalized — matches the indexer's `normalizeTroveTokenId`
 // (indexer-envio/src/handlers/liquity/troves.ts). No fixed length: unlike an
@@ -123,5 +125,5 @@ export function compareTroveOperationRowsDesc(
 export function reorderTroveOperationsChronologically<
   TRow extends { id: string; timestamp: string },
 >(descRows: readonly TRow[]): TRow[] {
-  return [...descRows].sort(compareTroveOperationRowsDesc);
+  return sortedCopy(descRows, compareTroveOperationRowsDesc);
 }

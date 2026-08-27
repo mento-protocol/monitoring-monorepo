@@ -1,11 +1,7 @@
 "use client";
 
-import {
-  EmptyBox,
-  ErrorBox,
-  Skeleton,
-  StaleRefreshNotice,
-} from "@/components/feedback";
+import { EmptyBox, ErrorBox, StaleRefreshNotice } from "@/components/feedback";
+import { TableSkeleton } from "@/components/skeletons";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TxHashCell } from "@/components/tx-hash-cell";
 import { formatTimestamp, relativeTime } from "@/lib/format";
@@ -28,6 +24,7 @@ export function TroveOperationsList({
   truncated,
   isLoading,
   error,
+  hasLoadedOnce = rows.length > 0,
   chainId,
   debtSymbol,
 }: {
@@ -35,6 +32,17 @@ export function TroveOperationsList({
   truncated: boolean;
   isLoading: boolean;
   error: Error | undefined;
+  /** True once the fetch has resolved at least once (`data !== undefined`),
+   *  captured by the caller BEFORE any `?? []` fallback collapses "never
+   *  loaded" and "loaded, confirmed empty" to the same `rows.length === 0`.
+   *  A trove with zero real operations is a legitimate confirmed-empty
+   *  state — without this flag, a later poll failure on that trove would
+   *  misread as a first-load failure and show the hard ErrorBox instead of
+   *  the EmptyBox + stale-refresh notice. Optional: defaults to `rows.length
+   *  > 0`, the prior (imprecise) behavior, so callers indifferent to the
+   *  loaded-vs-never-loaded distinction — most tests — don't need to pass
+   *  it explicitly. */
+  hasLoadedOnce?: boolean;
   chainId: number;
   debtSymbol: string;
 }) {
@@ -50,22 +58,29 @@ export function TroveOperationsList({
         the lifetime totals above.
       </p>
       {/* Mirrors the parent view's other three notices (markets/trove/batch
-          rate): once rows have loaded at least once, a later poll failure
-          keeps the cached rows on screen — disclose that rather than
-          silently continuing as if nothing happened. A first-load failure
-          (rows still empty) is handled by the ErrorBox branch below
-          instead, so this stays gated to the "already had data" case. */}
+          rate): once the fetch has resolved at least once, a later poll
+          failure keeps the cached rows (which may legitimately be empty —
+          a trove can have zero real operations) on screen — disclose that
+          rather than silently continuing as if nothing happened. Gated on
+          `hasLoadedOnce`, not `rows.length > 0`: a confirmed-empty trove
+          must not be mistaken for "never loaded" the moment a refresh
+          fails. A genuine first-load failure is handled by the ErrorBox
+          branch below instead. */}
       <StaleRefreshNotice
         subject="Trove operations"
-        error={rows.length > 0 ? error : undefined}
+        error={hasLoadedOnce ? error : undefined}
         className="mb-3"
       />
-      {error != null && rows.length === 0 ? (
+      {error != null && !hasLoadedOnce ? (
         <ErrorBox
           message={`Failed to load trove operations — ${error.message}`}
         />
       ) : isLoading && rows.length === 0 ? (
-        <Skeleton rows={4} />
+        // Table-shaped, not the generic bar `Skeleton`: this branch swaps
+        // straight into the 5-column table below once `operations` resolves
+        // (the trove/markets queries can settle first), so it needs the real
+        // header + row rhythm `TableSkeleton` reserves, not an unrelated shape.
+        <TableSkeleton rows={4} cols={5} variant="rows" />
       ) : rows.length === 0 ? (
         <EmptyBox message="No operations indexed for this trove yet." />
       ) : (
@@ -108,7 +123,7 @@ export function TroveOperationsList({
             </tbody>
           </Table>
           {truncated && (
-            <p className="px-1 pt-1 text-xs text-amber-400">
+            <p role="status" className="px-1 pt-1 text-xs text-amber-400">
               Earliest history truncated — this trove has more operations than
               fit in one fetch. The most recent operations are shown.
             </p>

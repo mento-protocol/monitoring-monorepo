@@ -29,7 +29,12 @@ export function TroveDetailSkeleton() {
           <div className={`h-5 w-16 ${SHIMMER}`} />
         </div>
         <div className="grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-3 lg:grid-cols-6">
-          {Array.from({ length: 6 }, (_, i) => (
+          {/* 7 stats (owner/opened/closed-or-updated/rate/coll/debt/icr) —
+              matches TroveHeaderStats exactly, so the `lg` 6-col grid wraps
+              the same way loading and loaded: the 7th (ICR) starts a second
+              row in both, instead of the skeleton reserving only one row and
+              the loaded card growing when data resolves. */}
+          {Array.from({ length: 7 }, (_, i) => (
             // react-doctor-disable-next-line react-doctor/no-array-index-as-key
             <div key={`trove-header-skel-${i}`}>
               <div className={`h-3 w-16 ${SHIMMER}`} />

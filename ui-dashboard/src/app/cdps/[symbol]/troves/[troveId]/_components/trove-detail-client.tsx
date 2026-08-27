@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useNetwork } from "@/components/network-provider";
 import { EmptyBox, ErrorBox, StaleRefreshNotice } from "@/components/feedback";
 import { HASURA_TIMEOUT_MS, useGQL } from "@/lib/graphql";
@@ -79,6 +79,42 @@ function resolveTroveByIdQuery(
     : CDP_TROVE_BY_ID_WITHOUT_TX;
 }
 
+/** The schema probe above can flip `supportsTroveLastUpdatedTxHash` mid
+ *  session (a live Hasura deploy+resync completing), which swaps
+ *  `resolveTroveByIdQuery`'s result to a different query STRING — a new SWR
+ *  key, since `useGQL` keys on the query text (`src/lib/graphql.ts`). That
+ *  drops the already-loaded row for this same trove back to `undefined`
+ *  data, flashing the full skeleton or, if the new request then fails,
+ *  replacing perfectly good cached data with a hard error. Mirrors the
+ *  market page's `useStableCdpDetail` (`cdp-detail-client.tsx`): substitute
+ *  back the last successful response for the SAME entity id while the new
+ *  key's fetch is in flight or has failed, so a query-variant swap is
+ *  invisible to the reader. */
+function useStableTroveById(
+  troveById: ReturnType<typeof useGQL<CdpTroveByIdResponse>>,
+  troveEntityId: string | null,
+): ReturnType<typeof useGQL<CdpTroveByIdResponse>> {
+  const previous = useRef<{
+    troveEntityId: string;
+    data: CdpTroveByIdResponse;
+  } | null>(null);
+
+  useEffect(() => {
+    if (troveEntityId == null || troveById.data == null) return;
+    previous.current = { troveEntityId, data: troveById.data };
+  }, [troveEntityId, troveById.data]);
+
+  if (troveById.data != null || troveEntityId == null) return troveById;
+  if (previous.current?.troveEntityId !== troveEntityId) return troveById;
+
+  return {
+    ...troveById,
+    data: previous.current.data,
+    error: undefined,
+    isLoading: false,
+  };
+}
+
 /** Batch-rate join target (mirrors `buildRankedOpenRows` in the market
  *  page's `trove-row-data.ts`): only for a currently-open trove, since a
  *  closed/liquidated/redeemed trove's rate is a historical snapshot, not a
@@ -133,6 +169,63 @@ function resolveInterestBatchFirstLoadError(
   return resolvedBatchRate == null ? error : undefined;
 }
 
+/** True only once the batch join has RESOLVED successfully with no matching
+ *  row (`InterestBatch: []`) — distinct from still loading (`data ==
+ *  null`) and from a failed request (already covered by
+ *  {@link resolveInterestBatchFirstLoadError}). Both a loading and a
+ *  successful-empty join otherwise collapse to the same `undefined` rate;
+ *  without this, a confirmed-missing batch row reads as "still loading"
+ *  forever instead of the explicit "Batch missing" state the market table
+ *  already shows for it (`trove-cells.tsx`). */
+function resolveInterestBatchMissing(
+  joinBatchId: string | null,
+  data: CdpInterestBatchByIdResponse | undefined,
+): boolean {
+  return joinBatchId != null && data != null && data.InterestBatch.length === 0;
+}
+
+type BatchRateProps = {
+  displayedInterestRate: string | null;
+  interestBatchError: Error | undefined;
+  interestBatchFirstLoadError: Error | undefined;
+  batchRateTimestamp: string | null;
+  batchMissing: boolean;
+};
+
+/** Bundles every value derived from the `interestBatch` join into one call
+ *  — split out of {@link TroveDetailClient} so its own complexity and
+ *  line-count stay under the file's lint budget; the branching this
+ *  replaces (5 separate resolver calls, each with its own conditional)
+ *  lives here instead. */
+function resolveBatchRateProps(
+  trove: CdpTrove | undefined,
+  joinBatchId: string | null,
+  interestBatch: ReturnType<typeof useGQL<CdpInterestBatchByIdResponse>>,
+): BatchRateProps {
+  const resolvedBatchRate =
+    interestBatch.data?.InterestBatch[0]?.annualInterestRate;
+  return {
+    displayedInterestRate: resolveDisplayedInterestRate(
+      trove,
+      joinBatchId,
+      resolvedBatchRate,
+    ),
+    interestBatchError: resolveInterestBatchNoticeError(
+      resolvedBatchRate,
+      interestBatch.error,
+    ),
+    interestBatchFirstLoadError: resolveInterestBatchFirstLoadError(
+      resolvedBatchRate,
+      interestBatch.error,
+    ),
+    batchRateTimestamp:
+      joinBatchId == null
+        ? null
+        : (interestBatch.data?.InterestBatch[0]?.updatedAt ?? null),
+    batchMissing: resolveInterestBatchMissing(joinBatchId, interestBatch.data),
+  };
+}
+
 export function TroveDetailClient({
   symbol,
   troveId,
@@ -170,10 +263,13 @@ export function TroveDetailClient({
     ) === true;
   const troveEntityId =
     collateral == null ? null : makeTroveEntityId(collateral.id, troveId);
-  const troveById = useGQL<CdpTroveByIdResponse>(
-    resolveTroveByIdQuery(troveEntityId, supportsTroveLastUpdatedTxHash),
-    troveEntityId == null ? undefined : { troveEntityId },
-    { timeoutMs: HASURA_TIMEOUT_MS },
+  const troveById = useStableTroveById(
+    useGQL<CdpTroveByIdResponse>(
+      resolveTroveByIdQuery(troveEntityId, supportsTroveLastUpdatedTxHash),
+      troveEntityId == null ? undefined : { troveEntityId },
+      { timeoutMs: HASURA_TIMEOUT_MS },
+    ),
+    troveEntityId,
   );
   const trove = troveById.data?.Trove[0];
   const joinBatchId = resolveJoinBatchId(trove);
@@ -208,8 +304,6 @@ export function TroveDetailClient({
       <EmptyBox message="CDP markets are only deployed on Celo mainnet." />
     );
   }
-  const resolvedBatchRate =
-    interestBatch.data?.InterestBatch[0]?.annualInterestRate;
   return (
     <TroveDetailView
       symbol={symbol}
@@ -219,19 +313,7 @@ export function TroveDetailClient({
       collateral={collateral}
       troveById={troveById}
       trove={trove}
-      displayedInterestRate={resolveDisplayedInterestRate(
-        trove,
-        joinBatchId,
-        resolvedBatchRate,
-      )}
-      interestBatchError={resolveInterestBatchNoticeError(
-        resolvedBatchRate,
-        interestBatch.error,
-      )}
-      interestBatchFirstLoadError={resolveInterestBatchFirstLoadError(
-        resolvedBatchRate,
-        interestBatch.error,
-      )}
+      {...resolveBatchRateProps(trove, joinBatchId, interestBatch)}
       operations={operations}
       operationRows={operationRows}
       truncated={truncated}
@@ -255,6 +337,8 @@ function TroveDetailView({
   displayedInterestRate,
   interestBatchError,
   interestBatchFirstLoadError,
+  batchRateTimestamp,
+  batchMissing,
   operations,
   operationRows,
   truncated,
@@ -269,6 +353,8 @@ function TroveDetailView({
   displayedInterestRate: string | null;
   interestBatchError: Error | undefined;
   interestBatchFirstLoadError: Error | undefined;
+  batchRateTimestamp: string | null;
+  batchMissing: boolean;
   operations: ReturnType<typeof useGQL<CdpTroveOperationsResponse>>;
   operationRows: CdpTroveOperationEventRow[];
   truncated: boolean;
@@ -323,6 +409,8 @@ function TroveDetailView({
         trove={trove}
         collateral={collateral}
         displayedInterestRate={displayedInterestRate}
+        batchRateTimestamp={batchRateTimestamp}
+        batchMissing={batchMissing}
       />
       <TroveLifetimeTotals trove={trove} debtSymbol={collateral.symbol} />
       <TroveOperationsList
@@ -330,6 +418,10 @@ function TroveDetailView({
         truncated={truncated}
         isLoading={operations.isLoading}
         error={operations.error}
+        // `operations.data != null`, not `operationRows.length > 0`: the
+        // latter can't tell "never loaded" from "loaded, confirmed empty"
+        // (see the prop's doc comment on TroveOperationsList).
+        hasLoadedOnce={operations.data != null}
         chainId={collateral.chainId}
         debtSymbol={collateral.symbol}
       />

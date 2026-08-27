@@ -266,6 +266,52 @@ describe("TroveHeaderCard", () => {
     expect(text).toContain("Batch");
   });
 
+  it("shows an explicit 'Batch missing' instead of a bare dash when the batch join resolved with no matching row", () => {
+    handle = render(
+      <TroveHeaderCard
+        trove={trove({ interestBatchId: "batch-1" })}
+        collateral={collateral()}
+        displayedInterestRate={null}
+        batchMissing
+      />,
+    );
+    expect(handle.container.textContent).toContain("Batch missing");
+  });
+
+  it("does not show 'Batch missing' while the join is merely pending (not yet resolved-empty)", () => {
+    handle = render(
+      <TroveHeaderCard
+        trove={trove({ interestBatchId: "batch-1" })}
+        collateral={collateral()}
+        displayedInterestRate={null}
+        batchMissing={false}
+      />,
+    );
+    expect(handle.container.textContent).not.toContain("Batch missing");
+  });
+
+  it("timestamps the joined batch rate separately from the trove's own footer timestamp", () => {
+    // A batch manager can change the batch rate without touching this
+    // trove, so `InterestBatch.updatedAt` can be newer than
+    // `trove.lastUpdatedAt` — the footer must not claim the rate as
+    // observed at the trove's own timestamp.
+    handle = render(
+      <TroveHeaderCard
+        trove={trove({ interestBatchId: "batch-1" })}
+        collateral={collateral()}
+        displayedInterestRate={rateWei(250)}
+        batchRateTimestamp={String(NOW + 500)}
+      />,
+    );
+    const tooltipTexts = Array.from(
+      handle.container.querySelectorAll('[role="tooltip"]'),
+    ).map((el) => el.textContent ?? "");
+    expect(
+      tooltipTexts.some((t) => t.includes("batch's own last update")),
+    ).toBe(true);
+    expect(handle.container.textContent).toContain("timestamped separately");
+  });
+
   it("links the owner to previousOwner when the NFT has burned (owner zeroed)", () => {
     handle = render(
       <TroveHeaderCard
@@ -301,7 +347,7 @@ describe("TroveHeaderCard", () => {
     expect(link?.getAttribute("href")).toBe("mock-address://0xliveowner");
   });
 
-  it("is keyboard-focusable on every asChild tooltip trigger (status badge + ICR)", () => {
+  it("is keyboard-focusable on every tooltip trigger (status badge, ICR, event-time links)", () => {
     handle = render(
       <TroveHeaderCard
         trove={trove()}
@@ -309,17 +355,37 @@ describe("TroveHeaderCard", () => {
         displayedInterestRate={DEFAULT_RATE}
       />,
     );
-    // The Debt stat's tooltip uses the default `<button>` trigger. The
-    // status badge and ICR stat both clone a `<button>` via `asChild` too
-    // (not a plain `<span>`, which jsx-a11y/no-noninteractive-tabindex
-    // rejects as a tabIndex target) — every tooltip trigger on this card is
-    // reachable by Tab.
+    // The Debt stat's tooltip uses the default `<button>` trigger, as do the
+    // status badge and ICR stat via `asChild` (not a plain `<span>`, which
+    // jsx-a11y/no-noninteractive-tabindex rejects as a tabIndex target). The
+    // Opened/Updated `EventTimeLink`s clone an `<a href>` via `asChild`
+    // instead — natively focusable without an explicit tabIndex, so it's a
+    // valid trigger even though it isn't a `<button>`.
     const triggers = handle.container.querySelectorAll("[aria-describedby]");
     expect(triggers.length).toBeGreaterThan(0);
     for (const trigger of triggers) {
-      expect(trigger.tagName).toBe("BUTTON");
-      expect((trigger as HTMLButtonElement).tabIndex).toBe(0);
+      const nativelyFocusable =
+        trigger.tagName === "BUTTON" ||
+        (trigger.tagName === "A" && trigger.hasAttribute("href"));
+      expect(nativelyFocusable).toBe(true);
     }
+  });
+
+  it("makes the exact Updated timestamp reachable without a mouse when there's no tx hash to link to", () => {
+    // Most notably hit while the schema-lag fallback omits
+    // `lastUpdatedTxHash` — the exact time must not live only in a `title`
+    // on a non-focusable span.
+    handle = render(
+      <TroveHeaderCard
+        trove={trove({ lastUpdatedTxHash: null })}
+        collateral={collateral()}
+        displayedInterestRate={DEFAULT_RATE}
+      />,
+    );
+    const triggers = handle.container.querySelectorAll(
+      "button[aria-describedby]",
+    );
+    expect(triggers.length).toBeGreaterThanOrEqual(1);
   });
 
   it("colors ICR below MCR as danger", () => {

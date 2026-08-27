@@ -195,4 +195,80 @@ describe("TroveOperationsList", () => {
     expect(handle.container.textContent).not.toContain("refresh failed");
     expect(handle.container.querySelector('[role="alert"]')).toBeNull();
   });
+
+  it("preserves a confirmed-empty result (not the hard error) when a poll fails after a real prior load", () => {
+    // rows.length === 0 alone can't distinguish "never loaded" from
+    // "loaded, confirmed empty" — a trove with zero real operations is a
+    // legitimate empty state. `hasLoadedOnce` disambiguates it: the failed
+    // refresh still gets an alert (via the shared StaleRefreshNotice), but
+    // it's the "showing the last confirmed state" wording, not the harder
+    // "Failed to load" first-load message, and the empty-state box (not a
+    // blank content area) still renders underneath it.
+    handle = render(
+      <TroveOperationsList
+        rows={[]}
+        truncated={false}
+        isLoading={false}
+        error={new Error("boom")}
+        hasLoadedOnce
+        chainId={42220}
+        debtSymbol="GBPm"
+      />,
+    );
+    const text = handle.container.textContent ?? "";
+    expect(text).not.toContain("Failed to load trove operations");
+    expect(text).toContain("No operations indexed for this trove yet.");
+    expect(text).toContain("Trove operations refresh failed");
+    expect(text).toContain("showing the last confirmed state");
+    expect(text).toContain("boom");
+  });
+
+  it("shows the hard error for a genuine first-load failure (hasLoadedOnce omitted, defaults from empty rows)", () => {
+    handle = render(
+      <TroveOperationsList
+        rows={[]}
+        truncated={false}
+        isLoading={false}
+        error={new Error("boom")}
+        chainId={42220}
+        debtSymbol="GBPm"
+      />,
+    );
+    expect(
+      handle.container.querySelector('[role="alert"]')?.textContent,
+    ).toContain("boom");
+  });
+
+  it("uses a table-shaped skeleton (not generic bars) while operations are loading", () => {
+    handle = render(
+      <TroveOperationsList
+        rows={[]}
+        truncated={false}
+        isLoading={true}
+        error={undefined}
+        chainId={42220}
+        debtSymbol="GBPm"
+      />,
+    );
+    expect(
+      handle.container.querySelector('[aria-label="Loading table"]'),
+    ).not.toBeNull();
+  });
+
+  it("announces the truncation disclosure as a live status region", () => {
+    handle = render(
+      <TroveOperationsList
+        rows={[op()]}
+        truncated={true}
+        isLoading={false}
+        error={undefined}
+        chainId={42220}
+        debtSymbol="GBPm"
+      />,
+    );
+    const notice = Array.from(
+      handle.container.querySelectorAll('[role="status"]'),
+    ).find((el) => el.textContent?.includes("Earliest history truncated"));
+    expect(notice).toBeDefined();
+  });
 });

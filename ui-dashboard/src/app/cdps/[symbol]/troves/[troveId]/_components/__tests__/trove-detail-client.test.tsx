@@ -660,4 +660,85 @@ describe("TroveDetailClient", () => {
     render(handle!);
     expect(handle!.container.textContent).not.toContain("refresh failed");
   });
+
+  it("shows 'Batch missing' when the batch join resolves successfully with no matching row — not the same as still loading", () => {
+    mockQueries({
+      troveRows: [trove({ status: "active", interestBatchId: "batch-1" })],
+      interestBatchRows: [], // resolved, but empty: confirmed missing.
+    });
+    render(handle!);
+    expect(handle!.container.textContent).toContain("Batch missing");
+  });
+
+  it("timestamps a resolved batch rate with the batch's own updatedAt, distinct from the trove's timestamp", () => {
+    mockQueries({
+      troveRows: [trove({ status: "active", interestBatchId: "batch-1" })],
+      interestBatchRows: [
+        {
+          id: "batch-1",
+          collateralId: "gbpm",
+          batchManager: "0xmanager",
+          annualInterestRate: rateWei(250),
+          updatedAt: String(NOW + 999),
+        },
+      ],
+    });
+    render(handle!);
+    expect(handle!.container.textContent).toContain("timestamped separately");
+  });
+
+  it("keeps showing the last successful trove row while a schema-probe query-variant swap is in flight", () => {
+    // First render: the schema probe hasn't yet detected
+    // `lastUpdatedTxHash` support, so `troveById` resolves via the
+    // fallback variant.
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_MARKETS) {
+        return { data: marketsData(), error: null, isLoading: false };
+      }
+      if (query === CDP_TROVE_SCHEMA_FIELDS) {
+        return { data: TROVE_SCHEMA_WITHOUT_TX, error: null, isLoading: false };
+      }
+      if (query === CDP_TROVE_BY_ID_WITHOUT_TX) {
+        return { data: { Trove: [trove()] }, error: null, isLoading: false };
+      }
+      if (query === CDP_TROVE_OPERATIONS) {
+        return {
+          data: { TroveOperationEvent: [op()] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+    render(handle!);
+    expect(handle!.container.textContent).toContain("Trove 0x8abc");
+
+    // The schema probe now confirms support: `resolveTroveByIdQuery` swaps
+    // to a DIFFERENT query string — a new SWR key whose fetch hasn't
+    // resolved yet (`data` undefined). Without the stabilizer this drops
+    // back to the full skeleton even though the underlying row hasn't
+    // actually changed.
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_MARKETS) {
+        return { data: marketsData(), error: null, isLoading: false };
+      }
+      if (query === CDP_TROVE_SCHEMA_FIELDS) {
+        return { data: TROVE_SCHEMA_WITH_TX, error: null, isLoading: false };
+      }
+      if (query === CDP_TROVE_BY_ID) {
+        return { data: undefined, error: undefined, isLoading: true };
+      }
+      if (query === CDP_TROVE_OPERATIONS) {
+        return {
+          data: { TroveOperationEvent: [op()] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+    render(handle!);
+    expect(handle!.container.textContent).toContain("Trove 0x8abc");
+    expect(handle!.container.querySelector('[role="alert"]')).toBeNull();
+  });
 });
