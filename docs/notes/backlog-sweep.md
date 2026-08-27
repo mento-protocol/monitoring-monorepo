@@ -50,9 +50,12 @@ way to notice.
 
 A worker's clone path is derived from its issue number, so it is deterministic
 and can already exist — an interrupted run leaves one behind, and a released
-issue can be selected again later. An existing directory is inspected rather
-than assumed: one whose remote and branch match this issue is resumed, and
-anything else yields a fresh unique path plus a line in the report. A checkout
+issue can be selected again later. An existing directory is resumed only on
+proof that it belongs to this sweep — a `.sweep-owner` file written at clone
+time and naming this session. Remote and branch are not that proof: a second
+sweep of the same issue reproduces both, so matching on them alone also accepts
+a checkout another live worker is committing from. Anything else yields a fresh
+unique path plus a line in the report. A checkout
 whose contents have not been established is never deleted; it can hold
 uncommitted work, and nothing available to the sweep tells that apart from
 litter.

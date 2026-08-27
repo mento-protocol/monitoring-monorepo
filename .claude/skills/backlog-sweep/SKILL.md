@@ -153,9 +153,12 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   **The path is deterministic, so check it before cloning.** The same issue
   number produces the same directory, and `git clone` fails outright into one
   that already exists — from an interrupted run, or from an earlier sweep of an
-  issue that was released and later re-selected. When the directory is there,
-  read it: a clone whose `origin` is this repository and whose branch belongs to
-  this issue is resumable, and the worker continues in it. Anything else gets a
+  issue that was released and later re-selected. Resume it only on proof it is
+  this sweep's own: write `.sweep-owner` holding the sweep's session id at clone
+  time, and continue in the directory only when that file names this session.
+  Remote and branch are not proof — a second sweep of the same issue reproduces
+  both, so that test also accepts a checkout a live worker is committing from,
+  and two workers would then push from one tree. Anything else gets a
   fresh unique path, and the conflict is named in the report. **Never delete a
   checkout whose contents you have not established** — it may hold another
   session's uncommitted work, and nothing here can tell that apart from litter.
