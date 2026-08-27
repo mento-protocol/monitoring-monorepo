@@ -29,6 +29,7 @@ import {
   CDP_TROVE_OPERATIONS_REQUEST_LIMIT,
   makeTroveEntityId,
   paginateTroveOperations,
+  reorderTroveOperationsChronologically,
 } from "../_lib/params";
 import { TroveDetailSkeleton } from "./trove-detail-skeleton";
 import { TroveHeaderCard } from "./trove-header-card";
@@ -106,17 +107,30 @@ function resolveDisplayedInterestRate(
   return resolvedBatchRate ?? null;
 }
 
-/** Only disclose a batch-rate refresh failure once a rate was actually
- *  confirmed and is still on screen (mirrors the markets/trove notices,
- *  which are only reachable past `hasErrorWithoutData`, i.e. with data
- *  present). A first-attempt failure with nothing confirmed yet already
- *  reads honestly as "—" via {@link resolveDisplayedInterestRate} — a
- *  "last confirmed state" notice would misstate that as stale data. */
+/** Only disclose a batch-rate refresh failure via the "last confirmed
+ *  state" wording once a rate was actually confirmed and is still on
+ *  screen (mirrors the markets/trove notices, which are only reachable
+ *  past `hasErrorWithoutData`, i.e. with data present) — that specific
+ *  wording would misstate a first-attempt failure as stale data.
+ *  {@link resolveInterestBatchFirstLoadError} covers the complementary
+ *  case: a first-load failure is still real information (Codex correctly
+ *  flagged that collapsing it into the same silent dash as "still
+ *  loading" hides that the query failed, not just hasn't resolved yet). */
 function resolveInterestBatchNoticeError(
   resolvedBatchRate: string | null | undefined,
   error: Error | undefined,
 ): Error | undefined {
   return resolvedBatchRate != null ? error : undefined;
+}
+
+/** The complementary first-load case: an error with nothing ever
+ *  confirmed. Distinct from {@link resolveInterestBatchNoticeError} so the
+ *  two never both fire for the same render — exactly one, or neither. */
+function resolveInterestBatchFirstLoadError(
+  resolvedBatchRate: string | null | undefined,
+  error: Error | undefined,
+): Error | undefined {
+  return resolvedBatchRate == null ? error : undefined;
 }
 
 export function TroveDetailClient({
@@ -180,7 +194,12 @@ export function TroveDetailClient({
     { timeoutMs: HASURA_TIMEOUT_MS },
   );
   const { rows: operationRows, truncated } = useMemo(
-    () => paginateTroveOperations(operations.data?.TroveOperationEvent ?? []),
+    () =>
+      paginateTroveOperations(
+        reorderTroveOperationsChronologically(
+          operations.data?.TroveOperationEvent ?? [],
+        ),
+      ),
     [operations.data],
   );
 
@@ -209,6 +228,10 @@ export function TroveDetailClient({
         resolvedBatchRate,
         interestBatch.error,
       )}
+      interestBatchFirstLoadError={resolveInterestBatchFirstLoadError(
+        resolvedBatchRate,
+        interestBatch.error,
+      )}
       operations={operations}
       operationRows={operationRows}
       truncated={truncated}
@@ -231,6 +254,7 @@ function TroveDetailView({
   trove,
   displayedInterestRate,
   interestBatchError,
+  interestBatchFirstLoadError,
   operations,
   operationRows,
   truncated,
@@ -244,6 +268,7 @@ function TroveDetailView({
   trove: CdpTrove | undefined;
   displayedInterestRate: string | null;
   interestBatchError: Error | undefined;
+  interestBatchFirstLoadError: Error | undefined;
   operations: ReturnType<typeof useGQL<CdpTroveOperationsResponse>>;
   operationRows: CdpTroveOperationEventRow[];
   truncated: boolean;
@@ -288,24 +313,11 @@ function TroveDetailView({
       >
         ← {collateral.symbol} market
       </Link>
-      {/* A revalidation failure after either query has already succeeded once
-          leaves `data` populated (`hasErrorWithoutData` above is false), so
-          the header below keeps rendering — this discloses that it's the
-          last confirmed state rather than a silently-stalled poll. */}
-      <StaleRefreshNotice
-        subject="Market data"
-        error={markets.error}
-        className="mb-3"
-      />
-      <StaleRefreshNotice
-        subject="Trove data"
-        error={troveById.error}
-        className="mb-3"
-      />
-      <StaleRefreshNotice
-        subject="Batch rate"
-        error={interestBatchError}
-        className="mb-3"
+      <TroveDetailNotices
+        marketsError={markets.error}
+        troveError={troveById.error}
+        interestBatchError={interestBatchError}
+        interestBatchFirstLoadError={interestBatchFirstLoadError}
       />
       <TroveHeaderCard
         trove={trove}
@@ -322,6 +334,55 @@ function TroveDetailView({
         debtSymbol={collateral.symbol}
       />
     </div>
+  );
+}
+
+/** The page's four stale/failed-refresh disclosures — split out of
+ *  {@link TroveDetailView} to stay under the file's max-lines-per-function
+ *  lint budget. A revalidation failure after any of these queries has
+ *  already succeeded once leaves `data` populated
+ *  (`hasErrorWithoutData` in {@link TroveDetailView} is false), so the
+ *  header keeps rendering below — these disclose that it's the last
+ *  confirmed state rather than a silently-stalled poll. */
+function TroveDetailNotices({
+  marketsError,
+  troveError,
+  interestBatchError,
+  interestBatchFirstLoadError,
+}: {
+  marketsError: Error | undefined;
+  troveError: Error | undefined;
+  interestBatchError: Error | undefined;
+  interestBatchFirstLoadError: Error | undefined;
+}) {
+  return (
+    <>
+      <StaleRefreshNotice
+        subject="Market data"
+        error={marketsError}
+        className="mb-3"
+      />
+      <StaleRefreshNotice
+        subject="Trove data"
+        error={troveError}
+        className="mb-3"
+      />
+      <StaleRefreshNotice
+        subject="Batch rate"
+        error={interestBatchError}
+        className="mb-3"
+      />
+      {/* Distinct from StaleRefreshNotice above: a first-load batch-rate
+          failure has nothing "last confirmed" to point to, so it gets its
+          own honest wording instead of borrowing that one's phrasing. */}
+      {interestBatchFirstLoadError != null && (
+        <div className="mb-3">
+          <ErrorBox
+            message={`Batch rate unavailable — ${interestBatchFirstLoadError.message}`}
+          />
+        </div>
+      )}
+    </>
   );
 }
 

@@ -145,6 +145,38 @@ describe("TroveHeaderCard", () => {
     );
   });
 
+  it("does not claim the footer timestamp as a debt/price observation time — it can be a pure ownership transfer", () => {
+    // indexer-envio/src/handlers/liquity/troveNFT.ts bumps lastUpdatedAt on
+    // every NFT Transfer (mint/burn/transfer), not only on a debt- or
+    // collateral-changing TroveOperation — so the footer must not claim
+    // "values" (debt, ICR) were captured exactly at that timestamp.
+    handle = render(
+      <TroveHeaderCard
+        trove={trove()}
+        collateral={collateral()}
+        displayedInterestRate={DEFAULT_RATE}
+      />,
+    );
+    expect(handle.container.textContent).toContain("ownership transfer");
+  });
+
+  it("discloses the same ownership-transfer caveat on the Debt and ICR tooltips", () => {
+    handle = render(
+      <TroveHeaderCard
+        trove={trove()}
+        collateral={collateral()}
+        displayedInterestRate={DEFAULT_RATE}
+      />,
+    );
+    const tooltipTexts = Array.from(
+      handle.container.querySelectorAll('[role="tooltip"]'),
+    ).map((el) => el.textContent ?? "");
+    const debtTooltip = tooltipTexts.find((t) => t.includes("debt change"));
+    const icrTooltip = tooltipTexts.find((t) => t.includes("price/debt"));
+    expect(debtTooltip).toContain("ownership transfer");
+    expect(icrTooltip).toContain("ownership transfer");
+  });
+
   it("shows 'Closed' with the closing tx for a closed/liquidated/redeemed trove", () => {
     handle = render(
       <TroveHeaderCard

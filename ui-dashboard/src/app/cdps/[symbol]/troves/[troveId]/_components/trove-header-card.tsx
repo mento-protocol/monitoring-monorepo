@@ -117,7 +117,9 @@ export function TroveHeaderCard({
 
       <p className="mt-4 text-xs text-slate-500">
         Values shown are indexed as of the last recorded event (
-        {relativeTime(trove.lastUpdatedAt)}) — not a live RPC or oracle read.
+        {relativeTime(trove.lastUpdatedAt)}), which can be a plain ownership
+        transfer rather than a debt or price change — not a live RPC or oracle
+        read.
       </p>
     </header>
   );
@@ -136,10 +138,16 @@ function TroveHeaderStats({
   displayedInterestRate: string | null;
 }) {
   const icrTimestamp = formatTimestamp(trove.lastUpdatedAt);
+  // `lastUpdatedAt` is bumped by a pure NFT ownership transfer too
+  // (indexer-envio/src/handlers/liquity/troveNFT.ts), not only by a
+  // debt/collateral-changing event — so it's an upper bound on how old
+  // debt/ICR actually are, never a guarantee they were captured at exactly
+  // this time. Say so rather than implying more precision than the field
+  // carries.
   const icrTitle =
     trove.icrBps < 0
       ? `Indexed ICR unavailable. Row last updated at ${icrTimestamp}.`
-      : `Indexed ICR as of ${icrTimestamp}.\nNot a live RPC or oracle read.`;
+      : `Indexed ICR as of the last indexed event (${icrTimestamp}), which can be a plain ownership transfer rather than a price/debt change.\nNot a live RPC or oracle read.`;
   const endedAt = trove.closedAt ?? null;
   const endedTxHash = trove.closedTxHash ?? null;
 
@@ -193,7 +201,7 @@ function TroveHeaderStats({
         <StatLabel>
           Debt
           <Tooltip
-            content={`Recorded at the last indexed event (${icrTimestamp}). Interest has accrued since — this is not a live contract read.`}
+            content={`As of the last indexed event (${icrTimestamp}), which can be a plain ownership transfer rather than a debt change — this figure may be older. Interest has accrued since either way; not a live contract read.`}
             label="About the debt figure's staleness"
           />
         </StatLabel>

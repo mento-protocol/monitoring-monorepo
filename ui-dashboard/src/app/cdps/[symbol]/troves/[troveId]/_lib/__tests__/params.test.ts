@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   CDP_TROVE_OPERATIONS_RENDER_LIMIT,
   CDP_TROVE_OPERATIONS_REQUEST_LIMIT,
+  compareTroveOperationRowsDesc,
   isValidTroveIdParam,
   makeTroveEntityId,
   normalizeTroveIdParam,
   paginateTroveOperations,
+  reorderTroveOperationsChronologically,
 } from "../params";
 
 describe("isValidTroveIdParam", () => {
@@ -89,5 +91,80 @@ describe("paginateTroveOperations", () => {
     );
     expect(result.truncated).toBe(true);
     expect(result.rows).toHaveLength(CDP_TROVE_OPERATIONS_RENDER_LIMIT);
+  });
+});
+
+describe("compareTroveOperationRowsDesc", () => {
+  // The indexer's eventId (indexer-envio/src/helpers.ts) is
+  // `${chainId}_${blockNumber}_${logIndex}` with UNPADDED numeric
+  // components — a naive string comparison of ids sorts "..._100_9" AFTER
+  // "..._100_10" as text, even though log 10 happened after log 9 in the
+  // same block.
+  it("breaks a same-timestamp tie by numeric block+logIndex, not string id order", () => {
+    const logNine = { id: "42220_100_9", timestamp: "1000" };
+    const logTen = { id: "42220_100_10", timestamp: "1000" };
+    // Descending (newest first): log 10 must sort before log 9.
+    expect(compareTroveOperationRowsDesc(logTen, logNine)).toBeLessThan(0);
+    expect(compareTroveOperationRowsDesc(logNine, logTen)).toBeGreaterThan(0);
+  });
+
+  it("breaks a same-timestamp, same-block tie correctly across a two-digit boundary (99 vs 100)", () => {
+    const log99 = { id: "42220_100_99", timestamp: "1000" };
+    const log100 = { id: "42220_100_100", timestamp: "1000" };
+    expect(compareTroveOperationRowsDesc(log100, log99)).toBeLessThan(0);
+  });
+
+  it("breaks a same-timestamp tie by block number when logIndex ties or blocks differ", () => {
+    const earlierBlock = { id: "42220_100_5", timestamp: "1000" };
+    const laterBlock = { id: "42220_101_1", timestamp: "1000" };
+    // Descending: the later block sorts first even though its logIndex (1)
+    // is numerically smaller than the earlier block's (5).
+    expect(
+      compareTroveOperationRowsDesc(laterBlock, earlierBlock),
+    ).toBeLessThan(0);
+  });
+
+  it("sorts primarily by timestamp, descending, regardless of id", () => {
+    const older = { id: "42220_999_1", timestamp: "1000" };
+    const newer = { id: "42220_1_1", timestamp: "2000" };
+    expect(compareTroveOperationRowsDesc(newer, older)).toBeLessThan(0);
+  });
+
+  it("treats equal id and timestamp as a tie", () => {
+    const row = { id: "42220_100_9", timestamp: "1000" };
+    expect(compareTroveOperationRowsDesc(row, { ...row })).toBe(0);
+  });
+});
+
+describe("reorderTroveOperationsChronologically", () => {
+  it("fixes a same-timestamp log-index tie that Hasura's string id order gets backwards", () => {
+    // As Hasura would return them under `order_by: [{ timestamp: desc },
+    // { id: desc }]` — log 9 sorts ahead of log 10 as a string.
+    const hasuraOrder = [
+      { id: "42220_100_9", timestamp: "1000" },
+      { id: "42220_100_10", timestamp: "1000" },
+    ];
+    const reordered = reorderTroveOperationsChronologically(hasuraOrder);
+    expect(reordered.map((r) => r.id)).toEqual(["42220_100_10", "42220_100_9"]);
+  });
+
+  it("leaves already-correct ordering untouched", () => {
+    const rows = [
+      { id: "42220_2_1", timestamp: "2000" },
+      { id: "42220_1_1", timestamp: "1000" },
+    ];
+    expect(
+      reorderTroveOperationsChronologically(rows).map((r) => r.id),
+    ).toEqual(["42220_2_1", "42220_1_1"]);
+  });
+
+  it("does not mutate the input array", () => {
+    const rows = [
+      { id: "42220_100_9", timestamp: "1000" },
+      { id: "42220_100_10", timestamp: "1000" },
+    ];
+    const original = [...rows];
+    reorderTroveOperationsChronologically(rows);
+    expect(rows).toEqual(original);
   });
 });

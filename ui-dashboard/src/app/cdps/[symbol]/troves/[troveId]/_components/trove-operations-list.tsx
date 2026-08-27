@@ -1,6 +1,11 @@
 "use client";
 
-import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
+import {
+  EmptyBox,
+  ErrorBox,
+  Skeleton,
+  StaleRefreshNotice,
+} from "@/components/feedback";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TxHashCell } from "@/components/tx-hash-cell";
 import { formatTimestamp, relativeTime } from "@/lib/format";
@@ -44,6 +49,17 @@ export function TroveOperationsList({
         liquidations that touched this trove are not yet attributable here; see
         the lifetime totals above.
       </p>
+      {/* Mirrors the parent view's other three notices (markets/trove/batch
+          rate): once rows have loaded at least once, a later poll failure
+          keeps the cached rows on screen — disclose that rather than
+          silently continuing as if nothing happened. A first-load failure
+          (rows still empty) is handled by the ErrorBox branch below
+          instead, so this stays gated to the "already had data" case. */}
+      <StaleRefreshNotice
+        subject="Trove operations"
+        error={rows.length > 0 ? error : undefined}
+        className="mb-3"
+      />
       {error != null && rows.length === 0 ? (
         <ErrorBox
           message={`Failed to load trove operations — ${error.message}`}

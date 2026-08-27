@@ -8,6 +8,14 @@
 // AGENTS.md's skeleton/content parity rule exists to avoid. ARIA live region
 // lives on the trailing skeleton block so we don't nest live regions
 // (mirrors address-book/[address]/loading.tsx).
+//
+// Two post-header blocks, matching the two sections the loaded view can
+// show: TroveLifetimeTotals (conditional — only for a trove with
+// redemption/liquidation history) and TroveOperationsList (always present).
+// Which trove this is isn't known until data resolves, so the totals block
+// is reserved unconditionally; a trove without that history loses a modest
+// placeholder when it resolves, which is a smaller mismatch than the
+// alternative — a whole card appearing with no skeleton anticipating it.
 
 const SHIMMER = "animate-pulse rounded bg-slate-800/50";
 
@@ -26,6 +34,19 @@ export function TroveDetailSkeleton() {
             <div key={`trove-header-skel-${i}`}>
               <div className={`h-3 w-16 ${SHIMMER}`} />
               <div className={`mt-1 h-4 w-20 ${SHIMMER}`} />
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 space-y-3">
+        <div className={`h-4 w-56 ${SHIMMER}`} />
+        <div className={`h-3 w-full max-w-md ${SHIMMER}`} />
+        <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+          {Array.from({ length: 4 }, (_, i) => (
+            // react-doctor-disable-next-line react-doctor/no-array-index-as-key
+            <div key={`trove-totals-skel-${i}`}>
+              <div className={`h-3 w-20 ${SHIMMER}`} />
+              <div className={`mt-1 h-4 w-16 ${SHIMMER}`} />
             </div>
           ))}
         </div>

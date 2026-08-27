@@ -141,7 +141,7 @@ describe("TroveOperationsList", () => {
     );
   });
 
-  it("shows an error only when there is no fallback data to display", () => {
+  it("shows a hard error (no table) only when there is no fallback data to display", () => {
     handle = render(
       <TroveOperationsList
         rows={[]}
@@ -155,10 +155,10 @@ describe("TroveOperationsList", () => {
     expect(
       handle.container.querySelector('[role="alert"]')?.textContent,
     ).toContain("boom");
+    expect(handle.container.querySelector("table")).toBeNull();
+  });
 
-    act(() => handle!.root.unmount());
-    handle.container.remove();
-
+  it("discloses a failed refresh while keeping the cached rows on screen, instead of silently continuing", () => {
     handle = render(
       <TroveOperationsList
         rows={[op()]}
@@ -169,7 +169,30 @@ describe("TroveOperationsList", () => {
         debtSymbol="GBPm"
       />,
     );
+    const text = handle.container.textContent ?? "";
+    // The table still renders from the cached rows...
+    expect(text).toContain("0xabc");
+    expect(handle.container.querySelector("table")).not.toBeNull();
+    // ...but discloses that the poll behind it failed, via the same
+    // StaleRefreshNotice wording the parent view uses for its other
+    // queries (markets/trove/batch rate).
+    expect(text).toContain("Trove operations refresh failed");
+    expect(text).toContain("showing the last confirmed state");
+    expect(text).toContain("boom");
+  });
+
+  it("shows no stale-refresh notice when there is no error", () => {
+    handle = render(
+      <TroveOperationsList
+        rows={[op()]}
+        truncated={false}
+        isLoading={false}
+        error={undefined}
+        chainId={42220}
+        debtSymbol="GBPm"
+      />,
+    );
+    expect(handle.container.textContent).not.toContain("refresh failed");
     expect(handle.container.querySelector('[role="alert"]')).toBeNull();
-    expect(handle.container.textContent).toContain("0xabc");
   });
 });

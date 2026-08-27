@@ -69,3 +69,59 @@ export function paginateTroveOperations<TRow>(
   const kept = truncated ? descRows.slice(0, renderLimit) : descRows;
   return { rows: [...kept].reverse(), truncated };
 }
+
+function compareBigIntStrings(a: string, b: string): number {
+  const diff = BigInt(a) - BigInt(b);
+  return diff < BigInt(0) ? -1 : diff > BigInt(0) ? 1 : 0;
+}
+
+/** The indexer's `eventId` helper (indexer-envio/src/helpers.ts) builds an
+ *  id as `${chainId}_${blockNumber}_${logIndex}` with UNPADDED numeric
+ *  components. Parses the trailing `blockNumber_logIndex` pair back out for
+ *  a numeric comparison. */
+function parseEventIdOrdinal(id: string): [bigint, bigint] {
+  const parts = id.split("_");
+  const logIndex = BigInt(parts[parts.length - 1] || "0");
+  const blockNumber = BigInt(parts[parts.length - 2] || "0");
+  return [blockNumber, logIndex];
+}
+
+function compareEventIdOrdinal(a: string, b: string): number {
+  const [aBlock, aLog] = parseEventIdOrdinal(a);
+  const [bBlock, bLog] = parseEventIdOrdinal(b);
+  if (aBlock !== bBlock) return aBlock < bBlock ? -1 : 1;
+  if (aLog !== bLog) return aLog < bLog ? -1 : 1;
+  return 0;
+}
+
+/** Numeric-aware chronological comparator, DESCENDING (newest first) —
+ *  matches `CDP_TROVE_OPERATIONS`'s intended `order_by`. Hasura's own
+ *  `order_by: [{ timestamp: desc }, { id: desc }]` ties break on the id
+ *  STRING: an unpadded id like `..._100_9` sorts AFTER `..._100_10` as text
+ *  even though log 10 happened after log 9 in the same block — the wrong
+ *  chronology whenever two operations share a timestamp. Re-sorting
+ *  client-side with this comparator (see
+ *  {@link reorderTroveOperationsChronologically}) fixes display order for
+ *  whatever page Hasura returns. It can't recover a row Hasura already
+ *  dropped at the row-limit boundary using the wrong tiebreak — the
+ *  `TroveOperationEvent` entity has no queryable `logIndex` field to order
+ *  by server-side; that needs an indexer-side schema change (tracked
+ *  separately, see the PR's Deferrals section). */
+export function compareTroveOperationRowsDesc(
+  a: { id: string; timestamp: string },
+  b: { id: string; timestamp: string },
+): number {
+  const byTimestamp = compareBigIntStrings(b.timestamp, a.timestamp);
+  if (byTimestamp !== 0) return byTimestamp;
+  return compareEventIdOrdinal(b.id, a.id);
+}
+
+/** Re-sorts a Hasura-ordered `CDP_TROVE_OPERATIONS` fetch with the numeric
+ *  tiebreak above before {@link paginateTroveOperations} touches it, so the
+ *  limit+1 sentinel detection and the final reverse-to-chronological step
+ *  both operate on the correctly-ordered set. */
+export function reorderTroveOperationsChronologically<
+  TRow extends { id: string; timestamp: string },
+>(descRows: readonly TRow[]): TRow[] {
+  return [...descRows].sort(compareTroveOperationRowsDesc);
+}

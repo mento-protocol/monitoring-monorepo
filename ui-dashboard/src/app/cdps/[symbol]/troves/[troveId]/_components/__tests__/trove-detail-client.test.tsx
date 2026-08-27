@@ -399,6 +399,32 @@ describe("TroveDetailClient", () => {
     );
   });
 
+  it("renders same-timestamp operations in true chronological order, not Hasura's string-id tiebreak order", () => {
+    // Simulates exactly what Hasura's `order_by: [{ timestamp: desc },
+    // { id: desc }]` would return for two ops in the same block sharing a
+    // timestamp: log 9 sorts ahead of log 10 as a string ("...9" > "...10"
+    // lexicographically), the wrong chronology. The page must correct this
+    // before rendering, oldest first.
+    mockQueries({
+      operationRows: [
+        op({ id: "42220_100_9", timestamp: "1000", txHash: "0xlog9" }),
+        op({ id: "42220_100_10", timestamp: "1000", txHash: "0xlog10" }),
+      ],
+    });
+    render(handle!);
+
+    const txCells = Array.from(
+      handle!.container.querySelectorAll("table tbody tr"),
+    ).map((row) => row.textContent ?? "");
+    const log9Index = txCells.findIndex((t) => t.includes("0xlog9"));
+    const log10Index = txCells.findIndex((t) => t.includes("0xlog10"));
+    expect(log9Index).toBeGreaterThanOrEqual(0);
+    expect(log10Index).toBeGreaterThanOrEqual(0);
+    // Oldest-first display: log 9 (earlier in the block) comes before log
+    // 10 (later in the same block).
+    expect(log9Index).toBeLessThan(log10Index);
+  });
+
   it("never renders a chart, interest-residual estimate, or net-equity figure from the interim view", () => {
     mockQueries();
     render(handle!);
@@ -547,11 +573,13 @@ describe("TroveDetailClient", () => {
     expect(text).toContain("Batch");
     expect(text).not.toContain("1.60%");
     // No misleading "showing the last confirmed state" — nothing has been
-    // confirmed yet.
+    // confirmed yet. A genuinely-loading state (no error at all) also
+    // shouldn't show the first-load-failure notice.
     expect(text).not.toContain("Batch rate refresh failed");
+    expect(text).not.toContain("Batch rate unavailable");
   });
 
-  it("shows the rate as unavailable — never the trove's own copy — when the batch join fails with nothing cached", () => {
+  it("discloses a first-load batch-rate failure distinctly — not the 'last confirmed state' wording, since nothing was ever confirmed", () => {
     mockQueries({
       troveRows: [
         trove({
@@ -568,9 +596,12 @@ describe("TroveDetailClient", () => {
     const text = handle!.container.textContent ?? "";
     expect(text).toContain("Batch");
     expect(text).not.toContain("1.60%");
-    // Nothing was ever confirmed, so this isn't a "stale" disclosure case —
-    // the plain "—" already tells the truth honestly.
+    // A first-load failure IS disclosed (Codex's finding) — just not via
+    // the "last confirmed state" wording, which would misstate it.
     expect(text).not.toContain("Batch rate refresh failed");
+    expect(text).not.toContain("showing the last confirmed state");
+    expect(text).toContain("Batch rate unavailable");
+    expect(text).toContain("batch query failed");
   });
 
   it("discloses a batch-rate refresh failure once a rate was confirmed, while still showing that confirmed rate", () => {
