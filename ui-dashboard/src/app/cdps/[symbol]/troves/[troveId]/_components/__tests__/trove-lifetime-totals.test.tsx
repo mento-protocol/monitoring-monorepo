@@ -5,7 +5,10 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 import type { CdpTrove } from "../../../../../_lib/types";
-import { TroveLifetimeTotals } from "../trove-lifetime-totals";
+import {
+  hasTroveLifetimeTotals,
+  TroveLifetimeTotals,
+} from "../trove-lifetime-totals";
 
 const D18 = BigInt(10) ** BigInt(18);
 function wei(amount: number): string {
@@ -121,5 +124,15 @@ describe("TroveLifetimeTotals", () => {
     text = handle.container.textContent ?? "";
     expect(text).toContain("Collateral surplus");
     expect(text).toContain("1.00 USDm");
+  });
+});
+
+describe("hasTroveLifetimeTotals", () => {
+  it("matches the component's own null-render condition", () => {
+    expect(hasTroveLifetimeTotals(trove())).toBe(false);
+    expect(hasTroveLifetimeTotals(trove({ redemptionCount: 1 }))).toBe(true);
+    expect(hasTroveLifetimeTotals(trove({ liquidatedDebt: wei(1) }))).toBe(
+      true,
+    );
   });
 });

@@ -10,6 +10,22 @@ function isPositiveWei(value: string | null | undefined): boolean {
   }
 }
 
+/** Whether {@link TroveLifetimeTotals} renders its card for this trove — the
+ *  normal case for an untouched active trove is `false` (no redemption or
+ *  liquidation history yet). Exported so callers that reference "the
+ *  lifetime totals above" (e.g. `TroveOperationsList`'s partial-view notice)
+ *  can condition that reference on the card actually existing, instead of
+ *  duplicating this check and risking drift. */
+export function hasTroveLifetimeTotals(trove: CdpTrove): boolean {
+  const hasRedemptions =
+    trove.redemptionCount > 0 ||
+    isPositiveWei(trove.redeemedDebt) ||
+    isPositiveWei(trove.redeemedColl);
+  const hasLiquidation =
+    isPositiveWei(trove.liquidatedDebt) || isPositiveWei(trove.liquidatedColl);
+  return hasRedemptions || hasLiquidation;
+}
+
 /** Raw `Trove` lifetime cumulatives — the only redemption/liquidation figures
  *  available before the full ledger ships (docs/PLAN-trove-history-page.md,
  *  "GraphQL contract → interim assembly"). These are TOTALS, not a derived
@@ -23,14 +39,14 @@ export function TroveLifetimeTotals({
   trove: CdpTrove;
   debtSymbol: string;
 }) {
+  if (!hasTroveLifetimeTotals(trove)) return null;
+
   const hasRedemptions =
     trove.redemptionCount > 0 ||
     isPositiveWei(trove.redeemedDebt) ||
     isPositiveWei(trove.redeemedColl);
   const hasLiquidation =
     isPositiveWei(trove.liquidatedDebt) || isPositiveWei(trove.liquidatedColl);
-
-  if (!hasRedemptions && !hasLiquidation) return null;
 
   return (
     <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">

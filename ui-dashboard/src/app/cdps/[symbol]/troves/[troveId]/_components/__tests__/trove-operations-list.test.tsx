@@ -73,6 +73,40 @@ describe("TroveOperationsList", () => {
     );
   });
 
+  it("does not reference the lifetime totals card when it hasn't rendered (the default)", () => {
+    // TroveLifetimeTotals returns null for an untouched active trove (no
+    // redemption/liquidation history) — the normal case. Pointing to "the
+    // lifetime totals above" when nothing is there misdirects the reader.
+    handle = render(
+      <TroveOperationsList
+        rows={[]}
+        truncated={false}
+        isLoading={false}
+        error={undefined}
+        chainId={42220}
+        debtSymbol="GBPm"
+      />,
+    );
+    const text = handle.container.textContent ?? "";
+    expect(text).toContain("Per-redemption detail pending indexer rollout");
+    expect(text).not.toContain("lifetime totals above");
+  });
+
+  it("references the lifetime totals card when it did render", () => {
+    handle = render(
+      <TroveOperationsList
+        rows={[]}
+        truncated={false}
+        isLoading={false}
+        error={undefined}
+        hasLifetimeTotals
+        chainId={42220}
+        debtSymbol="GBPm"
+      />,
+    );
+    expect(handle.container.textContent).toContain("lifetime totals above");
+  });
+
   it("shows an empty state with no rows", () => {
     handle = render(
       <TroveOperationsList
@@ -138,12 +172,12 @@ describe("TroveOperationsList", () => {
     expect(text).toContain("2.50%");
   });
 
-  it("shows the new rate for a batch-membership operation", () => {
+  it("labels a setBatchManager operation as 'Joined Batch' and shows the new rate", () => {
     handle = render(
       <TroveOperationsList
         rows={[
           op({
-            id: "evt-batch",
+            id: "evt-batch-join",
             operation: 8, // setBatchManager
             debtChange: "0",
             collChange: "0",
@@ -158,8 +192,63 @@ describe("TroveOperationsList", () => {
       />,
     );
     const text = handle.container.textContent ?? "";
-    expect(text).toContain("Batch Membership");
+    expect(text).toContain("Joined Batch");
+    expect(text).not.toContain("Left Batch");
     expect(text).toContain("1.75%");
+  });
+
+  it("labels a removeFromBatch operation as 'Left Batch', not the generic 'Batch Membership'", () => {
+    // Operations 8 and 9 are opposite actions that both map to the same
+    // `troveBatch` badge kind — without a direction-specific label, the
+    // history can't tell whether the trove joined or left a batch.
+    handle = render(
+      <TroveOperationsList
+        rows={[
+          op({
+            id: "evt-batch-leave",
+            operation: 9, // removeFromBatch
+            debtChange: "0",
+            collChange: "0",
+            annualInterestRate: rateWei(175),
+          }),
+        ]}
+        truncated={false}
+        isLoading={false}
+        error={undefined}
+        chainId={42220}
+        debtSymbol="GBPm"
+      />,
+    );
+    const text = handle.container.textContent ?? "";
+    expect(text).toContain("Left Batch");
+    expect(text).not.toContain("Joined Batch");
+    expect(text).not.toContain("Batch Membership");
+  });
+
+  it("includes the upfront borrowing fee in the displayed debt change", () => {
+    // debtAfter = debtBefore + debtChange + debtIncreaseFromUpfrontFee (+
+    // redistribution, not tracked here) — debtChange alone understates the
+    // actual position increase whenever the fee is nonzero.
+    handle = render(
+      <TroveOperationsList
+        rows={[
+          op({
+            id: "evt-open-fee",
+            operation: 0,
+            debtChange: "1000000000000000000", // 1.00
+            debtIncreaseFromUpfrontFee: "50000000000000000", // 0.05
+          }),
+        ]}
+        truncated={false}
+        isLoading={false}
+        error={undefined}
+        chainId={42220}
+        debtSymbol="GBPm"
+      />,
+    );
+    const text = handle.container.textContent ?? "";
+    expect(text).toContain("1.05 GBPm");
+    expect(text).not.toContain("1.00 GBPm");
   });
 
   it("does not show a rate annotation for a regular adjust/open/close operation", () => {

@@ -33,7 +33,10 @@ import {
 } from "../_lib/params";
 import { TroveDetailSkeleton } from "./trove-detail-skeleton";
 import { TroveHeaderCard } from "./trove-header-card";
-import { TroveLifetimeTotals } from "./trove-lifetime-totals";
+import {
+  hasTroveLifetimeTotals,
+  TroveLifetimeTotals,
+} from "./trove-lifetime-totals";
 import { TroveOperationsList } from "./trove-operations-list";
 
 const CELO_MAINNET_CHAIN_ID = 42220;
@@ -426,6 +429,7 @@ function TroveDetailView({
         // latter can't tell "never loaded" from "loaded, confirmed empty"
         // (see the prop's doc comment on TroveOperationsList).
         hasLoadedOnce={operations.data != null}
+        hasLifetimeTotals={hasTroveLifetimeTotals(trove)}
         chainId={collateral.chainId}
         debtSymbol={collateral.symbol}
       />

@@ -27,6 +27,39 @@ const RATE_VISIBLE_BADGES = new Set<BadgeKind>([
   "troveBatch",
 ]);
 
+// Liquity v2 OP enum values for the two batch-membership operations (see
+// CdpTroveOperationEventRow's `operation` doc) — opposite actions that
+// `badgeKindFor` both map to the single "troveBatch" kind.
+const OP_SET_BATCH_MANAGER = 8;
+const OP_REMOVE_FROM_BATCH = 9;
+
+/** `BADGE_LABELS[kind]` is too coarse for `troveBatch`: operations 8
+ *  (setBatchManager, joining/switching batch manager) and 9
+ *  (removeFromBatch, leaving) are opposite actions that both map to the
+ *  same badge kind — showing the shared "Batch Membership" label for both
+ *  leaves the direction unrecoverable even with the rate now shown next to
+ *  it. */
+function operationBadgeLabel(kind: BadgeKind, operation: number): string {
+  if (kind === "troveBatch") {
+    if (operation === OP_SET_BATCH_MANAGER) return "Joined Batch";
+    if (operation === OP_REMOVE_FROM_BATCH) return "Left Batch";
+  }
+  return BADGE_LABELS[kind];
+}
+
+/** The indexer's actual debt-position math is `debtAfter = debtBefore +
+ *  debtChange + debtIncreaseFromUpfrontFee + debtFromRedist`
+ *  (`indexer-envio/src/handlers/liquity/math.ts`) — `debtChange` alone
+ *  excludes the upfront borrowing fee charged on an open or debt-increase
+ *  operation, understating the actual position increase whenever that fee
+ *  is nonzero. Per-operation redistribution isn't tracked here (same
+ *  partial-view limit as the rest of this interim ledger). */
+function totalDebtChange(row: CdpTroveOperationEventRow): string {
+  return (
+    BigInt(row.debtChange) + BigInt(row.debtIncreaseFromUpfrontFee)
+  ).toString();
+}
+
 /** One operations-table row — split out of {@link TroveOperationsList} to
  *  keep it under the file's max-lines-per-function budget. */
 function OperationRow({
@@ -45,7 +78,7 @@ function OperationRow({
         <span
           className={`inline-block rounded border px-2 py-0.5 text-xs ${BADGE_STYLES[kind]}`}
         >
-          {BADGE_LABELS[kind]}
+          {operationBadgeLabel(kind, row.operation)}
         </span>
         {RATE_VISIBLE_BADGES.has(kind) && (
           <span className="ml-1 text-[10px] text-slate-500">
@@ -54,7 +87,7 @@ function OperationRow({
         )}
       </Td>
       <Td align="right" mono>
-        {formatSignedWei(row.debtChange, debtSymbol)}
+        {formatSignedWei(totalDebtChange(row), debtSymbol)}
       </Td>
       <Td align="right" mono>
         {formatSignedWei(row.collChange, "USDm")}
@@ -84,6 +117,7 @@ export function TroveOperationsList({
   isLoading,
   error,
   hasLoadedOnce = rows.length > 0,
+  hasLifetimeTotals = false,
   chainId,
   debtSymbol,
 }: {
@@ -102,6 +136,13 @@ export function TroveOperationsList({
    *  loaded-vs-never-loaded distinction — most tests — don't need to pass
    *  it explicitly. */
   hasLoadedOnce?: boolean;
+  /** Whether `TroveLifetimeTotals` actually rendered its card for this
+   *  trove — that card returns `null` for the normal case of an untouched
+   *  active trove (no redemption/liquidation history), so the partial-view
+   *  notice below must not unconditionally point to a section that doesn't
+   *  exist. Optional/defaults to `false` (omit the reference) so callers
+   *  indifferent to it — most tests — don't need to pass it. */
+  hasLifetimeTotals?: boolean;
   chainId: number;
   debtSymbol: string;
 }) {
@@ -113,8 +154,8 @@ export function TroveOperationsList({
       <p role="status" className="mb-3 text-xs text-amber-400">
         Per-redemption detail pending indexer rollout — this list shows only
         this trove&apos;s own borrow/repay/adjust operations. Redemptions and
-        liquidations that touched this trove are not yet attributable here; see
-        the lifetime totals above.
+        liquidations that touched this trove are not yet attributable here
+        {hasLifetimeTotals ? "; see the lifetime totals above." : "."}
       </p>
       {/* Mirrors the parent view's other three notices (markets/trove/batch
           rate): once the fetch has resolved at least once, a later poll
