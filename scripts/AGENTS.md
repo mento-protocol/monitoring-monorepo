@@ -105,7 +105,7 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   copy the broad `workflowAdmissionPatterns` boundary from
   `terraform.stacks.json`. A miss is silent: the job stops while `ci` stays
   green. ADR 0064 has the enumeration, the `routing.test.mjs` equality
-  contract, and glob guidance. Review-eval pins: `docs/evals/review-skill.md`.
+  contract, and glob rules. Review-eval pins: `docs/evals/review-skill.md`.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.
