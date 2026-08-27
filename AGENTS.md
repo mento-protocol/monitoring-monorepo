@@ -45,6 +45,9 @@ rule are in
 
 ## Safety Boundaries
 
+- **Never weaken a control that blocks your own work** — an agent that can
+  widen its own gate has no gate. The exception and the hand-off procedure are
+  in the [operating card](docs/notes/pr-operating-card.md).
 - **Secrets are IaC-owned.** Never create, rotate, or overwrite secrets with
   `gh secret set`, `vercel env add`, `gcloud secrets versions add`, or another
   one-off provider command. Model them in the owning Terraform/integration path
