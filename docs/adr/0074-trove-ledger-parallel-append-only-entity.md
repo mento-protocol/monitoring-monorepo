@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0073 — TroveLedgerEvent is a parallel append-only entity, not a widened TroveOperationEvent
+# ADR 0074 — TroveLedgerEvent is a parallel append-only entity, not a widened TroveOperationEvent
 
 **Status:** Accepted (Aug 2026), in force.
 **Scope:** indexer-envio (constrains ui-dashboard trove-history reads)

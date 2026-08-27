@@ -787,6 +787,138 @@ describe("TroveLedgerEvent — append-only per-trove ledger", () => {
     assert.equal(trove?.lastLedgerLogIndex, 1);
   });
 
+  it("remove-from-batch (op 9) writes a direct row with full snapshots; nothing is staged for a replay that never comes", async () => {
+    let mockDb = MockDb.createMockDb();
+    seedLoadedCollateral(mockDb);
+    const troveId = 12n;
+    const batchManager = "0x00000000000000000000000000000000000000cc";
+    mockDb = await openTrove(mockDb, {
+      troveId,
+      debt: 1_000n * D18,
+      coll: 500n * D18,
+      annualInterestRate: 5n * 10n ** 16n,
+      blockNumber: 810,
+      blockTimestamp: 690_000,
+      txHash: "0xopen12",
+    });
+
+    // Join in real emission order so the trove is batch-managed.
+    const joinTx = {
+      blockNumber: 811,
+      blockTimestamp: 700_000,
+      txHash: "0xjoin12",
+    };
+    mockDb = await processMockEvents({
+      mockDb,
+      events: [
+        LiquityTroveManager.BatchedTroveUpdated.createMockEvent({
+          _troveId: troveId,
+          _interestBatchManager: batchManager,
+          _batchDebtShares: 1_000n * D18,
+          _coll: 500n * D18,
+          _stake: 500n * D18,
+          _snapshotOfTotalCollRedist: 0n,
+          _snapshotOfTotalDebtRedist: 0n,
+          mockEventData: mockEventData({ ...joinTx, logIndex: 1 }),
+        }),
+        troveOperationEvent({
+          ...joinTx,
+          troveId,
+          operation: OP.SET_INTEREST_BATCH_MANAGER,
+          annualInterestRate: 6n * 10n ** 16n,
+          logIndex: 2,
+        }),
+        LiquityTroveManager.BatchUpdated.createMockEvent({
+          _interestBatchManager: batchManager,
+          _operation: 0n,
+          _debt: 1_000n * D18,
+          _coll: 500n * D18,
+          _annualInterestRate: 6n * 10n ** 16n,
+          _annualManagementFee: 0n,
+          _totalDebtShares: 1_000n * D18,
+          _debtIncreaseFromUpfrontFee: 0n,
+          mockEventData: mockEventData({ ...joinTx, logIndex: 3 }),
+        }),
+      ],
+    });
+    assert.equal(
+      mockDb.entities.Trove.get(makeTroveId(collateralId, "0xc"))
+        ?.interestBatchId,
+      `${collateralId}-${batchManager}`,
+      "precondition: trove is batch-managed before the removal",
+    );
+
+    // Real removal order (`onRemoveFromBatch` emit site): an ordinary
+    // TroveUpdated with the full individual debt, then TroveOperation(9),
+    // then the batch's exit BatchUpdated — no BatchedTroveUpdated, so no
+    // replay row exists for this trove.
+    const exitTx = {
+      blockNumber: 812,
+      blockTimestamp: 710_000,
+      txHash: "0xexit12",
+    };
+    mockDb = await processMockEvents({
+      mockDb,
+      events: [
+        troveUpdatedEvent({
+          ...exitTx,
+          troveId,
+          debt: 1_050n * D18,
+          coll: 500n * D18,
+          annualInterestRate: 7n * 10n ** 16n,
+          logIndex: 1,
+        }),
+        troveOperationEvent({
+          ...exitTx,
+          troveId,
+          operation: OP.REMOVE_FROM_BATCH,
+          annualInterestRate: 7n * 10n ** 16n,
+          debtIncreaseFromUpfrontFee: 2n * D18,
+          logIndex: 2,
+        }),
+        LiquityTroveManager.BatchUpdated.createMockEvent({
+          _interestBatchManager: batchManager,
+          _operation: 0n,
+          _debt: 0n,
+          _coll: 0n,
+          _annualInterestRate: 6n * 10n ** 16n,
+          _annualManagementFee: 0n,
+          _totalDebtShares: 0n,
+          _debtIncreaseFromUpfrontFee: 0n,
+          mockEventData: mockEventData({ ...exitTx, logIndex: 3 }),
+        }),
+      ],
+    });
+
+    const row = ledgerRow(mockDb, 812, 2);
+    assert.ok(row, "op-9 row writes directly at the TroveOperation event");
+    assert.equal(row.operation, OP.REMOVE_FROM_BATCH);
+    assert.equal(
+      row.debtAfter,
+      1_050n * D18,
+      "debtAfter is the TroveUpdated-carried individual debt",
+    );
+    assert.equal(
+      row.debtBefore,
+      1_048n * D18,
+      "debtBefore derives backward across the upfront fee",
+    );
+    assert.equal(row.collBefore, 500n * D18);
+    assert.equal(row.collAfter, 500n * D18);
+    assert.equal(row.statusBefore, "active");
+    assert.equal(row.statusAfter, "active");
+    assert.equal(
+      mockDb.entities.PendingTroveLedgerEvent.get(
+        pendingTroveKey(market.chainId, "0xexit12", collateralId, "0xc"),
+      ),
+      undefined,
+      "no staged batch row is left behind",
+    );
+    const trove = mockDb.entities.Trove.get(makeTroveId(collateralId, "0xc"));
+    assert.equal(trove?.lastLedgerBlock, 812n, "watermark stamps directly");
+    assert.equal(trove?.lastLedgerLogIndex, 2);
+  });
+
   it("zombie transition and revival surface as statusBefore/statusAfter flips against live SystemParams minDebt", async () => {
     let mockDb = MockDb.createMockDb();
     seedLoadedCollateral(mockDb);

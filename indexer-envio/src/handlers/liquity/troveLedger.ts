@@ -10,7 +10,7 @@ import { computeTroveIcrBps } from "./math.js";
 import { OP, isBatchMembershipOperation } from "./operations.js";
 import type { TroveOperationLogEvent } from "./troveOperationSnapshot.js";
 
-/** Writers for the append-only `TroveLedgerEvent` history (ADR 0073): one row
+/** Writers for the append-only `TroveLedgerEvent` history (ADR 0074): one row
  * per `TroveOperation` event across ALL ten Operation ordinals. Rows that need
  * data from a later same-transaction event are staged in
  * `PendingTroveLedgerEvent` and written exactly once by their finalizer — the
@@ -128,6 +128,9 @@ export type TroveLedgerWriteContext = {
  * or a batch-membership op whose `TroveOperation` precedes its update
  * event) carry null debt snapshots: per-trove debt truth is batch-level
  * until the `BatchUpdated` replay. Collateral snapshots stay non-null.
+ * `REMOVE_FROM_BATCH` is the exception: its paired update is an ordinary
+ * `TroveUpdated` carrying the trove's full individual debt, so its row
+ * writes directly with complete snapshots.
  *
  * Ops 5/6 and batch rows are staged for their same-transaction finalizer;
  * everything else is written here. Returns the trove with the ledger
@@ -163,10 +166,17 @@ export async function recordTroveLedgerOnOperation(
   if (capture !== undefined) {
     context.PendingTroveStatusCapture.deleteUnsafe(pendingId);
   }
+  // REMOVE_FROM_BATCH pairs with an ordinary `TroveUpdated` (the trove is
+  // individual again — see the `onRemoveFromBatch` emit site), so the
+  // entity already holds post-operation debt/coll and the row writes
+  // directly. Its exit `BatchUpdated` replays no trove rows, so a staged
+  // batch row would never finalize; the stale `interestBatchId` still on
+  // the entry state (cleared only at batch replay) must not stage one.
   const batched =
-    capture?.batched === true ||
-    entryState.interestBatchId !== undefined ||
-    (capture === undefined && isBatchMembershipOperation(op));
+    op !== OP.REMOVE_FROM_BATCH &&
+    (capture?.batched === true ||
+      entryState.interestBatchId !== undefined ||
+      (capture === undefined && isBatchMembershipOperation(op)));
   const debtDelta =
     event.params._debtChangeFromOperation +
     event.params._debtIncreaseFromUpfrontFee +

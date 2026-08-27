@@ -1925,7 +1925,7 @@ type TroveOperationEvent
 # Operation ordinals — redemptions, liquidations, and interest folds
 # included — so the dashboard can render a complete per-trove history.
 # Parallel to `TroveOperationEvent` (which stays user-ops-only and feeds the
-# market transaction tables); see ADR 0073 for why a new entity instead of
+# market transaction tables); see ADR 0074 for why a new entity instead of
 # widening. Rows are assembled from their transaction's own events and never
 # mutated afterwards; the `Trove` entity remains the only mutable trove
 # state.
