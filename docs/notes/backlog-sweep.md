@@ -177,8 +177,16 @@ the number of rounds it will take.
 ## Preflight
 
 The orchestrator verifies, before anything is claimed: `origin/main` fetched, a
-clean session worktree, and working `gh` auth. It does **not** probe the gate's
-lock.
+clean session worktree, working `gh` auth, and that
+`git remote get-url --push origin` serves `mento-protocol/monitoring-monorepo`.
+It does **not** probe the gate's lock.
+
+A fork checkout is a stop. The operating card refuses every fork head and tells
+a fork to stop rather than first-publish, and workers inherit this checkout's
+remote — so a sweep started from a fork would claim, implement, and gate a
+whole batch that can never open a PR. That is the preflight's whole purpose:
+each check here costs one command, and skipping one fails late, with issues
+already claimed and a worker mid-gate.
 
 That omission is deliberate. Gate `--run` requests share a transient
 machine-wide coordinator that admits independent work from different worktrees
