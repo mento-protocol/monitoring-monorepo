@@ -88,6 +88,37 @@ function resolveJoinBatchId(trove: CdpTrove | undefined): string | null {
   return isOpenTroveStatus(trove.status) ? trove.interestBatchId : null;
 }
 
+/** The rate to render in the header. When a batch join applies
+ *  (`joinBatchId` set), `trove.interestRate` is a snapshot the batch
+ *  manager may have already superseded — NEVER show it as a placeholder
+ *  while the join is loading, failed, or came back empty; render `null`
+ *  (an explicit "unavailable" dash) instead so the header never presents a
+ *  possibly-stale copied rate as the confirmed current one. Only a
+ *  successfully-resolved join, or no join applying at all (not
+ *  batch-managed, or a closed trove's historical snapshot), yields a rate. */
+function resolveDisplayedInterestRate(
+  trove: CdpTrove | undefined,
+  joinBatchId: string | null,
+  resolvedBatchRate: string | null | undefined,
+): string | null {
+  if (trove == null) return null;
+  if (joinBatchId == null) return trove.interestRate;
+  return resolvedBatchRate ?? null;
+}
+
+/** Only disclose a batch-rate refresh failure once a rate was actually
+ *  confirmed and is still on screen (mirrors the markets/trove notices,
+ *  which are only reachable past `hasErrorWithoutData`, i.e. with data
+ *  present). A first-attempt failure with nothing confirmed yet already
+ *  reads honestly as "—" via {@link resolveDisplayedInterestRate} — a
+ *  "last confirmed state" notice would misstate that as stale data. */
+function resolveInterestBatchNoticeError(
+  resolvedBatchRate: string | null | undefined,
+  error: Error | undefined,
+): Error | undefined {
+  return resolvedBatchRate != null ? error : undefined;
+}
+
 export function TroveDetailClient({
   symbol,
   troveId,
@@ -158,6 +189,8 @@ export function TroveDetailClient({
       <EmptyBox message="CDP markets are only deployed on Celo mainnet." />
     );
   }
+  const resolvedBatchRate =
+    interestBatch.data?.InterestBatch[0]?.annualInterestRate;
   return (
     <TroveDetailView
       symbol={symbol}
@@ -167,9 +200,15 @@ export function TroveDetailClient({
       collateral={collateral}
       troveById={troveById}
       trove={trove}
-      batchAnnualInterestRate={
-        interestBatch.data?.InterestBatch[0]?.annualInterestRate
-      }
+      displayedInterestRate={resolveDisplayedInterestRate(
+        trove,
+        joinBatchId,
+        resolvedBatchRate,
+      )}
+      interestBatchError={resolveInterestBatchNoticeError(
+        resolvedBatchRate,
+        interestBatch.error,
+      )}
       operations={operations}
       operationRows={operationRows}
       truncated={truncated}
@@ -190,7 +229,8 @@ function TroveDetailView({
   collateral,
   troveById,
   trove,
-  batchAnnualInterestRate,
+  displayedInterestRate,
+  interestBatchError,
   operations,
   operationRows,
   truncated,
@@ -202,7 +242,8 @@ function TroveDetailView({
   collateral: CdpCollateral | undefined;
   troveById: ReturnType<typeof useGQL<CdpTroveByIdResponse>>;
   trove: CdpTrove | undefined;
-  batchAnnualInterestRate: string | null | undefined;
+  displayedInterestRate: string | null;
+  interestBatchError: Error | undefined;
   operations: ReturnType<typeof useGQL<CdpTroveOperationsResponse>>;
   operationRows: CdpTroveOperationEventRow[];
   truncated: boolean;
@@ -261,10 +302,15 @@ function TroveDetailView({
         error={troveById.error}
         className="mb-3"
       />
+      <StaleRefreshNotice
+        subject="Batch rate"
+        error={interestBatchError}
+        className="mb-3"
+      />
       <TroveHeaderCard
         trove={trove}
         collateral={collateral}
-        batchAnnualInterestRate={batchAnnualInterestRate}
+        displayedInterestRate={displayedInterestRate}
       />
       <TroveLifetimeTotals trove={trove} debtSymbol={collateral.symbol} />
       <TroveOperationsList

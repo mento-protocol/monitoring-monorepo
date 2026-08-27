@@ -75,16 +75,18 @@ function StatValue({ children }: { children: ReactNode }) {
 export function TroveHeaderCard({
   trove,
   collateral,
-  batchAnnualInterestRate,
+  displayedInterestRate,
 }: {
   trove: CdpTrove;
   collateral: CdpCollateral;
-  /** Current `InterestBatch.annualInterestRate` for `trove.interestBatchId`,
-   *  resolved by the caller (join, not a local lookup — see
-   *  `trove-detail-client.tsx`). `null`/`undefined` while unresolved or not
-   *  applicable; falls back to the trove's own (possibly stale, for a
-   *  batch-managed trove) `interestRate`. */
-  batchAnnualInterestRate?: string | null | undefined;
+  /** Fully resolved by the caller (`trove-detail-client.tsx`): the trove's
+   *  own `interestRate` when it isn't currently batch-managed (or is
+   *  closed, where the stored rate is a historical snapshot), the joined
+   *  `InterestBatch.annualInterestRate` once resolved for an open
+   *  batch-managed trove, or `null` while that join is pending, failed, or
+   *  came back empty. Never `trove.interestRate` as a stand-in for an
+   *  unresolved join — that could present a stale copied rate as current. */
+  displayedInterestRate: string | null;
 }) {
   return (
     <header className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
@@ -110,7 +112,7 @@ export function TroveHeaderCard({
       <TroveHeaderStats
         trove={trove}
         collateral={collateral}
-        batchAnnualInterestRate={batchAnnualInterestRate}
+        displayedInterestRate={displayedInterestRate}
       />
 
       <p className="mt-4 text-xs text-slate-500">
@@ -127,17 +129,13 @@ export function TroveHeaderCard({
 function TroveHeaderStats({
   trove,
   collateral,
-  batchAnnualInterestRate,
+  displayedInterestRate,
 }: {
   trove: CdpTrove;
   collateral: CdpCollateral;
-  batchAnnualInterestRate?: string | null | undefined;
+  displayedInterestRate: string | null;
 }) {
   const icrTimestamp = formatTimestamp(trove.lastUpdatedAt);
-  const displayedRate =
-    trove.interestBatchId != null && batchAnnualInterestRate != null
-      ? batchAnnualInterestRate
-      : trove.interestRate;
   const icrTitle =
     trove.icrBps < 0
       ? `Indexed ICR unavailable. Row last updated at ${icrTimestamp}.`
@@ -181,7 +179,7 @@ function TroveHeaderStats({
       <div>
         <StatLabel>Rate</StatLabel>
         <StatValue>
-          {formatInterestRate(displayedRate)}
+          {formatInterestRate(displayedInterestRate)}
           {trove.interestBatchId != null && (
             <span className="ml-1 text-[10px] text-slate-500">Batch</span>
           )}

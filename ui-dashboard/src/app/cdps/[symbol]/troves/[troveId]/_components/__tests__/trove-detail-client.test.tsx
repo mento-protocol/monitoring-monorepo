@@ -91,6 +91,10 @@ function wei(amount: number): string {
   return (BigInt(amount) * D18).toString();
 }
 
+function rateWei(bps: number): string {
+  return ((BigInt(bps) * D18) / BigInt(10_000)).toString();
+}
+
 function collateral(overrides: Partial<CdpCollateral> = {}): CdpCollateral {
   return {
     id: "gbpm",
@@ -208,7 +212,8 @@ describe("TroveDetailClient", () => {
     troveError = null,
     operationRows = [op()],
     troveSchema = TROVE_SCHEMA_WITH_TX,
-    interestBatchRows = [],
+    interestBatchRows,
+    interestBatchError = null,
   }: {
     markets?: ReturnType<typeof marketsData>;
     marketsError?: Error | null;
@@ -216,6 +221,10 @@ describe("TroveDetailClient", () => {
     troveError?: Error | null;
     operationRows?: CdpTroveOperationEventRow[];
     troveSchema?: typeof TROVE_SCHEMA_WITH_TX | typeof TROVE_SCHEMA_WITHOUT_TX;
+    /** `undefined` (default) simulates "never resolved" (loading, or a
+     *  failure with nothing cached) — `data` stays `undefined`, matching
+     *  real SWR semantics. Pass `[]` for "resolved, no matching batch row"
+     *  or `[row]` for a confirmed rate. */
     interestBatchRows?: Array<{
       id: string;
       collateralId: string;
@@ -223,6 +232,7 @@ describe("TroveDetailClient", () => {
       annualInterestRate: string;
       updatedAt: string;
     }>;
+    interestBatchError?: Error | null;
   } = {}) {
     mockUseGQL.mockImplementation((query: string | null) => {
       if (query === CDP_MARKETS) {
@@ -240,8 +250,11 @@ describe("TroveDetailClient", () => {
       }
       if (query === CDP_INTEREST_BATCH_BY_ID) {
         return {
-          data: { InterestBatch: interestBatchRows },
-          error: null,
+          data:
+            interestBatchRows === undefined
+              ? undefined
+              : { InterestBatch: interestBatchRows },
+          error: interestBatchError,
           isLoading: false,
         };
       }
@@ -515,6 +528,79 @@ describe("TroveDetailClient", () => {
         (variables as { batchId?: string } | undefined)?.batchId === "batch-1",
     );
     expect(batchRequest).toBeUndefined();
+  });
+
+  it("shows the rate as unavailable — never the trove's own copy — while the batch join is still loading", () => {
+    mockQueries({
+      troveRows: [
+        trove({
+          status: "active",
+          interestBatchId: "batch-1",
+          interestRate: rateWei(160),
+        }),
+      ],
+      // interestBatchRows omitted -> data stays undefined, i.e. "loading".
+    });
+    render(handle!);
+
+    const text = handle!.container.textContent ?? "";
+    expect(text).toContain("Batch");
+    expect(text).not.toContain("1.60%");
+    // No misleading "showing the last confirmed state" — nothing has been
+    // confirmed yet.
+    expect(text).not.toContain("Batch rate refresh failed");
+  });
+
+  it("shows the rate as unavailable — never the trove's own copy — when the batch join fails with nothing cached", () => {
+    mockQueries({
+      troveRows: [
+        trove({
+          status: "active",
+          interestBatchId: "batch-1",
+          interestRate: rateWei(160),
+        }),
+      ],
+      interestBatchError: new Error("batch query failed"),
+      // interestBatchRows omitted -> no cached rate to fall back to.
+    });
+    render(handle!);
+
+    const text = handle!.container.textContent ?? "";
+    expect(text).toContain("Batch");
+    expect(text).not.toContain("1.60%");
+    // Nothing was ever confirmed, so this isn't a "stale" disclosure case —
+    // the plain "—" already tells the truth honestly.
+    expect(text).not.toContain("Batch rate refresh failed");
+  });
+
+  it("discloses a batch-rate refresh failure once a rate was confirmed, while still showing that confirmed rate", () => {
+    mockQueries({
+      troveRows: [
+        trove({
+          status: "active",
+          interestBatchId: "batch-1",
+          interestRate: rateWei(160),
+        }),
+      ],
+      interestBatchRows: [
+        {
+          id: "batch-1",
+          collateralId: "gbpm",
+          batchManager: "0xmanager",
+          annualInterestRate: rateWei(250),
+          updatedAt: "1000",
+        },
+      ],
+      interestBatchError: new Error("batch revalidation stalled"),
+    });
+    render(handle!);
+
+    const text = handle!.container.textContent ?? "";
+    expect(text).toContain("2.50%");
+    expect(text).not.toContain("1.60%");
+    expect(text).toContain("Batch rate refresh failed");
+    expect(text).toContain("showing the last confirmed state");
+    expect(text).toContain("batch revalidation stalled");
   });
 
   it("discloses a failed trove revalidation while keeping the last confirmed data on screen", () => {

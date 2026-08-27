@@ -21,6 +21,12 @@ function wei(amount: number): string {
   return (BigInt(amount) * D18).toString();
 }
 
+function rateWei(bps: number): string {
+  return ((BigInt(bps) * D18) / BigInt(10_000)).toString();
+}
+
+const DEFAULT_RATE = rateWei(160); // 1.60%
+
 function collateral(overrides: Partial<CdpCollateral> = {}): CdpCollateral {
   return {
     id: "gbpm",
@@ -52,7 +58,7 @@ function trove(overrides: Partial<CdpTrove> = {}): CdpTrove {
     debt: wei(28_081),
     coll: wei(44_791),
     icrBps: 11_710,
-    interestRate: ((BigInt(160) * D18) / BigInt(10_000)).toString(),
+    interestRate: DEFAULT_RATE,
     interestBatchId: null,
     openedAt: String(NOW - 100_000),
     openedTxHash: "0xopened",
@@ -103,7 +109,11 @@ describe("TroveHeaderCard", () => {
 
   it("renders symbol, trove id, status badge, manage link, rate, coll, debt, and ICR", () => {
     handle = render(
-      <TroveHeaderCard trove={trove()} collateral={collateral()} />,
+      <TroveHeaderCard
+        trove={trove()}
+        collateral={collateral()}
+        displayedInterestRate={DEFAULT_RATE}
+      />,
     );
     const text = handle.container.textContent ?? "";
     expect(text).toContain("GBPm");
@@ -124,7 +134,11 @@ describe("TroveHeaderCard", () => {
 
   it("discloses the debt figure is recorded-at-last-event, not a live read", () => {
     handle = render(
-      <TroveHeaderCard trove={trove()} collateral={collateral()} />,
+      <TroveHeaderCard
+        trove={trove()}
+        collateral={collateral()}
+        displayedInterestRate={DEFAULT_RATE}
+      />,
     );
     expect(handle.container.textContent).toContain(
       "not a live RPC or oracle read",
@@ -140,6 +154,7 @@ describe("TroveHeaderCard", () => {
           closedTxHash: "0xclosed",
         })}
         collateral={collateral()}
+        displayedInterestRate={DEFAULT_RATE}
       />,
     );
     expect(handle.container.textContent).toContain("Closed");
@@ -154,49 +169,48 @@ describe("TroveHeaderCard", () => {
       <TroveHeaderCard
         trove={trove({ status: "active" })}
         collateral={collateral()}
+        displayedInterestRate={DEFAULT_RATE}
       />,
     );
     expect(handle.container.textContent).toContain("Last updated");
   });
 
-  it("marks a batch-managed rate", () => {
+  it("marks a batch-managed rate with the 'Batch' label", () => {
     handle = render(
       <TroveHeaderCard
-        trove={trove({ interestRate: "0", interestBatchId: "batch-1" })}
+        trove={trove({ interestBatchId: "batch-1" })}
         collateral={collateral()}
+        displayedInterestRate={rateWei(250)}
       />,
     );
-    expect(handle.container.textContent).toContain("Batch");
+    const text = handle.container.textContent ?? "";
+    expect(text).toContain("Batch");
+    expect(text).toContain("2.50%");
   });
 
-  it("falls back to the trove's own rate while the batch join is unresolved", () => {
+  it("does not show the 'Batch' label for a non-batch-managed trove", () => {
+    handle = render(
+      <TroveHeaderCard
+        trove={trove({ interestBatchId: null })}
+        collateral={collateral()}
+        displayedInterestRate={DEFAULT_RATE}
+      />,
+    );
+    expect(handle.container.textContent).not.toContain("Batch");
+  });
+
+  it("renders whatever displayedInterestRate the caller resolved, verbatim — the header does no batch-vs-trove fallback itself", () => {
+    // trove-detail-client.tsx owns the batch-join resolution (including the
+    // "never show trove.interestRate as a stand-in for an unresolved join"
+    // rule); the header is a pure display of the already-resolved value.
     handle = render(
       <TroveHeaderCard
         trove={trove({
-          interestRate: ((BigInt(160) * D18) / BigInt(10_000)).toString(),
           interestBatchId: "batch-1",
+          interestRate: DEFAULT_RATE,
         })}
         collateral={collateral()}
-      />,
-    );
-    expect(handle.container.textContent).toContain("1.60%");
-  });
-
-  it("prefers the joined InterestBatch rate over a stale trove.interestRate", () => {
-    // Trove.interestRate can retain the previously-copied rate after the
-    // batch manager changes the batch's rate — the effective rate is
-    // whatever InterestBatch.annualInterestRate currently holds.
-    handle = render(
-      <TroveHeaderCard
-        trove={trove({
-          interestRate: ((BigInt(160) * D18) / BigInt(10_000)).toString(),
-          interestBatchId: "batch-1",
-        })}
-        collateral={collateral()}
-        batchAnnualInterestRate={(
-          (BigInt(250) * D18) /
-          BigInt(10_000)
-        ).toString()}
+        displayedInterestRate={rateWei(250)}
       />,
     );
     const text = handle.container.textContent ?? "";
@@ -204,21 +218,20 @@ describe("TroveHeaderCard", () => {
     expect(text).not.toContain("1.60%");
   });
 
-  it("ignores batchAnnualInterestRate for a trove with no interestBatchId", () => {
+  it("shows '—' (unavailable) when the caller passes null — e.g. batch join pending, failed, or empty", () => {
     handle = render(
       <TroveHeaderCard
         trove={trove({
-          interestRate: ((BigInt(160) * D18) / BigInt(10_000)).toString(),
-          interestBatchId: null,
+          interestBatchId: "batch-1",
+          interestRate: DEFAULT_RATE,
         })}
         collateral={collateral()}
-        batchAnnualInterestRate={(
-          (BigInt(250) * D18) /
-          BigInt(10_000)
-        ).toString()}
+        displayedInterestRate={null}
       />,
     );
-    expect(handle.container.textContent).toContain("1.60%");
+    const text = handle.container.textContent ?? "";
+    expect(text).not.toContain("1.60%");
+    expect(text).toContain("Batch");
   });
 
   it("links the owner to previousOwner when the NFT has burned (owner zeroed)", () => {
@@ -230,6 +243,7 @@ describe("TroveHeaderCard", () => {
           status: "redeemed",
         })}
         collateral={collateral()}
+        displayedInterestRate={DEFAULT_RATE}
       />,
     );
     const link = handle.container.querySelector<HTMLAnchorElement>(
@@ -246,6 +260,7 @@ describe("TroveHeaderCard", () => {
           previousOwner: "0x0000000000000000000000000000000000000000",
         })}
         collateral={collateral()}
+        displayedInterestRate={DEFAULT_RATE}
       />,
     );
     const link = handle.container.querySelector<HTMLAnchorElement>(
@@ -256,7 +271,11 @@ describe("TroveHeaderCard", () => {
 
   it("is keyboard-focusable on every asChild tooltip trigger (status badge + ICR)", () => {
     handle = render(
-      <TroveHeaderCard trove={trove()} collateral={collateral()} />,
+      <TroveHeaderCard
+        trove={trove()}
+        collateral={collateral()}
+        displayedInterestRate={DEFAULT_RATE}
+      />,
     );
     // The Debt stat's tooltip uses the default `<button>` trigger. The
     // status badge and ICR stat both clone a `<button>` via `asChild` too
@@ -276,6 +295,7 @@ describe("TroveHeaderCard", () => {
       <TroveHeaderCard
         trove={trove({ icrBps: 10_000 })}
         collateral={collateral({ mcrBps: 11_000 })}
+        displayedInterestRate={DEFAULT_RATE}
       />,
     );
     const icrSpan = handle.container.querySelector(".text-rose-300");

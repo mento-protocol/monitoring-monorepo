@@ -77,4 +77,22 @@ describe("TroveStatusBadge", () => {
     expect(trigger?.tagName).toBe("BUTTON");
     expect((trigger as HTMLButtonElement).tabIndex).toBe(0);
   });
+
+  it("wraps a tooltip'd status in a live region without replacing the button's native role", () => {
+    handle = render(<TroveStatusBadge status="active" />);
+    const liveRegion = handle.container.querySelector('[role="status"]');
+    expect(liveRegion?.getAttribute("aria-live")).toBe("polite");
+    // The live region wraps the trigger — it isn't the trigger itself, so
+    // the button keeps its own native "button" role for the tooltip.
+    const button = handle.container.querySelector("button");
+    expect(liveRegion?.contains(button)).toBe(true);
+    expect(button?.getAttribute("role")).toBeNull();
+  });
+
+  it("gives an untooltipped (unknown-status) badge a live region directly", () => {
+    handle = render(<TroveStatusBadge status="some-future-status" />);
+    const liveRegion = handle.container.querySelector('[role="status"]');
+    expect(liveRegion?.getAttribute("aria-live")).toBe("polite");
+    expect(liveRegion?.textContent).toBe("some-future-status");
+  });
 });
