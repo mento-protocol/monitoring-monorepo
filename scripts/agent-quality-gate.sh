@@ -8792,7 +8792,13 @@ run_mapped_entries_parallel() {
           fail_command_scheduler_infrastructure "$command" || return $?
         fi
         request_marker_open=1
-        worker_has_recovery_owner=1
+        # Explicit no-lock markers are private discovery handles. No successor
+        # can recover them after this parent dies, so their sentinels must keep
+        # watching the exact parent instead of waiting for a recovery owner.
+        case "$gate_lock_enabled" in
+          0|false|no) ;;
+          *) worker_has_recovery_owner=1 ;;
+        esac
       fi
       # The coordinator generation marker is the compatibility handle an
       # older legacy gate knows how to drain after it reclaims run.lock. Keep
