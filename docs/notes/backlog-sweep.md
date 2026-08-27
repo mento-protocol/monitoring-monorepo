@@ -56,9 +56,12 @@ way to notice.
 A worker's clone path is derived from its issue number, so it is deterministic
 and can already exist — an interrupted run leaves one behind, and a released
 issue can be selected again later. An existing directory is resumed only on
-proof that it belongs to this sweep — a `.git/sweep-owner` file written at
-clone time and naming this session, kept inside `.git/` so it never shows up as
-untracked state a gate or a push can trip over. Remote and branch are not that
+proof that it belongs to this sweep — a `.git/sweep-owner` file written
+immediately after the clone and holding the sweep id, kept inside `.git/` so it
+never shows up as untracked state a gate or a push can trip over. The
+orchestrator fixes that id once, before the first claim, and gives it to every
+worker; a clone whose marker was never written cannot be resumed, only
+abandoned for a fresh path. Remote and branch are not that
 proof: a second
 sweep of the same issue reproduces both, so matching on them alone also accepts
 a checkout another live worker is committing from. Anything else yields a fresh

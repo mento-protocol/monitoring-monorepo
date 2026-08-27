@@ -148,9 +148,26 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   ```bash
   root=/private/tmp/claude          # or "$TMPDIR" where that root is unwritable
   mkdir -p "$root"
-  git clone https://github.com/mento-protocol/monitoring-monorepo \
-    "$root/sweep-${issue}"
+  dir="$root/sweep-${issue}"
+
+  if [ -e "$dir/.git/sweep-owner" ] &&
+     [ "$(cat "$dir/.git/sweep-owner")" = "$sweep_id" ]; then
+    :                               # this sweep's own checkout: resume in it
+  elif [ -e "$dir" ]; then
+    dir="$dir-$(date +%s)"          # someone else's or unproven: fresh path
+    git clone https://github.com/mento-protocol/monitoring-monorepo "$dir"
+    printf '%s\n' "$sweep_id" > "$dir/.git/sweep-owner"
+  else
+    git clone https://github.com/mento-protocol/monitoring-monorepo "$dir"
+    printf '%s\n' "$sweep_id" > "$dir/.git/sweep-owner"
+  fi
   ```
+
+  `sweep_id` is one value the orchestrator fixes before the first claim and
+  passes to every worker — this session's id is the obvious choice, and any
+  string is fine as long as one sweep never reuses another's. Write it right
+  after the clone: the marker is what the next run reads, so a clone that
+  skipped this step can never be resumed, only abandoned for a fresh path.
 
   Create the parent first. `git clone` does not create intermediate
   directories, and the sweep root is not guaranteed on a fresh machine or in
@@ -167,8 +184,7 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   number produces the same directory, and `git clone` fails outright into one
   that already exists — from an interrupted run, or from an earlier sweep of an
   issue that was released and later re-selected. Resume it only on proof it is
-  this sweep's own: write the sweep's session id to `.git/sweep-owner` at clone
-  time, and continue in the directory only when that file names this session.
+  this sweep's own, which is what the `sweep-owner` comparison above decides.
   Keep the marker inside `.git/` — a file at the clone root would be untracked
   in every worker checkout, where a clean-worktree check can refuse the gate or
   the push and broad staging can commit the marker into the PR. Remote and
