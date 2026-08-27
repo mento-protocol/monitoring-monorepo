@@ -228,7 +228,8 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   root=/private/tmp/claude
   if ! mkdir -p "$root" 2>/dev/null || [ ! -w "$root" ]; then
     root="${TMPDIR:-/tmp}/claude-sweep"   # unwritable default: fall back
-    mkdir -p "$root" || exit 1
+    mkdir -p "$root" 2>/dev/null || exit 1
+    [ -w "$root" ] || exit 1              # the fallback gets the same proof
   fi
   dir="$root/sweep-${issue}"
 
