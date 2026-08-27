@@ -239,7 +239,12 @@ async function resolveLogin({ gh, host }) {
       `unable to establish the active GitHub login: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
-  if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,99}$/.test(login)) {
+  // Underscores are allowed: an Enterprise Managed User's login carries the
+  // enterprise shortcode after one (`octocat_fabrikam`). Rejecting it would
+  // stop every merge on such an account before the briefing. The pattern still
+  // has to be narrow — this value is written into the ledger — so it stays
+  // ASCII, bounded, and free of whitespace, quotes and shell metacharacters.
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(login)) {
     throw new MergeRefusal("unable to establish the active GitHub login");
   }
   return login;

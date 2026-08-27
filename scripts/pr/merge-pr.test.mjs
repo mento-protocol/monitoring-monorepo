@@ -1676,6 +1676,22 @@ await test("a title edited during confirmation refuses", async () => {
   assertEqual(h.calls.merges.length, 0, "nothing should have merged");
 });
 
+await test("an Enterprise Managed User login is accepted", async () => {
+  // EMU logins carry the enterprise shortcode after an underscore. Rejecting
+  // them would stop every merge on such an account before the briefing.
+  const h = harness({ logins: ["octocat_fabrikam", "octocat_fabrikam"] });
+  const result = await h.run();
+  assertEqual(result.merged, true);
+  assertEqual(result.record.login, "octocat_fabrikam");
+});
+
+await test("a login with unsafe characters still refuses", async () => {
+  // The value is written into the ledger, so the pattern stays narrow.
+  const h = harness({ logins: ["not a login", "not a login"] });
+  await assertRefuses(h.run(), "unable to establish the active GitHub login");
+  assertEqual(h.calls.merges.length, 0, "nothing should have merged");
+});
+
 await test("only a confirmed merge exits zero", async () => {
   // The CLI's exit status is what `pnpm pr:merge && <post-merge closeout>`
   // branches on. Reporting success for a queued or unverified merge would run
