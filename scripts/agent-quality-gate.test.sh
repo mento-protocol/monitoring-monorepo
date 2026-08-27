@@ -8021,7 +8021,9 @@ assert_contains "complete autoreview failure diagnostic"
   cat > scripts/agent-autoreview.test.sh <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
-printf '%s\n' "$$" > "${AUTOREVIEW_TEST_PID_FILE:?}"
+# The gate removes AUTOREVIEW_TEST_* controls before mapped commands start.
+# The fixture runs from this repository root, so use its fixed relative path.
+printf '%s\n' "$$" > autoreview-child-pid
 echo 'AUTOREVIEW_TEST_PROGRESS family=adapter elapsed=7s'
 sleep 30
 STUB
@@ -8032,8 +8034,7 @@ STUB
   mkfifo "$gate_output_fifo"
   cat "$gate_output_fifo" > "$output_file" &
   output_reader_pid=$!
-  AUTOREVIEW_TEST_PID_FILE="$autoreview_pid_file" \
-    DATE_COUNTER_FILE="$autoreview_progress_repo/date-counter" \
+  DATE_COUNTER_FILE="$autoreview_progress_repo/date-counter" \
     PATH="$autoreview_progress_repo/bin:$PATH" \
     "$repo_root/scripts/agent-quality-gate.sh" \
       --changed-paths-file changed-paths.txt \
