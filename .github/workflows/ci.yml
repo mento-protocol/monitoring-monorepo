@@ -1075,6 +1075,17 @@ jobs:
         run: node scripts/repo-health/check-hermetic-vitest-setup.mjs
       - name: Hermetic Vitest setup consistency suite
         run: node scripts/repo-health/check-hermetic-vitest-setup.test.mjs
+      # The prose check itself moved to the unconditional `guardrail-prose` job
+      # above: this job is path-gated on `rootScripts` and allowed to skip, so a
+      # PR editing only AGENTS.md or the operating card never reached it.
+      # The suite stays here as well, and only the suite. It carries the
+      # assertion that pins `guardrail-prose`'s own CI wiring, which would be
+      # deleted by the same edit that deletes that job if the job were its only
+      # host. `rootScripts` includes `.github/workflows/**`, so any edit able to
+      # remove that job admits this one and reds here. Each job is the other's
+      # witness; the duplicate sub-second run is what that costs.
+      - name: Guardrail prose pin suite
+        run: node scripts/repo-health/check-guardrail-prose.test.mjs
       - name: Deviation threshold drift suite
         run: node scripts/alerts/check-deviation-threshold-drift.test.mjs
       - name: Agent context checker unit tests
@@ -1198,6 +1209,45 @@ jobs:
       # their own output that each one asserted (issue #1779, ADR 0062) — a
       # strictly stronger claim than a step existing. Running them in both jobs
       # cost a second copy of the whole set and let the two paths disagree.
+      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
+        if: always()
+
+  guardrail-prose:
+    name: Guardrail prose pins
+    # Unconditional by design (no `if:`), like production-infra-contract and
+    # sentry-suites below. These two commands ran as steps of the path-gated
+    # `scripts` job until review found the hole: that job admits on
+    # `rootScripts` (`scripts/**`) and sits in the `ci` sentinel's
+    # `allowed-skips`, so the exact diff this check exists to catch — one that
+    # edits only AGENTS.md, CLAUDE.md or the operating card and drops a pinned
+    # sentence — skipped the job while the required sentinel stayed green. A
+    # guardrail absent precisely when it is needed is worse than none, and the
+    # Sentry suites were moved out of that same job for the same reason.
+    #
+    # The checker and its suite import only `node:` builtins, so this job is a
+    # checkout, a Node, and two sub-second commands — no `pnpm install`.
+    # `check-guardrail-prose.test.mjs` also asserts this job's own wiring: that
+    # it exists, carries no `if:`, runs both commands, and reaches `ci` without
+    # an allowed-skip. Move or rename it and that suite reds. That assertion
+    # would vanish with the job it protects if this were its only host, so the
+    # path-gated `scripts` job runs the suite a second time: `rootScripts`
+    # includes `.github/workflows/**`, so the very edit that deletes this job
+    # admits that job and reds there instead. The two hosts pin each other.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - name: Guardrail prose pins
+        run: node scripts/repo-health/check-guardrail-prose.mjs
+      - name: Guardrail prose pin suite
+        run: node scripts/repo-health/check-guardrail-prose.test.mjs
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
 
@@ -1529,6 +1579,7 @@ jobs:
         deps,
         scripts,
         docs-checks,
+        guardrail-prose,
         production-infra-contract,
         sentry-suites,
         autoreview-suite,
