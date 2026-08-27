@@ -40,7 +40,10 @@ vi.mock("@/components/network-provider", () => ({
   }),
 }));
 
+const HASURA_TIMEOUT_MS = 5000;
+
 vi.mock("@/lib/graphql", () => ({
+  HASURA_TIMEOUT_MS: 5000,
   useGQL: (...args: unknown[]) => mockUseGQL(...args),
 }));
 
@@ -65,11 +68,21 @@ vi.mock("@/components/tx-hash-cell", () => ({
 }));
 
 import {
+  CDP_INTEREST_BATCH_BY_ID,
   CDP_MARKETS,
   CDP_TROVE_BY_ID,
+  CDP_TROVE_BY_ID_WITHOUT_TX,
   CDP_TROVE_OPERATIONS,
+  CDP_TROVE_SCHEMA_FIELDS,
 } from "@/lib/queries";
 import { TroveDetailClient } from "../trove-detail-client";
+
+const TROVE_SCHEMA_WITH_TX = {
+  TroveType: { fields: [{ name: "lastUpdatedTxHash" }] },
+};
+const TROVE_SCHEMA_WITHOUT_TX = {
+  TroveType: { fields: [{ name: "owner" }] },
+};
 
 const NOW = 1_767_225_600;
 const D18 = BigInt(10) ** BigInt(18);
@@ -190,19 +203,47 @@ describe("TroveDetailClient", () => {
 
   function mockQueries({
     markets = marketsData(),
+    marketsError = null,
     troveRows = [trove()],
+    troveError = null,
     operationRows = [op()],
+    troveSchema = TROVE_SCHEMA_WITH_TX,
+    interestBatchRows = [],
   }: {
     markets?: ReturnType<typeof marketsData>;
+    marketsError?: Error | null;
     troveRows?: CdpTrove[];
+    troveError?: Error | null;
     operationRows?: CdpTroveOperationEventRow[];
+    troveSchema?: typeof TROVE_SCHEMA_WITH_TX | typeof TROVE_SCHEMA_WITHOUT_TX;
+    interestBatchRows?: Array<{
+      id: string;
+      collateralId: string;
+      batchManager: string;
+      annualInterestRate: string;
+      updatedAt: string;
+    }>;
   } = {}) {
     mockUseGQL.mockImplementation((query: string | null) => {
       if (query === CDP_MARKETS) {
-        return { data: markets, error: null, isLoading: false };
+        return { data: markets, error: marketsError, isLoading: false };
       }
-      if (query === CDP_TROVE_BY_ID) {
-        return { data: { Trove: troveRows }, error: null, isLoading: false };
+      if (query === CDP_TROVE_SCHEMA_FIELDS) {
+        return { data: troveSchema, error: null, isLoading: false };
+      }
+      if (query === CDP_TROVE_BY_ID || query === CDP_TROVE_BY_ID_WITHOUT_TX) {
+        return {
+          data: { Trove: troveRows },
+          error: troveError,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_INTEREST_BATCH_BY_ID) {
+        return {
+          data: { InterestBatch: interestBatchRows },
+          error: null,
+          isLoading: false,
+        };
       }
       if (query === CDP_TROVE_OPERATIONS) {
         return {
@@ -309,7 +350,10 @@ describe("TroveDetailClient", () => {
       if (query === CDP_MARKETS) {
         return { data: marketsData(), error: null, isLoading: false };
       }
-      if (query === CDP_TROVE_BY_ID) {
+      if (query === CDP_TROVE_SCHEMA_FIELDS) {
+        return { data: TROVE_SCHEMA_WITH_TX, error: null, isLoading: false };
+      }
+      if (query === CDP_TROVE_BY_ID || query === CDP_TROVE_BY_ID_WITHOUT_TX) {
         return {
           data: undefined,
           error: new Error("trove query failed"),
@@ -349,5 +393,154 @@ describe("TroveDetailClient", () => {
     expect(text).not.toMatch(/net equity/i);
     expect(text.toLowerCase()).not.toContain("interest residual");
     expect(handle!.container.querySelector("canvas, svg")).toBeNull();
+  });
+
+  it("passes the shared Hasura timeout to every polling useGQL call", () => {
+    mockQueries({
+      troveRows: [trove({ interestBatchId: "batch-1", status: "active" })],
+      interestBatchRows: [
+        {
+          id: "batch-1",
+          collateralId: "gbpm",
+          batchManager: "0xmanager",
+          annualInterestRate: "0",
+          updatedAt: "1000",
+        },
+      ],
+    });
+    render(handle!);
+
+    // Index calls by query once, rather than re-scanning the call list per
+    // query below (array.find() in a loop).
+    const callsByQuery = new Map<string | null, unknown[]>();
+    for (const call of mockUseGQL.mock.calls) {
+      callsByQuery.set(call[0] as string | null, call);
+    }
+    for (const query of [
+      CDP_MARKETS,
+      CDP_TROVE_SCHEMA_FIELDS,
+      CDP_TROVE_BY_ID,
+      CDP_INTEREST_BATCH_BY_ID,
+      CDP_TROVE_OPERATIONS,
+    ]) {
+      const call = callsByQuery.get(query);
+      expect(call, `expected a useGQL call for: ${query}`).toBeDefined();
+      const options = call?.[2] as { timeoutMs?: number } | undefined;
+      expect(options?.timeoutMs).toBe(HASURA_TIMEOUT_MS);
+    }
+  });
+
+  it("uses the schema-lag fallback query when Trove.lastUpdatedTxHash isn't supported", () => {
+    mockQueries({ troveSchema: TROVE_SCHEMA_WITHOUT_TX });
+    render(handle!);
+
+    expect(
+      mockUseGQL.mock.calls.some(([q]) => q === CDP_TROVE_BY_ID_WITHOUT_TX),
+    ).toBe(true);
+    expect(mockUseGQL.mock.calls.some(([q]) => q === CDP_TROVE_BY_ID)).toBe(
+      false,
+    );
+    // The page still renders normally on the fallback shape.
+    expect(handle!.container.textContent).toContain("Trove 0x8abc");
+  });
+
+  it("uses the full trove query once the schema probe confirms lastUpdatedTxHash support", () => {
+    mockQueries({ troveSchema: TROVE_SCHEMA_WITH_TX });
+    render(handle!);
+
+    expect(mockUseGQL.mock.calls.some(([q]) => q === CDP_TROVE_BY_ID)).toBe(
+      true,
+    );
+    expect(
+      mockUseGQL.mock.calls.some(([q]) => q === CDP_TROVE_BY_ID_WITHOUT_TX),
+    ).toBe(false);
+  });
+
+  it("shows the joined InterestBatch rate for an open batch-managed trove, not the trove's stale copy", () => {
+    mockQueries({
+      troveRows: [
+        trove({
+          status: "active",
+          interestBatchId: "batch-1",
+          interestRate: ((BigInt(160) * D18) / BigInt(10_000)).toString(),
+        }),
+      ],
+      interestBatchRows: [
+        {
+          id: "batch-1",
+          collateralId: "gbpm",
+          batchManager: "0xmanager",
+          annualInterestRate: ((BigInt(250) * D18) / BigInt(10_000)).toString(),
+          updatedAt: "1000",
+        },
+      ],
+    });
+    render(handle!);
+
+    const text = handle!.container.textContent ?? "";
+    expect(text).toContain("2.50%");
+    expect(text).not.toContain("1.60%");
+    const call = mockUseGQL.mock.calls.find(
+      ([q]) => q === CDP_INTEREST_BATCH_BY_ID,
+    );
+    expect(call?.[1]).toEqual({ batchId: "batch-1" });
+  });
+
+  it("does not join InterestBatch for a closed batch-managed trove — its rate is a historical snapshot", () => {
+    mockQueries({
+      troveRows: [
+        trove({
+          status: "redeemed",
+          interestBatchId: "batch-1",
+          interestRate: ((BigInt(160) * D18) / BigInt(10_000)).toString(),
+        }),
+      ],
+      interestBatchRows: [
+        {
+          id: "batch-1",
+          collateralId: "gbpm",
+          batchManager: "0xmanager",
+          annualInterestRate: ((BigInt(250) * D18) / BigInt(10_000)).toString(),
+          updatedAt: "1000",
+        },
+      ],
+    });
+    render(handle!);
+
+    const text = handle!.container.textContent ?? "";
+    expect(text).toContain("1.60%");
+    expect(text).not.toContain("2.50%");
+    const batchRequest = mockUseGQL.mock.calls.find(
+      ([, variables]) =>
+        (variables as { batchId?: string } | undefined)?.batchId === "batch-1",
+    );
+    expect(batchRequest).toBeUndefined();
+  });
+
+  it("discloses a failed trove revalidation while keeping the last confirmed data on screen", () => {
+    mockQueries({ troveError: new Error("revalidation stalled") });
+    render(handle!);
+
+    const text = handle!.container.textContent ?? "";
+    expect(text).toContain("Trove 0x8abc");
+    expect(text).toContain("Trove data refresh failed");
+    expect(text).toContain("showing the last confirmed state");
+    expect(text).toContain("revalidation stalled");
+  });
+
+  it("discloses a failed markets revalidation while keeping the last confirmed data on screen", () => {
+    mockQueries({ marketsError: new Error("markets revalidation stalled") });
+    render(handle!);
+
+    const text = handle!.container.textContent ?? "";
+    expect(text).toContain("Trove 0x8abc");
+    expect(text).toContain("Market data refresh failed");
+    expect(text).toContain("markets revalidation stalled");
+  });
+
+  it("shows no stale-refresh notice when both queries are healthy", () => {
+    mockQueries();
+    render(handle!);
+    expect(handle!.container.textContent).not.toContain("refresh failed");
   });
 });

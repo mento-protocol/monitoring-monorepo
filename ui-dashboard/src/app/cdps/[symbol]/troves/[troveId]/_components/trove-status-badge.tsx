@@ -12,17 +12,27 @@ import {
 export function TroveStatusBadge({ status }: { status: string }) {
   const label = troveStatusLabel(status);
   const tooltip = troveStatusTooltip(status);
-  const pill = (
-    <span
-      className={`inline-block rounded border px-2 py-0.5 text-xs font-medium uppercase tracking-wide ${troveStatusBadgeClasses(status)}`}
-    >
-      {label}
-    </span>
-  );
-  if (tooltip == null) return pill;
+  if (tooltip == null) {
+    return (
+      <span
+        className={`inline-block rounded border px-2 py-0.5 text-xs font-medium uppercase tracking-wide ${troveStatusBadgeClasses(status)}`}
+      >
+        {label}
+      </span>
+    );
+  }
   return (
     <Tooltip content={tooltip} label={`${label}: ${tooltip}`} asChild>
-      {pill}
+      {/* `asChild` clones this child as-is (see @/components/tooltip.tsx) —
+          a plain span isn't reachable by Tab, so keyboard users could never
+          open the tooltip. `tabIndex={0}` makes it a focusable trigger like
+          the component's default `<button>` trigger. */}
+      <span
+        tabIndex={0}
+        className={`inline-block rounded border px-2 py-0.5 text-xs font-medium uppercase tracking-wide ${troveStatusBadgeClasses(status)}`}
+      >
+        {label}
+      </span>
     </Tooltip>
   );
 }

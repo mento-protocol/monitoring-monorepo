@@ -70,4 +70,11 @@ describe("TroveStatusBadge", () => {
     // No tooltip trigger for an unrecognized status.
     expect(handle.container.querySelector("[aria-describedby]")).toBeNull();
   });
+
+  it("is keyboard-focusable — asChild clones a plain span, which needs an explicit tabIndex to be Tab-reachable", () => {
+    handle = render(<TroveStatusBadge status="active" />);
+    const trigger = handle.container.querySelector("[aria-describedby]");
+    expect(trigger?.tagName).toBe("SPAN");
+    expect(trigger?.getAttribute("tabindex")).toBe("0");
+  });
 });

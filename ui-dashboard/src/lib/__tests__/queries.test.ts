@@ -77,7 +77,9 @@ const EXPECTED_EXPORT_NAMES = [
   "CDP_MARKET_DETAIL_WITH_TROVE_TX_AND_SP_SOURCE",
   "CDP_STABILITY_POOL_EVENTS",
   "CDP_TRANSACTIONS",
+  "CDP_INTEREST_BATCH_BY_ID",
   "CDP_TROVE_BY_ID",
+  "CDP_TROVE_BY_ID_WITHOUT_TX",
   "CDP_TROVE_OPERATIONS",
   "CDP_TROVE_SCHEMA_FIELDS",
   "CDP_TROVE_OP_SNAPSHOTS",
@@ -741,6 +743,23 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
         }
       `),
     );
+  });
+
+  it("CDP_TROVE_BY_ID_WITHOUT_TX omits lastUpdatedTxHash for the schema-lag fallback", () => {
+    const query = normalize(queries.CDP_TROVE_BY_ID_WITHOUT_TX);
+    expect(query).toContain("query CdpTroveByIdWithoutTx");
+    expect(query).toContain("where: { id: { _eq: $troveEntityId } }");
+    expect(query).toContain("previousOwner");
+    expect(query).not.toContain("lastUpdatedTxHash");
+  });
+
+  it("CDP_INTEREST_BATCH_BY_ID resolves one batch's current rate by id", () => {
+    const query = normalize(queries.CDP_INTEREST_BATCH_BY_ID);
+    expect(query).toContain("query CdpInterestBatchById");
+    expect(query).toContain(
+      "InterestBatch(where: { id: { _eq: $batchId } }, limit: 1)",
+    );
+    expect(query).toContain("annualInterestRate");
   });
 
   it("POOL_BREAKER_CONFIG queries both BreakerConfig and BreakerTripEvent in one round-trip", () => {

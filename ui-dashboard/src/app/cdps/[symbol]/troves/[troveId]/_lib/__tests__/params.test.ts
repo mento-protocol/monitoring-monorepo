@@ -29,6 +29,25 @@ describe("normalizeTroveIdParam", () => {
   it("lowercases to match the indexer's stored casing", () => {
     expect(normalizeTroveIdParam("0xABCdef")).toBe("0xabcdef");
   });
+
+  it("strips leading zeros to match the indexer's toString(16) storage", () => {
+    // The indexer stores `0x${troveId.toString(16)}` — a padded 32-byte ABI
+    // form of the same uint256 must normalize to the identical unpadded id,
+    // or the entity lookup misses and the trove reads as "not indexed".
+    expect(normalizeTroveIdParam("0x0000000000000000000000000000000001")).toBe(
+      "0x1",
+    );
+    expect(normalizeTroveIdParam("0x000abc")).toBe("0xabc");
+  });
+
+  it("collapses an all-zero id to 0x0, matching bigint.toString(16)", () => {
+    expect(normalizeTroveIdParam("0x000")).toBe("0x0");
+  });
+
+  it("is idempotent on an already-normalized id", () => {
+    expect(normalizeTroveIdParam("0x1")).toBe("0x1");
+    expect(normalizeTroveIdParam("0xabc")).toBe("0xabc");
+  });
 });
 
 describe("makeTroveEntityId", () => {

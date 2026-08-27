@@ -169,6 +169,108 @@ describe("TroveHeaderCard", () => {
     expect(handle.container.textContent).toContain("Batch");
   });
 
+  it("falls back to the trove's own rate while the batch join is unresolved", () => {
+    handle = render(
+      <TroveHeaderCard
+        trove={trove({
+          interestRate: ((BigInt(160) * D18) / BigInt(10_000)).toString(),
+          interestBatchId: "batch-1",
+        })}
+        collateral={collateral()}
+      />,
+    );
+    expect(handle.container.textContent).toContain("1.60%");
+  });
+
+  it("prefers the joined InterestBatch rate over a stale trove.interestRate", () => {
+    // Trove.interestRate can retain the previously-copied rate after the
+    // batch manager changes the batch's rate — the effective rate is
+    // whatever InterestBatch.annualInterestRate currently holds.
+    handle = render(
+      <TroveHeaderCard
+        trove={trove({
+          interestRate: ((BigInt(160) * D18) / BigInt(10_000)).toString(),
+          interestBatchId: "batch-1",
+        })}
+        collateral={collateral()}
+        batchAnnualInterestRate={(
+          (BigInt(250) * D18) /
+          BigInt(10_000)
+        ).toString()}
+      />,
+    );
+    const text = handle.container.textContent ?? "";
+    expect(text).toContain("2.50%");
+    expect(text).not.toContain("1.60%");
+  });
+
+  it("ignores batchAnnualInterestRate for a trove with no interestBatchId", () => {
+    handle = render(
+      <TroveHeaderCard
+        trove={trove({
+          interestRate: ((BigInt(160) * D18) / BigInt(10_000)).toString(),
+          interestBatchId: null,
+        })}
+        collateral={collateral()}
+        batchAnnualInterestRate={(
+          (BigInt(250) * D18) /
+          BigInt(10_000)
+        ).toString()}
+      />,
+    );
+    expect(handle.container.textContent).toContain("1.60%");
+  });
+
+  it("links the owner to previousOwner when the NFT has burned (owner zeroed)", () => {
+    handle = render(
+      <TroveHeaderCard
+        trove={trove({
+          owner: "0x0000000000000000000000000000000000000000",
+          previousOwner: "0xformerowner",
+          status: "redeemed",
+        })}
+        collateral={collateral()}
+      />,
+    );
+    const link = handle.container.querySelector<HTMLAnchorElement>(
+      "a[href^='mock-address://']",
+    );
+    expect(link?.getAttribute("href")).toBe("mock-address://0xformerowner");
+  });
+
+  it("links the owner to the live owner when the trove hasn't burned", () => {
+    handle = render(
+      <TroveHeaderCard
+        trove={trove({
+          owner: "0xliveowner",
+          previousOwner: "0x0000000000000000000000000000000000000000",
+        })}
+        collateral={collateral()}
+      />,
+    );
+    const link = handle.container.querySelector<HTMLAnchorElement>(
+      "a[href^='mock-address://']",
+    );
+    expect(link?.getAttribute("href")).toBe("mock-address://0xliveowner");
+  });
+
+  it("is keyboard-focusable on every span-based tooltip trigger (status badge + ICR)", () => {
+    handle = render(
+      <TroveHeaderCard trove={trove()} collateral={collateral()} />,
+    );
+    // The Debt stat's tooltip uses the default `<button>` trigger (already
+    // focusable). The status badge and ICR stat both clone a plain `<span>`
+    // via `asChild` — neither is reachable by Tab without an explicit
+    // tabIndex.
+    const spanTriggers = handle.container.querySelectorAll(
+      "span[aria-describedby]",
+    );
+    expect(spanTriggers.length).toBeGreaterThan(0);
+    for (const trigger of spanTriggers) {
+      expect(trigger.getAttribute("tabindex")).toBe("0");
+    }
+  });
+
   it("colors ICR below MCR as danger", () => {
     handle = render(
       <TroveHeaderCard

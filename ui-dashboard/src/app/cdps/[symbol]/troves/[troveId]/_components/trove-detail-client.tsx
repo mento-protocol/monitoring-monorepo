@@ -3,21 +3,26 @@
 import Link from "next/link";
 import { useMemo } from "react";
 import { useNetwork } from "@/components/network-provider";
-import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
-import { useGQL } from "@/lib/graphql";
+import { EmptyBox, ErrorBox, StaleRefreshNotice } from "@/components/feedback";
+import { HASURA_TIMEOUT_MS, useGQL } from "@/lib/graphql";
 import { hasErrorWithoutData, isLoadingWithoutData } from "@/lib/swr-state";
 import type { Network } from "@/lib/networks";
 import { explorerAddressUrl } from "@/lib/tokens";
 import {
+  CDP_INTEREST_BATCH_BY_ID,
   CDP_MARKETS,
   CDP_TROVE_BY_ID,
+  CDP_TROVE_BY_ID_WITHOUT_TX,
   CDP_TROVE_OPERATIONS,
+  CDP_TROVE_SCHEMA_FIELDS,
 } from "@/lib/queries";
-import type {
-  CdpCollateral,
-  CdpTrove,
-  CdpTroveListRow,
-  CdpTroveOperationEventRow,
+import {
+  CDP_TROVE_OPEN_STATUSES,
+  type CdpCollateral,
+  type CdpInterestBatch,
+  type CdpTrove,
+  type CdpTroveListRow,
+  type CdpTroveOperationEventRow,
 } from "../../../../_lib/types";
 import { cdpSymbolSlug } from "../../../../_lib/format";
 import {
@@ -25,6 +30,7 @@ import {
   makeTroveEntityId,
   paginateTroveOperations,
 } from "../_lib/params";
+import { TroveDetailSkeleton } from "./trove-detail-skeleton";
 import { TroveHeaderCard } from "./trove-header-card";
 import { TroveLifetimeTotals } from "./trove-lifetime-totals";
 import { TroveOperationsList } from "./trove-operations-list";
@@ -41,9 +47,23 @@ type CdpTroveByIdResponse = {
   Trove: CdpTrove[];
 };
 
+type CdpTroveSchemaFieldsResponse = {
+  TroveType: {
+    fields: Array<{ name: string }>;
+  } | null;
+};
+
+type CdpInterestBatchByIdResponse = {
+  InterestBatch: CdpInterestBatch[];
+};
+
 type CdpTroveOperationsResponse = {
   TroveOperationEvent: CdpTroveOperationEventRow[];
 };
+
+function isOpenTroveStatus(status: string): boolean {
+  return (CDP_TROVE_OPEN_STATUSES as readonly string[]).includes(status);
+}
 
 export function TroveDetailClient({
   symbol,
@@ -58,6 +78,7 @@ export function TroveDetailClient({
   const markets = useGQL<CdpMarketsResponse>(
     network.chainId === CELO_MAINNET_CHAIN_ID ? CDP_MARKETS : null,
     { chainId: network.chainId },
+    { timeoutMs: HASURA_TIMEOUT_MS },
   );
   const collateral = useMemo(
     () =>
@@ -66,11 +87,46 @@ export function TroveDetailClient({
       ),
     [markets.data, symbolSlug],
   );
+  // Schema-lag probe (same query + pattern as the market page's
+  // `cdp-detail-client.tsx`): `lastUpdatedTxHash` is a newer `Trove` column,
+  // so a hosted Hasura instance mid deploy+resync would reject the whole
+  // header query for an unknown field if we queried it unconditionally.
+  const troveSchema = useGQL<CdpTroveSchemaFieldsResponse>(
+    network.chainId === CELO_MAINNET_CHAIN_ID ? CDP_TROVE_SCHEMA_FIELDS : null,
+    undefined,
+    { refreshInterval: 300_000, timeoutMs: HASURA_TIMEOUT_MS },
+  );
+  const supportsTroveLastUpdatedTxHash =
+    troveSchema.data?.TroveType?.fields.some(
+      (field) => field.name === "lastUpdatedTxHash",
+    ) === true;
   const troveEntityId =
     collateral == null ? null : makeTroveEntityId(collateral.id, troveId);
   const troveById = useGQL<CdpTroveByIdResponse>(
-    troveEntityId == null ? null : CDP_TROVE_BY_ID,
+    troveEntityId == null
+      ? null
+      : supportsTroveLastUpdatedTxHash
+        ? CDP_TROVE_BY_ID
+        : CDP_TROVE_BY_ID_WITHOUT_TX,
     troveEntityId == null ? undefined : { troveEntityId },
+    { timeoutMs: HASURA_TIMEOUT_MS },
+  );
+  const trove = troveById.data?.Trove[0];
+  // Batch-rate join (mirrors `buildRankedOpenRows` in the market page's
+  // `trove-row-data.ts`): only for a currently-open trove, since a
+  // closed/liquidated/redeemed trove's rate is a historical snapshot, not a
+  // live obligation — joining a closed trove to the batch's CURRENT rate
+  // would misrepresent what it actually paid.
+  const joinBatchId =
+    trove != null &&
+    trove.interestBatchId != null &&
+    isOpenTroveStatus(trove.status)
+      ? trove.interestBatchId
+      : null;
+  const interestBatch = useGQL<CdpInterestBatchByIdResponse>(
+    joinBatchId == null ? null : CDP_INTEREST_BATCH_BY_ID,
+    joinBatchId == null ? undefined : { batchId: joinBatchId },
+    { timeoutMs: HASURA_TIMEOUT_MS },
   );
   const operations = useGQL<CdpTroveOperationsResponse>(
     collateral == null ? null : CDP_TROVE_OPERATIONS,
@@ -81,6 +137,7 @@ export function TroveDetailClient({
           troveId,
           limit: CDP_TROVE_OPERATIONS_REQUEST_LIMIT,
         },
+    { timeoutMs: HASURA_TIMEOUT_MS },
   );
   const { rows: operationRows, truncated } = useMemo(
     () => paginateTroveOperations(operations.data?.TroveOperationEvent ?? []),
@@ -93,7 +150,7 @@ export function TroveDetailClient({
     );
   }
   if (isLoadingWithoutData(markets.isLoading, markets.data)) {
-    return <Skeleton rows={8} />;
+    return <TroveDetailSkeleton />;
   }
   if (hasErrorWithoutData(markets.error, markets.data)) {
     return (
@@ -106,14 +163,13 @@ export function TroveDetailClient({
     return <EmptyBox message="Unknown CDP market." />;
   }
   if (isLoadingWithoutData(troveById.isLoading, troveById.data)) {
-    return <Skeleton rows={6} />;
+    return <TroveDetailSkeleton />;
   }
   if (hasErrorWithoutData(troveById.error, troveById.data)) {
     return (
       <ErrorBox message={`Failed to load trove — ${troveById.error.message}`} />
     );
   }
-  const trove = troveById.data?.Trove[0];
   if (trove == null) {
     return (
       <NotIndexedNotice
@@ -133,7 +189,27 @@ export function TroveDetailClient({
       >
         ← {collateral.symbol} market
       </Link>
-      <TroveHeaderCard trove={trove} collateral={collateral} />
+      {/* A revalidation failure after either query has already succeeded once
+          leaves `data` populated (`hasErrorWithoutData` above is false), so
+          the header below keeps rendering — this discloses that it's the
+          last confirmed state rather than a silently-stalled poll. */}
+      <StaleRefreshNotice
+        subject="Market data"
+        error={markets.error}
+        className="mb-3"
+      />
+      <StaleRefreshNotice
+        subject="Trove data"
+        error={troveById.error}
+        className="mb-3"
+      />
+      <TroveHeaderCard
+        trove={trove}
+        collateral={collateral}
+        batchAnnualInterestRate={
+          interestBatch.data?.InterestBatch[0]?.annualInterestRate
+        }
+      />
       <TroveLifetimeTotals trove={trove} debtSymbol={collateral.symbol} />
       <TroveOperationsList
         rows={operationRows}

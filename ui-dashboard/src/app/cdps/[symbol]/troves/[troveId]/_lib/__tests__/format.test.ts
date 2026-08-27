@@ -3,6 +3,7 @@ import {
   formatBpsPercent,
   formatInterestRate,
   icrTextClass,
+  lastOwnerAddress,
   troveManageUrl,
 } from "../format";
 
@@ -48,5 +49,43 @@ describe("troveManageUrl", () => {
     expect(troveManageUrl("0x8abc", "GBPm")).toBe(
       "https://app.mento.org/borrow/manage/0x8abc?token=GBPm",
     );
+  });
+});
+
+describe("lastOwnerAddress", () => {
+  it("falls back to previousOwner once the NFT has burned (owner zeroed)", () => {
+    expect(
+      lastOwnerAddress({
+        owner: "0x0000000000000000000000000000000000000000",
+        previousOwner: "0xformerowner",
+      }),
+    ).toBe("0xformerowner");
+  });
+
+  it("returns the live owner when it hasn't zeroed", () => {
+    expect(
+      lastOwnerAddress({
+        owner: "0xliveowner",
+        previousOwner: "0x0000000000000000000000000000000000000000",
+      }),
+    ).toBe("0xliveowner");
+  });
+
+  it("returns the zero owner as-is when previousOwner is also zero", () => {
+    expect(
+      lastOwnerAddress({
+        owner: "0x0000000000000000000000000000000000000000",
+        previousOwner: "0x0000000000000000000000000000000000000000",
+      }),
+    ).toBe("0x0000000000000000000000000000000000000000");
+  });
+
+  it("is case-insensitive when checking for the zero address", () => {
+    expect(
+      lastOwnerAddress({
+        owner: "0x0000000000000000000000000000000000000000".toUpperCase(),
+        previousOwner: "0xformerowner",
+      }),
+    ).toBe("0xformerowner");
   });
 });

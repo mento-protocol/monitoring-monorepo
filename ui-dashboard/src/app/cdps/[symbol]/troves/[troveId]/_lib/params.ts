@@ -11,10 +11,20 @@ export function isValidTroveIdParam(value: string): boolean {
   return TROVE_ID_PATTERN.test(value);
 }
 
-/** Lowercase a route troveId param to match the indexer's stored casing. Only
- *  meaningful after {@link isValidTroveIdParam} confirms the shape. */
+/** Normalize a route troveId param to match the indexer's stored id. Only
+ *  meaningful after {@link isValidTroveIdParam} confirms the shape. Lowercases
+ *  AND strips leading zeros: the indexer stores `` `0x${troveId.toString(16)}` ``
+ *  (`normalizeTroveTokenId`, indexer-envio/src/handlers/liquity/troves.ts),
+ *  and `bigint.toString(16)` never carries leading zeros. A trove id copied in
+ *  its common 32-byte ABI form (`0x000…0001`) would otherwise pass validation,
+ *  get lowercased to the same padded string, and then fail the entity lookup
+ *  against the indexer's unpadded `0x1` — read as "not indexed" instead of
+ *  resolving. Round-tripping through `BigInt` matches the indexer exactly
+ *  (including collapsing `0x000` to `0x0`) rather than a regex strip, which
+ *  would need its own "how many zeros are actually leading" edge cases.
+ *  `BigInt` accepts a `0x`-prefixed literal directly. */
 export function normalizeTroveIdParam(value: string): string {
-  return value.toLowerCase();
+  return `0x${BigInt(value).toString(16)}`;
 }
 
 /** Mirrors the indexer's `makeTroveId` (indexer-envio/src/handlers/liquity/

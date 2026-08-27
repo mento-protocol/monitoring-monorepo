@@ -436,10 +436,42 @@ export const ALL_CDP_TROVE_OP_SNAPSHOTS = `
 // the composite entity id (`${collateralId}-${troveId}`, see the indexer's
 // `makeTroveId`) resolved client-side from the route's symbol + on-chain
 // troveId — never passed in raw from the URL.
+//
+// Two variants, same schema-lag rationale as `CDP_MARKET_DETAIL` /
+// `CDP_MARKET_DETAIL_WITH_TROVE_TX`: `lastUpdatedTxHash` is a newer column,
+// and hosted Hasura rejects unknown fields at parse time during a
+// deploy+resync window. The caller probes `CDP_TROVE_SCHEMA_FIELDS` (shared
+// with the market page) and picks the variant that matches — querying the
+// `_WITH_TX` variant unconditionally would fail the whole header request on
+// a schema-lagged environment instead of just omitting one optional field.
 export const CDP_TROVE_BY_ID = `
   query CdpTroveById($troveEntityId: String!) {
     Trove(where: { id: { _eq: $troveEntityId } }, limit: 1) {
 ${CDP_TROVE_ROW_FIELDS_WITH_TX}
+    }
+  }
+`;
+
+export const CDP_TROVE_BY_ID_WITHOUT_TX = `
+  query CdpTroveByIdWithoutTx($troveEntityId: String!) {
+    Trove(where: { id: { _eq: $troveEntityId } }, limit: 1) {
+${CDP_TROVE_ROW_FIELDS}
+    }
+  }
+`;
+
+// Trove history page header rate join: resolves the CURRENT batch rate for a
+// batch-managed trove, same as the market page's `InterestBatch` join in
+// `cdpMarketDetailQuery` — `Trove.interestRate` can retain a stale
+// individually-copied value after the batch manager changes the batch's
+// rate, so the header must read `InterestBatch.annualInterestRate` rather
+// than the trove's own (possibly stale) field. Queried by id rather than
+// bundled into `CDP_TROVE_BY_ID` because the batch id isn't known until the
+// trove row itself resolves.
+export const CDP_INTEREST_BATCH_BY_ID = `
+  query CdpInterestBatchById($batchId: String!) {
+    InterestBatch(where: { id: { _eq: $batchId } }, limit: 1) {
+      id collateralId batchManager annualInterestRate updatedAt
     }
   }
 `;

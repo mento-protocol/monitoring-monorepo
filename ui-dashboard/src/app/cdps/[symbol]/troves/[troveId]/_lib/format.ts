@@ -5,6 +5,27 @@
 
 const D18 = BigInt(10) ** BigInt(18);
 const MENTO_APP_BORROW_MANAGE_BASE_URL = "https://app.mento.org/borrow/manage";
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+function isZeroAddress(address: string | null | undefined): boolean {
+  return address?.toLowerCase() === ZERO_ADDRESS;
+}
+
+/** The NFT-burn handler zeroes `owner` and stashes the former owner in
+ *  `previousOwner` for closed/liquidated/redeemed troves — mirrors
+ *  `lastOwnerAddress` in `../../_components/trove-cells.tsx`, which the
+ *  history table uses for the same reason. Without this fallback, the header
+ *  links to `0x000…000` for exactly the historical positions where owner
+ *  attribution matters most. */
+export function lastOwnerAddress(trove: {
+  owner: string;
+  previousOwner: string;
+}): string {
+  if (isZeroAddress(trove.owner) && !isZeroAddress(trove.previousOwner)) {
+    return trove.previousOwner;
+  }
+  return trove.owner;
+}
 
 export function formatBpsPercent(bps: number): string {
   if (bps < 0) return "—";

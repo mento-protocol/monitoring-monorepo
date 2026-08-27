@@ -10,6 +10,7 @@ import {
   formatBpsPercent,
   formatInterestRate,
   icrTextClass,
+  lastOwnerAddress,
   troveManageUrl,
 } from "../_lib/format";
 import { TroveStatusBadge } from "./trove-status-badge";
@@ -74,9 +75,16 @@ function StatValue({ children }: { children: ReactNode }) {
 export function TroveHeaderCard({
   trove,
   collateral,
+  batchAnnualInterestRate,
 }: {
   trove: CdpTrove;
   collateral: CdpCollateral;
+  /** Current `InterestBatch.annualInterestRate` for `trove.interestBatchId`,
+   *  resolved by the caller (join, not a local lookup — see
+   *  `trove-detail-client.tsx`). `null`/`undefined` while unresolved or not
+   *  applicable; falls back to the trove's own (possibly stale, for a
+   *  batch-managed trove) `interestRate`. */
+  batchAnnualInterestRate?: string | null | undefined;
 }) {
   return (
     <header className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
@@ -99,7 +107,11 @@ export function TroveHeaderCard({
         </a>
       </div>
 
-      <TroveHeaderStats trove={trove} collateral={collateral} />
+      <TroveHeaderStats
+        trove={trove}
+        collateral={collateral}
+        batchAnnualInterestRate={batchAnnualInterestRate}
+      />
 
       <p className="mt-4 text-xs text-slate-500">
         Values shown are indexed as of the last recorded event (
@@ -115,11 +127,17 @@ export function TroveHeaderCard({
 function TroveHeaderStats({
   trove,
   collateral,
+  batchAnnualInterestRate,
 }: {
   trove: CdpTrove;
   collateral: CdpCollateral;
+  batchAnnualInterestRate?: string | null | undefined;
 }) {
   const icrTimestamp = formatTimestamp(trove.lastUpdatedAt);
+  const displayedRate =
+    trove.interestBatchId != null && batchAnnualInterestRate != null
+      ? batchAnnualInterestRate
+      : trove.interestRate;
   const icrTitle =
     trove.icrBps < 0
       ? `Indexed ICR unavailable. Row last updated at ${icrTimestamp}.`
@@ -132,7 +150,10 @@ function TroveHeaderStats({
       <div>
         <StatLabel>Owner</StatLabel>
         <StatValue>
-          <AddressLink address={trove.owner} chainId={collateral.chainId} />
+          <AddressLink
+            address={lastOwnerAddress(trove)}
+            chainId={collateral.chainId}
+          />
         </StatValue>
       </div>
       <div>
@@ -160,7 +181,7 @@ function TroveHeaderStats({
       <div>
         <StatLabel>Rate</StatLabel>
         <StatValue>
-          {formatInterestRate(trove.interestRate)}
+          {formatInterestRate(displayedRate)}
           {trove.interestBatchId != null && (
             <span className="ml-1 text-[10px] text-slate-500">Batch</span>
           )}
@@ -186,7 +207,10 @@ function TroveHeaderStats({
         <StatLabel>ICR</StatLabel>
         <StatValue>
           <Tooltip content={icrTitle} asChild>
-            <span className={icrTextClass(trove.icrBps, collateral.mcrBps)}>
+            <span
+              tabIndex={0}
+              className={icrTextClass(trove.icrBps, collateral.mcrBps)}
+            >
               {formatBpsPercent(trove.icrBps)}
             </span>
           </Tooltip>
