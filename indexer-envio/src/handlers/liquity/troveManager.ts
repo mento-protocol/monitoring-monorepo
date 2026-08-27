@@ -386,9 +386,10 @@ indexer.onEvent(
     }
     // Same-tx status capture for the ledger writer, marked batched: the
     // paired update carries batch shares, so per-trove debt truth is
-    // batch-level and the ledger row keeps null debt snapshots. For
-    // batch-membership ops TroveOperation precedes this event, so the
-    // capture may go unconsumed (bounded leak; zero batches in production).
+    // batch-level and the ledger row keeps null debt snapshots. On-chain,
+    // batch-membership ops emit this event BEFORE TroveOperation (verified
+    // against TroveManager.sol emit sites), so the same-tx TroveOperation
+    // consumes and deletes the capture.
     const troveForCapture = await context.Trove.get(
       makeTroveId(collateralId, troveId),
     );

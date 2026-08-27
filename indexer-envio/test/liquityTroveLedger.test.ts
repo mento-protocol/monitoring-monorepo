@@ -708,8 +708,9 @@ describe("TroveLedgerEvent — append-only per-trove ledger", () => {
     });
 
     const tx = { blockNumber: 801, blockTimestamp: 700_000, txHash: "0xjoin" };
-    // Batch-membership ops emit TroveOperation FIRST, then the batched
-    // update events — the writer must classify without a status capture.
+    // On-chain, batched update events precede TroveOperation; this case
+    // inverts the order deliberately to exercise the defensive fallback
+    // where the writer must classify without a status capture.
     mockDb = await processMockEvents({
       mockDb,
       events: [
