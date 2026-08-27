@@ -194,8 +194,12 @@ export async function readMergeOutcome({ gh, repo, number }) {
 }
 
 /**
- * The rule types GitHub applies to one branch, from every active ruleset and
- * branch-protection source.
+ * The rule types GitHub applies to one branch through its rulesets.
+ *
+ * Ruleset-sourced only. A merge queue enabled through
+ * a CLASSIC branch-protection rule does not surface here, so this narrows the
+ * window rather than closing it — `reconcileMergeOutcome` still catches such an
+ * enqueue afterwards, reports it and exits non-zero.
  *
  * Used to refuse a merge-queue base before the merge request exists. `gh pr
  * merge` enqueues such a base and returns success, and `--disable-auto` does
@@ -304,6 +308,26 @@ export async function reconcileMergeOutcome({
         `Check ${repo}#${number} before running any post-merge step.\n`,
     );
     return { merged: false, verified: false, record, consentPath };
+  }
+
+  // A closed pull request is not a queued one. Cancelling auto-merge on it
+  // fails, and reporting that failure as "this can still merge later" would be
+  // both false and alarming — GitHub will not merge a closed pull request.
+  if (outcome.state === "CLOSED") {
+    write(
+      `${repo}#${number} is CLOSED, not merged. Nothing was merged and there is ` +
+        `no pending request to cancel: GitHub does not merge a closed pull request. ` +
+        (mergeError ? `The merge command also failed: ${mergeError}. ` : "") +
+        `\nThe consent record stays in the ledger as evidence of what was approved.\n`,
+    );
+    return {
+      merged: false,
+      verified: true,
+      closed: true,
+      state: outcome.state,
+      record,
+      consentPath,
+    };
   }
 
   if (outcome.state !== "MERGED") {

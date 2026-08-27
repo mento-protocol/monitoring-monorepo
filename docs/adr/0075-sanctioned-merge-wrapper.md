@@ -70,7 +70,12 @@ The ordered gates in `scripts/pr/merge-pr.mjs`:
    gates; merging over it or cancelling it are both wrong, and the wrapper
    cannot tell its own compensation from interference with another operator's
    state. Refusing also makes the post-merge cleanup provably its own.
-8. Refuse a merge-queue base before sending anything. `gh pr merge` enqueues
+8. Refuse a ruleset-declared merge-queue base before sending anything, and
+   again after the confirmation. The check reads the branch's **ruleset** rules;
+   a merge queue enabled through a classic branch-protection rule does not
+   surface there, so this narrows the window rather than closing it — step 9's
+   reconciliation still catches such an enqueue, reports it, and exits non-zero.
+   `gh pr merge` enqueues
    such a base and returns success, and nothing the wrapper can call removes a
    queue entry — `--disable-auto` turns off auto-merge only — so merging first
    would leave a standing request it cannot take back, which GitHub could

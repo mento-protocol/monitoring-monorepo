@@ -2042,6 +2042,31 @@ await test("an unreadable auto-merge state after confirming refuses", async () =
   );
 });
 
+await test("a closed pull request is not reported as queued", async () => {
+  // Cancelling auto-merge on a closed PR fails, and reporting that as "this can
+  // still merge later" would be false and alarming — GitHub does not merge a
+  // closed pull request.
+  const h = harness({ mergedState: "CLOSED" });
+  const result = await h.run();
+
+  assertEqual(result.merged, false);
+  assertEqual(result.closed, true);
+  assertEqual(result.queued, undefined, "a closed PR is not queued");
+  assertEqual(exitCodeForResult(result), 1);
+  const cancel = h.calls.gh.find(
+    (args) => args[0] === "pr" && args.includes("--disable-auto"),
+  );
+  assertEqual(cancel, undefined, "no cancellation is attempted on a closed PR");
+  assert(
+    h.output().includes("no pending request to cancel"),
+    `the operator should be told plainly, got:\n${h.output()}`,
+  );
+  assert(
+    !h.output().includes("can still merge later"),
+    "a closed PR cannot still merge later",
+  );
+});
+
 await test("only a confirmed merge exits zero", async () => {
   // The CLI's exit status is what `pnpm pr:merge && <post-merge closeout>`
   // branches on. Reporting success for a queued or unverified merge would run
