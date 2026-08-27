@@ -90,16 +90,15 @@ feedback-runtime pins.
   `gate/routing-table/**`, `gate/mapping*`, the autoreview core, and sealed
   policy. Runtime hashes use `$script_source_dir`; suites use `$repo_root`.
   Core edits route both suites; policy edits route autoreview. Missing pins
-  freeze the stamp (ADRs 0069 and 0079).
+  freeze the stamp (ADRs 0069 and 0079). Two exact pins inside that glob move
+  alone: the `.dependency-cruiser.cjs` arm names
+  `gate/mapping/engine.test.mjs`, and `gate/mapping/post-passes.mjs` names
+  itself to keep `code-health:deps` scheduled.
 - **Review-eval pins.** `docs/evals/review-skill.md` tracks
-  `scripts/review/run-eval.sh`,
-  `scripts/review/run-eval-source-snapshot.sh`,
-  `scripts/review/run-eval-lifecycle.sh`,
-  `scripts/review/run-eval-runtime.sh`,
-  `scripts/review/install-review-eval-launchd.sh`,
-  `scripts/review/launchd/org.mento.review-eval.plist`,
-  `scripts/review/review-eval.test.mjs`, and
-  `scripts/review/install-review-eval-launchd.test.mjs`.
+  `review/run-eval{,-source-snapshot,-lifecycle,-runtime}.sh`,
+  `review/install-review-eval-launchd.{sh,test.mjs}`,
+  `review/launchd/org.mento.review-eval.plist`, and
+  `review/review-eval.test.mjs`.
   `review/review-eval-*publication*` pins both tests.
 - **Navigation-eval pin.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names its source.

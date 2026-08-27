@@ -333,6 +333,12 @@ export const HEAD_GROUPS = [
             reason: "dep-cruiser config changed (root ESLint coverage)",
           },
           {
+            why: "The engine narrows `pnpm code-health:deps` to the roots dependency-cruiser actually scans, and it holds those roots as a pinned constant. `engine.test.mjs` is what compares that constant with this file's `includeOnly.path` and with the root `code-health:deps` script, set-equal both ways. Without this route, adding a root here would leave the gate under-routing every change under it — a smaller plan, arrived at silently, which is the failure mode ADR 0069 exists to prevent.",
+            command: "node --test scripts/gate/mapping/engine.test.mjs",
+            reason:
+              "dep-cruiser config changed (gate pins its scanned roots against this file)",
+          },
+          {
             checklist: "docs/pr-checklists/code-health.md",
             reason: "dep-cruiser config changed",
           },

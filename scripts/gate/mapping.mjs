@@ -50,6 +50,7 @@ import {
   addWorkspaceConfigBuild,
   applyScopedTestCommands,
   compactTurboQualityCommands,
+  narrowCodeHealthDepsCommand,
   sortCodegenCommands,
 } from "./mapping/post-passes.mjs";
 import * as verbs from "./mapping/verbs.mjs";
@@ -335,6 +336,9 @@ export function buildPlan({ changedPaths, facts, routingSensitive = false }) {
   addWorkspaceConfigBuild(plan);
   compactTurboQualityCommands(plan);
   applyScopedTestCommands(plan, changedPaths, facts);
+  // Last: it reads the finished quality bucket, and it is the only pass that
+  // removes a command, so nothing after it can reintroduce one.
+  narrowCodeHealthDepsCommand(plan, changedPaths);
   return plan;
 }
 

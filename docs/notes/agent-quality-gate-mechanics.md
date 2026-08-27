@@ -207,9 +207,20 @@ entrypoint validator
 (`scripts/check-agent-quality-gate-package-scripts.mjs`) runs as a fail-fast
 quality-setup prerequisite: an unpinned or drifted alias aborts the run before
 any `pnpm <alias>` executes, and `--skip-if-fresh` cannot skip it. Existing changed paths run
-targeted Trunk checks for faster local iteration. Deleted paths,
-Trunk/tooling changes, package-manager changes, pnpm patches, and
-package-manifest changes still run full-repo Trunk locally. CI also runs a
+targeted Trunk checks for faster local iteration. Trunk/tooling changes,
+package-manager changes, pnpm patches, and package-manifest changes still run
+full-repo Trunk locally. A deleted path is dropped from the targeted argument
+list — Trunk fails on an argument that is not there — and the surviving paths
+are still linted. Three deletion cases keep the whole-repo scan: a change set
+with no survivor to target, a deleted path that is itself in the whole-repo
+list, and a deleted path under `.github/`. That last one is cross-file
+semantics: actionlint resolves `uses: ./.github/actions/<name>` and
+`uses: ./.github/workflows/<file>` against the tree, so deleting one invalidates
+surviving callers that are not in the change set and that a targeted run would
+never name. Every other enabled Trunk linter judges a file on its own bytes —
+shellcheck included, because Trunk's `copy_targets` sandbox lints one file at a
+time. checkov would join `.github/` if this repo gained a local
+`module { source = "./…" }` reference; it has none today. CI also runs a
 required full-repo Trunk check on every
 PR. Where the environment blocks Trunk's downloads — a Claude cloud container
 proxies egress and refuses any host outside its allowlist, and its credential
@@ -749,9 +760,27 @@ comparison would be the engine against itself. What routing correctness rests on
 now is `pnpm gate:routing-table:test` (the pairing lint, the staleness check, the
 `/bin/bash` pattern oracle, the closed verb set) and
 `node --test scripts/gate/mapping/engine.test.mjs` (dedupe and first-reason-wins,
-bucket order, the five post-passes, the root-manifest classifier). Both are
+bucket order, the six post-passes, the root-manifest classifier). Both are
 routed by a change to the engine or the table, and the routing-table suite also
-runs in the required `ci` job.
+runs in the required `ci` job. The engine suite is routed by
+`.dependency-cruiser.cjs` as well, because it is what pins the gate's copy of
+the scanned roots against that file.
+
+The sixth post-pass narrows `pnpm code-health:deps`. Several arms reach that
+command through a package quality bundle — a `governance-watchdog/**` edit, an
+`alerts/infra/**` edit, a `.github/workflows/**` edit that routes a package's
+bundle — from paths dependency-cruiser neither walks nor reports. The command
+scans six roots: `shared-config`, `ui-dashboard`, `indexer-envio`,
+`metrics-bridge`, `integration-probes`, and `aegis`. Two sources define that
+list, the positional arguments of the root `code-health:deps` script and the
+`includeOnly.path` alternation in `.dependency-cruiser.cjs`, and
+`engine.test.mjs` holds the gate's pinned copy set-equal to both. A change
+outside every root drops the command; a change inside any root, to
+`.dependency-cruiser.cjs`, or to the narrowing pass itself keeps it. The
+`docs/pr-checklists/code-health.md` checklist is unaffected either way, because
+knip is the other half of it and still runs per package. This is the only pass
+that makes a plan smaller, so its condition is about what dependency-cruiser can
+read, never about which package the arms routed.
 
 ### Scheduling contract (Refs #1802, #2006; [ADR 0076](../adr/0076-fair-quality-gate-coordinator.md))
 

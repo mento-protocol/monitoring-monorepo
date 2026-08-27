@@ -1,15 +1,16 @@
 /**
- * The five whole-set passes that run AFTER every changed path has been routed.
+ * The six whole-set passes that run AFTER every changed path has been routed.
  *
  * They are separate from the verbs because they cannot be decided per path:
  * each reads the complete changed set or the complete command list. Their order
  * is fixed and is itself contract — Trunk is prepended first so it lands at the
  * head, codegen is sorted before the plan is written, workspace dependency
  * setup is added from the complete command list, Turbo compaction rewrites the
- * quality bucket, and scoped tests rewrite it again afterwards.
+ * quality bucket, scoped tests rewrite it again afterwards, and the dep-cruiser
+ * narrowing runs last on the finished quality bucket.
  *
  *   addTrunkCheckCommand → sortCodegenCommands → addWorkspaceConfigBuild →
- *   compactTurbo → applyScopedTests
+ *   compactTurbo → applyScopedTests → narrowCodeHealthDepsCommand
  */
 
 import { shellQuote } from "./shell-quote.mjs";
@@ -17,9 +18,7 @@ import { shellQuote } from "./shell-quote.mjs";
 // ── 1. Trunk ───────────────────────────────────────────────────────────────
 
 /**
- * Patterns that force a full-repo Trunk scan. A changed path that no longer
- * exists forces one too: a targeted invocation naming a deleted file fails, so
- * the whole-repo scan is the fail-safe answer.
+ * Patterns that force a full-repo Trunk scan, whether or not the path survives.
  */
 const TRUNK_FULL_SCAN = [
   /^\.trunk\//,
@@ -36,23 +35,57 @@ const TRUNK_FULL_SCAN = [
   /\/package\.json$/,
 ];
 
+/**
+ * Deleted paths whose absence changes what a linter reports about files that
+ * did NOT change, so a targeted run over the survivors cannot see the damage.
+ *
+ * actionlint resolves `uses: ./.github/actions/<name>` and `uses:
+ * ./.github/workflows/<file>` against the working tree. Deleting one of those
+ * makes every surviving caller newly invalid — and no surviving caller is in
+ * the changed set, so nothing would name it. `.github/actions/pnpm-install` is
+ * referenced by most workflows in this repo, which is the measured case.
+ *
+ * The other enabled Trunk linters (prettier, markdownlint, codespell,
+ * yamllint, trufflehog, git-diff-check, shellcheck under Trunk's
+ * one-file-at-a-time `copy_targets` sandbox) judge each file on its own bytes,
+ * so an ordinary source or docs deletion cannot invalidate a survivor. checkov
+ * would belong here for local `module { source = "./…" }` references; this repo
+ * has none today, and `.tf` deletions stay covered by the whole-repo branches.
+ */
+const TRUNK_DELETION_FULL_SCAN = [/^\.github\//];
+
 export function addTrunkCheckCommand(plan, changedPaths, facts) {
-  const missing = changedPaths.some(
-    (path) => !facts.pathExistsInWorktree(path),
-  );
+  const present = [];
+  const missing = [];
+  for (const path of changedPaths) {
+    (facts.pathExistsInWorktree(path) ? present : missing).push(path);
+  }
+
+  // A deleted path cannot be named on a targeted command line — Trunk fails on
+  // an argument that is not there. Dropping it from the argument list is the
+  // narrow fix; the two branches below cover the cases where dropping it would
+  // also drop coverage.
   const forcesFull =
-    missing ||
-    changedPaths.some((path) => TRUNK_FULL_SCAN.some((r) => r.test(path)));
+    changedPaths.some((path) => TRUNK_FULL_SCAN.some((r) => r.test(path))) ||
+    missing.some((path) => TRUNK_DELETION_FULL_SCAN.some((r) => r.test(path)));
 
   if (forcesFull) {
     plan.prependCommand(
       "./tools/trunk check --ci --all",
       "changed paths require full-repo Trunk checks",
     );
-  } else if (changedPaths.length > 0) {
+  } else if (present.length > 0) {
     plan.prependCommand(
-      `./tools/trunk check --ci ${changedPaths.map(shellQuote).join(" ")}`,
+      `./tools/trunk check --ci ${present.map(shellQuote).join(" ")}`,
       "changed existing paths should pass targeted Trunk checks",
+    );
+  } else if (changedPaths.length > 0) {
+    // Every changed path was deleted. There is no survivor to target, and a
+    // deletion-only change set is exactly where a cross-file linter has the
+    // most to say, so keep the whole-repo scan.
+    plan.prependCommand(
+      "./tools/trunk check --ci --all",
+      "every changed path was deleted; full-repo Trunk checks",
     );
   } else {
     plan.prependCommand(
@@ -317,4 +350,76 @@ export function applyScopedTestCommands(plan, changedPaths, facts) {
       reason: `${entry.reason} (scoped-tests)`,
     };
   });
+}
+
+// ── 6. dep-cruiser scope ───────────────────────────────────────────────────
+
+/** The command this pass narrows. */
+export const CODE_HEALTH_DEPS_COMMAND = "pnpm code-health:deps";
+
+/**
+ * The roots `pnpm code-health:deps` actually scans.
+ *
+ * Two sources agree on this list and both are pinned by
+ * `engine.test.mjs`, set-equal in both directions: the positional arguments of
+ * the root `package.json` `code-health:deps` script, and the `includeOnly.path`
+ * alternation in `.dependency-cruiser.cjs`. The arguments decide what
+ * dependency-cruiser walks; `includeOnly` decides what it reports. A module
+ * outside both is neither walked nor reported, so a change to it cannot change
+ * the command's verdict.
+ *
+ * Duplicated here rather than derived at run time on purpose: routing is
+ * reviewable data, and a routing constant parsed out of a shell string at gate
+ * time would be neither. The staleness test is what keeps the copy honest —
+ * adding a seventh root turns into a red test, not a silently under-routed
+ * gate.
+ */
+export const DEPCRUISE_ROOTS = Object.freeze([
+  "shared-config",
+  "ui-dashboard",
+  "indexer-envio",
+  "metrics-bridge",
+  "integration-probes",
+  "aegis",
+]);
+
+/**
+ * Changed paths that keep `pnpm code-health:deps` in the plan.
+ *
+ * The roots are the reason the command exists. The other two entries are
+ * fail-closed: `.dependency-cruiser.cjs` is the config whose rules the command
+ * enforces, and this module is where the narrowing itself lives, so an edit to
+ * either has to run the command it governs rather than be judged by it.
+ */
+const CODE_HEALTH_DEPS_TRIGGERS = [
+  new RegExp(`^(${DEPCRUISE_ROOTS.join("|")})/`),
+  /^\.dependency-cruiser\.cjs$/,
+  /^scripts\/gate\/mapping\/post-passes\.mjs$/,
+];
+
+export function codeHealthDepsTriggered(changedPaths) {
+  return changedPaths.some((path) =>
+    CODE_HEALTH_DEPS_TRIGGERS.some((r) => r.test(path)),
+  );
+}
+
+/**
+ * Drop `pnpm code-health:deps` when nothing it can see changed.
+ *
+ * Several arms reach it as part of a package quality bundle — a
+ * `governance-watchdog/**` edit, an `alerts/infra/**` edit, a
+ * `.github/workflows/**` edit that routes a package's bundle — and none of
+ * those paths is inside a scanned root, so the command re-proves the same
+ * verdict on an unchanged graph. This is the one pass that makes the plan
+ * smaller, which is the direction the rest of the engine refuses to go, so its
+ * condition is deliberately about what dependency-cruiser can read rather than
+ * about which package was routed. The `docs/pr-checklists/code-health.md`
+ * checklist stays either way: knip is the other half of that checklist and it
+ * still runs per package.
+ */
+export function narrowCodeHealthDepsCommand(plan, changedPaths) {
+  if (codeHealthDepsTriggered(changedPaths)) return;
+  plan.quality = plan.quality.filter(
+    (entry) => entry.command !== CODE_HEALTH_DEPS_COMMAND,
+  );
 }

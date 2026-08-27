@@ -19,9 +19,12 @@ or the `.dependency-cruiser.cjs` / `*/knip.json` files.
 ## Before pushing
 
 - [ ] `pnpm code-health` is green (`code-health:knip` + `code-health:deps`).
-      The agent quality gate selects the changed package's `knip` task and the
-      workspace dependency-cruiser check; use the umbrella command for a full
-      local sweep.
+      The agent quality gate selects the changed package's `knip` task always,
+      and the workspace dependency-cruiser check only when a changed path is
+      inside a root that check scans (`shared-config`, `ui-dashboard`,
+      `indexer-envio`, `metrics-bridge`, `integration-probes`, `aegis`) or is
+      `.dependency-cruiser.cjs`. Use the umbrella command for a full local
+      sweep.
 - [ ] If you added a new cross-package import, it goes via `shared-config`
       (or `@mento-protocol/contracts`), never indexer/dashboard/bridge ↔ each other.
 - [ ] If you added a new top-level dependency, knip can see it being used.

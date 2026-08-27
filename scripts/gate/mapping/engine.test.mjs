@@ -27,6 +27,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -38,10 +39,13 @@ import { ROUTING_PLAN } from "../routing-table/index.mjs";
 import { Facts } from "./facts.mjs";
 import { BUCKETS, Plan, commandDedupeKey } from "./plan.mjs";
 import {
+  CODE_HEALTH_DEPS_COMMAND,
+  DEPCRUISE_ROOTS,
   addTrunkCheckCommand,
   addWorkspaceConfigBuild,
   applyScopedTestCommands,
   compactTurboQualityCommands,
+  narrowCodeHealthDepsCommand,
   scopedIsNonSourcePath,
   scopedTestInfraChanged,
   sortCodegenCommands,
@@ -408,17 +412,83 @@ test("Darwin runtime files shared with autoreview route both regression suites",
 
 // ── Post-pass 1: Trunk ─────────────────────────────────────────────────────
 
-test("a path that no longer exists forces a full-repo Trunk scan", () => {
+test("a change set of nothing but deletions forces a full-repo Trunk scan", () => {
   const plan = new Plan();
   addTrunkCheckCommand(
     plan,
-    ["deleted/file.ts"],
+    ["deleted/one.ts", "deleted/two.ts"],
     stubFacts({ presentPaths: [] }),
   );
-  assert.deepEqual(commandsOf(plan), ["./tools/trunk check --ci --all"]);
+  assert.deepEqual(
+    commandsOf(plan),
+    ["./tools/trunk check --ci --all"],
+    "there is no survivor to name on a targeted command line",
+  );
   assert.equal(
     reasonOf(plan, "./tools/trunk check --ci --all"),
-    "changed paths require full-repo Trunk checks",
+    "every changed path was deleted; full-repo Trunk checks",
+  );
+});
+
+test("a deleted path is dropped from the targeted Trunk argument list", () => {
+  const plan = new Plan();
+  addTrunkCheckCommand(
+    plan,
+    ["a/kept.ts", "a/deleted.ts", "b/kept.ts"],
+    stubFacts({ presentPaths: ["a/kept.ts", "b/kept.ts"] }),
+  );
+  assert.deepEqual(
+    commandsOf(plan),
+    ["./tools/trunk check --ci a/kept.ts b/kept.ts"],
+    "Trunk fails on an argument that is not there; the survivors still lint",
+  );
+});
+
+test("a deleted .github path forces full, because actionlint reads across files", () => {
+  for (const deleted of [
+    ".github/actions/pnpm-install/action.yml",
+    ".github/workflows/reusable.yml",
+  ]) {
+    const plan = new Plan();
+    addTrunkCheckCommand(
+      plan,
+      [deleted, "docs/note.md"],
+      stubFacts({ presentPaths: ["docs/note.md"] }),
+    );
+    assert.deepEqual(
+      commandsOf(plan),
+      ["./tools/trunk check --ci --all"],
+      `${deleted} is referenced by surviving workflows that are not in the change set`,
+    );
+  }
+});
+
+test("an ordinary deletion beside a survivor does NOT force full", () => {
+  // The standing invariant the narrowing rests on: every enabled Trunk linter
+  // except actionlint judges a file on its own bytes, so a deleted source file
+  // cannot invalidate a file nobody touched.
+  const plan = new Plan();
+  addTrunkCheckCommand(
+    plan,
+    ["ui-dashboard/src/gone.tsx", "ui-dashboard/src/kept.tsx"],
+    stubFacts({ presentPaths: ["ui-dashboard/src/kept.tsx"] }),
+  );
+  assert.deepEqual(commandsOf(plan), [
+    "./tools/trunk check --ci ui-dashboard/src/kept.tsx",
+  ]);
+});
+
+test("a deleted path still in the full-scan list forces full", () => {
+  const plan = new Plan();
+  addTrunkCheckCommand(
+    plan,
+    ["ui-dashboard/package.json", "ui-dashboard/src/kept.tsx"],
+    stubFacts({ presentPaths: ["ui-dashboard/src/kept.tsx"] }),
+  );
+  assert.deepEqual(
+    commandsOf(plan),
+    ["./tools/trunk check --ci --all"],
+    "the whole-repo list is matched against every changed path, deleted or not",
   );
 });
 
@@ -798,6 +868,127 @@ test("scopedTestInfraChanged sees infra anywhere in the set", () => {
   assert.equal(
     scopedTestInfraChanged(["ui-dashboard/src/a.ts", "shared-config/src/b.ts"]),
     true,
+  );
+});
+
+// ── Post-pass 6: dep-cruiser scope ─────────────────────────────────────────
+
+/** A plan holding only the command the pass may remove. */
+function depsPlan() {
+  const plan = new Plan();
+  plan.addCommand("pnpm exec turbo run lint --filter=x --cache=local:rw", "a");
+  plan.addCommand(CODE_HEALTH_DEPS_COMMAND, "package bundle");
+  plan.addCommand("pnpm --filter x test:coverage", "b");
+  return plan;
+}
+
+const depsSurvives = (changedPaths) => {
+  const plan = depsPlan();
+  narrowCodeHealthDepsCommand(plan, changedPaths);
+  return commandsOf(plan).includes(CODE_HEALTH_DEPS_COMMAND);
+};
+
+test("every scanned root keeps pnpm code-health:deps", () => {
+  // The standing invariant: a change dependency-cruiser can read must still be
+  // judged by it. Asserted for all six roots, not just the motivating one.
+  // This iterates the same constant the pass compiles its trigger from, so it
+  // proves the trigger is built correctly and NOT that the list is right — the
+  // staleness test below is what pins the list against its two sources.
+  for (const root of DEPCRUISE_ROOTS) {
+    assert.equal(
+      depsSurvives([`${root}/src/thing.ts`]),
+      true,
+      `${root} is a scanned root; narrowing it away would weaken the check`,
+    );
+  }
+});
+
+test("a change outside every scanned root drops pnpm code-health:deps", () => {
+  for (const path of [
+    "governance-watchdog/src/index.ts",
+    "alerts/infra/onchain-event-handler/src/index.ts",
+    "alerts/infra/oncall-announcer/src/main.ts",
+    ".github/workflows/ci.yml",
+    "docs/notes/quick-commands.md",
+    "terraform/platform/main.tf",
+  ]) {
+    assert.equal(
+      depsSurvives([path]),
+      false,
+      `${path} is neither walked nor reported by dependency-cruiser`,
+    );
+  }
+});
+
+test("one in-root path anywhere in the set keeps the command", () => {
+  assert.equal(
+    depsSurvives(["governance-watchdog/src/index.ts", "aegis/src/Thing.sol"]),
+    true,
+    "the pass asks what changed, not which package the arms routed",
+  );
+});
+
+test("the dep-cruiser config and this pass keep the command", () => {
+  // Fail-closed: an edit to the rules, or to the narrowing itself, runs the
+  // command rather than being judged by it.
+  assert.equal(depsSurvives([".dependency-cruiser.cjs"]), true);
+  assert.equal(
+    depsSurvives([
+      "scripts/gate/mapping/post-passes.mjs",
+      "governance-watchdog/src/index.ts",
+    ]),
+    true,
+  );
+});
+
+test("the pass removes only its own command", () => {
+  const plan = depsPlan();
+  narrowCodeHealthDepsCommand(plan, ["docs/note.md"]);
+  assert.deepEqual(commandsOf(plan), [
+    "pnpm exec turbo run lint --filter=x --cache=local:rw",
+    "pnpm --filter x test:coverage",
+  ]);
+});
+
+test("the pinned roots match both sources that define them", () => {
+  // Staleness, both directions. Adding a seventh root to either source without
+  // updating DEPCRUISE_ROOTS would otherwise leave the gate quietly
+  // under-routing every change beneath it.
+  const repoRoot = join(
+    fileURLToPath(new URL(".", import.meta.url)),
+    "../../..",
+  );
+  const manifest = JSON.parse(
+    readFileSync(join(repoRoot, "package.json"), "utf8"),
+  );
+  const script = manifest.scripts["code-health:deps"];
+  assert.ok(script.startsWith("depcruise --config .dependency-cruiser.cjs "));
+  const scriptRoots = script
+    .slice("depcruise --config .dependency-cruiser.cjs ".length)
+    .split(" ")
+    .filter((token) => token !== "");
+
+  const config = createRequire(import.meta.url)(
+    join(repoRoot, ".dependency-cruiser.cjs"),
+  );
+  const includeOnly = config.options.includeOnly.path;
+  const match = /^\^\(([^)]+)\)\/$/.exec(includeOnly);
+  assert.ok(
+    match !== null,
+    `includeOnly.path is no longer a root alternation: ${includeOnly}`,
+  );
+  const configRoots = match[1].split("|");
+
+  const sorted = (values) => [...values].sort();
+  assert.deepEqual(
+    sorted(scriptRoots),
+    sorted(DEPCRUISE_ROOTS),
+    "the code-health:deps arguments and the gate's pinned roots must agree",
+  );
+  assert.deepEqual(
+    sorted(configRoots),
+    sorted(DEPCRUISE_ROOTS),
+    "the dependency-cruiser includeOnly roots and the gate's pinned roots must agree",
   );
 });
 

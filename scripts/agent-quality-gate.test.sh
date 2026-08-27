@@ -13113,10 +13113,26 @@ run_context_check_expect_failure
 assert_contains ".claude/settings.json: unexpected Bash permission; add the exact reviewed entry to the context-check allowlist: Bash(pnpm agent:quality-gate:*)"
 restore_hook_configs
 
+# A deleted path cannot be named on a targeted Trunk command line. With no
+# survivor to target, the whole-repo scan is the only run left.
 run_gate "docs/deleted.md"
 assert_contains "- docs"
-assert_contains "- ./tools/trunk check --ci --all (changed paths require full-repo Trunk checks)"
+assert_contains "- ./tools/trunk check --ci --all (every changed path was deleted; full-repo Trunk checks)"
 assert_not_contains "- ./tools/trunk check --ci docs/deleted.md"
+
+# Mixed set: drop the deleted argument, keep linting the survivor. Before this
+# the whole set escalated to --all on the strength of one deletion.
+run_gate "docs/deleted.md" "docs/deployment.md"
+assert_contains "- ./tools/trunk check --ci docs/deployment.md (changed existing paths should pass targeted Trunk checks)"
+assert_not_contains "- ./tools/trunk check --ci --all"
+assert_not_contains "docs/deleted.md (changed existing paths"
+
+# The carve-out: actionlint resolves `uses: ./.github/...` against the tree, so
+# deleting a local action invalidates surviving workflows that are not in the
+# change set and that a targeted run would never name.
+run_gate ".github/actions/deleted/action.yml" "docs/deployment.md"
+assert_contains "- ./tools/trunk check --ci --all (changed paths require full-repo Trunk checks)"
+assert_not_contains "- ./tools/trunk check --ci docs/deployment.md ("
 
 # Code-health routing: ensure a `.dependency-cruiser.cjs` change schedules
 # the cross-package dep-cruiser gate + surfaces the code-health checklist.
@@ -13124,6 +13140,19 @@ run_gate ".dependency-cruiser.cjs"
 assert_contains "- tooling"
 assert_contains "- pnpm code-health:deps (dep-cruiser config changed (cross-package boundaries + cycles))"
 assert_contains "- docs/pr-checklists/code-health.md (dep-cruiser config changed)"
+assert_contains "- node --test scripts/gate/mapping/engine.test.mjs (dep-cruiser config changed (gate pins its scanned roots against this file))"
+
+# dep-cruiser scans six roots and reports nothing outside them, so a change it
+# cannot read must not schedule it. governance-watchdog reaches the command
+# through its package quality bundle and is in none of those roots.
+run_gate "governance-watchdog/src/index.ts"
+assert_contains "- pnpm exec turbo run knip --filter=@mento-protocol/governance-watchdog --cache=local:rw"
+assert_not_contains "- pnpm code-health:deps"
+assert_contains "- docs/pr-checklists/code-health.md"
+
+# One path inside a scanned root brings it back for the whole set.
+run_gate "governance-watchdog/src/index.ts" "shared-config/src/index.ts"
+assert_contains "- pnpm code-health:deps"
 
 # Code-health routing: each package's knip.json routes to the matching
 # `pnpm --filter <pkg> knip` command + the same checklist. A typo in the
