@@ -201,6 +201,7 @@ function harness({
   // Rule types GitHub reports for the base branch, and a read failure knob.
   baseRuleTypes = ["pull_request", "required_status_checks"],
   baseRulesError = null,
+  baseRuleTypesAfterConfirmation = null,
   // The base the pull request reports AFTER the merge. A retarget between the
   // final gate read and GitHub processing the merge shows up only here.
   mergedBaseRefName = null,
@@ -219,6 +220,7 @@ function harness({
     prompts: [],
     readyStateReads: 0,
     logins: 0,
+    branchRules: [],
   };
   let output = "";
 
@@ -233,10 +235,16 @@ function harness({
     }
     if (
       args[0] === "api" &&
-      String(args[1] ?? "").includes("/rules/branches/")
+      args.some((arg) => String(arg).includes("/rules/branches/"))
     ) {
       if (baseRulesError) throw new Error(baseRulesError);
-      return JSON.stringify(baseRuleTypes.map((type) => ({ type })));
+      calls.branchRules.push(args);
+      const types =
+        calls.branchRules.length > 1 && baseRuleTypesAfterConfirmation
+          ? baseRuleTypesAfterConfirmation
+          : baseRuleTypes;
+      // --slurp wraps each page in its own array; mirror that shape.
+      return JSON.stringify([types.map((type) => ({ type }))]);
     }
     if (args[0] === "api" && args.includes("user")) {
       if (logins)
@@ -1872,6 +1880,59 @@ await test("an ordinary protected base still merges", async () => {
   const h = harness();
   const result = await h.run();
   assertEqual(result.merged, true);
+});
+
+await test("the branch-rules read names its host and paginates", async () => {
+  // splitRepo strips the host, so a bare gh api would read rules from whatever
+  // host is configured — an unrelated same-named repository, on Enterprise.
+  const h = harness({
+    argv: ["--pr", "2071", "--repo", "ghe.example.com/acme/widgets"],
+  });
+  await h.run();
+
+  const read = h.calls.branchRules[0];
+  assert(read !== undefined, "the branch rules must be read");
+  assertEqual(read[read.indexOf("--hostname") + 1], "ghe.example.com");
+  assert(read.includes("--paginate"), "a merge_queue rule can be on page two");
+  assert(read.includes("--slurp"), "pages must be collected, not concatenated");
+  assert(
+    read.some((arg) => String(arg).includes("acme/widgets")),
+    `the read must target the merge repository, got: ${read.join(" ")}`,
+  );
+});
+
+await test("a github.com base names github.com explicitly", async () => {
+  const h = harness();
+  await h.run();
+  const read = h.calls.branchRules[0];
+  assertEqual(read[read.indexOf("--hostname") + 1], "github.com");
+});
+
+await test("the branch rules are re-read after the confirmation", async () => {
+  // They were read before an unbounded prompt; a queue can be switched on
+  // while the operator reads.
+  const h = harness();
+  await h.run();
+  assertEqual(
+    h.calls.branchRules.length,
+    2,
+    "the rules belong to the gates that are re-read after confirming",
+  );
+});
+
+await test("a merge queue switched on during confirmation refuses", async () => {
+  // The first read happens before an unbounded prompt. A queue enabled while
+  // the operator reads would otherwise be merged into.
+  const h = harness({
+    baseRuleTypesAfterConfirmation: ["pull_request", "merge_queue"],
+  });
+
+  await assertRefuses(
+    h.run(),
+    "gained a merge queue while you were confirming",
+  );
+  assertEqual(h.calls.merges.length, 0, "no merge request may be sent");
+  assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
 });
 
 await test("only a confirmed merge exits zero", async () => {

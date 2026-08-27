@@ -332,6 +332,29 @@ export async function mergePullRequest({
     );
   }
 
+  // The rules were read before an unbounded prompt, and a merge queue can be
+  // switched on while the operator reads. Re-read them, like every other gate.
+  let confirmedRuleTypes;
+  try {
+    confirmedRuleTypes = await readBaseBranchRuleTypes({
+      gh,
+      repo: repos.base,
+      branch: confirmed.baseRefName,
+    });
+  } catch (err) {
+    throw new MergeRefusal(
+      `unable to re-read the branch rules for ${confirmed.baseRefName} in ${repos.base}: ` +
+        `${err instanceof Error ? err.message : String(err)}. ` +
+        `Refusing, because a merge-queue base would accept a request this command cannot take back.`,
+    );
+  }
+  if (confirmedRuleTypes.includes("merge_queue")) {
+    throw new MergeRefusal(
+      `${confirmed.baseRefName} in ${repos.base} gained a merge queue while you were confirming; ` +
+        `re-run — this command cannot take back a queued request.`,
+    );
+  }
+
   // The merge below starts a fresh `gh`, which reads whatever credentials are
   // active then — not the ones read before the prompt. A `gh auth switch` while
   // the prompt was open would otherwise record one login in the ledger and

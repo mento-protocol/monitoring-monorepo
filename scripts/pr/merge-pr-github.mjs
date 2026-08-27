@@ -204,15 +204,27 @@ export async function readMergeOutcome({ gh, repo, number }) {
  * of the gates. Checking first is the only fail-closed order.
  */
 export async function readBaseBranchRuleTypes({ gh, repo, branch }) {
-  const { owner, name } = splitRepo(repo);
+  const { owner, name, host } = splitRepo(repo);
   const parsed = JSON.parse(
     await gh([
       "api",
+      // Same reason `resolveLogin` names its host: `splitRepo` strips the host
+      // off the repository, and a bare `gh api` would then read rules from
+      // whatever host is configured — an unrelated same-named repository on
+      // github.com, in the Enterprise case.
+      "--hostname",
+      host ?? "github.com",
+      // A branch can carry more rules than one page holds, and a `merge_queue`
+      // rule missed on page two would permit exactly the request this refuses.
+      "--paginate",
+      "--slurp",
       `repos/${owner}/${name}/rules/branches/${encodeURIComponent(branch)}`,
     ]),
   );
   if (!Array.isArray(parsed)) {
     throw new Error("the branch-rules response was not a list");
   }
-  return parsed.map((rule) => String(rule?.type ?? ""));
+  // `--slurp` wraps each page in its own array; a single unpaginated page is
+  // already flat. `flat()` accepts both.
+  return parsed.flat().map((rule) => String(rule?.type ?? ""));
 }
