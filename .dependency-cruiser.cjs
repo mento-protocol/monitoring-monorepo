@@ -246,6 +246,20 @@ module.exports = {
       },
     },
     {
+      name: "dashboard-route-private-cdp-trove-detail",
+      severity: "error",
+      comment:
+        "ui-dashboard/src/app/cdps/[symbol]/troves/[troveId]/_components/ is private to the trove-history route. No code outside app/cdps/[symbol]/troves/[troveId]/ — including lib/, components/, the parent cdps market page, or other routes — may import from it.",
+      from: {
+        path: "^ui-dashboard/src/",
+        pathNot:
+          "^ui-dashboard/src/app/cdps/\\[symbol\\]/troves/\\[troveId\\]/",
+      },
+      to: {
+        path: "^ui-dashboard/src/app/cdps/\\[symbol\\]/troves/\\[troveId\\]/_components/",
+      },
+    },
+    {
       name: "dashboard-route-private-volume",
       severity: "error",
       comment:

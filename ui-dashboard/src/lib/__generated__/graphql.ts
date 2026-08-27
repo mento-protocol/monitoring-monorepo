@@ -6959,6 +6959,106 @@ export type AllCdpTroveOpSnapshotsQuery = {
   }>;
 };
 
+// queries/liquity.CDP_TROVE_BY_ID
+export type CdpTroveByIdQueryVariables = {
+  readonly troveEntityId: string;
+};
+export type CdpTroveByIdQuery = {
+  readonly Trove: ReadonlyArray<{
+    readonly id: string;
+    readonly troveId: string;
+    readonly owner: string;
+    readonly previousOwner: string;
+    readonly status: string;
+    readonly debt: string;
+    readonly coll: string;
+    readonly icrBps: number;
+    readonly interestRate: string;
+    readonly interestBatchId: string | null;
+    readonly openedAt: string;
+    readonly openedTxHash: string;
+    readonly closedAt: string | null;
+    readonly closedTxHash: string | null;
+    readonly lastUpdatedAt: string;
+    readonly lastUpdatedTxHash: string | null;
+    readonly liquidatedDebt: string | null;
+    readonly liquidatedColl: string | null;
+    readonly collSurplus: string | null;
+    readonly priceAtLiquidation: string | null;
+    readonly redemptionCount: number;
+    readonly redeemedDebt: string;
+    readonly redeemedColl: string;
+    readonly redemptionFeePaidCum: string;
+  }>;
+};
+
+// queries/liquity.CDP_TROVE_BY_ID_WITHOUT_TX
+export type CdpTroveByIdWithoutTxQueryVariables = {
+  readonly troveEntityId: string;
+};
+export type CdpTroveByIdWithoutTxQuery = {
+  readonly Trove: ReadonlyArray<{
+    readonly id: string;
+    readonly troveId: string;
+    readonly owner: string;
+    readonly previousOwner: string;
+    readonly status: string;
+    readonly debt: string;
+    readonly coll: string;
+    readonly icrBps: number;
+    readonly interestRate: string;
+    readonly interestBatchId: string | null;
+    readonly openedAt: string;
+    readonly openedTxHash: string;
+    readonly closedAt: string | null;
+    readonly closedTxHash: string | null;
+    readonly lastUpdatedAt: string;
+    readonly liquidatedDebt: string | null;
+    readonly liquidatedColl: string | null;
+    readonly collSurplus: string | null;
+    readonly priceAtLiquidation: string | null;
+    readonly redemptionCount: number;
+    readonly redeemedDebt: string;
+    readonly redeemedColl: string;
+    readonly redemptionFeePaidCum: string;
+  }>;
+};
+
+// queries/liquity.CDP_INTEREST_BATCH_BY_ID
+export type CdpInterestBatchByIdQueryVariables = {
+  readonly batchId: string;
+};
+export type CdpInterestBatchByIdQuery = {
+  readonly InterestBatch: ReadonlyArray<{
+    readonly id: string;
+    readonly collateralId: string;
+    readonly batchManager: string;
+    readonly annualInterestRate: string;
+    readonly updatedAt: string;
+  }>;
+};
+
+// queries/liquity.CDP_TROVE_OPERATIONS
+export type CdpTroveOperationsQueryVariables = {
+  readonly instanceId: string;
+  readonly troveId: string;
+  readonly limit: number;
+};
+export type CdpTroveOperationsQuery = {
+  readonly TroveOperationEvent: ReadonlyArray<{
+    readonly id: string;
+    readonly troveId: string;
+    readonly operation: number;
+    readonly collChange: string;
+    readonly debtChange: string;
+    readonly annualInterestRate: string;
+    readonly debtIncreaseFromUpfrontFee: string;
+    readonly timestamp: string;
+    readonly blockNumber: string;
+    readonly txHash: string;
+  }>;
+};
+
 // queries/lp.POOL_LP_POSITIONS
 export type PoolLpPositionsQueryVariables = {
   readonly poolId: string;
