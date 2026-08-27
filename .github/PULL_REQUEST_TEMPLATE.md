@@ -29,6 +29,14 @@ invariants, caveats, and scope boundaries here.
 
 ## Validation
 
+<!--
+Name the evidence behind each claim — the command, the run, the artifact that
+establishes it. Then state the nearest stronger claim that evidence does NOT
+support, for example: "the tests prove the parser handles these six shapes;
+they do not prove exhaustiveness". An unexplained strengthening of a claim is
+a review finding.
+-->
+
 - [Commands and results.]
 
 ## Deferrals
@@ -50,5 +58,6 @@ When you keep it, CI requires each item to be "None" or link a GitHub issue.
 - [ ] The opening states any material limit or non-goal that applies.
 - [ ] A reader can understand the opening without reading the diff.
 - [ ] Deeper implementation details come after the opening two sections.
+- [ ] Each Validation claim names its evidence and the nearest stronger claim that evidence does not support.
 - [ ] Every knowing deferral is listed under Deferrals with a GitHub issue link.
 - [ ] Architecture decision? If this makes one, an ADR is added under `docs/adr/` (see `docs/pr-checklists/architecture-decisions.md`); otherwise not applicable.

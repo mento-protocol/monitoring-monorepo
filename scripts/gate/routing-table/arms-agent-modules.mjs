@@ -167,6 +167,22 @@ export const AGENT_MODULE_ARMS = [
   },
   {
     patterns: [
+      "scripts/repo-health/check-guardrail-prose.mjs",
+      "scripts/repo-health/check-guardrail-prose.test.mjs",
+    ],
+    effects: [
+      {
+        command: "node scripts/repo-health/check-guardrail-prose.test.mjs",
+        reason: "guardrail prose checker changed",
+      },
+      {
+        command: "node scripts/repo-health/check-guardrail-prose.mjs",
+        reason: "guardrail prose checker changed",
+      },
+    ],
+  },
+  {
+    patterns: [
       "scripts/repo-health/check-skills-mirror.mjs",
       "scripts/repo-health/check-skills-mirror.test.mjs",
     ],

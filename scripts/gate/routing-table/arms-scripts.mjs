@@ -323,4 +323,21 @@ export const SCRIPT_ARMS = [
       },
     ],
   },
+  {
+    patterns: ["scripts/repo-health/guardrail-prose.json"],
+    effects: [
+      {
+        why: "The pin list check-guardrail-prose.mjs reads. Like the Sentry manifest above, a .json under scripts/ reaches no module arm — those key off `.mjs` — and would otherwise fall through to the bare `scripts/*` catch-all with no commands at all. Editing a pin IS the deliberate rule change this check exists to surface, so it has to run the checker against the edited list.",
+        surface: "scripts",
+      },
+      {
+        command: "node scripts/repo-health/check-guardrail-prose.test.mjs",
+        reason: "guardrail prose pin list changed",
+      },
+      {
+        command: "node scripts/repo-health/check-guardrail-prose.mjs",
+        reason: "guardrail prose pin list changed",
+      },
+    ],
+  },
 ];

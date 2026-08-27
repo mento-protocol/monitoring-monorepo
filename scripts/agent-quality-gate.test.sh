@@ -7578,6 +7578,36 @@ assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- node scripts/repo-health/check-skills-mirror.test.mjs (skills mirror checker changed)"
 assert_contains "- node scripts/repo-health/check-skills-mirror.mjs (skills mirror checker changed)"
 
+# The guardrail-prose pins route from BOTH directions: an edit to the checker or
+# its pin list, and an edit to any prose file the pins protect. The second is
+# the one that matters — a change dropping a pinned sentence must not reach a
+# push without the check having run.
+run_gate "AGENTS.md"
+assert_contains "- node scripts/repo-health/check-guardrail-prose.mjs (agent instruction file holding pinned guardrail prose changed)"
+
+# CLAUDE.md is the AGENTS.md symlink and carries its own pin block. An edit made
+# through the link reports as AGENTS.md, but replacing the link with a regular
+# file reports as CLAUDE.md — the case the pin block exists for — so it must
+# route the check too.
+run_gate "CLAUDE.md"
+assert_contains "- node scripts/repo-health/check-guardrail-prose.mjs (agent instruction file holding pinned guardrail prose changed)"
+
+run_gate "docs/notes/pr-operating-card.md"
+assert_contains "- node scripts/repo-health/check-guardrail-prose.mjs (operating card holding pinned guardrail prose changed)"
+
+run_gate "scripts/repo-health/check-guardrail-prose.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node scripts/repo-health/check-guardrail-prose.test.mjs (guardrail prose checker changed)"
+assert_contains "- node scripts/repo-health/check-guardrail-prose.mjs (guardrail prose checker changed)"
+
+# The pin list is a .json, so it reaches no module arm and would otherwise fall
+# through to the bare `scripts/*` catch-all. Its own arm is what keeps an edited
+# pin checked against the prose it claims to pin.
+run_gate "scripts/repo-health/guardrail-prose.json"
+assert_contains "- scripts"
+assert_contains "- node scripts/repo-health/check-guardrail-prose.test.mjs (guardrail prose pin list changed)"
+assert_contains "- node scripts/repo-health/check-guardrail-prose.mjs (guardrail prose pin list changed)"
+
 run_gate ".trunk/trunk.yaml"
 assert_contains "- tooling"
 assert_contains "- node scripts/workflows/check-github-action-pins.mjs (Trunk workflow/action setup changed)"
