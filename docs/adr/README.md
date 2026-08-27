@@ -83,6 +83,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0070](0070-sentry-requeue-settlement-sentinel.md)          | The archive's terminal label is withheld from the re-queue's shed and read back      |
 | [0072](0072-md-only-docs-checks-job.md)                     | The Markdown globs route to a small `docs-checks` job; some Markdown runs both jobs  |
 | [0073](0073-guardrail-prose-pinned-in-ci.md)                | Normative guardrail sentences are pinned in CI; script digests deliberately are not  |
+| [0075](0075-pr-merge.md)                                    | One sanctioned merge wrapper gates merges locally; the binding control stays human   |
 
 ### shared-config
 

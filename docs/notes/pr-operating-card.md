@@ -3,7 +3,7 @@ title: PR Operating Card
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-22
+last_verified: 2026-08-26
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -357,7 +357,32 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
 8. **Merge hygiene.** **Never merge a PR without the user's explicit, direct
    approval of that specific merge.** Green CI, bot approvals, a READY
    ready-state, and "ship it" do not authorize a merge. Drive the PR to ready,
-   present the evidence, then stop and ask. If the merge itself satisfies Done
+   present the evidence, then stop and ask.
+
+   Once the user approves, they merge from their own terminal through the
+   sanctioned path:
+
+   ```bash
+   pnpm pr:merge --pr <number>    # human-only; agents must never run this
+   ```
+
+   `scripts/pr/merge-pr.mjs` refuses outside an interactive human session, runs
+   both step 7 projections, shows a briefing, makes the operator type the
+   pull-request number back, re-reads every gate, records consent to gitignored
+   `.merge-consents.jsonl`, and confirms afterwards that the PR reached
+   `MERGED` on the approved base and head. Any ambiguous state refuses; a
+   not-ready PR or unclean feedback ledger needs `--not-ready-reason "<why>"`.
+   `.claude/settings.json` denies `gh pr merge` and its repository-qualified
+   spellings, which removes the obvious shortcuts. Neither layer is an
+   unforgeable boundary — a local process running as the operator can
+   synthesize any local signal — so the approval rule above stays the binding
+   control, and the durable boundary belongs on GitHub's side of the wire.
+   [ADR 0075](../adr/0075-pr-merge.md) owns the ordered gates,
+   the alternatives, and every residual, including what the deny does not
+   cover. The Dependabot auto-merge workflow runs in CI, not an agent session,
+   and is unaffected. The approval rule above is
+   unchanged — the wrapper mechanizes it, and its refusal is what makes "agents
+   never merge" a control rather than a habit. If the merge itself satisfies Done
    means, sync the issue state and workboard afterward per
    [`agent-issue-workflow.md`](agent-issue-workflow.md). If live proof remains,
    continue to production closeout first. After a partial merge, keep the issue
@@ -384,7 +409,8 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
 
 These bind regardless of which step you are on:
 
-- **Never merge without explicit approval** for that specific merge (step 8).
+- **Never merge without explicit approval** for that specific merge (step 8),
+  and the approved merge runs through `pnpm pr:merge` in a human terminal.
 - **Reply before resolving** every feedback item, in the two forms above; a
   clear reply stops re-raising bots from looping.
 - **`Closes #N` only when Done means is fully met**, else `Refs #N`.
