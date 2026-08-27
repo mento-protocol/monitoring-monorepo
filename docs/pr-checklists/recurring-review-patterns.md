@@ -19,6 +19,28 @@ link are inline-canonical and are candidates for future extraction.
 
 ## Patterns
 
+### Rigour floor
+
+Applies to every pattern below, in any repository, sandboxed or not. A sandbox
+lowers the cost of being wrong; it does not lower the standard of evidence.
+
+- Where a claim rests on a measurement — a benchmark, a fuzz run, a coverage or
+  timing number — establish the baseline before changing anything, so breakage
+  can be attributed. During a read-only review pass, where the change already
+  exists, the equivalent is a deterministic comparison against the **merge
+  base**, or an explicitly recorded pre-change baseline. Not the commit parent:
+  a PR carries review-fix commits and is never amended, so `HEAD^` already
+  contains the change being measured and would show no regression while
+  omitting the baseline entirely. A baseline that could only have been taken
+  earlier is not a finding against the PR.
+- Settle each candidate fix against the code, not on paper: apply it when you
+  are implementing, and check it against the code you are reading when the pass
+  is read-only, such as the closeout review this checklist is loaded into.
+- Classify failures rather than counting them.
+- Pin boundaries deterministically rather than quoting a fuzz counterexample.
+- State what a measurement does not establish.
+- When a test passes, check that it passed for the reason claimed.
+
 ### Architecture decisions — [checklist](architecture-decisions.md)
 
 tldr: if a PR makes an architectural decision (constrains future work · had a
