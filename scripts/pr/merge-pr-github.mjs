@@ -313,8 +313,10 @@ export async function reconcileMergeOutcome({
     // Neither confirmed nor refuted. Cancel first, report second.
     const cancellation = await cancelPendingMerge();
     write(
-      `Could not confirm the merge landed: ${outcomeError}\n` +
-        (mergeError ? `The merge command also failed: ${mergeError}\n` : "") +
+      `Could not confirm the merge landed: ${sanitizeTerminalText(outcomeError)}\n` +
+        (mergeError
+          ? `The merge command also failed: ${sanitizeTerminalText(mergeError)}\n`
+          : "") +
         `${cancellation}\n` +
         `Check ${repo}#${number} before running any post-merge step.\n`,
     );
@@ -328,7 +330,9 @@ export async function reconcileMergeOutcome({
     write(
       `${repo}#${number} is CLOSED, not merged. Nothing was merged and there is ` +
         `no pending request to cancel: GitHub does not merge a closed pull request. ` +
-        (mergeError ? `The merge command also failed: ${mergeError}. ` : "") +
+        (mergeError
+          ? `The merge command also failed: ${sanitizeTerminalText(mergeError)}. `
+          : "") +
         `\nThe consent record stays in the ledger as evidence of what was approved.\n`,
     );
     return {
@@ -346,7 +350,9 @@ export async function reconcileMergeOutcome({
     write(
       `${repo}#${number} is ${outcome.state || "in an unreadable state"}, not merged — ` +
         `a queued or auto-merge target accepts the request without merging it. ` +
-        (mergeError ? `The merge command also failed: ${mergeError}. ` : "") +
+        (mergeError
+          ? `The merge command also failed: ${sanitizeTerminalText(mergeError)}. `
+          : "") +
         `${cancellation}\n` +
         `Do not run post-merge steps until it reports MERGED.\n`,
     );
@@ -420,7 +426,7 @@ export async function reconcileMergeOutcome({
   // rather than a merge failure. Say so instead of hiding it.
   if (mergeError) {
     write(
-      `The merge command reported an error (${mergeError}) but ${repo}#${number} ` +
+      `The merge command reported an error (${sanitizeTerminalText(mergeError)}) but ${repo}#${number} ` +
         `is MERGED, so the merge itself landed.\n`,
     );
   }
