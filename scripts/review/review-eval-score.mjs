@@ -61,8 +61,9 @@ const PLACEHOLDER_PATTERN = /\{\{([A-Z_]+)\}\}/g;
 const promptDir = fileURLToPath(new URL("./prompts", import.meta.url));
 const scriptPath = fileURLToPath(import.meta.url);
 // Every file that can change a recorded number or a recorded verdict. The
-// extraction and the matcher live here, the per-condition fold and the leak
-// signal live in `review-eval-run.mjs`, the recompute lives in
+// extraction and the matcher live here, CLI scoring orchestration lives in
+// `review-eval.mjs`, the per-condition fold and the leak signal live in
+// `review-eval-run.mjs`, the recompute lives in
 // `review-eval-result-shape.mjs`, and the verdict rules live in
 // `review-eval-report.mjs`.
 //
@@ -78,6 +79,7 @@ const scriptPath = fileURLToPath(import.meta.url);
 // Editing any of them changes what a row means, so all of them are hashed into
 // `matcher_digest` and comparison is refused across the change.
 export const SCORING_MODULES = [
+  "review-eval.mjs",
   "review-eval-run.mjs",
   "review-eval-result-shape.mjs",
   "review-eval-report.mjs",

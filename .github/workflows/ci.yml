@@ -1139,7 +1139,7 @@ jobs:
       - name: Review skill fixture contract
         run: pnpm review:eval -- --check-fixtures --offline
       - name: Review skill committed ledger
-        run: pnpm review:eval -- --check-ledger --require-base
+        run: pnpm review:eval -- --check-ledger --require-base --revalidate-appended
       - name: Agent context budget tests
         run: pnpm agent:context-budget:test
       - name: Enforce agent context budgets

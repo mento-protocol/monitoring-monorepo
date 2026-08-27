@@ -758,6 +758,7 @@ test("scorerDigest covers every module that can move a recorded number", () => {
   // truth file and the recall denominator, and `build-fixture.sh` materializes
   // the checkout the contestant reviews and carries the checks that verify it.
   for (const name of [
+    "review-eval.mjs",
     "review-eval-run.mjs",
     "review-eval-result-shape.mjs",
     "review-eval-report.mjs",

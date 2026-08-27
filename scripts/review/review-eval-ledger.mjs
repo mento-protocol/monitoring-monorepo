@@ -462,6 +462,58 @@ export function validateLedgerRow(row, label = "row") {
   return problems;
 }
 
+/** Validate one row against the current frozen contract and matrix. */
+export function validateLedgerRowAgainstContract({
+  row,
+  contract,
+  contractDigest,
+  label = "baseline row",
+}) {
+  const problems = validateLedgerRow(row, label);
+  if (problems.length > 0) return problems;
+  if (contractDigest && row.contract_digest !== contractDigest) {
+    problems.push(
+      `${label}.contract_digest does not match the current contract`,
+    );
+    return problems;
+  }
+  problems.push(...frozenDefectProblems({ contract, row, label }));
+  // The other half of the frozen denominator: which conditions, which PRs and
+  // how many draws a complete run must have scored at all.
+  problems.push(...completeMatrixProblems({ contract, row, label }));
+  return problems;
+}
+
+/** Validate an external baseline before a generated plan starts paid work. */
+export function baselinePreflightProblems({
+  row,
+  contract,
+  contractDigest,
+  planComparabilityKey,
+  candidateExecutedAt,
+}) {
+  const problems = validateLedgerRowAgainstContract({
+    row,
+    contract,
+    contractDigest,
+  });
+  if (row?.comparability_key !== planComparabilityKey) {
+    problems.push(
+      "baseline comparability_key does not match the generated plan",
+    );
+  }
+  if (
+    typeof candidateExecutedAt === "string" &&
+    typeof row?.executed_at === "string" &&
+    !(row.executed_at < candidateExecutedAt)
+  ) {
+    problems.push(
+      "baseline executed_at must precede the generated plan's candidate timestamp",
+    );
+  }
+  return problems;
+}
+
 /**
  * Read the JSONL ledger. A zero-byte file is a valid empty ledger; a malformed
  * line is a hard error that names its line number.
@@ -691,15 +743,18 @@ export function checkLedger({ path, contract, contractDigest, baseRows }) {
 
   rows.forEach((row, index) => {
     const label = `ledger row ${index + 1}`;
-    const rowProblems = validateLedgerRow(row, label);
+    const rowProblems =
+      contractDigest && row.contract_digest !== contractDigest
+        ? validateLedgerRow(row, label)
+        : validateLedgerRowAgainstContract({
+            row,
+            contract,
+            contractDigest,
+            label,
+          });
     problems.push(...rowProblems);
     if (rowProblems.length) return;
     if (contractDigest && row.contract_digest !== contractDigest) return;
-    problems.push(...frozenDefectProblems({ contract, row, label }));
-    // The other half of the frozen denominator: which conditions, which PRs and
-    // how many draws a complete run must have scored at all. Reported after the
-    // per-id checks above, which name the narrower fault when a row breaks both.
-    problems.push(...completeMatrixProblems({ contract, row, label }));
   });
 
   if (baseRows) {

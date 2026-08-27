@@ -184,15 +184,21 @@ export function scorableTotals(contract) {
  * the first head and the base; the frozen truth names the last head, which is
  * the commit that carries the fixes and is therefore the answer key.
  */
-export function forbiddenShasForFixture({ fixture, repoRoot = process.cwd() }) {
+export function forbiddenShasForFixture({
+  fixture,
+  repoRoot = process.cwd(),
+  truth: suppliedTruth = null,
+}) {
   const forbidden = new Set();
-  let truth;
-  try {
-    truth = JSON.parse(
-      readBytes(repoRoot, fixture.truth_file).toString("utf8"),
-    );
-  } catch {
-    return [];
+  let truth = suppliedTruth;
+  if (!truth) {
+    try {
+      truth = JSON.parse(
+        readBytes(repoRoot, fixture.truth_file).toString("utf8"),
+      );
+    } catch {
+      return [];
+    }
   }
   for (const sha of [truth.last_head]) {
     if (

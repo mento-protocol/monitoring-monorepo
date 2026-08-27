@@ -128,7 +128,8 @@ export const WORKFLOW_ARMS = [
                 reason: "review skill evaluation freshness workflow changed",
               },
               {
-                command: "pnpm review:eval -- --check-ledger --require-base",
+                command:
+                  "pnpm review:eval -- --check-ledger --require-base --revalidate-appended",
                 reason: "review skill evaluation freshness workflow changed",
               },
             ],

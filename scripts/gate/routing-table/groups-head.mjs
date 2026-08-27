@@ -158,7 +158,8 @@ export const HEAD_GROUPS = [
             reason: "review skill evaluation contract changed",
           },
           {
-            command: "pnpm review:eval -- --check-ledger --require-base",
+            command:
+              "pnpm review:eval -- --check-ledger --require-base --revalidate-appended",
             reason: "review skill evaluation contract changed",
           },
         ],
@@ -176,7 +177,8 @@ export const HEAD_GROUPS = [
             reason: "review skill evaluation harness changed",
           },
           {
-            command: "pnpm review:eval -- --check-ledger --require-base",
+            command:
+              "pnpm review:eval -- --check-ledger --require-base --revalidate-appended",
             reason: "review skill evaluation harness changed",
           },
         ],

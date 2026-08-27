@@ -135,9 +135,16 @@ function walkFiles(dir, base = dir, found = []) {
 export function skillDigest(dir) {
   const root = expandHome(dir);
   const hash = createHash("sha256");
+  const updateFramed = (bytes) => {
+    const value = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
+    const length = Buffer.alloc(8);
+    length.writeBigUInt64BE(BigInt(value.length));
+    hash.update(length);
+    hash.update(value);
+  };
   for (const relative of walkFiles(root).sort()) {
-    hash.update(relative);
-    hash.update(readFileSync(path.join(root, relative)));
+    updateFramed(relative);
+    updateFramed(readFileSync(path.join(root, relative)));
   }
   return hash.digest("hex");
 }
@@ -911,6 +918,7 @@ async function scoreOneCell({
   cellResult,
   contract,
   repoRoot,
+  truth,
   exec: baseExec,
   runGit = defaultRunGit,
 }) {
@@ -921,7 +929,6 @@ async function scoreOneCell({
   const cellCost = { usd: 0 };
   const exec = meterExec(baseExec, cellCost);
   const fixture = fixtureForPr(contract, cell.pr);
-  const truth = readJson(path.join(repoRoot, fixture.truth_file));
   const transcript = cellResult.output;
   // The judge model is the one the comparability key records. Reading a
   // default here would let a judge retirement move the key while scoring kept
@@ -970,7 +977,7 @@ async function scoreOneCell({
     truth,
     pr: cell.pr,
     excludeLogins,
-    forbiddenShas: forbiddenShasForFixture({ fixture, repoRoot }),
+    forbiddenShas: forbiddenShasForFixture({ fixture, repoRoot, truth }),
   });
   return {
     cell_id: cell.cell_id,
@@ -1109,6 +1116,15 @@ export async function scorePlan({
   now = new Date(),
   write = true,
 }) {
+  // Freeze every truth object before the first model call. A candidate run uses
+  // the operator's live checkout, and calibration can take long enough for an
+  // edit after the CLI's digest check to otherwise change later cell scoring.
+  const truthByPr = new Map(
+    [...new Set(plan.cells.map((cell) => cell.pr))].map((pr) => {
+      const fixture = fixtureForPr(contract, pr);
+      return [pr, readJson(path.join(repoRoot, fixture.truth_file))];
+    }),
+  );
   const scoringCost = { usd: 0 };
   const metered = meterExec(exec, scoringCost);
   const calibrationCost = { usd: 0 };
@@ -1153,6 +1169,7 @@ export async function scorePlan({
       cellResult,
       contract,
       repoRoot,
+      truth: truthByPr.get(cell.pr),
       exec: metered,
       runGit,
     });
@@ -1215,9 +1232,15 @@ export async function scorePlan({
     detail_dir: plan.detail_dir,
     notes: notes.join(" | "),
   };
+  const baselineIsExplicit = baselineRow !== null;
   const baseline = baselineRow ?? resolveBaseline({ rows: ledgerRows, row });
   row.vs_baseline = buildVsBaseline({ row, baselineRow: baseline });
-  const decision = verdict({ contract, row, baselineRow: baseline });
+  const decision = verdict({
+    contract,
+    row,
+    baselineRow: baseline,
+    baselineIsExplicit,
+  });
   row.verdict = decision.verdict;
   if (leaked.length && ["GREEN", "PROMOTE"].includes(row.verdict)) {
     row.verdict = "AMBER";

@@ -12,11 +12,9 @@ import path from "node:path";
 
 import { fixtureForPr } from "./review-eval-fixtures.mjs";
 import {
+  baselineEligibility,
   compareConditions,
   headlineCondition,
-  installedSkillRun,
-  judgeCalibrationPasses,
-  leakSuspected,
   verdict,
 } from "./review-eval-report.mjs";
 
@@ -93,6 +91,7 @@ export function failedRow({
       [name]: {
         model: plan.cells[0]?.model ?? contract.sut.verifier.model,
         effort: plan.cells[0]?.effort ?? contract.sut.verifier.effort,
+        ...(plan.cells[0]?.finder ? { finder: plan.cells[0].finder } : {}),
         draws: 1,
         recall: zero(scope.scorableIds),
         p1: zero(scope.p1Ids),
@@ -118,6 +117,8 @@ export function failedRow({
  * threshold still shows against the score the baseline PR established. The
  * anchor moves only where the runbook says it may — a reviewed PROMOTE row —
  * and the newest such row then becomes the anchor for everything after it.
+ * "First" and "newest" use ledger append order. A slow machine clock cannot
+ * place a later row before the established anchor.
  *
  * A row whose judge calibration failed is never eligible, as anchor or as
  * re-anchor: the runbook excludes such a row from baseline comparison, and an
@@ -137,18 +138,24 @@ export function failedRow({
  * explicitly, which is how a candidate is compared on purpose.
  */
 export function resolveBaseline({ rows, row }) {
-  const eligible = (rows ?? [])
-    .filter(
-      (candidate) =>
-        candidate.kind === "full" &&
-        candidate.status === "complete" &&
-        installedSkillRun(candidate) &&
-        judgeCalibrationPasses(candidate) &&
-        !leakSuspected(candidate) &&
-        candidate.comparability_key === row.comparability_key &&
-        candidate.executed_at < row.executed_at,
-    )
-    .sort((left, right) => (left.executed_at < right.executed_at ? -1 : 1));
+  const ledgerRows = rows ?? [];
+  const objectIndex = ledgerRows.indexOf(row);
+  const rowIndex =
+    objectIndex !== -1
+      ? objectIndex
+      : ledgerRows.findIndex(
+          (candidate) =>
+            candidate.executed_at === row?.executed_at &&
+            candidate.contract_digest === row?.contract_digest &&
+            candidate.detail_dir === row?.detail_dir,
+        );
+  const priorRows =
+    rowIndex === -1 ? ledgerRows : ledgerRows.slice(0, rowIndex);
+  const eligible = priorRows.filter(
+    (candidate) =>
+      baselineEligibility(candidate).usable &&
+      candidate.comparability_key === row.comparability_key,
+  );
   if (eligible.length === 0) return null;
   const reAnchored = eligible.findLast(
     (candidate) => candidate.verdict === "PROMOTE",
@@ -530,6 +537,7 @@ export function revalidateRow({
   detailDir = null,
   ledgerRows = [],
   baselineRow = null,
+  baselineIsExplicit = baselineRow !== null,
   baselineMissing = false,
   calibrationSet = null,
 }) {
@@ -710,7 +718,12 @@ export function revalidateRow({
   }
   let recomputed = null;
   try {
-    recomputed = verdict({ contract, row, baselineRow: baseline }).verdict;
+    recomputed = verdict({
+      contract,
+      row,
+      baselineRow: baseline,
+      baselineIsExplicit,
+    }).verdict;
   } catch (error) {
     problems.push(
       `the verdict could not be recomputed: ${error instanceof Error ? error.message : String(error)}`,

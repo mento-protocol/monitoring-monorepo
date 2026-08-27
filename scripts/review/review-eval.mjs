@@ -49,6 +49,7 @@ import {
   DEFAULT_LEDGER_PATH,
   DEFAULT_RUNS_DIR,
   fileDigest,
+  planCells,
   planStalenessIssueSync,
   resolveKind,
   scorePlan,
@@ -524,17 +525,16 @@ function holdsCellResults(dir) {
  * written before the matrix spends anything, so it is the run's own statement
  * of what it was. A directory that holds cell results must hold it: deleting
  * the file cannot buy back the check, exactly as with `calibration.json`. A
- * detail directory with no cell results — the hand-assembled bridge row — is
- * left to the reviewer of the ledger PR, as it already is elsewhere.
+ * Only an evidence-free hand-assembled bridge row may omit the plan. It cannot
+ * become an automatic anchor or refresh the full-run clock.
  */
-export function planProvenanceProblems({ dir, row }) {
+export function planProvenanceProblems({ dir, row, contract }) {
   const file = path.join(dir, "plan.json");
   if (!existsSync(file)) {
-    return holdsCellResults(dir)
-      ? [
-          `${dir} carries cell results but no plan.json; the row's provenance cannot be checked against the run that produced it`,
-        ]
-      : [];
+    if (row.kind === "bridge" && !holdsCellResults(dir)) return [];
+    return [
+      `${dir} carries no plan.json; the row's provenance cannot be checked against the run that produced it`,
+    ];
   }
   let plan;
   try {
@@ -575,6 +575,115 @@ export function planProvenanceProblems({ dir, row }) {
     problems.push(
       `row inputs do not match the inputs plan.json in ${row.detail_dir} recorded`,
     );
+  }
+  if (!Array.isArray(plan.cells)) {
+    problems.push(`plan.json in ${row.detail_dir} carries no cells array`);
+    return problems;
+  }
+  if (!contract || !["full", "canary"].includes(plan.kind)) {
+    problems.push(
+      `plan.json in ${row.detail_dir} has no frozen ${plan.kind ?? "unknown"} matrix to validate`,
+    );
+  } else {
+    const expectedCells = planCells({ contract, kind: plan.kind });
+    if (JSON.stringify(plan.cells) !== JSON.stringify(expectedCells)) {
+      problems.push(
+        `plan.json in ${row.detail_dir} cells do not match the frozen ${plan.kind} matrix`,
+      );
+    }
+  }
+  for (const [name, condition] of Object.entries(row.conditions ?? {})) {
+    const cells = plan.cells.filter((cell) => cell.condition === name);
+    if (cells.length === 0) {
+      problems.push(
+        `row condition ${name} has no matching cell in plan.json in ${row.detail_dir}`,
+      );
+      continue;
+    }
+    for (const field of ["model", "effort", "finder"]) {
+      const planned = [...new Set(cells.map((cell) => cell[field]))];
+      if (planned.length !== 1) {
+        problems.push(
+          `plan.json in ${row.detail_dir} records ${planned.length} ${field} values for condition ${name}`,
+        );
+      } else if (condition?.[field] !== planned[0]) {
+        problems.push(
+          `row condition ${name}.${field} is ${JSON.stringify(condition?.[field])}; plan.json recorded ${JSON.stringify(planned[0])}`,
+        );
+      }
+    }
+  }
+  return problems;
+}
+
+/** Evidence files required for every row that claims scored results. */
+function runEvidenceProblems({ dir, row }) {
+  if (row.kind === "bridge" || row.status === "failed") return [];
+  const problems = [];
+  if (!holdsCellResults(dir)) {
+    problems.push(`${dir} carries no scored result-*.json files`);
+  }
+  const planFile = path.join(dir, "plan.json");
+  if (existsSync(planFile)) {
+    try {
+      const plan = readJson(planFile);
+      if (Array.isArray(plan.cells)) {
+        const rowConditions = new Set(Object.keys(row.conditions ?? {}));
+        const planConditions = new Set(
+          plan.cells.map((cell) => cell.condition),
+        );
+        if (row.status === "complete") {
+          for (const condition of planConditions) {
+            if (!rowConditions.has(condition)) {
+              problems.push(
+                `${dir} planned condition ${condition}, but the complete row omits it`,
+              );
+            }
+          }
+          for (const condition of rowConditions) {
+            if (!planConditions.has(condition)) {
+              problems.push(
+                `${dir} complete row condition ${condition} has no planned cells`,
+              );
+            }
+          }
+          for (const cell of plan.cells) {
+            const resultFile = `result-${cell.pr}-${cell.condition}-${cell.draw}.json`;
+            if (!existsSync(path.join(dir, resultFile))) {
+              problems.push(
+                `${dir} carries no ${resultFile} for planned cell ${cell.cell_id ?? "unknown"}`,
+              );
+            }
+          }
+        } else {
+          const cells = plan.cells.filter((cell) =>
+            rowConditions.has(cell.condition),
+          );
+          for (const condition of rowConditions) {
+            const hasConditionResult = cells
+              .filter((cell) => cell.condition === condition)
+              .some((cell) =>
+                existsSync(
+                  path.join(
+                    dir,
+                    `result-${cell.pr}-${cell.condition}-${cell.draw}.json`,
+                  ),
+                ),
+              );
+            if (!hasConditionResult) {
+              problems.push(
+                `${dir} carries no scored result for row condition ${condition}`,
+              );
+            }
+          }
+        }
+      }
+    } catch {
+      // planProvenanceProblems reports the unreadable plan with its full error.
+    }
+  }
+  if (!existsSync(path.join(dir, "calibration.json"))) {
+    problems.push(`${dir} carries no calibration.json`);
   }
   return problems;
 }
@@ -641,8 +750,39 @@ function revalidateAppendedRows({ options, context, result, base }) {
         ? null
         : (rows.find((candidate) => candidate.executed_at === recordedAt) ??
           null);
-    const baselineMissing = recordedAt !== null && baselineRow === null;
+    const missingRecordedBaseline = recordedAt !== null && baselineRow === null;
+    const candidateMissingBaseline =
+      missingRecordedBaseline &&
+      row.inputs?.dirty === true &&
+      row.inputs?.skill_ref !== "installed";
+    if (missingRecordedBaseline && !candidateMissingBaseline) {
+      problems.push(
+        `${label}: baseline ${recordedAt} is not in the ledger; only a dirty --skill-ref candidate row may waive a missing baseline`,
+      );
+    }
+    const baselineMissing = candidateMissingBaseline;
     if (baselineMissing) unpaired += 1;
+    const baselineIsExplicit =
+      row.kind === "bridge" ||
+      (row.inputs?.dirty === true && row.inputs?.skill_ref !== "installed");
+    if (!baselineMissing && !baselineIsExplicit) {
+      const resolvedBaseline = resolveBaseline({ rows, row });
+      const sameBaseline =
+        resolvedBaseline === baselineRow ||
+        (resolvedBaseline !== null &&
+          baselineRow !== null &&
+          resolvedBaseline.executed_at === baselineRow.executed_at &&
+          resolvedBaseline.contract_digest === baselineRow.contract_digest &&
+          resolvedBaseline.detail_dir === baselineRow.detail_dir);
+      if (
+        !sameBaseline &&
+        !(resolvedBaseline === null && baselineRow === null)
+      ) {
+        problems.push(
+          `${label}: recorded baseline ${recordedAt ?? "none"} does not match the append-order baseline ${resolvedBaseline?.executed_at ?? "none"}`,
+        );
+      }
+    }
     const check = revalidateRow({
       contract: context.contract,
       row,
@@ -650,6 +790,7 @@ function revalidateAppendedRows({ options, context, result, base }) {
       detailDir: dir,
       ledgerRows: baselineMissing ? [] : rows,
       baselineRow,
+      baselineIsExplicit,
       // Half the verdict is the pairing: a regression and a promotion are both
       // read out of the flip counts against the anchor. Recomputing an unpaired
       // row without one turns a recorded RED or PROMOTE into GREEN and fails
@@ -661,7 +802,12 @@ function revalidateAppendedRows({ options, context, result, base }) {
     });
     problems.push(...check.problems.map((problem) => `${label}: ${problem}`));
     problems.push(
-      ...planProvenanceProblems({ dir, row }).map(
+      ...planProvenanceProblems({ dir, row, contract: context.contract }).map(
+        (problem) => `${label}: ${problem}`,
+      ),
+    );
+    problems.push(
+      ...runEvidenceProblems({ dir, row }).map(
         (problem) => `${label}: ${problem}`,
       ),
     );
@@ -897,19 +1043,26 @@ async function modeReport(options, context) {
       `the ledger has no row for contract ${context.contractDigest.slice(0, 8)} to report`,
     );
   }
-  const baselineRow =
-    resolveRowReference({
-      reference: options.against,
-      rows,
-      repoRoot: context.repoRoot,
-    }) ?? resolveBaseline({ rows, row });
+  const explicitBaseline = resolveRowReference({
+    reference: options.against,
+    rows,
+    repoRoot: context.repoRoot,
+  });
+  const baselineRow = explicitBaseline ?? resolveBaseline({ rows, row });
+  const baselineIsExplicit = explicitBaseline !== null;
   const markdown = renderReport({
     contract: context.contract,
     row,
     baselineRow,
+    baselineIsExplicit,
     repoRoot: context.repoRoot,
   });
-  const decision = verdict({ contract: context.contract, row, baselineRow });
+  const decision = verdict({
+    contract: context.contract,
+    row,
+    baselineRow,
+    baselineIsExplicit,
+  });
   if (options.json) {
     printObject(
       {

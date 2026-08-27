@@ -104,18 +104,29 @@ falls back to the `origin/main` tip when no merge base resolves. CI and the
 gate add `--require-base`, which fails the check when the base ref does not
 resolve at all, so the guard can never turn itself into a silent no-op.
 
-CI also adds `--revalidate-appended`, which recomputes every row the branch
-adds from the detail the same branch commits. Schema, id coverage and
+Required CI, the advisory freshness workflow, and the local quality gate add
+`--revalidate-appended`.
+It recomputes every row the branch adds from the detail the same branch commits.
+Schema, id coverage and
 append-only history all stay satisfied when a ledger PR edits its own row's
 verdict, counters or `per_defect` bits after the local `--validate --append`,
 and this is the only PR workflow there is. Like `--require-base` it refuses to
 no-op: with no base it cannot tell which rows are new, and it says so instead
 of passing. It calls no model — the recompute reads the committed
 `result-*.json` and `calibration.json` files — so the workflow stays free of
-model credentials. A row whose recorded baseline is not committed on the same
-branch, which is the candidate row of a sitting whose installed ledger PR has
-not merged yet, is recomputed against its own bits and detail and counted in
-`unpaired_baselines` rather than failed.
+model credentials. Every scored full or canary row must commit `plan.json`, its
+`result-*.json` files, and `calibration.json`. A complete row must carry one
+result file for every planned cell. A partial row must carry evidence for every
+condition it records. CI also checks each condition's model, effort, and finder
+against the planned cells. It regenerates the exact cell list from the frozen
+contract and row kind. Editing `plan.json` cannot remove a required cell. A
+dirty `--skill-ref`
+candidate row can name an installed baseline that is not committed on the same
+branch. CI recomputes that candidate against its own evidence and counts it in
+`unpaired_baselines`. An installed row cannot use this waiver.
+For each installed row, CI also resolves the automatic baseline from ledger
+append order and requires the row to name that exact anchor. A row cannot name
+a later row on the same branch as its baseline.
 
 Both the ledger check and `--validate --append` hold the frozen denominator. A
 condition that scored a PR at all carries every defect that PR froze, and a
@@ -151,8 +162,9 @@ checkout, and every run appends to the ledger, so a scheduled run starting
 under a manual one would rewrite the tree the other is reviewing. The script
 takes a `run.lock` directory under both the checkout's git directory and the
 fixture cache — they move independently, under `--repo` and `--cache-dir` — and
-refuses to start while another live run holds either; a lock left behind by a
-killed run is reclaimed. The skill under test is snapshotted once, before the first
+refuses to start while another live run holds either. A process atomically
+claims a stale lock before it removes the lock, so two starters cannot both
+reclaim one killed run. The skill under test is snapshotted once, before the first
 cell, and every cell stages from that snapshot: the plan records one skill
 digest for the whole matrix, and two hours is long enough to edit the installed
 skill under a running evaluation. A snapshot that no longer matches the planned
@@ -176,12 +188,15 @@ results, row and report the earlier row still claims and reuse its publication
 branch. Seeded cells are fingerprint-checked one by one like any other. The
 skill directory itself may hold no symlink: `cp -R` would stage the link, so the
 contestant would read bytes `skill_digest` never covered and an edit to that
-target mid-run would change the treatment. The six-hour deadline bounds the whole run: three quarters
+target mid-run would change the treatment. The digest length-frames every path
+and file body, so a path/content boundary cannot alias another skill. The
+six-hour deadline bounds the whole run: three quarters
 of it start cells and bound each finder and contestant process, the rest bounds
 the judge pass, and a run that reaches either bound reports a partial matrix
 rather than a table with quietly missing cells. A stalled process is killed
 rather than waited on, because a deadline checked only between cells is no
-deadline at all. A PR whose
+deadline at all. After TERM, the watchdog completes its group-wide KILL before
+the run returns, even when the direct child exits first. A PR whose
 draw-2 cell never ran is scored on draw 1 alone: the defect's bit vector is as
 long as the draws its own PR completed, so a missing cell shrinks the
 denominator instead of recording misses that were never possible.
@@ -208,11 +223,17 @@ the checkout, where no branch switch reaches it, and logs the exact `--against`
 argument. A row carries every bit the comparison reads, so no detail directory
 is needed for the baseline.
 
+Claude auto-review skips that branch only when the diff contains the ledger and
+files under `docs/evals/review-skill-runs/`. Any other changed path keeps normal
+auto-review enabled. The branch prefix alone grants no review exemption.
+
 Naming the `executed_at` is correct once the installed PR is merged and main is
 pulled, because the row is then in the checkout's ledger. It is never a date
 typed from memory: `--against` resolves against rows the ledger already holds,
 so a value no row carries fails the pre-flight before the candidate spends
-anything.
+anything. The pre-flight also validates the full baseline row, its frozen
+matrix, its comparability key, and that its `executed_at` precedes the plan's
+fixed `planned_at` timestamp. These checks finish before the first model call.
 
 Publish first, or both rows land in one working tree and only one of them
 reaches a PR: each run appends to the same ledger file, and the candidate's
@@ -332,8 +353,9 @@ controls; a runtime change large enough to move the score shows up as a flip
 against the anchor with the version drift named beside it.
 
 `scorer_digest` covers every file that can move a recorded number or a recorded
-verdict — the scorer, the per-condition fold, the recompute and the verdict
-rules — not the extraction alone. It also covers the two fixture helpers:
+verdict — the CLI scoring orchestration, the scorer, the per-condition fold,
+the recompute, and the verdict rules — not the extraction alone. It also covers
+the two fixture helpers:
 `review-eval-fixtures.mjs` picks the matrix, the truth file and the recall
 denominator, and `build-fixture.sh` materializes the checkout the contestant
 reviews and carries the checks that verify it, so an edit to either moves what
@@ -347,9 +369,11 @@ a silently paired one is not.
 
 `--score` rechecks the bytes the contract pins by `sha256` — both prompts, every
 truth file, every frozen finder report — before it calls the judge, and refuses
-the pass when one of them moved. `--check-fixtures` covers them once, before the
-matrix starts; under `--skill-ref` the spec worktree is the live checkout for
-the two hours in between, and the contract digest alone would not notice.
+the pass when one of them moved. It snapshots every parsed truth file before
+the first calibration call, so a later checkout edit cannot change one cell's
+scoring. `--check-fixtures` covers the inputs once, before the matrix starts;
+under `--skill-ref` the spec worktree is the live checkout for the two hours in
+between, and the contract digest alone would not notice.
 
 `--report` refuses to compute McNemar across rows with different
 `comparability_key` unless the row is a bridge run, and `--score --against`
@@ -428,7 +452,9 @@ Every later run pairs against that anchor, never against the run before it: a
 five-point slide repeated four times never trips the per-run flip threshold,
 but it does show against the anchor. The anchor moves only for a `PROMOTE`
 row, which is where the runbook already requires a reviewed PR; from then on
-that promoted row is the baseline of record.
+that promoted row is the baseline of record. Baseline selection uses immutable
+ledger append order. A backdated row cannot move ahead of the established
+anchor because its machine clock was slow.
 
 1. Merge the harness. The contract must be on `main` before anything is scored
    against it, so the spec worktree can find it.
