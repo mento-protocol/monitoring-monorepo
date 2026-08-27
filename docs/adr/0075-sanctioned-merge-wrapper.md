@@ -61,27 +61,33 @@ The ordered gates in `scripts/pr/merge-pr.mjs`:
    to the blocker set, the required-check states, or the individual blocking
    feedback items refuses. The comparison uses identities, not counts, and
    serializes each record on its own so no field can spell another's value.
-6. Append the consent record — login, timestamp, pull request, head commit,
+6. Refuse a pull request that already has an auto-merge request standing on
+   it, and a ruleset-declared merge-queue base — both before the briefing is
+   printed, and both again after the confirmation.
+
+   A standing auto-merge request means GitHub is already holding a merge
+   somebody asked for outside these gates; merging over it and cancelling it
+   are both wrong, and the wrapper cannot tell its own compensation from
+   interference with another operator's state. Refusing also makes the
+   post-merge cleanup provably its own.
+
+   A merge-queue base is refused because `gh pr merge` enqueues it and returns
+   success, and nothing the wrapper can call removes a queue entry —
+   `--disable-auto` turns off auto-merge only — so merging first would leave a
+   standing request it cannot take back, which GitHub could complete later
+   outside every gate above. The check reads the branch's **ruleset** rules; a
+   merge queue enabled through a classic branch-protection rule does not
+   surface there, so this narrows the window rather than closing it, and
+   step 8's reconciliation still catches such an enqueue and exits non-zero.
+   An unreadable answer from either read refuses.
+
+7. Append the consent record — login, timestamp, pull request, head commit,
    any override reason — to gitignored `.merge-consents.jsonl`, opened
    `O_NOFOLLOW | O_NONBLOCK` with an `fstat` regular-file and single-hard-link
-   check, and a short-write refusal.
-7. Refuse a pull request that already has an auto-merge request standing on it.
-   GitHub is then already holding a merge that someone asked for outside these
-   gates; merging over it or cancelling it are both wrong, and the wrapper
-   cannot tell its own compensation from interference with another operator's
-   state. Refusing also makes the post-merge cleanup provably its own.
-8. Refuse a ruleset-declared merge-queue base before sending anything, and
-   again after the confirmation. The check reads the branch's **ruleset** rules;
-   a merge queue enabled through a classic branch-protection rule does not
-   surface there, so this narrows the window rather than closing it — step 9's
-   reconciliation still catches such an enqueue, reports it, and exits non-zero.
-   `gh pr merge` enqueues
-   such a base and returns success, and nothing the wrapper can call removes a
-   queue entry — `--disable-auto` turns off auto-merge only — so merging first
-   would leave a standing request it cannot take back, which GitHub could
-   complete later outside every gate above. An unreadable branch-rules answer
-   refuses too.
-9. Merge with `--squash --match-head-commit`, then confirm with GitHub that the
+   check, and a short-write refusal. This is deliberately the **last** step
+   before the merge: every refusal above runs first, so no consent record
+   exists for a run the gates turned away.
+8. Merge with `--squash --match-head-commit`, then confirm with GitHub that the
    pull request actually reached `MERGED`, on the approved base and the
    approved head. Any other outcome — including a failed merge command, which
    may still have reached GitHub — cancels auto-merge and exits non-zero.
@@ -98,8 +104,8 @@ wrapper says so in its own header rather than implying otherwise:
 - The permission deny is a list of command patterns, so it covers the spellings
   someone enumerated. `gh pr merge` and its repository-qualified forms
   (`gh -R X pr merge`, `gh pr --repo X merge`, and the `=` variants) are denied
-  — eight patterns, covering `-R` and `--repo`, separated and `=` joined,
-  before and after `pr`. Six of those spellings were run against gh 2.96.0 and
+  — nine entries in all: the bare command plus eight qualified spellings
+  covering `-R` and `--repo`, separated and `=` joined, before and after `pr`. Six of those spellings were run against gh 2.96.0 and
   all six parse; the bare `-R` form was confirmed to bypass the original single
   pattern. It does not cover the same
   merge issued as `gh api --method PUT repos/{owner}/{repo}/pulls/{n}/merge`,
