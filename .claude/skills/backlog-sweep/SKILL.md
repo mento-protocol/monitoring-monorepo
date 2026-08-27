@@ -127,6 +127,14 @@ skill is mirrored to both stores, so a hard-coded name would file every Codex
 sweep's claim under the wrong owner, and the claim comment and Project `Agent`
 field are what a human reads to find the session holding an issue.
 
+**Read the claim result before briefing anyone.** The claim can lose a race —
+another session can take the issue between the ranking that selected it and
+this command. Spawn the worker only for a claim that succeeded. On a refused
+claim, leave the issue alone, move to the next eligible entry on the receipt,
+and record the loss and its new owner in the report; when the receipt is
+exhausted, finish with the smaller batch. A worker briefed on an issue this
+sweep does not hold duplicates whatever its real owner is already doing.
+
 Then spawn one worker subagent per issue. Give each a brief containing:
 
 - **Its own checkout.** Clone to `/private/tmp/claude/sweep-<issue>`, with

@@ -32,6 +32,11 @@ every worker's PR loop is
 Preflight. Rank. Pick the eligible top N. Claim each by number. Hand each to a
 worker. Keep the workers awake. Write the report. Stop at READY.
 
+A claim can lose a race to another session between ranking and claiming, so
+each claim result is read before its worker is briefed. Only a successful claim
+gets a worker; a refused one moves to the next eligible receipt entry and is
+recorded in the report, and an exhausted receipt finishes with a smaller batch.
+
 Stopping at READY is the design, and it is the same reason stage 1 stopped at
 the recommendation. The operator gets finished PRs with their evidence and
 decides what merges. A sweep that merged its own output would remove the only
