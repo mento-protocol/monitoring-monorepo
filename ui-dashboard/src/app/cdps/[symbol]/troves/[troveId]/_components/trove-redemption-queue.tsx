@@ -52,7 +52,7 @@ function queueSummaryText(
     const sharesRung = (rung?.troveCount ?? 1) > 1;
     const shieldLine =
       BigInt(thisTrove.shieldDebt) > BigInt(0)
-        ? `${formatTokenAmount(thisTrove.shieldDebt, debtSymbol)} of active debt at lower rates shields this trove today.`
+        ? `${formatTokenAmount(thisTrove.shieldDebt, debtSymbol)} of recorded active debt at lower rates shields this trove.`
         : sharesRung
           ? "No lower-rate active debt shields this trove — its rate level is redeemed first, with order inside the level decided by the queue's tiebreak."
           : "No lower-rate active debt shields this trove — it is redeemed first.";
@@ -160,10 +160,12 @@ function QueueReady({
       </p>
       <QueueLadder rungs={model.rungs} debtSymbol={debtSymbol} />
       <p className="mt-2 text-xs text-slate-500">
-        Bar length is proportional to the debt at each rate. Zombie troves sit
-        outside the queue and shield nothing — though a leftover zombie trove
-        (the market&apos;s <code>lastZombieTroveId</code> remnant) is redeemed
-        first on the next redemption.
+        Bar length is proportional to the debt at each rate. Rung totals are
+        balances recorded at each trove&apos;s last event — interest accrued
+        since is not included. Zombie troves sit outside the queue and shield
+        nothing — though a leftover zombie trove (the market&apos;s{" "}
+        <code>lastZombieTroveId</code> remnant) is redeemed first on the next
+        redemption.
       </p>
     </>
   );

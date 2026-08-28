@@ -105,7 +105,7 @@ test.describe("trove history page", () => {
     ).toBeVisible();
     await expect(
       page.getByText(
-        "12,000.00 CHFm of active debt at lower rates shields this trove today.",
+        "12,000.00 CHFm of recorded active debt at lower rates shields this trove.",
       ),
     ).toBeVisible();
     const ladder = page.getByRole("table", {

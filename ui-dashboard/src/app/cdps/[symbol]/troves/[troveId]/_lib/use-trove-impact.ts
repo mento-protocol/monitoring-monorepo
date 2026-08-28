@@ -64,14 +64,21 @@ export function useTroveRedemptionImpact(
   // fire. `settledEpisode` is state, not a ref, because settling must
   // re-render: the refetch can resolve to the identical (still mismatching)
   // response, which changes nothing else.
-  const inFlightEpisode = useRef<string | null>(null);
-  const [settledEpisode, setSettledEpisode] = useState<string | null>(null);
+  // Keyed PER EPISODE, not one replaceable slot: an out-of-order stale
+  // response can flip the cache back to an earlier watermark, and a single
+  // shared key would then re-fire that episode's refetch (violating
+  // once-per-episode) or let one episode's settle mask another's. Bounded:
+  // one entry per distinct mismatching watermark seen this mount.
+  const attemptedEpisodes = useRef<Set<string>>(new Set());
+  const [settledEpisodes, setSettledEpisodes] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
   const refetch = ledger.refetch;
 
   useEffect(() => {
     if (!rawMismatch || episodeKey == null) return;
-    if (inFlightEpisode.current === episodeKey) return;
-    inFlightEpisode.current = episodeKey;
+    if (attemptedEpisodes.current.has(episodeKey)) return;
+    attemptedEpisodes.current.add(episodeKey);
     void refetch()
       // Defensive: SWR's bound mutate routes fetcher errors to the error
       // channel and resolves, but a rejection would otherwise hang this
@@ -79,13 +86,11 @@ export function useTroveRedemptionImpact(
       // attempt, so settle either way.
       .catch(() => {})
       .then(() => {
-        // A stale completion must not clobber a newer episode's settle:
-        // if fresher data started episode B while episode A's refetch was
-        // in flight, A's late resolve would otherwise flip B's warning
-        // back to "unverified" with no further refetch to re-settle it.
-        if (inFlightEpisode.current === episodeKey) {
-          setSettledEpisode(episodeKey);
-        }
+        setSettledEpisodes((previous) => {
+          const next = new Set(previous);
+          next.add(episodeKey);
+          return next;
+        });
       });
   }, [rawMismatch, episodeKey, refetch]);
 
@@ -99,7 +104,7 @@ export function useTroveRedemptionImpact(
   if (status.kind === "mismatch") {
     // While the one refetch is still in flight the mismatch is not yet
     // "persistent" — render the neutral unverified totals, not the warning.
-    return settledEpisode === episodeKey
+    return episodeKey != null && settledEpisodes.has(episodeKey)
       ? { kind: "mismatch", cumulatives }
       : { kind: "totals", reason: "unverified", cumulatives };
   }

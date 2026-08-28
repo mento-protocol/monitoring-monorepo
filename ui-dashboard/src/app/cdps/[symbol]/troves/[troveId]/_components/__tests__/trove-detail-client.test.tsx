@@ -1213,7 +1213,7 @@ describe("TroveDetailClient", () => {
     // This trove (0.50%) queues behind the 0.20% trove's 6,200 GBPm.
     expect(text).toContain("queue position #2 of 2 rate levels");
     expect(text).toContain(
-      "6,200.00 GBPm of active debt at lower rates shields this trove today",
+      "6,200.00 GBPm of recorded active debt at lower rates shields this trove",
     );
     expect(text).toContain("#2 · this trove");
   });

@@ -1,5 +1,6 @@
 "use client";
 
+import { StaleRefreshNotice } from "@/components/feedback";
 import { formatSignedWei, formatTokenAmount } from "../../../../_lib/format";
 import type { CdpTrove } from "../../../../_lib/types";
 import type { TroveRedemptionLedgerSums } from "../_lib/impact";
@@ -226,6 +227,8 @@ function impactDescription(model: TroveRedemptionImpactModel): string {
       return `${base} Per-hit detail loads with the ledger below.`;
     case "unverified":
       return `${base} Per-hit detail resumes once the ledger and the trove's recorded position agree.`;
+    case "incomplete":
+      return `${base} A redemption row carries no fee record, so per-hit figures cannot be verified.`;
     case "truncated":
     case "batch":
       // These carry their own role="status" notice below.
@@ -366,6 +369,14 @@ export function TroveRedemptionImpact({
     <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
       <h2 className="text-sm font-semibold text-white">Redemption impact</h2>
       <p className="mt-1 text-xs text-slate-500">{impactDescription(model)}</p>
+      {/* A failed poll leaves SWR's prior data on screen — say so here, not
+          only far below in the ledger table, or the support summary reads
+          as current while a recent redemption is missing. */}
+      <StaleRefreshNotice
+        subject="Redemption impact"
+        error={ledger.hasLoadedOnce ? ledger.error : undefined}
+        className="mt-3"
+      />
       <ImpactNotice model={model} />
       <ImpactBody model={model} debtSymbol={debtSymbol} />
       <LiquidationTotals trove={trove} debtSymbol={debtSymbol} />

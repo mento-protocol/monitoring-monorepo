@@ -239,9 +239,10 @@ describe("TroveBalanceChart", () => {
     expect(layout().yaxis3).toBeDefined();
     const icr = traces().find((trace) => trace.yaxis === "y3");
     expect(icr).toBeDefined();
-    // Literal percent suffix must be the escaped %% form (a lone % is a
-    // Plotly directive marker).
-    expect(icr!.hovertemplate).toContain("%%<br>");
+    // A single literal % suffix: Plotly substitutes only %{...} sequences,
+    // so %% would render as two percent signs.
+    expect(icr!.hovertemplate).toContain("%<br>");
+    expect(icr!.hovertemplate).not.toContain("%%");
     expect(icr!.hovertemplate).not.toContain("USDm");
     expect(icr!.y).toEqual([117.1, 165]);
     // Sparse observations render as dots too, not an invisible 1-point line.

@@ -30,9 +30,9 @@ export type TroveRedemptionLedgerSums = {
   debt: string;
   /** Positive Σ|collChange| over op-6 rows, wei string. */
   coll: string;
-  /** Positive Σ redemptionFeeCredited, wei string. A null fee on a drifted
-   *  row counts as 0 — the reconciliation then fails loudly instead of the
-   *  sum guessing. */
+  /** Positive Σ redemptionFeeCredited, wei string, over rows that CARRY a
+   *  fee. A null fee is never coerced to 0 into this sum — see
+   *  `missingFeeCount`. */
   fees: string;
   rebalanceCount: number;
   rebalanceDebt: string;
@@ -42,6 +42,11 @@ export type TroveRedemptionLedgerSums = {
    *  presented as user activity, and user-driven = total − rebalance only
    *  holds when every row is discriminated. */
   undiscriminatedCount: number;
+  /** Op-6 rows with `redemptionFeeCredited` null — the fee fact was never
+   *  supplied (a drifted or legacy row). Any such row makes the fee
+   *  reconciliation unrunnable: coercing to 0 could PASS against a zero
+   *  cumulative and confirm a figure no writer recorded. */
+  missingFeeCount: number;
   /** Op-6 rows with no usable `redemptionPrice`. Any such hit suppresses
    *  the net-equity figure — substituting the current FX rate would
    *  fabricate the core support answer. */
@@ -56,12 +61,26 @@ export type TroveRedemptionLedgerSums = {
   netEquity: string | null;
 };
 
+/** This hit's equity contribution at ITS OWN oracle price, or null when the
+ *  row carries no usable price (which suppresses net equity entirely). */
+function hitEquityDelta(
+  row: CdpTroveLedgerEventRow,
+  debtChange: bigint,
+  collChange: bigint,
+): bigint | null {
+  const price =
+    row.redemptionPrice == null ? null : BigInt(row.redemptionPrice);
+  if (price == null || price <= BigInt(0)) return null;
+  return collChange - (debtChange * D18) / price;
+}
+
 export function sumTroveRedemptionRows(
   rows: readonly CdpTroveLedgerEventRow[],
 ): TroveRedemptionLedgerSums {
   let count = 0;
   let rebalanceCount = 0;
   let undiscriminatedCount = 0;
+  let missingFeeCount = 0;
   let missingPriceCount = 0;
   let debt = BigInt(0);
   let coll = BigInt(0);
@@ -78,7 +97,11 @@ export function sumTroveRedemptionRows(
     const rowColl = collChange < BigInt(0) ? -collChange : collChange;
     debt += rowDebt;
     coll += rowColl;
-    fees += BigInt(row.redemptionFeeCredited ?? "0");
+    if (row.redemptionFeeCredited == null) {
+      missingFeeCount += 1;
+    } else {
+      fees += BigInt(row.redemptionFeeCredited);
+    }
     if (row.isRebalance === true) {
       rebalanceCount += 1;
       rebalanceDebt += rowDebt;
@@ -86,12 +109,11 @@ export function sumTroveRedemptionRows(
     } else if (row.isRebalance == null) {
       undiscriminatedCount += 1;
     }
-    const price =
-      row.redemptionPrice == null ? null : BigInt(row.redemptionPrice);
-    if (price == null || price <= BigInt(0)) {
+    const equityDelta = hitEquityDelta(row, debtChange, collChange);
+    if (equityDelta == null) {
       missingPriceCount += 1;
     } else {
-      equity += collChange - (debtChange * D18) / price;
+      equity += equityDelta;
     }
   }
   return {
@@ -103,6 +125,7 @@ export function sumTroveRedemptionRows(
     rebalanceDebt: rebalanceDebt.toString(),
     rebalanceColl: rebalanceColl.toString(),
     undiscriminatedCount,
+    missingFeeCount,
     missingPriceCount,
     netEquity: count > 0 && missingPriceCount === 0 ? equity.toString() : null,
   };
@@ -153,6 +176,9 @@ function isZeroCumulatives(cumulatives: TroveRedemptionCumulatives): boolean {
  *    a dropped early row would misattribute its deltas.
  *  - `batch`: a null batch debt snapshot switches reconciliation (and the
  *    interest residual) to the explicit batch notice.
+ *  - `incomplete`: an op-6 row carries no fee record, so the fee
+ *    reconciliation cannot run — passing it with a coerced 0 could confirm
+ *    a figure no writer recorded.
  *  - `unverified`: the watermark does not equal the newest row's pair (or
  *    the response is missing its anchor row) — the check is SKIPPED, never
  *    run against skewed reads; the next poll re-anchors. */
@@ -161,6 +187,7 @@ export type TroveRedemptionTotalsReason =
   | "pending"
   | "truncated"
   | "batch"
+  | "incomplete"
   | "unverified";
 
 export type TroveRedemptionImpactStatus =
@@ -206,6 +233,9 @@ export function classifyTroveRedemptionImpact(ledger: {
     return { kind: "totals", reason: "unverified" };
   }
   const sums = sumTroveRedemptionRows(ledger.rows);
+  if (sums.missingFeeCount > 0) {
+    return { kind: "totals", reason: "incomplete" };
+  }
   return reconcileTroveRedemptions(sums, cumulatives)
     ? { kind: "reconciled", sums }
     : { kind: "mismatch" };

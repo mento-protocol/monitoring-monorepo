@@ -483,6 +483,16 @@ describe("TroveRedemptionImpact", () => {
     expect(notices.some((t) => t.includes("reconciliation failed"))).toBe(true);
   });
 
+  it("discloses a failed poll behind cached figures instead of presenting them as current", () => {
+    const ledger = ticketLedgerState({ error: new Error("boom") });
+    render({ ledger });
+    expect(text()).toContain(
+      "Redemption impact refresh failed — showing the last confirmed state",
+    );
+    // The reconciled figures stay on screen — disclosed, not withheld.
+    expect(text()).toContain("all rebalancing");
+  });
+
   it("settles the episode into the warning state even when the one refetch rejects", async () => {
     const skewed = anchor({
       lastLedgerBlock: "75796000",
@@ -578,6 +588,13 @@ describe("TroveRedemptionImpact", () => {
     render({ ledger: ledgerB });
     expect(text()).toContain("Ledger reconciliation failed");
     expect(refetch).toHaveBeenCalledTimes(2);
+
+    // An out-of-order stale response can flip the cache BACK to episode A.
+    // A was already attempted and settled: no third refetch fires, and A's
+    // own warning state shows immediately instead of a hung "unverified".
+    render({ ledger: ledgerA });
+    expect(refetch).toHaveBeenCalledTimes(2);
+    expect(text()).toContain("Ledger reconciliation failed");
   });
 
   it("suppresses the net-equity figure when any hit lacks its oracle price — never priced at current rates", () => {

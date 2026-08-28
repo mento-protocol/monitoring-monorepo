@@ -161,9 +161,10 @@ describe("sumTroveRedemptionRows", () => {
     expect(sums.rebalanceCount).toBe(0);
   });
 
-  it("treats a null credited fee as 0 so a drifted row fails reconciliation loudly instead of guessing", () => {
+  it("counts a null credited fee as missing — never coerced into the sum", () => {
     const sums = sumTroveRedemptionRows([hit({ redemptionFeeCredited: null })]);
     expect(sums.fees).toBe("0");
+    expect(sums.missingFeeCount).toBe(1);
   });
 
   it("returns null net equity for zero hits", () => {
@@ -234,6 +235,20 @@ describe("ledgerWatermarkMatchesNewestRow", () => {
 });
 
 describe("classifyTroveRedemptionImpact", () => {
+  it("withholds reconciliation when a redemption row carries no fee record — a coerced 0 could pass against a zero cumulative", () => {
+    const noFee = hit({ redemptionFeeCredited: null });
+    const watermark = anchor({
+      redemptionCount: 1,
+      redeemedDebt: noFee.debtChange.replace("-", ""),
+      redeemedColl: noFee.collChange.replace("-", ""),
+      redemptionFeePaidCum: "0",
+    });
+    const status = classifyTroveRedemptionImpact(
+      classifyArgs({ rows: [noFee], watermark, cumulatives: watermark }),
+    );
+    expect(status).toEqual({ kind: "totals", reason: "incomplete" });
+  });
+
   it("returns totals/partial for the interim view — the check never runs", () => {
     expect(
       classifyTroveRedemptionImpact(classifyArgs({ supported: false })),

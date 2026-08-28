@@ -164,7 +164,7 @@ describe("TroveRedemptionQueuePanel", () => {
       "Current rate 1.60% — queue position #2 of 2 rate levels.",
     );
     expect(status?.textContent).toContain(
-      "6,200.00 GBPm of active debt at lower rates shields this trove today.",
+      "6,200.00 GBPm of recorded active debt at lower rates shields this trove.",
     );
   });
 
