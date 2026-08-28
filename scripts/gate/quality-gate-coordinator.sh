@@ -544,7 +544,7 @@ gate_coordinator_after_command() {
   local expected_lifecycle_contract="${3:-}"
   local lease_id="$gate_coordinator_active_lease_id"
   gate_coordinator_is_active || return 0
-  if [[ ! "$expected_drain_identity" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]]; then
+  if ! gate_lock_token_is_wellformed "$expected_drain_identity"; then
     gate_coordinator_infrastructure_failed=1
     echo "error: coordinator release has no valid expected command drain identity." >&2
     return 2

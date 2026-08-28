@@ -1980,17 +1980,20 @@ if ! /bin/bash -c '
   probe="$2"
   script_source_dir="$repo_root/scripts"
   source "$repo_root/scripts/gate/quality-gate-coordinator.sh"
+  gate_lock_token_is_wellformed() {
+    [[ "${1:-}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,180}-[0-9]{1,10}-[0-9]{1,12}$ ]]
+  }
   gate_coordinator_active=1
   gate_coordinator_request_id="adapter-release-request"
   gate_coordinator_owner_pid="$$"
   gate_coordinator_owner_start="adapter-release-owner"
   gate_coordinator_active_lease_id="adapter-release-lease"
-  gate_coordinator_active_drain_identity="adapter-release-drain"
+  gate_coordinator_active_drain_identity="adapter-release-drain-123-1770000000"
   gate_coordinator_active_lifecycle_contract="darwin-coherent-lineage-v2"
   gate_coordinator_cli() { : > "$probe"; return 0; }
   set +e
   gate_coordinator_after_command \
-    "true" "adapter-release-other" "darwin-coherent-lineage-v2" \
+    "true" "adapter-release-other-123-1770000000" "darwin-coherent-lineage-v2" \
     >/dev/null 2>&1
   identity_rc=$?
   set -e
@@ -2000,7 +2003,7 @@ if ! /bin/bash -c '
   gate_coordinator_infrastructure_failed=0
   set +e
   gate_coordinator_after_command \
-    "true" "adapter-release-drain" "portable-marker-v1" \
+    "true" "adapter-release-drain-123-1770000000" "portable-marker-v1" \
     >/dev/null 2>&1
   contract_rc=$?
   set -e
@@ -2008,10 +2011,23 @@ if ! /bin/bash -c '
   [[ ! -e "$probe" ]]
   [[ "$gate_coordinator_active_lease_id" == "adapter-release-lease" ]]
   gate_coordinator_infrastructure_failed=0
+  longest_drain_identity="$(printf "%181s" "" | tr " " a)-1234567890-123456789012"
+  gate_coordinator_active_drain_identity="$longest_drain_identity"
+  gate_coordinator_cli() { : > "$probe"; return 0; }
+  gate_coordinator_after_command \
+    "true" "$longest_drain_identity" "darwin-coherent-lineage-v2" \
+    >/dev/null 2>&1
+  [[ -e "$probe" ]]
+  [[ -z "$gate_coordinator_active_lease_id" ]]
+  [[ -z "$gate_coordinator_active_drain_identity" ]]
+  rm -f "$probe"
+  gate_coordinator_active_lease_id="adapter-release-lease"
+  gate_coordinator_active_drain_identity="adapter-release-drain-123-1770000000"
+  gate_coordinator_active_lifecycle_contract="darwin-coherent-lineage-v2"
   gate_coordinator_cli() { return 1; }
   set +e
   gate_coordinator_after_command \
-    "true" "adapter-release-drain" "darwin-coherent-lineage-v2" \
+    "true" "adapter-release-drain-123-1770000000" "darwin-coherent-lineage-v2" \
     >/dev/null 2>&1
   release_rc=$?
   set -e
