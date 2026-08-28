@@ -21,7 +21,7 @@
  * changing this, because a merge method the repository rejects fails at the
  * API rather than here, after consent is already recorded.
  */
-export const MERGE_METHOD_FLAG = "--squash";
+export const MERGE_METHOD = "squash";
 
 export const CONSENT_LOG_BASENAME = ".merge-consents.jsonl";
 
@@ -244,7 +244,7 @@ export function formatBriefing({ summary, feedback, repo, notReadyReason }) {
 
   const lines = [
     "",
-    `About to merge ${sanitizeTerminalText(repo)}#${pr.number} with ${MERGE_METHOD_FLAG.replace("--", "")}.`,
+    `About to merge ${sanitizeTerminalText(repo)}#${pr.number} with ${MERGE_METHOD}.`,
     "",
     `  Title: ${sanitizeTerminalText(pr.title)}`,
     `  Head:  ${sanitizeTerminalText(pr.headRefOid)} (${sanitizeTerminalText(pr.headRefName)})`,
@@ -342,7 +342,7 @@ export function gateSignature({ summary, feedback }) {
 /**
  * The process exit status for one {@link mergePullRequest} result.
  *
- * Only a confirmed merge is a success. A queued pull request and an unreadable
+ * Only a confirmed merge is a success. An open pull request and an unreadable
  * outcome both exit non-zero, so `pnpm pr:merge && <post-merge closeout>` does
  * not run the closeout on a merge the wrapper could not confirm — the shell
  * would otherwise read the wrapper's own refusal to claim success as success.

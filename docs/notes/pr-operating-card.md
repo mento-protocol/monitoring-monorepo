@@ -3,7 +3,7 @@ title: PR Operating Card
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-26
+last_verified: 2026-08-28
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -374,14 +374,35 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    `scripts/pr/merge-pr.mjs` refuses outside an interactive human session, runs
    both step 7 projections, shows a briefing, makes the operator type the
    pull-request number back, re-reads every gate, records consent to gitignored
-   `.merge-consents.jsonl`, and confirms afterwards that the PR reached
-   `MERGED` on the approved base and head. Any ambiguous state refuses; a
-   not-ready PR or unclean feedback ledger needs `--not-ready-reason "<why>"`.
+   `.merge-consents.jsonl`, then calls the synchronous REST merge endpoint with
+   the approved head and squash method. The request cannot enqueue or enable
+   auto-merge. It can bypass a classic branch-protection merge queue, so the
+   wrapper proves `Repository.mergeQueue(branch:)` is null before the briefing
+   and again in a final GraphQL read that also returns `viewer.login` and the
+   pull request's current `baseRefName` and `autoMergeRequest`. A login or base
+   mismatch refuses, so the credential observation and queue query must still
+   name the confirmed operator and current target. That query covers ruleset
+   and classic queues while keeping the credential, base, and both intent gates
+   in the shortest available race window. The wrapper also reads ruleset rule
+   types as a second signal. Any unreadable intent state refuses. The request
+   omits commit title and message
+   fields, so the repository's squash defaults remain in effect. The wrapper
+   confirms afterwards that the PR reached `MERGED` on the approved base and
+   head. It never disables auto-merge during reconciliation. Any ambiguous
+   state refuses; a not-ready PR or unclean feedback ledger needs
+   `--not-ready-reason "<why>"`.
    `.claude/settings.json` denies `gh pr merge` and its repository-qualified
    spellings, which removes the obvious shortcuts. Neither layer is an
    unforgeable boundary — a local process running as the operator can
-   synthesize any local signal — so the approval rule above stays the binding
-   control, and the durable boundary belongs on GitHub's side of the wire.
+   synthesize any local signal. The credential-attribution window begins when
+   the final GraphQL child selects its credential and ends when the REST child
+   selects its credential. It includes the in-flight final query and the
+   consent-ledger write. A credential switch in this window can still
+   misattribute the local consent record. The REST request names the confirmed
+   repository and pull request and pins the approved head with `sha`. It cannot
+   pin the base, so a retarget after the final read can still land on another
+   branch. The approval rule above stays the binding control, and the durable
+   boundary belongs on GitHub's side of the wire.
    [ADR 0075](../adr/0075-pr-merge.md) owns the ordered gates,
    the alternatives, and every residual, including what the deny does not
    cover. The Dependabot auto-merge workflow runs in CI, not an agent session,
