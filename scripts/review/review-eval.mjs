@@ -6,6 +6,7 @@
 // (`run-eval.sh`) invokes it.
 
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   appendFileSync,
   existsSync,
@@ -42,6 +43,7 @@ import {
 } from "./review-eval-ledger.mjs";
 import {
   parseLeadingReviewEvalMarkers,
+  leakSuspected,
   renderReport,
   REVIEW_EVAL_OWNERSHIP_LABEL,
   scheduleIssuePayload,
@@ -704,10 +706,43 @@ export function planProvenanceProblems({
   return problems;
 }
 
+/** Preserve a scorer's hard leak flag on every row that reuses its results. */
+function resultLeakProblems({ dir, row }) {
+  if (row.status === "failed" || !existsSync(dir)) return [];
+  const problems = [];
+  let resultRecordsLeak = false;
+  for (const resultFile of readdirSync(dir).filter(
+    (name) => name.startsWith("result-") && name.endsWith(".json"),
+  )) {
+    try {
+      if (readJson(path.join(dir, resultFile))?.leak?.suspected === true) {
+        resultRecordsLeak = true;
+      }
+    } catch {
+      // The normal evidence checks report unreadable result records.
+    }
+  }
+  if (resultRecordsLeak && !leakSuspected(row)) {
+    problems.push(
+      `${dir} carries a result with leak.suspected true, but the row notes omit leak suspected`,
+    );
+  }
+  if (resultRecordsLeak && row.verdict !== "AMBER") {
+    problems.push(
+      `${dir} carries a result with leak.suspected true, but the row verdict is ${row.verdict} instead of AMBER`,
+    );
+  }
+  return problems;
+}
+
 /** Evidence files required for every row that claims scored results. */
 function runEvidenceProblems({ dir, row, contract }) {
-  if (row.kind === "bridge" || row.status === "failed") return [];
-  const problems = [];
+  if (row.status === "failed") return [];
+  const problems = resultLeakProblems({ dir, row });
+  // A bridge intentionally reuses the source full run's plan and scored
+  // records. It owes no new evidence, but it must retain any leak flag those
+  // records carry because that flag makes the reused score unusable.
+  if (row.kind === "bridge") return problems;
   if (!holdsCellResults(dir)) {
     problems.push(`${dir} carries no scored result-*.json files`);
   }
@@ -837,6 +872,50 @@ function runEvidenceProblems({ dir, row, contract }) {
   return problems;
 }
 
+/** Canonical JSON text for evidence fingerprints. */
+function canonicalJson(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
+  if (value !== null && typeof value === "object") {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/** Digest the scored result and calibration records, independent of layout. */
+function runEvidenceDigest(dir) {
+  if (!existsSync(dir)) return null;
+  const files = readdirSync(dir)
+    .filter(
+      (name) =>
+        name === "calibration.json" ||
+        (name.startsWith("result-") && name.endsWith(".json")),
+    )
+    .sort();
+  if (files.length === 0) return null;
+  const hash = createHash("sha256");
+  const update = (value) => {
+    const bytes = Buffer.from(value);
+    const length = Buffer.alloc(8);
+    length.writeBigUInt64BE(BigInt(bytes.length));
+    hash.update(length);
+    hash.update(bytes);
+  };
+  try {
+    for (const file of files) {
+      update(file);
+      update(canonicalJson(readJson(path.join(dir, file))));
+    }
+  } catch {
+    return null;
+  }
+  return hash.digest("hex");
+}
+
 /**
  * Recompute every row this branch appends, from the detail the same branch
  * commits. `checkLedger` proves a ledger PR is schema-valid, covers the frozen
@@ -895,13 +974,22 @@ function revalidateAppendedRows({ options, context, result, base }) {
     return canonical;
   };
   const usedDetailDirs = new Set();
+  const usedEvidence = new Map();
   for (const row of base.rows ?? []) {
     if (typeof row.detail_dir !== "string") continue;
     const identity = detailDirectoryIdentity(
       row.detail_dir,
       `base row ${row.executed_at}`,
     );
-    if (identity !== null) usedDetailDirs.add(identity);
+    if (identity !== null) {
+      usedDetailDirs.add(identity);
+      if (row.kind !== "bridge" && row.status !== "failed") {
+        const digest = runEvidenceDigest(identity);
+        if (digest !== null) {
+          usedEvidence.set(digest, `base row ${row.executed_at}`);
+        }
+      }
+    }
   }
   let unpaired = 0;
   for (const row of appended) {
@@ -925,6 +1013,17 @@ function revalidateAppendedRows({ options, context, result, base }) {
       );
       continue;
     }
+    if (row.kind !== "bridge" && row.status !== "failed") {
+      const digest = runEvidenceDigest(dir);
+      const previous = digest === null ? null : usedEvidence.get(digest);
+      if (previous) {
+        problems.push(
+          `${label} reuses scored result and calibration evidence from ${previous}`,
+        );
+      } else if (digest !== null) {
+        usedEvidence.set(digest, label);
+      }
+    }
     // The recorded pairing is rechecked against the row it actually names, not
     // against whatever anchor this ledger would resolve on its own — those are
     // two different pairs of runs, and comparing the wrong one reports
@@ -933,6 +1032,7 @@ function revalidateAppendedRows({ options, context, result, base }) {
     // branch does not carry; that pairing cannot be rechecked here, so the row
     // is recomputed against its own bits and detail alone and counted as
     // unpaired rather than failed.
+    const skipsBaselinePairing = row.status === "failed";
     const recordedAt = row.vs_baseline?.baseline_executed_at ?? null;
     const baselineRow =
       recordedAt === null
@@ -946,21 +1046,29 @@ function revalidateAppendedRows({ options, context, result, base }) {
       row.inputs?.dirty === true &&
       row.inputs?.skill_ref !== "installed" &&
       baselineSelection === "explicit";
-    if (missingRecordedBaseline && !candidateMissingBaseline) {
+    if (
+      !skipsBaselinePairing &&
+      missingRecordedBaseline &&
+      !candidateMissingBaseline
+    ) {
       problems.push(
         `${label}: baseline ${recordedAt} is not in the ledger; only a dirty --skill-ref candidate row with explicit selection may waive a missing baseline`,
       );
     }
     const baselineMissing = candidateMissingBaseline;
     if (baselineMissing) unpaired += 1;
-    if (recordedAt !== null && baselineSelection === null) {
+    if (
+      !skipsBaselinePairing &&
+      recordedAt !== null &&
+      baselineSelection === null
+    ) {
       problems.push(
         `${label}: vs_baseline.selection must record automatic or explicit baseline selection`,
       );
     }
     const baselineIsExplicit =
       row.kind === "bridge" || baselineSelection === "explicit";
-    if (!baselineMissing && !baselineIsExplicit) {
+    if (!skipsBaselinePairing && !baselineMissing && !baselineIsExplicit) {
       const resolvedBaseline = resolveBaseline({ rows, row });
       const sameBaseline =
         resolvedBaseline === baselineRow ||
@@ -983,8 +1091,8 @@ function revalidateAppendedRows({ options, context, result, base }) {
       row,
       repoRoot: context.repoRoot,
       detailDir: dir,
-      ledgerRows: baselineMissing ? [] : rows,
-      baselineRow,
+      ledgerRows: baselineMissing || skipsBaselinePairing ? [] : rows,
+      baselineRow: skipsBaselinePairing ? null : baselineRow,
       baselineIsExplicit,
       // Half the verdict is the pairing: a regression and a promotion are both
       // read out of the flip counts against the anchor. Recomputing an unpaired

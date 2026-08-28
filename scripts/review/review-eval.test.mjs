@@ -4858,6 +4858,66 @@ test("--revalidate-appended rejects reused and aliased detail directories", () =
   }
 });
 
+test("--revalidate-appended rejects copied evidence in a new directory", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+
+    const original = makeRow({
+      matchedIds: scorableIdsFor([1990]),
+      fullMatrix: true,
+    });
+    const originalDetail = writeRowEvidence(root, original);
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(original)}\n`,
+    );
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "record original run");
+
+    const copied = structuredClone(original);
+    copied.executed_at = "2026-10-08T10:41:07Z";
+    copied.detail_dir =
+      "docs/evals/review-skill-runs/2026-10-08-copied-evidence";
+    const copiedDetail = path.join(root, copied.detail_dir);
+    cpSync(originalDetail, copiedDetail, { recursive: true });
+    const copiedPlan = JSON.parse(
+      readFileSync(path.join(copiedDetail, "plan.json"), "utf8"),
+    );
+    copiedPlan.detail_dir = copied.detail_dir;
+    writeFileSync(
+      path.join(copiedDetail, "plan.json"),
+      JSON.stringify(copiedPlan),
+    );
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(original)}\n${JSON.stringify(copied)}\n`,
+    );
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 1);
+    assert.match(
+      JSON.parse(checked.stdout).problems.join(" | "),
+      /reuses scored result and calibration evidence from base row/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("--revalidate-appended requires every planned cell of a complete row", () => {
   const root = makeRoot();
   try {
@@ -5078,6 +5138,54 @@ test("--revalidate-appended leaves an unpaired row's verdict alone", () => {
   }
 });
 
+test("--revalidate-appended accepts a failed trace after an eligible baseline", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+
+    const baseline = makeRow({ fullMatrix: true });
+    writeRowEvidence(root, baseline);
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(baseline)}\n`,
+    );
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "record baseline");
+
+    const failed = makeRow({
+      executedAt: "2026-10-08T10:41:07Z",
+      status: "failed",
+      verdict: "INCOMPLETE",
+    });
+    failed.detail_dir = "docs/evals/review-skill-runs/2026-10-08-failed";
+    failed.notes = "run failed: model process exited 1";
+    writeRowEvidence(root, failed);
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(baseline)}\n${JSON.stringify(failed)}\n`,
+    );
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 0, checked.stdout + checked.stderr);
+    assert.equal(JSON.parse(checked.stdout).revalidated_rows, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("--revalidate-appended refuses a missing baseline on an installed row", () => {
   const root = makeRoot();
   try {
@@ -5136,6 +5244,7 @@ test("--revalidate-appended preserves an automatic candidate baseline", () => {
     });
     const candidate = makeRow({
       executedAt: "2026-09-08T10:00:00Z",
+      matchedIds: scorableIdsFor([1990]),
       fullMatrix: true,
     });
     candidate.detail_dir = "docs/evals/review-skill-runs/2026-09-08-candidate";
@@ -5288,6 +5397,7 @@ test("--revalidate-appended checks a row against its committed plan", () => {
     writeRowEvidence(root, row);
 
     const plannedResult = path.join(detail, "result-1990-pipeline-1.json");
+    const originalVerdict = row.verdict;
     const misidentified = JSON.parse(readFileSync(plannedResult, "utf8"));
     misidentified.cell_id = "pr-1990-pipeline-draw2";
     writeFileSync(plannedResult, JSON.stringify(misidentified));
@@ -5345,6 +5455,29 @@ test("--revalidate-appended checks a row against its committed plan", () => {
       JSON.parse(nestedResult.stdout).problems.join(" | "),
       /result-1990-pipeline-1\.json matched_ids contains non-scalar/,
     );
+    writeRowEvidence(root, row);
+
+    const leakedResult = JSON.parse(readFileSync(plannedResult, "utf8"));
+    leakedResult.leak = { suspected: true, hard: ["answer key path"] };
+    writeFileSync(plannedResult, JSON.stringify(leakedResult));
+    const hiddenLeak = cli(flags, { root });
+    assert.equal(hiddenLeak.status, 1);
+    assert.match(
+      JSON.parse(hiddenLeak.stdout).problems.join(" | "),
+      /row notes omit leak suspected.*row verdict is .* instead of AMBER/,
+    );
+    row.notes = "leak suspected: answer key path";
+    row.verdict = "AMBER";
+    writeFileSync(path.join(root, ledgerRelative), `${JSON.stringify(row)}\n`);
+    const preservedLeak = cli(flags, { root });
+    assert.equal(
+      preservedLeak.status,
+      0,
+      preservedLeak.stdout + preservedLeak.stderr,
+    );
+    row.notes = "";
+    row.verdict = originalVerdict;
+    writeFileSync(path.join(root, ledgerRelative), `${JSON.stringify(row)}\n`);
     writeRowEvidence(root, row);
 
     // A scored explicit plan must retain its pairing. Removing vs_baseline and
@@ -5572,6 +5705,37 @@ test("--revalidate-appended accepts an explicit bridge pairing", () => {
     ];
     const checked = cli(flags, { root });
     assert.equal(checked.status, 0, checked.stdout + checked.stderr);
+
+    const bridgeVerdict = bridge.verdict;
+    const bridgeResult = path.join(
+      root,
+      newer.detail_dir,
+      "result-1990-pipeline-1.json",
+    );
+    const leakedResult = JSON.parse(readFileSync(bridgeResult, "utf8"));
+    leakedResult.leak = { suspected: true, hard: ["answer key path"] };
+    writeFileSync(bridgeResult, JSON.stringify(leakedResult));
+    const hiddenBridgeLeak = cli(flags, { root });
+    assert.equal(hiddenBridgeLeak.status, 1);
+    assert.match(
+      JSON.parse(hiddenBridgeLeak.stdout).problems.join(" | "),
+      /row notes omit leak suspected.*row verdict is .* instead of AMBER/,
+    );
+    bridge.notes = "leak suspected: answer key path";
+    bridge.verdict = "AMBER";
+    writeFileSync(
+      ledgerPath,
+      `${JSON.stringify(retiring)}\n${JSON.stringify(bridge)}\n`,
+    );
+    const preservedBridgeLeak = cli(flags, { root });
+    assert.equal(
+      preservedBridgeLeak.status,
+      0,
+      preservedBridgeLeak.stdout + preservedBridgeLeak.stderr,
+    );
+    bridge.notes = "";
+    bridge.verdict = bridgeVerdict;
+    writeRowEvidence(root, newer);
 
     delete bridge.vs_baseline.selection;
     writeFileSync(
