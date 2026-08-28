@@ -326,7 +326,7 @@ export const BROKER_CLIENT_ALLOWLIST = [
       "node-net-dynamic-client",
       "javascript-process-broker",
     ],
-    sha256: "8043830f3802eb43b6a9fcd8ec8dfc7986df953db6f37376976166f9286b42e6",
+    sha256: "b150470100879e290f9b5c34aaea79e7b2ed4118f474ceeb18ad40ffb32220de",
     reason: APPROVED_ALLOWLIST_SHAPE.get(TEST_PATH).reason,
   },
 ];
