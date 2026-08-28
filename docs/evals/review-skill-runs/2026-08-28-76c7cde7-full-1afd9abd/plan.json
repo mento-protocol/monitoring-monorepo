@@ -12,7 +12,7 @@
   },
   "detail_dir": "docs/evals/review-skill-runs/2026-08-28-76c7cde7-full-1afd9abd",
   "resume_from": null,
-  "plan_dir": "/Users/chapati/code/mento/monitoring-monorepo/docs/evals/review-skill-runs/2026-08-28-76c7cde7-full-1afd9abd",
+  "plan_dir": "docs/evals/review-skill-runs/2026-08-28-76c7cde7-full-1afd9abd",
   "inputs": {
     "skill_digest": "1afd9abdbe073cb23c29f635b5d9674ef927d319395e9f5d8672f7919454516a",
     "skill_ref": "installed",
