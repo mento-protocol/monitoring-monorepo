@@ -117,17 +117,20 @@ wrapper says so in its own header rather than implying otherwise:
   pattern list closes that space, and one that read as though it did would be
   worse than a documented gap.
 - **The confirmed login is not bound to the merge subprocess credential.** The
-  final combined GraphQL response returns `viewer.login` with every final
-  state. The wrapper compares that login with the operator confirmed before the
-  briefing, then writes consent and starts a fresh `gh api` process. A
-  `gh auth switch` after that response but before the REST child reads its
-  credential can still make the child use another keyring or `hosts.yml`
-  credential. The merge still targets the confirmed repository, pull request,
-  base, and head, but the local ledger can name the wrong GitHub account. This
-  does not apply when `GH_TOKEN` fixes the credential in the environment. The
-  irreducible window is accepted because closing it would require the trust-root
-  wrapper to capture a live token and inject it into a child environment, which
-  creates a larger credential-handling surface. Issue 2099 records the decision.
+  final GraphQL child selects a credential before it sends the combined query;
+  the response returns that credential's `viewer.login` with every final state.
+  The wrapper compares that login with the operator confirmed before the
+  briefing, then writes consent and starts the REST merge child. The residual
+  window begins when the GraphQL child selects its credential and ends when the
+  REST child selects its credential. It includes the in-flight final query and
+  the consent-ledger write. A `gh auth switch` in that window can make the two
+  children use different keyring or `hosts.yml` credentials. The merge still
+  targets the confirmed repository, pull request, base, and head, but the local
+  ledger can name the wrong GitHub account. This does not apply when `GH_TOKEN`
+  fixes the credential in the environment. The irreducible window is accepted
+  because closing it would require the trust-root wrapper to capture a live
+  token and inject it into a child environment, which creates a larger
+  credential-handling surface. Issue 2099 records the decision.
 - **Merge-queue and auto-merge absence are not bound atomically to the merge.**
   The wrapper checks both before the briefing and again in one final GraphQL
   response. A queue or auto-merge request enabled after that read but before

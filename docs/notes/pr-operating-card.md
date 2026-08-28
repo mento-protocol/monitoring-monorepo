@@ -394,11 +394,13 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    `.claude/settings.json` denies `gh pr merge` and its repository-qualified
    spellings, which removes the obvious shortcuts. Neither layer is an
    unforgeable boundary — a local process running as the operator can
-   synthesize any local signal. A credential switch after the final combined
-   read but before the REST child selects its credential can still misattribute
-   the local consent record; the merge target remains bound. The approval rule
-   above stays the binding control, and the durable boundary belongs on
-   GitHub's side of the wire.
+   synthesize any local signal. The credential-attribution window begins when
+   the final GraphQL child selects its credential and ends when the REST child
+   selects its credential. It includes the in-flight final query and the
+   consent-ledger write. A credential switch in this window can still
+   misattribute the local consent record; the merge target remains bound. The
+   approval rule above stays the binding control, and the durable boundary
+   belongs on GitHub's side of the wire.
    [ADR 0075](../adr/0075-pr-merge.md) owns the ordered gates,
    the alternatives, and every residual, including what the deny does not
    cover. The Dependabot auto-merge workflow runs in CI, not an agent session,

@@ -57,9 +57,10 @@
  * no check in this file can be one. What the wrapper does provide is a default
  * that refuses, a briefing the operator must read, a confirmation they must
  * type, and an append-only consent record naming the confirmed GitHub login
- * and approved head. A credential switch after the final combined read but
- * before the REST child selects its credential can still misattribute that
- * record; the accepted residual is below and in ADR 0075.
+ * and approved head. A credential switch after the final GraphQL child selects
+ * its credential but before the REST child selects its credential can still
+ * misattribute that record. This window includes the in-flight query and the
+ * consent-ledger write; the accepted residual is below and in ADR 0075.
  * The approval rule itself remains the binding control, and the only
  * unforgeable boundary would live on GitHub's side of the wire;
  * `docs/adr/0075-pr-merge.md` records that decision and its
@@ -419,10 +420,11 @@ export async function mergePullRequest({
   // final GraphQL response. The base proves the queue query still names the
   // pull request's target, and viewer.login binds the credential observation
   // to the same response. This minimizes the race windows before the direct
-  // REST call. A credential switch after this response can still make the
-  // separate merge child use another account. Capturing and injecting a token
-  // would add a larger credential-handling surface to this trust-root wrapper
-  // (issue 2099; ADR 0075).
+  // REST call. The credential-attribution window starts when this GraphQL child
+  // selects its credential and ends when the REST child selects its credential;
+  // it includes the in-flight query and consent-ledger write. Capturing and
+  // injecting a token would add a larger credential-handling surface to this
+  // trust-root wrapper (issue 2099; ADR 0075).
   let confirmedIntent;
   try {
     confirmedIntent = await readFinalMergeIntent({
