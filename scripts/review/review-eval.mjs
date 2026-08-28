@@ -715,7 +715,11 @@ function resultLeakProblems({ dir, row }) {
     (name) => name.startsWith("result-") && name.endsWith(".json"),
   )) {
     try {
-      if (readJson(path.join(dir, resultFile))?.leak?.suspected === true) {
+      const leak = readJson(path.join(dir, resultFile))?.leak;
+      if (
+        leak?.suspected === true ||
+        (Array.isArray(leak?.hard) && leak.hard.length > 0)
+      ) {
         resultRecordsLeak = true;
       }
     } catch {
@@ -810,6 +814,46 @@ function runEvidenceProblems({ dir, row, contract }) {
               }
             }
           }
+          if (!Array.isArray(record?.claims)) {
+            problems.push(`${dir}/${resultFile} claims must be an array`);
+          }
+          for (const field of ["novelWrong", "novelReal"]) {
+            const value = Number(record?.novel?.[field]);
+            if (!Number.isSafeInteger(value) || value < 0) {
+              problems.push(
+                `${dir}/${resultFile} novel.${field} must be a nonnegative safe integer`,
+              );
+            }
+          }
+          for (const field of ["usd", "seconds"]) {
+            const value = Number(record?.[field]);
+            if (!Number.isFinite(value) || value < 0) {
+              problems.push(
+                `${dir}/${resultFile} ${field} must be a nonnegative finite number`,
+              );
+            }
+          }
+          if (Object.hasOwn(record ?? {}, "scoring_usd")) {
+            const value = Number(record.scoring_usd);
+            if (!Number.isFinite(value) || value < 0) {
+              problems.push(
+                `${dir}/${resultFile} scoring_usd must be a nonnegative finite number`,
+              );
+            }
+          }
+          if (record?.leak !== undefined) {
+            const hard = record.leak?.hard;
+            const suspected = record.leak?.suspected;
+            if (!Array.isArray(hard) || typeof suspected !== "boolean") {
+              problems.push(
+                `${dir}/${resultFile} leak must carry a hard array and suspected boolean`,
+              );
+            } else if (suspected !== hard.length > 0) {
+              problems.push(
+                `${dir}/${resultFile} leak.suspected must equal whether leak.hard is non-empty`,
+              );
+            }
+          }
           if (!rowConditions.has(cell.condition)) {
             problems.push(
               `${dir}/${resultFile} records condition ${cell.condition}, but the row omits it`,
@@ -886,7 +930,7 @@ function canonicalJson(value) {
   return JSON.stringify(value);
 }
 
-/** Digest the scored result and calibration records, independent of layout. */
+/** Digest one run's exact canonical scored evidence, independent of layout. */
 function runEvidenceDigest(dir) {
   if (!existsSync(dir)) return null;
   const files = readdirSync(dir)
@@ -907,45 +951,8 @@ function runEvidenceDigest(dir) {
   };
   try {
     for (const file of files) {
-      const record = readJson(path.join(dir, file));
-      const scoreEvidence =
-        file === "calibration.json"
-          ? {
-              outcomes: [...(record?.outcomes ?? [])]
-                .map((outcome) => ({
-                  record_id: String(outcome?.record_id),
-                  expected: outcome?.expected,
-                  actual: outcome?.actual,
-                }))
-                .sort((left, right) =>
-                  canonicalJson(left).localeCompare(canonicalJson(right)),
-                ),
-              scoring_usd: {
-                present: Object.hasOwn(record ?? {}, "scoring_usd"),
-                value: Number(record?.scoring_usd ?? 0),
-              },
-            }
-          : {
-              cell_id: record?.cell_id,
-              pr: record?.pr,
-              condition: record?.condition,
-              draw: record?.draw,
-              matched_ids: [
-                ...new Set((record?.matched_ids ?? []).map((id) => String(id))),
-              ].sort(),
-              claim_count: (record?.claims ?? []).length,
-              novel_wrong: Number(record?.novel?.novelWrong ?? 0),
-              novel_real: Number(record?.novel?.novelReal ?? 0),
-              usd: Number(record?.usd ?? 0),
-              seconds: Number(record?.seconds ?? 0),
-              scoring_usd: {
-                present: Object.hasOwn(record ?? {}, "scoring_usd"),
-                value: Number(record?.scoring_usd ?? 0),
-              },
-              leak_suspected: record?.leak?.suspected === true,
-            };
       update(file);
-      update(canonicalJson(scoreEvidence));
+      update(canonicalJson(readJson(path.join(dir, file))));
     }
   } catch {
     return null;

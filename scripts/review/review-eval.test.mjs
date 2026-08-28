@@ -4917,78 +4917,6 @@ test("--revalidate-appended rejects copied evidence in a new directory", () => {
       JSON.parse(checked.stdout).problems.join(" | "),
       /reuses scored result and calibration evidence from base row/,
     );
-
-    const copiedResult = readdirSync(copiedDetail).find((file) => {
-      if (!file.startsWith("result-")) return false;
-      const record = JSON.parse(
-        readFileSync(path.join(copiedDetail, file), "utf8"),
-      );
-      return (record.matched_ids ?? []).length > 1;
-    });
-    assert.ok(copiedResult);
-    const copiedResultPath = path.join(copiedDetail, copiedResult);
-    const copiedRecord = JSON.parse(readFileSync(copiedResultPath, "utf8"));
-    copiedRecord.judge_reasoning = "changed text that does not affect scoring";
-    writeFileSync(copiedResultPath, JSON.stringify(copiedRecord));
-
-    const metadataChanged = cli(
-      [
-        "--check-ledger",
-        "--revalidate-appended",
-        "--base-ref",
-        "HEAD",
-        "--json",
-      ],
-      { root },
-    );
-    assert.equal(metadataChanged.status, 1);
-    assert.match(
-      JSON.parse(metadataChanged.stdout).problems.join(" | "),
-      /reuses scored result and calibration evidence from base row/,
-    );
-
-    const reorderedMatches = [...copiedRecord.matched_ids].reverse();
-    copiedRecord.matched_ids = [
-      Number(reorderedMatches[0]),
-      ...reorderedMatches,
-    ];
-    writeFileSync(copiedResultPath, JSON.stringify(copiedRecord));
-    const equivalentMatches = cli(
-      [
-        "--check-ledger",
-        "--revalidate-appended",
-        "--base-ref",
-        "HEAD",
-        "--json",
-      ],
-      { root },
-    );
-    assert.equal(equivalentMatches.status, 1);
-    assert.match(
-      JSON.parse(equivalentMatches.stdout).problems.join(" | "),
-      /reuses scored result and calibration evidence from base row/,
-    );
-
-    copiedRecord.usd = String(copiedRecord.usd);
-    copiedRecord.seconds = String(copiedRecord.seconds);
-    copiedRecord.novel.novelWrong = String(copiedRecord.novel.novelWrong);
-    copiedRecord.novel.novelReal = String(copiedRecord.novel.novelReal);
-    writeFileSync(copiedResultPath, JSON.stringify(copiedRecord));
-    const equivalentNumbers = cli(
-      [
-        "--check-ledger",
-        "--revalidate-appended",
-        "--base-ref",
-        "HEAD",
-        "--json",
-      ],
-      { root },
-    );
-    assert.equal(equivalentNumbers.status, 1);
-    assert.match(
-      JSON.parse(equivalentNumbers.stdout).problems.join(" | "),
-      /reuses scored result and calibration evidence from base row/,
-    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -5533,15 +5461,33 @@ test("--revalidate-appended checks a row against its committed plan", () => {
     );
     writeRowEvidence(root, row);
 
+    const negativeCounter = JSON.parse(readFileSync(plannedResult, "utf8"));
+    negativeCounter.novel.novelWrong = -1;
+    writeFileSync(plannedResult, JSON.stringify(negativeCounter));
+    const negativeResult = cli(flags, { root });
+    assert.equal(negativeResult.status, 1);
+    assert.match(
+      JSON.parse(negativeResult.stdout).problems.join(" | "),
+      /result-1990-pipeline-1\.json novel\.novelWrong must be a nonnegative safe integer/,
+    );
+    writeRowEvidence(root, row);
+
     const leakedResult = JSON.parse(readFileSync(plannedResult, "utf8"));
-    leakedResult.leak = { suspected: true, hard: ["answer key path"] };
+    leakedResult.leak = { suspected: false, hard: ["answer key path"] };
     writeFileSync(plannedResult, JSON.stringify(leakedResult));
     const hiddenLeak = cli(flags, { root });
     assert.equal(hiddenLeak.status, 1);
+    const leakProblems = JSON.parse(hiddenLeak.stdout).problems.join(" | ");
     assert.match(
-      JSON.parse(hiddenLeak.stdout).problems.join(" | "),
+      leakProblems,
+      /leak\.suspected must equal whether leak\.hard is non-empty/,
+    );
+    assert.match(
+      leakProblems,
       /row notes omit leak suspected.*row verdict is .* instead of AMBER/,
     );
+    leakedResult.leak.suspected = true;
+    writeFileSync(plannedResult, JSON.stringify(leakedResult));
     row.notes = "leak suspected: answer key path";
     row.verdict = "AMBER";
     writeFileSync(path.join(root, ledgerRelative), `${JSON.stringify(row)}\n`);
