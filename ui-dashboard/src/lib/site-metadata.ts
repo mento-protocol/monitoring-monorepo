@@ -13,6 +13,15 @@ function inferredProtocol(host: string): "http" | "https" {
     : "https";
 }
 
+function isAllowedMetadataHostname(hostname: string): boolean {
+  return (
+    hostname === new URL(PRODUCTION_SITE_ORIGIN).hostname ||
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname.endsWith(".vercel.app")
+  );
+}
+
 /**
  * Resolve social image URLs against the host that served the page. This keeps
  * localhost ports and Vercel preview deployments self-contained, while the
@@ -32,7 +41,8 @@ export function resolveMetadataBase(headers: HeaderReader): URL {
       : inferredProtocol(host);
   try {
     const candidate = new URL(`${protocol}://${host}`);
-    return candidate.host === host
+    return candidate.host === host &&
+      isAllowedMetadataHostname(candidate.hostname)
       ? candidate
       : new URL(PRODUCTION_SITE_ORIGIN);
   } catch {

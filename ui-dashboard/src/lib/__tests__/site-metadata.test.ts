@@ -38,4 +38,14 @@ describe("resolveMetadataBase", () => {
       resolveMetadataBase(new Headers({ host: "https://bad host" })).href,
     ).toBe(`${PRODUCTION_SITE_ORIGIN}/`);
   });
+
+  it("rejects valid but untrusted host headers", () => {
+    expect(
+      resolveMetadataBase(new Headers({ host: "attacker.example" })).href,
+    ).toBe(`${PRODUCTION_SITE_ORIGIN}/`);
+    expect(
+      resolveMetadataBase(new Headers({ host: "preview.vercel.app.evil.test" }))
+        .href,
+    ).toBe(`${PRODUCTION_SITE_ORIGIN}/`);
+  });
 });

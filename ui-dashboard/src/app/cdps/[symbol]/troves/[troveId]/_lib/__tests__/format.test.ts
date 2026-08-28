@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatBpsPercent,
   formatInterestRate,
+  icrSeverity,
   icrTextClass,
   lastOwnerAddress,
   troveManageUrl,
@@ -41,6 +42,15 @@ describe("icrTextClass", () => {
 
   it("renders the unknown sentinel as muted", () => {
     expect(icrTextClass(-1, 11_000)).toBe("text-slate-500");
+  });
+});
+
+describe("icrSeverity", () => {
+  it("uses the same MCR bands as the UI text class", () => {
+    expect(icrSeverity(10_500, 11_000)).toBe("critical");
+    expect(icrSeverity(11_500, 11_000)).toBe("warning");
+    expect(icrSeverity(20_000, 11_000)).toBe("healthy");
+    expect(icrSeverity(-1, 11_000)).toBe("neutral");
   });
 });
 
