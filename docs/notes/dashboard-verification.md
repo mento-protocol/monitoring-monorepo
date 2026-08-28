@@ -306,8 +306,9 @@ UI PR shipped or ready. The user may waive visual evidence for a specific PR.
 ## Dynamic social-preview verification
 
 For any direct or transitive change to dynamic metadata or an Open Graph image,
-verify the final deployed origin. This includes routes, renderers, data helpers,
-and shared fonts. Local and preview results are not production proof.
+verify every affected route and applicable state on the final deployed origin.
+Dependencies include renderers, data helpers, and shared fonts. Local and
+preview results are not production proof.
 
 - Send isolated, cookie-free requests with a normal browser user agent and each
   relevant crawler user agent, such as Slackbot or Twitterbot. Record the
@@ -315,9 +316,9 @@ and shared fonts. Local and preview results are not production proof.
   final HTTP 200.
 - In each raw initial HTML response, verify the exact document title and
   description; canonical URL; Open Graph type, URL, title, description, image,
-  and image alt; and Twitter card, title, description, image, and image alt.
-  Match the route and public-data contract. Record expected absence for an
-  optional canonical URL, Open Graph URL, or image-alt tag.
+  image alt, image width, image height, and image type; and Twitter card,
+  title, description, image, and image alt. Match the route and public-data
+  contract. Record expected absence for optional tags.
 - For public and private metadata states, test an explicit record in each state.
   Require the safe private fallback and no restricted label, tag, or source.
 - Verify document `Cache-Control` and `Age` against its freshness policy. For
@@ -327,9 +328,9 @@ and shared fonts. Local and preview results are not production proof.
   is not crawler proof.
 - Fetch the exact image URL cookie-free with browser caching disabled. For an
   access-controlled route, compare an authenticated fetch and reject any
-  credential dependence. Require HTTP 200, the expected type and dimensions,
-  and `Cache-Control` and `Age` that match policy. Browser cache controls do not
-  bypass a CDN cache.
+  credential dependence. Require HTTP 200. Match the response type and
+  dimensions with the declared image metadata. Require `Cache-Control` and
+  `Age` that match policy. Browser cache controls do not bypass a CDN cache.
 - Inspect the image for the correct route and data or fallback. Require no blank
   or clipped content. Check browser console errors after both loads.
 - Test a URL that Slack has not expanded. An old message is cached evidence.
