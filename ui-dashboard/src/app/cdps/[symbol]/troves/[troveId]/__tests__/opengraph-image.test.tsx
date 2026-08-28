@@ -63,7 +63,7 @@ describe("trove opengraph-image route", () => {
     fetchForMetadata.mockResolvedValue(data);
 
     const [entry] = await generateImageMetadata({
-      params: { symbol: "GBPM", troveId: "0x0008ABC" },
+      params: Promise.resolve({ symbol: "GBPM", troveId: "0x0008ABC" }),
     });
 
     expect(fetchForMetadata).toHaveBeenCalledWith("GBPM", "0x8abc");

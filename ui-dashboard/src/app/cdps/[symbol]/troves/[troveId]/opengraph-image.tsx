@@ -56,9 +56,9 @@ const IMAGE_CACHE_CONTROL =
 export async function generateImageMetadata({
   params,
 }: {
-  params: RouteParams;
+  params: Promise<RouteParams>;
 }) {
-  const identity = routeIdentity(params);
+  const identity = routeIdentity(await params);
   const data = await fetchTroveOgDataForMetadata(
     identity.symbol,
     identity.troveId,
