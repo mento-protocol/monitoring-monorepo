@@ -8,7 +8,9 @@ function firstForwardedValue(value: string | null): string | null {
 }
 
 function inferredProtocol(host: string): "http" | "https" {
-  return host.startsWith("localhost") || host.startsWith("127.0.0.1")
+  return host.startsWith("localhost") ||
+    host.startsWith("127.0.0.1") ||
+    host.startsWith("[::1]")
     ? "http"
     : "https";
 }
@@ -18,6 +20,7 @@ function isAllowedMetadataHostname(hostname: string): boolean {
     hostname === new URL(PRODUCTION_SITE_ORIGIN).hostname ||
     hostname === "localhost" ||
     hostname === "127.0.0.1" ||
+    hostname === "[::1]" ||
     hostname.endsWith(".vercel.app")
   );
 }

@@ -8,6 +8,12 @@ describe("resolveMetadataBase", () => {
     expect(resolveMetadataBase(headers).href).toBe("http://127.0.0.1:3210/");
   });
 
+  it("keeps IPv6 loopback social images on the active development port", () => {
+    const headers = new Headers({ host: "[::1]:3210" });
+
+    expect(resolveMetadataBase(headers).href).toBe("http://[::1]:3210/");
+  });
+
   it("uses the forwarded deployment origin behind Vercel", () => {
     const headers = new Headers({
       "x-forwarded-host": "monitoring-preview.vercel.app",
