@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { resolveMetadataBase } from "@/lib/site-metadata";
 import { isValidTroveIdParam, normalizeTroveIdParam } from "./_lib/params";
 import { TroveDetailClient } from "./_components/trove-detail-client";
 
@@ -16,7 +18,10 @@ export async function generateMetadata({
 }: {
   params: Promise<{ symbol: string; troveId: string }>;
 }): Promise<Metadata> {
-  const { symbol, troveId: rawTroveId } = await params;
+  const [{ symbol, troveId: rawTroveId }, requestHeaders] = await Promise.all([
+    params,
+    headers(),
+  ]);
   const decoded = decodeTroveIdParam(rawTroveId);
   const troveId = isValidTroveIdParam(decoded)
     ? normalizeTroveIdParam(decoded)
@@ -25,6 +30,7 @@ export async function generateMetadata({
   const socialTitle = `${symbol.toUpperCase()} Trove ${shortTroveId(troveId)} history — Mento Analytics`;
   const description = "Indexed history for a Mento CDP position.";
   return {
+    metadataBase: resolveMetadataBase(requestHeaders),
     title,
     description,
     // A page-level title does not replace the root layout's Open Graph block.

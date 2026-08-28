@@ -1,9 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { capturedCacheKeyParts, capturedCacheOptions } = vi.hoisted(() => ({
-  capturedCacheKeyParts: [] as string[][],
-  capturedCacheOptions: [] as unknown[],
-}));
+const { capturedCacheCallbacks, capturedCacheKeyParts, capturedCacheOptions } =
+  vi.hoisted(() => ({
+    capturedCacheCallbacks: [] as Array<
+      (symbol: string, troveId: string) => Promise<unknown>
+    >,
+    capturedCacheKeyParts: [] as string[][],
+    capturedCacheOptions: [] as unknown[],
+  }));
 
 vi.mock("next/cache", () => ({
   unstable_cache: <T extends (...args: never[]) => unknown>(
@@ -11,6 +15,9 @@ vi.mock("next/cache", () => ({
     keyParts?: string[],
     options?: unknown,
   ) => {
+    capturedCacheCallbacks.push(
+      fn as unknown as (symbol: string, troveId: string) => Promise<unknown>,
+    );
     if (keyParts) capturedCacheKeyParts.push(keyParts);
     capturedCacheOptions.push(options);
     return fn;
@@ -44,6 +51,7 @@ vi.mock("@/lib/graphql-fetch", () => {
 
 import { GraphQLClient } from "@/lib/graphql-fetch";
 import { CDP_TROVE_OG_BY_ID, CDP_TROVE_OG_COLLATERALS } from "@/lib/queries";
+import type { CdpTroveOgCollateralsQuery } from "@/lib/__generated__/graphql";
 import {
   fetchTroveOgDataForMetadata,
   fetchTroveOgDataUncached,
@@ -228,5 +236,43 @@ describe("fetchTroveOgDataForMetadata", () => {
       troveOgDataIsFresh(data, NOW_MS + TROVE_OG_MAX_DATA_AGE_MS + 1),
     ).toBe(false);
     expect(troveOgDataIsFresh(data, NOW_MS - 1)).toBe(false);
+  });
+
+  it("keeps transport failures outside the cache boundary", async () => {
+    (
+      GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+    ).mockRejectedValue(new Error("network"));
+
+    await expect(capturedCacheCallbacks[0]?.("gbpm", "0x8abc")).rejects.toThrow(
+      "network",
+    );
+    await expect(
+      fetchTroveOgDataForMetadata("gbpm", "0x8abc"),
+    ).resolves.toBeNull();
+  });
+
+  it("coalesces concurrent reads for the same canonical position", async () => {
+    let resolveCollaterals!: (value: CdpTroveOgCollateralsQuery) => void;
+    const collateralsPending = new Promise<CdpTroveOgCollateralsQuery>(
+      (resolve) => {
+        resolveCollaterals = resolve;
+      },
+    );
+    (
+      GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+    ).mockImplementation(({ document }: { document: string }) => {
+      if (document === CDP_TROVE_OG_COLLATERALS) return collateralsPending;
+      return Promise.resolve({ Trove: [trove] });
+    });
+
+    const first = fetchTroveOgDataForMetadata("GBPM", "0x0008ABC");
+    const second = fetchTroveOgDataForMetadata("gbpm", "0x8abc");
+
+    expect(GraphQLClient.prototype.request).toHaveBeenCalledTimes(1);
+    resolveCollaterals({ LiquityCollateral: [collateral] });
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+
+    expect(GraphQLClient.prototype.request).toHaveBeenCalledTimes(2);
+    expect(firstResult).toEqual(secondResult);
   });
 });

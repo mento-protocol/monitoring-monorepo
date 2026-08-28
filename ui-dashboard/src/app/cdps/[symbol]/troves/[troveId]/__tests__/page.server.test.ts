@@ -9,6 +9,9 @@
 import { describe, it, expect, vi } from "vitest";
 
 const redirectCalls: string[] = [];
+vi.mock("next/headers", () => ({
+  headers: () => Promise.resolve(new Headers({ host: "127.0.0.1:3210" })),
+}));
 vi.mock("next/navigation", () => ({
   redirect: (path: string) => {
     redirectCalls.push(path);
@@ -104,6 +107,7 @@ describe("TroveDetailPage social metadata", () => {
     expect(metadata.description).toBe(
       "Indexed history for a Mento CDP position.",
     );
+    expect(metadata.metadataBase).toEqual(new URL("http://127.0.0.1:3210"));
     expect(metadata.openGraph).toMatchObject({
       title: socialTitle,
       type: "website",

@@ -182,37 +182,45 @@ function buildTroveOgData(
 }
 
 /** @internal Exported for focused data-contract tests. */
-export async function fetchTroveOgDataUncached(
+async function fetchTroveOgData(
   rawSymbol: string,
   rawTroveId: string,
 ): Promise<TroveOgData | null> {
   const params = canonicalParams(rawSymbol, rawTroveId);
   if (params === null || CELO.hasuraUrl === "") return null;
+  const client = makeOgGraphQLClient(CELO);
+  // Both sequential reads share one upstream budget. A slow collateral lookup
+  // must not leave a fresh timeout window for the exact-trove lookup.
+  const signal = AbortSignal.timeout(HASURA_TIMEOUT_MS);
+  const collaterals = await client.request<CdpTroveOgCollateralsQuery>({
+    document: CDP_TROVE_OG_COLLATERALS,
+    variables: { chainId: CELO.chainId },
+    signal,
+  });
+  const collateral = (collaterals.LiquityCollateral ?? []).find(
+    (row) => cdpSymbolSlug(row.symbol) === params.symbol,
+  );
+  if (collateral === undefined) return null;
+  const result = await client.request<CdpTroveOgByIdQuery>({
+    document: CDP_TROVE_OG_BY_ID,
+    variables: {
+      troveEntityId: makeTroveEntityId(collateral.id, params.troveId),
+    },
+    signal,
+  });
+  const trove = result.Trove?.[0];
+  return trove === undefined
+    ? null
+    : buildTroveOgData(collateral, trove, Date.now());
+}
+
+/** @internal Exported for focused data-contract tests. */
+export async function fetchTroveOgDataUncached(
+  rawSymbol: string,
+  rawTroveId: string,
+): Promise<TroveOgData | null> {
   try {
-    const client = makeOgGraphQLClient(CELO);
-    // Both sequential reads share one upstream budget. A slow collateral lookup
-    // must not leave a fresh timeout window for the exact-trove lookup.
-    const signal = AbortSignal.timeout(HASURA_TIMEOUT_MS);
-    const collaterals = await client.request<CdpTroveOgCollateralsQuery>({
-      document: CDP_TROVE_OG_COLLATERALS,
-      variables: { chainId: CELO.chainId },
-      signal,
-    });
-    const collateral = (collaterals.LiquityCollateral ?? []).find(
-      (row) => cdpSymbolSlug(row.symbol) === params.symbol,
-    );
-    if (collateral === undefined) return null;
-    const result = await client.request<CdpTroveOgByIdQuery>({
-      document: CDP_TROVE_OG_BY_ID,
-      variables: {
-        troveEntityId: makeTroveEntityId(collateral.id, params.troveId),
-      },
-      signal,
-    });
-    const trove = result.Trove?.[0];
-    return trove === undefined
-      ? null
-      : buildTroveOgData(collateral, trove, Date.now());
+    return await fetchTroveOgData(rawSymbol, rawTroveId);
   } catch {
     return null;
   }
@@ -226,8 +234,25 @@ export function troveOgDataIsFresh(
   return ageMs >= 0 && ageMs <= TROVE_OG_MAX_DATA_AGE_MS;
 }
 
+const inFlightFetches = new Map<string, Promise<TroveOgData | null>>();
+
+async function fetchTroveOgDataForCache(
+  symbol: string,
+  troveId: string,
+): Promise<TroveOgData | null> {
+  const key = `${symbol}:${troveId}`;
+  const existing = inFlightFetches.get(key);
+  if (existing !== undefined) return existing;
+
+  const request = fetchTroveOgData(symbol, troveId).finally(() => {
+    inFlightFetches.delete(key);
+  });
+  inFlightFetches.set(key, request);
+  return request;
+}
+
 const cachedFetch = unstable_cache(
-  fetchTroveOgDataUncached,
+  fetchTroveOgDataForCache,
   [
     "trove-og",
     process.env.VERCEL_DEPLOYMENT_ID ??
@@ -244,6 +269,12 @@ export async function fetchTroveOgDataForMetadata(
 ): Promise<TroveOgData | null> {
   const params = canonicalParams(rawSymbol, rawTroveId);
   if (params === null) return null;
-  const data = await cachedFetch(params.symbol, params.troveId);
-  return data !== null && troveOgDataIsFresh(data) ? data : null;
+  try {
+    const data = await cachedFetch(params.symbol, params.troveId);
+    return data !== null && troveOgDataIsFresh(data) ? data : null;
+  } catch {
+    // Keep transport errors outside unstable_cache. Next can retain the last
+    // good value when a revalidation fails, while the image still fails open.
+    return null;
+  }
 }
