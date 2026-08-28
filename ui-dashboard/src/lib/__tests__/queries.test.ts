@@ -81,6 +81,8 @@ const EXPECTED_EXPORT_NAMES = [
   "CDP_TROVE_BY_ID",
   "CDP_TROVE_BY_ID_WITHOUT_TX",
   "CDP_TROVE_LEDGER",
+  "CDP_TROVE_OG_BY_ID",
+  "CDP_TROVE_OG_COLLATERALS",
   "CDP_TROVE_OPERATIONS",
   "CDP_TROVE_QUEUE",
   "CDP_TROVE_SCHEMA_FIELDS",
@@ -857,6 +859,26 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(query).toContain("where: { id: { _eq: $troveEntityId } }");
     expect(query).toContain("previousOwner");
     expect(query).not.toContain("lastUpdatedTxHash");
+  });
+
+  it("CDP_TROVE_OG_COLLATERALS keeps the cold-unfurl lookup narrow", () => {
+    const query = normalize(queries.CDP_TROVE_OG_COLLATERALS);
+    expect(query).toContain("query CdpTroveOgCollaterals");
+    expect(query).toContain("chainId: { _eq: $chainId }");
+    expect(query).toContain("id chainId symbol mcrBps");
+    expect(query).not.toContain("LiquityInstance");
+    expect(query).not.toContain("Trove(");
+  });
+
+  it("CDP_TROVE_OG_BY_ID selects confirmed header fields without rate or interim operations", () => {
+    const query = normalize(queries.CDP_TROVE_OG_BY_ID);
+    expect(query).toContain("query CdpTroveOgById");
+    expect(query).toContain("where: { id: { _eq: $troveEntityId } }");
+    expect(query).toContain(
+      "id troveId status debt coll icrBps openedAt closedAt lastUpdatedAt",
+    );
+    expect(query).not.toContain("interestRate");
+    expect(query).not.toContain("TroveOperationEvent");
   });
 
   it("CDP_INTEREST_BATCH_BY_ID resolves one batch's current rate by id", () => {

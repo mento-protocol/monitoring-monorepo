@@ -20,7 +20,7 @@ vi.mock("../_components/trove-detail-client", () => ({
   TroveDetailClient: () => null,
 }));
 
-import TroveDetailPage from "../page";
+import TroveDetailPage, { generateMetadata } from "../page";
 import { TroveDetailClient } from "../_components/trove-detail-client";
 
 function makeParams(
@@ -85,5 +85,32 @@ describe("TroveDetailPage server shell — valid troveId renders the client", ()
     })) as React.ReactElement<{ symbol: string; troveId: string }>;
     expect(redirectCalls).toEqual([]);
     expect(result.props.troveId).toBe("0x8abc");
+  });
+});
+
+describe("TroveDetailPage social metadata", () => {
+  it("uses the position identity for Open Graph and Twitter unfurls", async () => {
+    const metadata = await generateMetadata({
+      params: makeParams(
+        "gbpm",
+        "0x8ABCB264ED2E25BEB15C6D31228771BE0C804AC3ABE6CF8C4432A1C4AC2C0D7D",
+      ),
+    });
+
+    const socialTitle = "GBPM Trove 0x8abc…0d7d history — Mento Analytics";
+    expect(metadata.title).toBe(
+      "Trove 0x8abcb264ed2e25beb15c6d31228771be0c804ac3abe6cf8c4432a1c4ac2c0d7d — GBPM CDP — Mento Analytics",
+    );
+    expect(metadata.description).toBe(
+      "Indexed history for a Mento CDP position.",
+    );
+    expect(metadata.openGraph).toMatchObject({
+      title: socialTitle,
+      type: "website",
+    });
+    expect(metadata.twitter).toMatchObject({
+      card: "summary_large_image",
+      title: socialTitle,
+    });
   });
 });

@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import { Suspense } from "react";
 import localFont from "next/font/local";
 import { SessionProvider } from "next-auth/react";
@@ -14,6 +15,7 @@ import { PlotlyIdlePreloader } from "@/components/plotly-idle-preloader";
 import { Analytics } from "@vercel/analytics/next";
 import { clientEnv } from "@/env";
 import { serverEnv } from "@/server-env";
+import { resolveMetadataBase } from "@/lib/site-metadata";
 import "./globals.css";
 
 // This is server-only; local `next start` needs analytics development mode.
@@ -31,24 +33,30 @@ const geistMono = localFont({
 });
 const analyticsEnabled = !clientEnv.NEXT_PUBLIC_BROWSER_TEST_FIXTURES;
 
-// Static fallback for every route. The homepage overrides via its own
+// Base metadata for every route. The homepage overrides via its own
 // `generateMetadata` in `app/(home)/page.tsx` — keeping the dynamic fetch scoped
 // there so non-homepage routes don't inherit the cross-chain I/O latency
 // when the OG cache is cold.
-export const metadata: Metadata = {
-  title: "Mento Analytics",
-  description: "Cross-chain analytics dashboard for Mento protocol",
-  openGraph: {
-    title: "Mento Analytics",
-    description: "Cross-chain analytics dashboard for Mento protocol",
-    type: "website",
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: "Mento Analytics",
-    description: "Cross-chain analytics dashboard for Mento protocol",
-  },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const requestHeaders = await headers();
+  const title = "Mento Analytics";
+  const description = "Cross-chain analytics dashboard for Mento protocol";
+  return {
+    metadataBase: resolveMetadataBase(requestHeaders),
+    title,
+    description,
+    openGraph: {
+      title,
+      description,
+      type: "website",
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+    },
+  };
+}
 
 export const viewport: Viewport = {
   colorScheme: "dark",
