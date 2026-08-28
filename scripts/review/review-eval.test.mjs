@@ -3284,6 +3284,60 @@ test("scorePlan rejects an ineligible explicit baseline before model work", asyn
   }
 });
 
+test("scorePlan rejects an altered cell matrix before model work", async () => {
+  const root = makeRoot();
+  try {
+    const plan = buildPlan({
+      contract,
+      contractDigest,
+      kind: "canary",
+      repoRoot: root,
+      outDir: path.join(root, "run"),
+      env: planEnv,
+    });
+    for (const cell of plan.cells) {
+      const dir = path.join(plan.plan_dir, "cells", cell.cell_id);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        path.join(dir, "result.json"),
+        JSON.stringify({
+          ok: true,
+          fingerprint: cellFingerprint({ plan }),
+          output: "nothing looks wrong here",
+          seconds: 10,
+          cost_usd: 0.5,
+          fixture_path: root,
+        }),
+      );
+    }
+    plan.cells[0].model = `${plan.cells[0].model}-altered`;
+    let modelCalls = 0;
+    await assert.rejects(
+      scorePlan({
+        plan,
+        contract,
+        contractDigest,
+        repoRoot: root,
+        planDir: plan.plan_dir,
+        exec: async () => {
+          modelCalls += 1;
+          throw new Error("model must not run");
+        },
+        calibrationSet: JSON.parse(
+          readFileSync(
+            path.join(root, "docs/evals/review-skill-judge-calibration.json"),
+            "utf8",
+          ),
+        ),
+      }),
+      /plan cells do not match the frozen canary matrix/,
+    );
+    assert.equal(modelCalls, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("scorePlan resolves an automatic baseline by ledger append order", async () => {
   const root = makeRoot();
   try {

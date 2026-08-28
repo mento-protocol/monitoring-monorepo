@@ -1146,6 +1146,20 @@ export async function scorePlan({
   now = new Date(),
   write = true,
 }) {
+  // Refuse edits to the branch-owned plan before calibration or judge calls
+  // spend quota. Later evidence validation applies the same frozen matrix.
+  if (!Array.isArray(plan.cells)) {
+    throw new Error("plan carries no cells array");
+  }
+  if (!["full", "canary"].includes(plan.kind)) {
+    throw new Error(
+      `plan has no frozen ${String(plan.kind ?? "unknown")} matrix to score`,
+    );
+  }
+  const expectedCells = planCells({ contract, kind: plan.kind });
+  if (JSON.stringify(plan.cells) !== JSON.stringify(expectedCells)) {
+    throw new Error(`plan cells do not match the frozen ${plan.kind} matrix`);
+  }
   const baselineIsExplicit = baselineRow !== null;
   const baselineSelection = baselineIsExplicit ? "explicit" : "automatic";
   if (plan.baseline_selection !== baselineSelection) {
