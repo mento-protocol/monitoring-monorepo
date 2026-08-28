@@ -1,0 +1,70 @@
+{
+  "cell_id": "pr-1995-control-draw1",
+  "pr": 1995,
+  "condition": "control",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": null,
+  "claims": [
+    "`scripts/agent-quality-gate.test.sh:601` — the focus guard leaks under `--no-lock`: the condition checks only `AGENT_QUALITY_GATE_LOCK_HELD` and `GITHUB_ACTIONS`, so an exported `GATE_TEST_FOCUS` can shrink the gate's self-test",
+    "The comment above the guard, and `docs/notes/agent-quality-gate-mechanics.md:1143-1147`, claim `AGENT_QUALITY_GATE_LOCK_HELD` is carried by \"any command a real gate run spawns\" so \"an exported focus cannot shrink the gate's self-test\" — that is not true; the doc bullet needs the same correction",
+    "With `--no-lock` or `AGENT_QUALITY_GATE_LOCK=0`, `acquire_gate_run_lock` returns at `scripts/agent-quality-gate.sh:1616-1618` so it never reaches the only `export AGENT_QUALITY_GATE_LOCK_HELD` at `scripts/agent-quality-gate.sh:1143`, and the gate reports its self-test green after running one family out of eleven",
+    "Tabs in the focus list are not stripped (`${req// /}` only handles spaces)",
+    "The partition check only covers the region between the markers, so a test added to the prelude (before line 655) runs in *every* focused mode uncaught",
+    "`.claude/settings.json:31-32` allowlists `Bash(bash scripts/agent-quality-gate.test.sh:*)`, which won't prefix-match the documented `GATE_TEST_FOCUS=… bash scripts/…` form — agents will hit a prompt on the invocation the doc tells them to use (and adding it means updating the pin in `scripts/context/check-settings-contract.mjs:74-75`)"
+  ],
+  "matched_ids": [
+    3830042123
+  ],
+  "judge_reasoning": {
+    "3829986398": "Review never discusses the abort trap expanding an unset output_file under set -u; its only output_file mention is about family isolation ordering.",
+    "3829986403": "No mention that the partition validator tolerates multiple dispatch_gate_test_families calls; review only lists the failure modes it injected, none about duplicate dispatch.",
+    "3830003055": "No mention that a zero-dispatch (deleted call) still passes the structural check; the review's minor note is about the prelude region, a different gap.",
+    "3830042123": "Main finding: the focus guard checks AGENT_QUALITY_GATE_LOCK_HELD which is never exported under --no-lock/AGENT_QUALITY_GATE_LOCK=0, letting an exported GATE_TEST_FOCUS shrink the gate self-test — same defect.",
+    "3830042128": "Review flags the .claude/settings.json allowlist prefix and its check-settings-contract.mjs pin, not the unregistered hard-coded self-test path pin in the fallback.",
+    "3830695396": "No comment on the doc's 'is set' vs 'is non-empty' wording or 'reds the suite'; its doc criticism is about the lock-held claim only."
+  },
+  "novel": {
+    "claims": 6,
+    "novelReal": 1,
+    "novelWrong": 0,
+    "novelVague": 2,
+    "restatedKnown": 3,
+    "alreadyMatched": 1,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "Verified the guard at scripts/agent-quality-gate.test.sh:601 only tests AGENT_QUALITY_GATE_LOCK_HELD/GITHUB_ACTIONS — this is the already-known 'Reject focus during lock-free gate runs' defect"
+      },
+      "2": {
+        "class": "known",
+        "why": "The doc bullet at docs/notes/agent-quality-gate-mechanics.md:1143-1146 and the comment at test.sh:595-597 state the same false premise; it is the doc-side restatement of the known lock-free focus defect"
+      },
+      "3": {
+        "class": "known",
+        "why": "Confirmed acquire_gate_run_lock returns at agent-quality-gate.sh:1615-1617 (case gate_lock_enabled 0|false|no) before the sole export at :1143 — same known lock-free focus defect"
+      },
+      "4": {
+        "class": "vague",
+        "why": "True that line 612/632 use ${req// /} and IFS=',' leaves tabs, but a tabbed entry falls into the unknown-family branch and exits 2 loudly — a nit with no silent failure"
+      },
+      "5": {
+        "class": "vague",
+        "why": "awk skips everything with body==0 before line 656's start marker, but the prelude (lines 1-654) contains only helper/function definitions today — a hypothetical hardening gap, not a present defect"
+      },
+      "6": {
+        "class": "real",
+        "why": ".claude/settings.json:31-32 allowlists 'Bash(bash scripts/agent-quality-gate.test.sh:*)' while the doc at md:1119-1120 documents 'GATE_TEST_FOCUS=… bash scripts/…', which cannot prefix-match; the pin at check-settings-contract.mjs:74-75 would also need updating"
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 700,
+  "usd": 4.2019234999999995,
+  "scoring_usd": 0.808968
+}

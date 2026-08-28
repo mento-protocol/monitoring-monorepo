@@ -1,0 +1,131 @@
+{
+  "cell_id": "pr-1999-replay-draw1",
+  "pr": 1999,
+  "condition": "replay",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "Required CI job `Test Peg rule definitions` fails — `alerts/rules/peg-message-templates.tf:13-15` the new title template contains neither `Annotations.summary` nor `Annotations.resolved_summary`; `alerts/rules/peg-rule-definitions.tftest.hcl:68-69` still asserts both are present",
+    "`Error → Alerting` now discards the breach's measured cause and the clear reports the wrong magnitude — `peg-alert-events.ts:109-115` returns `error-recovered-alerting`, which `isOpening` (line 318) treats as a closing transition on the error lane, so the alert lane never opens; the later `Alerting → Normal` is orphaned into `unpairedCleared`",
+    "After a datasource blip during a live breach, Recent alerts reports the deviation as 5 bps instead of the 31 bps that actually fired, and drops the duration",
+    "Canonical runbook now contradicts shipped behaviour — `docs/notes/peg-monitoring.md:118-119` \"Slack titles use the severity icon plus that summary\" but titles are now icon-only",
+    "`docs/notes/peg-monitoring.md:132-133` says the history backend \"does not read Pending or canceled transitions\" and reads only fired and resolved transitions, but it now also reads `Error` and `Error →` recoveries; reversing that contract without amending the sentence leaves operators following the previous decision",
+    "`Alerting → Error → Normal` leaves the alert cycle open forever — `peg-alert-events.ts:344-352` closes only the error lane, so the panel simultaneously says monitoring recovered and the breach is live when Grafana is Normal",
+    "`Error → Pending` is neither queried nor classified — `peg-alert-events.ts:109-115` returns `null` for it and `route.ts:51-54` only derives `previous=Error&current=Normal`, so the `Grafana could not evaluate…` entry never gets a recovery",
+    "Source-less rules are described as price-source rules — `peg-alert-events.ts:230-234` → `pegAlertSourceName(\"\")` returns `\"Price source\"` (`peg-alert-copy.ts:47-49`) for structural and heartbeat rules where `source = \"\"`",
+    "Query fan-out doubled back to four, and `Promise.all` makes each one fatal — `route.ts:63-64` + `115-122`: any single rejection → 502 for the whole endpoint, so an Error-query hiccup now blanks the breach history that used to render fine",
+    "Peak read budget also goes 2 × 4 MB → 4 × 4 MB",
+    "This may reintroduce the outage that #1875 fixed when it cut this exact fan-out from four to two under the title \"restore alert history availability\"",
+    "Three fault tests now pass through a path that cannot occur in production — `route.test.ts:819, 832, 846` `.mockResolvedValue(json(stateFrame([])))` evaluates `json(...)` once so all three concurrent calls share one `Response`; `readBoundedGrafanaResponse` (`grafana-read.ts:65`) locks the stream and the second and third calls throw `TypeError`, so every one of these tests yields 502 whether or not the guards work",
+    "`recent-alerts.test.tsx:193` — `not.toContain(\"sell price is below peg\")` is vacuous; no production explanation emits that string",
+    "`alert-rules-lint.test.mjs:1215-1220` — the `indexOf` slice and the new link assertions search the whole file rather than the message resource; brittle",
+    "`https://monitoring.mento.org/peg-monitoring` is hardcoded six times in `peg-message-templates.tf:29,46`; a local would be tidier",
+    "Monitoring-failure entries compete for the same `PEG_ALERTS_MAX_EVENTS = 4` slots as breaches (`route.ts:22`), so a flapping datasource can push real peg breaches off Recent alerts entirely"
+  ],
+  "matched_ids": [
+    3830366234,
+    3830366243,
+    3830366247,
+    3830366547,
+    3830366556,
+    3830371307,
+    3830371315,
+    3830371325,
+    3830416461
+  ],
+  "judge_reasoning": {
+    "3830366234": "Review finding #1 reports the stale tftest.hcl:68-69 assertion requiring summary/resolved_summary against the icon-only title, with a reproduced failing terraform test.",
+    "3830366243": "Review finding #3 flags docs/notes/peg-monitoring.md:118-119 saying Slack titles use icon plus summary, contradicting the icon-only title.",
+    "3830366247": "Review finding #5 states Error → Pending is neither classified nor queried (route.ts only derives previous=Error&current=Normal), for rules with nonzero for_duration.",
+    "3830366547": "Review finding #4 describes Alerting → Error → Normal closing only the error lane, leaving the raise open so the panel shows an active breach while Grafana is Normal.",
+    "3830366556": "Review finding #5 also covers the orphaned error cycle: the 'could not evaluate' entry never gets a recovery when evaluation resumes into Pending.",
+    "3830371307": "Nits bullet on alert-rules-lint.test.mjs:1215-1220 names both sub-problems: the unvalidated indexOf slice and link assertions searching the whole file instead of the message resource.",
+    "3830371315": "Review finding #8 identifies mockResolvedValue sharing one consumable Response across concurrent calls, locking the stream and yielding 502 in three route tests.",
+    "3830371325": "Same error-recovered-alerting/pairing defect at peg-alert-events.ts:352, covered by review findings #2 and #4 (isOpening treats it as closing on the error lane; alert lane never opens/closes).",
+    "3830416461": "Review finding #6 shows pegAlertSourceName(\"\") returns 'Price source' for structural/heartbeat rules with source = \"\", mislabeling evaluation failures."
+  },
+  "novel": {
+    "claims": 16,
+    "novelReal": 5,
+    "novelWrong": 0,
+    "novelVague": 4,
+    "restatedKnown": 7,
+    "alreadyMatched": 9,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "tftest.hcl:68-69 still asserts $alert.Annotations.summary/resolved_summary while the new title template is icon-only — matches known 'stale Terraform title assertion' (peg-message-templates.tf:14)"
+      },
+      "2": {
+        "class": "real",
+        "why": "transitionKind (l.108) maps Error→Alerting to error-recovered-alerting, cycleKey puts it on the ':error' lane and isOpening (l.318) excludes it, so a later Alerting→Normal finds no open ':alert' entry and falls into unpairedCleared (l.346); previously that line was 'raised'"
+      },
+      "3": {
+        "class": "real",
+        "why": "same defect's symptom: the orphaned clear is phrased with raised=undefined, so evidence=the Normal line (downsideCause reads evidence.values.A, peg-alert-copy.ts:203-211) and the 'lasted …' part is skipped (peg-alert-events.ts:271)"
+      },
+      "4": {
+        "class": "known",
+        "why": "docs/notes/peg-monitoring.md:118 'Slack titles use the severity icon plus that summary' vs icon-only template — matches known 'Keep the Peg runbook aligned with the new title'"
+      },
+      "5": {
+        "class": "real",
+        "why": "docs/notes/peg-monitoring.md:132-133 (written by #1875) states the backend 'reads only fired and resolved transitions'; route.ts:43-56 now also queries current=Error and previous=Error and the doc is untouched in this diff"
+      },
+      "6": {
+        "class": "known",
+        "why": "Error→Normal closes only the ':error' key at l.352, leaving the ':alert' raise in `open` and re-emitted at l.356 — matches known 'Error recovery leaves breach active' (peg-alert-events.ts:352)"
+      },
+      "7": {
+        "class": "known",
+        "why": "transitionKind returns null for previous=Error/current=Pending and errorStateHistoryUrl only derives current=Error and previous=Error&current=Normal — matches known l.114/l.116 Pending-recovery findings"
+      },
+      "8": {
+        "class": "known",
+        "why": "evaluationCause l.230 calls pegAlertSourceName(evidence.labels.source) and peg-alert-copy.ts:47-49 returns 'Price source' for '' — matches known 'Label source-less evaluation failures by rule' (l.230)"
+      },
+      "9": {
+        "class": "real",
+        "why": "route.ts:63-65 wraps each URL pair in Promise.all and l.115-118 wraps both pairs again; 4 fetches, any rejection propagates to the catch at l.126 returning 502, so an Error-query failure now blanks breach history that used to render"
+      },
+      "10": {
+        "class": "vague",
+        "why": "factually true (PEG_ALERTS_MAX_STATE_RESPONSE_BYTES is applied per response in readBoundedGrafanaResponse, now 4 concurrent reads) but names no threshold breached or failure — a resource note supporting claim 9"
+      },
+      "11": {
+        "class": "vague",
+        "why": "56dff428 'fix(peg): restore alert history availability (#1875)' did cut the fan-out 4→2, but the claim is hedged ('may reintroduce') and identifies no concrete defect beyond claim 9"
+      },
+      "12": {
+        "class": "known",
+        "why": "route.test.ts:819/832/846 use mockResolvedValue with a single evaluated Response, and readBoundedGrafanaResponse calls body.getReader() per call — matches known route.test.ts:819"
+      },
+      "13": {
+        "class": "known",
+        "why": "recent-alerts.test.tsx:193 asserts absence of a string the failed-evaluation explanation never emits — matches known recent-alerts.test.tsx:193"
+      },
+      "14": {
+        "class": "vague",
+        "why": "verified the slice at 1215-1220 is correctly scoped and the link assertions do use whole-file `templates.includes`, but that is a test-precision preference with no demonstrated failure"
+      },
+      "15": {
+        "class": "vague",
+        "why": "style/tidiness note, and the count is off — the URL appears 4 times (2 per line at 29 and 46), not six"
+      },
+      "16": {
+        "class": "real",
+        "why": "combinePegAlertEvents sorts purely by `at` desc and slices to PEG_ALERTS_MAX_EVENTS=4 (route.ts:22), and error/recovery transitions now produce events in the same list, so repeated datasource errors evict breach rows"
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 523,
+  "usd": 4.437899500000001,
+  "scoring_usd": 2.0809615000000004
+}

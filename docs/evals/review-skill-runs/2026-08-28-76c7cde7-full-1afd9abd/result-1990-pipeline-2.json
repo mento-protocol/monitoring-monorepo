@@ -1,0 +1,80 @@
+{
+  "cell_id": "pr-1990-pipeline-draw2",
+  "pr": 1990,
+  "condition": "pipeline",
+  "draw": 2,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "The closeout-request signal has no author trust check — anyone can suppress the review: `classifyCodeRabbitReviewSignal` (`scripts/pr/pr-ready-state-core.mjs:434-443` and `:772-782`) scans every issue comment for `@coderabbitai review` + the head marker and never looks at the author, so a drive-by outsider comment or a pasted/quoted template permanently suppresses the exact-head CodeRabbit review while babysit signals all-clear",
+    "The canonical JSON contract block was not updated — `docs/notes/pr-ready-state.md:276-297` and `:305` still list four gates and a bare `\"codexReviewSignal\"`; the new `gates.codeRabbitReviewSignal` and top-level `codeRabbitReviewSignal` are absent",
+    "`pr-ready-state-core.mjs` crosses soft cap → near hard cap: the reporter now returns `961 | 1077 | +84 | near hard cap` against the checked-in baseline `888 | 993 | 0 | soft cap` at `docs/notes/file-size-watch.md:53`",
+    "The rewritten config test asserts nothing new — `scripts/coderabbit-config.test.mjs:122-124` compares a literal against a literal already covered by the `deepEqual` pin at `:95-97`, replacing a version that encoded an actual policy invariant (`> 0 && <= 2`)",
+    "Fail-open when head info is absent: with both `currentHeadOid` and `headUpdatedAt` unset, `isCurrentReviewSignal` (`:657-658`) falls through and any run-marked CodeRabbit review at any commit classifies as `reviewed`, while `docs/notes/pr-ready-state.md:353` states the stricter contract unconditionally",
+    "Nothing in this change has been validated against a real CodeRabbit payload — `CODERABBIT_REVIEW_RUN_MARKER` (`:4`) requires the literal `**Run ID**: `…`` in a PR review body and the tests construct that body themselves (`scripts/pr/pr-ready-state.test.mjs:2226-2229`), so if CodeRabbit reports completions as a top-level issue comment or the literal differs, `reviewed` is unreachable and every closeout posts a request",
+    "Duplicate suppression is best-effort, not atomic — the marker is read-then-write, so two concurrent watchers can both observe `missing` and both post",
+    "`scripts/coderabbit-config.test.mjs` could not be run because `js-yaml` is declared (`package.json:155`) but not installed, so the yaml pin is unverified by execution"
+  ],
+  "matched_ids": [
+    3829654081,
+    3829659544,
+    3829659550
+  ],
+  "judge_reasoning": {
+    "3829654081": "Item #3 reports pr-ready-state-core.mjs growing past the soft cap into near-hard-cap tier with the same measured numbers (961/1077), same underlying defect though downgraded to non-blocking.",
+    "3829659544": "Item #2 states the canonical 'Expected top-level fields' JSON sample in docs/notes/pr-ready-state.md was not updated with gates.codeRabbitReviewSignal — same defect.",
+    "3829659546": "No mention anywhere of the ordering/sequence of the CodeRabbit closeout rule relative to the feedback-state/ready-state projection pair across the workflow and ship mirrors.",
+    "3829659550": "Item #5 'Fail-open when head info is absent' identifies that without currentHeadOid the classifier falls back and returns reviewed without an exact head match, violating the stricter documented contract."
+  },
+  "novel": {
+    "claims": 8,
+    "novelReal": 3,
+    "novelWrong": 0,
+    "novelVague": 3,
+    "restatedKnown": 2,
+    "alreadyMatched": 3,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "classifyCodeRabbitReviewSignal (core.mjs:772-784) and isCodeRabbitFinalHeadReviewRequestBody (:434-443) indeed ignore comment author, but this is the known 'Trust only authorized closeout requests' / 'Authenticate closeout markers in the cloud loop' defect"
+      },
+      "2": {
+        "class": "real",
+        "why": "docs/notes/pr-ready-state.md:276-298 lists only codexDescriptionApproval/codexReviewSignal/reviewCommentReplies/reviewThreads and :305 only top-level codexReviewSignal, while core.mjs:1008 and :1068 now emit gates.codeRabbitReviewSignal and a top-level codeRabbitReviewSignal"
+      },
+      "3": {
+        "class": "known",
+        "why": "reporter output is exactly '961 | 1077 | +84 | near hard cap' vs the checked-in '888 | 993 | 0 | soft cap' row, but this is the same file-growth issue as the known 'Split the growing ready-state core' at core.mjs:750"
+      },
+      "4": {
+        "class": "real",
+        "why": "coderabbit-config.test.mjs:121-125 asserts EXPECTED_CONFIG's own literal 5 against 5 — already pinned by the deepEqual at :95-97 — replacing the removed `> 0 && <= 2` policy bound; the assertion can never fail independently"
+      },
+      "5": {
+        "class": "real",
+        "why": "isCurrentReviewSignal (:656-662) falls back to isCurrentSignal(submittedAt, headUpdatedAt), and isCurrentSignal (:481-484) returns true when lowerBound is null, so with both unset any run-marked review classifies 'reviewed', contradicting docs :353's unconditional exact-head contract"
+      },
+      "6": {
+        "class": "vague",
+        "why": "the marker regex at core.mjs:4 and the self-constructed fixture at pr-ready-state.test.mjs:2226-2229 exist as described, but the claim only hypothesizes ('if the literal differs') without naming a verified mismatch against real CodeRabbit output"
+      },
+      "7": {
+        "class": "vague",
+        "why": "generic read-then-write race assertion about the head marker with no concrete code site or realistic failure scenario in this comment-polling workflow"
+      },
+      "8": {
+        "class": "vague",
+        "why": "js-yaml is at package.json:155 and node_modules is entirely absent (no install in this checkout) — an environment/tooling note about the reviewer's inability to run tests, not a defect introduced by the change"
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 1292,
+  "usd": 2.950403,
+  "scoring_usd": 1.1965515
+}

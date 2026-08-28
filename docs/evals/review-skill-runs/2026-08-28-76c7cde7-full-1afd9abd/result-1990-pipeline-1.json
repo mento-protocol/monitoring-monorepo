@@ -1,0 +1,89 @@
+{
+  "cell_id": "pr-1990-pipeline-draw1",
+  "pr": 1990,
+  "condition": "pipeline",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "Finding 1: `reviewed` state may be unreachable — `scripts/pr/pr-ready-state-core.mjs:759-770` gives `reviewed` exactly one route: a CodeRabbit review record whose body matches `**Run ID**` and whose commit oid equals the head, both resting on unverified assumptions",
+    "1(a): the clean-run completion text (`\"No actionable comments were generated in the recent review. 🎉\"`) appears in the top-level walkthrough issue comment which carries no Run ID, so the `**Run ID**` body match won't fire for clean runs (`pr-feedback-state.test.mjs:3355-3373`)",
+    "1(a): the new issue-comment loop at `pr-ready-state-core.mjs:772-784` only matches the agent's own request marker; it never inspects CodeRabbit-authored comments",
+    "1(b): `isCurrentReviewSignal` (`:657-658`) takes the oid branch whenever `currentHeadOid` is set, and it always is (`:875`); if gh's `reviews` field carries no commit, `reviewCommitOid` returns null and `reviewed` is unreachable whatever the body says",
+    "Consequence of finding 1: every PR reads `stale`/`missing`, and the closeout rule posts `@coderabbitai review` on PRs CodeRabbit already reviewed cleanly — spending the Pro+ ladder round the ADR change exists to save",
+    "Finding 2: the request marker is accepted from any author — `scripts/pr/pr-ready-state-core.mjs:772-784` has no author or association check, unlike `parseReadinessOverrideComment` (`:523-556`) and `issue-board-backfill.mjs:90`; anyone who copies the public head SHA into the marker flips the state to `requested`, and the runbook then forbids the authorized request for that head, silently skipping an advisory review",
+    "Finding 3: watchlist drift — `scripts/pr/pr-ready-state-core.mjs` goes 889 → 961 rough lines (998 → 1,077 raw) while `docs/notes/file-size-watch.md:53` still records `888 | 993 | soft cap`, and policy at `docs/pr-checklists/recurring-review-patterns.md:191-194` says don't append to a file already drifting up",
+    "Finding 4: documented JSON sample now incomplete — `docs/notes/pr-ready-state.md:275-296` still shows four gates while the same file's new prose (`:111-127`, `:351-356`) says the projection exposes `codeRabbitReviewSignal`",
+    "`scripts/coderabbit-config.test.mjs` could not run because `js-yaml` is not installed, so the config pin is unverified coverage",
+    "The two passing suites run over hand-written fixtures that encode the very assumptions finding 1 questions, so green is not evidence the classifier works against real CodeRabbit output"
+  ],
+  "matched_ids": [
+    3829654081,
+    3829659544
+  ],
+  "judge_reasoning": {
+    "3829654081": "Finding 3 reports the same growth (889→961 rough, 998→1,077 raw) in pr-ready-state-core.mjs and cites the recurring-review policy against appending to an already-oversized file.",
+    "3829659544": "Finding 4 flags that the documented gates JSON sample in docs/notes/pr-ready-state.md still shows four gates and omits codeRabbitReviewSignal.",
+    "3829659546": "The review never discusses the ordering of the CodeRabbit closeout rule relative to the feedback-state/ready-state projection pair across the workflow and ship mirrors.",
+    "3829659550": "Finding 1(b) argues the opposite (currentHeadOid is always set so the oid branch always wins); nothing in the review flags the null-currentHeadOid fallback to review timestamps or acceptance of any marked request as unsafe."
+  },
+  "novel": {
+    "claims": 10,
+    "novelReal": 1,
+    "novelWrong": 5,
+    "novelVague": 2,
+    "restatedKnown": 2,
+    "alreadyMatched": 2,
+    "verdicts": {
+      "1": {
+        "class": "wrong",
+        "why": "Both stated legs fail: `gh pr view --json reviews` does emit `commit{oid}` (confirmed in the gh 2.96 GraphQL fragment: `reviews(first:100){nodes{author,authorAssociation,submittedAt,body,state,commit{oid},...}}`), and CodeRabbit run bodies carry `**Run ID**`; `reviewed` is reachable via pr-ready-state-core.mjs:759-770 as the new tests at pr-ready-state.test.mjs:2223-2270 exercise."
+      },
+      "2": {
+        "class": "wrong",
+        "why": "pr-feedback-state.test.mjs:3359-3372 only shows the walkthrough issue comment carrying the 🎉 line; it does not show that a clean run posts no review record — the real review body shape recorded at pr-ready-state.test.mjs:2226-2229 pairs `Actionable comments posted: N` with `**Run ID**`, and the classifier reads reviews, not the walkthrough."
+      },
+      "3": {
+        "class": "vague",
+        "why": "The loop at :772-784 does only match the closeout marker, which is its stated purpose (docs/notes/pr-ready-state.md:113-127); the claim names no failing case of its own once the reviews-array route is shown to work."
+      },
+      "4": {
+        "class": "wrong",
+        "why": "Premise disproved: gh's `reviews` field includes `commit{oid}` (verified in the gh binary's GraphQL query), so `reviewCommitOid` (:647-655) returns the oid and the :658 branch resolves; `currentHeadOid` at :875 is also `?? null`, not unconditionally set."
+      },
+      "5": {
+        "class": "wrong",
+        "why": "Follows only from claim 1, which is false — `reviewed` fires for a Run-ID review whose `commit.oid` equals `pr.headRefOid`, so PRs do not uniformly read stale/missing."
+      },
+      "6": {
+        "class": "known",
+        "why": "No author/association check on the marker at :772-784 — this is the already-known 'Trust only authorized closeout requests' / 'Authenticate closeout markers in the cloud loop' pair."
+      },
+      "7": {
+        "class": "known",
+        "why": "pr-ready-state-core.mjs grew 998→1077 raw lines while docs/notes/file-size-watch.md:53 still says 888|993, but the substance is the already-known 'Split the growing ready-state core' finding."
+      },
+      "8": {
+        "class": "real",
+        "why": "docs/notes/pr-ready-state.md:222 labels the block 'Expected top-level fields', yet its `gates` sample (:275-296) and top-level fields (:305) still omit `codeRabbitReviewSignal` that the same file documents at :111-127 and :351-356 and that the code emits at pr-ready-state-core.mjs:1008/1068; distinct from the known :369/:408 anchors."
+      },
+      "9": {
+        "class": "wrong",
+        "why": "js-yaml is a declared dependency (package.json:155, `js-yaml: 4.3.1`); the checkout simply has no node_modules at all, so this is a reviewer-environment artifact, not a defect in the change."
+      },
+      "10": {
+        "class": "vague",
+        "why": "Generic meta-commentary about fixture-based tests; names no concrete incorrect fixture or missing case beyond the already-refuted finding 1."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 1428,
+  "usd": 3.2607350000000004,
+  "scoring_usd": 1.8657525000000001
+}

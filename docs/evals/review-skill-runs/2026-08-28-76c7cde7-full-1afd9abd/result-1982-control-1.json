@@ -1,0 +1,76 @@
+{
+  "cell_id": "pr-1982-control-draw1",
+  "pr": 1982,
+  "condition": "control",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": null,
+  "claims": [
+    "Confirmed bug: a trailing newline kills the whole claim comment — `scripts/pr/issue-board-backfill.mjs:68-71` (`isBoundedCloudHandoff`), reached from line 112: the trailer check requires `line.length > 0` for every line, but a body ending in `\\n` produces a final `\"\"` element that lands inside `lines.slice(index)` so `.every()` fails, `parseClaimComment` returns `null`, and `backfillIssue` dies with `Issue #N has no valid trusted agent claim comment`",
+    "The blank-skipping loop at line 111 only advances `index` to the first trailer line — it never trims trailing blanks",
+    "A blank line between trailer paragraphs is rejected (`2-para trailer : REJECTED`) — the blank-line-inside-trailer rejection is the same root cause and worth deciding on deliberately; a single-blank-line separator is a normal way to write that sentence",
+    "The test fixture at `scripts/pr/agent-issue-board.test.mjs:568-570` appends the trailer with no trailing newline and no blank separator, so the suite never covers it",
+    "`Branch` is mandatory in the parser but optional in the producer — `scripts/pr/issue-board-backfill.mjs:115,119`: `buildClaimComment` (`issue-board-commands.mjs:74`) only emits `Branch:` when `metadata.branch` is truthy and `git branch --show-current` returns empty on a detached HEAD, so `parseClaimComment` rejects the comment outright rather than backfilling the three fields it can recover",
+    "A branchless claim (including one made from the cloud before a branch exists) is permanently unrecoverable, with an error message that says the comment is invalid rather than that Branch is missing",
+    "`isBackfillable` is a byte-for-byte duplicate of `isReleasable` — `scripts/pr/issue-board-state.mjs:99-109` vs `122-132`, identical predicate with only local variable names differing, so two copies must stay in sync"
+  ],
+  "matched_ids": [
+    3827636772,
+    3827655684,
+    3827663924
+  ],
+  "judge_reasoning": {
+    "3827636772": "Section 2 states Branch is mandatory in parseClaimComment but optional in buildClaimComment (detached HEAD → empty git branch --show-current), making branchless claims unrecoverable — same defect.",
+    "3827647420": "No mention of re-validating the claim during the write batch or the race with a competing newer MCP claim comment; review only notes buildBackfillPlan throws before writes.",
+    "3827655676": "No mention of the docs/notes/github-tooling-surfaces.md formatting (broken inline code span / list indentation); doc is cited only as evidence for the trailer path.",
+    "3827655684": "Section 1 identifies isBoundedCloudHandoff rejecting the trailing \"\" element from split(\"\\n\"), with the blank-skip loop at line 111 not trimming trailing blanks, and proposes trimming — same defect.",
+    "3827663924": "Same trailing-newline-in-handoff parse failure causing 'has no valid trusted agent claim comment'; review also notes non-trailer comments are unaffected because blanks are skipped."
+  },
+  "novel": {
+    "claims": 7,
+    "novelReal": 1,
+    "novelWrong": 1,
+    "novelVague": 0,
+    "restatedKnown": 5,
+    "alreadyMatched": 3,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "Ran the parser: base+\"\\n\" alone parses OK (line 111 trims trailing blanks); only handoff-text+trailing-newline is rejected, which is the known 'Handoff trailing newline rejects claims' item."
+      },
+      "2": {
+        "class": "wrong",
+        "why": "issue-board-backfill.mjs:103 is the loop that advances to the first trailer line; :111 is a second blank-skip loop after the trailer, and empirically a body ending in \\n (no handoff) still parses OK, so trailing blanks are trimmed."
+      },
+      "3": {
+        "class": "known",
+        "why": "Verified a two-paragraph handoff is rejected, but the cause is the same `line.length > 0` check in isBoundedCloudHandoff (:68-75) as the already-known handoff/blank-line rejection."
+      },
+      "4": {
+        "class": "known",
+        "why": "The fixture/handoff test is at agent-issue-board.test.mjs:588-590 (not 568-570) and does append with no trailing newline; it's the test-gap corollary of the known trailing-newline defect, not an independent one."
+      },
+      "5": {
+        "class": "known",
+        "why": "Confirmed buildClaimComment (issue-board-commands.mjs:74) emits Branch conditionally while backfill.mjs:119 requires it — this is the known P1 at :119."
+      },
+      "6": {
+        "class": "known",
+        "why": "Same as claim 5: restates the known P1 'Comments claimed without a resolvable git branch can never be backfilled' at backfill.mjs:119."
+      },
+      "7": {
+        "class": "real",
+        "why": "issue-board-state.mjs:99-109 (new in this diff) is identical to pre-existing isReleasable at :122-132 apart from the hasActive/hasActiveClaim local names; genuine duplicated predicate not in the known list."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 314,
+  "usd": 1.9466259999999997,
+  "scoring_usd": 0.653215
+}

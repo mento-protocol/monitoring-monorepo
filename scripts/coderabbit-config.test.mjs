@@ -52,6 +52,11 @@ const EXPECTED_CONFIG = {
       "!alerts/infra/onchain-event-listeners/event-hashes.json",
       "!**/eslint-baseline.json",
       "!**/__snapshots__/**",
+      "!docs/evals/review-skill-runs/**",
+      "!docs/evals/review-skill-truth/**",
+      "!docs/evals/review-skill-finder-reports/**",
+      "!docs/evals/review-skill-ledger.jsonl",
+      "!docs/evals/review-skill-judge-calibration.json",
     ],
     auto_review: {
       enabled: true,

@@ -1,0 +1,94 @@
+{
+  "cell_id": "pr-1990-replay-draw2",
+  "pr": 1990,
+  "condition": "replay",
+  "draw": 2,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "Finding 1: `CODERABBIT_REVIEW_RUN_MARKER = /\\*\\*Run ID\\*\\*:\\s*`[^`\\r\\n]+`/i` (scripts/pr/pr-ready-state-core.mjs:4) hangs the `reviewed` state on an unverified external format contract — if the marker is absent or moves, `codeRabbitReviewSignal` can never reach `reviewed`, so every PR closeout posts one extra `@coderabbitai review` and net ladder spend goes up while the projection reports success",
+    "ADR 0066 records no dated \"checked on\" evidence line for the review-body format (unlike every other external claim), and the commit message is a bare subject line",
+    "No test can catch the `**Run ID**` marker contract: every test hand-writes the body (`pr-ready-state.test.mjs:2227,2274`)",
+    "Finding 2: `isCodeRabbitFinalHeadReviewRequestBody(body)` (scripts/pr/pr-ready-state-core.mjs:774) requires both `@coderabbitai review` and the generated marker, so a human's bare `@coderabbitai review` is invisible (returns `stale`) and the babysit closeout posts a duplicate `@coderabbitai review` for the same head",
+    "Finding 3: the canonical runbook and the skills that defer to it give opposite orderings — `docs/notes/pr-ready-state.md:399-409` makes closeout step 8 after the ready-state check, while `.claude/skills/babysit-pr/SKILL.md:295`, `.agents/…/SKILL.md:295`, `docs/notes/pr-operating-card.md:157` and `.claude/skills/ship/SKILL.md:214-216` say apply it before the final projection pair; two agents on the same PR post the request at different points, and the `pr-ready-state.md` order permits all-clear at step 10 without re-running feedback-state after the request",
+    "Finding 4: no author check on the request comment loop (scripts/pr/pr-ready-state-core.mjs:772-784) unlike the review loop's `CODERABBIT_AUTHORS` check at 761 — any comment from any account carrying the marker with the current head sets `requested` and suppresses the closeout (confirmed: a comment from `random-drive-by` returns `requested`)",
+    "Finding 5: sample JSON in the owning doc is stale — `docs/notes/pr-ready-state.md:276-297` (gates block) and `:305` (top-level `codexReviewSignal`) omit `codeRabbitReviewSignal` although the field is now unconditionally present",
+    "Finding 6: `scripts/coderabbit-config.test.mjs:124` lost its invariant — `assert.equal(…, 5)` is redundant with the `deepEqual` pin at line 61 and encodes nothing, so for this key the file is no longer the negative control its header claims",
+    "The 2→5 raise increases spend on both axes (more auto-reviews per PR plus a new manual closeout request), and the capacity numbers at ADR 0066:214-215 (4/hour, degradation past 90/week) were not recomputed against the 29-PR sample",
+    "The closeout isn't a wait point — `docs/notes/pr-ready-state.md:116-118` and step 9's optional-lag stance permit all-clear before the requested review returns, so on a fast PR the request buys nothing but spend",
+    "Latent pre-existing: `isCurrentReviewSignal` (658) compares review commit OIDs case-sensitively while the new marker path lowercases — an uppercase review OID yields `stale`"
+  ],
+  "matched_ids": [
+    3829659544,
+    3829659546
+  ],
+  "judge_reasoning": {
+    "3829654081": "The review never discusses file length, the 600-line cap, or splitting pr-ready-state-core.mjs; its scope note counts diff lines only.",
+    "3829659544": "Finding 5 states the sample JSON gates block at docs/notes/pr-ready-state.md omits codeRabbitReviewSignal though the field is documented and always emitted — same defect.",
+    "3829659546": "Finding 3 documents the contradictory ordering between pr-ready-state.md step 8 and the ship/babysit skills plus operating card, and recommends one canonical sequence — same defect.",
+    "3829659550": "The review's classifier findings concern a bare human request lacking the marker (finding 2) and a missing author check on the comment loop (finding 4); it never raises the currentHeadOid === null fallback to review timestamps / unconditional marked-request acceptance."
+  },
+  "novel": {
+    "claims": 11,
+    "novelReal": 1,
+    "novelWrong": 0,
+    "novelVague": 7,
+    "restatedKnown": 3,
+    "alreadyMatched": 2,
+    "verdicts": {
+      "1": {
+        "class": "vague",
+        "why": "Regex at pr-ready-state-core.mjs:4 exists as quoted, but the claim is a hedged 'if the external format is absent or moves' fragility argument; I cannot verify CodeRabbit's real review-body format offline, and the gate is optional (required:false), so no demonstrated defect."
+      },
+      "2": {
+        "class": "vague",
+        "why": "True that ADR 0066's Evidence section (lines 263-300) has dated lines only for pricing/pause-sample and none for the `**Run ID**` body format, and `git log -1` is a bare subject — but this is a documentation/commit-convention note naming no concrete failure."
+      },
+      "3": {
+        "class": "vague",
+        "why": "Tests do hand-write the body (pr-ready-state.test.mjs:2229, 2274), but that is inherent to unit-testing an external format; it names no defect beyond claim 1's speculation."
+      },
+      "4": {
+        "class": "real",
+        "why": "isCodeRabbitFinalHeadReviewRequestBody (core.mjs:774-441) requires the HTML marker, so a human's bare `@coderabbitai review` is skipped by the loop (state stays missing, not 'stale' as claimed) and the documented closeout then posts a second request — unlike classifyCodexReviewSignal, which accepts a bare `@codex review` bound by timestamp."
+      },
+      "5": {
+        "class": "known",
+        "why": "Restates the pr-ready-state.md step-8/step-10 ordering defect already listed as known at docs/notes/pr-ready-state.md:408 (Functional Correctness, Major); confirmed skills say 'before the final pair' while the runbook places it after step 7 and allows all-clear at 407-408."
+      },
+      "6": {
+        "class": "known",
+        "why": "The unauthenticated request-comment loop (core.mjs:772-784, no CODERABBIT_AUTHORS check unlike line 761) is the known 'Trust only authorized closeout requests' / 'Authenticate closeout markers' item (core.mjs:783, review-signals.mjs:226, cloud-watch-loop.md:53)."
+      },
+      "7": {
+        "class": "known",
+        "why": "Confirmed the sample JSON gates block (pr-ready-state.md:276-297) and top-level line 305 omit codeRabbitReviewSignal though summarizeReadyState always emits it — this is the known Data Integrity & Integration / Minor item in that file."
+      },
+      "8": {
+        "class": "vague",
+        "why": "coderabbit-config.test.mjs:124 does tautologically assert EXPECTED_CONFIG's own line-61 value, but the exact-equality pin and the negative-control test (105-119) are unchanged and still catch any config weakening, so the claimed loss of protection is a style/redundancy note, not a defect."
+      },
+      "9": {
+        "class": "vague",
+        "why": "ADR 0066:213-221 does keep the 4/hour and 90/week numbers unchanged, but 'not recomputed against the 29-PR sample' asserts no concrete error or breached limit — a request for more analysis."
+      },
+      "10": {
+        "class": "vague",
+        "why": "Accurate description of intent (lines 123-128 keep CodeRabbit advisory and rerun feedback-state only if the review lands while watching, per ADR 0066), so this is disagreement with a deliberate advisory design, not a defect."
+      },
+      "11": {
+        "class": "vague",
+        "why": "isCurrentReviewSignal:658-659 does compare OIDs with `===` while the new marker path lowercases, but it is pre-existing (also used by the Codex path) and GitHub returns lowercase OIDs, so no realistic failure is demonstrated."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 450,
+  "usd": 2.9986240000000004,
+  "scoring_usd": 1.8340365
+}

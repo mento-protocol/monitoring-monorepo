@@ -1,0 +1,69 @@
+{
+  "cell_id": "pr-2001-pipeline-draw2",
+  "pr": 2001,
+  "condition": "pipeline",
+  "draw": 2,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "`isZeroWei` crashes the revenue page on any non-string field value — a regression this change introduces (`ui-dashboard/src/lib/canonical-revenue/daily-series.ts:67`): `.trim()` is called outside the try, so `null`/`undefined`/numeric values throw `TypeError` instead of degrading to the partial banner",
+    "The `try/catch` guards `BigInt(trimmed)`, which the regex has already guaranteed cannot throw — the protection sits on the safe operation while `.trim()` is left bare",
+    "`isZeroWei` newly reads `balanceAmount` and `principalAmount`, which no prior code path touched at all",
+    "Rows arrive unvalidated: `use-reserve-yield-history.ts:185` does a bare `requestWithTimeout<ReserveYieldHistoryResponse>` generic cast, and `pageRowsForResponse` (`:196`) pushes them straight through — the `string` typing is an assertion, not a runtime check",
+    "The throw escapes `buildCanonicalRevenue` inside the `useMemo` at `use-canonical-revenue.ts:53`, i.e. during render — the revenue page dies to the nearest error boundary rather than degrading to the partial banner",
+    "No test for the dormant → funded handoff: a wallet whose all-zero rows precede its first funded row now seeds `previousReserveTotalsBySource` with `0` (`daily-series.ts:204`) and nothing pins this sequence",
+    "Worth adding `null`/numeric cases to that existing `it.each` block (missing test coverage for non-string inputs to `isZeroWei`)"
+  ],
+  "matched_ids": [],
+  "judge_reasoning": {
+    "3830423746": "The review explicitly raises the negative-spike scenario in 'Considered and discarded' and concludes it cannot occur, so it rejects rather than identifies the defect.",
+    "3830513980": "No mention of tracked-wallet-to-tracked-wallet transfers, recordTransfer, or failing to subtract prior yield when a zero row empties a wallet; the only zero-row baseline discussion (dormant → funded) is judged correct."
+  },
+  "novel": {
+    "claims": 7,
+    "novelReal": 3,
+    "novelWrong": 0,
+    "novelVague": 4,
+    "restatedKnown": 0,
+    "alreadyMatched": 0,
+    "verdicts": {
+      "1": {
+        "class": "real",
+        "why": "daily-series.ts:67 calls value.trim() outside the try; base code (git show base) routed the same fields through numericTokenWei whose BigInt() is inside try/catch, so non-string values previously degraded to null — and reserve-yield-shared.ts:34 bigintField explicitly accepts number/bigint from this same Hasura source, so non-string is not merely hypothetical"
+      },
+      "2": {
+        "class": "real",
+        "why": "isZeroWei returns false unless /^-?\\d+$/ matches, so BigInt(trimmed) cannot throw — the try/catch at :68-71 is dead while the unguarded .trim() at :67 is the only throwing op"
+      },
+      "3": {
+        "class": "vague",
+        "why": "grep confirms balanceAmount/principalAmount only appeared in queries/reserve-yield.ts and generated types before, but the claim states a fact and names no concrete defect"
+      },
+      "4": {
+        "class": "vague",
+        "why": "use-reserve-yield-history.ts:186 does an unchecked generic requestWithTimeout and :196 pushes rows through as-is — true, but pre-existing to this change and no defect is asserted on its own"
+      },
+      "5": {
+        "class": "real",
+        "why": "use-canonical-revenue.ts:50-53 wraps buildCanonicalRevenue in useMemo with no try/catch, so the TypeError from claim 1 propagates during render instead of setting partialReasons"
+      },
+      "6": {
+        "class": "vague",
+        "why": "confirmed no test at canonical-revenue.test.ts covers a zero→funded wallet sequence, but the seeding of 0 at :204 yields the correct daily delta, so this is a coverage suggestion with no defect"
+      },
+      "7": {
+        "class": "vague",
+        "why": "the new it.each blocks (test lines 355, 382) only pass string overrides; adding null/numeric cases is a test suggestion, not itself a defect"
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 1365,
+  "usd": 2.4886884999999994,
+  "scoring_usd": 1.1814820000000001
+}
