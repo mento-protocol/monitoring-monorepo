@@ -181,17 +181,19 @@ export function CdpsPageClient() {
     );
   }
 
-  if (isLoadingWithoutData(isLoading, data)) {
-    return <CdpsPageSkeleton chainId={network.chainId} />;
-  }
   if (hasErrorWithoutData(error, data)) {
     return (
       <ErrorBox message={`Failed to load CDP markets — ${error.message}`} />
     );
   }
 
+  // The header and owner search render ONCE in this shared tree: an early
+  // skeleton return would remount them on the loading→loaded swap, dropping
+  // input focus mid-entry (the typed value survives via URL state; the DOM
+  // node and caret do not).
+  const marketsLoading = isLoadingWithoutData(isLoading, data);
   const collaterals = data?.LiquityCollateral ?? [];
-  if (collaterals.length === 0) {
+  if (!marketsLoading && collaterals.length === 0) {
     return <EmptyBox message="No CDP markets indexed yet." />;
   }
 
@@ -199,9 +201,54 @@ export function CdpsPageClient() {
     <div className="space-y-6">
       <CdpsHeader />
       <CdpOwnerSearchSection
-        collaterals={collaterals}
+        collaterals={marketsLoading ? undefined : collaterals}
         chainId={network.chainId}
       />
+      {marketsLoading ? (
+        <CdpsPageSkeletonContent />
+      ) : (
+        <CdpsPageLoadedContent
+          collaterals={collaterals}
+          instances={instances}
+          aggregatesByCollateral={aggregatesByCollateral}
+          queryTruncated={queryTruncated}
+          activityByInstance={activityByInstance}
+          totalActivity={totalActivity}
+          txCapped={txCapped}
+          txLoading={txLoading}
+          txHasError={txHasError}
+          chainId={network.chainId}
+        />
+      )}
+    </div>
+  );
+}
+
+function CdpsPageLoadedContent({
+  collaterals,
+  instances,
+  aggregatesByCollateral,
+  queryTruncated,
+  activityByInstance,
+  totalActivity,
+  txCapped,
+  txLoading,
+  txHasError,
+  chainId,
+}: {
+  collaterals: CdpCollateral[];
+  instances: Map<string, CdpInstance>;
+  aggregatesByCollateral: Map<string, CdpAggregates>;
+  queryTruncated: boolean;
+  activityByInstance: Map<string, CdpMarketActivity>;
+  totalActivity: CdpActivitySummary;
+  txCapped: boolean;
+  txLoading: boolean;
+  txHasError: boolean;
+  chainId: number;
+}) {
+  return (
+    <>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {collaterals.map((collateral) => (
           <CdpMarketCard
@@ -233,11 +280,8 @@ export function CdpsPageClient() {
         activityLoading={txLoading}
         activityHasError={txHasError}
       />
-      <CdpTransactionsSection
-        collaterals={collaterals}
-        chainId={network.chainId}
-      />
-    </div>
+      <CdpTransactionsSection collaterals={collaterals} chainId={chainId} />
+    </>
   );
 }
 
@@ -314,30 +358,27 @@ function CdpsHeader() {
 // activity digest, transactions table) under a single page-level live
 // region — nested skeleton pieces are `presentational` so they don't
 // announce independently.
-function CdpsPageSkeleton({ chainId }: { chainId: number }) {
-  // The header and the interactive owner search stay OUTSIDE the live
-  // region: announcing keystroke-driven search updates as "Loading CDP
-  // markets" changes would be wrong, and the search owns its own status
-  // semantics. Only the actual skeleton content is announced.
+/** Market-dependent skeleton content only. The header and the interactive
+ *  owner search render once in `CdpsPageClient`'s shared tree so their DOM
+ *  nodes (and input focus) survive the loading→loaded swap — and so
+ *  keystroke-driven search updates are never announced as "Loading CDP
+ *  markets" changes by this live region. */
+function CdpsPageSkeletonContent() {
   return (
-    <div className="space-y-6">
-      <CdpsHeader />
-      <CdpOwnerSearchSection collaterals={undefined} chainId={chainId} />
-      <div
-        className="space-y-6"
-        role="status"
-        aria-live="polite"
-        aria-label="Loading CDP markets"
-      >
-        <CdpMarketCardGridSkeleton />
-        <CdpActivityDigestSkeleton />
-        <section>
-          <h2 className="text-lg font-semibold text-white mb-3">
-            Recent CDP Transactions
-          </h2>
-          <CdpTransactionsBodySkeleton presentational />
-        </section>
-      </div>
+    <div
+      className="space-y-6"
+      role="status"
+      aria-live="polite"
+      aria-label="Loading CDP markets"
+    >
+      <CdpMarketCardGridSkeleton />
+      <CdpActivityDigestSkeleton />
+      <section>
+        <h2 className="text-lg font-semibold text-white mb-3">
+          Recent CDP Transactions
+        </h2>
+        <CdpTransactionsBodySkeleton presentational />
+      </section>
     </div>
   );
 }

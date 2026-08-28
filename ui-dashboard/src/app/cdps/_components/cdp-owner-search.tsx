@@ -39,7 +39,7 @@ import {
   type CdpOwnerTroveRow,
   type CdpTrovesByOwnerResponse,
 } from "../_lib/owner-search";
-import type { CdpCollateral } from "../_lib/types";
+import { CELO_MAINNET_CHAIN_ID, type CdpCollateral } from "../_lib/types";
 
 const CDP_OWNER_QUERY_PARAM = "owner";
 
@@ -145,7 +145,7 @@ export function CdpOwnerSearch({
   const validAddress = isValidOwnerSearchAddress(normalized)
     ? normalized
     : null;
-  const enabled = validAddress != null && chainId === 42220;
+  const enabled = validAddress != null && chainId === CELO_MAINNET_CHAIN_ID;
   const troves = useGQL<CdpTrovesByOwnerResponse>(
     enabled ? CDP_TROVES_BY_OWNER : null,
     enabled

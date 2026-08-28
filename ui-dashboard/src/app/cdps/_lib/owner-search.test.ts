@@ -54,6 +54,10 @@ describe("isValidOwnerSearchAddress", () => {
       isValidOwnerSearchAddress("cca0a99b94529493ddffe7c61a3ae454828cd3bb"),
     ).toBe(false);
   });
+
+  it("rejects the zero address — never-transferred troves hold it as previousOwner", () => {
+    expect(isValidOwnerSearchAddress(`0x${"0".repeat(40)}`)).toBe(false);
+  });
 });
 
 describe("paginateOwnerSearchRows", () => {

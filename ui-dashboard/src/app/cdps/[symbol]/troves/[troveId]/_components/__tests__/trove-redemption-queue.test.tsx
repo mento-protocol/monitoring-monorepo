@@ -187,6 +187,26 @@ describe("TroveRedemptionQueuePanel", () => {
     );
   });
 
+  it("does not claim first place when the lowest rung is shared — the tiebreak decides", () => {
+    render(
+      state({
+        model: readyModel({
+          rungs: [rung({ containsThisTrove: true, troveCount: 2 })],
+          thisTrove: {
+            position: 1,
+            rateLevels: 1,
+            rate: rateWei(50),
+            shieldDebt: "0",
+          },
+        }),
+      }),
+    );
+    expect(text()).not.toContain("it is redeemed first.");
+    expect(text()).toContain(
+      "order inside the level decided by the queue's tiebreak",
+    );
+  });
+
   it("states that the panel shows current state only — historical rank is not tracked", () => {
     render(state());
     expect(text()).toContain("Historical rank is not tracked");

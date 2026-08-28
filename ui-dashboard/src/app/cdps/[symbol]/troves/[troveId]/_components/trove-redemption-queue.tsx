@@ -45,10 +45,17 @@ function queueSummaryText(
   const thisTrove = model.thisTrove;
   if (thisTrove != null) {
     const rankLine = `Current rate ${formatInterestRate(thisTrove.rate)} — queue position #${thisTrove.position} of ${thisTrove.rateLevels} rate levels.`;
+    // "Redeemed first" is only certain when this trove is ALONE on the
+    // lowest rung: within a shared rate level the protocol's tiebreak
+    // decides the order, so a same-rate neighbor can still absorb first.
+    const rung = model.rungs.find((r) => r.containsThisTrove);
+    const sharesRung = (rung?.troveCount ?? 1) > 1;
     const shieldLine =
       BigInt(thisTrove.shieldDebt) > BigInt(0)
         ? `${formatTokenAmount(thisTrove.shieldDebt, debtSymbol)} of active debt at lower rates shields this trove today.`
-        : "No lower-rate active debt shields this trove — it is redeemed first.";
+        : sharesRung
+          ? "No lower-rate active debt shields this trove — its rate level is redeemed first, with order inside the level decided by the queue's tiebreak."
+          : "No lower-rate active debt shields this trove — it is redeemed first.";
     return `${rankLine} ${shieldLine}`;
   }
   if (troveStatus === "zombie") {

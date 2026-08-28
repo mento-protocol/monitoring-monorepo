@@ -43,8 +43,22 @@ function hasRedemptionHistory(c: TroveRedemptionCumulatives): boolean {
   );
 }
 
-function negated(value: string): string {
-  return (-BigInt(value)).toString();
+/** Zod validates these fields only as `string` — a hosted value that is not
+ *  BigInt-parseable must render as the unknown dash, never throw mid-render
+ *  (same guarded posture as `isPositiveWei`). */
+function parseWei(value: string): bigint | null {
+  try {
+    return BigInt(value);
+  } catch {
+    return null;
+  }
+}
+
+/** Renders a lifetime magnitude as its signed negative, "-18,450.82 GBPm"
+ *  style; "—" for a non-parseable value. */
+function formatNegatedWei(value: string, symbol: string): string {
+  const parsed = parseWei(value);
+  return parsed == null ? "—" : formatSignedWei((-parsed).toString(), symbol);
 }
 
 /** Credits and gains render with an explicit sign either way — a bare
@@ -52,7 +66,9 @@ function negated(value: string): string {
  *  used for non-negative-or-signed REAL amounts, so `formatTokenAmount`'s
  *  −1 sentinel rule cannot fire on the positive branch. */
 function formatSignedWithPlus(value: string, symbol: string): string {
-  return BigInt(value) < BigInt(0)
+  const parsed = parseWei(value);
+  if (parsed == null) return "—";
+  return parsed < BigInt(0)
     ? formatSignedWei(value, symbol)
     : `+${formatTokenAmount(value, symbol)}`;
 }
@@ -84,8 +100,11 @@ function mixedSplitSub(
   if (sums.rebalanceCount === 0 || sums.rebalanceCount === sums.count) {
     return null;
   }
-  const user = (BigInt(total) - BigInt(rebalance)).toString();
-  return `user ${formatSignedWei(negated(user), symbol)} · rebalance ${formatSignedWei(negated(rebalance), symbol)}`;
+  const totalParsed = parseWei(total);
+  const rebalanceParsed = parseWei(rebalance);
+  if (totalParsed == null || rebalanceParsed == null) return null;
+  const user = (totalParsed - rebalanceParsed).toString();
+  return `user ${formatNegatedWei(user, symbol)} · rebalance ${formatNegatedWei(rebalance, symbol)}`;
 }
 
 function ImpactStat({
@@ -135,12 +154,12 @@ function CumulativeFigures({
       />
       <ImpactStat
         label="Debt repaid"
-        value={formatSignedWei(negated(cumulatives.redeemedDebt), debtSymbol)}
+        value={formatNegatedWei(cumulatives.redeemedDebt, debtSymbol)}
         sub={debtSub}
       />
       <ImpactStat
         label="Collateral taken"
-        value={formatSignedWei(negated(cumulatives.redeemedColl), "USDm")}
+        value={formatNegatedWei(cumulatives.redeemedColl, "USDm")}
         sub={collSub}
       />
       <ImpactStat

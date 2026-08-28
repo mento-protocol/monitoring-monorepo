@@ -59,8 +59,14 @@ const OWNER_ADDRESS_PATTERN = /^0x[0-9a-f]{40}$/;
 /** True only for a full 20-byte hex address (already normalized). Partial
  *  input never fires the query — `Trove.owner` matching is exact `_eq`, so
  *  anything else can only return a misleading empty result. */
+const ZERO_ADDRESS = `0x${"0".repeat(40)}`;
+
 export function isValidOwnerSearchAddress(normalized: string): boolean {
-  return OWNER_ADDRESS_PATTERN.test(normalized);
+  // The zero address is syntactically valid but never a real owner: the
+  // indexer initializes `previousOwner` to it on never-transferred troves,
+  // so the `_or` lookup would present a capped chain-wide list of unrelated
+  // positions as this "owner's" troves.
+  return OWNER_ADDRESS_PATTERN.test(normalized) && normalized !== ZERO_ADDRESS;
 }
 
 export type OwnerSearchPage = {

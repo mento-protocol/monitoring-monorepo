@@ -325,6 +325,7 @@ function CenteredNote({ children }: { children: React.ReactNode }) {
 function TroveChartBody({
   rows,
   truncated,
+  anchored,
   isLoading,
   error,
   hasLoadedOnce,
@@ -335,6 +336,7 @@ function TroveChartBody({
 }: {
   rows: CdpTroveLedgerEventRow[];
   truncated: boolean;
+  anchored: boolean;
   isLoading: boolean;
   error: Error | undefined;
   hasLoadedOnce: boolean;
@@ -373,6 +375,22 @@ function TroveChartBody({
       >
         Chart suppressed — earliest history truncated, so a complete series
         cannot be drawn. The ledger below shows the most recent events.
+      </p>
+    );
+  }
+  if (!anchored) {
+    // The response caught the indexer between writing ledger rows and
+    // stamping the watermark: the snapshot may be missing (or prematurely
+    // carrying) the newest operation. Drawing it as a complete history
+    // would misstate the tail for one poll cycle; the next poll re-anchors.
+    return (
+      <p
+        role="status"
+        className="flex items-center justify-center px-4 text-center text-xs text-amber-400"
+        style={{ height: TROVE_CHART_HEIGHT_PX }}
+      >
+        Chart paused — the ledger snapshot is mid-update and refreshes with the
+        next poll.
       </p>
     );
   }
@@ -474,6 +492,7 @@ function TroveChartRangePills({
 export function TroveBalanceChart({
   rows,
   truncated,
+  anchored,
   debtSnapshotsComplete,
   isLoading,
   error,
@@ -483,6 +502,11 @@ export function TroveBalanceChart({
   /** Chronological (oldest-first) complete-ledger rows, already capped. */
   rows: CdpTroveLedgerEventRow[];
   truncated: boolean;
+  /** False when the response caught the indexer between writing ledger rows
+   *  and stamping the watermark — the snapshot may misstate the newest
+   *  operation, so the chart pauses until the next poll re-anchors (same
+   *  gate the interest estimates apply). */
+  anchored: boolean;
   debtSnapshotsComplete: boolean;
   isLoading: boolean;
   error: Error | undefined;
@@ -506,7 +530,7 @@ export function TroveBalanceChart({
       ),
     [series, range, debtSymbol],
   );
-  const shouldRenderPlot = rows.length > 0 && !truncated;
+  const shouldRenderPlot = rows.length > 0 && !truncated && anchored;
   const shouldMountPlot = useDeferredMount(
     "visible",
     containerRef,
@@ -521,7 +545,9 @@ export function TroveBalanceChart({
       ? "Collateral and debt chart: no ledger events indexed for this trove yet."
       : truncated
         ? "Collateral and debt chart suppressed: earliest history truncated."
-        : `Collateral and debt recorded over ${rows.length} ledger events, ${activeRangeLabel} range.`;
+        : !anchored
+          ? "Collateral and debt chart paused: the ledger snapshot is mid-update."
+          : `Collateral and debt recorded over ${rows.length} ledger events, ${activeRangeLabel} range.`;
 
   return (
     <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
@@ -547,6 +573,7 @@ export function TroveBalanceChart({
         <TroveChartBody
           rows={rows}
           truncated={truncated}
+          anchored={anchored}
           isLoading={isLoading}
           error={error}
           hasLoadedOnce={hasLoadedOnce}

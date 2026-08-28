@@ -553,6 +553,37 @@ describe("CdpsPageClient", () => {
     expect(loadedSectionCount).toBe(5);
   });
 
+  it("keeps the owner-search input node and its focus across the loading→loaded swap", () => {
+    mockUseGQL.mockImplementation((query: string | null) =>
+      query === CDP_MARKETS
+        ? { data: undefined, error: null, isLoading: true }
+        : { data: undefined, error: null, isLoading: false },
+    );
+    render(handle!, <CdpsPageClient />);
+    const input = handle!.container.querySelector<HTMLInputElement>(
+      'input[aria-label="Find troves by owner address"]',
+    );
+    expect(input).not.toBeNull();
+    act(() => input!.focus());
+    expect(document.activeElement).toBe(input);
+
+    mockUseGQL.mockImplementation((query: string | null) =>
+      query === CDP_MARKETS
+        ? { data: marketData(), error: null, isLoading: false }
+        : { data: undefined, error: null, isLoading: false },
+    );
+    render(handle!, <CdpsPageClient />);
+
+    // Same DOM node, still focused: a user typing an address mid-load never
+    // loses the caret when the markets resolve.
+    expect(
+      handle!.container.querySelector(
+        'input[aria-label="Find troves by owner address"]',
+      ),
+    ).toBe(input);
+    expect(document.activeElement).toBe(input);
+  });
+
   it("renders market cards with health, derived open troves, and transactions", () => {
     render(handle!, <CdpsPageClient />);
 

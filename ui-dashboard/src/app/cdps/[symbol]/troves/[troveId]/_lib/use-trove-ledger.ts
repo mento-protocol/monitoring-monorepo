@@ -120,7 +120,13 @@ export function useTroveLedger(troveEntityId: string | null): TroveLedgerState {
   // against them.
   const mutate: (() => Promise<unknown>) | undefined = ledger.mutate;
   const refetch = useCallback(async () => {
-    await mutate?.();
+    try {
+      await mutate?.();
+    } catch {
+      // Revalidation failures surface through the hook's `error` state; the
+      // refetch contract is resolve-always so callers' one-shot episode
+      // machines (use-trove-impact) always advance.
+    }
   }, [mutate]);
 
   const hasLoadedOnce = ledger.data != null;

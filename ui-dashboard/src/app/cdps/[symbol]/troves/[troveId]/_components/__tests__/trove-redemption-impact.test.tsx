@@ -353,8 +353,12 @@ describe("TroveRedemptionImpact", () => {
 
     const body = text();
     expect(body).toContain("Redemption impact");
-    // 5 hits, all via CDPLiquidityStrategy rebalancing.
-    expect(body).toContain("5");
+    // 5 hits, all via CDPLiquidityStrategy rebalancing. Scoped to the count
+    // cell — a bare toContain("5") is satisfied by any amount digit.
+    const countCell = Array.from(
+      handle!.container.querySelectorAll("div"),
+    ).find((node) => node.querySelector("p")?.textContent === "Redemptions");
+    expect(countCell?.textContent).toContain("Redemptions5");
     expect(body).toContain("all rebalancing");
     expect(body).toContain("-18,450.82 GBPm");
     expect(body).toContain("-25,163.91 USDm");

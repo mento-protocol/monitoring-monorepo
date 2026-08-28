@@ -16,6 +16,7 @@ import {
   CDP_TROVE_SCHEMA_FIELDS,
 } from "@/lib/queries";
 import {
+  CELO_MAINNET_CHAIN_ID,
   CDP_TROVE_OPEN_STATUSES,
   type CdpCollateral,
   type CdpInterestBatch,
@@ -50,8 +51,6 @@ import {
   TroveRedemptionImpact,
 } from "./trove-redemption-impact";
 import { TroveRedemptionQueuePanel } from "./trove-redemption-queue";
-
-const CELO_MAINNET_CHAIN_ID = 42220;
 
 type CdpMarketsResponse = {
   LiquityCollateral: CdpCollateral[];
@@ -537,6 +536,7 @@ function TroveEventHistory({
         <TroveBalanceChart
           rows={ledger.rows}
           truncated={ledger.truncated}
+          anchored={ledger.anchored}
           debtSnapshotsComplete={ledger.debtSnapshotsComplete}
           isLoading={ledger.isLoading}
           error={ledger.error}

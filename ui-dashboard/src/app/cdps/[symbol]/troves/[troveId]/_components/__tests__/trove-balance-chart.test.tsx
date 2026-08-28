@@ -83,6 +83,7 @@ function chartProps(overrides: Partial<ChartProps> = {}): ChartProps {
       }),
     ],
     truncated: false,
+    anchored: true,
     debtSnapshotsComplete: true,
     isLoading: false,
     error: undefined,
@@ -364,6 +365,20 @@ describe("TroveBalanceChart", () => {
     expect(
       status.some((text) =>
         text.includes("Chart suppressed — earliest history truncated"),
+      ),
+    ).toBe(true);
+  });
+
+  it("pauses the chart while the ledger snapshot is un-anchored", () => {
+    render(handle!, chartProps({ anchored: false }));
+
+    expect(handle!.container.querySelector('[data-testid="plot"]')).toBeNull();
+    const status = Array.from(
+      handle!.container.querySelectorAll('[role="status"]'),
+    ).map((node) => node.textContent ?? "");
+    expect(
+      status.some((text) =>
+        text.includes("Chart paused — the ledger snapshot is mid-update"),
       ),
     ).toBe(true);
   });
