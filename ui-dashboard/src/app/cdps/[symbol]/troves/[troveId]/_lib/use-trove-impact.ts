@@ -72,9 +72,21 @@ export function useTroveRedemptionImpact(
     if (!rawMismatch || episodeKey == null) return;
     if (inFlightEpisode.current === episodeKey) return;
     inFlightEpisode.current = episodeKey;
-    void refetch().then(() => {
-      setSettledEpisode(episodeKey);
-    });
+    void refetch()
+      // Defensive: SWR's bound mutate routes fetcher errors to the error
+      // channel and resolves, but a rejection would otherwise hang this
+      // episode in "unverified" forever — it still consumed the one
+      // attempt, so settle either way.
+      .catch(() => {})
+      .then(() => {
+        // A stale completion must not clobber a newer episode's settle:
+        // if fresher data started episode B while episode A's refetch was
+        // in flight, A's late resolve would otherwise flip B's warning
+        // back to "unverified" with no further refetch to re-settle it.
+        if (inFlightEpisode.current === episodeKey) {
+          setSettledEpisode(episodeKey);
+        }
+      });
   }, [rawMismatch, episodeKey, refetch]);
 
   // Display cumulatives: prefer the ledger response's same-snapshot copy;

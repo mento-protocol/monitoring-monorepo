@@ -291,7 +291,9 @@ function buildTroveChartModel(
         color: ICR_COLOR,
         yaxis: "y3",
         withMarkers: true,
-        hovertemplate: `%{y:,.1f}%<br>${hoverDate}<extra>ICR</extra>`,
+        // Literal percent must be %% in a Plotly hovertemplate — a lone %
+        // is a directive marker and can garble the suffix.
+        hovertemplate: `%{y:,.1f}%%<br>${hoverDate}<extra>ICR</extra>`,
       }),
     );
   }

@@ -479,6 +479,103 @@ describe("TroveRedemptionImpact", () => {
     expect(notices.some((t) => t.includes("reconciliation failed"))).toBe(true);
   });
 
+  it("settles the episode into the warning state even when the one refetch rejects", async () => {
+    const skewed = anchor({
+      lastLedgerBlock: "75796000",
+      lastLedgerLogIndex: 4,
+      ...TICKET_CUMULATIVES,
+      redemptionCount: 6,
+    });
+    const ledger = ticketLedgerState({
+      watermark: skewed,
+      cumulatives: skewed,
+      refetch: vi.fn().mockRejectedValue(new Error("network down")),
+    });
+    render({ ledger });
+
+    expect(ledger.refetch).toHaveBeenCalledTimes(1);
+    expect(text()).toContain("resumes once the ledger");
+
+    // The rejection consumed the episode's single attempt: the mismatch is
+    // persistent — never a hung "unverified", never a retry loop.
+    await act(async () => {});
+    render({ ledger });
+    expect(text()).toContain("Ledger reconciliation failed");
+    expect(ledger.refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a stale refetch completion from a superseded episode", async () => {
+    let resolveA: () => void = () => {};
+    let resolveB: () => void = () => {};
+    const refetch = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveA = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveB = resolve;
+          }),
+      );
+    const mismatchAnchor = (block: string, logIndex: number) =>
+      anchor({
+        lastLedgerBlock: block,
+        lastLedgerLogIndex: logIndex,
+        ...TICKET_CUMULATIVES,
+        redemptionCount: 6,
+      });
+    const episodeA = mismatchAnchor("75796000", 4);
+    const ledgerA = ticketLedgerState({
+      watermark: episodeA,
+      cumulatives: episodeA,
+      refetch,
+    });
+    render({ ledger: ledgerA });
+    expect(refetch).toHaveBeenCalledTimes(1);
+
+    // Fresh (still mismatching) data lands under a NEW watermark while A's
+    // refetch is in flight: a fresh episode with its own single attempt.
+    // The watermark must match the newest row for the check to run, so the
+    // new snapshot also carries one more (non-redemption) ledger row.
+    const episodeB = mismatchAnchor("75796100", 2);
+    const ledgerB = ticketLedgerState({
+      rows: [
+        ...ticketRows(),
+        ledgerRow({
+          id: "42220_75796100_2",
+          blockNumber: "75796100",
+          logIndex: 2,
+          timestamp: "1999999999",
+        }),
+      ],
+      watermark: episodeB,
+      cumulatives: episodeB,
+      refetch,
+    });
+    render({ ledger: ledgerB });
+    expect(refetch).toHaveBeenCalledTimes(2);
+
+    // B settles first: episode B's warning state renders.
+    await act(async () => {
+      resolveB();
+    });
+    render({ ledger: ledgerB });
+    expect(text()).toContain("Ledger reconciliation failed");
+
+    // A's late completion is stale and must not flip B back to
+    // "unverified" — no further refetch exists that could re-settle it.
+    await act(async () => {
+      resolveA();
+    });
+    render({ ledger: ledgerB });
+    expect(text()).toContain("Ledger reconciliation failed");
+    expect(refetch).toHaveBeenCalledTimes(2);
+  });
+
   it("suppresses the net-equity figure when any hit lacks its oracle price — never priced at current rates", () => {
     const rows = ticketRows().map((row) =>
       row.id === "42220_75781400_3" ? { ...row, redemptionPrice: null } : row,
