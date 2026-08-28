@@ -5,7 +5,7 @@
 // so the judge path is covered without spending a cent.
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   cpSync,
@@ -28,16 +28,21 @@ import {
   forbiddenShasForFixture,
   loadContract,
 } from "./review-eval-fixtures.mjs";
-import { readLedger, validateLedgerRow } from "./review-eval-ledger.mjs";
+import {
+  baselinePreflightProblems,
+  readLedger,
+  validateLedgerRow,
+} from "./review-eval-ledger.mjs";
 import {
   baseLedgerRows,
   parseArgs,
   planProvenanceProblems,
   runScheduleIssue,
 } from "./review-eval.mjs";
-import { verdict } from "./review-eval-report.mjs";
+import { baselineEligibility, verdict } from "./review-eval-report.mjs";
 import {
   assertAuthorizedFreshnessWorkflow,
+  baselinePlanIdentity,
   buildPlan,
   cellFingerprint,
   cellReuseDecision,
@@ -166,10 +171,10 @@ function makeRow({
         opportunities === 0 ? null : Number((hit / opportunities).toFixed(3)),
     };
   };
-  const conditionOver = (subset, draws) => ({
+  const conditionOver = (subset, draws, withFinder = true) => ({
     model: "claude-opus-5",
     effort: "high",
-    finder: "gpt-5.6-sol@high",
+    ...(withFinder ? { finder: "gpt-5.6-sol@high" } : {}),
     draws,
     recall: count(subset, draws),
     p1: count(
@@ -217,16 +222,128 @@ function makeRow({
       },
     },
     judge_calibration: { agreement: 40, total: 40 },
+    scoring_usd: 0,
     vs_baseline: null,
     detail_dir: "docs/evals/review-skill-runs/2026-09-08-deadbeef",
     notes: "",
   };
   if (fullMatrix) {
     built.conditions.replay = conditionOver(scorableIdsFor(gridPrs), 2);
-    built.conditions.control = conditionOver(ids, 1);
+    built.conditions.control = conditionOver(ids, 1, false);
   }
   built.verdict = statedVerdict ?? verdict({ contract, row: built }).verdict;
   return built;
+}
+
+/** Write the plan, scored cells, and calibration evidence for one test row. */
+function writeRowEvidence(root, row) {
+  const detail = path.join(root, row.detail_dir);
+  mkdirSync(detail, { recursive: true });
+  const cells = planCells({ contract, kind: row.kind });
+  const plan = {
+    contract_digest: row.contract_digest,
+    comparability_key: row.comparability_key,
+    kind: row.kind,
+    detail_dir: row.detail_dir,
+    baseline_selection: row.vs_baseline?.selection ?? "automatic",
+    baseline:
+      row.vs_baseline?.selection === "explicit"
+        ? {
+            executed_at: row.vs_baseline.baseline_executed_at,
+            contract_digest: row.contract_digest,
+            comparability_key: row.vs_baseline.baseline_comparability_key,
+            detail_dir: "external-baseline",
+            row_digest: "0".repeat(64),
+          }
+        : null,
+    inputs: row.inputs,
+    cells,
+  };
+  const fingerprint = cellFingerprint({ plan });
+  const completedCellIds = [];
+  for (const [name, condition] of Object.entries(row.conditions)) {
+    const idsByPr = new Map();
+    for (const id of Object.keys(condition.per_defect)) {
+      const fixture = contract.fixtures.find((candidate) =>
+        candidate.scorable_ids.map(String).includes(id),
+      );
+      if (!fixture) continue;
+      idsByPr.set(fixture.pr, [...(idsByPr.get(fixture.pr) ?? []), id]);
+    }
+    let first = true;
+    for (let draw = 1; draw <= condition.draws; draw += 1) {
+      for (const [pr, ids] of idsByPr) {
+        const matchedIds = ids.filter(
+          (id) => condition.per_defect[id][draw - 1] === 1,
+        );
+        const novelWrong = first ? condition.wrong_claims : 0;
+        const novelReal = first ? condition.novel_real : 0;
+        const claimCount = Math.max(1, novelWrong + novelReal);
+        const claims = Array.from(
+          { length: claimCount },
+          (_unused, index) => `claim ${index + 1}`,
+        );
+        const classes = [
+          ...Array(novelWrong).fill("wrong"),
+          ...Array(novelReal).fill("real"),
+          ...Array(claimCount - novelWrong - novelReal).fill("vague"),
+        ];
+        writeFileSync(
+          path.join(detail, `result-${pr}-${name}-${draw}.json`),
+          JSON.stringify({
+            cell_id: `pr-${pr}-${name}-draw${draw}`,
+            fingerprint,
+            pr,
+            condition: name,
+            draw,
+            matched_ids: matchedIds,
+            claims,
+            novel: {
+              claims: claimCount,
+              novelWrong,
+              novelReal,
+              novelVague: claimCount - novelWrong - novelReal,
+              restatedKnown: 0,
+              alreadyMatched: matchedIds.length,
+              verdicts: Object.fromEntries(
+                classes.map((className, index) => [
+                  String(index + 1),
+                  { class: className },
+                ]),
+              ),
+            },
+            usd: first ? condition.usd : 0,
+            seconds: first ? condition.seconds : 0,
+            scoring_usd: 0,
+            leak: { suspected: false, hard: [] },
+          }),
+        );
+        completedCellIds.push(`pr-${pr}-${name}-draw${draw}`);
+        first = false;
+      }
+    }
+  }
+  writeFileSync(path.join(detail, "plan.json"), JSON.stringify(plan));
+  const calibration = JSON.parse(
+    readFileSync(
+      path.join(root, "docs/evals/review-skill-judge-calibration.json"),
+      "utf8",
+    ),
+  );
+  writeFileSync(
+    path.join(detail, "calibration.json"),
+    JSON.stringify({
+      fingerprint,
+      completed_cell_ids: completedCellIds,
+      outcomes: calibration.records.map((record) => ({
+        record_id: record.record_id,
+        expected: record.expected_verdict,
+        actual: record.expected_verdict,
+      })),
+      scoring_usd: 0,
+    }),
+  );
+  return detail;
 }
 
 test("parseArgs selects exactly one mode and rejects the rest", () => {
@@ -432,6 +549,7 @@ test("--plan writes plan.json and pins the comparability key", () => {
     assert.equal(result.status, 0, result.stderr);
     const plan = JSON.parse(result.stdout);
     assert.equal(plan.kind, "canary");
+    assert.equal(plan.baseline_selection, "automatic");
     assert.equal(plan.cells.length, 3);
     assert.equal(
       plan.comparability_key,
@@ -468,6 +586,27 @@ test("--plan --skill-ref stamps a dirty candidate run", () => {
     const plan = JSON.parse(result.stdout);
     assert.equal(plan.inputs.dirty, true);
     assert.match(plan.inputs.skill_ref, /prompts$/);
+
+    const baseline = makeRow({ executedAt: "2026-07-08T10:00:00Z" });
+    const baselinePath = path.join(root, "baseline-row.json");
+    writeFileSync(baselinePath, JSON.stringify(baseline));
+    const explicit = cli(
+      [
+        "--plan",
+        "--kind",
+        "canary",
+        "--against",
+        baselinePath,
+        "--out",
+        path.join(root, "explicit-plan"),
+        "--json",
+      ],
+      { root, env: planEnv },
+    );
+    assert.equal(explicit.status, 0, explicit.stderr);
+    const explicitPlan = JSON.parse(explicit.stdout);
+    assert.equal(explicitPlan.baseline_selection, "explicit");
+    assert.deepEqual(explicitPlan.baseline, baselinePlanIdentity(baseline));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -663,10 +802,12 @@ test("a cached cell from another skill or contract is never reused", () => {
     "claude_cli",
     "codex_cli",
     "contract_digest",
+    "dirty",
     "finder_argv_digest",
     "kind",
     "orchestrator_digest",
     "skill_digest",
+    "skill_ref",
   ]);
 
   const decide = (result) =>
@@ -677,6 +818,10 @@ test("a cached cell from another skill or contract is never reused", () => {
     decide({ ok: true, fingerprint: { ...fingerprint, skill_digest: "0" } })
       .reason,
     /different skill_digest/,
+  );
+  assert.match(
+    decide({ ok: true, fingerprint: { ...fingerprint, legacy: true } }).reason,
+    /unexpected legacy/,
   );
   assert.match(
     decide({ ok: true, fingerprint: { ...fingerprint, kind: "full" } }).reason,
@@ -698,8 +843,10 @@ test("a cached cell from another skill or contract is never reused", () => {
   for (const field of [
     "claude_cli",
     "codex_cli",
+    "dirty",
     "finder_argv_digest",
     "orchestrator_digest",
+    "skill_ref",
   ]) {
     assert.match(
       decide({ ok: true, fingerprint: { ...fingerprint, [field]: "moved" } })
@@ -819,6 +966,23 @@ test("a symlink in the skill directory refuses the digest", () => {
   }
 });
 
+test("skillDigest frames file paths and contents", () => {
+  const first = mkdtempSync(path.join(tmpdir(), "review-eval-skill-first-"));
+  const second = mkdtempSync(path.join(tmpdir(), "review-eval-skill-second-"));
+  try {
+    for (const dir of [first, second]) {
+      writeFileSync(path.join(dir, "SKILL.md"), "# review\n");
+    }
+    // Without framing, both streams end in the same bytes: `abc`.
+    writeFileSync(path.join(first, "a"), "bc");
+    writeFileSync(path.join(second, "ab"), "c");
+    assert.notEqual(skillDigest(first), skillDigest(second));
+  } finally {
+    rmSync(first, { recursive: true, force: true });
+    rmSync(second, { recursive: true, force: true });
+  }
+});
+
 test("a baseline from another CLI version is paired and labelled", () => {
   // The comparability key deliberately omits the CLI versions: they ship far
   // more often than this suite runs, so keying on them would end the lineage at
@@ -877,7 +1041,15 @@ test("failedRow is schema-valid and never ranks", () => {
   assert.deepEqual(validateLedgerRow(row), []);
   assert.equal(row.status, "failed");
   assert.equal(row.verdict, "INCOMPLETE");
+  assert.equal(row.conditions.replay.finder, plan.cells[0].finder);
   assert.match(row.notes, /unauthenticated/);
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-failed-row-"));
+  try {
+    writeFileSync(path.join(dir, "plan.json"), JSON.stringify(plan));
+    assert.deepEqual(planProvenanceProblems({ dir, row, contract }), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("revalidateRow recomputes the numbers and catches a tampered count", () => {
@@ -954,12 +1126,26 @@ test("revalidateRow recomputes vs_baseline instead of trusting it", () => {
     executedAt: "2026-12-08T10:00:00Z",
     matchedIds: scorableIdsFor([1990]),
   });
-  row.vs_baseline = buildVsBaseline({ row, baselineRow });
+  row.vs_baseline = buildVsBaseline({
+    row,
+    baselineRow,
+    selection: "explicit",
+  });
   row.verdict = verdict({ contract, row, baselineRow }).verdict;
   assert.ok(row.vs_baseline.mcnemar.b > 0, "the fixture pair must flip");
   assert.deepEqual(
     revalidateRow({ contract, row, repoRoot, baselineRow }).problems,
     [],
+  );
+  assert.match(
+    revalidateRow({
+      contract,
+      row,
+      repoRoot,
+      baselineRow,
+      baselineIsExplicit: false,
+    }).problems.join(" | "),
+    /row\.vs_baseline\.selection is explicit; this validation uses automatic/,
   );
 
   const flattened = {
@@ -1587,6 +1773,43 @@ test("--validate --append refuses a row that overstates its own verdict", () => 
   }
 });
 
+test("--validate --append rejects coerced cell cost and duration", () => {
+  const root = makeRoot();
+  try {
+    const row = makeRow({
+      matchedIds: scorableIdsFor([1990, 1999]),
+      fullMatrix: true,
+    });
+    const detail = writeRowEvidence(root, row);
+    const rowPath = path.join(root, "row.json");
+    const resultPath = path.join(detail, "result-1990-pipeline-1.json");
+    const resultRecord = JSON.parse(readFileSync(resultPath, "utf8"));
+    resultRecord.usd = null;
+    resultRecord.seconds = "600";
+    writeFileSync(resultPath, JSON.stringify(resultRecord));
+    writeFileSync(rowPath, JSON.stringify(row, null, 2));
+
+    const result = cli(
+      ["--validate", rowPath, "--append", "--detail-dir", detail, "--json"],
+      { root },
+    );
+    assert.equal(result.status, 1);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.appended, false);
+    assert.match(
+      output.problems.join(" | "),
+      /conditions\.pipeline\.usd cannot be checked; the run detail sums to NaN/,
+    );
+    assert.match(
+      output.problems.join(" | "),
+      /conditions\.pipeline\.seconds cannot be checked; the run detail sums to NaN/,
+    );
+    assert.equal(readLedger(path.join(root, ledgerRelative)).length, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("--validate applies the schema check without --append", () => {
   const root = makeRoot();
   try {
@@ -1870,7 +2093,7 @@ test("--report renders the newest row and pairs it with its baseline", () => {
   }
 });
 
-test("resolveBaseline ignores incomparable, incomplete, and later rows", () => {
+test("resolveBaseline ignores incomparable, incomplete, and later-appended rows", () => {
   const row = makeRow({ executedAt: "2026-12-08T10:00:00Z" });
   const rows = [
     makeRow({ executedAt: "2026-09-08T10:00:00Z", status: "partial" }),
@@ -1878,11 +2101,103 @@ test("resolveBaseline ignores incomparable, incomplete, and later rows", () => {
     makeRow({ executedAt: "2026-11-08T10:00:00Z", kind: "canary" }),
     makeRow({ executedAt: "2027-01-08T10:00:00Z" }),
   ];
-  assert.equal(resolveBaseline({ rows, row }), null);
+  const laterAppended = rows.at(-1);
+  const prior = rows.slice(0, -1);
+  assert.equal(
+    resolveBaseline({ rows: [...prior, row, laterAppended], row }),
+    null,
+  );
   const usable = makeRow({ executedAt: "2026-11-30T10:00:00Z" });
   assert.equal(
-    resolveBaseline({ rows: [...rows, usable], row }).executed_at,
+    resolveBaseline({ rows: [...prior, usable, row, laterAppended], row })
+      .executed_at,
     usable.executed_at,
+  );
+});
+
+test("baselineEligibility refuses rows that cannot be paired", () => {
+  const usable = makeRow({ fullMatrix: true });
+  assert.equal(baselineEligibility(usable).usable, true);
+  for (const row of [
+    { ...usable, kind: "canary" },
+    { ...usable, status: "partial" },
+    { ...usable, judge_calibration: { agreement: 33, total: 40 } },
+    { ...usable, notes: "leak suspected: reviewer login" },
+    {
+      ...usable,
+      inputs: { ...usable.inputs, skill_ref: "/tmp/candidate", dirty: true },
+    },
+    { ...usable, conditions: {} },
+  ]) {
+    assert.equal(baselineEligibility(row).usable, false);
+  }
+});
+
+test("baseline preflight rejects a wrong key and malformed frozen bits", () => {
+  const row = makeRow({ fullMatrix: true });
+  assert.deepEqual(
+    baselinePreflightProblems({
+      row,
+      contract,
+      contractDigest,
+      planComparabilityKey: row.comparability_key,
+      candidateExecutedAt: "2026-10-08T10:00:00Z",
+    }),
+    [],
+  );
+  assert.match(
+    baselinePreflightProblems({
+      row,
+      contract,
+      contractDigest,
+      planComparabilityKey: "f".repeat(64),
+      candidateExecutedAt: "2026-10-08T10:00:00Z",
+    }).join(" | "),
+    /comparability_key does not match the generated plan/,
+  );
+  const malformed = JSON.parse(JSON.stringify(row));
+  const [id] = Object.keys(malformed.conditions.pipeline.per_defect);
+  malformed.conditions.pipeline.per_defect[id] = "found";
+  assert.match(
+    baselinePreflightProblems({
+      row: malformed,
+      contract,
+      contractDigest,
+      planComparabilityKey: malformed.comparability_key,
+      candidateExecutedAt: "2026-10-08T10:00:00Z",
+    }).join(" | "),
+    /must be a non-empty array/,
+  );
+  assert.match(
+    baselinePreflightProblems({
+      row,
+      contract,
+      contractDigest,
+      planComparabilityKey: row.comparability_key,
+      candidateExecutedAt: row.executed_at,
+    }).join(" | "),
+    /must precede the generated plan's candidate timestamp/,
+  );
+});
+
+test("resolveBaseline uses the same eligibility rule as an explicit baseline", () => {
+  const empty = {
+    ...makeRow({ executedAt: "2026-09-08T10:00:00Z" }),
+    conditions: {},
+  };
+  const clean = makeRow({ executedAt: "2026-10-08T10:00:00Z" });
+  const emptyPromotion = {
+    ...makeRow({
+      executedAt: "2026-11-08T10:00:00Z",
+      verdict: "PROMOTE",
+    }),
+    conditions: {},
+  };
+  const row = makeRow({ executedAt: "2026-12-08T10:00:00Z" });
+  assert.equal(resolveBaseline({ rows: [empty], row }), null);
+  assert.equal(
+    resolveBaseline({ rows: [empty, clean, emptyPromotion], row }).executed_at,
+    clean.executed_at,
   );
 });
 
@@ -1910,6 +2225,86 @@ test("resolveBaseline anchors on the first full row until a PROMOTE re-anchors",
       .executed_at,
     promoted.executed_at,
   );
+});
+
+test("resolveBaseline keeps append order when a later row is backdated", () => {
+  const anchor = makeRow({ executedAt: "2026-09-08T10:00:00Z" });
+  const backdated = makeRow({ executedAt: "2026-08-08T10:00:00Z" });
+  const row = makeRow({ executedAt: "2026-12-08T10:00:00Z" });
+  assert.equal(
+    resolveBaseline({ rows: [anchor, backdated, row], row }).executed_at,
+    anchor.executed_at,
+  );
+});
+
+test("resolveBaseline finds a deserialized ledger row by stable identity", () => {
+  const anchor = makeRow({ executedAt: "2026-09-08T10:00:00Z" });
+  const row = makeRow({ executedAt: "2026-10-08T10:00:00Z" });
+  const promoted = makeRow({
+    executedAt: "2026-11-08T10:00:00Z",
+    verdict: "PROMOTE",
+  });
+  const clone = JSON.parse(JSON.stringify(row));
+  assert.equal(
+    resolveBaseline({ rows: [anchor, row, promoted], row: clone }).executed_at,
+    anchor.executed_at,
+  );
+});
+
+test("resolveBaseline excludes future ledger anchors from an external row", () => {
+  const anchor = makeRow({ executedAt: "2026-09-08T10:00:00Z" });
+  const external = makeRow({ executedAt: "2026-10-08T10:00:00Z" });
+  const futurePromotion = makeRow({
+    executedAt: "2026-11-08T10:00:00Z",
+    verdict: "PROMOTE",
+  });
+  assert.equal(
+    resolveBaseline({ rows: [anchor, futurePromotion], row: external })
+      .executed_at,
+    anchor.executed_at,
+  );
+});
+
+test("resolveBaseline rejects a malformed instant on an external row", () => {
+  const anchor = makeRow({ executedAt: "2026-02-28T10:00:00Z" });
+  const external = makeRow({ executedAt: "2026-02-31T10:00:00Z" });
+  assert.equal(resolveBaseline({ rows: [anchor], row: external }), null);
+});
+
+test("resolveBaseline excludes a malformed external baseline candidate", () => {
+  const anchor = makeRow({ executedAt: "2026-02-01T10:00:00Z" });
+  const malformedPromotion = makeRow({
+    executedAt: "2026-02-31T10:00:00Z",
+    verdict: "PROMOTE",
+  });
+  const external = makeRow({ executedAt: "2026-04-01T10:00:00Z" });
+  assert.equal(
+    resolveBaseline({ rows: [anchor, malformedPromotion], row: external })
+      .executed_at,
+    anchor.executed_at,
+  );
+});
+
+test("an automatic baseline ranks a later-appended backdated row", () => {
+  const ids = scorableIdsFor(contract.fixtures.map((fixture) => fixture.pr));
+  const p1 = new Set(p1IdsFor(contract.fixtures.map((fixture) => fixture.pr)));
+  const lost = ids.filter((id) => !p1.has(id)).slice(0, 6);
+  const anchor = makeRow({
+    executedAt: "2026-09-08T10:00:00Z",
+    matchedIds: ids,
+  });
+  const row = makeRow({
+    executedAt: "2026-08-08T10:00:00Z",
+    matchedIds: ids.filter((id) => !lost.includes(id)),
+  });
+  const decision = verdict({
+    contract,
+    row,
+    baselineRow: anchor,
+    baselineIsExplicit: false,
+  });
+  assert.equal(decision.verdict, "RED");
+  assert.match(decision.reasons.join(" | "), /lost a net 6 defects/);
 });
 
 test("resolveBaseline refuses a row whose judge calibration failed", () => {
@@ -2506,6 +2901,7 @@ test("scorePlan folds stubbed cells into a schema-valid ledger row", async () =>
         path.join(dir, "result.json"),
         JSON.stringify({
           ok: true,
+          fingerprint: cellFingerprint({ plan }),
           output: `scripts/pr/pr-ready-state-core.mjs:750 is too long.`,
           seconds: 300,
           cost_usd: 3.5,
@@ -2545,6 +2941,62 @@ test("scorePlan folds stubbed cells into a schema-valid ledger row", async () =>
       0,
       "scoring never writes the ledger",
     );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("scorePlan freezes truth before the calibration pass", async () => {
+  const root = makeRoot();
+  try {
+    const plan = buildPlan({
+      contract,
+      contractDigest,
+      kind: "canary",
+      repoRoot: root,
+      outDir: path.join(root, "run"),
+      env: planEnv,
+    });
+    const fixture = contract.fixtures.find(
+      (candidate) => candidate.pr === plan.cells[0].pr,
+    );
+    const truthFile = path.join(root, fixture.truth_file);
+    const originalTruth = JSON.parse(readFileSync(truthFile, "utf8"));
+    for (const cell of plan.cells) {
+      writeCell(plan, cell, {
+        output: `scripts/pr/pr-ready-state-core.mjs:750 is too long. ${originalTruth.last_head}`,
+        root,
+      });
+    }
+    const inner = stubExec().exec;
+    let changed = false;
+    const exec = async (request) => {
+      if (!changed) {
+        changed = true;
+        writeFileSync(truthFile, JSON.stringify({ findings: [] }));
+      }
+      return inner(request);
+    };
+    const scored = await scorePlan({
+      plan,
+      contract,
+      contractDigest,
+      repoRoot: root,
+      planDir: plan.plan_dir,
+      exec,
+      runGit: stubGit().runGit,
+      calibrationSet: JSON.parse(
+        readFileSync(
+          path.join(root, "docs/evals/review-skill-judge-calibration.json"),
+          "utf8",
+        ),
+      ),
+    });
+    const frozenBits = fixture.scorable_ids.flatMap(
+      (id) => scored.row.conditions.replay.per_defect[String(id)] ?? [],
+    );
+    assert.ok(frozenBits.some((bit) => bit === 1));
+    assert.match(scored.row.notes, /withheld commit/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -2667,6 +3119,7 @@ test("a PR that ran fewer draws loses opportunities, not recall", async () => {
         path.join(dir, "result.json"),
         JSON.stringify({
           ok: true,
+          fingerprint: cellFingerprint({ plan }),
           output: `${finding.path}:${finding.line} is wrong.`,
           seconds: 300,
           cost_usd: 3.5,
@@ -2719,15 +3172,20 @@ test("a PR that ran fewer draws loses opportunities, not recall", async () => {
   }
 });
 
-test("scorePlan stores no McNemar against an incomparable baseline", async () => {
+test("scorePlan binds an eligible explicit baseline before model work", async () => {
   const root = makeRoot();
   try {
+    const baseline = makeRow({
+      executedAt: "2026-08-01T10:00:00Z",
+      fullMatrix: true,
+    });
     const plan = buildPlan({
       contract,
       contractDigest,
       kind: "canary",
       repoRoot: root,
       outDir: path.join(root, "run"),
+      baselineRow: baseline,
       env: planEnv,
     });
     for (const cell of plan.cells) {
@@ -2737,6 +3195,7 @@ test("scorePlan stores no McNemar against an incomparable baseline", async () =>
         path.join(dir, "result.json"),
         JSON.stringify({
           ok: true,
+          fingerprint: cellFingerprint({ plan }),
           output: "scripts/pr/pr-ready-state-core.mjs:750 is too long.",
           seconds: 300,
           cost_usd: 3.5,
@@ -2763,18 +3222,205 @@ test("scorePlan stores no McNemar against an incomparable baseline", async () =>
         baselineRow,
       });
 
-    // `--against` may name any row, including one that measures something
-    // else. That pair is recorded, never counted.
-    const foreign = await score(makeRow({ key: "c".repeat(64) }));
-    assert.deepEqual(validateLedgerRow(foreign.row), []);
-    assert.equal(foreign.row.vs_baseline.mcnemar, null);
-    assert.equal(
-      foreign.row.vs_baseline.baseline_comparability_key,
-      "c".repeat(64),
-    );
-
-    const paired = await score(makeRow());
+    const paired = await score(baseline);
+    assert.deepEqual(validateLedgerRow(paired.row), []);
+    assert.equal(paired.row.vs_baseline.selection, "explicit");
     assert.equal(typeof paired.row.vs_baseline.mcnemar.delta, "number");
+
+    await assert.rejects(
+      score(makeRow()),
+      /plan baseline .* does not match score baseline/,
+    );
+    await assert.rejects(
+      score(null),
+      /plan baseline_selection is explicit; this score command is automatic/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("scorePlan rejects an ineligible explicit baseline before model work", async () => {
+  const root = makeRoot();
+  try {
+    const baseline = makeRow({
+      executedAt: "2026-08-01T10:00:00Z",
+      status: "partial",
+    });
+    const plan = buildPlan({
+      contract,
+      contractDigest,
+      kind: "canary",
+      repoRoot: root,
+      outDir: path.join(root, "run"),
+      baselineRow: baseline,
+      env: planEnv,
+    });
+    let modelCalls = 0;
+    await assert.rejects(
+      scorePlan({
+        plan,
+        contract,
+        contractDigest,
+        repoRoot: root,
+        planDir: plan.plan_dir,
+        exec: async () => {
+          modelCalls += 1;
+          throw new Error("model must not run");
+        },
+        calibrationSet: JSON.parse(
+          readFileSync(
+            path.join(root, "docs/evals/review-skill-judge-calibration.json"),
+            "utf8",
+          ),
+        ),
+        baselineRow: baseline,
+      }),
+      /explicit baseline is not eligible.*complete full run/s,
+    );
+    assert.equal(modelCalls, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("scorePlan rejects altered plan inputs before model work", async () => {
+  const root = makeRoot();
+  try {
+    const plan = buildPlan({
+      contract,
+      contractDigest,
+      kind: "canary",
+      repoRoot: root,
+      outDir: path.join(root, "run"),
+      env: planEnv,
+    });
+    for (const cell of plan.cells) {
+      const dir = path.join(plan.plan_dir, "cells", cell.cell_id);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        path.join(dir, "result.json"),
+        JSON.stringify({
+          ok: true,
+          fingerprint: cellFingerprint({ plan }),
+          output: "nothing looks wrong here",
+          seconds: 10,
+          cost_usd: 0.5,
+          fixture_path: root,
+        }),
+      );
+    }
+    let modelCalls = 0;
+    const score = (digest = contractDigest) =>
+      scorePlan({
+        plan,
+        contract,
+        contractDigest: digest,
+        repoRoot: root,
+        planDir: plan.plan_dir,
+        exec: async () => {
+          modelCalls += 1;
+          throw new Error("model must not run");
+        },
+        calibrationSet: JSON.parse(
+          readFileSync(
+            path.join(root, "docs/evals/review-skill-judge-calibration.json"),
+            "utf8",
+          ),
+        ),
+      });
+    await assert.rejects(
+      score("f".repeat(64)),
+      /plan contract digest does not match the scoring contract/,
+    );
+    assert.equal(modelCalls, 0);
+
+    plan.cells[0].model = `${plan.cells[0].model}-altered`;
+    await assert.rejects(
+      score(),
+      /plan cells do not match the frozen canary matrix/,
+    );
+    assert.equal(modelCalls, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("scorePlan resolves an automatic baseline by ledger append order", async () => {
+  const root = makeRoot();
+  try {
+    const plan = buildPlan({
+      contract,
+      contractDigest,
+      kind: "canary",
+      repoRoot: root,
+      outDir: path.join(root, "run"),
+      env: planEnv,
+    });
+    for (const cell of plan.cells) {
+      const dir = path.join(plan.plan_dir, "cells", cell.cell_id);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        path.join(dir, "result.json"),
+        JSON.stringify({
+          ok: true,
+          fingerprint: cellFingerprint({ plan }),
+          output: "scripts/pr/pr-ready-state-core.mjs:750 is too long.",
+          seconds: 300,
+          cost_usd: 3.5,
+          fixture_path: root,
+        }),
+      );
+    }
+    const anchor = makeRow({
+      executedAt: "2026-10-08T10:00:00Z",
+      fullMatrix: true,
+    });
+    const scored = await scorePlan({
+      plan,
+      contract,
+      contractDigest,
+      repoRoot: root,
+      planDir: plan.plan_dir,
+      exec: stubExec().exec,
+      runGit: stubGit().runGit,
+      calibrationSet: JSON.parse(
+        readFileSync(
+          path.join(root, "docs/evals/review-skill-judge-calibration.json"),
+          "utf8",
+        ),
+      ),
+      ledgerRows: [anchor],
+      now: new Date("2026-09-08T10:00:00Z"),
+    });
+    assert.equal(
+      scored.row.vs_baseline.baseline_executed_at,
+      anchor.executed_at,
+    );
+    assert.equal(scored.row.vs_baseline.selection, "automatic");
+
+    // The local append validates the row at its pending ledger position. The
+    // anchor's clock is later than this row, so treating the row as external
+    // would exclude the established anchor and recompute the wrong verdict.
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(anchor)}\n`,
+    );
+    const rowPath = path.join(plan.plan_dir, "row.json");
+    writeFileSync(rowPath, JSON.stringify(scored.row));
+    const appended = cli(
+      [
+        "--validate",
+        rowPath,
+        "--append",
+        "--detail-dir",
+        plan.plan_dir,
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(appended.status, 0, appended.stdout + appended.stderr);
+    assert.equal(readLedger(path.join(root, ledgerRelative)).length, 2);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -2815,10 +3461,45 @@ test("scorePlan reports a partial matrix and refuses an empty one", async () => 
     const cell = plan.cells[0];
     const dir = path.join(plan.plan_dir, "cells", cell.cell_id);
     mkdirSync(dir, { recursive: true });
+    const canonicalFingerprint = cellFingerprint({ plan });
     writeFileSync(
       path.join(dir, "result.json"),
       JSON.stringify({
         ok: true,
+        fingerprint: { ...canonicalFingerprint, legacy: true },
+        output: "nothing looks wrong here",
+        seconds: 10,
+        cost_usd: 0.5,
+        fixture_path: root,
+      }),
+    );
+    let invalidFingerprintCalls = 0;
+    await assert.rejects(
+      scorePlan({
+        plan,
+        contract,
+        contractDigest,
+        repoRoot: root,
+        planDir: plan.plan_dir,
+        exec: async () => {
+          invalidFingerprintCalls += 1;
+          throw new Error("model must not run");
+        },
+        runGit: stubGit().runGit,
+        calibrationSet,
+      }),
+      /fingerprint carries unexpected legacy/,
+    );
+    assert.equal(invalidFingerprintCalls, 0);
+
+    const reorderedFingerprint = Object.fromEntries(
+      Object.entries(canonicalFingerprint).reverse(),
+    );
+    writeFileSync(
+      path.join(dir, "result.json"),
+      JSON.stringify({
+        ok: true,
+        fingerprint: reorderedFingerprint,
         output: "nothing looks wrong here",
         seconds: 10,
         cost_usd: 0.5,
@@ -2838,6 +3519,16 @@ test("scorePlan reports a partial matrix and refuses an empty one", async () => 
     assert.equal(scored.row.status, "partial");
     assert.equal(scored.missing.length, 2);
     assert.match(scored.row.notes, /2 cell\(s\) missing/);
+    const scoredResult = JSON.parse(
+      readFileSync(
+        path.join(
+          plan.plan_dir,
+          `result-${cell.pr}-${cell.condition}-${cell.draw}.json`,
+        ),
+        "utf8",
+      ),
+    );
+    assert.deepEqual(scoredResult.fingerprint, canonicalFingerprint);
     // A canary that did not finish never ranks, not even as a pass.
     assert.equal(scored.row.verdict, "INCOMPLETE");
   } finally {
@@ -2853,6 +3544,7 @@ function writeCell(plan, cell, { output, root, usd = 3.5 }) {
     path.join(dir, "result.json"),
     JSON.stringify({
       ok: true,
+      fingerprint: cellFingerprint({ plan }),
       output,
       seconds: 300,
       cost_usd: usd,
@@ -3613,7 +4305,7 @@ test("the ledger commit leaves the operator's other staged work alone", () => {
   }
 });
 
-test("one review eval at a time may hold the shared run state", () => {
+test("one review eval at a time may hold the shared run state", async () => {
   // Every cell resets and cleans the shared per-PR checkout and stages `.skill`
   // in it, and every run appends to the checkout's ledger. Two overlapping
   // runs — the launchd job starting under a manual run, or two manual runs —
@@ -3623,7 +4315,7 @@ test("one review eval at a time may hold the shared run state", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "review-eval-lock-"));
   try {
     const lockRoot = path.join(dir, "git");
-    const harness = (cacheDir) =>
+    const harness = (cacheDir, tail = "") =>
       [
         "set -uo pipefail",
         `LOCK_ROOT=${JSON.stringify(lockRoot)}`,
@@ -3634,10 +4326,17 @@ test("one review eval at a time may hold the shared run state", () => {
         shellFunction("acquire_one_lock"),
         shellFunction("acquire_run_lock"),
         'acquire_run_lock; printf "held %s\\n" "${LOCK_DIRS[@]}"',
+        tail,
       ].join("\n");
     const cache = path.join(dir, "cache");
     const lock = path.join(lockRoot, "run.lock");
     const cacheLock = path.join(cache, "run.lock");
+    const lockFunction = shellFunction("acquire_one_lock");
+    assert.ok(
+      lockFunction.indexOf('"$claim_ticket" "$claim_file"') <
+        lockFunction.indexOf('rm -rf "$lock"'),
+      "a stale lock is deleted before this process claims it",
+    );
 
     const free = spawnSync("bash", ["-c", harness(cache)], {
       encoding: "utf8",
@@ -3645,13 +4344,37 @@ test("one review eval at a time may hold the shared run state", () => {
     assert.equal(free.status, 0, free.stderr);
     assert.match(free.stdout, new RegExp(`held ${lock}`));
     assert.match(free.stdout, new RegExp(`held ${cacheLock}`));
-    assert.equal(
-      readFileSync(path.join(lock, "pid"), "utf8").trim().length > 0,
-      true,
+    assert.equal(readFileSync(lock, "utf8").trim().length > 0, true);
+
+    // The owner record is complete before its hard link makes the lock path
+    // visible. A suspended owner therefore exposes no pid-less lock that a
+    // contender can mistake for stale state.
+    assert.ok(
+      lockFunction.indexOf(`printf '%s\\n' "$$" >"$owner_ticket"`) <
+        lockFunction.indexOf('"$owner_ticket" "$lock" 2>/dev/null'),
+      "the lock is published before its owner record is complete",
+    );
+    assert.match(
+      lockFunction,
+      /linkSync\(process\.argv\[1\], process\.argv\[2\]\)/,
+      "lock publication must name the exact destination path",
     );
 
+    // A reclaimer can die after it removes the old lock but before it publishes
+    // a replacement. The next direct lock owner must retire that abandoned
+    // claim, even when its ticket pid now belongs to a live process.
+    rmSync(lock, { force: true });
+    rmSync(cacheLock, { force: true });
+    mkdirSync(`${lock}.reclaim`, { recursive: true });
+    writeFileSync(path.join(`${lock}.reclaim`, "0"), `${process.pid}\n`);
+    const abandonedClaim = spawnSync("bash", ["-c", harness(cache)], {
+      encoding: "utf8",
+    });
+    assert.equal(abandonedClaim.status, 0, abandonedClaim.stderr);
+    assert.equal(existsSync(`${lock}.reclaim`), false);
+
     // A live holder is a real conflict, and the run refuses before it spends.
-    writeFileSync(path.join(lock, "pid"), `${process.pid}\n`);
+    writeFileSync(lock, `${process.pid}\n`);
     const busy = spawnSync("bash", ["-c", harness(cache)], {
       encoding: "utf8",
     });
@@ -3668,15 +4391,95 @@ test("one review eval at a time may hold the shared run state", () => {
     assert.equal(elsewhere.status, 1);
     assert.match(elsewhere.stderr, new RegExp(`holds ${lock}`));
 
-    // A lock left behind by a SIGKILL is reclaimed rather than wedging the job.
+    // A live directory-form lock from an older checkout remains a conflict.
+    // Exact link publication must not create an owner ticket inside it.
+    rmSync(lock, { force: true });
+    mkdirSync(lock);
+    writeFileSync(path.join(lock, "pid"), `${process.pid}\n`);
+    const legacyBusy = spawnSync("bash", ["-c", harness(cache)], {
+      encoding: "utf8",
+    });
+    assert.equal(legacyBusy.status, 1);
+    assert.match(legacyBusy.stderr, /another review eval \(pid \d+\) holds/);
+
+    // An old owner can be suspended between mkdir and writing pid. Treat that
+    // directory as occupied because its liveness cannot be proved safely.
+    unlinkSync(path.join(lock, "pid"));
+    const legacyUnidentified = spawnSync("bash", ["-c", harness(cache)], {
+      encoding: "utf8",
+    });
+    assert.equal(legacyUnidentified.status, 1);
+    assert.match(
+      legacyUnidentified.stderr,
+      /cannot identify the run lock owner/,
+    );
+    assert.equal(existsSync(lock), true);
+
+    // A dead directory-form lock is reclaimed and replaced by the atomic
+    // owner-record file, so upgrades do not wedge scheduled runs.
     const dead = spawnSync("bash", ["-c", "exit 0"]);
     writeFileSync(path.join(lock, "pid"), `${dead.pid}\n`);
-    writeFileSync(path.join(cacheLock, "pid"), `${dead.pid}\n`);
+    writeFileSync(cacheLock, `${dead.pid}\n`);
+    const legacyReclaimed = spawnSync("bash", ["-c", harness(cache)], {
+      encoding: "utf8",
+    });
+    assert.equal(legacyReclaimed.status, 0, legacyReclaimed.stderr);
+    assert.match(legacyReclaimed.stdout, /reclaiming a run lock/);
+    assert.equal(readFileSync(lock, "utf8").trim().length > 0, true);
+
+    // A lock left behind by a SIGKILL is reclaimed rather than wedging the job.
+    writeFileSync(lock, `${dead.pid}\n`);
+    writeFileSync(cacheLock, `${dead.pid}\n`);
     const reclaimed = spawnSync("bash", ["-c", harness(cache)], {
       encoding: "utf8",
     });
     assert.equal(reclaimed.status, 0, reclaimed.stderr);
     assert.match(reclaimed.stdout, /reclaiming a run lock/);
+
+    // A killed stale-lock reclaimer leaves its own marker. Its dead pid makes
+    // that marker recoverable, so it cannot wedge every later scheduled run.
+    writeFileSync(lock, `${dead.pid}\n`);
+    mkdirSync(`${lock}.reclaim`, { recursive: true });
+    writeFileSync(path.join(`${lock}.reclaim`, "0"), `${dead.pid}\n`);
+    writeFileSync(cacheLock, `${dead.pid}\n`);
+    const staleReclaimer = spawnSync("bash", ["-c", harness(cache)], {
+      encoding: "utf8",
+    });
+    assert.equal(staleReclaimer.status, 0, staleReclaimer.stderr);
+    assert.match(staleReclaimer.stdout, /reclaiming a run lock/);
+    assert.equal(existsSync(`${lock}.reclaim`), false);
+
+    // Two contenders that observe the same dead reclaimer cannot both take
+    // the next generation. Keep the winner alive long enough for the loser to
+    // see its pid rather than treating the new run lock as stale again.
+    for (const target of [lock, cacheLock]) {
+      writeFileSync(target, `${dead.pid}\n`);
+      mkdirSync(`${target}.reclaim`, { recursive: true });
+      writeFileSync(path.join(`${target}.reclaim`, "0"), `${dead.pid}\n`);
+    }
+    const runContender = () =>
+      new Promise((resolve) => {
+        const child = spawn("bash", ["-c", harness(cache, "sleep 0.5")], {
+          encoding: "utf8",
+        });
+        let stdout = "";
+        let stderr = "";
+        child.stdout.on("data", (chunk) => {
+          stdout += chunk;
+        });
+        child.stderr.on("data", (chunk) => {
+          stderr += chunk;
+        });
+        child.on("close", (status) => resolve({ status, stdout, stderr }));
+      });
+    const contenders = await Promise.all([runContender(), runContender()]);
+    assert.deepEqual(
+      contenders.map(({ status }) => status).sort(),
+      [0, 1],
+      JSON.stringify(contenders),
+    );
+    assert.equal(existsSync(`${lock}.reclaim`), false);
+    assert.equal(existsSync(`${cacheLock}.reclaim`), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -3730,7 +4533,7 @@ test("the orchestrator rejects a cell whose finder or report failed", () => {
   assert.match(script, /frozen finder report \$finder_report is unreadable/);
 });
 
-test("the orchestrator carries one baseline through score, validate and report", () => {
+test("the orchestrator carries one baseline through plan, score, validate and report", () => {
   const script = readFileSync(
     path.join(repoRoot, "scripts/review/run-eval.sh"),
     "utf8",
@@ -3738,8 +4541,13 @@ test("the orchestrator carries one baseline through score, validate and report",
   // The candidate procedure runs the installed skill and the candidate in one
   // sitting. Without a baseline argument the candidate resolves the ledger's
   // stored anchor instead, which is the model drift the procedure exists to
-  // exclude. The same argument reaches all three commands so the row, its
-  // revalidation and the PR body cannot disagree about what it was ranked on.
+  // exclude. The same argument reaches both plans and all three later commands
+  // so the plan, row, revalidation and PR body cannot disagree about what it
+  // was ranked on.
+  assert.equal(
+    script.match(/PLAN_ARGS\+=\(--against "\$AGAINST"\)/g)?.length,
+    2,
+  );
   assert.match(script, /AGAINST_ARGS=\(--against "\$AGAINST"\)/);
   const expansion = /"\$\{AGAINST_ARGS\[@\]\+"\$\{AGAINST_ARGS\[@\]\}"\}"/g;
   assert.equal(script.match(expansion)?.length, 3);
@@ -3749,6 +4557,59 @@ test("the orchestrator carries one baseline through score, validate and report",
       `${mode} does not receive the baseline`,
     );
   }
+});
+
+test("the orchestrator rejects an ineligible baseline before paid work", () => {
+  const script = readFileSync(
+    path.join(repoRoot, "scripts/review/run-eval.sh"),
+    "utf8",
+  );
+  assert.equal(script.match(/baselineEligibility\(row\)/g)?.length, 2);
+  assert.ok(
+    script.indexOf("baselineEligibility(row)") <
+      script.indexOf("# --- the run deadline"),
+  );
+  assert.ok(
+    script.lastIndexOf("baselineEligibility(row)") <
+      script.indexOf("writeFileSync(snapshot"),
+  );
+  assert.match(script, /baselinePreflightProblems\(\{/);
+  assert.match(script, /planComparabilityKey: plan\.comparability_key/);
+  assert.match(script, /baselinePlanIdentity\(row\)/);
+  assert.match(
+    script,
+    /JSON\.stringify\(plannedBaseline\) !== JSON\.stringify\(currentBaseline\)/,
+  );
+  assert.ok(
+    script.indexOf("baselinePreflightProblems({") <
+      script.indexOf("# --- the run deadline"),
+  );
+  assert.ok(
+    script.indexOf("baselinePlanIdentity(row)") <
+      script.indexOf("# --- the run deadline"),
+  );
+  assert.match(
+    script,
+    /writeFileSync\(snapshot, `\$\{JSON\.stringify\(row\)\}\\n`\)/,
+  );
+  assert.match(
+    script,
+    /BASELINE_SNAPSHOT="\$\(mktemp "\$LOCK_ROOT\/review-eval-baseline/,
+  );
+  assert.equal(
+    /BASELINE_SNAPSHOT="\$\(mktemp "\$TMPROOT\/review-eval-baseline/.test(
+      script,
+    ),
+    false,
+  );
+  assert.match(script, /AGAINST="\$BASELINE_SNAPSHOT"/);
+  assert.ok(
+    script.indexOf('AGAINST="$BASELINE_SNAPSHOT"') <
+      script.indexOf("# --- the run deadline"),
+  );
+  assert.match(script, /rm -f "\$BASELINE_SNAPSHOT"/);
+  assert.match(script, /eligible complete full baseline row/);
+  assert.match(script, /malformed or incompatible with the generated plan/);
 });
 
 test("the installed baseline survives the checkout the candidate needs", () => {
@@ -3884,23 +4745,30 @@ test("the deadline terminates the whole subprocess tree, not only its parent", (
   );
   const definition = script.match(/^run_bounded\(\) \{\n[\s\S]*?^\}$/m);
   assert.ok(definition, "run_bounded is not defined at column zero");
+  const fastDefinition = definition[0].replace("sleep 10", "sleep 1");
   const dir = mkdtempSync(path.join(tmpdir(), "review-eval-bounded-"));
   let grandchild = null;
   try {
     const harness = path.join(dir, "harness.sh");
     const outFile = path.join(dir, "out");
+    const heartbeat = path.join(dir, "heartbeat");
+    const child = [
+      'trap "exit 0" TERM',
+      `(trap "" TERM; while :; do printf . >> ${JSON.stringify(heartbeat)}; sleep 0.2; done) &`,
+      'echo "$!"',
+      "while :; do sleep 120; done",
+    ].join("\n");
+    const childArg = `'${child.replaceAll("'", `'"'"'`)}'`;
     writeFileSync(
       harness,
       [
         "#!/usr/bin/env bash",
         "set -uo pipefail",
-        definition[0],
+        fastDefinition,
         "status=0",
-        // The direct child leaves a background process behind and then stalls
-        // past the bound, exactly like a judge pass that hangs on a session
-        // limit. It `exec`s so that it dies on the group's TERM rather than on
-        // the KILL ten seconds later, which keeps the case under five seconds.
-        `run_bounded ${JSON.stringify(outFile)} 3 bash -c 'sleep 120 & echo "$!"; exec sleep 120' || status=$?`,
+        // The direct child exits when TERM reaches it. Its descendant ignores
+        // TERM, so only the watchdog's later group-wide KILL can stop it.
+        `run_bounded ${JSON.stringify(outFile)} 3 bash -c ${childArg} || status=$?`,
         'echo "status=$status"',
       ].join("\n"),
     );
@@ -3912,10 +4780,12 @@ test("the deadline terminates the whole subprocess tree, not only its parent", (
     // The group signal is delivered with the parent's; give the kernel a beat
     // before asking whether the grandchild is gone.
     spawnSync("sleep", ["1"]);
-    assert.throws(
-      () => process.kill(grandchild, 0),
-      /ESRCH/,
-      `grandchild ${grandchild} outlived the deadline`,
+    const stoppedAt = readFileSync(heartbeat, "utf8").length;
+    spawnSync("sleep", ["1"]);
+    assert.equal(
+      readFileSync(heartbeat, "utf8").length,
+      stoppedAt,
+      `grandchild ${grandchild} kept running after the deadline`,
     );
     grandchild = null;
   } finally {
@@ -4041,8 +4911,12 @@ test("required CI routes the nested frozen inputs to the scripts job", () => {
 });
 
 test("the ledger PR workflow recomputes the rows it appends", () => {
-  const workflow = readFileSync(
+  const advisory = readFileSync(
     path.join(repoRoot, ".github/workflows/review-eval-freshness.yml"),
+    "utf8",
+  );
+  const required = readFileSync(
+    path.join(repoRoot, ".github/workflows/ci.yml"),
     "utf8",
   );
   // Schema, id coverage and append-only history all stay satisfied when a
@@ -4050,9 +4924,31 @@ test("the ledger PR workflow recomputes the rows it appends", () => {
   // the local `--validate --append`. The only PR workflow there is has to
   // recompute the row from the detail the same branch commits, or the committed
   // report is backed by nothing a reader can check.
-  assert.match(workflow, /--check-ledger --require-base --revalidate-appended/);
+  for (const workflow of [advisory, required]) {
+    assert.match(
+      workflow,
+      /--check-ledger --require-base --revalidate-appended/,
+    );
+  }
   // The recompute reads committed JSON. This job must stay credential-free.
-  assert.doesNotMatch(workflow, /ANTHROPIC|OPENAI|api[_-]?key/i);
+  assert.doesNotMatch(advisory, /ANTHROPIC|OPENAI|api[_-]?key/i);
+});
+
+test("the Claude review exemption verifies scorecard-only paths", () => {
+  const workflow = readFileSync(
+    path.join(repoRoot, ".github/workflows/claude.yml"),
+    "utf8",
+  );
+  assert.doesNotMatch(
+    workflow,
+    /!startsWith\(github\.event\.pull_request\.head\.ref, 'eval\/review-skill-'\)/,
+  );
+  assert.match(workflow, /Verify review-eval scorecard-only scope/);
+  assert.match(workflow, /git merge-base "\$BASE_SHA" "\$HEAD_SHA"/);
+  assert.match(workflow, /git diff --quiet "\$merge_base" "\$HEAD_SHA"/);
+  assert.match(workflow, /docs\/evals\/review-skill-ledger\.jsonl/);
+  assert.match(workflow, /docs\/evals\/review-skill-runs\/\*\*/);
+  assert.match(workflow, /if: steps\.review-scope\.outputs\.skip != 'true'/);
 });
 
 test("--check-ledger --revalidate-appended catches an edited appended row", () => {
@@ -4076,7 +4972,7 @@ test("--check-ledger --revalidate-appended catches an edited appended row", () =
       matchedIds: scorableIdsFor([1990]),
       fullMatrix: true,
     });
-    mkdirSync(path.join(root, row.detail_dir), { recursive: true });
+    writeRowEvidence(root, row);
     writeFileSync(rowPath, JSON.stringify(row, null, 2));
     assert.equal(
       cli(["--validate", rowPath, "--append", "--json"], { root }).status,
@@ -4133,6 +5029,476 @@ test("--check-ledger --revalidate-appended catches an edited appended row", () =
   }
 });
 
+test("--revalidate-appended rejects reused and aliased detail directories", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+
+    const original = makeRow({
+      matchedIds: scorableIdsFor([1990]),
+      fullMatrix: true,
+    });
+    writeRowEvidence(root, original);
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(original)}\n`,
+    );
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "record original run");
+
+    const alias = path.join(
+      path.dirname(original.detail_dir),
+      "original-evidence-alias",
+    );
+    symlinkSync(path.basename(original.detail_dir), path.join(root, alias));
+    for (const detailDir of [
+      original.detail_dir,
+      path.join(
+        path.dirname(original.detail_dir),
+        "..",
+        "review-skill-runs",
+        path.basename(original.detail_dir),
+      ),
+      alias,
+    ]) {
+      const copied = {
+        ...structuredClone(original),
+        executed_at: "2026-10-08T10:41:07Z",
+        detail_dir: detailDir,
+      };
+      writeFileSync(
+        path.join(root, ledgerRelative),
+        `${JSON.stringify(original)}\n${JSON.stringify(copied)}\n`,
+      );
+      const checked = cli(
+        [
+          "--check-ledger",
+          "--revalidate-appended",
+          "--base-ref",
+          "HEAD",
+          "--json",
+        ],
+        { root },
+      );
+      assert.equal(checked.status, 1, detailDir);
+      assert.match(
+        JSON.parse(checked.stdout).problems.join(" | "),
+        /appended row .* reuses detail_dir .* from an earlier ledger row/,
+        detailDir,
+      );
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended rejects copied evidence in a new directory", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+
+    const original = makeRow({
+      matchedIds: scorableIdsFor([1990]),
+      fullMatrix: true,
+    });
+    const originalDetail = writeRowEvidence(root, original);
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(original)}\n`,
+    );
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "record original run");
+
+    const copied = structuredClone(original);
+    copied.executed_at = "2026-10-08T10:41:07Z";
+    copied.detail_dir =
+      "docs/evals/review-skill-runs/2026-10-08-copied-evidence";
+    const copiedDetail = path.join(root, copied.detail_dir);
+    cpSync(originalDetail, copiedDetail, { recursive: true });
+    const copiedPlan = JSON.parse(
+      readFileSync(path.join(copiedDetail, "plan.json"), "utf8"),
+    );
+    copiedPlan.detail_dir = copied.detail_dir;
+    writeFileSync(
+      path.join(copiedDetail, "plan.json"),
+      JSON.stringify(copiedPlan),
+    );
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(original)}\n${JSON.stringify(copied)}\n`,
+    );
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 1);
+    assert.match(
+      JSON.parse(checked.stdout).problems.join(" | "),
+      /reuses scored result and calibration evidence from base row/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended rejects edits to base-row evidence", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+
+    const baseRow = makeRow({
+      matchedIds: scorableIdsFor([1990]),
+      fullMatrix: true,
+    });
+    const detail = writeRowEvidence(root, baseRow);
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(baseRow)}\n`,
+    );
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "record base run");
+
+    const resultFile = path.join(detail, "result-1990-pipeline-1.json");
+    const edited = JSON.parse(readFileSync(resultFile, "utf8"));
+    edited.claims = ["replacement claim"];
+    writeFileSync(resultFile, JSON.stringify(edited));
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 1);
+    assert.equal(JSON.parse(checked.stdout).revalidated_rows, 0);
+    assert.match(
+      JSON.parse(checked.stdout).problems.join(" | "),
+      /base row .* evidence changed at .*result-1990-pipeline-1\.json/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended rejects edits through a base-row detail symlink", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+
+    const baseRow = makeRow({
+      matchedIds: scorableIdsFor([1990]),
+      fullMatrix: true,
+    });
+    const detail = writeRowEvidence(root, baseRow);
+    const alias = path.join(
+      path.dirname(baseRow.detail_dir),
+      "base-evidence-alias",
+    );
+    symlinkSync(path.basename(baseRow.detail_dir), path.join(root, alias));
+    baseRow.detail_dir = alias;
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(baseRow)}\n`,
+    );
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "record symlinked base run");
+
+    const resultFile = path.join(detail, "result-1990-pipeline-1.json");
+    const edited = JSON.parse(readFileSync(resultFile, "utf8"));
+    edited.claims = ["replacement claim"];
+    writeFileSync(resultFile, JSON.stringify(edited));
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 1);
+    assert.match(
+      JSON.parse(checked.stdout).problems.join(" | "),
+      /base row .* evidence changed at .*result-1990-pipeline-1\.json/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended rejects a detail directory normalized to the repo root", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+
+    const baseRow = makeRow({ fullMatrix: true });
+    baseRow.detail_dir = "docs/..";
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(baseRow)}\n`,
+    );
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "record root detail path");
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 1);
+    assert.match(
+      JSON.parse(checked.stdout).problems.join(" | "),
+      /base row .* names the repository root as detail_dir/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended rejects a retargeted parent detail symlink", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+
+    const baseRow = makeRow({
+      matchedIds: scorableIdsFor([1990]),
+      fullMatrix: true,
+    });
+    const runs = path.dirname(baseRow.detail_dir);
+    baseRow.detail_dir = path.join(runs, "target-one", "run");
+    const firstDetail = writeRowEvidence(root, baseRow);
+    const secondDetail = path.join(root, runs, "target-two", "run");
+    cpSync(firstDetail, secondDetail, { recursive: true });
+    const alias = path.join(root, runs, "alias");
+    symlinkSync("target-one", alias);
+    baseRow.detail_dir = path.join(runs, "alias", "run");
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(baseRow)}\n`,
+    );
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "record parent detail symlink");
+
+    unlinkSync(alias);
+    symlinkSync("target-two", alias);
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 1);
+    assert.match(
+      JSON.parse(checked.stdout).problems.join(" | "),
+      /base row .* evidence changed at .*\/alias/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended rejects a symlinked base evidence file", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+
+    const baseRow = makeRow({
+      matchedIds: scorableIdsFor([1990]),
+      fullMatrix: true,
+    });
+    const detail = writeRowEvidence(root, baseRow);
+    const resultFile = path.join(detail, "result-1990-pipeline-1.json");
+    const target = path.join(root, "docs/evals/base-result-target.json");
+    writeFileSync(target, readFileSync(resultFile));
+    unlinkSync(resultFile);
+    symlinkSync(path.relative(detail, target), resultFile);
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(baseRow)}\n`,
+    );
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "record linked base evidence");
+
+    const edited = JSON.parse(readFileSync(target, "utf8"));
+    edited.claims = ["replacement claim"];
+    writeFileSync(target, JSON.stringify(edited));
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 1);
+    assert.match(
+      JSON.parse(checked.stdout).problems.join(" | "),
+      /base row .*result-1990-pipeline-1\.json must be a regular evidence file/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended rejects a symlinked base plan", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+
+    const baseRow = makeRow({
+      matchedIds: scorableIdsFor([1990]),
+      fullMatrix: true,
+    });
+    const detail = writeRowEvidence(root, baseRow);
+    const planFile = path.join(detail, "plan.json");
+    const target = path.join(root, "docs/evals/base-plan-target.json");
+    writeFileSync(target, readFileSync(planFile));
+    unlinkSync(planFile);
+    symlinkSync(path.relative(detail, target), planFile);
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(baseRow)}\n`,
+    );
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "record linked base plan");
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 1);
+    assert.match(
+      JSON.parse(checked.stdout).problems.join(" | "),
+      /base row .*plan\.json must be a regular evidence file/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended requires every planned cell of a complete row", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "base");
+
+    const row = makeRow({
+      matchedIds: scorableIdsFor([1990]),
+      fullMatrix: true,
+    });
+    const detail = writeRowEvidence(root, row);
+    writeFileSync(path.join(root, ledgerRelative), `${JSON.stringify(row)}\n`);
+    for (const file of readdirSync(detail)) {
+      if (file.includes("-control-")) rmSync(path.join(detail, file));
+    }
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 1);
+    assert.match(
+      JSON.parse(checked.stdout).problems.join(" | "),
+      /carries no result-.*-control-1\.json for planned cell/,
+    );
+
+    delete row.conditions.control;
+    writeFileSync(path.join(root, ledgerRelative), `${JSON.stringify(row)}\n`);
+    const omitted = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(omitted.status, 1);
+    assert.match(
+      JSON.parse(omitted.stdout).problems.join(" | "),
+      /planned condition control, but the complete row omits it/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("--revalidate-appended treats a base without a ledger as all-appended", () => {
   const root = makeRoot();
   try {
@@ -4159,7 +5525,7 @@ test("--revalidate-appended treats a base without a ledger as all-appended", () 
       matchedIds: scorableIdsFor([1990]),
       fullMatrix: true,
     });
-    mkdirSync(path.join(root, row.detail_dir), { recursive: true });
+    writeRowEvidence(root, row);
     const rowPath = path.join(root, "row.json");
     writeFileSync(rowPath, JSON.stringify(row, null, 2));
     assert.equal(
@@ -4242,12 +5608,18 @@ test("--revalidate-appended leaves an unpaired row's verdict alone", () => {
       fullMatrix: true,
       verdict: "PROMOTE",
     });
+    row.inputs = {
+      ...row.inputs,
+      skill_ref: "/tmp/review-candidate",
+      dirty: true,
+    };
     row.vs_baseline = {
       baseline_executed_at: "2026-08-01T09:00:00Z",
+      selection: "explicit",
       baseline_comparability_key: row.comparability_key,
       mcnemar: { b: 0, c: 6, delta: -6 },
     };
-    mkdirSync(path.join(root, row.detail_dir), { recursive: true });
+    writeRowEvidence(root, row);
     const ledgerPath = path.join(root, ledgerRelative);
     writeFileSync(ledgerPath, `${JSON.stringify(row)}\n`);
     const unpaired = cli(flags, { root });
@@ -4255,6 +5627,18 @@ test("--revalidate-appended leaves an unpaired row's verdict alone", () => {
     const report = JSON.parse(unpaired.stdout);
     assert.equal(report.unpaired_baselines, 1);
     assert.equal(report.revalidated_rows, 1);
+
+    // Automatic selection cannot waive a missing row. An automatic baseline
+    // must resolve from this ledger's append order.
+    row.vs_baseline.selection = "automatic";
+    writeRowEvidence(root, row);
+    writeFileSync(ledgerPath, `${JSON.stringify(row)}\n`);
+    const missingAutomatic = cli(flags, { root });
+    assert.equal(missingAutomatic.status, 1);
+    assert.match(
+      JSON.parse(missingAutomatic.stdout).problems.join(" | "),
+      /only a dirty --skill-ref candidate row with explicit selection/,
+    );
 
     // The suppression is only for the row whose recorded baseline is missing.
     // A row that records no pairing at all is still recomputed, so a forged
@@ -4270,6 +5654,484 @@ test("--revalidate-appended leaves an unpaired row's verdict alone", () => {
     assert.match(
       JSON.parse(failed.stdout).problems.join(" | "),
       /row\.verdict is RED; the row's own numbers give GREEN/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended accepts a failed trace after an eligible baseline", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+
+    const baseline = makeRow({ fullMatrix: true });
+    writeRowEvidence(root, baseline);
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(baseline)}\n`,
+    );
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "record baseline");
+
+    const failed = makeRow({
+      executedAt: "2026-10-08T10:41:07Z",
+      status: "failed",
+      verdict: "INCOMPLETE",
+    });
+    failed.detail_dir = "docs/evals/review-skill-runs/2026-10-08-failed";
+    failed.notes = "run failed: model process exited 1";
+    writeRowEvidence(root, failed);
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(baseline)}\n${JSON.stringify(failed)}\n`,
+    );
+
+    const flags = [
+      "--check-ledger",
+      "--revalidate-appended",
+      "--base-ref",
+      "HEAD",
+      "--json",
+    ];
+    const concealedScore = cli(flags, { root });
+    assert.equal(concealedScore.status, 1);
+    const concealedProblems = JSON.parse(concealedScore.stdout).problems.join(
+      " | ",
+    );
+    assert.match(
+      concealedProblems,
+      /failed row retains scoring artifact calibration\.json/,
+    );
+    assert.match(
+      concealedProblems,
+      /failed row retains scoring artifact result-1990-pipeline-1\.json/,
+    );
+
+    const failedDetail = path.join(root, failed.detail_dir);
+    unlinkSync(path.join(failedDetail, "calibration.json"));
+    for (const name of readdirSync(failedDetail)) {
+      if (name.startsWith("result-") && name.endsWith(".json")) {
+        unlinkSync(path.join(failedDetail, name));
+      }
+    }
+    const checked = cli([...flags], { root });
+    assert.equal(checked.status, 0, checked.stdout + checked.stderr);
+    assert.equal(JSON.parse(checked.stdout).revalidated_rows, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended refuses a missing baseline on an installed row", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "base");
+    const row = makeRow({ fullMatrix: true });
+    row.vs_baseline = {
+      baseline_executed_at: "2026-08-01T09:00:00Z",
+      selection: "automatic",
+      baseline_comparability_key: row.comparability_key,
+      mcnemar: { b: 0, c: 0, delta: 0 },
+    };
+    writeRowEvidence(root, row);
+    writeFileSync(path.join(root, ledgerRelative), `${JSON.stringify(row)}\n`);
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 1);
+    const output = JSON.parse(checked.stdout);
+    assert.equal(output.unpaired_baselines, 0);
+    assert.match(output.problems.join(" | "), /only a dirty --skill-ref/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended preserves an automatic candidate baseline", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "base");
+
+    // Append order makes this the anchor even though its wall-clock timestamp
+    // is later. Automatic selection must keep append-order semantics for a
+    // candidate in the same way it does for an installed run.
+    const anchor = makeRow({
+      executedAt: "2026-10-08T10:00:00Z",
+      fullMatrix: true,
+    });
+    const candidate = makeRow({
+      executedAt: "2026-09-08T10:00:00Z",
+      matchedIds: scorableIdsFor([1990]),
+      fullMatrix: true,
+    });
+    candidate.detail_dir = "docs/evals/review-skill-runs/2026-09-08-candidate";
+    candidate.inputs = {
+      ...candidate.inputs,
+      skill_ref: "/tmp/review-candidate",
+      dirty: true,
+    };
+    candidate.vs_baseline = buildVsBaseline({
+      row: candidate,
+      baselineRow: anchor,
+      selection: "automatic",
+    });
+    candidate.verdict = verdict({
+      contract,
+      row: candidate,
+      baselineRow: anchor,
+      baselineIsExplicit: false,
+    }).verdict;
+    writeRowEvidence(root, anchor);
+    writeRowEvidence(root, candidate);
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(anchor)}\n${JSON.stringify(candidate)}\n`,
+    );
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 0, checked.stdout + checked.stderr);
+    assert.equal(JSON.parse(checked.stdout).revalidated_rows, 2);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended refuses a later appended automatic baseline", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "base");
+
+    const first = makeRow({
+      executedAt: "2026-09-08T10:00:00Z",
+      fullMatrix: true,
+    });
+    first.inputs = {
+      ...first.inputs,
+      skill_ref: "/tmp/review-candidate",
+      dirty: true,
+    };
+    const later = makeRow({
+      executedAt: "2026-10-08T10:00:00Z",
+      fullMatrix: true,
+    });
+    later.detail_dir = "docs/evals/review-skill-runs/2026-10-08-deadbeef";
+    first.vs_baseline = buildVsBaseline({
+      row: first,
+      baselineRow: later,
+      selection: "automatic",
+    });
+    writeRowEvidence(root, first);
+    writeRowEvidence(root, later);
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(first)}\n${JSON.stringify(later)}\n`,
+    );
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 1);
+    assert.match(
+      JSON.parse(checked.stdout).problems.join(" | "),
+      /recorded baseline .* does not match the append-order baseline none/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended rejects a self-selected explicit baseline", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "base");
+
+    const row = makeRow({ fullMatrix: true });
+    const detail = writeRowEvidence(root, row);
+    row.vs_baseline = buildVsBaseline({
+      row,
+      baselineRow: row,
+      selection: "explicit",
+    });
+    const planFile = path.join(detail, "plan.json");
+    const plan = JSON.parse(readFileSync(planFile, "utf8"));
+    plan.baseline_selection = "explicit";
+    plan.baseline = baselinePlanIdentity(row);
+    writeFileSync(planFile, JSON.stringify(plan));
+    writeFileSync(path.join(root, ledgerRelative), `${JSON.stringify(row)}\n`);
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 1);
+    assert.match(
+      JSON.parse(checked.stdout).problems.join(" | "),
+      new RegExp(
+        `explicit baseline ${row.executed_at} must precede candidate ${row.executed_at}`,
+      ),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended rejects an ineligible explicit baseline", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "base");
+
+    const baseline = makeRow({
+      executedAt: "2026-08-08T10:00:00Z",
+      fullMatrix: true,
+    });
+    baseline.notes = "leak suspected: test fixture";
+    baseline.verdict = verdict({ contract, row: baseline }).verdict;
+    const candidate = makeRow({
+      executedAt: "2026-09-08T10:00:00Z",
+      fullMatrix: true,
+    });
+    candidate.detail_dir = "docs/evals/review-skill-runs/2026-09-08-candidate";
+    candidate.vs_baseline = buildVsBaseline({
+      row: candidate,
+      baselineRow: baseline,
+      selection: "explicit",
+    });
+    writeRowEvidence(root, baseline);
+    const candidateDetail = writeRowEvidence(root, candidate);
+    const planFile = path.join(candidateDetail, "plan.json");
+    const plan = JSON.parse(readFileSync(planFile, "utf8"));
+    plan.baseline = baselinePlanIdentity(baseline);
+    writeFileSync(planFile, JSON.stringify(plan));
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(baseline)}\n${JSON.stringify(candidate)}\n`,
+    );
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 1);
+    assert.match(
+      JSON.parse(checked.stdout).problems.join(" | "),
+      /explicit baseline .* is not eligible: baseline notes record a suspected leak/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended rejects complete evidence relabelled partial", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "base");
+
+    const row = makeRow({ fullMatrix: true });
+    writeRowEvidence(root, row);
+    row.status = "partial";
+    row.verdict = verdict({ contract, row }).verdict;
+    writeFileSync(path.join(root, ledgerRelative), `${JSON.stringify(row)}\n`);
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 1);
+    assert.match(
+      JSON.parse(checked.stdout).problems.join(" | "),
+      /records partial status but calibration\.json proves a complete matrix/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended binds partial rows to every scored PR", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "base");
+
+    const scoredFixtures = contract.fixtures.filter(
+      (fixture) => fixture.scorable_ids.length > 0,
+    );
+    assert.ok(scoredFixtures.length > 1);
+    const [retainedFixture, omittedFixture] = scoredFixtures;
+    const row = makeRow({
+      matchedIds: scorableIdsFor([retainedFixture.pr]),
+      status: "partial",
+    });
+    writeRowEvidence(root, row);
+    const condition = row.conditions.pipeline;
+    for (const id of omittedFixture.scorable_ids.map(String)) {
+      delete condition.per_defect[id];
+    }
+    const omittedP1 = p1IdsFor([omittedFixture.pr]).length;
+    condition.recall.opportunities -=
+      omittedFixture.scorable_ids.length * condition.draws;
+    condition.recall.rate = Number(
+      (condition.recall.matched / condition.recall.opportunities).toFixed(3),
+    );
+    condition.p1.opportunities -= omittedP1 * condition.draws;
+    condition.p1.rate =
+      condition.p1.opportunities === 0
+        ? null
+        : Number(
+            (condition.p1.matched / condition.p1.opportunities).toFixed(3),
+          );
+    row.verdict = verdict({ contract, row }).verdict;
+    writeFileSync(path.join(root, ledgerRelative), `${JSON.stringify(row)}\n`);
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 1);
+    assert.match(
+      JSON.parse(checked.stdout).problems.join(" | "),
+      new RegExp(
+        `row condition pipeline omits frozen defect .* for scored result PR ${omittedFixture.pr}`,
+      ),
+    );
+
+    for (let draw = 1; draw <= condition.draws; draw += 1) {
+      rmSync(
+        path.join(
+          root,
+          row.detail_dir,
+          `result-${omittedFixture.pr}-pipeline-${draw}.json`,
+        ),
+      );
+    }
+    const concealedCompletion = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(concealedCompletion.status, 1);
+    assert.match(
+      JSON.parse(concealedCompletion.stdout).problems.join(" | "),
+      /result files do not match calibration\.json completed_cell_ids/,
+    );
+
+    const calibrationFile = path.join(root, row.detail_dir, "calibration.json");
+    const calibration = JSON.parse(readFileSync(calibrationFile, "utf8"));
+    calibration.completed_cell_ids = calibration.completed_cell_ids.filter(
+      (cellId) => !cellId.startsWith(`pr-${omittedFixture.pr}-pipeline-`),
+    );
+    writeFileSync(calibrationFile, JSON.stringify(calibration));
+    const legitimatePartial = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(
+      legitimatePartial.status,
+      0,
+      legitimatePartial.stdout + legitimatePartial.stderr,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -4298,18 +6160,7 @@ test("--revalidate-appended checks a row against its committed plan", () => {
       matchedIds: scorableIdsFor([1990]),
       fullMatrix: true,
     });
-    const detail = path.join(root, row.detail_dir);
-    mkdirSync(detail, { recursive: true });
-    writeFileSync(
-      path.join(detail, "plan.json"),
-      JSON.stringify({
-        contract_digest: row.contract_digest,
-        comparability_key: row.comparability_key,
-        kind: row.kind,
-        detail_dir: row.detail_dir,
-        inputs: row.inputs,
-      }),
-    );
+    const detail = writeRowEvidence(root, row);
     const rowPath = path.join(root, "row.json");
     writeFileSync(rowPath, JSON.stringify(row, null, 2));
     assert.equal(
@@ -4318,6 +6169,281 @@ test("--revalidate-appended checks a row against its committed plan", () => {
     );
     const clean = cli(flags, { root });
     assert.equal(clean.status, 0, clean.stdout + clean.stderr);
+
+    writeFileSync(
+      path.join(detail, "result-9999-pipeline-1.json"),
+      JSON.stringify({
+        cell_id: "pr-9999-pipeline-draw1",
+        pr: 9999,
+        condition: "pipeline",
+        draw: 1,
+        matched_ids: [],
+      }),
+    );
+    const unplanned = cli(flags, { root });
+    assert.equal(unplanned.status, 1);
+    assert.match(
+      JSON.parse(unplanned.stdout).problems.join(" | "),
+      /carries unplanned result file result-9999-pipeline-1\.json/,
+    );
+    unlinkSync(path.join(detail, "result-9999-pipeline-1.json"));
+    writeRowEvidence(root, row);
+
+    const plannedResult = path.join(detail, "result-1990-pipeline-1.json");
+    const originalVerdict = row.verdict;
+    const misidentified = JSON.parse(readFileSync(plannedResult, "utf8"));
+    misidentified.cell_id = "pr-1990-pipeline-draw2";
+    writeFileSync(plannedResult, JSON.stringify(misidentified));
+    const wrongIdentity = cli(flags, { root });
+    assert.equal(wrongIdentity.status, 1);
+    assert.match(
+      JSON.parse(wrongIdentity.stdout).problems.join(" | "),
+      /result-1990-pipeline-1\.json cell_id is .*plan\.json recorded "pr-1990-pipeline-draw1"/,
+    );
+    writeRowEvidence(root, row);
+
+    const foreignFixture = contract.fixtures.find(
+      (fixture) => fixture.pr !== 1990 && fixture.scorable_ids.length > 0,
+    );
+    assert.ok(foreignFixture);
+    const foreignMatch = JSON.parse(readFileSync(plannedResult, "utf8"));
+    foreignMatch.matched_ids.push(foreignFixture.scorable_ids[0]);
+    writeFileSync(plannedResult, JSON.stringify(foreignMatch));
+    const crossFixtureMatch = cli(flags, { root });
+    assert.equal(crossFixtureMatch.status, 1);
+    assert.match(
+      JSON.parse(crossFixtureMatch.stdout).problems.join(" | "),
+      /result-1990-pipeline-1\.json matched_ids contains .*fixture PR 1990 does not score/,
+    );
+    writeRowEvidence(root, row);
+
+    for (const malformed of [undefined, null, ""]) {
+      const malformedMatches = JSON.parse(readFileSync(plannedResult, "utf8"));
+      if (malformed === undefined) {
+        delete malformedMatches.matched_ids;
+      } else {
+        malformedMatches.matched_ids = malformed;
+      }
+      writeFileSync(plannedResult, JSON.stringify(malformedMatches));
+      const malformedResult = cli(flags, { root });
+      assert.equal(malformedResult.status, 1);
+      assert.match(
+        JSON.parse(malformedResult.stdout).problems.join(" | "),
+        /result-1990-pipeline-1\.json matched_ids must be an array/,
+      );
+      writeRowEvidence(root, row);
+    }
+
+    const nestedMatch = JSON.parse(readFileSync(plannedResult, "utf8"));
+    nestedMatch.matched_ids = [
+      [
+        contract.fixtures.find((fixture) => fixture.pr === 1990)
+          .scorable_ids[0],
+      ],
+    ];
+    writeFileSync(plannedResult, JSON.stringify(nestedMatch));
+    const nestedResult = cli(flags, { root });
+    assert.equal(nestedResult.status, 1);
+    assert.match(
+      JSON.parse(nestedResult.stdout).problems.join(" | "),
+      /result-1990-pipeline-1\.json matched_ids contains non-scalar/,
+    );
+    writeRowEvidence(root, row);
+
+    const negativeCounter = JSON.parse(readFileSync(plannedResult, "utf8"));
+    negativeCounter.novel.novelWrong = -1;
+    writeFileSync(plannedResult, JSON.stringify(negativeCounter));
+    const negativeResult = cli(flags, { root });
+    assert.equal(negativeResult.status, 1);
+    assert.match(
+      JSON.parse(negativeResult.stdout).problems.join(" | "),
+      /result-1990-pipeline-1\.json novel\.novelWrong must be a nonnegative safe integer/,
+    );
+    writeRowEvidence(root, row);
+
+    const invalidClaim = JSON.parse(readFileSync(plannedResult, "utf8"));
+    invalidClaim.claims = [{}];
+    writeFileSync(plannedResult, JSON.stringify(invalidClaim));
+    const invalidClaimResult = cli(flags, { root });
+    assert.equal(invalidClaimResult.status, 1);
+    assert.match(
+      JSON.parse(invalidClaimResult.stdout).problems.join(" | "),
+      /result-1990-pipeline-1\.json claims must contain only non-empty strings/,
+    );
+    writeRowEvidence(root, row);
+
+    const falseNovelSummary = JSON.parse(readFileSync(plannedResult, "utf8"));
+    falseNovelSummary.novel.novelVague += 1;
+    writeFileSync(plannedResult, JSON.stringify(falseNovelSummary));
+    const falseNovelResult = cli(flags, { root });
+    assert.equal(falseNovelResult.status, 1);
+    assert.match(
+      JSON.parse(falseNovelResult.stdout).problems.join(" | "),
+      /result-1990-pipeline-1\.json novel\.novelVague does not match novel\.verdicts/,
+    );
+    writeRowEvidence(root, row);
+
+    const missingRequiredEvidence = JSON.parse(
+      readFileSync(plannedResult, "utf8"),
+    );
+    delete missingRequiredEvidence.scoring_usd;
+    delete missingRequiredEvidence.leak;
+    writeFileSync(plannedResult, JSON.stringify(missingRequiredEvidence));
+    delete row.scoring_usd;
+    writeFileSync(path.join(root, ledgerRelative), `${JSON.stringify(row)}\n`);
+    writeFileSync(rowPath, JSON.stringify(row, null, 2));
+    const calibrationFile = path.join(detail, "calibration.json");
+    const missingCalibrationCost = JSON.parse(
+      readFileSync(calibrationFile, "utf8"),
+    );
+    delete missingCalibrationCost.scoring_usd;
+    writeFileSync(calibrationFile, JSON.stringify(missingCalibrationCost));
+    const missingRequiredResult = cli(flags, { root });
+    assert.equal(missingRequiredResult.status, 1);
+    const missingRequiredProblems = JSON.parse(
+      missingRequiredResult.stdout,
+    ).problems.join(" | ");
+    assert.match(
+      missingRequiredProblems,
+      /result-1990-pipeline-1\.json scoring_usd must be a nonnegative finite number/,
+    );
+    assert.match(
+      missingRequiredProblems,
+      /result-1990-pipeline-1\.json leak must carry a hard array and suspected boolean/,
+    );
+    assert.match(
+      missingRequiredProblems,
+      /calibration\.json scoring_usd must be a nonnegative finite number/,
+    );
+    assert.match(
+      missingRequiredProblems,
+      /row\.scoring_usd must be a nonnegative finite number for scored evidence/,
+    );
+    const localMissingTotal = cli(
+      ["--validate", rowPath, "--append", "--detail-dir", detail, "--json"],
+      { root },
+    );
+    assert.equal(localMissingTotal.status, 1);
+    assert.match(
+      JSON.parse(localMissingTotal.stdout).problems.join(" | "),
+      /row\.scoring_usd is missing; scored run detail requires a recorded judge cost total/,
+    );
+    row.scoring_usd = 0;
+    writeFileSync(path.join(root, ledgerRelative), `${JSON.stringify(row)}\n`);
+    writeFileSync(rowPath, JSON.stringify(row, null, 2));
+    writeRowEvidence(root, row);
+
+    const invalidResultCost = JSON.parse(readFileSync(plannedResult, "utf8"));
+    invalidResultCost.scoring_usd = null;
+    writeFileSync(plannedResult, JSON.stringify(invalidResultCost));
+    const invalidCalibrationCost = JSON.parse(
+      readFileSync(calibrationFile, "utf8"),
+    );
+    invalidCalibrationCost.scoring_usd = "1.25";
+    writeFileSync(calibrationFile, JSON.stringify(invalidCalibrationCost));
+    const invalidCostResult = cli(flags, { root });
+    assert.equal(invalidCostResult.status, 1);
+    const invalidCostProblems = JSON.parse(
+      invalidCostResult.stdout,
+    ).problems.join(" | ");
+    assert.match(
+      invalidCostProblems,
+      /result-1990-pipeline-1\.json scoring_usd must be a nonnegative finite number/,
+    );
+    assert.match(
+      invalidCostProblems,
+      /calibration\.json scoring_usd must be a nonnegative finite number/,
+    );
+    writeRowEvidence(root, row);
+
+    const invalidCellCost = JSON.parse(readFileSync(plannedResult, "utf8"));
+    invalidCellCost.usd = null;
+    invalidCellCost.seconds = "600";
+    writeFileSync(plannedResult, JSON.stringify(invalidCellCost));
+    const invalidCellCostResult = cli(flags, { root });
+    assert.equal(invalidCellCostResult.status, 1);
+    const invalidCellCostProblems = JSON.parse(
+      invalidCellCostResult.stdout,
+    ).problems.join(" | ");
+    assert.match(
+      invalidCellCostProblems,
+      /result-1990-pipeline-1\.json usd must be a nonnegative finite number/,
+    );
+    assert.match(
+      invalidCellCostProblems,
+      /result-1990-pipeline-1\.json seconds must be a nonnegative finite number/,
+    );
+    writeRowEvidence(root, row);
+
+    const leakedResult = JSON.parse(readFileSync(plannedResult, "utf8"));
+    leakedResult.leak = { suspected: false, hard: ["answer key path"] };
+    writeFileSync(plannedResult, JSON.stringify(leakedResult));
+    const hiddenLeak = cli(flags, { root });
+    assert.equal(hiddenLeak.status, 1);
+    const leakProblems = JSON.parse(hiddenLeak.stdout).problems.join(" | ");
+    assert.match(
+      leakProblems,
+      /leak\.suspected must equal whether leak\.hard is non-empty/,
+    );
+    assert.match(
+      leakProblems,
+      /row notes omit leak suspected.*row verdict is .* instead of AMBER/,
+    );
+    leakedResult.leak.suspected = true;
+    writeFileSync(plannedResult, JSON.stringify(leakedResult));
+    row.notes = "leak suspected: answer key path";
+    row.verdict = "AMBER";
+    writeFileSync(path.join(root, ledgerRelative), `${JSON.stringify(row)}\n`);
+    const preservedLeak = cli(flags, { root });
+    assert.equal(
+      preservedLeak.status,
+      0,
+      preservedLeak.stdout + preservedLeak.stderr,
+    );
+    row.notes = "";
+    row.verdict = originalVerdict;
+    writeFileSync(path.join(root, ledgerRelative), `${JSON.stringify(row)}\n`);
+    writeRowEvidence(root, row);
+
+    // A scored explicit plan must retain its pairing. Removing vs_baseline and
+    // changing the verdict to the unpaired result cannot erase that evidence.
+    const planFile = path.join(detail, "plan.json");
+    const explicitPlan = JSON.parse(readFileSync(planFile, "utf8"));
+    explicitPlan.baseline_selection = "explicit";
+    explicitPlan.baseline = {
+      executed_at: "2026-08-08T10:00:00Z",
+      contract_digest: row.contract_digest,
+      comparability_key: row.comparability_key,
+      detail_dir: "docs/evals/review-skill-runs/baseline",
+      row_digest: "0".repeat(64),
+    };
+    writeFileSync(planFile, JSON.stringify(explicitPlan));
+    const lostPairing = cli(flags, { root });
+    assert.equal(lostPairing.status, 1);
+    assert.match(
+      JSON.parse(lostPairing.stdout).problems.join(" | "),
+      /row has no vs_baseline; plan\.json in .* planned an explicit baseline/,
+    );
+    writeRowEvidence(root, row);
+
+    // plan.json is branch-editable evidence. Removing one planned cell and its
+    // result cannot make that cell disappear from the frozen contract matrix.
+    const thinnedPlan = JSON.parse(readFileSync(planFile, "utf8"));
+    const removedCell = thinnedPlan.cells.pop();
+    writeFileSync(planFile, JSON.stringify(thinnedPlan));
+    rmSync(
+      path.join(
+        detail,
+        `result-${removedCell.pr}-${removedCell.condition}-${removedCell.draw}.json`,
+      ),
+    );
+    const thinned = cli(flags, { root });
+    assert.equal(thinned.status, 1);
+    assert.match(
+      JSON.parse(thinned.stdout).problems.join(" | "),
+      /plan\.json in .* cells do not match the frozen full matrix/,
+    );
+    writeRowEvidence(root, row);
 
     // Re-keying a first full row after the local append leaves its no-baseline
     // GREEN verdict, its bits and its counters all intact, and opens a lineage
@@ -4333,6 +6459,48 @@ test("--revalidate-appended checks a row against its committed plan", () => {
       /row comparability_key is "9+"; plan\.json in .* planned/,
     );
 
+    const rekeyedPlan = JSON.parse(readFileSync(planFile, "utf8"));
+    rekeyedPlan.comparability_key = committed.comparability_key;
+    writeFileSync(planFile, JSON.stringify(rekeyedPlan));
+    const jointlyRekeyed = cli(flags, { root });
+    assert.equal(jointlyRekeyed.status, 1);
+    assert.match(
+      JSON.parse(jointlyRekeyed.stdout).problems.join(" | "),
+      /current frozen inputs derive/,
+    );
+    writeRowEvidence(root, row);
+
+    writeFileSync(
+      ledgerPath,
+      `${JSON.stringify({
+        ...row,
+        conditions: {
+          ...row.conditions,
+          pipeline: { ...row.conditions.pipeline, model: "forged-model" },
+        },
+      })}\n`,
+    );
+    const reprovenanced = cli(flags, { root });
+    assert.equal(reprovenanced.status, 1);
+    assert.match(
+      JSON.parse(reprovenanced.stdout).problems.join(" | "),
+      /row condition pipeline\.model is "forged-model"/,
+    );
+
+    writeFileSync(ledgerPath, `${JSON.stringify(row)}\n`);
+    for (const file of readdirSync(detail)) {
+      if (file === "calibration.json" || file.startsWith("result-")) {
+        rmSync(path.join(detail, file));
+      }
+    }
+    const evidenceFree = cli(flags, { root });
+    assert.equal(evidenceFree.status, 1);
+    assert.match(
+      JSON.parse(evidenceFree.stdout).problems.join(" | "),
+      /carries no scored result-\*\.json files.*carries no calibration\.json/,
+    );
+    writeRowEvidence(root, row);
+
     // Deleting the plan does not buy the check back: a directory that holds
     // cell results must hold the plan that produced them.
     writeFileSync(ledgerPath, `${JSON.stringify(row)}\n`);
@@ -4345,7 +6513,59 @@ test("--revalidate-appended checks a row against its committed plan", () => {
     assert.equal(deleted.status, 1);
     assert.match(
       JSON.parse(deleted.stdout).problems.join(" | "),
-      /carries cell results but no plan\.json/,
+      /carries no plan\.json/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended binds candidate status to execution evidence", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "base");
+
+    const row = makeRow({ fullMatrix: true });
+    row.inputs = {
+      ...row.inputs,
+      skill_ref: "/tmp/review-candidate",
+      dirty: true,
+    };
+    const detail = writeRowEvidence(root, row);
+
+    row.inputs = { ...row.inputs, skill_ref: "installed" };
+    delete row.inputs.dirty;
+    const planFile = path.join(detail, "plan.json");
+    const plan = JSON.parse(readFileSync(planFile, "utf8"));
+    plan.inputs = row.inputs;
+    writeFileSync(planFile, JSON.stringify(plan));
+    writeFileSync(path.join(root, ledgerRelative), `${JSON.stringify(row)}\n`);
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 1);
+    const problems = JSON.parse(checked.stdout).problems.join(" | ");
+    assert.match(
+      problems,
+      /result-.* fingerprint does not match the plan execution inputs/,
+    );
+    assert.match(
+      problems,
+      /calibration\.json fingerprint does not match the plan execution inputs/,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -4369,12 +6589,19 @@ test("a hand-assembled bridge row keeps the full run's plan", () => {
       comparability_key: row.comparability_key,
       kind: "full",
       detail_dir: row.detail_dir,
+      baseline_selection: "automatic",
+      baseline: null,
       inputs: row.inputs,
+      cells: planCells({ contract, kind: "full" }),
     };
     writeFileSync(path.join(dir, "plan.json"), JSON.stringify(plan));
-    assert.deepEqual(planProvenanceProblems({ dir, row }), []);
+    assert.deepEqual(planProvenanceProblems({ dir, row, contract }), []);
     assert.deepEqual(
-      planProvenanceProblems({ dir, row: { ...row, kind: "bridge" } }),
+      planProvenanceProblems({
+        dir,
+        row: { ...row, kind: "bridge" },
+        contract,
+      }),
       [],
     );
 
@@ -4384,6 +6611,7 @@ test("a hand-assembled bridge row keeps the full run's plan", () => {
       planProvenanceProblems({
         dir,
         row: { ...row, kind: "bridge", comparability_key: "9".repeat(64) },
+        contract,
       }).join(" | "),
       /row comparability_key is "9+"; plan\.json in .* planned/,
     );
@@ -4398,18 +6626,144 @@ test("a hand-assembled bridge row keeps the full run's plan", () => {
       planProvenanceProblems({
         dir,
         row: { ...row, kind: "bridge" },
+        contract,
       }).join(" | "),
       /row kind is "bridge"; plan\.json in .* planned "canary"/,
     );
     writeFileSync(path.join(dir, "plan.json"), JSON.stringify(plan));
     assert.match(
-      planProvenanceProblems({ dir, row: { ...row, kind: "canary" } }).join(
-        " | ",
-      ),
+      planProvenanceProblems({
+        dir,
+        row: { ...row, kind: "canary" },
+        contract,
+      }).join(" | "),
       /row kind is "canary"; plan\.json in .* planned "full"/,
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended accepts an explicit bridge pairing", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "base");
+
+    const retiring = makeRow({
+      executedAt: "2026-08-08T10:00:00Z",
+      fullMatrix: true,
+    });
+    const newer = makeRow({
+      executedAt: "2026-09-08T10:00:00Z",
+      fullMatrix: true,
+    });
+    newer.detail_dir = "docs/evals/review-skill-runs/2026-09-08-new-model";
+    const bridge = JSON.parse(JSON.stringify(newer));
+    bridge.kind = "bridge";
+    bridge.vs_baseline = buildVsBaseline({
+      row: bridge,
+      baselineRow: retiring,
+      selection: "explicit",
+    });
+    bridge.verdict = verdict({
+      contract,
+      row: bridge,
+      baselineRow: retiring,
+      baselineIsExplicit: true,
+    }).verdict;
+    writeRowEvidence(root, retiring);
+    writeRowEvidence(root, newer);
+    const ledgerPath = path.join(root, ledgerRelative);
+    writeFileSync(
+      ledgerPath,
+      `${JSON.stringify(retiring)}\n${JSON.stringify(bridge)}\n`,
+    );
+    const flags = [
+      "--check-ledger",
+      "--revalidate-appended",
+      "--base-ref",
+      "HEAD",
+      "--json",
+    ];
+    const checked = cli(flags, { root });
+    assert.equal(checked.status, 0, checked.stdout + checked.stderr);
+
+    rmSync(path.join(root, newer.detail_dir), {
+      recursive: true,
+      force: true,
+    });
+    mkdirSync(path.join(root, newer.detail_dir), { recursive: true });
+    const retiringVerdict = retiring.verdict;
+    retiring.notes = "leak suspected: test fixture";
+    retiring.verdict = verdict({ contract, row: retiring }).verdict;
+    writeFileSync(
+      ledgerPath,
+      `${JSON.stringify(retiring)}\n${JSON.stringify(bridge)}\n`,
+    );
+    const ineligibleBridgeBaseline = cli(flags, { root });
+    assert.equal(ineligibleBridgeBaseline.status, 1);
+    assert.match(
+      JSON.parse(ineligibleBridgeBaseline.stdout).problems.join(" | "),
+      /explicit baseline .* is not eligible: baseline notes record a suspected leak/,
+    );
+    retiring.notes = "";
+    retiring.verdict = retiringVerdict;
+    writeFileSync(
+      ledgerPath,
+      `${JSON.stringify(retiring)}\n${JSON.stringify(bridge)}\n`,
+    );
+    writeRowEvidence(root, newer);
+
+    const bridgeVerdict = bridge.verdict;
+    const bridgeResult = path.join(
+      root,
+      newer.detail_dir,
+      "result-1990-pipeline-1.json",
+    );
+    const leakedResult = JSON.parse(readFileSync(bridgeResult, "utf8"));
+    leakedResult.leak = { suspected: true, hard: ["answer key path"] };
+    writeFileSync(bridgeResult, JSON.stringify(leakedResult));
+    const hiddenBridgeLeak = cli(flags, { root });
+    assert.equal(hiddenBridgeLeak.status, 1);
+    assert.match(
+      JSON.parse(hiddenBridgeLeak.stdout).problems.join(" | "),
+      /row notes omit leak suspected.*row verdict is .* instead of AMBER/,
+    );
+    bridge.notes = "leak suspected: answer key path";
+    bridge.verdict = "AMBER";
+    writeFileSync(
+      ledgerPath,
+      `${JSON.stringify(retiring)}\n${JSON.stringify(bridge)}\n`,
+    );
+    const preservedBridgeLeak = cli(flags, { root });
+    assert.equal(
+      preservedBridgeLeak.status,
+      0,
+      preservedBridgeLeak.stdout + preservedBridgeLeak.stderr,
+    );
+    bridge.notes = "";
+    bridge.verdict = bridgeVerdict;
+    writeRowEvidence(root, newer);
+
+    delete bridge.vs_baseline.selection;
+    writeFileSync(
+      ledgerPath,
+      `${JSON.stringify(retiring)}\n${JSON.stringify(bridge)}\n`,
+    );
+    const missingSelection = cli(flags, { root });
+    assert.equal(missingSelection.status, 1);
+    assert.match(
+      JSON.parse(missingSelection.stdout).problems.join(" | "),
+      /vs_baseline\.selection must record automatic or explicit/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

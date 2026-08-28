@@ -752,14 +752,17 @@ test("scorerDigest is a stable sha256 over the scorer and its prompts", () => {
 });
 
 test("scorerDigest covers every module that can move a recorded number", () => {
-  // The per-condition fold, the recompute and the verdict rules live outside
-  // this module, so an edit to one of them must break the pairing too. So do
-  // the fixture helpers: `review-eval-fixtures.mjs` chooses the matrix, the
-  // truth file and the recall denominator, and `build-fixture.sh` materializes
-  // the checkout the contestant reviews and carries the checks that verify it.
+  // The per-condition fold, the recompute, timestamp validation and the
+  // verdict rules live outside this module, so an edit to one of them must
+  // break the pairing too. So do the fixture helpers:
+  // `review-eval-fixtures.mjs` chooses the matrix, the truth file and the recall
+  // denominator, and `build-fixture.sh` materializes the checkout the
+  // contestant reviews and carries the checks that verify it.
   for (const name of [
+    "review-eval.mjs",
     "review-eval-run.mjs",
     "review-eval-result-shape.mjs",
+    "review-eval-ledger.mjs",
     "review-eval-report.mjs",
     "review-eval-fixtures.mjs",
     "build-fixture.sh",

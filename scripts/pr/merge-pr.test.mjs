@@ -191,13 +191,16 @@ function harness({
   // The second element, when present, is what the post-confirmation re-read
   // returns; without it both reads see the same state.
   summaryAfterConfirmation = null,
-  // What the post-merge confirmation read reports. A merge-queue base leaves
-  // the pull request OPEN even though `gh pr merge` exited 0.
+  // What the post-merge confirmation read reports.
   mergedState = "MERGED",
   mergeOutcomeError = null,
-  disableAutoError = null,
   mergeCommandError = null,
   mergedHeadOid = null,
+  // Repository.mergeQueue covers both ruleset and classic-protection queues.
+  baseMergeQueue = null,
+  mergeQueueError = null,
+  baseMergeQueueAfterConfirmation = undefined,
+  mergeQueueErrorAfterConfirmation = null,
   // Rule types GitHub reports for the base branch, and a read failure knob.
   baseRuleTypes = ["pull_request", "required_status_checks"],
   baseRulesError = null,
@@ -207,13 +210,16 @@ function harness({
   autoMergeError = null,
   standingAutoMergeAfterConfirmation = null,
   autoMergeErrorAfterConfirmation = null,
+  // The base returned beside the final intent state. This can differ from the
+  // last ready-state read when a retarget lands between those two requests.
+  baseRefNameAtFinalIntent = null,
   openPullRequestCount = 1,
   baseRulesErrorAfterConfirmation = null,
   // The base the pull request reports AFTER the merge. A retarget between the
   // final gate read and GitHub processing the merge shows up only here.
   mergedBaseRefName = null,
-  // Logins returned by successive `gh api user` calls; the second models a
-  // `gh auth switch` during the confirmation prompt.
+  // Logins returned by the initial `gh api user` read and the final combined
+  // GraphQL viewer read. The second models `gh auth switch` during the prompt.
   logins = null,
   // The repository URL `gh repo view` reports, which carries the host.
   repoUrl = "https://github.com/mento-protocol/monitoring-monorepo",
@@ -222,23 +228,78 @@ function harness({
   const calls = {
     gh: [],
     git: [],
+    events: [],
     merges: [],
     consents: [],
     prompts: [],
     readyStateReads: 0,
     logins: 0,
+    mergeQueues: [],
+    finalIntentReads: [],
     branchRules: [],
     autoMergeReads: 0,
   };
   let output = "";
+  const nextLogin = () => {
+    const login = logins
+      ? (logins[calls.logins] ?? logins[logins.length - 1])
+      : "chapati23";
+    calls.logins += 1;
+    return login;
+  };
 
   const gh = async (args) => {
     calls.gh.push(args);
+    calls.events.push({ kind: "remote-read", source: "gh", args });
     if (args[0] === "repo" && args[1] === "view") {
       return JSON.stringify({
         nameWithOwner: "mento-protocol/monitoring-monorepo",
         parent,
         url: repoUrl,
+      });
+    }
+    if (
+      args[0] === "api" &&
+      args.includes("graphql") &&
+      args.some((arg) => String(arg).includes("autoMergeRequest"))
+    ) {
+      calls.mergeQueues.push(args);
+      calls.autoMergeReads += 1;
+      calls.finalIntentReads.push(args);
+      if (mergeQueueErrorAfterConfirmation) {
+        throw new Error(mergeQueueErrorAfterConfirmation);
+      }
+      if (autoMergeErrorAfterConfirmation) {
+        throw new Error(autoMergeErrorAfterConfirmation);
+      }
+      const queue =
+        baseMergeQueueAfterConfirmation !== undefined
+          ? baseMergeQueueAfterConfirmation
+          : baseMergeQueue;
+      const request = standingAutoMergeAfterConfirmation
+        ? standingAutoMergeAfterConfirmation
+        : standingAutoMerge;
+      return JSON.stringify({
+        data: {
+          viewer: { login: nextLogin() },
+          repository: {
+            mergeQueue: queue,
+            pullRequest: {
+              baseRefName:
+                baseRefNameAtFinalIntent ??
+                summaryAfterConfirmation?.pr?.baseRefName ??
+                summary.pr.baseRefName,
+              autoMergeRequest: request,
+            },
+          },
+        },
+      });
+    }
+    if (args[0] === "api" && args.includes("graphql")) {
+      if (mergeQueueError) throw new Error(mergeQueueError);
+      calls.mergeQueues.push(args);
+      return JSON.stringify({
+        data: { repository: { mergeQueue: baseMergeQueue } },
       });
     }
     if (
@@ -258,9 +319,7 @@ function harness({
       return JSON.stringify([types.map((type) => ({ type }))]);
     }
     if (args[0] === "api" && args.includes("user")) {
-      if (logins)
-        return `${logins[calls.logins++] ?? logins[logins.length - 1]}\n`;
-      return "chapati23\n";
+      return `${nextLogin()}\n`;
     }
     if (args[0] === "pr" && args[1] === "list") {
       return JSON.stringify(
@@ -272,16 +331,9 @@ function harness({
         })),
       );
     }
-    if (
-      args[0] === "pr" &&
-      args[1] === "merge" &&
-      args.includes("--disable-auto")
-    ) {
-      if (disableAutoError) throw new Error(disableAutoError);
-      return "";
-    }
-    // The pre-merge auto-merge read and the post-merge outcome read are both
-    // `pr view`; only their fields tell them apart.
+    // The pre-briefing auto-merge read and the post-merge outcome read are both
+    // `pr view`; only their fields tell them apart. The post-confirmation
+    // auto-merge read shares one GraphQL response with the final queue read.
     if (
       args[0] === "pr" &&
       args[1] === "view" &&
@@ -289,14 +341,7 @@ function harness({
     ) {
       if (autoMergeError) throw new Error(autoMergeError);
       calls.autoMergeReads += 1;
-      if (calls.autoMergeReads > 1 && autoMergeErrorAfterConfirmation) {
-        throw new Error(autoMergeErrorAfterConfirmation);
-      }
-      const request =
-        calls.autoMergeReads > 1 && standingAutoMergeAfterConfirmation
-          ? standingAutoMergeAfterConfirmation
-          : standingAutoMerge;
-      return JSON.stringify({ autoMergeRequest: request });
+      return JSON.stringify({ autoMergeRequest: standingAutoMerge });
     }
     if (args[0] === "pr" && args[1] === "view") {
       if (mergeOutcomeError) throw new Error(mergeOutcomeError);
@@ -332,6 +377,10 @@ function harness({
         gh,
         git,
         fetchReadyState: async () => {
+          calls.events.push({
+            kind: "remote-read",
+            source: "ready-state",
+          });
           if (readyStateError) throw new Error(readyStateError);
           calls.readyStateReads += 1;
           if (calls.readyStateReads > 1 && summaryAfterConfirmation) {
@@ -340,6 +389,7 @@ function harness({
           return summary;
         },
         merge: async (args) => {
+          calls.events.push({ kind: "merge", args });
           calls.merges.push(args);
           if (mergeCommandError) throw new Error(mergeCommandError);
         },
@@ -348,6 +398,7 @@ function harness({
           return answer;
         },
         appendConsent: async ({ record }) => {
+          calls.events.push({ kind: "consent" });
           calls.consents.push(record);
           return "/repo/.merge-consents.jsonl";
         },
@@ -361,6 +412,17 @@ function harness({
 function assertNothingHappened(calls) {
   assertEqual(calls.consents.length, 0, "consent must not be recorded");
   assertEqual(calls.merges.length, 0, "merge must not run");
+}
+
+function assertNoDeferredMergeMutation(calls) {
+  const mutation = calls.gh.find(
+    (args) => args[0] === "pr" && args[1] === "merge",
+  );
+  assertEqual(
+    mutation,
+    undefined,
+    "reconciliation must not enable or disable auto-merge",
+  );
 }
 
 // --- Refusal: non-TTY ------------------------------------------------------
@@ -697,7 +759,7 @@ await test("an override reason still refuses a head that moved mid-confirmation"
 
 // --- The approved path ------------------------------------------------------
 
-await test("records consent before merging, and binds the merge to the head", async () => {
+await test("records consent before a synchronous squash merge bound to the head", async () => {
   const { run, calls, output } = harness();
   const result = await run();
 
@@ -715,21 +777,38 @@ await test("records consent before merging, and binds the merge to the head", as
   );
 
   const mergeArgs = calls.merges[0];
-  assertEqual(mergeArgs[0], "pr");
-  assertEqual(mergeArgs[1], "merge");
-  assertEqual(mergeArgs[2], "2071");
-  assert(mergeArgs.includes("--squash"), "merge must be a squash");
+  assertEqual(mergeArgs[0], "api");
+  assertEqual(
+    mergeArgs[mergeArgs.indexOf("--hostname") + 1],
+    "github.com",
+    "the write must name its host",
+  );
+  assertEqual(mergeArgs[mergeArgs.indexOf("--method") + 1], "PUT");
   assert(
-    mergeArgs.includes("--match-head-commit"),
-    "merge must be bound to the reviewed head",
+    mergeArgs.includes(
+      "repos/mento-protocol/monitoring-monorepo/pulls/2071/merge",
+    ),
+    "the write must use the synchronous REST merge endpoint",
+  );
+  assert(
+    !mergeArgs.some((arg) => String(arg).includes("merge-async")),
+    "the asynchronous endpoint can enqueue and must never be used",
+  );
+  const fields = mergeArgs.filter(
+    (_arg, index) => mergeArgs[index - 1] === "--raw-field",
   );
   assertEqual(
-    mergeArgs[mergeArgs.indexOf("--match-head-commit") + 1],
-    HEAD_OID,
+    JSON.stringify(fields),
+    JSON.stringify([`sha=${HEAD_OID}`, "merge_method=squash"]),
+    "the body must bind the approved head and squash method only",
   );
   assert(
-    mergeArgs.includes("mento-protocol/monitoring-monorepo"),
-    "merge must name the base repository explicitly",
+    !fields.some(
+      (field) =>
+        field.startsWith("commit_title=") ||
+        field.startsWith("commit_message="),
+    ),
+    "omitting title and message preserves the repository squash defaults",
   );
 
   const briefing = output();
@@ -1034,7 +1113,7 @@ await test("sanitizeTerminalText keeps ordinary text and reports empty values", 
 });
 
 await test("refuses when the base branch is retargeted mid-confirmation", async () => {
-  // `--match-head-commit` binds the head only, so a retarget keeps the same
+  // The REST `sha` binds the head only, so a retarget keeps the same
   // SHA and would merge into a branch the operator was never shown.
   const retargeted = readySummary();
   retargeted.pr = { ...retargeted.pr, baseRefName: "release/v2" };
@@ -1369,18 +1448,17 @@ await test("every record lands on its own line, blank lines and all", async () =
   }
 });
 
-await test("an enqueued pull request is not reported as merged", async () => {
-  // `gh pr merge` exits 0 after enqueueing on a merge-queue base. Reporting
-  // that as merged would let callers run post-merge closeout while the pull
-  // request is still open and the queue is still retesting it.
+await test("an open post-call state is not reported as merged", async () => {
+  // The synchronous endpoint cannot enqueue. An OPEN outcome means the direct
+  // merge did not complete and no standing request came from this run.
   const h = harness({ mergedState: "OPEN" });
 
   const result = await h.run();
-  assertEqual(result.merged, false, "an enqueued request is not merged");
-  assertEqual(result.queued, true, "it should be reported as queued");
+  assertEqual(result.merged, false, "an open pull request is not merged");
+  assertEqual(result.queued, undefined, "the direct call cannot queue it");
   assertEqual(result.verified, true, "the state was read successfully");
   assert(
-    h.output().includes("not merged"),
+    h.output().includes("created no queued or auto-merge request"),
     `the operator should be told, got:\n${h.output()}`,
   );
 });
@@ -1417,9 +1495,15 @@ await test("an Enterprise checkout keeps its host on every call", async () => {
 
   const merged = h.calls.merges[0];
   assertEqual(
-    merged[merged.indexOf("--repo") + 1],
-    "ghe.example.com/mento-protocol/monitoring-monorepo",
+    merged[merged.indexOf("--hostname") + 1],
+    "ghe.example.com",
     "the merge must target the Enterprise host",
+  );
+  assert(
+    merged.includes(
+      "repos/mento-protocol/monitoring-monorepo/pulls/2071/merge",
+    ),
+    "the endpoint must name the Enterprise repository",
   );
 
   const login = h.calls.gh.find(
@@ -1442,10 +1526,7 @@ await test("a github.com checkout still names github.com explicitly", async () =
   );
   assertEqual(login[login.indexOf("--hostname") + 1], "github.com");
   const merged = h.calls.merges[0];
-  assertEqual(
-    merged[merged.indexOf("--repo") + 1],
-    "mento-protocol/monitoring-monorepo",
-  );
+  assertEqual(merged[merged.indexOf("--hostname") + 1], "github.com");
 });
 
 await test("an explicit host-qualified --repo reaches gh verbatim", async () => {
@@ -1455,10 +1536,8 @@ await test("an explicit host-qualified --repo reaches gh verbatim", async () => 
   await h.run();
 
   const merged = h.calls.merges[0];
-  assertEqual(
-    merged[merged.indexOf("--repo") + 1],
-    "ghe.example.com/acme/widgets",
-  );
+  assertEqual(merged[merged.indexOf("--hostname") + 1], "ghe.example.com");
+  assert(merged.includes("repos/acme/widgets/pulls/2071/merge"));
   const login = h.calls.gh.find(
     (args) => args[0] === "api" && args.includes("user"),
   );
@@ -1637,7 +1716,7 @@ await test("the login is always read from a named host", async () => {
 });
 
 await test("a base retargeted during the merge itself is reported", async () => {
-  // `--match-head-commit` pins the head, and GitHub's merge API has no
+  // The REST `sha` pins the head, and GitHub's merge API has no
   // parameter that pins the base — its only matching field is `sha`. So this
   // race cannot be prevented in the wrapper; it must be detected and said
   // plainly rather than reported as a clean merge.
@@ -1684,9 +1763,9 @@ await test("an unchanged base reports no mismatch", async () => {
 });
 
 await test("a login switched during confirmation refuses", async () => {
-  // The merge starts a fresh gh, which reads whatever credentials are active
-  // then. Recording one login and merging as another would break exactly the
-  // attribution the ledger exists to provide.
+  // The final combined GraphQL response identifies the credential that read
+  // every final state. Recording one login and observing another would break
+  // exactly the attribution the ledger exists to provide.
   const h = harness({ logins: ["chapati23", "someone-else"] });
 
   await assertRefuses(h.run(), "login changed from chapati23 to someone-else");
@@ -1699,6 +1778,14 @@ await test("an unchanged login still merges", async () => {
   const result = await h.run();
   assertEqual(result.merged, true);
   assertEqual(result.record.login, "chapati23");
+});
+
+await test("an unsafe final viewer login refuses", async () => {
+  const h = harness({ logins: ["chapati23", "not a login"] });
+
+  await assertRefuses(h.run(), "named no usable viewer login");
+  assertEqual(h.calls.merges.length, 0, "nothing should have merged");
+  assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
 });
 
 await test("refuses a bare target while GH_HOST is set", async () => {
@@ -1757,53 +1844,23 @@ await test("a login with unsafe characters still refuses", async () => {
   assertEqual(h.calls.merges.length, 0, "nothing should have merged");
 });
 
-await test("an enqueued merge has its pending request cancelled", async () => {
-  // gh enqueues when required checks pass and enables auto-merge when they do
-  // not. Either leaves a standing request GitHub can complete later, with none
-  // of the gates — the merge nobody approved.
+await test("an OPEN outcome never mutates auto-merge state", async () => {
   const h = harness({ mergedState: "OPEN" });
   const result = await h.run();
 
   assertEqual(result.merged, false);
-  const cancel = h.calls.gh.find(
-    (args) =>
-      args[0] === "pr" &&
-      args[1] === "merge" &&
-      args.includes("--disable-auto"),
-  );
-  assert(cancel !== undefined, "the pending merge request must be cancelled");
-  assertEqual(
-    cancel[cancel.indexOf("--repo") + 1],
-    "mento-protocol/monitoring-monorepo",
-  );
+  assertNoDeferredMergeMutation(h.calls);
   assert(
-    h.output().includes("Auto-merge has been disabled"),
+    h.output().includes("created no queued or auto-merge request"),
     `the operator should be told, got:\n${h.output()}`,
   );
-  assert(
-    h.output().includes("does not remove a merge-queue entry"),
-    "the report must not overstate what --disable-auto did",
-  );
 });
 
-await test("a failed cancellation is reported, not swallowed", async () => {
-  const h = harness({ mergedState: "OPEN", disableAutoError: "gh refused" });
-  const result = await h.run();
-
-  assertEqual(result.merged, false);
-  assert(
-    h.output().includes("could NOT be cancelled"),
-    `the operator must be warned, got:\n${h.output()}`,
-  );
-  assert(
-    h.output().includes("without any of the gates"),
-    "the warning should say what the risk is",
-  );
-});
-
-await test("a failing merge command still reconciles the pull request", async () => {
-  // The request may have reached GitHub before the command failed, so its
-  // failure is ambiguous rather than a clean abort.
+await test("a foreign auto-merge request after the final read is never cancelled", async () => {
+  // Model the issue #2098 window: another operator acts after the final state
+  // read, while this run's direct merge reports a transport failure and the PR
+  // remains OPEN. The wrapper cannot prove ownership of any later auto-merge
+  // request, so reconciliation must remain read-only.
   const h = harness({
     mergeCommandError: "connection reset",
     mergedState: "OPEN",
@@ -1811,13 +1868,7 @@ await test("a failing merge command still reconciles the pull request", async ()
   const result = await h.run();
 
   assertEqual(result.merged, false);
-  const cancel = h.calls.gh.find(
-    (args) =>
-      args[0] === "pr" &&
-      args[1] === "merge" &&
-      args.includes("--disable-auto"),
-  );
-  assert(cancel !== undefined, "a pending request must still be cancelled");
+  assertNoDeferredMergeMutation(h.calls);
   assert(
     h.output().includes("connection reset"),
     `the command failure must be surfaced, got:\n${h.output()}`,
@@ -1836,25 +1887,22 @@ await test("a failing merge command on an already-merged PR reports the merge", 
   );
 });
 
-await test("an unreadable outcome cancels any pending request", async () => {
-  // Neither confirmed nor refuted: cancel first, report second.
+await test("an unreadable outcome never mutates auto-merge state", async () => {
   const h = harness({ mergeOutcomeError: "gh exploded" });
   const result = await h.run();
 
   assertEqual(result.merged, false);
   assertEqual(result.verified, false);
-  const cancel = h.calls.gh.find(
-    (args) =>
-      args[0] === "pr" &&
-      args[1] === "merge" &&
-      args.includes("--disable-auto"),
+  assertNoDeferredMergeMutation(h.calls);
+  assert(
+    h.output().includes("created no standing merge request"),
+    `the operator should be told, got:\n${h.output()}`,
   );
-  assert(cancel !== undefined, "an unreadable outcome must still cancel");
 });
 
 await test("a merge of a head nobody approved is not a verified merge", async () => {
-  // If the head moved and something else merged the new one, our
-  // --match-head-commit request fails while the PR still reads MERGED. The
+  // If the head moved and something else merged the new one, our REST `sha`
+  // check fails while the PR still reads MERGED. The
   // consent record would then name a commit GitHub never merged.
   const h = harness({ mergedHeadOid: "c".repeat(40) });
   const result = await h.run();
@@ -1883,9 +1931,41 @@ await test("a MERGED state with no head OID is not a verified merge", async () =
   );
 });
 
-await test("a merge-queue base refuses before anything is sent", async () => {
-  // gh enqueues such a base and returns success, and nothing this command can
-  // call removes a queue entry — so the merge must not be attempted at all.
+await test("a classic-protection merge queue refuses before direct merge", async () => {
+  // Repository.mergeQueue exposes a classic queue that the ruleset endpoint
+  // cannot see. The synchronous endpoint could bypass it, so object means stop.
+  const h = harness({
+    baseMergeQueue: {
+      id: "MQ_kwDOExample",
+      url: "https://github.com/mento-protocol/monitoring-monorepo/queue/main",
+    },
+  });
+
+  await assertRefuses(h.run(), "uses a merge queue");
+  assertEqual(h.calls.merges.length, 0, "no merge request may be sent");
+  assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
+  assertEqual(
+    h.calls.prompts.length,
+    0,
+    "the operator is not asked to confirm",
+  );
+  assertEqual(
+    h.calls.branchRules.length,
+    0,
+    "the authoritative queue object refuses before the diagnostic read",
+  );
+});
+
+await test("an unreadable merge-queue state refuses rather than guessing", async () => {
+  const h = harness({ mergeQueueError: "GraphQL: Resource not accessible" });
+
+  await assertRefuses(h.run(), "unable to read the merge-queue state");
+  assertEqual(h.calls.merges.length, 0, "no merge request may be sent");
+  assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
+});
+
+await test("a ruleset merge-queue signal also refuses before direct merge", async () => {
+  // Keep the ruleset endpoint as a second signal and specific diagnosis.
   const h = harness({
     baseRuleTypes: ["pull_request", "merge_queue", "required_status_checks"],
   });
@@ -1914,6 +1994,29 @@ await test("an ordinary protected base still merges", async () => {
   const h = harness();
   const result = await h.run();
   assertEqual(result.merged, true);
+  assertEqual(
+    h.calls.mergeQueues.length,
+    2,
+    "a null queue response is proved before and after confirmation",
+  );
+});
+
+await test("the merge-queue read binds the host, repository, and branch", async () => {
+  const h = harness({
+    argv: ["--pr", "2071", "--repo", "ghe.example.com/acme/widgets"],
+  });
+  await h.run();
+
+  const read = h.calls.mergeQueues[0];
+  assert(read !== undefined, "the merge queue must be read");
+  assertEqual(read[read.indexOf("--hostname") + 1], "ghe.example.com");
+  assert(read.includes("owner=acme"), "the query must bind the owner");
+  assert(read.includes("name=widgets"), "the query must bind the repository");
+  assert(read.includes("branch=main"), "the query must bind the base branch");
+  assert(
+    read.some((arg) => String(arg).includes("mergeQueue(branch:$branch)")),
+    "the query must use Repository.mergeQueue for the exact branch",
+  );
 });
 
 await test("the branch-rules read names its host and paginates", async () => {
@@ -1969,10 +2072,48 @@ await test("a merge queue switched on during confirmation refuses", async () => 
   assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
 });
 
+await test("a classic merge queue switched on during confirmation refuses", async () => {
+  const h = harness({
+    baseMergeQueueAfterConfirmation: {
+      id: "MQ_kwDOExample",
+      url: "https://github.com/mento-protocol/monitoring-monorepo/queue/main",
+    },
+  });
+
+  await assertRefuses(
+    h.run(),
+    "gained a merge queue while you were confirming",
+  );
+  assertEqual(h.calls.merges.length, 0, "no merge request may be sent");
+  assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
+});
+
+await test("an unreadable merge queue after confirmation refuses", async () => {
+  const h = harness({
+    mergeQueueErrorAfterConfirmation: "GraphQL: Something went wrong",
+  });
+
+  await assertRefuses(h.run(), "unable to re-read the final merge intent");
+  assertEqual(h.calls.merges.length, 0, "no merge request may be sent");
+  assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
+});
+
+await test("a retarget before the final intent read refuses", async () => {
+  // The combined query must prove that its queue branch is still the pull
+  // request's current base. The REST `sha` binds the head, but not this base.
+  const h = harness({ baseRefNameAtFinalIntent: "release/v2" });
+
+  await assertRefuses(
+    h.run(),
+    "was retargeted from main to release/v2 after the final readiness read",
+  );
+  assertEqual(h.calls.merges.length, 0, "nothing should have merged");
+  assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
+});
+
 await test("a pull request that already has auto-merge enabled refuses", async () => {
   // Someone asked GitHub to merge it outside these gates. This command must
-  // neither merge over that nor cancel it — its own cleanup could not tell
-  // compensation from interference.
+  // neither merge over that nor cancel it.
   const h = harness({
     standingAutoMerge: { enabledAt: "2026-08-26T00:00:00Z" },
   });
@@ -1980,49 +2121,21 @@ await test("a pull request that already has auto-merge enabled refuses", async (
   await assertRefuses(h.run(), "already has auto-merge enabled");
   assertEqual(h.calls.merges.length, 0, "no merge request may be sent");
   assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
-  const cancel = h.calls.gh.find(
-    (args) => args[0] === "pr" && args.includes("--disable-auto"),
-  );
-  assertEqual(
-    cancel,
-    undefined,
-    "another operator's request must be left alone",
-  );
+  assertNoDeferredMergeMutation(h.calls);
 });
 
 await test("an unreadable auto-merge state refuses", async () => {
-  // Not knowing whether a request already stands is the case where cleanup
-  // could cancel somebody else's.
+  // Not knowing whether another operator already has a request standing is an
+  // ambiguous intent boundary, so the wrapper does not merge over it.
   const h = harness({ autoMergeError: "403 Forbidden" });
 
   await assertRefuses(h.run(), "unable to read the auto-merge state");
   assertEqual(h.calls.merges.length, 0, "no merge request may be sent");
 });
 
-await test("the cleanup only ever cancels a request this run created", async () => {
-  // The refusal above is what makes this true: with no standing request before
-  // the merge, anything --disable-auto turns off was created by this run.
-  const h = harness({ mergedState: "OPEN" });
-  await h.run();
-
-  const autoRead = h.calls.gh.find(
-    (args) => args[0] === "pr" && args.includes("autoMergeRequest"),
-  );
-  assert(
-    autoRead !== undefined,
-    "the pre-merge auto-merge read is what licenses the cleanup",
-  );
-  const cancel = h.calls.gh.find(
-    (args) => args[0] === "pr" && args.includes("--disable-auto"),
-  );
-  assert(cancel !== undefined, "this run's own request is still cancelled");
-});
-
 await test("an auto-merge request enabled during confirmation refuses", async () => {
-  // The pre-briefing read is what licenses the cleanup to call anything it
-  // cancels its own. That licence expires the moment another operator can act,
-  // which the unbounded prompt gives them — so the state is re-read, like every
-  // other gate.
+  // The state is re-read after the unbounded prompt so the wrapper does not
+  // merge over another operator's newly recorded intent.
   const h = harness({
     standingAutoMergeAfterConfirmation: { enabledAt: "2026-08-27T00:00:00Z" },
   });
@@ -2033,14 +2146,7 @@ await test("an auto-merge request enabled during confirmation refuses", async ()
   );
   assertEqual(h.calls.merges.length, 0, "nothing should have merged");
   assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
-  const cancel = h.calls.gh.find(
-    (args) => args[0] === "pr" && args.includes("--disable-auto"),
-  );
-  assertEqual(
-    cancel,
-    undefined,
-    "the other operator's request must be left alone",
-  );
+  assertNoDeferredMergeMutation(h.calls);
 });
 
 await test("an unreadable auto-merge state after confirming refuses", async () => {
@@ -2048,7 +2154,7 @@ await test("an unreadable auto-merge state after confirming refuses", async () =
   // branch is asserted with no consent and no merge — the suite's contract.
   const h = harness({ autoMergeErrorAfterConfirmation: "500 Server Error" });
 
-  await assertRefuses(h.run(), "unable to re-read the auto-merge state");
+  await assertRefuses(h.run(), "unable to re-read the final merge intent");
   assertEqual(h.calls.merges.length, 0, "nothing should have merged");
   assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
 });
@@ -2061,7 +2167,7 @@ await test("unreadable branch rules after confirming refuse", async () => {
   assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
 });
 
-await test("both post-confirmation reads happen on the ordinary path", async () => {
+await test("all post-confirmation intent reads happen on the ordinary path", async () => {
   const h = harness();
   await h.run();
   assertEqual(
@@ -2070,12 +2176,61 @@ await test("both post-confirmation reads happen on the ordinary path", async () 
     "auto-merge is read once per gate pass",
   );
   assertEqual(h.calls.branchRules.length, 2, "so are the branch rules");
+  assertEqual(h.calls.mergeQueues.length, 2, "so is the merge-queue state");
+  assertEqual(
+    h.calls.finalIntentReads.length,
+    1,
+    "the final queue and auto-merge states share one response",
+  );
+});
+
+await test("the final read combines every remote gate immediately before merge", async () => {
+  const h = harness();
+  await h.run();
+
+  const read = h.calls.finalIntentReads[0];
+  assert(read !== undefined, "the final combined intent read must run");
+  assert(
+    read.some((arg) => String(arg).includes("mergeQueue(branch:$branch)")),
+    "the final query must include Repository.mergeQueue",
+  );
+  assert(
+    read.some((arg) => String(arg).includes("autoMergeRequest")),
+    "the final query must include the pull request's auto-merge state",
+  );
+  assert(
+    read.some((arg) => String(arg).includes("baseRefName")),
+    "the final query must include the pull request's current base",
+  );
+  assert(
+    read.some((arg) => String(arg).includes("viewer{login}")),
+    "the final query must include the active GitHub login",
+  );
+  assert(read.includes("number=2071"), "the query must bind the pull request");
+
+  const readEvent = h.calls.events.findIndex(
+    (event) =>
+      event.kind === "remote-read" &&
+      event.source === "gh" &&
+      event.args === read,
+  );
+  const mergeEvent = h.calls.events.findIndex(
+    (event) => event.kind === "merge",
+  );
+  assert(
+    readEvent >= 0 && mergeEvent > readEvent,
+    "the read must precede merge",
+  );
+  assertEqual(
+    h.calls.events
+      .slice(readEvent + 1, mergeEvent)
+      .some((event) => event.kind === "remote-read"),
+    false,
+    "no later remote read may make the final base or intent state stale",
+  );
 });
 
 await test("a closed pull request is not reported as queued", async () => {
-  // Cancelling auto-merge on a closed PR fails, and reporting that as "this can
-  // still merge later" would be false and alarming — GitHub does not merge a
-  // closed pull request.
   const h = harness({ mergedState: "CLOSED" });
   const result = await h.run();
 
@@ -2083,49 +2238,11 @@ await test("a closed pull request is not reported as queued", async () => {
   assertEqual(result.closed, true);
   assertEqual(result.queued, undefined, "a closed PR is not queued");
   assertEqual(exitCodeForResult(result), 1);
-  const cancel = h.calls.gh.find(
-    (args) => args[0] === "pr" && args.includes("--disable-auto"),
-  );
-  assertEqual(cancel, undefined, "no cancellation is attempted on a closed PR");
+  assertNoDeferredMergeMutation(h.calls);
   assert(
-    h.output().includes("no pending request to cancel"),
+    h.output().includes("no request from this run pending"),
     `the operator should be told plainly, got:\n${h.output()}`,
   );
-  assert(
-    !h.output().includes("can still merge later"),
-    "a closed PR cannot still merge later",
-  );
-});
-
-await test("nothing-to-cancel is not reported as a failed cancellation", async () => {
-  // gh fails --disable-auto when there is no request to turn off, which is the
-  // ordinary case when the merge never reached GitHub. Claiming "this can still
-  // merge later" there is the same over-claiming the CLOSED branch avoids.
-  const h = harness({
-    mergedState: "OPEN",
-    disableAutoError: "X auto-merge is not enabled for this pull request",
-  });
-  await h.run();
-
-  assert(
-    h.output().includes("no auto-merge request to cancel"),
-    `expected the benign wording, got:\n${h.output()}`,
-  );
-  assert(
-    !h.output().includes("can still merge later"),
-    "nothing reached GitHub, so nothing can merge later",
-  );
-});
-
-await test("a genuine cancellation failure still escalates", async () => {
-  const h = harness({ mergedState: "OPEN", disableAutoError: "403 Forbidden" });
-  await h.run();
-
-  assert(
-    h.output().includes("could NOT be cancelled"),
-    `a real failure must still escalate, got:\n${h.output()}`,
-  );
-  assert(h.output().includes("can still merge later"), "and name the risk");
 });
 
 await test("refusal and warning messages sanitize GitHub-sourced text", async () => {
@@ -2199,18 +2316,18 @@ await test("the implicit-target listing asks for more than the gh default", asyn
 
 await test("only a confirmed merge exits zero", async () => {
   // The CLI's exit status is what `pnpm pr:merge && <post-merge closeout>`
-  // branches on. Reporting success for a queued or unverified merge would run
+  // branches on. Reporting success for an open or unverified result would run
   // the closeout on exactly the states this wrapper refused to call a merge.
   assertEqual(exitCodeForResult({ merged: true, verified: true }), 0);
-  assertEqual(exitCodeForResult({ merged: false, queued: true }), 1);
+  assertEqual(exitCodeForResult({ merged: false, state: "OPEN" }), 1);
   assertEqual(exitCodeForResult({ merged: false, verified: false }), 1);
   assertEqual(exitCodeForResult(undefined), 1);
   // `--help` is not a merge and must not read as a failure.
   assertEqual(exitCodeForResult({ merged: false, help: true }), 0);
 
   // Bound to the real results the wrapper returns, so the two cannot drift.
-  const queued = await harness({ mergedState: "OPEN" }).run();
-  assertEqual(exitCodeForResult(queued), 1, "a queued merge must exit nonzero");
+  const open = await harness({ mergedState: "OPEN" }).run();
+  assertEqual(exitCodeForResult(open), 1, "an open PR must exit nonzero");
   const unverified = await harness({ mergeOutcomeError: "gh exploded" }).run();
   assertEqual(
     exitCodeForResult(unverified),

@@ -133,10 +133,10 @@ export const INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
  * Parse a canonical UTC date-time; return null when it is not one.
  *
  * `new Date(value)` accepts far more than the schema promises — "0", "2026-9-8"
- * and RFC-style dates all parse — and `resolveBaseline` orders rows by
- * comparing `executed_at` as strings. A row carrying any of those would pass
- * validation and then sort or filter against every canonical row incorrectly,
- * so the format is required, not merely parseable. The round-trip check is what
+ * and RFC-style dates all parse — and baseline resolution orders rows by
+ * `executed_at`. A row carrying any of those would pass validation and then
+ * sort or filter against every canonical row incorrectly, so the format is
+ * required, not merely parseable. The round-trip check is what
  * refuses a well-shaped impossible date such as `2026-02-31T00:00:00Z`, which
  * `Date` silently rolls forward into March.
  */
@@ -425,7 +425,7 @@ export function validateLedgerRow(row, label = "row") {
         row.vs_baseline,
         `${label}.vs_baseline`,
         ["baseline_executed_at", "mcnemar"],
-        ["baseline_comparability_key", "control_mcnemar"],
+        ["baseline_comparability_key", "control_mcnemar", "selection"],
         problems,
       )
     ) {
@@ -457,7 +457,67 @@ export function validateLedgerRow(row, label = "row") {
           problems,
         );
       }
+      if (
+        Object.hasOwn(row.vs_baseline, "selection") &&
+        !["automatic", "explicit"].includes(row.vs_baseline.selection)
+      ) {
+        problems.push(
+          `${label}.vs_baseline.selection must be automatic or explicit`,
+        );
+      }
     }
+  }
+  return problems;
+}
+
+/** Validate one row against the current frozen contract and matrix. */
+export function validateLedgerRowAgainstContract({
+  row,
+  contract,
+  contractDigest,
+  label = "baseline row",
+}) {
+  const problems = validateLedgerRow(row, label);
+  if (problems.length > 0) return problems;
+  if (contractDigest && row.contract_digest !== contractDigest) {
+    problems.push(
+      `${label}.contract_digest does not match the current contract`,
+    );
+    return problems;
+  }
+  problems.push(...frozenDefectProblems({ contract, row, label }));
+  // The other half of the frozen denominator: which conditions, which PRs and
+  // how many draws a complete run must have scored at all.
+  problems.push(...completeMatrixProblems({ contract, row, label }));
+  return problems;
+}
+
+/** Validate an external baseline before a generated plan starts paid work. */
+export function baselinePreflightProblems({
+  row,
+  contract,
+  contractDigest,
+  planComparabilityKey,
+  candidateExecutedAt,
+}) {
+  const problems = validateLedgerRowAgainstContract({
+    row,
+    contract,
+    contractDigest,
+  });
+  if (row?.comparability_key !== planComparabilityKey) {
+    problems.push(
+      "baseline comparability_key does not match the generated plan",
+    );
+  }
+  if (
+    typeof candidateExecutedAt === "string" &&
+    typeof row?.executed_at === "string" &&
+    !(row.executed_at < candidateExecutedAt)
+  ) {
+    problems.push(
+      "baseline executed_at must precede the generated plan's candidate timestamp",
+    );
   }
   return problems;
 }
@@ -691,15 +751,18 @@ export function checkLedger({ path, contract, contractDigest, baseRows }) {
 
   rows.forEach((row, index) => {
     const label = `ledger row ${index + 1}`;
-    const rowProblems = validateLedgerRow(row, label);
+    const rowProblems =
+      contractDigest && row.contract_digest !== contractDigest
+        ? validateLedgerRow(row, label)
+        : validateLedgerRowAgainstContract({
+            row,
+            contract,
+            contractDigest,
+            label,
+          });
     problems.push(...rowProblems);
     if (rowProblems.length) return;
     if (contractDigest && row.contract_digest !== contractDigest) return;
-    problems.push(...frozenDefectProblems({ contract, row, label }));
-    // The other half of the frozen denominator: which conditions, which PRs and
-    // how many draws a complete run must have scored at all. Reported after the
-    // per-id checks above, which name the narrower fault when a row breaks both.
-    problems.push(...completeMatrixProblems({ contract, row, label }));
   });
 
   if (baseRows) {
@@ -774,10 +837,17 @@ export function freshness({
     return Boolean(instant) && instant > evaluatedAt;
   }).length;
 
-  const lastAny = newestInstant(eligible, () => true, evaluatedAt);
+  // A bridge records a reviewed transition between two existing full runs. It
+  // does not execute the harness or complete a new matrix, so it moves neither
+  // of these clocks even when its hand-assembled row is current and complete.
+  const lastAny = newestInstant(
+    eligible,
+    (row) => row.kind !== "bridge",
+    evaluatedAt,
+  );
   const lastComplete = newestInstant(
     eligible,
-    (row) => row.status === "complete",
+    (row) => row.kind !== "bridge" && row.status === "complete",
     evaluatedAt,
   );
   // A failed or partial full run verified nothing: it is a trace that the

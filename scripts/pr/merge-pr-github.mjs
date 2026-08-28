@@ -11,6 +11,7 @@
  */
 
 import {
+  MERGE_METHOD,
   MergeRefusal,
   PR_NUMBER_PATTERN,
   hostFromRepoUrl,
@@ -25,6 +26,7 @@ import { splitRepo } from "./pr-ready-state.mjs";
  * silently, and a hidden second candidate would defeat the ambiguity gate.
  */
 const PR_LIST_LIMIT = 100;
+const LOGIN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/;
 
 /**
  * Resolve the checkout's own repository and the repository the pull request
@@ -182,19 +184,43 @@ export async function resolveLogin({ gh, host }) {
   // stop every merge on such an account before the briefing. The pattern still
   // has to be narrow — this value is written into the ledger — so it stays
   // ASCII, bounded, and free of whitespace, quotes and shell metacharacters.
-  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(login)) {
+  if (!LOGIN_PATTERN.test(login)) {
     throw new MergeRefusal("unable to establish the active GitHub login");
   }
   return login;
 }
 
 /**
+ * Merge the approved head through GitHub's synchronous REST endpoint.
+ *
+ * This endpoint either completes the merge or fails. It does not enqueue the
+ * pull request and does not enable auto-merge. The request supplies only the
+ * approved head and the repository's fixed merge method. It omits
+ * `commit_title` and `commit_message`, so GitHub applies the repository's
+ * configured squash title and message defaults.
+ */
+export async function mergeApprovedHead({ merge, repo, number, headOid }) {
+  const { owner, name, host } = splitRepo(repo);
+  await merge([
+    "api",
+    "--hostname",
+    host ?? "github.com",
+    "--method",
+    "PUT",
+    `repos/${owner}/${name}/pulls/${number}/merge`,
+    "--raw-field",
+    `sha=${headOid}`,
+    "--raw-field",
+    `merge_method=${MERGE_METHOD}`,
+  ]);
+}
+
+/**
  * Ask GitHub whether the pull request is actually merged.
  *
- * `gh pr merge` exits 0 on a merge-queue base after only ENQUEUEING the pull
- * request, and the queue may rebuild and retest it before any merge happens. A
- * bare success would then leave a consent record bound to the pre-queue head
- * while callers ran post-merge closeout against a pull request still open.
+ * The synchronous merge endpoint returns only after a merge or a failure, but
+ * a transport failure can hide a completed merge. This read binds the outcome
+ * to the approved head and base before callers run post-merge closeout.
  */
 export async function readMergeOutcome({ gh, repo, number }) {
   const parsed = JSON.parse(
@@ -217,18 +243,129 @@ export async function readMergeOutcome({ gh, repo, number }) {
 }
 
 /**
+ * The merge queue configured for one base branch, or null when none exists.
+ *
+ * `Repository.mergeQueue` covers queues enabled through either a ruleset or a
+ * classic branch-protection rule. The synchronous REST merge endpoint can
+ * bypass a classic queue, so callers must prove this value is null before they
+ * send the merge request. A missing or malformed response is not proof and
+ * therefore throws.
+ */
+export async function readBaseMergeQueue({ gh, repo, branch }) {
+  const { owner, name, host } = splitRepo(repo);
+  const parsed = JSON.parse(
+    await gh([
+      "api",
+      "--hostname",
+      host ?? "github.com",
+      "graphql",
+      "-f",
+      `query=query($owner:String!,$name:String!,$branch:String!){repository(owner:$owner,name:$name){mergeQueue(branch:$branch){id url}}}`,
+      "-f",
+      `owner=${owner}`,
+      "-f",
+      `name=${name}`,
+      "-f",
+      `branch=${branch}`,
+    ]),
+  );
+
+  return parseMergeQueueResponse(parsed).mergeQueue;
+}
+
+function parseMergeQueueResponse(parsed) {
+  if (Array.isArray(parsed?.errors) && parsed.errors.length > 0) {
+    throw new Error("the merge-queue query returned GraphQL errors");
+  }
+  const repository = parsed?.data?.repository;
+  if (
+    repository === null ||
+    typeof repository !== "object" ||
+    !Object.hasOwn(repository, "mergeQueue")
+  ) {
+    throw new Error("the merge-queue response did not identify the branch");
+  }
+  const queue = repository.mergeQueue;
+  if (queue !== null && typeof queue !== "object") {
+    throw new Error("the merge-queue response was malformed");
+  }
+  return { repository, mergeQueue: queue };
+}
+
+/**
+ * The final viewer, base, merge-queue, and auto-merge state from one GraphQL
+ * response.
+ *
+ * Reading both intent gates together removes the extra remote round trip that
+ * would otherwise leave one state older than the other immediately before the
+ * direct merge. Returning the current viewer binds the credential observation
+ * to those states. Returning the pull request's current base also proves that
+ * the queue query still names that base. The REST request separately binds the
+ * approved head through `sha`. The response is still not atomic with the later
+ * REST write, so callers must keep this as their final remote read and refuse
+ * every malformed or partial response.
+ */
+export async function readFinalMergeIntent({ gh, repo, branch, number }) {
+  const { owner, name, host } = splitRepo(repo);
+  const parsed = JSON.parse(
+    await gh([
+      "api",
+      "--hostname",
+      host ?? "github.com",
+      "graphql",
+      "-f",
+      `query=query($owner:String!,$name:String!,$branch:String!,$number:Int!){viewer{login} repository(owner:$owner,name:$name){mergeQueue(branch:$branch){id url} pullRequest(number:$number){baseRefName autoMergeRequest{enabledAt}}}}`,
+      "-f",
+      `owner=${owner}`,
+      "-f",
+      `name=${name}`,
+      "-f",
+      `branch=${branch}`,
+      "-F",
+      `number=${number}`,
+    ]),
+  );
+
+  const { repository, mergeQueue } = parseMergeQueueResponse(parsed);
+  const login = parsed?.data?.viewer?.login;
+  if (typeof login !== "string" || !LOGIN_PATTERN.test(login)) {
+    throw new Error(
+      "the final merge-intent response named no usable viewer login",
+    );
+  }
+  const pullRequest = repository.pullRequest;
+  if (
+    pullRequest === null ||
+    typeof pullRequest !== "object" ||
+    !Object.hasOwn(pullRequest, "baseRefName") ||
+    !Object.hasOwn(pullRequest, "autoMergeRequest")
+  ) {
+    throw new Error(
+      "the final merge-intent response did not identify the pull request",
+    );
+  }
+  const baseRefName = pullRequest.baseRefName;
+  if (typeof baseRefName !== "string" || baseRefName === "") {
+    throw new Error("the final merge-intent response named no base branch");
+  }
+  const autoMergeRequest = pullRequest.autoMergeRequest;
+  if (autoMergeRequest !== null && typeof autoMergeRequest !== "object") {
+    throw new Error("the final auto-merge response was malformed");
+  }
+  return { login, baseRefName, mergeQueue, autoMergeRequest };
+}
+
+/**
  * The rule types GitHub applies to one branch through its rulesets.
  *
- * Ruleset-sourced only. A merge queue enabled through
- * a CLASSIC branch-protection rule does not surface here, so this narrows the
- * window rather than closing it — `reconcileMergeOutcome` still catches such an
- * enqueue afterwards, reports it and exits non-zero.
+ * Ruleset-sourced only. The `Repository.mergeQueue` reads are the authoritative
+ * queue gate because they also detect classic branch-protection queues. This
+ * read keeps the ruleset-specific diagnosis and provides a second refusal
+ * signal.
  *
- * Used to refuse a merge-queue base before the merge request exists. `gh pr
- * merge` enqueues such a base and returns success, and `--disable-auto` does
- * not remove a queue entry — so merging first would create a standing request
- * this wrapper cannot take back, which GitHub could complete later with none
- * of the gates. Checking first is the only fail-closed order.
+ * Used to refuse a merge-queue base before the briefing. Queue-managed bases
+ * need a deliberate queue workflow, and this read gives the operator that
+ * specific reason before consent is recorded.
  */
 export async function readBaseBranchRuleTypes({ gh, repo, branch }) {
   const { owner, name, host } = splitRepo(repo);
@@ -257,19 +394,12 @@ export async function readBaseBranchRuleTypes({ gh, repo, branch }) {
 }
 
 /**
- * Decide what actually happened after the merge command, and leave nothing
- * standing behind.
+ * Decide what actually happened after the synchronous merge request.
  *
- * Any outcome other than a confirmed merge may have left a standing request:
- * `gh pr merge` enqueues when the required checks pass and enables auto-merge
- * when they do not, and `--not-ready-reason` reaches that second path. GitHub
- * can complete such a request minutes or hours later, with none of the gates
- * the wrapper ran — the merge nobody approved, arriving late. So every path
- * here reconciles rather than merely reporting.
- *
- * The caller refuses a pull request that already had auto-merge enabled, so
- * any request cancelled here is one this run created rather than another
- * operator's unrelated state.
+ * The request cannot enqueue or enable auto-merge. A failed or unreadable
+ * outcome therefore needs reporting and verification only. It must never call
+ * `--disable-auto`, because an auto-merge request that appears after the final
+ * gate read belongs to another operator.
  *
  * @param write receives operator-facing lines, normally `stdout.write`.
  */
@@ -283,46 +413,6 @@ export async function reconcileMergeOutcome({
   consentPath,
   write,
 }) {
-  const cancelPendingMerge = async () => {
-    try {
-      await gh([
-        "pr",
-        "merge",
-        String(number),
-        "--repo",
-        repo,
-        "--disable-auto",
-      ]);
-      // `--disable-auto` turns off auto-merge. It does NOT remove a pull
-      // request already sitting in a merge queue, so this is not proof the
-      // request is gone. Report what the command actually does, and name the
-      // case that still needs a hand.
-      return (
-        `Auto-merge has been disabled for this pull request. That does not ` +
-        `remove a merge-queue entry: if the base uses a merge queue, dequeue ` +
-        `it by hand and confirm, because a queued entry can still merge later ` +
-        `without any of the gates above.`
-      );
-    } catch (err) {
-      const message = sanitizeTerminalText(
-        err instanceof Error ? err.message : String(err),
-        "(no message)",
-      );
-      // `gh` fails this call when there is no auto-merge request to turn off,
-      // which is the ordinary case when the merge never reached GitHub. Saying
-      // "this can still merge later" there would be the same over-claiming the
-      // CLOSED branch avoids.
-      if (/auto-merge is not enabled|not enabled for/i.test(message)) {
-        return "There was no auto-merge request to cancel.";
-      }
-      return (
-        `A pending merge request could NOT be cancelled: ${message}. ` +
-        `Cancel it by hand — until you do, this pull request can still merge ` +
-        `later without any of the gates above.`
-      );
-    }
-  };
-
   let outcome = null;
   let outcomeError = null;
   try {
@@ -332,26 +422,22 @@ export async function reconcileMergeOutcome({
   }
 
   if (outcome === null) {
-    // Neither confirmed nor refuted. Cancel first, report second.
-    const cancellation = await cancelPendingMerge();
     write(
       `Could not confirm the merge landed: ${sanitizeTerminalText(outcomeError)}\n` +
         (mergeError
           ? `The merge command also failed: ${sanitizeTerminalText(mergeError)}\n`
           : "") +
-        `${cancellation}\n` +
+        `The synchronous merge endpoint cannot queue this pull request or enable ` +
+        `auto-merge, so this run created no standing merge request.\n` +
         `Check ${repo}#${number} before running any post-merge step.\n`,
     );
     return { merged: false, verified: false, record, consentPath };
   }
 
-  // A closed pull request is not a queued one. Cancelling auto-merge on it
-  // fails, and reporting that failure as "this can still merge later" would be
-  // both false and alarming — GitHub will not merge a closed pull request.
   if (outcome.state === "CLOSED") {
     write(
       `${repo}#${number} is CLOSED, not merged. Nothing was merged and there is ` +
-        `no pending request to cancel: GitHub does not merge a closed pull request. ` +
+        `no request from this run pending: the synchronous endpoint does not queue. ` +
         (mergeError
           ? `The merge command also failed: ${sanitizeTerminalText(mergeError)}. `
           : "") +
@@ -368,20 +454,18 @@ export async function reconcileMergeOutcome({
   }
 
   if (outcome.state !== "MERGED") {
-    const cancellation = await cancelPendingMerge();
     write(
       `${repo}#${number} is ${outcome.state || "in an unreadable state"}, not merged — ` +
-        `a queued or auto-merge target accepts the request without merging it. ` +
+        `the synchronous endpoint did not complete the merge. ` +
         (mergeError
           ? `The merge command also failed: ${sanitizeTerminalText(mergeError)}. `
           : "") +
-        `${cancellation}\n` +
+        `This run created no queued or auto-merge request.\n` +
         `Do not run post-merge steps until it reports MERGED.\n`,
     );
     return {
       merged: false,
       verified: true,
-      queued: true,
       state: outcome.state,
       record,
       consentPath,
@@ -422,9 +506,9 @@ export async function reconcileMergeOutcome({
   }
 
   // MERGED alone does not mean this run's merge landed. If the head moved after
-  // the final gate read and something else merged the new one, our
-  // `--match-head-commit` request fails while this read still says MERGED —
-  // and the consent record would then name a commit GitHub never merged.
+  // the final gate read and something else merged the new one, the REST
+  // request's `sha` check fails while this read still says MERGED — and the
+  // consent record would then name a commit GitHub never merged.
   if (outcome.headRefOid !== approved.headOid.toLowerCase()) {
     write(
       `WARNING: ${repo}#${number} is MERGED at ${outcome.headRefOid}, not the ` +
@@ -453,8 +537,8 @@ export async function reconcileMergeOutcome({
     );
   }
 
-  // `--match-head-commit` pins the head, and the merge API offers nothing that
-  // pins the base: its only matching parameter is `sha`, for the head. So a
+  // The request's `sha` pins the head, and the merge API offers nothing that
+  // pins the base. So a
   // retarget landing between the final gate read and GitHub processing the
   // merge cannot be prevented — only detected, which is what this does.
   const baseMismatch = outcome.baseRefName !== approved.baseRefName;
@@ -483,9 +567,8 @@ export async function reconcileMergeOutcome({
  * The auto-merge request already standing on a pull request, or null.
  *
  * A pull request someone else has already queued for automatic merge is not a
- * state this wrapper can reconcile: its own cleanup would cancel that unrelated
- * request, and it cannot tell compensation from interference. Refusing up front
- * both avoids that and makes the cleanup provably its own.
+ * state this wrapper should merge over. Refusing up front preserves the other
+ * operator's request and makes them resolve that intent explicitly.
  */
 export async function readAutoMergeRequest({ gh, repo, number }) {
   const parsed = JSON.parse(
