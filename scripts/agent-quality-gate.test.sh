@@ -12149,6 +12149,26 @@ STUB
     local attempt
     local interrupt_exit
     local next_gate_exit
+    local settle_started_at=""
+    # How long to wait for the interrupted gate to exit before calling it hung.
+    # Teardown drains every registered worker group before it re-raises the
+    # signal, and each drain re-walks the process table to a fixpoint, because a
+    # TERM-ignoring command can fork again in the window before KILL reaches it.
+    # That cost belongs to the machine's process count, not to the gate: on a
+    # macOS box carrying ~1250 live processes this phase takes about 53s, while
+    # Linux CI settles it well inside 30s. So the number below is not an
+    # estimate of settlement speed — it is only far enough above the slowest
+    # settlement we have measured to stop tracking machine speed, and far enough
+    # below the gate's own limit to stay meaningful: a single drain may run for
+    # AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS (120s by default) before the
+    # gate fails closed, so a fixture that allowed the whole teardown less than
+    # that would be asserting a promise the gate never made.
+    local settle_deadline_seconds=150
+    # Same idea for the unobstructed follow-up run below, which is a whole gate
+    # rather than a teardown and so gets its own number: measured at 35-36s
+    # here, bounded well above that, and still unreachable by a run that never
+    # finishes because the interrupted one left something in its way.
+    local followup_deadline_seconds=120
 
     # Invoked indirectly by the EXIT trap below.
     # shellcheck disable=SC2329
@@ -12239,16 +12259,29 @@ STUB
       kill -CONT "$gate_pid"
     fi
 
-    for ((attempt = 0; attempt < 600; attempt++)); do
+    # Measure the wait on the clock rather than by counting sleeps. Every pass
+    # forks `jobs | grep`, so the 600 iterations this replaces drifted to ~36s
+    # of wall clock and reported a 30s bound they never used. The gate's own
+    # drain already makes this correction for the same reason; see "Clock, not
+    # the sum of requested sleeps" in agent-quality-gate.sh.
+    #
+    # A swallowed interrupt still fails here: the gate would keep running its
+    # mapped commands, and the trunk fixture's worker never exits on its own, so
+    # no amount of waiting produces the exit this asserts. The deadline only
+    # decides how long that failure takes to report (issue 2108).
+    settle_started_at="$(date +%s)"
+    while :; do
       if ! jobs -pr | grep -Fxq "$gate_pid"; then
         settled=1
         break
       fi
+      [[ $(($(date +%s) - settle_started_at)) -lt "$settle_deadline_seconds" ]] ||
+        break
       sleep 0.05
     done
     [[ "$settled" -eq 1 ]] ||
       fail_parallel_interrupt_fixture \
-        "parallel $phase interrupt did not terminate the gate within 30s"
+        "parallel $phase interrupt did not terminate the gate within ${settle_deadline_seconds}s"
 
     set +e
     wait "$gate_pid"
@@ -12288,16 +12321,27 @@ STUB
         > "$next_gate_output" 2>&1 &
     next_gate_pid=$!
     settled=0
-    for ((attempt = 0; attempt < 400; attempt++)); do
+    # On the clock, for the same reason as the settle wait above. What this
+    # asserts is that the follow-up run is never blocked or joined by anything
+    # the interrupted run left behind, so the bound has to clear an unobstructed
+    # run on the slowest machine we measure. That is not free even with fast
+    # fixtures: the run still settles every mapped command through the same
+    # process-table walk, which took 35-36s here against ~1250 live processes,
+    # while the 400 iterations this replaces expired after ~24s. A run that is
+    # genuinely blocked never finishes, so this still fails on it (issue 2108).
+    settle_started_at="$(date +%s)"
+    while :; do
       if ! jobs -pr | grep -Fxq "$next_gate_pid"; then
         settled=1
         break
       fi
+      [[ $(($(date +%s) - settle_started_at)) -lt "$followup_deadline_seconds" ]] ||
+        break
       sleep 0.05
     done
     [[ "$settled" -eq 1 ]] ||
       fail_parallel_interrupt_fixture \
-        "gate after parallel $phase interrupt did not finish cleanly within 20s"
+        "gate after parallel $phase interrupt did not finish cleanly within ${followup_deadline_seconds}s"
     set +e
     wait "$next_gate_pid"
     next_gate_exit=$?
