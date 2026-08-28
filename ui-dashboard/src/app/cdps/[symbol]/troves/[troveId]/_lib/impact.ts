@@ -174,8 +174,6 @@ function isZeroCumulatives(cumulatives: TroveRedemptionCumulatives): boolean {
  *  - `pending`: gate open but the ledger has not loaded once.
  *  - `truncated`: capped history counts as partial for every derivation —
  *    a dropped early row would misattribute its deltas.
- *  - `batch`: a null batch debt snapshot switches reconciliation (and the
- *    interest residual) to the explicit batch notice.
  *  - `incomplete`: an op-6 row carries no fee record, so the fee
  *    reconciliation cannot run — passing it with a coerced 0 could confirm
  *    a figure no writer recorded.
@@ -186,7 +184,6 @@ export type TroveRedemptionTotalsReason =
   | "partial"
   | "pending"
   | "truncated"
-  | "batch"
   | "incomplete"
   | "unverified";
 
@@ -204,12 +201,15 @@ export type TroveRedemptionImpactStatus =
  *  check is skipped, except the vacuous case: a `(0, 0)` watermark says "no
  *  ledger row was ever written", and all-zero cumulatives agree with zero
  *  rows exactly, so a fresh trove verifies trivially instead of sitting in
- *  "unverified" forever. */
+ *  "unverified" forever. Debt snapshot completeness is intentionally not a
+ *  gate here: the equality check consumes only event-carried op-6 deltas and
+ *  fees. The user/rebalance split and oracle valuation consume their own
+ *  event-carried fields and degrade independently. The debt chart and
+ *  interest residual keep their separate snapshot gates. */
 export function classifyTroveRedemptionImpact(ledger: {
   supported: boolean;
   hasLoadedOnce: boolean;
   truncated: boolean;
-  debtSnapshotsComplete: boolean;
   rows: readonly CdpTroveLedgerEventRow[];
   watermark: TroveLedgerWatermark | null;
   cumulatives: TroveRedemptionCumulatives | null;
@@ -217,7 +217,6 @@ export function classifyTroveRedemptionImpact(ledger: {
   if (!ledger.supported) return { kind: "totals", reason: "partial" };
   if (!ledger.hasLoadedOnce) return { kind: "totals", reason: "pending" };
   if (ledger.truncated) return { kind: "totals", reason: "truncated" };
-  if (!ledger.debtSnapshotsComplete) return { kind: "totals", reason: "batch" };
   const cumulatives = ledger.cumulatives;
   if (cumulatives == null) return { kind: "totals", reason: "unverified" };
   if (ledger.rows.length === 0) {

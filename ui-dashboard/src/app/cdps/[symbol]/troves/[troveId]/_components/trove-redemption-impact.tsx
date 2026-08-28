@@ -230,16 +230,15 @@ function impactDescription(model: TroveRedemptionImpactModel): string {
     case "incomplete":
       return `${base} A redemption row carries no fee record, so per-hit figures cannot be verified.`;
     case "truncated":
-    case "batch":
-      // These carry their own role="status" notice below.
+      // This carries its own role="status" notice below.
       return base;
   }
 }
 
 /** The suppression states that need a live status region, not just muted
- *  prose: they can persist (truncation, batch rows) or demand attention (a
- *  reconciliation mismatch that survived its one refetch — a bug surface,
- *  per the plan's invariant, not a rendering choice). */
+ *  prose: truncation can persist, while a reconciliation mismatch that
+ *  survived its one refetch demands attention as a bug surface, per the
+ *  plan's invariant. */
 function ImpactNotice({ model }: { model: TroveRedemptionImpactModel }) {
   if (model.kind === "mismatch") {
     return (
@@ -257,14 +256,6 @@ function ImpactNotice({ model }: { model: TroveRedemptionImpactModel }) {
       <p role="status" className="mt-3 text-xs text-amber-400">
         Earliest ledger history truncated — per-hit figures are off for an
         incomplete history.
-      </p>
-    );
-  }
-  if (model.reason === "batch") {
-    return (
-      <p role="status" className="mt-3 text-xs text-amber-400">
-        Batch data unavailable — batch-managed rows carry no per-trove debt
-        snapshots, so the reconciliation and per-hit figures are off.
       </p>
     );
   }
