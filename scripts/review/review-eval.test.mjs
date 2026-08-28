@@ -5743,6 +5743,148 @@ test("--revalidate-appended refuses a later appended automatic baseline", () => 
   }
 });
 
+test("--revalidate-appended rejects a self-selected explicit baseline", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "base");
+
+    const row = makeRow({ fullMatrix: true });
+    const detail = writeRowEvidence(root, row);
+    row.vs_baseline = buildVsBaseline({
+      row,
+      baselineRow: row,
+      selection: "explicit",
+    });
+    const planFile = path.join(detail, "plan.json");
+    const plan = JSON.parse(readFileSync(planFile, "utf8"));
+    plan.baseline_selection = "explicit";
+    plan.baseline = baselinePlanIdentity(row);
+    writeFileSync(planFile, JSON.stringify(plan));
+    writeFileSync(path.join(root, ledgerRelative), `${JSON.stringify(row)}\n`);
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 1);
+    assert.match(
+      JSON.parse(checked.stdout).problems.join(" | "),
+      new RegExp(
+        `explicit baseline ${row.executed_at} must precede candidate ${row.executed_at}`,
+      ),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended rejects an ineligible explicit baseline", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "base");
+
+    const baseline = makeRow({
+      executedAt: "2026-08-08T10:00:00Z",
+      fullMatrix: true,
+    });
+    baseline.notes = "leak suspected: test fixture";
+    baseline.verdict = verdict({ contract, row: baseline }).verdict;
+    const candidate = makeRow({
+      executedAt: "2026-09-08T10:00:00Z",
+      fullMatrix: true,
+    });
+    candidate.detail_dir = "docs/evals/review-skill-runs/2026-09-08-candidate";
+    candidate.vs_baseline = buildVsBaseline({
+      row: candidate,
+      baselineRow: baseline,
+      selection: "explicit",
+    });
+    writeRowEvidence(root, baseline);
+    const candidateDetail = writeRowEvidence(root, candidate);
+    const planFile = path.join(candidateDetail, "plan.json");
+    const plan = JSON.parse(readFileSync(planFile, "utf8"));
+    plan.baseline = baselinePlanIdentity(baseline);
+    writeFileSync(planFile, JSON.stringify(plan));
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(baseline)}\n${JSON.stringify(candidate)}\n`,
+    );
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 1);
+    assert.match(
+      JSON.parse(checked.stdout).problems.join(" | "),
+      /explicit baseline .* is not eligible: baseline notes record a suspected leak/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended rejects complete evidence relabelled partial", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "base");
+
+    const row = makeRow({ fullMatrix: true });
+    writeRowEvidence(root, row);
+    row.status = "partial";
+    row.verdict = verdict({ contract, row }).verdict;
+    writeFileSync(path.join(root, ledgerRelative), `${JSON.stringify(row)}\n`);
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 1);
+    assert.match(
+      JSON.parse(checked.stdout).problems.join(" | "),
+      /records partial status but carries every planned result cell/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("--revalidate-appended binds partial rows to every scored PR", () => {
   const root = makeRoot();
   try {
@@ -6334,6 +6476,32 @@ test("--revalidate-appended accepts an explicit bridge pairing", () => {
     ];
     const checked = cli(flags, { root });
     assert.equal(checked.status, 0, checked.stdout + checked.stderr);
+
+    rmSync(path.join(root, newer.detail_dir), {
+      recursive: true,
+      force: true,
+    });
+    mkdirSync(path.join(root, newer.detail_dir), { recursive: true });
+    const retiringVerdict = retiring.verdict;
+    retiring.notes = "leak suspected: test fixture";
+    retiring.verdict = verdict({ contract, row: retiring }).verdict;
+    writeFileSync(
+      ledgerPath,
+      `${JSON.stringify(retiring)}\n${JSON.stringify(bridge)}\n`,
+    );
+    const ineligibleBridgeBaseline = cli(flags, { root });
+    assert.equal(ineligibleBridgeBaseline.status, 1);
+    assert.match(
+      JSON.parse(ineligibleBridgeBaseline.stdout).problems.join(" | "),
+      /explicit baseline .* is not eligible: baseline notes record a suspected leak/,
+    );
+    retiring.notes = "";
+    retiring.verdict = retiringVerdict;
+    writeFileSync(
+      ledgerPath,
+      `${JSON.stringify(retiring)}\n${JSON.stringify(bridge)}\n`,
+    );
+    writeRowEvidence(root, newer);
 
     const bridgeVerdict = bridge.verdict;
     const bridgeResult = path.join(

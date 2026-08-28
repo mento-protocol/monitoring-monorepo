@@ -43,6 +43,7 @@ import {
   validateLedgerRow,
 } from "./review-eval-ledger.mjs";
 import {
+  baselineEligibility,
   parseLeadingReviewEvalMarkers,
   leakSuspected,
   renderReport,
@@ -567,20 +568,37 @@ export function planProvenanceProblems({
   baselineRow = null,
   expectedComparabilityKey = null,
 }) {
+  const problems = [];
+  const checkBaselineStanding = () => {
+    if (baselineRow === null) return;
+    const eligibility = baselineEligibility(baselineRow);
+    if (!eligibility.usable) {
+      problems.push(
+        `explicit baseline ${baselineRow.executed_at} is not eligible: ${eligibility.reason}`,
+      );
+    }
+    if (!(baselineRow.executed_at < row.executed_at)) {
+      problems.push(
+        `explicit baseline ${baselineRow.executed_at} must precede candidate ${row.executed_at}`,
+      );
+    }
+  };
+  if (row.kind === "bridge") checkBaselineStanding();
   const file = path.join(dir, "plan.json");
   if (!existsSync(file)) {
-    if (row.kind === "bridge" && !holdsCellResults(dir)) return [];
-    return [
+    if (row.kind === "bridge" && !holdsCellResults(dir)) return problems;
+    problems.push(
       `${dir} carries no plan.json; the row's provenance cannot be checked against the run that produced it`,
-    ];
+    );
+    return problems;
   }
   let plan;
   try {
     plan = readJson(file);
   } catch (error) {
-    return [error instanceof Error ? error.message : String(error)];
+    problems.push(error instanceof Error ? error.message : String(error));
+    return problems;
   }
-  const problems = [];
   /** True when the plan carries the complete explicit-baseline fingerprint. */
   const validBaselineIdentity = (value) =>
     value !== null &&
@@ -696,6 +714,9 @@ export function planProvenanceProblems({
     problems.push(
       `resolved baseline does not match the explicit baseline identity plan.json in ${row.detail_dir} recorded`,
     );
+  }
+  if (plan.baseline_selection === "explicit" && row.kind !== "bridge") {
+    checkBaselineStanding();
   }
   if (!Array.isArray(plan.cells)) {
     problems.push(`plan.json in ${row.detail_dir} carries no cells array`);
@@ -861,6 +882,16 @@ function runEvidenceProblems({ dir, row, contract }) {
         const resultFiles = readdirSync(dir).filter(
           (name) => name.startsWith("result-") && name.endsWith(".json"),
         );
+        if (
+          row.status === "partial" &&
+          [...plannedResults.keys()].every((resultFile) =>
+            resultFiles.includes(resultFile),
+          )
+        ) {
+          problems.push(
+            `${dir} records partial status but carries every planned result cell`,
+          );
+        }
         for (const resultFile of resultFiles) {
           const cell = plannedResults.get(resultFile);
           if (!cell) {
