@@ -240,7 +240,11 @@ survive the night:
 - **Resume, never restart, after a usage-limit interruption.** The worker's
   clone still holds its branch, its claim, and often an open PR. A restart
   re-claims an issue already `agent-active`, re-runs a passed gate, and can
-  open a second PR on the same branch.
+  open a second PR on the same branch. The orchestrator also records each
+  worker's allocated clone path and hands it back on any respawn: a worker
+  displaced to a suffixed path cannot recognise its own checkout from the
+  deterministic base name alone, and would otherwise clone fresh and abandon
+  its branch and open PR.
 - **Reclassify after five review-triggered patch cycles.** The operating card
   allows five and requires a pause before a sixth. The worker then stops
   patching and classifies what is left as an evidence-backed won't-fix, a

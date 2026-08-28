@@ -501,6 +501,16 @@ restart re-claims an issue that is already `agent-active`, re-runs a gate that
 already passed, and can open a second PR for the same branch. Wait for the
 limit to reset, then wake the existing worker where it stopped.
 
+**Record each worker's allocated path, and pass it back on any respawn.** The
+resume test in the brief compares the marker at the deterministic base path
+only. A worker displaced to `sweep-<issue>-2` therefore cannot recognise its own
+checkout if it is ever spawned fresh rather than woken — after a crash, say — so
+it would allocate `-3`, clone from `origin/main`, and abandon its own branch,
+commits, and open PR sitting at `-2`. That is the restart this duty forbids,
+arriving through the back door. The orchestrator already knows the path each
+worker reported; hand it back explicitly instead of letting the worker re-derive
+it.
+
 **Direct a reclassification after five review-triggered patch cycles.** The
 operating card allows five and requires a pause before a sixth. At that point
 tell the worker to stop patching and classify what is left, honestly, in one of
