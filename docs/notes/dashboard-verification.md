@@ -302,3 +302,20 @@ A local path, broken Markdown, or an unverified upload is not visual evidence.
 If either revision cannot be rendered, or the authenticated attachment surface
 is unavailable, stop before publication and report the blocker; do not call the
 UI PR shipped or ready. The user may waive visual evidence for a specific PR.
+
+## Dynamic social-preview verification
+
+For a change to dynamic route metadata or an Open Graph image route, verify the
+final deployed origin in the browser. Do not use a local render as production
+proof.
+
+- Read the exact `og:title`, `og:description`, `og:image`, and Twitter image
+  values from the deployed document. Confirm that each value matches the route
+  and its public-data policy.
+- Fetch the exact image URL from the deployed document with the browser cache
+  disabled. Require HTTP 200, the expected image content type, and the declared
+  pixel dimensions.
+- Check browser console errors after the route and image load.
+- Use a URL that Slack has not expanded before when testing the unfurl. Slack
+  can retain the first unfurl for a shared URL, so an existing message does not
+  prove that the current metadata or image is live.
