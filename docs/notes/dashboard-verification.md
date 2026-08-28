@@ -310,13 +310,15 @@ final deployed origin in the browser. Do not use a local render as production
 proof.
 
 - Read the exact Open Graph and Twitter title, description, and image values
-  from the raw initial HTML response. Confirm that each value matches the route
-  and its public-data policy.
+  from the raw initial HTML response of an isolated, cookie-free request.
+  Confirm that each value matches the route and its public-data policy.
 - Compare those values with the live DOM when client-side hydration is
   relevant. The hydrated DOM alone does not prove what a crawler receives.
 - Fetch the exact image URL from the deployed document with the browser cache
   disabled. Require HTTP 200, the expected image content type, and the declared
-  pixel dimensions.
+  pixel dimensions. Inspect `Cache-Control` and `Age`, and confirm that they
+  match the route's declared freshness or revalidation policy. Disabling the
+  browser cache does not bypass a CDN cache.
 - Inspect the rendered image. Confirm that it identifies the correct route,
   shows the expected data or fallback state, and has no blank or clipped
   content.

@@ -55,6 +55,13 @@ For a narrow verify (specific page or feature), skip the list and go directly to
 
 6. **Report** a concise pass/fail summary. If something failed, include what you expected vs what you saw.
 
+7. **Verify dynamic social previews when applicable.** When a change touches
+   dynamic route metadata or an Open Graph image route, run the "Dynamic
+   social-preview verification" section in
+   `docs/notes/dashboard-verification.md` against the final deployed origin.
+   Run this check after the production deployment for post-merge closeout. A
+   localhost or preview result does not prove the production social preview.
+
 ## Auth-state checks
 
 - Logged out: nav shows `Sign in`; authenticated-only nav links are hidden;
