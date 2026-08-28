@@ -42,6 +42,7 @@ import {
 import { baselineEligibility, verdict } from "./review-eval-report.mjs";
 import {
   assertAuthorizedFreshnessWorkflow,
+  baselinePlanIdentity,
   buildPlan,
   cellFingerprint,
   cellReuseDecision,
@@ -280,6 +281,16 @@ function writeRowEvidence(root, row) {
       kind: row.kind,
       detail_dir: row.detail_dir,
       baseline_selection: row.vs_baseline?.selection ?? "automatic",
+      baseline:
+        row.vs_baseline?.selection === "explicit"
+          ? {
+              executed_at: row.vs_baseline.baseline_executed_at,
+              contract_digest: row.contract_digest,
+              comparability_key: row.vs_baseline.baseline_comparability_key,
+              detail_dir: "external-baseline",
+              row_digest: "0".repeat(64),
+            }
+          : null,
       inputs: row.inputs,
       cells,
     }),
@@ -544,13 +555,16 @@ test("--plan --skill-ref stamps a dirty candidate run", () => {
     assert.equal(plan.inputs.dirty, true);
     assert.match(plan.inputs.skill_ref, /prompts$/);
 
+    const baseline = makeRow({ executedAt: "2026-07-08T10:00:00Z" });
+    const baselinePath = path.join(root, "baseline-row.json");
+    writeFileSync(baselinePath, JSON.stringify(baseline));
     const explicit = cli(
       [
         "--plan",
         "--kind",
         "canary",
         "--against",
-        "/tmp/baseline-row.json",
+        baselinePath,
         "--out",
         path.join(root, "explicit-plan"),
         "--json",
@@ -558,7 +572,9 @@ test("--plan --skill-ref stamps a dirty candidate run", () => {
       { root, env: planEnv },
     );
     assert.equal(explicit.status, 0, explicit.stderr);
-    assert.equal(JSON.parse(explicit.stdout).baseline_selection, "explicit");
+    const explicitPlan = JSON.parse(explicit.stdout);
+    assert.equal(explicitPlan.baseline_selection, "explicit");
+    assert.deepEqual(explicitPlan.baseline, baselinePlanIdentity(baseline));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -3080,13 +3096,14 @@ test("a PR that ran fewer draws loses opportunities, not recall", async () => {
 test("scorePlan stores no McNemar against an incomparable baseline", async () => {
   const root = makeRoot();
   try {
+    const foreignBaseline = makeRow({ key: "c".repeat(64) });
     const plan = buildPlan({
       contract,
       contractDigest,
       kind: "canary",
       repoRoot: root,
       outDir: path.join(root, "run"),
-      baselineIsExplicit: true,
+      baselineRow: foreignBaseline,
       env: planEnv,
     });
     for (const cell of plan.cells) {
@@ -3124,7 +3141,7 @@ test("scorePlan stores no McNemar against an incomparable baseline", async () =>
 
     // `--against` may name any row, including one that measures something
     // else. That pair is recorded, never counted.
-    const foreign = await score(makeRow({ key: "c".repeat(64) }));
+    const foreign = await score(foreignBaseline);
     assert.deepEqual(validateLedgerRow(foreign.row), []);
     assert.equal(foreign.row.vs_baseline.selection, "explicit");
     assert.equal(foreign.row.vs_baseline.mcnemar, null);
@@ -3133,8 +3150,10 @@ test("scorePlan stores no McNemar against an incomparable baseline", async () =>
       "c".repeat(64),
     );
 
-    const paired = await score(makeRow());
-    assert.equal(typeof paired.row.vs_baseline.mcnemar.delta, "number");
+    await assert.rejects(
+      score(makeRow()),
+      /plan baseline .* does not match score baseline/,
+    );
     await assert.rejects(
       score(null),
       /plan baseline_selection is explicit; this score command is automatic/,
@@ -4201,7 +4220,7 @@ test("the orchestrator carries one baseline through plan, score, validate and re
   // so the plan, row, revalidation and PR body cannot disagree about what it
   // was ranked on.
   assert.equal(
-    script.match(/PLAN_ARGS\+\=\(--against "\$AGAINST"\)/g)?.length,
+    script.match(/PLAN_ARGS\+=\(--against "\$AGAINST"\)/g)?.length,
     2,
   );
   assert.match(script, /AGAINST_ARGS=\(--against "\$AGAINST"\)/);
@@ -5067,6 +5086,13 @@ test("--revalidate-appended checks a row against its committed plan", () => {
     const planFile = path.join(detail, "plan.json");
     const explicitPlan = JSON.parse(readFileSync(planFile, "utf8"));
     explicitPlan.baseline_selection = "explicit";
+    explicitPlan.baseline = {
+      executed_at: "2026-08-08T10:00:00Z",
+      contract_digest: row.contract_digest,
+      comparability_key: row.comparability_key,
+      detail_dir: "docs/evals/review-skill-runs/baseline",
+      row_digest: "0".repeat(64),
+    };
     writeFileSync(planFile, JSON.stringify(explicitPlan));
     const lostPairing = cli(flags, { root });
     assert.equal(lostPairing.status, 1);
@@ -5177,6 +5203,7 @@ test("a hand-assembled bridge row keeps the full run's plan", () => {
       kind: "full",
       detail_dir: row.detail_dir,
       baseline_selection: "automatic",
+      baseline: null,
       inputs: row.inputs,
       cells: planCells({ contract, kind: "full" }),
     };

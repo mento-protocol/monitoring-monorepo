@@ -95,6 +95,18 @@ function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+/** The exact explicit baseline a plan authorizes scoring against. */
+export function baselinePlanIdentity(row) {
+  if (!row) return null;
+  return {
+    executed_at: row.executed_at,
+    contract_digest: row.contract_digest,
+    comparability_key: row.comparability_key,
+    detail_dir: row.detail_dir,
+    row_digest: sha256(JSON.stringify(row)),
+  };
+}
+
 function readJson(file) {
   try {
     return JSON.parse(readFileSync(file, "utf8"));
@@ -377,7 +389,7 @@ export function buildPlan({
   skillRef = null,
   runsDir = DEFAULT_RUNS_DIR,
   ledgerRows = [],
-  baselineIsExplicit = false,
+  baselineRow = null,
   now = new Date(),
   env = process.env,
   write = true,
@@ -432,7 +444,8 @@ export function buildPlan({
     comparability_key: key,
     judge: { ...contract.judge },
     detail_dir: detailDir,
-    baseline_selection: baselineIsExplicit ? "explicit" : "automatic",
+    baseline_selection: baselineRow === null ? "automatic" : "explicit",
+    baseline: baselinePlanIdentity(baselineRow),
     // The directory of the previous execution under this name, whose cells this
     // one may seed from, or null when this is the first. Never the directory
     // this run writes to: a recorded row's evidence is not overwritten.
@@ -1123,6 +1136,13 @@ export async function scorePlan({
   if (plan.baseline_selection !== baselineSelection) {
     throw new Error(
       `plan baseline_selection is ${String(plan.baseline_selection)}; this score command is ${baselineSelection}`,
+    );
+  }
+  const plannedBaseline = plan.baseline ?? null;
+  const scoreBaseline = baselinePlanIdentity(baselineRow);
+  if (JSON.stringify(plannedBaseline) !== JSON.stringify(scoreBaseline)) {
+    throw new Error(
+      `plan baseline ${String(plannedBaseline?.executed_at ?? "none")} does not match score baseline ${String(scoreBaseline?.executed_at ?? "none")}`,
     );
   }
   // Freeze every truth object before the first model call. A candidate run uses

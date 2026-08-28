@@ -30,6 +30,7 @@ import {
   completeMatrixProblems,
   freshness,
   frozenDefectProblems,
+  parseInstant,
   readLedger,
   validateLedgerRow,
 } from "./review-eval-ledger.mjs";
@@ -43,6 +44,7 @@ import {
 import {
   assertAuthorizedFreshnessWorkflow,
   buildPlan,
+  baselinePlanIdentity,
   claudeExec,
   comparabilityKey,
   DEFAULT_CALIBRATION_PATH,
@@ -528,7 +530,12 @@ function holdsCellResults(dir) {
  * Only an evidence-free hand-assembled bridge row may omit the plan. It cannot
  * become an automatic anchor or refresh the full-run clock.
  */
-export function planProvenanceProblems({ dir, row, contract }) {
+export function planProvenanceProblems({
+  dir,
+  row,
+  contract,
+  baselineRow = null,
+}) {
   const file = path.join(dir, "plan.json");
   if (!existsSync(file)) {
     if (row.kind === "bridge" && !holdsCellResults(dir)) return [];
@@ -543,6 +550,26 @@ export function planProvenanceProblems({ dir, row, contract }) {
     return [error instanceof Error ? error.message : String(error)];
   }
   const problems = [];
+  const validBaselineIdentity = (value) =>
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    JSON.stringify(Object.keys(value).sort()) ===
+      JSON.stringify(
+        [
+          "comparability_key",
+          "contract_digest",
+          "detail_dir",
+          "executed_at",
+          "row_digest",
+        ].sort(),
+      ) &&
+    parseInstant(value.executed_at) !== null &&
+    /^[0-9a-f]{64}$/.test(value.contract_digest) &&
+    /^[0-9a-f]{64}$/.test(value.comparability_key) &&
+    typeof value.detail_dir === "string" &&
+    value.detail_dir.length > 0 &&
+    /^[0-9a-f]{64}$/.test(value.row_digest);
   for (const field of [
     "contract_digest",
     "comparability_key",
@@ -581,6 +608,20 @@ export function planProvenanceProblems({ dir, row, contract }) {
       `plan.json in ${row.detail_dir} carries invalid baseline_selection ${JSON.stringify(plan.baseline_selection)}`,
     );
   } else if (
+    plan.baseline_selection === "automatic" &&
+    plan.baseline !== null
+  ) {
+    problems.push(
+      `plan.json in ${row.detail_dir} planned automatic baseline selection but carries an explicit baseline identity`,
+    );
+  } else if (
+    plan.baseline_selection === "explicit" &&
+    !validBaselineIdentity(plan.baseline)
+  ) {
+    problems.push(
+      `plan.json in ${row.detail_dir} planned an explicit baseline but carries no valid baseline identity`,
+    );
+  } else if (
     plan.baseline_selection === "explicit" &&
     row.vs_baseline === null &&
     row.kind !== "bridge" &&
@@ -595,6 +636,26 @@ export function planProvenanceProblems({ dir, row, contract }) {
         `row baseline selection is ${JSON.stringify(row.vs_baseline?.selection)}; plan.json in ${row.detail_dir} planned ${JSON.stringify(plan.baseline_selection)}`,
       );
     }
+    if (
+      plan.baseline_selection === "explicit" &&
+      (plan.baseline.executed_at !== row.vs_baseline?.baseline_executed_at ||
+        plan.baseline.comparability_key !==
+          row.vs_baseline?.baseline_comparability_key)
+    ) {
+      problems.push(
+        `row baseline identity does not match the explicit baseline plan.json in ${row.detail_dir} recorded`,
+      );
+    }
+  }
+  if (
+    plan.baseline_selection === "explicit" &&
+    baselineRow !== null &&
+    JSON.stringify(plan.baseline) !==
+      JSON.stringify(baselinePlanIdentity(baselineRow))
+  ) {
+    problems.push(
+      `resolved baseline does not match the explicit baseline identity plan.json in ${row.detail_dir} recorded`,
+    );
   }
   if (!Array.isArray(plan.cells)) {
     problems.push(`plan.json in ${row.detail_dir} carries no cells array`);
@@ -828,9 +889,12 @@ function revalidateAppendedRows({ options, context, result, base }) {
     });
     problems.push(...check.problems.map((problem) => `${label}: ${problem}`));
     problems.push(
-      ...planProvenanceProblems({ dir, row, contract: context.contract }).map(
-        (problem) => `${label}: ${problem}`,
-      ),
+      ...planProvenanceProblems({
+        dir,
+        row,
+        contract: context.contract,
+        baselineRow,
+      }).map((problem) => `${label}: ${problem}`),
     );
     problems.push(
       ...runEvidenceProblems({ dir, row }).map(
@@ -844,6 +908,11 @@ function revalidateAppendedRows({ options, context, result, base }) {
 
 async function modePlan(options, context) {
   const rows = readLedger(path.resolve(context.repoRoot, options.ledgerPath));
+  const baselineRow = resolveRowReference({
+    reference: options.against,
+    rows,
+    repoRoot: context.repoRoot,
+  });
   const kind = resolveKind({
     kind: options.kind,
     rows,
@@ -862,7 +931,7 @@ async function modePlan(options, context) {
     // The rows decide which detail directory this execution may own: one a row
     // already points at holds that row's evidence and is never written again.
     ledgerRows: rows,
-    baselineIsExplicit: options.against !== null,
+    baselineRow,
   });
   printObject(plan, options.json);
 }

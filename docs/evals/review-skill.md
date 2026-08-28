@@ -247,12 +247,13 @@ second ledger delta left for a PR of its own.
 
 `--against` takes a row file path or an `executed_at` prefix and reaches the
 plan, `--score`, `--validate` and `--report` alike. The plan and row therefore
-record `selection: "explicit"`, and all steps read the same baseline. Without
-it the plan and row record automatic selection, and the candidate resolves the
+record `baseline_selection: "explicit"` and
+`vs_baseline.selection: "explicit"`. The plan also records the resolved row's
+identity and digest. Scoring rejects a different row. Without `--against`, the
+plan and row record automatic selection, and the candidate resolves the
 ledger's stored anchor. A candidate also stamps `skill_ref` and `dirty: true`
 into the ledger row. Never compare a candidate against a ledger row from three
-months ago: that comparison silently includes an unknown amount of model
-drift.
+months ago: that comparison silently includes an unknown amount of model drift.
 
 The run ends by printing the branch, commit and `gh pr create` commands for the
 ledger PR. Pass `--pr` to execute them instead. There is no auto-merge; a human
