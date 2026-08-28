@@ -386,10 +386,12 @@ mechanism that separates "the review skill regressed" from "the judge alias now
 points at different weights and the scorer got stricter". It fired on the very
 first baseline run (2026-08-28): the original labels — the frozen 2026-08
 judge's own decisions — scored 29/40 against two independent modern judges,
-which agreed with each other on 36/40. The set was re-audited to the modern
-consensus (provenance in the calibration file) and the contract judge is now
-`claude-fable-5` at max effort, the judge whose full-context adjudication set
-the four contested labels.
+which agreed with each other on 36/40. The set was re-audited against the modern
+consensus, one consensus flip was declined on full context, and four degraded
+records were replaced with fresh matched pairs so the set still clears the
+balance guard at 18 matched / 22 unmatched (provenance in the calibration file).
+The contract judge is now `claude-fable-5` at max effort, the judge whose
+full-context adjudication settled the contested labels.
 
 The forty outcomes are written to `calibration.json` in the run's detail
 directory. `--validate` re-derives `agreement` and `total` from them and checks
@@ -460,8 +462,8 @@ The pinned operating point — `gpt-5.6-sol` at high effort finding, then
 v2, closed 2026-08-24. On the three-PR grid that pairing reached 64% recall
 against the frozen truth, while every solo condition measured at or below 50%.
 Treat that 64% as measured in the retired judge's units: the 2026-08-28
-calibration re-audit found that judge over-lenient (it accepted 8 of 20
-match labels both modern judges reject), so cross-lineage comparisons against
+calibration re-audit rejected eight of that judge's twenty match labels — six by
+modern-judge consensus, two on full-context adjudication — so comparisons against
 it carry that inflation. The first re-keyed baseline sets the new reference.
 The same benchmark supplied the six fixtures, the frozen truth, the frozen
 finder reports for the `replay` condition, and the calibration pairs.

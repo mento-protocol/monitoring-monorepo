@@ -711,12 +711,8 @@ export function validateCalibrationSet(doc) {
       );
     }
   }
-  // The 2026-08-28 re-audit moved 8 net labels toward unmatched (the frozen
-  // judge over-matched), so the audited set sits at 15/25. A future set
-  // refresh should restore the 20/20 target; the tolerance holds the line
-  // against anything more degenerate than the audited skew.
   check(
-    records.length !== 40 || Math.abs(tally.matched - tally.unmatched) <= 10,
+    records.length !== 40 || Math.abs(tally.matched - tally.unmatched) <= 4,
     `records must be roughly balanced, found ${tally.matched} matched / ${tally.unmatched} unmatched`,
   );
   return { ok: problems.length === 0, problems };

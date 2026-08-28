@@ -2,8 +2,8 @@
  "schema_version": 1,
  "suite_id": "review-skill-v1",
  "generated_at": "2026-08-25",
- "provenance": "Labels re-audited 2026-08-28: original 2026-08-25 labels were the frozen 2026-08 opus judge's own decisions. Two independent modern judges (claude-opus-5 current, claude-fable-5 max) each agreed with only 29/40 and with each other on 36/40; every consensus disagreement was adopted, and the 4 modern-judge-contested pairs were adjudicated with full context (receipts in PR): 3829659550 matched (same fails-open-on-null-head defect, same function), 3829986403 matched (claim names duplicate-dispatch acceptance and the exactly-one fix), 3830003055 unmatched (stored excerpt carries only the lock-guard item; the matching partition item was truncated out at set construction, so the pair as presented does not support a match), 3830371325 unmatched (stored defect detail is analysis-script noise; the pair as presented is not judgeable as a match). Net: consensus disagreements = 11 frozen labels flipped where both modern judges concurred, plus these two truncation relabels.",
- "method": "For every bench2 run cell (runs/<pr>/<condition>/), the structural pre-filter of match_findings.py was replayed over the stored review output to rebuild the numbered candidate list. Each numbered entry in the cell's judge_reasoning maps to one candidate defect; the label is matched when that defect id appears in the cell's matched_ids, unmatched otherwise. claim_excerpt is the passage of the review that names the defect's file, taken verbatim. Cells whose reasoning keys did not cover 1..N were skipped. The sample is balanced 20 matched / 20 unmatched and spread across all 6 contract PRs and 21 run conditions.",
+ "provenance": "Labels re-audited 2026-08-28. The original 2026-08-25 labels were the frozen 2026-08 opus judge's own decisions; two independent modern judges (claude-opus-5 current, claude-fable-5 max) each agreed with only 29/40 and with each other on 36/40, so the frozen judge was the outlier. The set now committed contains: 8 frozen labels flipped where both modern judges agreed (6 matched -> unmatched, 2 unmatched -> matched); 1 consensus flip declined on full-context adjudication (3827655676 stays unmatched \u2014 the claim is about the backfill parser rejecting a multi-paragraph handoff note while the defect is a broken code span and list indentation at the same doc lines, which judge-match.md excludes as a location-only overlap); 2 modern-contested pairs adjudicated matched (3829659550, same fails-open-on-null-head defect in the same function; 3829986403, the claim names duplicate-dispatch acceptance and the exactly-one fix); and 4 records replaced to restore balance. The 4 dropped records were the two pairs whose stored content was too degraded to judge (3830003055-matched, whose excerpt truncated out the matching partition item at set construction, and 3830371325-matched, whose stored defect detail is CodeRabbit analysis-script noise) plus the two least informative consensus-unmatched records (3830371325-unmatched, same noise detail, and 3829659546-unmatched, whose detail truncates before the requirement it states). Their four replacements are matched pairs taken from the 2026-08-28 scored run and re-confirmed on the merits here: 3830366234, 3830366247, 3830416461 and 3828328194.",
+ "method": "For every bench2 run cell (runs/<pr>/<condition>/), the structural pre-filter of match_findings.py was replayed over the stored review output to rebuild the numbered candidate list. Each numbered entry in the cell's judge_reasoning maps to one candidate defect; the label is matched when that defect id appears in the cell's matched_ids, unmatched otherwise. claim_excerpt is the passage of the review that names the defect's file, taken verbatim. Cells whose reasoning keys did not cover 1..N were skipped. The sample was built balanced 20 matched / 20 unmatched; the 2026-08-28 re-audit and rebalance moved it to 18 matched / 22 unmatched, spread across 6 contract PRs and 22 run conditions (see provenance and counts for the current numbers). The four records added in the rebalance come from the 2026-08-28 scored run detail directory instead, where candidate_index indexes that cell's claims[] array.",
  "judge": {
   "model": "claude-fable-5",
   "effort": "max",
@@ -14,10 +14,10 @@
  },
  "counts": {
   "total": 40,
-  "matched": 15,
-  "unmatched": 25,
+  "matched": 18,
+  "unmatched": 22,
   "prs": 6,
-  "conditions": 21
+  "conditions": 22
  },
  "records": [
   {
@@ -88,7 +88,7 @@
     "candidate_index": 3
    },
    "defect_id": 3827655676,
-   "expected_verdict": "matched",
+   "expected_verdict": "unmatched",
    "claim_excerpt": "This matters because `docs/notes/github-tooling-surfaces.md:105-112` instructs cloud agents to hand-write this comment plus a free-form note stating Project fields were not set \u2014 and a two-paragraph note, the most natural form, kills the whole claim. Returning a reason string (or logging one under `--dry-run`) would make the failure actionable.",
    "defect": {
     "id": 3827655676,
@@ -98,7 +98,7 @@
     "title": "\ud83d\udcd0 Maintainability & Code Quality | \ud83d\udfe1 Minor | \u26a1 Quick win",
     "detail": "_\ud83d\udcd0 Maintainability & Code Quality_ | _\ud83d\udfe1 Minor_ | _\u26a1 Quick win_\n\nKeep Claim ID on one line and restore the list indentation.\n\nLine 108 breaks the inline code span mid-token, and line 109 starts at column 0 instead of the 3-space continuation indent that every other step uses. Rewrap the sentence.\n\n\n\ud83d\udcdd Proposed fix\n\ndiff\n-4. Hand off to a gh-capable surface. Run\n-   pnpm issue:board backfill --issue"
    },
-   "frozen_reasoning": "No mention of the docs/notes/github-tooling-surfaces.md markdown formatting issue (broken inline code span / list indentation); the file is cited only as context for the parser strictness finding."
+   "frozen_reasoning": "Audited 2026-08-28: the claim is about the backfill parser rejecting a multi-paragraph handoff note (a functional strictness problem), while defect 3827655676 is a broken inline code span and list indentation at the same doc lines (a cosmetic formatting problem) \u2014 same location, unrelated problems, which judge-match.md excludes explicitly; both modern judges false-positived here with only the excerpt in view."
   },
   {
    "record_id": "pr1982-3827655684-unmatched",
@@ -301,26 +301,6 @@
    "frozen_reasoning": "Item #4 flags pr-ready-state.md:399-402 running the projection pair at step 5 and posting the request at step 8 with no re-run, contradicting SKILL.md/operating card, and says to pick one ordering."
   },
   {
-   "record_id": "pr1990-3829659546-unmatched",
-   "source_cell": {
-    "pr": 1990,
-    "condition": "sweep_claude-opus-5_max",
-    "candidate_index": 3
-   },
-   "defect_id": 3829659546,
-   "expected_verdict": "unmatched",
-   "claim_excerpt": "`scripts/pr/pr-ready-state-core.mjs:1008-1015` \u00b7 `.claude/skills/babysit-pr/SKILL.md:311` (and the `.agents/` mirror) \u00b7 `docs/notes/pr-ready-state.md:399-402`",
-   "defect": {
-    "id": 3829659546,
-    "severity": "P1",
-    "path": "docs/notes/pr-ready-state.md",
-    "line": 408,
-    "title": "\ud83c\udfaf Functional Correctness | \ud83d\udfe0 Major | \u26a1 Quick win",
-    "detail": "_\ud83c\udfaf Functional Correctness_ | _\ud83d\udfe0 Major_ | _\u26a1 Quick win_\n\nUse one ordering for the final readiness workflow.\n\nThe central workflow and both ship mirrors can run the projection pair before applying the CodeRabbit closeout rule. Require the exact sequence below at every site:\n\n- docs/notes/pr-ready-state.md#L399-L408: Apply CodeRabbit closeout before the final feedback-state and ready-state pair.\n- .a"
-   },
-   "frozen_reasoning": "No discussion of the ordering of the CodeRabbit closeout rule relative to the feedback-state/ready-state projection pair across the workflow and ship mirrors."
-  },
-  {
    "record_id": "pr1990-3829659550-matched",
    "source_cell": {
     "pr": 1990,
@@ -459,26 +439,6 @@
     "detail": "_\ud83c\udfaf Functional Correctness_ | _\ud83d\udfe1 Minor_ | _\u26a1 Quick win_\n\nRequire exactly one dispatch call.\n\nThe validator accepts every dispatch_gate_test_families line after the end marker. A second call passes validation and runs every selected family twice. Count dispatch calls and fail unless the count is one.\n\n\nProposed fix\n\ndiff\n-        if ($0 == \"dispatch_gate_test_families\") { next }\n+        if ($0 == \""
    },
    "frozen_reasoning": "Review asserts the partition checker rejects 'second statement after dispatch' and treats dispatch validation as correct; it never flags that multiple dispatch calls pass and would double-run families."
-  },
-  {
-   "record_id": "pr1995-3830003055-matched",
-   "source_cell": {
-    "pr": 1995,
-    "condition": "E_opus5_r3",
-    "candidate_index": 3
-   },
-   "defect_id": 3830003055,
-   "expected_verdict": "unmatched",
-   "claim_excerpt": "1. `scripts/agent-quality-gate.test.sh:596,601` \u2014 the guard's stated invariant (\"every command a real gate run spawns carries it\") is false for `--no-lock` / `AGENT_QUALITY_GATE_LOCK=0`. `acquire_gate_run_lock` returns at `agent-quality-gate.sh:1616` *before* the export, so those runs spawn the mapped self-test without `AGENT_QUALITY_GATE_LOCK_HELD` \u2014 an exported `GATE_TEST_FOCUS` then silently shrinks the gate's own self-test, reported as passed. `docs/notes/agent-quality-gate-mechanics.md:1144` repeats the same inaccurate claim.",
-   "defect": {
-    "id": 3830003055,
-    "severity": "P2",
-    "path": "scripts/agent-quality-gate.test.sh",
-    "line": 572,
-    "title": "Partition allows missing dispatch",
-    "detail": "### Partition allows missing dispatch\n\nMedium Severity\n\n\nverify_gate_family_partition treats any number of dispatch_gate_test_families lines after the end marker as fine, including zero. Deleting that call still passes the structural check, defines every family, then exits 0 without running tests or printing success. That quietly greens the mapped self-test the partition was meant to protect."
-   },
-   "frozen_reasoning": "Item 2 states the verifier never checks the dispatch call is present, and confirms deleting it exits 0 with zero tests run \u2014 same defect."
   },
   {
    "record_id": "pr1995-3830003055-unmatched",
@@ -701,46 +661,6 @@
    "frozen_reasoning": "Review item 5 identifies mockResolvedValue sharing one consumable Response across four fetches, causing 502 from body reuse and vacuous assertions."
   },
   {
-   "record_id": "pr1999-3830371325-matched",
-   "source_cell": {
-    "pr": 1999,
-    "condition": "C_opus5_orig",
-    "candidate_index": 8
-   },
-   "defect_id": 3830371325,
-   "expected_verdict": "unmatched",
-   "claim_excerpt": "**\ud83d\udd34 `ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts:109` \u2014 an alert that starts out of `Error` is never recorded as raised, and its resolution loses duration and measurement.**",
-   "defect": {
-    "id": 3830371325,
-    "severity": "P2",
-    "path": "ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts",
-    "line": 352,
-    "title": "\ud83c\udfaf Functional Correctness | \ud83d\udfe1 Minor | \u26a1 Quick win",
-    "detail": "_\ud83c\udfaf Functional Correctness_ | _\ud83d\udfe1 Minor_ | _\u26a1 Quick win_\n\n\n\ud83e\udde9 Analysis chain\n\n\ud83c\udfc1 Script executed:\n\nshell\n#!/bin/bash\nrg -n -C6 'error-recovered-alerting' ui-dashboard/src --glob '.ts' --glob '.tsx'\n\n\nRepository: mento-protocol/monitoring-monorepo\n\nLength of output: 5558\n\n---\n\n\ud83c\udfc1 Script executed:\n\nshell\n#!/bin/bash\nset -e\nprintf '%s\\n' '--- transition classification ---'\nsed -n '96,122p' ui-dashboard/sr"
-   },
-   "frozen_reasoning": "Same location/underlying pairing defect at pairStateTransitions/cycleKey; review's blocker explains error-recovered-alerting routing to the :error cycle so the :alert cycle never opens, plus the Error\u2192Normal stale-open raise."
-  },
-  {
-   "record_id": "pr1999-3830371325-unmatched",
-   "source_cell": {
-    "pr": 1999,
-    "condition": "sweep_claude-haiku-4-5-20251001_medium",
-    "candidate_index": 5
-   },
-   "defect_id": 3830371325,
-   "expected_verdict": "unmatched",
-   "claim_excerpt": "2. **Severity escalation bug in `ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts:251`** \u2014 When a rule evaluation fails (e.g., Grafana query error), the error inherits the rule's severity instead of being escalated to page-worthy priority. A warning-level rule that can't evaluate stays \"warning\" rather than \"page\", potentially under-prioritizing monitoring infrastructure failures.",
-   "defect": {
-    "id": 3830371325,
-    "severity": "P2",
-    "path": "ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts",
-    "line": 352,
-    "title": "\ud83c\udfaf Functional Correctness | \ud83d\udfe1 Minor | \u26a1 Quick win",
-    "detail": "_\ud83c\udfaf Functional Correctness_ | _\ud83d\udfe1 Minor_ | _\u26a1 Quick win_\n\n\n\ud83e\udde9 Analysis chain\n\n\ud83c\udfc1 Script executed:\n\nshell\n#!/bin/bash\nrg -n -C6 'error-recovered-alerting' ui-dashboard/src --glob '.ts' --glob '.tsx'\n\n\nRepository: mento-protocol/monitoring-monorepo\n\nLength of output: 5558\n\n---\n\n\ud83c\udfc1 Script executed:\n\nshell\n#!/bin/bash\nset -e\nprintf '%s\\n' '--- transition classification ---'\nsed -n '96,122p' ui-dashboard/sr"
-   },
-   "frozen_reasoning": "Same as defect 2 \u2014 the error-recovered/alerting pairing logic at line 352 is not discussed; the review's peg-alert-events.ts item is about severity escalation."
-  },
-  {
    "record_id": "pr1999-3830416461-unmatched",
    "source_cell": {
     "pr": 1999,
@@ -819,6 +739,86 @@
     "detail": "![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)  Subtract prior yield when a zero row empties a wallet\n\nWhen a yielding tracked wallet transfers its entire balance to another tracked wallet, recordTransfer moves the balance and principal, so the sender's next snapshot can have all four checked fields at zero while the recipient inherits the unrealized yield. This branch records zero"
    },
    "frozen_reasoning": "No mention of tracked-wallet transfers, prior unrealized yield, or the need to subtract prior yield when a wallet empties."
+  },
+  {
+   "record_id": "pr1999-3830366234-matched",
+   "source_cell": {
+    "pr": 1999,
+    "condition": "control",
+    "candidate_index": 0
+   },
+   "defect_id": 3830366234,
+   "expected_verdict": "matched",
+   "claim_excerpt": "`terraform test` fails \u2014 the HCL test wasn't updated with the template: `alerts/rules/peg-rule-definitions.tftest.hcl:68-69` still asserts the Slack title template contains `$alert.Annotations.summary` and `$alert.Annotations.resolved_summary`, but the new emoji-only title (`alerts/rules/peg-message-templates.tf:13-16`) has neither",
+   "defect": {
+    "id": 3830366234,
+    "severity": "P1",
+    "path": "alerts/rules/peg-message-templates.tf",
+    "line": 14,
+    "title": "Update the stale Terraform title assertion",
+    "detail": "![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)  Update the stale Terraform title assertion\n\nWhen the required ci.yml Terraform job runs for this alerts/rules change, peg-rule-definitions.tftest.hcl lines 68\u201369 still require the Slack title template to contain both $alert.Annotations.summary and $alert.Annotations.resolved_summary. This icon-only template contains neither, so terraf"
+   },
+   "frozen_reasoning": "Audited 2026-08-28: the claim names the same stale peg-rule-definitions.tftest.hcl:68-69 assertion requiring $alert.Annotations.summary and resolved_summary against the now icon-only title, and draws the same conclusion that the required terraform test fails \u2014 same defect, same cause."
+  },
+  {
+   "record_id": "pr1999-3830366247-matched",
+   "source_cell": {
+    "pr": 1999,
+    "condition": "pipeline",
+    "candidate_index": 4
+   },
+   "defect_id": 3830366247,
+   "expected_verdict": "matched",
+   "claim_excerpt": "3. `Error \u2192 Pending` recovery is never observed, so the failure row never resolves \u2014 `route.ts:43-55` + `peg-alert-events.ts:105-114`: `errorStateHistoryUrl` never requests `current=Pending` and `transitionKind` returns `null` for that pair, so the `error` transition stays in `open` forever and is emitted as a standalone \"Grafana could not evaluate the \u2026 Peg rule\" that never gets a recovery counterpart",
+   "defect": {
+    "id": 3830366247,
+    "severity": "P2",
+    "path": "ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts",
+    "line": 114,
+    "title": "Include recoveries that resume in Pending",
+    "detail": "![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)  Include recoveries that resume in Pending\n\nWhen a rule with a nonzero for duration enters Error and its next successful evaluation still satisfies the condition, Grafana can recover into Pending rather than Normal or Alerting. This classifier ignores that transition, and errorStateHistoryUrl also requests only previous=Error&current=N"
+   },
+   "frozen_reasoning": "Audited 2026-08-28: the claim states that errorStateHistoryUrl never requests current=Pending and that transitionKind returns null for Error -> Pending, so the failure row never gets its recovery \u2014 the same missing-Pending-recovery defect the truth finding describes."
+  },
+  {
+   "record_id": "pr1999-3830416461-matched",
+   "source_cell": {
+    "pr": 1999,
+    "condition": "replay",
+    "candidate_index": 3
+   },
+   "defect_id": 3830416461,
+   "expected_verdict": "matched",
+   "claim_excerpt": "peg-alert-events.ts:230 \u2014 evaluation-failure copy says 'Price source' for rules that have no source; pegAlertSourceName(\"\") returns the literal 'Price source' for Structural Saturation Warning, Indexed Pool Unreachable, Heartbeat Missing and Policy Rollover Stuck, so a Grafana error renders 'Grafana could not evaluate the Price source Peg rule'",
+   "defect": {
+    "id": 3830416461,
+    "severity": "P2",
+    "path": "ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts",
+    "line": 230,
+    "title": "Label source-less evaluation failures by rule",
+    "detail": "![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)  Label source-less evaluation failures by rule\n\nWhen an asset-wide or policy rule enters Error, labels.source is empty\u2014as it is for Structural Saturation, Indexed Pool, Heartbeat, and Policy Rollover rules\u2014so this calls pegAlertSourceName(\"\"), which returns Price source. Both failure and recovery rows then claim Grafana evaluated a non"
+   },
+   "frozen_reasoning": "Audited 2026-08-28: the claim identifies pegAlertSourceName(\"\") returning the literal 'Price source' at peg-alert-events.ts:230 and names the same source-less rules, so evaluation failures are mislabelled \u2014 the same defect."
+  },
+  {
+   "record_id": "pr1984-3828328194-matched",
+   "source_cell": {
+    "pr": 1984,
+    "condition": "pipeline",
+    "candidate_index": 1
+   },
+   "defect_id": 3828328194,
+   "expected_verdict": "matched",
+   "claim_excerpt": "scripts/sentry/autofix/sentry-autofix-run-record.mjs:67 \u2014 the repo default is dead for the only caller shape; omitting the --refused-inventory-repo flag yields `github.com/null` links because readFlag returns null and a JS default parameter fires only on undefined",
+   "defect": {
+    "id": 3828328194,
+    "severity": "P3",
+    "path": "scripts/sentry/autofix/sentry-autofix-run-record.mjs",
+    "line": 78,
+    "title": "Repo default bypassed by null",
+    "detail": "### Repo default bypassed by null\n\nLow Severity\n\n\nrenderRefusedStubInventory defaults repo to REFUSED_INVENTORY_DEFAULT_REPO, but the finalize run-record path passes readFlag's null when --refused-inventory-repo is omitted. In JavaScript, null does not trigger a parameter default, so known inventories render links as https://github.com/null/issues/... instead of falling back to the intended defaul"
+   },
+   "frozen_reasoning": "Audited 2026-08-28: the claim states that readFlag returns null while a JS default parameter fires only on undefined, so omitting --refused-inventory-repo renders github.com/null links \u2014 the same null-bypasses-the-default defect at the same call site."
   }
  ]
 }

@@ -712,8 +712,8 @@ test("the committed calibration set holds forty labelled pairs", () => {
   assert.deepEqual(problems, []);
   assert.equal(ok, true);
   assert.equal(calibration.counts.total, calibration.records.length);
-  assert.equal(calibration.counts.matched, 15);
-  assert.equal(calibration.counts.unmatched, 25);
+  assert.equal(calibration.counts.matched, 18);
+  assert.equal(calibration.counts.unmatched, 22);
 });
 
 test("validateCalibrationSet reports a set that lost its provenance or balance", () => {
