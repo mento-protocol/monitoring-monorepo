@@ -305,47 +305,32 @@ UI PR shipped or ready. The user may waive visual evidence for a specific PR.
 
 ## Dynamic social-preview verification
 
-For a change that can affect dynamic route metadata or an Open Graph image,
-verify the final deployed origin in the browser. This includes changes to the
-metadata or image route and to a renderer, data helper, shared font, or other
-dependency used by that route. Do not use a local render as production proof.
+For any direct or transitive change to dynamic metadata or an Open Graph image,
+verify the final deployed origin. This includes routes, renderers, data helpers,
+and shared fonts. Local and preview results are not production proof.
 
-- Send isolated, cookie-free requests with an ordinary browser user agent and
-  each relevant crawler user agent, such as Slackbot or Twitterbot. Check the
-  original document status, redirect chain, and final URL before validating
-  metadata. Require the original status and redirect chain to match the route
-  contract, and require HTTP 200 from the expected final route.
-- Read the exact document title and description; canonical URL; Open Graph
-  type, URL, title, description, image, and image alt values; and Twitter card
-  type, title, description, image, and image alt values from each raw initial
-  HTML response. Confirm that every value the route declares matches its
-  contract and public-data policy. Record expected absence when the route
-  contract does not declare an optional canonical URL, Open Graph URL, or
-  image-alt tag.
-- When metadata has public and private states, verify an explicitly public
-  record and an explicitly private record. Confirm that the private state uses
-  the declared safe fallback and exposes no private label, tag, source, or
-  other restricted data.
-- Inspect the deployed document's `Cache-Control` and `Age` headers. Confirm
-  that they match the route's declared freshness or revalidation policy. For
-  metadata that can become private, require a policy that prevents stale
-  public data from remaining in a shared cache, or perform an equivalent
-  public-to-private revocation check.
-- Compare those values with the live DOM when client-side hydration is
-  relevant. The hydrated DOM alone does not prove what a crawler receives.
-- Fetch the exact image URL from the deployed document in the same isolated,
-  cookie-free context and with the browser cache disabled. Reject any
-  credential-dependent response difference; for an access-controlled route,
-  compare the anonymous response with an authenticated fetch. Require HTTP
-  200, the expected image content type, and the declared pixel dimensions.
-  Inspect `Cache-Control` and `Age`, and confirm that they match the route's
-  declared freshness or revalidation policy. Disabling the browser cache does
-  not bypass a CDN cache.
-- Inspect the rendered image. Confirm that it identifies the correct route,
-  shows the expected data or fallback state, and has no blank or clipped
-  content.
-- Check browser console errors after the route and image load.
-- Use a URL that Slack has not expanded before when testing the unfurl. Slack
-  can retain the first unfurl for a shared URL, so an existing message does not
-  prove that the current metadata or image is live. Inspect the new unfurl and
-  confirm that its content matches the rendered image.
+- Send isolated, cookie-free requests with a normal browser user agent and each
+  relevant crawler user agent, such as Slackbot or Twitterbot. Record the
+  initial status, redirects, and final URL. Require the route contract and a
+  final HTTP 200.
+- In each raw initial HTML response, verify the exact document title and
+  description; canonical URL; Open Graph type, URL, title, description, image,
+  and image alt; and Twitter card, title, description, image, and image alt.
+  Match the route and public-data contract. Record expected absence for an
+  optional canonical URL, Open Graph URL, or image-alt tag.
+- For public and private metadata states, test an explicit record in each state.
+  Require the safe private fallback and no restricted label, tag, or source.
+- Verify document `Cache-Control` and `Age` against its freshness policy. For
+  metadata that can become private, prevent stale shared caching or test
+  public-to-private revocation.
+- If hydration affects metadata, compare raw tags with the DOM. The DOM alone
+  is not crawler proof.
+- Fetch the exact image URL cookie-free with browser caching disabled. For an
+  access-controlled route, compare an authenticated fetch and reject any
+  credential dependence. Require HTTP 200, the expected type and dimensions,
+  and `Cache-Control` and `Age` that match policy. Browser cache controls do not
+  bypass a CDN cache.
+- Inspect the image for the correct route and data or fallback. Require no blank
+  or clipped content. Check browser console errors after both loads.
+- Test a URL that Slack has not expanded. An old message is cached evidence.
+  Require the new unfurl to match the inspected image.
