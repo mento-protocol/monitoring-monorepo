@@ -133,10 +133,10 @@ export const INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
  * Parse a canonical UTC date-time; return null when it is not one.
  *
  * `new Date(value)` accepts far more than the schema promises — "0", "2026-9-8"
- * and RFC-style dates all parse — and `resolveBaseline` orders rows by
- * comparing `executed_at` as strings. A row carrying any of those would pass
- * validation and then sort or filter against every canonical row incorrectly,
- * so the format is required, not merely parseable. The round-trip check is what
+ * and RFC-style dates all parse — and baseline resolution orders rows by
+ * `executed_at`. A row carrying any of those would pass validation and then
+ * sort or filter against every canonical row incorrectly, so the format is
+ * required, not merely parseable. The round-trip check is what
  * refuses a well-shaped impossible date such as `2026-02-31T00:00:00Z`, which
  * `Date` silently rolls forward into March.
  */

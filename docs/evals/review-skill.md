@@ -360,8 +360,8 @@ against the anchor with the version drift named beside it.
 
 `scorer_digest` covers every file that can move a recorded number or a recorded
 verdict — the CLI scoring orchestration, the scorer, the per-condition fold,
-the recompute, and the verdict rules — not the extraction alone. It also covers
-the two fixture helpers:
+the recompute, timestamp validation, and the verdict rules — not the extraction
+alone. It also covers the two fixture helpers:
 `review-eval-fixtures.mjs` picks the matrix, the truth file and the recall
 denominator, and `build-fixture.sh` materializes the checkout the contestant
 reviews and carries the checks that verify it, so an edit to either moves what
@@ -392,21 +392,21 @@ would recompute its verdict against a truth index and thresholds the run never
 saw. The default selection is the newest row of this contract, and `--row` on an
 older one is refused; pass `--contract` with the archived contract to read it.
 
-| drift vector      | control                                                                                              |
-| ----------------- | ---------------------------------------------------------------------------------------------------- |
-| fixture content   | eval tags plus a tree-hash check in `build-fixture.sh`, whose bytes are in `scorerDigest()`          |
-| truth content     | committed verbatim, per-file `sha256`, never re-derived from the API                                 |
-| scorable set      | explicit frozen id list in the contract                                                              |
-| run prompts       | frozen files with `sha256` in the contract                                                           |
-| scoring pipeline  | `scorerDigest()` over the scorer, run, result-shape, report and fixture files and every judge prompt |
-| judge model       | model id and CLI version in the row, plus 40 calibration pairs every run                             |
-| calibration set   | its `sha256` is bound into `comparability_key`                                                       |
-| reviewed model    | isolated by the `control` condition; model id and CLI version recorded                               |
-| skill text        | `skill_digest` over every file in the skill directory, symlinks refused — this is the treatment      |
-| finder command    | `argv` pinned in the contract; `finder_argv_digest` records what a cell spawned                      |
-| orchestrator      | `orchestrator_digest` over `run-eval.sh`: in the key and in every cell fingerprint                   |
-| machine and shell | host, CLI versions, `--setting-sources ""`, clean worktree of `origin/main`                          |
-| CLI upgrade       | versions in every cell fingerprint; a pair across one is labelled in the verdict, not in the key     |
+| drift vector      | control                                                                                                      |
+| ----------------- | ------------------------------------------------------------------------------------------------------------ |
+| fixture content   | eval tags plus a tree-hash check in `build-fixture.sh`, whose bytes are in `scorerDigest()`                  |
+| truth content     | committed verbatim, per-file `sha256`, never re-derived from the API                                         |
+| scorable set      | explicit frozen id list in the contract                                                                      |
+| run prompts       | frozen files with `sha256` in the contract                                                                   |
+| scoring pipeline  | `scorerDigest()` over the scorer, run, result-shape, ledger, report and fixture files and every judge prompt |
+| judge model       | model id and CLI version in the row, plus 40 calibration pairs every run                                     |
+| calibration set   | its `sha256` is bound into `comparability_key`                                                               |
+| reviewed model    | isolated by the `control` condition; model id and CLI version recorded                                       |
+| skill text        | `skill_digest` over every file in the skill directory, symlinks refused — this is the treatment              |
+| finder command    | `argv` pinned in the contract; `finder_argv_digest` records what a cell spawned                              |
+| orchestrator      | `orchestrator_digest` over `run-eval.sh`: in the key and in every cell fingerprint                           |
+| machine and shell | host, CLI versions, `--setting-sources ""`, clean worktree of `origin/main`                                  |
+| CLI upgrade       | versions in every cell fingerprint; a pair across one is labelled in the verdict, not in the key             |
 
 **Judge calibration runs before every scoring pass.** Forty frozen
 `(claim, defect, verdict)` pairs replay through the current judge. Agreement

@@ -2158,6 +2158,40 @@ test("resolveBaseline finds a deserialized ledger row by stable identity", () =>
   );
 });
 
+test("resolveBaseline excludes future ledger anchors from an external row", () => {
+  const anchor = makeRow({ executedAt: "2026-09-08T10:00:00Z" });
+  const external = makeRow({ executedAt: "2026-10-08T10:00:00Z" });
+  const futurePromotion = makeRow({
+    executedAt: "2026-11-08T10:00:00Z",
+    verdict: "PROMOTE",
+  });
+  assert.equal(
+    resolveBaseline({ rows: [anchor, futurePromotion], row: external })
+      .executed_at,
+    anchor.executed_at,
+  );
+});
+
+test("resolveBaseline rejects a malformed instant on an external row", () => {
+  const anchor = makeRow({ executedAt: "2026-02-28T10:00:00Z" });
+  const external = makeRow({ executedAt: "2026-02-31T10:00:00Z" });
+  assert.equal(resolveBaseline({ rows: [anchor], row: external }), null);
+});
+
+test("resolveBaseline excludes a malformed external baseline candidate", () => {
+  const anchor = makeRow({ executedAt: "2026-02-01T10:00:00Z" });
+  const malformedPromotion = makeRow({
+    executedAt: "2026-02-31T10:00:00Z",
+    verdict: "PROMOTE",
+  });
+  const external = makeRow({ executedAt: "2026-04-01T10:00:00Z" });
+  assert.equal(
+    resolveBaseline({ rows: [anchor, malformedPromotion], row: external })
+      .executed_at,
+    anchor.executed_at,
+  );
+});
+
 test("an automatic baseline ranks a later-appended backdated row", () => {
   const ids = scorableIdsFor(contract.fixtures.map((fixture) => fixture.pr));
   const p1 = new Set(p1IdsFor(contract.fixtures.map((fixture) => fixture.pr)));

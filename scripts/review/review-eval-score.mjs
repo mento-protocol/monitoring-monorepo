@@ -64,7 +64,8 @@ const scriptPath = fileURLToPath(import.meta.url);
 // extraction and the matcher live here, CLI scoring orchestration lives in
 // `review-eval.mjs`, the per-condition fold and the leak signal live in
 // `review-eval-run.mjs`, the recompute lives in
-// `review-eval-result-shape.mjs`, and the verdict rules live in
+// `review-eval-result-shape.mjs`, timestamp validation lives in
+// `review-eval-ledger.mjs`, and the verdict rules live in
 // `review-eval-report.mjs`.
 //
 // The two fixture helpers are hashed for the same reason. `gridFixtures()`
@@ -82,6 +83,7 @@ export const SCORING_MODULES = [
   "review-eval.mjs",
   "review-eval-run.mjs",
   "review-eval-result-shape.mjs",
+  "review-eval-ledger.mjs",
   "review-eval-report.mjs",
   "review-eval-fixtures.mjs",
   "build-fixture.sh",

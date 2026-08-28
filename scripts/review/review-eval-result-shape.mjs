@@ -11,6 +11,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
 import { fixtureForPr } from "./review-eval-fixtures.mjs";
+import { parseInstant } from "./review-eval-ledger.mjs";
 import {
   baselineEligibility,
   compareConditions,
@@ -120,6 +121,10 @@ export function failedRow({
  * "First" and "newest" use ledger append order. A slow machine clock cannot
  * place a later row before the established anchor.
  *
+ * An external row has no ledger position. For that row, its execution time
+ * bounds the eligible ledger prefix. This prevents a later ledger row from
+ * becoming the automatic baseline of an earlier external result.
+ *
  * A row whose judge calibration failed is never eligible, as anchor or as
  * re-anchor: the runbook excludes such a row from baseline comparison, and an
  * anchor is the comparison every later run is paired against.
@@ -149,8 +154,18 @@ export function resolveBaseline({ rows, row }) {
             candidate.contract_digest === row?.contract_digest &&
             candidate.detail_dir === row?.detail_dir,
         );
+  const rowInstant = rowIndex === -1 ? parseInstant(row?.executed_at) : null;
   const priorRows =
-    rowIndex === -1 ? ledgerRows : ledgerRows.slice(0, rowIndex);
+    rowIndex === -1
+      ? ledgerRows.filter((candidate) => {
+          const candidateInstant = parseInstant(candidate.executed_at);
+          return (
+            rowInstant !== null &&
+            candidateInstant !== null &&
+            candidateInstant < rowInstant
+          );
+        })
+      : ledgerRows.slice(0, rowIndex);
   const eligible = priorRows.filter(
     (candidate) =>
       baselineEligibility(candidate).usable &&
