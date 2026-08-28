@@ -217,6 +217,44 @@ describe("TroveBalanceChart", () => {
     expect(coll!.y).toEqual([40_000, 15_000, 15_000]);
   });
 
+  it("moves the active range cutoff when the shared clock advances", () => {
+    render(
+      handle!,
+      chartProps({
+        rows: [
+          ledgerRow({
+            id: "42220_100_1",
+            timestamp: String(NOW - 2 * DAY),
+            collAfter: wei(40_000),
+          }),
+          ledgerRow({
+            id: "42220_200_1",
+            timestamp: String(NOW - DAY + 15),
+            blockNumber: "200",
+            collAfter: wei(15_000),
+          }),
+        ],
+      }),
+    );
+
+    const oneDay = handle!.container.querySelector<HTMLButtonElement>(
+      '[role="group"][aria-label="Trove chart time range"] button',
+    );
+    act(() =>
+      oneDay!.dispatchEvent(new MouseEvent("click", { bubbles: true })),
+    );
+    expect(traces()[0]!.x[0]).toBe(new Date((NOW - DAY) * 1000).toISOString());
+
+    act(() => vi.advanceTimersByTime(30_000));
+
+    expect(traces()[0]!.x[0]).toBe(
+      new Date((NOW + 30 - DAY) * 1000).toISOString(),
+    );
+    expect(traces()[0]!.x.at(-1)).toBe(
+      new Date((NOW + 30) * 1000).toISOString(),
+    );
+  });
+
   it("adds the ICR percentage panel only when price data exists — its own axis, never shared", () => {
     render(
       handle!,

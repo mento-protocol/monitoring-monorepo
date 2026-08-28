@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { useMemo, useRef, useState } from "react";
 import { StaleRefreshNotice } from "@/components/feedback";
 import { useDeferredMount } from "@/components/use-deferred-mount";
+import { useNowSeconds } from "@/hooks/use-now-seconds";
 import {
   escapePlotText,
   PLOTLY_AXIS_DEFAULTS,
@@ -538,15 +539,10 @@ export function TroveBalanceChart({
     () => buildTroveChartSeries(rows, { debtSnapshotsComplete }),
     [rows, debtSnapshotsComplete],
   );
+  const nowSeconds = useNowSeconds();
   const model = useMemo(
-    () =>
-      buildTroveChartModel(
-        series,
-        range,
-        debtSymbol,
-        Math.floor(Date.now() / 1000),
-      ),
-    [series, range, debtSymbol],
+    () => buildTroveChartModel(series, range, debtSymbol, nowSeconds ?? 0),
+    [series, range, debtSymbol, nowSeconds],
   );
   const shouldRenderPlot = rows.length > 0 && !truncated && anchored;
   const shouldMountPlot = useDeferredMount(

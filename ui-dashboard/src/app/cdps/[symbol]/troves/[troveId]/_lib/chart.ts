@@ -151,12 +151,13 @@ export function buildTroveChartSeries(
   const icrRows = ascending.filter(
     (row) => row.icrAfterBps != null && row.icrAfterBps >= 0,
   );
-  const icr = collapseSameSecond(
-    icrRows.map((row) => ({
-      timestamp: Number(row.timestamp),
-      value: (row.icrAfterBps ?? 0) / 100,
-    })),
-  );
+  // ICR renders as independent observations, so same-second rows stay
+  // distinct even though they share an x-coordinate. Only balance steps
+  // collapse to the second's final state.
+  const icr = icrRows.map((row) => ({
+    timestamp: Number(row.timestamp),
+    value: (row.icrAfterBps ?? 0) / 100,
+  }));
   const icrCoverage =
     icrRows.length === 0
       ? ("none" as const)
