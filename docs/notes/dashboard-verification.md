@@ -305,15 +305,27 @@ UI PR shipped or ready. The user may waive visual evidence for a specific PR.
 
 ## Dynamic social-preview verification
 
-For a change to dynamic route metadata or an Open Graph image route, verify the
-final deployed origin in the browser. Do not use a local render as production
-proof.
+For a change that can affect dynamic route metadata or an Open Graph image,
+verify the final deployed origin in the browser. This includes changes to the
+metadata or image route and to a renderer, data helper, shared font, or other
+dependency used by that route. Do not use a local render as production proof.
 
-- Read the exact document title, description, and canonical URL; Open Graph
-  type, URL, title, description, and image values; and Twitter card type,
-  title, description, and image values from the raw initial HTML response of
-  an isolated, cookie-free request. Confirm that each value matches the route
-  and its public-data policy.
+- Send isolated, cookie-free requests with an ordinary browser user agent and
+  each relevant crawler user agent, such as Slackbot or Twitterbot. Check the
+  original document status, redirect chain, and final URL before validating
+  metadata. Require the original status and redirect chain to match the route
+  contract, and require HTTP 200 from the expected final route.
+- Read the exact document title and description; canonical URL; Open Graph
+  type, URL, title, description, image, and image alt values; and Twitter card
+  type, title, description, image, and image alt values from each raw initial
+  HTML response. Confirm that every value the route declares matches its
+  contract and public-data policy. Record expected absence when the route
+  contract does not declare an optional canonical URL, Open Graph URL, or
+  image-alt tag.
+- When metadata has public and private states, verify an explicitly public
+  record and an explicitly private record. Confirm that the private state uses
+  the declared safe fallback and exposes no private label, tag, source, or
+  other restricted data.
 - Inspect the deployed document's `Cache-Control` and `Age` headers. Confirm
   that they match the route's declared freshness or revalidation policy. For
   metadata that can become private, require a policy that prevents stale
@@ -321,11 +333,14 @@ proof.
   public-to-private revocation check.
 - Compare those values with the live DOM when client-side hydration is
   relevant. The hydrated DOM alone does not prove what a crawler receives.
-- Fetch the exact image URL from the deployed document with the browser cache
-  disabled. Require HTTP 200, the expected image content type, and the declared
-  pixel dimensions. Inspect `Cache-Control` and `Age`, and confirm that they
-  match the route's declared freshness or revalidation policy. Disabling the
-  browser cache does not bypass a CDN cache.
+- Fetch the exact image URL from the deployed document in the same isolated,
+  cookie-free context and with the browser cache disabled. Reject any
+  credential-dependent response difference; for an access-controlled route,
+  compare the anonymous response with an authenticated fetch. Require HTTP
+  200, the expected image content type, and the declared pixel dimensions.
+  Inspect `Cache-Control` and `Age`, and confirm that they match the route's
+  declared freshness or revalidation policy. Disabling the browser cache does
+  not bypass a CDN cache.
 - Inspect the rendered image. Confirm that it identifies the correct route,
   shows the expected data or fallback state, and has no blank or clipped
   content.

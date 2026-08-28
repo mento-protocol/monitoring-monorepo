@@ -53,8 +53,9 @@ For a narrow verify (specific page or feature), skip the list and go directly to
    re-check the affected routes at the relevant breakpoints with `resize_page`.
    A content-and-console pass alone does not cover interaction changes.
 
-6. **Verify dynamic social previews when applicable.** When a change touches
-   dynamic route metadata or an Open Graph image route, run the "Dynamic
+6. **Verify dynamic social previews when applicable.** When a change can affect
+   dynamic route metadata or an Open Graph image, including through a renderer,
+   data helper, shared font, or other route dependency, run the "Dynamic
    social-preview verification" section in
    `docs/notes/dashboard-verification.md` against the final deployed origin.
    Run this check after the production deployment for post-merge closeout. A
