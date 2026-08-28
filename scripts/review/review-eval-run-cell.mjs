@@ -17,6 +17,61 @@ const ORCHESTRATOR_REUSE_TRANSITIONS = new Map([
   ],
 ]);
 
+// One full run finished its 24 paid cells before the orchestrator and scorer
+// were split into focused modules. This exact source tuple is the only old
+// lineage the planner may discover by scanning a physical runs directory.
+export const LEGACY_SPLIT_CACHE_PLAN = Object.freeze({
+  comparabilityKey:
+    "4543e3da483d5f2c70fc97e97664377ae22cc844bf1e5f376c1ce60eb3a42267",
+  contractDigest:
+    "7223888cc6bd15c9bdb3bf1f6929a516719dd497ee6d2f1bc577a6405e8202e9",
+  matcherDigest:
+    "d183758cd7a3b28aa14fe857ed04c6ca93601e1834a1dfd08cf730ad2332c922",
+  calibrationDigest:
+    "aa930bb14f90b5c747706771685eb0696100e1ce9e64ab8595440b55fde017dd",
+  orchestratorDigest:
+    "5cdfbd0e709af2d68c193d484b724706b339ab0562d14b283f5fc38eebe9ae49",
+});
+
+/** Whether one recorded orchestrator change preserves raw cell behavior. */
+export function orchestratorReuseAllowed(fromDigest, toDigest) {
+  return ORCHESTRATOR_REUSE_TRANSITIONS.get(fromDigest) === toDigest;
+}
+
+/** Whether an on-disk plan is the exact reusable pre-split cache lineage. */
+export function legacySplitCachePlanMatches({
+  plan,
+  detailDir,
+  contractDigest,
+  calibrationDigest,
+  kind,
+  inputs,
+  cells,
+}) {
+  const legacy = LEGACY_SPLIT_CACHE_PLAN;
+  return (
+    contractDigest === legacy.contractDigest &&
+    calibrationDigest === legacy.calibrationDigest &&
+    plan?.schema_version === 1 &&
+    plan?.detail_dir === detailDir &&
+    plan?.comparability_key === legacy.comparabilityKey &&
+    plan?.contract_digest === legacy.contractDigest &&
+    plan?.matcher_digest === legacy.matcherDigest &&
+    plan?.calibration_digest === legacy.calibrationDigest &&
+    plan?.kind === kind &&
+    plan?.inputs?.skill_digest === inputs.skill_digest &&
+    plan?.inputs?.finder_argv_digest === inputs.finder_argv_digest &&
+    plan?.inputs?.claude_cli === inputs.claude_cli &&
+    plan?.inputs?.codex_cli === inputs.codex_cli &&
+    plan?.inputs?.orchestrator_digest === legacy.orchestratorDigest &&
+    orchestratorReuseAllowed(
+      legacy.orchestratorDigest,
+      inputs.orchestrator_digest,
+    ) &&
+    JSON.stringify(plan?.cells) === JSON.stringify(cells)
+  );
+}
+
 function readJson(file) {
   try {
     return JSON.parse(readFileSync(file, "utf8"));
@@ -186,7 +241,7 @@ export function cellReuseDecision({ plan, resultPath, result = null }) {
     if (found[field] === expected[field]) return false;
     if (
       field === "orchestrator_digest" &&
-      ORCHESTRATOR_REUSE_TRANSITIONS.get(found[field]) === expected[field]
+      orchestratorReuseAllowed(found[field], expected[field])
     ) {
       reusedAcrossOrchestratorSplit = true;
       return false;

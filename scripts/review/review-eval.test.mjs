@@ -443,6 +443,10 @@ test("parseArgs selects exactly one mode and rejects the rest", () => {
   );
   assert.throws(() => parseArgs(["--nope"]), /--nope/);
   assert.throws(() => parseArgs(["--score", ""]), /requires a value/);
+  assert.throws(
+    () => parseArgs(["--validate", "/tmp/row", "--detail-dir", ""]),
+    /--detail-dir requires a value/,
+  );
 });
 
 test("parseArgs refuses an option that belongs to another mode", () => {
@@ -1012,6 +1016,146 @@ test("a cached cell from another skill or contract is never reused", () => {
       .reason,
     /no cell result/,
   );
+});
+
+test("the exact pre-split cache is discovered, seeded, and reused", () => {
+  const root = makeRoot();
+  const now = new Date("2026-08-28T20:00:00Z");
+  const oldKey =
+    "4543e3da483d5f2c70fc97e97664377ae22cc844bf1e5f376c1ce60eb3a42267";
+  const oldMatcher =
+    "d183758cd7a3b28aa14fe857ed04c6ca93601e1834a1dfd08cf730ad2332c922";
+  const oldOrchestrator =
+    "5cdfbd0e709af2d68c193d484b724706b339ab0562d14b283f5fc38eebe9ae49";
+  try {
+    const planArgs = {
+      contract,
+      contractDigest,
+      kind: "full",
+      repoRoot: root,
+      now,
+      env: planEnv,
+    };
+    const first = buildPlan({ ...planArgs, write: false });
+    const runs = "docs/evals/review-skill-runs";
+    const oldDetail = `${runs}/2026-08-28-${oldKey.slice(0, 8)}-full-${first.inputs.skill_digest.slice(0, 8)}`;
+    const oldPhysical = path.join(root, oldDetail);
+    const cell = first.cells[0];
+    const oldResult = path.join(
+      oldPhysical,
+      "cells",
+      cell.cell_id,
+      "result.json",
+    );
+    mkdirSync(path.dirname(oldResult), { recursive: true });
+    const oldPlan = {
+      ...first,
+      matcher_digest: oldMatcher,
+      comparability_key: oldKey,
+      detail_dir: oldDetail,
+      plan_dir: oldPhysical,
+      resume_from: null,
+      inputs: {
+        ...first.inputs,
+        orchestrator_digest: oldOrchestrator,
+      },
+    };
+    writeFileSync(
+      path.join(oldPhysical, "plan.json"),
+      JSON.stringify({ ...oldPlan, matcher_digest: "0".repeat(64) }),
+    );
+    const oldFingerprint = {
+      ...cellFingerprint({ plan: first }),
+      orchestrator_digest: oldOrchestrator,
+    };
+    writeFileSync(
+      oldResult,
+      JSON.stringify({ ok: true, fingerprint: oldFingerprint }),
+    );
+
+    const currentOut = path.join(root, first.detail_dir);
+    const refused = buildPlan({
+      ...planArgs,
+      outDir: currentOut,
+      write: false,
+    });
+    assert.equal(refused.resume_from, null);
+
+    writeFileSync(path.join(oldPhysical, "plan.json"), JSON.stringify(oldPlan));
+    const invalidDetail = `${oldDetail}-2`;
+    const invalidPhysical = path.join(root, invalidDetail);
+    mkdirSync(invalidPhysical, { recursive: true });
+    writeFileSync(
+      path.join(invalidPhysical, "plan.json"),
+      JSON.stringify({
+        ...oldPlan,
+        planned_at: "2026-08-28T21:00:00Z",
+        detail_dir: invalidDetail,
+        plan_dir: invalidPhysical,
+      }),
+    );
+    for (const invalidCell of first.cells.slice(0, 2)) {
+      const invalidResult = path.join(
+        invalidPhysical,
+        "cells",
+        invalidCell.cell_id,
+        "result.json",
+      );
+      mkdirSync(path.dirname(invalidResult), { recursive: true });
+      writeFileSync(
+        invalidResult,
+        JSON.stringify({
+          ok: true,
+          fingerprint: { ...oldFingerprint, unexpected: true },
+        }),
+      );
+    }
+    const planned = buildPlan({
+      ...planArgs,
+      outDir: currentOut,
+      write: true,
+    });
+    assert.equal(planned.resume_from, oldDetail);
+
+    const shell = runEvalSourceSet();
+    const block = shell.match(
+      /\nRESUME_FROM="\$\(json_field "\$PLAN_OUT" resume_from\)"\n[\s\S]*?\nfi\n/,
+    )?.[0];
+    const guard = shell.match(
+      /\nrequire_safe_detail\(\) \{\n[\s\S]*?\n\}\n/,
+    )?.[0];
+    assert.ok(block, "the resume-cache step was not found in run-eval.sh");
+    assert.ok(guard, "the detail-path guard was not found in run-eval.sh");
+    const harness = [
+      "set -euo pipefail",
+      `REPO=${JSON.stringify(root)}`,
+      `RUN_DIR=${JSON.stringify(currentOut)}`,
+      `PLAN_OUT=${JSON.stringify(path.join(currentOut, "plan.json"))}`,
+      `fail() { printf 'FATAL: %s\\n' "$*" >&2; exit 1; }`,
+      `log() { printf '%s\\n' "$*"; }`,
+      `json_field() { node -e 'const d=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); process.stdout.write(String(d[process.argv[2]]));' "$1" "$2"; }`,
+      guard,
+      block,
+    ].join("\n");
+    const seeded = spawnSync("bash", ["-c", harness], { encoding: "utf8" });
+    assert.equal(seeded.status, 0, seeded.stderr);
+    assert.match(seeded.stdout, /seeded the resume cache/);
+
+    const copiedResult = path.join(
+      currentOut,
+      "cells",
+      cell.cell_id,
+      "result.json",
+    );
+    const decision = cellReuseDecision({
+      plan: planned,
+      resultPath: copiedResult,
+    });
+    assert.equal(decision.reuse, true);
+    assert.match(decision.reason, /recorded pure orchestrator split/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("the detail directory separates two skills under one contract", () => {
@@ -1802,6 +1946,26 @@ test("--validate refuses bad or evidence-free rows and appends a good one", () =
 
     row.conditions.pipeline.p1.matched -= 1;
     writeFileSync(rowPath, JSON.stringify(row, null, 2));
+    const bitsOnly = cli(["--validate", rowPath, "--json"], { root });
+    assert.equal(bitsOnly.status, 0, bitsOnly.stderr);
+    assert.equal(JSON.parse(bitsOnly.stdout).ok, true);
+
+    const explicitMissing = cli(
+      [
+        "--validate",
+        rowPath,
+        "--detail-dir",
+        path.join(root, "missing-detail"),
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(explicitMissing.status, 1);
+    assert.match(
+      JSON.parse(explicitMissing.stdout).problems.join(" | "),
+      /--validate requires an existing non-symlink detail directory/,
+    );
+
     const missing = cli(["--validate", rowPath, "--append", "--json"], {
       root,
     });

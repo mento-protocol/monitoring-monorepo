@@ -153,6 +153,9 @@ export function parseArgs(argv, env = process.env) {
       throw new Error(`--${name} is not valid with --${mode}`);
     }
   }
+  if (values["detail-dir"]?.trim() === "") {
+    throw new Error("--detail-dir requires a value");
+  }
   const options = {
     mode,
     help: false,
@@ -671,6 +674,7 @@ async function modeValidate(options, context) {
       `row contract_digest ${row.contract_digest?.slice(0, 8)} is not the current contract`,
     );
   }
+  const detailDirWasExplicit = options.detailDir !== null;
   let detailPathExists = false;
   let hasDetailDirectory = false;
   try {
@@ -682,7 +686,10 @@ async function modeValidate(options, context) {
     detailPathExists = false;
     // The problem below names the missing or uninspectable directory.
   }
-  if (!hasDetailDirectory && (options.append || detailPathExists)) {
+  if (
+    !hasDetailDirectory &&
+    (options.append || detailDirWasExplicit || detailPathExists)
+  ) {
     problems.push(
       `${options.append ? "--validate --append" : "--validate"} requires an existing non-symlink detail directory; found ${JSON.stringify(revalidated.detail_dir)}`,
     );

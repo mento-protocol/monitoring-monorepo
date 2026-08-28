@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -19,6 +20,11 @@ import {
   scorableTotals,
 } from "./review-eval-fixtures.mjs";
 import { freshness } from "./review-eval-ledger.mjs";
+import {
+  cellReuseDecision,
+  LEGACY_SPLIT_CACHE_PLAN,
+  legacySplitCachePlanMatches,
+} from "./review-eval-run-cell.mjs";
 import { scorerDigest } from "./review-eval-score.mjs";
 
 export const PLAN_SCHEMA_VERSION = 1;
@@ -325,6 +331,114 @@ export function planCells({ contract, kind }) {
 // re-running the same matrix in a loop, which is a bug worth stopping on.
 const MAX_RUNS_PER_NAME = 50;
 
+function reusableCellResultCount({ cellsDir, cells, plan }) {
+  try {
+    if (!lstatSync(cellsDir).isDirectory()) return 0;
+    return cells.filter((cell) => {
+      const resultPath = path.join(cellsDir, cell.cell_id, "result.json");
+      try {
+        return (
+          lstatSync(resultPath).isFile() &&
+          cellReuseDecision({ plan, resultPath }).reuse
+        );
+      } catch {
+        return false;
+      }
+    }).length;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Find the one pre-split cache whose raw cells the recorded split preserves.
+ * The first plan runs in the clean spec worktree and does not scan. The second
+ * plan writes to the real checkout, so its conventional out directory names
+ * the physical runs directory that can hold the ignored cell cache.
+ */
+function resolveLegacySplitCache({
+  runsDir,
+  outDir,
+  detailDir,
+  contractDigest,
+  calibrationDigest,
+  kind,
+  inputs,
+  cells,
+}) {
+  if (
+    runsDir !== DEFAULT_RUNS_DIR ||
+    !outDir ||
+    path.basename(path.resolve(outDir)) !== path.posix.basename(detailDir) ||
+    existsSync(path.join(path.resolve(outDir), "cells"))
+  ) {
+    return null;
+  }
+  const physicalRunsDir = path.dirname(path.resolve(outDir));
+  if (
+    path.basename(physicalRunsDir) !== path.posix.basename(DEFAULT_RUNS_DIR)
+  ) {
+    return null;
+  }
+  let entries;
+  try {
+    entries = readdirSync(physicalRunsDir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  const prefix = LEGACY_SPLIT_CACHE_PLAN.comparabilityKey.slice(0, 8);
+  const skill = String(inputs.skill_digest).slice(0, 8);
+  const namePattern = new RegExp(
+    `^\\d{4}-\\d{2}-\\d{2}-${prefix}-${kind}-${skill}(?:-(?:[2-9]|[1-4]\\d|50))?$`,
+  );
+  let best = null;
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !namePattern.test(entry.name)) continue;
+    const relative = path.posix.join(runsDir, entry.name);
+    const physical = path.join(physicalRunsDir, entry.name);
+    let cachedPlan;
+    try {
+      const planPath = path.join(physical, "plan.json");
+      if (!lstatSync(planPath).isFile()) continue;
+      cachedPlan = JSON.parse(readFileSync(planPath, "utf8"));
+    } catch {
+      continue;
+    }
+    if (
+      !legacySplitCachePlanMatches({
+        plan: cachedPlan,
+        detailDir: relative,
+        contractDigest,
+        calibrationDigest,
+        kind,
+        inputs,
+        cells,
+      })
+    ) {
+      continue;
+    }
+    const results = reusableCellResultCount({
+      cellsDir: path.join(physical, "cells"),
+      cells,
+      plan: { kind, contract_digest: contractDigest, inputs },
+    });
+    const plannedAt =
+      typeof cachedPlan.planned_at === "string" ? cachedPlan.planned_at : "";
+    if (
+      results > 0 &&
+      (!best ||
+        results > best.results ||
+        (results === best.results && plannedAt > best.plannedAt) ||
+        (results === best.results &&
+          plannedAt === best.plannedAt &&
+          relative > best.relative))
+    ) {
+      best = { relative, results, plannedAt };
+    }
+  }
+  return best?.relative ?? null;
+}
+
 /**
  * The detail directory this execution owns, and the one it may resume from.
  *
@@ -398,15 +512,28 @@ export function buildPlan({
   // The skill under test and the kind are part of the directory name because
   // the directory is also the resume cache: two runs of the same contract with
   // different skills must never land on each other's cells.
-  const { detailDir, resumeFrom } = resolveDetailDir({
+  const resolvedDetail = resolveDetailDir({
     runsDir,
     base: `${date}-${key.slice(0, 8)}-${kind}-${String(inputs.skill_digest).slice(0, 8)}`,
     ledgerRows,
   });
+  const { detailDir } = resolvedDetail;
   const planDir = outDir
     ? path.resolve(outDir)
     : path.resolve(repoRoot, detailDir);
   const cells = planCells({ contract, kind });
+  const resumeFrom =
+    resolvedDetail.resumeFrom ??
+    resolveLegacySplitCache({
+      runsDir,
+      outDir,
+      detailDir,
+      contractDigest,
+      calibrationDigest,
+      kind,
+      inputs,
+      cells,
+    });
   const claudeCells = cells.length;
   const warnings = [];
   for (const binary of ["claude_cli", "codex_cli"]) {
