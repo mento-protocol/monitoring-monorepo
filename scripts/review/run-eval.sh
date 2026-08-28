@@ -462,11 +462,14 @@ if [[ -n $AGAINST ]]; then
     const { readFileSync, writeFileSync } = await import("node:fs");
     const { loadContract } = await import(`${spec}/scripts/review/review-eval-fixtures.mjs`);
     const { baselinePreflightProblems, readLedger } = await import(`${spec}/scripts/review/review-eval-ledger.mjs`);
+    const { baselineEligibility } = await import(`${spec}/scripts/review/review-eval-report.mjs`);
     const { resolveRowReference } = await import(`${spec}/scripts/review/review-eval-result-shape.mjs`);
     const { baselinePlanIdentity } = await import(`${spec}/scripts/review/review-eval-run.mjs`);
     const { contract, digest } = loadContract(contractFile);
     const plan = JSON.parse(readFileSync(planFile, "utf8"));
     const row = resolveRowReference({ reference, rows: readLedger(ledger), repoRoot: spec });
+    const eligibility = baselineEligibility(row);
+    if (!eligibility.usable) throw new Error(eligibility.reason);
     const plannedBaseline = plan.baseline ?? null;
     const currentBaseline = baselinePlanIdentity(row);
     if (JSON.stringify(plannedBaseline) !== JSON.stringify(currentBaseline)) {

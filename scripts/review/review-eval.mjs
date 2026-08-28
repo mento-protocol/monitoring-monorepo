@@ -907,8 +907,45 @@ function runEvidenceDigest(dir) {
   };
   try {
     for (const file of files) {
+      const record = readJson(path.join(dir, file));
+      const scoreEvidence =
+        file === "calibration.json"
+          ? {
+              outcomes: [...(record?.outcomes ?? [])]
+                .map((outcome) => ({
+                  record_id: String(outcome?.record_id),
+                  expected: outcome?.expected,
+                  actual: outcome?.actual,
+                }))
+                .sort((left, right) =>
+                  canonicalJson(left).localeCompare(canonicalJson(right)),
+                ),
+              scoring_usd: {
+                present: Object.hasOwn(record ?? {}, "scoring_usd"),
+                value: Number(record?.scoring_usd ?? 0),
+              },
+            }
+          : {
+              cell_id: record?.cell_id,
+              pr: record?.pr,
+              condition: record?.condition,
+              draw: record?.draw,
+              matched_ids: [
+                ...new Set((record?.matched_ids ?? []).map((id) => String(id))),
+              ].sort(),
+              claim_count: (record?.claims ?? []).length,
+              novel_wrong: Number(record?.novel?.novelWrong ?? 0),
+              novel_real: Number(record?.novel?.novelReal ?? 0),
+              usd: Number(record?.usd ?? 0),
+              seconds: Number(record?.seconds ?? 0),
+              scoring_usd: {
+                present: Object.hasOwn(record ?? {}, "scoring_usd"),
+                value: Number(record?.scoring_usd ?? 0),
+              },
+              leak_suspected: record?.leak?.suspected === true,
+            };
       update(file);
-      update(canonicalJson(readJson(path.join(dir, file))));
+      update(canonicalJson(scoreEvidence));
     }
   } catch {
     return null;

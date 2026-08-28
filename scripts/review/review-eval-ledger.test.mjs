@@ -916,6 +916,28 @@ test("a candidate run never restarts the installed-skill clock", () => {
   );
 });
 
+test("a bridge transition never advances a run freshness clock", () => {
+  const result = freshness({
+    rows: [
+      row({ executed_at: daysAgo(200) }),
+      row({
+        executed_at: daysAgo(2),
+        kind: "bridge",
+        status: "complete",
+      }),
+    ],
+    contract,
+    now: NOW,
+    contractDigest: DIGEST_A,
+  });
+  assert.equal(result.daysSinceAny, 200);
+  assert.equal(result.daysSinceComplete, 200);
+  assert.equal(result.daysSinceFull, 200);
+  assert.equal(result.lastAnyAt, daysAgo(200));
+  assert.equal(result.lastCompleteAt, daysAgo(200));
+  assert.equal(result.lastFullAt, daysAgo(200));
+});
+
 test("a future-dated row runs no freshness clock", () => {
   // A complete full row dated a year out would hold every clock below zero
   // until that date arrives. A skewed machine clock or a hand-edited

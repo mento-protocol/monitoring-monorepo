@@ -837,10 +837,17 @@ export function freshness({
     return Boolean(instant) && instant > evaluatedAt;
   }).length;
 
-  const lastAny = newestInstant(eligible, () => true, evaluatedAt);
+  // A bridge records a reviewed transition between two existing full runs. It
+  // does not execute the harness or complete a new matrix, so it moves neither
+  // of these clocks even when its hand-assembled row is current and complete.
+  const lastAny = newestInstant(
+    eligible,
+    (row) => row.kind !== "bridge",
+    evaluatedAt,
+  );
   const lastComplete = newestInstant(
     eligible,
-    (row) => row.status === "complete",
+    (row) => row.kind !== "bridge" && row.status === "complete",
     evaluatedAt,
   );
   // A failed or partial full run verified nothing: it is a trace that the

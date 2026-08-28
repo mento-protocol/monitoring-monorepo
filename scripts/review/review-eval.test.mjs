@@ -4340,10 +4340,14 @@ test("the orchestrator rejects an ineligible baseline before paid work", () => {
     path.join(repoRoot, "scripts/review/run-eval.sh"),
     "utf8",
   );
-  assert.match(script, /baselineEligibility\(row\)/);
+  assert.equal(script.match(/baselineEligibility\(row\)/g)?.length, 2);
   assert.ok(
     script.indexOf("baselineEligibility(row)") <
       script.indexOf("# --- the run deadline"),
+  );
+  assert.ok(
+    script.lastIndexOf("baselineEligibility(row)") <
+      script.indexOf("writeFileSync(snapshot"),
   );
   assert.match(script, /baselinePreflightProblems\(\{/);
   assert.match(script, /planComparabilityKey: plan\.comparability_key/);
@@ -4911,6 +4915,78 @@ test("--revalidate-appended rejects copied evidence in a new directory", () => {
     assert.equal(checked.status, 1);
     assert.match(
       JSON.parse(checked.stdout).problems.join(" | "),
+      /reuses scored result and calibration evidence from base row/,
+    );
+
+    const copiedResult = readdirSync(copiedDetail).find((file) => {
+      if (!file.startsWith("result-")) return false;
+      const record = JSON.parse(
+        readFileSync(path.join(copiedDetail, file), "utf8"),
+      );
+      return (record.matched_ids ?? []).length > 1;
+    });
+    assert.ok(copiedResult);
+    const copiedResultPath = path.join(copiedDetail, copiedResult);
+    const copiedRecord = JSON.parse(readFileSync(copiedResultPath, "utf8"));
+    copiedRecord.judge_reasoning = "changed text that does not affect scoring";
+    writeFileSync(copiedResultPath, JSON.stringify(copiedRecord));
+
+    const metadataChanged = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(metadataChanged.status, 1);
+    assert.match(
+      JSON.parse(metadataChanged.stdout).problems.join(" | "),
+      /reuses scored result and calibration evidence from base row/,
+    );
+
+    const reorderedMatches = [...copiedRecord.matched_ids].reverse();
+    copiedRecord.matched_ids = [
+      Number(reorderedMatches[0]),
+      ...reorderedMatches,
+    ];
+    writeFileSync(copiedResultPath, JSON.stringify(copiedRecord));
+    const equivalentMatches = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(equivalentMatches.status, 1);
+    assert.match(
+      JSON.parse(equivalentMatches.stdout).problems.join(" | "),
+      /reuses scored result and calibration evidence from base row/,
+    );
+
+    copiedRecord.usd = String(copiedRecord.usd);
+    copiedRecord.seconds = String(copiedRecord.seconds);
+    copiedRecord.novel.novelWrong = String(copiedRecord.novel.novelWrong);
+    copiedRecord.novel.novelReal = String(copiedRecord.novel.novelReal);
+    writeFileSync(copiedResultPath, JSON.stringify(copiedRecord));
+    const equivalentNumbers = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(equivalentNumbers.status, 1);
+    assert.match(
+      JSON.parse(equivalentNumbers.stdout).problems.join(" | "),
       /reuses scored result and calibration evidence from base row/,
     );
   } finally {
