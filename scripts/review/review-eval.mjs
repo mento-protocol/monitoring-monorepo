@@ -1523,6 +1523,13 @@ async function modeValidate(options, context) {
     context.repoRoot,
     options.calibrationPath,
   );
+  // An automatic row is scored at the next ledger position. Before append it
+  // is still an external object, so timestamp fallback can wrongly exclude an
+  // established anchor whose clock is later. Give validation the same pending
+  // append position that scorePlan used.
+  const validationLedgerRows = options.append
+    ? [...ledgerRows, row]
+    : ledgerRows;
   const revalidated = revalidateRow({
     contract: context.contract,
     row,
@@ -1530,7 +1537,7 @@ async function modeValidate(options, context) {
     // The run detail may sit outside `--root`: the orchestrator reads the
     // contract from a spec worktree while the cells live in the real checkout.
     detailDir: options.detailDir ? path.resolve(options.detailDir) : null,
-    ledgerRows,
+    ledgerRows: validationLedgerRows,
     // Name the same baseline `--score --against` used, or the row's own
     // verdict is rechecked against a baseline it was never scored on.
     baselineRow: resolveRowReference({

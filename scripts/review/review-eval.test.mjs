@@ -3283,6 +3283,29 @@ test("scorePlan resolves an automatic baseline by ledger append order", async ()
       anchor.executed_at,
     );
     assert.equal(scored.row.vs_baseline.selection, "automatic");
+
+    // The local append validates the row at its pending ledger position. The
+    // anchor's clock is later than this row, so treating the row as external
+    // would exclude the established anchor and recompute the wrong verdict.
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(anchor)}\n`,
+    );
+    const rowPath = path.join(plan.plan_dir, "row.json");
+    writeFileSync(rowPath, JSON.stringify(scored.row));
+    const appended = cli(
+      [
+        "--validate",
+        rowPath,
+        "--append",
+        "--detail-dir",
+        plan.plan_dir,
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(appended.status, 0, appended.stdout + appended.stderr);
+    assert.equal(readLedger(path.join(root, ledgerRelative)).length, 2);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -4407,6 +4430,16 @@ test("the orchestrator rejects an ineligible baseline before paid work", () => {
   assert.match(
     script,
     /writeFileSync\(snapshot, `\$\{JSON\.stringify\(row\)\}\\n`\)/,
+  );
+  assert.match(
+    script,
+    /BASELINE_SNAPSHOT="\$\(mktemp "\$LOCK_ROOT\/review-eval-baseline/,
+  );
+  assert.equal(
+    /BASELINE_SNAPSHOT="\$\(mktemp "\$TMPROOT\/review-eval-baseline/.test(
+      script,
+    ),
+    false,
   );
   assert.match(script, /AGAINST="\$BASELINE_SNAPSHOT"/);
   assert.ok(

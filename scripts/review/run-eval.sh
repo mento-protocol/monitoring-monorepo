@@ -459,8 +459,8 @@ PLAN_JSON="$RUN_DIR/plan.json"
 # row. The generated plan now supplies the remaining checks before paid work:
 # full schema and frozen-matrix validation, plus the exact comparison lineage.
 if [[ -n $AGAINST ]]; then
-  BASELINE_SNAPSHOT="$(mktemp "$TMPROOT/review-eval-baseline.XXXXXX")" ||
-    fail "could not prepare an immutable baseline snapshot under $TMPROOT"
+  BASELINE_SNAPSHOT="$(mktemp "$LOCK_ROOT/review-eval-baseline.XXXXXX")" ||
+    fail "could not prepare an immutable baseline snapshot under $LOCK_ROOT"
   # shellcheck disable=SC2016  # the single-quoted block is node source
   node --input-type=module -e '
     const [spec, ledger, contractFile, planFile, reference, snapshot] = process.argv.slice(1);
