@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import type { TroveOgData, TroveOgTone } from "../_lib/trove-og-data";
 
 const BG = "#0f172a";
@@ -8,6 +9,90 @@ const TEXT = "#f8fafc";
 const MUTED = "#94a3b8";
 const DIM = "#64748b";
 const INDIGO = "#818cf8";
+const GRID_COLUMNS = [0, 120, 240, 360, 480, 600, 720, 840, 960, 1080];
+const GRID_ROWS = [0, 126, 252, 378, 504, 630];
+
+const BRAND_MARK_STYLE = {
+  display: "flex",
+  width: 38,
+  height: 38,
+  borderRadius: 10,
+  alignItems: "center",
+  justifyContent: "center",
+  background: INDIGO,
+  color: "#ffffff",
+  fontSize: 23,
+  fontWeight: 800,
+} satisfies CSSProperties;
+
+const IDENTITY_PILL_STYLE = {
+  display: "flex",
+  alignItems: "center",
+  alignSelf: "flex-start",
+  gap: 10,
+  padding: "10px 15px",
+  borderRadius: 999,
+  border: `1px solid ${BORDER}`,
+  background: "rgba(30, 41, 59, 0.74)",
+  color: MUTED,
+  fontSize: 19,
+} satisfies CSSProperties;
+
+const STAT_TILE_STYLE = {
+  display: "flex",
+  flexDirection: "column",
+  flex: 1,
+  minWidth: 0,
+  height: 132,
+  padding: "20px 18px",
+  borderRadius: 14,
+  border: `1px solid ${BORDER}`,
+  background: TILE,
+} satisfies CSSProperties;
+
+const STAT_VALUE_STYLE = {
+  display: "flex",
+  flex: 1,
+  alignItems: "flex-end",
+  fontSize: 22,
+  fontWeight: 700,
+  letterSpacing: -0.5,
+  whiteSpace: "nowrap",
+} satisfies CSSProperties;
+
+const LIFECYCLE_PANEL_STYLE = {
+  display: "flex",
+  flex: 1,
+  flexDirection: "column",
+  marginTop: 22,
+  padding: "19px 22px 13px",
+  borderRadius: 14,
+  border: `1px solid ${BORDER}`,
+  background: "rgba(15, 23, 42, 0.66)",
+} satisfies CSSProperties;
+
+const SNAPSHOT_PANEL_STYLE = {
+  display: "flex",
+  flexDirection: "column",
+  flex: 1,
+  height: "100%",
+  padding: 24,
+  borderRadius: 20,
+  border: "2px solid rgba(129, 140, 248, 0.38)",
+  background: "rgba(15, 23, 42, 0.94)",
+  boxShadow: "0 24px 80px rgba(49, 46, 129, 0.32)",
+} satisfies CSSProperties;
+
+const GLOW_STYLE = {
+  display: "flex",
+  position: "absolute",
+  left: 270,
+  top: 172,
+  width: 330,
+  height: 330,
+  borderRadius: 330,
+  background: "rgba(79, 70, 229, 0.15)",
+} satisfies CSSProperties;
 
 const TONE_COLOR: Record<TroveOgTone, string> = {
   healthy: "#6ee7b7",
@@ -41,27 +126,27 @@ function GridBackdrop() {
         opacity: 0.16,
       }}
     >
-      {Array.from({ length: 10 }, (_, index) => (
+      {GRID_COLUMNS.map((left) => (
         <div
-          key={`v-${index}`}
+          key={`v-${left}`}
           style={{
             position: "absolute",
             top: 0,
             bottom: 0,
-            left: index * 120,
+            left,
             width: 1,
             background: BORDER,
           }}
         />
       ))}
-      {Array.from({ length: 6 }, (_, index) => (
+      {GRID_ROWS.map((top) => (
         <div
-          key={`h-${index}`}
+          key={`h-${top}`}
           style={{
             position: "absolute",
             left: 0,
             right: 0,
-            top: index * 126,
+            top,
             height: 1,
             background: BORDER,
           }}
@@ -74,22 +159,7 @@ function GridBackdrop() {
 function Brand() {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-      <div
-        style={{
-          display: "flex",
-          width: 38,
-          height: 38,
-          borderRadius: 10,
-          alignItems: "center",
-          justifyContent: "center",
-          background: INDIGO,
-          color: "#ffffff",
-          fontSize: 23,
-          fontWeight: 800,
-        }}
-      >
-        M
-      </div>
+      <div style={BRAND_MARK_STYLE}>M</div>
       <span style={{ fontSize: 25, fontWeight: 700, color: TEXT }}>Mento</span>
       <span style={{ fontSize: 25, color: MUTED }}>Analytics</span>
     </div>
@@ -98,20 +168,7 @@ function Brand() {
 
 function IdentityPill({ identity }: { identity: TroveOgIdentity }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        alignSelf: "flex-start",
-        gap: 10,
-        padding: "10px 15px",
-        borderRadius: 999,
-        border: `1px solid ${BORDER}`,
-        background: "rgba(30, 41, 59, 0.74)",
-        color: MUTED,
-        fontSize: 19,
-      }}
-    >
+    <div style={IDENTITY_PILL_STYLE}>
       <span style={{ color: "#c7d2fe", fontWeight: 700 }}>
         {identity.symbol.toUpperCase()}
       </span>
@@ -134,19 +191,7 @@ function StatTile({
 }) {
   const color = TONE_COLOR[tone];
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        flex: 1,
-        minWidth: 0,
-        height: 132,
-        padding: "20px 18px",
-        borderRadius: 14,
-        border: `1px solid ${BORDER}`,
-        background: TILE,
-      }}
-    >
+    <div style={STAT_TILE_STYLE}>
       <div
         style={{
           display: "flex",
@@ -159,7 +204,7 @@ function StatTile({
             color: MUTED,
             fontSize: 15,
             fontWeight: 600,
-            letterSpacing: 1.5,
+            letterSpacing: 0.7,
           }}
         >
           {label}
@@ -175,20 +220,7 @@ function StatTile({
           }}
         />
       </div>
-      <span
-        style={{
-          display: "flex",
-          flex: 1,
-          alignItems: "flex-end",
-          color,
-          fontSize: 22,
-          fontWeight: 700,
-          letterSpacing: -0.5,
-          whiteSpace: "nowrap",
-        }}
-      >
-        {value}
-      </span>
+      <span style={{ ...STAT_VALUE_STYLE, color }}>{value}</span>
     </div>
   );
 }
@@ -285,7 +317,7 @@ function SnapshotPanelHeader({
           color: MUTED,
           fontSize: 17,
           fontWeight: 600,
-          letterSpacing: 1.7,
+          letterSpacing: 0.8,
         }}
       >
         INDEXED POSITION SNAPSHOT
@@ -340,25 +372,14 @@ function SnapshotStats({ data }: { data: TroveOgData | null }) {
 
 function LifecyclePanel({ data }: { data: TroveOgData | null }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        flex: 1,
-        flexDirection: "column",
-        marginTop: 22,
-        padding: "19px 22px 13px",
-        borderRadius: 14,
-        border: `1px solid ${BORDER}`,
-        background: "rgba(15, 23, 42, 0.66)",
-      }}
-    >
+    <div style={LIFECYCLE_PANEL_STYLE}>
       <span
         style={{
           marginBottom: 15,
           color: MUTED,
           fontSize: 15,
           fontWeight: 600,
-          letterSpacing: 1.5,
+          letterSpacing: 0.7,
         }}
       >
         POSITION LIFECYCLE
@@ -392,19 +413,7 @@ function LifecyclePanel({ data }: { data: TroveOgData | null }) {
 function SnapshotPanel({ data }: { data: TroveOgData | null }) {
   const statusTone = data?.statusTone ?? "neutral";
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        flex: 1,
-        height: "100%",
-        padding: 24,
-        borderRadius: 20,
-        border: "2px solid rgba(129, 140, 248, 0.38)",
-        background: "rgba(15, 23, 42, 0.94)",
-        boxShadow: "0 24px 80px rgba(49, 46, 129, 0.32)",
-      }}
-    >
+    <div style={SNAPSHOT_PANEL_STYLE}>
       <SnapshotPanelHeader
         statusLabel={data?.statusLabel ?? "Data unavailable"}
         statusTone={statusTone}
@@ -439,18 +448,7 @@ export function TroveOgCard({
       }}
     >
       <GridBackdrop />
-      <div
-        style={{
-          display: "flex",
-          position: "absolute",
-          left: 270,
-          top: 172,
-          width: 330,
-          height: 330,
-          borderRadius: 330,
-          background: "rgba(79, 70, 229, 0.15)",
-        }}
-      />
+      <div style={GLOW_STYLE} />
 
       <div
         style={{
