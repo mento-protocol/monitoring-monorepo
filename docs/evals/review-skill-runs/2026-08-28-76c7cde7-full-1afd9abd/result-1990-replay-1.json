@@ -1,0 +1,115 @@
+{
+  "cell_id": "pr-1990-replay-draw1",
+  "pr": 1990,
+  "condition": "replay",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "`reviewed` may be unreachable, which inverts the change's purpose — `scripts/pr/pr-ready-state-core.mjs:766`: `classifyCodeRabbitReviewSignal` reaches `reviewed` only when `isCurrentReviewSignal` is true, and gh's `PullRequestReview` JSON has no commit field, in which case `reviewCommitOid` returns `null` for every real review and the comparison is always false",
+    "Consequence if it holds: a genuine exact-head CodeRabbit run classifies `stale`, `fallbackAction` stays `request_review_once_for_head_after_optional_check`, and babysit posts `@coderabbitai review` at closeout on every PR — one wasted round per PR, contradicting the ADR's spend argument at `docs/adr/0066-...md:213-218`",
+    "No test uses a recorded gh payload — every fixture in `pr-ready-state.test.mjs` hand-adds a commit field",
+    "A clean CodeRabbit run has no `**Run ID**` review and will be re-requested — `scripts/pr/pr-ready-state-core.mjs:762`: the loop only inspects `reviews` and requires `/\\*\\*Run ID\\*\\*:\\s*`…`/`, but the recorded clean completion is a top-level walkthrough comment with no Run ID and no review record, so the signal is `missing`/`stale` and babysit posts a redundant request",
+    "The change pushes `pr-ready-state-core.mjs` past the file-size cap — `scripts/pr/pr-ready-state-core.mjs:750-790`; raw is now over the 1,000-line hard cap and the file is not on the exempt table",
+    "The authority doc orders the closeout after the final pair; the three docs that defer to it say before — `docs/notes/pr-ready-state.md:399`; read literally, the authority doc lets an agent all-clear on projections taken before the request went out",
+    "Canonical JSON example missing the new fields — `docs/notes/pr-ready-state.md:276-306`: the example's `gates` block omits `codeRabbitReviewSignal`, so a consumer reading the example as the shape contract misses the field",
+    "Marker comments are accepted from any author — `scripts/pr/pr-ready-state-core.mjs:772-786`: the `issueComments` loop checks only the body, not the author or association, so on a public PR anyone can post `@coderabbitai review` plus the marker, flipping the state to `requested` and suppressing the legitimate closeout",
+    "Related, same lines: a human typing the bare `@coderabbitai review` resume command named in `.coderabbit.yaml:64` carries no marker, so it's invisible here and babysit will post a second request on top of it",
+    "\"Idempotent\" overstates the mechanism — `babysit-pr/SKILL.md:311` (both copies), `ship/SKILL.md:214`: GitHub has no conditional-create for issue comments, so check-then-post is best-effort duplicate suppression, not idempotency",
+    "A residual TOCTOU window exists between re-resolving the head and posting (`babysit-pr/SKILL.md:300-301`)",
+    "The rewritten config test is narrower than the old range check",
+    "Coverage gap: the second-model side channel was not used because `gh` is disabled",
+    "`node scripts/coderabbit-config.test.mjs` could not run — `js-yaml` is not installed in this checkout, so the `.coderabbit.yaml` ↔ `EXPECTED_CONFIG` pin is unverified by execution",
+    "Every CodeRabbit fixture in `pr-ready-state.test.mjs` and `pr-feedback-state.test.mjs` is hand-authored, so the green suite says the classifier does what its author intended, not that it matches GitHub or CodeRabbit"
+  ],
+  "matched_ids": [
+    3829654081,
+    3829659544,
+    3829659546
+  ],
+  "judge_reasoning": {
+    "3829654081": "Point 3 confirms the file grew to 961/1077 lines into 'near hard cap' and recommends extracting the classifiers — same split-the-file defect.",
+    "3829659544": "Point 5 flags the canonical JSON example's gates block omitting codeRabbitReviewSignal — same doc inconsistency.",
+    "3829659546": "Point 4 identifies the ordering inconsistency between the authority doc (closeout after the final projection pair) and the operating card/babysit/ship mirrors (before) — same defect.",
+    "3829659550": "The review explicitly rejects this under 'Considered and discarded' ('Other review's require a head SHA ... Wrong on both halves'), arguing the null-currentHeadOid fallback is unreachable, so it does not identify the defect."
+  },
+  "novel": {
+    "claims": 15,
+    "novelReal": 3,
+    "novelWrong": 2,
+    "novelVague": 7,
+    "restatedKnown": 3,
+    "alreadyMatched": 3,
+    "verdicts": {
+      "1": {
+        "class": "wrong",
+        "why": "`strings` on gh 2.96.0 shows the `pr view --json reviews` GraphQL fragment is `reviews(first:100){nodes{author{login},authorAssociation,submittedAt,body,state,commit{oid},reactionGroups...}}` — `commit.oid` is present, so `reviewCommitOid` resolves and `reviewed` is reachable"
+      },
+      "2": {
+        "class": "wrong",
+        "why": "Consequence rests on claim 1, which is false (gh emits `commit{oid}` for reviews), so the exact-head comparison works and no per-PR wasted request follows"
+      },
+      "3": {
+        "class": "vague",
+        "why": "Literally true that pr-ready-state.test.mjs fixtures are hand-written, but it names no defect — and the hand-added `commit:{oid}` matches gh's real review payload shape"
+      },
+      "4": {
+        "class": "real",
+        "why": "The only CodeRabbit shapes recorded from a real run in this repo (pr-feedback-state.test.mjs:3355-3373, 'shapes observed on PR #1918') show a clean completion as a top-level walkthrough issue comment with no `**Run ID**`; classifyCodeRabbitReviewSignal (core:760-768) only scans `reviews` for that marker, so such a run reads missing/stale and gets a redundant request"
+      },
+      "5": {
+        "class": "known",
+        "why": "Same concern as known 'Split the growing ready-state core' (core:750); also mis-stated — the watchlist keys the 1,000 hard cap on `rough` (961) not `raw` (1077), so the file reports 'near hard cap'"
+      },
+      "6": {
+        "class": "known",
+        "why": "Restates the known docs/notes/pr-ready-state.md:408 functional-correctness finding: the authority doc's step 8 closeout after step 5's pair vs operating-card/ship/babysit 'before the final pair' lets all-clear rest on pre-request projections"
+      },
+      "7": {
+        "class": "real",
+        "why": "docs/notes/pr-ready-state.md:276-306 canonical example's `gates` block and top-level fields still omit `codeRabbitReviewSignal`, which the same doc (348-355) and the code now emit"
+      },
+      "8": {
+        "class": "known",
+        "why": "Matches known core:783 / review-signals:226 'Trust only authorized closeout requests' — the issueComments loop checks only body text, no author or association"
+      },
+      "9": {
+        "class": "real",
+        "why": "isCodeRabbitFinalHeadReviewRequestBody requires the marker, so a human's bare `@coderabbitai review` (the resume command named at .coderabbit.yaml:64-65) never yields `requested`, unlike classifyCodexReviewSignal which accepts bare `@codex review`; the agent then posts a second request"
+      },
+      "10": {
+        "class": "vague",
+        "why": "Verified the wording at babysit-pr/SKILL.md:311 and ship/SKILL.md:214, but this is a terminology preference about 'idempotent' with no behavioral defect"
+      },
+      "11": {
+        "class": "vague",
+        "why": "SKILL.md:300-301 does say re-resolve then post; the claim states an inherent race with no concrete failure or consequence"
+      },
+      "12": {
+        "class": "vague",
+        "why": "coderabbit-config.test.mjs now asserts equality to 5 instead of a 1-2 range — a stricter pin, and the claim names no resulting defect"
+      },
+      "13": {
+        "class": "vague",
+        "why": "A statement about the reviewer's own tooling coverage, not about the code under review"
+      },
+      "14": {
+        "class": "vague",
+        "why": "Reproduced: the test fails with ERR_MODULE_NOT_FOUND for js-yaml, but js-yaml is a declared dep (package.json:155) and node_modules is simply absent in this checkout — an environment gap, not a defect in the change"
+      },
+      "15": {
+        "class": "vague",
+        "why": "Confirmed fixtures are hand-authored, but this is a general testing-methodology observation with no specific defect identified"
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 428,
+  "usd": 2.8847149999999995,
+  "scoring_usd": 2.598388
+}

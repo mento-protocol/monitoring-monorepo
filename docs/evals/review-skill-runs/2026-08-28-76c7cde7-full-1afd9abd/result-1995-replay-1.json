@@ -1,0 +1,81 @@
+{
+  "cell_id": "pr-1995-replay-draw1",
+  "pr": 1995,
+  "condition": "replay",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "The focus guard misses lock-disabled gate runs — `scripts/agent-quality-gate.test.sh:601`: under `--no-lock` or `AGENT_QUALITY_GATE_LOCK=0`, no mapped command carries `AGENT_QUALITY_GATE_LOCK_HELD`, and the guard at line 601 does not fire",
+    "`acquire_gate_run_lock` returns at `scripts/agent-quality-gate.sh:1617` before the only `export AGENT_QUALITY_GATE_LOCK_HELD` at `scripts/agent-quality-gate.sh:1143`",
+    "developer with `export GATE_TEST_FOCUS=gate-contract` runs `pnpm agent:quality-gate --run --no-lock` → the mapped self-test runs one 2s family, prints `agent quality gate focused tests passed: gate-contract`, exits 0, and the gate records the self-test as passed",
+    "The new doc text is wrong on the same point: `docs/notes/agent-quality-gate-mechanics.md:1144` claims `AGENT_QUALITY_GATE_LOCK_HELD` is set by \"any command a real gate run spawns\", which line 594–596 of that same file contradicts",
+    "The partition checker never asserts the dispatch call exists — `scripts/agent-quality-gate.test.sh:554-563`: Line 515 permits `dispatch_gate_test_families` after the end marker without ever requiring it, and the `END` block checks `seen_end` but has no `seen_dispatch`",
+    "I deleted the final `dispatch_gate_test_families` line and ran the file. The partition check passed, zero tests ran, nothing was printed, and it exited 0 — and since the self-test is stamp-exempt but not output-checked, the gate would report it as passed",
+    "`arm_suite_abort_trap` is required but unenforced — `scripts/agent-quality-gate.test.sh:520`: a 12th family added without it runs with no ERR trap, since bash does not inherit it into functions; consequence is lost diagnostics on abort",
+    "`docs/notes/agent-quality-gate-mechanics.md:1116` says \"the whole ~9-minute suite\", but the solo runtimes in the table immediately below sum to 696s ≈ 11.6 min"
+  ],
+  "matched_ids": [
+    3830003055,
+    3830042123
+  ],
+  "judge_reasoning": {
+    "3829986398": "No mention of the abort trap's use of unset output_file under set -u at line 28.",
+    "3829986403": "Review only argues dispatch is never *required* (zero case); it never notes that a second dispatch call passes validation and runs families twice.",
+    "3830003055": "Finding 2 states the partition checker permits dispatch after the end marker without requiring it, and empirically shows deleting it yields zero tests run, exit 0 — same defect.",
+    "3830042123": "Finding 1 identifies the GATE_TEST_FOCUS guard missing under --no-lock/AGENT_QUALITY_GATE_LOCK=0 because AGENT_QUALITY_GATE_LOCK_HELD is never exported — same defect.",
+    "3830042128": "No mention of the hard-coded scripts/agent-quality-gate.test.sh fallback path or the path-pin inventory.",
+    "3830695396": "Review flags a different doc error (the lock-held claim at :1144) and a runtime-nit; it does not raise the 'is set' vs 'is non-empty' wording or 'reds the suite'."
+  },
+  "novel": {
+    "claims": 8,
+    "novelReal": 2,
+    "novelWrong": 0,
+    "novelVague": 0,
+    "restatedKnown": 6,
+    "alreadyMatched": 2,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "Verified: guard at test.sh:601 keys on AGENT_QUALITY_GATE_LOCK_HELD, and agent-quality-gate.sh:1616-1618 returns before the export under --no-lock — this is the known 'Reject focus during lock-free gate runs' item (test.sh:628)"
+      },
+      "2": {
+        "class": "known",
+        "why": "Line refs check out exactly (case ... return 0 at 1617; export at 1143), but it is just the mechanism behind the same known lock-free focus defect"
+      },
+      "3": {
+        "class": "known",
+        "why": "Scenario restatement of the same known defect: exported GATE_TEST_FOCUS is inherited by the mapped self-test when no lock is held, so the guard at 601 never fires"
+      },
+      "4": {
+        "class": "known",
+        "why": "Doc line 1144 does overstate the guard versus line 594's --no-lock escape hatch, but the claim itself says it is 'the same point' as the known lock-free focus defect"
+      },
+      "5": {
+        "class": "known",
+        "why": "Confirmed awk line 515 only permits the dispatch call and END (554-564) checks failed/open/seen_end with no seen_dispatch — the known 'Partition allows missing dispatch' item (test.sh:572)"
+      },
+      "6": {
+        "class": "known",
+        "why": "Same missing-dispatch defect as claim 5, restated as an experiment report"
+      },
+      "7": {
+        "class": "real",
+        "why": "Verified all 11 families start with arm_suite_abort_trap (lines 662..5933) yet the awk checker skips family interiors via `open != \"\" { next }`, and the script uses set -euo pipefail without -E, so a new family omitting it silently loses the ERR trap"
+      },
+      "8": {
+        "class": "real",
+        "why": "Doc line 1116 says '~9-minute suite' while the table it introduces (2+1+52+86+41+15+10+92+27+51+319) sums to 696s ≈ 11.6 min — internal inconsistency inside the same added block"
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 538,
+  "usd": 2.9640930000000005,
+  "scoring_usd": 1.0674325
+}

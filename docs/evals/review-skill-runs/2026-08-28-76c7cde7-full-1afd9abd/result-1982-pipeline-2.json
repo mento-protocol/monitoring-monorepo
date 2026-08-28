@@ -1,0 +1,56 @@
+{
+  "cell_id": "pr-1982-pipeline-draw2",
+  "pr": 1982,
+  "condition": "pipeline",
+  "draw": 2,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "Sole critical finding at `issue-board-backfill.mjs:144` (my finding #1), reached by independent reproduction — must-fix",
+    "`commentOnIssue` (`issue-board-commands.mjs:92-93`) returns early when `options.comment` is false, and `--no-comment` (`issue-board-cli.mjs:172-174`) is accepted by `release`, so `pnpm issue:release --issue 901 --no-comment` clears all four ownership fields and leaves no marker at all in the comment stream, and comment-derived staleness detection would still resurrect the stale claim on that path",
+    "Finding #2 remains confirmed by my own execution against the real parser, not withdrawn (must-fix)",
+    "Finding #3 remains confirmed by my own execution against the real parser, not withdrawn"
+  ],
+  "matched_ids": [],
+  "judge_reasoning": {
+    "3827636772": "The review never mentions the Branch: line, getGitBranch(), detached HEAD, or any branch-resolution requirement blocking backfill; its only described finding is stale-claim resurrection after release.",
+    "3827647420": "The review's described issue is a stale claim surviving a `release` (fixed via timeline `agent-active` epoch), not a competing newer claim arriving between snapshot and write batch causing post-mutation failure; its findings #2/#3 are referenced by number only with no content.",
+    "3827655684": "No mention of isBoundedCloudHandoff, trailing blank lines, or parseClaimComment returning null; the unnamed findings #2/#3 cannot be matched on content.",
+    "3827663924": "Same as above — the review never describes the trailing-newline handoff parsing rejection."
+  },
+  "novel": {
+    "claims": 4,
+    "novelReal": 0,
+    "novelWrong": 1,
+    "novelVague": 3,
+    "restatedKnown": 0,
+    "alreadyMatched": 0,
+    "verdicts": {
+      "1": {
+        "class": "vague",
+        "why": "Line 144 is just the `selectNewestTrustedClaim` declaration in scripts/pr/issue-board-backfill.mjs:144; the claim names no concrete defect, only a cross-reference to an unstated 'finding #1'."
+      },
+      "2": {
+        "class": "wrong",
+        "why": "The mechanics check out (commentOnIssue early-returns at issue-board-commands.mjs:92-93, --no-comment parsed globally at issue-board-cli.mjs:172-174, release nulls the four fields), but the asserted harm is false: release applies the ready/grooming label transition (issue-board-state.mjs:14-32) and isBackfillable (issue-board-state.mjs:99-109) rejects any issue carrying agent-ready/needs-grooming, so backfill can never resurrect the released claim on that path."
+      },
+      "3": {
+        "class": "vague",
+        "why": "Pure meta-assertion about an unstated 'finding #2' — no file, line, or behavior to verify against the code."
+      },
+      "4": {
+        "class": "vague",
+        "why": "Pure meta-assertion about an unstated 'finding #3' — no file, line, or behavior to verify against the code."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 1816,
+  "usd": 3.546053,
+  "scoring_usd": 0.6340445000000001
+}

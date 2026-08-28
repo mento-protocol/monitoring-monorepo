@@ -1,0 +1,77 @@
+{
+  "cell_id": "pr-1982-pipeline-draw1",
+  "pr": 1982,
+  "condition": "pipeline",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "Backfill writes the *previous* claimant's ownership fields when the current claim comment doesn't parse — `scripts/pr/issue-board-backfill.mjs:144-164` (`selectNewestTrustedClaim`) parses every comment, drops failures with `.filter(Boolean)`, and *then* takes the newest survivor, so a newer claim that fails validation is invisible and an older valid one wins",
+    "Writing `claim-OLD` onto an issue `claude` is actively working makes the board assert the wrong owner, and makes the real claimant's next `verifyClaimOwnership` throw \"claim was overwritten\"",
+    "The new parser is stricter than its own producer — `buildClaimComment` (`issue-board-commands.mjs:74`) emits `Branch:` only `if (metadata.branch)`, and `claim()` resolves branch via `options.branch || await getGitBranch()`, which returns `\"\"` on a detached HEAD, so the helper's own output triggers the parse failure",
+    "No lifecycle boundary: a pre-release claim is still eligible after release + re-claim — `scripts/pr/issue-board-backfill.mjs:200-232` (`readSnapshot`) checks only `isBackfillable(issue)` and nothing compares the selected claim's timestamp against the release comment or the current label transition",
+    "The handoff-tail validator rejects shapes the docs actively ask for — `scripts/pr/issue-board-backfill.mjs:71-79` (`isBoundedCloudHandoff`) `lines.every(line => line.length > 0)` rejects any blank line in the tail, including the empty string `split(\"\\n\")` produces from a trailing newline",
+    "It fails closed with a misleading \"has no valid trusted agent claim comment\" message",
+    "Nit — broken indentation in the new doc block: `docs/notes/github-tooling-surfaces.md:110-111` `Claim` / `ID` wraps to column 0 inside a numbered list item"
+  ],
+  "matched_ids": [
+    3827636772,
+    3827655676,
+    3827655684,
+    3827663924
+  ],
+  "judge_reasoning": {
+    "3827636772": "Finding #1 explicitly names buildClaimComment emitting Branch: only if metadata.branch and getGitBranch() returning \"\" on detached HEAD, making claim comments unparseable/unbackfillable.",
+    "3827647420": "No mention of re-validating the claim during the write batch or a competing claim arriving between snapshot and mutation; review's #2 is about pre-release claims, a different mechanism.",
+    "3827655676": "Finding #4 flags the broken code span / column-0 wrap in github-tooling-surfaces.md numbered list.",
+    "3827655684": "Finding #3 states lines.every(line => line.length > 0) rejects the empty string from a trailing newline and recommends stripping trailing empty lines.",
+    "3827663924": "Same handoff trailing-newline rejection identified in finding #3, including the misleading 'no valid trusted agent claim comment' failure."
+  },
+  "novel": {
+    "claims": 7,
+    "novelReal": 1,
+    "novelWrong": 2,
+    "novelVague": 1,
+    "restatedKnown": 3,
+    "alreadyMatched": 4,
+    "verdicts": {
+      "1": {
+        "class": "real",
+        "why": "Ran the code: selectNewestTrustedClaim([validOld(claim-OLD, agent-A), newerUnparseable(agent-B)], 7) returns the OLD claim — map→filter(Boolean)→max at backfill.mjs:144-164 makes a newer invalid claim invisible instead of failing closed"
+      },
+      "2": {
+        "class": "wrong",
+        "why": "verifyClaimOwnership has exactly one call site (issue-board-commands.mjs:170), inline in claimIssue right after its own field writes — it is never re-run later; and buildBackfillPlan (backfill.mjs:176-182) throws on any non-empty mismatch, so a live claimant's Claim ID cannot be overwritten"
+      },
+      "3": {
+        "class": "known",
+        "why": "buildClaimComment:74 omits Branch when falsy and parseClaimComment:119 rejects the result — this is the known P1 at issue-board-backfill.mjs:119 (no resolvable git branch → never backfillable)"
+      },
+      "4": {
+        "class": "wrong",
+        "why": "After release + re-claim the re-claim posts a newer comment that selectNewestTrustedClaim picks (verified by running it), and the re-claim's updateProjectFields fills Claim ID so buildBackfillPlan conflicts — the pre-release claim is in the candidate set but never wins the stated scenario"
+      },
+      "5": {
+        "class": "known",
+        "why": "Confirmed by running the parser: a handoff tail plus trailing newline returns null via isBoundedCloudHandoff:72-74 — this is the known 'Handoff trailing newline rejects claims' finding (backfill.mjs:123)"
+      },
+      "6": {
+        "class": "vague",
+        "why": "No location or independent defect; readSnapshot:234-236 does throw that message, but the claim only restates the fail-closed consequence of claims 3/5 as a diagnosability gripe"
+      },
+      "7": {
+        "class": "known",
+        "why": "The column-0 wrap is at docs/notes/github-tooling-surfaces.md:109 (`ID\\`, \\`Agent\\`...`) inside the same numbered item as the known doc nit anchored at :112; explicitly labeled a nit"
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 1260,
+  "usd": 3.0051565,
+  "scoring_usd": 1.051117
+}

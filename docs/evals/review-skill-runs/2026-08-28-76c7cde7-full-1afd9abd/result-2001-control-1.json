@@ -1,0 +1,74 @@
+{
+  "cell_id": "pr-2001-control-draw1",
+  "pr": 2001,
+  "condition": "control",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": null,
+  "claims": [
+    "`ui-dashboard/src/lib/canonical-revenue/actuals.ts:30-45` — dormant wallets still kill the series through the staleness path: `latestReserveSnapshotBucketsBySource` counts every source key as an active reserve source, including the all-zero stETH wallets this commit just taught `daily-series.ts` to ignore",
+    "If a dormant wallet's rows lag the active wallet's by even one day, `reserveStaleAfterBucket` (`actuals.ts:47-65`) pins `reserveStaleAfter` to the dormant wallet's last bucket and nulls all reserve revenue after it",
+    "`ui-dashboard/src/lib/canonical-revenue/daily-series.ts:76-83` — guard is narrower than its own rationale: `isZeroExposureStethSnapshot` requires all four fields zero, but only `totalEarnedYieldAmount` and `dailyEarnedYieldAmount` are ever multiplied by `usdPerToken`. A wallet holding 100 stETH with zero accrued yield so far contributes exactly `0` to the history regardless of price, yet still trips `reserveHistoryUnpriced` and nulls the entire reserve series — including unrelated sUSDS revenue",
+    "`ui-dashboard/src/lib/canonical-revenue/daily-series.ts:69-73` — dead `try`/`catch`: after `/^-?\\d+$/` passes on the trimmed string, `BigInt(trimmed)` cannot throw. The `catch { return false }` is unreachable",
+    "`ui-dashboard/src/lib/__tests__/canonical-revenue.test.ts:354-408` — the 11 negative cases never exercise the priced path: both `it.each` blocks use `reserveYield()` with the default `holdings: []`, so `stethRates` is empty and every assertion holds because `usdPerToken === undefined` short-circuits at `daily-series.ts:136`",
+    "The four `\"not-wei\"` cases are redundant with the `catch` and none of the 11 cover a *priced* wallet with a malformed field",
+    "A priced wallet with a malformed field currently reports the misleading `\"…USD/token pricing is missing.\"` when the real problem is unparseable data (pre-existing message bug, but the new tests give the impression it's covered)",
+    "Pre-existing: a priced wallet whose cumulative `totalEarnedYieldAmount` drops (e.g. `unrealizedYieldAmount` falling when balance dips below principal) books a large negative day and a matching positive rebound, spiking the daily chart"
+  ],
+  "matched_ids": [],
+  "judge_reasoning": {
+    "3830423746": "The review affirmatively denies this: it states the zero-return cannot corrupt cumulative-delta arithmetic and that for priced wallets the guard is a no-op. Its 'aside' about a negative day comes from a cumulative total dropping and is explicitly called identical on base and branch / pre-existing, not the fabricated negative spike created by returning 0 on a full-withdrawal day via the baselineUsd fallback.",
+    "3830513980": "No mention of transfers between tracked wallets, recordTransfer, principal/balance movement, or the need to subtract prior unrealized yield when a wallet is emptied; findings all concern staleness, guard breadth, dead try/catch, and test coverage."
+  },
+  "novel": {
+    "claims": 8,
+    "novelReal": 4,
+    "novelWrong": 0,
+    "novelVague": 3,
+    "restatedKnown": 1,
+    "alreadyMatched": 0,
+    "verdicts": {
+      "1": {
+        "class": "real",
+        "why": "actuals.ts:25-45 keys every row (incl. all-zero stETH wallets) as a separate source and reserveStaleAfterBucket (47-65) takes the min over all of them, so the new zero-exposure notion in daily-series.ts is not applied to the staleness path at all."
+      },
+      "2": {
+        "class": "real",
+        "why": "Verified in actuals.ts:58-63 (Math.min over every source whose latest bucket < today) plus daily-series.ts:218-224 (reserveYieldUsd nulled for timestamp > reserveStaleAfter); one lagging wallet source nulls all reserve revenue after its last bucket."
+      },
+      "3": {
+        "class": "real",
+        "why": "Only totalEarnedYieldAmount (line 121) and dailyEarnedYieldAmount (line 153) are priced; balanceAmount/principalAmount are used nowhere but the guard, so a nonzero-balance/zero-yield unpriced row returns null → reserveHistoryUnpriced (line 191) → actuals.ts:73 makes reserve unavailable, nulling sUSDS revenue too."
+      },
+      "4": {
+        "class": "vague",
+        "why": "Accurate that /^-?\\d+$/ makes BigInt(trimmed) non-throwing so the catch at daily-series.ts:71 is unreachable, but it is dead-code tidiness with no behavioral consequence."
+      },
+      "5": {
+        "class": "vague",
+        "why": "reserveYield() defaults holdings:[] so all 11 cases are unpriced (confirmed test.ts:146), but the conclusion of vacuity is off: reserveSnapshotTotalUsd checks the guard at line 119 before pricing, so e.g. balanceAmount:\"\" (BigInt(\"\")===0n) would return 0 instead of null without the regex — the tests do exercise the new code; only the priced-path coverage gap remains, which is a test-wishlist note."
+      },
+      "6": {
+        "class": "vague",
+        "why": "Test-quality remark: the \"not-wei\" cases are actually rejected by the regex (the catch is dead, so they aren't redundant with it), and \"no priced+malformed case\" is a coverage wish with no defect named."
+      },
+      "7": {
+        "class": "real",
+        "why": "Traced a priced wallet with totalEarnedYieldAmount=\"not-wei\": guard false → usdPerToken defined → numericTokenWei throws → null → reserveHistoryUnpriced (daily-series.ts:191) → actuals.ts:95 emits the \"USD/token pricing is missing\" reason for what is actually unparseable data."
+      },
+      "8": {
+        "class": "known",
+        "why": "Same negative-spike defect already listed: dailyYieldUsd = totalYieldUsd - previousTotal (daily-series.ts:203) is unclamped, so any cumulative drop books a negative day and a rebound — the known line-119/190 zero-row items are this same computation."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 479,
+  "usd": 2.5096024999999997,
+  "scoring_usd": 1.7106714999999997
+}
