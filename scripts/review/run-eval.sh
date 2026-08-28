@@ -449,9 +449,15 @@ if [[ -n $AGAINST ]]; then
     const { loadContract } = await import(`${spec}/scripts/review/review-eval-fixtures.mjs`);
     const { baselinePreflightProblems, readLedger } = await import(`${spec}/scripts/review/review-eval-ledger.mjs`);
     const { resolveRowReference } = await import(`${spec}/scripts/review/review-eval-result-shape.mjs`);
+    const { baselinePlanIdentity } = await import(`${spec}/scripts/review/review-eval-run.mjs`);
     const { contract, digest } = loadContract(contractFile);
     const plan = JSON.parse(readFileSync(planFile, "utf8"));
     const row = resolveRowReference({ reference, rows: readLedger(ledger), repoRoot: spec });
+    const plannedBaseline = plan.baseline ?? null;
+    const currentBaseline = baselinePlanIdentity(row);
+    if (JSON.stringify(plannedBaseline) !== JSON.stringify(currentBaseline)) {
+      throw new Error("the resolved baseline changed after planning");
+    }
     const problems = baselinePreflightProblems({
       row,
       contract,

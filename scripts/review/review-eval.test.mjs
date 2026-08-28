@@ -4344,8 +4344,17 @@ test("the orchestrator rejects an ineligible baseline before paid work", () => {
   );
   assert.match(script, /baselinePreflightProblems\(\{/);
   assert.match(script, /planComparabilityKey: plan\.comparability_key/);
+  assert.match(script, /baselinePlanIdentity\(row\)/);
+  assert.match(
+    script,
+    /JSON\.stringify\(plannedBaseline\) !== JSON\.stringify\(currentBaseline\)/,
+  );
   assert.ok(
     script.indexOf("baselinePreflightProblems({") <
+      script.indexOf("# --- the run deadline"),
+  );
+  assert.ok(
+    script.indexOf("baselinePlanIdentity(row)") <
       script.indexOf("# --- the run deadline"),
   );
   assert.match(script, /eligible complete full baseline row/);
