@@ -24,6 +24,7 @@ Authority: canonical
 - [`.agents/roles/standards-enforcer.md`](../.agents/roles/standards-enforcer.md)
 - [`.agents/roles/verifier.md`](../.agents/roles/verifier.md)
 - [`.agents/skills/babysit-pr/SKILL.md`](../.agents/skills/babysit-pr/SKILL.md)
+- [`.agents/skills/backlog-sweep/SKILL.md`](../.agents/skills/backlog-sweep/SKILL.md)
 - [`.agents/skills/deploy-indexer/SKILL.md`](../.agents/skills/deploy-indexer/SKILL.md)
 - [`.agents/skills/doc-garden/SKILL.md`](../.agents/skills/doc-garden/SKILL.md)
 - [`.agents/skills/envio/performance.md`](../.agents/skills/envio/performance.md)
@@ -81,6 +82,7 @@ Authority: canonical
 - [`docs/notes/agent-issue-workflow.md`](notes/agent-issue-workflow.md)
 - [`docs/notes/agent-quality-gate-mechanics.md`](notes/agent-quality-gate-mechanics.md)
 - [`docs/notes/backlog-ranking.md`](notes/backlog-ranking.md)
+- [`docs/notes/backlog-sweep.md`](notes/backlog-sweep.md)
 - [`docs/notes/codex-agent-skills.md`](notes/codex-agent-skills.md)
 - [`docs/notes/codex-cloud-setup.md`](notes/codex-cloud-setup.md)
 - [`docs/notes/cross-protocol-context.md`](notes/cross-protocol-context.md)
@@ -205,6 +207,7 @@ Authority: canonical
 - [`docs/adr/0074-trove-ledger-parallel-append-only-entity.md`](adr/0074-trove-ledger-parallel-append-only-entity.md) — TroveLedgerEvent is a parallel append-only entity, not a widened TroveOperationEvent
 - [`docs/adr/0075-pr-merge.md`](adr/0075-pr-merge.md) — One sanctioned human-only merge path
 - [`docs/adr/0076-fair-quality-gate-coordinator.md`](adr/0076-fair-quality-gate-coordinator.md) — Fair local quality-gate coordination across worktrees
+- [`docs/adr/0077-operator-triggered-backlog-sweep.md`](adr/0077-operator-triggered-backlog-sweep.md) — Operator-triggered backlog sweep with isolated workers
 
 Authority: non-canonical
 

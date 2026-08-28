@@ -127,12 +127,35 @@ it, or move it to `needs-grooming`. The ledger holds only short-lived
 
 ## Staging
 
-**Stage 1, current: ranking only.** The loop produces a receipt and a
-recommendation. A human claims the issue.
+**Stage 1: ranking only.** The loop produces a receipt and a recommendation. A
+human claims the issue. This is what `rank-backlog` does, and it remains the
+whole of that skill — running a sweep does not change it.
 
-**Stage 2, deferred: auto-start the top item.** Tracked by issue #2071, which
-stays open after the stage-1 PR. Stage 2 needs three things that are not settled
-yet: a claim that stays safe when several agents rank at once, a stop condition
-for a bad pick, and an answer for what happens when the selected issue turns out
-to need a decision mid-flight. Shipping the selector first lets a run of
-receipts show whether the ranking is good enough to trust with a claim.
+**Stage 2, delivered in operator-triggered form: the backlog sweep.** The
+`backlog-sweep` skill takes a receipt's eligible top N, claims each issue by
+number, and drives each through its own worker to a ready-for-review PR. The
+loop, the eligibility rules, the boundaries, and the report contract are
+canonical in [`backlog-sweep.md`](backlog-sweep.md).
+
+The three questions stage 2 was waiting on are answered there rather than here:
+a claim that stays safe under concurrency is the specific-number claim and the
+helper's own `Claim ID` guard; the stop condition for a bad pick is an honest
+`pnpm issue:release` with a comment saying what was learned; and an issue that
+turns out to need a decision mid-flight is released the same way — with
+`--needs-grooming` when clarity is what is missing — as long as no PR is open
+for it yet. Once one is, the issue stays `in-pr` and the PR goes to the operator
+as a decision instead, since releasing it there would return work already under
+review to the ready queue. Eligibility also excludes
+authority-capped fit up front, so the mid-flight case is rarer than it was when
+this was deferred.
+
+**Still future work: cron-triggered autonomy.** A sweep that starts itself on a
+schedule is not in scope for the operator-triggered form and is not required by
+it. The operator invoking each run is the trust gate — the batch is printed with
+a short abort window before the first claim, and every PR stops at READY for
+them to read before any merge.
+
+Issue #2071 tracked stage 2 and closes with the operator-triggered form its
+grooming decisions chose. Cron autonomy carries no tracking issue by design: it
+is an idea the operator descoped, not work this loop deferred, and it gets a
+fresh issue if it is ever wanted.

@@ -1,0 +1,737 @@
+---
+name: backlog-sweep
+description: "[repo-skill] Ship a small batch of ranked monitoring-monorepo backlog issues in one operator-started session: rank, pick the eligible top N, claim each by number, and drive each through its own worker subagent to a ready-for-review PR. Use when asked to sweep the backlog, work the top issues, or run a batch overnight. It never merges: it stops at READY and hands the operator the merge commands."
+title: Backlog Sweep Skill
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-08-27
+doc_type: skill
+scope: repo-wide
+review_interval_days: 90
+garden_lane: agent-entry-points
+---
+
+# Backlog Sweep
+
+Take the top of the ranked backlog and ship it. The operator starts this in a
+session they leave running — `/backlog-sweep`, or `/backlog-sweep 3` for a
+larger batch — and reads the report afterwards. Default batch size is 2.
+
+The session that runs this skill is an **orchestrator**. It ranks, picks,
+claims, and hands each issue to a dedicated worker subagent. It runs no gate,
+edits no source file, and opens no PR. Those three prohibitions keep concurrent
+workers out of each other's trees, so they bind only while separate workers
+exist: on a runtime with no way to spawn one, the session works the batch
+sequentially and takes both roles itself, one issue at a time.
+
+**It merges nothing, in either shape.** That boundary is unconditional — it has
+nothing to do with tree isolation or with how many actors are running, and the
+hard boundaries below state it. The isolated checkout, the rest of those
+boundaries, and the report contract hold either way.
+
+The loop, the boundaries, the report contract, and the resilience duties are
+canonical in
+[`backlog-sweep.md`](../../../docs/notes/backlog-sweep.md), and
+[ADR 0077](../../../docs/adr/0077-operator-triggered-backlog-sweep.md) records
+why this operating model was chosen over shared checkouts and cron autonomy.
+Ranking is the
+`rank-backlog` skill and its contracts in
+[`backlog-ranking.md`](../../../docs/notes/backlog-ranking.md). Queue labels,
+claiming, and release stay canonical in
+[`agent-issue-workflow.md`](../../../docs/notes/agent-issue-workflow.md). Every
+worker works
+[`pr-operating-card.md`](../../../docs/notes/pr-operating-card.md) steps 2-7.
+
+## Preflight
+
+Every check here fails cheaply. Skipping one fails late, after issues are
+already claimed and a worker is mid-gate.
+
+```bash
+git fetch origin main
+git status --porcelain            # must print nothing
+gh auth status                    # must report an authenticated account
+git remote get-url --push origin  # must serve mento-protocol/monitoring-monorepo
+```
+
+**A fork checkout is a stop, before anything is claimed.** The operating card
+refuses every fork head and tells a fork checkout to stop rather than
+first-publish, because a cross-repository PR is one that workflow can never
+drive to ready
+([`pr-operating-card.md`](../../../docs/notes/pr-operating-card.md)). Workers
+inherit this checkout's remote, so a sweep started from a fork would claim
+upstream issues, implement and gate all of them, and only then discover that
+none of them can open a PR. Check the push URL here, where it costs one
+command.
+
+A dirty session worktree is a stop, not a warning. The orchestrator does not
+commit, so nothing it does would clear those changes, and a sweep that runs
+beside unfinished work makes the two indistinguishable in the report.
+
+**Do not probe the gate's lock, and never stop on it.** Gate `--run` requests
+share a transient machine-wide coordinator that admits independent work from
+different worktrees under a weighted capacity, so a new gate **joins** a
+compatible coordinator rather than queueing behind it
+([`agent-quality-gate-mechanics.md`](../../../docs/notes/agent-quality-gate-mechanics.md)).
+The coordinator adopts the legacy `run.lock` while scheduled or recovery work
+exists, which makes `run.lock/owner` name a live pid for as long as anyone on
+the machine is gating — hours, routinely, during ordinary parallel work. A
+sweep that read that record as a busy signal would refuse to start in the
+normal case. Workers wait with `--lock-wait 3600`, which covers scheduler
+admission, a command lease, a coalesced result, and an older legacy holder.
+Never pass `--no-lock` and never delete the lock directory: the gate owns its
+own reclaim rules, and a record that looks stale from outside is routinely a
+live holder inside a long browser suite.
+
+**State the usage reality before starting.** One shipped PR costs roughly 3% of
+the weekly usage window, and every push to it triggers another round of bot
+reviews whose findings then cost replies and often another push. Two issues is
+the default because the cost is dominated by review rounds, not by the first
+implementation. **Refuse a batch size above 4.** Say that plainly and stop
+rather than clamping silently — an operator who asked for 6 needs to know they
+got a refusal, not a quiet 4.
+
+## Rank And Pick The Batch
+
+Run the `rank-backlog` skill's ranking end to end and let it write its normal
+receipt. Do not shortcut it to a quick issue list: the receipt is the audit
+trail this sweep's report cites, and a batch picked without one cannot be
+reviewed after the fact.
+
+**Its `Stop There` section does not stop the sweep.** That section ends a
+_standalone_ ranking at the recommendation — it hands the receipt to the
+operator and leaves `pnpm issue:claim` to them, because nothing else in that
+skill is authorized to claim. Here the operator has already authorized the
+batch by invoking this skill, which owns the claiming, so ranking hands its
+receipt back to the sweep and the sweep continues at the next section. Read
+`Stop There` as the boundary of the ranking skill's own authority, not as a
+halt for whatever invoked it. A sweep that stopped there would rank all night
+and ship nothing.
+
+**The receipt does not carry eligibility.** Its Top 15 table is
+`Rank | Issue | Score | Reason`, and it ranks `needs-grooming` issues beside
+`agent-ready` ones. Being Selected by `rank-backlog` is a ranking verdict, not
+a batch verdict — the Selected issue can fail any rule below. So read each
+candidate directly, stopping once N qualify, in this order: the receipt's
+Selected issue, its runner-up, then the Top 15. Those first two are read
+"whatever their rank" by `rank-backlog` itself and are not always in the table
+— fifteen higher-scoring grooming issues push the best ready candidate off it —
+so a sweep that scanned only the table would report an empty batch while the
+receipt names a valid pick.
+
+```bash
+gh issue view <n> --repo mento-protocol/monitoring-monorepo \
+  --json number,title,state,labels,body,projectItems,blockedBy
+```
+
+`labels` settles `agent-ready`, `risk:low`, and the `pkg:*` area;
+`projectItems[].status.name` settles `Blocked`; `body` is where an external
+dependency is named; `blockedBy` is GitHub's own blocked-by relationship, and a
+non-empty `blockedBy.nodes` is a rejection on its own. Read all three
+blocked-ness sources: a dependency recorded only through the native
+relationship appears in none of the others, so a projection that skipped it
+would claim work still waiting on something. Only the fit cap comes from the
+receipt.
+
+`state` must read `OPEN`, and `--repo` is not decoration. A closed issue
+otherwise passes every rule below and is refused only later by `issue:claim`,
+after it has already been printed as part of the batch. An unqualified
+`gh issue view` resolves against the current checkout's remote or `GH_REPO`, so
+from a fork or a redirected environment it would grade a same-numbered issue in
+a different repository while the receipt and the claim helper both target this
+one.
+
+Take the top N — default 2 — that satisfy **all** of:
+
+- **`agent-ready`.** Never `needs-grooming`. `rank-backlog` ranks grooming
+  issues and never Selects one; a sweep that claimed one would be doing the
+  grooming itself, unattended, on the operator's behalf.
+- **Exactly one `risk:*` label, and it is `risk:low`.** The batch runs without
+  a human reading the diff before it is pushed. `risk:medium` and `risk:high`
+  issues are exactly the ones where that gap matters, and the label is the
+  repo's own judgement of which those are. Test for the whole set, not for the
+  presence of `risk:low`: only state labels are mutually exclusive
+  ([`agent-issue-workflow.md`](../../../docs/notes/agent-issue-workflow.md)),
+  so an issue can carry `risk:low` and `risk:high` together, and a
+  presence-only check would admit it while the sentence above excludes it. Two
+  risk labels is also a grooming signal, not a tie to break.
+- **Fit not authority-capped.** `rank-backlog` caps fit and names the cap when
+  an issue needs a product decision, a credential the loop cannot reach, or an
+  issue-specific human approval ahead of normal PR readiness. A capped issue
+  cannot be finished by an unattended worker however well it scores, so it is
+  ineligible here even at rank 1. The merge approval every PR needs is not such
+  a cap — it applies to the whole batch equally.
+- **Not blocked, by any of the three records.** Not projected to `Blocked` on
+  the workboard, no non-empty `blockedBy` relationship, and not waiting on an
+  external dependency named in its body. The three do not imply each other:
+  a native blocked-by link needs no body sentence and moves no Project field.
+- **Carries a `pkg:*` label at all.** An issue with no package area makes the
+  independence test below vacuous: it shares no label with anything, so two
+  such issues both pass and then edit the same package. Nothing else rejects
+  the gap — the Agent Task form starts an issue at `needs-grooming`, and
+  `issue:claim` validates queue state rather than routing labels. Treat a
+  missing or ambiguous package area as ineligible rather than as independence.
+- **Mutually independent.** No two issues in one batch share a `pkg:*` label —
+  `pkg:dashboard`, `pkg:indexer`, `pkg:alerts`, `pkg:terraform`, `pkg:tooling`,
+  listed in
+  [`agent-issue-workflow.md`](../../../docs/notes/agent-issue-workflow.md).
+  That label is the repo's own ownership area, so it settles "same subsystem"
+  by lookup rather than per-batch judgement. Two workers editing one package
+  produce PRs whose diffs conflict and whose reviewers see a base moving under
+  them, and the second PR then pays for a merge, a re-gate, and a fresh review
+  round it did not need.
+
+If fewer than N issues qualify, take fewer and say so in the report. Never
+relax a rule to fill the batch. Zero qualifying issues is a valid result: write
+the report with an empty disposition table, name what the receipt held, and
+stop.
+
+## Hand Each Issue To A Worker
+
+**Print the batch, dwell 60 seconds, then claim.** List every selected issue by
+number and title, with the receipt position that put it there, and say plainly
+that the sweep is about to claim them and open a PR for each. Then hold about
+60 seconds before the first claim — any bounded wait the runtime supports —
+and proceed the moment it elapses. The wait must end on its own; never ask a
+question and block on the answer.
+
+This is a reviewable audit line with an abort window, not consent. The operator
+chose a batch size, not a set of issues, and a full `rank-backlog` run stands
+between their keypress and this print — so by the time the batch appears they
+have most likely already walked away, which is the point of starting a sweep.
+The printed batch is what makes the run auditable afterwards; the dwell is a
+cheap abort for an operator who is still watching. Blocking on a reply would
+strand every batch started by one who is not.
+
+Work the batch **sequentially**: claim one issue, brief its worker, then move
+to the next. Claiming ahead of the briefing would park the whole batch in
+`agent-active` while only one worker exists to move it.
+
+**Re-read eligibility immediately before each claim.** Claims are sequential,
+so minutes pass between the ranking that selected the last issue and the moment
+it is claimed. `issue:claim` checks only that the issue is open and carries a
+claimable queue label; it does not know about `risk:low`, `Blocked`, a
+dependency added to the body, or an authority cap. Run the same
+`gh issue view --repo … --json number,title,state,labels,body,projectItems,blockedBy`
+read from the eligibility step again, against this issue, right before claiming
+it. An issue that stopped qualifying — closed included — is dropped, not
+claimed: say so in the report and move to the next receipt entry.
+
+**Claim the specific number, never a count, and name the branch:**
+
+```bash
+pnpm issue:claim --issue <n> --agent <name> --branch <worker-branch>
+```
+
+`--count` claims whatever the ready queue holds at that moment, which is not
+the set the receipt selected — a race with any other session silently swaps an
+issue in, and the report would then cite a receipt that never chose it.
+
+`--branch` is not optional here. Without it the helper falls back to the
+current checkout's branch, and the orchestrator runs this command from its own
+session — so every claim would file the orchestrator's branch in the Project
+`Branch` field and in the permanent claim comment, pointing every human at one
+checkout that owns none of the work. Decide the worker's branch name before
+claiming and pass it.
+
+`<name>` is the runtime actually running the sweep — `claude` or `codex`. This
+skill is mirrored to both stores, so a hard-coded name would file every Codex
+sweep's claim under the wrong owner, and the claim comment and Project `Agent`
+field are what a human reads to find the session holding an issue.
+
+**Read the claim result before briefing anyone.** The claim can lose a race —
+another session can take the issue between the ranking that selected it and
+this command. Spawn the worker only for a claim that succeeded. A worker briefed
+on an issue this sweep does not hold duplicates whatever its real owner is
+already doing.
+
+**A nonzero claim is not proof the claim did not happen.** `issue:claim`
+transitions the issue before it verifies ownership and posts the claim comment,
+so a failure in a later step exits nonzero with the issue already
+`agent-active`. Treating that as "not staffed, leave it alone" strands it on the
+board with no worker and no report row — the same orphan the unstaffable-claim
+rule below prevents.
+
+So after **any** claim error, re-read the issue and decide from what is visible:
+the state labels, and whether a claim comment naming this sweep's agent is
+present. `issue:claim` generates its `Claim ID` internally and never prints it,
+so there is no expected ID to compare against; do not try. If the issue is
+`agent-active` and no other session's claim comment sits on it, treat the claim
+as this sweep's and either staff it or release it, as the unstaffable-claim rule
+below does. If another session's
+claim is there, it is a lost claim. If it is neither `agent-active` nor `in-pr`,
+nothing landed and there is nothing to undo.
+
+On a refused claim, leave the issue alone and record the loss in the report.
+The refusal names only the label state it found —
+`is not claimable; expected open agent-ready without agent-active/in-pr/needs-grooming`
+— so re-read the issue for the report line. A holder exists only when it came
+back `agent-active` or `in-pr`; take that holder's `Claim ID` from the project
+field or the claim comment. When it closed or returned to `needs-grooming`
+between the read and the claim there is no holder at all: record the state
+change, and do not go looking for one — an old comment would name a session
+that has nothing to do with this refusal. A replacement from the next eligible receipt entry
+is allowed, but **print it before claiming it**, exactly as the batch was
+printed: the printed batch is the audit record of what this sweep worked on,
+and an unannounced substitute makes that record wrong. When the receipt is
+exhausted, finish with the smaller batch.
+
+**A claim the sweep cannot staff is released at once.** Spawning a worker can
+fail — a runtime's concurrent-agent limit, a transient error — and the issue is
+already `agent-active` by then. Release it immediately with
+`pnpm issue:release --issue <n>`, comment why, and record it in the report.
+Leaving a claimed issue with no worker parks it where nothing will pick it up.
+This is also the reason the batch is claimed one issue at a time: the failure
+costs one release rather than the whole batch.
+
+Then spawn one worker subagent per issue. Give each a brief containing:
+
+- **Its own checkout.** Clone to `/private/tmp/claude/sweep-<issue>`, with
+  `issue` holding the number:
+
+  ```bash
+  repo="$clone_url"                 # the orchestrator's own origin URL
+  root=/private/tmp/claude
+  if ! mkdir -p "$root" 2>/dev/null || [ ! -w "$root" ]; then
+    root="${TMPDIR:-/tmp}/claude-sweep"   # unwritable default: fall back
+    mkdir -p "$root" 2>/dev/null || exit 1
+    [ -w "$root" ] || exit 1              # the fallback gets the same proof
+  fi
+  dir="$root/sweep-${issue}"
+
+  [ -n "${worker_dir:-}" ] && dir="$worker_dir"   # respawn: use it verbatim
+
+  if [ -e "$dir/.git/sweep-owner" ] &&
+     [ "$(cat "$dir/.git/sweep-owner")" = "$sweep_id" ]; then
+    :                               # this sweep's own checkout: resume in it
+  else
+    if [ -e "$dir" ]; then          # someone else's or unproven: fresh path
+      for n in $(seq 2 50); do
+        if mkdir "$dir-$n" 2>/dev/null; then dir="$dir-$n"; break; fi
+        [ "$n" -lt 50 ] || exit 1   # never reuse a path you did not allocate
+      done
+    fi
+    git clone "$repo" "$dir" || exit 1  # never mark a clone that failed
+    printf '%s\n' "$sweep_id" > "$dir/.git/sweep-owner"
+  fi
+  cd "$dir" || exit 1                   # everything after this runs here
+  ```
+
+  **`$dir` is the working directory for every later command, not just the
+  clone.** `git clone` does not move the shell, and a worker can inherit the
+  orchestrator's directory, so setup, the branch, the edits, the gate, and the
+  push would all run in the orchestrator's checkout — the one tree this whole
+  scheme exists to keep workers out of, and the one the preflight requires to
+  stay clean. A shell that does not persist between calls does not make this
+  optional: every fresh shell re-enters `$dir` first, and no worker command is
+  ever issued from an unstated directory.
+
+  `clone_url` is the orchestrator's own `git remote get-url --push origin`,
+  fixed once and passed to every worker beside `sweep_id`. Take the **push**
+  URL specifically: `git clone` copies no remote config, `pushurl` included, so
+  where a checkout's fetch and push URLs differ a worker cloned from the fetch
+  URL gates cleanly and then pushes somewhere nobody is watching. `--push`
+  returns `pushurl` when one is set and the fetch URL otherwise, so it is right
+  either way. Do not hard-code the public HTTPS URL. A worker must push, not
+  merely clone, and the transport that
+  already authenticates on this machine is the one the operator's checkout is
+  using — often SSH, while `gh auth status` says nothing about git's credential
+  helper. Cloning over a transport nobody has credentials for succeeds on a
+  public repository and then fails at the push, after the whole issue has been
+  implemented and gated.
+
+  `worker_dir` is set only on a respawn, to the path the orchestrator recorded
+  for this worker. Use it verbatim; do not re-derive. A worker displaced to a
+  suffixed path would otherwise start from the base name, fail `mkdir` on its
+  own directory, and clone a fresh one — abandoning the branch, commits, and
+  open PR that the resume duty exists to keep.
+
+  `sweep_id` is one value the orchestrator fixes before the first claim and
+  passes to every worker — this session's id is the obvious choice, and any
+  string is fine as long as one sweep never reuses another's. Write it right
+  after the clone: the marker is what the next run reads, so a clone that
+  skipped this step can never be resumed, only abandoned for a fresh path.
+
+  Write it only after a clone that **succeeded**, which is what the `|| exit 1`
+  buys. The existence check and the clone are two steps, so another sweep can
+  take the same deterministic path in between; this clone then fails into a
+  directory that is not empty, and an unconditional marker write would stamp
+  this sweep's id over the owner file of a checkout someone else's live worker
+  is committing from — handing away the tree the rest of this section exists to
+  protect.
+
+  Create the parent first, and prove it writable rather than assuming it.
+  `git clone` does not create intermediate directories, and the sweep root is
+  not guaranteed on a fresh machine or in the Codex runtime this skill is also
+  mirrored into — so a missing or read-only parent fails the very first command
+  of every worker. `mkdir -p` alone does not settle it: it succeeds on a
+  directory that already exists and cannot be written.
+
+  The fresh path is allocated with `mkdir`, not stamped with a timestamp. Two
+  workers displaced in the same second would derive the same `-$(date +%s)`
+  name, and `mkdir` is the atomic claim that makes the loser take the next
+  suffix instead.
+
+  In Claude Code, subagents inherit the parent session's Bash worktree pin, so
+  git in a sibling worktree under `.claude/worktrees/` is refused for them, and
+  a tmp clone is the only checkout those workers can use. The general rule
+  outlives that specific block: every worker gets an isolated checkout — a
+  clone or a worktree — that its own runtime can actually write to, because two
+  workers in one checkout is the failure this is preventing. Then run
+  `./scripts/setup.sh` unsandboxed in **every** new clone, not conditionally.
+  It is what sets `core.hooksPath` to `.trunk/hooks`, so a checkout that only
+  ran `pnpm install` has no pre-push hook — and a worker there could push
+  without the gate the boundaries below forbid bypassing. Run it on **resumed**
+  checkouts too, not just fresh ones: the marker is written straight after the
+  clone, so an interruption between the two leaves an owned checkout with no
+  hooks, and a resume that trusted the marker would push from it. Rerunning is
+  free — the script owns codegen and the browser dependencies and skips its own
+  work when the inputs are unchanged — which is why this is a blanket rule
+  rather than a condition to evaluate.
+
+  Branch as **the exact name the orchestrator passed to `issue:claim
+--branch`**, from `origin/main`. That name is already in the Project `Branch`
+  field and the claim comment, and the release guard looks for an open PR with
+  `--head` that name. A worker that invents its own leaves all three pointing at
+  a branch nobody pushed, and the guard then reads "no open PR" and releases an
+  issue that has one.
+
+  **The path is deterministic, so check it before cloning.** The same issue
+  number produces the same directory, and `git clone` fails outright into one
+  that already exists — from an interrupted run, or from an earlier sweep of an
+  issue that was released and later re-selected. Resume it only on proof it is
+  this sweep's own, which is what the `sweep-owner` comparison above decides.
+  Keep the marker inside `.git/` — a file at the clone root would be untracked
+  in every worker checkout, where a clean-worktree check can refuse the gate or
+  the push and broad staging can commit the marker into the PR. Remote and
+  branch are not proof — a second sweep of the same issue reproduces both, so
+  that test also accepts a checkout a live worker is committing from, and two
+  workers would then push from one tree. Anything else gets a
+  fresh unique path, and the conflict is named in the report. **Never delete a
+  checkout whose contents you have not established** — it may hold another
+  session's uncommitted work, and nothing here can tell that apart from litter.
+
+- **The loop:** [`pr-operating-card.md`](../../../docs/notes/pr-operating-card.md)
+  steps 2-7, end to end. Implement surgically — touch only what the issue
+  needs, and read the scoped `AGENTS.md` for the package first.
+- **Formatting before the commit:** `./tools/trunk fmt <changed files>`. The
+  gate does not run it, and the required Code Quality check does.
+- **The gate**, unsandboxed, backgrounded, and polled inside the turn:
+
+  ```bash
+  pnpm agent:quality-gate                                # inspect first
+  bash scripts/agent-quality-gate.sh --run --lock-wait 3600
+  ```
+
+  Inspect before running, as the operating card's step 3 requires: the bare
+  form prints the mapped commands **and the checklists to apply**, and the
+  checklists are the half that `--run` never surfaces.
+
+  Invoke the script directly. The `pnpm agent:quality-gate -- --run` spelling
+  mangles the arguments on the way through the package manager. Every worker
+  gate goes through the machine's gate coordinator and counts against its
+  capacity — 3 by default, `AGENT_QUALITY_GATE_CAPACITY`. Gates from different
+  worktrees run together under that capacity; the hour-long `--lock-wait` is
+  what covers the rest, since it spans scheduler admission, a command lease, a
+  coalesced result, and an older legacy holder.
+
+  **A package-manifest change needs the gate's acknowledgement, not a
+  hand-off.** When the issue touches a package manifest, `pnpm-lock.yaml`, pnpm
+  configuration, or `patches/**`, that invocation exits 2 before running any
+  check: `Refusing to run because package manifests, patches, or lockfile
+changed.` Review the lifecycle and install scripts in the diff first, then
+  record the acknowledgement in local git config and re-run:
+
+  ```bash
+  git config agent.qualityGate.allowPackageScriptChanges true
+  bash scripts/agent-quality-gate.sh --run --lock-wait 3600
+  ```
+
+  The **config**, not the `--allow-package-script-changes` flag, is what lets
+  the push through. The pre-push hook runs the gate without that flag
+  (`.trunk/trunk.yaml`), and on a package-risk push the acknowledgement is part
+  of the freshness key — so a run acknowledged only on the command line cannot
+  be reused by the hook, which then refuses the push with the same message.
+  Local git config is read by both the manual run and the hook
+  ([`agent-quality-gate-mechanics.md`](../../../docs/notes/agent-quality-gate-mechanics.md)).
+  This is the gate's own designed path for that change class, so it is not the
+  blocked-control hand-off in the boundaries below: the acknowledgement records
+  a diff the worker has read, and setting it without reading one is the
+  dishonest version. Without this step a `risk:low` issue that edits a manifest
+  can never finish — it gates, then cannot push, and `--no-verify` is forbidden.
+
+  **Background it with the runtime's own mechanism, then poll within the
+  turn.** The command above is written foreground; do not run it that way for a
+  full gate. Start it the way the runtime backgrounds work — in Claude Code the
+  Bash tool's background mode, not a trailing `&` — and poll it to completion
+  inside the same turn. Judge the run by its exit status, never by the tail of
+  its log. A worker that instead ends its turn to wait never wakes: subagents
+  die at turn end, and a backgrounded process they were waiting on has no one
+  left to notice it finished.
+
+- **The closeout**, chosen by the runtime the worker is in. Outside an active
+  Codex session, bare `pnpm agent:autoreview`; when the codex engine is
+  unavailable, `pnpm agent:autoreview --engine claude`, with the `claude` CLI's
+  install directory prepended to `PATH` — a worker subagent does not always
+  inherit the interactive shell's `PATH`, and the fallback engine then reports
+  as unavailable too. **Inside an active Codex session the bare command is not
+  the closeout**: it silently selects the local deterministic engine, so no
+  separate reviewer sees the bundle. Use the prepared-bundle fresh-context flow
+  with its manifest checks before and after review, which
+  [`pr-operating-card.md`](../../../docs/notes/pr-operating-card.md) owns — this
+  skill defers to it rather than carrying a second copy of the commands.
+  Address the real findings; an unexplained strengthening of a validation claim
+  is itself a finding, and testing those claims is the worker's own job, not
+  the bundled reviewer's.
+- **The ship:** full repo PR template, all four sections, **ready for review,
+  never a draft**. A draft disables CodeRabbit auto-review and the PR
+  description check, so it is skipping review rather than staging it. Then
+  `pnpm issue:review --pr <pr> --issue <n>`.
+- **The babysit:** sweep every feedback surface — top-level comments, review
+  bodies, inline threads, annotations, failing logs. **Batch fixes into single
+  pushes**, because every push costs another bot review round. Reply before
+  resolving, in the two canonical forms: `Fixed in <commit> — <what changed>`
+  and `Won't fix: <technical reason why>`. Drive to READY on both projections,
+  `pr:feedback-state` clean first, then `pr:ready-state`.
+- **The report-back.** End the last turn — at READY, at a release, or at a
+  block — with one message to the orchestrator carrying every fact the report
+  needs and only the worker can see: the PR URL; the final
+  `pnpm pr:ready-state --pr <pr> --compact` line **verbatim**; the release form
+  and reason if the issue was released; each deferral issue filed with the PR
+  it came from; anything needing an operator decision; and the two paths if the
+  deterministic clone path was taken and a fresh one was used. The orchestrator
+  observes none of this from outside, so a fact left out of this message is a
+  fact missing from the report.
+
+## Keep The Workers Awake
+
+These duties belong to the orchestrator. They are the reason this skill has an
+orchestrator at all.
+
+**Re-invoke a worker that has gone quiet.** Each worker polls its own gate and
+push inside its turn, so the orchestrator holds no timers and watches no pids —
+it never learns their pids in the first place. What it owns is the case
+in-turn polling cannot reach: a worker whose task notification shows it parked
+at a turn end, or whose last report has gone stale while its siblings advance.
+Send that worker a message naming where it stopped and what to do next. Nothing
+else re-invokes a subagent that has already ended its turn.
+
+**Collect each worker's report-back.** The report is the orchestrator's to
+write, but five of its facts exist only inside a worker's turn — the verbatim
+ready-state line, the release form and reason, the deferral issues, the
+operator-decision items, and any checkout conflict. Record each closing message
+as it arrives. A worker that finished without one is not done: ask it for the
+missing facts before writing the report, because nothing on disk reconstructs
+them afterwards.
+
+**Keep concurrent gates within the coordinator's capacity.** The coordinator
+schedules gate work across worktrees under a weighted capacity, 3 by default,
+so a batch of 4 runs at most three gates at once — hold the fourth worker at
+its gate step until one finishes rather than letting all four queue. The
+non-gate part of a worker's turn stays outside the coordinator, and that is
+sound on the axis the operating card warns about: each worker owns its own tmp
+clone, so no package-manager process can recreate or invalidate another's
+`node_modules`. It is not free on CPU and memory, which is why the batch cap
+and the coordinator's capacity both stay small. The card's read-only rule for
+spare same-machine workers governs _uncoordinated_ validation; every validation
+a worker runs here goes through the coordinator instead.
+
+**Serialize the instructions so two workers never share a checkout.** Each
+worker owns exactly one clone and one branch, and no instruction ever names
+another worker's path. A repair applied through the wrong checkout lands on the
+wrong branch, and the worker that owns it will not notice.
+
+**Resume workers after a usage-limit interruption; never restart them.** The
+worker's clone still holds its branch, its claim, and often an open PR. A
+restart re-claims an issue that is already `agent-active`, re-runs a gate that
+already passed, and can open a second PR for the same branch. Wait for the
+limit to reset, then wake the existing worker where it stopped.
+
+**Record each worker's allocated path, and pass it back as `worker_dir` on any
+respawn.** Waking a worker is not the only way one comes back; after a crash it
+is spawned fresh, and then only the path you hand it keeps it off a new clone.
+
+**Direct a reclassification after five review-triggered patch cycles.** The
+operating card allows five and requires a pause before a sixth. At that point
+tell the worker to stop patching and classify what is left, honestly, in one of
+three ways: an evidence-backed won't-fix; a deferral with its issue filed and
+linked from `## Deferrals`; or — for a finding that is valid, in scope, and
+genuinely still required — a hand-off. A required fix is neither a won't-fix
+nor a deferral, and mislabelling it to end the loop is the failure this rule
+exists to prevent. A handed-off PR goes in the report as an operator decision
+and is **not** reported as READY, whatever its ready-state line says. A
+converging bot loop costs a review round per push and does not end on its own,
+but neither does an unfixed defect.
+
+## Hard Boundaries
+
+These are MUST-level. A sweep runs unattended, so a boundary crossed here is
+crossed without anyone watching.
+
+- **MUST NOT merge.** Green CI, a READY ready-state, and a batch that finished
+  early are not merge approval. `pnpm pr:merge` refuses outside an interactive
+  human session, so the sweep cannot merge even by accident — but the rule binds
+  regardless of the wrapper, which mechanizes it rather than replacing it. The
+  sweep ends at READY and hands the operator the commands.
+- **MUST NOT weaken or widen a control that blocks the run.** Root
+  [`AGENTS.md`](../../../AGENTS.md) states it: never weaken a control that
+  blocks your own work, because an agent that can widen its own gate has no
+  gate. A gate refusal, a failing hook, a denied permission, or a sandbox block
+  is reported and handed to an independent session — never edited away by the
+  worker it is blocking. Reclassifying the blocking change as a separate task
+  does not qualify.
+- **MUST NOT bypass hooks.** No `--no-verify`, no hook-skipping environment
+  variable, no direct push that dodges the pre-push gate.
+- **MUST release a bad pick honestly.** An issue that turns out misgroomed, or
+  a worker that stalls with no path forward, releases the issue rather than
+  leaving it parked in `agent-active`:
+
+  ```bash
+  pnpm issue:release --issue <n>                    # remaining work still clear
+  pnpm issue:release --issue <n> --needs-grooming   # clarity is missing
+  ```
+
+  Post a comment on the issue saying what the worker learned — what it tried,
+  where it stopped, and what a human would need to decide. A silent release
+  sends the next run straight back into the same wall.
+
+  **Only while the issue is still `agent-active` and has no open PR.** Check
+  both. A worker can open its PR and stall before `pnpm issue:review` runs, so
+  the label still reads `agent-active` while a PR is already up for review; a
+  label-only test releases it and the next sweep duplicates that work.
+  `gh pr list --repo mento-protocol/monitoring-monorepo --head <worker-branch>
+--state open` settles it, and an open PR is handled exactly like the `in-pr`
+  case below. Pass `--repo` for the same reason the eligibility read carries it:
+  an unqualified lookup resolves through `GH_REPO` or the local remote, and a
+  miss here does not fail loudly — it reads as "no open PR" and releases an
+  issue that has one.
+
+  Once the worker has opened its PR and run `pnpm issue:review`, the issue is
+  `in-pr`, and releasing it
+  then returns it to the ready queue while the PR is still open — a later sweep
+  claims it and duplicates work that is already up for review, because
+  `rank-backlog` deliberately does not read a `Refs` cross-reference as
+  ownership. `issue:release` accepts `in-pr` and will not stop you. The
+  canonical lifecycle in
+  [`agent-issue-workflow.md`](../../../docs/notes/agent-issue-workflow.md)
+  releases _after_ an unmerged PR closes. So a worker that stalls with a PR
+  already open keeps the issue `in-pr` and hands the PR to the operator as a
+  decision item; releasing is what the operator does after they close it.
+
+- **MUST file an issue before deferring.** Every knowingly deferred follow-up
+  gets a GitHub issue, linked from the PR's `## Deferrals` section. An
+  evidence-backed won't-fix is not a deferral and needs no issue.
+
+## Write The Report
+
+Write `.rankings/sweep-<YYYY-MM-DD>.md` in UTC. `.rankings/` is gitignored and
+already holds the ranking receipts, so the two artifacts of one night sit
+together. If the name is taken, append the lowest unused suffix — `-2`, then
+`-3` — and never overwrite an earlier report.
+
+Reserve the name atomically, with `set -o noclobber` or `mkdir` on a lock, and
+retry the next suffix when the reservation fails:
+
+```bash
+mkdir -p .rankings                        # noclobber cannot create the parent
+base=".rankings/sweep-$(date -u +%F)"
+candidate="$base.md"
+reserved=""
+set -o noclobber
+for n in $(seq 1 50); do
+  if { : > "$candidate"; } 2>/dev/null; then reserved="$candidate"; break; fi
+  candidate="$base-$((n + 1)).md"        # reservation lost: try the next one
+done
+set +o noclobber                          # or write with >| below
+[ -n "$reserved" ] || {
+  echo "sweep report: no free name under $base after 50 tries" >&2
+  exit 1
+}
+printf '%s\n' "$report" > "$reserved"
+```
+
+Checking that a name is free and then writing it are two steps, and two sweeps
+finishing on the same UTC date can both pass the check before either writes.
+The reservation is what makes "never overwrite an earlier report" true rather
+than merely intended.
+
+A failed reservation is not proof the name was taken. A missing `.rankings/`, a
+directory the session cannot write, and a full disk all fail identically, so
+create the parent first, bound the loop, and exit loudly past the bound. An
+unbounded retry treats a permission error as contention and spins forever, and
+the night's report is lost either way — the difference is whether the operator
+finds out.
+
+Turn `noclobber` back off, or write with `>|`, before filling the file. The
+reservation leaves an empty file in place, so a plain `>` under `noclobber`
+refuses it — and a sweep that reserved a name and then silently failed to write
+its report would lose the whole night's record.
+
+Six parts. Every fact is recorded by whoever performed the action: the
+orchestrator for the receipt, for the refused claims, and for anything it did
+itself — releasing a claim it could not staff, say; the worker's closing message
+for everything that happened inside its own turn.
+
+**Every claimed issue gets a row, reported back or not.** A worker can end
+without its closing message and without answering the request for one. That
+does not remove the row: write it from what the orchestrator does know — the
+issue, the branch, and the PR if one exists — say plainly that the worker did
+not report, and list it under the operator's decisions. A silently missing row
+would read as an issue that was never claimed, while the claim is still on the
+board.
+
+1. **The receipt.** The path of the `rank-backlog` receipt this batch was
+   selected from, and the batch size the operator asked for.
+2. **A disposition table**, one row per claimed issue, with the columns
+   `Issue | PR | Disposition`. For a shipped PR the disposition cell holds the
+   worker's final `pnpm pr:ready-state --pr <pr> --compact` line **verbatim** —
+   copied, not summarized, because a paraphrase of a readiness verdict is not
+   evidence of one. `--compact` is the mode that emits one quotable line; the
+   operating card's `--json` stays the machine-readable check and does not
+   belong in a table cell. For an issue that was released, the cell holds the
+   release reason and which release form was used.
+3. **Claims this sweep did not get**, one line per refused claim, naming the
+   issue, why it was refused, and the receipt entry taken instead. The reason is
+   either a holder — give its `Claim ID` — or a state change between the read
+   and the claim, which has no holder to name. A refused claim never becomes a
+   disposition row, because no work was done on it; omitting it entirely would
+   hide that the batch shrank.
+4. **Deferral issues filed**, by number, each with the PR it came from.
+5. **Checkout conflicts**, one line per worker that found its deterministic
+   clone path already taken and moved to a fresh one, naming both paths. The
+   path it left is deliberately unexamined, so this line is the only record
+   that something is still sitting there.
+6. **Anything needing the operator's decision** — a blocked control, a
+   misgroomed issue, a finding the worker could not adjudicate.
+
+Print the same summary to the terminal; the file is the artifact, the terminal
+output is its summary.
+
+**End with the merge commands**, one line per PR that reached READY and nothing
+for the rest:
+
+```bash
+pnpm pr:merge --pr <number>
+```
+
+The operator runs those from their own terminal. Listing a command is not
+approval to run it, and this skill runs none of them.
+
+Finally, send one spoken line saying the report is ready, through the fallback
+ladder in
+[`spoken-attention-nudge.md`](../../../docs/notes/spoken-attention-nudge.md).
+That note owns the command, the key-file rule, and the `say`/`spd-say`
+fallbacks; do not re-derive them here. Run the nudge with escalated execution
+rather than inside the workspace sandbox — `sag` needs the network and the local
+audio device, and a sandboxed attempt fails in a way that looks like a missing
+command.
+
+Keep the spoken text fixed and low-information: no issue numbers, PR numbers,
+paths, or findings. It goes to a third-party service, and the report on disk is
+where the detail belongs.
+
+When every spoken path fails, **say so in the report** instead of skipping
+quietly. A sweep that finished overnight and could not announce itself is a
+different situation from one the operator was told about, and only the written
+line distinguishes them.
