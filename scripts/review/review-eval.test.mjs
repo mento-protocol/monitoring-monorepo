@@ -251,6 +251,21 @@ function writeRowEvidence(root, row) {
     let first = true;
     for (let draw = 1; draw <= condition.draws; draw += 1) {
       for (const [pr, ids] of idsByPr) {
+        const matchedIds = ids.filter(
+          (id) => condition.per_defect[id][draw - 1] === 1,
+        );
+        const novelWrong = first ? condition.wrong_claims : 0;
+        const novelReal = first ? condition.novel_real : 0;
+        const claimCount = Math.max(1, novelWrong + novelReal);
+        const claims = Array.from(
+          { length: claimCount },
+          (_unused, index) => `claim ${index + 1}`,
+        );
+        const classes = [
+          ...Array(novelWrong).fill("wrong"),
+          ...Array(novelReal).fill("real"),
+          ...Array(claimCount - novelWrong - novelReal).fill("vague"),
+        ];
         writeFileSync(
           path.join(detail, `result-${pr}-${name}-${draw}.json`),
           JSON.stringify({
@@ -258,13 +273,21 @@ function writeRowEvidence(root, row) {
             pr,
             condition: name,
             draw,
-            matched_ids: ids.filter(
-              (id) => condition.per_defect[id][draw - 1] === 1,
-            ),
-            claims: ["claim"],
+            matched_ids: matchedIds,
+            claims,
             novel: {
-              novelWrong: first ? condition.wrong_claims : 0,
-              novelReal: first ? condition.novel_real : 0,
+              claims: claimCount,
+              novelWrong,
+              novelReal,
+              novelVague: claimCount - novelWrong - novelReal,
+              restatedKnown: 0,
+              alreadyMatched: matchedIds.length,
+              verdicts: Object.fromEntries(
+                classes.map((className, index) => [
+                  String(index + 1),
+                  { class: className },
+                ]),
+              ),
             },
             usd: first ? condition.usd : 0,
             seconds: first ? condition.seconds : 0,
@@ -4922,6 +4945,244 @@ test("--revalidate-appended rejects copied evidence in a new directory", () => {
   }
 });
 
+test("--revalidate-appended rejects edits to base-row evidence", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+
+    const baseRow = makeRow({
+      matchedIds: scorableIdsFor([1990]),
+      fullMatrix: true,
+    });
+    const detail = writeRowEvidence(root, baseRow);
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(baseRow)}\n`,
+    );
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "record base run");
+
+    const resultFile = path.join(detail, "result-1990-pipeline-1.json");
+    const edited = JSON.parse(readFileSync(resultFile, "utf8"));
+    edited.claims = ["replacement claim"];
+    writeFileSync(resultFile, JSON.stringify(edited));
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 1);
+    assert.equal(JSON.parse(checked.stdout).revalidated_rows, 0);
+    assert.match(
+      JSON.parse(checked.stdout).problems.join(" | "),
+      /base row .* evidence changed at .*result-1990-pipeline-1\.json/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended rejects edits through a base-row detail symlink", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+
+    const baseRow = makeRow({
+      matchedIds: scorableIdsFor([1990]),
+      fullMatrix: true,
+    });
+    const detail = writeRowEvidence(root, baseRow);
+    const alias = path.join(
+      path.dirname(baseRow.detail_dir),
+      "base-evidence-alias",
+    );
+    symlinkSync(path.basename(baseRow.detail_dir), path.join(root, alias));
+    baseRow.detail_dir = alias;
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(baseRow)}\n`,
+    );
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "record symlinked base run");
+
+    const resultFile = path.join(detail, "result-1990-pipeline-1.json");
+    const edited = JSON.parse(readFileSync(resultFile, "utf8"));
+    edited.claims = ["replacement claim"];
+    writeFileSync(resultFile, JSON.stringify(edited));
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 1);
+    assert.match(
+      JSON.parse(checked.stdout).problems.join(" | "),
+      /base row .* evidence changed at .*result-1990-pipeline-1\.json/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended rejects a detail directory normalized to the repo root", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+
+    const baseRow = makeRow({ fullMatrix: true });
+    baseRow.detail_dir = "docs/..";
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(baseRow)}\n`,
+    );
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "record root detail path");
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 1);
+    assert.match(
+      JSON.parse(checked.stdout).problems.join(" | "),
+      /base row .* names the repository root as detail_dir/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended rejects a retargeted parent detail symlink", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+
+    const baseRow = makeRow({
+      matchedIds: scorableIdsFor([1990]),
+      fullMatrix: true,
+    });
+    const runs = path.dirname(baseRow.detail_dir);
+    baseRow.detail_dir = path.join(runs, "target-one", "run");
+    const firstDetail = writeRowEvidence(root, baseRow);
+    const secondDetail = path.join(root, runs, "target-two", "run");
+    cpSync(firstDetail, secondDetail, { recursive: true });
+    const alias = path.join(root, runs, "alias");
+    symlinkSync("target-one", alias);
+    baseRow.detail_dir = path.join(runs, "alias", "run");
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(baseRow)}\n`,
+    );
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "record parent detail symlink");
+
+    unlinkSync(alias);
+    symlinkSync("target-two", alias);
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 1);
+    assert.match(
+      JSON.parse(checked.stdout).problems.join(" | "),
+      /base row .* evidence changed at .*\/alias/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended rejects a symlinked base evidence file", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+
+    const baseRow = makeRow({
+      matchedIds: scorableIdsFor([1990]),
+      fullMatrix: true,
+    });
+    const detail = writeRowEvidence(root, baseRow);
+    const resultFile = path.join(detail, "result-1990-pipeline-1.json");
+    const target = path.join(root, "docs/evals/base-result-target.json");
+    writeFileSync(target, readFileSync(resultFile));
+    unlinkSync(resultFile);
+    symlinkSync(path.relative(detail, target), resultFile);
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(baseRow)}\n`,
+    );
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "record linked base evidence");
+
+    const edited = JSON.parse(readFileSync(target, "utf8"));
+    edited.claims = ["replacement claim"];
+    writeFileSync(target, JSON.stringify(edited));
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 1);
+    assert.match(
+      JSON.parse(checked.stdout).problems.join(" | "),
+      /base row .*result-1990-pipeline-1\.json must be a regular evidence file/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("--revalidate-appended requires every planned cell of a complete row", () => {
   const root = makeRoot();
   try {
@@ -5472,6 +5733,28 @@ test("--revalidate-appended checks a row against its committed plan", () => {
     );
     writeRowEvidence(root, row);
 
+    const invalidClaim = JSON.parse(readFileSync(plannedResult, "utf8"));
+    invalidClaim.claims = [{}];
+    writeFileSync(plannedResult, JSON.stringify(invalidClaim));
+    const invalidClaimResult = cli(flags, { root });
+    assert.equal(invalidClaimResult.status, 1);
+    assert.match(
+      JSON.parse(invalidClaimResult.stdout).problems.join(" | "),
+      /result-1990-pipeline-1\.json claims must contain only non-empty strings/,
+    );
+    writeRowEvidence(root, row);
+
+    const falseNovelSummary = JSON.parse(readFileSync(plannedResult, "utf8"));
+    falseNovelSummary.novel.novelVague += 1;
+    writeFileSync(plannedResult, JSON.stringify(falseNovelSummary));
+    const falseNovelResult = cli(flags, { root });
+    assert.equal(falseNovelResult.status, 1);
+    assert.match(
+      JSON.parse(falseNovelResult.stdout).problems.join(" | "),
+      /result-1990-pipeline-1\.json novel\.novelVague does not match novel\.verdicts/,
+    );
+    writeRowEvidence(root, row);
+
     const leakedResult = JSON.parse(readFileSync(plannedResult, "utf8"));
     leakedResult.leak = { suspected: false, hard: ["answer key path"] };
     writeFileSync(plannedResult, JSON.stringify(leakedResult));
@@ -5555,6 +5838,17 @@ test("--revalidate-appended checks a row against its committed plan", () => {
       JSON.parse(rekeyed.stdout).problems.join(" | "),
       /row comparability_key is "9+"; plan\.json in .* planned/,
     );
+
+    const rekeyedPlan = JSON.parse(readFileSync(planFile, "utf8"));
+    rekeyedPlan.comparability_key = committed.comparability_key;
+    writeFileSync(planFile, JSON.stringify(rekeyedPlan));
+    const jointlyRekeyed = cli(flags, { root });
+    assert.equal(jointlyRekeyed.status, 1);
+    assert.match(
+      JSON.parse(jointlyRekeyed.stdout).problems.join(" | "),
+      /current frozen inputs derive/,
+    );
+    writeRowEvidence(root, row);
 
     writeFileSync(
       ledgerPath,

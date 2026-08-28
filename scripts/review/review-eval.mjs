@@ -10,6 +10,7 @@ import { createHash } from "node:crypto";
 import {
   appendFileSync,
   existsSync,
+  lstatSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -520,6 +521,26 @@ function holdsCellResults(dir) {
   }
 }
 
+/** Reject evidence links and special files before any JSON reader follows them. */
+function nonRegularEvidenceProblems(dir) {
+  if (!existsSync(dir)) return [];
+  const problems = [];
+  for (const file of readdirSync(dir).filter(
+    (name) =>
+      name === "calibration.json" ||
+      (name.startsWith("result-") && name.endsWith(".json")),
+  )) {
+    try {
+      if (!lstatSync(path.join(dir, file)).isFile()) {
+        problems.push(`${dir}/${file} must be a regular evidence file`);
+      }
+    } catch {
+      problems.push(`${dir}/${file} cannot be inspected as an evidence file`);
+    }
+  }
+  return problems;
+}
+
 /**
  * The row's provenance, checked against the plan that produced it.
  *
@@ -543,6 +564,7 @@ export function planProvenanceProblems({
   row,
   contract,
   baselineRow = null,
+  expectedComparabilityKey = null,
 }) {
   const file = path.join(dir, "plan.json");
   if (!existsSync(file)) {
@@ -604,6 +626,14 @@ export function planProvenanceProblems({
         `row ${field} is ${JSON.stringify(row[field])}; plan.json in ${row.detail_dir} planned ${JSON.stringify(plan[field])}`,
       );
     }
+  }
+  if (
+    expectedComparabilityKey !== null &&
+    plan.comparability_key !== expectedComparabilityKey
+  ) {
+    problems.push(
+      `plan.json in ${row.detail_dir} carries comparability_key ${JSON.stringify(plan.comparability_key)}; current frozen inputs derive ${expectedComparabilityKey}`,
+    );
   }
   // The inputs are the skill, argv, orchestrator and CLI provenance the scorer
   // copies out of the plan verbatim, so any difference is an edit.
@@ -709,6 +739,8 @@ export function planProvenanceProblems({
 /** Preserve a scorer's hard leak flag on every row that reuses its results. */
 function resultLeakProblems({ dir, row }) {
   if (row.status === "failed" || !existsSync(dir)) return [];
+  const regularityProblems = nonRegularEvidenceProblems(dir);
+  if (regularityProblems.length > 0) return regularityProblems;
   const problems = [];
   let resultRecordsLeak = false;
   for (const resultFile of readdirSync(dir).filter(
@@ -742,6 +774,8 @@ function resultLeakProblems({ dir, row }) {
 /** Evidence files required for every row that claims scored results. */
 function runEvidenceProblems({ dir, row, contract }) {
   if (row.status === "failed") return [];
+  const regularityProblems = nonRegularEvidenceProblems(dir);
+  if (regularityProblems.length > 0) return regularityProblems;
   const problems = resultLeakProblems({ dir, row });
   // A bridge intentionally reuses the source full run's plan and scored
   // records. It owes no new evidence, but it must retain any leak flag those
@@ -814,15 +848,107 @@ function runEvidenceProblems({ dir, row, contract }) {
               }
             }
           }
-          if (!Array.isArray(record?.claims)) {
+          const claims = record?.claims;
+          if (!Array.isArray(claims)) {
             problems.push(`${dir}/${resultFile} claims must be an array`);
+          } else {
+            for (const claim of claims) {
+              if (typeof claim !== "string" || claim.trim().length === 0) {
+                problems.push(
+                  `${dir}/${resultFile} claims must contain only non-empty strings`,
+                );
+                break;
+              }
+            }
           }
-          for (const field of ["novelWrong", "novelReal"]) {
+          for (const field of [
+            "claims",
+            "novelWrong",
+            "novelReal",
+            "novelVague",
+            "restatedKnown",
+            "alreadyMatched",
+          ]) {
             const value = Number(record?.novel?.[field]);
             if (!Number.isSafeInteger(value) || value < 0) {
               problems.push(
                 `${dir}/${resultFile} novel.${field} must be a nonnegative safe integer`,
               );
+            }
+          }
+          if (
+            Array.isArray(claims) &&
+            record?.novel?.claims !== claims.length
+          ) {
+            problems.push(
+              `${dir}/${resultFile} novel.claims must equal the claims array length`,
+            );
+          }
+          if (
+            Array.isArray(record?.matched_ids) &&
+            record?.novel?.alreadyMatched !== record.matched_ids.length
+          ) {
+            problems.push(
+              `${dir}/${resultFile} novel.alreadyMatched must equal the matched_ids array length`,
+            );
+          }
+          const verdicts = record?.novel?.verdicts;
+          if (
+            verdicts === null ||
+            typeof verdicts !== "object" ||
+            Array.isArray(verdicts)
+          ) {
+            problems.push(
+              `${dir}/${resultFile} novel.verdicts must be an object`,
+            );
+          } else if (Array.isArray(claims)) {
+            const expectedKeys = claims.map((_claim, index) =>
+              String(index + 1),
+            );
+            const actualKeys = Object.keys(verdicts).sort(
+              (left, right) => Number(left) - Number(right),
+            );
+            if (JSON.stringify(actualKeys) !== JSON.stringify(expectedKeys)) {
+              problems.push(
+                `${dir}/${resultFile} novel.verdicts must carry one numbered verdict per claim`,
+              );
+            }
+            const counts = {
+              real: 0,
+              wrong: 0,
+              vague: 0,
+              known: 0,
+            };
+            let validVerdicts = true;
+            for (const verdict of Object.values(verdicts)) {
+              if (
+                verdict === null ||
+                typeof verdict !== "object" ||
+                Array.isArray(verdict) ||
+                !Object.hasOwn(counts, verdict.class)
+              ) {
+                validVerdicts = false;
+                break;
+              }
+              counts[verdict.class] += 1;
+            }
+            if (!validVerdicts) {
+              problems.push(
+                `${dir}/${resultFile} novel.verdicts carries an invalid class`,
+              );
+            } else {
+              for (const [field, count] of [
+                ["novelReal", counts.real],
+                ["novelWrong", counts.wrong],
+                ["novelVague", counts.vague],
+                ["restatedKnown", counts.known],
+              ]) {
+                if (record?.novel?.[field] !== count) {
+                  problems.push(
+                    `${dir}/${resultFile} novel.${field} does not match novel.verdicts`,
+                  );
+                }
+              }
             }
           }
           for (const field of ["usd", "seconds"]) {
@@ -933,6 +1059,7 @@ function canonicalJson(value) {
 /** Digest one run's exact canonical scored evidence, independent of layout. */
 function runEvidenceDigest(dir) {
   if (!existsSync(dir)) return null;
+  if (nonRegularEvidenceProblems(dir).length > 0) return null;
   const files = readdirSync(dir)
     .filter(
       (name) =>
@@ -994,6 +1121,11 @@ function revalidateAppendedRows({ options, context, result, base }) {
   const calibrationSet = existsSync(calibrationFile)
     ? readJson(calibrationFile)
     : null;
+  const expectedComparabilityKey = comparabilityKey({
+    contract: context.contract,
+    contractDigest: context.contractDigest,
+    calibrationDigest: fileDigest(calibrationFile),
+  });
   const repoRoot = realpathSync(context.repoRoot);
   const detailDirectoryIdentity = (detailDir, label) => {
     const resolved = path.resolve(repoRoot, detailDir);
@@ -1015,10 +1147,15 @@ function revalidateAppendedRows({ options, context, result, base }) {
       problems.push(`${label} names detail_dir ${detailDir} outside the repo`);
       return null;
     }
+    if (canonical === repoRoot) {
+      problems.push(`${label} names the repository root as detail_dir`);
+      return null;
+    }
     return canonical;
   };
   const usedDetailDirs = new Set();
   const usedEvidence = new Map();
+  const baseDetailPaths = new Map();
   for (const row of base.rows ?? []) {
     if (typeof row.detail_dir !== "string") continue;
     const identity = detailDirectoryIdentity(
@@ -1027,10 +1164,55 @@ function revalidateAppendedRows({ options, context, result, base }) {
     );
     if (identity !== null) {
       usedDetailDirs.add(identity);
+      baseDetailPaths.set(
+        path
+          .relative(repoRoot, path.resolve(repoRoot, row.detail_dir))
+          .split(path.sep)
+          .join("/"),
+        row.executed_at,
+      );
+      baseDetailPaths.set(
+        path.relative(repoRoot, identity).split(path.sep).join("/"),
+        row.executed_at,
+      );
+      problems.push(
+        ...nonRegularEvidenceProblems(identity).map(
+          (problem) => `base row ${row.executed_at}: ${problem}`,
+        ),
+      );
       if (row.kind !== "bridge" && row.status !== "failed") {
         const digest = runEvidenceDigest(identity);
         if (digest !== null) {
           usedEvidence.set(digest, `base row ${row.executed_at}`);
+        }
+      }
+    }
+  }
+  if (base.rows && base.base) {
+    const changed = spawnSync(
+      "git",
+      ["diff", "--name-only", "-z", "--no-renames", base.base, "--"],
+      { cwd: repoRoot },
+    );
+    if (changed.status !== 0) {
+      problems.push(
+        `could not compare base evidence directories with ${base.base}`,
+      );
+    } else {
+      for (const changedPath of String(changed.stdout)
+        .split("\0")
+        .filter(Boolean)) {
+        for (const [detailPath, executedAt] of baseDetailPaths) {
+          if (
+            changedPath === detailPath ||
+            changedPath.startsWith(`${detailPath}/`) ||
+            detailPath.startsWith(`${changedPath}/`)
+          ) {
+            problems.push(
+              `base row ${executedAt} evidence changed at ${changedPath}`,
+            );
+            break;
+          }
         }
       }
     }
@@ -1057,6 +1239,11 @@ function revalidateAppendedRows({ options, context, result, base }) {
       );
       continue;
     }
+    problems.push(
+      ...nonRegularEvidenceProblems(dir).map(
+        (problem) => `${label}: ${problem}`,
+      ),
+    );
     if (row.kind !== "bridge" && row.status !== "failed") {
       const digest = runEvidenceDigest(dir);
       const previous = digest === null ? null : usedEvidence.get(digest);
@@ -1154,6 +1341,7 @@ function revalidateAppendedRows({ options, context, result, base }) {
         row,
         contract: context.contract,
         baselineRow,
+        expectedComparabilityKey,
       }).map((problem) => `${label}: ${problem}`),
     );
     problems.push(
