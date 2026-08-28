@@ -8034,9 +8034,49 @@ printf '%s\n' \
   'AUTOREVIEW_TEST_PROGRESS family=adapter elapsed=2s'
 : > "${AUTOREVIEW_PROGRESS_MARKER:?}"
 echo 'successful autoreview noise that should stay quiet'
-# Keep this command active while the parallel parent settles its two fast
-# siblings, so the next synthetic heartbeat can relay the published progress.
-/bin/sleep 6
+# Stay in flight until the gate has actually relayed the published progress,
+# then finish. The parent reaches that heartbeat only after settling this
+# command's siblings, and each settlement walks the process table, so its cost
+# is a property of the machine rather than a constant: the fixed six-second
+# sleep this replaces held on Linux and expired mid-settlement on macOS,
+# leaving nothing in flight to relay (issue 2108).
+#
+# Poll for the relayed record itself, not the heartbeat's display text, so
+# rewording that banner cannot stall this stub. Matching the record is sound
+# because the relay is the only writer that can put this line into the gate's
+# stdout while this command is still running: mapped output is captured to a
+# private per-command file, a successful command contributes only its
+# AUTOREVIEW_TEST_TIMING records, and a failed command's output is dumped to
+# stderr after it exits. latest_autoreview_test_progress prints the matched
+# line verbatim, so the relayed form is exactly this string. The assertions
+# below already rely on that same routing, so this adds no new assumption.
+#
+# /bin/date and /bin/sleep, never the bare names: this fixture shadows date on
+# PATH to drive the gate's fake clock, and a bare call here would advance the
+# gate's counter. Measured on the clock rather than by counting sleeps, for the
+# same reason as the interrupt fixture below — each pass also forks grep, so a
+# loop count names a bound it never actually waits. Expiring fails loudly, so
+# the report names this timeout instead of the downstream assertion it would
+# otherwise surface as.
+heartbeat_seen=0
+progress_wait_deadline_seconds=120
+progress_wait_started_at="$(/bin/date +%s)"
+while :; do
+  if grep -Fq 'AUTOREVIEW_TEST_PROGRESS family=adapter elapsed=2s' \
+    "${AUTOREVIEW_PROGRESS_OUTPUT:?}"; then
+    heartbeat_seen=1
+    break
+  fi
+  if [[ $(($(/bin/date +%s) - progress_wait_started_at)) -ge \
+    "$progress_wait_deadline_seconds" ]]; then
+    break
+  fi
+  /bin/sleep 0.1
+done
+if [[ "$heartbeat_seen" -ne 1 ]]; then
+  echo "autoreview progress relay did not run within ${progress_wait_deadline_seconds}s" >&2
+  exit 1
+fi
 printf '%s\n' \
   'AUTOREVIEW_TEST_TIMING family=target-selection status=ok elapsed=3s' \
   'AUTOREVIEW_TEST_TIMING family=adapter status=ok elapsed=4s'
@@ -8083,7 +8123,12 @@ STUB
   git commit -qm init
   printf 'scripts/agent-autoreview.test.sh\n' > changed-paths.txt
   rm -f "$autoreview_progress_marker"
+  # The mapped command reads this run's stdout while the gate writes it. That
+  # is the handshake, not an accident: one writer, one reader that only ever
+  # greps to EOF, so SC2094's clobber case cannot arise here.
+  # shellcheck disable=SC2094
   AUTOREVIEW_PROGRESS_MARKER="$autoreview_progress_marker" \
+    AUTOREVIEW_PROGRESS_OUTPUT="$output_file" \
     DATE_COUNTER_FILE="$autoreview_progress_repo/date-counter" \
     PATH="$autoreview_progress_repo/bin:$PATH" \
     "$repo_root/scripts/agent-quality-gate.sh" \
@@ -8111,7 +8156,10 @@ for sequential_mode in parallel-one fail-fast; do
     # autoreview test on later runs, so drop the stamps to force re-execution.
     rm -f "$autoreview_progress_repo/.tmp/agent-quality-gate/command-stamps.tsv"
     rm -f "$autoreview_progress_marker"
+    # Same deliberate read-while-write handshake as the parallel case above.
+    # shellcheck disable=SC2094
     AUTOREVIEW_PROGRESS_MARKER="$autoreview_progress_marker" \
+      AUTOREVIEW_PROGRESS_OUTPUT="$output_file" \
       DATE_COUNTER_FILE="$autoreview_progress_repo/date-counter" \
       PATH="$autoreview_progress_repo/bin:$PATH" \
       "$repo_root/scripts/agent-quality-gate.sh" \
@@ -12129,6 +12177,40 @@ STUB
     local attempt
     local interrupt_exit
     local next_gate_exit
+    local settle_started_at=""
+    # Both waits below are sized from the gate's own drain contract rather than
+    # from how fast this machine happens to settle, so the fixture and the gate
+    # cannot drift apart.
+    #
+    # Teardown drains every registered worker group serially before it re-raises
+    # the deferred signal, and each of those drains may legitimately run for
+    # AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS before the gate gives up and
+    # fails closed. Read that same variable, with the same default the gate's
+    # gate_lock_seconds_knob call applies, instead of restating the window here.
+    #
+    # The parent registers at most one worker group per parallel slot, and its
+    # own timeout drain identity stays empty for the whole pool because
+    # run_with_timeout runs inside the workers rather than the parent, so the
+    # pool's parallelism is the number of drains teardown can queue.
+    local interrupt_parallelism=2
+    local orphan_drain_seconds="${AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS:-120}"
+    # The drain window bounds the drains only. This covers what follows them:
+    # the TERM-then-KILL grace, the process-tree walk, and the lock release.
+    local interrupt_settlement_margin_seconds=60
+    # A whole-gate deadline guessed from observed settlement is what expired on
+    # permitted behaviour in Linux CI. This is the permitted worst case plus
+    # room to settle; a gate that never terminates still fails here, and the
+    # deadline only decides how long that takes to report.
+    local settle_deadline_seconds=$((
+      interrupt_parallelism * orphan_drain_seconds +
+        interrupt_settlement_margin_seconds
+    ))
+    # The unobstructed follow-up run is a whole gate rather than a teardown, but
+    # it settles each mapped command it completes through the same per-drain
+    # window, so it takes the same derived budget rather than a second guessed
+    # constant. It measured 35-36s here; the budget only decides how long a run
+    # genuinely blocked by the interrupted one's leftovers takes to report.
+    local followup_deadline_seconds="$settle_deadline_seconds"
 
     # Invoked indirectly by the EXIT trap below.
     # shellcheck disable=SC2329
@@ -12167,7 +12249,7 @@ STUB
           --changed-paths-file changed-paths.txt \
           --base HEAD \
           --run \
-          --parallel 2 \
+          --parallel "$interrupt_parallelism" \
           > "$gate_output" 2>&1 &
     gate_pid=$!
 
@@ -12219,16 +12301,29 @@ STUB
       kill -CONT "$gate_pid"
     fi
 
-    for ((attempt = 0; attempt < 600; attempt++)); do
+    # Measure the wait on the clock rather than by counting sleeps. Every pass
+    # forks `jobs | grep`, so the 600 iterations this replaces drifted to ~36s
+    # of wall clock and reported a 30s bound they never used. The gate's own
+    # drain already makes this correction for the same reason; see "Clock, not
+    # the sum of requested sleeps" in agent-quality-gate.sh.
+    #
+    # A swallowed interrupt still fails here: the gate would keep running its
+    # mapped commands, and the trunk fixture's worker never exits on its own, so
+    # no amount of waiting produces the exit this asserts. The deadline only
+    # decides how long that failure takes to report (issue 2108).
+    settle_started_at="$(date +%s)"
+    while :; do
       if ! jobs -pr | grep -Fxq "$gate_pid"; then
         settled=1
         break
       fi
+      [[ $(($(date +%s) - settle_started_at)) -lt "$settle_deadline_seconds" ]] ||
+        break
       sleep 0.05
     done
     [[ "$settled" -eq 1 ]] ||
       fail_parallel_interrupt_fixture \
-        "parallel $phase interrupt did not terminate the gate within 30s"
+        "parallel $phase interrupt did not terminate the gate within ${settle_deadline_seconds}s"
 
     set +e
     wait "$gate_pid"
@@ -12264,20 +12359,30 @@ STUB
         --changed-paths-file changed-paths.txt \
         --base HEAD \
         --run \
-        --parallel 2 \
+        --parallel "$interrupt_parallelism" \
         > "$next_gate_output" 2>&1 &
     next_gate_pid=$!
     settled=0
-    for ((attempt = 0; attempt < 400; attempt++)); do
+    # On the clock, for the same reason as the settle wait above: the 400
+    # iterations this replaces read as 20s and expired after ~24s, because each
+    # pass also forks `jobs | grep`. The budget itself comes from the drain
+    # contract where it is declared, not from this machine's timings — an
+    # unobstructed run still settles every mapped command through the same
+    # process-table walk, and only a run genuinely blocked by the interrupted
+    # one's leftovers fails to finish at all (issue 2108).
+    settle_started_at="$(date +%s)"
+    while :; do
       if ! jobs -pr | grep -Fxq "$next_gate_pid"; then
         settled=1
         break
       fi
+      [[ $(($(date +%s) - settle_started_at)) -lt "$followup_deadline_seconds" ]] ||
+        break
       sleep 0.05
     done
     [[ "$settled" -eq 1 ]] ||
       fail_parallel_interrupt_fixture \
-        "gate after parallel $phase interrupt did not finish cleanly within 20s"
+        "gate after parallel $phase interrupt did not finish cleanly within ${followup_deadline_seconds}s"
     set +e
     wait "$next_gate_pid"
     next_gate_exit=$?
