@@ -20,7 +20,12 @@ larger batch — and reads the report afterwards. Default batch size is 2.
 
 The session that runs this skill is an **orchestrator**. It ranks, picks,
 claims, and hands each issue to a dedicated worker subagent. It runs no gate,
-edits no source file, and merges nothing.
+edits no source file, and merges nothing. Those three prohibitions keep
+concurrent workers out of each other's trees, so they bind only while separate
+workers exist: on a runtime with no way to spawn one, the session works the
+batch sequentially and takes both roles itself, one issue at a time. Nothing
+else changes — the isolated checkout, the boundaries, and the report contract
+all still hold.
 
 The loop, the boundaries, the report contract, and the resilience duties are
 canonical in
@@ -654,9 +659,10 @@ reservation leaves an empty file in place, so a plain `>` under `noclobber`
 refuses it — and a sweep that reserved a name and then silently failed to write
 its report would lose the whole night's record.
 
-Six parts. The receipt line and the refused claims are the orchestrator's own —
-a refused claim never got a worker, so no report-back can carry it. The rest is
-assembled from the workers' closing messages.
+Six parts. Every fact is recorded by whoever performed the action: the
+orchestrator for the receipt, for the refused claims, and for anything it did
+itself — releasing a claim it could not staff, say; the worker's closing message
+for everything that happened inside its own turn.
 
 **Every claimed issue gets a row, reported back or not.** A worker can end
 without its closing message and without answering the request for one. That

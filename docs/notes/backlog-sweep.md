@@ -78,7 +78,10 @@ place a human still reads the batch.
 ## Roles
 
 **The orchestrator** is the session the operator invoked. It runs no quality
-gate, edits no source file, and opens no PR. Its work is selection, claiming,
+gate, edits no source file, and opens no PR — prohibitions that keep concurrent
+workers out of each other's trees, and so bind only while separate workers
+exist. A runtime that cannot spawn one works the batch sequentially, taking both
+roles, one issue at a time. Its work is selection, claiming,
 and keeping workers alive.
 
 **A worker** is one subagent per issue, with one checkout, one branch, and one
@@ -320,10 +323,10 @@ A checkout conflict line names the taken path and the fresh one: the taken path
 is never inspected or deleted, so the line is the only record that something is
 sitting there. The same summary is printed to the terminal.
 
-The receipt line and the refused claims are the orchestrator's own — a refused
-claim never got a worker, so nothing can report it back. Every other fact
-reaches the report through a worker's closing message, and the orchestrator
-observes none of those directly. A worker that ends without reporting back, and
+Every fact is recorded by whoever performed the action: the orchestrator for the
+receipt, the refused claims, and anything it did itself — releasing a claim it
+could not staff, for one; a worker's closing message for everything inside its
+own turn, which the orchestrator does not observe directly. A worker that ends without reporting back, and
 without answering the request for one, still gets its row: written from the
 issue, branch, and any PR the orchestrator can see, marked as not reported, and
 listed under the operator's decisions. A missing row would read as an issue

@@ -155,9 +155,11 @@ operator-triggered batch on top of that ranking: it picks the eligible top N
 from a receipt, claims each issue by number, and hands each to its own worker
 that ships a ready-for-review PR. Which surface runs those workers is the
 runtime's to decide — Codex uses whatever parallel-execution surface it
-provides, and runs the picks one after another when it has none. The isolated
-checkout per worker, the orchestrator duties, and the report contract hold
-either way. It never merges — it stops at READY and prints the operator's
+provides. With none, the session works the batch sequentially and takes both
+roles itself: the orchestrator's no-edit, no-gate, no-ship prohibitions exist to
+keep concurrent workers out of each other's trees, so they do not bind when
+there is exactly one actor. The isolated checkout per issue, the duties, and the
+report contract hold either way. It never merges — it stops at READY and prints the operator's
 `pnpm pr:merge` commands. The loop, eligibility rules, boundaries, and report
 contract live in [`backlog-sweep.md`](backlog-sweep.md).
 
