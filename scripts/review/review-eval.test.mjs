@@ -1918,7 +1918,7 @@ test("resolveBaseline refuses a row whose judge calibration failed", () => {
   // judge that failed its own replay produced must not become the record.
   const drifted = {
     ...makeRow({ executedAt: "2026-09-08T10:00:00Z" }),
-    judge_calibration: { agreement: 37, total: 40 },
+    judge_calibration: { agreement: 33, total: 40 },
   };
   const row = makeRow({ executedAt: "2026-12-08T10:00:00Z" });
   assert.equal(resolveBaseline({ rows: [drifted], row }), null);

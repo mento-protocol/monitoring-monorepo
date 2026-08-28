@@ -705,7 +705,9 @@
    "source_cell": {
     "pr": 1999,
     "condition": "control",
-    "candidate_index": 0
+    "candidate_index": 0,
+    "draw": 1,
+    "result_file": "result-1999-control-1.json"
    },
    "defect_id": 3830366234,
    "expected_verdict": "matched",
@@ -725,7 +727,9 @@
    "source_cell": {
     "pr": 1999,
     "condition": "pipeline",
-    "candidate_index": 4
+    "candidate_index": 4,
+    "draw": 2,
+    "result_file": "result-1999-pipeline-2.json"
    },
    "defect_id": 3830366247,
    "expected_verdict": "matched",
@@ -745,7 +749,9 @@
    "source_cell": {
     "pr": 1999,
     "condition": "replay",
-    "candidate_index": 3
+    "candidate_index": 3,
+    "draw": 2,
+    "result_file": "result-1999-replay-2.json"
    },
    "defect_id": 3830416461,
    "expected_verdict": "matched",
@@ -765,7 +771,9 @@
    "source_cell": {
     "pr": 1984,
     "condition": "pipeline",
-    "candidate_index": 1
+    "candidate_index": 1,
+    "draw": 1,
+    "result_file": "result-1984-pipeline-1.json"
    },
    "defect_id": 3828328194,
    "expected_verdict": "matched",
@@ -785,7 +793,9 @@
    "source_cell": {
     "pr": 1999,
     "condition": "replay",
-    "candidate_index": 5
+    "candidate_index": 5,
+    "draw": 1,
+    "result_file": "result-1999-replay-1.json"
    },
    "defect_id": 3830366547,
    "expected_verdict": "matched",
@@ -805,7 +815,9 @@
    "source_cell": {
     "pr": 1999,
     "condition": "pipeline",
-    "candidate_index": 1
+    "candidate_index": 1,
+    "draw": 1,
+    "result_file": "result-1999-pipeline-1.json"
    },
    "defect_id": 3830366556,
    "expected_verdict": "matched",
@@ -820,5 +832,18 @@
    },
    "frozen_reasoning": "Audited 2026-08-28: the claim says the Error \u2192 Pending row is neither fetched by errorStateHistoryUrl nor classified by transitionKind, so the error cycle opened at Normal \u2192 Error never closes and flushes as a permanently unresolved 'Monitoring failed' event. That is the same orphaned-error-cycle defect the truth body states for rules with a non-zero for duration recovering through Pending."
   }
- ]
+ ],
+ "measured_blind_baseline": {
+  "model": "claude-fable-5",
+  "effort": "max",
+  "measured_at": "2026-08-28",
+  "agreement": 37,
+  "total": 40,
+  "misses": [
+   "pr1982-3827655676-unmatched",
+   "pr1982-3827655684-unmatched",
+   "pr1995-3830695396-unmatched"
+  ],
+  "note": "Blind excerpt-only replay of the contract judge against the audited labels; the three misses are the same-file trap pairs recorded in provenance as a systematic blind over-matching bias. The verdict floor is anchored at this baseline minus 2."
+ }
 }

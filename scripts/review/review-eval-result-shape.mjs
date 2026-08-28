@@ -352,7 +352,7 @@ function recomputeScoringUsd(dir) {
  * Re-derive `judge_calibration` from the outcomes the scoring pass wrote.
  *
  * `judge_calibration` gates every other number on the row: `verdict()` caps a
- * run below 38/40 at AMBER, `resolveBaseline` refuses to anchor on it, and the
+ * run below the 35/40 floor at AMBER, `resolveBaseline` refuses to anchor on it, and the
  * freshness clock refuses to count it as a full run. Taken from the row itself
  * it was the one gate an edit could lift by retyping two integers, so it is
  * recomputed here from `calibration.json` exactly as the bits are recomputed

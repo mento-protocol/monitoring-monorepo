@@ -272,7 +272,7 @@ on the next wake while cron drops it. `--kind auto` reads the ledger and picks
 | verdict        | it means                                                                                                                                                                                                                      | do this                                                                   |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | **GREEN**      | nothing below fired                                                                                                                                                                                                           | merge the ledger PR                                                       |
-| **AMBER**      | recall below baseline but McNemar not significant; or fewer than three paired defects, which never ranks; or the run did not complete; or judge calibration under 38/40; or a leak signal; or `control` moved with `pipeline` | merge the row, do not rank on it, read the reason                         |
+| **AMBER**      | recall below baseline but McNemar not significant; or fewer than three paired defects, which never ranks; or the run did not complete; or judge calibration under 35/40; or a leak signal; or `control` moved with `pipeline` | merge the row, do not rank on it, read the reason                         |
 | **RED**        | `b − c ≥ 6` net flips; or pooled P1 recall under 0.60 where P1 was measured; or wrong claims at twice the baseline rate, the baseline floored at one; or a condition found nothing on two or more PRs                         | open a priority issue naming the flipped defects before changing anything |
 | **PROMOTE**    | `c − b ≥ 6` and the change was intentional                                                                                                                                                                                    | re-anchor the baseline in a PR that says what changed and why             |
 | **INCOMPLETE** | the run failed, or a canary did not finish                                                                                                                                                                                    | fix the harness and re-run; the row stays as a trace                      |
@@ -380,7 +380,7 @@ older one is refused; pass `--contract` with the archived contract to read it.
 
 **Judge calibration runs before every scoring pass.** Forty frozen
 `(claim, defect, verdict)` pairs replay through the current judge. Agreement
-under 38/40 marks the run AMBER, excludes the row from baseline comparison, and
+under 35/40 marks the run AMBER (floor = the contract judge's measured 37/40 blind baseline on the audited set minus a two-pair drift margin; re-anchor on any judge or set change), excludes the row from baseline comparison, and
 keeps it off the full-run freshness clock. It costs about $2 and it is the only
 mechanism that separates "the review skill regressed" from "the judge alias now
 points at different weights and the scorer got stricter". It fired on the very
