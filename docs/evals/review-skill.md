@@ -387,11 +387,15 @@ points at different weights and the scorer got stricter". It fired on the very
 first baseline run (2026-08-28): the original labels — the frozen 2026-08
 judge's own decisions — scored 29/40 against two independent modern judges,
 which agreed with each other on 36/40. The set was re-audited against the modern
-consensus, one consensus flip was declined on full context, and four degraded
-records were replaced with fresh matched pairs so the set still clears the
-balance guard at 18 matched / 22 unmatched (provenance in the calibration file).
-The contract judge is now `claude-fable-5` at max effort, the judge whose
-full-context adjudication settled the contested labels.
+consensus, which held for all six matched -> unmatched flips. All three
+unmatched -> matched flips it proposed were declined on full context: each cited
+the same file while describing a different problem, so both blind modern judges
+share an over-matching bias on file overlap and that direction has to be
+adjudicated, not trusted. Six records were then replaced with fresh matched
+pairs so the set still clears the balance guard at 18 matched / 22 unmatched
+(provenance in the calibration file). The contract judge is now
+`claude-fable-5` at max effort, the judge whose full-context adjudication
+settled the contested labels.
 
 The forty outcomes are written to `calibration.json` in the run's detail
 directory. `--validate` re-derives `agreement` and `total` from them and checks

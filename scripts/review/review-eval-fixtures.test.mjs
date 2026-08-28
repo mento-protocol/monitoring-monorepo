@@ -950,3 +950,36 @@ test("the contract must declare a tool, a model and an effort for every role", (
     [],
   );
 });
+
+test("the contract must declare a model and an effort for the judge", () => {
+  // `runScoring` hands `contract.judge.effort` to the scoring helpers, whose
+  // parameter defaults fire on `undefined`. A contract missing it would score
+  // at the `high` default while the row claims the contract's effort, so the
+  // offline check has to refuse it for the same reason it refuses a SUT role
+  // with no effort.
+  for (const field of ["model", "effort"]) {
+    const missing = clone(committed.contract);
+    delete missing.judge[field];
+    const result = checkFixtures({ contract: missing, repoRoot });
+    assert.equal(result.ok, false, `judge.${field} was accepted`);
+    assert.ok(
+      result.problems.some((problem) =>
+        new RegExp(`judge\\.${field} must be a non-empty string`).test(problem),
+      ),
+      result.problems.join("\n"),
+    );
+    const empty = clone(committed.contract);
+    empty.judge[field] = "";
+    assert.ok(
+      checkFixtures({ contract: empty, repoRoot }).problems.some((problem) =>
+        new RegExp(`judge\\.${field} must be a non-empty string`).test(problem),
+      ),
+    );
+  }
+  assert.deepEqual(
+    checkFixtures({ contract: committed.contract, repoRoot }).problems.filter(
+      (problem) => /judge\./.test(problem),
+    ),
+    [],
+  );
+});

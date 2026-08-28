@@ -2,8 +2,8 @@
  "schema_version": 1,
  "suite_id": "review-skill-v1",
  "generated_at": "2026-08-25",
- "provenance": "Labels re-audited 2026-08-28. The original 2026-08-25 labels were the frozen 2026-08 opus judge's own decisions; two independent modern judges (claude-opus-5 current, claude-fable-5 max) each agreed with only 29/40 and with each other on 36/40, so the frozen judge was the outlier. The set now committed contains: 8 frozen labels flipped where both modern judges agreed (6 matched -> unmatched, 2 unmatched -> matched); 1 consensus flip declined on full-context adjudication (3827655676 stays unmatched \u2014 the claim is about the backfill parser rejecting a multi-paragraph handoff note while the defect is a broken code span and list indentation at the same doc lines, which judge-match.md excludes as a location-only overlap); 2 modern-contested pairs adjudicated matched (3829659550, same fails-open-on-null-head defect in the same function; 3829986403, the claim names duplicate-dispatch acceptance and the exactly-one fix); and 4 records replaced to restore balance. The 4 dropped records were the two pairs whose stored content was too degraded to judge (3830003055-matched, whose excerpt truncated out the matching partition item at set construction, and 3830371325-matched, whose stored defect detail is CodeRabbit analysis-script noise) plus the two least informative consensus-unmatched records (3830371325-unmatched, same noise detail, and 3829659546-unmatched, whose detail truncates before the requirement it states). Their four replacements are matched pairs taken from the 2026-08-28 scored run and re-confirmed on the merits here: 3830366234, 3830366247, 3830416461 and 3828328194.",
- "method": "For every bench2 run cell (runs/<pr>/<condition>/), the structural pre-filter of match_findings.py was replayed over the stored review output to rebuild the numbered candidate list. Each numbered entry in the cell's judge_reasoning maps to one candidate defect; the label is matched when that defect id appears in the cell's matched_ids, unmatched otherwise. claim_excerpt is the passage of the review that names the defect's file, taken verbatim. Cells whose reasoning keys did not cover 1..N were skipped. The sample was built balanced 20 matched / 20 unmatched; the 2026-08-28 re-audit and rebalance moved it to 18 matched / 22 unmatched, spread across 6 contract PRs and 22 run conditions (see provenance and counts for the current numbers). The four records added in the rebalance come from the 2026-08-28 scored run detail directory instead, where candidate_index indexes that cell's claims[] array.",
+ "provenance": "Labels re-audited 2026-08-28. The original 2026-08-25 labels were the frozen 2026-08 opus judge's own decisions; two independent modern judges (claude-opus-5 current, claude-fable-5 max) each agreed with only 29/40 and with each other on 36/40, so the frozen judge was the outlier. The set now committed contains: 6 frozen labels flipped where both modern judges agreed, every one of them matched -> unmatched; 3 consensus flips declined on full-context adjudication, which is every unmatched -> matched flip the modern consensus proposed \u2014 all three were same-file false positives (3827655676, a claim about the backfill parser rejecting a multi-paragraph handoff note against a defect about a broken code span and list indentation at the same doc lines; 3827655684, a claim about the missing Branch: line, which is defect 3827636772, against a defect about the trailing-blank-line rejection in isBoundedCloudHandoff; 3830695396, a claim about the AGENT_QUALITY_GATE_LOCK_HELD guard and the poisoned success stamp against a defect about 'is set' vs 'is non-empty' wording at :1157). Both blind modern judges therefore share a systematic over-matching bias on file overlap, and a future audit must adjudicate proposed unmatched -> matched flips on full context rather than trust their agreement. The set also holds 2 modern-contested pairs adjudicated matched (3829659550, same fails-open-on-null-head defect in the same function; 3829986403, the claim names duplicate-dispatch acceptance and the exactly-one fix) and 6 records replaced to restore balance. The 6 dropped records were the two pairs whose stored content was too degraded to judge (3830003055-matched, whose excerpt truncated out the matching partition item at set construction, and 3830371325-matched, whose stored defect detail is CodeRabbit analysis-script noise) plus the four least informative consensus-unmatched records (3830371325-unmatched, same noise detail; 3829659546-unmatched, whose detail truncates before the requirement it states; and 3829986398-unmatched and 3830003055-unmatched, which repeat one identical truncated hazard-table excerpt from the same cell and never name the defect's file). Their six replacements are matched pairs taken from the 2026-08-28 scored run and re-confirmed on the merits here: 3830366234, 3830366247, 3830416461, 3828328194, 3830366547 and 3830366556.",
+ "method": "For every bench2 run cell (runs/<pr>/<condition>/), the structural pre-filter of match_findings.py was replayed over the stored review output to rebuild the numbered candidate list. Each numbered entry in the cell's judge_reasoning maps to one candidate defect; the label is matched when that defect id appears in the cell's matched_ids, unmatched otherwise. claim_excerpt is the passage of the review that names the defect's file, taken verbatim. Cells whose reasoning keys did not cover 1..N were skipped. The sample was built balanced 20 matched / 20 unmatched; the 2026-08-28 re-audit and rebalance moved it to 18 matched / 22 unmatched, spread across 6 contract PRs and 22 run conditions (see provenance and counts for the current numbers). The six records added in the rebalance come from the 2026-08-28 scored run detail directory instead, where candidate_index indexes that cell's claims[] array.",
  "judge": {
   "model": "claude-fable-5",
   "effort": "max",
@@ -108,7 +108,7 @@
     "candidate_index": 3
    },
    "defect_id": 3827655684,
-   "expected_verdict": "matched",
+   "expected_verdict": "unmatched",
    "claim_excerpt": "`buildClaimComment` drops the `Branch:` line whenever the branch is falsy (`scripts/pr/issue-board-commands.mjs:74`), and `claimMetadata` deliberately produces that state (`scripts/pr/issue-board-commands.mjs:144`, `branch: branch || undefined`). The new parser requires `Branch:` and returns `null` without it (`scripts/pr/issue-board-backfill.mjs:119`), so `readSnapshot` throws `has no valid trusted agent claim comment` (`scripts/pr/issue-board-backfill.mjs:235`).",
    "defect": {
     "id": 3827655684,
@@ -118,7 +118,7 @@
     "title": "\ud83c\udfaf Functional Correctness | \ud83d\udfe1 Minor | \u26a1 Quick win",
     "detail": "_\ud83c\udfaf Functional Correctness_ | _\ud83d\udfe1 Minor_ | _\u26a1 Quick win_\n\nIgnore trailing blank lines before the handoff bound check.\n\nisBoundedCloudHandoff rejects any empty line. Line 111 skips blank lines only directly after the field block. A body that ends with a newline after handoff text keeps a final \"\" element in lines.slice(index). parseClaimComment then returns null, and readSnapshot fails with \"has no v"
    },
-   "frozen_reasoning": "The review never mentions isBoundedCloudHandoff, blank/empty lines, or trailing-newline handling in parseClaimComment; no finding touches this."
+   "frozen_reasoning": "Audited 2026-08-28: consensus flip declined on full context. Defect 3827655684 is the trailing-blank-line bug \u2014 isBoundedCloudHandoff rejects the empty final element that a body ending in a newline leaves in lines.slice(index), so a legitimate claim fails to parse. The claim instead says buildClaimComment omits the Branch: line whenever the branch is falsy while parseClaimComment requires it; that is defect 3827636772, which this set already pairs separately. Same file and the same downstream readSnapshot error, different underlying problem, which judge-match.md excludes. Stays unmatched."
   },
   {
    "record_id": "pr1982-3827663924-matched",
@@ -381,26 +381,6 @@
    "frozen_reasoning": "The review's authentication finding is scoped to the local Node classifier (core.mjs:772-784); its cloud-watch-loop.md discussion concerns only the unreachable 'reviewed' rule, not accepting closeout markers from untrusted commenters in the MCP path."
   },
   {
-   "record_id": "pr1995-3829986398-unmatched",
-   "source_cell": {
-    "pr": 1995,
-    "condition": "sweep_claude-fable-5_high",
-    "candidate_index": 1
-   },
-   "defect_id": 3829986398,
-   "expected_verdict": "unmatched",
-   "claim_excerpt": "| Hazard | Result |\n|---|---|\n| `declare`/`local` that would become function-scoped | All 30 hits are inside nested helpers or heredoc stubs \u2014 none at family level |\n| `$1`/`$@`/`shift`/`return` now seeing function args instead of script args | All hits are inside helper functions or heredoc fixtures |\n| Helper functions defined in one family, used in another | `run_lockfile_scope_gate`, `assert_hermetic_setup_routes`, `run_parallel_interrupt_regression` are each defined and used within a single family |\n| Variables read in family N but assigned only in family < N | None (scripted scan across all 11 families) |\n| `set`/`shopt`/`trap`/`cd`/`export` at family level (not in a subshell) | None |\n| ERR trap re-arming via nested `arm_suite_abort_trap` call | Verified empirically: fires inside the family on bash 5.3 and 3.2, and does **not** fire in fixture subshells / `$(\u2026)` \u2014 matches the comment's claim |\n| Partition checker actually catches violations | Injected 5 faults (stray line between families, line after end marker, registry/definition mismatch, reorder, line before start marker) \u2014 all 5 refused with a correct line number |\n| Focus dispatch | `install-wiring,gate-contract` passes in 2s; unknown family, `GITHUB_ACTIONS` set, and `\" , \"` all exit 2 with the right message |\n| `AGENT_QUALITY_GATE_LOCK_HELD` really exported by the gate | `scripts/agent-quality-gate.sh:1143` |\n| Exact success line `agent quality gate tests passed` preserved for unfocused runs | Yes (`scripts/agent-quality-gate.test.sh:649`); no external consumer greps it anyway |\n| shellcheck + trunk | Clean |",
-   "defect": {
-    "id": 3829986398,
-    "severity": "P2",
-    "path": "scripts/agent-quality-gate.test.sh",
-    "line": 28,
-    "title": "\ud83e\ude7a Stability & Availability | \ud83d\udfe1 Minor | \u26a1 Quick win",
-    "detail": "_\ud83e\ude7a Stability & Availability_ | _\ud83d\udfe1 Minor_ | _\u26a1 Quick win_\n\nKeep the abort trap safe before output_file exists.\n\nWith the required set -u, a failure at Line 26 expands unset output_file in this trap. The handler then emits an unbound-variable error instead of its intended diagnostic. Use a default value such as ${output_file:-/dev/null}, or initialize output_file before arming the trap.\n\n\n\ud83e\udd16 Prompt f"
-   },
-   "frozen_reasoning": "No mention of the abort trap / output_file being unset under set -u."
-  },
-  {
    "record_id": "pr1995-3829986403-matched",
    "source_cell": {
     "pr": 1995,
@@ -439,26 +419,6 @@
     "detail": "_\ud83c\udfaf Functional Correctness_ | _\ud83d\udfe1 Minor_ | _\u26a1 Quick win_\n\nRequire exactly one dispatch call.\n\nThe validator accepts every dispatch_gate_test_families line after the end marker. A second call passes validation and runs every selected family twice. Count dispatch calls and fail unless the count is one.\n\n\nProposed fix\n\ndiff\n-        if ($0 == \"dispatch_gate_test_families\") { next }\n+        if ($0 == \""
    },
    "frozen_reasoning": "Review asserts the partition checker rejects 'second statement after dispatch' and treats dispatch validation as correct; it never flags that multiple dispatch calls pass and would double-run families."
-  },
-  {
-   "record_id": "pr1995-3830003055-unmatched",
-   "source_cell": {
-    "pr": 1995,
-    "condition": "sweep_claude-fable-5_high",
-    "candidate_index": 3
-   },
-   "defect_id": 3830003055,
-   "expected_verdict": "unmatched",
-   "claim_excerpt": "| Hazard | Result |\n|---|---|\n| `declare`/`local` that would become function-scoped | All 30 hits are inside nested helpers or heredoc stubs \u2014 none at family level |\n| `$1`/`$@`/`shift`/`return` now seeing function args instead of script args | All hits are inside helper functions or heredoc fixtures |\n| Helper functions defined in one family, used in another | `run_lockfile_scope_gate`, `assert_hermetic_setup_routes`, `run_parallel_interrupt_regression` are each defined and used within a single family |\n| Variables read in family N but assigned only in family < N | None (scripted scan across all 11 families) |\n| `set`/`shopt`/`trap`/`cd`/`export` at family level (not in a subshell) | None |\n| ERR trap re-arming via nested `arm_suite_abort_trap` call | Verified empirically: fires inside the family on bash 5.3 and 3.2, and does **not** fire in fixture subshells / `$(\u2026)` \u2014 matches the comment's claim |\n| Partition checker actually catches violations | Injected 5 faults (stray line between families, line after end marker, registry/definition mismatch, reorder, line before start marker) \u2014 all 5 refused with a correct line number |\n| Focus dispatch | `install-wiring,gate-contract` passes in 2s; unknown family, `GITHUB_ACTIONS` set, and `\" , \"` all exit 2 with the right message |\n| `AGENT_QUALITY_GATE_LOCK_HELD` really exported by the gate | `scripts/agent-quality-gate.sh:1143` |\n| Exact success line `agent quality gate tests passed` preserved for unfocused runs | Yes (`scripts/agent-quality-gate.test.sh:649`); no external consumer greps it anyway |\n| shellcheck + trunk | Clean |",
-   "defect": {
-    "id": 3830003055,
-    "severity": "P2",
-    "path": "scripts/agent-quality-gate.test.sh",
-    "line": 572,
-    "title": "Partition allows missing dispatch",
-    "detail": "### Partition allows missing dispatch\n\nMedium Severity\n\n\nverify_gate_family_partition treats any number of dispatch_gate_test_families lines after the end marker as fine, including zero. Deleting that call still passes the structural check, defines every family, then exits 0 without running tests or printing success. That quietly greens the mapped self-test the partition was meant to protect."
-   },
-   "frozen_reasoning": "No mention that zero dispatch calls would pass the structural check and silently skip the suite."
   },
   {
    "record_id": "pr1995-3830042123-matched",
@@ -528,7 +488,7 @@
     "candidate_index": 6
    },
    "defect_id": 3830695396,
-   "expected_verdict": "matched",
+   "expected_verdict": "unmatched",
    "claim_excerpt": "- **The fix already exists in the gate.** `AGENTQG_RUN` is exported into every mapped command by `run_with_timeout` (`agent-quality-gate.sh:5085`), the single execution path for both the serial (`:5356`) and parallel (`:5403`) branches, and it is set for no-lock runs too (`agentqg:nolock-$$`, `:620-622`). Guard on `AGENTQG_RUN` instead of `AGENT_QUALITY_GATE_LOCK_HELD`; no new marker needed. Note the lock family clears `AGENT_QUALITY_GATE_LOCK_HELD` deliberately in `run_locked_gate` (`:5966-5967`) \u2014 it does not clear `AGENTQG_RUN`, so check whether those nested fixture runs need the same treatment for the new variable.\n- **The shrunken run poisons the next push.** A green `--run` writes the whole-run success stamp unconditionally of lock mode (`agent-quality-gate.sh:5868-5877`); the pre-push hook is `--run --parallel 3 --skip-if-fresh --base origin/main` (`.trunk/trunk.yaml:136`) and exits on that stamp (`:4843-4848`). And `--no-lock` is exactly what the gate's own lock-timeout message tells a developer to use (`:1811`). So the escape-hatch path is the likely one, and its result is cached into the push that follows. (Per-command stamps are not a vector \u2014 the self-test is stamp-exempt, `:5224`.)\n- Same false claim in prose: `docs/notes/agent-quality-gate-mechanics.md:1143-1146` says the focus is refused when `AGENT_QUALITY_GATE_LOCK_HELD` is set, \"any command a real gate run spawns\". Fix with the code.",
    "defect": {
     "id": 3830695396,
@@ -538,7 +498,7 @@
     "title": "\ud83d\udcd0 Maintainability & Code Quality | \ud83d\udfe1 Minor | \u26a1 Quick win",
     "detail": "_\ud83d\udcd0 Maintainability & Code Quality_ | _\ud83d\udfe1 Minor_ | _\u26a1 Quick win_\n\nMake the guard and failure wording precise.\n\nThe shell code rejects non-empty marker values, but this text says \u201cis set.\u201d Change it to \u201cis non-empty,\u201d or change the code to test variable presence. Replace \u201cIt reds the suite\u201d with \u201cIt fails the suite.\u201d\n\n\n\n\nAs per coding guidelines, \u201cPrefer the short word. Cut every word that does no wo"
    },
-   "frozen_reasoning": "Review cites docs:1143-1146 only for the substantive false claim about the lock guard, not the 'is set' vs 'is non-empty' wording or 'reds the suite' phrasing at :1157."
+   "frozen_reasoning": "Audited 2026-08-28: consensus flip declined on full context. Defect 3830695396 is a wording fix at agent-quality-gate-mechanics.md:1157 \u2014 say the guard rejects a non-empty value rather than that the variable 'is set', and 'It fails the suite' rather than 'It reds the suite'. The claim is a substantive gate bug: the focus guard tests AGENT_QUALITY_GATE_LOCK_HELD, which a --no-lock run never sets, and the resulting green --run writes the whole-run success stamp the pre-push gate then skips on. It cites docs:1143-1146 only because the same false claim appears in prose there, never the :1157 wording. Same file, different underlying problem, which judge-match.md excludes. Stays unmatched."
   },
   {
    "record_id": "pr1999-3830366243-matched",
@@ -819,6 +779,46 @@
     "detail": "### Repo default bypassed by null\n\nLow Severity\n\n\nrenderRefusedStubInventory defaults repo to REFUSED_INVENTORY_DEFAULT_REPO, but the finalize run-record path passes readFlag's null when --refused-inventory-repo is omitted. In JavaScript, null does not trigger a parameter default, so known inventories render links as https://github.com/null/issues/... instead of falling back to the intended defaul"
    },
    "frozen_reasoning": "Audited 2026-08-28: the claim states that readFlag returns null while a JS default parameter fires only on undefined, so omitting --refused-inventory-repo renders github.com/null links \u2014 the same null-bypasses-the-default defect at the same call site."
+  },
+  {
+   "record_id": "pr1999-3830366547-replay-matched",
+   "source_cell": {
+    "pr": 1999,
+    "condition": "replay",
+    "candidate_index": 5
+   },
+   "defect_id": 3830366547,
+   "expected_verdict": "matched",
+   "claim_excerpt": "`Alerting \u2192 Error \u2192 Normal` leaves the alert cycle open forever \u2014 `peg-alert-events.ts:344-352` closes only the error lane, so the panel simultaneously says monitoring recovered and the breach is live when Grafana is Normal",
+   "defect": {
+    "id": 3830366547,
+    "severity": "P1",
+    "path": "ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts",
+    "line": 352,
+    "title": "Error recovery leaves breach active",
+    "detail": "### Error recovery leaves breach active\n\nHigh Severity\n\n\npairStateTransitions keeps alert and error cycles on separate keys, so error-recovered only closes the error lane. After Alerting \u2192 Error \u2192 Normal, the earlier raised stays open and Recent alerts still shows an active peg breach even though Grafana is Normal and the new recovery row says monitoring resumed. Peg rules use exec_err_state = \"Er"
+   },
+   "frozen_reasoning": "Audited 2026-08-28: the claim says Alerting \u2192 Error \u2192 Normal leaves the alert cycle open forever because peg-alert-events.ts:344-352 closes only the error lane, so the panel shows a live breach while Grafana is Normal. That is the same separate-cycle-key defect the truth body states at :352 \u2014 the earlier raised entry never closes \u2014 same cause and same symptom."
+  },
+  {
+   "record_id": "pr1999-3830366556-pipeline-matched",
+   "source_cell": {
+    "pr": 1999,
+    "condition": "pipeline",
+    "candidate_index": 1
+   },
+   "defect_id": 3830366556,
+   "expected_verdict": "matched",
+   "claim_excerpt": "A recovered rule shows \"Monitoring failed\" forever \u2014 `peg-alert-events.ts:105-115`, `route.ts:43-56`: the `Error \u2192 Pending` row is neither fetched by `errorStateHistoryUrl` nor classified (`transitionKind` returns `null` when `current` is `Pending`), so the error cycle opened at `Normal \u2192 Error` never closes and `pairStateTransitions:356` flushes it as a permanently-unresolved event",
+   "defect": {
+    "id": 3830366556,
+    "severity": "P2",
+    "path": "ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts",
+    "line": 116,
+    "title": "Pending recovery orphans error cycle",
+    "detail": "### Pending recovery orphans error cycle\n\nMedium Severity\n\n\nError cycles only close on Error \u2192 Alerting or Error \u2192 Normal. Several Peg rules use a non-zero for duration, and Grafana can recover through Error \u2192 Pending \u2192 Alerting. Pending transitions are intentionally not queried, so the error opening never pairs and Recent alerts can keep a stuck \u201cmonitoring failed\u201d row after evaluation has alread"
+   },
+   "frozen_reasoning": "Audited 2026-08-28: the claim says the Error \u2192 Pending row is neither fetched by errorStateHistoryUrl nor classified by transitionKind, so the error cycle opened at Normal \u2192 Error never closes and flushes as a permanently unresolved 'Monitoring failed' event. That is the same orphaned-error-cycle defect the truth body states for rules with a non-zero for duration recovering through Pending."
   }
  ]
 }

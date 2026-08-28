@@ -454,8 +454,24 @@ function checkShape({ contract, problems }) {
       "contract provenance must record how the truth was harvested",
     );
   }
-  if (!isObject(contract.judge) || typeof contract.judge.model !== "string") {
-    problems.push("contract judge must name a model");
+  // The judge is configured like a SUT role and spends quota like one.
+  // `runScoring` reads `judge.effort` straight out of the contract and hands it
+  // to the scoring helpers, whose parameter defaults fire on `undefined`. A
+  // contract that dropped `judge.effort` would pass the offline check and then
+  // score at the `high` default instead of the effort the contract declares,
+  // recording calibration and cell numbers under provenance that never held.
+  // Require both fields, while the check is still free.
+  if (!isObject(contract.judge)) {
+    problems.push("contract judge must be an object");
+  } else {
+    for (const field of ["model", "effort"]) {
+      if (
+        typeof contract.judge[field] !== "string" ||
+        contract.judge[field].length === 0
+      ) {
+        problems.push(`contract judge.${field} must be a non-empty string`);
+      }
+    }
   }
   if (!isObject(contract.sut)) {
     problems.push("contract sut must be an object");
