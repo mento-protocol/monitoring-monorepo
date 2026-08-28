@@ -465,6 +465,33 @@ ${CDP_TROVE_ROW_FIELDS}
   }
 `;
 
+// Route-specific Open Graph snapshot. Keep this narrower than CDP_MARKETS:
+// an unfurl needs only enough collateral metadata to resolve the composite
+// Trove id and label the four visible values. Reusing CDP_MARKETS would also
+// fetch instances and up to 500 open troves for every cold social share.
+export const CDP_TROVE_OG_COLLATERALS = `
+  query CdpTroveOgCollaterals($chainId: Int!) {
+    LiquityCollateral(
+      where: { chainId: { _eq: $chainId } }
+      order_by: { collIndex: asc }
+    ) {
+      id chainId symbol mcrBps
+    }
+  }
+`;
+
+// Stable fields only. The card deliberately omits the batch-managed interest
+// rate, so it needs neither the schema-lagged lastUpdatedTxHash field nor a
+// follow-up InterestBatch join. Opened/closed/updated timestamps are complete
+// lifecycle facts; the partial interim operation ledger stays off the image.
+export const CDP_TROVE_OG_BY_ID = `
+  query CdpTroveOgById($troveEntityId: String!) {
+    Trove(where: { id: { _eq: $troveEntityId } }, limit: 1) {
+      id troveId status debt coll icrBps openedAt closedAt lastUpdatedAt
+    }
+  }
+`;
+
 // Trove history page header rate join: resolves the CURRENT batch rate for a
 // batch-managed trove, same as the market page's `InterestBatch` join in
 // `cdpMarketDetailQuery` — `Trove.interestRate` can retain a stale

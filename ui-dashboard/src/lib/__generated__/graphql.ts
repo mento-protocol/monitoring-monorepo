@@ -7029,6 +7029,37 @@ export type CdpTroveByIdWithoutTxQuery = {
   }>;
 };
 
+// queries/liquity.CDP_TROVE_OG_COLLATERALS
+export type CdpTroveOgCollateralsQueryVariables = {
+  readonly chainId: number;
+};
+export type CdpTroveOgCollateralsQuery = {
+  readonly LiquityCollateral: ReadonlyArray<{
+    readonly id: string;
+    readonly chainId: number;
+    readonly symbol: string;
+    readonly mcrBps: number;
+  }>;
+};
+
+// queries/liquity.CDP_TROVE_OG_BY_ID
+export type CdpTroveOgByIdQueryVariables = {
+  readonly troveEntityId: string;
+};
+export type CdpTroveOgByIdQuery = {
+  readonly Trove: ReadonlyArray<{
+    readonly id: string;
+    readonly troveId: string;
+    readonly status: string;
+    readonly debt: string;
+    readonly coll: string;
+    readonly icrBps: number;
+    readonly openedAt: string;
+    readonly closedAt: string | null;
+    readonly lastUpdatedAt: string;
+  }>;
+};
+
 // queries/liquity.CDP_INTEREST_BATCH_BY_ID
 export type CdpInterestBatchByIdQueryVariables = {
   readonly batchId: string;

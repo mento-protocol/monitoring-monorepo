@@ -41,11 +41,23 @@ export function formatInterestRate(rate: string | null | undefined): string {
   return `${(Number(hundredths) / 100).toFixed(2)}%`;
 }
 
+export type IcrSeverity = "neutral" | "critical" | "warning" | "healthy";
+
+export function icrSeverity(icrBps: number, mcrBps: number): IcrSeverity {
+  if (icrBps < 0 || mcrBps <= 0) return "neutral";
+  if (icrBps < mcrBps) return "critical";
+  if (icrBps < Math.ceil(mcrBps * 1.2)) return "warning";
+  return "healthy";
+}
+
 export function icrTextClass(icrBps: number, mcrBps: number): string {
-  if (icrBps < 0 || mcrBps <= 0) return "text-slate-500";
-  if (icrBps < mcrBps) return "text-rose-300";
-  if (icrBps < Math.ceil(mcrBps * 1.2)) return "text-amber-300";
-  return "text-emerald-300";
+  const classes: Record<IcrSeverity, string> = {
+    neutral: "text-slate-500",
+    critical: "text-rose-300",
+    warning: "text-amber-300",
+    healthy: "text-emerald-300",
+  };
+  return classes[icrSeverity(icrBps, mcrBps)];
 }
 
 /** The dashboard's only Mento-app manage link: the trove tables' id cells
