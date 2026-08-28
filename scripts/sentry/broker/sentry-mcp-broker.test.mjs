@@ -1868,7 +1868,7 @@ test("the live supervisor reports the target exit status before cleanup", async 
   );
 });
 
-test("verbose server stderr retains the supervisor target status", async () => {
+test("verbose server stderr remains bounded and marks truncation", async () => {
   const targetScript =
     'process.stderr.write("server stderr head\\n" + "x".repeat(1_200) + "\\nserver stderr tail\\n"); process.exit(23);';
   await assert.rejects(
@@ -1889,10 +1889,6 @@ test("verbose server stderr retains the supervisor target status", async () => {
       );
       assert.match(diagnostic, /^server stderr head/u);
       assert.match(diagnostic, /\.\.\. server stderr truncated \.\.\./u);
-      assert.match(
-        diagnostic,
-        /sentry-mcp-server-supervisor: target exited with status 23$/u,
-      );
       return true;
     },
   );

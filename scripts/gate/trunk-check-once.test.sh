@@ -264,6 +264,17 @@ run_wrapper_with_handshake >/dev/null
 [[ "$(cat "$fixture_root/repo/log")" == check ]]
 cleanup_guardian_handshake
 
+# Strict mode must preserve an expected nonzero status from the direct check.
+echo running > "$fixture_root/repo/state"
+: > "$fixture_root/repo/log"
+set +e
+TRUNK_FIXTURE_CHECK_STATUS=7 run_wrapper >/dev/null
+status=$?
+set -e
+[[ "$status" -eq 7 ]]
+[[ "$(cat "$fixture_root/repo/state")" == running ]]
+[[ "$(cat "$fixture_root/repo/log")" == check ]]
+
 # When the guardian runs normally, the live wrapper publishes completion only
 # after its final daemon-state check.
 echo stopped > "$fixture_root/repo/state"
@@ -491,9 +502,11 @@ assert.match(
 );
 assert.match(gate, /read -r -t 1 signal <&26[\s\S]*signal_status.*-lt 128/u);
 assert.match(run, /exec 26<&-[\s\S]*eval "\$2"/u);
+assert.match(wrapper, /^set -euo pipefail$/mu);
+assert.match(wrapper, /stdio\[signalFd\] = "ignore";/u);
 assert.match(
   wrapper,
-  /stdio\[signalFd\] = "ignore";[\s\S]*spawnSync\("\.\/tools\/trunk"/u,
+  /return spawnSync\(\s*"\/bin\/bash",\s*\[\s*"-c",\s*'exec 25>&-; exec \.\/tools\/trunk "\$@"'/u,
 );
 assert.match(wrapper, /\.\/tools\/trunk check --ci "\$@" 25>&-/u);
 assert.match(

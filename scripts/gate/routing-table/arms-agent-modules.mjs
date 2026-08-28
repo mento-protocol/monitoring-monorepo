@@ -26,13 +26,42 @@ export const AGENT_MODULE_ARMS = [
       "scripts/gate/agent-quality-gate-scheduler*.mjs",
       "scripts/gate/agent-quality-gate-fixture-processes.mjs",
       "scripts/gate/darwin-broker-launch-preflight*.mjs",
-      "scripts/gate/darwin-process-identity*.mjs",
-      "scripts/gate/darwin-process-lineage*.mjs",
     ],
     effects: [
       {
         command: "pnpm agent:quality-gate:test",
         reason: "quality-gate coordinator changed",
+      },
+    ],
+  },
+  {
+    why: "Autoreview imports the Darwin lineage modules and materializes the identity helper as part of its trusted runtime. These shared sources must exercise both consumers.",
+    patterns: [
+      "scripts/gate/darwin-process-identity-helper.mjs",
+      "scripts/gate/darwin-process-lineage-model.mjs",
+      "scripts/gate/darwin-process-lineage-state.mjs",
+      "scripts/gate/darwin-process-lineage.mjs",
+    ],
+    effects: [
+      {
+        command: "pnpm agent:quality-gate:test",
+        reason: "quality-gate process containment changed",
+      },
+      {
+        command: "pnpm agent:autoreview:test",
+        reason: "autoreview Darwin containment runtime changed",
+      },
+    ],
+  },
+  {
+    patterns: [
+      "scripts/gate/darwin-process-identity.test.mjs",
+      "scripts/gate/darwin-process-lineage.test.mjs",
+    ],
+    effects: [
+      {
+        command: "pnpm agent:quality-gate:test",
+        reason: "quality-gate process containment changed",
       },
     ],
   },

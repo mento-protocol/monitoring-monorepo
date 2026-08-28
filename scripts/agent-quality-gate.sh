@@ -8965,6 +8965,7 @@ run_with_timeout() {
   local cmd_start
   local watchdog_pid
   local watchdog_start
+  local watchdog_reaped=0
   local lineage_watcher_pid=""
   local lineage_watcher_start=""
   local cmd_exact_identity=""
@@ -8984,6 +8985,12 @@ run_with_timeout() {
   local command_control_fifo
   local command_status_file
   local command_settlement_ack_file
+  local trunk_probe_result_file=""
+  local trunk_probe_result=""
+  local trunk_probe_deadline=0
+  local trunk_probe_completed=0
+  local trunk_probe_ready_observed=0
+  local trunk_probe_root_exited=0
   local trunk_guardian_pending_file=""
   local trunk_guardian_done_file=""
   local trunk_guardian_signal_fifo=""
@@ -9011,6 +9018,7 @@ run_with_timeout() {
   local lineage_watcher_module=""
   local lineage_watcher_setup_rc=0
   local command_reported_status=""
+  local pre_settlement_command_status=""
   local executable_command="$command"
   local command_lineage_token
   local command_lifecycle_contract
@@ -9299,6 +9307,9 @@ run_with_timeout() {
     gate_coordinator_recovery_drain_context="active-command"
   fi
   if is_trunk_command "$command"; then
+    if [[ "$gate_darwin_lineage_host_platform" == Darwin ]]; then
+      trunk_probe_result_file="$trunk_probe_handshake_file"
+    fi
     printf -v executable_command 'bash %q%s' \
       "$script_source_dir/gate/trunk-check-once.sh" \
       "${command#./tools/trunk check --ci}"
@@ -9368,17 +9379,48 @@ run_with_timeout() {
         exec 25>&-
       fi
       printf "%s\n" "$command_status" > "$9" || exit 127
-      IFS= read -r gate_action <&21 || exit 127
-      [[ "$gate_action" == settle ]] || exit 127
-      exec 21<&-
-      exit "$command_status"
+      trunk_probe_ran=0
+      while IFS= read -r gate_action <&21; do
+        case "$gate_action" in
+          probe)
+            [[ "$command_status" -ne 0 && "$trunk_probe_ran" -eq 0 &&
+              -n "${14}" ]] || exit 127
+            trunk_probe_ran=1
+            printf "%s\n" ready > "${14}" || exit 127
+            if TRUNK_LAUNCHER_QUIET=true \
+              ./tools/trunk --version 21<&- >/dev/null 2>&1; then
+              trunk_probe_status=0
+            else
+              trunk_probe_status=$?
+            fi
+            trunk_probe_ready=""
+            if ! {
+              IFS= read -r trunk_probe_ready && ! IFS= read -r _
+            } < "${14}" || [[ "$trunk_probe_ready" != ready ]]; then
+              exit 127
+            fi
+            if [[ "$trunk_probe_status" -eq 0 ||
+              "$trunk_probe_status" -gt 128 ]]; then
+              printf "%s\n" ok >> "${14}" || exit 127
+            else
+              printf "%s\n" blocked >> "${14}" || exit 127
+            fi
+            ;;
+          settle)
+            exec 21<&-
+            exit "$command_status"
+            ;;
+          *) exit 127 ;;
+        esac
+      done
+      exit 127
     ' "$command_tag" "$request_tag" \
       "$executable_command" "$command_marker" "$request_marker" "$coordinator_marker" \
       "$gate_coordinator_stdout_reserved" \
       "$close_parallel_worker_control_fd" "$command_control_fifo" \
       "$command_status_file" "$trunk_guardian_pending_file" \
       "$trunk_guardian_done_file" "$effective_command_timeout_seconds" \
-      "$trunk_guardian_signal_fd" &
+      "$trunk_guardian_signal_fd" "$trunk_probe_result_file" &
   cmd_pid=$!
   if ! gate_darwin_lineage_bind_root "$cmd_pid" "$mapped_command_parent_pid"; then
     echo "error: could not bind the mapped-command root to its Darwin kernel identity." >&2
@@ -9814,6 +9856,116 @@ EOF_KILL
       sleep 0.02 || true
     done
   fi
+  # A failed Trunk command is not downgraded until the launcher proves that it
+  # cannot provision its CLI. After the mapped status is durable, stop only the
+  # command watchdog and ask the still-live mapped root to run the probe. The
+  # active Darwin watcher then owns the probe and any downloader it forks.
+  if [[ "$gate_darwin_lineage_host_platform" == Darwin ]] &&
+    is_trunk_command "$command" && [[ -s "$command_status_file" ]]; then
+    pre_settlement_command_status="$(
+      cat "$command_status_file" 2>/dev/null
+    )" || pre_settlement_command_status=""
+    if [[ ! "$pre_settlement_command_status" =~ ^[0-9]+$ ||
+      "$pre_settlement_command_status" -gt 255 ]]; then
+      echo "error: mapped Trunk command returned an invalid pre-settlement status." >&2
+      lineage_bind_rc=2
+    elif [[ "$pre_settlement_command_status" -ne 0 &&
+      ! -s "$timeout_marker" && -z "$trunk_provisioning_state" ]]; then
+      # The tracked launcher must exist and be executable before a failed
+      # command can enter environment classification. Its absence is a real
+      # checkout failure and must retain the original Trunk verdict.
+      if [[ ! -x ./tools/trunk ]]; then
+        provisioning_probe_rc=1
+      elif [[ -n "$watchdog_exact_identity" ]] &&
+        gate_darwin_exact_identity_terminate \
+          "$watchdog_exact_identity" "$watchdog_pid"; then
+        wait "$watchdog_pid" 2>/dev/null || true
+        watchdog_reaped=1
+      else
+        lineage_bind_rc=2
+      fi
+      if [[ "$watchdog_reaped" -eq 1 && ! -s "$timeout_marker" ]]; then
+        if ! printf '%s\n' probe >&20; then
+          provisioning_probe_rc=2
+        else
+          trunk_probe_deadline=$(($(date +%s) + trunk_provisioning_probe_timeout_seconds))
+          while [[ "$(date +%s)" -lt "$trunk_probe_deadline" ]]; do
+            trunk_probe_result="$(
+              read_parallel_worker_result_value \
+                "$trunk_probe_result_file" trunk-probe 2>/dev/null
+            )" || trunk_probe_result=""
+            case "$trunk_probe_result" in
+              ready)
+                trunk_probe_ready_observed=1
+                ;;
+              $'ready\nok')
+                trunk_probe_ready_observed=1
+                trunk_provisioning_state=ok
+                trunk_probe_completed=1
+                break
+                ;;
+              $'ready\nblocked')
+                trunk_probe_ready_observed=1
+                trunk_provisioning_state=blocked
+                trunk_probe_completed=1
+                break
+                ;;
+              "") ;;
+            esac
+            if ! kill -0 "$cmd_pid" 2>/dev/null ||
+              gate_lock_process_is_confirmed_zombie "$cmd_pid" "$cmd_start"; then
+              trunk_probe_root_exited=1
+              break
+            fi
+            sleep 0.02 || true
+          done
+          if [[ "$trunk_probe_completed" -eq 0 &&
+            "$provisioning_probe_rc" -eq 0 ]]; then
+            # The mapped root appends its final record to the durable readiness
+            # record. Ignore a partial append while it is live. At the deadline,
+            # only `ready` proves that the probe is still in flight.
+            trunk_probe_result="$(
+              read_parallel_worker_result_value \
+                "$trunk_probe_result_file" trunk-probe 2>/dev/null
+            )" || trunk_probe_result=""
+            case "$trunk_probe_result" in
+              $'ready\nok')
+                trunk_probe_ready_observed=1
+                trunk_provisioning_state=ok
+                trunk_probe_completed=1
+                ;;
+              $'ready\nblocked')
+                trunk_probe_ready_observed=1
+                trunk_provisioning_state=blocked
+                trunk_probe_completed=1
+                ;;
+              ready)
+                trunk_probe_ready_observed=1
+                if [[ "$trunk_probe_root_exited" -eq 1 ]] ||
+                  ! kill -0 "$cmd_pid" 2>/dev/null ||
+                  gate_lock_process_is_confirmed_zombie \
+                    "$cmd_pid" "$cmd_start"; then
+                  provisioning_probe_rc=2
+                fi
+                ;;
+              *) provisioning_probe_rc=2 ;;
+            esac
+          fi
+          if [[ "$trunk_probe_completed" -eq 0 &&
+            "$provisioning_probe_rc" -eq 0 &&
+            "$trunk_probe_ready_observed" -eq 1 ]]; then
+            # An unresponsive probe leaves the original Trunk failure standing.
+            # Final settlement owns the still-live probe before lease release.
+            trunk_provisioning_state=ok
+          fi
+        fi
+      fi
+    fi
+    if [[ "$pre_settlement_command_status" -ne 0 &&
+      "$trunk_provisioning_state" == blocked ]]; then
+      last_command_trunk_provisioning_blocked=true
+    fi
+  fi
   if declare -F gate_coordinator_begin_command_settlement >/dev/null 2>&1; then
     if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
       gate_coordinator_is_active &&
@@ -9916,6 +10068,10 @@ EOF_KILL
       "$command_reported_status" -gt 255 ]]; then
       echo "error: mapped command returned an invalid barrier status." >&2
       lineage_bind_rc=2
+    elif [[ -n "$pre_settlement_command_status" &&
+      "$command_reported_status" != "$pre_settlement_command_status" ]]; then
+      echo "error: mapped Trunk command status changed during settlement." >&2
+      lineage_bind_rc=2
     elif [[ "$lineage_bind_rc" -eq 0 &&
       "$forced_exact_settlement" -eq 0 &&
       "$rc" -ne "$command_reported_status" ]]; then
@@ -9924,7 +10080,7 @@ EOF_KILL
     elif [[ "$lineage_bind_rc" -eq 0 &&
       "$darwin_exact_active" -eq 1 &&
       "$forced_exact_settlement" -eq 1 ]]; then
-      # The watcher terminates the wrapper after its authoritative status is
+      # The watcher can terminate the wrapper after its authoritative status is
       # durable. Preserve that command result instead of the wrapper signal.
       rc="$command_reported_status"
     fi
@@ -9938,12 +10094,12 @@ EOF_KILL
     "$command_settlement_ack_file"
   rmdir "$command_barrier_dir" 2>/dev/null || true
 
-  if [[ -s "$timeout_marker" ]]; then
+  if [[ -s "$timeout_marker" && "$watchdog_reaped" -eq 0 ]]; then
     # A timeout fired: the watchdog is mid-escalation. Let it finish its KILL
     # pass (bounded by the 3s grace) — killing it here would strand a
     # TERM-ignoring descendant whose root already exited on TERM.
     wait "$watchdog_pid" 2>/dev/null
-  else
+  elif [[ "$watchdog_reaped" -eq 0 ]]; then
     # Command settled first: tear the watchdog and its pending sleep down so
     # nothing leaks on normal completion.
     if [[ "$gate_darwin_lineage_host_platform" == Darwin ]]; then
@@ -9970,11 +10126,10 @@ EOF_KILL
     echo "error: could not retire the Darwin lineage watcher control files." >&2
     lineage_bind_rc=2
   fi
-  # A failed Trunk command is not downgraded until the launcher proves that it
-  # cannot provision its CLI. Treat that probe as part of the same mapped
-  # command: it inherits the command's tags and marker handles, and the exact
-  # descendant drain below runs before the scheduler lease is released.
-  if [[ "$rc" -ne 0 && ! -s "$timeout_marker" ]] &&
+  # Portable hosts retain the existing parent-owned probe. Their tree
+  # settlement can bound and reap that probe without Darwin kernel identities.
+  if [[ "$gate_darwin_lineage_host_platform" != Darwin &&
+    "$rc" -ne 0 && ! -s "$timeout_marker" ]] &&
     is_trunk_command "$command"; then
     if trunk_provisioning_is_blocked \
       "$command_tag" "$request_tag" "$command_marker" "$request_marker" \
@@ -10409,6 +10564,10 @@ read_parallel_worker_result_value() {
       ;;
     ready)
       [[ "$value" == ready ]] || return 1
+      ;;
+    trunk-probe)
+      [[ "$value" == ready || "$value" == $'ready\nok' ||
+        "$value" == $'ready\nblocked' ]] || return 1
       ;;
     *) return 1 ;;
   esac

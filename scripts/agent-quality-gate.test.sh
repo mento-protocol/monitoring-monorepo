@@ -5476,6 +5476,11 @@ run_trunk_probe_lease_regression() {
   # This marker comes from the late Trunk dispatch after earlier mapped work.
   # Allow 120 seconds for this dispatch under load.
   local trunk_probe_late_command_observer_attempts=2400
+  # The failed Trunk command publishes its status before this probe starts.
+  # Hold the probe longer than the old command watchdog budget to prove that
+  # post-command provisioning classification cannot become a command timeout.
+  local trunk_probe_command_timeout_seconds=3
+  local trunk_probe_post_status_hold_seconds=4
 
   for probe_parallelism in 1 2; do
     if [[ "$probe_parallelism" -eq 1 ]]; then
@@ -5729,6 +5734,7 @@ STUB
         AGENT_QUALITY_GATE_LOCK_DIR="$fixture_lock_root" \
         AGENT_QUALITY_GATE_COORDINATOR=1 \
         AGENT_QUALITY_GATE_CAPACITY=1 \
+        AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS="$trunk_probe_command_timeout_seconds" \
         AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER="$drain_refresh_barrier" \
         NODE_ENV=test \
         QG_GATE_ROLE=holder \
@@ -5851,6 +5857,19 @@ STUB
         fail_trunk_probe_lease_fixture \
           "the provisioning probe descendant exited while its lease was held"
 
+      for ((attempt = 0; attempt < trunk_probe_post_status_hold_seconds * 20; attempt++)); do
+        [[ ! -e "$contender_started" && ! -e "$overlap_file" ]] ||
+          fail_trunk_probe_lease_fixture \
+            "the contender started while the slow provisioning probe held capacity"
+        gate_test_process_has_live_start "$holder_pid" "$holder_start" ||
+          fail_trunk_probe_lease_fixture \
+            "the holder exited while its slow provisioning probe was active"
+        gate_test_process_has_live_start "$descendant_pid" "$descendant_start" ||
+          fail_trunk_probe_lease_fixture \
+            "the slow provisioning probe lost its descendant before settlement"
+        sleep 0.05
+      done
+
       # Let the failed launcher exit, then hold the exact descendant drain
       # after its refreshed census and before its first signal. Capacity must
       # remain reserved for the holder for the entire barrier interval.
@@ -5958,6 +5977,10 @@ STUB
       grep -Fq "All mapped commands passed." "$contender_output" ||
         fail_trunk_probe_lease_fixture \
           "the contender did not complete after the probe drain"
+      if grep -Fq "Command timed out after" "$holder_output"; then
+        fail_trunk_probe_lease_fixture \
+          "the slow provisioning probe was charged to the completed Trunk command timeout"
+      fi
       if grep -Fq "scan-error" "$holder_output" "$contender_output"; then
         fail_trunk_probe_lease_fixture \
           "the live probe fixture emitted a marker scan error"
@@ -5987,11 +6010,229 @@ STUB
   done
 }
 
+run_trunk_probe_deadline_regression() {
+  local fixture_repo
+  local gate_pid=""
+  local gate_status
+  local probe_ready
+  local probe_stopped
+  local probe_descendant_pid_file
+  local probe_descendant_pid=""
+  local probe_descendant_start=""
+  local probe_attempt
+  local gate_output
+
+  fixture_repo="$(mktemp -d)"
+  (
+    # shellcheck disable=SC2329 # invoked by the EXIT trap below
+    cleanup_trunk_probe_deadline_fixture() {
+      if [[ "$gate_pid" =~ ^[1-9][0-9]*$ ]] &&
+        jobs -pr | grep -Fxq "$gate_pid"; then
+        kill -KILL "$gate_pid" 2>/dev/null || true
+        wait "$gate_pid" 2>/dev/null || true
+      fi
+      if [[ "$probe_descendant_pid" =~ ^[1-9][0-9]*$ &&
+        -n "$probe_descendant_start" ]] &&
+        gate_test_process_has_live_start \
+          "$probe_descendant_pid" "$probe_descendant_start"; then
+        gate_test_signal_with_current_parent \
+          "ready-only Trunk-probe descendant" KILL \
+          "$probe_descendant_pid" "$probe_descendant_start" || true
+      fi
+      rm -rf -- "$fixture_repo"
+    }
+    trap cleanup_trunk_probe_deadline_fixture EXIT
+    cd "$fixture_repo"
+    git init -q
+    git config user.email test@example.invalid
+    git config user.name "Quality Gate Test"
+    mkdir -p bin scripts/context tools
+    printf 'console.log("deadline fixture");\n' \
+      > scripts/context/agent-context-budget.mjs
+    cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  printf '9.0.0\n'
+fi
+exit 0
+STUB
+    cat > bin/qg-trunk-probe-deadline-descendant <<'STUB'
+#!/usr/bin/env bash
+trap '' HUP INT TERM
+printf '%s\n' "$$" > "${QG_PROBE_DESCENDANT_PID_FILE:?}"
+while :; do sleep 1; done
+STUB
+    cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-} ${2:-}" == "daemon status" ]]; then
+  printf 'x Daemon stopped\n'
+  exit 1
+fi
+if [[ "${1:-}" == "--version" ]]; then
+  trap 'printf "stopped\n" > "${QG_PROBE_STOPPED:?}"; exit 143' HUP INT TERM
+  qg-trunk-probe-deadline-descendant >/dev/null 2>&1 &
+  while [[ ! -s "${QG_PROBE_DESCENDANT_PID_FILE:?}" ]]; do
+    sleep 0.01
+  done
+  : > "${QG_PROBE_READY:?}"
+  for ((probe_wait = 0; probe_wait < 600; probe_wait++)); do
+    sleep 0.1
+  done
+  exit 1
+fi
+printf 'deadline fixture lint failure\n'
+exit 1
+STUB
+    chmod +x bin/pnpm bin/qg-trunk-probe-deadline-descendant tools/trunk
+    write_installed_dependency_fixture "$PWD"
+    git add .
+    git commit -qm init
+    printf 'changed\n' >> scripts/context/agent-context-budget.mjs
+    printf 'scripts/context/agent-context-budget.mjs\n' > changed-paths.txt
+
+    probe_ready="$fixture_repo/probe-ready"
+    probe_stopped="$fixture_repo/probe-stopped"
+    probe_descendant_pid_file="$fixture_repo/probe-descendant-pid"
+    gate_output="$fixture_repo/gate-output"
+    AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS=3 \
+      QG_PROBE_READY="$probe_ready" \
+      QG_PROBE_STOPPED="$probe_stopped" \
+      QG_PROBE_DESCENDANT_PID_FILE="$probe_descendant_pid_file" \
+      PATH="$fixture_repo/bin:$PATH" \
+      /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+        --changed-paths-file changed-paths.txt \
+        --base HEAD --run --fail-fast --no-lock \
+        > "$gate_output" 2>&1 &
+    gate_pid=$!
+    for ((probe_attempt = 0; probe_attempt < gate_test_coordinator_observer_attempts; probe_attempt++)); do
+      [[ -e "$probe_ready" && -s "$probe_descendant_pid_file" ]] && break
+      kill -0 "$gate_pid" 2>/dev/null || break
+      sleep 0.05
+    done
+    [[ -e "$probe_ready" && -s "$probe_descendant_pid_file" ]] || {
+      sed 's/^/deadline probe: /' "$gate_output" > "$output_file"
+      fail "the ready-only Trunk probe did not publish its descendant identity"
+    }
+    probe_descendant_pid="$(cat "$probe_descendant_pid_file")"
+    probe_descendant_start="$(gate_test_process_start "$probe_descendant_pid")"
+    [[ "$probe_descendant_pid" =~ ^[1-9][0-9]*$ &&
+      -n "$probe_descendant_start" ]] || {
+      sed 's/^/deadline probe: /' "$gate_output" > "$output_file"
+      fail "the ready-only Trunk probe published an invalid descendant identity"
+    }
+    gate_test_process_has_live_start \
+      "$probe_descendant_pid" "$probe_descendant_start" || {
+      sed 's/^/deadline probe: /' "$gate_output" > "$output_file"
+      fail "the ready-only Trunk probe descendant was not live at its exact PID/start identity"
+    }
+    set +e
+    wait "$gate_pid"
+    gate_status=$?
+    set -e
+    gate_pid=""
+
+    [[ "$gate_status" -eq 1 ]] || {
+      sed 's/^/deadline probe: /' "$gate_output" > "$output_file"
+      fail "the ready-only Trunk probe deadline did not preserve the original command failure"
+    }
+    [[ -e "$probe_ready" && -e "$probe_stopped" ]] || {
+      sed 's/^/deadline probe: /' "$gate_output" > "$output_file"
+      fail "the ready-only Trunk probe was not settled at its deadline"
+    }
+    if gate_test_process_has_live_start \
+      "$probe_descendant_pid" "$probe_descendant_start"; then
+      sed 's/^/deadline probe: /' "$gate_output" > "$output_file"
+      fail "the ready-only Trunk probe returned before its TERM-ignoring descendant was gone"
+    fi
+    probe_descendant_pid=""
+    probe_descendant_start=""
+    if grep -Fq "Command timed out after" "$gate_output"; then
+      sed 's/^/deadline probe: /' "$gate_output" > "$output_file"
+      fail "the ready-only Trunk probe deadline was charged to the completed command timeout"
+    fi
+    if grep -Fq "warning: skipping ./tools/trunk check" "$gate_output"; then
+      sed 's/^/deadline probe: /' "$gate_output" > "$output_file"
+      fail "the unanswerable Trunk probe downgraded the original command failure"
+    fi
+  )
+}
+
+run_trunk_probe_launcher_guard_regression() {
+  local fixture_repo
+  local launcher_mode
+  local launcher_output
+  local launcher_status
+
+  fixture_repo="$(mktemp -d)"
+  (
+    trap 'rm -rf -- "$fixture_repo"' EXIT
+    cd "$fixture_repo"
+    git init -q
+    git config user.email test@example.invalid
+    git config user.name "Quality Gate Test"
+    mkdir -p bin scripts/context tools
+    printf 'console.log("launcher guard fixture");\n' \
+      > scripts/context/agent-context-budget.mjs
+    cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  printf '9.0.0\n'
+fi
+exit 0
+STUB
+    cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-} ${2:-}" == "daemon status" ]]; then
+  printf 'x Daemon stopped\n'
+  exit 1
+fi
+printf 'launcher guard fixture lint failure\n'
+exit 1
+STUB
+    chmod +x bin/pnpm tools/trunk
+    write_installed_dependency_fixture "$PWD"
+    git add .
+    git commit -qm init
+    printf 'changed\n' >> scripts/context/agent-context-budget.mjs
+    printf 'scripts/context/agent-context-budget.mjs\n' > changed-paths.txt
+
+    for launcher_mode in non-executable missing; do
+      launcher_output="$fixture_repo/${launcher_mode}-output"
+      if [[ "$launcher_mode" == non-executable ]]; then
+        chmod -x tools/trunk
+      else
+        rm -f tools/trunk
+      fi
+      set +e
+      PATH="$fixture_repo/bin:$PATH" \
+        /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+          --changed-paths-file changed-paths.txt \
+          --base HEAD --run --fail-fast --no-lock \
+          > "$launcher_output" 2>&1
+      launcher_status=$?
+      set -e
+      [[ "$launcher_status" -ne 0 ]] || {
+        sed "s/^/${launcher_mode} launcher: /" \
+          "$launcher_output" > "$output_file"
+        fail "the ${launcher_mode} Trunk launcher was downgraded to success"
+      }
+      if grep -Fq "warning: skipping ./tools/trunk check" "$launcher_output" ||
+        grep -Fq "Note: the Trunk arm was skipped" "$launcher_output"; then
+        sed "s/^/${launcher_mode} launcher: /" \
+          "$launcher_output" > "$output_file"
+        fail "the ${launcher_mode} Trunk launcher received the provisioning skip"
+      fi
+    done
+  )
+}
+
 run_parallel_worker_loss_coordinator_regression
 run_parallel_release_failure_coordinator_regression
 run_stale_failure_result_regression
 run_sequential_descendant_lease_regression
 run_trunk_probe_lease_regression
+run_trunk_probe_deadline_regression
+run_trunk_probe_launcher_guard_regression
 
 for invalid_capacity in "" 0 65 invalid; do
   if AGENT_QUALITY_GATE_CAPACITY="$invalid_capacity" \
@@ -13191,6 +13432,22 @@ done
   printf 'unknown\n' > "$launch_state_record"
   if read_parallel_worker_result_value \
     "$launch_state_record" launch-state >/dev/null; then
+    exit 1
+  fi
+
+  trunk_probe_receipt="$parallel_contract_fixture/trunk-probe"
+  printf 'ready\n' > "$trunk_probe_receipt"
+  [[ "$(read_parallel_worker_result_value \
+    "$trunk_probe_receipt" trunk-probe)" == ready ]]
+  printf 'ready\nok\n' > "$trunk_probe_receipt"
+  [[ "$(read_parallel_worker_result_value \
+    "$trunk_probe_receipt" trunk-probe)" == $'ready\nok' ]]
+  printf 'ready\nblocked\n' > "$trunk_probe_receipt"
+  [[ "$(read_parallel_worker_result_value \
+    "$trunk_probe_receipt" trunk-probe)" == $'ready\nblocked' ]]
+  printf 'ready\nblock' > "$trunk_probe_receipt"
+  if read_parallel_worker_result_value \
+    "$trunk_probe_receipt" trunk-probe >/dev/null; then
     exit 1
   fi
 

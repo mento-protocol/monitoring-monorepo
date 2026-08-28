@@ -686,6 +686,14 @@ later `--skip-if-fresh` request must execute and retry Trunk. The scheduler
 lease stays reserved until classification, any launcher probe, and all
 identified descendants drain.
 
+On Darwin, the failed Trunk status becomes durable before the parent retires
+the command watchdog. The parent requests the launcher probe through the
+mapped root's private control FIFO. The probe runs below that still-live root.
+It publishes an append-only `ready` then `ok` or `blocked` receipt and has an
+independent 15-second deadline. The existing exact-lineage watcher settles the
+probe, any downloader, and the mapped root before the lease is released.
+Portable hosts keep the parent-owned probe and their existing tree settlement.
+
 The leader gate owns the worker. A follower disconnect only detaches that
 follower. A leader disconnect, cancellation, interrupt, or stale-owner verdict
 starts the drain and publishes the same non-success result to every attached

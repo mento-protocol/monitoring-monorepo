@@ -34,6 +34,7 @@ import { fileURLToPath } from "node:url";
 
 import { bashFunctionSource } from "../../sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.mjs";
 
+import { ROUTING_PLAN } from "../routing-table/index.mjs";
 import { Facts } from "./facts.mjs";
 import { BUCKETS, Plan, commandDedupeKey } from "./plan.mjs";
 import {
@@ -45,6 +46,7 @@ import {
   scopedTestInfraChanged,
   sortCodegenCommands,
 } from "./post-passes.mjs";
+import { routeChangedPaths } from "./route.mjs";
 import * as verbs from "./verbs.mjs";
 
 /** The subset of Facts the post-passes and verbs actually consult. */
@@ -279,6 +281,42 @@ test("the root tooling bundle schedules the whole suite list", () => {
   );
   assert.ok(commands.includes("bash scripts/agent-quality-gate.test.sh"));
   assert.ok(commands.includes("node scripts/pr/pr-ready-state.test.mjs"));
+});
+
+test("Darwin runtime files shared with autoreview route both regression suites", () => {
+  const sharedRuntimePaths = [
+    "scripts/gate/darwin-process-identity.c",
+    "scripts/gate/darwin-process-identity-runtime.inc.c",
+    "scripts/gate/darwin-process-identity-helper.mjs",
+    "scripts/gate/darwin-process-lineage-model.mjs",
+    "scripts/gate/darwin-process-lineage-state.mjs",
+    "scripts/gate/darwin-process-lineage.mjs",
+  ];
+
+  for (const changedPath of sharedRuntimePaths) {
+    const plan = new Plan();
+    routeChangedPaths(
+      ROUTING_PLAN,
+      [changedPath],
+      stubFacts({ isRealTree: false, presentPaths: [changedPath] }),
+      {
+        plan,
+        routeLockfileChange: () => {
+          throw new Error("unexpected lockfile route");
+        },
+      },
+    );
+    const commands = commandsOf(plan);
+    for (const expected of [
+      "pnpm agent:quality-gate:test",
+      "pnpm agent:autoreview:test",
+    ]) {
+      assert.ok(
+        commands.includes(expected),
+        `${changedPath} does not route ${expected}: ${JSON.stringify(commands)}`,
+      );
+    }
+  }
 });
 
 // ── Post-pass 1: Trunk ─────────────────────────────────────────────────────

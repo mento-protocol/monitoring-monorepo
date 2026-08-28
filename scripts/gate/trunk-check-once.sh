@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -u
+set -euo pipefail
 
 guardian_dir=""
 guardian_pid=""
@@ -300,7 +300,19 @@ function trunk(args, baseStdio = ["ignore", "pipe", "pipe"], timeout = 30_000) {
     killSignal: "SIGKILL",
   };
   if (timeout !== null) options.timeout = timeout;
-  return spawnSync("./tools/trunk", args, options);
+  // Node can retain an existing high-numbered descriptor when its stdio entry
+  // is "ignore" on Linux. Close the guardian capability in the exec process
+  // before Trunk starts, while the guardian keeps its own writer open.
+  return spawnSync(
+    "/bin/bash",
+    [
+      "-c",
+      'exec 25>&-; exec ./tools/trunk "$@"',
+      "agentqg-trunk-guardian",
+      ...args,
+    ],
+    options,
+  );
 }
 
 function daemonState() {
@@ -479,12 +491,18 @@ if [[ "$initial_state" == stopped ]]; then
     echo "error: could not start the Trunk daemon lifecycle guardian." >&2
     exit 2
   }
-  wait "$guardian_pid"
-  check_status=$?
+  if wait "$guardian_pid"; then
+    check_status=0
+  else
+    check_status=$?
+  fi
   guardian_pid=""
 else
-  ./tools/trunk check --ci "$@" 25>&-
-  check_status=$?
+  if ./tools/trunk check --ci "$@" 25>&-; then
+    check_status=0
+  else
+    check_status=$?
+  fi
 fi
 
 # A daemon that existed before the gate is a named trusted external service.

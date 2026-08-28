@@ -46,7 +46,7 @@ Use `--format issue` for GitHub Issues; do not append this report to `BACKLOG.md
 
 | Rough |   Raw | Delta | Status        | File                                                                                      |
 | ----: | ----: | ----: | ------------- | ----------------------------------------------------------------------------------------- |
-|  9401 | 11714 | +8387 | hard cap      | `scripts/agent-quality-gate.sh`                                                           |
+|  9550 | 11873 |  +159 | hard cap      | `scripts/agent-quality-gate.sh`                                                           |
 |  2421 |  2506 | (new) | hard cap      | `scripts/gate/quality-gate-coordinator-environment.mjs`                                   |
 |  1916 |  2004 | (new) | hard cap      | `scripts/gate/darwin-broker-launch-preflight.mjs`                                         |
 |  1727 |  1793 | (new) | hard cap      | `scripts/gate/quality-gate-coordinator-legacy.mjs`                                        |

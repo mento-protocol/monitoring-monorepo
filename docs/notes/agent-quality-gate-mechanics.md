@@ -240,6 +240,13 @@ reached a linter, and that a credential proxy gating the host per session is not
 something an allowed-domains entry can lift — there the remedy is a prewarmed
 Trunk cache (`$TRUNK_CACHE`, else `$XDG_CACHE_HOME/trunk`, else
 `~/.cache/trunk`) or CI.
+On Darwin, the failed Trunk status becomes durable before the parent stops the
+command watchdog. The parent then requests the provisioning probe through the
+mapped root's private control FIFO. The probe runs below the still-live mapped
+root. It publishes an append-only `ready` then `ok` or `blocked` receipt and
+has an independent 15-second deadline. The existing exact-lineage watcher
+settles the probe, any downloader, and the mapped root before lease release.
+Portable hosts keep the parent-owned probe and their existing tree settlement.
 Everything else fails the gate, including a partly-explained failure set and a
 download step that failed for a local reason. Only a provisioning failure
 degrades: a provisioned Trunk that finds real problems still fails the gate, and
@@ -599,7 +606,9 @@ procedure below.
   `gate/darwin-process-lineage.mjs`,
   `gate/mapped-command-process-identity.mjs`, and optional
   `pr-feedback-state-claude.mjs` and
-  `pr-ready-state-review-signals.mjs`. Feedback blobs use `origin/main`. Move
+  `pr-ready-state-review-signals.mjs`. Changes to the six Darwin runtime files
+  route both `pnpm agent:autoreview:test` and
+  `pnpm agent:quality-gate:test`. Feedback blobs use `origin/main`. Move
   feedback paths in three merges: add copies and fallback; repoint; remove old
   paths after no pre-move wrapper remains.
 - **Gate routing pins.** The gate excludes stub-repo tests with

@@ -56,6 +56,7 @@ import {
   mergeWatchedDarwinLineageTombstones,
   validateState,
 } from "./darwin-process-lineage-model.mjs";
+
 import { readStateForSettlement } from "./darwin-process-lineage-state.mjs";
 import {
   DarwinSnapshotContentionError,
@@ -66,6 +67,14 @@ import {
   readDarwinPrivateCancelMarker,
   runNativeSnapshot,
 } from "./darwin-process-identity-helper.mjs";
+
+function unlinkIfPresent(path) {
+  try {
+    unlinkSync(path);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+}
 
 const LINEAGE_MODULE_PATH = fileURLToPath(
   new URL("./darwin-process-lineage.mjs", import.meta.url),
@@ -701,11 +710,7 @@ test("Darwin cohort settlement validates its bounded token and path set", async 
     assert.equal(nonRetained.status, 2);
     assert.match(nonRetained.stderr, /must retain every state/u);
   } finally {
-    try {
-      unlinkSync(linkedDirectory);
-    } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
-    }
+    unlinkIfPresent(linkedDirectory);
     rmSync(firstDirectory, { recursive: true, force: true });
     rmSync(secondDirectory, { recursive: true, force: true });
   }
