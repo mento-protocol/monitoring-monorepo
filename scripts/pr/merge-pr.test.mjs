@@ -210,6 +210,9 @@ function harness({
   autoMergeError = null,
   standingAutoMergeAfterConfirmation = null,
   autoMergeErrorAfterConfirmation = null,
+  // The base returned beside the final intent state. This can differ from the
+  // last ready-state read when a retarget lands between those two requests.
+  baseRefNameAtFinalIntent = null,
   openPullRequestCount = 1,
   baseRulesErrorAfterConfirmation = null,
   // The base the pull request reports AFTER the merge. A retarget between the
@@ -240,7 +243,7 @@ function harness({
 
   const gh = async (args) => {
     calls.gh.push(args);
-    calls.events.push({ kind: "gh", args });
+    calls.events.push({ kind: "remote-read", source: "gh", args });
     if (args[0] === "repo" && args[1] === "view") {
       return JSON.stringify({
         nameWithOwner: "mento-protocol/monitoring-monorepo",
@@ -273,7 +276,13 @@ function harness({
         data: {
           repository: {
             mergeQueue: queue,
-            pullRequest: { autoMergeRequest: request },
+            pullRequest: {
+              baseRefName:
+                baseRefNameAtFinalIntent ??
+                summaryAfterConfirmation?.pr?.baseRefName ??
+                summary.pr.baseRefName,
+              autoMergeRequest: request,
+            },
           },
         },
       });
@@ -362,6 +371,10 @@ function harness({
         gh,
         git,
         fetchReadyState: async () => {
+          calls.events.push({
+            kind: "remote-read",
+            source: "ready-state",
+          });
           if (readyStateError) throw new Error(readyStateError);
           calls.readyStateReads += 1;
           if (calls.readyStateReads > 1 && summaryAfterConfirmation) {
@@ -2071,6 +2084,19 @@ await test("an unreadable merge queue after confirmation refuses", async () => {
   assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
 });
 
+await test("a retarget before the final intent read refuses", async () => {
+  // The combined query must prove that its queue branch is still the pull
+  // request's current base. The REST `sha` binds the head, but not this base.
+  const h = harness({ baseRefNameAtFinalIntent: "release/v2" });
+
+  await assertRefuses(
+    h.run(),
+    "was retargeted from main to release/v2 after the final readiness read",
+  );
+  assertEqual(h.calls.merges.length, 0, "nothing should have merged");
+  assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
+});
+
 await test("a pull request that already has auto-merge enabled refuses", async () => {
   // Someone asked GitHub to merge it outside these gates. This command must
   // neither merge over that nor cancel it.
@@ -2158,10 +2184,17 @@ await test("the final intent read combines both gates immediately before merge",
     read.some((arg) => String(arg).includes("autoMergeRequest")),
     "the final query must include the pull request's auto-merge state",
   );
+  assert(
+    read.some((arg) => String(arg).includes("baseRefName")),
+    "the final query must include the pull request's current base",
+  );
   assert(read.includes("number=2071"), "the query must bind the pull request");
 
   const readEvent = h.calls.events.findIndex(
-    (event) => event.kind === "gh" && event.args === read,
+    (event) =>
+      event.kind === "remote-read" &&
+      event.source === "gh" &&
+      event.args === read,
   );
   const mergeEvent = h.calls.events.findIndex(
     (event) => event.kind === "merge",
@@ -2173,9 +2206,9 @@ await test("the final intent read combines both gates immediately before merge",
   assertEqual(
     h.calls.events
       .slice(readEvent + 1, mergeEvent)
-      .some((event) => event.kind === "gh"),
+      .some((event) => event.kind === "remote-read"),
     false,
-    "no later remote read may make either final intent state stale",
+    "no later remote read may make the final base or intent state stale",
   );
 });
 

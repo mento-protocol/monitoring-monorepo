@@ -429,10 +429,12 @@ export async function mergePullRequest({
     );
   }
 
-  // Read both foreign-intent gates in one final GraphQL response. A separate
-  // queue round trip after the auto-merge read would make that earlier state
-  // stale before the direct REST call. This combined read minimizes both race
-  // windows, although GitHub cannot bind either absence to the later write.
+  // Read the current base and both foreign-intent gates in one final GraphQL
+  // response. The base proves the queue query still names the pull request's
+  // target. A separate queue round trip after the auto-merge read would make
+  // that earlier state stale before the direct REST call. This combined read
+  // minimizes all three race windows, although GitHub cannot bind them to the
+  // later write.
   let confirmedIntent;
   try {
     confirmedIntent = await readFinalMergeIntent({
@@ -446,7 +448,15 @@ export async function mergePullRequest({
       `unable to re-read the final merge intent for ${repos.base}#${number} and ` +
         `${sanitizeTerminalText(confirmed.baseRefName)}: ` +
         `${err instanceof Error ? err.message : String(err)}. ` +
-        `Refusing, because this command must prove there is no merge queue or auto-merge request before direct merge.`,
+        `Refusing, because this command must prove the base is unchanged and there is no merge queue or auto-merge request before direct merge.`,
+    );
+  }
+  if (confirmedIntent.baseRefName !== confirmed.baseRefName) {
+    throw new MergeRefusal(
+      `${repos.base}#${number} was retargeted from ` +
+        `${sanitizeTerminalText(confirmed.baseRefName)} to ` +
+        `${sanitizeTerminalText(confirmedIntent.baseRefName)} after the final readiness read; ` +
+        `re-run to review the new base and its queue state`,
     );
   }
   if (confirmedIntent.autoMergeRequest !== null) {

@@ -292,13 +292,15 @@ function parseMergeQueueResponse(parsed) {
 }
 
 /**
- * The final merge-queue and auto-merge state from one GraphQL response.
+ * The final base, merge-queue, and auto-merge state from one GraphQL response.
  *
  * Reading both intent gates together removes the extra remote round trip that
  * would otherwise leave one state older than the other immediately before the
- * direct merge. The response is still not atomic with the later REST write, so
- * callers must keep this as their final remote read and refuse every malformed
- * or partial response.
+ * direct merge. Returning the pull request's current base also proves that the
+ * queue query still names that base. The REST request separately binds the
+ * approved head through `sha`. The response is still not atomic with the later
+ * REST write, so callers must keep this as their final remote read and refuse
+ * every malformed or partial response.
  */
 export async function readFinalMergeIntent({ gh, repo, branch, number }) {
   const { owner, name, host } = splitRepo(repo);
@@ -309,7 +311,7 @@ export async function readFinalMergeIntent({ gh, repo, branch, number }) {
       host ?? "github.com",
       "graphql",
       "-f",
-      `query=query($owner:String!,$name:String!,$branch:String!,$number:Int!){repository(owner:$owner,name:$name){mergeQueue(branch:$branch){id url} pullRequest(number:$number){autoMergeRequest{enabledAt}}}}`,
+      `query=query($owner:String!,$name:String!,$branch:String!,$number:Int!){repository(owner:$owner,name:$name){mergeQueue(branch:$branch){id url} pullRequest(number:$number){baseRefName autoMergeRequest{enabledAt}}}}`,
       "-f",
       `owner=${owner}`,
       "-f",
@@ -326,17 +328,22 @@ export async function readFinalMergeIntent({ gh, repo, branch, number }) {
   if (
     pullRequest === null ||
     typeof pullRequest !== "object" ||
+    !Object.hasOwn(pullRequest, "baseRefName") ||
     !Object.hasOwn(pullRequest, "autoMergeRequest")
   ) {
     throw new Error(
       "the final merge-intent response did not identify the pull request",
     );
   }
+  const baseRefName = pullRequest.baseRefName;
+  if (typeof baseRefName !== "string" || baseRefName === "") {
+    throw new Error("the final merge-intent response named no base branch");
+  }
   const autoMergeRequest = pullRequest.autoMergeRequest;
   if (autoMergeRequest !== null && typeof autoMergeRequest !== "object") {
     throw new Error("the final auto-merge response was malformed");
   }
-  return { mergeQueue, autoMergeRequest };
+  return { baseRefName, mergeQueue, autoMergeRequest };
 }
 
 /**

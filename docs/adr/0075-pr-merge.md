@@ -75,9 +75,10 @@ The ordered gates in `scripts/pr/merge-pr.mjs`:
    it detects queues from rulesets and classic branch protection. The wrapper
    also reads the branch's ruleset rule types as a second signal and a specific
    diagnostic. An unreadable answer from either queue read refuses. The final
-   GraphQL read queries `Repository.mergeQueue` and the pull request's
-   `autoMergeRequest` together. It is the last remote read before consent is
-   recorded and the direct merge starts.
+   GraphQL read queries `Repository.mergeQueue` and returns the pull request's
+   current `baseRefName` and `autoMergeRequest` together. A base mismatch
+   refuses, so the queue query must still name the current base. It is the last
+   remote read before consent is recorded and the direct merge starts.
 
 7. Append the consent record — login, timestamp, pull request, head commit,
    any override reason — to gitignored `.merge-consents.jsonl`, opened
@@ -138,12 +139,13 @@ wrapper says so in its own header rather than implying otherwise:
   bound in the confirmation signature and the residual window is accepted
   rather than changing how every merge commit is titled.
 - **The approved base cannot be bound atomically.** The request's `sha` pins the
-  head, and the merge endpoint has no base equivalent. A retarget landing
-  between the final gate read and GitHub processing the merge therefore cannot
-  be prevented here. The
-  wrapper re-reads the base afterwards, says plainly that the merge did not go
-  where the operator approved, and exits non-zero. That is detection, not
-  prevention, and the window is a few hundred milliseconds wide.
+  head, and the merge endpoint has no base equivalent. The final GraphQL read
+  proves that the queue query still names the pull request's current base. A
+  retarget landing after that read but before GitHub processes the merge still
+  cannot be prevented here. The wrapper re-reads the base afterwards, says
+  plainly that the merge did not go where the operator approved, and exits
+  non-zero. That is detection, not prevention, and the window is a few hundred
+  milliseconds wide.
 
 The durable boundary is on GitHub's side of the wire — branch protection, or
 credentials that cannot merge — and is tracked separately as follow-up.
