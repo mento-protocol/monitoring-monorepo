@@ -3,7 +3,7 @@ title: PR Operating Card
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-26
+last_verified: 2026-08-28
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -374,14 +374,25 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    `scripts/pr/merge-pr.mjs` refuses outside an interactive human session, runs
    both step 7 projections, shows a briefing, makes the operator type the
    pull-request number back, re-reads every gate, records consent to gitignored
-   `.merge-consents.jsonl`, and confirms afterwards that the PR reached
-   `MERGED` on the approved base and head. Any ambiguous state refuses; a
-   not-ready PR or unclean feedback ledger needs `--not-ready-reason "<why>"`.
+   `.merge-consents.jsonl`, then calls the synchronous REST merge endpoint with
+   the approved head and squash method. The request cannot enqueue or enable
+   auto-merge. It can bypass a classic branch-protection merge queue, so the
+   wrapper proves `Repository.mergeQueue(branch:)` is null before the briefing
+   and again as its final remote read. That query covers ruleset and classic
+   queues. The wrapper also reads ruleset rule types as a second signal. Any
+   unreadable queue state refuses. The request omits commit title and message
+   fields, so the repository's squash defaults remain in effect. The wrapper
+   confirms afterwards that the PR reached `MERGED` on the approved base and
+   head. It never disables auto-merge during reconciliation. Any ambiguous
+   state refuses; a not-ready PR or unclean feedback ledger needs
+   `--not-ready-reason "<why>"`.
    `.claude/settings.json` denies `gh pr merge` and its repository-qualified
    spellings, which removes the obvious shortcuts. Neither layer is an
    unforgeable boundary — a local process running as the operator can
-   synthesize any local signal — so the approval rule above stays the binding
-   control, and the durable boundary belongs on GitHub's side of the wire.
+   synthesize any local signal. A credential switch after the final login read
+   can also misattribute the local consent record; the merge target remains
+   bound. The approval rule above stays the binding control, and the durable
+   boundary belongs on GitHub's side of the wire.
    [ADR 0075](../adr/0075-pr-merge.md) owns the ordered gates,
    the alternatives, and every residual, including what the deny does not
    cover. The Dependabot auto-merge workflow runs in CI, not an agent session,
