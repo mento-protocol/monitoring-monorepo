@@ -208,6 +208,14 @@ function QueuePanelBody({
           queue, so rate order does not decide which troves are redeemed.
         </p>
       );
+    case "instance-missing":
+      return (
+        <p role="status" className={NOTICE_CLASSES}>
+          Queue position and shield are unavailable — the latest fetch carried
+          no market row, so whether redemptions currently follow the rate queue
+          is unknown. The next poll retries.
+        </p>
+      );
     case "capped":
       return (
         <p role="status" className={NOTICE_CLASSES}>

@@ -278,12 +278,12 @@ describe("buildTroveQueueModel", () => {
     expect(model.rungs[0]?.troveCount).toBe(2);
   });
 
-  it("tolerates a missing LiquityInstance row (market barely indexed) without claiming shutdown", () => {
+  it("withholds the ladder when the LiquityInstance row is missing — the shutdown flag is unknown, never defaulted to healthy", () => {
     const model = buildTroveQueueModel(
       response({ LiquityInstance: [] }),
       "gbpm-0x1",
     );
-    expect(model.kind).toBe("ready");
+    expect(model).toEqual({ kind: "instance-missing" });
   });
 });
 

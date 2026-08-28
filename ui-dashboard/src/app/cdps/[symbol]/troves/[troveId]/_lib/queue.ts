@@ -117,6 +117,10 @@ export type TroveQueueReadyModel = {
 
 export type TroveQueueModel =
   | { kind: "shutdown"; shutDownAt: string | null }
+  /** The response carried no `LiquityInstance` row, so the shutdown flag —
+   *  which decides whether rate order governs redemptions at all — is
+   *  unknown. Fail closed: no ladder until the row is back. */
+  | { kind: "instance-missing" }
   | { kind: "capped" }
   | { kind: "unresolved-rates"; unresolvedCount: number }
   | { kind: "empty" }
@@ -216,7 +220,13 @@ export function buildTroveQueueModel(
   troveEntityId: string,
 ): TroveQueueModel {
   const instance = data.LiquityInstance[0];
-  if (instance?.isShutDown === true) {
+  if (instance == null) {
+    // Never default a missing shutdown flag to "not shut down": a healthy
+    // ladder built during indexer lag or a partial resync would claim rate
+    // order governs redemptions while the market may be urgent-mode.
+    return { kind: "instance-missing" };
+  }
+  if (instance.isShutDown === true) {
     return { kind: "shutdown", shutDownAt: instance.shutDownAt };
   }
   if (data.OpenTrove.length >= CDP_TROVES_DETAIL_LIMIT) {

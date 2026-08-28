@@ -118,7 +118,8 @@ type Trace = {
   y: number[];
   yaxis: string;
   mode: string;
-  line: { shape: string; color: string };
+  /** Absent on the markers-only ICR observation trace. */
+  line?: { shape: string; color: string };
   hovertemplate: string;
 };
 
@@ -158,7 +159,7 @@ describe("TroveBalanceChart", () => {
     expect(coll!.yaxis).toBe("y");
     expect(debt!.yaxis).toBe("y2");
     for (const trace of traces()) {
-      expect(trace.line.shape).toBe("hv");
+      expect(trace.line?.shape).toBe("hv");
     }
     expect(coll!.hovertemplate).toContain("USDm");
     expect(debt!.hovertemplate).toContain("GBPm");
@@ -245,8 +246,10 @@ describe("TroveBalanceChart", () => {
     expect(icr!.hovertemplate).not.toContain("%%");
     expect(icr!.hovertemplate).not.toContain("USDm");
     expect(icr!.y).toEqual([117.1, 165]);
-    // Sparse observations render as dots too, not an invisible 1-point line.
-    expect(icr!.mode).toBe("lines+markers");
+    // Observations only — a connecting step line would assert ICR held
+    // between events while the oracle price moved.
+    expect(icr!.mode).toBe("markers");
+    expect(icr!.line).toBeUndefined();
     expect(handle!.container.textContent).not.toContain(
       "ICR panel unavailable",
     );

@@ -264,6 +264,20 @@ describe("TroveRedemptionQueuePanel", () => {
     expect(status).toBeDefined();
   });
 
+  it("withholds the ladder when the market row is missing — shutdown state unknown", () => {
+    render(state({ model: { kind: "instance-missing" } }));
+    const body = text();
+    expect(body).toContain("no market row");
+    expect(body).toContain(
+      "whether redemptions currently follow the rate queue is unknown",
+    );
+    expect(
+      handle!.container.querySelector(
+        'table[aria-label="Redemption queue ladder"]',
+      ),
+    ).toBeNull();
+  });
+
   it("suppresses rank and shield when active batch rates are unresolved", () => {
     render(state({ model: { kind: "unresolved-rates", unresolvedCount: 2 } }));
     const body = text();

@@ -97,24 +97,41 @@ function stepTrace(
   points: readonly TroveChartPoint[],
   options: {
     color: string;
-    yaxis: "y" | "y2" | "y3";
+    yaxis: "y" | "y2";
     hovertemplate: string;
     fillcolor?: string;
-    withMarkers?: boolean;
   },
 ): Plotly.Data {
   return {
     x: points.map((point) => new Date(point.timestamp * 1000).toISOString()),
     y: points.map((point) => point.value),
     type: "scatter",
-    mode: options.withMarkers ? "lines+markers" : "lines",
+    mode: "lines",
     line: { color: options.color, width: 2, shape: "hv" },
-    ...(options.withMarkers
-      ? { marker: { color: options.color, size: 5 } }
-      : {}),
     ...(options.fillcolor
       ? { fill: "tozeroy" as const, fillcolor: options.fillcolor }
       : {}),
+    xaxis: "x",
+    yaxis: options.yaxis,
+    hovertemplate: options.hovertemplate,
+  };
+}
+
+/** Markers only, never a connecting line: ICR is coll×price/debt and the
+ *  oracle price moves between events, so a step segment would assert the
+ *  value HELD from one observation to the next — a claim the ledger cannot
+ *  support. Collateral and debt do hold between events; only they get
+ *  `stepTrace`. */
+function observationTrace(
+  points: readonly TroveChartPoint[],
+  options: { color: string; yaxis: "y3"; hovertemplate: string },
+): Plotly.Data {
+  return {
+    x: points.map((point) => new Date(point.timestamp * 1000).toISOString()),
+    y: points.map((point) => point.value),
+    type: "scatter",
+    mode: "markers",
+    marker: { color: options.color, size: 5 },
     xaxis: "x",
     yaxis: options.yaxis,
     hovertemplate: options.hovertemplate,
@@ -287,10 +304,9 @@ function buildTroveChartModel(
   }
   if (showIcr) {
     data.push(
-      stepTrace(icr, {
+      observationTrace(icr, {
         color: ICR_COLOR,
         yaxis: "y3",
-        withMarkers: true,
         // A lone % renders literally in a Plotly hovertemplate: only %{...}
         // sequences are substituted (TEMPLATE_STRING_REGEX), so %% would
         // display two percent signs.
