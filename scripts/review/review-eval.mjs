@@ -1056,20 +1056,33 @@ function runEvidenceProblems({ dir, row, contract }) {
             rowConditions.has(cell.condition),
           );
           for (const condition of rowConditions) {
-            const hasConditionResult = cells
-              .filter((cell) => cell.condition === condition)
-              .some((cell) =>
-                existsSync(
-                  path.join(
-                    dir,
-                    `result-${cell.pr}-${cell.condition}-${cell.draw}.json`,
-                  ),
+            const resultCells = cells.filter(
+              (cell) =>
+                cell.condition === condition &&
+                resultFiles.includes(
+                  `result-${cell.pr}-${cell.condition}-${cell.draw}.json`,
                 ),
-              );
-            if (!hasConditionResult) {
+            );
+            if (resultCells.length === 0) {
               problems.push(
                 `${dir} carries no scored result for row condition ${condition}`,
               );
+              continue;
+            }
+            const representedPrs = new Set(resultCells.map((cell) => cell.pr));
+            const perDefect = row.conditions?.[condition]?.per_defect ?? {};
+            for (const pr of representedPrs) {
+              const fixture = contract.fixtures.find(
+                (candidate) => candidate.pr === pr,
+              );
+              const missingIds = (fixture?.scorable_ids ?? [])
+                .map(String)
+                .filter((id) => !Object.hasOwn(perDefect, id));
+              if (missingIds.length > 0) {
+                problems.push(
+                  `${dir} row condition ${condition} omits frozen defect ${missingIds.join(", ")} for scored result PR ${pr}`,
+                );
+              }
             }
           }
         }

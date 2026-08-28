@@ -5743,6 +5743,94 @@ test("--revalidate-appended refuses a later appended automatic baseline", () => 
   }
 });
 
+test("--revalidate-appended binds partial rows to every scored PR", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "base");
+
+    const scoredFixtures = contract.fixtures.filter(
+      (fixture) => fixture.scorable_ids.length > 0,
+    );
+    assert.ok(scoredFixtures.length > 1);
+    const [retainedFixture, omittedFixture] = scoredFixtures;
+    const row = makeRow({
+      matchedIds: scorableIdsFor([retainedFixture.pr]),
+      status: "partial",
+    });
+    writeRowEvidence(root, row);
+    const condition = row.conditions.pipeline;
+    for (const id of omittedFixture.scorable_ids.map(String)) {
+      delete condition.per_defect[id];
+    }
+    const omittedP1 = p1IdsFor([omittedFixture.pr]).length;
+    condition.recall.opportunities -=
+      omittedFixture.scorable_ids.length * condition.draws;
+    condition.recall.rate = Number(
+      (condition.recall.matched / condition.recall.opportunities).toFixed(3),
+    );
+    condition.p1.opportunities -= omittedP1 * condition.draws;
+    condition.p1.rate =
+      condition.p1.opportunities === 0
+        ? null
+        : Number(
+            (condition.p1.matched / condition.p1.opportunities).toFixed(3),
+          );
+    row.verdict = verdict({ contract, row }).verdict;
+    writeFileSync(path.join(root, ledgerRelative), `${JSON.stringify(row)}\n`);
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 1);
+    assert.match(
+      JSON.parse(checked.stdout).problems.join(" | "),
+      new RegExp(
+        `row condition pipeline omits frozen defect .* for scored result PR ${omittedFixture.pr}`,
+      ),
+    );
+
+    for (let draw = 1; draw <= condition.draws; draw += 1) {
+      rmSync(
+        path.join(
+          root,
+          row.detail_dir,
+          `result-${omittedFixture.pr}-pipeline-${draw}.json`,
+        ),
+      );
+    }
+    const legitimatePartial = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(
+      legitimatePartial.status,
+      0,
+      legitimatePartial.stdout + legitimatePartial.stderr,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("--revalidate-appended checks a row against its committed plan", () => {
   const root = makeRoot();
   try {
