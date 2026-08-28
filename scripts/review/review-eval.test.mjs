@@ -2068,7 +2068,7 @@ test("baselineEligibility refuses rows that cannot be paired", () => {
   for (const row of [
     { ...usable, kind: "canary" },
     { ...usable, status: "partial" },
-    { ...usable, judge_calibration: { agreement: 37, total: 40 } },
+    { ...usable, judge_calibration: { agreement: 33, total: 40 } },
     { ...usable, notes: "leak suspected: reviewer login" },
     {
       ...usable,
