@@ -15733,8 +15733,10 @@ done
 rm -rf "$legacy_contract_fixture"
 
 # A reclaimed coordinator owner names only its aggregate generation marker.
-# Detect that exact typed record and use the marker-empty recovery contract.
-# Ordinary owner records retain the current host contract.
+# Darwin uses the marker-empty recovery contract because it has no safe
+# per-command lineage. Portable hosts retain their marker recovery contract so
+# the recovering gate can stop holders from the crashed generation. Ordinary
+# owner records retain the current host contract.
 coordinator_owner_contract_fixture="$(mktemp -d)"
 coordinator_owner_contract_functions="$coordinator_owner_contract_fixture/functions.sh"
 for coordinator_owner_contract_function in \
@@ -15748,13 +15750,20 @@ done
 if ! /bin/bash -c '
   set -euo pipefail
   source "$1"
-  gate_host_lifecycle_contract=darwin-coherent-lineage-v2
   current_uid="$(id -u)"
   coordinator_snapshot="pid=123
 uid=${current_uid}
 coordinator_start_utc=coordinator-start
 coordinator_token=fixture-coordinator-1-1
 token=coordinator-owner-v1"
+  gate_host_lifecycle_contract=portable-marker-v1
+  pair="$(
+    gate_lock_current_user_authority_and_recovery_contract_from_snapshot \
+      "$coordinator_snapshot"
+  )"
+  [[ "$pair" == $'"'"'fixture-coordinator-1-1\nportable-marker-v1'"'"' ]]
+
+  gate_host_lifecycle_contract=darwin-coherent-lineage-v2
   pair="$(
     gate_lock_current_user_authority_and_recovery_contract_from_snapshot \
       "$coordinator_snapshot"

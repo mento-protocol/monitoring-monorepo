@@ -305,11 +305,13 @@ reads that field from one record snapshot.
 
 Cross-policy recovery accepts an old coordinator owner only when one stable
 record contains its exact coordinator token, exact coordinator start identity,
-and the literal `coordinator-owner-v1` owner token. This record maps to the
-recovery-only `request-marker-empty-v1` contract. Recovery waits for the
+and the literal `coordinator-owner-v1` owner token. On Darwin, this record maps
+to the recovery-only `request-marker-empty-v1` contract. Recovery waits for the
 aggregate coordinator generation marker. It does not create per-command
 lineage or trust an old settlement claim. An open or ambiguous marker keeps the
-new policy blocked.
+new policy blocked. Portable hosts retain `portable-marker-v1`. Their recovery
+must stop surviving marker holders before the aggregate marker can become
+empty.
 
 Adoption preserves the incoming owner record's group and other read bits so a
 legacy waiter with shared-root access can observe the barrier. The replacement

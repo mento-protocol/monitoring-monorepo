@@ -1468,13 +1468,15 @@ fall back to PID liveness instead of comparing unrelated values. New
 coordinators read `coordinator_start_utc` from one file snapshot and can compare
 the exact process identity.
 
-An old-policy coordinator owner has no safe per-command lineage under the new
-policy. Recovery accepts it only when one stable record has the exact
+An old-policy coordinator owner has no safe per-command Darwin lineage under
+the new policy. Recovery accepts it only when one stable record has the exact
 coordinator token, exact coordinator start identity, and the literal
-`coordinator-owner-v1` owner token. It assigns the recovery-only
+`coordinator-owner-v1` owner token. Darwin assigns the recovery-only
 `request-marker-empty-v1` contract and waits for the aggregate generation
 marker to close. It never creates per-command lineage or uses old settlement
 proof. Missing or live aggregate evidence keeps the new policy blocked.
+Portable hosts retain `portable-marker-v1`. Their recovery stops surviving
+marker holders before it releases the aggregate generation barrier.
 
 The current Bash gate and coordinator read process start time and process status
 from one `ps` snapshot. A different start time means PID reuse. A matching

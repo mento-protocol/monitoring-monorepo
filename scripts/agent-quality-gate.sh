@@ -3656,7 +3656,8 @@ gate_lock_recovery_contract_from_owner_snapshot() {
   )"
   owner_identity="$(gate_lock_field_from_text "$snapshot" token)"
   if [[ -n "$coordinator_start" &&
-    "$owner_identity" == "coordinator-owner-v1" ]]; then
+    "$owner_identity" == "coordinator-owner-v1" &&
+    "$gate_host_lifecycle_contract" == "darwin-coherent-lineage-v2" ]]; then
     # A coordinator owner token identifies the aggregate generation marker.
     # It has no per-command Darwin state, so recovery may only wait for that
     # exact marker to become empty. It must not invent lineage evidence.
