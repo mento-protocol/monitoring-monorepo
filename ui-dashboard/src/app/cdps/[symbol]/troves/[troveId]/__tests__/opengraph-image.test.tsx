@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TroveOgData } from "../_lib/trove-og-data";
 
 const imageResponseCalls: { element: unknown; options: unknown }[] = [];
@@ -32,7 +32,6 @@ const data: TroveOgData = {
   collateral: "44.79K USDm",
   debt: "28.08K GBPm",
   icr: "117.10%",
-  icrTone: "warning",
   openedDate: "2026-08-18",
   lastEventLabel: "Last indexed",
   lastEventDate: "2026-08-28",
@@ -41,6 +40,7 @@ const data: TroveOgData = {
 
 const {
   buildTroveOgAlt,
+  buildImageCacheControl,
   contentType,
   default: Image,
   generateImageMetadata,
@@ -51,7 +51,11 @@ const { TroveOgCard } = await import("../_og/trove-og-card");
 beforeEach(() => {
   imageResponseCalls.length = 0;
   fetchForMetadata.mockReset();
+  vi.useFakeTimers();
+  vi.setSystemTime(data.fetchedAtMs + 2 * 60 * 1_000);
 });
+
+afterEach(() => vi.useRealTimers());
 
 describe("trove opengraph-image route", () => {
   it("declares the social-preview dimensions", () => {
@@ -68,7 +72,7 @@ describe("trove opengraph-image route", () => {
 
     expect(fetchForMetadata).toHaveBeenCalledWith("GBPM", "0x8abc");
     expect(entry?.alt).toBe(
-      "Mento Analytics · GBPM Trove 0x8abc · Active · collateral 44.79K USDm · debt 28.08K GBPm · ICR 117.10% · last indexed 2026-08-28",
+      "Mento Analytics · GBPM Trove 0x8abc · Active · collateral 44.79K USDm · debt 28.08K GBPm · indexed ICR 117.10% · last indexed 2026-08-28",
     );
     expect(entry?.size).toEqual(size);
   });
@@ -90,6 +94,7 @@ describe("trove opengraph-image route", () => {
     expect(markup).toContain("44.79K USDm");
     expect(markup).toContain("28.08K GBPm");
     expect(markup).toContain("117.10%");
+    expect(markup).toContain("INDEXED ICR");
     expect(markup).toContain("2026-08-18");
     expect(markup).not.toContain(">RATE<");
   });
@@ -121,8 +126,7 @@ describe("trove opengraph-image route", () => {
       width: 1200,
       height: 630,
       headers: {
-        "Cache-Control":
-          "public, max-age=60, s-maxage=60, stale-while-revalidate=300",
+        "Cache-Control": "public, max-age=0, s-maxage=60, must-revalidate",
       },
     });
     const { fonts } = imageResponseCalls[0]!.options as {
@@ -131,5 +135,17 @@ describe("trove opengraph-image route", () => {
     expect(fonts?.map((font) => font.weight).sort()).toEqual([
       400, 600, 700, 800,
     ]);
+  });
+
+  it("does not cache the image beyond the source freshness boundary", () => {
+    expect(
+      buildImageCacheControl(data, data.fetchedAtMs + 4 * 60 * 1_000 + 45_000),
+    ).toBe("public, max-age=0, s-maxage=15, must-revalidate");
+    expect(
+      buildImageCacheControl(data, data.fetchedAtMs + 5 * 60 * 1_000),
+    ).toBe("public, max-age=0, s-maxage=0, must-revalidate");
+    expect(buildImageCacheControl(null)).toBe(
+      "public, max-age=0, s-maxage=60, must-revalidate",
+    );
   });
 });

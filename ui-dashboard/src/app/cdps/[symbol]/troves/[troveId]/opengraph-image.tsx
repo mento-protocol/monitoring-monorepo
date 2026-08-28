@@ -3,6 +3,7 @@ import { ogFontOptions } from "@/lib/og-fonts";
 import { isValidTroveIdParam, normalizeTroveIdParam } from "./_lib/params";
 import {
   fetchTroveOgDataForMetadata,
+  TROVE_OG_MAX_DATA_AGE_MS,
   type TroveOgData,
 } from "./_lib/trove-og-data";
 import {
@@ -12,7 +13,7 @@ import {
 } from "./_og/trove-og-card";
 
 export const runtime = "nodejs";
-export const revalidate = 60;
+export const revalidate = 0;
 export const contentType = "image/png";
 export const size = { width: 1200, height: 630 };
 
@@ -43,15 +44,25 @@ export function buildTroveOgAlt(
   const shown = data ?? identity;
   const prefix = `Mento Analytics · ${shown.symbol.toUpperCase()} Trove ${shortTroveId(shown.troveId)}`;
   if (data === null) return `${prefix} · indexed snapshot unavailable`;
-  return `${prefix} · ${data.statusLabel} · collateral ${data.collateral} · debt ${data.debt} · ICR ${data.icr} · ${data.lastEventLabel.toLowerCase()} ${data.lastEventDate}`;
+  return `${prefix} · ${data.statusLabel} · collateral ${data.collateral} · debt ${data.debt} · indexed ICR ${data.icr} · ${data.lastEventLabel.toLowerCase()} ${data.lastEventDate}`;
 }
 
-// One minute fresh, then at most five minutes of stale replay. The card can
-// show a collateral-ratio warning, so it uses the same bounded stale window as
-// the peg-monitoring safety card. Slack can keep its own per-URL copy longer;
-// no response header can refresh a message that Slack already expanded.
-const IMAGE_CACHE_CONTROL =
-  "public, max-age=60, s-maxage=60, stale-while-revalidate=300";
+const IMAGE_CACHE_MAX_SECONDS = 60;
+
+export function buildImageCacheControl(
+  data: TroveOgData | null,
+  nowMs: number = Date.now(),
+): string {
+  const remainingMs =
+    data === null
+      ? IMAGE_CACHE_MAX_SECONDS * 1_000
+      : Math.max(0, TROVE_OG_MAX_DATA_AGE_MS - (nowMs - data.fetchedAtMs));
+  const sharedMaxAge = Math.min(
+    IMAGE_CACHE_MAX_SECONDS,
+    Math.floor(remainingMs / 1_000),
+  );
+  return `public, max-age=0, s-maxage=${sharedMaxAge}, must-revalidate`;
+}
 
 export async function generateImageMetadata({
   params,
@@ -86,6 +97,9 @@ export default async function Image({
   return new ImageResponse(<TroveOgCard data={data} identity={identity} />, {
     ...size,
     ...(await ogFontOptions()),
-    headers: { "Cache-Control": IMAGE_CACHE_CONTROL },
+    // The route output is not ISR-cached. The CDN lifetime cannot cross the
+    // source snapshot's five-minute freshness boundary. Slack can retain a
+    // message-local copy longer after it expands the URL.
+    headers: { "Cache-Control": buildImageCacheControl(data) },
   });
 }

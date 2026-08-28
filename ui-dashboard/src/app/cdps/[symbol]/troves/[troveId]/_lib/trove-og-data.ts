@@ -15,7 +15,7 @@ import {
   makeTroveEntityId,
   normalizeTroveIdParam,
 } from "./params";
-import { formatBpsPercent, icrSeverity } from "./format";
+import { formatBpsPercent } from "./format";
 import { troveStatusLabel } from "./status";
 
 const CELO = NETWORKS["celo-mainnet"];
@@ -38,7 +38,6 @@ export type TroveOgData = {
   collateral: string;
   debt: string;
   icr: string;
-  icrTone: TroveOgTone;
   openedDate: string;
   lastEventLabel: "Closed" | "Last indexed";
   lastEventDate: string;
@@ -166,7 +165,6 @@ function buildTroveOgData(
     collateral: formatOgTokenAmount(trove.coll, "USDm"),
     debt: formatOgTokenAmount(trove.debt, collateral.symbol),
     icr: formatBpsPercent(trove.icrBps),
-    icrTone: icrSeverity(trove.icrBps, collateral.mcrBps),
     openedDate: utcDate(trove.openedAt),
     lastEventLabel: closedAt === null ? "Last indexed" : "Closed",
     lastEventDate: utcDate(closedAt ?? trove.lastUpdatedAt),

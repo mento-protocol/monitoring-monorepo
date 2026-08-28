@@ -137,7 +137,6 @@ describe("fetchTroveOgDataUncached", () => {
       collateral: "44.79K USDm",
       debt: "28.08K GBPm",
       icr: "117.10%",
-      icrTone: "warning",
       openedDate: "2026-08-17",
       lastEventLabel: "Last indexed",
       lastEventDate: "2026-08-28",

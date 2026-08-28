@@ -361,11 +361,7 @@ function SnapshotStats({ data }: { data: TroveOgData | null }) {
       />
       <StatTile label="COLLATERAL" value={data?.collateral ?? "—"} />
       <StatTile label="DEBT" value={data?.debt ?? "—"} />
-      <StatTile
-        label="ICR"
-        value={data?.icr ?? "—"}
-        tone={data?.icrTone ?? "neutral"}
-      />
+      <StatTile label="INDEXED ICR" value={data?.icr ?? "—"} />
     </div>
   );
 }
