@@ -157,7 +157,7 @@ export function leakSignals({
     }
   }
   const normalized = text.toLowerCase().replace(/[^a-z0-9]+/g, " ");
-  for (const finding of truth.findings ?? []) {
+  for (const finding of truth?.findings ?? []) {
     const title = String(finding.title ?? "")
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, " ")

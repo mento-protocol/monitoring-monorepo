@@ -16,6 +16,26 @@ function readJson(file) {
   }
 }
 
+function fixtureScorableIdsByPr(contract) {
+  if (!Array.isArray(contract?.fixtures)) return null;
+  const indexed = new Map();
+  for (const fixture of contract.fixtures) {
+    if (
+      fixture === null ||
+      typeof fixture !== "object" ||
+      Array.isArray(fixture) ||
+      !Number.isSafeInteger(fixture.pr) ||
+      !Array.isArray(fixture.scorable_ids)
+    ) {
+      return null;
+    }
+    if (!indexed.has(fixture.pr)) {
+      indexed.set(fixture.pr, fixture.scorable_ids);
+    }
+  }
+  return indexed;
+}
+
 /** Evidence files required for every row that claims scored results. */
 export function runEvidenceProblems({ dir, row, contract }) {
   const regularityProblems = nonRegularEvidenceProblems(dir);
@@ -33,6 +53,13 @@ export function runEvidenceProblems({ dir, row, contract }) {
       );
   }
   const problems = resultEvidenceProblems({ dir, row });
+  const fixtureScorableIds = fixtureScorableIdsByPr(contract);
+  if (fixtureScorableIds === null) {
+    problems.push(
+      `${dir} contract.fixtures must be an array of entries with a safe-integer pr and scorable_ids array`,
+    );
+  }
+  const scorableIdsByPr = fixtureScorableIds ?? new Map();
   // A bridge creates no new evidence. It reuses the source full run's plan and
   // scored records, which remain subject to every check below.
   if (!holdsCellResults(dir)) {
@@ -133,13 +160,11 @@ export function runEvidenceProblems({ dir, row, contract }) {
               );
             }
           }
-          const fixture = contract.fixtures.find(
-            (candidate) => candidate.pr === cell.pr,
-          );
+          const fixtureScorableIds = scorableIdsByPr.get(cell.pr);
           if (!Array.isArray(record?.matched_ids)) {
             problems.push(`${dir}/${resultFile} matched_ids must be an array`);
-          } else if (fixture) {
-            const allowedIds = new Set(fixture.scorable_ids.map(String));
+          } else if (fixtureScorableIds) {
+            const allowedIds = new Set(fixtureScorableIds.map(String));
             for (const id of record.matched_ids) {
               if (
                 !(
@@ -322,10 +347,7 @@ export function runEvidenceProblems({ dir, row, contract }) {
             const representedPrs = new Set(resultCells.map((cell) => cell.pr));
             const perDefect = row.conditions?.[condition]?.per_defect ?? {};
             for (const pr of representedPrs) {
-              const fixture = contract.fixtures.find(
-                (candidate) => candidate.pr === pr,
-              );
-              const missingIds = (fixture?.scorable_ids ?? [])
+              const missingIds = (scorableIdsByPr.get(pr) ?? [])
                 .map(String)
                 .filter((id) => !Object.hasOwn(perDefect, id));
               if (missingIds.length > 0) {

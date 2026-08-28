@@ -73,6 +73,7 @@ import {
   BLIND_JUDGE_TOOLS,
   scorerDigest,
 } from "./review-eval-score.mjs";
+import { runEvidenceProblems } from "./review-eval-run-evidence.mjs";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const scriptPath = fileURLToPath(new URL("./review-eval.mjs", import.meta.url));
@@ -115,6 +116,33 @@ function runEvalSourceSet() {
   return [...runEvalSourcePaths]
     .map(([owner]) => `# source-owner: ${owner}\n${runEvalSource(owner)}`)
     .join("\n");
+}
+
+function assertBefore(source, earlier, later, message) {
+  const earlierIndex = source.indexOf(earlier);
+  const laterIndex = source.indexOf(later);
+  assert.notEqual(
+    earlierIndex,
+    -1,
+    `missing earlier marker ${JSON.stringify(earlier)}`,
+  );
+  assert.notEqual(
+    laterIndex,
+    -1,
+    `missing later marker ${JSON.stringify(later)}`,
+  );
+  assert.ok(earlierIndex < laterIndex, message);
+}
+
+function sourceIndexes(source, needle) {
+  const indexes = [];
+  let offset = 0;
+  for (;;) {
+    const index = source.indexOf(needle, offset);
+    if (index === -1) return indexes;
+    indexes.push(index);
+    offset = index + needle.length;
+  }
 }
 
 function reconstructLegacyOrchestrator() {
@@ -839,6 +867,23 @@ test("leakSignals flags a PR number and a reviewer login, not a bare review", ()
   });
   assert.equal(leaked.suspected, true);
   assert.equal(leaked.hard.length, 2);
+});
+
+test("leakSignals keeps truth-independent checks when truth is absent", () => {
+  for (const truth of [null, undefined]) {
+    assert.deepEqual(
+      leakSignals({ transcript: "ordinary review", truth, pr: 1990 }),
+      { suspected: false, hard: [], advisory: [] },
+    );
+  }
+  assert.deepEqual(
+    leakSignals({ transcript: "reviewed #1990", truth: null, pr: 1990 }),
+    {
+      suspected: true,
+      hard: ["transcript names PR 1990"],
+      advisory: [],
+    },
+  );
 });
 
 test("a reviewer login the fixture's own source names is not a leak", () => {
@@ -4717,9 +4762,10 @@ test("one review eval at a time may hold the shared run state", async () => {
     const lock = path.join(lockRoot, "run.lock");
     const cacheLock = path.join(cache, "run.lock");
     const lockFunction = shellFunction("acquire_one_lock");
-    assert.ok(
-      lockFunction.indexOf('"$claim_ticket" "$claim_file"') <
-        lockFunction.indexOf('rm -rf "$lock"'),
+    assertBefore(
+      lockFunction,
+      '"$claim_ticket" "$claim_file"',
+      'rm -rf "$lock"',
       "a stale lock is deleted before this process claims it",
     );
 
@@ -4734,11 +4780,32 @@ test("one review eval at a time may hold the shared run state", async () => {
     // The owner record is complete before its hard link makes the lock path
     // visible. A suspended owner therefore exposes no pid-less lock that a
     // contender can mistake for stale state.
-    assert.ok(
-      lockFunction.indexOf(`printf '%s\\n' "$$" >"$owner_ticket"`) <
-        lockFunction.indexOf('"$owner_ticket" "$lock" 2>/dev/null'),
-      "the lock is published before its owner record is complete",
+    const ownerWrites = sourceIndexes(
+      lockFunction,
+      `printf '%s\\n' "$$" >"$owner_ticket"`,
     );
+    const ownerPublications = sourceIndexes(
+      lockFunction,
+      '"$owner_ticket" "$lock" 2>/dev/null',
+    );
+    assert.equal(ownerWrites.length, 2, "expected two owner-record writes");
+    assert.equal(
+      ownerPublications.length,
+      2,
+      "expected two owner-record publications",
+    );
+    for (let index = 0; index < ownerWrites.length; index += 1) {
+      assert.ok(
+        ownerWrites[index] < ownerPublications[index],
+        `owner record ${index + 1} is published before it is complete`,
+      );
+      if (index + 1 < ownerWrites.length) {
+        assert.ok(
+          ownerPublications[index] < ownerWrites[index + 1],
+          `owner publication ${index + 1} crosses into the next owner path`,
+        );
+      }
+    }
     assert.match(
       lockFunction,
       /linkSync\(process\.argv\[1\], process\.argv\[2\]\)/,
@@ -4871,13 +4938,14 @@ test("one review eval at a time may hold the shared run state", async () => {
 });
 
 test("the run lock is taken before anything touches the fixtures", () => {
-  const wrapper = runEvalSource("wrapper");
+  const script = reconstructLegacyOrchestrator();
   const lifecycle = runEvalSource("lifecycle");
   // Taken before the spec worktree, the plan and the matrix, and released by
   // the EXIT trap so an interrupted run does not wedge the next one.
-  assert.ok(
-    wrapper.indexOf("# RUN-EVAL-EXTRACT-BEGIN lifecycle-setup") <
-      wrapper.indexOf("# --- the spec worktree"),
+  assertBefore(
+    script,
+    "\nacquire_run_lock\n",
+    "# --- the spec worktree",
     "the run lock is taken after the spec worktree is added",
   );
   assert.match(lifecycle, /\nacquire_run_lock\n/);
@@ -4891,9 +4959,11 @@ test("the run lock is taken before anything touches the fixtures", () => {
     lifecycle,
     /LOCK_ROOT="\$\(git -C "\$REPO" rev-parse --absolute-git-dir/,
   );
-  assert.ok(
-    lifecycle.indexOf('acquire_one_lock "$LOCK_ROOT"') <
-      lifecycle.indexOf('acquire_one_lock "$CACHE_DIR"'),
+  assertBefore(
+    lifecycle,
+    'acquire_one_lock "$LOCK_ROOT"',
+    'acquire_one_lock "$CACHE_DIR"',
+    "the cache lock is taken before the checkout lock",
   );
 });
 
@@ -4938,11 +5008,13 @@ test("the orchestrator carries one baseline through plan, score, validate and re
 });
 
 test("the orchestrator rejects an ineligible baseline before paid work", () => {
-  const script = runEvalSourceSet();
+  const script = reconstructLegacyOrchestrator();
   assert.equal(script.match(/baselineEligibility\(row\)/g)?.length, 2);
-  assert.ok(
-    script.indexOf("baselineEligibility(row)") <
-      script.indexOf("# --- the run deadline"),
+  assertBefore(
+    script,
+    "baselineEligibility(row)",
+    "# --- the run deadline",
+    "baseline eligibility is checked after the run deadline starts",
   );
   assert.ok(
     script.lastIndexOf("baselineEligibility(row)") <
@@ -4955,13 +5027,17 @@ test("the orchestrator rejects an ineligible baseline before paid work", () => {
     script,
     /JSON\.stringify\(plannedBaseline\) !== JSON\.stringify\(currentBaseline\)/,
   );
-  assert.ok(
-    script.indexOf("baselinePreflightProblems({") <
-      script.indexOf("# --- the run deadline"),
+  assertBefore(
+    script,
+    "baselinePreflightProblems({",
+    "# --- the run deadline",
+    "baseline preflight runs after the run deadline starts",
   );
-  assert.ok(
-    script.indexOf("baselinePlanIdentity(row)") <
-      script.indexOf("# --- the run deadline"),
+  assertBefore(
+    script,
+    "baselinePlanIdentity(row)",
+    "# --- the run deadline",
+    "baseline identity is checked after the run deadline starts",
   );
   assert.match(
     script,
@@ -4978,9 +5054,11 @@ test("the orchestrator rejects an ineligible baseline before paid work", () => {
     false,
   );
   assert.match(script, /AGAINST="\$BASELINE_SNAPSHOT"/);
-  assert.ok(
-    script.indexOf('AGAINST="$BASELINE_SNAPSHOT"') <
-      script.indexOf("# --- the run deadline"),
+  assertBefore(
+    script,
+    'AGAINST="$BASELINE_SNAPSHOT"',
+    "# --- the run deadline",
+    "the baseline snapshot is selected after the run deadline starts",
   );
   assert.match(script, /rm -f "\$BASELINE_SNAPSHOT"/);
   assert.match(script, /eligible complete full baseline row/);
@@ -6517,6 +6595,77 @@ test("--revalidate-appended binds partial rows to every scored PR", () => {
       legitimatePartial.status,
       0,
       legitimatePartial.stdout + legitimatePartial.stderr,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("run evidence reports malformed fixture contracts without hiding result defects", () => {
+  const root = makeRoot();
+  try {
+    const row = makeRow({ fullMatrix: true });
+    const detail = writeRowEvidence(root, row);
+    const resultFile = path.join(detail, "result-1990-pipeline-1.json");
+    const result = JSON.parse(readFileSync(resultFile, "utf8"));
+    result.claims = [null];
+    writeFileSync(resultFile, JSON.stringify(result));
+
+    for (const malformedContract of [
+      null,
+      {},
+      { fixtures: {} },
+      { fixtures: [null] },
+      { fixtures: [{ pr: "1990", scorable_ids: [] }] },
+      { fixtures: [{ pr: 1990, scorable_ids: null }] },
+    ]) {
+      const problems = runEvidenceProblems({
+        dir: detail,
+        row,
+        contract: malformedContract,
+      });
+      assert.equal(
+        problems.filter((problem) =>
+          problem.includes("contract.fixtures must be an array"),
+        ).length,
+        1,
+        problems.join(" | "),
+      );
+      assert.ok(
+        problems.some((problem) =>
+          /claims must contain only non-empty strings/.test(problem),
+        ),
+        problems.join(" | "),
+      );
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("run evidence handles malformed fixture contracts for partial rows", () => {
+  const root = makeRoot();
+  try {
+    const row = makeRow({ status: "partial" });
+    const detail = writeRowEvidence(root, row);
+    row.conditions.replay = structuredClone(row.conditions.pipeline);
+    const problems = runEvidenceProblems({
+      dir: detail,
+      row,
+      contract: { fixtures: [null] },
+    });
+    assert.equal(
+      problems.filter((problem) =>
+        problem.includes("contract.fixtures must be an array"),
+      ).length,
+      1,
+      problems.join(" | "),
+    );
+    assert.ok(
+      problems.some((problem) =>
+        /carries no scored result for row condition replay/.test(problem),
+      ),
+      problems.join(" | "),
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
