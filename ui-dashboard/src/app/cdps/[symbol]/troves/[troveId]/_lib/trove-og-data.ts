@@ -190,10 +190,13 @@ export async function fetchTroveOgDataUncached(
   if (params === null || CELO.hasuraUrl === "") return null;
   try {
     const client = makeOgGraphQLClient(CELO);
+    // Both sequential reads share one upstream budget. A slow collateral lookup
+    // must not leave a fresh timeout window for the exact-trove lookup.
+    const signal = AbortSignal.timeout(HASURA_TIMEOUT_MS);
     const collaterals = await client.request<CdpTroveOgCollateralsQuery>({
       document: CDP_TROVE_OG_COLLATERALS,
       variables: { chainId: CELO.chainId },
-      signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
+      signal,
     });
     const collateral = (collaterals.LiquityCollateral ?? []).find(
       (row) => cdpSymbolSlug(row.symbol) === params.symbol,
@@ -204,7 +207,7 @@ export async function fetchTroveOgDataUncached(
       variables: {
         troveEntityId: makeTroveEntityId(collateral.id, params.troveId),
       },
-      signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
+      signal,
     });
     const trove = result.Trove?.[0];
     return trove === undefined

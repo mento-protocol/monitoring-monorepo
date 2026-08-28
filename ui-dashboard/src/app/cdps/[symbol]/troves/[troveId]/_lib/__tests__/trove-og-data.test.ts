@@ -142,6 +142,14 @@ describe("fetchTroveOgDataUncached", () => {
         variables: { troveEntityId: "gbpm-0x8abc" },
       }),
     );
+    const firstSignal = (
+      GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+    ).mock.calls[0]?.[0]?.signal;
+    const secondSignal = (
+      GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+    ).mock.calls[1]?.[0]?.signal;
+    expect(firstSignal).toBeInstanceOf(AbortSignal);
+    expect(secondSignal).toBe(firstSignal);
   });
 
   it("uses the close timestamp and status when the position has ended", async () => {
