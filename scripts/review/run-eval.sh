@@ -41,11 +41,11 @@
 #               [--repo PATH] [--cache-dir DIR] [--deadline SECONDS]
 #               [--against REF]
 #
-# --against names the baseline row this run is scored, validated and reported
-# against: a row file path or an executed_at prefix. The candidate procedure
-# needs it — a --skill-ref run must be compared against the installed run from
-# the same sitting, not against the ledger's stored anchor, or the comparison
-# carries whatever the model did between the anchor and today.
+# --against names the baseline row this run is planned, scored, validated and
+# reported against: a row file path or an executed_at prefix. The candidate
+# procedure needs it — a --skill-ref run must be compared against the installed
+# run from the same sitting, not against the ledger's stored anchor, or the
+# comparison carries whatever the model did between the anchor and today.
 #
 # --deadline bounds the whole run, cells and scoring together. Three quarters of
 # it start cells and bound each finder and contestant process; the rest is
@@ -403,6 +403,9 @@ PLAN_ARGS=(--root "$SPEC" --ledger "$LEDGER" --plan --kind "$KIND" --json)
 if [[ -n $SKILL_REF ]]; then
   PLAN_ARGS+=(--skill-ref "$SKILL_REF")
 fi
+if [[ -n $AGAINST ]]; then
+  PLAN_ARGS+=(--against "$AGAINST")
+fi
 node "$CLI" "${PLAN_ARGS[@]}" >"$PLAN_OUT" || fail "planning failed"
 
 # Read one top-level string field out of a JSON file.
@@ -427,6 +430,9 @@ PLAN_ARGS=(--root "$SPEC" --ledger "$LEDGER" --plan --kind "$KIND" --json
   --out "$RUN_DIR")
 if [[ -n $SKILL_REF ]]; then
   PLAN_ARGS+=(--skill-ref "$SKILL_REF")
+fi
+if [[ -n $AGAINST ]]; then
+  PLAN_ARGS+=(--against "$AGAINST")
 fi
 node "$CLI" "${PLAN_ARGS[@]}" >"$PLAN_OUT" ||
   fail "planning into $RUN_DIR failed"

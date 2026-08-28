@@ -377,6 +377,7 @@ export function buildPlan({
   skillRef = null,
   runsDir = DEFAULT_RUNS_DIR,
   ledgerRows = [],
+  baselineIsExplicit = false,
   now = new Date(),
   env = process.env,
   write = true,
@@ -431,6 +432,7 @@ export function buildPlan({
     comparability_key: key,
     judge: { ...contract.judge },
     detail_dir: detailDir,
+    baseline_selection: baselineIsExplicit ? "explicit" : "automatic",
     // The directory of the previous execution under this name, whose cells this
     // one may seed from, or null when this is the first. Never the directory
     // this run writes to: a recorded row's evidence is not overwritten.
@@ -1116,6 +1118,13 @@ export async function scorePlan({
   now = new Date(),
   write = true,
 }) {
+  const baselineIsExplicit = baselineRow !== null;
+  const baselineSelection = baselineIsExplicit ? "explicit" : "automatic";
+  if (plan.baseline_selection !== baselineSelection) {
+    throw new Error(
+      `plan baseline_selection is ${String(plan.baseline_selection)}; this score command is ${baselineSelection}`,
+    );
+  }
   // Freeze every truth object before the first model call. A candidate run uses
   // the operator's live checkout, and calibration can take long enough for an
   // edit after the CLI's digest check to otherwise change later cell scoring.
@@ -1232,9 +1241,12 @@ export async function scorePlan({
     detail_dir: plan.detail_dir,
     notes: notes.join(" | "),
   };
-  const baselineIsExplicit = baselineRow !== null;
   const baseline = baselineRow ?? resolveBaseline({ rows: ledgerRows, row });
-  row.vs_baseline = buildVsBaseline({ row, baselineRow: baseline });
+  row.vs_baseline = buildVsBaseline({
+    row,
+    baselineRow: baseline,
+    selection: baselineSelection,
+  });
   const decision = verdict({
     contract,
     row,

@@ -124,9 +124,12 @@ dirty `--skill-ref`
 candidate row can name an installed baseline that is not committed on the same
 branch. CI recomputes that candidate against its own evidence and counts it in
 `unpaired_baselines`. An installed row cannot use this waiver.
-For each installed row, CI also resolves the automatic baseline from ledger
-append order and requires the row to name that exact anchor. A row cannot name
-a later row on the same branch as its baseline.
+Each paired row records whether `--against` selected its baseline or append
+order selected it automatically. `plan.json` records the same choice before
+the run spends model quota. CI requires both records to match. For every
+automatic row, including a dirty candidate, CI resolves the baseline from
+ledger append order and requires the row to name that exact anchor. An
+automatic row cannot name a later row on the same branch as its baseline.
 
 Both the ledger check and `--validate --append` hold the frozen denominator. A
 condition that scored a PR at all carries every defect that PR froze, and a
@@ -242,12 +245,14 @@ publish stages that whole file next to its own detail directory alone. The
 installed run's detail directory is then never committed, and there is no
 second ledger delta left for a PR of its own.
 
-`--against` takes a row file path or an `executed_at` prefix and reaches
-`--score`, `--validate` and `--report` alike, so all three read the same
-baseline. Without it the candidate resolves the ledger's stored anchor. That
-stamps `skill_ref` and `dirty: true` into the ledger row. Never compare a
-candidate against a ledger row from three months ago: that comparison silently
-includes an unknown amount of model drift.
+`--against` takes a row file path or an `executed_at` prefix and reaches the
+plan, `--score`, `--validate` and `--report` alike. The plan and row therefore
+record `selection: "explicit"`, and all steps read the same baseline. Without
+it the plan and row record automatic selection, and the candidate resolves the
+ledger's stored anchor. A candidate also stamps `skill_ref` and `dirty: true`
+into the ledger row. Never compare a candidate against a ledger row from three
+months ago: that comparison silently includes an unknown amount of model
+drift.
 
 The run ends by printing the branch, commit and `gh pr create` commands for the
 ledger PR. Pass `--pr` to execute them instead. There is no auto-merge; a human
@@ -424,8 +429,8 @@ the contract, so each of those is an ordinary full run against its own
 
 The bridge row is assembled by hand from the newer of the two runs: copy its
 `row.json`, set `kind` to `"bridge"`, and record the retiring run's
-`executed_at`, its `comparability_key`, and the McNemar delta between the two
-in `vs_baseline`. `--validate ROW --detail-dir RUNDIR --append --against
+`executed_at`, its `comparability_key`, `selection: "explicit"`, and the
+McNemar delta between the two in `vs_baseline`. `--validate ROW --detail-dir RUNDIR --append --against
 RETIRING_ROW` re-derives every recorded number from the run detail before
 appending, `vs_baseline` included: the McNemar counts are recomputed from the
 two rows' `per_defect` vectors and a stated `baseline_executed_at`,

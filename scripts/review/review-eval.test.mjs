@@ -279,6 +279,7 @@ function writeRowEvidence(root, row) {
       comparability_key: row.comparability_key,
       kind: row.kind,
       detail_dir: row.detail_dir,
+      baseline_selection: row.vs_baseline?.selection ?? "automatic",
       inputs: row.inputs,
       cells,
     }),
@@ -505,6 +506,7 @@ test("--plan writes plan.json and pins the comparability key", () => {
     assert.equal(result.status, 0, result.stderr);
     const plan = JSON.parse(result.stdout);
     assert.equal(plan.kind, "canary");
+    assert.equal(plan.baseline_selection, "automatic");
     assert.equal(plan.cells.length, 3);
     assert.equal(
       plan.comparability_key,
@@ -541,6 +543,22 @@ test("--plan --skill-ref stamps a dirty candidate run", () => {
     const plan = JSON.parse(result.stdout);
     assert.equal(plan.inputs.dirty, true);
     assert.match(plan.inputs.skill_ref, /prompts$/);
+
+    const explicit = cli(
+      [
+        "--plan",
+        "--kind",
+        "canary",
+        "--against",
+        "/tmp/baseline-row.json",
+        "--out",
+        path.join(root, "explicit-plan"),
+        "--json",
+      ],
+      { root, env: planEnv },
+    );
+    assert.equal(explicit.status, 0, explicit.stderr);
+    assert.equal(JSON.parse(explicit.stdout).baseline_selection, "explicit");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1052,12 +1070,26 @@ test("revalidateRow recomputes vs_baseline instead of trusting it", () => {
     executedAt: "2026-12-08T10:00:00Z",
     matchedIds: scorableIdsFor([1990]),
   });
-  row.vs_baseline = buildVsBaseline({ row, baselineRow });
+  row.vs_baseline = buildVsBaseline({
+    row,
+    baselineRow,
+    selection: "explicit",
+  });
   row.verdict = verdict({ contract, row, baselineRow }).verdict;
   assert.ok(row.vs_baseline.mcnemar.b > 0, "the fixture pair must flip");
   assert.deepEqual(
     revalidateRow({ contract, row, repoRoot, baselineRow }).problems,
     [],
+  );
+  assert.match(
+    revalidateRow({
+      contract,
+      row,
+      repoRoot,
+      baselineRow,
+      baselineIsExplicit: false,
+    }).problems.join(" | "),
+    /row\.vs_baseline\.selection is explicit; this validation uses automatic/,
   );
 
   const flattened = {
@@ -3020,6 +3052,7 @@ test("scorePlan stores no McNemar against an incomparable baseline", async () =>
       kind: "canary",
       repoRoot: root,
       outDir: path.join(root, "run"),
+      baselineIsExplicit: true,
       env: planEnv,
     });
     for (const cell of plan.cells) {
@@ -3059,6 +3092,7 @@ test("scorePlan stores no McNemar against an incomparable baseline", async () =>
     // else. That pair is recorded, never counted.
     const foreign = await score(makeRow({ key: "c".repeat(64) }));
     assert.deepEqual(validateLedgerRow(foreign.row), []);
+    assert.equal(foreign.row.vs_baseline.selection, "explicit");
     assert.equal(foreign.row.vs_baseline.mcnemar, null);
     assert.equal(
       foreign.row.vs_baseline.baseline_comparability_key,
@@ -3067,6 +3101,10 @@ test("scorePlan stores no McNemar against an incomparable baseline", async () =>
 
     const paired = await score(makeRow());
     assert.equal(typeof paired.row.vs_baseline.mcnemar.delta, "number");
+    await assert.rejects(
+      score(null),
+      /plan baseline_selection is explicit; this score command is automatic/,
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -4117,7 +4155,7 @@ test("the orchestrator rejects a cell whose finder or report failed", () => {
   assert.match(script, /frozen finder report \$finder_report is unreadable/);
 });
 
-test("the orchestrator carries one baseline through score, validate and report", () => {
+test("the orchestrator carries one baseline through plan, score, validate and report", () => {
   const script = readFileSync(
     path.join(repoRoot, "scripts/review/run-eval.sh"),
     "utf8",
@@ -4125,8 +4163,13 @@ test("the orchestrator carries one baseline through score, validate and report",
   // The candidate procedure runs the installed skill and the candidate in one
   // sitting. Without a baseline argument the candidate resolves the ledger's
   // stored anchor instead, which is the model drift the procedure exists to
-  // exclude. The same argument reaches all three commands so the row, its
-  // revalidation and the PR body cannot disagree about what it was ranked on.
+  // exclude. The same argument reaches both plans and all three later commands
+  // so the plan, row, revalidation and PR body cannot disagree about what it
+  // was ranked on.
+  assert.equal(
+    script.match(/PLAN_ARGS\+\=\(--against "\$AGAINST"\)/g)?.length,
+    2,
+  );
   assert.match(script, /AGAINST_ARGS=\(--against "\$AGAINST"\)/);
   const expansion = /"\$\{AGAINST_ARGS\[@\]\+"\$\{AGAINST_ARGS\[@\]\}"\}"/g;
   assert.equal(script.match(expansion)?.length, 3);
@@ -4750,6 +4793,7 @@ test("--revalidate-appended leaves an unpaired row's verdict alone", () => {
     };
     row.vs_baseline = {
       baseline_executed_at: "2026-08-01T09:00:00Z",
+      selection: "explicit",
       baseline_comparability_key: row.comparability_key,
       mcnemar: { b: 0, c: 6, delta: -6 },
     };
@@ -4761,6 +4805,18 @@ test("--revalidate-appended leaves an unpaired row's verdict alone", () => {
     const report = JSON.parse(unpaired.stdout);
     assert.equal(report.unpaired_baselines, 1);
     assert.equal(report.revalidated_rows, 1);
+
+    // Automatic selection cannot waive a missing row. An automatic baseline
+    // must resolve from this ledger's append order.
+    row.vs_baseline.selection = "automatic";
+    writeRowEvidence(root, row);
+    writeFileSync(ledgerPath, `${JSON.stringify(row)}\n`);
+    const missingAutomatic = cli(flags, { root });
+    assert.equal(missingAutomatic.status, 1);
+    assert.match(
+      JSON.parse(missingAutomatic.stdout).problems.join(" | "),
+      /only a dirty --skill-ref candidate row with explicit selection/,
+    );
 
     // The suppression is only for the row whose recorded baseline is missing.
     // A row that records no pairing at all is still recomputed, so a forged
@@ -4795,6 +4851,7 @@ test("--revalidate-appended refuses a missing baseline on an installed row", () 
     const row = makeRow({ fullMatrix: true });
     row.vs_baseline = {
       baseline_executed_at: "2026-08-01T09:00:00Z",
+      selection: "automatic",
       baseline_comparability_key: row.comparability_key,
       mcnemar: { b: 0, c: 0, delta: 0 },
     };
@@ -4819,6 +4876,69 @@ test("--revalidate-appended refuses a missing baseline on an installed row", () 
   }
 });
 
+test("--revalidate-appended preserves an automatic candidate baseline", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "base");
+
+    // Append order makes this the anchor even though its wall-clock timestamp
+    // is later. Automatic selection must keep append-order semantics for a
+    // candidate in the same way it does for an installed run.
+    const anchor = makeRow({
+      executedAt: "2026-10-08T10:00:00Z",
+      fullMatrix: true,
+    });
+    const candidate = makeRow({
+      executedAt: "2026-09-08T10:00:00Z",
+      fullMatrix: true,
+    });
+    candidate.detail_dir = "docs/evals/review-skill-runs/2026-09-08-candidate";
+    candidate.inputs = {
+      ...candidate.inputs,
+      skill_ref: "/tmp/review-candidate",
+      dirty: true,
+    };
+    candidate.vs_baseline = buildVsBaseline({
+      row: candidate,
+      baselineRow: anchor,
+      selection: "automatic",
+    });
+    candidate.verdict = verdict({
+      contract,
+      row: candidate,
+      baselineRow: anchor,
+      baselineIsExplicit: false,
+    }).verdict;
+    writeRowEvidence(root, anchor);
+    writeRowEvidence(root, candidate);
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(anchor)}\n${JSON.stringify(candidate)}\n`,
+    );
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 0, checked.stdout + checked.stderr);
+    assert.equal(JSON.parse(checked.stdout).revalidated_rows, 2);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("--revalidate-appended refuses a later appended automatic baseline", () => {
   const root = makeRoot();
   try {
@@ -4834,12 +4954,21 @@ test("--revalidate-appended refuses a later appended automatic baseline", () => 
       executedAt: "2026-09-08T10:00:00Z",
       fullMatrix: true,
     });
+    first.inputs = {
+      ...first.inputs,
+      skill_ref: "/tmp/review-candidate",
+      dirty: true,
+    };
     const later = makeRow({
       executedAt: "2026-10-08T10:00:00Z",
       fullMatrix: true,
     });
     later.detail_dir = "docs/evals/review-skill-runs/2026-10-08-deadbeef";
-    first.vs_baseline = buildVsBaseline({ row: first, baselineRow: later });
+    first.vs_baseline = buildVsBaseline({
+      row: first,
+      baselineRow: later,
+      selection: "automatic",
+    });
     writeRowEvidence(root, first);
     writeRowEvidence(root, later);
     writeFileSync(
@@ -4899,9 +5028,22 @@ test("--revalidate-appended checks a row against its committed plan", () => {
     const clean = cli(flags, { root });
     assert.equal(clean.status, 0, clean.stdout + clean.stderr);
 
+    // A scored explicit plan must retain its pairing. Removing vs_baseline and
+    // changing the verdict to the unpaired result cannot erase that evidence.
+    const planFile = path.join(detail, "plan.json");
+    const explicitPlan = JSON.parse(readFileSync(planFile, "utf8"));
+    explicitPlan.baseline_selection = "explicit";
+    writeFileSync(planFile, JSON.stringify(explicitPlan));
+    const lostPairing = cli(flags, { root });
+    assert.equal(lostPairing.status, 1);
+    assert.match(
+      JSON.parse(lostPairing.stdout).problems.join(" | "),
+      /row has no vs_baseline; plan\.json in .* planned an explicit baseline/,
+    );
+    writeRowEvidence(root, row);
+
     // plan.json is branch-editable evidence. Removing one planned cell and its
     // result cannot make that cell disappear from the frozen contract matrix.
-    const planFile = path.join(detail, "plan.json");
     const thinnedPlan = JSON.parse(readFileSync(planFile, "utf8"));
     const removedCell = thinnedPlan.cells.pop();
     writeFileSync(planFile, JSON.stringify(thinnedPlan));
@@ -5000,6 +5142,7 @@ test("a hand-assembled bridge row keeps the full run's plan", () => {
       comparability_key: row.comparability_key,
       kind: "full",
       detail_dir: row.detail_dir,
+      baseline_selection: "automatic",
       inputs: row.inputs,
       cells: planCells({ contract, kind: "full" }),
     };
@@ -5050,6 +5193,72 @@ test("a hand-assembled bridge row keeps the full run's plan", () => {
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended accepts an explicit bridge pairing", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "base");
+
+    const retiring = makeRow({
+      executedAt: "2026-08-08T10:00:00Z",
+      fullMatrix: true,
+    });
+    const newer = makeRow({
+      executedAt: "2026-09-08T10:00:00Z",
+      fullMatrix: true,
+    });
+    newer.detail_dir = "docs/evals/review-skill-runs/2026-09-08-new-model";
+    const bridge = JSON.parse(JSON.stringify(newer));
+    bridge.kind = "bridge";
+    bridge.vs_baseline = buildVsBaseline({
+      row: bridge,
+      baselineRow: retiring,
+      selection: "explicit",
+    });
+    bridge.verdict = verdict({
+      contract,
+      row: bridge,
+      baselineRow: retiring,
+      baselineIsExplicit: true,
+    }).verdict;
+    writeRowEvidence(root, retiring);
+    writeRowEvidence(root, newer);
+    const ledgerPath = path.join(root, ledgerRelative);
+    writeFileSync(
+      ledgerPath,
+      `${JSON.stringify(retiring)}\n${JSON.stringify(bridge)}\n`,
+    );
+    const flags = [
+      "--check-ledger",
+      "--revalidate-appended",
+      "--base-ref",
+      "HEAD",
+      "--json",
+    ];
+    const checked = cli(flags, { root });
+    assert.equal(checked.status, 0, checked.stdout + checked.stderr);
+
+    delete bridge.vs_baseline.selection;
+    writeFileSync(
+      ledgerPath,
+      `${JSON.stringify(retiring)}\n${JSON.stringify(bridge)}\n`,
+    );
+    const missingSelection = cli(flags, { root });
+    assert.equal(missingSelection.status, 1);
+    assert.match(
+      JSON.parse(missingSelection.stdout).problems.join(" | "),
+      /vs_baseline\.selection must record automatic or explicit/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

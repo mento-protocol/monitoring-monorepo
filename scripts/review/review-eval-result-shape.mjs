@@ -173,14 +173,16 @@ export function resolveBaseline({ rows, row }) {
  * re-derives is a claim, and `--validate` re-derives it from the same two
  * `per_defect` vectors the scorer read.
  */
-export function buildVsBaseline({ row, baselineRow }) {
+export function buildVsBaseline({ row, baselineRow, selection = null }) {
   if (!baselineRow) return null;
+  const selectionField = selection === null ? {} : { selection };
   const paired =
     row.comparability_key === baselineRow.comparability_key ||
     row.kind === "bridge";
   if (!paired) {
     return {
       baseline_executed_at: baselineRow.executed_at,
+      ...selectionField,
       baseline_comparability_key: baselineRow.comparability_key,
       mcnemar: null,
     };
@@ -192,6 +194,7 @@ export function buildVsBaseline({ row, baselineRow }) {
     : { b: 0, c: 0 };
   const vs = {
     baseline_executed_at: baselineRow.executed_at,
+    ...selectionField,
     baseline_comparability_key: baselineRow.comparability_key,
     mcnemar: { b: flips.b, c: flips.c, delta: flips.b - flips.c },
   };
@@ -477,12 +480,21 @@ function checkMcnemar(stated, expected, label, problems) {
  * A row that records no pairing at all is not a problem here: it under-claims,
  * and the verdict is derived from the baseline directly either way.
  */
-function checkVsBaseline({ row, baseline, problems }) {
+function checkVsBaseline({ row, baseline, baselineIsExplicit, problems }) {
   const stated = row.vs_baseline ?? null;
   if (!baseline || stated === null) return;
   if (!isShape(stated)) {
     problems.push("row.vs_baseline is neither null nor an object");
     return;
+  }
+  const expectedSelection = baselineIsExplicit ? "explicit" : "automatic";
+  if (
+    Object.hasOwn(stated, "selection") &&
+    stated.selection !== expectedSelection
+  ) {
+    problems.push(
+      `row.vs_baseline.selection is ${stated.selection}; this validation uses ${expectedSelection} baseline selection`,
+    );
   }
   const expected = buildVsBaseline({ row, baselineRow: baseline });
   if (stated.baseline_executed_at !== expected.baseline_executed_at) {
@@ -696,7 +708,7 @@ export function revalidateRow({
   }
   const baseline =
     baselineRow ?? resolveBaseline({ rows: ledgerRows ?? [], row });
-  checkVsBaseline({ row, baseline, problems });
+  checkVsBaseline({ row, baseline, baselineIsExplicit, problems });
   // The verdict is a function of the row and its baseline together: a net loss
   // of flips is RED and a net gain is PROMOTE, both read against the anchor.
   // `baselineMissing` says the caller knows the row was scored against a

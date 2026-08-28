@@ -425,7 +425,7 @@ export function validateLedgerRow(row, label = "row") {
         row.vs_baseline,
         `${label}.vs_baseline`,
         ["baseline_executed_at", "mcnemar"],
-        ["baseline_comparability_key", "control_mcnemar"],
+        ["baseline_comparability_key", "control_mcnemar", "selection"],
         problems,
       )
     ) {
@@ -455,6 +455,14 @@ export function validateLedgerRow(row, label = "row") {
           row.vs_baseline.baseline_comparability_key,
           `${label}.vs_baseline.baseline_comparability_key`,
           problems,
+        );
+      }
+      if (
+        Object.hasOwn(row.vs_baseline, "selection") &&
+        !["automatic", "explicit"].includes(row.vs_baseline.selection)
+      ) {
+        problems.push(
+          `${label}.vs_baseline.selection must be automatic or explicit`,
         );
       }
     }

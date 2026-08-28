@@ -66,7 +66,7 @@ export const DEFAULT_REVIEW_EVAL_REPO = "mento-protocol/monitoring-monorepo";
 const MODE_OPTIONS = {
   "check-fixtures": ["offline", "src-repo"],
   "check-ledger": ["base-ref", "require-base", "revalidate-appended"],
-  plan: ["kind", "skill-ref", "out", "runs-dir"],
+  plan: ["kind", "skill-ref", "out", "runs-dir", "against"],
   score: ["against", "calibration"],
   validate: ["append", "against", "calibration", "detail-dir"],
   report: ["against", "row"],
@@ -228,7 +228,7 @@ Options:
   --out DIR              Plan directory (default: the run's detail directory)
   --runs-dir PATH        Detail root (default: ${DEFAULT_RUNS_DIR})
   --against REF          Baseline row: a file path or an executed_at prefix
-                         (--score, --report, and --validate)
+                         (--plan, --score, --report, and --validate)
   --detail-dir DIR       Run detail to recompute from (--validate); default is
                          the row's own detail_dir under --root
   --row REF              Row to report (default: the newest ledger row)
@@ -576,6 +576,26 @@ export function planProvenanceProblems({ dir, row, contract }) {
       `row inputs do not match the inputs plan.json in ${row.detail_dir} recorded`,
     );
   }
+  if (!["automatic", "explicit"].includes(plan.baseline_selection)) {
+    problems.push(
+      `plan.json in ${row.detail_dir} carries invalid baseline_selection ${JSON.stringify(plan.baseline_selection)}`,
+    );
+  } else if (
+    plan.baseline_selection === "explicit" &&
+    row.vs_baseline === null &&
+    row.kind !== "bridge" &&
+    row.status !== "failed"
+  ) {
+    problems.push(
+      `row has no vs_baseline; plan.json in ${row.detail_dir} planned an explicit baseline`,
+    );
+  } else if (row.vs_baseline !== null && row.kind !== "bridge") {
+    if (row.vs_baseline?.selection !== plan.baseline_selection) {
+      problems.push(
+        `row baseline selection is ${JSON.stringify(row.vs_baseline?.selection)}; plan.json in ${row.detail_dir} planned ${JSON.stringify(plan.baseline_selection)}`,
+      );
+    }
+  }
   if (!Array.isArray(plan.cells)) {
     problems.push(`plan.json in ${row.detail_dir} carries no cells array`);
     return problems;
@@ -751,20 +771,26 @@ function revalidateAppendedRows({ options, context, result, base }) {
         : (rows.find((candidate) => candidate.executed_at === recordedAt) ??
           null);
     const missingRecordedBaseline = recordedAt !== null && baselineRow === null;
+    const baselineSelection = row.vs_baseline?.selection ?? null;
     const candidateMissingBaseline =
       missingRecordedBaseline &&
       row.inputs?.dirty === true &&
-      row.inputs?.skill_ref !== "installed";
+      row.inputs?.skill_ref !== "installed" &&
+      baselineSelection === "explicit";
     if (missingRecordedBaseline && !candidateMissingBaseline) {
       problems.push(
-        `${label}: baseline ${recordedAt} is not in the ledger; only a dirty --skill-ref candidate row may waive a missing baseline`,
+        `${label}: baseline ${recordedAt} is not in the ledger; only a dirty --skill-ref candidate row with explicit selection may waive a missing baseline`,
       );
     }
     const baselineMissing = candidateMissingBaseline;
     if (baselineMissing) unpaired += 1;
+    if (recordedAt !== null && baselineSelection === null) {
+      problems.push(
+        `${label}: vs_baseline.selection must record automatic or explicit baseline selection`,
+      );
+    }
     const baselineIsExplicit =
-      row.kind === "bridge" ||
-      (row.inputs?.dirty === true && row.inputs?.skill_ref !== "installed");
+      row.kind === "bridge" || baselineSelection === "explicit";
     if (!baselineMissing && !baselineIsExplicit) {
       const resolvedBaseline = resolveBaseline({ rows, row });
       const sameBaseline =
@@ -836,6 +862,7 @@ async function modePlan(options, context) {
     // The rows decide which detail directory this execution may own: one a row
     // already points at holds that row's evidence and is never written again.
     ledgerRows: rows,
+    baselineIsExplicit: options.against !== null,
   });
   printObject(plan, options.json);
 }
