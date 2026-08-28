@@ -3,7 +3,7 @@ title: PR Operating Card
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-26
+last_verified: 2026-08-27
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -152,11 +152,18 @@ even when you never open an authority.
    skill binds `origin`, the immutable base, and protected `main` before any
    adapter call. It invokes an absolute wrapper and explicit helper through
    `/bin/bash`, never through the package manager. If either review axis changes
-   `scripts/agent-autoreview.sh`, `scripts/agent-autoreview.mjs`, or
-   `scripts/agent-autoreview-core.mjs`, use the last independently reviewed
-   compatible pre-change runtime. After every semantic review and bound
-   postverification, run the sequential suite through `/bin/bash` as separate
-   behavior evidence. Authority:
+   `scripts/agent-autoreview.sh`, `scripts/agent-autoreview.mjs`,
+   `scripts/agent-autoreview-core.mjs`,
+   `scripts/gate/darwin-process-identity.c`,
+   `scripts/gate/darwin-process-identity-runtime.inc.c`,
+   `scripts/gate/darwin-process-identity-helper.mjs`,
+   `scripts/gate/darwin-process-lineage-model.mjs`,
+   `scripts/gate/darwin-process-lineage-state.mjs`,
+   `scripts/gate/darwin-process-lineage.mjs`, or
+   `scripts/gate/mapped-command-process-identity.mjs`, use the last
+   independently reviewed compatible pre-change runtime. After every semantic
+   review and bound postverification, run the sequential suite through
+   `/bin/bash` as separate behavior evidence. Authority:
    [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md).
 
 5. **Ship.** Open the PR through the `ship` skill on every surface, including

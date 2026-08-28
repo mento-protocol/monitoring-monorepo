@@ -55,6 +55,174 @@ suite_tmp_dir=""
 suite_child_pids=()
 suite_registry_in_progress=0
 suite_pending_exit=0
+suite_darwin_identity_helper=""
+suite_identity_root=""
+
+prepare_suite_darwin_identity_helper() {
+  local probe
+
+  [[ "$(/usr/bin/uname -s 2>/dev/null)" == "Darwin" ]] || return 0
+  [[ -n "$suite_identity_root" && -d "$suite_identity_root" ]] || return 1
+  [[ -f "$repo_root/scripts/gate/darwin-process-identity-runtime.inc.c" &&
+    ! -L "$repo_root/scripts/gate/darwin-process-identity-runtime.inc.c" ]] || return 1
+  suite_darwin_identity_helper="$suite_identity_root/darwin-process-identity"
+  /usr/bin/xcrun --sdk macosx clang \
+    -std=c11 -Wall -Wextra -Werror -O2 \
+    "$repo_root/scripts/gate/darwin-process-identity.c" \
+    -o "$suite_darwin_identity_helper" || return 1
+  chmod 0500 "$suite_darwin_identity_helper" || return 1
+  probe="$("$suite_darwin_identity_helper" probe)" || return 1
+  [[ "$probe" == "agentqg-darwin-process-identity-v3" ]]
+}
+
+persist_suite_darwin_child_identity() {
+  local pid="$1"
+  local owner_file
+  local owner_pid
+  local parent_row
+  local child_row
+  local parent_observed_pid parent_ppid parent_pgid parent_state
+  local parent_uid parent_ruid parent_svuid parent_unique_id
+  local parent_parent_unique_id parent_resource_coalition_id
+  local parent_jetsam_coalition_id parent_pid_version
+  local child_observed_pid child_ppid child_pgid child_state
+  local child_uid child_ruid child_svuid child_unique_id
+  local child_parent_unique_id child_resource_coalition_id
+  local child_jetsam_coalition_id child_pid_version
+  local identity_path
+
+  [[ "$(/usr/bin/uname -s 2>/dev/null)" == "Darwin" ]] || return 0
+  [[
+    "$pid" =~ ^[1-9][0-9]*$ &&
+      -x "$suite_darwin_identity_helper"
+  ]] || return 1
+  owner_file="$(/usr/bin/mktemp "$suite_identity_root/suite-owner.XXXXXX")" ||
+    return 1
+  chmod 0600 "$owner_file" || return 1
+  if ! /usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C \
+    /usr/bin/perl -e 'print getppid(), "\n";' >"$owner_file" ||
+    ! IFS= read -r owner_pid <"$owner_file"; then
+    rm -f -- "$owner_file"
+    return 1
+  fi
+  rm -f -- "$owner_file"
+  [[ "$owner_pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  parent_row="$("$suite_darwin_identity_helper" identity "$owner_pid")" ||
+    return 1
+  child_row="$("$suite_darwin_identity_helper" identity "$pid")" || return 1
+  # Keep the fixed twelve-field schema aligned while binding the live kernel
+  # parent and child before either can be reaped.
+  # shellcheck disable=SC2034
+  IFS=$'\t' read -r \
+    parent_observed_pid parent_ppid parent_pgid parent_state \
+    parent_uid parent_ruid parent_svuid parent_unique_id \
+    parent_parent_unique_id parent_resource_coalition_id \
+    parent_jetsam_coalition_id parent_pid_version <<<"$parent_row"
+  # shellcheck disable=SC2034
+  IFS=$'\t' read -r \
+    child_observed_pid child_ppid child_pgid child_state \
+    child_uid child_ruid child_svuid child_unique_id \
+    child_parent_unique_id child_resource_coalition_id \
+    child_jetsam_coalition_id child_pid_version <<<"$child_row"
+  [[
+    "$parent_observed_pid" == "$owner_pid" &&
+      "$child_observed_pid" == "$pid" &&
+      "$child_ppid" == "$owner_pid" &&
+      "$child_parent_unique_id" == "$parent_unique_id" &&
+      "$child_resource_coalition_id" == "$parent_resource_coalition_id" &&
+      "$child_jetsam_coalition_id" == "$parent_jetsam_coalition_id" &&
+      "$child_unique_id" =~ ^[1-9][0-9]*$ &&
+      "$parent_unique_id" =~ ^[1-9][0-9]*$
+  ]] || return 1
+  identity_path="$suite_identity_root/suite-child.$pid.tsv"
+  {
+    printf 'agent-autoreview-suite-child-v1\n'
+    printf '%s\n' "$child_row"
+  } >"$identity_path" || return 1
+  chmod 0400 "$identity_path"
+}
+
+signal_suite_darwin_child_identity() {
+  local pid="$1"
+  local signal_number="$2"
+  local identity_path="$suite_identity_root/suite-child.$pid.tsv"
+  local header
+  local row
+  local observed_pid ppid pgid state uid ruid svuid unique_id
+  local parent_unique_id resource_coalition_id jetsam_coalition_id pid_version
+  local current
+  local current_status
+  local current_pid current_ppid current_pgid current_state
+  local current_uid current_ruid current_svuid current_unique_id
+  local current_parent_unique_id current_resource_coalition_id
+  local current_jetsam_coalition_id current_pid_version
+  local signal_status
+  local attempt
+
+  [[ -x "$suite_darwin_identity_helper" && -s "$identity_path" ]] || return 1
+  {
+    IFS= read -r header || return 1
+    IFS= read -r row || return 1
+    if IFS= read -r _; then
+      return 1
+    fi
+  } <"$identity_path"
+  [[ "$header" == "agent-autoreview-suite-child-v1" ]] || return 1
+  # shellcheck disable=SC2034
+  IFS=$'\t' read -r \
+    observed_pid ppid pgid state uid ruid svuid unique_id parent_unique_id \
+    resource_coalition_id jetsam_coalition_id pid_version <<<"$row"
+  [[ "$observed_pid" == "$pid" && "$unique_id" =~ ^[1-9][0-9]*$ ]] ||
+    return 1
+  for ((attempt = 0; attempt < 4; attempt++)); do
+    if current="$("$suite_darwin_identity_helper" identity "$pid" 2>/dev/null)"; then
+      current_status=0
+    else
+      current_status=$?
+    fi
+    [[ "$current_status" -ne 3 ]] || return 0
+    [[ "$current_status" -eq 0 ]] || return 1
+    # shellcheck disable=SC2034
+    IFS=$'\t' read -r \
+      current_pid current_ppid current_pgid current_state \
+      current_uid current_ruid current_svuid current_unique_id \
+      current_parent_unique_id current_resource_coalition_id \
+      current_jetsam_coalition_id current_pid_version <<<"$current"
+    [[ "$current_pid" == "$pid" && "$current_unique_id" == "$unique_id" ]] ||
+      return 0
+    if "$suite_darwin_identity_helper" signal \
+      "$pid" "$unique_id" "$signal_number" >/dev/null 2>&1; then
+      return 0
+    else
+      signal_status=$?
+    fi
+    [[ "$signal_status" -eq 4 ]] || {
+      [[ "$signal_status" -eq 3 ]] && return 0
+      return 1
+    }
+  done
+  return 1
+}
+
+signal_owned_suite_child() {
+  local pid="$1"
+  local signal_name="$2"
+  local host_platform
+  local signal_number
+
+  case "$signal_name" in
+    KILL) signal_number=9 ;;
+    TERM) signal_number=15 ;;
+    *) return 1 ;;
+  esac
+  host_platform="$(/usr/bin/uname -s 2>/dev/null)" || return 1
+  if [[ "$host_platform" == "Darwin" ]]; then
+    signal_suite_darwin_child_identity "$pid" "$signal_number"
+    return
+  fi
+  [[ "$host_platform" == "Linux" ]] || return 1
+  kill "-$signal_name" "$pid" 2>/dev/null
+}
 
 handle_suite_signal() {
   local exit_code="$1"
@@ -94,7 +262,7 @@ unregister_suite_child_pid() {
 reap_and_unregister_suite_wrapper() {
   local pid="$1"
   suite_registry_in_progress=1
-  while kill -0 "$pid" 2>/dev/null; do
+  while process_is_runnable "$pid"; do
     wait "$pid" 2>/dev/null || true
   done
   wait "$pid" 2>/dev/null || true
@@ -108,11 +276,7 @@ cleanup_suite_runner() {
   local group_pid
   for pid in "${suite_child_pids[@]:-}"; do
     [[ -n "$pid" ]] || continue
-    kill -TERM "$pid" 2>/dev/null || true
-  done
-  for pid in "${suite_child_pids[@]:-}"; do
-    [[ -n "$pid" ]] || continue
-    wait "$pid" 2>/dev/null || true
+    terminate_suite_process_group "$pid"
   done
   if [[ -n "$suite_tmp_dir" && -d "$suite_tmp_dir" ]]; then
     for group_file in "$suite_tmp_dir"/*.group; do
@@ -127,12 +291,191 @@ cleanup_suite_runner() {
   fi
 }
 
+settle_suite_darwin_child_lineage() {
+  local group_pid="$1"
+  local grace_tenths="$2"
+  local identity_path="$suite_identity_root/suite-child.$group_pid.tsv"
+
+  [[
+    -x "$suite_darwin_identity_helper" &&
+      -s "$identity_path" &&
+      "$grace_tenths" =~ ^[0-9]+$
+  ]] || return 1
+  "$node_bin" - \
+    "$suite_darwin_identity_helper" \
+    "$identity_path" \
+    "$grace_tenths" <<'NODE'
+const { spawnSync } = require("node:child_process");
+const fs = require("node:fs");
+
+const [helper, identityPath, graceTenths] = process.argv.slice(2);
+const pause = (milliseconds) =>
+  Atomics.wait(
+    new Int32Array(new SharedArrayBuffer(4)),
+    0,
+    0,
+    milliseconds,
+  );
+const parseRow = (line) => {
+  const fields = line.split("\t");
+  if (
+    fields.length !== 12 ||
+    fields.some((field) => !/^(?:0|[1-9]\d*)$/u.test(field)) ||
+    fields[9] === "0" ||
+    fields[10] === "0"
+  ) {
+    throw new Error(`malformed suite Darwin identity: ${line}`);
+  }
+  return {
+    pid: Number(fields[0]),
+    state: Number(fields[3]),
+    uniqueId: fields[7],
+    parentUniqueId: fields[8],
+  };
+};
+const authority = fs.readFileSync(identityPath, "utf8").trimEnd().split("\n");
+if (authority.shift() !== "agent-autoreview-suite-child-v1" || authority.length !== 1) {
+  throw new Error("invalid suite Darwin child authority");
+}
+const root = parseRow(authority[0]);
+const known = new Set([root.uniqueId]);
+const runHelper = (args, accepted) => {
+  const result = spawnSync(helper, args, {
+    encoding: "utf8",
+    env: { PATH: "/usr/bin:/bin" },
+    timeout: 5_000,
+  });
+  if (!accepted.includes(result.status)) {
+    throw new Error(
+      `suite Darwin helper ${args[0]} failed: ${result.stderr || result.stdout || result.status}`,
+    );
+  }
+  return result;
+};
+const parseSnapshot = (output) => {
+  const lines = output.trimEnd().split("\n");
+  const header = lines.shift().split("\t");
+  if (
+    header.length !== 8 ||
+    header[0] !== "agentqg-darwin-process-snapshot-v3"
+  ) {
+    throw new Error("invalid suite Darwin process snapshot header");
+  }
+  const decimal = (value, label, allowZero = true) => {
+    if (!/^[0-9]+$/u.test(value)) {
+      throw new Error(`invalid suite Darwin process snapshot ${label}`);
+    }
+    const parsed = BigInt(value);
+    if (!allowZero && parsed === 0n) {
+      throw new Error(`invalid suite Darwin process snapshot ${label}`);
+    }
+    return parsed;
+  };
+  const maximumUint64 = 18_446_744_073_709_551_615n;
+  const lower = decimal(header[1], "lower fence", false);
+  const upper = decimal(header[2], "upper fence", false);
+  const estimatedCount = decimal(header[3], "estimated count");
+  const listedCount = decimal(header[4], "listed count");
+  const capacity = decimal(header[5], "capacity");
+  const zeroPidCount = decimal(header[6], "PID-zero count");
+  const rowCount = decimal(header[7], "row count");
+  if (
+    lower === maximumUint64 ||
+    upper > maximumUint64 ||
+    upper !== lower + 1n ||
+    zeroPidCount !== 1n ||
+    listedCount <= zeroPidCount ||
+    estimatedCount - (listedCount - zeroPidCount) < 20n ||
+    listedCount >= capacity ||
+    rowCount > listedCount
+  ) {
+    throw new Error("invalid suite Darwin process snapshot proof");
+  }
+  const rows = lines.length === 0 ? [] : lines.map(parseRow);
+  if (BigInt(rows.length) !== rowCount) {
+    throw new Error("suite Darwin process snapshot row count changed");
+  }
+  const pids = new Set();
+  const uniqueIds = new Set();
+  for (const row of rows) {
+    if (
+      BigInt(row.uniqueId) >= lower ||
+      pids.has(row.pid) ||
+      uniqueIds.has(row.uniqueId)
+    ) {
+      throw new Error("invalid suite Darwin process snapshot row proof");
+    }
+    pids.add(row.pid);
+    uniqueIds.add(row.uniqueId);
+  }
+  return rows;
+};
+const snapshot = () => {
+  let result;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    result = runHelper(["snapshot"], [0, 5]);
+    if (result.status === 0) return parseSnapshot(result.stdout);
+    if (attempt < 3) pause(10 + ((process.pid + attempt * 17) % 31));
+  }
+  throw new Error(
+    `suite Darwin process snapshot remained contended: ${result.stderr || result.stdout || result.status}`,
+  );
+};
+const ownedRows = () => {
+  const rows = snapshot();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const row of rows) {
+      if (!known.has(row.uniqueId) && known.has(row.parentUniqueId)) {
+        known.add(row.uniqueId);
+        changed = true;
+      }
+    }
+  }
+  return rows.filter((row) => known.has(row.uniqueId) && row.state !== 5);
+};
+const signalRows = (rows, signal) => {
+  for (const row of rows.reverse()) {
+    runHelper(
+      ["signal", String(row.pid), row.uniqueId, String(signal)],
+      [0, 3, 4],
+    );
+  }
+};
+signalRows(ownedRows(), 15);
+pause(Number(graceTenths) * 100);
+let emptyRounds = 0;
+for (let round = 0; round < 100; round += 1) {
+  const live = ownedRows();
+  if (live.length === 0) {
+    emptyRounds += 1;
+    if (emptyRounds === 2) process.exit(0);
+  } else {
+    emptyRounds = 0;
+    signalRows(live, 9);
+  }
+  pause(50);
+}
+throw new Error("suite Darwin exact lineage did not reach an empty set");
+NODE
+}
+
 terminate_suite_process_group() {
   local group_pid="$1"
   local grace_tenths="${2:-70}"
   local attempt
+  local host_platform
 
   [[ -n "$group_pid" ]] || return 0
+  host_platform="$(/usr/bin/uname -s 2>/dev/null)" || return 1
+  if [[ "$host_platform" == "Darwin" ]]; then
+    settle_suite_darwin_child_lineage \
+      "$group_pid" "$grace_tenths" || return 1
+    wait "$group_pid" 2>/dev/null || true
+    return 0
+  fi
+  [[ "$host_platform" == "Linux" ]] || return 1
   if ! kill -0 -- "-$group_pid" 2>/dev/null; then
     wait "$group_pid" 2>/dev/null || true
     return 0
@@ -171,10 +514,22 @@ process_state_code() {
 
 process_is_runnable() {
   local pid="$1"
+  local host_platform
   local state
 
   # Invalid fixture output must fail closed as a surviving process.
   [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 0
+  host_platform="$(/usr/bin/uname -s 2>/dev/null)" || return 0
+  if [[ "$host_platform" == "Darwin" ]]; then
+    # A numeric kill(2) probe has the same reusable-PID problem as a
+    # destructive signal. ps is read-only and reports no row after exit.
+    state="$(process_state_code "$pid")" || return 1
+    case "$state" in
+      Z | X) return 1 ;;
+      *) return 0 ;;
+    esac
+  fi
+  [[ "$host_platform" == "Linux" ]] || return 0
   kill -0 "$pid" 2>/dev/null || return 1
   if state="$(process_state_code "$pid")"; then
     case "$state" in
@@ -200,6 +555,27 @@ wait_for_process_exit_or_zombie() {
     sleep 0.05
   done
   return 1
+}
+
+assert_helper_descendant_cleanup_contract() {
+  local context="$1"
+  local pid="$2"
+
+  if [[ "$(/usr/bin/uname -s)" == "Darwin" ]]; then
+    if wait_for_process_exit_or_zombie "$pid" 200; then
+      return 0
+    fi
+    printf '%s descendant survived standalone Darwin exact-lineage cleanup: %s\n' \
+      "$context" "$pid" >&2
+    return 1
+  fi
+
+  if ! wait_for_process_exit_or_zombie "$pid"; then
+    kill -KILL "$pid" 2>/dev/null || true
+    printf '%s descendant survived Linux process-group cleanup: %s\n' \
+      "$context" "$pid" >&2
+    return 1
+  fi
 }
 
 signal_cleanup_fixture_is_ready() {
@@ -310,6 +686,8 @@ run_autoreview_test_suite() {
   local suite_tmp_parent="$trusted_fixture_parent"
   suite_tmp_dir="$(/usr/bin/mktemp -d "$suite_tmp_parent/agent-autoreview-suite.XXXXXX")"
   suite_tmp_dir="$(cd "$suite_tmp_dir" && pwd -P)"
+  suite_identity_root="$suite_tmp_dir"
+  prepare_suite_darwin_identity_helper
   trap cleanup_suite_runner EXIT
   trap 'handle_suite_signal 129' HUP
   trap 'handle_suite_signal 130' INT
@@ -362,6 +740,10 @@ run_autoreview_test_suite() {
       AUTOREVIEW_TEST_FOCUS="$family" /bin/bash "$suite_script" \
         >"$log_file" 2>&1 &
       family_pid=$!
+      persist_suite_darwin_child_identity "$family_pid" || {
+        family_status=125
+        exit "$family_status"
+      }
       set +m
       printf '%s\n' "$family_pid" >"$group_file.tmp"
       mv -- "$group_file.tmp" "$group_file"
@@ -380,6 +762,11 @@ run_autoreview_test_suite() {
     ) &
     local wrapper_pid
     wrapper_pid=$!
+    persist_suite_darwin_child_identity "$wrapper_pid" || {
+      terminate_suite_process_group "$wrapper_pid" || true
+      finish_suite_registry_update
+      return 125
+    }
     if [[ -n "${AUTOREVIEW_TEST_SUITE_REGISTRATION_MARKER:-}" ]]; then
       printf 'registration\n' >"$AUTOREVIEW_TEST_SUITE_REGISTRATION_MARKER"
       sleep 2 || true
@@ -432,7 +819,7 @@ run_autoreview_test_suite() {
           family_started="$(cat "$suite_tmp_dir/$family.started")"
           printf '%s\n' "$(( $(date +%s) - family_started ))" \
             >"$suite_tmp_dir/$family.elapsed"
-        elif ! kill -0 "$pid" 2>/dev/null; then
+        elif ! process_is_runnable "$pid"; then
           local wrapper_status=0
           suite_registry_in_progress=1
           set +e
@@ -645,10 +1032,88 @@ if [[ "${AUTOREVIEW_TEST_FOCUS:-all}" == "suite-wrapper-fixture" ]]; then
   printf 'entered\n' >"$fixture_state/entered"
   fixture_script="$fixture_state/family-worker.mjs"
   cat >"$fixture_script" <<'NODE'
-import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { chmodSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 const stateDir = process.argv[2];
+const nativeSource = process.argv[3];
+const nativeRuntimeSource = process.argv[4];
+let exactHelper = "";
+let reviewerExactIdentity;
+const parseIdentity = (output) => {
+  const fields = output.trimEnd().split("\t");
+  if (
+    fields.length !== 12 ||
+    fields.some((field) => !/^(?:0|[1-9]\d*)$/u.test(field)) ||
+    fields[9] === "0" ||
+    fields[10] === "0"
+  ) {
+    throw new Error("suite wrapper fixture received malformed Darwin identity");
+  }
+  return {
+    pid: Number(fields[0]),
+    ppid: Number(fields[1]),
+    uniqueId: fields[7],
+    parentUniqueId: fields[8],
+    resourceCoalitionId: fields[9],
+    jetsamCoalitionId: fields[10],
+  };
+};
+const runExactHelper = (args, accepted = [0]) => {
+  const result = spawnSync(exactHelper, args, {
+    encoding: "utf8",
+    env: { PATH: "/usr/bin:/bin" },
+    timeout: 5_000,
+  });
+  if (!accepted.includes(result.status)) {
+    throw new Error(
+      `suite wrapper Darwin identity helper failed: ${result.stderr || result.stdout || result.status}`,
+    );
+  }
+  return result;
+};
+if (process.platform === "darwin") {
+  if (
+    nativeRuntimeSource !==
+      join(dirname(nativeSource), "darwin-process-identity-runtime.inc.c") ||
+    readFileSync(nativeRuntimeSource).length === 0
+  ) {
+    throw new Error("suite wrapper Darwin identity runtime input is invalid");
+  }
+  exactHelper = `${stateDir}/darwin-process-identity`;
+  const compile = spawnSync(
+    "/usr/bin/xcrun",
+    [
+      "--sdk",
+      "macosx",
+      "clang",
+      "-std=c11",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-O2",
+      nativeSource,
+      "-o",
+      exactHelper,
+    ],
+    {
+      encoding: "utf8",
+      env: { PATH: "/usr/bin:/bin", TMPDIR: stateDir },
+      timeout: 30_000,
+    },
+  );
+  if (compile.status !== 0) {
+    throw new Error(
+      `suite wrapper could not compile the Darwin identity helper: ${compile.stderr || compile.stdout || compile.status}`,
+    );
+  }
+  chmodSync(exactHelper, 0o500);
+  const probe = runExactHelper(["probe"]);
+  if (probe.stdout.trimEnd() !== "agentqg-darwin-process-identity-v3") {
+    throw new Error("suite wrapper Darwin identity helper probe failed");
+  }
+}
 const reviewer = spawn(
   process.execPath,
   [
@@ -657,6 +1122,35 @@ const reviewer = spawn(
   ],
   { detached: true, stdio: "ignore" },
 );
+const reviewerClosed = new Promise((resolve) => reviewer.once("close", resolve));
+if (process.platform === "darwin") {
+  try {
+    const parent = parseIdentity(
+      runExactHelper(["identity", String(process.pid)]).stdout,
+    );
+    const child = parseIdentity(
+      runExactHelper(["identity", String(reviewer.pid)]).stdout,
+    );
+    if (
+      child.ppid !== parent.pid ||
+      child.parentUniqueId !== parent.uniqueId ||
+      BigInt(child.uniqueId) <= BigInt(parent.uniqueId) ||
+      child.resourceCoalitionId !== parent.resourceCoalitionId ||
+      child.jetsamCoalitionId !== parent.jetsamCoalitionId
+    ) {
+      throw new Error("suite wrapper reviewer is not the exact Darwin child");
+    }
+    reviewerExactIdentity = child;
+  } catch (error) {
+    // ChildProcess authority remains valid until close. Stop and reap this
+    // exact unreaped child before propagating any capture/validation failure.
+    if (reviewer.exitCode === null && reviewer.signalCode === null) {
+      reviewer.kill("SIGKILL");
+    }
+    await reviewerClosed;
+    throw error;
+  }
+}
 writeFileSync(`${stateDir}/worker.pid`, `${process.pid}\n`);
 writeFileSync(`${stateDir}/reviewer.pid`, `${reviewer.pid}\n`);
 writeFileSync(`${stateDir}/ready`, "ready\n");
@@ -664,12 +1158,35 @@ let terminating = false;
 process.on("SIGTERM", () => {
   if (terminating) return;
   terminating = true;
-  setTimeout(() => {
-    try {
-      process.kill(-reviewer.pid, "SIGKILL");
-    } catch (error) {
-      if (error?.code !== "ESRCH") throw error;
+  setTimeout(async () => {
+    if (process.platform === "darwin") {
+      let settled = false;
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        const result = runExactHelper(
+          [
+            "signal",
+            String(reviewerExactIdentity.pid),
+            reviewerExactIdentity.uniqueId,
+            "9",
+          ],
+          [0, 3, 4],
+        );
+        if (result.status === 0 || result.status === 3) {
+          settled = true;
+          break;
+        }
+      }
+      if (!settled) {
+        throw new Error("suite wrapper could not settle its exact Darwin child");
+      }
+    } else {
+      try {
+        process.kill(-reviewer.pid, "SIGKILL");
+      } catch (error) {
+        if (error?.code !== "ESRCH") throw error;
+      }
     }
+    await reviewerClosed;
     writeFileSync(`${stateDir}/cleaned`, "cleaned\n");
     process.exit(143);
   }, 500);
@@ -677,6 +1194,8 @@ process.on("SIGTERM", () => {
 setInterval(() => {}, 1000);
 NODE
   "$node_bin" "$fixture_script" "$fixture_state" \
+    "$repo_root/scripts/gate/darwin-process-identity.c" \
+    "$repo_root/scripts/gate/darwin-process-identity-runtime.inc.c" \
     >"$fixture_state/worker.stdout" 2>"$fixture_state/worker.stderr"
   exit $?
 fi
@@ -692,6 +1211,8 @@ if [[ "${AUTOREVIEW_TEST_SIGNAL_DISPOSITIONS_RESET:-}" != "1" ]]; then
 fi
 tmp_dir="$(/usr/bin/mktemp -d "$trusted_fixture_parent/agent-autoreview-test.XXXXXX")"
 tmp_dir="$(cd "$tmp_dir" && pwd -P)"
+suite_identity_root="$tmp_dir/suite-process-authority"
+mkdir "$suite_identity_root"
 active_deadline_wrapper_pid=""
 active_deadline_state_dir=""
 deadline_fixture_registry_in_progress=0
@@ -718,11 +1239,20 @@ finish_deadline_fixture_registry_update() {
 
 begin_deadline_fixture_registration() {
   deadline_fixture_registry_in_progress=1
+  if [[ "$(/usr/bin/uname -s)" == "Darwin" ]]; then
+    # Compile and probe before the fixture starts. Identity capture must not
+    # spend the fixture's short deadline compiling its authority helper.
+    darwin_fixture_identity_helper_path >/dev/null
+  fi
 }
 
 arm_deadline_fixture_cleanup() {
   active_deadline_wrapper_pid="$1"
   active_deadline_state_dir="$2"
+  if [[ "$(/usr/bin/uname -s)" == "Darwin" ]]; then
+    persist_darwin_deadline_root_identity \
+      "$active_deadline_wrapper_pid" "$active_deadline_state_dir"
+  fi
   finish_deadline_fixture_registry_update
 }
 
@@ -1061,21 +1591,37 @@ capture="$tmp_dir/args"
 stdout="$tmp_dir/stdout"
 stderr="$tmp_dir/stderr"
 
-mkdir "$trusted_direct_helper_dir"
-cp "$repo_root/scripts/agent-autoreview.mjs" \
-  "$repo_root/scripts/agent-autoreview-core.mjs" \
-  "$trusted_direct_helper_dir/"
+copy_autoreview_helper_runtime() {
+  local destination="$1"
+  mkdir -p "$destination/gate"
+  cp \
+    "$repo_root/scripts/agent-autoreview.mjs" \
+    "$repo_root/scripts/agent-autoreview-core.mjs" \
+    "$destination/"
+  cp \
+    "$repo_root/scripts/gate/darwin-process-identity.c" \
+    "$repo_root/scripts/gate/darwin-process-identity-runtime.inc.c" \
+    "$repo_root/scripts/gate/darwin-process-identity-helper.mjs" \
+    "$repo_root/scripts/gate/darwin-process-lineage-model.mjs" \
+    "$repo_root/scripts/gate/darwin-process-lineage-state.mjs" \
+    "$repo_root/scripts/gate/darwin-process-lineage.mjs" \
+    "$repo_root/scripts/gate/mapped-command-process-identity.mjs" \
+    "$destination/gate/"
+}
+
+copy_autoreview_wrapper_runtime() {
+  local destination="$1"
+  copy_autoreview_helper_runtime "$destination"
+  cp "$repo_root/scripts/agent-autoreview.sh" "$destination/"
+}
+
+copy_autoreview_helper_runtime "$trusted_direct_helper_dir"
 chmod +x "$trusted_direct_helper"
 
 # Explicit-helper adapter tests must use the production trust topology: the
 # wrapper runtime is outside the reviewed checkout and independently trusted by
 # the caller. Same-checkout behavior has its own fail-closed regression below.
-mkdir -p "$adapter_runtime/scripts"
-cp \
-  "$repo_root/scripts/agent-autoreview.sh" \
-  "$repo_root/scripts/agent-autoreview.mjs" \
-  "$repo_root/scripts/agent-autoreview-core.mjs" \
-  "$adapter_runtime/scripts/"
+copy_autoreview_wrapper_runtime "$adapter_runtime/scripts"
 chmod +x \
   "$adapter_wrapper" \
   "$adapter_runtime/scripts/agent-autoreview.mjs"
@@ -1533,11 +2079,7 @@ run_same_checkout_explicit_helper_fail_closed_regression() {
 
   init_review_repo "$review_repo"
   mkdir -p "$review_repo/scripts" "$bundle_parent"
-  cp \
-    "$repo_root/scripts/agent-autoreview.sh" \
-    "$repo_root/scripts/agent-autoreview.mjs" \
-    "$repo_root/scripts/agent-autoreview-core.mjs" \
-    "$review_repo/scripts/"
+  copy_autoreview_wrapper_runtime "$review_repo/scripts"
   chmod +x \
     "$review_repo/scripts/agent-autoreview.sh" \
     "$review_repo/scripts/agent-autoreview.mjs"
@@ -1598,11 +2140,7 @@ run_same_checkout_protected_runtime_regression() {
 
   init_review_repo "$review_repo"
   mkdir -p "$review_repo/scripts" "$bundle_parent"
-  cp \
-    "$repo_root/scripts/agent-autoreview.sh" \
-    "$repo_root/scripts/agent-autoreview.mjs" \
-    "$repo_root/scripts/agent-autoreview-core.mjs" \
-    "$review_repo/scripts/"
+  copy_autoreview_wrapper_runtime "$review_repo/scripts"
   chmod +x \
     "$review_repo/scripts/agent-autoreview.sh" \
     "$review_repo/scripts/agent-autoreview.mjs"
@@ -1677,12 +2215,7 @@ run_nested_wrapper_fail_closed_regression() {
   mkdir "$bundle_parent"
   printf 'nested-wrapper fixture\n' >"$review_repo/README.md"
   commit_review_repo "$review_repo" init
-  mkdir -p "$nested_runtime/scripts"
-  cp \
-    "$repo_root/scripts/agent-autoreview.sh" \
-    "$repo_root/scripts/agent-autoreview.mjs" \
-    "$repo_root/scripts/agent-autoreview-core.mjs" \
-    "$nested_runtime/scripts/"
+  copy_autoreview_wrapper_runtime "$nested_runtime/scripts"
   chmod +x \
     "$nested_wrapper" \
     "$nested_runtime/scripts/agent-autoreview.mjs"
@@ -1733,7 +2266,9 @@ run_external_wrapper_source_trust_regression() {
   local external_runtime="$tmp_dir/external-source-trust-runtime"
   local external_wrapper="$external_runtime/scripts/agent-autoreview.sh"
   local source_helper="$external_runtime/scripts/agent-autoreview.mjs"
+  local source_identity_helper="$external_runtime/scripts/gate/mapped-command-process-identity.mjs"
   local source_parent="$external_runtime/scripts"
+  local source_gate_parent="$external_runtime/scripts/gate"
   local source_capture="$tmp_dir/external-source-trust.capture"
   local source_stdout="$tmp_dir/external-source-trust.stdout"
   local source_stderr="$tmp_dir/external-source-trust.stderr"
@@ -1742,20 +2277,27 @@ run_external_wrapper_source_trust_regression() {
   local bundle_dir
   local status
   local selected_helper
-  local scenarios=(unsafe-mode default-unsafe-mode)
+  local scenarios=(
+    unsafe-mode
+    default-unsafe-mode
+    gate-unsafe-mode
+    default-gate-unsafe-mode
+  )
 
   if [[ "$(/usr/bin/uname -s)" == "Darwin" ]]; then
-    scenarios+=(file-acl default-file-acl parent-acl)
+    scenarios+=(
+      file-acl
+      default-file-acl
+      gate-file-acl
+      default-gate-file-acl
+      parent-acl
+    )
   fi
   init_review_repo "$review_repo"
   printf 'external source trust fixture\n' >"$review_repo/README.md"
   commit_review_repo "$review_repo" init
   mkdir -p "$source_parent"
-  cp \
-    "$repo_root/scripts/agent-autoreview.sh" \
-    "$repo_root/scripts/agent-autoreview.mjs" \
-    "$repo_root/scripts/agent-autoreview-core.mjs" \
-    "$source_parent/"
+  copy_autoreview_wrapper_runtime "$source_parent"
   chmod +x "$external_wrapper" "$source_helper"
 
   for scenario in "${scenarios[@]}"; do
@@ -1770,8 +2312,14 @@ run_external_wrapper_source_trust_regression() {
       unsafe-mode | default-unsafe-mode)
         chmod 0777 "$source_parent"
         ;;
+      gate-unsafe-mode | default-gate-unsafe-mode)
+        chmod 0777 "$source_gate_parent"
+        ;;
       file-acl | default-file-acl)
         /bin/chmod +a "everyone allow write,delete" "$source_helper"
+        ;;
+      gate-file-acl | default-gate-file-acl)
+        /bin/chmod +a "everyone allow write,delete" "$source_identity_helper"
         ;;
       parent-acl)
         /bin/chmod +a \
@@ -1800,7 +2348,9 @@ run_external_wrapper_source_trust_regression() {
     ) || status=$?
     case "$scenario" in
       unsafe-mode | default-unsafe-mode) chmod 0700 "$source_parent" ;;
+      gate-unsafe-mode | default-gate-unsafe-mode) chmod 0700 "$source_gate_parent" ;;
       file-acl | default-file-acl) /bin/chmod -N "$source_helper" ;;
+      gate-file-acl | default-gate-file-acl) /bin/chmod -N "$source_identity_helper" ;;
       parent-acl) /bin/chmod -N "$source_parent" ;;
     esac
     cleanup_retained_test_command_runtimes "$source_stderr"
@@ -1918,6 +2468,7 @@ run_helper_with_path_in_repo() {
     "UNRELATED_SECRET=$unrelated_secret_value"
   )
   local key
+  local status=0
   local value
   for key in \
     ANTHROPIC_VERTEX_PROJECT_ID \
@@ -1948,7 +2499,12 @@ run_helper_with_path_in_repo() {
     env -i "${env_args[@]}" \
       "$adapter_wrapper" \
       "$@" >"$stdout" 2>"$stderr"
-  )
+  ) || status=$?
+  if [[ "$status" -ne 0 ]]; then
+    printf 'helper failed unexpectedly\nstdout:\n%s\nstderr:\n%s\n' \
+      "$(cat "$stdout")" "$(cat "$stderr")" >&2
+  fi
+  return "$status"
 }
 
 run_helper_with_path_in_repo_expect_failure() {
@@ -3546,10 +4102,18 @@ const leaderExitCode = /^[0-9]+$/.test(leaderExitCodeText)
   ? Number.parseInt(leaderExitCodeText, 10)
   : null;
 const leaderExitsNormally = leaderExitCode !== null;
+const completionBarrier =
+  process.env.AUTOREVIEW_FAKE_COMPLETION_BARRIER || "";
 let stdinEnded = !leaderExitsNormally;
 let grandchildReady = !leaderExitsNormally;
+let completionReleased = completionBarrier === "";
 function maybeExitNormally() {
-  if (!leaderExitsNormally || !stdinEnded || !grandchildReady) return;
+  if (
+    !leaderExitsNormally ||
+    !stdinEnded ||
+    !grandchildReady ||
+    !completionReleased
+  ) return;
   if (leaderExitCode === 0) {
     const args = process.argv.slice(2);
     const outputIndex = args.indexOf("-o");
@@ -3559,6 +4123,17 @@ function maybeExitNormally() {
     );
   }
   process.exit(leaderExitCode);
+}
+if (completionBarrier) {
+  setInterval(() => {
+    try {
+      completionReleased =
+        fs.readFileSync(completionBarrier, "utf8") === "go\n";
+    } catch {
+      completionReleased = false;
+    }
+    maybeExitNormally();
+  }, 25);
 }
 process.on("SIGTERM", () => {
   if (leaderExitsOnTermination) process.exit(0);
@@ -3620,11 +4195,14 @@ CODEX
   local snapshot_path
   local snapshot_unlinked
   local completion_mode
+  local completion_barrier
   local leader_exit_code
   local termination_mode
   local wait_status
   local launch_dir
   local startup_diagnostic
+  local host_platform
+  local engine_identity_dir
   # This is intentionally an internal test constant rather than a repo-level
   # environment knob. The wait helper accepts an explicit timeout so focused
   # deadline fixtures can use a shorter bound without changing the production
@@ -3634,6 +4212,8 @@ CODEX
   local -a signal_env_args
   local -a termination_args
   launch_dir="$(pwd -P)"
+  host_platform="$(/usr/bin/uname -s)"
+  prepare_suite_darwin_identity_helper
 
   engine_capture="$tmp_dir/engine-startup-early-exit"
   startup_diagnostic="$engine_capture.diagnostic"
@@ -3648,7 +4228,7 @@ CODEX
   )
   cd "$review_repo"
   /usr/bin/env -i "${signal_env_args[@]}" \
-    "$node_bin" "$repo_root/scripts/agent-autoreview.mjs" \
+    "$adapter_wrapper" \
     --mode local --engine codex --stream-engine-output \
     >"$engine_capture.stdout" 2>"$engine_capture.stderr" &
   engine_pid=$!
@@ -3672,17 +4252,19 @@ CODEX
   startup_diagnostic="$engine_capture.diagnostic"
   printf 'slow startup stdout\n' >"$engine_capture.stdout"
   printf 'slow startup stderr\n' >"$engine_capture.stderr"
+  prepare_suite_darwin_identity_helper
   "$node_bin" -e 'setInterval(() => {}, 1000)' &
   engine_pid=$!
+  persist_suite_darwin_child_identity "$engine_pid"
   if wait_for_signal_cleanup_fixture_startup \
     delayed-timeout "$engine_pid" "$engine_capture" 1 \
     2>"$startup_diagnostic"; then
-    kill -KILL "$engine_pid" 2>/dev/null || true
+    signal_owned_suite_child "$engine_pid" KILL || true
     wait "$engine_pid" 2>/dev/null || true
     printf 'signal-cleanup startup wait ignored its explicit deadline\n' >&2
     exit 1
   fi
-  kill -KILL "$engine_pid" 2>/dev/null || true
+  signal_owned_suite_child "$engine_pid" KILL
   wait "$engine_pid" 2>/dev/null || true
   expect_file_contains "$startup_diagnostic" \
     "scenario=delayed-timeout reason=deadline-exceeded elapsed="
@@ -3720,16 +4302,34 @@ CODEX
         "AUTOREVIEW_FAKE_STARTUP_DELAY_MS=$delayed_live_startup_ms"
       )
     fi
+    engine_identity_dir="$engine_capture.identities"
+    mkdir "$engine_identity_dir"
+    chmod 0700 "$engine_identity_dir"
     cd "$review_repo"
     /usr/bin/env -i "${signal_env_args[@]}" \
-      "$node_bin" "$repo_root/scripts/agent-autoreview.mjs" \
+      "$adapter_wrapper" \
       --mode local --engine "$engine" >"$engine_capture.stdout" 2>"$engine_capture.stderr" &
     engine_pid=$!
     cd "$launch_dir"
+    if [[ "$host_platform" == "Darwin" ]]; then
+      persist_suite_darwin_child_identity "$engine_pid"
+      if ! persist_darwin_deadline_root_identity \
+        "$engine_pid" "$engine_identity_dir"; then
+        signal_owned_suite_child "$engine_pid" KILL || true
+        wait "$engine_pid" 2>/dev/null || true
+        printf '%s wrapper exact identity capture failed\n' "$scenario" >&2
+        exit 1
+      fi
+    fi
     if ! wait_for_signal_cleanup_fixture_startup \
       "$scenario" "$engine_pid" "$engine_capture" "$startup_timeout_seconds" \
       2>"$startup_diagnostic"; then
-      kill -TERM "$engine_pid" 2>/dev/null || true
+      if [[ "$host_platform" == "Darwin" ]]; then
+        cleanup_darwin_deadline_fixture_lineage \
+          "$scenario startup failure" "$engine_identity_dir" || true
+      else
+        kill -TERM "$engine_pid" 2>/dev/null || true
+      fi
       wait "$engine_pid" 2>/dev/null || true
       cat "$startup_diagnostic" >&2
       exit 1
@@ -3743,11 +4343,28 @@ CODEX
     grandchild_pid="$(cat "$engine_capture.grandchild-pid")"
     helper_pid="$(cat "$engine_capture.helper-pid")"
     snapshot_path="$(cat "$engine_capture.snapshot")"
+    if [[ "$host_platform" == "Darwin" ]]; then
+      printf '%s\n' "$helper_pid" >"$engine_identity_dir/leader.pid"
+      printf '%s\n' "$child_pid" >"$engine_identity_dir/descendant.pid"
+      if ! capture_darwin_deadline_fixture_lineage \
+        "$scenario signal cleanup" \
+        "$engine_pid" "$engine_identity_dir"; then
+        cleanup_darwin_deadline_fixture_lineage \
+          "$scenario lineage capture failure" "$engine_identity_dir" || true
+        wait "$engine_pid" 2>/dev/null || true
+        exit 1
+      fi
+    fi
     if [[ ! -f "$snapshot_path" ]]; then
+      cleanup_engine_signal_fixture \
+        "$scenario missing credential snapshot" \
+        "$engine_identity_dir" "$engine_pid" \
+        "$helper_pid" "$engine_pid" "$child_pid" "$grandchild_pid"
       printf '%s engine credential snapshot was absent before interruption\n' "$engine" >&2
       exit 1
     fi
-    kill -TERM "$helper_pid"
+    signal_engine_fixture_process \
+      "$engine_identity_dir" "$helper_pid" TERM
     snapshot_unlinked=0
     for _ in {1..40}; do
       if [[ ! -e "$snapshot_path" ]]; then
@@ -3763,27 +4380,37 @@ CODEX
       sleep 0.05
     done
     if [[ "$snapshot_unlinked" -ne 1 ]]; then
-      kill -KILL "$helper_pid" "$engine_pid" "$child_pid" "$grandchild_pid" 2>/dev/null || true
-      wait "$engine_pid" 2>/dev/null || true
+      cleanup_engine_signal_fixture \
+        "$scenario snapshot cleanup failure" \
+        "$engine_identity_dir" "$engine_pid" \
+        "$helper_pid" "$engine_pid" "$child_pid" "$grandchild_pid"
       printf '%s credential snapshot remained readable during interruption grace period\n' "$scenario" >&2
       exit 1
     fi
     if ! process_is_runnable "$helper_pid"; then
-      kill -KILL "$engine_pid" "$child_pid" "$grandchild_pid" 2>/dev/null || true
+      cleanup_engine_signal_fixture \
+        "$scenario early helper exit" \
+        "$engine_identity_dir" "$engine_pid" \
+        "$engine_pid" "$child_pid" "$grandchild_pid"
       printf '%s helper exited before credential snapshot cleanup was observed\n' "$scenario" >&2
       cat "$engine_capture.stderr" >&2
       exit 1
     fi
     if [[ "$scenario" == "claude-probe" ]] && ! process_is_runnable "$grandchild_pid"; then
-      kill -KILL "$helper_pid" "$engine_pid" "$child_pid" 2>/dev/null || true
-      wait "$engine_pid" 2>/dev/null || true
+      cleanup_engine_signal_fixture \
+        "$scenario early grandchild exit" \
+        "$engine_identity_dir" "$engine_pid" \
+        "$helper_pid" "$engine_pid" "$child_pid"
       printf 'detached probe grandchild exited before credential snapshot cleanup was observed\n' >&2
       exit 1
     fi
-    kill -TERM "$helper_pid"
+    signal_engine_fixture_process \
+      "$engine_identity_dir" "$helper_pid" TERM
     if ! wait_for_process_exit_or_zombie "$helper_pid" 240; then
-      kill -KILL "$helper_pid" "$engine_pid" "$child_pid" "$grandchild_pid" 2>/dev/null || true
-      wait "$engine_pid" 2>/dev/null || true
+      cleanup_engine_signal_fixture \
+        "$scenario helper termination timeout" \
+        "$engine_identity_dir" "$engine_pid" \
+        "$helper_pid" "$engine_pid" "$child_pid" "$grandchild_pid"
       printf '%s helper did not terminate within the signal-cleanup deadline\n' "$scenario" >&2
       exit 1
     fi
@@ -3792,33 +4419,41 @@ CODEX
     wait_status=$?
     set -e
     if [[ "$wait_status" -eq 0 ]]; then
+      cleanup_engine_signal_fixture \
+        "$scenario unexpected helper success" \
+        "$engine_identity_dir" "$engine_pid" \
+        "$child_pid" "$grandchild_pid"
       printf '%s helper exited successfully after SIGTERM\n' "$scenario" >&2
       exit 1
     fi
     if ! wait_for_process_exit_or_zombie "$child_pid"; then
-      kill -KILL "$child_pid" "$grandchild_pid" 2>/dev/null || true
+      cleanup_engine_signal_fixture \
+        "$scenario surviving direct child" \
+        "$engine_identity_dir" "$engine_pid" \
+        "$child_pid" "$grandchild_pid"
       printf '%s direct engine child survived helper interruption\n' "$scenario" >&2
       exit 1
     fi
     if [[ -e "$snapshot_path" ]]; then
-      kill -KILL "$grandchild_pid" 2>/dev/null || true
+      cleanup_engine_signal_fixture \
+        "$scenario surviving credential snapshot" \
+        "$engine_identity_dir" "$engine_pid" "$grandchild_pid"
       printf '%s credential snapshot survived SIGTERM cleanup: %s\n' "$scenario" "$snapshot_path" >&2
       exit 1
     fi
-    if [[ "$scenario" != "claude-probe" ]]; then
-      if ! wait_for_process_exit_or_zombie "$grandchild_pid"; then
-        kill -KILL "$grandchild_pid" 2>/dev/null || true
-        printf '%s same-group grandchild survived helper interruption\n' "$scenario" >&2
-        exit 1
-      fi
-    fi
-    if find "$signal_tmp" -mindepth 1 -maxdepth 1 -type d -name 'autoreview-*' -print -quit | grep -q .; then
-      kill -KILL "$grandchild_pid" 2>/dev/null || true
-      printf '%s engine runtime survived SIGTERM cleanup\n' "$scenario" >&2
+    if ! assert_helper_descendant_cleanup_contract \
+      "$scenario helper interruption" "$grandchild_pid"; then
+      cleanup_engine_signal_fixture \
+        "$scenario surviving descendant" \
+        "$engine_identity_dir" "$engine_pid" "$grandchild_pid"
       exit 1
     fi
-    if [[ "$scenario" == "claude-probe" ]]; then
-      kill -KILL "$grandchild_pid" 2>/dev/null || true
+    if find "$signal_tmp" -mindepth 1 -maxdepth 1 -type d -name 'autoreview-*' -print -quit | grep -q .; then
+      cleanup_engine_signal_fixture \
+        "$scenario surviving engine runtime" \
+        "$engine_identity_dir" "$engine_pid" "$grandchild_pid"
+      printf '%s engine runtime survived SIGTERM cleanup\n' "$scenario" >&2
+      exit 1
     fi
   done
 
@@ -3844,12 +4479,26 @@ CODEX
     if [[ "$termination_mode" == "timeout" ]]; then
       termination_args+=(--timeout-seconds 3)
     fi
+    engine_identity_dir="$engine_capture.identities"
+    mkdir "$engine_identity_dir"
+    chmod 0700 "$engine_identity_dir"
     cd "$review_repo"
     /usr/bin/env -i "${signal_env_args[@]}" \
-      "$node_bin" "$repo_root/scripts/agent-autoreview.mjs" \
+      "$adapter_wrapper" \
       "${termination_args[@]}" >"$engine_capture.stdout" 2>"$engine_capture.stderr" &
     engine_pid=$!
     cd "$launch_dir"
+    if [[ "$host_platform" == "Darwin" ]]; then
+      persist_suite_darwin_child_identity "$engine_pid"
+      if ! persist_darwin_deadline_root_identity \
+        "$engine_pid" "$engine_identity_dir"; then
+        signal_owned_suite_child "$engine_pid" KILL || true
+        wait "$engine_pid" 2>/dev/null || true
+        printf 'leader-exit %s wrapper exact identity capture failed\n' \
+          "$termination_mode" >&2
+        exit 1
+      fi
+    fi
     if ! wait_for_signal_cleanup_fixture_startup \
       "leader-exit-$termination_mode" \
       "$engine_pid" \
@@ -3857,7 +4506,13 @@ CODEX
       "$startup_timeout_seconds" \
       1 \
       2>"$startup_diagnostic"; then
-      kill -KILL "$engine_pid" 2>/dev/null || true
+      if [[ "$host_platform" == "Darwin" ]]; then
+        cleanup_darwin_deadline_fixture_lineage \
+          "leader-exit $termination_mode startup failure" \
+          "$engine_identity_dir" || true
+      else
+        kill -KILL "$engine_pid" 2>/dev/null || true
+      fi
       wait "$engine_pid" 2>/dev/null || true
       cat "$startup_diagnostic" >&2
       exit 1
@@ -3866,17 +4521,36 @@ CODEX
     grandchild_pid="$(cat "$engine_capture.grandchild-pid")"
     helper_pid="$(cat "$engine_capture.helper-pid")"
     snapshot_path="$(cat "$engine_capture.snapshot")"
+    if [[ "$host_platform" == "Darwin" ]]; then
+      printf '%s\n' "$helper_pid" >"$engine_identity_dir/leader.pid"
+      printf '%s\n' "$child_pid" >"$engine_identity_dir/descendant.pid"
+      if ! capture_darwin_deadline_fixture_lineage \
+        "leader-exit $termination_mode" \
+        "$engine_pid" "$engine_identity_dir"; then
+        cleanup_darwin_deadline_fixture_lineage \
+          "leader-exit $termination_mode lineage capture failure" \
+          "$engine_identity_dir" || true
+        wait "$engine_pid" 2>/dev/null || true
+        exit 1
+      fi
+    fi
     if [[ ! -f "$snapshot_path" ]]; then
-      kill -KILL "$helper_pid" "$engine_pid" "$child_pid" "$grandchild_pid" 2>/dev/null || true
+      cleanup_engine_signal_fixture \
+        "leader-exit $termination_mode missing snapshot" \
+        "$engine_identity_dir" "$engine_pid" \
+        "$helper_pid" "$engine_pid" "$child_pid" "$grandchild_pid"
       printf 'leader-exit %s credential snapshot was absent before termination\n' "$termination_mode" >&2
       exit 1
     fi
     if [[ "$termination_mode" == "signal" ]]; then
-      kill -TERM "$helper_pid"
+      signal_engine_fixture_process \
+        "$engine_identity_dir" "$helper_pid" TERM
     fi
     if ! wait_for_process_exit_or_zombie "$helper_pid" 240; then
-      kill -KILL "$helper_pid" "$engine_pid" "$child_pid" "$grandchild_pid" 2>/dev/null || true
-      wait "$engine_pid" 2>/dev/null || true
+      cleanup_engine_signal_fixture \
+        "leader-exit $termination_mode helper timeout" \
+        "$engine_identity_dir" "$engine_pid" \
+        "$helper_pid" "$engine_pid" "$child_pid" "$grandchild_pid"
       printf 'leader-exit %s helper did not terminate within the deadline\n' "$termination_mode" >&2
       exit 1
     fi
@@ -3885,23 +4559,40 @@ CODEX
     wait_status=$?
     set -e
     if [[ "$wait_status" -eq 0 ]]; then
-      kill -KILL "$child_pid" "$grandchild_pid" 2>/dev/null || true
+      cleanup_engine_signal_fixture \
+        "leader-exit $termination_mode unexpected success" \
+        "$engine_identity_dir" "$engine_pid" \
+        "$child_pid" "$grandchild_pid"
       printf 'leader-exit %s helper exited successfully\n' "$termination_mode" >&2
       exit 1
     fi
-    for descendant_pid in "$child_pid" "$grandchild_pid"; do
-      if ! wait_for_process_exit_or_zombie "$descendant_pid"; then
-        kill -KILL "$descendant_pid" 2>/dev/null || true
-        printf 'leader-exit %s descendant survived termination: %s\n' \
-          "$termination_mode" "$descendant_pid" >&2
-        exit 1
-      fi
-    done
+    if ! wait_for_process_exit_or_zombie "$child_pid"; then
+      cleanup_engine_signal_fixture \
+        "leader-exit $termination_mode surviving child" \
+        "$engine_identity_dir" "$engine_pid" \
+        "$child_pid" "$grandchild_pid"
+      printf 'leader-exit %s direct child survived termination: %s\n' \
+        "$termination_mode" "$child_pid" >&2
+      exit 1
+    fi
+    if ! assert_helper_descendant_cleanup_contract \
+      "leader-exit $termination_mode" "$grandchild_pid"; then
+      cleanup_engine_signal_fixture \
+        "leader-exit $termination_mode surviving descendant" \
+        "$engine_identity_dir" "$engine_pid" "$grandchild_pid"
+      exit 1
+    fi
     if [[ -e "$snapshot_path" ]]; then
+      cleanup_engine_signal_fixture \
+        "leader-exit $termination_mode surviving snapshot" \
+        "$engine_identity_dir" "$engine_pid" "$grandchild_pid"
       printf 'leader-exit %s credential snapshot survived termination\n' "$termination_mode" >&2
       exit 1
     fi
     if find "$signal_tmp" -mindepth 1 -maxdepth 1 -type d -name 'autoreview-*' -print -quit | grep -q .; then
+      cleanup_engine_signal_fixture \
+        "leader-exit $termination_mode surviving runtime" \
+        "$engine_identity_dir" "$engine_pid" "$grandchild_pid"
       printf 'leader-exit %s engine runtime survived termination\n' "$termination_mode" >&2
       exit 1
     fi
@@ -3923,6 +4614,8 @@ CODEX
     else
       leader_exit_code=7
     fi
+    completion_barrier="$engine_capture.completion-barrier"
+    : >"$completion_barrier"
     signal_env_args=(
       "PATH=$fake_bin:$PATH"
       "HOME=$HOME"
@@ -3930,51 +4623,99 @@ CODEX
       "SSL_CERT_FILE=$ssl_cert_file"
       "AUTOREVIEW_FAKE_CAPTURE=$engine_capture"
       "AUTOREVIEW_FAKE_EXIT_LEADER_NORMALLY=$leader_exit_code"
+      "AUTOREVIEW_FAKE_COMPLETION_BARRIER=$completion_barrier"
       "AUTOREVIEW_HEARTBEAT_SECONDS=60"
     )
+    engine_identity_dir="$engine_capture.identities"
+    mkdir "$engine_identity_dir"
+    chmod 0700 "$engine_identity_dir"
+    cd "$review_repo"
+    /usr/bin/env -i "${signal_env_args[@]}" \
+      "$adapter_wrapper" \
+      --mode local --engine codex \
+      >"$engine_capture.stdout" 2>"$engine_capture.stderr" &
+    engine_pid=$!
+    cd "$launch_dir"
+    if [[ "$host_platform" == "Darwin" ]]; then
+      persist_suite_darwin_child_identity "$engine_pid"
+      if ! persist_darwin_deadline_root_identity \
+        "$engine_pid" "$engine_identity_dir"; then
+        signal_owned_suite_child "$engine_pid" KILL || true
+        wait "$engine_pid" 2>/dev/null || true
+        printf 'ordinary-%s wrapper exact identity capture failed\n' \
+          "$completion_mode" >&2
+        exit 1
+      fi
+    fi
+    if ! wait_for_signal_cleanup_fixture_startup \
+      "ordinary-$completion_mode" \
+      "$engine_pid" "$engine_capture" "$startup_timeout_seconds" 1; then
+      if [[ "$host_platform" == "Darwin" ]]; then
+        cleanup_darwin_deadline_fixture_lineage \
+          "ordinary-$completion_mode startup failure" \
+          "$engine_identity_dir" || true
+      else
+        kill -KILL "$engine_pid" 2>/dev/null || true
+      fi
+      wait "$engine_pid" 2>/dev/null || true
+      exit 1
+    fi
+    child_pid="$(cat "$engine_capture.child-pid")"
+    grandchild_pid="$(cat "$engine_capture.grandchild-pid")"
+    helper_pid="$(cat "$engine_capture.helper-pid")"
+    snapshot_path="$(cat "$engine_capture.snapshot")"
+    if [[ "$host_platform" == "Darwin" ]]; then
+      printf '%s\n' "$helper_pid" >"$engine_identity_dir/leader.pid"
+      printf '%s\n' "$child_pid" >"$engine_identity_dir/descendant.pid"
+      if ! capture_darwin_deadline_fixture_lineage \
+        "ordinary-$completion_mode" \
+        "$engine_pid" "$engine_identity_dir"; then
+        cleanup_darwin_deadline_fixture_lineage \
+          "ordinary-$completion_mode lineage capture failure" \
+          "$engine_identity_dir" || true
+        wait "$engine_pid" 2>/dev/null || true
+        exit 1
+      fi
+    fi
+    printf 'go\n' >"$completion_barrier"
     set +e
-    (
-      cd "$review_repo"
-      /usr/bin/env -i "${signal_env_args[@]}" \
-        "$node_bin" "$repo_root/scripts/agent-autoreview.mjs" \
-        --mode local --engine codex \
-        >"$engine_capture.stdout" 2>"$engine_capture.stderr"
-    )
+    wait "$engine_pid"
     wait_status=$?
     set -e
     if [[ "$completion_mode" == "success" && "$wait_status" -ne 0 ]]; then
+      cleanup_engine_signal_fixture \
+        "ordinary-success unexpected failure" \
+        "$engine_identity_dir" "$engine_pid" "$grandchild_pid"
       printf 'ordinary-success helper failed with status %s\n' "$wait_status" >&2
       cat "$engine_capture.stderr" >&2
       exit 1
     fi
     if [[ "$completion_mode" == "failure" && "$wait_status" -eq 0 ]]; then
+      cleanup_engine_signal_fixture \
+        "ordinary-failure unexpected success" \
+        "$engine_identity_dir" "$engine_pid" "$grandchild_pid"
       printf 'ordinary-failure helper exited successfully\n' >&2
       exit 1
     fi
-    if [[
-      ! -s "$engine_capture.child-pid" ||
-        ! -s "$engine_capture.grandchild-pid" ||
-        ! -s "$engine_capture.grandchild-ready" ||
-        ! -s "$engine_capture.snapshot"
-    ]]; then
-      printf 'ordinary-%s fixture did not complete startup\n' \
-        "$completion_mode" >&2
-      exit 1
-    fi
-    grandchild_pid="$(cat "$engine_capture.grandchild-pid")"
-    snapshot_path="$(cat "$engine_capture.snapshot")"
-    if ! wait_for_process_exit_or_zombie "$grandchild_pid"; then
-      kill -KILL "$grandchild_pid" 2>/dev/null || true
-      printf 'ordinary-%s background descendant survived completion\n' \
-        "$completion_mode" >&2
+    if ! assert_helper_descendant_cleanup_contract \
+      "ordinary-$completion_mode completion" "$grandchild_pid"; then
+      cleanup_engine_signal_fixture \
+        "ordinary-$completion_mode surviving descendant" \
+        "$engine_identity_dir" "$engine_pid" "$grandchild_pid"
       exit 1
     fi
     if [[ -e "$snapshot_path" ]]; then
+      cleanup_engine_signal_fixture \
+        "ordinary-$completion_mode surviving snapshot" \
+        "$engine_identity_dir" "$engine_pid" "$grandchild_pid"
       printf 'ordinary-%s credential snapshot survived completion\n' \
         "$completion_mode" >&2
       exit 1
     fi
     if find "$signal_tmp" -mindepth 1 -maxdepth 1 -type d -name 'autoreview-*' -print -quit | grep -q .; then
+      cleanup_engine_signal_fixture \
+        "ordinary-$completion_mode surviving runtime" \
+        "$engine_identity_dir" "$engine_pid" "$grandchild_pid"
       printf 'ordinary-%s engine runtime survived completion\n' \
         "$completion_mode" >&2
       exit 1
@@ -4040,15 +4781,17 @@ verify_process_liveness_probe() {
   local zombie_state=""
   local zombie_observed=0
 
+  prepare_suite_darwin_identity_helper
   "$node_bin" -e 'setInterval(() => {}, 1000)' &
   live_pid=$!
+  persist_suite_darwin_child_identity "$live_pid"
   if wait_for_process_exit_or_zombie "$live_pid" 2; then
-    kill -KILL "$live_pid" 2>/dev/null || true
+    signal_owned_suite_child "$live_pid" KILL || true
     wait "$live_pid" 2>/dev/null || true
     printf 'process-state probe accepted a runnable process as exited\n' >&2
     exit 1
   fi
-  kill -KILL "$live_pid" 2>/dev/null || true
+  signal_owned_suite_child "$live_pid" KILL
   wait "$live_pid" 2>/dev/null || true
   if ! wait_for_process_exit_or_zombie "$live_pid" 2; then
     printf 'process-state probe rejected a reaped process\n' >&2
@@ -4126,6 +4869,7 @@ run_suite_process_group_cleanup_regression() {
   local launched=0
   verify_process_liveness_probe
   mkdir "$fixture_state"
+  prepare_suite_darwin_identity_helper
   cat >"$fixture" <<'NODE'
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
@@ -4148,6 +4892,7 @@ NODE
   set -m
   "$node_bin" "$fixture" leader "$fixture_state" &
   leader_pid=$!
+  persist_suite_darwin_child_identity "$leader_pid"
   set +m
   for _ in {1..200}; do
     if [[
@@ -4164,8 +4909,7 @@ NODE
     sleep 0.05
   done
   if [[ "$launched" -ne 1 ]]; then
-    kill -KILL -- "-$leader_pid" 2>/dev/null || true
-    wait "$leader_pid" 2>/dev/null || true
+    terminate_suite_process_group "$leader_pid" 0 || true
     printf 'suite process-group cleanup fixture did not launch\n' >&2
     exit 1
   fi
@@ -4174,7 +4918,9 @@ NODE
   for role in leader child grandchild; do
     descendant_pid="$(cat "$fixture_state/$role.pid")"
     if ! wait_for_process_exit_or_zombie "$descendant_pid"; then
-      kill -KILL "$descendant_pid" 2>/dev/null || true
+      if [[ "$(/usr/bin/uname -s)" == "Linux" ]]; then
+        kill -KILL "$descendant_pid" 2>/dev/null || true
+      fi
       printf 'suite process-group descendant survived cleanup: %s (%s)\n' \
         "$role" "$descendant_pid" >&2
       exit 1
@@ -4192,6 +4938,7 @@ run_suite_wrapper_signal_regression() {
   local descendant_pid
   local launched=0
   mkdir "$fixture_state"
+  prepare_suite_darwin_identity_helper
 
   AUTOREVIEW_TEST_FOCUS=suite \
     AUTOREVIEW_TEST_SUITE_SIGNAL_FIXTURE=1 \
@@ -4200,6 +4947,7 @@ run_suite_wrapper_signal_regression() {
     /bin/bash "${BASH_SOURCE[0]}" --jobs 1 \
       >"$nested_stdout" 2>"$nested_stderr" &
   suite_pid=$!
+  persist_suite_darwin_child_identity "$suite_pid"
   for _ in {1..200}; do
     if [[ -s "$registration_marker" && -s "$fixture_state/ready" ]]; then
       launched=1
@@ -4211,8 +4959,7 @@ run_suite_wrapper_signal_regression() {
     sleep 0.05
   done
   if [[ "$launched" -ne 1 ]]; then
-    kill -TERM "$suite_pid" 2>/dev/null || true
-    wait "$suite_pid" 2>/dev/null || true
+    terminate_suite_process_group "$suite_pid" 0 || true
     printf 'nested suite did not reach its wrapper registration window\n' >&2
     cat "$nested_stdout" >&2
     cat "$nested_stderr" >&2
@@ -4229,7 +4976,11 @@ run_suite_wrapper_signal_regression() {
     exit 1
   fi
 
-  kill -TERM "$suite_pid"
+  if [[ "$(/usr/bin/uname -s)" == "Darwin" ]]; then
+    signal_suite_darwin_child_identity "$suite_pid" 15
+  else
+    kill -TERM "$suite_pid"
+  fi
   set +e
   wait "$suite_pid"
   suite_status=$?
@@ -4246,7 +4997,9 @@ run_suite_wrapper_signal_regression() {
   for role in worker reviewer; do
     descendant_pid="$(cat "$fixture_state/$role.pid")"
     if ! wait_for_process_exit_or_zombie "$descendant_pid"; then
-      kill -KILL "$descendant_pid" 2>/dev/null || true
+      if [[ "$(/usr/bin/uname -s)" == "Linux" ]]; then
+        kill -KILL "$descendant_pid" 2>/dev/null || true
+      fi
       printf 'nested suite cancellation orphaned %s process: %s\n' \
         "$role" "$descendant_pid" >&2
       exit 1
@@ -4457,15 +5210,848 @@ GH
   expect_stderr_contains "gh pr list timed out after 1s"
 }
 
-assert_deadline_fixture_processes_stopped() {
+darwin_fixture_identity_helper_path() {
+  local helper_dir="$tmp_dir/darwin-fixture-process-identity"
+  local helper="$helper_dir/darwin-process-identity"
+  local staged="$helper.staged"
+  local probe
+
+  if [[ ! -x "$helper" ]]; then
+    mkdir -p "$helper_dir"
+    rm -f "$staged"
+    [[ -f "$repo_root/scripts/gate/darwin-process-identity-runtime.inc.c" &&
+      ! -L "$repo_root/scripts/gate/darwin-process-identity-runtime.inc.c" ]] || return 1
+    if ! /usr/bin/xcrun --sdk macosx clang \
+      -std=c11 -Wall -Wextra -Werror -O2 \
+      "$repo_root/scripts/gate/darwin-process-identity.c" \
+      -o "$staged"; then
+      rm -f "$staged"
+      printf 'could not compile the Darwin fixture identity helper\n' >&2
+      return 1
+    fi
+    chmod 500 "$staged"
+    mv "$staged" "$helper"
+  fi
+  probe="$("$helper" probe)" || return 1
+  if [[ "$probe" != "agentqg-darwin-process-identity-v3" ]]; then
+    printf 'Darwin fixture identity helper returned an invalid probe\n' >&2
+    return 1
+  fi
+  printf '%s\n' "$helper"
+}
+
+decimal_is_strictly_greater() {
+  local left="$1"
+  local right="$2"
+
+  [[ "$left" =~ ^[0-9]+$ && "$right" =~ ^[0-9]+$ ]] || return 1
+  if [[ "${#left}" -ne "${#right}" ]]; then
+    [[ "${#left}" -gt "${#right}" ]]
+    return
+  fi
+  [[ "$left" > "$right" ]]
+}
+
+persist_darwin_deadline_root_identity() {
+  local root_pid="$1"
+  local state_dir="$2"
+  local helper
+  local parent_row
+  local root_row
+  local parent_pid="$$"
+  local parent_observed_pid
+  local parent_ppid
+  local parent_pgid
+  local parent_state
+  local parent_uid
+  local parent_ruid
+  local parent_svuid
+  local parent_unique_id
+  local parent_parent_unique_id
+  local parent_resource_coalition_id
+  local parent_jetsam_coalition_id
+  local parent_pid_version
+  local root_observed_pid
+  local root_ppid
+  local root_pgid
+  local root_state
+  local root_uid
+  local root_ruid
+  local root_svuid
+  local root_unique_id
+  local root_parent_unique_id
+  local root_resource_coalition_id
+  local root_jetsam_coalition_id
+  local root_pid_version
+  local staged
+
+  helper="$(darwin_fixture_identity_helper_path)" || return 1
+  parent_row="$("$helper" identity "$parent_pid")" || return 1
+  root_row="$("$helper" identity "$root_pid")" || return 1
+  # Keep the fixed twelve-field schema aligned. This check needs only the
+  # parent identity and coalition fields from the complete row.
+  # shellcheck disable=SC2034
+  IFS=$'\t' read -r \
+    parent_observed_pid parent_ppid parent_pgid parent_state \
+    parent_uid parent_ruid parent_svuid parent_unique_id \
+    parent_parent_unique_id parent_resource_coalition_id \
+    parent_jetsam_coalition_id parent_pid_version <<<"$parent_row"
+  # Keep the fixed twelve-field schema aligned. This check needs only the
+  # root ownership and coalition fields from the complete row.
+  # shellcheck disable=SC2034
+  IFS=$'\t' read -r \
+    root_observed_pid root_ppid root_pgid root_state \
+    root_uid root_ruid root_svuid root_unique_id root_parent_unique_id \
+    root_resource_coalition_id root_jetsam_coalition_id root_pid_version \
+    <<<"$root_row"
+  if [[
+    "$parent_observed_pid" != "$parent_pid" ||
+    "$root_observed_pid" != "$root_pid" ||
+      "$root_ppid" != "$parent_pid" ||
+      "$root_parent_unique_id" != "$parent_unique_id" ||
+      "$root_state" == "5" ||
+      ! "$root_unique_id" =~ ^[0-9]+$ ||
+      ! "$parent_unique_id" =~ ^[0-9]+$ ||
+      ! "$root_resource_coalition_id" =~ ^[1-9][0-9]*$ ||
+      ! "$root_jetsam_coalition_id" =~ ^[1-9][0-9]*$ ||
+      ! "$parent_resource_coalition_id" =~ ^[1-9][0-9]*$ ||
+      ! "$parent_jetsam_coalition_id" =~ ^[1-9][0-9]*$
+  ]]; then
+    printf 'deadline fixture root is not the live exact child owned by this test: %s\n' \
+      "$root_pid" >&2
+    return 1
+  fi
+  if ! decimal_is_strictly_greater \
+    "$root_unique_id" "$parent_unique_id"; then
+    printf 'deadline fixture root has a non-monotonic exact identity: %s\n' \
+      "$root_pid" >&2
+    return 1
+  fi
+  staged="$(/usr/bin/mktemp "$state_dir/.darwin-root-identity.XXXXXX")" ||
+    return 1
+  chmod 600 "$staged"
+  {
+    printf 'agent-autoreview-fixture-identities-v2\n'
+    printf '%s\n' "$root_row"
+  } >"$staged"
+  mv "$staged" "$state_dir/darwin-root-identity.tsv"
+}
+
+capture_darwin_deadline_fixture_lineage() {
+  local context="$1"
+  local root_pid="$2"
+  local state_dir="$3"
+  local require_descendant="${4:-1}"
+  local helper
+  local ready=0
+  local attempt
+  local maximum_attempts="${5:-160}"
+
+  [[ "$(/usr/bin/uname -s)" == "Darwin" ]] || return 0
+  [[ "$maximum_attempts" =~ ^[1-9][0-9]*$ ]] || return 1
+  helper="$(darwin_fixture_identity_helper_path)" || return 1
+  for ((attempt = 0; attempt < maximum_attempts; attempt++)); do
+    if [[
+      -s "$state_dir/leader.pid" &&
+        ("$require_descendant" -eq 0 || -s "$state_dir/descendant.pid")
+    ]]; then
+      ready=1
+      break
+    fi
+    if ! process_is_runnable "$root_pid"; then
+      break
+    fi
+    sleep 0.025
+  done
+  if [[ "$ready" -ne 1 ]]; then
+    if process_is_runnable "$root_pid"; then
+      printf '%s did not expose its fixture lineage within %s Darwin registration attempts\n' \
+        "$context" "$maximum_attempts" >&2
+    else
+      printf '%s did not expose its fixture lineage before the owned root exited\n' \
+        "$context" >&2
+    fi
+    return 1
+  fi
+
+  "$node_bin" - \
+    "$helper" \
+    "$state_dir/darwin-root-identity.tsv" \
+    "$state_dir/leader.pid" \
+    "$state_dir/descendant.pid" \
+    "$require_descendant" \
+    "$state_dir/darwin-fixture-identities.tsv" <<'NODE'
+const { spawnSync } = require("node:child_process");
+const { randomUUID } = require("node:crypto");
+const fs = require("node:fs");
+
+const [helper, rootPath, leaderPath, descendantPath, requireDescendant, output] =
+  process.argv.slice(2);
+const header = "agent-autoreview-fixture-identities-v2";
+const pause = (milliseconds) =>
+  Atomics.wait(
+    new Int32Array(new SharedArrayBuffer(4)),
+    0,
+    0,
+    milliseconds,
+  );
+const parseRow = (line) => {
+  const fields = line.split("\t");
+  if (
+    fields.length !== 12 ||
+    fields.some((field) => !/^(?:0|[1-9]\d*)$/.test(field)) ||
+    fields[9] === "0" ||
+    fields[10] === "0"
+  ) {
+    throw new Error(`malformed Darwin fixture identity row: ${line}`);
+  }
+  return {
+    line,
+    pid: Number(fields[0]),
+    ppid: Number(fields[1]),
+    state: Number(fields[3]),
+    uniqueId: fields[7],
+    parentUniqueId: fields[8],
+    resourceCoalitionId: fields[9],
+    jetsamCoalitionId: fields[10],
+  };
+};
+const readIdentityFile = (path) => {
+  const lines = fs.readFileSync(path, "utf8").trimEnd().split("\n");
+  if (lines.shift() !== header || lines.length === 0) {
+    throw new Error(`invalid Darwin fixture identity authority: ${path}`);
+  }
+  return lines.map(parseRow);
+};
+const root = readIdentityFile(rootPath)[0];
+const parseSnapshot = (snapshotOutput) => {
+  const lines = snapshotOutput.trimEnd().split("\n");
+  const proof = lines.shift().split("\t");
+  if (
+    proof.length !== 8 ||
+    proof[0] !== "agentqg-darwin-process-snapshot-v3"
+  ) {
+    throw new Error("Darwin fixture snapshot has an invalid header");
+  }
+  const decimal = (value, label, allowZero = true) => {
+    if (!/^[0-9]+$/u.test(value)) {
+      throw new Error(`Darwin fixture snapshot has an invalid ${label}`);
+    }
+    const parsed = BigInt(value);
+    if (!allowZero && parsed === 0n) {
+      throw new Error(`Darwin fixture snapshot has an invalid ${label}`);
+    }
+    return parsed;
+  };
+  const maximumUint64 = 18_446_744_073_709_551_615n;
+  const lower = decimal(proof[1], "lower fence", false);
+  const upper = decimal(proof[2], "upper fence", false);
+  const estimatedCount = decimal(proof[3], "estimated count");
+  const listedCount = decimal(proof[4], "listed count");
+  const capacity = decimal(proof[5], "capacity");
+  const zeroPidCount = decimal(proof[6], "PID-zero count");
+  const rowCount = decimal(proof[7], "row count");
+  if (
+    lower === maximumUint64 ||
+    upper > maximumUint64 ||
+    upper !== lower + 1n ||
+    zeroPidCount !== 1n ||
+    listedCount <= zeroPidCount ||
+    estimatedCount - (listedCount - zeroPidCount) < 20n ||
+    listedCount >= capacity ||
+    rowCount > listedCount
+  ) {
+    throw new Error("Darwin fixture snapshot has an invalid proof");
+  }
+  const rows = lines.length === 0 ? [] : lines.map(parseRow);
+  if (BigInt(rows.length) !== rowCount) {
+    throw new Error("Darwin fixture snapshot row count changed");
+  }
+  const pids = new Set();
+  const uniqueIds = new Set();
+  for (const row of rows) {
+    if (
+      BigInt(row.uniqueId) >= lower ||
+      pids.has(row.pid) ||
+      uniqueIds.has(row.uniqueId)
+    ) {
+      throw new Error("Darwin fixture snapshot has an invalid row proof");
+    }
+    pids.add(row.pid);
+    uniqueIds.add(row.uniqueId);
+  }
+  return rows;
+};
+const readSnapshot = () => {
+  let snapshot;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    snapshot = spawnSync(helper, ["snapshot"], {
+      encoding: "utf8",
+      timeout: 5000,
+    });
+    if (snapshot.status === 0) return parseSnapshot(snapshot.stdout);
+    if (snapshot.status !== 5) {
+      throw new Error(snapshot.stderr || "Darwin fixture snapshot failed");
+    }
+    if (attempt < 3) pause(10 + ((process.pid + attempt * 17) % 31));
+  }
+  throw new Error(
+    snapshot.stderr || "Darwin fixture snapshot remained contended",
+  );
+};
+const rows = readSnapshot();
+const known = new Set([root.uniqueId]);
+let changed = true;
+while (changed) {
+  changed = false;
+  for (const row of rows) {
+    if (!known.has(row.uniqueId) && known.has(row.parentUniqueId)) {
+      known.add(row.uniqueId);
+      changed = true;
+    }
+  }
+}
+const byPid = new Map(rows.map((row) => [row.pid, row]));
+const leaderPid = Number(fs.readFileSync(leaderPath, "utf8").trim());
+const leader = byPid.get(leaderPid);
+if (!leader || !known.has(leader.uniqueId) || leader.state === 5) {
+  throw new Error("deadline fixture leader is outside the owned exact lineage");
+}
+if (requireDescendant === "1") {
+  const descendantPid = Number(
+    fs.readFileSync(descendantPath, "utf8").trim(),
+  );
+  const descendant = byPid.get(descendantPid);
+  if (
+    !descendant ||
+    !known.has(descendant.uniqueId) ||
+    descendant.state === 5 ||
+    descendant.ppid !== leader.pid ||
+    descendant.parentUniqueId !== leader.uniqueId
+  ) {
+    throw new Error(
+      "deadline fixture descendant is not the live exact child of its leader",
+    );
+  }
+}
+const persisted = new Map([[root.uniqueId, root]]);
+for (const row of rows) {
+  if (known.has(row.uniqueId)) persisted.set(row.uniqueId, row);
+}
+const staged = `${output}.${process.pid}.${randomUUID()}.staging`;
+fs.writeFileSync(
+  staged,
+  `${header}\n${[...persisted.values()].map((row) => row.line).join("\n")}\n`,
+  { encoding: "utf8", flag: "wx", mode: 0o600 },
+);
+fs.renameSync(staged, output);
+NODE
+}
+
+cleanup_darwin_deadline_fixture_lineage() {
+  local context="$1"
+  local state_dir="$2"
+  local helper
+  local identities_path="$state_dir/darwin-fixture-identities.tsv"
+  local root_path="$state_dir/darwin-root-identity.tsv"
+
+  [[ "$(/usr/bin/uname -s)" == "Darwin" ]] || return 0
+  helper="$(darwin_fixture_identity_helper_path)" || return 1
+  if [[ ! -s "$root_path" ]]; then
+    printf '%s has no pre-captured Darwin root identity\n' "$context" >&2
+    return 1
+  fi
+
+  "$node_bin" - "$helper" "$root_path" "$identities_path" <<'NODE'
+const { spawnSync } = require("node:child_process");
+const fs = require("node:fs");
+
+const [helper, rootPath, identitiesPath] = process.argv.slice(2);
+const header = "agent-autoreview-fixture-identities-v2";
+const pause = (milliseconds) =>
+  Atomics.wait(
+    new Int32Array(new SharedArrayBuffer(4)),
+    0,
+    0,
+    milliseconds,
+  );
+const parseRow = (line) => {
+  const fields = line.split("\t");
+  if (
+    fields.length !== 12 ||
+    fields.some((field) => !/^(?:0|[1-9]\d*)$/.test(field)) ||
+    fields[9] === "0" ||
+    fields[10] === "0"
+  ) {
+    throw new Error(`malformed Darwin fixture identity row: ${line}`);
+  }
+  return {
+    pid: Number(fields[0]),
+    state: Number(fields[3]),
+    uniqueId: fields[7],
+    parentUniqueId: fields[8],
+    resourceCoalitionId: fields[9],
+    jetsamCoalitionId: fields[10],
+  };
+};
+const readAuthority = (path) => {
+  const lines = fs.readFileSync(path, "utf8").trimEnd().split("\n");
+  if (lines.shift() !== header || lines.length === 0) {
+    throw new Error(`invalid Darwin fixture identity authority: ${path}`);
+  }
+  return lines.map(parseRow);
+};
+const known = new Set(readAuthority(rootPath).map((row) => row.uniqueId));
+if (fs.existsSync(identitiesPath)) {
+  for (const row of readAuthority(identitiesPath)) known.add(row.uniqueId);
+}
+const runHelper = (args, accepted) => {
+  const result = spawnSync(helper, args, { encoding: "utf8", timeout: 5000 });
+  if (!accepted.includes(result.status)) {
+    throw new Error(
+      `Darwin identity helper ${args[0]} failed (${result.status}): ${result.stderr || result.stdout}`,
+    );
+  }
+  return result;
+};
+const parseSnapshot = (output) => {
+  const lines = output.trimEnd().split("\n");
+  const proof = lines.shift().split("\t");
+  if (
+    proof.length !== 8 ||
+    proof[0] !== "agentqg-darwin-process-snapshot-v3"
+  ) {
+    throw new Error("Darwin fixture snapshot has an invalid header");
+  }
+  const decimal = (value, label, allowZero = true) => {
+    if (!/^[0-9]+$/u.test(value)) {
+      throw new Error(`Darwin fixture snapshot has an invalid ${label}`);
+    }
+    const parsed = BigInt(value);
+    if (!allowZero && parsed === 0n) {
+      throw new Error(`Darwin fixture snapshot has an invalid ${label}`);
+    }
+    return parsed;
+  };
+  const maximumUint64 = 18_446_744_073_709_551_615n;
+  const lower = decimal(proof[1], "lower fence", false);
+  const upper = decimal(proof[2], "upper fence", false);
+  const estimatedCount = decimal(proof[3], "estimated count");
+  const listedCount = decimal(proof[4], "listed count");
+  const capacity = decimal(proof[5], "capacity");
+  const zeroPidCount = decimal(proof[6], "PID-zero count");
+  const rowCount = decimal(proof[7], "row count");
+  if (
+    lower === maximumUint64 ||
+    upper > maximumUint64 ||
+    upper !== lower + 1n ||
+    zeroPidCount !== 1n ||
+    listedCount <= zeroPidCount ||
+    estimatedCount - (listedCount - zeroPidCount) < 20n ||
+    listedCount >= capacity ||
+    rowCount > listedCount
+  ) {
+    throw new Error("Darwin fixture snapshot has an invalid proof");
+  }
+  const rows = lines.length === 0 ? [] : lines.map(parseRow);
+  if (BigInt(rows.length) !== rowCount) {
+    throw new Error("Darwin fixture snapshot row count changed");
+  }
+  const pids = new Set();
+  const uniqueIds = new Set();
+  for (const row of rows) {
+    if (
+      BigInt(row.uniqueId) >= lower ||
+      pids.has(row.pid) ||
+      uniqueIds.has(row.uniqueId)
+    ) {
+      throw new Error("Darwin fixture snapshot has an invalid row proof");
+    }
+    pids.add(row.pid);
+    uniqueIds.add(row.uniqueId);
+  }
+  return rows;
+};
+const snapshot = () => {
+  let result;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    result = runHelper(["snapshot"], [0, 5]);
+    if (result.status === 0) return parseSnapshot(result.stdout);
+    if (attempt < 3) pause(10 + ((process.pid + attempt * 17) % 31));
+  }
+  throw new Error(
+    `Darwin fixture snapshot remained contended: ${result.stderr || result.stdout || result.status}`,
+  );
+};
+const signalExact = (row) => {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const current = runHelper(["identity", String(row.pid)], [0, 3]);
+    if (current.status === 3) return;
+    const currentRow = parseRow(current.stdout.trimEnd());
+    if (currentRow.uniqueId !== row.uniqueId) return;
+    const signalled = runHelper(
+      ["signal", String(row.pid), row.uniqueId, "9"],
+      [0, 3, 4],
+    );
+    if (signalled.status === 0 || signalled.status === 3) return;
+  }
+  throw new Error(
+    `Darwin fixture identity changed during every signal attempt: ${row.pid}/${row.uniqueId}`,
+  );
+};
+let emptyRounds = 0;
+for (let round = 0; round < 80; round += 1) {
+  const rows = snapshot();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const row of rows) {
+      if (!known.has(row.uniqueId) && known.has(row.parentUniqueId)) {
+        known.add(row.uniqueId);
+        changed = true;
+      }
+    }
+  }
+  const live = rows.filter(
+    (row) => known.has(row.uniqueId) && row.state !== 5,
+  );
+  if (live.length === 0) {
+    emptyRounds += 1;
+    if (emptyRounds === 2) process.exit(0);
+    pause(50);
+    continue;
+  }
+  emptyRounds = 0;
+  const byId = new Map(rows.map((row) => [row.uniqueId, row]));
+  const depth = (row) => {
+    let current = row;
+    let value = 0;
+    const seen = new Set();
+    while (current && !seen.has(current.uniqueId)) {
+      seen.add(current.uniqueId);
+      current = byId.get(current.parentUniqueId);
+      if (current) value += 1;
+    }
+    return value;
+  };
+  live.sort((left, right) => depth(right) - depth(left));
+  for (const row of live) signalExact(row);
+  pause(50);
+}
+throw new Error("Darwin fixture exact-lineage cleanup did not reach an empty set");
+NODE
+}
+
+read_darwin_fixture_identity() {
+  local pid="$1"
+  local helper="$2"
+  local row
+  local read_status
+  local observed_pid
+  local observed_ppid
+  local observed_pgid
+  local observed_state
+  local observed_uid
+  local observed_ruid
+  local observed_svuid
+  local observed_unique_id
+  local observed_parent_unique_id
+  local observed_resource_coalition_id
+  local observed_jetsam_coalition_id
+  local observed_pid_version
+
+  if row="$("$helper" identity "$pid" 2>/dev/null)"; then
+    read_status=0
+  else
+    read_status=$?
+  fi
+  if [[ "$read_status" -eq 3 ]]; then
+    return 3
+  fi
+  if [[ "$read_status" -ne 0 ]]; then
+    printf 'could not read exact Darwin fixture identity for pid %s\n' \
+      "$pid" >&2
+    return 2
+  fi
+  # Keep the fixed twelve-field schema aligned. This check needs only the PID,
+  # status, unique ID, and coalition fields from the complete row.
+  # shellcheck disable=SC2034
+  IFS=$'\t' read -r \
+    observed_pid observed_ppid observed_pgid observed_state \
+    observed_uid observed_ruid observed_svuid observed_unique_id \
+    observed_parent_unique_id observed_resource_coalition_id \
+    observed_jetsam_coalition_id observed_pid_version <<<"$row"
+  if [[
+    "$observed_pid" != "$pid" ||
+      ! "$observed_state" =~ ^[0-9]+$ ||
+      ! "$observed_unique_id" =~ ^[0-9]+$ ||
+      ! "$observed_resource_coalition_id" =~ ^[1-9][0-9]*$ ||
+      ! "$observed_jetsam_coalition_id" =~ ^[1-9][0-9]*$
+  ]]; then
+    printf 'Darwin fixture identity helper returned malformed evidence for pid %s\n' \
+      "$pid" >&2
+    return 2
+  fi
+  printf '%s %s\n' "$observed_unique_id" "$observed_state"
+}
+
+persisted_darwin_fixture_unique_id() {
+  local state_dir="$1"
+  local expected_pid="$2"
+  local identities_path="$state_dir/darwin-fixture-identities.tsv"
+  local pid ppid pgid state uid ruid svuid unique_id parent_unique_id
+  local resource_coalition_id jetsam_coalition_id pid_version
+  local matched=""
+
+  [[ -s "$identities_path" ]] || return 1
+  # Keep the fixed twelve-field schema aligned while selecting the PID's
+  # persisted unique ID and coalition fields.
+  # shellcheck disable=SC2034
+  while IFS=$'\t' read -r \
+    pid ppid pgid state uid ruid svuid unique_id parent_unique_id \
+    resource_coalition_id jetsam_coalition_id pid_version; do
+    [[ "$pid" == "$expected_pid" ]] || continue
+    if [[
+      -n "$matched" ||
+        ! "$unique_id" =~ ^[0-9]+$ ||
+        ! "$resource_coalition_id" =~ ^[1-9][0-9]*$ ||
+        ! "$jetsam_coalition_id" =~ ^[1-9][0-9]*$
+    ]]; then
+      return 1
+    fi
+    matched="$unique_id"
+  done <"$identities_path"
+  [[ -n "$matched" ]] || return 1
+  printf '%s\n' "$matched"
+}
+
+signal_darwin_persisted_fixture_identity() {
+  local state_dir="$1"
+  local expected_pid="$2"
+  local signal_number="$3"
+  local helper
+  local unique_id
+  local current
+  local current_status
+  local current_pid current_ppid current_pgid current_state
+  local current_uid current_ruid current_svuid current_unique_id
+  local current_parent_unique_id current_resource_coalition_id
+  local current_jetsam_coalition_id current_pid_version
+  local signal_status
+  local attempt
+
+  [[
+    "$expected_pid" =~ ^[1-9][0-9]*$ &&
+      "$signal_number" =~ ^[1-9][0-9]*$
+  ]] || return 1
+  helper="$(darwin_fixture_identity_helper_path)" || return 1
+  unique_id="$(
+    persisted_darwin_fixture_unique_id "$state_dir" "$expected_pid"
+  )" || return 1
+  for ((attempt = 0; attempt < 4; attempt++)); do
+    if current="$("$helper" identity "$expected_pid" 2>/dev/null)"; then
+      current_status=0
+    else
+      current_status=$?
+    fi
+    [[ "$current_status" -ne 3 ]] || return 3
+    [[ "$current_status" -eq 0 ]] || return 1
+    # Keep the fixed twelve-field schema aligned while checking the persisted
+    # audit-token identity immediately before each native signal attempt.
+    # shellcheck disable=SC2034
+    IFS=$'\t' read -r \
+      current_pid current_ppid current_pgid current_state \
+      current_uid current_ruid current_svuid current_unique_id \
+      current_parent_unique_id current_resource_coalition_id \
+      current_jetsam_coalition_id current_pid_version <<<"$current"
+    [[
+      "$current_pid" == "$expected_pid" &&
+        "$current_unique_id" == "$unique_id"
+    ]] || return 3
+    if "$helper" signal \
+      "$expected_pid" "$unique_id" "$signal_number" >/dev/null 2>&1; then
+      return 0
+    else
+      signal_status=$?
+    fi
+    [[ "$signal_status" -eq 4 ]] || {
+      [[ "$signal_status" -eq 3 ]] && return 3
+      return 1
+    }
+  done
+  return 1
+}
+
+signal_engine_fixture_process() {
+  local state_dir="$1"
+  local pid="$2"
+  local signal_name="$3"
+  local host_platform
+  local signal_number
+
+  case "$signal_name" in
+    KILL) signal_number=9 ;;
+    TERM) signal_number=15 ;;
+    *) return 1 ;;
+  esac
+  host_platform="$(/usr/bin/uname -s 2>/dev/null)" || return 1
+  if [[ "$host_platform" == "Darwin" ]]; then
+    signal_darwin_persisted_fixture_identity \
+      "$state_dir" "$pid" "$signal_number"
+    return
+  fi
+  [[ "$host_platform" == "Linux" ]] || return 1
+  kill "-$signal_name" "$pid" 2>/dev/null
+}
+
+cleanup_engine_signal_fixture() {
+  local context="$1"
+  local state_dir="$2"
+  local root_pid="$3"
+  shift 3
+  local host_platform
+
+  host_platform="$(/usr/bin/uname -s 2>/dev/null)" || return 1
+  if [[ "$host_platform" == "Darwin" ]]; then
+    cleanup_darwin_deadline_fixture_lineage "$context" "$state_dir" || true
+  elif [[ "$host_platform" == "Linux" ]]; then
+    kill -KILL "$@" 2>/dev/null || true
+  else
+    return 1
+  fi
+  wait "$root_pid" 2>/dev/null || true
+}
+
+signal_darwin_deadline_fixture_root() {
+  local state_dir="$1"
+  local expected_pid="$2"
+  local signal_number="$3"
+  local helper
+  local authority_path="$state_dir/darwin-root-identity.tsv"
+  local header
+  local row
+  local pid ppid pgid state uid ruid svuid unique_id parent_unique_id
+  local resource_coalition_id jetsam_coalition_id pid_version
+  local current
+  local current_status
+  local current_pid current_ppid current_pgid current_state
+  local current_uid current_ruid current_svuid current_unique_id
+  local current_parent_unique_id current_resource_coalition_id
+  local current_jetsam_coalition_id current_pid_version
+  local signal_status
+  local attempt
+
+  [[
+    "$expected_pid" =~ ^[1-9][0-9]*$ &&
+      "$signal_number" =~ ^[1-9][0-9]*$ &&
+      -s "$authority_path"
+  ]] || return 1
+  helper="$(darwin_fixture_identity_helper_path)" || return 1
+  {
+    IFS= read -r header || return 1
+    IFS= read -r row || return 1
+    if IFS= read -r; then
+      return 1
+    fi
+  } <"$authority_path"
+  [[ "$header" == "agent-autoreview-fixture-identities-v2" ]] || return 1
+  # Keep the fixed twelve-field schema aligned while retaining the authority
+  # captured before the fixture root could be reaped.
+  # shellcheck disable=SC2034
+  IFS=$'\t' read -r \
+    pid ppid pgid state uid ruid svuid unique_id parent_unique_id \
+    resource_coalition_id jetsam_coalition_id pid_version <<<"$row"
+  [[
+    "$pid" == "$expected_pid" &&
+      "$unique_id" =~ ^[1-9][0-9]*$ &&
+      "$resource_coalition_id" =~ ^[1-9][0-9]*$ &&
+      "$jetsam_coalition_id" =~ ^[1-9][0-9]*$
+  ]] || return 1
+
+  for ((attempt = 0; attempt < 4; attempt++)); do
+    if current="$("$helper" identity "$pid" 2>/dev/null)"; then
+      current_status=0
+    else
+      current_status=$?
+    fi
+    [[ "$current_status" -ne 3 ]] || return 3
+    [[ "$current_status" -eq 0 ]] || return 1
+    # shellcheck disable=SC2034
+    IFS=$'\t' read -r \
+      current_pid current_ppid current_pgid current_state \
+      current_uid current_ruid current_svuid current_unique_id \
+      current_parent_unique_id current_resource_coalition_id \
+      current_jetsam_coalition_id current_pid_version <<<"$current"
+    [[
+      "$current_pid" == "$pid" &&
+        "$current_unique_id" == "$unique_id"
+    ]] || return 3
+    if "$helper" signal "$pid" "$unique_id" "$signal_number" \
+      >/dev/null 2>&1; then
+      return 0
+    else
+      signal_status=$?
+    fi
+    [[ "$signal_status" -eq 4 ]] || {
+      [[ "$signal_status" -eq 3 ]] && return 3
+      return 1
+    }
+  done
+  return 1
+}
+
+signal_deadline_fixture_wrapper() {
+  local wrapper_pid="$1"
+  local state_dir="$2"
+  local signal_name="$3"
+  local host_platform
+  local signal_number
+  local signal_status
+
+  case "$signal_name" in
+    INT) signal_number=2 ;;
+    TERM) signal_number=15 ;;
+    *) return 1 ;;
+  esac
+  host_platform="$(/usr/bin/uname -s 2>/dev/null)" || return 1
+  if [[ "$host_platform" == "Darwin" ]]; then
+    if signal_darwin_deadline_fixture_root \
+      "$state_dir" "$wrapper_pid" "$signal_number"; then
+      return 0
+    else
+      signal_status=$?
+    fi
+    [[ "$signal_status" -eq 3 ]] && return 1
+    return "$signal_status"
+  fi
+  [[ "$host_platform" == "Linux" ]] || return 1
+  kill "-$signal_name" -- "-$wrapper_pid" 2>/dev/null ||
+    kill "-$signal_name" "$wrapper_pid" 2>/dev/null
+}
+
+assert_deadline_fixture_process_contract() {
   local context="$1"
   local leader_pid_file="$2"
   local descendant_pid_file="$3"
+  local host_platform
+  local state_dir="${leader_pid_file%/*}"
+  local helper=""
   local role
   local pid_file
   local pid
+  local identity
+  local read_status
+  local unique_id
+  local expected_unique_id
+  local state
+  local attempt
+  local exact_settled
   local failed=0
 
+  host_platform="$(/usr/bin/uname -s)"
+  if [[ "$host_platform" == "Darwin" ]]; then
+    helper="$(darwin_fixture_identity_helper_path)" || return 1
+  fi
   for role in leader descendant; do
     if [[ "$role" == "leader" ]]; then
       pid_file="$leader_pid_file"
@@ -4478,9 +6064,42 @@ assert_deadline_fixture_processes_stopped() {
       continue
     fi
     pid="$(cat "$pid_file")"
-    if ! wait_for_process_exit_or_zombie "$pid" 200; then
+    if [[ "$host_platform" == "Darwin" ]]; then
+      expected_unique_id="$(
+        persisted_darwin_fixture_unique_id "$state_dir" "$pid"
+      )" || expected_unique_id=""
+      exact_settled=0
+      for ((attempt = 0; attempt < 600; attempt++)); do
+        if identity="$(read_darwin_fixture_identity "$pid" "$helper")"; then
+          read_status=0
+        else
+          read_status=$?
+        fi
+        if [[ "$read_status" -eq 3 ]]; then
+          exact_settled=1
+          break
+        fi
+        if [[ "$read_status" -ne 0 ]]; then
+          break
+        fi
+        read -r unique_id state <<<"$identity"
+        if [[ "$unique_id" != "$expected_unique_id" || "$state" == "5" ]]; then
+          # The exact identity is gone. A reused numeric PID is unrelated and
+          # must not receive a signal.
+          exact_settled=1
+          break
+        fi
+        sleep 0.05
+      done
+      if [[ "$exact_settled" -eq 1 ]]; then
+        continue
+      fi
+      printf '%s left its exact Darwin fixture %s alive after standalone lineage settlement: pid %s\n' \
+        "$context" "$role" "$pid" >&2
+      failed=1
+    elif ! wait_for_process_exit_or_zombie "$pid" 200; then
       kill -KILL "$pid" 2>/dev/null || true
-      printf '%s left its fixture %s alive: pid %s\n' \
+      printf '%s left its fixture %s alive after Linux process-group cleanup: pid %s\n' \
         "$context" "$role" "$pid" >&2
       failed=1
     fi
@@ -4492,10 +6111,23 @@ assert_deadline_fixture_processes_stopped() {
 cleanup_deadline_fixture_processes() {
   local wrapper_pid="$1"
   local state_dir="$2"
+  local host_platform
   local group_pid=""
   local role
   local pid_file
   local pid
+
+  host_platform="$(/usr/bin/uname -s)"
+  if [[ "$host_platform" == "Darwin" ]]; then
+    # Use only the authority captured while the root was this test's unreaped
+    # child. Late PID reads cannot authorize cleanup after the wrapper exits.
+    cleanup_darwin_deadline_fixture_lineage \
+      "deadline fixture cleanup" "$state_dir" || true
+    if [[ "$wrapper_pid" =~ ^[1-9][0-9]*$ ]]; then
+      wait "$wrapper_pid" 2>/dev/null || true
+    fi
+    return 0
+  fi
 
   # run_with_deadline's signal trap deliberately grants its child one second
   # before SIGKILL. Give that trap enough time to finish before forcing the
@@ -4526,12 +6158,16 @@ wait_for_deadline_wrapper_exit() {
   local context="$1"
   local wrapper_pid="$2"
   local state_dir="$3"
+  local maximum_attempts="${4:-300}"
 
-  if wait_for_process_exit_or_zombie "$wrapper_pid" 300; then
+  [[ "$maximum_attempts" =~ ^[1-9][0-9]*$ ]] || return 1
+
+  if wait_for_process_exit_or_zombie "$wrapper_pid" "$maximum_attempts"; then
     return 0
   fi
   cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
-  printf '%s wrapper did not exit within 15s\n' "$context" >&2
+  printf '%s wrapper did not exit within its fixture observation budget\n' \
+    "$context" >&2
   return 1
 }
 
@@ -4540,9 +6176,10 @@ run_deadline_gh_lookup_kill_regression() {
   # timeout) through its real caller. Branch-mode bundle prep with no explicit
   # --base resolves the PR base via detect_unique_pr_record, which bounds
   # `gh pr list` with run_with_deadline. A gh that ignores SIGTERM proves the
-  # deadline escalates to a process-group SIGKILL, fails closed with exit 124,
-  # and leaves no orphaned child -- unlike run_gh_lookup_timeout_regression,
-  # whose --dry-run path resolves entirely through the helper's own timeout.
+  # deadline fails closed with exit 124. Linux sends a process-group SIGKILL.
+  # Darwin settles the persistent tree through its standalone exact lineage.
+  # run_gh_lookup_timeout_regression differs
+  # because its --dry-run path resolves through the helper's own timeout.
   local review_repo="$tmp_dir/deadline-gh-lookup-kill"
   local fake_bin="$tmp_dir/deadline-gh-lookup-kill-bin"
   local state_dir="$tmp_dir/deadline-gh-lookup-kill-state"
@@ -4568,8 +6205,8 @@ run_deadline_gh_lookup_kill_regression() {
 #!/usr/bin/env bash
 if [[ "$1" == "pr" && "$2" == "list" ]]; then
   # Ignore SIGTERM so only run_with_deadline's SIGKILL escalation can stop us,
-  # proving the deadline signals the whole backgrounded process group rather
-  # than blocking on the child until the fake one-hour sleep elapses.
+  # identifying the backgrounded group used by Linux cleanup. Darwin never
+  # signals this reusable group identity.
   trap '' TERM
   printf '%s\n' "$$" >"$AUTOREVIEW_FAKE_GH_PID_FILE"
   # run_with_deadline backgrounds run_trusted_external as the process-group
@@ -4650,6 +6287,11 @@ GH
     cat "$stderr" >&2
     exit 1
   fi
+  if ! capture_darwin_deadline_fixture_lineage \
+    "deadline expiry" "$wrapper_pid" "$state_dir"; then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+    exit 1
+  fi
   if ! wait_for_deadline_wrapper_exit \
     "deadline expiry" "$wrapper_pid" "$state_dir"; then
     exit 1
@@ -4672,9 +6314,9 @@ GH
     exit 1
   fi
 
-  # The escalation must reach the whole process group: both the
-  # SIGTERM-ignoring gh leader and its persistent descendant are gone.
-  if ! assert_deadline_fixture_processes_stopped \
+  # Linux settles the group. Darwin must prove its standalone exact lineage is
+  # empty before the wrapper returns.
+  if ! assert_deadline_fixture_process_contract \
     "deadline expiry" "$pid_file" "$descendant_pid_file"; then
     cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
     exit 1
@@ -4697,8 +6339,9 @@ GH
 
 run_deadline_wrapper_signal_cleanup_regression() {
   # A terminal interrupt reaches the wrapper's foreground process group, while
-  # run_with_deadline's hung command is in its own group. Exercise both traps
-  # and prove they reap that separate tree and unlink the stdout capture.
+  # run_with_deadline's hung command is in its own group. Exercise both traps.
+  # Linux reaps that tree. Darwin settles its standalone exact lineage.
+  # Both platforms unlink the stdout capture.
   local review_repo="$tmp_dir/deadline-wrapper-signal"
   local fake_bin="$tmp_dir/deadline-wrapper-signal-bin"
   local signal_name
@@ -4814,9 +6457,15 @@ GH
       cat "$wrapper_stderr" >&2
       exit 1
     fi
+    if ! capture_darwin_deadline_fixture_lineage \
+      "$signal_name interruption" "$wrapper_pid" "$state_dir"; then
+      cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+      exit 1
+    fi
 
     signal_started_at="$(date +%s)"
-    if ! kill "-$signal_name" -- "-$wrapper_pid"; then
+    if ! signal_deadline_fixture_wrapper \
+      "$wrapper_pid" "$state_dir" "$signal_name"; then
       cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
       printf 'failed to interrupt wrapper group %s with %s\n' \
       "$wrapper_pid" "$signal_name" >&2
@@ -4845,7 +6494,7 @@ GH
       cat "$wrapper_stderr" >&2
       exit 1
     fi
-    if ! assert_deadline_fixture_processes_stopped \
+    if ! assert_deadline_fixture_process_contract \
       "$signal_name interruption" \
       "$state_dir/leader.pid" \
       "$state_dir/descendant.pid"; then
@@ -6096,6 +7745,7 @@ run_trusted_helper_runtime_regression() {
   local branch_bundle="$tmp_dir/trusted-helper-branch-bundle"
   local commit_bundle="$tmp_dir/trusted-helper-commit-bundle"
   local dirty_helper_bundle="$tmp_dir/trusted-helper-dirty-helper-bundle"
+  local dirty_process_identity_bundle="$tmp_dir/trusted-helper-dirty-process-identity-bundle"
   local dirty_shell_bundle="$tmp_dir/trusted-helper-dirty-shell-bundle"
   local changed_runtime_bundle="$tmp_dir/trusted-helper-changed-runtime-bundle"
   local changed_runtime_commit_bundle="$tmp_dir/trusted-helper-changed-runtime-commit-bundle"
@@ -6121,11 +7771,7 @@ run_trusted_helper_runtime_regression() {
   local native_node_argv0
   local status=0
   init_review_repo "$review_repo"
-  mkdir -p "$review_repo/scripts"
-  cp "$repo_root/scripts/agent-autoreview.sh" \
-    "$repo_root/scripts/agent-autoreview.mjs" \
-    "$repo_root/scripts/agent-autoreview-core.mjs" \
-    "$review_repo/scripts/"
+  copy_autoreview_wrapper_runtime "$review_repo/scripts"
   chmod +x \
     "$review_repo/scripts/agent-autoreview.sh" \
     "$review_repo/scripts/agent-autoreview.mjs"
@@ -6210,6 +7856,40 @@ run_trusted_helper_runtime_regression() {
   git -C "$review_repo" checkout -- \
     scripts/agent-autoreview.mjs \
     scripts/agent-autoreview-core.mjs
+  printf '\n// dirty mapped-command identity helper\n' \
+    >>"$review_repo/scripts/gate/mapped-command-process-identity.mjs"
+  set +e
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=$PATH" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "$review_repo/scripts/agent-autoreview.sh" \
+      --prepare-bundle-dir "$dirty_process_identity_bundle" \
+      --mode local \
+      --engine local >"$local_stdout" 2>"$local_stderr"
+  )
+  status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    printf 'local bundle executed a dirty mapped-command identity helper\n' >&2
+    exit 1
+  fi
+  if ! grep -Fq \
+    "local review target changes executable autoreview runtime: scripts/gate/mapped-command-process-identity.mjs" \
+    "$local_stderr"; then
+    printf 'dirty mapped-command identity helper failed for the wrong reason:\n%s\n' \
+      "$(cat "$local_stderr")" >&2
+    exit 1
+  fi
+  if [[ -e "$dirty_process_identity_bundle" ]]; then
+    printf 'bundle was published with a dirty mapped-command identity helper\n' >&2
+    exit 1
+  fi
+
+  git -C "$review_repo" checkout -- \
+    scripts/gate/mapped-command-process-identity.mjs
   printf '\n# dirty wrapper\n' \
     >>"$review_repo/scripts/agent-autoreview.sh"
   set +e
@@ -6244,7 +7924,7 @@ run_trusted_helper_runtime_regression() {
 
   git -C "$review_repo" checkout -- scripts/agent-autoreview.sh
   printf '\nthrow new Error("reviewed helper runtime executed");\n' \
-    >>"$review_repo/scripts/agent-autoreview.mjs"
+    >>"$review_repo/scripts/gate/mapped-command-process-identity.mjs"
   commit_review_repo "$review_repo" "change reviewed helper runtime"
   changed_runtime_commit="$(git -C "$review_repo" rev-parse HEAD)"
   changed_runtime_parent="$(git -C "$review_repo" rev-parse HEAD^)"
@@ -6356,11 +8036,7 @@ run_trusted_helper_runtime_regression() {
   fi
 
   init_review_repo "$hostile_base_repo"
-  mkdir -p "$hostile_base_repo/scripts"
-  cp "$repo_root/scripts/agent-autoreview.sh" \
-    "$repo_root/scripts/agent-autoreview.mjs" \
-    "$repo_root/scripts/agent-autoreview-core.mjs" \
-    "$hostile_base_repo/scripts/"
+  copy_autoreview_wrapper_runtime "$hostile_base_repo/scripts"
   chmod +x \
     "$hostile_base_repo/scripts/agent-autoreview.sh" \
     "$hostile_base_repo/scripts/agent-autoreview.mjs"
@@ -6447,7 +8123,8 @@ run_trusted_helper_runtime_regression() {
   git -C "$hostile_base_repo" checkout main -- \
     scripts/agent-autoreview.sh \
     scripts/agent-autoreview.mjs \
-    scripts/agent-autoreview-core.mjs
+    scripts/agent-autoreview-core.mjs \
+    scripts/gate/mapped-command-process-identity.mjs
   commit_review_repo "$hostile_base_repo" "restore protected runtime"
   (
     cd "$hostile_base_repo"
@@ -7382,8 +9059,9 @@ run_rename_capture_regressions() {
 # only for a rename-aware patch capture, so target selection, the source
 # fingerprint, the changed-path enumeration, and the stat captures all convert
 # normally and the run reaches the one capture the deadline must bound. The
-# filter ignores SIGTERM and forks a descendant that does too, so only a
-# process-group SIGKILL clears the tree it leaves behind.
+# filter ignores SIGTERM and forks a descendant that does too. Linux clears the
+# tree with a process-group SIGKILL. Darwin settles its standalone exact
+# lineage.
 # `stall_seconds` of 0 hangs the capture forever; a positive value delays it by
 # that many seconds and then passes the content through, which is what an arm
 # needs when it must observe how much budget a slow-but-finite capture spends.
@@ -7425,7 +9103,9 @@ state_dir="\$(cat "$state_pointer" 2>/dev/null || true)"
 inspect_pid="\$PPID"
 level=0
 while [[ "\$inspect_pid" =~ ^[1-9][0-9]*\$ && "\$level" -lt 4 ]]; do
-  args="\$(ps -o args= -p "\$inspect_pid" 2>/dev/null || true)"
+  # A long temporary repository path can otherwise truncate the Git flags that
+  # define this fixture's target capture.
+  args="\$(ps -ww -o args= -p "\$inspect_pid" 2>/dev/null || true)"
   if [[ $match_condition && "\$args" == *--find-renames* && "\$args" == *-l5000* ]]; then
     if [[ "$stall_seconds" -gt 0 ]]; then
       # Record the start so an arm can wait for the capture to be in progress
@@ -7450,8 +9130,10 @@ FILTER
   chmod +x "$filter_script"
   git -C "$review_repo" config filter.stall.clean "$filter_script"
   # Only an unstaged change routes worktree content through the clean filter, so
-  # this is what puts the stall on the unstaged patch capture.
-  printf 'dirty\n' >"$review_repo/payload.txt"
+  # this is what puts the stall on the unstaged patch capture. Use a different
+  # byte length so Git cannot accept the index stat cache as clean when the
+  # commit and worktree write share one filesystem timestamp.
+  printf 'dirty worktree\n' >"$review_repo/payload.txt"
 }
 
 run_capture_deadline_regressions() {
@@ -7466,9 +9148,17 @@ run_capture_deadline_regressions() {
   local control_waited
 
   mkdir -p "$control_state" "$wrapper_state" "$helper_state"
+  if [[ "$(/usr/bin/uname -s)" == "Darwin" ]]; then
+    # Each standalone wrapper capture prepares an exact lineage baseline before
+    # launch. Keep the adversarial stall budget above that measured setup cost.
+    deadline_seconds=20
+  fi
   printf '%s\n' "$control_state" >"$state_pointer"
   seed_capture_deadline_fixture \
     "$review_repo" "$filter_script" "$state_pointer"
+  if [[ "$(/usr/bin/uname -s)" == "Darwin" ]]; then
+    darwin_fixture_identity_helper_path >/dev/null
+  fi
 
   # Negative control. The arms below only prove a deadline if the fixture really
   # does stall the capture, so run the exact rename-aware patch capture outside
@@ -7479,6 +9169,9 @@ run_capture_deadline_regressions() {
     --patch --find-renames -l5000 --no-ext-diff --no-textconv \
     >/dev/null 2>&1 &
   control_pid=$!
+  if [[ "$(/usr/bin/uname -s)" == "Darwin" ]]; then
+    persist_darwin_deadline_root_identity "$control_pid" "$control_state"
+  fi
   control_waited=0
   while ((control_waited < (deadline_seconds + 3) * 10)); do
     process_is_runnable "$control_pid" || break
@@ -7489,7 +9182,18 @@ run_capture_deadline_regressions() {
     printf 'capture-deadline fixture no longer stalls an unbounded rename-aware patch capture; the deadline arms below would pass vacuously\n' >&2
     exit 1
   fi
-  kill -KILL "$control_pid" 2>/dev/null || true
+  if ! capture_darwin_deadline_fixture_lineage \
+    "capture deadline negative control" \
+    "$control_pid" "$control_state"; then
+    cleanup_capture_deadline_fixture_tree "$control_state"
+    exit 1
+  fi
+  if [[ "$(/usr/bin/uname -s)" == "Darwin" ]]; then
+    cleanup_darwin_deadline_fixture_lineage \
+      "capture deadline negative control" "$control_state"
+  else
+    kill -KILL "$control_pid" 2>/dev/null || true
+  fi
   wait "$control_pid" 2>/dev/null || true
   cleanup_capture_deadline_fixture_tree "$control_state"
 
@@ -7497,6 +9201,9 @@ run_capture_deadline_regressions() {
     "$review_repo" "$state_pointer" "$wrapper_state" "$deadline_seconds"
   run_capture_deadline_helper_arm \
     "$review_repo" "$state_pointer" "$helper_state" "$deadline_seconds"
+  if [[ "$(/usr/bin/uname -s)" == "Darwin" ]]; then
+    run_capture_deadline_hard_crash_arm
+  fi
   run_capture_deadline_headroom_arm
   run_capture_deadline_override_parity_arm
   run_capture_deadline_feedback_clamp_arm
@@ -7507,18 +9214,150 @@ run_capture_deadline_regressions() {
   run_capture_deadline_interrupt_arm
 }
 
+# A normal signal lets the wrapper run its own cleanup trap. SIGKILL does not.
+# The recovery watcher must therefore own a complete, prebound exact lineage
+# before the capture starts. The running filter proves the target passed its
+# launch barrier, which also proves the watcher was released first.
+run_capture_deadline_hard_crash_arm() {
+  local review_repo="$tmp_dir/capture-deadline-hard-crash"
+  local filter_script="$tmp_dir/capture-deadline-hard-crash-filter.sh"
+  local state_pointer="$tmp_dir/capture-deadline-hard-crash-state-pointer"
+  local state_dir="$tmp_dir/capture-deadline-hard-crash-state"
+  local deadline_tmp="$state_dir/tmp"
+  local bundle_dir="$state_dir/bundle"
+  local wrapper_pid
+  local wrapper_status
+  local launched=0
+  local settled=0
+  local proof_floor
+  local proof_state
+  local shared_tmp_root
+  local had_monitor=0
+
+  mkdir -p "$state_dir" "$deadline_tmp"
+  printf '%s\n' "$state_dir" >"$state_pointer"
+  : >"$state_dir/leader.pid"
+  : >"$state_dir/descendant.pid"
+  : >"$state_dir/group.pid"
+  seed_capture_deadline_fixture \
+    "$review_repo" "$filter_script" "$state_pointer"
+  shared_tmp_root="$(cd /tmp && pwd -P)"
+  proof_floor="$state_dir/proof.floor"
+  : >"$proof_floor"
+
+  begin_deadline_fixture_registration
+  case "$-" in
+    *m*) had_monitor=1 ;;
+  esac
+  set -m
+  (
+    cd "$review_repo"
+    exec /usr/bin/env -i \
+      "PATH=$PATH" \
+      "HOME=$HOME" \
+      "TMPDIR=$deadline_tmp" \
+      "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=120" \
+      "$adapter_wrapper" \
+      --prepare-bundle-dir "$bundle_dir" \
+      --mode local \
+      --engine local >"$stdout" 2>"$stderr"
+  ) &
+  wrapper_pid=$!
+  arm_deadline_fixture_cleanup "$wrapper_pid" "$state_dir"
+  if [[ "$had_monitor" -eq 0 ]]; then
+    set +m
+  fi
+
+  for _ in {1..400}; do
+    if [[ -s "$state_dir/leader.pid" && -s "$state_dir/descendant.pid" ]]; then
+      launched=1
+      break
+    fi
+    process_is_runnable "$wrapper_pid" || break
+    sleep 0.05
+  done
+  if [[ "$launched" -ne 1 ]]; then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+    printf 'hard-crash fixture never passed the capture launch barrier\n' >&2
+    cat "$stderr" >&2
+    exit 1
+  fi
+  if ! capture_darwin_deadline_fixture_lineage \
+    "capture deadline hard crash" "$wrapper_pid" "$state_dir"; then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+    exit 1
+  fi
+
+  if ! signal_darwin_deadline_fixture_root "$state_dir" "$wrapper_pid" 9; then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+    printf 'could not SIGKILL the exact hard-crash wrapper identity\n' >&2
+    exit 1
+  fi
+  set +e
+  wait "$wrapper_pid" 2>/dev/null
+  wrapper_status=$?
+  set -e
+  if [[ "$wrapper_status" -eq 0 ]]; then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+    printf 'SIGKILLed hard-crash wrapper exited successfully\n' >&2
+    exit 1
+  fi
+
+  if ! assert_deadline_fixture_process_contract \
+    "capture deadline hard crash" \
+    "$state_dir/leader.pid" \
+    "$state_dir/descendant.pid"; then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+    exit 1
+  fi
+  for _ in {1..200}; do
+    settled=0
+    proof_state=""
+    while IFS= read -r proof_state; do
+      if "$node_bin" "$repo_root/scripts/gate/darwin-process-lineage.mjs" \
+        discard-settled \
+        --state "$proof_state" \
+        --scratch "${proof_state%/*}" >/dev/null 2>&1; then
+        settled=1
+        break
+      fi
+    done < <(
+      find "$shared_tmp_root" -mindepth 2 -maxdepth 2 -type f \
+        -name "lineage.autoreview-deadline-${wrapper_pid}-*.json" \
+        -newer "$proof_floor" -print
+    )
+    [[ "$settled" -eq 0 ]] || break
+    sleep 0.05
+  done
+  if [[ "$settled" -ne 1 ]]; then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+    printf 'hard-crash recovery watcher did not publish exact settlement proof\n' >&2
+    exit 1
+  fi
+  if [[ -e "$bundle_dir" ]]; then
+    printf 'SIGKILLed hard-crash wrapper published a bundle\n' >&2
+    exit 1
+  fi
+  if ! disarm_deadline_fixture_cleanup "$wrapper_pid" "$state_dir"; then
+    printf 'hard-crash fixture cleanup registry drifted\n' >&2
+    exit 1
+  fi
+}
+
 # Detaching the helper's Git captures takes them out of the group a terminal
 # interrupt reaches, which raises the question of whether an interrupt during a
 # stalled capture strands the tree. It does not, and this arm is the proof.
 # `spawnSync` blocks the event loop, so the helper's own SIGINT/SIGTERM
 # listeners cannot run mid-call -- but because they are registered, the signal
 # is caught rather than fatal, so the helper stays alive, its capture deadline
-# fires on schedule, and the group sweep reaps the whole tree. An interrupt
-# therefore costs the remaining budget, not an orphan.
+# fires on schedule. Linux reaps the group. The trusted wrapper settles the
+# exact Darwin lineage. An interrupt therefore costs the remaining budget
+# without sending a reusable Darwin group signal.
 # Both runtimes own an interrupt path, and they are different code: the helper
 # relies on its signal handlers being registered before it detaches, while the
-# wrapper's `run_capture_with_deadline` traps INT/TERM/HUP, kills both groups,
-# restores the caller's dispositions and re-raises. Run the case against each.
+# wrapper's `run_capture_with_deadline` traps INT/TERM/HUP, signals only the
+# direct jobs on Darwin, restores the caller's dispositions, and re-raises. Run
+# the case against each runtime.
 run_capture_deadline_interrupt_arm() {
   run_capture_deadline_interrupt_case helper
   run_capture_deadline_interrupt_case wrapper
@@ -7589,9 +9428,15 @@ run_capture_deadline_publication_interrupt_case() {
     cat "$stderr" >&2
     exit 1
   fi
+  if ! capture_darwin_deadline_fixture_lineage \
+    "capture deadline publication" "$wrapper_pid" "$state_dir" 0; then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+    exit 1
+  fi
 
   # Interrupt while the capture is running, so the signal is queued behind it.
-  kill -INT -- "-$wrapper_pid" 2>/dev/null || kill -INT "$wrapper_pid" 2>/dev/null || true
+  signal_deadline_fixture_wrapper \
+    "$wrapper_pid" "$state_dir" INT || true
   set +e
   wait "$wrapper_pid" 2>/dev/null
   set -e
@@ -7603,6 +9448,11 @@ run_capture_deadline_publication_interrupt_case() {
   if [[ -e "$human_output" ]]; then
     cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
     printf 'an interrupted run still wrote its output file: %s\n' "$human_output" >&2
+    exit 1
+  fi
+  if ! cleanup_darwin_deadline_fixture_lineage \
+    "capture deadline publication" "$state_dir"; then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
     exit 1
   fi
   cleanup_retained_test_command_runtimes
@@ -7632,6 +9482,13 @@ run_capture_deadline_interrupt_case() {
   local elapsed
   local launched=0
   local had_monitor=0
+  local deadline_seconds=5
+
+  if [[ "$(/usr/bin/uname -s)" == "Darwin" ]]; then
+    # The real helper establishes exact recovery authority before it starts the
+    # capture. Keep this fixture's deadline beyond that measured setup cost.
+    deadline_seconds=20
+  fi
 
   mkdir -p "$state_dir"
   printf '%s\n' "$state_dir" >"$state_pointer"
@@ -7657,7 +9514,7 @@ run_capture_deadline_interrupt_case() {
       "PATH=$PATH" \
       "HOME=$HOME" \
       "TMPDIR=${TMPDIR:-/tmp}" \
-      "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=5" \
+      "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=$deadline_seconds" \
       "$adapter_wrapper" \
       --mode local \
       --engine local \
@@ -7685,14 +9542,20 @@ run_capture_deadline_interrupt_case() {
     cat "$stderr" >&2
     exit 1
   fi
+  if ! capture_darwin_deadline_fixture_lineage \
+    "capture deadline $mode interrupt" "$wrapper_pid" "$state_dir"; then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+    exit 1
+  fi
 
-  kill -INT -- "-$wrapper_pid" 2>/dev/null || kill -INT "$wrapper_pid" 2>/dev/null || true
+  signal_deadline_fixture_wrapper \
+    "$wrapper_pid" "$state_dir" INT || true
   set +e
   wait "$wrapper_pid" 2>/dev/null
   set -e
-  # The interrupted run must still leave nothing behind: the SIGTERM-ignoring
-  # filter and its descendant are both reaped by the deadline's group sweep.
-  if ! assert_deadline_fixture_processes_stopped \
+  # Both platforms settle the owned tree before returning. Darwin proves the
+  # pre-captured exact identities are gone.
+  if ! assert_deadline_fixture_process_contract \
     "capture deadline $mode interrupt" \
     "$state_dir/leader.pid" \
     "$state_dir/descendant.pid"; then
@@ -7728,16 +9591,26 @@ run_capture_deadline_wrapper_accumulation_arm() {
   local state_pointer="$tmp_dir/capture-deadline-wrapper-accumulation-state-dir"
   local state_dir="$tmp_dir/capture-deadline-wrapper-accumulation-state"
   local bundle_dir="$tmp_dir/capture-deadline-wrapper-accumulation-bundle"
+  local deadline_seconds=22
+  local stall_seconds=6
+
+  if [[ "$(/usr/bin/uname -s)" == "Darwin" ]]; then
+    # Exact-lineage setup takes about ten seconds on the real helper. Preserve
+    # enough room for one capture, then exceed one shared budget with two.
+    deadline_seconds=32
+    stall_seconds=8
+  fi
 
   mkdir -p "$state_dir"
   printf '%s\n' "$state_dir" >"$state_pointer"
   # Sized for the reason the helper arm records.
   seed_capture_deadline_fixture \
-    "$review_repo" "$filter_script" "$state_pointer" 6 patch-and-stat
+    "$review_repo" "$filter_script" "$state_pointer" \
+    "$stall_seconds" patch-and-stat
 
   run_helper_in_repo_expect_failure_with_env "$review_repo" \
-    "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=22" \
-    "AGENT_AUTOREVIEW_FEEDBACK_DEADLINE_SECONDS=30" \
+    "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=$deadline_seconds" \
+    "AGENT_AUTOREVIEW_FEEDBACK_DEADLINE_SECONDS=$((deadline_seconds + 10))" \
     --prepare-bundle-dir "$bundle_dir" \
     --mode local \
     --engine local
@@ -7865,7 +9738,7 @@ CODEX
   (
     cd "$review_repo"
     env -i \
-      "PATH=$engine_bin:$hermetic_git_bin" \
+      "PATH=$engine_bin:$trusted_test_node_dir:$hermetic_git_bin" \
       "HOME=$HOME" \
       "TMPDIR=${TMPDIR:-/tmp}" \
       "GIT_CONFIG_GLOBAL=/dev/null" \
@@ -7873,7 +9746,7 @@ CODEX
       "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=$deadline_seconds" \
       "AUTOREVIEW_FAKE_ENGINE_STATE_DIR=$state_dir" \
       "AUTOREVIEW_FAKE_ENGINE_SECONDS=$engine_seconds" \
-      "$node_bin" "$repo_root/scripts/agent-autoreview.mjs" \
+      "$adapter_wrapper" \
       --mode local \
       --engine codex \
       --json-output "$json_output" \
@@ -7960,10 +9833,19 @@ run_capture_deadline_byte_refusal_arm() {
 
 cleanup_capture_deadline_fixture_tree() {
   local state_dir="$1"
+  local host_platform
   local role
   local pid_file
   local pid
 
+  host_platform="$(/usr/bin/uname -s)"
+  if [[ "$host_platform" == "Darwin" ]]; then
+    cleanup_darwin_deadline_fixture_lineage \
+      "capture deadline cleanup" "$state_dir" || true
+    : >"$state_dir/leader.pid"
+    : >"$state_dir/descendant.pid"
+    return 0
+  fi
   for role in descendant leader; do
     pid_file="$state_dir/$role.pid"
     [[ -s "$pid_file" ]] || continue
@@ -8020,8 +9902,16 @@ run_capture_deadline_wrapper_arm() {
   if [[ "$had_monitor" -eq 0 ]]; then
     set +m
   fi
+  if ! capture_darwin_deadline_fixture_lineage \
+    "wrapper capture deadline" "$wrapper_pid" "$state_dir" 1 \
+    "$(((deadline_seconds + 10) * 40))"; then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+    printf 'wrapper capture deadline exited before fixture lineage capture\nstdout:\n%s\nstderr:\n%s\n' \
+      "$(cat "$stdout")" "$(cat "$stderr")" >&2
+    exit 1
+  fi
   if ! wait_for_deadline_wrapper_exit \
-    "wrapper capture deadline" "$wrapper_pid" "$state_dir"; then
+    "wrapper capture deadline" "$wrapper_pid" "$state_dir" 1200; then
     exit 1
   fi
   set +e
@@ -8050,10 +9940,8 @@ run_capture_deadline_wrapper_arm() {
       "$bundle_dir" >&2
     exit 1
   fi
-  # The escalation must reach the whole process group, not just the Git process
-  # the wrapper started: both the SIGTERM-ignoring filter and its descendant are
-  # gone.
-  if ! assert_deadline_fixture_processes_stopped \
+  # Linux settles the group. Darwin proves the filter's exact lineage is empty.
+  if ! assert_deadline_fixture_process_contract \
     "wrapper capture deadline" \
     "$state_dir/leader.pid" \
     "$state_dir/descendant.pid"; then
@@ -8115,8 +10003,16 @@ run_capture_deadline_helper_arm() {
   if [[ "$had_monitor" -eq 0 ]]; then
     set +m
   fi
+  if ! capture_darwin_deadline_fixture_lineage \
+    "helper capture deadline" "$wrapper_pid" "$state_dir" 1 \
+    "$(((deadline_seconds + 10) * 40))"; then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+    printf 'helper capture deadline exited before fixture lineage capture\nstdout:\n%s\nstderr:\n%s\n' \
+      "$(cat "$stdout")" "$(cat "$stderr")" >&2
+    exit 1
+  fi
   if ! wait_for_deadline_wrapper_exit \
-    "helper capture deadline" "$wrapper_pid" "$state_dir"; then
+    "helper capture deadline" "$wrapper_pid" "$state_dir" 1200; then
     exit 1
   fi
   set +e
@@ -8145,7 +10041,7 @@ run_capture_deadline_helper_arm() {
       "$bundle_output" >&2
     exit 1
   fi
-  if ! assert_deadline_fixture_processes_stopped \
+  if ! assert_deadline_fixture_process_contract \
     "helper capture deadline" \
     "$state_dir/leader.pid" \
     "$state_dir/descendant.pid"; then
@@ -8909,6 +10805,484 @@ run_trusted_sync_spawn_invariant_regression() {
   fi
 }
 
+run_darwin_process_signal_contract_regression() {
+  "$node_bin" - \
+    "$repo_root/scripts/agent-autoreview.mjs" \
+    "$repo_root/scripts/agent-autoreview.sh" \
+    "$repo_root/scripts/agent-autoreview.test.sh" \
+    "$repo_root/scripts/gate/darwin-process-lineage.mjs" \
+    "$repo_root/scripts/gate/darwin-process-lineage-model.mjs" \
+    "$repo_root/scripts/gate/darwin-process-lineage-state.mjs" \
+    "$repo_root/scripts/gate/darwin-process-identity-helper.mjs" \
+    "$repo_root/scripts/gate/darwin-process-identity.c" \
+    "$repo_root/scripts/gate/darwin-process-identity-runtime.inc.c" <<'NODE'
+const assert = require("node:assert/strict");
+const { spawnSync } = require("node:child_process");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+
+const source = fs.readFileSync(process.argv[2], "utf8");
+const wrapperSource = fs.readFileSync(process.argv[3], "utf8");
+const testSource = fs.readFileSync(process.argv[4], "utf8");
+const lineageSource = fs.readFileSync(process.argv[5], "utf8");
+const lineageModelSource = fs.readFileSync(process.argv[6], "utf8");
+const lineageStateSource = fs.readFileSync(process.argv[7], "utf8");
+const identityHelperSource = fs.readFileSync(process.argv[8], "utf8");
+const identityNativeSource = fs.readFileSync(process.argv[9], "utf8");
+const identityNativeRuntimeSource = fs.readFileSync(process.argv[10], "utf8");
+const shellFunction = (name) => {
+  const start = wrapperSource.indexOf(`${name}() {`);
+  assert.notEqual(start, -1, `missing ${name}`);
+  const end = wrapperSource.indexOf("\n}\n\n", start);
+  assert.notEqual(end, -1, `cannot bound ${name}`);
+  return wrapperSource.slice(start, end + 3);
+};
+const testBlock = (startName, endName) => {
+  const start = testSource.indexOf(`${startName}() {`);
+  const end = testSource.indexOf(`${endName}() {`, start);
+  assert.notEqual(start, -1, `missing test block ${startName}`);
+  assert.notEqual(end, -1, `cannot bound test block ${startName}`);
+  return testSource.slice(start, end);
+};
+const decision = /function canSignalDetachedProcessGroup\([^)]*\) \{\s*return ([^;]+);\s*\}/u.exec(
+  source,
+);
+assert.ok(decision, "missing detached process-group platform decision");
+const canSignal = Function(
+  "platformName",
+  `"use strict"; return (${decision[1]});`,
+);
+assert.equal(canSignal("linux"), true);
+assert.equal(canSignal("darwin"), false);
+assert.equal(canSignal("win32"), false);
+
+const negativeSignals = [...source.matchAll(/process\.kill\(-/gu)];
+assert.equal(
+  negativeSignals.length,
+  2,
+  "add each new negative-pid signal to the Darwin contract regression",
+);
+assert.match(
+  source,
+  /if \(canSignalDetachedProcessGroup\(\) && Number\.isInteger\(child\.pid\)\) \{\s*process\.kill\(-child\.pid, signal\);/u,
+  "reviewer group signals are not behind the Darwin guard",
+);
+assert.equal(
+  [...source.matchAll(/child\.kill\(/gu)].length,
+  1,
+  "add each direct reviewer-child signal to the unreaped-child audit",
+);
+assert.match(
+  source,
+  /else if \(!childHasClosed\) \{[\s\S]*?child\.kill\(signal\);/u,
+  "Darwin direct-child signals are not behind the unreaped-child guard",
+);
+assert.match(
+  source,
+  /child\.on\("close", \(code, signal\) => \{\s*signalReviewerChildOrGroup\(child, "SIGKILL", \{\s*childHasClosed: true,\s*\}\);/u,
+  "the reviewer close callback can still signal a reaped numeric PID",
+);
+assert.match(
+  source,
+  /if \(!pid \|\| !canSignalDetachedProcessGroup\(\)\) return;\s*try \{\s*process\.kill\(-pid, "SIGKILL"\);/u,
+  "synchronous spawn group signals are not behind the Darwin guard",
+);
+
+assert.match(
+  wrapperSource,
+  /classify_deadline_host\(\) \{[\s\S]*?detected="\$\(\/usr\/bin\/uname -s 2>\/dev\/null\)" \|\| \{[\s\S]*?return 2[\s\S]*?Linux \| Darwin\) deadline_host_platform="\$detected"/u,
+  "shell deadline host classification does not fail closed",
+);
+assert.match(
+  shellFunction("can_signal_deadline_process_group"),
+  /classify_deadline_host \|\| return 2\s*\[\[ "\$deadline_host_platform" == "Linux" \]\]/u,
+  "numeric process-group authority is not restricted to exact Linux",
+);
+assert.match(
+  shellFunction("deadline_current_shell_pid"),
+  /\/usr\/bin\/mktemp[\s\S]*?"\$command_runtime_dir\/deadline-owner-pid\.XXXXXX"[\s\S]*?system_perl -e '[^']*getppid\(\)[^']*' >"\$output_file"[\s\S]*?IFS= read -r deadline_current_shell_pid_result <"\$output_file"/u,
+  "the Darwin deadline owner probe does not return through a private file",
+);
+assert.doesNotMatch(
+  wrapperSource,
+  /deadline_owner_pid="\$\(deadline_current_shell_pid\)"/u,
+  "the Darwin deadline owner probe still runs in a command-substitution shell",
+);
+assert.match(
+  shellFunction("capture_darwin_deadline_exact_parent"),
+  /deadline-parent-identity\.XXXXXX[\s\S]*?capture-exact-parent[\s\S]*?>"\$output_file"[\s\S]*?IFS= read -r captured <"\$output_file"/u,
+  "the exact-parent probe does not run directly into a private file",
+);
+assert.doesNotMatch(
+  shellFunction("capture_darwin_deadline_exact_parent"),
+  /captured="\$\(/u,
+  "the exact-parent probe still runs below a command-substitution shell",
+);
+const wrapperNegativePidSites = [
+  ...wrapperSource.matchAll(/"-\$[A-Za-z_][A-Za-z0-9_]*"/gu),
+];
+assert.equal(
+  wrapperNegativePidSites.length,
+  5,
+  "add each shell negative-pid site to the Darwin contract regression",
+);
+assert.match(
+  shellFunction("deadline_process_or_group_is_live"),
+  /if \[\[ "\$deadline_host_platform" == "Linux" \]\]; then\s*kill -0 -- "-\$pid"[\s\S]*?darwin_deadline_exact_identity_status "\$exact_identity"/u,
+  "Darwin deadline liveness does not use the captured exact identity",
+);
+assert.match(
+  shellFunction("signal_deadline_process_or_group"),
+  /if \[\[ "\$deadline_host_platform" == "Linux" \]\]; then[\s\S]*?kill -s "\$signal_name" -- "-\$pid"[\s\S]*?\n {2}fi\s*signal_darwin_deadline_exact_identity "\$exact_identity" "\$signal_name"/u,
+  "Darwin deadline signals can bypass the exact identity helper",
+);
+assert.match(
+  shellFunction("signal_deadline_group_after_reap"),
+  /classify_deadline_host \|\| return 2\s*if \[\[ "\$deadline_host_platform" == "Linux" \]\]; then\s*kill -s "\$signal_name" -- "-\$pid"[\s\S]*?\[\[ "\$deadline_host_platform" == "Darwin" \]\] \|\| return 2\s*return 0/u,
+  "post-reap shell group sweeps are not restricted to exact Linux",
+);
+assert.match(
+  shellFunction("prepare_darwin_deadline_identity_helper"),
+  /darwin-process-lineage\.mjs[\s\S]*?prepare-exact[\s\S]*?"ready"/u,
+  "the Darwin deadline native helper is not snapshotted and probed",
+);
+assert.match(
+  shellFunction("capture_darwin_deadline_exact_child"),
+  /capture-exact-child-or-gone[\s\S]*?--pid "\$pid"[\s\S]*?--parent-pid "\$parent_pid"/u,
+  "Darwin deadline authority is not captured from an exact owned child",
+);
+assert.match(
+  shellFunction("darwin_deadline_exact_identity_status"),
+  /status-exact[\s\S]*?--scratch "\$command_runtime_dir"[\s\S]*?--identity "\$exact_identity"/u,
+  "Darwin deadline liveness does not use the status-exact CLI contract",
+);
+assert.match(
+  shellFunction("signal_darwin_deadline_exact_identity"),
+  /signal-exact[\s\S]*?--identity "\$exact_identity"[\s\S]*?--signal "\$signal_name"/u,
+  "Darwin deadline cleanup does not use the native audit-token signal",
+);
+assert.match(
+  shellFunction("run_darwin_deadline_recovery_watcher"),
+  /watch-settle[\s\S]*?--state "\$state_path"[\s\S]*?--scratch "\$command_runtime_dir"[\s\S]*?--controller-identity "\$controller_identity"[\s\S]*?--cancel-file "\$cancel_file"[\s\S]*?--armed-file "\$armed_file"[\s\S]*?--timeout-seconds "\$timeout_seconds"/u,
+  "Darwin recovery does not use the complete watch-settle CLI contract",
+);
+assert.match(
+  lineageSource,
+  /prepareDarwinExactIdentityHelper\([\s\S]*?nativeHelper\(scratchDirectory\)/u,
+  "the exact identity preparation path no longer compiles and probes the native helper",
+);
+assert.match(
+  lineageModelSource,
+  /function isExactDarwinChild\(child, parent\) \{[\s\S]*?child\.ppid === parent\.pid[\s\S]*?child\.parentUniqueId === parent\.uniqueId[\s\S]*?sameCoalitionPair\(child, parent\)/u,
+  "the exact child capture no longer binds the parent and coalition identity",
+);
+assert.match(
+  lineageStateSource,
+  /linkSync\(path, paths\.current\)[\s\S]*?validateClaimedCurrent\(paths, plan\)[\s\S]*?currentMatchesClaimedInode\(path, claimedStat\)/u,
+  "the Darwin state transition no longer binds the exact expected-state inode",
+);
+assert.match(
+  lineageStateSource,
+  /ensureTransitionPayload\(paths, plan\)[\s\S]*?validateReadyLink\(paths\)[\s\S]*?renameSync\(paths\.payload, path\)[\s\S]*?fsyncDirectory\(dirname\(path\)\)/u,
+  "the Darwin state transition no longer publishes its durable ready payload",
+);
+assert.match(
+  lineageSource,
+  /signalDarwinExactIdentity\([\s\S]*?signalIdentity\(helper, current, signalNumber\)/u,
+  "the exact identity signal no longer uses the native audit-token helper",
+);
+assert.match(
+  lineageSource,
+  /watchDarwinLineageSettlement\([\s\S]*?isExactDarwinChild\(watcherRow, launcherRow\)[\s\S]*?hasExactDarwinAncestry\([\s\S]*?watcherRow,[\s\S]*?controllerRow,[\s\S]*?currentUid\(\)[\s\S]*?exactIdentityStatus\(helper, controller, bootId\) !== "live"[\s\S]*?exactIdentityStatus\(helper, launcher, bootId\) !== "live"/u,
+  "the recovery watcher does not bind and monitor the top wrapper and launcher identities",
+);
+assert.match(
+  identityHelperSource,
+  /armDarwinPrivateWatcherControl\([\s\S]*?validateDarwinPrivateControlDirectory\([\s\S]*?readDarwinPrivateCancelMarker\([\s\S]*?readDarwinPrivateArmedMarker\([\s\S]*?publishDarwinPrivateArmedMarker/u,
+  "the recovery watcher does not validate cancel before atomically publishing readiness",
+);
+assert.match(
+  identityHelperSource,
+  /publishDarwinPrivateArmedMarker\([\s\S]*?writeExclusiveFile\(stagedPath[\s\S]*?fsyncDirectory\(directory\)[\s\S]*?readDarwinPrivatePeerFile\([\s\S]*?linkSync\(stagedPath, path\);\s*\n\}/u,
+  "the recovery watcher no longer uses an exclusive durable readiness publication",
+);
+assert.match(
+  identityNativeSource,
+  /#include "darwin-process-identity-runtime\.inc\.c"/u,
+  "the Darwin native entry point no longer closes over its split runtime",
+);
+assert.match(
+  identityNativeRuntimeSource,
+  /capture_snapshot_epoch[\s\S]*?snapshot_command/u,
+  "the split Darwin native runtime no longer owns the coherent snapshot",
+);
+for (const nativeName of [
+  "source.c",
+  "darwin-process-identity-runtime.inc.c",
+]) {
+  assert.ok(
+    identityHelperSource.includes(nativeName),
+    `the Darwin native helper cache does not bind ${nativeName}`,
+  );
+}
+assert.match(
+  identityHelperSource,
+  /nativeSourcesDigest\([\s\S]*?for \(const source of sources\)[\s\S]*?join\(stagedDirectory, source\.cacheName\)/u,
+  "the Darwin native helper does not digest and stage the complete source set",
+);
+const recoveryControlSource = shellFunction(
+  "prepare_deadline_recovery_control",
+);
+assert.match(
+  recoveryControlSource,
+  /action\.cancel\.staged[\s\S]*?action\.settle\.staged[\s\S]*?chmod 0400 "\$cancel_staged_file" "\$settle_staged_file"/u,
+  "the wrapper does not precreate immutable watcher action stages",
+);
+assert.match(
+  recoveryControlSource,
+  /armed\.pending[\s\S]*?chmod 0600[\s\S]*?deadline_recovery_armed_file_result/u,
+  "the wrapper does not precreate a private watcher readiness marker",
+);
+assert.match(
+  shellFunction("publish_deadline_recovery_action"),
+  /! -e "\$cancel_file"[\s\S]*?\/bin\/ln "\$pending_file" "\$cancel_file"[\s\S]*?\$handle->sync\(\)/u,
+  "the wrapper does not publish one exclusive, durable, stage-bound watcher action",
+);
+assert.match(
+  shellFunction("darwin_deadline_recovery_armed_status"),
+  /O_NOFOLLOW[\s\S]*?read_marker[\s\S]*?"\$armed\.staged"[\s\S]*?same_stat\(\$staged_before, \$armed_before\)[\s\S]*?sync\(\)[\s\S]*?same_stat\(\$staged_after, \$armed_after\)/u,
+  "the wrapper accepts replaceable or malformed watcher readiness evidence",
+);
+if (process.platform === "darwin") {
+  const observerFunction = shellFunction(
+    "darwin_deadline_recovery_armed_status",
+  );
+  const observerMatch = /<<'PERL'\n([\s\S]*?)\nPERL/u.exec(observerFunction);
+  assert.ok(observerMatch, "cannot extract the Darwin readiness observer");
+  const scratch = fs.mkdtempSync(
+    path.join(os.tmpdir(), "agent-autoreview-armed-observer-"),
+  );
+  const directory = path.join(scratch, "deadline-recovery.runtime");
+  const armed = path.join(directory, "armed");
+  const pending = `${armed}.pending`;
+  const staged = `${armed}.staged`;
+  const runObserver = () =>
+    spawnSync("/usr/bin/perl", ["-", scratch, directory, armed, "once"], {
+      encoding: "utf8",
+      env: { PATH: "/usr/bin:/bin" },
+      input: observerMatch[1],
+    });
+  try {
+    fs.mkdirSync(directory, { mode: 0o700 });
+    fs.writeFileSync(pending, "", { flag: "wx", mode: 0o600 });
+    fs.chmodSync(pending, 0o600);
+    fs.writeFileSync(staged, "armed\n", { flag: "wx", mode: 0o400 });
+    fs.chmodSync(staged, 0o400);
+    let observed = runObserver();
+    assert.equal(observed.status, 0, observed.stderr);
+    assert.equal(observed.stdout, "pending\n");
+
+    fs.linkSync(staged, armed);
+    observed = runObserver();
+    assert.equal(observed.status, 0, observed.stderr);
+    assert.equal(observed.stdout, "armed\n");
+
+    const extra = path.join(directory, "extra-link");
+    fs.linkSync(staged, extra);
+    observed = runObserver();
+    assert.notEqual(observed.status, 0);
+    assert.match(observed.stderr, /unsafe Darwin watcher armed marker/u);
+    fs.unlinkSync(extra);
+    fs.unlinkSync(armed);
+    fs.unlinkSync(staged);
+
+    const stagedSeed = path.join(directory, "staged-seed");
+    const armedSeed = path.join(directory, "armed-seed");
+    fs.writeFileSync(stagedSeed, "armed\n", { flag: "wx", mode: 0o400 });
+    fs.writeFileSync(armedSeed, "armed\n", { flag: "wx", mode: 0o400 });
+    fs.chmodSync(stagedSeed, 0o400);
+    fs.chmodSync(armedSeed, 0o400);
+    fs.linkSync(stagedSeed, staged);
+    fs.linkSync(armedSeed, armed);
+    observed = runObserver();
+    assert.notEqual(observed.status, 0);
+    assert.match(observed.stderr, /unsafe Darwin watcher armed marker/u);
+  } finally {
+    fs.rmSync(scratch, { force: true, recursive: true });
+  }
+}
+assert.match(
+  shellFunction("wait_for_darwin_deadline_recovery_watcher_armed"),
+  /darwin_deadline_recovery_armed_status "\$armed_file" wait[\s\S]*?darwin_deadline_exact_identity_status/u,
+  "the wrapper does not keep one readiness observer alive until the watcher arms",
+);
+assert.doesNotMatch(
+  shellFunction("wait_for_darwin_deadline_recovery_watcher_armed"),
+  /sleep 0\.025|for \(\(attempt/u,
+  "the watcher readiness path still forks polling processes during bootstrap",
+);
+for (const functionName of [
+  "run_with_deadline",
+  "reap_capture_jobs",
+  "run_capture_with_deadline",
+]) {
+  const functionSource = shellFunction(functionName);
+  assert.doesNotMatch(
+    functionSource,
+    /"-\$[A-Za-z_][A-Za-z0-9_]*"/u,
+    `${functionName} bypasses the Darwin-aware shell signal boundary`,
+  );
+  assert.match(
+    functionSource,
+    /exact_identity/u,
+    `${functionName} does not carry captured Darwin identity authority`,
+  );
+}
+for (const functionName of ["run_with_deadline", "run_capture_with_deadline"]) {
+  const functionSource = shellFunction(functionName);
+  assert.match(
+    functionSource,
+    /deadline_current_shell_pid \|\| return 125\s*deadline_owner_pid="\$deadline_current_shell_pid_result"/u,
+    `${functionName} does not capture ownership in the spawning shell`,
+  );
+  assert.match(
+    functionSource,
+    /run_darwin_deadline_recovery_watcher[\s\S]*?darwin_autoreview_wrapper_exact_identity[\s\S]*?close_deadline_launch_barrier "\$recovery_watcher_barrier" go[\s\S]*?close_deadline_launch_barrier "\$child_launch_barrier" go/u,
+    `${functionName} can release work before its recovery watcher`,
+  );
+  assert.match(
+    functionSource,
+    /close_deadline_launch_barrier "\$recovery_watcher_barrier" go[\s\S]*?wait_for_darwin_deadline_recovery_watcher_armed[\s\S]*?close_deadline_launch_barrier "\$child_launch_barrier" go/u,
+    `${functionName} does not require watcher readiness before work`,
+  );
+}
+assert.match(
+  shellFunction("run_capture_with_deadline"),
+  /watchdog_live_status[\s\S]*?1\)[\s\S]*?if \[\[ -s "\$status_file" \|\| -s "\$timeout_file" \]\]; then\s*break\s*fi[\s\S]*?capture deadline watchdog exited without a completion marker/u,
+  "the capture watchdog exit can race its terminal marker publication",
+);
+const watcherSettlementSource = shellFunction(
+  "settle_and_reap_darwin_deadline_recovery_watcher",
+);
+assert.match(
+  watcherSettlementSource,
+  /publish_deadline_recovery_settle[\s\S]*?wait "\$watcher_pid"[\s\S]*?darwin_deadline_exact_identity_status[\s\S]*?"\$result" == "settled"/u,
+  "the wrapper can acknowledge settlement before the recovery watcher exits with exact proof",
+);
+assert.doesNotMatch(
+  watcherSettlementSource,
+  /(?:settle_darwin_deadline_lineage_state|signal_darwin_deadline_exact_identity)/u,
+  "the foreground wrapper can race the recovery watcher as a second settlement writer",
+);
+assert.match(
+  shellFunction("finalize_darwin_deadline_lineage_with_watcher"),
+  /settle_and_reap_darwin_deadline_recovery_watcher[\s\S]*?discard_settled_darwin_deadline_lineage_state/u,
+  "the wrapper discards retained lineage proof before it validates the watcher handoff",
+);
+const barrierWait = shellFunction("wait_for_deadline_launch_barrier");
+assert.match(
+  barrierWait,
+  /SECONDS - started_at >= 10/u,
+  "the pre-exec barrier has no autonomous parent-crash bound",
+);
+assert.doesNotMatch(
+  barrierWait,
+  /\b(?:sleep|perl|node|env)\b/u,
+  "the pre-exec barrier can spawn a descendant before exact binding",
+);
+assert.match(
+  shellFunction("run_darwin_contained_trusted_node"),
+  /prepare_darwin_helper_containment_contract[\s\S]*?publish_darwin_helper_containment_contract[\s\S]*?close_deadline_launch_barrier[\s\S]*?contained_recovery_watcher_barrier[\s\S]*?wait_for_darwin_deadline_recovery_watcher_armed[\s\S]*?close_deadline_launch_barrier "\$contained_helper_barrier" go/u,
+  "the default helper is not contract-bound behind its recovery watcher",
+);
+assert.match(
+  shellFunction("exec_helper"),
+  /run_darwin_contained_trusted_node/u,
+  "the final default-helper entry point bypasses Darwin containment",
+);
+assert.match(
+  source,
+  /function assertDarwinWrapperContainment\(\)[\s\S]*?AGENT_AUTOREVIEW_DARWIN_CONTAINMENT_FILE[\s\S]*?validateDarwinLineageState[\s\S]*?parseDarwinExactIdentity/u,
+  "the Node helper does not validate the wrapper containment contract",
+);
+assert.match(
+  source,
+  /if \(!helpOnly\) assertDarwinWrapperContainment\(\);\s*if \(argv\[0\] === "--serialize-untracked-file"\)/u,
+  "a direct Darwin helper path can run before containment validation",
+);
+assert.match(
+  testSource,
+  /run_capture_deadline_hard_crash_arm\(\)[\s\S]*?signal_darwin_deadline_fixture_root "\$state_dir" "\$wrapper_pid" 9[\s\S]*?discard-settled[\s\S]*?--scratch "\$\{proof_state%\/\*\}"[\s\S]*?find "\$shared_tmp_root"[\s\S]*?lineage\.autoreview-deadline-\$\{wrapper_pid\}-\*\.json[\s\S]*?-newer "\$proof_floor"/u,
+  "the standalone SIGKILL-after-release recovery contract has no regression",
+);
+assert.match(
+  testSource,
+  /if \(process\.platform === "darwin"\) \{[\s\S]*?runExactHelper\([\s\S]*?"signal"[\s\S]*?\} else \{\s*try \{\s*process\.kill\(-reviewer\.pid, "SIGKILL"\);/u,
+  "the suite wrapper fixture can still use a numeric Darwin process group",
+);
+assert.match(
+  testSource,
+  /reviewerExactIdentity = child;[\s\S]*?process\.on\("SIGTERM"[\s\S]*?reviewerExactIdentity\.pid[\s\S]*?reviewerExactIdentity\.uniqueId/u,
+  "the suite wrapper fixture does not retain its pre-captured Darwin identity",
+);
+assert.match(
+  testSource,
+  /signal_owned_suite_child\(\) \{[\s\S]*?"\$host_platform" == "Darwin"[\s\S]*?signal_suite_darwin_child_identity[\s\S]*?"\$host_platform" == "Linux"[\s\S]*?kill/u,
+  "direct suite-child fixtures can signal a reusable Darwin PID",
+);
+assert.match(
+  testSource,
+  /signal_engine_fixture_process\(\) \{[\s\S]*?"\$host_platform" == "Darwin"[\s\S]*?signal_darwin_persisted_fixture_identity[\s\S]*?"\$host_platform" == "Linux"[\s\S]*?kill/u,
+  "engine fixtures can signal a reusable Darwin PID",
+);
+const signalCleanupBlock = testBlock(
+  "run_engine_signal_cleanup_regression",
+  "run_stdin_epipe_regression",
+);
+assert.doesNotMatch(
+  signalCleanupBlock,
+  /"\$node_bin" "\$repo_root\/scripts\/agent-autoreview\.mjs"/u,
+  "the signal cleanup fixture bypasses standalone Darwin containment",
+);
+assert.match(
+  signalCleanupBlock,
+  /"\$adapter_wrapper"[\s\S]*?persist_darwin_deadline_root_identity[\s\S]*?capture_darwin_deadline_fixture_lineage[\s\S]*?signal_engine_fixture_process/u,
+  "the signal cleanup fixture does not capture exact authority before signalling",
+);
+assert.match(
+  signalCleanupBlock,
+  /AUTOREVIEW_FAKE_COMPLETION_BARRIER[\s\S]*?capture_darwin_deadline_fixture_lineage[\s\S]*?printf 'go\\n'/u,
+  "ordinary completion can release its engine before exact fixture capture",
+);
+assert.ok(
+  [...source.matchAll(/stdio:\s*inheritGateMarkerStdio\(/gu)].length >= 5,
+  "mapped autoreview spawns no longer retain the quality gate marker descriptors",
+);
+NODE
+
+  if [[ "$(/usr/bin/uname -s)" == "Darwin" ]]; then
+    local direct_status=0
+    : >"$stdout"
+    : >"$stderr"
+    /usr/bin/env -i \
+      "PATH=$PATH" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "$node_bin" "$repo_root/scripts/agent-autoreview.mjs" \
+      --mode local --engine local --dry-run \
+      >"$stdout" 2>"$stderr" || direct_status=$?
+    if [[ "$direct_status" -eq 0 ]] ||
+      ! grep -Fq \
+        'direct Darwin execution has no trusted containment contract' \
+        "$stderr"; then
+      printf 'direct Darwin Node entry did not fail closed without wrapper containment\nstdout:\n%s\nstderr:\n%s\n' \
+        "$(cat "$stdout")" "$(cat "$stderr")" >&2
+      exit 1
+    fi
+  fi
+}
+
 run_privileged_shebang_startup_regression() {
   local review_repo="$tmp_dir/privileged-shebang-startup"
   local startup_payload="$tmp_dir/hostile-bash-env.sh"
@@ -9324,6 +11698,7 @@ run_runtime_trust_family() {
   run_privileged_shebang_startup_regression
   run_hostile_volta_environment_regression
   run_trusted_sync_spawn_invariant_regression
+  run_darwin_process_signal_contract_regression
 }
 
 run_bundle_integrity_family() {
@@ -9745,15 +12120,10 @@ external_stderr="$tmp_dir/external-wrapper.stderr"
 standalone_verify_cwd="$tmp_dir/standalone-verify-cwd"
 hostile_cwd_node_marker="$tmp_dir/standalone-hostile-cwd-node-ran"
 mkdir -p \
-  "$external_runtime/scripts" \
   "$standalone_verify_cwd/bin"
 cp "$terminal_manifest_node" "$standalone_verify_cwd/bin/node"
 chmod +x "$standalone_verify_cwd/bin/node"
-cp \
-  "$repo_root/scripts/agent-autoreview.sh" \
-  "$repo_root/scripts/agent-autoreview.mjs" \
-  "$repo_root/scripts/agent-autoreview-core.mjs" \
-  "$external_runtime/scripts/"
+copy_autoreview_wrapper_runtime "$external_runtime/scripts"
 chmod +x \
   "$external_wrapper" \
   "$external_runtime/scripts/agent-autoreview.mjs"
@@ -10733,6 +13103,9 @@ case "$test_focus" in
     ;;
   capture-deadline)
     run_capture_deadline_regressions
+    ;;
+  darwin-signal-contract)
+    run_darwin_process_signal_contract_regression
     ;;
   *)
     printf 'unknown AUTOREVIEW_TEST_FOCUS: %s\n' "$test_focus" >&2

@@ -3,7 +3,7 @@ title: Fair local quality-gate coordination across worktrees
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-26
+last_verified: 2026-08-28
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -79,9 +79,9 @@ It does not run mapped commands without exclusion.
 The protocol, journal schema, and scheduling policy have explicit versions. A
 client or coordinator rejects an unsupported version, malformed state, or
 invalid resource name before it starts work. The Bash adapter rejects resource
-names outside its `browser-fixture-3211`, `playwright-install`, and
-`terraform-plugin-cache` policy allowlist. It never silently falls back to
-unrestricted execution.
+names outside its `browser-fixture-3211`, `playwright-install`,
+`terraform-plugin-cache`, and `trunk-daemon` policy allowlist. It never silently
+falls back to unrestricted execution.
 
 The effective policy also binds the hosting Node runtime identity and the
 production coordinator source signature. The runtime identity covers the
@@ -303,6 +303,14 @@ readers that fetch fields in separate snapshots fall back to PID liveness. It
 writes the exact start identity to `coordinator_start_utc=`. A new coordinator
 reads that field from one record snapshot.
 
+Cross-policy recovery accepts an old coordinator owner only when one stable
+record contains its exact coordinator token, exact coordinator start identity,
+and the literal `coordinator-owner-v1` owner token. This record maps to the
+recovery-only `request-marker-empty-v1` contract. Recovery waits for the
+aggregate coordinator generation marker. It does not create per-command
+lineage or trust an old settlement claim. An open or ambiguous marker keeps the
+new policy blocked.
+
 Adoption preserves the incoming owner record's group and other read bits so a
 legacy waiter with shared-root access can observe the barrier. The replacement
 record remains writable only by its owner. It stores the real coordinator
@@ -368,18 +376,21 @@ contains separate version-, policy-, and capacity-specific namespaces.
 Sequential users of one shared root do not inherit another user's mode-0700
 coordinator directory.
 
-A gate cannot drain coordinator journal entries through the socket. If all
-remaining state is drain-required work from dead clients, and no live client,
+A coordinator-disabled gate cannot drain coordinator journal entries through
+the socket. If all remaining state is drain-required work from dead clients, and no live client,
 waiter, drain claim, or result handoff remains, the coordinator closes its
 socket after the idle period without releasing `run.lock`. A current gate that
 runs with the coordinator disabled can then reclaim a same-UID dead coordinator
 owner. It records the coordinator generation as a legacy drain obligation and
-drains every worker through the shared generation marker. Each worker retains
-that marker after its mapped wrapper exits. A historical gate treats the
-versioned compatibility token as unreclaimable and waits until a current gate
-recovers or releases the owner. The same-PGID close-all-handle guarantee
-requires a gate version with anchored group capture. A queued, granted, or
-result-ready request prevents this recovery handoff.
+drains every Linux worker through the shared generation marker and an exact
+anchored process group. Each worker retains that marker after its mapped wrapper
+exits. Darwin cannot derive a non-reusable per-command identity from the
+aggregate marker. The disabled compatibility path waits for that marker to
+close and fails closed at its bound when a holder remains. A normal
+coordinator-enabled successor reads the journal and settles each persisted
+Darwin lineage. A historical gate treats the versioned compatibility token as
+unreclaimable and waits until a current gate recovers or releases the owner. A
+queued, granted, or result-ready request prevents this recovery handoff.
 
 ### Serialize each worktree for the full request
 
@@ -454,6 +465,26 @@ enable a shared plugin cache after request registration or while a request
 waits. Terraform does not guarantee concurrent writes to that cache. The
 unconditional resource claim closes this configuration race. Each named
 resource has capacity 1.
+
+Every mapped `./tools/trunk check --ci` command claims the named
+`trunk-daemon` resource. The gate runs Trunk through
+`scripts/gate/trunk-check-once.sh`. The wrapper records the daemon state before
+and after the check. A daemon that was already live is a named trusted external
+service and stays outside command capacity. If the check starts a daemon, a
+direct guardian owns the check child and its shutdown. The guardian survives a
+hard wrapper death through the inherited mapped process handles. After the
+check exits, it makes at most three named cleanup cycles. Each status or
+shutdown call has a 10-second limit, so cleanup uses at most 90 seconds of
+command time plus two one-second retry delays. It does not signal a PID or
+process-group ID. If it confirms `stopped`, it exits with the check status. If
+it cannot confirm `stopped`, it exits 2 and leaves the daemon as the named
+trusted external service. A surviving wrapper reports that failure. A wrapper
+also fails if its final status check finds a late live daemon after bounded
+cleanup. A wrapper that died cannot receive a status. Its successor reclassifies
+daemon state before it runs, refuses an unclassifiable state, and treats a
+reported live daemon as the trusted service. The `trunk-daemon` resource
+serializes every mapped client that inspects, starts, uses, or stops the service.
+Direct Trunk commands outside the gate remain outside coordinator control.
 
 Resource names and weights are part of the versioned policy. A new exclusive
 class needs measured contention evidence and scheduler regression coverage.
@@ -715,11 +746,177 @@ only after the prior coordinator releases that lock.
 Request records include a unique request drain identity. Each lease includes a
 different command drain identity. The records also include the gate owner's PID
 and process start identity, the request capability digest, the worktree,
-capacity weight, and named resources. Workers and mapped wrappers carry command
-and request tags. Workers retain open command, request, and coordinator
-generation marker descriptors. Raw capabilities and secret-bearing
-environment values do not enter the journal, result files, status output,
-command arguments, or coordinator logs.
+capacity weight, named resources, and lifecycle contract. Workers and mapped
+wrappers carry command and request tags. Workers retain open command, request,
+and coordinator generation marker descriptors. Raw capabilities and
+secret-bearing environment values do not enter the journal, result files,
+status output, command arguments, or coordinator logs.
+
+Linux uses the `portable-marker-v1` lifecycle contract. It uses marker
+descriptors, exact PID/start pairs, and validated process groups. macOS uses
+`darwin-coherent-lineage-v2`. It does not signal a bare PID or process-group
+ID.
+
+New leases accept only `portable-marker-v1` or
+`darwin-coherent-lineage-v2`. A journal from the prior policy can contain
+`darwin-unique-lineage-v1`. Restart recovery keeps that lease as a global
+`drain-required` barrier. It cannot begin new settlement or use normal release.
+A drainer must upgrade and settle its exact lineage evidence, then acknowledge
+the obligation with the same legacy contract. This compatibility path never
+admits new v1 work.
+
+Before a Darwin client requests a command lease, it records a complete
+same-user process baseline and the current boot identity. A legacy client
+records the same state before it links its owner record. After the lease or
+legacy claim, it atomically refreshes that unbound baseline before it creates
+the mapped-command wrapper. The initial record gives crash recovery durable
+fail-closed evidence. The refresh prevents scheduler wait time from making
+unrelated processes look like command descendants. The client then binds the
+wrapper and its launcher to exact kernel identities before it sends `START`.
+The shell resolves `process.execPath` and rejects a relative, missing,
+non-executable, or symlink result. It uses that real Node runtime for every
+Darwin lineage helper launch. A version-manager shim therefore cannot break the
+exact controller-to-helper or launcher-to-watcher parent relation.
+
+The canonical lineage file lives under the current user's mode-0700 coordinator
+lineage root, or the corresponding legacy lineage root. This location lets a
+different worktree recover the durable obligation. Watcher controls and native
+helper cache files stay under the invoking repository's private scratch root.
+The watcher receives the canonical state directory as a separate input and
+validates it independently. It does not require shared state to be below its
+scratch root.
+
+Each v4 state replacement compares and increments a revision. Concurrent
+foreground and watcher settlement cannot replace newer evidence. The state
+helper first publishes a fsynced plan with the full expected state, full target,
+operation, and adjacent revisions. It then links the canonical expected-state
+inode to an exclusive `.current` path. The helper fsyncs one payload and links
+the plan to `.ready` before it renames that payload over the state. Recovery can
+complete only the exact plan. A stale writer can link only the newer canonical
+inode, so it fails before publication. Settlement can upgrade an exact v3/v1
+obligation, but it clears the old settlement claim and signal timestamps before
+the next census. Initial discard remains strict v4/v2 and publishes a validated
+terminal tombstone before state removal.
+
+The Darwin identity helper uses the kernel `p_uniqueid`, `p_puniqueid`, PID
+version, resource coalition ID, and jetsam coalition ID values. The source and
+cache trust implementation in
+`scripts/gate/darwin-process-identity-helper.mjs` compiles from the pinned
+sources in `scripts/gate/darwin-process-identity.c` and
+`scripts/gate/darwin-process-identity-runtime.inc.c`. A runtime probe must
+confirm that the private libproc operations have the required behavior.
+The probe requires a forked child's unique ID to be greater than its exact
+parent's unique ID. A child of another parent must consume the next global
+unique ID between two helper fence children. The probe also requires one
+coherent process snapshot. Each accepted snapshot has two adjacent,
+non-wrapping fence unique IDs. Its pre-list estimate must be at least the raw
+listed count, minus its one PID 0 slot, plus the XNU padding of 20. This relation
+permits processes to exit between the count and vector reads. XNU excludes PID
+0 from `nprocs`; the libproc vector includes it. The raw count must fit in the
+recorded vector capacity. Each emitted row must predate the lower fence. These
+runtime invariants replace an OS-version allowlist. A changed XNU contract
+fails closed.
+
+Cache lookup performs static source, binary, provenance, and file-identity
+validation. It does not run the semantic probe or a throwaway census. The
+authority-establishment path runs the probe and one coherent census inside one
+bounded monotonic retry budget. It then revalidates the cache and publishes a
+private boot-scoped capability receipt. The receipt binds the source digest,
+helper digest, cache identity, helper identity, and boot identity. Every exact
+identity or lineage consumer requires that receipt. A successor settlement
+process can establish its own receipt through the same full authority path when
+it resumes a durable lineage from a different worktree. This exception applies
+only to settlement and stays inside the original settlement deadline. One persistent marker
+observer waits for watcher readiness. The parent checks the exact watcher
+identity after the armed marker appears. It does not fork one status command
+and one sleep process per polling interval. This prevents the readiness path
+from creating process births that compete with the watcher census.
+
+Fence or allocator contention returns a typed retry status. The implementation
+keeps the adjacent-fence rule. It never converts contention into snapshot
+evidence. The authority path uses bounded exponential jitter. Watcher censuses
+use one native call per 200 ms cycle and recheck their action, owners, and
+deadline after typed contention. Settlement retries typed contention inside
+its existing deadline. Deadline expiry keeps the recovery obligation and
+lineage state.
+
+The probe also requires both coalition IDs to be non-zero and the child's
+coalition pair to match its exact parent's pair. The snapshot parser and bound
+state reject zero coalition IDs. The bound root and launcher must have the same
+pair. The helper brackets the PID 1 boot-time read with the exact PID 1
+identity. It sends signals through `proc_signal_with_audittoken`, which binds
+the signal to the captured process identity. If the API, probe, compiler,
+baseline, boot identity, coalition evidence, ordering evidence, coherent
+snapshot, or lineage is unavailable or ambiguous, the command fails closed
+before `START` or the scheduler keeps its recovery obligation.
+
+The lineage census follows stable process identities and their captured parent
+unique IDs. It owns a process when its complete captured parent chain reaches
+the bound root. The process unique ID survives `exec`, `setsid`, reparenting,
+environment removal, and descriptor closure. XNU can update the captured parent
+unique ID during `exec`. The helper reads every row twice and retries a mixed
+row. An incomplete chain stays ambiguous unless a durable prior tombstone owns
+it. The census excludes a new incomplete chain only if its resource and jetsam
+coalition pair differs from the bound root's pair. An incomplete same-coalition
+chain keeps the settlement barrier. The census does not classify a process by
+its name or executable path. The census cannot infer causality through a
+process broker that existed before the baseline. The Darwin broker-launch
+preflight rejects
+opaque repository executables and known XPC, launch-service, Apple-event, and
+Unix-domain-socket client paths in tracked, untracked, and bounded ignored
+executable source. The ignored-file walk excludes explicit dependency and tool
+caches, generated build and coverage output, documentation, and local or frozen
+evidence. These directories are `.git`, `.cache`, `.investigations`, `.next`,
+`.pnpm-store`, `.rankings`, `.reviews`, `.tmp`, `.trunk`, `.turbo`, `coverage`,
+`dist`, `docs`, `node_modules`, and `vendor`. Mapped commands must not use
+excluded content to request broker process creation. An enumerated symlink is
+valid only when it resolves to an enumerated regular file inside the
+repository. Mach-O and ELF magic fails closed without relying on the executable
+mode bit. Fixed path, Git-output, file-size, and total-source limits fail
+closed. Its exact allowlist contains only reviewed local protocols that cannot
+request an external process. The only generated native exception is an exact
+Darwin Terraform provider package. Its registry address, version, platform,
+executable name, current CPU slice, and complete `h1:` directory hash must match
+the owning lock from the unique `HEAD` and `origin/main` merge-base. The stack
+registry and lock are read from that exact Git object. Their stable worktree
+bytes must be identical. The attestation rejects missing mainline objects,
+links, non-regular entries, unstable ancestry or metadata, and any other opaque
+file under `.terraform-agent-gate`.
+The gate copies the preflight source through a no-follow stable read into an
+unlinked read-only descriptor before repo-owned helpers run. It records and
+rechecks the descriptor identity and source digest before every dispatch. The
+mapped target closes its inherited descriptor before START. A mapped command
+cannot redirect a later preflight by replacing the repository pathname.
+Mapped commands use `/dev/null` as the Terraform CLI configuration. They remove
+development overrides, provider reattachment, checksum-breaking cache policy,
+`TF_PLUGIN_CACHE_DIR`, and inherited `TF_CLI_ARGS*`. The plugin cache stays in
+the outer environment identity and serialized resource policy. Mapped commands
+cannot use it until the preflight supports Terraform's symlinked cache layout.
+The coalition mismatch exclusion classifies external-service processes only
+within this preflight contract. This lexical policy cannot detect a broker call
+hidden in a dependency, a system executable, or an arbitrary runtime-built
+string. The pinned toolchain must not use those forms to launch persistent
+broker-owned processes. Complete coverage for those forms requires a future
+OS-enforced containment boundary. A named trusted service, such as the Trunk
+daemon, needs an explicit coordinator resource and a bounded wrapper instead.
+
+The parent starts one recovery watcher for each bound mapped command. It
+captures the watcher's exact identity and waits for its durable armed marker
+before it releases the mapped root's `START` barrier. The watcher samples a
+coherent lineage census every 200 ms while work runs. It persists owned and
+ambiguous candidates. It excludes fresh unrelated rows. A parent that starts
+and exits between samples can leave no durable ownership evidence. A
+same-coalition descendant then remains ambiguous and keeps the release barrier.
+This sampling limit affects liveness only. It cannot authorize a bare signal or
+an empty settlement proof.
+
+Normal finalization changes the lease to `settling` and then asks the watcher
+to settle. The mapped root remains live behind its settlement FIFO during the
+final census. The watcher signals descendants from deepest to shallowest and
+signals the mapped root last. This order keeps a final descendant fork visible
+through the root's exact lineage. The watcher is the only normal settlement
+writer. If its exact controller or launcher exits first, it settles
+autonomously. A parent fallback can write only after the exact watcher is gone.
 
 The parallel parent opens the request marker before it forks a worker. In
 coordinator mode, it also opens the shared generation marker for the worker.
@@ -729,29 +926,43 @@ every cleanup registry. The coordinator journal persists the command identity.
 A pure legacy parent persists that identity as a drain obligation before launch
 release. The worker creates and retains its command marker only after that
 recovery mapping exists and, in coordinator mode, after its lease exists. It
-atomically publishes its complete result and stays
-alive as the process-group leader until the parent drains that command. A crash
-before lease registration therefore leaves no unreferenced command marker. A
-worker still behind the launch barrier exits when its exact parent dies. A
-worker released past the barrier retains its request handle for successor
-recovery and its generation handle for a legacy handoff. A no-lock sentinel
-retries an empty parent-identity read while that PID still exists. A crash after
-registration leaves request, command, and generation recovery handles where
-their lock modes provide them.
+checks its exact parent while a coordinator lease is queued. It cancels the
+private wait if that parent exits. The worker accepts recovery ownership only
+after its v1 lease record matches the active lease ID, drain identity, and
+lifecycle contract. It closes its own command-marker descriptor when the mapped
+call returns, then publishes its complete result atomically. The mapped root
+and surviving descendants retain their command-marker descriptors. This avoids
+a recovery cycle in which the sentinel keeps its own drain open. A crash before
+lease registration therefore leaves no unreferenced command marker. A worker
+still behind the launch barrier exits when its exact parent dies. Linux keeps a
+post-grant worker as the validated process-group leader for parent or successor
+recovery. A Darwin worker exits when its exact parent dies because the persisted
+unique lineage is the successor's command authority. A no-lock sentinel retries
+an empty parent-identity read while that PID still exists. A crash after
+registration leaves the recovery handles required by its lifecycle contract.
 
-Before an explicit no-lock run starts mapped work, it creates a request token
-and marker under `.tmp/agent-quality-gate/no-lock-handles`. This private
-repo-local directory carries process handles only. It grants no coordinator
-capacity, worktree lease, named resource, or legacy lock authority.
+Before an explicit no-lock run or a nested gate starts mapped work, it creates
+its own request token and marker under
+`.tmp/agent-quality-gate/no-lock-handles`. A nested gate already runs under its
+ancestor's exclusion. It does not reuse the ancestor's token or change the
+ancestor's lock. This private repo-local directory carries process handles
+only. It grants no coordinator capacity, worktree lease, named resource, or
+legacy lock authority.
 
 A successor coordinator reads the journal before it reuses any lease. It drops
 queued command leases because their wait connections ended with the old
 coordinator. It converts each granted lease to a drain obligation and keeps its
-capacity and resources reserved. A joining Bash gate claims the stale request
-and drains every lease's command identity. It then drains the request identity
-once. Each drain persists every discovered PID and start identity and confirms
-that the set is empty. Only then can it acknowledge the lease obligations and
-release capacity, a named resource, the worktree lease, or the legacy lock.
+capacity and resources reserved. A joining Bash gate claims one stale request
+and gathers all Darwin command identities for that request. It settles those
+identities as one cohort from one coherent process snapshot per census epoch. A
+process can receive a signal only when at least one cohort lineage proves exact
+ownership. An incomplete or ambiguous chain in another cohort lineage does not
+override that proof. A process that remains ambiguous in every lineage receives
+no signal and keeps the barrier. The drainer persists every cohort census before
+it sends a signal and confirms that every lineage is empty. It then drains the
+request identity once. Only after both steps complete can it acknowledge the
+lease obligations and release capacity, a named resource, the worktree lease,
+or the legacy lock.
 The sequential and parallel paths apply the same rule after each command
 wrapper and watchdog settle. A parallel drain also seeds its durable capture
 from the live registered worker process group before it sends the first signal.
@@ -770,21 +981,45 @@ append-only capture retains the legacy `pid|lstart` line, then adds a
 `runtime-v2|pid|start` metadata line that an old reader skips because its first
 field is not a PID. A current reader requires that exact generation before it
 signals. An interrupted legacy-only Linux capture stays unverified unless a
-fresh handle or pinned relation reauthorizes it. macOS uses the calendar value
-as its runtime generation. It drains every descendant
-captured before detachment or still discoverable through the registered worker
-group or a command, request, or generation identity before it unregisters the
-worker or releases that command's scheduler lease. A
+fresh handle or pinned relation reauthorizes it. Darwin uses the unique-lineage
+record instead of the portable numeric signal path. It drains every exact
+descendant before it unregisters the worker or releases that command's
+scheduler lease. A
 legacy run publishes its token-scoped obligation before the first signal. Each
 drain refresh captures newly tagged roots before it can declare the prior set
 empty. A failed drain keeps its recovery evidence and reports that the mapped
-command ran. An explicit no-lock run has no successor recovery owner. If its
-normal drain fails, it uses the recorded direct-child, worker-group, and drain
-capture identities for a bounded TERM/KILL settlement attempt. It rechecks each
-process generation before it sends a signal. This fallback cannot prove that an
-unobserved detached process is absent, so the gate keeps the original failure
-status. `EXIT` changes an otherwise successful status to 2 when this teardown
-fails.
+command ran. On Darwin, every lock mode uses exact unique-lineage settlement.
+An explicit no-lock run has no successor recovery owner, so failed settlement
+returns a non-zero result and retains its evidence for inspection. On Linux, a
+failed no-lock drain uses its recorded direct-child, worker-group, and
+drain-capture identities for a bounded TERM/KILL settlement attempt. It
+rechecks each generation before it sends a signal. This fallback cannot prove
+that an unobserved detached process is absent, so the gate keeps the original
+failure status. `EXIT` changes an otherwise successful status to 2 when
+teardown fails.
+
+A Darwin lease enters `settling` before the client starts its final census.
+This state blocks every new grant, including a grant for another resource or
+worktree. A coordinator restart converts the settling lease into a drain
+obligation and preserves the global barrier. The drainer retains a durable
+verified-empty lineage record until `release-lease` or `ack-drain` commits the
+obligation release. It then deletes the record. Missing, corrupt, or incomplete
+lineage evidence cannot release capacity, a named resource, or a worktree
+lease.
+
+A legacy sequential client retains the verified-empty state under its owner
+token after each command. It validates and rearms that state with a fresh
+unbound baseline before the next command. Final release removes the exact owner
+and empty lock directory before it retires the state. Retirement accepts only
+exact unbound state or durable settlement. Coordinator adoption changes the
+owner recovery contract to its exact generation marker before it retires the
+original unbound owner state.
+
+The orphan-drain bound can be `0`. On Darwin, zero can validate and consume an
+already durable settlement record. It cannot establish native authority, take
+a census, or signal an unsettled lineage. An unsettled obligation remains
+blocked.
+
 All obligations for one request share one request-scoped drain claim. A
 different process cannot acknowledge a sibling obligation while that claim is
 live. PID reuse, a matching zombie owner, an unreadable identity, an unreadable
@@ -799,11 +1034,17 @@ only that execution's stale leases and drain obligations. It then reconstructs
 the result-ready journal state from the exact result.
 
 Result publication is forbidden while any command lease for that request
-remains. A pre-command scheduler timeout uses
+remains. A pre-command scheduler timeout or another pre-bind failure uses
 `abandon-lease --command-not-started` to remove its queued or granted lease
-without creating a drain obligation. Once a command can have started,
-cancellation retains its capacity and named resources until a token-scoped
-drainer acknowledges `processTreeEmpty=true`.
+without creating a drain obligation. On Darwin, it then retires only an exact
+v4 lineage state with a null root, a null launcher, and no tombstones. The
+revision-checked `verified-unbound-abandonment` transition does not take a
+process census or signal a process. A legacy owner retains that proof for its
+next command or final release. Other modes discard it after their scheduler or
+private-run authority ends. A bound or non-empty state remains subject to full
+exact-lineage settlement. Once a command can have started, cancellation retains
+its capacity and named resources until a token-scoped drainer acknowledges
+`processTreeEmpty=true`.
 
 ## Alternatives considered
 
@@ -851,18 +1092,27 @@ drainer acknowledges `processTreeEmpty=true`.
 - Capacity 3 is a safe initial default. Change it only with the benchmark from
   #2006: one full gate plus concurrent short package gates, including an
   all-capacity dashboard phase.
-- A descendant can escape recovery if it starts a new session before capture
-  and closes every inherited gate identity. The gate does not support mapped
-  commands that self-daemonize this way. Issue
-  [#2042](https://github.com/mento-protocol/monitoring-monorepo/issues/2042)
-  tracks portable containment or enforcement without signalling a reusable bare
-  PID or process-group ID.
-- The Bash drain rechecks the exact process identity immediately before each
-  numeric `kill`, but the identity read and signal remain separate system calls.
-  A PID can be reused in that final gap. Linux uses the kernel start tick to
-  avoid coarse calendar collisions before the signal. macOS retains the exact
-  calendar value. Issue #2042 also tracks a kernel-backed selector or containment
-  boundary that removes this portable check-to-signal gap.
+- On Darwin, direct descendants cannot escape by creating a new session,
+  clearing gate environment values, or closing marker descriptors. The exact
+  process identity survives those changes. Stable parent-row reads and a
+  coherent census preserve fail-closed classification. Atomic audit-token
+  signals remove the numeric check-to-signal gap.
+- A Darwin nested runtime can retain a stale marker declaration after it closes
+  every declared descriptor. The spawn adapter ignores that declaration only
+  when no declared descriptor is an open regular file. It rejects a partially
+  surviving set. Linux rejects every all-stale declaration because its marker
+  can be the only remaining containment handle.
+- A process broker that existed before the baseline can hide causality. The
+  broker-launch preflight rejects opaque executables and known unapproved
+  repository clients. The toolchain boundary, lexical-policy limit, and
+  named-service policy remain part of the trust model.
+- The Sentry broker probe and CI-gate extractor put each detached target behind
+  a live Bash process-group leader. An in-group watchdog reacts to a timeout,
+  stop request, or parent-pipe EOF. It signals the leader's own `-$$` group
+  before that identity can be reused. Node never signals the reaped numeric PID
+  or process-group ID.
+- Linux retains the portable PID/start and process-group implementation. It
+  does not receive Darwin's audit-token signal guarantee.
 
 ## Benchmark result
 
@@ -910,6 +1160,10 @@ They do not predict production gate duration.
 - Issue
   [#2006](https://github.com/mento-protocol/monitoring-monorepo/issues/2006)
   — the fair scheduling, coalescing, recovery, and benchmark requirements.
+- Issue
+  [#2042](https://github.com/mento-protocol/monitoring-monorepo/issues/2042)
+  — the detached-descendant, non-reusable identity, trusted-service, and
+  pre-capture recovery requirements.
 - Local `.tmp/agent-quality-gate/durations.jsonl` records captured on
   2026-08-21 — 1,710 seconds total for 14 seconds of recorded execution, and
   1,306 seconds total for about 64 seconds of recorded execution.
@@ -934,6 +1188,14 @@ They do not predict production gate duration.
   `quality-gate-coordinator-result-record.mjs`,
   `quality-gate-coordinator-results.mjs`, and
   `quality-gate-coordinator-retention.mjs`.
+- Darwin containment and service files:
+  `scripts/gate/darwin-broker-launch-preflight.mjs`,
+  `darwin-process-identity.c`, `darwin-process-identity-runtime.inc.c`,
+  `darwin-process-identity-helper.mjs`,
+  `darwin-process-lineage-model.mjs`, `darwin-process-lineage-state.mjs`,
+  `darwin-process-lineage.mjs`,
+  `darwin-process-lineage.sh`,
+  `mapped-command-process-identity.mjs`, and `trunk-check-once.sh`.
 - Test and benchmark files: `scripts/agent-quality-gate.test.sh`,
   `scripts/gate/quality-gate-coordinator.test.mjs`,
   `quality-gate-coordinator-policy.test.mjs`,
@@ -943,6 +1205,13 @@ They do not predict production gate duration.
   `agent-quality-gate-scheduler-fixture-support.mjs`,
   `agent-quality-gate-fixture-processes.mjs`, and
   `agent-quality-gate-scheduler-tool-fixture.mjs`.
+- Focused containment tests:
+  `scripts/gate/darwin-broker-launch-preflight.test.mjs`,
+  `darwin-process-identity.test.mjs`, `darwin-process-lineage.test.mjs`,
+  `mapped-command-process-identity.test.mjs`, `trunk-check-once.test.sh`,
+  `scripts/agent-autoreview.test.sh`,
+  `scripts/sentry/broker/sentry-mcp-broker.test.mjs`, and
+  `scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.test.mjs`.
 - Integration entry point: `scripts/agent-quality-gate.sh`.
 - Related decision: [ADR 0007](0007-agent-quality-gate-and-merge-oracle.md),
   which owns why the local gate is required before push.

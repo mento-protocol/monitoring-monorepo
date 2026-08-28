@@ -162,7 +162,7 @@ export const ALERT_ARMS = [
     patterns: [".shellcheckrc"],
     effects: [
       {
-        why: "The repo-wide `./tools/trunk check --all --filter=shellcheck` command itself is added by add_trunk_check_command (see trunk_requires_shellcheck_full_scan) since it depends on the full changed-paths set, not just this one path.",
+        why: "The repo-wide `./tools/trunk check --ci --all --filter=shellcheck` command itself is added by add_trunk_check_command (see trunk_requires_shellcheck_full_scan) since it depends on the full changed-paths set, not just this one path.",
         surface: "tooling",
       },
     ],

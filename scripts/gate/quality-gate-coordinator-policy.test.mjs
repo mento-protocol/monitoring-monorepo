@@ -797,7 +797,14 @@ test("material environment normalizes only worktree lifecycle roots", async (t) 
     "the relative gate temp fallback must normalize across worktrees",
   );
 
-  for (const name of MATERIAL_SINGLE_PATH_ENVIRONMENT_NAMES) {
+  for (const name of MATERIAL_SINGLE_PATH_ENVIRONMENT_NAMES.filter(
+    (name) =>
+      ![
+        "TERRAFORM_CONFIG",
+        "TF_CLI_CONFIG_FILE",
+        "TF_PLUGIN_CACHE_DIR",
+      ].includes(name),
+  )) {
     assert.notEqual(
       directMaterialEnvironmentDigest(first, {
         [name]: join("..", "material-input"),
@@ -1216,7 +1223,6 @@ test("material environment binds mapped-command controls", async (t) => {
     "SSL_CERT_DIR",
     "SSL_CERT_FILE",
     "STRYKER_MUTATOR",
-    "TERRAFORM_CONFIG",
     "TRUNK_CACHE",
     "TRUNK_CLI_VERSION",
     "VERCEL",
@@ -1265,6 +1271,11 @@ test("material environment binds mapped-command controls", async (t) => {
     "SENTRY_SUITE_GATE_ROOT",
     "SKEW_CHECK_ROOT",
     "SKILLS_MIRROR_ROOT_A",
+    "TERRAFORM_CONFIG",
+    "TF_CLI_CONFIG_FILE",
+    "TF_PLUGIN_CACHE_DIR",
+    "TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE",
+    "TF_REATTACH_PROVIDERS",
     "TRUNK_LAUNCHER_DEBUG",
     "TRUNK_LAUNCHER_PATH",
     "TRUNK_LAUNCHER_QUIET",

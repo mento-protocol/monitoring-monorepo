@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   CoordinatorError,
+  PERSISTED_DARWIN_LIFECYCLE_CONTRACTS,
   copy,
   utc,
   validateRunToken,
@@ -9,7 +10,7 @@ import {
 
 export function activeLeases(state) {
   return Object.values(state.leases).filter((lease) =>
-    ["granted", "drain-required"].includes(lease.status),
+    ["granted", "settling", "drain-required"].includes(lease.status),
   );
 }
 
@@ -25,7 +26,7 @@ export function recoverGrantedLeases(state, recoveredGeneration, now) {
       delete state.leases[lease.leaseId];
       continue;
     }
-    if (lease.status !== "granted") continue;
+    if (!["granted", "settling"].includes(lease.status)) continue;
     const request = state.requests[lease.requestId];
     if (!request) {
       throw new CoordinatorError(
@@ -42,6 +43,7 @@ export function recoverGrantedLeases(state, recoveredGeneration, now) {
       leaseId: lease.leaseId,
       requestId: lease.requestId,
       drainIdentity: lease.drainIdentity,
+      lifecycleContract: lease.lifecycleContract,
       owner: copy(lease.owner),
       weight: lease.weight,
       resources: copy(lease.resources),
@@ -56,6 +58,19 @@ export function recoverGrantedLeases(state, recoveredGeneration, now) {
       payload: { reason: "coordinator-restart" },
     };
   }
+}
+
+export function darwinSettlementBarrier(state) {
+  return (
+    Object.values(state.leases)
+      .filter(
+        (lease) =>
+          PERSISTED_DARWIN_LIFECYCLE_CONTRACTS.includes(
+            lease.lifecycleContract,
+          ) && ["settling", "drain-required"].includes(lease.status),
+      )
+      .sort((left, right) => left.sequence - right.sequence)[0] ?? null
+  );
 }
 
 function heldResources(state) {
@@ -108,6 +123,7 @@ function canGrant(state, lease) {
 
 export function scheduleState(state, acquiredAt, grantGuard = () => true) {
   const grants = [];
+  if (darwinSettlementBarrier(state)) return grants;
   while (true) {
     const reservation = weightedReservation(state);
     const count = state.requestOrder.length;
@@ -171,6 +187,15 @@ export function blockersForLease(state, lease) {
     });
   }
   const used = usedCapacity(state);
+  const settlementBarrier = darwinSettlementBarrier(state);
+  if (settlementBarrier) {
+    blockers.push({
+      type: "darwin-settlement-barrier",
+      leaseId: settlementBarrier.leaseId,
+      status: settlementBarrier.status,
+      lifecycleContract: settlementBarrier.lifecycleContract,
+    });
+  }
   if (used + lease.weight > state.capacity) {
     blockers.push({
       type: "capacity",

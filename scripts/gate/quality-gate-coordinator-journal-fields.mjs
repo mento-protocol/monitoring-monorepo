@@ -4,6 +4,24 @@ const runTokenPattern =
 const resourcePattern = /^[A-Za-z0-9][A-Za-z0-9:._/-]{0,191}$/u;
 const sha256Pattern = /^[a-f0-9]{64}$/u;
 
+export const DARWIN_COHERENT_LIFECYCLE_CONTRACT = "darwin-coherent-lineage-v2";
+export const DARWIN_LEGACY_LIFECYCLE_CONTRACT = "darwin-unique-lineage-v1";
+
+export const LEASE_LIFECYCLE_CONTRACTS = Object.freeze([
+  "portable-marker-v1",
+  DARWIN_COHERENT_LIFECYCLE_CONTRACT,
+]);
+
+export const PERSISTED_LEASE_LIFECYCLE_CONTRACTS = Object.freeze([
+  ...LEASE_LIFECYCLE_CONTRACTS,
+  DARWIN_LEGACY_LIFECYCLE_CONTRACT,
+]);
+
+export const PERSISTED_DARWIN_LIFECYCLE_CONTRACTS = Object.freeze([
+  DARWIN_COHERENT_LIFECYCLE_CONTRACT,
+  DARWIN_LEGACY_LIFECYCLE_CONTRACT,
+]);
+
 export class JournalValidationError extends Error {
   constructor(path, reason) {
     super(`${path}: ${reason}`);
@@ -142,6 +160,10 @@ export function oneOf(value, allowed, path) {
   if (!allowed.includes(value)) {
     reject(path, `must be one of ${allowed.join(", ")}`);
   }
+}
+
+export function lifecycleContract(value, path) {
+  oneOf(value, PERSISTED_LEASE_LIFECYCLE_CONTRACTS, path);
 }
 
 export function own(map, key) {

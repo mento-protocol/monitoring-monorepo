@@ -3,7 +3,7 @@ title: File-size and lint-hygiene watch list
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-23
+last_verified: 2026-08-28
 doc_type: report
 scope: repo-wide
 review_interval_days: 30
@@ -45,7 +45,9 @@ D5c retired the gate's bash routing: `scripts/agent-quality-gate.sh` dropped to
 its row is gone rather than left as a baseline for a file that no longer exists.
 Every other row is the 2026-08-23 refresh.
 
-Scope: source files in package configs that enforce `max-lines`, plus `scripts/` script and shell sources; generated files, tests outside Aegis, and `ui-dashboard/src/lib/types.ts` are excluded.
+Scope: source files in package configs that enforce `max-lines`, plus `scripts/`
+JavaScript, shell, and native C sources; generated files, tests outside Aegis,
+and `ui-dashboard/src/lib/types.ts` are excluded.
 `raw` is physical lines; `rough` approximates ESLint after `skipBlankLines` and `skipComments`.
 Use `--format issue` for GitHub Issues; do not append this report to `BACKLOG.md`.
 
@@ -120,8 +122,8 @@ Use `--format issue` for GitHub Issues; do not append this report to `BACKLOG.md
 
 Exempt (3): splitting these would change a named mechanism rather than refactor a file, so they never open an issue. `docs/adr/0065-scripts-file-size-watchlist-scope.md` owns the list and its review cadence.
 
-| Rough |  Raw | Cap      | File                                | Why it is exempt                                                                                                                                                                              |
-| ----: | ---: | -------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-|  6710 | 7324 | hard cap | `scripts/agent-autoreview.sh`       | trust root: the wrapper hashes its own blob against frozen HEAD before an explicit-ref review, so a sourced sibling falls outside the identity it proves                                      |
-|  4647 | 5013 | hard cap | `scripts/agent-autoreview.mjs`      | trust root: the wrapper materializes exactly these two helper names under a 2 MB aggregate cap, from six literal lists with per-name file modes; admitting a third rewrites that materializer |
-|  2058 | 2315 | hard cap | `scripts/agent-autoreview-core.mjs` | trust root: the wrapper materializes exactly these two helper names under a 2 MB aggregate cap, from six literal lists with per-name file modes; admitting a third rewrites that materializer |
+| Rough |  Raw | Cap      | File                                | Why it is exempt                                                                                                                                                                                                                                                            |
+| ----: | ---: | -------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|  6710 | 7324 | hard cap | `scripts/agent-autoreview.sh`       | trust root: the wrapper hashes its own blob against frozen HEAD before an explicit-ref review, so a sourced sibling falls outside the identity it proves                                                                                                                    |
+|  4647 | 5013 | hard cap | `scripts/agent-autoreview.mjs`      | trust root: the wrapper materializes the entry point, core, native Darwin identity runtime, and process-identity dependency under a 2 MB aggregate cap from explicit trust lists and private nested directories; splitting either large helper changes the attested runtime |
+|  2058 | 2315 | hard cap | `scripts/agent-autoreview-core.mjs` | trust root: the wrapper materializes the entry point, core, native Darwin identity runtime, and process-identity dependency under a 2 MB aggregate cap from explicit trust lists and private nested directories; splitting either large helper changes the attested runtime |

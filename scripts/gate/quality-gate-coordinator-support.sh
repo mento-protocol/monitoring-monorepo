@@ -652,6 +652,14 @@ gate_coordinator_wait_cli() {
   gate_coordinator_wait_error_file="$wait_error_file"
   while [[ ! -s "$completion_file" ]]; do
     sleep 1
+    if [[ "${gate_coordinator_wait_requires_live_parent:-0}" == 1 ]]; then
+      if ! declare -F parallel_worker_parent_is_live >/dev/null 2>&1 ||
+        ! parallel_worker_parent_is_live; then
+        echo "error: the parallel worker parent exited while its command lease was queued." >&2
+        gate_coordinator_stop_wait_cli || true
+        return 2
+      fi
+    fi
     now="$(date +%s)"
     if [[ "$now" -ge "$wait_deadline" ]]; then
       echo "error: quality-gate coordinator wait exceeded its client timeout." >&2
@@ -670,6 +678,14 @@ gate_coordinator_wait_cli() {
       last_heartbeat="$now"
     fi
   done
+  if [[ "${gate_coordinator_wait_requires_live_parent:-0}" == 1 ]] && {
+    ! declare -F parallel_worker_parent_is_live >/dev/null 2>&1 ||
+      ! parallel_worker_parent_is_live;
+  }; then
+    gate_coordinator_stop_wait_cli || true
+    echo "error: the parallel worker parent exited before its queued lease result was accepted." >&2
+    return 2
+  fi
   case "$-" in *e*) had_errexit=1 ;; esac
   set +e
   recorded_rc="$(<"$completion_file")" || recorded_rc=""
@@ -700,6 +716,13 @@ gate_coordinator_classify_command() {
   gate_coordinator_command_class="ordinary"
 
   case "$command" in
+    "./tools/trunk check --ci"*)
+      # Trunk can use a persistent per-worktree daemon. The bounded machine-wide
+      # resource serializes every mapped client that can start, use, or stop
+      # this named trusted service class.
+      gate_coordinator_command_resources+=("trunk-daemon")
+      gate_coordinator_command_class="trunk-check"
+      ;;
     "pnpm agent:quality-gate:test"|"bash scripts/agent-quality-gate.test.sh")
       if [[ "$gate_coordinator_capacity" -ge 2 ]]; then
         gate_coordinator_command_weight=2
@@ -741,8 +764,11 @@ gate_coordinator_classify_command() {
 
 gate_coordinator_recover_stale_obligations() {
   local status_json status_records records="" obligation_id drain_token request_token request_id
+  local lifecycle_contract
   local current_status obligation_present condemned_dir
   local claim_error claim_json error_code rc had_errexit=0
+  local discarded_request_tokens=""
+  local -a darwin_cohort_tokens=()
   local drain_context="${1:-stale-run}"
   local request_filter="${2:-}"
   gate_coordinator_is_active || return 0
@@ -753,8 +779,10 @@ gate_coordinator_recover_stale_obligations() {
   status_json="$(gate_coordinator_cli status)" || return 2
   status_records="$(printf '%s' "$status_json" | node -e '
     const value = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
-    for (const item of value.drainObligations ?? []) {
-      if (process.argv[1] && item.requestId !== process.argv[1]) continue;
+    const obligations = value.drainObligations ?? [];
+    const selectedRequestId = process.argv[1] || obligations[0]?.requestId || "";
+    for (const item of obligations) {
+      if (item.requestId !== selectedRequestId) continue;
       const request = (value.requests ?? []).find(
         (candidate) => candidate.requestId === item.requestId,
       );
@@ -763,10 +791,11 @@ gate_coordinator_recover_stale_obligations() {
         item.drainIdentity ?? "",
         request?.drainIdentity ?? "",
         item.requestId ?? "",
+        item.lifecycleContract ?? "",
       ].join("|") + "\n");
     }
   ' "$request_filter")" || return 2
-  while IFS='|' read -r obligation_id drain_token request_token request_id; do
+  while IFS='|' read -r obligation_id drain_token request_token request_id lifecycle_contract; do
     [[ -n "$obligation_id" ]] || continue
     gate_lock_token_is_wellformed "$drain_token" || {
       echo "error: coordinator drain obligation ${obligation_id} has no safe persisted token." >&2
@@ -777,6 +806,13 @@ gate_coordinator_recover_stale_obligations() {
       return 2
     }
     [[ -n "$request_id" ]] || return 2
+    case "$lifecycle_contract" in
+      portable-marker-v1|darwin-coherent-lineage-v2|darwin-unique-lineage-v1) ;;
+      *)
+        echo "error: coordinator drain obligation ${obligation_id} has no supported lifecycle contract." >&2
+        return 2
+        ;;
+    esac
     claim_error="$(mktemp "$scratch_dir/coordinator-drain-claim.XXXXXX")" || return 2
     case "$-" in *e*) had_errexit=1 ;; esac
     set +e
@@ -807,8 +843,9 @@ gate_coordinator_recover_stale_obligations() {
       const obligation = value.obligation ?? {};
       process.exit(value.claimed === true &&
         obligation.obligationId === process.argv[1] &&
-        obligation.drainIdentity === process.argv[2] ? 0 : 1);
-    ' "$obligation_id" "$drain_token"; then
+        obligation.drainIdentity === process.argv[2] &&
+        obligation.lifecycleContract === process.argv[3] ? 0 : 1);
+    ' "$obligation_id" "$drain_token" "$lifecycle_contract"; then
       gate_coordinator_cli release-drain-claim \
         --obligation-id "$obligation_id" --drain-token "$drain_token" \
         --claimant-pid "$gate_coordinator_owner_pid" \
@@ -817,7 +854,7 @@ gate_coordinator_recover_stale_obligations() {
       echo "error: coordinator returned an invalid drain claim for ${obligation_id}." >&2
       return 2
     fi
-    if ! record_condemned_run "$drain_token"; then
+    if ! record_condemned_run "$drain_token" "$lifecycle_contract"; then
       gate_coordinator_cli release-drain-claim \
         --obligation-id "$obligation_id" --drain-token "$drain_token" \
         --claimant-pid "$gate_coordinator_owner_pid" \
@@ -826,7 +863,7 @@ gate_coordinator_recover_stale_obligations() {
       echo "error: coordinator drain obligation ${obligation_id} could not be persisted." >&2
       return 2
     fi
-    if ! record_condemned_run "$request_token"; then
+    if ! record_condemned_run "$request_token" "request-marker-empty-v1"; then
       gate_coordinator_cli release-drain-claim \
         --obligation-id "$obligation_id" --drain-token "$drain_token" \
         --claimant-pid "$gate_coordinator_owner_pid" \
@@ -835,20 +872,42 @@ gate_coordinator_recover_stale_obligations() {
       echo "error: coordinator request recovery handle for ${obligation_id} could not be persisted." >&2
       return 2
     fi
-    records="${records}${obligation_id}|${drain_token}|${request_token}|${request_id}
+    records="${records}${obligation_id}|${drain_token}|${request_token}|${request_id}|${lifecycle_contract}
 "
   done <<< "$status_records"
   [[ -n "$records" ]] || return 0
   condemned_dir="$(gate_lock_condemned_dir)" || return 2
   [[ "$condemned_dir" == "${gate_lock_root_dir}/condemned.d" ]] || return 2
-  while IFS='|' read -r obligation_id drain_token request_token request_id; do
+  while IFS='|' read -r obligation_id drain_token request_token request_id lifecycle_contract; do
+    [[ -n "$obligation_id" ]] || continue
+    case "$lifecycle_contract" in
+      darwin-coherent-lineage-v2|darwin-unique-lineage-v1)
+        darwin_cohort_tokens+=("$drain_token")
+        ;;
+    esac
+  done <<< "$records"
+  if [[ "${#darwin_cohort_tokens[@]}" -gt 0 ]]; then
+    if ! declare -F gate_drain_settle_darwin_lineage_cohort >/dev/null 2>&1 ||
+      ! gate_drain_settle_darwin_lineage_cohort \
+        "$drain_context" "${darwin_cohort_tokens[@]}"; then
+      echo "error: coordinator request cohort did not reach empty exact Darwin process trees." >&2
+      return 2
+    fi
+    for drain_token in "${darwin_cohort_tokens[@]}"; do
+      rm -f "$condemned_dir/$drain_token" || return 2
+      gate_lock_drained_tokens="${gate_lock_drained_tokens} ${drain_token}"
+    done
+  fi
+  while IFS='|' read -r obligation_id drain_token request_token request_id lifecycle_contract; do
     [[ -n "$obligation_id" ]] || continue
     case " ${gate_lock_drained_tokens} " in
       *" ${drain_token} "*) continue ;;
     esac
     # Drain only the token this parent claimed. The legacy directory-wide scan
     # would also take records claimed by another coordinator client.
-    if ! drain_condemned_run_commands "$drain_token" "$drain_context"; then
+    if ! drain_condemned_run_commands \
+      "$drain_token" "$drain_context" "" "" 0 0 \
+      "$lifecycle_contract"; then
       echo "error: coordinator drain obligation ${obligation_id} did not reach an empty process tree." >&2
       return 2
     fi
@@ -858,19 +917,21 @@ gate_coordinator_recover_stale_obligations() {
   # Command tokens recover exact command captures. The request token is a
   # separate coarse handle retained by every command. Drain both before any
   # lease in that stale request can release capacity.
-  while IFS='|' read -r obligation_id drain_token request_token request_id; do
+  while IFS='|' read -r obligation_id drain_token request_token request_id lifecycle_contract; do
     [[ -n "$obligation_id" ]] || continue
     case " ${gate_lock_drained_tokens} " in
       *" ${request_token} "*) continue ;;
     esac
-    if ! drain_condemned_run_commands "$request_token" "$drain_context"; then
+    if ! drain_condemned_run_commands \
+      "$request_token" "$drain_context" "" "" 0 0 \
+      "request-marker-empty-v1"; then
       echo "error: coordinator request ${request_id} did not reach an empty process tree." >&2
       return 2
     fi
     rm -f "$condemned_dir/$request_token" || return 2
     gate_lock_drained_tokens="${gate_lock_drained_tokens} ${request_token}"
   done <<< "$records"
-  while IFS='|' read -r obligation_id drain_token request_token request_id; do
+  while IFS='|' read -r obligation_id drain_token request_token request_id lifecycle_contract; do
     [[ -n "$obligation_id" ]] || continue
     case " ${gate_lock_drained_tokens} " in
       *" ${drain_token} "*) ;;
@@ -884,7 +945,7 @@ gate_coordinator_recover_stale_obligations() {
       --obligation-id "$obligation_id" --drain-token "$drain_token" \
       --drainer-pid "$gate_coordinator_owner_pid" \
       --drainer-start-utc "$gate_coordinator_owner_start" \
-      --evidence-json '{"processTreeEmpty":true,"source":"bash-stale-recovery"}' \
+      --evidence-json "{\"processTreeEmpty\":true,\"source\":\"bash-stale-recovery\",\"lifecycleContract\":\"${lifecycle_contract}\"}" \
       >/dev/null; then
       current_status="$(gate_coordinator_cli status)" || return 2
       obligation_present="$(printf '%s' "$current_status" | node -e '
@@ -895,5 +956,22 @@ gate_coordinator_recover_stale_obligations() {
       ' "$obligation_id")" || return 2
       [[ "$obligation_present" == "0" ]] || return 2
     fi
+    if [[ "$lifecycle_contract" == "darwin-coherent-lineage-v2" ||
+      "$lifecycle_contract" == "darwin-unique-lineage-v1" ]]; then
+      gate_darwin_lineage_discard_settled "$drain_token" || return 2
+    fi
+  done <<< "$records"
+  # The request marker is aggregate discovery evidence for every command in
+  # the stale request. Remove it only after every per-command coordinator
+  # obligation above has been acknowledged. A crash before this point leaves
+  # the marker available for the next recovery client.
+  while IFS='|' read -r obligation_id drain_token request_token request_id lifecycle_contract; do
+    [[ -n "$obligation_id" ]] || continue
+    case " ${discarded_request_tokens} " in
+      *" ${request_token} "*) continue ;;
+    esac
+    gate_run_discard_marker_exact "$request_token" \
+      "The stale request marker was empty, but its cleanup failed." || return 2
+    discarded_request_tokens="${discarded_request_tokens} ${request_token}"
   done <<< "$records"
 }

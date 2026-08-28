@@ -439,6 +439,8 @@ export async function startCoordinator({
           params.owner,
           params.capability,
         );
+      case "begin-lease-settlement":
+        return core.beginLeaseSettlement(params);
       case "release-lease":
         return core.releaseLease(params);
       case "abandon-lease":

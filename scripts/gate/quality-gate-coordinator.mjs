@@ -335,7 +335,7 @@ export async function startDetached(
 }
 
 function usage() {
-  return `Usage: quality-gate-coordinator.mjs <adapter-hashes|policy-hash|source-signature|runtime-hash|node-policy-hash|start|serve|authority|register|wait-admission|lease|wait-lease|release|abandon-lease|result|wait-result|ack-result|cancel|claim-drain|release-drain-claim|ack-drain|status> [options]\n`;
+  return `Usage: quality-gate-coordinator.mjs <adapter-hashes|policy-hash|source-signature|runtime-hash|node-policy-hash|start|serve|authority|register|wait-admission|lease|wait-lease|begin-lease-settlement|release|abandon-lease|result|wait-result|ack-result|cancel|claim-drain|release-drain-claim|ack-drain|status> [options]\n`;
 }
 
 function commonOwnerParams(parsed) {
@@ -468,6 +468,7 @@ export async function runCli(argv) {
         ...commonOwnerParams(parsed),
         leaseId: required(parsed, "--lease-id"),
         drainIdentity: required(parsed, "--drain-token"),
+        lifecycleContract: required(parsed, "--lifecycle-contract"),
         weight: integer(parsed, "--weight", 1),
         allCapacity: parsed.flags.has("--all-capacity"),
         resources: parsed.resources,
@@ -481,6 +482,13 @@ export async function runCli(argv) {
         owner: owner(parsed),
         capability: requestCapability(),
         timeoutMs: integer(parsed, "--timeout-ms", 0),
+      };
+      break;
+    case "begin-lease-settlement":
+      action = "begin-lease-settlement";
+      params = {
+        ...commonOwnerParams(parsed),
+        leaseId: required(parsed, "--lease-id"),
       };
       break;
     case "release":

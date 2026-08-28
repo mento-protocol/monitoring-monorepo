@@ -17,6 +17,7 @@ import { spawn } from "node:child_process";
 import {
   createGateFixture,
   intervalMetrics,
+  isSchedulerTimeoutWatchdogCommand,
   waitUntil,
 } from "./agent-quality-gate-scheduler-fixture.mjs";
 import { directAncestor } from "./agent-quality-gate-fixture-processes.mjs";
@@ -68,6 +69,25 @@ test("directAncestor reports a vanished process as unproven ancestry", async () 
   );
 });
 
+test("the scheduler fixture identifies only the mapped-command timeout watchdog", () => {
+  const watchdog = `/bin/bash -c '
+request_tag="$1"
+timeout_secs="$3"
+collect_tree() {
+  :
+}
+settlement_ack="$7"
+'`;
+  assert.equal(isSchedulerTimeoutWatchdogCommand(watchdog), true);
+  assert.equal(isSchedulerTimeoutWatchdogCommand("/bin/sleep 0.02"), false);
+  assert.equal(
+    isSchedulerTimeoutWatchdogCommand(
+      "node scripts/gate/quality-gate-coordinator.mjs register --bind-connection",
+    ),
+    false,
+  );
+});
+
 async function copyCoordinatorRuntime(worktree) {
   const targetScripts = join(worktree, "scripts");
   const targetGate = join(targetScripts, "gate");
@@ -104,6 +124,20 @@ async function copyCoordinatorRuntime(worktree) {
   await copyFile(
     join(sourceGate, "run-handles.sh"),
     join(targetGate, "run-handles.sh"),
+  );
+  await Promise.all(
+    [
+      "darwin-broker-launch-preflight.mjs",
+      "darwin-broker-launch-preflight.test.mjs",
+      "darwin-process-identity.c",
+      "darwin-process-identity-runtime.inc.c",
+      "darwin-process-identity-helper.mjs",
+      "darwin-process-lineage-model.mjs",
+      "darwin-process-lineage-state.mjs",
+      "darwin-process-lineage.mjs",
+      "darwin-process-lineage.sh",
+      "trunk-check-once.sh",
+    ].map((name) => copyFile(join(sourceGate, name), join(targetGate, name))),
   );
   await copyFile(
     join(sourceGate, "mapping.mjs"),
@@ -247,23 +281,29 @@ test("the real quality gate uses scheduler concurrency and recovery", async (t) 
         const handles = await Promise.all(
           worktrees.map((worktree, index) =>
             fixture.startGate({
+              // Trunk has one named resource. The mapped docs command tests
+              // ordinary capacity after Trunk releases the named resource.
               worktree,
-              changedPath: `fixture-${String.fromCharCode(97 + index)}.txt`,
+              changedPath: `capacity-${String.fromCharCode(97 + index)}.md`,
               scenario,
               label: `overlap-${index + 1}`,
               defaultDelayMs: 100,
               commandTimeoutSeconds: 60,
               extraEnvironment: {
-                QG_FIXTURE_START_BARRIER: startBarrier,
+                QG_FIXTURE_CAPACITY_BARRIER: startBarrier,
               },
             }),
           ),
         );
+        const capacityEvents = async () =>
+          (await fixture.events(scenario)).filter(
+            (event) => event.commandClass === "ordinary-capacity",
+          );
         let barrierError;
         try {
           await waitUntil(
             async () =>
-              (await fixture.events(scenario)).filter(
+              (await capacityEvents()).filter(
                 (event) => event.event === "start",
               ).length === 3,
             {
@@ -279,7 +319,7 @@ test("the real quality gate uses scheduler concurrency and recovery", async (t) 
         const results = await Promise.all(handles.map((handle) => handle.done));
         if (barrierError) throw barrierError;
         results.forEach(assertPassed);
-        const metrics = intervalMetrics(await fixture.events(scenario));
+        const metrics = intervalMetrics(await capacityEvents());
         assert.equal(metrics.intervals.length, 3);
         assert.equal(metrics.maxConcurrency, 3);
       },
@@ -755,6 +795,7 @@ test("the real quality gate uses scheduler concurrency and recovery", async (t) 
           scenario,
           label: "mixed-lock-wait-holder",
           defaultDelayMs: 100,
+          commandTimeoutSeconds: 120,
           lockWaitSeconds: 30,
           extraEnvironment: {
             ...capacityOne,
@@ -785,6 +826,17 @@ test("the real quality gate uses scheduler concurrency and recovery", async (t) 
             timeoutMs: observerTimeoutMs,
             message: "the short-budget request to register as leader",
           });
+          await Promise.race([
+            waitUntil(() => /Scheduler wait:/u.test(shortHandle.stdout), {
+              timeoutMs: observerTimeoutMs,
+              message: "the short-budget request to enter its scheduler wait",
+            }),
+            shortHandle.done.then((result) => {
+              throw new Error(
+                `short-budget request exited before its scheduler wait:\n${result.stdout}\n${result.stderr}`,
+              );
+            }),
+          ]);
           longHandle = await fixture.startGate({
             worktree: worktrees[2],
             changedPath: "fixture-same.txt",
@@ -801,6 +853,17 @@ test("the real quality gate uses scheduler concurrency and recovery", async (t) 
               message: "the long-budget request to register",
             },
           );
+          try {
+            await waitUntil(() => shortHandle.settled, {
+              timeoutMs: observerTimeoutMs,
+              message: "the short-budget scheduler wait to finish",
+            });
+          } catch (error) {
+            throw new Error(
+              `${error.message}:\n${shortHandle.stdout}\n${shortHandle.stderr}`,
+              { cause: error },
+            );
+          }
           shortResult = await shortHandle.done;
         } finally {
           await releaseHolder();
@@ -1101,7 +1164,7 @@ test("the real adapter cleans a request when its gate parent disconnects", async
   }
 });
 
-test("a coordinator-disabled gate recovers a killed coordinator leader", async () => {
+test("a coordinator-disabled gate handles a killed coordinator leader safely", async () => {
   const fixture = await createGateFixture();
   let descendantPid;
   try {
@@ -1129,6 +1192,15 @@ test("a coordinator-disabled gate recovers a killed coordinator leader", async (
       descendant.descendantPid,
     );
     assert.equal(await fixture.processRunning(descendantPid), true);
+    if (process.platform === "darwin") {
+      await waitUntil(
+        async () => !(await fixture.processRunning(descendantPid)),
+        {
+          timeoutMs: observerTimeoutMs,
+          message: "the killed leader watcher to settle its descendant",
+        },
+      );
+    }
 
     const legacy = await fixture.startGate({
       worktree: legacyWorktree,
@@ -1137,15 +1209,27 @@ test("a coordinator-disabled gate recovers a killed coordinator leader", async (
       label: "legacy-recovery-client",
       coordinator: false,
       shortDelayMs: 250,
+      extraEnvironment:
+        process.platform === "darwin"
+          ? { AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS: "0" }
+          : {},
     });
-    assertPassed(await legacy.done);
-    await waitUntil(
-      async () => !(await fixture.processRunning(descendantPid)),
-      {
-        timeoutMs: observerTimeoutMs,
-        message: "the legacy gate to drain the coordinator descendant",
-      },
+    const legacyResult = await legacy.done;
+    assertPassed(legacyResult);
+    if (process.platform !== "darwin") {
+      await waitUntil(
+        async () => !(await fixture.processRunning(descendantPid)),
+        {
+          timeoutMs: observerTimeoutMs,
+          message: "the legacy gate to drain the coordinator descendant",
+        },
+      );
+    }
+    const starts = (await fixture.events(scenario)).filter(
+      (event) =>
+        event.event === "start" && event.label === "legacy-recovery-client",
     );
+    assert.equal(starts.length, 1, JSON.stringify(starts));
   } finally {
     await fixture.cleanup();
   }

@@ -439,6 +439,11 @@ const mappedChildScrubbedExactNames = new Set([
   "ESLINT_BASELINE_MAIN",
   "GOOGLE_APPLICATION_CREDENTIALS",
   "SENTRY_SUITE_GATE_ROOT",
+  "TERRAFORM_CONFIG",
+  "TF_CLI_CONFIG_FILE",
+  "TF_PLUGIN_CACHE_DIR",
+  "TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE",
+  "TF_REATTACH_PROVIDERS",
   "TRUNK_LAUNCHER_DEBUG",
   "TRUNK_LAUNCHER_PATH",
   "TRUNK_LAUNCHER_QUIET",
@@ -472,6 +477,7 @@ const fingerprintExcludedScrubbedPrefixes = [
 const mappedChildScrubbedPrefixes = [
   "AGENT_QUALITY_GATE_LOCK_TEST_",
   "AGENT_QUALITY_GATE_TEST_",
+  "TF_CLI_ARGS",
   ...fingerprintExcludedScrubbedPrefixes,
 ];
 const stableFields = [

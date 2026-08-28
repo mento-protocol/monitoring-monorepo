@@ -290,9 +290,9 @@ test("a path that no longer exists forces a full-repo Trunk scan", () => {
     ["deleted/file.ts"],
     stubFacts({ presentPaths: [] }),
   );
-  assert.deepEqual(commandsOf(plan), ["./tools/trunk check --all"]);
+  assert.deepEqual(commandsOf(plan), ["./tools/trunk check --ci --all"]);
   assert.equal(
-    reasonOf(plan, "./tools/trunk check --all"),
+    reasonOf(plan, "./tools/trunk check --ci --all"),
     "changed paths require full-repo Trunk checks",
   );
 });
@@ -301,7 +301,9 @@ test("existing ordinary paths get a targeted Trunk scan", () => {
   const plan = new Plan();
   const paths = ["a/one.ts", "b/two.ts"];
   addTrunkCheckCommand(plan, paths, stubFacts({ presentPaths: paths }));
-  assert.deepEqual(commandsOf(plan), ["./tools/trunk check a/one.ts b/two.ts"]);
+  assert.deepEqual(commandsOf(plan), [
+    "./tools/trunk check --ci a/one.ts b/two.ts",
+  ]);
 });
 
 test("a config path in the full-scan list forces full even when it exists", () => {
@@ -318,7 +320,7 @@ test("a config path in the full-scan list forces full even when it exists", () =
     addTrunkCheckCommand(plan, [path], stubFacts({ presentPaths: [path] }));
     assert.deepEqual(
       commandsOf(plan),
-      ["./tools/trunk check --all"],
+      ["./tools/trunk check --ci --all"],
       `${path} governs the whole repo, so a targeted scan would lint only itself`,
     );
   }
@@ -330,7 +332,7 @@ test("a .shellcheckrc edit adds a repo-wide ShellCheck-only pass, ahead of the r
   addTrunkCheckCommand(plan, paths, stubFacts({ presentPaths: paths }));
   assert.equal(
     commandsOf(plan)[0],
-    "./tools/trunk check --all --filter=shellcheck",
+    "./tools/trunk check --ci --all --filter=shellcheck",
     "prepended last, so it must end up first",
   );
 });
@@ -341,7 +343,7 @@ test("Trunk is prepended, so it runs before commands added earlier", () => {
   const paths = ["a/one.ts"];
   addTrunkCheckCommand(plan, paths, stubFacts({ presentPaths: paths }));
   assert.deepEqual(commandsOf(plan), [
-    "./tools/trunk check a/one.ts",
+    "./tools/trunk check --ci a/one.ts",
     "pnpm lint",
   ]);
 });

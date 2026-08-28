@@ -26,6 +26,7 @@ gate_coordinator_completed_result_json=""
 gate_coordinator_active_lease_id=""
 gate_coordinator_active_drain_identity=""
 gate_coordinator_active_drain_marker=""
+gate_coordinator_active_lifecycle_contract=""
 gate_coordinator_infrastructure_failed=0
 gate_coordinator_wait_pid=""
 gate_coordinator_wait_dir=""
@@ -270,6 +271,15 @@ gate_coordinator_bootstrap_from_legacy() {
   rc=$?
   [[ "$had_errexit" -eq 1 ]] && set -e
   [[ "$rc" -eq 0 ]] || { gate_coordinator_report_no_work_failure 2 "startup" "No mapped command ran in this request"; return 2; }
+  # Adoption replaces the legacy owner with a coordinator record whose exact
+  # generation marker is its recovery contract. Retire the original unbound
+  # owner lineage only after that handoff is durable.
+  if ! gate_darwin_lineage_retire_owner "$legacy_owner_token"; then
+    echo "error: coordinator adoption completed, but the prior Darwin owner lineage could not be retired." >&2
+    gate_coordinator_report_no_work_failure 2 "startup" \
+      "No mapped command ran in this request"
+    return 2
+  fi
   gate_coordinator_apply_authority_json "$(printf '%s' "$metadata" | node -e '
     const value = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
     process.stdout.write(JSON.stringify({
@@ -330,13 +340,15 @@ gate_coordinator_abandon_active_lease() {
   gate_coordinator_active_lease_id=""
   gate_coordinator_active_drain_identity=""
   gate_coordinator_active_drain_marker=""
+  gate_coordinator_active_lifecycle_contract=""
 }
 
 gate_coordinator_before_command() {
   local command="$1"
   local lease_drain_identity="${2:-}"
   local lease_tmp lease_suffix command_digest lease_json parsed status blockers
-  local lease_sequence returned_drain_identity resource
+  local lease_sequence returned_drain_identity returned_lifecycle_contract
+  local host_system requested_lifecycle_contract resource wait_lifecycle_contract
   local wait_file wait_started wait_finished rc had_errexit=0
   local lease_args=()
   gate_coordinator_is_active || return 0
@@ -357,14 +369,25 @@ gate_coordinator_before_command() {
   lease_tmp="$(mktemp "$scratch_dir/coordinator-lease.XXXXXX")" || { gate_coordinator_report_no_work_failure 2 "command lease acquisition" "The mapped command did not run"; return 2; }
   lease_suffix="${lease_tmp##*.}"
   rm -f "$lease_tmp"
+  host_system="$(/usr/bin/uname -s 2>/dev/null)" || {
+    echo "error: coordinator could not identify the command host operating system." >&2
+    gate_coordinator_report_no_work_failure 2 "command lease acquisition" "The mapped command did not run"; return 2
+  }
+  if [[ "$host_system" == "Darwin" ]]; then
+    requested_lifecycle_contract="darwin-coherent-lineage-v2"
+  else
+    requested_lifecycle_contract="portable-marker-v1"
+  fi
+  command_digest="$(printf '%s' "$command" | hash_stream)" || { gate_coordinator_report_no_work_failure 2 "command lease acquisition" "The mapped command did not run"; return 2; }
   gate_coordinator_active_lease_id="lease-${gate_coordinator_request_id}-${lease_suffix}"
   gate_coordinator_active_drain_identity="$lease_drain_identity"
-  command_digest="$(printf '%s' "$command" | hash_stream)" || { gate_coordinator_report_no_work_failure 2 "command lease acquisition" "The mapped command did not run"; return 2; }
+  gate_coordinator_active_lifecycle_contract="$requested_lifecycle_contract"
 
   lease_args=(lease
     --request-id "$gate_coordinator_request_id"
     --lease-id "$gate_coordinator_active_lease_id"
     --drain-token "$gate_coordinator_active_drain_identity"
+    --lifecycle-contract "$gate_coordinator_active_lifecycle_contract"
     --owner-pid "$gate_coordinator_owner_pid"
     --owner-start-utc "$gate_coordinator_owner_start"
     --weight "$gate_coordinator_command_weight"
@@ -374,7 +397,7 @@ gate_coordinator_before_command() {
   fi
   for resource in "${gate_coordinator_command_resources[@]+"${gate_coordinator_command_resources[@]}"}"; do
     case "$resource" in
-      browser-fixture-3211|playwright-install|terraform-plugin-cache) ;;
+      browser-fixture-3211|playwright-install|terraform-plugin-cache|trunk-daemon) ;;
       *) echo "error: unknown coordinator resource: ${resource}" >&2
         gate_coordinator_report_no_work_failure 2 "command lease acquisition" "The mapped command did not run"; return 2 ;;
     esac
@@ -402,6 +425,7 @@ gate_coordinator_before_command() {
       value.status ?? "",
       value.sequence ?? "",
       value.drainIdentity ?? "",
+      value.lifecycleContract ?? "",
       blockers,
     ].join("\x1f"));
   ')"; then
@@ -409,10 +433,15 @@ gate_coordinator_before_command() {
     echo "error: coordinator returned an invalid command lease response." >&2
     gate_coordinator_report_no_work_failure 2 "command lease acquisition" "The mapped command did not run"; return 2
   fi
-  IFS=$'\x1f' read -r status lease_sequence returned_drain_identity blockers <<< "$parsed"
+  IFS=$'\x1f' read -r status lease_sequence returned_drain_identity returned_lifecycle_contract blockers <<< "$parsed"
   if [[ "$returned_drain_identity" != "$gate_coordinator_active_drain_identity" ]]; then
     gate_coordinator_abandon_active_lease || true
     echo "error: coordinator returned a different command drain identity." >&2
+    gate_coordinator_report_no_work_failure 2 "command lease acquisition" "The mapped command did not run"; return 2
+  fi
+  if [[ "$returned_lifecycle_contract" != "$gate_coordinator_active_lifecycle_contract" ]]; then
+    gate_coordinator_abandon_active_lease || true
+    echo "error: coordinator returned a different command lifecycle contract." >&2
     gate_coordinator_report_no_work_failure 2 "command lease acquisition" "The mapped command did not run"; return 2
   fi
   wait_started="$(date +%s)"
@@ -445,15 +474,24 @@ gate_coordinator_before_command() {
       echo "error: command scheduler wait failed." >&2
       gate_coordinator_report_no_work_failure 2 "command lease acquisition" "The mapped command did not run"; return 2
     fi
-    status="$(node -e '
+    parsed="$(node -e '
       const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
-      process.stdout.write(value.status ?? "");
+      process.stdout.write([
+        value.status ?? "",
+        value.lifecycleContract ?? "",
+      ].join("\x1f"));
     ' "$wait_file")" || {
       rm -f "$wait_file"
       gate_coordinator_abandon_active_lease || true
       gate_coordinator_report_no_work_failure 2 "command lease acquisition" "The mapped command did not run"; return 2
     }
     rm -f "$wait_file"
+    IFS=$'\x1f' read -r status wait_lifecycle_contract <<< "$parsed"
+    if [[ "$wait_lifecycle_contract" != "$gate_coordinator_active_lifecycle_contract" ]]; then
+      gate_coordinator_abandon_active_lease || true
+      echo "error: coordinator changed the command lifecycle contract while queued." >&2
+      gate_coordinator_report_no_work_failure 2 "command lease acquisition" "The mapped command did not run"; return 2
+    fi
   fi
   wait_finished="$(date +%s)"
   last_scheduler_wait_seconds=$((wait_finished - wait_started))
@@ -471,11 +509,69 @@ gate_coordinator_before_command() {
     "${lease_sequence:-unknown}" "$last_scheduler_wait_seconds" >&7
 }
 
-gate_coordinator_after_command() {
-  local command="$1"
+gate_coordinator_begin_command_settlement() {
   local lease_id="$gate_coordinator_active_lease_id"
   gate_coordinator_is_active || return 0
-  [[ -n "$lease_id" ]] || return 0
+  [[ -n "$lease_id" ]] || {
+    echo "error: coordinator has no active command lease to settle." >&2
+    return 2
+  }
+  case "$gate_coordinator_active_lifecycle_contract" in
+    portable-marker-v1)
+      return 0
+      ;;
+    darwin-coherent-lineage-v2)
+      ;;
+    *)
+      echo "error: coordinator active command lifecycle contract is missing or invalid." >&2
+      return 2
+      ;;
+  esac
+  if ! gate_coordinator_cli begin-lease-settlement \
+    --request-id "$gate_coordinator_request_id" \
+    --lease-id "$lease_id" \
+    --owner-pid "$gate_coordinator_owner_pid" \
+    --owner-start-utc "$gate_coordinator_owner_start" >/dev/null; then
+    gate_coordinator_infrastructure_failed=1
+    echo "error: coordinator could not begin mapped-command settlement." >&2
+    return 2
+  fi
+}
+
+gate_coordinator_after_command() {
+  local command="$1"
+  local expected_drain_identity="${2:-}"
+  local expected_lifecycle_contract="${3:-}"
+  local lease_id="$gate_coordinator_active_lease_id"
+  gate_coordinator_is_active || return 0
+  if [[ ! "$expected_drain_identity" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]]; then
+    gate_coordinator_infrastructure_failed=1
+    echo "error: coordinator release has no valid expected command drain identity." >&2
+    return 2
+  fi
+  case "$expected_lifecycle_contract" in
+    portable-marker-v1|darwin-coherent-lineage-v2) ;;
+    *)
+      gate_coordinator_infrastructure_failed=1
+      echo "error: coordinator release has no supported expected lifecycle contract." >&2
+      return 2
+      ;;
+  esac
+  if [[ -z "$lease_id" ]]; then
+    gate_coordinator_infrastructure_failed=1
+    echo "error: coordinator has no active command lease to release." >&2
+    return 2
+  fi
+  if [[ "$gate_coordinator_active_drain_identity" != "$expected_drain_identity" ]]; then
+    gate_coordinator_infrastructure_failed=1
+    echo "error: coordinator release command drain identity does not match the active lease." >&2
+    return 2
+  fi
+  if [[ "$gate_coordinator_active_lifecycle_contract" != "$expected_lifecycle_contract" ]]; then
+    gate_coordinator_infrastructure_failed=1
+    echo "error: coordinator release lifecycle contract does not match the active lease." >&2
+    return 2
+  fi
   if ! gate_coordinator_cli release \
     --request-id "$gate_coordinator_request_id" \
     --lease-id "$lease_id" \
@@ -488,6 +584,7 @@ gate_coordinator_after_command() {
   gate_coordinator_active_lease_id=""
   gate_coordinator_active_drain_identity=""
   gate_coordinator_active_drain_marker=""
+  gate_coordinator_active_lifecycle_contract=""
 }
 
 gate_coordinator_cancel_and_ack() {

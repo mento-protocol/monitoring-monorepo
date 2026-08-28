@@ -293,6 +293,7 @@ export const SENTRY_MODULE_ARMS = [
       "scripts/sentry/broker/sentry-mcp-broker.mjs",
       "scripts/sentry/broker/sentry-mcp-broker.test.mjs",
       "scripts/sentry/broker/sentry-mcp-probe.mjs",
+      "scripts/sentry/broker/mapped-command-process-identity.mjs",
     ],
     effects: [
       {

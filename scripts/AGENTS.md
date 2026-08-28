@@ -3,7 +3,7 @@ title: Scripts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-23
+last_verified: 2026-08-27
 doc_type: agent-instructions
 scope: scripts
 review_interval_days: 90
@@ -57,41 +57,15 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 `scripts/` has twelve path-pin classes. Move each pin with its file in the
 same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
 
-- **Autoreview runtime pins.** `agent-autoreview.sh` pins sibling runtime and
-  optional `pr-feedback-state-claude.mjs` and
-  `pr-ready-state-review-signals.mjs`; feedback blobs use `origin/main`. Move
-  feedback paths in three merges: add copies/fallback; repoint; remove old paths
-  after no pre-move wrapper remains (ADR 0064).
-- **Gate routing pins.** The gate excludes stub-repo tests with
-  `$script_source_dir == $repo_root/scripts`, and pairs
-  `bootstrap/codex-cloud-setup.{sh,test.sh}` for offline tests. It routes
-  `sentry/autofix/sentry-autofix-refused-inventory.mjs` alone to
-  `pnpm sentry:autofix:run-record:test` and
-  `pnpm sentry:autofix:finalize:test`. Exact
-  `sentry/triage/sentry-triage-project-route.mjs` runs
-  `pnpm sentry:project:test` in the projection arm.
-  `deploy/deploy-indexer-verify{,-analysis}{,.test}.mjs` and
-  `deploy/deploy-indexer-verify-status-identity.mjs` use one any-depth arm;
-  both verifier tests run. The exact `pr/agent-issue-board{,.test}.mjs` and
-  `pr/issue-board-{backfill,cli,commands,projects,state,sync,transport}.mjs` set
-  routes to `pnpm issue:board:test`. Exact
-  `repo-health/check-guardrail-prose{,.test}.mjs` and
-  `repo-health/guardrail-prose.json` route to the guardrail suite. `ci.yml` pins
-  both paths in two jobs, quick-commands names the checker, and the manifest's
-  keys pin `AGENTS.md`, `CLAUDE.md` and the operating card. ADR 0073 has it.
-  `pr/merge-pr*`, both PR-state helpers, and `agent-autoreview.sh` (Codex
-  markers) route `pnpm pr:merge:test`.
-- **Gate runtime pins.** Before `cd`, `agent-quality-gate.sh` resolves
-  `gate/run-handles.sh`, coordinator files,
-  `docs/docs-navigation-eval-helpers.mjs`, and `gate/lockfile-scope.mjs` from
-  `$script_source_dir`; tests hash them from `$repo_root`. Move each path with
-  its routes, signatures, fixtures, and literals (ADRs 0064 and
-  0076).
-- **Gate mapping pins.** The signature and three Turbo inputs pin
-  `gate/routing-table/**`, `gate/mapping*`, and
-  `agent-autoreview-core.mjs`. Runtime hashes use `$script_source_dir`; suites
-  use `$repo_root`. Core edits route both suites; missing pins freeze the stamp
-  (ADR 0069).
+- **Autoreview runtime pins.** The sibling runtime and three-merge feedback-path
+  move procedure are in [Script path pins](../docs/notes/agent-quality-gate-mechanics.md#script-path-pins).
+- **Gate routing pins.** Exact routing, CI, manifest, and workflow-bridge pins
+  are in [Script path pins](../docs/notes/agent-quality-gate-mechanics.md#script-path-pins).
+- **Gate runtime pins.** Pre-`cd` helpers, signature roots, and fixture hash
+  roots are in [Script path pins](../docs/notes/agent-quality-gate-mechanics.md#script-path-pins).
+- **Gate mapping pins.** `gate/routing-table/`, mapping-engine, autoreview-core,
+  signature, and Turbo pins are in
+  [Script path pins](../docs/notes/agent-quality-gate-mechanics.md#script-path-pins).
 - **Evaluation fixture forbidden lists.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names the navigation
   eval's own implementation.

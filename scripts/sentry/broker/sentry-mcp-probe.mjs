@@ -45,15 +45,18 @@
  * the fetch here — where a timeout is an honest job failure — is better than
  * paying it inside a startup window whose expiry is silent.
  *
- * The module is pure logic plus a thin CLI shell, and its import closure is
- * itself: the workflow runs it after setup-node with NO install, from the
- * immutable staged copy under $RUNNER_TEMP, never from the agent-writable
- * checkout. Both properties are pinned by tests in sentry-mcp-broker.test.mjs.
+ * The module is pure logic plus a thin CLI shell. Its two-file import closure is
+ * this module and `mapped-command-process-identity.mjs`: the workflow runs both
+ * after setup-node with NO install, from immutable staged copies under
+ * $RUNNER_TEMP, never from the agent-writable checkout. The suite in
+ * sentry-mcp-broker.test.mjs pins both properties.
  */
 
 import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+
+import { inheritGateMarkerStdio } from "./mapped-command-process-identity.mjs";
 
 /**
  * The Sentry tools the probe requires to be present.
@@ -191,30 +194,69 @@ export function missingTools(present, required = REQUIRED_TOOLS) {
   return required.filter((want) => !has(want));
 }
 
+const MCP_SERVER_SUPERVISOR = String.raw`
+set -u
+
+# fd 3 belongs only to the Node parent and this watchdog. The target closes it.
+# A stop line and parent-pipe EOF have the same meaning: settle the complete
+# group while this detached supervisor still pins its own group id in $$.
+(
+  IFS= read -r _ <&3
+  kill -KILL -- "-$$"
+  exit 127
+) &
+
+"$@" 3<&- <&0 >&1 2>&2 &
+target_pid=$!
+wait "$target_pid"
+
+# A target can exit after it starts a grandchild. Settle the group before this
+# live leader can be reaped and its numeric process-group id can be reused.
+kill -KILL -- "-$$"
+exit 127
+`;
+
 /**
- * Kill the child AND anything it spawned.
+ * Start the target under a detached Bash process-group leader.
  *
- * The child is `npx`, which execs the MCP server as a grandchild; killing the
- * child alone leaves that grandchild alive holding the stdio pipes it
- * inherited. Negating the pid addresses the whole process group, which is why
- * the spawn sets `detached`. Falls back to the direct child on Windows (no
- * process groups) and whenever the group kill throws — an already-dead group
- * raises ESRCH, which is success, not a problem to report.
+ * The target inherits stdio 0-2. It does not inherit control fd 3. A watchdog
+ * reads that descriptor and self-signals the process group on a stop request or
+ * parent-pipe EOF while the supervisor is still the live group leader. The
+ * supervisor applies the same live-leader group settlement if the target exits.
  */
-export function killProcessGroup(child) {
-  if (!child) return;
-  if (process.platform !== "win32" && typeof child.pid === "number") {
-    try {
-      process.kill(-child.pid, "SIGKILL");
-      return;
-    } catch {
-      // Fall through to the direct kill below.
-    }
-  }
+export function spawnServerSupervisor({
+  command,
+  args,
+  handle,
+  spawnFn = spawn,
+} = {}) {
+  return spawnFn(
+    "/bin/bash",
+    [
+      "-c",
+      MCP_SERVER_SUPERVISOR,
+      "sentry-mcp-server-supervisor",
+      command,
+      ...args,
+    ],
+    {
+      stdio: inheritGateMarkerStdio(["pipe", "pipe", "pipe", "pipe"]),
+      env: { ...process.env, SENTRY_ACCESS_TOKEN: handle },
+      detached: true,
+    },
+  );
+}
+
+/** Ask the live supervisor to settle its complete process group. */
+export function requestSupervisorStop(child) {
+  const control = child?.stdio?.[3];
+  if (!control || control.destroyed || control.writableEnded) return false;
   try {
-    child.kill("SIGKILL");
+    control.on?.("error", () => {});
+    control.end("stop\n");
+    return true;
   } catch {
-    // Already gone.
+    return false;
   }
 }
 
@@ -231,19 +273,9 @@ export async function listServerTools({
   handle,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   spawnFn = spawn,
-  killFn = killProcessGroup,
+  stopFn = requestSupervisorStop,
 } = {}) {
-  const child = spawnFn(command, args, {
-    stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, SENTRY_ACCESS_TOKEN: handle },
-    // `npx` EXECS A GRANDCHILD — the MCP server binary — and killing `npx`
-    // alone leaves it running with our stdio pipes inherited. An orphan
-    // holding the read side can keep this process from exiting, which would
-    // hang the pre-flight step until the 30-minute job timeout: a new failure
-    // mode, in the step whose whole job is to be a reliable gate. Its own
-    // process group makes the whole tree killable in one call.
-    detached: process.platform !== "win32",
-  });
+  const child = spawnServerSupervisor({ command, args, handle, spawnFn });
 
   let settled = false;
   let stdout = "";
@@ -259,19 +291,20 @@ export async function listServerTools({
   };
 
   return await new Promise((resolve, reject) => {
-    const finish = (fn, value) => {
+    const finish = (fn, value, { childHasExited = false } = {}) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      killFn(child);
+      if (!childHasExited) stopFn(child);
       fn(value);
     };
-    const fail = (reason) =>
+    const fail = (reason, finishOptions) =>
       finish(
         reject,
         new Error(
           `${reason}${stderr.trim() ? ` — server stderr: ${stderr.trim().slice(0, 800)}` : ""}`,
         ),
+        finishOptions,
       );
 
     const timer = setTimeout(
@@ -296,6 +329,14 @@ export async function listServerTools({
       if (settled) return;
       fail(
         `the Sentry MCP server exited before the handshake completed (code=${code}, signal=${signal})`,
+        { childHasExited: true },
+      );
+    });
+    child.on("close", (code, signal) => {
+      if (settled) return;
+      fail(
+        `the Sentry MCP server closed before the handshake completed (code=${code}, signal=${signal})`,
+        { childHasExited: true },
       );
     });
 
@@ -380,11 +421,11 @@ export async function listServerTools({
 export async function probeSentryToolset({
   env = process.env,
   spawnFn = spawn,
-  killFn = killProcessGroup,
+  stopFn = requestSupervisorStop,
   required = REQUIRED_TOOLS,
 } = {}) {
   const config = resolveProbeConfig(env);
-  const tools = await listServerTools({ ...config, spawnFn, killFn });
+  const tools = await listServerTools({ ...config, spawnFn, stopFn });
   const missing = missingTools(tools, required);
   if (missing.length) {
     throw new Error(

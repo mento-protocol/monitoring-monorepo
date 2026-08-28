@@ -46,17 +46,17 @@ export function addTrunkCheckCommand(plan, changedPaths, facts) {
 
   if (forcesFull) {
     plan.prependCommand(
-      "./tools/trunk check --all",
+      "./tools/trunk check --ci --all",
       "changed paths require full-repo Trunk checks",
     );
   } else if (changedPaths.length > 0) {
     plan.prependCommand(
-      `./tools/trunk check ${changedPaths.map(shellQuote).join(" ")}`,
+      `./tools/trunk check --ci ${changedPaths.map(shellQuote).join(" ")}`,
       "changed existing paths should pass targeted Trunk checks",
     );
   } else {
     plan.prependCommand(
-      "./tools/trunk check --all",
+      "./tools/trunk check --ci --all",
       "changed paths could not be mapped to targeted Trunk checks",
     );
   }
@@ -66,7 +66,7 @@ export function addTrunkCheckCommand(plan, changedPaths, facts) {
   // up ahead of it.
   if (changedPaths.includes(".shellcheckrc")) {
     plan.prependCommand(
-      "./tools/trunk check --all --filter=shellcheck",
+      "./tools/trunk check --ci --all --filter=shellcheck",
       "ShellCheck config changed; re-validate every script it governs",
     );
   }

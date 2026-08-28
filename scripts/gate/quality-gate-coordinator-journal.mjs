@@ -1,12 +1,14 @@
 import { createHash } from "node:crypto";
 
 import {
+  PERSISTED_DARWIN_LIFECYCLE_CONTRACTS,
   array,
   boundedJson,
   identitiesEqual,
   identifier,
   identity,
   isResourceNameValue,
+  lifecycleContract,
   nonNegativeInteger,
   oneOf,
   own,
@@ -141,6 +143,7 @@ function validateLease(lease, key, state, sequences, capacity) {
   if (lease.leaseId !== key) reject(path, "map key differs from leaseId");
   identifier(lease.requestId, `${path}.requestId`);
   runToken(lease.drainIdentity, `${path}.drainIdentity`);
+  lifecycleContract(lease.lifecycleContract, `${path}.lifecycleContract`);
   const request = own(state.requests, lease.requestId);
   if (!request) reject(`${path}.requestId`, "does not reference a request");
   identity(lease.owner, `${path}.owner`);
@@ -177,7 +180,7 @@ function validateLease(lease, key, state, sequences, capacity) {
   sequences.set(lease.sequence, path);
   oneOf(
     lease.status,
-    ["queued", "granted", "drain-required"],
+    ["queued", "granted", "settling", "drain-required"],
     `${path}.status`,
   );
   utcTimestamp(lease.queuedAt, `${path}.queuedAt`);
@@ -187,12 +190,21 @@ function validateLease(lease, key, state, sequences, capacity) {
     }
   } else {
     utcTimestamp(lease.acquiredAt, `${path}.acquiredAt`);
-    if (lease.status === "granted" && lease.drainObligationId !== null) {
-      reject(path, "granted lease cannot reference a drain obligation");
+    if (
+      ["granted", "settling"].includes(lease.status) &&
+      lease.drainObligationId !== null
+    ) {
+      reject(path, `${lease.status} lease cannot reference a drain obligation`);
     }
     if (lease.status === "drain-required") {
       identifier(lease.drainObligationId, `${path}.drainObligationId`);
     }
+  }
+  if (
+    lease.status === "settling" &&
+    !PERSISTED_DARWIN_LIFECYCLE_CONTRACTS.includes(lease.lifecycleContract)
+  ) {
+    reject(path, "settling lease requires a persisted Darwin lineage contract");
   }
   if (
     request.role !== "leader" ||
@@ -206,7 +218,10 @@ function validateLease(lease, key, state, sequences, capacity) {
       reject(path, "drain-required lease needs a pending terminal request");
     }
   } else if (request.pendingTerminal !== null || request.state !== "active") {
-    reject(path, "queued or granted lease requires an active request");
+    reject(
+      path,
+      "queued, granted, or settling lease requires an active request",
+    );
   }
 }
 
@@ -297,6 +312,7 @@ function validateObligation(obligation, key, state) {
   identifier(obligation.leaseId, `${path}.leaseId`);
   identifier(obligation.requestId, `${path}.requestId`);
   runToken(obligation.drainIdentity, `${path}.drainIdentity`);
+  lifecycleContract(obligation.lifecycleContract, `${path}.lifecycleContract`);
   identity(obligation.owner, `${path}.owner`);
   positiveInteger(obligation.weight, `${path}.weight`);
   const resources = array(obligation.resources, `${path}.resources`);
@@ -329,6 +345,7 @@ function validateObligation(obligation, key, state) {
     request.pendingTerminal === null ||
     request.pendingTerminal.payload.reason !== obligation.reason ||
     lease.drainIdentity !== obligation.drainIdentity ||
+    lease.lifecycleContract !== obligation.lifecycleContract ||
     !identitiesEqual(request.owner, obligation.owner) ||
     !identitiesEqual(lease.owner, obligation.owner) ||
     lease.weight !== obligation.weight ||
@@ -495,7 +512,9 @@ export function validatePersistedJournal(state, capacity) {
   const activeResources = new Map();
   let usedCapacity = 0;
   for (const lease of Object.values(state.leases)) {
-    if (!["granted", "drain-required"].includes(lease.status)) continue;
+    if (!["granted", "settling", "drain-required"].includes(lease.status)) {
+      continue;
+    }
     usedCapacity += lease.weight;
     if (!Number.isSafeInteger(usedCapacity) || usedCapacity > capacity) {
       reject("leases", "active lease weight exceeds capacity");

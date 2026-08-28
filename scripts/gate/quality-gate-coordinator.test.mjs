@@ -52,6 +52,7 @@ import {
 } from "./quality-gate-coordinator-legacy.mjs";
 import {
   initialState,
+  JOURNAL_SCHEMA_VERSION,
   RECORD_SCHEMA_VERSION,
   syncDirectory,
   validateState,
@@ -118,6 +119,7 @@ const capabilityActions = new Set([
   "request-status",
   "request-lease",
   "lease-status",
+  "begin-lease-settlement",
   "release-lease",
   "abandon-lease",
   "publish-result",
@@ -252,6 +254,7 @@ async function lease(fixture, requestId, leaseId, requestOwner, options = {}) {
     requestId,
     leaseId,
     drainIdentity,
+    lifecycleContract: options.lifecycleContract ?? "portable-marker-v1",
     capability: options.capability ?? capabilityFor(requestId),
     owner: requestOwner,
     weight: options.weight ?? 1,
@@ -477,6 +480,7 @@ test("request capabilities protect exposed request and lease identities", async 
       {
         ...attackerOwnerParams,
         leaseId: "capability-attacker-lease",
+        lifecycleContract: "portable-marker-v1",
         drainIdentity: runToken(
           "capability-attacker-lease",
           victimOwner.pid,
@@ -736,6 +740,20 @@ test("startup rejects corrupt journals before recovery or legacy adoption", asyn
       },
     },
     {
+      name: "unsupported lease lifecycle contract",
+      path: "leases.journal-active-lease.lifecycleContract",
+      mutate: (state) => {
+        activeLease(state).lifecycleContract = "unsupported-v1";
+      },
+    },
+    {
+      name: "portable lease in Darwin settlement state",
+      path: "leases.journal-active-lease",
+      mutate: (state) => {
+        activeLease(state).status = "settling";
+      },
+    },
+    {
       name: "request and lease share one drain token",
       path: "leases.journal-active-lease.drainIdentity",
       mutate: (state) => {
@@ -810,6 +828,14 @@ test("startup rejects corrupt journals before recovery or legacy adoption", asyn
           229,
           1_770_000_000,
         );
+      },
+    },
+    {
+      name: "obligation lifecycle contract differs from its lease",
+      path: `drainObligations.${drainingLease(validJournal).drainObligationId}`,
+      mutate: (state) => {
+        drainingObligation(state).lifecycleContract =
+          "darwin-unique-lineage-v1";
       },
     },
     {
@@ -1387,6 +1413,7 @@ test("each lease requires one distinct persisted drain identity", async () => {
   const baseParams = {
     requestId,
     leaseId: "lease-drain-identity-a",
+    lifecycleContract: "portable-marker-v1",
     owner: requestOwner,
     weight: 1,
     resources: [],
@@ -1580,6 +1607,7 @@ test("bound cleanup stops after its first journal commit failure", async () => {
     const granted = await client.request("request-lease", {
       requestId,
       leaseId: `${requestId}-lease`,
+      lifecycleContract: "portable-marker-v1",
       drainIdentity: runToken(
         `${requestId}-lease`,
         requestOwner.pid,
@@ -1665,7 +1693,10 @@ test("restart completes a drain whose terminal journal commit failed", async () 
         obligationId: obligation.obligationId,
         drainIdentity: obligation.drainIdentity,
         drainer,
-        evidence: { processTreeEmpty: true },
+        evidence: {
+          processTreeEmpty: true,
+          lifecycleContract: "portable-marker-v1",
+        },
       }),
     (error) => error.code === "STATE_COMMIT_FAILED",
   );
@@ -2797,6 +2828,249 @@ test("a pre-command abandon removes a grant won during a timeout race", async ()
   assertWithinCapacity(snapshot);
 });
 
+test("request lease rejects the legacy Darwin lifecycle contract", async () => {
+  const fixture = await createFixture({ capacity: 1 });
+  const requestOwner = owner(300);
+  await register(
+    fixture,
+    "legacy-darwin-rejected",
+    "legacy-darwin-rejected-fp",
+    requestOwner,
+  );
+
+  await assert.rejects(
+    lease(
+      fixture,
+      "legacy-darwin-rejected",
+      "legacy-darwin-rejected-lease",
+      requestOwner,
+      { lifecycleContract: "darwin-unique-lineage-v1" },
+    ),
+    (error) =>
+      error.code === "INVALID_ARGUMENT" &&
+      /lifecycleContract/u.test(error.message),
+  );
+  assert.equal((await status(fixture)).leases.length, 0);
+});
+
+test("Darwin settlement blocks every new lease grant until release", async () => {
+  const fixture = await createFixture({ capacity: 3 });
+  const darwinOwner = owner(301);
+  const activeOwner = owner(302);
+  const queuedOwner = owner(303);
+  await register(fixture, "darwin-settling", "darwin-settling-fp", darwinOwner);
+  await register(fixture, "settling-active", "settling-active-fp", activeOwner);
+  await register(fixture, "settling-queued", "settling-queued-fp", queuedOwner);
+
+  const darwinLease = await lease(
+    fixture,
+    "darwin-settling",
+    "darwin-settling-lease",
+    darwinOwner,
+    { lifecycleContract: "darwin-coherent-lineage-v2" },
+  );
+  assert.equal(darwinLease.status, "granted");
+  assert.equal(darwinLease.lifecycleContract, "darwin-coherent-lineage-v2");
+  await lease(fixture, "settling-active", "settling-active-lease", activeOwner);
+
+  await assert.rejects(
+    release(fixture, "darwin-settling", "darwin-settling-lease", darwinOwner),
+    (error) => error.code === "LEASE_SETTLEMENT_REQUIRED",
+  );
+  assert.equal(
+    (await status(fixture)).leases.find(
+      (candidate) => candidate.leaseId === "darwin-settling-lease",
+    ).status,
+    "granted",
+  );
+
+  const settling = await rpc(fixture, "begin-lease-settlement", {
+    requestId: "darwin-settling",
+    leaseId: "darwin-settling-lease",
+    owner: darwinOwner,
+  });
+  assert.equal(settling.status, "settling");
+  assert.equal(
+    (
+      await rpc(fixture, "begin-lease-settlement", {
+        requestId: "darwin-settling",
+        leaseId: "darwin-settling-lease",
+        owner: darwinOwner,
+      })
+    ).status,
+    "settling",
+  );
+
+  const queued = await lease(
+    fixture,
+    "settling-queued",
+    "settling-queued-lease",
+    queuedOwner,
+  );
+  assert.equal(queued.status, "queued");
+  assert.ok(
+    queued.blockers.some(
+      (blocker) =>
+        blocker.type === "darwin-settlement-barrier" &&
+        blocker.leaseId === "darwin-settling-lease",
+    ),
+  );
+  await release(
+    fixture,
+    "settling-active",
+    "settling-active-lease",
+    activeOwner,
+  );
+  assert.equal(
+    (await status(fixture)).leases.find(
+      (candidate) => candidate.leaseId === "settling-queued-lease",
+    ).status,
+    "queued",
+  );
+
+  await release(
+    fixture,
+    "darwin-settling",
+    "darwin-settling-lease",
+    darwinOwner,
+  );
+  assert.equal(
+    (await status(fixture)).leases.find(
+      (candidate) => candidate.leaseId === "settling-queued-lease",
+    ).status,
+    "granted",
+  );
+});
+
+test("restart recovers a legacy Darwin lease as a global drain barrier", async () => {
+  const fixture = await createFixture({ capacity: 3 });
+  const darwinOwner = owner(304);
+  await register(
+    fixture,
+    "settling-restart",
+    "settling-restart-fp",
+    darwinOwner,
+  );
+  await lease(
+    fixture,
+    "settling-restart",
+    "settling-restart-lease",
+    darwinOwner,
+    { lifecycleContract: "darwin-coherent-lineage-v2" },
+  );
+  await rpc(fixture, "begin-lease-settlement", {
+    requestId: "settling-restart",
+    leaseId: "settling-restart-lease",
+    owner: darwinOwner,
+  });
+
+  const journalPath = join(fixture.coordinator.stateRoot, "journal.json");
+  await fixture.coordinator.close("settling-restart");
+  const legacyJournal = JSON.parse(readFileSync(journalPath, "utf8"));
+  legacyJournal.leases["settling-restart-lease"].lifecycleContract =
+    "darwin-unique-lineage-v1";
+  writeFileSync(journalPath, `${JSON.stringify(legacyJournal)}\n`);
+  fixture.coordinator = await startCoordinator({
+    root: fixture.root,
+    capacity: 3,
+    idleMs: 30_000,
+    ownerSweepMs: 0,
+    coordinatorIdentity: {
+      pid: process.pid,
+      startUtc: "test-settling-restart",
+    },
+  });
+  let snapshot = await status(fixture);
+  const [obligation] = snapshot.drainObligations;
+  assert.equal(snapshot.leases[0].status, "drain-required");
+  assert.equal(
+    snapshot.leases[0].lifecycleContract,
+    "darwin-unique-lineage-v1",
+  );
+  assert.equal(obligation.lifecycleContract, "darwin-unique-lineage-v1");
+
+  const nextOwner = owner(305);
+  await register(
+    fixture,
+    "settling-restart-next",
+    "settling-restart-next-fp",
+    nextOwner,
+  );
+  assert.equal(
+    (
+      await lease(
+        fixture,
+        "settling-restart-next",
+        "settling-restart-next-lease",
+        nextOwner,
+      )
+    ).status,
+    "queued",
+  );
+
+  const drainer = owner(306);
+  await claimObligation(fixture, obligation, drainer);
+  await rpc(fixture, "acknowledge-drain", {
+    obligationId: obligation.obligationId,
+    drainIdentity: obligation.drainIdentity,
+    drainer,
+    evidence: {
+      processTreeEmpty: true,
+      lifecycleContract: "darwin-unique-lineage-v1",
+    },
+  });
+  snapshot = await status(fixture);
+  assert.equal(
+    snapshot.leases.find(
+      (candidate) => candidate.leaseId === "settling-restart-next-lease",
+    ).status,
+    "granted",
+  );
+});
+
+test("drain acknowledgement must name the obligation lifecycle contract", async () => {
+  const fixture = await createFixture({ capacity: 1 });
+  const requestOwner = owner(307);
+  const requestId = "lifecycle-evidence";
+  await register(fixture, requestId, "lifecycle-evidence-fp", requestOwner);
+  await lease(fixture, requestId, "lifecycle-evidence-lease", requestOwner, {
+    lifecycleContract: "darwin-coherent-lineage-v2",
+  });
+  const cancelled = await rpc(fixture, "cancel-request", {
+    requestId,
+    owner: requestOwner,
+    reason: "lifecycle evidence test",
+  });
+  const [obligation] = cancelled.drainObligations;
+  assert.equal(obligation.lifecycleContract, "darwin-coherent-lineage-v2");
+  const drainer = owner(308);
+  await claimObligation(fixture, obligation, drainer);
+
+  await assert.rejects(
+    rpc(fixture, "acknowledge-drain", {
+      obligationId: obligation.obligationId,
+      drainIdentity: obligation.drainIdentity,
+      drainer,
+      evidence: {
+        processTreeEmpty: true,
+        lifecycleContract: "portable-marker-v1",
+      },
+    }),
+    (error) => error.code === "DRAIN_LIFECYCLE_CONTRACT_MISMATCH",
+  );
+  assert.equal((await status(fixture)).drainObligations.length, 1);
+  await rpc(fixture, "acknowledge-drain", {
+    obligationId: obligation.obligationId,
+    drainIdentity: obligation.drainIdentity,
+    drainer,
+    evidence: {
+      processTreeEmpty: true,
+      lifecycleContract: "darwin-coherent-lineage-v2",
+    },
+  });
+  assert.equal((await status(fixture)).drainObligations.length, 0);
+});
+
 test("an all-capacity barrier blocks younger light work until it runs", async () => {
   const fixture = await createFixture({ capacity: 3 });
   const activeOwner = owner(121);
@@ -3213,7 +3487,7 @@ test("startup rejects a success index for a result that forbids reuse", async ()
       reusable: false,
       skipped: [
         {
-          command: "./tools/trunk check",
+          command: "./tools/trunk check --ci",
           reason: "provisioning-unavailable",
         },
       ],
@@ -3796,6 +4070,7 @@ test("a joining client can drain a dead owner's tagged process tree", async () =
       drainer: joiningOwner,
       evidence: {
         processTreeEmpty: true,
+        lifecycleContract: "portable-marker-v1",
         drainedToken: obligation.drainIdentity,
       },
     });
@@ -3860,7 +4135,10 @@ test("a dead drain claimant releases its exact claim for another client", async 
       obligationId: obligation.obligationId,
       drainIdentity: obligation.drainIdentity,
       drainer: liveOwner,
-      evidence: { processTreeEmpty: true },
+      evidence: {
+        processTreeEmpty: true,
+        lifecycleContract: "portable-marker-v1",
+      },
     });
     assert.equal((await status(fixture)).drainObligations.length, 0);
   } finally {
@@ -4007,7 +4285,7 @@ test("qualified success reaches followers but never satisfies retained reuse", a
     reusable: false,
     skipped: [
       {
-        command: "./tools/trunk check",
+        command: "./tools/trunk check --ci",
         reason: "provisioning-unavailable",
       },
     ],
@@ -4125,6 +4403,7 @@ test("an unclean bound-client disconnect creates a drain obligation", async () =
   await client.request("request-lease", {
     requestId: "disconnect-owner",
     leaseId: "disconnect-lease",
+    lifecycleContract: "portable-marker-v1",
     drainIdentity: disconnectedDrainId,
     capability: capabilityFor("disconnect-owner"),
     owner: disconnectedOwner,
@@ -4173,7 +4452,10 @@ test("an unclean bound-client disconnect creates a drain obligation", async () =
       obligationId: obligation.obligationId,
       drainIdentity: unrelatedDrainId,
       drainer: owner(173),
-      evidence: { processTreeEmpty: true },
+      evidence: {
+        processTreeEmpty: true,
+        lifecycleContract: "portable-marker-v1",
+      },
     }),
     (error) => error.code === "DRAIN_TOKEN_MISMATCH",
   );
@@ -4192,7 +4474,10 @@ test("an unclean bound-client disconnect creates a drain obligation", async () =
     obligationId: obligation.obligationId,
     drainIdentity: obligation.drainIdentity,
     drainer,
-    evidence: { processTreeEmpty: true },
+    evidence: {
+      processTreeEmpty: true,
+      lifecycleContract: "portable-marker-v1",
+    },
   });
   const snapshot = await status(fixture);
   assert.equal(
@@ -4305,6 +4590,7 @@ test("a disconnected leader auto-acknowledges after drain across restart", async
   await client.request("request-lease", {
     requestId,
     leaseId: "restart-bound-stale-lease",
+    lifecycleContract: "portable-marker-v1",
     drainIdentity: runToken(
       "restart-bound-stale-lease",
       requestOwner.pid,
@@ -4343,7 +4629,10 @@ test("a disconnected leader auto-acknowledges after drain across restart", async
     obligationId: obligation.obligationId,
     drainIdentity: obligation.drainIdentity,
     drainer,
-    evidence: { processTreeEmpty: true },
+    evidence: {
+      processTreeEmpty: true,
+      lifecycleContract: "portable-marker-v1",
+    },
   });
   const settled = await status(fixture);
   assert.equal(settled.activeRequestCount, 0);
@@ -4361,7 +4650,7 @@ test("a disconnected leader auto-acknowledges after drain across restart", async
   assert.equal(next.admission, "held");
 });
 
-test("process-group TERM marks a bound request unclean", async () => {
+test("TERM on the bound client marks its request unclean", async () => {
   const fixture = await createFixture({ capacity: 1 });
   const requestId = "term-bound-request";
   const requestOwner = owner(184);
@@ -4419,7 +4708,13 @@ test("process-group TERM marks a bound request unclean", async () => {
   try {
     await waitUntil(() => (stdout.includes("READY\n") ? true : null));
     await lease(fixture, requestId, "term-bound-lease", requestOwner);
-    process.kill(-child.pid, "SIGTERM");
+    if (process.platform === "darwin") {
+      // The unreaped ChildProcess handle remains the signal authority. Linux
+      // keeps the process-group case that this fixture originally covered.
+      assert.equal(child.kill("SIGTERM"), true);
+    } else {
+      process.kill(-child.pid, "SIGTERM");
+    }
     await once(child, "exit");
     const drained = await waitUntil(() => {
       const inspected = fixture.coordinator.core.inspect();
@@ -4429,7 +4724,11 @@ test("process-group TERM marks a bound request unclean", async () => {
     assert.equal(drained.leases[0].status, "drain-required");
   } finally {
     if (child.exitCode === null && child.signalCode === null) {
-      process.kill(-child.pid, "SIGKILL");
+      if (process.platform === "darwin") {
+        child.kill("SIGKILL");
+      } else {
+        process.kill(-child.pid, "SIGKILL");
+      }
       await once(child, "exit");
     }
     assert.equal(stderr, "");
@@ -4736,7 +5035,10 @@ test("stale reports require an exact PID/start identity and explicit drain ack",
       obligationId: stale.drainObligations[0].obligationId,
       drainIdentity: stale.drainObligations[0].drainIdentity,
       drainer: staleDrainer,
-      evidence: { processTreeEmpty: false },
+      evidence: {
+        processTreeEmpty: false,
+        lifecycleContract: "portable-marker-v1",
+      },
     }),
     (error) => error.code === "DRAIN_EVIDENCE_REQUIRED",
   );
@@ -4746,6 +5048,7 @@ test("stale reports require an exact PID/start identity and explicit drain ack",
     drainer: staleDrainer,
     evidence: {
       processTreeEmpty: true,
+      lifecycleContract: "portable-marker-v1",
       checkedPid: staleOwner.pid,
       descendants: [],
     },
@@ -4874,13 +5177,19 @@ test("one request claim owns its distinct per-lease drain identities", async () 
     obligationId: firstObligation.obligationId,
     drainIdentity: firstObligation.drainIdentity,
     drainer: firstClaimant,
-    evidence: { processTreeEmpty: true },
+    evidence: {
+      processTreeEmpty: true,
+      lifecycleContract: "portable-marker-v1",
+    },
   });
   await rpc(fixture, "acknowledge-drain", {
     obligationId: secondObligation.obligationId,
     drainIdentity: secondObligation.drainIdentity,
     drainer: firstClaimant,
-    evidence: { processTreeEmpty: true },
+    evidence: {
+      processTreeEmpty: true,
+      lifecycleContract: "portable-marker-v1",
+    },
   });
   assert.equal((await status(fixture)).drainObligations.length, 0);
 });
@@ -4942,7 +5251,11 @@ test("restart recovery preserves stale capacity until drain acknowledgement", as
     obligationId: snapshot.drainObligations[0].obligationId,
     drainIdentity: snapshot.drainObligations[0].drainIdentity,
     drainer: restartDrainer,
-    evidence: { processTreeEmpty: true, recoveredAfterCrash: true },
+    evidence: {
+      processTreeEmpty: true,
+      lifecycleContract: "portable-marker-v1",
+      recoveredAfterCrash: true,
+    },
   });
   snapshot = await status(fixture);
   assert.equal(
@@ -4955,7 +5268,7 @@ test("restart recovery preserves stale capacity until drain acknowledgement", as
   const journal = JSON.parse(
     readFileSync(join(fixture.coordinator.stateRoot, "journal.json"), "utf8"),
   );
-  assert.equal(journal.schemaVersion, 2);
+  assert.equal(journal.schemaVersion, JOURNAL_SCHEMA_VERSION);
   assert.equal(journal.protocol.major, PROTOCOL_VERSION.major);
   assert.equal(journal.policyHash, DEFAULT_POLICY_HASH);
   assert.equal(Object.keys(journal.drainObligations).length, 0);
@@ -4991,6 +5304,7 @@ test("legacy startup queues work until adoption before owner sweeping", async ()
       leaseBeforeAdoption = core.requestLease({
         requestId: "adoption-pending",
         leaseId: "adoption-pending-lease",
+        lifecycleContract: "portable-marker-v1",
         drainIdentity: runToken("adoption-lease", 197, 5004),
         capability: capabilityFor("adoption-pending"),
         owner: requestOwner,
@@ -6412,7 +6726,15 @@ test("coordinator marker cleanup crashes leave only inert top-level holder quara
           },
         },
       );
-      assert.equal(nextGate.status, 0, nextGate.stderr);
+      if (process.platform === "darwin") {
+        assert.equal(nextGate.status, 2, nextGate.stderr);
+        assert.match(
+          nextGate.stderr,
+          /required Darwin process-lineage evidence is missing/u,
+        );
+      } else {
+        assert.equal(nextGate.status, 0, nextGate.stderr);
+      }
       assert.doesNotMatch(
         `${nextGate.stdout}\n${nextGate.stderr}`,
         /quality-gate owner quarantine/u,

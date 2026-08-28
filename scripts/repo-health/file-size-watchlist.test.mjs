@@ -261,16 +261,25 @@ const BIG_SOURCE = Array.from(
   (_, index) => `const value${index} = ${index};`,
 ).join("\n");
 
-test("the scripts scope covers .mjs and .sh at every depth, tests aside", () => {
+test("the scripts scope covers executable and native sources at every depth", () => {
   assert.equal(scopeForPath("scripts/tf-stacks.mjs")?.label, "scripts");
   assert.equal(
     scopeForPath("scripts/alerts/check-peg-registry-integrity.mjs")?.label,
     "scripts",
   );
   assert.equal(scopeForPath("scripts/agent-quality-gate.sh")?.label, "scripts");
+  assert.equal(
+    scopeForPath("scripts/gate/darwin-process-identity.c")?.label,
+    "scripts",
+  );
+  assert.equal(
+    scopeForPath("scripts/gate/darwin-process-identity-runtime.inc.c")?.label,
+    "scripts",
+  );
   // Tests follow the rule every scope but Aegis uses.
   assert.equal(scopeForPath("scripts/alerts/alert-rules-lint.test.mjs"), null);
   assert.equal(scopeForPath("scripts/agent-quality-gate.test.sh"), null);
+  assert.equal(scopeForPath("scripts/gate/native-helper.test.c"), null);
   // Only executable sources. The manifest, the schema stub, and AGENTS.md are
   // data or prose, and a line cap says nothing useful about them.
   assert.equal(
@@ -366,47 +375,82 @@ test("every exemption names a file that is still real and still over the cap", (
   }
 });
 
-test("the trust root still pins the two helper names the exemption cites", () => {
-  // The reason cites six literal lists. It holds only while each names these
-  // two and nothing else — a third helper in any of them means the exemption
-  // is re-argued, not silently inherited. Windows are bounded so a literal
-  // surviving elsewhere in a 6,800-line file cannot stand in for the real one.
+test("the trust root pins the complete nested helper runtime", () => {
+  // The exemption depends on one closed, attested runtime. Keep the two large
+  // helpers, native Darwin identity runtime, and process-identity dependency
+  // in each trust enumeration.
+  // Windows are bounded so an unrelated literal elsewhere in the wrapper
+  // cannot stand in for the active materializer.
   const wrapper = readFileSync(
     resolve(repoRoot, "scripts/agent-autoreview.sh"),
     "utf8",
   );
-  const helpers = ["agent-autoreview.mjs", "agent-autoreview-core.mjs"];
+  const runtimePaths = [
+    "agent-autoreview.mjs",
+    "agent-autoreview-core.mjs",
+    "gate/darwin-process-identity.c",
+    "gate/darwin-process-identity-runtime.inc.c",
+    "gate/darwin-process-identity-helper.mjs",
+    "gate/darwin-process-lineage-model.mjs",
+    "gate/darwin-process-lineage-state.mjs",
+    "gate/darwin-process-lineage.mjs",
+    "gate/mapped-command-process-identity.mjs",
+  ];
 
-  const copyList = wrapper.match(/my @names = \(([^)]*)\)/);
-  assert.ok(copyList, "materialize_filesystem_autoreview_runtime lost @names");
+  const copyList = wrapper.match(/my @files = \(([\s\S]{0,500}?)\n\s*\);/);
+  assert.ok(copyList, "materialize_filesystem_autoreview_runtime lost @files");
   assert.deepEqual(
-    copyList[1].match(/"([^"]+)"/g)?.map((name) => name.replaceAll('"', "")),
-    helpers,
-    "the Perl copy list no longer materializes exactly the two exempt helpers",
+    [...copyList[1].matchAll(/\["([^"]+)", "([^"]+)"\]/g)].map(
+      ([, directory, name]) =>
+        directory === "." ? name : `${directory}/${name}`,
+    ),
+    runtimePaths,
+    "the Perl copy list no longer materializes the complete helper runtime",
   );
 
-  // helper_paths, both autoreview runtime_paths arrays, the lstat loop, and the
-  // ACL loop. Each is asserted where it stands, not anywhere in the file.
+  // helper_paths, both autoreview runtime_paths arrays, the source snapshot,
+  // and the ACL loop. Each assertion stays next to its active implementation.
   const lists = [
-    /local helper_paths=\(\n((?:\s+scripts\/[\w.-]+\n)+)\s*\)/,
-    /local runtime_paths=\(\n((?:\s+scripts\/agent-autoreview[\w.-]*\n)+)\s*\)/g,
-    /for my \$name \(([^)]*agent-autoreview[^)]*)\)/,
-    /for source_file in \\\n([\s\S]{0,300}?); do/,
+    /local helper_paths=\(\n([\s\S]{0,500}?)\n\s*\)/,
+    /my @source_files = \(([\s\S]{0,460}?)\n\s*\);/,
+    /for source_file in \\\n([\s\S]{0,580}?); do/,
   ];
   for (const list of lists) {
     const found = wrapper.match(list);
     assert.ok(found, `the trust root lost a list matching ${list}`);
-    for (const helper of helpers) {
+    for (const helper of runtimePaths) {
       assert.ok(
         String(found[0]).includes(helper),
         `${helper} is missing from ${String(found[0]).slice(0, 60)}…`,
       );
     }
   }
+  const runtimeLists = [
+    ...wrapper.matchAll(/local runtime_paths=\(\n([\s\S]{0,560}?)\n\s*\)/g),
+  ];
+  assert.equal(
+    runtimeLists.length,
+    2,
+    "the trust root must keep two runtime path lists",
+  );
+  for (const found of runtimeLists) {
+    for (const helper of runtimePaths) {
+      assert.ok(
+        found[0].includes(helper),
+        `${helper} is missing from ${found[0].slice(0, 60)}…`,
+      );
+    }
+  }
 
   assert.match(
     wrapper,
-    /my \$aggregate_limit = 2 \* 1024 \* 1024;[\s\S]{0,1200}?\$aggregate > \$aggregate_limit/,
+    /mkdir "\$runtime_dir\/scripts\/gate"[\s\S]{0,100}?chmod 0700 "\$runtime_dir\/scripts\/gate"/,
+    "the materialized gate directory is no longer private",
+  );
+
+  assert.match(
+    wrapper,
+    /my \$aggregate_limit = 2 \* 1024 \* 1024;[\s\S]{0,2600}?\$aggregate > \$aggregate_limit/,
     "the 2 MB aggregate cap is no longer enforced next to where it is declared",
   );
   // …and the wrapper still hashes its own path against the frozen ref.

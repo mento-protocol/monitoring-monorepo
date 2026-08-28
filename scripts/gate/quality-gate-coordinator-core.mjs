@@ -23,6 +23,7 @@ import {
 } from "./quality-gate-coordinator-results.mjs";
 import {
   abandonLease as abandonCoordinatorLease,
+  beginLeaseSettlement as beginCoordinatorLeaseSettlement,
   leaseStatus as coordinatorLeaseStatus,
   registerRequest,
   releaseLease as releaseCoordinatorLease,
@@ -278,6 +279,9 @@ export class QualityGateCoordinator extends EventEmitter {
   leaseStatus(leaseId, owner, capability) {
     return coordinatorLeaseStatus(this, leaseId, owner, capability);
   }
+  beginLeaseSettlement(params) {
+    return beginCoordinatorLeaseSettlement(this, params, () => this.#commit());
+  }
   releaseLease(params) {
     return releaseCoordinatorLease(
       this,
@@ -506,6 +510,7 @@ export class QualityGateCoordinator extends EventEmitter {
         leaseId: lease.leaseId,
         requestId: request.requestId,
         drainIdentity: lease.drainIdentity,
+        lifecycleContract: lease.lifecycleContract,
         owner: copy(lease.owner),
         weight: lease.weight,
         resources: copy(lease.resources),
@@ -546,6 +551,12 @@ export class QualityGateCoordinator extends EventEmitter {
       throw new CoordinatorError(
         "DRAIN_TOKEN_MISMATCH",
         "drain token does not match the obligation",
+      );
+    }
+    if (evidence.lifecycleContract !== obligation.lifecycleContract) {
+      throw new CoordinatorError(
+        "DRAIN_LIFECYCLE_CONTRACT_MISMATCH",
+        "drain evidence lifecycle contract differs from the obligation",
       );
     }
     assertDrainClaim(obligation, drainer);
