@@ -75,7 +75,8 @@ The ordered gates in `scripts/pr/merge-pr.mjs`:
    it detects queues from rulesets and classic branch protection. The wrapper
    also reads the branch's ruleset rule types as a second signal and a specific
    diagnostic. An unreadable answer from either queue read refuses. The final
-   `Repository.mergeQueue` read is the last remote read before consent is
+   GraphQL read queries `Repository.mergeQueue` and the pull request's
+   `autoMergeRequest` together. It is the last remote read before consent is
    recorded and the direct merge starts.
 
 7. Append the consent record — login, timestamp, pull request, head commit,
@@ -123,12 +124,12 @@ wrapper says so in its own header rather than implying otherwise:
   window is accepted because binding it would require the trust-root wrapper to
   capture a live token and inject it into a child environment, which creates a
   larger credential-handling surface. Issue 2099 records the decision.
-- **Merge-queue absence is not bound atomically to the merge.** The wrapper
-  proves that `Repository.mergeQueue(branch:)` is null before the briefing and
-  again as its final remote read. A queue enabled after that read but before
-  GitHub handles the REST request can still be bypassed. The wrapper minimizes
-  this interval, but GitHub's synchronous merge endpoint offers no parameter
-  that binds queue absence to the write.
+- **Merge-queue and auto-merge absence are not bound atomically to the merge.**
+  The wrapper checks both before the briefing and again in one final GraphQL
+  response. A queue or auto-merge request enabled after that read but before
+  GitHub handles the REST request can still be consumed or bypassed. The
+  wrapper minimizes this interval, but GitHub's synchronous merge endpoint
+  offers no parameter that binds either absence to the write.
 - **The squash subject is not pinned.** A title edited in the same window can
   reach the merge commit. Sending `commit_title` would pin it, but this
   repository sets `squash_merge_commit_title=COMMIT_OR_PR_TITLE`: GitHub uses

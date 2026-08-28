@@ -97,6 +97,7 @@ import {
   readAutoMergeRequest,
   readBaseMergeQueue,
   readBaseBranchRuleTypes,
+  readFinalMergeIntent,
   reconcileMergeOutcome,
   resolveLogin,
   resolveRepositories,
@@ -413,30 +414,6 @@ export async function mergePullRequest({
     );
   }
 
-  // Same reasoning for auto-merge. Re-read after the unbounded prompt so this
-  // command does not merge over a request another operator created while the
-  // briefing was open.
-  let confirmedAutoMerge;
-  try {
-    confirmedAutoMerge = await readAutoMergeRequest({
-      gh,
-      repo: repos.base,
-      number,
-    });
-  } catch (err) {
-    throw new MergeRefusal(
-      `unable to re-read the auto-merge state of ${repos.base}#${number}: ` +
-        `${err instanceof Error ? err.message : String(err)}. ` +
-        `Refusing, because this command must not merge over another operator's request.`,
-    );
-  }
-  if (confirmedAutoMerge !== null) {
-    throw new MergeRefusal(
-      `${repos.base}#${number} gained an auto-merge request while you were confirming; ` +
-        `re-run — this command will not merge over it or cancel it.`,
-    );
-  }
-
   // The merge below starts a fresh `gh`, which reads the credential active at
   // child-process start. Re-reading here narrows the unbounded prompt window.
   // It does not bind the child: `gh auth switch` can still run during the
@@ -452,24 +429,33 @@ export async function mergePullRequest({
     );
   }
 
-  // Make the authoritative queue check the final remote read. This minimizes
-  // the interval in which a classic queue could be enabled before the direct
-  // REST call, which can bypass that queue instead of refusing.
-  let confirmedMergeQueue;
+  // Read both foreign-intent gates in one final GraphQL response. A separate
+  // queue round trip after the auto-merge read would make that earlier state
+  // stale before the direct REST call. This combined read minimizes both race
+  // windows, although GitHub cannot bind either absence to the later write.
+  let confirmedIntent;
   try {
-    confirmedMergeQueue = await readBaseMergeQueue({
+    confirmedIntent = await readFinalMergeIntent({
       gh,
       repo: repos.base,
       branch: confirmed.baseRefName,
+      number,
     });
   } catch (err) {
     throw new MergeRefusal(
-      `unable to re-read the merge-queue state for ${sanitizeTerminalText(confirmed.baseRefName)} in ${repos.base}: ` +
+      `unable to re-read the final merge intent for ${repos.base}#${number} and ` +
+        `${sanitizeTerminalText(confirmed.baseRefName)}: ` +
         `${err instanceof Error ? err.message : String(err)}. ` +
-        `Refusing, because this command must prove the base still has no queue before direct merge.`,
+        `Refusing, because this command must prove there is no merge queue or auto-merge request before direct merge.`,
     );
   }
-  if (confirmedMergeQueue !== null) {
+  if (confirmedIntent.autoMergeRequest !== null) {
+    throw new MergeRefusal(
+      `${repos.base}#${number} gained an auto-merge request while you were confirming; ` +
+        `re-run — this command will not merge over it or cancel it.`,
+    );
+  }
+  if (confirmedIntent.mergeQueue !== null) {
     throw new MergeRefusal(
       `${sanitizeTerminalText(confirmed.baseRefName)} in ${repos.base} gained a merge queue while you were confirming; ` +
         `re-run after choosing the queue workflow deliberately.`,

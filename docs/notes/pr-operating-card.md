@@ -378,9 +378,11 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    the approved head and squash method. The request cannot enqueue or enable
    auto-merge. It can bypass a classic branch-protection merge queue, so the
    wrapper proves `Repository.mergeQueue(branch:)` is null before the briefing
-   and again as its final remote read. That query covers ruleset and classic
-   queues. The wrapper also reads ruleset rule types as a second signal. Any
-   unreadable queue state refuses. The request omits commit title and message
+   and again in a final GraphQL read that also checks the pull request's
+   `autoMergeRequest`. That query covers ruleset and classic queues while
+   keeping both intent gates in the shortest available race window. The wrapper
+   also reads ruleset rule types as a second signal. Any unreadable intent state
+   refuses. The request omits commit title and message
    fields, so the repository's squash defaults remain in effect. The wrapper
    confirms afterwards that the PR reached `MERGED` on the approved base and
    head. It never disables auto-merge during reconciliation. Any ambiguous

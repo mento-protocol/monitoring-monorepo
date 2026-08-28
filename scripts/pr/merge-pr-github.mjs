@@ -269,6 +269,10 @@ export async function readBaseMergeQueue({ gh, repo, branch }) {
     ]),
   );
 
+  return parseMergeQueueResponse(parsed).mergeQueue;
+}
+
+function parseMergeQueueResponse(parsed) {
   if (Array.isArray(parsed?.errors) && parsed.errors.length > 0) {
     throw new Error("the merge-queue query returned GraphQL errors");
   }
@@ -284,15 +288,64 @@ export async function readBaseMergeQueue({ gh, repo, branch }) {
   if (queue !== null && typeof queue !== "object") {
     throw new Error("the merge-queue response was malformed");
   }
-  return queue;
+  return { repository, mergeQueue: queue };
+}
+
+/**
+ * The final merge-queue and auto-merge state from one GraphQL response.
+ *
+ * Reading both intent gates together removes the extra remote round trip that
+ * would otherwise leave one state older than the other immediately before the
+ * direct merge. The response is still not atomic with the later REST write, so
+ * callers must keep this as their final remote read and refuse every malformed
+ * or partial response.
+ */
+export async function readFinalMergeIntent({ gh, repo, branch, number }) {
+  const { owner, name, host } = splitRepo(repo);
+  const parsed = JSON.parse(
+    await gh([
+      "api",
+      "--hostname",
+      host ?? "github.com",
+      "graphql",
+      "-f",
+      `query=query($owner:String!,$name:String!,$branch:String!,$number:Int!){repository(owner:$owner,name:$name){mergeQueue(branch:$branch){id url} pullRequest(number:$number){autoMergeRequest{enabledAt}}}}`,
+      "-f",
+      `owner=${owner}`,
+      "-f",
+      `name=${name}`,
+      "-f",
+      `branch=${branch}`,
+      "-F",
+      `number=${number}`,
+    ]),
+  );
+
+  const { repository, mergeQueue } = parseMergeQueueResponse(parsed);
+  const pullRequest = repository.pullRequest;
+  if (
+    pullRequest === null ||
+    typeof pullRequest !== "object" ||
+    !Object.hasOwn(pullRequest, "autoMergeRequest")
+  ) {
+    throw new Error(
+      "the final merge-intent response did not identify the pull request",
+    );
+  }
+  const autoMergeRequest = pullRequest.autoMergeRequest;
+  if (autoMergeRequest !== null && typeof autoMergeRequest !== "object") {
+    throw new Error("the final auto-merge response was malformed");
+  }
+  return { mergeQueue, autoMergeRequest };
 }
 
 /**
  * The rule types GitHub applies to one branch through its rulesets.
  *
- * Ruleset-sourced only. `readBaseMergeQueue` is the authoritative queue gate
- * because it also detects classic branch-protection queues. This read keeps the
- * ruleset-specific diagnosis and provides a second refusal signal.
+ * Ruleset-sourced only. The `Repository.mergeQueue` reads are the authoritative
+ * queue gate because they also detect classic branch-protection queues. This
+ * read keeps the ruleset-specific diagnosis and provides a second refusal
+ * signal.
  *
  * Used to refuse a merge-queue base before the briefing. Queue-managed bases
  * need a deliberate queue workflow, and this read gives the operator that

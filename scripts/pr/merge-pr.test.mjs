@@ -225,12 +225,14 @@ function harness({
   const calls = {
     gh: [],
     git: [],
+    events: [],
     merges: [],
     consents: [],
     prompts: [],
     readyStateReads: 0,
     logins: 0,
     mergeQueues: [],
+    finalIntentReads: [],
     branchRules: [],
     autoMergeReads: 0,
   };
@@ -238,6 +240,7 @@ function harness({
 
   const gh = async (args) => {
     calls.gh.push(args);
+    calls.events.push({ kind: "gh", args });
     if (args[0] === "repo" && args[1] === "view") {
       return JSON.stringify({
         nameWithOwner: "mento-protocol/monitoring-monorepo",
@@ -245,19 +248,41 @@ function harness({
         url: repoUrl,
       });
     }
-    if (args[0] === "api" && args.includes("graphql")) {
-      if (mergeQueueError) throw new Error(mergeQueueError);
+    if (
+      args[0] === "api" &&
+      args.includes("graphql") &&
+      args.some((arg) => String(arg).includes("autoMergeRequest"))
+    ) {
       calls.mergeQueues.push(args);
-      if (calls.mergeQueues.length > 1 && mergeQueueErrorAfterConfirmation) {
+      calls.autoMergeReads += 1;
+      calls.finalIntentReads.push(args);
+      if (mergeQueueErrorAfterConfirmation) {
         throw new Error(mergeQueueErrorAfterConfirmation);
       }
+      if (autoMergeErrorAfterConfirmation) {
+        throw new Error(autoMergeErrorAfterConfirmation);
+      }
       const queue =
-        calls.mergeQueues.length > 1 &&
         baseMergeQueueAfterConfirmation !== undefined
           ? baseMergeQueueAfterConfirmation
           : baseMergeQueue;
+      const request = standingAutoMergeAfterConfirmation
+        ? standingAutoMergeAfterConfirmation
+        : standingAutoMerge;
       return JSON.stringify({
-        data: { repository: { mergeQueue: queue } },
+        data: {
+          repository: {
+            mergeQueue: queue,
+            pullRequest: { autoMergeRequest: request },
+          },
+        },
+      });
+    }
+    if (args[0] === "api" && args.includes("graphql")) {
+      if (mergeQueueError) throw new Error(mergeQueueError);
+      calls.mergeQueues.push(args);
+      return JSON.stringify({
+        data: { repository: { mergeQueue: baseMergeQueue } },
       });
     }
     if (
@@ -291,8 +316,9 @@ function harness({
         })),
       );
     }
-    // The pre-merge auto-merge read and the post-merge outcome read are both
-    // `pr view`; only their fields tell them apart.
+    // The pre-briefing auto-merge read and the post-merge outcome read are both
+    // `pr view`; only their fields tell them apart. The post-confirmation
+    // auto-merge read shares one GraphQL response with the final queue read.
     if (
       args[0] === "pr" &&
       args[1] === "view" &&
@@ -300,14 +326,7 @@ function harness({
     ) {
       if (autoMergeError) throw new Error(autoMergeError);
       calls.autoMergeReads += 1;
-      if (calls.autoMergeReads > 1 && autoMergeErrorAfterConfirmation) {
-        throw new Error(autoMergeErrorAfterConfirmation);
-      }
-      const request =
-        calls.autoMergeReads > 1 && standingAutoMergeAfterConfirmation
-          ? standingAutoMergeAfterConfirmation
-          : standingAutoMerge;
-      return JSON.stringify({ autoMergeRequest: request });
+      return JSON.stringify({ autoMergeRequest: standingAutoMerge });
     }
     if (args[0] === "pr" && args[1] === "view") {
       if (mergeOutcomeError) throw new Error(mergeOutcomeError);
@@ -351,6 +370,7 @@ function harness({
           return summary;
         },
         merge: async (args) => {
+          calls.events.push({ kind: "merge", args });
           calls.merges.push(args);
           if (mergeCommandError) throw new Error(mergeCommandError);
         },
@@ -359,6 +379,7 @@ function harness({
           return answer;
         },
         appendConsent: async ({ record }) => {
+          calls.events.push({ kind: "consent" });
           calls.consents.push(record);
           return "/repo/.merge-consents.jsonl";
         },
@@ -2045,7 +2066,7 @@ await test("an unreadable merge queue after confirmation refuses", async () => {
     mergeQueueErrorAfterConfirmation: "GraphQL: Something went wrong",
   });
 
-  await assertRefuses(h.run(), "unable to re-read the merge-queue state");
+  await assertRefuses(h.run(), "unable to re-read the final merge intent");
   assertEqual(h.calls.merges.length, 0, "no merge request may be sent");
   assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
 });
@@ -2093,7 +2114,7 @@ await test("an unreadable auto-merge state after confirming refuses", async () =
   // branch is asserted with no consent and no merge — the suite's contract.
   const h = harness({ autoMergeErrorAfterConfirmation: "500 Server Error" });
 
-  await assertRefuses(h.run(), "unable to re-read the auto-merge state");
+  await assertRefuses(h.run(), "unable to re-read the final merge intent");
   assertEqual(h.calls.merges.length, 0, "nothing should have merged");
   assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
 });
@@ -2116,6 +2137,46 @@ await test("all post-confirmation intent reads happen on the ordinary path", asy
   );
   assertEqual(h.calls.branchRules.length, 2, "so are the branch rules");
   assertEqual(h.calls.mergeQueues.length, 2, "so is the merge-queue state");
+  assertEqual(
+    h.calls.finalIntentReads.length,
+    1,
+    "the final queue and auto-merge states share one response",
+  );
+});
+
+await test("the final intent read combines both gates immediately before merge", async () => {
+  const h = harness();
+  await h.run();
+
+  const read = h.calls.finalIntentReads[0];
+  assert(read !== undefined, "the final combined intent read must run");
+  assert(
+    read.some((arg) => String(arg).includes("mergeQueue(branch:$branch)")),
+    "the final query must include Repository.mergeQueue",
+  );
+  assert(
+    read.some((arg) => String(arg).includes("autoMergeRequest")),
+    "the final query must include the pull request's auto-merge state",
+  );
+  assert(read.includes("number=2071"), "the query must bind the pull request");
+
+  const readEvent = h.calls.events.findIndex(
+    (event) => event.kind === "gh" && event.args === read,
+  );
+  const mergeEvent = h.calls.events.findIndex(
+    (event) => event.kind === "merge",
+  );
+  assert(
+    readEvent >= 0 && mergeEvent > readEvent,
+    "the read must precede merge",
+  );
+  assertEqual(
+    h.calls.events
+      .slice(readEvent + 1, mergeEvent)
+      .some((event) => event.kind === "gh"),
+    false,
+    "no later remote read may make either final intent state stale",
+  );
 });
 
 await test("a closed pull request is not reported as queued", async () => {
