@@ -3,7 +3,7 @@ title: One sanctioned human-only merge path
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-26
+last_verified: 2026-08-28
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -21,9 +21,9 @@ garden_lane: adrs-architecture
 "Never merge a pull request without the user's explicit approval" was written
 only in agent instructions. Nothing in the repository could refuse a merge.
 
-`gh pr merge` reaches GitHub's write API directly. No git hook, no CI job, and
-no branch-protection rule observes the decision to press the button, so the
-repository had no place to put a gate even in principle. A merge is
+GitHub's merge API accepts the write directly. No git hook or CI job observes
+the decision to press the button, so the repository had no place to put a gate
+even in principle. A merge is
 irreversible in practice: one agent that reads "ship it" as approval, or one
 operator merging a pull request that went red minutes ago, lands unreviewed
 code on `main` with no record of who approved what.
@@ -62,24 +62,24 @@ The ordered gates in `scripts/pr/merge-pr.mjs`:
    feedback items refuses. The comparison uses identities, not counts, and
    serializes each record on its own so no field can spell another's value.
 6. Refuse a pull request that already has an auto-merge request standing on
-   it, and a ruleset-declared merge-queue base — both before the briefing is
-   printed, and both again after the confirmation.
+   it, or whose base has a merge queue. Read both before the briefing and again
+   after the confirmation.
 
    A standing auto-merge request means GitHub is already holding a merge
-   somebody asked for outside these gates; merging over it and cancelling it
-   are both wrong, and the wrapper cannot tell its own compensation from
-   interference with another operator's state. Refusing also makes the
-   post-merge cleanup provably its own.
+   somebody asked for outside these gates. Merging over it or cancelling it
+   would overwrite another operator's intent.
 
-   A merge-queue base is refused because `gh pr merge` enqueues it and returns
-   success, and nothing the wrapper can call removes a queue entry —
-   `--disable-auto` turns off auto-merge only — so merging first would leave a
-   standing request it cannot take back, which GitHub could complete later
-   outside every gate above. The check reads the branch's **ruleset** rules; a
-   merge queue enabled through a classic branch-protection rule does not
-   surface there, so this narrows the window rather than closing it, and
-   step 8's reconciliation still catches such an enqueue and exits non-zero.
-   An unreadable answer from either read refuses.
+   The synchronous merge endpoint cannot enqueue, but it can bypass a merge
+   queue enabled through classic branch protection and merge directly.
+   `Repository.mergeQueue(branch:)` is therefore the authoritative queue gate;
+   it detects queues from rulesets and classic branch protection. The wrapper
+   also reads the branch's ruleset rule types as a second signal and a specific
+   diagnostic. An unreadable answer from either queue read refuses. The final
+   GraphQL read queries `Repository.mergeQueue` and returns `viewer.login` plus
+   the pull request's current `baseRefName` and `autoMergeRequest`. A login or
+   base mismatch refuses, so the credential observation and queue query still
+   match the confirmed operator and current base. It is the last remote read
+   before consent is recorded and the direct merge starts.
 
 7. Append the consent record — login, timestamp, pull request, head commit,
    any override reason — to gitignored `.merge-consents.jsonl`, opened
@@ -87,10 +87,13 @@ The ordered gates in `scripts/pr/merge-pr.mjs`:
    check, and a short-write refusal. This is deliberately the **last** step
    before the merge: every refusal above runs first, so no consent record
    exists for a run the gates turned away.
-8. Merge with `--squash --match-head-commit`, then confirm with GitHub that the
-   pull request actually reached `MERGED`, on the approved base and the
-   approved head. Any other outcome — including a failed merge command, which
-   may still have reached GitHub — cancels auto-merge and exits non-zero.
+8. Call the synchronous REST endpoint
+   `PUT /repos/{owner}/{repo}/pulls/{number}/merge` with the approved head in
+   `sha` and `merge_method=squash`. Omit `commit_title` and `commit_message`, so
+   GitHub uses the repository's configured squash defaults. Then confirm that
+   the pull request reached `MERGED` on the approved base and head. Any other
+   outcome exits non-zero. Reconciliation never enables or disables
+   auto-merge, because this request cannot create deferred merge state.
 
 `.claude/settings.json` denies the raw `Bash(gh pr merge:*)` command, removing
 the obvious shortcut past the wrapper for a Claude session.
@@ -108,42 +111,49 @@ wrapper says so in its own header rather than implying otherwise:
   covering `-R` and `--repo`, separated and `=` joined, before and after `pr`. Six of those spellings were run against gh 2.96.0 and
   all six parse; the bare `-R` form was confirmed to bypass the original single
   pattern. It does not cover the same
-  merge issued as `gh api --method PUT repos/{owner}/{repo}/pulls/{n}/merge`,
-  through a `gh alias`, or with other global flags interleaved. No pattern list
-  closes that space, and one that read as though it did would be worse than a
-  documented gap.
-- **A merge queue enabled in the final window still enqueues.** The base's rule
-  types are read before the briefing and again after the confirmation, and a
-  `merge_queue` rule refuses both times. Neither read closes the gap between the
-  last one and GitHub handling the request: `gh pr merge` enqueues rather than
-  merging, and `--disable-auto` cannot remove a queue entry, so the wrapper
-  would be left unable to take back a request it created. Closing this needs a
-  merge operation that cannot enqueue — the REST endpoint with the approved
-  `sha` — which is a change to the wrapper's central call and is tracked in
-  issue 2092. `main` has no `merge_queue` rule today, so the hazard is latent
-  here rather than active.
-- **An interrupt during the merge call skips reconciliation.** SIGINT or
-  SIGTERM reaches this process as well as `gh`, so the wrapper can exit after
-  GitHub accepted a request but before the post-merge reconciliation runs,
-  leaving something standing. The pre-send refusals shrink this to a base with
-  no merge queue, no standing auto-merge request, and `--not-ready-reason` in
-  play. Trapping and forwarding signals around the merge call would narrow it
-  further; issue 2092 removes it outright, because an operation that cannot
-  enqueue or enable auto-merge leaves nothing to reconcile.
+  merge issued as a raw REST call, through a `gh alias`, or with other global
+  flags interleaved. The sanctioned wrapper now uses that REST form after its
+  gates; agents remain forbidden from using the wrapper or the raw form. No
+  pattern list closes that space, and one that read as though it did would be
+  worse than a documented gap.
+- **The confirmed login is not bound to the merge subprocess credential.** The
+  final GraphQL child selects a credential before it sends the combined query;
+  the response returns that credential's `viewer.login` with every final state.
+  The wrapper compares that login with the operator confirmed before the
+  briefing, then writes consent and starts the REST merge child. The residual
+  window begins when the GraphQL child selects its credential and ends when the
+  REST child selects its credential. It includes the in-flight final query and
+  the consent-ledger write. A `gh auth switch` in that window can make the two
+  children use different keyring or `hosts.yml` credentials. The REST request
+  still names the confirmed repository and pull request, and `sha` binds the
+  confirmed head. It cannot bind the base, so a retarget after the final read
+  can still land on another branch. The local ledger can name the wrong GitHub
+  account. This does not apply when `GH_TOKEN`
+  fixes the credential in the environment. The irreducible window is accepted
+  because closing it would require the trust-root wrapper to capture a live
+  token and inject it into a child environment, which creates a larger
+  credential-handling surface. Issue 2099 records the decision.
+- **Merge-queue and auto-merge absence are not bound atomically to the merge.**
+  The wrapper checks both before the briefing and again in one final GraphQL
+  response. A queue or auto-merge request enabled after that read but before
+  GitHub handles the REST request can still be consumed or bypassed. The
+  wrapper minimizes this interval, but GitHub's synchronous merge endpoint
+  offers no parameter that binds either absence to the write.
 - **The squash subject is not pinned.** A title edited in the same window can
-  reach the merge commit. `gh pr merge --subject` would pin it, but this
+  reach the merge commit. Sending `commit_title` would pin it, but this
   repository sets `squash_merge_commit_title=COMMIT_OR_PR_TITLE`: GitHub uses
   the single commit's subject when a PR has one, and appends `(#N)`. A fixed
-  `--subject` would replace both behaviours on every merge, so the title is
+  title would replace both behaviors on every merge, so the title is
   bound in the confirmation signature and the residual window is accepted
   rather than changing how every merge commit is titled.
-- **The approved base cannot be bound atomically.** `--match-head-commit` pins
-  the head, and the merge endpoint's only matching parameter is `sha`, for the
-  head — there is no base equivalent. A retarget landing between the final gate
-  read and GitHub processing the merge therefore cannot be prevented here. The
-  wrapper re-reads the base afterwards, says plainly that the merge did not go
-  where the operator approved, and exits non-zero. That is detection, not
-  prevention, and the window is a few hundred milliseconds wide.
+- **The approved base cannot be bound atomically.** The request's `sha` pins the
+  head, and the merge endpoint has no base equivalent. The final GraphQL read
+  proves that the queue query still names the pull request's current base. A
+  retarget landing after that read but before GitHub processes the merge still
+  cannot be prevented here. The wrapper re-reads the base afterwards, says
+  plainly that the merge did not go where the operator approved, and exits
+  non-zero. That is detection, not prevention, and the window is a few hundred
+  milliseconds wide.
 
 The durable boundary is on GitHub's side of the wire — branch protection, or
 credentials that cannot merge — and is tracked separately as follow-up.
@@ -156,7 +166,7 @@ credentials that cannot merge — and is tracked separately as follow-up.
   record who approved which head locally, and cannot refuse before the request
   leaves the machine. Rejected as a replacement, kept as the follow-up.
 - **A pre-push or pre-receive hook.** A merge is not a push. No local hook runs
-  on `gh pr merge`, so there is nothing to hook.
+  on a merge API call, so there is nothing to hook.
 - **Trusting the agent instructions alone.** This was the prior state. The rule
   was correct and unenforced; a rule with no default-refusing mechanism behind
   it fails exactly when an agent misreads intent.
@@ -167,6 +177,11 @@ credentials that cannot merge — and is tracked separately as follow-up.
   expensive. The autoreview pass raised this and it is correct — so the claim
   was narrowed in the script header, the operating card, and the PR
   description instead of being left standing.
+- **Capture one token and pass it to the merge child.** This would bind the
+  final combined viewer read, consent record, and merge to one credential.
+  Rejected because it makes the trust-root wrapper read a live GitHub token and
+  inject it into a child environment. The accepted misattribution window has
+  less impact and does not change what merge the operator approved.
 
 ## Consequences
 
@@ -176,10 +191,15 @@ credentials that cannot merge — and is tracked separately as follow-up.
 - Merging now depends on both PR projections. A pull request that is
   check-green but has unresolved review threads no longer merges without a
   recorded reason, which matches the repository's own two-projection all-clear.
-- The merge method is fixed to `--squash`; `allow_merge_commit` and
+- The merge method is fixed to `squash`; `allow_merge_commit` and
   `allow_rebase_merge` are false on this repository. Changing it needs a
   re-check, because a rejected method fails at the API after consent is
   already recorded.
+- The request omits `commit_title` and `commit_message`. The live repository
+  settings verified on 2026-08-28 are
+  `squash_merge_commit_title=COMMIT_OR_PR_TITLE` and
+  `squash_merge_commit_message=COMMIT_MESSAGES`, so GitHub keeps the existing
+  squash subject and message behavior.
 - `.merge-consents.jsonl` is local and gitignored. It is evidence for the
   operator, not an audit log anyone else can read, and an attacker with local
   write can still delete it. It is deliberately not pushed anywhere.
@@ -188,16 +208,19 @@ credentials that cannot merge — and is tracked separately as follow-up.
   `merge-pr-github.mjs` (GitHub calls) so each stays under the 600-line soft
   cap. The suite asserts the cap over all four, which is the only per-PR
   enforcement: `scripts/` has no `max-lines` rule.
-- The `gh api` merge route and CI tokens remain outside this control's reach.
+- Raw merge API calls and CI tokens remain outside this local control's reach.
 
 ## Evidence
 
 - `scripts/pr/merge-pr.mjs`, `scripts/pr/merge-pr-core.mjs`,
   `scripts/pr/merge-pr-io.mjs`, and `.claude/settings.json` enforce the
   decision; `docs/notes/pr-operating-card.md` step 8 routes to it. PR #2072.
-- `scripts/pr/merge-pr.test.mjs` is offline — every GitHub and filesystem
-  boundary is injected — and each refusal case asserts that no consent was
-  recorded and no merge ran.
+- `scripts/pr/merge-pr.test.mjs` is offline. Every GitHub and filesystem
+  boundary is injected. It asserts the exact synchronous REST route, approved
+  `sha`, squash method, omitted title and message fields, and the absence of
+  any auto-merge compensation call on failed or unreadable outcomes. It also
+  asserts queue-object, null-queue, and unreadable-queue responses for
+  `Repository.mergeQueue`.
 - Every gate above was verified by a negative control: removing the
   base-retarget check, the gate-signature check, the feedback gate, the
   hard-link check, the short-write check, the terminal sanitizer, the
@@ -208,6 +231,12 @@ credentials that cannot merge — and is tracked separately as follow-up.
   `contents: read`, and merging a pull request requires `contents: write`, so
   that token cannot merge. The residual is a local session using the operator's
   own `gh` credentials.
-- `gh api repos/mento-protocol/monitoring-monorepo/rulesets` reports no
-  `merge_queue` rule on `main` today; the post-merge verification exists because
-  the wrapper accepts any `--repo`.
+- `gh api repos/mento-protocol/monitoring-monorepo` reports squash-only merge
+  settings with `COMMIT_OR_PR_TITLE` and `COMMIT_MESSAGES`. Post-merge
+  verification remains required because the wrapper accepts any `--repo` and
+  a lost response can hide a completed merge.
+- A read-only GraphQL control on 2026-08-28 returned a queue object and
+  `https://github.com/github/docs/queue/main` for the queue-managed
+  `github/docs` `main` branch. The same `Repository.mergeQueue(branch:)` query
+  returned null for this repository's `main` branch. This verifies the signal
+  without merging either repository.

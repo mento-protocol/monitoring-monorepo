@@ -2,11 +2,9 @@
 /**
  * The sanctioned merge path for this repository.
  *
- * Merging is a human-only action here, and `gh pr merge` reaches GitHub's write
- * API directly: no git hook, no CI job, and no branch protection sees the
- * decision to press the button. A wrapper in front of the real command is
- * therefore the only place the decision can be gated at all, which is why this
- * script runs the ordered gates itself and hands the request to `gh` last.
+ * Merging is a human-only action here. No git hook or CI job sees the decision
+ * to press the button, so this wrapper runs the ordered gates before it calls
+ * GitHub's write API.
  *
  * The order is fixed: refuse outside an interactive human terminal, resolve the
  * repository and the target pull request unambiguously, run the ready-state
@@ -18,33 +16,31 @@
  * an operator who has to re-run one command loses a minute, and a merge nobody
  * approved cannot be taken back.
  *
- * A merge-queue base is refused outright, before any request is sent, and again
- * after the confirmation: `gh pr merge` enqueues such a base and returns
- * success, and nothing this wrapper can call removes a queue entry, so merging
- * first would leave a standing request it cannot take back. An unreadable
- * branch-rules answer refuses too. Those reads narrow the window but cannot
- * close it — a queue enabled between the last read and GitHub handling the
- * request still enqueues. Closing it means merging through an operation that
- * cannot enqueue at all; issue 2092 carries that change.
+ * The final write uses the synchronous REST merge endpoint with the approved
+ * head in `sha` and `merge_method=squash`. That endpoint either completes the
+ * merge or fails. It cannot enqueue the pull request or enable auto-merge, so
+ * an interrupt or a failed response cannot leave a request that GitHub later
+ * completes outside these gates. Reconciliation verifies the outcome but never
+ * disables auto-merge, because any request that appears after the final read
+ * belongs to another operator.
  *
- * An interrupt during the merge call is a third residual: SIGINT or SIGTERM
- * reaches this process too, so it can exit before the reconciliation below
- * runs, leaving a request GitHub might complete later. The pre-send refusals
- * shrink that to a base with no merge queue, no standing auto-merge request,
- * and an override reason in play — and issue 2092 removes it outright, since
- * an operation that cannot enqueue leaves nothing standing to reconcile.
+ * A merge-queue base refuses before the briefing and again after confirmation.
+ * `Repository.mergeQueue` detects queues from rulesets and classic branch
+ * protection. The ruleset read remains as a second diagnostic signal. The REST
+ * endpoint can bypass a classic queue, so an unreadable answer from either read
+ * refuses.
  *
- * Two races are detected rather than prevented. `--match-head-commit` pins the
+ * Two races are detected rather than prevented. The request's `sha` pins the
  * head, and the merge endpoint has no base equivalent, so a retarget between
  * the final gate read and the merge request itself can still land on another
  * branch; the wrapper re-reads the base afterwards and fails loudly when it
  * moved. A title edited in that same window can likewise reach the squash
- * subject. `--subject` would pin it, but this repository sets
+ * subject. Supplying `commit_title` would pin it, but this repository sets
  * `squash_merge_commit_title=COMMIT_OR_PR_TITLE`, so GitHub uses the single
  * commit's subject when there is one and appends `(#N)` — behaviour a fixed
- * `--subject` would replace on every merge. Changing how every merge commit is
- * titled, to close a sub-second window, is the worse trade; the title is bound
- * in the confirmation signature instead.
+ * title would replace on every merge. The REST request omits both title and
+ * message fields, which also preserves `squash_merge_commit_message=COMMIT_MESSAGES`.
+ * The title is bound in the confirmation signature instead.
  *
  * Agents must never invoke this script. Be honest about what makes that true.
  * The interactive-session refusal stops an agent that runs this command the
@@ -54,14 +50,19 @@
  * an unforgeable boundary: a caller on this machine can allocate a
  * pseudo-terminal and clear the markers, and the deny is a command-pattern
  * list, so it covers the spellings someone thought to enumerate and not the
- * same merge issued as `gh api --method PUT repos/{owner}/{repo}/pulls/{n}/merge`,
- * through an alias, or with other global flags interleaved.
+ * REST call this wrapper now uses, an alias, or other global flag orderings.
+ * Using the API inside this sanctioned wrapper does not widen its authority;
+ * agents remain forbidden from invoking the wrapper or the raw API merge.
  * A local process running as the operator can synthesize any local signal, so
  * no check in this file can be one. What the wrapper does provide is a default
  * that refuses, a briefing the operator must read, a confirmation they must
- * type, and an append-only consent record naming who approved which head. The
- * approval rule itself remains the binding control, and the only unforgeable
- * boundary would live on GitHub's side of the wire;
+ * type, and an append-only consent record naming the confirmed GitHub login
+ * and approved head. A credential switch after the final GraphQL child selects
+ * its credential but before the REST child selects its credential can still
+ * misattribute that record. This window includes the in-flight query and the
+ * consent-ledger write; the accepted residual is below and in ADR 0075.
+ * The approval rule itself remains the binding control, and the only
+ * unforgeable boundary would live on GitHub's side of the wire;
  * `docs/adr/0075-pr-merge.md` records that decision and its
  * residual risk.
  *
@@ -77,7 +78,6 @@ import { fileURLToPath } from "node:url";
 
 import {
   COMMIT_OID_PATTERN,
-  MERGE_METHOD_FLAG,
   MergeRefusal,
   buildConsentRecord,
   exitCodeForResult,
@@ -95,8 +95,11 @@ import {
   runGit,
 } from "./merge-pr-io.mjs";
 import {
+  mergeApprovedHead,
   readAutoMergeRequest,
+  readBaseMergeQueue,
   readBaseBranchRuleTypes,
+  readFinalMergeIntent,
   reconcileMergeOutcome,
   resolveLogin,
   resolveRepositories,
@@ -108,7 +111,7 @@ import { fetchReadyState, runGh, splitRepo } from "./pr-ready-state.mjs";
 export {
   AUTOMATION_ENV_MARKERS,
   CONSENT_LOG_BASENAME,
-  MERGE_METHOD_FLAG,
+  MERGE_METHOD,
   MergeRefusal,
   NON_INTERACTIVE_REFUSAL,
   buildConsentRecord,
@@ -277,13 +280,33 @@ export async function mergePullRequest({
 
   const approved = await readGatedReadyState();
 
-  // Refuse a merge-queue base before anything is sent. `gh pr merge` enqueues
-  // such a base and returns success, and nothing this wrapper can call removes
-  // a queue entry — so merging first would leave a standing request GitHub
-  // could complete later with none of the gates above. The base is bound
-  // across the confirmation below, so checking it here is checking the base
-  // that gets merged. An unreadable answer refuses too: this is the last gate
-  // before an irreversible action, and "probably no queue" is not a gate.
+  // Refuse a merge-queue base before anything is sent. Repository.mergeQueue
+  // covers ruleset and classic branch-protection queues. This matters because
+  // the synchronous REST endpoint can bypass a classic queue and merge
+  // directly. The base is bound across the confirmation below.
+  let baseMergeQueue;
+  try {
+    baseMergeQueue = await readBaseMergeQueue({
+      gh,
+      repo: repos.base,
+      branch: approved.baseRefName,
+    });
+  } catch (err) {
+    throw new MergeRefusal(
+      `unable to read the merge-queue state for ${sanitizeTerminalText(approved.baseRefName)} in ${repos.base}: ` +
+        `${err instanceof Error ? err.message : String(err)}. ` +
+        `Refusing, because this command must prove the base has no queue before direct merge.`,
+    );
+  }
+  if (baseMergeQueue !== null) {
+    throw new MergeRefusal(
+      `${sanitizeTerminalText(approved.baseRefName)} in ${repos.base} uses a merge queue. ` +
+        `This command uses the synchronous direct-merge endpoint and will not enqueue it. ` +
+        `Merge it through the queue deliberately instead.`,
+    );
+  }
+
+  // Keep the ruleset read as a second queue signal and a specific diagnostic.
   let baseRuleTypes;
   try {
     baseRuleTypes = await readBaseBranchRuleTypes({
@@ -295,7 +318,7 @@ export async function mergePullRequest({
     throw new MergeRefusal(
       `unable to read the branch rules for ${sanitizeTerminalText(approved.baseRefName)} in ${repos.base}: ` +
         `${err instanceof Error ? err.message : String(err)}. ` +
-        `Refusing, because a merge-queue base would accept a request this command cannot take back.`,
+        `Refusing, because this command does not merge through a queue.`,
     );
   }
   let standingAutoMerge;
@@ -309,7 +332,7 @@ export async function mergePullRequest({
     throw new MergeRefusal(
       `unable to read the auto-merge state of ${repos.base}#${number}: ` +
         `${err instanceof Error ? err.message : String(err)}. ` +
-        `Refusing, because this command must not cancel a request it did not create.`,
+        `Refusing, because this command must not merge over another operator's request.`,
     );
   }
   if (standingAutoMerge !== null) {
@@ -323,9 +346,8 @@ export async function mergePullRequest({
   if (baseRuleTypes.includes("merge_queue")) {
     throw new MergeRefusal(
       `${sanitizeTerminalText(approved.baseRefName)} in ${repos.base} uses a merge queue. ` +
-        `\`gh pr merge\` would enqueue this pull request and return success, and nothing ` +
-        `this command can call removes a queue entry, so the merge would sit outside ` +
-        `every gate above. Merge it through the queue deliberately instead.`,
+        `This command uses the synchronous direct-merge endpoint and will not enqueue it. ` +
+        `Merge it through the queue deliberately instead.`,
     );
   }
 
@@ -350,8 +372,8 @@ export async function mergePullRequest({
     );
   }
 
-  // The prompt has no time limit, and `--match-head-commit` only notices a new
-  // head commit. A dismissed review, a rerun check, a retargeted base, or new
+  // The prompt has no time limit, and the REST `sha` only notices a new head
+  // commit. A dismissed review, a rerun check, a retargeted base, or new
   // blocking feedback during the wait would otherwise merge on a briefing the
   // operator can no longer see, so every gate runs once more against live
   // state and any difference refuses.
@@ -372,8 +394,7 @@ export async function mergePullRequest({
     );
   }
 
-  // The rules were read before an unbounded prompt, and a merge queue can be
-  // switched on while the operator reads. Re-read them, like every other gate.
+  // Keep the ruleset diagnosis in the repeated gate set too.
   let confirmedRuleTypes;
   try {
     confirmedRuleTypes = await readBaseBranchRuleTypes({
@@ -385,51 +406,64 @@ export async function mergePullRequest({
     throw new MergeRefusal(
       `unable to re-read the branch rules for ${sanitizeTerminalText(confirmed.baseRefName)} in ${repos.base}: ` +
         `${err instanceof Error ? err.message : String(err)}. ` +
-        `Refusing, because a merge-queue base would accept a request this command cannot take back.`,
+        `Refusing, because this command does not merge through a queue.`,
     );
   }
   if (confirmedRuleTypes.includes("merge_queue")) {
     throw new MergeRefusal(
       `${sanitizeTerminalText(confirmed.baseRefName)} in ${repos.base} gained a merge queue while you were confirming; ` +
-        `re-run — this command cannot take back a queued request.`,
+        `re-run after choosing the queue workflow deliberately.`,
     );
   }
 
-  // Same reasoning for auto-merge. The pre-briefing read is what licenses the
-  // post-merge cleanup to call anything it cancels its own, and that licence
-  // expires the moment another operator can act — which the unbounded prompt
-  // gives them. Re-read it, or the cleanup could turn off a request enabled
-  // while the operator was reading.
-  let confirmedAutoMerge;
+  // Read the active login, current base, and both foreign-intent gates in one
+  // final GraphQL response. The base proves the queue query still names the
+  // pull request's target, and viewer.login binds the credential observation
+  // to the same response. This minimizes the race windows before the direct
+  // REST call. The credential-attribution window starts when this GraphQL child
+  // selects its credential and ends when the REST child selects its credential;
+  // it includes the in-flight query and consent-ledger write. Capturing and
+  // injecting a token would add a larger credential-handling surface to this
+  // trust-root wrapper (issue 2099; ADR 0075).
+  let confirmedIntent;
   try {
-    confirmedAutoMerge = await readAutoMergeRequest({
+    confirmedIntent = await readFinalMergeIntent({
       gh,
       repo: repos.base,
+      branch: confirmed.baseRefName,
       number,
     });
   } catch (err) {
     throw new MergeRefusal(
-      `unable to re-read the auto-merge state of ${repos.base}#${number}: ` +
+      `unable to re-read the final merge intent for ${repos.base}#${number} and ` +
+        `${sanitizeTerminalText(confirmed.baseRefName)}: ` +
         `${err instanceof Error ? err.message : String(err)}. ` +
-        `Refusing, because this command must not cancel a request it did not create.`,
+        `Refusing, because this command must prove the login and base are unchanged and there is no merge queue or auto-merge request before direct merge.`,
     );
   }
-  if (confirmedAutoMerge !== null) {
+  if (confirmedIntent.login !== login) {
+    throw new MergeRefusal(
+      `the active GitHub login changed from ${login} to ${confirmedIntent.login} while you were confirming; re-run so the consent record names who is merging`,
+    );
+  }
+  if (confirmedIntent.baseRefName !== confirmed.baseRefName) {
+    throw new MergeRefusal(
+      `${repos.base}#${number} was retargeted from ` +
+        `${sanitizeTerminalText(confirmed.baseRefName)} to ` +
+        `${sanitizeTerminalText(confirmedIntent.baseRefName)} after the final readiness read; ` +
+        `re-run to review the new base and its queue state`,
+    );
+  }
+  if (confirmedIntent.autoMergeRequest !== null) {
     throw new MergeRefusal(
       `${repos.base}#${number} gained an auto-merge request while you were confirming; ` +
         `re-run — this command will not merge over it or cancel it.`,
     );
   }
-
-  // The merge below starts a fresh `gh`, which reads whatever credentials are
-  // active then — not the ones read before the prompt. A `gh auth switch` while
-  // the prompt was open would otherwise record one login in the ledger and
-  // merge as another, which is exactly the attribution the ledger exists to
-  // make true.
-  const confirmedLogin = await resolveLogin({ gh, host: repos.host });
-  if (confirmedLogin !== login) {
+  if (confirmedIntent.mergeQueue !== null) {
     throw new MergeRefusal(
-      `the active GitHub login changed from ${login} to ${confirmedLogin} while you were confirming; re-run so the consent record names who is merging`,
+      `${sanitizeTerminalText(confirmed.baseRefName)} in ${repos.base} gained a merge queue while you were confirming; ` +
+        `re-run after choosing the queue workflow deliberately.`,
     );
   }
 
@@ -444,24 +478,18 @@ export async function mergePullRequest({
   const consentPath = await appendConsent({ record, git });
   stdout.write(`Recorded consent in ${consentPath}\n`);
 
-  // The merge command itself can fail after the request reached GitHub — a
-  // transport error, a truncated response — so its failure is an ambiguous
-  // outcome, not a clean abort. Hold it and let the reconciliation decide.
+  // The merge command itself can fail after GitHub completed the merge — for
+  // example, when the response is lost. Hold the error and let the outcome
+  // read decide. The synchronous endpoint cannot leave a queued or auto-merge
+  // request behind on any failure path.
   let mergeError = null;
   try {
-    await merge([
-      "pr",
-      "merge",
-      String(number),
-      "--repo",
-      repos.base,
-      MERGE_METHOD_FLAG,
-      // Bind the merge to the head the operator was shown, so a push between
-      // the briefing and the confirmation cannot merge a commit nobody
-      // approved.
-      "--match-head-commit",
-      approved.headOid,
-    ]);
+    await mergeApprovedHead({
+      merge,
+      repo: repos.base,
+      number,
+      headOid: approved.headOid,
+    });
   } catch (err) {
     mergeError = err instanceof Error ? err.message : String(err);
   }
