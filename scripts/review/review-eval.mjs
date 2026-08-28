@@ -853,9 +853,20 @@ function resultEvidenceProblems({ dir, row }) {
 
 /** Evidence files required for every row that claims scored results. */
 function runEvidenceProblems({ dir, row, contract }) {
-  if (row.status === "failed") return [];
   const regularityProblems = nonRegularEvidenceProblems(dir);
   if (regularityProblems.length > 0) return regularityProblems;
+  if (row.status === "failed") {
+    return readdirSync(dir)
+      .filter(
+        (name) =>
+          name === "calibration.json" ||
+          (name.startsWith("result-") && name.endsWith(".json")),
+      )
+      .map(
+        (name) =>
+          `${dir} failed row retains scoring artifact ${name}; failed traces must clear scored evidence`,
+      );
+  }
   const problems = resultEvidenceProblems({ dir, row });
   // A bridge intentionally reuses the source full run's plan and scored
   // records. It owes no new evidence, but it must retain any leak flag those

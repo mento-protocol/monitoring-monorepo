@@ -5567,16 +5567,35 @@ test("--revalidate-appended accepts a failed trace after an eligible baseline", 
       `${JSON.stringify(baseline)}\n${JSON.stringify(failed)}\n`,
     );
 
-    const checked = cli(
-      [
-        "--check-ledger",
-        "--revalidate-appended",
-        "--base-ref",
-        "HEAD",
-        "--json",
-      ],
-      { root },
+    const flags = [
+      "--check-ledger",
+      "--revalidate-appended",
+      "--base-ref",
+      "HEAD",
+      "--json",
+    ];
+    const concealedScore = cli(flags, { root });
+    assert.equal(concealedScore.status, 1);
+    const concealedProblems = JSON.parse(concealedScore.stdout).problems.join(
+      " | ",
     );
+    assert.match(
+      concealedProblems,
+      /failed row retains scoring artifact calibration\.json/,
+    );
+    assert.match(
+      concealedProblems,
+      /failed row retains scoring artifact result-1990-pipeline-1\.json/,
+    );
+
+    const failedDetail = path.join(root, failed.detail_dir);
+    unlinkSync(path.join(failedDetail, "calibration.json"));
+    for (const name of readdirSync(failedDetail)) {
+      if (name.startsWith("result-") && name.endsWith(".json")) {
+        unlinkSync(path.join(failedDetail, name));
+      }
+    }
+    const checked = cli([...flags], { root });
     assert.equal(checked.status, 0, checked.stdout + checked.stderr);
     assert.equal(JSON.parse(checked.stdout).revalidated_rows, 1);
   } finally {
