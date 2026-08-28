@@ -1,0 +1,288 @@
+{
+  "model": "claude-opus-5",
+  "agreement": 29,
+  "total": 40,
+  "scoring_usd": 2.3661600000000003,
+  "outcomes": [
+    {
+      "record_id": "pr1982-3827636772-matched",
+      "defect_id": 3827636772,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "The review flags the same line and the same problem: Branch is required for parsing but optional when emitting, so a branchless claim can never be backfilled."
+    },
+    {
+      "record_id": "pr1982-3827647420-matched",
+      "defect_id": 3827647420,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "The review flags that the post-write verification re-reads a fresh snapshot's claim metadata instead of the pre-write claim, so a concurrent trusted claim change causes a false verification failure — the same revalidate-the-claim-during-the-write-batch defect at that location."
+    },
+    {
+      "record_id": "pr1982-3827647420-unmatched",
+      "defect_id": 3827647420,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review only raises C1 control characters in hasControlCharacter (line 30) and inlining valueFor (line 167); it never mentions re-validating/re-checking the claim at write-batch time (line 269) or the TOCTOU-style staleness between planning and writing."
+    },
+    {
+      "record_id": "pr1982-3827655676-unmatched",
+      "defect_id": 3827655676,
+      "expected": "unmatched",
+      "actual": "matched",
+      "reasoning": "Review points at docs/notes/github-tooling-surfaces.md:105-112 and critiques the hand-written comment/free-form note instruction documented there as unworkable, overlapping the flagged doc location and quality concern."
+    },
+    {
+      "record_id": "pr1982-3827655684-unmatched",
+      "defect_id": 3827655684,
+      "expected": "unmatched",
+      "actual": "matched",
+      "reasoning": "Review flags a functional-correctness parsing bug in scripts/pr/issue-board-backfill.mjs — the claim-comment parser hard-requires the `Branch:` line and returns null (causing readSnapshot to throw) even though buildClaimComment legitimately omits it when branch is falsy; that is a minor, quick-fix correctness defect in the cited file, so treated as the same defect."
+    },
+    {
+      "record_id": "pr1982-3827663924-matched",
+      "defect_id": 3827663924,
+      "expected": "matched",
+      "actual": "unmatched",
+      "reasoning": "The review flags parseClaimComment rejecting comments that omit the `Branch:` line (detached HEAD / falsy branch), not the Handoff trailing-newline rejection described in the defect — same function/area but a different underlying cause."
+    },
+    {
+      "record_id": "pr1982-3827663924-unmatched",
+      "defect_id": 3827663924,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review flags a parser/generator mismatch in the same region (backfill.mjs:119 vs commands.mjs:74) but describes the problem as a claim comment lacking a `Branch:` line being unrecoverable with a misleading error — it never identifies the trailing-newline in the handoff text as the reason claims are rejected, so it names a different underlying cause."
+    },
+    {
+      "record_id": "pr1984-3828303385-matched",
+      "defect_id": 3828303385,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "The review explicitly flags line 26 of the same file for the unquoted colon-bearing label `label:sentry:fix-refused` breaking/misparsing the Search API query, and recommends quoting it — same defect."
+    },
+    {
+      "record_id": "pr1984-3828303385-unmatched",
+      "defect_id": 3828303385,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review flags the same line but for a different problem — hardcoded label literals bypassing shared constants — not that an unquoted colon-bearing label breaks the Sentry Search API query."
+    },
+    {
+      "record_id": "pr1984-3828313974-matched",
+      "defect_id": 3828313974,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "Review flags a concrete functional-correctness bug in sentry-autofix-run-record.mjs — the repo default parameter never fires because readFlag returns null, so the documented-optional flag is effectively required and yields a bad repo value; same file, same category/severity profile, line offset likely just the signature vs. use site."
+    },
+    {
+      "record_id": "pr1990-3829654081-matched",
+      "defect_id": 3829654081,
+      "expected": "matched",
+      "actual": "unmatched",
+      "reasoning": "The defect is a maintainability/structural concern about splitting the growing ready-state core module; the review instead reports a functional bug about CodeRabbit completion comments not being recognized at the current head, which is an unrelated problem in the same file."
+    },
+    {
+      "record_id": "pr1990-3829654081-unmatched",
+      "defect_id": 3829654081,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "Defect 1 is a maintainability request to split the growing ready-state core module; the review instead describes a functional gap in recognizing CodeRabbit's summary comment for stale-detection — same file, unrelated problem."
+    },
+    {
+      "record_id": "pr1990-3829659544-matched",
+      "defect_id": 3829659544,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "The review identifies that the example payload in docs/notes/pr-ready-state.md is missing the codeRabbitReviewSignal field (in gates and top level), pointing at the same doc/example-schema drift around line 369 region and proposing adding the field."
+    },
+    {
+      "record_id": "pr1990-3829659546-matched",
+      "defect_id": 3829659546,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "Review flags the ordered-workflow sequencing defect in pr-ready-state.md — step 10 closeout not requiring a fresh projection pair after the step-8 CodeRabbit request, so stale projections yield a false all-clear; this is a functional-correctness problem in the same step-8/step-10 region as line 408."
+    },
+    {
+      "record_id": "pr1990-3829659546-unmatched",
+      "defect_id": 3829659546,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review is only a bare list of file/line references (including docs/notes/pr-ready-state.md:399-402) with no description of any problem; naming the file without identifying the actual defect does not count as a match."
+    },
+    {
+      "record_id": "pr1990-3829659550-matched",
+      "defect_id": 3829659550,
+      "expected": "matched",
+      "actual": "unmatched",
+      "reasoning": "The review flags four things in/near this region — fail-open when `currentHeadOid` is falsy (anchored at 442), SHA case-sensitivity inconsistency (443), the closeout marker being accepted from any commenter (772), and a redundant double call of the predicate (777) — but none of these is presented as a functional-correctness bug at the 783 call site; the closest anchored items are characterized as an authorization gap and a pure efficiency/redundancy nit rather than the actual defect."
+    },
+    {
+      "record_id": "pr1990-3829659550-unmatched",
+      "defect_id": 3829659550,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review explicitly found no issues and only mentions the CodeRabbit classification helpers approvingly; it does not identify any functional correctness problem at pr-ready-state-core.mjs:783."
+    },
+    {
+      "record_id": "pr1990-3830394205-matched",
+      "defect_id": 3830394205,
+      "expected": "matched",
+      "actual": "unmatched",
+      "reasoning": "The review targets cloud-watch-loop.md but describes a false-negative problem (the edited-in-place CodeRabbit marker comment should also count as review-complete), not the missing authentication/author-trust check on closeout markers; mentioning the bot login as part of its proposed matching rule does not name the spoofable-marker defect."
+    },
+    {
+      "record_id": "pr1990-3830394205-unmatched",
+      "defect_id": 3830394205,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review mentions cloud-watch-loop.md:48-50 but only about propagating a never-true classification rule for reading a signal from get_reviews; it says nothing about authenticating or verifying closeout markers in the cloud loop."
+    },
+    {
+      "record_id": "pr1995-3829986398-unmatched",
+      "defect_id": 3829986398,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review is a verification table reporting all checks as clean/passing; it identifies no defect at scripts/agent-quality-gate.test.sh:28 or any stability/availability problem."
+    },
+    {
+      "record_id": "pr1995-3829986403-matched",
+      "defect_id": 3829986403,
+      "expected": "matched",
+      "actual": "unmatched",
+      "reasoning": "The review's only finding concerns lines 514-516 — a hardening suggestion that the marker-verifier should count dispatch calls — which does not describe an actual functional defect at line 525; no other issue in that region is identified."
+    },
+    {
+      "record_id": "pr1995-3829986403-unmatched",
+      "defect_id": 3829986403,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "Defect is at test.sh:525; the review's only finding targets test.sh:601, describing an env-guard condition (AGENT_QUALITY_GATE_LOCK_HELD/GITHUB_ACTIONS not set on the --no-lock path). Nothing in the review addresses the code at line 525, so there is no evidence it names the same underlying problem."
+    },
+    {
+      "record_id": "pr1995-3830003055-matched",
+      "defect_id": 3830003055,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "The review targets the same guard block in agent-quality-gate.test.sh, arguing its case split over spawned commands is unsound because --no-lock/AGENT_QUALITY_GATE_LOCK=0 runs return before the export and so dispatch the self-test without the marker — i.e. the partition tolerates a dispatch with no marker, matching 'partition allows missing dispatch'."
+    },
+    {
+      "record_id": "pr1995-3830003055-unmatched",
+      "defect_id": 3830003055,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review only asserts the partition checker works (claims an injected 'registry/definition mismatch' fault was caught); it never identifies that the partition check permits a family with a missing dispatch entry."
+    },
+    {
+      "record_id": "pr1995-3830042123-matched",
+      "defect_id": 3830042123,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "The review's finding at agent-quality-gate.test.sh:600-603 describes the same defect: focused test selection (GATE_TEST_FOCUS) is not rejected when the gate runs lock-free (--no-lock / AGENT_QUALITY_GATE_LOCK=0), so the guard keyed on lock ownership misses it."
+    },
+    {
+      "record_id": "pr1995-3830042128-unmatched",
+      "defect_id": 3830042128,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "Defect 1 concerns failing to register a new self-test path pin at line 492; the review instead discusses GATE_TEST_FOCUS not being cleared when the lock is skipped (--no-lock), an unrelated problem in the same file."
+    },
+    {
+      "record_id": "pr1995-3830695396-matched",
+      "defect_id": 3830695396,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "The review flags the doc at docs/notes/agent-quality-gate-mechanics.md (line ~1143) for overstating the refusal condition — saying a 'set' GATE_TEST_FOCUS exits 2 when the code only refuses on non-empty — a doc-accuracy/maintainability nit in the same file and region as the defect."
+    },
+    {
+      "record_id": "pr1995-3830695396-unmatched",
+      "defect_id": 3830695396,
+      "expected": "unmatched",
+      "actual": "matched",
+      "reasoning": "Review's third bullet flags docs/notes/agent-quality-gate-mechanics.md (lines 1143-1146, same section) as stating an incorrect claim that the focus command is refused when AGENT_QUALITY_GATE_LOCK_HELD is set, and says the prose must be fixed along with the code — a doc-accuracy/maintainability issue in the same file and passage."
+    },
+    {
+      "record_id": "pr1999-3830366243-matched",
+      "defect_id": 3830366243,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "The review flags the same file/line and says the canonical Peg monitoring runbook doc is now stale relative to the new icon-only title, matching the defect about keeping the Peg runbook aligned with the new title."
+    },
+    {
+      "record_id": "pr1999-3830366247-unmatched",
+      "defect_id": 3830366247,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review's only finding concerns misleading copy from an empty `source` label producing 'Price source' text; it says nothing about recovery events that resume in a Pending state being excluded from the history/events output."
+    },
+    {
+      "record_id": "pr1999-3830366547-matched",
+      "defect_id": 3830366547,
+      "expected": "matched",
+      "actual": "unmatched",
+      "reasoning": "The review only mentions the area (new \"Error\"-state handling in peg-alert-events.ts) and announces \"One real bug found:\" without ever stating the problem — no description of the breach remaining active after error recovery, so it does not identify the defect."
+    },
+    {
+      "record_id": "pr1999-3830366556-unmatched",
+      "defect_id": 3830366556,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "Review's cycle-bookkeeping bullet is about `error-recovered-alerting` (lines 318-319) failing to OPEN an `:alert` cycle after closing the `:error` cycle, which it deems cosmetic; it never identifies the pending-recovery path at line 116 leaving an error cycle orphaned/unclosed."
+    },
+    {
+      "record_id": "pr1999-3830371307-matched",
+      "defect_id": 3830371307,
+      "expected": "matched",
+      "actual": "unmatched",
+      "reasoning": "The review only states that alert-rules-lint.test.mjs passes (50 tests) and points at a tftest assertion/runbook being out of sync; it never identifies a correctness defect at that test file's line 1289."
+    },
+    {
+      "record_id": "pr1999-3830371315-matched",
+      "defect_id": 3830371315,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "Review flags route.test.ts:818-819 mocks reusing a single consumable Response across four concurrent fetches, matching the defect location and functional-correctness issue."
+    },
+    {
+      "record_id": "pr1999-3830371325-matched",
+      "defect_id": 3830371325,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "Defect gives only file/line and a 'minor functional correctness' label; the review's sole finding is a concrete functional-correctness bug in that same file whose second half (resolution path losing duration and measurement) plausibly covers the ~line 352 region, so treated as the same defect."
+    },
+    {
+      "record_id": "pr1999-3830371325-unmatched",
+      "defect_id": 3830371325,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "Defect is at peg-alert-events.ts:352 with no detail; the review's only finding in that file is at line 251 about error severity not being escalated on rule evaluation failure — a different location and no evidence it describes the same underlying problem."
+    },
+    {
+      "record_id": "pr1999-3830416461-unmatched",
+      "defect_id": 3830416461,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review only raises the Alerting→Error→Normal cycle-key issue leaving a stale raised alert in the leftover drain; it never identifies mislabeled/source-less evaluation-failure messages needing rule-based labeling at line 230."
+    },
+    {
+      "record_id": "pr2001-3830423746-matched",
+      "defect_id": 3830423746,
+      "expected": "matched",
+      "actual": "unmatched",
+      "reasoning": "The review touches daily-series.ts:119 but only flags duplication of the isZeroExposureStethSnapshot short-circuit across two functions as an architecture/DRY concern; it never identifies that returning 0 there fabricates a negative revenue spike on a genuine full-withdrawal day."
+    },
+    {
+      "record_id": "pr2001-3830423746-unmatched",
+      "defect_id": 3830423746,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review only discusses isZeroWei crashing on non-string values (TypeError at value.trim()); it never mentions the unconditional 0 return at line 119 fabricating a negative revenue spike on a full-withdrawal day."
+    },
+    {
+      "record_id": "pr2001-3830513980-unmatched",
+      "defect_id": 3830513980,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review only discusses isZeroWei crashing on non-string values (type-safety of malformed fields); it never mentions failing to subtract prior yield when a zero row empties a wallet at line 190."
+    }
+  ]
+}

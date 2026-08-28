@@ -1,0 +1,49 @@
+{
+  "cell_id": "pr-2001-pipeline-draw1",
+  "pr": 2001,
+  "condition": "pipeline",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "Pre-existing, adjacent, not caused by this change — `ui-dashboard/src/lib/canonical-revenue/daily-series.ts:42-58`: `numericUsdWei` and `numericTokenWei` still call `BigInt(value)` bare — so a blank `totalEarnedYieldAmount` on a priced wallet returns `0` rather than `null`, making that day's cumulative total read $0, the delta a large negative, resetting `previousReserveTotalsBySource` to 0 and re-counting the full cumulative as one day's yield — silently wrong numbers instead of the partial banner",
+    "Test discrimination: the `\"not-wei\"` cases pass either way and add nothing",
+    "`AGENTS.md:135` requires browser verification for dashboard UI changes (`/verify-ui`, `docs/notes/dashboard-verification.md`); this change alters what the `/revenue` page renders, so that gate applies and is unmet"
+  ],
+  "matched_ids": [],
+  "judge_reasoning": {
+    "3830423746": "The review explicitly walked the 'wallet fully exited' case and the previousReserveTotalsBySource baseline and cleared both as safe ('0 is the right answer', '?? not ||'); its only negative-spike discussion is a different, pre-existing blank-string BigInt parsing issue in numericUsdWei/numericTokenWei, not the unconditional 0 return on a real full-withdrawal day.",
+    "3830513980": "The review touches realized/unrealized/transferredOut fields only to argue the zero-check is safe under the indexer invariant; it never identifies the tracked-wallet-to-tracked-wallet transfer case where the sender's zero row should subtract prior yield from the baseline."
+  },
+  "novel": {
+    "claims": 3,
+    "novelReal": 1,
+    "novelWrong": 0,
+    "novelVague": 2,
+    "restatedKnown": 0,
+    "alreadyMatched": 0,
+    "verdicts": {
+      "1": {
+        "class": "real",
+        "why": "Verified daily-series.ts:42-58 still uses bare `BigInt(value)` and node confirms `BigInt(\"\")===0n`, so a blank/whitespace `totalEarnedYieldAmount` on a priced wallet flows through the new `stethAmountUsd` to 0 instead of null, producing the described negative delta and reset of `previousReserveTotalsBySource`; distinct from the two known findings (different trigger/lines) though unchanged from base."
+      },
+      "2": {
+        "class": "vague",
+        "why": "Confirmed the four `\"not-wei\"` cases use `reserveYield()` with `holdings: []`, so `usdPerToken` is undefined and the result is null/partial under both base and new code — accurate but a test-redundancy preference note that identifies no defect (unlike the blank/whitespace/0x0 cases, which do discriminate the regex guard)."
+      },
+      "3": {
+        "class": "vague",
+        "why": "AGENTS.md:135 and ui-dashboard/AGENTS.md:65 do mandate browser verification for UI changes, but the diff touches only lib logic and tests; whether the author ran /verify-ui is a process assertion not verifiable in the repo and names no code defect."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 1089,
+  "usd": 2.3910545,
+  "scoring_usd": 0.9672340000000001
+}

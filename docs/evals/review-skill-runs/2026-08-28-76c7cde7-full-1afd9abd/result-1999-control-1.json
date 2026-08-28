@@ -1,0 +1,78 @@
+{
+  "cell_id": "pr-1999-control-draw1",
+  "pr": 1999,
+  "condition": "control",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": null,
+  "claims": [
+    "`terraform test` fails — the HCL test wasn't updated with the template: `alerts/rules/peg-rule-definitions.tftest.hcl:68-69` still asserts the Slack title template contains `$alert.Annotations.summary` and `$alert.Annotations.resolved_summary`, but the new emoji-only title (`alerts/rules/peg-message-templates.tf:13-16`) has neither",
+    "A breach that starts out of an `Error` state loses its raise event and reports the wrong magnitude — `peg-alert-events.ts:109-110` and `:320-321`: `Error → Alerting` is now classified `error-recovered-alerting` and keyed into the `:error` cycle, so it no longer opens the `:alert` cycle",
+    "The later `Alerting → Normal` then finds no open raise and falls through to the `unpairedCleared` fallback at `:346` — the path meant for raises that happened before the query window — which uses the resolving line as evidence (`:262`), so the alert history reports the breach as 12 bps and drops both the onset entry and the duration (a regression vs base)",
+    "The branch's own test only covers `Alerting → Error → Alerting`, where an alert cycle is already open, which is why it passes (finding 2 is behavioral and not covered by any existing test)",
+    "The new `Error` query is a single point of failure for the whole panel — `ui-dashboard/src/app/api/peg-monitoring/alerts/route.ts:63-83`: `fetchJson` now issues a second request and `Promise.all`s it, so a failure on the supplementary `current=Error` / `previous=Error` query rejects and `GET`'s catch returns 502, blanking Recent Alerts even when the primary Alerting/Normal history came back fine",
+    "Upstream request count per poll goes 2 → 4, each with its own 8s timeout and 4 MB cap",
+    "Minor: the new lint slice is declaration-order dependent — `scripts/alerts/alert-rules-lint.test.mjs:1215-1220`: `slackTitleTemplate` is a `slice` between two `indexOf` results, so if the two resources are ever reordered in `peg-message-templates.tf`, start > end yields `\"\"` and both `!slackTitleTemplate.includes(...)` assertions pass vacuously"
+  ],
+  "matched_ids": [
+    3830366234,
+    3830371307,
+    3830371325
+  ],
+  "judge_reasoning": {
+    "3830366234": "Review finding 1 names the stale peg-rule-definitions.tftest.hcl:68-69 assertions requiring summary/resolved_summary against the new icon-only title.",
+    "3830366243": "No mention of docs/notes/peg-monitoring.md or any runbook/doc alignment.",
+    "3830366247": "Review never discusses Pending as a recovery target or the Error-query's previous/current parameters omitting Pending.",
+    "3830366547": "Review's finding 2 is the inverse direction (Error → Alerting fails to open the alert cycle, losing the raise); it never says an Alerting → Error → Normal sequence leaves the raise open so a stale active breach is displayed.",
+    "3830366556": "No mention of Error → Pending → Alerting or orphaned/stuck 'monitoring failed' rows.",
+    "3830371307": "Review finding 4 flags the same lint-test weakness: slackTitleTemplate built from unvalidated indexOf/slice can yield \"\" so the includes assertions pass vacuously; suggests scoping to the single resource block.",
+    "3830371325": "Defect at the same pairing site, investigated via the 'error-recovered-alerting' classification; review finding 2 identifies exactly that classification keying Error → Alerting into the :error cycle so the alert cycle never opens and the clear falls to unpairedCleared."
+  },
+  "novel": {
+    "claims": 7,
+    "novelReal": 2,
+    "novelWrong": 0,
+    "novelVague": 4,
+    "restatedKnown": 1,
+    "alreadyMatched": 3,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "peg-rule-definitions.tftest.hcl:68-69 does still assert the emoji-only peg_slack_title contains $alert.Annotations.summary/resolved_summary, but this is the known 'Update the stale Terraform title assertion' item at peg-message-templates.tf:14"
+      },
+      "2": {
+        "class": "real",
+        "why": "peg-alert-events.ts:109-110 maps Error→Alerting to error-recovered-alerting, and :318-321 make it a non-opening transition keyed to `identity:error`, so unlike base (where current==='Alerting' was always 'raised') a breach starting from Error never opens the :alert cycle"
+      },
+      "3": {
+        "class": "real",
+        "why": "the later Alerting→Normal keys to `identity:alert`, finds no open raise and no observedRaised, so :346 stores it in unpairedCleared and :354-355 phrase it with no raise — evidence falls back to the resolving line (:262) and the `lasted …` detail (:270) plus the onset event are dropped"
+      },
+      "4": {
+        "class": "vague",
+        "why": "coverage commentary on claim 2 with a false premise — the new 'Alerting to Error to Alerting' test (route.test.ts) opens only an :error cycle (Alerting→Error is classified 'error'), no alert cycle; it names no defect of its own"
+      },
+      "5": {
+        "class": "vague",
+        "why": "route.ts:63-83 does Promise.all a second Error-state request and GET's catch returns 502, but the route already fails closed on any upstream failure by design (base's two queries were equally fatal); a robustness preference, not a malfunction"
+      },
+      "6": {
+        "class": "vague",
+        "why": "factually true (4 fetches per poll, each with AbortSignal.timeout(8_000) at :74 and the 4 MB cap at :21/:80) but states no concrete defect"
+      },
+      "7": {
+        "class": "vague",
+        "why": "alert-rules-lint.test.mjs:1215-1220 does slice between the two indexOf results, but peg_slack_title precedes peg_slack_message in peg-message-templates.tf so the slice is non-empty today; a hypothetical-reorder fragility note, no current defect"
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 357,
+  "usd": 2.268374,
+  "scoring_usd": 1.0844555
+}
