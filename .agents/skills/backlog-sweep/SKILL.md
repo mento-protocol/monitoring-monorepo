@@ -420,8 +420,13 @@ Then spawn one worker subagent per issue. Give each a brief containing:
 - **The gate**, unsandboxed, backgrounded, and polled inside the turn:
 
   ```bash
+  pnpm agent:quality-gate                                # inspect first
   bash scripts/agent-quality-gate.sh --run --lock-wait 3600
   ```
+
+  Inspect before running, as the operating card's step 3 requires: the bare
+  form prints the mapped commands **and the checklists to apply**, and the
+  checklists are the half that `--run` never surfaces.
 
   Invoke the script directly. The `pnpm agent:quality-gate -- --run` spelling
   mangles the arguments on the way through the package manager. Every worker
