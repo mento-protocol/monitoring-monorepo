@@ -124,9 +124,11 @@ wrapper says so in its own header rather than implying otherwise:
   window begins when the GraphQL child selects its credential and ends when the
   REST child selects its credential. It includes the in-flight final query and
   the consent-ledger write. A `gh auth switch` in that window can make the two
-  children use different keyring or `hosts.yml` credentials. The merge still
-  targets the confirmed repository, pull request, base, and head, but the local
-  ledger can name the wrong GitHub account. This does not apply when `GH_TOKEN`
+  children use different keyring or `hosts.yml` credentials. The REST request
+  still names the confirmed repository and pull request, and `sha` binds the
+  confirmed head. It cannot bind the base, so a retarget after the final read
+  can still land on another branch. The local ledger can name the wrong GitHub
+  account. This does not apply when `GH_TOKEN`
   fixes the credential in the environment. The irreducible window is accepted
   because closing it would require the trust-root wrapper to capture a live
   token and inject it into a child environment, which creates a larger

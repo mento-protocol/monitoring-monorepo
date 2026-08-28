@@ -398,9 +398,11 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    the final GraphQL child selects its credential and ends when the REST child
    selects its credential. It includes the in-flight final query and the
    consent-ledger write. A credential switch in this window can still
-   misattribute the local consent record; the merge target remains bound. The
-   approval rule above stays the binding control, and the durable boundary
-   belongs on GitHub's side of the wire.
+   misattribute the local consent record. The REST request names the confirmed
+   repository and pull request and pins the approved head with `sha`. It cannot
+   pin the base, so a retarget after the final read can still land on another
+   branch. The approval rule above stays the binding control, and the durable
+   boundary belongs on GitHub's side of the wire.
    [ADR 0075](../adr/0075-pr-merge.md) owns the ordered gates,
    the alternatives, and every residual, including what the deny does not
    cover. The Dependabot auto-merge workflow runs in CI, not an agent session,
