@@ -30,13 +30,13 @@ import {
   PIPELINE_DRAWS,
   scorableTotals,
 } from "./review-eval-fixtures.mjs";
-import { freshness } from "./review-eval-ledger.mjs";
+import { baselinePreflightProblems, freshness } from "./review-eval-ledger.mjs";
 import {
   buildVsBaseline,
   conditionScope,
   resolveBaseline,
 } from "./review-eval-result-shape.mjs";
-import { verdict } from "./review-eval-report.mjs";
+import { baselineEligibility, verdict } from "./review-eval-report.mjs";
 import {
   aggregateDraws,
   classifyNovel,
@@ -95,6 +95,18 @@ function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+/** The exact explicit baseline a plan authorizes scoring against. */
+export function baselinePlanIdentity(row) {
+  if (!row) return null;
+  return {
+    executed_at: row.executed_at,
+    contract_digest: row.contract_digest,
+    comparability_key: row.comparability_key,
+    detail_dir: row.detail_dir,
+    row_digest: sha256(JSON.stringify(row)),
+  };
+}
+
 function readJson(file) {
   try {
     return JSON.parse(readFileSync(file, "utf8"));
@@ -135,9 +147,16 @@ function walkFiles(dir, base = dir, found = []) {
 export function skillDigest(dir) {
   const root = expandHome(dir);
   const hash = createHash("sha256");
+  const updateFramed = (bytes) => {
+    const value = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
+    const length = Buffer.alloc(8);
+    length.writeBigUInt64BE(BigInt(value.length));
+    hash.update(length);
+    hash.update(value);
+  };
   for (const relative of walkFiles(root).sort()) {
-    hash.update(relative);
-    hash.update(readFileSync(path.join(root, relative)));
+    updateFramed(relative);
+    updateFramed(readFileSync(path.join(root, relative)));
   }
   return hash.digest("hex");
 }
@@ -370,6 +389,7 @@ export function buildPlan({
   skillRef = null,
   runsDir = DEFAULT_RUNS_DIR,
   ledgerRows = [],
+  baselineRow = null,
   now = new Date(),
   env = process.env,
   write = true,
@@ -424,6 +444,8 @@ export function buildPlan({
     comparability_key: key,
     judge: { ...contract.judge },
     detail_dir: detailDir,
+    baseline_selection: baselineRow === null ? "automatic" : "explicit",
+    baseline: baselinePlanIdentity(baselineRow),
     // The directory of the previous execution under this name, whose cells this
     // one may seed from, or null when this is the first. Never the directory
     // this run writes to: a recorded row's evidence is not overwritten.
@@ -551,11 +573,15 @@ export function leakSignals({
  * under one provenance. `finder_argv_digest` is the command the pipeline
  * condition spawns, and `orchestrator_digest` is the script that spawns it with
  * its tools, turn limit and skill staging, so both move a recorded number the
- * same way.
+ * same way. `skill_ref` and `dirty` preserve whether the execution measured the
+ * installed skill or an explicit candidate. That status controls freshness and
+ * automatic baseline eligibility, so the scored evidence must retain it.
  */
 export function cellFingerprint({ plan }) {
   return {
     skill_digest: plan?.inputs?.skill_digest ?? null,
+    skill_ref: plan?.inputs?.skill_ref ?? null,
+    dirty: plan?.inputs?.dirty === true,
     kind: plan?.kind ?? null,
     contract_digest: plan?.contract_digest ?? null,
     claude_cli: plan?.inputs?.claude_cli ?? null,
@@ -586,6 +612,15 @@ export function cellReuseDecision({ plan, resultPath, result = null }) {
   const found = stored?.fingerprint;
   if (!found || typeof found !== "object") {
     return { reuse: false, reason: "the cached cell carries no fingerprint" };
+  }
+  const unexpected = Object.keys(found).filter(
+    (field) => !Object.hasOwn(expected, field),
+  );
+  if (unexpected.length > 0) {
+    return {
+      reuse: false,
+      reason: `the cached cell fingerprint carries unexpected ${unexpected.join(", ")}`,
+    };
   }
   const differing = Object.keys(expected).filter(
     (field) => found[field] !== expected[field],
@@ -909,8 +944,10 @@ export function resetFixture({
 async function scoreOneCell({
   cell,
   cellResult,
+  fingerprint,
   contract,
   repoRoot,
+  truth,
   exec: baseExec,
   runGit = defaultRunGit,
 }) {
@@ -921,7 +958,6 @@ async function scoreOneCell({
   const cellCost = { usd: 0 };
   const exec = meterExec(baseExec, cellCost);
   const fixture = fixtureForPr(contract, cell.pr);
-  const truth = readJson(path.join(repoRoot, fixture.truth_file));
   const transcript = cellResult.output;
   // The judge model is the one the comparability key records. Reading a
   // default here would let a judge retirement move the key while scoring kept
@@ -978,10 +1014,11 @@ async function scoreOneCell({
     truth,
     pr: cell.pr,
     excludeLogins,
-    forbiddenShas: forbiddenShasForFixture({ fixture, repoRoot }),
+    forbiddenShas: forbiddenShasForFixture({ fixture, repoRoot, truth }),
   });
   return {
     cell_id: cell.cell_id,
+    fingerprint,
     pr: cell.pr,
     condition: cell.condition,
     draw: cell.draw,
@@ -1117,6 +1154,86 @@ export async function scorePlan({
   now = new Date(),
   write = true,
 }) {
+  // Refuse edits to the branch-owned plan before calibration or judge calls
+  // spend quota. Later evidence validation applies the same frozen matrix.
+  if (!Array.isArray(plan.cells)) {
+    throw new Error("plan carries no cells array");
+  }
+  if (plan.contract_digest !== contractDigest) {
+    throw new Error("plan contract digest does not match the scoring contract");
+  }
+  if (!["full", "canary"].includes(plan.kind)) {
+    throw new Error(
+      `plan has no frozen ${String(plan.kind ?? "unknown")} matrix to score`,
+    );
+  }
+  const expectedCells = planCells({ contract, kind: plan.kind });
+  if (JSON.stringify(plan.cells) !== JSON.stringify(expectedCells)) {
+    throw new Error(`plan cells do not match the frozen ${plan.kind} matrix`);
+  }
+  const baselineIsExplicit = baselineRow !== null;
+  const baselineSelection = baselineIsExplicit ? "explicit" : "automatic";
+  if (plan.baseline_selection !== baselineSelection) {
+    throw new Error(
+      `plan baseline_selection is ${String(plan.baseline_selection)}; this score command is ${baselineSelection}`,
+    );
+  }
+  const plannedBaseline = plan.baseline ?? null;
+  const scoreBaseline = baselinePlanIdentity(baselineRow);
+  if (JSON.stringify(plannedBaseline) !== JSON.stringify(scoreBaseline)) {
+    throw new Error(
+      `plan baseline ${String(plannedBaseline?.executed_at ?? "none")} does not match score baseline ${String(scoreBaseline?.executed_at ?? "none")}`,
+    );
+  }
+  if (baselineIsExplicit) {
+    const eligibility = baselineEligibility(baselineRow);
+    const baselineProblems = baselinePreflightProblems({
+      row: baselineRow,
+      contract,
+      contractDigest,
+      planComparabilityKey: plan.comparability_key,
+      candidateExecutedAt: plan.planned_at,
+    });
+    if (!eligibility.usable) baselineProblems.unshift(eligibility.reason);
+    if (baselineProblems.length > 0) {
+      throw new Error(
+        `explicit baseline is not eligible for this plan:\n${baselineProblems.join("\n")}`,
+      );
+    }
+  }
+  const completedCellResults = new Map();
+  const fingerprint = cellFingerprint({ plan });
+  const missing = [];
+  for (const cell of plan.cells) {
+    const cellResult = readCellResult(planDir, cell);
+    if (!cellResult) {
+      missing.push(cell.cell_id);
+      continue;
+    }
+    const reuse = cellReuseDecision({
+      plan,
+      resultPath: cellResultPath(planDir, cell),
+      result: cellResult,
+    });
+    if (!reuse.reuse) {
+      throw new Error(`cell ${cell.cell_id} cannot be scored: ${reuse.reason}`);
+    }
+    completedCellResults.set(cell.cell_id, cellResult);
+  }
+  if (completedCellResults.size === 0) {
+    throw new Error(
+      `no completed cell results under ${planDir}; run the orchestrator first`,
+    );
+  }
+  // Freeze every truth object before the first model call. A candidate run uses
+  // the operator's live checkout, and calibration can take long enough for an
+  // edit after the CLI's digest check to otherwise change later cell scoring.
+  const truthByPr = new Map(
+    [...new Set(plan.cells.map((cell) => cell.pr))].map((pr) => {
+      const fixture = fixtureForPr(contract, pr);
+      return [pr, readJson(path.join(repoRoot, fixture.truth_file))];
+    }),
+  );
   const scoringCost = { usd: 0 };
   const metered = meterExec(exec, scoringCost);
   const calibrationCost = { usd: 0 };
@@ -1138,6 +1255,8 @@ export async function scorePlan({
           model: contract.judge.model,
           agreement: calibration.agreement,
           total: calibration.total,
+          fingerprint,
+          completed_cell_ids: [...completedCellResults.keys()],
           // The replay's share of `scoring_usd`. With the per-cell shares it
           // makes the row's scoring cost re-derivable from the detail.
           scoring_usd: calibrationCost.usd,
@@ -1149,19 +1268,17 @@ export async function scorePlan({
     );
   }
   const scored = new Map();
-  const missing = [];
   const leaked = [];
   for (const cell of plan.cells) {
-    const cellResult = readCellResult(planDir, cell);
-    if (!cellResult) {
-      missing.push(cell.cell_id);
-      continue;
-    }
+    const cellResult = completedCellResults.get(cell.cell_id);
+    if (!cellResult) continue;
     const record = await scoreOneCell({
       cell,
       cellResult,
+      fingerprint,
       contract,
       repoRoot,
+      truth: truthByPr.get(cell.pr),
       exec: metered,
       runGit,
     });
@@ -1177,12 +1294,6 @@ export async function scorePlan({
       );
     }
   }
-  if (scored.size === 0) {
-    throw new Error(
-      `no completed cell results under ${planDir}; run the orchestrator first`,
-    );
-  }
-
   const conditions = {};
   for (const name of ["pipeline", "replay", "control"]) {
     const folded = foldCondition({
@@ -1224,9 +1335,22 @@ export async function scorePlan({
     detail_dir: plan.detail_dir,
     notes: notes.join(" | "),
   };
-  const baseline = baselineRow ?? resolveBaseline({ rows: ledgerRows, row });
-  row.vs_baseline = buildVsBaseline({ row, baselineRow: baseline });
-  const decision = verdict({ contract, row, baselineRow: baseline });
+  // Automatic scoring creates the row before it appends it. Resolve it as the
+  // next ledger entry so clock skew cannot replace append-order semantics with
+  // the timestamp fallback reserved for external report files.
+  const baseline =
+    baselineRow ?? resolveBaseline({ rows: [...ledgerRows, row], row });
+  row.vs_baseline = buildVsBaseline({
+    row,
+    baselineRow: baseline,
+    selection: baselineSelection,
+  });
+  const decision = verdict({
+    contract,
+    row,
+    baselineRow: baseline,
+    baselineIsExplicit,
+  });
   row.verdict = decision.verdict;
   if (leaked.length && ["GREEN", "PROMOTE"].includes(row.verdict)) {
     row.verdict = "AMBER";

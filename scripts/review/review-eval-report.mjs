@@ -213,8 +213,8 @@ function runtimeDrift(row, baselineRow) {
     .join(", ")}; a flip may come from the runtime rather than the skill`;
 }
 
-function comparable(row, baselineRow) {
-  if (!baselineRow) return { usable: false, reason: null };
+/** Whether one row has the intrinsic standing required of a baseline. */
+export function baselineEligibility(row) {
   // The same standing `resolveBaseline` requires of an anchor. A canary is a
   // floor test on a two-cell subset and a partial or failed run is a matrix
   // with cells that never ran, so neither carries the per-defect bits a flip
@@ -222,10 +222,17 @@ function comparable(row, baselineRow) {
   // the chance to find as gains, and produce a RED or PROMOTE verdict from
   // non-ranking evidence. `resolveBaseline` never selects such a row; this
   // refuses one named explicitly with `--against`.
-  if (baselineRow.kind !== "full" || baselineRow.status !== "complete") {
+  if (row?.kind !== "full" || row?.status !== "complete") {
     return {
       usable: false,
-      reason: `baseline is a ${baselineRow.kind} row with status ${baselineRow.status}; comparison refused (a baseline must be a complete full run)`,
+      reason: `baseline is a ${row?.kind} row with status ${row?.status}; comparison refused (a baseline must be a complete full run)`,
+    };
+  }
+  if (!installedSkillRun(row)) {
+    return {
+      usable: false,
+      reason:
+        "baseline is not an installed-skill run; comparison refused (a candidate cannot become the denominator)",
     };
   }
   // The baseline supplies `baseHeadline`, every flip count derived from it and
@@ -233,10 +240,10 @@ function comparable(row, baselineRow) {
   // would rank a calibrated candidate on numbers the runbook calls unusable, so
   // it is refused as a baseline exactly the way `resolveBaseline` refuses to
   // anchor on one.
-  if (!judgeCalibrationPasses(baselineRow)) {
+  if (!judgeCalibrationPasses(row)) {
     return {
       usable: false,
-      reason: `baseline ${calibrationReason(baselineRow)}; comparison refused`,
+      reason: `baseline ${calibrationReason(row)}; comparison refused`,
     };
   }
   // A leaked baseline is refused for the same reason, and here it matters more
@@ -244,21 +251,40 @@ function comparable(row, baselineRow) {
   // flip count, so answer-key-contaminated bits would silently score every
   // clean run after them as a regression. `resolveBaseline` never selects such
   // a row; this refuses one named explicitly with `--against`.
-  if (leakSuspected(baselineRow)) {
+  if (leakSuspected(row)) {
     return {
       usable: false,
       reason:
         "baseline notes record a suspected leak; comparison refused (its bits are not trusted)",
     };
   }
-  // `resolveBaseline` only ever anchors on a row that precedes the candidate.
-  // A later row named with `--against` reverses the pairing: its bits become
+  const { condition } = headlineCondition(row);
+  if (
+    !isObject(condition) ||
+    !isObject(condition.per_defect) ||
+    Object.keys(condition.per_defect).length === 0
+  ) {
+    return {
+      usable: false,
+      reason:
+        "baseline carries no scored condition; comparison refused (there are no defect bits to pair)",
+    };
+  }
+  return { usable: true, reason: null };
+}
+
+function comparable(row, baselineRow, { baselineIsExplicit = true } = {}) {
+  if (!baselineRow) return { usable: false, reason: null };
+  const eligibility = baselineEligibility(baselineRow);
+  if (!eligibility.usable) return eligibility;
+  // `resolveBaseline` establishes precedence from append order. A baseline
+  // named outside that ledger context still needs a timestamp guard. A later
+  // row named with `--against` reverses the pairing: its bits become
   // the base, so the defects the candidate found and the later row did not are
   // counted as lost and the ones it gained as gains. The delta then reads
-  // backwards, and a regression can print PROMOTE. Instants are ISO-8601 UTC —
-  // `checkInstant` refuses any other form — so a string compare orders them,
-  // the same compare `resolveBaseline` uses.
-  if (!(baselineRow.executed_at < row.executed_at)) {
+  // backwards, and a regression can print PROMOTE. Instants are ISO-8601 UTC,
+  // so a string compare orders explicit rows without overriding append order.
+  if (baselineIsExplicit && !(baselineRow.executed_at < row.executed_at)) {
     return {
       usable: false,
       reason: `baseline executed_at ${baselineRow.executed_at} does not precede this row's ${row.executed_at}; comparison refused (a baseline must be the earlier run)`,
@@ -339,7 +365,12 @@ function canaryVerdict({ contract, row }) {
  * run whose numbers are untrusted or incomplete may not be escalated on them
  * either.
  */
-export function verdict({ contract, row, baselineRow = null }) {
+export function verdict({
+  contract,
+  row,
+  baselineRow = null,
+  baselineIsExplicit = true,
+}) {
   if (!isObject(contract?.verdict_rules)) {
     throw new Error("contract is missing verdict_rules");
   }
@@ -362,7 +393,7 @@ export function verdict({ contract, row, baselineRow = null }) {
     return { verdict: "INCOMPLETE", reasons: ["row carries no condition"] };
   }
 
-  const pairing = comparable(row, baselineRow);
+  const pairing = comparable(row, baselineRow, { baselineIsExplicit });
   const baseline = pairing.usable ? baselineRow : null;
   if (pairing.reason) reasons.push(pairing.reason);
   if (!baselineRow) reasons.push("no baseline row; comparison skipped");
@@ -593,6 +624,7 @@ export function renderReport({
   contract,
   row,
   baselineRow = null,
+  baselineIsExplicit = true,
   truth = null,
   repoRoot = null,
 }) {
@@ -601,7 +633,12 @@ export function renderReport({
     : repoRoot
       ? loadTruthIndex({ contract, repoRoot })
       : new Map();
-  const decision = verdict({ contract, row, baselineRow });
+  const decision = verdict({
+    contract,
+    row,
+    baselineRow,
+    baselineIsExplicit,
+  });
   // The row is the artifact of record, so the report states the verdict the
   // row carries. Recomputing it is a check, never a silent substitution: a
   // disagreement is printed instead of hidden.
@@ -611,7 +648,7 @@ export function renderReport({
       ? null
       : `stored verdict ${stored} disagrees with the verdict recomputed here (${decision.verdict}); revalidate the row before ranking on it`;
   const { name, condition } = headlineCondition(row);
-  const pairing = comparable(row, baselineRow);
+  const pairing = comparable(row, baselineRow, { baselineIsExplicit });
   const baseHeadline =
     pairing.usable && baselineRow ? baselineRow.conditions?.[name] : null;
   const flips = baseHeadline

@@ -20,7 +20,8 @@
 # Every cell writes its own output directory and is resumable. A failed cell is
 # never cached: a session-limit error returns in seconds and, cached, would
 # permanently score as a zero-recall review. A cached cell is reused only when
-# its fingerprint — skill digest, kind, contract digest — matches this run.
+# its fingerprint — treatment identity, kind, contract, runtime, finder and
+# orchestrator — matches this run.
 # A run that ends before it scores keeps those cells so the retry reuses them;
 # they never reach the PR.
 #
@@ -41,11 +42,11 @@
 #               [--repo PATH] [--cache-dir DIR] [--deadline SECONDS]
 #               [--against REF]
 #
-# --against names the baseline row this run is scored, validated and reported
-# against: a row file path or an executed_at prefix. The candidate procedure
-# needs it — a --skill-ref run must be compared against the installed run from
-# the same sitting, not against the ledger's stored anchor, or the comparison
-# carries whatever the model did between the anchor and today.
+# --against names the baseline row this run is planned, scored, validated and
+# reported against: a row file path or an executed_at prefix. The candidate
+# procedure needs it — a --skill-ref run must be compared against the installed
+# run from the same sitting, not against the ledger's stored anchor, or the
+# comparison carries whatever the model did between the anchor and today.
 #
 # --deadline bounds the whole run, cells and scoring together. Three quarters of
 # it start cells and bound each finder and contestant process; the rest is
@@ -71,6 +72,7 @@ SPEC=""
 SPEC_TEMP=0
 SHIM=""
 SKILL_SNAPSHOT=""
+BASELINE_SNAPSHOT=""
 LOCK_DIRS=()
 RUN_DIR=""
 PLAN_JSON=""
@@ -190,6 +192,9 @@ cleanup() {
   if [[ -n $SKILL_SNAPSHOT ]]; then
     rm -rf "$SKILL_SNAPSHOT"
   fi
+  if [[ -n $BASELINE_SNAPSHOT ]]; then
+    rm -f "$BASELINE_SNAPSHOT"
+  fi
   local lock_dir
   for lock_dir in ${LOCK_DIRS[@]+"${LOCK_DIRS[@]}"}; do
     rm -rf "$lock_dir"
@@ -215,35 +220,114 @@ trap cleanup EXIT
 # A fixed order means two runs contending on both cannot each hold one and wait
 # — the loser fails immediately and the EXIT trap frees whatever it took.
 #
-# mkdir is the lock: it is atomic on every filesystem this runs on and needs no
-# flock, which macOS does not ship. The holder's pid goes inside so a lock left
-# behind by a SIGKILL can be told from a live run and reclaimed. The pid is
-# written before the directory is recorded in LOCK_DIRS — the holder must be
-# identifiable the instant the directory exists, or a second run arriving in
-# that window reads no pid and reclaims a live lock. The read side waits for it
-# for the same reason. `kill -0` on a recycled pid can keep a stale lock held;
-# that fails closed, and the message names the directory to remove.
+# A hard link publishes a prepared owner record as the lock. The record already
+# contains the holder's pid when the lock path becomes visible. This gives the
+# acquisition atomicity of mkdir without a window where a suspended owner has
+# created the lock but has not written its pid. The prepared record and lock
+# live under the same root, so the hard link never crosses a filesystem. A lock
+# left behind by SIGKILL can be told from a live run and reclaimed. `kill -0` on
+# a recycled pid can keep a stale lock held; that fails closed, and the message
+# names the file to remove.
 acquire_one_lock() {
-  local root="$1" what="$2" lock="$1/run.lock" holder="" waited=0
+  local root="$1" what="$2" lock="$1/run.lock" holder="" legacy_lock=0
+  local reclaim_root="$1/run.lock.reclaim" claim_file="" claim_holder=""
+  local claim_ticket="" owner_ticket="" claim_generation=-1
+  local candidate_generation=-1 entry=""
   mkdir -p "$root" || fail "the $what $root is not writable"
-  if ! mkdir "$lock" 2>/dev/null; then
-    while ((waited < 5)); do
-      waited=$((waited + 1))
+  owner_ticket="$(mktemp "$root/.run.lock.owner.XXXXXX")" ||
+    fail "could not prepare the run lock owner record under $root"
+  printf '%s\n' "$$" >"$owner_ticket"
+  if ! node -e \
+    'require("node:fs").linkSync(process.argv[1], process.argv[2])' \
+    "$owner_ticket" "$lock" 2>/dev/null; then
+    rm -f "$owner_ticket"
+    owner_ticket=""
+    if [[ -d $lock ]]; then
+      legacy_lock=1
       holder="$(cat "$lock/pid" 2>/dev/null || true)"
-      if [[ $holder =~ ^[0-9]+$ ]]; then
-        break
-      fi
-      sleep 0.2
-    done
+    else
+      holder="$(cat "$lock" 2>/dev/null || true)"
+    fi
+    [[ $holder =~ ^[0-9]+$ ]] ||
+      fail "cannot identify the run lock owner at $lock; refusing to reclaim shared run state"
     if [[ $holder =~ ^[0-9]+$ ]] && kill -0 "$holder" 2>/dev/null; then
       fail "another review eval (pid $holder) holds $lock; a run rewrites the shared fixtures and appends to the shared ledger, so wait for it to finish"
     fi
+    # Reclaimers elect one owner through immutable, monotonically numbered
+    # tickets. `ln` publishes the prepared pid file atomically. A killed owner
+    # leaves its generation behind; the next contender creates the next one.
+    # Tickets stay immutable during the election. The winner removes the claim
+    # root only after it publishes the replacement lock owner.
+    mkdir "$reclaim_root" 2>/dev/null || true
+    [[ -d $reclaim_root ]] ||
+      fail "could not create the stale-lock claim root at $reclaim_root"
+    for entry in "$reclaim_root"/*; do
+      [[ -f $entry ]] || continue
+      candidate_generation="${entry##*/}"
+      [[ $candidate_generation =~ ^[0-9]+$ ]] || continue
+      if ((candidate_generation > claim_generation)); then
+        claim_generation=$candidate_generation
+      fi
+    done
+    if ((claim_generation >= 0)); then
+      claim_file="$reclaim_root/$claim_generation"
+      claim_holder="$(cat "$claim_file" 2>/dev/null || true)"
+      [[ $claim_holder =~ ^[0-9]+$ ]] ||
+        fail "cannot identify the stale-lock reclaimer in $claim_file; refusing to reclaim shared run state"
+      if [[ $claim_holder =~ ^[0-9]+$ ]] &&
+        kill -0 "$claim_holder" 2>/dev/null; then
+        fail "another review eval (pid $claim_holder) is reclaiming the stale lock at $lock; retry after it finishes"
+      fi
+    fi
+    claim_generation=$((claim_generation + 1))
+    claim_file="$reclaim_root/$claim_generation"
+    claim_ticket="$(mktemp "$reclaim_root/.ticket.XXXXXX")" ||
+      fail "could not prepare a stale-lock claim at $reclaim_root"
+    printf '%s\n' "$$" >"$claim_ticket"
+    if ! node -e \
+      'require("node:fs").linkSync(process.argv[1], process.argv[2])' \
+      "$claim_ticket" "$claim_file" 2>/dev/null; then
+      rm -f "$claim_ticket"
+      fail "another review eval claimed the stale lock at $lock; retry after it finishes"
+    fi
+    rm -f "$claim_ticket"
+    local confirmed
+    if [[ $legacy_lock -eq 1 && -d $lock ]]; then
+      confirmed="$(cat "$lock/pid" 2>/dev/null || true)"
+    else
+      confirmed="$(cat "$lock" 2>/dev/null || true)"
+    fi
+    [[ $confirmed =~ ^[0-9]+$ ]] ||
+      {
+        rm -f "$claim_file"
+        fail "cannot confirm the stale run lock owner at $lock; refusing to reclaim shared run state"
+      }
+    if [[ $confirmed =~ ^[0-9]+$ ]] && kill -0 "$confirmed" 2>/dev/null; then
+      rm -f "$claim_file"
+      fail "another review eval (pid $confirmed) holds $lock; a run rewrites the shared fixtures and appends to the shared ledger, so wait for it to finish"
+    fi
     log "reclaiming a run lock left behind by pid ${holder:-unknown}"
     rm -rf "$lock"
-    mkdir "$lock" 2>/dev/null ||
-      fail "could not take the run lock at $lock; remove it if no eval is running"
+    owner_ticket="$(mktemp "$root/.run.lock.owner.XXXXXX")" || {
+      rm -f "$claim_file"
+      fail "could not prepare the run lock owner record under $root"
+    }
+    printf '%s\n' "$$" >"$owner_ticket"
+    if ! node -e \
+      'require("node:fs").linkSync(process.argv[1], process.argv[2])' \
+      "$owner_ticket" "$lock" 2>/dev/null; then
+      rm -f "$owner_ticket"
+      rm -f "$claim_file"
+      fail "another review eval took the run lock at $lock; retry after it finishes"
+    fi
+    rm -rf "$reclaim_root"
+  else
+    # A prior reclaimer can die after it removes the stale lock and before it
+    # publishes its replacement. Retire that abandoned claim after this owner
+    # wins the now-empty lock so a recycled ticket pid cannot block recovery.
+    rm -rf "$reclaim_root"
   fi
-  printf '%s\n' "$$" >"$lock/pid"
+  rm -f "$owner_ticket"
   LOCK_DIRS+=("$lock")
 }
 
@@ -324,15 +408,21 @@ if [[ -n $AGAINST ]]; then
     const [spec, ledger, reference] = process.argv.slice(1);
     const { readLedger } = await import(`${spec}/scripts/review/review-eval-ledger.mjs`);
     const { resolveRowReference } = await import(`${spec}/scripts/review/review-eval-result-shape.mjs`);
-    resolveRowReference({ reference, rows: readLedger(ledger), repoRoot: spec });
+    const { baselineEligibility } = await import(`${spec}/scripts/review/review-eval-report.mjs`);
+    const row = resolveRowReference({ reference, rows: readLedger(ledger), repoRoot: spec });
+    const eligibility = baselineEligibility(row);
+    if (!eligibility.usable) throw new Error(eligibility.reason);
   ' "$SPEC" "$LEDGER" "$AGAINST" >/dev/null 2>&1 ||
-    fail "--against $AGAINST does not resolve to exactly one ledger row or row file"
+    fail "--against $AGAINST does not resolve to one eligible complete full baseline row"
 fi
 
 PLAN_OUT="$(mktemp "$TMPROOT/review-eval-plan.XXXXXX")"
 PLAN_ARGS=(--root "$SPEC" --ledger "$LEDGER" --plan --kind "$KIND" --json)
 if [[ -n $SKILL_REF ]]; then
   PLAN_ARGS+=(--skill-ref "$SKILL_REF")
+fi
+if [[ -n $AGAINST ]]; then
+  PLAN_ARGS+=(--against "$AGAINST")
 fi
 node "$CLI" "${PLAN_ARGS[@]}" >"$PLAN_OUT" || fail "planning failed"
 
@@ -359,10 +449,51 @@ PLAN_ARGS=(--root "$SPEC" --ledger "$LEDGER" --plan --kind "$KIND" --json
 if [[ -n $SKILL_REF ]]; then
   PLAN_ARGS+=(--skill-ref "$SKILL_REF")
 fi
+if [[ -n $AGAINST ]]; then
+  PLAN_ARGS+=(--against "$AGAINST")
+fi
 node "$CLI" "${PLAN_ARGS[@]}" >"$PLAN_OUT" ||
   fail "planning into $RUN_DIR failed"
 RUN_DIR="$(json_field "$PLAN_OUT" plan_dir)"
 PLAN_JSON="$RUN_DIR/plan.json"
+# The first preflight proves that --against resolves to an intrinsically usable
+# row. The generated plan now supplies the remaining checks before paid work:
+# full schema and frozen-matrix validation, plus the exact comparison lineage.
+if [[ -n $AGAINST ]]; then
+  BASELINE_SNAPSHOT="$(mktemp "$LOCK_ROOT/review-eval-baseline.XXXXXX")" ||
+    fail "could not prepare an immutable baseline snapshot under $LOCK_ROOT"
+  # shellcheck disable=SC2016  # the single-quoted block is node source
+  node --input-type=module -e '
+    const [spec, ledger, contractFile, planFile, reference, snapshot] = process.argv.slice(1);
+    const { readFileSync, writeFileSync } = await import("node:fs");
+    const { loadContract } = await import(`${spec}/scripts/review/review-eval-fixtures.mjs`);
+    const { baselinePreflightProblems, readLedger } = await import(`${spec}/scripts/review/review-eval-ledger.mjs`);
+    const { baselineEligibility } = await import(`${spec}/scripts/review/review-eval-report.mjs`);
+    const { resolveRowReference } = await import(`${spec}/scripts/review/review-eval-result-shape.mjs`);
+    const { baselinePlanIdentity } = await import(`${spec}/scripts/review/review-eval-run.mjs`);
+    const { contract, digest } = loadContract(contractFile);
+    const plan = JSON.parse(readFileSync(planFile, "utf8"));
+    const row = resolveRowReference({ reference, rows: readLedger(ledger), repoRoot: spec });
+    const eligibility = baselineEligibility(row);
+    if (!eligibility.usable) throw new Error(eligibility.reason);
+    const plannedBaseline = plan.baseline ?? null;
+    const currentBaseline = baselinePlanIdentity(row);
+    if (JSON.stringify(plannedBaseline) !== JSON.stringify(currentBaseline)) {
+      throw new Error("the resolved baseline changed after planning");
+    }
+    const problems = baselinePreflightProblems({
+      row,
+      contract,
+      contractDigest: digest,
+      planComparabilityKey: plan.comparability_key,
+      candidateExecutedAt: plan.planned_at,
+    });
+    if (problems.length > 0) throw new Error(problems.join(" | "));
+    writeFileSync(snapshot, `${JSON.stringify(row)}\n`);
+  ' "$SPEC" "$LEDGER" "$CONTRACT" "$PLAN_JSON" "$AGAINST" "$BASELINE_SNAPSHOT" >/dev/null 2>&1 ||
+    fail "--against $AGAINST is malformed or incompatible with the generated plan"
+  AGAINST="$BASELINE_SNAPSHOT"
+fi
 # shellcheck disable=SC2016  # the single-quoted block is node source
 CELL_COUNT="$(node -e '
   const plan = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
@@ -404,8 +535,9 @@ remaining_seconds() {
 # running against their own one-hour timeouts, spending quota long after the run
 # reported failure and removed the worktrees they were reading. Monitor mode is
 # what gives the job its own group; it is switched off again immediately, and
-# the group id is read back so a shell that gave the job no group of its own
-# falls back to the bare pid rather than signalling this script's own group.
+# Bash makes the direct child the process-group leader for this simple
+# background job, so its pid is also the group id. This avoids a `ps` lookup
+# that a restricted runner can deny after the child has already started.
 #
 # Standard input comes from /dev/null. In its own process group a child that
 # reads the controlling terminal takes SIGTTIN and stops, which would turn a
@@ -430,12 +562,7 @@ run_bounded() {
   "$@" </dev/null >"$out_file" 2>"${out_file}.err" &
   local pid=$!
   ((monitor_off)) && set +m
-  local own_pgid child_pgid target="$pid"
-  own_pgid="$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')"
-  child_pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')"
-  if [[ -n $child_pgid && -n $own_pgid && $child_pgid != "$own_pgid" ]]; then
-    target="-$child_pgid"
-  fi
+  local target="-$pid"
   (
     local waited=0
     while ((waited < limit)); do
@@ -451,7 +578,13 @@ run_bounded() {
   local watcher=$!
   local status=0
   wait "$pid" || status=$?
-  kill -TERM "$watcher" 2>/dev/null || true
+  if [[ -f $marker ]]; then
+    # The direct child can exit on TERM while a model grandchild ignores it.
+    # Let the watchdog finish its group-wide KILL before this function returns.
+    wait "$watcher" 2>/dev/null || true
+  else
+    kill -TERM "$watcher" 2>/dev/null || true
+  fi
   wait "$watcher" 2>/dev/null || true
   if [[ -f $marker ]]; then
     rm -f "$marker"

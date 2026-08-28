@@ -84,6 +84,11 @@
           "required": ["baseline_executed_at", "mcnemar"],
           "properties": {
             "baseline_executed_at": { "$ref": "#/$defs/instant" },
+            "selection": {
+              "type": "string",
+              "enum": ["automatic", "explicit"],
+              "description": "How the scorer selected this baseline. explicit means --against named it; automatic means append-order resolution selected it."
+            },
             "baseline_comparability_key": { "$ref": "#/$defs/digest" },
             "mcnemar": {
               "description": "null when the baseline carries a different comparability_key: that pair is never ranked.",

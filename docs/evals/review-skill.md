@@ -104,18 +104,35 @@ falls back to the `origin/main` tip when no merge base resolves. CI and the
 gate add `--require-base`, which fails the check when the base ref does not
 resolve at all, so the guard can never turn itself into a silent no-op.
 
-CI also adds `--revalidate-appended`, which recomputes every row the branch
-adds from the detail the same branch commits. Schema, id coverage and
+Required CI, the advisory freshness workflow, and the local quality gate add
+`--revalidate-appended`.
+It recomputes every row the branch adds from the detail the same branch commits.
+Schema, id coverage and
 append-only history all stay satisfied when a ledger PR edits its own row's
 verdict, counters or `per_defect` bits after the local `--validate --append`,
 and this is the only PR workflow there is. Like `--require-base` it refuses to
 no-op: with no base it cannot tell which rows are new, and it says so instead
 of passing. It calls no model — the recompute reads the committed
 `result-*.json` and `calibration.json` files — so the workflow stays free of
-model credentials. A row whose recorded baseline is not committed on the same
-branch, which is the candidate row of a sitting whose installed ledger PR has
-not merged yet, is recomputed against its own bits and detail and counted in
-`unpaired_baselines` rather than failed.
+model credentials. Every scored full or canary row must commit `plan.json`, its
+`result-*.json` files, and `calibration.json`. A complete row must carry one
+result file for every planned cell. A partial row must carry evidence for every
+condition it records. `calibration.json` records the exact cell IDs that existed
+when scoring began. CI requires that list to match the committed result files
+and the row status. Deleting a completed result cannot turn a complete run into
+a partial run. CI also checks each condition's model, effort, and finder against
+the planned cells. It regenerates the exact cell list from the frozen contract
+and row kind. Editing `plan.json` cannot remove a required cell. A dirty
+`--skill-ref`
+candidate row can name an installed baseline that is not committed on the same
+branch. CI recomputes that candidate against its own evidence and counts it in
+`unpaired_baselines`. An installed row cannot use this waiver.
+Each paired row records whether `--against` selected its baseline or append
+order selected it automatically. `plan.json` records the same choice before
+the run spends model quota. CI requires both records to match. For every
+automatic row, including a dirty candidate, CI resolves the baseline from
+ledger append order and requires the row to name that exact anchor. An
+automatic row cannot name a later row on the same branch as its baseline.
 
 Both the ledger check and `--validate --append` hold the frozen denominator. A
 condition that scored a PR at all carries every defect that PR froze, and a
@@ -149,11 +166,13 @@ launchd job runs the same code path. Only one run at a time may hold the shared
 state: every cell resets, cleans and stages `.skill` into the shared per-PR
 checkout, and every run appends to the ledger, so a scheduled run starting
 under a manual one would rewrite the tree the other is reviewing. The script
-takes a `run.lock` directory under both the checkout's git directory and the
+takes a `run.lock` owner record under both the checkout's git directory and the
 fixture cache — they move independently, under `--repo` and `--cache-dir` — and
-refuses to start while another live run holds either; a lock left behind by a
-killed run is reclaimed. The skill under test is snapshotted once, before the first
-cell, and every cell stages from that snapshot: the plan records one skill
+refuses to start while another live run holds either. A hard link publishes the
+complete owner record atomically. A process also claims a stale lock before it
+removes the lock, so two starters cannot both reclaim one killed run. The skill
+under test is snapshotted once, before the first cell, and every cell stages
+from that snapshot: the plan records one skill
 digest for the whole matrix, and two hours is long enough to edit the installed
 skill under a running evaluation. A snapshot that no longer matches the planned
 digest refuses the run instead of mixing two treatments into one row. Every
@@ -162,8 +181,11 @@ cached — a finder that exits non-zero fails its cell even when it wrote a
 partial report, because a truncated review cached is a permanent zero-recall
 score. A cached cell is reused only when its stored
 fingerprint — skill digest, kind, contract digest, the two CLI versions, the
-finder argv digest and the orchestrator digest — matches the current run,
-and the run directory carries the kind and the skill digest in its name, so an
+finder argv digest, the orchestrator digest, and the installed-or-candidate
+selection — matches the current run. The scorer preserves that fingerprint in
+every result and in `calibration.json`, and CI checks it against the row and
+plan. Editing both metadata copies cannot relabel a candidate as an installed
+run. The run directory carries the kind and the skill digest in its name, so an
 aborted run followed by a skill edit re-runs instead of scoring the old skill
 under the new digest. A run that ends before it scores keeps its cells on disk
 for that retry — publishing strips them from the commit with an exclude
@@ -176,12 +198,15 @@ results, row and report the earlier row still claims and reuse its publication
 branch. Seeded cells are fingerprint-checked one by one like any other. The
 skill directory itself may hold no symlink: `cp -R` would stage the link, so the
 contestant would read bytes `skill_digest` never covered and an edit to that
-target mid-run would change the treatment. The six-hour deadline bounds the whole run: three quarters
+target mid-run would change the treatment. The digest length-frames every path
+and file body, so a path/content boundary cannot alias another skill. The
+six-hour deadline bounds the whole run: three quarters
 of it start cells and bound each finder and contestant process, the rest bounds
 the judge pass, and a run that reaches either bound reports a partial matrix
 rather than a table with quietly missing cells. A stalled process is killed
 rather than waited on, because a deadline checked only between cells is no
-deadline at all. A PR whose
+deadline at all. After TERM, the watchdog completes its group-wide KILL before
+the run returns, even when the direct child exits first. A PR whose
 draw-2 cell never ran is scored on draw 1 alone: the defect's bit vector is as
 long as the draws its own PR completed, so a missing cell shrinks the
 denominator instead of recording misses that were never possible.
@@ -208,11 +233,17 @@ the checkout, where no branch switch reaches it, and logs the exact `--against`
 argument. A row carries every bit the comparison reads, so no detail directory
 is needed for the baseline.
 
+Claude auto-review skips that branch only when the diff contains the ledger and
+files under `docs/evals/review-skill-runs/`. Any other changed path keeps normal
+auto-review enabled. The branch prefix alone grants no review exemption.
+
 Naming the `executed_at` is correct once the installed PR is merged and main is
 pulled, because the row is then in the checkout's ledger. It is never a date
 typed from memory: `--against` resolves against rows the ledger already holds,
 so a value no row carries fails the pre-flight before the candidate spends
-anything.
+anything. The pre-flight also validates the full baseline row, its frozen
+matrix, its comparability key, and that its `executed_at` precedes the plan's
+fixed `planned_at` timestamp. These checks finish before the first model call.
 
 Publish first, or both rows land in one working tree and only one of them
 reaches a PR: each run appends to the same ledger file, and the candidate's
@@ -220,12 +251,15 @@ publish stages that whole file next to its own detail directory alone. The
 installed run's detail directory is then never committed, and there is no
 second ledger delta left for a PR of its own.
 
-`--against` takes a row file path or an `executed_at` prefix and reaches
-`--score`, `--validate` and `--report` alike, so all three read the same
-baseline. Without it the candidate resolves the ledger's stored anchor. That
-stamps `skill_ref` and `dirty: true` into the ledger row. Never compare a
-candidate against a ledger row from three months ago: that comparison silently
-includes an unknown amount of model drift.
+`--against` takes a row file path or an `executed_at` prefix and reaches the
+plan, `--score`, `--validate` and `--report` alike. The plan and row therefore
+record `baseline_selection: "explicit"` and
+`vs_baseline.selection: "explicit"`. The plan also records the resolved row's
+identity and digest. Scoring rejects a different row. Without `--against`, the
+plan and row record automatic selection, and the candidate resolves the
+ledger's stored anchor. A candidate also stamps `skill_ref` and `dirty: true`
+into the ledger row. Never compare a candidate against a ledger row from three
+months ago: that comparison silently includes an unknown amount of model drift.
 
 The run ends by printing the branch, commit and `gh pr create` commands for the
 ledger PR. Pass `--pr` to execute them instead. There is no auto-merge; a human
@@ -332,8 +366,9 @@ controls; a runtime change large enough to move the score shows up as a flip
 against the anchor with the version drift named beside it.
 
 `scorer_digest` covers every file that can move a recorded number or a recorded
-verdict — the scorer, the per-condition fold, the recompute and the verdict
-rules — not the extraction alone. It also covers the two fixture helpers:
+verdict — the CLI scoring orchestration, the scorer, the per-condition fold,
+the recompute, timestamp validation, and the verdict rules — not the extraction
+alone. It also covers the two fixture helpers:
 `review-eval-fixtures.mjs` picks the matrix, the truth file and the recall
 denominator, and `build-fixture.sh` materializes the checkout the contestant
 reviews and carries the checks that verify it, so an edit to either moves what
@@ -347,14 +382,17 @@ a silently paired one is not.
 
 `--score` rechecks the bytes the contract pins by `sha256` — both prompts, every
 truth file, every frozen finder report — before it calls the judge, and refuses
-the pass when one of them moved. `--check-fixtures` covers them once, before the
-matrix starts; under `--skill-ref` the spec worktree is the live checkout for
-the two hours in between, and the contract digest alone would not notice.
+the pass when one of them moved. It snapshots every parsed truth file before
+the first calibration call, so a later checkout edit cannot change one cell's
+scoring. `--check-fixtures` covers the inputs once, before the matrix starts;
+under `--skill-ref` the spec worktree is the live checkout for the two hours in
+between, and the contract digest alone would not notice.
 
-`--report` refuses to compute McNemar across rows with different
-`comparability_key` unless the row is a bridge run, and `--score --against`
-stores `vs_baseline.mcnemar: null` for such a pair rather than numbers nobody
-may read. Rows with different keys are different series and plot separately.
+`--score --against` requires the baseline to carry the plan's
+`comparability_key`. It refuses a cross-key pair before model work. `--report`
+also refuses to compute McNemar across different keys unless the row is a
+hand-assembled bridge run. Rows with different keys are different series and
+plot separately.
 
 `--report` reads rows of the current `contract_digest` only. The ledger keeps
 the rows a retired contract scored, and reporting one under today's contract
@@ -362,21 +400,21 @@ would recompute its verdict against a truth index and thresholds the run never
 saw. The default selection is the newest row of this contract, and `--row` on an
 older one is refused; pass `--contract` with the archived contract to read it.
 
-| drift vector      | control                                                                                              |
-| ----------------- | ---------------------------------------------------------------------------------------------------- |
-| fixture content   | eval tags plus a tree-hash check in `build-fixture.sh`, whose bytes are in `scorerDigest()`          |
-| truth content     | committed verbatim, per-file `sha256`, never re-derived from the API                                 |
-| scorable set      | explicit frozen id list in the contract                                                              |
-| run prompts       | frozen files with `sha256` in the contract                                                           |
-| scoring pipeline  | `scorerDigest()` over the scorer, run, result-shape, report and fixture files and every judge prompt |
-| judge model       | model id and CLI version in the row, plus 40 calibration pairs every run                             |
-| calibration set   | its `sha256` is bound into `comparability_key`                                                       |
-| reviewed model    | isolated by the `control` condition; model id and CLI version recorded                               |
-| skill text        | `skill_digest` over every file in the skill directory, symlinks refused — this is the treatment      |
-| finder command    | `argv` pinned in the contract; `finder_argv_digest` records what a cell spawned                      |
-| orchestrator      | `orchestrator_digest` over `run-eval.sh`: in the key and in every cell fingerprint                   |
-| machine and shell | host, CLI versions, `--setting-sources ""`, clean worktree of `origin/main`                          |
-| CLI upgrade       | versions in every cell fingerprint; a pair across one is labelled in the verdict, not in the key     |
+| drift vector      | control                                                                                                      |
+| ----------------- | ------------------------------------------------------------------------------------------------------------ |
+| fixture content   | eval tags plus a tree-hash check in `build-fixture.sh`, whose bytes are in `scorerDigest()`                  |
+| truth content     | committed verbatim, per-file `sha256`, never re-derived from the API                                         |
+| scorable set      | explicit frozen id list in the contract                                                                      |
+| run prompts       | frozen files with `sha256` in the contract                                                                   |
+| scoring pipeline  | `scorerDigest()` over the scorer, run, result-shape, ledger, report and fixture files and every judge prompt |
+| judge model       | model id and CLI version in the row, plus 40 calibration pairs every run                                     |
+| calibration set   | its `sha256` is bound into `comparability_key`                                                               |
+| reviewed model    | isolated by the `control` condition; model id and CLI version recorded                                       |
+| skill text        | `skill_digest` over every file in the skill directory, symlinks refused — this is the treatment              |
+| finder command    | `argv` pinned in the contract; `finder_argv_digest` records what a cell spawned                              |
+| orchestrator      | `orchestrator_digest` over `run-eval.sh`: in the key and in every cell fingerprint                           |
+| machine and shell | host, CLI versions, `--setting-sources ""`, clean worktree of `origin/main`                                  |
+| CLI upgrade       | versions in every cell fingerprint; a pair across one is labelled in the verdict, not in the key             |
 
 **Judge calibration runs before every scoring pass.** Forty frozen
 `(claim, defect, verdict)` pairs replay through the current judge. Agreement
@@ -411,8 +449,8 @@ the contract, so each of those is an ordinary full run against its own
 
 The bridge row is assembled by hand from the newer of the two runs: copy its
 `row.json`, set `kind` to `"bridge"`, and record the retiring run's
-`executed_at`, its `comparability_key`, and the McNemar delta between the two
-in `vs_baseline`. `--validate ROW --detail-dir RUNDIR --append --against
+`executed_at`, its `comparability_key`, `selection: "explicit"`, and the
+McNemar delta between the two in `vs_baseline`. `--validate ROW --detail-dir RUNDIR --append --against
 RETIRING_ROW` re-derives every recorded number from the run detail before
 appending, `vs_baseline` included: the McNemar counts are recomputed from the
 two rows' `per_defect` vectors and a stated `baseline_executed_at`,
@@ -426,9 +464,9 @@ re-audits the calibration set before the new judge's labels are trusted.
 
 No CLI mode plans a bridge run: `--kind` accepts `full` and `canary`, and
 `buildPlan` refuses anything else. What the harness contributes is the row's
-standing — `bridge` is a valid ledger kind, and both `--report` and
-`--score --against` pair a bridge row across two comparability keys where every
-other row is refused.
+standing — `bridge` is a valid ledger kind, `--validate --against` re-derives
+its cross-key pairing, and `--report` renders it. Ordinary scoring refuses a
+cross-key baseline.
 
 ## Establish the baseline
 
@@ -440,7 +478,9 @@ Every later run pairs against that anchor, never against the run before it: a
 five-point slide repeated four times never trips the per-run flip threshold,
 but it does show against the anchor. The anchor moves only for a `PROMOTE`
 row, which is where the runbook already requires a reviewed PR; from then on
-that promoted row is the baseline of record.
+that promoted row is the baseline of record. Baseline selection uses immutable
+ledger append order. A backdated row cannot move ahead of the established
+anchor because its machine clock was slow.
 
 1. Merge the harness. The contract must be on `main` before anything is scored
    against it, so the spec worktree can find it.

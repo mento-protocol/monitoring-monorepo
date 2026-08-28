@@ -11,12 +11,11 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
 import { fixtureForPr } from "./review-eval-fixtures.mjs";
+import { parseInstant } from "./review-eval-ledger.mjs";
 import {
+  baselineEligibility,
   compareConditions,
   headlineCondition,
-  installedSkillRun,
-  judgeCalibrationPasses,
-  leakSuspected,
   verdict,
 } from "./review-eval-report.mjs";
 
@@ -93,6 +92,7 @@ export function failedRow({
       [name]: {
         model: plan.cells[0]?.model ?? contract.sut.verifier.model,
         effort: plan.cells[0]?.effort ?? contract.sut.verifier.effort,
+        ...(plan.cells[0]?.finder ? { finder: plan.cells[0].finder } : {}),
         draws: 1,
         recall: zero(scope.scorableIds),
         p1: zero(scope.p1Ids),
@@ -118,6 +118,12 @@ export function failedRow({
  * threshold still shows against the score the baseline PR established. The
  * anchor moves only where the runbook says it may — a reviewed PROMOTE row —
  * and the newest such row then becomes the anchor for everything after it.
+ * "First" and "newest" use ledger append order. A slow machine clock cannot
+ * place a later row before the established anchor.
+ *
+ * An external row has no ledger position. For that row, its execution time
+ * bounds the eligible ledger prefix. This prevents a later ledger row from
+ * becoming the automatic baseline of an earlier external result.
  *
  * A row whose judge calibration failed is never eligible, as anchor or as
  * re-anchor: the runbook excludes such a row from baseline comparison, and an
@@ -137,18 +143,34 @@ export function failedRow({
  * explicitly, which is how a candidate is compared on purpose.
  */
 export function resolveBaseline({ rows, row }) {
-  const eligible = (rows ?? [])
-    .filter(
-      (candidate) =>
-        candidate.kind === "full" &&
-        candidate.status === "complete" &&
-        installedSkillRun(candidate) &&
-        judgeCalibrationPasses(candidate) &&
-        !leakSuspected(candidate) &&
-        candidate.comparability_key === row.comparability_key &&
-        candidate.executed_at < row.executed_at,
-    )
-    .sort((left, right) => (left.executed_at < right.executed_at ? -1 : 1));
+  const ledgerRows = rows ?? [];
+  const objectIndex = ledgerRows.indexOf(row);
+  const rowIndex =
+    objectIndex !== -1
+      ? objectIndex
+      : ledgerRows.findIndex(
+          (candidate) =>
+            candidate.executed_at === row?.executed_at &&
+            candidate.contract_digest === row?.contract_digest &&
+            candidate.detail_dir === row?.detail_dir,
+        );
+  const rowInstant = rowIndex === -1 ? parseInstant(row?.executed_at) : null;
+  const priorRows =
+    rowIndex === -1
+      ? ledgerRows.filter((candidate) => {
+          const candidateInstant = parseInstant(candidate.executed_at);
+          return (
+            rowInstant !== null &&
+            candidateInstant !== null &&
+            candidateInstant < rowInstant
+          );
+        })
+      : ledgerRows.slice(0, rowIndex);
+  const eligible = priorRows.filter(
+    (candidate) =>
+      baselineEligibility(candidate).usable &&
+      candidate.comparability_key === row.comparability_key,
+  );
   if (eligible.length === 0) return null;
   const reAnchored = eligible.findLast(
     (candidate) => candidate.verdict === "PROMOTE",
@@ -166,14 +188,16 @@ export function resolveBaseline({ rows, row }) {
  * re-derives is a claim, and `--validate` re-derives it from the same two
  * `per_defect` vectors the scorer read.
  */
-export function buildVsBaseline({ row, baselineRow }) {
+export function buildVsBaseline({ row, baselineRow, selection = null }) {
   if (!baselineRow) return null;
+  const selectionField = selection === null ? {} : { selection };
   const paired =
     row.comparability_key === baselineRow.comparability_key ||
     row.kind === "bridge";
   if (!paired) {
     return {
       baseline_executed_at: baselineRow.executed_at,
+      ...selectionField,
       baseline_comparability_key: baselineRow.comparability_key,
       mcnemar: null,
     };
@@ -185,6 +209,7 @@ export function buildVsBaseline({ row, baselineRow }) {
     : { b: 0, c: 0 };
   const vs = {
     baseline_executed_at: baselineRow.executed_at,
+    ...selectionField,
     baseline_comparability_key: baselineRow.comparability_key,
     mcnemar: { b: flips.b, c: flips.c, delta: flips.b - flips.c },
   };
@@ -259,8 +284,18 @@ function recomputeFromDetail({ dir, condition, ids, prForId }) {
     byDraw.set(draw, entry);
     wrongClaims += Number(record.novel?.novelWrong ?? 0);
     novelReal += Number(record.novel?.novelReal ?? 0);
-    usd += Number(record.usd ?? 0);
-    seconds += Number(record.seconds ?? 0);
+    const cellUsd = record.usd;
+    const cellSeconds = record.seconds;
+    usd =
+      typeof cellUsd === "number" && Number.isFinite(cellUsd) && cellUsd >= 0
+        ? usd + cellUsd
+        : Number.NaN;
+    seconds =
+      typeof cellSeconds === "number" &&
+      Number.isFinite(cellSeconds) &&
+      cellSeconds >= 0
+        ? seconds + cellSeconds
+        : Number.NaN;
     claimsByPr.set(
       String(record.pr),
       (claimsByPr.get(String(record.pr)) ?? 0) + (record.claims ?? []).length,
@@ -317,8 +352,8 @@ function checkClose(stated, found, tolerance, label, digits, problems) {
  * `--validate` had to take it on the row's own say-so. Each cell record now
  * carries the dollars its own judge calls cost and `calibration.json` carries
  * the replay's, which makes the run total a sum of evidence like every other
- * number on the row. Returns null when the detail predates that, so a row
- * written before the field existed is not failed for it.
+ * number on the row. Returns null only when the directory has no scored cell
+ * detail. Missing or invalid cost evidence produces NaN so validation fails.
  */
 function recomputeScoringUsd(dir) {
   let files;
@@ -329,23 +364,32 @@ function recomputeScoringUsd(dir) {
   } catch {
     return null;
   }
+  if (files.length === 0) return null;
   let total = 0;
-  let seen = false;
   for (const file of files) {
     const record = readJson(path.join(dir, file));
-    if (!Object.hasOwn(record ?? {}, "scoring_usd")) continue;
-    seen = true;
-    total += Number(record.scoring_usd ?? 0);
+    if (
+      !Object.hasOwn(record ?? {}, "scoring_usd") ||
+      typeof record.scoring_usd !== "number" ||
+      !Number.isFinite(record.scoring_usd) ||
+      record.scoring_usd < 0
+    ) {
+      return Number.NaN;
+    }
+    total += record.scoring_usd;
   }
   const calibrationFile = path.join(dir, "calibration.json");
-  if (existsSync(calibrationFile)) {
-    const record = readJson(calibrationFile);
-    if (Object.hasOwn(record ?? {}, "scoring_usd")) {
-      seen = true;
-      total += Number(record.scoring_usd ?? 0);
-    }
+  if (!existsSync(calibrationFile)) return Number.NaN;
+  const calibration = readJson(calibrationFile);
+  if (
+    !Object.hasOwn(calibration ?? {}, "scoring_usd") ||
+    typeof calibration.scoring_usd !== "number" ||
+    !Number.isFinite(calibration.scoring_usd) ||
+    calibration.scoring_usd < 0
+  ) {
+    return Number.NaN;
   }
-  return seen ? total : null;
+  return total + calibration.scoring_usd;
 }
 
 /**
@@ -470,12 +514,21 @@ function checkMcnemar(stated, expected, label, problems) {
  * A row that records no pairing at all is not a problem here: it under-claims,
  * and the verdict is derived from the baseline directly either way.
  */
-function checkVsBaseline({ row, baseline, problems }) {
+function checkVsBaseline({ row, baseline, baselineIsExplicit, problems }) {
   const stated = row.vs_baseline ?? null;
   if (!baseline || stated === null) return;
   if (!isShape(stated)) {
     problems.push("row.vs_baseline is neither null nor an object");
     return;
+  }
+  const expectedSelection = baselineIsExplicit ? "explicit" : "automatic";
+  if (
+    Object.hasOwn(stated, "selection") &&
+    stated.selection !== expectedSelection
+  ) {
+    problems.push(
+      `row.vs_baseline.selection is ${stated.selection}; this validation uses ${expectedSelection} baseline selection`,
+    );
   }
   const expected = buildVsBaseline({ row, baselineRow: baseline });
   if (stated.baseline_executed_at !== expected.baseline_executed_at) {
@@ -530,6 +583,7 @@ export function revalidateRow({
   detailDir = null,
   ledgerRows = [],
   baselineRow = null,
+  baselineIsExplicit = baselineRow !== null,
   baselineMissing = false,
   calibrationSet = null,
 }) {
@@ -674,9 +728,13 @@ export function revalidateRow({
       problems,
     );
   }
-  if (dir && Object.hasOwn(row, "scoring_usd")) {
+  if (dir && hasCellResults(dir)) {
     const spent = recomputeScoringUsd(dir);
-    if (spent !== null) {
+    if (!Object.hasOwn(row, "scoring_usd")) {
+      problems.push(
+        "row.scoring_usd is missing; scored run detail requires a recorded judge cost total",
+      );
+    } else if (spent !== null) {
       checkClose(row.scoring_usd, spent, 0.005, "row.scoring_usd", 2, problems);
     }
   }
@@ -688,7 +746,7 @@ export function revalidateRow({
   }
   const baseline =
     baselineRow ?? resolveBaseline({ rows: ledgerRows ?? [], row });
-  checkVsBaseline({ row, baseline, problems });
+  checkVsBaseline({ row, baseline, baselineIsExplicit, problems });
   // The verdict is a function of the row and its baseline together: a net loss
   // of flips is RED and a net gain is PROMOTE, both read against the anchor.
   // `baselineMissing` says the caller knows the row was scored against a
@@ -710,7 +768,12 @@ export function revalidateRow({
   }
   let recomputed = null;
   try {
-    recomputed = verdict({ contract, row, baselineRow: baseline }).verdict;
+    recomputed = verdict({
+      contract,
+      row,
+      baselineRow: baseline,
+      baselineIsExplicit,
+    }).verdict;
   } catch (error) {
     problems.push(
       `the verdict could not be recomputed: ${error instanceof Error ? error.message : String(error)}`,
