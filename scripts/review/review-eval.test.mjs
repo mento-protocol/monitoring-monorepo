@@ -1761,6 +1761,43 @@ test("--validate --append refuses a row that overstates its own verdict", () => 
   }
 });
 
+test("--validate --append rejects coerced cell cost and duration", () => {
+  const root = makeRoot();
+  try {
+    const row = makeRow({
+      matchedIds: scorableIdsFor([1990, 1999]),
+      fullMatrix: true,
+    });
+    const detail = writeRowEvidence(root, row);
+    const rowPath = path.join(root, "row.json");
+    const resultPath = path.join(detail, "result-1990-pipeline-1.json");
+    const resultRecord = JSON.parse(readFileSync(resultPath, "utf8"));
+    resultRecord.usd = null;
+    resultRecord.seconds = "600";
+    writeFileSync(resultPath, JSON.stringify(resultRecord));
+    writeFileSync(rowPath, JSON.stringify(row, null, 2));
+
+    const result = cli(
+      ["--validate", rowPath, "--append", "--detail-dir", detail, "--json"],
+      { root },
+    );
+    assert.equal(result.status, 1);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.appended, false);
+    assert.match(
+      output.problems.join(" | "),
+      /conditions\.pipeline\.usd cannot be checked; the run detail sums to NaN/,
+    );
+    assert.match(
+      output.problems.join(" | "),
+      /conditions\.pipeline\.seconds cannot be checked; the run detail sums to NaN/,
+    );
+    assert.equal(readLedger(path.join(root, ledgerRelative)).length, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("--validate applies the schema check without --append", () => {
   const root = makeRoot();
   try {
@@ -5921,6 +5958,25 @@ test("--revalidate-appended checks a row against its committed plan", () => {
     assert.match(
       invalidCostProblems,
       /calibration\.json scoring_usd must be a nonnegative finite number/,
+    );
+    writeRowEvidence(root, row);
+
+    const invalidCellCost = JSON.parse(readFileSync(plannedResult, "utf8"));
+    invalidCellCost.usd = null;
+    invalidCellCost.seconds = "600";
+    writeFileSync(plannedResult, JSON.stringify(invalidCellCost));
+    const invalidCellCostResult = cli(flags, { root });
+    assert.equal(invalidCellCostResult.status, 1);
+    const invalidCellCostProblems = JSON.parse(
+      invalidCellCostResult.stdout,
+    ).problems.join(" | ");
+    assert.match(
+      invalidCellCostProblems,
+      /result-1990-pipeline-1\.json usd must be a nonnegative finite number/,
+    );
+    assert.match(
+      invalidCellCostProblems,
+      /result-1990-pipeline-1\.json seconds must be a nonnegative finite number/,
     );
     writeRowEvidence(root, row);
 

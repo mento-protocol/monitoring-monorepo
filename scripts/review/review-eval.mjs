@@ -1011,8 +1011,12 @@ function runEvidenceProblems({ dir, row, contract }) {
             }
           }
           for (const field of ["usd", "seconds"]) {
-            const value = Number(record?.[field]);
-            if (!Number.isFinite(value) || value < 0) {
+            const value = record?.[field];
+            if (
+              typeof value !== "number" ||
+              !Number.isFinite(value) ||
+              value < 0
+            ) {
               problems.push(
                 `${dir}/${resultFile} ${field} must be a nonnegative finite number`,
               );

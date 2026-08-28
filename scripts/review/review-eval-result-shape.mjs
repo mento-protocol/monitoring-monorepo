@@ -284,8 +284,18 @@ function recomputeFromDetail({ dir, condition, ids, prForId }) {
     byDraw.set(draw, entry);
     wrongClaims += Number(record.novel?.novelWrong ?? 0);
     novelReal += Number(record.novel?.novelReal ?? 0);
-    usd += Number(record.usd ?? 0);
-    seconds += Number(record.seconds ?? 0);
+    const cellUsd = record.usd;
+    const cellSeconds = record.seconds;
+    usd =
+      typeof cellUsd === "number" && Number.isFinite(cellUsd) && cellUsd >= 0
+        ? usd + cellUsd
+        : Number.NaN;
+    seconds =
+      typeof cellSeconds === "number" &&
+      Number.isFinite(cellSeconds) &&
+      cellSeconds >= 0
+        ? seconds + cellSeconds
+        : Number.NaN;
     claimsByPr.set(
       String(record.pr),
       (claimsByPr.get(String(record.pr)) ?? 0) + (record.claims ?? []).length,
