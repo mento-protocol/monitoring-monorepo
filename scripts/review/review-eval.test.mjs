@@ -5299,6 +5299,54 @@ test("--revalidate-appended checks a row against its committed plan", () => {
     );
     writeRowEvidence(root, row);
 
+    const foreignFixture = contract.fixtures.find(
+      (fixture) => fixture.pr !== 1990 && fixture.scorable_ids.length > 0,
+    );
+    assert.ok(foreignFixture);
+    const foreignMatch = JSON.parse(readFileSync(plannedResult, "utf8"));
+    foreignMatch.matched_ids.push(foreignFixture.scorable_ids[0]);
+    writeFileSync(plannedResult, JSON.stringify(foreignMatch));
+    const crossFixtureMatch = cli(flags, { root });
+    assert.equal(crossFixtureMatch.status, 1);
+    assert.match(
+      JSON.parse(crossFixtureMatch.stdout).problems.join(" | "),
+      /result-1990-pipeline-1\.json matched_ids contains .*fixture PR 1990 does not score/,
+    );
+    writeRowEvidence(root, row);
+
+    for (const malformed of [undefined, null, ""]) {
+      const malformedMatches = JSON.parse(readFileSync(plannedResult, "utf8"));
+      if (malformed === undefined) {
+        delete malformedMatches.matched_ids;
+      } else {
+        malformedMatches.matched_ids = malformed;
+      }
+      writeFileSync(plannedResult, JSON.stringify(malformedMatches));
+      const malformedResult = cli(flags, { root });
+      assert.equal(malformedResult.status, 1);
+      assert.match(
+        JSON.parse(malformedResult.stdout).problems.join(" | "),
+        /result-1990-pipeline-1\.json matched_ids must be an array/,
+      );
+      writeRowEvidence(root, row);
+    }
+
+    const nestedMatch = JSON.parse(readFileSync(plannedResult, "utf8"));
+    nestedMatch.matched_ids = [
+      [
+        contract.fixtures.find((fixture) => fixture.pr === 1990)
+          .scorable_ids[0],
+      ],
+    ];
+    writeFileSync(plannedResult, JSON.stringify(nestedMatch));
+    const nestedResult = cli(flags, { root });
+    assert.equal(nestedResult.status, 1);
+    assert.match(
+      JSON.parse(nestedResult.stdout).problems.join(" | "),
+      /result-1990-pipeline-1\.json matched_ids contains non-scalar/,
+    );
+    writeRowEvidence(root, row);
+
     // A scored explicit plan must retain its pairing. Removing vs_baseline and
     // changing the verdict to the unpaired result cannot erase that evidence.
     const planFile = path.join(detail, "plan.json");

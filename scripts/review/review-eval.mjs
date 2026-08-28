@@ -705,7 +705,7 @@ export function planProvenanceProblems({
 }
 
 /** Evidence files required for every row that claims scored results. */
-function runEvidenceProblems({ dir, row }) {
+function runEvidenceProblems({ dir, row, contract }) {
   if (row.kind === "bridge" || row.status === "failed") return [];
   const problems = [];
   if (!holdsCellResults(dir)) {
@@ -749,6 +749,30 @@ function runEvidenceProblems({ dir, row }) {
               problems.push(
                 `${dir}/${resultFile} ${field} is ${JSON.stringify(record?.[field])}; plan.json recorded ${JSON.stringify(cell[field])}`,
               );
+            }
+          }
+          const fixture = contract.fixtures.find(
+            (candidate) => candidate.pr === cell.pr,
+          );
+          if (!Array.isArray(record?.matched_ids)) {
+            problems.push(`${dir}/${resultFile} matched_ids must be an array`);
+          } else if (fixture) {
+            const allowedIds = new Set(fixture.scorable_ids.map(String));
+            for (const id of record.matched_ids) {
+              if (
+                !(
+                  typeof id === "string" ||
+                  (typeof id === "number" && Number.isSafeInteger(id))
+                )
+              ) {
+                problems.push(
+                  `${dir}/${resultFile} matched_ids contains non-scalar ${JSON.stringify(id)}`,
+                );
+              } else if (!allowedIds.has(String(id))) {
+                problems.push(
+                  `${dir}/${resultFile} matched_ids contains ${JSON.stringify(id)}, which fixture PR ${cell.pr} does not score`,
+                );
+              }
             }
           }
           if (!rowConditions.has(cell.condition)) {
@@ -981,7 +1005,7 @@ function revalidateAppendedRows({ options, context, result, base }) {
       }).map((problem) => `${label}: ${problem}`),
     );
     problems.push(
-      ...runEvidenceProblems({ dir, row }).map(
+      ...runEvidenceProblems({ dir, row, contract: context.contract }).map(
         (problem) => `${label}: ${problem}`,
       ),
     );
