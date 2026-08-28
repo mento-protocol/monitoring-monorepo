@@ -218,8 +218,8 @@ function harness({
   // The base the pull request reports AFTER the merge. A retarget between the
   // final gate read and GitHub processing the merge shows up only here.
   mergedBaseRefName = null,
-  // Logins returned by successive `gh api user` calls; the second models a
-  // `gh auth switch` during the confirmation prompt.
+  // Logins returned by the initial `gh api user` read and the final combined
+  // GraphQL viewer read. The second models `gh auth switch` during the prompt.
   logins = null,
   // The repository URL `gh repo view` reports, which carries the host.
   repoUrl = "https://github.com/mento-protocol/monitoring-monorepo",
@@ -240,6 +240,13 @@ function harness({
     autoMergeReads: 0,
   };
   let output = "";
+  const nextLogin = () => {
+    const login = logins
+      ? (logins[calls.logins] ?? logins[logins.length - 1])
+      : "chapati23";
+    calls.logins += 1;
+    return login;
+  };
 
   const gh = async (args) => {
     calls.gh.push(args);
@@ -274,6 +281,7 @@ function harness({
         : standingAutoMerge;
       return JSON.stringify({
         data: {
+          viewer: { login: nextLogin() },
           repository: {
             mergeQueue: queue,
             pullRequest: {
@@ -311,9 +319,7 @@ function harness({
       return JSON.stringify([types.map((type) => ({ type }))]);
     }
     if (args[0] === "api" && args.includes("user")) {
-      if (logins)
-        return `${logins[calls.logins++] ?? logins[logins.length - 1]}\n`;
-      return "chapati23\n";
+      return `${nextLogin()}\n`;
     }
     if (args[0] === "pr" && args[1] === "list") {
       return JSON.stringify(
@@ -1757,9 +1763,9 @@ await test("an unchanged base reports no mismatch", async () => {
 });
 
 await test("a login switched during confirmation refuses", async () => {
-  // The merge starts a fresh gh, which reads whatever credentials are active
-  // then. Recording one login and merging as another would break exactly the
-  // attribution the ledger exists to provide.
+  // The final combined GraphQL response identifies the credential that read
+  // every final state. Recording one login and observing another would break
+  // exactly the attribution the ledger exists to provide.
   const h = harness({ logins: ["chapati23", "someone-else"] });
 
   await assertRefuses(h.run(), "login changed from chapati23 to someone-else");
@@ -1772,6 +1778,14 @@ await test("an unchanged login still merges", async () => {
   const result = await h.run();
   assertEqual(result.merged, true);
   assertEqual(result.record.login, "chapati23");
+});
+
+await test("an unsafe final viewer login refuses", async () => {
+  const h = harness({ logins: ["chapati23", "not a login"] });
+
+  await assertRefuses(h.run(), "named no usable viewer login");
+  assertEqual(h.calls.merges.length, 0, "nothing should have merged");
+  assertEqual(h.calls.consents.length, 0, "no consent should be recorded");
 });
 
 await test("refuses a bare target while GH_HOST is set", async () => {
@@ -2170,7 +2184,7 @@ await test("all post-confirmation intent reads happen on the ordinary path", asy
   );
 });
 
-await test("the final intent read combines both gates immediately before merge", async () => {
+await test("the final read combines every remote gate immediately before merge", async () => {
   const h = harness();
   await h.run();
 
@@ -2187,6 +2201,10 @@ await test("the final intent read combines both gates immediately before merge",
   assert(
     read.some((arg) => String(arg).includes("baseRefName")),
     "the final query must include the pull request's current base",
+  );
+  assert(
+    read.some((arg) => String(arg).includes("viewer{login}")),
+    "the final query must include the active GitHub login",
   );
   assert(read.includes("number=2071"), "the query must bind the pull request");
 

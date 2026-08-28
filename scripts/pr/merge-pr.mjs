@@ -57,8 +57,9 @@
  * no check in this file can be one. What the wrapper does provide is a default
  * that refuses, a briefing the operator must read, a confirmation they must
  * type, and an append-only consent record naming the confirmed GitHub login
- * and approved head. A credential switch after the final login read can still
- * misattribute that record; the accepted residual is below and in ADR 0075.
+ * and approved head. A credential switch after the final combined read but
+ * before the REST child selects its credential can still misattribute that
+ * record; the accepted residual is below and in ADR 0075.
  * The approval rule itself remains the binding control, and the only
  * unforgeable boundary would live on GitHub's side of the wire;
  * `docs/adr/0075-pr-merge.md` records that decision and its
@@ -414,27 +415,14 @@ export async function mergePullRequest({
     );
   }
 
-  // The merge below starts a fresh `gh`, which reads the credential active at
-  // child-process start. Re-reading here narrows the unbounded prompt window.
-  // It does not bind the child: `gh auth switch` can still run during the
-  // consent-ledger write and make the merge use another account. That accepted
-  // residual can misattribute the ledger but cannot bypass confirmation or
-  // authorize another target. Capturing and injecting a token would add a
-  // larger credential-handling surface to this trust-root wrapper (issue 2099;
-  // ADR 0075).
-  const confirmedLogin = await resolveLogin({ gh, host: repos.host });
-  if (confirmedLogin !== login) {
-    throw new MergeRefusal(
-      `the active GitHub login changed from ${login} to ${confirmedLogin} while you were confirming; re-run so the consent record names who is merging`,
-    );
-  }
-
-  // Read the current base and both foreign-intent gates in one final GraphQL
-  // response. The base proves the queue query still names the pull request's
-  // target. A separate queue round trip after the auto-merge read would make
-  // that earlier state stale before the direct REST call. This combined read
-  // minimizes all three race windows, although GitHub cannot bind them to the
-  // later write.
+  // Read the active login, current base, and both foreign-intent gates in one
+  // final GraphQL response. The base proves the queue query still names the
+  // pull request's target, and viewer.login binds the credential observation
+  // to the same response. This minimizes the race windows before the direct
+  // REST call. A credential switch after this response can still make the
+  // separate merge child use another account. Capturing and injecting a token
+  // would add a larger credential-handling surface to this trust-root wrapper
+  // (issue 2099; ADR 0075).
   let confirmedIntent;
   try {
     confirmedIntent = await readFinalMergeIntent({
@@ -448,7 +436,12 @@ export async function mergePullRequest({
       `unable to re-read the final merge intent for ${repos.base}#${number} and ` +
         `${sanitizeTerminalText(confirmed.baseRefName)}: ` +
         `${err instanceof Error ? err.message : String(err)}. ` +
-        `Refusing, because this command must prove the base is unchanged and there is no merge queue or auto-merge request before direct merge.`,
+        `Refusing, because this command must prove the login and base are unchanged and there is no merge queue or auto-merge request before direct merge.`,
+    );
+  }
+  if (confirmedIntent.login !== login) {
+    throw new MergeRefusal(
+      `the active GitHub login changed from ${login} to ${confirmedIntent.login} while you were confirming; re-run so the consent record names who is merging`,
     );
   }
   if (confirmedIntent.baseRefName !== confirmed.baseRefName) {

@@ -26,6 +26,7 @@ import { splitRepo } from "./pr-ready-state.mjs";
  * silently, and a hidden second candidate would defeat the ambiguity gate.
  */
 const PR_LIST_LIMIT = 100;
+const LOGIN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/;
 
 /**
  * Resolve the checkout's own repository and the repository the pull request
@@ -183,7 +184,7 @@ export async function resolveLogin({ gh, host }) {
   // stop every merge on such an account before the briefing. The pattern still
   // has to be narrow — this value is written into the ledger — so it stays
   // ASCII, bounded, and free of whitespace, quotes and shell metacharacters.
-  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(login)) {
+  if (!LOGIN_PATTERN.test(login)) {
     throw new MergeRefusal("unable to establish the active GitHub login");
   }
   return login;
@@ -292,12 +293,14 @@ function parseMergeQueueResponse(parsed) {
 }
 
 /**
- * The final base, merge-queue, and auto-merge state from one GraphQL response.
+ * The final viewer, base, merge-queue, and auto-merge state from one GraphQL
+ * response.
  *
  * Reading both intent gates together removes the extra remote round trip that
  * would otherwise leave one state older than the other immediately before the
- * direct merge. Returning the pull request's current base also proves that the
- * queue query still names that base. The REST request separately binds the
+ * direct merge. Returning the current viewer binds the credential observation
+ * to those states. Returning the pull request's current base also proves that
+ * the queue query still names that base. The REST request separately binds the
  * approved head through `sha`. The response is still not atomic with the later
  * REST write, so callers must keep this as their final remote read and refuse
  * every malformed or partial response.
@@ -311,7 +314,7 @@ export async function readFinalMergeIntent({ gh, repo, branch, number }) {
       host ?? "github.com",
       "graphql",
       "-f",
-      `query=query($owner:String!,$name:String!,$branch:String!,$number:Int!){repository(owner:$owner,name:$name){mergeQueue(branch:$branch){id url} pullRequest(number:$number){baseRefName autoMergeRequest{enabledAt}}}}`,
+      `query=query($owner:String!,$name:String!,$branch:String!,$number:Int!){viewer{login} repository(owner:$owner,name:$name){mergeQueue(branch:$branch){id url} pullRequest(number:$number){baseRefName autoMergeRequest{enabledAt}}}}`,
       "-f",
       `owner=${owner}`,
       "-f",
@@ -324,6 +327,12 @@ export async function readFinalMergeIntent({ gh, repo, branch, number }) {
   );
 
   const { repository, mergeQueue } = parseMergeQueueResponse(parsed);
+  const login = parsed?.data?.viewer?.login;
+  if (typeof login !== "string" || !LOGIN_PATTERN.test(login)) {
+    throw new Error(
+      "the final merge-intent response named no usable viewer login",
+    );
+  }
   const pullRequest = repository.pullRequest;
   if (
     pullRequest === null ||
@@ -343,7 +352,7 @@ export async function readFinalMergeIntent({ gh, repo, branch, number }) {
   if (autoMergeRequest !== null && typeof autoMergeRequest !== "object") {
     throw new Error("the final auto-merge response was malformed");
   }
-  return { baseRefName, mergeQueue, autoMergeRequest };
+  return { login, baseRefName, mergeQueue, autoMergeRequest };
 }
 
 /**

@@ -75,10 +75,11 @@ The ordered gates in `scripts/pr/merge-pr.mjs`:
    it detects queues from rulesets and classic branch protection. The wrapper
    also reads the branch's ruleset rule types as a second signal and a specific
    diagnostic. An unreadable answer from either queue read refuses. The final
-   GraphQL read queries `Repository.mergeQueue` and returns the pull request's
-   current `baseRefName` and `autoMergeRequest` together. A base mismatch
-   refuses, so the queue query must still name the current base. It is the last
-   remote read before consent is recorded and the direct merge starts.
+   GraphQL read queries `Repository.mergeQueue` and returns `viewer.login` plus
+   the pull request's current `baseRefName` and `autoMergeRequest`. A login or
+   base mismatch refuses, so the credential observation and queue query still
+   match the confirmed operator and current base. It is the last remote read
+   before consent is recorded and the direct merge starts.
 
 7. Append the consent record — login, timestamp, pull request, head commit,
    any override reason — to gitignored `.merge-consents.jsonl`, opened
@@ -116,15 +117,17 @@ wrapper says so in its own header rather than implying otherwise:
   pattern list closes that space, and one that read as though it did would be
   worse than a documented gap.
 - **The confirmed login is not bound to the merge subprocess credential.** The
-  wrapper reads the login again after confirmation, then writes the consent
-  record and starts a fresh `gh api` process. A `gh auth switch` during that
-  short interval can make the child use another keyring or `hosts.yml`
+  final combined GraphQL response returns `viewer.login` with every final
+  state. The wrapper compares that login with the operator confirmed before the
+  briefing, then writes consent and starts a fresh `gh api` process. A
+  `gh auth switch` after that response but before the REST child reads its
+  credential can still make the child use another keyring or `hosts.yml`
   credential. The merge still targets the confirmed repository, pull request,
   base, and head, but the local ledger can name the wrong GitHub account. This
   does not apply when `GH_TOKEN` fixes the credential in the environment. The
-  window is accepted because binding it would require the trust-root wrapper to
-  capture a live token and inject it into a child environment, which creates a
-  larger credential-handling surface. Issue 2099 records the decision.
+  irreducible window is accepted because closing it would require the trust-root
+  wrapper to capture a live token and inject it into a child environment, which
+  creates a larger credential-handling surface. Issue 2099 records the decision.
 - **Merge-queue and auto-merge absence are not bound atomically to the merge.**
   The wrapper checks both before the briefing and again in one final GraphQL
   response. A queue or auto-merge request enabled after that read but before
@@ -170,10 +173,10 @@ credentials that cannot merge — and is tracked separately as follow-up.
   was narrowed in the script header, the operating card, and the PR
   description instead of being left standing.
 - **Capture one token and pass it to the merge child.** This would bind the
-  final login read, consent record, and merge to one credential. Rejected
-  because it makes the trust-root wrapper read a live GitHub token and inject
-  it into a child environment. The accepted misattribution window has less
-  impact and does not change what merge the operator approved.
+  final combined viewer read, consent record, and merge to one credential.
+  Rejected because it makes the trust-root wrapper read a live GitHub token and
+  inject it into a child environment. The accepted misattribution window has
+  less impact and does not change what merge the operator approved.
 
 ## Consequences
 
