@@ -240,6 +240,27 @@ function writeRowEvidence(root, row) {
   const detail = path.join(root, row.detail_dir);
   mkdirSync(detail, { recursive: true });
   const cells = planCells({ contract, kind: row.kind });
+  const plan = {
+    contract_digest: row.contract_digest,
+    comparability_key: row.comparability_key,
+    kind: row.kind,
+    detail_dir: row.detail_dir,
+    baseline_selection: row.vs_baseline?.selection ?? "automatic",
+    baseline:
+      row.vs_baseline?.selection === "explicit"
+        ? {
+            executed_at: row.vs_baseline.baseline_executed_at,
+            contract_digest: row.contract_digest,
+            comparability_key: row.vs_baseline.baseline_comparability_key,
+            detail_dir: "external-baseline",
+            row_digest: "0".repeat(64),
+          }
+        : null,
+    inputs: row.inputs,
+    cells,
+  };
+  const fingerprint = cellFingerprint({ plan });
+  const completedCellIds = [];
   for (const [name, condition] of Object.entries(row.conditions)) {
     const idsByPr = new Map();
     for (const id of Object.keys(condition.per_defect)) {
@@ -271,6 +292,7 @@ function writeRowEvidence(root, row) {
           path.join(detail, `result-${pr}-${name}-${draw}.json`),
           JSON.stringify({
             cell_id: `pr-${pr}-${name}-draw${draw}`,
+            fingerprint,
             pr,
             condition: name,
             draw,
@@ -296,32 +318,12 @@ function writeRowEvidence(root, row) {
             leak: { suspected: false, hard: [] },
           }),
         );
+        completedCellIds.push(`pr-${pr}-${name}-draw${draw}`);
         first = false;
       }
     }
   }
-  writeFileSync(
-    path.join(detail, "plan.json"),
-    JSON.stringify({
-      contract_digest: row.contract_digest,
-      comparability_key: row.comparability_key,
-      kind: row.kind,
-      detail_dir: row.detail_dir,
-      baseline_selection: row.vs_baseline?.selection ?? "automatic",
-      baseline:
-        row.vs_baseline?.selection === "explicit"
-          ? {
-              executed_at: row.vs_baseline.baseline_executed_at,
-              contract_digest: row.contract_digest,
-              comparability_key: row.vs_baseline.baseline_comparability_key,
-              detail_dir: "external-baseline",
-              row_digest: "0".repeat(64),
-            }
-          : null,
-      inputs: row.inputs,
-      cells,
-    }),
-  );
+  writeFileSync(path.join(detail, "plan.json"), JSON.stringify(plan));
   const calibration = JSON.parse(
     readFileSync(
       path.join(root, "docs/evals/review-skill-judge-calibration.json"),
@@ -331,6 +333,8 @@ function writeRowEvidence(root, row) {
   writeFileSync(
     path.join(detail, "calibration.json"),
     JSON.stringify({
+      fingerprint,
+      completed_cell_ids: completedCellIds,
       outcomes: calibration.records.map((record) => ({
         record_id: record.record_id,
         expected: record.expected_verdict,
@@ -798,10 +802,12 @@ test("a cached cell from another skill or contract is never reused", () => {
     "claude_cli",
     "codex_cli",
     "contract_digest",
+    "dirty",
     "finder_argv_digest",
     "kind",
     "orchestrator_digest",
     "skill_digest",
+    "skill_ref",
   ]);
 
   const decide = (result) =>
@@ -812,6 +818,10 @@ test("a cached cell from another skill or contract is never reused", () => {
     decide({ ok: true, fingerprint: { ...fingerprint, skill_digest: "0" } })
       .reason,
     /different skill_digest/,
+  );
+  assert.match(
+    decide({ ok: true, fingerprint: { ...fingerprint, legacy: true } }).reason,
+    /unexpected legacy/,
   );
   assert.match(
     decide({ ok: true, fingerprint: { ...fingerprint, kind: "full" } }).reason,
@@ -833,8 +843,10 @@ test("a cached cell from another skill or contract is never reused", () => {
   for (const field of [
     "claude_cli",
     "codex_cli",
+    "dirty",
     "finder_argv_digest",
     "orchestrator_digest",
+    "skill_ref",
   ]) {
     assert.match(
       decide({ ok: true, fingerprint: { ...fingerprint, [field]: "moved" } })
@@ -2889,6 +2901,7 @@ test("scorePlan folds stubbed cells into a schema-valid ledger row", async () =>
         path.join(dir, "result.json"),
         JSON.stringify({
           ok: true,
+          fingerprint: cellFingerprint({ plan }),
           output: `scripts/pr/pr-ready-state-core.mjs:750 is too long.`,
           seconds: 300,
           cost_usd: 3.5,
@@ -3106,6 +3119,7 @@ test("a PR that ran fewer draws loses opportunities, not recall", async () => {
         path.join(dir, "result.json"),
         JSON.stringify({
           ok: true,
+          fingerprint: cellFingerprint({ plan }),
           output: `${finding.path}:${finding.line} is wrong.`,
           seconds: 300,
           cost_usd: 3.5,
@@ -3181,6 +3195,7 @@ test("scorePlan binds an eligible explicit baseline before model work", async ()
         path.join(dir, "result.json"),
         JSON.stringify({
           ok: true,
+          fingerprint: cellFingerprint({ plan }),
           output: "scripts/pr/pr-ready-state-core.mjs:750 is too long.",
           seconds: 300,
           cost_usd: 3.5,
@@ -3287,6 +3302,7 @@ test("scorePlan resolves an automatic baseline by ledger append order", async ()
         path.join(dir, "result.json"),
         JSON.stringify({
           ok: true,
+          fingerprint: cellFingerprint({ plan }),
           output: "scripts/pr/pr-ready-state-core.mjs:750 is too long.",
           seconds: 300,
           cost_usd: 3.5,
@@ -3383,10 +3399,45 @@ test("scorePlan reports a partial matrix and refuses an empty one", async () => 
     const cell = plan.cells[0];
     const dir = path.join(plan.plan_dir, "cells", cell.cell_id);
     mkdirSync(dir, { recursive: true });
+    const canonicalFingerprint = cellFingerprint({ plan });
     writeFileSync(
       path.join(dir, "result.json"),
       JSON.stringify({
         ok: true,
+        fingerprint: { ...canonicalFingerprint, legacy: true },
+        output: "nothing looks wrong here",
+        seconds: 10,
+        cost_usd: 0.5,
+        fixture_path: root,
+      }),
+    );
+    let invalidFingerprintCalls = 0;
+    await assert.rejects(
+      scorePlan({
+        plan,
+        contract,
+        contractDigest,
+        repoRoot: root,
+        planDir: plan.plan_dir,
+        exec: async () => {
+          invalidFingerprintCalls += 1;
+          throw new Error("model must not run");
+        },
+        runGit: stubGit().runGit,
+        calibrationSet,
+      }),
+      /fingerprint carries unexpected legacy/,
+    );
+    assert.equal(invalidFingerprintCalls, 0);
+
+    const reorderedFingerprint = Object.fromEntries(
+      Object.entries(canonicalFingerprint).reverse(),
+    );
+    writeFileSync(
+      path.join(dir, "result.json"),
+      JSON.stringify({
+        ok: true,
+        fingerprint: reorderedFingerprint,
         output: "nothing looks wrong here",
         seconds: 10,
         cost_usd: 0.5,
@@ -3406,6 +3457,16 @@ test("scorePlan reports a partial matrix and refuses an empty one", async () => 
     assert.equal(scored.row.status, "partial");
     assert.equal(scored.missing.length, 2);
     assert.match(scored.row.notes, /2 cell\(s\) missing/);
+    const scoredResult = JSON.parse(
+      readFileSync(
+        path.join(
+          plan.plan_dir,
+          `result-${cell.pr}-${cell.condition}-${cell.draw}.json`,
+        ),
+        "utf8",
+      ),
+    );
+    assert.deepEqual(scoredResult.fingerprint, canonicalFingerprint);
     // A canary that did not finish never ranks, not even as a pass.
     assert.equal(scored.row.verdict, "INCOMPLETE");
   } finally {
@@ -3421,6 +3482,7 @@ function writeCell(plan, cell, { output, root, usd = 3.5 }) {
     path.join(dir, "result.json"),
     JSON.stringify({
       ok: true,
+      fingerprint: cellFingerprint({ plan }),
       output,
       seconds: 300,
       cost_usd: usd,
@@ -5897,7 +5959,7 @@ test("--revalidate-appended rejects complete evidence relabelled partial", () =>
     assert.equal(checked.status, 1);
     assert.match(
       JSON.parse(checked.stdout).problems.join(" | "),
-      /records partial status but carries every planned result cell/,
+      /records partial status but calibration\.json proves a complete matrix/,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -5972,6 +6034,28 @@ test("--revalidate-appended binds partial rows to every scored PR", () => {
         ),
       );
     }
+    const concealedCompletion = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(concealedCompletion.status, 1);
+    assert.match(
+      JSON.parse(concealedCompletion.stdout).problems.join(" | "),
+      /result files do not match calibration\.json completed_cell_ids/,
+    );
+
+    const calibrationFile = path.join(root, row.detail_dir, "calibration.json");
+    const calibration = JSON.parse(readFileSync(calibrationFile, "utf8"));
+    calibration.completed_cell_ids = calibration.completed_cell_ids.filter(
+      (cellId) => !cellId.startsWith(`pr-${omittedFixture.pr}-pipeline-`),
+    );
+    writeFileSync(calibrationFile, JSON.stringify(calibration));
     const legitimatePartial = cli(
       [
         "--check-ledger",
@@ -6368,6 +6452,58 @@ test("--revalidate-appended checks a row against its committed plan", () => {
     assert.match(
       JSON.parse(deleted.stdout).problems.join(" | "),
       /carries no plan\.json/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended binds candidate status to execution evidence", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "base");
+
+    const row = makeRow({ fullMatrix: true });
+    row.inputs = {
+      ...row.inputs,
+      skill_ref: "/tmp/review-candidate",
+      dirty: true,
+    };
+    const detail = writeRowEvidence(root, row);
+
+    row.inputs = { ...row.inputs, skill_ref: "installed" };
+    delete row.inputs.dirty;
+    const planFile = path.join(detail, "plan.json");
+    const plan = JSON.parse(readFileSync(planFile, "utf8"));
+    plan.inputs = row.inputs;
+    writeFileSync(planFile, JSON.stringify(plan));
+    writeFileSync(path.join(root, ledgerRelative), `${JSON.stringify(row)}\n`);
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 1);
+    const problems = JSON.parse(checked.stdout).problems.join(" | ");
+    assert.match(
+      problems,
+      /result-.* fingerprint does not match the plan execution inputs/,
+    );
+    assert.match(
+      problems,
+      /calibration\.json fingerprint does not match the plan execution inputs/,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });

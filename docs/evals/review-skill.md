@@ -117,10 +117,13 @@ of passing. It calls no model — the recompute reads the committed
 model credentials. Every scored full or canary row must commit `plan.json`, its
 `result-*.json` files, and `calibration.json`. A complete row must carry one
 result file for every planned cell. A partial row must carry evidence for every
-condition it records. CI also checks each condition's model, effort, and finder
-against the planned cells. It regenerates the exact cell list from the frozen
-contract and row kind. Editing `plan.json` cannot remove a required cell. A
-dirty `--skill-ref`
+condition it records. `calibration.json` records the exact cell IDs that existed
+when scoring began. CI requires that list to match the committed result files
+and the row status. Deleting a completed result cannot turn a complete run into
+a partial run. CI also checks each condition's model, effort, and finder against
+the planned cells. It regenerates the exact cell list from the frozen contract
+and row kind. Editing `plan.json` cannot remove a required cell. A dirty
+`--skill-ref`
 candidate row can name an installed baseline that is not committed on the same
 branch. CI recomputes that candidate against its own evidence and counts it in
 `unpaired_baselines`. An installed row cannot use this waiver.
@@ -178,8 +181,11 @@ cached — a finder that exits non-zero fails its cell even when it wrote a
 partial report, because a truncated review cached is a permanent zero-recall
 score. A cached cell is reused only when its stored
 fingerprint — skill digest, kind, contract digest, the two CLI versions, the
-finder argv digest and the orchestrator digest — matches the current run,
-and the run directory carries the kind and the skill digest in its name, so an
+finder argv digest, the orchestrator digest, and the installed-or-candidate
+selection — matches the current run. The scorer preserves that fingerprint in
+every result and in `calibration.json`, and CI checks it against the row and
+plan. Editing both metadata copies cannot relabel a candidate as an installed
+run. The run directory carries the kind and the skill digest in its name, so an
 aborted run followed by a skill edit re-runs instead of scoring the old skill
 under the new digest. A run that ends before it scores keeps its cells on disk
 for that retry — publishing strips them from the commit with an exclude

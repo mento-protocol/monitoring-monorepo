@@ -55,6 +55,7 @@ import {
   assertAuthorizedFreshnessWorkflow,
   buildPlan,
   baselinePlanIdentity,
+  cellFingerprint,
   claudeExec,
   comparabilityKey,
   DEFAULT_CALIBRATION_PATH,
@@ -764,6 +765,14 @@ function resultEvidenceProblems({ dir, row }) {
   const regularityProblems = nonRegularEvidenceProblems(dir);
   if (regularityProblems.length > 0) return regularityProblems;
   const problems = [];
+  let expectedFingerprint = null;
+  try {
+    expectedFingerprint = cellFingerprint({
+      plan: readJson(path.join(dir, "plan.json")),
+    });
+  } catch {
+    // planProvenanceProblems reports a missing or unreadable plan.
+  }
   if (holdsCellResults(dir)) {
     const scoringUsd = row?.scoring_usd;
     if (
@@ -783,6 +792,15 @@ function resultEvidenceProblems({ dir, row }) {
   )) {
     try {
       const record = readJson(path.join(dir, resultFile));
+      if (
+        expectedFingerprint !== null &&
+        JSON.stringify(record?.fingerprint) !==
+          JSON.stringify(expectedFingerprint)
+      ) {
+        problems.push(
+          `${dir}/${resultFile} fingerprint does not match the plan execution inputs`,
+        );
+      }
       const scoringUsd = record?.scoring_usd;
       if (
         !Object.hasOwn(record ?? {}, "scoring_usd") ||
@@ -823,6 +841,15 @@ function resultEvidenceProblems({ dir, row }) {
   if (existsSync(calibrationFile)) {
     try {
       const calibration = readJson(calibrationFile);
+      if (
+        expectedFingerprint !== null &&
+        JSON.stringify(calibration?.fingerprint) !==
+          JSON.stringify(expectedFingerprint)
+      ) {
+        problems.push(
+          `${dir}/calibration.json fingerprint does not match the plan execution inputs`,
+        );
+      }
       const scoringUsd = calibration?.scoring_usd;
       if (
         !Object.hasOwn(calibration ?? {}, "scoring_usd") ||
@@ -893,15 +920,60 @@ function runEvidenceProblems({ dir, row, contract }) {
         const resultFiles = readdirSync(dir).filter(
           (name) => name.startsWith("result-") && name.endsWith(".json"),
         );
-        if (
-          row.status === "partial" &&
-          [...plannedResults.keys()].every((resultFile) =>
-            resultFiles.includes(resultFile),
-          )
-        ) {
-          problems.push(
-            `${dir} records partial status but carries every planned result cell`,
-          );
+        try {
+          const completedCellIds = readJson(
+            path.join(dir, "calibration.json"),
+          )?.completed_cell_ids;
+          if (
+            !Array.isArray(completedCellIds) ||
+            completedCellIds.some(
+              (cellId) => typeof cellId !== "string" || cellId.length === 0,
+            )
+          ) {
+            problems.push(
+              `${dir}/calibration.json completed_cell_ids must be an array of non-empty strings`,
+            );
+          } else {
+            const plannedCellIds = new Set(
+              plan.cells.map((cell) => cell.cell_id),
+            );
+            const completedSet = new Set(completedCellIds);
+            if (completedSet.size !== completedCellIds.length) {
+              problems.push(
+                `${dir}/calibration.json completed_cell_ids must not contain duplicates`,
+              );
+            }
+            for (const cellId of completedSet) {
+              if (!plannedCellIds.has(cellId)) {
+                problems.push(
+                  `${dir}/calibration.json records unplanned completed cell ${cellId}`,
+                );
+              }
+            }
+            const resultCellIds = resultFiles
+              .map((resultFile) => plannedResults.get(resultFile)?.cell_id)
+              .filter(Boolean);
+            const sorted = (values) => [...values].sort();
+            if (
+              JSON.stringify(sorted(completedSet)) !==
+              JSON.stringify(sorted(new Set(resultCellIds)))
+            ) {
+              problems.push(
+                `${dir} result files do not match calibration.json completed_cell_ids`,
+              );
+            }
+            const expectedStatus =
+              completedSet.size === plannedCellIds.size
+                ? "complete"
+                : "partial";
+            if (row.status !== expectedStatus) {
+              problems.push(
+                `${dir} records ${row.status} status but calibration.json proves a ${expectedStatus} matrix`,
+              );
+            }
+          }
+        } catch {
+          // The calibration evidence checks report an unreadable record.
         }
         for (const resultFile of resultFiles) {
           const cell = plannedResults.get(resultFile);

@@ -573,11 +573,15 @@ export function leakSignals({
  * under one provenance. `finder_argv_digest` is the command the pipeline
  * condition spawns, and `orchestrator_digest` is the script that spawns it with
  * its tools, turn limit and skill staging, so both move a recorded number the
- * same way.
+ * same way. `skill_ref` and `dirty` preserve whether the execution measured the
+ * installed skill or an explicit candidate. That status controls freshness and
+ * automatic baseline eligibility, so the scored evidence must retain it.
  */
 export function cellFingerprint({ plan }) {
   return {
     skill_digest: plan?.inputs?.skill_digest ?? null,
+    skill_ref: plan?.inputs?.skill_ref ?? null,
+    dirty: plan?.inputs?.dirty === true,
     kind: plan?.kind ?? null,
     contract_digest: plan?.contract_digest ?? null,
     claude_cli: plan?.inputs?.claude_cli ?? null,
@@ -608,6 +612,15 @@ export function cellReuseDecision({ plan, resultPath, result = null }) {
   const found = stored?.fingerprint;
   if (!found || typeof found !== "object") {
     return { reuse: false, reason: "the cached cell carries no fingerprint" };
+  }
+  const unexpected = Object.keys(found).filter(
+    (field) => !Object.hasOwn(expected, field),
+  );
+  if (unexpected.length > 0) {
+    return {
+      reuse: false,
+      reason: `the cached cell fingerprint carries unexpected ${unexpected.join(", ")}`,
+    };
   }
   const differing = Object.keys(expected).filter(
     (field) => found[field] !== expected[field],
@@ -931,6 +944,7 @@ export function resetFixture({
 async function scoreOneCell({
   cell,
   cellResult,
+  fingerprint,
   contract,
   repoRoot,
   truth,
@@ -996,6 +1010,7 @@ async function scoreOneCell({
   });
   return {
     cell_id: cell.cell_id,
+    fingerprint,
     pr: cell.pr,
     condition: cell.condition,
     draw: cell.draw,
@@ -1161,6 +1176,30 @@ export async function scorePlan({
       );
     }
   }
+  const completedCellResults = new Map();
+  const fingerprint = cellFingerprint({ plan });
+  const missing = [];
+  for (const cell of plan.cells) {
+    const cellResult = readCellResult(planDir, cell);
+    if (!cellResult) {
+      missing.push(cell.cell_id);
+      continue;
+    }
+    const reuse = cellReuseDecision({
+      plan,
+      resultPath: cellResultPath(planDir, cell),
+      result: cellResult,
+    });
+    if (!reuse.reuse) {
+      throw new Error(`cell ${cell.cell_id} cannot be scored: ${reuse.reason}`);
+    }
+    completedCellResults.set(cell.cell_id, cellResult);
+  }
+  if (completedCellResults.size === 0) {
+    throw new Error(
+      `no completed cell results under ${planDir}; run the orchestrator first`,
+    );
+  }
   // Freeze every truth object before the first model call. A candidate run uses
   // the operator's live checkout, and calibration can take long enough for an
   // edit after the CLI's digest check to otherwise change later cell scoring.
@@ -1190,6 +1229,8 @@ export async function scorePlan({
           model: contract.judge.model,
           agreement: calibration.agreement,
           total: calibration.total,
+          fingerprint,
+          completed_cell_ids: [...completedCellResults.keys()],
           // The replay's share of `scoring_usd`. With the per-cell shares it
           // makes the row's scoring cost re-derivable from the detail.
           scoring_usd: calibrationCost.usd,
@@ -1201,17 +1242,14 @@ export async function scorePlan({
     );
   }
   const scored = new Map();
-  const missing = [];
   const leaked = [];
   for (const cell of plan.cells) {
-    const cellResult = readCellResult(planDir, cell);
-    if (!cellResult) {
-      missing.push(cell.cell_id);
-      continue;
-    }
+    const cellResult = completedCellResults.get(cell.cell_id);
+    if (!cellResult) continue;
     const record = await scoreOneCell({
       cell,
       cellResult,
+      fingerprint,
       contract,
       repoRoot,
       truth: truthByPr.get(cell.pr),
@@ -1230,12 +1268,6 @@ export async function scorePlan({
       );
     }
   }
-  if (scored.size === 0) {
-    throw new Error(
-      `no completed cell results under ${planDir}; run the orchestrator first`,
-    );
-  }
-
   const conditions = {};
   for (const name of ["pipeline", "replay", "control"]) {
     const folded = foldCondition({

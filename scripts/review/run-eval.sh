@@ -20,7 +20,8 @@
 # Every cell writes its own output directory and is resumable. A failed cell is
 # never cached: a session-limit error returns in seconds and, cached, would
 # permanently score as a zero-recall review. A cached cell is reused only when
-# its fingerprint — skill digest, kind, contract digest — matches this run.
+# its fingerprint — treatment identity, kind, contract, runtime, finder and
+# orchestrator — matches this run.
 # A run that ends before it scores keeps those cells so the retry reuses them;
 # they never reach the PR.
 #
