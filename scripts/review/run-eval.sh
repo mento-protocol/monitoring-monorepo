@@ -215,28 +215,36 @@ trap cleanup EXIT
 # A fixed order means two runs contending on both cannot each hold one and wait
 # — the loser fails immediately and the EXIT trap frees whatever it took.
 #
-# mkdir is the lock: it is atomic on every filesystem this runs on and needs no
-# flock, which macOS does not ship. The holder's pid goes inside so a lock left
-# behind by a SIGKILL can be told from a live run and reclaimed. The pid is
-# written before the directory is recorded in LOCK_DIRS — the holder must be
-# identifiable the instant the directory exists, or a second run arriving in
-# that window reads no pid and reclaims a live lock. The read side waits for it
-# for the same reason. `kill -0` on a recycled pid can keep a stale lock held;
-# that fails closed, and the message names the directory to remove.
+# A hard link publishes a prepared owner record as the lock. The record already
+# contains the holder's pid when the lock path becomes visible. This gives the
+# acquisition atomicity of mkdir without a window where a suspended owner has
+# created the lock but has not written its pid. The prepared record and lock
+# live under the same root, so the hard link never crosses a filesystem. A lock
+# left behind by SIGKILL can be told from a live run and reclaimed. `kill -0` on
+# a recycled pid can keep a stale lock held; that fails closed, and the message
+# names the file to remove.
 acquire_one_lock() {
-  local root="$1" what="$2" lock="$1/run.lock" holder="" waited=0
+  local root="$1" what="$2" lock="$1/run.lock" holder="" legacy_lock=0
   local reclaim_root="$1/run.lock.reclaim" claim_file="" claim_holder=""
-  local claim_ticket="" claim_generation=-1 candidate_generation=-1 entry=""
+  local claim_ticket="" owner_ticket="" claim_generation=-1
+  local candidate_generation=-1 entry=""
   mkdir -p "$root" || fail "the $what $root is not writable"
-  if ! mkdir "$lock" 2>/dev/null; then
-    while ((waited < 5)); do
-      waited=$((waited + 1))
+  owner_ticket="$(mktemp "$root/.run.lock.owner.XXXXXX")" ||
+    fail "could not prepare the run lock owner record under $root"
+  printf '%s\n' "$$" >"$owner_ticket"
+  if ! node -e \
+    'require("node:fs").linkSync(process.argv[1], process.argv[2])' \
+    "$owner_ticket" "$lock" 2>/dev/null; then
+    rm -f "$owner_ticket"
+    owner_ticket=""
+    if [[ -d $lock ]]; then
+      legacy_lock=1
       holder="$(cat "$lock/pid" 2>/dev/null || true)"
-      if [[ $holder =~ ^[0-9]+$ ]]; then
-        break
-      fi
-      sleep 0.2
-    done
+    else
+      holder="$(cat "$lock" 2>/dev/null || true)"
+    fi
+    [[ $holder =~ ^[0-9]+$ ]] ||
+      fail "cannot identify the run lock owner at $lock; refusing to reclaim shared run state"
     if [[ $holder =~ ^[0-9]+$ ]] && kill -0 "$holder" 2>/dev/null; then
       fail "another review eval (pid $holder) holds $lock; a run rewrites the shared fixtures and appends to the shared ledger, so wait for it to finish"
     fi
@@ -271,22 +279,37 @@ acquire_one_lock() {
     claim_ticket="$(mktemp "$reclaim_root/.ticket.XXXXXX")" ||
       fail "could not prepare a stale-lock claim at $reclaim_root"
     printf '%s\n' "$$" >"$claim_ticket"
-    if ! ln "$claim_ticket" "$claim_file" 2>/dev/null; then
+    if ! node -e \
+      'require("node:fs").linkSync(process.argv[1], process.argv[2])' \
+      "$claim_ticket" "$claim_file" 2>/dev/null; then
       rm -f "$claim_ticket"
       fail "another review eval claimed the stale lock at $lock; retry after it finishes"
     fi
     rm -f "$claim_ticket"
     local confirmed
-    confirmed="$(cat "$lock/pid" 2>/dev/null || true)"
+    if [[ $legacy_lock -eq 1 && -d $lock ]]; then
+      confirmed="$(cat "$lock/pid" 2>/dev/null || true)"
+    else
+      confirmed="$(cat "$lock" 2>/dev/null || true)"
+    fi
+    [[ $confirmed =~ ^[0-9]+$ ]] ||
+      fail "cannot confirm the stale run lock owner at $lock; refusing to reclaim shared run state"
     if [[ $confirmed =~ ^[0-9]+$ ]] && kill -0 "$confirmed" 2>/dev/null; then
       fail "another review eval (pid $confirmed) holds $lock; a run rewrites the shared fixtures and appends to the shared ledger, so wait for it to finish"
     fi
     log "reclaiming a run lock left behind by pid ${holder:-unknown}"
     rm -rf "$lock"
-    mkdir "$lock" 2>/dev/null ||
-      fail "could not take the run lock at $lock; remove it if no eval is running"
+    owner_ticket="$(mktemp "$root/.run.lock.owner.XXXXXX")" ||
+      fail "could not prepare the run lock owner record under $root"
+    printf '%s\n' "$$" >"$owner_ticket"
+    if ! node -e \
+      'require("node:fs").linkSync(process.argv[1], process.argv[2])' \
+      "$owner_ticket" "$lock" 2>/dev/null; then
+      rm -f "$owner_ticket"
+      fail "another review eval took the run lock at $lock; retry after it finishes"
+    fi
   fi
-  printf '%s\n' "$$" >"$lock/pid"
+  rm -f "$owner_ticket"
   LOCK_DIRS+=("$lock")
 }
 

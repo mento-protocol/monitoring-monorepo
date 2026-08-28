@@ -160,12 +160,13 @@ launchd job runs the same code path. Only one run at a time may hold the shared
 state: every cell resets, cleans and stages `.skill` into the shared per-PR
 checkout, and every run appends to the ledger, so a scheduled run starting
 under a manual one would rewrite the tree the other is reviewing. The script
-takes a `run.lock` directory under both the checkout's git directory and the
+takes a `run.lock` owner record under both the checkout's git directory and the
 fixture cache — they move independently, under `--repo` and `--cache-dir` — and
-refuses to start while another live run holds either. A process atomically
-claims a stale lock before it removes the lock, so two starters cannot both
-reclaim one killed run. The skill under test is snapshotted once, before the first
-cell, and every cell stages from that snapshot: the plan records one skill
+refuses to start while another live run holds either. A hard link publishes the
+complete owner record atomically. A process also claims a stale lock before it
+removes the lock, so two starters cannot both reclaim one killed run. The skill
+under test is snapshotted once, before the first cell, and every cell stages
+from that snapshot: the plan records one skill
 digest for the whole matrix, and two hours is long enough to edit the installed
 skill under a running evaluation. A snapshot that no longer matches the planned
 digest refuses the run instead of mixing two treatments into one row. Every

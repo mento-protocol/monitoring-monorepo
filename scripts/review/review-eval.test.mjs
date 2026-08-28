@@ -3933,7 +3933,7 @@ test("one review eval at a time may hold the shared run state", async () => {
     const cacheLock = path.join(cache, "run.lock");
     const lockFunction = shellFunction("acquire_one_lock");
     assert.ok(
-      lockFunction.indexOf('ln "$claim_ticket" "$claim_file"') <
+      lockFunction.indexOf('"$claim_ticket" "$claim_file"') <
         lockFunction.indexOf('rm -rf "$lock"'),
       "a stale lock is deleted before this process claims it",
     );
@@ -3944,13 +3944,24 @@ test("one review eval at a time may hold the shared run state", async () => {
     assert.equal(free.status, 0, free.stderr);
     assert.match(free.stdout, new RegExp(`held ${lock}`));
     assert.match(free.stdout, new RegExp(`held ${cacheLock}`));
-    assert.equal(
-      readFileSync(path.join(lock, "pid"), "utf8").trim().length > 0,
-      true,
+    assert.equal(readFileSync(lock, "utf8").trim().length > 0, true);
+
+    // The owner record is complete before its hard link makes the lock path
+    // visible. A suspended owner therefore exposes no pid-less lock that a
+    // contender can mistake for stale state.
+    assert.ok(
+      lockFunction.indexOf(`printf '%s\\n' "$$" >"$owner_ticket"`) <
+        lockFunction.indexOf('"$owner_ticket" "$lock" 2>/dev/null'),
+      "the lock is published before its owner record is complete",
+    );
+    assert.match(
+      lockFunction,
+      /linkSync\(process\.argv\[1\], process\.argv\[2\]\)/,
+      "lock publication must name the exact destination path",
     );
 
     // A live holder is a real conflict, and the run refuses before it spends.
-    writeFileSync(path.join(lock, "pid"), `${process.pid}\n`);
+    writeFileSync(lock, `${process.pid}\n`);
     const busy = spawnSync("bash", ["-c", harness(cache)], {
       encoding: "utf8",
     });
@@ -3967,10 +3978,45 @@ test("one review eval at a time may hold the shared run state", async () => {
     assert.equal(elsewhere.status, 1);
     assert.match(elsewhere.stderr, new RegExp(`holds ${lock}`));
 
-    // A lock left behind by a SIGKILL is reclaimed rather than wedging the job.
+    // A live directory-form lock from an older checkout remains a conflict.
+    // Exact link publication must not create an owner ticket inside it.
+    rmSync(lock, { force: true });
+    mkdirSync(lock);
+    writeFileSync(path.join(lock, "pid"), `${process.pid}\n`);
+    const legacyBusy = spawnSync("bash", ["-c", harness(cache)], {
+      encoding: "utf8",
+    });
+    assert.equal(legacyBusy.status, 1);
+    assert.match(legacyBusy.stderr, /another review eval \(pid \d+\) holds/);
+
+    // An old owner can be suspended between mkdir and writing pid. Treat that
+    // directory as occupied because its liveness cannot be proved safely.
+    unlinkSync(path.join(lock, "pid"));
+    const legacyUnidentified = spawnSync("bash", ["-c", harness(cache)], {
+      encoding: "utf8",
+    });
+    assert.equal(legacyUnidentified.status, 1);
+    assert.match(
+      legacyUnidentified.stderr,
+      /cannot identify the run lock owner/,
+    );
+    assert.equal(existsSync(lock), true);
+
+    // A dead directory-form lock is reclaimed and replaced by the atomic
+    // owner-record file, so upgrades do not wedge scheduled runs.
     const dead = spawnSync("bash", ["-c", "exit 0"]);
     writeFileSync(path.join(lock, "pid"), `${dead.pid}\n`);
-    writeFileSync(path.join(cacheLock, "pid"), `${dead.pid}\n`);
+    writeFileSync(cacheLock, `${dead.pid}\n`);
+    const legacyReclaimed = spawnSync("bash", ["-c", harness(cache)], {
+      encoding: "utf8",
+    });
+    assert.equal(legacyReclaimed.status, 0, legacyReclaimed.stderr);
+    assert.match(legacyReclaimed.stdout, /reclaiming a run lock/);
+    assert.equal(readFileSync(lock, "utf8").trim().length > 0, true);
+
+    // A lock left behind by a SIGKILL is reclaimed rather than wedging the job.
+    writeFileSync(lock, `${dead.pid}\n`);
+    writeFileSync(cacheLock, `${dead.pid}\n`);
     const reclaimed = spawnSync("bash", ["-c", harness(cache)], {
       encoding: "utf8",
     });
@@ -3979,10 +4025,10 @@ test("one review eval at a time may hold the shared run state", async () => {
 
     // A killed stale-lock reclaimer leaves its own marker. Its dead pid makes
     // that marker recoverable, so it cannot wedge every later scheduled run.
-    writeFileSync(path.join(lock, "pid"), `${dead.pid}\n`);
+    writeFileSync(lock, `${dead.pid}\n`);
     mkdirSync(`${lock}.reclaim`, { recursive: true });
     writeFileSync(path.join(`${lock}.reclaim`, "0"), `${dead.pid}\n`);
-    writeFileSync(path.join(cacheLock, "pid"), `${dead.pid}\n`);
+    writeFileSync(cacheLock, `${dead.pid}\n`);
     const staleReclaimer = spawnSync("bash", ["-c", harness(cache)], {
       encoding: "utf8",
     });
@@ -3993,7 +4039,7 @@ test("one review eval at a time may hold the shared run state", async () => {
     // the next generation. Keep the winner alive long enough for the loser to
     // see its pid rather than treating the new run lock as stale again.
     for (const target of [lock, cacheLock]) {
-      writeFileSync(path.join(target, "pid"), `${dead.pid}\n`);
+      writeFileSync(target, `${dead.pid}\n`);
       mkdirSync(`${target}.reclaim`, { recursive: true });
       writeFileSync(path.join(`${target}.reclaim`, "0"), `${dead.pid}\n`);
     }
