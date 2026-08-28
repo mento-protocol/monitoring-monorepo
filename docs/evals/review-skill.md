@@ -382,8 +382,14 @@ older one is refused; pass `--contract` with the archived contract to read it.
 `(claim, defect, verdict)` pairs replay through the current judge. Agreement
 under 38/40 marks the run AMBER, excludes the row from baseline comparison, and
 keeps it off the full-run freshness clock. It costs about $2 and it is the only
-mechanism that separates "the review skill regressed" from "the `claude-opus-5`
-alias now points at different weights and the scorer got stricter".
+mechanism that separates "the review skill regressed" from "the judge alias now
+points at different weights and the scorer got stricter". It fired on the very
+first baseline run (2026-08-28): the original labels — the frozen 2026-08
+judge's own decisions — scored 29/40 against two independent modern judges,
+which agreed with each other on 36/40. The set was re-audited to the modern
+consensus (provenance in the calibration file) and the contract judge is now
+`claude-fable-5` at max effort, the judge whose full-context adjudication set
+the four contested labels.
 
 The forty outcomes are written to `calibration.json` in the run's detail
 directory. `--validate` re-derives `agreement` and `total` from them and checks
@@ -453,6 +459,10 @@ The pinned operating point — `gpt-5.6-sol` at high effort finding, then
 `claude-opus-5` at high effort verifying and extending — comes from benchmark
 v2, closed 2026-08-24. On the three-PR grid that pairing reached 64% recall
 against the frozen truth, while every solo condition measured at or below 50%.
+Treat that 64% as measured in the retired judge's units: the 2026-08-28
+calibration re-audit found that judge over-lenient (it accepted 8 of 20
+match labels both modern judges reject), so cross-lineage comparisons against
+it carry that inflation. The first re-keyed baseline sets the new reference.
 The same benchmark supplied the six fixtures, the frozen truth, the frozen
 finder reports for the `replay` condition, and the calibration pairs.
 

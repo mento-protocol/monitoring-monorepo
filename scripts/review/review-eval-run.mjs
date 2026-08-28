@@ -927,6 +927,7 @@ async function scoreOneCell({
   // default here would let a judge retirement move the key while scoring kept
   // calling the retired model.
   const model = contract.judge.model;
+  const judgeEffort = contract.judge.effort;
   const fixturePath = cellResult.fixture_path ?? "";
   resetFixture({
     fixturePath,
@@ -948,8 +949,14 @@ async function scoreOneCell({
       runGit,
     }),
   ];
-  const claims = await extractClaims({ transcript, exec, model });
+  const claims = await extractClaims({
+    transcript,
+    exec,
+    model,
+    effort: judgeEffort,
+  });
   const matched = await matchClaims({
+    effort: judgeEffort,
     claims,
     truthFindings: truth.findings,
     scorableIds: fixture.scorable_ids,
@@ -958,6 +965,7 @@ async function scoreOneCell({
     model,
   });
   const novel = await classifyNovel({
+    effort: judgeEffort,
     claims,
     matchedIds: matched.matchedIds,
     truthFindings: truth.findings,
@@ -1116,6 +1124,7 @@ export async function scorePlan({
     calibrationSet,
     exec: meterExec(metered, calibrationCost),
     model: contract.judge.model,
+    effort: contract.judge.effort,
   });
   // The calibration replay is the only recorded number with no other trace on
   // disk, so `--validate` had to take `judge_calibration` on the row's own say
