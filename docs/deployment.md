@@ -428,6 +428,12 @@ autofix branches. See [ADR 0019](adr/0019-vercel-path-aware-deploys.md).
 
 The project is named `monitoring-dashboard` and lives at [monitoring.mento.org](https://monitoring.mento.org).
 
+After a merged change that can affect dynamic route metadata or an Open Graph
+image deploys, including a change to a route dependency, run the
+[dynamic social-preview verification](notes/dashboard-verification.md#dynamic-social-preview-verification)
+against the production origin. A successful Vercel deployment does not prove
+that the production metadata, image, cache policy, or Slack unfurl is correct.
+
 ### Infrastructure (Terraform)
 
 Terraform stack ownership is registered in [`terraform.stacks.json`](../terraform.stacks.json) and summarized in [`docs/terraform.md`](./terraform.md). The dashboard/platform stack lives in [`terraform/`](../terraform/). The team-level Vercel Blob store is managed through Vercel Storage and linked to the project outside Terraform. The platform stack covers:
