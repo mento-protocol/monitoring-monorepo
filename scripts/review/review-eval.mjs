@@ -550,6 +550,7 @@ export function planProvenanceProblems({
     return [error instanceof Error ? error.message : String(error)];
   }
   const problems = [];
+  /** True when the plan carries the complete explicit-baseline fingerprint. */
   const validBaselineIdentity = (value) =>
     value !== null &&
     typeof value === "object" &&

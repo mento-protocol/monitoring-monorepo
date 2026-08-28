@@ -382,10 +382,11 @@ scoring. `--check-fixtures` covers the inputs once, before the matrix starts;
 under `--skill-ref` the spec worktree is the live checkout for the two hours in
 between, and the contract digest alone would not notice.
 
-`--report` refuses to compute McNemar across rows with different
-`comparability_key` unless the row is a bridge run, and `--score --against`
-stores `vs_baseline.mcnemar: null` for such a pair rather than numbers nobody
-may read. Rows with different keys are different series and plot separately.
+`--score --against` requires the baseline to carry the plan's
+`comparability_key`. It refuses a cross-key pair before model work. `--report`
+also refuses to compute McNemar across different keys unless the row is a
+hand-assembled bridge run. Rows with different keys are different series and
+plot separately.
 
 `--report` reads rows of the current `contract_digest` only. The ledger keeps
 the rows a retired contract scored, and reporting one under today's contract
@@ -445,9 +446,9 @@ re-audits the calibration set before the new judge's labels are trusted.
 
 No CLI mode plans a bridge run: `--kind` accepts `full` and `canary`, and
 `buildPlan` refuses anything else. What the harness contributes is the row's
-standing — `bridge` is a valid ledger kind, and both `--report` and
-`--score --against` pair a bridge row across two comparability keys where every
-other row is refused.
+standing — `bridge` is a valid ledger kind, `--validate --against` re-derives
+its cross-key pairing, and `--report` renders it. Ordinary scoring refuses a
+cross-key baseline.
 
 ## Establish the baseline
 

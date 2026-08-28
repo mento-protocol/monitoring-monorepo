@@ -3093,17 +3093,20 @@ test("a PR that ran fewer draws loses opportunities, not recall", async () => {
   }
 });
 
-test("scorePlan stores no McNemar against an incomparable baseline", async () => {
+test("scorePlan binds an eligible explicit baseline before model work", async () => {
   const root = makeRoot();
   try {
-    const foreignBaseline = makeRow({ key: "c".repeat(64) });
+    const baseline = makeRow({
+      executedAt: "2026-08-01T10:00:00Z",
+      fullMatrix: true,
+    });
     const plan = buildPlan({
       contract,
       contractDigest,
       kind: "canary",
       repoRoot: root,
       outDir: path.join(root, "run"),
-      baselineRow: foreignBaseline,
+      baselineRow: baseline,
       env: planEnv,
     });
     for (const cell of plan.cells) {
@@ -3139,16 +3142,10 @@ test("scorePlan stores no McNemar against an incomparable baseline", async () =>
         baselineRow,
       });
 
-    // `--against` may name any row, including one that measures something
-    // else. That pair is recorded, never counted.
-    const foreign = await score(foreignBaseline);
-    assert.deepEqual(validateLedgerRow(foreign.row), []);
-    assert.equal(foreign.row.vs_baseline.selection, "explicit");
-    assert.equal(foreign.row.vs_baseline.mcnemar, null);
-    assert.equal(
-      foreign.row.vs_baseline.baseline_comparability_key,
-      "c".repeat(64),
-    );
+    const paired = await score(baseline);
+    assert.deepEqual(validateLedgerRow(paired.row), []);
+    assert.equal(paired.row.vs_baseline.selection, "explicit");
+    assert.equal(typeof paired.row.vs_baseline.mcnemar.delta, "number");
 
     await assert.rejects(
       score(makeRow()),
@@ -3158,6 +3155,50 @@ test("scorePlan stores no McNemar against an incomparable baseline", async () =>
       score(null),
       /plan baseline_selection is explicit; this score command is automatic/,
     );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("scorePlan rejects an ineligible explicit baseline before model work", async () => {
+  const root = makeRoot();
+  try {
+    const baseline = makeRow({
+      executedAt: "2026-08-01T10:00:00Z",
+      status: "partial",
+    });
+    const plan = buildPlan({
+      contract,
+      contractDigest,
+      kind: "canary",
+      repoRoot: root,
+      outDir: path.join(root, "run"),
+      baselineRow: baseline,
+      env: planEnv,
+    });
+    let modelCalls = 0;
+    await assert.rejects(
+      scorePlan({
+        plan,
+        contract,
+        contractDigest,
+        repoRoot: root,
+        planDir: plan.plan_dir,
+        exec: async () => {
+          modelCalls += 1;
+          throw new Error("model must not run");
+        },
+        calibrationSet: JSON.parse(
+          readFileSync(
+            path.join(root, "docs/evals/review-skill-judge-calibration.json"),
+            "utf8",
+          ),
+        ),
+        baselineRow: baseline,
+      }),
+      /explicit baseline is not eligible.*complete full run/s,
+    );
+    assert.equal(modelCalls, 0);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -30,13 +30,13 @@ import {
   PIPELINE_DRAWS,
   scorableTotals,
 } from "./review-eval-fixtures.mjs";
-import { freshness } from "./review-eval-ledger.mjs";
+import { baselinePreflightProblems, freshness } from "./review-eval-ledger.mjs";
 import {
   buildVsBaseline,
   conditionScope,
   resolveBaseline,
 } from "./review-eval-result-shape.mjs";
-import { verdict } from "./review-eval-report.mjs";
+import { baselineEligibility, verdict } from "./review-eval-report.mjs";
 import {
   aggregateDraws,
   classifyNovel,
@@ -1144,6 +1144,22 @@ export async function scorePlan({
     throw new Error(
       `plan baseline ${String(plannedBaseline?.executed_at ?? "none")} does not match score baseline ${String(scoreBaseline?.executed_at ?? "none")}`,
     );
+  }
+  if (baselineIsExplicit) {
+    const eligibility = baselineEligibility(baselineRow);
+    const baselineProblems = baselinePreflightProblems({
+      row: baselineRow,
+      contract,
+      contractDigest,
+      planComparabilityKey: plan.comparability_key,
+      candidateExecutedAt: plan.planned_at,
+    });
+    if (!eligibility.usable) baselineProblems.unshift(eligibility.reason);
+    if (baselineProblems.length > 0) {
+      throw new Error(
+        `explicit baseline is not eligible for this plan:\n${baselineProblems.join("\n")}`,
+      );
+    }
   }
   // Freeze every truth object before the first model call. A candidate run uses
   // the operator's live checkout, and calibration can take long enough for an
