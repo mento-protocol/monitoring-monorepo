@@ -109,12 +109,17 @@ a batch verdict — the Selected issue can fail any rule below. So walk the Top
 
 ```bash
 gh issue view <n> --repo mento-protocol/monitoring-monorepo \
-  --json number,title,state,labels,body,projectItems
+  --json number,title,state,labels,body,projectItems,blockedBy
 ```
 
 `labels` settles `agent-ready`, `risk:low`, and the `pkg:*` area;
 `projectItems[].status.name` settles `Blocked`; `body` is where an external
-dependency is named. Only the fit cap comes from the receipt.
+dependency is named; `blockedBy` is GitHub's own blocked-by relationship, and a
+non-empty `blockedBy.nodes` is a rejection on its own. Read all three
+blocked-ness sources: a dependency recorded only through the native
+relationship appears in none of the others, so a projection that skipped it
+would claim work still waiting on something. Only the fit cap comes from the
+receipt.
 
 `state` must read `OPEN`, and `--repo` is not decoration. A closed issue
 otherwise passes every rule below and is refused only later by `issue:claim`,
@@ -144,8 +149,10 @@ Take the top N — default 2 — that satisfy **all** of:
   cannot be finished by an unattended worker however well it scores, so it is
   ineligible here even at rank 1. The merge approval every PR needs is not such
   a cap — it applies to the whole batch equally.
-- **Not blocked.** Not projected to `Blocked` on the workboard, and not waiting
-  on an external dependency named in its body.
+- **Not blocked, by any of the three records.** Not projected to `Blocked` on
+  the workboard, no non-empty `blockedBy` relationship, and not waiting on an
+  external dependency named in its body. The three do not imply each other:
+  a native blocked-by link needs no body sentence and moves no Project field.
 - **Carries a `pkg:*` label at all.** An issue with no package area makes the
   independence test below vacuous: it shares no label with anything, so two
   such issues both pass and then edit the same package. Nothing else rejects
@@ -193,7 +200,7 @@ so minutes pass between the ranking that selected the last issue and the moment
 it is claimed. `issue:claim` checks only that the issue is open and carries a
 claimable queue label; it does not know about `risk:low`, `Blocked`, a
 dependency added to the body, or an authority cap. Run the same
-`gh issue view --repo … --json number,title,state,labels,body,projectItems`
+`gh issue view --repo … --json number,title,state,labels,body,projectItems,blockedBy`
 read from the eligibility step again, against this issue, right before claiming
 it. An issue that stopped qualifying — closed included — is dropped, not
 claimed: say so in the report and move to the next receipt entry.
@@ -225,6 +232,17 @@ another session can take the issue between the ranking that selected it and
 this command. Spawn the worker only for a claim that succeeded. A worker briefed
 on an issue this sweep does not hold duplicates whatever its real owner is
 already doing.
+
+**A nonzero claim is not proof the claim did not happen.** `issue:claim`
+transitions the issue before it verifies ownership, re-reads the issue, and
+posts the claim comment, so a failure in any of those later steps exits nonzero
+with the issue already `agent-active` carrying this sweep's `Claim ID`.
+Treating that as "not staffed, leave it alone" strands the issue on the board
+with no worker and no report row — the same orphan the unstaffable-claim rule
+above prevents. So after **any** claim error, re-read the labels and the
+Project `Claim ID`. If this sweep holds it, either staff it or release it as
+above. If another session holds it, it is a lost claim. Only when nothing holds
+it is there nothing to undo.
 
 On a refused claim, leave the issue alone and record the loss in the report.
 The refusal names only the label state it found —
@@ -272,7 +290,17 @@ Then spawn one worker subagent per issue. Give each a brief containing:
     git clone "$repo" "$dir" || exit 1  # never mark a clone that failed
     printf '%s\n' "$sweep_id" > "$dir/.git/sweep-owner"
   fi
+  cd "$dir" || exit 1                   # everything after this runs here
   ```
+
+  **`$dir` is the working directory for every later command, not just the
+  clone.** `git clone` does not move the shell, and a worker can inherit the
+  orchestrator's directory, so setup, the branch, the edits, the gate, and the
+  push would all run in the orchestrator's checkout — the one tree this whole
+  scheme exists to keep workers out of, and the one the preflight requires to
+  stay clean. A shell that does not persist between calls does not make this
+  optional: every fresh shell re-enters `$dir` first, and no worker command is
+  ever issued from an unstated directory.
 
   `clone_url` is the orchestrator's own `git remote get-url --push origin`,
   fixed once and passed to every worker beside `sweep_id`. Take the **push**
@@ -521,8 +549,12 @@ crossed without anyone watching.
   both. A worker can open its PR and stall before `pnpm issue:review` runs, so
   the label still reads `agent-active` while a PR is already up for review; a
   label-only test releases it and the next sweep duplicates that work.
-  `gh pr list --head <worker-branch> --state open` settles it, and an open PR
-  is handled exactly like the `in-pr` case below.
+  `gh pr list --repo mento-protocol/monitoring-monorepo --head <worker-branch>
+--state open` settles it, and an open PR is handled exactly like the `in-pr`
+  case below. Pass `--repo` for the same reason the eligibility read carries it:
+  an unqualified lookup resolves through `GH_REPO` or the local remote, and a
+  miss here does not fail loudly — it reads as "no open PR" and releases an
+  issue that has one.
 
   Once the worker has opened its PR and run `pnpm issue:review`, the issue is
   `in-pr`, and releasing it

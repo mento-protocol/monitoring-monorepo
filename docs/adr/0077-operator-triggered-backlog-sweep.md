@@ -88,9 +88,10 @@ a reviewable audit line, not a consent gate.
 
 ## Consequences
 
-The nightly loop produces finished PRs with their evidence instead of a receipt
-someone still has to act on. The operator's review points are unchanged: they
-see the batch before it starts and every PR before anything merges.
+A sweep produces finished PRs with their evidence instead of a receipt someone
+still has to act on. It runs when an operator starts one, never on a schedule.
+The operator's review points are unchanged: they see the batch before it starts
+and every PR before anything merges.
 
 Eligibility is deliberately narrower than the ranking that feeds it —
 `agent-ready`, exactly one `risk:*` label equal to `risk:low`, a `pkg:*` area,

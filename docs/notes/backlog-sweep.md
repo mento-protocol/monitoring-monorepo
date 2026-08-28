@@ -58,7 +58,11 @@ each claim result is read before its worker is briefed. Only a successful claim
 gets a worker; a refused one is recorded in the report, and an exhausted receipt
 finishes with a smaller batch. A claim the sweep then cannot staff — a spawn
 that fails on a runtime's concurrency limit or any other error — is released
-immediately rather than left parked in `agent-active` with no worker. A
+immediately rather than left parked in `agent-active` with no worker. A claim
+command that exits nonzero is reconciled the same way rather than assumed not to
+have happened: the helper transitions the issue before it verifies ownership and
+posts its comment, so a later failure leaves the issue `agent-active` under this
+sweep's `Claim ID`. Re-read labels and ownership after any claim error. A
 replacement drawn from the next eligible receipt entry is printed before it is
 claimed, like the original batch — the printed batch is the record of what the
 sweep worked on, and an unannounced substitute makes that record wrong.
@@ -78,6 +82,12 @@ and keeping workers alive.
 PR. Workers never share a checkout: a repair applied through another worker's
 clone lands on the wrong branch, and the worker that owns that branch has no
 way to notice.
+
+Every worker command runs from inside its own clone. `git clone` does not move
+the shell and a worker can inherit the orchestrator's directory, so a brief
+that only says which path to clone into would let setup, the branch, the
+edits, and the gate run in the orchestrator's checkout — the tree the whole
+scheme exists to keep workers out of.
 
 A worker's clone path is derived from its issue number, so it is deterministic
 and can already exist — an interrupted run leaves one behind, and a released
@@ -117,9 +127,10 @@ does not carry the difference: its Top 15 is `Rank | Issue | Score | Reason`,
 and it scores `needs-grooming` issues beside `agent-ready` ones. Selection by
 `rank-backlog` is a ranking verdict, not a batch verdict. So each candidate is
 read directly — `gh issue view <n> --repo mento-protocol/monitoring-monorepo
---json number,title,state,labels,body,projectItems`, where `labels` settles the
-queue state, risk, and `pkg:*` area, `projectItems[].status.name` settles
-`Blocked`, and `body` is where an external dependency is named. Only the fit cap
+--json number,title,state,labels,body,projectItems,blockedBy`, where `labels`
+settles the queue state, risk, and `pkg:*` area, `projectItems[].status.name`
+settles `Blocked`, `blockedBy` carries GitHub's own blocked-by relationship,
+and `body` is where an external dependency is named. Only the fit cap
 comes from the receipt. `state` must read `OPEN`, since a closed issue passes
 every rule below and is refused only later by `issue:claim`; `--repo` is
 explicit because an unqualified read resolves against the current checkout's
@@ -147,8 +158,9 @@ An issue enters a batch only when all of the following hold:
   capped issue cannot be finished unattended however well it scores, so it is
   ineligible here even at rank 1. The merge approval every PR needs is not such
   a cap; it applies to the whole batch equally and so distinguishes nothing.
-- **Not blocked** — not projected to `Blocked` on the workboard, and not
-  waiting on an external dependency named in its body.
+- **Not blocked by any of three records** — not projected to `Blocked` on the
+  workboard, no non-empty `blockedBy` relationship, and not waiting on an
+  external dependency named in its body. None of the three implies another.
 - **Carries a `pkg:*` label** — an issue with no package area satisfies the
   independence test vacuously and can then collide with a sibling in the same
   package. Nothing else catches it: the Agent Task form starts at
