@@ -309,6 +309,15 @@ describe("TroveLedgerTable", () => {
     expect(rowTexts()).toHaveLength(2);
   });
 
+  it("qualifies the complete-history claim with a mid-update notice while un-anchored", () => {
+    render({ rows: [ledgerRow()], anchored: false });
+    expect(text()).toContain("Snapshot mid-update");
+
+    // Anchored again: the notice clears.
+    render({ rows: [ledgerRow()], anchored: true });
+    expect(text()).not.toContain("Snapshot mid-update");
+  });
+
   it("defaults to chronological ascending; the header toggle reverses and exposes aria-sort", () => {
     render({
       complete: false,

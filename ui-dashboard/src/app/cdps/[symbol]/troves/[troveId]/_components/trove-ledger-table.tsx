@@ -406,6 +406,15 @@ export function TroveLedgerTable({
         error={hasLoadedOnce ? error : undefined}
         className="mb-3"
       />
+      {!anchored && rows.length > 0 && (
+        // Same mid-write window the chart pauses for and the interest and
+        // reconciliation gates hold on: qualifies the "complete history"
+        // claim above until the next poll re-anchors.
+        <p role="status" className="mb-3 text-xs text-amber-400">
+          Snapshot mid-update — the rows below may be missing the newest
+          operation until the next poll re-anchors the ledger.
+        </p>
+      )}
       {error != null && !hasLoadedOnce ? (
         // First-load failure: the header cards above keep rendering; this
         // section degrades alone. Retry is automatic — the shared SWR retry
