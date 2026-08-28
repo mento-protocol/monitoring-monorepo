@@ -182,9 +182,31 @@ describe("useTroveLedger", () => {
     render(handle!);
 
     expect(latest!.supported).toBe(false);
+    // Checked-absent, not check-failed: the interim rollout wording is
+    // honest here.
+    expect(latest!.probeFailed).toBe(false);
     expect(
       mockUseGQL.mock.calls.some(([query]) => query === CDP_TROVE_LEDGER),
     ).toBe(false);
+  });
+
+  it("flags a never-succeeded, errored probe as check-failed, not checked-absent", () => {
+    mockQueries({
+      probeUnresolved: true,
+      probeError: new Error("probe timeout"),
+    });
+    render(handle!);
+
+    expect(latest!.supported).toBe(false);
+    expect(latest!.probeFailed).toBe(true);
+  });
+
+  it("keeps probeFailed false when a probe refresh fails behind a stale success", () => {
+    mockQueries({ probeError: new Error("refresh failed") });
+    render(handle!);
+
+    expect(latest!.supported).toBe(true);
+    expect(latest!.probeFailed).toBe(false);
   });
 
   it("fires the gated query with the sentinel request limit and the Zod guard once supported", () => {

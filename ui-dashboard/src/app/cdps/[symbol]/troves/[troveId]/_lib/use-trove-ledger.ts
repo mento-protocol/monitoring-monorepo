@@ -34,6 +34,13 @@ export type TroveLedgerState = {
    *  direction swaps the view (upgrade on promotion, honest fallback on
    *  rollback). Fails closed while the probe loads or errors. */
   supported: boolean;
+  /** True when the probe has NEVER succeeded and its latest attempt
+   *  errored: `supported` false then means "could not check the schema",
+   *  not "checked, entity absent" — the caller renders an honest
+   *  check-failed notice instead of the rollout wording. A failed refresh
+   *  AFTER a success keeps SWR's stale probe data, so the gate holds the
+   *  last real answer and this stays false. */
+  probeFailed: boolean;
   /** Chronological (oldest-first) ledger rows, capped at the render limit.
    *  When truncated, the OLDEST rows were dropped (desc fetch, reversed
    *  client-side) so the recent events under investigation survive. */
@@ -133,6 +140,7 @@ export function useTroveLedger(troveEntityId: string | null): TroveLedgerState {
   const anchor = resolveLedgerWatermark(ledger.data);
   return {
     supported,
+    probeFailed: probe.data == null && probe.error != null,
     rows,
     truncated,
     complete: hasLoadedOnce && !truncated,

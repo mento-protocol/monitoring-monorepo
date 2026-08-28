@@ -122,8 +122,9 @@ export function CdpOwnerSearchShell({ children }: { children: ReactNode }) {
         Find Troves by Owner
       </h2>
       <p className="mt-1 text-sm text-slate-400">
-        Matches current and previous owners, so closed and liquidated troves are
-        found too.
+        Matches the current owner and each trove&apos;s most recent previous
+        owner, so closed and liquidated troves are found from the address that
+        last held them. Owners from older transfers are not indexed.
       </p>
       {children}
     </section>

@@ -299,6 +299,7 @@ describe("TroveDetailClient", () => {
     troveError = null,
     operationRows = [op()],
     troveSchema = TROVE_SCHEMA_WITH_TX,
+    troveSchemaError = null,
     interestBatchRows,
     interestBatchError = null,
     ledgerRows,
@@ -315,6 +316,9 @@ describe("TroveDetailClient", () => {
       | typeof TROVE_SCHEMA_WITH_TX
       | typeof TROVE_SCHEMA_WITHOUT_TX
       | typeof TROVE_SCHEMA_WITH_LEDGER;
+    /** When set, the probe reports never-succeeded + errored (`data`
+     *  undefined), the check-failed case — `troveSchema` is ignored. */
+    troveSchemaError?: Error | null;
     /** `undefined` (default) simulates "never resolved" (loading, or a
      *  failure with nothing cached) — `data` stays `undefined`, matching
      *  real SWR semantics. Pass `[]` for "resolved, no matching batch row"
@@ -341,7 +345,9 @@ describe("TroveDetailClient", () => {
         return { data: markets, error: marketsError, isLoading: false };
       }
       if (query === CDP_TROVE_SCHEMA_FIELDS) {
-        return { data: troveSchema, error: null, isLoading: false };
+        return troveSchemaError != null
+          ? { data: undefined, error: troveSchemaError, isLoading: false }
+          : { data: troveSchema, error: null, isLoading: false };
       }
       if (query === CDP_TROVE_BY_ID || query === CDP_TROVE_BY_ID_WITHOUT_TX) {
         return {
@@ -996,10 +1002,27 @@ describe("TroveDetailClient", () => {
     const text = handle!.container.textContent ?? "";
     expect(text).toContain("Trove operations");
     expect(text).toContain("Per-redemption detail pending indexer rollout");
+    // Checked-absent: the check-failed disclosure must NOT render.
+    expect(text).not.toContain("availability check failed");
     expect(text).not.toContain("Trove ledger");
     expect(mockUseGQL.mock.calls.some(([q]) => q === CDP_TROVE_LEDGER)).toBe(
       false,
     );
+  });
+
+  it("discloses a failed schema probe instead of claiming a pending rollout", () => {
+    mockQueries({ troveSchemaError: new Error("probe timeout") });
+    render(handle!);
+
+    const text = handle!.container.textContent ?? "";
+    // Fail-closed still: interim view, no ledger query.
+    expect(text).toContain("Trove operations");
+    expect(mockUseGQL.mock.calls.some(([q]) => q === CDP_TROVE_LEDGER)).toBe(
+      false,
+    );
+    // But the cause is named — the rollout wording alone would misattribute
+    // a backend failure to a pending rollout.
+    expect(text).toContain("complete-history availability check failed");
   });
 
   it("renders the complete ledger — and disables the interim query — once the gate opens", () => {

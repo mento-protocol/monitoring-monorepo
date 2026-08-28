@@ -428,6 +428,22 @@ describe("TroveBalanceChart", () => {
     );
   });
 
+  it("discloses a failed refresh behind cached rows with the shared stale notice", () => {
+    render(
+      handle!,
+      chartProps({ error: new Error("poll timeout"), hasLoadedOnce: true }),
+    );
+
+    // The cached series keeps rendering — under the explicit
+    // last-confirmed-state disclosure, same affordance as the panels.
+    expect(
+      handle!.container.querySelector('[data-testid="plot"]'),
+    ).not.toBeNull();
+    expect(handle!.container.textContent).toContain(
+      "Balance chart refresh failed — showing the last confirmed state",
+    );
+  });
+
   it("exposes the figure role with a range-aware accessible name and sr-only summary", () => {
     render(handle!, chartProps());
 

@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useMemo, useRef, useState } from "react";
+import { StaleRefreshNotice } from "@/components/feedback";
 import { useDeferredMount } from "@/components/use-deferred-mount";
 import {
   escapePlotText,
@@ -580,6 +581,11 @@ export function TroveBalanceChart({
         </div>
         <TroveChartRangePills range={range} onRangeChange={setRange} />
       </div>
+      <StaleRefreshNotice
+        subject="Balance chart"
+        error={hasLoadedOnce ? error : undefined}
+        className="mt-3"
+      />
       <div
         ref={containerRef}
         role="figure"

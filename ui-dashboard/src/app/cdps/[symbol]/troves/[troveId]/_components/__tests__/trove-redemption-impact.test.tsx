@@ -105,6 +105,7 @@ function ledgerState(
 ): TroveLedgerState {
   return {
     supported: true,
+    probeFailed: false,
     rows: [],
     truncated: false,
     complete: true,

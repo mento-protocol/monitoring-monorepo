@@ -560,19 +560,31 @@ function TroveEventHistory({
     );
   }
   return (
-    <TroveOperationsList
-      rows={operationRows}
-      truncated={truncated}
-      isLoading={operations.isLoading}
-      error={operations.error}
-      // `operations.data != null`, not `operationRows.length > 0`: the
-      // latter can't tell "never loaded" from "loaded, confirmed empty"
-      // (see the prop's doc comment on TroveOperationsList).
-      hasLoadedOnce={operations.data != null}
-      hasLifetimeTotals={hasTroveLifetimeTotals(trove)}
-      chainId={collateral.chainId}
-      debtSymbol={collateral.symbol}
-    />
+    <>
+      {ledger.probeFailed && (
+        // A never-succeeded, errored probe means "could not check the
+        // schema" — without this line the interim view's rollout wording
+        // would misattribute a backend failure to a pending rollout.
+        <p role="status" className="text-xs text-amber-400">
+          The complete-history availability check failed — showing the interim
+          view while it retries automatically. Per-redemption detail may exist
+          but cannot be confirmed right now.
+        </p>
+      )}
+      <TroveOperationsList
+        rows={operationRows}
+        truncated={truncated}
+        isLoading={operations.isLoading}
+        error={operations.error}
+        // `operations.data != null`, not `operationRows.length > 0`: the
+        // latter can't tell "never loaded" from "loaded, confirmed empty"
+        // (see the prop's doc comment on TroveOperationsList).
+        hasLoadedOnce={operations.data != null}
+        hasLifetimeTotals={hasTroveLifetimeTotals(trove)}
+        chainId={collateral.chainId}
+        debtSymbol={collateral.symbol}
+      />
+    </>
   );
 }
 
