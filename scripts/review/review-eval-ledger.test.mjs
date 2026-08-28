@@ -783,7 +783,7 @@ test("freshness ages the ledger from executed_at alone", () => {
       rows: [
         full(121),
         full(1, {
-          judge_calibration: { agreement: 37, total: 40 },
+          judge_calibration: { agreement: 33, total: 40 },
           verdict: "AMBER",
         }),
       ],

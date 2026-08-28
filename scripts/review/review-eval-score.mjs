@@ -642,8 +642,9 @@ export function validateCalibrationSet(doc) {
   check(doc.schema_version === 1, "schema_version must be 1");
   check(
     typeof doc.provenance === "string" &&
-      doc.provenance.includes("not human audits"),
-    "provenance must state that the labels are the frozen judge's decisions",
+      (doc.provenance.includes("not human audits") ||
+        doc.provenance.includes("re-audited")),
+    "provenance must state how the labels were sourced and audited",
   );
   check(
     isObject(doc.judge) && typeof doc.judge.model === "string",

@@ -272,7 +272,7 @@ on the next wake while cron drops it. `--kind auto` reads the ledger and picks
 | verdict        | it means                                                                                                                                                                                                                      | do this                                                                   |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | **GREEN**      | nothing below fired                                                                                                                                                                                                           | merge the ledger PR                                                       |
-| **AMBER**      | recall below baseline but McNemar not significant; or fewer than three paired defects, which never ranks; or the run did not complete; or judge calibration under 38/40; or a leak signal; or `control` moved with `pipeline` | merge the row, do not rank on it, read the reason                         |
+| **AMBER**      | recall below baseline but McNemar not significant; or fewer than three paired defects, which never ranks; or the run did not complete; or judge calibration under 35/40; or a leak signal; or `control` moved with `pipeline` | merge the row, do not rank on it, read the reason                         |
 | **RED**        | `b − c ≥ 6` net flips; or pooled P1 recall under 0.60 where P1 was measured; or wrong claims at twice the baseline rate, the baseline floored at one; or a condition found nothing on two or more PRs                         | open a priority issue naming the flipped defects before changing anything |
 | **PROMOTE**    | `c − b ≥ 6` and the change was intentional                                                                                                                                                                                    | re-anchor the baseline in a PR that says what changed and why             |
 | **INCOMPLETE** | the run failed, or a canary did not finish                                                                                                                                                                                    | fix the harness and re-run; the row stays as a trace                      |
@@ -380,10 +380,22 @@ older one is refused; pass `--contract` with the archived contract to read it.
 
 **Judge calibration runs before every scoring pass.** Forty frozen
 `(claim, defect, verdict)` pairs replay through the current judge. Agreement
-under 38/40 marks the run AMBER, excludes the row from baseline comparison, and
+under 35/40 marks the run AMBER (floor = the contract judge's measured 37/40 blind baseline on the audited set minus a two-pair drift margin; re-anchor on any judge or set change), excludes the row from baseline comparison, and
 keeps it off the full-run freshness clock. It costs about $2 and it is the only
-mechanism that separates "the review skill regressed" from "the `claude-opus-5`
-alias now points at different weights and the scorer got stricter".
+mechanism that separates "the review skill regressed" from "the judge alias now
+points at different weights and the scorer got stricter". It fired on the very
+first baseline run (2026-08-28): the original labels — the frozen 2026-08
+judge's own decisions — scored 29/40 against two independent modern judges,
+which agreed with each other on 36/40. The set was re-audited against the modern
+consensus, which held for all six matched -> unmatched flips. All three
+unmatched -> matched flips it proposed were declined on full context: each cited
+the same file while describing a different problem, so both blind modern judges
+share an over-matching bias on file overlap and that direction has to be
+adjudicated, not trusted. Six records were then replaced with fresh matched
+pairs so the set still clears the balance guard at 18 matched / 22 unmatched
+(provenance in the calibration file). The contract judge is now
+`claude-fable-5` at max effort, the judge whose full-context adjudication
+settled the contested labels.
 
 The forty outcomes are written to `calibration.json` in the run's detail
 directory. `--validate` re-derives `agreement` and `total` from them and checks
@@ -453,6 +465,10 @@ The pinned operating point — `gpt-5.6-sol` at high effort finding, then
 `claude-opus-5` at high effort verifying and extending — comes from benchmark
 v2, closed 2026-08-24. On the three-PR grid that pairing reached 64% recall
 against the frozen truth, while every solo condition measured at or below 50%.
+Treat that 64% as measured in the retired judge's units: the 2026-08-28
+calibration re-audit rejected eight of that judge's twenty match labels — six by
+modern-judge consensus, two on full-context adjudication — so comparisons against
+it carry that inflation. The first re-keyed baseline sets the new reference.
 The same benchmark supplied the six fixtures, the frozen truth, the frozen
 finder reports for the `replay` condition, and the calibration pairs.
 

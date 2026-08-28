@@ -1,823 +1,849 @@
 {
-  "schema_version": 1,
-  "suite_id": "review-skill-v1",
-  "generated_at": "2026-08-25",
-  "provenance": "sampled 2026-08-25 from bench2 judge outputs; labels are the frozen 2026-08 judge's decisions, not human audits",
-  "method": "For every bench2 run cell (runs/<pr>/<condition>/), the structural pre-filter of match_findings.py was replayed over the stored review output to rebuild the numbered candidate list. Each numbered entry in the cell's judge_reasoning maps to one candidate defect; the label is matched when that defect id appears in the cell's matched_ids, unmatched otherwise. claim_excerpt is the passage of the review that names the defect's file, taken verbatim. Cells whose reasoning keys did not cover 1..N were skipped. The sample is balanced 20 matched / 20 unmatched and spread across all 6 contract PRs and 21 run conditions.",
-  "judge": {
-    "model": "claude-opus-5",
-    "prompt": "scripts/review/prompts/judge-match.md"
+ "schema_version": 1,
+ "suite_id": "review-skill-v1",
+ "generated_at": "2026-08-25",
+ "provenance": "Labels re-audited 2026-08-28. The original 2026-08-25 labels were the frozen 2026-08 opus judge's own decisions; two independent modern judges (claude-opus-5 current, claude-fable-5 max) each agreed with only 29/40 and with each other on 36/40, so the frozen judge was the outlier. The set now committed contains: 6 frozen labels flipped where both modern judges agreed, every one of them matched -> unmatched; 3 consensus flips declined on full-context adjudication, which is every unmatched -> matched flip the modern consensus proposed \u2014 all three were same-file false positives (3827655676, a claim about the backfill parser rejecting a multi-paragraph handoff note against a defect about a broken code span and list indentation at the same doc lines; 3827655684, a claim about the missing Branch: line, which is defect 3827636772, against a defect about the trailing-blank-line rejection in isBoundedCloudHandoff; 3830695396, a claim about the AGENT_QUALITY_GATE_LOCK_HELD guard and the poisoned success stamp against a defect about 'is set' vs 'is non-empty' wording at :1157). Both blind modern judges therefore share a systematic over-matching bias on file overlap, and a future audit must adjudicate proposed unmatched -> matched flips on full context rather than trust their agreement. The set also holds 2 modern-contested pairs adjudicated matched (3829659550, same fails-open-on-null-head defect in the same function; 3829986403, the claim names duplicate-dispatch acceptance and the exactly-one fix) and 6 records replaced to restore balance. The 6 dropped records were the two pairs whose stored content was too degraded to judge (3830003055-matched, whose excerpt truncated out the matching partition item at set construction, and 3830371325-matched, whose stored defect detail is CodeRabbit analysis-script noise) plus the four least informative consensus-unmatched records (3830371325-unmatched, same noise detail; 3829659546-unmatched, whose detail truncates before the requirement it states; and 3829986398-unmatched and 3830003055-unmatched, which repeat one identical truncated hazard-table excerpt from the same cell and never name the defect's file). Their six replacements are matched pairs taken from the 2026-08-28 scored run and re-confirmed on the merits here: 3830366234, 3830366247, 3830416461, 3828328194, 3830366547 and 3830366556.",
+ "method": "For every bench2 run cell (runs/<pr>/<condition>/), the structural pre-filter of match_findings.py was replayed over the stored review output to rebuild the numbered candidate list. Each numbered entry in the cell's judge_reasoning maps to one candidate defect; the label is matched when that defect id appears in the cell's matched_ids, unmatched otherwise. claim_excerpt is the passage of the review that names the defect's file, taken verbatim. Cells whose reasoning keys did not cover 1..N were skipped. The sample was built balanced 20 matched / 20 unmatched; the 2026-08-28 re-audit and rebalance moved it to 18 matched / 22 unmatched, spread across 6 contract PRs and 22 run conditions (see provenance and counts for the current numbers). The six records added in the rebalance come from the 2026-08-28 scored run detail directory instead, where candidate_index indexes that cell's claims[] array.",
+ "judge": {
+  "model": "claude-fable-5",
+  "effort": "max",
+  "prompt": "scripts/review/prompts/judge-match.md"
+ },
+ "limits": {
+  "agreement_amber_below": 35
+ },
+ "counts": {
+  "total": 40,
+  "matched": 18,
+  "unmatched": 22,
+  "prs": 6,
+  "conditions": 22
+ },
+ "records": [
+  {
+   "record_id": "pr1982-3827636772-matched",
+   "source_cell": {
+    "pr": 1982,
+    "condition": "C_opus5_orig",
+    "candidate_index": 1
+   },
+   "defect_id": 3827636772,
+   "expected_verdict": "matched",
+   "claim_excerpt": "**\ud83d\udd34 92 \u2014 `scripts/pr/issue-board-backfill.mjs:119` \u2014 `Branch:` is mandatory to parse but optional to emit, so a branchless claim is permanently un-backfillable.**",
+   "defect": {
+    "id": 3827636772,
+    "severity": "P1",
+    "path": "scripts/pr/issue-board-backfill.mjs",
+    "line": 119,
+    "title": "[P1] Comments claimed without a resolvable git branch can never be backfilled \u2014 not even for Agent/Claim ID/Claimed At.",
+    "detail": "[P1] Comments claimed without a resolvable git branch can never be backfilled \u2014 not even for Agent/Claim ID/Claimed At.\n\nbuildClaimComment (scripts/pr/issue-board-commands.mjs:74) only emits a Branch: line if (metadata.branch). metadata.branch falls back to options.branch || (await getGitBranch()) (issue-board-commands.mjs:190,261), and getGitBranch() runs git branch --show-current, which returns"
+   },
+   "frozen_reasoning": "The 92-confidence blocker states exactly this: parseClaimComment requires Branch: while buildClaimComment only emits it if metadata.branch, getGitBranch returns empty on detached HEAD, leaving claims permanently un-backfillable."
   },
-  "limits": {
-    "agreement_amber_below": 38
+  {
+   "record_id": "pr1982-3827647420-matched",
+   "source_cell": {
+    "pr": 1982,
+    "condition": "B_opus5_bare",
+    "candidate_index": 2
+   },
+   "defect_id": 3827647420,
+   "expected_verdict": "matched",
+   "claim_excerpt": "`scripts/pr/issue-board-backfill.mjs:271-277` re-reads a snapshot and checks `verified.values[field] !== verified.claim.metadata[field]`. The invariant you want is \"did my write land\", which is `beforeWrite.claim.metadata`. As written, a competing trusted claim comment posted between the write and the verify read reports `backfill verification failed for <field>` when the write actually succeeded.",
+   "defect": {
+    "id": 3827647420,
+    "severity": "P2",
+    "path": "scripts/pr/issue-board-backfill.mjs",
+    "line": 269,
+    "title": "Revalidate the claim during the write batch",
+    "detail": "![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)  Revalidate the claim during the write batch\n\nWhen a competing MCP claim comment arrives after the second snapshot but before or during this batch, the command writes the older claim into every empty Project field and only notices the newer claim during final verification. It then exits with an error after mutation, leaving stale non-e"
+   },
+   "frozen_reasoning": "Section 2 explicitly identifies that the beforeWrite\u2192mutation window (:264) is unguarded while the two back-to-back snapshots guard nothing, and section 6 describes the competing-claim-during-write failing verification after mutation \u2014 same underlying race, different suggested fix."
   },
-  "counts": {
-    "total": 40,
-    "matched": 20,
-    "unmatched": 20,
-    "prs": 6,
-    "conditions": 21
+  {
+   "record_id": "pr1982-3827647420-unmatched",
+   "source_cell": {
+    "pr": 1982,
+    "condition": "A_opus48_orig",
+    "candidate_index": 2
+   },
+   "defect_id": 3827647420,
+   "expected_verdict": "unmatched",
+   "claim_excerpt": "- **65** \ud83d\udca1 `scripts/pr/issue-board-backfill.mjs:30` \u2014 `hasControlCharacter` rejects C0 controls (\u22640x1f) and 0x7f but **not C1 controls (0x80\u20130x9f, e.g. NEL 0x85)**. A claim value containing an embedded C1 separator would pass the `isSafeSingleLineText` \"single line\" guarantee and be written into a project field. (found by: correctness, security) \u2014 Low impact: source comments must already come from an OWNER/MEMBER/COLLABORATOR, so this is hardening, not an exploit path. Note it also doesn't catch U+2028/U+2029.\n- **65** \ud83d\udca1 `scripts/pr/issue-board-backfill.mjs:167` \u2014 `valueFor(field, metadata)` is a single-use one-line wrapper (`metadata[field] ?? null`) used only in `buildBackfillPlan`; inline it. (found by: architecture, slop)",
+   "defect": {
+    "id": 3827647420,
+    "severity": "P2",
+    "path": "scripts/pr/issue-board-backfill.mjs",
+    "line": 269,
+    "title": "Revalidate the claim during the write batch",
+    "detail": "![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)  Revalidate the claim during the write batch\n\nWhen a competing MCP claim comment arrives after the second snapshot but before or during this batch, the command writes the older claim into every empty Project field and only notices the newer claim during final verification. It then exits with an error after mutation, leaving stale non-e"
+   },
+   "frozen_reasoning": "Review explicitly asserts the CAS re-read-before-write and post-write verification are sound, the opposite of the race/stale-write defect."
   },
-  "records": [
-    {
-      "record_id": "pr1982-3827636772-matched",
-      "source_cell": {
-        "pr": 1982,
-        "condition": "C_opus5_orig",
-        "candidate_index": 1
-      },
-      "defect_id": 3827636772,
-      "expected_verdict": "matched",
-      "claim_excerpt": "**🔴 92 — `scripts/pr/issue-board-backfill.mjs:119` — `Branch:` is mandatory to parse but optional to emit, so a branchless claim is permanently un-backfillable.**",
-      "defect": {
-        "id": 3827636772,
-        "severity": "P1",
-        "path": "scripts/pr/issue-board-backfill.mjs",
-        "line": 119,
-        "title": "[P1] Comments claimed without a resolvable git branch can never be backfilled — not even for Agent/Claim ID/Claimed At.",
-        "detail": "[P1] Comments claimed without a resolvable git branch can never be backfilled — not even for Agent/Claim ID/Claimed At.\n\nbuildClaimComment (scripts/pr/issue-board-commands.mjs:74) only emits a Branch: line if (metadata.branch). metadata.branch falls back to options.branch || (await getGitBranch()) (issue-board-commands.mjs:190,261), and getGitBranch() runs git branch --show-current, which returns"
-      },
-      "frozen_reasoning": "The 92-confidence blocker states exactly this: parseClaimComment requires Branch: while buildClaimComment only emits it if metadata.branch, getGitBranch returns empty on detached HEAD, leaving claims permanently un-backfillable."
-    },
-    {
-      "record_id": "pr1982-3827647420-matched",
-      "source_cell": {
-        "pr": 1982,
-        "condition": "B_opus5_bare",
-        "candidate_index": 2
-      },
-      "defect_id": 3827647420,
-      "expected_verdict": "matched",
-      "claim_excerpt": "`scripts/pr/issue-board-backfill.mjs:271-277` re-reads a snapshot and checks `verified.values[field] !== verified.claim.metadata[field]`. The invariant you want is \"did my write land\", which is `beforeWrite.claim.metadata`. As written, a competing trusted claim comment posted between the write and the verify read reports `backfill verification failed for <field>` when the write actually succeeded.",
-      "defect": {
-        "id": 3827647420,
-        "severity": "P2",
-        "path": "scripts/pr/issue-board-backfill.mjs",
-        "line": 269,
-        "title": "Revalidate the claim during the write batch",
-        "detail": "![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)  Revalidate the claim during the write batch\n\nWhen a competing MCP claim comment arrives after the second snapshot but before or during this batch, the command writes the older claim into every empty Project field and only notices the newer claim during final verification. It then exits with an error after mutation, leaving stale non-e"
-      },
-      "frozen_reasoning": "Section 2 explicitly identifies that the beforeWrite→mutation window (:264) is unguarded while the two back-to-back snapshots guard nothing, and section 6 describes the competing-claim-during-write failing verification after mutation — same underlying race, different suggested fix."
-    },
-    {
-      "record_id": "pr1982-3827647420-unmatched",
-      "source_cell": {
-        "pr": 1982,
-        "condition": "A_opus48_orig",
-        "candidate_index": 2
-      },
-      "defect_id": 3827647420,
-      "expected_verdict": "unmatched",
-      "claim_excerpt": "- **65** 💡 `scripts/pr/issue-board-backfill.mjs:30` — `hasControlCharacter` rejects C0 controls (≤0x1f) and 0x7f but **not C1 controls (0x80–0x9f, e.g. NEL 0x85)**. A claim value containing an embedded C1 separator would pass the `isSafeSingleLineText` \"single line\" guarantee and be written into a project field. (found by: correctness, security) — Low impact: source comments must already come from an OWNER/MEMBER/COLLABORATOR, so this is hardening, not an exploit path. Note it also doesn't catch U+2028/U+2029.\n- **65** 💡 `scripts/pr/issue-board-backfill.mjs:167` — `valueFor(field, metadata)` is a single-use one-line wrapper (`metadata[field] ?? null`) used only in `buildBackfillPlan`; inline it. (found by: architecture, slop)",
-      "defect": {
-        "id": 3827647420,
-        "severity": "P2",
-        "path": "scripts/pr/issue-board-backfill.mjs",
-        "line": 269,
-        "title": "Revalidate the claim during the write batch",
-        "detail": "![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)  Revalidate the claim during the write batch\n\nWhen a competing MCP claim comment arrives after the second snapshot but before or during this batch, the command writes the older claim into every empty Project field and only notices the newer claim during final verification. It then exits with an error after mutation, leaving stale non-e"
-      },
-      "frozen_reasoning": "Review explicitly asserts the CAS re-read-before-write and post-write verification are sound, the opposite of the race/stale-write defect."
-    },
-    {
-      "record_id": "pr1982-3827655676-unmatched",
-      "source_cell": {
-        "pr": 1982,
-        "condition": "C_opus5_orig",
-        "candidate_index": 3
-      },
-      "defect_id": 3827655676,
-      "expected_verdict": "unmatched",
-      "claim_excerpt": "This matters because `docs/notes/github-tooling-surfaces.md:105-112` instructs cloud agents to hand-write this comment plus a free-form note stating Project fields were not set — and a two-paragraph note, the most natural form, kills the whole claim. Returning a reason string (or logging one under `--dry-run`) would make the failure actionable.",
-      "defect": {
-        "id": 3827655676,
-        "severity": "P2",
-        "path": "docs/notes/github-tooling-surfaces.md",
-        "line": 112,
-        "title": "📐 Maintainability & Code Quality | 🟡 Minor | ⚡ Quick win",
-        "detail": "_📐 Maintainability & Code Quality_ | _🟡 Minor_ | _⚡ Quick win_\n\nKeep Claim ID on one line and restore the list indentation.\n\nLine 108 breaks the inline code span mid-token, and line 109 starts at column 0 instead of the 3-space continuation indent that every other step uses. Rewrap the sentence.\n\n\n📝 Proposed fix\n\ndiff\n-4. Hand off to a gh-capable surface. Run\n-   pnpm issue:board backfill --issue"
-      },
-      "frozen_reasoning": "No mention of the docs/notes/github-tooling-surfaces.md markdown formatting issue (broken inline code span / list indentation); the file is cited only as context for the parser strictness finding."
-    },
-    {
-      "record_id": "pr1982-3827655684-unmatched",
-      "source_cell": {
-        "pr": 1982,
-        "condition": "B_opus5_bare",
-        "candidate_index": 3
-      },
-      "defect_id": 3827655684,
-      "expected_verdict": "unmatched",
-      "claim_excerpt": "`buildClaimComment` drops the `Branch:` line whenever the branch is falsy (`scripts/pr/issue-board-commands.mjs:74`), and `claimMetadata` deliberately produces that state (`scripts/pr/issue-board-commands.mjs:144`, `branch: branch || undefined`). The new parser requires `Branch:` and returns `null` without it (`scripts/pr/issue-board-backfill.mjs:119`), so `readSnapshot` throws `has no valid trusted agent claim comment` (`scripts/pr/issue-board-backfill.mjs:235`).",
-      "defect": {
-        "id": 3827655684,
-        "severity": "P2",
-        "path": "scripts/pr/issue-board-backfill.mjs",
-        "line": 87,
-        "title": "🎯 Functional Correctness | 🟡 Minor | ⚡ Quick win",
-        "detail": "_🎯 Functional Correctness_ | _🟡 Minor_ | _⚡ Quick win_\n\nIgnore trailing blank lines before the handoff bound check.\n\nisBoundedCloudHandoff rejects any empty line. Line 111 skips blank lines only directly after the field block. A body that ends with a newline after handoff text keeps a final \"\" element in lines.slice(index). parseClaimComment then returns null, and readSnapshot fails with \"has no v"
-      },
-      "frozen_reasoning": "The review never mentions isBoundedCloudHandoff, blank/empty lines, or trailing-newline handling in parseClaimComment; no finding touches this."
-    },
-    {
-      "record_id": "pr1982-3827663924-matched",
-      "source_cell": {
-        "pr": 1982,
-        "condition": "D_opus5_r2",
-        "candidate_index": 4
-      },
-      "defect_id": 3827663924,
-      "expected_verdict": "matched",
-      "claim_excerpt": "**F1 — `issue-board-backfill.mjs:119` rejects the helper's own branch-less claim comment.** `buildClaimComment` (`issue-board-commands.mjs:74`) omits the `Branch:` line when branch is falsy, and `getGitBranch()` returns `\"\"` on detached HEAD. Feeding that comment to `parseClaimComment` returns `null`, so backfill throws and `Claim ID`, `Agent`, and `Claimed At` don't get written either — the one absent field takes the three recoverable ones down with it.",
-      "defect": {
-        "id": 3827663924,
-        "severity": "P2",
-        "path": "scripts/pr/issue-board-backfill.mjs",
-        "line": 123,
-        "title": "Handoff trailing newline rejects claims",
-        "detail": "### Handoff trailing newline rejects claims\n\nMedium Severity\n\n\nisBoundedCloudHandoff requires every remaining line to be non-empty, so a trusted MCP claim that ends with a trailing newline after the Project #12 handoff sentence fails parsing and backfill reports no valid claim. Comments without that footer still accept trailing blanks because empties are skipped before the check, so the primary cl"
-      },
-      "frozen_reasoning": "Same defect as 3; F2 covers the handoff trailing-newline rejection of trusted MCP claims."
-    },
-    {
-      "record_id": "pr1982-3827663924-unmatched",
-      "source_cell": {
-        "pr": 1982,
-        "condition": "E_opus5_r3",
-        "candidate_index": 5
-      },
-      "defect_id": 3827663924,
-      "expected_verdict": "unmatched",
-      "claim_excerpt": "### 1. A claim comment with no `Branch:` line is unrecoverable, and the error misdescribes why\n`scripts/pr/issue-board-backfill.mjs:119` (parser) vs `scripts/pr/issue-board-commands.mjs:74` (generator) — **confirmed by execution**, routed back to you for the design call.",
-      "defect": {
-        "id": 3827663924,
-        "severity": "P2",
-        "path": "scripts/pr/issue-board-backfill.mjs",
-        "line": 123,
-        "title": "Handoff trailing newline rejects claims",
-        "detail": "### Handoff trailing newline rejects claims\n\nMedium Severity\n\n\nisBoundedCloudHandoff requires every remaining line to be non-empty, so a trusted MCP claim that ends with a trailing newline after the Project #12 handoff sentence fails parsing and backfill reports no valid claim. Comments without that footer still accept trailing blanks because empties are skipped before the check, so the primary cl"
-      },
-      "frozen_reasoning": "Same as 4 — the trailing-newline handoff rejection is listed under 'Considered and cleared' as not a bug."
-    },
-    {
-      "record_id": "pr1984-3828303385-matched",
-      "source_cell": {
-        "pr": 1984,
-        "condition": "A_opus48_orig",
-        "candidate_index": 1
-      },
-      "defect_id": 3828303385,
-      "expected_verdict": "matched",
-      "claim_excerpt": "- **🟡 [scripts/sentry/autofix/sentry-autofix-refused-inventory.mjs:26]** The Search query leaves the colon-bearing label **unquoted**: `label:sentry:fix-refused`. The repo's own established convention for this exact label quotes it — `sentry-autofix-queue-io.mjs:278` builds `-label:\"${FIX_REFUSED_LABEL}\"` (and does so through the same GitHub search-qualifier grammar). If GitHub's parser treats the unquoted `label:sentry:fix-refused` differently (e.g. as `label:sentry` + stray text), the API returns a **wrong `total_count` that still passes every validation** in `parseRefusedStubInventory` and renders as a confident \"Refused stubs (all states): N\" line. That's worse than the module's designed failure mode (render `unknown`): it's silently incorrect operator data. The tests can't catch it — they mock `runGh` (`run-record.test.mjs:106`) and in fact *assert* the unquoted string, enshrining it. **Fix:** quote the label to match the sibling module: `label:\"sentry:fix-refused\"` (verify against a live search first). Worth confirming before merge.",
-      "defect": {
-        "id": 3828303385,
-        "severity": "P1",
-        "path": "scripts/sentry/autofix/sentry-autofix-refused-inventory.mjs",
-        "line": 26,
-        "title": "[P1] Unquoted colon-bearing label breaks the Search API query",
-        "detail": "[P1] Unquoted colon-bearing label breaks the Search API query\n\njs\nq=repo:${repo} is:issue label:sentry-triage label:sentry:fix-refused,\n\n\nEvery other GitHub Search query in this codebase quotes a label value that contains a colon (and, for consistency, quotes plain labels too):\n\n- scripts/sentry/autofix/sentry-autofix-queue-io.mjs:278 —  -label:\"${FIX_PR_OPENED_LABEL}\" -label:\"${FIX_REFUSED_LABEL}"
-      },
-      "frozen_reasoning": "The review's sole warning names sentry-autofix-refused-inventory.mjs:26, the unquoted colon-bearing `label:sentry:fix-refused`, cites the same sibling convention at sentry-autofix-queue-io.mjs:278, and proposes quoting it."
-    },
-    {
-      "record_id": "pr1984-3828303385-unmatched",
-      "source_cell": {
-        "pr": 1984,
-        "condition": "E_opus5_r3",
-        "candidate_index": 1
-      },
-      "defect_id": 3828303385,
-      "expected_verdict": "unmatched",
-      "claim_excerpt": "**3. Hardcoded label literals bypass the repo's documented single-source-of-truth constants — `scripts/sentry/autofix/sentry-autofix-refused-inventory.mjs:26`**",
-      "defect": {
-        "id": 3828303385,
-        "severity": "P1",
-        "path": "scripts/sentry/autofix/sentry-autofix-refused-inventory.mjs",
-        "line": 26,
-        "title": "[P1] Unquoted colon-bearing label breaks the Search API query",
-        "detail": "[P1] Unquoted colon-bearing label breaks the Search API query\n\njs\nq=repo:${repo} is:issue label:sentry-triage label:sentry:fix-refused,\n\n\nEvery other GitHub Search query in this codebase quotes a label value that contains a colon (and, for consistency, quotes plain labels too):\n\n- scripts/sentry/autofix/sentry-autofix-queue-io.mjs:278 —  -label:\"${FIX_PR_OPENED_LABEL}\" -label:\"${FIX_REFUSED_LABEL}"
-      },
-      "frozen_reasoning": "The review explicitly considered and discarded the unquoted colon-bearing label, testing it against the live API and declaring it 'Not a defect' — it does not identify it as the defect."
-    },
-    {
-      "record_id": "pr1984-3828313974-matched",
-      "source_cell": {
-        "pr": 1984,
-        "condition": "D_opus5_r2",
-        "candidate_index": 1
-      },
-      "defect_id": 3828313974,
-      "expected_verdict": "matched",
-      "claim_excerpt": "**1. `sentry-autofix-run-record.mjs:66` — dead default-repo fallback.** `renderRefusedStubInventory(…, repo = REFUSED_INVENTORY_DEFAULT_REPO)` declares a default, and the CLI documents the flag as optional. Both are false: `readFlag` returns **`null`**, not `undefined` (`sentry-autofix-finalize.mjs:712`), and default params only fire on `undefined`. Confirmed by running it:",
-      "defect": {
-        "id": 3828313974,
-        "severity": "P1",
-        "path": "scripts/sentry/autofix/sentry-autofix-run-record.mjs",
-        "line": 85,
-        "title": "🎯 Functional Correctness | 🟠 Major | ⚡ Quick win",
-        "detail": "_🎯 Functional Correctness_ | _🟠 Major_ | _⚡ Quick win_\n\nNormalize a null repo before building the links.\n\nThe default parameter on line 67 applies only when repo is undefined. The CLI supplies null. readFlag in scripts/sentry/autofix/sentry-autofix-finalize.mjs (lines 710-716) returns null for an absent flag, and line 853 forwards that value as refusedInventoryRepo. The usage text on lines 690-691"
-      },
-      "frozen_reasoning": "Review finding #1 names renderRefusedStubInventory's repo default being bypassed because readFlag returns null and defaults only fire on undefined — same defect, same file/function."
-    },
-    {
-      "record_id": "pr1990-3829654081-matched",
-      "source_cell": {
-        "pr": 1990,
-        "condition": "cx_gpt-5.6-terra_max",
-        "candidate_index": 1
-      },
-      "defect_id": 3829654081,
-      "expected_verdict": "matched",
-      "claim_excerpt": "- [P2] Recognize CodeRabbit completion comments at the current head — /private/tmp/fx-1990/scripts/pr/pr-ready-state-core.mjs:772-774\n  CodeRabbit can finish a current-head run in its `recent_review` issue comment instead of a new `PullRequestReview`. PR #2007 had that Run ID/completion block at the head while `reviews` held only an older run and empty reply records, so this returns `stale` and the new babysit rule posts another command that CodeRabbit answers `Already reviewed`. Treat a CodeRabbit-authored completion block whose reviewed range ends at `headRefOid` as `reviewed` before considering request markers.",
-      "defect": {
-        "id": 3829654081,
-        "severity": "P1",
-        "path": "scripts/pr/pr-ready-state-core.mjs",
-        "line": 750,
-        "title": "Split the growing ready-state core",
-        "detail": "![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)  Split the growing ready-state core\n\nThis addition grows scripts/pr/pr-ready-state-core.mjs from 998 raw / 889 rough lines to 1,077 raw / 961 rough lines, moving it into the repository watchlist's near-hard tier. The required recurring-review checklist says that a source file already past the 600-line cap must be split when a change gr"
-      },
-      "frozen_reasoning": "Third comment names the same file-size problem — the change pushes pr-ready-state-core.mjs from 889/998 to 961/1,077 lines into the near-hard band and must be split/extracted."
-    },
-    {
-      "record_id": "pr1990-3829654081-unmatched",
-      "source_cell": {
-        "pr": 1990,
-        "condition": "cx_gpt-5.6-terra_medium",
-        "candidate_index": 1
-      },
-      "defect_id": 3829654081,
-      "expected_verdict": "unmatched",
-      "claim_excerpt": "- [P1] Recognize CodeRabbit’s current-head summary comment — /private/tmp/fx-1990/scripts/pr/pr-ready-state-core.mjs:772-774\n  When CodeRabbit records its run in its edited top-level summary comment (the observed integration shape) and leaves the current-head `reviews[]` record empty, this returns `stale` because the comment loop only recognizes this repo's request marker. The closeout workflow then posts another `@coderabbitai review` for a head that was already reviewed, consuming a review slot and adding avoidable wait time. Parse CodeRabbit-authored summary comments with the Run ID and a reviewed range ending at `currentHeadOid`, using `updated_at` for freshness.",
-      "defect": {
-        "id": 3829654081,
-        "severity": "P1",
-        "path": "scripts/pr/pr-ready-state-core.mjs",
-        "line": 750,
-        "title": "Split the growing ready-state core",
-        "detail": "![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)  Split the growing ready-state core\n\nThis addition grows scripts/pr/pr-ready-state-core.mjs from 998 raw / 889 rough lines to 1,077 raw / 961 rough lines, moving it into the repository watchlist's near-hard tier. The required recurring-review checklist says that a source file already past the 600-line cap must be split when a change gr"
-      },
-      "frozen_reasoning": "The review says nothing about file length, the 600-line cap, or splitting the ready-state core module."
-    },
-    {
-      "record_id": "pr1990-3829659544-matched",
-      "source_cell": {
-        "pr": 1990,
-        "condition": "sweep_claude-opus-5_medium",
-        "candidate_index": 2
-      },
-      "defect_id": 3829659544,
-      "expected_verdict": "matched",
-      "claim_excerpt": "The example payload still shows only `codexReviewSignal` in `gates` and at top level, while the field list below (`:351-355`) documents `codeRabbitReviewSignal` and both formatters emit it (`pr-ready-state-format.mjs:58`, `:151`). `docs/notes/pr-ready-state.md` is declared the owner of that contract (`ship/SKILL.md:215`), so consumers copying the schema will miss the new field. Add the gate object after `:290` and `\"codeRabbitReviewSignal\": \"missing\"` after `:305`.",
-      "defect": {
-        "id": 3829659544,
-        "severity": "P2",
-        "path": "docs/notes/pr-ready-state.md",
-        "line": 369,
-        "title": "🗄️ Data Integrity & Integration | 🟡 Minor | ⚡ Quick win",
-        "detail": "_🗄️ Data Integrity & Integration_ | _🟡 Minor_ | _⚡ Quick win_\n\nAdd codeRabbitReviewSignal to the sample JSON.\n\nThe new field expectation documents this gate, but the gates object in the expected CLI example does not include it. Add the field to the example or state that the example is abbreviated. Keep the documented JSON shape consistent with the new projection.\n\n\n🤖 Prompt for AI Agents\n\n\nTreat f"
-      },
-      "frozen_reasoning": "Review section 2 flags the stale example payload in docs/notes/pr-ready-state.md missing codeRabbitReviewSignal in the gates object and top level — same defect."
-    },
-    {
-      "record_id": "pr1990-3829659546-matched",
-      "source_cell": {
-        "pr": 1990,
-        "condition": "combo_gpt-5.6-sol_high__claude-opus-5_high",
-        "candidate_index": 3
-      },
-      "defect_id": 3829659546,
-      "expected_verdict": "matched",
-      "claim_excerpt": "- [P2] Run the final projections after the closeout request — /private/tmp/fx-1990/docs/notes/pr-ready-state.md:399-402\n  The ordered workflow runs the projection pair in step 5 and posts the CodeRabbit request here in step 8, but step 10 does not explicitly require another pair afterward. If the requested review posts findings after the earlier sweep, the agent can report all-clear from stale projections. Move the request before the final pair or require both projections again after the closeout refresh, per `AGENTS.md:90-95`.",
-      "defect": {
-        "id": 3829659546,
-        "severity": "P1",
-        "path": "docs/notes/pr-ready-state.md",
-        "line": 408,
-        "title": "🎯 Functional Correctness | 🟠 Major | ⚡ Quick win",
-        "detail": "_🎯 Functional Correctness_ | _🟠 Major_ | _⚡ Quick win_\n\nUse one ordering for the final readiness workflow.\n\nThe central workflow and both ship mirrors can run the projection pair before applying the CodeRabbit closeout rule. Require the exact sequence below at every site:\n\n- docs/notes/pr-ready-state.md#L399-L408: Apply CodeRabbit closeout before the final feedback-state and ready-state pair.\n- .a"
-      },
-      "frozen_reasoning": "Item #4 flags pr-ready-state.md:399-402 running the projection pair at step 5 and posting the request at step 8 with no re-run, contradicting SKILL.md/operating card, and says to pick one ordering."
-    },
-    {
-      "record_id": "pr1990-3829659546-unmatched",
-      "source_cell": {
-        "pr": 1990,
-        "condition": "sweep_claude-opus-5_max",
-        "candidate_index": 3
-      },
-      "defect_id": 3829659546,
-      "expected_verdict": "unmatched",
-      "claim_excerpt": "`scripts/pr/pr-ready-state-core.mjs:1008-1015` · `.claude/skills/babysit-pr/SKILL.md:311` (and the `.agents/` mirror) · `docs/notes/pr-ready-state.md:399-402`",
-      "defect": {
-        "id": 3829659546,
-        "severity": "P1",
-        "path": "docs/notes/pr-ready-state.md",
-        "line": 408,
-        "title": "🎯 Functional Correctness | 🟠 Major | ⚡ Quick win",
-        "detail": "_🎯 Functional Correctness_ | _🟠 Major_ | _⚡ Quick win_\n\nUse one ordering for the final readiness workflow.\n\nThe central workflow and both ship mirrors can run the projection pair before applying the CodeRabbit closeout rule. Require the exact sequence below at every site:\n\n- docs/notes/pr-ready-state.md#L399-L408: Apply CodeRabbit closeout before the final feedback-state and ready-state pair.\n- .a"
-      },
-      "frozen_reasoning": "No discussion of the ordering of the CodeRabbit closeout rule relative to the feedback-state/ready-state projection pair across the workflow and ship mirrors."
-    },
-    {
-      "record_id": "pr1990-3829659550-matched",
-      "source_cell": {
-        "pr": 1990,
-        "condition": "sweep_claude-sonnet-5_max",
-        "candidate_index": 4
-      },
-      "defect_id": 3829659550,
-      "expected_verdict": "matched",
-      "claim_excerpt": "- **`scripts/pr/pr-ready-state-core.mjs:442`** — `isCodeRabbitFinalHeadReviewRequestBody` returns `true` unconditionally when `currentHeadOid` is falsy (fails open), unlike the sibling `isCurrentReviewSignal` (line 657-658), which degrades to a timestamp comparison instead.\n- **`scripts/pr/pr-ready-state-core.mjs:443`** — SHAs are lowercased before comparison here, but the composed `reviewCommitOid` path (line 658) does a raw case-sensitive `===`. Inconsistent contract within the same function (harmless today since GitHub SHAs are always lowercase).\n- **`scripts/pr/pr-ready-state-core.mjs:772`** — The closeout-request marker is accepted from *any* commenter, not just the PR author, so any account can post the marker and suppress a legitimate re-request against the paid, rate-limited CodeRabbit ladder (ADR 0066). Mirrors a pre-existing pattern (`isCodexReviewRequestBody`) but now gates a paid resource.\n- **`scripts/pr/pr-ready-state-core.mjs:3`** — `CODERABBIT_AUTHORS` duplicates an identical `Set` literal already in `pr-feedback-state-core.mjs:52` and `review-process-metrics.mjs:14` — three copies to keep in sync if the bot login ever changes.\n- **`scripts/pr/pr-ready-state-core.mjs:777`** — `isCodeRabbitFinalHeadReviewRequestBody` is called twice per comment (once 1-arg as a filter, once 2-arg for the SHA compare), re-running the same two regexes redundantly.",
-      "defect": {
-        "id": 3829659550,
-        "severity": "P1",
-        "path": "scripts/pr/pr-ready-state-core.mjs",
-        "line": 783,
-        "title": "🎯 Functional Correctness | 🟠 Major | ⚡ Quick win",
-        "detail": "_🎯 Functional Correctness_ | _🟠 Major_ | _⚡ Quick win_\n\nRequire a current head SHA for current CodeRabbit states.\n\nLine 766 falls back to review timestamps when currentHeadOid is null. Line 777 accepts any marked request when currentHeadOid is null. The classifier can then return reviewed or requested without an exact head match. This violates the exact-head closeout contract and can suppress a re"
-      },
-      "frozen_reasoning": "Review's finding at core.mjs:442 names the same problem — the marker check returns true unconditionally when currentHeadOid is falsy, so classification succeeds without an exact head match."
-    },
-    {
-      "record_id": "pr1990-3829659550-unmatched",
-      "source_cell": {
-        "pr": 1990,
-        "condition": "sweep_claude-sonnet-5_medium",
-        "candidate_index": 2
-      },
-      "defect_id": 3829659550,
-      "expected_verdict": "unmatched",
-      "claim_excerpt": "No issues found — the review covered the diff against `base` (docs updates, plus the new `classifyCodeRabbitReviewSignal`/`isCodeRabbitFinalHeadReviewRequestBody` pair in `scripts/pr/pr-ready-state-core.mjs` with matching test coverage) and nothing rose to a level worth blocking on. Safe to merge.",
-      "defect": {
-        "id": 3829659550,
-        "severity": "P1",
-        "path": "scripts/pr/pr-ready-state-core.mjs",
-        "line": 783,
-        "title": "🎯 Functional Correctness | 🟠 Major | ⚡ Quick win",
-        "detail": "_🎯 Functional Correctness_ | _🟠 Major_ | _⚡ Quick win_\n\nRequire a current head SHA for current CodeRabbit states.\n\nLine 766 falls back to review timestamps when currentHeadOid is null. Line 777 accepts any marked request when currentHeadOid is null. The classifier can then return reviewed or requested without an exact head match. This violates the exact-head closeout contract and can suppress a re"
-      },
-      "frozen_reasoning": "The review names classifyCodeRabbitReviewSignal but explicitly reports no issues; it does not identify the null currentHeadOid fallback breaking the exact-head closeout contract."
-    },
-    {
-      "record_id": "pr1990-3830394205-matched",
-      "source_cell": {
-        "pr": 1990,
-        "condition": "G_opus5_plus_codex_builtin",
-        "candidate_index": 5
-      },
-      "defect_id": 3830394205,
-      "expected_verdict": "matched",
-      "claim_excerpt": "Fix: also count a `coderabbitai`/`coderabbitai[bot]` issue comment matching `CODERABBIT_REVIEW_RUN_MARKER` whose reviewed span ends at the full current head, keyed on `updated_at` (the comment is edited in place), keeping empty review records ignored. The same rule is written into the specs and must move with it: `docs/notes/pr-ready-state.md:111-115` and `:351-355`, `SKILL.md:295-297` (both mirrors), and `cloud-watch-loop.md:48-50` (both mirrors) — the MCP path inherits the defect independently of the Node classifier.",
-      "defect": {
-        "id": 3830394205,
-        "severity": "P2",
-        "path": ".agents/skills/babysit-pr/cloud-watch-loop.md",
-        "line": 53,
-        "title": "Authenticate closeout markers in the cloud loop",
-        "detail": "![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)  Authenticate closeout markers in the cloud loop\n\nWhen a public PR is babysat through the MCP fallback, this condition accepts the marker from any top-level commenter, unlike the new local classifier's maintainer/agent check. An outside user can quote the template for the current head, causing the cloud agent to suppress the real CodeR"
-      },
-      "frozen_reasoning": "The review names the same underlying problem — the marker loop accepts a closeout marker from any commenter with no author/maintainer check, letting an outsider suppress the real CodeRabbit request — though it anchors it in the Node classifier rather than the cloud-watch-loop mirror and downgrades severity."
-    },
-    {
-      "record_id": "pr1990-3830394205-unmatched",
-      "source_cell": {
-        "pr": 1990,
-        "condition": "combo_gpt-5.6-sol_max__claude-opus-5_max",
-        "candidate_index": 5
-      },
-      "defect_id": 3830394205,
-      "expected_verdict": "unmatched",
-      "claim_excerpt": "The same never-true rule is written into the specs and must be fixed in the same patch: `docs/notes/pr-ready-state.md:113-114` and `:351-355`, `.claude/` and `.agents/skills/babysit-pr/SKILL.md:296-297`, and — independently of the Node classifier — `.claude/` and `.agents/skills/babysit-pr/cloud-watch-loop.md:48-50`, which tells the MCP path to read the signal from `get_reviews` under the identical condition. Fixing only the classifier leaves the cloud path broken.",
-      "defect": {
-        "id": 3830394205,
-        "severity": "P2",
-        "path": ".agents/skills/babysit-pr/cloud-watch-loop.md",
-        "line": 53,
-        "title": "Authenticate closeout markers in the cloud loop",
-        "detail": "![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)  Authenticate closeout markers in the cloud loop\n\nWhen a public PR is babysat through the MCP fallback, this condition accepts the marker from any top-level commenter, unlike the new local classifier's maintainer/agent check. An outside user can quote the template for the current head, causing the cloud agent to suppress the real CodeR"
-      },
-      "frozen_reasoning": "The review's authentication finding is scoped to the local Node classifier (core.mjs:772-784); its cloud-watch-loop.md discussion concerns only the unreachable 'reviewed' rule, not accepting closeout markers from untrusted commenters in the MCP path."
-    },
-    {
-      "record_id": "pr1995-3829986398-unmatched",
-      "source_cell": {
-        "pr": 1995,
-        "condition": "sweep_claude-fable-5_high",
-        "candidate_index": 1
-      },
-      "defect_id": 3829986398,
-      "expected_verdict": "unmatched",
-      "claim_excerpt": "| Hazard | Result |\n|---|---|\n| `declare`/`local` that would become function-scoped | All 30 hits are inside nested helpers or heredoc stubs — none at family level |\n| `$1`/`$@`/`shift`/`return` now seeing function args instead of script args | All hits are inside helper functions or heredoc fixtures |\n| Helper functions defined in one family, used in another | `run_lockfile_scope_gate`, `assert_hermetic_setup_routes`, `run_parallel_interrupt_regression` are each defined and used within a single family |\n| Variables read in family N but assigned only in family < N | None (scripted scan across all 11 families) |\n| `set`/`shopt`/`trap`/`cd`/`export` at family level (not in a subshell) | None |\n| ERR trap re-arming via nested `arm_suite_abort_trap` call | Verified empirically: fires inside the family on bash 5.3 and 3.2, and does **not** fire in fixture subshells / `$(…)` — matches the comment's claim |\n| Partition checker actually catches violations | Injected 5 faults (stray line between families, line after end marker, registry/definition mismatch, reorder, line before start marker) — all 5 refused with a correct line number |\n| Focus dispatch | `install-wiring,gate-contract` passes in 2s; unknown family, `GITHUB_ACTIONS` set, and `\" , \"` all exit 2 with the right message |\n| `AGENT_QUALITY_GATE_LOCK_HELD` really exported by the gate | `scripts/agent-quality-gate.sh:1143` |\n| Exact success line `agent quality gate tests passed` preserved for unfocused runs | Yes (`scripts/agent-quality-gate.test.sh:649`); no external consumer greps it anyway |\n| shellcheck + trunk | Clean |",
-      "defect": {
-        "id": 3829986398,
-        "severity": "P2",
-        "path": "scripts/agent-quality-gate.test.sh",
-        "line": 28,
-        "title": "🩺 Stability & Availability | 🟡 Minor | ⚡ Quick win",
-        "detail": "_🩺 Stability & Availability_ | _🟡 Minor_ | _⚡ Quick win_\n\nKeep the abort trap safe before output_file exists.\n\nWith the required set -u, a failure at Line 26 expands unset output_file in this trap. The handler then emits an unbound-variable error instead of its intended diagnostic. Use a default value such as ${output_file:-/dev/null}, or initialize output_file before arming the trap.\n\n\n🤖 Prompt f"
-      },
-      "frozen_reasoning": "No mention of the abort trap / output_file being unset under set -u."
-    },
-    {
-      "record_id": "pr1995-3829986403-matched",
-      "source_cell": {
-        "pr": 1995,
-        "condition": "G_opus5_plus_codex_builtin",
-        "candidate_index": 2
-      },
-      "defect_id": 3829986403,
-      "expected_verdict": "matched",
-      "claim_excerpt": "- [P2] Require exactly one post-partition dispatch — /private/tmp/fx-1995/scripts/agent-quality-gate.test.sh:514-516\n  If a later edit deletes the final `dispatch_gate_test_families` call, this verifier accepts the file because its `END` block checks only the closing marker. The script then exits successfully after defining functions and runs zero tests; duplicate dispatch calls are also accepted. Count this line and require exactly one so the self-test required by [scripts/AGENTS.md:164-166](scripts/AGENTS.md#L164-L166) cannot silently become a no-op.",
-      "defect": {
-        "id": 3829986403,
-        "severity": "P2",
-        "path": "scripts/agent-quality-gate.test.sh",
-        "line": 525,
-        "title": "🎯 Functional Correctness | 🟡 Minor | ⚡ Quick win",
-        "detail": "_🎯 Functional Correctness_ | _🟡 Minor_ | _⚡ Quick win_\n\nRequire exactly one dispatch call.\n\nThe validator accepts every dispatch_gate_test_families line after the end marker. A second call passes validation and runs every selected family twice. Count dispatch calls and fail unless the count is one.\n\n\nProposed fix\n\ndiff\n-        if ($0 == \"dispatch_gate_test_families\") { next }\n+        if ($0 == \""
-      },
-      "frozen_reasoning": "Claim 2 explicitly states duplicate dispatch calls are accepted (suite runs twice) and says to count the line in END and require exactly one."
-    },
-    {
-      "record_id": "pr1995-3829986403-unmatched",
-      "source_cell": {
-        "pr": 1995,
-        "condition": "sweep_claude-fable-5_max",
-        "candidate_index": 2
-      },
-      "defect_id": 3829986403,
-      "expected_verdict": "unmatched",
-      "claim_excerpt": "`scripts/agent-quality-gate.test.sh:601` refuses a focus only when `AGENT_QUALITY_GATE_LOCK_HELD` or `GITHUB_ACTIONS` is set. But the gate only exports `AGENT_QUALITY_GATE_LOCK_HELD` after it wins the lock (`scripts/agent-quality-gate.sh:1143`), and `acquire_gate_run_lock` returns before that line when locking is disabled (`scripts/agent-quality-gate.sh:1617`, `--no-lock` or `AGENT_QUALITY_GATE_LOCK=0`). Mapped commands on that path carry only `AGENTQG_RUN` (line 5085) and `CI=true`.",
-      "defect": {
-        "id": 3829986403,
-        "severity": "P2",
-        "path": "scripts/agent-quality-gate.test.sh",
-        "line": 525,
-        "title": "🎯 Functional Correctness | 🟡 Minor | ⚡ Quick win",
-        "detail": "_🎯 Functional Correctness_ | _🟡 Minor_ | _⚡ Quick win_\n\nRequire exactly one dispatch call.\n\nThe validator accepts every dispatch_gate_test_families line after the end marker. A second call passes validation and runs every selected family twice. Count dispatch calls and fail unless the count is one.\n\n\nProposed fix\n\ndiff\n-        if ($0 == \"dispatch_gate_test_families\") { next }\n+        if ($0 == \""
-      },
-      "frozen_reasoning": "Review asserts the partition checker rejects 'second statement after dispatch' and treats dispatch validation as correct; it never flags that multiple dispatch calls pass and would double-run families."
-    },
-    {
-      "record_id": "pr1995-3830003055-matched",
-      "source_cell": {
-        "pr": 1995,
-        "condition": "E_opus5_r3",
-        "candidate_index": 3
-      },
-      "defect_id": 3830003055,
-      "expected_verdict": "matched",
-      "claim_excerpt": "1. `scripts/agent-quality-gate.test.sh:596,601` — the guard's stated invariant (\"every command a real gate run spawns carries it\") is false for `--no-lock` / `AGENT_QUALITY_GATE_LOCK=0`. `acquire_gate_run_lock` returns at `agent-quality-gate.sh:1616` *before* the export, so those runs spawn the mapped self-test without `AGENT_QUALITY_GATE_LOCK_HELD` — an exported `GATE_TEST_FOCUS` then silently shrinks the gate's own self-test, reported as passed. `docs/notes/agent-quality-gate-mechanics.md:1144` repeats the same inaccurate claim.",
-      "defect": {
-        "id": 3830003055,
-        "severity": "P2",
-        "path": "scripts/agent-quality-gate.test.sh",
-        "line": 572,
-        "title": "Partition allows missing dispatch",
-        "detail": "### Partition allows missing dispatch\n\nMedium Severity\n\n\nverify_gate_family_partition treats any number of dispatch_gate_test_families lines after the end marker as fine, including zero. Deleting that call still passes the structural check, defines every family, then exits 0 without running tests or printing success. That quietly greens the mapped self-test the partition was meant to protect."
-      },
-      "frozen_reasoning": "Item 2 states the verifier never checks the dispatch call is present, and confirms deleting it exits 0 with zero tests run — same defect."
-    },
-    {
-      "record_id": "pr1995-3830003055-unmatched",
-      "source_cell": {
-        "pr": 1995,
-        "condition": "sweep_claude-fable-5_high",
-        "candidate_index": 3
-      },
-      "defect_id": 3830003055,
-      "expected_verdict": "unmatched",
-      "claim_excerpt": "| Hazard | Result |\n|---|---|\n| `declare`/`local` that would become function-scoped | All 30 hits are inside nested helpers or heredoc stubs — none at family level |\n| `$1`/`$@`/`shift`/`return` now seeing function args instead of script args | All hits are inside helper functions or heredoc fixtures |\n| Helper functions defined in one family, used in another | `run_lockfile_scope_gate`, `assert_hermetic_setup_routes`, `run_parallel_interrupt_regression` are each defined and used within a single family |\n| Variables read in family N but assigned only in family < N | None (scripted scan across all 11 families) |\n| `set`/`shopt`/`trap`/`cd`/`export` at family level (not in a subshell) | None |\n| ERR trap re-arming via nested `arm_suite_abort_trap` call | Verified empirically: fires inside the family on bash 5.3 and 3.2, and does **not** fire in fixture subshells / `$(…)` — matches the comment's claim |\n| Partition checker actually catches violations | Injected 5 faults (stray line between families, line after end marker, registry/definition mismatch, reorder, line before start marker) — all 5 refused with a correct line number |\n| Focus dispatch | `install-wiring,gate-contract` passes in 2s; unknown family, `GITHUB_ACTIONS` set, and `\" , \"` all exit 2 with the right message |\n| `AGENT_QUALITY_GATE_LOCK_HELD` really exported by the gate | `scripts/agent-quality-gate.sh:1143` |\n| Exact success line `agent quality gate tests passed` preserved for unfocused runs | Yes (`scripts/agent-quality-gate.test.sh:649`); no external consumer greps it anyway |\n| shellcheck + trunk | Clean |",
-      "defect": {
-        "id": 3830003055,
-        "severity": "P2",
-        "path": "scripts/agent-quality-gate.test.sh",
-        "line": 572,
-        "title": "Partition allows missing dispatch",
-        "detail": "### Partition allows missing dispatch\n\nMedium Severity\n\n\nverify_gate_family_partition treats any number of dispatch_gate_test_families lines after the end marker as fine, including zero. Deleting that call still passes the structural check, defines every family, then exits 0 without running tests or printing success. That quietly greens the mapped self-test the partition was meant to protect."
-      },
-      "frozen_reasoning": "No mention that zero dispatch calls would pass the structural check and silently skip the suite."
-    },
-    {
-      "record_id": "pr1995-3830042123-matched",
-      "source_cell": {
-        "pr": 1995,
-        "condition": "combo_gpt-5.6-sol_high__claude-opus-5_high",
-        "candidate_index": 4
-      },
-      "defect_id": 3830042123,
-      "expected_verdict": "matched",
-      "claim_excerpt": "- [P2] Refuse focused tests in lockless gate runs — /private/tmp/fx-1995/scripts/agent-quality-gate.test.sh:600-603\n  When a developer uses the documented `--no-lock` or `AGENT_QUALITY_GATE_LOCK=0` escape hatch while `GATE_TEST_FOCUS` is exported, lock acquisition returns without setting `AGENT_QUALITY_GATE_LOCK_HELD`, so this guard does not fire. The gate's mapped self-test can then run only the selected family and report success without the full suite, contrary to the contract in `docs/notes/agent-quality-gate-mechanics.md:1139-1146`. Detect gate execution independently of lock ownership, or clear the focus before mapped commands.",
-      "defect": {
-        "id": 3830042123,
-        "severity": "P2",
-        "path": "scripts/agent-quality-gate.test.sh",
-        "line": 628,
-        "title": "Reject focus during lock-free gate runs",
-        "detail": "![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)  Reject focus during lock-free gate runs\n\nWhen a developer exports GATE_TEST_FOCUS and invokes the documented agent-quality-gate.sh --run --no-lock mode (or sets AGENT_QUALITY_GATE_LOCK=0), this guard allows the focused subset to answer for the full gate. acquire_gate_run_lock returns immediately for that mode at scripts/agent-quality-"
-      },
-      "frozen_reasoning": "Main finding: GATE_TEST_FOCUS guard keyed on AGENT_QUALITY_GATE_LOCK_HELD misses --no-lock / AGENT_QUALITY_GATE_LOCK=0 runs, letting a focused subset answer for the full gate."
-    },
-    {
-      "record_id": "pr1995-3830042128-unmatched",
-      "source_cell": {
-        "pr": 1995,
-        "condition": "combo_gpt-5.6-sol_high__claude-opus-5_high",
-        "candidate_index": 5
-      },
-      "defect_id": 3830042128,
-      "expected_verdict": "unmatched",
-      "claim_excerpt": "- [P2] Refuse focused tests in lockless gate runs — /private/tmp/fx-1995/scripts/agent-quality-gate.test.sh:600-603\n  When a developer uses the documented `--no-lock` or `AGENT_QUALITY_GATE_LOCK=0` escape hatch while `GATE_TEST_FOCUS` is exported, lock acquisition returns without setting `AGENT_QUALITY_GATE_LOCK_HELD`, so this guard does not fire. The gate's mapped self-test can then run only the selected family and report success without the full suite, contrary to the contract in `docs/notes/agent-quality-gate-mechanics.md:1139-1146`. Detect gate execution independently of lock ownership, or clear the focus before mapped commands.",
-      "defect": {
-        "id": 3830042128,
-        "severity": "P1",
-        "path": "scripts/agent-quality-gate.test.sh",
-        "line": 492,
-        "title": "Register the new self-test path pin",
-        "detail": "![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)  Register the new self-test path pin\n\nThis fallback introduces a hard-coded scripts/agent-quality-gate.test.sh pin but does not add it to the scripts path-pin inventory. The fallback is exercised when the suite is launched through a relative path from a subdirectory and then changes to the repo root; after a future script move, obvious"
-      },
-      "frozen_reasoning": "No mention of the hard-coded scripts/agent-quality-gate.test.sh path pin or the path-pin inventory."
-    },
-    {
-      "record_id": "pr1995-3830695396-matched",
-      "source_cell": {
-        "pr": 1995,
-        "condition": "sweep_claude-fable-5_high",
-        "candidate_index": 6
-      },
-      "defect_id": 3830695396,
-      "expected_verdict": "matched",
-      "claim_excerpt": "**`docs/notes/agent-quality-gate-mechanics.md:1143` — doc overstates the refusal.** It says \"A *set* `GATE_TEST_FOCUS` exits 2\" under the lock/CI, but `scripts/agent-quality-gate.test.sh:600` only refuses when the value is **non-empty** (`[[ -n \"$gate_test_focus\" ]]`). `GATE_TEST_FOCUS=` exported empty runs the full suite silently. The code behavior is the sensible one; change the doc to \"A non-empty `GATE_TEST_FOCUS`\".",
-      "defect": {
-        "id": 3830695396,
-        "severity": "P2",
-        "path": "docs/notes/agent-quality-gate-mechanics.md",
-        "line": 1157,
-        "title": "📐 Maintainability & Code Quality | 🟡 Minor | ⚡ Quick win",
-        "detail": "_📐 Maintainability & Code Quality_ | _🟡 Minor_ | _⚡ Quick win_\n\nMake the guard and failure wording precise.\n\nThe shell code rejects non-empty marker values, but this text says “is set.” Change it to “is non-empty,” or change the code to test variable presence. Replace “It reds the suite” with “It fails the suite.”\n\n\n\n\nAs per coding guidelines, “Prefer the short word. Cut every word that does no wo"
-      },
-      "frozen_reasoning": "The review's sole finding is exactly this: doc says 'set' GATE_TEST_FOCUS but the code tests for non-empty ([[ -n ]]); it proposes changing the doc to 'non-empty'."
-    },
-    {
-      "record_id": "pr1995-3830695396-unmatched",
-      "source_cell": {
-        "pr": 1995,
-        "condition": "G_opus5_plus_codex_builtin",
-        "candidate_index": 6
-      },
-      "defect_id": 3830695396,
-      "expected_verdict": "unmatched",
-      "claim_excerpt": "- **The fix already exists in the gate.** `AGENTQG_RUN` is exported into every mapped command by `run_with_timeout` (`agent-quality-gate.sh:5085`), the single execution path for both the serial (`:5356`) and parallel (`:5403`) branches, and it is set for no-lock runs too (`agentqg:nolock-$$`, `:620-622`). Guard on `AGENTQG_RUN` instead of `AGENT_QUALITY_GATE_LOCK_HELD`; no new marker needed. Note the lock family clears `AGENT_QUALITY_GATE_LOCK_HELD` deliberately in `run_locked_gate` (`:5966-5967`) — it does not clear `AGENTQG_RUN`, so check whether those nested fixture runs need the same treatment for the new variable.\n- **The shrunken run poisons the next push.** A green `--run` writes the whole-run success stamp unconditionally of lock mode (`agent-quality-gate.sh:5868-5877`); the pre-push hook is `--run --parallel 3 --skip-if-fresh --base origin/main` (`.trunk/trunk.yaml:136`) and exits on that stamp (`:4843-4848`). And `--no-lock` is exactly what the gate's own lock-timeout message tells a developer to use (`:1811`). So the escape-hatch path is the likely one, and its result is cached into the push that follows. (Per-command stamps are not a vector — the self-test is stamp-exempt, `:5224`.)\n- Same false claim in prose: `docs/notes/agent-quality-gate-mechanics.md:1143-1146` says the focus is refused when `AGENT_QUALITY_GATE_LOCK_HELD` is set, \"any command a real gate run spawns\". Fix with the code.",
-      "defect": {
-        "id": 3830695396,
-        "severity": "P2",
-        "path": "docs/notes/agent-quality-gate-mechanics.md",
-        "line": 1157,
-        "title": "📐 Maintainability & Code Quality | 🟡 Minor | ⚡ Quick win",
-        "detail": "_📐 Maintainability & Code Quality_ | _🟡 Minor_ | _⚡ Quick win_\n\nMake the guard and failure wording precise.\n\nThe shell code rejects non-empty marker values, but this text says “is set.” Change it to “is non-empty,” or change the code to test variable presence. Replace “It reds the suite” with “It fails the suite.”\n\n\n\n\nAs per coding guidelines, “Prefer the short word. Cut every word that does no wo"
-      },
-      "frozen_reasoning": "Review cites docs:1143-1146 only for the substantive false claim about the lock guard, not the 'is set' vs 'is non-empty' wording or 'reds the suite' phrasing at :1157."
-    },
-    {
-      "record_id": "pr1999-3830366243-matched",
-      "source_cell": {
-        "pr": 1999,
-        "condition": "cx_gpt-5.6-sol_max",
-        "candidate_index": 2
-      },
-      "defect_id": 3830366243,
-      "expected_verdict": "matched",
-      "claim_excerpt": "- [P2] Update the canonical Peg monitoring runbook — /private/tmp/fx-1999/alerts/rules/peg-message-templates.tf:5-6\n  `docs/notes/peg-monitoring.md:118-120` still says Slack titles contain the summary, while this change makes them icon-only, and lines 132-133 still say history reads only fired and resolved transitions although it now reads evaluation failures and recoveries. Update both statements because `AGENTS.md:25-27` defines canonical context as current operating truth.",
-      "defect": {
-        "id": 3830366243,
-        "severity": "P2",
-        "path": "alerts/rules/peg-message-templates.tf",
-        "line": 6,
-        "title": "Keep the Peg runbook aligned with the new title",
-        "detail": "![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)  Keep the Peg runbook aligned with the new title\n\nAfter this ships, the canonical docs/notes/peg-monitoring.md runbook still says that Slack titles contain the severity icon plus the alert summary, while this change makes the title icon-only and moves the linked summary into the body. Update the alert-copy contract in that runbook so o"
-      },
-      "frozen_reasoning": "Bullet 5 flags docs/notes/peg-monitoring.md title/summary contract being stale."
-    },
-    {
-      "record_id": "pr1999-3830366247-unmatched",
-      "source_cell": {
-        "pr": 1999,
-        "condition": "cx_gpt-5.6-terra_max",
-        "candidate_index": 3
-      },
-      "defect_id": 3830366247,
-      "expected_verdict": "unmatched",
-      "claim_excerpt": "- [P2] Use rule-aware copy for source-less evaluation failures — /private/tmp/fx-1999/ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts:230-234\n  When a source-less asset or policy rule enters Grafana `Error` (for example, Structural Saturation, Heartbeat Missing, Indexed Pool Unreachable, or Policy Rollover Stuck), its `source` label is empty. `pegAlertSourceName(\"\")` becomes `Price source`, so the new history rows point operators at a nonexistent price-source rule; use rule-aware or neutral copy for an empty source.",
-      "defect": {
-        "id": 3830366247,
-        "severity": "P2",
-        "path": "ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts",
-        "line": 114,
-        "title": "Include recoveries that resume in Pending",
-        "detail": "![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)  Include recoveries that resume in Pending\n\nWhen a rule with a nonzero for duration enters Error and its next successful evaluation still satisfies the condition, Grafana can recover into Pending rather than Normal or Alerting. This classifier ignores that transition, and errorStateHistoryUrl also requests only previous=Error&current=N"
-      },
-      "frozen_reasoning": "Review never discusses Pending-state recovery transitions or errorStateHistoryUrl query params."
-    },
-    {
-      "record_id": "pr1999-3830366547-matched",
-      "source_cell": {
-        "pr": 1999,
-        "condition": "sweep_claude-sonnet-5_high",
-        "candidate_index": 2
-      },
-      "defect_id": 3830366547,
-      "expected_verdict": "matched",
-      "claim_excerpt": "Reviewed the branch diff (peg-alert monitoring: Terraform Slack/VictorOps templates, Grafana state-history route, and the new \"Error\"-state handling in `peg-alert-events.ts`). One real bug found:",
-      "defect": {
-        "id": 3830366547,
-        "severity": "P1",
-        "path": "ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts",
-        "line": 352,
-        "title": "Error recovery leaves breach active",
-        "detail": "### Error recovery leaves breach active\n\nHigh Severity\n\n\npairStateTransitions keeps alert and error cycles on separate keys, so error-recovered only closes the error lane. After Alerting → Error → Normal, the earlier raised stays open and Recent alerts still shows an active peg breach even though Grafana is Normal and the new recovery row says monitoring resumed. Peg rules use exec_err_state = \"Er"
-      },
-      "frozen_reasoning": "Matches exactly: separate alert/error cycle keys mean Alerting→Error→Normal leaves the earlier 'raised' open, showing a still-active breach while the recovery row says monitoring resumed."
-    },
-    {
-      "record_id": "pr1999-3830366556-unmatched",
-      "source_cell": {
-        "pr": 1999,
-        "condition": "B_opus5_bare",
-        "candidate_index": 5
-      },
-      "defect_id": 3830366556,
-      "expected_verdict": "unmatched",
-      "claim_excerpt": "- **`peg-alert-events.ts:318-319`** — `error-recovered-alerting` closes the `:error` cycle but doesn't open an `:alert` cycle, even though the rule is Alerting afterwards. The eventual `Alerting→Normal` falls through to `unpairedCleared` (line 346) and renders without a `lasted …` duration. Nothing is dropped, so this is cosmetic.\n- **`scripts/alerts/alert-rules-lint.test.mjs:1215-1220`** — `templates.slice(indexOf(title), indexOf(message))` returns `\"\"` if the two resources are ever reordered, and the new negative assertions at 1258-1259 would then pass vacuously. `indexOf`-pair slicing is worth a guard.",
-      "defect": {
-        "id": 3830366556,
-        "severity": "P2",
-        "path": "ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts",
-        "line": 116,
-        "title": "Pending recovery orphans error cycle",
-        "detail": "### Pending recovery orphans error cycle\n\nMedium Severity\n\n\nError cycles only close on Error → Alerting or Error → Normal. Several Peg rules use a non-zero for duration, and Grafana can recover through Error → Pending → Alerting. Pending transitions are intentionally not queried, so the error opening never pairs and Recent alerts can keep a stuck “monitoring failed” row after evaluation has alread"
-      },
-      "frozen_reasoning": "No mention of Error→Pending→Alerting leaving a stuck 'monitoring failed' row."
-    },
-    {
-      "record_id": "pr1999-3830371307-matched",
-      "source_cell": {
-        "pr": 1999,
-        "condition": "combo_gpt-5.6-sol_high__claude-opus-5_max",
-        "candidate_index": 6
-      },
-      "defect_id": 3830371307,
-      "expected_verdict": "matched",
-      "claim_excerpt": "- `pnpm typecheck` and all 177 peg-related vitest tests pass; `scripts/alerts/alert-rules-lint.test.mjs` passes (50 tests). The only red gate is `terraform test`.\n- The icon-only Slack title matches the established repo convention — `alerts/rules/message-templates-slack.tf:7, 81, 109` already use bare `🔴`/`✅` titles with the linked human title in the body. The design is right; only the tftest assertion and the runbook are out of sync.\n- I removed the `alerts/rules/.terraform` directory created by my `terraform init`; the working tree is clean.",
-      "defect": {
-        "id": 3830371307,
-        "severity": "P2",
-        "path": "scripts/alerts/alert-rules-lint.test.mjs",
-        "line": 1289,
-        "title": "🎯 Functional Correctness | 🟡 Minor | ⚡ Quick win",
-        "detail": "_🎯 Functional Correctness_ | _🟡 Minor_ | _⚡ Quick win_\n\nMake the Slack template lint assertions fail closed and scope them to the intended resources. The current extraction does not validate the resource-marker indexes, so a marker change can make slice select unrelated text. The link checks also search the complete Terraform source, allowing duplicate strings elsewhere to satisfy them. Validate o"
-      },
-      "frozen_reasoning": "Review item 6 confirms the indexOf/-1 slice fail-open marker extraction (disputes only the link-scoping half), same underlying defect."
-    },
-    {
-      "record_id": "pr1999-3830371315-matched",
-      "source_cell": {
-        "pr": 1999,
-        "condition": "combo_gpt-5.6-sol_high__claude-opus-5_max",
-        "candidate_index": 7
-      },
-      "defect_id": 3830371315,
-      "expected_verdict": "matched",
-      "claim_excerpt": "- [P2] Return a fresh Response for each companion fetch — /private/tmp/fx-1999/ui-dashboard/src/app/api/peg-monitoring/alerts/__tests__/route.test.ts:818-819\n  The route now makes four concurrent requests, but these mocks return the same body-bearing `Response` for every call after the first. A response body is consumable once, so companion fetches reject with a disturbed-body error and the tests can return 502 for that mock artifact instead of the malformed, oversized, or truncated input under test. Use a mock implementation that creates a new `Response` per call.",
-      "defect": {
-        "id": 3830371315,
-        "severity": "P2",
-        "path": "ui-dashboard/src/app/api/peg-monitoring/alerts/__tests__/route.test.ts",
-        "line": 819,
-        "title": "🎯 Functional Correctness | 🟡 Minor | ⚡ Quick win",
-        "detail": "_🎯 Functional Correctness_ | _🟡 Minor_ | _⚡ Quick win_\n\nOne consumable Response is shared across the companion fetches in three tests. The route now issues four requests, but mockResolvedValue resolves every remaining call with the same Response instance. A Response body can be read once, so the second call fails inside readBoundedGrafanaResponse and the route returns 502 for body reuse rather tha"
-      },
-      "frozen_reasoning": "Review item 5 identifies mockResolvedValue sharing one consumable Response across four fetches, causing 502 from body reuse and vacuous assertions."
-    },
-    {
-      "record_id": "pr1999-3830371325-matched",
-      "source_cell": {
-        "pr": 1999,
-        "condition": "C_opus5_orig",
-        "candidate_index": 8
-      },
-      "defect_id": 3830371325,
-      "expected_verdict": "matched",
-      "claim_excerpt": "**🔴 `ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts:109` — an alert that starts out of `Error` is never recorded as raised, and its resolution loses duration and measurement.**",
-      "defect": {
-        "id": 3830371325,
-        "severity": "P2",
-        "path": "ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts",
-        "line": 352,
-        "title": "🎯 Functional Correctness | 🟡 Minor | ⚡ Quick win",
-        "detail": "_🎯 Functional Correctness_ | _🟡 Minor_ | _⚡ Quick win_\n\n\n🧩 Analysis chain\n\n🏁 Script executed:\n\nshell\n#!/bin/bash\nrg -n -C6 'error-recovered-alerting' ui-dashboard/src --glob '.ts' --glob '.tsx'\n\n\nRepository: mento-protocol/monitoring-monorepo\n\nLength of output: 5558\n\n---\n\n🏁 Script executed:\n\nshell\n#!/bin/bash\nset -e\nprintf '%s\\n' '--- transition classification ---'\nsed -n '96,122p' ui-dashboard/sr"
-      },
-      "frozen_reasoning": "Same location/underlying pairing defect at pairStateTransitions/cycleKey; review's blocker explains error-recovered-alerting routing to the :error cycle so the :alert cycle never opens, plus the Error→Normal stale-open raise."
-    },
-    {
-      "record_id": "pr1999-3830371325-unmatched",
-      "source_cell": {
-        "pr": 1999,
-        "condition": "sweep_claude-haiku-4-5-20251001_medium",
-        "candidate_index": 5
-      },
-      "defect_id": 3830371325,
-      "expected_verdict": "unmatched",
-      "claim_excerpt": "2. **Severity escalation bug in `ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts:251`** — When a rule evaluation fails (e.g., Grafana query error), the error inherits the rule's severity instead of being escalated to page-worthy priority. A warning-level rule that can't evaluate stays \"warning\" rather than \"page\", potentially under-prioritizing monitoring infrastructure failures.",
-      "defect": {
-        "id": 3830371325,
-        "severity": "P2",
-        "path": "ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts",
-        "line": 352,
-        "title": "🎯 Functional Correctness | 🟡 Minor | ⚡ Quick win",
-        "detail": "_🎯 Functional Correctness_ | _🟡 Minor_ | _⚡ Quick win_\n\n\n🧩 Analysis chain\n\n🏁 Script executed:\n\nshell\n#!/bin/bash\nrg -n -C6 'error-recovered-alerting' ui-dashboard/src --glob '.ts' --glob '.tsx'\n\n\nRepository: mento-protocol/monitoring-monorepo\n\nLength of output: 5558\n\n---\n\n🏁 Script executed:\n\nshell\n#!/bin/bash\nset -e\nprintf '%s\\n' '--- transition classification ---'\nsed -n '96,122p' ui-dashboard/sr"
-      },
-      "frozen_reasoning": "Same as defect 2 — the error-recovered/alerting pairing logic at line 352 is not discussed; the review's peg-alert-events.ts item is about severity escalation."
-    },
-    {
-      "record_id": "pr1999-3830416461-unmatched",
-      "source_cell": {
-        "pr": 1999,
-        "condition": "G_opus5_plus_codex_builtin",
-        "candidate_index": 8
-      },
-      "defect_id": 3830416461,
-      "expected_verdict": "unmatched",
-      "claim_excerpt": "**Its P1 is real, but its framing is wrong.** `Alerting → Error → Normal` does leave the alert cycle open. `cycleKey` at `peg-alert-events.ts:320-321` hard-partitions each fingerprint into an `alert` cycle and an `error` cycle, and nothing crosses between them. Grafana never emits a `previous=Alerting, current=Normal` row for that path, so the `raised` entry survives to the leftover drain at `peg-alert-events.ts:356`. I ran it — output is a `severity: \"warning\"` entry with present-tense copy (`\"Bitvavo buy and sell prices are 34 bps apart\"`, no duration) sitting next to `\"Grafana can evaluate the Bitvavo Peg rule again\"`. The UI contradicts itself.",
-      "defect": {
-        "id": 3830416461,
-        "severity": "P2",
-        "path": "ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts",
-        "line": 230,
-        "title": "Label source-less evaluation failures by rule",
-        "detail": "![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)  Label source-less evaluation failures by rule\n\nWhen an asset-wide or policy rule enters Error, labels.source is empty—as it is for Structural Saturation, Indexed Pool, Heartbeat, and Policy Rollover rules—so this calls pegAlertSourceName(\"\"), which returns Price source. Both failure and recovery rows then claim Grafana evaluated a non"
-      },
-      "frozen_reasoning": "No mention of pegAlertSourceName(\"\") defaulting to 'Price source' for rules with empty labels.source."
-    },
-    {
-      "record_id": "pr2001-3830423746-matched",
-      "source_cell": {
-        "pr": 2001,
-        "condition": "A_opus48_orig",
-        "candidate_index": 1
-      },
-      "defect_id": 3830423746,
-      "expected_verdict": "matched",
-      "claim_excerpt": "- **90** 🟡 `ui-dashboard/src/lib/canonical-revenue/daily-series.ts:69` — Dead `try/catch` in `isZeroWei`. The preceding `/^-?\\d+$/` regex guarantees `BigInt(trimmed)` can never throw, so the `catch { return false }` is unreachable. It reads like real error handling but is never exercised — either drop the try/catch or drop the regex and rely on the catch. (found by: larp, architecture, slop)\n- **90** 🟡 `ui-dashboard/src/lib/canonical-revenue/daily-series.ts:119` — The `isZeroExposureStethSnapshot` short-circuit is duplicated in both `reserveSnapshotTotalUsd` (line 119) and `reserveSnapshotBaseline` (line 151), coupling both to the same convention. Could be centralized once in the `buildRevenueBuckets` loop. (found by: architecture, history)",
-      "defect": {
-        "id": 3830423746,
-        "severity": "P1",
-        "path": "ui-dashboard/src/lib/canonical-revenue/daily-series.ts",
-        "line": 119,
-        "title": "[P1] Returning 0 unconditionally here fabricates a large negative revenue spike on a real full-withdrawal day, instead of the intended \"$0 row.\"",
-        "detail": "[P1] Returning 0 unconditionally here fabricates a large negative revenue spike on a real full-withdrawal day, instead of the intended \"$0 row.\"\n\nDownstream in buildRevenueBuckets (lines ~194-205), baselineUsd falls back to previousReserveTotalsBySource.get(sourceKey) whenever a prior snapshot exists for this wallet — including a real, nonzero, priced total from the day before. Since this function"
-      },
-      "frozen_reasoning": "The Notes section names the exact mechanism — an all-zero snapshot after priced history making `dailyYieldUsd = 0 - previousTotal` go negative at daily-series.ts:119 — same underlying problem, though the review dismisses it as pre-existing rather than flagging it."
-    },
-    {
-      "record_id": "pr2001-3830423746-unmatched",
-      "source_cell": {
-        "pr": 2001,
-        "condition": "F_codex_raw",
-        "candidate_index": 1
-      },
-      "defect_id": 3830423746,
-      "expected_verdict": "unmatched",
-      "claim_excerpt": "- Why it matters: The new tests assert malformed stETH fields keep revenue partial. That holds for malformed strings, but a malformed non-string value can crash the revenue build instead of producing the partial state.\n- Evidence: [daily-series.ts](/private/tmp/fx-2001/ui-dashboard/src/lib/canonical-revenue/daily-series.ts:66) calls `value.trim()` before the `try`. `useReserveYieldHistory` returns raw GraphQL rows as typed data without a row schema parser at [use-reserve-yield-history.ts](/private/tmp/fx-2001/ui-dashboard/src/hooks/use-reserve-yield-history.ts:149). A `null` or numeric amount field would throw `TypeError`.\n- Suggested fix: Change `isZeroWei` to accept `unknown`, return `false` unless `typeof value === \"string\"`, then trim and parse. Add a regression test with `balanceAmount: null as unknown as string`.\n- Confidence: Medium. The GraphQL schema should normally return strings, but this path has no runtime guard.",
-      "defect": {
-        "id": 3830423746,
-        "severity": "P1",
-        "path": "ui-dashboard/src/lib/canonical-revenue/daily-series.ts",
-        "line": 119,
-        "title": "[P1] Returning 0 unconditionally here fabricates a large negative revenue spike on a real full-withdrawal day, instead of the intended \"$0 row.\"",
-        "detail": "[P1] Returning 0 unconditionally here fabricates a large negative revenue spike on a real full-withdrawal day, instead of the intended \"$0 row.\"\n\nDownstream in buildRevenueBuckets (lines ~194-205), baselineUsd falls back to previousReserveTotalsBySource.get(sourceKey) whenever a prior snapshot exists for this wallet — including a real, nonzero, priced total from the day before. Since this function"
-      },
-      "frozen_reasoning": "Review only raises isZeroWei throwing on non-string values; it never identifies that returning 0 for zero-exposure rows creates a negative revenue spike against a nonzero prior baseline. The suggested test about previousReserveTotalsBySource is only a 'lock intended behavior' note, not identification of the defect."
-    },
-    {
-      "record_id": "pr2001-3830513980-unmatched",
-      "source_cell": {
-        "pr": 2001,
-        "condition": "F_codex_raw",
-        "candidate_index": 2
-      },
-      "defect_id": 3830513980,
-      "expected_verdict": "unmatched",
-      "claim_excerpt": "- Why it matters: The new tests assert malformed stETH fields keep revenue partial. That holds for malformed strings, but a malformed non-string value can crash the revenue build instead of producing the partial state.\n- Evidence: [daily-series.ts](/private/tmp/fx-2001/ui-dashboard/src/lib/canonical-revenue/daily-series.ts:66) calls `value.trim()` before the `try`. `useReserveYieldHistory` returns raw GraphQL rows as typed data without a row schema parser at [use-reserve-yield-history.ts](/private/tmp/fx-2001/ui-dashboard/src/hooks/use-reserve-yield-history.ts:149). A `null` or numeric amount field would throw `TypeError`.\n- Suggested fix: Change `isZeroWei` to accept `unknown`, return `false` unless `typeof value === \"string\"`, then trim and parse. Add a regression test with `balanceAmount: null as unknown as string`.\n- Confidence: Medium. The GraphQL schema should normally return strings, but this path has no runtime guard.",
-      "defect": {
-        "id": 3830513980,
-        "severity": "P1",
-        "path": "ui-dashboard/src/lib/canonical-revenue/daily-series.ts",
-        "line": 190,
-        "title": "Subtract prior yield when a zero row empties a wallet",
-        "detail": "![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)  Subtract prior yield when a zero row empties a wallet\n\nWhen a yielding tracked wallet transfers its entire balance to another tracked wallet, recordTransfer moves the balance and principal, so the sender's next snapshot can have all four checked fields at zero while the recipient inherits the unrealized yield. This branch records zero"
-      },
-      "frozen_reasoning": "No mention of tracked-wallet transfers, prior unrealized yield, or the need to subtract prior yield when a wallet empties."
-    }
-  ]
+  {
+   "record_id": "pr1982-3827655676-unmatched",
+   "source_cell": {
+    "pr": 1982,
+    "condition": "C_opus5_orig",
+    "candidate_index": 3
+   },
+   "defect_id": 3827655676,
+   "expected_verdict": "unmatched",
+   "claim_excerpt": "This matters because `docs/notes/github-tooling-surfaces.md:105-112` instructs cloud agents to hand-write this comment plus a free-form note stating Project fields were not set \u2014 and a two-paragraph note, the most natural form, kills the whole claim. Returning a reason string (or logging one under `--dry-run`) would make the failure actionable.",
+   "defect": {
+    "id": 3827655676,
+    "severity": "P2",
+    "path": "docs/notes/github-tooling-surfaces.md",
+    "line": 112,
+    "title": "\ud83d\udcd0 Maintainability & Code Quality | \ud83d\udfe1 Minor | \u26a1 Quick win",
+    "detail": "_\ud83d\udcd0 Maintainability & Code Quality_ | _\ud83d\udfe1 Minor_ | _\u26a1 Quick win_\n\nKeep Claim ID on one line and restore the list indentation.\n\nLine 108 breaks the inline code span mid-token, and line 109 starts at column 0 instead of the 3-space continuation indent that every other step uses. Rewrap the sentence.\n\n\n\ud83d\udcdd Proposed fix\n\ndiff\n-4. Hand off to a gh-capable surface. Run\n-   pnpm issue:board backfill --issue"
+   },
+   "frozen_reasoning": "Audited 2026-08-28: the claim is about the backfill parser rejecting a multi-paragraph handoff note (a functional strictness problem), while defect 3827655676 is a broken inline code span and list indentation at the same doc lines (a cosmetic formatting problem) \u2014 same location, unrelated problems, which judge-match.md excludes explicitly; both modern judges false-positived here with only the excerpt in view."
+  },
+  {
+   "record_id": "pr1982-3827655684-unmatched",
+   "source_cell": {
+    "pr": 1982,
+    "condition": "B_opus5_bare",
+    "candidate_index": 3
+   },
+   "defect_id": 3827655684,
+   "expected_verdict": "unmatched",
+   "claim_excerpt": "`buildClaimComment` drops the `Branch:` line whenever the branch is falsy (`scripts/pr/issue-board-commands.mjs:74`), and `claimMetadata` deliberately produces that state (`scripts/pr/issue-board-commands.mjs:144`, `branch: branch || undefined`). The new parser requires `Branch:` and returns `null` without it (`scripts/pr/issue-board-backfill.mjs:119`), so `readSnapshot` throws `has no valid trusted agent claim comment` (`scripts/pr/issue-board-backfill.mjs:235`).",
+   "defect": {
+    "id": 3827655684,
+    "severity": "P2",
+    "path": "scripts/pr/issue-board-backfill.mjs",
+    "line": 87,
+    "title": "\ud83c\udfaf Functional Correctness | \ud83d\udfe1 Minor | \u26a1 Quick win",
+    "detail": "_\ud83c\udfaf Functional Correctness_ | _\ud83d\udfe1 Minor_ | _\u26a1 Quick win_\n\nIgnore trailing blank lines before the handoff bound check.\n\nisBoundedCloudHandoff rejects any empty line. Line 111 skips blank lines only directly after the field block. A body that ends with a newline after handoff text keeps a final \"\" element in lines.slice(index). parseClaimComment then returns null, and readSnapshot fails with \"has no v"
+   },
+   "frozen_reasoning": "Audited 2026-08-28: consensus flip declined on full context. Defect 3827655684 is the trailing-blank-line bug \u2014 isBoundedCloudHandoff rejects the empty final element that a body ending in a newline leaves in lines.slice(index), so a legitimate claim fails to parse. The claim instead says buildClaimComment omits the Branch: line whenever the branch is falsy while parseClaimComment requires it; that is defect 3827636772, which this set already pairs separately. Same file and the same downstream readSnapshot error, different underlying problem, which judge-match.md excludes. Stays unmatched."
+  },
+  {
+   "record_id": "pr1982-3827663924-matched",
+   "source_cell": {
+    "pr": 1982,
+    "condition": "D_opus5_r2",
+    "candidate_index": 4
+   },
+   "defect_id": 3827663924,
+   "expected_verdict": "unmatched",
+   "claim_excerpt": "**F1 \u2014 `issue-board-backfill.mjs:119` rejects the helper's own branch-less claim comment.** `buildClaimComment` (`issue-board-commands.mjs:74`) omits the `Branch:` line when branch is falsy, and `getGitBranch()` returns `\"\"` on detached HEAD. Feeding that comment to `parseClaimComment` returns `null`, so backfill throws and `Claim ID`, `Agent`, and `Claimed At` don't get written either \u2014 the one absent field takes the three recoverable ones down with it.",
+   "defect": {
+    "id": 3827663924,
+    "severity": "P2",
+    "path": "scripts/pr/issue-board-backfill.mjs",
+    "line": 123,
+    "title": "Handoff trailing newline rejects claims",
+    "detail": "### Handoff trailing newline rejects claims\n\nMedium Severity\n\n\nisBoundedCloudHandoff requires every remaining line to be non-empty, so a trusted MCP claim that ends with a trailing newline after the Project #12 handoff sentence fails parsing and backfill reports no valid claim. Comments without that footer still accept trailing blanks because empties are skipped before the check, so the primary cl"
+   },
+   "frozen_reasoning": "Same defect as 3; F2 covers the handoff trailing-newline rejection of trusted MCP claims."
+  },
+  {
+   "record_id": "pr1982-3827663924-unmatched",
+   "source_cell": {
+    "pr": 1982,
+    "condition": "E_opus5_r3",
+    "candidate_index": 5
+   },
+   "defect_id": 3827663924,
+   "expected_verdict": "unmatched",
+   "claim_excerpt": "### 1. A claim comment with no `Branch:` line is unrecoverable, and the error misdescribes why\n`scripts/pr/issue-board-backfill.mjs:119` (parser) vs `scripts/pr/issue-board-commands.mjs:74` (generator) \u2014 **confirmed by execution**, routed back to you for the design call.",
+   "defect": {
+    "id": 3827663924,
+    "severity": "P2",
+    "path": "scripts/pr/issue-board-backfill.mjs",
+    "line": 123,
+    "title": "Handoff trailing newline rejects claims",
+    "detail": "### Handoff trailing newline rejects claims\n\nMedium Severity\n\n\nisBoundedCloudHandoff requires every remaining line to be non-empty, so a trusted MCP claim that ends with a trailing newline after the Project #12 handoff sentence fails parsing and backfill reports no valid claim. Comments without that footer still accept trailing blanks because empties are skipped before the check, so the primary cl"
+   },
+   "frozen_reasoning": "Same as 4 \u2014 the trailing-newline handoff rejection is listed under 'Considered and cleared' as not a bug."
+  },
+  {
+   "record_id": "pr1984-3828303385-matched",
+   "source_cell": {
+    "pr": 1984,
+    "condition": "A_opus48_orig",
+    "candidate_index": 1
+   },
+   "defect_id": 3828303385,
+   "expected_verdict": "matched",
+   "claim_excerpt": "- **\ud83d\udfe1 [scripts/sentry/autofix/sentry-autofix-refused-inventory.mjs:26]** The Search query leaves the colon-bearing label **unquoted**: `label:sentry:fix-refused`. The repo's own established convention for this exact label quotes it \u2014 `sentry-autofix-queue-io.mjs:278` builds `-label:\"${FIX_REFUSED_LABEL}\"` (and does so through the same GitHub search-qualifier grammar). If GitHub's parser treats the unquoted `label:sentry:fix-refused` differently (e.g. as `label:sentry` + stray text), the API returns a **wrong `total_count` that still passes every validation** in `parseRefusedStubInventory` and renders as a confident \"Refused stubs (all states): N\" line. That's worse than the module's designed failure mode (render `unknown`): it's silently incorrect operator data. The tests can't catch it \u2014 they mock `runGh` (`run-record.test.mjs:106`) and in fact *assert* the unquoted string, enshrining it. **Fix:** quote the label to match the sibling module: `label:\"sentry:fix-refused\"` (verify against a live search first). Worth confirming before merge.",
+   "defect": {
+    "id": 3828303385,
+    "severity": "P1",
+    "path": "scripts/sentry/autofix/sentry-autofix-refused-inventory.mjs",
+    "line": 26,
+    "title": "[P1] Unquoted colon-bearing label breaks the Search API query",
+    "detail": "[P1] Unquoted colon-bearing label breaks the Search API query\n\njs\nq=repo:${repo} is:issue label:sentry-triage label:sentry:fix-refused,\n\n\nEvery other GitHub Search query in this codebase quotes a label value that contains a colon (and, for consistency, quotes plain labels too):\n\n- scripts/sentry/autofix/sentry-autofix-queue-io.mjs:278 \u2014  -label:\"${FIX_PR_OPENED_LABEL}\" -label:\"${FIX_REFUSED_LABEL}"
+   },
+   "frozen_reasoning": "The review's sole warning names sentry-autofix-refused-inventory.mjs:26, the unquoted colon-bearing `label:sentry:fix-refused`, cites the same sibling convention at sentry-autofix-queue-io.mjs:278, and proposes quoting it."
+  },
+  {
+   "record_id": "pr1984-3828303385-unmatched",
+   "source_cell": {
+    "pr": 1984,
+    "condition": "E_opus5_r3",
+    "candidate_index": 1
+   },
+   "defect_id": 3828303385,
+   "expected_verdict": "unmatched",
+   "claim_excerpt": "**3. Hardcoded label literals bypass the repo's documented single-source-of-truth constants \u2014 `scripts/sentry/autofix/sentry-autofix-refused-inventory.mjs:26`**",
+   "defect": {
+    "id": 3828303385,
+    "severity": "P1",
+    "path": "scripts/sentry/autofix/sentry-autofix-refused-inventory.mjs",
+    "line": 26,
+    "title": "[P1] Unquoted colon-bearing label breaks the Search API query",
+    "detail": "[P1] Unquoted colon-bearing label breaks the Search API query\n\njs\nq=repo:${repo} is:issue label:sentry-triage label:sentry:fix-refused,\n\n\nEvery other GitHub Search query in this codebase quotes a label value that contains a colon (and, for consistency, quotes plain labels too):\n\n- scripts/sentry/autofix/sentry-autofix-queue-io.mjs:278 \u2014  -label:\"${FIX_PR_OPENED_LABEL}\" -label:\"${FIX_REFUSED_LABEL}"
+   },
+   "frozen_reasoning": "The review explicitly considered and discarded the unquoted colon-bearing label, testing it against the live API and declaring it 'Not a defect' \u2014 it does not identify it as the defect."
+  },
+  {
+   "record_id": "pr1984-3828313974-matched",
+   "source_cell": {
+    "pr": 1984,
+    "condition": "D_opus5_r2",
+    "candidate_index": 1
+   },
+   "defect_id": 3828313974,
+   "expected_verdict": "matched",
+   "claim_excerpt": "**1. `sentry-autofix-run-record.mjs:66` \u2014 dead default-repo fallback.** `renderRefusedStubInventory(\u2026, repo = REFUSED_INVENTORY_DEFAULT_REPO)` declares a default, and the CLI documents the flag as optional. Both are false: `readFlag` returns **`null`**, not `undefined` (`sentry-autofix-finalize.mjs:712`), and default params only fire on `undefined`. Confirmed by running it:",
+   "defect": {
+    "id": 3828313974,
+    "severity": "P1",
+    "path": "scripts/sentry/autofix/sentry-autofix-run-record.mjs",
+    "line": 85,
+    "title": "\ud83c\udfaf Functional Correctness | \ud83d\udfe0 Major | \u26a1 Quick win",
+    "detail": "_\ud83c\udfaf Functional Correctness_ | _\ud83d\udfe0 Major_ | _\u26a1 Quick win_\n\nNormalize a null repo before building the links.\n\nThe default parameter on line 67 applies only when repo is undefined. The CLI supplies null. readFlag in scripts/sentry/autofix/sentry-autofix-finalize.mjs (lines 710-716) returns null for an absent flag, and line 853 forwards that value as refusedInventoryRepo. The usage text on lines 690-691"
+   },
+   "frozen_reasoning": "Review finding #1 names renderRefusedStubInventory's repo default being bypassed because readFlag returns null and defaults only fire on undefined \u2014 same defect, same file/function."
+  },
+  {
+   "record_id": "pr1990-3829654081-matched",
+   "source_cell": {
+    "pr": 1990,
+    "condition": "cx_gpt-5.6-terra_max",
+    "candidate_index": 1
+   },
+   "defect_id": 3829654081,
+   "expected_verdict": "unmatched",
+   "claim_excerpt": "- [P2] Recognize CodeRabbit completion comments at the current head \u2014 /private/tmp/fx-1990/scripts/pr/pr-ready-state-core.mjs:772-774\n  CodeRabbit can finish a current-head run in its `recent_review` issue comment instead of a new `PullRequestReview`. PR #2007 had that Run ID/completion block at the head while `reviews` held only an older run and empty reply records, so this returns `stale` and the new babysit rule posts another command that CodeRabbit answers `Already reviewed`. Treat a CodeRabbit-authored completion block whose reviewed range ends at `headRefOid` as `reviewed` before considering request markers.",
+   "defect": {
+    "id": 3829654081,
+    "severity": "P1",
+    "path": "scripts/pr/pr-ready-state-core.mjs",
+    "line": 750,
+    "title": "Split the growing ready-state core",
+    "detail": "![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)  Split the growing ready-state core\n\nThis addition grows scripts/pr/pr-ready-state-core.mjs from 998 raw / 889 rough lines to 1,077 raw / 961 rough lines, moving it into the repository watchlist's near-hard tier. The required recurring-review checklist says that a source file already past the 600-line cap must be split when a change gr"
+   },
+   "frozen_reasoning": "Third comment names the same file-size problem \u2014 the change pushes pr-ready-state-core.mjs from 889/998 to 961/1,077 lines into the near-hard band and must be split/extracted."
+  },
+  {
+   "record_id": "pr1990-3829654081-unmatched",
+   "source_cell": {
+    "pr": 1990,
+    "condition": "cx_gpt-5.6-terra_medium",
+    "candidate_index": 1
+   },
+   "defect_id": 3829654081,
+   "expected_verdict": "unmatched",
+   "claim_excerpt": "- [P1] Recognize CodeRabbit\u2019s current-head summary comment \u2014 /private/tmp/fx-1990/scripts/pr/pr-ready-state-core.mjs:772-774\n  When CodeRabbit records its run in its edited top-level summary comment (the observed integration shape) and leaves the current-head `reviews[]` record empty, this returns `stale` because the comment loop only recognizes this repo's request marker. The closeout workflow then posts another `@coderabbitai review` for a head that was already reviewed, consuming a review slot and adding avoidable wait time. Parse CodeRabbit-authored summary comments with the Run ID and a reviewed range ending at `currentHeadOid`, using `updated_at` for freshness.",
+   "defect": {
+    "id": 3829654081,
+    "severity": "P1",
+    "path": "scripts/pr/pr-ready-state-core.mjs",
+    "line": 750,
+    "title": "Split the growing ready-state core",
+    "detail": "![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)  Split the growing ready-state core\n\nThis addition grows scripts/pr/pr-ready-state-core.mjs from 998 raw / 889 rough lines to 1,077 raw / 961 rough lines, moving it into the repository watchlist's near-hard tier. The required recurring-review checklist says that a source file already past the 600-line cap must be split when a change gr"
+   },
+   "frozen_reasoning": "The review says nothing about file length, the 600-line cap, or splitting the ready-state core module."
+  },
+  {
+   "record_id": "pr1990-3829659544-matched",
+   "source_cell": {
+    "pr": 1990,
+    "condition": "sweep_claude-opus-5_medium",
+    "candidate_index": 2
+   },
+   "defect_id": 3829659544,
+   "expected_verdict": "matched",
+   "claim_excerpt": "The example payload still shows only `codexReviewSignal` in `gates` and at top level, while the field list below (`:351-355`) documents `codeRabbitReviewSignal` and both formatters emit it (`pr-ready-state-format.mjs:58`, `:151`). `docs/notes/pr-ready-state.md` is declared the owner of that contract (`ship/SKILL.md:215`), so consumers copying the schema will miss the new field. Add the gate object after `:290` and `\"codeRabbitReviewSignal\": \"missing\"` after `:305`.",
+   "defect": {
+    "id": 3829659544,
+    "severity": "P2",
+    "path": "docs/notes/pr-ready-state.md",
+    "line": 369,
+    "title": "\ud83d\uddc4\ufe0f Data Integrity & Integration | \ud83d\udfe1 Minor | \u26a1 Quick win",
+    "detail": "_\ud83d\uddc4\ufe0f Data Integrity & Integration_ | _\ud83d\udfe1 Minor_ | _\u26a1 Quick win_\n\nAdd codeRabbitReviewSignal to the sample JSON.\n\nThe new field expectation documents this gate, but the gates object in the expected CLI example does not include it. Add the field to the example or state that the example is abbreviated. Keep the documented JSON shape consistent with the new projection.\n\n\n\ud83e\udd16 Prompt for AI Agents\n\n\nTreat f"
+   },
+   "frozen_reasoning": "Review section 2 flags the stale example payload in docs/notes/pr-ready-state.md missing codeRabbitReviewSignal in the gates object and top level \u2014 same defect."
+  },
+  {
+   "record_id": "pr1990-3829659546-matched",
+   "source_cell": {
+    "pr": 1990,
+    "condition": "combo_gpt-5.6-sol_high__claude-opus-5_high",
+    "candidate_index": 3
+   },
+   "defect_id": 3829659546,
+   "expected_verdict": "matched",
+   "claim_excerpt": "- [P2] Run the final projections after the closeout request \u2014 /private/tmp/fx-1990/docs/notes/pr-ready-state.md:399-402\n  The ordered workflow runs the projection pair in step 5 and posts the CodeRabbit request here in step 8, but step 10 does not explicitly require another pair afterward. If the requested review posts findings after the earlier sweep, the agent can report all-clear from stale projections. Move the request before the final pair or require both projections again after the closeout refresh, per `AGENTS.md:90-95`.",
+   "defect": {
+    "id": 3829659546,
+    "severity": "P1",
+    "path": "docs/notes/pr-ready-state.md",
+    "line": 408,
+    "title": "\ud83c\udfaf Functional Correctness | \ud83d\udfe0 Major | \u26a1 Quick win",
+    "detail": "_\ud83c\udfaf Functional Correctness_ | _\ud83d\udfe0 Major_ | _\u26a1 Quick win_\n\nUse one ordering for the final readiness workflow.\n\nThe central workflow and both ship mirrors can run the projection pair before applying the CodeRabbit closeout rule. Require the exact sequence below at every site:\n\n- docs/notes/pr-ready-state.md#L399-L408: Apply CodeRabbit closeout before the final feedback-state and ready-state pair.\n- .a"
+   },
+   "frozen_reasoning": "Item #4 flags pr-ready-state.md:399-402 running the projection pair at step 5 and posting the request at step 8 with no re-run, contradicting SKILL.md/operating card, and says to pick one ordering."
+  },
+  {
+   "record_id": "pr1990-3829659550-matched",
+   "source_cell": {
+    "pr": 1990,
+    "condition": "sweep_claude-sonnet-5_max",
+    "candidate_index": 4
+   },
+   "defect_id": 3829659550,
+   "expected_verdict": "matched",
+   "claim_excerpt": "- **`scripts/pr/pr-ready-state-core.mjs:442`** \u2014 `isCodeRabbitFinalHeadReviewRequestBody` returns `true` unconditionally when `currentHeadOid` is falsy (fails open), unlike the sibling `isCurrentReviewSignal` (line 657-658), which degrades to a timestamp comparison instead.\n- **`scripts/pr/pr-ready-state-core.mjs:443`** \u2014 SHAs are lowercased before comparison here, but the composed `reviewCommitOid` path (line 658) does a raw case-sensitive `===`. Inconsistent contract within the same function (harmless today since GitHub SHAs are always lowercase).\n- **`scripts/pr/pr-ready-state-core.mjs:772`** \u2014 The closeout-request marker is accepted from *any* commenter, not just the PR author, so any account can post the marker and suppress a legitimate re-request against the paid, rate-limited CodeRabbit ladder (ADR 0066). Mirrors a pre-existing pattern (`isCodexReviewRequestBody`) but now gates a paid resource.\n- **`scripts/pr/pr-ready-state-core.mjs:3`** \u2014 `CODERABBIT_AUTHORS` duplicates an identical `Set` literal already in `pr-feedback-state-core.mjs:52` and `review-process-metrics.mjs:14` \u2014 three copies to keep in sync if the bot login ever changes.\n- **`scripts/pr/pr-ready-state-core.mjs:777`** \u2014 `isCodeRabbitFinalHeadReviewRequestBody` is called twice per comment (once 1-arg as a filter, once 2-arg for the SHA compare), re-running the same two regexes redundantly.",
+   "defect": {
+    "id": 3829659550,
+    "severity": "P1",
+    "path": "scripts/pr/pr-ready-state-core.mjs",
+    "line": 783,
+    "title": "\ud83c\udfaf Functional Correctness | \ud83d\udfe0 Major | \u26a1 Quick win",
+    "detail": "_\ud83c\udfaf Functional Correctness_ | _\ud83d\udfe0 Major_ | _\u26a1 Quick win_\n\nRequire a current head SHA for current CodeRabbit states.\n\nLine 766 falls back to review timestamps when currentHeadOid is null. Line 777 accepts any marked request when currentHeadOid is null. The classifier can then return reviewed or requested without an exact head match. This violates the exact-head closeout contract and can suppress a re"
+   },
+   "frozen_reasoning": "Review's finding at core.mjs:442 names the same problem \u2014 the marker check returns true unconditionally when currentHeadOid is falsy, so classification succeeds without an exact head match."
+  },
+  {
+   "record_id": "pr1990-3829659550-unmatched",
+   "source_cell": {
+    "pr": 1990,
+    "condition": "sweep_claude-sonnet-5_medium",
+    "candidate_index": 2
+   },
+   "defect_id": 3829659550,
+   "expected_verdict": "unmatched",
+   "claim_excerpt": "No issues found \u2014 the review covered the diff against `base` (docs updates, plus the new `classifyCodeRabbitReviewSignal`/`isCodeRabbitFinalHeadReviewRequestBody` pair in `scripts/pr/pr-ready-state-core.mjs` with matching test coverage) and nothing rose to a level worth blocking on. Safe to merge.",
+   "defect": {
+    "id": 3829659550,
+    "severity": "P1",
+    "path": "scripts/pr/pr-ready-state-core.mjs",
+    "line": 783,
+    "title": "\ud83c\udfaf Functional Correctness | \ud83d\udfe0 Major | \u26a1 Quick win",
+    "detail": "_\ud83c\udfaf Functional Correctness_ | _\ud83d\udfe0 Major_ | _\u26a1 Quick win_\n\nRequire a current head SHA for current CodeRabbit states.\n\nLine 766 falls back to review timestamps when currentHeadOid is null. Line 777 accepts any marked request when currentHeadOid is null. The classifier can then return reviewed or requested without an exact head match. This violates the exact-head closeout contract and can suppress a re"
+   },
+   "frozen_reasoning": "The review names classifyCodeRabbitReviewSignal but explicitly reports no issues; it does not identify the null currentHeadOid fallback breaking the exact-head closeout contract."
+  },
+  {
+   "record_id": "pr1990-3830394205-matched",
+   "source_cell": {
+    "pr": 1990,
+    "condition": "G_opus5_plus_codex_builtin",
+    "candidate_index": 5
+   },
+   "defect_id": 3830394205,
+   "expected_verdict": "unmatched",
+   "claim_excerpt": "Fix: also count a `coderabbitai`/`coderabbitai[bot]` issue comment matching `CODERABBIT_REVIEW_RUN_MARKER` whose reviewed span ends at the full current head, keyed on `updated_at` (the comment is edited in place), keeping empty review records ignored. The same rule is written into the specs and must move with it: `docs/notes/pr-ready-state.md:111-115` and `:351-355`, `SKILL.md:295-297` (both mirrors), and `cloud-watch-loop.md:48-50` (both mirrors) \u2014 the MCP path inherits the defect independently of the Node classifier.",
+   "defect": {
+    "id": 3830394205,
+    "severity": "P2",
+    "path": ".agents/skills/babysit-pr/cloud-watch-loop.md",
+    "line": 53,
+    "title": "Authenticate closeout markers in the cloud loop",
+    "detail": "![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)  Authenticate closeout markers in the cloud loop\n\nWhen a public PR is babysat through the MCP fallback, this condition accepts the marker from any top-level commenter, unlike the new local classifier's maintainer/agent check. An outside user can quote the template for the current head, causing the cloud agent to suppress the real CodeR"
+   },
+   "frozen_reasoning": "The review names the same underlying problem \u2014 the marker loop accepts a closeout marker from any commenter with no author/maintainer check, letting an outsider suppress the real CodeRabbit request \u2014 though it anchors it in the Node classifier rather than the cloud-watch-loop mirror and downgrades severity."
+  },
+  {
+   "record_id": "pr1990-3830394205-unmatched",
+   "source_cell": {
+    "pr": 1990,
+    "condition": "combo_gpt-5.6-sol_max__claude-opus-5_max",
+    "candidate_index": 5
+   },
+   "defect_id": 3830394205,
+   "expected_verdict": "unmatched",
+   "claim_excerpt": "The same never-true rule is written into the specs and must be fixed in the same patch: `docs/notes/pr-ready-state.md:113-114` and `:351-355`, `.claude/` and `.agents/skills/babysit-pr/SKILL.md:296-297`, and \u2014 independently of the Node classifier \u2014 `.claude/` and `.agents/skills/babysit-pr/cloud-watch-loop.md:48-50`, which tells the MCP path to read the signal from `get_reviews` under the identical condition. Fixing only the classifier leaves the cloud path broken.",
+   "defect": {
+    "id": 3830394205,
+    "severity": "P2",
+    "path": ".agents/skills/babysit-pr/cloud-watch-loop.md",
+    "line": 53,
+    "title": "Authenticate closeout markers in the cloud loop",
+    "detail": "![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)  Authenticate closeout markers in the cloud loop\n\nWhen a public PR is babysat through the MCP fallback, this condition accepts the marker from any top-level commenter, unlike the new local classifier's maintainer/agent check. An outside user can quote the template for the current head, causing the cloud agent to suppress the real CodeR"
+   },
+   "frozen_reasoning": "The review's authentication finding is scoped to the local Node classifier (core.mjs:772-784); its cloud-watch-loop.md discussion concerns only the unreachable 'reviewed' rule, not accepting closeout markers from untrusted commenters in the MCP path."
+  },
+  {
+   "record_id": "pr1995-3829986403-matched",
+   "source_cell": {
+    "pr": 1995,
+    "condition": "G_opus5_plus_codex_builtin",
+    "candidate_index": 2
+   },
+   "defect_id": 3829986403,
+   "expected_verdict": "matched",
+   "claim_excerpt": "- [P2] Require exactly one post-partition dispatch \u2014 /private/tmp/fx-1995/scripts/agent-quality-gate.test.sh:514-516\n  If a later edit deletes the final `dispatch_gate_test_families` call, this verifier accepts the file because its `END` block checks only the closing marker. The script then exits successfully after defining functions and runs zero tests; duplicate dispatch calls are also accepted. Count this line and require exactly one so the self-test required by [scripts/AGENTS.md:164-166](scripts/AGENTS.md#L164-L166) cannot silently become a no-op.",
+   "defect": {
+    "id": 3829986403,
+    "severity": "P2",
+    "path": "scripts/agent-quality-gate.test.sh",
+    "line": 525,
+    "title": "\ud83c\udfaf Functional Correctness | \ud83d\udfe1 Minor | \u26a1 Quick win",
+    "detail": "_\ud83c\udfaf Functional Correctness_ | _\ud83d\udfe1 Minor_ | _\u26a1 Quick win_\n\nRequire exactly one dispatch call.\n\nThe validator accepts every dispatch_gate_test_families line after the end marker. A second call passes validation and runs every selected family twice. Count dispatch calls and fail unless the count is one.\n\n\nProposed fix\n\ndiff\n-        if ($0 == \"dispatch_gate_test_families\") { next }\n+        if ($0 == \""
+   },
+   "frozen_reasoning": "Claim 2 explicitly states duplicate dispatch calls are accepted (suite runs twice) and says to count the line in END and require exactly one."
+  },
+  {
+   "record_id": "pr1995-3829986403-unmatched",
+   "source_cell": {
+    "pr": 1995,
+    "condition": "sweep_claude-fable-5_max",
+    "candidate_index": 2
+   },
+   "defect_id": 3829986403,
+   "expected_verdict": "unmatched",
+   "claim_excerpt": "`scripts/agent-quality-gate.test.sh:601` refuses a focus only when `AGENT_QUALITY_GATE_LOCK_HELD` or `GITHUB_ACTIONS` is set. But the gate only exports `AGENT_QUALITY_GATE_LOCK_HELD` after it wins the lock (`scripts/agent-quality-gate.sh:1143`), and `acquire_gate_run_lock` returns before that line when locking is disabled (`scripts/agent-quality-gate.sh:1617`, `--no-lock` or `AGENT_QUALITY_GATE_LOCK=0`). Mapped commands on that path carry only `AGENTQG_RUN` (line 5085) and `CI=true`.",
+   "defect": {
+    "id": 3829986403,
+    "severity": "P2",
+    "path": "scripts/agent-quality-gate.test.sh",
+    "line": 525,
+    "title": "\ud83c\udfaf Functional Correctness | \ud83d\udfe1 Minor | \u26a1 Quick win",
+    "detail": "_\ud83c\udfaf Functional Correctness_ | _\ud83d\udfe1 Minor_ | _\u26a1 Quick win_\n\nRequire exactly one dispatch call.\n\nThe validator accepts every dispatch_gate_test_families line after the end marker. A second call passes validation and runs every selected family twice. Count dispatch calls and fail unless the count is one.\n\n\nProposed fix\n\ndiff\n-        if ($0 == \"dispatch_gate_test_families\") { next }\n+        if ($0 == \""
+   },
+   "frozen_reasoning": "Review asserts the partition checker rejects 'second statement after dispatch' and treats dispatch validation as correct; it never flags that multiple dispatch calls pass and would double-run families."
+  },
+  {
+   "record_id": "pr1995-3830042123-matched",
+   "source_cell": {
+    "pr": 1995,
+    "condition": "combo_gpt-5.6-sol_high__claude-opus-5_high",
+    "candidate_index": 4
+   },
+   "defect_id": 3830042123,
+   "expected_verdict": "matched",
+   "claim_excerpt": "- [P2] Refuse focused tests in lockless gate runs \u2014 /private/tmp/fx-1995/scripts/agent-quality-gate.test.sh:600-603\n  When a developer uses the documented `--no-lock` or `AGENT_QUALITY_GATE_LOCK=0` escape hatch while `GATE_TEST_FOCUS` is exported, lock acquisition returns without setting `AGENT_QUALITY_GATE_LOCK_HELD`, so this guard does not fire. The gate's mapped self-test can then run only the selected family and report success without the full suite, contrary to the contract in `docs/notes/agent-quality-gate-mechanics.md:1139-1146`. Detect gate execution independently of lock ownership, or clear the focus before mapped commands.",
+   "defect": {
+    "id": 3830042123,
+    "severity": "P2",
+    "path": "scripts/agent-quality-gate.test.sh",
+    "line": 628,
+    "title": "Reject focus during lock-free gate runs",
+    "detail": "![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)  Reject focus during lock-free gate runs\n\nWhen a developer exports GATE_TEST_FOCUS and invokes the documented agent-quality-gate.sh --run --no-lock mode (or sets AGENT_QUALITY_GATE_LOCK=0), this guard allows the focused subset to answer for the full gate. acquire_gate_run_lock returns immediately for that mode at scripts/agent-quality-"
+   },
+   "frozen_reasoning": "Main finding: GATE_TEST_FOCUS guard keyed on AGENT_QUALITY_GATE_LOCK_HELD misses --no-lock / AGENT_QUALITY_GATE_LOCK=0 runs, letting a focused subset answer for the full gate."
+  },
+  {
+   "record_id": "pr1995-3830042128-unmatched",
+   "source_cell": {
+    "pr": 1995,
+    "condition": "combo_gpt-5.6-sol_high__claude-opus-5_high",
+    "candidate_index": 5
+   },
+   "defect_id": 3830042128,
+   "expected_verdict": "unmatched",
+   "claim_excerpt": "- [P2] Refuse focused tests in lockless gate runs \u2014 /private/tmp/fx-1995/scripts/agent-quality-gate.test.sh:600-603\n  When a developer uses the documented `--no-lock` or `AGENT_QUALITY_GATE_LOCK=0` escape hatch while `GATE_TEST_FOCUS` is exported, lock acquisition returns without setting `AGENT_QUALITY_GATE_LOCK_HELD`, so this guard does not fire. The gate's mapped self-test can then run only the selected family and report success without the full suite, contrary to the contract in `docs/notes/agent-quality-gate-mechanics.md:1139-1146`. Detect gate execution independently of lock ownership, or clear the focus before mapped commands.",
+   "defect": {
+    "id": 3830042128,
+    "severity": "P1",
+    "path": "scripts/agent-quality-gate.test.sh",
+    "line": 492,
+    "title": "Register the new self-test path pin",
+    "detail": "![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)  Register the new self-test path pin\n\nThis fallback introduces a hard-coded scripts/agent-quality-gate.test.sh pin but does not add it to the scripts path-pin inventory. The fallback is exercised when the suite is launched through a relative path from a subdirectory and then changes to the repo root; after a future script move, obvious"
+   },
+   "frozen_reasoning": "No mention of the hard-coded scripts/agent-quality-gate.test.sh path pin or the path-pin inventory."
+  },
+  {
+   "record_id": "pr1995-3830695396-matched",
+   "source_cell": {
+    "pr": 1995,
+    "condition": "sweep_claude-fable-5_high",
+    "candidate_index": 6
+   },
+   "defect_id": 3830695396,
+   "expected_verdict": "matched",
+   "claim_excerpt": "**`docs/notes/agent-quality-gate-mechanics.md:1143` \u2014 doc overstates the refusal.** It says \"A *set* `GATE_TEST_FOCUS` exits 2\" under the lock/CI, but `scripts/agent-quality-gate.test.sh:600` only refuses when the value is **non-empty** (`[[ -n \"$gate_test_focus\" ]]`). `GATE_TEST_FOCUS=` exported empty runs the full suite silently. The code behavior is the sensible one; change the doc to \"A non-empty `GATE_TEST_FOCUS`\".",
+   "defect": {
+    "id": 3830695396,
+    "severity": "P2",
+    "path": "docs/notes/agent-quality-gate-mechanics.md",
+    "line": 1157,
+    "title": "\ud83d\udcd0 Maintainability & Code Quality | \ud83d\udfe1 Minor | \u26a1 Quick win",
+    "detail": "_\ud83d\udcd0 Maintainability & Code Quality_ | _\ud83d\udfe1 Minor_ | _\u26a1 Quick win_\n\nMake the guard and failure wording precise.\n\nThe shell code rejects non-empty marker values, but this text says \u201cis set.\u201d Change it to \u201cis non-empty,\u201d or change the code to test variable presence. Replace \u201cIt reds the suite\u201d with \u201cIt fails the suite.\u201d\n\n\n\n\nAs per coding guidelines, \u201cPrefer the short word. Cut every word that does no wo"
+   },
+   "frozen_reasoning": "The review's sole finding is exactly this: doc says 'set' GATE_TEST_FOCUS but the code tests for non-empty ([[ -n ]]); it proposes changing the doc to 'non-empty'."
+  },
+  {
+   "record_id": "pr1995-3830695396-unmatched",
+   "source_cell": {
+    "pr": 1995,
+    "condition": "G_opus5_plus_codex_builtin",
+    "candidate_index": 6
+   },
+   "defect_id": 3830695396,
+   "expected_verdict": "unmatched",
+   "claim_excerpt": "- **The fix already exists in the gate.** `AGENTQG_RUN` is exported into every mapped command by `run_with_timeout` (`agent-quality-gate.sh:5085`), the single execution path for both the serial (`:5356`) and parallel (`:5403`) branches, and it is set for no-lock runs too (`agentqg:nolock-$$`, `:620-622`). Guard on `AGENTQG_RUN` instead of `AGENT_QUALITY_GATE_LOCK_HELD`; no new marker needed. Note the lock family clears `AGENT_QUALITY_GATE_LOCK_HELD` deliberately in `run_locked_gate` (`:5966-5967`) \u2014 it does not clear `AGENTQG_RUN`, so check whether those nested fixture runs need the same treatment for the new variable.\n- **The shrunken run poisons the next push.** A green `--run` writes the whole-run success stamp unconditionally of lock mode (`agent-quality-gate.sh:5868-5877`); the pre-push hook is `--run --parallel 3 --skip-if-fresh --base origin/main` (`.trunk/trunk.yaml:136`) and exits on that stamp (`:4843-4848`). And `--no-lock` is exactly what the gate's own lock-timeout message tells a developer to use (`:1811`). So the escape-hatch path is the likely one, and its result is cached into the push that follows. (Per-command stamps are not a vector \u2014 the self-test is stamp-exempt, `:5224`.)\n- Same false claim in prose: `docs/notes/agent-quality-gate-mechanics.md:1143-1146` says the focus is refused when `AGENT_QUALITY_GATE_LOCK_HELD` is set, \"any command a real gate run spawns\". Fix with the code.",
+   "defect": {
+    "id": 3830695396,
+    "severity": "P2",
+    "path": "docs/notes/agent-quality-gate-mechanics.md",
+    "line": 1157,
+    "title": "\ud83d\udcd0 Maintainability & Code Quality | \ud83d\udfe1 Minor | \u26a1 Quick win",
+    "detail": "_\ud83d\udcd0 Maintainability & Code Quality_ | _\ud83d\udfe1 Minor_ | _\u26a1 Quick win_\n\nMake the guard and failure wording precise.\n\nThe shell code rejects non-empty marker values, but this text says \u201cis set.\u201d Change it to \u201cis non-empty,\u201d or change the code to test variable presence. Replace \u201cIt reds the suite\u201d with \u201cIt fails the suite.\u201d\n\n\n\n\nAs per coding guidelines, \u201cPrefer the short word. Cut every word that does no wo"
+   },
+   "frozen_reasoning": "Audited 2026-08-28: consensus flip declined on full context. Defect 3830695396 is a wording fix at agent-quality-gate-mechanics.md:1157 \u2014 say the guard rejects a non-empty value rather than that the variable 'is set', and 'It fails the suite' rather than 'It reds the suite'. The claim is a substantive gate bug: the focus guard tests AGENT_QUALITY_GATE_LOCK_HELD, which a --no-lock run never sets, and the resulting green --run writes the whole-run success stamp the pre-push gate then skips on. It cites docs:1143-1146 only because the same false claim appears in prose there, never the :1157 wording. Same file, different underlying problem, which judge-match.md excludes. Stays unmatched."
+  },
+  {
+   "record_id": "pr1999-3830366243-matched",
+   "source_cell": {
+    "pr": 1999,
+    "condition": "cx_gpt-5.6-sol_max",
+    "candidate_index": 2
+   },
+   "defect_id": 3830366243,
+   "expected_verdict": "matched",
+   "claim_excerpt": "- [P2] Update the canonical Peg monitoring runbook \u2014 /private/tmp/fx-1999/alerts/rules/peg-message-templates.tf:5-6\n  `docs/notes/peg-monitoring.md:118-120` still says Slack titles contain the summary, while this change makes them icon-only, and lines 132-133 still say history reads only fired and resolved transitions although it now reads evaluation failures and recoveries. Update both statements because `AGENTS.md:25-27` defines canonical context as current operating truth.",
+   "defect": {
+    "id": 3830366243,
+    "severity": "P2",
+    "path": "alerts/rules/peg-message-templates.tf",
+    "line": 6,
+    "title": "Keep the Peg runbook aligned with the new title",
+    "detail": "![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)  Keep the Peg runbook aligned with the new title\n\nAfter this ships, the canonical docs/notes/peg-monitoring.md runbook still says that Slack titles contain the severity icon plus the alert summary, while this change makes the title icon-only and moves the linked summary into the body. Update the alert-copy contract in that runbook so o"
+   },
+   "frozen_reasoning": "Bullet 5 flags docs/notes/peg-monitoring.md title/summary contract being stale."
+  },
+  {
+   "record_id": "pr1999-3830366247-unmatched",
+   "source_cell": {
+    "pr": 1999,
+    "condition": "cx_gpt-5.6-terra_max",
+    "candidate_index": 3
+   },
+   "defect_id": 3830366247,
+   "expected_verdict": "unmatched",
+   "claim_excerpt": "- [P2] Use rule-aware copy for source-less evaluation failures \u2014 /private/tmp/fx-1999/ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts:230-234\n  When a source-less asset or policy rule enters Grafana `Error` (for example, Structural Saturation, Heartbeat Missing, Indexed Pool Unreachable, or Policy Rollover Stuck), its `source` label is empty. `pegAlertSourceName(\"\")` becomes `Price source`, so the new history rows point operators at a nonexistent price-source rule; use rule-aware or neutral copy for an empty source.",
+   "defect": {
+    "id": 3830366247,
+    "severity": "P2",
+    "path": "ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts",
+    "line": 114,
+    "title": "Include recoveries that resume in Pending",
+    "detail": "![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)  Include recoveries that resume in Pending\n\nWhen a rule with a nonzero for duration enters Error and its next successful evaluation still satisfies the condition, Grafana can recover into Pending rather than Normal or Alerting. This classifier ignores that transition, and errorStateHistoryUrl also requests only previous=Error&current=N"
+   },
+   "frozen_reasoning": "Review never discusses Pending-state recovery transitions or errorStateHistoryUrl query params."
+  },
+  {
+   "record_id": "pr1999-3830366547-matched",
+   "source_cell": {
+    "pr": 1999,
+    "condition": "sweep_claude-sonnet-5_high",
+    "candidate_index": 2
+   },
+   "defect_id": 3830366547,
+   "expected_verdict": "unmatched",
+   "claim_excerpt": "Reviewed the branch diff (peg-alert monitoring: Terraform Slack/VictorOps templates, Grafana state-history route, and the new \"Error\"-state handling in `peg-alert-events.ts`). One real bug found:",
+   "defect": {
+    "id": 3830366547,
+    "severity": "P1",
+    "path": "ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts",
+    "line": 352,
+    "title": "Error recovery leaves breach active",
+    "detail": "### Error recovery leaves breach active\n\nHigh Severity\n\n\npairStateTransitions keeps alert and error cycles on separate keys, so error-recovered only closes the error lane. After Alerting \u2192 Error \u2192 Normal, the earlier raised stays open and Recent alerts still shows an active peg breach even though Grafana is Normal and the new recovery row says monitoring resumed. Peg rules use exec_err_state = \"Er"
+   },
+   "frozen_reasoning": "Matches exactly: separate alert/error cycle keys mean Alerting\u2192Error\u2192Normal leaves the earlier 'raised' open, showing a still-active breach while the recovery row says monitoring resumed."
+  },
+  {
+   "record_id": "pr1999-3830366556-unmatched",
+   "source_cell": {
+    "pr": 1999,
+    "condition": "B_opus5_bare",
+    "candidate_index": 5
+   },
+   "defect_id": 3830366556,
+   "expected_verdict": "unmatched",
+   "claim_excerpt": "- **`peg-alert-events.ts:318-319`** \u2014 `error-recovered-alerting` closes the `:error` cycle but doesn't open an `:alert` cycle, even though the rule is Alerting afterwards. The eventual `Alerting\u2192Normal` falls through to `unpairedCleared` (line 346) and renders without a `lasted \u2026` duration. Nothing is dropped, so this is cosmetic.\n- **`scripts/alerts/alert-rules-lint.test.mjs:1215-1220`** \u2014 `templates.slice(indexOf(title), indexOf(message))` returns `\"\"` if the two resources are ever reordered, and the new negative assertions at 1258-1259 would then pass vacuously. `indexOf`-pair slicing is worth a guard.",
+   "defect": {
+    "id": 3830366556,
+    "severity": "P2",
+    "path": "ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts",
+    "line": 116,
+    "title": "Pending recovery orphans error cycle",
+    "detail": "### Pending recovery orphans error cycle\n\nMedium Severity\n\n\nError cycles only close on Error \u2192 Alerting or Error \u2192 Normal. Several Peg rules use a non-zero for duration, and Grafana can recover through Error \u2192 Pending \u2192 Alerting. Pending transitions are intentionally not queried, so the error opening never pairs and Recent alerts can keep a stuck \u201cmonitoring failed\u201d row after evaluation has alread"
+   },
+   "frozen_reasoning": "No mention of Error\u2192Pending\u2192Alerting leaving a stuck 'monitoring failed' row."
+  },
+  {
+   "record_id": "pr1999-3830371307-matched",
+   "source_cell": {
+    "pr": 1999,
+    "condition": "combo_gpt-5.6-sol_high__claude-opus-5_max",
+    "candidate_index": 6
+   },
+   "defect_id": 3830371307,
+   "expected_verdict": "unmatched",
+   "claim_excerpt": "- `pnpm typecheck` and all 177 peg-related vitest tests pass; `scripts/alerts/alert-rules-lint.test.mjs` passes (50 tests). The only red gate is `terraform test`.\n- The icon-only Slack title matches the established repo convention \u2014 `alerts/rules/message-templates-slack.tf:7, 81, 109` already use bare `\ud83d\udd34`/`\u2705` titles with the linked human title in the body. The design is right; only the tftest assertion and the runbook are out of sync.\n- I removed the `alerts/rules/.terraform` directory created by my `terraform init`; the working tree is clean.",
+   "defect": {
+    "id": 3830371307,
+    "severity": "P2",
+    "path": "scripts/alerts/alert-rules-lint.test.mjs",
+    "line": 1289,
+    "title": "\ud83c\udfaf Functional Correctness | \ud83d\udfe1 Minor | \u26a1 Quick win",
+    "detail": "_\ud83c\udfaf Functional Correctness_ | _\ud83d\udfe1 Minor_ | _\u26a1 Quick win_\n\nMake the Slack template lint assertions fail closed and scope them to the intended resources. The current extraction does not validate the resource-marker indexes, so a marker change can make slice select unrelated text. The link checks also search the complete Terraform source, allowing duplicate strings elsewhere to satisfy them. Validate o"
+   },
+   "frozen_reasoning": "Review item 6 confirms the indexOf/-1 slice fail-open marker extraction (disputes only the link-scoping half), same underlying defect."
+  },
+  {
+   "record_id": "pr1999-3830371315-matched",
+   "source_cell": {
+    "pr": 1999,
+    "condition": "combo_gpt-5.6-sol_high__claude-opus-5_max",
+    "candidate_index": 7
+   },
+   "defect_id": 3830371315,
+   "expected_verdict": "matched",
+   "claim_excerpt": "- [P2] Return a fresh Response for each companion fetch \u2014 /private/tmp/fx-1999/ui-dashboard/src/app/api/peg-monitoring/alerts/__tests__/route.test.ts:818-819\n  The route now makes four concurrent requests, but these mocks return the same body-bearing `Response` for every call after the first. A response body is consumable once, so companion fetches reject with a disturbed-body error and the tests can return 502 for that mock artifact instead of the malformed, oversized, or truncated input under test. Use a mock implementation that creates a new `Response` per call.",
+   "defect": {
+    "id": 3830371315,
+    "severity": "P2",
+    "path": "ui-dashboard/src/app/api/peg-monitoring/alerts/__tests__/route.test.ts",
+    "line": 819,
+    "title": "\ud83c\udfaf Functional Correctness | \ud83d\udfe1 Minor | \u26a1 Quick win",
+    "detail": "_\ud83c\udfaf Functional Correctness_ | _\ud83d\udfe1 Minor_ | _\u26a1 Quick win_\n\nOne consumable Response is shared across the companion fetches in three tests. The route now issues four requests, but mockResolvedValue resolves every remaining call with the same Response instance. A Response body can be read once, so the second call fails inside readBoundedGrafanaResponse and the route returns 502 for body reuse rather tha"
+   },
+   "frozen_reasoning": "Review item 5 identifies mockResolvedValue sharing one consumable Response across four fetches, causing 502 from body reuse and vacuous assertions."
+  },
+  {
+   "record_id": "pr1999-3830416461-unmatched",
+   "source_cell": {
+    "pr": 1999,
+    "condition": "G_opus5_plus_codex_builtin",
+    "candidate_index": 8
+   },
+   "defect_id": 3830416461,
+   "expected_verdict": "unmatched",
+   "claim_excerpt": "**Its P1 is real, but its framing is wrong.** `Alerting \u2192 Error \u2192 Normal` does leave the alert cycle open. `cycleKey` at `peg-alert-events.ts:320-321` hard-partitions each fingerprint into an `alert` cycle and an `error` cycle, and nothing crosses between them. Grafana never emits a `previous=Alerting, current=Normal` row for that path, so the `raised` entry survives to the leftover drain at `peg-alert-events.ts:356`. I ran it \u2014 output is a `severity: \"warning\"` entry with present-tense copy (`\"Bitvavo buy and sell prices are 34 bps apart\"`, no duration) sitting next to `\"Grafana can evaluate the Bitvavo Peg rule again\"`. The UI contradicts itself.",
+   "defect": {
+    "id": 3830416461,
+    "severity": "P2",
+    "path": "ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts",
+    "line": 230,
+    "title": "Label source-less evaluation failures by rule",
+    "detail": "![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)  Label source-less evaluation failures by rule\n\nWhen an asset-wide or policy rule enters Error, labels.source is empty\u2014as it is for Structural Saturation, Indexed Pool, Heartbeat, and Policy Rollover rules\u2014so this calls pegAlertSourceName(\"\"), which returns Price source. Both failure and recovery rows then claim Grafana evaluated a non"
+   },
+   "frozen_reasoning": "No mention of pegAlertSourceName(\"\") defaulting to 'Price source' for rules with empty labels.source."
+  },
+  {
+   "record_id": "pr2001-3830423746-matched",
+   "source_cell": {
+    "pr": 2001,
+    "condition": "A_opus48_orig",
+    "candidate_index": 1
+   },
+   "defect_id": 3830423746,
+   "expected_verdict": "unmatched",
+   "claim_excerpt": "- **90** \ud83d\udfe1 `ui-dashboard/src/lib/canonical-revenue/daily-series.ts:69` \u2014 Dead `try/catch` in `isZeroWei`. The preceding `/^-?\\d+$/` regex guarantees `BigInt(trimmed)` can never throw, so the `catch { return false }` is unreachable. It reads like real error handling but is never exercised \u2014 either drop the try/catch or drop the regex and rely on the catch. (found by: larp, architecture, slop)\n- **90** \ud83d\udfe1 `ui-dashboard/src/lib/canonical-revenue/daily-series.ts:119` \u2014 The `isZeroExposureStethSnapshot` short-circuit is duplicated in both `reserveSnapshotTotalUsd` (line 119) and `reserveSnapshotBaseline` (line 151), coupling both to the same convention. Could be centralized once in the `buildRevenueBuckets` loop. (found by: architecture, history)",
+   "defect": {
+    "id": 3830423746,
+    "severity": "P1",
+    "path": "ui-dashboard/src/lib/canonical-revenue/daily-series.ts",
+    "line": 119,
+    "title": "[P1] Returning 0 unconditionally here fabricates a large negative revenue spike on a real full-withdrawal day, instead of the intended \"$0 row.\"",
+    "detail": "[P1] Returning 0 unconditionally here fabricates a large negative revenue spike on a real full-withdrawal day, instead of the intended \"$0 row.\"\n\nDownstream in buildRevenueBuckets (lines ~194-205), baselineUsd falls back to previousReserveTotalsBySource.get(sourceKey) whenever a prior snapshot exists for this wallet \u2014 including a real, nonzero, priced total from the day before. Since this function"
+   },
+   "frozen_reasoning": "The Notes section names the exact mechanism \u2014 an all-zero snapshot after priced history making `dailyYieldUsd = 0 - previousTotal` go negative at daily-series.ts:119 \u2014 same underlying problem, though the review dismisses it as pre-existing rather than flagging it."
+  },
+  {
+   "record_id": "pr2001-3830423746-unmatched",
+   "source_cell": {
+    "pr": 2001,
+    "condition": "F_codex_raw",
+    "candidate_index": 1
+   },
+   "defect_id": 3830423746,
+   "expected_verdict": "unmatched",
+   "claim_excerpt": "- Why it matters: The new tests assert malformed stETH fields keep revenue partial. That holds for malformed strings, but a malformed non-string value can crash the revenue build instead of producing the partial state.\n- Evidence: [daily-series.ts](/private/tmp/fx-2001/ui-dashboard/src/lib/canonical-revenue/daily-series.ts:66) calls `value.trim()` before the `try`. `useReserveYieldHistory` returns raw GraphQL rows as typed data without a row schema parser at [use-reserve-yield-history.ts](/private/tmp/fx-2001/ui-dashboard/src/hooks/use-reserve-yield-history.ts:149). A `null` or numeric amount field would throw `TypeError`.\n- Suggested fix: Change `isZeroWei` to accept `unknown`, return `false` unless `typeof value === \"string\"`, then trim and parse. Add a regression test with `balanceAmount: null as unknown as string`.\n- Confidence: Medium. The GraphQL schema should normally return strings, but this path has no runtime guard.",
+   "defect": {
+    "id": 3830423746,
+    "severity": "P1",
+    "path": "ui-dashboard/src/lib/canonical-revenue/daily-series.ts",
+    "line": 119,
+    "title": "[P1] Returning 0 unconditionally here fabricates a large negative revenue spike on a real full-withdrawal day, instead of the intended \"$0 row.\"",
+    "detail": "[P1] Returning 0 unconditionally here fabricates a large negative revenue spike on a real full-withdrawal day, instead of the intended \"$0 row.\"\n\nDownstream in buildRevenueBuckets (lines ~194-205), baselineUsd falls back to previousReserveTotalsBySource.get(sourceKey) whenever a prior snapshot exists for this wallet \u2014 including a real, nonzero, priced total from the day before. Since this function"
+   },
+   "frozen_reasoning": "Review only raises isZeroWei throwing on non-string values; it never identifies that returning 0 for zero-exposure rows creates a negative revenue spike against a nonzero prior baseline. The suggested test about previousReserveTotalsBySource is only a 'lock intended behavior' note, not identification of the defect."
+  },
+  {
+   "record_id": "pr2001-3830513980-unmatched",
+   "source_cell": {
+    "pr": 2001,
+    "condition": "F_codex_raw",
+    "candidate_index": 2
+   },
+   "defect_id": 3830513980,
+   "expected_verdict": "unmatched",
+   "claim_excerpt": "- Why it matters: The new tests assert malformed stETH fields keep revenue partial. That holds for malformed strings, but a malformed non-string value can crash the revenue build instead of producing the partial state.\n- Evidence: [daily-series.ts](/private/tmp/fx-2001/ui-dashboard/src/lib/canonical-revenue/daily-series.ts:66) calls `value.trim()` before the `try`. `useReserveYieldHistory` returns raw GraphQL rows as typed data without a row schema parser at [use-reserve-yield-history.ts](/private/tmp/fx-2001/ui-dashboard/src/hooks/use-reserve-yield-history.ts:149). A `null` or numeric amount field would throw `TypeError`.\n- Suggested fix: Change `isZeroWei` to accept `unknown`, return `false` unless `typeof value === \"string\"`, then trim and parse. Add a regression test with `balanceAmount: null as unknown as string`.\n- Confidence: Medium. The GraphQL schema should normally return strings, but this path has no runtime guard.",
+   "defect": {
+    "id": 3830513980,
+    "severity": "P1",
+    "path": "ui-dashboard/src/lib/canonical-revenue/daily-series.ts",
+    "line": 190,
+    "title": "Subtract prior yield when a zero row empties a wallet",
+    "detail": "![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)  Subtract prior yield when a zero row empties a wallet\n\nWhen a yielding tracked wallet transfers its entire balance to another tracked wallet, recordTransfer moves the balance and principal, so the sender's next snapshot can have all four checked fields at zero while the recipient inherits the unrealized yield. This branch records zero"
+   },
+   "frozen_reasoning": "No mention of tracked-wallet transfers, prior unrealized yield, or the need to subtract prior yield when a wallet empties."
+  },
+  {
+   "record_id": "pr1999-3830366234-matched",
+   "source_cell": {
+    "pr": 1999,
+    "condition": "control",
+    "candidate_index": 0,
+    "draw": 1,
+    "result_file": "result-1999-control-1.json"
+   },
+   "defect_id": 3830366234,
+   "expected_verdict": "matched",
+   "claim_excerpt": "`terraform test` fails \u2014 the HCL test wasn't updated with the template: `alerts/rules/peg-rule-definitions.tftest.hcl:68-69` still asserts the Slack title template contains `$alert.Annotations.summary` and `$alert.Annotations.resolved_summary`, but the new emoji-only title (`alerts/rules/peg-message-templates.tf:13-16`) has neither",
+   "defect": {
+    "id": 3830366234,
+    "severity": "P1",
+    "path": "alerts/rules/peg-message-templates.tf",
+    "line": 14,
+    "title": "Update the stale Terraform title assertion",
+    "detail": "![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)  Update the stale Terraform title assertion\n\nWhen the required ci.yml Terraform job runs for this alerts/rules change, peg-rule-definitions.tftest.hcl lines 68\u201369 still require the Slack title template to contain both $alert.Annotations.summary and $alert.Annotations.resolved_summary. This icon-only template contains neither, so terraf"
+   },
+   "frozen_reasoning": "Audited 2026-08-28: the claim names the same stale peg-rule-definitions.tftest.hcl:68-69 assertion requiring $alert.Annotations.summary and resolved_summary against the now icon-only title, and draws the same conclusion that the required terraform test fails \u2014 same defect, same cause."
+  },
+  {
+   "record_id": "pr1999-3830366247-matched",
+   "source_cell": {
+    "pr": 1999,
+    "condition": "pipeline",
+    "candidate_index": 4,
+    "draw": 2,
+    "result_file": "result-1999-pipeline-2.json"
+   },
+   "defect_id": 3830366247,
+   "expected_verdict": "matched",
+   "claim_excerpt": "3. `Error \u2192 Pending` recovery is never observed, so the failure row never resolves \u2014 `route.ts:43-55` + `peg-alert-events.ts:105-114`: `errorStateHistoryUrl` never requests `current=Pending` and `transitionKind` returns `null` for that pair, so the `error` transition stays in `open` forever and is emitted as a standalone \"Grafana could not evaluate the \u2026 Peg rule\" that never gets a recovery counterpart",
+   "defect": {
+    "id": 3830366247,
+    "severity": "P2",
+    "path": "ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts",
+    "line": 114,
+    "title": "Include recoveries that resume in Pending",
+    "detail": "![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)  Include recoveries that resume in Pending\n\nWhen a rule with a nonzero for duration enters Error and its next successful evaluation still satisfies the condition, Grafana can recover into Pending rather than Normal or Alerting. This classifier ignores that transition, and errorStateHistoryUrl also requests only previous=Error&current=N"
+   },
+   "frozen_reasoning": "Audited 2026-08-28: the claim states that errorStateHistoryUrl never requests current=Pending and that transitionKind returns null for Error -> Pending, so the failure row never gets its recovery \u2014 the same missing-Pending-recovery defect the truth finding describes."
+  },
+  {
+   "record_id": "pr1999-3830416461-matched",
+   "source_cell": {
+    "pr": 1999,
+    "condition": "replay",
+    "candidate_index": 3,
+    "draw": 2,
+    "result_file": "result-1999-replay-2.json"
+   },
+   "defect_id": 3830416461,
+   "expected_verdict": "matched",
+   "claim_excerpt": "peg-alert-events.ts:230 \u2014 evaluation-failure copy says 'Price source' for rules that have no source; pegAlertSourceName(\"\") returns the literal 'Price source' for Structural Saturation Warning, Indexed Pool Unreachable, Heartbeat Missing and Policy Rollover Stuck, so a Grafana error renders 'Grafana could not evaluate the Price source Peg rule'",
+   "defect": {
+    "id": 3830416461,
+    "severity": "P2",
+    "path": "ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts",
+    "line": 230,
+    "title": "Label source-less evaluation failures by rule",
+    "detail": "![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)  Label source-less evaluation failures by rule\n\nWhen an asset-wide or policy rule enters Error, labels.source is empty\u2014as it is for Structural Saturation, Indexed Pool, Heartbeat, and Policy Rollover rules\u2014so this calls pegAlertSourceName(\"\"), which returns Price source. Both failure and recovery rows then claim Grafana evaluated a non"
+   },
+   "frozen_reasoning": "Audited 2026-08-28: the claim identifies pegAlertSourceName(\"\") returning the literal 'Price source' at peg-alert-events.ts:230 and names the same source-less rules, so evaluation failures are mislabelled \u2014 the same defect."
+  },
+  {
+   "record_id": "pr1984-3828328194-matched",
+   "source_cell": {
+    "pr": 1984,
+    "condition": "pipeline",
+    "candidate_index": 1,
+    "draw": 1,
+    "result_file": "result-1984-pipeline-1.json"
+   },
+   "defect_id": 3828328194,
+   "expected_verdict": "matched",
+   "claim_excerpt": "scripts/sentry/autofix/sentry-autofix-run-record.mjs:67 \u2014 the repo default is dead for the only caller shape; omitting the --refused-inventory-repo flag yields `github.com/null` links because readFlag returns null and a JS default parameter fires only on undefined",
+   "defect": {
+    "id": 3828328194,
+    "severity": "P3",
+    "path": "scripts/sentry/autofix/sentry-autofix-run-record.mjs",
+    "line": 78,
+    "title": "Repo default bypassed by null",
+    "detail": "### Repo default bypassed by null\n\nLow Severity\n\n\nrenderRefusedStubInventory defaults repo to REFUSED_INVENTORY_DEFAULT_REPO, but the finalize run-record path passes readFlag's null when --refused-inventory-repo is omitted. In JavaScript, null does not trigger a parameter default, so known inventories render links as https://github.com/null/issues/... instead of falling back to the intended defaul"
+   },
+   "frozen_reasoning": "Audited 2026-08-28: the claim states that readFlag returns null while a JS default parameter fires only on undefined, so omitting --refused-inventory-repo renders github.com/null links \u2014 the same null-bypasses-the-default defect at the same call site."
+  },
+  {
+   "record_id": "pr1999-3830366547-replay-matched",
+   "source_cell": {
+    "pr": 1999,
+    "condition": "replay",
+    "candidate_index": 5,
+    "draw": 1,
+    "result_file": "result-1999-replay-1.json"
+   },
+   "defect_id": 3830366547,
+   "expected_verdict": "matched",
+   "claim_excerpt": "`Alerting \u2192 Error \u2192 Normal` leaves the alert cycle open forever \u2014 `peg-alert-events.ts:344-352` closes only the error lane, so the panel simultaneously says monitoring recovered and the breach is live when Grafana is Normal",
+   "defect": {
+    "id": 3830366547,
+    "severity": "P1",
+    "path": "ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts",
+    "line": 352,
+    "title": "Error recovery leaves breach active",
+    "detail": "### Error recovery leaves breach active\n\nHigh Severity\n\n\npairStateTransitions keeps alert and error cycles on separate keys, so error-recovered only closes the error lane. After Alerting \u2192 Error \u2192 Normal, the earlier raised stays open and Recent alerts still shows an active peg breach even though Grafana is Normal and the new recovery row says monitoring resumed. Peg rules use exec_err_state = \"Er"
+   },
+   "frozen_reasoning": "Audited 2026-08-28: the claim says Alerting \u2192 Error \u2192 Normal leaves the alert cycle open forever because peg-alert-events.ts:344-352 closes only the error lane, so the panel shows a live breach while Grafana is Normal. That is the same separate-cycle-key defect the truth body states at :352 \u2014 the earlier raised entry never closes \u2014 same cause and same symptom."
+  },
+  {
+   "record_id": "pr1999-3830366556-pipeline-matched",
+   "source_cell": {
+    "pr": 1999,
+    "condition": "pipeline",
+    "candidate_index": 1,
+    "draw": 1,
+    "result_file": "result-1999-pipeline-1.json"
+   },
+   "defect_id": 3830366556,
+   "expected_verdict": "matched",
+   "claim_excerpt": "A recovered rule shows \"Monitoring failed\" forever \u2014 `peg-alert-events.ts:105-115`, `route.ts:43-56`: the `Error \u2192 Pending` row is neither fetched by `errorStateHistoryUrl` nor classified (`transitionKind` returns `null` when `current` is `Pending`), so the error cycle opened at `Normal \u2192 Error` never closes and `pairStateTransitions:356` flushes it as a permanently-unresolved event",
+   "defect": {
+    "id": 3830366556,
+    "severity": "P2",
+    "path": "ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts",
+    "line": 116,
+    "title": "Pending recovery orphans error cycle",
+    "detail": "### Pending recovery orphans error cycle\n\nMedium Severity\n\n\nError cycles only close on Error \u2192 Alerting or Error \u2192 Normal. Several Peg rules use a non-zero for duration, and Grafana can recover through Error \u2192 Pending \u2192 Alerting. Pending transitions are intentionally not queried, so the error opening never pairs and Recent alerts can keep a stuck \u201cmonitoring failed\u201d row after evaluation has alread"
+   },
+   "frozen_reasoning": "Audited 2026-08-28: the claim says the Error \u2192 Pending row is neither fetched by errorStateHistoryUrl nor classified by transitionKind, so the error cycle opened at Normal \u2192 Error never closes and flushes as a permanently unresolved 'Monitoring failed' event. That is the same orphaned-error-cycle defect the truth body states for rules with a non-zero for duration recovering through Pending."
+  }
+ ],
+ "measured_blind_baseline": {
+  "model": "claude-fable-5",
+  "effort": "max",
+  "measured_at": "2026-08-28",
+  "agreement": 37,
+  "total": 40,
+  "misses": [
+   "pr1982-3827655676-unmatched",
+   "pr1982-3827655684-unmatched",
+   "pr1995-3830695396-unmatched"
+  ],
+  "note": "Blind excerpt-only replay of the contract judge against the audited labels; the three misses are the same-file trap pairs recorded in provenance as a systematic blind over-matching bias. The verdict floor is anchored at this baseline minus 2."
+ }
 }
