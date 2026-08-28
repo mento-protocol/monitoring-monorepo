@@ -4360,6 +4360,16 @@ test("the orchestrator rejects an ineligible baseline before paid work", () => {
     script.indexOf("baselinePlanIdentity(row)") <
       script.indexOf("# --- the run deadline"),
   );
+  assert.match(
+    script,
+    /writeFileSync\(snapshot, `\$\{JSON\.stringify\(row\)\}\\n`\)/,
+  );
+  assert.match(script, /AGAINST="\$BASELINE_SNAPSHOT"/);
+  assert.ok(
+    script.indexOf('AGAINST="$BASELINE_SNAPSHOT"') <
+      script.indexOf("# --- the run deadline"),
+  );
+  assert.match(script, /rm -f "\$BASELINE_SNAPSHOT"/);
   assert.match(script, /eligible complete full baseline row/);
   assert.match(script, /malformed or incompatible with the generated plan/);
 });

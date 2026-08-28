@@ -71,6 +71,7 @@ SPEC=""
 SPEC_TEMP=0
 SHIM=""
 SKILL_SNAPSHOT=""
+BASELINE_SNAPSHOT=""
 LOCK_DIRS=()
 RUN_DIR=""
 PLAN_JSON=""
@@ -189,6 +190,9 @@ cleanup() {
   fi
   if [[ -n $SKILL_SNAPSHOT ]]; then
     rm -rf "$SKILL_SNAPSHOT"
+  fi
+  if [[ -n $BASELINE_SNAPSHOT ]]; then
+    rm -f "$BASELINE_SNAPSHOT"
   fi
   local lock_dir
   for lock_dir in ${LOCK_DIRS[@]+"${LOCK_DIRS[@]}"}; do
@@ -450,10 +454,12 @@ PLAN_JSON="$RUN_DIR/plan.json"
 # row. The generated plan now supplies the remaining checks before paid work:
 # full schema and frozen-matrix validation, plus the exact comparison lineage.
 if [[ -n $AGAINST ]]; then
+  BASELINE_SNAPSHOT="$(mktemp "$TMPROOT/review-eval-baseline.XXXXXX")" ||
+    fail "could not prepare an immutable baseline snapshot under $TMPROOT"
   # shellcheck disable=SC2016  # the single-quoted block is node source
   node --input-type=module -e '
-    const [spec, ledger, contractFile, planFile, reference] = process.argv.slice(1);
-    const { readFileSync } = await import("node:fs");
+    const [spec, ledger, contractFile, planFile, reference, snapshot] = process.argv.slice(1);
+    const { readFileSync, writeFileSync } = await import("node:fs");
     const { loadContract } = await import(`${spec}/scripts/review/review-eval-fixtures.mjs`);
     const { baselinePreflightProblems, readLedger } = await import(`${spec}/scripts/review/review-eval-ledger.mjs`);
     const { resolveRowReference } = await import(`${spec}/scripts/review/review-eval-result-shape.mjs`);
@@ -474,8 +480,10 @@ if [[ -n $AGAINST ]]; then
       candidateExecutedAt: plan.planned_at,
     });
     if (problems.length > 0) throw new Error(problems.join(" | "));
-  ' "$SPEC" "$LEDGER" "$CONTRACT" "$PLAN_JSON" "$AGAINST" >/dev/null 2>&1 ||
+    writeFileSync(snapshot, `${JSON.stringify(row)}\n`);
+  ' "$SPEC" "$LEDGER" "$CONTRACT" "$PLAN_JSON" "$AGAINST" "$BASELINE_SNAPSHOT" >/dev/null 2>&1 ||
     fail "--against $AGAINST is malformed or incompatible with the generated plan"
+  AGAINST="$BASELINE_SNAPSHOT"
 fi
 # shellcheck disable=SC2016  # the single-quoted block is node source
 CELL_COUNT="$(node -e '
