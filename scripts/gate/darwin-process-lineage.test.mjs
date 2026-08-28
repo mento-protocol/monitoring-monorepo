@@ -70,6 +70,9 @@ import {
 const LINEAGE_MODULE_PATH = fileURLToPath(
   new URL("./darwin-process-lineage.mjs", import.meta.url),
 );
+const LINEAGE_SHELL_PATH = fileURLToPath(
+  new URL("./darwin-process-lineage.sh", import.meta.url),
+);
 const { lifecycleContract, schema, snapshotHeader } =
   darwinLineageConstantsForTest;
 
@@ -1079,6 +1082,21 @@ test("Darwin watcher defaults state storage to scratch and accepts an explicit p
   assert.match(source, /stateDirectory: options\.get\("--state-directory"\)/u);
 });
 
+test("Darwin watcher census CAS retries are bounded by attempts and deadline", () => {
+  const source = readFileSync(LINEAGE_MODULE_PATH, "utf8");
+  const censusTransition = source.slice(
+    source.indexOf("const MAX_WATCH_CENSUS_TRANSITION_ATTEMPTS"),
+    source.indexOf("async function settleWatchedDarwinLineage"),
+  );
+  assert.match(censusTransition, /MAX_WATCH_CENSUS_TRANSITION_ATTEMPTS = 4/u);
+  assert.match(
+    censusTransition,
+    /attempt < MAX_WATCH_CENSUS_TRANSITION_ATTEMPTS/u,
+  );
+  assert.match(censusTransition, /performance\.now\(\) >= deadline/u);
+  assert.doesNotMatch(censusTransition, /while \(true\)/u);
+});
+
 function tombstone({ pid, uniqueId, parentUniqueId, classification }) {
   return {
     pid,
@@ -1973,6 +1991,79 @@ test("host classification ignores a PATH-shadowed uname", () => {
     );
     assert.equal(invalidCache.status, 2);
     assert.match(invalidCache.stderr, /classification is invalid/u);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("Darwin lineage root accepts a concurrent real-directory creator", () => {
+  const directory = mkdtempSync(join(tmpdir(), "agentqg-lineage-root-race-"));
+  try {
+    const result = spawnSync(
+      "/bin/bash",
+      [
+        "-c",
+        `source "$1"
+gate_lock_root_dir="$2"
+mkdir() {
+  command mkdir "$@"
+  return 1
+}
+gate_darwin_lineage_root`,
+        "lineage-root-race-test",
+        LINEAGE_SHELL_PATH,
+        directory,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const root = result.stdout.trim();
+    assert.equal(root, join(directory, `lineage-v1-u${process.getuid()}`));
+    const stat = lstatSync(root);
+    assert.equal(stat.isDirectory(), true);
+    assert.equal(stat.isSymbolicLink(), false);
+    assert.equal(stat.uid, process.getuid());
+    assert.equal(stat.mode & 0o7777, 0o700);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("Darwin lineage bind rejects a symlinked module before Node runs", () => {
+  const directory = mkdtempSync(join(tmpdir(), "agentqg-lineage-bind-link-"));
+  const sourceDirectory = join(directory, "source");
+  const gateDirectory = join(sourceDirectory, "gate");
+  const target = join(directory, "replacement.mjs");
+  const marker = join(directory, "invoked");
+  mkdirSync(gateDirectory, { recursive: true });
+  writeFileSync(
+    target,
+    `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "invoked\\n");\n`,
+  );
+  symlinkSync(target, join(gateDirectory, "darwin-process-lineage.mjs"));
+  try {
+    const result = spawnSync(
+      "/bin/bash",
+      [
+        "-c",
+        `source "$1"
+script_source_dir="$2"
+scratch_dir="$3"
+gate_darwin_lineage_active=1
+gate_darwin_lineage_state_file="$3/lineage.json"
+gate_darwin_node_bin="$4"
+gate_darwin_lineage_bind_root 123 456`,
+        "lineage-bind-link-test",
+        LINEAGE_SHELL_PATH,
+        sourceDirectory,
+        directory,
+        process.execPath,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /process-lineage helper is unavailable/u);
+    assert.equal(existsSync(marker), false);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -3017,6 +3108,44 @@ test("lineage classification owns the full exact chain to the mapped root", () =
       { uniqueId: "1001", classification: "owned" },
       { uniqueId: "1200", classification: "ambiguous" },
     ],
+  );
+});
+
+test("guardian tombstone hands a surviving Trunk daemon to exact settlement", () => {
+  const candidates = classifyDarwinLineageCandidates(
+    state({
+      tombstones: [
+        tombstone({
+          pid: 201,
+          uniqueId: "1001",
+          parentUniqueId: "1000",
+          classification: "owned",
+        }),
+      ],
+    }),
+    [
+      record({ pid: 1, ppid: 0, uniqueId: "10", parentUniqueId: "0" }),
+      record({ pid: 100, ppid: 1, uniqueId: "900", parentUniqueId: "10" }),
+      record({ pid: 200, ppid: 100, uniqueId: "1000", parentUniqueId: "900" }),
+      record({ pid: 202, ppid: 1, uniqueId: "1002", parentUniqueId: "1001" }),
+    ],
+    { controlPid: 100, now: 2 },
+  );
+
+  const daemon = candidates.find(({ uniqueId }) => uniqueId === "1002");
+  assert.deepEqual(
+    {
+      pid: daemon?.pid,
+      uniqueId: daemon?.uniqueId,
+      parentUniqueId: daemon?.parentUniqueId,
+      classification: daemon?.classification,
+    },
+    {
+      pid: 202,
+      uniqueId: "1002",
+      parentUniqueId: "1001",
+      classification: "owned",
+    },
   );
 });
 

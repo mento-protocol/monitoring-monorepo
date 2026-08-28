@@ -1835,13 +1835,67 @@ exit 0
     assert.equal(eofSignal, "SIGKILL");
     assert.equal(targetSignal, "SIGKILL");
 
-    await delay(2_200);
-    assert.equal(existsSync(eof.leak), false);
-    assert.equal(existsSync(targetExit.leak), false);
+    const leakDeadline = Date.now() + 6_000;
+    for (;;) {
+      assert.equal(existsSync(eof.leak), false);
+      assert.equal(existsSync(targetExit.leak), false);
+      const remaining = leakDeadline - Date.now();
+      if (remaining <= 0) break;
+      await delay(Math.min(100, remaining));
+    }
   } finally {
     for (const child of children) requestSupervisorStop(child);
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("the live supervisor reports the target exit status before cleanup", async () => {
+  const child = spawnServerSupervisor({
+    command: "/bin/bash",
+    args: ["-c", "exit 23"],
+    handle: HANDLE,
+  });
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  const [, signal] = await once(child, "close");
+  assert.equal(signal, "SIGKILL");
+  assert.match(
+    stderr,
+    /sentry-mcp-server-supervisor: target exited with status 23/u,
+  );
+});
+
+test("verbose server stderr retains the supervisor target status", async () => {
+  const targetScript =
+    'process.stderr.write("server stderr head\\n" + "x".repeat(1_200) + "\\nserver stderr tail\\n"); process.exit(23);';
+  await assert.rejects(
+    listServerTools({
+      command: process.execPath,
+      args: ["-e", targetScript],
+      handle: HANDLE,
+      timeoutMs: 5_000,
+    }),
+    (error) => {
+      const prefix = " — server stderr: ";
+      const diagnosticStart = error.message.indexOf(prefix);
+      assert.ok(diagnosticStart >= 0, "the probe omitted server stderr");
+      const diagnostic = error.message.slice(diagnosticStart + prefix.length);
+      assert.ok(
+        diagnostic.length <= 800,
+        `the bounded server stderr grew to ${diagnostic.length} characters`,
+      );
+      assert.match(diagnostic, /^server stderr head/u);
+      assert.match(diagnostic, /\.\.\. server stderr truncated \.\.\./u);
+      assert.match(
+        diagnostic,
+        /sentry-mcp-server-supervisor: target exited with status 23$/u,
+      );
+      return true;
+    },
+  );
 });
 
 test("the closure assertion catches every relative import form", () => {

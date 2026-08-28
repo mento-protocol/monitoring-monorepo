@@ -209,9 +209,11 @@ set -u
 "$@" 3<&- <&0 >&1 2>&2 &
 target_pid=$!
 wait "$target_pid"
+target_status=$?
 
 # A target can exit after it starts a grandchild. Settle the group before this
 # live leader can be reaped and its numeric process-group id can be reused.
+printf 'sentry-mcp-server-supervisor: target exited with status %s\n' "$target_status" >&2
 kill -KILL -- "-$$"
 exit 127
 `;
@@ -260,6 +262,19 @@ export function requestSupervisorStop(child) {
   }
 }
 
+const MAX_SERVER_STDERR_CHARS = 800;
+const SERVER_STDERR_TRUNCATION = "\n... server stderr truncated ...\n";
+
+function boundedServerStderr(value) {
+  const text = String(value ?? "").trim();
+  if (text.length <= MAX_SERVER_STDERR_CHARS) return text;
+  const contentBudget =
+    MAX_SERVER_STDERR_CHARS - SERVER_STDERR_TRUNCATION.length;
+  const headLength = Math.ceil(contentBudget / 2);
+  const tailLength = contentBudget - headLength;
+  return `${text.slice(0, headLength)}${SERVER_STDERR_TRUNCATION}${text.slice(-tailLength)}`;
+}
+
 /**
  * Spawn the MCP server, handshake, and return its tool names.
  *
@@ -298,14 +313,16 @@ export async function listServerTools({
       if (!childHasExited) stopFn(child);
       fn(value);
     };
-    const fail = (reason, finishOptions) =>
+    const fail = (reason, finishOptions) => {
+      const stderrDiagnostic = boundedServerStderr(stderr);
       finish(
         reject,
         new Error(
-          `${reason}${stderr.trim() ? ` — server stderr: ${stderr.trim().slice(0, 800)}` : ""}`,
+          `${reason}${stderrDiagnostic ? ` — server stderr: ${stderrDiagnostic}` : ""}`,
         ),
         finishOptions,
       );
+    };
 
     const timer = setTimeout(
       () =>

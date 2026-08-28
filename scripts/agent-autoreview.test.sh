@@ -10964,7 +10964,7 @@ assert.match(
 );
 assert.match(
   shellFunction("run_darwin_deadline_recovery_watcher"),
-  /watch-settle[\s\S]*?--state "\$state_path"[\s\S]*?--scratch "\$command_runtime_dir"[\s\S]*?--controller-identity "\$controller_identity"[\s\S]*?--cancel-file "\$cancel_file"[\s\S]*?--armed-file "\$armed_file"[\s\S]*?--timeout-seconds "\$timeout_seconds"/u,
+  /watch-settle[\s\S]*?--state "\$state_path"[\s\S]*?--scratch "\$command_runtime_dir"[\s\S]*?--controller-identity "\$controller_identity"[\s\S]*?--cancel-file "\$cancel_file"[\s\S]*?--armed-file "\$armed_file"[\s\S]*?--timeout-seconds "\$settlement_timeout_seconds"/u,
   "Darwin recovery does not use the complete watch-settle CLI contract",
 );
 assert.match(
@@ -10979,12 +10979,12 @@ assert.match(
 );
 assert.match(
   lineageStateSource,
-  /linkSync\(path, paths\.current\)[\s\S]*?validateClaimedCurrent\(paths, plan\)[\s\S]*?currentMatchesClaimedInode\(path, claimedStat\)/u,
+  /linkSync\(path, paths\.current\)[\s\S]*?validateClaimedCurrent\(paths, plan, expectedCanonicalStat\)[\s\S]*?currentMatchesClaimedInode\(path, claimedStat\)/u,
   "the Darwin state transition no longer binds the exact expected-state inode",
 );
 assert.match(
   lineageStateSource,
-  /ensureTransitionPayload\(paths, plan\)[\s\S]*?validateReadyLink\(paths\)[\s\S]*?renameSync\(paths\.payload, path\)[\s\S]*?fsyncDirectory\(dirname\(path\)\)/u,
+  /ensureTransitionPayload\(path, paths, plan, boundary\)[\s\S]*?validateReadyLink\(paths\)[\s\S]*?renameSync\(paths\.payload, path\)[\s\S]*?fsyncDirectory\(dirname\(path\)\)/u,
   "the Darwin state transition no longer publishes its durable ready payload",
 );
 assert.match(
@@ -11183,14 +11183,162 @@ assert.match(
 const barrierWait = shellFunction("wait_for_deadline_launch_barrier");
 assert.match(
   barrierWait,
-  /SECONDS - started_at >= 10/u,
-  "the pre-exec barrier has no autonomous parent-crash bound",
+  /local go_deadline="\$3"[\s\S]*?local abandon_deadline="\$4"[\s\S]*?"\$go_deadline" =~ \^\[0-9\]\+\$[\s\S]*?"\$abandon_deadline" =~ \^\[0-9\]\+\$[\s\S]*?"\$go_deadline" -le "\$abandon_deadline"[\s\S]*?SECONDS >= abandon_deadline/u,
+  "the pre-exec barrier does not enforce its caller's abandon deadline",
+);
+assert.match(
+  barrierWait,
+  /IFS= read -r decision <"\$action_file"[\s\S]*?"\$decision" == "go"[\s\S]*?SECONDS < go_deadline/u,
+  "the pre-exec barrier can accept go after its launch deadline",
 );
 assert.doesNotMatch(
   barrierWait,
   /\b(?:sleep|perl|node|env)\b/u,
   "the pre-exec barrier can spawn a descendant before exact binding",
 );
+const numericShellAssignment = (name) => {
+  const match = new RegExp(`^${name}=([0-9]+)$`, "mu").exec(wrapperSource);
+  assert.ok(match, `missing numeric shell assignment ${name}`);
+  return Number.parseInt(match[1], 10);
+};
+const darwinSetupBudget = numericShellAssignment(
+  "darwin_deadline_setup_budget_seconds",
+);
+const launchCrashGrace = numericShellAssignment(
+  "deadline_launch_parent_crash_grace_seconds",
+);
+const defaultLaunchGo = numericShellAssignment(
+  "deadline_launch_go_default_seconds",
+);
+const defaultLaunchAbandon = numericShellAssignment(
+  "deadline_launch_abandon_default_seconds",
+);
+assert.equal(darwinSetupBudget, 30);
+assert.equal(launchCrashGrace, 5);
+assert.equal(defaultLaunchGo, 10);
+assert.equal(defaultLaunchAbandon, 10);
+assert.match(
+  wrapperSource,
+  /darwin_deadline_launch_go_seconds="\$darwin_deadline_setup_budget_seconds"/u,
+  "the Darwin go deadline does not use the parent setup budget",
+);
+assert.match(
+  wrapperSource,
+  /darwin_deadline_launch_abandon_seconds=\$\(\(\s*darwin_deadline_setup_budget_seconds \+\s*deadline_launch_parent_crash_grace_seconds\s*\)\)/u,
+  "the Darwin abandon deadline is not derived from setup plus cleanup grace",
+);
+assert.ok(
+  darwinSetupBudget + launchCrashGrace > darwinSetupBudget,
+  "the Darwin launch barrier does not outlive the parent setup budget",
+);
+assert.match(
+  shellFunction("darwin_deadline_setup_is_within_budget"),
+  /SECONDS >= started_at[\s\S]*?SECONDS - started_at < darwin_deadline_setup_budget_seconds/u,
+  "the parent does not enforce the bounded Darwin setup clock",
+);
+for (const functionName of [
+  "exec_after_deadline_launch_barrier",
+  "exec_darwin_contained_helper_after_barrier",
+  "run_darwin_deadline_recovery_watcher",
+  "run_capture_deadline_watchdog",
+]) {
+  assert.match(
+    shellFunction(functionName),
+    /wait_for_deadline_launch_barrier[\s\S]*?"\$launch_go_deadline" "\$launch_abandon_deadline"/u,
+    `${functionName} does not pass both launch deadlines to the barrier`,
+  );
+}
+for (const functionName of ["run_with_deadline", "run_capture_with_deadline"]) {
+  const functionSource = shellFunction(functionName);
+  assert.match(
+    functionSource,
+    /launch_go_seconds="\$deadline_launch_go_default_seconds"[\s\S]*?launch_abandon_seconds="\$deadline_launch_abandon_default_seconds"[\s\S]*?launch_go_seconds="\$darwin_deadline_launch_go_seconds"[\s\S]*?launch_abandon_seconds="\$darwin_deadline_launch_abandon_seconds"/u,
+    `${functionName} does not select both bounded Darwin launch budgets`,
+  );
+  assert.match(
+    functionSource,
+    /deadline_setup_started_at="\$SECONDS"[\s\S]*?launch_go_deadline=\$\(\(deadline_setup_started_at \+ launch_go_seconds\)\)[\s\S]*?launch_abandon_deadline=\$\(\([\s\S]*?deadline_setup_started_at \+ launch_abandon_seconds[\s\S]*?\)\)/u,
+    `${functionName} does not derive absolute launch deadlines from one setup clock`,
+  );
+  assert.match(
+    functionSource,
+    /wait_for_darwin_deadline_recovery_watcher_armed[\s\S]*?darwin_deadline_setup_is_within_budget[\s\S]*?close_deadline_launch_barrier/u,
+    `${functionName} can release work after its Darwin setup budget`,
+  );
+}
+const containedHelperSource = shellFunction(
+  "run_darwin_contained_trusted_node",
+);
+assert.match(
+  containedHelperSource,
+  /launch_go_deadline=\$\(\([\s\S]*?darwin_deadline_launch_go_seconds[\s\S]*?launch_abandon_deadline=\$\(\([\s\S]*?darwin_deadline_launch_abandon_seconds[\s\S]*?exec_darwin_contained_helper_after_barrier[\s\S]*?"\$launch_go_deadline" "\$launch_abandon_deadline"[\s\S]*?run_darwin_deadline_recovery_watcher[\s\S]*?"\$launch_go_deadline" "\$launch_abandon_deadline"/u,
+  "the contained helper cohort does not share both absolute launch deadlines",
+);
+assert.match(
+  containedHelperSource,
+  /wait_for_darwin_deadline_recovery_watcher_armed[\s\S]*?darwin_deadline_setup_is_within_budget[\s\S]*?close_deadline_launch_barrier "\$contained_helper_barrier" go/u,
+  "the contained helper can launch after its Darwin setup budget",
+);
+const barrierFixture = fs.mkdtempSync(
+  path.join(os.tmpdir(), "agent-autoreview-launch-barrier-"),
+);
+try {
+  const timeoutResult = spawnSync(
+    "/bin/bash",
+    [
+      "-c",
+      `${barrierWait}\nSECONDS=0\nwait_for_deadline_launch_barrier "$1" "$$" 1 1\nstatus=$?\nprintf '%s %s\\n' "$status" "$SECONDS"\n`,
+      "barrier-timeout",
+      path.join(barrierFixture, "missing"),
+    ],
+    { encoding: "utf8", timeout: 4000 },
+  );
+  assert.equal(timeoutResult.status, 0, timeoutResult.stderr);
+  const [timeoutStatus, elapsed] = timeoutResult.stdout.trim().split(" ").map(Number);
+  assert.equal(timeoutStatus, 125);
+  assert.ok(elapsed >= 1 && elapsed <= 3, `unexpected barrier expiry: ${elapsed}s`);
+
+  const action = path.join(barrierFixture, "action");
+  const released = path.join(barrierFixture, "released");
+  const ready = path.join(barrierFixture, "ready");
+  const releaseResult = spawnSync(
+    "/bin/bash",
+    [
+      "-c",
+      `${barrierWait}\nSECONDS=0\n(\n  printf 'ready\\n' >"$3"\n  wait_for_deadline_launch_barrier "$1" "$$" 3 4 &&\n    printf 'released\\n' >"$2"\n) &\nchild=$!\nwhile [[ ! -e "$3" ]]; do\n  :\ndone\nprintf 'go\\n' >"$1.pending"\n/bin/mv "$1.pending" "$1"\nwait "$child"\n`,
+      "barrier-release",
+      action,
+      released,
+      ready,
+    ],
+    { encoding: "utf8", timeout: 4000 },
+  );
+  assert.equal(releaseResult.status, 0, releaseResult.stderr);
+  assert.equal(fs.readFileSync(released, "utf8"), "released\n");
+
+  const lateAction = path.join(barrierFixture, "late-action");
+  const lateLaunch = path.join(barrierFixture, "late-launch");
+  const lateReady = path.join(barrierFixture, "late-ready");
+  const lateStatus = path.join(barrierFixture, "late-status");
+  const lateGoResult = spawnSync(
+    "/bin/bash",
+    [
+      "-c",
+      `${barrierWait}\nSECONDS=0\n(\n  printf 'ready\\n' >"$3"\n  wait_for_deadline_launch_barrier "$1" "$$" 1 10\n  wait_status=$?\n  if [[ "$wait_status" -eq 0 ]]; then\n    printf 'launched\\n' >"$2"\n  fi\n  printf '%s\\n' "$wait_status" >"$4"\n) &\nchild=$!\nwhile [[ ! -e "$3" ]]; do\n  :\ndone\n/bin/sleep 2\nprintf 'go\\n' >"$1.pending"\n/bin/mv "$1.pending" "$1"\nwait "$child"\n`,
+      "barrier-late-go",
+      lateAction,
+      lateLaunch,
+      lateReady,
+      lateStatus,
+    ],
+    { encoding: "utf8", timeout: 6000 },
+  );
+  assert.equal(lateGoResult.status, 0, lateGoResult.stderr);
+  assert.equal(fs.readFileSync(lateStatus, "utf8"), "125\n");
+  assert.equal(fs.existsSync(lateLaunch), false, "late go launched work");
+} finally {
+  fs.rmSync(barrierFixture, { force: true, recursive: true });
+}
 assert.match(
   shellFunction("run_darwin_contained_trusted_node"),
   /prepare_darwin_helper_containment_contract[\s\S]*?publish_darwin_helper_containment_contract[\s\S]*?close_deadline_launch_barrier[\s\S]*?contained_recovery_watcher_barrier[\s\S]*?wait_for_darwin_deadline_recovery_watcher_armed[\s\S]*?close_deadline_launch_barrier "\$contained_helper_barrier" go/u,

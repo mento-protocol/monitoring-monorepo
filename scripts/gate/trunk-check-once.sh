@@ -4,6 +4,68 @@ set -u
 
 guardian_dir=""
 guardian_pid=""
+guardian_handshake_pending="${AGENTQG_TRUNK_GUARDIAN_PENDING:-}"
+guardian_handshake_done="${AGENTQG_TRUNK_GUARDIAN_DONE:-}"
+guardian_check_timeout_seconds="${AGENTQG_TRUNK_CHECK_TIMEOUT_SECONDS:-}"
+guardian_signal_fd="${AGENTQG_TRUNK_GUARDIAN_SIGNAL_FD:-}"
+unset AGENTQG_TRUNK_GUARDIAN_PENDING AGENTQG_TRUNK_GUARDIAN_DONE \
+  AGENTQG_TRUNK_CHECK_TIMEOUT_SECONDS AGENTQG_TRUNK_GUARDIAN_SIGNAL_FD
+exec 26<&-
+
+guardian_pending_is_valid() {
+  local first_line
+  {
+    IFS= read -r first_line && ! IFS= read -r _
+  } <"$guardian_handshake_pending" || return 1
+  [[ "$first_line" == pending ]]
+}
+
+validate_guardian_handshake() {
+  local handshake_dir
+  if [[ -z "$guardian_handshake_pending" && -z "$guardian_handshake_done" &&
+    -z "$guardian_check_timeout_seconds" && -z "$guardian_signal_fd" ]]; then
+    return 0
+  fi
+  [[ "$guardian_handshake_pending" == /* &&
+    "$guardian_handshake_done" == /* &&
+    "$guardian_check_timeout_seconds" =~ ^[1-9][0-9]*$ &&
+    "$guardian_check_timeout_seconds" -le 86400 &&
+    "$guardian_signal_fd" == 25 && -p /dev/fd/25 ]] || return 2
+  handshake_dir="${guardian_handshake_pending%/*}"
+  [[ "$guardian_handshake_pending" == "$handshake_dir/trunk-guardian.pending" &&
+    "$guardian_handshake_done" == "$handshake_dir/trunk-guardian.done" &&
+    -d "$handshake_dir" && ! -L "$handshake_dir" && -O "$handshake_dir" &&
+    -f "$guardian_handshake_pending" &&
+    ! -L "$guardian_handshake_pending" &&
+    -O "$guardian_handshake_pending" ]] &&
+    guardian_pending_is_valid &&
+    [[
+    ! -e "$guardian_handshake_done" && ! -L "$guardian_handshake_done" &&
+    ! -e "${guardian_handshake_done}.tmp" &&
+    ! -L "${guardian_handshake_done}.tmp" ]]
+}
+
+# Invoked indirectly by cleanup from the EXIT trap below.
+# shellcheck disable=SC2329
+publish_guardian_done() {
+  local done_temp
+  [[ -n "$guardian_handshake_done" ]] || return 0
+  done_temp="${guardian_handshake_done}.tmp"
+  (set -o noclobber && umask 077 &&
+    printf 'done\n' >"$done_temp") || return 2
+  if ! /bin/chmod 0400 "$done_temp" ||
+    ! /bin/mv "$done_temp" "$guardian_handshake_done"; then
+    /bin/rm -f -- "$done_temp"
+    return 2
+  fi
+  printf 'done\n' >&25 || return 2
+  exec 25>&-
+}
+
+if ! validate_guardian_handshake; then
+  echo "error: Trunk guardian lifecycle handshake is invalid." >&2
+  exit 2
+fi
 
 # Invoked indirectly by the EXIT trap below.
 # shellcheck disable=SC2329
@@ -12,6 +74,9 @@ cleanup() {
   trap - EXIT
   if [[ -n "$guardian_pid" ]]; then
     wait "$guardian_pid" || status=2
+  fi
+  if ! publish_guardian_done; then
+    status=2
   fi
   if [[ -n "$guardian_dir" && "$guardian_dir" == "${TMPDIR:-/tmp}"/agentqg-trunk-guardian.* ]]; then
     /bin/rm -f -- \
@@ -33,7 +98,7 @@ start_owned_daemon_guardian() {
   /bin/chmod 0700 "$guardian_dir" || return 2
   local ready_file="$guardian_dir/ready"
 
-  node_bin="$(node -p 'process.execPath')" || return 2
+  node_bin="$(node -p 'process.execPath' 25>&-)" || return 2
   [[ "$node_bin" == /* && -x "$node_bin" && ! -L "$node_bin" ]] || return 2
 
   (
@@ -41,24 +106,112 @@ start_owned_daemon_guardian() {
       "$expected_parent_pid" \
       "$ready_file" \
       "$guardian_dir" \
+      "$guardian_handshake_pending" \
+      "$guardian_handshake_done" \
+      "$guardian_check_timeout_seconds" \
+      "$guardian_signal_fd" \
       "$@" <<'EOF_TRUNK_GUARDIAN'
 const { spawnSync } = require("node:child_process");
 const {
   chmodSync,
+  closeSync,
+  existsSync,
   fstatSync,
   lstatSync,
+  readFileSync,
+  renameSync,
   rmSync,
   rmdirSync,
   writeFileSync,
+  writeSync,
 } = require("node:fs");
 const { setTimeout: delay } = require("node:timers/promises");
 
-const [expectedParentText, readyPath, guardianDir, ...checkArgs] =
-  process.argv.slice(2);
+const [
+  expectedParentText,
+  readyPath,
+  guardianDir,
+  handshakePending,
+  handshakeDone,
+  checkTimeoutSecondsText,
+  signalFdText,
+  ...checkArgs
+] = process.argv.slice(2);
 const expectedParent = Number.parseInt(expectedParentText, 10);
+const checkTimeoutSeconds = Number.parseInt(checkTimeoutSecondsText, 10);
+const signalFd = Number.parseInt(signalFdText, 10);
 const cleanupAttempts = 3;
 const cleanupCommandTimeoutMs = 10_000;
 const retryDelayMs = 1_000;
+
+function validateHandshake() {
+  if (
+    !handshakePending &&
+    !handshakeDone &&
+    !checkTimeoutSecondsText &&
+    !signalFdText
+  ) {
+    return null;
+  }
+  if (
+    !handshakePending ||
+    !handshakeDone ||
+    signalFd !== 25 ||
+    !fstatSync(signalFd).isFIFO() ||
+    !Number.isSafeInteger(checkTimeoutSeconds) ||
+    checkTimeoutSeconds <= 0 ||
+    checkTimeoutSeconds > 86_400
+  ) {
+    throw new Error("invalid Trunk guardian lifecycle handshake arguments");
+  }
+  const directory = handshakePending.slice(0, handshakePending.lastIndexOf("/"));
+  if (
+    handshakePending !== `${directory}/trunk-guardian.pending` ||
+    handshakeDone !== `${directory}/trunk-guardian.done`
+  ) {
+    throw new Error("invalid Trunk guardian lifecycle handshake paths");
+  }
+  const directoryStat = lstatSync(directory);
+  const pendingStat = lstatSync(handshakePending);
+  if (
+    !directoryStat.isDirectory() ||
+    directoryStat.isSymbolicLink() ||
+    directoryStat.uid !== process.getuid() ||
+    (directoryStat.mode & 0o7777) !== 0o700 ||
+    !pendingStat.isFile() ||
+    pendingStat.isSymbolicLink() ||
+    pendingStat.uid !== process.getuid() ||
+    (pendingStat.mode & 0o7777) !== 0o400 ||
+    readFileSync(handshakePending, "utf8") !== "pending\n" ||
+    existsSync(handshakeDone) ||
+    existsSync(`${handshakeDone}.tmp`)
+  ) {
+    throw new Error("unsafe Trunk guardian lifecycle handshake state");
+  }
+  return { directory };
+}
+
+function publishDone(handshake) {
+  if (handshake === null) return;
+  const temporaryPath = `${handshakeDone}.tmp`;
+  try {
+    writeFileSync(temporaryPath, "done\n", { flag: "wx", mode: 0o400 });
+    chmodSync(temporaryPath, 0o400);
+    renameSync(temporaryPath, handshakeDone);
+    const signal = Buffer.from("done\n", "utf8");
+    if (writeSync(signalFd, signal) !== signal.length) {
+      throw new Error("could not publish Trunk guardian completion signal");
+    }
+    closeSync(signalFd);
+  } catch (error) {
+    try {
+      rmSync(temporaryPath);
+    } catch (cleanupError) {
+      if (cleanupError.code !== "ENOENT") throw cleanupError;
+    }
+    throw error;
+  }
+}
 
 function removePrivateState() {
   for (const path of [readyPath]) {
@@ -85,6 +238,9 @@ function trunk(args, baseStdio = ["ignore", "pipe", "pipe"], timeout = 30_000) {
       typeof value === "string" && /^agentqg:[A-Za-z0-9._:-]+$/u.test(value),
   );
   if (carriesGateIdentity) {
+    // Keep this copy aligned with mapped-command-process-identity.mjs. The
+    // guardian runs from trusted stdin and must not import a replaceable
+    // module after the mapped command starts.
     const declaration = process.env.AGENTQG_MARKER_FDS ?? "";
     if (!/^(?:6|8|9)(?:,(?:6|8|9))*$/u.test(declaration)) {
       throw new Error("Trunk guardian has no valid gate marker declaration");
@@ -133,6 +289,10 @@ function trunk(args, baseStdio = ["ignore", "pipe", "pipe"], timeout = 30_000) {
       }
     }
   }
+  if (Number.isSafeInteger(signalFd)) {
+    while (stdio.length <= signalFd) stdio.push("ignore");
+    stdio[signalFd] = "ignore";
+  }
   const options = {
     cwd: process.cwd(),
     encoding: "utf8",
@@ -169,7 +329,7 @@ function daemonState() {
   );
 }
 
-async function stopOwnedDaemon() {
+async function stopOwnedDaemon(handshake) {
   let lastError = "";
   for (let attempt = 1; attempt <= cleanupAttempts; attempt += 1) {
     try {
@@ -197,8 +357,12 @@ async function stopOwnedDaemon() {
       if (attempt < cleanupAttempts) await delay(retryDelayMs);
     }
   }
+  const disposition =
+    handshake === null
+      ? "leaving it as the named trusted external service"
+      : "handing remaining gate-owned descendants to exact mapped-command settlement";
   throw new Error(
-    `could not confirm Trunk daemon shutdown after ${cleanupAttempts} attempts; leaving it as the named trusted external service: ${lastError}`,
+    `could not confirm Trunk daemon shutdown after ${cleanupAttempts} attempts; ${disposition}: ${lastError}`,
   );
 }
 
@@ -211,28 +375,32 @@ async function stopOwnedDaemon() {
   ) {
     throw new Error("invalid Trunk guardian parent or private state");
   }
-  writeFileSync(readyPath, "ready\n", { flag: "wx", mode: 0o400 });
-  chmodSync(readyPath, 0o400);
-  const check = trunk(
-    ["check", "--ci", ...checkArgs],
-    ["inherit", "inherit", "inherit"],
-    null,
-  );
-  let checkStatus = check.status;
-  if (check.error || !Number.isInteger(checkStatus)) {
-    console.error(
-      `error: gate-owned Trunk check did not return a status: ${check.error?.message ?? `signal ${check.signal ?? "unknown"}`}`,
-    );
-    checkStatus = 2;
-  }
+  const handshake = validateHandshake();
   try {
-    await stopOwnedDaemon();
-    process.exitCode = checkStatus;
-  } catch (error) {
-    console.error(`error: ${error.message}`);
-    process.exitCode = 2;
+    writeFileSync(readyPath, "ready\n", { flag: "wx", mode: 0o400 });
+    chmodSync(readyPath, 0o400);
+    const check = trunk(
+      ["check", "--ci", ...checkArgs],
+      ["inherit", "inherit", "inherit"],
+      handshake === null ? null : checkTimeoutSeconds * 1_000,
+    );
+    let checkStatus = check.status;
+    if (check.error || !Number.isInteger(checkStatus)) {
+      console.error(
+        `error: gate-owned Trunk check did not return a status: ${check.error?.message ?? `signal ${check.signal ?? "unknown"}`}`,
+      );
+      checkStatus = 2;
+    }
+    try {
+      await stopOwnedDaemon(handshake);
+      process.exitCode = checkStatus;
+    } catch (error) {
+      console.error(`error: ${error.message}`);
+      process.exitCode = 2;
+    }
   } finally {
     removePrivateState();
+    if (process.ppid !== expectedParent) publishDone(handshake);
   }
 })().catch((error) => {
   console.error(`error: Trunk daemon guardian failed: ${error.message}`);
@@ -245,7 +413,7 @@ EOF_TRUNK_GUARDIAN
 }
 
 trunk_daemon_state() {
-  node <<'EOF_TRUNK_STATUS'
+  node 25>&- <<'EOF_TRUNK_STATUS'
 const { spawnSync } = require("node:child_process");
 const {
   closeSync,
@@ -315,7 +483,7 @@ if [[ "$initial_state" == stopped ]]; then
   check_status=$?
   guardian_pid=""
 else
-  ./tools/trunk check --ci "$@"
+  ./tools/trunk check --ci "$@" 25>&-
   check_status=$?
 fi
 
@@ -325,13 +493,15 @@ fi
 # wrapper death. The guardian keeps the mapped command lineage live until the
 # check and shutdown complete, so the coordinator retains the `trunk-daemon`
 # resource through crash recovery.
-final_state="$(trunk_daemon_state)" || {
-  echo "error: could not classify the Trunk daemon after the check." >&2
-  exit 2
-}
-if [[ "$initial_state" == stopped && "$final_state" != stopped ]]; then
-  echo "error: gate-owned Trunk daemon remained live after bounded cleanup; leaving it as the named trusted external service." >&2
-  exit 2
+if [[ "$initial_state" == stopped ]]; then
+  final_state="$(trunk_daemon_state)" || {
+    echo "error: could not classify the Trunk daemon after the check." >&2
+    exit 2
+  }
+  if [[ "$final_state" != stopped ]]; then
+    echo "error: gate-owned Trunk daemon remained live after bounded cleanup; leaving it as the named trusted external service." >&2
+    exit 2
+  fi
 fi
 
 exit "$check_status"

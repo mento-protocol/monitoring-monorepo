@@ -268,10 +268,30 @@ external service. A check that starts a daemon runs as the direct guardian's
 child. The guardian retains the mapped lineage through normal exit or hard
 wrapper death. It makes at most three named shutdown cycles. Each status or
 shutdown call has a 10-second limit. If it cannot confirm `stopped`, it exits 2
-and leaves the daemon as the same named trusted service. A surviving wrapper
-therefore fails the gate. It also fails if its final status check finds a late
-live daemon after bounded cleanup. Future mapped Trunk clients still serialize
-on `trunk-daemon`; no cleanup path signals a daemon PID or process-group ID.
+and a standalone wrapper leaves the daemon as the same named trusted service.
+A mapped Darwin wrapper hands remaining gate-owned descendants to exact lineage
+settlement. A surviving wrapper therefore fails the gate. It also fails if its
+final status check finds a late live daemon after bounded cleanup. Future mapped
+Trunk clients still serialize on `trunk-daemon`.
+On Darwin, the parent creates a private `pending` receipt and an unlinked
+completion pipe before START. The parent retains the read end. The trusted
+wrapper chain and guardian retain the write end. The parent closes its write
+end after START. The wrapper closes its read end before target code runs.
+Mapped Trunk children cannot publish completion. Guardian-spawned children
+receive `/dev/null` at the write descriptor. Status and direct Trunk launches
+close it. A live wrapper creates the `done` receipt and writes `done` after its
+final status check. After hard wrapper death, the guardian publishes after the
+check and named cleanup finish. The parent keeps the lease and named resource
+while it waits. It verifies both receipts after the pipe signal. It gives the
+mapped root five seconds to publish wrapper status, then starts generic lineage
+settlement. If every publisher dies, EOF fails the wait immediately. The completion
+deadline is the command timeout plus 120 seconds. This covers
+10 seconds for initial status, 92 seconds for named cleanup, 10 seconds for
+final status, and eight seconds of scheduling margin. EOF or a missing or
+invalid signal or receipt is an infrastructure failure. Exact lineage
+settlement owns a post-baseline daemon through an exact guardian tombstone. An
+incomplete chain stays ambiguous and keeps the scheduler barrier. No fallback
+signals by a reusable PID or process group.
 The quality-gate self-test stays ordered inside its worktree
 because it temporarily mutates tracked fixture files; this keeps
 source-fingerprinting tests such as autoreview from observing synthetic drift.

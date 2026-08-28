@@ -222,7 +222,26 @@ test("Darwin allocator contention has a retry status distinct from infrastructur
     source,
     /probe_global_unique_id_allocator\(void\)[\s\S]*return EPOCH_RETRY;[\s\S]*allocator_probe_result == EPOCH_RETRY[\s\S]*probe_result = EXIT_RETRY_CONTENTION/u,
   );
+  assert.match(
+    source,
+    /result = capture_fence_unique_id\(&lower_unique_id\);[\s\S]*?if \(result != EPOCH_OK\) \{[\s\S]*?control_aborted = 1;[\s\S]*?goto cleanup;[\s\S]*?reap_result = reap_exact_child\(control_pid\);[\s\S]*?control_aborted == 0/u,
+  );
   assert.match(runtime, /exit_status = EXIT_RETRY_CONTENTION/u);
+});
+
+test("Darwin boot identity uses the BOOT_TIME fields defined by getutxid", () => {
+  const source = readFileSync(SOURCE_PATH, "utf8");
+  const bootIdentity = source.slice(
+    source.indexOf("static int boot_id_command"),
+    source.indexOf("static int identity_command"),
+  );
+  assert.match(bootIdentity, /query\.ut_type = BOOT_TIME/u);
+  assert.match(bootIdentity, /entry->ut_type != BOOT_TIME/u);
+  assert.match(
+    bootIdentity,
+    /boot_seconds <= 0 \|\| boot_microseconds < 0 \|\|[\s\S]*boot_microseconds >= 1000000/u,
+  );
+  assert.doesNotMatch(bootIdentity, /entry->ut_pid/u);
 });
 
 test(

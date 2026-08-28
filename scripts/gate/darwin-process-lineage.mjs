@@ -435,8 +435,20 @@ function readPrivateWatchState(statePath, stateDirectory) {
   return validateState(JSON.parse(bytes.toString("utf8")), token);
 }
 
-function recordWatchedDarwinLineageCensus(statePath, helper, retryProfile) {
-  while (true) {
+const MAX_WATCH_CENSUS_TRANSITION_ATTEMPTS = 4;
+
+function recordWatchedDarwinLineageCensus(
+  statePath,
+  helper,
+  retryProfile,
+  deadline,
+) {
+  for (
+    let attempt = 0;
+    attempt < MAX_WATCH_CENSUS_TRANSITION_ATTEMPTS;
+    attempt += 1
+  ) {
+    if (performance.now() >= deadline) return;
     const state = readState(statePath);
     if (state.settledAt !== null || state.settledReason !== null) return;
     if (state.launcher === null || state.root === null) {
@@ -609,6 +621,7 @@ export async function watchDarwinLineageSettlement({
         statePath,
         helper,
         nativeRetryProfile(censusTimeout, 1),
+        deadline,
       );
       const actionAfterCensus = readDarwinPrivateCancelMarker(
         cancelFile,

@@ -31,6 +31,25 @@ function rulesFor(path, source) {
   return new Set(scanSource(path, source).map((finding) => finding.rule));
 }
 
+test("broker findings keep exact source line numbers", () => {
+  const findings = scanSource(
+    "tool.sh",
+    [
+      "#!/bin/bash",
+      "printf 'safe\\n'",
+      "",
+      "open report.pdf",
+      "launchctl print gui/501",
+      "",
+    ].join("\n"),
+  );
+  assert.equal(findings.find(({ evidence }) => evidence === "open")?.line, 4);
+  assert.equal(
+    findings.find(({ evidence }) => evidence === "launchctl")?.line,
+    5,
+  );
+});
+
 test("known broker launch and Unix client APIs fail closed", () => {
   const cases = [
     [
@@ -1190,14 +1209,14 @@ test("the gate runs the preflight before lease or mapped-command launch", () => 
     "if ! gate_darwin_broker_preflight;",
     lineage,
   );
-  const barrierRelease = source.indexOf(
-    "if ! printf '%s\\n' start >&20;",
-    runWithTimeout,
+  const launchStateRecorded = source.indexOf(
+    "last_command_launch_state=started",
+    dispatchPreflight,
   );
   assert.ok(runWithTimeout >= 0);
   assert.ok(lineage > runWithTimeout);
   assert.ok(dispatchPreflight > lineage);
-  assert.ok(barrierRelease > dispatchPreflight);
+  assert.ok(launchStateRecorded > dispatchPreflight);
 });
 
 test("mapped Terraform commands use an empty CLI config and scrub bypass controls", () => {

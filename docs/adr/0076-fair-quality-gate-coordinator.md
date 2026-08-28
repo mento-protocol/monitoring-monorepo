@@ -477,14 +477,42 @@ check exits, it makes at most three named cleanup cycles. Each status or
 shutdown call has a 10-second limit, so cleanup uses at most 90 seconds of
 command time plus two one-second retry delays. It does not signal a PID or
 process-group ID. If it confirms `stopped`, it exits with the check status. If
-it cannot confirm `stopped`, it exits 2 and leaves the daemon as the named
-trusted external service. A surviving wrapper reports that failure. A wrapper
-also fails if its final status check finds a late live daemon after bounded
-cleanup. A wrapper that died cannot receive a status. Its successor reclassifies
-daemon state before it runs, refuses an unclassifiable state, and treats a
-reported live daemon as the trusted service. The `trunk-daemon` resource
-serializes every mapped client that inspects, starts, uses, or stops the service.
-Direct Trunk commands outside the gate remain outside coordinator control.
+it cannot confirm `stopped`, it exits 2. A standalone wrapper leaves the daemon
+as the named trusted external service. A mapped Darwin wrapper hands any
+remaining gate-owned descendant to exact lineage settlement. A surviving
+wrapper reports that failure. A wrapper also fails if its final status check
+finds a late live daemon after bounded cleanup.
+
+On Darwin, the mapped-command parent creates a private `pending` receipt before
+START. It also opens an anonymous completion pipe and unlinks the pipe path.
+The parent retains the read end. The trusted wrapper chain and guardian retain
+the write end. The parent closes its write end after START. The mapped wrapper
+closes its read end before it runs target code. Mapped Trunk children cannot use
+the write end. Guardian-spawned children receive `/dev/null` at that descriptor.
+Status and direct Trunk launches close it. The guardian applies the
+mapped-command timeout to the check. A live wrapper atomically creates the
+`done` receipt and writes `done` after its final daemon check. After a hard
+wrapper death, the guardian performs the same publication after the check and
+named cleanup finish. If every publisher dies, the parent's read sees EOF and
+fails immediately.
+
+The mapped-command parent retains the command lease and the `trunk-daemon`
+resource while it waits for the pipe signal. It verifies both receipts after
+the signal. It then gives the mapped-root shell five seconds to publish the
+wrapper status. It does not start generic Darwin lineage settlement before
+these steps complete. The completion deadline is the mapped-command timeout
+plus 120 seconds.
+The wrapper can use 10 seconds for its initial status, 92 seconds for named
+cleanup, and 10 seconds for its final status. The remaining eight seconds cover
+scheduling and integer-second measurement. EOF, a missing signal, an invalid
+signal, or an invalid receipt is an infrastructure failure. The parent then
+uses exact lineage settlement as a fail-closed fallback. An exact post-baseline
+daemon remains `owned`, including through an owned guardian tombstone, and may
+receive an audit-token signal. An incomplete chain remains `ambiguous` and
+keeps the scheduler barrier. No fallback signals by a reusable PID or process
+group. The `trunk-daemon` resource serializes every mapped client that inspects,
+starts, uses, or stops the service. Direct Trunk commands outside the gate
+remain outside coordinator control.
 
 Resource names and weights are part of the versioned policy. A new exclusive
 class needs measured contention evidence and scheduler regression coverage.

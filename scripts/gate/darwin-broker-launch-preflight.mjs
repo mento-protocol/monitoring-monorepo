@@ -314,7 +314,7 @@ export const BROKER_CLIENT_ALLOWLIST = [
   {
     path: "scripts/gate/quality-gate-coordinator.test.mjs",
     rules: ["node-net-client"],
-    sha256: "e9a963aaeba462baeef40dffeb9559ebc909e3844d03d2c582ddab068cb7e0de",
+    sha256: "71bf18f794a697d214bf20ae6610592702d343ca351d47b37617aa05824bd9cf",
     reason: APPROVED_ALLOWLIST_SHAPE.get(
       "scripts/gate/quality-gate-coordinator.test.mjs",
     ).reason,
@@ -326,7 +326,7 @@ export const BROKER_CLIENT_ALLOWLIST = [
       "node-net-dynamic-client",
       "javascript-process-broker",
     ],
-    sha256: "d41716ab6930ac964ad83c9edba0ab857ad992fd347a47a32184b42c9abc66ea",
+    sha256: "8043830f3802eb43b6a9fcd8ec8dfc7986df953db6f37376976166f9286b42e6",
     reason: APPROVED_ALLOWLIST_SHAPE.get(TEST_PATH).reason,
   },
 ];
@@ -365,21 +365,32 @@ function isExcludedPath(path) {
   );
 }
 
-function lineForOffset(source, offset) {
-  let line = 1;
-  for (let index = 0; index < offset; index += 1) {
-    if (source.charCodeAt(index) === 10) line += 1;
+function indexLineStarts(source) {
+  const starts = [0];
+  for (let index = 0; index < source.length; index += 1) {
+    if (source.charCodeAt(index) === 10) starts.push(index + 1);
   }
-  return line;
+  return starts;
 }
 
-function addMatches(findings, path, source, rule, expression) {
+function lineForOffset(lineStarts, offset) {
+  let low = 0;
+  let high = lineStarts.length;
+  while (low < high) {
+    const middle = low + Math.floor((high - low) / 2);
+    if (lineStarts[middle] <= offset) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
+function addMatches(findings, path, source, lineStarts, rule, expression) {
   expression.lastIndex = 0;
   for (const match of source.matchAll(expression)) {
     findings.push({
       path,
       rule,
-      line: lineForOffset(source, match.index),
+      line: lineForOffset(lineStarts, match.index),
       evidence: match[0].replace(/\s+/gu, " ").trim().slice(0, 180),
     });
   }
@@ -393,6 +404,7 @@ function addNamedBrokerAliasCalls(
   findings,
   path,
   source,
+  lineStarts,
   rule,
   alias,
   invocationSuffix,
@@ -402,12 +414,18 @@ function addNamedBrokerAliasCalls(
     findings,
     path,
     source,
+    lineStarts,
     rule,
     namedBrokerPattern(`\\b${escapeRegExp(alias)}${invocationSuffix}`),
   );
 }
 
-function scanJavaScriptProcessBrokerAliases(path, source, findings) {
+function scanJavaScriptProcessBrokerAliases(
+  path,
+  source,
+  lineStarts,
+  findings,
+) {
   const processApis = new Set([
     "exec",
     "execFile",
@@ -426,6 +444,7 @@ function scanJavaScriptProcessBrokerAliases(path, source, findings) {
         findings,
         path,
         source,
+        lineStarts,
         "javascript-process-broker",
         parts[1].trim(),
         "\\s*\\(\\s*",
@@ -434,7 +453,7 @@ function scanJavaScriptProcessBrokerAliases(path, source, findings) {
   }
 }
 
-function scanPythonProcessBrokerAliases(path, source, findings) {
+function scanPythonProcessBrokerAliases(path, source, lineStarts, findings) {
   const processApis = new Map([
     ["os", new Set(["popen", "system"])],
     [
@@ -453,6 +472,7 @@ function scanPythonProcessBrokerAliases(path, source, findings) {
         findings,
         path,
         source,
+        lineStarts,
         "python-process-broker",
         parts[1].trim(),
         "\\s*\\(\\s*(?:[[(]\\s*)?",
@@ -461,7 +481,7 @@ function scanPythonProcessBrokerAliases(path, source, findings) {
   }
 }
 
-function scanGoProcessBrokerAliases(path, source, findings) {
+function scanGoProcessBrokerAliases(path, source, lineStarts, findings) {
   const aliases =
     /\b(?:var\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*(?::=|=)\s*[A-Za-z_][A-Za-z0-9_]*\s*\.\s*(Command|CommandContext)\b/gmu;
   for (const match of source.matchAll(aliases)) {
@@ -473,6 +493,7 @@ function scanGoProcessBrokerAliases(path, source, findings) {
       findings,
       path,
       source,
+      lineStarts,
       "go-process-broker",
       match[1],
       invocationSuffix,
@@ -480,7 +501,7 @@ function scanGoProcessBrokerAliases(path, source, findings) {
   }
 }
 
-function scanRustProcessBrokerAliases(path, source, findings) {
+function scanRustProcessBrokerAliases(path, source, lineStarts, findings) {
   const aliases =
     /\buse\s+(?:(?:std|tokio|async_std)\s*::\s*)?process\s*::\s*Command\s+as\s+([A-Za-z_][A-Za-z0-9_]*)\s*;/gmu;
   for (const match of source.matchAll(aliases)) {
@@ -488,6 +509,7 @@ function scanRustProcessBrokerAliases(path, source, findings) {
       findings,
       path,
       source,
+      lineStarts,
       "rust-process-broker",
       match[1],
       "\\s*::\\s*new\\s*\\(\\s*",
@@ -542,7 +564,7 @@ function maskJavaScriptCommentsAndStrings(source) {
   return output;
 }
 
-function scanNodeNet(path, source, findings) {
+function scanNodeNet(path, source, lineStarts, findings) {
   const importsNet = source
     .split("\n")
     .some((line) => NODE_NET_MODULE.test(line));
@@ -580,7 +602,7 @@ function scanNodeNet(path, source, findings) {
     findings.push({
       path,
       rule: "node-net-client",
-      line: lineForOffset(source, match.index),
+      line: lineForOffset(lineStarts, match.index),
       evidence: match[0].replace(/\s+/gu, " ").trim().slice(0, 180),
     });
   }
@@ -588,6 +610,7 @@ function scanNodeNet(path, source, findings) {
     findings,
     path,
     source,
+    lineStarts,
     "node-net-client",
     NODE_COMPUTED_CLIENT_CALL,
   );
@@ -601,7 +624,7 @@ function scanNodeNet(path, source, findings) {
       findings.push({
         path,
         rule: "node-net-client",
-        line: lineForOffset(source, match.index),
+        line: lineForOffset(lineStarts, match.index),
         evidence: match[0].trim(),
       });
     }
@@ -610,6 +633,7 @@ function scanNodeNet(path, source, findings) {
     findings,
     path,
     source,
+    lineStarts,
     "node-net-client",
     NODE_TEMPLATE_CLIENT_CALL,
   );
@@ -618,6 +642,7 @@ function scanNodeNet(path, source, findings) {
       findings,
       path,
       source,
+      lineStarts,
       "node-net-dynamic-client",
       NODE_DYNAMIC_NET,
     );
@@ -627,21 +652,22 @@ function scanNodeNet(path, source, findings) {
 export function scanSource(path, source) {
   if (isExcludedPath(path) || !isExecutableSource(path, source)) return [];
   const language = sourceLanguage(path, source);
+  const lineStarts = indexLineStarts(source);
   const findings = [];
   if (language === "javascript") {
-    scanNodeNet(path, source, findings);
-    scanJavaScriptProcessBrokerAliases(path, source, findings);
+    scanNodeNet(path, source, lineStarts, findings);
+    scanJavaScriptProcessBrokerAliases(path, source, lineStarts, findings);
   } else if (language === "python") {
-    scanPythonProcessBrokerAliases(path, source, findings);
+    scanPythonProcessBrokerAliases(path, source, lineStarts, findings);
   } else if (language === "go") {
-    scanGoProcessBrokerAliases(path, source, findings);
+    scanGoProcessBrokerAliases(path, source, lineStarts, findings);
   } else if (language === "rust") {
-    scanRustProcessBrokerAliases(path, source, findings);
+    scanRustProcessBrokerAliases(path, source, lineStarts, findings);
   }
   for (const rule of RULES) {
     if (!rule.languages.has(language)) continue;
     for (const pattern of rule.patterns) {
-      addMatches(findings, path, source, rule.id, pattern);
+      addMatches(findings, path, source, lineStarts, rule.id, pattern);
     }
   }
   return findings;

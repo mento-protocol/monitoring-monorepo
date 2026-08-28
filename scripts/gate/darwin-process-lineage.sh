@@ -35,9 +35,11 @@ gate_darwin_lineage_root() {
     return 2
   fi
   if [[ ! -d "$root" ]]; then
-    (umask 077 && mkdir "$root") || return 2
+    (umask 077 && mkdir "$root") || {
+      [[ ! -L "$root" && -d "$root" ]] || return 2
+    }
   fi
-  [[ -d "$root" && -O "$root" ]] || return 2
+  [[ ! -L "$root" && -d "$root" && -O "$root" ]] || return 2
   chmod 700 "$root" || return 2
   printf '%s\n' "$root"
 }
@@ -562,6 +564,10 @@ gate_darwin_lineage_bind_root() {
   [[ "$parent_pid" =~ ^[1-9][0-9]*$ ]] || return 2
   gate_darwin_node_runtime_prepare || return 2
   module="$(gate_darwin_lineage_module)" || return 2
+  if [[ -L "$module" || ! -f "$module" || ! -r "$module" ]]; then
+    echo "error: Darwin process-lineage helper is unavailable: ${module}" >&2
+    return 2
+  fi
   "$gate_darwin_node_bin" "$module" bind \
     --state "$gate_darwin_lineage_state_file" \
     --scratch "$scratch_dir" --pid "$pid" \

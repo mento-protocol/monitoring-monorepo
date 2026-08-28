@@ -6664,7 +6664,21 @@ test("coordinator marker cleanup crashes leave only inert top-level holder quara
         "#!/usr/bin/env bash\nexit 0\n",
       );
       const trunkPath = join(fixtureTools, "trunk");
-      writeFileSync(trunkPath, "#!/usr/bin/env bash\nexit 0\n");
+      writeFileSync(
+        trunkPath,
+        [
+          "#!/usr/bin/env bash",
+          'case "${1:-} ${2:-}" in',
+          '  "daemon status")',
+          "    printf '+ Daemon running (pid: %s)\\n' \"$$\"",
+          "    exit 0",
+          "    ;;",
+          '  "check --ci") exit 0 ;;',
+          "  *) exit 90 ;;",
+          "esac",
+          "",
+        ].join("\n"),
+      );
       chmodSync(trunkPath, 0o755);
       const pnpmPath = join(fixtureBin, "pnpm");
       writeFileSync(

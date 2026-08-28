@@ -3093,6 +3093,18 @@ deadline_recovery_armed_file_result=""
 deadline_recovery_output_file_result=""
 deadline_recovery_stderr_file_result=""
 darwin_helper_containment_file_result=""
+deadline_launch_go_default_seconds=10
+deadline_launch_abandon_default_seconds=10
+# Darwin captures and binds exact identities before a readiness wait that can
+# use 10 seconds. Give the parent 30 seconds for the full setup. The child gets
+# five more seconds to observe cancellation or exit after that budget expires.
+darwin_deadline_setup_budget_seconds=30
+deadline_launch_parent_crash_grace_seconds=5
+darwin_deadline_launch_go_seconds="$darwin_deadline_setup_budget_seconds"
+darwin_deadline_launch_abandon_seconds=$((
+  darwin_deadline_setup_budget_seconds +
+    deadline_launch_parent_crash_grace_seconds
+))
 
 # Bound each automatic-lookup gh call (and the multi-call feedback capture) so a
 # hung GitHub CLI cannot stall autoreview forever. Overridable for tests.
@@ -3300,16 +3312,23 @@ close_deadline_launch_barrier() {
 wait_for_deadline_launch_barrier() {
   local action_file="$1"
   local owner_pid="$2"
-  local started_at="$SECONDS"
+  local go_deadline="$3"
+  local abandon_deadline="$4"
   local decision=""
 
-  [[ "$owner_pid" =~ ^[1-9][0-9]*$ ]] || return 125
+  [[
+    "$owner_pid" =~ ^[1-9][0-9]*$ &&
+      "$go_deadline" =~ ^[0-9]+$ &&
+      "$abandon_deadline" =~ ^[0-9]+$ &&
+      "$go_deadline" -le "$abandon_deadline"
+  ]] || return 125
   # Bash 3.2 does not refresh $PPID after reparenting. Use only Bash builtins
   # before release and impose an autonomous setup deadline instead. A parent
-  # crash therefore leaves this child for at most ten seconds. Calling the
-  # target in this shell also supports trusted wrapper functions in "$@".
+  # crash therefore leaves this child only for its caller's bounded setup plus
+  # cleanup grace. Calling the target in this shell also supports trusted
+  # wrapper functions in "$@".
   while [[ ! -e "$action_file" ]]; do
-    if ((SECONDS - started_at >= 10)); then
+    if ((SECONDS >= abandon_deadline)); then
       return 125
     fi
     :
@@ -3317,16 +3336,29 @@ wait_for_deadline_launch_barrier() {
   [[ -f "$action_file" && ! -L "$action_file" ]] || return 125
   IFS= read -r decision <"$action_file" || return 125
   [[ "$decision" == "go" ]] || return 125
+  ((SECONDS < go_deadline)) || return 125
 }
 
 exec_after_deadline_launch_barrier() {
   local action_file="$1"
   local owner_pid="$2"
-  shift 2
+  local launch_go_deadline="$3"
+  local launch_abandon_deadline="$4"
+  shift 4
 
   [[ "$#" -gt 0 ]] || return 125
-  wait_for_deadline_launch_barrier "$action_file" "$owner_pid" || return 125
+  wait_for_deadline_launch_barrier \
+    "$action_file" "$owner_pid" \
+    "$launch_go_deadline" "$launch_abandon_deadline" || return 125
   "$@"
+}
+
+darwin_deadline_setup_is_within_budget() {
+  local started_at="$1"
+
+  [[ "$started_at" =~ ^[0-9]+$ ]] || return 2
+  ((SECONDS >= started_at)) || return 2
+  ((SECONDS - started_at < darwin_deadline_setup_budget_seconds))
 }
 
 prepare_darwin_deadline_identity_helper() {
@@ -3732,11 +3764,14 @@ publish_darwin_helper_containment_contract() {
 exec_darwin_contained_helper_after_barrier() {
   local action_file="$1"
   local owner_pid="$2"
-  local contract_file="$3"
-  shift 3
+  local launch_go_deadline="$3"
+  local launch_abandon_deadline="$4"
+  local contract_file="$5"
+  shift 5
 
   wait_for_deadline_launch_barrier \
-    "$action_file" "$owner_pid" || return 125
+    "$action_file" "$owner_pid" \
+    "$launch_go_deadline" "$launch_abandon_deadline" || return 125
   exec /usr/bin/env \
     -u NODE_OPTIONS \
     -u NODE_PATH \
@@ -3770,14 +3805,17 @@ exec_darwin_contained_helper_after_barrier() {
 run_darwin_deadline_recovery_watcher() {
   local action_file="$1"
   local owner_pid="$2"
-  local state_path="$3"
-  local controller_identity="$4"
-  local cancel_file="$5"
-  local armed_file="$6"
-  local timeout_seconds="$7"
+  local launch_go_deadline="$3"
+  local launch_abandon_deadline="$4"
+  local state_path="$5"
+  local controller_identity="$6"
+  local cancel_file="$7"
+  local armed_file="$8"
+  local settlement_timeout_seconds="$9"
 
   wait_for_deadline_launch_barrier \
-    "$action_file" "$owner_pid" || return 125
+    "$action_file" "$owner_pid" \
+    "$launch_go_deadline" "$launch_abandon_deadline" || return 125
   exec /usr/bin/env \
     -u NODE_OPTIONS \
     -u NODE_PATH \
@@ -3794,7 +3832,7 @@ run_darwin_deadline_recovery_watcher() {
       --controller-identity "$controller_identity" \
       --cancel-file "$cancel_file" \
       --armed-file "$armed_file" \
-      --timeout-seconds "$timeout_seconds"
+      --timeout-seconds "$settlement_timeout_seconds"
 }
 
 darwin_deadline_recovery_armed_status() {
@@ -4151,6 +4189,11 @@ run_with_deadline() {
   local waited=0
   local status
   local had_monitor=0
+  local deadline_setup_started_at=0
+  local launch_go_seconds="$deadline_launch_go_default_seconds"
+  local launch_abandon_seconds="$deadline_launch_abandon_default_seconds"
+  local launch_go_deadline=0
+  local launch_abandon_deadline=0
   prepare_deadline_signal_contract || return 125
   deadline_current_shell_pid || return 125
   deadline_owner_pid="$deadline_current_shell_pid_result"
@@ -4166,6 +4209,8 @@ run_with_deadline() {
     recovery_output_file="$deadline_recovery_output_file_result"
     recovery_stderr_file="$deadline_recovery_stderr_file_result"
     recovery_timeout=$((deadline + 90))
+    launch_go_seconds="$darwin_deadline_launch_go_seconds"
+    launch_abandon_seconds="$darwin_deadline_launch_abandon_seconds"
   fi
   prepare_deadline_launch_barrier || return 125
   child_launch_barrier="$deadline_launch_barrier_result"
@@ -4180,13 +4225,21 @@ run_with_deadline() {
   # captures and binds its exact identity, then publishes the `go` decision.
   trap 'cleanup_deadline_child_before_reraise "$child" "$child_exact_identity" "$child_lineage_state" "$child_launch_barrier" "$child_launch_released" "$out_file" || true; trap - INT TERM; kill -s TERM "$$"' TERM
   trap 'cleanup_deadline_child_before_reraise "$child" "$child_exact_identity" "$child_lineage_state" "$child_launch_barrier" "$child_launch_released" "$out_file" || true; trap - INT TERM; kill -s INT "$$"' INT
+  deadline_setup_started_at="$SECONDS"
+  launch_go_deadline=$((deadline_setup_started_at + launch_go_seconds))
+  launch_abandon_deadline=$((
+    deadline_setup_started_at + launch_abandon_seconds
+  ))
   set -m
   exec_after_deadline_launch_barrier \
-    "$child_launch_barrier" "$deadline_owner_pid" "$@" >"$out_file" &
+    "$child_launch_barrier" "$deadline_owner_pid" \
+    "$launch_go_deadline" "$launch_abandon_deadline" \
+    "$@" >"$out_file" &
   child=$!
   if [[ "$deadline_host_platform" == "Darwin" ]]; then
     run_darwin_deadline_recovery_watcher \
       "$recovery_watcher_barrier" "$deadline_owner_pid" \
+      "$launch_go_deadline" "$launch_abandon_deadline" \
       "$child_lineage_state" "$darwin_autoreview_wrapper_exact_identity" \
       "$recovery_cancel_file" "$recovery_armed_file" "$recovery_timeout" \
       >"$recovery_output_file" 2>"$recovery_stderr_file" &
@@ -4252,6 +4305,15 @@ run_with_deadline() {
       recovery_watcher_reaped=1
       settle_darwin_deadline_lineage_state "$child_lineage_state" 0 || true
       /bin/rm -f -- "$out_file"
+      trap - INT TERM
+      return 125
+    fi
+    if ! darwin_deadline_setup_is_within_budget \
+      "$deadline_setup_started_at"; then
+      echo "agent:autoreview: Darwin deadline setup exceeded its bounded budget" >&2
+      cleanup_deadline_child_before_reraise \
+        "$child" "$child_exact_identity" "$child_lineage_state" \
+        "$child_launch_barrier" "$child_launch_released" "$out_file" || true
       trap - INT TERM
       return 125
     fi
@@ -4521,6 +4583,9 @@ run_darwin_contained_trusted_node() {
   local contained_status=125
   local saved_signal_traps
   local had_monitor=0
+  local deadline_setup_started_at=0
+  local launch_go_deadline=0
+  local launch_abandon_deadline=0
 
   prepare_deadline_signal_contract || return 125
   if [[ "$deadline_host_platform" != "Darwin" ]]; then
@@ -4551,13 +4616,22 @@ run_darwin_contained_trusted_node() {
   trap 'reap_darwin_contained_helper_jobs; trap - INT TERM HUP; eval "$saved_signal_traps"; kill -s TERM "$$"' TERM
   trap 'reap_darwin_contained_helper_jobs; trap - INT TERM HUP; eval "$saved_signal_traps"; kill -s INT "$$"' INT
   trap 'reap_darwin_contained_helper_jobs; trap - INT TERM HUP; eval "$saved_signal_traps"; kill -s HUP "$$"' HUP
+  deadline_setup_started_at="$SECONDS"
+  launch_go_deadline=$((
+    deadline_setup_started_at + darwin_deadline_launch_go_seconds
+  ))
+  launch_abandon_deadline=$((
+    deadline_setup_started_at + darwin_deadline_launch_abandon_seconds
+  ))
   set -m
   exec_darwin_contained_helper_after_barrier \
     "$contained_helper_barrier" "$contained_owner_pid" \
+    "$launch_go_deadline" "$launch_abandon_deadline" \
     "$contained_contract_file" "$@" &
   contained_helper=$!
   run_darwin_deadline_recovery_watcher \
     "$contained_recovery_watcher_barrier" "$contained_owner_pid" \
+    "$launch_go_deadline" "$launch_abandon_deadline" \
     "$contained_helper_lineage_state" \
     "$darwin_autoreview_wrapper_exact_identity" \
     "$contained_recovery_cancel_file" "$contained_recovery_armed_file" 7290 \
@@ -4628,6 +4702,14 @@ run_darwin_contained_trusted_node() {
     contained_recovery_watcher_reaped=1
     settle_darwin_deadline_lineage_state \
       "$contained_helper_lineage_state" 0 || true
+    trap - INT TERM HUP
+    eval "$saved_signal_traps"
+    return 125
+  fi
+  if ! darwin_deadline_setup_is_within_budget \
+    "$deadline_setup_started_at"; then
+    echo "agent:autoreview: Darwin helper setup exceeded its bounded budget" >&2
+    reap_darwin_contained_helper_jobs || true
     trap - INT TERM HUP
     eval "$saved_signal_traps"
     return 125
@@ -7474,12 +7556,15 @@ run_capture_pipeline() {
 run_capture_deadline_watchdog() {
   local action_file="$1"
   local owner_pid="$2"
-  local deadline="$3"
-  local status_file="$4"
-  local timeout_file="$5"
+  local launch_go_deadline="$3"
+  local launch_abandon_deadline="$4"
+  local deadline="$5"
+  local status_file="$6"
+  local timeout_file="$7"
 
   wait_for_deadline_launch_barrier \
-    "$action_file" "$owner_pid" || return 125
+    "$action_file" "$owner_pid" \
+    "$launch_go_deadline" "$launch_abandon_deadline" || return 125
   # Replace the captured Bash root. The watchdog then remains one exact process
   # and cannot create external descendants.
   # shellcheck disable=SC2016 # The embedded Perl program is intentionally literal.
@@ -7615,6 +7700,11 @@ run_capture_with_deadline() {
   local saved_signal_traps
   local had_monitor=0
   local host_signal_status
+  local deadline_setup_started_at=0
+  local launch_go_seconds="$deadline_launch_go_default_seconds"
+  local launch_abandon_seconds="$deadline_launch_abandon_default_seconds"
+  local launch_go_deadline=0
+  local launch_abandon_deadline=0
   prepare_deadline_signal_contract || return 125
   deadline_current_shell_pid || return 125
   deadline_owner_pid="$deadline_current_shell_pid_result"
@@ -7630,6 +7720,8 @@ run_capture_with_deadline() {
     recovery_output_file="$deadline_recovery_output_file_result"
     recovery_stderr_file="$deadline_recovery_stderr_file_result"
     recovery_timeout=$((deadline + 90))
+    launch_go_seconds="$darwin_deadline_launch_go_seconds"
+    launch_abandon_seconds="$darwin_deadline_launch_abandon_seconds"
   fi
   prepare_deadline_launch_barrier || return 125
   child_launch_barrier="$deadline_launch_barrier_result"
@@ -7668,17 +7760,25 @@ run_capture_with_deadline() {
   trap 'reap_capture_jobs; trap - INT TERM HUP; eval "$saved_signal_traps"; kill -s TERM "$$"' TERM
   trap 'reap_capture_jobs; trap - INT TERM HUP; eval "$saved_signal_traps"; kill -s INT "$$"' INT
   trap 'reap_capture_jobs; trap - INT TERM HUP; eval "$saved_signal_traps"; kill -s HUP "$$"' HUP
+  deadline_setup_started_at="$SECONDS"
+  launch_go_deadline=$((deadline_setup_started_at + launch_go_seconds))
+  launch_abandon_deadline=$((
+    deadline_setup_started_at + launch_abandon_seconds
+  ))
   set -m
   exec_after_deadline_launch_barrier \
-    "$child_launch_barrier" "$deadline_owner_pid" "$@" &
+    "$child_launch_barrier" "$deadline_owner_pid" \
+    "$launch_go_deadline" "$launch_abandon_deadline" "$@" &
   child=$!
   run_capture_deadline_watchdog \
     "$watchdog_launch_barrier" "$deadline_owner_pid" \
+    "$launch_go_deadline" "$launch_abandon_deadline" \
     "$deadline" "$status_file" "$timeout_file" &
   watchdog=$!
   if [[ "$deadline_host_platform" == "Darwin" ]]; then
     run_darwin_deadline_recovery_watcher \
       "$recovery_watcher_barrier" "$deadline_owner_pid" \
+      "$launch_go_deadline" "$launch_abandon_deadline" \
       "$child_lineage_state" "$darwin_autoreview_wrapper_exact_identity" \
       "$recovery_cancel_file" "$recovery_armed_file" "$recovery_timeout" \
       >"$recovery_output_file" 2>"$recovery_stderr_file" &
@@ -7765,6 +7865,17 @@ run_capture_with_deadline() {
         set +m
       fi
       /bin/rm -f -- "$timeout_file" "$status_file" "$partial_file"
+      trap - INT TERM HUP
+      eval "$saved_signal_traps"
+      return 125
+    fi
+    if ! darwin_deadline_setup_is_within_budget \
+      "$deadline_setup_started_at"; then
+      echo "agent:autoreview: Darwin capture setup exceeded its bounded budget" >&2
+      reap_capture_jobs || true
+      if [[ "$had_monitor" -eq 0 ]]; then
+        set +m
+      fi
       trap - INT TERM HUP
       eval "$saved_signal_traps"
       return 125

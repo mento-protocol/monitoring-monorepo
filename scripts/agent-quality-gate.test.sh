@@ -1590,7 +1590,7 @@ assert.match(
 );
 assert.match(
   source,
-  /if \[\[ "\$6" == 1 \]\]; then\n        exec 7>&-\n      fi\n      if \[\[ "\$7" == 1 \]\]; then[\s\S]*?exec 17>&-\n      fi\n      eval "\$2"/u,
+  /if \[\[ "\$6" == 1 \]\]; then\n        exec 7>&-\n      fi\n      if \[\[ "\$7" == 1 \]\]; then[\s\S]*?exec 17>&-\n      fi\n      if \[\[ -n "\$\{10\}" \]\]; then[\s\S]*?fi\n      eval "\$2"/u,
   "mapped commands must close fd 7 and fd 17 only when their caller reserved them",
 );
 assert.equal(

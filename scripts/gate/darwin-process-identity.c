@@ -242,9 +242,9 @@ static int boot_id_command(void) {
     }
     boot_seconds = entry->ut_tv.tv_sec;
     boot_microseconds = entry->ut_tv.tv_usec;
-    if (entry->ut_pid != 1 || entry->ut_type != BOOT_TIME) {
+    if (entry->ut_type != BOOT_TIME) {
       endutxent();
-      fprintf(stderr, "the boot entry is not owned by PID 1\n");
+      fprintf(stderr, "the boot entry has an invalid type\n");
       return EXIT_INFRASTRUCTURE;
     }
     endutxent();
@@ -421,6 +421,7 @@ static enum epoch_result allocator_scope_probe_attempt(void) {
   uint64_t upper_unique_id;
   enum epoch_result result = EPOCH_INFRASTRUCTURE;
   int control_reaped = 0;
+  int control_aborted = 0;
 
   if (pipe(command_pipe) != 0 || pipe(result_pipe) != 0) {
     fprintf(stderr, "cannot create allocator-scope probe pipes: %s\n",
@@ -449,6 +450,7 @@ static enum epoch_result allocator_scope_probe_attempt(void) {
   result_pipe[1] = -1;
   result = capture_fence_unique_id(&lower_unique_id);
   if (result != EPOCH_OK) {
+    control_aborted = 1;
     goto cleanup;
   }
   if (write_full(command_pipe[1], &command, sizeof(command)) != 0) {
@@ -494,10 +496,12 @@ cleanup:
       close(result_pipe[index]);
     }
   }
-  if (control_pid > 0 && control_reaped == 0 &&
-      reap_exact_child(control_pid) != 0) {
-    fprintf(stderr, "cannot reap allocator-scope probe controller\n");
-    return EPOCH_INFRASTRUCTURE;
+  if (control_pid > 0 && control_reaped == 0) {
+    int reap_result = reap_exact_child(control_pid);
+    if (reap_result != 0 && control_aborted == 0) {
+      fprintf(stderr, "cannot reap allocator-scope probe controller\n");
+      return EPOCH_INFRASTRUCTURE;
+    }
   }
   return result;
 }

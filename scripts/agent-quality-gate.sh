@@ -7917,6 +7917,119 @@ is_trunk_command() {
 }
 
 trunk_provisioning_probe_timeout_seconds=15
+trunk_guardian_completion_bound_seconds=120
+trunk_guardian_status_publish_bound_seconds=5
+
+gate_trunk_guardian_receipt_is_safe() {
+  local path="$1"
+  local expected_value="$2"
+  [[ "${gate_darwin_node_bin:-}" == /* ]] || return 2
+  "$gate_darwin_node_bin" -e '
+    const { lstatSync, readFileSync } = require("node:fs");
+    const [path, expectedValue, uidText] = process.argv.slice(1);
+    const stat = lstatSync(path);
+    process.exit(
+      stat.isFile() &&
+      !stat.isSymbolicLink() &&
+      stat.uid === Number(uidText) &&
+      (stat.mode & 0o7777) === 0o400 &&
+      readFileSync(path, "utf8") === expectedValue + "\n"
+        ? 0
+        : 1,
+    );
+  ' "$path" "$expected_value" "$UID" 2>/dev/null
+}
+
+gate_trunk_guardian_prepare_handshake() {
+  local directory="$1"
+  local pending_file="$2"
+  local done_file="$3"
+
+  [[ "$pending_file" == "$directory/trunk-guardian.pending" &&
+    "$done_file" == "$directory/trunk-guardian.done" ]] || return 2
+  gate_run_private_marker_directory_is_safe "$directory" || return 2
+  [[ ! -e "$pending_file" && ! -L "$pending_file" &&
+    ! -e "$done_file" && ! -L "$done_file" &&
+    ! -e "${done_file}.tmp" && ! -L "${done_file}.tmp" ]] || return 2
+  if ! (set -o noclobber && umask 077 &&
+    printf 'pending\n' >"$pending_file") ||
+    ! /bin/chmod 0400 "$pending_file" ||
+    ! gate_trunk_guardian_receipt_is_safe "$pending_file" pending; then
+    /bin/rm -f -- "$pending_file"
+    return 2
+  fi
+}
+
+gate_trunk_guardian_wait_done() {
+  local pending_file="$1"
+  local done_file="$2"
+  local deadline="$3"
+  local directory="${pending_file%/*}"
+  local signal=""
+  local signal_status=0
+  local now
+
+  if [[ ! "$deadline" =~ ^[1-9][0-9]*$ ||
+    "$pending_file" != "$directory/trunk-guardian.pending" ||
+    "$done_file" != "$directory/trunk-guardian.done" ]] ||
+    ! gate_run_private_marker_directory_is_safe "$directory" ||
+    ! gate_trunk_guardian_receipt_is_safe "$pending_file" pending; then
+    echo "error: Trunk guardian lifecycle handshake is invalid before settlement." >&2
+    return 2
+  fi
+
+  while true; do
+    if [[ -n "$signal" ]]; then
+      signal_status=0
+    else
+      IFS= read -r -t 1 signal <&26
+      signal_status=$?
+    fi
+    if [[ "$signal_status" -eq 0 ]]; then
+      if [[ "$signal" == "done" ]] &&
+        gate_trunk_guardian_receipt_is_safe "$pending_file" pending &&
+        gate_trunk_guardian_receipt_is_safe "$done_file" "done"; then
+        return 0
+      fi
+      echo "error: Trunk guardian published an invalid completion signal." >&2
+      return 2
+    fi
+    if [[ "$signal_status" -lt 128 ]]; then
+      echo "error: Trunk guardian completion capability closed before publication." >&2
+      return 2
+    fi
+    now="$(date +%s)" || return 2
+    if [[ ! "$now" =~ ^[1-9][0-9]*$ || "$now" -ge "$deadline" ]]; then
+      echo "error: Trunk guardian did not finish before its lifecycle deadline." >&2
+      return 2
+    fi
+    sleep 0.02 || true
+  done
+}
+
+gate_trunk_guardian_cleanup_handshake() {
+  local pending_file="$1"
+  local done_file="$2"
+  local directory
+
+  if [[ "${trunk_guardian_signal_write_open:-0}" -eq 1 ]]; then
+    exec 25>&-
+    trunk_guardian_signal_write_open=0
+  fi
+  if [[ "${trunk_guardian_signal_read_open:-0}" -eq 1 ]]; then
+    exec 26<&-
+    trunk_guardian_signal_read_open=0
+  fi
+
+  if [[ -z "$pending_file" && -z "$done_file" ]]; then
+    return 0
+  fi
+  directory="${pending_file%/*}"
+  [[ -n "$directory" &&
+    "$pending_file" == "$directory/trunk-guardian.pending" &&
+    "$done_file" == "$directory/trunk-guardian.done" ]] || return 2
+  /bin/rm -f -- "$pending_file" "$done_file" "${done_file}.tmp"
+}
 
 # Ask the launcher whether it can produce a CLI. Bounded: a probe that cannot
 # answer within its budget is torn down and reported as NOT blocked, so an
@@ -7951,7 +8064,7 @@ trunk_provisioning_probe() {
   # The sanitized launcher executes this Bash body.
   # shellcheck disable=SC2016
   AGENTQG_RUN="$command_tag" \
-    AGENTQG_REQUEST="$request_tag" \
+  AGENTQG_REQUEST="$request_tag" \
     "${gate_sanitized_bash_launcher[@]}" -c '
       exec 24<&- 2>/dev/null || true
       command_marker="$1"
@@ -8804,7 +8917,7 @@ gate_run_darwin_lineage_watcher_after_barrier() {
   exec 23<&-
   exec </dev/null
   exec 6>&- 7>&- 8>&- 9>&- 14>&- 15>&- 16>&- 17>&- 18>&- 19>&- \
-    20>&- 21>&- 22>&- 24>&-
+    20>&- 21>&- 22>&- 24>&- 25>&- 26>&-
   exec /usr/bin/env \
     -u NODE_OPTIONS \
     -u NODE_PATH \
@@ -8871,6 +8984,16 @@ run_with_timeout() {
   local command_control_fifo
   local command_status_file
   local command_settlement_ack_file
+  local trunk_guardian_pending_file=""
+  local trunk_guardian_done_file=""
+  local trunk_guardian_signal_fifo=""
+  local trunk_guardian_signal_read_open=0
+  local trunk_guardian_signal_write_open=0
+  local trunk_guardian_signal_fd=""
+  local trunk_guardian_started_at=""
+  local trunk_guardian_wait_deadline=""
+  local trunk_guardian_handshake_rc=0
+  local trunk_guardian_status_deadline=""
   local lineage_watcher_barrier_dir=""
   local lineage_watcher_control_fifo=""
   local lineage_watcher_action_file=""
@@ -9096,7 +9219,7 @@ run_with_timeout() {
     [[ "$had_errexit" == 1 ]] && set -e
     return 2
   }
-  chmod 700 "$command_barrier_dir" || {
+  /bin/chmod 700 "$command_barrier_dir" || {
     rmdir "$command_barrier_dir" 2>/dev/null || true
     echo "error: could not protect the mapped-command launch barrier." >&2
     gate_abandon_unstarted_command_lifecycle \
@@ -9108,7 +9231,7 @@ run_with_timeout() {
   command_control_fifo="$command_barrier_dir/control"
   command_status_file="$command_barrier_dir/status"
   command_settlement_ack_file="$command_barrier_dir/settlement-ready"
-  if ! mkfifo "$command_control_fifo" ||
+  if ! /usr/bin/mkfifo "$command_control_fifo" ||
     ! : > "$command_status_file" ||
     ! exec 20<> "$command_control_fifo"; then
     rm -f "$command_control_fifo" "$command_status_file" \
@@ -9120,6 +9243,56 @@ run_with_timeout() {
     last_command_infrastructure_failed=true
     [[ "$had_errexit" == 1 ]] && set -e
     return 2
+  fi
+  if [[ "$darwin_exact_active" -eq 1 ]] && is_trunk_command "$command"; then
+    trunk_guardian_pending_file="$command_barrier_dir/trunk-guardian.pending"
+    trunk_guardian_done_file="$command_barrier_dir/trunk-guardian.done"
+    trunk_guardian_signal_fifo="$command_barrier_dir/trunk-guardian.signal"
+    if ! gate_trunk_guardian_prepare_handshake \
+      "$command_barrier_dir" "$trunk_guardian_pending_file" \
+      "$trunk_guardian_done_file" ||
+      ! /usr/bin/mkfifo "$trunk_guardian_signal_fifo" ||
+      ! exec 27<> "$trunk_guardian_signal_fifo" ||
+      ! exec 26< "$trunk_guardian_signal_fifo" ||
+      ! exec 25> "$trunk_guardian_signal_fifo"; then
+      exec 27>&- || true
+      exec 26<&- || true
+      exec 25>&- || true
+      echo "error: could not create the Trunk guardian lifecycle handshake." >&2
+      exec 20>&-
+      gate_abandon_unstarted_command_lifecycle \
+        "$active_timeout_drain_identity" "$unstarted_settlement_owner" || true
+      /bin/rm -f -- "$command_control_fifo" "$command_status_file" \
+        "$command_settlement_ack_file" "$trunk_guardian_pending_file" \
+        "$trunk_guardian_done_file" "${trunk_guardian_done_file}.tmp" \
+        "$trunk_guardian_signal_fifo"
+      rmdir "$command_barrier_dir" 2>/dev/null || true
+      last_command_infrastructure_failed=true
+      [[ "$had_errexit" == 1 ]] && set -e
+      return 2
+    fi
+    exec 27>&-
+    trunk_guardian_signal_read_open=1
+    trunk_guardian_signal_write_open=1
+    trunk_guardian_signal_fd=25
+    if ! /bin/rm -f -- "$trunk_guardian_signal_fifo"; then
+      exec 25>&-
+      exec 26<&-
+      trunk_guardian_signal_write_open=0
+      trunk_guardian_signal_read_open=0
+      echo "error: could not unlink the Trunk guardian completion capability." >&2
+      exec 20>&-
+      gate_abandon_unstarted_command_lifecycle \
+        "$active_timeout_drain_identity" "$unstarted_settlement_owner" || true
+      gate_trunk_guardian_cleanup_handshake \
+        "$trunk_guardian_pending_file" "$trunk_guardian_done_file" || true
+      rm -f "$command_control_fifo" "$command_status_file" \
+        "$command_settlement_ack_file"
+      rmdir "$command_barrier_dir" 2>/dev/null || true
+      last_command_infrastructure_failed=true
+      [[ "$had_errexit" == 1 ]] && set -e
+      return 2
+    fi
   fi
   command_started_at="$(date +%s)"
   if declare -p gate_coordinator_recovery_drain_context >/dev/null 2>&1; then
@@ -9136,6 +9309,7 @@ run_with_timeout() {
     AGENTQG_REQUEST="$request_tag" \
     "${gate_sanitized_bash_launcher[@]}" -c '
       exec 24<&- 2>/dev/null || true
+      exec 26<&-
       # Open a read-only copy of the launch FIFO, then close the inherited
       # read/write descriptor. If the gate dies before START, this read sees
       # EOF and no target code runs.
@@ -9180,8 +9354,19 @@ run_with_timeout() {
         # code must never inherit a writer that can release its group anchor.
         exec 17>&-
       fi
+      if [[ -n "${10}" ]]; then
+        export AGENTQG_TRUNK_GUARDIAN_PENDING="${10}"
+        export AGENTQG_TRUNK_GUARDIAN_DONE="${11}"
+        export AGENTQG_TRUNK_CHECK_TIMEOUT_SECONDS="${12}"
+        export AGENTQG_TRUNK_GUARDIAN_SIGNAL_FD="${13}"
+      fi
       eval "$2"
       command_status=$?
+      unset AGENTQG_TRUNK_GUARDIAN_PENDING AGENTQG_TRUNK_GUARDIAN_DONE \
+        AGENTQG_TRUNK_CHECK_TIMEOUT_SECONDS AGENTQG_TRUNK_GUARDIAN_SIGNAL_FD
+      if [[ -n "${10}" ]]; then
+        exec 25>&-
+      fi
       printf "%s\n" "$command_status" > "$9" || exit 127
       IFS= read -r gate_action <&21 || exit 127
       [[ "$gate_action" == settle ]] || exit 127
@@ -9191,7 +9376,9 @@ run_with_timeout() {
       "$executable_command" "$command_marker" "$request_marker" "$coordinator_marker" \
       "$gate_coordinator_stdout_reserved" \
       "$close_parallel_worker_control_fd" "$command_control_fifo" \
-      "$command_status_file" &
+      "$command_status_file" "$trunk_guardian_pending_file" \
+      "$trunk_guardian_done_file" "$effective_command_timeout_seconds" \
+      "$trunk_guardian_signal_fd" &
   cmd_pid=$!
   if ! gate_darwin_lineage_bind_root "$cmd_pid" "$mapped_command_parent_pid"; then
     echo "error: could not bind the mapped-command root to its Darwin kernel identity." >&2
@@ -9200,6 +9387,8 @@ run_with_timeout() {
     wait "$cmd_pid" 2>/dev/null || true
     gate_abandon_unstarted_command_lifecycle \
       "$active_timeout_drain_identity" "$unstarted_settlement_owner" || true
+    gate_trunk_guardian_cleanup_handshake \
+      "$trunk_guardian_pending_file" "$trunk_guardian_done_file" || true
     rm -f "$command_control_fifo" "$command_status_file" \
       "$command_settlement_ack_file"
     rmdir "$command_barrier_dir" 2>/dev/null || true
@@ -9214,6 +9403,8 @@ run_with_timeout() {
     wait "$cmd_pid" 2>/dev/null || true
     gate_abandon_unstarted_command_lifecycle \
       "$active_timeout_drain_identity" "$unstarted_settlement_owner" || true
+    gate_trunk_guardian_cleanup_handshake \
+      "$trunk_guardian_pending_file" "$trunk_guardian_done_file" || true
     rm -f "$command_control_fifo" "$command_status_file" \
       "$command_settlement_ack_file"
     rmdir "$command_barrier_dir" 2>/dev/null || true
@@ -9229,6 +9420,8 @@ run_with_timeout() {
     wait "$cmd_pid" 2>/dev/null || true
     gate_abandon_unstarted_command_lifecycle \
       "$active_timeout_drain_identity" "$unstarted_settlement_owner" || true
+    gate_trunk_guardian_cleanup_handshake \
+      "$trunk_guardian_pending_file" "$trunk_guardian_done_file" || true
     rm -f "$command_control_fifo" "$command_status_file" \
       "$command_settlement_ack_file"
     rmdir "$command_barrier_dir" 2>/dev/null || true
@@ -9246,6 +9439,8 @@ run_with_timeout() {
     wait "$cmd_pid" 2>/dev/null || true
     gate_abandon_unstarted_command_lifecycle \
       "$command_lineage_token" "$unstarted_settlement_owner" || true
+    gate_trunk_guardian_cleanup_handshake \
+      "$trunk_guardian_pending_file" "$trunk_guardian_done_file" || true
     rm -f "$command_control_fifo" "$command_status_file" \
       "$command_settlement_ack_file"
     rmdir "$command_barrier_dir" 2>/dev/null || true
@@ -9356,6 +9551,8 @@ run_with_timeout() {
       wait "$cmd_pid" 2>/dev/null || true
       gate_abandon_unstarted_command_lifecycle \
         "$active_timeout_drain_identity" "$unstarted_settlement_owner" || true
+      gate_trunk_guardian_cleanup_handshake \
+        "$trunk_guardian_pending_file" "$trunk_guardian_done_file" || true
       rm -f "$command_control_fifo" "$command_status_file" \
         "$command_settlement_ack_file"
       rmdir "$command_barrier_dir" 2>/dev/null || true
@@ -9405,6 +9602,8 @@ run_with_timeout() {
     wait "$cmd_pid" 2>/dev/null || true
     gate_abandon_unstarted_command_lifecycle \
       "$active_timeout_drain_identity" "$unstarted_settlement_owner" || true
+    gate_trunk_guardian_cleanup_handshake \
+      "$trunk_guardian_pending_file" "$trunk_guardian_done_file" || true
     rm -f "$command_control_fifo" "$command_status_file" \
       "$command_settlement_ack_file"
     rmdir "$command_barrier_dir" 2>/dev/null || true
@@ -9420,6 +9619,13 @@ run_with_timeout() {
     return 2
   fi
   last_command_launch_state=started
+  if [[ "$trunk_guardian_signal_write_open" -eq 1 ]]; then
+    exec 25>&-
+    trunk_guardian_signal_write_open=0
+  fi
+  if [[ -n "$trunk_guardian_pending_file" ]]; then
+    trunk_guardian_started_at="$(date +%s)" || trunk_guardian_started_at=""
+  fi
   # Run the watchdog via `bash -c` (which execs) rather than a `( … ) &`
   # subshell. A forked subshell inherits bash's saved copy of the caller's
   # redirected stdout — the descriptor bash stashes (close-on-exec) while
@@ -9432,6 +9638,8 @@ run_with_timeout() {
   # shellcheck disable=SC2016
   "${gate_sanitized_bash_launcher[@]}" -c '
     exec 24<&- 2>/dev/null || true
+    exec 25>&-
+    exec 26<&-
     exec 7>&-
     if [[ "$6" == 1 ]]; then
       exec 17>&-
@@ -9558,12 +9766,54 @@ EOF_KILL
     )
   fi
 
-  while [[ ! -s "$command_status_file" && ! -s "$timeout_marker" ]]; do
-    if ! kill -0 "$cmd_pid" 2>/dev/null; then
-      break
+  if [[ -n "$trunk_guardian_pending_file" ]]; then
+    if [[ ! "$trunk_guardian_started_at" =~ ^[1-9][0-9]*$ ]]; then
+      echo "error: Trunk guardian lifecycle start time is unavailable." >&2
+      lineage_bind_rc=2
+      trunk_guardian_handshake_rc=2
+    else
+      trunk_guardian_wait_deadline=$((
+        trunk_guardian_started_at + effective_command_timeout_seconds +
+          trunk_guardian_completion_bound_seconds
+      ))
+      if ! gate_trunk_guardian_wait_done \
+        "$trunk_guardian_pending_file" "$trunk_guardian_done_file" \
+        "$trunk_guardian_wait_deadline"; then
+        lineage_bind_rc=2
+        trunk_guardian_handshake_rc=2
+      fi
     fi
-    sleep 0.02 || true
-  done
+    if [[ "$trunk_guardian_signal_read_open" -eq 1 ]]; then
+      exec 26<&-
+      trunk_guardian_signal_read_open=0
+    fi
+    if [[ "$trunk_guardian_handshake_rc" -eq 0 ]]; then
+      trunk_guardian_status_deadline=$((
+        $(date +%s) + trunk_guardian_status_publish_bound_seconds
+      ))
+      while [[ ! -s "$command_status_file" && ! -s "$timeout_marker" ]]; do
+        if ! kill -0 "$cmd_pid" 2>/dev/null; then
+          break
+        fi
+        if gate_lock_process_is_confirmed_zombie "$cmd_pid" "$cmd_start"; then
+          break
+        fi
+        if [[ "$(date +%s)" -ge "$trunk_guardian_status_deadline" ]]; then
+          echo "error: mapped Trunk wrapper did not publish its status after authenticated completion." >&2
+          lineage_bind_rc=2
+          break
+        fi
+        sleep 0.02 || true
+      done
+    fi
+  else
+    while [[ ! -s "$command_status_file" && ! -s "$timeout_marker" ]]; do
+      if ! kill -0 "$cmd_pid" 2>/dev/null; then
+        break
+      fi
+      sleep 0.02 || true
+    done
+  fi
   if declare -F gate_coordinator_begin_command_settlement >/dev/null 2>&1; then
     if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
       gate_coordinator_is_active &&
@@ -9643,6 +9893,8 @@ EOF_KILL
         "$watchdog_exact_identity" "$watchdog_pid"; then
       wait "$watchdog_pid" 2>/dev/null || true
     fi
+    gate_trunk_guardian_cleanup_handshake \
+      "$trunk_guardian_pending_file" "$trunk_guardian_done_file" || true
     rm -f "$command_control_fifo" "$command_status_file" \
       "$command_settlement_ack_file"
     rmdir "$command_barrier_dir" 2>/dev/null || true
@@ -9680,6 +9932,8 @@ EOF_KILL
     echo "error: mapped-command root exited before it published a completion status." >&2
     lineage_bind_rc=2
   fi
+  gate_trunk_guardian_cleanup_handshake \
+    "$trunk_guardian_pending_file" "$trunk_guardian_done_file" || true
   rm -f "$command_control_fifo" "$command_status_file" \
     "$command_settlement_ack_file"
   rmdir "$command_barrier_dir" 2>/dev/null || true
