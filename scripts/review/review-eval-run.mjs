@@ -1151,6 +1151,9 @@ export async function scorePlan({
   if (!Array.isArray(plan.cells)) {
     throw new Error("plan carries no cells array");
   }
+  if (plan.contract_digest !== contractDigest) {
+    throw new Error("plan contract digest does not match the scoring contract");
+  }
   if (!["full", "canary"].includes(plan.kind)) {
     throw new Error(
       `plan has no frozen ${String(plan.kind ?? "unknown")} matrix to score`,

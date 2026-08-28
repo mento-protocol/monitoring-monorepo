@@ -3284,7 +3284,7 @@ test("scorePlan rejects an ineligible explicit baseline before model work", asyn
   }
 });
 
-test("scorePlan rejects an altered cell matrix before model work", async () => {
+test("scorePlan rejects altered plan inputs before model work", async () => {
   const root = makeRoot();
   try {
     const plan = buildPlan({
@@ -3310,13 +3310,12 @@ test("scorePlan rejects an altered cell matrix before model work", async () => {
         }),
       );
     }
-    plan.cells[0].model = `${plan.cells[0].model}-altered`;
     let modelCalls = 0;
-    await assert.rejects(
+    const score = (digest = contractDigest) =>
       scorePlan({
         plan,
         contract,
-        contractDigest,
+        contractDigest: digest,
         repoRoot: root,
         planDir: plan.plan_dir,
         exec: async () => {
@@ -3329,7 +3328,16 @@ test("scorePlan rejects an altered cell matrix before model work", async () => {
             "utf8",
           ),
         ),
-      }),
+      });
+    await assert.rejects(
+      score("f".repeat(64)),
+      /plan contract digest does not match the scoring contract/,
+    );
+    assert.equal(modelCalls, 0);
+
+    plan.cells[0].model = `${plan.cells[0].model}-altered`;
+    await assert.rejects(
+      score(),
       /plan cells do not match the frozen canary matrix/,
     );
     assert.equal(modelCalls, 0);
