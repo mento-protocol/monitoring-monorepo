@@ -81,8 +81,9 @@ place a human still reads the batch.
 gate, edits no source file, and opens no PR — prohibitions that keep concurrent
 workers out of each other's trees, and so bind only while separate workers
 exist. A runtime that cannot spawn one works the batch sequentially, taking both
-roles, one issue at a time. Its work is selection, claiming,
-and keeping workers alive.
+roles, one issue at a time. Merging is not one of those prohibitions: that
+boundary is unconditional, in every shape of the run. Its work is selection,
+claiming, and keeping workers alive.
 
 **A worker** is one subagent per issue, with one checkout, one branch, and one
 PR. Workers never share a checkout: a repair applied through another worker's

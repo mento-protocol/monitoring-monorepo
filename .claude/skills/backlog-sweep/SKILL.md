@@ -20,12 +20,15 @@ larger batch — and reads the report afterwards. Default batch size is 2.
 
 The session that runs this skill is an **orchestrator**. It ranks, picks,
 claims, and hands each issue to a dedicated worker subagent. It runs no gate,
-edits no source file, and merges nothing. Those three prohibitions keep
-concurrent workers out of each other's trees, so they bind only while separate
-workers exist: on a runtime with no way to spawn one, the session works the
-batch sequentially and takes both roles itself, one issue at a time. Nothing
-else changes — the isolated checkout, the boundaries, and the report contract
-all still hold.
+edits no source file, and opens no PR. Those three prohibitions keep concurrent
+workers out of each other's trees, so they bind only while separate workers
+exist: on a runtime with no way to spawn one, the session works the batch
+sequentially and takes both roles itself, one issue at a time.
+
+**It merges nothing, in either shape.** That boundary is unconditional — it has
+nothing to do with tree isolation or with how many actors are running, and the
+hard boundaries below state it. The isolated checkout, the rest of those
+boundaries, and the report contract hold either way.
 
 The loop, the boundaries, the report contract, and the resilience duties are
 canonical in
@@ -248,14 +251,15 @@ transitions the issue before it verifies ownership and posts the claim comment,
 so a failure in a later step exits nonzero with the issue already
 `agent-active`. Treating that as "not staffed, leave it alone" strands it on the
 board with no worker and no report row — the same orphan the unstaffable-claim
-rule above prevents.
+rule below prevents.
 
 So after **any** claim error, re-read the issue and decide from what is visible:
 the state labels, and whether a claim comment naming this sweep's agent is
 present. `issue:claim` generates its `Claim ID` internally and never prints it,
 so there is no expected ID to compare against; do not try. If the issue is
 `agent-active` and no other session's claim comment sits on it, treat the claim
-as this sweep's and either staff it or release it as above. If another session's
+as this sweep's and either staff it or release it, as the unstaffable-claim rule
+below does. If another session's
 claim is there, it is a lost claim. If it is neither `agent-active` nor `in-pr`,
 nothing landed and there is nothing to undo.
 
