@@ -48,7 +48,8 @@ Claims are sequential, so eligibility is re-read against each issue immediately
 before it is claimed rather than trusted from the ranking: `issue:claim` checks
 only that the issue is open and queue-claimable, and `risk:low`, `Blocked`, a
 new dependency, or an authority cap can all have changed in between. Each claim
-also passes `--branch` with the worker's branch name — without it the helper
+also passes `--branch` with the branch the worker will push, and the worker is
+briefed with that exact name — without it the helper
 falls back to the orchestrator's own branch and files that in the Project
 `Branch` field and the claim comment, pointing every reader at a checkout that
 owns none of the work.
@@ -61,8 +62,10 @@ that fails on a runtime's concurrency limit or any other error — is released
 immediately rather than left parked in `agent-active` with no worker. A claim
 command that exits nonzero is reconciled the same way rather than assumed not to
 have happened: the helper transitions the issue before it verifies ownership and
-posts its comment, so a later failure leaves the issue `agent-active` under this
-sweep's `Claim ID`. Re-read labels and ownership after any claim error. A
+posts its comment, so a later failure leaves it `agent-active` anyway. Reconcile
+from what is visible — the state labels and whether another session's claim
+comment is present — because `issue:claim` never prints the `Claim ID` it
+generates, so there is no expected value to compare. A
 replacement drawn from the next eligible receipt entry is printed before it is
 claimed, like the original batch — the printed batch is the record of what the
 sweep worked on, and an unannounced substitute makes that record wrong.
@@ -108,10 +111,12 @@ suffix. A checkout whose contents have not been established is never deleted;
 it can hold uncommitted work, and nothing available to the sweep tells that
 apart from litter.
 
-Every new clone runs `./scripts/setup.sh`, unconditionally. That script sets
-`core.hooksPath`, so a clone that only ran `pnpm install` has no pre-push hook
-— and a worker there could push without the gate these boundaries forbid
-bypassing.
+Every checkout runs `./scripts/setup.sh`, fresh or resumed. That script sets
+`core.hooksPath`, so a checkout that only ran `pnpm install` has no pre-push
+hook — and a worker there could push without the gate these boundaries forbid
+bypassing. The marker is written straight after the clone, so an interruption
+between the two leaves an owned checkout with no hooks; rerunning is free, since
+the script skips its own work when inputs are unchanged.
 
 The split exists because subagents cannot wait across turns. A subagent that
 ends its turn to wait for a gate stalls permanently — nothing re-invokes it,
@@ -125,8 +130,10 @@ anyway, and collecting the facts only workers can see.
 A sweep is narrower than the ranking that feeds it, and the ranking receipt
 does not carry the difference: its Top 15 is `Rank | Issue | Score | Reason`,
 and it scores `needs-grooming` issues beside `agent-ready` ones. Selection by
-`rank-backlog` is a ranking verdict, not a batch verdict. So each candidate is
-read directly — `gh issue view <n> --repo mento-protocol/monitoring-monorepo
+`rank-backlog` is a ranking verdict, not a batch verdict. Candidates are read in
+receipt order — Selected, runner-up, then the Top 15, since ranking reads that
+pair "whatever their rank" and grooming issues can push them off the table. Each
+is read directly — `gh issue view <n> --repo mento-protocol/monitoring-monorepo
 --json number,title,state,labels,body,projectItems,blockedBy`, where `labels`
 settles the queue state, risk, and `pkg:*` area, `projectItems[].status.name`
 settles `Blocked`, `blockedBy` carries GitHub's own blocked-by relationship,
@@ -305,8 +312,10 @@ It carries the receipt path and requested batch size, a disposition table of
 deferral issues filed, the checkout conflicts, and anything needing the
 operator's decision. A refused claim gets its own line rather than a table row
 — no work was done on it — and without that line a shrunken batch would look
-like the batch that was asked for. It names the holder by the `Claim ID` left
-on the issue, because the refusal itself reports only the label state it found.
+like the batch that was asked for. It names the holder's `Claim ID` when the re-read
+shows one, and otherwise records a state change between the read and the claim —
+a closed or re-groomed issue has no holder, and an old comment would name a
+session unrelated to the refusal.
 A checkout conflict line names the taken path and the fresh one: the taken path
 is never inspected or deleted, so the line is the only record that something is
 sitting there. The same summary is printed to the terminal.

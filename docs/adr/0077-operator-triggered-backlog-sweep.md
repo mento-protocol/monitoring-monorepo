@@ -105,6 +105,28 @@ by how many issues qualify.
 Because the sweep stops at READY, merge approval remains a human step for every
 PR it opens.
 
+## Evidence
+
+- PR
+  [#2106](https://github.com/mento-protocol/monitoring-monorepo/pull/2106)
+  shipped this decision and closes issue
+  [#2071](https://github.com/mento-protocol/monitoring-monorepo/issues/2071),
+  whose grooming decisions chose the operator-triggered form.
+- [`.agents/skills/backlog-sweep/SKILL.md`](../../.agents/skills/backlog-sweep/SKILL.md)
+  is the procedure that enforces the decision, mirrored byte-identically into
+  `.claude/skills/backlog-sweep/SKILL.md`. That mirror is enforced by
+  `scripts/repo-health/check-skills-mirror.mjs`, which the Agent Quality Gate
+  routes on any change to either tree.
+- [`docs/notes/backlog-sweep.md`](../notes/backlog-sweep.md) is the canonical
+  contract the skill produces against — eligibility, boundaries, resilience
+  duties, and the report.
+- The concurrency bound is the gate coordinator's own capacity, default 3,
+  recorded in [ADR 0076](0076-fair-quality-gate-coordinator.md) and
+  [`docs/notes/agent-quality-gate-mechanics.md`](../notes/agent-quality-gate-mechanics.md).
+- The never-merge boundary rests on the sanctioned merge wrapper of
+  [ADR 0075](0075-pr-merge.md), which refuses outside an interactive human
+  session.
+
 ## References
 
 - [`docs/notes/backlog-sweep.md`](../notes/backlog-sweep.md) — the canonical

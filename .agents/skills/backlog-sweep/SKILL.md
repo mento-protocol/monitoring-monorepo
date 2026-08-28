@@ -104,8 +104,13 @@ and ship nothing.
 **The receipt does not carry eligibility.** Its Top 15 table is
 `Rank | Issue | Score | Reason`, and it ranks `needs-grooming` issues beside
 `agent-ready` ones. Being Selected by `rank-backlog` is a ranking verdict, not
-a batch verdict — the Selected issue can fail any rule below. So walk the Top
-15 in order and read each candidate directly, stopping once N qualify:
+a batch verdict — the Selected issue can fail any rule below. So read each
+candidate directly, stopping once N qualify, in this order: the receipt's
+Selected issue, its runner-up, then the Top 15. Those first two are read
+"whatever their rank" by `rank-backlog` itself and are not always in the table
+— fifteen higher-scoring grooming issues push the best ready candidate off it —
+so a sweep that scanned only the table would report an empty batch while the
+receipt names a valid pick.
 
 ```bash
 gh issue view <n> --repo mento-protocol/monitoring-monorepo \
@@ -234,21 +239,30 @@ on an issue this sweep does not hold duplicates whatever its real owner is
 already doing.
 
 **A nonzero claim is not proof the claim did not happen.** `issue:claim`
-transitions the issue before it verifies ownership, re-reads the issue, and
-posts the claim comment, so a failure in any of those later steps exits nonzero
-with the issue already `agent-active` carrying this sweep's `Claim ID`.
-Treating that as "not staffed, leave it alone" strands the issue on the board
-with no worker and no report row — the same orphan the unstaffable-claim rule
-above prevents. So after **any** claim error, re-read the labels and the
-Project `Claim ID`. If this sweep holds it, either staff it or release it as
-above. If another session holds it, it is a lost claim. Only when nothing holds
-it is there nothing to undo.
+transitions the issue before it verifies ownership and posts the claim comment,
+so a failure in a later step exits nonzero with the issue already
+`agent-active`. Treating that as "not staffed, leave it alone" strands it on the
+board with no worker and no report row — the same orphan the unstaffable-claim
+rule above prevents.
+
+So after **any** claim error, re-read the issue and decide from what is visible:
+the state labels, and whether a claim comment naming this sweep's agent is
+present. `issue:claim` generates its `Claim ID` internally and never prints it,
+so there is no expected ID to compare against; do not try. If the issue is
+`agent-active` and no other session's claim comment sits on it, treat the claim
+as this sweep's and either staff it or release it as above. If another session's
+claim is there, it is a lost claim. If it is neither `agent-active` nor `in-pr`,
+nothing landed and there is nothing to undo.
 
 On a refused claim, leave the issue alone and record the loss in the report.
 The refusal names only the label state it found —
 `is not claimable; expected open agent-ready without agent-active/in-pr/needs-grooming`
-— so read the holder's `Claim ID` from the issue's project field or its claim
-comment for the report line. A replacement from the next eligible receipt entry
+— so re-read the issue for the report line. A holder exists only when it came
+back `agent-active` or `in-pr`; take that holder's `Claim ID` from the project
+field or the claim comment. When it closed or returned to `needs-grooming`
+between the read and the claim there is no holder at all: record the state
+change, and do not go looking for one — an old comment would name a session
+that has nothing to do with this refusal. A replacement from the next eligible receipt entry
 is allowed, but **print it before claiming it**, exactly as the batch was
 printed: the printed batch is the audit record of what this sweep worked on,
 and an unannounced substitute makes that record wrong. When the receipt is
@@ -276,6 +290,8 @@ Then spawn one worker subagent per issue. Give each a brief containing:
     [ -w "$root" ] || exit 1              # the fallback gets the same proof
   fi
   dir="$root/sweep-${issue}"
+
+  [ -n "${worker_dir:-}" ] && dir="$worker_dir"   # respawn: use it verbatim
 
   if [ -e "$dir/.git/sweep-owner" ] &&
      [ "$(cat "$dir/.git/sweep-owner")" = "$sweep_id" ]; then
@@ -316,6 +332,12 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   public repository and then fails at the push, after the whole issue has been
   implemented and gated.
 
+  `worker_dir` is set only on a respawn, to the path the orchestrator recorded
+  for this worker. Use it verbatim; do not re-derive. A worker displaced to a
+  suffixed path would otherwise start from the base name, fail `mkdir` on its
+  own directory, and clone a fresh one — abandoning the branch, commits, and
+  open PR that the resume duty exists to keep.
+
   `sweep_id` is one value the orchestrator fixes before the first claim and
   passes to every worker — this session's id is the obvious choice, and any
   string is fine as long as one sweep never reuses another's. Write it right
@@ -349,11 +371,22 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   clone or a worktree — that its own runtime can actually write to, because two
   workers in one checkout is the failure this is preventing. Then run
   `./scripts/setup.sh` unsandboxed in **every** new clone, not conditionally.
-  It is what sets `core.hooksPath` to `.trunk/hooks`, so a clone that only ran
-  `pnpm install` has no pre-push hook — and a worker there could push without
-  the gate the boundaries below forbid bypassing. It also owns codegen and the
-  browser dependencies, and skips its own work when the inputs are unchanged.
-  Branch from `origin/main`.
+  It is what sets `core.hooksPath` to `.trunk/hooks`, so a checkout that only
+  ran `pnpm install` has no pre-push hook — and a worker there could push
+  without the gate the boundaries below forbid bypassing. Run it on **resumed**
+  checkouts too, not just fresh ones: the marker is written straight after the
+  clone, so an interruption between the two leaves an owned checkout with no
+  hooks, and a resume that trusted the marker would push from it. Rerunning is
+  free — the script owns codegen and the browser dependencies and skips its own
+  work when the inputs are unchanged — which is why this is a blanket rule
+  rather than a condition to evaluate.
+
+  Branch as **the exact name the orchestrator passed to `issue:claim
+--branch`**, from `origin/main`. That name is already in the Project `Branch`
+  field and the claim comment, and the release guard looks for an open PR with
+  `--head` that name. A worker that invents its own leaves all three pointing at
+  a branch nobody pushed, and the guard then reads "no open PR" and releases an
+  issue that has one.
 
   **The path is deterministic, so check it before cloning.** The same issue
   number produces the same directory, and `git clone` fails outright into one
@@ -501,15 +534,9 @@ restart re-claims an issue that is already `agent-active`, re-runs a gate that
 already passed, and can open a second PR for the same branch. Wait for the
 limit to reset, then wake the existing worker where it stopped.
 
-**Record each worker's allocated path, and pass it back on any respawn.** The
-resume test in the brief compares the marker at the deterministic base path
-only. A worker displaced to `sweep-<issue>-2` therefore cannot recognise its own
-checkout if it is ever spawned fresh rather than woken — after a crash, say — so
-it would allocate `-3`, clone from `origin/main`, and abandon its own branch,
-commits, and open PR sitting at `-2`. That is the restart this duty forbids,
-arriving through the back door. The orchestrator already knows the path each
-worker reported; hand it back explicitly instead of letting the worker re-derive
-it.
+**Record each worker's allocated path, and pass it back as `worker_dir` on any
+respawn.** Waking a worker is not the only way one comes back; after a crash it
+is spawned fresh, and then only the path you hand it keeps it off a new clone.
 
 **Direct a reclassification after five review-triggered patch cycles.** The
 operating card allows five and requires a pause before a sixth. At that point
@@ -650,9 +677,11 @@ board.
    belong in a table cell. For an issue that was released, the cell holds the
    release reason and which release form was used.
 3. **Claims this sweep did not get**, one line per refused claim, naming the
-   issue, the `Claim ID` its real owner left on it, and the receipt entry taken
-   instead. A refused claim never becomes a disposition row, because no work
-   was done on it; omitting it entirely would hide that the batch shrank.
+   issue, why it was refused, and the receipt entry taken instead. The reason is
+   either a holder — give its `Claim ID` — or a state change between the read
+   and the claim, which has no holder to name. A refused claim never becomes a
+   disposition row, because no work was done on it; omitting it entirely would
+   hide that the batch shrank.
 4. **Deferral issues filed**, by number, each with the PR it came from.
 5. **Checkout conflicts**, one line per worker that found its deterministic
    clone path already taken and moved to a fresh one, naming both paths. The
