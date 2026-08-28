@@ -52,21 +52,10 @@ create, replace, or revoke those keys.
 
 Without a stack, `pnpm tf validate` validates every registered stack. It formats
 tracked and non-ignored untracked Terraform, then runs backend-free init and
-validate. On Darwin, the local quality gate attests each generated provider
-package against the stack registry and owning lock at the branch's unique
-merge-base with the local `origin/main`. The worktree registry and lock must
-match those trusted Git blobs byte for byte. The selected source, version,
-platform, current CPU slice, and `h1:` directory hash must also match. It keeps
-all other opaque content under `.terraform-agent-gate` blocked. It removes
-`TF_PLUGIN_CACHE_DIR` because Terraform can install cached providers through
-symlinks. Gitignored operator `*.tfvars` stay outside the source check.
-
-A provider, lock, or stack-registry upgrade cannot authorize itself in a Darwin
-local gate run. Land that trust update separately on reviewed `main` through
-CI and the documented gate-exception handoff. Then refresh the branch from
-`origin/main` so its merge-base contains the reviewed blobs. Run the Darwin gate
-again after that refresh. The preflight does not fall back to `HEAD`, the index,
-or worktree policy when the trusted object is missing or different.
+validate. On Darwin, it applies the [immutable provider trust and cache
+rules](notes/agent-quality-gate-mechanics.md). Land trust updates through
+reviewed `main` and CI. Then refresh `origin/main` and rerun the gate. Gitignored
+operator `*.tfvars` stay outside the source check.
 
 For stacks with `ci.apply == "push-main-production-infra-environment"`, local
 apply requires a clean `main` at `origin/main` unless the operator deliberately

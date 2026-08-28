@@ -17,16 +17,8 @@ The invocation pointer lives in the "Agent Tooling and Setup" section of root
 
 ## New Worktree / Clone Setup
 
-On macOS, install the Xcode Command Line Tools first:
-
-```bash
-xcode-select --install
-```
-
-The Darwin quality-gate containment helper uses `/usr/bin/xcrun --sdk macosx`
-to select Clang and the macOS SDK. `setup.sh` checks that exact toolchain and
-fails with this installation command when it is unavailable. Linux setup does
-not require it.
+macOS setup requires the Xcode Command Line Tools (`xcode-select --install`)
+for the Darwin gate helper. Linux does not need them.
 
 After creating a new worktree manually or cloning the repo, run:
 

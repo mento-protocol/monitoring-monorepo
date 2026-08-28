@@ -149,21 +149,12 @@ even when you never open an authority.
    verification before and after review. Capture, bundle-integrity,
    sensitive-input, runtime-trust, and explicitly-selected-unavailable-engine
    failures all fail closed. For merge-review provenance, the `babysit-pr`
-   skill binds `origin`, the immutable base, and protected `main` before any
-   adapter call. It invokes an absolute wrapper and explicit helper through
-   `/bin/bash`, never through the package manager. If either review axis changes
-   `scripts/agent-autoreview.sh`, `scripts/agent-autoreview.mjs`,
-   `scripts/agent-autoreview-core.mjs`,
-   `scripts/gate/darwin-process-identity.c`,
-   `scripts/gate/darwin-process-identity-runtime.inc.c`,
-   `scripts/gate/darwin-process-identity-helper.mjs`,
-   `scripts/gate/darwin-process-lineage-model.mjs`,
-   `scripts/gate/darwin-process-lineage-state.mjs`,
-   `scripts/gate/darwin-process-lineage.mjs`, or
-   `scripts/gate/mapped-command-process-identity.mjs`, use the last
-   independently reviewed compatible pre-change runtime. After every semantic
-   review and bound postverification, run the sequential suite through
-   `/bin/bash` as separate behavior evidence. Authority:
+   skill binds `origin`, the immutable base, and protected `main` before it
+   calls an absolute wrapper and helper through `/bin/bash`. If a review axis
+   changes a pinned runtime, use the last independently reviewed compatible
+   pre-change runtime. After semantic review and bound postverification, run
+   the sequential `/bin/bash` suite as behavior evidence. Exact pins and
+   authority:
    [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md).
 
 5. **Ship.** Open the PR through the `ship` skill on every surface, including

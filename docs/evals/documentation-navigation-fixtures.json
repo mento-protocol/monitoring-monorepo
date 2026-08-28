@@ -84,7 +84,10 @@
       "id": "deployment-terraform-registry-apply",
       "category": "deployment",
       "question": "Which source maps Terraform stack ownership, and when may a stack be applied locally versus through the production-infra environment on main?",
-      "accepted_routes": [["docs/terraform.md"]],
+      "accepted_routes": [
+        ["docs/notes/quick-commands.md"],
+        ["docs/terraform.md"]
+      ],
       "sources_requiring_verification": [
         {
           "path": "docs/notes/terraform-cicd-hardening-decisions-2026-05.md",

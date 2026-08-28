@@ -701,7 +701,11 @@ test("Darwin cohort settlement validates its bounded token and path set", async 
     assert.equal(nonRetained.status, 2);
     assert.match(nonRetained.stderr, /must retain every state/u);
   } finally {
-    rmSync(linkedDirectory, { force: true });
+    try {
+      unlinkSync(linkedDirectory);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
     rmSync(firstDirectory, { recursive: true, force: true });
     rmSync(secondDirectory, { recursive: true, force: true });
   }
