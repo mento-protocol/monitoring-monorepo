@@ -43,6 +43,11 @@ export const CDP_TROVE_SCHEMA_FIELDS = `
         name
       }
     }
+    TroveLedgerEventType: __type(name: "TroveLedgerEvent") {
+      fields {
+        name
+      }
+    }
   }
 `;
 
@@ -494,6 +499,119 @@ export const CDP_TROVE_OPERATIONS = `
       id troveId operation collChange debtChange
       annualInterestRate debtIncreaseFromUpfrontFee
       timestamp blockNumber txHash
+    }
+  }
+`;
+
+// Owner lookup on the /cdps overview (docs/PLAN-trove-history-page.md,
+// "GraphQL contract → CDP_TROVES_BY_OWNER"): every trove an address owns or
+// owned, across all markets on one chain. The NFT burn handler zeroes
+// `owner` on close and liquidation and stashes the last owner in
+// `previousOwner`, so matching `owner` alone would miss exactly the closed
+// troves support asks about — hence the `_or`. Chain-scoped because Liquity
+// is indexed on multiple chains. `$limit` is the caller's request size
+// (render limit + 1) so a capped result is detected via the sentinel row,
+// never a Hasura aggregate (disabled on hosted Hasura); ordering is
+// newest-updated-first with the unique entity id as tiebreaker, so the cap
+// drops the least recently touched troves.
+export const CDP_TROVES_BY_OWNER = `
+  query CdpTrovesByOwner($chainId: Int!, $address: String!, $limit: Int!) {
+    Trove(
+      where: {
+        chainId: { _eq: $chainId }
+        _or: [{ owner: { _eq: $address } }, { previousOwner: { _eq: $address } }]
+      }
+      order_by: [{ lastUpdatedAt: desc }, { id: asc }]
+      limit: $limit
+    ) {
+      id collateralId troveId status debt coll lastUpdatedAt
+    }
+  }
+`;
+
+// Trove history page redemption-queue panel (docs/PLAN-trove-history-page.md,
+// "UI design → Redemption queue"): the market's current rate ladder plus the
+// shutdown flag, fetched by the trove page ITSELF — a direct page load must
+// render the ladder without the market page's cache being warm, so this owns
+// its fetch instead of reading `CDP_MARKET_DETAIL`'s. Same `OpenTrove` shape
+// and cap as that query (active + zombie, `CDP_TROVES_DETAIL_LIMIT`) so the
+// panel's cap suppression triggers exactly where the market table hides its
+// rank column; zombies are excluded client-side (they sit outside the sorted
+// queue and shield nothing), which keeps the exclusion unit-testable and the
+// cap semantics identical. Per-row payload is minimal — the ladder needs only
+// status/debt/rate/batch join; `InterestBatch` resolves the CURRENT rate for
+// batch-managed troves (`Trove.interestRate` can be a stale copy). While
+// `isShutDown` is true redemptions are urgent-mode and rate order no longer
+// decides, so the panel swaps the ladder for a shutdown notice.
+export const CDP_TROVE_QUEUE = `
+  query CdpTroveQueue($collateralId: String!) {
+    LiquityInstance(where: { collateralId: { _eq: $collateralId } }, limit: 1) {
+      id isShutDown shutDownAt
+    }
+    OpenTrove: Trove(
+      where: {
+        collateralId: { _eq: $collateralId }
+        status: { _in: [${OPEN_STATUS_LIST}] }
+      }
+      order_by: [{ interestRate: asc }, { troveId: asc }, { id: asc }]
+      limit: ${CDP_TROVES_DETAIL_LIMIT}
+    ) {
+      id status debt interestRate interestBatchId
+    }
+    InterestBatch(
+      where: { collateralId: { _eq: $collateralId } }
+      order_by: [{ annualInterestRate: asc }, { id: asc }]
+      limit: ${CDP_TROVES_DETAIL_LIMIT}
+    ) {
+      id annualInterestRate
+    }
+  }
+`;
+
+// Trove history page complete ledger (docs/PLAN-trove-history-page.md,
+// "GraphQL contract → CDP_TROVE_LEDGER"): every TroveOperation ordinal
+// including redemptions/liquidations/interest folds, superseding the interim
+// `CDP_TROVE_OPERATIONS` assembly once hosted Hasura serves the entity. The
+// caller gates on `CDP_TROVE_SCHEMA_FIELDS` finding both `TroveLedgerEvent`
+// and the `Trove` watermark columns — this query is never fired ungated,
+// which is also why `lastLedgerBlock`/`lastLedgerLogIndex` live HERE (aliased
+// `LedgerWatermark` branch) and never in `CDP_TROVE_ROW_FIELDS[_WITH_TX]`:
+// those constants feed the ungated market-detail and trove-header queries,
+// and one unknown column fails a whole request at parse time on a
+// schema-lagged deploy. Fetching the watermark alongside the ledger rows also
+// keeps the reconciliation pair (#2088) reading one response, not two skewed
+// polls — and the same branch carries the redemption cumulatives the impact
+// panel reconciles against, so cumulatives, watermark, and rows are all one
+// snapshot: comparing the header query's (independently polled) cumulatives
+// to this response's rows would re-open exactly the skew the watermark
+// exists to close. The cumulative columns are long-deployed and safe here;
+// only the two watermark columns are gate-dependent.
+//
+// Ordering is the numeric triple — `TroveLedgerEvent` has a queryable
+// `logIndex`, unlike `TroveOperationEvent`, so the server tiebreaks
+// correctly and no row can be dropped at the cap boundary by the string-id
+// workaround this route needs for the interim query. The unpadded string
+// `id` never participates in ordering. Fetched newest-first so the OLDEST
+// rows drop at the cap; the caller reverses to chronological and detects
+// truncation via the limit+1 sentinel (render 999, request 1000 — aggregates
+// are disabled on hosted Hasura, and the render limit sits below the
+// 1,000-row hard cap so a capped response still carries the sentinel).
+export const CDP_TROVE_LEDGER = `
+  query CdpTroveLedger($troveEntityId: String!, $limit: Int!) {
+    LedgerWatermark: Trove(where: { id: { _eq: $troveEntityId } }, limit: 1) {
+      lastLedgerBlock lastLedgerLogIndex
+      redemptionCount redeemedDebt redeemedColl redemptionFeePaidCum
+    }
+    TroveLedgerEvent(
+      where: { troveEntityId: { _eq: $troveEntityId } }
+      order_by: [{ timestamp: desc }, { blockNumber: desc }, { logIndex: desc }]
+      limit: $limit
+    ) {
+      id operation collChange debtChange debtIncreaseFromUpfrontFee
+      debtIncreaseFromRedist collIncreaseFromRedist annualInterestRate
+      debtBefore debtAfter collBefore collAfter statusBefore statusAfter
+      redemptionFeeCredited isRebalance redemptionPrice priceAtEvent
+      icrAfterBps timestamp blockNumber logIndex txHash
     }
   }
 `;

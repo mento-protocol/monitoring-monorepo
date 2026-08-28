@@ -88,6 +88,12 @@ export const EMPTY_CDP_MARKET_ACTIVITY: CdpMarketActivity = {
   lastTimestamp: null,
 };
 
+// The last three kinds (`zombie`, `revived`, `interest`) are ledger-only:
+// they never come out of `badgeKindFor` (no `CdpTransactionRow` maps to
+// them) and never appear in the market transaction feeds — the trove
+// history page's complete-ledger view assigns them directly for status-flip
+// annotations and synthetic interest-estimate rows
+// (docs/PLAN-trove-history-page.md, "UI design → Ledger table").
 export type BadgeKind =
   | "liquidation"
   | "userRedemption"
@@ -100,7 +106,10 @@ export type BadgeKind =
   | "troveClose"
   | "troveAdjust"
   | "troveInterestRateChange"
-  | "troveBatch";
+  | "troveBatch"
+  | "zombie"
+  | "revived"
+  | "interest";
 
 export const BADGE_STYLES: Record<BadgeKind, string> = {
   liquidation: "bg-amber-500/10 text-amber-300 border-amber-700/40",
@@ -116,6 +125,9 @@ export const BADGE_STYLES: Record<BadgeKind, string> = {
   troveInterestRateChange:
     "bg-violet-500/10 text-violet-300 border-violet-700/40",
   troveBatch: "bg-zinc-500/10 text-zinc-300 border-zinc-600/40",
+  zombie: "bg-yellow-500/10 text-yellow-300 border-yellow-700/40",
+  revived: "bg-green-500/10 text-green-300 border-green-700/40",
+  interest: "bg-purple-500/10 text-purple-300 border-purple-700/40",
 };
 
 export const BADGE_LABELS: Record<BadgeKind, string> = {
@@ -131,6 +143,9 @@ export const BADGE_LABELS: Record<BadgeKind, string> = {
   troveAdjust: "Adjust Trove",
   troveInterestRateChange: "Change Interest Rate",
   troveBatch: "Batch Membership",
+  zombie: "Zombie",
+  revived: "Revived",
+  interest: "Interest",
 };
 
 // Mirrors `OP` in indexer-envio/src/handlers/liquity/operations.ts. Kept
@@ -175,26 +190,31 @@ export function badgeKindFor(row: CdpTransactionRow): BadgeKind {
   }
 }
 
+// `Record<BadgeKind, number>` keeps this exhaustive at compile time — a new
+// BadgeKind member fails the build until it gets a rank, exactly like the
+// switch this replaced. The ledger-only kinds (`zombie`/`revived`/
+// `interest`) are unreachable through `badgeKindFor` today; a zombie flip
+// is attention-adjacent to a close if those kinds ever enter a feed.
+const TRANSACTION_ATTENTION_RANK: Record<BadgeKind, number> = {
+  liquidation: 3,
+  rebalanceRedemption: 2,
+  spRebalance: 2,
+  userRedemption: 1,
+  troveClose: 1,
+  zombie: 1,
+  spDeposit: 0,
+  spWithdraw: 0,
+  spClaim: 0,
+  troveOpen: 0,
+  troveAdjust: 0,
+  troveInterestRateChange: 0,
+  troveBatch: 0,
+  revived: 0,
+  interest: 0,
+};
+
 export function transactionAttentionRank(row: CdpTransactionRow): number {
-  const kind = badgeKindFor(row);
-  switch (kind) {
-    case "liquidation":
-      return 3;
-    case "rebalanceRedemption":
-    case "spRebalance":
-      return 2;
-    case "userRedemption":
-    case "troveClose":
-      return 1;
-    case "spDeposit":
-    case "spWithdraw":
-    case "spClaim":
-    case "troveOpen":
-    case "troveAdjust":
-    case "troveInterestRateChange":
-    case "troveBatch":
-      return 0;
-  }
+  return TRANSACTION_ATTENTION_RANK[badgeKindFor(row)];
 }
 
 export function summarizeCdpActivity(

@@ -48,6 +48,9 @@ export function icrTextClass(icrBps: number, mcrBps: number): string {
   return "text-emerald-300";
 }
 
+/** The dashboard's only Mento-app manage link: the trove tables' id cells
+ *  link internally to this history page (entry-points slice, #2085), and
+ *  the manage action lives here on the header as "Manage in app ↗". */
 export function troveManageUrl(troveId: string, tokenSymbol: string): string {
   return `${MENTO_APP_BORROW_MANAGE_BASE_URL}/${encodeURIComponent(
     troveId,

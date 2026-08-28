@@ -54,13 +54,12 @@ vi.mock("next/link", () => ({
   default: ({
     href,
     children,
-    className,
+    ...rest
   }: {
     href: string;
     children: React.ReactNode;
-    className?: string;
-  }) => (
-    <a href={href} className={className}>
+  } & Record<string, unknown>) => (
+    <a href={href} {...rest}>
       {children}
     </a>
   ),
@@ -812,7 +811,7 @@ describe("CdpDetailClient", () => {
     );
   });
 
-  it("links trove IDs to the Mento app without a hash prefix", () => {
+  it("links trove IDs to the market-scoped trove history page", () => {
     const troveId =
       "0x5f23a9b8f4c249163a0d7969d2fc23af8de9e84d3f63b44136bfd18ea3e73ac4";
     mockUseGQL.mockImplementation((query: string | null) => {
@@ -841,17 +840,23 @@ describe("CdpDetailClient", () => {
 
     render(handle!);
 
+    // Entry-points slice: the trove-id cell links internally to the trove
+    // history page (market-scoped — the raw troveId collides across
+    // markets); the Mento-app manage link moved to that page's header.
     const link = handle!.container.querySelector<HTMLAnchorElement>(
-      `a[href="https://app.mento.org/borrow/manage/${troveId}?token=GBPm"]`,
+      `a[href="/cdps/gbpm/troves/${troveId}"]`,
     );
     expect(link).not.toBeNull();
     // Display text is middle-ellipsized to avoid blowing out the column width;
-    // the full id stays in the href + title (and never carries a `#` prefix).
+    // the full id stays in the title (and never carries a `#` prefix).
     expect(link?.textContent).toBe("0x5f23…3ac4");
     expect(link?.getAttribute("title")).toBe(troveId);
-    expect(link?.getAttribute("href")).not.toContain("#");
-    expect(link?.target).toBe("_blank");
-    expect(link?.rel).toBe("noopener noreferrer");
+    expect(link?.getAttribute("aria-label")).toBe(
+      `View history for trove ${troveId}`,
+    );
+    expect(
+      handle!.container.querySelector('a[href^="https://app.mento.org"]'),
+    ).toBeNull();
   });
 
   it("explains indexed ICR freshness and timestamps each displayed value", () => {

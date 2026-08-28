@@ -47,6 +47,7 @@ vi.mock("@/components/network-provider", () => ({
 }));
 
 vi.mock("@/lib/graphql", () => ({
+  HASURA_TIMEOUT_MS: 5000,
   useGQL: (...args: unknown[]) => mockUseGQL(...args),
 }));
 
@@ -435,7 +436,7 @@ describe("CdpsPageClient", () => {
     );
   });
 
-  it("loading skeleton mirrors the loaded page's section structure (header + 3 cards + digest + table skeleton)", () => {
+  it("loading skeleton mirrors the loaded page's section structure (header + owner search + 3 cards + digest + table skeleton)", () => {
     mockUseGQL.mockImplementation((query: string | null) =>
       query === CDP_MARKETS
         ? { data: undefined, error: null, isLoading: true }
@@ -450,19 +451,32 @@ describe("CdpsPageClient", () => {
     );
     expect(liveRegions).toHaveLength(1);
 
-    // Real header stays mounted (no data dependency) so it never moves
-    // between the loading and loaded phases.
+    // Real header and owner-search input stay mounted (no market-data
+    // dependency) so they never move between the loading and loaded phases.
     expect(handle!.container.querySelector("header h1")?.textContent).toBe(
       "CDPs",
     );
+    expect(
+      handle!.container.querySelector(
+        'input[aria-label="Find troves by owner address"]',
+      ),
+    ).not.toBeNull();
 
-    // Top-level sections, in order: header, market-card grid, activity
-    // digest, transactions section — same 4 sections the loaded page renders.
-    const sections = Array.from(
+    // Top-level, in order: header, owner search, then the live region
+    // wrapping the three skeleton sections (market-card grid, activity
+    // digest, transactions). The live region excludes the header and the
+    // interactive owner search so typing there is never announced as a
+    // loading update; `space-y-6` on both levels keeps the visual rhythm
+    // identical to the loaded page's flat five-section layout.
+    const topLevel = Array.from(
       handle!.container.firstElementChild!.children,
     ) as HTMLElement[];
-    expect(sections).toHaveLength(4);
-    const [, grid, digest, transactionsSection] = sections;
+    expect(topLevel).toHaveLength(3);
+    const liveRegion = topLevel[2]!;
+    expect(liveRegion.getAttribute("role")).toBe("status");
+    const sections = Array.from(liveRegion.children) as HTMLElement[];
+    expect(sections).toHaveLength(3);
+    const [grid, digest, transactionsSection] = sections;
 
     // Market-card grid: same 3-column shape as the loaded grid, 3 cards.
     expect(grid!.className).toContain("grid-cols-1");
@@ -502,8 +516,13 @@ describe("CdpsPageClient", () => {
         : { data: undefined, error: null, isLoading: false },
     );
     render(handle!, <CdpsPageClient />);
+    // Loading phase: header + owner search + a live region wrapping the
+    // three skeleton sections. Flatten the live region so the count
+    // compares section-for-section with the loaded page's flat layout.
+    const loadingRoot = handle!.container.firstElementChild!;
+    const loadingLiveRegion = loadingRoot.children[2] as HTMLElement;
     const loadingSectionCount =
-      handle!.container.firstElementChild!.children.length;
+      loadingRoot.children.length - 1 + loadingLiveRegion.children.length;
 
     mockUseGQL.mockImplementation((query: string | null) => {
       if (query === CDP_MARKETS) {
@@ -528,9 +547,41 @@ describe("CdpsPageClient", () => {
     const loadedSectionCount =
       handle!.container.firstElementChild!.children.length;
 
-    // header, market-card grid, activity digest, transactions section
-    expect(loadingSectionCount).toBe(4);
-    expect(loadedSectionCount).toBe(4);
+    // header, owner search, market-card grid, activity digest,
+    // transactions section
+    expect(loadingSectionCount).toBe(5);
+    expect(loadedSectionCount).toBe(5);
+  });
+
+  it("keeps the owner-search input node and its focus across the loading→loaded swap", () => {
+    mockUseGQL.mockImplementation((query: string | null) =>
+      query === CDP_MARKETS
+        ? { data: undefined, error: null, isLoading: true }
+        : { data: undefined, error: null, isLoading: false },
+    );
+    render(handle!, <CdpsPageClient />);
+    const input = handle!.container.querySelector<HTMLInputElement>(
+      'input[aria-label="Find troves by owner address"]',
+    );
+    expect(input).not.toBeNull();
+    act(() => input!.focus());
+    expect(document.activeElement).toBe(input);
+
+    mockUseGQL.mockImplementation((query: string | null) =>
+      query === CDP_MARKETS
+        ? { data: marketData(), error: null, isLoading: false }
+        : { data: undefined, error: null, isLoading: false },
+    );
+    render(handle!, <CdpsPageClient />);
+
+    // Same DOM node, still focused: a user typing an address mid-load never
+    // loses the caret when the markets resolve.
+    expect(
+      handle!.container.querySelector(
+        'input[aria-label="Find troves by owner address"]',
+      ),
+    ).toBe(input);
+    expect(document.activeElement).toBe(input);
   });
 
   it("renders market cards with health, derived open troves, and transactions", () => {

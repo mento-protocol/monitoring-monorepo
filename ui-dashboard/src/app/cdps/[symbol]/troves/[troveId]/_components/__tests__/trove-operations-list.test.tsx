@@ -73,10 +73,11 @@ describe("TroveOperationsList", () => {
     );
   });
 
-  it("does not reference the lifetime totals card when it hasn't rendered (the default)", () => {
-    // TroveLifetimeTotals returns null for an untouched active trove (no
-    // redemption/liquidation history) — the normal case. Pointing to "the
-    // lifetime totals above" when nothing is there misdirects the reader.
+  it("does not reference the impact panel's totals when the trove has none (the default)", () => {
+    // The redemption-impact panel shows no lifetime totals for an untouched
+    // active trove (no redemption/liquidation history) — the normal case.
+    // Pointing to totals "above" when nothing is there misdirects the
+    // reader.
     handle = render(
       <TroveOperationsList
         rows={[]}
@@ -89,10 +90,10 @@ describe("TroveOperationsList", () => {
     );
     const text = handle.container.textContent ?? "";
     expect(text).toContain("Per-redemption detail pending indexer rollout");
-    expect(text).not.toContain("lifetime totals above");
+    expect(text).not.toContain("redemption impact totals above");
   });
 
-  it("references the lifetime totals card when it did render", () => {
+  it("references the impact panel's totals when the trove has them", () => {
     handle = render(
       <TroveOperationsList
         rows={[]}
@@ -104,7 +105,9 @@ describe("TroveOperationsList", () => {
         debtSymbol="GBPm"
       />,
     );
-    expect(handle.container.textContent).toContain("lifetime totals above");
+    expect(handle.container.textContent).toContain(
+      "redemption impact totals above",
+    );
   });
 
   it("shows an empty state with no rows", () => {

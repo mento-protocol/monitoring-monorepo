@@ -6117,6 +6117,11 @@ export type CdpSchemaFieldsQuery = {
       readonly name: string;
     }> | null;
   } | null;
+  readonly TroveLedgerEventType: {
+    readonly fields: ReadonlyArray<{
+      readonly name: string;
+    }> | null;
+  } | null;
 };
 
 // queries/liquity.CDP_MARKETS
@@ -7055,6 +7060,88 @@ export type CdpTroveOperationsQuery = {
     readonly debtIncreaseFromUpfrontFee: string;
     readonly timestamp: string;
     readonly blockNumber: string;
+    readonly txHash: string;
+  }>;
+};
+
+// queries/liquity.CDP_TROVES_BY_OWNER
+export type CdpTrovesByOwnerQueryVariables = {
+  readonly chainId: number;
+  readonly address: string;
+  readonly limit: number;
+};
+export type CdpTrovesByOwnerQuery = {
+  readonly Trove: ReadonlyArray<{
+    readonly id: string;
+    readonly collateralId: string;
+    readonly troveId: string;
+    readonly status: string;
+    readonly debt: string;
+    readonly coll: string;
+    readonly lastUpdatedAt: string;
+  }>;
+};
+
+// queries/liquity.CDP_TROVE_QUEUE
+export type CdpTroveQueueQueryVariables = {
+  readonly collateralId: string;
+};
+export type CdpTroveQueueQuery = {
+  readonly LiquityInstance: ReadonlyArray<{
+    readonly id: string;
+    readonly isShutDown: boolean;
+    readonly shutDownAt: string | null;
+  }>;
+  readonly OpenTrove: ReadonlyArray<{
+    readonly id: string;
+    readonly status: string;
+    readonly debt: string;
+    readonly interestRate: string;
+    readonly interestBatchId: string | null;
+  }>;
+  readonly InterestBatch: ReadonlyArray<{
+    readonly id: string;
+    readonly annualInterestRate: string;
+  }>;
+};
+
+// queries/liquity.CDP_TROVE_LEDGER
+export type CdpTroveLedgerQueryVariables = {
+  readonly troveEntityId: string;
+  readonly limit: number;
+};
+export type CdpTroveLedgerQuery = {
+  readonly LedgerWatermark: ReadonlyArray<{
+    readonly lastLedgerBlock: string;
+    readonly lastLedgerLogIndex: number;
+    readonly redemptionCount: number;
+    readonly redeemedDebt: string;
+    readonly redeemedColl: string;
+    readonly redemptionFeePaidCum: string;
+  }>;
+  readonly TroveLedgerEvent: ReadonlyArray<{
+    readonly id: string;
+    readonly operation: number;
+    readonly collChange: string;
+    readonly debtChange: string;
+    readonly debtIncreaseFromUpfrontFee: string;
+    readonly debtIncreaseFromRedist: string;
+    readonly collIncreaseFromRedist: string;
+    readonly annualInterestRate: string;
+    readonly debtBefore: string | null;
+    readonly debtAfter: string | null;
+    readonly collBefore: string;
+    readonly collAfter: string;
+    readonly statusBefore: string;
+    readonly statusAfter: string;
+    readonly redemptionFeeCredited: string | null;
+    readonly isRebalance: boolean | null;
+    readonly redemptionPrice: string | null;
+    readonly priceAtEvent: string | null;
+    readonly icrAfterBps: number | null;
+    readonly timestamp: string;
+    readonly blockNumber: string;
+    readonly logIndex: number;
     readonly txHash: string;
   }>;
 };
