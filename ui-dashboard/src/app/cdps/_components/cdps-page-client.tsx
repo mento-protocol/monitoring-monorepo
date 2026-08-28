@@ -315,23 +315,29 @@ function CdpsHeader() {
 // region — nested skeleton pieces are `presentational` so they don't
 // announce independently.
 function CdpsPageSkeleton({ chainId }: { chainId: number }) {
+  // The header and the interactive owner search stay OUTSIDE the live
+  // region: announcing keystroke-driven search updates as "Loading CDP
+  // markets" changes would be wrong, and the search owns its own status
+  // semantics. Only the actual skeleton content is announced.
   return (
-    <div
-      className="space-y-6"
-      role="status"
-      aria-live="polite"
-      aria-label="Loading CDP markets"
-    >
+    <div className="space-y-6">
       <CdpsHeader />
       <CdpOwnerSearchSection collaterals={undefined} chainId={chainId} />
-      <CdpMarketCardGridSkeleton />
-      <CdpActivityDigestSkeleton />
-      <section>
-        <h2 className="text-lg font-semibold text-white mb-3">
-          Recent CDP Transactions
-        </h2>
-        <CdpTransactionsBodySkeleton presentational />
-      </section>
+      <div
+        className="space-y-6"
+        role="status"
+        aria-live="polite"
+        aria-label="Loading CDP markets"
+      >
+        <CdpMarketCardGridSkeleton />
+        <CdpActivityDigestSkeleton />
+        <section>
+          <h2 className="text-lg font-semibold text-white mb-3">
+            Recent CDP Transactions
+          </h2>
+          <CdpTransactionsBodySkeleton presentational />
+        </section>
+      </div>
     </div>
   );
 }

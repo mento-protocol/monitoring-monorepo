@@ -301,8 +301,9 @@ function buildTroveChartModel(
       showIcr,
       debtNotice: debt == null,
       debtSymbol,
-      tickformat:
-        range === "1d" ? "%H:%M" : dateTickFormatForSeries(series.coll),
+      // Tick density must match the PLOTTED window, not the full history —
+      // a years-old trove viewed at 7d would otherwise get month/year ticks.
+      tickformat: range === "1d" ? "%H:%M" : dateTickFormatForSeries(coll),
       shapes: markerShapes(markersInWindow(series.markers, cutoff)),
     }),
   };

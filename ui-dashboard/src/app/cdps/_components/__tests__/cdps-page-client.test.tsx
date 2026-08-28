@@ -462,14 +462,21 @@ describe("CdpsPageClient", () => {
       ),
     ).not.toBeNull();
 
-    // Top-level sections, in order: header, owner search, market-card grid,
-    // activity digest, transactions section — same 5 sections the loaded
-    // page renders.
-    const sections = Array.from(
+    // Top-level, in order: header, owner search, then the live region
+    // wrapping the three skeleton sections (market-card grid, activity
+    // digest, transactions). The live region excludes the header and the
+    // interactive owner search so typing there is never announced as a
+    // loading update; `space-y-6` on both levels keeps the visual rhythm
+    // identical to the loaded page's flat five-section layout.
+    const topLevel = Array.from(
       handle!.container.firstElementChild!.children,
     ) as HTMLElement[];
-    expect(sections).toHaveLength(5);
-    const [, , grid, digest, transactionsSection] = sections;
+    expect(topLevel).toHaveLength(3);
+    const liveRegion = topLevel[2]!;
+    expect(liveRegion.getAttribute("role")).toBe("status");
+    const sections = Array.from(liveRegion.children) as HTMLElement[];
+    expect(sections).toHaveLength(3);
+    const [grid, digest, transactionsSection] = sections;
 
     // Market-card grid: same 3-column shape as the loaded grid, 3 cards.
     expect(grid!.className).toContain("grid-cols-1");
@@ -509,8 +516,13 @@ describe("CdpsPageClient", () => {
         : { data: undefined, error: null, isLoading: false },
     );
     render(handle!, <CdpsPageClient />);
+    // Loading phase: header + owner search + a live region wrapping the
+    // three skeleton sections. Flatten the live region so the count
+    // compares section-for-section with the loaded page's flat layout.
+    const loadingRoot = handle!.container.firstElementChild!;
+    const loadingLiveRegion = loadingRoot.children[2] as HTMLElement;
     const loadingSectionCount =
-      handle!.container.firstElementChild!.children.length;
+      loadingRoot.children.length - 1 + loadingLiveRegion.children.length;
 
     mockUseGQL.mockImplementation((query: string | null) => {
       if (query === CDP_MARKETS) {

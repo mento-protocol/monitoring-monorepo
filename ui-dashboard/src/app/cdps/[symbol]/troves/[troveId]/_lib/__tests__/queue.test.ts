@@ -5,9 +5,10 @@ import {
   maxTroveQueueRungDebt,
   troveQueueBarWidthPercent,
   type CdpTroveQueueResponse,
-  type CdpTroveQueueTroveRow,
   type TroveQueueReadyModel,
 } from "../queue";
+
+type CdpTroveQueueTroveRow = CdpTroveQueueResponse["OpenTrove"][number];
 
 const D18 = BigInt(10) ** BigInt(18);
 

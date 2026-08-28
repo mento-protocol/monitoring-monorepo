@@ -12,7 +12,7 @@ import { CDP_TROVES_DETAIL_LIMIT } from "../../../../_lib/types";
  *  Includes zombies — the fetch mirrors the market table's open-trove branch
  *  so the cap suppression triggers in exactly the same place; the zombie
  *  exclusion happens in {@link buildTroveQueueModel}. */
-export type CdpTroveQueueTroveRow = {
+type CdpTroveQueueTroveRow = {
   id: string;
   status: string;
   debt: string;
@@ -20,13 +20,13 @@ export type CdpTroveQueueTroveRow = {
   interestBatchId: string | null;
 };
 
-export type CdpTroveQueueInstanceRow = {
+type CdpTroveQueueInstanceRow = {
   id: string;
   isShutDown: boolean;
   shutDownAt: string | null;
 };
 
-export type CdpTroveQueueBatchRow = {
+type CdpTroveQueueBatchRow = {
   id: string;
   annualInterestRate: string;
 };
@@ -82,7 +82,7 @@ export type TroveQueueRung = {
   containsThisTrove: boolean;
 };
 
-export type TroveQueuePosition = {
+type TroveQueuePosition = {
   position: number;
   /** Total number of rate levels — the "#N of M" denominator. */
   rateLevels: number;
