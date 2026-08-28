@@ -309,10 +309,16 @@ For a change to dynamic route metadata or an Open Graph image route, verify the
 final deployed origin in the browser. Do not use a local render as production
 proof.
 
-- Read the exact Open Graph title, description, and image values and the exact
-  Twitter card type, title, description, and image values from the raw initial
-  HTML response of an isolated, cookie-free request. Confirm that each value
-  matches the route and its public-data policy.
+- Read the exact document title, description, and canonical URL; Open Graph
+  type, URL, title, description, and image values; and Twitter card type,
+  title, description, and image values from the raw initial HTML response of
+  an isolated, cookie-free request. Confirm that each value matches the route
+  and its public-data policy.
+- Inspect the deployed document's `Cache-Control` and `Age` headers. Confirm
+  that they match the route's declared freshness or revalidation policy. For
+  metadata that can become private, require a policy that prevents stale
+  public data from remaining in a shared cache, or perform an equivalent
+  public-to-private revocation check.
 - Compare those values with the live DOM when client-side hydration is
   relevant. The hydrated DOM alone does not prove what a crawler receives.
 - Fetch the exact image URL from the deployed document with the browser cache
