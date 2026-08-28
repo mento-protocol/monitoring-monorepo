@@ -10,7 +10,7 @@
   "prompt": "scripts/review/prompts/judge-match.md"
  },
  "limits": {
-  "agreement_amber_below": 38
+  "agreement_amber_below": 35
  },
  "counts": {
   "total": 40,

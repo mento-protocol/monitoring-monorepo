@@ -54,9 +54,10 @@ const LEAK_NOTE_PATTERN = /leak[ _]suspected/i;
 
 /**
  * Whether a row's judge calibration is good enough for its numbers to mean
- * anything. Every recorded bit comes from the judge, so a judge that disagrees
- * with the frozen pairs more than twice in forty produces a matrix nothing may
- * rank on. The runbook: agreement under 35/40 marks the run AMBER and excludes
+ * anything. Every recorded bit comes from the judge, so a judge that falls
+ * more than two pairs below its measured 37/40 blind baseline produces a
+ * matrix nothing may rank on. The runbook: agreement under 35/40 marks the
+ * run AMBER and excludes
  * it from baseline comparison.
  */
 export function judgeCalibrationPasses(row) {
