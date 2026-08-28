@@ -3,7 +3,7 @@ title: Review Skill Evaluation
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-25
+last_verified: 2026-08-28
 doc_type: runbook
 scope: ci/process
 review_interval_days: 90
@@ -107,6 +107,15 @@ resolve at all, so the guard can never turn itself into a silent no-op.
 Required CI, the advisory freshness workflow, and the local quality gate add
 `--revalidate-appended`.
 It recomputes every row the branch adds from the detail the same branch commits.
+This check verifies consistency, not authenticity. It rejects missing evidence
+and mismatches between the row, plan, scored results, and calibration. It does
+not prove that a model produced the committed results. A pull request author
+can create a mutually consistent evidence set. The author can also change the
+branch-run validator in the same pull request. Git makes both changes visible
+for review, but the check does not resist a hostile author. PR review owns this
+boundary. Hostile-author resistance requires a protected validator and
+execution evidence that the pull request author cannot change.
+
 Schema, id coverage and
 append-only history all stay satisfied when a ledger PR edits its own row's
 verdict, counters or `per_defect` bits after the local `--validate --append`,
@@ -117,12 +126,15 @@ of passing. It calls no model — the recompute reads the committed
 model credentials. Every scored full or canary row must commit `plan.json`, its
 `result-*.json` files, and `calibration.json`. A complete row must carry one
 result file for every planned cell. A partial row must carry evidence for every
-condition it records. `calibration.json` records the exact cell IDs that existed
-when scoring began. CI requires that list to match the committed result files
-and the row status. Deleting a completed result cannot turn a complete run into
-a partial run. CI also checks each condition's model, effort, and finder against
+condition it records. `calibration.json` records the exact cell IDs that the
+scorer saw. CI requires that list to match the committed result files and the
+row status. Deleting only a completed result cannot turn a complete run into a
+partial run. A partial row records an attempted run. It cannot rank, become a
+baseline, or refresh the complete-run or full-run freshness clocks. It refreshes
+only the any-run clock, which records that the harness ran. CI also checks each
+condition's model, effort, and finder against
 the planned cells. It regenerates the exact cell list from the frozen contract
-and row kind. Editing `plan.json` cannot remove a required cell. A dirty
+and row kind. Changing only `plan.json` cannot remove a required cell. A dirty
 `--skill-ref`
 candidate row can name an installed baseline that is not committed on the same
 branch. CI recomputes that candidate against its own evidence and counts it in
@@ -181,11 +193,17 @@ cached — a finder that exits non-zero fails its cell even when it wrote a
 partial report, because a truncated review cached is a permanent zero-recall
 score. A cached cell is reused only when its stored
 fingerprint — skill digest, kind, contract digest, the two CLI versions, the
-finder argv digest, the orchestrator digest, and the installed-or-candidate
-selection — matches the current run. The scorer preserves that fingerprint in
-every result and in `calibration.json`, and CI checks it against the row and
-plan. Editing both metadata copies cannot relabel a candidate as an installed
-run. The run directory carries the kind and the skill digest in its name, so an
+finder argv digest and the orchestrator digest — matches the current run. The
+one cache-compatibility rule accepts the recorded pre-split orchestrator digest
+only when the current digest is the exact reviewed wrapper-and-helper split.
+The test reconstructs the pre-split bytes from the extracted payloads. An edit
+to the wrapper or either helper changes the current digest and disables this
+rule. The
+scorer preserves that fingerprint and a separate installed-or-candidate
+treatment identity in every result and in `calibration.json`. Local validation
+and CI check both records against the plan. Changing only the row and plan
+inputs cannot relabel a candidate as an installed run. The run directory
+carries the kind and the skill digest in its name, so an
 aborted run followed by a skill edit re-runs instead of scoring the old skill
 under the new digest. A run that ends before it scores keeps its cells on disk
 for that retry — publishing strips them from the commit with an exclude
@@ -365,25 +383,28 @@ regression visible would never fire again. The key binds what this repository
 controls; a runtime change large enough to move the score shows up as a flip
 against the anchor with the version drift named beside it.
 
-`scorer_digest` covers every file that can move a recorded number or a recorded
-verdict — the CLI scoring orchestration, the scorer, the per-condition fold,
-the recompute, timestamp validation, and the verdict rules — not the extraction
-alone. It also covers the two fixture helpers:
+`review-eval-score.mjs` owns the `SCORING_MODULES` inventory and computes
+`scorer_digest`. The digest covers every file that can move a recorded number
+or verdict. This includes the CLI, the run facade, plan construction, scoring
+process execution, cell identity and leak checks, condition folding, row
+assembly, the recompute, timestamp validation, and verdict rules. It also
+covers the two fixture helpers:
 `review-eval-fixtures.mjs` picks the matrix, the truth file and the recall
 denominator, and `build-fixture.sh` materializes the checkout the contestant
 reviews and carries the checks that verify it, so an edit to either moves what
-was reviewed or what it was scored against. `orchestrator_digest` is `run-eval.sh`
-itself, which fixes the contestant's allowed tools, its turn limit, how the
-skill is staged into the fixture, how far the finder report is truncated and
-what environment a cell runs in: it shapes the transcript every number is
-derived from as directly as a prompt does. An edit to any of them re-anchors the
-series, which is the conservative direction: a refused comparison is visible,
-a silently paired one is not.
+was reviewed or what it was scored against. `orchestrator_digest` is a
+length-framed digest over `run-eval.sh`, `run-eval-lifecycle.sh`, and
+`run-eval-runtime.sh`. Together they fix the contestant's allowed tools, turn
+limit, skill staging, finder-report truncation, and cell environment. They
+shape the transcript every number is derived from as directly as a prompt does.
+An edit to any of them re-anchors the series, which is the conservative
+direction: a refused comparison is visible, a silently paired one is not.
 
 `--score` rechecks the bytes the contract pins by `sha256` — both prompts, every
 truth file, every frozen finder report — before it calls the judge, and refuses
-the pass when one of them moved. It snapshots every parsed truth file before
-the first calibration call, so a later checkout edit cannot change one cell's
+the pass when one of them moved. It reads each truth file once, checks that
+exact buffer against the pinned digest, and parses the same buffer before the
+first calibration call. A later checkout edit cannot change one cell's
 scoring. `--check-fixtures` covers the inputs once, before the matrix starts;
 under `--skill-ref` the spec worktree is the live checkout for the two hours in
 between, and the contract digest alone would not notice.
@@ -412,7 +433,7 @@ older one is refused; pass `--contract` with the archived contract to read it.
 | reviewed model    | isolated by the `control` condition; model id and CLI version recorded                                       |
 | skill text        | `skill_digest` over every file in the skill directory, symlinks refused — this is the treatment              |
 | finder command    | `argv` pinned in the contract; `finder_argv_digest` records what a cell spawned                              |
-| orchestrator      | `orchestrator_digest` over `run-eval.sh`: in the key and in every cell fingerprint                           |
+| orchestrator      | length-framed digest over the wrapper and two helpers: in the key and every cell fingerprint                 |
 | machine and shell | host, CLI versions, `--setting-sources ""`, clean worktree of `origin/main`                                  |
 | CLI upgrade       | versions in every cell fingerprint; a pair across one is labelled in the verdict, not in the key             |
 
@@ -551,17 +572,31 @@ path must exist on `main` before the first run after the moving commit.
 
 ## Files
 
-| path                                             | what it is                                               |
-| ------------------------------------------------ | -------------------------------------------------------- |
-| `docs/evals/review-skill-fixtures.json`          | the contract: PRs, pinned SHAs, scorable ids, thresholds |
-| `docs/evals/review-skill-truth/`                 | frozen answer keys, one per PR                           |
-| `docs/evals/review-skill-finder-reports/`        | frozen codex reports for the `replay` condition          |
-| `docs/evals/review-skill-judge-calibration.json` | 40 frozen judge pairs                                    |
-| `docs/evals/review-skill-result.schema.json`     | the schema for one ledger row                            |
-| `docs/evals/review-skill-ledger.jsonl`           | append-only score ledger, one row per run                |
-| `docs/evals/review-skill-runs/`                  | per-run scored detail                                    |
-| `scripts/review/review-eval.mjs`                 | the CLI                                                  |
-| `scripts/review/run-eval.sh`                     | the orchestrator that spends model quota                 |
-| `scripts/review/build-fixture.sh`                | leak-proof fixture materialization                       |
-| `scripts/review/launchd/`                        | the monthly scheduler                                    |
-| `.github/workflows/review-eval-freshness.yml`    | the LLM-free contract and freshness guard                |
+| path                                                        | what it is                                               |
+| ----------------------------------------------------------- | -------------------------------------------------------- |
+| `docs/evals/review-skill-fixtures.json`                     | the contract: PRs, pinned SHAs, scorable ids, thresholds |
+| `docs/evals/review-skill-truth/`                            | frozen answer keys, one per PR                           |
+| `docs/evals/review-skill-finder-reports/`                   | frozen codex reports for the `replay` condition          |
+| `docs/evals/review-skill-judge-calibration.json`            | 40 frozen judge pairs                                    |
+| `docs/evals/review-skill-result.schema.json`                | the schema for one ledger row                            |
+| `docs/evals/review-skill-ledger.jsonl`                      | append-only score ledger, one row per run                |
+| `docs/evals/review-skill-runs/`                             | per-run scored detail                                    |
+| `scripts/review/review-eval.mjs`                            | the CLI                                                  |
+| `scripts/review/review-eval-run.mjs`                        | the stable run-helper import facade                      |
+| `scripts/review/review-eval-run-plan.mjs`                   | plan, input, matrix, and comparability-key construction  |
+| `scripts/review/review-eval-run-execution.mjs`              | judge execution, environment scrub, and fixture reset    |
+| `scripts/review/review-eval-run-cell.mjs`                   | cell identity, cache reuse, and leak signals             |
+| `scripts/review/review-eval-run-score.mjs`                  | cell scoring, condition folds, rows, and freshness plans |
+| `scripts/review/review-eval-score.mjs`                      | scorer logic and scoring-module digest ownership         |
+| `scripts/review/review-eval-plan-evidence.mjs`              | plan, result, and calibration evidence checks            |
+| `scripts/review/review-eval-run-evidence.mjs`               | matrix completeness and evidence reuse checks            |
+| `scripts/review/review-eval-appended.mjs`                   | appended-row evidence revalidation                       |
+| `scripts/review/review-eval-split-equivalence-fixtures.mjs` | generated Node and shell equivalence harnesses           |
+| `scripts/review/testdata/review-eval-split-equivalence/`    | frozen split inputs and observable-behavior snapshot     |
+| `scripts/review/review-eval-split-equivalence.test.mjs`     | frozen pre-split entry-point equivalence                 |
+| `scripts/review/run-eval.sh`                                | the orchestrator that spends model quota                 |
+| `scripts/review/run-eval-lifecycle.sh`                      | locks, deadlines, failure traces, and publication        |
+| `scripts/review/run-eval-runtime.sh`                        | skill staging, fixtures, cache, and cell runtime         |
+| `scripts/review/build-fixture.sh`                           | leak-proof fixture materialization                       |
+| `scripts/review/launchd/`                                   | the monthly scheduler                                    |
+| `.github/workflows/review-eval-freshness.yml`               | the LLM-free contract and freshness guard                |

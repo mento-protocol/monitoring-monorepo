@@ -62,8 +62,10 @@ const promptDir = fileURLToPath(new URL("./prompts", import.meta.url));
 const scriptPath = fileURLToPath(import.meta.url);
 // Every file that can change a recorded number or a recorded verdict. The
 // extraction and the matcher live here, CLI scoring orchestration lives in
-// `review-eval.mjs`, the per-condition fold and the leak signal live in
-// `review-eval-run.mjs`, the recompute lives in
+// `review-eval.mjs`, and `review-eval-run.mjs` preserves the public import
+// surface. Its focused modules own plan construction, scoring-process
+// execution, cell identity and leak checks, condition folding, row assembly,
+// and freshness planning. The recompute lives in
 // `review-eval-result-shape.mjs`, timestamp validation lives in
 // `review-eval-ledger.mjs`, and the verdict rules live in
 // `review-eval-report.mjs`.
@@ -82,6 +84,10 @@ const scriptPath = fileURLToPath(import.meta.url);
 export const SCORING_MODULES = [
   "review-eval.mjs",
   "review-eval-run.mjs",
+  "review-eval-run-plan.mjs",
+  "review-eval-run-execution.mjs",
+  "review-eval-run-cell.mjs",
+  "review-eval-run-score.mjs",
   "review-eval-result-shape.mjs",
   "review-eval-ledger.mjs",
   "review-eval-report.mjs",

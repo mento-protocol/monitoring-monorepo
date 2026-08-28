@@ -4,8 +4,9 @@
 // row a candidate may be paired against, and recompute a committed row from its
 // own evidence.
 //
-// Nothing here calls a model. `revalidateRow` is what makes a committed row
-// evidence rather than a claim: a self-reported score is never trusted.
+// Nothing here calls a model. `revalidateRow` checks that a committed row
+// agrees with its committed detail. It does not authenticate the execution
+// that produced those files.
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
@@ -568,8 +569,9 @@ function checkVsBaseline({ row, baseline, baselineIsExplicit, problems }) {
 
 /**
  * Recompute a row's numbers from its own per-defect bits and, when the run
- * detail is on disk, from the per-cell matched ids. A self-reported score is
- * never trusted; this is what makes a committed row evidence.
+ * detail is on disk, from the per-cell matched ids. A row number that disagrees
+ * with the committed detail is refused. This checks internal consistency. It
+ * does not authenticate the execution.
  *
  * The verdict is recomputed the same way, against the baseline the ledger
  * rows resolve to, because the verdict is the one field a human reads first.
