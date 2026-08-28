@@ -6,7 +6,13 @@
 // (`run-eval.sh`) invokes it.
 
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+} from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { parseArgs as parseNodeArgs } from "node:util";
@@ -841,6 +847,38 @@ function revalidateAppendedRows({ options, context, result, base }) {
   const calibrationSet = existsSync(calibrationFile)
     ? readJson(calibrationFile)
     : null;
+  const repoRoot = realpathSync(context.repoRoot);
+  const detailDirectoryIdentity = (detailDir, label) => {
+    const resolved = path.resolve(repoRoot, detailDir);
+    const insideRepo = (target) => {
+      const relative = path.relative(repoRoot, target);
+      return (
+        relative === "" ||
+        (relative !== ".." &&
+          !relative.startsWith(`..${path.sep}`) &&
+          !path.isAbsolute(relative))
+      );
+    };
+    if (!insideRepo(resolved)) {
+      problems.push(`${label} names detail_dir ${detailDir} outside the repo`);
+      return null;
+    }
+    const canonical = existsSync(resolved) ? realpathSync(resolved) : resolved;
+    if (!insideRepo(canonical)) {
+      problems.push(`${label} names detail_dir ${detailDir} outside the repo`);
+      return null;
+    }
+    return canonical;
+  };
+  const usedDetailDirs = new Set();
+  for (const row of base.rows ?? []) {
+    if (typeof row.detail_dir !== "string") continue;
+    const identity = detailDirectoryIdentity(
+      row.detail_dir,
+      `base row ${row.executed_at}`,
+    );
+    if (identity !== null) usedDetailDirs.add(identity);
+  }
   let unpaired = 0;
   for (const row of appended) {
     const label = `appended row ${row.executed_at}`;
@@ -848,7 +886,15 @@ function revalidateAppendedRows({ options, context, result, base }) {
       problems.push(`${label} carries no detail_dir to recompute from`);
       continue;
     }
-    const dir = path.resolve(context.repoRoot, row.detail_dir);
+    const dir = detailDirectoryIdentity(row.detail_dir, label);
+    if (dir === null) continue;
+    if (row.kind !== "bridge" && usedDetailDirs.has(dir)) {
+      problems.push(
+        `${label} reuses detail_dir ${row.detail_dir} from an earlier ledger row`,
+      );
+      continue;
+    }
+    usedDetailDirs.add(dir);
     if (!existsSync(dir)) {
       problems.push(
         `${label} names detail_dir ${row.detail_dir}, which this branch does not commit`,

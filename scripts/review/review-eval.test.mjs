@@ -4223,6 +4223,7 @@ test("one review eval at a time may hold the shared run state", async () => {
     });
     assert.equal(staleReclaimer.status, 0, staleReclaimer.stderr);
     assert.match(staleReclaimer.stdout, /reclaiming a run lock/);
+    assert.equal(existsSync(`${lock}.reclaim`), false);
 
     // Two contenders that observe the same dead reclaimer cannot both take
     // the next generation. Keep the winner alive long enough for the loser to
@@ -4253,6 +4254,8 @@ test("one review eval at a time may hold the shared run state", async () => {
       [0, 1],
       JSON.stringify(contenders),
     );
+    assert.equal(existsSync(`${lock}.reclaim`), false);
+    assert.equal(existsSync(`${cacheLock}.reclaim`), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -4773,6 +4776,73 @@ test("--check-ledger --revalidate-appended catches an edited appended row", () =
       JSON.parse(noBase.stdout).problems.join(" | "),
       /--revalidate-appended cannot tell which rows are new/,
     );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--revalidate-appended rejects reused and aliased detail directories", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+
+    const original = makeRow({
+      matchedIds: scorableIdsFor([1990]),
+      fullMatrix: true,
+    });
+    writeRowEvidence(root, original);
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(original)}\n`,
+    );
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "record original run");
+
+    const alias = path.join(
+      path.dirname(original.detail_dir),
+      "original-evidence-alias",
+    );
+    symlinkSync(path.basename(original.detail_dir), path.join(root, alias));
+    for (const detailDir of [
+      original.detail_dir,
+      path.join(
+        path.dirname(original.detail_dir),
+        "..",
+        "review-skill-runs",
+        path.basename(original.detail_dir),
+      ),
+      alias,
+    ]) {
+      const copied = {
+        ...structuredClone(original),
+        executed_at: "2026-10-08T10:41:07Z",
+        detail_dir: detailDir,
+      };
+      writeFileSync(
+        path.join(root, ledgerRelative),
+        `${JSON.stringify(original)}\n${JSON.stringify(copied)}\n`,
+      );
+      const checked = cli(
+        [
+          "--check-ledger",
+          "--revalidate-appended",
+          "--base-ref",
+          "HEAD",
+          "--json",
+        ],
+        { root },
+      );
+      assert.equal(checked.status, 1, detailDir);
+      assert.match(
+        JSON.parse(checked.stdout).problems.join(" | "),
+        /appended row .* reuses detail_dir .* from an earlier ledger row/,
+        detailDir,
+      );
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

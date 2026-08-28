@@ -251,8 +251,8 @@ acquire_one_lock() {
     # Reclaimers elect one owner through immutable, monotonically numbered
     # tickets. `ln` publishes the prepared pid file atomically. A killed owner
     # leaves its generation behind; the next contender creates the next one.
-    # No process deletes or replaces a shared ticket after inspecting its pid,
-    # so a live replacement cannot appear at the same path (the ABA race).
+    # Tickets stay immutable during the election. The winner removes the claim
+    # root only after it publishes the replacement lock owner.
     mkdir "$reclaim_root" 2>/dev/null || true
     [[ -d $reclaim_root ]] ||
       fail "could not create the stale-lock claim root at $reclaim_root"
@@ -293,21 +293,29 @@ acquire_one_lock() {
       confirmed="$(cat "$lock" 2>/dev/null || true)"
     fi
     [[ $confirmed =~ ^[0-9]+$ ]] ||
-      fail "cannot confirm the stale run lock owner at $lock; refusing to reclaim shared run state"
+      {
+        rm -f "$claim_file"
+        fail "cannot confirm the stale run lock owner at $lock; refusing to reclaim shared run state"
+      }
     if [[ $confirmed =~ ^[0-9]+$ ]] && kill -0 "$confirmed" 2>/dev/null; then
+      rm -f "$claim_file"
       fail "another review eval (pid $confirmed) holds $lock; a run rewrites the shared fixtures and appends to the shared ledger, so wait for it to finish"
     fi
     log "reclaiming a run lock left behind by pid ${holder:-unknown}"
     rm -rf "$lock"
-    owner_ticket="$(mktemp "$root/.run.lock.owner.XXXXXX")" ||
+    owner_ticket="$(mktemp "$root/.run.lock.owner.XXXXXX")" || {
+      rm -f "$claim_file"
       fail "could not prepare the run lock owner record under $root"
+    }
     printf '%s\n' "$$" >"$owner_ticket"
     if ! node -e \
       'require("node:fs").linkSync(process.argv[1], process.argv[2])' \
       "$owner_ticket" "$lock" 2>/dev/null; then
       rm -f "$owner_ticket"
+      rm -f "$claim_file"
       fail "another review eval took the run lock at $lock; retry after it finishes"
     fi
+    rm -rf "$reclaim_root"
   fi
   rm -f "$owner_ticket"
   LOCK_DIRS+=("$lock")
