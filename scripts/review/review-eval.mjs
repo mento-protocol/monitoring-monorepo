@@ -714,6 +714,43 @@ function runEvidenceProblems({ dir, row }) {
         const planConditions = new Set(
           plan.cells.map((cell) => cell.condition),
         );
+        const plannedResults = new Map(
+          plan.cells.map((cell) => [
+            `result-${cell.pr}-${cell.condition}-${cell.draw}.json`,
+            cell,
+          ]),
+        );
+        const resultFiles = readdirSync(dir).filter(
+          (name) => name.startsWith("result-") && name.endsWith(".json"),
+        );
+        for (const resultFile of resultFiles) {
+          const cell = plannedResults.get(resultFile);
+          if (!cell) {
+            problems.push(`${dir} carries unplanned result file ${resultFile}`);
+            continue;
+          }
+          let record;
+          try {
+            record = readJson(path.join(dir, resultFile));
+          } catch (error) {
+            problems.push(
+              error instanceof Error ? error.message : String(error),
+            );
+            continue;
+          }
+          for (const field of ["cell_id", "pr", "condition", "draw"]) {
+            if (record?.[field] !== cell[field]) {
+              problems.push(
+                `${dir}/${resultFile} ${field} is ${JSON.stringify(record?.[field])}; plan.json recorded ${JSON.stringify(cell[field])}`,
+              );
+            }
+          }
+          if (!rowConditions.has(cell.condition)) {
+            problems.push(
+              `${dir}/${resultFile} records condition ${cell.condition}, but the row omits it`,
+            );
+          }
+        }
         if (row.status === "complete") {
           for (const condition of planConditions) {
             if (!rowConditions.has(condition)) {
@@ -731,7 +768,7 @@ function runEvidenceProblems({ dir, row }) {
           }
           for (const cell of plan.cells) {
             const resultFile = `result-${cell.pr}-${cell.condition}-${cell.draw}.json`;
-            if (!existsSync(path.join(dir, resultFile))) {
+            if (!resultFiles.includes(resultFile)) {
               problems.push(
                 `${dir} carries no ${resultFile} for planned cell ${cell.cell_id ?? "unknown"}`,
               );

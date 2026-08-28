@@ -254,6 +254,7 @@ function writeRowEvidence(root, row) {
         writeFileSync(
           path.join(detail, `result-${pr}-${name}-${draw}.json`),
           JSON.stringify({
+            cell_id: `pr-${pr}-${name}-draw${draw}`,
             pr,
             condition: name,
             draw,
@@ -3204,6 +3205,62 @@ test("scorePlan rejects an ineligible explicit baseline before model work", asyn
   }
 });
 
+test("scorePlan resolves an automatic baseline by ledger append order", async () => {
+  const root = makeRoot();
+  try {
+    const plan = buildPlan({
+      contract,
+      contractDigest,
+      kind: "canary",
+      repoRoot: root,
+      outDir: path.join(root, "run"),
+      env: planEnv,
+    });
+    for (const cell of plan.cells) {
+      const dir = path.join(plan.plan_dir, "cells", cell.cell_id);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        path.join(dir, "result.json"),
+        JSON.stringify({
+          ok: true,
+          output: "scripts/pr/pr-ready-state-core.mjs:750 is too long.",
+          seconds: 300,
+          cost_usd: 3.5,
+          fixture_path: root,
+        }),
+      );
+    }
+    const anchor = makeRow({
+      executedAt: "2026-10-08T10:00:00Z",
+      fullMatrix: true,
+    });
+    const scored = await scorePlan({
+      plan,
+      contract,
+      contractDigest,
+      repoRoot: root,
+      planDir: plan.plan_dir,
+      exec: stubExec().exec,
+      runGit: stubGit().runGit,
+      calibrationSet: JSON.parse(
+        readFileSync(
+          path.join(root, "docs/evals/review-skill-judge-calibration.json"),
+          "utf8",
+        ),
+      ),
+      ledgerRows: [anchor],
+      now: new Date("2026-09-08T10:00:00Z"),
+    });
+    assert.equal(
+      scored.row.vs_baseline.baseline_executed_at,
+      anchor.executed_at,
+    );
+    assert.equal(scored.row.vs_baseline.selection, "automatic");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("scorePlan reports a partial matrix and refuses an empty one", async () => {
   const root = makeRoot();
   try {
@@ -5121,6 +5178,37 @@ test("--revalidate-appended checks a row against its committed plan", () => {
     );
     const clean = cli(flags, { root });
     assert.equal(clean.status, 0, clean.stdout + clean.stderr);
+
+    writeFileSync(
+      path.join(detail, "result-9999-pipeline-1.json"),
+      JSON.stringify({
+        cell_id: "pr-9999-pipeline-draw1",
+        pr: 9999,
+        condition: "pipeline",
+        draw: 1,
+        matched_ids: [],
+      }),
+    );
+    const unplanned = cli(flags, { root });
+    assert.equal(unplanned.status, 1);
+    assert.match(
+      JSON.parse(unplanned.stdout).problems.join(" | "),
+      /carries unplanned result file result-9999-pipeline-1\.json/,
+    );
+    unlinkSync(path.join(detail, "result-9999-pipeline-1.json"));
+    writeRowEvidence(root, row);
+
+    const plannedResult = path.join(detail, "result-1990-pipeline-1.json");
+    const misidentified = JSON.parse(readFileSync(plannedResult, "utf8"));
+    misidentified.cell_id = "pr-1990-pipeline-draw2";
+    writeFileSync(plannedResult, JSON.stringify(misidentified));
+    const wrongIdentity = cli(flags, { root });
+    assert.equal(wrongIdentity.status, 1);
+    assert.match(
+      JSON.parse(wrongIdentity.stdout).problems.join(" | "),
+      /result-1990-pipeline-1\.json cell_id is .*plan\.json recorded "pr-1990-pipeline-draw1"/,
+    );
+    writeRowEvidence(root, row);
 
     // A scored explicit plan must retain its pairing. Removing vs_baseline and
     // changing the verdict to the unpaired result cannot erase that evidence.

@@ -1277,7 +1277,11 @@ export async function scorePlan({
     detail_dir: plan.detail_dir,
     notes: notes.join(" | "),
   };
-  const baseline = baselineRow ?? resolveBaseline({ rows: ledgerRows, row });
+  // Automatic scoring creates the row before it appends it. Resolve it as the
+  // next ledger entry so clock skew cannot replace append-order semantics with
+  // the timestamp fallback reserved for external report files.
+  const baseline =
+    baselineRow ?? resolveBaseline({ rows: [...ledgerRows, row], row });
   row.vs_baseline = buildVsBaseline({
     row,
     baselineRow: baseline,
