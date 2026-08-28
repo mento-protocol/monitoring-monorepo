@@ -15,6 +15,10 @@ import {
 import { formatSignedWei } from "../../../../_lib/format";
 import type { CdpTroveOperationEventRow } from "../../../../_lib/types";
 import { formatInterestRate } from "../_lib/format";
+import {
+  troveLedgerInterimProbeMessage,
+  type TroveLedgerProbeState,
+} from "../_lib/trove-ledger-probe";
 
 // Operation codes 3 (adjustInterestRate), 8 (setBatchManager), and 9
 // (removeFromBatch) — see CdpTroveOperationEventRow's `operation` doc —
@@ -132,6 +136,7 @@ export function TroveOperationsList({
   truncated,
   isLoading,
   error,
+  probeState,
   hasLoadedOnce = rows.length > 0,
   hasLifetimeTotals = false,
   chainId,
@@ -141,6 +146,8 @@ export function TroveOperationsList({
   truncated: boolean;
   isLoading: boolean;
   error: Error | undefined;
+  /** The schema-probe state that selects this interim view's disclosure. */
+  probeState: TroveLedgerProbeState;
   /** True once the fetch has resolved at least once (`data !== undefined`),
    *  captured by the caller BEFORE any `?? []` fallback collapses "never
    *  loaded" and "loaded, confirmed empty" to the same `rows.length === 0`.
@@ -162,16 +169,17 @@ export function TroveOperationsList({
   chainId: number;
   debtSymbol: string;
 }) {
+  const partialNotice = troveLedgerInterimProbeMessage(
+    probeState,
+    hasLifetimeTotals,
+  );
   return (
     <section>
       <h2 className="text-lg font-semibold text-white mb-1">
         Trove operations
       </h2>
       <p role="status" className="mb-3 text-xs text-amber-400">
-        Per-redemption detail pending indexer rollout — this list shows only
-        this trove&apos;s own borrow/repay/adjust operations. Redemptions and
-        liquidations that touched this trove are not yet attributable here
-        {hasLifetimeTotals ? "; see the redemption impact totals above." : "."}
+        {partialNotice}
       </p>
       {/* Mirrors the parent view's other three notices (markets/trove/batch
           rate): once the fetch has resolved at least once, a later poll

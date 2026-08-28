@@ -6,6 +6,7 @@ import type { CdpTrove } from "../../../../_lib/types";
 import type { TroveRedemptionLedgerSums } from "../_lib/impact";
 import type { TroveRedemptionCumulatives } from "../_lib/ledger";
 import type { TroveLedgerState } from "../_lib/use-trove-ledger";
+import { troveLedgerImpactPartialMessage } from "../_lib/trove-ledger-probe";
 import {
   useTroveRedemptionImpact,
   type TroveRedemptionImpactModel,
@@ -211,7 +212,10 @@ function ReconciledFigures({
   );
 }
 
-function impactDescription(model: TroveRedemptionImpactModel): string {
+function impactDescription(
+  model: TroveRedemptionImpactModel,
+  ledger: TroveLedgerState,
+): string {
   if (model.kind === "reconciled") {
     return "Per-redemption ledger figures, reconciled to the trove's recorded cumulatives at the same indexed position.";
   }
@@ -222,7 +226,7 @@ function impactDescription(model: TroveRedemptionImpactModel): string {
       // Wording deliberately avoids naming the suppressed figures — the
       // interim view must never surface even the phrase "net equity" next
       // to a number.
-      return `${base} Per-hit detail — the user vs rebalance split and the oracle-price valuation — is pending indexer rollout.`;
+      return `${base} ${troveLedgerImpactPartialMessage(ledger.probeState)}`;
     case "pending":
       return `${base} Per-hit detail loads with the ledger below.`;
     case "unverified":
@@ -365,10 +369,16 @@ export function TroveRedemptionImpact({
   ledger: TroveLedgerState;
 }) {
   const model = useTroveRedemptionImpact(trove, ledger);
+  const partial = model.kind === "totals" && model.reason === "partial";
   return (
     <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
       <h2 className="text-sm font-semibold text-white">Redemption impact</h2>
-      <p className="mt-1 text-xs text-slate-500">{impactDescription(model)}</p>
+      <p
+        role={partial ? "status" : undefined}
+        className="mt-1 text-xs text-slate-500"
+      >
+        {impactDescription(model, ledger)}
+      </p>
       {/* A failed poll leaves SWR's prior data on screen — say so here, not
           only far below in the ledger table, or the support summary reads
           as current while a recent redemption is missing. */}
