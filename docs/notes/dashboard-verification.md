@@ -309,13 +309,17 @@ For a change to dynamic route metadata or an Open Graph image route, verify the
 final deployed origin in the browser. Do not use a local render as production
 proof.
 
-- Read the exact `og:title`, `og:description`, `og:image`, and Twitter image
-  values from the deployed document. Confirm that each value matches the route
-  and its public-data policy.
+- Read the exact Open Graph and Twitter title, description, and image values
+  from the deployed document. Confirm that each value matches the route and its
+  public-data policy.
 - Fetch the exact image URL from the deployed document with the browser cache
   disabled. Require HTTP 200, the expected image content type, and the declared
   pixel dimensions.
+- Inspect the rendered image. Confirm that it identifies the correct route,
+  shows the expected data or fallback state, and has no blank or clipped
+  content.
 - Check browser console errors after the route and image load.
 - Use a URL that Slack has not expanded before when testing the unfurl. Slack
   can retain the first unfurl for a shared URL, so an existing message does not
-  prove that the current metadata or image is live.
+  prove that the current metadata or image is live. Inspect the new unfurl and
+  confirm that its content matches the rendered image.
