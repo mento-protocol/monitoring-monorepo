@@ -222,6 +222,7 @@ function makeRow({
       },
     },
     judge_calibration: { agreement: 40, total: 40 },
+    scoring_usd: 0,
     vs_baseline: null,
     detail_dir: "docs/evals/review-skill-runs/2026-09-08-deadbeef",
     notes: "",
@@ -291,6 +292,8 @@ function writeRowEvidence(root, row) {
             },
             usd: first ? condition.usd : 0,
             seconds: first ? condition.seconds : 0,
+            scoring_usd: 0,
+            leak: { suspected: false, hard: [] },
           }),
         );
         first = false;
@@ -333,6 +336,7 @@ function writeRowEvidence(root, row) {
         expected: record.expected_verdict,
         actual: record.expected_verdict,
       })),
+      scoring_usd: 0,
     }),
   );
   return detail;
@@ -4172,6 +4176,19 @@ test("one review eval at a time may hold the shared run state", async () => {
       "lock publication must name the exact destination path",
     );
 
+    // A reclaimer can die after it removes the old lock but before it publishes
+    // a replacement. The next direct lock owner must retire that abandoned
+    // claim, even when its ticket pid now belongs to a live process.
+    rmSync(lock, { force: true });
+    rmSync(cacheLock, { force: true });
+    mkdirSync(`${lock}.reclaim`, { recursive: true });
+    writeFileSync(path.join(`${lock}.reclaim`, "0"), `${process.pid}\n`);
+    const abandonedClaim = spawnSync("bash", ["-c", harness(cache)], {
+      encoding: "utf8",
+    });
+    assert.equal(abandonedClaim.status, 0, abandonedClaim.stderr);
+    assert.equal(existsSync(`${lock}.reclaim`), false);
+
     // A live holder is a real conflict, and the run refuses before it spends.
     writeFileSync(lock, `${process.pid}\n`);
     const busy = spawnSync("bash", ["-c", harness(cache)], {
@@ -5183,6 +5200,52 @@ test("--revalidate-appended rejects a symlinked base evidence file", () => {
   }
 });
 
+test("--revalidate-appended rejects a symlinked base plan", () => {
+  const root = makeRoot();
+  try {
+    const git = (...args) =>
+      spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    git("init", "--quiet");
+    git("config", "user.email", "eval@example.com");
+    git("config", "user.name", "eval");
+
+    const baseRow = makeRow({
+      matchedIds: scorableIdsFor([1990]),
+      fullMatrix: true,
+    });
+    const detail = writeRowEvidence(root, baseRow);
+    const planFile = path.join(detail, "plan.json");
+    const target = path.join(root, "docs/evals/base-plan-target.json");
+    writeFileSync(target, readFileSync(planFile));
+    unlinkSync(planFile);
+    symlinkSync(path.relative(detail, target), planFile);
+    writeFileSync(
+      path.join(root, ledgerRelative),
+      `${JSON.stringify(baseRow)}\n`,
+    );
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "record linked base plan");
+
+    const checked = cli(
+      [
+        "--check-ledger",
+        "--revalidate-appended",
+        "--base-ref",
+        "HEAD",
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(checked.status, 1);
+    assert.match(
+      JSON.parse(checked.stdout).problems.join(" | "),
+      /base row .*plan\.json must be a regular evidence file/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("--revalidate-appended requires every planned cell of a complete row", () => {
   const root = makeRoot();
   try {
@@ -5752,6 +5815,79 @@ test("--revalidate-appended checks a row against its committed plan", () => {
     assert.match(
       JSON.parse(falseNovelResult.stdout).problems.join(" | "),
       /result-1990-pipeline-1\.json novel\.novelVague does not match novel\.verdicts/,
+    );
+    writeRowEvidence(root, row);
+
+    const missingRequiredEvidence = JSON.parse(
+      readFileSync(plannedResult, "utf8"),
+    );
+    delete missingRequiredEvidence.scoring_usd;
+    delete missingRequiredEvidence.leak;
+    writeFileSync(plannedResult, JSON.stringify(missingRequiredEvidence));
+    delete row.scoring_usd;
+    writeFileSync(path.join(root, ledgerRelative), `${JSON.stringify(row)}\n`);
+    writeFileSync(rowPath, JSON.stringify(row, null, 2));
+    const calibrationFile = path.join(detail, "calibration.json");
+    const missingCalibrationCost = JSON.parse(
+      readFileSync(calibrationFile, "utf8"),
+    );
+    delete missingCalibrationCost.scoring_usd;
+    writeFileSync(calibrationFile, JSON.stringify(missingCalibrationCost));
+    const missingRequiredResult = cli(flags, { root });
+    assert.equal(missingRequiredResult.status, 1);
+    const missingRequiredProblems = JSON.parse(
+      missingRequiredResult.stdout,
+    ).problems.join(" | ");
+    assert.match(
+      missingRequiredProblems,
+      /result-1990-pipeline-1\.json scoring_usd must be a nonnegative finite number/,
+    );
+    assert.match(
+      missingRequiredProblems,
+      /result-1990-pipeline-1\.json leak must carry a hard array and suspected boolean/,
+    );
+    assert.match(
+      missingRequiredProblems,
+      /calibration\.json scoring_usd must be a nonnegative finite number/,
+    );
+    assert.match(
+      missingRequiredProblems,
+      /row\.scoring_usd must be a nonnegative finite number for scored evidence/,
+    );
+    const localMissingTotal = cli(
+      ["--validate", rowPath, "--append", "--detail-dir", detail, "--json"],
+      { root },
+    );
+    assert.equal(localMissingTotal.status, 1);
+    assert.match(
+      JSON.parse(localMissingTotal.stdout).problems.join(" | "),
+      /row\.scoring_usd is missing; scored run detail requires a recorded judge cost total/,
+    );
+    row.scoring_usd = 0;
+    writeFileSync(path.join(root, ledgerRelative), `${JSON.stringify(row)}\n`);
+    writeFileSync(rowPath, JSON.stringify(row, null, 2));
+    writeRowEvidence(root, row);
+
+    const invalidResultCost = JSON.parse(readFileSync(plannedResult, "utf8"));
+    invalidResultCost.scoring_usd = null;
+    writeFileSync(plannedResult, JSON.stringify(invalidResultCost));
+    const invalidCalibrationCost = JSON.parse(
+      readFileSync(calibrationFile, "utf8"),
+    );
+    invalidCalibrationCost.scoring_usd = "1.25";
+    writeFileSync(calibrationFile, JSON.stringify(invalidCalibrationCost));
+    const invalidCostResult = cli(flags, { root });
+    assert.equal(invalidCostResult.status, 1);
+    const invalidCostProblems = JSON.parse(
+      invalidCostResult.stdout,
+    ).problems.join(" | ");
+    assert.match(
+      invalidCostProblems,
+      /result-1990-pipeline-1\.json scoring_usd must be a nonnegative finite number/,
+    );
+    assert.match(
+      invalidCostProblems,
+      /calibration\.json scoring_usd must be a nonnegative finite number/,
     );
     writeRowEvidence(root, row);
 

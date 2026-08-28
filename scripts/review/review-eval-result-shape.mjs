@@ -342,8 +342,8 @@ function checkClose(stated, found, tolerance, label, digits, problems) {
  * `--validate` had to take it on the row's own say-so. Each cell record now
  * carries the dollars its own judge calls cost and `calibration.json` carries
  * the replay's, which makes the run total a sum of evidence like every other
- * number on the row. Returns null when the detail predates that, so a row
- * written before the field existed is not failed for it.
+ * number on the row. Returns null only when the directory has no scored cell
+ * detail. Missing or invalid cost evidence produces NaN so validation fails.
  */
 function recomputeScoringUsd(dir) {
   let files;
@@ -354,23 +354,32 @@ function recomputeScoringUsd(dir) {
   } catch {
     return null;
   }
+  if (files.length === 0) return null;
   let total = 0;
-  let seen = false;
   for (const file of files) {
     const record = readJson(path.join(dir, file));
-    if (!Object.hasOwn(record ?? {}, "scoring_usd")) continue;
-    seen = true;
-    total += Number(record.scoring_usd ?? 0);
+    if (
+      !Object.hasOwn(record ?? {}, "scoring_usd") ||
+      typeof record.scoring_usd !== "number" ||
+      !Number.isFinite(record.scoring_usd) ||
+      record.scoring_usd < 0
+    ) {
+      return Number.NaN;
+    }
+    total += record.scoring_usd;
   }
   const calibrationFile = path.join(dir, "calibration.json");
-  if (existsSync(calibrationFile)) {
-    const record = readJson(calibrationFile);
-    if (Object.hasOwn(record ?? {}, "scoring_usd")) {
-      seen = true;
-      total += Number(record.scoring_usd ?? 0);
-    }
+  if (!existsSync(calibrationFile)) return Number.NaN;
+  const calibration = readJson(calibrationFile);
+  if (
+    !Object.hasOwn(calibration ?? {}, "scoring_usd") ||
+    typeof calibration.scoring_usd !== "number" ||
+    !Number.isFinite(calibration.scoring_usd) ||
+    calibration.scoring_usd < 0
+  ) {
+    return Number.NaN;
   }
-  return seen ? total : null;
+  return total + calibration.scoring_usd;
 }
 
 /**
@@ -709,9 +718,13 @@ export function revalidateRow({
       problems,
     );
   }
-  if (dir && Object.hasOwn(row, "scoring_usd")) {
+  if (dir && hasCellResults(dir)) {
     const spent = recomputeScoringUsd(dir);
-    if (spent !== null) {
+    if (!Object.hasOwn(row, "scoring_usd")) {
+      problems.push(
+        "row.scoring_usd is missing; scored run detail requires a recorded judge cost total",
+      );
+    } else if (spent !== null) {
       checkClose(row.scoring_usd, spent, 0.005, "row.scoring_usd", 2, problems);
     }
   }

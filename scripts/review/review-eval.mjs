@@ -528,6 +528,7 @@ function nonRegularEvidenceProblems(dir) {
   for (const file of readdirSync(dir).filter(
     (name) =>
       name === "calibration.json" ||
+      name === "plan.json" ||
       (name.startsWith("result-") && name.endsWith(".json")),
   )) {
     try {
@@ -736,26 +737,84 @@ export function planProvenanceProblems({
   return problems;
 }
 
-/** Preserve a scorer's hard leak flag on every row that reuses its results. */
-function resultLeakProblems({ dir, row }) {
+/** Validate required fields that every scored result must retain. */
+function resultEvidenceProblems({ dir, row }) {
   if (row.status === "failed" || !existsSync(dir)) return [];
   const regularityProblems = nonRegularEvidenceProblems(dir);
   if (regularityProblems.length > 0) return regularityProblems;
   const problems = [];
+  if (holdsCellResults(dir)) {
+    const scoringUsd = row?.scoring_usd;
+    if (
+      !Object.hasOwn(row ?? {}, "scoring_usd") ||
+      typeof scoringUsd !== "number" ||
+      !Number.isFinite(scoringUsd) ||
+      scoringUsd < 0
+    ) {
+      problems.push(
+        "row.scoring_usd must be a nonnegative finite number for scored evidence",
+      );
+    }
+  }
   let resultRecordsLeak = false;
   for (const resultFile of readdirSync(dir).filter(
     (name) => name.startsWith("result-") && name.endsWith(".json"),
   )) {
     try {
-      const leak = readJson(path.join(dir, resultFile))?.leak;
+      const record = readJson(path.join(dir, resultFile));
+      const scoringUsd = record?.scoring_usd;
       if (
-        leak?.suspected === true ||
-        (Array.isArray(leak?.hard) && leak.hard.length > 0)
+        !Object.hasOwn(record ?? {}, "scoring_usd") ||
+        typeof scoringUsd !== "number" ||
+        !Number.isFinite(scoringUsd) ||
+        scoringUsd < 0
       ) {
+        problems.push(
+          `${dir}/${resultFile} scoring_usd must be a nonnegative finite number`,
+        );
+      }
+      const leak = record?.leak;
+      const hard = leak?.hard;
+      const suspected = leak?.suspected;
+      if (
+        leak === null ||
+        typeof leak !== "object" ||
+        Array.isArray(leak) ||
+        !Array.isArray(hard) ||
+        typeof suspected !== "boolean"
+      ) {
+        problems.push(
+          `${dir}/${resultFile} leak must carry a hard array and suspected boolean`,
+        );
+      } else if (suspected !== hard.length > 0) {
+        problems.push(
+          `${dir}/${resultFile} leak.suspected must equal whether leak.hard is non-empty`,
+        );
+      }
+      if (suspected === true || (Array.isArray(hard) && hard.length > 0)) {
         resultRecordsLeak = true;
       }
     } catch {
       // The normal evidence checks report unreadable result records.
+    }
+  }
+  const calibrationFile = path.join(dir, "calibration.json");
+  if (existsSync(calibrationFile)) {
+    try {
+      const calibration = readJson(calibrationFile);
+      const scoringUsd = calibration?.scoring_usd;
+      if (
+        !Object.hasOwn(calibration ?? {}, "scoring_usd") ||
+        typeof scoringUsd !== "number" ||
+        !Number.isFinite(scoringUsd) ||
+        scoringUsd < 0
+      ) {
+        problems.push(
+          `${dir}/calibration.json scoring_usd must be a nonnegative finite number`,
+        );
+      }
+    } catch {
+      // The calibration evidence checks report an unreadable record.
     }
   }
   if (resultRecordsLeak && !leakSuspected(row)) {
@@ -776,7 +835,7 @@ function runEvidenceProblems({ dir, row, contract }) {
   if (row.status === "failed") return [];
   const regularityProblems = nonRegularEvidenceProblems(dir);
   if (regularityProblems.length > 0) return regularityProblems;
-  const problems = resultLeakProblems({ dir, row });
+  const problems = resultEvidenceProblems({ dir, row });
   // A bridge intentionally reuses the source full run's plan and scored
   // records. It owes no new evidence, but it must retain any leak flag those
   // records carry because that flag makes the reused score unusable.
@@ -956,27 +1015,6 @@ function runEvidenceProblems({ dir, row, contract }) {
             if (!Number.isFinite(value) || value < 0) {
               problems.push(
                 `${dir}/${resultFile} ${field} must be a nonnegative finite number`,
-              );
-            }
-          }
-          if (Object.hasOwn(record ?? {}, "scoring_usd")) {
-            const value = Number(record.scoring_usd);
-            if (!Number.isFinite(value) || value < 0) {
-              problems.push(
-                `${dir}/${resultFile} scoring_usd must be a nonnegative finite number`,
-              );
-            }
-          }
-          if (record?.leak !== undefined) {
-            const hard = record.leak?.hard;
-            const suspected = record.leak?.suspected;
-            if (!Array.isArray(hard) || typeof suspected !== "boolean") {
-              problems.push(
-                `${dir}/${resultFile} leak must carry a hard array and suspected boolean`,
-              );
-            } else if (suspected !== hard.length > 0) {
-              problems.push(
-                `${dir}/${resultFile} leak.suspected must equal whether leak.hard is non-empty`,
               );
             }
           }

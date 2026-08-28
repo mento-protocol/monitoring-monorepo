@@ -320,6 +320,11 @@ acquire_one_lock() {
       fail "another review eval took the run lock at $lock; retry after it finishes"
     fi
     rm -rf "$reclaim_root"
+  else
+    # A prior reclaimer can die after it removes the stale lock and before it
+    # publishes its replacement. Retire that abandoned claim after this owner
+    # wins the now-empty lock so a recycled ticket pid cannot block recovery.
+    rm -rf "$reclaim_root"
   fi
   rm -f "$owner_ticket"
   LOCK_DIRS+=("$lock")
