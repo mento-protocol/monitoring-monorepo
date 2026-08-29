@@ -31,7 +31,9 @@ pull-request, status-check, review-thread, linear-history, deletion, and
 force-push controls. It also contains
 `require_extra_approval_for_unattributed_changes`. GitHub provider `6.12.1`
 cannot represent that field. Importing and updating the core ruleset through
-the provider can remove a live review control.
+the provider can remove a live review control. The official `6.13.0` resource
+schema reviewed on 2026-08-29 still omits the field, so a provider update does
+not close this gap.
 
 GitHub combines all active rulesets that target a ref. A bypass actor applies
 only to the ruleset that names that actor. A separate ruleset can therefore
@@ -189,7 +191,7 @@ an arbitrary tfvars list. Existing protected project-owner and production
 infrastructure impersonation paths remain in the App-key blast radius. They do
 not enter the agent OS.
 
-### Accepted Vercel Free-plan residual
+### Vercel Free-plan residual and activation gate
 
 The Vercel GitHub integration retains Administration and Contents permissions
 because the Free plan does not support the narrower integration control needed
@@ -199,8 +201,9 @@ here. This principal can change or remove the lifecycle ruleset and then update
 Daily drift can detect a Vercel settings change after it occurs. It cannot
 prevent the change. Activation evidence must record the Vercel installation,
 its current permissions, its selected repository, the Free-plan constraint,
-and the owner who accepted the residual. A plan or product change that permits
-permission separation must remove this residual in a follow-up.
+and the owner who accepted the residual. Do not activate the boundary until the
+operator accepts this exact residual. A plan or product change that permits
+permission separation must remove it in a follow-up.
 
 ### Precursor and activation boundaries
 

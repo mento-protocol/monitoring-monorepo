@@ -429,9 +429,9 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    boundary belongs on GitHub's side of the wire.
    [ADR 0075](../adr/0075-pr-merge.md) owns the ordered gates,
    the alternatives, and every residual, including what the deny does not
-   cover. Before ADR 0078 activation, the Dependabot auto-merge workflow runs in
-   CI and is unaffected by this local wrapper. Its separate precursor must
-   retire and drain before the server rule activates. The approval rule above is
+   cover. ADR 0078 requires the separate Dependabot auto-merge precursor to
+   retire the workflow and drain its retained runs before the server rule
+   activates. The workflow did not share this local wrapper. The approval rule above is
    unchanged — the wrapper mechanizes it, and its refusal is what makes "agents
    never merge" a control rather than a habit. If the merge itself satisfies Done
    means, sync the issue state and workboard afterward per
@@ -453,9 +453,9 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    separate `main` creation, update, and deletion rules, and only through a
    pull request. The local agent App is not a bypass actor. Keep the human
    credential outside the agent OS. Vercel Administration-plus-Contents remains
-   an accepted Free-plan residual and can change the rule before updating
-   `main`. Before activation, the local wrapper and approval rule remain the
-   live control.
+   a Free-plan residual and can change the rule before updating `main`. The
+   operator must accept this exact residual before activation. Before activation,
+   the local wrapper and approval rule remain the live control.
 
 9. **Production closeout when required.** When Done means includes deployed or
    live behavior, merge is an intermediate state. Monitor the owning deployment
