@@ -19,10 +19,30 @@ import { fileURLToPath } from "node:url";
 const HELPER_PATH = "scripts/gate/darwin-broker-launch-preflight.mjs";
 const TEST_PATH = "scripts/gate/darwin-broker-launch-preflight.test.mjs";
 const PACKAGE_MANIFEST_BASENAME = "package.json";
-const PACKAGE_SCRIPT_SHELL_COMMAND_STRING =
-  /(?:^|[\s;&|()])(?:[^\s;&|()]+\/)*(?:[bB][aA][sS][hH]|[cC][sS][hH]|[dD][aA][sS][hH]|[fF][iI][sS][hH]|[kK][sS][hH]|[sS][hH]|[tT][cC][sS][hH]|[zZ][sS][hH])(?=\s)[^;&|()\n]*(?:^|\s)(?:-[a-z]*c[a-z]*|--(?:command|init-command)(?:=\S*)?)(?=\s|$)/mu;
-const PACKAGE_SCRIPT_FISH_INIT_COMMAND_STRING =
-  /(?:^|[\s;&|()])(?:[^\s;&|()]+\/)*[fF][iI][sS][hH](?=\s)[^;&|()\n]*(?:^|\s)-C\S*(?=\s|$)/mu;
+const PACKAGE_SCRIPT_SHELL_TOKEN =
+  /(?:^|[\s;&|()])(?:[^\s;&|()]*\/)?(?:[bB][aA][sS][hH]|[cC][sS][hH]|[dD][aA][sS][hH]|[fF][iI][sS][hH]|[kK][sS][hH]|[sS][hH]|[tT][cC][sS][hH]|[zZ][sS][hH])(?=$|[\s;&|()<>])/mu;
+const PACKAGE_SCRIPT_COMMAND_STRING_OPTION =
+  /(?:^|\s)(?:-(?=[A-Za-z]*c)[A-Za-z]+|--(?:command|init-command)(?:=\S*)?)(?=\s|$)/mu;
+const PACKAGE_SCRIPT_FISH_TOKEN =
+  /(?:^|[\s;&|()])(?:[^\s;&|()]*\/)?[fF][iI][sS][hH](?=$|[\s;&|()<>])/mu;
+const PACKAGE_SCRIPT_FISH_INIT_COMMAND_OPTION =
+  /(?:^|\s)-(?=[A-Za-z]*C)\S+(?=\s|$)/mu;
+const PACKAGE_SCRIPT_ENV_TOKEN =
+  /(?:^|[\s;&|()])(?:[^\s;&|()]*\/)?[eE][nN][vV](?=$|[\s;&|()<>])/mu;
+const PACKAGE_SCRIPT_ENV_SPLIT_STRING_OPTION =
+  /(?:^|\s)(?:-(?=[A-Za-z]*S)\S+|--split-string(?:=\S*)?)(?=\s|$)/mu;
+const PACKAGE_SCRIPT_SHELL_BASENAMES = new Set([
+  "bash",
+  "csh",
+  "dash",
+  "fish",
+  "ksh",
+  "sh",
+  "tcsh",
+  "zsh",
+]);
+const PACKAGE_SCRIPT_MAX_SHELL_WORDS = 4096;
+const PACKAGE_SCRIPT_MAX_ACTIVE_EXPANSIONS = 8192;
 
 // This admission check has a narrow claim. It rejects named process-broker
 // APIs, obvious constructed forms, unapproved Unix-domain clients, and opaque
@@ -331,7 +351,7 @@ export const BROKER_CLIENT_ALLOWLIST = [
       "node-net-dynamic-client",
       "javascript-process-broker",
     ],
-    sha256: "124d1ec6e53743d40d205e969ad7c9c50abc1571bd714bb92ad8ba1db5ac52e8",
+    sha256: "ee83a5ec93ed6719d8bf6e3423b4ab6253940c8f33b7e5e72fe0f1b093c86ac3",
     reason: APPROVED_ALLOWLIST_SHAPE.get(TEST_PATH).reason,
   },
 ];
@@ -658,6 +678,162 @@ function scanNodeNet(path, source, lineStarts, findings) {
   }
 }
 
+function packageScriptParameterExpansion(command, start) {
+  const next = command[start + 1];
+  if (/[A-Za-z_]/u.test(next ?? "")) {
+    let end = start + 2;
+    while (/[A-Za-z0-9_]/u.test(command[end] ?? "")) end += 1;
+    return { end, plain: true };
+  }
+  if (next === "{") {
+    const end = command.indexOf("}", start + 2);
+    if (end === -1) return null;
+    const body = command.slice(start + 2, end);
+    const plain = /^[A-Za-z_][A-Za-z0-9_]*(?:(?::?[-+?=])[^$`{}\\'"]*)?$/u.test(
+      body,
+    );
+    return { end: end + 1, plain };
+  }
+  if (next === "(" || next === "[") {
+    return { end: start + 2, plain: false };
+  }
+  if (/[0-9@*#?$!-]/u.test(next ?? "")) {
+    return { end: start + 2, plain: false };
+  }
+  return { end: start + 1, plain: null };
+}
+
+function packageScriptDirectShell(words) {
+  if (words.length < 2) return false;
+  const shell = words[0];
+  const script = words[1];
+  const shellBasename = shell.literal
+    .slice(shell.literal.lastIndexOf("/") + 1)
+    .toLowerCase();
+  return (
+    shell.directLiteral &&
+    PACKAGE_SCRIPT_SHELL_BASENAMES.has(shellBasename) &&
+    script.directLiteral &&
+    script.literal !== "" &&
+    !script.literal.startsWith("-") &&
+    !/^(?:[0-9]+|&)?[<>]/u.test(script.literal)
+  );
+}
+
+// This bounded projection recognizes only the shell structure needed by the
+// admission policy. Active expansions fail closed. The sole exception is a
+// plain parameter expansion in a double-quoted word after a direct shell and a
+// fixed script path.
+function packageScriptHasUnsupportedExpansion(command) {
+  let quote = "";
+  let commandWords = [];
+  let wordCount = 0;
+  let expansionCount = 0;
+  let word = {
+    directLiteral: true,
+    doubleQuotedOnly: true,
+    hasAllowedExpansion: false,
+    literal: "",
+    started: false,
+  };
+
+  const finishWord = () => {
+    if (!word.started) return true;
+    wordCount += 1;
+    if (
+      wordCount > PACKAGE_SCRIPT_MAX_SHELL_WORDS ||
+      (word.hasAllowedExpansion && !word.doubleQuotedOnly)
+    ) {
+      return false;
+    }
+    commandWords.push(word);
+    word = {
+      directLiteral: true,
+      doubleQuotedOnly: true,
+      hasAllowedExpansion: false,
+      literal: "",
+      started: false,
+    };
+    return true;
+  };
+
+  for (let index = 0; index < command.length; index += 1) {
+    const character = command[index];
+    if (quote === "'") {
+      if (character === "'") quote = "";
+      else word.literal += character;
+      word.started = true;
+      continue;
+    }
+    if (character === "\\") {
+      if (index + 1 >= command.length) return true;
+      word.directLiteral = false;
+      if (quote !== '"') word.doubleQuotedOnly = false;
+      word.literal += command[index + 1];
+      word.started = true;
+      index += 1;
+      continue;
+    }
+    if (quote === '"' && character === '"') {
+      quote = "";
+      word.started = true;
+      continue;
+    }
+    if (quote === "" && (character === "'" || character === '"')) {
+      quote = character;
+      word.directLiteral = false;
+      if (character === "'") word.doubleQuotedOnly = false;
+      word.started = true;
+      continue;
+    }
+    if (character === "$" && quote !== "'") {
+      const expansion = packageScriptParameterExpansion(command, index);
+      if (expansion === null) return true;
+      if (expansion.plain === null) {
+        word.literal += character;
+        word.started = true;
+        continue;
+      }
+      expansionCount += 1;
+      if (
+        expansionCount > PACKAGE_SCRIPT_MAX_ACTIVE_EXPANSIONS ||
+        !expansion.plain ||
+        quote !== '"' ||
+        !word.doubleQuotedOnly ||
+        !packageScriptDirectShell(commandWords)
+      ) {
+        return true;
+      }
+      word.directLiteral = false;
+      word.hasAllowedExpansion = true;
+      word.started = true;
+      index = expansion.end - 1;
+      continue;
+    }
+    if (character === "`" && quote !== "'") return true;
+    if (quote === "" && /[ \t\r\f\v]/u.test(character)) {
+      if (!finishWord()) return true;
+      continue;
+    }
+    if (quote === "" && /[\n;&|(){}]/u.test(character)) {
+      if (!finishWord()) return true;
+      commandWords = [];
+      continue;
+    }
+    word.literal += character;
+    word.started = true;
+    if (quote === "") word.doubleQuotedOnly = false;
+  }
+  return quote !== "" || !finishWord();
+}
+
+function packageScriptHasLaterOption(command, tokenPattern, optionPattern) {
+  const token = tokenPattern.exec(command);
+  if (token === null) return false;
+  const suffix = command.slice(token.index + token[0].length);
+  return optionPattern.test(suffix);
+}
+
 function scanPackageScripts(path, source) {
   let manifest;
   try {
@@ -719,8 +895,22 @@ function scanPackageScripts(path, source) {
     );
     if (
       command.includes("$'") ||
-      PACKAGE_SCRIPT_SHELL_COMMAND_STRING.test(normalizedCommand) ||
-      PACKAGE_SCRIPT_FISH_INIT_COMMAND_STRING.test(normalizedCommand)
+      packageScriptHasLaterOption(
+        normalizedCommand,
+        PACKAGE_SCRIPT_SHELL_TOKEN,
+        PACKAGE_SCRIPT_COMMAND_STRING_OPTION,
+      ) ||
+      packageScriptHasLaterOption(
+        normalizedCommand,
+        PACKAGE_SCRIPT_FISH_TOKEN,
+        PACKAGE_SCRIPT_FISH_INIT_COMMAND_OPTION,
+      ) ||
+      packageScriptHasLaterOption(
+        normalizedCommand,
+        PACKAGE_SCRIPT_ENV_TOKEN,
+        PACKAGE_SCRIPT_ENV_SPLIT_STRING_OPTION,
+      ) ||
+      packageScriptHasUnsupportedExpansion(command)
     ) {
       findings.push({
         path,

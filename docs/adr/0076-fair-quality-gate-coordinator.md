@@ -913,14 +913,27 @@ Unix-domain-socket client paths in tracked, untracked, and bounded ignored
 executable source. It parses decoded `scripts` values from each `package.json`
 as shell commands. It rejects direct broker calls in those values. It also
 fails closed when a script contains a literal `bash`, `csh`, `dash`, `fish`,
-`ksh`, `sh`, `tcsh`, or `zsh` token followed by a command-string option before
-the next shell control separator. Any ANSI-C quote fails closed because it can
-decode an escaped shell name or option. The check removes normal quote,
-backslash, and locale-quote markers before matching. It can therefore reject a
-shell name and option used only as quoted data. This conservative refusal avoids
-parsing or trusting the nested command string. Bash `-C` stays distinct from
-`-c`; fish `-C` is a command-string option. A malformed scripts object, a non-string
-script, or a package-manifest symlink also fails closed. The ignored-file walk
+`ksh`, `sh`, `tcsh`, or `zsh` token followed later in the script by a
+command-string option. It matches across redirection, control, and newline
+syntax. This conservative whole-script rule can reject quoted data. A bounded
+shell-word projection also rejects all active parameter expansions, command
+substitutions, arithmetic expansions, and backtick command substitutions. One
+narrow case is allowed. A plain, non-nested parameter expansion can occur in a
+word made only from double-quoted text after the script path. The word can be
+an argument or a redirection target. A direct literal supported shell must
+be the first command word. A fixed non-option script path must be the second
+word. This rule rejects unquoted expansions, command prefixes, dynamic
+script paths, and all command, arithmetic, and backtick substitutions. It
+rejects `env -S` and `env --split-string` because these options parse an
+argument as a command. More than 4,096 words, more than 8,192 active expansions,
+an unclosed quote, and an unclosed or nested parameter expansion fail closed.
+Any ANSI-C quote fails closed because it can decode an escaped shell name or
+option. The check removes normal quote, backslash, and locale-quote markers
+before matching. It can therefore reject a shell name and option used only as
+quoted data. This conservative refusal avoids parsing or trusting the nested
+command string. Bash `-C` stays distinct from `-c`; fish `-C` is a
+command-string option. A malformed scripts object, a non-string script, or a
+package-manifest symlink also fails closed. The ignored-file walk
 excludes explicit
 dependency and tool caches, generated build and coverage output, documentation,
 and local or frozen evidence. These directories are `.git`, `.cache`,

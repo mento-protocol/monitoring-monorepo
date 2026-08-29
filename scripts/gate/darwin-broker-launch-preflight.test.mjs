@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { performance } from "node:perf_hooks";
 import test from "node:test";
 
 import {
@@ -308,7 +309,7 @@ test("package script fields fail closed when they cannot be scanned", () => {
   );
 });
 
-test("package script shell command-string wrappers fail closed", () => {
+test("package script unsupported shell forms fail closed", () => {
   for (const command of [
     "sh -c 'launchctl kickstart system/fixture'",
     "/BIN/BaSh -lc 'printf safe'",
@@ -334,6 +335,7 @@ test("package script shell command-string wrappers fail closed", () => {
     "exec -a shell sh -c 'printf exec_prefix'",
     "sh 3>/dev/null -c 'printf redirected'",
     "sh -o nounset -c 'printf shell_option'",
+    "bash -Bc 'printf uppercase_shell_option'",
     "bash -O extglob -c 'printf bash_option'",
     "sudo -u root sh -c 'printf sudo_prefix'",
     "echo 'x\\'; sh -c 'printf quote_boundary'",
@@ -341,6 +343,84 @@ test("package script shell command-string wrappers fail closed", () => {
     "sh $'\\x2d\\x63' 'printf ansi_hex_option'",
     "$'\\163\\150' -c 'printf ansi_octal_shell'",
     "fish -C'open /tmp/report.pdf'",
+    "sh${IFS}-c 'launchctl kickstart system/expanded_separator'",
+    "/bin/bash$IFS-lc 'printf bare_parameter_separator'",
+    "zsh${IFS%?}--no-rcs${IFS%?}-c 'printf shaped_separator'",
+    "fish${IFS}-C'open /tmp/expanded-report.pdf'",
+    "${SHELL:-sh} -c 'printf expanded_shell'",
+    "s${SHELL_TAIL:-h} -c 'printf split_shell'",
+    "env ${SHELL:-sh} -c 'printf env_expanded_shell'",
+    "env FOO=x${IFS}sh${IFS}-c 'printf env_split_assignment'",
+    "command -- ${SHELL:-sh} -c 'printf command_expanded_shell'",
+    "sudo -u root ${SHELL:-sh} -c 'printf sudo_expanded_shell'",
+    "sh ${SHELL_OPTION:--c} 'printf expanded_option_default'",
+    "sh $SHELL_OPTION 'printf expanded_option'",
+    "sh${SHELL_SEPARATOR}${SHELL_OPTION} 'printf fully_expanded_boundary'",
+    "$SHELL -c 'printf bare_expanded_shell'",
+    "WRAPPER='sh -c'; $WRAPPER 'launchctl print system/dynamic_wrapper'",
+    "$(printf sh) -c 'printf command_substitution_shell'",
+    "sh $(printf -- -c) 'printf command_substitution_option'",
+    "$((SHELL_INDEX)) -c 'printf arithmetic_expansion_shell'",
+    "`printf sh` -c 'printf backtick_substitution_shell'",
+    "$1 -c 'printf positional_shell'",
+    "$@ -c 'printf all_arguments_shell'",
+    "time -p $SHELL -c 'printf timed_expanded_shell'",
+    'env -S "$WRAPPER"',
+    "env --split-string=$WRAPPER",
+    "env -S'sh -c id'",
+    "env --split-string='sh -c id'",
+    "env -S 'node safe'",
+    "env --split-string 'node safe'",
+    "env -u $ENV_NAME node safe",
+    "exec -a $ARGV_ZERO node safe",
+    "sudo -u $SUDO_USER node safe",
+    "env VA${ASSIGNMENT_MIDDLE}R=value node safe",
+    "sh -o nounset $SHELL_OPTION 'printf option_after_operand'",
+    "sh -o $SHELL_OPTIONS ./scripts/safe.sh",
+    "VA${ASSIGNMENT_MIDDLE}R=value -c 'printf dynamic_assignment_name'",
+    "$SHELL>/dev/null -c 'printf dynamic_before_redirection'",
+    "sh>/dev/null -c 'printf attached_output_redirection'",
+    "sh</dev/null -c 'printf attached_input_redirection'",
+    "/bin/sh>/dev/null -c 'printf attached_path_redirection'",
+    "sh 9>/dev/null -c 'printf numeric_output_redirection'",
+    "9</dev/null sh -c 'printf leading_numeric_input_redirection'",
+    "sh 3>&1 -c 'printf duplicated_fd_redirection'",
+    "sh 3<&0 -c 'printf input_duplicated_fd_redirection'",
+    "sh &>/dev/null -c 'printf combined_redirection'",
+    "sh >'fixture;&|()' -c 'printf quoted_separator_redirection'",
+    "sh > >(cat) -c 'printf process_substitution_redirection'",
+    'sh >"file\nname" -c id',
+    "fish 3>&1 -C 'printf fish_duplicated_fd_redirection'",
+    "fish -lC'printf combined_fish_init'",
+    "env FOO=';&|()' -S 'node safe'",
+    'env -u "name\npart" -S node',
+    "env -iS'node safe'",
+    'bash -- "${SCRIPT_PATH}"',
+    'node "${CONFIG_PATH}" -c safe_non_shell_option',
+    'time -p node "${CONFIG_PATH}" -c safe_timed_non_shell_option',
+    'bash -o nounset ./scripts/test.sh "${BASE_REF:-origin/main}"',
+    'node "$(printf config)" -c command_substitution_argument',
+    'bash ./scripts/test.sh "$(printf argument)"',
+    'node "`printf config`" -c backtick_argument',
+    'bash ./scripts/test.sh "`printf argument`"',
+    'node "$((CONFIG_INDEX))" -c arithmetic_argument',
+    'bash ./scripts/test.sh "$((ARG_INDEX))"',
+    'FOO="$VALUE" node dynamic_assignment',
+    'bash >"$LOG_PATH" ./scripts/test.sh "$ARGUMENT"',
+    "bash ./scripts/test.sh $ARGUMENT",
+    'env bash ./scripts/test.sh "$ARGUMENT"',
+    'FOO=1 bash ./scripts/test.sh "$ARGUMENT"',
+    'bash ./scripts/test.sh "prefix${ARGUMENT}"suffix',
+    'bash ./scripts/test.sh "${ARGUMENT:-${FALLBACK}}"',
+    'bash ./scripts/test.sh "${ARGUMENT:-$(printf fallback)}"',
+    "${SHELL -c 'printf malformed_expansion'",
+    'echo "unterminated_quote',
+    "${A:-".repeat(9) +
+      "sh" +
+      "}".repeat(9) +
+      " -c 'printf over_nested_expansion'",
+    'bash ./scripts/test.sh "' + "${X}".repeat(8193) + '"',
+    "word ".repeat(4097),
   ]) {
     const findings = scanSource(
       "package.json",
@@ -362,6 +442,15 @@ test("package script shell command-string wrappers fail closed", () => {
   for (const command of [
     "bash ./scripts/test.sh",
     "bash -C ./scripts/test.sh",
+    'bash ./scripts/test.sh "${BASE_REF:-origin/main}"',
+    '/bin/bash ./scripts/test.sh "$ARGUMENT"',
+    'bash ./scripts/test.sh "prefix${ARGUMENT}suffix"',
+    "bash ./scripts/test.sh '${ARGUMENT}'",
+    "node>/dev/null ./scripts/safe.mjs",
+    "node</dev/null ./scripts/safe.mjs",
+    "node 9>/dev/null ./scripts/safe.mjs",
+    "echo '$SHELL -c quoted_data'",
+    "awk '{print $2}' fixture.txt",
   ]) {
     assert.deepEqual(
       scanSource(
@@ -372,6 +461,51 @@ test("package script shell command-string wrappers fail closed", () => {
       command,
     );
   }
+});
+
+test("package script token scans stay bounded before word-limit refusal", () => {
+  const command = "sh safe; ".repeat(30_000);
+  const startedAt = performance.now();
+  const findings = scanSource(
+    "package.json",
+    JSON.stringify({ scripts: { repeated: command } }),
+  );
+  assert.deepEqual(
+    findings.map(({ rule }) => rule),
+    ["unscanned-package-scripts"],
+  );
+  const elapsedMs = performance.now() - startedAt;
+  assert.ok(elapsedMs < 2_000, `shell token scan took ${elapsedMs}ms`);
+
+  const adversarialPath = `${"a/".repeat(30)}x`;
+  const pathStartedAt = performance.now();
+  assert.deepEqual(
+    scanSource(
+      "package.json",
+      JSON.stringify({ scripts: { adversarialPath } }),
+    ),
+    [],
+  );
+  const pathElapsedMs = performance.now() - pathStartedAt;
+  assert.ok(
+    pathElapsedMs < 2_000,
+    `shell path token scan took ${pathElapsedMs}ms`,
+  );
+
+  const adversarialOption = `sh -${"c".repeat(50_000)}!`;
+  const optionStartedAt = performance.now();
+  assert.deepEqual(
+    scanSource(
+      "package.json",
+      JSON.stringify({ scripts: { adversarialOption } }),
+    ),
+    [],
+  );
+  const optionElapsedMs = performance.now() - optionStartedAt;
+  assert.ok(
+    optionElapsedMs < 2_000,
+    `shell option scan took ${optionElapsedMs}ms`,
+  );
 });
 
 test("repository admission rejects broker package scripts before dispatch", () => {

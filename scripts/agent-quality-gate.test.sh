@@ -14748,6 +14748,7 @@ STUB
     local launcher_pgid=""
     local worker_pid=""
     local worker_start=""
+    local worker_runtime_start=""
     local gate_exit=""
     local contender_exit=""
     local coordinator_metadata=""
@@ -14801,15 +14802,29 @@ STUB
       fi
       return 1
     }
+    parallel_detached_worker_runtime_live() {
+      local pid="$1"
+      local expected_start="$2"
+      local current_start current_state
+      current_start="$(runtime_process_start "$pid")"
+      [[ -n "$current_start" && "$current_start" == "$expected_start" ]] ||
+        return 1
+      current_state="$(TZ=UTC LC_ALL=C LANG=C \
+        ps -p "$pid" -o stat= 2>/dev/null |
+        awk 'NF { print $1; exit }' || true)"
+      [[ -n "$current_state" && "$current_state" != Z* ]]
+    }
     parallel_detached_signal_exact() {
       local signal="$1"
       local pid="$2"
       local expected_start="$3"
       local darwin_exact_identity="${4:-}"
       local darwin_scratch="${5:-$fixture_repo/.tmp/agent-quality-gate}"
+      local host_platform
       case "$signal" in TERM|KILL) ;; *) return 2 ;; esac
       [[ "$pid" != "$$" && "$pid" != "$PPID" ]] || return 2
-      if [[ "$(uname -s)" == Darwin && -n "$darwin_exact_identity" ]]; then
+      host_platform="$(uname -s)" || return 2
+      if [[ "$host_platform" == Darwin && -n "$darwin_exact_identity" ]]; then
         case "$darwin_exact_identity" in
           agentqg-darwin-exact-v1:pid1-*":${pid}:"*) ;;
           *) return 2 ;;
@@ -14820,9 +14835,17 @@ STUB
           >/dev/null
         return $?
       fi
-      parallel_detached_process_live "$pid" "$expected_start" || return 1
-      [[ "$(parallel_detached_process_start "$pid")" == "$expected_start" ]] ||
-        return 1
+      if [[ "$darwin_exact_identity" == portable ]]; then
+        parallel_detached_worker_runtime_live "$pid" "$expected_start" ||
+          return 1
+        [[ "$(runtime_process_start "$pid")" == "$expected_start" ]] ||
+          return 1
+      else
+        [[ -z "$darwin_exact_identity" ]] || return 2
+        parallel_detached_process_live "$pid" "$expected_start" || return 1
+        [[ "$(parallel_detached_process_start "$pid")" == "$expected_start" ]] ||
+          return 1
+      fi
       kill "-$signal" "$pid" 2>/dev/null || return 1
     }
     parallel_detached_worker_live() {
@@ -14843,7 +14866,7 @@ STUB
         return $?
       fi
       [[ "$darwin_exact_identity" == portable ]] || return 2
-      parallel_detached_process_live "$pid" "$expected_start"
+      parallel_detached_worker_runtime_live "$pid" "$expected_start"
     }
     parallel_detached_targets_are_owned() {
       local state_search_root="$1"
@@ -15194,6 +15217,7 @@ STUB
           "${holder_worker_barrier}.identities" 2>/dev/null || true
         sed 's/^/contender worker: /' \
           "${contender_worker_barrier}.identities" 2>/dev/null || true
+        sed 's/^/launcher ready: /' "$launcher_ready_file" 2>/dev/null || true
         sed 's/^/holder dispatch: /' "$holder_dispatch_log" 2>/dev/null || true
       } > "$output_file"
       parallel_detached_append_ambiguous_diagnostics
@@ -15253,6 +15277,7 @@ STUB
       < "$launcher_ready_file"
     worker_pid="$launcher_pgid"
     worker_start="$(parallel_detached_process_start "$worker_pid")"
+    worker_runtime_start="$(runtime_process_start "$worker_pid")"
     [[ "$detached_pid" =~ ^[1-9][0-9]*$ && -n "$detached_start" &&
       "$detached_pgid" =~ ^[1-9][0-9]*$ ]] ||
       fail_parallel_detached_fixture "detached child identity is invalid"
@@ -15286,8 +15311,10 @@ STUB
       "$launcher_pgid" =~ ^[1-9][0-9]*$ ]] ||
       fail_parallel_detached_fixture "launcher identity is invalid"
     [[ "$worker_pid" =~ ^[1-9][0-9]*$ && -n "$worker_start" &&
+      -n "$worker_runtime_start" &&
       "$worker_pid" != "$launcher_pid" &&
       "$(parallel_detached_process_start "$worker_pid")" == "$worker_start" &&
+      "$(runtime_process_start "$worker_pid")" == "$worker_runtime_start" &&
       "$(TZ=UTC LC_ALL=C LANG=C ps -p "$worker_pid" -o pgid= 2>/dev/null |
         tr -d '[:space:]' || true)" == "$worker_pid" ]] ||
       fail_parallel_detached_fixture "parallel worker sentinel identity is invalid"
@@ -15307,7 +15334,7 @@ STUB
     [[ "$(wc -l < "${holder_worker_barrier}.identities" | tr -d '[:space:]')" -ge 2 ]] ||
       fail_parallel_detached_fixture \
         "holder did not register both capacity-one worker sentinels"
-    awk -F '|' -v pid="$worker_pid" -v start="$worker_start" '
+    awk -F '|' -v pid="$worker_pid" -v start="$worker_runtime_start" '
       $1 == "agentqg-worker-v1" && $2 == pid && $3 == start { found = 1 }
       END { exit(found ? 0 : 1) }
     ' "${holder_worker_barrier}.identities" ||
