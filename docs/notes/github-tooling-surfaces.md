@@ -181,8 +181,11 @@ partial MCP emulation plus an explicit gh-capable handoff:
    snapshot, Project field types, and current values. GitHub provides no
    compare-and-swap operation. A concurrent write can still occur after that
    read and before the mutation. The helper does not roll back because a
-   rollback could erase concurrent state. Run `pnpm issue:board sync`
-   separately to reconcile status.
+   rollback could erase concurrent state. Run `pnpm issue:board sync --dry-run`
+   separately to preview status reconciliation. This command is
+   repository-wide and does not accept issue-number scope. If the preview
+   includes an issue outside the approved closeout, obtain explicit authority
+   for the full projection before you rerun the command without `--dry-run`.
 
 ## Known MCP gaps
 

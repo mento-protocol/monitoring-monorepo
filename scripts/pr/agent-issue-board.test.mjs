@@ -271,6 +271,21 @@ test("parses claim options for the monitoring workboard", () => {
   assertEqual(args.dryRun, true);
 });
 
+test("sync is repository-wide and rejects issue scope", () => {
+  const options = parseArgs(["sync", "--dry-run"]);
+  assertEqual(options.command, "sync");
+  assertEqual(options.dryRun, true);
+  assertEqual(options.issues.length, 0);
+
+  for (const argv of [
+    ["sync", "--issue", "901"],
+    ["sync", "--issues", "901,902"],
+    ["sync", "901"],
+  ]) {
+    assertThrows(() => parseArgs(argv), /sync is repository-wide/);
+  }
+});
+
 test("backfill requires exactly one explicit issue", () => {
   const options = parseArgs(["board", "backfill", "--issue", "901"]);
   assertEqual(options.issues[0], 901);

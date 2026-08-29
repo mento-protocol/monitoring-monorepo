@@ -35,9 +35,12 @@ list for review.
    fallback in
    [`docs/notes/github-tooling-surfaces.md`](../../../docs/notes/github-tooling-surfaces.md)
    (label transition, claim comment, `issue:board backfill --issue <n>` and
-   `issue:board sync` handoff). Run the backfill helper first with `--dry-run`.
+   repository-wide `issue:board sync` handoff). Run the backfill helper first
+   with `--dry-run`.
    It fills empty ownership fields from a trusted claim comment and rejects
-   conflicting Project values. Do not
+   conflicting Project values. Preview the sync with `--dry-run`. If it
+   includes an unrelated issue, obtain explicit authority for the full
+   projection before you apply it. Do not
    overwrite a packet already labeled `needs-grooming`, `agent-active`, or
    `in-pr`; it remains the one live packet until resolved or closed.
 3. Reproduce the packet when needed:

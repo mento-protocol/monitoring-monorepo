@@ -69,10 +69,15 @@ Routing labels:
    `agent-active`, adds `in-pr`, and moves the Project item into review when
    the Project has an `In Review` status option. With the default GitHub status
    options, it falls back to `In Progress`.
-6. On merge, GitHub closes issues referenced with closing keywords. Run
-   `pnpm issue:board sync` after merge, or on a schedule, to move closed
-   queue-labeled Project #12 items to `Done` and clear all queue labels. The
-   helper also clears queue labels from closed issues that have no Project item.
+6. On merge, GitHub closes issues referenced with closing keywords. For an ad
+   hoc closeout, run `pnpm issue:board sync --dry-run` after merge. A scheduled
+   job can run the sync under its established authority. The command is
+   repository-wide. It scans every issue with a queue label and does not accept
+   issue-number scope. It moves closed queue-labeled Project #12 items to
+   `Done` and clears all queue labels. Inspect the ad hoc preview. If it includes
+   an issue outside the approved closeout, obtain explicit authority for the
+   full projection before you rerun the command without `--dry-run`. The helper
+   also clears queue labels from closed issues that have no Project item.
    It re-reads and reclassifies each issue before it changes the Project item or
    labels. After each open-state projection, it re-reads the issue and
    reprojects bounded concurrent state changes. After a Done transition, it
@@ -120,7 +125,7 @@ If a follow-up PR fully closes an issue that is already labeled `in-pr` from an
 earlier partial PR, `pnpm issue:review` will refuse because the issue is no
 longer `agent-active`. Do not churn labels just to satisfy the helper. Add a
 fresh issue comment linking the final PR, use a closing keyword in the PR body,
-and run `pnpm issue:board sync` after merge.
+and use the repository-wide sync preview and apply sequence above after merge.
 
 ## Workboard Commands
 
@@ -130,6 +135,7 @@ pnpm issue:claim --issue 901 --agent claude
 pnpm issue:review --pr 123 --issue 901
 pnpm issue:release --issue 901
 pnpm issue:release --issue 901 --needs-grooming
+pnpm issue:board sync --dry-run
 pnpm issue:board sync
 pnpm issue:board backfill --issue 901 --dry-run
 pnpm issue:board:test

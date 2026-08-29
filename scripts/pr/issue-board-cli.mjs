@@ -18,14 +18,14 @@ export function usage() {
   pnpm issue:claim --issue 901 --issue 902 [--agent claude]
   pnpm issue:review --pr 123 --issue 901 [--issue 902]
   pnpm issue:release --issue 901 [--needs-grooming]
-  pnpm issue:board sync [--dry-run]
+  pnpm issue:board sync [--dry-run] (repository-wide)
   pnpm issue:board backfill --issue 901 [--dry-run]
 
 Options:
   --repo <owner/name>              Repository to operate on (default: ${DEFAULT_REPO})
   --project-owner <owner>          Project owner (default: ${DEFAULT_PROJECT_OWNER})
   --project-number <number>        Project number (default: ${DEFAULT_PROJECT_NUMBER})
-  --issue, --issues <numbers>      Issue number(s), comma-separated or repeated
+  --issue, --issues <numbers>      Issue number(s), comma-separated or repeated; not valid for sync
   --count <number>                 Number of ready issues to claim (default: 1)
   --agent <name>                   Agent/session label for comments and project fields
   --branch <name>                  Branch/worktree hint for comments and project fields
@@ -200,6 +200,11 @@ export function parseArgs(argv, env = process.env) {
     options.pr = parsePr(options.prValue, options.repo);
   }
   delete options.prValue;
+  if (options.command === "sync" && options.issueValues.length > 0) {
+    throw new Error(
+      "sync is repository-wide and does not accept --issue, --issues, or positional issue arguments",
+    );
+  }
   options.issues = parseIssueNumbers(options.issueValues, options.repo);
   if (options.command === "backfill") {
     const explicitIssue = options.issueValues[0]?.trim();

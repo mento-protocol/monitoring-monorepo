@@ -109,7 +109,8 @@ pnpm integrations:probe:test   # Unit tests for probe adapters/parsers
 pnpm issue:claim --count 3 --agent codex       # Claim ready issues and move them to In Progress
 pnpm issue:review --pr 123 --issue 901         # Move claimed issue to in-pr / review
 pnpm issue:release --issue 901                 # Release a mistaken claim back to agent-ready
-pnpm issue:board sync                          # Re-project open labels, mark closed items Done, verify closed queue labels clear
+pnpm issue:board sync --dry-run                # Preview the repository-wide queue-label and Project projection
+pnpm issue:board sync                          # Apply the approved repository-wide projection
 pnpm issue:board backfill --issue 901 --dry-run # Preview fill-only ownership-field recovery from a trusted claim comment
 pnpm issue:board:test                          # Offline tests for the issue-board helper
 

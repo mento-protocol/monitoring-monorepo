@@ -426,8 +426,10 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    run the owning package's production checks. Report merge, deployment, and
    live proof as separate facts; a successful workflow alone does not prove the
    runtime behavior. Use `Refs #N` instead of `Closes #N` when proof can happen
-   only after merge. Close the issue and run `pnpm issue:board sync` only after
-   the live acceptance criteria pass.
+   only after merge. Close the issue only after the live acceptance criteria
+   pass. Then use the repository-wide `pnpm issue:board sync --dry-run` preview
+   and apply contract in
+   [`agent-issue-workflow.md`](agent-issue-workflow.md).
 
 ## Non-negotiables
 
