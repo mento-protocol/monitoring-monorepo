@@ -25,6 +25,7 @@ import {
   sync,
   validateOpenPr,
 } from "./agent-issue-board.mjs";
+import { usage } from "./issue-board-cli.mjs";
 import {
   readBackfillProjectFields,
   writeBackfillProjectFields,
@@ -269,6 +270,31 @@ test("parses claim options for the monitoring workboard", () => {
   assertEqual(args.projectOwner, "mento-protocol");
   assertEqual(args.projectNumber, 12);
   assertEqual(args.dryRun, true);
+});
+
+test("sync is repository-wide and rejects issue scope", () => {
+  const help = usage();
+  assert(
+    help.includes("pnpm issue:board sync --dry-run"),
+    "sync help must name the repository-wide preview",
+  );
+  assert(
+    help.includes("requires explicit repository-wide authority"),
+    "sync help must require repository-wide apply authority",
+  );
+
+  const options = parseArgs(["sync", "--dry-run"]);
+  assertEqual(options.command, "sync");
+  assertEqual(options.dryRun, true);
+  assertEqual(options.issues.length, 0);
+
+  for (const argv of [
+    ["sync", "--issue", "901"],
+    ["sync", "--issues", "901,902"],
+    ["sync", "901"],
+  ]) {
+    assertThrows(() => parseArgs(argv), /sync is repository-wide/);
+  }
 });
 
 test("backfill requires exactly one explicit issue", () => {
