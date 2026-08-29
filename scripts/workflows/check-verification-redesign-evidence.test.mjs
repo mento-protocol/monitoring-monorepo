@@ -183,7 +183,10 @@ test("validateInventory rejects invalid duplicate targets", () => {
   delete scheduled[2].entry_point;
   scheduled[2].duplicate_of = scheduled[4].id;
   scheduled[5].duplicate_of = scheduled[2].id;
-  assert.doesNotThrow(() => validateInventory(scheduled));
+  assert.throws(
+    () => validateInventory(scheduled),
+    /existing acyclic retained target/u,
+  );
 });
 
 test("validateInventory rejects a missing disposition evidence field", () => {

@@ -20,7 +20,7 @@ export const DISPOSITION_FIELDS = Object.freeze({
   "deferred-with-owner": "follow_up",
 });
 const DISPOSITION_EVIDENCE_FIELDS = new Set(Object.values(DISPOSITION_FIELDS));
-const RETAINED = new Set(Object.keys(DISPOSITION_FIELDS).slice(0, 4));
+const RETAINED = new Set(Object.keys(DISPOSITION_FIELDS).slice(0, 3));
 const DUPLICATE_TARGET_RULE =
   "duplicate_of needs an existing acyclic retained target.";
 const DEDICATED_PATHS = new Set([

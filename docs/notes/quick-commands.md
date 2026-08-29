@@ -67,6 +67,7 @@ pnpm docs:navigation-eval -- --validate <result.json>  # Recompute authority, ev
 pnpm verification:inventory:check  # Validate Phase 0 inventory schema, unique IDs, and complete dispositions
 pnpm verification:manifest:write   # Regenerate the fixed-source gate control-plane baseline manifest
 pnpm verification:manifest:check   # Recompute and compare the fixed-source baseline manifest
+pnpm verification:evidence:check   # Run the Phase 0 checker suite plus both non-writing evidence checks
 pnpm agent:context-budget --strict # Enforce root, scoped-file, and aggregate-route AGENTS byte caps
 # Run feedback-state first. Final all-clear needs the current-head Codex
 # PR-description +1 or this exact-head human override:

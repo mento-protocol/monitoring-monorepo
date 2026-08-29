@@ -24,11 +24,12 @@ The machine-readable evidence is:
 - [Architecture decision](../adr/0078-staged-verification-redesign.md)
 - [Migration plan](../PLAN-progressive-verification-graph.md)
 
-Use `pnpm verification:inventory:check` to validate the record schema, unique
-IDs, complete dispositions, and structural duplicate references. Use
-`pnpm verification:manifest:write` to regenerate the fixed-source line manifest.
-Use `pnpm verification:manifest:check` to compare it. The checker does not
-decide inventory completeness, safeguard meaning, risk coverage, ownership, or
+Use `pnpm verification:evidence:check` for the Phase 0 author closeout. It runs
+the checker regression suite, validates the inventory schema, and compares the
+fixed-source line manifest. Use `pnpm verification:manifest:write` to regenerate
+that manifest. Phase 0 does not add the closeout to the gate or required CI
+because this issue changes no blocking behavior. The checker does not decide
+inventory completeness, safeguard meaning, risk coverage, ownership, or
 routing. Reviewers own those judgments.
 
 ## Snapshot boundary
