@@ -25,10 +25,10 @@ maintenance utilities.
 subdirectories.
 
 - `deploy/`: deploy wrappers and Node helpers
-- `workflows/`: scripts backing Actions workflow jobs
+- `workflows/`: Actions workflow support
 - `bootstrap/`: container and hosted-session setup
 - `context/`: agent context, budget, doc catalog
-- `docs/`: audit planner, garden, navigation eval
+- `docs/`: audit, garden, navigation, verification evidence
 - `pr/`: PR and issue state projections
 - `supply-chain/`: lockfile, audit, pin, skew gates
 - `mcp/`: MCP broker, launcher, config rendering
@@ -54,8 +54,8 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 
 ## Why Files Stay Flat
 
-`scripts/` has thirteen path-pin classes. Move each pin with its file, except
-the `agent-autoreview.sh` feedback-runtime pins below.
+`scripts/` has 14 path-pin classes. Move each pin with its file, except the
+`agent-autoreview.sh` feedback-runtime pins.
 
 - **Autoreview runtime pins.** `agent-autoreview.sh` pins sibling runtime and
   optional `pr-feedback-state-claude.mjs` and
@@ -95,9 +95,10 @@ the `agent-autoreview.sh` feedback-runtime pins below.
 - **Review-eval pins.** `review/run-eval-source-snapshot.sh` joins the
   four-source set in `docs/evals/review-skill.md`; update every listed consumer
   together.
-- **Evaluation fixture forbidden lists.** `forbidden_sources` in
-  `docs/evals/documentation-navigation-fixtures.json` names the navigation
-  eval's own implementation.
+- **Navigation-eval self-pin.** `forbidden_sources` in
+  `docs/evals/documentation-navigation-fixtures.json` names its implementation.
+- **Verification evidence.** Four root aliases pin
+  `docs/check-verification-redesign-evidence{,.test}.mjs`; move them together.
 - **Sentry suite manifest.** `scripts/sentry/gate/sentry-suite-manifest.json`
   keys are exact repo-relative paths, reconciled against `findSentrySuites()`
   by set equality both ways. A moved or renamed suite fails the gate closed.

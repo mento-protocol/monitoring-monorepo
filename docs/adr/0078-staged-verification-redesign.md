@@ -15,6 +15,9 @@ garden_lane: adrs-architecture
 
 **Status:** Accepted (Aug 2026). The migration is in force. The current gate
 stays mandatory until the approved cutover stage completes.
+[ADR 0007](0007-agent-quality-gate-and-merge-oracle.md) remains active for the
+hosted two-projection all-clear and Codex approval gate. This ADR supersedes
+only its mandatory-local-gate target state.
 
 **Scope:** ci/process
 
