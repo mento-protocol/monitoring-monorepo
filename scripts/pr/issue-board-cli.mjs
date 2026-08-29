@@ -18,7 +18,8 @@ export function usage() {
   pnpm issue:claim --issue 901 --issue 902 [--agent claude]
   pnpm issue:review --pr 123 --issue 901 [--issue 902]
   pnpm issue:release --issue 901 [--needs-grooming]
-  pnpm issue:board sync [--dry-run] (repository-wide)
+  pnpm issue:board sync --dry-run       # preview repository-wide changes
+  pnpm issue:board sync                 # apply; requires explicit repository-wide authority
   pnpm issue:board backfill --issue 901 [--dry-run]
 
 Options:

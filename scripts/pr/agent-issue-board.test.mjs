@@ -25,6 +25,7 @@ import {
   sync,
   validateOpenPr,
 } from "./agent-issue-board.mjs";
+import { usage } from "./issue-board-cli.mjs";
 import {
   readBackfillProjectFields,
   writeBackfillProjectFields,
@@ -272,6 +273,16 @@ test("parses claim options for the monitoring workboard", () => {
 });
 
 test("sync is repository-wide and rejects issue scope", () => {
+  const help = usage();
+  assert(
+    help.includes("pnpm issue:board sync --dry-run"),
+    "sync help must name the repository-wide preview",
+  );
+  assert(
+    help.includes("requires explicit repository-wide authority"),
+    "sync help must require repository-wide apply authority",
+  );
+
   const options = parseArgs(["sync", "--dry-run"]);
   assertEqual(options.command, "sync");
   assertEqual(options.dryRun, true);
