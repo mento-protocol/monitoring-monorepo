@@ -34,6 +34,7 @@ export const SCRIPT_MODULE_ARMS = [
       "scripts/*.mjs",
       "scripts/*.cjs",
       "scripts/*.js",
+      "scripts/agent-autoreview-secret-suppressions.json",
       "eslint.config.mjs",
     ],
     effects: [
