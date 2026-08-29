@@ -283,25 +283,81 @@ reap_and_unregister_suite_wrapper() {
   finish_suite_registry_update
 }
 
-cleanup_suite_runner() {
+wait_for_registered_suite_wrappers() {
+  local attempts="$1"
+  local attempt
   local pid
+  local live
+
+  for ((attempt = 0; attempt < attempts; attempt++)); do
+    live=0
+    for pid in "${suite_child_pids[@]:-}"; do
+      [[ -n "$pid" ]] || continue
+      if process_is_runnable "$pid"; then
+        live=1
+        break
+      fi
+    done
+    [[ "$live" -eq 1 ]] || return 0
+    sleep 0.05
+  done
+  return 1
+}
+
+settle_registered_suite_groups() {
   local group_file
   local group_pid
+  local status=0
+
+  [[ -n "$suite_tmp_dir" && -d "$suite_tmp_dir" ]] || return 0
+  for group_file in "$suite_tmp_dir"/*.group; do
+    [[ -f "$group_file" ]] || continue
+    group_pid="$(cat "$group_file" 2>/dev/null || true)"
+    [[ "$group_pid" =~ ^[1-9][0-9]*$ ]] || continue
+    if ! terminate_suite_process_group "$group_pid"; then
+      status=1
+    fi
+  done
+  return "$status"
+}
+
+cleanup_suite_runner() {
+  local pid
+  local cleanup_failed=0
   for pid in "${suite_child_pids[@]:-}"; do
     [[ -n "$pid" ]] || continue
-    terminate_suite_process_group "$pid"
+    signal_owned_suite_child "$pid" TERM || true
   done
-  if [[ -n "$suite_tmp_dir" && -d "$suite_tmp_dir" ]]; then
-    for group_file in "$suite_tmp_dir"/*.group; do
-      [[ -f "$group_file" ]] || continue
-      group_pid="$(cat "$group_file" 2>/dev/null || true)"
-      [[ "$group_pid" =~ ^[0-9]+$ ]] || continue
-      terminate_suite_process_group "$group_pid"
+  if ! wait_for_registered_suite_wrappers 400; then
+    if ! settle_registered_suite_groups; then
+      cleanup_failed=1
+    fi
+    for pid in "${suite_child_pids[@]:-}"; do
+      [[ -n "$pid" ]] || continue
+      if process_is_runnable "$pid"; then
+        signal_owned_suite_child "$pid" KILL || true
+      fi
     done
+    if ! wait_for_registered_suite_wrappers 100; then
+      cleanup_failed=1
+    fi
   fi
-  if [[ -n "$suite_tmp_dir" && -d "$suite_tmp_dir" ]]; then
+  if ! settle_registered_suite_groups; then
+    cleanup_failed=1
+  fi
+  for pid in "${suite_child_pids[@]:-}"; do
+    [[ -n "$pid" ]] || continue
+    if process_is_runnable "$pid"; then
+      printf 'suite wrapper survived bounded cleanup: %s\n' "$pid" >&2
+      cleanup_failed=1
+      continue
+    fi
+    wait "$pid" 2>/dev/null || true
+  done
+  if [[ "$cleanup_failed" -eq 0 && -n "$suite_tmp_dir" && -d "$suite_tmp_dir" ]]; then
     rm -rf -- "$suite_tmp_dir"
   fi
+  return "$cleanup_failed"
 }
 
 settle_suite_darwin_child_lineage() {
@@ -554,6 +610,75 @@ process_is_runnable() {
   # If process state cannot be inspected, preserve the existing fail-closed
   # behavior and only accept an exit that kill(2) can confirm.
   kill -0 "$pid" 2>/dev/null
+}
+
+read_linux_process_identity() {
+  local pid="$1"
+  local stat_path="/proc/$pid/stat"
+  local stat_line
+  local stat_tail
+  local fields=()
+
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 2
+  [[ -e "/proc/$pid" ]] || return 3
+  [[ -r "$stat_path" ]] || return 2
+  if ! IFS= read -r stat_line <"$stat_path"; then
+    [[ -e "/proc/$pid" ]] || return 3
+    return 2
+  fi
+  stat_tail="${stat_line##*) }"
+  [[ "$stat_tail" != "$stat_line" ]] || return 2
+  read -r -a fields <<<"$stat_tail"
+  [[
+    "${#fields[@]}" -gt 19 &&
+      "${fields[0]}" =~ ^[A-Za-z]$ &&
+      "${fields[19]}" =~ ^[1-9][0-9]*$
+  ]] || return 2
+  printf '%s\t%s\n' "${fields[19]}" "${fields[0]}"
+}
+
+linux_fixture_identity_is_runnable() {
+  local pid="$1"
+  local expected_start_tick="$2"
+  local identity
+  local identity_status
+  local current_start_tick
+  local state
+
+  [[ "$expected_start_tick" =~ ^[1-9][0-9]*$ ]] || return 2
+  if identity="$(read_linux_process_identity "$pid")"; then
+    identity_status=0
+  else
+    identity_status=$?
+  fi
+  [[ "$identity_status" -ne 3 ]] || return 1
+  [[ "$identity_status" -eq 0 ]] || return 2
+  IFS=$'\t' read -r current_start_tick state <<<"$identity"
+  [[ "$current_start_tick" == "$expected_start_tick" ]] || return 1
+  case "$state" in
+    Z | X) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+wait_for_linux_fixture_identity_exit() {
+  local pid="$1"
+  local expected_start_tick="$2"
+  local attempts="${3:-100}"
+  local attempt
+  local identity_status
+
+  for ((attempt = 0; attempt < attempts; attempt++)); do
+    if linux_fixture_identity_is_runnable "$pid" "$expected_start_tick"; then
+      sleep 0.05
+      continue
+    else
+      identity_status=$?
+    fi
+    [[ "$identity_status" -eq 1 ]] && return 0
+    return 2
+  done
+  return 1
 }
 
 wait_for_process_exit_or_zombie() {
@@ -1086,6 +1211,20 @@ const runExactHelper = (args, accepted = [0]) => {
   }
   return result;
 };
+const readLinuxStartTick = (pid) => {
+  const value = readFileSync(`/proc/${pid}/stat`, "utf8");
+  const close = value.lastIndexOf(")");
+  if (close < 0) throw new Error("malformed Linux process identity");
+  const fields = value
+    .slice(close + 1)
+    .trim()
+    .split(/\s+/u);
+  const startTick = fields[19];
+  if (!/^[1-9]\d*$/u.test(startTick ?? "")) {
+    throw new Error("malformed Linux process start identity");
+  }
+  return startTick;
+};
 if (process.platform === "darwin") {
   if (
     nativeRuntimeSource !==
@@ -1163,6 +1302,16 @@ if (process.platform === "darwin") {
     await reviewerClosed;
     throw error;
   }
+}
+if (process.platform === "linux") {
+  writeFileSync(
+    `${stateDir}/worker.start-tick`,
+    `${readLinuxStartTick(process.pid)}\n`,
+  );
+  writeFileSync(
+    `${stateDir}/reviewer.start-tick`,
+    `${readLinuxStartTick(reviewer.pid)}\n`,
+  );
 }
 writeFileSync(`${stateDir}/worker.pid`, `${process.pid}\n`);
 writeFileSync(`${stateDir}/reviewer.pid`, `${reviewer.pid}\n`);
@@ -4959,6 +5108,157 @@ NODE
   done
 }
 
+settle_suite_wrapper_signal_fixture() {
+  local fixture_state="$1"
+  local suite_pid="$2"
+  local host_platform
+  local reviewer_pid=""
+  local reviewer_start_tick=""
+  local worker_pid=""
+  local worker_start_tick=""
+  local role
+  local pid
+  local start_tick
+  local identity_status
+  local attempt
+  local live=1
+  local cleanup_failed=0
+
+  [[ "$suite_pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  host_platform="$(/usr/bin/uname -s 2>/dev/null)" || return 1
+  [[ "$host_platform" == "Darwin" || "$host_platform" == "Linux" ]] ||
+    return 1
+  for role in reviewer worker; do
+    pid=""
+    start_tick=""
+    if [[ -s "$fixture_state/$role.pid" ]]; then
+      IFS= read -r pid <"$fixture_state/$role.pid" || pid=""
+      if [[ ! "$pid" =~ ^[1-9][0-9]*$ ]]; then
+        printf 'nested suite recorded an invalid %s pid: %s\n' \
+          "$role" "$pid" >&2
+        cleanup_failed=1
+        pid=""
+      fi
+    fi
+    if [[ "$host_platform" == "Linux" && -n "$pid" ]]; then
+      if [[ -s "$fixture_state/$role.start-tick" ]]; then
+        IFS= read -r start_tick <"$fixture_state/$role.start-tick" ||
+          start_tick=""
+      fi
+      if [[ ! "$start_tick" =~ ^[1-9][0-9]*$ ]]; then
+        printf 'nested suite recorded an invalid %s start tick: %s\n' \
+          "$role" "$start_tick" >&2
+        cleanup_failed=1
+        pid=""
+        start_tick=""
+      fi
+    fi
+    if [[ "$role" == "reviewer" ]]; then
+      reviewer_pid="$pid"
+      reviewer_start_tick="$start_tick"
+    else
+      worker_pid="$pid"
+      worker_start_tick="$start_tick"
+    fi
+  done
+
+  if [[ "$host_platform" == "Darwin" ]]; then
+    if ! settle_suite_darwin_child_lineage "$suite_pid" 0; then
+      cleanup_failed=1
+    fi
+  else
+    for role in reviewer worker; do
+      if [[ "$role" == "reviewer" ]]; then
+        pid="$reviewer_pid"
+        start_tick="$reviewer_start_tick"
+      else
+        pid="$worker_pid"
+        start_tick="$worker_start_tick"
+      fi
+      [[ -n "$pid" ]] || continue
+      if linux_fixture_identity_is_runnable "$pid" "$start_tick"; then
+        kill -KILL -- "$pid" 2>/dev/null || true
+      else
+        identity_status=$?
+        if [[ "$identity_status" -eq 2 ]]; then
+          printf 'could not validate nested suite %s identity: %s\n' \
+            "$role" "$pid" >&2
+          cleanup_failed=1
+        fi
+      fi
+    done
+    if process_is_runnable "$suite_pid"; then
+      kill -KILL -- "$suite_pid" 2>/dev/null || true
+    fi
+  fi
+
+  for ((attempt = 0; attempt < 100; attempt++)); do
+    live=0
+    if process_is_runnable "$suite_pid"; then
+      live=1
+    fi
+    for role in worker reviewer; do
+      if [[ "$role" == "reviewer" ]]; then
+        pid="$reviewer_pid"
+        start_tick="$reviewer_start_tick"
+      else
+        pid="$worker_pid"
+        start_tick="$worker_start_tick"
+      fi
+      [[ -n "$pid" ]] || continue
+      if [[ "$host_platform" == "Linux" ]]; then
+        if linux_fixture_identity_is_runnable "$pid" "$start_tick"; then
+          live=1
+        else
+          identity_status=$?
+          if [[ "$identity_status" -eq 2 ]]; then
+            live=1
+            cleanup_failed=1
+          fi
+        fi
+      elif process_is_runnable "$pid"; then
+        live=1
+      fi
+    done
+    [[ "$live" -eq 1 ]] || break
+    sleep 0.05
+  done
+  if [[ "$live" -eq 1 ]]; then
+    if process_is_runnable "$suite_pid"; then
+      printf 'nested suite fixture process survived bounded cleanup: suite %s\n' \
+        "$suite_pid" >&2
+    fi
+    for role in worker reviewer; do
+      if [[ "$role" == "reviewer" ]]; then
+        pid="$reviewer_pid"
+        start_tick="$reviewer_start_tick"
+      else
+        pid="$worker_pid"
+        start_tick="$worker_start_tick"
+      fi
+      [[ -n "$pid" ]] || continue
+      if [[ "$host_platform" == "Linux" ]]; then
+        if linux_fixture_identity_is_runnable "$pid" "$start_tick"; then
+          printf 'nested suite fixture process survived bounded cleanup: %s %s\n' \
+            "$role" "$pid" >&2
+        else
+          identity_status=$?
+          if [[ "$identity_status" -eq 2 ]]; then
+            printf 'nested suite fixture identity remained unreadable: %s %s\n' \
+              "$role" "$pid" >&2
+          fi
+        fi
+      elif process_is_runnable "$pid"; then
+        printf 'nested suite fixture process survived bounded cleanup: %s %s\n' \
+          "$role" "$pid" >&2
+      fi
+    done
+    return 1
+  fi
+  wait "$suite_pid" 2>/dev/null || true
+  return "$cleanup_failed"
+}
+
 run_suite_wrapper_signal_regression() {
   local fixture_state="$tmp_dir/suite-wrapper-signal-state"
   local registration_marker="$fixture_state/registration-window"
@@ -4967,9 +5267,13 @@ run_suite_wrapper_signal_regression() {
   local suite_pid
   local suite_status
   local descendant_pid
+  local descendant_start_tick
+  local descendant_status
+  local host_platform
   local launched=0
   mkdir "$fixture_state"
   prepare_suite_darwin_identity_helper
+  host_platform="$(/usr/bin/uname -s)"
 
   AUTOREVIEW_TEST_FOCUS=suite \
     AUTOREVIEW_TEST_SUITE_SIGNAL_FIXTURE=1 \
@@ -4990,7 +5294,11 @@ run_suite_wrapper_signal_regression() {
     sleep 0.05
   done
   if [[ "$launched" -ne 1 ]]; then
-    terminate_suite_process_group "$suite_pid" 0 || true
+    signal_owned_suite_child "$suite_pid" TERM || true
+    wait_for_process_exit_or_zombie "$suite_pid" 1000 || true
+    if ! settle_suite_wrapper_signal_fixture "$fixture_state" "$suite_pid"; then
+      printf 'nested suite startup cleanup did not settle all known processes\n' >&2
+    fi
     printf 'nested suite did not reach its wrapper registration window\n' >&2
     cat "$nested_stdout" >&2
     cat "$nested_stderr" >&2
@@ -5007,10 +5315,27 @@ run_suite_wrapper_signal_regression() {
     exit 1
   fi
 
-  if [[ "$(/usr/bin/uname -s)" == "Darwin" ]]; then
+  if [[ "$host_platform" == "Darwin" ]]; then
     signal_suite_darwin_child_identity "$suite_pid" 15
   else
     kill -TERM "$suite_pid"
+  fi
+  if ! wait_for_process_exit_or_zombie "$suite_pid" 1000; then
+    if ! settle_suite_wrapper_signal_fixture "$fixture_state" "$suite_pid"; then
+      printf 'nested suite timeout cleanup did not settle all known processes\n' >&2
+    fi
+    printf 'nested suite did not stop within the cancellation deadline\n' >&2
+    cat "$nested_stdout" >&2
+    cat "$nested_stderr" >&2
+    if [[ -f "$fixture_state/worker.stderr" ]]; then
+      cat "$fixture_state/worker.stderr" >&2
+    fi
+    for role in worker reviewer; do
+      if [[ -f "$fixture_state/$role.pid" ]]; then
+        printf '%s pid: %s\n' "$role" "$(cat "$fixture_state/$role.pid")" >&2
+      fi
+    done
+    exit 1
   fi
   set +e
   wait "$suite_pid"
@@ -5027,10 +5352,27 @@ run_suite_wrapper_signal_regression() {
   fi
   for role in worker reviewer; do
     descendant_pid="$(cat "$fixture_state/$role.pid")"
-    if ! wait_for_process_exit_or_zombie "$descendant_pid"; then
-      if [[ "$(/usr/bin/uname -s)" == "Linux" ]]; then
-        kill -KILL "$descendant_pid" 2>/dev/null || true
+    if [[ "$host_platform" == "Linux" ]]; then
+      descendant_start_tick="$(cat "$fixture_state/$role.start-tick" 2>/dev/null || true)"
+      if [[ ! "$descendant_start_tick" =~ ^[1-9][0-9]*$ ]]; then
+        printf 'nested suite recorded an invalid %s start tick: %s\n' \
+          "$role" "$descendant_start_tick" >&2
+        exit 1
       fi
+      descendant_status=0
+      wait_for_linux_fixture_identity_exit \
+        "$descendant_pid" "$descendant_start_tick" || descendant_status=$?
+      if [[ "$descendant_status" -ne 0 ]]; then
+        if [[ "$descendant_status" -eq 1 ]] &&
+          linux_fixture_identity_is_runnable \
+            "$descendant_pid" "$descendant_start_tick"; then
+          kill -KILL -- "$descendant_pid" 2>/dev/null || true
+        fi
+        printf 'nested suite cancellation orphaned %s process: %s\n' \
+          "$role" "$descendant_pid" >&2
+        exit 1
+      fi
+    elif ! wait_for_process_exit_or_zombie "$descendant_pid"; then
       printf 'nested suite cancellation orphaned %s process: %s\n' \
         "$role" "$descendant_pid" >&2
       exit 1
