@@ -21,7 +21,9 @@ import {
   assertStableFileRead,
   assertStableEvidencePathAfterRead,
   buildBoundedReviewPrompts,
+  createExactPatchSecretSuppressionForTest,
   createReviewInputCollector,
+  createTrustedGitPatchSecretSuppression,
   getIndexerHandlerInvariantChecklistDecisions,
   getIndexerHandlerInvariantRoutingFamilies,
   isWithin,
@@ -707,6 +709,432 @@ assert.match(
   /credential-like token/,
   "even a genuine bundle redaction is refused when it arrives as supplemental input",
 );
+
+const exactPatchSuppressionText = readFileSync(
+  path.join(import.meta.dirname, "agent-autoreview-secret-suppressions.json"),
+  "utf8",
+);
+const exactPatchSuppressionRecords = JSON.parse(exactPatchSuppressionText);
+const canonicalExactPatchConfig = (records) =>
+  `${JSON.stringify(records, null, 2)}\n`;
+const mutateExactPatchConfig = (mutate) => {
+  const records = JSON.parse(exactPatchSuppressionText);
+  mutate(records[0], records);
+  return canonicalExactPatchConfig(records);
+};
+const exactPatchRecord = exactPatchSuppressionRecords[0];
+const exactFixturePatch = `${exactPatchRecord.patchLines.join("\n")}\n`;
+
+assert.throws(
+  () => createTrustedGitPatchSecretSuppression(repoRoot),
+  /must be outside the reviewed checkout/,
+  "the production loader never reads suppression policy from the reviewed checkout",
+);
+
+assert.equal(
+  secretLikeReason(exactFixturePatch, { gitDiff: true }),
+  exactPatchRecord.expectedFinding,
+  "the sealed file patch records the exact first suppression-free finding",
+);
+const exactPatchSession = createExactPatchSecretSuppressionForTest(
+  exactPatchSuppressionText,
+);
+const maskedFixturePatch =
+  exactPatchSession.maskTrustedGitPatch(exactFixturePatch);
+assert.equal(
+  maskedFixturePatch.split("\n")[exactPatchRecord.anchorIndex],
+  "-",
+  "the exact match masks only the removed anchor line",
+);
+assert.equal(
+  secretLikeReason(maskedFixturePatch, { gitDiff: true }),
+  null,
+  "the masked exact file patch scans clean without suppression",
+);
+assert.throws(
+  () => exactPatchSession.maskTrustedGitPatch(exactFixturePatch),
+  /more than one record occurrence/,
+  "one suppression record cannot match twice across patch captures",
+);
+
+const patchWithDrift = exactFixturePatch.replace(
+  "StableTokenCustodyState: [] };",
+  "StableTokenCustodyState: [] }; ",
+);
+const driftResult = createExactPatchSecretSuppressionForTest(
+  exactPatchSuppressionText,
+).maskTrustedGitPatch(patchWithDrift);
+assert.equal(
+  driftResult,
+  patchWithDrift,
+  "one changed patch byte does not match",
+);
+assert.equal(
+  secretLikeReason(driftResult, { gitDiff: true }),
+  exactPatchRecord.expectedFinding,
+  "byte drift leaves the original finding blocked",
+);
+
+for (const [label, drift] of [
+  [
+    "old blob",
+    exactFixturePatch.replace(
+      "index 0fc286e74b51c4636d2fd1669dd496d913fabfb5..",
+      "index 1fc286e74b51c4636d2fd1669dd496d913fabfb5..",
+    ),
+  ],
+  ["old line", exactFixturePatch.replace("@@ -1654,8", "@@ -1655,8")],
+  [
+    "path",
+    exactFixturePatch.replaceAll(
+      "ui-dashboard/tests/browser/fixtures/hasura-fixture-server.mjs",
+      "ui-dashboard/tests/browser/fixtures/other-server.mjs",
+    ),
+  ],
+  [
+    "line kind",
+    exactFixturePatch.replace(
+      exactPatchRecord.patchLines[exactPatchRecord.anchorIndex],
+      ` ${exactPatchRecord.patchLines[exactPatchRecord.anchorIndex].slice(1)}`,
+    ),
+  ],
+]) {
+  const result = createExactPatchSecretSuppressionForTest(
+    exactPatchSuppressionText,
+  ).maskTrustedGitPatch(drift);
+  assert.equal(result, drift, `${label} drift does not match the sealed patch`);
+  assert.notEqual(
+    secretLikeReason(result, { gitDiff: true }),
+    null,
+    `${label} drift remains blocked`,
+  );
+}
+
+assert.throws(
+  () =>
+    createExactPatchSecretSuppressionForTest(
+      mutateExactPatchConfig((record) => {
+        record.oldLine += 1;
+      }),
+    ),
+  /anchor old line/,
+  "the configured old line is derived from the count-valid hunk",
+);
+assert.throws(
+  () =>
+    createExactPatchSecretSuppressionForTest(
+      mutateExactPatchConfig((record) => {
+        record.patchLines[1] = record.patchLines[1].replace(
+          /^[^.]+/,
+          "0fc286e",
+        );
+      }),
+    ),
+  /full, distinct ordinary blob IDs/,
+  "abbreviated old blob IDs are rejected",
+);
+assert.throws(
+  () =>
+    createExactPatchSecretSuppressionForTest(
+      mutateExactPatchConfig((record) => {
+        record.patchLines[3] = "+++ b/ui-dashboard/other-fixture.mjs";
+      }),
+    ),
+  /invalid old or new path headers/,
+  "a mismatched new path header is rejected",
+);
+assert.throws(
+  () =>
+    createExactPatchSecretSuppressionForTest(
+      mutateExactPatchConfig((record) => {
+        record.patchLines[4] = record.patchLines[4].replace(
+          "-1654,8",
+          "-1654,9",
+        );
+      }),
+    ),
+  /hunk counts/,
+  "malformed hunk counts are rejected",
+);
+assert.throws(
+  () =>
+    createExactPatchSecretSuppressionForTest(
+      mutateExactPatchConfig((record) => {
+        record.patchLines[4] = "@@@ -1654,8 +1654,8 @@@";
+      }),
+    ),
+  /ordinary hunk/,
+  "combined hunk headers are rejected",
+);
+
+for (const [label, anchorIndex] of [
+  ["added", 10],
+  ["context", 9],
+]) {
+  assert.throws(
+    () =>
+      createExactPatchSecretSuppressionForTest(
+        mutateExactPatchConfig((record) => {
+          record.anchorIndex = anchorIndex;
+          record.oldLine = label === "added" ? 1659 : 1658;
+        }),
+      ),
+    /anchor must be a removed hunk line/,
+    `${label} lines cannot serve as suppression anchors`,
+  );
+}
+
+assert.throws(
+  () =>
+    createExactPatchSecretSuppressionForTest(
+      mutateExactPatchConfig((record) => {
+        record.patchLines[9] = record.patchLines[record.anchorIndex];
+        record.patchLines[4] = record.patchLines[4].replace(
+          "+1654,8",
+          "+1654,7",
+        );
+      }),
+    ),
+  /exactly one anchor/,
+  "a second byte-identical removed anchor is rejected",
+);
+assert.throws(
+  () =>
+    createExactPatchSecretSuppressionForTest(
+      `${exactPatchSuppressionText}${exactPatchSuppressionText}`,
+    ),
+  /valid JSON/,
+  "concatenated configs are rejected",
+);
+assert.throws(
+  () =>
+    createExactPatchSecretSuppressionForTest(
+      canonicalExactPatchConfig([
+        exactPatchSuppressionRecords[0],
+        exactPatchSuppressionRecords[0],
+      ]),
+    ),
+  /duplicate record or file patch/,
+  "duplicate records are rejected",
+);
+assert.throws(
+  () =>
+    createExactPatchSecretSuppressionForTest(
+      `${exactFixturePatch}${exactFixturePatch}`,
+    ),
+  /valid JSON/,
+  "patch text cannot be used as a config override",
+);
+assert.throws(
+  () =>
+    createExactPatchSecretSuppressionForTest(
+      exactPatchSuppressionText,
+    ).maskTrustedGitPatch(`${exactFixturePatch}${exactFixturePatch}`),
+  /more than one record occurrence/,
+  "two identical file-patch occurrences are rejected",
+);
+
+const secondExactPatchRecord = JSON.parse(
+  JSON.stringify(exactPatchSuppressionRecords[0]),
+);
+secondExactPatchRecord.reason =
+  "A second distinct test record must not match in the same session.";
+secondExactPatchRecord.patchLines = secondExactPatchRecord.patchLines.map(
+  (line) =>
+    line.replaceAll(
+      "ui-dashboard/tests/browser/fixtures/hasura-fixture-server.mjs",
+      "ui-dashboard/tests/browser/fixtures/second-hasura-fixture-server.mjs",
+    ),
+);
+const secondExactFixturePatch = `${secondExactPatchRecord.patchLines.join("\n")}\n`;
+assert.throws(
+  () =>
+    createExactPatchSecretSuppressionForTest(
+      canonicalExactPatchConfig([
+        exactPatchSuppressionRecords[0],
+        secondExactPatchRecord,
+      ]),
+    ).maskTrustedGitPatch(`${exactFixturePatch}${secondExactFixturePatch}`),
+  /more than one record occurrence/,
+  "two distinct suppression records cannot both match one review session",
+);
+assert.throws(
+  () =>
+    createExactPatchSecretSuppressionForTest(
+      exactPatchSuppressionText,
+    ).maskTrustedGitPatch(`commit prose\n${exactFixturePatch}`),
+  /must start with a file-patch header/,
+  "commit prose never enters the trusted pure-patch matcher",
+);
+assert.throws(
+  () =>
+    createExactPatchSecretSuppressionForTest(
+      exactPatchSuppressionText,
+    ).maskTrustedGitPatch(exactFixturePatch.trimEnd()),
+  /must end with a newline/,
+  "a truncated patch is rejected",
+);
+
+const weakSiblingValue = "a".repeat(24);
+const weakSiblingKey = ["SERVICE", "API", "KEY"].join("_");
+const weakSiblingPatch = [
+  "diff --git a/scripts/sibling.mjs b/scripts/sibling.mjs",
+  `index ${"1".repeat(40)}..${"2".repeat(40)} 100644`,
+  "--- a/scripts/sibling.mjs",
+  "+++ b/scripts/sibling.mjs",
+  "@@ -1 +1,2 @@",
+  " const unchanged = true;",
+  `+${weakSiblingKey}="${weakSiblingValue}"`,
+  "",
+].join("\n");
+const maskedWithSibling = createExactPatchSecretSuppressionForTest(
+  exactPatchSuppressionText,
+).maskTrustedGitPatch(`${exactFixturePatch}${weakSiblingPatch}`);
+assert.match(
+  secretLikeReason(maskedWithSibling, { gitDiff: true }),
+  /literal credential/,
+  "a weaker sibling secret remains blocked after the exact anchor is masked",
+);
+
+for (const [label, mutate] of [
+  [
+    "rename",
+    (record) => record.patchLines.splice(1, 0, "similarity index 100%"),
+  ],
+  ["copy", (record) => record.patchLines.splice(1, 0, "copy from source.mjs")],
+  [
+    "added file",
+    (record) => record.patchLines.splice(1, 0, "new file mode 100644"),
+  ],
+  [
+    "deleted file",
+    (record) => record.patchLines.splice(1, 0, "deleted file mode 100644"),
+  ],
+  [
+    "binary",
+    (record) => {
+      record.patchLines = [
+        record.patchLines[0],
+        record.patchLines[1],
+        "Binary files a/example and b/example differ",
+        record.patchLines[2],
+        record.patchLines[3],
+        record.patchLines[record.anchorIndex],
+      ];
+      record.anchorIndex = 5;
+    },
+  ],
+  [
+    "submodule",
+    (record) => {
+      record.patchLines[1] = record.patchLines[1].replace("100644", "160000");
+    },
+  ],
+  [
+    "combined diff",
+    (record) => {
+      record.patchLines[0] = "diff --cc ui-dashboard/example.mjs";
+    },
+  ],
+  [
+    "second hunk",
+    (record) => {
+      record.patchLines.push("@@ -2000 +2000 @@", " old", "+new");
+    },
+  ],
+]) {
+  assert.throws(
+    () =>
+      createExactPatchSecretSuppressionForTest(mutateExactPatchConfig(mutate)),
+    undefined,
+    `${label} file patches are ineligible for suppression`,
+  );
+}
+
+assert.doesNotThrow(
+  () =>
+    createExactPatchSecretSuppressionForTest(
+      mutateExactPatchConfig((record) => {
+        const oldOid = "0fc286e74b51c4636d2fd1669dd496d913fabfb5";
+        const newOid = "4b57d28225f0126f2960900da41711193f05c5dd";
+        record.patchLines[1] = `index ${oldOid}${"0".repeat(24)}..${newOid}${"0".repeat(24)} 100644`;
+      }),
+    ),
+  "full SHA-256 blob IDs are accepted",
+);
+assert.doesNotThrow(
+  () =>
+    createExactPatchSecretSuppressionForTest(
+      mutateExactPatchConfig((record) => {
+        const oldPath =
+          "ui-dashboard/tests/browser/fixtures/hasura-fixture-server.mjs";
+        const bracketPath =
+          "ui-dashboard/src/app/cdps/[symbol]/hasura-fixture-server.mjs";
+        record.patchLines = record.patchLines.map((line) =>
+          line.replaceAll(oldPath, bracketPath),
+        );
+      }),
+    ),
+  "safe bracketed dynamic-route paths are accepted",
+);
+
+for (const [label, invalidConfig] of [
+  ["missing final newline", exactPatchSuppressionText.trimEnd()],
+  ["extra final newline", `${exactPatchSuppressionText}\n`],
+  ["compact JSON", JSON.stringify(exactPatchSuppressionRecords)],
+  [
+    "unknown key",
+    mutateExactPatchConfig((record) => {
+      record.unknown = true;
+    }),
+  ],
+  [
+    "reordered keys",
+    canonicalExactPatchConfig([
+      {
+        expectedFinding: exactPatchRecord.expectedFinding,
+        reason: exactPatchRecord.reason,
+        anchorIndex: exactPatchRecord.anchorIndex,
+        oldLine: exactPatchRecord.oldLine,
+        patchLines: exactPatchRecord.patchLines,
+      },
+    ]),
+  ],
+  [
+    "escaped bidi",
+    exactPatchSuppressionText.replace(
+      exactPatchRecord.reason,
+      `unsafe\\u202e${exactPatchRecord.reason}`,
+    ),
+  ],
+  ["empty records", canonicalExactPatchConfig([])],
+  [
+    "too many records",
+    canonicalExactPatchConfig(
+      Array.from({ length: 17 }, () => exactPatchRecord),
+    ),
+  ],
+  [
+    "too many patch lines",
+    mutateExactPatchConfig((record) => {
+      record.patchLines.push(
+        ...Array.from({ length: 257 }, () => " extra context"),
+      );
+    }),
+  ],
+  [
+    "overlong patch line",
+    mutateExactPatchConfig((record) => {
+      record.patchLines[5] = ` ${"x".repeat(8192)}`;
+    }),
+  ],
+]) {
+  assert.throws(
+    () => createExactPatchSecretSuppressionForTest(invalidConfig),
+    undefined,
+    `${label} config is rejected`,
+  );
+}
 
 for (const label of [
   "PRIVATE KEY",

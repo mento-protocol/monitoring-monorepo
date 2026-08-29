@@ -208,6 +208,7 @@ Authority: canonical
 - [`docs/adr/0075-pr-merge.md`](adr/0075-pr-merge.md) — One sanctioned human-only merge path
 - [`docs/adr/0076-fair-quality-gate-coordinator.md`](adr/0076-fair-quality-gate-coordinator.md) — Fair local quality-gate coordination across worktrees
 - [`docs/adr/0077-operator-triggered-backlog-sweep.md`](adr/0077-operator-triggered-backlog-sweep.md) — Operator-triggered backlog sweep with isolated workers
+- [`docs/adr/0078-sealed-exact-file-patch-secret-suppression.md`](adr/0078-sealed-exact-file-patch-secret-suppression.md) — Autoreview permits only sealed exact-file-patch secret suppression
 
 Authority: non-canonical
 

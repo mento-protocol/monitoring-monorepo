@@ -16,6 +16,11 @@ garden_lane: adrs-architecture
 **Status:** Accepted (Aug 2026), in force.
 **Scope:** ci/process
 
+**Current refinement:** [ADR 0078](0078-sealed-exact-file-patch-secret-suppression.md)
+permits one sealed, complete, byte-exact Git file-patch record for issue #2114.
+It does not permit a value or line registry and does not implement the deferred
+source-provenance oracle below.
+
 ## Context
 
 `pnpm agent:autoreview` builds a review bundle and refuses to send it when

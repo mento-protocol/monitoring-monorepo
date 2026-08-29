@@ -363,6 +363,7 @@ jobs:
               - scripts/agent-autoreview.sh
               - scripts/agent-autoreview.mjs
               - scripts/agent-autoreview-core.mjs
+              - scripts/agent-autoreview-secret-suppressions.json
               - scripts/gate/darwin-process-identity.c
               - scripts/gate/darwin-process-identity-runtime.inc.c
               - scripts/gate/darwin-process-identity-helper.mjs

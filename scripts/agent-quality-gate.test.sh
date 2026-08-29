@@ -3859,6 +3859,8 @@ adapter_drift_lock="$(cd "$adapter_drift_lock" && pwd -P)"
     scripts/gate/routing-table scripts/lib tools
   cp "$repo_root/scripts/agent-quality-gate.sh" scripts/agent-quality-gate.sh
   cp "$repo_root/scripts/agent-autoreview-core.mjs" scripts/agent-autoreview-core.mjs
+  cp "$repo_root/scripts/agent-autoreview-secret-suppressions.json" \
+    scripts/agent-autoreview-secret-suppressions.json
   cp "$repo_root/scripts/docs/docs-navigation-eval-helpers.mjs" scripts/docs/
   cp "$repo_root/scripts/lib/gh-issue-lifecycle.mjs" scripts/lib/
   cp "$repo_root/scripts/gate/lockfile-scope.mjs" scripts/gate/
@@ -10358,6 +10360,8 @@ cp "$repo_root/scripts/agent-quality-gate.sh" \
   "$signature_runtime_root/scripts/agent-quality-gate.sh"
 cp "$repo_root/scripts/agent-autoreview-core.mjs" \
   "$signature_runtime_root/scripts/agent-autoreview-core.mjs"
+cp "$repo_root/scripts/agent-autoreview-secret-suppressions.json" \
+  "$signature_runtime_root/scripts/agent-autoreview-secret-suppressions.json"
 cp "$repo_root/scripts/gate/run-handles.sh" \
   "$signature_runtime_root/scripts/gate/run-handles.sh"
 cp "$repo_root/scripts/gate/darwin-broker-launch-preflight.mjs" \
@@ -10415,6 +10419,7 @@ chmod +x "$signature_runtime_root/scripts/agent-quality-gate.sh"
   printf 'second fixture\n' > second.txt
   printf '# fixture gate implementation\n' > scripts/agent-quality-gate.sh
   printf '// fixture autoreview core routing source\n' > scripts/agent-autoreview-core.mjs
+  printf '[]\n' > scripts/agent-autoreview-secret-suppressions.json
   printf '// fixture alias validator\n' > scripts/check-agent-quality-gate-package-scripts.mjs
   printf '# fixture routing classifier\n' > scripts/docs/docs-navigation-eval-helpers.mjs
   printf '# fixture lockfile scope classifier\n' > scripts/gate/lockfile-scope.mjs
@@ -12242,6 +12247,9 @@ assert_contains "$fixture_canary (autoreview secret scanner changed)"
 assert_contains "- pnpm gate:routing-table:test (indexer invariant routing source changed)"
 assert_contains "- pnpm agent:quality-gate:test (indexer invariant routing source changed)"
 
+run_gate "scripts/agent-autoreview-secret-suppressions.json"
+assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"
+
 # The protected-main classifier sees both targets below as route:false. A
 # candidate core can add the new owner or reclassify the existing owner, so the
 # changed core path must carry the checklist independently of those decisions.
@@ -12647,6 +12655,10 @@ run_gate "scripts/pr/check-pr-description.test.mjs"
 assert_contains "- node scripts/pr/check-pr-description.test.mjs (PR description validator changed)"
 
 run_gate "scripts/agent-autoreview.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"
+
+run_gate "scripts/agent-autoreview-secret-suppressions.json"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"
 

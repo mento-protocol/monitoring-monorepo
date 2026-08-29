@@ -157,20 +157,20 @@ that PR, base branch, current head branch, and frozen head object ID.
 ## Pinned runtime and executable ancestry
 
 The adapter requires the current shell adapter's bytes and executable mode to
-match frozen `HEAD`. In every target mode it requires the complete ten-file
+match frozen `HEAD`. In every target mode it requires the complete eleven-file
 runtime closure at that frozen `HEAD` to match the pinned protected-main object.
-This closure contains the shell, MJS helper, core, two Darwin identity sources,
-Darwin helper, Darwin lineage model, Darwin lineage state runtime, Darwin
-lineage entry point, and mapped-command process-identity helper. The adapter
-then executes MJS files materialized from that protected object instead of a
-PR-selected base or mutable worktree. Commit mode also requires the selected
-commit's executable runtime to match the protected baseline. Local and
-branch-local prepared bundles require the nine non-shell runtime files in the
-worktree to match frozen `HEAD`. Any dirty or committed runtime change fails
-closed and must be reviewed from a separate trusted checkout with an explicit
-compatible `AUTOREVIEW_HELPER`. Direct default-helper execution in the owning
-checkout uses the same frozen-`HEAD` and protected-main checks and materialized
-runtime.
+This closure contains the shell, MJS helper, core, exact-patch suppression JSON,
+two Darwin identity sources, Darwin helper, Darwin lineage model, Darwin lineage
+state runtime, Darwin lineage entry point, and mapped-command process-identity
+helper. The adapter then executes MJS files materialized from that protected
+object instead of a PR-selected base or mutable worktree. Commit mode also
+requires the selected commit's executable runtime to match the protected
+baseline. Local and branch-local prepared bundles require the ten non-shell
+runtime files in the worktree to match frozen `HEAD`. Any dirty or committed
+runtime change fails closed and must be reviewed from a separate trusted
+checkout with an explicit compatible `AUTOREVIEW_HELPER`. Direct default-helper
+execution in the owning checkout uses the same frozen-`HEAD` and protected-main
+checks and materialized runtime.
 
 Wrapper-owned Node launches, including executable discovery and validation
 helpers, discard `NODE_OPTIONS` and `NODE_PATH`, plus dynamic-loader and
@@ -496,11 +496,26 @@ for composition only for a provider prefix that has to stay recognizable.
 Evidence reads reject symlinks and verify that the opened descriptor still
 identifies the file that was inspected, closing path-swap races.
 
+One narrow exception covers issue #2114. The sealed
+`agent-autoreview-secret-suppressions.json` file records one complete expected
+Git file patch, its full old blob ID, one removed anchor, the anchor's derived
+old line, and the exact first scanner finding. The helper loads this file next
+to the materialized core with the same stable bounded regular-file primitive.
+It accepts no checkout path or override. Git patch captures use full blob IDs,
+three context lines, fixed prefixes, and no external diff or text conversion.
+The matcher requires exact equality with one complete ordinary file-patch
+section. The full capture session can consume only one record occurrence. It
+masks only the removed anchor in a copy. It then scans the matched section, the
+pure patch, and the complete bundle again. Any byte drift, duplicate occurrence,
+malformed structure, or sibling finding fails closed.
+[ADR 0078](../adr/0078-sealed-exact-file-patch-secret-suppression.md) owns the
+full audit contract.
+
 ## Explicit helper attestation
 
 Source fingerprints and untracked-file serialization remain wrapper-owned
 operations executed by the attested helper. A trusted wrapper physically outside
-the reviewed checkout copies its nine-file non-shell runtime closure no-follow
+the reviewed checkout copies its ten-file non-shell runtime closure no-follow
 into the private command runtime. It binds that snapshot to an identity and full
 content manifest before use. The source directories are descriptor-pinned
 across all copies. Their POSIX ancestry, source identities, and macOS ACLs stay

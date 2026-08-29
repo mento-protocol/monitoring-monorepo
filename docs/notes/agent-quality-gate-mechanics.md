@@ -695,8 +695,10 @@ procedure below.
   [0076](../adr/0076-fair-quality-gate-coordinator.md) own those constraints.
 - **Gate mapping pins.** The signature and three Turbo inputs pin
   `gate/routing-table/**`, `gate/mapping*`, and
-  `agent-autoreview-core.mjs`. Runtime hashes use `$script_source_dir`; suites
-  use `$repo_root`. Core edits route both suites. Missing pins freeze the stamp.
+  `agent-autoreview-core.mjs` plus its sealed exact-patch suppression JSON.
+  Runtime hashes use `$script_source_dir`; suites use `$repo_root`. Core and
+  suppression-policy edits route the autoreview suite. Missing pins freeze the
+  stamp.
   [ADR 0069](../adr/0069-gate-routing-table-as-data.md) owns this contract.
 
 ### Where the plan comes from ([ADR 0069](../adr/0069-gate-routing-table-as-data.md))
@@ -2647,14 +2649,16 @@ For each review axis, compare its immutable base tree with the immutable final
 tree before any autoreview entrypoint runs. Treat the axis as runtime-sensitive
 only when
 `scripts/agent-autoreview.sh`, `scripts/agent-autoreview.mjs`,
-`scripts/agent-autoreview-core.mjs`, `scripts/gate/darwin-process-identity.c`,
+`scripts/agent-autoreview-core.mjs`,
+`scripts/agent-autoreview-secret-suppressions.json`,
+`scripts/gate/darwin-process-identity.c`,
 `scripts/gate/darwin-process-identity-runtime.inc.c`,
 `scripts/gate/darwin-process-identity-helper.mjs`,
 `scripts/gate/darwin-process-lineage-model.mjs`,
 `scripts/gate/darwin-process-lineage-state.mjs`,
 `scripts/gate/darwin-process-lineage.mjs`, or
 `scripts/gate/mapped-command-process-identity.mjs` differs. Compare the modes
-and blob IDs for all ten paths on both axes. Fail closed on any Git, blob,
+and blob IDs for all eleven paths on both axes. Fail closed on any Git, blob,
 mode, or comparison error. If neither axis is sensitive, use the clean final
 checkout's absolute wrapper and explicit helper. Invoke it through `/bin/bash`
 from the reviewed checkout. Never use `pnpm agent:autoreview` for this
@@ -2671,9 +2675,10 @@ under review.
 
 Create a clean detached physical checkout at `trusted_oid` outside the reviewed
 worktree. Require its `HEAD` to equal `trusted_oid` and its worktree to be clean.
-Require the wrapper, helper, core, both Darwin identity sources, Darwin helper,
-Darwin lineage model, Darwin lineage state runtime, Darwin lineage entry point,
-and mapped-command process-identity modes and blob IDs to match `trusted_oid`.
+Require the wrapper, helper, core, exact-patch suppression JSON, both Darwin
+identity sources, Darwin helper, Darwin lineage model, Darwin lineage state
+runtime, Darwin lineage entry point, and mapped-command process-identity modes
+and blob IDs to match `trusted_oid`.
 Stop concurrent writers to both checkouts. From the reviewed checkout directory,
 use the same absolute trusted wrapper and explicit compatible
 `AUTOREVIEW_HELPER` for every required axis preparation. Invoke the wrapper
@@ -2684,7 +2689,7 @@ substitute the reviewed checkout's package script or wrapper.
 Before and after every preparation or verification invocation, repeat the
 normalized `origin` identity check; require the retained base and protected-main
 refs to keep their pinned OIDs; require the reviewed checkout to remain clean at
-its immutable final head; and repeat the selected ten-file runtime closure's
+its immutable final head; and repeat the selected eleven-file runtime closure's
 physical-root, mode, and blob checks. Repeat the detached `trusted_oid` and
 clean checks when the runtime is external. Any check error or drift invalidates
 the invocation.

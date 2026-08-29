@@ -58,6 +58,8 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 the `agent-autoreview.sh` feedback-runtime pins below.
 
 - **Autoreview runtime pins.** `agent-autoreview.sh` pins sibling runtime and
+  `agent-autoreview-secret-suppressions.json`. The JSON is sealed policy, not
+  reviewed-checkout input; ADR 0078 owns its exact-patch contract. It also pins
   optional `pr-feedback-state-claude.mjs` and
   `pr-ready-state-review-signals.mjs`; feedback blobs use `origin/main`. Move
   feedback paths in three merges: add copies/fallback; repoint; remove old paths
@@ -89,9 +91,10 @@ the `agent-autoreview.sh` feedback-runtime pins below.
   0076).
 - **Gate mapping pins.** The signature and three Turbo inputs pin
   `gate/routing-table/**`, `gate/mapping*`, and
-  `agent-autoreview-core.mjs`. Runtime hashes use `$script_source_dir`; suites
-  use `$repo_root`. Core edits route both suites; missing pins freeze the stamp
-  (ADR 0069).
+  `agent-autoreview-core.mjs` plus its sealed suppression JSON. Runtime hashes
+  use `$script_source_dir`; suites use `$repo_root`. Core edits route both
+  suites; suppression-policy edits route autoreview; missing pins freeze the
+  stamp (ADRs 0069 and 0078).
 - **Review-eval pins.** `review/run-eval-source-snapshot.sh` joins the
   four-source set in `docs/evals/review-skill.md`; update every listed consumer
   together.

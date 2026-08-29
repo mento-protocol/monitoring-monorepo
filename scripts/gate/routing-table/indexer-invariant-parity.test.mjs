@@ -685,12 +685,24 @@ test("freshness and Turbo inputs pin the external family source", () => {
     signatureEntries?.includes("scripts/agent-autoreview-core.mjs"),
     "implementation_signature() does not list the external family source",
   );
+  assert.ok(
+    signatureEntries?.includes(
+      "scripts/agent-autoreview-secret-suppressions.json",
+    ),
+    "implementation_signature() does not list the sealed suppression config",
+  );
   const turbo = JSON.parse(read("/turbo.json"));
   const input = "$TURBO_ROOT$/scripts/agent-autoreview-core.mjs";
+  const suppressionInput =
+    "$TURBO_ROOT$/scripts/agent-autoreview-secret-suppressions.json";
   for (const task of ["build", "size-limit", "test:browser"]) {
     assert.ok(
       turbo.tasks[task].inputs.includes(input),
       `turbo task ${task} does not pin the external family source`,
+    );
+    assert.ok(
+      turbo.tasks[task].inputs.includes(suppressionInput),
+      `turbo task ${task} does not pin the sealed suppression config`,
     );
   }
 });
