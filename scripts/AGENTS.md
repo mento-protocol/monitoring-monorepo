@@ -3,7 +3,7 @@ title: Scripts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-27
+last_verified: 2026-08-29
 doc_type: agent-instructions
 scope: scripts
 review_interval_days: 90
@@ -54,18 +54,47 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 
 ## Why Files Stay Flat
 
-`scripts/` has twelve path-pin classes. Move each pin with its file in the
-same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
+`scripts/` has thirteen path-pin classes. Move each pin with its file, except
+the `agent-autoreview.sh` feedback-runtime pins below.
 
-- **Autoreview runtime pins.** The sibling runtime and three-merge feedback-path
-  move procedure are in [Script path pins](../docs/notes/agent-quality-gate-mechanics.md#script-path-pins).
-- **Gate routing pins.** Exact routing, CI, manifest, and workflow-bridge pins
-  are in [Script path pins](../docs/notes/agent-quality-gate-mechanics.md#script-path-pins).
-- **Gate runtime pins.** Pre-`cd` helpers, signature roots, and fixture hash
-  roots are in [Script path pins](../docs/notes/agent-quality-gate-mechanics.md#script-path-pins).
-- **Gate mapping pins.** `gate/routing-table/`, mapping-engine, autoreview-core,
-  signature, and Turbo pins are in
-  [Script path pins](../docs/notes/agent-quality-gate-mechanics.md#script-path-pins).
+- **Autoreview runtime pins.** `agent-autoreview.sh` pins sibling runtime and
+  optional `pr-feedback-state-claude.mjs` and
+  `pr-ready-state-review-signals.mjs`; feedback blobs use `origin/main`. Move
+  feedback paths in three merges: add copies/fallback; repoint; remove old paths
+  after no pre-move wrapper remains (ADR 0064).
+- **Gate routing pins.** The gate excludes stub-repo tests with
+  `$script_source_dir == $repo_root/scripts`, and pairs
+  `bootstrap/codex-cloud-setup.{sh,test.sh}` for offline tests. It routes
+  `sentry/autofix/sentry-autofix-refused-inventory.mjs` alone to
+  `pnpm sentry:autofix:run-record:test` and
+  `pnpm sentry:autofix:finalize:test`. Exact
+  `sentry/triage/sentry-triage-project-route.mjs` runs
+  `pnpm sentry:project:test` in the projection arm.
+  `deploy/deploy-indexer-verify{,-analysis}{,.test}.mjs` and
+  `deploy/deploy-indexer-verify-status-identity.mjs` use one any-depth arm;
+  both verifier tests run. The exact `pr/agent-issue-board{,.test}.mjs` and
+  `pr/issue-board-{backfill,cli,commands,projects,state,sync,transport}.mjs` set
+  routes to `pnpm issue:board:test`. Exact
+  `repo-health/check-guardrail-prose{,.test}.mjs` and
+  `repo-health/guardrail-prose.json` route to the guardrail suite. `ci.yml` pins
+  both paths in two jobs, quick-commands names the checker, and the manifest's
+  keys pin `AGENTS.md`, `CLAUDE.md` and the operating card. ADR 0073 has it.
+  `pr/merge-pr*`, both PR-state helpers, and `agent-autoreview.sh` (Codex
+  markers) route `pnpm pr:merge:test`.
+- **Gate runtime pins.** Before `cd`, `agent-quality-gate.sh` resolves
+  `gate/run-handles.sh`, coordinator files,
+  `docs/docs-navigation-eval-helpers.mjs`, and `gate/lockfile-scope.mjs` from
+  `$script_source_dir`; tests hash them from `$repo_root`. Move each path with
+  its routes, signatures, fixtures, and literals (ADRs 0064 and
+  0076).
+- **Gate mapping pins.** The signature and three Turbo inputs pin
+  `gate/routing-table/**`, `gate/mapping*`, and
+  `agent-autoreview-core.mjs`. Runtime hashes use `$script_source_dir`; suites
+  use `$repo_root`. Core edits route both suites; missing pins freeze the stamp
+  (ADR 0069).
+- **Review-eval pins.** `review/run-eval-source-snapshot.sh` joins the
+  four-source set in `docs/evals/review-skill.md`; update every listed consumer
+  together.
 - **Evaluation fixture forbidden lists.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names the navigation
   eval's own implementation.
@@ -83,19 +112,16 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.
-- **Trusted-validator probes.** `pr-description.yml` runs the validator from the
-  PR's base branch **name**, so it resolves to that branch's tip, never a
-  PR-time snapshot. One probe path is enough once the target is live on the base
-  branch (issue 1904); a move commit still needs a temporary dual probe.
-  ADR 0064 has the failure mode.
+- **Trusted-validator probes.** `pr-description.yml` resolves the validator at
+  the PR base-branch tip, not a PR snapshot. After a move, keep dual probes
+  until the new path reaches the base (issue 1904; ADR 0064).
 - **Production infrastructure contract pins.**
   `production-infra-identity-contract/workflow-inventory.mjs` pins exact script
   paths for the workflows it audits.
-- **External console pins.** The Codex Cloud console holds
-  `bootstrap/codex-cloud-setup.sh` and
-  `bootstrap/codex-cloud-maintenance.sh`; Claude Code web resolves
+- **External console pins.** Codex Cloud pins
+  `bootstrap/codex-cloud-{setup,maintenance}.sh`; Claude Code web pins
   `bootstrap/claude-code-web-setup.sh` through `.claude/hooks/session-start.sh`.
-  A move needs an operator edit; repo grep cannot reach it.
+  Moves need operator updates outside repo grep.
 - **Reviewed-artifact byte pins.** `.gitattributes` pins the Upstash launcher
   EOL and `UPSTASH_MCP_LAUNCHER_SHA256` hashes it. A move changes both. See
   [`docs/notes/upstash-mcp-operator.md`](../docs/notes/upstash-mcp-operator.md).
