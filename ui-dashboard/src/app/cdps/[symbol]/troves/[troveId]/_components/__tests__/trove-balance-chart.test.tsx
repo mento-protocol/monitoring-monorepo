@@ -206,7 +206,11 @@ describe("TroveBalanceChart", () => {
     render(handle!, chartProps());
 
     expect(handle!.container.querySelector('[data-testid="plot"]')).toBeNull();
-    expect(handle!.container.querySelector(".animate-pulse")).not.toBeNull();
+    expect(
+      handle!.container.querySelector(
+        '[role="status"][aria-label="Loading trove chart"]',
+      ),
+    ).not.toBeNull();
 
     nowSecondsOverride.value = NOW;
     render(handle!, chartProps());

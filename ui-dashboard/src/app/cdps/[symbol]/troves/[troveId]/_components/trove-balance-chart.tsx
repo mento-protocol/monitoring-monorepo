@@ -422,8 +422,11 @@ function TroveChartBody({
       </p>
     );
   }
-  if (!shouldMountPlot || model == null) {
+  if (!shouldMountPlot) {
     return <ChartShimmer />;
+  }
+  if (model == null) {
+    return <ChartShimmer announce />;
   }
   return (
     <Plot
@@ -560,7 +563,7 @@ export function TroveBalanceChart({
   const shouldMountPlot = useDeferredMount(
     "visible",
     containerRef,
-    shouldRenderPlot && model != null,
+    shouldRenderPlot,
   );
 
   const activeRangeLabel =
