@@ -308,6 +308,72 @@ test("package script fields fail closed when they cannot be scanned", () => {
   );
 });
 
+test("package script shell command-string wrappers fail closed", () => {
+  for (const command of [
+    "sh -c 'launchctl kickstart system/fixture'",
+    "/BIN/BaSh -lc 'printf safe'",
+    "env FIXTURE=1 zsh --no-rcs -c 'open /tmp/report.pdf'",
+    "command -- /bin/sh '-c' 'printf safe'",
+    's"h" -c "printf safe"',
+    "s\\h -c 'printf safe'",
+    "sh $'-c' 'printf ansi_option'",
+    "$'sh' -c 'printf ansi_shell'",
+    "s$'h' -c 'printf ansi_split'",
+    'sh $"-c" "printf locale_option"',
+    '$"sh" -c "printf locale_shell"',
+    's$""h -c "printf locale_split"',
+    "fish --command='open /tmp/report.pdf'",
+    "fish -C 'open /tmp/report.pdf'",
+    "! sh -c 'printf negated'",
+    "time sh -c 'printf timed'",
+    "if sh -c 'printf conditional'; then :; fi",
+    "{ sh -c 'printf grouped'; }",
+    "FOO='x y' sh -c 'printf assigned'",
+    "env FOO='x y' sh -c 'printf env_assigned'",
+    "command -p sh -c 'printf command_prefix'",
+    "exec -a shell sh -c 'printf exec_prefix'",
+    "sh 3>/dev/null -c 'printf redirected'",
+    "sh -o nounset -c 'printf shell_option'",
+    "bash -O extglob -c 'printf bash_option'",
+    "sudo -u root sh -c 'printf sudo_prefix'",
+    "echo 'x\\'; sh -c 'printf quote_boundary'",
+    "$'\\x73\\x68' -c 'printf ansi_hex_shell'",
+    "sh $'\\x2d\\x63' 'printf ansi_hex_option'",
+    "$'\\163\\150' -c 'printf ansi_octal_shell'",
+    "fish -C'open /tmp/report.pdf'",
+  ]) {
+    const findings = scanSource(
+      "package.json",
+      JSON.stringify({ scripts: { wrapped: command } }),
+    );
+    assert.deepEqual(
+      findings.map(({ rule, evidence }) => ({ rule, evidence })),
+      [
+        {
+          rule: "unscanned-package-scripts",
+          evidence:
+            'package script "wrapped" uses shell syntax that broker admission cannot parse',
+        },
+      ],
+      command,
+    );
+  }
+
+  for (const command of [
+    "bash ./scripts/test.sh",
+    "bash -C ./scripts/test.sh",
+  ]) {
+    assert.deepEqual(
+      scanSource(
+        "package.json",
+        JSON.stringify({ scripts: { test: command } }),
+      ),
+      [],
+      command,
+    );
+  }
+});
+
 test("repository admission rejects broker package scripts before dispatch", () => {
   const root = mkdtempSync(join(tmpdir(), "darwin-package-preflight-"));
   try {

@@ -3,7 +3,7 @@ title: Fair local quality-gate coordination across worktrees
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-28
+last_verified: 2026-08-29
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -911,8 +911,17 @@ preflight rejects
 opaque repository executables and known XPC, launch-service, Apple-event, and
 Unix-domain-socket client paths in tracked, untracked, and bounded ignored
 executable source. It parses decoded `scripts` values from each `package.json`
-as shell commands. A malformed scripts object, a non-string script, or a
-package-manifest symlink fails closed. The ignored-file walk excludes explicit
+as shell commands. It rejects direct broker calls in those values. It also
+fails closed when a script contains a literal `bash`, `csh`, `dash`, `fish`,
+`ksh`, `sh`, `tcsh`, or `zsh` token followed by a command-string option before
+the next shell control separator. Any ANSI-C quote fails closed because it can
+decode an escaped shell name or option. The check removes normal quote,
+backslash, and locale-quote markers before matching. It can therefore reject a
+shell name and option used only as quoted data. This conservative refusal avoids
+parsing or trusting the nested command string. Bash `-C` stays distinct from
+`-c`; fish `-C` is a command-string option. A malformed scripts object, a non-string
+script, or a package-manifest symlink also fails closed. The ignored-file walk
+excludes explicit
 dependency and tool caches, generated build and coverage output, documentation,
 and local or frozen evidence. These directories are `.git`, `.cache`,
 `.investigations`, `.next`,

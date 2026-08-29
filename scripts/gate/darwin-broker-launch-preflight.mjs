@@ -19,6 +19,10 @@ import { fileURLToPath } from "node:url";
 const HELPER_PATH = "scripts/gate/darwin-broker-launch-preflight.mjs";
 const TEST_PATH = "scripts/gate/darwin-broker-launch-preflight.test.mjs";
 const PACKAGE_MANIFEST_BASENAME = "package.json";
+const PACKAGE_SCRIPT_SHELL_COMMAND_STRING =
+  /(?:^|[\s;&|()])(?:[^\s;&|()]+\/)*(?:[bB][aA][sS][hH]|[cC][sS][hH]|[dD][aA][sS][hH]|[fF][iI][sS][hH]|[kK][sS][hH]|[sS][hH]|[tT][cC][sS][hH]|[zZ][sS][hH])(?=\s)[^;&|()\n]*(?:^|\s)(?:-[a-z]*c[a-z]*|--(?:command|init-command)(?:=\S*)?)(?=\s|$)/mu;
+const PACKAGE_SCRIPT_FISH_INIT_COMMAND_STRING =
+  /(?:^|[\s;&|()])(?:[^\s;&|()]+\/)*[fF][iI][sS][hH](?=\s)[^;&|()\n]*(?:^|\s)-C\S*(?=\s|$)/mu;
 
 // This admission check has a narrow claim. It rejects named process-broker
 // APIs, obvious constructed forms, unapproved Unix-domain clients, and opaque
@@ -327,7 +331,7 @@ export const BROKER_CLIENT_ALLOWLIST = [
       "node-net-dynamic-client",
       "javascript-process-broker",
     ],
-    sha256: "b68479961b3ba9e9e593fb15bdf73cb001d51df414dc0066da7b84ac697e5286",
+    sha256: "124d1ec6e53743d40d205e969ad7c9c50abc1571bd714bb92ad8ba1db5ac52e8",
     reason: APPROVED_ALLOWLIST_SHAPE.get(TEST_PATH).reason,
   },
 ];
@@ -706,6 +710,23 @@ function scanPackageScripts(path, source) {
         rule: "unscanned-package-scripts",
         line: 1,
         evidence: `package script ${JSON.stringify(scriptName)} is not a string`,
+      });
+      continue;
+    }
+    const normalizedCommand = command.replace(
+      /\$(?=["'])|\\(?:\r?\n)?|["']/gu,
+      "",
+    );
+    if (
+      command.includes("$'") ||
+      PACKAGE_SCRIPT_SHELL_COMMAND_STRING.test(normalizedCommand) ||
+      PACKAGE_SCRIPT_FISH_INIT_COMMAND_STRING.test(normalizedCommand)
+    ) {
+      findings.push({
+        path,
+        rule: "unscanned-package-scripts",
+        line: 1,
+        evidence: `package script ${JSON.stringify(scriptName)} uses shell syntax that broker admission cannot parse`,
       });
       continue;
     }

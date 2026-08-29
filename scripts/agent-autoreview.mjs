@@ -5290,7 +5290,11 @@ entrypoint()
   .then((code) => {
     process.exitCode = code;
   })
-  .catch((error) => {
+  .catch(async (error) => {
+    // A terminal signal can queue while spawnSync is blocked and become
+    // observable only after the rejected main promise settles. Give that
+    // callback one turn before choosing an ordinary error exit.
+    await new Promise((resolve) => setImmediate(resolve));
     if (!pendingTerminationSignal) {
       console.error(`autoreview failed: ${error.message}`);
     }

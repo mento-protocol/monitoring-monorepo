@@ -3,7 +3,7 @@ title: Agent Quality Gate — Mechanics
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-28
+last_verified: 2026-08-29
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -511,8 +511,17 @@ through a broker that existed before the baseline. A Darwin preflight scans
 tracked, untracked, and bounded ignored repository source. It rejects
 unapproved XPC, launch-service, Apple-event, and Unix-domain-socket client
 paths. It parses decoded `scripts` values from every `package.json` as shell
-commands. A malformed scripts object, non-string script, or package-manifest
-symlink fails closed. It also rejects native executable magic and a source
+commands. It rejects direct broker calls in those values. It also fails closed
+when a script contains a literal `bash`, `csh`, `dash`, `fish`, `ksh`, `sh`,
+`tcsh`, or `zsh` token followed by a command-string option before the next shell
+control separator. Any ANSI-C quote fails closed because it can decode an
+escaped shell name or option. The check removes normal quote, backslash, and
+locale-quote markers before matching. It can therefore reject a shell name and
+option used only as quoted data. This conservative refusal avoids parsing or
+trusting the nested command string. Bash `-C` stays distinct from `-c`; fish
+`-C` is a command-string option. A malformed scripts object, non-string script, or
+package-manifest symlink also fails closed. It also rejects
+native executable magic and a source
 symlink that does not resolve to an enumerated regular file inside the
 repository. Fixed path, Git-output, file-size, and total-source limits fail
 closed. The ignored-file

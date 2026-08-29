@@ -9107,6 +9107,10 @@ while [[ "\$inspect_pid" =~ ^[1-9][0-9]*\$ && "\$level" -lt 4 ]]; do
   # define this fixture's target capture.
   args="\$(ps -ww -o args= -p "\$inspect_pid" 2>/dev/null || true)"
   if [[ $match_condition && "\$args" == *--find-renames* && "\$args" == *-l5000* ]]; then
+    group_pid="\$(ps -o pgid= -p "\$\$" 2>/dev/null | tr -d ' ')"
+    if [[ "\$group_pid" =~ ^[1-9][0-9]*\$ ]]; then
+      printf '%s\n' "\$group_pid" >"\$state_dir/group.pid"
+    fi
     if [[ "$stall_seconds" -gt 0 ]]; then
       # Record the start so an arm can wait for the capture to be in progress
       # rather than guessing at a sleep.
@@ -9378,6 +9382,7 @@ run_capture_deadline_publication_interrupt_case() {
   local json_output="$state_dir/report.json"
   local human_output="$state_dir/report.txt"
   local wrapper_pid
+  local wrapper_status
   local launched=0
   local had_monitor=0
 
@@ -9435,11 +9440,27 @@ run_capture_deadline_publication_interrupt_case() {
   fi
 
   # Interrupt while the capture is running, so the signal is queued behind it.
-  signal_deadline_fixture_wrapper \
-    "$wrapper_pid" "$state_dir" INT || true
+  if ! signal_deadline_fixture_wrapper \
+    "$wrapper_pid" "$state_dir" INT; then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+    printf 'failed to interrupt capture deadline publication wrapper with SIGINT\n' >&2
+    exit 1
+  fi
+  if ! wait_for_deadline_wrapper_exit \
+    "capture deadline publication" "$wrapper_pid" "$state_dir" 600; then
+    exit 1
+  fi
   set +e
   wait "$wrapper_pid" 2>/dev/null
+  wrapper_status=$?
   set -e
+  if [[ "$wrapper_status" -ne 130 ]]; then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+    printf 'capture deadline publication wrapper exited %s after SIGINT; expected 130\n' \
+      "$wrapper_status" >&2
+    cat "$stderr" >&2
+    exit 1
+  fi
   if [[ -e "$json_output" ]]; then
     cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
     printf 'an interrupted run still wrote its JSON report: %s\n' "$json_output" >&2
@@ -9478,6 +9499,7 @@ run_capture_deadline_interrupt_case() {
     target_args=(--prepare-only --bundle-output "$bundle_output")
   fi
   local wrapper_pid
+  local wrapper_status
   local started_at
   local elapsed
   local launched=0
@@ -9548,11 +9570,29 @@ run_capture_deadline_interrupt_case() {
     exit 1
   fi
 
-  signal_deadline_fixture_wrapper \
-    "$wrapper_pid" "$state_dir" INT || true
+  if ! signal_deadline_fixture_wrapper \
+    "$wrapper_pid" "$state_dir" INT; then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+    printf 'failed to interrupt capture deadline %s wrapper with SIGINT\n' \
+      "$mode" >&2
+    exit 1
+  fi
+  if ! wait_for_deadline_wrapper_exit \
+    "capture deadline $mode interrupt" \
+    "$wrapper_pid" "$state_dir" 600; then
+    exit 1
+  fi
   set +e
   wait "$wrapper_pid" 2>/dev/null
+  wrapper_status=$?
   set -e
+  if [[ "$wrapper_status" -ne 130 ]]; then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+    printf 'capture deadline %s wrapper exited %s after SIGINT; expected 130\n' \
+      "$mode" "$wrapper_status" >&2
+    cat "$stderr" >&2
+    exit 1
+  fi
   # Both platforms settle the owned tree before returning. Darwin proves the
   # pre-captured exact identities are gone.
   if ! assert_deadline_fixture_process_contract \
@@ -13251,6 +13291,9 @@ case "$test_focus" in
     ;;
   capture-deadline)
     run_capture_deadline_regressions
+    ;;
+  capture-deadline-interrupt)
+    run_capture_deadline_interrupt_arm
     ;;
   darwin-signal-contract)
     run_darwin_process_signal_contract_regression

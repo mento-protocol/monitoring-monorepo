@@ -3081,6 +3081,7 @@ indexer_handler_invariant_paths_file=""
 attested_helper_runtime_identity=""
 attested_helper_runtime_manifest=""
 deadline_host_platform=""
+linux_deadline_ps_bin=""
 darwin_deadline_identity_module=""
 darwin_deadline_exact_identity=""
 deadline_current_shell_pid_result=""
@@ -3211,8 +3212,8 @@ run_trusted_external() {
 classify_deadline_host() {
   local detected
   if [[ -n "$deadline_host_platform" ]]; then
-    [[ "$deadline_host_platform" == "Linux" || "$deadline_host_platform" == "Darwin" ]]
-    return
+    [[ "$deadline_host_platform" == "Linux" || "$deadline_host_platform" == "Darwin" ]] || return 2
+    return 0
   fi
   detected="$(/usr/bin/uname -s 2>/dev/null)" || {
     echo "agent:autoreview: cannot classify the host for deadline process cleanup" >&2
@@ -3347,9 +3348,15 @@ exec_after_deadline_launch_barrier() {
   shift 4
 
   [[ "$#" -gt 0 ]] || return 125
+  # The parent shell owns lifecycle cleanup. A background barrier child must
+  # not inherit those handlers and re-enter the parent's reap path when the
+  # parent signals its process group. Disable job control in the child so a
+  # nested pipeline stays in this child's owned process group on Linux.
+  trap - HUP INT TERM
   wait_for_deadline_launch_barrier \
     "$action_file" "$owner_pid" \
     "$launch_go_deadline" "$launch_abandon_deadline" || return 125
+  set +m
   "$@"
 }
 
@@ -3423,6 +3430,15 @@ prepare_deadline_signal_contract() {
   classify_deadline_host || return 2
   if [[ "$deadline_host_platform" == "Darwin" ]]; then
     prepare_darwin_deadline_identity_helper || return 2
+  elif [[ -z "$linux_deadline_ps_bin" ]]; then
+    if [[ -x /bin/ps ]]; then
+      linux_deadline_ps_bin=/bin/ps
+    elif [[ -x /usr/bin/ps ]]; then
+      linux_deadline_ps_bin=/usr/bin/ps
+    else
+      echo "agent:autoreview: Linux deadline cleanup requires ps" >&2
+      return 2
+    fi
   fi
   return 0
 }
@@ -4058,6 +4074,70 @@ signal_deadline_process_or_group() {
   signal_darwin_deadline_exact_identity "$exact_identity" "$signal_name"
 }
 
+linux_deadline_child_is_reapable() {
+  local pid="$1"
+  local state
+
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 2
+  classify_deadline_host || return 2
+  [[ "$deadline_host_platform" == "Linux" ]] || return 2
+  if ! kill -0 -- "$pid" 2>/dev/null; then
+    return 0
+  fi
+  [[
+    "$linux_deadline_ps_bin" == "/bin/ps" ||
+      "$linux_deadline_ps_bin" == "/usr/bin/ps"
+  ]] || return 2
+  [[ -x "$linux_deadline_ps_bin" ]] || return 2
+  if ! state="$("$linux_deadline_ps_bin" -o stat= -p "$pid" 2>/dev/null)"; then
+    kill -0 -- "$pid" 2>/dev/null && return 2
+    return 0
+  fi
+  [[ "$state" =~ ^[[:space:]]*[ZX] ]]
+}
+
+wait_for_linux_deadline_child_reapable() {
+  local pid="$1"
+  local maximum_attempts="${2:-100}"
+  local attempt
+  local status
+
+  [[ "$maximum_attempts" =~ ^[1-9][0-9]*$ ]] || return 2
+  for ((attempt = 0; attempt < maximum_attempts; attempt++)); do
+    if linux_deadline_child_is_reapable "$pid"; then
+      return 0
+    else
+      status=$?
+    fi
+    [[ "$status" -eq 1 ]] || return 2
+    sleep 0.05
+  done
+  return 1
+}
+
+# A signal trap can run while Bash has SIGCHLD blocked for its interrupted
+# foreground wait. Make the child reapable before calling wait so the nested
+# wait cannot block on a SIGCHLD that Bash cannot consume inside that trap.
+terminate_and_reap_linux_deadline_child() {
+  local pid="$1"
+  local exact_identity="${2:-}"
+  local failed=0
+
+  classify_deadline_host || return 2
+  [[ "$deadline_host_platform" == "Linux" ]] || return 2
+  signal_deadline_process_or_group \
+    "$pid" TERM "$exact_identity" || failed=1
+  sleep 1
+  signal_deadline_process_or_group \
+    "$pid" KILL "$exact_identity" || failed=1
+  if wait_for_linux_deadline_child_reapable "$pid" 100; then
+    wait "$pid" 2>/dev/null || true
+  else
+    failed=1
+  fi
+  [[ "$failed" -eq 0 ]]
+}
+
 # A waited child no longer reserves its numeric PID. Only Linux performs the
 # immediate descendant-group sweep after that reap. Darwin cannot signal the
 # direct PID or its reusable process-group number from this state.
@@ -4100,6 +4180,10 @@ cleanup_deadline_child_before_reraise() {
       else
         failed=1
       fi
+      if [[ "$deadline_host_platform" == "Linux" ]]; then
+        terminate_and_reap_linux_deadline_child \
+          "$child" "$exact_identity" || failed=1
+      fi
     elif [[ "$deadline_host_platform" == "Darwin" ]]; then
       if ! finalize_darwin_deadline_lineage_with_watcher \
         "$lineage_state" \
@@ -4116,19 +4200,15 @@ cleanup_deadline_child_before_reraise() {
         recovery_watcher_reaped=1
       fi
     else
-      if ! signal_deadline_process_or_group \
-        "$child" TERM "$exact_identity"; then
-        failed=1
-      else
-        sleep 1
-        signal_deadline_process_or_group \
-          "$child" KILL "$exact_identity" || failed=1
-      fi
+      terminate_and_reap_linux_deadline_child \
+        "$child" "$exact_identity" || failed=1
     fi
     # A cancelled barrier child exits without running the target. A released
     # child exits after exact Darwin settlement or Linux group cleanup. Wait in
     # all cases so setup failures cannot leave an unreaped direct child.
-    wait "$child" 2>/dev/null || true
+    if [[ "$deadline_host_platform" != "Linux" ]]; then
+      wait "$child" 2>/dev/null || true
+    fi
     if [[ "$launch_released" -eq 0 && "$barrier_closed" -eq 0 ]]; then
       failed=1
     fi
@@ -7602,17 +7682,27 @@ reap_capture_jobs() {
     if [[ "$watchdog_launch_released" -eq 0 ]]; then
       close_deadline_launch_barrier \
         "$watchdog_launch_barrier" cancel || failed=1
-    else
+    elif [[ "$deadline_host_platform" != "Linux" ]]; then
       signal_deadline_process_or_group \
         "$watchdog" KILL "$watchdog_exact_identity" || failed=1
     fi
-    wait "$watchdog" 2>/dev/null || true
+    if [[ "$deadline_host_platform" == "Linux" ]]; then
+      terminate_and_reap_linux_deadline_child \
+        "$watchdog" "$watchdog_exact_identity" || failed=1
+    else
+      wait "$watchdog" 2>/dev/null || true
+    fi
     watchdog_reaped=1
   fi
   if [[ -n "$child" && "$child_reaped" -eq 0 ]]; then
     if [[ "$child_launch_released" -eq 0 ]]; then
       close_deadline_launch_barrier \
         "$child_launch_barrier" cancel || failed=1
+      if [[ "$deadline_host_platform" == "Linux" ]]; then
+        terminate_and_reap_linux_deadline_child \
+          "$child" "$child_exact_identity" || failed=1
+        child_reaped=1
+      fi
     elif [[ "$deadline_host_platform" == "Darwin" ]]; then
       if ! finalize_darwin_deadline_lineage_with_watcher \
         "$child_lineage_state" \
@@ -7626,17 +7716,14 @@ reap_capture_jobs() {
         recovery_watcher_reaped=1
       fi
     else
-      if signal_deadline_process_or_group \
-        "$child" TERM "$child_exact_identity"; then
-        sleep 1
-        signal_deadline_process_or_group \
-          "$child" KILL "$child_exact_identity" || failed=1
-      else
-        failed=1
-      fi
+      terminate_and_reap_linux_deadline_child \
+        "$child" "$child_exact_identity" || failed=1
+      child_reaped=1
     fi
-    wait "$child" 2>/dev/null || true
-    child_reaped=1
+    if [[ "$child_reaped" -eq 0 ]]; then
+      wait "$child" 2>/dev/null || true
+      child_reaped=1
+    fi
   fi
   if [[
     "$deadline_host_platform" == "Darwin" &&

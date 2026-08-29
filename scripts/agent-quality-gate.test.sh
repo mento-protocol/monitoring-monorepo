@@ -8609,7 +8609,13 @@ for path in \
   scripts/gate/agent-quality-gate-scheduler-benchmark.mjs \
   scripts/gate/agent-quality-gate-fixture-processes.mjs \
   scripts/gate/darwin-broker-launch-preflight.mjs \
-  scripts/gate/darwin-broker-launch-preflight.test.mjs \
+  scripts/gate/darwin-broker-launch-preflight.test.mjs; do
+  run_gate "$path"
+  assert_contains "- pnpm lint:scripts (root build script changed)"
+  assert_contains "- pnpm agent:quality-gate:test (quality-gate coordinator changed)"
+done
+
+for path in \
   scripts/gate/darwin-process-identity.test.mjs \
   scripts/gate/darwin-process-identity-helper.mjs \
   scripts/gate/darwin-process-lineage-model.mjs \
@@ -8618,7 +8624,7 @@ for path in \
   scripts/gate/darwin-process-lineage.test.mjs; do
   run_gate "$path"
   assert_contains "- pnpm lint:scripts (root build script changed)"
-  assert_contains "- pnpm agent:quality-gate:test (quality-gate coordinator changed)"
+  assert_contains "- pnpm agent:quality-gate:test (quality-gate process containment changed)"
 done
 
 for path in \
