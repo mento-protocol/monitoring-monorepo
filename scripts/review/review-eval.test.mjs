@@ -6551,7 +6551,7 @@ test("a scheduled run refuses a checkout that is not at origin/main", () => {
   assert.match(script, /has uncommitted changes/);
 });
 
-test("the launchd template carries placeholders the runbook install step rewrites", () => {
+test("the launchd template carries safe arguments and installed PATH placeholders", () => {
   const plist = readFileSync(
     path.join(repoRoot, "scripts/review/launchd/org.mento.review-eval.plist"),
     "utf8",
@@ -6566,14 +6566,101 @@ test("the launchd template carries placeholders the runbook install step rewrite
   const tokens = [
     ...new Set([...plist.matchAll(/__[A-Z_]+__/g)].map((match) => match[0])),
   ].sort();
-  assert.deepEqual(tokens, ["__REPO_CHECKOUT__", "__USER_HOME__"]);
+  assert.deepEqual(tokens, [
+    "__NODE_BIN_DIR__",
+    "__REPO_CHECKOUT__",
+    "__USER_HOME__",
+  ]);
   for (const token of tokens) {
     assert.ok(
-      runbook.includes(`s|${token}|`),
-      `${token} is not rewritten by the documented install step`,
+      runbook.includes(`\`${token}\``),
+      `${token} is not documented by the install step`,
     );
   }
+  const programArgumentsBlock = plist.match(
+    /<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/,
+  );
+  assert.ok(programArgumentsBlock, "ProgramArguments was not found");
+  const programArguments = [
+    ...programArgumentsBlock[1].matchAll(/<string>(.*?)<\/string>/g),
+  ].map((match) => match[1]);
+  assert.deepEqual(programArguments, [
+    "/bin/zsh",
+    "-lc",
+    'exec "$@"',
+    "org.mento.review-eval",
+    "__REPO_CHECKOUT__/scripts/review/run-eval.sh",
+    "--kind",
+    "auto",
+  ]);
+  assert.match(
+    plist,
+    /<key>PATH<\/key>\s*<string>__NODE_BIN_DIR__:\/usr\/local\/bin:/,
+  );
+  assert.match(runbook, /node_bin="\$\(command -v node\)"/);
+  assert.match(runbook, /plutil -remove ProgramArguments\.4/);
+  assert.match(runbook, /plutil -insert ProgramArguments\.4/);
+  assert.match(runbook, /plutil -replace EnvironmentVariables\.PATH/);
+  assert.doesNotMatch(runbook, /sed -e "s\|__REPO_CHECKOUT__/);
 });
+
+test(
+  "the launchd install mutations preserve one quoted program vector",
+  { skip: process.platform !== "darwin" },
+  () => {
+    const root = mkdtempSync(path.join(tmpdir(), "review eval & launchd-"));
+    try {
+      const target = path.join(root, "org.mento.review-eval.plist");
+      const script = path.join(
+        root,
+        "checkout & eval",
+        "scripts/review/run-eval.sh",
+      );
+      const nodePath = `${path.join(root, "node & bin")}:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`;
+      const logPath = path.join(root, "Logs", "review & eval.log");
+      cpSync(
+        path.join(
+          repoRoot,
+          "scripts/review/launchd/org.mento.review-eval.plist",
+        ),
+        target,
+      );
+      const plutil = (...args) =>
+        spawnSync("/usr/bin/plutil", [...args, target], {
+          encoding: "utf8",
+        });
+      for (const args of [
+        ["-remove", "ProgramArguments.4"],
+        ["-insert", "ProgramArguments.4", "-string", script],
+        ["-replace", "EnvironmentVariables.PATH", "-string", nodePath],
+        ["-replace", "StandardOutPath", "-string", logPath],
+        ["-replace", "StandardErrorPath", "-string", logPath],
+      ]) {
+        const result = plutil(...args);
+        assert.equal(result.status, 0, result.stdout + result.stderr);
+      }
+      const extract = (key, format = "raw") => {
+        const result = plutil("-extract", key, format, "-o", "-");
+        assert.equal(result.status, 0, result.stdout + result.stderr);
+        return result.stdout.trim();
+      };
+      assert.deepEqual(JSON.parse(extract("ProgramArguments", "json")), [
+        "/bin/zsh",
+        "-lc",
+        'exec "$@"',
+        "org.mento.review-eval",
+        script,
+        "--kind",
+        "auto",
+      ]);
+      assert.equal(extract("EnvironmentVariables.PATH"), nodePath);
+      assert.equal(extract("StandardOutPath"), logPath);
+      assert.equal(extract("StandardErrorPath"), logPath);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
 
 test("--revalidate-appended leaves an unpaired row's verdict alone", () => {
   const root = makeRoot();

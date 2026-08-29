@@ -311,23 +311,54 @@ human still has to finish the job.
 ### Install the scheduler
 
 The plist is a template. A plist has no variable substitution, so the install
-step substitutes its two placeholders: `__REPO_CHECKOUT__` (the checkout that
-holds `run-eval.sh`) and `__USER_HOME__` (the log location). Run this from the
-root of your checkout.
+step replaces three placeholders: `__REPO_CHECKOUT__` (the checkout that holds
+`run-eval.sh`), `__USER_HOME__` (the log location), and `__NODE_BIN_DIR__` (the
+directory that holds the current `node` executable). launchd does not read an
+interactive shell's `.zshrc`, so it cannot otherwise find Node installations
+managed by Volta or a similar tool. Run this from the root of your checkout.
 
 ```bash
-sed -e "s|__REPO_CHECKOUT__|$PWD|g" \
-    -e "s|__USER_HOME__|$HOME|g" \
-    scripts/review/launchd/org.mento.review-eval.plist \
-    > ~/Library/LaunchAgents/org.mento.review-eval.plist
-grep -q "$PWD/scripts/review/run-eval.sh" ~/Library/LaunchAgents/org.mento.review-eval.plist
-launchctl bootstrap gui/"$(id -u)" ~/Library/LaunchAgents/org.mento.review-eval.plist
-launchctl kickstart -p gui/"$(id -u)"/org.mento.review-eval   # optional smoke test
+(
+  set -euo pipefail
+  template="scripts/review/launchd/org.mento.review-eval.plist"
+  target="$HOME/Library/LaunchAgents/org.mento.review-eval.plist"
+  repo_checkout="$PWD"
+  if ! node_bin="$(command -v node)"; then
+    echo "node is not on PATH" >&2
+    exit 1
+  fi
+  case "$node_bin" in
+    /*) ;;
+    *) echo "node must resolve to an absolute path" >&2; exit 1 ;;
+  esac
+  node_bin_dir="$(dirname "$node_bin")"
+  mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
+  cp "$template" "$target"
+  /usr/bin/plutil -remove ProgramArguments.4 "$target"
+  /usr/bin/plutil -insert ProgramArguments.4 \
+    -string "$repo_checkout/scripts/review/run-eval.sh" "$target"
+  /usr/bin/plutil -replace EnvironmentVariables.PATH \
+    -string "$node_bin_dir:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" "$target"
+  /usr/bin/plutil -replace StandardOutPath \
+    -string "$HOME/Library/Logs/mento-review-eval.log" "$target"
+  /usr/bin/plutil -replace StandardErrorPath \
+    -string "$HOME/Library/Logs/mento-review-eval.log" "$target"
+  /usr/bin/plutil -lint "$target"
+  test "$(/usr/bin/plutil -extract ProgramArguments.4 raw -o - "$target")" = \
+    "$repo_checkout/scripts/review/run-eval.sh"
+  test "$(/usr/bin/plutil -extract EnvironmentVariables.PATH raw -o - "$target")" = \
+    "$node_bin_dir:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+)
+launchctl bootstrap gui/"$(id -u)" "$HOME/Library/LaunchAgents/org.mento.review-eval.plist"
+launchctl kickstart -p gui/"$(id -u)"/org.mento.review-eval   # optional; starts a paid run now
 ```
 
-The `grep` is the check that the substitution actually landed: launchd reports
-a missing program only in its log, and a template that silently kept someone
-else's home directory would look installed while never running.
+The two `plutil -extract` checks verify the script path and Node path before
+launchd loads the file. Each `plutil` mutation receives its path as one
+argument, so spaces and XML metacharacters in a checkout or home path stay
+data. launchd reports a missing program only in its log, and a template with
+unresolved values can look installed while it never runs. Omit `kickstart`
+after a current baseline run. It starts another paid evaluation immediately.
 
 It fires on the 8th at 10:20 and logs to
 `~/Library/Logs/mento-review-eval.log`. launchd, not cron: a laptop is asleep
