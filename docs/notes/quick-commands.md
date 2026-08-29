@@ -65,8 +65,8 @@ pnpm docs:navigation-eval -- --prompt          # Print the bounded read-only pro
 pnpm docs:navigation-eval -- --prompt --base-commit <full-sha>  # Pin a committed result to a reachable default-branch ancestor
 pnpm docs:navigation-eval -- --validate <result.json>  # Recompute authority, evidence, route, and context scores
 pnpm verification:inventory:check  # Validate Phase 0 inventory schema, unique IDs, and complete dispositions
-pnpm verification:manifest:write   # Regenerate the fixed-source gate-rooted control-plane baseline manifest
-pnpm verification:manifest:check   # Recompute and compare the fixed-source baseline manifest
+pnpm verification:manifest:write   # Regenerate the terminal pre-M1 gate-rooted control-plane baseline manifest
+pnpm verification:manifest:check   # Recompute and compare the terminal pre-M1 baseline manifest
 pnpm verification:evidence:check   # Run the Phase 0 checker suite plus both non-writing evidence checks
 pnpm agent:context-budget --strict # Enforce root, scoped-file, and aggregate-route AGENTS byte caps
 # Run feedback-state first. Final all-clear needs the current-head Codex

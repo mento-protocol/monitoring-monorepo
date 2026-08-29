@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source_sha": "e0346ec4756f9577bcbb1e13e06566ccc507e9e4",
+  "source_sha": "a5692c4570d7fe33255c2ce863d7f79264a9ddb0",
   "definitions": {
     "whole_file": "Physical lines in the gate entry points, every scripts/gate/** file, the package-script pin checker, and the full pre-push hook. The gate-rooted set includes retained shared-consumer code.",
     "matching_lines": "Unique fixed-pattern lines in other tracked files, full Turbo input filters that pin gate sources, and the full Trunk gate action block."
@@ -487,7 +487,7 @@
       "surface": "instruction",
       "count_mode": "matching-lines",
       "lines": 79,
-      "sha256": "6d68a82491c6605f72ef9a7ba19934149b3872dd109a7751ff5b3d51283ac245"
+      "sha256": "7b340d792a6d4b54f0b9a64c155f94c6acf9b0d98ae7ec3a3bb09eed87a626ea"
     },
     {
       "path": "docs/notes/autoreview-runtime-trust.md",
@@ -710,15 +710,15 @@
       "path": "scripts/agent-quality-gate.sh",
       "surface": "implementation",
       "count_mode": "whole-file",
-      "lines": 11976,
-      "sha256": "e0f8db49e8b5e5db78216fb8cc52f339d9c510eaae11974e869c8db5a822f9a2"
+      "lines": 11993,
+      "sha256": "5ded7a1dc0538ea995ad42043584245937afc7884a53c1f8f276642c20d57ac4"
     },
     {
       "path": "scripts/agent-quality-gate.test.sh",
       "surface": "test",
       "count_mode": "whole-file",
-      "lines": 24878,
-      "sha256": "7dbe86c631c438555daa29f06549da8c6b5bb297fcf51098217c1c74ea8bd05b"
+      "lines": 24901,
+      "sha256": "868642d07bb99ac12055fdefdf2a8be0e3b7e688350d3686ba0674bee9686275"
     },
     {
       "path": "scripts/bootstrap/codex-cloud-setup.sh",
@@ -822,8 +822,8 @@
       "path": "scripts/gate/agent-quality-gate-scheduler-fixture.mjs",
       "surface": "implementation",
       "count_mode": "whole-file",
-      "lines": 799,
-      "sha256": "fb208ba5244aad269df8eb26fb601d51e7e1cb661b5bdfa99ea8a273b32a5993"
+      "lines": 800,
+      "sha256": "cd62a7943791e580e36b246088e3e89ed65abe4e62d7eb461057ffdb9f369db5"
     },
     {
       "path": "scripts/gate/agent-quality-gate-scheduler-tool-fixture.mjs",
@@ -1256,8 +1256,8 @@
       "path": "scripts/gate/routing-table/groups-head.mjs",
       "surface": "implementation",
       "count_mode": "whole-file",
-      "lines": 611,
-      "sha256": "4cb0da56c9d08ef418bfd7300487383e32dfbd5e9056b8ebc89752c488bb2b9f"
+      "lines": 616,
+      "sha256": "9f08549c6d1fec1660477fd593b4dcf3c51bbe592988c48d9680f1b46e042e08"
     },
     {
       "path": "scripts/gate/routing-table/groups-tail.mjs",
@@ -1549,15 +1549,15 @@
   ],
   "totals": {
     "files": 220,
-    "counted_lines": 96688,
+    "counted_lines": 96734,
     "by_surface": {
       "alias": 5,
       "configuration-reference": 392,
       "hook": 33,
-      "implementation": 46151,
+      "implementation": 46174,
       "instruction": 378,
       "shell-reference": 68,
-      "test": 49618,
+      "test": 49641,
       "yaml-or-inline-shell": 43
     }
   }

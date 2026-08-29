@@ -35,10 +35,10 @@ routing. Reviewers own those judgments.
 ## Snapshot boundary
 
 The terminal pre-M1 control-plane source is
-`e0346ec4756f9577bcbb1e13e06566ccc507e9e4`. The generated raw manifest counts
-96,688 lines across 220 files. This total has two parts:
+`a5692c4570d7fe33255c2ce863d7f79264a9ddb0`. The generated raw manifest counts
+96,734 lines across 220 files. This total has two parts:
 
-- 95,769 whole-file implementation and test lines. This set includes every
+- 95,815 whole-file implementation and test lines. This set includes every
   `scripts/gate/**` file, both gate entry points, and the package-script pin
   checker.
 - 919 shared-reference and hook lines in aliases, YAML, inline shell, the full
@@ -62,18 +62,24 @@ this shared closure:
 | `scripts/gate/mapped-command-process-identity.test.mjs` |            178 |
 | **Retained shared closure**                             |     **12,543** |
 
-Subtracting the 12,543 retained shared lines from the 95,769 whole-file
-implementation and test lines gives an 83,226-line gate-specific deletion
+Subtracting the 12,543 retained shared lines from the 95,815 whole-file
+implementation and test lines gives an 83,272-line gate-specific deletion
 denominator. The 80% final-retirement target applies to this denominator. It
-does not apply to the 96,688-line raw before manifest.
+does not apply to the 96,734-line raw before manifest.
+
+PR #2134 advanced the pre-M1 boundary from the #2042 terminal commit
+`e0346ec4756f9577bcbb1e13e06566ccc507e9e4`. It adds 46 whole-file lines to the
+gate-specific surface: 17 in the gate entry point, 23 in its Bash regression
+suite, and 6 under `scripts/gate/**`. It changes none of the ten retained shared
+files. The 919 shared-reference and hook lines are also unchanged.
 
 The earlier 70,028-line estimate used source
 `8bcb675b6b241e57435ce0e864e8511c03d9fce2`. It covered the 9,289-line Bash
 entry point, its then-21,655-line Bash regression suite, and 39,084 lines under
-`scripts/gate/**`. At the terminal source, the gate entry point is 11,976
-lines, its Bash regression suite is 24,878 lines, `scripts/gate/**` is 58,756
+`scripts/gate/**`. At the terminal pre-M1 source, the gate entry point is 11,993
+lines, its Bash regression suite is 24,901 lines, `scripts/gate/**` is 58,762
 lines, and the package-script pin checker is 159 lines. These four values total
-the 95,769 whole-file implementation and test lines. The generated total adds
+the 95,815 whole-file implementation and test lines. The generated total adds
 the 919 shared-reference and hook lines for the after comparison.
 
 ## Local behavior
@@ -354,12 +360,14 @@ only after owners confirm that no supported old worktree remains.
 Issue #2042 closed as completed on 2026-08-29 through PR #2131 at terminal
 commit `e0346ec4756f9577bcbb1e13e06566ccc507e9e4`. The earlier provisional
 snapshot at `8e2965a6ffbd92bcc0c2793a6892754e4c674a6b` remains historical evidence
-only. Before cutover, relocation, or deletion, issues #2127 and #2128 must
-re-audit the terminal code by consumer.
+only. PR #2134 advanced the terminal pre-M1 control-plane source to
+`a5692c4570d7fe33255c2ce863d7f79264a9ddb0` without changing the retained
+shared closure. Before cutover, relocation, or deletion, issues #2127 and #2128
+must re-audit the #2042 shared consumers and the current gate-specific code.
 
 | Consumer                                                       | Terminal disposition                       | Required invariant                                                                                                                                                      |
 | -------------------------------------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Gate coordinator, routing, prewarm, and gate-only Trunk checks | Deferred retirement candidate              | Re-audit terminal commit `e0346ec4756f9577bcbb1e13e06566ccc507e9e4` by consumer before cutover or deletion in #2127 or #2128.                                           |
+| Gate coordinator, routing, prewarm, and gate-only Trunk checks | Deferred retirement candidate              | Re-audit current pre-M1 source `a5692c4570d7fe33255c2ce863d7f79264a9ddb0` by consumer before cutover or deletion in #2127 or #2128.                                     |
 | Darwin process identity and lineage                            | Retained shared runtime and tests          | Never signal a bare PID or process group without matching non-reusable identity. Settle coherent lineage before release. Fail closed on unsupported self-daemonization. |
 | Autoreview                                                     | Retained provenance behavior               | Bind child processes and evidence to the verified review runtime.                                                                                                       |
 | Sentry broker                                                  | Retained verified-leader behavior          | Signal a detached group only while its verified leader is alive. Never reuse its PID or group after reap.                                                               |
@@ -367,9 +375,12 @@ re-audit the terminal code by consumer.
 | Legacy `run.lock`                                              | Retained through mixed-worktree transition | Do not let a new path run beside an older gate that owns the lock.                                                                                                      |
 
 Issues #2006, #2032, and #2094 remain open with their current owners and states.
-Issue #2042 is closed. The inventory binds current claims to its terminal
-commit, preserves its earlier snapshot as history, and requires a terminal-code
-consumer audit before cutover, relocation, or deletion.
+Issue #2042 is closed. The inventory preserves
+`e0346ec4756f9577bcbb1e13e06566ccc507e9e4` as its terminal commit and
+`8e2965a6ffbd92bcc0c2793a6892754e4c674a6b` as its earlier snapshot. It binds
+the current control-plane baseline to
+`a5692c4570d7fe33255c2ce863d7f79264a9ddb0` and requires a consumer audit
+before cutover, relocation, or deletion.
 
 ## Shadow spend recommendation
 

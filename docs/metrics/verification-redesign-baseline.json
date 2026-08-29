@@ -7,7 +7,7 @@
     "cutover_approval": "human maintainer"
   },
   "source_shas": {
-    "control_plane": "e0346ec4756f9577bcbb1e13e06566ccc507e9e4",
+    "control_plane": "a5692c4570d7fe33255c2ce863d7f79264a9ddb0",
     "local_author_measurement_base_head": "8bcb675b6b241e57435ce0e864e8511c03d9fce2",
     "issue_2042_terminal": "e0346ec4756f9577bcbb1e13e06566ccc507e9e4",
     "historical_issue_2042_snapshot": "8e2965a6ffbd92bcc0c2793a6892754e4c674a6b",
@@ -17,12 +17,14 @@
     "earlier_core_physical_lines": 70028,
     "earlier_core_source_sha": "8bcb675b6b241e57435ce0e864e8511c03d9fce2",
     "complete_manifest_files": 220,
-    "complete_manifest_counted_lines": 96688,
-    "manifest_whole_file_implementation_test_lines": 95769,
+    "complete_manifest_counted_lines": 96734,
+    "manifest_whole_file_implementation_test_lines": 95815,
     "manifest_shared_reference_hook_lines": 919,
     "retained_shared_gate_rooted_lines": 12543,
-    "gate_specific_deletion_denominator_lines": 83226,
-    "gate_specific_deletion_denominator_definition": "95,769 whole-file implementation and test lines minus 12,543 lines in the retained shared gate-rooted closure",
+    "gate_specific_deletion_denominator_lines": 83272,
+    "gate_specific_deletion_denominator_definition": "95,815 whole-file implementation and test lines minus 12,543 lines in the retained shared gate-rooted closure",
+    "issue_2134_gate_specific_whole_file_delta_lines": 46,
+    "issue_2134_retained_shared_closure_delta_lines": 0,
     "retained_shared_gate_rooted_files": [
       "scripts/gate/darwin-process-identity.c",
       "scripts/gate/darwin-process-identity-runtime.inc.c",

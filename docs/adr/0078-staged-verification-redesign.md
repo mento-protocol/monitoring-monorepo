@@ -22,7 +22,7 @@ stays mandatory until the approved cutover stage completes.
 
 The local quality gate combines path routing, validation, process cleanup,
 cross-worktree scheduling, result reuse, and crash recovery. The raw Phase 0
-manifest records 96,688 counted control-plane lines at the terminal pre-M1
+manifest records 96,734 counted control-plane lines at the terminal pre-M1
 source. Recent local runs spent more time waiting for shared capacity than
 running mapped commands. The system protects real shared resources, but its
 mandatory push path now slows local and hosted development.
@@ -137,12 +137,16 @@ or let new work run beside an older gate that owns the legacy lock.
 Issue #2042 closed as completed on 2026-08-29 through PR #2131 at terminal
 commit `e0346ec4756f9577bcbb1e13e06566ccc507e9e4`. The earlier provisional
 snapshot at `8e2965a6ffbd92bcc0c2793a6892754e4c674a6b` remains historical evidence
-only. The terminal source has a ten-file, 12,543-line shared closure for Darwin
-process identity, coherent lineage, autoreview provenance, and Sentry process
-identity. Retain that closure and its tests. Before cutover, relocation, or
-deletion, issues #2127 and #2128 must re-audit each terminal consumer. Gate-only
-coordinator, routing, prewarm, and Trunk wrapper or check code remains a
-deferred retirement candidate.
+only. The #2042 terminal commit has a ten-file, 12,543-line shared closure for
+Darwin process identity, coherent lineage, autoreview provenance, and Sentry
+process identity. Retain that closure and its tests. PR #2134 advances the
+terminal pre-M1 source to `a5692c4570d7fe33255c2ce863d7f79264a9ddb0`. It
+changes gate-specific drain recovery and adds 46 gate-specific whole-file
+lines. It changes none of the retained shared files. Before cutover, relocation,
+or deletion, issues #2127 and #2128 must re-audit the shared consumers at the
+#2042 terminal commit and the gate-specific candidates through the current
+pre-M1 source. Gate-only coordinator, routing, prewarm, and Trunk wrapper or
+check components remain deferred retirement candidates.
 
 The process contract never signals a bare PID or process-group ID without a
 matching non-reusable identity. It settles coherent lineage before release and
@@ -163,14 +167,14 @@ implementation size.
 The raw manifest counts every `scripts/gate/**` file as a whole file. This
 keeps the full gate-rooted before surface even when another consumer must retain
 a file. It also counts gate references and the full pre-push hook. At terminal
-source `e0346ec4756f9577bcbb1e13e06566ccc507e9e4`, the manifest records 220
-files and 96,688 counted lines. This includes 95,769 whole-file implementation
+pre-M1 source `a5692c4570d7fe33255c2ce863d7f79264a9ddb0`, the manifest records
+220 files and 96,734 counted lines. This includes 95,815 whole-file implementation
 and test lines plus 919 shared-reference and hook lines. The retained shared
 closure contributes 12,543 of the whole-file lines. The reviewed gate-specific
-implementation and test deletion denominator is therefore 83,226 lines.
+implementation and test deletion denominator is therefore 83,272 lines.
 Replacement additions must be smaller than the gate-specific code they replace
 at each cutover stage. Final retirement must remove at least 80% of that
-83,226-line denominator.
+83,272-line denominator.
 
 ## Rollback
 
