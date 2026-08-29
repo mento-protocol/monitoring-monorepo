@@ -3441,7 +3441,8 @@ gate_drain_obligation_unreadable() {
 # same run publishes a fresh file rather than swapping the one in hand. The
 # claimed copy is removed only once its own processes are confirmed gone, and a
 # drainer killed part way leaves it in the directory for the next run, which
-# reads the token from the file's contents rather than its name.
+# reads a non-empty record's token from its contents. For an empty legacy
+# record, it removes every completed claim suffix from the filename first.
 #
 # The scan repeats until a pass finds nothing, because obligations are still
 # being published while this one drains — a waiter condemning a remnant of some
