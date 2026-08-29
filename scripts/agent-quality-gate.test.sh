@@ -789,6 +789,7 @@ if ! TMPDIR="$unusable_gate_tmpdir" \
 fi
 assert_contains "Mode: dry-run"
 assert_contains "- pnpm docs:index --check (tracked documentation changed)"
+assert_contains "- pnpm docs:navigation-eval:test (tracked documentation can change navigation source budgets)"
 [[ -f "$unusable_gate_tmpdir" ]] ||
   fail "default coordinator dry run changed the unusable inherited TMPDIR path"
 assert_script_occurrences 1 "command -v sha256sum"
@@ -11898,6 +11899,7 @@ scripts/agent-quality-gate.sh \
   --base origin/test \
   > "$output_file"
 assert_contains "- docs"
+assert_contains "- pnpm docs:navigation-eval:test (tracked documentation can change navigation source budgets)"
 assert_contains "- ./tools/trunk check --ci docs/deployment.md (changed existing paths should pass targeted Trunk checks)"
 assert_not_contains "- ./tools/trunk check --ci --all"
 
@@ -11905,6 +11907,7 @@ run_gate "docs/deployment.md"
 assert_contains "Detected surfaces:"
 assert_contains "- docs"
 assert_contains "- pnpm docs:index --check (tracked documentation changed)"
+assert_contains "- pnpm docs:navigation-eval:test (tracked documentation can change navigation source budgets)"
 assert_contains "- ./tools/trunk check --ci docs/deployment.md (changed existing paths should pass targeted Trunk checks)"
 assert_not_contains "- ./tools/trunk check --ci --all"
 
@@ -24619,6 +24622,26 @@ NODE
     [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" ]] ||
       fail "a run that could not read the ${race_unreadable_case} record executed a mapped command anyway"
   done
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -f "$gate_race_root"/captured.*
+
+  # An empty obligation can retain a claim suffix when its drainer dies after
+  # the rename. Later drainers add more suffixes. Recover the original token
+  # instead of treating the interrupted claim chain as a malformed token.
+  : > "$gate_race_log"
+  mkdir -p "$gate_race_root/condemned.d"
+  race_interrupted_drain_identity="fixture-interrupted-drain-1-1"
+  race_interrupted_drain_record="${race_interrupted_drain_identity}.draining.66501.draining.77021.draining.58994"
+  gate_test_write_inert_darwin_lineage_state \
+    "$gate_race_root" "$race_interrupted_drain_identity" ||
+    fail "the interrupted empty obligation could not prepare inert Darwin lineage state"
+  : > "$gate_race_root/condemned.d/$race_interrupted_drain_record"
+  race_waiter "interrupted-empty-obligation" 0 0
+  grep -q "All mapped commands passed" \
+    "$gate_race_out/interrupted-empty-obligation.out" ||
+    fail "an empty obligation left by interrupted drainers must not wedge the next run"
+  [[ ! -e "$gate_race_root/condemned.d/$race_interrupted_drain_record" ]] ||
+    fail "the recovered interrupted obligation must be removed after draining"
   rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
   rm -f "$gate_race_root"/captured.*
 

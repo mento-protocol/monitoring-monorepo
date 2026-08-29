@@ -157,7 +157,10 @@ mapping is a Node engine reading a data table — see
 [Where the plan comes from](#where-the-plan-comes-from-adr-0069) below. For a
 routing-sensitive source, the shared classifier adds the offline
 `pnpm docs:navigation-eval -- --check-fixtures` check. It invokes no model or
-scheduled evaluation. Review the output, then run:
+scheduled evaluation. Every tracked Markdown change runs `pnpm docs:index
+--check` and `pnpm docs:navigation-eval:test`. The second command enforces the
+navigation source budgets that the Markdown-only CI job checks. Review the
+output, then run:
 
 ```bash
 pnpm agent:quality-gate --run
