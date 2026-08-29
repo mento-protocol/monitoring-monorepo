@@ -6551,6 +6551,16 @@ test("a scheduled run refuses a checkout that is not at origin/main", () => {
   assert.match(script, /has uncommitted changes/);
 });
 
+function launchdRunbookBlocks(runbook) {
+  const section = runbook.match(
+    /### Install the scheduler\n([\s\S]*?)\nIt fires on the 8th/,
+  );
+  assert.ok(section, "the scheduler install section was not found");
+  return [...section[1].matchAll(/```bash\n([\s\S]*?)\n```/g)].map(
+    (match) => match[1],
+  );
+}
+
 test("the launchd template carries safe arguments and installed PATH placeholders", () => {
   const plist = readFileSync(
     path.join(repoRoot, "scripts/review/launchd/org.mento.review-eval.plist"),
@@ -6602,7 +6612,150 @@ test("the launchd template carries safe arguments and installed PATH placeholder
   assert.match(runbook, /plutil -insert ProgramArguments\.4/);
   assert.match(runbook, /plutil -replace EnvironmentVariables\.PATH/);
   assert.doesNotMatch(runbook, /sed -e "s\|__REPO_CHECKOUT__/);
+
+  const [installBlock, kickstartBlock, ...extraBlocks] =
+    launchdRunbookBlocks(runbook);
+  assert.equal(extraBlocks.length, 0);
+  assert.match(installBlock, /^\(\n {2}set -euo pipefail\n/);
+  assert.doesNotMatch(installBlock, /kickstart/);
+  assert.ok(
+    installBlock.indexOf("launchctl bootstrap") >
+      installBlock.lastIndexOf("plutil -extract"),
+    "bootstrap must follow every render and validation command",
+  );
+  assert.match(installBlock, /launchctl bootstrap[^\n]*"\$target"\n\)$/);
+  assert.doesNotMatch(kickstartBlock, /bootstrap|plutil/);
+  assert.match(
+    kickstartBlock,
+    /^launchctl kickstart -p gui\/"\$\(id -u\)"\/org\.mento\.review-eval$/,
+  );
+  assert.match(
+    runbook,
+    /separate opt-in command only when you intend to start a paid\nevaluation immediately/,
+  );
 });
+
+test(
+  "the guarded launchd install never loads a render or validation failure",
+  { skip: process.platform !== "darwin" },
+  () => {
+    const runbook = readFileSync(
+      path.join(repoRoot, "docs/evals/review-skill.md"),
+      "utf8",
+    );
+    const [installBlock] = launchdRunbookBlocks(runbook);
+    const root = mkdtempSync(path.join(tmpdir(), "review-eval-launchd-guard-"));
+    try {
+      const checkout = path.join(root, "checkout");
+      const taskHome = path.join(root, "home");
+      const fakeBin = path.join(root, "bin");
+      const templateDir = path.join(checkout, "scripts/review/launchd");
+      mkdirSync(templateDir, { recursive: true });
+      mkdirSync(fakeBin, { recursive: true });
+      cpSync(
+        path.join(
+          repoRoot,
+          "scripts/review/launchd/org.mento.review-eval.plist",
+        ),
+        path.join(templateDir, "org.mento.review-eval.plist"),
+      );
+
+      const fakeNode = path.join(fakeBin, "node");
+      const fakePlutil = path.join(fakeBin, "plutil");
+      const fakeLaunchctl = path.join(fakeBin, "launchctl");
+      writeFileSync(fakeNode, "#!/bin/sh\nexit 0\n");
+      writeFileSync(
+        fakePlutil,
+        `#!/bin/sh
+count=0
+if [ -f "$REVIEW_EVAL_PLUTIL_COUNT_FILE" ]; then
+  count="$(/bin/cat "$REVIEW_EVAL_PLUTIL_COUNT_FILE")"
+fi
+count=$((count + 1))
+printf '%s\\n' "$count" > "$REVIEW_EVAL_PLUTIL_COUNT_FILE"
+if [ "$count" -eq "$REVIEW_EVAL_PLUTIL_FAIL_AT" ]; then
+  exit 64
+fi
+if [ "$1" = "-extract" ]; then
+  case "$2" in
+    ProgramArguments.4) printf '%s\\n' "$REVIEW_EVAL_EXPECTED_SCRIPT" ;;
+    EnvironmentVariables.PATH) printf '%s\\n' "$REVIEW_EVAL_EXPECTED_PATH" ;;
+  esac
+fi
+`,
+      );
+      writeFileSync(
+        fakeLaunchctl,
+        `#!/bin/sh
+printf '%s\\n' "$*" >> "$REVIEW_EVAL_LAUNCHCTL_LOG"
+`,
+      );
+      for (const executable of [fakeNode, fakePlutil, fakeLaunchctl]) {
+        chmodSync(executable, 0o755);
+      }
+
+      const launchctlLog = path.join(root, "launchctl.log");
+      const plutilCount = path.join(root, "plutil.count");
+      const expectedScript = path.join(
+        realpathSync(checkout),
+        "scripts/review/run-eval.sh",
+      );
+      const expectedPath = `${fakeBin}:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`;
+      const guardedInstall = installBlock.replaceAll(
+        "/usr/bin/plutil",
+        `"${fakePlutil}"`,
+      );
+      const runInstall = (failAt) => {
+        rmSync(taskHome, { recursive: true, force: true });
+        rmSync(launchctlLog, { force: true });
+        rmSync(plutilCount, { force: true });
+        mkdirSync(taskHome, { recursive: true });
+        return spawnSync("/bin/bash", ["-c", guardedInstall], {
+          cwd: checkout,
+          encoding: "utf8",
+          env: {
+            HOME: taskHome,
+            PATH: `${fakeBin}:/usr/bin:/bin`,
+            REVIEW_EVAL_EXPECTED_PATH: expectedPath,
+            REVIEW_EVAL_EXPECTED_SCRIPT: expectedScript,
+            REVIEW_EVAL_LAUNCHCTL_LOG: launchctlLog,
+            REVIEW_EVAL_PLUTIL_COUNT_FILE: plutilCount,
+            REVIEW_EVAL_PLUTIL_FAIL_AT: String(failAt),
+          },
+        });
+      };
+
+      for (let failAt = 1; failAt <= 8; failAt += 1) {
+        const failed = runInstall(failAt);
+        assert.notEqual(
+          failed.status,
+          0,
+          `plutil failure ${failAt} did not stop the guarded install`,
+        );
+        assert.equal(
+          existsSync(launchctlLog),
+          false,
+          `plutil failure ${failAt} reached launchctl`,
+        );
+      }
+
+      const successful = runInstall(0);
+      assert.equal(
+        successful.status,
+        0,
+        JSON.stringify({
+          stdout: successful.stdout,
+          stderr: successful.stderr,
+          plutilCalls: readFileSync(plutilCount, "utf8"),
+        }),
+      );
+      assert.match(readFileSync(launchctlLog, "utf8"), /^bootstrap gui\//);
+      assert.doesNotMatch(readFileSync(launchctlLog, "utf8"), /kickstart/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
 
 test(
   "the launchd install mutations preserve one quoted program vector",

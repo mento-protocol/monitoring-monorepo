@@ -348,17 +348,26 @@ managed by Volta or a similar tool. Run this from the root of your checkout.
     "$repo_checkout/scripts/review/run-eval.sh"
   test "$(/usr/bin/plutil -extract EnvironmentVariables.PATH raw -o - "$target")" = \
     "$node_bin_dir:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+  launchctl bootstrap gui/"$(id -u)" "$target"
 )
-launchctl bootstrap gui/"$(id -u)" "$HOME/Library/LaunchAgents/org.mento.review-eval.plist"
-launchctl kickstart -p gui/"$(id -u)"/org.mento.review-eval   # optional; starts a paid run now
 ```
 
 The two `plutil -extract` checks verify the script path and Node path before
-launchd loads the file. Each `plutil` mutation receives its path as one
+launchd loads the file. The guarded block stops before `bootstrap` if a render
+or validation command fails. Each `plutil` mutation receives its path as one
 argument, so spaces and XML metacharacters in a checkout or home path stay
 data. launchd reports a missing program only in its log, and a template with
-unresolved values can look installed while it never runs. Omit `kickstart`
-after a current baseline run. It starts another paid evaluation immediately.
+unresolved values can look installed while it never runs.
+
+Run this separate opt-in command only when you intend to start a paid
+evaluation immediately:
+
+```bash
+launchctl kickstart -p gui/"$(id -u)"/org.mento.review-eval
+```
+
+Omit `kickstart` after a current baseline run. It starts another paid
+evaluation immediately.
 
 It fires on the 8th at 10:20 and logs to
 `~/Library/Logs/mento-review-eval.log`. launchd, not cron: a laptop is asleep
