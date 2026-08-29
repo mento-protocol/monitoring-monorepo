@@ -23,13 +23,13 @@ run_eval_source_snapshot_path_valid() {
 }
 
 run_eval_source_snapshot_authentic() {
-  local marker marker_pid marker_token
-  [[ $RUN_EVAL_SOURCE_TOKEN =~ ^[[:alnum:]]{12}$ ]] || return 1
+  local marker marker_pid marker_nonce
+  [[ $RUN_EVAL_SOURCE_NONCE =~ ^[[:alnum:]]{12}$ ]] || return 1
   run_eval_source_snapshot_path_valid || return 1
-  marker="$RUN_EVAL_SOURCE_SNAPSHOT/.review-eval-owner.$RUN_EVAL_SOURCE_TOKEN"
+  marker="$RUN_EVAL_SOURCE_SNAPSHOT/.review-eval-owner.$RUN_EVAL_SOURCE_NONCE"
   [[ -f $marker && ! -L $marker ]] || return 1
-  IFS=$'\t' read -r marker_pid marker_token <"$marker" || return 1
-  [[ $marker_pid == "$$" && $marker_token == "$RUN_EVAL_SOURCE_TOKEN" ]] ||
+  IFS=$'\t' read -r marker_pid marker_nonce <"$marker" || return 1
+  [[ $marker_pid == "$$" && $marker_nonce == "$RUN_EVAL_SOURCE_NONCE" ]] ||
     return 1
   [[ $RUN_EVAL_CREATED_SOURCE_SNAPSHOT -eq 1 ||
     $RUN_EVAL_ENTRY_SOURCE == "$RUN_EVAL_SOURCE_SNAPSHOT/run-eval.sh" ]]
@@ -50,9 +50,9 @@ cleanup_source_snapshot() {
   else
     run_eval_source_snapshot_authentic || return 1
   fi
-  if [[ $RUN_EVAL_SOURCE_TOKEN =~ ^[[:alnum:]]{12}$ ]]; then
+  if [[ $RUN_EVAL_SOURCE_NONCE =~ ^[[:alnum:]]{12}$ ]]; then
     source_paths+=(
-      "$RUN_EVAL_SOURCE_SNAPSHOT/.review-eval-owner.$RUN_EVAL_SOURCE_TOKEN"
+      "$RUN_EVAL_SOURCE_SNAPSHOT/.review-eval-owner.$RUN_EVAL_SOURCE_NONCE"
     )
   fi
   for source_path in "${source_paths[@]}"; do
@@ -86,7 +86,7 @@ run_eval_source_snapshot_accept() {
   local lock_root="$1"
   local live_dir="$2"
   local source_name source_path
-  [[ -n $RUN_EVAL_SOURCE_SNAPSHOT && -n $RUN_EVAL_SOURCE_TOKEN &&
+  [[ -n $RUN_EVAL_SOURCE_SNAPSHOT && -n $RUN_EVAL_SOURCE_NONCE &&
     $RUN_EVAL_SOURCE_OWNED -eq 1 ]] || return 1
   run_eval_source_snapshot_authentic || return 1
   [[ ${RUN_EVAL_SOURCE_SNAPSHOT%/*} == "$lock_root" &&
@@ -98,7 +98,7 @@ run_eval_source_snapshot_accept() {
     source_path="$RUN_EVAL_SOURCE_SNAPSHOT/$source_name"
     [[ -f $source_path && ! -L $source_path && ! -w $source_path ]] || return 1
   done
-  [[ ! -w $RUN_EVAL_SOURCE_SNAPSHOT/.review-eval-owner.$RUN_EVAL_SOURCE_TOKEN ]]
+  [[ ! -w $RUN_EVAL_SOURCE_SNAPSHOT/.review-eval-owner.$RUN_EVAL_SOURCE_NONCE ]]
 }
 
 run_eval_source_snapshot_fail() {
@@ -114,7 +114,7 @@ run_eval_source_snapshot_restart() {
   shift 2
   RUN_EVAL_SOURCE_SNAPSHOT="$(run_eval_physical_dir "$(dirname "${BASH_SOURCE[0]}")")" ||
     run_eval_source_snapshot_fail "could not resolve the orchestrator snapshot"
-  RUN_EVAL_SOURCE_TOKEN=""
+  RUN_EVAL_SOURCE_NONCE=""
   RUN_EVAL_ENTRY_SOURCE="${BASH_SOURCE[0]}"
   RUN_EVAL_CREATED_SOURCE_SNAPSHOT=1
   RUN_EVAL_SOURCE_OWNED=1
@@ -138,8 +138,8 @@ run_eval_source_snapshot_restart() {
     run_eval_source_snapshot_fail "could not make the orchestrator wrapper executable"
   marker="$(mktemp "$RUN_EVAL_SOURCE_SNAPSHOT/.review-eval-owner.XXXXXXXXXXXX")" ||
     run_eval_source_snapshot_fail "could not create the orchestrator snapshot owner marker"
-  RUN_EVAL_SOURCE_TOKEN="${marker##*.review-eval-owner.}"
-  printf '%s\t%s\n' "$$" "$RUN_EVAL_SOURCE_TOKEN" >"$marker" ||
+  RUN_EVAL_SOURCE_NONCE="${marker##*.review-eval-owner.}"
+  printf '%s\t%s\n' "$$" "$RUN_EVAL_SOURCE_NONCE" >"$marker" ||
     run_eval_source_snapshot_fail "could not bind the orchestrator snapshot owner marker"
   chmod 0400 "$marker" ||
     run_eval_source_snapshot_fail "could not protect the orchestrator snapshot owner marker"
@@ -149,7 +149,7 @@ run_eval_source_snapshot_restart() {
     run_eval_source_snapshot_fail "could not seal the orchestrator snapshot directory"
   run_eval_source_snapshot_accept "${RUN_EVAL_SOURCE_SNAPSHOT%/*}" "$RUN_EVAL_SOURCE_SNAPSHOT" ||
     run_eval_source_snapshot_fail "could not verify the sealed orchestrator snapshot"
-  export RUN_EVAL_SOURCE_SNAPSHOT RUN_EVAL_SOURCE_TOKEN
+  export RUN_EVAL_SOURCE_SNAPSHOT RUN_EVAL_SOURCE_NONCE
   shopt -s execfail
   set +e
   exec "$RUN_EVAL_SOURCE_SNAPSHOT/run-eval.sh" "$@" --repo "$repo"

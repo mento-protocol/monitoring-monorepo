@@ -804,7 +804,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the wrapper and three helpers", () => {
   const expected =
-    "fd1bdfa3c59a73e6b31027db49840d512b4580efa39872ac81889c4da26c5139";
+    "d0790e1d52542ac8e22bbc84932e98d635035f685ca201321bda3ab4c196033a";
   assert.equal(orchestratorSourceDigest(), expected);
   assert.deepEqual(
     ORCHESTRATOR_FILES.map((file) => path.basename(file)),
@@ -1126,6 +1126,7 @@ test("a cached cell from another skill or contract is never reused", () => {
     "9dc869e7380348812afd6bdc5f20259a4cdc4a5390a4ba284223ad1f3b89cef8",
     "6f300d247726aab9c2a4c73ee24908ee852a4bc04dc71f30522cb80423e60cc8",
     "0f465e8fce3a0e11065d9a822d6d67ae7ef78f43594e393af615feda388e04aa",
+    "fd1bdfa3c59a73e6b31027db49840d512b4580efa39872ac81889c4da26c5139",
   ]) {
     assert.equal(
       cellReuseDecision({
@@ -5544,7 +5545,7 @@ test("the orchestrator keeps every helper stage on one private source snapshot",
     const hostileRunEvalEnv = Object.fromEntries(
       [
         "RUN_EVAL_SOURCE_SNAPSHOT",
-        "RUN_EVAL_SOURCE_TOKEN",
+        "RUN_EVAL_SOURCE_NONCE",
         "RUN_EVAL_SCRIPT_DIR",
         "RUN_EVAL_SOURCE_MARKER",
         "RUN_EVAL_SOURCE_WRAPPER",
@@ -5553,12 +5554,12 @@ test("the orchestrator keeps every helper stage on one private source snapshot",
         "RUN_EVAL_SOURCE_PHYSICAL",
         "RUN_EVAL_SOURCE_PHYSICAL_PARENT",
         "RUN_EVAL_MARKER_PID",
-        "RUN_EVAL_MARKER_TOKEN",
+        "RUN_EVAL_MARKER_NONCE",
         "RUN_EVAL_LIVE_SCRIPT_DIR",
       ].map((name) => [name, "hostile-export"]),
     );
     hostileRunEvalEnv.RUN_EVAL_SOURCE_SNAPSHOT = "";
-    hostileRunEvalEnv.RUN_EVAL_SOURCE_TOKEN = "";
+    hostileRunEvalEnv.RUN_EVAL_SOURCE_NONCE = "";
     const run = spawnSync(liveWrapper, [], {
       encoding: "utf8",
       env: { ...process.env, ...hostileRunEvalEnv },
@@ -5600,12 +5601,12 @@ test("the orchestrator keeps every helper stage on one private source snapshot",
     assert.deepEqual(snapshotEntries(), []);
 
     const missingSecondPassHelper = snapshotHelperFixture.replace(
-      "  export RUN_EVAL_SOURCE_SNAPSHOT RUN_EVAL_SOURCE_TOKEN",
+      "  export RUN_EVAL_SOURCE_SNAPSHOT RUN_EVAL_SOURCE_NONCE",
       [
         '  chmod 0700 "$RUN_EVAL_SOURCE_SNAPSHOT"',
         '  rm -f "$RUN_EVAL_SOURCE_SNAPSHOT/run-eval-source-snapshot.sh"',
         '  chmod 0500 "$RUN_EVAL_SOURCE_SNAPSHOT"',
-        "  export RUN_EVAL_SOURCE_SNAPSHOT RUN_EVAL_SOURCE_TOKEN",
+        "  export RUN_EVAL_SOURCE_SNAPSHOT RUN_EVAL_SOURCE_NONCE",
       ].join("\n"),
     );
     assert.notEqual(missingSecondPassHelper, snapshotHelperFixture);
@@ -5654,7 +5655,7 @@ test("the orchestrator keeps every helper stage on one private source snapshot",
       "review-eval-source.ABC123",
     );
     mkdirSync(retained);
-    const retainedToken = "ABCDEFGHIJKL";
+    const retainedNonce = "ABCDEFGHIJKL";
     const retainedWrapper = path.join(retained, "run-eval.sh");
     writeFileSync(
       path.join(retained, "run-eval-source-snapshot.sh"),
@@ -5670,9 +5671,9 @@ test("the orchestrator keeps every helper stage on one private source snapshot",
         "#!/usr/bin/env bash",
         "set -euo pipefail",
         "RUN_EVAL_SOURCE_SNAPSHOT=" + JSON.stringify(retained),
-        "RUN_EVAL_SOURCE_TOKEN=" + JSON.stringify(retainedToken),
-        'printf "%s\\t%s\\n" "$$" "$RUN_EVAL_SOURCE_TOKEN" >"$RUN_EVAL_SOURCE_SNAPSHOT/.review-eval-owner.$RUN_EVAL_SOURCE_TOKEN"',
-        'chmod 0400 "$RUN_EVAL_SOURCE_SNAPSHOT/.review-eval-owner.$RUN_EVAL_SOURCE_TOKEN"',
+        "RUN_EVAL_SOURCE_NONCE=" + JSON.stringify(retainedNonce),
+        'printf "%s\\t%s\\n" "$$" "$RUN_EVAL_SOURCE_NONCE" >"$RUN_EVAL_SOURCE_SNAPSHOT/.review-eval-owner.$RUN_EVAL_SOURCE_NONCE"',
+        'chmod 0400 "$RUN_EVAL_SOURCE_SNAPSHOT/.review-eval-owner.$RUN_EVAL_SOURCE_NONCE"',
         'chmod 0500 "$RUN_EVAL_SOURCE_SNAPSHOT"',
         stateBlock,
         "[[ $RUN_EVAL_SOURCE_OWNED -eq 1 ]]",
@@ -5717,7 +5718,7 @@ test("the source snapshot path validator rejects aliases and nested paths", () =
         "#!/usr/bin/env bash",
         "set -euo pipefail",
         'RUN_EVAL_SOURCE_SNAPSHOT=""',
-        'RUN_EVAL_SOURCE_TOKEN=""',
+        'RUN_EVAL_SOURCE_NONCE=""',
         "source " + JSON.stringify(sourceSnapshotPath),
         'RUN_EVAL_SOURCE_SNAPSHOT="$1"',
         'if run_eval_source_snapshot_path_valid; then printf "valid\\n"; else printf "invalid\\n"; fi',
