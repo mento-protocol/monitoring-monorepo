@@ -12646,6 +12646,15 @@ assert_contains "- node scripts/pr/check-pr-description.test.mjs (PR description
 run_gate "scripts/pr/check-pr-description.test.mjs"
 assert_contains "- node scripts/pr/check-pr-description.test.mjs (PR description validator changed)"
 
+run_gate "scripts/review/review-eval-publication.mjs"
+assert_contains "- node scripts/pr/check-pr-description.test.mjs (review-eval publication PR body renderer changed)"
+
+run_gate "scripts/review/review-eval-publication.test.mjs"
+assert_contains "- node scripts/pr/check-pr-description.test.mjs (review-eval publication PR body renderer changed)"
+
+run_gate ".gitignore"
+assert_contains "- pnpm review:eval:test (review-eval raw cell exclusion changed)"
+
 run_gate "scripts/agent-autoreview.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"

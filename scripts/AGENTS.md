@@ -81,6 +81,7 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
   keys pin `AGENTS.md`, `CLAUDE.md` and the operating card. ADR 0073 has it.
   `pr/merge-pr*`, both PR-state helpers, and `agent-autoreview.sh` (Codex
   markers) route `pnpm pr:merge:test`.
+  `review/review-eval-publication{,.test}.mjs` routes the PR-description suite.
 - **Gate runtime pins.** Before `cd`, `agent-quality-gate.sh` resolves
   `gate/run-handles.sh`, coordinator files,
   `docs/docs-navigation-eval-helpers.mjs`, and `gate/lockfile-scope.mjs` from
