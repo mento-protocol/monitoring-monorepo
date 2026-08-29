@@ -42,6 +42,10 @@ import {
   writeAtomicJson,
 } from "./quality-gate-coordinator-state.mjs";
 
+export function legacyRecoveryHandoffAllowed(platform = process.platform) {
+  return platform === "linux";
+}
+
 export async function startCoordinator({
   root,
   capacity = DEFAULT_CAPACITY,
@@ -385,7 +389,9 @@ export async function startCoordinator({
     if (closing || connections.size || waiters.size) return;
     const idle = core.isIdle();
     const recoveryHandoff =
-      Boolean(legacy) && core.isLegacyRecoveryHandoffReady();
+      Boolean(legacy) &&
+      legacyRecoveryHandoffAllowed() &&
+      core.isLegacyRecoveryHandoffReady();
     if (!idle && !recoveryHandoff) return;
     if (idle) {
       const pruned = runMaintenance("prune-records", () => core.pruneRecords());
@@ -394,7 +400,11 @@ export async function startCoordinator({
     idleTimer = setTimeout(() => {
       if (connections.size || waiters.size) return;
       if (core.isIdle()) void close("idle");
-      else if (legacy && core.isLegacyRecoveryHandoffReady())
+      else if (
+        legacy &&
+        legacyRecoveryHandoffAllowed() &&
+        core.isLegacyRecoveryHandoffReady()
+      )
         void close("legacy-recovery-handoff");
     }, idleMs);
   }

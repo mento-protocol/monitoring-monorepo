@@ -9,6 +9,7 @@ import {
   lstatSync,
   openSync,
   readFileSync,
+  readdirSync,
   renameSync,
   unlinkSync,
   writeFileSync,
@@ -28,11 +29,13 @@ const MAX_TRANSITION_BYTES = MAX_STATE_BYTES * 3 + 64 * 1024;
 const TRANSITION_SCHEMA = "agentqg-darwin-lineage-transition-v1";
 const DISCARD_SCHEMA = "agentqg-darwin-lineage-discard-v1";
 const TRANSITION_ATTEMPTS = 3;
+const MAX_TRANSITION_DIRECTORY_ENTRIES = 16_384;
 
 class DarwinStableReadContentionError extends Error {
-  constructor(message) {
+  constructor(message, { retryWithinTransition = true } = {}) {
     super(message);
     this.name = "DarwinStableReadContentionError";
+    this.retryWithinTransition = retryWithinTransition;
   }
 }
 
@@ -85,6 +88,8 @@ function readStableFile(
     expectedModes = [0o600],
     expectedLinkCounts = [1, 2],
     afterRead = () => {},
+    pathReplacementIsContention = false,
+    linkCountIsContention = false,
   } = {},
 ) {
   let descriptor;
@@ -94,22 +99,58 @@ function readStableFile(
       constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
     );
     const before = fstatSync(descriptor, { bigint: true });
-    const pathBefore = lstatSync(path, { bigint: true });
+    let pathBefore;
+    try {
+      pathBefore = lstatSync(path, { bigint: true });
+    } catch (error) {
+      if (pathReplacementIsContention && error?.code === "ENOENT") {
+        throw new DarwinStableReadContentionError(
+          `${label} was removed before its stable read`,
+        );
+      }
+      throw error;
+    }
     if (
       !before.isFile() ||
       !pathBefore.isFile() ||
       before.uid !== BigInt(currentUid()) ||
       before.size > BigInt(maximumBytes) ||
       !expectedModes.includes(fileMode(before)) ||
-      !expectedLinkCounts.includes(Number(before.nlink)) ||
-      !sameFileIdentity(before, pathBefore)
+      !expectedModes.includes(fileMode(pathBefore))
     ) {
       fail(`${label} is unsafe`);
     }
+    if (!sameFileIdentity(before, pathBefore)) {
+      if (pathReplacementIsContention) {
+        throw new DarwinStableReadContentionError(
+          `${label} was replaced before its stable read`,
+        );
+      }
+      fail(`${label} is unsafe`);
+    }
+    if (!expectedLinkCounts.includes(Number(before.nlink))) {
+      if (linkCountIsContention) {
+        throw new DarwinStableReadContentionError(
+          `${label} acquired another transition link`,
+          { retryWithinTransition: false },
+        );
+      }
+      fail(`${label} is unsafe`);
+    }
     const bytes = readFileSync(descriptor);
-    afterRead();
+    afterRead({ bytes, stat: before });
     const after = fstatSync(descriptor, { bigint: true });
-    const pathAfter = lstatSync(path, { bigint: true });
+    let pathAfter;
+    try {
+      pathAfter = lstatSync(path, { bigint: true });
+    } catch (error) {
+      if (pathReplacementIsContention && error?.code === "ENOENT") {
+        throw new DarwinStableReadContentionError(
+          `${label} was removed while read`,
+        );
+      }
+      throw error;
+    }
     if (
       !sameFileIdentity(before, after) ||
       !sameFileIdentity(before, pathAfter) ||
@@ -191,14 +232,15 @@ function createState(path, state) {
 }
 
 class DarwinTransitionConflictError extends Error {
-  constructor(message) {
+  constructor(message, { retryWithinTransition = true } = {}) {
     super(message);
     this.name = "DarwinTransitionConflictError";
+    this.retryWithinTransition = retryWithinTransition;
   }
 }
 
-function transitionConflict(message) {
-  throw new DarwinTransitionConflictError(message);
+function transitionConflict(message, options) {
+  throw new DarwinTransitionConflictError(message, options);
 }
 
 function revisionNumber(value, label, { allowLegacy = false } = {}) {
@@ -516,7 +558,11 @@ function pathEntryExists(path) {
   }
 }
 
-function readCanonicalTransitionValue(path, afterRead = () => {}) {
+function readCanonicalTransitionValue(
+  path,
+  afterRead = () => {},
+  { expectedLinkCounts = [1, 2] } = {},
+) {
   try {
     const { bytes, stat } = readStableFile(
       path,
@@ -524,7 +570,7 @@ function readCanonicalTransitionValue(path, afterRead = () => {}) {
       {
         maximumBytes: MAX_TRANSITION_BYTES,
         expectedModes: [0o600],
-        expectedLinkCounts: [1, 2],
+        expectedLinkCounts,
         afterRead,
       },
     );
@@ -582,7 +628,76 @@ function isAdvancedTransitionValue(value, plan) {
   }
 }
 
-function validateClaimedCurrent(paths, plan, expectedCanonicalStat = null) {
+function canonicalCurrentSlotLimit(value, token) {
+  try {
+    const state = validateState(value, token);
+    return Math.min(state.revision + 1, 4_294_967_295);
+  } catch {
+    return validateDiscardTombstone(value, token).nextRevision;
+  }
+}
+
+function validateCanonicalCurrentLinks(
+  path,
+  requiredCurrentPath,
+  canonicalStat,
+  canonicalValue,
+  token,
+) {
+  const directory = dirname(path);
+  const prefix = `.${basename(path)}.transition-`;
+  const suffix = ".current";
+  const linkedCurrents = [];
+  const entries = readdirSync(directory);
+  if (entries.length > MAX_TRANSITION_DIRECTORY_ENTRIES) {
+    fail("Darwin lineage transition directory is too large to prove");
+  }
+  for (const name of entries) {
+    if (!name.startsWith(prefix) || !name.endsWith(suffix)) continue;
+    const revisionText = name.slice(prefix.length, -suffix.length);
+    if (!/^(0|[1-9]\d*)$/u.test(revisionText)) continue;
+    const revision = Number(revisionText);
+    if (!Number.isSafeInteger(revision) || revision > 4_294_967_295) continue;
+    const currentPath = join(directory, name);
+    let current;
+    try {
+      current = lstatSync(currentPath, { bigint: true });
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        throw new DarwinStableReadContentionError(
+          "Darwin lineage canonical current links changed during proof",
+        );
+      }
+      throw error;
+    }
+    if (!sameFileIdentity(canonicalStat, current)) continue;
+    if (
+      !current.isFile() ||
+      current.uid !== BigInt(currentUid()) ||
+      fileMode(current) !== 0o600
+    ) {
+      fail("Darwin lineage canonical current link topology is unsafe");
+    }
+    linkedCurrents.push({ path: currentPath, revision });
+  }
+  if (
+    linkedCurrents.length !== Number(canonicalStat.nlink) - 1 ||
+    !linkedCurrents.some((current) => current.path === requiredCurrentPath)
+  ) {
+    fail("Darwin lineage canonical current link topology is unsafe");
+  }
+  const slotLimit = canonicalCurrentSlotLimit(canonicalValue, token);
+  if (linkedCurrents.some((current) => current.revision > slotLimit)) {
+    fail("Darwin lineage canonical current link revision is unsafe");
+  }
+}
+
+function validateClaimedCurrent(
+  paths,
+  plan,
+  expectedCanonicalStat = null,
+  { boundary = () => {}, created = false } = {},
+) {
   const { bytes, stat } = readStableFile(
     paths.current,
     "Darwin lineage claimed current state",
@@ -590,6 +705,9 @@ function validateClaimedCurrent(paths, plan, expectedCanonicalStat = null) {
       maximumBytes: MAX_TRANSITION_BYTES,
       expectedModes: [0o600],
       expectedLinkCounts: [1, 2],
+      afterRead: () => boundary("during-current-claim-read"),
+      pathReplacementIsContention: true,
+      linkCountIsContention: created,
     },
   );
   const value = parseJsonBytes(bytes, "Darwin lineage claimed current state");
@@ -889,6 +1007,66 @@ function cleanupTransition(paths, plan, boundary = () => {}) {
   }
 }
 
+function cleanupObsoleteTransitionCurrent(path, paths, plan, boundary) {
+  let canonical;
+  for (let attempt = 0; attempt < TRANSITION_ATTEMPTS; attempt += 1) {
+    try {
+      canonical = readCanonicalTransitionValue(
+        path,
+        () => boundary("during-obsolete-current-canonical-read"),
+        { expectedLinkCounts: [1, 2, 3] },
+      );
+      break;
+    } catch (error) {
+      if (!(error instanceof DarwinStableReadContentionError)) throw error;
+    }
+  }
+  if (canonical === undefined || canonical === null) return false;
+  if (!isAdvancedTransitionValue(canonical.value, plan)) return false;
+
+  if (canonical.stat.nlink === 3n) {
+    canonical = undefined;
+    for (let attempt = 0; attempt < TRANSITION_ATTEMPTS; attempt += 1) {
+      try {
+        canonical = readCanonicalTransitionValue(
+          path,
+          ({ bytes, stat: stableCanonical }) => {
+            boundary("during-obsolete-current-link-proof");
+            if (stableCanonical.nlink !== 3n) return;
+            validateCanonicalCurrentLinks(
+              path,
+              paths.current,
+              stableCanonical,
+              parseJsonBytes(bytes, "Darwin lineage transition current state"),
+              plan.token,
+            );
+          },
+          { expectedLinkCounts: [1, 2, 3] },
+        );
+        break;
+      } catch (error) {
+        if (!(error instanceof DarwinStableReadContentionError)) throw error;
+      }
+    }
+    if (canonical === undefined || canonical === null) return false;
+    if (!isAdvancedTransitionValue(canonical.value, plan)) return false;
+  }
+
+  // A stable canonical revision at or beyond this transition's target makes
+  // this revision-specific pathname obsolete. Every valid replacement in the
+  // same slot is obsolete too, so cleanup does not depend on a racy inode
+  // ownership check.
+  boundary("before-obsolete-current-cleanup");
+  try {
+    unlinkSync(paths.current);
+    fsyncDirectory(dirname(path));
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  boundary("after-obsolete-current-cleanup");
+  return true;
+}
+
 function bindTransitionCurrent(
   path,
   paths,
@@ -901,26 +1079,31 @@ function bindTransitionCurrent(
     boundary("before-current-link");
     try {
       linkSync(path, paths.current);
-      fsyncDirectory(dirname(path));
       created = true;
+      fsyncDirectory(dirname(path));
+      boundary("after-current-link-before-validation");
     } catch (error) {
       if (error?.code !== "EEXIST") throw error;
     }
   }
   if (created) boundary("after-current-link");
   try {
-    return validateClaimedCurrent(paths, plan, expectedCanonicalStat);
+    return validateClaimedCurrent(paths, plan, expectedCanonicalStat, {
+      boundary,
+      created,
+    });
   } catch (error) {
-    if (created) {
-      unlinkExactTransitionFile(
-        paths.current,
-        "Darwin lineage rejected current-state claim",
-        {
-          maximumBytes: MAX_TRANSITION_BYTES,
-          expectedModes: [0o600],
-          expectedLinkCounts: [1, 2],
-        },
-      );
+    const obsoleteCurrentRemoved = cleanupObsoleteTransitionCurrent(
+      path,
+      paths,
+      plan,
+      boundary,
+    );
+    if (error instanceof DarwinStableReadContentionError) {
+      transitionConflict(error.message, {
+        retryWithinTransition:
+          obsoleteCurrentRemoved || error.retryWithinTransition,
+      });
     }
     throw error;
   }
@@ -1102,6 +1285,7 @@ function performTransition(path, requestedPlan, boundary = () => {}) {
       return completeTransition(path, plan, boundary);
     } catch (error) {
       if (!(error instanceof DarwinTransitionConflictError)) throw error;
+      if (!error.retryWithinTransition) throw error;
       if (attempt + 1 === TRANSITION_ATTEMPTS) throw error;
     }
   }

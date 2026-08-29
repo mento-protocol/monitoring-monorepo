@@ -305,13 +305,14 @@ reads that field from one record snapshot.
 
 Cross-policy recovery accepts an old coordinator owner only when one stable
 record contains its exact coordinator token, exact coordinator start identity,
-and the literal `coordinator-owner-v1` owner token. On Darwin, this record maps
-to the recovery-only `request-marker-empty-v1` contract. Recovery waits for the
-aggregate coordinator generation marker. It does not create per-command
-lineage or trust an old settlement claim. An open or ambiguous marker keeps the
-new policy blocked. Portable hosts retain `portable-marker-v1`. Their recovery
-must stop surviving marker holders before the aggregate marker can become
-empty.
+and the literal `coordinator-owner-v1` owner token. Darwin rejects this
+owner-record-only recovery. The record has no exact per-command lineage, and an
+untagged descendant can close its aggregate marker descriptor. The gate retains
+the owner evidence and does not start the new coordinator. This also blocks a
+dead same-policy coordinator when its socket cannot be joined and recovery
+falls back to the legacy owner record. Portable hosts retain
+`portable-marker-v1`. Their recovery must stop surviving marker holders before
+the aggregate marker can become empty.
 
 Adoption preserves the incoming owner record's group and other read bits so a
 legacy waiter with shared-root access can observe the barrier. The replacement
@@ -379,20 +380,24 @@ Sequential users of one shared root do not inherit another user's mode-0700
 coordinator directory.
 
 A coordinator-disabled gate cannot drain coordinator journal entries through
-the socket. If all remaining state is drain-required work from dead clients, and no live client,
-waiter, drain claim, or result handoff remains, the coordinator closes its
-socket after the idle period without releasing `run.lock`. A current gate that
-runs with the coordinator disabled can then reclaim a same-UID dead coordinator
-owner. It records the coordinator generation as a legacy drain obligation and
-drains every Linux worker through the shared generation marker and an exact
-anchored process group. Each worker retains that marker after its mapped wrapper
-exits. Darwin cannot derive a non-reusable per-command identity from the
-aggregate marker. The disabled compatibility path waits for that marker to
-close and fails closed at its bound when a holder remains. A normal
-coordinator-enabled successor reads the journal and settles each persisted
-Darwin lineage. A historical gate treats the versioned compatibility token as
-unreclaimable and waits until a current gate recovers or releases the owner. A
-queued, granted, or result-ready request prevents this recovery handoff.
+the socket. On Linux, the coordinator can close its socket after the idle
+period without releasing `run.lock` when all remaining state is portable
+drain-required work and no live client, waiter, drain claim, or result handoff
+remains. A current coordinator-disabled gate can then reclaim the same-UID dead
+coordinator owner. It records the coordinator generation as a legacy drain
+obligation. It drains every worker through the shared generation marker and an
+exact anchored process group. Each worker retains that marker after its mapped
+wrapper exits.
+
+Darwin does not make this graceful handoff. The coordinator keeps its socket
+live while a Darwin drain obligation remains. A normal coordinator-enabled
+successor joins that socket and settles each persisted per-command lineage. A
+coordinator-disabled or historical gate waits behind the retained owner. If the
+Darwin coordinator process or socket is lost, the typed owner record remains,
+but it cannot authorize signals from its aggregate marker. Recovery fails
+closed until a current journal-aware recovery path becomes available. A queued,
+granted, result-ready, claimed, or non-portable obligation prevents the Linux
+recovery handoff.
 
 ### Serialize each worktree for the full request
 
@@ -495,8 +500,11 @@ Status and direct Trunk launches close it. The guardian applies the
 mapped-command timeout to the check. A live wrapper atomically creates the
 `done` receipt and writes `done` after its final daemon check. After a hard
 wrapper death, the guardian performs the same publication after the check and
-named cleanup finish. If every publisher dies, the parent's read sees EOF and
-fails immediately.
+named cleanup finish. One bounded Node reader accepts only the exact `done\n`
+signal. It does not wait for EOF because the lineage watcher can retain a write
+descriptor until settlement. Silence from a live writer keeps the wait active.
+Zero-byte EOF fails immediately. The reader validates its gate parent and runs
+behind interruptible Bash `wait`, so gate termination stays prompt.
 
 The mapped-command parent retains the command lease and the `trunk-daemon`
 resource while it waits for the pipe signal. It verifies both receipts after
@@ -902,9 +910,12 @@ process broker that existed before the baseline. The Darwin broker-launch
 preflight rejects
 opaque repository executables and known XPC, launch-service, Apple-event, and
 Unix-domain-socket client paths in tracked, untracked, and bounded ignored
-executable source. The ignored-file walk excludes explicit dependency and tool
-caches, generated build and coverage output, documentation, and local or frozen
-evidence. These directories are `.git`, `.cache`, `.investigations`, `.next`,
+executable source. It parses decoded `scripts` values from each `package.json`
+as shell commands. A malformed scripts object, a non-string script, or a
+package-manifest symlink fails closed. The ignored-file walk excludes explicit
+dependency and tool caches, generated build and coverage output, documentation,
+and local or frozen evidence. These directories are `.git`, `.cache`,
+`.investigations`, `.next`,
 `.pnpm-store`, `.rankings`, `.reviews`, `.tmp`, `.trunk`, `.turbo`, `coverage`,
 `dist`, `docs`, `node_modules`, and `vendor`. Mapped commands must not use
 excluded content to request broker process creation. An enumerated symlink is
@@ -955,6 +966,13 @@ signals the mapped root last. This order keeps a final descendant fork visible
 through the root's exact lineage. The watcher is the only normal settlement
 writer. If its exact controller or launcher exits first, it settles
 autonomously. A parent fallback can write only after the exact watcher is gone.
+A successor can observe the durable drain before that autonomous settlement
+finishes. The lineage transition treats a peer removal or replacement of its
+shared current-state link as bounded contention. It yields when an adjacent
+transition adds a link. A fresh stable canonical read can remove an obsolete
+revision slot. If that read sees three links, it must account for every other
+link as a valid current-state slot for the same lineage and revision range.
+Unknown, malformed, or persistent link evidence fails closed.
 
 The parallel parent opens the request marker before it forks a worker. In
 coordinator mode, it also opens the shared generation marker for the worker.
@@ -990,8 +1008,9 @@ legacy lock authority.
 A successor coordinator reads the journal before it reuses any lease. It drops
 queued command leases because their wait connections ended with the old
 coordinator. It converts each granted lease to a drain obligation and keeps its
-capacity and resources reserved. A joining Bash gate claims one stale request
-and gathers all Darwin command identities for that request. It settles those
+capacity and resources reserved. A joining Bash gate enumerates every stale
+request in one status snapshot. It processes each request separately and
+gathers all Darwin command identities for that request. It settles those
 identities as one cohort from one coherent process snapshot per census epoch. A
 process can receive a signal only when at least one cohort lineage proves exact
 ownership. An incomplete or ambiguous chain in another cohort lineage does not

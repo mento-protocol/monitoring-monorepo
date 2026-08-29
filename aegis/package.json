@@ -13,7 +13,7 @@
     "deploy": "./bin/deploy.sh",
     "dev": "nest start --watch",
     "format": "trunk fmt",
-    "grafana": "open $(terraform -chdir=terraform state show module.grafana_dashboard.grafana_dashboard.aegis | grep 'url' | awk -F '\"' '{print $2}')",
+    "grafana": "terraform -chdir=terraform state show module.grafana_dashboard.grafana_dashboard.aegis | grep 'url' | awk -F '\"' '{print $2}'",
     "knip": "knip --config knip.json --no-progress",
     "knip:report": "knip --config knip.json --no-exit-code --no-progress",
     "lint": "node ../scripts/eslint-baseline-diff.mjs check",

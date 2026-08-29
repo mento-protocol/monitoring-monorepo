@@ -763,7 +763,7 @@ gate_coordinator_classify_command() {
 }
 
 gate_coordinator_recover_stale_obligations() {
-  local status_json status_records records="" obligation_id drain_token request_token request_id
+  local status_json status_records request_ids records="" obligation_id drain_token request_token request_id
   local lifecycle_contract
   local current_status obligation_present condemned_dir
   local claim_error claim_json error_code rc had_errexit=0
@@ -776,6 +776,26 @@ gate_coordinator_recover_stale_obligations() {
   # parent can drain. A drain scans and updates shared capture files, so two
   # worker subshells must never enter it concurrently.
   [[ "${BASH_SUBSHELL:-0}" == "$gate_coordinator_owner_subshell" ]] || return 0
+  if [[ -z "$request_filter" ]]; then
+    status_json="$(gate_coordinator_cli status)" || return 2
+    request_ids="$(printf '%s' "$status_json" | node -e '
+      const value = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+      const requestIds = new Set();
+      for (const item of value.drainObligations ?? []) {
+        if (typeof item.requestId !== "string" || item.requestId.length === 0) {
+          process.exit(1);
+        }
+        requestIds.add(item.requestId);
+      }
+      for (const requestId of requestIds) process.stdout.write(`${requestId}\n`);
+    ')" || return 2
+    while IFS= read -r request_id; do
+      [[ -n "$request_id" ]] || continue
+      gate_coordinator_recover_stale_obligations \
+        "$drain_context" "$request_id" || return 2
+    done <<< "$request_ids"
+    return 0
+  fi
   status_json="$(gate_coordinator_cli status)" || return 2
   status_records="$(printf '%s' "$status_json" | node -e '
     const value = JSON.parse(require("node:fs").readFileSync(0, "utf8"));

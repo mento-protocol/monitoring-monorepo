@@ -35,6 +35,7 @@ import {
   connectCoordinator,
   coordinatorRpc,
   fingerprintHash,
+  legacyRecoveryHandoffAllowed,
   observeProcessIdentity,
   ownerFields,
   processStartUtc,
@@ -2988,6 +2989,7 @@ test("restart recovers a legacy Darwin lease as a global drain barrier", async (
     "darwin-unique-lineage-v1",
   );
   assert.equal(obligation.lifecycleContract, "darwin-unique-lineage-v1");
+  assert.equal(fixture.coordinator.core.isLegacyRecoveryHandoffReady(), false);
 
   const nextOwner = owner(305);
   await register(
@@ -4146,6 +4148,43 @@ test("a dead drain claimant releases its exact claim for another client", async 
       claimant.kill("SIGKILL");
     }
   }
+});
+
+test("legacy recovery handoff requires portable lifecycle evidence", async () => {
+  for (const [lifecycleContract, expected] of [
+    ["portable-marker-v1", true],
+    ["darwin-coherent-lineage-v2", false],
+  ]) {
+    const fixture = await createFixture({ capacity: 1 });
+    const requestId = `handoff-${lifecycleContract}`;
+    const requestOwner = owner(310 + requestId.length);
+    await register(
+      fixture,
+      requestId,
+      `${requestId}-fingerprint`,
+      requestOwner,
+    );
+    await lease(fixture, requestId, `${requestId}-lease`, requestOwner, {
+      lifecycleContract,
+    });
+    await markOwnerStale(fixture, {
+      requestId,
+      observedOwner: requestOwner,
+      reporter: requestOwner,
+      reason: "test classifies the graceful recovery handoff contract",
+    });
+    assert.equal(
+      fixture.coordinator.core.isLegacyRecoveryHandoffReady(),
+      expected,
+      lifecycleContract,
+    );
+  }
+});
+
+test("legacy recovery handoff is enabled only on Linux", () => {
+  assert.equal(legacyRecoveryHandoffAllowed("linux"), true);
+  assert.equal(legacyRecoveryHandoffAllowed("darwin"), false);
+  assert.equal(legacyRecoveryHandoffAllowed("freebsd"), false);
 });
 
 for (const terminalStatus of ["success", "failure", "cancelled"]) {

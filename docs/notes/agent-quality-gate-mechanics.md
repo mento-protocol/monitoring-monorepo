@@ -291,8 +291,12 @@ final status check. After hard wrapper death, the guardian publishes after the
 check and named cleanup finish. The parent keeps the lease and named resource
 while it waits. It verifies both receipts after the pipe signal. It gives the
 mapped root five seconds to publish wrapper status, then starts generic lineage
-settlement. If every publisher dies, EOF fails the wait immediately. The completion
-deadline is the command timeout plus 120 seconds. This covers
+settlement. One bounded Node reader accepts only the exact `done\n` signal. It
+does not wait for EOF because the lineage watcher can retain a write descriptor
+until settlement. Silence from a live writer keeps the wait active. Zero-byte
+EOF fails the wait immediately. The reader validates its gate parent and runs
+behind interruptible Bash `wait`, so gate termination stays prompt. The
+completion deadline is the command timeout plus 120 seconds. This covers
 10 seconds for initial status, 92 seconds for named cleanup, 10 seconds for
 final status, and eight seconds of scheduling margin. EOF or a missing or
 invalid signal or receipt is an infrastructure failure. Exact lineage
@@ -425,15 +429,16 @@ This state blocks every new grant. A restart converts it to a typed drain
 obligation and keeps the global barrier. The drainer retains the verified-empty
 lineage state until the coordinator or legacy obligation is durably released.
 It then discards that state. A missing contract or lineage record fails closed.
-The drainer selects one request and settles all of that request's Darwin command
-lineages as one cohort. Each census epoch uses one coherent process snapshot.
+The drainer enumerates every stale request in one status snapshot. It settles
+each request's Darwin command lineages as a separate cohort. Each census epoch
+uses one coherent process snapshot.
 The helper can signal an exact identity when any cohort lineage proves that it
 owns the identity. An ambiguous classification in another lineage does not
 remove this authority. An identity that is ambiguous in every lineage receives
 no signal and keeps the request blocked. The helper persists every lineage's
 census before it signals. The shell acknowledges obligations only after every
-lineage reaches an empty exact set. It does not claim obligations from another
-request in the same recovery pass.
+lineage reaches an empty exact set. It never combines obligations from two
+requests into one cohort.
 Each v4 lineage update increments a revision. Publication compares the current
 state through an exclusive same-directory hard link before its atomic rename.
 The transition plan records the full expected state, full target, operation,
@@ -442,7 +447,14 @@ expected-state inode as `.current`, fsyncs the payload, and publishes a ready
 hard link before rename. A recovery helper can complete only that exact plan.
 A late writer links the newer canonical inode and fails the expected-state
 comparison before publication. A foreground drainer and recovery watcher
-cannot replace a newer tombstone set or settlement proof. Settlement alone can
+cannot replace a newer tombstone set or settlement proof. One helper can remove
+or replace a shared `.current` link while another helper has it open.
+That overlap is bounded transition contention. An adjacent transition yields
+until the older writer advances. A stale writer removes its old revision slot
+only after a fresh stable canonical read proves that the slot is obsolete. A
+three-link proof enumerates and validates every current-state link for the same
+lineage and allowed revision range. A wrong type, owner, mode, unknown link, or
+persistent extra link remains unsafe and fails closed. Only settlement can
 upgrade an exact v3/v1 obligation. The upgrade clears its old settlement claim
 and signal timestamps before it publishes v4/v2 and performs a coherent census.
 Initial discard accepts only v4/v2 evidence. It publishes and validates a
@@ -498,9 +510,12 @@ name or executable path for this decision. It cannot infer process causality
 through a broker that existed before the baseline. A Darwin preflight scans
 tracked, untracked, and bounded ignored repository source. It rejects
 unapproved XPC, launch-service, Apple-event, and Unix-domain-socket client
-paths. It also rejects native executable magic and a symlink that does not
-resolve to an enumerated regular file inside the repository. Fixed path,
-Git-output, file-size, and total-source limits fail closed. The ignored-file
+paths. It parses decoded `scripts` values from every `package.json` as shell
+commands. A malformed scripts object, non-string script, or package-manifest
+symlink fails closed. It also rejects native executable magic and a source
+symlink that does not resolve to an enumerated regular file inside the
+repository. Fixed path, Git-output, file-size, and total-source limits fail
+closed. The ignored-file
 walk excludes only named dependency, tool-cache, generated-build, coverage,
 documentation, and local-evidence directories:
 `.git`, `.cache`, `.investigations`, `.next`, `.pnpm-store`, `.rankings`,
@@ -1288,20 +1303,22 @@ The private state namespace includes the numeric UID, so a later user of that
 root does not inherit another user's mode-0700 state directory.
 
 A coordinator-disabled gate cannot read or acknowledge coordinator drain
-records through the socket. If every remaining request is terminal-pending, every lease is
-drain-required, and no live client, waiter, drain claim, or result handoff
-remains, the coordinator closes its socket after the idle period without
-releasing `run.lock`. A current gate that runs with the coordinator disabled
-can then reclaim a same-UID dead coordinator owner. It records the coordinator
-generation under `condemned.d/`. Linux drains workers through the shared
-generation marker and an exact anchored process group. Darwin cannot derive a
-non-reusable per-command identity from that aggregate marker. The disabled
-compatibility path waits for the marker to close and fails closed at its bound
-when a holder remains. A normal coordinator-enabled successor reads the journal
-and settles each persisted Darwin lineage. A historical gate treats the
-versioned compatibility token as unreclaimable and waits until a current gate
-recovers or releases the owner. A queued, granted, or result-ready request
-prevents this handoff.
+records through the socket. On Linux, the coordinator closes its socket after
+the idle period without releasing `run.lock` when every remaining request is
+terminal-pending, every lease has a portable drain obligation, and no live
+client, waiter, drain claim, or result handoff remains. A current
+coordinator-disabled gate can then reclaim the same-UID dead coordinator owner.
+It records the coordinator generation under `condemned.d/`. It drains workers
+through the shared generation marker and an exact anchored process group.
+
+Darwin keeps the coordinator socket live while a Darwin drain obligation
+remains. A normal coordinator-enabled successor joins the socket and settles
+each persisted per-command lineage. A coordinator-disabled or historical gate
+waits behind the retained owner. If the Darwin coordinator process or socket is
+lost, the typed owner record remains. Its aggregate marker cannot authorize a
+Darwin signal, so recovery fails closed until a journal-aware recovery path is
+available. A queued, granted, result-ready, claimed, or non-portable obligation
+prevents the Linux handoff.
 
 The coordinator publishes mutable request, lease, and drain state through
 same-directory temporary files and atomic rename. It creates terminal results
@@ -1315,8 +1332,9 @@ or coordinator logs. Workers and mapped wrappers carry command and request
 tags. Workers retain open command, request, and coordinator generation marker
 descriptors. A successor coordinator restores uncertain
 leases as drain obligations and keeps their resources reserved. A joining Bash
-gate claims one stale request. It persists and drains every lease command
-identity, then drains the request identity. It confirms all discovered worker
+gate enumerates every stale request and handles the requests in sequence. For
+each request, it persists and drains every lease command identity, then drains
+the request identity. It confirms all discovered worker
 and descendant PID/start identities are gone before it acknowledges any lease
 obligation. Only then can the coordinator reuse capacity, a named resource,
 the worktree lease, or the legacy lock. Recovery cancels uncertain work. It
@@ -1469,14 +1487,15 @@ coordinators read `coordinator_start_utc` from one file snapshot and can compare
 the exact process identity.
 
 An old-policy coordinator owner has no safe per-command Darwin lineage under
-the new policy. Recovery accepts it only when one stable record has the exact
+the new policy. Recovery recognizes it only when one stable record has the exact
 coordinator token, exact coordinator start identity, and the literal
-`coordinator-owner-v1` owner token. Darwin assigns the recovery-only
-`request-marker-empty-v1` contract and waits for the aggregate generation
-marker to close. It never creates per-command lineage or uses old settlement
-proof. Missing or live aggregate evidence keeps the new policy blocked.
-Portable hosts retain `portable-marker-v1`. Their recovery stops surviving
-marker holders before it releases the aggregate generation barrier.
+`coordinator-owner-v1` owner token. Darwin then rejects owner-record-only
+recovery. An untagged descendant can close the aggregate generation marker
+descriptor, so an empty marker cannot authorize the new coordinator. The gate
+retains the owner evidence. This also blocks a dead same-policy coordinator
+when its socket cannot be joined and recovery falls back to the legacy owner
+record. Portable hosts retain `portable-marker-v1`. Their recovery stops
+surviving marker holders before it releases the aggregate generation barrier.
 
 The current Bash gate and coordinator read process start time and process status
 from one `ps` snapshot. A different start time means PID reuse. A matching

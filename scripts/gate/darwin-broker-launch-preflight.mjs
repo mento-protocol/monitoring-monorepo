@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 
 const HELPER_PATH = "scripts/gate/darwin-broker-launch-preflight.mjs";
 const TEST_PATH = "scripts/gate/darwin-broker-launch-preflight.test.mjs";
+const PACKAGE_MANIFEST_BASENAME = "package.json";
 
 // This admission check has a narrow claim. It rejects named process-broker
 // APIs, obvious constructed forms, unapproved Unix-domain clients, and opaque
@@ -129,9 +130,9 @@ const RULES = [
     id: "shell-process-broker",
     languages: new Set(["shell", "workflow"]),
     patterns: [
-      /(?:^|[;&|()])[ \t]*(?:then\s+)?(?:(?:command|exec|env|sudo)\s+)*(?:["']?(?:[^"';&|()\s]+\/)?launchctl["']?)(?=\s+[^=!<>|&{+*/%,)])/gmu,
-      /(?:^|[;&|()])[ \t]*(?:then\s+)?(?:(?:command|exec|env|sudo)\s+)*(?:["']?(?:[^"';&|()\s]+\/)?osascript["']?)(?=\s+[^=!<>|&{+*/%,)])/gmu,
-      /(?:^|[;&|()])[ \t]*(?:then\s+)?(?:(?:command|exec|env|sudo)\s+)*(?:["']?(?:[^"';&|()\s]+\/)?open["']?)(?=\s+[^=!<>|&{+*/%,)])/gmu,
+      /(?:^|[;&|()])[ \t]*(?:then\s+)?(?:(?:command|exec|env|sudo)\s+)*(?:["']?(?:[^"';&|()\s]+\/)?launchctl["']?)(?=\s+[^=!<>|&{+*%,)])/gmu,
+      /(?:^|[;&|()])[ \t]*(?:then\s+)?(?:(?:command|exec|env|sudo)\s+)*(?:["']?(?:[^"';&|()\s]+\/)?osascript["']?)(?=\s+[^=!<>|&{+*%,)])/gmu,
+      /(?:^|[;&|()])[ \t]*(?:then\s+)?(?:(?:command|exec|env|sudo)\s+)*(?:["']?(?:[^"';&|()\s]+\/)?open["']?)(?=\s+[^=!<>|&{+*%,)])/gmu,
       /(?:^|[;&|()])[ \t]*(?:then\s+)?(?:(?:command|exec|env|sudo)\s+)*(?:["']?(?:[^"';&|()\s]+\/)?(?:nc|ncat)["']?)\s+[^\n;&|]*-U(?:\s|$)/gmu,
       /(?:^|[;&|()])[ \t]*(?:then\s+)?(?:(?:command|exec|env|sudo)\s+)*(?:["']?(?:[^"';&|()\s]+\/)?socat["']?)\s+[^\n;&|]*(?:UNIX-CONNECT|UNIX-CLIENT|ABSTRACT-CONNECT):/gimu,
       /(?:^|[;&|()])[ \t]*(?:then\s+)?(?:(?:command|exec|env|sudo)\s+)*(?:["']?(?:[^"';&|()\s]+\/)?curl["']?)\s+[^\n;&|]*--unix-socket(?:\s|=)/gmu,
@@ -142,7 +143,7 @@ const RULES = [
     id: "shell-process-broker",
     languages: new Set(["workflow"]),
     patterns: [
-      /^[ \t]*(?:-\s*)?run:\s*(?:(?:command|exec|env|sudo)\s+)*["']?(?:[^"';&|()\s]+\/)?(?:launchctl|osascript|open)["']?(?=\s+[^=!<>|&{+*/%,)])/gmu,
+      /^[ \t]*(?:-\s*)?run:\s*(?:(?:command|exec|env|sudo)\s+)*["']?(?:[^"';&|()\s]+\/)?(?:launchctl|osascript|open)["']?(?=\s+[^=!<>|&{+*%,)])/gmu,
       /^[ \t]*(?:-\s*)?run:\s*(?:(?:command|exec|env|sudo)\s+)*["']?(?:[^"';&|()\s]+\/)?(?:nc|ncat)["']?\s+[^\n;&|]*-U(?:\s|$)/gmu,
       /^[ \t]*(?:-\s*)?run:\s*(?:(?:command|exec|env|sudo)\s+)*["']?(?:[^"';&|()\s]+\/)?socat["']?\s+[^\n;&|]*(?:UNIX-CONNECT|UNIX-CLIENT|ABSTRACT-CONNECT):/gimu,
       /^[ \t]*(?:-\s*)?run:\s*(?:(?:command|exec|env|sudo)\s+)*["']?(?:[^"';&|()\s]+\/)?curl["']?\s+[^\n;&|]*--unix-socket(?:\s|=)/gmu,
@@ -314,7 +315,7 @@ export const BROKER_CLIENT_ALLOWLIST = [
   {
     path: "scripts/gate/quality-gate-coordinator.test.mjs",
     rules: ["node-net-client"],
-    sha256: "71bf18f794a697d214bf20ae6610592702d343ca351d47b37617aa05824bd9cf",
+    sha256: "3d4b13b7f7738693d42dfa6fbb2a529f61ad0e18ae4a4f097d4dabfe048352ff",
     reason: APPROVED_ALLOWLIST_SHAPE.get(
       "scripts/gate/quality-gate-coordinator.test.mjs",
     ).reason,
@@ -326,7 +327,7 @@ export const BROKER_CLIENT_ALLOWLIST = [
       "node-net-dynamic-client",
       "javascript-process-broker",
     ],
-    sha256: "b150470100879e290f9b5c34aaea79e7b2ed4118f474ceeb18ad40ffb32220de",
+    sha256: "b68479961b3ba9e9e593fb15bdf73cb001d51df414dc0066da7b84ac697e5286",
     reason: APPROVED_ALLOWLIST_SHAPE.get(TEST_PATH).reason,
   },
 ];
@@ -355,6 +356,10 @@ function isExecutableSource(path, source) {
     SOURCE_BASENAMES.has(basename) ||
     source.startsWith("#!")
   );
+}
+
+function isPackageManifest(path) {
+  return path.slice(path.lastIndexOf("/") + 1) === PACKAGE_MANIFEST_BASENAME;
 }
 
 function isExcludedPath(path) {
@@ -649,8 +654,84 @@ function scanNodeNet(path, source, lineStarts, findings) {
   }
 }
 
+function scanPackageScripts(path, source) {
+  let manifest;
+  try {
+    manifest = JSON.parse(source);
+  } catch {
+    return [
+      {
+        path,
+        rule: "unscanned-package-scripts",
+        line: 1,
+        evidence: "package manifest is not valid JSON",
+      },
+    ];
+  }
+  if (
+    manifest === null ||
+    Array.isArray(manifest) ||
+    typeof manifest !== "object"
+  ) {
+    return [
+      {
+        path,
+        rule: "unscanned-package-scripts",
+        line: 1,
+        evidence: "package manifest is not a JSON object",
+      },
+    ];
+  }
+  if (manifest.scripts === undefined) return [];
+  if (
+    manifest.scripts === null ||
+    Array.isArray(manifest.scripts) ||
+    typeof manifest.scripts !== "object"
+  ) {
+    return [
+      {
+        path,
+        rule: "unscanned-package-scripts",
+        line: 1,
+        evidence: "package scripts are not a JSON object",
+      },
+    ];
+  }
+
+  const findings = [];
+  for (const [scriptName, command] of Object.entries(manifest.scripts)) {
+    if (typeof command !== "string") {
+      findings.push({
+        path,
+        rule: "unscanned-package-scripts",
+        line: 1,
+        evidence: `package script ${JSON.stringify(scriptName)} is not a string`,
+      });
+      continue;
+    }
+    for (const finding of scanSource(
+      `${path}.agentqg-package-script.sh`,
+      command,
+    )) {
+      findings.push({
+        ...finding,
+        path,
+        line: 1,
+        evidence:
+          `script ${JSON.stringify(scriptName)}: ${finding.evidence}`.slice(
+            0,
+            180,
+          ),
+      });
+    }
+  }
+  return findings;
+}
+
 export function scanSource(path, source) {
-  if (isExcludedPath(path) || !isExecutableSource(path, source)) return [];
+  if (isExcludedPath(path)) return [];
+  if (isPackageManifest(path)) return scanPackageScripts(path, source);
+  if (!isExecutableSource(path, source)) return [];
   const language = sourceLanguage(path, source);
   const lineStarts = indexLineStarts(source);
   const findings = [];
@@ -1810,6 +1891,16 @@ export function scanRepository(
       continue;
     }
     if (stat.isSymbolicLink()) {
+      if (isPackageManifest(path)) {
+        findings.push({
+          path,
+          rule: "unscanned-package-scripts",
+          line: 1,
+          evidence:
+            "package manifest is a symlink and cannot be scanned safely",
+        });
+        continue;
+      }
       let targetPath;
       try {
         targetPath = normalizeRepoPath(root, realpathSync(absolutePath));
@@ -1851,7 +1942,9 @@ export function scanRepository(
     }
     const basename = path.slice(path.lastIndexOf("/") + 1);
     const sourceShaped =
-      SOURCE_EXTENSIONS.has(extname(path)) || SOURCE_BASENAMES.has(basename);
+      SOURCE_EXTENSIONS.has(extname(path)) ||
+      SOURCE_BASENAMES.has(basename) ||
+      basename === PACKAGE_MANIFEST_BASENAME;
     if (stat.size > MAX_SOURCE_BYTES) {
       if (sourceShaped || (stat.mode & 0o111) !== 0) {
         findings.push({
@@ -1865,10 +1958,11 @@ export function scanRepository(
     }
     const sourceBytes = readFileSync(absolutePath);
     const source = sourceBytes.toString("utf8");
-    const recognizedSource = isExecutableSource(path, source);
+    const executableSource = isExecutableSource(path, source);
+    const recognizedSource = executableSource || isPackageManifest(path);
     if (
       (stat.mode & 0o111) !== 0 &&
-      (!recognizedSource || sourceBytes.includes(0))
+      (!executableSource || sourceBytes.includes(0))
     ) {
       findings.push({
         path,

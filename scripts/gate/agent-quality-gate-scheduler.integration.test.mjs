@@ -88,6 +88,90 @@ settlement_ack="$7"
   );
 });
 
+test(
+  "Darwin Trunk guardian keeps an idle completion writer live",
+  { skip: process.platform !== "darwin", timeout: 60_000 },
+  async () => {
+    const fixture = await createGateFixture();
+    try {
+      const worktree = await fixture.addWorktree("trunk-guardian-idle-writer");
+      const scenario = fixture.scenarioPaths("trunk-guardian-idle-writer");
+      const handle = await fixture.startGate({
+        worktree,
+        changedPath: "fixture-same.txt",
+        scenario,
+        label: "trunk-guardian-idle-writer",
+        defaultDelayMs: 2_100,
+        commandTimeoutSeconds: 30,
+      });
+      const result = await handle.done;
+      assertPassed(result);
+      assert.doesNotMatch(
+        result.stderr,
+        /completion capability closed before publication/u,
+      );
+      assert.deepEqual(
+        (await fixture.events(scenario)).map((event) => event.event),
+        ["start", "end"],
+      );
+    } finally {
+      await fixture.cleanup();
+    }
+  },
+);
+
+test(
+  "Darwin Trunk guardian reader does not delay gate termination",
+  { skip: process.platform !== "darwin", timeout: 60_000 },
+  async () => {
+    const fixture = await createGateFixture();
+    let startBarrier;
+    let barrierReleased = false;
+    const releaseBarrier = async () => {
+      if (!startBarrier || barrierReleased) return;
+      await writeFile(`${startBarrier}.release`, "release\n");
+      barrierReleased = true;
+    };
+    try {
+      const worktree = await fixture.addWorktree("trunk-guardian-term");
+      const scenario = fixture.scenarioPaths("trunk-guardian-term");
+      startBarrier = join(scenario.directory, "trunk-start-barrier");
+      const handle = await fixture.startGate({
+        worktree,
+        changedPath: "fixture-same.txt",
+        scenario,
+        label: "trunk-guardian-term",
+        defaultDelayMs: 2_100,
+        commandTimeoutSeconds: 30,
+        extraEnvironment: {
+          QG_FIXTURE_START_BARRIER: startBarrier,
+        },
+      });
+      await fixture.waitForEvent(
+        scenario,
+        (event) =>
+          event.event === "start" && event.label === "trunk-guardian-term",
+        "the Trunk command to start before gate termination",
+      );
+      const signaledAt = Date.now();
+      await fixture.signalGate(handle, "SIGTERM");
+      await waitUntil(() => handle.settled, {
+        timeoutMs: 10_000,
+        message: "the terminated gate and its output pipes to close",
+      });
+      const result = await handle.done;
+      assert.notEqual(result.code, 0, `${result.stdout}\n${result.stderr}`);
+      assert.ok(
+        Date.now() - signaledAt < 10_000,
+        "the guardian reader delayed gate termination",
+      );
+    } finally {
+      await releaseBarrier();
+      await fixture.cleanup();
+    }
+  },
+);
+
 async function copyCoordinatorRuntime(worktree) {
   const targetScripts = join(worktree, "scripts");
   const targetGate = join(targetScripts, "gate");
@@ -957,6 +1041,12 @@ test("the real quality gate uses scheduler concurrency and recovery", async (t) 
         );
         const draining = await fixture.waitForDrain(scenario);
         assert.equal(draining.drainObligations.length, 1);
+        // Cross the coordinator's five-second recovery-handoff interval. A
+        // Darwin coordinator must keep its exact journal socket joinable.
+        // A portable coordinator can close and use legacy recovery.
+        await new Promise((resolvePromise) =>
+          setTimeout(resolvePromise, 6_000),
+        );
 
         const joiners = await Promise.all([
           fixture.startGate({
@@ -1215,8 +1305,18 @@ test("a coordinator-disabled gate handles a killed coordinator leader safely", a
           : {},
     });
     const legacyResult = await legacy.done;
-    assertPassed(legacyResult);
-    if (process.platform !== "darwin") {
+    if (process.platform === "darwin") {
+      assert.equal(
+        legacyResult.code,
+        2,
+        `${legacyResult.stdout}\n${legacyResult.stderr}`,
+      );
+      assert.match(
+        legacyResult.stderr,
+        /requires exact per-command lineage evidence/u,
+      );
+    } else {
+      assertPassed(legacyResult);
       await waitUntil(
         async () => !(await fixture.processRunning(descendantPid)),
         {
@@ -1229,7 +1329,11 @@ test("a coordinator-disabled gate handles a killed coordinator leader safely", a
       (event) =>
         event.event === "start" && event.label === "legacy-recovery-client",
     );
-    assert.equal(starts.length, 1, JSON.stringify(starts));
+    assert.equal(
+      starts.length,
+      process.platform === "darwin" ? 0 : 1,
+      JSON.stringify(starts),
+    );
   } finally {
     await fixture.cleanup();
   }
@@ -1262,6 +1366,7 @@ test("coordinator startup rejects source mutation during the legacy-lock wait", 
       label: "policy-drift-holder",
       coordinator: false,
       shortDelayMs: 100,
+      commandTimeoutSeconds: 120,
       extraEnvironment: {
         QG_FIXTURE_START_BARRIER: holderBarrier,
       },

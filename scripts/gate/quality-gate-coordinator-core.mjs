@@ -633,7 +633,11 @@ export class QualityGateCoordinator extends EventEmitter {
     const requests = Object.values(this.state.requests);
     return (
       obligations.length > 0 &&
-      obligations.every((obligation) => obligation.claim === null) &&
+      obligations.every(
+        (obligation) =>
+          obligation.claim === null &&
+          obligation.lifecycleContract === "portable-marker-v1",
+      ) &&
       leases.length === obligations.length &&
       leases.every((lease) => lease.status === "drain-required") &&
       requests.length > 0 &&

@@ -72,6 +72,7 @@ export {
   fingerprintHash,
 } from "./quality-gate-coordinator-state.mjs";
 export {
+  legacyRecoveryHandoffAllowed,
   startCoordinator,
   stateNamespace,
 } from "./quality-gate-coordinator-server.mjs";

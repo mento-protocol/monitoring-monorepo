@@ -500,7 +500,23 @@ assert.match(
   run.slice(wait, settlement),
   /exec 26<&-[\s\S]*trunk_guardian_signal_read_open=0/u,
 );
-assert.match(gate, /read -r -t 1 signal <&26[\s\S]*signal_status.*-lt 128/u);
+assert.doesNotMatch(gate, /read -r -t [^\n]*<&26/u);
+assert.match(
+  gate,
+  /\/usr\/bin\/env -i "\$gate_darwin_node_bin" -e '[\s\S]*const expectedParent = Number\(expectedParentText\);[\s\S]*process\.ppid !== expectedParent[\s\S]*process\.stdin\.on\("data"[\s\S]*process\.stdin\.once\("end"/u,
+);
+assert.match(
+  gate,
+  /finish\(11\)[\s\S]*parentTimer = setInterval\([\s\S]*process\.ppid !== expectedParent[\s\S]*finish\(13\)/u,
+);
+assert.match(
+  gate,
+  /input\.length === 5[\s\S]*\? 0 : 12[\s\S]*input\.length === 0[\s\S]*finish\(10\)/u,
+);
+assert.match(
+  gate,
+  /24>&- 25>&- <&26 26<&- >\/dev\/null 2>\/dev\/null &[\s\S]*reader_pid=\$![\s\S]*wait "\$reader_pid"[\s\S]*case "\$signal_status" in[\s\S]*10\)[\s\S]*11\)[\s\S]*12\)/u,
+);
 assert.match(run, /exec 26<&-[\s\S]*eval "\$2"/u);
 assert.match(wrapper, /^set -euo pipefail$/mu);
 assert.match(wrapper, /stdio\[signalFd\] = "ignore";/u);

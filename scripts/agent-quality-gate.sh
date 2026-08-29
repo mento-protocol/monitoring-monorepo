@@ -2113,7 +2113,8 @@ gate_lock_prepare_owner_quarantine() {
   local record="$1"
   local retention_state="${2:-Nothing has been executed.}"
   local raw_marker_token="${3:-}"
-  local authority_and_contract parent quarantine quarantine_template
+  local authority_and_contract authority_status=0
+  local parent quarantine quarantine_template
   local quarantine_prefix="owner.reclaiming.quarantine.v1"
   gate_lock_clear_quarantine_state
   gate_lock_quarantine_retention_state="$retention_state"
@@ -2160,10 +2161,17 @@ gate_lock_prepare_owner_quarantine() {
     [[ ! -e "$record" && ! -L "$record" ]] && return 1
     return 2
   fi
-  if ! authority_and_contract="$(
+  authority_and_contract="$(
     gate_lock_quarantine_authority_and_contract_from_record \
       "$gate_lock_quarantine_anchor"
-  )" || [[ "$authority_and_contract" != *$'\n'* ]]; then
+  )" || authority_status=$?
+  if [[ "$authority_status" -eq 2 ]]; then
+    gate_lock_retain_quarantine \
+      "Darwin coordinator-owner recovery requires exact per-command lineage evidence"
+    return 2
+  fi
+  if [[ "$authority_status" -ne 0 ||
+    "$authority_and_contract" != *$'\n'* ]]; then
     gate_lock_report_foreign_owner_recovery \
       "$record" "$gate_lock_quarantine_retention_state"
     gate_lock_retain_quarantine \
@@ -3036,7 +3044,14 @@ gate_lock_recover_hidden_record() {
         ! -e "$remnant" && ! -L "$remnant" ]]; then
         continue
       fi
-      gate_lock_report_foreign_owner_recovery "$remnant"
+      if [[ "$prepare_status" -eq 2 ]]; then
+        # The witness path already diagnosed and retained unsafe evidence.
+        # This includes the Darwin exact-lineage boundary for a current-user
+        # coordinator owner. Do not relabel that owner as foreign here.
+        echo "error: hidden quality-gate owner recovery stopped at its evidence boundary; retained ${remnant}." >&2
+      else
+        gate_lock_report_foreign_owner_recovery "$remnant"
+      fi
       gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
         "No mapped command ran in this request"
       exit 2
@@ -3658,24 +3673,30 @@ gate_lock_recovery_contract_from_owner_snapshot() {
   if [[ -n "$coordinator_start" &&
     "$owner_identity" == "coordinator-owner-v1" &&
     "$gate_host_lifecycle_contract" == "darwin-coherent-lineage-v2" ]]; then
-    # A coordinator owner token identifies the aggregate generation marker.
-    # It has no per-command Darwin state, so recovery may only wait for that
-    # exact marker to become empty. It must not invent lineage evidence.
-    printf '%s\n' "request-marker-empty-v1"
-  else
-    printf '%s\n' "$gate_host_lifecycle_contract"
+    # A stale coordinator owner has no exact per-command Darwin lineage in this
+    # owner snapshot. Its aggregate marker can look empty after a descendant
+    # closes descriptors and removes tags. Retain the owner evidence instead of
+    # authorising recovery from that marker alone.
+    echo "error: Darwin coordinator-owner recovery has no exact per-command lineage evidence under this policy." >&2
+    return 2
   fi
+  printf '%s\n' "$gate_host_lifecycle_contract"
 }
 
 gate_lock_current_user_authority_and_recovery_contract_from_snapshot() {
   local snapshot="$1"
-  local authority recovery_contract
+  local authority recovery_contract recovery_status
   authority="$(
     gate_lock_current_user_authority_token_from_snapshot "$snapshot"
   )" || return 1
-  recovery_contract="$(
+  if recovery_contract="$(
     gate_lock_recovery_contract_from_owner_snapshot "$snapshot"
-  )" || return 1
+  )"; then
+    :
+  else
+    recovery_status=$?
+    return "$recovery_status"
+  fi
   printf '%s\n%s\n' "$authority" "$recovery_contract"
 }
 
@@ -7961,16 +7982,97 @@ gate_trunk_guardian_prepare_handshake() {
   fi
 }
 
+gate_trunk_guardian_read_signal_until() {
+  local deadline="$1"
+  local expected_parent="$2"
+  local reader_pid
+  local reader_status
+  [[ "${gate_darwin_node_bin:-}" == /* ]] || return 2
+  /usr/bin/env -i "$gate_darwin_node_bin" -e '
+    const [deadlineText, expectedParentText] = process.argv.slice(1);
+    const deadlineSeconds = Number(deadlineText);
+    const expectedParent = Number(expectedParentText);
+    const remainingMilliseconds = deadlineSeconds * 1_000 - Date.now();
+    if (
+      !Number.isSafeInteger(deadlineSeconds) ||
+      deadlineSeconds <= 0 ||
+      !Number.isSafeInteger(expectedParent) ||
+      expectedParent <= 1 ||
+      process.ppid !== expectedParent ||
+      !Number.isFinite(remainingMilliseconds)
+    ) {
+      process.exit(2);
+    }
+    if (remainingMilliseconds <= 0) process.exit(11);
+
+    let settled = false;
+    let input = Buffer.alloc(0);
+    let deadlineTimer;
+    let parentTimer;
+    const finish = (status) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadlineTimer);
+      clearInterval(parentTimer);
+      process.exit(status);
+    };
+    const checkDeadline = () => {
+      const remaining = deadlineSeconds * 1_000 - Date.now();
+      if (remaining <= 0) {
+        finish(11);
+        return;
+      }
+      deadlineTimer = setTimeout(checkDeadline, Math.min(remaining, 60_000));
+    };
+    checkDeadline();
+    parentTimer = setInterval(() => {
+      if (process.ppid !== expectedParent) finish(13);
+    }, 250);
+    for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"]) {
+      process.once(signal, () => finish(13));
+    }
+    process.stdin.on("data", (chunk) => {
+      input = Buffer.concat([input, chunk]);
+      if (input.length > 5) {
+        finish(12);
+        return;
+      }
+      if (input.length === 5) {
+        finish(input.equals(Buffer.from("done\n", "utf8")) ? 0 : 12);
+      }
+    });
+    process.stdin.once("end", () => {
+      if (input.length === 0) {
+        finish(10);
+        return;
+      }
+      finish(12);
+    });
+    process.stdin.once("error", () => finish(2));
+    process.stdin.resume();
+  ' "$deadline" "$expected_parent" \
+    3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- 10>&- 11>&- 12>&- 13>&- \
+    14>&- 15>&- 16>&- 17>&- 18>&- 19>&- 20>&- 21>&- 22>&- 23>&- \
+    24>&- 25>&- <&26 26<&- >/dev/null 2>/dev/null &
+  reader_pid=$!
+  if wait "$reader_pid"; then
+    return 0
+  else
+    reader_status=$?
+    return "$reader_status"
+  fi
+}
+
 gate_trunk_guardian_wait_done() {
   local pending_file="$1"
   local done_file="$2"
   local deadline="$3"
+  local expected_parent="$4"
   local directory="${pending_file%/*}"
-  local signal=""
   local signal_status=0
-  local now
 
   if [[ ! "$deadline" =~ ^[1-9][0-9]*$ ||
+    ! "$expected_parent" =~ ^[1-9][0-9]*$ ||
     "$pending_file" != "$directory/trunk-guardian.pending" ||
     "$done_file" != "$directory/trunk-guardian.done" ]] ||
     ! gate_run_private_marker_directory_is_safe "$directory" ||
@@ -7979,33 +8081,33 @@ gate_trunk_guardian_wait_done() {
     return 2
   fi
 
-  while true; do
-    if [[ -n "$signal" ]]; then
-      signal_status=0
-    else
-      IFS= read -r -t 1 signal <&26
-      signal_status=$?
-    fi
-    if [[ "$signal_status" -eq 0 ]]; then
-      if [[ "$signal" == "done" ]] &&
-        gate_trunk_guardian_receipt_is_safe "$pending_file" pending &&
+  if gate_trunk_guardian_read_signal_until "$deadline" "$expected_parent"; then
+    signal_status=0
+  else
+    signal_status=$?
+  fi
+  case "$signal_status" in
+    0)
+      if gate_trunk_guardian_receipt_is_safe "$pending_file" pending &&
         gate_trunk_guardian_receipt_is_safe "$done_file" "done"; then
         return 0
       fi
       echo "error: Trunk guardian published an invalid completion signal." >&2
-      return 2
-    fi
-    if [[ "$signal_status" -lt 128 ]]; then
+      ;;
+    10)
       echo "error: Trunk guardian completion capability closed before publication." >&2
-      return 2
-    fi
-    now="$(date +%s)" || return 2
-    if [[ ! "$now" =~ ^[1-9][0-9]*$ || "$now" -ge "$deadline" ]]; then
+      ;;
+    11)
       echo "error: Trunk guardian did not finish before its lifecycle deadline." >&2
-      return 2
-    fi
-    sleep 0.02 || true
-  done
+      ;;
+    12)
+      echo "error: Trunk guardian published an invalid completion signal." >&2
+      ;;
+    *)
+      echo "error: Trunk guardian completion capability could not be inspected." >&2
+      ;;
+  esac
+  return 2
 }
 
 gate_trunk_guardian_cleanup_handshake() {
@@ -9821,7 +9923,7 @@ EOF_KILL
       ))
       if ! gate_trunk_guardian_wait_done \
         "$trunk_guardian_pending_file" "$trunk_guardian_done_file" \
-        "$trunk_guardian_wait_deadline"; then
+        "$trunk_guardian_wait_deadline" "$mapped_command_parent_pid"; then
         lineage_bind_rc=2
         trunk_guardian_handshake_rc=2
       fi

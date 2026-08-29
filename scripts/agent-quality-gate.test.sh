@@ -3603,8 +3603,8 @@ if ! /bin/bash -c '
 fi
 rm -rf "$coordinator_legacy_drain_scratch"
 
-# One recovery pass owns one stale request. Its Darwin command obligations
-# settle as one cohort. Obligations from the next request remain unclaimed.
+# One recovery pass settles every stale request. Each request's Darwin command
+# obligations remain a separate coherent cohort.
 coordinator_darwin_cohort_scratch="$(mktemp -d)"
 coordinator_darwin_cohort_trace="$coordinator_darwin_cohort_scratch/trace"
 if ! /bin/bash -c '
@@ -3630,21 +3630,33 @@ if ! /bin/bash -c '
     printf "record:%s:%s\n" "$1" "$2" >> "$trace"
   }
   drain_condemned_run_commands() {
-    [[ "$1" == fixture-cohort-request-a-1 &&
-      "$7" == request-marker-empty-v1 ]] || return 1
+    case "$1" in
+      fixture-cohort-request-a-1|fixture-cohort-request-b-1) ;;
+      *) return 1 ;;
+    esac
+    [[ "$7" == request-marker-empty-v1 ]] || return 1
     printf "drain-request:%s\n" "$1" >> "$trace"
   }
   gate_drain_settle_darwin_lineage_cohort() {
-    [[ "$1" == stale-run &&
-      "$2" == fixture-cohort-drain-a1-1 &&
-      "$3" == fixture-cohort-drain-a2-1 && "$#" -eq 3 ]] || return 1
-    printf "cohort:%s,%s\n" "$2" "$3" >> "$trace"
+    [[ "$1" == stale-run ]] || return 1
+    case "$*" in
+      "stale-run fixture-cohort-drain-a1-1 fixture-cohort-drain-a2-1")
+        printf "cohort:%s,%s\n" "$2" "$3" >> "$trace"
+        ;;
+      "stale-run fixture-cohort-drain-b1-1")
+        printf "cohort:%s\n" "$2" >> "$trace"
+        ;;
+      *) return 1 ;;
+    esac
   }
   gate_darwin_lineage_discard_settled() {
     printf "discard-darwin:%s\n" "$1" >> "$trace"
   }
   gate_run_discard_marker_exact() {
-    [[ "$1" == fixture-cohort-request-a-1 ]] || return 1
+    case "$1" in
+      fixture-cohort-request-a-1|fixture-cohort-request-b-1) ;;
+      *) return 1 ;;
+    esac
     printf "discard-request:%s\n" "$1" >> "$trace"
   }
   gate_coordinator_cli() {
@@ -3671,6 +3683,9 @@ if ! /bin/bash -c '
           obligation-a2\|fixture-cohort-drain-a2-1)
             lifecycle_contract=darwin-coherent-lineage-v2
             ;;
+          obligation-b1\|fixture-cohort-drain-b1-1)
+            lifecycle_contract=darwin-coherent-lineage-v2
+            ;;
           *) return 1 ;;
         esac
         printf "claim:%s\n" "$obligation_id" >> "$trace"
@@ -3678,37 +3693,50 @@ if ! /bin/bash -c '
           "$obligation_id" "$drain_token" "$lifecycle_contract"
         ;;
       ack-drain)
-        grep -Fxq \
-          "cohort:fixture-cohort-drain-a1-1,fixture-cohort-drain-a2-1" \
-          "$trace" || return 1
-        grep -Fxq "drain-request:fixture-cohort-request-a-1" "$trace" ||
-          return 1
+        case "$obligation_id" in
+          obligation-a1|obligation-a2)
+            grep -Fxq \
+              "cohort:fixture-cohort-drain-a1-1,fixture-cohort-drain-a2-1" \
+              "$trace" || return 1
+            grep -Fxq "drain-request:fixture-cohort-request-a-1" "$trace" ||
+              return 1
+            ;;
+          obligation-b1)
+            grep -Fxq "cohort:fixture-cohort-drain-b1-1" "$trace" ||
+              return 1
+            grep -Fxq "drain-request:fixture-cohort-request-b-1" "$trace" ||
+              return 1
+            ;;
+          *) return 1 ;;
+        esac
         printf "ack:%s\n" "$obligation_id" >> "$trace"
         ;;
       *) return 1 ;;
     esac
   }
   gate_coordinator_recover_stale_obligations >/dev/null
-  [[ "$(grep -c "^cohort:" "$trace")" -eq 1 ]]
-  [[ "$(grep -c "^ack:" "$trace")" -eq 2 ]]
+  [[ "$(grep -c "^cohort:" "$trace")" -eq 2 ]]
+  [[ "$(grep -c "^ack:" "$trace")" -eq 3 ]]
   grep -Fxq "claim:obligation-a1" "$trace"
   grep -Fxq "claim:obligation-a2" "$trace"
-  if grep -Fq "obligation-b1" "$trace" ||
-    grep -Fq "fixture-cohort-drain-b1-1" "$trace"; then
-    exit 1
-  fi
+  grep -Fxq "claim:obligation-b1" "$trace"
+  grep -Fxq "cohort:fixture-cohort-drain-b1-1" "$trace"
+  grep -Fxq "drain-request:fixture-cohort-request-b-1" "$trace"
   [[ " $gate_lock_drained_tokens " == *" fixture-cohort-drain-a1-1 "* ]]
   [[ " $gate_lock_drained_tokens " == *" fixture-cohort-drain-a2-1 "* ]]
   [[ " $gate_lock_drained_tokens " == *" fixture-cohort-request-a-1 "* ]]
-  [[ " $gate_lock_drained_tokens " != *" fixture-cohort-drain-b1-1 "* ]]
+  [[ " $gate_lock_drained_tokens " == *" fixture-cohort-drain-b1-1 "* ]]
+  [[ " $gate_lock_drained_tokens " == *" fixture-cohort-request-b-1 "* ]]
   [[ ! -e "$gate_lock_root_dir/condemned.d/fixture-cohort-drain-a1-1" ]]
   [[ ! -e "$gate_lock_root_dir/condemned.d/fixture-cohort-drain-a2-1" ]]
   [[ ! -e "$gate_lock_root_dir/condemned.d/fixture-cohort-request-a-1" ]]
+  [[ ! -e "$gate_lock_root_dir/condemned.d/fixture-cohort-drain-b1-1" ]]
+  [[ ! -e "$gate_lock_root_dir/condemned.d/fixture-cohort-request-b-1" ]]
 ' quality-gate-darwin-request-cohort \
   "$repo_root/scripts/gate/quality-gate-coordinator-support.sh" \
   "$coordinator_darwin_cohort_scratch" \
   "$coordinator_darwin_cohort_trace"; then
-  fail "coordinator recovery did not settle one complete Darwin request cohort"
+  fail "coordinator recovery did not settle every Darwin request cohort separately"
 fi
 rm -rf "$coordinator_darwin_cohort_scratch"
 
@@ -4273,7 +4301,7 @@ STUB
     sibling_self_exit_deadline_ms="$(awk -F '|' \
       -v killed="agentqg:${killed_drain_identity}" \
       '$1 != killed { print $2; exit }' "$worker_deadlines")"
-    gate_lock_token_is_wellformed "$killed_drain_identity" ||
+    [[ "$killed_drain_identity" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,180}-[0-9]{1,10}-[0-9]{1,12}$ ]] ||
       fail_worker_loss_fixture \
         "parallel worker-loss fixture could not bind the killed worker to its command lineage"
     [[ "$sibling_self_exit_deadline_ms" =~ ^[1-9][0-9]*$ ]] ||
@@ -15733,10 +15761,12 @@ done
 rm -rf "$legacy_contract_fixture"
 
 # A reclaimed coordinator owner names only its aggregate generation marker.
-# Darwin uses the marker-empty recovery contract because it has no safe
-# per-command lineage. Portable hosts retain their marker recovery contract so
-# the recovering gate can stop holders from the crashed generation. Ordinary
-# owner records retain the current host contract.
+# Darwin rejects owner-record-only recovery because a descriptor-closing,
+# untagged descendant can make that marker look empty without exact
+# per-command lineage.
+# Portable hosts retain their marker recovery contract so the recovering gate
+# can stop holders from the crashed generation. Ordinary owner records retain
+# the current host contract.
 coordinator_owner_contract_fixture="$(mktemp -d)"
 coordinator_owner_contract_functions="$coordinator_owner_contract_fixture/functions.sh"
 for coordinator_owner_contract_function in \
@@ -15764,11 +15794,19 @@ token=coordinator-owner-v1"
   [[ "$pair" == $'"'"'fixture-coordinator-1-1\nportable-marker-v1'"'"' ]]
 
   gate_host_lifecycle_contract=darwin-coherent-lineage-v2
-  pair="$(
+  if pair="$(
     gate_lock_current_user_authority_and_recovery_contract_from_snapshot \
-      "$coordinator_snapshot"
-  )"
-  [[ "$pair" == $'"'"'fixture-coordinator-1-1\nrequest-marker-empty-v1'"'"' ]]
+      "$coordinator_snapshot" 2> "$2"
+  )"; then
+    pair_status=0
+  else
+    pair_status=$?
+  fi
+  [[ "$pair_status" -eq 2 ]]
+  [[ -z "$pair" ]]
+  grep -Fq \
+    "Darwin coordinator-owner recovery has no exact per-command lineage evidence" \
+    "$2"
 
   ordinary_snapshot="pid=124
 uid=${current_uid}
@@ -15789,7 +15827,8 @@ token=ordinary-owner-v1"
       "$untyped_snapshot"
   )"
   [[ "$pair" == $'"'"'fixture-untyped-1-1\ndarwin-coherent-lineage-v2'"'"' ]]
-' coordinator-owner-contract-test "$coordinator_owner_contract_functions"; then
+' coordinator-owner-contract-test "$coordinator_owner_contract_functions" \
+  "$coordinator_owner_contract_fixture/error"; then
   rm -rf "$coordinator_owner_contract_fixture"
   fail "coordinator owner recovery contract classification failed"
 fi
@@ -21543,6 +21582,23 @@ STUB
       chmod 640 "$path"
     }
 
+    write_ordinary_owner() {
+      local path="$1"
+      local pid="$2"
+      local owner_id="$3"
+      local recorded_uid="$4"
+      {
+        printf 'pid=%s\n' "$pid"
+        printf 'uid=%s\n' "$recorded_uid"
+        printf 'host=%s\n' "$(uname -n)"
+        printf 'started_at=1\n'
+        printf 'start_utc=\n'
+        printf 'worktree=%s\n' "$gate_race_repo"
+        printf 'token=%s\n' "$owner_id"
+      } > "$path"
+      chmod 640 "$path"
+    }
+
     # A quarantine hard-link witnesses the exact remnant inode before the
     # shared path moves. Replace that path with a byte-identical, same-token
     # inode. The move must retain both inodes and fail closed.
@@ -21553,7 +21609,7 @@ STUB
       "$gate_race_out/live-remnant-discard.ready" \
       "$gate_race_out/live-remnant-discard.release"
     mkdir -p "$gate_race_root/run.lock"
-    write_versioned_coordinator_owner \
+    write_ordinary_owner \
       "$live_remnant_path" "$$" "$live_remnant_original_id" "$(id -u)"
     : > "$gate_race_log"
     (
@@ -21582,7 +21638,7 @@ STUB
       fail "the live-remnant replacement fixture never reached its discard barrier"
     }
     rm -f "$live_remnant_path"
-    write_versioned_coordinator_owner \
+    write_ordinary_owner \
       "$live_remnant_path" "$$" "$live_remnant_original_id" "$(id -u)"
     : > "$gate_race_out/live-remnant-discard.release"
     wait "$live_remnant_waiter"
@@ -21591,17 +21647,17 @@ STUB
     grep -q "owner inode changed before quarantine" \
       "$gate_race_out/live-remnant-replacement.out" ||
       fail "live-remnant replacement did not report the retained evidence"
-    grep -q "^coordinator_token=${live_remnant_original_id}$" \
+    grep -q "^token=${live_remnant_original_id}$" \
       "$gate_race_root/run.lock/owner" ||
       fail "live-remnant replacement displaced the restored canonical owner"
     live_remnant_quarantine="$(find "$gate_race_root/run.lock" -maxdepth 1 \
       -name 'owner.reclaiming.quarantine.*' -type d -print | head -n1)"
     [[ -n "$live_remnant_quarantine" ]] ||
       fail "live-remnant replacement did not retain its private quarantine"
-    grep -q "^coordinator_token=${live_remnant_original_id}$" \
+    grep -q "^token=${live_remnant_original_id}$" \
       "$live_remnant_quarantine/anchor" ||
       fail "live-remnant replacement changed the witnessed authority"
-    grep -q "^coordinator_token=${live_remnant_original_id}$" \
+    grep -q "^token=${live_remnant_original_id}$" \
       "$live_remnant_quarantine/record" ||
       fail "live-remnant replacement changed the moved authority"
     [[ ! "$live_remnant_quarantine/anchor" -ef "$live_remnant_quarantine/record" ]] ||
@@ -21620,7 +21676,7 @@ STUB
       "$gate_race_out/live-remnant-quarantined.ready" \
       "$gate_race_out/live-remnant-quarantined.release"
     mkdir -p "$gate_race_root/run.lock"
-    write_versioned_coordinator_owner \
+    write_ordinary_owner \
       "$live_remnant_path" "$$" "$live_remnant_original_id" "$(id -u)"
     : > "$gate_race_log"
     (
@@ -21648,7 +21704,7 @@ STUB
       wait "$live_remnant_waiter" 2>/dev/null || true
       fail "the post-quarantine replacement fixture never reached its barrier"
     }
-    write_versioned_coordinator_owner \
+    write_ordinary_owner \
       "$live_remnant_path" "$$" "$live_remnant_original_id" "$(id -u)"
     : > "$gate_race_out/live-remnant-quarantined.release"
     wait "$live_remnant_waiter"
@@ -21663,49 +21719,67 @@ STUB
       fail "post-quarantine replacement lost the private owner evidence"
     [[ "$live_remnant_quarantine/anchor" -ef "$live_remnant_quarantine/record" ]] ||
       fail "post-quarantine replacement changed the quarantined inode"
-    grep -q "^coordinator_token=${live_remnant_original_id}$" \
+    grep -q "^token=${live_remnant_original_id}$" \
       "$live_remnant_path" ||
       fail "post-quarantine replacement was deleted or changed"
     [[ ! "$live_remnant_path" -ef "$live_remnant_quarantine/record" ]] ||
       fail "post-quarantine replacement did not create a distinct inode"
-    grep -q "^coordinator_token=${live_remnant_original_id}$" \
+    grep -q "^token=${live_remnant_original_id}$" \
       "$gate_race_root/run.lock/owner" ||
       fail "post-quarantine replacement displaced the canonical owner"
     [[ -z "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
       fail "mapped work ran after post-quarantine owner replacement"
     rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
 
-    # A current gate must use coordinator_token= to recover a same-user dead
-    # coordinator. Rejecting every versioned owner would preserve foreign
-    # evidence, but it would also wedge the owning user's normal recovery path.
+    # A stale same-user coordinator owner has only its aggregate generation
+    # marker. Its detached child below inherits no marker descriptor, agentqg
+    # tag, or environment. Darwin must retain the owner and refuse admission;
+    # portable hosts retain their active marker-holder recovery contract.
     same_uid_owner_identity="$(
       node --input-type=module -e '
+        import { spawn } from "node:child_process";
         import { pathToFileURL } from "node:url";
         const { generatedToken } = await import(pathToFileURL(process.argv[1]).href);
-        process.stdout.write(`${process.pid}\t${generatedToken(process.pid)}\n`);
+        const detached = spawn("/bin/sleep", ["60"], {
+          detached: true,
+          env: { PATH: "/usr/bin:/bin" },
+          stdio: "ignore",
+        });
+        if (!Number.isSafeInteger(detached.pid) || detached.pid < 1) process.exit(1);
+        detached.unref();
+        process.stdout.write(
+          `${process.pid}\t${generatedToken(process.pid)}\t${detached.pid}\n`,
+        );
       ' "$repo_root/scripts/gate/quality-gate-coordinator-legacy.mjs"
     )" || fail "could not generate the same-uid coordinator fixture identity"
     [[ "$same_uid_owner_identity" != *$'\n'* ]] ||
       fail "the same-uid coordinator fixture produced multiple identity lines"
-    IFS=$'\t' read -r same_uid_dead_pid same_uid_owner_id same_uid_owner_extra \
-      <<< "$same_uid_owner_identity"
+    IFS=$'\t' read -r same_uid_dead_pid same_uid_owner_id \
+      same_uid_detached_pid same_uid_owner_extra <<< "$same_uid_owner_identity"
     [[ "$same_uid_dead_pid" =~ ^[1-9][0-9]*$ &&
       "$same_uid_owner_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,180}-${same_uid_dead_pid}-[0-9]{1,12}$ &&
+      "$same_uid_detached_pid" =~ ^[1-9][0-9]*$ &&
       -z "$same_uid_owner_extra" ]] ||
       fail "the same-uid coordinator fixture produced a malformed identity"
     if kill -0 "$same_uid_dead_pid" 2>/dev/null ||
       ps -p "$same_uid_dead_pid" >/dev/null 2>&1; then
       fail "the same-uid coordinator fixture PID is still live after generation"
     fi
-    rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+    same_uid_detached_start="$(
+      gate_test_process_start "$same_uid_detached_pid"
+    )"
+    gate_test_process_has_live_start \
+      "$same_uid_detached_pid" "$same_uid_detached_start" ||
+      fail "the same-uid coordinator fixture did not retain its detached child"
+    same_uid_coordinator_root="$gate_race_root/qgc-v1-u$(id -u)"
+    rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d" \
+      "$same_uid_coordinator_root"
     rm -f "$gate_race_root/holder.${same_uid_owner_id}"
     mkdir -p "$gate_race_root/run.lock"
     write_versioned_coordinator_owner \
       "$gate_race_root/run.lock/owner" "$same_uid_dead_pid" \
       "$same_uid_owner_id" "$(id -u)"
     printf '%s\n' "$same_uid_owner_id" > "$gate_race_root/holder.${same_uid_owner_id}"
-    gate_test_write_inert_darwin_lineage_state \
-      "$gate_race_root" "$same_uid_owner_id"
     : > "$gate_race_log"
     if AGENT_QUALITY_GATE_LOCK=1 \
       AGENT_QUALITY_GATE_LOCK_HELD='' \
@@ -21719,16 +21793,105 @@ STUB
     else
       same_uid_status=$?
     fi
-    [[ "$same_uid_status" -eq 0 ]] ||
-      fail "a stale same-uid versioned coordinator owner must recover; got ${same_uid_status}"
-    grep -q "reclaiming it" "$gate_race_out/same-uid-versioned-owner.out" ||
-      fail "same-uid versioned coordinator recovery did not reclaim the dead owner"
-    [[ -n "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
-      fail "same-uid versioned coordinator recovery did not run mapped work"
-    [[ ! -e "$gate_race_root/run.lock" ]] ||
-      fail "same-uid versioned coordinator recovery did not release its lock"
-    [[ ! -e "$gate_race_root/condemned.d/${same_uid_owner_id}" ]] ||
-      fail "same-uid versioned coordinator recovery left its drain obligation"
+    same_uid_detached_live=0
+    if gate_test_process_has_live_start \
+      "$same_uid_detached_pid" "$same_uid_detached_start"; then
+      same_uid_detached_live=1
+      kill -TERM "$same_uid_detached_pid" 2>/dev/null || true
+      for _ in {1..100}; do
+        gate_test_process_has_live_start \
+          "$same_uid_detached_pid" "$same_uid_detached_start" || break
+        sleep 0.05
+      done
+    fi
+    [[ "$same_uid_detached_live" -eq 1 ]] ||
+      fail "the detached coordinator descendant exited before recovery decided admission"
+    if gate_test_process_has_live_start \
+      "$same_uid_detached_pid" "$same_uid_detached_start"; then
+      fail "the detached coordinator descendant did not stop after TERM"
+    fi
+    if [[ "$(uname -s)" == Darwin ]]; then
+      [[ "$same_uid_status" -eq 2 ]] ||
+        fail "Darwin coordinator-owner recovery must fail closed; got ${same_uid_status}"
+      grep -q "requires exact per-command lineage evidence" \
+        "$gate_race_out/same-uid-versioned-owner.out" ||
+        fail "Darwin coordinator-owner recovery did not report its exact-lineage boundary"
+      [[ -z "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+        fail "mapped work ran after Darwin coordinator-owner recovery was rejected"
+      [[ ! -e "$same_uid_coordinator_root" ]] ||
+        fail "rejected Darwin coordinator-owner recovery started a successor coordinator"
+      [[ ! -e "$gate_race_root/condemned.d/${same_uid_owner_id}" ]] ||
+        fail "rejected Darwin coordinator-owner recovery created an aggregate drain obligation"
+      [[ -f "$gate_race_root/holder.${same_uid_owner_id}" ]] ||
+        fail "rejected Darwin coordinator-owner recovery removed the generation marker"
+      grep -q "^coordinator_token=${same_uid_owner_id}$" \
+        "$gate_race_root/run.lock/owner" ||
+        fail "rejected Darwin coordinator-owner recovery lost its canonical owner evidence"
+    else
+      [[ "$same_uid_status" -eq 0 ]] ||
+        fail "a portable same-uid coordinator owner must recover; got ${same_uid_status}"
+      grep -q "reclaiming it" "$gate_race_out/same-uid-versioned-owner.out" ||
+        fail "portable coordinator-owner recovery did not reclaim the dead owner"
+      [[ -n "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+        fail "portable coordinator-owner recovery did not run mapped work"
+      [[ ! -e "$gate_race_root/run.lock" ]] ||
+        fail "portable coordinator-owner recovery did not release its lock"
+      [[ ! -e "$gate_race_root/condemned.d/${same_uid_owner_id}" ]] ||
+        fail "portable coordinator-owner recovery left its drain obligation"
+    fi
+
+    if [[ "$(uname -s)" == Darwin ]]; then
+      hidden_same_uid_dead_pid="$(fresh_dead_pid)" ||
+        fail "could not allocate a dead pid for the hidden same-uid coordinator fixture"
+      hidden_same_uid_owner_id="hidden-same-uid-${hidden_same_uid_dead_pid}-1"
+      hidden_same_uid_owner_path="$gate_race_root/run.lock/owner.reclaiming.same-uid-fixture"
+      rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d" \
+        "$same_uid_coordinator_root"
+      rm -f "$gate_race_root/holder.${hidden_same_uid_owner_id}"
+      mkdir -p "$gate_race_root/run.lock"
+      write_versioned_coordinator_owner \
+        "$hidden_same_uid_owner_path" "$hidden_same_uid_dead_pid" \
+        "$hidden_same_uid_owner_id" "$(id -u)"
+      printf '%s\n' "$hidden_same_uid_owner_id" \
+        > "$gate_race_root/holder.${hidden_same_uid_owner_id}"
+      : > "$gate_race_log"
+      if AGENT_QUALITY_GATE_LOCK=1 \
+        AGENT_QUALITY_GATE_LOCK_HELD='' \
+        AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+        AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+        AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+        "$repo_root/scripts/agent-quality-gate.sh" \
+        --base HEAD --run --lock-wait 5 \
+        > "$gate_race_out/hidden-same-uid-versioned-owner.out" 2>&1; then
+        hidden_same_uid_status=0
+      else
+        hidden_same_uid_status=$?
+      fi
+      [[ "$hidden_same_uid_status" -eq 2 ]] ||
+        fail "a hidden Darwin coordinator owner must fail closed; got ${hidden_same_uid_status}"
+      grep -q "requires exact per-command lineage evidence" \
+        "$gate_race_out/hidden-same-uid-versioned-owner.out" ||
+        fail "hidden Darwin coordinator-owner recovery did not report its exact-lineage boundary"
+      if grep -q "belongs to another user or has inconsistent uid metadata" \
+        "$gate_race_out/hidden-same-uid-versioned-owner.out"; then
+        fail "hidden current-user coordinator evidence was mislabeled as foreign"
+      fi
+      [[ -z "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+        fail "mapped work ran after hidden Darwin coordinator-owner recovery was rejected"
+      [[ ! -e "$gate_race_root/run.lock/owner" ]] ||
+        fail "hidden Darwin coordinator-owner recovery published a canonical owner"
+      grep -q "^coordinator_token=${hidden_same_uid_owner_id}$" \
+        "$hidden_same_uid_owner_path" ||
+        fail "hidden Darwin coordinator-owner recovery lost its owner evidence"
+      [[ -f "$gate_race_root/holder.${hidden_same_uid_owner_id}" ]] ||
+        fail "hidden Darwin coordinator-owner recovery removed its generation marker"
+      [[ ! -e "$gate_race_root/condemned.d/${hidden_same_uid_owner_id}" ]] ||
+        fail "hidden Darwin coordinator-owner recovery created an aggregate drain obligation"
+      [[ ! -e "$same_uid_coordinator_root" ]] ||
+        fail "hidden Darwin coordinator-owner recovery started a successor coordinator"
+      rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+      rm -f "$gate_race_root/holder.${hidden_same_uid_owner_id}"
+    fi
 
     run_foreign_coordinator_owner_case() {
       local kind="$1"
@@ -21871,7 +22034,7 @@ STUB
     rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
     rm -f "$gate_race_out/owner-discard.ready" "$gate_race_out/owner-discard.release"
     mkdir -p "$gate_race_root/run.lock"
-    write_versioned_coordinator_owner \
+    write_ordinary_owner \
       "$gate_race_root/run.lock/owner" "$replacement_dead_pid" \
       "$replacement_original_id" "$(id -u)"
     : > "$gate_race_log"
@@ -21905,7 +22068,7 @@ STUB
     [[ -n "$replacement_taken_record" ]] ||
       fail "the owner-replacement fixture did not expose its taken record"
     rm -f "$replacement_taken_record"
-    write_versioned_coordinator_owner \
+    write_ordinary_owner \
       "$replacement_taken_record" "$replacement_dead_pid" \
       "$replacement_new_id" "$(( $(id -u) + 1 ))"
     printf '%s\n' "$replacement_new_id" > "$gate_race_root/holder.${replacement_new_id}"
@@ -21924,10 +22087,10 @@ STUB
       -name 'owner.reclaiming.quarantine.*' -type d -print | head -n1)"
     [[ -n "$replacement_quarantine" ]] ||
       fail "owner replacement did not retain its private quarantine"
-    grep -q "^coordinator_token=${replacement_original_id}$" \
+    grep -q "^token=${replacement_original_id}$" \
       "$replacement_quarantine/anchor" ||
       fail "owner replacement lost the original inode witness"
-    grep -q "^coordinator_token=${replacement_new_id}$" \
+    grep -q "^token=${replacement_new_id}$" \
       "$replacement_quarantine/record" ||
       fail "owner replacement lost the replacement inode"
     [[ ! "$replacement_quarantine/anchor" -ef "$replacement_quarantine/record" ]] ||

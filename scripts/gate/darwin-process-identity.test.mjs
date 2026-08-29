@@ -798,7 +798,15 @@ test("Darwin lineage transition serializes settle and discard races", () => {
     assert.deepEqual(transitionValue(settlement.statePath), result);
     assert.equal(existsSync(stalePaths.current), false);
 
-    const sameRevision = { ...result, baseline: ["8"] };
+    const successor = darwinLineageTransitionForTest.replaceState(
+      settlement.statePath,
+      result,
+      { ...result, baseline: ["7"] },
+    );
+    assert.equal(successor.revision, 2);
+    assert.deepEqual(transitionValue(settlement.statePath), successor);
+
+    const sameRevision = { ...successor, baseline: ["8"] };
     writeFileSync(settlement.statePath, `${JSON.stringify(sameRevision)}\n`, {
       mode: 0o600,
     });
@@ -806,8 +814,8 @@ test("Darwin lineage transition serializes settle and discard races", () => {
     try {
       darwinLineageTransitionForTest.replaceState(
         settlement.statePath,
-        result,
-        { ...result, baseline: ["9"] },
+        successor,
+        { ...successor, baseline: ["9"] },
       );
     } catch (error) {
       sameRevisionError = error;
@@ -850,6 +858,92 @@ test("Darwin lineage transition serializes settle and discard races", () => {
     }
   } finally {
     rmSync(readToLink.directory, { recursive: true, force: true });
+  }
+
+  const nextRevision = transitionFixture("transition-next-revision-race");
+  try {
+    const firstTarget = { ...nextRevision.state, baseline: ["17"] };
+    const secondTarget = { ...nextRevision.state, baseline: ["18"] };
+    let firstResult;
+    let nextRevisionError;
+    const staleAttempt = darwinLineageTransitionForTest.replaceState(
+      nextRevision.statePath,
+      nextRevision.state,
+      firstTarget,
+      (boundary) => {
+        if (boundary === "before-current-link" && firstResult === undefined) {
+          firstResult = darwinLineageTransitionForTest.replaceState(
+            nextRevision.statePath,
+            nextRevision.state,
+            firstTarget,
+          );
+          return;
+        }
+        if (boundary !== "after-current-link" || nextRevisionError) return;
+        try {
+          darwinLineageTransitionForTest.replaceState(
+            nextRevision.statePath,
+            firstResult,
+            secondTarget,
+          );
+        } catch (error) {
+          nextRevisionError = error;
+        }
+      },
+    );
+    assert.deepEqual(staleAttempt, firstResult);
+    assert.equal(
+      nextRevisionError?.name,
+      "DarwinTransitionConflictError",
+      nextRevisionError?.message,
+    );
+    assert.doesNotMatch(nextRevisionError?.message ?? "", /unsafe/u);
+    const completed = darwinLineageTransitionForTest.replaceState(
+      nextRevision.statePath,
+      firstResult,
+      secondTarget,
+    );
+    assert.equal(completed.revision, 2);
+    assert.deepEqual(transitionValue(nextRevision.statePath), completed);
+    for (const revision of [1, 2]) {
+      for (const artifact of Object.values(
+        darwinLineageTransitionForTest.transitionPaths(
+          nextRevision.statePath,
+          revision,
+        ),
+      )) {
+        assert.equal(existsSync(artifact), false, artifact);
+      }
+    }
+  } finally {
+    rmSync(nextRevision.directory, { recursive: true, force: true });
+  }
+
+  const currentRead = transitionFixture("transition-current-read-race");
+  try {
+    const paths = darwinLineageTransitionForTest.transitionPaths(
+      currentRead.statePath,
+      1,
+    );
+    let removed = false;
+    const result = darwinLineageTransitionForTest.replaceState(
+      currentRead.statePath,
+      currentRead.state,
+      { ...currentRead.state, baseline: ["19"] },
+      (boundary) => {
+        if (boundary !== "during-current-claim-read" || removed) return;
+        removed = true;
+        unlinkSync(paths.current);
+      },
+    );
+    assert.equal(removed, true);
+    assert.equal(result.revision, 1);
+    assert.deepEqual(transitionValue(currentRead.statePath), result);
+    for (const artifact of Object.values(paths)) {
+      assert.equal(existsSync(artifact), false, artifact);
+    }
+  } finally {
+    rmSync(currentRead.directory, { recursive: true, force: true });
   }
 
   const discard = transitionFixture("transition-discard-race", {
@@ -910,6 +1004,181 @@ test("Darwin lineage transition serializes settle and discard races", () => {
     assert.equal(existsSync(settleThenDiscard.statePath), false);
   } finally {
     rmSync(settleThenDiscard.directory, { recursive: true, force: true });
+  }
+});
+
+test("Darwin lineage transition rejects a persistent extra state link", () => {
+  const fixture = transitionFixture("transition-persistent-extra-link");
+  try {
+    const paths = darwinLineageTransitionForTest.transitionPaths(
+      fixture.statePath,
+      1,
+    );
+    const extraLink = join(fixture.directory, ".persistent-extra-link");
+    linkSync(fixture.statePath, paths.current);
+    linkSync(fixture.statePath, extraLink);
+    assert.equal(lstatSync(fixture.statePath, { bigint: true }).nlink, 3n);
+    assert.throws(
+      () =>
+        darwinLineageTransitionForTest.replaceState(
+          fixture.statePath,
+          fixture.state,
+          { ...fixture.state, baseline: ["20"] },
+        ),
+      /current state is unsafe/u,
+    );
+    assert.deepEqual(
+      JSON.parse(readFileSync(fixture.statePath, "utf8")),
+      fixture.state,
+    );
+    assert.equal(existsSync(paths.current), true);
+    assert.equal(existsSync(extraLink), true);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("Darwin lineage transition retains a peer current replacement", () => {
+  const fixture = transitionFixture("transition-peer-current-replacement");
+  try {
+    const paths = darwinLineageTransitionForTest.transitionPaths(
+      fixture.statePath,
+      1,
+    );
+    const peerPath = join(fixture.directory, ".peer-current");
+    const peerState = {
+      ...fixture.state,
+      baseline: ["21"],
+      revision: 2,
+    };
+    writeFileSync(peerPath, `${JSON.stringify(peerState)}\n`, { mode: 0o600 });
+    chmodSync(peerPath, 0o600);
+    let replaced = false;
+    let transitionError;
+    try {
+      darwinLineageTransitionForTest.replaceState(
+        fixture.statePath,
+        fixture.state,
+        { ...fixture.state, baseline: ["22"] },
+        (boundary) => {
+          if (boundary !== "after-current-link-before-validation" || replaced)
+            return;
+          unlinkSync(paths.current);
+          linkSync(peerPath, paths.current);
+          replaced = true;
+        },
+      );
+    } catch (error) {
+      transitionError = error;
+    }
+    assert.equal(replaced, true);
+    assert.equal(
+      transitionError?.name,
+      "DarwinTransitionConflictError",
+      transitionError?.message,
+    );
+    const peer = lstatSync(peerPath, { bigint: true });
+    const current = lstatSync(paths.current, { bigint: true });
+    assert.equal(peer.dev, current.dev);
+    assert.equal(peer.ino, current.ino);
+    assert.deepEqual(transitionValue(fixture.statePath), fixture.state);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("Darwin lineage transition cleans a lagged obsolete current slot", () => {
+  const fixture = transitionFixture("transition-lagged-obsolete-current");
+  try {
+    const first = darwinLineageTransitionForTest.replaceState(
+      fixture.statePath,
+      fixture.state,
+      { ...fixture.state, baseline: ["23"] },
+    );
+    const second = darwinLineageTransitionForTest.replaceState(
+      fixture.statePath,
+      first,
+      { ...first, baseline: ["24"] },
+    );
+    const stalePaths = darwinLineageTransitionForTest.transitionPaths(
+      fixture.statePath,
+      1,
+    );
+    const activePaths = darwinLineageTransitionForTest.transitionPaths(
+      fixture.statePath,
+      3,
+    );
+    linkSync(fixture.statePath, activePaths.current);
+
+    let staleError;
+    try {
+      darwinLineageTransitionForTest.replaceState(
+        fixture.statePath,
+        fixture.state,
+        { ...fixture.state, baseline: ["25"] },
+      );
+    } catch (error) {
+      staleError = error;
+    }
+    assert.equal(staleError?.name, "DarwinTransitionConflictError");
+    assert.equal(existsSync(stalePaths.current), false);
+    assert.equal(existsSync(activePaths.current), true);
+
+    const third = darwinLineageTransitionForTest.replaceState(
+      fixture.statePath,
+      second,
+      { ...second, baseline: ["26"] },
+    );
+    assert.equal(third.revision, 3);
+    assert.deepEqual(transitionValue(fixture.statePath), third);
+    for (const artifact of Object.values(activePaths)) {
+      assert.equal(existsSync(artifact), false, artifact);
+    }
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("Darwin lineage obsolete cleanup rejects an unknown hardlink", () => {
+  const fixture = transitionFixture("transition-obsolete-foreign-link");
+  try {
+    const winner = darwinLineageTransitionForTest.replaceState(
+      fixture.statePath,
+      fixture.state,
+      { ...fixture.state, baseline: ["27"] },
+    );
+    const stalePaths = darwinLineageTransitionForTest.transitionPaths(
+      fixture.statePath,
+      1,
+    );
+    const foreignLink = join(fixture.directory, ".unknown-current-link");
+    let injected = false;
+
+    assert.throws(
+      () =>
+        darwinLineageTransitionForTest.replaceState(
+          fixture.statePath,
+          fixture.state,
+          { ...fixture.state, baseline: ["28"] },
+          (boundary) => {
+            if (boundary !== "after-current-link-before-validation" || injected)
+              return;
+            linkSync(fixture.statePath, foreignLink);
+            injected = true;
+          },
+        ),
+      /current link topology is unsafe/u,
+    );
+    assert.equal(injected, true);
+    assert.equal(lstatSync(fixture.statePath, { bigint: true }).nlink, 3n);
+    assert.deepEqual(
+      JSON.parse(readFileSync(fixture.statePath, "utf8")),
+      winner,
+    );
+    assert.equal(existsSync(stalePaths.current), true);
+    assert.equal(existsSync(foreignLink), true);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
   }
 });
 

@@ -59,12 +59,21 @@ test("known broker launch and Unix client APIs fail closed", () => {
     ],
     ["tool.sh", "/bin/launchctl print gui/501\n", "shell-process-broker"],
     ["tool.sh", "osascript -e 'return 1'\n", "shell-process-broker"],
+    ["tool.sh", "osascript /tmp/agentqg.scpt\n", "shell-process-broker"],
     ["tool.sh", "open -a Calculator\n", "shell-process-broker"],
     ["tool.sh", "open report.pdf\n", "shell-process-broker"],
+    ["tool.sh", "open /tmp/report.pdf\n", "shell-process-broker"],
+    ["tool.sh", "/usr/bin/open /tmp/report.pdf\n", "shell-process-broker"],
+    ["tool.sh", "launchctl /tmp/agentqg.plist\n", "shell-process-broker"],
     ["tool.sh", "/usr/bin/nc -U /tmp/broker.sock\n", "shell-process-broker"],
     [
       "workflow.yml",
       "steps:\n  - run: open report.pdf\n",
+      "shell-process-broker",
+    ],
+    [
+      "workflow.yml",
+      "steps:\n  - run: open /tmp/report.pdf\n",
       "shell-process-broker",
     ],
     ["tool.sh", "nc -U /tmp/broker.sock\n", "shell-process-broker"],
@@ -242,6 +251,128 @@ test("named broker detection covers obvious command construction", () => {
       `${path} did not match ${expectedRule}: ${source}`,
     );
   }
+});
+
+test("package scripts are parsed and scanned as executable shell commands", () => {
+  const source = `${JSON.stringify(
+    {
+      name: "fixture",
+      scripts: {
+        safe: "node ./safe.mjs",
+        "test:cov": "open /tmp/report.pdf",
+        automate: "osascript /tmp/agentqg.scpt",
+      },
+    },
+    null,
+    2,
+  )}\n`;
+  const findings = scanSource("package.json", source);
+  assert.deepEqual(
+    findings.map(({ line, rule, evidence }) => ({ line, rule, evidence })),
+    [
+      {
+        line: 1,
+        rule: "shell-process-broker",
+        evidence: 'script "test:cov": open',
+      },
+      {
+        line: 1,
+        rule: "shell-process-broker",
+        evidence: 'script "automate": osascript',
+      },
+    ],
+  );
+});
+
+test("package script fields fail closed when they cannot be scanned", () => {
+  assert.ok(
+    rulesFor("package.json", '{"scripts":').has("unscanned-package-scripts"),
+  );
+  assert.ok(
+    rulesFor("package.json", '{"scripts":{"test":false}}\n').has(
+      "unscanned-package-scripts",
+    ),
+  );
+  assert.ok(
+    rulesFor(
+      "package.json",
+      '{"scripts":{"test":"op\\u0065n \\u002ftmp/report.pdf"}}\n',
+    ).has("shell-process-broker"),
+  );
+  assert.deepEqual(
+    scanSource(
+      "package.json",
+      '{"description":"open /tmp/report.pdf","scripts":{"test":"node ./test.mjs"}}\n',
+    ),
+    [],
+  );
+});
+
+test("repository admission rejects broker package scripts before dispatch", () => {
+  const root = mkdtempSync(join(tmpdir(), "darwin-package-preflight-"));
+  try {
+    writeFileSync(
+      join(root, "package.json"),
+      '{"scripts":{"test:cov":"open /tmp/report.pdf"}}\n',
+    );
+    const result = scanRepository(root, {
+      paths: ["package.json"],
+      policyRoot: repoRoot,
+    });
+    assert.deepEqual(result.policyErrors, []);
+    assert.ok(
+      result.rejected.some(
+        ({ path, rule }) =>
+          path === "package.json" && rule === "shell-process-broker",
+      ),
+    );
+
+    chmodSync(join(root, "package.json"), 0o755);
+    const executableResult = scanRepository(root, {
+      paths: ["package.json"],
+      policyRoot: repoRoot,
+    });
+    assert.ok(
+      executableResult.rejected.some(
+        ({ path, rule }) =>
+          path === "package.json" && rule === "opaque-executable",
+      ),
+    );
+
+    rmSync(join(root, "package.json"));
+    writeFileSync(
+      join(root, "package.payload.json"),
+      '{"scripts":{"test:cov":"open /tmp/report.pdf"}}\n',
+    );
+    symlinkSync("package.payload.json", join(root, "package.json"));
+    const symlinkResult = scanRepository(root, {
+      paths: ["package.json", "package.payload.json"],
+      policyRoot: repoRoot,
+    });
+    assert.ok(
+      symlinkResult.rejected.some(
+        ({ path, rule }) =>
+          path === "package.json" && rule === "unscanned-package-scripts",
+      ),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("repository package scripts contain no broker trampoline", () => {
+  const manifests = execFileSync("git", ["ls-files", "*package.json"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  })
+    .trim()
+    .split("\n")
+    .filter(Boolean);
+  assert.ok(manifests.length > 0);
+  const findings = manifests.flatMap((path) =>
+    scanSource(path, readFileSync(join(repoRoot, path), "utf8")),
+  );
+  assert.deepEqual(findings, []);
 });
 
 test("Node net clients and obvious dynamic forms fail closed", () => {
