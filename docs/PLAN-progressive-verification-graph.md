@@ -107,9 +107,12 @@ cleanup, cross-worktree scheduling, and crash recovery.
 - A later caller waited 1,800 seconds and timed out before a command ran.
 - A later [source-bound serialized route](metrics/verification-redesign-local-gate-source-bound-sample.json)
   passed in 168 seconds, with 70 seconds of command execution and no scheduler
-  wait. Its measured commit is no longer an ancestor after rebase; the artifact
-  records an exact patch replay that reproduced the measured tree. This one
-  narrow route does not replace the seven-request distribution.
+  wait. The gate exported `CI=true`, so mapped commands used their
+  non-interactive CI path. Compare this result only with gate requests that used
+  the same command environment. Its measured commit is no longer an ancestor
+  after rebase; the artifact records an exact patch replay that reproduced the
+  measured tree. This one narrow route does not replace the seven-request
+  distribution.
 - The gate self-test has needed a 40-minute CI timeout.
 - Remote Turbo result caching is disabled.
 

@@ -188,6 +188,7 @@
   },
   "result": "pass",
   "scope_limit": "This one narrow serialized route proves the source binding and timing method. It does not replace the seven-request historical distribution or estimate a full branch gate.",
+  "environment_limit": "The gate exported CI=true, so mapped commands used their non-interactive CI path. Compare this timing only with gate requests that used the same command environment.",
   "artifact_boundary": "The source state was captured before this evidence file existed. The evidence file is added on a later tree.",
   "provenance_limit": "This local record is source-bound and patch-reproducible. It is not an independently signed execution attestation."
 }

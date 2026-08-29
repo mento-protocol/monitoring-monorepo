@@ -604,9 +604,12 @@
             >source-bound narrow route</a
           >
           passed in 168 seconds, with 70 seconds of command execution and no
-          scheduler wait. Its measured commit is no longer an ancestor after
-          rebase; the artifact records an exact patch replay that reproduced the
-          measured tree. It does not replace the historical distribution.
+          scheduler wait. The gate exported <code>CI=true</code>, so mapped
+          commands used their non-interactive CI path. Compare this result only
+          with gate requests that used the same command environment. Its
+          measured commit is no longer an ancestor after rebase; the artifact
+          records an exact patch replay that reproduced the measured tree. It
+          does not replace the historical distribution.
         </p>
       </header>
 

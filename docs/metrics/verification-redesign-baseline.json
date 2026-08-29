@@ -91,7 +91,8 @@
       "execution_seconds": 70,
       "run_total_seconds": 168,
       "unattributed_orchestration_seconds": 98,
-      "scope_limit": "This narrow serialized route validates the source binding and timing method. It does not replace the seven-request historical distribution or estimate a full branch gate."
+      "scope_limit": "This narrow serialized route validates the source binding and timing method. It does not replace the seven-request historical distribution or estimate a full branch gate.",
+      "environment_limit": "The gate exported CI=true, so mapped commands used their non-interactive CI path. Compare this timing only with gate requests that used the same command environment."
     },
     "coordinator_benchmark": {
       "command": "node scripts/gate/agent-quality-gate-scheduler-benchmark.mjs",

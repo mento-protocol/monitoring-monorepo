@@ -108,9 +108,11 @@ of command execution, and 98 seconds of unattributed orchestration. Its measured
 commit, `49c454da57485169f85b903c608aad66730f80af`, is no longer an ancestor of
 the current branch after rebase. The artifact records the exact raw-patch argv
 and digest, plus a temporary-index replay that reproduced the measured tree
-`45e2376dedc3f4a6a0302081e485b7cb9d3b1d98`. This narrow route validates the
-source-binding and timing method. It does not replace the seven-request
-historical distribution or estimate a full branch gate.
+`45e2376dedc3f4a6a0302081e485b7cb9d3b1d98`. The gate exported `CI=true`, so
+mapped commands used their non-interactive CI path. Compare this timing only
+with gate requests that used the same command environment. This narrow route
+validates the source-binding and timing method. It does not replace the
+seven-request historical distribution or estimate a full branch gate.
 
 The coordinator benchmark used
 `node scripts/gate/agent-quality-gate-scheduler-benchmark.mjs` in the gate-lock

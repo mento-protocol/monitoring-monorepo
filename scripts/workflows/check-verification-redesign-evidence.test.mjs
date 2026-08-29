@@ -115,6 +115,25 @@ test("validateInventory rejects duplicate and unknown risk classes", () => {
   assert.throws(() => validateInventory(unknown), /duplicate or unknown/u);
 });
 
+test("validateInventory requires the fixed 13-class metadata schema", () => {
+  const missing = fixtureRecords();
+  missing[0].risk_classes.pop();
+  assert.throws(
+    () => validateInventory(missing),
+    /exactly classes 1 through 13/u,
+  );
+
+  const extra = fixtureRecords();
+  extra[0].risk_classes.push(14);
+  assert.throws(() => validateInventory(extra), /duplicate or unknown/u);
+});
+
+test("validateInventory leaves safeguard risk coverage to review", () => {
+  const records = fixtureRecords();
+  for (const record of records.slice(1)) record.risk_classes = [1];
+  assert.equal(validateInventory(records).safeguard_count, 7);
+});
+
 test("validateInventory rejects duplicate ids", () => {
   const records = fixtureRecords();
   records[2].id = records[1].id;

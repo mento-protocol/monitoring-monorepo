@@ -21,6 +21,7 @@ export const DISPOSITION_FIELDS = Object.freeze({
 });
 const DISPOSITION_EVIDENCE_FIELDS = new Set(Object.values(DISPOSITION_FIELDS));
 const RETAINED = new Set(Object.keys(DISPOSITION_FIELDS).slice(0, 3));
+const REQUIRED_RISKS = new Set(Array.from({ length: 13 }, (_, i) => i + 1));
 const DUPLICATE_TARGET_RULE =
   "duplicate_of needs an existing acyclic retained target.";
 const WHOLE_FILE_PATHS = new Set([
@@ -92,8 +93,11 @@ export function validateInventory(records) {
     !/^[0-9a-f]{40}$/u.test(metadata[0].baseline_source_sha)
   )
     fail("Metadata needs a full baseline_source_sha.");
-  requireRiskList(metadata[0].risk_classes, "Metadata risk_classes");
-  const allowedRisks = new Set(metadata[0].risk_classes);
+  const risks = metadata[0].risk_classes;
+  requireRiskList(risks, "Metadata risk_classes", REQUIRED_RISKS);
+  if (risks.length !== REQUIRED_RISKS.size)
+    fail("Metadata risk_classes must define exactly classes 1 through 13.");
+  const allowedRisks = REQUIRED_RISKS;
   const safeguards = records.filter((record) => record.kind === "safeguard");
   if (safeguards.length === 0 || records.length !== safeguards.length + 1)
     fail("Inventory may contain only metadata and safeguard records.");
@@ -182,7 +186,6 @@ function countReferenceLines(path, content) {
   }
   return selected.size;
 }
-
 export function buildManifest({ repoRoot = DEFAULT_ROOT, source }) {
   const sourceSha = git(repoRoot, ["rev-parse", `${source}^{commit}`]).trim();
   const paths = git(repoRoot, ["ls-tree", "-r", "-z", sourceSha])
@@ -238,7 +241,6 @@ export function buildManifest({ repoRoot = DEFAULT_ROOT, source }) {
     totals,
   };
 }
-
 export function checkManifest(actual, expected, baselineSourceSha) {
   if (
     expected.source_sha !== baselineSourceSha ||
@@ -249,11 +251,9 @@ export function checkManifest(actual, expected, baselineSourceSha) {
 export function renderManifest(manifest) {
   return `${JSON.stringify(manifest, null, 2)}\n`;
 }
-
 function readValidatedInventory(inventoryPath) {
   return validateInventory(parseInventory(readFileSync(inventoryPath, "utf8")));
 }
-
 export function runCli(
   args,
   {
