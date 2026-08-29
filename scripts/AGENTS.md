@@ -57,13 +57,11 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 `scripts/` has thirteen path-pin classes. Move each pin with its file, except
 the `agent-autoreview.sh` feedback-runtime pins below.
 
-- **Autoreview runtime pins.** `agent-autoreview.sh` pins sibling runtime and
-  `agent-autoreview-secret-suppressions.json`. The JSON is sealed policy, not
-  reviewed-checkout input; ADR 0078 owns its exact-patch contract. It also pins
-  optional `pr-feedback-state-claude.mjs` and
-  `pr-ready-state-review-signals.mjs`; feedback blobs use `origin/main`. Move
-  feedback paths in three merges: add copies/fallback; repoint; remove old paths
-  after no pre-move wrapper remains (ADR 0064).
+- **Autoreview runtime pins.** `agent-autoreview.sh` pins sibling runtime,
+  sealed `agent-autoreview-secret-suppressions.json` (ADR 0078), and optional
+  `pr-feedback-state-claude.mjs` and
+  `pr-ready-state-review-signals.mjs`; feedback blobs use `origin/main`. Follow
+  ADR 0064's three-merge sequence when these paths move.
 - **Gate routing pins.** The gate excludes stub-repo tests with
   `$script_source_dir == $repo_root/scripts`, and pairs
   `bootstrap/codex-cloud-setup.{sh,test.sh}` for offline tests. It routes
@@ -89,12 +87,11 @@ the `agent-autoreview.sh` feedback-runtime pins below.
   `$script_source_dir`; tests hash them from `$repo_root`. Move each path with
   its routes, signatures, fixtures, and literals (ADRs 0064 and
   0076).
-- **Gate mapping pins.** The signature and three Turbo inputs pin
-  `gate/routing-table/**`, `gate/mapping*`, and
-  `agent-autoreview-core.mjs` plus its sealed suppression JSON. Runtime hashes
-  use `$script_source_dir`; suites use `$repo_root`. Core edits route both
-  suites; suppression-policy edits route autoreview; missing pins freeze the
-  stamp (ADRs 0069 and 0078).
+- **Gate mapping pins.** The signature and Turbo inputs pin
+  `gate/routing-table/**`, `gate/mapping*`, the autoreview core, and its sealed
+  policy. Runtime hashes use `$script_source_dir`; suites use `$repo_root`.
+  Core edits route both suites; policy edits route autoreview. Missing pins
+  freeze the stamp (ADRs 0069 and 0078).
 - **Review-eval pins.** `review/run-eval-source-snapshot.sh` joins the
   four-source set in `docs/evals/review-skill.md`; update every listed consumer
   together.

@@ -2198,7 +2198,7 @@ function parseOrdinaryExactFilePatch(record, recordIndex) {
   const label = `exact patch suppression record ${recordIndex}`;
   const lines = record.patchLines;
   const diffHeader =
-    /^diff --git a\/([A-Za-z0-9._\/\[\]-]+) b\/([A-Za-z0-9._\/\[\]-]+)$/.exec(
+    /^diff --git a\/([A-Za-z0-9._/[\]-]+) b\/([A-Za-z0-9._/[\]-]+)$/.exec(
       lines[0],
     );
   if (!diffHeader || diffHeader[1] !== diffHeader[2]) {
