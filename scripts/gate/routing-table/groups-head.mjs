@@ -35,6 +35,11 @@ export const HEAD_GROUPS = [
             command: "pnpm docs:index --check",
             reason: "tracked documentation changed",
           },
+          {
+            command: "pnpm docs:navigation-eval:test",
+            reason:
+              "tracked documentation can change navigation source budgets",
+          },
         ],
       },
     ],

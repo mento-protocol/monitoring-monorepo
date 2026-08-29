@@ -3337,6 +3337,15 @@ record_condemned_run() {
 gate_condemned_record_token=""
 gate_condemned_record_lifecycle_contract=""
 
+gate_lock_token_from_claimed_obligation_path() {
+  local token_name
+  token_name="${1##*/}"
+  while [[ "$token_name" =~ ^(.+)\.draining\.[0-9]+$ ]]; do
+    token_name="${BASH_REMATCH[1]}"
+  done
+  printf '%s\n' "$token_name"
+}
+
 # New records bind the token to an explicit recovery lifecycle contract. A
 # command record carries the contract selected before work started. An
 # aggregate request record carries its non-signalling marker-empty contract.
@@ -3344,7 +3353,7 @@ gate_condemned_record_lifecycle_contract=""
 # verified host classifier, never from state-file presence.
 gate_read_condemned_record() {
   local path="$1"
-  local value byte_count expected_bytes version token lifecycle_contract extra
+  local value byte_count expected_bytes version obligation_identity lifecycle_contract extra
   gate_condemned_record_token=""
   gate_condemned_record_lifecycle_contract=""
   [[ -f "$path" && ! -L "$path" && -r "$path" ]] || return 2
@@ -3352,21 +3361,28 @@ gate_read_condemned_record() {
   byte_count="$(LC_ALL=C wc -c < "$path" 2>/dev/null | tr -d '[:space:]')" ||
     return 2
   [[ "$byte_count" =~ ^[0-9]+$ ]] || return 2
-  expected_bytes=$((${#value} + 1))
-  [[ "$byte_count" -eq "$expected_bytes" ]] || return 2
-  case "$value" in
-    agentqg-condemned-v2\|*)
-      IFS='|' read -r version token lifecycle_contract extra <<< "$value"
-      [[ "$version" == "agentqg-condemned-v2" && -z "$extra" ]] || return 2
-      ;;
-    *)
-      token="$value"
-      lifecycle_contract="$(gate_lifecycle_contract_for_host)" || return 2
-      ;;
-  esac
-  gate_lock_token_is_wellformed "$token" || return 2
+  if [[ "$byte_count" -eq 0 ]]; then
+    # A drainer can die after it renames an empty legacy obligation. Later
+    # drainers add more claim suffixes. Recover the token from that claim chain.
+    obligation_identity="$(gate_lock_token_from_claimed_obligation_path "$path")"
+    lifecycle_contract="$(gate_lifecycle_contract_for_host)" || return 2
+  else
+    expected_bytes=$((${#value} + 1))
+    [[ "$byte_count" -eq "$expected_bytes" ]] || return 2
+    case "$value" in
+      agentqg-condemned-v2\|*)
+        IFS='|' read -r version obligation_identity lifecycle_contract extra <<< "$value"
+        [[ "$version" == "agentqg-condemned-v2" && -z "$extra" ]] || return 2
+        ;;
+      *)
+        obligation_identity="$value"
+        lifecycle_contract="$(gate_lifecycle_contract_for_host)" || return 2
+        ;;
+    esac
+  fi
+  gate_lock_token_is_wellformed "$obligation_identity" || return 2
   gate_recovery_lifecycle_contract_is_supported "$lifecycle_contract" || return 2
-  gate_condemned_record_token="$token"
+  gate_condemned_record_token="$obligation_identity"
   gate_condemned_record_lifecycle_contract="$lifecycle_contract"
 }
 
@@ -3425,7 +3441,8 @@ gate_drain_obligation_unreadable() {
 # same run publishes a fresh file rather than swapping the one in hand. The
 # claimed copy is removed only once its own processes are confirmed gone, and a
 # drainer killed part way leaves it in the directory for the next run, which
-# reads the token from the file's contents rather than its name.
+# reads a non-empty record's token from its contents. For an empty legacy
+# record, it removes every completed claim suffix from the filename first.
 #
 # The scan repeats until a pass finds nothing, because obligations are still
 # being published while this one drains — a waiter condemning a remnant of some

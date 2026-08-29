@@ -157,7 +157,10 @@ mapping is a Node engine reading a data table — see
 [Where the plan comes from](#where-the-plan-comes-from-adr-0069) below. For a
 routing-sensitive source, the shared classifier adds the offline
 `pnpm docs:navigation-eval -- --check-fixtures` check. It invokes no model or
-scheduled evaluation. Review the output, then run:
+scheduled evaluation. Every tracked Markdown change runs `pnpm docs:index
+--check` and `pnpm docs:navigation-eval:test`. The second command enforces the
+navigation source budgets that the Markdown-only CI job checks. Review the
+output, then run:
 
 ```bash
 pnpm agent:quality-gate --run
@@ -1973,8 +1976,9 @@ of them.
    otherwise a second condemnation of the same run could swap the entry between
    the read and the unlink, and the unlink would delete an obligation nobody
    had drained. A drainer killed while holding a claimed file leaves it in the
-   directory; the next run reads the token from the file's contents rather than
-   its name, so the suffix costs nothing.
+   directory. The next run reads a non-empty record's token from its contents.
+   For an empty legacy record, it removes every completed claim suffix from the
+   filename before it validates the token.
 
    The scan repeats until a pass finds nothing, because obligations are still
    being published while the drain runs: a waiter condemning some third run's
