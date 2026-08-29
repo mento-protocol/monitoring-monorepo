@@ -19,7 +19,9 @@ const TEST_POLICY = Object.freeze({
   human_main_lifecycle_ruleset_id: MANAGED_RULESET_ID,
   human_main_lifecycle_ruleset_enforcement: "active",
   ruleset_audit_active: true,
-  local_agent_github_broker_impersonator: "",
+  local_agent_github_broker_scaffold_enabled: true,
+  local_agent_github_broker_impersonator:
+    "serviceAccount:local-agent-broker@mento-monitoring.iam.gserviceaccount.com",
 });
 
 function coreRuleset() {

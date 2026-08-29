@@ -66,10 +66,20 @@ github_token = "github_pat_..."
 # The broker is not the only cloud reader: protected org-terraform has project
 # Owner, and production-infra-applier can impersonate it. The App still has no
 # Administration permission and no ruleset bypass.
+# The reviewed policy keeps the complete broker scaffold absent by default.
+# Phase 3 creates only the disabled lifecycle ruleset. A separate Phase 4
+# source change enables the scaffold and pins its impersonator before these
+# values can create anything. That guarded plan must create the service account,
+# secret container, credential version, accessor binding, and impersonation
+# binding together, with no unrelated change.
 local_agent_github_app_id                           = 0
 local_agent_github_app_installation_id              = 0
 local_agent_github_app_credential_active            = false
 local_agent_github_app_private_key_rotation_counter = 0
+# When credential_active is true, use a complete PKCS#1 or PKCS#8 PEM envelope
+# of at most 65,536 bytes. Omitted, blank, malformed, and oversized values fail
+# during input validation. Keep the real value only in this gitignored,
+# operator-owned file.
 # local_agent_github_app_private_key = <<-PEM
 #   <operator-supplied PEM private key>
 # PEM

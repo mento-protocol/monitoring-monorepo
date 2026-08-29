@@ -77,6 +77,20 @@ variable "local_agent_github_app_private_key" {
   default     = ""
   sensitive   = true
   ephemeral   = true
+
+  validation {
+    condition = (
+      var.local_agent_github_app_credential_active == false ||
+      (
+        length(var.local_agent_github_app_private_key) <= 65536 &&
+        (
+          can(regex("^-----BEGIN RSA PRIVATE KEY-----\\n([A-Za-z0-9+/=]{4,64}\\n)+-----END RSA PRIVATE KEY-----\\n?$", var.local_agent_github_app_private_key)) ||
+          can(regex("^-----BEGIN PRIVATE KEY-----\\n([A-Za-z0-9+/=]{4,64}\\n)+-----END PRIVATE KEY-----\\n?$", var.local_agent_github_app_private_key))
+        )
+      )
+    )
+    error_message = "Active local agent GitHub App credentials require a PKCS#1 or PKCS#8 PEM envelope of at most 65536 bytes."
+  }
 }
 
 variable "local_agent_github_app_private_key_rotation_counter" {

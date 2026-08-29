@@ -76,22 +76,34 @@ Terraform uses `prevent_destroy`. The exact plan guard rejects replacement,
 deletion, another first-class repository ruleset, an unknown managed field, a
 different Team, a mutable provider owner, and a non-public GitHub API endpoint.
 It also rejects core ruleset ID `13494367` in every lifecycle resource state.
+During initial ruleset creation, it rejects every other non-no-op action. When
+the reviewed broker-scaffold gate first becomes true, it requires the complete
+five-resource create set and rejects every unrelated change.
 
 The reviewed policy records the repository, Team ID, managed lifecycle ruleset
-ID, desired enforcement state, and drift-audit state. The initial source uses
-zero ID sentinels and disabled enforcement. The state changes in separate
-reviewed phases:
+ID, desired enforcement state, drift-audit state, broker-scaffold gate, and
+broker impersonator. The initial source uses zero ID sentinels, disabled
+enforcement, an empty impersonator, and a false scaffold gate. The state
+changes in separate reviewed phases:
 
 1. A human creates and verifies the Team. Source pins its positive numeric ID.
-2. An approved platform apply creates the lifecycle ruleset with enforcement
-   disabled. The create plan must have no prior ruleset value.
+2. An approved Phase 3 platform apply creates only the lifecycle ruleset with
+   enforcement disabled. The create plan must have no prior ruleset value and
+   no broker scaffold or credential resource.
 3. A human reads the new ruleset ID. A reviewed source change pins that
    positive ID. The ID must never equal `13494367`.
-4. Agent credential cutover completes while the lifecycle rule is disabled.
+4. A separate reviewed Phase 4 source change enables the broker scaffold and
+   pins its one service-account impersonator. Its approved plan creates only
+   the service account, secret container, accessor binding, impersonation
+   binding, and write-only credential version. Agent credential cutover then
+   completes while the lifecycle rule is disabled.
 5. A reviewed source change selects active enforcement. An approved platform
    apply changes only enforcement on the pinned lifecycle ruleset.
-6. Live checks prove that the App cannot update `main` and that an approved
-   Team member can merge the same ready pull request.
+6. Live checks prove that the App lacks Contents permission, record the exact
+   live lifecycle ruleset JSON, and prove that the approved Team
+   `pull_request` bypass can merge the same ready pull request. The App denial
+   proves its permission ceiling. It does not prove that GitHub evaluated the
+   lifecycle ruleset.
 7. A final reviewed source change activates daily drift enforcement.
 
 The daily read-only audit checks the exact core shape and the exact lifecycle
@@ -176,9 +188,12 @@ outside the cutover and must not have repository write access.
 
 A human creates the App and downloads its initial PEM outside every agent
 surface. The operator transfers the PEM through the approved private tfvars
-path. Terraform sends it only to Secret Manager's write-only field. The exact
-plan wrapper uses one private mode-`0600` variable-file copy inside its
-mode-`0700` plan directory and removes that directory on success or failure.
+path. Credential activation accepts only a bounded PKCS#1 or PKCS#8 PEM
+envelope. An omitted, blank, malformed, or larger-than-64-KiB value fails before
+apply. Terraform sends the accepted ephemeral value only to Secret Manager's
+write-only field. The exact plan wrapper uses one private mode-`0600`
+variable-file copy inside its mode-`0700` plan directory and removes that
+directory on success or failure.
 
 The plan wrapper rejects the App PEM and the platform GitHub PAT in environment
 variables and CLI `-var` arguments. It uses fixed errors that cannot echo an
@@ -219,11 +234,12 @@ These actions require separate human approvals:
 - App creation, registration, and selected-repository installation;
 - source changes that pin the Team and managed ruleset IDs;
 - disabled ruleset plan and apply;
+- broker-scaffold source enablement and impersonator pin;
 - App-key plan and apply;
 - root-owned broker installation;
 - local and cloud credential cutover;
 - active ruleset plan and apply;
-- live refusal and human merge proof;
+- App permission-ceiling denial, exact ruleset JSON, and human merge proof;
 - drift-audit activation.
 
 Source merge activates none of these external states.
@@ -275,6 +291,8 @@ explicit residual.
 - Only the source-pinned Team has a bypass in that ruleset, and its bypass works
   only through a pull request.
 - Agent credentials authenticate as one selected-repository App installation.
+- Checked-in source keeps the broker scaffold absent until a separate reviewed
+  Phase 4 change enables it and pins its impersonator.
 - Normal read operations receive no write permission.
 - A local agent never receives the App PEM, JWT, or installation token.
 - Host and cloud activation require live identity and refusal evidence.
@@ -283,6 +301,9 @@ explicit residual.
   not prevention, after an authorized or compromised settings change.
 - Terraform source, plan, apply, credential cutover, and live proof remain
   separate authority boundaries.
+- The default App denial proves the App registration ceiling. The exact live
+  ruleset JSON and Team merge prove the server configuration and human path as
+  separate facts.
 
 ## Evidence
 

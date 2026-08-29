@@ -35,7 +35,8 @@ The completed cutover has these properties:
 - the dedicated agent OS or container has no human or platform credential;
 - every writable cloud-agent surface uses a proved App installation identity;
 - Vercel Administration-plus-Contents remains an explicit Free-plan residual;
-- live proof shows App refusal and an approved Team merge on the same ready PR;
+- live proof records an App permission-ceiling denial, exact live ruleset JSON,
+  and an approved Team merge on the same ready PR;
 - the daily audit reports `main-ruleset-audit state=ok`.
 
 ## Source and live-state boundary
@@ -53,7 +54,8 @@ behavior. They cannot prove these external facts:
 - removal of a human credential from an agent host;
 - a cloud platform's credential type;
 - the Vercel plan constraint;
-- server refusal of an App update to `main`.
+- the App's live permission registration and a permission-denied App merge or
+  `main` update attempt;
 
 Record each live fact separately. Do not infer it from source, a plan, an App
 name, an installation ID, or a successful read request.
@@ -103,6 +105,11 @@ The App private key stays in Secret Manager after provisioning. The broker
 creates the App JWT and installation token in memory. None of the three values
 may reach stdout, stderr, returned JSON, a temporary file, the agent process,
 or a caller-controlled child.
+
+Checked-in source keeps the broker scaffold absent. The reviewed policy gate is
+false and its impersonator is empty. A separate Phase 4 source change must
+enable the complete scaffold and pin its one impersonating service account
+before the credential plan can pass.
 
 ## Accepted residuals
 
@@ -203,6 +210,8 @@ The reviewed policy starts with:
 - managed lifecycle ruleset ID `0`;
 - enforcement disabled;
 - drift audit inactive.
+- broker scaffold disabled;
+- broker impersonator empty.
 
 From a clean current-`main` operator checkout, run the guarded platform
 preflight. The exact policy must permit one creation only. Require:
@@ -214,7 +223,12 @@ preflight. The exact policy must permit one creation only. Require:
 - one source-pinned Team bypass in `pull_request` mode;
 - no core ruleset resource;
 - no action for core ruleset ID `13494367`;
+- no broker service account, secret, credential version, accessor binding, or
+  impersonation binding;
 - no replacement, deletion, unknown managed field, or second ruleset.
+
+Require the lifecycle ruleset create to be the plan's only non-no-op action.
+The exact plan guard rejects any broker or unrelated change in this phase.
 
 Review the full plan. Obtain separate apply approval. Run the guarded apply
 from the same clean current-`main` source. Do not use direct Terraform apply.
@@ -225,20 +239,33 @@ change. Repeat the guarded plan. It must be a no-op for the disabled ruleset.
 
 ## Phase 4: provision the App key and broker principal
 
-Pin the one approved broker impersonating principal in reviewed source. Do not
-select it from an arbitrary tfvars list.
+Start with a separate reviewed source change. Set the broker-scaffold policy
+gate to true and pin the one approved broker impersonating principal. Keep the
+gate and principal in reviewed source. Do not select either from a tfvar,
+repository variable, or environment variable. The managed lifecycle ruleset
+ID must already be positive and pinned.
 
-Use the operator tfvars file for the App key. The platform wrapper rejects the
-App key and platform GitHub PAT in `TF_VAR_*`, ambient GitHub authentication,
-and CLI `-var` arguments. It copies the variable file once into its private
-plan directory. Terraform sends the key only to the write-only Secret Manager
-field.
+Use the operator tfvars file for the App and installation IDs, positive
+rotation counter, credential-active selector, and App key. When the selector is
+true, Terraform accepts only a complete PKCS#1 or PKCS#8 PEM envelope no larger
+than 65,536 bytes. An omitted, blank, malformed, or oversized key fails during
+input validation before apply. The key remains sensitive and ephemeral. It
+does not enter a managed-resource lifecycle condition, output, log, plan, or
+state.
+
+The platform wrapper rejects the App key and platform GitHub PAT in
+`TF_VAR_*`, ambient GitHub authentication, and CLI `-var` arguments. It copies
+the variable file once into its private plan directory. Terraform sends the
+key only to the write-only Secret Manager field.
 
 Review the guarded plan. Require only the expected service account, secret,
-write-only version, accessor binding, and exact impersonation binding. Obtain
-separate apply approval. Apply the checked plan. Remove any obsolete operator
-key copy only when the approved rotation and recovery process no longer needs
-it. Revoke the key if custody becomes uncertain.
+write-only version, accessor binding, and exact impersonation binding as
+non-no-op actions. All five resources must be created together. The disabled,
+pinned lifecycle ruleset must be unchanged. The exact plan guard rejects a
+partial scaffold, an unrelated change, or broker provisioning while the source
+gate is false. Obtain separate apply approval. Apply the checked plan. Remove
+any obsolete operator key copy only when the approved rotation and recovery
+process no longer needs it. Revoke the key if custody becomes uncertain.
 
 ## Phase 5: install the trusted host boundary
 
@@ -347,19 +374,33 @@ live rulesets through the human Administration-read surface. Require:
 Use one ready, same-repository PR whose exact head passed required checks and
 reviews. Keep the PR unchanged during proof.
 
-1. Through a trusted operator diagnostic that does not reveal the installation
-   token, ask GitHub to perform the App-authenticated merge or equivalent main
-   update. Require GitHub to refuse it because the App is not a lifecycle
-   bypass actor.
-2. Confirm that the diagnostic returned only the fixed refusal classification.
-   Do not return headers, request bodies, tokens, or raw provider output.
-3. Have an approved Team member merge the same ready PR through the approved
-   human merge command.
-4. Record the PR, exact head, App installation identity, refusal class, human
-   actor, merge record, both live ruleset IDs, and time.
+1. Read the selected-repository App installation through the human
+   Administration surface. Require Contents to be absent. Record the exact
+   installation identity, selected repository, and permission map.
+2. Through a trusted operator diagnostic that does not reveal the installation
+   token, ask GitHub to perform the App-authenticated merge or equivalent
+   `main` update. Require the fixed `permission-ceiling-denied` result. Do not
+   return headers, request bodies, tokens, or raw provider output.
+3. Record the exact live JSON for core ruleset `13494367` and the pinned
+   lifecycle ruleset. Require the lifecycle ruleset to be active, target only
+   `refs/heads/main`, contain only creation, update, and deletion restrictions,
+   and name only the approved Team in `pull_request` bypass mode.
+4. Have an approved Team member merge the same ready PR through the approved
+   human merge command. Require the merge record to identify that Team member;
+   this proves the source-pinned Team `pull_request` bypass path succeeded.
+5. Record the PR, exact head, App installation identity, permission-denial
+   class, human actor, merge record, both live ruleset JSON documents, and
+   time.
 
-A rejected direct push is insufficient. The core pull-request rule can reject
-that push before the lifecycle identity rule is tested.
+The App attempt proves the App permission ceiling. It cannot prove lifecycle
+ruleset evaluation because the App has no Contents permission. The exact live
+ruleset JSON and the Team merge are separate proof of the configured server
+control and approved human path. Do not describe the App denial as a lifecycle
+ruleset refusal.
+
+Do not add a rejected direct push as a substitute for any step. The core
+pull-request rule can reject that push before the lifecycle identity rule is
+tested.
 
 ## Phase 9: activate daily drift enforcement
 

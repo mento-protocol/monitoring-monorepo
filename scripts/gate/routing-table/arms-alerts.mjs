@@ -97,7 +97,7 @@ export const ALERT_ARMS = [
     ],
   },
   {
-    why: "The reviewed policy selects the human Team actor and the drift-audit activation state. Keep its focused evaluator test above the broad Terraform arm, which is first-match routing.",
+    why: "The reviewed policy selects the human Team actor, broker-scaffold phase, and drift-audit activation state. Keep its focused plan and drift evaluator tests above the broad Terraform arm, which is first-match routing.",
     patterns: ["terraform/human-merge-boundary-policy.json"],
     effects: [
       { surface: "terraform" },
@@ -108,6 +108,10 @@ export const ALERT_ARMS = [
       {
         checklist: "docs/pr-checklists/terraform-cloudrun.md",
         reason: "Terraform/Cloud Run path changed",
+      },
+      {
+        command: "pnpm tf:test",
+        reason: "human merge boundary phase policy changed",
       },
       {
         command: "node scripts/workflows/check-main-rulesets-drift.test.mjs",

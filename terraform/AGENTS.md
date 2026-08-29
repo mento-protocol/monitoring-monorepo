@@ -23,7 +23,8 @@ account and token, Upstash, the monitoring GCP project and APIs, private
 Peg-policy storage, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana
 Alloy bootstrap, deploy source buckets, the separated Terraform/service-deploy
 Workload Identity Federation chains, repo-level GitHub Actions settings, the
-Team-only main lifecycle ruleset, and the local-agent App broker secret bootstrap.
+Team-only main lifecycle ruleset, and the source-gated local-agent App broker
+secret bootstrap.
 Core ruleset `13494367` remains unmanaged. Alerts live elsewhere:
 `alerts/rules/` owns protocol and Aegis
 Grafana rules plus global routing, `alerts/infra/` owns event-driven delivery,
@@ -64,8 +65,10 @@ handshake and image pull depend on these boundaries.
   `vercel env add`, or an equivalent workaround.
 - ADR 0078 owns the human merge boundary. Keep all three lifecycle rules
   Team-only in `pull_request` mode and core ruleset `13494367` unmanaged. Source
-  pins the repository, Team, rule ID, enforcement, audit, and broker service
-  account; never move this authority to a tfvar or repository variable. Keep
+  pins the repository, Team, rule ID, enforcement, audit, broker-scaffold gate,
+  and broker impersonator; never move this authority to a tfvar or
+  repository variable. Keep the scaffold gate false until the separate Phase 4
+  source approval. Keep
   provider targets fixed, Secret Manager write-only, and stronger credentials
   off agent OSes. The runbook owns custody, approvals, cutover, proof, and
   rotation.

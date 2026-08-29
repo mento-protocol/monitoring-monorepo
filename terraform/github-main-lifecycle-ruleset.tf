@@ -65,6 +65,22 @@ resource "github_repository_ruleset" "human_only_main_lifecycle" {
         local.human_main_lifecycle_ruleset_id != 13494367 &&
         contains(["disabled", "active"], local.human_main_lifecycle_ruleset_enforcement) &&
         (
+          local.local_agent_github_broker_scaffold_enabled == false ||
+          local.local_agent_github_broker_scaffold_enabled == true
+        ) &&
+        (
+          local.local_agent_github_broker_scaffold_enabled ?
+          (
+            local.human_main_lifecycle_ruleset_id > 0 &&
+            can(regex("^serviceAccount:[^@[:space:]]+@[^@[:space:]]+\\.iam\\.gserviceaccount\\.com$", local.local_agent_github_broker_impersonator))
+          ) :
+          local.local_agent_github_broker_impersonator == ""
+        ) &&
+        (
+          local.local_agent_github_broker_scaffold_enabled ||
+          var.local_agent_github_app_credential_active == false
+        ) &&
+        (
           local.human_main_lifecycle_ruleset_id != 0 ||
           (
             local.human_main_lifecycle_ruleset_enforcement == "disabled" &&
@@ -79,7 +95,7 @@ resource "github_repository_ruleset" "human_only_main_lifecycle" {
           )
         )
       )
-      error_message = "terraform/human-merge-boundary-policy.json must pin the repository, approved Team ID, non-core managed lifecycle ruleset ID, valid enforcement state, and ordered audit activation. Initial creation requires ID 0, disabled enforcement, and an inactive audit."
+      error_message = "terraform/human-merge-boundary-policy.json must pin the repository, approved Team ID, non-core managed lifecycle ruleset ID, valid enforcement state, ordered audit activation, and a coherent broker-scaffold gate. Initial ruleset creation requires ID 0, disabled enforcement, an inactive audit, a disabled broker scaffold, and inactive App credentials."
     }
   }
 }

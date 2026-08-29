@@ -113,7 +113,7 @@ const IAM_MEMBER_EXPRESSION_GROUPS = [
   },
   {
     expression:
-      '"serviceAccount:${google_service_account.local_agent_github_broker.email}"',
+      '"serviceAccount:${google_service_account.local_agent_github_broker[0].email}"',
     blocks: [
       "terraform/github-local-agent-app.tf:google_secret_manager_secret_iam_member.local_agent_github_broker_accessor",
     ],
@@ -304,8 +304,8 @@ const IAM_BLOCK_SHAPE_SPECIFICATIONS = [
   "terraform/aegis-bootstrap.tf:google_secret_manager_secret_iam_member.grafana_agent_runtime_accessor|8a6b9484ca33c2b9885793c7c3764b6e8c2465d5ef2001f3523c4bac50e2bfee",
   "terraform/aegis-bootstrap.tf:google_service_account_iam_member.grafana_agent_builder_submitter|50c0c21f15e2fb9cd7a5dad6dc8b3e78daf904ccd30aa7849a25f551215fa733",
   "terraform/aegis-bootstrap.tf:google_service_account_iam_member.grafana_agent_cloudbuild_runtime_service_account_user|0644d6863de32b32d50203204674cd615d1fb07cf574a34786f7ebe4d1ef4749",
-  "terraform/github-local-agent-app.tf:google_secret_manager_secret_iam_member.local_agent_github_broker_accessor|da295c3fc03aad3fa561db73b442f22373a64a53b54a4316be5c3b39111b5635",
-  "terraform/github-local-agent-app.tf:google_service_account_iam_member.local_agent_github_broker_impersonator|3896844cf883f5e8c541112577622b6a4d628983aaf0ee5eda26bba2d2b5dd1e",
+  "terraform/github-local-agent-app.tf:google_secret_manager_secret_iam_member.local_agent_github_broker_accessor|b8e2c205c0754b4360983c8ace3fb2b1647397f59ca22a9e7abdbaa8a1d1b385",
+  "terraform/github-local-agent-app.tf:google_service_account_iam_member.local_agent_github_broker_impersonator|d740ffe641ece0258f101115dc097035ab46e6da6cbd4d3eb923977b082eba48",
   "terraform/agent-readonly.tf:google_organization_iam_member.agent_readonly_org_roles|7c3104c85aed42208922ae49b7bcf3ccad1a92fd0550d512da1cc2e98c54803c",
   "terraform/agent-readonly.tf:google_project_iam_member.agent_readonly_storage_object_viewer|711050d13fd79a3a8824657145fe93b3453c1d7b6ffbe31ebdf7e658c3a3398f",
   "terraform/agent-readonly.tf:google_service_account_iam_member.agent_readonly_token_creators|70839f6d974946314e5657a18e65df3afff646801c915595ed125f619557f188",
@@ -373,7 +373,7 @@ const IDENTITY_SOURCE_BLOCK_SHAPE_SPECIFICATIONS = [
   "terraform/aegis-bootstrap.tf:google_service_account.grafana_agent_builder|5771d741295744c2da543de15ca4c4a6aae93325d52451e0f764c6c83833b5e4",
   "terraform/aegis-bootstrap.tf:google_service_account.grafana_agent_runtime|994b37f38438e2180e0db4d60b1b84e704ea99b16db9dc7da86a8659840951d6",
   "terraform/agent-readonly.tf:google_service_account.agent_readonly|834eabe3ade9753f7a947c28c8cee40983352d1208c1b11c1f7974e17be64499",
-  "terraform/github-local-agent-app.tf:google_service_account.local_agent_github_broker|2e8eb45b417ce9a6ef1531f004c096f70e39240b8d83cd903a374205fe726f8d",
+  "terraform/github-local-agent-app.tf:google_service_account.local_agent_github_broker|22d57db0763e02460ad22212390da72fbd690a7571a0b5b94f0eb59f0da4904e",
   "terraform/ci-wif.tf:google_service_account.metrics_bridge_deployer|ce299e0e1c290cca2c98446508e334010819da839a022bec6e9993b29c8050ec",
   "terraform/ci-wif.tf:google_service_account.metrics_bridge_plan_readonly|24628df00c7031ae0ca5ee2a6fa559b6f257cdb519619b9fe0f885c8715960b0",
   "terraform/ci-wif.tf:google_service_account.org_terraform_plan_readonly|f8085c49ff045f8b86710a39f32df57a597725a83997c589e3bd48e6ce406dc1",

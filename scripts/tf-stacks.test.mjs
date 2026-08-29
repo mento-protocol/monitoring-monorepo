@@ -33,6 +33,7 @@ const testHumanMergeBoundaryPolicy = Object.freeze({
   human_main_lifecycle_ruleset_id: 24680,
   human_main_lifecycle_ruleset_enforcement: "active",
   ruleset_audit_active: false,
+  local_agent_github_broker_scaffold_enabled: false,
   local_agent_github_broker_impersonator: "",
 });
 const defaultLifecycleRuleset = {

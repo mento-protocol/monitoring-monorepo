@@ -92,16 +92,20 @@ owns the exact-plan boundary.
 [runbook](notes/local-agent-github-app-credential.md) own all phases, custody,
 proof, rollback, and import deferral. Each needs approval; source merge is inert.
 
-Source pins the repository, Team, managed rule ID/enforcement, audit, and broker
-principal. Reviewed source replaces zero sentinels. The first plan creates a
-disabled creation/update/deletion rule with one Team `pull_request` bypass.
-Later plans use its pinned ID after cutover. Core rule `13494367` stays
-unmanaged because provider `6.12.1` loses its unattributed-change field.
+Source pins the repository, Team, managed rule ID/enforcement, audit,
+broker-scaffold gate, and broker principal. Reviewed source replaces zero
+sentinels. Phase 3 creates only a disabled creation/update/deletion rule with
+one Team `pull_request` bypass. A separate Phase 4 source change enables the
+five-resource broker scaffold and pins its impersonator. Its plan may create
+only that complete scaffold and credential set. Later plans use the pinned
+ruleset ID after cutover. Core rule `13494367` stays unmanaged because provider
+`6.12.1` loses its unattributed-change field.
 
-The broker keeps its PEM, JWT, and token outside agents. Git, workflow,
-readiness, and transactional board lanes stay unavailable. Stronger credentials
-stay outside agent OSes. Dependabot auto-merge drains before live proof and an
-audit with `main-ruleset-audit state=ok`.
+Credential activation rejects an omitted, blank, malformed, or larger than
+64 KiB App key. The broker keeps its PEM, JWT, and token outside agents. Git,
+workflow, readiness, and transactional board lanes stay unavailable. Stronger
+credentials stay outside agent OSes. Dependabot auto-merge drains before live
+proof and an audit with `main-ruleset-audit state=ok`.
 
 Vercel retains Administration plus Contents as a Free-plan residual. It can
 change the rule and then `main`; drift is detective only.

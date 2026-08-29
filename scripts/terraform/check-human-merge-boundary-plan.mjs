@@ -6,6 +6,42 @@ import { isDeepStrictEqual } from "node:util";
 export const CORE_RULESET_ID = 13494367;
 export const HUMAN_LIFECYCLE_RULESET_ADDRESS =
   "github_repository_ruleset.human_only_main_lifecycle";
+const BROKER_SCAFFOLD_RESOURCE_SPECS = Object.freeze([
+  Object.freeze({
+    address: "google_service_account.local_agent_github_broker[0]",
+    index: 0,
+    name: "local_agent_github_broker",
+    type: "google_service_account",
+  }),
+  Object.freeze({
+    address:
+      "google_secret_manager_secret.local_agent_github_app_private_key[0]",
+    index: 0,
+    name: "local_agent_github_app_private_key",
+    type: "google_secret_manager_secret",
+  }),
+  Object.freeze({
+    address:
+      "google_secret_manager_secret_version.local_agent_github_app_private_key[0]",
+    index: 0,
+    name: "local_agent_github_app_private_key",
+    replaceable: true,
+    type: "google_secret_manager_secret_version",
+  }),
+  Object.freeze({
+    address:
+      "google_secret_manager_secret_iam_member.local_agent_github_broker_accessor[0]",
+    index: 0,
+    name: "local_agent_github_broker_accessor",
+    type: "google_secret_manager_secret_iam_member",
+  }),
+  Object.freeze({
+    address: undefined,
+    index: undefined,
+    name: "local_agent_github_broker_impersonator",
+    type: "google_service_account_iam_member",
+  }),
+]);
 export const SOURCE_HUMAN_MERGE_BOUNDARY_POLICY = Object.freeze(
   JSON.parse(
     readFileSync(
@@ -60,6 +96,26 @@ function relatedRulesetEntry(resourceChange) {
   );
 }
 
+function brokerScaffoldSpec(resourceChange) {
+  return BROKER_SCAFFOLD_RESOURCE_SPECS.find(
+    (spec) =>
+      resourceChange?.type === spec.type && resourceChange?.name === spec.name,
+  );
+}
+
+function relatedBrokerScaffoldEntry(resourceChange) {
+  if (brokerScaffoldSpec(resourceChange)) return true;
+  return BROKER_SCAFFOLD_RESOURCE_SPECS.some((spec) => {
+    const prefix = `${spec.type}.${spec.name}`;
+    return (
+      resourceChange?.address === prefix ||
+      resourceChange?.address?.startsWith(`${prefix}[`) ||
+      resourceChange?.previous_address === prefix ||
+      resourceChange?.previous_address?.startsWith(`${prefix}[`)
+    );
+  });
+}
+
 function exactIdentity(entry) {
   return (
     entry?.address === HUMAN_LIFECYCLE_RULESET_ADDRESS &&
@@ -74,6 +130,9 @@ function exactIdentity(entry) {
 }
 
 function validateSourcePolicy(policy, errors) {
+  const brokerScaffoldEnabled =
+    policy?.local_agent_github_broker_scaffold_enabled;
+  const brokerImpersonator = policy?.local_agent_github_broker_impersonator;
   if (
     !isObject(policy) ||
     policy.repository !== "mento-protocol/monitoring-monorepo" ||
@@ -85,14 +144,16 @@ function validateSourcePolicy(policy, errors) {
       policy.human_main_lifecycle_ruleset_enforcement,
     ) ||
     typeof policy.ruleset_audit_active !== "boolean" ||
-    typeof policy.local_agent_github_broker_impersonator !== "string" ||
-    (policy.local_agent_github_broker_impersonator !== "" &&
-      !/^serviceAccount:[^@\s]+@[^@\s]+\.iam\.gserviceaccount\.com$/u.test(
-        policy.local_agent_github_broker_impersonator,
-      ))
+    typeof brokerScaffoldEnabled !== "boolean" ||
+    typeof brokerImpersonator !== "string" ||
+    (brokerScaffoldEnabled
+      ? !/^serviceAccount:[^@\s]+@[^@\s]+\.iam\.gserviceaccount\.com$/u.test(
+          brokerImpersonator,
+        )
+      : brokerImpersonator !== "")
   ) {
     errors.push(
-      "source policy must pin the repository, approved positive Team ID, non-negative managed lifecycle ruleset ID, valid enforcement state, boolean audit state, and zero or one broker service-account principal; replace the zero Team sentinel first",
+      "source policy must pin the repository, approved positive Team ID, non-negative managed lifecycle ruleset ID, valid enforcement state, boolean audit state, boolean broker-scaffold gate, and one service-account principal only while that gate is enabled; replace the zero Team sentinel first",
     );
     return undefined;
   }
@@ -113,12 +174,145 @@ function validateSourcePolicy(policy, errors) {
       "ruleset audit activation requires a source-pinned non-core managed ID and active enforcement",
     );
   }
+  if (brokerScaffoldEnabled && rulesetId <= 0) {
+    errors.push(
+      "broker scaffold enablement requires a source-pinned non-core managed lifecycle ruleset ID",
+    );
+  }
   return {
     auditActive,
+    brokerImpersonator,
+    brokerScaffoldEnabled,
     enforcement,
     rulesetId,
     teamId: policy.human_merge_operator_team_id,
   };
+}
+
+function exactBrokerScaffoldIdentity(entry, spec, expected) {
+  const expectedIndex =
+    spec.index === undefined ? expected?.brokerImpersonator : spec.index;
+  const expectedAddress =
+    spec.address ??
+    `${spec.type}.${spec.name}[${JSON.stringify(expectedIndex)}]`;
+  return (
+    entry?.address === expectedAddress &&
+    entry?.mode === "managed" &&
+    entry?.type === spec.type &&
+    entry?.name === spec.name &&
+    entry?.module_address === undefined &&
+    entry?.index === expectedIndex &&
+    entry?.deposed === undefined &&
+    entry?.previous_address === undefined
+  );
+}
+
+function nonNoOpEntries(plan) {
+  return plan.resource_changes.filter(
+    (entry) => !sameActions(entry?.change?.actions, ["no-op"]),
+  );
+}
+
+function validateBrokerScaffold(plan, rulesetEntry, expected, errors) {
+  const related = plan.resource_changes.filter(relatedBrokerScaffoldEntry);
+  if (!expected?.brokerScaffoldEnabled) {
+    if (related.length > 0) {
+      errors.push(
+        "a disabled broker-scaffold source gate forbids every broker scaffold and credential resource",
+      );
+    }
+    if (sameActions(rulesetEntry?.change?.actions, ["create"])) {
+      const outsideRuleset = nonNoOpEntries(plan).filter(
+        (entry) => entry !== rulesetEntry,
+      );
+      if (outsideRuleset.length > 0) {
+        errors.push(
+          "initial disabled lifecycle ruleset creation must be the plan's only change",
+        );
+      }
+    }
+    return;
+  }
+
+  if (related.length !== BROKER_SCAFFOLD_RESOURCE_SPECS.length) {
+    errors.push(
+      "an enabled broker-scaffold source gate requires the complete five-resource scaffold and credential set",
+    );
+    return;
+  }
+
+  const entriesBySpec = new Map();
+  for (const entry of related) {
+    const spec = brokerScaffoldSpec(entry);
+    const key = `${spec?.type}.${spec?.name}`;
+    if (!spec || entriesBySpec.has(key)) {
+      errors.push(
+        "broker scaffold resources must have one canonical identity each",
+      );
+      continue;
+    }
+    entriesBySpec.set(key, entry);
+    if (!exactBrokerScaffoldIdentity(entry, spec, expected)) {
+      errors.push("a broker scaffold resource has an unexpected identity");
+    }
+    const actions = entry?.change?.actions;
+    const allowed =
+      sameActions(actions, ["create"]) ||
+      sameActions(actions, ["no-op"]) ||
+      (spec.replaceable && sameActions(actions, ["create", "delete"]));
+    if (!allowed) {
+      errors.push(
+        "broker scaffold resources may only be created, unchanged, or rotate the write-only credential version",
+      );
+    }
+  }
+
+  const createEntries = related.filter((entry) =>
+    sameActions(entry?.change?.actions, ["create"]),
+  );
+  const replacementEntries = related.filter((entry) =>
+    sameActions(entry?.change?.actions, ["create", "delete"]),
+  );
+  if (createEntries.length > 0) {
+    if (
+      createEntries.length !== BROKER_SCAFFOLD_RESOURCE_SPECS.length ||
+      replacementEntries.length > 0
+    ) {
+      errors.push(
+        "initial broker scaffold provisioning must create all five resources together",
+      );
+    }
+    if (
+      expected.rulesetId <= 0 ||
+      expected.enforcement !== "disabled" ||
+      expected.auditActive ||
+      !sameActions(rulesetEntry?.change?.actions, ["no-op"])
+    ) {
+      errors.push(
+        "initial broker scaffold provisioning requires a pinned, disabled, unchanged lifecycle ruleset and an inactive audit",
+      );
+    }
+    const outsideScaffold = nonNoOpEntries(plan).filter(
+      (entry) => !related.includes(entry),
+    );
+    if (outsideScaffold.length > 0) {
+      errors.push(
+        "initial broker scaffold provisioning may change only the documented five-resource scaffold and credential set",
+      );
+    }
+  } else if (replacementEntries.length > 0) {
+    if (replacementEntries.length !== 1) {
+      errors.push("one approved credential plan may rotate only one version");
+    }
+    const outsideVersion = nonNoOpEntries(plan).filter(
+      (entry) => !replacementEntries.includes(entry),
+    );
+    if (outsideVersion.length > 0) {
+      errors.push(
+        "a credential rotation plan may change only the write-only credential version",
+      );
+    }
+  }
 }
 
 function validateRulesetShape(after, expected, errors) {
@@ -413,6 +607,7 @@ export function validateHumanMergeBoundaryPlan(
     return errors;
   }
   validateRulesetEntry(related[0], expected, errors);
+  validateBrokerScaffold(plan, related[0], expected, errors);
   return errors;
 }
 

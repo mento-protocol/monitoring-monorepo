@@ -166,9 +166,10 @@ in the same PR.
   caller plan, credential environment or CLI input, provider-runtime override,
   and unknown argument without echo. Never persist plan data. ADR 0061 owns the
   exact guard and deploy-only exception.
-- ADR 0078 and its runbook own the App boundary. Keep the Team, ruleset ID, and
-  broker principal in source. Keep the PEM, JWT, and token outside agents and
-  caller-controlled children. Preserve fixed root-owned execution, profiles,
+- ADR 0078 and its runbook own the App boundary. Keep the Team, ruleset ID,
+  broker-scaffold gate, and broker principal in source. Keep the gate false
+  until the separate Phase 4 source approval. Keep the PEM, JWT, and token
+  outside agents and caller-controlled children. Preserve fixed root-owned execution, profiles,
   ambient-credential refusal, redaction, and no-token canaries. Agent input
   cannot select Workflow write. Follow the runbook for PEM custody, activation,
   and revoke-on-uncertain-custody.

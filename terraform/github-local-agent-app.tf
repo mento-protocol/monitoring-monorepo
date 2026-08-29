@@ -11,7 +11,14 @@
 # production-infra impersonation path can also read Secret Manager payloads.
 # The App has no Administration permission or ruleset bypass.
 
+locals {
+  local_agent_github_broker_scaffold_enabled = local.human_merge_boundary_policy.local_agent_github_broker_scaffold_enabled
+  local_agent_github_broker_impersonator     = local.human_merge_boundary_policy.local_agent_github_broker_impersonator
+}
+
 resource "google_service_account" "local_agent_github_broker" {
+  count = local.local_agent_github_broker_scaffold_enabled ? 1 : 0
+
   project      = google_project.monitoring.project_id
   account_id   = "local-agent-github-broker"
   display_name = "Local agent GitHub credential broker"
@@ -28,6 +35,8 @@ resource "google_service_account" "local_agent_github_broker" {
 }
 
 resource "google_secret_manager_secret" "local_agent_github_app_private_key" {
+  count = local.local_agent_github_broker_scaffold_enabled ? 1 : 0
+
   project   = google_project.monitoring.project_id
   secret_id = "local-agent-github-app-private-key"
 
@@ -59,9 +68,9 @@ resource "google_secret_manager_secret" "local_agent_github_app_private_key" {
 # keeps the PEM, JWT, and installation token inside its fixed process and
 # returns only normalized operation results.
 resource "google_secret_manager_secret_version" "local_agent_github_app_private_key" {
-  count = var.local_agent_github_app_credential_active ? 1 : 0
+  count = local.local_agent_github_broker_scaffold_enabled && var.local_agent_github_app_credential_active ? 1 : 0
 
-  secret                 = google_secret_manager_secret.local_agent_github_app_private_key.id
+  secret                 = google_secret_manager_secret.local_agent_github_app_private_key[0].id
   secret_data_wo         = var.local_agent_github_app_private_key
   secret_data_wo_version = var.local_agent_github_app_private_key_rotation_counter
   deletion_policy        = "DISABLE"
@@ -81,27 +90,26 @@ resource "google_secret_manager_secret_version" "local_agent_github_app_private_
 }
 
 resource "google_secret_manager_secret_iam_member" "local_agent_github_broker_accessor" {
+  count = local.local_agent_github_broker_scaffold_enabled ? 1 : 0
+
   project   = google_project.monitoring.project_id
-  secret_id = google_secret_manager_secret.local_agent_github_app_private_key.secret_id
+  secret_id = google_secret_manager_secret.local_agent_github_app_private_key[0].secret_id
   role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.local_agent_github_broker.email}"
+  member    = "serviceAccount:${google_service_account.local_agent_github_broker[0].email}"
 }
 
 # Keep host-broker access explicit. Do not reuse gcp_dev_members: a deployment
 # role does not imply authority to mint agent GitHub credentials. Reviewed
-# source pins the one dedicated service-account principal. An empty string is
-# the fail-closed bootstrap state.
-locals {
-  local_agent_github_broker_impersonator = local.human_merge_boundary_policy.local_agent_github_broker_impersonator
-}
+# source pins the one dedicated service-account principal. The scaffold gate
+# and empty principal are the fail-closed bootstrap state.
 
 resource "google_service_account_iam_member" "local_agent_github_broker_impersonator" {
   for_each = toset(
-    local.local_agent_github_broker_impersonator == "" ?
-    [] : [local.local_agent_github_broker_impersonator]
+    local.local_agent_github_broker_scaffold_enabled ?
+    [local.local_agent_github_broker_impersonator] : []
   )
 
-  service_account_id = google_service_account.local_agent_github_broker.name
+  service_account_id = google_service_account.local_agent_github_broker[0].name
   role               = "roles/iam.serviceAccountTokenCreator"
   member             = each.value
 

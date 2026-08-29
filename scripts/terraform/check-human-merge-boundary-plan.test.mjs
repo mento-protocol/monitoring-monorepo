@@ -12,18 +12,27 @@ import {
 
 const TEAM_ID = 424242;
 const MANAGED_RULESET_ID = 24680;
+const BROKER_IMPERSONATOR =
+  "serviceAccount:local-agent-broker@mento-monitoring.iam.gserviceaccount.com";
 const POLICY_BASE = Object.freeze({
   repository: "mento-protocol/monitoring-monorepo",
   human_merge_operator_team_id: TEAM_ID,
   human_main_lifecycle_ruleset_id: MANAGED_RULESET_ID,
   human_main_lifecycle_ruleset_enforcement: "active",
   ruleset_audit_active: false,
+  local_agent_github_broker_scaffold_enabled: false,
   local_agent_github_broker_impersonator: "",
 });
 const BOOTSTRAP_POLICY = Object.freeze({
   ...POLICY_BASE,
   human_main_lifecycle_ruleset_id: 0,
   human_main_lifecycle_ruleset_enforcement: "disabled",
+});
+const SCAFFOLD_POLICY = Object.freeze({
+  ...POLICY_BASE,
+  human_main_lifecycle_ruleset_enforcement: "disabled",
+  local_agent_github_broker_scaffold_enabled: true,
+  local_agent_github_broker_impersonator: BROKER_IMPERSONATOR,
 });
 
 function rulesetAfter({
@@ -86,6 +95,57 @@ function rulesetEntry({
   };
 }
 
+function brokerScaffoldEntries({ actions = ["no-op"] } = {}) {
+  return [
+    {
+      address: "google_service_account.local_agent_github_broker[0]",
+      index: 0,
+      mode: "managed",
+      name: "local_agent_github_broker",
+      type: "google_service_account",
+    },
+    {
+      address:
+        "google_secret_manager_secret.local_agent_github_app_private_key[0]",
+      index: 0,
+      mode: "managed",
+      name: "local_agent_github_app_private_key",
+      type: "google_secret_manager_secret",
+    },
+    {
+      address:
+        "google_secret_manager_secret_version.local_agent_github_app_private_key[0]",
+      index: 0,
+      mode: "managed",
+      name: "local_agent_github_app_private_key",
+      type: "google_secret_manager_secret_version",
+    },
+    {
+      address:
+        "google_secret_manager_secret_iam_member.local_agent_github_broker_accessor[0]",
+      index: 0,
+      mode: "managed",
+      name: "local_agent_github_broker_accessor",
+      type: "google_secret_manager_secret_iam_member",
+    },
+    {
+      address: `google_service_account_iam_member.local_agent_github_broker_impersonator[${JSON.stringify(BROKER_IMPERSONATOR)}]`,
+      index: BROKER_IMPERSONATOR,
+      mode: "managed",
+      name: "local_agent_github_broker_impersonator",
+      type: "google_service_account_iam_member",
+    },
+  ].map((entry) => ({
+    ...entry,
+    change: {
+      actions: [...actions],
+      after: { fixture: entry.address },
+      after_unknown: {},
+      before: actions[0] === "create" ? null : { fixture: entry.address },
+    },
+  }));
+}
+
 function plan(entries = [rulesetEntry()]) {
   return {
     configuration: {
@@ -126,11 +186,10 @@ function expectFailure(candidate, expected, policy = POLICY_BASE) {
 
 // Steady-state and forward-only activation plans.
 expectPass(plan());
-expectPass(plan(), {
-  ...POLICY_BASE,
-  local_agent_github_broker_impersonator:
-    "serviceAccount:local-agent-broker@mento-monitoring.iam.gserviceaccount.com",
-});
+expectPass(
+  plan([rulesetEntry({ enforcement: "disabled" }), ...brokerScaffoldEntries()]),
+  SCAFFOLD_POLICY,
+);
 const activation = rulesetEntry({ actions: ["update"] });
 activation.change.before.enforcement = "disabled";
 expectPass(plan([activation]));
@@ -309,6 +368,92 @@ computedCreate.change.after_unknown = {
 };
 expectPass(plan([computedCreate]), BOOTSTRAP_POLICY);
 
+// Phase 3 creates only the disabled lifecycle ruleset while the broker source
+// gate is false.
+const phaseThreeExtra = {
+  address: "google_storage_bucket.unrelated",
+  mode: "managed",
+  name: "unrelated",
+  type: "google_storage_bucket",
+  change: { actions: ["create"], before: null, after: {}, after_unknown: {} },
+};
+expectFailure(
+  plan([initialCreate, phaseThreeExtra]),
+  "only change",
+  BOOTSTRAP_POLICY,
+);
+expectFailure(
+  plan([initialCreate, ...brokerScaffoldEntries({ actions: ["create"] })]),
+  "disabled broker-scaffold source gate",
+  BOOTSTRAP_POLICY,
+);
+
+// Phase 4 requires one reviewed source transition and one coherent creation
+// plan. The ruleset is already pinned, disabled, and unchanged.
+const phaseFourRuleset = rulesetEntry({ enforcement: "disabled" });
+const phaseFourScaffold = brokerScaffoldEntries({ actions: ["create"] });
+expectPass(plan([phaseFourRuleset, ...phaseFourScaffold]), SCAFFOLD_POLICY);
+expectFailure(
+  plan([phaseFourRuleset, ...phaseFourScaffold, phaseThreeExtra]),
+  "may change only the documented five-resource",
+  SCAFFOLD_POLICY,
+);
+expectFailure(
+  plan([phaseFourRuleset, ...phaseFourScaffold.slice(1)]),
+  "complete five-resource",
+  SCAFFOLD_POLICY,
+);
+expectFailure(
+  plan([initialCreate, ...phaseFourScaffold]),
+  "broker scaffold enablement requires a source-pinned",
+  { ...SCAFFOLD_POLICY, human_main_lifecycle_ruleset_id: 0 },
+);
+const partialScaffold = brokerScaffoldEntries();
+partialScaffold[0].change = phaseFourScaffold[0].change;
+expectFailure(
+  plan([phaseFourRuleset, ...partialScaffold]),
+  "create all five resources together",
+  SCAFFOLD_POLICY,
+);
+expectFailure(
+  plan([activation, ...phaseFourScaffold]),
+  "pinned, disabled, unchanged lifecycle ruleset",
+  { ...SCAFFOLD_POLICY, human_main_lifecycle_ruleset_enforcement: "active" },
+);
+expectFailure(
+  plan([phaseFourRuleset, ...brokerScaffoldEntries()]),
+  "disabled broker-scaffold source gate",
+  managedDisabledPolicy,
+);
+
+const wrongScaffoldIdentity = brokerScaffoldEntries();
+wrongScaffoldIdentity[0].address =
+  "google_service_account.local_agent_github_broker[1]";
+wrongScaffoldIdentity[0].index = 1;
+expectFailure(
+  plan([phaseFourRuleset, ...wrongScaffoldIdentity]),
+  "unexpected identity",
+  SCAFFOLD_POLICY,
+);
+const deletedScaffold = brokerScaffoldEntries();
+deletedScaffold[0].change.actions = ["delete"];
+expectFailure(
+  plan([phaseFourRuleset, ...deletedScaffold]),
+  "may only be created, unchanged, or rotate",
+  SCAFFOLD_POLICY,
+);
+
+const rotationEntries = brokerScaffoldEntries();
+rotationEntries[2].change.actions = ["create", "delete"];
+expectPass(plan([phaseFourRuleset, ...rotationEntries]), SCAFFOLD_POLICY);
+const rotationWithExtra = structuredClone(rotationEntries);
+rotationWithExtra[0].change.actions = ["update"];
+expectFailure(
+  plan([phaseFourRuleset, ...rotationWithExtra]),
+  "may only be created, unchanged, or rotate",
+  SCAFFOLD_POLICY,
+);
+
 const wrongTeam = rulesetEntry();
 wrongTeam.change.after.bypass_actors[0].actor_id = 7;
 expectFailure(plan([wrongTeam]), "source-pinned approved Team ID");
@@ -457,12 +602,15 @@ for (const policy of [
   null,
   { ...POLICY_BASE, ruleset_audit_active: "true" },
   { ...POLICY_BASE, repository: "attacker/repo" },
+  { ...POLICY_BASE, local_agent_github_broker_scaffold_enabled: "false" },
   {
     ...POLICY_BASE,
+    local_agent_github_broker_scaffold_enabled: false,
     local_agent_github_broker_impersonator: "group:agents@example.com",
   },
   {
     ...POLICY_BASE,
+    local_agent_github_broker_scaffold_enabled: true,
     local_agent_github_broker_impersonator: "serviceAccount:not-an-email",
   },
 ]) {
@@ -514,6 +662,90 @@ assert.doesNotMatch(
   /var\.local_agent_github_app_private_key\s*!=\s*""/u,
   "an ephemeral App key must not enter a managed-resource lifecycle precondition",
 );
+assert.doesNotMatch(
+  appSource,
+  /precondition\s*\{[^}]*var\.local_agent_github_app_private_key(?![A-Za-z0-9_])/u,
+  "the ephemeral App key must stay out of every managed-resource precondition",
+);
+assert.match(
+  appSource,
+  /secret_data_wo\s*=\s*var\.local_agent_github_app_private_key/u,
+  "the ephemeral App key must terminate at the write-only Secret Manager field",
+);
+assert.doesNotMatch(
+  appSource,
+  /secret_data\s*=\s*var\.local_agent_github_app_private_key/u,
+  "the App key must never enter Terraform state through the ordinary secret-data field",
+);
+for (const resource of [
+  "google_service_account",
+  "google_secret_manager_secret",
+  "google_secret_manager_secret_version",
+  "google_secret_manager_secret_iam_member",
+  "google_service_account_iam_member",
+]) {
+  assert.match(
+    appSource,
+    new RegExp(
+      `resource "${resource}"[\\s\\S]*?local_agent_github_broker_scaffold_enabled`,
+      "u",
+    ),
+    `${resource} must stay behind the reviewed broker-scaffold source gate`,
+  );
+}
+
+const pkcs1Pattern =
+  /^-----BEGIN RSA PRIVATE KEY-----\n([A-Za-z0-9+/=]{4,64}\n)+-----END RSA PRIVATE KEY-----\n?$/u;
+const pkcs8Pattern =
+  /^-----BEGIN PRIVATE KEY-----\n([A-Za-z0-9+/=]{4,64}\n)+-----END PRIVATE KEY-----\n?$/u;
+const pkcs1Begin = ["-----BEGIN RSA", "PRIVATE KEY-----"].join(" ");
+const pkcs1End = ["-----END RSA", "PRIVATE KEY-----"].join(" ");
+const pkcs8Begin = ["-----BEGIN", "PRIVATE KEY-----"].join(" ");
+const pkcs8End = ["-----END", "PRIVATE KEY-----"].join(" ");
+function acceptsPrivateKeyFixture(value, active = true) {
+  const key = value ?? "";
+  return (
+    !active ||
+    (Buffer.byteLength(key, "utf8") <= 65536 &&
+      (pkcs1Pattern.test(key) || pkcs8Pattern.test(key)))
+  );
+}
+const validPkcs1 = `${pkcs1Begin}\nQUJDRA==\n${pkcs1End}\n`;
+const validPkcs8 = `${pkcs8Begin}\nQUJDRA==\n${pkcs8End}\n`;
+const oversizedPkcs8 = `${pkcs8Begin}\n${`${"A".repeat(64)}\n`.repeat(1024)}${pkcs8End}\n`;
+for (const [label, value, accepted] of [
+  ["omitted", undefined, false],
+  ["blank", "", false],
+  ["malformed", "-----BEGIN PRIVATE KEY-----\nnot pem!\n", false],
+  ["oversized", oversizedPkcs8, false],
+  ["valid PKCS#1", validPkcs1, true],
+  ["valid PKCS#8", validPkcs8, true],
+]) {
+  assert.equal(
+    acceptsPrivateKeyFixture(value),
+    accepted,
+    `${label} private-key fixture has the wrong activation result`,
+  );
+}
+assert.equal(
+  acceptsPrivateKeyFixture("", false),
+  true,
+  "an inactive credential must not require key material",
+);
+assert.match(
+  variableSource,
+  /sensitive\s*=\s*true[\s\S]*?ephemeral\s*=\s*true[\s\S]*?length\(var\.local_agent_github_app_private_key\) <= 65536/u,
+  "the App key must stay sensitive, ephemeral, and bounded",
+);
+for (const pattern of [
+  "^-----BEGIN RSA PRIVATE KEY-----\\\\n([A-Za-z0-9+/=]{4,64}\\\\n)+-----END RSA PRIVATE KEY-----\\\\n?$",
+  "^-----BEGIN PRIVATE KEY-----\\\\n([A-Za-z0-9+/=]{4,64}\\\\n)+-----END PRIVATE KEY-----\\\\n?$",
+]) {
+  assert(
+    variableSource.includes(`can(regex("${pattern}"`),
+    "Terraform activation validation must retain the exact tested PEM envelope patterns",
+  );
+}
 assert.match(
   providerSource,
   /provider "github" \{\s*owner\s*=\s*"mento-protocol"\s*base_url\s*=\s*"https:\/\/api\.github\.com\/"\s*token\s*=\s*var\.github_token\s*\}/u,

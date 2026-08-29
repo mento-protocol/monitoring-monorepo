@@ -71,8 +71,10 @@ another workflow. An installed cloud App does not authenticate local `gh`.
 
 Before cutover, report the local credential as human-derived and treat the
 local wrapper as the live merge control. After cutover, prove the installation
-ID and server refusal through the credential runbook's proof phase. Do not claim
-activation from Terraform source or an App registration alone.
+ID, absence of Contents permission, fixed permission-denial result, exact live
+ruleset JSON, and Team merge through the credential runbook's proof phase. The
+App denial proves its permission ceiling, not lifecycle-ruleset evaluation. Do
+not claim activation from Terraform source or an App registration alone.
 
 After cutover, use a fresh dedicated agent OS account or container with no
 operator Git configuration or credential. Do not run an authenticated direct
