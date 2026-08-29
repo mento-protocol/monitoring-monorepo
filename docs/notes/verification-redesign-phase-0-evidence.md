@@ -324,20 +324,24 @@ only after owners confirm that no supported old worktree remains.
 
 ## Issue 2042 consumer audit
 
-Issue #2042 is active. Its snapshot at
-`8e2965a6ffbd92bcc0c2793a6892754e4c674a6b` is provisional.
+Issue #2042 closed as completed on 2026-08-29 through PR #2131 at terminal
+commit `e0346ec4756f9577bcbb1e13e06566ccc507e9e4`. Its snapshot at
+`8e2965a6ffbd92bcc0c2793a6892754e4c674a6b` remains provisional evidence.
+Before cutover or deletion, issues #2127 and #2128 must re-audit the terminal
+code by consumer.
 
 | Consumer                                                       | Provisional disposition                  | Required invariant                                                                                                                                                      |
 | -------------------------------------------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Gate coordinator, routing, prewarm, and gate-only Trunk checks | Candidate for retirement with the gate   | Re-audit the terminal #2042 commit or record explicit supersession first.                                                                                               |
+| Gate coordinator, routing, prewarm, and gate-only Trunk checks | Candidate for retirement with the gate   | Re-audit terminal commit `e0346ec4756f9577bcbb1e13e06566ccc507e9e4` by consumer before cutover or deletion in #2127 or #2128.                                           |
 | Darwin process identity and lineage                            | Retain for every independent consumer    | Never signal a bare PID or process group without matching non-reusable identity. Settle coherent lineage before release. Fail closed on unsupported self-daemonization. |
 | Autoreview                                                     | Retain provenance behavior               | Bind child processes and evidence to the verified review runtime.                                                                                                       |
 | Sentry broker                                                  | Retain verified-leader behavior          | Signal a detached group only while its verified leader is alive. Never reuse its PID or group after reap.                                                               |
 | Trunk daemon                                                   | Classify or contain before cutover       | Treat it as a bounded trusted external service or contain it.                                                                                                           |
 | Legacy `run.lock`                                              | Retain through mixed-worktree transition | Do not let a new path run beside an older gate that owns the lock.                                                                                                      |
 
-Issues #2006, #2032, #2042, and #2094 remain open with their current owners and
-states. The inventory records their coexistence and retirement follow-ups.
+Issues #2006, #2032, and #2094 remain open with their current owners and states.
+Issue #2042 is closed. The inventory preserves its Phase 0 snapshot and requires
+a terminal-code consumer audit before cutover or deletion.
 
 ## Shadow spend recommendation
 

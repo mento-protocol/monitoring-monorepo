@@ -134,11 +134,13 @@ The legacy coordinator keeps `run.lock` while old and new worktrees coexist.
 Do not use `--no-lock`, clear live coordinator state, repurpose its state root,
 or let new work run beside an older gate that owns the legacy lock.
 
-Issue #2042 remains provisional until its terminal commit or an explicit
-supersession decision. Inventory its code by consumer. Gate-only scheduling and
-routing can retire with the gate. Retain any Darwin process-identity, coherent
-lineage, autoreview provenance, or Sentry broker behavior that an independent
-consumer still needs.
+Issue #2042 closed as completed on 2026-08-29 through PR #2131 at terminal
+commit `e0346ec4756f9577bcbb1e13e06566ccc507e9e4`. Its Phase 0 snapshot at
+`8e2965a6ffbd92bcc0c2793a6892754e4c674a6b` remains provisional evidence.
+Before cutover or deletion, issues #2127 and #2128 must re-audit the terminal
+code by consumer. Gate-only scheduling and routing can retire with the gate.
+Retain any Darwin process-identity, coherent lineage, autoreview provenance, or
+Sentry broker behavior that an independent consumer still needs.
 
 The process contract never signals a bare PID or process-group ID without a
 matching non-reusable identity. It settles coherent lineage before release and
