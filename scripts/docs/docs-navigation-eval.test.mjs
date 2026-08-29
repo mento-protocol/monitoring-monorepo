@@ -438,6 +438,9 @@ test("fixture byte budgets can contain every cheapest accepted route", () => {
   const selectedRoutes = new Map(
     floor.questions.map((question) => [question.question_id, question.route]),
   );
+  assert.deepEqual(selectedRoutes.get("deployment-indexer-promote"), [
+    "indexer-envio/README.md",
+  ]);
   assert.deepEqual(selectedRoutes.get("pr-hazard-package-script-refusal"), [
     "docs/notes/quick-commands.md",
   ]);

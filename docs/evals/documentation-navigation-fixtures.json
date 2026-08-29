@@ -70,6 +70,7 @@
       "category": "deployment",
       "question": "What is the current sequence for deploying a new Envio indexer version, monitoring its sync, and promoting it without allowing an agent to auto-promote?",
       "accepted_routes": [
+        ["indexer-envio/README.md"],
         ["docs/deployment.md"],
         [".agents/skills/deploy-indexer/SKILL.md"]
       ],
