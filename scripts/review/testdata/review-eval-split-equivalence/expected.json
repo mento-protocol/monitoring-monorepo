@@ -1,0 +1,157 @@
+{
+  "source": {
+    "commit": "1babac1d315b1579e1d4587dfd759ee04763325b",
+    "entrypoint_sha256": {
+      "scripts/review/review-eval.mjs": "fe5a78eba7a53a4c768ad406edbdffb9d1cff756f05ad9ad5a8573c1e42e22cc",
+      "scripts/review/review-eval-run.mjs": "1fccbd18c05146ebdc2b94e29da65014f37992eaf74e81ff14857302b2b55980",
+      "scripts/review/run-eval.sh": "5cdfbd0e709af2d68c193d484b724706b339ab0562d14b283f5fc38eebe9ae49"
+    },
+    "fixture_sha256": {
+      "contract": "7223888cc6bd15c9bdb3bf1f6929a516719dd497ee6d2f1bc577a6405e8202e9",
+      "ledger": "b4437a13e3ae7669f1edbdd60dc7a59eee0eba06d26e765d324ba1ad692f2853"
+    }
+  },
+  "processes": [
+    {
+      "name": "node help",
+      "status": 0,
+      "signal": null,
+      "stdout": "Usage: node scripts/review/review-eval.mjs MODE [options]\n\nPlan, score, validate, and report the recurring review-skill evaluation. Only\n--score invokes a model; every other mode is deterministic and CI-safe.\n\nModes:\n  --check-fixtures       Validate the frozen contract, truth, and prompts\n  --check-ledger         Validate the ledger, its append-only history, freshness\n  --plan                 Print the run matrix and write plan.json\n  --score PLANDIR        Score collected run output (spends model quota)\n  --validate FILE        Recompute one ledger row from its own detail\n  --report               Render the ledger PR body for one row\n  --schedule-issue       Create or retain the staleness issue\n\nOptions:\n  --offline              Resolve eval tags locally, never over the network\n  --src-repo PATH        Resolve eval tags from a local clone\n  --base-ref REF         Append-only comparison base (default: origin/main)\n  --require-base         Fail when the base ref does not resolve (--check-ledger)\n  --revalidate-appended  Recompute every row this branch appends from its\n                         committed detail (--check-ledger); calls no model\n  --kind full|canary|auto  Run matrix to plan (default: auto, read from ledger)\n  --skill-ref PATH       Evaluate a candidate skill directory; stamps dirty\n  --out DIR              Plan directory (default: the run's detail directory)\n  --runs-dir PATH        Detail root (default: docs/evals/review-skill-runs)\n  --against REF          Baseline row: a file path or an executed_at prefix\n                         (--plan, --score, --report, and --validate)\n  --detail-dir DIR       Run detail to recompute from (--validate); default is\n                         the row's own detail_dir under --root\n  --row REF              Row to report (default: the newest ledger row)\n  --calibration PATH     Judge calibration set (--score, --validate); --score\n                         refuses it unless it digests to the set the plan's key\n                         hashed, and --validate reads it to re-derive the row's\n                         recorded judge_calibration\n  --append               Append the validated row to the ledger (--validate)\n  --repo OWNER/REPO      Repository for issue scheduling\n  --dry-run              Plan issue synchronization without mutating\n  --date YYYY-MM-DD      Scheduler date (default: today UTC)\n  --contract PATH        Contract path (default: docs/evals/review-skill-fixtures.json)\n  --ledger PATH          Ledger path (default: docs/evals/review-skill-ledger.jsonl)\n  --root PATH            Repository root (default: current directory)\n  --json                 Print machine-readable output\n  -h, --help             Show this help\n",
+      "stderr": ""
+    },
+    {
+      "name": "node argument error",
+      "status": 1,
+      "signal": null,
+      "stdout": "",
+      "stderr": "review-eval: --kind is not valid with --schedule-issue\n"
+    },
+    {
+      "name": "node appended evidence validation",
+      "status": 1,
+      "signal": null,
+      "stdout": "{\n  \"ok\": false,\n  \"rows\": 1,\n  \"comparable_rows\": 0,\n  \"append_only_base\": \"stub-base\",\n  \"append_only_ref\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\n  \"append_only_mode\": \"merge-base\",\n  \"append_only_reason\": null,\n  \"freshness\": {\n    \"level\": \"green\",\n    \"days_since_any\": 3,\n    \"days_since_complete\": 3,\n    \"days_since_full\": 3,\n    \"reasons\": [\n      \"no ledger row for the current contract; counting from established_at 2026-08-25\"\n    ]\n  },\n  \"revalidated_rows\": 1,\n  \"unpaired_baselines\": 0,\n  \"problems\": [\n    \"appended row 2026-08-28T02:13:20Z: <STATE>/generated/appended-detail carries no plan.json; the row's provenance cannot be checked against the run that produced it\",\n    \"appended row 2026-08-28T02:13:20Z: <STATE>/generated/appended-detail carries no scored result-*.json files\",\n    \"appended row 2026-08-28T02:13:20Z: <STATE>/generated/appended-detail carries no calibration.json\"\n  ]\n}\n",
+      "stderr": ""
+    },
+    {
+      "name": "node run facade domains",
+      "status": 0,
+      "signal": null,
+      "stdout": "{\"kind\":\"canary\",\"cell_ids\":[\"pr-1990-replay-draw1\",\"pr-1995-replay-draw1\",\"pr-1999-replay-draw1\"],\"reset\":true,\"git_calls\":[[\"checkout\",\"--quiet\",\"--force\",\"--detach\",\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"],[\"reset\",\"--hard\",\"--quiet\",\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"],[\"clean\",\"-xdffq\"],[\"rev-parse\",\"--verify\",\"--quiet\",\"HEAD\"]],\"exec_calls\":0,\"score_error\":\"no completed cell results under <STATE>/generated/facade-plan; run the orchestrator first\"}\n",
+      "stderr": ""
+    },
+    {
+      "name": "shell lifecycle and cell runtime",
+      "status": 0,
+      "signal": null,
+      "stdout": "lifecycle-bounded-status=7\nLOG:   probe-control FAILED — claude exited 9; not cached\nruntime-cell-status=1\n",
+      "stderr": ""
+    },
+    {
+      "name": "node evidence validation",
+      "status": 1,
+      "signal": null,
+      "stdout": "{\n  \"ok\": false,\n  \"row\": \"<STATE>/generated/validation-row.json\",\n  \"verdict\": \"AMBER\",\n  \"recomputed_verdict\": \"AMBER\",\n  \"detail_dir\": \"<STATE>/generated/validation-detail\",\n  \"appended\": false,\n  \"problems\": [\n    \"row.scoring_usd cannot be checked; the run detail sums to NaN, so at least one cell record carries a value that is not a finite number\",\n    \"<STATE>/generated/validation-detail carries cell results but no calibration.json; judge_calibration cannot be re-derived\",\n    \"row contract_digest 8b6479d1 is not the current contract\",\n    \"row contract_digest is \\\"8b6479d106737fedea402269835428a5d29452acbc41c86d09bffee70fd2f9fb\\\"; plan.json in generated/validation-detail planned undefined\",\n    \"row comparability_key is \\\"76c7cde728e17b7f758bcfa384fa64e5683f389d39ec058a9d551716dffe752f\\\"; plan.json in generated/validation-detail planned undefined\",\n    \"row kind is \\\"full\\\"; plan.json in generated/validation-detail planned undefined\",\n    \"row detail_dir is \\\"generated/validation-detail\\\"; plan.json in generated/validation-detail planned undefined\",\n    \"row inputs do not match the inputs plan.json in generated/validation-detail recorded\",\n    \"plan.json in generated/validation-detail carries invalid baseline_selection undefined\",\n    \"plan.json in generated/validation-detail carries no cells array\",\n    \"<STATE>/generated/validation-detail/result-probe.json fingerprint does not match the plan execution inputs\",\n    \"<STATE>/generated/validation-detail/result-probe.json treatment does not match the plan execution inputs\",\n    \"<STATE>/generated/validation-detail/result-probe.json scoring_usd must be a nonnegative finite number\",\n    \"<STATE>/generated/validation-detail/result-probe.json leak must carry a hard array and suspected boolean\",\n    \"<STATE>/generated/validation-detail carries no calibration.json\"\n  ]\n}\n",
+      "stderr": ""
+    },
+    {
+      "name": "node scheduled issue dry-run",
+      "status": 1,
+      "signal": null,
+      "stdout": "{\n  \"action\": \"create\",\n  \"reason\": \"no open or completed staleness issue exists for 2099-03\",\n  \"issue_number\": null,\n  \"level\": \"red\",\n  \"reasons\": [\n    \"no ledger row for the current contract; counting from established_at 2026-08-25\",\n    \"no run in 26495 days (freshness_red 60)\",\n    \"no complete run in 26495 days (complete_red 90)\",\n    \"no full run in 26495 days (full_red 120)\"\n  ],\n  \"title\": \"Review-skill eval is stale (last full run never)\",\n  \"dry_run\": true,\n  \"mutated\": false\n}\n",
+      "stderr": ""
+    },
+    {
+      "name": "shell help",
+      "status": 0,
+      "signal": null,
+      "stdout": "# Run the review-skill evaluation end to end. This is the only script that\n# spends model quota, and it never runs in CI.\n#\n# The contract that scores a run is the committed one: the script adds a\n# detached worktree of origin/main and reads the fixtures, truth, prompts and\n# scorer from there, so a dirty working tree cannot silently change what is\n# being measured. --skill-ref is the deliberate exception for evaluating a\n# candidate skill; it uses the current checkout and stamps dirty into the row.\n#\n# Leak-proofing during a contestant run: every GitHub token variable is unset,\n# a gh that refuses is placed first on PATH, and git runs with no global or\n# system config, no credential helper, no prompt, no askpass and no protocol\n# but file. This is defense in depth, not containment — the model API hosts\n# stay reachable because codex and claude need them, and a cell runs with Bash.\n# The stronger controls are structural: the fixture is a detached checkout at a\n# 2026-08 commit, the answer key exists only on main, and a transcript that\n# names a withheld commit is scored as a hard leak signal.\n#\n# Every cell writes its own output directory and is resumable. A failed cell is\n# never cached: a session-limit error returns in seconds and, cached, would\n# permanently score as a zero-recall review. A cached cell is reused only when\n# its fingerprint — skill digest, kind, contract digest — matches this run.\n# A run that ends before it scores keeps those cells so the retry reuses them;\n# they never reach the PR.\n#\n# The detail directory belongs to one execution. A run killed before it recorded\n# anything is retried into the same directory and reuses its cells; once a ledger\n# row points at that directory it is evidence, so the next execution takes the\n# next name and seeds its cells from the old one instead of overwriting a row's\n# plan, results, report and publication branch.\n#\n# One run at a time. The fixture cache and the ledger are shared but move\n# independently — the cache with --cache-dir, the ledger and the detail\n# directory with --repo — so the script locks both roots and refuses to start\n# while another run holds either, rather than letting two runs rewrite each\n# other's fixture checkouts or race the same ledger appends.\n#\n# Usage:\n#   run-eval.sh [--kind full|canary|auto] [--skill-ref PATH] [--pr] [--no-pr]\n#               [--repo PATH] [--cache-dir DIR] [--deadline SECONDS]\n#               [--against REF]\n#\n# --against names the baseline row this run is planned, scored, validated and\n# reported against: a row file path or an executed_at prefix. The candidate\n# procedure needs it — a --skill-ref run must be compared against the installed\n# run from the same sitting, not against the ledger's stored anchor, or the\n# comparison carries whatever the model did between the anchor and today.\n#\n# --deadline bounds the whole run, cells and scoring together. Three quarters of\n# it start cells and bound each finder and contestant process; the rest is\n# reserved for the judge pass, which is itself bounded.\n#\n# Default is --no-pr: the branch, push and gh pr create commands are printed,\n# not executed. Every run appends its row to the checkout's ledger — a scored\n# one and the status:failed row of a run that fails alike — so both publish the\n# same way, and both exit non-zero when the run could only print the commands.\n",
+      "stderr": ""
+    },
+    {
+      "name": "shell argument error",
+      "status": 1,
+      "signal": null,
+      "stdout": "",
+      "stderr": "FATAL: unknown argument: --unknown\n"
+    }
+  ],
+  "files": {
+    "bin/claude": {
+      "executable": true,
+      "sha256": "94862798bf9da87e10a2abb45cd2647fd9c59dfcd15e106c5aee5e00de234976"
+    },
+    "bin/codex": {
+      "executable": true,
+      "sha256": "94862798bf9da87e10a2abb45cd2647fd9c59dfcd15e106c5aee5e00de234976"
+    },
+    "bin/gh": {
+      "executable": true,
+      "sha256": "73e3ffa519228d35d5f4c5f39f4bfe7e5f5c337b890e47e98165da168acd747a"
+    },
+    "bin/git": {
+      "executable": true,
+      "sha256": "71651c421578eaf98956f808a176502480542eb86ad54ab1a30cbc7bd484718f"
+    },
+    "docs/evals/review-skill-fixtures.json": {
+      "executable": false,
+      "sha256": "7223888cc6bd15c9bdb3bf1f6929a516719dd497ee6d2f1bc577a6405e8202e9"
+    },
+    "docs/evals/review-skill-ledger.jsonl": {
+      "executable": false,
+      "sha256": "80536699815d7771fd235a3b5930392fd47910488c60dabb0314646c3bd494e1"
+    },
+    "generated/bounded.out": {
+      "executable": false,
+      "sha256": "8f0b58191ceb2634a45be4295f7ad9f13540e19b8180e9bec8d4370b541c1a90"
+    },
+    "generated/bounded.out.err": {
+      "executable": false,
+      "sha256": "005c741784a0357ca423b7c2d061d9fc6285a896a81ea07dac084f930ab8a703"
+    },
+    "generated/facade-harness.mjs": {
+      "executable": false,
+      "sha256": "cac8fcd8d51152215d269ae4128e51f00db86f066971d0d4de116485948750fa"
+    },
+    "generated/gh.log": {
+      "executable": false,
+      "sha256": "b3d26f4261e368c854121a18b95424669566ae59538b39598384fefad0ff602a"
+    },
+    "generated/git.log": {
+      "executable": false,
+      "sha256": "064b036bd9e33aa5b695d5851f23c04f1d29570a3923ebabd4f8e32a5f2d4c99"
+    },
+    "generated/runtime-plan.json": {
+      "executable": false,
+      "sha256": "2074ceab62dfea4d8b5f78e2a7774461d97264de13c2aadf922057c6a648c1ef"
+    },
+    "generated/shell-harness.sh": {
+      "executable": true,
+      "sha256": "3db3ecb0a508c50ff2ecec4446f31ad5d7b7b8fc599aeebd8dca22f1d8562422"
+    },
+    "generated/shell-run/keep.txt": {
+      "executable": false,
+      "sha256": "f660a7996deacfbc7560e4240054a8ad82eb02fe25a95064257e07084bcacb85"
+    },
+    "generated/step-summary.md": {
+      "executable": false,
+      "sha256": "464ae39952aef7748c5931e57108739bee5bff9d6007587e015edefc9de0754a"
+    },
+    "generated/validation-detail/plan.json": {
+      "executable": false,
+      "sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356"
+    },
+    "generated/validation-detail/result-probe.json": {
+      "executable": false,
+      "sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356"
+    },
+    "generated/validation-row.json": {
+      "executable": false,
+      "sha256": "86332bf141fde2eaa8f0cbbb191a8b77900e342c9af9d199d408c9c38db8cf63"
+    },
+    "skill/SKILL.md": {
+      "executable": false,
+      "sha256": "39eac472364ce9c766e6f53c3bf35f94bb8f3c621db638f8ce0b88c944a72300"
+    }
+  }
+}

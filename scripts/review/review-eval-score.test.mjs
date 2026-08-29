@@ -2,6 +2,7 @@
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import path from "node:path";
 import test from "node:test";
 
 import {
@@ -758,19 +759,23 @@ test("scorerDigest covers every module that can move a recorded number", () => {
   // `review-eval-fixtures.mjs` chooses the matrix, the truth file and the recall
   // denominator, and `build-fixture.sh` materializes the checkout the
   // contestant reviews and carries the checks that verify it.
+  const moduleNames = new Set(
+    SCORING_MODULES.map((module) => path.basename(module)),
+  );
   for (const name of [
     "review-eval.mjs",
     "review-eval-run.mjs",
+    "review-eval-run-plan.mjs",
+    "review-eval-run-execution.mjs",
+    "review-eval-run-cell.mjs",
+    "review-eval-run-score.mjs",
     "review-eval-result-shape.mjs",
     "review-eval-ledger.mjs",
     "review-eval-report.mjs",
     "review-eval-fixtures.mjs",
     "build-fixture.sh",
   ]) {
-    assert.ok(
-      SCORING_MODULES.some((module) => module.endsWith(name)),
-      `${name} is not hashed into the matcher digest`,
-    );
+    assert.ok(moduleNames.has(name), `${name} is not hashed into the digest`);
   }
   assert.notEqual(
     scorerDigest({ modules: SCORING_MODULES.slice(1) }),

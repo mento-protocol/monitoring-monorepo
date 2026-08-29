@@ -8,12 +8,14 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   unlinkSync,
@@ -48,10 +50,10 @@ import {
   cellReuseDecision,
   claudeArgv,
   comparabilityKey,
-  fileDigest,
   leakSignals,
   loginsInFixtureTree,
-  ORCHESTRATOR_FILE,
+  ORCHESTRATOR_FILES,
+  orchestratorSourceDigest,
   planCells,
   planStalenessIssueSync,
   resolveDetailDir,
@@ -60,6 +62,7 @@ import {
   skillDigest,
   SCRUBBED_ENV_VARS,
   scrubbedEnv,
+  treatmentIdentity,
 } from "./review-eval-run.mjs";
 import {
   buildVsBaseline,
@@ -72,9 +75,21 @@ import {
   BLIND_JUDGE_TOOLS,
   scorerDigest,
 } from "./review-eval-score.mjs";
+import { runEvidenceProblems } from "./review-eval-run-evidence.mjs";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const scriptPath = fileURLToPath(new URL("./review-eval.mjs", import.meta.url));
+const validationModuleLineLimits = new Map([
+  ["review-eval.mjs", 900],
+  ["review-eval-run.mjs", 100],
+  ["review-eval-run-plan.mjs", 600],
+  ["review-eval-run-execution.mjs", 600],
+  ["review-eval-run-cell.mjs", 600],
+  ["review-eval-run-score.mjs", 600],
+  ["review-eval-plan-evidence.mjs", 600],
+  ["review-eval-run-evidence.mjs", 600],
+  ["review-eval-appended.mjs", 600],
+]);
 const contractRelative = "docs/evals/review-skill-fixtures.json";
 const ledgerRelative = "docs/evals/review-skill-ledger.jsonl";
 const { contract, digest: contractDigest } = loadContract(
@@ -86,6 +101,122 @@ const planEnv = {
   REVIEW_EVAL_HOST: "test-host",
   REVIEW_EVAL_SKILL_DIR: path.join(repoRoot, "scripts/review/prompts"),
 };
+
+const runEvalSourcePaths = new Map([
+  ["wrapper", path.join(repoRoot, "scripts/review/run-eval.sh")],
+  [
+    "sourceSnapshot",
+    path.join(repoRoot, "scripts/review/run-eval-source-snapshot.sh"),
+  ],
+  ["lifecycle", path.join(repoRoot, "scripts/review/run-eval-lifecycle.sh")],
+  ["runtime", path.join(repoRoot, "scripts/review/run-eval-runtime.sh")],
+]);
+
+function runEvalSource(owner) {
+  const sourcePath = runEvalSourcePaths.get(owner);
+  assert.ok(sourcePath, `unknown run-eval source owner: ${owner}`);
+  return readFileSync(sourcePath, "utf8");
+}
+
+function runEvalSourceSet() {
+  return [...runEvalSourcePaths]
+    .map(([owner]) => `# source-owner: ${owner}\n${runEvalSource(owner)}`)
+    .join("\n");
+}
+
+function assertBefore(source, earlier, later, message) {
+  const earlierIndex = source.indexOf(earlier);
+  const laterIndex = source.indexOf(later);
+  assert.notEqual(
+    earlierIndex,
+    -1,
+    `missing earlier marker ${JSON.stringify(earlier)}`,
+  );
+  assert.notEqual(
+    laterIndex,
+    -1,
+    `missing later marker ${JSON.stringify(later)}`,
+  );
+  assert.ok(earlierIndex < laterIndex, message);
+}
+
+function sourceIndexes(source, needle) {
+  const indexes = [];
+  let offset = 0;
+  for (;;) {
+    const index = source.indexOf(needle, offset);
+    if (index === -1) return indexes;
+    indexes.push(index);
+    offset = index + needle.length;
+  }
+}
+
+function reconstructLegacyOrchestrator() {
+  let wrapper = runEvalSource("wrapper");
+  const helpers = `${runEvalSource("lifecycle")}\n${runEvalSource("runtime")}`;
+  for (const id of [
+    "lifecycle-setup",
+    "lifecycle-verify",
+    "lifecycle-support",
+    "cell-runtime",
+  ]) {
+    const payload = helpers.match(
+      new RegExp(
+        `# RUN-EVAL-ORIGINAL-BEGIN ${id}\\n([\\s\\S]*?)# RUN-EVAL-ORIGINAL-END ${id}\\n`,
+      ),
+    )?.[1];
+    assert.notEqual(payload, undefined, `missing original payload ${id}`);
+    const block = new RegExp(
+      `# RUN-EVAL-EXTRACT-BEGIN ${id}\\n[\\s\\S]*?# RUN-EVAL-EXTRACT-END ${id}\\n`,
+    );
+    assert.match(wrapper, block);
+    wrapper = wrapper.replace(block, () => payload);
+  }
+  for (const id of ["source-snapshot-state", "source-snapshot-digest"]) {
+    const block = new RegExp(
+      `# RUN-EVAL-SPLIT-ONLY-BEGIN ${id}\\n[\\s\\S]*?# RUN-EVAL-SPLIT-ONLY-END ${id}\\n`,
+    );
+    assert.match(wrapper, block);
+    wrapper = wrapper.replace(block, "");
+  }
+  const exitTrapBlock = new RegExp(
+    "# RUN-EVAL-SPLIT-ONLY-BEGIN source-snapshot-exit-trap\\n" +
+      "[\\s\\S]*?# RUN-EVAL-SPLIT-ONLY-END source-snapshot-exit-trap\\n",
+  );
+  assert.match(wrapper, exitTrapBlock);
+  wrapper = wrapper.replace(exitTrapBlock, "trap cleanup EXIT\n");
+  return wrapper;
+}
+
+test("run-eval shell sources retain split headroom", () => {
+  for (const owner of runEvalSourcePaths.keys()) {
+    const source = runEvalSource(owner);
+    const lines = source.endsWith("\n")
+      ? source.slice(0, -1).split("\n").length
+      : source.split("\n").length;
+    assert.ok(lines < 600, `${owner} run-eval source has ${lines} lines`);
+  }
+});
+
+test("the shell split reconstructs the cached-cell orchestrator bytes", () => {
+  assert.equal(
+    createHash("sha256").update(reconstructLegacyOrchestrator()).digest("hex"),
+    "5cdfbd0e709af2d68c193d484b724706b339ab0562d14b283f5fc38eebe9ae49",
+  );
+});
+
+test("review-eval validation modules retain split headroom", () => {
+  for (const [name, limit] of validationModuleLineLimits) {
+    const source = readFileSync(
+      fileURLToPath(new URL(`./${name}`, import.meta.url)),
+      "utf8",
+    );
+    const lines = source.endsWith("\n")
+      ? source.slice(0, -1).split("\n").length
+      : source.split("\n").length;
+    assert.ok(lines < limit, `${name} has ${lines} lines; limit is ${limit}`);
+  }
+});
 
 /** A temporary repository root holding only what the CLI reads. */
 function makeRoot() {
@@ -260,6 +391,7 @@ function writeRowEvidence(root, row) {
     cells,
   };
   const fingerprint = cellFingerprint({ plan });
+  const treatment = treatmentIdentity({ plan });
   const completedCellIds = [];
   for (const [name, condition] of Object.entries(row.conditions)) {
     const idsByPr = new Map();
@@ -293,6 +425,7 @@ function writeRowEvidence(root, row) {
           JSON.stringify({
             cell_id: `pr-${pr}-${name}-draw${draw}`,
             fingerprint,
+            treatment,
             pr,
             condition: name,
             draw,
@@ -334,6 +467,7 @@ function writeRowEvidence(root, row) {
     path.join(detail, "calibration.json"),
     JSON.stringify({
       fingerprint,
+      treatment,
       completed_cell_ids: completedCellIds,
       outcomes: calibration.records.map((record) => ({
         record_id: record.record_id,
@@ -356,6 +490,10 @@ test("parseArgs selects exactly one mode and rejects the rest", () => {
   );
   assert.throws(() => parseArgs(["--nope"]), /--nope/);
   assert.throws(() => parseArgs(["--score", ""]), /requires a value/);
+  assert.throws(
+    () => parseArgs(["--validate", "/tmp/row", "--detail-dir", ""]),
+    /--detail-dir requires a value/,
+  );
 });
 
 test("parseArgs refuses an option that belongs to another mode", () => {
@@ -643,9 +781,9 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
       calibrationDigest: "2".repeat(64),
     }),
   );
-  // `run-eval.sh` fixes the contestant's tools, turn limit, skill staging and
-  // finder truncation: it shapes the transcript every recorded number comes
-  // from, so an edit to it re-anchors the series the way a prompt edit does.
+  // The wrapper and three sourced helpers fix the contestant's tools, turn
+  // limit, skill staging and finder truncation. An edit to any of them
+  // re-anchors the series the way a prompt edit does.
   assert.notEqual(
     base,
     comparabilityKey({
@@ -659,9 +797,45 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
     comparabilityKey({
       contract,
       contractDigest,
-      orchestratorDigest: fileDigest(ORCHESTRATOR_FILE),
+      orchestratorDigest: orchestratorSourceDigest(),
     }),
   );
+});
+
+test("orchestratorSourceDigest binds the wrapper and three helpers", () => {
+  const expected =
+    "d0790e1d52542ac8e22bbc84932e98d635035f685ca201321bda3ab4c196033a";
+  assert.equal(orchestratorSourceDigest(), expected);
+  assert.deepEqual(
+    ORCHESTRATOR_FILES.map((file) => path.basename(file)),
+    [
+      "run-eval.sh",
+      "run-eval-source-snapshot.sh",
+      "run-eval-lifecycle.sh",
+      "run-eval-runtime.sh",
+    ],
+  );
+
+  for (const changed of ORCHESTRATOR_FILES) {
+    const dir = mkdtempSync(path.join(tmpdir(), "review-eval-orchestrator-"));
+    try {
+      const copies = ORCHESTRATOR_FILES.map((file) => {
+        const copy = path.join(dir, path.basename(file));
+        cpSync(file, copy);
+        return copy;
+      });
+      const changedCopy = copies.find(
+        (file) => path.basename(file) === path.basename(changed),
+      );
+      writeFileSync(
+        changedCopy,
+        `${readFileSync(changedCopy, "utf8")}# drift\n`,
+      );
+      assert.notEqual(orchestratorSourceDigest({ files: copies }), expected);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
 });
 
 test("resolveKind picks full only when the last full run is past cadence", () => {
@@ -717,6 +891,23 @@ test("leakSignals flags a PR number and a reviewer login, not a bare review", ()
   });
   assert.equal(leaked.suspected, true);
   assert.equal(leaked.hard.length, 2);
+});
+
+test("leakSignals keeps truth-independent checks when truth is absent", () => {
+  for (const truth of [null, undefined]) {
+    assert.deepEqual(
+      leakSignals({ transcript: "ordinary review", truth, pr: 1990 }),
+      { suspected: false, hard: [], advisory: [] },
+    );
+  }
+  assert.deepEqual(
+    leakSignals({ transcript: "reviewed #1990", truth: null, pr: 1990 }),
+    {
+      suspected: true,
+      hard: ["transcript names PR 1990"],
+      advisory: [],
+    },
+  );
 });
 
 test("a reviewer login the fixture's own source names is not a leak", () => {
@@ -802,17 +993,164 @@ test("a cached cell from another skill or contract is never reused", () => {
     "claude_cli",
     "codex_cli",
     "contract_digest",
-    "dirty",
     "finder_argv_digest",
     "kind",
     "orchestrator_digest",
     "skill_digest",
-    "skill_ref",
   ]);
+  const candidatePlan = {
+    ...plan,
+    inputs: {
+      ...plan.inputs,
+      skill_ref: "/tmp/review-candidate",
+      dirty: true,
+    },
+  };
+  assert.deepEqual(cellFingerprint({ plan: candidatePlan }), fingerprint);
+  assert.deepEqual(treatmentIdentity({ plan }), {
+    skill_ref: "installed",
+    dirty: false,
+  });
+  assert.deepEqual(treatmentIdentity({ plan: candidatePlan }), {
+    skill_ref: "/tmp/review-candidate",
+    dirty: true,
+  });
 
   const decide = (result) =>
     cellReuseDecision({ plan, resultPath: "unused", result });
   assert.equal(decide({ ok: true, fingerprint }).reuse, true);
+  const legacyOrchestratorFingerprint = {
+    ...fingerprint,
+    skill_ref: "/tmp/old-candidate",
+    dirty: true,
+    orchestrator_digest:
+      "5cdfbd0e709af2d68c193d484b724706b339ab0562d14b283f5fc38eebe9ae49",
+  };
+  const transitioned = decide({
+    ok: true,
+    fingerprint: legacyOrchestratorFingerprint,
+  });
+  assert.equal(transitioned.reuse, true);
+  assert.match(
+    transitioned.reason,
+    /recorded reviewed orchestrator transition/,
+  );
+  assert.equal(
+    decide({
+      ok: true,
+      fingerprint: {
+        ...legacyOrchestratorFingerprint,
+        skill_ref: "installed",
+        dirty: false,
+      },
+    }).reuse,
+    true,
+  );
+  const legacyWithoutTreatment = Object.fromEntries(
+    Object.entries(legacyOrchestratorFingerprint).filter(
+      ([field]) => !["skill_ref", "dirty"].includes(field),
+    ),
+  );
+  assert.match(
+    decide({ ok: true, fingerprint: legacyWithoutTreatment }).reason,
+    /lacks the complete historically valid legacy treatment fields/,
+  );
+  for (const malformedLegacy of [
+    { ...legacyOrchestratorFingerprint, dirty: "true" },
+    { ...legacyOrchestratorFingerprint, dirty: null },
+    { ...legacyOrchestratorFingerprint, dirty: 1 },
+    { ...legacyOrchestratorFingerprint, skill_ref: null },
+    { ...legacyOrchestratorFingerprint, skill_ref: "" },
+    { ...legacyOrchestratorFingerprint, skill_ref: "relative/candidate" },
+    { ...legacyOrchestratorFingerprint, skill_ref: "/tmp/../candidate" },
+    { ...legacyOrchestratorFingerprint, skill_ref: 1 },
+    { ...legacyOrchestratorFingerprint, skill_ref: "installed", dirty: true },
+    {
+      ...legacyOrchestratorFingerprint,
+      skill_ref: "/tmp/review-candidate",
+      dirty: false,
+    },
+    Object.fromEntries(
+      Object.entries(legacyOrchestratorFingerprint).filter(
+        ([field]) => field !== "dirty",
+      ),
+    ),
+    Object.fromEntries(
+      Object.entries(legacyOrchestratorFingerprint).filter(
+        ([field]) => field !== "skill_ref",
+      ),
+    ),
+  ]) {
+    assert.match(
+      decide({ ok: true, fingerprint: malformedLegacy }).reason,
+      /lacks the complete historically valid legacy treatment fields/,
+    );
+  }
+  assert.match(
+    decide({
+      ok: true,
+      fingerprint: {
+        ...fingerprint,
+        skill_ref: "installed",
+        dirty: false,
+      },
+    }).reason,
+    /unexpected skill_ref, dirty/,
+  );
+  assert.match(
+    decide({
+      ok: true,
+      fingerprint: { ...legacyOrchestratorFingerprint, legacy: true },
+    }).reason,
+    /unexpected legacy/,
+  );
+  assert.match(
+    decide({
+      ok: true,
+      fingerprint: {
+        ...legacyOrchestratorFingerprint,
+        skill_digest: "0".repeat(64),
+      },
+    }).reason,
+    /different skill_digest/,
+  );
+  for (const obsoleteTarget of [
+    "77bba1e0af554775f19429d48ea6470a3574b05e6b3ed95a1b3e73e8bf3a2807",
+    "7f1ddbc6c5bb4a9c9ae630c6eb5d9e17a71de7efdb6e0660177ec89580cd262e",
+    "a96569fb66b556607219358d77dd44a4e4fcf56d2a48bb331f55779a459de788",
+    "cdf05f6f468a099a089831bdfc29f3070cd213208e172addb0bd783710c6aa1a",
+    "1360db627cd2cdbfe3c42c1bb811521d6b6f546c58b36525d870810013e72a2e",
+    "e5fc8f6c4bdf274ce93e3f347fe3ca4502e8650df8e63145920379f30535abc6",
+    "86807927a37ce7452874f9243da157a1ef6b03774f5762d7402c3261a14a79dd",
+    "db23905c41a655b33f0dc8970b9b9de504469198e580e786dcb2f4455634e27a",
+    "9dc869e7380348812afd6bdc5f20259a4cdc4a5390a4ba284223ad1f3b89cef8",
+    "6f300d247726aab9c2a4c73ee24908ee852a4bc04dc71f30522cb80423e60cc8",
+    "0f465e8fce3a0e11065d9a822d6d67ae7ef78f43594e393af615feda388e04aa",
+    "fd1bdfa3c59a73e6b31027db49840d512b4580efa39872ac81889c4da26c5139",
+  ]) {
+    assert.equal(
+      cellReuseDecision({
+        plan: {
+          ...plan,
+          inputs: { ...plan.inputs, orchestrator_digest: obsoleteTarget },
+        },
+        resultPath: "unused",
+        result: { ok: true, fingerprint: legacyOrchestratorFingerprint },
+      }).reuse,
+      false,
+    );
+  }
+  assert.equal(
+    cellReuseDecision({
+      plan: {
+        ...plan,
+        inputs: { ...plan.inputs, orchestrator_digest: "4".repeat(64) },
+      },
+      resultPath: "unused",
+      result: { ok: true, fingerprint: legacyOrchestratorFingerprint },
+    }).reuse,
+    false,
+  );
   assert.match(decide({ ok: true }).reason, /carries no fingerprint/);
   assert.match(
     decide({ ok: true, fingerprint: { ...fingerprint, skill_digest: "0" } })
@@ -843,10 +1181,8 @@ test("a cached cell from another skill or contract is never reused", () => {
   for (const field of [
     "claude_cli",
     "codex_cli",
-    "dirty",
     "finder_argv_digest",
     "orchestrator_digest",
-    "skill_ref",
   ]) {
     assert.match(
       decide({ ok: true, fingerprint: { ...fingerprint, [field]: "moved" } })
@@ -859,6 +1195,148 @@ test("a cached cell from another skill or contract is never reused", () => {
       .reason,
     /no cell result/,
   );
+});
+
+test("the exact pre-split cache is discovered, seeded, and reused", () => {
+  const root = makeRoot();
+  const now = new Date("2026-08-28T20:00:00Z");
+  const oldKey =
+    "4543e3da483d5f2c70fc97e97664377ae22cc844bf1e5f376c1ce60eb3a42267";
+  const oldMatcher =
+    "d183758cd7a3b28aa14fe857ed04c6ca93601e1834a1dfd08cf730ad2332c922";
+  const oldOrchestrator =
+    "5cdfbd0e709af2d68c193d484b724706b339ab0562d14b283f5fc38eebe9ae49";
+  try {
+    const planArgs = {
+      contract,
+      contractDigest,
+      kind: "full",
+      repoRoot: root,
+      now,
+      env: planEnv,
+    };
+    const first = buildPlan({ ...planArgs, write: false });
+    const runs = "docs/evals/review-skill-runs";
+    const oldDetail = `${runs}/2026-08-28-${oldKey.slice(0, 8)}-full-${first.inputs.skill_digest.slice(0, 8)}`;
+    const oldPhysical = path.join(root, oldDetail);
+    const cell = first.cells[0];
+    const oldResult = path.join(
+      oldPhysical,
+      "cells",
+      cell.cell_id,
+      "result.json",
+    );
+    mkdirSync(path.dirname(oldResult), { recursive: true });
+    const oldPlan = {
+      ...first,
+      matcher_digest: oldMatcher,
+      comparability_key: oldKey,
+      detail_dir: oldDetail,
+      plan_dir: oldPhysical,
+      resume_from: null,
+      inputs: {
+        ...first.inputs,
+        orchestrator_digest: oldOrchestrator,
+      },
+    };
+    writeFileSync(
+      path.join(oldPhysical, "plan.json"),
+      JSON.stringify({ ...oldPlan, matcher_digest: "0".repeat(64) }),
+    );
+    const oldFingerprint = {
+      ...cellFingerprint({ plan: first }),
+      skill_ref: "installed",
+      dirty: false,
+      orchestrator_digest: oldOrchestrator,
+    };
+    writeFileSync(
+      oldResult,
+      JSON.stringify({ ok: true, fingerprint: oldFingerprint }),
+    );
+
+    const currentOut = path.join(root, first.detail_dir);
+    const refused = buildPlan({
+      ...planArgs,
+      outDir: currentOut,
+      write: false,
+    });
+    assert.equal(refused.resume_from, null);
+
+    writeFileSync(path.join(oldPhysical, "plan.json"), JSON.stringify(oldPlan));
+    const invalidDetail = `${oldDetail}-2`;
+    const invalidPhysical = path.join(root, invalidDetail);
+    mkdirSync(invalidPhysical, { recursive: true });
+    writeFileSync(
+      path.join(invalidPhysical, "plan.json"),
+      JSON.stringify({
+        ...oldPlan,
+        planned_at: "2026-08-28T21:00:00Z",
+        detail_dir: invalidDetail,
+        plan_dir: invalidPhysical,
+      }),
+    );
+    for (const invalidCell of first.cells.slice(0, 2)) {
+      const invalidResult = path.join(
+        invalidPhysical,
+        "cells",
+        invalidCell.cell_id,
+        "result.json",
+      );
+      mkdirSync(path.dirname(invalidResult), { recursive: true });
+      writeFileSync(
+        invalidResult,
+        JSON.stringify({
+          ok: true,
+          fingerprint: { ...oldFingerprint, unexpected: true },
+        }),
+      );
+    }
+    const planned = buildPlan({
+      ...planArgs,
+      outDir: currentOut,
+      write: true,
+    });
+    assert.equal(planned.resume_from, oldDetail);
+
+    const shell = runEvalSourceSet();
+    const block = shell.match(
+      /\nRESUME_FROM="\$\(json_field "\$PLAN_OUT" resume_from\)"\n[\s\S]*?\nfi\n/,
+    )?.[0];
+    const guard = shell.match(
+      /\nrequire_safe_detail\(\) \{\n[\s\S]*?\n\}\n/,
+    )?.[0];
+    assert.ok(block, "the resume-cache step was not found in run-eval.sh");
+    assert.ok(guard, "the detail-path guard was not found in run-eval.sh");
+    const harness = [
+      "set -euo pipefail",
+      `REPO=${JSON.stringify(root)}`,
+      `RUN_DIR=${JSON.stringify(currentOut)}`,
+      `PLAN_OUT=${JSON.stringify(path.join(currentOut, "plan.json"))}`,
+      `fail() { printf 'FATAL: %s\\n' "$*" >&2; exit 1; }`,
+      `log() { printf '%s\\n' "$*"; }`,
+      `json_field() { node -e 'const d=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); process.stdout.write(String(d[process.argv[2]]));' "$1" "$2"; }`,
+      guard,
+      block,
+    ].join("\n");
+    const seeded = spawnSync("bash", ["-c", harness], { encoding: "utf8" });
+    assert.equal(seeded.status, 0, seeded.stderr);
+    assert.match(seeded.stdout, /seeded the resume cache/);
+
+    const copiedResult = path.join(
+      currentOut,
+      "cells",
+      cell.cell_id,
+      "result.json",
+    );
+    const decision = cellReuseDecision({
+      plan: planned,
+      resultPath: copiedResult,
+    });
+    assert.equal(decision.reuse, true);
+    assert.match(decision.reason, /recorded reviewed orchestrator transition/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("the detail directory separates two skills under one contract", () => {
@@ -1287,10 +1765,7 @@ test("run-eval.sh refuses a detail_dir before it can delete the checkout", () =>
   // `json_field` prints `String(doc[key])`: a missing key arrives as the word
   // "undefined" and a JSON null as "null". An empty value is the dangerous one
   // — it makes `rm -rf "$REPO/$detail"` target the checkout itself.
-  const shell = readFileSync(
-    path.join(repoRoot, "scripts/review/run-eval.sh"),
-    "utf8",
-  );
+  const shell = runEvalSourceSet();
   const guard = shell.match(
     /\nrequire_safe_detail\(\) \{\n[\s\S]*?\n\}\n/,
   )?.[0];
@@ -1334,10 +1809,7 @@ test("run-eval.sh exits non-zero when no PR carries the row", () => {
   // --pr. Exiting zero while only the publish commands were printed reports a
   // clean run while the next scheduled run refuses to start against a ledger
   // with uncommitted changes.
-  const shell = readFileSync(
-    path.join(repoRoot, "scripts/review/run-eval.sh"),
-    "utf8",
-  );
+  const shell = runEvalSourceSet();
   const guard = shell.match(
     /\nif \[\[ \$PUBLISHED -ne 1 \]\]; then\n[\s\S]*?\nfi\nexit 0\n/,
   )?.[0];
@@ -1370,10 +1842,7 @@ test("run-eval.sh seeds a fresh run directory from the cells it superseded", () 
   // execution its own. The cells in the old one are paid for, so they are
   // copied across — and re-checked one by one against this run's fingerprint,
   // exactly as cells found in place are.
-  const shell = readFileSync(
-    path.join(repoRoot, "scripts/review/run-eval.sh"),
-    "utf8",
-  );
+  const shell = runEvalSourceSet();
   const block = shell.match(
     /\nRESUME_FROM="\$\(json_field "\$PLAN_OUT" resume_from\)"\n[\s\S]*?\nfi\n/,
   )?.[0];
@@ -1442,10 +1911,7 @@ test("run-eval.sh publishes the appended row when the report fails", () => {
   // — a same-sitting `--against` file under /tmp that is gone by now is enough
   // — printed no PR and no recovery commands, and the next scheduled run then
   // refuses to start against the dirty ledger it left behind.
-  const shell = readFileSync(
-    path.join(repoRoot, "scripts/review/run-eval.sh"),
-    "utf8",
-  );
+  const shell = runEvalSourceSet();
   const block = shell.match(
     /\nREPORT="\$RUN_DIR\/report\.md"\n[\s\S]*?\nlog "verdict \$VERDICT"\n/,
   )?.[0];
@@ -1492,10 +1958,7 @@ test("run-eval.sh keeps the stderr of a bounded command it had to fail", () => {
   // A finder, a contestant or the scorer says why it exited on stderr, and
   // every failure path logs only an exit status. Discarding stderr left the
   // one line that explains the failure unreachable.
-  const shell = readFileSync(
-    path.join(repoRoot, "scripts/review/run-eval.sh"),
-    "utf8",
-  );
+  const shell = runEvalSourceSet();
   const parts = ["run_bounded", "log_stderr_tail"].map((name) => {
     const source = shell.match(
       new RegExp(`\\n${name}\\(\\) \\{\\n[\\s\\S]*?\\n\\}\\n`),
@@ -1541,10 +2004,7 @@ test("run-eval.sh refuses a skill staging that did not land", () => {
   // The preamble is taken in a command substitution, so a failed `cp -R` and a
   // preamble missing the instructions both used to render as a plausible,
   // empty treatment that the cell was scored on.
-  const shell = readFileSync(
-    path.join(repoRoot, "scripts/review/run-eval.sh"),
-    "utf8",
-  );
+  const shell = runEvalSourceSet();
   const parts = ["purge_skill", "skill_body_head", "stage_skill"].map(
     (name) => {
       const source = shell.match(
@@ -1627,10 +2087,7 @@ test("run-eval.sh inserts finder output into the handoff prompt verbatim", () =>
   // $' and $1 in a *string* replacement, so a review containing one of those
   // would rewrite the prompt the treatment under test receives. This runs the
   // shell script's own node program to prove the replacement stays literal.
-  const shell = readFileSync(
-    path.join(repoRoot, "scripts/review/run-eval.sh"),
-    "utf8",
-  );
+  const shell = runEvalSourceSet();
   const program = shell.match(
     /REVIEW_EVAL_OTHER="\$other_review" node -e '\n([\s\S]*?)\n {4}' "\$SPEC/,
   )?.[1];
@@ -1651,7 +2108,7 @@ test("run-eval.sh inserts finder output into the handoff prompt verbatim", () =>
   }
 });
 
-test("--validate refuses a bad row and appends a good one", () => {
+test("--validate refuses bad or evidence-free rows and appends a good one", () => {
   const root = makeRoot();
   try {
     const rowPath = path.join(root, "row.json");
@@ -1670,6 +2127,37 @@ test("--validate refuses a bad row and appends a good one", () => {
 
     row.conditions.pipeline.p1.matched -= 1;
     writeFileSync(rowPath, JSON.stringify(row, null, 2));
+    const bitsOnly = cli(["--validate", rowPath, "--json"], { root });
+    assert.equal(bitsOnly.status, 0, bitsOnly.stderr);
+    assert.equal(JSON.parse(bitsOnly.stdout).ok, true);
+
+    const explicitMissing = cli(
+      [
+        "--validate",
+        rowPath,
+        "--detail-dir",
+        path.join(root, "missing-detail"),
+        "--json",
+      ],
+      { root },
+    );
+    assert.equal(explicitMissing.status, 1);
+    assert.match(
+      JSON.parse(explicitMissing.stdout).problems.join(" | "),
+      /--validate requires an existing non-symlink detail directory/,
+    );
+
+    const missing = cli(["--validate", rowPath, "--append", "--json"], {
+      root,
+    });
+    assert.equal(missing.status, 1);
+    assert.match(
+      JSON.parse(missing.stdout).problems.join(" | "),
+      /requires an existing non-symlink detail directory/,
+    );
+    assert.equal(readLedger(path.join(root, ledgerRelative)).length, 0);
+
+    writeRowEvidence(root, row);
     const good = cli(["--validate", rowPath, "--append", "--json"], { root });
     assert.equal(good.status, 0, good.stderr);
     assert.equal(JSON.parse(good.stdout).appended, true);
@@ -1714,6 +2202,33 @@ test("--validate --detail-dir recomputes from a run outside --root", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(detail, { recursive: true, force: true });
+  }
+});
+
+test("--validate rejects a symlinked detail directory without append", () => {
+  const root = makeRoot();
+  try {
+    const row = makeRow({
+      matchedIds: scorableIdsFor([1990, 1999]),
+      fullMatrix: true,
+    });
+    const detail = writeRowEvidence(root, row);
+    const linkedDetail = path.join(root, "linked-detail");
+    symlinkSync(detail, linkedDetail, "dir");
+    const rowPath = path.join(root, "row.json");
+    writeFileSync(rowPath, JSON.stringify(row, null, 2));
+
+    const result = cli(
+      ["--validate", rowPath, "--detail-dir", linkedDetail, "--json"],
+      { root },
+    );
+    assert.equal(result.status, 1);
+    assert.match(
+      JSON.parse(result.stdout).problems.join(" | "),
+      /--validate requires an existing non-symlink detail directory/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -1853,6 +2368,16 @@ test("--validate --against rechecks the verdict on the named baseline", () => {
       fullMatrix: true,
     });
     row.verdict = verdict({ contract, row, baselineRow }).verdict;
+    row.vs_baseline = buildVsBaseline({
+      row,
+      baselineRow,
+      selection: "explicit",
+    });
+    const detail = writeRowEvidence(root, row);
+    const planPath = path.join(detail, "plan.json");
+    const plan = JSON.parse(readFileSync(planPath, "utf8"));
+    plan.baseline = baselinePlanIdentity(baselineRow);
+    writeFileSync(planPath, JSON.stringify(plan));
     const rowPath = path.join(root, "row.json");
     writeFileSync(rowPath, JSON.stringify(row, null, 2));
     const result = cli(
@@ -3002,6 +3527,53 @@ test("scorePlan freezes truth before the calibration pass", async () => {
   }
 });
 
+test("scorePlan verifies the exact truth bytes it snapshots", async () => {
+  const root = makeRoot();
+  try {
+    const plan = buildPlan({
+      contract,
+      contractDigest,
+      kind: "canary",
+      repoRoot: root,
+      outDir: path.join(root, "run"),
+      env: planEnv,
+    });
+    for (const cell of plan.cells) {
+      writeCell(plan, cell, { output: "nothing looks wrong here", root });
+    }
+    const fixture = contract.fixtures.find(
+      (candidate) => candidate.pr === plan.cells[0].pr,
+    );
+    const truthFile = path.join(root, fixture.truth_file);
+    writeFileSync(truthFile, `${readFileSync(truthFile, "utf8")} `);
+    let modelCalls = 0;
+    await assert.rejects(
+      scorePlan({
+        plan,
+        contract,
+        contractDigest,
+        repoRoot: root,
+        planDir: plan.plan_dir,
+        exec: async () => {
+          modelCalls += 1;
+          throw new Error("model must not run");
+        },
+        runGit: stubGit().runGit,
+        calibrationSet: JSON.parse(
+          readFileSync(
+            path.join(root, "docs/evals/review-skill-judge-calibration.json"),
+            "utf8",
+          ),
+        ),
+      }),
+      /truth .* changed after frozen-input verification/,
+    );
+    assert.equal(modelCalls, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("the login exclusions are snapshotted before the tool-bearing judge", async () => {
   // The novelty judge runs with `Bash` inside the fixture. Fixture content that
   // prompt-injects it into writing a reviewer login into a tracked file would,
@@ -3529,6 +4101,12 @@ test("scorePlan reports a partial matrix and refuses an empty one", async () => 
       ),
     );
     assert.deepEqual(scoredResult.fingerprint, canonicalFingerprint);
+    assert.deepEqual(scoredResult.treatment, treatmentIdentity({ plan }));
+    const scoredCalibration = JSON.parse(
+      readFileSync(path.join(plan.plan_dir, "calibration.json"), "utf8"),
+    );
+    assert.deepEqual(scoredCalibration.fingerprint, canonicalFingerprint);
+    assert.deepEqual(scoredCalibration.treatment, treatmentIdentity({ plan }));
     // A canary that did not finish never ranks, not even as a pass.
     assert.equal(scored.row.verdict, "INCOMPLETE");
   } finally {
@@ -4039,10 +4617,7 @@ test("a cell inherits no path back to the source checkout", () => {
   try {
     const fixture = path.join(dir, "fixture");
     mkdirSync(fixture, { recursive: true });
-    const script = readFileSync(
-      path.join(repoRoot, "scripts/review/run-eval.sh"),
-      "utf8",
-    );
+    const script = runEvalSourceSet();
     const cellEnv = script.match(
       /\nCELL_ENV=\(env\n[\s\S]*?PATH="\$CELL_PATH"\)\n/,
     )?.[0];
@@ -4097,10 +4672,7 @@ test("a cell inherits no path back to the source checkout", () => {
 });
 
 test("the orchestrator keeps its resume cache outside the spec worktree", () => {
-  const script = readFileSync(
-    path.join(repoRoot, "scripts/review/run-eval.sh"),
-    "utf8",
-  );
+  const script = runEvalSourceSet();
   // The spec worktree is a temporary directory the EXIT trap removes, so a
   // plan directory inside it takes every completed cell down with it.
   assert.match(script, /RUN_DIR="\$REPO\/\$DETAIL_DIR"/);
@@ -4114,10 +4686,7 @@ test("the spec worktree is not created where a cell can list it", () => {
   // no PR number, reviewer login or withheld SHA for `leakSignals()` to catch.
   // Permissions cannot help — a cell runs as the same user — so it goes under
   // the git directory, which nothing hands a cell a path to.
-  const script = readFileSync(
-    path.join(repoRoot, "scripts/review/run-eval.sh"),
-    "utf8",
-  );
+  const script = runEvalSourceSet();
   assert.match(script, /SPEC="\$\(mktemp -d "\$LOCK_ROOT\/review-eval-spec/);
   assert.equal(/mktemp -d "\$TMPROOT\/review-eval-spec/.test(script), false);
   // `$TMPDIR` is swept by the OS and the git directory is not, so a removal
@@ -4173,16 +4742,13 @@ test("a failed run publishes no partial scoring artifacts", () => {
   }
 });
 
-/** Extract one shell function from run-eval.sh, or fail the test. */
+/** Extract one shell function from the run-eval source that owns it. */
 function shellFunction(name) {
-  const script = readFileSync(
-    path.join(repoRoot, "scripts/review/run-eval.sh"),
-    "utf8",
-  );
+  const script = runEvalSourceSet();
   const source = script.match(
     new RegExp(`\\n${name}\\(\\) \\{\\n[\\s\\S]*?\\n\\}\\n`),
   )?.[0];
-  assert.ok(source, `${name} was not found in run-eval.sh`);
+  assert.ok(source, `${name} was not found in the run-eval source set`);
   return source;
 }
 
@@ -4332,9 +4898,10 @@ test("one review eval at a time may hold the shared run state", async () => {
     const lock = path.join(lockRoot, "run.lock");
     const cacheLock = path.join(cache, "run.lock");
     const lockFunction = shellFunction("acquire_one_lock");
-    assert.ok(
-      lockFunction.indexOf('"$claim_ticket" "$claim_file"') <
-        lockFunction.indexOf('rm -rf "$lock"'),
+    assertBefore(
+      lockFunction,
+      '"$claim_ticket" "$claim_file"',
+      'rm -rf "$lock"',
       "a stale lock is deleted before this process claims it",
     );
 
@@ -4349,11 +4916,32 @@ test("one review eval at a time may hold the shared run state", async () => {
     // The owner record is complete before its hard link makes the lock path
     // visible. A suspended owner therefore exposes no pid-less lock that a
     // contender can mistake for stale state.
-    assert.ok(
-      lockFunction.indexOf(`printf '%s\\n' "$$" >"$owner_ticket"`) <
-        lockFunction.indexOf('"$owner_ticket" "$lock" 2>/dev/null'),
-      "the lock is published before its owner record is complete",
+    const ownerWrites = sourceIndexes(
+      lockFunction,
+      `printf '%s\\n' "$$" >"$owner_ticket"`,
     );
+    const ownerPublications = sourceIndexes(
+      lockFunction,
+      '"$owner_ticket" "$lock" 2>/dev/null',
+    );
+    assert.equal(ownerWrites.length, 2, "expected two owner-record writes");
+    assert.equal(
+      ownerPublications.length,
+      2,
+      "expected two owner-record publications",
+    );
+    for (let index = 0; index < ownerWrites.length; index += 1) {
+      assert.ok(
+        ownerWrites[index] < ownerPublications[index],
+        `owner record ${index + 1} is published before it is complete`,
+      );
+      if (index + 1 < ownerWrites.length) {
+        assert.ok(
+          ownerPublications[index] < ownerWrites[index + 1],
+          `owner publication ${index + 1} crosses into the next owner path`,
+        );
+      }
+    }
     assert.match(
       lockFunction,
       /linkSync\(process\.argv\[1\], process\.argv\[2\]\)/,
@@ -4486,38 +5074,37 @@ test("one review eval at a time may hold the shared run state", async () => {
 });
 
 test("the run lock is taken before anything touches the fixtures", () => {
-  const script = readFileSync(
-    path.join(repoRoot, "scripts/review/run-eval.sh"),
-    "utf8",
-  );
+  const script = reconstructLegacyOrchestrator();
+  const lifecycle = runEvalSource("lifecycle");
   // Taken before the spec worktree, the plan and the matrix, and released by
   // the EXIT trap so an interrupted run does not wedge the next one.
-  assert.ok(
-    script.indexOf("\nacquire_run_lock\n") <
-      script.indexOf("# --- the spec worktree"),
+  assertBefore(
+    script,
+    "\nacquire_run_lock\n",
+    "# --- the spec worktree",
     "the run lock is taken after the spec worktree is added",
   );
+  assert.match(lifecycle, /\nacquire_run_lock\n/);
   assert.match(
-    script,
+    lifecycle,
     /for lock_dir in \$\{LOCK_DIRS\[@\]\+"\$\{LOCK_DIRS\[@\]\}"\}; do\n\s*rm -rf "\$lock_dir"/,
   );
   // The checkout half is anchored to the git directory, which no option moves,
   // and it is taken first so the ordering between the two roots is fixed.
   assert.match(
-    script,
+    lifecycle,
     /LOCK_ROOT="\$\(git -C "\$REPO" rev-parse --absolute-git-dir/,
   );
-  assert.ok(
-    script.indexOf('acquire_one_lock "$LOCK_ROOT"') <
-      script.indexOf('acquire_one_lock "$CACHE_DIR"'),
+  assertBefore(
+    lifecycle,
+    'acquire_one_lock "$LOCK_ROOT"',
+    'acquire_one_lock "$CACHE_DIR"',
+    "the cache lock is taken before the checkout lock",
   );
 });
 
 test("the orchestrator rejects a cell whose finder or report failed", () => {
-  const script = readFileSync(
-    path.join(repoRoot, "scripts/review/run-eval.sh"),
-    "utf8",
-  );
+  const script = runEvalSourceSet();
   // A finder that writes a partial report and then exits non-zero — a session
   // limit, a killed process — produces output that is not empty and is not a
   // review. Cached, it would score forever as a finder that missed those
@@ -4534,10 +5121,7 @@ test("the orchestrator rejects a cell whose finder or report failed", () => {
 });
 
 test("the orchestrator carries one baseline through plan, score, validate and report", () => {
-  const script = readFileSync(
-    path.join(repoRoot, "scripts/review/run-eval.sh"),
-    "utf8",
-  );
+  const script = runEvalSourceSet();
   // The candidate procedure runs the installed skill and the candidate in one
   // sitting. Without a baseline argument the candidate resolves the ledger's
   // stored anchor instead, which is the model drift the procedure exists to
@@ -4560,14 +5144,13 @@ test("the orchestrator carries one baseline through plan, score, validate and re
 });
 
 test("the orchestrator rejects an ineligible baseline before paid work", () => {
-  const script = readFileSync(
-    path.join(repoRoot, "scripts/review/run-eval.sh"),
-    "utf8",
-  );
+  const script = reconstructLegacyOrchestrator();
   assert.equal(script.match(/baselineEligibility\(row\)/g)?.length, 2);
-  assert.ok(
-    script.indexOf("baselineEligibility(row)") <
-      script.indexOf("# --- the run deadline"),
+  assertBefore(
+    script,
+    "baselineEligibility(row)",
+    "# --- the run deadline",
+    "baseline eligibility is checked after the run deadline starts",
   );
   assert.ok(
     script.lastIndexOf("baselineEligibility(row)") <
@@ -4580,13 +5163,17 @@ test("the orchestrator rejects an ineligible baseline before paid work", () => {
     script,
     /JSON\.stringify\(plannedBaseline\) !== JSON\.stringify\(currentBaseline\)/,
   );
-  assert.ok(
-    script.indexOf("baselinePreflightProblems({") <
-      script.indexOf("# --- the run deadline"),
+  assertBefore(
+    script,
+    "baselinePreflightProblems({",
+    "# --- the run deadline",
+    "baseline preflight runs after the run deadline starts",
   );
-  assert.ok(
-    script.indexOf("baselinePlanIdentity(row)") <
-      script.indexOf("# --- the run deadline"),
+  assertBefore(
+    script,
+    "baselinePlanIdentity(row)",
+    "# --- the run deadline",
+    "baseline identity is checked after the run deadline starts",
   );
   assert.match(
     script,
@@ -4603,9 +5190,11 @@ test("the orchestrator rejects an ineligible baseline before paid work", () => {
     false,
   );
   assert.match(script, /AGAINST="\$BASELINE_SNAPSHOT"/);
-  assert.ok(
-    script.indexOf('AGAINST="$BASELINE_SNAPSHOT"') <
-      script.indexOf("# --- the run deadline"),
+  assertBefore(
+    script,
+    'AGAINST="$BASELINE_SNAPSHOT"',
+    "# --- the run deadline",
+    "the baseline snapshot is selected after the run deadline starts",
   );
   assert.match(script, /rm -f "\$BASELINE_SNAPSHOT"/);
   assert.match(script, /eligible complete full baseline row/);
@@ -4613,10 +5202,7 @@ test("the orchestrator rejects an ineligible baseline before paid work", () => {
 });
 
 test("the installed baseline survives the checkout the candidate needs", () => {
-  const script = readFileSync(
-    path.join(repoRoot, "scripts/review/run-eval.sh"),
-    "utf8",
-  );
+  const script = runEvalSourceSet();
   const doc = readFileSync(
     path.join(repoRoot, "docs/evals/review-skill.md"),
     "utf8",
@@ -4643,10 +5229,7 @@ test("the installed baseline survives the checkout the candidate needs", () => {
 });
 
 test("the ledger branch names one run, not one day", () => {
-  const script = readFileSync(
-    path.join(repoRoot, "scripts/review/run-eval.sh"),
-    "utf8",
-  );
+  const script = runEvalSourceSet();
   // Two runs finishing on the same UTC day — the installed and candidate pair
   // the runbook asks for — collided on a date-only branch at `git checkout -b`
   // or at the push, after the paid run and the ledger append were both done.
@@ -4656,10 +5239,7 @@ test("the ledger branch names one run, not one day", () => {
 });
 
 test("the orchestrator snapshots the skill once and refuses a mid-run edit", () => {
-  const script = readFileSync(
-    path.join(repoRoot, "scripts/review/run-eval.sh"),
-    "utf8",
-  );
+  const script = runEvalSourceSet();
   // The plan records one skill digest for the whole matrix and every cached
   // cell's fingerprint carries it, so cells must all stage the same bytes.
   assert.match(script, /SKILL_DIR="\$SKILL_SNAPSHOT"/);
@@ -4672,10 +5252,7 @@ test("the orchestrator snapshots the skill once and refuses a mid-run edit", () 
 });
 
 test("a failed run records its failure, publishes it, or exits non-zero", () => {
-  const script = readFileSync(
-    path.join(repoRoot, "scripts/review/run-eval.sh"),
-    "utf8",
-  );
+  const script = runEvalSourceSet();
   // A run that leaves no trace is indistinguishable from one that never ran,
   // and the freshness guard cannot tell those apart either.
   assert.match(
@@ -4698,10 +5275,7 @@ test("a failed run records its failure, publishes it, or exits non-zero", () => 
 });
 
 test("the run deadline bounds the cell subprocesses and the judge pass", () => {
-  const script = readFileSync(
-    path.join(repoRoot, "scripts/review/run-eval.sh"),
-    "utf8",
-  );
+  const script = runEvalSourceSet();
   // Checked only between cells, the deadline bounded nothing: a finder or a
   // contestant that stalls never returns to the check, and the judge pass ran
   // outside the budget entirely. Every one of the three is now started through
@@ -4739,10 +5313,7 @@ test("the deadline terminates the whole subprocess tree, not only its parent", (
   // Run the committed function itself rather than grepping it: whether a
   // grandchild dies is a property of the process group, which no pattern in the
   // source can assert.
-  const script = readFileSync(
-    path.join(repoRoot, "scripts/review/run-eval.sh"),
-    "utf8",
-  );
+  const script = runEvalSourceSet();
   const definition = script.match(/^run_bounded\(\) \{\n[\s\S]*?^\}$/m);
   assert.ok(definition, "run_bounded is not defined at column zero");
   const fastDefinition = definition[0].replace("sleep 10", "sleep 1");
@@ -4801,15 +5372,445 @@ test("the deadline terminates the whole subprocess tree, not only its parent", (
 });
 
 test("the orchestrator refuses to run bytes the row would not record", () => {
-  const script = readFileSync(
-    path.join(repoRoot, "scripts/review/run-eval.sh"),
-    "utf8",
-  );
+  const wrapper = runEvalSource("wrapper");
+  const lifecycle = runEvalSource("lifecycle");
   // `orchestrator_digest` is taken from the spec worktree, which is where the
   // harness reads every other input. Running an edited copy against a clean
-  // spec would record the spec's bytes for a matrix this file actually shaped.
-  assert.match(script, /ORCHESTRATOR="\$SPEC\/scripts\/review\/run-eval\.sh"/);
-  assert.match(script, /cmp -s "\$\{BASH_SOURCE\[0\]\}" "\$ORCHESTRATOR"/);
+  // spec would record the spec's bytes for a matrix these files actually
+  // shaped. Resolve all helpers from the wrapper path and compare all four.
+  assert.match(
+    wrapper,
+    /RUN_EVAL_LIVE_SCRIPT_DIR="\$\(unset CDPATH; cd -P "\$\(dirname "\$\{BASH_SOURCE\[0\]\}"\)" && pwd -P\)"/,
+  );
+  assert.match(wrapper, /RUN_EVAL_SCRIPT_DIR="\$RUN_EVAL_SOURCE_SNAPSHOT"/);
+  assert.match(wrapper, /source "\$RUN_EVAL_SOURCE_HELPER"/);
+  for (const helper of ["run-eval-lifecycle.sh", "run-eval-runtime.sh"]) {
+    assert.match(
+      wrapper,
+      new RegExp(
+        `source "\\$RUN_EVAL_SCRIPT_DIR/${helper.replace(".", "\\.")}"`,
+      ),
+    );
+  }
+
+  const verify = lifecycle.match(
+    /\n {2}verify\)\n([\s\S]*?)\n {4};;\n {2}support\)/,
+  )?.[1];
+  assert.ok(verify, "the lifecycle verify stage is missing");
+  for (const source of [
+    "run-eval.sh",
+    "run-eval-source-snapshot.sh",
+    "run-eval-lifecycle.sh",
+    "run-eval-runtime.sh",
+  ]) {
+    assert.match(
+      verify,
+      new RegExp(`\\n      ${source.replace(".", "\\.")}\\n`),
+    );
+  }
+  assert.match(
+    verify,
+    /cmp -s "\$RUN_EVAL_RUNNING_SOURCE" "\$RUN_EVAL_SPEC_SOURCE"/,
+  );
+  assert.doesNotMatch(verify, /\$\{BASH_SOURCE\[0\]\}/);
+  assert.match(
+    lifecycle,
+    /: <<'RUN_EVAL_ORIGINAL_LIFECYCLE_VERIFY'[\s\S]*# RUN-EVAL-ORIGINAL-BEGIN lifecycle-verify/,
+  );
+  assert.doesNotMatch(lifecycle, /\n {2}original-verify\)/);
+});
+
+test("the orchestrator keeps every helper stage on one private source snapshot", () => {
+  const wrapper = runEvalSource("wrapper");
+  const sourceSnapshot = runEvalSource("sourceSnapshot");
+  const lifecycle = runEvalSource("lifecycle");
+  const snapshotBlock = wrapper.match(
+    /# RUN-EVAL-SOURCE-SNAPSHOT-BEGIN\n([\s\S]*?)# RUN-EVAL-SOURCE-SNAPSHOT-END\n/,
+  )?.[1];
+  const stateBlock = wrapper.match(
+    /# RUN-EVAL-SPLIT-ONLY-BEGIN source-snapshot-state\n([\s\S]*?)# RUN-EVAL-SPLIT-ONLY-END source-snapshot-state\n/,
+  )?.[1];
+  assert.ok(snapshotBlock, "the source-snapshot block is missing");
+  assert.ok(stateBlock, "the early source-snapshot state block is missing");
+  assertBefore(
+    wrapper,
+    "# RUN-EVAL-SOURCE-SNAPSHOT-BEGIN",
+    'source "$RUN_EVAL_SCRIPT_DIR/run-eval-lifecycle.sh"',
+    "a helper is sourced before the private source snapshot exists",
+  );
+  assert.match(snapshotBlock, /source "\$RUN_EVAL_SOURCE_HELPER"/);
+  assert.match(snapshotBlock, /run_eval_source_snapshot_restart/);
+  assert.match(
+    sourceSnapshot,
+    /exec "\$RUN_EVAL_SOURCE_SNAPSHOT\/run-eval\.sh"/,
+  );
+  assert.match(sourceSnapshot, /chmod 0500 "\$RUN_EVAL_SOURCE_SNAPSHOT"/);
+  assert.match(
+    sourceSnapshot,
+    /\$\{RUN_EVAL_SOURCE_SNAPSHOT%\/\*\} == "\$lock_root"/,
+  );
+  assert.match(
+    stateBlock,
+    /the inherited orchestrator snapshot is not authenticated/,
+  );
+  assert.doesNotMatch(snapshotBlock, /LOCK_DIRS\+=/);
+  assert.doesNotMatch(stateBlock, /rm -rf "\$RUN_EVAL_SOURCE_SNAPSHOT"/);
+  assert.match(
+    sourceSnapshot,
+    /physical_snapshot="\$\(run_eval_physical_dir "\$snapshot"\)"/,
+  );
+  assert.match(
+    sourceSnapshot,
+    /\^review-eval-source\\\.\[\[:alnum:\]\]\{6\}\$/,
+  );
+  assert.match(stateBlock, /source "\$RUN_EVAL_SOURCE_HELPER"/);
+  assert.match(stateBlock, /! -f \$RUN_EVAL_SOURCE_WRAPPER/);
+  assert.match(lifecycle, /trap cleanup_with_source_snapshot EXIT/);
+  assert.match(
+    sourceSnapshot,
+    /if declare -F cleanup[\s\S]*?cleanup \|\| true[\s\S]*?cleanup_source_snapshot \|\| true/,
+  );
+  assert.doesNotMatch(
+    wrapper.slice(wrapper.indexOf("# RUN-EVAL-SOURCE-SNAPSHOT-END")),
+    /source "\$RUN_EVAL_LIVE_SCRIPT_DIR\//,
+  );
+
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-sources-"));
+  try {
+    const initialized = spawnSync("git", ["init", "--quiet", dir], {
+      encoding: "utf8",
+    });
+    assert.equal(initialized.status, 0, initialized.stderr);
+    const live = path.join(dir, "live");
+    mkdirSync(live);
+    const liveWrapper = path.join(live, "run-eval.sh");
+    const liveSnapshotHelper = path.join(live, "run-eval-source-snapshot.sh");
+    const changedWrapper = path.join(dir, "changed-wrapper.sh");
+    const changedSnapshotHelper = path.join(dir, "changed-source-snapshot.sh");
+    const changedLifecycle = path.join(dir, "changed-lifecycle.sh");
+    const changedRuntime = path.join(dir, "changed-runtime.sh");
+    writeFileSync(changedWrapper, "wrapper=changed\n");
+    writeFileSync(changedSnapshotHelper, "SNAPSHOT_HELPER=changed\n");
+    writeFileSync(
+      changedLifecycle,
+      'case "$RUN_EVAL_LIFECYCLE_STAGE" in support) SNAPSHOT_LIFECYCLE=changed ;; esac\n',
+    );
+    writeFileSync(changedRuntime, "SNAPSHOT_RUNTIME=changed\n");
+
+    const harness = [
+      "#!/usr/bin/env bash",
+      "set -euo pipefail",
+      stateBlock,
+      "REPO=" + JSON.stringify(dir),
+      "TEST_LIVE=" + JSON.stringify(live),
+      "LOCK_DIRS=()",
+      "fail() { printf 'FATAL: %s\\n' \"$*\" >&2; exit 1; }",
+      'if [[ ${TEST_SOURCE_EARLY_FAIL:-0} == 1 && -n $RUN_EVAL_SOURCE_SNAPSHOT ]]; then fail "second-pass source failure"; fi',
+      'RUN_EVAL_LIVE_SCRIPT_DIR="$(unset CDPATH; cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"',
+      snapshotBlock,
+      "cp " + JSON.stringify(changedWrapper) + ' "$TEST_LIVE/run-eval.sh"',
+      "cp " +
+        JSON.stringify(changedSnapshotHelper) +
+        ' "$TEST_LIVE/run-eval-source-snapshot.sh"',
+      "cp " +
+        JSON.stringify(changedLifecycle) +
+        ' "$TEST_LIVE/run-eval-lifecycle.sh"',
+      "cp " +
+        JSON.stringify(changedRuntime) +
+        ' "$TEST_LIVE/run-eval-runtime.sh"',
+      "RUN_EVAL_LIFECYCLE_STAGE=support",
+      'node -e \'const fs = require("node:fs"); const p = process.argv[1]; const mode = (name) => (fs.statSync(name).mode & 0o777).toString(8); process.stdout.write(`modes=${mode(p)}:${mode(`${p}/run-eval.sh`)}:${mode(`${p}/run-eval-source-snapshot.sh`)}:${mode(`${p}/run-eval-lifecycle.sh`)}:${mode(`${p}/run-eval-runtime.sh`)}\\n`);\' "$RUN_EVAL_SOURCE_SNAPSHOT"',
+      "node -e 'for (const key of Object.keys(process.env)) { if (key.startsWith(\"RUN_EVAL_\")) process.exit(1); }'",
+      'if [[ $(id -u) -ne 0 ]] && mv "$RUN_EVAL_SOURCE_SNAPSHOT/run-eval-runtime.sh" "$RUN_EVAL_SOURCE_SNAPSHOT/run-eval-runtime.moved" 2>/dev/null; then fail "the sealed source snapshot allowed an entry replacement"; fi',
+      'source "$RUN_EVAL_SCRIPT_DIR/run-eval-lifecycle.sh"',
+      'source "$RUN_EVAL_SCRIPT_DIR/run-eval-runtime.sh"',
+      'printf "wrapper=%s helper=%s lifecycle=%s runtime=%s snapshot=%s\\n" "${BASH_SOURCE[0]}" "$SNAPSHOT_HELPER" "$SNAPSHOT_LIFECYCLE" "$SNAPSHOT_RUNTIME" "$RUN_EVAL_SOURCE_SNAPSHOT"',
+    ].join("\n");
+    const snapshotHelperFixture = `${sourceSnapshot}\nSNAPSHOT_HELPER="\${BASH_SOURCE[0]}"\n`;
+    const resetLiveSources = ({ helper = snapshotHelperFixture } = {}) => {
+      writeFileSync(liveWrapper, `${harness}\n`, { mode: 0o700 });
+      chmodSync(liveWrapper, 0o700);
+      writeFileSync(liveSnapshotHelper, helper, { mode: 0o700 });
+      chmodSync(liveSnapshotHelper, 0o700);
+      writeFileSync(
+        path.join(live, "run-eval-lifecycle.sh"),
+        'case "$RUN_EVAL_LIFECYCLE_STAGE" in support) SNAPSHOT_LIFECYCLE=old ;; esac\n',
+      );
+      writeFileSync(
+        path.join(live, "run-eval-runtime.sh"),
+        "SNAPSHOT_RUNTIME=old\n",
+      );
+    };
+    resetLiveSources();
+    const hostileRunEvalEnv = Object.fromEntries(
+      [
+        "RUN_EVAL_SOURCE_SNAPSHOT",
+        "RUN_EVAL_SOURCE_NONCE",
+        "RUN_EVAL_SCRIPT_DIR",
+        "RUN_EVAL_SOURCE_MARKER",
+        "RUN_EVAL_SOURCE_WRAPPER",
+        "RUN_EVAL_SOURCE_HELPER",
+        "RUN_EVAL_ENTRY_SOURCE",
+        "RUN_EVAL_SOURCE_PHYSICAL",
+        "RUN_EVAL_SOURCE_PHYSICAL_PARENT",
+        "RUN_EVAL_MARKER_PID",
+        "RUN_EVAL_MARKER_NONCE",
+        "RUN_EVAL_LIVE_SCRIPT_DIR",
+      ].map((name) => [name, "hostile-export"]),
+    );
+    hostileRunEvalEnv.RUN_EVAL_SOURCE_SNAPSHOT = "";
+    hostileRunEvalEnv.RUN_EVAL_SOURCE_NONCE = "";
+    const run = spawnSync(liveWrapper, [], {
+      encoding: "utf8",
+      env: { ...process.env, ...hostileRunEvalEnv },
+    });
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /lifecycle=old runtime=old/);
+    assert.match(run.stdout, /modes=500:500:400:400:400/);
+    const snapshot = run.stdout.match(/snapshot=(.+)$/m)?.[1];
+    assert.ok(snapshot);
+    assert.equal(
+      run.stdout.match(/wrapper=(.*?) helper=/)?.[1],
+      path.join(snapshot, "run-eval.sh"),
+    );
+    assert.equal(
+      run.stdout.match(/helper=(.*?) lifecycle=/)?.[1],
+      path.join(snapshot, "run-eval-source-snapshot.sh"),
+    );
+    assert.equal(readFileSync(liveWrapper, "utf8"), "wrapper=changed\n");
+    assert.equal(
+      readFileSync(liveSnapshotHelper, "utf8"),
+      "SNAPSHOT_HELPER=changed\n",
+    );
+    assert.equal(existsSync(snapshot), false);
+    const snapshotEntries = () =>
+      readdirSync(path.join(dir, ".git")).filter((name) =>
+        name.startsWith("review-eval-source."),
+      );
+    assert.deepEqual(snapshotEntries(), []);
+
+    const failedRestartHelper = snapshotHelperFixture.replace(
+      'exec "$RUN_EVAL_SOURCE_SNAPSHOT/run-eval.sh" "$@" --repo "$repo"',
+      'exec "$RUN_EVAL_SOURCE_SNAPSHOT/missing-run-eval.sh"',
+    );
+    assert.notEqual(failedRestartHelper, snapshotHelperFixture);
+    resetLiveSources({ helper: failedRestartHelper });
+    const failedExec = spawnSync(liveWrapper, [], { encoding: "utf8" });
+    assert.equal(failedExec.status, 1);
+    assert.match(failedExec.stderr, /could not restart from the immutable/);
+    assert.deepEqual(snapshotEntries(), []);
+
+    const missingSecondPassHelper = snapshotHelperFixture.replace(
+      "  export RUN_EVAL_SOURCE_SNAPSHOT RUN_EVAL_SOURCE_NONCE",
+      [
+        '  chmod 0700 "$RUN_EVAL_SOURCE_SNAPSHOT"',
+        '  rm -f "$RUN_EVAL_SOURCE_SNAPSHOT/run-eval-source-snapshot.sh"',
+        '  chmod 0500 "$RUN_EVAL_SOURCE_SNAPSHOT"',
+        "  export RUN_EVAL_SOURCE_SNAPSHOT RUN_EVAL_SOURCE_NONCE",
+      ].join("\n"),
+    );
+    assert.notEqual(missingSecondPassHelper, snapshotHelperFixture);
+    resetLiveSources({ helper: missingSecondPassHelper });
+    const failedBeforeHelperSource = spawnSync(liveWrapper, [], {
+      encoding: "utf8",
+    });
+    assert.equal(failedBeforeHelperSource.status, 1);
+    assert.match(failedBeforeHelperSource.stderr, /snapshot is not sealed/);
+    assert.deepEqual(snapshotEntries(), []);
+
+    const writableSourceHelper = snapshotHelperFixture.replace(
+      '  chmod 0500 "$RUN_EVAL_SOURCE_SNAPSHOT" ||',
+      [
+        '  chmod 0600 "$RUN_EVAL_SOURCE_SNAPSHOT/run-eval-runtime.sh"',
+        '  chmod 0500 "$RUN_EVAL_SOURCE_SNAPSHOT" ||',
+      ].join("\n"),
+    );
+    assert.notEqual(writableSourceHelper, snapshotHelperFixture);
+    resetLiveSources({ helper: writableSourceHelper });
+    const rejectedWritableSource = spawnSync(liveWrapper, [], {
+      encoding: "utf8",
+    });
+    assert.equal(rejectedWritableSource.status, 1);
+    assert.match(rejectedWritableSource.stderr, /verify the sealed/);
+    assert.deepEqual(snapshotEntries(), []);
+
+    resetLiveSources();
+    const failedAfterRestart = spawnSync(liveWrapper, [], {
+      encoding: "utf8",
+      env: { ...process.env, TEST_SOURCE_EARLY_FAIL: "1" },
+    });
+    assert.equal(failedAfterRestart.status, 1);
+    assert.match(failedAfterRestart.stderr, /second-pass source failure/);
+    assert.deepEqual(snapshotEntries(), []);
+
+    resetLiveSources();
+    unlinkSync(liveSnapshotHelper);
+    const failed = spawnSync(liveWrapper, [], { encoding: "utf8" });
+    assert.equal(failed.status, 1);
+    assert.match(failed.stderr, /is not a regular file/);
+    assert.deepEqual(snapshotEntries(), []);
+
+    const retained = path.join(
+      realpathSync(path.join(dir, ".git")),
+      "review-eval-source.ABC123",
+    );
+    mkdirSync(retained);
+    const retainedNonce = "ABCDEFGHIJKL";
+    const retainedWrapper = path.join(retained, "run-eval.sh");
+    writeFileSync(
+      path.join(retained, "run-eval-source-snapshot.sh"),
+      snapshotHelperFixture,
+    );
+    for (const name of ["run-eval-lifecycle.sh", "run-eval-runtime.sh"]) {
+      writeFileSync(path.join(retained, name), `${name}\n`);
+    }
+    writeFileSync(path.join(retained, "sentinel"), "retain\n");
+    writeFileSync(
+      retainedWrapper,
+      [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        "RUN_EVAL_SOURCE_SNAPSHOT=" + JSON.stringify(retained),
+        "RUN_EVAL_SOURCE_NONCE=" + JSON.stringify(retainedNonce),
+        'printf "%s\\t%s\\n" "$$" "$RUN_EVAL_SOURCE_NONCE" >"$RUN_EVAL_SOURCE_SNAPSHOT/.review-eval-owner.$RUN_EVAL_SOURCE_NONCE"',
+        'chmod 0400 "$RUN_EVAL_SOURCE_SNAPSHOT/.review-eval-owner.$RUN_EVAL_SOURCE_NONCE"',
+        'chmod 0500 "$RUN_EVAL_SOURCE_SNAPSHOT"',
+        stateBlock,
+        "[[ $RUN_EVAL_SOURCE_OWNED -eq 1 ]]",
+      ].join("\n") + "\n",
+      { mode: 0o500 },
+    );
+    chmodSync(path.join(retained, "run-eval-source-snapshot.sh"), 0o400);
+    chmodSync(path.join(retained, "run-eval-lifecycle.sh"), 0o400);
+    chmodSync(path.join(retained, "run-eval-runtime.sh"), 0o400);
+    chmodSync(retained, 0o700);
+    const retainedRun = spawnSync(retainedWrapper, [], { encoding: "utf8" });
+    assert.equal(retainedRun.status, 0, retainedRun.stderr);
+    assert.equal(existsSync(path.join(retained, "sentinel")), true);
+    assert.equal(existsSync(retained), true);
+  } finally {
+    spawnSync("chmod", ["-R", "u+w", dir]);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the source snapshot path validator rejects aliases and nested paths", () => {
+  const sourceSnapshotPath = runEvalSourcePaths.get("sourceSnapshot");
+  assert.ok(sourceSnapshotPath);
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-source-paths-"));
+  try {
+    const physicalRoot = realpathSync(dir);
+    const direct = path.join(physicalRoot, "review-eval-source.ABC123");
+    mkdirSync(direct);
+    mkdirSync(path.join(direct, "nested"));
+    const short = path.join(physicalRoot, "review-eval-source.ABC12");
+    mkdirSync(short);
+    const aliasParent = path.join(physicalRoot, "alias-parent");
+    symlinkSync(physicalRoot, aliasParent, "dir");
+    const symlinked = path.join(physicalRoot, "review-eval-source.SYM123");
+    symlinkSync(direct, symlinked, "dir");
+    const lexicalParent = path.join(physicalRoot, "lexical");
+    mkdirSync(lexicalParent);
+    const probe = path.join(physicalRoot, "probe.sh");
+    writeFileSync(
+      probe,
+      [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        'RUN_EVAL_SOURCE_SNAPSHOT=""',
+        'RUN_EVAL_SOURCE_NONCE=""',
+        "source " + JSON.stringify(sourceSnapshotPath),
+        'RUN_EVAL_SOURCE_SNAPSHOT="$1"',
+        'if run_eval_source_snapshot_path_valid; then printf "valid\\n"; else printf "invalid\\n"; fi',
+      ].join("\n") + "\n",
+      { mode: 0o700 },
+    );
+    const validate = (candidate) =>
+      spawnSync(probe, [candidate], { encoding: "utf8" }).stdout.trim();
+    assert.equal(validate(direct), "valid");
+    assert.equal(validate(path.join(direct, "nested")), "invalid");
+    assert.equal(validate(short), "invalid");
+    assert.equal(validate(symlinked), "invalid");
+    assert.equal(
+      validate(`${physicalRoot}/lexical/../${path.basename(direct)}`),
+      "invalid",
+    );
+    assert.equal(
+      validate(path.join(aliasParent, path.basename(direct))),
+      "invalid",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the persistent plan must bind the private source snapshot", () => {
+  const wrapper = runEvalSource("wrapper");
+  const digestBlock = wrapper.match(
+    /# RUN-EVAL-SPLIT-ONLY-BEGIN source-snapshot-digest\n([\s\S]*?)# RUN-EVAL-SPLIT-ONLY-END source-snapshot-digest\n/,
+  )?.[1];
+  assert.ok(digestBlock, "the source-snapshot digest check is missing");
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-source-digest-"));
+  try {
+    const snapshot = path.join(dir, "snapshot");
+    const changed = path.join(dir, "changed");
+    mkdirSync(snapshot);
+    mkdirSync(changed);
+    const names = [
+      "run-eval.sh",
+      "run-eval-source-snapshot.sh",
+      "run-eval-lifecycle.sh",
+      "run-eval-runtime.sh",
+    ];
+    for (const name of names) {
+      writeFileSync(path.join(snapshot, name), "snapshotted " + name + "\n");
+      writeFileSync(path.join(changed, name), "changed " + name + "\n");
+    }
+    const snapshotDigest = orchestratorSourceDigest({
+      files: names.map((name) => path.join(snapshot, name)),
+    });
+    const changedDigest = orchestratorSourceDigest({
+      files: names.map((name) => path.join(changed, name)),
+    });
+    const planFile = path.join(dir, "plan.json");
+    const run = (digest) => {
+      writeFileSync(
+        planFile,
+        JSON.stringify({ inputs: { orchestrator_digest: digest } }),
+      );
+      return spawnSync(
+        "bash",
+        [
+          "-c",
+          [
+            "set -euo pipefail",
+            "SPEC=" + JSON.stringify(repoRoot),
+            "PLAN_JSON=" + JSON.stringify(planFile),
+            "RUN_EVAL_SCRIPT_DIR=" + JSON.stringify(snapshot),
+            "source " +
+              JSON.stringify(runEvalSourcePaths.get("sourceSnapshot")),
+            digestBlock,
+            "printf 'cell-started\\n'",
+          ].join("\n"),
+        ],
+        { encoding: "utf8" },
+      );
+    };
+
+    const mismatched = run(changedDigest);
+    assert.equal(mismatched.status, 1);
+    assert.match(
+      mismatched.stderr,
+      /snapshot differs from the persistent plan/,
+    );
+    assert.doesNotMatch(mismatched.stdout, /cell-started/);
+
+    const matched = run(snapshotDigest);
+    assert.equal(matched.status, 0, matched.stderr);
+    assert.match(matched.stdout, /cell-started/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("the cell reader emits nothing when the plan carries a forged field", () => {
@@ -4817,10 +5818,7 @@ test("the cell reader emits nothing when the plan carries a forged field", () =>
   // substitution and cannot see the writer die. Emitting rows as it goes would
   // run every cell before the offending one and then score that truncated
   // matrix as merely partial, which is what the tab check exists to prevent.
-  const shell = readFileSync(
-    path.join(repoRoot, "scripts/review/run-eval.sh"),
-    "utf8",
-  );
+  const shell = runEvalSourceSet();
   const program = shell.match(
     /cell_rows\(\) \{\n[\s\S]*?node -e '\n([\s\S]*?)\n {2}' "\$PLAN_JSON"/,
   )?.[1];
@@ -5543,10 +6541,7 @@ test("--revalidate-appended treats a base without a ledger as all-appended", () 
 });
 
 test("a scheduled run refuses a checkout that is not at origin/main", () => {
-  const script = readFileSync(
-    path.join(repoRoot, "scripts/review/run-eval.sh"),
-    "utf8",
-  );
+  const script = runEvalSourceSet();
   // The spec worktree pins the contract, but the ledger, the baseline it
   // resolves and the PR commands come from the checkout launchd fires in. A
   // feature branch there would score against the wrong anchor and offer to
@@ -6138,6 +7133,77 @@ test("--revalidate-appended binds partial rows to every scored PR", () => {
   }
 });
 
+test("run evidence reports malformed fixture contracts without hiding result defects", () => {
+  const root = makeRoot();
+  try {
+    const row = makeRow({ fullMatrix: true });
+    const detail = writeRowEvidence(root, row);
+    const resultFile = path.join(detail, "result-1990-pipeline-1.json");
+    const result = JSON.parse(readFileSync(resultFile, "utf8"));
+    result.claims = [null];
+    writeFileSync(resultFile, JSON.stringify(result));
+
+    for (const malformedContract of [
+      null,
+      {},
+      { fixtures: {} },
+      { fixtures: [null] },
+      { fixtures: [{ pr: "1990", scorable_ids: [] }] },
+      { fixtures: [{ pr: 1990, scorable_ids: null }] },
+    ]) {
+      const problems = runEvidenceProblems({
+        dir: detail,
+        row,
+        contract: malformedContract,
+      });
+      assert.equal(
+        problems.filter((problem) =>
+          problem.includes("contract.fixtures must be an array"),
+        ).length,
+        1,
+        problems.join(" | "),
+      );
+      assert.ok(
+        problems.some((problem) =>
+          /claims must contain only non-empty strings/.test(problem),
+        ),
+        problems.join(" | "),
+      );
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("run evidence handles malformed fixture contracts for partial rows", () => {
+  const root = makeRoot();
+  try {
+    const row = makeRow({ status: "partial" });
+    const detail = writeRowEvidence(root, row);
+    row.conditions.replay = structuredClone(row.conditions.pipeline);
+    const problems = runEvidenceProblems({
+      dir: detail,
+      row,
+      contract: { fixtures: [null] },
+    });
+    assert.equal(
+      problems.filter((problem) =>
+        problem.includes("contract.fixtures must be an array"),
+      ).length,
+      1,
+      problems.join(" | "),
+    );
+    assert.ok(
+      problems.some((problem) =>
+        /carries no scored result for row condition replay/.test(problem),
+      ),
+      problems.join(" | "),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("--revalidate-appended checks a row against its committed plan", () => {
   const root = makeRoot();
   try {
@@ -6545,6 +7611,22 @@ test("--revalidate-appended binds candidate status to execution evidence", () =>
     const plan = JSON.parse(readFileSync(planFile, "utf8"));
     plan.inputs = row.inputs;
     writeFileSync(planFile, JSON.stringify(plan));
+    const rowPath = path.join(detail, "row.json");
+    writeFileSync(rowPath, JSON.stringify(row));
+    const validated = cli(["--validate", rowPath, "--json"], { root });
+    assert.equal(validated.status, 1);
+    const validationProblems = JSON.parse(validated.stdout).problems.join(
+      " | ",
+    );
+    assert.match(
+      validationProblems,
+      /result-.* treatment does not match the plan execution inputs/,
+    );
+    assert.match(
+      validationProblems,
+      /calibration\.json treatment does not match the plan execution inputs/,
+    );
+
     writeFileSync(path.join(root, ledgerRelative), `${JSON.stringify(row)}\n`);
 
     const checked = cli(
@@ -6561,11 +7643,11 @@ test("--revalidate-appended binds candidate status to execution evidence", () =>
     const problems = JSON.parse(checked.stdout).problems.join(" | ");
     assert.match(
       problems,
-      /result-.* fingerprint does not match the plan execution inputs/,
+      /result-.* treatment does not match the plan execution inputs/,
     );
     assert.match(
       problems,
-      /calibration\.json fingerprint does not match the plan execution inputs/,
+      /calibration\.json treatment does not match the plan execution inputs/,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -6699,6 +7781,18 @@ test("--revalidate-appended accepts an explicit bridge pairing", () => {
       force: true,
     });
     mkdirSync(path.join(root, newer.detail_dir), { recursive: true });
+    const missingBridgeEvidence = cli(flags, { root });
+    assert.equal(missingBridgeEvidence.status, 1);
+    const missingBridgeProblems = JSON.parse(
+      missingBridgeEvidence.stdout,
+    ).problems.join(" | ");
+    assert.match(missingBridgeProblems, /carries no plan\.json/);
+    assert.match(
+      missingBridgeProblems,
+      /carries no scored result-\*\.json files/,
+    );
+    writeRowEvidence(root, newer);
+
     const retiringVerdict = retiring.verdict;
     retiring.notes = "leak suspected: test fixture";
     retiring.verdict = verdict({ contract, row: retiring }).verdict;
@@ -6830,10 +7924,7 @@ test("run-eval.sh resets a fixture to the commit the contract pins", () => {
   // committed its own edits — or a prompt-injected commit out of the diff under
   // review — makes that commit the fixture for every later cell of the PR, for
   // the novelty judge and for the pre-judge login snapshot.
-  const shell = readFileSync(
-    path.join(repoRoot, "scripts/review/run-eval.sh"),
-    "utf8",
-  );
+  const shell = runEvalSourceSet();
   const reset = shell.match(/\nreset_fixture\(\) \{\n[\s\S]*?\n\}\n/)?.[0];
   assert.ok(reset, "reset_fixture was not found in run-eval.sh");
   const dir = mkdtempSync(path.join(tmpdir(), "review-eval-reset-"));
@@ -6886,10 +7977,7 @@ test("run-eval.sh resets a fixture to the commit the contract pins", () => {
 });
 
 test("every cell resets its fixture through reset_fixture", () => {
-  const shell = readFileSync(
-    path.join(repoRoot, "scripts/review/run-eval.sh"),
-    "utf8",
-  );
+  const shell = runEvalSourceSet();
   // The pinned head travels beside the path, and no bare reset survives: an
   // argument-free one is the whole defect.
   assert.match(shell, /reset_fixture "\$fixture" "\$fixture_head"/);
