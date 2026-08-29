@@ -20,7 +20,7 @@ const expectedScripts = {
   // must hash. The gate schedules it and so does the required `ci` job, which
   // makes it exactly the alias a PR weakening the routing would want to repoint.
   "gate:routing-table:test":
-    "node --test scripts/gate/routing-table/*.test.mjs",
+    'node --test "scripts/gate/routing-table/*.test.mjs"',
   "agent:prewarm": "node scripts/gate/agent-prewarm.mjs",
   "agent:prewarm:test": "node scripts/gate/agent-prewarm.test.mjs",
   "agent:review-materiality": "node scripts/pr/review-materiality.mjs",
