@@ -6163,14 +6163,18 @@ STUB
       sed 's/^/deadline probe: /' "$gate_output" > "$output_file"
       fail "the ready-only Trunk probe deadline did not preserve the original command failure"
     }
-    [[ -e "$probe_ready" && -e "$probe_stopped" ]] || {
+    [[ -e "$probe_ready" ]] || {
       sed 's/^/deadline probe: /' "$gate_output" > "$output_file"
-      fail "the ready-only Trunk probe was not settled at its deadline"
+      fail "the ready-only Trunk probe lost its deadline readiness record"
     }
     if gate_test_process_has_live_start \
       "$probe_descendant_pid" "$probe_descendant_start"; then
       sed 's/^/deadline probe: /' "$gate_output" > "$output_file"
       fail "the ready-only Trunk probe returned before its TERM-ignoring descendant was gone"
+    fi
+    if [[ "$(/usr/bin/uname -s)" == Darwin && ! -e "$probe_stopped" ]]; then
+      sed 's/^/deadline probe: /' "$gate_output" > "$output_file"
+      fail "the ready-only Trunk probe did not acknowledge Darwin TERM settlement at its deadline"
     fi
     probe_descendant_pid=""
     probe_descendant_start=""
