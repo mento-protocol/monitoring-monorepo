@@ -59,13 +59,26 @@ suite_darwin_identity_helper=""
 suite_identity_root=""
 
 prepare_suite_darwin_identity_helper() {
-  local probe
+  local current_uid helper_uid probe
 
   [[ "$(/usr/bin/uname -s 2>/dev/null)" == "Darwin" ]] || return 0
   [[ -n "$suite_identity_root" && -d "$suite_identity_root" ]] || return 1
   [[ -f "$repo_root/scripts/gate/darwin-process-identity-runtime.inc.c" &&
     ! -L "$repo_root/scripts/gate/darwin-process-identity-runtime.inc.c" ]] || return 1
   suite_darwin_identity_helper="$suite_identity_root/darwin-process-identity"
+  if [[ -e "$suite_darwin_identity_helper" ||
+    -L "$suite_darwin_identity_helper" ]]; then
+    [[ -f "$suite_darwin_identity_helper" &&
+      ! -L "$suite_darwin_identity_helper" &&
+      -x "$suite_darwin_identity_helper" ]] || return 1
+    current_uid="$(/usr/bin/id -u)" || return 1
+    helper_uid="$(/usr/bin/stat -f '%u' "$suite_darwin_identity_helper")" ||
+      return 1
+    [[ "$helper_uid" == "$current_uid" ]] || return 1
+    probe="$("$suite_darwin_identity_helper" probe)" || return 1
+    [[ "$probe" == "agentqg-darwin-process-identity-v3" ]] || return 1
+    return 0
+  fi
   /usr/bin/xcrun --sdk macosx clang \
     -std=c11 -Wall -Wextra -Werror -O2 \
     "$repo_root/scripts/gate/darwin-process-identity.c" \
@@ -4441,12 +4454,16 @@ CODEX
       printf '%s credential snapshot survived SIGTERM cleanup: %s\n' "$scenario" "$snapshot_path" >&2
       exit 1
     fi
-    if ! assert_helper_descendant_cleanup_contract \
-      "$scenario helper interruption" "$grandchild_pid"; then
-      cleanup_engine_signal_fixture \
-        "$scenario surviving descendant" \
-        "$engine_identity_dir" "$engine_pid" "$grandchild_pid"
-      exit 1
+    # The probe deliberately leaves the Linux process group. The Darwin wrapper
+    # must still settle it through exact-lineage recovery.
+    if [[ "$host_platform" == "Darwin" || "$scenario" != "claude-probe" ]]; then
+      if ! assert_helper_descendant_cleanup_contract \
+        "$scenario helper interruption" "$grandchild_pid"; then
+        cleanup_engine_signal_fixture \
+          "$scenario surviving descendant" \
+          "$engine_identity_dir" "$engine_pid" "$grandchild_pid"
+        exit 1
+      fi
     fi
     if find "$signal_tmp" -mindepth 1 -maxdepth 1 -type d -name 'autoreview-*' -print -quit | grep -q .; then
       cleanup_engine_signal_fixture \
@@ -4454,6 +4471,20 @@ CODEX
         "$engine_identity_dir" "$engine_pid" "$grandchild_pid"
       printf '%s engine runtime survived SIGTERM cleanup\n' "$scenario" >&2
       exit 1
+    fi
+    if [[ "$host_platform" == "Linux" && "$scenario" == "claude-probe" ]]; then
+      if [[ ! "$grandchild_pid" =~ ^[1-9][0-9]*$ ]]; then
+        printf 'detached probe grandchild recorded an invalid Linux fixture PID\n' >&2
+        exit 1
+      fi
+      if ! kill -KILL -- "$grandchild_pid" 2>/dev/null; then
+        printf 'detached probe grandchild could not be stopped after Linux fixture cleanup\n' >&2
+        exit 1
+      fi
+      if ! wait_for_process_exit_or_zombie "$grandchild_pid"; then
+        printf 'detached probe grandchild survived Linux fixture cleanup\n' >&2
+        exit 1
+      fi
     fi
   done
 
@@ -11019,7 +11050,7 @@ assert.match(
 );
 assert.match(
   lineageStateSource,
-  /linkSync\(path, paths\.current\)[\s\S]*?validateClaimedCurrent\(paths, plan, expectedCanonicalStat\)[\s\S]*?currentMatchesClaimedInode\(path, claimedStat\)/u,
+  /linkSync\(path, paths\.current\)[\s\S]*?validateClaimedCurrent\(paths, plan, expectedCanonicalStat,[\s\S]*?currentMatchesClaimedInode\(path, claimedStat\)/u,
   "the Darwin state transition no longer binds the exact expected-state inode",
 );
 assert.match(

@@ -14935,7 +14935,7 @@ STUB
         entry_contract entry_exact extra; do
         [[ "$version" == agentqg-worker-v1 && -z "$extra" &&
           "$entry_pid" =~ ^[1-9][0-9]*$ && -n "$entry_start" &&
-          "$entry_drain" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ &&
+          "$entry_drain" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,180}-[0-9]{1,10}-[0-9]{1,12}$ &&
           "$entry_contract" =~ ^(portable-marker-v1|darwin-coherent-lineage-v2)$ ]] ||
           return 1
         parallel_detached_stop_exact \
@@ -14952,7 +14952,7 @@ STUB
         entry_contract entry_exact extra; do
         [[ "$version" == agentqg-worker-v1 && -z "$extra" &&
           "$entry_pid" =~ ^[1-9][0-9]*$ && -n "$entry_start" &&
-          "$entry_drain" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || return 1
+          "$entry_drain" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,180}-[0-9]{1,10}-[0-9]{1,12}$ ]] || return 1
         case "$seen" in *" ${entry_pid} "*) return 1 ;; esac
         seen="${seen}${entry_pid} "
         if [[ "$(uname -s)" == Darwin ]]; then
