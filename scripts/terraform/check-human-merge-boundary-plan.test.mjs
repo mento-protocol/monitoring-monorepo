@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
+import { checkPrimeSync, createPrivateKey } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import {
@@ -21,6 +22,7 @@ const POLICY_BASE = Object.freeze({
   human_main_lifecycle_ruleset_enforcement: "active",
   ruleset_audit_active: false,
   local_agent_github_broker_scaffold_enabled: false,
+  local_agent_github_broker_partial_recovery_enabled: false,
   local_agent_github_broker_impersonator: "",
 });
 const BOOTSTRAP_POLICY = Object.freeze({
@@ -33,6 +35,10 @@ const SCAFFOLD_POLICY = Object.freeze({
   human_main_lifecycle_ruleset_enforcement: "disabled",
   local_agent_github_broker_scaffold_enabled: true,
   local_agent_github_broker_impersonator: BROKER_IMPERSONATOR,
+});
+const SCAFFOLD_RECOVERY_POLICY = Object.freeze({
+  ...SCAFFOLD_POLICY,
+  local_agent_github_broker_partial_recovery_enabled: true,
 });
 
 function rulesetAfter({
@@ -415,6 +421,70 @@ expectFailure(
   "create all five resources together",
   SCAFFOLD_POLICY,
 );
+expectPass(
+  plan([phaseFourRuleset, ...partialScaffold]),
+  SCAFFOLD_RECOVERY_POLICY,
+);
+expectPass(
+  plan([phaseFourRuleset, ...brokerScaffoldEntries()]),
+  SCAFFOLD_RECOVERY_POLICY,
+);
+expectFailure(
+  plan([phaseFourRuleset, ...phaseFourScaffold]),
+  "requires at least one existing no-op scaffold member",
+  SCAFFOLD_RECOVERY_POLICY,
+);
+expectFailure(
+  plan([phaseFourRuleset, ...partialScaffold, phaseThreeExtra]),
+  "partial recovery may change only missing members",
+  SCAFFOLD_RECOVERY_POLICY,
+);
+const recoveryChangedNoOp = structuredClone(partialScaffold);
+recoveryChangedNoOp[1].change.after.fixture = "changed-shape";
+expectFailure(
+  plan([phaseFourRuleset, ...recoveryChangedNoOp]),
+  "no-op must preserve the same current resource shape",
+  SCAFFOLD_RECOVERY_POLICY,
+);
+const recoveryCreateWithPriorValue = structuredClone(partialScaffold);
+recoveryCreateWithPriorValue[0].change.before = { unexpected: true };
+expectFailure(
+  plan([phaseFourRuleset, ...recoveryCreateWithPriorValue]),
+  "create must have no prior value",
+  SCAFFOLD_RECOVERY_POLICY,
+);
+const recoveryReplacement = brokerScaffoldEntries();
+recoveryReplacement[2].change.actions = ["create", "delete"];
+expectFailure(
+  plan([phaseFourRuleset, ...recoveryReplacement]),
+  "partial recovery permits only canonical create and no-op",
+  SCAFFOLD_RECOVERY_POLICY,
+);
+expectFailure(
+  plan([activation, ...partialScaffold]),
+  "partial recovery requires the enabled scaffold",
+  {
+    ...SCAFFOLD_RECOVERY_POLICY,
+    human_main_lifecycle_ruleset_enforcement: "active",
+  },
+);
+expectFailure(
+  plan([phaseFourRuleset, ...partialScaffold]),
+  "partial recovery requires the enabled scaffold",
+  {
+    ...SCAFFOLD_RECOVERY_POLICY,
+    ruleset_audit_active: true,
+  },
+);
+expectFailure(
+  plan([phaseFourRuleset, ...partialScaffold]),
+  "partial recovery requires the enabled scaffold",
+  {
+    ...SCAFFOLD_RECOVERY_POLICY,
+    local_agent_github_broker_scaffold_enabled: false,
+    local_agent_github_broker_impersonator: "",
+  },
+);
 expectFailure(
   plan([activation, ...phaseFourScaffold]),
   "pinned, disabled, unchanged lifecycle ruleset",
@@ -605,6 +675,10 @@ for (const policy of [
   { ...POLICY_BASE, local_agent_github_broker_scaffold_enabled: "false" },
   {
     ...POLICY_BASE,
+    local_agent_github_broker_partial_recovery_enabled: "false",
+  },
+  {
+    ...POLICY_BASE,
     local_agent_github_broker_scaffold_enabled: false,
     local_agent_github_broker_impersonator: "group:agents@example.com",
   },
@@ -657,6 +731,16 @@ assert.match(
   /for_each = toset\([\s\S]*?local\.local_agent_github_broker_impersonator/u,
   "the broker impersonator must come from reviewed source",
 );
+assert.match(
+  appSource,
+  /local_agent_github_broker_partial_recovery_enabled\s*=\s*local\.human_merge_boundary_policy\.local_agent_github_broker_partial_recovery_enabled/u,
+  "the partial-recovery lane must come only from reviewed source",
+);
+assert.match(
+  terraformSource,
+  /local\.local_agent_github_broker_partial_recovery_enabled == false[\s\S]*?local\.local_agent_github_broker_scaffold_enabled[\s\S]*?human_main_lifecycle_ruleset_enforcement == "disabled"[\s\S]*?ruleset_audit_active == false/u,
+  "the Terraform source must keep partial recovery bounded to the disabled scaffold phase",
+);
 assert.doesNotMatch(
   appSource,
   /var\.local_agent_github_app_private_key\s*!=\s*""/u,
@@ -694,15 +778,19 @@ for (const resource of [
   );
 }
 
-const pkcs1Pattern =
-  /^-----BEGIN RSA PRIVATE KEY-----\n([A-Za-z0-9+/=]{4,64}\n)+-----END RSA PRIVATE KEY-----\n?$/u;
-const pkcs8Pattern =
-  /^-----BEGIN PRIVATE KEY-----\n([A-Za-z0-9+/=]{4,64}\n)+-----END PRIVATE KEY-----\n?$/u;
-const pkcs1Begin = ["-----BEGIN RSA", "PRIVATE KEY-----"].join(" ");
-const pkcs1End = ["-----END RSA", "PRIVATE KEY-----"].join(" ");
+const canonicalBase64Lines =
+  "(?:[A-Za-z0-9+/]{64}\\n)*(?:[A-Za-z0-9+/]{4}){0,15}(?:[A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2}==)";
+const pkcs1Pattern = new RegExp(
+  `^-----BEGIN RSA PRIVATE KEY-----\\n${canonicalBase64Lines}\\n-----END RSA PRIVATE KEY-----\\n?$`,
+  "u",
+);
+const pkcs8Pattern = new RegExp(
+  `^-----BEGIN PRIVATE KEY-----\\n${canonicalBase64Lines}\\n-----END PRIVATE KEY-----\\n?$`,
+  "u",
+);
 const pkcs8Begin = ["-----BEGIN", "PRIVATE KEY-----"].join(" ");
 const pkcs8End = ["-----END", "PRIVATE KEY-----"].join(" ");
-function acceptsPrivateKeyFixture(value, active = true) {
+function acceptsPrivateKeyEnvelopeFixture(value, active = true) {
   const key = value ?? "";
   return (
     !active ||
@@ -710,25 +798,97 @@ function acceptsPrivateKeyFixture(value, active = true) {
       (pkcs1Pattern.test(key) || pkcs8Pattern.test(key)))
   );
 }
-const validPkcs1 = `${pkcs1Begin}\nQUJDRA==\n${pkcs1End}\n`;
-const validPkcs8 = `${pkcs8Begin}\nQUJDRA==\n${pkcs8End}\n`;
+function bigIntBuffer(value) {
+  let hexadecimal = value.toString(16);
+  if (hexadecimal.length % 2 === 1) hexadecimal = `0${hexadecimal}`;
+  return Buffer.from(hexadecimal, "hex");
+}
+function nextDeterministicPrime(start) {
+  let candidate = start | 1n;
+  while (!checkPrimeSync(bigIntBuffer(candidate), { checks: 32 })) {
+    candidate += 2n;
+  }
+  return candidate;
+}
+function extendedGcd(left, right) {
+  if (right === 0n) return [left, 1n, 0n];
+  const [divisor, x, y] = extendedGcd(right, left % right);
+  return [divisor, y, x - (left / right) * y];
+}
+function modularInverse(value, modulus) {
+  const [divisor, inverse] = extendedGcd(value, modulus);
+  assert.equal(divisor, 1n, "deterministic RSA fixture inputs must be coprime");
+  return ((inverse % modulus) + modulus) % modulus;
+}
+export function deterministicRsaTestKey() {
+  // Fixed prime-search starts produce a synthetic key on every run. No
+  // generated or operator credential is stored in source or test output.
+  const base = 3n << 1022n;
+  const p = nextDeterministicPrime(base + 0x123456789abcdefn);
+  const q = nextDeterministicPrime(base + 0xfedcba987654321n);
+  const e = 65537n;
+  const d = modularInverse(e, (p - 1n) * (q - 1n));
+  const base64Url = (value) => bigIntBuffer(value).toString("base64url");
+  return createPrivateKey({
+    format: "jwk",
+    key: {
+      kty: "RSA",
+      n: base64Url(p * q),
+      e: base64Url(e),
+      d: base64Url(d),
+      p: base64Url(p),
+      q: base64Url(q),
+      dp: base64Url(d % (p - 1n)),
+      dq: base64Url(d % (q - 1n)),
+      qi: base64Url(modularInverse(q, p)),
+    },
+  });
+}
+const deterministicKey = deterministicRsaTestKey();
+const validPkcs1 = deterministicKey
+  .export({
+    format: "pem",
+    type: "pkcs1",
+  })
+  .toString();
+const validPkcs8 = deterministicKey
+  .export({
+    format: "pem",
+    type: "pkcs8",
+  })
+  .toString();
 const oversizedPkcs8 = `${pkcs8Begin}\n${`${"A".repeat(64)}\n`.repeat(1024)}${pkcs8End}\n`;
 for (const [label, value, accepted] of [
   ["omitted", undefined, false],
   ["blank", "", false],
   ["malformed", "-----BEGIN PRIVATE KEY-----\nnot pem!\n", false],
+  [
+    "padding before the final quantum",
+    `${pkcs8Begin}\nQU=JDRA=\n${pkcs8End}\n`,
+    false,
+  ],
+  [
+    "noncanonical short line",
+    `${pkcs8Begin}\nQUJD\nRA==\n${pkcs8End}\n`,
+    false,
+  ],
+  [
+    "canonical non-DER envelope",
+    `${pkcs8Begin}\nQUJDRA==\n${pkcs8End}\n`,
+    true,
+  ],
   ["oversized", oversizedPkcs8, false],
   ["valid PKCS#1", validPkcs1, true],
   ["valid PKCS#8", validPkcs8, true],
 ]) {
   assert.equal(
-    acceptsPrivateKeyFixture(value),
+    acceptsPrivateKeyEnvelopeFixture(value),
     accepted,
     `${label} private-key fixture has the wrong activation result`,
   );
 }
 assert.equal(
-  acceptsPrivateKeyFixture("", false),
+  acceptsPrivateKeyEnvelopeFixture("", false),
   true,
   "an inactive credential must not require key material",
 );
@@ -738,8 +898,8 @@ assert.match(
   "the App key must stay sensitive, ephemeral, and bounded",
 );
 for (const pattern of [
-  "^-----BEGIN RSA PRIVATE KEY-----\\\\n([A-Za-z0-9+/=]{4,64}\\\\n)+-----END RSA PRIVATE KEY-----\\\\n?$",
-  "^-----BEGIN PRIVATE KEY-----\\\\n([A-Za-z0-9+/=]{4,64}\\\\n)+-----END PRIVATE KEY-----\\\\n?$",
+  "^-----BEGIN RSA PRIVATE KEY-----\\\\n([A-Za-z0-9+/]{64}\\\\n)*([A-Za-z0-9+/]{4}){0,15}([A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2}==)\\\\n-----END RSA PRIVATE KEY-----\\\\n?$",
+  "^-----BEGIN PRIVATE KEY-----\\\\n([A-Za-z0-9+/]{64}\\\\n)*([A-Za-z0-9+/]{4}){0,15}([A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2}==)\\\\n-----END PRIVATE KEY-----\\\\n?$",
 ]) {
   assert(
     variableSource.includes(`can(regex("${pattern}"`),

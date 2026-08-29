@@ -12,8 +12,9 @@
 # The App has no Administration permission or ruleset bypass.
 
 locals {
-  local_agent_github_broker_scaffold_enabled = local.human_merge_boundary_policy.local_agent_github_broker_scaffold_enabled
-  local_agent_github_broker_impersonator     = local.human_merge_boundary_policy.local_agent_github_broker_impersonator
+  local_agent_github_broker_scaffold_enabled         = local.human_merge_boundary_policy.local_agent_github_broker_scaffold_enabled
+  local_agent_github_broker_partial_recovery_enabled = local.human_merge_boundary_policy.local_agent_github_broker_partial_recovery_enabled
+  local_agent_github_broker_impersonator             = local.human_merge_boundary_policy.local_agent_github_broker_impersonator
 }
 
 resource "google_service_account" "local_agent_github_broker" {

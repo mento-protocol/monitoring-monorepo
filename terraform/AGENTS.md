@@ -66,12 +66,14 @@ handshake and image pull depend on these boundaries.
 - ADR 0078 owns the human merge boundary. Keep all three lifecycle rules
   Team-only in `pull_request` mode and core ruleset `13494367` unmanaged. Source
   pins the repository, Team, rule ID, enforcement, audit, broker-scaffold gate,
-  and broker impersonator; never move this authority to a tfvar or
-  repository variable. Keep the scaffold gate false until the separate Phase 4
-  source approval. Keep
+  partial-recovery gate, and broker impersonator; never move this authority to
+  a tfvar or repository variable. Keep the scaffold gate false until the
+  separate Phase 4 source approval. Keep the recovery gate false except for the
+  reviewed create/no-op recovery of a failed Phase 4 apply. Keep
   provider targets fixed, Secret Manager write-only, and stronger credentials
-  off agent OSes. The runbook owns custody, approvals, cutover, proof, and
-  rotation.
+  off agent OSes. Parse and exercise the App RSA key only from the wrapper's
+  private tfvars copy. The runbook owns custody, approvals, recovery, cutover,
+  proof, and rotation.
 - Resource address renames need `moved` blocks. To retire a state-managed
   resource without destroying its remote counterpart, use a `removed` block
   with an explicit `destroy` choice.

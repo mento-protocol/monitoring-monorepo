@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import { createPrivateKey } from "node:crypto";
 import {
   chmodSync,
   existsSync,
@@ -18,7 +19,7 @@ import "./production-infra-identity-contract/index.test.mjs";
 import "./sentry/gate/sentry-provider-contract.test.mjs";
 import "./alerts/check-peg-policy-publication.test.mjs";
 import "./terraform/check-metrics-bridge-template-plan.test.mjs";
-import "./terraform/check-human-merge-boundary-plan.test.mjs";
+import { deterministicRsaTestKey } from "./terraform/check-human-merge-boundary-plan.test.mjs";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -34,6 +35,7 @@ const testHumanMergeBoundaryPolicy = Object.freeze({
   human_main_lifecycle_ruleset_enforcement: "active",
   ruleset_audit_active: false,
   local_agent_github_broker_scaffold_enabled: false,
+  local_agent_github_broker_partial_recovery_enabled: false,
   local_agent_github_broker_impersonator: "",
 });
 const defaultLifecycleRuleset = {
@@ -967,7 +969,193 @@ function runPlatformPlanPolicyTests(tempDir) {
   const operatorVarFile = path.join(fixtureRoot, "operator.tfvars");
   writeFileSync(operatorVarFile, 'ephemeral_probe = "present"\n');
 
-  let result = runFail(["apply", "platform"], { env: baseEnv });
+  const activeCredentialPlan = structuredClone(defaultPlatformPlan);
+  activeCredentialPlan.variables = {
+    local_agent_github_app_credential_active: { value: true },
+  };
+  const deterministicKey = deterministicRsaTestKey();
+  const pkcs1 = deterministicKey
+    .export({ format: "pem", type: "pkcs1" })
+    .toString();
+  const pkcs8 = deterministicKey
+    .export({ format: "pem", type: "pkcs8" })
+    .toString();
+  const pkcs1VarFile = path.join(fixtureRoot, "app-key-pkcs1.tfvars");
+  const pkcs8VarFile = path.join(fixtureRoot, "app-key-pkcs8.tfvars.json");
+  writeFileSync(
+    pkcs1VarFile,
+    `local_agent_github_app_private_key = <<APP_PRIVATE_KEY_PEM\n${pkcs1}APP_PRIVATE_KEY_PEM\n`,
+  );
+  writeFileSync(
+    pkcs8VarFile,
+    `${JSON.stringify({ local_agent_github_app_private_key: pkcs8 })}\n`,
+  );
+  for (const keyFile of [pkcs1VarFile, pkcs8VarFile]) {
+    run(["plan", "platform", `-var-file=${keyFile}`], {
+      env: {
+        ...baseEnv,
+        TF_STACKS_TEST_PLAN_JSON: JSON.stringify(activeCredentialPlan),
+      },
+    });
+    assertTerraformCommands(
+      fakeTools.terraformLog,
+      ["init", "plan", "show"],
+      "a canonical parseable test-only RSA App key should pass the private-copy preflight",
+    );
+    assertExactSavedPlanBinding(fakeTools.terraformLog, false);
+    resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+  }
+
+  const malformedKeyCanary = "QUJDRA==";
+  const malformedVarFile = path.join(fixtureRoot, "app-key-malformed.tfvars");
+  writeFileSync(
+    malformedVarFile,
+    `local_agent_github_app_private_key = <<APP_PRIVATE_KEY_PEM\n-----BEGIN PRIVATE KEY-----\n${malformedKeyCanary}\n-----END PRIVATE KEY-----\nAPP_PRIVATE_KEY_PEM\n`,
+  );
+  let result = runFail(["plan", "platform", `-var-file=${malformedVarFile}`], {
+    env: {
+      ...baseEnv,
+      TF_STACKS_TEST_PLAN_JSON: JSON.stringify(activeCredentialPlan),
+    },
+  });
+  assertIncludes(
+    result.stderr,
+    "operator tfvars App key is missing or is not a canonical, parseable 2048-bit-or-stronger RSA",
+    "a base64-shaped non-key must fail the trusted private-key preflight",
+  );
+  assert(
+    !result.stdout.includes(malformedKeyCanary) &&
+      !result.stderr.includes(malformedKeyCanary),
+    "the private-key preflight must not echo rejected key material",
+  );
+  assertTerraformCommands(
+    fakeTools.terraformLog,
+    ["init", "plan", "show"],
+    "an invalid key must stop after the in-memory plan and key checks",
+  );
+  assertExactSavedPlanBinding(fakeTools.terraformLog, false);
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  const smallIntegerBase64Url = (value) => {
+    let hexadecimal = value.toString(16);
+    if (hexadecimal.length % 2 === 1) hexadecimal = `0${hexadecimal}`;
+    return Buffer.from(hexadecimal, "hex").toString("base64url");
+  };
+  // Textbook 61 x 53 RSA values. This deterministic 12-bit fixture is
+  // intentionally unusable and proves that parsing alone is insufficient.
+  const weakRsaKey = createPrivateKey({
+    format: "jwk",
+    key: {
+      kty: "RSA",
+      n: smallIntegerBase64Url(3233),
+      e: smallIntegerBase64Url(17),
+      d: smallIntegerBase64Url(2753),
+      p: smallIntegerBase64Url(61),
+      q: smallIntegerBase64Url(53),
+      dp: smallIntegerBase64Url(53),
+      dq: smallIntegerBase64Url(49),
+      qi: smallIntegerBase64Url(38),
+    },
+  })
+    .export({ format: "pem", type: "pkcs8" })
+    .toString();
+  const weakKeyVarFile = path.join(fixtureRoot, "app-key-weak.tfvars");
+  writeFileSync(
+    weakKeyVarFile,
+    `local_agent_github_app_private_key = <<APP_PRIVATE_KEY_PEM\n${weakRsaKey}APP_PRIVATE_KEY_PEM\n`,
+  );
+  result = runFail(["plan", "platform", `-var-file=${weakKeyVarFile}`], {
+    env: {
+      ...baseEnv,
+      TF_STACKS_TEST_PLAN_JSON: JSON.stringify(activeCredentialPlan),
+    },
+  });
+  assertIncludes(
+    result.stderr,
+    "operator tfvars App key is missing or is not a canonical, parseable 2048-bit-or-stronger RSA",
+    "a parseable but weak RSA private key must fail closed",
+  );
+  assertExactSavedPlanBinding(fakeTools.terraformLog, false);
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  const commentDecoyVarFile = path.join(
+    fixtureRoot,
+    "app-key-comment-decoy.tfvars",
+  );
+  writeFileSync(
+    commentDecoyVarFile,
+    `/*\nlocal_agent_github_app_private_key = <<APP_PRIVATE_KEY_PEM\n${pkcs8}APP_PRIVATE_KEY_PEM\n*/\nlocal_agent_github_app_private_key = <<APP_PRIVATE_KEY_PEM\n-----BEGIN PRIVATE KEY-----\n${malformedKeyCanary}\n-----END PRIVATE KEY-----\nAPP_PRIVATE_KEY_PEM\n`,
+  );
+  result = runFail(["plan", "platform", `-var-file=${commentDecoyVarFile}`], {
+    env: {
+      ...baseEnv,
+      TF_STACKS_TEST_PLAN_JSON: JSON.stringify(activeCredentialPlan),
+    },
+  });
+  assertIncludes(
+    result.stderr,
+    "operator tfvars App key is missing or is not a canonical, parseable 2048-bit-or-stronger RSA",
+    "a valid key inside a block comment must not shadow the active assignment",
+  );
+  assertExactSavedPlanBinding(fakeTools.terraformLog, false);
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  const missingKeyVarFile = path.join(fixtureRoot, "app-key-missing.tfvars");
+  writeFileSync(missingKeyVarFile, "unrelated = true\n");
+  result = runFail(["plan", "platform", `-var-file=${missingKeyVarFile}`], {
+    env: {
+      ...baseEnv,
+      TF_STACKS_TEST_PLAN_JSON: JSON.stringify(activeCredentialPlan),
+    },
+  });
+  assertIncludes(
+    result.stderr,
+    "operator tfvars App key is missing or is not a canonical, parseable 2048-bit-or-stronger RSA",
+    "an active credential with no operator tfvars key must fail closed",
+  );
+  assertExactSavedPlanBinding(fakeTools.terraformLog, false);
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  run(
+    [
+      "plan",
+      "platform",
+      `-var-file=${malformedVarFile}`,
+      `-var-file=${pkcs8VarFile}`,
+    ],
+    {
+      env: {
+        ...baseEnv,
+        TF_STACKS_TEST_PLAN_JSON: JSON.stringify(activeCredentialPlan),
+      },
+    },
+  );
+  assertExactSavedPlanBinding(fakeTools.terraformLog, false);
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  result = runFail(
+    [
+      "plan",
+      "platform",
+      `-var-file=${pkcs8VarFile}`,
+      `-var-file=${malformedVarFile}`,
+    ],
+    {
+      env: {
+        ...baseEnv,
+        TF_STACKS_TEST_PLAN_JSON: JSON.stringify(activeCredentialPlan),
+      },
+    },
+  );
+  assertIncludes(
+    result.stderr,
+    "operator tfvars App key is missing or is not a canonical, parseable 2048-bit-or-stronger RSA",
+    "the key preflight must follow Terraform's last explicit var-file precedence",
+  );
+  assertExactSavedPlanBinding(fakeTools.terraformLog, false);
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  result = runFail(["apply", "platform"], { env: baseEnv });
   assertIncludes(
     result.stderr,
     "requires exactly one -auto-approve acknowledgement",

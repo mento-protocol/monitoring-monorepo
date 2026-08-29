@@ -80,11 +80,22 @@ During initial ruleset creation, it rejects every other non-no-op action. When
 the reviewed broker-scaffold gate first becomes true, it requires the complete
 five-resource create set and rejects every unrelated change.
 
+A platform apply can save part of the five-resource scaffold before a later
+create fails. A separate reviewed partial-recovery gate is false during normal
+provisioning. When that gate is true, the exact plan guard permits only the
+canonical five scaffold members. Each member must be a create or a no-op with
+the same before and after shape. At least one member must already be a no-op
+when the plan has creates.
+The pinned lifecycle ruleset must be disabled and unchanged. The audit must be
+inactive. The guard rejects a replacement, deletion, update, all-five create,
+or unrelated action. After recovery reaches an all-no-op plan, reviewed source
+must return the recovery gate to false before other platform work continues.
+
 The reviewed policy records the repository, Team ID, managed lifecycle ruleset
-ID, desired enforcement state, drift-audit state, broker-scaffold gate, and
-broker impersonator. The initial source uses zero ID sentinels, disabled
-enforcement, an empty impersonator, and a false scaffold gate. The state
-changes in separate reviewed phases:
+ID, desired enforcement state, drift-audit state, broker-scaffold gate,
+partial-recovery gate, and broker impersonator. The initial source uses zero ID
+sentinels, disabled enforcement, an empty impersonator, and false scaffold and
+recovery gates. The state changes in separate reviewed phases:
 
 1. A human creates and verifies the Team. Source pins its positive numeric ID.
 2. An approved Phase 3 platform apply creates only the lifecycle ruleset with
@@ -188,12 +199,18 @@ outside the cutover and must not have repository write access.
 
 A human creates the App and downloads its initial PEM outside every agent
 surface. The operator transfers the PEM through the approved private tfvars
-path. Credential activation accepts only a bounded PKCS#1 or PKCS#8 PEM
-envelope. An omitted, blank, malformed, or larger-than-64-KiB value fails before
-apply. Terraform sends the accepted ephemeral value only to Secret Manager's
-write-only field. The exact plan wrapper uses one private mode-`0600`
-variable-file copy inside its mode-`0700` plan directory and removes that
-directory on success or failure.
+path. Credential activation requires the runbook's exact literal heredoc. The
+Terraform variable check accepts only canonical base64 layout in a bounded RSA
+PKCS#1 or unencrypted PKCS#8 envelope. The exact plan wrapper then parses the
+private key from its copied tfvars file with Node `crypto.createPrivateKey`,
+requires a 2048-bit-or-stronger RSA key, and performs one in-memory RSA-SHA256
+private operation. An omitted, blank, malformed, non-RSA, weak, encrypted, or
+larger-than-64-KiB value fails before apply with a fixed error. Terraform sends
+the accepted ephemeral value only to Secret Manager's write-only field. The
+wrapper uses one private mode-`0600` variable-file copy inside its mode-`0700`
+plan directory and removes that directory on success or failure. It does not
+pass the key through an argument or environment variable and does not write a
+second copy.
 
 The plan wrapper rejects the App PEM and the platform GitHub PAT in environment
 variables and CLI `-var` arguments. It uses fixed errors that cannot echo an
@@ -236,6 +253,9 @@ These actions require separate human approvals:
 - disabled ruleset plan and apply;
 - broker-scaffold source enablement and impersonator pin;
 - App-key plan and apply;
+- partial-recovery source enablement and bounded recovery apply after a failed
+  Phase 4 apply;
+- partial-recovery source disablement after an all-no-op recovery plan;
 - root-owned broker installation;
 - local and cloud credential cutover;
 - active ruleset plan and apply;

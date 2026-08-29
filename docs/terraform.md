@@ -93,19 +93,23 @@ owns the exact-plan boundary.
 proof, rollback, and import deferral. Each needs approval; source merge is inert.
 
 Source pins the repository, Team, managed rule ID/enforcement, audit,
-broker-scaffold gate, and broker principal. Reviewed source replaces zero
-sentinels. Phase 3 creates only a disabled creation/update/deletion rule with
-one Team `pull_request` bypass. A separate Phase 4 source change enables the
-five-resource broker scaffold and pins its impersonator. Its plan may create
-only that complete scaffold and credential set. Later plans use the pinned
-ruleset ID after cutover. Core rule `13494367` stays unmanaged because provider
-`6.12.1` loses its unattributed-change field.
+broker-scaffold gate, partial-recovery gate, and broker principal. Reviewed
+source replaces zero sentinels. Phase 3 creates only a disabled
+creation/update/deletion rule with one Team `pull_request` bypass. A separate
+Phase 4 source change enables the five-resource broker scaffold and pins its
+impersonator. Its first plan may create only that complete scaffold and
+credential set. A reviewed recovery gate permits only the same canonical
+resources as a bounded create/no-op mix after a partial apply. Later plans use
+the pinned ruleset ID after cutover. Core rule `13494367` stays unmanaged
+because provider `6.12.1` loses its unattributed-change field.
 
-Credential activation rejects an omitted, blank, malformed, or larger than
-64 KiB App key. The broker keeps its PEM, JWT, and token outside agents. Git,
-workflow, readiness, and transactional board lanes stay unavailable. Stronger
-credentials stay outside agent OSes. Dependabot auto-merge drains before live
-proof and an audit with `main-ruleset-audit state=ok`.
+Credential activation rejects an omitted, blank, malformed, non-RSA, weak,
+encrypted, or larger than 64 KiB App key. The wrapper checks the canonical PEM
+envelope, parses and exercises the key in memory, and emits only a fixed error.
+The broker keeps its PEM, JWT, and token outside agents. Git, workflow,
+readiness, and transactional board lanes stay unavailable. Stronger credentials
+stay outside agent OSes. Dependabot auto-merge drains before live proof and an
+audit with `main-ruleset-audit state=ok`.
 
 Vercel retains Administration plus Contents as a Free-plan residual. It can
 change the rule and then `main`; drift is detective only.
@@ -208,6 +212,20 @@ platform plan/apply by guarding the Metrics Bridge template, ADR 0055 recovery,
 and ADR 0078 lifecycle rules through
 `check-human-merge-boundary-plan.mjs`. Issue #1576 owns the broader policy. The
 other apply paths retain their documented apply-time re-plan window.
+
+The first local-agent broker-scaffold apply requires all five creates. If that
+apply saves only part of the scaffold, use the reviewed partial-recovery source
+gate in the App credential runbook. It permits only canonical create/no-op
+scaffold members with a disabled no-op lifecycle ruleset and no unrelated
+action. Do not use a direct retry, target, import, replacement, or manual state
+edit.
+
+When the App credential is active, the platform wrapper reads the key only from
+its private mode-`0600` tfvars copy. It checks canonical PEM syntax, parses and
+exercises a 2048-bit-or-stronger RSA key in memory, and emits only a fixed error
+for invalid input. It does not pass the key in argv or the environment and does
+not persist another copy. The exact activation and recovery procedures are in
+[`docs/notes/local-agent-github-app-credential.md`](notes/local-agent-github-app-credential.md).
 
 ## Identity bootstrap, routing cutover, and authority removal
 

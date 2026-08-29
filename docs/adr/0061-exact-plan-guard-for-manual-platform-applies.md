@@ -56,6 +56,11 @@ per command:
   changes the binary plan to mode `0600`. Plan and apply use the same copies.
 - It captures `terraform show -json` in memory with a bounded buffer. It never
   writes the JSON or prints plan values.
+- When the local-agent App credential is active, it reads the key only from the
+  private variable-file copy. It requires the runbook's literal heredoc or a
+  JSON string, parses a 2048-bit-or-stronger RSA PKCS#1 or unencrypted PKCS#8
+  key in memory, and performs one RSA-SHA256 private operation. A fixed error
+  rejects a missing or unusable key without printing it.
 - It reads the literal rollout marker from the verified source and checks it
   against the saved plan. Stable mode permits only a no-op or service-level
   update whose complete known template and revision are unchanged. Rollout mode
@@ -71,6 +76,11 @@ per command:
   plans must use the source-pinned managed ruleset ID. Every plan rejects core
   ruleset ID `13494367`. The exact Team, repository, lifecycle rules,
   enforcement transition, and GitHub provider endpoint must stay known.
+- The first broker-scaffold plan requires all five canonical creates. A
+  reviewed recovery gate permits only a partial create/no-op mix after a failed
+  apply. It requires a disabled no-op lifecycle ruleset, an inactive audit, no
+  replacement, and no unrelated action. Recovery must reach all no-op and then
+  return the source gate to false.
 - ADR 0055's exact `-refresh=false` controller-role target is the only target
   exception. Terraform marks that target plan `complete: false`; only this
   recovery may use that incomplete envelope, and its entire managed non-no-op

@@ -71,17 +71,21 @@ github_token = "github_pat_..."
 # source change enables the scaffold and pins its impersonator before these
 # values can create anything. That guarded plan must create the service account,
 # secret container, credential version, accessor binding, and impersonation
-# binding together, with no unrelated change.
+# binding together, with no unrelated change. A separate reviewed source gate
+# permits only the same five addresses as a create/no-op mix after a partial
+# apply. The recovery gate returns to false after an all-no-op plan.
 local_agent_github_app_id                           = 0
 local_agent_github_app_installation_id              = 0
 local_agent_github_app_credential_active            = false
 local_agent_github_app_private_key_rotation_counter = 0
-# When credential_active is true, use a complete PKCS#1 or PKCS#8 PEM envelope
-# of at most 65,536 bytes. Omitted, blank, malformed, and oversized values fail
-# during input validation. Keep the real value only in this gitignored,
-# operator-owned file.
-# local_agent_github_app_private_key = <<-PEM
-#   <operator-supplied PEM private key>
+# When credential_active is true, use the exact unindented literal heredoc below
+# with a canonical RSA PKCS#1 or unencrypted PKCS#8 PEM of at most 65,536 bytes.
+# Terraform checks the envelope and base64 layout. The guarded wrapper parses
+# and exercises the RSA key in memory before apply. Omitted, blank, malformed,
+# non-RSA, weak, and oversized values fail closed. Keep the real value only in
+# this gitignored, operator-owned file.
+# local_agent_github_app_private_key = <<PEM
+# <operator-supplied PEM private key, starting at column 1>
 # PEM
 
 # Dedicated READ-ONLY audit PAT for the daily platform-settings drift check

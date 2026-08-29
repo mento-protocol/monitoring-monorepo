@@ -106,10 +106,11 @@ creates the App JWT and installation token in memory. None of the three values
 may reach stdout, stderr, returned JSON, a temporary file, the agent process,
 or a caller-controlled child.
 
-Checked-in source keeps the broker scaffold absent. The reviewed policy gate is
-false and its impersonator is empty. A separate Phase 4 source change must
-enable the complete scaffold and pin its one impersonating service account
-before the credential plan can pass.
+Checked-in source keeps the broker scaffold absent. The reviewed scaffold and
+partial-recovery gates are false, and the impersonator is empty. A separate
+Phase 4 source change must enable the complete scaffold and pin its one
+impersonating service account before the credential plan can pass. The recovery
+gate stays false during the ordinary all-five create.
 
 ## Accepted residuals
 
@@ -194,7 +195,9 @@ sync roots, and backup roots. Configure the browser to use that directory.
 
 Generate one key. Require one regular operator-owned PEM file. Set its mode to
 `0600` before transfer. Do not print its contents. Transfer it once into the
-mode-`0600`, gitignored operator platform tfvars file. Do not use an argument,
+mode-`0600`, gitignored operator platform tfvars file. Use the exact unindented
+literal heredoc from `terraform/terraform.tfvars.example`. The opening marker,
+PEM lines, and closing marker must start at column 1. Do not use an argument,
 environment variable, command substitution, clipboard history, repository
 file, log, or extra temporary file.
 
@@ -209,8 +212,9 @@ The reviewed policy starts with:
 - the verified positive Team ID;
 - managed lifecycle ruleset ID `0`;
 - enforcement disabled;
-- drift audit inactive.
+- drift audit inactive;
 - broker scaffold disabled;
+- broker partial recovery disabled;
 - broker impersonator empty.
 
 From a clean current-`main` operator checkout, run the guarded platform
@@ -247,16 +251,20 @@ ID must already be positive and pinned.
 
 Use the operator tfvars file for the App and installation IDs, positive
 rotation counter, credential-active selector, and App key. When the selector is
-true, Terraform accepts only a complete PKCS#1 or PKCS#8 PEM envelope no larger
-than 65,536 bytes. An omitted, blank, malformed, or oversized key fails during
-input validation before apply. The key remains sensitive and ephemeral. It
-does not enter a managed-resource lifecycle condition, output, log, plan, or
-state.
+true, Terraform accepts only canonical base64 lines in an RSA PKCS#1 or
+unencrypted PKCS#8 PEM envelope no larger than 65,536 bytes. The platform
+wrapper reads that value from its private tfvars copy. It parses the key with
+Node `crypto.createPrivateKey`, requires a 2048-bit-or-stronger RSA key, and
+performs one RSA-SHA256 private operation in memory. An omitted, blank,
+malformed, non-RSA, weak, encrypted, or oversized key fails with a fixed error
+before apply. The key remains sensitive and ephemeral. It does not enter a
+managed-resource lifecycle condition, output, log, plan, or state.
 
 The platform wrapper rejects the App key and platform GitHub PAT in
 `TF_VAR_*`, ambient GitHub authentication, and CLI `-var` arguments. It copies
-the variable file once into its private plan directory. Terraform sends the
-key only to the write-only Secret Manager field.
+the variable file once into its private plan directory. It does not create a
+second key copy or pass the key to a child through argv or the environment.
+Terraform sends the key only to the write-only Secret Manager field.
 
 Review the guarded plan. Require only the expected service account, secret,
 write-only version, accessor binding, and exact impersonation binding as
@@ -266,6 +274,38 @@ partial scaffold, an unrelated change, or broker provisioning while the source
 gate is false. Obtain separate apply approval. Apply the checked plan. Remove
 any obsolete operator key copy only when the approved rotation and recovery
 process no longer needs it. Revoke the key if custody becomes uncertain.
+
+### Phase 4 partial-apply recovery
+
+Terraform apply is not an atomic five-resource transaction. If it stops after
+one to four scaffold creates succeed, do not retry through the ordinary apply
+lane. Do not delete, replace, import, or edit state. Preserve the operator
+tfvars file and key custody. Record the failed command, plan summary, completed
+resource addresses, error, actor, and time.
+
+Use a separate reviewed source change to set
+`local_agent_github_broker_partial_recovery_enabled` to `true`. Keep the
+scaffold enabled. Keep the managed lifecycle ruleset ID pinned, its enforcement
+disabled, and the audit inactive. From clean current `main`, run the guarded
+plan with the same operator tfvars file. Require:
+
+- exactly the five canonical scaffold resource addresses;
+- one to four `create` actions for missing members;
+- one to four same-shape `no-op` actions for members already in state;
+- the pinned disabled lifecycle ruleset as a no-op;
+- no update, replacement, deletion, target, refresh exception, or unrelated
+  action.
+
+The recovery gate rejects an all-five create. Return the source gate to false
+and use the ordinary Phase 4 lane if no member exists. Stop and request a
+separate state-recovery design if the plan cannot represent the live resources
+as this exact create/no-op mix.
+
+Review the full recovery plan. Obtain separate approval for its apply. Repeat
+the same bounded recovery plan after another partial failure. After a successful
+apply, require an all-five no-op plan. Use a final reviewed source change to set
+the partial-recovery gate to `false`. Require another no-op plan before any
+other platform change or lifecycle activation.
 
 ## Phase 5: install the trusted host boundary
 

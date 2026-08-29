@@ -69,6 +69,10 @@ resource "github_repository_ruleset" "human_only_main_lifecycle" {
           local.local_agent_github_broker_scaffold_enabled == true
         ) &&
         (
+          local.local_agent_github_broker_partial_recovery_enabled == false ||
+          local.local_agent_github_broker_partial_recovery_enabled == true
+        ) &&
+        (
           local.local_agent_github_broker_scaffold_enabled ?
           (
             local.human_main_lifecycle_ruleset_id > 0 &&
@@ -79,6 +83,15 @@ resource "github_repository_ruleset" "human_only_main_lifecycle" {
         (
           local.local_agent_github_broker_scaffold_enabled ||
           var.local_agent_github_app_credential_active == false
+        ) &&
+        (
+          local.local_agent_github_broker_partial_recovery_enabled == false ||
+          (
+            local.local_agent_github_broker_scaffold_enabled &&
+            local.human_main_lifecycle_ruleset_id > 0 &&
+            local.human_main_lifecycle_ruleset_enforcement == "disabled" &&
+            local.human_merge_boundary_policy.ruleset_audit_active == false
+          )
         ) &&
         (
           local.human_main_lifecycle_ruleset_id != 0 ||
@@ -95,7 +108,7 @@ resource "github_repository_ruleset" "human_only_main_lifecycle" {
           )
         )
       )
-      error_message = "terraform/human-merge-boundary-policy.json must pin the repository, approved Team ID, non-core managed lifecycle ruleset ID, valid enforcement state, ordered audit activation, and a coherent broker-scaffold gate. Initial ruleset creation requires ID 0, disabled enforcement, an inactive audit, a disabled broker scaffold, and inactive App credentials."
+      error_message = "terraform/human-merge-boundary-policy.json must pin the repository, approved Team ID, non-core managed lifecycle ruleset ID, valid enforcement state, ordered audit activation, and coherent broker-scaffold and partial-recovery gates. Initial ruleset creation requires ID 0, disabled enforcement, an inactive audit, a disabled broker scaffold and recovery lane, and inactive App credentials."
     }
   }
 }

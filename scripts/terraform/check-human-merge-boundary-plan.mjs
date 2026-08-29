@@ -132,6 +132,8 @@ function exactIdentity(entry) {
 function validateSourcePolicy(policy, errors) {
   const brokerScaffoldEnabled =
     policy?.local_agent_github_broker_scaffold_enabled;
+  const brokerPartialRecoveryEnabled =
+    policy?.local_agent_github_broker_partial_recovery_enabled;
   const brokerImpersonator = policy?.local_agent_github_broker_impersonator;
   if (
     !isObject(policy) ||
@@ -145,6 +147,7 @@ function validateSourcePolicy(policy, errors) {
     ) ||
     typeof policy.ruleset_audit_active !== "boolean" ||
     typeof brokerScaffoldEnabled !== "boolean" ||
+    typeof brokerPartialRecoveryEnabled !== "boolean" ||
     typeof brokerImpersonator !== "string" ||
     (brokerScaffoldEnabled
       ? !/^serviceAccount:[^@\s]+@[^@\s]+\.iam\.gserviceaccount\.com$/u.test(
@@ -153,7 +156,7 @@ function validateSourcePolicy(policy, errors) {
       : brokerImpersonator !== "")
   ) {
     errors.push(
-      "source policy must pin the repository, approved positive Team ID, non-negative managed lifecycle ruleset ID, valid enforcement state, boolean audit state, boolean broker-scaffold gate, and one service-account principal only while that gate is enabled; replace the zero Team sentinel first",
+      "source policy must pin the repository, approved positive Team ID, non-negative managed lifecycle ruleset ID, valid enforcement state, boolean audit state, boolean broker-scaffold and partial-recovery gates, and one service-account principal only while the scaffold gate is enabled; replace the zero Team sentinel first",
     );
     return undefined;
   }
@@ -179,9 +182,21 @@ function validateSourcePolicy(policy, errors) {
       "broker scaffold enablement requires a source-pinned non-core managed lifecycle ruleset ID",
     );
   }
+  if (
+    brokerPartialRecoveryEnabled &&
+    (!brokerScaffoldEnabled ||
+      rulesetId <= 0 ||
+      enforcement !== "disabled" ||
+      auditActive)
+  ) {
+    errors.push(
+      "broker scaffold partial recovery requires the enabled scaffold, a source-pinned managed ruleset ID, disabled enforcement, and an inactive audit",
+    );
+  }
   return {
     auditActive,
     brokerImpersonator,
+    brokerPartialRecoveryEnabled,
     brokerScaffoldEnabled,
     enforcement,
     rulesetId,
@@ -205,6 +220,29 @@ function exactBrokerScaffoldIdentity(entry, spec, expected) {
     entry?.deposed === undefined &&
     entry?.previous_address === undefined
   );
+}
+
+function validateCanonicalBrokerScaffoldChange(entry, errors) {
+  const actions = entry?.change?.actions;
+  if (sameActions(actions, ["create"])) {
+    if (entry?.change?.before !== null || !isObject(entry?.change?.after)) {
+      errors.push(
+        "a broker scaffold create must have no prior value and one known current resource shape",
+      );
+    }
+    return;
+  }
+  if (sameActions(actions, ["no-op"])) {
+    if (
+      !isObject(entry?.change?.before) ||
+      !isObject(entry?.change?.after) ||
+      !isDeepStrictEqual(entry.change.before, entry.change.after)
+    ) {
+      errors.push(
+        "a broker scaffold no-op must preserve the same current resource shape",
+      );
+    }
+  }
 }
 
 function nonNoOpEntries(plan) {
@@ -255,6 +293,7 @@ function validateBrokerScaffold(plan, rulesetEntry, expected, errors) {
     if (!exactBrokerScaffoldIdentity(entry, spec, expected)) {
       errors.push("a broker scaffold resource has an unexpected identity");
     }
+    validateCanonicalBrokerScaffoldChange(entry, errors);
     const actions = entry?.change?.actions;
     const allowed =
       sameActions(actions, ["create"]) ||
@@ -273,13 +312,44 @@ function validateBrokerScaffold(plan, rulesetEntry, expected, errors) {
   const replacementEntries = related.filter((entry) =>
     sameActions(entry?.change?.actions, ["create", "delete"]),
   );
-  if (createEntries.length > 0) {
+  const outsideScaffold = nonNoOpEntries(plan).filter(
+    (entry) => !related.includes(entry),
+  );
+  if (expected.brokerPartialRecoveryEnabled) {
     if (
+      expected.rulesetId <= 0 ||
+      expected.enforcement !== "disabled" ||
+      expected.auditActive ||
+      !sameActions(rulesetEntry?.change?.actions, ["no-op"])
+    ) {
+      errors.push(
+        "broker scaffold partial recovery requires a pinned, disabled, unchanged lifecycle ruleset and an inactive audit",
+      );
+    }
+    if (replacementEntries.length > 0) {
+      errors.push(
+        "broker scaffold partial recovery permits only canonical create and no-op scaffold actions",
+      );
+    }
+    if (outsideScaffold.length > 0) {
+      errors.push(
+        "broker scaffold partial recovery may change only missing members of the documented five-resource scaffold and credential set",
+      );
+    }
+  }
+  if (createEntries.length > 0) {
+    if (expected.brokerPartialRecoveryEnabled) {
+      if (createEntries.length >= BROKER_SCAFFOLD_RESOURCE_SPECS.length) {
+        errors.push(
+          "broker scaffold partial recovery requires at least one existing no-op scaffold member; disable the recovery gate for an ordinary all-five create",
+        );
+      }
+    } else if (
       createEntries.length !== BROKER_SCAFFOLD_RESOURCE_SPECS.length ||
       replacementEntries.length > 0
     ) {
       errors.push(
-        "initial broker scaffold provisioning must create all five resources together",
+        "initial broker scaffold provisioning must create all five resources together unless the reviewed partial-recovery gate is enabled",
       );
     }
     if (
@@ -292,10 +362,7 @@ function validateBrokerScaffold(plan, rulesetEntry, expected, errors) {
         "initial broker scaffold provisioning requires a pinned, disabled, unchanged lifecycle ruleset and an inactive audit",
       );
     }
-    const outsideScaffold = nonNoOpEntries(plan).filter(
-      (entry) => !related.includes(entry),
-    );
-    if (outsideScaffold.length > 0) {
+    if (outsideScaffold.length > 0 && !expected.brokerPartialRecoveryEnabled) {
       errors.push(
         "initial broker scaffold provisioning may change only the documented five-resource scaffold and credential set",
       );
