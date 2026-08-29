@@ -104,12 +104,15 @@ the pinned ruleset ID after cutover. Core rule `13494367` stays unmanaged
 because provider `6.12.1` loses its unattributed-change field.
 
 Credential activation rejects an omitted, blank, malformed, non-RSA, weak,
-encrypted, or larger than 64 KiB App key. The wrapper checks the canonical PEM
-envelope, parses and exercises the key in memory, and emits only a fixed error.
-The broker keeps its PEM, JWT, and token outside agents. Git, workflow,
-readiness, and transactional board lanes stay unavailable. Stronger credentials
-stay outside agent OSes. Dependabot auto-merge drains before live proof and an
-audit with `main-ruleset-audit state=ok`.
+encrypted, or larger than 64 KiB App key. The wrapper requires the exact
+unindented HCL heredoc and rejects JSON assignments of the key. It checks the
+canonical PEM envelope and unused base64 pad bits. It also requires an exact
+decode and re-encode round trip before it parses and exercises the key in
+memory. It emits only a fixed error. The broker keeps its PEM, JWT, and token
+outside agents. Git, workflow, readiness, and transactional board lanes stay
+unavailable. Stronger credentials stay outside agent OSes. Dependabot
+auto-merge drains before live proof and an audit with
+`main-ruleset-audit state=ok`.
 
 Vercel retains Administration plus Contents as a Free-plan residual. It can
 change the rule and then `main`; drift is detective only.
@@ -221,10 +224,12 @@ action. Do not use a direct retry, target, import, replacement, or manual state
 edit.
 
 When the App credential is active, the platform wrapper reads the key only from
-its private mode-`0600` tfvars copy. It checks canonical PEM syntax, parses and
-exercises a 2048-bit-or-stronger RSA key in memory, and emits only a fixed error
-for invalid input. It does not pass the key in argv or the environment and does
-not persist another copy. The exact activation and recovery procedures are in
+its private mode-`0600` HCL tfvars copy. It rejects JSON key assignments. It
+checks canonical PEM syntax and base64 pad bits, verifies an exact decode and
+re-encode round trip, parses and exercises a 2048-bit-or-stronger RSA key in
+memory, and emits only a fixed error for invalid input. It does not pass the key
+in argv or the environment and does not persist another copy. The exact
+activation and recovery procedures are in
 [`docs/notes/local-agent-github-app-credential.md`](notes/local-agent-github-app-credential.md).
 
 ## Identity bootstrap, routing cutover, and authority removal

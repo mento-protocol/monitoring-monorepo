@@ -199,18 +199,21 @@ outside the cutover and must not have repository write access.
 
 A human creates the App and downloads its initial PEM outside every agent
 surface. The operator transfers the PEM through the approved private tfvars
-path. Credential activation requires the runbook's exact literal heredoc. The
-Terraform variable check accepts only canonical base64 layout in a bounded RSA
-PKCS#1 or unencrypted PKCS#8 envelope. The exact plan wrapper then parses the
-private key from its copied tfvars file with Node `crypto.createPrivateKey`,
-requires a 2048-bit-or-stronger RSA key, and performs one in-memory RSA-SHA256
-private operation. An omitted, blank, malformed, non-RSA, weak, encrypted, or
-larger-than-64-KiB value fails before apply with a fixed error. Terraform sends
-the accepted ephemeral value only to Secret Manager's write-only field. The
-wrapper uses one private mode-`0600` variable-file copy inside its mode-`0700`
-plan directory and removes that directory on success or failure. It does not
-pass the key through an argument or environment variable and does not write a
-second copy.
+path. Credential activation requires the runbook's exact unindented HCL
+literal heredoc. The wrapper rejects every JSON variable-file assignment of
+the key, regardless of activation and including one that a later file would
+override. The Terraform variable check accepts only canonical base64 layout
+and canonical unused pad bits in a bounded RSA PKCS#1 or unencrypted PKCS#8
+envelope. The exact plan wrapper normalizes the PEM body, decodes it, and
+requires an exact base64 re-encoding before it parses the private key with Node
+`crypto.createPrivateKey`. It requires a 2048-bit-or-stronger RSA key and
+performs one in-memory RSA-SHA256 private operation. An omitted, blank,
+malformed, non-RSA, weak, encrypted, or larger-than-64-KiB value fails before
+apply with a fixed error. Terraform sends the accepted ephemeral value only to
+Secret Manager's write-only field. The wrapper uses one private mode-`0600`
+variable-file copy inside its mode-`0700` plan directory and removes that
+directory on success or failure. It does not pass the key through an argument
+or environment variable and does not write a second copy.
 
 The plan wrapper rejects the App PEM and the platform GitHub PAT in environment
 variables and CLI `-var` arguments. It uses fixed errors that cannot echo an

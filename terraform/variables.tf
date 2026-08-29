@@ -72,7 +72,7 @@ variable "local_agent_github_app_installation_id" {
 }
 
 variable "local_agent_github_app_private_key" {
-  description = "RSA PEM private key for the local-agent GitHub App. Supply it to Terraform as the runbook's exact literal heredoc in an operator-owned gitignored tfvars file for the separately approved credential apply. The initial browser download follows the transient intake, removal, and revoke-on-uncertain-custody procedure. The guarded wrapper copies the tfvars file once into its private exact-plan directory, parses and exercises the key in memory with Node crypto, and deletes the directory in `finally`. The ephemeral value terminates at a Secret Manager write-only field and is omitted from plan and state."
+  description = "RSA PEM private key for the local-agent GitHub App. Supply it to Terraform as the runbook's exact unindented literal heredoc in an operator-owned gitignored HCL tfvars file for the separately approved credential apply. JSON assignment of this key is forbidden. The initial browser download follows the transient intake, removal, and revoke-on-uncertain-custody procedure. The guarded wrapper copies the tfvars file once into its private exact-plan directory, verifies canonical base64, parses and exercises the key in memory with Node crypto, and deletes the directory in `finally`. The ephemeral value terminates at a Secret Manager write-only field and is omitted from plan and state."
   type        = string
   default     = ""
   sensitive   = true
@@ -84,12 +84,12 @@ variable "local_agent_github_app_private_key" {
       (
         length(var.local_agent_github_app_private_key) <= 65536 &&
         (
-          can(regex("^-----BEGIN RSA PRIVATE KEY-----\\n([A-Za-z0-9+/]{64}\\n)*([A-Za-z0-9+/]{4}){0,15}([A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2}==)\\n-----END RSA PRIVATE KEY-----\\n?$", var.local_agent_github_app_private_key)) ||
-          can(regex("^-----BEGIN PRIVATE KEY-----\\n([A-Za-z0-9+/]{64}\\n)*([A-Za-z0-9+/]{4}){0,15}([A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2}==)\\n-----END PRIVATE KEY-----\\n?$", var.local_agent_github_app_private_key))
+          can(regex("^-----BEGIN RSA PRIVATE KEY-----\\n([A-Za-z0-9+/]{64}\\n)*([A-Za-z0-9+/]{4}){0,15}([A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=|[A-Za-z0-9+/][AQgw]==)\\n-----END RSA PRIVATE KEY-----\\n?$", var.local_agent_github_app_private_key)) ||
+          can(regex("^-----BEGIN PRIVATE KEY-----\\n([A-Za-z0-9+/]{64}\\n)*([A-Za-z0-9+/]{4}){0,15}([A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=|[A-Za-z0-9+/][AQgw]==)\\n-----END PRIVATE KEY-----\\n?$", var.local_agent_github_app_private_key))
         )
       )
     )
-    error_message = "Active local agent GitHub App credentials require a canonical RSA PKCS#1 or unencrypted PKCS#8 PEM envelope of at most 65536 bytes. The guarded wrapper separately parses and exercises the key before apply."
+    error_message = "Active local agent GitHub App credentials require a canonical RSA PKCS#1 or unencrypted PKCS#8 PEM envelope with canonical base64 pad bits and at most 65536 bytes. The guarded wrapper separately verifies the base64 encoding, parses the key, and exercises it before apply."
   }
 }
 

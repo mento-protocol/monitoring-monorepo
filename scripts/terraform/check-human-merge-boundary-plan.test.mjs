@@ -779,7 +779,7 @@ for (const resource of [
 }
 
 const canonicalBase64Lines =
-  "(?:[A-Za-z0-9+/]{64}\\n)*(?:[A-Za-z0-9+/]{4}){0,15}(?:[A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2}==)";
+  "(?:[A-Za-z0-9+/]{64}\\n)*(?:[A-Za-z0-9+/]{4}){0,15}(?:[A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=|[A-Za-z0-9+/][AQgw]==)";
 const pkcs1Pattern = new RegExp(
   `^-----BEGIN RSA PRIVATE KEY-----\\n${canonicalBase64Lines}\\n-----END RSA PRIVATE KEY-----\\n?$`,
   "u",
@@ -857,6 +857,25 @@ const validPkcs8 = deterministicKey
     type: "pkcs8",
   })
   .toString();
+const nonCanonicalPkcs1 = validPkcs1.replace(
+  /([AQgw])==(?=\n-----END RSA PRIVATE KEY-----)/u,
+  (_, finalCharacter) =>
+    `${{ A: "B", Q: "R", g: "h", w: "x" }[finalCharacter]}==`,
+);
+assert.notEqual(
+  nonCanonicalPkcs1,
+  validPkcs1,
+  "the deterministic PKCS#1 fixture must end with double padding",
+);
+const pemBody = (value) => value.split("\n").slice(1, -2).join("");
+assert.equal(
+  Buffer.compare(
+    Buffer.from(pemBody(nonCanonicalPkcs1), "base64"),
+    Buffer.from(pemBody(validPkcs1), "base64"),
+  ),
+  0,
+  "the pad-bit mutation must decode to the same deterministic DER bytes",
+);
 const oversizedPkcs8 = `${pkcs8Begin}\n${`${"A".repeat(64)}\n`.repeat(1024)}${pkcs8End}\n`;
 for (const [label, value, accepted] of [
   ["omitted", undefined, false],
@@ -878,6 +897,7 @@ for (const [label, value, accepted] of [
     true,
   ],
   ["oversized", oversizedPkcs8, false],
+  ["noncanonical PKCS#1 pad bits", nonCanonicalPkcs1, false],
   ["valid PKCS#1", validPkcs1, true],
   ["valid PKCS#8", validPkcs8, true],
 ]) {
@@ -898,8 +918,8 @@ assert.match(
   "the App key must stay sensitive, ephemeral, and bounded",
 );
 for (const pattern of [
-  "^-----BEGIN RSA PRIVATE KEY-----\\\\n([A-Za-z0-9+/]{64}\\\\n)*([A-Za-z0-9+/]{4}){0,15}([A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2}==)\\\\n-----END RSA PRIVATE KEY-----\\\\n?$",
-  "^-----BEGIN PRIVATE KEY-----\\\\n([A-Za-z0-9+/]{64}\\\\n)*([A-Za-z0-9+/]{4}){0,15}([A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2}==)\\\\n-----END PRIVATE KEY-----\\\\n?$",
+  "^-----BEGIN RSA PRIVATE KEY-----\\\\n([A-Za-z0-9+/]{64}\\\\n)*([A-Za-z0-9+/]{4}){0,15}([A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=|[A-Za-z0-9+/][AQgw]==)\\\\n-----END RSA PRIVATE KEY-----\\\\n?$",
+  "^-----BEGIN PRIVATE KEY-----\\\\n([A-Za-z0-9+/]{64}\\\\n)*([A-Za-z0-9+/]{4}){0,15}([A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=|[A-Za-z0-9+/][AQgw]==)\\\\n-----END PRIVATE KEY-----\\\\n?$",
 ]) {
   assert(
     variableSource.includes(`can(regex("${pattern}"`),

@@ -981,14 +981,14 @@ function runPlatformPlanPolicyTests(tempDir) {
     .export({ format: "pem", type: "pkcs8" })
     .toString();
   const pkcs1VarFile = path.join(fixtureRoot, "app-key-pkcs1.tfvars");
-  const pkcs8VarFile = path.join(fixtureRoot, "app-key-pkcs8.tfvars.json");
+  const pkcs8VarFile = path.join(fixtureRoot, "app-key-pkcs8.tfvars");
   writeFileSync(
     pkcs1VarFile,
     `local_agent_github_app_private_key = <<APP_PRIVATE_KEY_PEM\n${pkcs1}APP_PRIVATE_KEY_PEM\n`,
   );
   writeFileSync(
     pkcs8VarFile,
-    `${JSON.stringify({ local_agent_github_app_private_key: pkcs8 })}\n`,
+    `local_agent_github_app_private_key = <<APP_PRIVATE_KEY_PEM\n${pkcs8}APP_PRIVATE_KEY_PEM\n`,
   );
   for (const keyFile of [pkcs1VarFile, pkcs8VarFile]) {
     run(["plan", "platform", `-var-file=${keyFile}`], {
@@ -1036,6 +1036,45 @@ function runPlatformPlanPolicyTests(tempDir) {
   assertExactSavedPlanBinding(fakeTools.terraformLog, false);
   resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
 
+  const nonCanonicalPkcs1 = pkcs1.replace(
+    /([AQgw])==(?=\n-----END RSA PRIVATE KEY-----)/u,
+    (_, finalCharacter) =>
+      `${{ A: "B", Q: "R", g: "h", w: "x" }[finalCharacter]}==`,
+  );
+  assert(
+    nonCanonicalPkcs1 !== pkcs1,
+    "the deterministic PKCS#1 fixture must end with double padding",
+  );
+  const pemBody = (value) => value.split("\n").slice(1, -2).join("");
+  assert(
+    Buffer.compare(
+      Buffer.from(pemBody(nonCanonicalPkcs1), "base64"),
+      Buffer.from(pemBody(pkcs1), "base64"),
+    ) === 0,
+    "the noncanonical PKCS#1 fixture must decode to the same DER bytes",
+  );
+  const nonCanonicalVarFile = path.join(
+    fixtureRoot,
+    "app-key-noncanonical-pad-bits.tfvars",
+  );
+  writeFileSync(
+    nonCanonicalVarFile,
+    `local_agent_github_app_private_key = <<APP_PRIVATE_KEY_PEM\n${nonCanonicalPkcs1}APP_PRIVATE_KEY_PEM\n`,
+  );
+  result = runFail(["plan", "platform", `-var-file=${nonCanonicalVarFile}`], {
+    env: {
+      ...baseEnv,
+      TF_STACKS_TEST_PLAN_JSON: JSON.stringify(activeCredentialPlan),
+    },
+  });
+  assertIncludes(
+    result.stderr,
+    "operator tfvars App key is missing or is not a canonical, parseable 2048-bit-or-stronger RSA",
+    "a parseable key with noncanonical base64 pad bits must fail closed",
+  );
+  assertExactSavedPlanBinding(fakeTools.terraformLog, false);
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
   const smallIntegerBase64Url = (value) => {
     let hexadecimal = value.toString(16);
     if (hexadecimal.length % 2 === 1) hexadecimal = `0${hexadecimal}`;
@@ -1075,6 +1114,139 @@ function runPlatformPlanPolicyTests(tempDir) {
     "operator tfvars App key is missing or is not a canonical, parseable 2048-bit-or-stronger RSA",
     "a parseable but weak RSA private key must fail closed",
   );
+  assertExactSavedPlanBinding(fakeTools.terraformLog, false);
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  const ordinaryHeredocDecoyVarFile = path.join(
+    fixtureRoot,
+    "app-key-ordinary-heredoc-decoy.tfvars",
+  );
+  writeFileSync(
+    ordinaryHeredocDecoyVarFile,
+    `unrelated = <<BODY\nordinary heredoc content\n  BODY\nlocal_agent_github_app_private_key = <<APP_PRIVATE_KEY_PEM\n${pkcs8}APP_PRIVATE_KEY_PEM\nBODY\n`,
+  );
+  result = runFail(
+    [
+      "plan",
+      "platform",
+      `-var-file=${malformedVarFile}`,
+      `-var-file=${ordinaryHeredocDecoyVarFile}`,
+    ],
+    {
+      env: {
+        ...baseEnv,
+        TF_STACKS_TEST_PLAN_JSON: JSON.stringify(activeCredentialPlan),
+      },
+    },
+  );
+  assertIncludes(
+    result.stderr,
+    "operator tfvars App key is missing or is not a canonical, parseable 2048-bit-or-stronger RSA",
+    "an indented false terminator in an ordinary heredoc must not expose a decoy key assignment",
+  );
+  assertExactSavedPlanBinding(fakeTools.terraformLog, false);
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  const indentedHeredocThenKeyVarFile = path.join(
+    fixtureRoot,
+    "app-key-indented-heredoc-then-key.tfvars",
+  );
+  writeFileSync(
+    indentedHeredocThenKeyVarFile,
+    `unrelated = <<-BODY\nindented heredoc content\n  BODY\nlocal_agent_github_app_private_key = <<APP_PRIVATE_KEY_PEM\n${pkcs8}APP_PRIVATE_KEY_PEM\n`,
+  );
+  run(
+    [
+      "plan",
+      "platform",
+      `-var-file=${malformedVarFile}`,
+      `-var-file=${indentedHeredocThenKeyVarFile}`,
+    ],
+    {
+      env: {
+        ...baseEnv,
+        TF_STACKS_TEST_PLAN_JSON: JSON.stringify(activeCredentialPlan),
+      },
+    },
+  );
+  assertExactSavedPlanBinding(fakeTools.terraformLog, false);
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  const jsonKeyVarFile = path.join(
+    fixtureRoot,
+    "app-key-disallowed.tfvars.json",
+  );
+  const unrelatedJsonVarFile = path.join(
+    fixtureRoot,
+    "app-key-unrelated.tfvars.json",
+  );
+  writeFileSync(
+    jsonKeyVarFile,
+    `${JSON.stringify({ local_agent_github_app_private_key: pkcs8 })}\n`,
+  );
+  writeFileSync(
+    unrelatedJsonVarFile,
+    `${JSON.stringify({ unrelated: true })}\n`,
+  );
+  result = runFail(
+    [
+      "plan",
+      "platform",
+      `-var-file=${jsonKeyVarFile}`,
+      `-var-file=${pkcs8VarFile}`,
+    ],
+    {
+      env: {
+        ...baseEnv,
+        TF_STACKS_TEST_PLAN_JSON: JSON.stringify(activeCredentialPlan),
+      },
+    },
+  );
+  assertIncludes(
+    result.stderr,
+    "operator tfvars App key is missing or is not a canonical, parseable 2048-bit-or-stronger RSA",
+    "a JSON key assignment must fail even when a later literal heredoc overrides it",
+  );
+  assertExactSavedPlanBinding(fakeTools.terraformLog, false);
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  run(
+    [
+      "plan",
+      "platform",
+      `-var-file=${unrelatedJsonVarFile}`,
+      `-var-file=${pkcs8VarFile}`,
+    ],
+    {
+      env: {
+        ...baseEnv,
+        TF_STACKS_TEST_PLAN_JSON: JSON.stringify(activeCredentialPlan),
+      },
+    },
+  );
+  assertExactSavedPlanBinding(fakeTools.terraformLog, false);
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  result = runFail(["plan", "platform", `-var-file=${jsonKeyVarFile}`], {
+    env: {
+      ...baseEnv,
+      TF_STACKS_TEST_PLAN_JSON: JSON.stringify(defaultPlatformPlan),
+    },
+  });
+  assertIncludes(
+    result.stderr,
+    "operator tfvars App key is missing or is not a canonical, parseable 2048-bit-or-stronger RSA",
+    "a JSON key assignment must fail while credential activation is inactive",
+  );
+  assertExactSavedPlanBinding(fakeTools.terraformLog, false);
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  run(["plan", "platform", `-var-file=${unrelatedJsonVarFile}`], {
+    env: {
+      ...baseEnv,
+      TF_STACKS_TEST_PLAN_JSON: JSON.stringify(defaultPlatformPlan),
+    },
+  });
   assertExactSavedPlanBinding(fakeTools.terraformLog, false);
   resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
 

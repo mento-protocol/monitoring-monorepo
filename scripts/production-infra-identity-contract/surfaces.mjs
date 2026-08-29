@@ -196,7 +196,7 @@ const SENSITIVE_VARIABLE_BLOCK_SHAPE_SPECIFICATIONS = [
   "terraform/variables.tf:variable.grafana_provisioning_token|1064b93b0104e3cacfae6df21fa65e32e2b9f57bc93b18f36546bd651be9a48d",
   "terraform/variables.tf:variable.github_token|5f656efa388fcbf30d10dd1b0a02062f5c8c50953601a725bb0492735e3471ee",
   "terraform/variables.tf:variable.lifi_api_key|16976c6d8572570d010c27914176e31d7399a966971115d412ed81b214e48fd8",
-  "terraform/variables.tf:variable.local_agent_github_app_private_key|0c5d3c0b055e2538926c6cdbe5acdb48d028832da784ae5601d85ca52a9bf63f",
+  "terraform/variables.tf:variable.local_agent_github_app_private_key|78156508e960dd3f883b11caf467bf965e25a074aefca84baec95176b1706a01",
   "terraform/variables.tf:variable.openocean_api_key|c16fba8a336af2ba14de629247240f1475c40dfb6ce8579e271874487f639fcb",
   "terraform/variables.tf:variable.platform_settings_audit_token|a330809d692518065a7e77ff62bf9c06c0a4f761c680ba2bfb70f521c3e85a3f",
   "terraform/variables.tf:variable.sentry_archive_token|db113d0b355207db4fa93e30623ee49b8e74796f1cf190eae21ea07b69a9c967",

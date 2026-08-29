@@ -201,6 +201,12 @@ PEM lines, and closing marker must start at column 1. Do not use an argument,
 environment variable, command substitution, clipboard history, repository
 file, log, or extra temporary file.
 
+Do not assign `local_agent_github_app_private_key` in a `.tfvars.json` file.
+The wrapper rejects every JSON assignment of this variable, including one that
+a later HCL variable file would override. This rejection applies while
+credential activation is false. JSON variable files can still supply unrelated
+variables.
+
 Remove the browser download and any partial copy after the operator tfvars copy
 is verified. If custody or complete removal is uncertain, revoke the key and
 start again. File deletion does not revoke a key.
@@ -251,14 +257,16 @@ ID must already be positive and pinned.
 
 Use the operator tfvars file for the App and installation IDs, positive
 rotation counter, credential-active selector, and App key. When the selector is
-true, Terraform accepts only canonical base64 lines in an RSA PKCS#1 or
-unencrypted PKCS#8 PEM envelope no larger than 65,536 bytes. The platform
-wrapper reads that value from its private tfvars copy. It parses the key with
-Node `crypto.createPrivateKey`, requires a 2048-bit-or-stronger RSA key, and
-performs one RSA-SHA256 private operation in memory. An omitted, blank,
-malformed, non-RSA, weak, encrypted, or oversized key fails with a fixed error
-before apply. The key remains sensitive and ephemeral. It does not enter a
-managed-resource lifecycle condition, output, log, plan, or state.
+true, Terraform accepts only canonical base64 lines and unused pad bits in an
+RSA PKCS#1 or unencrypted PKCS#8 PEM envelope no larger than 65,536 bytes. The
+platform wrapper reads that value from its private tfvars copy. It normalizes
+the PEM body and requires an exact base64 decode and re-encode round trip. It
+then parses the key with Node `crypto.createPrivateKey`, requires a
+2048-bit-or-stronger RSA key, and performs one RSA-SHA256 private operation in
+memory. An omitted, blank, malformed, non-RSA, weak, encrypted, or oversized
+key fails with a fixed error before apply. The key remains sensitive and
+ephemeral. It does not enter a managed-resource lifecycle condition, output,
+log, plan, or state.
 
 The platform wrapper rejects the App key and platform GitHub PAT in
 `TF_VAR_*`, ambient GitHub authentication, and CLI `-var` arguments. It copies

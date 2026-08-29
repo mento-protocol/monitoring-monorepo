@@ -80,10 +80,11 @@ local_agent_github_app_credential_active            = false
 local_agent_github_app_private_key_rotation_counter = 0
 # When credential_active is true, use the exact unindented literal heredoc below
 # with a canonical RSA PKCS#1 or unencrypted PKCS#8 PEM of at most 65,536 bytes.
-# Terraform checks the envelope and base64 layout. The guarded wrapper parses
-# and exercises the RSA key in memory before apply. Omitted, blank, malformed,
-# non-RSA, weak, and oversized values fail closed. Keep the real value only in
-# this gitignored, operator-owned file.
+# Do not assign this key in a JSON variable file. Terraform checks the envelope,
+# base64 layout, and unused pad bits. The guarded wrapper also requires an exact
+# decode and re-encode round trip. It parses and exercises the RSA key in memory
+# before apply. Omitted, blank, malformed, non-RSA, weak, and oversized values
+# fail closed. Keep the real value only in this gitignored, operator-owned file.
 # local_agent_github_app_private_key = <<PEM
 # <operator-supplied PEM private key, starting at column 1>
 # PEM

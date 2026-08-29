@@ -27,12 +27,19 @@ const GITHUB_PROVIDER_TOKEN_VARIABLE = "github_token";
 const APP_PRIVATE_KEY_MAX_BYTES = 65536;
 const APP_PRIVATE_KEY_PREFLIGHT_ERROR =
   "refusing platform Terraform because the operator tfvars App key is missing or is not a canonical, parseable 2048-bit-or-stronger RSA PKCS#1 or unencrypted PKCS#8 private key";
-const CANONICAL_BASE64_LINES =
-  "(?:[A-Za-z0-9+/]{64}\\n)*(?:[A-Za-z0-9+/]{4}){0,15}(?:[A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2}==)";
-const CANONICAL_APP_PRIVATE_KEY_PATTERN = new RegExp(
-  `^(?:-----BEGIN RSA PRIVATE KEY-----\\n${CANONICAL_BASE64_LINES}\\n-----END RSA PRIVATE KEY-----|-----BEGIN PRIVATE KEY-----\\n${CANONICAL_BASE64_LINES}\\n-----END PRIVATE KEY-----)\\n?$`,
-  "u",
-);
+const CANONICAL_BASE64_FINAL_QUARTET =
+  "(?:[A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=|[A-Za-z0-9+/][AQgw]==)";
+const CANONICAL_BASE64_LINES = `(?:[A-Za-z0-9+/]{64}\\n)*(?:[A-Za-z0-9+/]{4}){0,15}${CANONICAL_BASE64_FINAL_QUARTET}`;
+const CANONICAL_APP_PRIVATE_KEY_PATTERNS = [
+  new RegExp(
+    `^-----BEGIN RSA PRIVATE KEY-----\\n(${CANONICAL_BASE64_LINES})\\n-----END RSA PRIVATE KEY-----\\n?$`,
+    "u",
+  ),
+  new RegExp(
+    `^-----BEGIN PRIVATE KEY-----\\n(${CANONICAL_BASE64_LINES})\\n-----END PRIVATE KEY-----\\n?$`,
+    "u",
+  ),
+];
 const RESTRICTED_CLI_VARIABLES = new Set([
   APP_PRIVATE_KEY_VARIABLE,
   GITHUB_PROVIDER_TOKEN_VARIABLE,
@@ -254,6 +261,14 @@ function fixedPrivateKeyFailure() {
   throw new Error(APP_PRIVATE_KEY_PREFLIGHT_ERROR);
 }
 
+function canonicalPrivateKeyBody(privateKey) {
+  for (const pattern of CANONICAL_APP_PRIVATE_KEY_PATTERNS) {
+    const match = pattern.exec(privateKey);
+    if (match) return match[1].replaceAll("\n", "");
+  }
+  fixedPrivateKeyFailure();
+}
+
 function scanHclLine(line, state) {
   let code = "";
   let quoted = false;
@@ -323,7 +338,10 @@ function readLiteralPrivateKeyHeredoc(contents) {
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
     if (state.heredoc) {
-      if (line.trim() === state.heredoc) state.heredoc = undefined;
+      const terminates = state.heredoc.allowIndent
+        ? new RegExp(`^[ \\t]*${state.heredoc.delimiter}$`, "u").test(line)
+        : line === state.heredoc.delimiter;
+      if (terminates) state.heredoc = undefined;
       continue;
     }
 
@@ -331,7 +349,7 @@ function readLiteralPrivateKeyHeredoc(contents) {
     const assignment =
       state.depth === 0
         ? new RegExp(
-            `^[ \\t]*${APP_PRIVATE_KEY_VARIABLE}[ \\t]*=[ \\t]*<<([A-Za-z_][A-Za-z0-9_]*)[ \\t]*$`,
+            `^${APP_PRIVATE_KEY_VARIABLE}[ \\t]*=[ \\t]*<<([A-Za-z_][A-Za-z0-9_]*)[ \\t]*$`,
             "u",
           ).exec(code)
         : null;
@@ -354,9 +372,14 @@ function readLiteralPrivateKeyHeredoc(contents) {
       fixedPrivateKeyFailure();
     }
 
-    const genericHeredoc = /<<-?([A-Za-z_][A-Za-z0-9_]*)/u.exec(code);
+    const genericHeredoc = /<<(-?)([A-Za-z_][A-Za-z0-9_]*)/u.exec(code);
     updateHclDepth(code, state);
-    if (genericHeredoc) state.heredoc = genericHeredoc[1];
+    if (genericHeredoc) {
+      state.heredoc = {
+        allowIndent: genericHeredoc[1] === "-",
+        delimiter: genericHeredoc[2],
+      };
+    }
   }
   if (state.blockComment || state.depth !== 0 || state.heredoc) {
     fixedPrivateKeyFailure();
@@ -372,7 +395,7 @@ function readPrivateKeyAssignment(variableFilePath) {
   } catch {
     fixedPrivateKeyFailure();
   }
-  if (variableFilePath.endsWith(".tfvars.json")) {
+  if (isJsonVariableFile(variableFilePath)) {
     let parsed;
     try {
       parsed = JSON.parse(contents);
@@ -381,12 +404,13 @@ function readPrivateKeyAssignment(variableFilePath) {
     }
     if (!isPlainObject(parsed)) fixedPrivateKeyFailure();
     if (!Object.hasOwn(parsed, APP_PRIVATE_KEY_VARIABLE)) return undefined;
-    if (typeof parsed[APP_PRIVATE_KEY_VARIABLE] !== "string") {
-      fixedPrivateKeyFailure();
-    }
-    return parsed[APP_PRIVATE_KEY_VARIABLE];
+    fixedPrivateKeyFailure();
   }
   return readLiteralPrivateKeyHeredoc(contents);
+}
+
+function isJsonVariableFile(variableFilePath) {
+  return variableFilePath.endsWith(".tfvars.json");
 }
 
 function isPlainObject(value) {
@@ -418,18 +442,37 @@ function planUsesActiveAppCredential(plan) {
 }
 
 export function assertLocalAgentAppPrivateKeyPreflight(plan, privatePlanArgs) {
+  const variableFiles = variableFilePaths(privatePlanArgs);
+  for (const variableFilePath of variableFiles) {
+    if (isJsonVariableFile(variableFilePath)) {
+      readPrivateKeyAssignment(variableFilePath);
+    }
+  }
   if (!planUsesActiveAppCredential(plan)) return;
   let privateKey;
-  for (const variableFilePath of variableFilePaths(privatePlanArgs)) {
+  for (const variableFilePath of variableFiles) {
+    if (isJsonVariableFile(variableFilePath)) continue;
     const candidate = readPrivateKeyAssignment(variableFilePath);
     if (candidate !== undefined) privateKey = candidate;
   }
   if (
     typeof privateKey !== "string" ||
-    Buffer.byteLength(privateKey, "utf8") > APP_PRIVATE_KEY_MAX_BYTES ||
-    !CANONICAL_APP_PRIVATE_KEY_PATTERN.test(privateKey)
+    Buffer.byteLength(privateKey, "utf8") > APP_PRIVATE_KEY_MAX_BYTES
   ) {
     fixedPrivateKeyFailure();
+  }
+
+  let decodedPrivateKey;
+  try {
+    const normalizedBody = canonicalPrivateKeyBody(privateKey);
+    decodedPrivateKey = Buffer.from(normalizedBody, "base64");
+    if (decodedPrivateKey.toString("base64") !== normalizedBody) {
+      fixedPrivateKeyFailure();
+    }
+  } catch {
+    fixedPrivateKeyFailure();
+  } finally {
+    decodedPrivateKey?.fill(0);
   }
 
   try {

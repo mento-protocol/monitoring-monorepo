@@ -170,8 +170,9 @@ in the same PR.
   broker-scaffold gate, partial-recovery gate, and broker principal in source.
   Keep the scaffold gate false until the separate Phase 4 source approval. Keep
   the recovery gate false except during reviewed create/no-op reconciliation.
-  Parse and exercise the App RSA key only from the private tfvars copy. Keep the
-  PEM, JWT, and token outside agents and caller-controlled children. Preserve fixed root-owned execution, profiles,
+  Parse and exercise the App RSA key only from the exact unindented HCL heredoc
+  in the private tfvars copy. Reject JSON key assignments. Keep the PEM, JWT,
+  and token outside agents and caller-controlled children. Preserve fixed root-owned execution, profiles,
   ambient-credential refusal, redaction, and no-token canaries. Agent input
   cannot select Workflow write. Follow the runbook for PEM custody, activation,
   and revoke-on-uncertain-custody.
