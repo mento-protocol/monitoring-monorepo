@@ -411,8 +411,9 @@ must re-audit the #2042 shared consumers and the current gate-specific code.
 | Trunk daemon                                                   | Deferred classification or containment     | Treat it as a bounded trusted external service or contain it.                                                                                                           |
 | Legacy `run.lock`                                              | Retained through mixed-worktree transition | Do not let a new path run beside an older gate that owns the lock.                                                                                                      |
 
-Issues #2006, #2032, and #2094 remain open with their current owners and states.
-Issue #2042 is closed. The inventory preserves
+At Phase 0 closeout, issues #2006 and #2042 are closed as completed. Issues
+#2032 and #2094 remain open with their current owners and states. The inventory
+preserves
 `e0346ec4756f9577bcbb1e13e06566ccc507e9e4` as its terminal commit and
 `8e2965a6ffbd92bcc0c2793a6892754e4c674a6b` as its earlier snapshot. It binds
 the current control-plane baseline to
