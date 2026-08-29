@@ -288,9 +288,43 @@ describe("TroveBalanceChart", () => {
     // between events while the oracle price moved.
     expect(icr!.mode).toBe("markers");
     expect(icr!.line).toBeUndefined();
+    expect(layout().hovermode).toBe("x");
     expect(handle!.container.textContent).not.toContain(
       "ICR panel unavailable",
     );
+  });
+
+  it("uses closest hover so same-second ICR markers expose their own values", () => {
+    const observedAt = NOW - DAY;
+    render(
+      handle!,
+      chartProps({
+        rows: [
+          ledgerRow({
+            id: "42220_200_10",
+            timestamp: String(observedAt),
+            blockNumber: "200",
+            logIndex: 10,
+            priceAtEvent: wei(2),
+            icrAfterBps: 17_000,
+          }),
+          ledgerRow({
+            id: "42220_200_9",
+            timestamp: String(observedAt),
+            blockNumber: "200",
+            logIndex: 9,
+            priceAtEvent: wei(1),
+            icrAfterBps: 13_000,
+          }),
+        ],
+      }),
+    );
+
+    const icr = traces().find((trace) => trace.yaxis === "y3");
+    const observedAtIso = new Date(observedAt * 1000).toISOString();
+    expect(icr!.x).toEqual([observedAtIso, observedAtIso]);
+    expect(icr!.y).toEqual([130, 170]);
+    expect(layout().hovermode).toBe("closest");
   });
 
   it("drops the ICR panel and says so when no row carries price data", () => {

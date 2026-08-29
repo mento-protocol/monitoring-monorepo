@@ -169,6 +169,7 @@ function buildLayout(options: {
   debtSymbol: string;
   tickformat: string;
   shapes: Plotly.Layout["shapes"];
+  hovermode: "x" | "closest";
 }): Partial<Plotly.Layout> {
   const domains = panelDomains(options.showIcr);
   const debtTitle = {
@@ -246,7 +247,10 @@ function buildLayout(options: {
     autosize: true,
     showlegend: false,
     dragmode: false,
-    hovermode: "x",
+    // Plotly's x-hover mode chooses one point per trace. Use 2D proximity
+    // when same-second ICR observations share an x-coordinate so each marker
+    // exposes its own value; keep the existing cross-panel x hover otherwise.
+    hovermode: options.hovermode,
     hoverlabel: {
       bgcolor: "#0f172a",
       bordercolor: "#6366f1",
@@ -281,6 +285,10 @@ function buildTroveChartModel(
   // with dots so a lone observation still shows.
   const icr = series.icr.filter(
     (point) => cutoff == null || point.timestamp >= cutoff,
+  );
+  const hasDuplicateIcrTimestamp = icr.some(
+    (point, index) =>
+      index > 0 && point.timestamp === icr[index - 1]?.timestamp,
   );
   const showIcr = series.icrCoverage !== "none";
   const hoverDate = "%{x|%b %d, %Y %H:%M}";
@@ -326,6 +334,7 @@ function buildTroveChartModel(
       // a years-old trove viewed at 7d would otherwise get month/year ticks.
       tickformat: range === "1d" ? "%H:%M" : dateTickFormatForSeries(coll),
       shapes: markerShapes(markersInWindow(series.markers, cutoff)),
+      hovermode: hasDuplicateIcrTimestamp ? "closest" : "x",
     }),
   };
 }
