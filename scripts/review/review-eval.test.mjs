@@ -8,12 +8,14 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   unlinkSync,
@@ -102,6 +104,10 @@ const planEnv = {
 
 const runEvalSourcePaths = new Map([
   ["wrapper", path.join(repoRoot, "scripts/review/run-eval.sh")],
+  [
+    "sourceSnapshot",
+    path.join(repoRoot, "scripts/review/run-eval-source-snapshot.sh"),
+  ],
   ["lifecycle", path.join(repoRoot, "scripts/review/run-eval-lifecycle.sh")],
   ["runtime", path.join(repoRoot, "scripts/review/run-eval-runtime.sh")],
 ]);
@@ -166,6 +172,19 @@ function reconstructLegacyOrchestrator() {
     assert.match(wrapper, block);
     wrapper = wrapper.replace(block, () => payload);
   }
+  for (const id of ["source-snapshot-state", "source-snapshot-digest"]) {
+    const block = new RegExp(
+      `# RUN-EVAL-SPLIT-ONLY-BEGIN ${id}\\n[\\s\\S]*?# RUN-EVAL-SPLIT-ONLY-END ${id}\\n`,
+    );
+    assert.match(wrapper, block);
+    wrapper = wrapper.replace(block, "");
+  }
+  const exitTrapBlock = new RegExp(
+    "# RUN-EVAL-SPLIT-ONLY-BEGIN source-snapshot-exit-trap\\n" +
+      "[\\s\\S]*?# RUN-EVAL-SPLIT-ONLY-END source-snapshot-exit-trap\\n",
+  );
+  assert.match(wrapper, exitTrapBlock);
+  wrapper = wrapper.replace(exitTrapBlock, "trap cleanup EXIT\n");
   return wrapper;
 }
 
@@ -762,7 +781,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
       calibrationDigest: "2".repeat(64),
     }),
   );
-  // The wrapper and both sourced helpers fix the contestant's tools, turn
+  // The wrapper and three sourced helpers fix the contestant's tools, turn
   // limit, skill staging and finder truncation. An edit to any of them
   // re-anchors the series the way a prompt edit does.
   assert.notEqual(
@@ -783,13 +802,18 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
   );
 });
 
-test("orchestratorSourceDigest binds the wrapper and both helpers", () => {
+test("orchestratorSourceDigest binds the wrapper and three helpers", () => {
   const expected =
-    "77bba1e0af554775f19429d48ea6470a3574b05e6b3ed95a1b3e73e8bf3a2807";
+    "fd1bdfa3c59a73e6b31027db49840d512b4580efa39872ac81889c4da26c5139";
   assert.equal(orchestratorSourceDigest(), expected);
   assert.deepEqual(
     ORCHESTRATOR_FILES.map((file) => path.basename(file)),
-    ["run-eval.sh", "run-eval-lifecycle.sh", "run-eval-runtime.sh"],
+    [
+      "run-eval.sh",
+      "run-eval-source-snapshot.sh",
+      "run-eval-lifecycle.sh",
+      "run-eval-runtime.sh",
+    ],
   );
 
   for (const changed of ORCHESTRATOR_FILES) {
@@ -997,6 +1021,8 @@ test("a cached cell from another skill or contract is never reused", () => {
   assert.equal(decide({ ok: true, fingerprint }).reuse, true);
   const legacyOrchestratorFingerprint = {
     ...fingerprint,
+    skill_ref: "/tmp/old-candidate",
+    dirty: true,
     orchestrator_digest:
       "5cdfbd0e709af2d68c193d484b724706b339ab0562d14b283f5fc38eebe9ae49",
   };
@@ -1005,7 +1031,114 @@ test("a cached cell from another skill or contract is never reused", () => {
     fingerprint: legacyOrchestratorFingerprint,
   });
   assert.equal(transitioned.reuse, true);
-  assert.match(transitioned.reason, /recorded pure orchestrator split/);
+  assert.match(
+    transitioned.reason,
+    /recorded reviewed orchestrator transition/,
+  );
+  assert.equal(
+    decide({
+      ok: true,
+      fingerprint: {
+        ...legacyOrchestratorFingerprint,
+        skill_ref: "installed",
+        dirty: false,
+      },
+    }).reuse,
+    true,
+  );
+  const legacyWithoutTreatment = Object.fromEntries(
+    Object.entries(legacyOrchestratorFingerprint).filter(
+      ([field]) => !["skill_ref", "dirty"].includes(field),
+    ),
+  );
+  assert.match(
+    decide({ ok: true, fingerprint: legacyWithoutTreatment }).reason,
+    /lacks the complete historically valid legacy treatment fields/,
+  );
+  for (const malformedLegacy of [
+    { ...legacyOrchestratorFingerprint, dirty: "true" },
+    { ...legacyOrchestratorFingerprint, dirty: null },
+    { ...legacyOrchestratorFingerprint, dirty: 1 },
+    { ...legacyOrchestratorFingerprint, skill_ref: null },
+    { ...legacyOrchestratorFingerprint, skill_ref: "" },
+    { ...legacyOrchestratorFingerprint, skill_ref: "relative/candidate" },
+    { ...legacyOrchestratorFingerprint, skill_ref: "/tmp/../candidate" },
+    { ...legacyOrchestratorFingerprint, skill_ref: 1 },
+    { ...legacyOrchestratorFingerprint, skill_ref: "installed", dirty: true },
+    {
+      ...legacyOrchestratorFingerprint,
+      skill_ref: "/tmp/review-candidate",
+      dirty: false,
+    },
+    Object.fromEntries(
+      Object.entries(legacyOrchestratorFingerprint).filter(
+        ([field]) => field !== "dirty",
+      ),
+    ),
+    Object.fromEntries(
+      Object.entries(legacyOrchestratorFingerprint).filter(
+        ([field]) => field !== "skill_ref",
+      ),
+    ),
+  ]) {
+    assert.match(
+      decide({ ok: true, fingerprint: malformedLegacy }).reason,
+      /lacks the complete historically valid legacy treatment fields/,
+    );
+  }
+  assert.match(
+    decide({
+      ok: true,
+      fingerprint: {
+        ...fingerprint,
+        skill_ref: "installed",
+        dirty: false,
+      },
+    }).reason,
+    /unexpected skill_ref, dirty/,
+  );
+  assert.match(
+    decide({
+      ok: true,
+      fingerprint: { ...legacyOrchestratorFingerprint, legacy: true },
+    }).reason,
+    /unexpected legacy/,
+  );
+  assert.match(
+    decide({
+      ok: true,
+      fingerprint: {
+        ...legacyOrchestratorFingerprint,
+        skill_digest: "0".repeat(64),
+      },
+    }).reason,
+    /different skill_digest/,
+  );
+  for (const obsoleteTarget of [
+    "77bba1e0af554775f19429d48ea6470a3574b05e6b3ed95a1b3e73e8bf3a2807",
+    "7f1ddbc6c5bb4a9c9ae630c6eb5d9e17a71de7efdb6e0660177ec89580cd262e",
+    "a96569fb66b556607219358d77dd44a4e4fcf56d2a48bb331f55779a459de788",
+    "cdf05f6f468a099a089831bdfc29f3070cd213208e172addb0bd783710c6aa1a",
+    "1360db627cd2cdbfe3c42c1bb811521d6b6f546c58b36525d870810013e72a2e",
+    "e5fc8f6c4bdf274ce93e3f347fe3ca4502e8650df8e63145920379f30535abc6",
+    "86807927a37ce7452874f9243da157a1ef6b03774f5762d7402c3261a14a79dd",
+    "db23905c41a655b33f0dc8970b9b9de504469198e580e786dcb2f4455634e27a",
+    "9dc869e7380348812afd6bdc5f20259a4cdc4a5390a4ba284223ad1f3b89cef8",
+    "6f300d247726aab9c2a4c73ee24908ee852a4bc04dc71f30522cb80423e60cc8",
+    "0f465e8fce3a0e11065d9a822d6d67ae7ef78f43594e393af615feda388e04aa",
+  ]) {
+    assert.equal(
+      cellReuseDecision({
+        plan: {
+          ...plan,
+          inputs: { ...plan.inputs, orchestrator_digest: obsoleteTarget },
+        },
+        resultPath: "unused",
+        result: { ok: true, fingerprint: legacyOrchestratorFingerprint },
+      }).reuse,
+      false,
+    );
+  }
   assert.equal(
     cellReuseDecision({
       plan: {
@@ -1111,6 +1244,8 @@ test("the exact pre-split cache is discovered, seeded, and reused", () => {
     );
     const oldFingerprint = {
       ...cellFingerprint({ plan: first }),
+      skill_ref: "installed",
+      dirty: false,
       orchestrator_digest: oldOrchestrator,
     };
     writeFileSync(
@@ -1197,7 +1332,7 @@ test("the exact pre-split cache is discovered, seeded, and reused", () => {
       resultPath: copiedResult,
     });
     assert.equal(decision.reuse, true);
-    assert.match(decision.reason, /recorded pure orchestrator split/);
+    assert.match(decision.reason, /recorded reviewed orchestrator transition/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -5241,11 +5376,13 @@ test("the orchestrator refuses to run bytes the row would not record", () => {
   // `orchestrator_digest` is taken from the spec worktree, which is where the
   // harness reads every other input. Running an edited copy against a clean
   // spec would record the spec's bytes for a matrix these files actually
-  // shaped. Resolve both helpers from the wrapper path and compare all three.
+  // shaped. Resolve all helpers from the wrapper path and compare all four.
   assert.match(
     wrapper,
-    /RUN_EVAL_SCRIPT_DIR="\$\(cd "\$\(dirname "\$\{BASH_SOURCE\[0\]\}"\)" && pwd\)"/,
+    /RUN_EVAL_LIVE_SCRIPT_DIR="\$\(unset CDPATH; cd -P "\$\(dirname "\$\{BASH_SOURCE\[0\]\}"\)" && pwd -P\)"/,
   );
+  assert.match(wrapper, /RUN_EVAL_SCRIPT_DIR="\$RUN_EVAL_SOURCE_SNAPSHOT"/);
+  assert.match(wrapper, /source "\$RUN_EVAL_SOURCE_HELPER"/);
   for (const helper of ["run-eval-lifecycle.sh", "run-eval-runtime.sh"]) {
     assert.match(
       wrapper,
@@ -5261,6 +5398,7 @@ test("the orchestrator refuses to run bytes the row would not record", () => {
   assert.ok(verify, "the lifecycle verify stage is missing");
   for (const source of [
     "run-eval.sh",
+    "run-eval-source-snapshot.sh",
     "run-eval-lifecycle.sh",
     "run-eval-runtime.sh",
   ]) {
@@ -5279,6 +5417,399 @@ test("the orchestrator refuses to run bytes the row would not record", () => {
     /: <<'RUN_EVAL_ORIGINAL_LIFECYCLE_VERIFY'[\s\S]*# RUN-EVAL-ORIGINAL-BEGIN lifecycle-verify/,
   );
   assert.doesNotMatch(lifecycle, /\n {2}original-verify\)/);
+});
+
+test("the orchestrator keeps every helper stage on one private source snapshot", () => {
+  const wrapper = runEvalSource("wrapper");
+  const sourceSnapshot = runEvalSource("sourceSnapshot");
+  const lifecycle = runEvalSource("lifecycle");
+  const snapshotBlock = wrapper.match(
+    /# RUN-EVAL-SOURCE-SNAPSHOT-BEGIN\n([\s\S]*?)# RUN-EVAL-SOURCE-SNAPSHOT-END\n/,
+  )?.[1];
+  const stateBlock = wrapper.match(
+    /# RUN-EVAL-SPLIT-ONLY-BEGIN source-snapshot-state\n([\s\S]*?)# RUN-EVAL-SPLIT-ONLY-END source-snapshot-state\n/,
+  )?.[1];
+  assert.ok(snapshotBlock, "the source-snapshot block is missing");
+  assert.ok(stateBlock, "the early source-snapshot state block is missing");
+  assertBefore(
+    wrapper,
+    "# RUN-EVAL-SOURCE-SNAPSHOT-BEGIN",
+    'source "$RUN_EVAL_SCRIPT_DIR/run-eval-lifecycle.sh"',
+    "a helper is sourced before the private source snapshot exists",
+  );
+  assert.match(snapshotBlock, /source "\$RUN_EVAL_SOURCE_HELPER"/);
+  assert.match(snapshotBlock, /run_eval_source_snapshot_restart/);
+  assert.match(
+    sourceSnapshot,
+    /exec "\$RUN_EVAL_SOURCE_SNAPSHOT\/run-eval\.sh"/,
+  );
+  assert.match(sourceSnapshot, /chmod 0500 "\$RUN_EVAL_SOURCE_SNAPSHOT"/);
+  assert.match(
+    sourceSnapshot,
+    /\$\{RUN_EVAL_SOURCE_SNAPSHOT%\/\*\} == "\$lock_root"/,
+  );
+  assert.match(
+    stateBlock,
+    /the inherited orchestrator snapshot is not authenticated/,
+  );
+  assert.doesNotMatch(snapshotBlock, /LOCK_DIRS\+=/);
+  assert.doesNotMatch(stateBlock, /rm -rf "\$RUN_EVAL_SOURCE_SNAPSHOT"/);
+  assert.match(
+    sourceSnapshot,
+    /physical_snapshot="\$\(run_eval_physical_dir "\$snapshot"\)"/,
+  );
+  assert.match(
+    sourceSnapshot,
+    /\^review-eval-source\\\.\[\[:alnum:\]\]\{6\}\$/,
+  );
+  assert.match(stateBlock, /source "\$RUN_EVAL_SOURCE_HELPER"/);
+  assert.match(stateBlock, /! -f \$RUN_EVAL_SOURCE_WRAPPER/);
+  assert.match(lifecycle, /trap cleanup_with_source_snapshot EXIT/);
+  assert.match(
+    sourceSnapshot,
+    /if declare -F cleanup[\s\S]*?cleanup \|\| true[\s\S]*?cleanup_source_snapshot \|\| true/,
+  );
+  assert.doesNotMatch(
+    wrapper.slice(wrapper.indexOf("# RUN-EVAL-SOURCE-SNAPSHOT-END")),
+    /source "\$RUN_EVAL_LIVE_SCRIPT_DIR\//,
+  );
+
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-sources-"));
+  try {
+    const initialized = spawnSync("git", ["init", "--quiet", dir], {
+      encoding: "utf8",
+    });
+    assert.equal(initialized.status, 0, initialized.stderr);
+    const live = path.join(dir, "live");
+    mkdirSync(live);
+    const liveWrapper = path.join(live, "run-eval.sh");
+    const liveSnapshotHelper = path.join(live, "run-eval-source-snapshot.sh");
+    const changedWrapper = path.join(dir, "changed-wrapper.sh");
+    const changedSnapshotHelper = path.join(dir, "changed-source-snapshot.sh");
+    const changedLifecycle = path.join(dir, "changed-lifecycle.sh");
+    const changedRuntime = path.join(dir, "changed-runtime.sh");
+    writeFileSync(changedWrapper, "wrapper=changed\n");
+    writeFileSync(changedSnapshotHelper, "SNAPSHOT_HELPER=changed\n");
+    writeFileSync(
+      changedLifecycle,
+      'case "$RUN_EVAL_LIFECYCLE_STAGE" in support) SNAPSHOT_LIFECYCLE=changed ;; esac\n',
+    );
+    writeFileSync(changedRuntime, "SNAPSHOT_RUNTIME=changed\n");
+
+    const harness = [
+      "#!/usr/bin/env bash",
+      "set -euo pipefail",
+      stateBlock,
+      "REPO=" + JSON.stringify(dir),
+      "TEST_LIVE=" + JSON.stringify(live),
+      "LOCK_DIRS=()",
+      "fail() { printf 'FATAL: %s\\n' \"$*\" >&2; exit 1; }",
+      'if [[ ${TEST_SOURCE_EARLY_FAIL:-0} == 1 && -n $RUN_EVAL_SOURCE_SNAPSHOT ]]; then fail "second-pass source failure"; fi',
+      'RUN_EVAL_LIVE_SCRIPT_DIR="$(unset CDPATH; cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"',
+      snapshotBlock,
+      "cp " + JSON.stringify(changedWrapper) + ' "$TEST_LIVE/run-eval.sh"',
+      "cp " +
+        JSON.stringify(changedSnapshotHelper) +
+        ' "$TEST_LIVE/run-eval-source-snapshot.sh"',
+      "cp " +
+        JSON.stringify(changedLifecycle) +
+        ' "$TEST_LIVE/run-eval-lifecycle.sh"',
+      "cp " +
+        JSON.stringify(changedRuntime) +
+        ' "$TEST_LIVE/run-eval-runtime.sh"',
+      "RUN_EVAL_LIFECYCLE_STAGE=support",
+      'node -e \'const fs = require("node:fs"); const p = process.argv[1]; const mode = (name) => (fs.statSync(name).mode & 0o777).toString(8); process.stdout.write(`modes=${mode(p)}:${mode(`${p}/run-eval.sh`)}:${mode(`${p}/run-eval-source-snapshot.sh`)}:${mode(`${p}/run-eval-lifecycle.sh`)}:${mode(`${p}/run-eval-runtime.sh`)}\\n`);\' "$RUN_EVAL_SOURCE_SNAPSHOT"',
+      "node -e 'for (const key of Object.keys(process.env)) { if (key.startsWith(\"RUN_EVAL_\")) process.exit(1); }'",
+      'if [[ $(id -u) -ne 0 ]] && mv "$RUN_EVAL_SOURCE_SNAPSHOT/run-eval-runtime.sh" "$RUN_EVAL_SOURCE_SNAPSHOT/run-eval-runtime.moved" 2>/dev/null; then fail "the sealed source snapshot allowed an entry replacement"; fi',
+      'source "$RUN_EVAL_SCRIPT_DIR/run-eval-lifecycle.sh"',
+      'source "$RUN_EVAL_SCRIPT_DIR/run-eval-runtime.sh"',
+      'printf "wrapper=%s helper=%s lifecycle=%s runtime=%s snapshot=%s\\n" "${BASH_SOURCE[0]}" "$SNAPSHOT_HELPER" "$SNAPSHOT_LIFECYCLE" "$SNAPSHOT_RUNTIME" "$RUN_EVAL_SOURCE_SNAPSHOT"',
+    ].join("\n");
+    const snapshotHelperFixture = `${sourceSnapshot}\nSNAPSHOT_HELPER="\${BASH_SOURCE[0]}"\n`;
+    const resetLiveSources = ({ helper = snapshotHelperFixture } = {}) => {
+      writeFileSync(liveWrapper, `${harness}\n`, { mode: 0o700 });
+      chmodSync(liveWrapper, 0o700);
+      writeFileSync(liveSnapshotHelper, helper, { mode: 0o700 });
+      chmodSync(liveSnapshotHelper, 0o700);
+      writeFileSync(
+        path.join(live, "run-eval-lifecycle.sh"),
+        'case "$RUN_EVAL_LIFECYCLE_STAGE" in support) SNAPSHOT_LIFECYCLE=old ;; esac\n',
+      );
+      writeFileSync(
+        path.join(live, "run-eval-runtime.sh"),
+        "SNAPSHOT_RUNTIME=old\n",
+      );
+    };
+    resetLiveSources();
+    const hostileRunEvalEnv = Object.fromEntries(
+      [
+        "RUN_EVAL_SOURCE_SNAPSHOT",
+        "RUN_EVAL_SOURCE_TOKEN",
+        "RUN_EVAL_SCRIPT_DIR",
+        "RUN_EVAL_SOURCE_MARKER",
+        "RUN_EVAL_SOURCE_WRAPPER",
+        "RUN_EVAL_SOURCE_HELPER",
+        "RUN_EVAL_ENTRY_SOURCE",
+        "RUN_EVAL_SOURCE_PHYSICAL",
+        "RUN_EVAL_SOURCE_PHYSICAL_PARENT",
+        "RUN_EVAL_MARKER_PID",
+        "RUN_EVAL_MARKER_TOKEN",
+        "RUN_EVAL_LIVE_SCRIPT_DIR",
+      ].map((name) => [name, "hostile-export"]),
+    );
+    hostileRunEvalEnv.RUN_EVAL_SOURCE_SNAPSHOT = "";
+    hostileRunEvalEnv.RUN_EVAL_SOURCE_TOKEN = "";
+    const run = spawnSync(liveWrapper, [], {
+      encoding: "utf8",
+      env: { ...process.env, ...hostileRunEvalEnv },
+    });
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /lifecycle=old runtime=old/);
+    assert.match(run.stdout, /modes=500:500:400:400:400/);
+    const snapshot = run.stdout.match(/snapshot=(.+)$/m)?.[1];
+    assert.ok(snapshot);
+    assert.equal(
+      run.stdout.match(/wrapper=(.*?) helper=/)?.[1],
+      path.join(snapshot, "run-eval.sh"),
+    );
+    assert.equal(
+      run.stdout.match(/helper=(.*?) lifecycle=/)?.[1],
+      path.join(snapshot, "run-eval-source-snapshot.sh"),
+    );
+    assert.equal(readFileSync(liveWrapper, "utf8"), "wrapper=changed\n");
+    assert.equal(
+      readFileSync(liveSnapshotHelper, "utf8"),
+      "SNAPSHOT_HELPER=changed\n",
+    );
+    assert.equal(existsSync(snapshot), false);
+    const snapshotEntries = () =>
+      readdirSync(path.join(dir, ".git")).filter((name) =>
+        name.startsWith("review-eval-source."),
+      );
+    assert.deepEqual(snapshotEntries(), []);
+
+    const failedRestartHelper = snapshotHelperFixture.replace(
+      'exec "$RUN_EVAL_SOURCE_SNAPSHOT/run-eval.sh" "$@" --repo "$repo"',
+      'exec "$RUN_EVAL_SOURCE_SNAPSHOT/missing-run-eval.sh"',
+    );
+    assert.notEqual(failedRestartHelper, snapshotHelperFixture);
+    resetLiveSources({ helper: failedRestartHelper });
+    const failedExec = spawnSync(liveWrapper, [], { encoding: "utf8" });
+    assert.equal(failedExec.status, 1);
+    assert.match(failedExec.stderr, /could not restart from the immutable/);
+    assert.deepEqual(snapshotEntries(), []);
+
+    const missingSecondPassHelper = snapshotHelperFixture.replace(
+      "  export RUN_EVAL_SOURCE_SNAPSHOT RUN_EVAL_SOURCE_TOKEN",
+      [
+        '  chmod 0700 "$RUN_EVAL_SOURCE_SNAPSHOT"',
+        '  rm -f "$RUN_EVAL_SOURCE_SNAPSHOT/run-eval-source-snapshot.sh"',
+        '  chmod 0500 "$RUN_EVAL_SOURCE_SNAPSHOT"',
+        "  export RUN_EVAL_SOURCE_SNAPSHOT RUN_EVAL_SOURCE_TOKEN",
+      ].join("\n"),
+    );
+    assert.notEqual(missingSecondPassHelper, snapshotHelperFixture);
+    resetLiveSources({ helper: missingSecondPassHelper });
+    const failedBeforeHelperSource = spawnSync(liveWrapper, [], {
+      encoding: "utf8",
+    });
+    assert.equal(failedBeforeHelperSource.status, 1);
+    assert.match(failedBeforeHelperSource.stderr, /snapshot is not sealed/);
+    assert.deepEqual(snapshotEntries(), []);
+
+    const writableSourceHelper = snapshotHelperFixture.replace(
+      '  chmod 0500 "$RUN_EVAL_SOURCE_SNAPSHOT" ||',
+      [
+        '  chmod 0600 "$RUN_EVAL_SOURCE_SNAPSHOT/run-eval-runtime.sh"',
+        '  chmod 0500 "$RUN_EVAL_SOURCE_SNAPSHOT" ||',
+      ].join("\n"),
+    );
+    assert.notEqual(writableSourceHelper, snapshotHelperFixture);
+    resetLiveSources({ helper: writableSourceHelper });
+    const rejectedWritableSource = spawnSync(liveWrapper, [], {
+      encoding: "utf8",
+    });
+    assert.equal(rejectedWritableSource.status, 1);
+    assert.match(rejectedWritableSource.stderr, /verify the sealed/);
+    assert.deepEqual(snapshotEntries(), []);
+
+    resetLiveSources();
+    const failedAfterRestart = spawnSync(liveWrapper, [], {
+      encoding: "utf8",
+      env: { ...process.env, TEST_SOURCE_EARLY_FAIL: "1" },
+    });
+    assert.equal(failedAfterRestart.status, 1);
+    assert.match(failedAfterRestart.stderr, /second-pass source failure/);
+    assert.deepEqual(snapshotEntries(), []);
+
+    resetLiveSources();
+    unlinkSync(liveSnapshotHelper);
+    const failed = spawnSync(liveWrapper, [], { encoding: "utf8" });
+    assert.equal(failed.status, 1);
+    assert.match(failed.stderr, /is not a regular file/);
+    assert.deepEqual(snapshotEntries(), []);
+
+    const retained = path.join(
+      realpathSync(path.join(dir, ".git")),
+      "review-eval-source.ABC123",
+    );
+    mkdirSync(retained);
+    const retainedToken = "ABCDEFGHIJKL";
+    const retainedWrapper = path.join(retained, "run-eval.sh");
+    writeFileSync(
+      path.join(retained, "run-eval-source-snapshot.sh"),
+      snapshotHelperFixture,
+    );
+    for (const name of ["run-eval-lifecycle.sh", "run-eval-runtime.sh"]) {
+      writeFileSync(path.join(retained, name), `${name}\n`);
+    }
+    writeFileSync(path.join(retained, "sentinel"), "retain\n");
+    writeFileSync(
+      retainedWrapper,
+      [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        "RUN_EVAL_SOURCE_SNAPSHOT=" + JSON.stringify(retained),
+        "RUN_EVAL_SOURCE_TOKEN=" + JSON.stringify(retainedToken),
+        'printf "%s\\t%s\\n" "$$" "$RUN_EVAL_SOURCE_TOKEN" >"$RUN_EVAL_SOURCE_SNAPSHOT/.review-eval-owner.$RUN_EVAL_SOURCE_TOKEN"',
+        'chmod 0400 "$RUN_EVAL_SOURCE_SNAPSHOT/.review-eval-owner.$RUN_EVAL_SOURCE_TOKEN"',
+        'chmod 0500 "$RUN_EVAL_SOURCE_SNAPSHOT"',
+        stateBlock,
+        "[[ $RUN_EVAL_SOURCE_OWNED -eq 1 ]]",
+      ].join("\n") + "\n",
+      { mode: 0o500 },
+    );
+    chmodSync(path.join(retained, "run-eval-source-snapshot.sh"), 0o400);
+    chmodSync(path.join(retained, "run-eval-lifecycle.sh"), 0o400);
+    chmodSync(path.join(retained, "run-eval-runtime.sh"), 0o400);
+    chmodSync(retained, 0o700);
+    const retainedRun = spawnSync(retainedWrapper, [], { encoding: "utf8" });
+    assert.equal(retainedRun.status, 0, retainedRun.stderr);
+    assert.equal(existsSync(path.join(retained, "sentinel")), true);
+    assert.equal(existsSync(retained), true);
+  } finally {
+    spawnSync("chmod", ["-R", "u+w", dir]);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the source snapshot path validator rejects aliases and nested paths", () => {
+  const sourceSnapshotPath = runEvalSourcePaths.get("sourceSnapshot");
+  assert.ok(sourceSnapshotPath);
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-source-paths-"));
+  try {
+    const physicalRoot = realpathSync(dir);
+    const direct = path.join(physicalRoot, "review-eval-source.ABC123");
+    mkdirSync(direct);
+    mkdirSync(path.join(direct, "nested"));
+    const short = path.join(physicalRoot, "review-eval-source.ABC12");
+    mkdirSync(short);
+    const aliasParent = path.join(physicalRoot, "alias-parent");
+    symlinkSync(physicalRoot, aliasParent, "dir");
+    const symlinked = path.join(physicalRoot, "review-eval-source.SYM123");
+    symlinkSync(direct, symlinked, "dir");
+    const lexicalParent = path.join(physicalRoot, "lexical");
+    mkdirSync(lexicalParent);
+    const probe = path.join(physicalRoot, "probe.sh");
+    writeFileSync(
+      probe,
+      [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        'RUN_EVAL_SOURCE_SNAPSHOT=""',
+        'RUN_EVAL_SOURCE_TOKEN=""',
+        "source " + JSON.stringify(sourceSnapshotPath),
+        'RUN_EVAL_SOURCE_SNAPSHOT="$1"',
+        'if run_eval_source_snapshot_path_valid; then printf "valid\\n"; else printf "invalid\\n"; fi',
+      ].join("\n") + "\n",
+      { mode: 0o700 },
+    );
+    const validate = (candidate) =>
+      spawnSync(probe, [candidate], { encoding: "utf8" }).stdout.trim();
+    assert.equal(validate(direct), "valid");
+    assert.equal(validate(path.join(direct, "nested")), "invalid");
+    assert.equal(validate(short), "invalid");
+    assert.equal(validate(symlinked), "invalid");
+    assert.equal(
+      validate(`${physicalRoot}/lexical/../${path.basename(direct)}`),
+      "invalid",
+    );
+    assert.equal(
+      validate(path.join(aliasParent, path.basename(direct))),
+      "invalid",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the persistent plan must bind the private source snapshot", () => {
+  const wrapper = runEvalSource("wrapper");
+  const digestBlock = wrapper.match(
+    /# RUN-EVAL-SPLIT-ONLY-BEGIN source-snapshot-digest\n([\s\S]*?)# RUN-EVAL-SPLIT-ONLY-END source-snapshot-digest\n/,
+  )?.[1];
+  assert.ok(digestBlock, "the source-snapshot digest check is missing");
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-source-digest-"));
+  try {
+    const snapshot = path.join(dir, "snapshot");
+    const changed = path.join(dir, "changed");
+    mkdirSync(snapshot);
+    mkdirSync(changed);
+    const names = [
+      "run-eval.sh",
+      "run-eval-source-snapshot.sh",
+      "run-eval-lifecycle.sh",
+      "run-eval-runtime.sh",
+    ];
+    for (const name of names) {
+      writeFileSync(path.join(snapshot, name), "snapshotted " + name + "\n");
+      writeFileSync(path.join(changed, name), "changed " + name + "\n");
+    }
+    const snapshotDigest = orchestratorSourceDigest({
+      files: names.map((name) => path.join(snapshot, name)),
+    });
+    const changedDigest = orchestratorSourceDigest({
+      files: names.map((name) => path.join(changed, name)),
+    });
+    const planFile = path.join(dir, "plan.json");
+    const run = (digest) => {
+      writeFileSync(
+        planFile,
+        JSON.stringify({ inputs: { orchestrator_digest: digest } }),
+      );
+      return spawnSync(
+        "bash",
+        [
+          "-c",
+          [
+            "set -euo pipefail",
+            "SPEC=" + JSON.stringify(repoRoot),
+            "PLAN_JSON=" + JSON.stringify(planFile),
+            "RUN_EVAL_SCRIPT_DIR=" + JSON.stringify(snapshot),
+            "source " +
+              JSON.stringify(runEvalSourcePaths.get("sourceSnapshot")),
+            digestBlock,
+            "printf 'cell-started\\n'",
+          ].join("\n"),
+        ],
+        { encoding: "utf8" },
+      );
+    };
+
+    const mismatched = run(changedDigest);
+    assert.equal(mismatched.status, 1);
+    assert.match(
+      mismatched.stderr,
+      /snapshot differs from the persistent plan/,
+    );
+    assert.doesNotMatch(mismatched.stdout, /cell-started/);
+
+    const matched = run(snapshotDigest);
+    assert.equal(matched.status, 0, matched.stderr);
+    assert.match(matched.stdout, /cell-started/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("the cell reader emits nothing when the plan carries a forged field", () => {

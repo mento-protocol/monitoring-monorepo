@@ -3,7 +3,7 @@ title: Scripts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-23
+last_verified: 2026-08-29
 doc_type: agent-instructions
 scope: scripts
 review_interval_days: 90
@@ -54,8 +54,8 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 
 ## Why Files Stay Flat
 
-`scripts/` has twelve path-pin classes. Move each pin with its file in the
-same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
+`scripts/` has thirteen path-pin classes. Move each pin with its file, except
+the `agent-autoreview.sh` feedback-runtime pins below.
 
 - **Autoreview runtime pins.** `agent-autoreview.sh` pins sibling runtime and
   optional `pr-feedback-state-claude.mjs` and
@@ -92,6 +92,9 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   `agent-autoreview-core.mjs`. Runtime hashes use `$script_source_dir`; suites
   use `$repo_root`. Core edits route both suites; missing pins freeze the stamp
   (ADR 0069).
+- **Review-eval pins.** `review/run-eval-source-snapshot.sh` joins the
+  four-source set in `docs/evals/review-skill.md`; update every listed consumer
+  together.
 - **Evaluation fixture forbidden lists.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names the navigation
   eval's own implementation.
@@ -109,19 +112,16 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.
-- **Trusted-validator probes.** `pr-description.yml` runs the validator from the
-  PR's base branch **name**, so it resolves to that branch's tip, never a
-  PR-time snapshot. One probe path is enough once the target is live on the base
-  branch (issue 1904); a move commit still needs a temporary dual probe.
-  ADR 0064 has the failure mode.
+- **Trusted-validator probes.** `pr-description.yml` resolves the validator at
+  the PR base-branch tip, not a PR snapshot. After a move, keep dual probes
+  until the new path reaches the base (issue 1904; ADR 0064).
 - **Production infrastructure contract pins.**
   `production-infra-identity-contract/workflow-inventory.mjs` pins exact script
   paths for the workflows it audits.
-- **External console pins.** The Codex Cloud console holds
-  `bootstrap/codex-cloud-setup.sh` and
-  `bootstrap/codex-cloud-maintenance.sh`; Claude Code web resolves
+- **External console pins.** Codex Cloud pins
+  `bootstrap/codex-cloud-{setup,maintenance}.sh`; Claude Code web pins
   `bootstrap/claude-code-web-setup.sh` through `.claude/hooks/session-start.sh`.
-  A move needs an operator edit; repo grep cannot reach it.
+  Moves need operator updates outside repo grep.
 - **Reviewed-artifact byte pins.** `.gitattributes` pins the Upstash launcher
   EOL and `UPSTASH_MCP_LAUNCHER_SHA256` hashes it. A move changes both. See
   [`docs/notes/upstash-mcp-operator.md`](../docs/notes/upstash-mcp-operator.md).

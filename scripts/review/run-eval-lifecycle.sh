@@ -45,7 +45,9 @@ cleanup() {
   done
   return "$code"
 }
-trap cleanup EXIT
+# RUN-EVAL-SPLIT-ONLY-BEGIN source-snapshot-exit-trap
+trap cleanup_with_source_snapshot EXIT
+# RUN-EVAL-SPLIT-ONLY-END source-snapshot-exit-trap
 
 # --- the run lock ------------------------------------------------------------
 
@@ -187,6 +189,7 @@ acquire_run_lock
   verify)
     RUN_EVAL_SOURCE_NAMES=(
       run-eval.sh
+      run-eval-source-snapshot.sh
       run-eval-lifecycle.sh
       run-eval-runtime.sh
     )

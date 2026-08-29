@@ -45,6 +45,7 @@ export const ORCHESTRATOR_FILE = fileURLToPath(
 );
 export const ORCHESTRATOR_FILES = Object.freeze([
   ORCHESTRATOR_FILE,
+  fileURLToPath(new URL("./run-eval-source-snapshot.sh", import.meta.url)),
   fileURLToPath(new URL("./run-eval-lifecycle.sh", import.meta.url)),
   fileURLToPath(new URL("./run-eval-runtime.sh", import.meta.url)),
 ]);

@@ -1,19 +1,21 @@
 // Cell identity, cache reuse, and answer-key leak signals.
 
 import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 
 import { defaultRunGit } from "./review-eval-fixtures.mjs";
 
 const MIN_VERBATIM_TITLE_WORDS = 6;
 
-// The shell split moved byte-identical runtime blocks into two sourced helpers.
-// Permit only that known source transition so the 24 paid cells cached before
-// the split remain reusable. The current digest binds the wrapper and both
-// helpers. Any later edit moves it and closes this compatibility path.
+// The shell refactor moved the cell runtime into two sourced helpers. Its final
+// reviewed wrapper also binds every helper source to one private snapshot before
+// paid work starts. Permit only that audited transition so the 24 paid cells
+// cached before the refactor remain reusable. The current digest binds the
+// wrapper and all three helpers. Any later edit closes this compatibility path.
 const ORCHESTRATOR_REUSE_TRANSITIONS = new Map([
   [
     "5cdfbd0e709af2d68c193d484b724706b339ab0562d14b283f5fc38eebe9ae49",
-    "77bba1e0af554775f19429d48ea6470a3574b05e6b3ed95a1b3e73e8bf3a2807",
+    "fd1bdfa3c59a73e6b31027db49840d512b4580efa39872ac81889c4da26c5139",
   ],
 ]);
 
@@ -205,6 +207,27 @@ export function treatmentIdentity({ plan }) {
   };
 }
 
+// The historical producer wrote only these two shapes. The skill digest, not
+// this display identity, decides whether the raw cell still matches this run.
+function validLegacyTreatmentFingerprint(fingerprint) {
+  if (
+    !Object.hasOwn(fingerprint, "skill_ref") ||
+    !Object.hasOwn(fingerprint, "dirty")
+  ) {
+    return false;
+  }
+  if (fingerprint.skill_ref === "installed") {
+    return fingerprint.dirty === false;
+  }
+  return (
+    fingerprint.dirty === true &&
+    typeof fingerprint.skill_ref === "string" &&
+    fingerprint.skill_ref.length > 0 &&
+    path.isAbsolute(fingerprint.skill_ref) &&
+    path.resolve(fingerprint.skill_ref) === fingerprint.skill_ref
+  );
+}
+
 /**
  * Whether the orchestrator may reuse a cell it finds on disk. An unfingerprinted
  * or mismatched cell is refused, which costs one re-run and never scores the
@@ -227,8 +250,26 @@ export function cellReuseDecision({ plan, resultPath, result = null }) {
   if (!found || typeof found !== "object") {
     return { reuse: false, reason: "the cached cell carries no fingerprint" };
   }
+  const reusedAcrossOrchestratorSplit = orchestratorReuseAllowed(
+    found.orchestrator_digest,
+    expected.orchestrator_digest,
+  );
+  const validLegacyTreatment = validLegacyTreatmentFingerprint(found);
+  if (reusedAcrossOrchestratorSplit && !validLegacyTreatment) {
+    return {
+      reuse: false,
+      reason:
+        "the approved pre-split fingerprint lacks the complete historically valid legacy treatment fields",
+    };
+  }
+  const acceptedLegacyFields = new Set(
+    reusedAcrossOrchestratorSplit && validLegacyTreatment
+      ? ["skill_ref", "dirty"]
+      : [],
+  );
   const unexpected = Object.keys(found).filter(
-    (field) => !Object.hasOwn(expected, field),
+    (field) =>
+      !Object.hasOwn(expected, field) && !acceptedLegacyFields.has(field),
   );
   if (unexpected.length > 0) {
     return {
@@ -236,14 +277,9 @@ export function cellReuseDecision({ plan, resultPath, result = null }) {
       reason: `the cached cell fingerprint carries unexpected ${unexpected.join(", ")}`,
     };
   }
-  let reusedAcrossOrchestratorSplit = false;
   const differing = Object.keys(expected).filter((field) => {
     if (found[field] === expected[field]) return false;
-    if (
-      field === "orchestrator_digest" &&
-      orchestratorReuseAllowed(found[field], expected[field])
-    ) {
-      reusedAcrossOrchestratorSplit = true;
+    if (field === "orchestrator_digest" && reusedAcrossOrchestratorSplit) {
       return false;
     }
     return true;
@@ -257,7 +293,7 @@ export function cellReuseDecision({ plan, resultPath, result = null }) {
   return {
     reuse: true,
     reason: reusedAcrossOrchestratorSplit
-      ? "the cached cell matches this run through the recorded pure orchestrator split"
+      ? "the cached cell matches this run through the recorded reviewed orchestrator transition"
       : "the cached cell matches this run",
   };
 }

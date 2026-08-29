@@ -72,6 +72,71 @@ SPEC_TEMP=0
 SHIM=""
 SKILL_SNAPSHOT=""
 BASELINE_SNAPSHOT=""
+# RUN-EVAL-SPLIT-ONLY-BEGIN source-snapshot-state
+RUN_EVAL_ORIGINAL_ARGS=("$@")
+RUN_EVAL_SOURCE_SNAPSHOT="${RUN_EVAL_SOURCE_SNAPSHOT:-}"
+RUN_EVAL_SOURCE_TOKEN="${RUN_EVAL_SOURCE_TOKEN:-}"
+for RUN_EVAL_INHERITED_EXPORT in $(compgen -e RUN_EVAL_); do
+  export -n "${RUN_EVAL_INHERITED_EXPORT?}"
+done
+unset RUN_EVAL_INHERITED_EXPORT
+RUN_EVAL_ENTRY_SOURCE="${BASH_SOURCE[0]}"
+RUN_EVAL_CREATED_SOURCE_SNAPSHOT=0
+RUN_EVAL_SOURCE_OWNED=0
+RUN_EVAL_BOOTSTRAP_SOURCE_OWNED=0
+# shellcheck disable=SC2329  # invoked by the bootstrap EXIT trap below
+cleanup_source_snapshot_bootstrap() {
+  local code=$?
+  if [[ $RUN_EVAL_BOOTSTRAP_SOURCE_OWNED -eq 1 ]]; then
+    chmod 0700 "$RUN_EVAL_SOURCE_SNAPSHOT" >/dev/null 2>&1 || true
+    rm -f -- "$RUN_EVAL_SOURCE_SNAPSHOT"/run-eval{,-source-snapshot,-lifecycle,-runtime}.sh
+    if [[ $RUN_EVAL_SOURCE_TOKEN =~ ^[[:alnum:]]{12}$ ]]; then
+      rm -f -- "$RUN_EVAL_SOURCE_SNAPSHOT/.review-eval-owner.$RUN_EVAL_SOURCE_TOKEN"
+    fi
+    rmdir -- "$RUN_EVAL_SOURCE_SNAPSHOT" >/dev/null 2>&1 || true
+  fi
+  return "$code"
+}
+if [[ -n $RUN_EVAL_SOURCE_SNAPSHOT || -n $RUN_EVAL_SOURCE_TOKEN ]]; then
+  RUN_EVAL_SOURCE_PARENT="${RUN_EVAL_SOURCE_SNAPSHOT%/*}"
+  RUN_EVAL_SOURCE_NAME="${RUN_EVAL_SOURCE_SNAPSHOT##*/}"
+  RUN_EVAL_SOURCE_MARKER="$RUN_EVAL_SOURCE_SNAPSHOT/.review-eval-owner.$RUN_EVAL_SOURCE_TOKEN"
+  RUN_EVAL_SOURCE_WRAPPER="$RUN_EVAL_SOURCE_SNAPSHOT/run-eval.sh"
+  RUN_EVAL_SOURCE_HELPER="$RUN_EVAL_SOURCE_SNAPSHOT/run-eval-source-snapshot.sh"
+  RUN_EVAL_SOURCE_PHYSICAL_PARENT="$(unset CDPATH; cd -P "$RUN_EVAL_SOURCE_PARENT" 2>/dev/null && pwd -P)" || RUN_EVAL_SOURCE_PHYSICAL_PARENT=""
+  RUN_EVAL_SOURCE_PHYSICAL="$(unset CDPATH; cd -P "$RUN_EVAL_SOURCE_SNAPSHOT" 2>/dev/null && pwd -P)" || RUN_EVAL_SOURCE_PHYSICAL=""
+  RUN_EVAL_MARKER_PID=""
+  RUN_EVAL_MARKER_TOKEN=""
+  if [[ -f $RUN_EVAL_SOURCE_MARKER && ! -L $RUN_EVAL_SOURCE_MARKER ]]; then
+    IFS=$'\t' read -r RUN_EVAL_MARKER_PID RUN_EVAL_MARKER_TOKEN <"$RUN_EVAL_SOURCE_MARKER" || true
+  fi
+  if [[ -z $RUN_EVAL_SOURCE_SNAPSHOT || -z $RUN_EVAL_SOURCE_TOKEN ||
+    ! $RUN_EVAL_SOURCE_TOKEN =~ ^[[:alnum:]]{12}$ ||
+    ! $RUN_EVAL_SOURCE_NAME =~ ^review-eval-source\.[[:alnum:]]{6}$ ||
+    $RUN_EVAL_SOURCE_PARENT != "$RUN_EVAL_SOURCE_PHYSICAL_PARENT" ||
+    $RUN_EVAL_SOURCE_SNAPSHOT != "$RUN_EVAL_SOURCE_PHYSICAL" ||
+    ${RUN_EVAL_SOURCE_PHYSICAL%/*} != "$RUN_EVAL_SOURCE_PHYSICAL_PARENT" ||
+    -L $RUN_EVAL_SOURCE_SNAPSHOT || ! -f $RUN_EVAL_SOURCE_MARKER ||
+    -L $RUN_EVAL_SOURCE_MARKER || $RUN_EVAL_MARKER_PID != "$$" ||
+    $RUN_EVAL_MARKER_TOKEN != "$RUN_EVAL_SOURCE_TOKEN" ||
+    $RUN_EVAL_ENTRY_SOURCE != "$RUN_EVAL_SOURCE_SNAPSHOT/run-eval.sh" ]]; then
+    printf 'FATAL: the inherited orchestrator snapshot is not authenticated\n' >&2
+    exit 1
+  fi
+  RUN_EVAL_BOOTSTRAP_SOURCE_OWNED=1
+  trap cleanup_source_snapshot_bootstrap EXIT
+  if [[ -w $RUN_EVAL_SOURCE_SNAPSHOT || -w $RUN_EVAL_SOURCE_MARKER ||
+    ! -f $RUN_EVAL_SOURCE_WRAPPER || -L $RUN_EVAL_SOURCE_WRAPPER ||
+    -w $RUN_EVAL_SOURCE_WRAPPER || ! -f $RUN_EVAL_SOURCE_HELPER ||
+    -L $RUN_EVAL_SOURCE_HELPER || -w $RUN_EVAL_SOURCE_HELPER ]]; then
+    printf 'FATAL: the inherited orchestrator snapshot is not sealed\n' >&2
+    exit 1
+  fi
+  # shellcheck source=scripts/review/run-eval-source-snapshot.sh
+  source "$RUN_EVAL_SOURCE_HELPER"
+  run_eval_source_snapshot_arm || exit 1
+fi
+# RUN-EVAL-SPLIT-ONLY-END source-snapshot-state
 LOCK_DIRS=()
 RUN_DIR=""
 PLAN_JSON=""
@@ -161,7 +226,35 @@ LEDGER="$REPO/docs/evals/review-skill-ledger.jsonl"
 [[ -f $LEDGER ]] || fail "ledger $LEDGER is missing"
 
 # RUN-EVAL-EXTRACT-BEGIN lifecycle-setup
-RUN_EVAL_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RUN_EVAL_LIVE_SCRIPT_DIR="$(unset CDPATH; cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# RUN-EVAL-SOURCE-SNAPSHOT-BEGIN
+LOCK_ROOT="$(git -C "$REPO" rev-parse --absolute-git-dir 2>/dev/null)" ||
+  fail "$REPO has no git directory for an immutable orchestrator snapshot"
+LOCK_ROOT="$(unset CDPATH; cd -P "$LOCK_ROOT" 2>/dev/null && pwd -P)" ||
+  fail "$REPO has no physical git directory for an immutable orchestrator snapshot"
+if [[ -z $RUN_EVAL_SOURCE_SNAPSHOT && -z $RUN_EVAL_SOURCE_TOKEN ]]; then
+  RUN_EVAL_SOURCE_SNAPSHOT="$(mktemp -d "$LOCK_ROOT/review-eval-source.XXXXXX")" ||
+    fail "could not prepare an immutable orchestrator snapshot under $LOCK_ROOT"
+  RUN_EVAL_BOOTSTRAP_SOURCE_OWNED=1
+  trap cleanup_source_snapshot_bootstrap EXIT
+  RUN_EVAL_SOURCE_HELPER="$RUN_EVAL_SOURCE_SNAPSHOT/run-eval-source-snapshot.sh"
+  [[ -f $RUN_EVAL_LIVE_SCRIPT_DIR/run-eval-source-snapshot.sh &&
+    ! -L $RUN_EVAL_LIVE_SCRIPT_DIR/run-eval-source-snapshot.sh ]] ||
+    fail "the source-snapshot helper is not a regular file"
+  cp "$RUN_EVAL_LIVE_SCRIPT_DIR/run-eval-source-snapshot.sh" "$RUN_EVAL_SOURCE_HELPER" ||
+    fail "could not snapshot the source-snapshot helper"
+  chmod 0400 "$RUN_EVAL_SOURCE_HELPER" ||
+    fail "could not protect the source-snapshot helper"
+  # shellcheck source=scripts/review/run-eval-source-snapshot.sh
+  source "$RUN_EVAL_SOURCE_HELPER"
+  run_eval_source_snapshot_restart \
+    "$REPO" "$RUN_EVAL_LIVE_SCRIPT_DIR" "${RUN_EVAL_ORIGINAL_ARGS[@]}"
+fi
+run_eval_source_snapshot_accept "$LOCK_ROOT" "$RUN_EVAL_LIVE_SCRIPT_DIR" ||
+  fail "the inherited orchestrator snapshot is not the sealed checkout source tuple"
+unset RUN_EVAL_ORIGINAL_ARGS
+RUN_EVAL_SCRIPT_DIR="$RUN_EVAL_SOURCE_SNAPSHOT"
+# RUN-EVAL-SOURCE-SNAPSHOT-END
 RUN_EVAL_LIFECYCLE_STAGE=setup
 # shellcheck source=scripts/review/run-eval-lifecycle.sh
 source "$RUN_EVAL_SCRIPT_DIR/run-eval-lifecycle.sh"
@@ -281,6 +374,9 @@ node "$CLI" "${PLAN_ARGS[@]}" >"$PLAN_OUT" ||
   fail "planning into $RUN_DIR failed"
 RUN_DIR="$(json_field "$PLAN_OUT" plan_dir)"
 PLAN_JSON="$RUN_DIR/plan.json"
+# RUN-EVAL-SPLIT-ONLY-BEGIN source-snapshot-digest
+run_eval_source_snapshot_verify_plan "$PLAN_JSON" "$RUN_EVAL_SCRIPT_DIR"
+# RUN-EVAL-SPLIT-ONLY-END source-snapshot-digest
 # The first preflight proves that --against resolves to an intrinsically usable
 # row. The generated plan now supplies the remaining checks before paid work:
 # full schema and frozen-matrix validation, plus the exact comparison lineage.

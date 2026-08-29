@@ -159,6 +159,16 @@ function normalizeStatePath(value, state) {
   return String(value).split(state).join("<STATE>");
 }
 
+function normalizeCalendarAges(processes) {
+  return processes.map((process) => ({
+    ...process,
+    stdout: process.stdout.replace(
+      /("days_since_(?:any|complete|full)": )\d+/g,
+      "$1<DAYS>",
+    ),
+  }));
+}
+
 function processResult(result, state) {
   return {
     status: result.status,
@@ -447,8 +457,8 @@ test("review-eval entry points match the frozen pre-split behavior", (t) => {
   });
 
   assert.deepEqual(
-    processes,
-    expected.processes,
+    normalizeCalendarAges(processes),
+    normalizeCalendarAges(expected.processes),
     "stdout, stderr, exit codes, and signals must match the frozen pre-split snapshot",
   );
   assert.deepEqual(

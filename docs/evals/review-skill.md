@@ -3,7 +3,7 @@ title: Review Skill Evaluation
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-28
+last_verified: 2026-08-29
 doc_type: runbook
 scope: ci/process
 review_interval_days: 90
@@ -182,7 +182,19 @@ takes a `run.lock` owner record under both the checkout's git directory and the
 fixture cache — they move independently, under `--repo` and `--cache-dir` — and
 refuses to start while another live run holds either. A hard link publishes the
 complete owner record atomically. A process also claims a stale lock before it
-removes the lock, so two starters cannot both reclaim one killed run. The skill
+removes the lock, so two starters cannot both reclaim one killed run. The runner
+creates one private directory under the checkout's physical git directory. It
+copies and sources `run-eval-source-snapshot.sh` from that directory first. The
+helper copies the wrapper and the other two sourced helpers, creates a PID-bound
+random owner marker, seals the directory, and restarts the wrapper. The
+restarted process accepts only that sealed, non-symlink direct child. The
+read-only directory and files prevent in-place writes and entry replacement
+before a later helper source. Cleanup unlinks only the four fixed source files
+and the authenticated marker, then removes the empty directory. Every later
+helper stage uses the same snapshot. Before a paid cell starts, the snapshot
+helper recomputes the framed source digest and requires the persistent plan to
+record the same digest. An edit during planning makes the run stop instead of
+executing bytes outside its recorded provenance. The skill
 under test is snapshotted once, before the first cell, and every cell stages
 from that snapshot: the plan records one skill
 digest for the whole matrix, and two hours is long enough to edit the installed
@@ -195,10 +207,14 @@ score. A cached cell is reused only when its stored
 fingerprint — skill digest, kind, contract digest, the two CLI versions, the
 finder argv digest and the orchestrator digest — matches the current run. The
 one cache-compatibility rule accepts the recorded pre-split orchestrator digest
-only when the current digest is the exact reviewed wrapper-and-helper split.
-The test reconstructs the pre-split bytes from the extracted payloads. An edit
-to the wrapper or either helper changes the current digest and disables this
-rule. The
+only when the current digest is the exact reviewed four-source split with
+the sealed source-snapshot provenance guard. It requires one complete,
+historically valid legacy treatment pair: `installed` with `dirty: false`, or a
+normalized absolute candidate path with `dirty: true`. Raw-cell reuse stays
+keyed to the recorded skill bytes. The tests reconstruct the pre-split
+bytes from the extracted payloads and exercise the stable-source behavior of the
+final wrapper. An edit to the wrapper or any of the three helpers changes the
+current digest and disables this rule. The
 scorer preserves that fingerprint and a separate installed-or-candidate
 treatment identity in every result and in `calibration.json`. Local validation
 and CI check both records against the plan. Changing only the row and plan
@@ -393,12 +409,14 @@ covers the two fixture helpers:
 denominator, and `build-fixture.sh` materializes the checkout the contestant
 reviews and carries the checks that verify it, so an edit to either moves what
 was reviewed or what it was scored against. `orchestrator_digest` is a
-length-framed digest over `run-eval.sh`, `run-eval-lifecycle.sh`, and
-`run-eval-runtime.sh`. Together they fix the contestant's allowed tools, turn
-limit, skill staging, finder-report truncation, and cell environment. They
-shape the transcript every number is derived from as directly as a prompt does.
-An edit to any of them re-anchors the series, which is the conservative
-direction: a refused comparison is visible, a silently paired one is not.
+length-framed digest over `run-eval.sh`,
+`run-eval-source-snapshot.sh`, `run-eval-lifecycle.sh`, and
+`run-eval-runtime.sh`. Together they fix source authentication, sealing,
+restart and cleanup, plus the contestant's allowed tools, turn limit, skill
+staging, finder-report truncation, and cell environment. They shape the
+transcript every number is derived from as directly as a prompt does. An edit
+to any of them re-anchors the series, which is the conservative direction: a
+refused comparison is visible, a silently paired one is not.
 
 `--score` rechecks the bytes the contract pins by `sha256` — both prompts, every
 truth file, every frozen finder report — before it calls the judge, and refuses
@@ -433,7 +451,7 @@ older one is refused; pass `--contract` with the archived contract to read it.
 | reviewed model    | isolated by the `control` condition; model id and CLI version recorded                                       |
 | skill text        | `skill_digest` over every file in the skill directory, symlinks refused — this is the treatment              |
 | finder command    | `argv` pinned in the contract; `finder_argv_digest` records what a cell spawned                              |
-| orchestrator      | length-framed digest over the wrapper and two helpers: in the key and every cell fingerprint                 |
+| orchestrator      | length-framed digest over the wrapper and three helpers: in the key and every cell fingerprint               |
 | machine and shell | host, CLI versions, `--setting-sources ""`, clean worktree of `origin/main`                                  |
 | CLI upgrade       | versions in every cell fingerprint; a pair across one is labelled in the verdict, not in the key             |
 
@@ -595,6 +613,7 @@ path must exist on `main` before the first run after the moving commit.
 | `scripts/review/testdata/review-eval-split-equivalence/`    | frozen split inputs and observable-behavior snapshot     |
 | `scripts/review/review-eval-split-equivalence.test.mjs`     | frozen pre-split entry-point equivalence                 |
 | `scripts/review/run-eval.sh`                                | the orchestrator that spends model quota                 |
+| `scripts/review/run-eval-source-snapshot.sh`                | source authentication, sealing, restart, and cleanup     |
 | `scripts/review/run-eval-lifecycle.sh`                      | locks, deadlines, failure traces, and publication        |
 | `scripts/review/run-eval-runtime.sh`                        | skill staging, fixtures, cache, and cell runtime         |
 | `scripts/review/build-fixture.sh`                           | leak-proof fixture materialization                       |
