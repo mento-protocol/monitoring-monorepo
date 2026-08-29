@@ -519,11 +519,12 @@ whole-script rule can reject quoted data. A bounded shell-word projection also
 rejects all active parameter expansions, command substitutions, arithmetic
 expansions, and backtick command substitutions. One narrow case is allowed. A
 plain, non-nested parameter expansion can occur in a word made only from
-double-quoted text after the script path. The word can be an argument or a
-redirection target. A direct literal supported shell must be the first command
-word. A fixed non-option script path must be the second word. This rule rejects
-unquoted expansions, command prefixes, dynamic script paths, and all command,
-arithmetic, and backtick substitutions. It rejects `env -S` and
+double-quoted text after the script path. The word must be an ordinary
+argument. Unquoted redirection and glob metacharacters (`<`, `>`, `*`, `?`,
+`[`, and `]`) fail closed. A direct literal supported shell must be the first
+command word. A fixed non-option script path must be the second word. This rule
+rejects unquoted expansions, command prefixes, dynamic script paths, and all
+command, arithmetic, and backtick substitutions. It rejects `env -S` and
 `env --split-string` because these options parse an argument as a command. More
 than 4,096 words, more than 8,192 active expansions, an unclosed quote, and an
 unclosed or nested parameter expansion fail closed. Any ANSI-C quote fails

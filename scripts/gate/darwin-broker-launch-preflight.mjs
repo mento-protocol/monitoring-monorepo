@@ -351,7 +351,7 @@ export const BROKER_CLIENT_ALLOWLIST = [
       "node-net-dynamic-client",
       "javascript-process-broker",
     ],
-    sha256: "ee83a5ec93ed6719d8bf6e3423b4ab6253940c8f33b7e5e72fe0f1b093c86ac3",
+    sha256: "995cd00e61c956a6d77bf36bf366533cec0d493af1e4f7ba9a454b5274a05ae9",
     reason: APPROVED_ALLOWLIST_SHAPE.get(TEST_PATH).reason,
   },
 ];
@@ -811,6 +811,7 @@ function packageScriptHasUnsupportedExpansion(command) {
       continue;
     }
     if (character === "`" && quote !== "'") return true;
+    if (quote === "" && /[<>*?[\]]/u.test(character)) return true;
     if (quote === "" && /[ \t\r\f\v]/u.test(character)) {
       if (!finishWord()) return true;
       continue;
