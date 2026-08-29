@@ -147,6 +147,10 @@ pnpm aegis:tf:init                         # Grafana folder/dashboard stack
 pnpm aegis:tf:plan
 
 # Infrastructure (Terraform)
+# `terraform.stacks.json` owns routing. `platform` uses human-approved local
+# apply; `peg-policy-publication` is workflow-only. Other stacks normally apply
+# on `main` behind `production-infra`; local apply needs clean current `main` or
+# deliberate `--force-local-apply`.
 pnpm tf list                  # Registered Terraform stacks from terraform.stacks.json
 pnpm tf validate <stack>      # fmt/init -backend=false/validate for one stack
 pnpm infra:init               # Init providers (first time or after changes)

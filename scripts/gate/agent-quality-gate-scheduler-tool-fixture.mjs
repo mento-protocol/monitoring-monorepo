@@ -8,6 +8,15 @@ start_barrier="\${QG_FIXTURE_START_BARRIER:-}"
 delay_ms="\${QG_FIXTURE_DEFAULT_DELAY_MS:-250}"
 trunk_argv="$*"
 
+case "$*" in
+  "daemon status --ci --color=false")
+    # The scheduler fixture models a Trunk daemon that existed before the gate.
+    # The lifecycle wrapper must classify it without adding scheduler events.
+    printf '✔ Daemon running (pid: %s)\n' "$$"
+    exit 0
+    ;;
+esac
+
 if [[ "\${QG_FIXTURE_ASSERT_SANITIZED_ENV:-}" == 1 ]]; then
   for name in AGENT_CONTEXT_CLAUDE_SETTINGS_FILE \
     AGENT_CONTEXT_CODEX_HOOKS_FILE \

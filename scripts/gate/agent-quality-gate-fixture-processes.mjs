@@ -1,5 +1,14 @@
 import { execFile } from "node:child_process";
+import { constants as osConstants } from "node:os";
 import { promisify } from "node:util";
+
+import {
+  captureDarwinExactChild,
+  parseDarwinExactIdentity,
+  prepareDarwinExactIdentityHelper,
+  signalDarwinExactIdentity,
+  statusDarwinExactIdentity,
+} from "./darwin-process-lineage.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -45,6 +54,13 @@ export async function processStartUtc(pid) {
 }
 
 export async function identityMatches(identity) {
+  if (process.platform === "darwin" && identity.darwinExactIdentity) {
+    const result = statusDarwinExactIdentity({
+      scratchDirectory: identity.darwinScratchDirectory,
+      exactIdentity: identity.darwinExactIdentity,
+    });
+    return result.status === "live";
+  }
   const currentStart = await processStartUtc(identity.pid);
   return currentStart !== null && currentStart === identity.startUtc;
 }
@@ -93,6 +109,29 @@ async function waitUntilStopped(identities, timeoutMs = 3_000) {
 }
 
 async function signalExact(identity, signal) {
+  if (process.platform === "darwin") {
+    if (!identity.darwinExactIdentity || !identity.darwinScratchDirectory) {
+      throw new Error(
+        `Darwin fixture process has no exact audit-token identity: ${identity.pid}`,
+      );
+    }
+    const signalNumber = osConstants.signals[signal];
+    if (
+      ![
+        osConstants.signals.SIGSTOP,
+        osConstants.signals.SIGTERM,
+        osConstants.signals.SIGKILL,
+      ].includes(signalNumber)
+    ) {
+      throw new Error(`unsupported exact fixture signal: ${signal}`);
+    }
+    const result = signalDarwinExactIdentity({
+      scratchDirectory: identity.darwinScratchDirectory,
+      exactIdentity: identity.darwinExactIdentity,
+      signal: signalNumber,
+    });
+    return result.signalled;
+  }
   if (!(await identityMatches(identity))) return false;
   try {
     process.kill(identity.pid, signal);
@@ -105,17 +144,117 @@ async function signalExact(identity, signal) {
 
 export class ExactFixtureProcesses {
   #identities = new Map();
+  #darwinScratchDirectory;
+  #rootParentPid = process.pid;
 
-  async track(pid, { allowMissing = false } = {}) {
-    if (this.#identities.has(pid)) return this.#identities.get(pid);
+  constructor({ darwinScratchDirectory = "" } = {}) {
+    if (
+      process.platform === "darwin" &&
+      (typeof darwinScratchDirectory !== "string" || !darwinScratchDirectory)
+    ) {
+      throw new Error(
+        "Darwin fixture cleanup requires a helper scratch directory",
+      );
+    }
+    this.#darwinScratchDirectory = darwinScratchDirectory;
+    if (process.platform === "darwin") {
+      prepareDarwinExactIdentityHelper({
+        scratchDirectory: this.#darwinScratchDirectory,
+      });
+    }
+  }
+
+  async track(pid, { allowMissing = false, parentPid = null } = {}) {
+    if (process.platform === "darwin") {
+      if (!Number.isInteger(parentPid) || parentPid < 1) {
+        throw new Error(
+          `Darwin fixture process requires an explicit parent: ${pid}`,
+        );
+      }
+      const existing = this.#identities.get(pid);
+      if (existing) {
+        if (existing.parentPid !== parentPid) {
+          throw new Error(
+            `Darwin fixture process parent changed after capture: ${pid}`,
+          );
+        }
+        return existing;
+      }
+    } else if (this.#identities.has(pid)) {
+      return this.#identities.get(pid);
+    }
     const startUtc = await processStartUtc(pid);
     if (!startUtc && allowMissing) return null;
     if (!startUtc) {
       throw new Error(`cannot read fixture process identity: ${pid}`);
     }
     const identity = { pid, startUtc };
+    if (process.platform === "darwin") {
+      const parentIdentity = this.#identities.get(parentPid);
+      if (!parentIdentity && parentPid !== this.#rootParentPid) {
+        throw new Error(
+          `Darwin fixture parent is outside the tracked fixture tree: ${parentPid}`,
+        );
+      }
+      let captured;
+      try {
+        captured = captureDarwinExactChild({
+          scratchDirectory: this.#darwinScratchDirectory,
+          pid,
+          parentPid,
+        });
+      } catch (error) {
+        if (allowMissing && !(await processRunning(pid))) return null;
+        throw error;
+      }
+      if (!captured.active || !captured.identity) {
+        throw new Error(`cannot capture exact Darwin fixture identity: ${pid}`);
+      }
+      if (parentIdentity) {
+        const childExact = parseDarwinExactIdentity(captured.identity);
+        const parentExact = parseDarwinExactIdentity(
+          parentIdentity.darwinExactIdentity,
+        );
+        if (
+          childExact.bootId !== parentExact.bootId ||
+          childExact.parentUniqueId !== parentExact.uniqueId
+        ) {
+          throw new Error(
+            `Darwin fixture child is not bound to its tracked parent: ${pid}`,
+          );
+        }
+      }
+      identity.darwinExactIdentity = captured.identity;
+      identity.darwinScratchDirectory = this.#darwinScratchDirectory;
+      identity.parentPid = parentPid;
+    }
     this.#identities.set(pid, identity);
     return identity;
+  }
+
+  async trackDescendant(pid, rootIdentity) {
+    if (this.#identities.get(rootIdentity?.pid) !== rootIdentity) {
+      throw new Error("fixture descendant root is not tracked");
+    }
+    if (pid === rootIdentity.pid) return rootIdentity;
+    const lineage = [];
+    let current = pid;
+    for (let depth = 0; depth < 32; depth += 1) {
+      const parentPid = await parentOf(current);
+      if (!Number.isInteger(parentPid) || parentPid <= 1) break;
+      lineage.push({ pid: current, parentPid });
+      if (parentPid === rootIdentity.pid) {
+        let identity = rootIdentity;
+        for (const edge of lineage.reverse()) {
+          identity = await this.track(edge.pid, {
+            parentPid: edge.parentPid,
+          });
+        }
+        return identity;
+      }
+      current = parentPid;
+    }
+    throw new Error(`${pid} is not a descendant of ${rootIdentity.pid}`);
   }
 
   async signal(identity, signal) {
@@ -124,9 +263,11 @@ export class ExactFixtureProcesses {
 
   async #trackTree(pid) {
     for (const child of await childrenOf(pid)) {
-      const startUtc = await processStartUtc(child);
-      if (!startUtc) continue;
-      this.#identities.set(child, { pid: child, startUtc });
+      const identity = await this.track(child, {
+        allowMissing: true,
+        parentPid: pid,
+      });
+      if (!identity) continue;
       await this.#trackTree(child);
     }
   }

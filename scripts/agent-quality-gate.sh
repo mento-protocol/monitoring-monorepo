@@ -332,6 +332,388 @@ fi
 # shellcheck source=scripts/gate/run-handles.sh
 source "$run_handles_path"
 
+darwin_lineage_path="$script_source_dir/gate/darwin-process-lineage.sh"
+if [[ -L "$darwin_lineage_path" || ! -f "$darwin_lineage_path" || ! -r "$darwin_lineage_path" ]]; then
+  echo "error: Darwin process-lineage helper is missing or not a readable regular file: ${darwin_lineage_path}" >&2
+  echo "Nothing has been executed." >&2
+  exit 2
+fi
+# shellcheck source=scripts/gate/darwin-process-lineage.sh
+source "$darwin_lineage_path"
+if ! gate_darwin_lineage_classify_host; then
+  echo "Nothing has been executed." >&2
+  exit 2
+fi
+
+darwin_broker_preflight_path="$script_source_dir/gate/darwin-broker-launch-preflight.mjs"
+if [[ -L "$darwin_broker_preflight_path" ||
+  ! -f "$darwin_broker_preflight_path" ||
+  ! -r "$darwin_broker_preflight_path" ]]; then
+  echo "error: Darwin broker preflight is missing or not a readable regular file: ${darwin_broker_preflight_path}" >&2
+  echo "Nothing has been executed." >&2
+  exit 2
+fi
+darwin_broker_preflight_bound=0
+darwin_broker_preflight_binding=""
+
+gate_darwin_broker_preflight_bind() {
+  local host_status copy_dir copy_path initial_binding bound_binding
+  if gate_darwin_lineage_host_is_darwin; then
+    host_status=0
+  else
+    host_status=$?
+  fi
+  case "$host_status" in
+    0) ;;
+    1) return 0 ;;
+    *) return 2 ;;
+  esac
+  [[ "$darwin_broker_preflight_bound" -eq 0 ]] || return 2
+  gate_darwin_node_runtime_prepare || return 2
+  copy_dir="$(mktemp -d "$scratch_dir/darwin-broker-preflight.XXXXXX")" ||
+    return 2
+  copy_path="$copy_dir/preflight.mjs"
+  if ! chmod 700 "$copy_dir"; then
+    rmdir "$copy_dir" 2>/dev/null || true
+    return 2
+  fi
+  initial_binding="$({
+    "$gate_darwin_node_bin" -e '
+      const {
+        closeSync,
+        constants,
+        fstatSync,
+        fsyncSync,
+        lstatSync,
+        openSync,
+        readSync,
+        writeSync,
+      } = require("node:fs");
+      const { createHash } = require("node:crypto");
+
+      const sourcePath = process.argv[1];
+      const destinationPath = process.argv[2];
+      const destinationDirectory = process.argv[3];
+      const maximumBytes = 1024 * 1024;
+      const fields = [
+        "dev", "ino", "mode", "nlink", "uid", "gid", "rdev", "size",
+        "mtimeNs", "ctimeNs",
+      ];
+      const snapshot = (stat) => Object.fromEntries(
+        fields.map((field) => [field, stat[field].toString()]),
+      );
+      const same = (left, right) => fields.every(
+        (field) => left[field] === right[field],
+      );
+      const fail = (message) => { throw new Error(message); };
+      const readPositionally = (descriptor, size) => {
+        const length = Number(size);
+        if (!Number.isSafeInteger(length) || length < 1 || length > maximumBytes) {
+          fail("helper size is outside the stable snapshot limit");
+        }
+        const bytes = Buffer.alloc(length);
+        let offset = 0;
+        while (offset < length) {
+          const count = readSync(descriptor, bytes, offset, length - offset, offset);
+          if (count === 0) fail("helper ended before its recorded size");
+          offset += count;
+        }
+        return bytes;
+      };
+      const directory = lstatSync(destinationDirectory, { bigint: true });
+      if (!directory.isDirectory() || directory.isSymbolicLink() ||
+          directory.uid !== BigInt(process.getuid()) ||
+          (directory.mode & 0o7777n) !== 0o700n) {
+        fail("private helper snapshot directory is unsafe");
+      }
+      const pathBefore = lstatSync(sourcePath, { bigint: true });
+      const source = openSync(
+        sourcePath,
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      );
+      let bytes;
+      let sourceBefore;
+      try {
+        sourceBefore = fstatSync(source, { bigint: true });
+        if (!sourceBefore.isFile() || sourceBefore.isSymbolicLink() ||
+            sourceBefore.uid !== BigInt(process.getuid()) ||
+            sourceBefore.nlink !== 1n || (sourceBefore.mode & 0o22n) !== 0n ||
+            !same(snapshot(sourceBefore), snapshot(pathBefore))) {
+          fail("helper source is not one stable private regular file");
+        }
+        bytes = readPositionally(source, sourceBefore.size);
+        const sourceAfter = fstatSync(source, { bigint: true });
+        const pathAfter = lstatSync(sourcePath, { bigint: true });
+        if (!same(snapshot(sourceBefore), snapshot(sourceAfter)) ||
+            !same(snapshot(sourceBefore), snapshot(pathAfter))) {
+          fail("helper source changed while it was copied");
+        }
+      } finally {
+        closeSync(source);
+      }
+      const destination = openSync(
+        destinationPath,
+        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL |
+          constants.O_NOFOLLOW,
+        0o400,
+      );
+      try {
+        let offset = 0;
+        while (offset < bytes.length) {
+          offset += writeSync(
+            destination,
+            bytes,
+            offset,
+            bytes.length - offset,
+            offset,
+          );
+        }
+        fsyncSync(destination);
+      } finally {
+        closeSync(destination);
+      }
+      const copied = lstatSync(destinationPath, { bigint: true });
+      if (!copied.isFile() || copied.isSymbolicLink() ||
+          copied.uid !== BigInt(process.getuid()) || copied.nlink !== 1n ||
+          (copied.mode & 0o7777n) !== 0o400n || copied.size !== BigInt(bytes.length)) {
+        fail("private helper snapshot is unsafe");
+      }
+      process.stdout.write(JSON.stringify({
+        source: snapshot(sourceBefore),
+        copy: snapshot(copied),
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+      }));
+    ' "$darwin_broker_preflight_path" "$copy_path" "$copy_dir"
+  } 2>/dev/null)" || {
+    rm -f "$copy_path" 2>/dev/null || true
+    rmdir "$copy_dir" 2>/dev/null || true
+    echo "error: could not create one stable Darwin broker preflight snapshot." >&2
+    return 2
+  }
+  if ! exec 24< "$copy_path"; then
+    rm -f "$copy_path" 2>/dev/null || true
+    rmdir "$copy_dir" 2>/dev/null || true
+    echo "error: could not retain the Darwin broker preflight snapshot." >&2
+    return 2
+  fi
+  bound_binding="$({
+    "$gate_darwin_node_bin" -e '
+      const {
+        fstatSync,
+        lstatSync,
+        readSync,
+        rmdirSync,
+        unlinkSync,
+      } = require("node:fs");
+      const { createHash } = require("node:crypto");
+
+      const descriptor = 24;
+      const copyPath = process.argv[1];
+      const copyDirectory = process.argv[2];
+      const binding = JSON.parse(process.argv[3]);
+      const fields = [
+        "dev", "ino", "mode", "nlink", "uid", "gid", "rdev", "size",
+        "mtimeNs", "ctimeNs",
+      ];
+      const snapshot = (stat) => Object.fromEntries(
+        fields.map((field) => [field, stat[field].toString()]),
+      );
+      const same = (left, right) => fields.every(
+        (field) => left[field] === right[field],
+      );
+      const fail = (message) => { throw new Error(message); };
+      const before = fstatSync(descriptor, { bigint: true });
+      const path = lstatSync(copyPath, { bigint: true });
+      if (!before.isFile() || before.isSymbolicLink() ||
+          !same(snapshot(before), binding.copy) ||
+          !same(snapshot(path), binding.copy)) {
+        fail("opened helper snapshot does not match its private path");
+      }
+      const length = Number(before.size);
+      const bytes = Buffer.alloc(length);
+      let offset = 0;
+      while (offset < length) {
+        const count = readSync(descriptor, bytes, offset, length - offset, offset);
+        if (count === 0) fail("opened helper snapshot ended early");
+        offset += count;
+      }
+      if (createHash("sha256").update(bytes).digest("hex") !== binding.sha256) {
+        fail("opened helper snapshot hash changed");
+      }
+      unlinkSync(copyPath);
+      rmdirSync(copyDirectory);
+      const after = fstatSync(descriptor, { bigint: true });
+      if (!after.isFile() || after.nlink !== 0n ||
+          after.dev.toString() !== binding.copy.dev ||
+          after.ino.toString() !== binding.copy.ino ||
+          after.uid.toString() !== binding.copy.uid ||
+          after.gid.toString() !== binding.copy.gid ||
+          after.mode.toString() !== binding.copy.mode ||
+          after.size.toString() !== binding.copy.size) {
+        fail("unlinked helper snapshot identity changed");
+      }
+      binding.copy = snapshot(after);
+      process.stdout.write(JSON.stringify(binding));
+    ' "$copy_path" "$copy_dir" "$initial_binding"
+  } 2>/dev/null)" || {
+    exec 24<&-
+    rm -f "$copy_path" 2>/dev/null || true
+    rmdir "$copy_dir" 2>/dev/null || true
+    echo "error: could not bind the Darwin broker preflight snapshot." >&2
+    return 2
+  }
+  darwin_broker_preflight_binding="$bound_binding"
+  darwin_broker_preflight_bound=1
+}
+
+gate_darwin_broker_preflight() {
+  local host_status
+  if gate_darwin_lineage_host_is_darwin; then
+    host_status=0
+  else
+    host_status=$?
+  fi
+  case "$host_status" in
+    0)
+      [[ "$darwin_broker_preflight_bound" -eq 1 &&
+        -n "$darwin_broker_preflight_binding" ]] || return 2
+      # The embedded module is literal source. Shell expansion would corrupt it.
+      # shellcheck disable=SC2016
+      "$gate_darwin_node_bin" --input-type=module -e '
+        import { createHash } from "node:crypto";
+        import {
+          closeSync,
+          constants,
+          fstatSync,
+          lstatSync,
+          openSync,
+          readSync,
+        } from "node:fs";
+
+        const sourcePath = process.argv[1];
+        const binding = JSON.parse(process.argv[2]);
+        const root = process.argv[3];
+        const policyRoot = process.argv[4];
+        const fields = [
+          "dev", "ino", "mode", "nlink", "uid", "gid", "rdev", "size",
+          "mtimeNs", "ctimeNs",
+        ];
+        const snapshot = (stat) => Object.fromEntries(
+          fields.map((field) => [field, stat[field].toString()]),
+        );
+        const same = (left, right) => fields.every(
+          (field) => left[field] === right[field],
+        );
+        const fail = (message) => { throw new Error(message); };
+        const readPositionally = (descriptor, size) => {
+          const length = Number(size);
+          if (!Number.isSafeInteger(length) || length < 1 || length > 1024 * 1024) {
+            fail("helper size is outside the stable snapshot limit");
+          }
+          const bytes = Buffer.alloc(length);
+          let offset = 0;
+          while (offset < length) {
+            const count = readSync(descriptor, bytes, offset, length - offset, offset);
+            if (count === 0) fail("helper snapshot ended early");
+            offset += count;
+          }
+          return bytes;
+        };
+        const stableSource = () => {
+          const pathBefore = lstatSync(sourcePath, { bigint: true });
+          const descriptor = openSync(
+            sourcePath,
+            constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+          );
+          try {
+            const before = fstatSync(descriptor, { bigint: true });
+            if (!before.isFile() || before.isSymbolicLink() ||
+                !same(snapshot(before), binding.source) ||
+                !same(snapshot(pathBefore), binding.source)) {
+              fail("helper source identity changed after binding");
+            }
+            const bytes = readPositionally(descriptor, before.size);
+            const after = fstatSync(descriptor, { bigint: true });
+            const pathAfter = lstatSync(sourcePath, { bigint: true });
+            if (!same(snapshot(before), snapshot(after)) ||
+                !same(snapshot(before), snapshot(pathAfter)) ||
+                createHash("sha256").update(bytes).digest("hex") !== binding.sha256) {
+              fail("helper source bytes changed after binding");
+            }
+          } finally {
+            closeSync(descriptor);
+          }
+        };
+        try {
+          stableSource();
+          const before = fstatSync(24, { bigint: true });
+          if (!before.isFile() || before.nlink !== 0n ||
+              !same(snapshot(before), binding.copy)) {
+            fail("bound helper descriptor identity changed");
+          }
+          const bytes = readPositionally(24, before.size);
+          const after = fstatSync(24, { bigint: true });
+          if (!same(snapshot(before), snapshot(after)) ||
+              createHash("sha256").update(bytes).digest("hex") !== binding.sha256) {
+            fail("bound helper descriptor bytes changed");
+          }
+          const moduleUrl = `data:text/javascript;base64,${bytes.toString("base64")}`;
+          const policy = await import(moduleUrl);
+          if (typeof policy.runDarwinBrokerPreflight !== "function") {
+            fail("bound helper exports no preflight runner");
+          }
+          const status = policy.runDarwinBrokerPreflight(root, policyRoot);
+          if (!Number.isInteger(status) || (status !== 0 && status !== 2)) {
+            fail("bound helper returned an invalid status");
+          }
+          process.exitCode = status;
+        } catch (error) {
+          console.error(`error: bound Darwin broker preflight: ${error.message}`);
+          process.exitCode = 2;
+        }
+      ' "$darwin_broker_preflight_path" "$darwin_broker_preflight_binding" \
+        "$repo_root" "$script_source_dir/.."
+      ;;
+    1) return 0 ;;
+    *) return 2 ;;
+  esac
+}
+
+gate_lifecycle_contract_for_host() {
+  local host_status
+  if gate_darwin_lineage_host_is_darwin; then
+    host_status=0
+  else
+    host_status=$?
+  fi
+  case "$host_status" in
+    0) printf '%s\n' "darwin-coherent-lineage-v2" ;;
+    1) printf '%s\n' "portable-marker-v1" ;;
+    *) return 2 ;;
+  esac
+}
+
+gate_lifecycle_contract_is_supported() {
+  case "${1:-}" in
+    darwin-coherent-lineage-v2|portable-marker-v1) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+gate_recovery_lifecycle_contract_is_supported() {
+  gate_lifecycle_contract_is_supported "${1:-}" && return 0
+  case "${1:-}" in
+    darwin-unique-lineage-v1|request-marker-empty-v1) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+gate_host_lifecycle_contract="$(gate_lifecycle_contract_for_host)" || {
+  echo "error: could not select a mapped-command lifecycle contract." >&2
+  echo "Nothing has been executed." >&2
+  exit 2
+}
+
 # Caller-controlled Bash startup state, Git controls, and test-only validator
 # injections must not affect a parent Git probe, internal control shell, or the
 # mapped-command tree. Keep every ordinary environment value, but remove
@@ -443,7 +825,15 @@ if [[ "$gate_bash_environment_scan_complete" -ne 1 ]]; then
   echo "error: could not inspect Bash startup controls for the quality gate." >&2
   exit 2
 fi
-gate_sanitized_bash_launcher+=(/bin/bash -p)
+# Terraform must not inherit a CLI configuration with provider development
+# overrides, an external provider reattachment, or a checksum-breaking cache
+# policy. /dev/null is a fixed empty CLI configuration. The mapped launcher
+# also removes TF_PLUGIN_CACHE_DIR because Terraform can install cached
+# providers through symlinks, which this narrow provider attestation rejects.
+gate_sanitized_bash_launcher+=(
+  TF_CLI_CONFIG_FILE=/dev/null
+  /bin/bash -p
+)
 unset gate_bash_environment_record gate_bash_environment_name
 unset gate_bash_environment_value gate_bash_environment_scan_complete
 unset gate_environment_helper gate_scrub_environment_name
@@ -464,6 +854,12 @@ fi
 # inherit this path instead of falling back to an unwritable system default.
 scratch_dir="$repo_root/.tmp/agent-quality-gate"
 mkdir -p "$scratch_dir"
+if [[ -L "$scratch_dir" || ! -d "$scratch_dir" || ! -O "$scratch_dir" ]] ||
+  ! chmod 700 "$scratch_dir"; then
+  echo "error: quality-gate scratch is not a private current-user directory: ${scratch_dir}" >&2
+  echo "Nothing has been executed." >&2
+  exit 2
+fi
 # Avoid overriding a usable TMPDIR: Terraform providers use go-plugin grpc on
 # a socket in TMPDIR, and repo-local paths can be blocked by agent seatbelts.
 # Trunk hooks can strip TMPDIR entirely, so prefer the system temp directory
@@ -619,6 +1015,10 @@ last_command_timed_out=false
 last_command_execution_seconds=0
 last_command_infrastructure_failed=false
 last_command_trunk_provisioning_blocked=false
+# Typed dispatch result for the parallel parent. `unstarted` means the mapped
+# wrapper never crossed its private START barrier. The parent can then abandon
+# the exact deferred lease only after it drains the retained lineage state.
+last_command_launch_state=unstarted
 # Monotonic counter for unique per-command timeout marker paths.
 timeout_seq=0
 # Monotonic across all parallel phases so no command drain identity is reused
@@ -632,7 +1032,20 @@ parallel_command_sequence=0
 # Each entry is PID|exact-start for one direct command/watchdog child. One
 # array assignment publishes the complete registry to the signal trap.
 active_timeout_records=()
+active_timeout_exact_identities=()
 active_timeout_drain_identity=""
+active_timeout_lifecycle_contract=""
+# Set only inside a parallel worker. Darwin sentinels use this path as the
+# parent's positive settlement acknowledgement after they close fd18.
+parallel_worker_command_marker=""
+# A bounded Darwin settlement keeps its state for another process to recover.
+# Retrying the same state from EXIT only repeats the full bound and delays the
+# preserved failure without adding a new recovery owner.
+gate_darwin_failed_settlement_tokens=""
+# A failed multi-state attempt blocks only the same canonical cohort. A later
+# request-level cohort can add sibling state whose lineage supplies exact
+# ownership evidence that the smaller attempt could not see.
+gate_darwin_failed_settlement_cohorts=""
 
 # Process-group IDs of the in-flight parallel workers. Non-interactive Bash job
 # control gives each worker a dedicated group whose ID equals its leader PID.
@@ -646,6 +1059,10 @@ active_worker_drain_identities=()
 # Exact leader start identities align with the same registry. They let the
 # active parent validate a live no-lock sentinel without trusting a bare PGID.
 active_worker_start_identities=()
+# Lifecycle contracts align with every parallel worker registry. Recovery must
+# use the contract that was selected before the worker started. It must not
+# infer a contract from mutable state-file presence.
+active_worker_lifecycle_contracts=()
 
 # A signal can arrive after Bash creates a parallel worker but before the parent
 # records its process group. Defer INT/TERM handling across that short registry
@@ -724,9 +1141,20 @@ if [[ -n "$release_private_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
   echo "AGENT_QUALITY_GATE_TEST_RELEASE_PRIVATE_BARRIER: test-only override requires NODE_ENV=test" >&2
   exit 2
 fi
+broker_preflight_bound_test_barrier="${AGENT_QUALITY_GATE_TEST_BROKER_PREFLIGHT_BOUND_BARRIER:-}"
+if [[ -n "$broker_preflight_bound_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
+  echo "AGENT_QUALITY_GATE_TEST_BROKER_PREFLIGHT_BOUND_BARRIER: test-only override requires NODE_ENV=test" >&2
+  exit 2
+fi
 lock_taken_test_barrier="${AGENT_QUALITY_GATE_TEST_LOCK_TAKEN_BARRIER:-}"
 if [[ -n "$lock_taken_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
   echo "AGENT_QUALITY_GATE_TEST_LOCK_TAKEN_BARRIER: test-only override requires NODE_ENV=test" >&2
+  exit 2
+fi
+if [[ -n "$worker_registration_test_barrier" ]] &&
+  ! gate_darwin_exact_identity_prepare; then
+  echo "error: could not establish Darwin identity authority for the worker registration test control." >&2
+  echo "Nothing has been executed." >&2
   exit 2
 fi
 
@@ -803,6 +1231,10 @@ teardown_no_lock_settle_known_processes() {
   local -a captured_runtime_records=()
   local -a direct_children=()
   [[ "$#" -gt 0 ]] || return 2
+  if [[ "$gate_darwin_lineage_host_platform" == Darwin ]]; then
+    echo "error: the portable no-lock process fallback is unsafe on Darwin." >&2
+    return 2
+  fi
 
   while [[ "$#" -ge 3 ]]; do
     kind="$1"
@@ -1025,12 +1457,18 @@ teardown_active_timeouts() {
   local record root_runtime captured_pid _captured_legacy captured_runtime
   local worker_start
   local clear_request_marker=0
+  local darwin_timeout_settled=0
+  local darwin_workers_settled=0
   local timeout_drain_identity="$active_timeout_drain_identity"
+  local timeout_lifecycle_contract="$active_timeout_lifecycle_contract"
   local -a timeout_records=("${active_timeout_records[@]+"${active_timeout_records[@]}"}")
+  local -a timeout_exact_identities=("${active_timeout_exact_identities[@]+"${active_timeout_exact_identities[@]}"}")
   local -a roots=()
   local -a worker_pgids=("${active_worker_pgids[@]+"${active_worker_pgids[@]}"}")
   local -a worker_drain_identities=("${active_worker_drain_identities[@]+"${active_worker_drain_identities[@]}"}")
   local -a worker_start_identities=("${active_worker_start_identities[@]+"${active_worker_start_identities[@]}"}")
+  local -a worker_lifecycle_contracts=("${active_worker_lifecycle_contracts[@]+"${active_worker_lifecycle_contracts[@]}"}")
+  local -a darwin_cohort_tokens=()
   local -a fallback_args=()
   for record in "${timeout_records[@]+"${timeout_records[@]}"}"; do
     pid="${record%%|*}"
@@ -1045,9 +1483,11 @@ teardown_active_timeouts() {
   [[ -n "${timeout_records[*]-}" || -n "${worker_pgids[*]-}" ||
     -n "${worker_drain_identities[*]-}" ||
     -n "${worker_start_identities[*]-}" ||
+    -n "${worker_lifecycle_contracts[*]-}" ||
     -n "$timeout_drain_identity" ]] || return 0
   if ! [[ "${#worker_pgids[@]}" -eq "${#worker_drain_identities[@]}" &&
-    "${#worker_pgids[@]}" -eq "${#worker_start_identities[@]}" ]]; then
+    "${#worker_pgids[@]}" -eq "${#worker_start_identities[@]}" &&
+    "${#worker_pgids[@]}" -eq "${#worker_lifecycle_contracts[@]}" ]]; then
     echo "error: parallel worker cleanup registry is inconsistent." >&2
     case "$gate_lock_enabled" in
       0|false|no)
@@ -1059,30 +1499,66 @@ teardown_active_timeouts() {
   fi
   local worker_index=0
   for pgid in "${worker_pgids[@]+"${worker_pgids[@]}"}"; do
+    gate_lifecycle_contract_is_supported \
+      "${worker_lifecycle_contracts[$worker_index]}" || {
+      echo "error: parallel worker cleanup registry has an invalid lifecycle contract." >&2
+      return 2
+    }
     fallback_args+=(worker "$pgid" "${worker_start_identities[$worker_index]}")
     worker_index=$((worker_index + 1))
   done
+
+  if [[ "$gate_darwin_lineage_host_platform" == Darwin ]]; then
+    if [[ -n "$timeout_drain_identity" &&
+      "$timeout_lifecycle_contract" == darwin-coherent-lineage-v2 ]]; then
+      darwin_cohort_tokens+=("$timeout_drain_identity")
+      darwin_timeout_settled=1
+    fi
+    worker_index=0
+    for drain_identity in "${worker_drain_identities[@]+"${worker_drain_identities[@]}"}"; do
+      if [[ "${worker_lifecycle_contracts[$worker_index]}" == \
+        darwin-coherent-lineage-v2 ]]; then
+        case " ${darwin_cohort_tokens[*]-} " in
+          *" ${drain_identity} "*) ;;
+          *) darwin_cohort_tokens+=("$drain_identity") ;;
+        esac
+        darwin_workers_settled=1
+      fi
+      worker_index=$((worker_index + 1))
+    done
+    if [[ "${#darwin_cohort_tokens[@]}" -gt 0 ]]; then
+      drain_completed_darwin_command_cohort \
+        "${darwin_cohort_tokens[@]}" || return $?
+    fi
+  fi
 
   # Persist and drain every exact command identity before any signal can
   # destroy its last discoverable ancestor. A failed drain retains
   # its recovery evidence. In that case, leave all remaining processes to the
   # preserved legacy owner or coordinator obligations.
-  if [[ -n "$timeout_drain_identity" ]]; then
+  if [[ -n "$timeout_drain_identity" && "$darwin_timeout_settled" -eq 0 ]]; then
+    gate_lifecycle_contract_is_supported "$timeout_lifecycle_contract" || {
+      echo "error: active command cleanup has no supported lifecycle contract." >&2
+      return 2
+    }
     if [[ "$timeout_drain_identity" == "${gate_run_id:-$gate_lock_token}" ]]; then
       clear_request_marker=1
     fi
     drain_completed_command_identity \
-      "$timeout_drain_identity" "$clear_request_marker" || drain_status=$?
+      "$timeout_drain_identity" "$clear_request_marker" "" "" 0 \
+      "$timeout_lifecycle_contract" || drain_status=$?
     if [[ "$drain_status" -ne 0 ]]; then
       case "$gate_lock_enabled" in
         0|false|no)
-          while IFS='|' read -r captured_pid _captured_legacy captured_runtime; do
-            [[ "$captured_pid" =~ ^[1-9][0-9]*$ &&
-              -n "$captured_runtime" ]] || continue
-            fallback_args+=(captured "$captured_pid" "$captured_runtime")
-          done <<< "$gate_drain_capture"
-          teardown_no_lock_settle_known_processes \
-            "${fallback_args[@]+"${fallback_args[@]}"}" || true
+          if [[ "$gate_darwin_lineage_host_platform" != Darwin ]]; then
+            while IFS='|' read -r captured_pid _captured_legacy captured_runtime; do
+              [[ "$captured_pid" =~ ^[1-9][0-9]*$ &&
+                -n "$captured_runtime" ]] || continue
+              fallback_args+=(captured "$captured_pid" "$captured_runtime")
+            done <<< "$gate_drain_capture"
+            teardown_no_lock_settle_known_processes \
+              "${fallback_args[@]+"${fallback_args[@]}"}" || true
+          fi
           ;;
       esac
       return "$drain_status"
@@ -1092,24 +1568,68 @@ teardown_active_timeouts() {
   for drain_identity in "${worker_drain_identities[@]+"${worker_drain_identities[@]}"}"; do
     pgid="${worker_pgids[$worker_index]}"
     worker_start="${worker_start_identities[$worker_index]}"
+    if [[ "$darwin_workers_settled" -eq 1 &&
+      "${worker_lifecycle_contracts[$worker_index]}" == \
+        darwin-coherent-lineage-v2 ]]; then
+      worker_index=$((worker_index + 1))
+      continue
+    fi
     worker_index=$((worker_index + 1))
     drain_completed_parallel_command \
-      "$drain_identity" "$pgid" "$worker_start" || drain_status=$?
+      "$drain_identity" "$pgid" "$worker_start" \
+      "${worker_lifecycle_contracts[$((worker_index - 1))]}" || drain_status=$?
     if [[ "$drain_status" -ne 0 ]]; then
       case "$gate_lock_enabled" in
         0|false|no)
-          while IFS='|' read -r captured_pid _captured_legacy captured_runtime; do
-            [[ "$captured_pid" =~ ^[1-9][0-9]*$ &&
-              -n "$captured_runtime" ]] || continue
-            fallback_args+=(captured "$captured_pid" "$captured_runtime")
-          done <<< "$gate_drain_capture"
-          teardown_no_lock_settle_known_processes \
-            "${fallback_args[@]+"${fallback_args[@]}"}" || true
+          if [[ "$gate_darwin_lineage_host_platform" != Darwin ]]; then
+            while IFS='|' read -r captured_pid _captured_legacy captured_runtime; do
+              [[ "$captured_pid" =~ ^[1-9][0-9]*$ &&
+                -n "$captured_runtime" ]] || continue
+              fallback_args+=(captured "$captured_pid" "$captured_runtime")
+            done <<< "$gate_drain_capture"
+            teardown_no_lock_settle_known_processes \
+              "${fallback_args[@]+"${fallback_args[@]}"}" || true
+          fi
           ;;
       esac
       return "$drain_status"
     fi
   done
+  if [[ "$gate_darwin_lineage_host_platform" == Darwin ]]; then
+    local exact_identity exact_status=0 timeout_index=0
+    if [[ "${#timeout_records[@]}" -ne "${#timeout_exact_identities[@]}" ]]; then
+      echo "error: Darwin exact child cleanup registry is inconsistent." >&2
+      return 2
+    fi
+    for record in "${timeout_records[@]+"${timeout_records[@]}"}"; do
+      pid="${record%%|*}"
+      exact_identity="${timeout_exact_identities[$timeout_index]}"
+      timeout_index=$((timeout_index + 1))
+      if [[ -z "$exact_identity" ]]; then
+        if kill -0 "$pid" 2>/dev/null; then
+          echo "error: a live Darwin administrative child has no exact kernel identity." >&2
+          exact_status=2
+        fi
+        continue
+      fi
+      gate_darwin_exact_identity_terminate "$exact_identity" "$pid" ||
+        exact_status=2
+    done
+    [[ "$exact_status" -eq 0 ]] || return 2
+    for record in "${timeout_records[@]+"${timeout_records[@]}"}"; do
+      pid="${record%%|*}"
+      wait "$pid" 2>/dev/null || true
+    done
+    active_timeout_records=()
+    active_timeout_exact_identities=()
+    active_timeout_drain_identity=""
+    active_timeout_lifecycle_contract=""
+    active_worker_pgids=()
+    active_worker_drain_identities=()
+    active_worker_start_identities=()
+    active_worker_lifecycle_contracts=()
+    return 0
+  fi
   # Snapshot every descendant BEFORE signalling: TERM kills intermediate
   # subshells first, which reparents a SIGTERM-ignoring survivor away from the
   # tree, so a post-TERM re-walk would miss it. The KILL pass targets the
@@ -1229,10 +1749,13 @@ teardown_active_timeouts() {
   # the drain. This is required for --no-lock, which has no durable owner that a
   # later gate can use to recover leaked descendants.
   active_timeout_records=()
+  active_timeout_exact_identities=()
   active_timeout_drain_identity=""
+  active_timeout_lifecycle_contract=""
   active_worker_pgids=()
   active_worker_drain_identities=()
   active_worker_start_identities=()
+  active_worker_lifecycle_contracts=()
 }
 
 # ---------------------------------------------------------------------------
@@ -1348,19 +1871,30 @@ gate_lock_clear_quarantine_state() {
   gate_lock_quarantine_taken=""
   gate_lock_quarantine_fallback=""
   gate_lock_quarantine_authority_value=""
+  gate_lock_quarantine_recovery_contract=""
   gate_lock_quarantine_raw_marker_token=""
   gate_lock_quarantine_retention_state="Nothing has been executed."
 }
 
-gate_lock_quarantine_authority_from_record() {
+gate_lock_quarantine_authority_and_contract_from_record() {
   local record="$1"
   if [[ -n "$gate_lock_quarantine_raw_marker_token" ]]; then
     gate_run_marker_snapshot_is_exact \
       "$record" "$gate_lock_quarantine_raw_marker_token" || return 1
-    printf '%s\n' "$gate_lock_quarantine_raw_marker_token"
+    printf '%s\n%s\n' \
+      "$gate_lock_quarantine_raw_marker_token" "$gate_host_lifecycle_contract"
     return 0
   fi
-  gate_lock_current_user_authority_token_from_record "$record"
+  gate_lock_current_user_authority_and_recovery_contract_from_record "$record"
+}
+
+gate_lock_quarantine_authority_from_record() {
+  local authority_and_contract
+  authority_and_contract="$(
+    gate_lock_quarantine_authority_and_contract_from_record "$1"
+  )" || return 1
+  [[ "$authority_and_contract" == *$'\n'* ]] || return 1
+  printf '%s\n' "${authority_and_contract%%$'\n'*}"
 }
 
 gate_lock_private_quarantine_directory_is_safe() {
@@ -1579,6 +2113,7 @@ gate_lock_prepare_owner_quarantine() {
   local record="$1"
   local retention_state="${2:-Nothing has been executed.}"
   local raw_marker_token="${3:-}"
+  local authority_and_contract authority_status=0
   local parent quarantine quarantine_template
   local quarantine_prefix="owner.reclaiming.quarantine.v1"
   gate_lock_clear_quarantine_state
@@ -1626,15 +2161,31 @@ gate_lock_prepare_owner_quarantine() {
     [[ ! -e "$record" && ! -L "$record" ]] && return 1
     return 2
   fi
-  if ! gate_lock_quarantine_authority_value="$(
-    gate_lock_quarantine_authority_from_record "$gate_lock_quarantine_anchor"
-  )"; then
+  authority_and_contract="$(
+    gate_lock_quarantine_authority_and_contract_from_record \
+      "$gate_lock_quarantine_anchor"
+  )" || authority_status=$?
+  if [[ "$authority_status" -eq 2 ]]; then
+    gate_lock_retain_quarantine \
+      "Darwin coordinator-owner recovery requires exact per-command lineage evidence"
+    return 2
+  fi
+  if [[ "$authority_status" -ne 0 ||
+    "$authority_and_contract" != *$'\n'* ]]; then
     gate_lock_report_foreign_owner_recovery \
       "$record" "$gate_lock_quarantine_retention_state"
     gate_lock_retain_quarantine \
       "the quality-gate owner witness is foreign or unsafe"
     return 2
   fi
+  gate_lock_quarantine_authority_value="${authority_and_contract%%$'\n'*}"
+  gate_lock_quarantine_recovery_contract="${authority_and_contract#*$'\n'}"
+  gate_recovery_lifecycle_contract_is_supported \
+    "$gate_lock_quarantine_recovery_contract" || {
+    gate_lock_retain_quarantine \
+      "the quality-gate owner witness has an unsupported recovery contract"
+    return 2
+  }
   if ! gate_lock_wait_for_test_barrier "$owner_witness_test_barrier"; then
     gate_lock_retain_quarantine \
       "the quality-gate owner witness barrier failed"
@@ -1989,7 +2540,9 @@ gate_lock_discard_inert_owner_stage() {
 gate_lock_condemn_prepared_quarantine() {
   local obligation_status take_status
   if [[ -n "$gate_lock_quarantine_authority_value" ]]; then
-    if record_condemned_run "$gate_lock_quarantine_authority_value"; then
+    if record_condemned_run \
+      "$gate_lock_quarantine_authority_value" \
+      "$gate_lock_quarantine_recovery_contract"; then
       :
     else
       obligation_status=$?
@@ -2491,7 +3044,14 @@ gate_lock_recover_hidden_record() {
         ! -e "$remnant" && ! -L "$remnant" ]]; then
         continue
       fi
-      gate_lock_report_foreign_owner_recovery "$remnant"
+      if [[ "$prepare_status" -eq 2 ]]; then
+        # The witness path already diagnosed and retained unsafe evidence.
+        # This includes the Darwin exact-lineage boundary for a current-user
+        # coordinator owner. Do not relabel that owner as foreign here.
+        echo "error: hidden quality-gate owner recovery stopped at its evidence boundary; retained ${remnant}." >&2
+      else
+        gate_lock_report_foreign_owner_recovery "$remnant"
+      fi
       gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
         "No mapped command ran in this request"
       exit 2
@@ -2746,17 +3306,20 @@ gate_lock_condemned_dir() {
 # but a shared lock root, where the directory belongs to another user.
 record_condemned_run() {
   local token="$1"
+  local lifecycle_contract="${2:-}"
   local dir
-  [[ -n "$token" ]] || return 0
+  [[ -n "$token" ]] || return 2
   # Validated HERE, not only at the read boundaries, because the token
   # becomes a path component below: a crafted '../x' from a shared-root
   # remnant would land the record outside condemned.d. Failing returns the
   # caller to its unwritable-obligation path — stop, record left in place.
   gate_lock_token_is_wellformed "$token" || return 1
+  gate_recovery_lifecycle_contract_is_supported "$lifecycle_contract" || return 1
   dir="$(gate_lock_condemned_dir)" || return 1
   mkdir -p "$dir" 2>/dev/null || return 1
   gate_lock_condemn_tmp="$(mktemp "${dir}/.staging.XXXXXX")" || return 1
-  printf '%s\n' "$token" > "$gate_lock_condemn_tmp" 2>/dev/null || {
+  printf 'agentqg-condemned-v2|%s|%s\n' \
+    "$token" "$lifecycle_contract" > "$gate_lock_condemn_tmp" 2>/dev/null || {
     rm -f "$gate_lock_condemn_tmp"
     gate_lock_condemn_tmp=""
     return 1
@@ -2769,6 +3332,42 @@ record_condemned_run() {
     return 1
   fi
   gate_lock_condemn_tmp=""
+}
+
+gate_condemned_record_token=""
+gate_condemned_record_lifecycle_contract=""
+
+# New records bind the token to an explicit recovery lifecycle contract. A
+# command record carries the contract selected before work started. An
+# aggregate request record carries its non-signalling marker-empty contract.
+# An old token-only record remains readable. Its contract comes only from the
+# verified host classifier, never from state-file presence.
+gate_read_condemned_record() {
+  local path="$1"
+  local value byte_count expected_bytes version token lifecycle_contract extra
+  gate_condemned_record_token=""
+  gate_condemned_record_lifecycle_contract=""
+  [[ -f "$path" && ! -L "$path" && -r "$path" ]] || return 2
+  value="$(cat "$path" 2>/dev/null)" || return 2
+  byte_count="$(LC_ALL=C wc -c < "$path" 2>/dev/null | tr -d '[:space:]')" ||
+    return 2
+  [[ "$byte_count" =~ ^[0-9]+$ ]] || return 2
+  expected_bytes=$((${#value} + 1))
+  [[ "$byte_count" -eq "$expected_bytes" ]] || return 2
+  case "$value" in
+    agentqg-condemned-v2\|*)
+      IFS='|' read -r version token lifecycle_contract extra <<< "$value"
+      [[ "$version" == "agentqg-condemned-v2" && -z "$extra" ]] || return 2
+      ;;
+    *)
+      token="$value"
+      lifecycle_contract="$(gate_lifecycle_contract_for_host)" || return 2
+      ;;
+  esac
+  gate_lock_token_is_wellformed "$token" || return 2
+  gate_recovery_lifecycle_contract_is_supported "$lifecycle_contract" || return 2
+  gate_condemned_record_token="$token"
+  gate_condemned_record_lifecycle_contract="$lifecycle_contract"
 }
 
 # These files are the only thing that tells the next holder a dead run's
@@ -2835,7 +3434,7 @@ gate_drain_obligation_unreadable() {
 # lock are not ordered against each other, and no arrangement of files in this
 # shell makes them so.
 drain_condemned_runs() {
-  local dir entry claimed entry_token_value drained_any
+  local dir entry claimed entry_token_value entry_lifecycle_contract drained_any
   dir="$(gate_lock_condemned_dir)" || return 0
   [[ -d "$dir" ]] || return 0
   [[ -r "$dir" && -x "$dir" ]] || gate_lock_obligation_unreadable "$dir"
@@ -2868,12 +3467,7 @@ drain_condemned_runs() {
           "No mapped command ran in this request"
         exit 2
       fi
-      entry_token_value="$(head -n1 "$claimed" 2>/dev/null || true)"
-      if [[ -z "$entry_token_value" ]]; then
-        entry_token_value="${claimed##*/}"
-        entry_token_value="${entry_token_value%.draining."$$"}"
-      fi
-      if ! gate_lock_token_is_wellformed "$entry_token_value"; then
+      if ! gate_read_condemned_record "$claimed"; then
         # On a shared lock root this is a crafted or corrupt record. Guessing
         # what it binds could match a stranger's processes; discarding it
         # could discharge a real obligation. Refusing to run is the only move
@@ -2884,13 +3478,27 @@ drain_condemned_runs() {
           "No mapped command ran in this request"
         exit 2
       fi
-      drain_condemned_run_commands "$entry_token_value"
+      entry_token_value="$gate_condemned_record_token"
+      entry_lifecycle_contract="$gate_condemned_record_lifecycle_contract"
+      drain_condemned_run_commands \
+        "$entry_token_value" stale-run "" "" 0 0 \
+        "$entry_lifecycle_contract"
       gate_lock_drained_tokens="${gate_lock_drained_tokens} ${entry_token_value}"
       # Removed only here, with every process confirmed gone, and by a name
       # only this drainer can have created. A drain that cannot confirm exits
       # instead, leaving the rest for whoever comes next.
       gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_DRAIN_UNLINK_DELAY_SECONDS:-}"
-      rm -f "$claimed"
+      rm -f "$claimed" || return 2
+      case "$entry_lifecycle_contract" in
+        darwin-unique-lineage-v1|darwin-coherent-lineage-v2)
+          gate_darwin_lineage_discard_settled "$entry_token_value" || return $?
+          ;;
+        request-marker-empty-v1)
+          gate_run_discard_marker_exact "$entry_token_value" \
+            "The recovered request marker was empty, but its cleanup failed." ||
+            return $?
+          ;;
+      esac
       drained_any=1
     done
     [[ "$drained_any" -eq 1 ]] || break
@@ -3046,6 +3654,52 @@ gate_lock_current_user_authority_token_from_snapshot() {
   printf '%s\n' "$value"
 }
 
+gate_lock_recovery_contract_from_owner_snapshot() {
+  local snapshot="$1"
+  local coordinator_count coordinator_start_count token_count
+  local coordinator_start owner_identity
+  coordinator_count="$(printf '%s\n' "$snapshot" | grep -c '^coordinator_token=' || true)"
+  coordinator_start_count="$(printf '%s\n' "$snapshot" | grep -c '^coordinator_start_utc=' || true)"
+  token_count="$(printf '%s\n' "$snapshot" | grep -c '^token=' || true)"
+  [[ "$coordinator_count" == 1 && "$coordinator_start_count" == 1 &&
+    "$token_count" == 1 ]] || {
+    printf '%s\n' "$gate_host_lifecycle_contract"
+    return 0
+  }
+  coordinator_start="$(
+    gate_lock_field_from_text "$snapshot" coordinator_start_utc
+  )"
+  owner_identity="$(gate_lock_field_from_text "$snapshot" token)"
+  if [[ -n "$coordinator_start" &&
+    "$owner_identity" == "coordinator-owner-v1" &&
+    "$gate_host_lifecycle_contract" == "darwin-coherent-lineage-v2" ]]; then
+    # A stale coordinator owner has no exact per-command Darwin lineage in this
+    # owner snapshot. Its aggregate marker can look empty after a descendant
+    # closes descriptors and removes tags. Retain the owner evidence instead of
+    # authorising recovery from that marker alone.
+    echo "error: Darwin coordinator-owner recovery has no exact per-command lineage evidence under this policy." >&2
+    return 2
+  fi
+  printf '%s\n' "$gate_host_lifecycle_contract"
+}
+
+gate_lock_current_user_authority_and_recovery_contract_from_snapshot() {
+  local snapshot="$1"
+  local authority recovery_contract recovery_status
+  authority="$(
+    gate_lock_current_user_authority_token_from_snapshot "$snapshot"
+  )" || return 1
+  if recovery_contract="$(
+    gate_lock_recovery_contract_from_owner_snapshot "$snapshot"
+  )"; then
+    :
+  else
+    recovery_status=$?
+    return "$recovery_status"
+  fi
+  printf '%s\n%s\n' "$authority" "$recovery_contract"
+}
+
 gate_lock_current_user_authority_token_from_record() {
   local record="$1"
   local snapshot
@@ -3067,6 +3721,30 @@ gate_lock_current_user_authority_token_from_record() {
   fi
   exec 15<&-
   gate_lock_current_user_authority_token_from_snapshot "$snapshot"
+}
+
+gate_lock_current_user_authority_and_recovery_contract_from_record() {
+  local record="$1"
+  local snapshot
+  gate_lock_record_is_readable_regular "$record" || return 1
+  if ! exec 15< "$record"; then
+    return 1
+  fi
+  if [[ ! -f /dev/fd/15 || ! -O /dev/fd/15 ]]; then
+    exec 15<&-
+    return 1
+  fi
+  snapshot="$(cat <&15)" || {
+    exec 15<&-
+    return 1
+  }
+  if [[ ! -f /dev/fd/15 || ! -O /dev/fd/15 ]]; then
+    exec 15<&-
+    return 1
+  fi
+  exec 15<&-
+  gate_lock_current_user_authority_and_recovery_contract_from_snapshot \
+    "$snapshot"
 }
 
 gate_lock_current_user_authority_token_from_release_descriptor() {
@@ -3557,6 +4235,8 @@ claim_gate_run_lock() {
   local claim_uid="$3"
   local staged="$lock/owner.claiming.$$"
   local published=0
+  local lineage_prepared=0
+  local readback_token
   [[ -n "$gate_lock_local_host_name" ]] || return 2
   [[ "$claim_uid" =~ ^[0-9]+$ ]] || return 2
   gate_lock_token_is_wellformed "$token" || return 2
@@ -3585,13 +4265,29 @@ claim_gate_run_lock() {
     printf 'token=%s\n' "$token"
   } > "$staged" 2>/dev/null; then
     gate_lock_test_crash after-staged
+    if ! gate_darwin_lineage_prepare "$token"; then
+      rm -f "$staged"
+      gate_lock_claim_tmp=""
+      return 2
+    fi
+    lineage_prepared="$gate_darwin_lineage_active"
     ln "$staged" "$lock/owner" 2>/dev/null && published=1
   fi
   gate_lock_test_crash after-link
   rm -f "$staged"
   gate_lock_claim_tmp=""
-  [[ "$published" -eq 1 ]] || return 1
-  [[ "$(gate_lock_owner_field "$lock" token)" == "$token" ]] || return 1
+  if [[ "$published" -ne 1 ]]; then
+    if [[ "$lineage_prepared" -eq 1 ]] &&
+      ! gate_darwin_lineage_abandon_unstarted "$token"; then
+      return 2
+    fi
+    return 1
+  fi
+  readback_token="$(gate_lock_owner_field "$lock" token)"
+  # A changed canonical owner can leave this exact record in hidden recovery
+  # state. Keep its Darwin evidence and stop this claim. Reusing the same token
+  # for another publication could bind two owner generations to one lineage.
+  [[ "$readback_token" == "$token" ]] || return 2
   gate_lock_dir="$lock"
   gate_lock_token="$token"
   [[ -n "$gate_run_id" ]] || gate_run_id="$token"
@@ -4144,6 +4840,250 @@ $group_anchors
 EOF
 }
 
+gate_darwin_settlement_failed_in_process() {
+  local token="$1"
+  case "|${gate_darwin_failed_settlement_tokens}|" in
+    *"|${token}|"*) return 0 ;;
+  esac
+  return 1
+}
+
+gate_darwin_remember_failed_settlement() {
+  local token="$1"
+  gate_lock_token_is_wellformed "$token" || return 2
+  gate_darwin_settlement_failed_in_process "$token" && return 0
+  gate_darwin_failed_settlement_tokens="${gate_darwin_failed_settlement_tokens:+${gate_darwin_failed_settlement_tokens}|}${token}"
+}
+
+gate_darwin_lineage_cohort_signature() {
+  local token existing inserted duplicate
+  local -a canonical=()
+  local -a next=()
+  [[ "$#" -gt 0 ]] || return 2
+  for token in "$@"; do
+    gate_lock_token_is_wellformed "$token" || return 2
+    inserted=0
+    duplicate=0
+    next=()
+    for existing in "${canonical[@]+"${canonical[@]}"}"; do
+      if [[ "$token" == "$existing" ]]; then
+        duplicate=1
+      elif [[ "$inserted" -eq 0 && "$token" < "$existing" ]]; then
+        next+=("$token")
+        inserted=1
+      fi
+      next+=("$existing")
+    done
+    [[ "$duplicate" -eq 0 ]] || return 2
+    if [[ "$inserted" -eq 0 ]]; then
+      next+=("$token")
+    fi
+    canonical=("${next[@]}")
+  done
+  local IFS=,
+  printf '%s' "${canonical[*]}"
+}
+
+gate_darwin_cohort_settlement_failed_in_process() {
+  local signature="$1"
+  [[ -n "$signature" ]] || return 2
+  case "|${gate_darwin_failed_settlement_cohorts}|" in
+    *"|${signature}|"*) return 0 ;;
+  esac
+  return 1
+}
+
+gate_darwin_remember_failed_cohort_settlement() {
+  local signature="$1"
+  [[ -n "$signature" ]] || return 2
+  gate_darwin_cohort_settlement_failed_in_process "$signature" && return 0
+  gate_darwin_failed_settlement_cohorts="${gate_darwin_failed_settlement_cohorts:+${gate_darwin_failed_settlement_cohorts}|}${signature}"
+}
+
+gate_drain_settle_darwin_lineage() {
+  local token="$1"
+  local drain_context="$2"
+  local drain_failure_prefix="$3"
+  local drain_failure_phase="$4"
+  local drain_failure_verdict="$5"
+  # Keep the verified-empty state until the coordinator lease or recovery
+  # obligation is durably discharged. A successor must be able to repeat the
+  # exact scan if this process dies before that journal transition.
+  if gate_darwin_settlement_failed_in_process "$token"; then
+    echo "error: this process already reached the bounded Darwin settlement failure for ${token}." >&2
+    echo "The retained lineage state is reserved for successor recovery." >&2
+  elif gate_darwin_lineage_settle "$token" 1; then
+    return 0
+  else
+    gate_darwin_remember_failed_settlement "$token" || return 2
+  fi
+  echo "${drain_failure_prefix} A Darwin process identity remained live or could not be classified safely." >&2
+  if [[ "$drain_context" == "stale-run" ]]; then
+    gate_report_coordinated_no_work_failure 2 "$drain_failure_phase" \
+      "$drain_failure_verdict"
+  fi
+  gate_drain_fail_for_context "$drain_context"
+}
+
+gate_drain_settle_darwin_lineage_cohort() {
+  local drain_context="${1:-stale-run}"
+  shift || return 2
+  local token cohort_signature
+  local drain_failure_prefix="Nothing has been executed."
+  local drain_failure_phase="stale-obligation recovery"
+  local drain_failure_verdict="No mapped command ran in this request"
+  local -a tokens=("$@")
+  [[ "${#tokens[@]}" -gt 0 ]] || return 0
+  cohort_signature="$(gate_darwin_lineage_cohort_signature "${tokens[@]}")" ||
+    return 2
+  if [[ "$drain_context" == "active-command" ]]; then
+    drain_failure_prefix="The mapped command finished, but descendant cleanup did not complete."
+    drain_failure_phase="command descendant cleanup"
+    drain_failure_verdict="A mapped command ran, but its descendants were not confirmed gone"
+  fi
+  for token in "${tokens[@]}"; do
+    gate_lock_token_is_wellformed "$token" || return 2
+    if ! gate_darwin_lineage_state_exists "$token"; then
+      echo "error: required Darwin process-lineage evidence is missing for ${token}." >&2
+      echo "${drain_failure_prefix} The scheduler barrier remains active." >&2
+      if [[ "$drain_context" == "stale-run" ]]; then
+        gate_report_coordinated_no_work_failure 2 "$drain_failure_phase" \
+          "$drain_failure_verdict"
+      fi
+      gate_drain_fail_for_context "$drain_context"
+      return $?
+    fi
+  done
+  if gate_darwin_cohort_settlement_failed_in_process "$cohort_signature"; then
+    echo "error: this process already reached the bounded Darwin cohort settlement failure for ${cohort_signature}." >&2
+    echo "The retained lineage state is reserved for successor recovery." >&2
+    echo "${drain_failure_prefix} A Darwin process identity remained live or could not be classified safely." >&2
+    if [[ "$drain_context" == "stale-run" ]]; then
+      gate_report_coordinated_no_work_failure 2 "$drain_failure_phase" \
+        "$drain_failure_verdict"
+    fi
+    gate_drain_fail_for_context "$drain_context"
+    return $?
+  fi
+  if ! gate_darwin_lineage_settle_cohort 1 "${tokens[@]}"; then
+    gate_darwin_remember_failed_cohort_settlement "$cohort_signature" ||
+      return 2
+    echo "${drain_failure_prefix} A Darwin process identity remained live or could not be classified safely." >&2
+    if [[ "$drain_context" == "stale-run" ]]; then
+      gate_report_coordinated_no_work_failure 2 "$drain_failure_phase" \
+        "$drain_failure_verdict"
+    fi
+    gate_drain_fail_for_context "$drain_context"
+    return $?
+  fi
+  for token in "${tokens[@]}"; do
+    gate_drain_finish_exact_darwin_lineage \
+      "$token" "$drain_context" "$drain_failure_prefix" \
+      "$drain_failure_phase" "$drain_failure_verdict" || return $?
+  done
+}
+
+gate_drain_finish_exact_darwin_lineage() {
+  local token="$1"
+  local drain_context="$2"
+  local drain_failure_prefix="$3"
+  local drain_failure_phase="$4"
+  local drain_failure_verdict="$5"
+  local captured_file=""
+
+  [[ -z "$gate_lock_root_dir" ]] ||
+    captured_file="${gate_lock_root_dir}/captured.${token}"
+  if [[ -n "$captured_file" && ( -e "$captured_file" || -L "$captured_file" ) ]]; then
+    if [[ -L "$captured_file" || ! -f "$captured_file" || ! -O "$captured_file" ]]; then
+      echo "error: exact Darwin lineage settlement found unsafe portable evidence at ${captured_file}." >&2
+      echo "${drain_failure_prefix} The scheduler barrier remains active." >&2
+      if [[ "$drain_context" == "stale-run" ]]; then
+        gate_report_coordinated_no_work_failure 2 "$drain_failure_phase" \
+          "$drain_failure_verdict"
+      fi
+      gate_drain_fail_for_context "$drain_context"
+      return $?
+    fi
+    rm -f "$captured_file" || return 2
+  fi
+  gate_run_discard_marker_exact "$token" \
+    "The exact Darwin command identity was drained, but its marker cleanup failed." ||
+    return $?
+}
+
+gate_drain_settle_request_marker() {
+  local token="$1"
+  local drain_context="${2:-stale-run}"
+  local drain_failure_prefix="$3"
+  local drain_failure_phase="$4"
+  local drain_failure_verdict="$5"
+  local marker raw candidate live scan_failed
+  local drain_started_at waited=0 empty_scans=0
+
+  gate_lock_token_is_wellformed "$token" || return 2
+  marker="$(gate_run_marker_path "$token")" || return 2
+  if ! gate_run_marker_snapshot_is_exact "$marker" "$token"; then
+    echo "error: request-marker recovery found missing, unsafe, or changed marker evidence for ${token}." >&2
+    echo "${drain_failure_prefix} No process was signalled; the scheduler barrier remains active." >&2
+    if [[ "$drain_context" == "stale-run" ]]; then
+      gate_report_coordinated_no_work_failure 2 "$drain_failure_phase" \
+        "$drain_failure_verdict"
+    fi
+    gate_drain_fail_for_context "$drain_context"
+    return $?
+  fi
+
+  drain_started_at="$(date +%s)"
+  while :; do
+    live=""
+    scan_failed=0
+    if raw="$(gate_run_tagged_pids "$token")"; then
+      :
+    else
+      raw=""
+      scan_failed=1
+    fi
+    for candidate in $raw; do
+      if [[ "$candidate" == "$gate_drain_scan_error" ]]; then
+        scan_failed=1
+      elif [[ "$candidate" =~ ^[1-9][0-9]*$ ]]; then
+        case " ${live} " in
+          *" ${candidate} "*) : ;;
+          *) live="${live}${candidate} " ;;
+        esac
+      else
+        scan_failed=1
+      fi
+    done
+
+    if [[ -z "$live" && "$scan_failed" -eq 0 ]]; then
+      empty_scans=$((empty_scans + 1))
+      # A holder can fork while the first lsof or procfs census runs. Require a
+      # second empty snapshot after a quiet interval before the direct recovery
+      # obligation can be removed.
+      [[ "$empty_scans" -lt 2 ]] || return 0
+      sleep 0.2
+      continue
+    fi
+    empty_scans=0
+    waited=$(($(date +%s) - drain_started_at))
+    if [[ "$waited" -ge "$gate_lock_orphan_drain_bound_seconds" ]]; then
+      [[ -z "$live" ]] ||
+        echo "error: request-marker holders are still alive after ${waited}s: ${live}" >&2
+      [[ "$scan_failed" -eq 0 ]] ||
+        echo "error: the request-marker holder scan kept failing after ${waited}s." >&2
+      echo "${drain_failure_prefix} No process was signalled; the scheduler barrier remains active." >&2
+      if [[ "$drain_context" == "stale-run" ]]; then
+        gate_report_coordinated_no_work_failure 2 "$drain_failure_phase" \
+          "$drain_failure_verdict"
+      fi
+      gate_drain_fail_for_context "$drain_context"
+      return $?
+    fi
+    sleep 1
+  done
+}
+
 drain_condemned_run_commands() {
   local token="$1"
   local drain_context="${2:-stale-run}"
@@ -4151,6 +5091,7 @@ drain_condemned_run_commands() {
   local seed_start="${4:-}"
   local quiet_seed_only="${5:-0}"
   local announce_captured_non_seed="${6:-0}"
+  local lifecycle_contract="${7:-}"
   local wrapper entry pid recorded current runtime_recorded runtime_current
   local signal_probe
   local alive alive_identities recycled unverified captured_file
@@ -4168,6 +5109,11 @@ drain_condemned_run_commands() {
   local drain_failure_phase="stale-obligation recovery"
   local drain_failure_verdict="No mapped command ran in this request"
   local full_scan_start_floor=""
+  if ! gate_recovery_lifecycle_contract_is_supported "$lifecycle_contract"; then
+    echo "error: mapped-command drain received a missing or unsupported lifecycle contract." >&2
+    gate_drain_fail_for_context "$drain_context"
+    return $?
+  fi
   if [[ "$drain_context" == "active-command" ]]; then
     drain_subject="completed mapped command"
     drain_start_message="A completed mapped command left descendants running; stopping them before releasing its scheduler lease."
@@ -4198,6 +5144,42 @@ drain_condemned_run_commands() {
   gate_drain_seed_start="$seed_start"
   gate_drain_membership_token="$token"
   drain_started_at="$(date +%s)"
+
+  # A request marker is an aggregate discovery barrier. Per-command recovery
+  # already owns every destructive action. This recovery-only contract waits
+  # for two exact empty marker scans and never treats a reusable PID or PGID as
+  # signal authority.
+  if [[ "$lifecycle_contract" == "request-marker-empty-v1" ]]; then
+    gate_drain_settle_request_marker \
+      "$token" "$drain_context" "$drain_failure_prefix" \
+      "$drain_failure_phase" "$drain_failure_verdict"
+    return $?
+  fi
+
+  # Darwin lineage settlement owns destructive recovery for both the current
+  # coherent contract and a persisted legacy contract. The lineage helper
+  # migrates old state before it settles anything. An ambiguous lineage fails
+  # here and keeps the scheduler barrier active.
+  if [[ "$lifecycle_contract" == "darwin-coherent-lineage-v2" ||
+    "$lifecycle_contract" == "darwin-unique-lineage-v1" ]]; then
+    if ! gate_darwin_lineage_state_exists "$token"; then
+      echo "error: required Darwin process-lineage evidence is missing for ${token}." >&2
+      echo "${drain_failure_prefix} The scheduler barrier remains active." >&2
+      if [[ "$drain_context" == "stale-run" ]]; then
+        gate_report_coordinated_no_work_failure 2 "$drain_failure_phase" \
+          "$drain_failure_verdict"
+      fi
+      gate_drain_fail_for_context "$drain_context"
+      return $?
+    fi
+    gate_drain_settle_darwin_lineage \
+      "$token" "$drain_context" "$drain_failure_prefix" \
+      "$drain_failure_phase" "$drain_failure_verdict" || return $?
+    gate_drain_finish_exact_darwin_lineage \
+      "$token" "$drain_context" "$drain_failure_prefix" \
+      "$drain_failure_phase" "$drain_failure_verdict"
+    return $?
+  fi
 
   # Enumerate before signalling anything. Only the wrapper carries the tag, so
   # killing it first would destroy the one handle to its descendants: a command
@@ -4346,6 +5328,20 @@ EOF
     echo "error: could not publish a complete valid captured process list at ${captured_file}." >&2
     echo "Signalling now would destroy the tag those processes are still findable by, without valid durable evidence to hand on." >&2
     echo "${drain_failure_prefix} Check the process identities and that path, then re-run." >&2
+    if [[ "$drain_context" == "stale-run" ]]; then
+      gate_report_coordinated_no_work_failure 2 "$drain_failure_phase" \
+        "$drain_failure_verdict"
+    fi
+    gate_drain_fail_for_context "$drain_context"
+    return $?
+  fi
+
+  # The portable path can observe marker state on Darwin, but its PID/start
+  # and PGID witnesses are reusable. Never use them as signal authority. A
+  # non-empty portable capture on Darwin keeps the scheduler barrier active.
+  if [[ "$gate_darwin_lineage_host_platform" == Darwin ]]; then
+    echo "error: portable marker recovery found a live process on Darwin without a non-reusable kernel identity." >&2
+    echo "${drain_failure_prefix} No process was signalled; the scheduler barrier remains active." >&2
     if [[ "$drain_context" == "stale-run" ]]; then
       gate_report_coordinated_no_work_failure 2 "$drain_failure_phase" \
         "$drain_failure_verdict"
@@ -4660,11 +5656,16 @@ drain_completed_command_identity() {
   local seed_pgid="${3:-}"
   local seed_start="${4:-}"
   local quiet_seed_only="${5:-0}"
+  local lifecycle_contract="${6:-}"
   local condemned_dir=""
   local coordinator_active=0
   local legacy_lock_active=0
   local announce_captured_non_seed=0
   [[ -n "$token" ]] || return 0
+  gate_lifecycle_contract_is_supported "$lifecycle_contract" || {
+    echo "error: completed-command drain has no supported lifecycle contract." >&2
+    return 2
+  }
 
   if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
     gate_coordinator_is_active; then
@@ -4683,7 +5684,7 @@ drain_completed_command_identity() {
     # guards: cleanup must preserve both the marker and the legacy owner until
     # the recovery obligation exists on disk.
     gate_active_command_drain_in_progress=1 gate_cleanup_preserve_legacy_lock=1
-    if ! record_condemned_run "$token"; then
+    if ! record_condemned_run "$token" "$lifecycle_contract"; then
       echo "error: could not record the completed command's descendants in ${gate_lock_root_dir:-unknown}/condemned.d." >&2
       echo "The legacy lock stays in place so a later run must reclaim and drain this run before executing work." >&2
       echo "The mapped command finished, but descendant cleanup did not start. Fix that path — permissions, or free space — then re-run." >&2
@@ -4709,9 +5710,19 @@ drain_completed_command_identity() {
   # token must never race this one over its append-only capture file.
   drain_condemned_run_commands \
     "$token" active-command "$seed_pgid" "$seed_start" \
-    "$quiet_seed_only" "$announce_captured_non_seed" || return $?
+    "$quiet_seed_only" "$announce_captured_non_seed" \
+    "$lifecycle_contract" || return $?
   if [[ "$legacy_lock_active" -eq 1 ]]; then
-    rm -f "${condemned_dir}/${token}"
+    rm -f "${condemned_dir}/${token}" || return 2
+  fi
+  if [[ "$lifecycle_contract" == "darwin-coherent-lineage-v2" &&
+    "$coordinator_active" -eq 0 ]]; then
+    # A legacy sequential run uses its owner token for every command. Retain
+    # the exact settlement as the recovery proof between commands and through
+    # final lock release. Unique no-lock identities retire immediately.
+    if [[ "$legacy_lock_active" -ne 1 || "$token" != "$gate_lock_token" ]]; then
+      gate_darwin_lineage_discard_settled "$token" || return $?
+    fi
   fi
   # The drain removes holder.<token>. A sequential command uses the request
   # marker itself, so clear that cached path. Parallel commands use their own
@@ -4722,24 +5733,72 @@ drain_completed_command_identity() {
   gate_active_command_drain_in_progress=0
 }
 
+drain_completed_darwin_command_cohort() {
+  local token condemned_dir=""
+  local coordinator_active=0
+  local legacy_lock_active=0
+  local -a tokens=("$@")
+  [[ "${#tokens[@]}" -gt 0 ]] || return 0
+  if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+    gate_coordinator_is_active; then
+    coordinator_active=1
+  fi
+  if [[ -n "$gate_lock_dir" && -n "$gate_lock_root_dir" &&
+    -n "$gate_lock_token" ]]; then
+    legacy_lock_active=1
+  fi
+  gate_active_command_drain_in_progress=1
+  if [[ "$legacy_lock_active" -eq 1 ]]; then
+    gate_cleanup_preserve_legacy_lock=1
+    for token in "${tokens[@]}"; do
+      if ! record_condemned_run "$token" "darwin-coherent-lineage-v2"; then
+        echo "error: could not record the Darwin command cohort in ${gate_lock_root_dir:-unknown}/condemned.d." >&2
+        echo "The legacy lock stays in place so a later run must reclaim and drain this cohort before executing work." >&2
+        return 2
+      fi
+    done
+    condemned_dir="$(gate_lock_condemned_dir)" || return 2
+    gate_cleanup_preserve_legacy_lock=0
+  fi
+  gate_drain_settle_darwin_lineage_cohort \
+    active-command "${tokens[@]}" || return $?
+  if [[ "$legacy_lock_active" -eq 1 ]]; then
+    for token in "${tokens[@]}"; do
+      rm -f "${condemned_dir}/${token}" || return 2
+    done
+  fi
+  if [[ "$coordinator_active" -eq 0 ]]; then
+    for token in "${tokens[@]}"; do
+      if [[ "$legacy_lock_active" -ne 1 || "$token" != "$gate_lock_token" ]]; then
+        gate_darwin_lineage_discard_settled "$token" || return $?
+      fi
+    done
+  fi
+  gate_active_command_drain_in_progress=0
+}
+
 drain_completed_sequential_command() {
   local token="${gate_run_id:-$gate_lock_token}"
   local clear_request_marker=1
+  local lifecycle_contract="${active_timeout_lifecycle_contract:-}"
   if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
     gate_coordinator_is_active &&
     [[ -n "${gate_coordinator_active_drain_identity:-}" ]]; then
     token="$gate_coordinator_active_drain_identity"
     clear_request_marker=0
   fi
-  drain_completed_command_identity "$token" "$clear_request_marker"
+  drain_completed_command_identity \
+    "$token" "$clear_request_marker" "" "" 0 "$lifecycle_contract"
 }
 
 drain_completed_parallel_command() {
   local drain_identity="$1"
   local worker_pgid="${2:-}"
   local worker_start="${3:-}"
+  local lifecycle_contract="${4:-}"
   drain_completed_command_identity \
-    "$drain_identity" 0 "$worker_pgid" "$worker_start" 1
+    "$drain_identity" 0 "$worker_pgid" "$worker_start" 1 \
+    "$lifecycle_contract"
 }
 
 assert_gate_run_lock_still_ours_legacy() {
@@ -4956,6 +6015,13 @@ release_gate_run_lock_legacy() {
       gate_lock_dir=""
       return 2
     fi
+    if [[ "$gate_active_command_drain_in_progress" -eq 0 ]]; then
+      if ! gate_darwin_lineage_retire_owner "$gate_lock_token"; then
+        echo "error: the legacy lock was removed, but its Darwin owner lineage could not be retired." >&2
+        gate_lock_dir=""
+        return 2
+      fi
+    fi
     gate_lock_dir=""
     return 0
   fi
@@ -5113,6 +6179,15 @@ acquire_gate_run_lock_legacy() {
   fi
   gate_lock_resolve_machine_id
   this_machine="$gate_lock_machine_id_cached"
+  # Prepare the native runtime before a claim creates an ownerless run.lock.
+  # The later state snapshot is then short and remains before owner publication.
+  if ! gate_darwin_exact_identity_prepare; then
+    echo "error: could not prepare Darwin owner-lineage authority before legacy lock publication." >&2
+    echo "Nothing has been executed." >&2
+    gate_report_coordinated_no_work_failure 2 "legacy owner publication" \
+      "No mapped command ran in this request"
+    exit 2
+  fi
   # Two questions about the root, answered from different evidence.
   #
   # Is the storage under it this machine's own? Every reason a record can look
@@ -5586,22 +6661,26 @@ gate_run_ensure_token() {
   fi
 }
 
-prepare_explicit_no_lock_run_handles() {
+prepare_uncoordinated_run_handles() {
   local handle_root="${scratch_dir}/no-lock-handles"
   case "$gate_lock_enabled" in
     0 | false | no) ;;
-    *) return 0 ;;
+    *)
+      [[ -n "${AGENT_QUALITY_GATE_LOCK_HELD:-}" ]] || return 0
+      ;;
   esac
 
-  # An explicit no-lock run has no legacy or coordinator root, but detached
-  # descendants still need an inherited marker that macOS can find after the
-  # tagged wrapper exits. Keep those handles in a private repo-local directory
-  # so an unusable configured lock root does not disable the escape hatch.
+  # An explicit no-lock run has no legacy or coordinator root. A nested gate
+  # reuses its ancestor's exclusion but must not reuse the ancestor's token.
+  # Both still need an inherited marker and an independent Darwin lineage for
+  # their own mapped-command cleanup. Keep those handles in a private
+  # repo-local directory. This also prevents an unusable configured lock root
+  # from disabling the explicit escape hatch.
   if [[ ! -e "$handle_root" && ! -L "$handle_root" ]]; then
     (umask 077 && mkdir "$handle_root") 2>/dev/null || true
   fi
   if ! gate_run_private_marker_directory_is_safe "$handle_root"; then
-    echo "error: could not prepare the private no-lock handle directory at ${handle_root}." >&2
+    echo "error: could not prepare the private uncoordinated handle directory at ${handle_root}." >&2
     return 2
   fi
   gate_lock_root_dir="$handle_root"
@@ -5674,6 +6753,10 @@ cleanup_tmpfiles() {
   local marker_status=0
   local release_status=0
   teardown_active_timeouts || teardown_status=$?
+  if [[ "$darwin_broker_preflight_bound" -eq 1 ]]; then
+    exec 24<&- 2>/dev/null || true
+    darwin_broker_preflight_bound=0
+  fi
   if [[ ${#tmpfiles[@]} -gt 0 ]]; then
     rm -f "${tmpfiles[@]+"${tmpfiles[@]}"}"
   fi
@@ -6089,6 +7172,17 @@ implementation_signature() {
     scripts/agent-quality-gate.test.sh \
     scripts/agent-autoreview-core.mjs \
     scripts/gate/run-handles.sh \
+    scripts/gate/darwin-broker-launch-preflight.mjs \
+    scripts/gate/darwin-broker-launch-preflight.test.mjs \
+    scripts/gate/darwin-process-identity.c \
+    scripts/gate/darwin-process-identity-runtime.inc.c \
+    scripts/gate/darwin-process-identity-helper.mjs \
+    scripts/gate/darwin-process-lineage-model.mjs \
+    scripts/gate/darwin-process-lineage-state.mjs \
+    scripts/gate/darwin-process-lineage.mjs \
+    scripts/gate/darwin-process-lineage.sh \
+    scripts/gate/mapped-command-process-identity.mjs \
+    scripts/gate/trunk-check-once.sh \
     scripts/check-agent-quality-gate-package-scripts.mjs \
     scripts/docs/docs-navigation-eval-helpers.mjs \
     scripts/gate/lockfile-scope.mjs \
@@ -6134,7 +7228,7 @@ implementation_signature() {
     scripts/gate/mapping/*.test.mjs | scripts/gate/routing-table/*.test.mjs)
         implementation_path="$repo_root/$path"
         ;;
-      scripts/agent-quality-gate.sh | scripts/agent-autoreview-core.mjs | scripts/docs/docs-navigation-eval-helpers.mjs | scripts/gate/lockfile-scope.mjs | scripts/gate/run-handles.sh | scripts/gate/mapping.mjs | scripts/gate/mapping/*.mjs | scripts/gate/routing-table/*.mjs | scripts/gate/quality-gate-coordinator.sh | scripts/gate/quality-gate-coordinator-support.sh)
+      scripts/agent-quality-gate.sh | scripts/agent-autoreview-core.mjs | scripts/docs/docs-navigation-eval-helpers.mjs | scripts/gate/lockfile-scope.mjs | scripts/gate/run-handles.sh | scripts/gate/darwin-broker-launch-preflight.mjs | scripts/gate/darwin-process-identity.c | scripts/gate/darwin-process-identity-runtime.inc.c | scripts/gate/darwin-process-identity-helper.mjs | scripts/gate/darwin-process-lineage-model.mjs | scripts/gate/darwin-process-lineage-state.mjs | scripts/gate/darwin-process-lineage.mjs | scripts/gate/darwin-process-lineage.sh | scripts/gate/trunk-check-once.sh | scripts/gate/mapping.mjs | scripts/gate/mapping/*.mjs | scripts/gate/routing-table/*.mjs | scripts/gate/quality-gate-coordinator.sh | scripts/gate/quality-gate-coordinator-support.sh)
         implementation_path="$script_source_dir/${path#scripts/}"
         ;;
       *)
@@ -6657,20 +7751,21 @@ fi
 # something: a dry run, a fresh-stamp skip, and a package-script refusal all
 # exit above without ever competing for the machine. Coordinated runs have
 # already prepared the identity that acquisition registers.
+# Legacy lock acquisition and coordinator registration already prepare their
+# run handles. Explicit no-lock runs and nested gates need private handles
+# before acquisition changes the inherited-lock marker. Without them,
+# descendant cleanup can report a false success.
+if ! prepare_uncoordinated_run_handles; then
+  echo "Nothing has been executed." >&2
+  gate_report_coordinated_no_work_failure 2 "run-handle preparation" \
+    "No mapped command ran in this request"
+  exit 2
+fi
 acquire_gate_run_lock
 if declare -F gate_coordinator_is_follower >/dev/null 2>&1 &&
   gate_coordinator_is_follower; then
   gate_coordinator_wait_for_shared_result
   exit $?
-fi
-# Legacy lock acquisition and coordinator registration already prepare their
-# run handles. Explicit no-lock runs need private handles before mapped work.
-# Without them, descendant cleanup can report a false success.
-if ! prepare_explicit_no_lock_run_handles; then
-  echo "Nothing has been executed." >&2
-  gate_report_coordinated_no_work_failure 2 "run-handle preparation" \
-    "No mapped command ran in this request"
-  exit 2
 fi
 # The run marker is written here, while the gate's own stderr is still live
 # and the exit is unambiguously the gate's: inside run_with_timeout the
@@ -6836,7 +7931,7 @@ print_failed_command_output() {
 # the command failed and asks the launcher whether it can produce a CLI at all.
 is_trunk_command() {
   case "$1" in
-    "./tools/trunk "*)
+    "./tools/trunk check --ci"*)
       return 0
       ;;
   esac
@@ -6844,6 +7939,200 @@ is_trunk_command() {
 }
 
 trunk_provisioning_probe_timeout_seconds=15
+trunk_guardian_completion_bound_seconds=120
+trunk_guardian_status_publish_bound_seconds=5
+
+gate_trunk_guardian_receipt_is_safe() {
+  local path="$1"
+  local expected_value="$2"
+  [[ "${gate_darwin_node_bin:-}" == /* ]] || return 2
+  "$gate_darwin_node_bin" -e '
+    const { lstatSync, readFileSync } = require("node:fs");
+    const [path, expectedValue, uidText] = process.argv.slice(1);
+    const stat = lstatSync(path);
+    process.exit(
+      stat.isFile() &&
+      !stat.isSymbolicLink() &&
+      stat.uid === Number(uidText) &&
+      (stat.mode & 0o7777) === 0o400 &&
+      readFileSync(path, "utf8") === expectedValue + "\n"
+        ? 0
+        : 1,
+    );
+  ' "$path" "$expected_value" "$UID" 2>/dev/null
+}
+
+gate_trunk_guardian_prepare_handshake() {
+  local directory="$1"
+  local pending_file="$2"
+  local done_file="$3"
+
+  [[ "$pending_file" == "$directory/trunk-guardian.pending" &&
+    "$done_file" == "$directory/trunk-guardian.done" ]] || return 2
+  gate_run_private_marker_directory_is_safe "$directory" || return 2
+  [[ ! -e "$pending_file" && ! -L "$pending_file" &&
+    ! -e "$done_file" && ! -L "$done_file" &&
+    ! -e "${done_file}.tmp" && ! -L "${done_file}.tmp" ]] || return 2
+  if ! (set -o noclobber && umask 077 &&
+    printf 'pending\n' >"$pending_file") ||
+    ! /bin/chmod 0400 "$pending_file" ||
+    ! gate_trunk_guardian_receipt_is_safe "$pending_file" pending; then
+    /bin/rm -f -- "$pending_file"
+    return 2
+  fi
+}
+
+gate_trunk_guardian_read_signal_until() {
+  local deadline="$1"
+  local expected_parent="$2"
+  local reader_pid
+  local reader_status
+  [[ "${gate_darwin_node_bin:-}" == /* ]] || return 2
+  /usr/bin/env -i "$gate_darwin_node_bin" -e '
+    const [deadlineText, expectedParentText] = process.argv.slice(1);
+    const deadlineSeconds = Number(deadlineText);
+    const expectedParent = Number(expectedParentText);
+    const remainingMilliseconds = deadlineSeconds * 1_000 - Date.now();
+    if (
+      !Number.isSafeInteger(deadlineSeconds) ||
+      deadlineSeconds <= 0 ||
+      !Number.isSafeInteger(expectedParent) ||
+      expectedParent <= 1 ||
+      process.ppid !== expectedParent ||
+      !Number.isFinite(remainingMilliseconds)
+    ) {
+      process.exit(2);
+    }
+    if (remainingMilliseconds <= 0) process.exit(11);
+
+    let settled = false;
+    let input = Buffer.alloc(0);
+    let deadlineTimer;
+    let parentTimer;
+    const finish = (status) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadlineTimer);
+      clearInterval(parentTimer);
+      process.exit(status);
+    };
+    const checkDeadline = () => {
+      const remaining = deadlineSeconds * 1_000 - Date.now();
+      if (remaining <= 0) {
+        finish(11);
+        return;
+      }
+      deadlineTimer = setTimeout(checkDeadline, Math.min(remaining, 60_000));
+    };
+    checkDeadline();
+    parentTimer = setInterval(() => {
+      if (process.ppid !== expectedParent) finish(13);
+    }, 250);
+    for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"]) {
+      process.once(signal, () => finish(13));
+    }
+    process.stdin.on("data", (chunk) => {
+      input = Buffer.concat([input, chunk]);
+      if (input.length > 5) {
+        finish(12);
+        return;
+      }
+      if (input.length === 5) {
+        finish(input.equals(Buffer.from("done\n", "utf8")) ? 0 : 12);
+      }
+    });
+    process.stdin.once("end", () => {
+      if (input.length === 0) {
+        finish(10);
+        return;
+      }
+      finish(12);
+    });
+    process.stdin.once("error", () => finish(2));
+    process.stdin.resume();
+  ' "$deadline" "$expected_parent" \
+    3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- 10>&- 11>&- 12>&- 13>&- \
+    14>&- 15>&- 16>&- 17>&- 18>&- 19>&- 20>&- 21>&- 22>&- 23>&- \
+    24>&- 25>&- <&26 26<&- >/dev/null 2>/dev/null &
+  reader_pid=$!
+  if wait "$reader_pid"; then
+    return 0
+  else
+    reader_status=$?
+    return "$reader_status"
+  fi
+}
+
+gate_trunk_guardian_wait_done() {
+  local pending_file="$1"
+  local done_file="$2"
+  local deadline="$3"
+  local expected_parent="$4"
+  local directory="${pending_file%/*}"
+  local signal_status=0
+
+  if [[ ! "$deadline" =~ ^[1-9][0-9]*$ ||
+    ! "$expected_parent" =~ ^[1-9][0-9]*$ ||
+    "$pending_file" != "$directory/trunk-guardian.pending" ||
+    "$done_file" != "$directory/trunk-guardian.done" ]] ||
+    ! gate_run_private_marker_directory_is_safe "$directory" ||
+    ! gate_trunk_guardian_receipt_is_safe "$pending_file" pending; then
+    echo "error: Trunk guardian lifecycle handshake is invalid before settlement." >&2
+    return 2
+  fi
+
+  if gate_trunk_guardian_read_signal_until "$deadline" "$expected_parent"; then
+    signal_status=0
+  else
+    signal_status=$?
+  fi
+  case "$signal_status" in
+    0)
+      if gate_trunk_guardian_receipt_is_safe "$pending_file" pending &&
+        gate_trunk_guardian_receipt_is_safe "$done_file" "done"; then
+        return 0
+      fi
+      echo "error: Trunk guardian published an invalid completion signal." >&2
+      ;;
+    10)
+      echo "error: Trunk guardian completion capability closed before publication." >&2
+      ;;
+    11)
+      echo "error: Trunk guardian did not finish before its lifecycle deadline." >&2
+      ;;
+    12)
+      echo "error: Trunk guardian published an invalid completion signal." >&2
+      ;;
+    *)
+      echo "error: Trunk guardian completion capability could not be inspected." >&2
+      ;;
+  esac
+  return 2
+}
+
+gate_trunk_guardian_cleanup_handshake() {
+  local pending_file="$1"
+  local done_file="$2"
+  local directory
+
+  if [[ "${trunk_guardian_signal_write_open:-0}" -eq 1 ]]; then
+    exec 25>&-
+    trunk_guardian_signal_write_open=0
+  fi
+  if [[ "${trunk_guardian_signal_read_open:-0}" -eq 1 ]]; then
+    exec 26<&-
+    trunk_guardian_signal_read_open=0
+  fi
+
+  if [[ -z "$pending_file" && -z "$done_file" ]]; then
+    return 0
+  fi
+  directory="${pending_file%/*}"
+  [[ -n "$directory" &&
+    "$pending_file" == "$directory/trunk-guardian.pending" &&
+    "$done_file" == "$directory/trunk-guardian.done" ]] || return 2
+  /bin/rm -f -- "$pending_file" "$done_file" "${done_file}.tmp"
+}
 
 # Ask the launcher whether it can produce a CLI. Bounded: a probe that cannot
 # answer within its budget is torn down and reported as NOT blocked, so an
@@ -6859,6 +8148,8 @@ trunk_provisioning_probe() {
   local handshake_file="${8:-}"
   local pid
   local pid_start
+  local exact_identity=""
+  local exact_capture_status=0
   local waited=0
   local had_errexit=0
   local rc
@@ -6876,8 +8167,9 @@ trunk_provisioning_probe() {
   # The sanitized launcher executes this Bash body.
   # shellcheck disable=SC2016
   AGENTQG_RUN="$command_tag" \
-    AGENTQG_REQUEST="$request_tag" \
+  AGENTQG_REQUEST="$request_tag" \
     "${gate_sanitized_bash_launcher[@]}" -c '
+      exec 24<&- 2>/dev/null || true
       command_marker="$1"
       request_marker="$2"
       coordinator_marker="$3"
@@ -6918,6 +8210,13 @@ trunk_provisioning_probe() {
   # launcher failure from a wrapper that never retained the recovery handles.
   pid_start="$(gate_lock_process_runtime_start "$pid")"
   active_timeout_records=("${pid}|${pid_start}")
+  if ! gate_darwin_exact_child_capture \
+    "$pid" "${gate_mapped_command_parent_pid:-$$}"; then
+    exact_capture_status=2
+  else
+    exact_identity="$gate_darwin_exact_identity"
+  fi
+  active_timeout_exact_identities=("$exact_identity")
   while kill -0 "$pid" 2>/dev/null &&
     [[ "$waited" -lt "$trunk_provisioning_probe_timeout_seconds" ]]; do
     sleep 1
@@ -6925,15 +8224,30 @@ trunk_provisioning_probe() {
   done
 
   if kill -0 "$pid" 2>/dev/null; then
-    kill_process_tree "$pid" KILL
-    wait "$pid" 2>/dev/null
-    rc=0
+    if [[ "$gate_darwin_lineage_host_platform" == Darwin ]]; then
+      if [[ "$exact_capture_status" -ne 0 || -z "$exact_identity" ]] ||
+        ! gate_darwin_exact_identity_terminate "$exact_identity" "$pid"; then
+        echo "error: the Trunk probe has no usable Darwin kernel identity." >&2
+        rc=2
+      else
+        wait "$pid" 2>/dev/null
+        rc=0
+      fi
+    else
+      kill_process_tree "$pid" KILL
+      wait "$pid" 2>/dev/null
+      rc=0
+    fi
   else
     wait "$pid" 2>/dev/null
     rc=$?
     [[ "$rc" -le 128 ]] || rc=0
   fi
-  active_timeout_records=()
+  [[ "$exact_capture_status" -eq 0 ]] || rc=2
+  if ! kill -0 "$pid" 2>/dev/null; then
+    active_timeout_records=()
+    active_timeout_exact_identities=()
+  fi
 
   if ! read_parallel_worker_result_value "$handshake_file" ready \
     >/dev/null 2>&1; then
@@ -7556,6 +8870,8 @@ monitor_sequential_autoreview_progress() {
   local heartbeat_interval=20
   local now_ts
 
+  exec 24<&- 2>/dev/null || true
+
   while [[ ! -e "$done_file" ]] && kill -0 "$parent_pid" 2>/dev/null; do
     sleep 1
     if [[ -e "$done_file" ]] || ! kill -0 "$parent_pid" 2>/dev/null; then
@@ -7588,6 +8904,161 @@ mapped_command_timeout_seconds() {
   esac
 }
 
+gate_command_lifecycle_uses_legacy_owner() {
+  local token="$1"
+  [[ -n "$gate_lock_dir" && -n "$gate_lock_token" &&
+    "$token" == "$gate_lock_token" ]] || return 1
+  if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+    gate_coordinator_is_active; then
+    return 1
+  fi
+  return 0
+}
+
+gate_abandon_unstarted_command_lifecycle() {
+  local token="$1"
+  local settlement_owner="${2:-worker}"
+  local lineage_status=0
+  case "$settlement_owner" in
+    worker) ;;
+    parent)
+      # The parallel parent registered this exact drain identity before it let
+      # the worker run. Leave both the coordinator lease and Darwin state in
+      # place. If the parent crashes, the coordinator can still turn that
+      # lease into a recovery obligation backed by the retained state.
+      if [[ "$active_timeout_drain_identity" == "$token" ]]; then
+        active_timeout_drain_identity=""
+        active_timeout_lifecycle_contract=""
+      fi
+      return 0
+      ;;
+    *) return 2 ;;
+  esac
+  if declare -F gate_coordinator_abandon_active_lease >/dev/null 2>&1; then
+    if ! gate_coordinator_abandon_active_lease; then
+      echo "error: the unstarted command lease could not be abandoned." >&2
+      echo "Its Darwin lineage state remains available for recovery." >&2
+      return 2
+    fi
+  fi
+  if gate_command_lifecycle_uses_legacy_owner "$token"; then
+    gate_darwin_lineage_settle "$token" 1 || lineage_status=$?
+  else
+    gate_darwin_lineage_settle "$token" || lineage_status=$?
+  fi
+  if [[ "$lineage_status" -ne 0 ]]; then
+    echo "error: unstarted mapped-command lineage state could not be discharged." >&2
+    return 2
+  fi
+  if [[ "$active_timeout_drain_identity" == "$token" ]]; then
+    active_timeout_drain_identity=""
+    active_timeout_lifecycle_contract=""
+  fi
+}
+
+gate_abandon_verified_unbound_command_lifecycle() {
+  local token="$1"
+  local settlement_owner="${2:-worker}"
+  local lineage_status=0
+  case "$settlement_owner" in
+    worker) ;;
+    parent)
+      # The registered parallel parent owns the pre-START lease and lineage.
+      # It resolves both after the worker reports its unstarted result.
+      if [[ "$active_timeout_drain_identity" == "$token" ]]; then
+        active_timeout_drain_identity=""
+        active_timeout_lifecycle_contract=""
+      fi
+      return 0
+      ;;
+    *) return 2 ;;
+  esac
+  if declare -F gate_coordinator_abandon_active_lease >/dev/null 2>&1; then
+    if ! gate_coordinator_abandon_active_lease; then
+      echo "error: the unstarted command lease could not be abandoned." >&2
+      echo "Its unbound Darwin lineage state remains available for recovery." >&2
+      return 2
+    fi
+  fi
+  if [[ -n "${gate_coordinator_active_lease_id:-}" ]]; then
+    echo "error: the unstarted command lease remains active after abandonment." >&2
+    echo "Its unbound Darwin lineage state remains available for recovery." >&2
+    return 2
+  fi
+  if gate_command_lifecycle_uses_legacy_owner "$token"; then
+    gate_darwin_lineage_settle "$token" 1 || lineage_status=$?
+  else
+    gate_darwin_lineage_abandon_unstarted "$token" || lineage_status=$?
+  fi
+  if [[ "$lineage_status" -ne 0 ]]; then
+    echo "error: unstarted mapped-command lineage state was not verified as unbound." >&2
+    return 2
+  fi
+  if [[ "$active_timeout_drain_identity" == "$token" ]]; then
+    active_timeout_drain_identity=""
+    active_timeout_lifecycle_contract=""
+  fi
+}
+
+gate_run_darwin_lineage_watcher_after_barrier() {
+  local barrier_file="$1"
+  local node_bin="$2"
+  local module="$3"
+  local state_file="$4"
+  local state_directory="$5"
+  local controller_identity="$6"
+  local action_file="$7"
+  local armed_file="$8"
+  local timeout_seconds="$9"
+  local action
+
+  trap - EXIT INT TERM HUP
+  exec 23< "$barrier_file" || return 127
+  exec 22>&-
+  IFS= read -r action <&23 || return 127
+  [[ "$action" == start ]] || return 127
+  exec 23<&-
+  exec </dev/null
+  exec 6>&- 7>&- 8>&- 9>&- 14>&- 15>&- 16>&- 17>&- 18>&- 19>&- \
+    20>&- 21>&- 22>&- 24>&- 25>&- 26>&-
+  exec /usr/bin/env \
+    -u NODE_OPTIONS \
+    -u NODE_PATH \
+    -u OPENSSL_CONF \
+    -u OPENSSL_MODULES \
+    -u GLIBC_TUNABLES \
+    -u LD_AUDIT \
+    -u LD_DEBUG \
+    -u LD_DEBUG_OUTPUT \
+    -u LD_PRELOAD \
+    -u LD_LIBRARY_PATH \
+    -u LD_ORIGIN_PATH \
+    -u LD_PROFILE \
+    -u LD_SHOW_AUXV \
+    -u DYLD_INSERT_LIBRARIES \
+    -u DYLD_LIBRARY_PATH \
+    -u DYLD_FRAMEWORK_PATH \
+    -u DYLD_FALLBACK_LIBRARY_PATH \
+    -u DYLD_FALLBACK_FRAMEWORK_PATH \
+    -u DYLD_IMAGE_SUFFIX \
+    -u DYLD_PRINT_TO_FILE \
+    -u DYLD_ROOT_PATH \
+    -u DYLD_SHARED_REGION \
+    -u DYLD_VERSIONED_FRAMEWORK_PATH \
+    -u DYLD_VERSIONED_LIBRARY_PATH \
+    -u AGENTQG_RUN \
+    -u AGENTQG_REQUEST \
+    -u AGENTQG_MARKER_FDS \
+    "$node_bin" "$module" watch-settle \
+      --state "$state_file" \
+      --state-directory "$state_directory" \
+      --scratch "$scratch_dir" \
+      --controller-identity "$controller_identity" \
+      --cancel-file "$action_file" \
+      --armed-file "$armed_file" \
+      --timeout-seconds "$timeout_seconds"
+}
+
 run_with_timeout() {
   local command="$1"
   local deferred_lease_file="${2:-}"
@@ -7597,22 +9068,77 @@ run_with_timeout() {
   local cmd_start
   local watchdog_pid
   local watchdog_start
+  local watchdog_reaped=0
+  local lineage_watcher_pid=""
+  local lineage_watcher_start=""
+  local cmd_exact_identity=""
+  local watchdog_exact_identity=""
+  local lineage_watcher_exact_identity=""
   local rc
   local release_rc=0
   local drain_rc=0
+  local lineage_bind_rc=0
   local provisioning_probe_rc=0
   local timeout_marker
   local had_errexit=0
   local command_started_at
   local command_finished_at
   local effective_command_timeout_seconds
+  local command_barrier_dir
+  local command_control_fifo
+  local command_status_file
+  local command_settlement_ack_file
+  local trunk_probe_result_file=""
+  local trunk_probe_result=""
+  local trunk_probe_deadline=0
+  local trunk_probe_completed=0
+  local trunk_probe_ready_observed=0
+  local trunk_probe_root_exited=0
+  local trunk_guardian_pending_file=""
+  local trunk_guardian_done_file=""
+  local trunk_guardian_signal_fifo=""
+  local trunk_guardian_signal_read_open=0
+  local trunk_guardian_signal_write_open=0
+  local trunk_guardian_signal_fd=""
+  local trunk_guardian_started_at=""
+  local trunk_guardian_wait_deadline=""
+  local trunk_guardian_handshake_rc=0
+  local trunk_guardian_status_deadline=""
+  local lineage_watcher_barrier_dir=""
+  local lineage_watcher_control_fifo=""
+  local lineage_watcher_action_file=""
+  local lineage_watcher_armed_file=""
+  local lineage_watcher_output_file=""
+  local lineage_watcher_stderr_file=""
+  local lineage_watcher_state_directory=""
+  local lineage_watcher_timeout_seconds=0
+  local lineage_watcher_released=0
+  local lineage_watcher_armed=0
+  local lineage_watcher_reaped=0
+  local lineage_watcher_result=""
+  local lineage_watcher_result_bytes=""
+  local lineage_watcher_wait_rc=0
+  local lineage_watcher_module=""
+  local lineage_watcher_setup_rc=0
+  local command_reported_status=""
+  local pre_settlement_command_status=""
+  local executable_command="$command"
+  local command_lineage_token
+  local command_lifecycle_contract
+  local resume_legacy_owner_lineage=0
+  local mapped_command_parent_pid="${gate_mapped_command_parent_pid:-$$}"
+  local darwin_exact_active=0
+  local forced_exact_settlement=0
+  local coordinator_lineage_release_required=0
   local coordinator_marker="${gate_coordinator_marker_file:-}"
   local request_marker command_marker command_tag request_tag
   local coordinator_release_deferred=0
   local close_parallel_worker_control_fd=0
+  local unstarted_settlement_owner=worker
 
   if [[ -n "$deferred_lease_file" ]]; then
     close_parallel_worker_control_fd=1
+    unstarted_settlement_owner=parent
   fi
 
   # A `wait` that reaps a SIGTERM/SIGKILL-killed child makes bash re-raise that
@@ -7630,6 +9156,7 @@ run_with_timeout() {
   last_command_execution_seconds=0
   last_command_infrastructure_failed=false
   last_command_trunk_provisioning_blocked=false
+  last_command_launch_state=unstarted
   if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
     gate_coordinator_is_active && [[ -z "$command_drain_identity" ]]; then
     parallel_command_sequence=$((parallel_command_sequence + 1))
@@ -7640,26 +9167,96 @@ run_with_timeout() {
       return 2
     fi
   fi
+  command_lineage_token="${command_drain_identity:-${gate_run_id:-$gate_lock_token}}"
+  command_lifecycle_contract="$(gate_lifecycle_contract_for_host)" || {
+    echo "error: could not classify the mapped-command lifecycle contract." >&2
+    last_command_infrastructure_failed=true
+    [[ "$had_errexit" == 1 ]] && set -e
+    return 2
+  }
+  active_timeout_drain_identity="$command_lineage_token"
+  active_timeout_lifecycle_contract="$command_lifecycle_contract"
+  if [[ -n "$gate_lock_dir" && -n "$gate_lock_token" &&
+    "$command_lineage_token" == "$gate_lock_token" ]] && {
+    ! declare -F gate_coordinator_is_active >/dev/null 2>&1 ||
+      ! gate_coordinator_is_active;
+  }; then
+    resume_legacy_owner_lineage=1
+  fi
+  if [[ "$resume_legacy_owner_lineage" -eq 1 ]]; then
+    gate_darwin_lineage_resume_owner "$command_lineage_token"
+    rc=$?
+  else
+    gate_darwin_lineage_prepare "$command_lineage_token"
+    rc=$?
+  fi
+  if [[ "$rc" -ne 0 ]]; then
+    echo "error: refusing to request a command lease without a complete Darwin process baseline." >&2
+    last_command_infrastructure_failed=true
+    [[ "$had_errexit" == 1 ]] && set -e
+    return 2
+  fi
+  darwin_exact_active="$gate_darwin_lineage_active"
   if declare -F gate_coordinator_before_command >/dev/null 2>&1; then
     gate_coordinator_before_command "$command" "$command_drain_identity"
     rc=$?
     if [[ "$rc" -ne 0 ]]; then
+      gate_abandon_verified_unbound_command_lifecycle \
+        "$command_lineage_token" "$unstarted_settlement_owner" || true
       last_command_infrastructure_failed=true
       [[ "$had_errexit" == 1 ]] && set -e
       return "$rc"
+    fi
+    if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+      gate_coordinator_is_active &&
+      [[ "${gate_coordinator_active_lifecycle_contract:-}" != "$command_lifecycle_contract" ]]; then
+      echo "error: coordinator selected a different mapped-command lifecycle contract." >&2
+      gate_abandon_unstarted_command_lifecycle \
+        "$command_lineage_token" "$unstarted_settlement_owner" || true
+      last_command_infrastructure_failed=true
+      [[ "$had_errexit" == 1 ]] && set -e
+      return 2
+    fi
+    if [[ -n "$deferred_lease_file" ]] && {
+      ! declare -F parallel_worker_parent_is_live >/dev/null 2>&1 ||
+        ! parallel_worker_parent_is_live;
+    }; then
+      echo "error: the parallel worker parent exited before command lease activation." >&2
+      gate_abandon_unstarted_command_lifecycle \
+        "$command_lineage_token" "$unstarted_settlement_owner" || true
+      last_command_infrastructure_failed=true
+      [[ "$had_errexit" == 1 ]] && set -e
+      return 2
     fi
     if [[ -n "$deferred_lease_file" ]] &&
       declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
       gate_coordinator_is_active; then
       if [[ -z "${gate_coordinator_active_lease_id:-}" ]] ||
-        ! printf '%s\n' "$gate_coordinator_active_lease_id" > "$deferred_lease_file"; then
-        gate_coordinator_abandon_active_lease || true
+        ! write_parallel_worker_lease_record \
+          "$deferred_lease_file" \
+          "$gate_coordinator_active_lease_id" \
+          "$command_lineage_token" \
+          "$command_lifecycle_contract"; then
+        gate_abandon_unstarted_command_lifecycle \
+          "$command_lineage_token" "$unstarted_settlement_owner" || true
         last_command_infrastructure_failed=true
         [[ "$had_errexit" == 1 ]] && set -e
         return 2
       fi
       coordinator_release_deferred=1
     fi
+  fi
+  # The durable pre-lease baseline closes the grant-without-evidence crash
+  # window. Refresh it after scheduler wait and before this process creates the
+  # mapped wrapper. Otherwise an unrelated daemon that starts while queued can
+  # have a parent chain outside the old baseline and hold settlement closed.
+  if ! gate_darwin_lineage_refresh; then
+    echo "error: refusing to start a mapped command without a current Darwin process baseline." >&2
+    gate_abandon_unstarted_command_lifecycle \
+      "$command_lineage_token" "$unstarted_settlement_owner" || true
+    last_command_infrastructure_failed=true
+    [[ "$had_errexit" == 1 ]] && set -e
+    return 2
   fi
   timeout_seq=$((timeout_seq + 1))
   # mktemp guarantees a unique path even across concurrent parallel-pool
@@ -7691,6 +9288,8 @@ run_with_timeout() {
   if [[ -n "$command_drain_identity" ]]; then
     if ! gate_lock_token_is_wellformed "$command_drain_identity"; then
       echo "error: the parallel command drain identity is malformed." >&2
+      gate_abandon_unstarted_command_lifecycle \
+        "$command_lineage_token" "$unstarted_settlement_owner" || true
       last_command_infrastructure_failed=true
       [[ "$had_errexit" == 1 ]] && set -e
       return 2
@@ -7699,14 +9298,16 @@ run_with_timeout() {
       "$command_drain_identity" \
       "The mapped command did not run" \
       "The mapped command did not start." 0; then
-      if declare -F gate_coordinator_abandon_active_lease >/dev/null 2>&1; then
-        gate_coordinator_abandon_active_lease || true
-      fi
+      gate_abandon_unstarted_command_lifecycle \
+        "$command_lineage_token" "$unstarted_settlement_owner" || true
       last_command_infrastructure_failed=true
       [[ "$had_errexit" == 1 ]] && set -e
       return 2
     fi
     command_marker="$gate_run_created_marker_file"
+    if [[ -n "$deferred_lease_file" ]]; then
+      parallel_worker_command_marker="$command_marker"
+    fi
     if declare -p gate_coordinator_active_drain_marker >/dev/null 2>&1; then
       gate_coordinator_active_drain_marker="$command_marker"
     fi
@@ -7714,24 +9315,123 @@ run_with_timeout() {
     if [[ -n "$deferred_lease_file" && -n "$command_marker" ]] &&
       ! exec 18< "$command_marker"; then
       echo "error: could not retain the parallel command marker." >&2
-      if declare -F gate_coordinator_abandon_active_lease >/dev/null 2>&1; then
-        gate_coordinator_abandon_active_lease || true
-      fi
+      gate_abandon_unstarted_command_lifecycle \
+        "$command_lineage_token" "$unstarted_settlement_owner" || true
       last_command_infrastructure_failed=true
       [[ "$had_errexit" == 1 ]] && set -e
       return 2
     fi
   fi
-  active_timeout_drain_identity="${command_drain_identity:-${gate_run_id:-$gate_lock_token}}"
+  command_barrier_dir="$(mktemp -d "$scratch_dir/command-barrier.XXXXXX")" || {
+    echo "error: could not create the mapped-command launch barrier." >&2
+    gate_abandon_unstarted_command_lifecycle \
+      "$active_timeout_drain_identity" "$unstarted_settlement_owner" || true
+    last_command_infrastructure_failed=true
+    [[ "$had_errexit" == 1 ]] && set -e
+    return 2
+  }
+  /bin/chmod 700 "$command_barrier_dir" || {
+    rmdir "$command_barrier_dir" 2>/dev/null || true
+    echo "error: could not protect the mapped-command launch barrier." >&2
+    gate_abandon_unstarted_command_lifecycle \
+      "$active_timeout_drain_identity" "$unstarted_settlement_owner" || true
+    last_command_infrastructure_failed=true
+    [[ "$had_errexit" == 1 ]] && set -e
+    return 2
+  }
+  command_control_fifo="$command_barrier_dir/control"
+  command_status_file="$command_barrier_dir/status"
+  command_settlement_ack_file="$command_barrier_dir/settlement-ready"
+  if ! /usr/bin/mkfifo "$command_control_fifo" ||
+    ! : > "$command_status_file" ||
+    ! exec 20<> "$command_control_fifo"; then
+    rm -f "$command_control_fifo" "$command_status_file" \
+      "$command_settlement_ack_file"
+    rmdir "$command_barrier_dir" 2>/dev/null || true
+    echo "error: could not open the mapped-command launch barrier." >&2
+    gate_abandon_unstarted_command_lifecycle \
+      "$active_timeout_drain_identity" "$unstarted_settlement_owner" || true
+    last_command_infrastructure_failed=true
+    [[ "$had_errexit" == 1 ]] && set -e
+    return 2
+  fi
+  if [[ "$darwin_exact_active" -eq 1 ]] && is_trunk_command "$command"; then
+    trunk_guardian_pending_file="$command_barrier_dir/trunk-guardian.pending"
+    trunk_guardian_done_file="$command_barrier_dir/trunk-guardian.done"
+    trunk_guardian_signal_fifo="$command_barrier_dir/trunk-guardian.signal"
+    if ! gate_trunk_guardian_prepare_handshake \
+      "$command_barrier_dir" "$trunk_guardian_pending_file" \
+      "$trunk_guardian_done_file" ||
+      ! /usr/bin/mkfifo "$trunk_guardian_signal_fifo" ||
+      ! exec 27<> "$trunk_guardian_signal_fifo" ||
+      ! exec 26< "$trunk_guardian_signal_fifo" ||
+      ! exec 25> "$trunk_guardian_signal_fifo"; then
+      exec 27>&- || true
+      exec 26<&- || true
+      exec 25>&- || true
+      echo "error: could not create the Trunk guardian lifecycle handshake." >&2
+      exec 20>&-
+      gate_abandon_unstarted_command_lifecycle \
+        "$active_timeout_drain_identity" "$unstarted_settlement_owner" || true
+      /bin/rm -f -- "$command_control_fifo" "$command_status_file" \
+        "$command_settlement_ack_file" "$trunk_guardian_pending_file" \
+        "$trunk_guardian_done_file" "${trunk_guardian_done_file}.tmp" \
+        "$trunk_guardian_signal_fifo"
+      rmdir "$command_barrier_dir" 2>/dev/null || true
+      last_command_infrastructure_failed=true
+      [[ "$had_errexit" == 1 ]] && set -e
+      return 2
+    fi
+    exec 27>&-
+    trunk_guardian_signal_read_open=1
+    trunk_guardian_signal_write_open=1
+    trunk_guardian_signal_fd=25
+    if ! /bin/rm -f -- "$trunk_guardian_signal_fifo"; then
+      exec 25>&-
+      exec 26<&-
+      trunk_guardian_signal_write_open=0
+      trunk_guardian_signal_read_open=0
+      echo "error: could not unlink the Trunk guardian completion capability." >&2
+      exec 20>&-
+      gate_abandon_unstarted_command_lifecycle \
+        "$active_timeout_drain_identity" "$unstarted_settlement_owner" || true
+      gate_trunk_guardian_cleanup_handshake \
+        "$trunk_guardian_pending_file" "$trunk_guardian_done_file" || true
+      rm -f "$command_control_fifo" "$command_status_file" \
+        "$command_settlement_ack_file"
+      rmdir "$command_barrier_dir" 2>/dev/null || true
+      last_command_infrastructure_failed=true
+      [[ "$had_errexit" == 1 ]] && set -e
+      return 2
+    fi
+  fi
   command_started_at="$(date +%s)"
   if declare -p gate_coordinator_recovery_drain_context >/dev/null 2>&1; then
     gate_coordinator_recovery_drain_context="active-command"
+  fi
+  if is_trunk_command "$command"; then
+    if [[ "$gate_darwin_lineage_host_platform" == Darwin ]]; then
+      trunk_probe_result_file="$trunk_probe_handshake_file"
+    fi
+    printf -v executable_command 'bash %q%s' \
+      "$script_source_dir/gate/trunk-check-once.sh" \
+      "${command#./tools/trunk check --ci}"
   fi
   # The sanitized launcher executes this Bash body.
   # shellcheck disable=SC2016
   AGENTQG_RUN="$command_tag" \
     AGENTQG_REQUEST="$request_tag" \
     "${gate_sanitized_bash_launcher[@]}" -c '
+      exec 24<&- 2>/dev/null || true
+      exec 26<&-
+      # Open a read-only copy of the launch FIFO, then close the inherited
+      # read/write descriptor. If the gate dies before START, this read sees
+      # EOF and no target code runs.
+      exec 21< "$8" || exit 127
+      exec 20>&-
+      IFS= read -r gate_action <&21 || exit 127
+      [[ "$gate_action" == start ]] || exit 127
+      marker_fds=""
       if [[ -n "$3" ]]; then
         # A marker this wrapper was given but cannot hold open is a refusal,
         # not a shrug: without the descriptor, a replacement this command
@@ -7741,6 +9441,7 @@ run_with_timeout() {
           exit 127
         fi
         exec 9< "$3"
+        marker_fds=9
       fi
       if [[ -n "$4" && "$4" != "$3" ]]; then
         if [[ ! -r "$4" ]]; then
@@ -7748,6 +9449,7 @@ run_with_timeout() {
           exit 127
         fi
         exec 8< "$4"
+        marker_fds="${marker_fds:+${marker_fds},}8"
       fi
       if [[ -n "$5" && "$5" != "$3" && "$5" != "$4" ]]; then
         if [[ ! -r "$5" ]]; then
@@ -7755,7 +9457,9 @@ run_with_timeout() {
           exit 127
         fi
         exec 6< "$5"
+        marker_fds="${marker_fds:+${marker_fds},}6"
       fi
+      export AGENTQG_MARKER_FDS="$marker_fds"
       if [[ "$6" == 1 ]]; then
         exec 7>&-
       fi
@@ -7764,13 +9468,309 @@ run_with_timeout() {
         # code must never inherit a writer that can release its group anchor.
         exec 17>&-
       fi
+      if [[ -n "${10}" ]]; then
+        export AGENTQG_TRUNK_GUARDIAN_PENDING="${10}"
+        export AGENTQG_TRUNK_GUARDIAN_DONE="${11}"
+        export AGENTQG_TRUNK_CHECK_TIMEOUT_SECONDS="${12}"
+        export AGENTQG_TRUNK_GUARDIAN_SIGNAL_FD="${13}"
+      fi
       eval "$2"
-      exit $?
+      command_status=$?
+      unset AGENTQG_TRUNK_GUARDIAN_PENDING AGENTQG_TRUNK_GUARDIAN_DONE \
+        AGENTQG_TRUNK_CHECK_TIMEOUT_SECONDS AGENTQG_TRUNK_GUARDIAN_SIGNAL_FD
+      if [[ -n "${10}" ]]; then
+        exec 25>&-
+      fi
+      printf "%s\n" "$command_status" > "$9" || exit 127
+      trunk_probe_ran=0
+      while IFS= read -r gate_action <&21; do
+        case "$gate_action" in
+          probe)
+            [[ "$command_status" -ne 0 && "$trunk_probe_ran" -eq 0 &&
+              -n "${14}" ]] || exit 127
+            trunk_probe_ran=1
+            printf "%s\n" ready > "${14}" || exit 127
+            if TRUNK_LAUNCHER_QUIET=true \
+              ./tools/trunk --version 21<&- >/dev/null 2>&1; then
+              trunk_probe_status=0
+            else
+              trunk_probe_status=$?
+            fi
+            trunk_probe_ready=""
+            if ! {
+              IFS= read -r trunk_probe_ready && ! IFS= read -r _
+            } < "${14}" || [[ "$trunk_probe_ready" != ready ]]; then
+              exit 127
+            fi
+            if [[ "$trunk_probe_status" -eq 0 ||
+              "$trunk_probe_status" -gt 128 ]]; then
+              printf "%s\n" ok >> "${14}" || exit 127
+            else
+              printf "%s\n" blocked >> "${14}" || exit 127
+            fi
+            ;;
+          settle)
+            exec 21<&-
+            exit "$command_status"
+            ;;
+          *) exit 127 ;;
+        esac
+      done
+      exit 127
     ' "$command_tag" "$request_tag" \
-      "$command" "$command_marker" "$request_marker" "$coordinator_marker" \
+      "$executable_command" "$command_marker" "$request_marker" "$coordinator_marker" \
       "$gate_coordinator_stdout_reserved" \
-      "$close_parallel_worker_control_fd" &
+      "$close_parallel_worker_control_fd" "$command_control_fifo" \
+      "$command_status_file" "$trunk_guardian_pending_file" \
+      "$trunk_guardian_done_file" "$effective_command_timeout_seconds" \
+      "$trunk_guardian_signal_fd" "$trunk_probe_result_file" &
   cmd_pid=$!
+  if ! gate_darwin_lineage_bind_root "$cmd_pid" "$mapped_command_parent_pid"; then
+    echo "error: could not bind the mapped-command root to its Darwin kernel identity." >&2
+    printf '%s\n' abort >&20 2>/dev/null || true
+    exec 20>&-
+    wait "$cmd_pid" 2>/dev/null || true
+    gate_abandon_unstarted_command_lifecycle \
+      "$active_timeout_drain_identity" "$unstarted_settlement_owner" || true
+    gate_trunk_guardian_cleanup_handshake \
+      "$trunk_guardian_pending_file" "$trunk_guardian_done_file" || true
+    rm -f "$command_control_fifo" "$command_status_file" \
+      "$command_settlement_ack_file"
+    rmdir "$command_barrier_dir" 2>/dev/null || true
+    last_command_infrastructure_failed=true
+    [[ "$had_errexit" == 1 ]] && set -e
+    return 2
+  fi
+  if ! gate_darwin_exact_child_capture "$cmd_pid" "$mapped_command_parent_pid"; then
+    echo "error: could not capture the mapped-command root's Darwin kernel identity." >&2
+    printf '%s\n' abort >&20 2>/dev/null || true
+    exec 20>&-
+    wait "$cmd_pid" 2>/dev/null || true
+    gate_abandon_unstarted_command_lifecycle \
+      "$active_timeout_drain_identity" "$unstarted_settlement_owner" || true
+    gate_trunk_guardian_cleanup_handshake \
+      "$trunk_guardian_pending_file" "$trunk_guardian_done_file" || true
+    rm -f "$command_control_fifo" "$command_status_file" \
+      "$command_settlement_ack_file"
+    rmdir "$command_barrier_dir" 2>/dev/null || true
+    last_command_infrastructure_failed=true
+    [[ "$had_errexit" == 1 ]] && set -e
+    return 2
+  fi
+  cmd_exact_identity="$gate_darwin_exact_identity"
+  if ! gate_darwin_broker_preflight; then
+    echo "error: Darwin broker source changed before mapped-command dispatch." >&2
+    printf '%s\n' abort >&20 2>/dev/null || true
+    exec 20>&-
+    wait "$cmd_pid" 2>/dev/null || true
+    gate_abandon_unstarted_command_lifecycle \
+      "$active_timeout_drain_identity" "$unstarted_settlement_owner" || true
+    gate_trunk_guardian_cleanup_handshake \
+      "$trunk_guardian_pending_file" "$trunk_guardian_done_file" || true
+    rm -f "$command_control_fifo" "$command_status_file" \
+      "$command_settlement_ack_file"
+    rmdir "$command_barrier_dir" 2>/dev/null || true
+    last_command_infrastructure_failed=true
+    [[ "$had_errexit" == 1 ]] && set -e
+    return 2
+  fi
+  if [[ -n "$deferred_lease_file" ]] && {
+    ! declare -F parallel_worker_parent_is_live >/dev/null 2>&1 ||
+      ! parallel_worker_parent_is_live;
+  }; then
+    echo "error: the parallel worker parent exited before mapped-command dispatch." >&2
+    printf '%s\n' abort >&20 2>/dev/null || true
+    exec 20>&-
+    wait "$cmd_pid" 2>/dev/null || true
+    gate_abandon_unstarted_command_lifecycle \
+      "$command_lineage_token" "$unstarted_settlement_owner" || true
+    gate_trunk_guardian_cleanup_handshake \
+      "$trunk_guardian_pending_file" "$trunk_guardian_done_file" || true
+    rm -f "$command_control_fifo" "$command_status_file" \
+      "$command_settlement_ack_file"
+    rmdir "$command_barrier_dir" 2>/dev/null || true
+    last_command_infrastructure_failed=true
+    [[ "$had_errexit" == 1 ]] && set -e
+    return 2
+  fi
+  if [[ "$darwin_exact_active" -eq 1 ]]; then
+    lineage_watcher_module="$(gate_darwin_lineage_module)" ||
+      lineage_watcher_setup_rc=2
+    lineage_watcher_state_directory="${gate_darwin_lineage_state_file%/*}"
+    lineage_watcher_timeout_seconds=$((
+      effective_command_timeout_seconds +
+        gate_lock_orphan_drain_bound_seconds + 90
+    ))
+    if [[ "$gate_darwin_controller_exact_identity" != agentqg-darwin-exact-v1:pid1-*:* ||
+      -z "$lineage_watcher_state_directory" ||
+      "$lineage_watcher_timeout_seconds" -gt 86400 ]]; then
+      lineage_watcher_setup_rc=2
+    fi
+    if [[ "$lineage_watcher_setup_rc" -eq 0 ]] &&
+      gate_darwin_watcher_control_prepare; then
+      lineage_watcher_action_file="$gate_darwin_watcher_action_file"
+      lineage_watcher_armed_file="$gate_darwin_watcher_armed_file"
+      lineage_watcher_output_file="$gate_darwin_watcher_output_file"
+      lineage_watcher_stderr_file="$gate_darwin_watcher_stderr_file"
+    else
+      lineage_watcher_setup_rc=2
+    fi
+    if [[ "$lineage_watcher_setup_rc" -eq 0 ]]; then
+      lineage_watcher_barrier_dir="$(
+        mktemp -d "$scratch_dir/watcher-barrier.XXXXXX"
+      )" || lineage_watcher_setup_rc=2
+    fi
+    if [[ "$lineage_watcher_setup_rc" -eq 0 ]] && {
+      ! chmod 700 "$lineage_watcher_barrier_dir" ||
+        ! mkfifo "$lineage_watcher_barrier_dir/control";
+    }; then
+      lineage_watcher_setup_rc=2
+    fi
+    if [[ "$lineage_watcher_setup_rc" -eq 0 ]]; then
+      lineage_watcher_control_fifo="$lineage_watcher_barrier_dir/control"
+      if ! exec 22<> "$lineage_watcher_control_fifo"; then
+        lineage_watcher_setup_rc=2
+      fi
+    fi
+    if [[ "$lineage_watcher_setup_rc" -eq 0 ]]; then
+      gate_run_darwin_lineage_watcher_after_barrier \
+        "$lineage_watcher_control_fifo" "$gate_darwin_node_bin" \
+        "$lineage_watcher_module" \
+        "$gate_darwin_lineage_state_file" \
+        "$lineage_watcher_state_directory" \
+        "$gate_darwin_controller_exact_identity" \
+        "$lineage_watcher_action_file" "$lineage_watcher_armed_file" \
+        "$lineage_watcher_timeout_seconds" \
+        >"$lineage_watcher_output_file" \
+        2>"$lineage_watcher_stderr_file" &
+      lineage_watcher_pid=$!
+      if gate_darwin_exact_child_capture \
+        "$lineage_watcher_pid" "$mapped_command_parent_pid"; then
+        lineage_watcher_exact_identity="$gate_darwin_exact_identity"
+      else
+        lineage_watcher_setup_rc=2
+      fi
+    fi
+    if [[ "$lineage_watcher_setup_rc" -eq 0 ]]; then
+      if printf '%s\n' start >&22; then
+        lineage_watcher_released=1
+      else
+        lineage_watcher_setup_rc=2
+      fi
+      exec 22>&-
+    fi
+    if [[ "$lineage_watcher_setup_rc" -eq 0 ]] &&
+      gate_darwin_watcher_wait_armed \
+        "$lineage_watcher_exact_identity" "$lineage_watcher_armed_file"; then
+      lineage_watcher_armed=1
+    else
+      lineage_watcher_setup_rc=2
+    fi
+    if [[ "$lineage_watcher_setup_rc" -eq 0 &&
+      -n "$deferred_lease_file" ]] && {
+      ! declare -F parallel_worker_parent_is_live >/dev/null 2>&1 ||
+        ! parallel_worker_parent_is_live;
+    }; then
+      lineage_watcher_setup_rc=2
+    fi
+    if [[ "$lineage_watcher_setup_rc" -ne 0 ]]; then
+      echo "error: could not arm the Darwin lineage watcher before mapped-command dispatch." >&2
+      if [[ -n "$lineage_watcher_pid" ]]; then
+        if [[ "$lineage_watcher_released" -eq 0 ]]; then
+          printf '%s\n' abort >&22 2>/dev/null || true
+          exec 22>&- || true
+        elif ! gate_darwin_watcher_action_publish \
+          "$lineage_watcher_action_file" cancel; then
+          [[ -z "$lineage_watcher_exact_identity" ]] ||
+            gate_darwin_exact_identity_terminate \
+              "$lineage_watcher_exact_identity" \
+              "$lineage_watcher_pid" || true
+        fi
+        wait "$lineage_watcher_pid" 2>/dev/null || true
+        lineage_watcher_reaped=1
+      else
+        exec 22>&- || true
+      fi
+      printf '%s\n' abort >&20 2>/dev/null || true
+      exec 20>&-
+      wait "$cmd_pid" 2>/dev/null || true
+      gate_abandon_unstarted_command_lifecycle \
+        "$active_timeout_drain_identity" "$unstarted_settlement_owner" || true
+      gate_trunk_guardian_cleanup_handshake \
+        "$trunk_guardian_pending_file" "$trunk_guardian_done_file" || true
+      rm -f "$command_control_fifo" "$command_status_file" \
+        "$command_settlement_ack_file"
+      rmdir "$command_barrier_dir" 2>/dev/null || true
+      if [[ -n "$lineage_watcher_control_fifo" ]]; then
+        rm -f "$lineage_watcher_control_fifo"
+      fi
+      if [[ -n "$lineage_watcher_barrier_dir" ]]; then
+        rmdir "$lineage_watcher_barrier_dir" 2>/dev/null || true
+      fi
+      if [[ -n "$lineage_watcher_action_file" ]]; then
+        gate_darwin_watcher_control_cleanup \
+          "$lineage_watcher_action_file" || true
+      fi
+      active_timeout_records=()
+      active_timeout_exact_identities=()
+      last_command_infrastructure_failed=true
+      [[ "$had_errexit" == 1 ]] && set -e
+      return 2
+    fi
+    rm -f "$lineage_watcher_control_fifo"
+    rmdir "$lineage_watcher_barrier_dir" 2>/dev/null || true
+    cmd_start="$(gate_lock_process_runtime_start "$cmd_pid")"
+    lineage_watcher_start="$(
+      gate_lock_process_runtime_start "$lineage_watcher_pid"
+    )"
+    active_timeout_records=(
+      "${cmd_pid}|${cmd_start}"
+      "${lineage_watcher_pid}|${lineage_watcher_start}"
+    )
+    active_timeout_exact_identities=(
+      "$cmd_exact_identity"
+      "$lineage_watcher_exact_identity"
+    )
+  fi
+  if ! printf '%s\n' start >&20; then
+    if [[ "$lineage_watcher_armed" -eq 1 ]]; then
+      if ! gate_darwin_watcher_action_publish \
+        "$lineage_watcher_action_file" cancel; then
+        gate_darwin_exact_identity_terminate \
+          "$lineage_watcher_exact_identity" \
+          "$lineage_watcher_pid" || true
+      fi
+      wait "$lineage_watcher_pid" 2>/dev/null || true
+      lineage_watcher_reaped=1
+    fi
+    exec 20>&-
+    wait "$cmd_pid" 2>/dev/null || true
+    gate_abandon_unstarted_command_lifecycle \
+      "$active_timeout_drain_identity" "$unstarted_settlement_owner" || true
+    gate_trunk_guardian_cleanup_handshake \
+      "$trunk_guardian_pending_file" "$trunk_guardian_done_file" || true
+    rm -f "$command_control_fifo" "$command_status_file" \
+      "$command_settlement_ack_file"
+    rmdir "$command_barrier_dir" 2>/dev/null || true
+    if [[ -n "$lineage_watcher_action_file" ]]; then
+      gate_darwin_watcher_control_cleanup \
+        "$lineage_watcher_action_file" || true
+    fi
+    active_timeout_records=()
+    active_timeout_exact_identities=()
+    echo "error: could not release the mapped-command launch barrier." >&2
+    last_command_infrastructure_failed=true
+    [[ "$had_errexit" == 1 ]] && set -e
+    return 2
+  fi
+  last_command_launch_state=started
+  if [[ "$trunk_guardian_signal_write_open" -eq 1 ]]; then
+    exec 25>&-
+    trunk_guardian_signal_write_open=0
+  fi
+  if [[ -n "$trunk_guardian_pending_file" ]]; then
+    trunk_guardian_started_at="$(date +%s)" || trunk_guardian_started_at=""
+  fi
   # Run the watchdog via `bash -c` (which execs) rather than a `( … ) &`
   # subshell. A forked subshell inherits bash's saved copy of the caller's
   # redirected stdout — the descriptor bash stashes (close-on-exec) while
@@ -7782,6 +9782,9 @@ run_with_timeout() {
   # The sanitized launcher executes this Bash body.
   # shellcheck disable=SC2016
   "${gate_sanitized_bash_launcher[@]}" -c '
+    exec 24<&- 2>/dev/null || true
+    exec 25>&-
+    exec 26<&-
     exec 7>&-
     if [[ "$6" == 1 ]]; then
       exec 17>&-
@@ -7791,6 +9794,7 @@ run_with_timeout() {
     timeout_secs="$3"
     marker="$4"
     gate_pid="$5"
+    darwin_exact="$8"
     collect_tree() {
       local pid="$1"
       local child
@@ -7843,48 +9847,392 @@ EOF_KILL
         # running: the lock it held is already reclaimable, so whatever starts
         # next would be sharing the machine with a run that no longer exists.
         # No marker — this is not a timeout, and nobody is left to read it.
-        kill_tree "$cmd_pid"
+        if [ "$darwin_exact" != 1 ]; then
+          kill_tree "$cmd_pid"
+        fi
+        exit 0
+      fi
+      if ! kill -0 "$cmd_pid" 2>/dev/null; then
         exit 0
       fi
       waited=$(($(date +%s) - started_at))
     done
     echo timeout > "$marker"
+    # Give the live gate time to publish its scheduler-wide settlement barrier
+    # before this watchdog lets the mapped root exit. A dead gate cannot reply;
+    # its coordinator owner-loss path publishes the same barrier.
+    settlement_ack="$7"
+    barrier_deadline=$(($(date +%s) + 3))
+    while [ ! -e "$settlement_ack" ] && kill -0 "$gate_pid" 2>/dev/null &&
+      [ "$(date +%s)" -lt "$barrier_deadline" ]; do
+      sleep 0.02
+    done
     # kill_tree snapshots the whole tree BEFORE TERM: a root that exits on TERM
     # reparents a TERM-ignoring descendant away from the tree, so a post-TERM
     # re-walk would miss it. The KILL pass targets the saved list.
-    kill_tree "$cmd_pid"
+    if [ "$darwin_exact" != 1 ]; then
+      kill_tree "$cmd_pid"
+    fi
     exit 0
   ' "$command_tag" "$request_tag" \
     "$cmd_pid" "$effective_command_timeout_seconds" "$timeout_marker" "$$" \
-    "$close_parallel_worker_control_fd" >/dev/null 2>&1 &
+    "$close_parallel_worker_control_fd" "$command_settlement_ack_file" \
+    "$darwin_exact_active" \
+    >/dev/null 2>&1 &
   watchdog_pid=$!
   cmd_start="$(gate_lock_process_runtime_start "$cmd_pid")"
   watchdog_start="$(gate_lock_process_runtime_start "$watchdog_pid")"
-  active_timeout_records=(
-    "${cmd_pid}|${cmd_start}"
-    "${watchdog_pid}|${watchdog_start}"
-  )
+  if ! gate_darwin_exact_child_capture \
+    "$watchdog_pid" "$mapped_command_parent_pid"; then
+    echo "error: could not capture the timeout watchdog's Darwin kernel identity." >&2
+    lineage_bind_rc=2
+  else
+    watchdog_exact_identity="$gate_darwin_exact_identity"
+  fi
+  if [[ "$darwin_exact_active" -eq 1 ]]; then
+    active_timeout_records=(
+      "${cmd_pid}|${cmd_start}"
+      "${watchdog_pid}|${watchdog_start}"
+      "${lineage_watcher_pid}|${lineage_watcher_start}"
+    )
+    active_timeout_exact_identities=(
+      "$cmd_exact_identity"
+      "$watchdog_exact_identity"
+      "$lineage_watcher_exact_identity"
+    )
+  else
+    active_timeout_records=(
+      "${cmd_pid}|${cmd_start}"
+      "${watchdog_pid}|${watchdog_start}"
+    )
+    active_timeout_exact_identities=(
+      "$cmd_exact_identity"
+      "$watchdog_exact_identity"
+    )
+  fi
 
+  if [[ -n "$trunk_guardian_pending_file" ]]; then
+    if [[ ! "$trunk_guardian_started_at" =~ ^[1-9][0-9]*$ ]]; then
+      echo "error: Trunk guardian lifecycle start time is unavailable." >&2
+      lineage_bind_rc=2
+      trunk_guardian_handshake_rc=2
+    else
+      trunk_guardian_wait_deadline=$((
+        trunk_guardian_started_at + effective_command_timeout_seconds +
+          trunk_guardian_completion_bound_seconds
+      ))
+      if ! gate_trunk_guardian_wait_done \
+        "$trunk_guardian_pending_file" "$trunk_guardian_done_file" \
+        "$trunk_guardian_wait_deadline" "$mapped_command_parent_pid"; then
+        lineage_bind_rc=2
+        trunk_guardian_handshake_rc=2
+      fi
+    fi
+    if [[ "$trunk_guardian_signal_read_open" -eq 1 ]]; then
+      exec 26<&-
+      trunk_guardian_signal_read_open=0
+    fi
+    if [[ "$trunk_guardian_handshake_rc" -eq 0 ]]; then
+      trunk_guardian_status_deadline=$((
+        $(date +%s) + trunk_guardian_status_publish_bound_seconds
+      ))
+      while [[ ! -s "$command_status_file" && ! -s "$timeout_marker" ]]; do
+        if ! kill -0 "$cmd_pid" 2>/dev/null; then
+          break
+        fi
+        if gate_lock_process_is_confirmed_zombie "$cmd_pid" "$cmd_start"; then
+          break
+        fi
+        if [[ "$(date +%s)" -ge "$trunk_guardian_status_deadline" ]]; then
+          echo "error: mapped Trunk wrapper did not publish its status after authenticated completion." >&2
+          lineage_bind_rc=2
+          break
+        fi
+        sleep 0.02 || true
+      done
+    fi
+  else
+    while [[ ! -s "$command_status_file" && ! -s "$timeout_marker" ]]; do
+      if ! kill -0 "$cmd_pid" 2>/dev/null; then
+        break
+      fi
+      sleep 0.02 || true
+    done
+  fi
+  # A failed Trunk command is not downgraded until the launcher proves that it
+  # cannot provision its CLI. After the mapped status is durable, stop only the
+  # command watchdog and ask the still-live mapped root to run the probe. The
+  # active Darwin watcher then owns the probe and any downloader it forks.
+  if [[ "$gate_darwin_lineage_host_platform" == Darwin ]] &&
+    is_trunk_command "$command" && [[ -s "$command_status_file" ]]; then
+    pre_settlement_command_status="$(
+      cat "$command_status_file" 2>/dev/null
+    )" || pre_settlement_command_status=""
+    if [[ ! "$pre_settlement_command_status" =~ ^[0-9]+$ ||
+      "$pre_settlement_command_status" -gt 255 ]]; then
+      echo "error: mapped Trunk command returned an invalid pre-settlement status." >&2
+      lineage_bind_rc=2
+    elif [[ "$pre_settlement_command_status" -ne 0 &&
+      ! -s "$timeout_marker" && -z "$trunk_provisioning_state" ]]; then
+      # The tracked launcher must exist and be executable before a failed
+      # command can enter environment classification. Its absence is a real
+      # checkout failure and must retain the original Trunk verdict.
+      if [[ ! -x ./tools/trunk ]]; then
+        provisioning_probe_rc=1
+      elif [[ -n "$watchdog_exact_identity" ]] &&
+        gate_darwin_exact_identity_terminate \
+          "$watchdog_exact_identity" "$watchdog_pid"; then
+        wait "$watchdog_pid" 2>/dev/null || true
+        watchdog_reaped=1
+      else
+        lineage_bind_rc=2
+      fi
+      if [[ "$watchdog_reaped" -eq 1 && ! -s "$timeout_marker" ]]; then
+        if ! printf '%s\n' probe >&20; then
+          provisioning_probe_rc=2
+        else
+          trunk_probe_deadline=$(($(date +%s) + trunk_provisioning_probe_timeout_seconds))
+          while [[ "$(date +%s)" -lt "$trunk_probe_deadline" ]]; do
+            trunk_probe_result="$(
+              read_parallel_worker_result_value \
+                "$trunk_probe_result_file" trunk-probe 2>/dev/null
+            )" || trunk_probe_result=""
+            case "$trunk_probe_result" in
+              ready)
+                trunk_probe_ready_observed=1
+                ;;
+              $'ready\nok')
+                trunk_probe_ready_observed=1
+                trunk_provisioning_state=ok
+                trunk_probe_completed=1
+                break
+                ;;
+              $'ready\nblocked')
+                trunk_probe_ready_observed=1
+                trunk_provisioning_state=blocked
+                trunk_probe_completed=1
+                break
+                ;;
+              "") ;;
+            esac
+            if ! kill -0 "$cmd_pid" 2>/dev/null ||
+              gate_lock_process_is_confirmed_zombie "$cmd_pid" "$cmd_start"; then
+              trunk_probe_root_exited=1
+              break
+            fi
+            sleep 0.02 || true
+          done
+          if [[ "$trunk_probe_completed" -eq 0 &&
+            "$provisioning_probe_rc" -eq 0 ]]; then
+            # The mapped root appends its final record to the durable readiness
+            # record. Ignore a partial append while it is live. At the deadline,
+            # only `ready` proves that the probe is still in flight.
+            trunk_probe_result="$(
+              read_parallel_worker_result_value \
+                "$trunk_probe_result_file" trunk-probe 2>/dev/null
+            )" || trunk_probe_result=""
+            case "$trunk_probe_result" in
+              $'ready\nok')
+                trunk_probe_ready_observed=1
+                trunk_provisioning_state=ok
+                trunk_probe_completed=1
+                ;;
+              $'ready\nblocked')
+                trunk_probe_ready_observed=1
+                trunk_provisioning_state=blocked
+                trunk_probe_completed=1
+                ;;
+              ready)
+                trunk_probe_ready_observed=1
+                if [[ "$trunk_probe_root_exited" -eq 1 ]] ||
+                  ! kill -0 "$cmd_pid" 2>/dev/null ||
+                  gate_lock_process_is_confirmed_zombie \
+                    "$cmd_pid" "$cmd_start"; then
+                  provisioning_probe_rc=2
+                fi
+                ;;
+              *) provisioning_probe_rc=2 ;;
+            esac
+          fi
+          if [[ "$trunk_probe_completed" -eq 0 &&
+            "$provisioning_probe_rc" -eq 0 &&
+            "$trunk_probe_ready_observed" -eq 1 ]]; then
+            # An unresponsive probe leaves the original Trunk failure standing.
+            # Final settlement owns the still-live probe before lease release.
+            trunk_provisioning_state=ok
+          fi
+        fi
+      fi
+    fi
+    if [[ "$pre_settlement_command_status" -ne 0 &&
+      "$trunk_provisioning_state" == blocked ]]; then
+      last_command_trunk_provisioning_blocked=true
+    fi
+  fi
+  if declare -F gate_coordinator_begin_command_settlement >/dev/null 2>&1; then
+    if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+      gate_coordinator_is_active &&
+      [[ "${gate_coordinator_active_lifecycle_contract:-}" != "$command_lifecycle_contract" ]]; then
+      echo "error: coordinator settlement lost the mapped-command lifecycle contract." >&2
+      lineage_bind_rc=2
+    elif ! gate_coordinator_begin_command_settlement \
+      "$command" "$command_lifecycle_contract"; then
+      echo "error: coordinator could not publish the mapped-command settlement barrier." >&2
+      lineage_bind_rc=2
+    fi
+  fi
+  : > "$command_settlement_ack_file"
+  if [[ "$darwin_exact_active" -eq 1 ]]; then
+    # Keep the mapped root alive behind its settlement FIFO while the watcher
+    # takes the final census. It can then see and own a last descendant fork
+    # before it signals descendants deepest-first and the root last.
+    forced_exact_settlement=1
+    if gate_darwin_watcher_action_publish \
+      "$lineage_watcher_action_file" settle; then
+      wait "$lineage_watcher_pid" 2>/dev/null
+      lineage_watcher_wait_rc=$?
+      lineage_watcher_reaped=1
+      if [[ "$lineage_watcher_wait_rc" -eq 0 ]]; then
+        if IFS= read -r lineage_watcher_result \
+          <"$lineage_watcher_output_file"; then
+          lineage_watcher_result_bytes="$(
+            LC_ALL=C wc -c < "$lineage_watcher_output_file" |
+              tr -d '[:space:]'
+          )"
+        else
+          lineage_watcher_result=""
+          lineage_watcher_result_bytes=""
+        fi
+      fi
+    fi
+    if [[ "$lineage_watcher_wait_rc" -ne 0 ||
+      "$lineage_watcher_result" != settled ||
+      "$lineage_watcher_result_bytes" != 8 ]]; then
+      if [[ "$lineage_watcher_reaped" -eq 0 ]]; then
+        if gate_darwin_exact_identity_terminate \
+          "$lineage_watcher_exact_identity" "$lineage_watcher_pid"; then
+          wait "$lineage_watcher_pid" 2>/dev/null || true
+          lineage_watcher_reaped=1
+        else
+          lineage_bind_rc=2
+        fi
+      fi
+      # The exact watcher is gone before this fallback becomes the settlement
+      # writer. Revision-CAS recovery preserves any census it published first.
+      if [[ "$lineage_watcher_reaped" -eq 1 ]] &&
+        ! gate_darwin_lineage_settle \
+          "$active_timeout_drain_identity" 1; then
+        lineage_bind_rc=2
+      fi
+    fi
+    if [[ "$lineage_bind_rc" -ne 0 &&
+      -s "$lineage_watcher_stderr_file" ]]; then
+      cat "$lineage_watcher_stderr_file" >&2 || true
+    fi
+  fi
+  if [[ "$darwin_exact_active" -eq 0 &&
+    "$lineage_bind_rc" -eq 0 && "$forced_exact_settlement" -eq 0 ]]; then
+    printf '%s\n' settle >&20 2>/dev/null || lineage_bind_rc=2
+  else
+    printf '%s\n' abort >&20 2>/dev/null || true
+  fi
+  exec 20>&-
+  if [[ "$darwin_exact_active" -eq 1 &&
+    "$forced_exact_settlement" -eq 1 &&
+    "$lineage_bind_rc" -ne 0 ]]; then
+    # Exact lineage evidence failed while the mapped root can still be live.
+    # Keep the durable scheduler barrier and return without a blocking wait or
+    # a reusable PID signal. A successor can retry from the retained state.
+    if [[ -n "$watchdog_exact_identity" ]] &&
+      gate_darwin_exact_identity_terminate \
+        "$watchdog_exact_identity" "$watchdog_pid"; then
+      wait "$watchdog_pid" 2>/dev/null || true
+    fi
+    gate_trunk_guardian_cleanup_handshake \
+      "$trunk_guardian_pending_file" "$trunk_guardian_done_file" || true
+    rm -f "$command_control_fifo" "$command_status_file" \
+      "$command_settlement_ack_file"
+    rmdir "$command_barrier_dir" 2>/dev/null || true
+    if [[ "$lineage_watcher_reaped" -eq 1 &&
+      -n "$lineage_watcher_action_file" ]]; then
+      gate_darwin_watcher_control_cleanup \
+        "$lineage_watcher_action_file" || true
+    fi
+    last_command_infrastructure_failed=true
+    [[ "$had_errexit" == 1 ]] && set -e
+    return 2
+  fi
   wait "$cmd_pid"
   rc=$?
+  if [[ -s "$command_status_file" ]]; then
+    command_reported_status="$(cat "$command_status_file" 2>/dev/null)" ||
+      command_reported_status=""
+    if [[ ! "$command_reported_status" =~ ^[0-9]+$ ||
+      "$command_reported_status" -gt 255 ]]; then
+      echo "error: mapped command returned an invalid barrier status." >&2
+      lineage_bind_rc=2
+    elif [[ -n "$pre_settlement_command_status" &&
+      "$command_reported_status" != "$pre_settlement_command_status" ]]; then
+      echo "error: mapped Trunk command status changed during settlement." >&2
+      lineage_bind_rc=2
+    elif [[ "$lineage_bind_rc" -eq 0 &&
+      "$forced_exact_settlement" -eq 0 &&
+      "$rc" -ne "$command_reported_status" ]]; then
+      echo "error: mapped-command wrapper status changed after settlement." >&2
+      lineage_bind_rc=2
+    elif [[ "$lineage_bind_rc" -eq 0 &&
+      "$darwin_exact_active" -eq 1 &&
+      "$forced_exact_settlement" -eq 1 ]]; then
+      # The watcher can terminate the wrapper after its authoritative status is
+      # durable. Preserve that command result instead of the wrapper signal.
+      rc="$command_reported_status"
+    fi
+  elif [[ ! -s "$timeout_marker" ]]; then
+    echo "error: mapped-command root exited before it published a completion status." >&2
+    lineage_bind_rc=2
+  fi
+  gate_trunk_guardian_cleanup_handshake \
+    "$trunk_guardian_pending_file" "$trunk_guardian_done_file" || true
+  rm -f "$command_control_fifo" "$command_status_file" \
+    "$command_settlement_ack_file"
+  rmdir "$command_barrier_dir" 2>/dev/null || true
 
-  if [[ -s "$timeout_marker" ]]; then
+  if [[ -s "$timeout_marker" && "$watchdog_reaped" -eq 0 ]]; then
     # A timeout fired: the watchdog is mid-escalation. Let it finish its KILL
     # pass (bounded by the 3s grace) — killing it here would strand a
     # TERM-ignoring descendant whose root already exited on TERM.
     wait "$watchdog_pid" 2>/dev/null
-  else
+  elif [[ "$watchdog_reaped" -eq 0 ]]; then
     # Command settled first: tear the watchdog and its pending sleep down so
     # nothing leaks on normal completion.
-    kill_process_tree "$watchdog_pid" TERM
-    wait "$watchdog_pid" 2>/dev/null
+    if [[ "$gate_darwin_lineage_host_platform" == Darwin ]]; then
+      if [[ -n "$watchdog_exact_identity" ]] &&
+        gate_darwin_exact_identity_terminate \
+          "$watchdog_exact_identity" "$watchdog_pid"; then
+        wait "$watchdog_pid" 2>/dev/null
+      else
+        lineage_bind_rc=2
+      fi
+    else
+      kill_process_tree "$watchdog_pid" TERM
+      wait "$watchdog_pid" 2>/dev/null
+    fi
   fi
-  active_timeout_records=()
-  # A failed Trunk command is not downgraded until the launcher proves that it
-  # cannot provision its CLI. Treat that probe as part of the same mapped
-  # command: it inherits the command's tags and marker handles, and the exact
-  # descendant drain below runs before the scheduler lease is released.
-  if [[ "$rc" -ne 0 && ! -s "$timeout_marker" ]] &&
+  if [[ "$lineage_bind_rc" -eq 0 ]]; then
+    active_timeout_records=()
+    active_timeout_exact_identities=()
+  fi
+  if [[ "$lineage_watcher_reaped" -eq 1 &&
+    -n "$lineage_watcher_action_file" ]] &&
+    ! gate_darwin_watcher_control_cleanup \
+      "$lineage_watcher_action_file"; then
+    echo "error: could not retire the Darwin lineage watcher control files." >&2
+    lineage_bind_rc=2
+  fi
+  # Portable hosts retain the existing parent-owned probe. Their tree
+  # settlement can bound and reap that probe without Darwin kernel identities.
+  if [[ "$gate_darwin_lineage_host_platform" != Darwin &&
+    "$rc" -ne 0 && ! -s "$timeout_marker" ]] &&
     is_trunk_command "$command"; then
     if trunk_provisioning_is_blocked \
       "$command_tag" "$request_tag" "$command_marker" "$request_marker" \
@@ -7903,11 +10251,13 @@ EOF_KILL
     drain_completed_sequential_command || drain_rc=$?
     if [[ "$drain_rc" -eq 0 ]]; then
       active_timeout_drain_identity=""
+      active_timeout_lifecycle_contract=""
     fi
   else
     # The parallel parent owns the registered identity and lease settlement.
     # Do not let this worker's EXIT trap race that parent drain.
     active_timeout_drain_identity=""
+    active_timeout_lifecycle_contract=""
   fi
   command_finished_at="$(date +%s)"
   last_command_execution_seconds=$((command_finished_at - command_started_at))
@@ -7920,6 +10270,13 @@ EOF_KILL
     rm -f "$timeout_marker"
     [[ "$had_errexit" == 1 ]] && set -e
     return "$drain_rc"
+  fi
+
+  if [[ "$lineage_bind_rc" -ne 0 ]]; then
+    last_command_infrastructure_failed=true
+    rm -f "$timeout_marker"
+    [[ "$had_errexit" == 1 ]] && set -e
+    return "$lineage_bind_rc"
   fi
 
   if [[ "$provisioning_probe_rc" -eq 2 ]]; then
@@ -7942,9 +10299,27 @@ EOF_KILL
 
   if [[ "$coordinator_release_deferred" -eq 0 ]] &&
     declare -F gate_coordinator_after_command >/dev/null 2>&1; then
-    gate_coordinator_after_command "$command"
-    release_rc=$?
+    if [[ "$darwin_exact_active" -eq 1 ]] &&
+      declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+      gate_coordinator_is_active; then
+      coordinator_lineage_release_required=1
+    fi
+    if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+      gate_coordinator_is_active &&
+      [[ "${gate_coordinator_active_lifecycle_contract:-}" != "$command_lifecycle_contract" ]]; then
+      echo "error: coordinator release lost the mapped-command lifecycle contract." >&2
+      release_rc=2
+    else
+      gate_coordinator_after_command \
+        "$command" "$command_lineage_token" "$command_lifecycle_contract"
+      release_rc=$?
+    fi
     if [[ "$release_rc" -ne 0 ]]; then
+      last_command_infrastructure_failed=true
+      rc=2
+    elif [[ "$coordinator_lineage_release_required" -eq 1 ]] &&
+      ! gate_darwin_lineage_discard_settled "$command_lineage_token"; then
+      echo "error: could not retire the discharged Darwin lineage state." >&2
       last_command_infrastructure_failed=true
       rc=2
     fi
@@ -7966,7 +10341,7 @@ command_stamp_key() {
 # so both must ALWAYS re-execute — never reused, never recorded (issue #1410).
 is_stamp_exempt_command() {
   case "$1" in
-    "./tools/trunk check"*)
+    "./tools/trunk check --ci"*)
       return 0
       ;;
     "pnpm agent:quality-gate:test"|"bash scripts/agent-quality-gate.test.sh")
@@ -8181,6 +10556,7 @@ run_mapped_command_to_files() {
   local trunk_provisioning_file="$7"
   local lease_file="$8"
   local command_drain_identity="$9"
+  local launch_state_file="${10}"
   local elapsed
   local exit_code
 
@@ -8197,6 +10573,7 @@ run_mapped_command_to_files() {
   printf '%s\n' "$last_command_infrastructure_failed" > "$infrastructure_file"
   printf '%s\n' "$last_command_trunk_provisioning_blocked" \
     > "$trunk_provisioning_file"
+  printf '%s\n' "$last_command_launch_state" > "$launch_state_file"
 }
 
 fail_command_scheduler_infrastructure() {
@@ -8219,6 +10596,55 @@ fail_command_scheduler_infrastructure() {
   return 2
 }
 
+write_parallel_worker_lease_record() {
+  local file="$1"
+  local lease_id="${2:-}"
+  local drain_identity="${3:-}"
+  local lifecycle_contract="${4:-}"
+  [[ -f "$file" && ! -L "$file" && -O "$file" ]] || return 1
+  [[ "$lease_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || return 1
+  gate_lock_token_is_wellformed "$drain_identity" || return 1
+  gate_lifecycle_contract_is_supported "$lifecycle_contract" || return 1
+  printf 'agentqg-parallel-lease-v1|%s|%s|%s\n' \
+    "$lease_id" "$drain_identity" "$lifecycle_contract" > "$file"
+}
+
+parallel_worker_lease_id=""
+parallel_worker_lease_drain_identity=""
+parallel_worker_lease_lifecycle_contract=""
+
+read_parallel_worker_lease_record() {
+  local file="$1"
+  local expected_drain_identity="${2:-}"
+  local expected_lifecycle_contract="${3:-}"
+  local value byte_count expected_bytes
+  local version lease_id drain_identity lifecycle_contract extra
+  parallel_worker_lease_id=""
+  parallel_worker_lease_drain_identity=""
+  parallel_worker_lease_lifecycle_contract=""
+  [[ -f "$file" && ! -L "$file" && -r "$file" && -O "$file" ]] || return 1
+  gate_lock_token_is_wellformed "$expected_drain_identity" || return 1
+  gate_lifecycle_contract_is_supported "$expected_lifecycle_contract" || return 1
+  value="$(cat "$file" 2>/dev/null)" || return 1
+  byte_count="$(LC_ALL=C wc -c < "$file" 2>/dev/null | tr -d '[:space:]')" ||
+    return 1
+  [[ "$byte_count" =~ ^[0-9]+$ ]] || return 1
+  expected_bytes=$((${#value} + 1))
+  [[ "$byte_count" -eq "$expected_bytes" ]] || return 1
+  IFS='|' read -r version lease_id drain_identity lifecycle_contract extra <<< "$value"
+  [[ "$value" == "agentqg-parallel-lease-v1|${lease_id}|${drain_identity}|${lifecycle_contract}" ]] ||
+    return 1
+  [[ "$version" == agentqg-parallel-lease-v1 && -z "$extra" ]] || return 1
+  [[ "$lease_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || return 1
+  gate_lock_token_is_wellformed "$drain_identity" || return 1
+  gate_lifecycle_contract_is_supported "$lifecycle_contract" || return 1
+  [[ "$drain_identity" == "$expected_drain_identity" ]] || return 1
+  [[ "$lifecycle_contract" == "$expected_lifecycle_contract" ]] || return 1
+  parallel_worker_lease_id="$lease_id"
+  parallel_worker_lease_drain_identity="$drain_identity"
+  parallel_worker_lease_lifecycle_contract="$lifecycle_contract"
+}
+
 read_parallel_worker_result_value() {
   local file="$1"
   local field_type="$2"
@@ -8236,11 +10662,15 @@ read_parallel_worker_result_value() {
     boolean)
       [[ "$value" == true || "$value" == false ]] || return 1
       ;;
-    lease)
-      [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || return 1
+    launch-state)
+      [[ "$value" == started || "$value" == unstarted ]] || return 1
       ;;
     ready)
       [[ "$value" == ready ]] || return 1
+      ;;
+    trunk-probe)
+      [[ "$value" == ready || "$value" == $'ready\nok' ||
+        "$value" == $'ready\nblocked' ]] || return 1
       ;;
     *) return 1 ;;
   esac
@@ -8269,15 +10699,25 @@ read_parallel_worker_result_value() {
 release_parallel_worker_lease() {
   local command="$1"
   local lease_file="$2"
+  local drain_identity="${3:-}"
+  local lifecycle_contract="${4:-}"
   local lease_id
+  gate_lock_token_is_wellformed "$drain_identity" || return 2
+  gate_lifecycle_contract_is_supported "$lifecycle_contract" || return 2
   if ! declare -F gate_coordinator_is_active >/dev/null 2>&1 ||
     ! gate_coordinator_is_active; then
     [[ ! -s "$lease_file" ]] || return 2
     return 0
   fi
   [[ -z "${gate_coordinator_active_lease_id:-}" ]] || return 2
-  lease_id="$(read_parallel_worker_result_value "$lease_file" lease)" || return 2
+  [[ -z "${gate_coordinator_active_drain_identity:-}" ]] || return 2
+  [[ -z "${gate_coordinator_active_lifecycle_contract:-}" ]] || return 2
+  read_parallel_worker_lease_record \
+    "$lease_file" "$drain_identity" "$lifecycle_contract" || return 2
+  lease_id="$parallel_worker_lease_id"
   gate_coordinator_active_lease_id="$lease_id"
+  gate_coordinator_active_drain_identity="$parallel_worker_lease_drain_identity"
+  gate_coordinator_active_lifecycle_contract="$parallel_worker_lease_lifecycle_contract"
   parallel_release_attempt=$((parallel_release_attempt + 1))
   if [[ -n "$parallel_release_failure_at" &&
     "$parallel_release_attempt" -eq "$parallel_release_failure_at" ]]; then
@@ -8285,7 +10725,48 @@ release_parallel_worker_lease() {
     echo "error: injected parallel coordinator lease-release failure." >&2
     return 2
   fi
-  gate_coordinator_after_command "$command"
+  gate_coordinator_after_command \
+    "$command" "$drain_identity" "$lifecycle_contract"
+}
+
+abandon_parallel_worker_lease() {
+  local lease_file="$1"
+  local drain_identity="${2:-}"
+  local lifecycle_contract="${3:-}"
+  gate_lock_token_is_wellformed "$drain_identity" || return 2
+  gate_lifecycle_contract_is_supported "$lifecycle_contract" || return 2
+  declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+    gate_coordinator_is_active || return 2
+  [[ -z "${gate_coordinator_active_lease_id:-}" ]] || return 2
+  [[ -z "${gate_coordinator_active_drain_identity:-}" ]] || return 2
+  [[ -z "${gate_coordinator_active_lifecycle_contract:-}" ]] || return 2
+  read_parallel_worker_lease_record \
+    "$lease_file" "$drain_identity" "$lifecycle_contract" || return 2
+  gate_coordinator_active_lease_id="$parallel_worker_lease_id"
+  gate_coordinator_active_drain_identity="$parallel_worker_lease_drain_identity"
+  gate_coordinator_active_lifecycle_contract="$parallel_worker_lease_lifecycle_contract"
+  gate_coordinator_abandon_active_lease
+}
+
+finish_unstarted_parallel_worker_lifecycle() {
+  local lease_file="$1"
+  local drain_identity="${2:-}"
+  local lifecycle_contract="${3:-}"
+  if ! declare -F gate_coordinator_is_active >/dev/null 2>&1 ||
+    ! gate_coordinator_is_active; then
+    # Without a coordinator, drain_completed_command_identity already retired
+    # the settled Darwin proof before this typed result was read.
+    return 0
+  fi
+  abandon_parallel_worker_lease \
+    "$lease_file" "$drain_identity" "$lifecycle_contract" || return 2
+  if [[ "$lifecycle_contract" == darwin-coherent-lineage-v2 ]]; then
+    if ! gate_darwin_lineage_state_exists "$drain_identity" ||
+      ! gate_darwin_lineage_discard_settled "$drain_identity"; then
+      echo "error: the abandoned unstarted lease lost its retained Darwin settlement proof." >&2
+      return 2
+    fi
+  fi
 }
 
 fail_parallel_worker_infrastructure() {
@@ -8453,28 +10934,35 @@ unregister_active_parallel_worker() {
   local target_pgid="$1"
   local target_identity="$2"
   local target_start="$3"
+  local target_lifecycle_contract="${4:-}"
   local index found=0
   local -a kept_pgids=()
   local -a kept_identities=()
   local -a kept_starts=()
+  local -a kept_lifecycle_contracts=()
+  gate_lifecycle_contract_is_supported "$target_lifecycle_contract" || return 2
   [[ "${#active_worker_pgids[@]}" -eq "${#active_worker_drain_identities[@]}" &&
-    "${#active_worker_pgids[@]}" -eq "${#active_worker_start_identities[@]}" ]] ||
+    "${#active_worker_pgids[@]}" -eq "${#active_worker_start_identities[@]}" &&
+    "${#active_worker_pgids[@]}" -eq "${#active_worker_lifecycle_contracts[@]}" ]] ||
     return 2
   for index in "${!active_worker_pgids[@]}"; do
     if [[ "${active_worker_pgids[$index]}" == "$target_pgid" &&
       "${active_worker_drain_identities[$index]}" == "$target_identity" &&
-      "${active_worker_start_identities[$index]}" == "$target_start" ]]; then
+      "${active_worker_start_identities[$index]}" == "$target_start" &&
+      "${active_worker_lifecycle_contracts[$index]}" == "$target_lifecycle_contract" ]]; then
       found=1
       continue
     fi
     kept_pgids+=("${active_worker_pgids[$index]}")
     kept_identities+=("${active_worker_drain_identities[$index]}")
     kept_starts+=("${active_worker_start_identities[$index]}")
+    kept_lifecycle_contracts+=("${active_worker_lifecycle_contracts[$index]}")
   done
   [[ "$found" -eq 1 ]] || return 2
   active_worker_pgids=("${kept_pgids[@]+"${kept_pgids[@]}"}")
   active_worker_drain_identities=("${kept_identities[@]+"${kept_identities[@]}"}")
   active_worker_start_identities=("${kept_starts[@]+"${kept_starts[@]}"}")
+  active_worker_lifecycle_contracts=("${kept_lifecycle_contracts[@]+"${kept_lifecycle_contracts[@]}"}")
 }
 
 run_mapped_entries_parallel() {
@@ -8494,10 +10982,12 @@ run_mapped_entries_parallel() {
   local active_infrastructure_files=()
   local active_trunk_provisioning_files=()
   local active_lease_files=()
+  local active_launch_state_files=()
   local active_ready_files=()
   local active_wait_files=()
   local active_drain_identities=()
   local active_start_identities=()
+  local active_lifecycle_contracts=()
   local next_active_pids=()
   local next_active_commands=()
   local next_active_output_files=()
@@ -8507,10 +10997,12 @@ run_mapped_entries_parallel() {
   local next_active_infrastructure_files=()
   local next_active_trunk_provisioning_files=()
   local next_active_lease_files=()
+  local next_active_launch_state_files=()
   local next_active_ready_files=()
   local next_active_wait_files=()
   local next_active_drain_identities=()
   local next_active_start_identities=()
+  local next_active_lifecycle_contracts=()
   local running_pids=()
   local entry
   local command
@@ -8521,6 +11013,7 @@ run_mapped_entries_parallel() {
   local infrastructure_file
   local trunk_provisioning_file
   local lease_file
+  local launch_state_file
   local ready_file
   local ready_staging_file
   local wait_file
@@ -8528,10 +11021,15 @@ run_mapped_entries_parallel() {
   local coordinator_marker_open
   local drain_identity
   local worker_start
+  local worker_lifecycle_contract
   local worker_pgid
   local worker_parent_pid
   local worker_parent_start
   local worker_has_recovery_owner
+  local worker_recovery_owner_requires_lease_record
+  local worker_coordinator_release_required
+  local worker_exact_identity
+  local worker_host_status
   local worker_identity_attempt
   local pid
   local i
@@ -8540,6 +11038,7 @@ run_mapped_entries_parallel() {
   local timed_out
   local infrastructure_failed
   local trunk_provisioning_blocked
+  local launch_state
   local worker_ready
   local phase_start_ts last_heartbeat_ts last_coordinator_recovery_ts now_ts hb_cmd
   local heartbeat_interval=20
@@ -8575,6 +11074,28 @@ run_mapped_entries_parallel() {
   last_coordinator_recovery_ts="$phase_start_ts"
 
   while [[ "$completed" -lt "$total" ]]; do
+    if ! [[ "${#active_pids[@]}" -eq "${#active_drain_identities[@]}" &&
+      "${#active_pids[@]}" -eq "${#active_start_identities[@]}" &&
+      "${#active_pids[@]}" -eq "${#active_lifecycle_contracts[@]}" &&
+      "${#active_pids[@]}" -eq "${#active_commands[@]}" &&
+      "${#active_pids[@]}" -eq "${#active_output_files[@]}" &&
+      "${#active_pids[@]}" -eq "${#active_status_files[@]}" &&
+      "${#active_pids[@]}" -eq "${#active_elapsed_files[@]}" &&
+      "${#active_pids[@]}" -eq "${#active_timeout_files[@]}" &&
+      "${#active_pids[@]}" -eq "${#active_infrastructure_files[@]}" &&
+      "${#active_pids[@]}" -eq "${#active_trunk_provisioning_files[@]}" &&
+      "${#active_pids[@]}" -eq "${#active_lease_files[@]}" &&
+      "${#active_pids[@]}" -eq "${#active_launch_state_files[@]}" &&
+      "${#active_pids[@]}" -eq "${#active_ready_files[@]}" &&
+      "${#active_pids[@]}" -eq "${#active_wait_files[@]}" &&
+      "${#active_pids[@]}" -eq "${#active_worker_pgids[@]}" &&
+      "${#active_pids[@]}" -eq "${#active_worker_drain_identities[@]}" &&
+      "${#active_pids[@]}" -eq "${#active_worker_start_identities[@]}" &&
+      "${#active_pids[@]}" -eq "${#active_worker_lifecycle_contracts[@]}" ]]; then
+      echo "error: parallel worker lifecycle registry is inconsistent." >&2
+      fail_command_scheduler_infrastructure \
+        "parallel worker settlement" || return $?
+    fi
     running_pids=()
     while IFS= read -r pid; do
       [[ -n "$pid" ]] && running_pids+=("$pid")
@@ -8588,10 +11109,12 @@ run_mapped_entries_parallel() {
     next_active_infrastructure_files=()
     next_active_trunk_provisioning_files=()
     next_active_lease_files=()
+    next_active_launch_state_files=()
     next_active_ready_files=()
     next_active_wait_files=()
     next_active_drain_identities=()
     next_active_start_identities=()
+    next_active_lifecycle_contracts=()
 
     for i in "${!active_pids[@]}"; do
       pid="${active_pids[$i]}"
@@ -8600,27 +11123,39 @@ run_mapped_entries_parallel() {
       if read_parallel_worker_result_value "$ready_file" ready >/dev/null 2>&1; then
         worker_ready=1
       fi
-      if [[ "$worker_ready" -eq 0 && ! -s "$ready_file" ]] &&
-        list_contains_word "$pid" "${running_pids[@]+"${running_pids[@]}"}"; then
-        next_active_pids+=("$pid")
-        next_active_commands+=("${active_commands[$i]}")
-        next_active_output_files+=("${active_output_files[$i]}")
-        next_active_status_files+=("${active_status_files[$i]}")
-        next_active_elapsed_files+=("${active_elapsed_files[$i]}")
-        next_active_timeout_files+=("${active_timeout_files[$i]}")
-        next_active_infrastructure_files+=("${active_infrastructure_files[$i]}")
-        next_active_trunk_provisioning_files+=("${active_trunk_provisioning_files[$i]}")
-        next_active_lease_files+=("${active_lease_files[$i]}")
-        next_active_ready_files+=("$ready_file")
-        next_active_wait_files+=("${active_wait_files[$i]}")
-        next_active_drain_identities+=("${active_drain_identities[$i]}")
-        next_active_start_identities+=("${active_start_identities[$i]}")
-        continue
+      if [[ "$worker_ready" -eq 0 ]]; then
+        if [[ ! -s "$ready_file" ]] &&
+          list_contains_word "$pid" "${running_pids[@]+"${running_pids[@]}"}"; then
+          next_active_pids+=("$pid")
+          next_active_commands+=("${active_commands[$i]}")
+          next_active_output_files+=("${active_output_files[$i]}")
+          next_active_status_files+=("${active_status_files[$i]}")
+          next_active_elapsed_files+=("${active_elapsed_files[$i]}")
+          next_active_timeout_files+=("${active_timeout_files[$i]}")
+          next_active_infrastructure_files+=("${active_infrastructure_files[$i]}")
+          next_active_trunk_provisioning_files+=("${active_trunk_provisioning_files[$i]}")
+          next_active_lease_files+=("${active_lease_files[$i]}")
+          next_active_launch_state_files+=("${active_launch_state_files[$i]}")
+          next_active_ready_files+=("$ready_file")
+          next_active_wait_files+=("${active_wait_files[$i]}")
+          next_active_drain_identities+=("${active_drain_identities[$i]}")
+          next_active_start_identities+=("${active_start_identities[$i]}")
+          next_active_lifecycle_contracts+=("${active_lifecycle_contracts[$i]}")
+          continue
+        fi
+        command="${active_commands[$i]}"
+        fail_parallel_worker_infrastructure "$command" readiness || return $?
       fi
 
       command="${active_commands[$i]}"
       drain_identity="${active_drain_identities[$i]}"
       worker_start="${active_start_identities[$i]}"
+      worker_lifecycle_contract="${active_lifecycle_contracts[$i]:-}"
+      if ! gate_lifecycle_contract_is_supported "$worker_lifecycle_contract"; then
+        finish_worker_settlement
+        fail_parallel_worker_infrastructure \
+          "$command" "lifecycle contract registry" || return $?
+      fi
       output_file="${active_output_files[$i]}"
       status_file="${active_status_files[$i]}"
       elapsed_file="${active_elapsed_files[$i]}"
@@ -8628,16 +11163,21 @@ run_mapped_entries_parallel() {
       infrastructure_file="${active_infrastructure_files[$i]}"
       trunk_provisioning_file="${active_trunk_provisioning_files[$i]}"
       lease_file="${active_lease_files[$i]}"
+      launch_state_file="${active_launch_state_files[$i]}"
       wait_file="${active_wait_files[$i]}"
       worker_settlement_in_progress=1
       # Capture and drain the exact command identity before signalling the
       # worker or its descendants. A detached child can leave the worker group.
       # The drain retains durable evidence for every process while signals run.
       if ! drain_completed_parallel_command \
-        "$drain_identity" "$pid" "$worker_start"; then
+        "$drain_identity" "$pid" "$worker_start" \
+        "$worker_lifecycle_contract"; then
         finish_worker_settlement
+        [[ ! -f "$output_file" ]] ||
+          filter_expected_output < "$output_file" >&2
         rm -f "$output_file" "$status_file" "$elapsed_file" "$timeout_file" \
           "$infrastructure_file" "$trunk_provisioning_file" "$lease_file" \
+          "$launch_state_file" \
           "$ready_file" \
           "${ready_file}.publishing" "$wait_file"
         fail_command_scheduler_infrastructure "$command" || return $?
@@ -8646,7 +11186,8 @@ run_mapped_entries_parallel() {
       # captures every same-group member. Reap it only after the drain is empty.
       wait "$pid" 2>/dev/null || true
       if ! unregister_active_parallel_worker \
-        "$pid" "$drain_identity" "$worker_start"; then
+        "$pid" "$drain_identity" "$worker_start" \
+        "$worker_lifecycle_contract"; then
         finish_worker_settlement
         fail_parallel_worker_infrastructure "$command" "drain registry" || return $?
       fi
@@ -8670,10 +11211,21 @@ run_mapped_entries_parallel() {
         fail_parallel_worker_infrastructure "$command" \
           "Trunk provisioning classification" || return $?
       fi
+      if ! launch_state="$(read_parallel_worker_result_value "$launch_state_file" launch-state)"; then
+        fail_parallel_worker_infrastructure "$command" \
+          "launch state" || return $?
+      fi
 
       if [[ "$infrastructure_failed" == true ]]; then
+        if [[ "$launch_state" == unstarted ]] &&
+          ! finish_unstarted_parallel_worker_lifecycle \
+            "$lease_file" "$drain_identity" "$worker_lifecycle_contract"; then
+          echo "error: the parallel parent could not discharge the exact unstarted command lifecycle." >&2
+        fi
+        filter_expected_output < "$output_file" >&2
         rm -f "$output_file" "$status_file" "$elapsed_file" "$timeout_file" \
           "$infrastructure_file" "$trunk_provisioning_file" "$lease_file" \
+          "$launch_state_file" \
           "$ready_file" \
           "${ready_file}.publishing" "$wait_file"
         fail_command_scheduler_infrastructure "$command" || return $?
@@ -8681,9 +11233,29 @@ run_mapped_entries_parallel() {
       if [[ "$trunk_provisioning_blocked" == true ]]; then
         trunk_provisioning_state=blocked
       fi
-      if ! release_parallel_worker_lease "$command" "$lease_file"; then
+      worker_coordinator_release_required=0
+      if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+        gate_coordinator_is_active; then
+        worker_coordinator_release_required=1
+      fi
+      if ! release_parallel_worker_lease \
+        "$command" "$lease_file" "$drain_identity" \
+        "$worker_lifecycle_contract"; then
         rm -f "$output_file" "$status_file" "$elapsed_file" "$timeout_file" \
           "$infrastructure_file" "$trunk_provisioning_file" "$lease_file" \
+          "$launch_state_file" \
+          "$ready_file" \
+          "${ready_file}.publishing" "$wait_file"
+        fail_command_scheduler_infrastructure "$command" || return $?
+      fi
+      if [[ "$worker_coordinator_release_required" -eq 1 &&
+        "$worker_lifecycle_contract" == "darwin-coherent-lineage-v2" ]] && {
+        ! gate_darwin_lineage_state_exists "$drain_identity" ||
+          ! gate_darwin_lineage_discard_settled "$drain_identity"
+      }; then
+        rm -f "$output_file" "$status_file" "$elapsed_file" "$timeout_file" \
+          "$infrastructure_file" "$trunk_provisioning_file" "$lease_file" \
+          "$launch_state_file" \
           "$ready_file" \
           "${ready_file}.publishing" "$wait_file"
         fail_command_scheduler_infrastructure "$command" || return $?
@@ -8715,6 +11287,7 @@ run_mapped_entries_parallel() {
 
       rm -f "$output_file" "$status_file" "$elapsed_file" "$timeout_file" \
         "$infrastructure_file" "$trunk_provisioning_file" "$lease_file" \
+        "$launch_state_file" \
         "$ready_file" \
         "${ready_file}.publishing" "$wait_file"
       completed=$((completed + 1))
@@ -8734,12 +11307,15 @@ run_mapped_entries_parallel() {
     active_infrastructure_files=("${next_active_infrastructure_files[@]+"${next_active_infrastructure_files[@]}"}")
     active_trunk_provisioning_files=("${next_active_trunk_provisioning_files[@]+"${next_active_trunk_provisioning_files[@]}"}")
     active_lease_files=("${next_active_lease_files[@]+"${next_active_lease_files[@]}"}")
+    active_launch_state_files=("${next_active_launch_state_files[@]+"${next_active_launch_state_files[@]}"}")
     active_ready_files=("${next_active_ready_files[@]+"${next_active_ready_files[@]}"}")
     active_wait_files=("${next_active_wait_files[@]+"${next_active_wait_files[@]}"}")
     active_drain_identities=("${next_active_drain_identities[@]+"${next_active_drain_identities[@]}"}")
     active_start_identities=("${next_active_start_identities[@]+"${next_active_start_identities[@]}"}")
+    active_lifecycle_contracts=("${next_active_lifecycle_contracts[@]+"${next_active_lifecycle_contracts[@]}"}")
     active_worker_drain_identities=("${next_active_drain_identities[@]+"${next_active_drain_identities[@]}"}")
     active_worker_start_identities=("${next_active_start_identities[@]+"${next_active_start_identities[@]}"}")
+    active_worker_lifecycle_contracts=("${next_active_lifecycle_contracts[@]+"${next_active_lifecycle_contracts[@]}"}")
     finish_worker_settlement
 
     # Process every completion observed above before opening another pool slot.
@@ -8771,12 +11347,14 @@ run_mapped_entries_parallel() {
       infrastructure_file="$(make_tmpfile)"
       trunk_provisioning_file="$(make_tmpfile)"
       lease_file="$(make_tmpfile)"
+      launch_state_file="$(make_tmpfile)"
       ready_file="$(make_tmpfile)"
       ready_staging_file="${ready_file}.publishing"
       wait_file="${ready_file}.wait"
       tmpfiles+=(
         "$output_file" "$status_file" "$elapsed_file" "$timeout_file"
         "$infrastructure_file" "$trunk_provisioning_file" "$lease_file"
+        "$launch_state_file"
         "$ready_file"
         "$ready_staging_file" "$wait_file"
       )
@@ -8793,6 +11371,10 @@ run_mapped_entries_parallel() {
         echo "error: could not create a safe parallel command drain identity." >&2
         fail_command_scheduler_infrastructure "$command" || return $?
       fi
+      worker_lifecycle_contract="$(gate_lifecycle_contract_for_host)" || {
+        echo "error: could not classify the parallel worker lifecycle contract." >&2
+        fail_command_scheduler_infrastructure "$command" || return $?
+      }
 
       echo
       echo "+ ${command}"
@@ -8800,6 +11382,7 @@ run_mapped_entries_parallel() {
       request_marker_open=0
       coordinator_marker_open=0
       worker_has_recovery_owner=0
+      worker_recovery_owner_requires_lease_record=0
       if [[ -n "$gate_run_marker_file" ]]; then
         if ! gate_run_marker_matches_identity \
           "${gate_run_id:-$gate_lock_token}" "$gate_run_marker_file" ||
@@ -8837,7 +11420,12 @@ run_mapped_entries_parallel() {
           fail_command_scheduler_infrastructure "$command" || return $?
         fi
         coordinator_marker_open=1
-        worker_has_recovery_owner=1
+        # A queued coordinator lease is not a durable command-recovery
+        # obligation. Keep this worker bound to its exact parent until the
+        # granted lease record exists. Otherwise an owner crash while queued
+        # leaves a permanent sentinel that no successor is authorised to reap.
+        worker_has_recovery_owner=0
+        worker_recovery_owner_requires_lease_record=1
       fi
       # Open the control FIFO in the parent before fork. The child cannot run
       # mapped work until this parent writes `start`, after it has bound the
@@ -8900,15 +11488,39 @@ run_mapped_entries_parallel() {
           fi
           parallel_worker_parent_is_live || exit 2
         done
-        [[ "$worker_action" == start ]] || exit 2
+        case "$worker_action" in
+          start:[1-9][0-9]*)
+            gate_mapped_command_parent_pid="${worker_action#start:}"
+            ;;
+          *) exit 2 ;;
+        esac
         rm -f "$wait_file"
         export AGENTQG_RUN="agentqg:${drain_identity}"
         AGENTQG_REQUEST="$(gate_run_request_tag)" || exit 2
         export AGENTQG_REQUEST
+        gate_coordinator_wait_requires_live_parent=1
+        parallel_worker_command_marker=""
         run_mapped_command_to_files \
           "$command" "$output_file" "$status_file" "$elapsed_file" \
           "$timeout_file" "$infrastructure_file" \
-          "$trunk_provisioning_file" "$lease_file" "$drain_identity"
+          "$trunk_provisioning_file" "$lease_file" "$drain_identity" \
+          "$launch_state_file"
+        # This worker dispatches one mapped command. Drop the unlinked policy
+        # snapshot before the post-command sentinel wait can outlive its parent.
+        exec 24<&- 2>/dev/null || true
+        # The mapped root and every surviving descendant hold their own command
+        # marker descriptor. The worker is their parent, not their descendant.
+        # Keeping its fd18 open would make successor recovery wait on the
+        # sentinel that recovery must itself terminate.
+        exec 18<&- 2>/dev/null || true
+        if [[ "$worker_recovery_owner_requires_lease_record" -eq 1 ]] &&
+          read_parallel_worker_lease_record \
+            "$lease_file" "$drain_identity" "$worker_lifecycle_contract" &&
+          [[ "$parallel_worker_lease_id" == "${gate_coordinator_active_lease_id:-}" &&
+            "$parallel_worker_lease_drain_identity" == "${gate_coordinator_active_drain_identity:-}" &&
+            "$parallel_worker_lease_lifecycle_contract" == "${gate_coordinator_active_lifecycle_contract:-}" ]]; then
+          worker_has_recovery_owner=1
+        fi
         if ! printf '%s\n' ready > "$ready_staging_file" ||
           ! mv -f "$ready_staging_file" "$ready_file"; then
           exit 2
@@ -8916,7 +11528,8 @@ run_mapped_entries_parallel() {
         # A locked run has a durable recovery owner, so this live group anchor
         # must remain until the parent or a successor drains it. A no-lock run
         # has no successor. Its sentinel exits when this exact parent dies.
-        if [[ "$worker_has_recovery_owner" -eq 1 ]]; then
+        if [[ "$worker_has_recovery_owner" -eq 1 &&
+          "$worker_lifecycle_contract" != darwin-coherent-lineage-v2 ]]; then
           # Bash can defer TERM while a blocking FIFO read has no writer. Poll
           # the private descriptor so the trap runs promptly and normal command
           # settlement does not wait for the four-second KILL escalation.
@@ -8925,7 +11538,17 @@ run_mapped_entries_parallel() {
             IFS= read -r -t 1 _ <&17 || true
           done
         else
+          # Darwin successors recover the mapped command from its persisted
+          # kernel lineage. The sentinel is outside that lineage, so it must
+          # retire when its exact parent exits or when a drainer removes the
+          # command marker. It must not become an unrecorded obligation.
           while parallel_worker_parent_is_live; do
+            if [[ "$worker_lifecycle_contract" == darwin-coherent-lineage-v2 &&
+              -n "$parallel_worker_command_marker" &&
+              ! -e "$parallel_worker_command_marker" &&
+              ! -L "$parallel_worker_command_marker" ]]; then
+              break
+            fi
             IFS= read -r -t 1 _ <&17 || true
           done
         fi
@@ -8976,7 +11599,8 @@ run_mapped_entries_parallel() {
         ! gate_coordinator_is_active; } &&
         [[ -n "$gate_lock_dir" && -n "$gate_lock_root_dir" &&
           -n "$gate_lock_token" ]] &&
-        ! record_condemned_run "$drain_identity"; then
+        ! record_condemned_run \
+          "$drain_identity" "$worker_lifecycle_contract"; then
         printf '%s\n' abort >&17 2>/dev/null || true
         exec 17>&-
         [[ "$coordinator_marker_open" -eq 0 ]] || exec 16<&-
@@ -8998,6 +11622,7 @@ run_mapped_entries_parallel() {
       active_worker_pgids+=("$worker_pgid")
       active_worker_drain_identities+=("$drain_identity")
       active_worker_start_identities+=("$worker_start")
+      active_worker_lifecycle_contracts+=("$worker_lifecycle_contract")
       active_commands+=("$command")
       active_output_files+=("$output_file")
       active_status_files+=("$status_file")
@@ -9006,11 +11631,13 @@ run_mapped_entries_parallel() {
       active_infrastructure_files+=("$infrastructure_file")
       active_trunk_provisioning_files+=("$trunk_provisioning_file")
       active_lease_files+=("$lease_file")
+      active_launch_state_files+=("$launch_state_file")
       active_ready_files+=("$ready_file")
       active_wait_files+=("$wait_file")
       active_drain_identities+=("$drain_identity")
       active_start_identities+=("$worker_start")
-      if ! printf '%s\n' start >&17; then
+      active_lifecycle_contracts+=("$worker_lifecycle_contract")
+      if ! printf 'start:%s\n' "$pid" >&17; then
         exec 17>&-
         [[ "$coordinator_marker_open" -eq 0 ]] || exec 16<&-
         [[ "$request_marker_open" -eq 0 ]] || exec 19<&-
@@ -9031,6 +11658,27 @@ run_mapped_entries_parallel() {
       # Private deterministic barrier for the signal-registration regression.
       # It is inert unless the test suite opts in.
       if [[ -n "$worker_registration_test_barrier" ]]; then
+        worker_exact_identity="portable"
+        if gate_darwin_lineage_host_is_darwin; then
+          worker_host_status=0
+          if ! gate_darwin_exact_child_capture "$pid" "$$"; then
+            finish_worker_registration
+            echo "error: could not capture the test worker's Darwin kernel identity." >&2
+            fail_command_scheduler_infrastructure "$command" || return $?
+          fi
+          worker_exact_identity="$gate_darwin_exact_identity"
+        else
+          worker_host_status=$?
+          if [[ "$worker_host_status" -ne 1 ]]; then
+            finish_worker_registration
+            echo "error: could not classify the test worker host." >&2
+            fail_command_scheduler_infrastructure "$command" || return $?
+          fi
+        fi
+        printf 'agentqg-worker-v1|%s|%s|%s|%s|%s\n' \
+          "$pid" "$worker_start" "$drain_identity" \
+          "$worker_lifecycle_contract" "$worker_exact_identity" \
+          >> "${worker_registration_test_barrier}.identities"
         printf '%s\n' "$pid" >> "${worker_registration_test_barrier}.workers"
         if [[ ! -e "${worker_registration_test_barrier}.ready" ]]; then
           printf '%s\n' "$pid" > "${worker_registration_test_barrier}.ready"
@@ -9210,6 +11858,45 @@ fi
 # and this stops. The publications that can still land are duplicates of
 # obligations this run already drained, whose processes are already gone.
 assert_gate_run_lock_still_ours
+
+# Freeze the Darwin broker policy after coordinator bootstrap and stale-run
+# recovery, but before a mapped-command worker can fork. Dispatches execute
+# only the unlinked descriptor snapshot and revalidate the original path.
+if ! gate_darwin_broker_preflight_bind; then
+  echo "error: could not bind the Darwin broker preflight before first dispatch." >&2
+  gate_report_coordinated_no_work_failure 2 "run-handle preparation" \
+    "No mapped command ran in this request"
+  exit 2
+fi
+if ! gate_lock_wait_for_test_barrier "$broker_preflight_bound_test_barrier"; then
+  echo "error: Darwin broker preflight binding test barrier failed." >&2
+  gate_report_coordinated_no_work_failure 2 "run-handle preparation" \
+    "No mapped command ran in this request"
+  exit 2
+fi
+
+# Bind every Darwin command watcher to this exact gate process before a
+# parallel worker can fork. The identity string is inherited by workers. It
+# lets their watchers settle when this controller dies even if a worker shell
+# remains alive.
+if gate_darwin_lineage_host_is_darwin; then
+  if ! gate_darwin_exact_identity_prepare ||
+    ! gate_darwin_exact_parent_capture "$$"; then
+    echo "error: could not establish the Darwin gate controller identity before first dispatch." >&2
+    gate_report_coordinated_no_work_failure 2 "run-handle preparation" \
+      "No mapped command ran in this request"
+    exit 2
+  fi
+  gate_darwin_controller_exact_identity="$gate_darwin_exact_identity"
+else
+  darwin_controller_status=$?
+  if [[ "$darwin_controller_status" -ne 1 ]]; then
+    echo "error: could not classify the host before Darwin controller capture." >&2
+    gate_report_coordinated_no_work_failure 2 "run-handle preparation" \
+      "No mapped command ran in this request"
+    exit 2
+  fi
+fi
 
 # Capture this boundary after scheduler registration and stale recovery, but
 # before the first mapped command. A process older than this Linux start tick

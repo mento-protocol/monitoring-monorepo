@@ -42,6 +42,9 @@ import {
   utf8Size,
   writeReviewPromptOutputs,
 } from "./agent-autoreview-core.mjs";
+import { inheritGateMarkerStdio } from "./gate/mapped-command-process-identity.mjs";
+import { parseDarwinExactIdentity } from "./gate/darwin-process-lineage.mjs";
+import { validateState as validateDarwinLineageState } from "./gate/darwin-process-lineage-model.mjs";
 
 const REVIEW_SCHEMA = {
   type: "object",
@@ -112,6 +115,8 @@ const FROZEN_TARGET_MODES = new Set([
 ]);
 const MAX_GIT_OUTPUT_BYTES = MAX_REVIEW_INPUT_BYTES + 12 * 1024 * 1024;
 const MAX_TRUSTED_ENGINE_FILE_BYTES = 16 * 1024 * 1024;
+const MAX_DARWIN_CONTAINMENT_CONTRACT_BYTES = 4096;
+const MAX_DARWIN_LINEAGE_STATE_BYTES = 8 * 1024 * 1024;
 const CLAUDE_SAFE_MODE_MIN_VERSION = [2, 1, 169];
 const ENGINE_VERSION_PROBE_TIMEOUT_MS = 15_000;
 const AWS_CREDENTIAL_CONFIG_KEYS = new Set([
@@ -387,6 +392,191 @@ function sameDirectorySecurityMetadata(left, right) {
   );
 }
 
+function assertPrivateDarwinContainmentDirectory(candidate, label) {
+  if (
+    typeof candidate !== "string" ||
+    !path.isAbsolute(candidate) ||
+    path.resolve(candidate) !== candidate
+  ) {
+    throw new Error(`${label} path is not absolute and normalized`);
+  }
+  const fileStat = lstatSync(candidate, { bigint: true });
+  if (
+    !fileStat.isDirectory() ||
+    fileStat.uid !== effectiveUid() ||
+    (fileStat.mode & 0o777n) !== 0o700n ||
+    hasWriteGrantingAcl(candidate, fileStat, label)
+  ) {
+    throw new Error(`${label} is not a private current-user directory`);
+  }
+  return fileStat;
+}
+
+function readStablePrivateDarwinContainmentFile(
+  candidate,
+  { label, expectedMode, maximumBytes },
+) {
+  if (
+    typeof candidate !== "string" ||
+    !path.isAbsolute(candidate) ||
+    path.resolve(candidate) !== candidate
+  ) {
+    throw new Error(`${label} path is not absolute and normalized`);
+  }
+  let descriptor;
+  try {
+    const pathBefore = lstatSync(candidate, { bigint: true });
+    descriptor = openSync(candidate, secureReadFlags({ nonBlocking: true }));
+    const before = fstatSync(descriptor, { bigint: true });
+    if (
+      !before.isFile() ||
+      before.uid !== effectiveUid() ||
+      (before.mode & 0o777n) !== BigInt(expectedMode) ||
+      (before.mode & 0o6000n) !== 0n ||
+      before.nlink !== 1n ||
+      before.size <= 0n ||
+      before.size > BigInt(maximumBytes) ||
+      !sameFileMetadata(pathBefore, before) ||
+      hasWriteGrantingAcl(candidate, before, label)
+    ) {
+      throw new Error(`${label} is not a private stable regular file`);
+    }
+    const bytes = readFileSync(descriptor);
+    const after = fstatSync(descriptor, { bigint: true });
+    const pathAfter = lstatSync(candidate, { bigint: true });
+    if (
+      bytes.length !== Number(after.size) ||
+      !sameFileMetadata(before, after) ||
+      !sameFileMetadata(before, pathAfter)
+    ) {
+      throw new Error(`${label} changed while read`);
+    }
+    return bytes;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
+function assertDarwinWrapperContainment() {
+  if (process.platform !== "darwin") return;
+  const contractPath = process.env.AGENT_AUTOREVIEW_DARWIN_CONTAINMENT_FILE;
+  if (!contractPath) {
+    throw new Error(
+      "direct Darwin execution has no trusted containment contract; run pnpm agent:autoreview",
+    );
+  }
+
+  try {
+    const contractDirectory = path.dirname(contractPath);
+    const runtimeDirectory = path.dirname(contractDirectory);
+    if (
+      !path.basename(contractDirectory).startsWith("helper-containment.") ||
+      !path
+        .basename(runtimeDirectory)
+        .startsWith("agent-autoreview-command-runtime.")
+    ) {
+      throw new Error("Darwin containment path has an unexpected layout");
+    }
+    const runtimeBefore = assertPrivateDarwinContainmentDirectory(
+      runtimeDirectory,
+      "Darwin containment runtime",
+    );
+    const contractDirectoryBefore = assertPrivateDarwinContainmentDirectory(
+      contractDirectory,
+      "Darwin containment contract directory",
+    );
+    const contractBytes = readStablePrivateDarwinContainmentFile(contractPath, {
+      label: "Darwin containment contract",
+      expectedMode: 0o400,
+      maximumBytes: MAX_DARWIN_CONTAINMENT_CONTRACT_BYTES,
+    });
+    const contractText = contractBytes.toString("utf8");
+    if (
+      !contractText.endsWith("\n") ||
+      contractText.slice(0, -1).includes("\n") ||
+      contractText.includes("\r")
+    ) {
+      throw new Error("Darwin containment contract is malformed");
+    }
+    const fields = contractText.slice(0, -1).split("\t");
+    if (
+      fields.length !== 5 ||
+      fields[0] !== "agent-autoreview-darwin-containment-v1"
+    ) {
+      throw new Error("Darwin containment contract schema is unsupported");
+    }
+    const [, childPidText, ownerPidText, identityText, statePath] = fields;
+    if (
+      !/^[1-9][0-9]*$/u.test(childPidText) ||
+      !/^[1-9][0-9]*$/u.test(ownerPidText) ||
+      Number(childPidText) !== process.pid ||
+      Number(ownerPidText) !== process.ppid
+    ) {
+      throw new Error("Darwin containment contract does not own this process");
+    }
+    if (
+      path.dirname(statePath) !== runtimeDirectory ||
+      !/^lineage\.autoreview-deadline-[A-Za-z0-9_-]+\.json$/u.test(
+        path.basename(statePath),
+      )
+    ) {
+      throw new Error("Darwin containment lineage path is outside its runtime");
+    }
+    const stateBytes = readStablePrivateDarwinContainmentFile(statePath, {
+      label: "Darwin containment lineage state",
+      expectedMode: 0o600,
+      maximumBytes: MAX_DARWIN_LINEAGE_STATE_BYTES,
+    });
+    const token = path
+      .basename(statePath)
+      .slice("lineage.".length, -".json".length);
+    const state = validateDarwinLineageState(
+      JSON.parse(stateBytes.toString("utf8")),
+      token,
+    );
+    const exactIdentity = parseDarwinExactIdentity(identityText);
+    if (
+      state.root === null ||
+      state.launcher === null ||
+      state.settledAt !== null ||
+      state.settledReason !== null ||
+      exactIdentity.bootId !== state.bootId ||
+      exactIdentity.pid !== process.pid ||
+      exactIdentity.uniqueId !== state.root.uniqueId ||
+      exactIdentity.parentUniqueId !== state.root.parentUniqueId ||
+      state.root.pid !== process.pid ||
+      state.launcher.pid !== process.ppid ||
+      state.root.parentUniqueId !== state.launcher.uniqueId
+    ) {
+      throw new Error(
+        "Darwin containment contract does not match its bound lineage",
+      );
+    }
+    const runtimeAfter = lstatSync(runtimeDirectory, { bigint: true });
+    const contractDirectoryAfter = lstatSync(contractDirectory, {
+      bigint: true,
+    });
+    if (
+      !sameDirectorySecurityMetadata(runtimeBefore, runtimeAfter) ||
+      !sameDirectorySecurityMetadata(
+        contractDirectoryBefore,
+        contractDirectoryAfter,
+      )
+    ) {
+      throw new Error(
+        "Darwin containment directories changed during validation",
+      );
+    }
+  } catch (error) {
+    throw new Error(
+      `invalid Darwin containment contract: ${error.message}; run pnpm agent:autoreview`,
+      { cause: error },
+    );
+  } finally {
+    delete process.env.AGENT_AUTOREVIEW_DARWIN_CONTAINMENT_FILE;
+  }
+}
+
 function aclMetadataKey(fileStat) {
   return [
     fileStat.dev,
@@ -631,11 +821,25 @@ function clearReviewerForceKillTimer() {
   reviewerForceKillTimer = null;
 }
 
-function signalReviewerProcessGroup(child, signal) {
+function canSignalDetachedProcessGroup(platformName = process.platform) {
+  return platformName !== "win32" && platformName !== "darwin";
+}
+
+function signalReviewerChildOrGroup(
+  child,
+  signal,
+  { childHasClosed = false } = {},
+) {
   try {
-    if (process.platform !== "win32" && Number.isInteger(child.pid)) {
+    if (canSignalDetachedProcessGroup() && Number.isInteger(child.pid)) {
       process.kill(-child.pid, signal);
-    } else {
+    } else if (!childHasClosed) {
+      // Darwin process-group ids are reusable numeric identities. The trusted
+      // shell wrapper binds this helper to a durable lineage and an autonomous
+      // recovery watcher before launch. This helper only signals the child it
+      // still owns. A close callback has already reaped that child, so it must
+      // not signal the numeric PID either. Windows has no negative-pid
+      // process-group signal.
       child.kill(signal);
     }
   } catch (error) {
@@ -646,7 +850,7 @@ function signalReviewerProcessGroup(child, signal) {
 function terminateActiveReviewerChildren(signal = "SIGTERM") {
   for (const child of activeReviewerChildren) {
     try {
-      signalReviewerProcessGroup(child, signal);
+      signalReviewerChildOrGroup(child, signal);
     } catch {
       // The close/error path will finish process cleanup.
     }
@@ -1968,9 +2172,9 @@ function captureDeadlineError(label) {
 // SIGKILL, not SIGTERM: spawnSync blocks until the child actually exits after
 // the timeout fires, so a child that handles or ignores SIGTERM would hang the
 // helper despite the "timeout" option. `detached: true` makes the child its own
-// process-group leader, so the sweep below reaches anything it forked instead of
-// leaving an orphan behind -- spawnSync's own timeout signals the direct child
-// only.
+// process-group leader. Linux can sweep that group. The trusted Darwin wrapper
+// settles descendants through its durable lineage record. spawnSync's timeout
+// signals the direct child only.
 function spawnGitWithinCaptureDeadline(git, gitArgs, options, label) {
   const remainingMs = CAPTURE_DEADLINE_MS - gitCaptureSpentMs;
   if (remainingMs <= 0) throw captureDeadlineError(label);
@@ -1988,6 +2192,7 @@ function spawnGitWithinCaptureDeadline(git, gitArgs, options, label) {
   const startedAt = performance.now();
   const result = spawnTrustedSync(git, gitArgs, {
     ...options,
+    stdio: inheritGateMarkerStdio(options.stdio),
     // The monotonic clock reports fractions of a millisecond; spawnSync only
     // takes whole ones.
     timeout: Math.ceil(remainingMs),
@@ -2005,18 +2210,16 @@ function spawnGitWithinCaptureDeadline(git, gitArgs, options, label) {
   // only claims the deadline when the capture actually reached it -- otherwise
   // a git the OOM killer or an operator stopped early would be reported with a
   // cause it did not have, beside a spent figure contradicting it. Any signalled
-  // spawn still sweeps the group the detached child leads.
+  // Linux sweeps the group after a signalled spawn. The Darwin wrapper owns
+  // exact descendant settlement.
   const outOfBuffer = result.error?.code === "ENOBUFS";
   const deadlineExpired =
     !outOfBuffer &&
     (result.error?.code === "ETIMEDOUT" ||
       (result.signal === "SIGKILL" && elapsedMs >= remainingMs - 50));
-  // Sweep every capture, not only the ones that ended badly. spawnSync has
-  // already waited for the child, so this group holds nothing but descendants
-  // the capture forked and left behind -- which are exactly what a detached
-  // spawn would otherwise strand, since they are no longer in the group a
-  // terminal signal reaches. Sweeping here rather than on the failure paths
-  // alone also leaves no window in which the pid could be recycled.
+  // On Linux, sweep every capture. spawnSync has already waited for the child,
+  // so the group holds only descendants the capture left behind. The guard in
+  // killProcessGroup prevents a reusable numeric group signal on Darwin.
   killProcessGroup(result.pid);
   if (deadlineExpired) throw captureDeadlineError(label);
   return result;
@@ -2145,14 +2348,13 @@ const GH_LOOKUP_TIMEOUT_MS = (() => {
     : 60_000;
 })();
 
-// spawnSync's built-in timeout only signals the direct child; it does not
-// reach descendants the child has already forked (a gh helper call that
-// backgrounds a subprocess, say). Every deadline-bounded spawn here -- the gh
-// lookups below and the Git captures above -- passes detached: true so the child
-// leads its own process group, letting this sweep the whole group after a
-// timeout instead of leaving an orphan running.
+// spawnSync's built-in timeout only signals the direct child. On Linux, each
+// deadline-bounded spawn leads a detached process group, so this sweep reaches
+// descendants. On Darwin, a negative pid is a reusable numeric process-group
+// identity. The trusted shell wrapper uses darwin-coherent-lineage-v2 to settle
+// descendants instead. Do not send a numeric process-group signal there.
 function killProcessGroup(pid) {
-  if (!pid) return;
+  if (!pid || !canSignalDetachedProcessGroup()) return;
   try {
     process.kill(-pid, "SIGKILL");
   } catch {
@@ -2189,7 +2391,7 @@ function detectPrBase(repo, branch) {
         cwd: repo,
         env,
         encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: inheritGateMarkerStdio(["ignore", "pipe", "pipe"]),
         timeout: GH_LOOKUP_TIMEOUT_MS,
         // SIGKILL, not SIGTERM: spawnSync blocks until the child actually
         // exits after the timeout fires, so a child that handles or ignores
@@ -2252,7 +2454,7 @@ function detectPrBase(repo, branch) {
         cwd: repo,
         env,
         encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: inheritGateMarkerStdio(["ignore", "pipe", "pipe"]),
         timeout: GH_LOOKUP_TIMEOUT_MS,
         killSignal: "SIGKILL",
         detached: true,
@@ -3278,7 +3480,7 @@ function runCommandWithInput(
       cwd,
       detached: process.platform !== "win32",
       env,
-      stdio: ["pipe", "pipe", "pipe"],
+      stdio: inheritGateMarkerStdio(["pipe", "pipe", "pipe"]),
     });
     activeReviewerChildren.add(child);
     if (pendingTerminationSignal) terminateActiveReviewerChildren();
@@ -3328,7 +3530,7 @@ function runCommandWithInput(
     };
     const forceAbort = (error) => {
       try {
-        signalReviewerProcessGroup(child, "SIGKILL");
+        signalReviewerChildOrGroup(child, "SIGKILL");
       } catch {
         // Pipe destruction below still bounds command settlement.
       }
@@ -3340,7 +3542,7 @@ function runCommandWithInput(
     activeReviewerAborters.set(child, forceAbort);
     timeout = setTimeout(() => {
       timedOut = true;
-      signalReviewerProcessGroup(child, "SIGTERM");
+      signalReviewerChildOrGroup(child, "SIGTERM");
       killTimer = setTimeout(
         () =>
           forceAbort(
@@ -3374,7 +3576,9 @@ function runCommandWithInput(
     };
     child.stdin.on("error", handleStdinError);
     child.on("close", (code, signal) => {
-      signalReviewerProcessGroup(child, "SIGKILL");
+      signalReviewerChildOrGroup(child, "SIGKILL", {
+        childHasClosed: true,
+      });
       try {
         assertAllAttestedNodeLibraryPaths();
       } catch (error) {
@@ -3433,10 +3637,10 @@ function engineVersionProbeFailure(executable, cwd, env) {
       // No pipes: spawnSync waits for the captured stdio to close, so a
       // descendant still holding one would outlast the timeout and wedge the
       // review. Only the exit status matters here.
-      stdio: ["ignore", "ignore", "ignore"],
+      stdio: inheritGateMarkerStdio(["ignore", "ignore", "ignore"]),
       timeout: ENGINE_VERSION_PROBE_TIMEOUT_MS,
-      // SIGKILL cannot be caught or ignored, and detached: true makes the
-      // child its own group leader so the sweep below reaches its descendants.
+      // SIGKILL cannot be caught or ignored. detached: true lets Linux sweep
+      // descendants. The trusted Darwin wrapper owns descendant settlement.
       killSignal: "SIGKILL",
       detached: true,
     });
@@ -4751,6 +4955,8 @@ function flushStageDurations() {
 
 async function main() {
   const argv = process.argv.slice(2);
+  const helpOnly = argv.length === 1 && ["--help", "-h"].includes(argv[0]);
+  if (!helpOnly) assertDarwinWrapperContainment();
   if (argv[0] === "--serialize-untracked-file") {
     if (argv.length !== 2 || !argv[1]) {
       throw new Error(
@@ -5084,7 +5290,11 @@ entrypoint()
   .then((code) => {
     process.exitCode = code;
   })
-  .catch((error) => {
+  .catch(async (error) => {
+    // A terminal signal can queue while spawnSync is blocked and become
+    // observable only after the rejected main promise settles. Give that
+    // callback one turn before choosing an ordinary error exit.
+    await new Promise((resolve) => setImmediate(resolve));
     if (!pendingTerminationSignal) {
       console.error(`autoreview failed: ${error.message}`);
     }

@@ -3,7 +3,7 @@ title: Sentry Triage Pipeline
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-23
+last_verified: 2026-08-28
 scope: ci/process
 doc_type: runbook
 review_interval_days: 90
@@ -585,9 +585,10 @@ read-only `sentry-triage-tools` directory under `$RUNNER_TEMP`, and the agent's
 source and fails if the staging list stops matching it, so the attack cannot
 move one file over. `scripts/sentry/broker/sentry-mcp-broker.mjs` and
 `scripts/sentry/broker/sentry-mcp-probe.mjs` are staged alongside it even though
-no grant names either: the rule for this job is that it executes nothing from
-the agent-writable checkout, and a rule with an ordering caveat is one refactor
-away from being wrong. The agent job's checkout also sets
+no grant names either. The probe's canonical
+`scripts/gate/mapped-command-process-identity.mjs` dependency is staged in the
+same read-only directory. The rule for this job is that it executes nothing from
+the agent-writable checkout. The agent job's checkout also sets
 `persist-credentials: false`, matching the autofix agent job.
 
 **The agent job ends with the agent.** Immutable copies alone would not be

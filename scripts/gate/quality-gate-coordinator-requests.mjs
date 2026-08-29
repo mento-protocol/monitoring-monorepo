@@ -6,6 +6,8 @@ import {
 } from "./quality-gate-coordinator-results.mjs";
 import {
   CoordinatorError,
+  DARWIN_COHERENT_LIFECYCLE_CONTRACT,
+  DARWIN_LEGACY_LIFECYCLE_CONTRACT,
   DEFAULT_SUCCESS_MAX_AGE_MS,
   PROTOCOL_VERSION,
   RECORD_SCHEMA_VERSION,
@@ -22,6 +24,7 @@ import {
   text,
   utc,
   validateIdentity,
+  validateLifecycleContract,
   validateRunToken,
   worktreeHolder,
   writeImmutable,
@@ -222,6 +225,7 @@ function leaseView(coordinator, lease) {
     leaseId: lease.leaseId,
     requestId: lease.requestId,
     drainIdentity: lease.drainIdentity,
+    lifecycleContract: lease.lifecycleContract,
     status: lease.status,
     sequence: lease.sequence,
     weight: lease.weight,
@@ -240,6 +244,7 @@ export function requestLease(coordinator, params, schedule, commit) {
     requestId,
     leaseId,
     drainIdentity,
+    lifecycleContract,
     capability,
     owner,
     weight = 1,
@@ -249,6 +254,7 @@ export function requestLease(coordinator, params, schedule, commit) {
   } = params;
   identifier(leaseId, "leaseId");
   validateRunToken(drainIdentity, "drainIdentity");
+  validateLifecycleContract(lifecycleContract);
   positiveInteger(weight, "weight");
   jsonSize(metadata, "metadata");
   const normalizedAllCapacity = Boolean(allCapacity);
@@ -287,6 +293,7 @@ export function requestLease(coordinator, params, schedule, commit) {
     if (
       existing.requestId !== requestId ||
       existing.drainIdentity !== drainIdentity ||
+      existing.lifecycleContract !== lifecycleContract ||
       !identitiesEqual(existing.owner, owner) ||
       existing.weight !== effectiveWeight ||
       existing.allCapacity !== normalizedAllCapacity ||
@@ -326,6 +333,7 @@ export function requestLease(coordinator, params, schedule, commit) {
     leaseId,
     requestId,
     drainIdentity,
+    lifecycleContract,
     owner: copy(owner),
     weight: effectiveWeight,
     allCapacity: normalizedAllCapacity,
@@ -357,6 +365,38 @@ export function leaseStatus(coordinator, leaseId, owner, capability) {
   return { found: true, ...leaseView(coordinator, lease) };
 }
 
+export function beginLeaseSettlement(coordinator, params, commit) {
+  const { requestId, leaseId, owner, capability } = params;
+  const request = coordinator.state.requests[requestId];
+  const lease = coordinator.state.leases[leaseId];
+  if (!request || !lease || lease.requestId !== requestId) {
+    throw new CoordinatorError("LEASE_NOT_FOUND", "lease is not active");
+  }
+  assertRequestAuthority(request, owner, capability);
+  if (lease.lifecycleContract !== DARWIN_COHERENT_LIFECYCLE_CONTRACT) {
+    throw new CoordinatorError(
+      "LEASE_SETTLEMENT_CONTRACT_UNSUPPORTED",
+      "only a Darwin coherent-lineage lease can begin settlement",
+    );
+  }
+  if (lease.status === "settling") {
+    return leaseView(coordinator, lease);
+  }
+  if (lease.status === "drain-required") {
+    throw new CoordinatorError(
+      "DRAIN_ACK_REQUIRED",
+      "stale capacity remains reserved until drain acknowledgement",
+      { obligationId: lease.drainObligationId },
+    );
+  }
+  if (lease.status !== "granted") {
+    throw new CoordinatorError("LEASE_NOT_GRANTED", `lease is ${lease.status}`);
+  }
+  lease.status = "settling";
+  commit();
+  return leaseView(coordinator, lease);
+}
+
 export function releaseLease(coordinator, params, schedule, commit) {
   const { requestId, leaseId, owner, capability } = params;
   const request = coordinator.state.requests[requestId];
@@ -372,8 +412,24 @@ export function releaseLease(coordinator, params, schedule, commit) {
       { obligationId: lease.drainObligationId },
     );
   }
-  if (lease.status !== "granted") {
-    throw new CoordinatorError("LEASE_NOT_GRANTED", `lease is ${lease.status}`);
+  if (lease.lifecycleContract === DARWIN_LEGACY_LIFECYCLE_CONTRACT) {
+    throw new CoordinatorError(
+      "LEGACY_LEASE_DRAIN_REQUIRED",
+      "a legacy Darwin lineage lease can release only through drain recovery",
+    );
+  }
+  if (lease.lifecycleContract === DARWIN_COHERENT_LIFECYCLE_CONTRACT) {
+    if (lease.status !== "settling") {
+      throw new CoordinatorError(
+        "LEASE_SETTLEMENT_REQUIRED",
+        "a Darwin coherent-lineage lease must complete the settlement transition before release",
+      );
+    }
+  } else if (lease.status !== "granted") {
+    throw new CoordinatorError(
+      "LEASE_RELEASE_STATE_INVALID",
+      `a portable lease cannot release from ${lease.status}`,
+    );
   }
   delete coordinator.state.leases[leaseId];
   schedule();

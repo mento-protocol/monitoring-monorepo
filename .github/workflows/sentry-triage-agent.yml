@@ -438,8 +438,9 @@ jobs:
           # sentry-mcp-broker.mjs and sentry-mcp-probe.mjs are NOT
           # agent-executable (no grant names either) — they are staged because
           # this job must execute nothing from the agent-writable checkout, and
-          # staging them keeps that true even if their steps ever move. Each
-          # one's import closure is itself; both closure checks live in
+          # staging them keeps that true even if their steps ever move. The probe
+          # also imports the shared mapped-command marker helper. The closure
+          # checks live in
           # scripts/sentry/broker/sentry-mcp-broker.test.mjs.
           for f in \
             sentry-triage-agent-comment.mjs \
@@ -453,6 +454,8 @@ jobs:
             "${tools_dir}/sentry-mcp-broker.mjs"
           install -m 0444 "scripts/sentry/broker/sentry-mcp-probe.mjs" \
             "${tools_dir}/sentry-mcp-probe.mjs"
+          install -m 0444 "scripts/gate/mapped-command-process-identity.mjs" \
+            "${tools_dir}/mapped-command-process-identity.mjs"
           chmod 0555 "${tools_dir}"
 
           echo "Pinned write target: ${GITHUB_REPOSITORY}#${QUEUE_ISSUE_NUMBER}"

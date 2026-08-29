@@ -3,7 +3,7 @@ title: Code Health Checklist
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-08-28
 doc_type: checklist
 scope: ci/process
 review_interval_days: 90
@@ -175,8 +175,9 @@ Treat these as a shrinking ceiling, not a target.
   merge-blocking workflow.
 - `node scripts/repo-health/file-size-watchlist.mjs` reports files over the
   600-line soft cap and 1,000-line hard cap. It covers the package `src/` trees
-  that set `max-lines` plus `scripts/` script and shell sources, where no lint
-  rule enforces a cap; tests are excluded outside Aegis. A `scripts/` file whose
+  that set `max-lines` plus `scripts/` JavaScript, shell, and native C sources,
+  where no lint rule enforces a cap; tests are excluded outside Aegis. A
+  `scripts/` file whose
   split would change a named mechanism rather than refactor a file prints in a
   separate exempt table with its reason
   ([ADR 0065](../adr/0065-scripts-file-size-watchlist-scope.md)); the monthly

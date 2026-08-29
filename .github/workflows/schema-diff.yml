@@ -68,13 +68,14 @@ jobs:
         with:
           filters: |
             # schema.graphql is the primary input for this job. The workflow
-            # file, the diff script, and the graphql package are also included
-            # so that changes to the checker itself trigger a self-test run
-            # (same pattern as the other required-status gates).
+            # file, the diff script and test, and the graphql package are also
+            # included so that changes to the checker itself trigger a
+            # self-test run (same pattern as the other required-status gates).
             schema:
               - indexer-envio/schema.graphql
               - .github/workflows/schema-diff.yml
               - scripts/schema-diff.mjs
+              - scripts/schema-diff.test.mjs
               - package.json
               - pnpm-lock.yaml
               - pnpm-workspace.yaml
@@ -118,6 +119,9 @@ jobs:
           fi
       - uses: ./.github/actions/pnpm-install
         if: steps.decide.outputs.run == 'true'
+      - name: Test schema diff input handling
+        if: steps.decide.outputs.run == 'true'
+        run: node --test scripts/schema-diff.test.mjs
       - name: Export base schema
         if: steps.decide.outputs.run == 'true'
         env:

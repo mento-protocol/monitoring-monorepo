@@ -136,7 +136,7 @@ Testnet, or Polygon Amoy polling stops or records repeated view-call errors. See
 1. Test the new config locally by running `pnpm start` and checking for any errors in the logs
 1. After code review, deploy the new config via `pnpm aegis:deploy` (this rebuilds and stages the service before upload)
 1. After successful deployment, check the logs for any errors via `pnpm aegis:logs`
-1. Check that the new metrics appear in the Grafana Dashboard: `pnpm --filter @mento-protocol/aegis grafana`
+1. Run `pnpm --filter @mento-protocol/aegis grafana`, open the printed URL, and check that the new metrics appear in the Grafana dashboard.
    - New rate feeds should be picked up automatically, it might take a few minutes after they show up
 1. Check that new [Oracle Relayer Grafana Alerts](https://clabsmento.grafana.net/alerting/list) have been added for the new Relayer Signer Wallets' CELO Balance after `alerts/rules` has been planned and applied.
 
@@ -416,7 +416,7 @@ managed in `alerts/rules`. The end-to-end Aegis flow is as follows:
 ### Grafana Dashboard
 
 ```bash
-# Opens the Aegis Grafana Dashboard in your default browser
+# Prints the Aegis Grafana dashboard URL. Open the URL in your browser.
 pnpm --filter @mento-protocol/aegis grafana
 ```
 

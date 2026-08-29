@@ -76,8 +76,8 @@ but `review-prompt-exclusions.md`), `README.md`, `AGENTS.md`, `BACKLOG.md`,
 Markdown-only diff that breaks the gate.
 
 The second is `agent:quality-gate:test`. The gate's Trunk mapping emits
-`./tools/trunk check <paths>` when every changed path still exists in the
-worktree and `./tools/trunk check --all` when one does not
+`./tools/trunk check --ci <paths>` when every changed path still exists in the
+worktree and `./tools/trunk check --ci --all` when one does not
 (`scripts/gate/mapping/post-passes.mjs:38-55`), and the suite pins the first
 branch on a real tracked document, `docs/deployment.md`
 (`scripts/agent-quality-gate.test.sh:5372-5384`); the contrast case at
@@ -305,7 +305,7 @@ costs a duplicate run on mixed diffs and nothing else.
   deleted or non-regular runtime document. This is why the suite is left in
   `scripts`.
 - `addTrunkCheckCommand` (`scripts/gate/mapping/post-passes.mjs:38-55`) selects
-  `./tools/trunk check --all` when any changed path is absent from the
+  `./tools/trunk check --ci --all` when any changed path is absent from the
   worktree. `scripts/agent-quality-gate.test.sh:5372-5384` pins the targeted
   branch on `docs/deployment.md` twice; `:5506-5509` pins the `--all` branch on
   `docs/deleted.md`. `scripts/gate/routing-table/groups-head.mjs:129` lists

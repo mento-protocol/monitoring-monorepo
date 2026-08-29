@@ -38,6 +38,37 @@ const coordinatorScript = join(
   sourceRoot,
   "scripts/gate/quality-gate-coordinator.mjs",
 );
+const ordinaryCapacityProbe = `#!/usr/bin/env node
+import { appendFileSync, existsSync } from "node:fs";
+
+const eventLog = process.env.QG_FIXTURE_EVENT_LOG;
+const label = process.env.QG_FIXTURE_LABEL ?? "gate";
+const barrier = process.env.QG_FIXTURE_CAPACITY_BARRIER ?? "";
+
+if (!eventLog) throw new Error("QG_FIXTURE_EVENT_LOG is required");
+
+function record(event) {
+  appendFileSync(
+    eventLog,
+    JSON.stringify({
+      commandClass: "ordinary-capacity",
+      event,
+      label,
+      timestampMs: Date.now(),
+    }) + "\\n",
+  );
+}
+
+const wait = (milliseconds) =>
+  new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
+
+record("start");
+while (barrier && !existsSync(\`\${barrier}.release\`)) {
+  await wait(50);
+}
+await wait(Number(process.env.QG_FIXTURE_CAPACITY_DELAY_MS ?? 100));
+record("end");
+`;
 
 function assertSafeTemporaryRoot(root) {
   const resolved = resolve(root);
@@ -70,14 +101,50 @@ async function pathExists(path) {
 }
 
 async function processCommand(pid) {
-  const { stdout } = await run("ps", [
-    "-ww",
-    "-o",
-    "command=",
-    "-p",
-    String(pid),
-  ]);
-  return stdout.trim();
+  try {
+    const { stdout } = await run("ps", [
+      "-ww",
+      "-o",
+      "command=",
+      "-p",
+      String(pid),
+    ]);
+    return stdout.trim();
+  } catch (error) {
+    // A gate loop can replace a short-lived child, such as `sleep 0.02`,
+    // between childrenOf() and this argv probe. macOS ps reports that normal
+    // disappearance as status 1 with no output. Keep every other ps failure.
+    if (
+      error.code === 1 &&
+      String(error.stdout ?? "").trim() === "" &&
+      String(error.stderr ?? "").trim() === ""
+    ) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+export function isSchedulerTimeoutWatchdogCommand(command) {
+  return (
+    typeof command === "string" &&
+    command.includes('request_tag="$1"') &&
+    command.includes('timeout_secs="$3"') &&
+    command.includes("collect_tree() {") &&
+    command.includes('settlement_ack="$7"')
+  );
+}
+
+function describeSiblingProcesses(processes) {
+  if (processes.length === 0) return "none";
+  return processes
+    .map(({ pid, command }) => {
+      const normalized = command.replace(/\s+/gu, " ").trim();
+      const summary =
+        normalized.length > 240 ? `${normalized.slice(0, 237)}...` : normalized;
+      return `${pid} (${summary || "empty argv"})`;
+    })
+    .join("; ");
 }
 
 export async function waitUntil(
@@ -123,7 +190,10 @@ async function initializeRepository(repository) {
         name: "quality-gate-scheduler-fixture",
         private: true,
         packageManager: sourceManifest.packageManager,
-        scripts: { "agent:quality-gate": gateScript },
+        scripts: {
+          "agent:quality-gate": gateScript,
+          "docs:index": "node tools/scheduler-capacity-probe.mjs",
+        },
       },
       null,
       2,
@@ -134,12 +204,19 @@ async function initializeRepository(repository) {
     "packages: []\nverifyDepsBeforeRun: false\n",
   );
   await writeFile(join(repository, "scripts/gate/.keep"), "fixture\n");
+  await writeFile(
+    join(repository, "tools/scheduler-capacity-probe.mjs"),
+    ordinaryCapacityProbe,
+  );
   await writeFile(join(repository, "tools/trunk"), stubTrunk);
   await chmod(join(repository, "tools/trunk"), 0o755);
   for (const name of [
     "fixture-a.txt",
     "fixture-b.txt",
     "fixture-c.txt",
+    "capacity-a.md",
+    "capacity-b.md",
+    "capacity-c.md",
     "fixture-crash.txt",
     "fixture-full.txt",
     "fixture-same.txt",
@@ -270,7 +347,9 @@ export async function createGateFixture() {
   const worktrees = [];
   const gateHandles = new Set();
   const lockRoots = new Set();
-  const fixtureProcesses = new ExactFixtureProcesses();
+  const fixtureProcesses = new ExactFixtureProcesses({
+    darwinScratchDirectory: root,
+  });
   let sequence = 0;
   let worktreeQueue = Promise.resolve();
 
@@ -443,7 +522,10 @@ PATH="\${QG_FIXTURE_ORIGINAL_PATH}" exec git "$@"
       () => gateHandles.delete(handle),
     );
     handle.processIdentity = Number.isSafeInteger(child.pid)
-      ? await fixtureProcesses.track(child.pid, { allowMissing: true })
+      ? await fixtureProcesses.track(child.pid, {
+          allowMissing: true,
+          parentPid: process.pid,
+        })
       : null;
     return handle;
   }
@@ -466,10 +548,6 @@ PATH="\${QG_FIXTURE_ORIGINAL_PATH}" exec git "$@"
       async () => (await events(scenario)).find(predicate),
       { timeoutMs, message },
     );
-    if (event.event === "descendant") {
-      await fixtureProcesses.track(event.shellPid);
-      await fixtureProcesses.track(event.descendantPid);
-    }
     return event;
   }
 
@@ -512,15 +590,27 @@ PATH="\${QG_FIXTURE_ORIGINAL_PATH}" exec git "$@"
 
   async function killLeaderWithoutWatchdog(handle, stubPid, descendantPid) {
     const commandRoot = await directAncestor(stubPid, handle.child.pid);
-    await fixtureProcesses.track(commandRoot);
-    await fixtureProcesses.track(stubPid);
-    await fixtureProcesses.track(descendantPid);
-    const directChildren = await childrenOf(handle.child.pid);
-    const siblingDetails = await Promise.all(
-      directChildren
-        .filter((pid) => pid !== commandRoot)
-        .map(async (pid) => ({ pid, command: await processCommand(pid) })),
+    const commandRootIdentity = await fixtureProcesses.track(commandRoot, {
+      parentPid: handle.child.pid,
+    });
+    const stubIdentity = await fixtureProcesses.trackDescendant(
+      stubPid,
+      commandRootIdentity,
     );
+    await fixtureProcesses.track(descendantPid, {
+      parentPid: stubIdentity.pid,
+    });
+    const directChildren = await childrenOf(handle.child.pid);
+    const siblingDetails = (
+      await Promise.all(
+        directChildren
+          .filter((pid) => pid !== commandRoot)
+          .map(async (pid) => {
+            const command = await processCommand(pid);
+            return command === null ? null : { pid, command };
+          }),
+      )
+    ).filter((detail) => detail !== null);
     const registrationLifecycles = siblingDetails.filter(
       ({ command }) =>
         command.includes(coordinatorScript) &&
@@ -529,23 +619,32 @@ PATH="\${QG_FIXTURE_ORIGINAL_PATH}" exec git "$@"
     );
     if (registrationLifecycles.length !== 1) {
       throw new Error(
-        `expected one bound-registration lifecycle beside command ${commandRoot}; found ${registrationLifecycles.map(({ pid }) => pid).join(",")}`,
+        `expected one bound-registration lifecycle beside command ${commandRoot}; ` +
+          `found ${describeSiblingProcesses(registrationLifecycles)}; ` +
+          `observed ${describeSiblingProcesses(siblingDetails)}`,
       );
     }
-    const watchdogs = siblingDetails.filter(
-      ({ pid }) => pid !== registrationLifecycles[0].pid,
+    const watchdogs = siblingDetails.filter(({ command }) =>
+      isSchedulerTimeoutWatchdogCommand(command),
     );
     if (watchdogs.length !== 1) {
       throw new Error(
-        `expected one watchdog beside command ${commandRoot}; found ${watchdogs.map(({ pid }) => pid).join(",")}`,
+        `expected one timeout watchdog beside command ${commandRoot}; ` +
+          `found ${describeSiblingProcesses(watchdogs)}; ` +
+          `observed ${describeSiblingProcesses(siblingDetails)}`,
       );
     }
-    process.kill(watchdogs[0].pid, "SIGKILL");
+    const watchdogIdentity = await fixtureProcesses.track(watchdogs[0].pid, {
+      parentPid: handle.child.pid,
+    });
+    if (!(await fixtureProcesses.signal(watchdogIdentity, "SIGKILL"))) {
+      throw new Error("the exact watchdog process exited before SIGKILL");
+    }
     await waitUntil(async () => !(await processRunning(watchdogs[0].pid)), {
       timeoutMs: 2_000,
       message: "the exact watchdog process to exit",
     });
-    process.kill(handle.child.pid, "SIGKILL");
+    await signalGate(handle, "SIGKILL");
     await handle.done;
   }
 
@@ -625,7 +724,11 @@ PATH="\${QG_FIXTURE_ORIGINAL_PATH}" exec git "$@"
                     "--drainer-start-utc",
                     startUtc,
                     "--evidence-json",
-                    '{"processTreeEmpty":true,"source":"integration-fixture-cleanup"}',
+                    JSON.stringify({
+                      processTreeEmpty: true,
+                      lifecycleContract: obligation.lifecycleContract,
+                      source: "integration-fixture-cleanup",
+                    }),
                   ]);
                 } catch (error) {
                   if (

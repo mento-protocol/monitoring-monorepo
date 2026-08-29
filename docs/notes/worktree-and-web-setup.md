@@ -3,7 +3,7 @@ title: New Worktree / Clone Setup and Claude Code on the Web Setup
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-26
+last_verified: 2026-08-28
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -16,6 +16,9 @@ The invocation pointer lives in the "Agent Tooling and Setup" section of root
 `AGENTS.md`. This note holds the underlying mechanics.
 
 ## New Worktree / Clone Setup
+
+macOS setup requires the Xcode Command Line Tools (`xcode-select --install`)
+for the Darwin gate helper. Linux does not need them.
 
 After creating a new worktree manually or cloning the repo, run:
 

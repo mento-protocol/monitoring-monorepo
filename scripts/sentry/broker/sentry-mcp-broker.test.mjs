@@ -16,14 +16,15 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { EventEmitter } from "node:events";
+import { EventEmitter, once } from "node:events";
 import { createServer } from "node:http";
 import { connect } from "node:net";
-import { readFileSync } from "node:fs";
-import { platform } from "node:os";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { platform, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -48,10 +49,12 @@ import {
   drainMessages,
   encodeAnnotation,
   isEntryPoint as probeIsEntryPoint,
-  killProcessGroup,
+  listServerTools,
   missingTools,
   probeSentryToolset,
+  requestSupervisorStop,
   resolveProbeConfig,
+  spawnServerSupervisor,
 } from "./sentry-mcp-probe.mjs";
 
 const HANDLE = "h".repeat(64);
@@ -1035,21 +1038,22 @@ test("the broker, spawned the way the workflow spawns it, has NO token in its ex
     set -euo pipefail
     tok="\${SENTRY_TRIAGE_TOKEN:-}"
     unset SENTRY_TRIAGE_TOKEN
-    printf '%s' "\${tok}" | \
+    exec env \
       SENTRY_MCP_BROKER_HANDLE="${HANDLE}" \
       SENTRY_MCP_BROKER_PORT=${port} \
       SENTRY_MCP_BROKER_TTL_SECONDS=30 \
-      node "${BROKER_PATH}" > /dev/null 2>&1 &
-    echo $!
+      node "${BROKER_PATH}" <<<"\${tok}"
   `;
-  const pid = execFileSync("bash", ["-c", script], {
-    encoding: "utf8",
+  // Keep the live ChildProcess handle. A PID string can be reused after exit,
+  // so it is not cleanup authority on Darwin.
+  const child = spawn("bash", ["-c", script], {
     env: { ...process.env, SENTRY_TRIAGE_TOKEN: REAL_CRED },
-  }).trim();
+    stdio: "ignore",
+  });
   try {
     await settle(700);
     // Throws if the broker died or the read failed — never a soft null.
-    const environ = execEnvironOf(pid);
+    const environ = execEnvironOf(child.pid);
     assert.ok(
       !environ.includes(REAL_CRED),
       `the token is in the broker's exec-time environment (read via ${READER}) — the agent could take it straight out of /proc`,
@@ -1062,14 +1066,14 @@ test("the broker, spawned the way the workflow spawns it, has NO token in its ex
     );
     // /proc/<pid>/cmdline is readable the same way; the token is never an argv.
     assert.ok(
-      !commandLineOf(pid).includes(REAL_CRED),
+      !commandLineOf(child.pid).includes(REAL_CRED),
       "the token must never appear on the broker's command line",
     );
   } finally {
-    try {
-      process.kill(Number(pid), "SIGKILL");
-    } catch {
-      /* already gone */
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = new Promise((resolve) => child.once("exit", resolve));
+      child.kill("SIGKILL");
+      await exited;
     }
   }
 });
@@ -1377,10 +1381,12 @@ function fakeMcpChild() {
   child.stdin = new PassThrough();
   child.stdout = new PassThrough();
   child.stderr = new PassThrough();
+  const control = new PassThrough();
+  child.stdio = [child.stdin, child.stdout, child.stderr, control];
   child.killed = false;
-  child.kill = () => {
+  control.on("data", () => {
     child.killed = true;
-  };
+  });
   return child;
 }
 
@@ -1628,7 +1634,8 @@ test("every tool the probe REQUIRES is one the agent is allowed to call", () => 
 
 test("the probe runs the immutable staged copy, before the agent", () => {
   const job = triageJobBlock();
-  // Its runtime closure is itself — the staging step carries no relative import.
+  // Its only relative import is the shared marker helper. The staging step
+  // carries the canonical helper under the probe's flat runtime directory.
   const source = readFileSync(
     join(dirname(fileURLToPath(import.meta.url)), "sentry-mcp-probe.mjs"),
     "utf8",
@@ -1637,11 +1644,17 @@ test("the probe runs the immutable staged copy, before the agent", () => {
   // side-effect `import "./x"` (which has no `from` at all) would each add a
   // file to the runtime closure that the staging step does not copy, and the
   // probe would then die inside the trusted step with ERR_MODULE_NOT_FOUND.
-  assert.equal(
-    [...source.matchAll(/(?:from|import)\s*\(?\s*["'](\.{1,2}\/[^"']+)["']/g)]
-      .length,
-    0,
-    "the probe grew a relative import; the staging step must carry it too",
+  assert.deepEqual(
+    [
+      ...source.matchAll(/(?:from|import)\s*\(?\s*["'](\.{1,2}\/[^"']+)["']/g),
+    ].map((match) => match[1]),
+    ["./mapped-command-process-identity.mjs"],
+    "the probe import closure changed; update the immutable staging copy",
+  );
+  assert.match(
+    source,
+    /stdio:\s*inheritGateMarkerStdio\(\["pipe", "pipe", "pipe", "pipe"\]\)/,
+    "the staged probe no longer inherits mapped-command marker descriptors",
   );
   const stagingBlock = job.slice(
     job.indexOf("Stage immutable agent tools"),
@@ -1650,6 +1663,10 @@ test("the probe runs the immutable staged copy, before the agent", () => {
   assert.ok(
     stagingBlock.includes("sentry-mcp-probe.mjs"),
     "the probe is not in the staging step's copy list",
+  );
+  assert.ok(
+    stagingBlock.includes('scripts/gate/mapped-command-process-identity.mjs"'),
+    "the probe's shared marker helper is not in the staging step's copy list",
   );
   assert.match(
     job,
@@ -1720,35 +1737,161 @@ test("a paginated tools/list is followed to the end", async () => {
   assert.deepEqual(cursorsSeen, [null, "p2", "p3"]);
 });
 
-test("the whole npx process TREE is killed, not just npx", async () => {
-  // npx execs the MCP server as a grandchild. Killing only npx leaves it
-  // holding the stdio pipes it inherited, which can keep this process from
-  // exiting — hanging the pre-flight step until the job timeout.
+test("the probe routes cleanup through its supervisor control pipe", async () => {
   const child = fakeMcpChild();
   respondLikeServer(child, REQUIRED_TOOLS);
-  child.pid = 4242;
-  const killed = [];
+  const stopped = [];
   await probeSentryToolset({
     env: PROBE_ENV,
     spawnFn: () => child,
-    killFn: (c) => killed.push(c.pid),
+    stopFn: (c) => stopped.push(c),
   });
-  assert.deepEqual(killed, [4242], "the probe must hand the child to killFn");
+  assert.deepEqual(stopped, [child]);
 
-  // And the real killer negates the pid, which is what addresses the group.
-  const signals = [];
-  const fakeChild = {
-    pid: 99,
-    kill: (sig) => signals.push(["direct", sig]),
-  };
-  const realKill = process.kill;
-  process.kill = (pid, sig) => signals.push([pid, sig]);
-  try {
-    killProcessGroup(fakeChild);
-  } finally {
-    process.kill = realKill;
+  assert.equal(requestSupervisorStop(child), true);
+  assert.equal(child.killed, true);
+
+  const source = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "sentry-mcp-probe.mjs"),
+    "utf8",
+  );
+  assert.doesNotMatch(
+    source,
+    /process\.kill\s*\(/,
+    "Node must not signal a reusable numeric pid or process-group id",
+  );
+  assert.match(source, /kill -KILL -- "-\$\$"/);
+});
+
+test("the probe does not stop an already-reaped supervisor", async () => {
+  for (const eventName of ["exit", "close"]) {
+    const child = fakeMcpChild();
+    const cleanupCalls = [];
+    const result = listServerTools({
+      command: "npx",
+      args: ["fixture"],
+      handle: HANDLE,
+      timeoutMs: 1_000,
+      spawnFn: () => child,
+      stopFn: (...args) => cleanupCalls.push(args),
+    });
+
+    queueMicrotask(() => child.emit(eventName, 7, null));
+    await assert.rejects(
+      result,
+      new RegExp(
+        `the Sentry MCP server ${eventName === "exit" ? "exited" : "closed"} before the handshake completed`,
+      ),
+    );
+    assert.deepEqual(
+      cleanupCalls,
+      [],
+      `cleanup after ${eventName} tried to address a reaped supervisor`,
+    );
   }
-  assert.deepEqual(signals, [[-99, "SIGKILL"]]);
+});
+
+test("the live supervisor settles descendants on control EOF and target exit", async () => {
+  const root = mkdtempSync(join(tmpdir(), "sentry-mcp-supervisor-"));
+  const children = [];
+  try {
+    const start = (mode) => {
+      const leak = join(root, `${mode}-descendant-survived`);
+      const script = `
+( /bin/sleep 2; printf survived > "$1" ) &
+if [ "$2" = eof ]; then
+  printf 'ready\\n'
+  while :; do :; done
+fi
+exit 0
+`;
+      const child = spawnServerSupervisor({
+        command: "/bin/bash",
+        args: ["-c", script, "supervisor-fixture", leak, mode],
+        handle: HANDLE,
+      });
+      children.push(child);
+      return { child, leak, closed: once(child, "close") };
+    };
+
+    const eof = start("eof");
+    const targetExit = start("target-exit");
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error("the supervisor EOF fixture did not start")),
+        5_000,
+      );
+      eof.child.stdout.once("data", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+    eof.child.stdio[3].end();
+
+    const [[, eofSignal], [, targetSignal]] = await Promise.all([
+      eof.closed,
+      targetExit.closed,
+    ]);
+    assert.equal(eofSignal, "SIGKILL");
+    assert.equal(targetSignal, "SIGKILL");
+
+    const leakDeadline = Date.now() + 6_000;
+    for (;;) {
+      assert.equal(existsSync(eof.leak), false);
+      assert.equal(existsSync(targetExit.leak), false);
+      const remaining = leakDeadline - Date.now();
+      if (remaining <= 0) break;
+      await delay(Math.min(100, remaining));
+    }
+  } finally {
+    for (const child of children) requestSupervisorStop(child);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the live supervisor reports the target exit status before cleanup", async () => {
+  const child = spawnServerSupervisor({
+    command: "/bin/bash",
+    args: ["-c", "exit 23"],
+    handle: HANDLE,
+  });
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  const [, signal] = await once(child, "close");
+  assert.equal(signal, "SIGKILL");
+  assert.match(
+    stderr,
+    /sentry-mcp-server-supervisor: target exited with status 23/u,
+  );
+});
+
+test("verbose server stderr remains bounded and marks truncation", async () => {
+  const targetScript =
+    'process.stderr.write("server stderr head\\n" + "x".repeat(1_200) + "\\nserver stderr tail\\n"); process.exit(23);';
+  await assert.rejects(
+    listServerTools({
+      command: process.execPath,
+      args: ["-e", targetScript],
+      handle: HANDLE,
+      timeoutMs: 5_000,
+    }),
+    (error) => {
+      const prefix = " — server stderr: ";
+      const diagnosticStart = error.message.indexOf(prefix);
+      assert.ok(diagnosticStart >= 0, "the probe omitted server stderr");
+      const diagnostic = error.message.slice(diagnosticStart + prefix.length);
+      assert.ok(
+        diagnostic.length <= 800,
+        `the bounded server stderr grew to ${diagnostic.length} characters`,
+      );
+      assert.match(diagnostic, /^server stderr head/u);
+      assert.match(diagnostic, /\.\.\. server stderr truncated \.\.\./u);
+      return true;
+    },
+  );
 });
 
 test("the closure assertion catches every relative import form", () => {

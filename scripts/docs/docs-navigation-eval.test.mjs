@@ -444,6 +444,9 @@ test("fixture byte budgets can contain every cheapest accepted route", () => {
   assert.deepEqual(selectedRoutes.get("commands-pr-readiness"), [
     "docs/notes/quick-commands.md",
   ]);
+  assert.deepEqual(selectedRoutes.get("deployment-terraform-registry-apply"), [
+    "docs/notes/quick-commands.md",
+  ]);
 
   const questionTooTight = structuredClone(context.suite);
   questionTooTight.targets.max_question_source_bytes =

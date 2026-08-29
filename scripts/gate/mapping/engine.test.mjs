@@ -34,6 +34,7 @@ import { fileURLToPath } from "node:url";
 
 import { bashFunctionSource } from "../../sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.mjs";
 
+import { ROUTING_PLAN } from "../routing-table/index.mjs";
 import { Facts } from "./facts.mjs";
 import { BUCKETS, Plan, commandDedupeKey } from "./plan.mjs";
 import {
@@ -45,6 +46,7 @@ import {
   scopedTestInfraChanged,
   sortCodegenCommands,
 } from "./post-passes.mjs";
+import { routeChangedPaths } from "./route.mjs";
 import * as verbs from "./verbs.mjs";
 
 /** The subset of Facts the post-passes and verbs actually consult. */
@@ -281,6 +283,42 @@ test("the root tooling bundle schedules the whole suite list", () => {
   assert.ok(commands.includes("node scripts/pr/pr-ready-state.test.mjs"));
 });
 
+test("Darwin runtime files shared with autoreview route both regression suites", () => {
+  const sharedRuntimePaths = [
+    "scripts/gate/darwin-process-identity.c",
+    "scripts/gate/darwin-process-identity-runtime.inc.c",
+    "scripts/gate/darwin-process-identity-helper.mjs",
+    "scripts/gate/darwin-process-lineage-model.mjs",
+    "scripts/gate/darwin-process-lineage-state.mjs",
+    "scripts/gate/darwin-process-lineage.mjs",
+  ];
+
+  for (const changedPath of sharedRuntimePaths) {
+    const plan = new Plan();
+    routeChangedPaths(
+      ROUTING_PLAN,
+      [changedPath],
+      stubFacts({ isRealTree: false, presentPaths: [changedPath] }),
+      {
+        plan,
+        routeLockfileChange: () => {
+          throw new Error("unexpected lockfile route");
+        },
+      },
+    );
+    const commands = commandsOf(plan);
+    for (const expected of [
+      "pnpm agent:quality-gate:test",
+      "pnpm agent:autoreview:test",
+    ]) {
+      assert.ok(
+        commands.includes(expected),
+        `${changedPath} does not route ${expected}: ${JSON.stringify(commands)}`,
+      );
+    }
+  }
+});
+
 // ── Post-pass 1: Trunk ─────────────────────────────────────────────────────
 
 test("a path that no longer exists forces a full-repo Trunk scan", () => {
@@ -290,9 +328,9 @@ test("a path that no longer exists forces a full-repo Trunk scan", () => {
     ["deleted/file.ts"],
     stubFacts({ presentPaths: [] }),
   );
-  assert.deepEqual(commandsOf(plan), ["./tools/trunk check --all"]);
+  assert.deepEqual(commandsOf(plan), ["./tools/trunk check --ci --all"]);
   assert.equal(
-    reasonOf(plan, "./tools/trunk check --all"),
+    reasonOf(plan, "./tools/trunk check --ci --all"),
     "changed paths require full-repo Trunk checks",
   );
 });
@@ -301,7 +339,9 @@ test("existing ordinary paths get a targeted Trunk scan", () => {
   const plan = new Plan();
   const paths = ["a/one.ts", "b/two.ts"];
   addTrunkCheckCommand(plan, paths, stubFacts({ presentPaths: paths }));
-  assert.deepEqual(commandsOf(plan), ["./tools/trunk check a/one.ts b/two.ts"]);
+  assert.deepEqual(commandsOf(plan), [
+    "./tools/trunk check --ci a/one.ts b/two.ts",
+  ]);
 });
 
 test("a config path in the full-scan list forces full even when it exists", () => {
@@ -318,7 +358,7 @@ test("a config path in the full-scan list forces full even when it exists", () =
     addTrunkCheckCommand(plan, [path], stubFacts({ presentPaths: [path] }));
     assert.deepEqual(
       commandsOf(plan),
-      ["./tools/trunk check --all"],
+      ["./tools/trunk check --ci --all"],
       `${path} governs the whole repo, so a targeted scan would lint only itself`,
     );
   }
@@ -330,7 +370,7 @@ test("a .shellcheckrc edit adds a repo-wide ShellCheck-only pass, ahead of the r
   addTrunkCheckCommand(plan, paths, stubFacts({ presentPaths: paths }));
   assert.equal(
     commandsOf(plan)[0],
-    "./tools/trunk check --all --filter=shellcheck",
+    "./tools/trunk check --ci --all --filter=shellcheck",
     "prepended last, so it must end up first",
   );
 });
@@ -341,7 +381,7 @@ test("Trunk is prepended, so it runs before commands added earlier", () => {
   const paths = ["a/one.ts"];
   addTrunkCheckCommand(plan, paths, stubFacts({ presentPaths: paths }));
   assert.deepEqual(commandsOf(plan), [
-    "./tools/trunk check a/one.ts",
+    "./tools/trunk check --ci a/one.ts",
     "pnpm lint",
   ]);
 });

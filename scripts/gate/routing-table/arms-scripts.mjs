@@ -23,6 +23,24 @@
 export const SCRIPT_ARMS = [
   {
     patterns: [
+      "scripts/gate/darwin-process-identity.c",
+      "scripts/gate/darwin-process-identity-runtime.inc.c",
+    ],
+    effects: [
+      { surface: "scripts" },
+      {
+        command: "pnpm agent:quality-gate:test",
+        reason: "quality-gate process containment changed",
+      },
+      {
+        why: "Autoreview materializes and compiles both native identity sources as part of its trusted Darwin containment runtime.",
+        command: "pnpm agent:autoreview:test",
+        reason: "autoreview Darwin containment runtime changed",
+      },
+    ],
+  },
+  {
+    patterns: [
       "docs/*",
       "README.md",
       "AGENTS.md",
@@ -203,6 +221,9 @@ export const SCRIPT_ARMS = [
             patterns: [
               "scripts/gate/quality-gate-coordinator.sh",
               "scripts/gate/quality-gate-coordinator-support.sh",
+              "scripts/gate/darwin-process-lineage.sh",
+              "scripts/gate/trunk-check-once.sh",
+              "scripts/gate/trunk-check-once.test.sh",
             ],
             effects: [
               {

@@ -3,7 +3,7 @@ title: Recurring PR Review Patterns
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-21
+last_verified: 2026-08-28
 doc_type: checklist
 scope: repo-wide
 review_interval_days: 90
@@ -227,7 +227,7 @@ tldr: **ruleset-required** workflows (`ci`, `Code Quality`, the Vercel checks) M
 - Split with real headroom, not to the line. A split landing at 598/600 is one commit from re-crossing: on PR #1829 the selector was split to 598 and the next commit in the same PR pushed it back over, costing an extra review round. Aim to land roughly 100 lines clear.
 - **Net drift versus the merge base decides defend-vs-split.** The cap is a drift guard, not an absolute. A file your change _reduces_ does not need re-splitting even if it is still over the cap (`sentry-triage-digest.mjs` 933 → 699 and `sentry-autofix-finalize.mjs` 930 → 889 both stood on that reasoning). A file your change pushes _up_ past a cap must be split in the same PR (`sentry-triage-project.mjs` 1,127 → 1,226 and `sentry-autofix-select.mjs` 442 → 828 both were). Don't preemptively split a file your change didn't move.
 - Hard cap is **1,000 lines**, enforced by `max-lines` in each package's `eslint.config.mjs` (incl. `indexer-envio` since 2026-05-04). CI blocks merges past this. Per-file escape via `// eslint-disable-next-line max-lines` with a comment explaining why the file genuinely needs to stay big. **`scripts/` is the exception**: the root `eslint.config.mjs` sets no `max-lines`, so nothing there is lint-enforced and the watchlist report is the whole signal.
-- Watchlist/reporting scope for a **package** MUST be derived from its actual `eslint.config.*` `max-lines` coverage, not blanket test/spec heuristics. Aegis relaxes complexity rules for `src/**/*.spec.ts` but still enforces `max-lines`, so Aegis specs stay in the watchlist. `scripts/` has no config to derive from; [ADR 0065](../adr/0065-scripts-file-size-watchlist-scope.md) sets its scope — script and shell sources, tests excluded — and holds the exemption list.
+- Watchlist/reporting scope for a **package** MUST be derived from its actual `eslint.config.*` `max-lines` coverage, not blanket test/spec heuristics. Aegis relaxes complexity rules for `src/**/*.spec.ts` but still enforces `max-lines`, so Aegis specs stay in the watchlist. `scripts/` has no config to derive from; [ADR 0065](../adr/0065-scripts-file-size-watchlist-scope.md) sets its scope — JavaScript, shell, and native C sources, with tests excluded — and holds the exemption list.
 - Exemptions (rule disabled): `**/__tests__/**`, `**/*.test.{ts,tsx}`, `**/src/lib/types.ts` (pure type definitions), `indexer-envio/test/Test.ts` (envio-generated harness). In `scripts/`, tests are out of the report and three trust-root files are exempt with a recorded reason.
 - **Unused-imports gate**: `eslint-plugin-unused-imports` is wired into every package's config with `unused-imports/no-unused-imports: "error"`. Refactor PRs that move blocks between modules can't leave dead imports behind — `--fix` removes them mechanically.
 - Files near the line budget are tracked in `docs/notes/file-size-watch.md`; refresh with `node scripts/repo-health/file-size-watchlist.mjs` before starting a split so growth doesn't slip past unnoticed. `.github/workflows/file-size-watchlist.yml` owns the monthly issue-only check against current `main`; keep external copies disabled, use `--format issue` for GitHub Issues, and never route reports to `BACKLOG.md`.
