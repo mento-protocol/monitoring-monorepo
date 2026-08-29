@@ -34,9 +34,9 @@ updates:
     #   - `anthropics/*` — claude-code-action is the auto-review reviewer;
     #     a broken reviewer can break the gate that would review its
     #     follow-ups. Glob covers future Anthropic actions.
-    #   - `dependabot/*` — dependabot/fetch-metadata is what classifies
-    #     Dependabot updates. A regression in that path needs an isolated
-    #     review instead of riding in the routine group.
+    #   - `dependabot/*` — dormant now because no Dependabot-owned action
+    #     remains after the auto-merge workflow retirement. Keep the glob so
+    #     any later Dependabot-owned action gets an isolated review.
     groups:
       actions-minor-patch:
         update-types:

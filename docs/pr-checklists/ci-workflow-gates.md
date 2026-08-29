@@ -129,9 +129,11 @@ Dependabot groups routine updates.
   for a second opinion.
 - **Maintainer changes:** review manually at every tier.
 - **Security advisories:** bypass cooldown but still require a human merge.
-- **`anthropics/*` and `dependabot/*`:** keep updates outside routine groups so
-  each gets an isolated-review PR. These patterns cover the auto-reviewer and
-  Dependabot service path.
+- **`anthropics/*`:** keep auto-reviewer updates outside routine groups so each
+  gets an isolated-review PR.
+- **`dependabot/*`:** this pattern is dormant because no Dependabot-owned action
+  remains. It reserves isolated-review treatment for any such action added
+  later.
 
 All tiers use `default-days: 7`; the `github-actions` ecosystem has no per-tier
 cooldown. GitHub skips cooldown for security updates.
