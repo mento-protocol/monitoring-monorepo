@@ -369,7 +369,7 @@ function TroveChartBody({
   error: Error | undefined;
   hasLoadedOnce: boolean;
   shouldMountPlot: boolean;
-  model: TroveChartModel;
+  model: TroveChartModel | null;
   chartAriaLabel: string;
   chartSummary: string;
 }) {
@@ -422,7 +422,7 @@ function TroveChartBody({
       </p>
     );
   }
-  if (!shouldMountPlot) {
+  if (!shouldMountPlot || model == null) {
     return <ChartShimmer />;
   }
   return (
@@ -550,14 +550,17 @@ export function TroveBalanceChart({
   );
   const nowSeconds = useNowSeconds();
   const model = useMemo(
-    () => buildTroveChartModel(series, range, debtSymbol, nowSeconds ?? 0),
+    () =>
+      nowSeconds === null
+        ? null
+        : buildTroveChartModel(series, range, debtSymbol, nowSeconds),
     [series, range, debtSymbol, nowSeconds],
   );
   const shouldRenderPlot = rows.length > 0 && !truncated && anchored;
   const shouldMountPlot = useDeferredMount(
     "visible",
     containerRef,
-    shouldRenderPlot,
+    shouldRenderPlot && model != null,
   );
 
   const activeRangeLabel =

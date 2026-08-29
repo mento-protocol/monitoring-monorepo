@@ -13,6 +13,9 @@ import type { CdpTroveLedgerEventRow } from "../../_lib/ledger";
 // Captures every Plot render's props (data/layout/config) so assertions run
 // against what Plotly would actually receive — the real chunk never loads.
 const plotCaptures = vi.hoisted(() => [] as Array<Record<string, unknown>>);
+const nowSecondsOverride = vi.hoisted(
+  () => ({ value: undefined }) as { value: number | null | undefined },
+);
 
 vi.mock("next/dynamic", () => ({
   default: () =>
@@ -21,6 +24,20 @@ vi.mock("next/dynamic", () => ({
       return <div data-testid="plot" />;
     },
 }));
+
+vi.mock("@/hooks/use-now-seconds", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/hooks/use-now-seconds")>();
+  return {
+    ...actual,
+    useNowSeconds: () => {
+      const liveNowSeconds = actual.useNowSeconds();
+      return nowSecondsOverride.value === undefined
+        ? liveNowSeconds
+        : nowSecondsOverride.value;
+    },
+  };
+});
 
 import { TroveBalanceChart } from "../trove-balance-chart";
 
@@ -139,6 +156,7 @@ describe("TroveBalanceChart", () => {
     vi.setSystemTime(new Date(NOW * 1000));
     vi.stubGlobal("IntersectionObserver", undefined);
     plotCaptures.length = 0;
+    nowSecondsOverride.value = undefined;
     handle = setup();
   });
 
@@ -181,6 +199,22 @@ describe("TroveBalanceChart", () => {
     expect(coll!.x).toHaveLength(3);
     expect(coll!.x[2]).toBe(new Date(NOW * 1000).toISOString());
     expect(coll!.y).toEqual([40_000, 15_000, 15_000]);
+  });
+
+  it("keeps the chart neutral until the shared client clock resolves", () => {
+    nowSecondsOverride.value = null;
+    render(handle!, chartProps());
+
+    expect(handle!.container.querySelector('[data-testid="plot"]')).toBeNull();
+    expect(handle!.container.querySelector(".animate-pulse")).not.toBeNull();
+
+    nowSecondsOverride.value = NOW;
+    render(handle!, chartProps());
+
+    expect(
+      handle!.container.querySelector('[data-testid="plot"]'),
+    ).not.toBeNull();
+    expect(traces()[0]!.x.at(-1)).toBe(new Date(NOW * 1000).toISOString());
   });
 
   it("defaults to All and re-windows with the pre-window step anchor when a range pill is pressed", () => {

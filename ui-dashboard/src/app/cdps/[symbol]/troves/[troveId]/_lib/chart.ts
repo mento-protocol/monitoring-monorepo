@@ -70,7 +70,8 @@ export type TroveChartSeries = {
    *  explicit "batch data unavailable" notice, never a gapped or
    *  zero-coerced series. */
   debt: TroveChartPoint[] | null;
-  /** Indexed ICR (percent) at events that carry price data; can be empty. */
+  /** Indexed ICR (percent) at events that carry price data; can be empty.
+   *  Same-second observations remain distinct marker points. */
   icr: TroveChartPoint[];
   /** Drives the ICR panel + its disclosure: `none` drops the panel and says
    *  so (historical-replay rows persist no price by design), `partial`
