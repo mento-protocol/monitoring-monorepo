@@ -60,6 +60,8 @@ function mutateCiWif(from, to) {
 }
 
 function liveRepositoryFiles() {
+  // The local gate runs before commit: include untracked additions and ignore
+  // cached paths that the worktree has already deleted.
   const filePaths = execFileSync(
     "git",
     [
