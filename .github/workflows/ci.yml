@@ -384,6 +384,7 @@ jobs:
             autoreviewRootRuntime:
               - scripts/agent-autoreview.sh
               - scripts/agent-autoreview*.mjs
+              - scripts/agent-autoreview-secret-suppressions.json
               - .node-version
               - .github/workflows/ci.yml
             # Dependency manifest and pnpm catalog/lifecycle policy drift.

@@ -49,10 +49,10 @@ The control has these rules:
 --no-ext-diff --no-textconv`, explicit `a/` and `b/` prefixes, and no commit
   prose. Commit metadata remains separate review evidence and uses the closed
   scanner path.
-- A record must describe one unchanged path, one full 40- or 64-hex old blob
-  ID, one full new blob ID, one unchanged ordinary mode, and one count-valid
-  ordinary hunk. Rename, copy, added-file, deleted-file, binary, submodule, and
-  combined forms are ineligible.
+- A record must describe one unchanged path, one full hexadecimal old blob ID
+  that contains 40 or 64 characters, one full new blob ID of the same width,
+  one unchanged ordinary mode, and one count-valid ordinary hunk. Rename, copy,
+  added-file, deleted-file, binary, submodule, and combined forms are ineligible.
 - The matcher splits only a pure Git patch capture into complete `diff --git`
   file sections. It requires exact line-array equality. It never searches for a
   substring.
