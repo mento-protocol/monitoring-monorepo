@@ -121,18 +121,30 @@ Audit workflows that "tolerate transient errors" become attack surface — an at
 
 Dependabot is scoped to the `github-actions` ecosystem (`.github/dependabot.yml`). npm is handled by pnpm with `minimumReleaseAge: 4320` in `pnpm-workspace.yaml`; GitHub-issued security advisories on `pnpm-lock.yaml` still come through as Dependabot PRs without an `npm` entry.
 
-PRs are grouped + cooldown-throttled and pass through a tiered auto-merge gate (`.github/workflows/dependabot-auto-merge.yml`):
+Dependabot groups routine updates.
 
-- **Patch / minor** → auto-merge once required CI checks pass (CI / Vercel / Code Quality / Vercel Preview Comments). Cursor Bugbot's risk summary is advisory.
-- **Major** → human review required. The two recurring failure modes are (a) action input/output signature breaks not caught by CI, (b) ESM-only migrations that quietly skip dependents. `@codex review` is the on-demand second opinion.
-- **Maintainer changes** (the action's upstream maintainer set changed) → held for manual review regardless of tier. Supply-chain signal.
-- **Security advisories** (any tier including major) → bypass Dependabot cooldown so CVE patches flow fast; major-tier security PRs still require human merge.
-- **Any `anthropics/*` or `dependabot/*` action** → never auto-merged (glob covers future renames + sibling actions). Self-loop: claude-code-action is the auto-reviewer, dependabot/fetch-metadata is what classifies update-type for the auto-merge workflow — a regression in either ships unreviewed and breaks the gate that would catch follow-ups.
+- **Patch / minor:** require human review and a human merge after required checks pass.
+- **Major:** require human review and a human merge. Check action input/output
+  changes and ESM-only migrations that can skip dependents. Use `@codex review`
+  for a second opinion.
+- **Maintainer changes:** review manually at every tier.
+- **Security advisories:** bypass cooldown but still require a human merge.
+- **`anthropics/*` and `dependabot/*`:** keep updates outside routine groups so
+  each gets an isolated-review PR. These patterns cover the auto-reviewer and
+  Dependabot service path.
 
-Cooldown default in `dependabot.yml`: `default-days: 7`. Per-semver-tier cooldown (`semver-major-days` etc.) is NOT supported for the github-actions ecosystem — only `default-days` is honored, so all tiers share the same delay. Cooldown does NOT apply to security updates (GitHub-enforced). Because auto-merge handles the click, the 7-day delay on routine bumps costs zero friction.
+All tiers use `default-days: 7`; the `github-actions` ecosystem has no per-tier
+cooldown. GitHub skips cooldown for security updates.
 
-- [ ] If you add a new external review integration — GitHub App or Action — that's load-bearing for review/merge gating (Cursor Bugbot, Codex, Claude, CodeRabbit), add it to the auto-merge exclusion list with the same self-loop rationale
-- [ ] If you add a new `package-ecosystem` to `dependabot.yml`, decide whether it inherits the same auto-merge policy or needs a separate rule — npm in particular has a larger transitive blast radius than github-actions
+Deleting the former auto-merge workflow stops new triggers. GitHub can rerun a
+historical workflow run for 30 days with its original SHA, ref, and actor
+privileges. Before a human-only merge boundary is declared active, audit open
+Dependabot PRs, every latent `autoMergeRequest`, in-flight runs, and all
+still-rerunnable historical runs. The server-side update ruleset or expiry of
+the last eligible rerun must close this residual.
+
+- [ ] If you add a new external review integration — GitHub App or Action — that is load-bearing for review or merge gating, keep its updates outside routine groups when an isolated review improves the self-update boundary
+- [ ] If you add a new `package-ecosystem` to `dependabot.yml`, decide whether it inherits the same grouping, cooldown, and review policy or needs separate rules — npm in particular has a larger transitive blast radius than github-actions
 
 ## 8. Runner architecture (ARM vs x64)
 

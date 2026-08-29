@@ -110,6 +110,30 @@ const validFiles = validFixtureFiles();
 assert.deepEqual(validate(validFiles), []);
 assert.deepEqual(validate(liveWorkflowFiles()), []);
 
+for (const permissions of [
+  `    permissions:
+      contents: write
+      pull-requests: write`,
+  "    permissions: write-all",
+]) {
+  expectFailure(
+    {
+      ...validFiles,
+      ".github/workflows/dependabot-auto-merge.yml": `name: Dependabot Auto Merge
+on:
+  pull_request:
+jobs:
+  auto-merge:
+${permissions}
+    runs-on: ubuntu-latest
+    steps:
+      - run: gh pr merge --auto --squash "$PR_URL"
+`,
+    },
+    "repository workflows must not use permissions: write-all or the retired combined contents: write and pull-requests: write shape",
+  );
+}
+
 expectFailure(
   replaceWorkflowFile(
     validFiles,

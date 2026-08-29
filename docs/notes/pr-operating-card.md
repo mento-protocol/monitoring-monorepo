@@ -403,11 +403,22 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    boundary belongs on GitHub's side of the wire.
    [ADR 0075](../adr/0075-pr-merge.md) owns the ordered gates,
    the alternatives, and every residual, including what the deny does not
-   cover. The Dependabot auto-merge workflow runs in CI, not an agent session,
-   and is unaffected. The approval rule above is
-   unchanged — the wrapper mechanizes it, and its refusal is what makes "agents
-   never merge" a control rather than a habit. If the merge itself satisfies Done
-   means, sync the issue state and workboard afterward per
+   cover. Current default-branch source contains no Dependabot workflow that
+   enables auto-merge, so new runs use the same explicit human approval and
+   merge path. GitHub can rerun a deleted workflow's historical runs for 30
+   days with the original SHA, ref, and actor privileges. Source retirement is
+   therefore not the server-side human-only boundary. Before that boundary is
+   declared active, audit open Dependabot PRs, latent `autoMergeRequest`
+   values, in-flight runs, and every still-rerunnable historical run. The
+   server-side update ruleset or expiry of the last eligible rerun closes this
+   residual. As defense in depth, `pnpm tf:test` rejects the deleted workflow's
+   combined `contents: write` and `pull-requests: write` permission shape, and
+   rejects `permissions: write-all`. This is not a merge-callsite boundary:
+   `contents: write` alone can authorize the REST merge endpoint and remains
+   valid for workflows such as `update-snapshots.yml`. The wrapper mechanizes
+   the approval rule, and its refusal makes
+   "agents never merge" a local control rather than a habit. If the merge
+   itself satisfies Done means, sync the issue state and workboard afterward per
    [`agent-issue-workflow.md`](agent-issue-workflow.md). If live proof remains,
    continue to production closeout first. After a partial merge, keep the issue
    open. Before `issue:release` restores `agent-ready`, update the issue body:

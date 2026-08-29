@@ -637,11 +637,56 @@ function containsVariableSelectorIndirection(value) {
   );
 }
 
+// This is a regression tripwire for the deleted Dependabot workflow's paired
+// write scopes and for write-all. It is not a merge-capability detector:
+// contents: write alone can authorize the REST pull-request merge endpoint.
+function usesRetiredBroadWritePermissionShape(permissions) {
+  return (
+    permissions === "write-all" ||
+    (isMapping(permissions) &&
+      permissions.contents === "write" &&
+      permissions["pull-requests"] === "write")
+  );
+}
+
+function validateRetiredBroadWritePermissionShape(
+  workflowPath,
+  parsedWorkflow,
+  jobs,
+  errors,
+) {
+  const matches = [];
+  if (usesRetiredBroadWritePermissionShape(parsedWorkflow.permissions)) {
+    matches.push("workflow");
+  }
+  for (const [jobName, job] of Object.entries(jobs)) {
+    if (
+      isMapping(job) &&
+      usesRetiredBroadWritePermissionShape(job.permissions)
+    ) {
+      matches.push(`job ${jobName}`);
+    }
+  }
+  if (matches.length > 0) {
+    errors.push(
+      `${workflowPath}: repository workflows must not use permissions: write-all or the retired combined contents: write and pull-requests: write shape (${matches.join(", ")})`,
+    );
+  }
+}
+
 export function validateWorkflowInventory(
   workflowPath,
   parsedWorkflow,
   errors,
 ) {
+  const jobs = isMapping(parsedWorkflow.jobs) ? parsedWorkflow.jobs : {};
+  validateRetiredBroadWritePermissionShape(
+    workflowPath,
+    parsedWorkflow,
+    jobs,
+    errors,
+  );
+
   if (workflowPath === PEG_POLICY_PUBLICATION_WORKFLOW) {
     if (
       !isDeepStrictEqual(
@@ -656,7 +701,6 @@ export function validateWorkflowInventory(
     return;
   }
 
-  const jobs = isMapping(parsedWorkflow.jobs) ? parsedWorkflow.jobs : {};
   const expectedEnvironmentEntries = [...JOB_ENVIRONMENT_INVENTORY].filter(
     ([key]) => key.startsWith(`${workflowPath}#`),
   );
