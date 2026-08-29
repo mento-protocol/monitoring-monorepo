@@ -183,9 +183,11 @@ partial MCP emulation plus an explicit gh-capable handoff:
    read and before the mutation. The helper does not roll back because a
    rollback could erase concurrent state. Run `pnpm issue:board sync --dry-run`
    separately to preview status reconciliation. This command is
-   repository-wide and does not accept issue-number scope. If the preview
-   includes an issue outside the approved closeout, obtain explicit authority
-   for the full projection before you rerun the command without `--dry-run`.
+   repository-wide and does not accept issue-number scope. Obtain explicit
+   authority for a repository-wide mutation before you rerun the command
+   without `--dry-run`. The apply re-reads live state, so a clean preview does
+   not narrow its mutation scope. The authority must cover the full projection,
+   including unrelated items.
 
 ## Known MCP gaps
 

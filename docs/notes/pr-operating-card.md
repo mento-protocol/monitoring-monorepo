@@ -428,7 +428,7 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    runtime behavior. Use `Refs #N` instead of `Closes #N` when proof can happen
    only after merge. Close the issue only after the live acceptance criteria
    pass. Then use the repository-wide `pnpm issue:board sync --dry-run` preview
-   and apply contract in
+   and authorized apply contract in
    [`agent-issue-workflow.md`](agent-issue-workflow.md).
 
 ## Non-negotiables

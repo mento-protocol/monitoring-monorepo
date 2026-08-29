@@ -38,9 +38,9 @@ list for review.
    repository-wide `issue:board sync` handoff). Run the backfill helper first
    with `--dry-run`.
    It fills empty ownership fields from a trusted claim comment and rejects
-   conflicting Project values. Preview the sync with `--dry-run`. If it
-   includes an unrelated issue, obtain explicit authority for the full
-   projection before you apply it. Do not
+   conflicting Project values. Preview the sync with `--dry-run`. Obtain
+   explicit authority for the repository-wide apply. The apply re-reads live
+   state, so a clean preview does not narrow its scope. Do not
    overwrite a packet already labeled `needs-grooming`, `agent-active`, or
    `in-pr`; it remains the one live packet until resolved or closed.
 3. Reproduce the packet when needed:

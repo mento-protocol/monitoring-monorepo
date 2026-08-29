@@ -74,10 +74,12 @@ Routing labels:
    job can run the sync under its established authority. The command is
    repository-wide. It scans every issue with a queue label and does not accept
    issue-number scope. It moves closed queue-labeled Project #12 items to
-   `Done` and clears all queue labels. Inspect the ad hoc preview. If it includes
-   an issue outside the approved closeout, obtain explicit authority for the
-   full projection before you rerun the command without `--dry-run`. The helper
-   also clears queue labels from closed issues that have no Project item.
+   `Done` and clears all queue labels. Inspect the ad hoc preview. Then obtain
+   explicit authority for a repository-wide mutation before you rerun the
+   command without `--dry-run`. The apply re-reads live state, so a clean
+   preview does not narrow its mutation scope. The authority must cover the
+   full projection, including unrelated items. The helper also clears queue
+   labels from closed issues that have no Project item.
    It re-reads and reclassifies each issue before it changes the Project item or
    labels. After each open-state projection, it re-reads the issue and
    reprojects bounded concurrent state changes. After a Done transition, it
