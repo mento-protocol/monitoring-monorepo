@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 const DEFAULT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const [DEFAULT_INVENTORY, DEFAULT_MANIFEST] = [
   "verification-redesign-safeguards.jsonl",
@@ -31,7 +32,7 @@ const WHOLE_FILE_PATHS = new Set([
   "scripts/check-agent-quality-gate-package-scripts.mjs",
 ]);
 const REFERENCE_PATTERN =
-  /agent[:-](?:quality-gate|prewarm)|gate:routing-table:test|quality[- ]gate|scripts\/gate\/|run\.lock|skip-if-fresh|\bGATE_[A-Z0-9_]+/i;
+  /agent[:-](?:quality-gate|prewarm)|gate:routing-table:test|quality[- ]gate|scripts\/gate\/|(?:^|["'`(])(?:\.\.?\/)*gate\/|\$[^"'\s]*\\?\/gate(?:\\?\/|["':])|["']gate["']\s*,\s*["'][^"']+\.(?:c|mjs|sh)["']|run\.lock|skip-if-fresh|\bGATE_[A-Z0-9_]+/i;
 function fail(message) {
   throw new Error(message);
 }
@@ -170,18 +171,19 @@ function countReferenceLines(path, content) {
     for (let index = start; index <= end; index += 1) selected.add(index);
   }
   if (path === "turbo.json") {
-    lines.forEach((line, index) => {
-      if (!REFERENCE_PATTERN.test(line)) return;
-      let start = index;
-      while (start >= 0 && !/^\s*"inputs": \[$/u.test(lines[start])) start -= 1;
-      if (start < 0) fail("Cannot locate a Turbo gate input filter.");
-      let depth = 0;
-      for (let cursor = start; cursor < lines.length; cursor += 1) {
-        depth += (lines[cursor].match(/\[/gu) ?? []).length;
-        depth -= (lines[cursor].match(/\]/gu) ?? []).length;
-        selected.add(cursor);
-        if (depth === 0) break;
-      }
+    const source = ts.parseJsonText(path, content);
+    if (source.parseDiagnostics.length)
+      fail("Cannot parse Turbo input filters.");
+    ts.forEachChildRecursively(source, (node) => {
+      if (!ts.isPropertyAssignment(node)) return;
+      if (node.name.text !== "inputs") return;
+      const input = node.initializer;
+      if (!ts.isArrayLiteralExpression(input)) return;
+      if (!REFERENCE_PATTERN.test(input.getText(source))) return;
+      const line = (position) =>
+        source.getLineAndCharacterOfPosition(position).line;
+      for (let index = line(input.pos); index <= line(input.end); index += 1)
+        selected.add(index);
     });
   }
   return selected.size;
@@ -287,7 +289,6 @@ export function runCli(
   }
   fail("Use --check-inventory, --write-manifest [ref], or --check-manifest.");
 }
-
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try {
     runCli(process.argv.slice(2));

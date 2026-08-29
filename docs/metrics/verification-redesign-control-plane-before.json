@@ -255,14 +255,14 @@
       "path": "docs/adr/0064-scripts-module-directories.md",
       "surface": "instruction",
       "count_mode": "matching-lines",
-      "lines": 15,
+      "lines": 17,
       "sha256": "3d5666ef9094d8bdea5efe257b8890ad4617b58f1b90c99a499aafef5bd6913b"
     },
     {
       "path": "docs/adr/0065-scripts-file-size-watchlist-scope.md",
       "surface": "instruction",
       "count_mode": "matching-lines",
-      "lines": 2,
+      "lines": 3,
       "sha256": "722e3830ecea2a6cef72cf5de8259879711ed97bef9f9399108a2ec99d2b4716"
     },
     {
@@ -486,7 +486,7 @@
       "path": "docs/notes/agent-quality-gate-mechanics.md",
       "surface": "instruction",
       "count_mode": "matching-lines",
-      "lines": 79,
+      "lines": 100,
       "sha256": "7b340d792a6d4b54f0b9a64c155f94c6acf9b0d98ae7ec3a3bb09eed87a626ea"
     },
     {
@@ -675,7 +675,7 @@
       "path": "scripts/AGENTS.md",
       "surface": "instruction",
       "count_mode": "matching-lines",
-      "lines": 5,
+      "lines": 9,
       "sha256": "f2a5f69e464f408edaa331e79d9c2feed7b4a4d63862413234bd9303f32eb7e2"
     },
     {
@@ -689,21 +689,21 @@
       "path": "scripts/agent-autoreview.mjs",
       "surface": "configuration-reference",
       "count_mode": "matching-lines",
-      "lines": 1,
+      "lines": 4,
       "sha256": "338f13d9003d3896d621fea300a29cfe53cae8493de805c1e9e2c99b88988e2d"
     },
     {
       "path": "scripts/agent-autoreview.sh",
       "surface": "shell-reference",
       "count_mode": "matching-lines",
-      "lines": 29,
+      "lines": 62,
       "sha256": "8f9b1ce9136afd20b7acdc7e49fe9d0a6991ef5f802fdc5b66e8ed1b9b857d91"
     },
     {
       "path": "scripts/agent-autoreview.test.sh",
       "surface": "shell-reference",
       "count_mode": "matching-lines",
-      "lines": 30,
+      "lines": 33,
       "sha256": "ba71e446eaa8c38367c7599c2ccd086070836cdc6ad0e802b7f6abaa61e300c0"
     },
     {
@@ -1368,7 +1368,7 @@
       "path": "scripts/repo-health/file-size-watchlist.test.mjs",
       "surface": "configuration-reference",
       "count_mode": "matching-lines",
-      "lines": 7,
+      "lines": 15,
       "sha256": "5231af6be1eb1f905cf69e5367560681672804e949b65a64679bb9b03ea7c7e6"
     },
     {
@@ -1400,6 +1400,13 @@
       "sha256": "8b4fab8147b1b5d1142c3dd0f8bb04d0af66954dc6b93c70495292ec595ef2c5"
     },
     {
+      "path": "scripts/sentry/broker/mapped-command-process-identity.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "1618852a02114d1e6bc89306a0a97fa086dba2b49270f9e9b853bb0ddd222824"
+    },
+    {
       "path": "scripts/sentry/broker/sentry-mcp-broker.test.mjs",
       "surface": "configuration-reference",
       "count_mode": "matching-lines",
@@ -1419,6 +1426,13 @@
       "count_mode": "matching-lines",
       "lines": 4,
       "sha256": "f7a60550f26afc0bbbdd36bc33c62eb081697378833cf0d61ff8a5271fec8ffc"
+    },
+    {
+      "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "b86098e6663799bf729c466c8163e32a7c70554d4d45c2acdf594326ecc54c64"
     },
     {
       "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.test.mjs",
@@ -1445,14 +1459,14 @@
       "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-probe.mjs",
       "surface": "configuration-reference",
       "count_mode": "matching-lines",
-      "lines": 11,
+      "lines": 13,
       "sha256": "317da3c86d9f13e7be19d7a8b8988d8e77f2c2f4a7152dac250f38c46226221b"
     },
     {
       "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-probe.test.mjs",
       "surface": "configuration-reference",
       "count_mode": "matching-lines",
-      "lines": 9,
+      "lines": 10,
       "sha256": "ca8c95b079a2f3ec414f91e4b8fa3529d3b8b6f90b50a10b91fc6a41d863594f"
     },
     {
@@ -1548,15 +1562,15 @@
     }
   ],
   "totals": {
-    "files": 220,
-    "counted_lines": 96734,
+    "files": 222,
+    "counted_lines": 96814,
     "by_surface": {
       "alias": 5,
-      "configuration-reference": 392,
+      "configuration-reference": 408,
       "hook": 33,
       "implementation": 46174,
-      "instruction": 378,
-      "shell-reference": 68,
+      "instruction": 406,
+      "shell-reference": 104,
       "test": 49641,
       "yaml-or-inline-shell": 43
     }

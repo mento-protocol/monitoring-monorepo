@@ -303,6 +303,15 @@ function withGitFixture(run) {
         "export const startupAttestation = true;\n",
       "scripts/gate/quality-gate-coordinator.test.mjs":
         "export const coordinatorTest = true;\n",
+      "scripts/sentry/broker/gate-consumer.mjs": [
+        'import "../../gate/mapped-command-process-identity.mjs";',
+        'const variablePath = "$source_scripts_dir/gate/mapping.mjs";',
+        'const variableDirectory = "$source_scripts_dir/gate: unavailable";',
+        'const splitPath = ["gate", "mapped-command-process-identity.mjs"];',
+        'const unrelatedKind = { kind: "gate", label: "review" };',
+        'const sentryGate = ["scripts", "sentry", "gate", "manifest.json"];',
+        "",
+      ].join("\n"),
       "package.json":
         '{\n  "scripts": {"agent:quality-gate": "./scripts/agent-quality-gate.sh"}\n}\n',
       "README.md": "Use the quality gate.\nUnrelated line.\n",
@@ -378,10 +387,15 @@ test("buildManifest counts whole files and matching reference lines", () => {
           count_mode: "whole-file",
           lines: 1,
         },
+        {
+          path: "scripts/sentry/broker/gate-consumer.mjs",
+          count_mode: "matching-lines",
+          lines: 4,
+        },
         { path: "turbo.json", count_mode: "matching-lines", lines: 4 },
       ],
     );
-    assert.equal(manifest.totals.counted_lines, 31);
+    assert.equal(manifest.totals.counted_lines, 35);
     assert.equal(
       manifest.entries.find(({ path }) =>
         path.endsWith("startup-attestation.mjs"),
@@ -401,6 +415,22 @@ test("buildManifest counts whole files and matching reference lines", () => {
     const rendered = renderManifest(manifest);
     assert.equal(rendered, `${JSON.stringify(manifest, null, 2)}\n`);
     assert.equal(renderManifest(JSON.parse(rendered)), rendered);
+  });
+});
+
+test("buildManifest parses compact Turbo input filters", () => {
+  withGitFixture((repoRoot) => {
+    writeFileSync(
+      join(repoRoot, "turbo.json"),
+      '{"tasks":{"fixture":{"inputs":["scripts/gate/**"]}}}\n',
+    );
+    execFileSync("git", ["-C", repoRoot, "add", "turbo.json"]);
+    execFileSync("git", ["-C", repoRoot, "commit", "-qm", "compact turbo"]);
+    const manifest = buildManifest({ repoRoot, source: "HEAD" });
+    assert.equal(
+      manifest.entries.find(({ path }) => path === "turbo.json")?.lines,
+      1,
+    );
   });
 });
 

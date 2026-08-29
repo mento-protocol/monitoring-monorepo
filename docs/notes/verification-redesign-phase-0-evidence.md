@@ -36,13 +36,18 @@ routing. Reviewers own those judgments.
 
 The terminal pre-M1 control-plane source is
 `a5692c4570d7fe33255c2ce863d7f79264a9ddb0`. The generated raw manifest counts
-96,734 lines across 220 files. This total has two parts:
+96,814 lines across 222 files. This total has two parts:
 
 - 95,815 whole-file implementation and test lines. This set includes every
   `scripts/gate/**` file, both gate entry points, and the package-script pin
   checker.
-- 919 shared-reference and hook lines in aliases, YAML, inline shell, the full
+- 999 shared-reference and hook lines in aliases, YAML, inline shell, the full
   pre-push hook, configuration, and instructions.
+
+The corrected generator matches repo-relative `scripts/gate/` paths and
+module-relative, variable-qualified, bare, or split-segment `gate/` paths. This
+adds two previously absent files and 80 reference lines. The source boundary
+and whole-file denominator do not change.
 
 The raw manifest fixes the complete gate-rooted before surface. It does not
 classify every whole file as a deletion candidate. The terminal source retains
@@ -65,13 +70,13 @@ this shared closure:
 Subtracting the 12,543 retained shared lines from the 95,815 whole-file
 implementation and test lines gives an 83,272-line gate-specific deletion
 denominator. The 80% final-retirement target applies to this denominator. It
-does not apply to the 96,734-line raw before manifest.
+does not apply to the 96,814-line raw before manifest.
 
 PR #2134 advanced the pre-M1 boundary from the #2042 terminal commit
 `e0346ec4756f9577bcbb1e13e06566ccc507e9e4`. It adds 46 whole-file lines to the
 gate-specific surface: 17 in the gate entry point, 23 in its Bash regression
 suite, and 6 under `scripts/gate/**`. It changes none of the ten retained shared
-files. The 919 shared-reference and hook lines are also unchanged.
+files. The 999 shared-reference and hook lines are also unchanged.
 
 The earlier 70,028-line estimate used source
 `8bcb675b6b241e57435ce0e864e8511c03d9fce2`. It covered the 9,289-line Bash
@@ -80,7 +85,7 @@ entry point, its then-21,655-line Bash regression suite, and 39,084 lines under
 lines, its Bash regression suite is 24,901 lines, `scripts/gate/**` is 58,762
 lines, and the package-script pin checker is 159 lines. These four values total
 the 95,815 whole-file implementation and test lines. The generated total adds
-the 919 shared-reference and hook lines for the after comparison.
+the 999 shared-reference and hook lines for the after comparison.
 
 ## Local behavior
 

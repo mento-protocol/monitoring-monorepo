@@ -16,10 +16,10 @@
   "local_gate": {
     "earlier_core_physical_lines": 70028,
     "earlier_core_source_sha": "8bcb675b6b241e57435ce0e864e8511c03d9fce2",
-    "complete_manifest_files": 220,
-    "complete_manifest_counted_lines": 96734,
+    "complete_manifest_files": 222,
+    "complete_manifest_counted_lines": 96814,
     "manifest_whole_file_implementation_test_lines": 95815,
-    "manifest_shared_reference_hook_lines": 919,
+    "manifest_shared_reference_hook_lines": 999,
     "retained_shared_gate_rooted_lines": 12543,
     "gate_specific_deletion_denominator_lines": 83272,
     "gate_specific_deletion_denominator_definition": "95,815 whole-file implementation and test lines minus 12,543 lines in the retained shared gate-rooted closure",
