@@ -315,7 +315,7 @@ function withGitFixture(run) {
   }
 }
 
-test("buildManifest counts dedicated files and matching reference lines", () => {
+test("buildManifest counts whole files and matching reference lines", () => {
   withGitFixture((repoRoot) => {
     const manifest = buildManifest({ repoRoot, source: "HEAD" });
     assert.deepEqual(
@@ -385,7 +385,7 @@ test("buildManifest counts dedicated files and matching reference lines", () => 
   });
 });
 
-test("buildManifest rejects a missing dedicated bootstrap path", () => {
+test("buildManifest rejects a missing required whole-file path", () => {
   withGitFixture((repoRoot) => {
     rmSync(
       join(repoRoot, "scripts/check-agent-quality-gate-package-scripts.mjs"),

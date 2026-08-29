@@ -109,12 +109,19 @@ cleanup, cross-worktree scheduling, and crash recovery.
 - Remote Turbo result caching is disabled.
 
 The generated Phase 0 manifest widens this count to the complete control-plane
-surface. It records 71,094 counted lines across 199 files at
-`61ab51af8cc07242a6d16b81d7ef77165d748e91`: 70,292 physical lines in
-gate-dedicated implementation and tests plus 802 lines in shared
-aliases, YAML, inline shell, hooks, configuration, and instructions.
-The dedicated total uses the 21,760-line Bash regression suite at that source
-and includes the 159-line package-script pin checker.
+surface. Its terminal pre-M1 source is
+`e0346ec4756f9577bcbb1e13e06566ccc507e9e4`. The raw manifest records 96,688
+counted lines across 220 files: 95,769 whole-file implementation and test lines
+plus 919 shared-reference and hook lines. It counts every `scripts/gate/**`
+file as a whole file so the before artifact preserves the full gate-rooted
+surface.
+
+The raw whole-file total includes a ten-file, 12,543-line shared closure for
+Darwin process identity, coherent lineage, autoreview provenance, Sentry
+process identity, and their tests. Those files remain retained. Subtracting
+them gives the reviewed gate-specific implementation and test deletion
+denominator of 83,226 lines. The raw 96,688-line manifest is the before-surface
+record. It is not the deletion denominator.
 
 Comparable retained runs produce a 41.18-runner-minute cold planning estimate
 for the current deterministic job set. The estimate starts with a run where all
@@ -615,10 +622,10 @@ The initial implementation must meet all of these limits:
   control-plane surface.
 - The replacement-specific control-plane additions must have a net line count
   below the gate-specific code they replace at every cutover phase.
-- The final state must remove at least 80% of current gate-specific
-  implementation and test lines.
+- The final state must remove at least 80% of the 83,226 gate-specific
+  implementation and test deletion denominator.
 - The final pull request must show the net line reduction and list every
-  retained gate-specific file with its reason.
+  retained gate-rooted shared file with its reason.
 
 If implementation exceeds a limit, stop. First simplify the design or improve
 an existing package command. Do not raise the limit in the same change that
@@ -691,8 +698,9 @@ in the existing notifier coverage.
 
 Keep the current gate self-tests active while the mandatory gate remains
 enforced. Exclude them only from the replacement benchmark and target command
-set. Delete them with the gate in Phase 4. Do not add 21,000 lines of scheduler
-tests to the replacement for a scheduler that will be deleted.
+set. Delete only gate-specific tests with the gate in Phase 4. Retain the
+shared-consumer process-identity and lineage tests. Do not add 21,000 lines of
+scheduler tests to the replacement for a scheduler that will be deleted.
 
 The first implementation pull request stops here. It adds no new authority and
 does not weaken the local gate.
@@ -768,11 +776,17 @@ cutover. Require zero observed migration-attributable safeguard omissions found
 by no-skip, scheduled, `main`, or deployment checks. Multiple heads or reruns
 from one pull request count as one pull request.
 
+The deletion scope starts from the 83,226-line gate-specific denominator.
+Retain the ten-file, 12,543-line shared closure. Issues #2127 and #2128 must
+re-audit the terminal `e0346ec4756f9577bcbb1e13e06566ccc507e9e4` consumers
+before relocation or deletion. The coordinator, routing, prewarm, and gate-only
+Trunk wrapper or check code remain deferred candidates until that audit passes.
+
 With separate human approval, delete:
 
 - The quality-gate Bash entry point.
-- The coordinator, mapper, router, locks, leases, sockets, journals, and stale
-  recovery code.
+- The gate-only coordinator, mapper, router, prewarm, Trunk wrapper or check,
+  locks, leases, sockets, journals, and stale recovery code.
 - Gate-only fixtures and tests.
 - Compatibility code that exists only for old worktrees after the documented
   transition ends.
@@ -855,7 +869,8 @@ calendar days for head-level measures unless a larger denominator is stated.
   and aggregate result without running a custom planner.
 - The before-and-after manifest counts changed YAML, inline shell, actions,
   aliases, filters, hooks, and structural tests.
-- The final deletion removes at least 80% of gate-specific lines.
+- The final deletion removes at least 80% of the 83,226 gate-specific
+  implementation and test lines.
 - No local or cloud development session waits for a repository gate slot.
 - Pre-commit runs staged formatting only and has p95 below 10 seconds across at
   least 20 comparable observations.

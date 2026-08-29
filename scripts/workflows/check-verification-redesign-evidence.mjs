@@ -23,7 +23,7 @@ const DISPOSITION_EVIDENCE_FIELDS = new Set(Object.values(DISPOSITION_FIELDS));
 const RETAINED = new Set(Object.keys(DISPOSITION_FIELDS).slice(0, 3));
 const DUPLICATE_TARGET_RULE =
   "duplicate_of needs an existing acyclic retained target.";
-const DEDICATED_PATHS = new Set([
+const WHOLE_FILE_PATHS = new Set([
   ".trunk/hooks/pre-push",
   "scripts/agent-quality-gate.sh",
   "scripts/agent-quality-gate.test.sh",
@@ -138,9 +138,9 @@ function git(repoRoot, args) {
 function countLines(text) {
   return text ? text.split("\n").length - (text.endsWith("\n") ? 1 : 0) : 0;
 }
-function surfaceFor(path, dedicated) {
+function surfaceFor(path, wholeFile) {
   if (path.startsWith(".trunk/hooks/")) return "hook";
-  if (dedicated)
+  if (wholeFile)
     return /\.test\.[^/]+$/u.test(path) ? "test" : "implementation";
   if (path === "package.json") return "alias";
   if (/\.ya?ml$/u.test(path)) return "yaml-or-inline-shell";
@@ -190,22 +190,22 @@ export function buildManifest({ repoRoot = DEFAULT_ROOT, source }) {
     .map((entry) => entry.match(/^\d+ blob [0-9a-f]+\t(.+)$/u)?.[1])
     .filter(Boolean)
     .sort();
-  for (const path of DEDICATED_PATHS)
+  for (const path of WHOLE_FILE_PATHS)
     if (!paths.includes(path)) fail(`Missing manifest path: ${path}`);
   const entries = [];
   for (const path of paths) {
-    const dedicated =
-      DEDICATED_PATHS.has(path) || path.startsWith("scripts/gate/");
+    const wholeFile =
+      WHOLE_FILE_PATHS.has(path) || path.startsWith("scripts/gate/");
     const content = git(repoRoot, ["show", `${sourceSha}:${path}`]);
     if (content.includes("\0")) continue;
-    const lines = dedicated
+    const lines = wholeFile
       ? countLines(content)
       : countReferenceLines(path, content);
     if (lines === 0) continue;
     entries.push({
       path,
-      surface: surfaceFor(path, dedicated),
-      count_mode: dedicated ? "whole-file" : "matching-lines",
+      surface: surfaceFor(path, wholeFile),
+      count_mode: wholeFile ? "whole-file" : "matching-lines",
       lines,
       sha256: createHash("sha256").update(content).digest("hex"),
     });
@@ -230,7 +230,7 @@ export function buildManifest({ repoRoot = DEFAULT_ROOT, source }) {
     source_sha: sourceSha,
     definitions: {
       whole_file:
-        "Physical lines in gate-dedicated implementation, tests, and the pre-push hook.",
+        "Physical lines in the gate entry points, every scripts/gate/** file, the package-script pin checker, and the full pre-push hook. The gate-rooted set includes retained shared-consumer code.",
       matching_lines:
         "Unique fixed-pattern lines in other tracked files, full Turbo input filters that pin gate sources, and the full Trunk gate action block.",
     },

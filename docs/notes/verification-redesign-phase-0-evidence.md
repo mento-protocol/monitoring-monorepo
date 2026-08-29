@@ -34,21 +34,47 @@ routing. Reviewers own those judgments.
 
 ## Snapshot boundary
 
-The control-plane source is
-`61ab51af8cc07242a6d16b81d7ef77165d748e91`. The generated manifest counts
-71,094 lines across 199 files. This total has two parts:
+The terminal pre-M1 control-plane source is
+`e0346ec4756f9577bcbb1e13e06566ccc507e9e4`. The generated raw manifest counts
+96,688 lines across 220 files. This total has two parts:
 
-- 70,292 physical lines in gate-dedicated implementation and tests.
-- 802 lines in shared aliases, YAML, inline shell, the full pre-push hook,
-  configuration, and instructions.
+- 95,769 whole-file implementation and test lines. This set includes every
+  `scripts/gate/**` file, both gate entry points, and the package-script pin
+  checker.
+- 919 shared-reference and hook lines in aliases, YAML, inline shell, the full
+  pre-push hook, configuration, and instructions.
+
+The raw manifest fixes the complete gate-rooted before surface. It does not
+classify every whole file as a deletion candidate. The terminal source retains
+this shared closure:
+
+| Retained shared file                                    | Physical lines |
+| ------------------------------------------------------- | -------------: |
+| `scripts/gate/darwin-process-identity.c`                |            785 |
+| `scripts/gate/darwin-process-identity-runtime.inc.c`    |            657 |
+| `scripts/gate/darwin-process-identity-helper.mjs`       |          1,311 |
+| `scripts/gate/darwin-process-identity.test.mjs`         |          1,881 |
+| `scripts/gate/darwin-process-lineage-model.mjs`         |            793 |
+| `scripts/gate/darwin-process-lineage-state.mjs`         |          1,466 |
+| `scripts/gate/darwin-process-lineage.mjs`               |          1,611 |
+| `scripts/gate/darwin-process-lineage.test.mjs`          |          3,754 |
+| `scripts/gate/mapped-command-process-identity.mjs`      |            107 |
+| `scripts/gate/mapped-command-process-identity.test.mjs` |            178 |
+| **Retained shared closure**                             |     **12,543** |
+
+Subtracting the 12,543 retained shared lines from the 95,769 whole-file
+implementation and test lines gives an 83,226-line gate-specific deletion
+denominator. The 80% final-retirement target applies to this denominator. It
+does not apply to the 96,688-line raw before manifest.
 
 The earlier 70,028-line estimate used source
 `8bcb675b6b241e57435ce0e864e8511c03d9fce2`. It covered the 9,289-line Bash
 entry point, its then-21,655-line Bash regression suite, and 39,084 lines under
-`scripts/gate/**`. At the manifest source, the Bash regression suite is 21,760
-lines. The 70,292-line dedicated total also includes the 159-line
-package-script pin checker. The generated total adds shared control-plane
-references. The manifest fixes this wider definition for the after comparison.
+`scripts/gate/**`. At the terminal source, the gate entry point is 11,976
+lines, its Bash regression suite is 24,878 lines, `scripts/gate/**` is 58,756
+lines, and the package-script pin checker is 159 lines. These four values total
+the 95,769 whole-file implementation and test lines. The generated total adds
+the 919 shared-reference and hook lines for the after comparison.
 
 ## Local behavior
 
@@ -326,23 +352,24 @@ only after owners confirm that no supported old worktree remains.
 ## Issue 2042 consumer audit
 
 Issue #2042 closed as completed on 2026-08-29 through PR #2131 at terminal
-commit `e0346ec4756f9577bcbb1e13e06566ccc507e9e4`. Its snapshot at
-`8e2965a6ffbd92bcc0c2793a6892754e4c674a6b` remains provisional evidence.
-Before cutover or deletion, issues #2127 and #2128 must re-audit the terminal
-code by consumer.
+commit `e0346ec4756f9577bcbb1e13e06566ccc507e9e4`. The earlier provisional
+snapshot at `8e2965a6ffbd92bcc0c2793a6892754e4c674a6b` remains historical evidence
+only. Before cutover, relocation, or deletion, issues #2127 and #2128 must
+re-audit the terminal code by consumer.
 
-| Consumer                                                       | Provisional disposition                  | Required invariant                                                                                                                                                      |
-| -------------------------------------------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Gate coordinator, routing, prewarm, and gate-only Trunk checks | Candidate for retirement with the gate   | Re-audit terminal commit `e0346ec4756f9577bcbb1e13e06566ccc507e9e4` by consumer before cutover or deletion in #2127 or #2128.                                           |
-| Darwin process identity and lineage                            | Retain for every independent consumer    | Never signal a bare PID or process group without matching non-reusable identity. Settle coherent lineage before release. Fail closed on unsupported self-daemonization. |
-| Autoreview                                                     | Retain provenance behavior               | Bind child processes and evidence to the verified review runtime.                                                                                                       |
-| Sentry broker                                                  | Retain verified-leader behavior          | Signal a detached group only while its verified leader is alive. Never reuse its PID or group after reap.                                                               |
-| Trunk daemon                                                   | Classify or contain before cutover       | Treat it as a bounded trusted external service or contain it.                                                                                                           |
-| Legacy `run.lock`                                              | Retain through mixed-worktree transition | Do not let a new path run beside an older gate that owns the lock.                                                                                                      |
+| Consumer                                                       | Terminal disposition                       | Required invariant                                                                                                                                                      |
+| -------------------------------------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Gate coordinator, routing, prewarm, and gate-only Trunk checks | Deferred retirement candidate              | Re-audit terminal commit `e0346ec4756f9577bcbb1e13e06566ccc507e9e4` by consumer before cutover or deletion in #2127 or #2128.                                           |
+| Darwin process identity and lineage                            | Retained shared runtime and tests          | Never signal a bare PID or process group without matching non-reusable identity. Settle coherent lineage before release. Fail closed on unsupported self-daemonization. |
+| Autoreview                                                     | Retained provenance behavior               | Bind child processes and evidence to the verified review runtime.                                                                                                       |
+| Sentry broker                                                  | Retained verified-leader behavior          | Signal a detached group only while its verified leader is alive. Never reuse its PID or group after reap.                                                               |
+| Trunk daemon                                                   | Deferred classification or containment     | Treat it as a bounded trusted external service or contain it.                                                                                                           |
+| Legacy `run.lock`                                              | Retained through mixed-worktree transition | Do not let a new path run beside an older gate that owns the lock.                                                                                                      |
 
 Issues #2006, #2032, and #2094 remain open with their current owners and states.
-Issue #2042 is closed. The inventory preserves its Phase 0 snapshot and requires
-a terminal-code consumer audit before cutover or deletion.
+Issue #2042 is closed. The inventory binds current claims to its terminal
+commit, preserves its earlier snapshot as history, and requires a terminal-code
+consumer audit before cutover, relocation, or deletion.
 
 ## Shadow spend recommendation
 
