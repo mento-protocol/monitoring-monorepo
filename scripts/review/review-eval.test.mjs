@@ -6637,7 +6637,7 @@ test("the launchd template carries safe arguments and installed PATH placeholder
 
 test(
   "the guarded launchd install never loads a render or validation failure",
-  { skip: process.platform !== "darwin" },
+  {},
   () => {
     const runbook = readFileSync(
       path.join(repoRoot, "docs/evals/review-skill.md"),
