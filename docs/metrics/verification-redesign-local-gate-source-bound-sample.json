@@ -168,7 +168,7 @@
     "reproduction_base_sha": "e0346ec4756f9577bcbb1e13e06566ccc507e9e4",
     "rebased_patch_base_sha": "a5692c4570d7fe33255c2ce863d7f79264a9ddb0",
     "rebased_patch_head_sha": "5d3d85c27d43f69a3944948780051d8a7c01cb51",
-    "rebased_patch_head_is_ancestor_of_current_branch": true,
+    "rebased_patch_head_is_ancestor_of_current_branch": false,
     "raw_patch_argv": [
       "git",
       "-c",
