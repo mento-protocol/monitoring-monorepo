@@ -193,6 +193,7 @@ async function initializeRepository(repository) {
         scripts: {
           "agent:quality-gate": gateScript,
           "docs:index": "node tools/scheduler-capacity-probe.mjs",
+          "docs:navigation-eval:test": 'node -e "process.exit(0)"',
         },
       },
       null,
