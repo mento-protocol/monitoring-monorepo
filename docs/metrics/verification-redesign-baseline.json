@@ -79,6 +79,20 @@
       "source": "ADR 0076 retained the 2026-08-21 local observations",
       "unavailable_evidence": "The raw .tmp/agent-quality-gate/durations.jsonl records expired. The retained evidence identifies the date and total and execution values, but not exact UTC timestamps, source SHAs, literal argv, or the timing-capture method."
     },
+    "source_bound_sample": {
+      "observations": 1,
+      "artifact": "docs/metrics/verification-redesign-local-gate-source-bound-sample.json",
+      "denominator": "one independently executed coordinator-leader request over three sequential mapped commands",
+      "measured_source_sha": "49c454da57485169f85b903c608aad66730f80af",
+      "measured_source_is_ancestor_of_current_branch": false,
+      "reproduced_tree_sha": "45e2376dedc3f4a6a0302081e485b7cb9d3b1d98",
+      "result": "pass",
+      "queue_seconds": 0,
+      "execution_seconds": 70,
+      "run_total_seconds": 168,
+      "unattributed_orchestration_seconds": 98,
+      "scope_limit": "This narrow serialized route validates the source binding and timing method. It does not replace the seven-request historical distribution or estimate a full branch gate."
+    },
     "coordinator_benchmark": {
       "command": "node scripts/gate/agent-quality-gate-scheduler-benchmark.mjs",
       "cwd": "/Users/chapati/code/mento/monitoring-monorepo.gate-lock",

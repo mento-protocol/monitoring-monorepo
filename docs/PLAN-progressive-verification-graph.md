@@ -105,6 +105,11 @@ cleanup, cross-worktree scheduling, and crash recovery.
 - Seven recent completed local requests had a median duration of 1,482 seconds.
 - The longest completed request took 2,816 seconds.
 - A later caller waited 1,800 seconds and timed out before a command ran.
+- A later [source-bound serialized route](metrics/verification-redesign-local-gate-source-bound-sample.json)
+  passed in 168 seconds, with 70 seconds of command execution and no scheduler
+  wait. Its measured commit is no longer an ancestor after rebase; the artifact
+  records an exact patch replay that reproduced the measured tree. This one
+  narrow route does not replace the seven-request distribution.
 - The gate self-test has needed a 40-minute CI timeout.
 - Remote Turbo result caching is disabled.
 

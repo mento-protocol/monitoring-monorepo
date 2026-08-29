@@ -155,6 +155,12 @@
         gap: 12px;
         margin-top: 38px;
       }
+      .evidence-note {
+        max-width: 800px;
+        margin: 16px 0 0;
+        color: var(--muted);
+        font-size: 14px;
+      }
       .fact {
         padding: 18px;
         border: 1px solid var(--line);
@@ -590,6 +596,18 @@
             <strong>0 sec</strong><span>target shared local wait</span>
           </div>
         </div>
+        <p class="evidence-note">
+          The 24.7-minute value is the provenance-limited seven-request median.
+          A later
+          <a
+            href="metrics/verification-redesign-local-gate-source-bound-sample.json"
+            >source-bound narrow route</a
+          >
+          passed in 168 seconds, with 70 seconds of command execution and no
+          scheduler wait. Its measured commit is no longer an ancestor after
+          rebase; the artifact records an exact patch replay that reproduced the
+          measured tree. It does not replace the historical distribution.
+        </p>
       </header>
 
       <section id="before-after">

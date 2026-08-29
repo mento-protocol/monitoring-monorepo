@@ -1,0 +1,193 @@
+{
+  "schema_version": 1,
+  "kind": "normal-locked-local-gate-timing-sample",
+  "denominator": "one independently executed coordinator-leader request over three sequential mapped commands",
+  "source": {
+    "cwd": "/Users/chapati/code/mento/monitoring-monorepo.gate-redesign",
+    "head_sha": "49c454da57485169f85b903c608aad66730f80af",
+    "head_tree_sha": "45e2376dedc3f4a6a0302081e485b7cb9d3b1d98",
+    "index_tree_before_sha": "45e2376dedc3f4a6a0302081e485b7cb9d3b1d98",
+    "index_tree_after_sha": "45e2376dedc3f4a6a0302081e485b7cb9d3b1d98",
+    "git_state_before": "clean",
+    "git_state_after_run_before_evidence_write": "clean",
+    "changed_path": "docs/metrics/verification-redesign-baseline.json",
+    "changed_path_blob_sha": "6a6d82a5e96e508a6a543dce62edea9eb5d039bb"
+  },
+  "invocation": {
+    "argv": [
+      "pnpm",
+      "agent:quality-gate",
+      "--run",
+      "--base",
+      "49c454da57485169f85b903c608aad66730f80af",
+      "--head",
+      "49c454da57485169f85b903c608aad66730f80af",
+      "--changed-paths-file",
+      "/private/tmp/m1-source-bound-paths.txt",
+      "--parallel",
+      "1",
+      "--command-timeout",
+      "3600"
+    ],
+    "environment": {
+      "CI": "true"
+    },
+    "changed_paths_file": {
+      "path": "/private/tmp/m1-source-bound-paths.txt",
+      "lines": ["docs/metrics/verification-redesign-baseline.json"],
+      "sha256": "70f6d2ef53ec7a9bfc06ae113f230baea9a853f470e18de9f1b733df580bda72"
+    },
+    "parallelism": 1,
+    "lock_mode": "coordinator",
+    "lock_wait_seconds": 1800,
+    "command_timeout_seconds": 3600,
+    "skip_if_fresh": false,
+    "no_lock": false
+  },
+  "mapping": {
+    "commands": [
+      "./tools/trunk check --ci docs/metrics/verification-redesign-baseline.json",
+      "pnpm tf:test",
+      "pnpm docs:navigation-eval -- --check-fixtures"
+    ],
+    "source": "captured gate plan and request-bound duration rows",
+    "all_commands_executed": true,
+    "reused_commands": 0,
+    "skipped_commands": 0
+  },
+  "request": {
+    "id": "req-3974-1788030560-0435efd328e5",
+    "sequence": 241,
+    "role": "leader",
+    "scheduler_line": "Scheduler request req-3974-1788030560-0435efd328e5: sequence 241, role leader."
+  },
+  "capture": {
+    "window_utc": {
+      "started_at": "2026-08-29T19:09:21Z",
+      "finished_at": "2026-08-29T19:12:09Z"
+    },
+    "window_method": "The terminal __run_total__ row records 168 seconds from gate_start_ts. Subtracting it from the row completion timestamp gives the whole-second start boundary.",
+    "clock_precision": "one second",
+    "durations_file": ".tmp/agent-quality-gate/durations.jsonl",
+    "pre_run_line_count": 961,
+    "appended_line_range": [962, 968],
+    "appended_rows_sha256": "51644c3c1debea24386e71f22fbc43cf0f4909e8128cc2512e0d576f5741de37",
+    "filter": "requestId equals request.id within the post-start appended line range",
+    "duration_rows": [
+      {
+        "ts": "2026-08-29T19:10:56Z",
+        "command": "__scheduler_wait__:aa8e2483ed4d",
+        "status": "ok",
+        "seconds": 0,
+        "mode": "scheduler",
+        "requestId": "req-3974-1788030560-0435efd328e5",
+        "sequence": 241,
+        "role": "leader"
+      },
+      {
+        "ts": "2026-08-29T19:11:10Z",
+        "command": "./tools/trunk check --ci docs/metrics/verification-redesign-baseline.json",
+        "status": "ok",
+        "seconds": 14,
+        "mode": "run",
+        "requestId": "req-3974-1788030560-0435efd328e5",
+        "sequence": 241,
+        "role": "leader"
+      },
+      {
+        "ts": "2026-08-29T19:11:10Z",
+        "command": "__scheduler_wait__:f75ad4182e2d",
+        "status": "ok",
+        "seconds": 0,
+        "mode": "scheduler",
+        "requestId": "req-3974-1788030560-0435efd328e5",
+        "sequence": 241,
+        "role": "leader"
+      },
+      {
+        "ts": "2026-08-29T19:12:02Z",
+        "command": "pnpm tf:test",
+        "status": "ok",
+        "seconds": 52,
+        "mode": "run",
+        "requestId": "req-3974-1788030560-0435efd328e5",
+        "sequence": 241,
+        "role": "leader"
+      },
+      {
+        "ts": "2026-08-29T19:12:03Z",
+        "command": "__scheduler_wait__:63ea1f7814e9",
+        "status": "ok",
+        "seconds": 0,
+        "mode": "scheduler",
+        "requestId": "req-3974-1788030560-0435efd328e5",
+        "sequence": 241,
+        "role": "leader"
+      },
+      {
+        "ts": "2026-08-29T19:12:07Z",
+        "command": "pnpm docs:navigation-eval -- --check-fixtures",
+        "status": "ok",
+        "seconds": 4,
+        "mode": "run",
+        "requestId": "req-3974-1788030560-0435efd328e5",
+        "sequence": 241,
+        "role": "leader"
+      },
+      {
+        "ts": "2026-08-29T19:12:09Z",
+        "command": "__run_total__",
+        "status": "ok",
+        "seconds": 168,
+        "mode": "run",
+        "requestId": "req-3974-1788030560-0435efd328e5",
+        "sequence": 241,
+        "role": "leader"
+      }
+    ],
+    "observed_notices": [
+      "Darwin lineage recovery found one process with an incomplete parent chain and did not signal it."
+    ],
+    "capture_limit": "The gate transcript streamed to the invoking session and was not retained as a file. The scheduler line, mapped plan, terminal result, and exact duration rows are retained here."
+  },
+  "metrics": {
+    "queue_seconds": 0,
+    "execution_seconds": 70,
+    "run_total_seconds": 168,
+    "unattributed_orchestration_seconds": 98,
+    "formulas": {
+      "queue_seconds": "Sum seconds for scheduler rows named __scheduler_queue__ or __scheduler_wait__:*.",
+      "execution_seconds": "Sum seconds for the three sequential mapped-command rows. Exclude __run_total__.",
+      "run_total_seconds": "Seconds from the request's single __run_total__ row.",
+      "unattributed_orchestration_seconds": "run_total_seconds - queue_seconds - execution_seconds."
+    },
+    "interpretation": "This run had no scheduler wait. Gate mapping, fingerprinting, Darwin recovery, orchestration, and cleanup accounted for the remaining 98 seconds."
+  },
+  "reproducibility": {
+    "source_history_limit": "The measured commit 49c454da57485169f85b903c608aad66730f80af is no longer an ancestor of the current branch after rebase.",
+    "reproduction_base_sha": "e0346ec4756f9577bcbb1e13e06566ccc507e9e4",
+    "rebased_patch_base_sha": "a5692c4570d7fe33255c2ce863d7f79264a9ddb0",
+    "rebased_patch_head_sha": "5d3d85c27d43f69a3944948780051d8a7c01cb51",
+    "rebased_patch_head_is_ancestor_of_current_branch": true,
+    "raw_patch_argv": [
+      "git",
+      "-c",
+      "diff.external=",
+      "diff",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--binary",
+      "--no-renames",
+      "a5692c4570d7fe33255c2ce863d7f79264a9ddb0",
+      "5d3d85c27d43f69a3944948780051d8a7c01cb51"
+    ],
+    "patch_sha256": "1dce787ccb8c59709f9bd6a4650eba9c3a037e5dc88bb0dfaf4c16876f4a51a2",
+    "method": "Applied the raw patch to reproduction_base_sha through a temporary index and wrote the resulting tree.",
+    "reproduced_tree_sha": "45e2376dedc3f4a6a0302081e485b7cb9d3b1d98",
+    "matches_measured_head_tree": true
+  },
+  "result": "pass",
+  "scope_limit": "This one narrow serialized route proves the source binding and timing method. It does not replace the seven-request historical distribution or estimate a full branch gate.",
+  "artifact_boundary": "The source state was captured before this evidence file existed. The evidence file is added on a later tree.",
+  "provenance_limit": "This local record is source-bound and patch-reproducible. It is not an independently signed execution attestation."
+}

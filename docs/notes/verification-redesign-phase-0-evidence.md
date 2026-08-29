@@ -101,6 +101,17 @@ The retained records do not identify exact UTC windows, source SHAs, literal
 argv, or the timing-capture method. Treat the two queue observations as a small
 operational sample. Do not report a percentile from them.
 
+A separate [source-bound sample](../metrics/verification-redesign-local-gate-source-bound-sample.json)
+records one normal locked coordinator request over three sequential mapped
+commands. It passed in 168 seconds: zero seconds of scheduler wait, 70 seconds
+of command execution, and 98 seconds of unattributed orchestration. Its measured
+commit, `49c454da57485169f85b903c608aad66730f80af`, is no longer an ancestor of
+the current branch after rebase. The artifact records the exact raw-patch argv
+and digest, plus a temporary-index replay that reproduced the measured tree
+`45e2376dedc3f4a6a0302081e485b7cb9d3b1d98`. This narrow route validates the
+source-binding and timing method. It does not replace the seven-request
+historical distribution or estimate a full branch gate.
+
 The coordinator benchmark used
 `node scripts/gate/agent-quality-gate-scheduler-benchmark.mjs` in the gate-lock
 worktree. Its trace window is
