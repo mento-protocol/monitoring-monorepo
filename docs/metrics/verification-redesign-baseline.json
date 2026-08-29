@@ -370,15 +370,68 @@
       }
     ]
   },
-  "ci_ten_pr_sample": {
+  "ci_workflow_ten_pr_sample": {
     "requested_api_filter": "created=2026-08-21..2026-08-28",
     "selection_as_of": "2026-08-28T17:14:14.810Z",
-    "selection": "ten most recent completed, non-cancelled pull_request CI runs from ten distinct pull requests at collection time",
+    "selection": "ten most recent completed, non-cancelled pull_request CI workflow runs after retaining at most one selected immutable head per pull request at collection time",
     "wall_seconds_method": "GitHub Actions workflow updatedAt minus createdAt",
     "runner_seconds_method": "for each attempt, sum startedAt-to-completedAt for every non-skipped job whose startedAt is at or after attempt.createdAt; sum all attempts for each workflow run; setup_seconds uses setup_measurement_definition",
     "copied_job_deduplication": "GitHub copies earlier successful jobs into later-attempt payloads; exclude a job from an attempt when job.startedAt is before attempt.createdAt",
     "jobs_run_method": "count every non-skipped job execution across all attempts after copied-job deduplication",
-    "denominator": "ten distinct pull_request workflow runs from ten distinct pull requests",
+    "denominator": "ten selected CI workflow runs, one from each of ten distinct pull requests; this is not total cost per pull request",
+    "cost_scope": {
+      "metric": "elapsed Actions job-seconds in each selected CI workflow run, not provider-billed minutes or total pull-request verification cost",
+      "workflow_source": ".github/workflows/ci.yml at source_shas.control_plane",
+      "surfaces": [
+        {
+          "surface": "CI",
+          "kind": "GitHub Actions workflow",
+          "included": true,
+          "detail": "Includes every non-skipped job execution in the selected CI workflow across all attempts, including the required ci aggregate job."
+        },
+        {
+          "surface": "Code Quality",
+          "kind": "required job in the separate Trunk workflow",
+          "included": false,
+          "detail": "Excluded because the sample selects only CI workflow runs."
+        },
+        {
+          "surface": "Sentry suites",
+          "kind": "required job in the CI workflow",
+          "included": true,
+          "detail": "Included when the Sentry suites job executes inside the selected CI workflow run."
+        },
+        {
+          "surface": "Vercel",
+          "kind": "external required commit status",
+          "included": false,
+          "detail": "Excluded because it is not a GitHub Actions job in the selected CI workflow."
+        },
+        {
+          "surface": "Vercel Preview Comments",
+          "kind": "external required check run",
+          "included": false,
+          "detail": "Excluded because it is not a GitHub Actions job in the selected CI workflow."
+        }
+      ],
+      "runner_providers": [
+        {
+          "provider": "Blacksmith",
+          "included": true,
+          "labels": [
+            "blacksmith-2vcpu-ubuntu-2404-arm",
+            "blacksmith-2vcpu-ubuntu-2404",
+            "blacksmith-4vcpu-ubuntu-2404"
+          ]
+        },
+        {
+          "provider": "GitHub-hosted Actions",
+          "included": true,
+          "labels": ["ubuntu-latest"]
+        }
+      ],
+      "runner_label_method": "Read the literal runs-on values from workflow_source at source_shas.control_plane; the retained job timing records do not establish provider billing rounding."
+    },
     "retried_cost_correction": {
       "query": "gh run view RUN --attempt N --json createdAt,updatedAt,conclusion,jobs",
       "query_window_utc": "2026-08-29T06:52:20.752Z..2026-08-29T06:52:28.450Z",
@@ -612,7 +665,7 @@
     "limit": "The setup_seconds fields measure this selected subset, not total workflow setup cost."
   },
   "ten_pr_reliability_proxy": {
-    "source": "the ten ci_ten_pr_sample run IDs, full head SHAs, timestamps, conclusions, and attempt counts",
+    "source": "the ten ci_workflow_ten_pr_sample run IDs, full head SHAs, timestamps, conclusions, and attempt counts",
     "observation_window": "2026-08-27T16:56:08Z..2026-08-28T17:03:22Z",
     "selection_query": "event=pull_request created=2026-08-21..2026-08-28",
     "selection_as_of": "2026-08-28T17:14:14.810Z",
@@ -819,7 +872,7 @@
   },
   "first_results": {
     "required_context_sample": {
-      "source": "the same ten ci_ten_pr_sample workflow creations plus commit check-runs with filter=all and legacy commit statuses on each full head SHA",
+      "source": "the same ten ci_workflow_ten_pr_sample workflow creations plus commit check-runs with filter=all and legacy commit statuses on each full head SHA",
       "query_window": "2026-08-28T21:19:30Z..2026-08-28T21:19:40Z",
       "queries": [
         "GET repos/mento-protocol/monitoring-monorepo/commits/{sha}/check-runs?filter=all&per_page=100",
@@ -1371,7 +1424,9 @@
   },
   "shadow_spend_recommendation": {
     "runner_minutes_per_run_ceiling": 45,
+    "per_run_scope": "one no-skip workflow execution for one immutable sampled head",
     "runner_minutes_total_ceiling": 450,
+    "total_scope": "cumulative no-skip workflow runner minutes across the approved shadow sample",
     "pre_launch_stop": "Do not start shadow execution if the all-cache-disabled no-skip proof exceeds the human-approved per-run ceiling or ten runs project above the approved total.",
     "running_stop": "Suspend after any run exceeds the human-approved 45-runner-minute per-run ceiling or when cumulative use reaches the approved total.",
     "approval": "A human maintainer must approve both ceilings before issue 2126 starts shadow execution."

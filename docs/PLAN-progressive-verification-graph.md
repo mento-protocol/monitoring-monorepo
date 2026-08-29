@@ -355,10 +355,10 @@ The retained jobs follow current package and risk boundaries:
 - Generated-file, schema, ABI, submodule, and tracked-mirror drift checks.
 - Dependency, Knip, and supply-chain checks that depend on the proposed source.
 
-Preserve the separate required Code Quality and Sentry suites workflows unless
-a later ruleset decision changes them. Preserve Vercel and Vercel Preview
-Comments while they remain required. This plan does not collapse independent
-reporters into `CI / ci`.
+Preserve the separate required Code Quality workflow and the required Sentry
+suites job inside `CI` unless a later ruleset decision changes them. Preserve
+Vercel and Vercel Preview Comments while they remain required. This plan does
+not collapse independent reporters into `CI / ci`.
 
 Run independent jobs in parallel. Use a fixed matrix only when every cell has
 the same contract. Do not generate a task DAG or let candidate data create job
@@ -662,9 +662,16 @@ Record the accepted one-maintainer risk in the ADR.
 Record local queue time, local execution time, CI wall time, time to the first
 terminal required-CI result, time to the first useful failure, runner minutes,
 setup time, per-suite flake rate, and failure yield. Record the source SHA and
-measurement window. Define whether the cost baseline includes CI, Code Quality,
-Sentry suites, Vercel, Vercel Preview Comments, and the selected runner
-provider. The Phase 0 setup figure includes top-level `pnpm-install` composite
+measurement window. The Phase 0 cost baseline selects one `CI` workflow run for
+each sampled immutable head. It includes every non-skipped `CI` job, including
+`Sentry suites` and the `ci` aggregate. It excludes `Code Quality` because that
+job runs in the separate `Trunk` workflow. It excludes `Vercel` and `Vercel
+Preview Comments` because they are external results, not Actions jobs in the
+selected workflow. Included `CI` jobs use the Blacksmith labels
+`blacksmith-2vcpu-ubuntu-2404-arm`, `blacksmith-2vcpu-ubuntu-2404`, and
+`blacksmith-4vcpu-ubuntu-2404`, plus GitHub-hosted `ubuntu-latest`. This is a
+selected-workflow metric, not total pull-request spend or provider-billed
+minutes. The Phase 0 setup figure includes top-level `pnpm-install` composite
 steps and explicit steps whose names start with `Install`. It excludes checkout,
 standalone cache actions, setup-terraform, and other tool setup. For a retried
 workflow, sum every non-skipped job execution and selected setup step across
@@ -731,7 +738,8 @@ For every head, record:
 - The no-skip result and failed job.
 - Any product failure found only by no-skip CI because path-gated CI omitted
   the failing job.
-- Wall time, time to first failure, runner minutes, and retry reason.
+- Wall time, time to first failure, runner minutes, and retry reason for the
+  path-gated `CI` run and no-skip run as separate observations.
 - Any product failure, flake, cancellation, or infrastructure failure.
 
 Record a local gate result when it is available for the same SHA. Do not make
@@ -872,8 +880,11 @@ calendar days for head-level measures unless a larger denominator is stated.
   existing flake is fixed.
 - Infrastructure retry rate stays below 1% over at least 200 workflow attempt
   executions.
-- Runner minutes per pull request do not exceed the measured current required
-  CI baseline by more than 25% without an explicit cost decision.
+- Runner minutes for one path-gated `CI` workflow run do not exceed the
+  comparable Phase 0 selected-workflow baseline by more than 25% without an
+  explicit cost decision. This condition does not claim total pull-request
+  spend. Each no-skip run also stays within the separately approved 45-minute
+  per-run ceiling and 450-minute cumulative ceiling.
 
 ### Simplicity
 

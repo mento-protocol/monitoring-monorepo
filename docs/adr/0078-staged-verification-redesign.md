@@ -105,10 +105,16 @@ with cache reads and writes disabled. Stop if that proof breaches the approved
 ceiling. A scheduled run uses the same deterministic no-skip coverage after
 this proof passes.
 
-The 10-PR Phase 0 cost baseline counts every non-skipped job execution and
-selected setup step across all 13 attempts. It excludes successful jobs copied
-into a rerun payload when their start time precedes that attempt's creation
-time.
+The Phase 0 cost baseline selects one `CI` workflow run for each of ten
+immutable pull request heads. It counts every non-skipped job execution and
+selected setup step across all 13 attempts. This includes `Sentry suites` and
+the `ci` aggregate inside the `CI` workflow. It excludes the separate `Code
+Quality` workflow and the external `Vercel` and `Vercel Preview Comments`
+results. The included jobs use the recorded Blacksmith runner labels and
+GitHub-hosted `ubuntu-latest`. The metric is elapsed Actions job time for the
+selected workflow, not total pull-request spend or provider-billed minutes. It
+also excludes successful jobs copied into a rerun payload when their start time
+precedes that attempt's creation time.
 
 ### Use staged evidence and separate approvals
 

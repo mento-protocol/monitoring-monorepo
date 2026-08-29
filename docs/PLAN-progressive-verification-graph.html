@@ -830,12 +830,23 @@
           </div>
           <div class="callout">
             <strong>Spend is not approved:</strong> recommend 45 runner-minutes
-            per no-skip run and 450 runner-minutes total. A human must approve
-            the ceiling and stop condition before shadow execution. The Phase 0
-            cold planning estimate is 41.18 runner-minutes. It is not an upper
-            bound. An all-cache-disabled current no-skip proof must run before
-            shadow. The 10-PR baseline counts every non-skipped job across all
-            13 attempts and excludes successful jobs copied into rerun payloads.
+            per no-skip run and 450 cumulative runner-minutes across the
+            selected no-skip runs. A human must approve the ceiling and stop
+            condition before shadow execution. The Phase 0 cold planning
+            estimate is 41.18 runner-minutes. It is not an upper bound. An
+            all-cache-disabled current no-skip proof must run before shadow. The
+            Phase 0 sample selects one <code>CI</code> workflow run for each of
+            10 immutable PR heads. It counts every non-skipped job across all 13
+            attempts, including <code>Sentry suites</code> and the
+            <code>ci</code> aggregate. It excludes the separate
+            <code>Code Quality</code> workflow and the external
+            <code>Vercel</code> and <code>Vercel Preview Comments</code>
+            results. Included jobs use Blacksmith
+            <code>blacksmith-2vcpu-ubuntu-2404-arm</code>,
+            <code>blacksmith-2vcpu-ubuntu-2404</code>, and
+            <code>blacksmith-4vcpu-ubuntu-2404</code>, plus GitHub-hosted
+            <code>ubuntu-latest</code>. This is selected-workflow elapsed job
+            time, not total PR spend or provider-billed minutes.
           </div>
         </div>
       </section>

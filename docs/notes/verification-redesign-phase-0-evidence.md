@@ -152,27 +152,30 @@ out run recorded a two-second full React Doctor score step.
 For the 33 author-command observations, the baseline JSON record contains every
 exact invocation and result. The historical Phase 0 Trunk formatter invocation
 covered 13 staged candidate paths, checked 11 files, and passed in 9.11 seconds.
-It predates and does not validate the final 17-file patch. The trace ran from
+It predates and does not validate the 18-file Phase 0 change. The trace ran from
 `2026-08-28T18:00:08.358Z` through `2026-08-28T18:00:17.340Z` in the same dirty
 worktree based on HEAD
 `8bcb675b6b241e57435ce0e864e8511c03d9fce2`. No exact tree hash was retained.
 The historical command names ADR 0077. Integration later renumbered that file
 to ADR 0078. One observation is a measured value, not a p95 claim.
 
-## Pull request CI baseline
+## Selected CI workflow baseline
 
-The 10-PR sample uses the ten most recent completed, non-cancelled CI runs from
-ten distinct pull requests returned by `created=2026-08-21..2026-08-28` as of
-`2026-08-28T17:14:14.810Z`. Each wall value is the GitHub Actions workflow
-`updatedAt` timestamp minus its `createdAt` timestamp. The baseline stores both
-timestamps, the full source SHA, latest conclusion, and attempt count for every
-run.
+The sample selects the ten most recent completed, non-cancelled `CI` workflow
+runs after retaining at most one immutable head per pull request from
+`created=2026-08-21..2026-08-28` as of `2026-08-28T17:14:14.810Z`. Each selected
+immutable head is one observation.
+This denominator measures one `CI` workflow execution per sampled head. It does
+not measure all pushes or the total verification cost of a pull request. Each
+wall value is the workflow `updatedAt` timestamp minus its `createdAt`
+timestamp. The baseline stores both timestamps, the full source SHA, latest
+conclusion, and attempt count for every run.
 
-| Metric             |    Median | Maximum | Observations |
-| ------------------ | --------: | ------: | -----------: |
-| CI wall time       | 1,750.5 s | 2,780 s |   10 PR runs |
-| Summed runner time |   1,905 s | 3,789 s |   10 PR runs |
-| Setup time         |   112.5 s |   424 s |   10 PR runs |
+| Metric                  |    Median | Maximum |     Observations |
+| ----------------------- | --------: | ------: | ---------------: |
+| CI workflow wall time   | 1,750.5 s | 2,780 s | 10 selected runs |
+| CI workflow runner time |   1,905 s | 3,789 s | 10 selected runs |
+| Selected setup time     |   112.5 s |   424 s | 10 selected runs |
 
 Ten observations do not support the plan's p95 rule. The baseline reports no
 p95 for this sample. The source run IDs and raw values are in the baseline JSON.
@@ -183,6 +186,22 @@ the calculation accepts a job only when its start is at or after that attempt's
 creation time. A correction query for the three retried runs ran from
 `2026-08-29T06:52:20.752Z` through `2026-08-29T06:52:28.450Z`. It measured
 2,165, 2,577, and 2,690 runner seconds and 114, 89, and 182 setup seconds.
+
+The cost scope is explicit:
+
+| Required surface                                     | Included in runner and setup totals | Reason                                                                        |
+| ---------------------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------------- |
+| `CI` workflow, including the required `ci` aggregate | Yes                                 | The sample selects this workflow and counts all its non-skipped jobs.         |
+| `Sentry suites`                                      | Yes                                 | It is a required job inside the selected `CI` workflow.                       |
+| `Code Quality`                                       | No                                  | It runs in the separate `Trunk` workflow.                                     |
+| `Vercel`                                             | No                                  | It is an external commit status, not an Actions job in the selected workflow. |
+| `Vercel Preview Comments`                            | No                                  | It is an external check run, not an Actions job in the selected workflow.     |
+
+At the recorded control-plane source, included `CI` jobs use Blacksmith labels
+`blacksmith-2vcpu-ubuntu-2404-arm`, `blacksmith-2vcpu-ubuntu-2404`, and
+`blacksmith-4vcpu-ubuntu-2404`. Other included jobs use the GitHub-hosted
+`ubuntu-latest` label. The metric sums elapsed job windows. It does not claim
+provider-billed minutes or provider billing rounding.
 
 The setup figures include top-level `./.github/actions/pnpm-install` composite
 durations and explicit workflow steps whose names start with `Install`. They
@@ -200,11 +219,11 @@ after the original workflow creation at `2026-08-26T12:23:24Z`. The workflow
 2,102 summed runner seconds and 342 selected setup seconds. This equals about
 35.0 runner-minutes.
 
-This run is a full deterministic CI cost proxy. It is not a cold billed result.
-It used existing caches. The root scripts job waited for a runner. GitHub's API
-does not expose provider billing rounding in the job record. External Vercel
-status and check results are not Actions jobs. The runner and setup totals
-exclude them.
+This run is a full deterministic `CI` workflow elapsed-job-time proxy. It is
+not a cold billed result or a total pull-request cost. It used existing caches.
+The root scripts job waited for a runner. GitHub's API does not expose provider
+billing rounding in the job record. The separate `Code Quality` workflow and
+external Vercel results are excluded.
 
 A second retained run provides the cold-cost basis. Actions run 32469559880 for
 PR #1987 at immutable head
@@ -284,20 +303,20 @@ records. The committed receipt remains in repository history. `eng` owns
 collection and classification. A human maintainer owns spend and cutover
 approval.
 
-| Metric                         | Source and retention                                                                 | Formula and denominator                                                                                                                                                                            | Ceiling and stop condition                                                                                                                                                                              |
-| ------------------------------ | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Local queue time               | ADR 0076 and #2006 retained records; raw local files expired                         | `total - execution`; two observations; exact UTC window, source SHA, literal argv, and capture method unavailable                                                                                  | Post-cutover value must be zero because no hook can take a gate slot. Stop cutover if a local checkpoint waits on shared gate state.                                                                    |
-| Local execution time           | Same retained records                                                                | Command runtime after admission; two observations; exact UTC window, source SHA, literal argv, and capture method unavailable                                                                      | Direct author commands target below two minutes. Record and optimize the 191.5-second indexer test before it becomes a hard local latency promise.                                                      |
-| Staged formatting              | Actual staged candidate; base HEAD, command, UTC trace, and exact-tree limit persist | One hook wall-time observation; future p95 needs at least 20 comparable observations                                                                                                               | Target p95 below 10 seconds. Stop hook expansion if it runs package checks, fetches, generates, or takes a shared lock.                                                                                 |
-| Author commands                | Warm dirty local run; base HEAD, UTC trace, and exact-tree limit persist             | 33 terminal invocations; mixed nested execution and outer elapsed clocks as recorded                                                                                                               | No spend ceiling. Keep each required command direct. Stop and revise a mandatory mapping when prerequisites make it fail in a normal worktree.                                                          |
-| CI wall time                   | Actions workflow timestamps; live detail retained 90 days                            | `workflow updatedAt - workflow createdAt`; ten distinct PR-event workflow runs                                                                                                                     | Do not claim p95 below 20 heads. Stop cutover if the accepted shadow sample regresses from the Phase 0 distribution without a recorded decision.                                                        |
-| First terminal required result | Check-run and commit-status timestamps; committed receipt persists                   | Earliest terminal live-ruleset context minus workflow creation; one value per head                                                                                                                 | Report median and maximum for 10 heads. Future p95 target is 120 seconds only after at least 20 comparable heads. Stop if result source binding is unclear.                                             |
-| First useful failure           | Failed-job timestamp plus manual failure classification; live logs retained 90 days  | First classified actionable failure minus workflow creation; one value per failing or fault-injected run                                                                                           | Future p95 target is 120 seconds over at least 20 comparable runs covering all PR risk classes. Proxy-only data cannot approve cutover.                                                                 |
-| Runner minutes                 | Actions job timestamps; live detail retained 90 days                                 | Sum all non-skipped job executions across attempts after copied-job deduplication, then divide by 60; one sampled workflow run across all its attempts is one observation                          | Recommend 45 minutes per no-skip run and 450 minutes total. Do not start without human approval. Suspend after one run exceeds the approved 45-minute per-run ceiling or the approved total is reached. |
-| Setup time                     | Selected install-step timestamps; live detail retained 90 days                       | Across all attempt-scoped jobs, sum top-level `pnpm-install` composite durations and explicit `Install…` steps; excludes checkout, standalone cache actions, setup-terraform, and other tool setup | No independent spend ceiling. Stop cache hardening if a cache hit skips a required command or a PR job can save.                                                                                        |
-| Retry rate                     | Actions run-attempt records; live detail retained 90 days                            | Extra attempts divided by all workflow attempt executions                                                                                                                                          | Target below 1% over at least 200 workflow attempt executions. Stop cutover when the classified shadow value exceeds the target.                                                                        |
-| Failure yield                  | Terminal workflow conclusions; live detail retained 90 days                          | Failed initial or final attempts divided by their ten-run denominators                                                                                                                             | Diagnostic only; no ceiling until causes are classified. Stop a rollout for any false success or safeguard omission.                                                                                    |
-| Per-suite flake rate           | Job attempts and classified logs; live detail retained 90 days                       | Classified flaky executions divided by executed, non-skipped suite runs                                                                                                                            | Target below 0.5% over at least 200 executions per suite. Use a separate browser budget. Stop cutover if any suite lacks its denominator, owner, or accepted exception.                                 |
+| Metric                              | Source and retention                                                                 | Formula and denominator                                                                                                                                                                            | Ceiling and stop condition                                                                                                                                              |
+| ----------------------------------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Local queue time                    | ADR 0076 and #2006 retained records; raw local files expired                         | `total - execution`; two observations; exact UTC window, source SHA, literal argv, and capture method unavailable                                                                                  | Post-cutover value must be zero because no hook can take a gate slot. Stop cutover if a local checkpoint waits on shared gate state.                                    |
+| Local execution time                | Same retained records                                                                | Command runtime after admission; two observations; exact UTC window, source SHA, literal argv, and capture method unavailable                                                                      | Direct author commands target below two minutes. Record and optimize the 191.5-second indexer test before it becomes a hard local latency promise.                      |
+| Staged formatting                   | Actual staged candidate; base HEAD, command, UTC trace, and exact-tree limit persist | One hook wall-time observation; future p95 needs at least 20 comparable observations                                                                                                               | Target p95 below 10 seconds. Stop hook expansion if it runs package checks, fetches, generates, or takes a shared lock.                                                 |
+| Author commands                     | Warm dirty local run; base HEAD, UTC trace, and exact-tree limit persist             | 33 terminal invocations; mixed nested execution and outer elapsed clocks as recorded                                                                                                               | No spend ceiling. Keep each required command direct. Stop and revise a mandatory mapping when prerequisites make it fail in a normal worktree.                          |
+| Selected CI workflow wall time      | Actions workflow timestamps; live detail retained 90 days                            | `workflow updatedAt - workflow createdAt`; one selected `CI` workflow run for each of ten distinct immutable PR heads                                                                              | Do not claim p95 below 20 heads. Stop cutover if the accepted shadow sample regresses from the Phase 0 distribution without a recorded decision.                        |
+| First terminal required result      | Check-run and commit-status timestamps; committed receipt persists                   | Earliest terminal live-ruleset context minus workflow creation; one value per head                                                                                                                 | Report median and maximum for 10 heads. Future p95 target is 120 seconds only after at least 20 comparable heads. Stop if result source binding is unclear.             |
+| First useful failure                | Failed-job timestamp plus manual failure classification; live logs retained 90 days  | First classified actionable failure minus workflow creation; one value per failing or fault-injected run                                                                                           | Future p95 target is 120 seconds over at least 20 comparable runs covering all PR risk classes. Proxy-only data cannot approve cutover.                                 |
+| Selected CI workflow runner minutes | Actions job timestamps; live detail retained 90 days                                 | Sum all non-skipped jobs in one selected `CI` workflow run across its attempts after copied-job deduplication, then divide by 60; this excludes separate and external required surfaces            | Baseline observation only. Compare the same workflow scope during shadow. The no-skip workflow has a separate approved per-run and cumulative spend ceiling.            |
+| Setup time                          | Selected install-step timestamps; live detail retained 90 days                       | Across all attempt-scoped jobs, sum top-level `pnpm-install` composite durations and explicit `Install…` steps; excludes checkout, standalone cache actions, setup-terraform, and other tool setup | No independent spend ceiling. Stop cache hardening if a cache hit skips a required command or a PR job can save.                                                        |
+| Retry rate                          | Actions run-attempt records; live detail retained 90 days                            | Extra attempts divided by all workflow attempt executions                                                                                                                                          | Target below 1% over at least 200 workflow attempt executions. Stop cutover when the classified shadow value exceeds the target.                                        |
+| Failure yield                       | Terminal workflow conclusions; live detail retained 90 days                          | Failed initial or final attempts divided by their ten-run denominators                                                                                                                             | Diagnostic only; no ceiling until causes are classified. Stop a rollout for any false success or safeguard omission.                                                    |
+| Per-suite flake rate                | Job attempts and classified logs; live detail retained 90 days                       | Classified flaky executions divided by executed, non-skipped suite runs                                                                                                                            | Target below 0.5% over at least 200 executions per suite. Use a separate browser budget. Stop cutover if any suite lacks its denominator, owner, or accepted exception. |
 
 ## Current CI authority
 
@@ -395,12 +414,13 @@ before cutover, relocation, or deletion.
 
 ## Shadow spend recommendation
 
-Recommend 45 runner-minutes per no-skip execution and 450 runner-minutes for
-the initial 10-PR sample. Before shadow, run the all-cache-disabled proof above.
+Recommend 45 runner-minutes per no-skip execution and 450 cumulative
+runner-minutes across the initial ten selected no-skip executions, one per
+sampled immutable head. Before shadow, run the all-cache-disabled proof above.
 Do not start if it exceeds the human-approved per-run ceiling or projects the
 sample above the approved total. Suspend shadow after one run exceeds the
-approved 45-minute per-run ceiling or cumulative use reaches the approved
-total.
+approved 45-minute per-run ceiling or cumulative no-skip use reaches the
+approved total.
 
 This is a recommendation. It is not an approval. A human maintainer must approve
 both the ceiling and stop condition before issue #2126 starts shadow runs.
