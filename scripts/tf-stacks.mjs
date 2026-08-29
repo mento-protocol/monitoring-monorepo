@@ -33,6 +33,7 @@ const WORKFLOW_ONLY_LOCAL_STATEFUL_STACKS = new Map([
   ["peg-policy-publication", ".github/workflows/peg-policy-publication.yml"],
 ]);
 const PLATFORM_STACK_ID = "platform";
+const PRIVATE_TERRAFORM_CLI_CONFIG = "disable_checkpoint = true\n";
 
 function usage(exitCode = 0) {
   const out = exitCode === 0 ? process.stdout : process.stderr;
@@ -117,6 +118,16 @@ function run(command, args, options = {}) {
 
 function runTerraform(stack, args, options = {}) {
   return run("terraform", [`-chdir=${stack.path}`, ...args], options);
+}
+
+function createPrivateTerraformCliConfig(snapshotRoot) {
+  const configPath = path.join(snapshotRoot, ".terraformrc");
+  writeFileSync(configPath, PRIVATE_TERRAFORM_CLI_CONFIG, {
+    encoding: "utf8",
+    flag: "wx",
+    mode: 0o600,
+  });
+  return configPath;
 }
 
 function gitOutput(args) {
@@ -617,6 +628,11 @@ function runStackCommand(command, args) {
   const initArgs = ["init", "-input=false"];
 
   assertWriteOnlySecretLoggingDisabled(stack, command);
+  const platformPolicy =
+    stack.id === PLATFORM_STACK_ID && ["plan", "apply"].includes(command)
+      ? parsePlatformCommandArgs(command, terraformArgs)
+      : undefined;
+
   if (stack.id === PLATFORM_STACK_ID && ["plan", "apply"].includes(command)) {
     assertPlatformTerraformEnvironment();
   }
@@ -642,12 +658,9 @@ function runStackCommand(command, args) {
             };
           })()
         : stack;
-    const platformPolicy =
-      stack.id === PLATFORM_STACK_ID && ["plan", "apply"].includes(command)
-        ? parsePlatformCommandArgs(command, terraformArgs)
-        : undefined;
     const platformTerraformEnvironment = platformPolicy
       ? {
+          TF_CLI_CONFIG_FILE: createPrivateTerraformCliConfig(snapshotRoot),
           TF_DATA_DIR: path.join(snapshotRoot, ".terraform-data"),
           TF_WORKSPACE: "default",
         }

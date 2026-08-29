@@ -167,6 +167,21 @@ export const WORKFLOW_ARMS = [
             ],
           },
           {
+            patterns: [".github/workflows/platform-settings-drift.yml"],
+            effects: [
+              {
+                command:
+                  "node scripts/workflows/check-main-rulesets-drift.test.mjs",
+                reason: "platform-settings main-ruleset drift workflow changed",
+              },
+              {
+                command: "node scripts/workflows/read-main-rulesets.test.mjs",
+                reason:
+                  "platform-settings main-ruleset reader workflow changed",
+              },
+            ],
+          },
+          {
             patterns: [".github/workflows/metrics-bridge.yml"],
             effects: [
               {

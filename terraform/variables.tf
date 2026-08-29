@@ -19,16 +19,11 @@ variable "vercel_team_id" {
 # `alerts/infra/` uses a separate token of the same shape for its own `TF_VAR_*`
 # repo-secret mirrors.
 
-variable "github_owner" {
-  description = "GitHub organization that owns the repo whose Actions secrets this stack manages."
-  type        = string
-  default     = "mento-protocol"
-}
-
 variable "github_token" {
   description = <<-EOT
-    GitHub PAT for writing repository Actions secrets, variables, and the
-    default workflow-token permission on `mento-protocol/monitoring-monorepo`.
+    GitHub PAT for writing repository Actions secrets, variables, repository
+    settings, and the main lifecycle ruleset on
+    `mento-protocol/monitoring-monorepo`.
     Fine-grained PAT scoped to that repo with Repository → Secrets: Read/write,
     Variables: Read/write, Administration: Read/write, and Environments:
     Read/write — least-privilege for this stack's use case (org-admin scope is
@@ -36,7 +31,9 @@ variable "github_token" {
     GitHub scopes these repo permissions independently: Variables for
     `github_actions_variable`, Administration for
     `github_workflow_repository_permissions` (`github-actions-permissions.tf`,
-    issue #1557), and Environments for the `sentry-pipeline` GitHub Environment +
+    issue #1557) and `github_repository_ruleset`
+    (`github-main-lifecycle-ruleset.tf`, issue #2091), and Environments for the
+    `sentry-pipeline` GitHub Environment +
     its `github_actions_environment_secret` mirrors (`github-environment.tf`,
     issue #1289) — a PAT missing any of these 403s.
   EOT
@@ -44,17 +41,77 @@ variable "github_token" {
   sensitive   = true
 }
 
+variable "local_agent_github_app_id" {
+  description = "Numeric App ID of the separately created local-agent GitHub App. This App is installed only on monitoring-monorepo and is never a ruleset bypass actor. Leave 0 until the human bootstrap is complete."
+  type        = number
+  default     = 0
+
+  validation {
+    condition = (
+      var.local_agent_github_app_id >= 0 &&
+      floor(var.local_agent_github_app_id) == var.local_agent_github_app_id &&
+      var.local_agent_github_app_id <= 9007199254740991
+    )
+    error_message = "local_agent_github_app_id must be 0 or a positive integer GitHub App ID."
+  }
+}
+
+variable "local_agent_github_app_installation_id" {
+  description = "Numeric installation ID of the local-agent GitHub App on monitoring-monorepo. Leave 0 until the human bootstrap is complete."
+  type        = number
+  default     = 0
+
+  validation {
+    condition = (
+      var.local_agent_github_app_installation_id >= 0 &&
+      floor(var.local_agent_github_app_installation_id) == var.local_agent_github_app_installation_id &&
+      var.local_agent_github_app_installation_id <= 9007199254740991
+    )
+    error_message = "local_agent_github_app_installation_id must be 0 or a positive integer GitHub App installation ID."
+  }
+}
+
+variable "local_agent_github_app_private_key" {
+  description = "PEM private key for the local-agent GitHub App. Supply it to Terraform through an operator-owned gitignored tfvars file for the separately approved credential apply. The initial browser download follows the runbook's transient intake, removal, and revoke-on-uncertain-custody procedure. The guarded wrapper copies the tfvars file once into its private exact-plan directory and deletes the directory in `finally`. The ephemeral value terminates at a Secret Manager write-only field and is omitted from plan and state."
+  type        = string
+  default     = ""
+  sensitive   = true
+  ephemeral   = true
+}
+
+variable "local_agent_github_app_private_key_rotation_counter" {
+  description = "Non-secret Secret Manager rotation counter for the local-agent GitHub App private key. Keep 0 before activation; start at 1 and increment only for a separately approved rotation."
+  type        = number
+  default     = 0
+
+  validation {
+    condition = (
+      var.local_agent_github_app_private_key_rotation_counter >= 0 &&
+      floor(var.local_agent_github_app_private_key_rotation_counter) == var.local_agent_github_app_private_key_rotation_counter
+    )
+    error_message = "local_agent_github_app_private_key_rotation_counter must be a non-negative integer."
+  }
+}
+
+variable "local_agent_github_app_credential_active" {
+  description = "Create the IaC-owned local-agent GitHub App private-key version. Keep false until the separate App bootstrap and credential apply are approved."
+  type        = bool
+  default     = false
+}
+
 variable "platform_settings_audit_token" {
   description = <<-EOT
     Fine-grained GitHub PAT with Administration: Read on
     `mento-protocol/monitoring-monorepo` ONLY (no other scope), consumed solely
     by `.github/workflows/platform-settings-drift.yml` to read
-    `GET /repos/{owner}/{repo}/actions/permissions/workflow` and assert the repo
-    default workflow-token permission stays read-only (issues #1564, #1557).
+    repository workflow-permission and ruleset endpoints and assert the repo
+    default workflow-token permission and main rulesets stay at their pinned
+    values (issues #2091, #1564, #1557).
     Mirrors into the `PLATFORM_SETTINGS_AUDIT_TOKEN` environment secret on the
     `sentry-pipeline` GitHub Environment (`github-environment.tf`, issue #1289),
-    count-gated so `terraform apply` succeeds while unset and the drift check
-    no-ops. Read-only by design: it can never CHANGE a
+    count-gated so `terraform apply` succeeds while unset. The source policy may
+    keep the ruleset leg inert before activation; after activation an unset
+    value fails the workflow. Read-only by design: it can never CHANGE a
     setting. Deliberately SEPARATE from `github_token` (Administration:
     Read/write, kept local-only, never a CI secret) and from the autofix App
     (whose minimal Contents+Pull-requests trust boundary we do not widen). Leave

@@ -1,0 +1,8 @@
+{
+  "repository": "mento-protocol/monitoring-monorepo",
+  "human_merge_operator_team_id": 0,
+  "human_main_lifecycle_ruleset_id": 0,
+  "human_main_lifecycle_ruleset_enforcement": "disabled",
+  "ruleset_audit_active": false,
+  "local_agent_github_broker_impersonator": ""
+}

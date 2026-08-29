@@ -50,6 +50,8 @@
     "issue:claim": "node scripts/pr/agent-issue-board.mjs claim",
     "issue:review": "node scripts/pr/agent-issue-board.mjs review",
     "issue:release": "node scripts/pr/agent-issue-board.mjs release",
+    "github:agent": "node scripts/github/local-agent-github-exec.mjs",
+    "github:agent:test": "node --test scripts/github/local-agent-github-broker.test.mjs",
     "sentry:ingest": "node scripts/sentry/triage/sentry-triage-ingest.mjs",
     "sentry:ingest:test": "node scripts/sentry/triage/sentry-triage-ingest.test.mjs",
     "sentry:digest": "node scripts/sentry/triage/sentry-triage-digest.mjs",

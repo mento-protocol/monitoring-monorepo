@@ -3,7 +3,7 @@ title: Terraform Stacks
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-20
+last_verified: 2026-08-28
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -15,14 +15,14 @@ garden_lane: operator-runbooks
 `terraform.stacks.json` is the source of truth for Terraform roots; do not infer
 ownership from directory names.
 
-| Stack                    | Path                             | State prefix             | Owns                                                                                                                                                                                                                                                                                                                                                                                                       | Plan/apply policy                                                                                                   |
-| ------------------------ | -------------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `platform`               | `terraform/`                     | `monitoring-monorepo`    | Dashboard Vercel project, the dashboard's read-only Grafana service account/token, Upstash, monitoring GCP project/APIs, private same-project Peg-policy storage, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, explicit deploy-source buckets, separated CI WIF/IAM identities, platform-owned repo Actions secrets/variables, and the Peg-policy storage/identity foundation | Manual plan; human-approved local apply                                                                             |
-| `peg-policy-publication` | `alerts/peg-policy-publication/` | `peg-policy-publication` | One immutable GCS generation of `alerts/rules/peg-thresholds.json`; no Cloud Run configuration or Grafana resources                                                                                                                                                                                                                                                                                        | Credential-free PR validation; manual `main` refresh plan, then `production-infra`-approved workflow apply          |
-| `alerts-rules`           | `alerts/rules/`                  | `alerts-rules`           | Protocol Grafana alert rules + Aegis service-health and testnet-health rule groups, Grafana folders, global Grafana notification policy, contact points, message templates, mute timings                                                                                                                                                                                                                   | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
-| `alerts-delivery`        | `alerts/infra/`                  | `alerts-infra`           | QuickNode webhooks, alert Cloud Functions, Sentry bridge, Slack channel lifecycle, Splunk On-Call rotation announcements, related GCP resources, and stack-local trusted-main refresh grants                                                                                                                                                                                                               | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
-| `aegis`                  | `aegis/terraform/`               | `aegis`                  | Aegis Grafana dashboard and Aegis folder                                                                                                                                                                                                                                                                                                                                                                   | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
-| `governance-watchdog`    | `governance-watchdog/infra/`     | `governance-watchdog`    | Dedicated governance-watchdog GCP project, Cloud Function/source archive, Secret Manager, QuickNode webhook creation, scheduler, monitoring, alerts, and stack-local trusted-main refresh grants                                                                                                                                                                                                           | PR plan; `main` apply through the `production-infra` GitHub Environment; daily drift plan via `terraform-drift.yml` |
+| Stack                    | Path                             | State prefix             | Owns                                                                                                                                                                                             | Plan/apply policy                                                                                                   |
+| ------------------------ | -------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `platform`               | `terraform/`                     | `monitoring-monorepo`    | Dashboard, Grafana read identity, Upstash, monitoring GCP, Peg storage, Cloud Run shape, Aegis bootstrap, deploy buckets, CI identities, repo Actions settings, and ADR 0078 boundary resources  | Manual plan; human-approved local apply                                                                             |
+| `peg-policy-publication` | `alerts/peg-policy-publication/` | `peg-policy-publication` | One immutable GCS generation of `alerts/rules/peg-thresholds.json`; no Cloud Run configuration or Grafana resources                                                                              | Credential-free PR validation; manual `main` refresh plan, then `production-infra`-approved workflow apply          |
+| `alerts-rules`           | `alerts/rules/`                  | `alerts-rules`           | Protocol Grafana alert rules + Aegis service-health and testnet-health rule groups, Grafana folders, global Grafana notification policy, contact points, message templates, mute timings         | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
+| `alerts-delivery`        | `alerts/infra/`                  | `alerts-infra`           | QuickNode webhooks, alert Cloud Functions, Sentry bridge, Slack channel lifecycle, Splunk On-Call rotation announcements, related GCP resources, and stack-local trusted-main refresh grants     | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
+| `aegis`                  | `aegis/terraform/`               | `aegis`                  | Aegis Grafana dashboard and Aegis folder                                                                                                                                                         | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
+| `governance-watchdog`    | `governance-watchdog/infra/`     | `governance-watchdog`    | Dedicated governance-watchdog GCP project, Cloud Function/source archive, Secret Manager, QuickNode webhook creation, scheduler, monitoring, alerts, and stack-local trusted-main refresh grants | PR plan; `main` apply through the `production-infra` GitHub Environment; daily drift plan via `terraform-drift.yml` |
 
 ## Commands
 
@@ -77,15 +77,34 @@ the default workspace, and a private `TF_DATA_DIR` under the committed-source
 snapshot, so interactive input or inherited workspace state cannot change the
 checked execution.
 
-The wrapper rejects caller-owned plan files, destructive and replacement
-modes, arbitrary targets, `-lock=false`, injected `TF_CLI_ARGS*`, and a
-non-default `TF_WORKSPACE`. The only `-target` and `-refresh=false` exception is
-the exact ADR 0055 controller-role recovery, whose whole managed diff may only
-create that role. The Metrics Bridge check does not approve unrelated platform
-changes. Human review of the earlier preflight and explicit apply approval
-remain mandatory, but only the machine policy sees the exact plan applied.
+The wrapper rejects caller plans, destructive/replacement modes, arbitrary
+targets, unsafe lock/workspace/CLI arguments, GitHub provider overrides,
+credential ingress, and caller Terraform provider-runtime state. It owns a
+private mode-`0600` CLI configuration and fixed non-echo errors. Only the exact
+ADR 0055 controller recovery can target or skip refresh. The guard does not
+approve other changes; human preflight and apply approval remain mandatory.
 [ADR 0061](adr/0061-exact-plan-guard-for-manual-platform-applies.md)
 owns the exact-plan boundary.
+
+## Human-only main lifecycle boundary
+
+[ADR 0078](adr/0078-human-only-main-update-boundary.md) and its
+[runbook](notes/local-agent-github-app-credential.md) own all phases, custody,
+proof, rollback, and import deferral. Each needs approval; source merge is inert.
+
+Source pins the repository, Team, managed rule ID/enforcement, audit, and broker
+principal. Reviewed source replaces zero sentinels. The first plan creates a
+disabled creation/update/deletion rule with one Team `pull_request` bypass.
+Later plans use its pinned ID after cutover. Core rule `13494367` stays
+unmanaged because provider `6.12.1` loses its unattributed-change field.
+
+The broker keeps its PEM, JWT, and token outside agents. Git, workflow,
+readiness, and transactional board lanes stay unavailable. Stronger credentials
+stay outside agent OSes. Dependabot auto-merge drains before live proof and an
+audit with `main-ruleset-audit state=ok`.
+
+Vercel retains Administration plus Contents as a Free-plan residual. It can
+change the rule and then `main`; drift is detective only.
 
 `peg-policy-publication` permits only backend-free local validation with
 `pnpm tf validate peg-policy-publication`. Local plan and apply are disabled,
@@ -181,10 +200,10 @@ secrets.
 ADR 0047 selects the final no-artifact protected-stack apply contract: make a
 private plan after approval, run fail-closed policy over its JSON, then apply
 those exact bytes. ADR 0061 implements the first narrow slice for manual
-platform plan/apply by guarding the Metrics Bridge template and ADR 0055
-recovery. Issue #1576 still owns the broader dual-run policy for every retained
-protected-stack mutation. The other apply paths retain their documented
-apply-time re-plan window until that work lands.
+platform plan/apply by guarding the Metrics Bridge template, ADR 0055 recovery,
+and ADR 0078 lifecycle rules through
+`check-human-merge-boundary-plan.mjs`. Issue #1576 owns the broader policy. The
+other apply paths retain their documented apply-time re-plan window.
 
 ## Identity bootstrap, routing cutover, and authority removal
 

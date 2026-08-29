@@ -49,6 +49,12 @@ const expectedScripts = {
   "issue:claim": "node scripts/pr/agent-issue-board.mjs claim",
   "issue:review": "node scripts/pr/agent-issue-board.mjs review",
   "issue:release": "node scripts/pr/agent-issue-board.mjs release",
+  // ADR 0078. This is the only agent-visible entry to the root-owned App
+  // credential broker. Pin both aliases so a source PR cannot repoint either
+  // the live client or the suite which proves its redaction and env binding.
+  "github:agent": "node scripts/github/local-agent-github-exec.mjs",
+  "github:agent:test":
+    "node --test scripts/github/local-agent-github-broker.test.mjs",
   "sentry:ingest": "node scripts/sentry/triage/sentry-triage-ingest.mjs",
   "sentry:ingest:test":
     "node scripts/sentry/triage/sentry-triage-ingest.test.mjs",

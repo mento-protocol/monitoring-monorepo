@@ -3,7 +3,7 @@ title: GitHub Tooling Surfaces — gh CLI vs MCP
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-25
+last_verified: 2026-08-29
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -16,9 +16,15 @@ The GitHub-interacting skills (`ship`, `babysit-pr`) branch on execution
 surface. This note is the single canonical mapping between the two paths; the
 skills link here instead of duplicating it.
 
-- **Local sessions (and Codex Cloud): gh-first.** The gh CLI works, so the
-  shared probes (`pnpm pr:ready-state`, `pnpm pr:feedback-state`,
-  `pnpm issue:claim`) are the source of truth.
+- **Local sessions: repository-helper first before cutover.** The shared probes
+  (`pnpm pr:ready-state`, `pnpm pr:feedback-state`, `pnpm issue:claim`) are the
+  source of truth on the legacy gh surface. The first structured broker does
+  not run these helpers or implement their GraphQL projections. After cutover,
+  keep each unsupported step unavailable until a trusted structured equivalent
+  exists. Do not give a repository helper an installation token.
+- **Codex Cloud: evidence-dependent.** Use the gh path only when the cloud
+  credential is proved to be an approved repository-scoped App installation
+  token. Otherwise keep the surface read-only.
 - **Claude cloud sessions: MCP-first.** The gh binary is not installed by
   default in cloud containers, and even where it is obtained, GraphQL stays
   blocked (the probes rely on it — `pnpm pr:ready-state` fails on its first
@@ -26,32 +32,82 @@ skills link here instead of duplicating it.
   the GitHub MCP tools, and monitoring goes through PR webhook subscription
   plus scheduled self-check-ins.
 
+## Local credential identity
+
+ADR 0078 separates the local agent identity from the human merge identity.
+The checked-in source defines the target state. It does not prove that the
+server ruleset or credential cutover is live.
+
+After the separately approved activation, a local agent submits one structured
+operation to the root-owned broker. The broker mints a short-lived installation
+token for the selected-repository App, performs that operation with a fixed
+permission profile, and returns only normalized operation output. The App PEM,
+JWT, and installation token never enter the agent process or a caller-controlled
+child.
+
+The fixed profiles separate reads, pull-request and issue mutation, future Git
+publication, and future issue-board mutation. The last two are source-disabled.
+A read profile has no write permission. Workflow write is absent from every
+normal profile. It needs a root-owned,
+human-controlled capability that ordinary agent input cannot select. The
+broker stays unavailable when the host cannot enforce this contract. The exact
+protocol and activation procedure are in
+[`local-agent-github-app-credential.md`](local-agent-github-app-credential.md).
+
+The checked-in broker supports only its named REST operations. It does not run
+`gh`, Git, `pnpm`, a repository hook, or a repository helper with a token. Git
+publication, merge, workflow publication, the two PR readiness projections,
+and transactional #2111 claim/release remain unavailable. Use an approved
+human or proved MCP lane for a required unsupported step. Report that handoff
+as a limit. Do not infer `READY` from the smaller REST response.
+
+The human merge credential and the write-capable platform PAT stay outside
+every agent OS, keychain, browser, environment, credential proxy, and command
+surface. The agent OS also has no operator platform tfvars file. A human Team
+member uses the merge credential only from a human-only terminal for the
+approved `pnpm pr:merge` step. Do not
+infer local identity from an App installed for Codex Cloud, Claude, Sentry, or
+another workflow. An installed cloud App does not authenticate local `gh`.
+
+Before cutover, report the local credential as human-derived and treat the
+local wrapper as the live merge control. After cutover, prove the installation
+ID and server refusal through the credential runbook's proof phase. Do not claim
+activation from Terraform source or an App registration alone.
+
+After cutover, use a fresh dedicated agent OS account or container with no
+operator Git configuration or credential. Do not run an authenticated direct
+gh or Git network command from the agent process. Use only a structured broker
+operation. Do not put an installation token in the parent shell. Git
+publication remains on the separate human lane until a root-owned clean mirror
+or equivalent trusted implementation passes its activation proof.
+
+Claude cloud remains MCP-first. Codex Cloud can remain gh-first only after its
+credential is proved to be a repository-scoped App installation token with no
+lifecycle bypass. A platform-provided credential name is not proof. A cloud
+surface that cannot prove this identity must remain read-only and outside the
+credential cutover.
+
 ## Surface detection
 
-1. `CLAUDE_CODE_REMOTE` is set → Claude cloud session → MCP-first, unless
-   the variant passes the full capability gate in step 3 — then gh-first
-   applies with `--repo <owner/name>` on PR-scoped calls. This is the same
-   gate `scripts/bootstrap/claude-code-web-setup.sh` and `.claude/babysit-pr.sh`
-   use.
-2. Otherwise → local (or Codex Cloud) → gh-first.
-3. The capability gate: run `command -v gh` **first**. Cloud containers do not
-   ship a gh binary by default, so the gate must fail here in the common case
-   rather than at the first `gh api` call below — a probe that skips this
-   check reads "command not found" as an evaluation failure instead of the
-   absence signal it actually is. When gh is present, a repo-scoped
-   `gh api repos/<owner>/<repo>` call, a minimal GraphQL query
-   (`gh api graphql -f query='query{viewer{login}}'`), and a flag-support check
-   for pagination slurping (`gh api --help | grep -- --slurp`) must all
-   succeed. Probe `--slurp` by capability, not by version: `--slurp` is only
-   valid alongside `--paginate` on a real endpoint, so a bare `gh api --slurp`
-   is not runnable, and distro builds backport flags unevenly — the observed
-   floor is that gh 2.45.0 (the default Ubuntu apt build) lacks it while gh
-   2.96.0 has it. `scripts/bootstrap/claude-code-web-setup.sh` runs this same
-   `--help` grep. **Do not use `gh auth status` or `/user`
-   reachability as the signal** — in Claude cloud sessions the proxy serves
-   `/user` and `/rate_limit` (so `gh auth status` succeeds) while GraphQL is
-   still blocked, and REST `/repos/*` behavior has been observed to vary (see
-   below).
+1. `CLAUDE_CODE_REMOTE` is set → Claude cloud session → MCP-first. Keep a
+   writable surface disabled until its connector identity is proved to be an
+   approved App installation with no lifecycle bypass.
+2. Local session after approved cutover → named structured broker operations
+   only. Do not run a direct authenticated gh or Git network probe from the
+   agent process. Hand off a helper or projection that the broker does not
+   implement.
+3. Local session before cutover → legacy gh-first path. Report that the server
+   identity boundary is not active.
+4. Codex Cloud → gh-first only after identity proof. Otherwise keep the surface
+   read-only.
+
+For an allowed cloud gh surface, run `command -v gh` first. Cloud containers do
+not ship a gh binary by default. When gh is present, require repository REST,
+minimal GraphQL, and pagination-slurping capability before selecting the gh
+path. Probe `--slurp` by capability, not version. `--slurp` is valid only with
+`--paginate` on a real endpoint. Do not use `gh auth status` or `/user`
+reachability as the signal. A cloud proxy can serve `/user` and `/rate_limit`
+while GraphQL remains blocked.
 
 ## Why gh cannot work in Claude cloud sessions
 
@@ -105,9 +161,9 @@ pass above:
 
 Regardless of REST behavior, MCP-first stands as the default for Claude cloud
 sessions: the gh binary is not reliably available, GraphQL stays blocked, and
-the probes the skills depend on need both. The capability gate in Surface
-detection step 3 is the one exception, and no cloud container has yet
-satisfied it. Do not build a gh-over-MCP shim as a substitute for that gate;
+the probes the skills depend on need both. The proved Codex Cloud identity and
+capability gate in Surface detection is the one gh-first exception. No cloud
+container has yet satisfied it. Do not build a gh-over-MCP shim for that gate;
 the skills document the two native paths.
 
 ## gh → MCP mapping
@@ -150,15 +206,19 @@ Use the unique workflow row's `id` as `<workflow-database-id>`. Require each
 run's `headSha` to equal the target SHA and `workflowDatabaseId` to equal that
 ID. A workflow display name, branch filter, or list position is not sufficient
 evidence because each can select an older or unrelated run. For pull requests,
-keep `pnpm pr:ready-state` and `gh pr checks` as the canonical probes.
+keep `pnpm pr:ready-state` and `gh pr checks` as the canonical probes on a
+credential surface that can run them. The first local App broker cannot run
+them. Its REST operations do not replace their verdict.
 
 ## Issue workboard transitions
 
-`pnpm issue:claim`, `issue:review`, and `issue:release` shell out to gh —
-including `gh api graphql` for Project #12 status and the Claim ID ownership
-field — so they cannot run in Claude cloud sessions absent the
-capability-gate exception. The cloud fallback is a
-partial MCP emulation plus an explicit gh-capable handoff:
+`pnpm issue:claim`, `issue:review`, and `issue:release` shell out to gh. They
+also use `gh api graphql` for Project #12 status and the Claim ID ownership
+field. They cannot run in Claude cloud sessions without the capability-gate
+exception. They also cannot run through the first local App broker. Its
+`issue-board-write` profile rejects every operation before token minting until
+the transactional #2111 adapter exists. The fallback is a partial MCP
+emulation plus an explicit gh-capable handoff:
 
 1. Perform the label transition with `issue_write` (send the full resulting
    label set, e.g. swap `agent-ready` for `agent-active` on claim, or

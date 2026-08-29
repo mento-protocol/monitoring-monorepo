@@ -3,7 +3,7 @@ title: Manual platform applies use an exact private plan guard
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-17
+last_verified: 2026-08-29
 scope: terraform/infra
 date: 2026-08
 doc_type: adr
@@ -41,10 +41,16 @@ per command:
 
 - The wrapper accepts a small Terraform argument allowlist and rejects caller
   plan paths, destroy/replace/invoke modes, `-lock=false`, injected
-  `TF_CLI_ARGS*`, and non-default `TF_WORKSPACE` values.
+  `TF_CLI_ARGS*`, and non-default `TF_WORKSPACE` values. It also rejects the
+  App private key and platform GitHub PAT in environment variables or CLI
+  `-var` arguments. It rejects caller `TF_CLI_CONFIG_FILE` and
+  `TF_REATTACH_PROVIDERS` values before Git or Terraform runs. Unknown
+  arguments fail with a fixed message that does not echo caller input.
 - Every Terraform phase runs non-interactively in the default workspace with a
-  private `TF_DATA_DIR` under the committed-source snapshot. An inherited data
-  directory or workspace-selection file cannot redirect the checked plan.
+  private `TF_DATA_DIR` and a wrapper-created mode-`0600` Terraform CLI
+  configuration under the committed-source snapshot. An inherited data
+  directory, CLI configuration, provider reattachment, or workspace-selection
+  file cannot redirect the checked plan.
 - It plans from the verified clean current-`main` snapshot into a mode-`0700`
   temporary directory, copies each variable file there once at mode `0600`, and
   changes the binary plan to mode `0600`. Plan and apply use the same copies.
@@ -60,6 +66,11 @@ per command:
   one canonical Metrics Bridge service entry. Aliases, module/index/deposed
   forms, previous addresses, deferred changes, action invocations, incomplete
   plans, errored plans, and unknown template changes fail closed.
+- The human merge-boundary policy checks the separate `main` lifecycle
+  ruleset. Initial creation must be disabled and have no prior value. Later
+  plans must use the source-pinned managed ruleset ID. Every plan rejects core
+  ruleset ID `13494367`. The exact Team, repository, lifecycle rules,
+  enforcement transition, and GitHub provider endpoint must stay known.
 - ADR 0055's exact `-refresh=false` controller-role target is the only target
   exception. Terraform marks that target plan `complete: false`; only this
   recovery may use that incomplete envelope, and its entire managed non-no-op
@@ -73,12 +84,12 @@ per command:
   Plans and plan JSON are never committed, uploaded, cached, or handed between
   operators.
 
-The checker approves only the Metrics Bridge template phase and the narrow ADR
-0055 recovery shape. It does not approve unrelated platform changes. Operators
-must still review a separate preflight plan and obtain explicit human approval
-before apply. The apply creates a fresh plan, so only the machine policy reviews
-the exact plan applied. Issue #1576 still owns broad policy coverage for every
-retained protected-stack mutation.
+The wrapper composes the Metrics Bridge policy, the narrow ADR 0055 recovery
+policy, and the ADR 0078 lifecycle policy. These checks do not approve another
+platform change. Operators must still review a separate preflight plan and
+obtain explicit human approval before apply. The apply creates a fresh plan,
+so only the machine policy reviews the exact plan applied. Issue #1576 still
+owns broad policy coverage for every retained protected-stack mutation.
 
 This guard covers `pnpm tf plan/apply platform` only. The direct Metrics Bridge
 deploy holds a separate, deploy-only exception: two targeted `-refresh=false`
@@ -123,6 +134,9 @@ contract that enforces it.
 - Adding another platform exception requires a reviewed policy rule, focused
   tests, and an ADR amendment. Arbitrary target and refresh exceptions remain
   closed.
+- Lifecycle-rule creation, ID pinning, enforcement activation, and drift-audit
+  activation are separate reviewed phases. A successful source check does not
+  prove that any external phase occurred.
 
 ## Evidence
 

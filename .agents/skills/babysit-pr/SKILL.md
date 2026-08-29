@@ -41,6 +41,13 @@ baseline, and the two-projection readiness contract.
   and `pnpm pr:feedback-state` decide, bound with `--repo <BASE_REPO>` resolved
   from the PR URL. `.claude/babysit-pr.sh` enforces this as a gate for any
   babysit skill that discovers it, including the user-global one.
+- **Use the local App after its approved cutover.** Send supported
+  authenticated reads or mutations through the structured `pnpm github:agent`
+  broker protocol. The trusted side never returns its installation token. The
+  first broker does not implement `pr:ready-state` or `pr:feedback-state`.
+  Hand those projections to an approved human or proved MCP surface after
+  cutover. Keep the verdict qualified until both run on the current head. The
+  human merge credential never enters a babysit session.
 - **Fork heads are refused**, not gated — at target resolution, before any
   repo-local probe, gate, or fix runs, on every surface. The repo's probes and
   bundle sequence assume a trusted `origin` serving the base repo.

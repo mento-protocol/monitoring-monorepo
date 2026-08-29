@@ -37,20 +37,16 @@ subdirectories.
 - `terraform/`: movable Terraform guards/helpers
 - `gate/`: routing engine + coordinator
 - `sentry/`: triage/autofix/gate/broker/ci-wiring
+- `github/`: local GitHub App host broker, agent client, and credential tests
 
 `lib/` and `production-infra-identity-contract/` predate the reorg.
 `.config/wt.toml` and eight docs pin flat `setup.sh`.
 `redrive-onchain-deadletter.{mjs,test.mjs}` stays flat under
 `alerts/infra/`; ADR 0064 gives the lint reason.
 
-`lib/` holds cores that multiple clusters read: `hcl.mjs` for Terraform HCL,
-`workflow-yaml.mjs` for Actions and shell parsing,
-`pnpm-override-selector.mjs` for pnpm overrides, and
-`gh-issue-lifecycle.mjs` for shared GitHub issue and label mechanics, which doc
-schedulers also read. Local projection keeps only `agent-ready` on create and
-all lifecycle labels on closed repair. ADR 0064 lists readers.
-`peg-policy-digest.mjs` defines the peg version-digest contract for both
-validators. Inventories, pinned hashes, and identities stay with their domain.
+`lib/` holds shared HCL, workflow, pnpm-override, and GitHub issue cores. ADR
+0064 lists their readers. `peg-policy-digest.mjs` defines the shared peg digest.
+Inventories, hashes, and identities stay with their domain.
 
 ## Why Files Stay Flat
 
@@ -111,8 +107,13 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.
-- **Trusted-validator probes.** `pr-description.yml` resolves the validator at
-  the PR base-branch tip, not a PR snapshot. After a move, keep dual probes
+- **Human boundary pins.** Platform plans, ruleset drift, and the local App
+  broker are pinned across Terraform, workflows,
+  gate routes, package scripts, CI, and operator docs. Move each implementation
+  with its test and every consumer. ADR 0078 and its credential runbook own the
+  exact files and fixed host install paths.
+- **Trusted-validator probes.** `pr-description.yml` runs the validator from the
+  PR base-branch tip, not a PR snapshot. After a move, keep dual probes
   until the new path reaches the base (issue 1904; ADR 0064).
 - **PR validation boundary pins.** Move
   `workflows/check-pr-validation-boundary{,.test}.mjs` together. Keep its
@@ -161,10 +162,16 @@ in the same PR.
 - No ESLint `max-lines` reaches this tree. The file-size watchlist reports it
   instead — tests aside, three trust-root files exempt:
   [ADR 0065](../docs/adr/0065-scripts-file-size-watchlist-scope.md).
-- `pnpm tf plan/apply platform` owns one private saved plan. Never accept a
-  caller plan path, or print, upload, or cache either plan form. Mechanism and
-  deploy-only bootstrap exception:
-  [ADR 0061](../docs/adr/0061-exact-plan-guard-for-manual-platform-applies.md).
+- Platform plan/apply owns its private plan and CLI configuration. Reject a
+  caller plan, credential environment or CLI input, provider-runtime override,
+  and unknown argument without echo. Never persist plan data. ADR 0061 owns the
+  exact guard and deploy-only exception.
+- ADR 0078 and its runbook own the App boundary. Keep the Team, ruleset ID, and
+  broker principal in source. Keep the PEM, JWT, and token outside agents and
+  caller-controlled children. Preserve fixed root-owned execution, profiles,
+  ambient-credential refusal, redaction, and no-token canaries. Agent input
+  cannot select Workflow write. Follow the runbook for PEM custody, activation,
+  and revoke-on-uncertain-custody.
 - `pnpm tf:test` enforces the deployment source-staging contract. Never add a
   deploy callsite, an indirect or dynamic deploy form, or a CLI service-account
   override; keep inert examples in `scripts/deploy-staging-contract.test.mjs`.

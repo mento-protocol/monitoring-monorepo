@@ -18,6 +18,7 @@ import "./production-infra-identity-contract/index.test.mjs";
 import "./sentry/gate/sentry-provider-contract.test.mjs";
 import "./alerts/check-peg-policy-publication.test.mjs";
 import "./terraform/check-metrics-bridge-template-plan.test.mjs";
+import "./terraform/check-human-merge-boundary-plan.test.mjs";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -26,12 +27,53 @@ const repoRoot = path.resolve(
 const script = path.join(repoRoot, "scripts/tf-stacks.mjs");
 const originMainFetchCommand =
   "fetch --quiet origin refs/heads/main:refs/remotes/origin/main";
+const testHumanMergeBoundaryPolicy = Object.freeze({
+  repository: "mento-protocol/monitoring-monorepo",
+  human_merge_operator_team_id: 424242,
+  human_main_lifecycle_ruleset_id: 24680,
+  human_main_lifecycle_ruleset_enforcement: "active",
+  ruleset_audit_active: false,
+  local_agent_github_broker_impersonator: "",
+});
+const defaultLifecycleRuleset = {
+  name: "human-only-main-lifecycle",
+  repository: "monitoring-monorepo",
+  target: "branch",
+  enforcement: "active",
+  ruleset_id: testHumanMergeBoundaryPolicy.human_main_lifecycle_ruleset_id,
+  conditions: [
+    {
+      ref_name: [{ include: ["refs/heads/main"], exclude: [] }],
+    },
+  ],
+  bypass_actors: [
+    {
+      actor_id: testHumanMergeBoundaryPolicy.human_merge_operator_team_id,
+      actor_type: "Team",
+      bypass_mode: "pull_request",
+    },
+  ],
+  rules: [{ creation: true, update: true, deletion: true }],
+};
 const defaultPlatformPlan = {
   format_version: "1.2",
   terraform_version: "1.14.0",
   applyable: true,
   complete: true,
   errored: false,
+  configuration: {
+    provider_config: {
+      github: {
+        name: "github",
+        full_name: "registry.terraform.io/integrations/github",
+        expressions: {
+          owner: { constant_value: "mento-protocol" },
+          base_url: { constant_value: "https://api.github.com/" },
+          token: { references: ["var.github_token"] },
+        },
+      },
+    },
+  },
   resource_changes: [
     {
       address: "google_cloud_run_v2_service.metrics_bridge",
@@ -42,6 +84,18 @@ const defaultPlatformPlan = {
         actions: ["no-op"],
         before: { template: [{ revision: "metrics-bridge-r-test" }] },
         after: { template: [{ revision: "metrics-bridge-r-test" }] },
+        after_unknown: {},
+      },
+    },
+    {
+      address: "github_repository_ruleset.human_only_main_lifecycle",
+      mode: "managed",
+      type: "github_repository_ruleset",
+      name: "human_only_main_lifecycle",
+      change: {
+        actions: ["no-op"],
+        before: structuredClone(defaultLifecycleRuleset),
+        after: structuredClone(defaultLifecycleRuleset),
         after_unknown: {},
       },
     },
@@ -116,7 +170,7 @@ function makeFakeTools(tempDir) {
   writeExecutable(
     path.join(binDir, "terraform"),
     `#!/usr/bin/env node
-const { appendFileSync, readdirSync, statSync, writeFileSync } = require("node:fs");
+const { appendFileSync, readFileSync, readdirSync, statSync, writeFileSync } = require("node:fs");
 const { dirname } = require("node:path");
 const args = process.argv.slice(2);
 const log = process.env.TF_STACKS_TEST_TERRAFORM_LOG;
@@ -132,7 +186,15 @@ if (environmentLog) {
   appendFileSync(
     environmentLog,
     JSON.stringify({
+      cliConfig: process.env.TF_CLI_CONFIG_FILE,
+      cliConfigContents: process.env.TF_CLI_CONFIG_FILE
+        ? readFileSync(process.env.TF_CLI_CONFIG_FILE, "utf8")
+        : null,
+      cliConfigMode: process.env.TF_CLI_CONFIG_FILE
+        ? (statSync(process.env.TF_CLI_CONFIG_FILE).mode & 0o777).toString(8)
+        : null,
       dataDir: process.env.TF_DATA_DIR,
+      reattachPresent: Object.hasOwn(process.env, "TF_REATTACH_PROVIDERS"),
       workspace: process.env.TF_WORKSPACE,
     }) + "\\n",
   );
@@ -214,7 +276,10 @@ if (args[0] === "-C" && args[2] === "ls-files") {
   args[2] === "--name-only" &&
   args[3] === "-z"
 ) {
-  process.stdout.write("terraform/main.tf\\0terraform/metrics-bridge.tf\\0");
+  process.stdout.write(
+    "terraform/main.tf\\0terraform/metrics-bridge.tf\\0" +
+      "terraform/human-merge-boundary-policy.json\\0",
+  );
 } else if (args[0] === "show" && args[1]?.endsWith(":terraform/main.tf")) {
   process.stdout.write("terraform {}\\n");
 } else if (
@@ -226,6 +291,13 @@ if (args[0] === "-C" && args[2] === "ls-files") {
       (process.env.TF_STACKS_TEST_ROLLOUT_ACTIVE ?? "false") +
       "\\n}\\n",
   );
+} else if (
+  args[0] === "show" &&
+  args[1]?.endsWith(":terraform/human-merge-boundary-policy.json")
+) {
+  process.stdout.write(${JSON.stringify(
+    `${JSON.stringify(testHumanMergeBoundaryPolicy, null, 2)}\n`,
+  )});
 } else {
   process.stderr.write("unexpected git command: " + command + "\\n");
   process.exit(92);
@@ -463,10 +535,26 @@ function assertPlatformTerraformUsesPrivateDefaultWorkspace(
     path.dirname(snapshotStackPath),
     ".terraform-data",
   );
+  const expectedCliConfig = path.join(
+    path.dirname(snapshotStackPath),
+    ".terraformrc",
+  );
   assert(
     environments.every(
-      ({ dataDir, workspace }) =>
-        dataDir === expectedDataDir && workspace === "default",
+      ({
+        cliConfig,
+        cliConfigContents,
+        cliConfigMode,
+        dataDir,
+        reattachPresent,
+        workspace,
+      }) =>
+        cliConfig === expectedCliConfig &&
+        cliConfigContents === "disable_checkpoint = true\n" &&
+        cliConfigMode === "600" &&
+        dataDir === expectedDataDir &&
+        reattachPresent === false &&
+        workspace === "default",
     ),
     `${message}: ${JSON.stringify(environments)}`,
   );
@@ -925,6 +1013,196 @@ function runPlatformPlanPolicyTests(tempDir) {
     resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
   }
 
+  const providerRuntimeCanary = "PROVIDER_RUNTIME_OVERRIDE_CANARY";
+  for (const variable of ["TF_CLI_CONFIG_FILE", "TF_REATTACH_PROVIDERS"]) {
+    for (const commandArgs of [
+      ["plan", "platform"],
+      ["apply", "platform", "-auto-approve"],
+    ]) {
+      for (const value of ["", providerRuntimeCanary]) {
+        result = runFail(commandArgs, {
+          env: { ...baseEnv, [variable]: value },
+        });
+        assertIncludes(
+          result.stderr,
+          "refusing platform Terraform with a provider runtime override present",
+          `${variable} must fail closed even when it is empty`,
+        );
+        assert(
+          !result.stdout.includes(providerRuntimeCanary) &&
+            !result.stderr.includes(providerRuntimeCanary),
+          "a provider runtime override value must not reach output",
+        );
+        assertNoTerraformCalls(
+          fakeTools.terraformLog,
+          "a provider runtime override must fail before Terraform",
+        );
+        assertNoGitCalls(
+          fakeTools.gitLog,
+          "a provider runtime override must fail before Git checks",
+        );
+        resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+      }
+    }
+  }
+
+  const environmentCanary = "RESTRICTED_ENV_CREDENTIAL_CANARY";
+  for (const variable of [
+    "TF_VAR_local_agent_github_app_private_key",
+    "TF_VAR_github_token",
+  ]) {
+    for (const commandArgs of [
+      ["plan", "platform"],
+      ["apply", "platform", "-auto-approve"],
+    ]) {
+      for (const value of ["", environmentCanary]) {
+        result = runFail(commandArgs, {
+          env: { ...baseEnv, [variable]: value },
+        });
+        assertIncludes(
+          result.stderr,
+          "refusing platform Terraform with a restricted TF_VAR credential present",
+          `${variable} must fail closed even when it is empty`,
+        );
+        assert(
+          !result.stdout.includes(environmentCanary) &&
+            !result.stderr.includes(environmentCanary),
+          "a restricted environment credential value must not reach output",
+        );
+        assertNoTerraformCalls(
+          fakeTools.terraformLog,
+          "a restricted TF_VAR credential must fail before Terraform",
+        );
+        assertNoGitCalls(
+          fakeTools.gitLog,
+          "a restricted TF_VAR credential must fail before Git checks",
+        );
+        resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+      }
+    }
+  }
+
+  for (const variable of [
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "GH_ENTERPRISE_TOKEN",
+    "GITHUB_ENTERPRISE_TOKEN",
+    "GITHUB_PERSONAL_ACCESS_TOKEN",
+    "GITHUB_APP_ID",
+    "GITHUB_APP_INSTALLATION_ID",
+    "GITHUB_APP_PEM_FILE",
+  ]) {
+    for (const commandArgs of [
+      ["plan", "platform"],
+      ["apply", "platform", "-auto-approve"],
+    ]) {
+      for (const value of ["", environmentCanary]) {
+        result = runFail(commandArgs, {
+          env: { ...baseEnv, [variable]: value },
+        });
+        assertIncludes(
+          result.stderr,
+          "refusing platform Terraform with ambient GitHub authentication present",
+          `${variable} must fail closed`,
+        );
+        assert(
+          !result.stdout.includes(environmentCanary) &&
+            !result.stderr.includes(environmentCanary),
+          "an ambient GitHub authentication value must not reach output",
+        );
+        assertNoTerraformCalls(
+          fakeTools.terraformLog,
+          "ambient GitHub authentication must fail before Terraform",
+        );
+        assertNoGitCalls(
+          fakeTools.gitLog,
+          "ambient GitHub authentication must fail before Git checks",
+        );
+        resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+      }
+    }
+  }
+
+  const cliCanary = "RESTRICTED_CLI_CREDENTIAL_CANARY";
+  for (const variable of [
+    "local_agent_github_app_private_key",
+    "github_token",
+  ]) {
+    for (const args of [
+      ["plan", "platform", "--", "-var", `${variable}=${cliCanary}`],
+      ["plan", "platform", "--", "-var", `${variable} =${cliCanary}`],
+      ["plan", "platform", "--", `-var=${variable}=${cliCanary}`],
+      [
+        "apply",
+        "platform",
+        "--",
+        "-auto-approve",
+        "-var",
+        `${variable}=${cliCanary}`,
+      ],
+      [
+        "apply",
+        "platform",
+        "--",
+        "-auto-approve",
+        `-var=${variable}=${cliCanary}`,
+      ],
+    ]) {
+      result = runFail(args, { env: baseEnv });
+      assertIncludes(
+        result.stderr,
+        "refusing platform Terraform with a restricted CLI credential variable",
+        `${variable} must not enter Terraform argv`,
+      );
+      assert(
+        !result.stdout.includes(cliCanary) &&
+          !result.stderr.includes(cliCanary),
+        "a restricted CLI credential value must not reach output",
+      );
+      assertNoTerraformCalls(
+        fakeTools.terraformLog,
+        "a restricted CLI credential must fail before Terraform",
+      );
+      assertNoGitCalls(
+        fakeTools.gitLog,
+        "a restricted CLI credential must fail before Git checks",
+      );
+      resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+    }
+  }
+
+  for (const name of [
+    "GITHUB_OWNER",
+    "GITHUB_ORGANIZATION",
+    "GITHUB_BASE_URL",
+    "GITHUB_MAX_PER_PAGE",
+  ]) {
+    for (const commandArgs of [
+      ["plan", "platform"],
+      ["apply", "platform", "-auto-approve"],
+    ]) {
+      for (const value of ["", "attacker.invalid"]) {
+        result = runFail(commandArgs, {
+          env: { ...baseEnv, [name]: value },
+        });
+        assertIncludes(
+          result.stderr,
+          "refusing platform Terraform with GitHub provider override environment",
+          `${name} must not retarget the GitHub provider`,
+        );
+        assertNoTerraformCalls(
+          fakeTools.terraformLog,
+          `${name} must fail before Terraform`,
+        );
+        assertNoGitCalls(
+          fakeTools.gitLog,
+          `${name} must fail before Git checks`,
+        );
+        resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+      }
+    }
+  }
+
   result = runFail(["plan", "platform"], {
     env: { ...baseEnv, TF_WORKSPACE: "shadow" },
   });
@@ -992,6 +1270,27 @@ function runPlatformPlanPolicyTests(tempDir) {
     );
     resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
   }
+
+  const unsupportedArgumentCanary = "UNSUPPORTED_ARGUMENT_SECRET_CANARY";
+  result = runFail(
+    ["plan", "platform", `-unsupported=${unsupportedArgumentCanary}`],
+    { env: baseEnv },
+  );
+  assertIncludes(
+    result.stderr,
+    "unsupported platform Terraform argument",
+    "an unsupported argument must fail closed",
+  );
+  assert(
+    !result.stdout.includes(unsupportedArgumentCanary) &&
+      !result.stderr.includes(unsupportedArgumentCanary),
+    "an unsupported argument value must not reach output",
+  );
+  assertNoTerraformCalls(
+    fakeTools.terraformLog,
+    "an unsupported argument must fail before Terraform",
+  );
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
 
   run(
     [
@@ -1071,6 +1370,32 @@ function runPlatformPlanPolicyTests(tempDir) {
     rejectedVarFile?.includes("tf-stacks-platform-plan.") &&
       !rejectedVarFile.includes(operatorVarFile),
     "a private copy of operator tfvars must reach the validated plan",
+  );
+  assertExactSavedPlanBinding(fakeTools.terraformLog, false);
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  const invalidLifecyclePlan = structuredClone(defaultPlatformPlan);
+  const invalidLifecycleRuleset = invalidLifecyclePlan.resource_changes.find(
+    (entry) =>
+      entry.address === "github_repository_ruleset.human_only_main_lifecycle",
+  );
+  invalidLifecycleRuleset.change.actions = ["update"];
+  invalidLifecycleRuleset.change.after.etag = "unexpected-update";
+  result = runFail(["apply", "platform", "-auto-approve"], {
+    env: {
+      ...baseEnv,
+      TF_STACKS_TEST_PLAN_JSON: JSON.stringify(invalidLifecyclePlan),
+    },
+  });
+  assertIncludes(
+    result.stderr,
+    "a human lifecycle ruleset update may only activate disabled enforcement",
+    "the platform wrapper must invoke the human lifecycle plan guard",
+  );
+  assertTerraformCommands(
+    fakeTools.terraformLog,
+    ["init", "plan", "show"],
+    "an invalid lifecycle plan must stop before apply",
   );
   assertExactSavedPlanBinding(fakeTools.terraformLog, false);
   resetLogs(fakeTools.terraformLog, fakeTools.gitLog);

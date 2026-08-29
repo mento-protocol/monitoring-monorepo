@@ -20,6 +20,22 @@ and names its owning authority. Root [`AGENTS.md`](../../AGENTS.md) routes here
 first; the hard invariants below and in the Non-negotiables section are binding
 even when you never open an authority.
 
+After the approved local App cutover, send each supported authenticated read
+or PR/issue mutation through one structured
+`pnpm github:agent` operation. The trusted broker performs the operation and
+never returns its installation token. Workflow publication has no normal agent
+profile. It needs the root-owned, human-controlled capability defined in
+[`local-agent-github-app-credential.md`](local-agent-github-app-credential.md).
+Git publication and the `issue-board-write` profile remain unavailable until
+their trusted-side prerequisites are proved. Use the documented human
+publication lane while they are disabled.
+The first broker also does not run `pnpm issue:*`, `pnpm pr:feedback-state`, or
+`pnpm pr:ready-state`. After cutover, hand those steps to an approved human or
+proved MCP surface until trusted structured equivalents exist. Never give a
+repository helper the installation token. Never claim `READY` from the
+broker's smaller REST response.
+Never put the human merge credential on the agent surface.
+
 ## The loop
 
 1. **Claim.** Before substantive edits, claim from the ready queue:
@@ -27,6 +43,11 @@ even when you never open an authority.
    ```bash
    pnpm issue:claim --count 3 --agent codex
    ```
+
+   Run this helper only on an allowed gh-capable surface. After the local App
+   cutover, use the qualified fallback in
+   [`github-tooling-surfaces.md`](github-tooling-surfaces.md) and record the
+   missing transaction fields until the structured #2111 operation exists.
 
    Claiming moves the issue out of the ready queue; if you cannot continue,
    release it with `pnpm issue:release --issue <n>` (add `--needs-grooming`
@@ -337,6 +358,11 @@ even when you never open an authority.
    pnpm pr:ready-state --pr <number> --repo <BASE_REPO> --json
    ```
 
+   Run these helpers only on an allowed gh-capable surface. The first local
+   App broker does not implement either projection. After cutover, hand this
+   step to an approved surface and keep the verdict qualified until both
+   canonical projections run against the current head.
+
    Run them in that order and preserve the two-projection contract. The
    feedback ledger must be clean **first**. Before the final pair, apply the
    CodeRabbit exact-head closeout in
@@ -403,8 +429,9 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    boundary belongs on GitHub's side of the wire.
    [ADR 0075](../adr/0075-pr-merge.md) owns the ordered gates,
    the alternatives, and every residual, including what the deny does not
-   cover. The Dependabot auto-merge workflow runs in CI, not an agent session,
-   and is unaffected. The approval rule above is
+   cover. Before ADR 0078 activation, the Dependabot auto-merge workflow runs in
+   CI and is unaffected by this local wrapper. Its separate precursor must
+   retire and drain before the server rule activates. The approval rule above is
    unchanged — the wrapper mechanizes it, and its refusal is what makes "agents
    never merge" a control rather than a habit. If the merge itself satisfies Done
    means, sync the issue state and workboard afterward per
@@ -419,6 +446,16 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    create a linked ordinary follow-up before closing it. Record merged work in
    issue comments and PR links, not in the generated body. Authority:
    [`documentation-gardening.md`](documentation-gardening.md).
+
+   [ADR 0078](../adr/0078-human-only-main-update-boundary.md) adds the
+   GitHub-side boundary. After its separately approved platform apply and
+   credential cutover, only the named human merge-operator Team can bypass the
+   separate `main` creation, update, and deletion rules, and only through a
+   pull request. The local agent App is not a bypass actor. Keep the human
+   credential outside the agent OS. Vercel Administration-plus-Contents remains
+   an accepted Free-plan residual and can change the rule before updating
+   `main`. Before activation, the local wrapper and approval rule remain the
+   live control.
 
 9. **Production closeout when required.** When Done means includes deployed or
    live behavior, merge is an intermediate state. Monitor the owning deployment

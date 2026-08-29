@@ -8753,6 +8753,24 @@ run_gate "scripts/terraform/check-metrics-bridge-template-plan.mjs"
 assert_contains "- pnpm tf:test (Terraform stack wrapper changed)"
 assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs terraform (Terraform stack wrapper changed)"
 
+run_gate "scripts/terraform/check-human-merge-boundary-plan.mjs"
+assert_contains "- pnpm tf:test (Terraform stack wrapper changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs terraform (Terraform stack wrapper changed)"
+
+run_gate "scripts/terraform/check-human-merge-boundary-plan.test.mjs"
+assert_contains "- pnpm tf:test (Terraform stack wrapper changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs terraform (Terraform stack wrapper changed)"
+
+for local_agent_github_path in \
+  scripts/github/local-agent-github-launcher.mjs \
+  scripts/github/local-agent-github-broker.mjs \
+  scripts/github/local-agent-github-command-policy.mjs \
+  scripts/github/local-agent-github-exec.mjs \
+  scripts/github/local-agent-github-broker.test.mjs; do
+  run_gate "$local_agent_github_path"
+  assert_contains "- pnpm github:agent:test (local-agent GitHub App credential boundary changed)"
+done
+
 for deploy_staging_contract_case in \
   '.github/workflows/metrics-bridge.yml|docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run workflow changed)' \
   'scripts/deploy/deploy-bridge.sh|node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)' \
@@ -12608,6 +12626,29 @@ run_gate "scripts/workflows/autofix-trust-annotations.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- node scripts/workflows/check-autofix-ci-trust.mjs (autofix CI trust checker changed)"
 assert_contains "- node scripts/workflows/check-autofix-ci-trust.test.mjs (autofix CI trust checker changed)"
+
+run_gate "scripts/workflows/check-main-rulesets-drift.mjs"
+assert_contains "- node scripts/workflows/check-main-rulesets-drift.test.mjs (platform-settings main-ruleset drift checker changed)"
+assert_contains "- node scripts/workflows/read-main-rulesets.test.mjs (platform-settings main-ruleset reader changed)"
+
+run_gate "scripts/workflows/check-main-rulesets-drift.test.mjs"
+assert_contains "- node scripts/workflows/check-main-rulesets-drift.test.mjs (platform-settings main-ruleset drift checker changed)"
+assert_contains "- node scripts/workflows/read-main-rulesets.test.mjs (platform-settings main-ruleset reader changed)"
+
+run_gate "scripts/workflows/read-main-rulesets.mjs"
+assert_contains "- node scripts/workflows/check-main-rulesets-drift.test.mjs (platform-settings main-ruleset drift checker changed)"
+assert_contains "- node scripts/workflows/read-main-rulesets.test.mjs (platform-settings main-ruleset reader changed)"
+
+run_gate "scripts/workflows/read-main-rulesets.test.mjs"
+assert_contains "- node scripts/workflows/check-main-rulesets-drift.test.mjs (platform-settings main-ruleset drift checker changed)"
+assert_contains "- node scripts/workflows/read-main-rulesets.test.mjs (platform-settings main-ruleset reader changed)"
+
+run_gate "terraform/human-merge-boundary-policy.json"
+assert_contains "- node scripts/workflows/check-main-rulesets-drift.test.mjs (platform-settings main-ruleset drift checker changed)"
+
+run_gate ".github/workflows/platform-settings-drift.yml"
+assert_contains "- node scripts/workflows/check-main-rulesets-drift.test.mjs (platform-settings main-ruleset drift workflow changed)"
+assert_contains "- node scripts/workflows/read-main-rulesets.test.mjs (platform-settings main-ruleset reader workflow changed)"
 
 run_gate "scripts/workflows/check-workflow-permissions-drift.mjs"
 assert_contains "- node scripts/workflows/check-workflow-permissions-drift.test.mjs (platform-settings workflow-permissions drift checker changed)"

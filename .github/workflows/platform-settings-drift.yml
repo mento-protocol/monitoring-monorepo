@@ -1,13 +1,14 @@
 name: Platform Settings Drift Detection
 
-# Daily lightweight check that a HIGH-VALUE platform-managed repository SETTING
-# has not been reverted out-of-band (issue #1564). Companion to
+# Daily lightweight check that HIGH-VALUE platform-managed repository SETTINGS
+# have not been reverted out-of-band (issues #1564 and #2091). Companion to
 # terraform-drift.yml, which runs `terraform plan` per stack: the `platform`
 # stack (terraform/) is manual plan/apply and deliberately NOT in that matrix.
 # A full platform plan would need the whole platform secret set — Vercel/Upstash
 # tokens, the App private key, and the Administration-scoped GitHub PAT — in an
 # unattended CI job, exactly the standing surface #1557 removed. Instead this
-# asserts just the invariant #1557 pins, via a single read-only REST call.
+# asserts the narrow invariants #1557 and #2091 pin, through read-only REST
+# calls.
 #
 # INVARIANT (#1564, #1557): the repo default GitHub Actions workflow-token
 # permission stays `read` (and token PR-approval stays disabled). The autofix
@@ -17,16 +18,25 @@ name: Platform Settings Drift Detection
 # assumption; this catches it within a day and opens a `drift-detection` issue,
 # mirroring terraform-drift's issue UX.
 #
-# CREDENTIAL. The read hits `GET /repos/{owner}/{repo}/actions/permissions/
-# workflow`, which requires `administration: read`. Authenticated by the
+# INVARIANT (#2091): after the approved platform apply, the unchanged core
+# ruleset and the Team-only `human-only-main-lifecycle` ruleset match their
+# exact pinned shapes. The lifecycle ruleset covers creation, update, and
+# deletion. The core ruleset stays unmanaged until the GitHub provider can
+# preserve `require_extra_approval_for_unattributed_changes` losslessly.
+#
+# CREDENTIAL. The reads hit `GET /repos/{owner}/{repo}/actions/permissions/
+# workflow` and the repository ruleset list/detail endpoints. They require
+# `administration: read`. Authenticated by the
 # dedicated `PLATFORM_SETTINGS_AUDIT_TOKEN` secret — a fine-grained PAT with
 # Administration:Read on THIS repo only, scoped to the `sentry-pipeline`
 # GitHub Environment and modeled by the platform stack
 # (terraform/github-environment.tf). Deliberately NOT the autofix App (whose minimal
 # Contents+PR trust boundary we do not widen) and NOT the CI `TF_VAR_github_token`
 # (which must not gain administration). Read-only by design: it can never CHANGE
-# a setting. While the secret is unprovisioned the job no-ops, mirroring the rest
-# of the ADR-0036 pipeline. Runbook: docs/notes/sentry-triage-pipeline.md.
+# a setting. The ruleset check may be inert only while
+# `terraform/human-merge-boundary-policy.json` keeps its reviewed activation
+# flag false. After activation, a missing credential fails the workflow.
+# Runbook: docs/notes/local-agent-github-app-credential.md.
 
 on:
   schedule:
@@ -124,8 +134,73 @@ jobs:
               ;;
           esac
 
+      - name: Read live main rulesets and evaluate drift
+        id: rulesets
+        env:
+          # The same dedicated, repository-scoped Administration:Read PAT.
+          # It performs only GET requests. Issue writes use github.token.
+          GH_TOKEN: ${{ secrets.PLATFORM_SETTINGS_AUDIT_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          policy="terraform/human-merge-boundary-policy.json"
+          audit_active=$(jq -r '
+            if (.ruleset_audit_active | type) == "boolean" then
+              .ruleset_audit_active | tostring
+            else
+              error("ruleset_audit_active must be boolean")
+            end
+          ' "$policy")
+          if [ "${audit_active}" = "false" ]; then
+            echo "::notice::Main-ruleset drift audit is source-disabled pending the approved cutover."
+            echo "state=inert" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::Main-ruleset audit is active but PLATFORM_SETTINGS_AUDIT_TOKEN is absent. Provision the repository-scoped Administration:Read credential through the approved platform plan/apply."
+            exit 1
+          fi
+
+          set +e
+          captured=$(node scripts/workflows/read-main-rulesets.mjs)
+          capture_rc=$?
+          set -e
+          if [ "$capture_rc" -ne 0 ]; then
+            echo "::error::Could not read repository rulesets with PLATFORM_SETTINGS_AUDIT_TOKEN — token expired/revoked, lacks administration:read, or GitHub returned malformed data. Rotate it through the platform stack or inspect the fixed-error log."
+            exit 1
+          fi
+
+          set +e
+          verdict=$(
+            printf '%s' "${captured}" |
+              node scripts/workflows/check-main-rulesets-drift.mjs
+          )
+          vc=$?
+          set -e
+          echo "${verdict}"
+          {
+            echo "verdict<<VERDICT_EOF"
+            echo "${verdict}"
+            echo "VERDICT_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          case "${vc}" in
+            0)
+              echo "state=ok" >> "$GITHUB_OUTPUT"
+              echo "main-ruleset-audit state=ok"
+              ;;
+            2)
+              echo "state=drift" >> "$GITHUB_OUTPUT"
+              echo "::warning::Main-ruleset drift detected — opening/updating a drift-detection issue."
+              ;;
+            *)
+              echo "::error::check-main-rulesets-drift.mjs failed (exit ${vc}) — malformed API response; investigate the workflow logs."
+              exit 1
+              ;;
+          esac
+
       - name: Ensure drift labels exist
-        if: steps.check.outputs.state == 'drift'
+        if: steps.check.outputs.state == 'drift' || steps.rulesets.outputs.state == 'drift'
         env:
           GH_TOKEN: ${{ github.token }}
         # `github.rest.issues.create()` SILENTLY DROPS unknown label names, so a
@@ -225,6 +300,76 @@ jobs:
                 labels,
               });
               console.log(`Opened drift issue #${created.data.number}`);
+            }
+
+      - name: Open or update main-ruleset drift issue
+        if: steps.rulesets.outputs.state == 'drift'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          VERDICT: ${{ steps.rulesets.outputs.verdict }}
+        with:
+          script: |
+            const verdict =
+              process.env.VERDICT || "(evaluator produced no output — see workflow logs)";
+            const runUrl =
+              `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}` +
+              `/actions/runs/${context.runId}`;
+            const now = new Date().toISOString();
+            const marker = "<!-- platform-settings-drift:main-rulesets -->";
+            const body =
+              `**Stack:** \`platform\` (repository rulesets)\n` +
+              `**Check:** human-only main lifecycle boundary\n` +
+              `**Last checked:** ${now}\n` +
+              `[Full workflow logs](${runUrl})\n\n` +
+              `The live repository rulesets differ from the approved source. This can ` +
+              `also mean that code on \`main\` has not received its separately approved ` +
+              `platform apply. Do not repair this boundary with an unreviewed settings ` +
+              `change. Run the full platform plan from a clean current \`main\` checkout, ` +
+              `review the guarded plan, and obtain explicit approval before apply.\n\n` +
+              `The existing core ruleset (ID 13494367) stays unmanaged until the native ` +
+              `provider can preserve its unattributed-change approval field. Its exact ` +
+              `live shape is still monitored here.\n\n` +
+              `<details><summary>Check output</summary>\n\n` +
+              `\`\`\`\n${verdict}\n\`\`\`\n` +
+              `</details>\n\n` +
+              `${marker}`;
+            const labels = ["drift-detection", "stack:platform"];
+            const issues = await github.paginate(
+              github.rest.issues.listForRepo,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: "open",
+                per_page: 100,
+              },
+            );
+            const existing = issues.find(
+              (issue) =>
+                !issue.pull_request && issue.body && issue.body.includes(marker),
+            );
+            if (existing) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body,
+              });
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                labels,
+              });
+              console.log(`Updated existing main-ruleset drift issue #${existing.number}`);
+            } else {
+              const created = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: "Platform settings drift: human-only main lifecycle boundary",
+                body,
+                labels,
+              });
+              console.log(`Opened main-ruleset drift issue #${created.data.number}`);
             }
 
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0

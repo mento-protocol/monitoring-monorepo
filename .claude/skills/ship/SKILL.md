@@ -47,6 +47,16 @@ hygiene, and production closeout.
   `BASE_REPO`; never substitute a fork's `origin` for its parent. Bind every
   `gh pr view`, feedback-state, and ready-state call with `--repo <BASE_REPO>`.
   A failed GitHub query is not evidence that no PR exists.
+- **Use the local App after its approved cutover.** Send each supported
+  authenticated operation through the structured `pnpm github:agent` broker
+  protocol. The trusted side selects a fixed available profile and never
+  returns its installation token. Git publication stays on the human lane until its
+  root-owned clean-mirror prerequisite is proved. While it is unavailable,
+  stop before push and give the human operator the exact branch and refspec.
+  The first broker does not implement the two PR readiness projections. Hand
+  that final verdict to an approved human or proved MCP surface.
+  Workflow publication needs a root-owned human capability. Before cutover,
+  report that the server identity boundary is not active.
 - **PRs open ready for review.** Drafts suppress the automated AI reviews this
   workflow depends on.
 - **`scripts/pr/check-pr-description.mjs` enforces `## The Problem` then

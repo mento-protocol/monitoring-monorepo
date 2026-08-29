@@ -16,7 +16,7 @@
       "id": "platform",
       "name": "Platform",
       "path": "terraform",
-      "description": "Dashboard Vercel project, the dashboard's read-only Grafana service account and token, Upstash Redis, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, explicit routine-deploy source buckets, separated CI Workload Identity Federation identities, project IAM, repo-level GitHub Actions secrets and variables, and a dormant unapplied Peg-policy GCS source foundation. It owns no Grafana alert rules, folders, or dashboards.",
+      "description": "Dashboard Vercel project, the dashboard's read-only Grafana service account and token, Upstash Redis, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, explicit routine-deploy source buckets, separated CI Workload Identity Federation identities, project IAM, repo-level GitHub Actions secrets and variables, the Team-only main lifecycle ruleset, and a dormant unapplied Peg-policy GCS source foundation. It owns no Grafana alert rules, folders, or dashboards.",
       "state": {
         "backend": "gcs",
         "bucket": "mento-terraform-tfstate-6ed6",
@@ -41,11 +41,18 @@
         "terraform.stacks.json",
         "scripts/terraform/check-metrics-bridge-template-plan.mjs",
         "scripts/terraform/check-metrics-bridge-template-plan.test.mjs",
+        "scripts/terraform/check-human-merge-boundary-plan.mjs",
+        "scripts/terraform/check-human-merge-boundary-plan.test.mjs",
         "scripts/terraform/terraform-fmt-check.mjs",
         "scripts/terraform/tf-platform-plan-guard.mjs",
+        "scripts/workflows/check-main-rulesets-drift.mjs",
+        "scripts/workflows/check-main-rulesets-drift.test.mjs",
+        "scripts/workflows/read-main-rulesets.mjs",
+        "scripts/workflows/read-main-rulesets.test.mjs",
         "scripts/tf-stacks.mjs",
         ".github/workflows/ci.yml",
-        ".github/workflows/infra.yml"
+        ".github/workflows/infra.yml",
+        ".github/workflows/platform-settings-drift.yml"
       ],
       "aliases": ["pnpm infra:init", "pnpm infra:plan", "pnpm infra:apply"]
     },

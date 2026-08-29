@@ -158,6 +158,12 @@ wrapper says so in its own header rather than implying otherwise:
 The durable boundary is on GitHub's side of the wire — branch protection, or
 credentials that cannot merge — and is tracked separately as follow-up.
 
+[ADR 0078](0078-human-only-main-update-boundary.md) defines that boundary. Its
+Team-only lifecycle ruleset and separate local agent App remove `main`
+lifecycle authority from the agent credential after the approved platform
+apply and credential cutover. Until then, this wrapper and the human approval
+rule remain live.
+
 ## Alternatives considered
 
 - **A GitHub-native approval or merge-queue control instead of a wrapper.**
@@ -209,6 +215,8 @@ credentials that cannot merge — and is tracked separately as follow-up.
   cap. The suite asserts the cap over all four, which is the only per-PR
   enforcement: `scripts/` has no `max-lines` rule.
 - Raw merge API calls and CI tokens remain outside this local control's reach.
+- ADR 0078 removes their ability to bypass the separate server-side lifecycle
+  rule after activation.
 
 ## Evidence
 
@@ -240,3 +248,5 @@ credentials that cannot merge — and is tracked separately as follow-up.
   `github/docs` `main` branch. The same `Repository.mergeQueue(branch:)` query
   returned null for this repository's `main` branch. This verifies the signal
   without merging either repository.
+- [ADR 0078](0078-human-only-main-update-boundary.md) owns the server-side
+  Team-only lifecycle rule, agent identity separation, and activation sequence.

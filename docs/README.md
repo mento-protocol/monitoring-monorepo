@@ -90,6 +90,7 @@ Authority: canonical
 - [`docs/notes/documentation-gardening.md`](notes/documentation-gardening.md)
 - [`docs/notes/github-tooling-surfaces.md`](notes/github-tooling-surfaces.md)
 - [`docs/notes/hasura-isolation-trigger.md`](notes/hasura-isolation-trigger.md)
+- [`docs/notes/local-agent-github-app-credential.md`](notes/local-agent-github-app-credential.md)
 - [`docs/notes/peg-monitoring-onboarding.md`](notes/peg-monitoring-onboarding.md)
 - [`docs/notes/peg-monitoring.md`](notes/peg-monitoring.md)
 - [`docs/notes/polygon-monitoring.md`](notes/polygon-monitoring.md)
@@ -210,6 +211,7 @@ Authority: canonical
 - [`docs/adr/0077-operator-triggered-backlog-sweep.md`](adr/0077-operator-triggered-backlog-sweep.md) — Operator-triggered backlog sweep with isolated workers
 - [`docs/adr/0078-staged-verification-redesign.md`](adr/0078-staged-verification-redesign.md) — Staged replacement of the mandatory local gate with existing CI
 - [`docs/adr/0079-sealed-exact-file-patch-secret-suppression.md`](adr/0079-sealed-exact-file-patch-secret-suppression.md) — Autoreview permits only sealed exact-file-patch secret suppression
+- [`docs/adr/0078-human-only-main-update-boundary.md`](adr/0078-human-only-main-update-boundary.md) — Main branch lifecycle changes require human merge operators
 
 Authority: non-canonical
 

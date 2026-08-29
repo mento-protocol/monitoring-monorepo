@@ -89,6 +89,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0077](0077-operator-triggered-backlog-sweep.md)            | Backlog sweeps start from an operator, run isolated workers, and stop at READY       |
 | [0078](0078-staged-verification-redesign.md)                | Staged existing-CI replacement of the mandatory local gate                           |
 | [0079](0079-sealed-exact-file-patch-secret-suppression.md)  | Autoreview permits only sealed exact-file-patch secret suppression                   |
+| [0078](0078-human-only-main-update-boundary.md)             | A Team-only lifecycle ruleset enforces the human merge boundary on GitHub            |
 
 ### shared-config
 
@@ -176,6 +177,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0061](0061-exact-plan-guard-for-manual-platform-applies.md)  | Manual platform applies check and consume one private exact plan                                                  |
 | [0063](0063-dashboard-grafana-history-read-access.md)         | The platform stack mints the dashboard's read-only Grafana identity and token                                     |
 | [0067](0067-pool-criticality-is-depletion-risk.md)            | Pool alerts page on depletion risk or rebalancer inaction, never on deviation magnitude                           |
+| [0078](0078-human-only-main-update-boundary.md)               | A separate Team-only lifecycle ruleset protects main; core adoption stays deferred                                |
 
 ### governance-watchdog
 

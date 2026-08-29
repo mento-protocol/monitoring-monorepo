@@ -36,12 +36,11 @@ terraform {
     }
     github = {
       source = "integrations/github"
-      # `~> 6.12` because `github_actions_organization_secret.value` was
-      # renamed from `plaintext_value` in 6.12.0. The looser `~> 6.6`
-      # constraint would let a fresh `terraform init` install 6.6.x–6.11.x,
-      # which doesn't know about `value` and fails with an unknown-attribute
-      # error.
-      version = "~> 6.12"
+      # Keep the ruleset adoption boundary on the schema reviewed in ADR 0078.
+      # Version 6.12.1 cannot represent the live core ruleset's unattributed-
+      # change approval field. A provider update needs a separate review before
+      # it can change that fail-closed adoption decision.
+      version = "= 6.12.1"
     }
   }
 }
@@ -64,24 +63,25 @@ provider "google" {
   region                      = var.gcp_region
 }
 
-# GitHub provider — used to manage repo-level GitHub Actions secrets and
-# variables on
-# `monitoring-monorepo` that belong to the platform stack, such as the
-# Vercel automation bypass mirror and integration-probe credentials.
+# GitHub provider — used to manage repo-level GitHub Actions secrets,
+# variables, repository settings, and the human-only main lifecycle ruleset on
+# `monitoring-monorepo`.
 # `var.github_token` should be a fine-grained PAT scoped to
 # `mento-protocol/monitoring-monorepo` with Repository → Secrets: Read/write,
 # Variables: Read/write, Administration: Read/write, and Environments:
 # Read/write. Administration is required by `github_workflow_repository_permissions`
 # in `github-actions-permissions.tf` (pins the default workflow-token permission
-# to read-only — issue #1557); Environments is required by the `sentry-pipeline`
+# to read-only — issue #1557) and `github_repository_ruleset` in
+# `github-main-lifecycle-ruleset.tf`; Environments is required by the `sentry-pipeline`
 # GitHub Environment and its `github_actions_environment_secret` resources in
 # `github-environment.tf` (issue #1289) — managing the environment and writing
 # its secrets (environment public-key read + secret PUT) 403s without it.
 # This keeps the credential repository-scoped and avoids the org-admin scope
 # that an organization-level secret or variable would force.
 provider "github" {
-  owner = var.github_owner
-  token = var.github_token
+  owner    = "mento-protocol"
+  base_url = "https://api.github.com/"
+  token    = var.github_token
 }
 
 # Grafana provider — this stack does not manage alert rules, folders, or

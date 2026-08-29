@@ -1039,6 +1039,11 @@ jobs:
       - uses: ./.github/actions/pnpm-install
       - name: ESLint root scripts
         run: pnpm lint:scripts
+      - name: Local-agent GitHub App credential boundary suite
+        # Proves the trusted broker keeps the PEM, JWT, and installation token
+        # out of agent output and processes. It also checks fixed profiles,
+        # executable paths, environment isolation, and fail-closed routing.
+        run: pnpm github:agent:test
       - name: Peg registry integrity
         run: node scripts/alerts/check-peg-registry-integrity.mjs
       - name: Peg registry integrity checker suite
@@ -1198,6 +1203,14 @@ jobs:
         # ok/drift/malformed classification + CLI exit codes for the daily
         # "default workflow-token permission stays read-only" check.
         run: node scripts/workflows/check-workflow-permissions-drift.test.mjs
+      - name: Main ruleset drift unit tests
+        # Exercises the exact unchanged core ruleset and Team-only lifecycle
+        # ruleset shapes used by platform-settings-drift.yml.
+        run: node scripts/workflows/check-main-rulesets-drift.test.mjs
+      - name: Main ruleset reader unit tests
+        # Covers paginated list capture, detail binding, malformed responses,
+        # fixed errors, and output redaction for platform-settings-drift.yml.
+        run: node scripts/workflows/read-main-rulesets.test.mjs
       - name: Override prune report self-tests
         # Behavioral coverage of scripts/supply-chain/override-prune-report.mjs
         # (verdict heuristic, lockfile parsing, git-blame age check). The report

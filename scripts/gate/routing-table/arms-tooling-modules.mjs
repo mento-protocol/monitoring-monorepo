@@ -22,6 +22,21 @@
  */
 export const TOOLING_MODULE_ARMS = [
   {
+    patterns: [
+      "scripts/github/local-agent-github-launcher.mjs",
+      "scripts/github/local-agent-github-broker.mjs",
+      "scripts/github/local-agent-github-command-policy.mjs",
+      "scripts/github/local-agent-github-exec.mjs",
+      "scripts/github/local-agent-github-broker.test.mjs",
+    ],
+    effects: [
+      {
+        command: "pnpm github:agent:test",
+        reason: "local-agent GitHub App credential boundary changed",
+      },
+    ],
+  },
+  {
     why: "scripts/pr/ is the only location: the aliases, the suites, and the autoreview wrapper all resolve there. Neither arm is a glob, so each path needs naming outright.",
     patterns: [
       "scripts/pr/pr-feedback-state.mjs",
@@ -104,6 +119,8 @@ export const TOOLING_MODULE_ARMS = [
     patterns: [
       "scripts/terraform/check-metrics-bridge-template-plan.mjs",
       "scripts/terraform/check-metrics-bridge-template-plan.test.mjs",
+      "scripts/terraform/check-human-merge-boundary-plan.mjs",
+      "scripts/terraform/check-human-merge-boundary-plan.test.mjs",
       "scripts/terraform/tf-platform-plan-guard.mjs",
       "scripts/tf-stacks.mjs",
       "scripts/tf-stacks.test.mjs",
@@ -325,6 +342,24 @@ export const TOOLING_MODULE_ARMS = [
       {
         command: "node scripts/workflows/check-autofix-ci-trust.test.mjs",
         reason: "autofix CI trust checker changed",
+      },
+    ],
+  },
+  {
+    patterns: [
+      "scripts/workflows/check-main-rulesets-drift.mjs",
+      "scripts/workflows/check-main-rulesets-drift.test.mjs",
+      "scripts/workflows/read-main-rulesets.mjs",
+      "scripts/workflows/read-main-rulesets.test.mjs",
+    ],
+    effects: [
+      {
+        command: "node scripts/workflows/check-main-rulesets-drift.test.mjs",
+        reason: "platform-settings main-ruleset drift checker changed",
+      },
+      {
+        command: "node scripts/workflows/read-main-rulesets.test.mjs",
+        reason: "platform-settings main-ruleset reader changed",
       },
     ],
   },

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validFixtureFiles } from "./fixtures.mjs";
@@ -78,14 +78,15 @@ function liveRepositoryFiles() {
     .split("\0")
     .filter(
       (filePath) =>
-        filePath.endsWith(".tf") ||
-        filePath.endsWith(".tf.json") ||
-        filePath.endsWith(".yml") ||
-        filePath.endsWith(".yaml") ||
-        filePath.endsWith(".sh") ||
-        /(?:^|\/)(?:terraform\.tfvars(?:\.json)?|[^/]*\.auto\.tfvars(?:\.json)?)$/u.test(
-          filePath,
-        ),
+        existsSync(path.join(repositoryRoot, filePath)) &&
+        (filePath.endsWith(".tf") ||
+          filePath.endsWith(".tf.json") ||
+          filePath.endsWith(".yml") ||
+          filePath.endsWith(".yaml") ||
+          filePath.endsWith(".sh") ||
+          /(?:^|\/)(?:terraform\.tfvars(?:\.json)?|[^/]*\.auto\.tfvars(?:\.json)?)$/u.test(
+            filePath,
+          )),
     )
     .concat([
       "scripts/sanitize-terraform-output.sh",

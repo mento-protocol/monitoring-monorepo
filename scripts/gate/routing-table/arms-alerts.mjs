@@ -97,6 +97,25 @@ export const ALERT_ARMS = [
     ],
   },
   {
+    why: "The reviewed policy selects the human Team actor and the drift-audit activation state. Keep its focused evaluator test above the broad Terraform arm, which is first-match routing.",
+    patterns: ["terraform/human-merge-boundary-policy.json"],
+    effects: [
+      { surface: "terraform" },
+      {
+        verb: "add_terraform_validate_commands",
+        args: ["terraform", "Terraform changed"],
+      },
+      {
+        checklist: "docs/pr-checklists/terraform-cloudrun.md",
+        reason: "Terraform/Cloud Run path changed",
+      },
+      {
+        command: "node scripts/workflows/check-main-rulesets-drift.test.mjs",
+        reason: "platform-settings main-ruleset drift checker changed",
+      },
+    ],
+  },
+  {
     patterns: ["terraform/*"],
     effects: [
       { surface: "terraform" },

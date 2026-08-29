@@ -3,7 +3,7 @@ title: Quick Commands
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-26
+last_verified: 2026-08-28
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -117,6 +117,10 @@ pnpm issue:board sync --dry-run                # Preview the repository-wide que
 pnpm issue:board sync                          # Apply an explicitly authorized repository-wide projection
 pnpm issue:board backfill --issue 901 --dry-run # Preview fill-only ownership-field recovery from a trusted claim comment
 pnpm issue:board:test                          # Offline tests for the issue-board helper
+
+# Local App broker after cutover; see the credential runbook
+pnpm github:agent -- --profile read -- pr-view <number>
+pnpm github:agent:test                         # Offline broker-boundary tests
 
 # Sentry triage pipeline (Stage A — deterministic ingest; Stage B — read-only triage + digest; ADR 0036)
 pnpm sentry:ingest --dry-run                   # Print queue-issue mutations without applying (needs local SENTRY_TRIAGE_TOKEN)

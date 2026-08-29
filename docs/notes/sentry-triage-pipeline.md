@@ -1780,13 +1780,13 @@ All values originate in the operator-held, gitignored
 `terraform/terraform.tfvars` and are mirrored by the `platform` Terraform
 stack:
 
-| Stage           | Terraform inputs                                                          | GitHub surface                                                                   | Minimum privilege                                                  |
-| --------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| Ingest + triage | `sentry_triage_token`, `claude_code_oauth_token`, `sentry_triage_enabled` | `SENTRY_TRIAGE_TOKEN`, shared `CLAUDE_CODE_OAUTH_TOKEN`, `SENTRY_TRIAGE_ENABLED` | Sentry Issue/Event, Project, and Organization read only            |
-| Projection      | `sentry_projection_token`                                                 | `SENTRY_PROJECTION_TOKEN`                                                        | GitHub Issues read/write on the allowlisted owning repos only      |
-| Autofix         | `autofix_app_id`, `autofix_app_private_key`, `sentry_autofix_enabled`     | `AUTOFIX_APP_ID`, `AUTOFIX_APP_PRIVATE_KEY`, `SENTRY_AUTOFIX_ENABLED`            | GitHub App Contents and Pull requests read/write on this repo only |
-| Archive         | `sentry_archive_token`, `sentry_archive_enabled`                          | `SENTRY_ARCHIVE_TOKEN`, `SENTRY_ARCHIVE_ENABLED`                                 | Separate Sentry Issue/Event read/write token                       |
-| Settings audit  | `platform_settings_audit_token`                                           | `PLATFORM_SETTINGS_AUDIT_TOKEN`                                                  | GitHub Administration **read-only** on this repo only              |
+| Stage           | Terraform inputs                                                          | GitHub surface                                                                   | Minimum privilege                                                                           |
+| --------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Ingest + triage | `sentry_triage_token`, `claude_code_oauth_token`, `sentry_triage_enabled` | `SENTRY_TRIAGE_TOKEN`, shared `CLAUDE_CODE_OAUTH_TOKEN`, `SENTRY_TRIAGE_ENABLED` | Sentry Issue/Event, Project, and Organization read only                                     |
+| Projection      | `sentry_projection_token`                                                 | `SENTRY_PROJECTION_TOKEN`                                                        | GitHub Issues read/write on the allowlisted owning repos only                               |
+| Autofix         | `autofix_app_id`, `autofix_app_private_key`, `sentry_autofix_enabled`     | `AUTOFIX_APP_ID`, `AUTOFIX_APP_PRIVATE_KEY`, `SENTRY_AUTOFIX_ENABLED`            | GitHub App Contents and Pull requests read/write on this repo only                          |
+| Archive         | `sentry_archive_token`, `sentry_archive_enabled`                          | `SENTRY_ARCHIVE_TOKEN`, `SENTRY_ARCHIVE_ENABLED`                                 | Separate Sentry Issue/Event read/write token                                                |
+| Settings audit  | `platform_settings_audit_token`                                           | `PLATFORM_SETTINGS_AUDIT_TOKEN`                                                  | GitHub Administration **read-only** on this repo only; workflow permission and ruleset GETs |
 
 All five Sentry-pipeline-exclusive secrets above — `SENTRY_TRIAGE_TOKEN`,
 `SENTRY_PROJECTION_TOKEN`, `AUTOFIX_APP_PRIVATE_KEY`, `SENTRY_ARCHIVE_TOKEN`,
@@ -1819,15 +1819,25 @@ the existing Claude PR workflow after applying it.
 
 The **settings audit** row is not a pipeline stage — it powers
 `.github/workflows/platform-settings-drift.yml`, a daily read-only check
-(issue #1564) that the repo default workflow-token permission stays `read`
-(pinned by `github_workflow_repository_permissions.default_read`, #1557). It is
+(issues #1564 and #2091) that the repo default workflow-token permission stays
+`read` and that the two `main` rulesets retain their exact approved shapes. The
+first invariant is pinned by
+`github_workflow_repository_permissions.default_read` (#1557). The second
+checks unchanged core ruleset `13494367` and the Team-only lifecycle ruleset from
+ADR 0078. The reviewed
+`terraform/human-merge-boundary-policy.json` file provides the expected Team
+ID and activation state. A repository variable cannot select the bypass actor.
+The audit does not adopt or update the core ruleset. It is
 the ONLY platform credential deliberately given a CI surface with Administration
 scope, and it is **read-only** — it can never change a setting. Provision
 `platform_settings_audit_token` as a fine-grained PAT with **Administration:
-Read** (nothing else) on this repo, then apply the platform stack. Until it is
-set the check no-ops; on drift it opens a `drift-detection` + `stack:platform`
-issue. Do not point this at the write-capable `github_token` (which stays
-local-only) or grant Administration to the autofix App. Fine-grained PATs
+Read** (nothing else) on this repo, then apply the platform stack. Before the
+ruleset cutover, the source activation flag keeps that check inert. After
+activation, an absent audit token fails the workflow. A successful activation
+proof contains `main-ruleset-audit state=ok`; `state=inert` is not proof. On
+drift, the workflow opens a `drift-detection` + `stack:platform` issue for the
+affected invariant. Do not point this at the write-capable `github_token`
+(which stays local-only) or grant Administration to the autofix App. Fine-grained PATs
 expire (≤1 year); when it lapses the check fails loudly ("rotate the audit
 token") rather than reporting false drift, so rotate it on that signal.
 

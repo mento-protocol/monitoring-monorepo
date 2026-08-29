@@ -12,10 +12,36 @@ import {
   assertMetricsBridgeTemplatePlan,
   parseMetricsBridgeTemplateRolloutActive,
 } from "./check-metrics-bridge-template-plan.mjs";
+import { assertHumanMergeBoundaryPlan } from "./check-human-merge-boundary-plan.mjs";
 
 const PLAN_CAPTURE_MAX_BYTES = 64 * 1024 * 1024;
 const PEG_POLICY_CONTROLLER_RECOVERY_TARGET =
   "google_project_iam_custom_role.peg_policy_bucket_controller";
+const APP_PRIVATE_KEY_VARIABLE = "local_agent_github_app_private_key";
+const GITHUB_PROVIDER_TOKEN_VARIABLE = "github_token";
+const RESTRICTED_CLI_VARIABLES = new Set([
+  APP_PRIVATE_KEY_VARIABLE,
+  GITHUB_PROVIDER_TOKEN_VARIABLE,
+]);
+const AMBIENT_GITHUB_AUTH_VARIABLES = [
+  "GH_TOKEN",
+  "GITHUB_TOKEN",
+  "GH_ENTERPRISE_TOKEN",
+  "GITHUB_ENTERPRISE_TOKEN",
+  "GITHUB_PERSONAL_ACCESS_TOKEN",
+  "GITHUB_APP_ID",
+  "GITHUB_APP_INSTALLATION_ID",
+  "GITHUB_APP_PEM_FILE",
+];
+
+function assertNotRestrictedCliVariable(value) {
+  const name = String(value).split("=", 1)[0].trim();
+  if (RESTRICTED_CLI_VARIABLES.has(name)) {
+    throw new Error(
+      "refusing platform Terraform with a restricted CLI credential variable; supply credentials through the operator tfvars file",
+    );
+  }
+}
 
 function takeOptionValue(args, index, name) {
   const value = args[index + 1];
@@ -34,6 +60,7 @@ export function parsePlatformCommandArgs(command, args) {
     const arg = args[index];
     if (["-var", "-var-file"].includes(arg)) {
       const value = takeOptionValue(args, index, arg);
+      if (arg === "-var") assertNotRestrictedCliVariable(value);
       planArgs.push(arg, value);
       index += 1;
       continue;
@@ -41,6 +68,9 @@ export function parsePlatformCommandArgs(command, args) {
     if (arg.startsWith("-var=") || arg.startsWith("-var-file=")) {
       if (arg.endsWith("=")) {
         throw new Error(`${arg.split("=")[0]} requires a value`);
+      }
+      if (arg.startsWith("-var=")) {
+        assertNotRestrictedCliVariable(arg.slice("-var=".length));
       }
       planArgs.push(arg);
       continue;
@@ -100,7 +130,7 @@ export function parsePlatformCommandArgs(command, args) {
       planArgs.push(arg);
       continue;
     }
-    throw new Error(`unsupported platform Terraform argument: ${arg}`);
+    throw new Error("unsupported platform Terraform argument");
   }
 
   if (command === "plan" && autoApproveCount > 0) {
@@ -125,6 +155,44 @@ export function parsePlatformCommandArgs(command, args) {
 }
 
 export function assertPlatformTerraformEnvironment(environment = process.env) {
+  const providerRuntimeOverrides = [
+    "TF_CLI_CONFIG_FILE",
+    "TF_REATTACH_PROVIDERS",
+  ].filter((name) => Object.hasOwn(environment, name));
+  if (providerRuntimeOverrides.length > 0) {
+    throw new Error(
+      "refusing platform Terraform with a provider runtime override present; the wrapper owns provider selection and CLI configuration",
+    );
+  }
+  const restrictedCredentialVariables = [
+    "TF_VAR_local_agent_github_app_private_key",
+    "TF_VAR_github_token",
+  ].filter((name) => Object.hasOwn(environment, name));
+  if (restrictedCredentialVariables.length > 0) {
+    throw new Error(
+      "refusing platform Terraform with a restricted TF_VAR credential present; supply credentials through the operator tfvars file",
+    );
+  }
+  if (
+    AMBIENT_GITHUB_AUTH_VARIABLES.some((name) =>
+      Object.hasOwn(environment, name),
+    )
+  ) {
+    throw new Error(
+      "refusing platform Terraform with ambient GitHub authentication present; supply the platform GitHub PAT only through the operator tfvars file",
+    );
+  }
+  const githubProviderOverrides = [
+    "GITHUB_OWNER",
+    "GITHUB_ORGANIZATION",
+    "GITHUB_BASE_URL",
+    "GITHUB_MAX_PER_PAGE",
+  ].filter((name) => Object.hasOwn(environment, name));
+  if (githubProviderOverrides.length > 0) {
+    throw new Error(
+      `refusing platform Terraform with GitHub provider override environment: ${githubProviderOverrides.sort().join(", ")}`,
+    );
+  }
   const injectedArgs = Object.keys(environment)
     .filter((name) => name === "TF_CLI_ARGS" || name.startsWith("TF_CLI_ARGS_"))
     .filter((name) => environment[name]?.trim());
@@ -150,6 +218,21 @@ function parsePrivatePlanJson(runTerraform, executionStack, planPath) {
     return JSON.parse(rawPlan);
   } catch {
     throw new Error("terraform show returned invalid or oversized plan JSON");
+  }
+}
+
+function readHumanMergeBoundaryPolicy(executionStack) {
+  try {
+    return JSON.parse(
+      readFileSync(
+        path.join(executionStack.path, "human-merge-boundary-policy.json"),
+        "utf8",
+      ),
+    );
+  } catch {
+    throw new Error(
+      "could not read the human merge boundary policy from the verified Terraform source snapshot",
+    );
   }
 }
 
@@ -233,6 +316,13 @@ export function runGuardedPlatformCommand({
     process.stderr.write(
       `Metrics Bridge platform plan policy: safe (${rolloutActive ? "rollout" : "stable"})\n`,
     );
+    const humanMergeBoundaryPolicy =
+      readHumanMergeBoundaryPolicy(executionStack);
+    assertHumanMergeBoundaryPlan(plan, {
+      policy: humanMergeBoundaryPolicy,
+      recoveryTargetOnly,
+    });
+    process.stderr.write("Human merge boundary plan policy: safe\n");
 
     if (command !== "apply") return;
     if (!plan.applyable) {

@@ -3,7 +3,7 @@ title: scripts/ may use module subdirectories; basenames and pinned paths are th
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-23
+last_verified: 2026-08-28
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -219,9 +219,9 @@ Run every item in the PR that moves a file. `scripts/AGENTS.md` points here
 rather than carrying the list, because its scoped instruction budget is for
 routing, not procedure.
 
-1. Root `package.json` — 74 entries reference `scripts/`.
+1. Root `package.json` — 83 entries reference `scripts/`.
 2. `check-agent-quality-gate-package-scripts.mjs` — pinned alias map.
-3. `.github/workflows/` — 22 of 32 files pin a `scripts/` path. `ci.yml`
+3. `.github/workflows/` — 23 of 33 files pin a `scripts/` path. `ci.yml`
    (`autoreviewSuite`, `autoreviewRootRuntime`, `versionSkew`; `rootScripts` is
    the recursive `scripts/**`), `infra.yml`, `alerts-rules.yml`,
    `peg-policy-publication.yml`, and `schema-diff.yml` list individual files.
