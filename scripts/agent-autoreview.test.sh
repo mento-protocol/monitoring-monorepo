@@ -8114,6 +8114,73 @@ run_git_replace_ref_regression() {
   expect_empty_stderr
 }
 
+run_suppression_policy_review_path_regression() {
+  local review_repo="$tmp_dir/suppression-policy-review-path"
+  local policy_path="$review_repo/scripts/agent-autoreview-secret-suppressions.json"
+  local valid_bundle="$tmp_dir/suppression-policy-valid-bundle"
+  local secret_bundle="$tmp_dir/suppression-policy-secret-bundle"
+  local secret_reason
+
+  init_review_repo "$review_repo"
+  mkdir -p "$review_repo/scripts"
+  cp \
+    "$repo_root/scripts/agent-autoreview-secret-suppressions.json" \
+    "$policy_path"
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+
+  git -C "$review_repo" switch -c policy-valid >/dev/null 2>&1
+  # shellcheck disable=SC2016
+  "$node_bin" -e '
+    const fs = require("node:fs");
+    const policyPath = process.argv[1];
+    const records = JSON.parse(fs.readFileSync(policyPath, "utf8"));
+    records[0].reason += " Reviewed path fixture.";
+    fs.writeFileSync(policyPath, `${JSON.stringify(records, null, 2)}\n`);
+  ' "$policy_path"
+  commit_review_repo "$review_repo" "change suppression policy reason"
+
+  run_helper_in_repo "$review_repo" \
+    --prepare-bundle-dir "$valid_bundle" \
+    --mode branch \
+    --base main \
+    --engine local
+  expect_file_contains \
+    "$valid_bundle/changed-paths.txt" \
+    "scripts/agent-autoreview-secret-suppressions.json"
+  expect_file_contains \
+    "$valid_bundle/patches/branch.diff" \
+    "Reviewed path fixture."
+  expect_empty_stderr
+
+  git -C "$review_repo" switch main >/dev/null 2>&1
+  git -C "$review_repo" switch -c policy-secret >/dev/null 2>&1
+  secret_reason="$(printf '%s%s%s' \
+    'https://example.invalid/?to' \
+    'ken=live-policy-credential-' \
+    'abcdefghijklmnopqrstuvwxyz')"
+  # shellcheck disable=SC2016
+  "$node_bin" -e '
+    const fs = require("node:fs");
+    const policyPath = process.argv[1];
+    const records = JSON.parse(fs.readFileSync(policyPath, "utf8"));
+    records[0].reason = process.argv[2];
+    fs.writeFileSync(policyPath, `${JSON.stringify(records, null, 2)}\n`);
+  ' "$policy_path" "$secret_reason"
+  commit_review_repo "$review_repo" "add secret-bearing policy reason"
+
+  run_helper_in_repo_expect_failure "$review_repo" \
+    --prepare-bundle-dir "$secret_bundle" \
+    --mode branch \
+    --base main \
+    --engine local
+  expect_stderr_contains "secret-bearing URL"
+  if [[ -e "$secret_bundle" ]]; then
+    printf 'secret-bearing suppression policy published a review bundle\n' >&2
+    exit 1
+  fi
+}
+
 run_trusted_helper_runtime_regression() {
   local review_repo="$tmp_dir/trusted-helper-runtime"
   local branch_bundle="$tmp_dir/trusted-helper-branch-bundle"
@@ -12403,6 +12470,7 @@ run_runtime_trust_family() {
   run_external_wrapper_source_trust_regression
   run_symlinked_node_codex_regression
   run_repo_controlled_node_regression
+  run_suppression_policy_review_path_regression
   run_trusted_helper_runtime_regression
   run_hostile_git_path_regression
   run_unsafe_script_fallback_regressions
@@ -13799,11 +13867,15 @@ case "$test_focus" in
     ;;
   review-target-trust)
     run_review_target_metadata_regression
+    run_suppression_policy_review_path_regression
     run_trusted_helper_runtime_regression
     run_same_checkout_explicit_helper_fail_closed_regression
     run_same_checkout_protected_runtime_regression
     run_nested_wrapper_fail_closed_regression
     run_external_wrapper_source_trust_regression
+    ;;
+  suppression-policy-review-path)
+    run_suppression_policy_review_path_regression
     ;;
   prepared-bundle-safety)
     run_frozen_checklist_provenance_regression

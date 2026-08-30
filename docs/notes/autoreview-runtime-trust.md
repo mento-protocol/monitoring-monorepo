@@ -501,6 +501,10 @@ One narrow exception covers issue #2114. The sealed
 Git file patch, its full old blob ID, one removed anchor, the anchor's derived
 old line, and the exact first scanner finding. The helper loads this file next
 to the materialized core with the same stable bounded regular-file primitive.
+The changed-path check permits only its exact `scripts/` path so a trusted
+compatible runtime can review policy updates. The general sensitive-path check
+still rejects the filename, and the policy diff still receives the closed
+content scan.
 It accepts no checkout path or override. Git patch captures use full blob IDs,
 three context lines, fixed prefixes, and no external diff or text conversion.
 The matcher requires exact equality with one complete ordinary file-patch

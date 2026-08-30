@@ -30,6 +30,7 @@ import {
   MAX_REVIEW_PROMPT_BYTES,
   readBoundedRegularFile,
   readSafeEvidenceFile,
+  reviewBundlePathReason,
   reviewPromptOutputPaths,
   secretLikeReason,
   serializeSafeUntrackedFile,
@@ -2939,6 +2940,46 @@ assert.equal(
 assert.equal(
   sensitivePathReason("nested/.docker/config.json"),
   "credential store",
+);
+assert.equal(
+  sensitivePathReason("scripts/agent-autoreview-secret-suppressions.json"),
+  "sensitive data filename",
+  "the default path scanner stays closed for the suppression policy",
+);
+assert.equal(
+  reviewBundlePathReason("scripts/agent-autoreview-secret-suppressions.json"),
+  null,
+  "the changed-path scanner permits only the canonical policy path",
+);
+for (const policyPathVariant of [
+  "agent-autoreview-secret-suppressions.json",
+  "nested/agent-autoreview-secret-suppressions.json",
+  "scripts/copy-agent-autoreview-secret-suppressions.json",
+  "scripts/Agent-autoreview-secret-suppressions.json",
+  "scripts\\agent-autoreview-secret-suppressions.json",
+  "./scripts/agent-autoreview-secret-suppressions.json",
+  "/scripts/agent-autoreview-secret-suppressions.json",
+]) {
+  assert.equal(
+    reviewBundlePathReason(policyPathVariant),
+    "sensitive data filename",
+    `noncanonical policy path stays blocked: ${policyPathVariant}`,
+  );
+}
+const policySecretQueryName = ["to", "ken"].join("");
+const policySecretQueryValue = [
+  "live",
+  "policy",
+  "credential",
+  "abcdefghijklmnopqrstuvwxyz",
+].join("-");
+assert.match(
+  secretLikeReason(
+    `+    "reason": "https://example.invalid/?${policySecretQueryName}=${policySecretQueryValue}"`,
+    { gitDiff: true },
+  ),
+  /secret-bearing URL/,
+  "the policy-path exception does not suppress secret-like diff content",
 );
 
 const root = realpathSync(

@@ -37,8 +37,8 @@ import {
   normalizedGitFileMode,
   readBoundedRegularFile,
   readSafeEvidenceFile,
+  reviewBundlePathReason,
   reviewPromptOutputPaths,
-  sensitivePathReason,
   serializeSafeUntrackedFile,
   utf8Size,
   writeReviewPromptOutputs,
@@ -4776,7 +4776,7 @@ function assertReviewableBundle(paths, bundle, scanBundle) {
   const blocked = [...paths]
     .map((relativePath) => ({
       relativePath,
-      reason: sensitivePathReason(relativePath),
+      reason: reviewBundlePathReason(relativePath),
     }))
     .filter(({ reason }) => reason);
   if (blocked.length > 0) {

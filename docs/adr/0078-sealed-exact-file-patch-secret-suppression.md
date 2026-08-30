@@ -68,6 +68,12 @@ The control has these rules:
   status output, stats, and untracked-file serialization use the closed
   `secretLikeReason` default. Header-shaped arbitrary text never enters the
   exact-patch matcher.
+- The changed-path classifier permits only the exact repository path
+  `scripts/agent-autoreview-secret-suppressions.json`. The general sensitive
+  path classifier still rejects this filename. No other path receives this
+  changed-path exception. Every other path follows the general sensitive-path
+  classifier. The policy diff still passes through the suppression-free content
+  scan.
 - The JSON loader resolves the file next to the materialized core. It accepts no
   reviewed-checkout path and no override. The stable bounded regular-file read
   rejects symlinks, hard links, path replacement, and read-time mutation.

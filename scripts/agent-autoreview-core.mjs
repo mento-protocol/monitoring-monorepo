@@ -18,6 +18,8 @@ export const MAX_REVIEW_CHUNK_CONTEXT_BYTES = 64_000;
 export const MAX_REVIEW_PASSES = 8;
 export const MAX_REVIEW_INPUT_BYTES =
   MAX_REVIEW_PROMPT_BYTES * MAX_REVIEW_PASSES;
+const EXACT_PATCH_SUPPRESSION_REPO_PATH =
+  "scripts/agent-autoreview-secret-suppressions.json";
 
 export function utf8Size(text) {
   return Buffer.byteLength(text, "utf8");
@@ -768,6 +770,11 @@ export function sensitivePathReason(rawPath) {
     return "sensitive data filename";
   }
   return null;
+}
+
+export function reviewBundlePathReason(rawPath) {
+  if (rawPath === EXACT_PATCH_SUPPRESSION_REPO_PATH) return null;
+  return sensitivePathReason(rawPath);
 }
 
 // A shell parameter expansion carrying a default, assign, alternate, or error
@@ -2160,8 +2167,9 @@ export function secretLikeReason(text, { gitDiff = false } = {}) {
   return null;
 }
 
-const EXACT_PATCH_SUPPRESSION_FILE =
-  "agent-autoreview-secret-suppressions.json";
+const EXACT_PATCH_SUPPRESSION_FILE = path.posix.basename(
+  EXACT_PATCH_SUPPRESSION_REPO_PATH,
+);
 const MAX_EXACT_PATCH_SUPPRESSION_BYTES = 64 * 1024;
 const MAX_EXACT_PATCH_SUPPRESSIONS = 16;
 const MAX_EXACT_PATCH_LINES = 256;
