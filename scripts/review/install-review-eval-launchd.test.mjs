@@ -295,11 +295,20 @@ function /bin/launchctl { "$REVIEW_EVAL_FAKE_LAUNCHCTL" "$@"; }
       mkdirSync(targetDir, { recursive: true });
       writeFileSync(installLock, "foreign-installer\n");
     }
-    return spawnSync("/bin/bash", [installer], {
+    const childUid =
+      options.runnerKind === "unreadable" &&
+      typeof process.geteuid === "function" &&
+      process.geteuid() === 0
+        ? 65534
+        : undefined;
+    if (childUid !== undefined) chmodSync(root, 0o755);
+    const spawnOptions = {
       cwd: checkout,
       encoding: "utf8",
       env: environment(options),
-    });
+    };
+    if (childUid !== undefined) spawnOptions.uid = childUid;
+    return spawnSync("/bin/bash", [installer], spawnOptions);
   }
 
   function operations() {
