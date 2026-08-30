@@ -104,7 +104,8 @@ test("uses a fence longer than report backticks without changing the report", ()
     detailDir: "docs/evals/review-skill-runs/example",
     report,
   });
-  assert.ok(body.includes(report));
+  const fence = "`".repeat(5);
+  assert.ok(body.includes(`${fence}markdown\n${report}${fence}`));
   assert.deepEqual(publicationTopLevelSections(body), [
     "The Problem",
     "The Solution",

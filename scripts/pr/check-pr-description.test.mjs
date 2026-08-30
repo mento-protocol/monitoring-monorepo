@@ -55,7 +55,8 @@ The report can contain its own headings and a literal \`\`\`\` fence.
     detailDir: "docs/evals/review-skill-runs/example",
     report,
   });
-  assert.ok(publicationBody.includes(report));
+  const fence = "`".repeat(5);
+  assert.ok(publicationBody.includes(`${fence}markdown\n${report}${fence}`));
   assertPass(publicationBody);
 });
 
