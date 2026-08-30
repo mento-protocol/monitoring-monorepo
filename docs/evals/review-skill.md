@@ -314,10 +314,10 @@ The plist is a template. A plist has no variable substitution, so the install
 step replaces three placeholders: `__REPO_CHECKOUT__` (the checkout that holds
 `run-eval.sh`), `__USER_HOME__` (the log location), and `__RUNTIME_PATH__` (the
 current `PATH` after the installer verifies `node`, `git`, `codex`, and
-`claude`). launchd does not read an interactive shell's startup files. The
-installed job invokes the runner through the fixed `/bin/bash` interpreter, so
-later shell startup cannot replace the captured path. Run this from the root of
-your checkout.
+`claude`). launchd does not inherit values that a login startup file exports.
+The installed job uses fixed `/bin/zsh` and `/bin/bash` interpreters. The login
+shell loads model credentials, then the command restores the captured path
+before it invokes the runner. Run this from the root of your checkout.
 
 ```bash
 (
@@ -341,8 +341,11 @@ your checkout.
   rendered="$(/usr/bin/mktemp "$target_dir/.org.mento.review-eval.plist.XXXXXX")"
   trap '/bin/rm -f "$rendered"' EXIT
   /bin/cp "$template" "$rendered"
-  /usr/bin/plutil -remove ProgramArguments.1 "$rendered"
-  /usr/bin/plutil -insert ProgramArguments.1 \
+  /usr/bin/plutil -remove ProgramArguments.5 "$rendered"
+  /usr/bin/plutil -insert ProgramArguments.5 \
+    -string "$runtime_path" "$rendered"
+  /usr/bin/plutil -remove ProgramArguments.6 "$rendered"
+  /usr/bin/plutil -insert ProgramArguments.6 \
     -string "$repo_checkout/scripts/review/run-eval.sh" "$rendered"
   /usr/bin/plutil -replace EnvironmentVariables.PATH \
     -string "$runtime_path" "$rendered"
@@ -351,7 +354,9 @@ your checkout.
   /usr/bin/plutil -replace StandardErrorPath \
     -string "$HOME/Library/Logs/mento-review-eval.log" "$rendered"
   /usr/bin/plutil -lint "$rendered"
-  test "$(/usr/bin/plutil -extract ProgramArguments.1 raw -o - "$rendered")" = \
+  test "$(/usr/bin/plutil -extract ProgramArguments.5 raw -o - "$rendered")" = \
+    "$runtime_path"
+  test "$(/usr/bin/plutil -extract ProgramArguments.6 raw -o - "$rendered")" = \
     "$repo_checkout/scripts/review/run-eval.sh"
   test "$(/usr/bin/plutil -extract EnvironmentVariables.PATH raw -o - "$rendered")" = \
     "$runtime_path"
@@ -361,7 +366,7 @@ your checkout.
 )
 ```
 
-The two `plutil -extract` checks verify the script path and required CLI path
+The three `plutil -extract` checks verify the script path and required CLI path
 before the command replaces the installed plist. The temporary file is in the
 same directory as the target, so `mv` replaces the target atomically after all
 checks pass. The guarded block stops before `bootstrap` if a required CLI is

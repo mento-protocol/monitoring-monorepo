@@ -8,9 +8,11 @@
   This file is a template and is not installable as it stands. A plist has no
   variable substitution, so the checkout inside ProgramArguments and the log
   file in StandardOutPath and StandardErrorPath carry __REPO_CHECKOUT__ and
-  __USER_HOME__ placeholders. PATH also carries __RUNTIME_PATH__, which the
-  install step captures after it verifies the operator's current Node, Git,
-  Codex, and Claude executables. "Install the scheduler" in
+  __USER_HOME__ placeholders. ProgramArguments and PATH also carry
+  __RUNTIME_PATH__, which the install step captures after it verifies the
+  operator's current Node, Git, Codex, and Claude executables. The login shell
+  loads exported model credentials and then restores this captured path.
+  "Install the scheduler" in
   docs/evals/review-skill.md replaces all three values; copy this file unchanged
   and launchd cannot find the script, required CLIs, or its log.
 -->
@@ -20,7 +22,12 @@
     <string>org.mento.review-eval</string>
     <key>ProgramArguments</key>
     <array>
-      <string>/bin/bash</string>
+      <string>/bin/zsh</string>
+      <string>-l</string>
+      <string>-c</string>
+      <string>set -eu; runtime_path="$1"; shift; export PATH="$runtime_path"; exec /bin/bash "$@"</string>
+      <string>org.mento.review-eval</string>
+      <string>__RUNTIME_PATH__</string>
       <string>__REPO_CHECKOUT__/scripts/review/run-eval.sh</string>
       <string>--kind</string>
       <string>auto</string>

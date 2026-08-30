@@ -6595,7 +6595,12 @@ test("the launchd template carries safe arguments and installed PATH placeholder
     ...programArgumentsBlock[1].matchAll(/<string>(.*?)<\/string>/g),
   ].map((match) => match[1]);
   assert.deepEqual(programArguments, [
-    "/bin/bash",
+    "/bin/zsh",
+    "-l",
+    "-c",
+    'set -eu; runtime_path="$1"; shift; export PATH="$runtime_path"; exec /bin/bash "$@"',
+    "org.mento.review-eval",
+    "__RUNTIME_PATH__",
     "__REPO_CHECKOUT__/scripts/review/run-eval.sh",
     "--kind",
     "auto",
@@ -6607,8 +6612,10 @@ test("the launchd template carries safe arguments and installed PATH placeholder
     runbook,
     /command_path="\$\(PATH="\$runtime_path" command -v "\$command_name"\)"/,
   );
-  assert.match(runbook, /plutil -remove ProgramArguments\.1/);
-  assert.match(runbook, /plutil -insert ProgramArguments\.1/);
+  assert.match(runbook, /plutil -remove ProgramArguments\.5/);
+  assert.match(runbook, /plutil -insert ProgramArguments\.5/);
+  assert.match(runbook, /plutil -remove ProgramArguments\.6/);
+  assert.match(runbook, /plutil -insert ProgramArguments\.6/);
   assert.match(runbook, /plutil -replace EnvironmentVariables\.PATH/);
   assert.doesNotMatch(runbook, /sed -e "s\|__REPO_CHECKOUT__/);
 
@@ -6617,7 +6624,7 @@ test("the launchd template carries safe arguments and installed PATH placeholder
   assert.equal(extraBlocks.length, 0);
   assert.match(installBlock, /^\(\n {2}set -euo pipefail\n/);
   assert.doesNotMatch(installBlock, /kickstart/);
-  assert.doesNotMatch(installBlock, /\/bin\/zsh|-lc|exec "\$@"/);
+  assert.doesNotMatch(installBlock, /-lc/);
   assert.ok(
     installBlock.indexOf("/bin/mv -f") >
       installBlock.lastIndexOf("plutil -extract"),
@@ -6694,7 +6701,8 @@ if [ "$count" -eq "$REVIEW_EVAL_PLUTIL_FAIL_AT" ]; then
 fi
 if [ "$1" = "-extract" ]; then
   case "$2" in
-    ProgramArguments.1) printf '%s\\n' "$REVIEW_EVAL_EXPECTED_SCRIPT" ;;
+    ProgramArguments.5) printf '%s\\n' "$REVIEW_EVAL_EXPECTED_PATH" ;;
+    ProgramArguments.6) printf '%s\\n' "$REVIEW_EVAL_EXPECTED_SCRIPT" ;;
     EnvironmentVariables.PATH) printf '%s\\n' "$REVIEW_EVAL_EXPECTED_PATH" ;;
   esac
 fi
@@ -6753,7 +6761,7 @@ printf '%s\\n' "$*" >> "$REVIEW_EVAL_LAUNCHCTL_LOG"
         });
       };
 
-      for (let failAt = 1; failAt <= 8; failAt += 1) {
+      for (let failAt = 1; failAt <= 11; failAt += 1) {
         const failed = runInstall(failAt);
         assert.notEqual(
           failed.status,
@@ -6791,7 +6799,7 @@ printf '%s\\n' "$*" >> "$REVIEW_EVAL_LAUNCHCTL_LOG"
 );
 
 test(
-  "the launchd install mutations preserve one direct program vector",
+  "the launchd install preserves login credentials and one safe program vector",
   { skip: process.platform !== "darwin" },
   () => {
     const root = mkdtempSync(path.join(tmpdir(), "review eval & launchd-"));
@@ -6823,8 +6831,10 @@ test(
           encoding: "utf8",
         });
       for (const args of [
-        ["-remove", "ProgramArguments.1"],
-        ["-insert", "ProgramArguments.1", "-string", script],
+        ["-remove", "ProgramArguments.5"],
+        ["-insert", "ProgramArguments.5", "-string", runtimePath],
+        ["-remove", "ProgramArguments.6"],
+        ["-insert", "ProgramArguments.6", "-string", script],
         ["-replace", "EnvironmentVariables.PATH", "-string", runtimePath],
         ["-replace", "StandardOutPath", "-string", logPath],
         ["-replace", "StandardErrorPath", "-string", logPath],
@@ -6837,8 +6847,14 @@ test(
         assert.equal(result.status, 0, result.stdout + result.stderr);
         return result.stdout.trim();
       };
-      assert.deepEqual(JSON.parse(extract("ProgramArguments", "json")), [
-        "/bin/bash",
+      const programArguments = JSON.parse(extract("ProgramArguments", "json"));
+      assert.deepEqual(programArguments, [
+        "/bin/zsh",
+        "-l",
+        "-c",
+        'set -eu; runtime_path="$1"; shift; export PATH="$runtime_path"; exec /bin/bash "$@"',
+        "org.mento.review-eval",
+        runtimePath,
         script,
         "--kind",
         "auto",
@@ -6846,6 +6862,37 @@ test(
       assert.equal(extract("EnvironmentVariables.PATH"), runtimePath);
       assert.equal(extract("StandardOutPath"), logPath);
       assert.equal(extract("StandardErrorPath"), logPath);
+
+      const profileHome = path.join(root, "profile home");
+      const probeOutput = path.join(root, "login probe.txt");
+      mkdirSync(profileHome);
+      mkdirSync(path.dirname(script), { recursive: true });
+      writeFileSync(
+        path.join(profileHome, ".zprofile"),
+        "export ANTHROPIC_API_KEY='profile credential'\nexport PATH='/profile only'\n",
+      );
+      writeFileSync(
+        script,
+        '#!/bin/bash\nprintf \'%s\\n\' "${ANTHROPIC_API_KEY:-missing}" "$PATH" > "$REVIEW_EVAL_LOGIN_PROBE"\n',
+      );
+      const launched = spawnSync(
+        programArguments[0],
+        programArguments.slice(1),
+        {
+          encoding: "utf8",
+          env: {
+            HOME: profileHome,
+            PATH: "/launchd only",
+            REVIEW_EVAL_LOGIN_PROBE: probeOutput,
+            ZDOTDIR: profileHome,
+          },
+        },
+      );
+      assert.equal(launched.status, 0, launched.stdout + launched.stderr);
+      assert.deepEqual(readFileSync(probeOutput, "utf8").trim().split("\n"), [
+        "profile credential",
+        runtimePath,
+      ]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
