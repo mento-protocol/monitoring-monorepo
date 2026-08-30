@@ -6595,6 +6595,7 @@ test("the launchd template carries safe arguments and installed PATH placeholder
     ...programArgumentsBlock[1].matchAll(/<string>(.*?)<\/string>/g),
   ].map((match) => match[1]);
   assert.deepEqual(programArguments, [
+    "/bin/bash",
     "__REPO_CHECKOUT__/scripts/review/run-eval.sh",
     "--kind",
     "auto",
@@ -6606,8 +6607,8 @@ test("the launchd template carries safe arguments and installed PATH placeholder
     runbook,
     /command_path="\$\(PATH="\$runtime_path" command -v "\$command_name"\)"/,
   );
-  assert.match(runbook, /plutil -remove ProgramArguments\.0/);
-  assert.match(runbook, /plutil -insert ProgramArguments\.0/);
+  assert.match(runbook, /plutil -remove ProgramArguments\.1/);
+  assert.match(runbook, /plutil -insert ProgramArguments\.1/);
   assert.match(runbook, /plutil -replace EnvironmentVariables\.PATH/);
   assert.doesNotMatch(runbook, /sed -e "s\|__REPO_CHECKOUT__/);
 
@@ -6693,7 +6694,7 @@ if [ "$count" -eq "$REVIEW_EVAL_PLUTIL_FAIL_AT" ]; then
 fi
 if [ "$1" = "-extract" ]; then
   case "$2" in
-    ProgramArguments.0) printf '%s\\n' "$REVIEW_EVAL_EXPECTED_SCRIPT" ;;
+    ProgramArguments.1) printf '%s\\n' "$REVIEW_EVAL_EXPECTED_SCRIPT" ;;
     EnvironmentVariables.PATH) printf '%s\\n' "$REVIEW_EVAL_EXPECTED_PATH" ;;
   esac
 fi
@@ -6822,8 +6823,8 @@ test(
           encoding: "utf8",
         });
       for (const args of [
-        ["-remove", "ProgramArguments.0"],
-        ["-insert", "ProgramArguments.0", "-string", script],
+        ["-remove", "ProgramArguments.1"],
+        ["-insert", "ProgramArguments.1", "-string", script],
         ["-replace", "EnvironmentVariables.PATH", "-string", runtimePath],
         ["-replace", "StandardOutPath", "-string", logPath],
         ["-replace", "StandardErrorPath", "-string", logPath],
@@ -6837,6 +6838,7 @@ test(
         return result.stdout.trim();
       };
       assert.deepEqual(JSON.parse(extract("ProgramArguments", "json")), [
+        "/bin/bash",
         script,
         "--kind",
         "auto",

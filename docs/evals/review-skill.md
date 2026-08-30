@@ -315,8 +315,9 @@ step replaces three placeholders: `__REPO_CHECKOUT__` (the checkout that holds
 `run-eval.sh`), `__USER_HOME__` (the log location), and `__RUNTIME_PATH__` (the
 current `PATH` after the installer verifies `node`, `git`, `codex`, and
 `claude`). launchd does not read an interactive shell's startup files. The
-installed job executes the runner directly, so later shell startup cannot
-replace the captured path. Run this from the root of your checkout.
+installed job invokes the runner through the fixed `/bin/bash` interpreter, so
+later shell startup cannot replace the captured path. Run this from the root of
+your checkout.
 
 ```bash
 (
@@ -340,8 +341,8 @@ replace the captured path. Run this from the root of your checkout.
   rendered="$(/usr/bin/mktemp "$target_dir/.org.mento.review-eval.plist.XXXXXX")"
   trap '/bin/rm -f "$rendered"' EXIT
   /bin/cp "$template" "$rendered"
-  /usr/bin/plutil -remove ProgramArguments.0 "$rendered"
-  /usr/bin/plutil -insert ProgramArguments.0 \
+  /usr/bin/plutil -remove ProgramArguments.1 "$rendered"
+  /usr/bin/plutil -insert ProgramArguments.1 \
     -string "$repo_checkout/scripts/review/run-eval.sh" "$rendered"
   /usr/bin/plutil -replace EnvironmentVariables.PATH \
     -string "$runtime_path" "$rendered"
@@ -350,7 +351,7 @@ replace the captured path. Run this from the root of your checkout.
   /usr/bin/plutil -replace StandardErrorPath \
     -string "$HOME/Library/Logs/mento-review-eval.log" "$rendered"
   /usr/bin/plutil -lint "$rendered"
-  test "$(/usr/bin/plutil -extract ProgramArguments.0 raw -o - "$rendered")" = \
+  test "$(/usr/bin/plutil -extract ProgramArguments.1 raw -o - "$rendered")" = \
     "$repo_checkout/scripts/review/run-eval.sh"
   test "$(/usr/bin/plutil -extract EnvironmentVariables.PATH raw -o - "$rendered")" = \
     "$runtime_path"

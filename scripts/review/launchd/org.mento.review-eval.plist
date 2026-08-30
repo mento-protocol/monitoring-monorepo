@@ -20,6 +20,7 @@
     <string>org.mento.review-eval</string>
     <key>ProgramArguments</key>
     <array>
+      <string>/bin/bash</string>
       <string>__REPO_CHECKOUT__/scripts/review/run-eval.sh</string>
       <string>--kind</string>
       <string>auto</string>
