@@ -6722,11 +6722,11 @@ test(
       mkdirSync(path.dirname(script), { recursive: true });
       writeFileSync(
         path.join(profileHome, ".zprofile"),
-        "export ANTHROPIC_API_KEY='profile credential'\nexport PATH='/profile only'\n",
+        "export REVIEW_EVAL_PROFILE_MARKER='profile marker'\nexport PATH='/profile only'\n",
       );
       writeFileSync(
         script,
-        '#!/bin/bash\nprintf \'%s\\n\' "${ANTHROPIC_API_KEY:-missing}" "$PATH" > "$REVIEW_EVAL_LOGIN_PROBE"\n',
+        '#!/bin/bash\nprintf \'%s\\n\' "${REVIEW_EVAL_PROFILE_MARKER:-missing}" "$PATH" > "$REVIEW_EVAL_LOGIN_PROBE"\n',
       );
       const launched = spawnSync(
         programArguments[0],
@@ -6743,7 +6743,7 @@ test(
       );
       assert.equal(launched.status, 0, launched.stdout + launched.stderr);
       assert.deepEqual(readFileSync(probeOutput, "utf8").trim().split("\n"), [
-        "profile credential",
+        "profile marker",
         runtimePath,
       ]);
     } finally {
