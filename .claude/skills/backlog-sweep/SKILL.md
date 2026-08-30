@@ -635,9 +635,11 @@ crossed without anyone watching.
   The helper accepts only that Claim ID on `agent-active`. It refuses `in-pr`
   and repeats the claimed-branch PR proof before and after each write and after
   its final state reads. If a PR appears before the final proof, the helper
-  restores the prior active state and exact ownership snapshot, then exits
-  nonzero. A PR can still open after the final proof because GitHub exposes
-  separate APIs. The canonical lifecycle in
+  normally restores the prior active state and exact ownership snapshot. If a
+  `--needs-grooming` release already reached the exact grooming state with
+  empty ownership, recovery preserves that completed non-ready endpoint. The
+  helper exits nonzero in either case. A PR can still open after the final proof
+  because GitHub exposes separate APIs. The canonical lifecycle in
   [`agent-issue-workflow.md`](../../../docs/notes/agent-issue-workflow.md)
   releases _after_ an unmerged PR closes. A worker that stalls with an open PR
   keeps `in-pr` and hands the PR to the operator as a decision item.

@@ -325,9 +325,12 @@ while it runs:
   what it tried, where it stopped, and what a human must decide. The helper
   accepts only the matching owner token on `agent-active`. It refuses `in-pr`
   and repeats the claimed-branch PR proof before and after each write and after
-  its final state reads. A PR found before the final proof restores the prior
-  active state and exact ownership snapshot. A PR can still open after the
-  final proof because GitHub exposes separate APIs. A silent release sends the next run into the same
+  its final state reads. A PR found before the final proof normally restores
+  the prior active state and exact ownership snapshot. If a `--needs-grooming`
+  release already reached the exact grooming state with empty ownership,
+  recovery preserves that completed non-ready endpoint and exits nonzero. A PR
+  can still open after the final proof because GitHub exposes separate APIs. A
+  silent release sends the next run into the same
   wall. A stall with an open PR keeps `in-pr` and hands the PR to the operator.
   After the operator closes it unmerged, run
   `pnpm issue:release --issue <n> --claim-id <claim-id> --closed-unmerged-pr`.
