@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -327,6 +328,13 @@ test("structural mutations fail closed at each M2 boundary", () => {
   mutateOnce(
     root,
     ".github/workflows/dependabot-auto-merge-candidate.yml",
+    "    permissions:\n      contents: read\n      pull-requests: read",
+    "    permissions:\n      contents: write\n      pull-requests: write",
+    /combined contents: write and pull-requests: write outside the exact Dependabot writer/u,
+  );
+  mutateOnce(
+    root,
+    ".github/workflows/dependabot-auto-merge-candidate.yml",
     "      github.actor == 'dependabot[bot]'",
     "      github.actor != 'dependabot[bot]'",
     /exact reviewed Dependabot auto-merge workflow pair inventory/u,
@@ -338,6 +346,16 @@ test("structural mutations fail closed at each M2 boundary", () => {
     ".run_attempt > 0 and",
     /exact reviewed Dependabot auto-merge workflow pair inventory/u,
   );
+});
+
+test("Dependabot auto-merge workflows may be absent only as one pair", () => {
+  const root = structuralFixture();
+  rmSync(join(root, ".github/workflows/dependabot-auto-merge-candidate.yml"));
+  assert.deepEqual(checkStructuralRepository(root), [
+    "the Dependabot auto-merge classifier and writer workflows must be present or absent as one reviewed pair",
+  ]);
+  rmSync(join(root, ".github/workflows/dependabot-auto-merge.yml"));
+  assert.deepEqual(checkStructuralRepository(root), []);
 });
 
 test("PR-local reusable workflows stay inside cache and authority boundaries", () => {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 // prettier-ignore
@@ -205,10 +205,13 @@ function checkSchema(root, violations) {
 
 // prettier-ignore
 function checkDependabot(root, violations) {
-  for (const path of [
+  const paths = [
     ".github/workflows/dependabot-auto-merge-candidate.yml",
     ".github/workflows/dependabot-auto-merge.yml",
-  ]) {
+  ];
+  const presentPaths = paths.filter((path) => existsSync(join(root, path)));
+  add(violations, presentPaths.length !== 1, "the Dependabot auto-merge classifier and writer workflows must be present or absent as one reviewed pair");
+  for (const path of presentPaths) {
     validateWorkflowInventory(path, load(root, path), violations);
   }
 }

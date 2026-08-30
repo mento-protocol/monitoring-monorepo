@@ -715,7 +715,7 @@ export function validateWorkflowInventory(
       }
     } else {
       errors.push(
-        `${workflowPath}: must match the exact reviewed Dependabot auto-merge workflow pair inventory`,
+        `${workflowPath}: must match the exact reviewed Dependabot auto-merge workflow pair inventory (observed semantic sha256 ${semanticHash})`,
       );
     }
   }

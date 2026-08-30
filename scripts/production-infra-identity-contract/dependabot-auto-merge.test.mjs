@@ -28,9 +28,31 @@ const writerPath = path.join(
 );
 const candidate = loadYaml(readFileSync(candidatePath, "utf8"));
 const writer = loadYaml(readFileSync(writerPath, "utf8"));
-const candidateEventScript = candidate.jobs.classify.steps[0].run;
-const candidateDependencyScript = candidate.jobs.classify.steps[2].run;
-const writerScript = writer.jobs["auto-merge"].steps[0].run;
+
+function stepScript(job, stepName) {
+  assert(Array.isArray(job?.steps), `job for ${stepName} must contain steps`);
+  const matches = job.steps.filter((step) => step.name === stepName);
+  assert.equal(matches.length, 1, `step ${stepName} must exist exactly once`);
+  assert.equal(
+    typeof matches[0].run,
+    "string",
+    `step ${stepName} must run a script`,
+  );
+  return matches[0].run;
+}
+
+const candidateEventScript = stepScript(
+  candidate.jobs.classify,
+  "Validate candidate event",
+);
+const candidateDependencyScript = stepScript(
+  candidate.jobs.classify,
+  "Mark routine update eligible",
+);
+const writerScript = stepScript(
+  writer.jobs["auto-merge"],
+  "Merge the verified head after required checks",
+);
 
 const expectedRepository = "mento-protocol/monitoring-monorepo";
 const workflowIdentity = {
@@ -251,45 +273,48 @@ else process.exit(92);
 
 function runWriter(fixture) {
   const scratch = mkdtempSync(path.join(tmpdir(), "dependabot-merge-test-"));
-  const ghPath = path.join(scratch, "gh");
-  const scenarioPath = path.join(scratch, "scenario.json");
-  const statePath = path.join(scratch, "state.json");
-  const callLogPath = path.join(scratch, "calls.jsonl");
-  const mergeMarker = path.join(scratch, "merge-called.txt");
-  writeFileSync(ghPath, mockGhSource);
-  chmodSync(ghPath, 0o755);
-  writeFileSync(scenarioPath, JSON.stringify(fixture));
-  writeFileSync(statePath, "{}");
-  writeFileSync(callLogPath, "");
-  const result = spawnSync("bash", ["-c", writerScript], {
-    cwd: repositoryRoot,
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      PATH: `${scratch}:${process.env.PATH}`,
-      GITHUB_REPOSITORY: expectedRepository,
-      GH_READ_TOKEN: "read-token",
-      FINAL_MERGE_TOKEN: "merge-token",
-      RUN_ID: String(fixture.run.id),
-      MOCK_GH_SCENARIO: scenarioPath,
-      MOCK_GH_STATE: statePath,
-      MOCK_GH_CALL_LOG: callLogPath,
-      MOCK_GH_MERGE_MARKER: mergeMarker,
-      MOCK_EXPECTED_READ_TOKEN: "read-token",
-      MOCK_EXPECTED_MERGE_TOKEN: "merge-token",
-    },
-  });
-  const merged = existsSync(mergeMarker);
-  const calls = readFileSync(callLogPath, "utf8")
-    .trim()
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line));
-  const mergeRequest = merged
-    ? JSON.parse(readFileSync(mergeMarker, "utf8"))
-    : null;
-  rmSync(scratch, { recursive: true, force: true });
-  return { ...result, calls, merged, mergeRequest };
+  try {
+    const ghPath = path.join(scratch, "gh");
+    const scenarioPath = path.join(scratch, "scenario.json");
+    const statePath = path.join(scratch, "state.json");
+    const callLogPath = path.join(scratch, "calls.jsonl");
+    const mergeMarker = path.join(scratch, "merge-called.txt");
+    writeFileSync(ghPath, mockGhSource);
+    chmodSync(ghPath, 0o755);
+    writeFileSync(scenarioPath, JSON.stringify(fixture));
+    writeFileSync(statePath, "{}");
+    writeFileSync(callLogPath, "");
+    const result = spawnSync("bash", ["-c", writerScript], {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${scratch}:${process.env.PATH}`,
+        GITHUB_REPOSITORY: expectedRepository,
+        GH_READ_TOKEN: "read-token",
+        FINAL_MERGE_TOKEN: "merge-token",
+        RUN_ID: String(fixture.run.id),
+        MOCK_GH_SCENARIO: scenarioPath,
+        MOCK_GH_STATE: statePath,
+        MOCK_GH_CALL_LOG: callLogPath,
+        MOCK_GH_MERGE_MARKER: mergeMarker,
+        MOCK_EXPECTED_READ_TOKEN: "read-token",
+        MOCK_EXPECTED_MERGE_TOKEN: "merge-token",
+      },
+    });
+    const merged = existsSync(mergeMarker);
+    const calls = readFileSync(callLogPath, "utf8")
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    const mergeRequest = merged
+      ? JSON.parse(readFileSync(mergeMarker, "utf8"))
+      : null;
+    return { ...result, calls, merged, mergeRequest };
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 }
 
 function callsMatching(result, predicate) {
