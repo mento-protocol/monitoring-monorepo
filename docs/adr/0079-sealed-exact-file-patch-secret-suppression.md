@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0078 — Autoreview permits only sealed exact-file-patch secret suppression
+# ADR 0079 — Autoreview permits only sealed exact-file-patch secret suppression
 
 **Status:** Accepted (Aug 2026). In force on branches that contain this change.
 **Scope:** ci/process

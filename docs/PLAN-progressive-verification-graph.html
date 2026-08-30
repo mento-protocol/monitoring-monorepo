@@ -1,0 +1,1131 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Before-and-after plan for simplifying verification in the monitoring monorepo."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="data:," />
+    <title>Simple Verification System Plan</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --page: #f2f5f3;
+        --surface: #fff;
+        --soft: #e9efec;
+        --ink: #132019;
+        --muted: #58665f;
+        --line: #cbd6d0;
+        --green: #087a55;
+        --green-soft: #dff2e9;
+        --red: #a13d35;
+        --red-soft: #fae9e7;
+        --amber: #926413;
+        --amber-soft: #f9efd5;
+        --shadow: 0 18px 55px rgb(25 48 37 / 10%);
+        --radius: 18px;
+        --width: 1180px;
+        font-family:
+          Inter,
+          ui-sans-serif,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+      }
+      :root[data-theme="dark"] {
+        color-scheme: dark;
+        --page: #0d1511;
+        --surface: #15201a;
+        --soft: #1d2b24;
+        --ink: #edf5f0;
+        --muted: #adbbb3;
+        --line: #34463c;
+        --green: #69d0a7;
+        --green-soft: #173b2c;
+        --red: #f09a91;
+        --red-soft: #432522;
+        --amber: #e5bd69;
+        --amber-soft: #3b311c;
+        --shadow: 0 18px 55px rgb(0 0 0 / 28%);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
+        scroll-padding-top: 76px;
+      }
+      body {
+        margin: 0;
+        background: var(--page);
+        color: var(--ink);
+        font-size: 16px;
+        line-height: 1.55;
+      }
+      a {
+        color: inherit;
+      }
+      button {
+        font: inherit;
+      }
+      .shell {
+        width: min(calc(100% - 36px), var(--width));
+        margin-inline: auto;
+      }
+      .skip {
+        position: fixed;
+        left: 12px;
+        top: -60px;
+        z-index: 20;
+        padding: 10px;
+        background: var(--ink);
+        color: var(--page);
+      }
+      .skip:focus {
+        top: 12px;
+      }
+      nav {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        border-bottom: 1px solid var(--line);
+        background: color-mix(in srgb, var(--page) 90%, transparent);
+        backdrop-filter: blur(14px);
+      }
+      .nav {
+        min-height: 64px;
+        display: flex;
+        align-items: center;
+        gap: 24px;
+      }
+      .brand {
+        font-weight: 800;
+        text-decoration: none;
+        letter-spacing: -0.02em;
+      }
+      .links {
+        display: flex;
+        gap: 18px;
+        margin-left: auto;
+      }
+      .links a {
+        color: var(--muted);
+        text-decoration: none;
+        font-size: 14px;
+        font-weight: 650;
+      }
+      .theme {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 8px 11px;
+        background: var(--surface);
+        color: var(--ink);
+        cursor: pointer;
+      }
+      header {
+        padding: 80px 0 60px;
+      }
+      .eyebrow {
+        color: var(--green);
+        font:
+          800 12px/1 ui-monospace,
+          monospace;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+      h1 {
+        max-width: 900px;
+        margin: 14px 0 20px;
+        font-size: clamp(42px, 7vw, 82px);
+        line-height: 0.98;
+        letter-spacing: -0.055em;
+      }
+      .lede {
+        max-width: 720px;
+        color: var(--muted);
+        font-size: clamp(18px, 2vw, 22px);
+      }
+      .facts {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+        margin-top: 38px;
+      }
+      .evidence-note {
+        max-width: 800px;
+        margin: 16px 0 0;
+        color: var(--muted);
+        font-size: 14px;
+      }
+      .fact {
+        padding: 18px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--surface);
+      }
+      .fact strong {
+        display: block;
+        font-size: 28px;
+        letter-spacing: -0.04em;
+      }
+      .fact span {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      section {
+        padding: 66px 0;
+        border-top: 1px solid var(--line);
+      }
+      .section-head {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 32px;
+        margin-bottom: 34px;
+      }
+      h2 {
+        margin: 0;
+        font-size: clamp(30px, 4vw, 52px);
+        line-height: 1.04;
+        letter-spacing: -0.04em;
+      }
+      .section-head p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 18px;
+      }
+      .compare {
+        display: grid;
+        grid-template-columns: 1fr 56px 1fr;
+        align-items: stretch;
+      }
+      .system {
+        padding: 28px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--surface);
+        box-shadow: var(--shadow);
+      }
+      .system.old {
+        border-top: 4px solid var(--red);
+      }
+      .system.new {
+        border-top: 4px solid var(--green);
+      }
+      .system h3 {
+        margin: 5px 0 8px;
+        font-size: 26px;
+      }
+      .system > p {
+        color: var(--muted);
+      }
+      .arrow {
+        display: grid;
+        place-items: center;
+        color: var(--green);
+        font-size: 30px;
+        font-weight: 800;
+      }
+      .flow {
+        display: grid;
+        gap: 9px;
+        margin: 22px 0;
+      }
+      .flow div {
+        position: relative;
+        padding: 13px 15px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--soft);
+      }
+      .flow div + div::before {
+        content: "↓";
+        position: absolute;
+        left: 20px;
+        top: -18px;
+        color: var(--muted);
+      }
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+      }
+      .chip {
+        padding: 5px 9px;
+        border-radius: 999px;
+        background: var(--soft);
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .proscons {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-top: 20px;
+      }
+      .list {
+        margin: 0;
+        padding: 16px 18px 16px 38px;
+        border-radius: 14px;
+      }
+      .list.good {
+        background: var(--green-soft);
+      }
+      .list.cost {
+        background: var(--red-soft);
+      }
+      .list li + li {
+        margin-top: 8px;
+      }
+      .moments {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 14px;
+      }
+      .moment {
+        padding: 22px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--surface);
+      }
+      .moment b {
+        color: var(--green);
+        font:
+          800 12px/1 ui-monospace,
+          monospace;
+        text-transform: uppercase;
+      }
+      .moment h3 {
+        margin: 12px 0 5px;
+      }
+      .moment p {
+        margin: 0;
+        color: var(--muted);
+      }
+      .scenario {
+        margin-top: 20px;
+        padding: 28px;
+        border-radius: var(--radius);
+        background: var(--ink);
+        color: var(--page);
+      }
+      :root[data-theme="dark"] .scenario {
+        background: #edf5f0;
+        color: #132019;
+      }
+      .scenario h3 {
+        margin-top: 0;
+        font-size: 26px;
+      }
+      .steps {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 16px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        counter-reset: steps;
+      }
+      .steps li {
+        counter-increment: steps;
+      }
+      .steps li::before {
+        content: "0" counter(steps);
+        display: block;
+        margin-bottom: 10px;
+        color: #67cda5;
+        font:
+          800 13px/1 ui-monospace,
+          monospace;
+      }
+      .steps strong {
+        display: block;
+        margin-bottom: 6px;
+      }
+      .steps span {
+        color: #cbd7d0;
+        font-size: 14px;
+      }
+      :root[data-theme="dark"] .steps span {
+        color: #3e4d45;
+      }
+      .scenario code {
+        background: rgb(255 255 255 / 14%);
+        color: inherit;
+      }
+      :root[data-theme="dark"] .scenario code {
+        background: #d7e4dd;
+        color: #132019;
+      }
+      code {
+        padding: 2px 5px;
+        border-radius: 5px;
+        background: color-mix(in srgb, var(--soft) 85%, transparent);
+        font:
+          12px/1.5 ui-monospace,
+          monospace;
+      }
+      .contract {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+      }
+      .card {
+        padding: 24px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--surface);
+      }
+      .card h3 {
+        margin-top: 0;
+      }
+      .card p,
+      .card li {
+        color: var(--muted);
+      }
+      .callout {
+        margin-top: 16px;
+        padding: 18px;
+        border-left: 4px solid var(--amber);
+        border-radius: 10px;
+        background: var(--amber-soft);
+      }
+      .layers {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+        counter-reset: layers;
+      }
+      .layer {
+        counter-increment: layers;
+        padding: 20px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--surface);
+      }
+      .layer::before {
+        content: "0" counter(layers);
+        display: block;
+        color: var(--green);
+        font:
+          800 12px/1 ui-monospace,
+          monospace;
+      }
+      .layer strong {
+        display: block;
+        margin: 10px 0 4px;
+      }
+      .layer span {
+        color: var(--muted);
+        font-size: 14px;
+      }
+      .track {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        counter-reset: phases -1;
+      }
+      .track li {
+        counter-increment: phases;
+        padding: 18px 14px;
+        border-top: 3px solid var(--green);
+      }
+      .track li::before {
+        content: "Phase " counter(phases);
+        display: block;
+        color: var(--green);
+        font:
+          800 11px/1 ui-monospace,
+          monospace;
+      }
+      .track strong {
+        display: block;
+        margin: 10px 0 5px;
+      }
+      .track span {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .numbers {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+        margin-top: 28px;
+      }
+      .number {
+        padding: 22px;
+        border-radius: 14px;
+        background: var(--green-soft);
+      }
+      .number strong {
+        display: block;
+        color: var(--green);
+        font-size: 30px;
+      }
+      .number span {
+        font-size: 13px;
+      }
+      footer {
+        padding: 38px 0 60px;
+        color: var(--muted);
+      }
+      footer .shell {
+        display: flex;
+        justify-content: space-between;
+        gap: 24px;
+      }
+      @media (max-width: 850px) {
+        .links {
+          display: none;
+        }
+        .theme {
+          margin-left: auto;
+        }
+        .facts,
+        .moments,
+        .layers,
+        .numbers {
+          grid-template-columns: 1fr 1fr;
+        }
+        .compare {
+          grid-template-columns: 1fr;
+          gap: 14px;
+        }
+        .arrow {
+          transform: rotate(90deg);
+        }
+        .section-head,
+        .contract {
+          grid-template-columns: 1fr;
+        }
+        .steps,
+        .track {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+      @media (max-width: 540px) {
+        .facts,
+        .moments,
+        .layers,
+        .numbers,
+        .steps,
+        .track,
+        .proscons {
+          grid-template-columns: 1fr;
+        }
+        header {
+          padding-top: 54px;
+        }
+        section {
+          padding: 50px 0;
+        }
+        footer .shell {
+          display: block;
+        }
+      }
+      @media print {
+        :root,
+        :root[data-theme="dark"] {
+          color-scheme: light;
+          --page: #f2f5f3;
+          --surface: #fff;
+          --soft: #e9efec;
+          --ink: #132019;
+          --muted: #58665f;
+          --line: #cbd6d0;
+          --green: #087a55;
+          --green-soft: #dff2e9;
+          --red: #a13d35;
+          --red-soft: #fae9e7;
+          --amber: #926413;
+          --amber-soft: #f9efd5;
+          --shadow: none;
+        }
+        nav,
+        .theme {
+          display: none;
+        }
+        body {
+          background: #fff;
+        }
+        section {
+          break-inside: avoid;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <nav>
+      <div class="shell nav">
+        <a class="brand" href="#top">Verification redesign</a>
+        <div class="links">
+          <a href="#before-after">Before / after</a
+          ><a href="#local">Local loop</a> <a href="#authority">Authority</a
+          ><a href="#migration">Migration</a>
+        </div>
+        <button class="theme" id="theme" type="button">Theme: auto</button>
+      </div>
+    </nav>
+    <main id="main">
+      <header id="top" class="shell">
+        <p class="eyebrow">Monitoring monorepo · Phase 0 plan</p>
+        <h1>Remove the queue. Keep the quality bar.</h1>
+        <p class="lede">
+          Replace the mandatory local gate with direct package feedback and
+          hardened existing CI. Add no app, cloud project, scheduler, task
+          graph, or verdict store.
+        </p>
+        <div class="facts" aria-label="Current baseline">
+          <div class="fact">
+            <strong>101,595</strong><span>raw counted control-plane lines</span>
+          </div>
+          <div class="fact">
+            <strong>24.7 min</strong><span>median local gate request</span>
+          </div>
+          <div class="fact">
+            <strong>25</strong><span>registered worktrees at snapshot</span>
+          </div>
+          <div class="fact">
+            <strong>0 sec</strong><span>target shared local wait</span>
+          </div>
+        </div>
+        <p class="evidence-note">
+          The raw total covers 223 files: 95,815 implementation and test lines,
+          4,952 lines from four dedicated gate documents, and 828 other
+          reference and hook lines. The dedicated documents count as whole
+          files, which avoids a token-by-token matcher. The 83,113-line
+          upper-bound deletion candidate uses the implementation and test
+          surface only.
+        </p>
+        <p class="evidence-note">
+          The 24.7-minute value is the provenance-limited seven-request median.
+          A later
+          <a
+            href="metrics/verification-redesign-local-gate-source-bound-sample.json"
+            >source-bound narrow route</a
+          >
+          passed in 168 seconds, with 70 seconds of command execution and no
+          scheduler wait. The gate exported <code>CI=true</code>, so mapped
+          commands used their non-interactive CI path. Compare this result only
+          with gate requests that used the same command environment. Its
+          measured commit is no longer an ancestor after rebase. The committed
+          <a href="metrics/verification-redesign-local-gate-source.patch"
+            >source patch</a
+          >
+          permits a fresh clone to reproduce the measured tree from a reachable
+          commit. It does not replace the historical distribution.
+        </p>
+      </header>
+
+      <section id="before-after">
+        <div class="shell">
+          <div class="section-head">
+            <h2>One large local control plane becomes three small stages.</h2>
+            <p>
+              The current system detects many risks. Its orchestration, shared
+              state, and process recovery now dominate local work.
+            </p>
+          </div>
+          <div class="compare">
+            <article class="system old">
+              <p class="eyebrow">Before · mandatory local gate</p>
+              <h3>Every push enters a shared machine queue.</h3>
+              <div class="flow">
+                <div>Edit and commit</div>
+                <div>Pre-push hook enters gate</div>
+                <div>Map paths and reserve shared resources</div>
+                <div>Run checks, journals, drains, and recovery</div>
+                <div>Push, then run overlapping CI</div>
+              </div>
+              <div class="chips">
+                <span class="chip">routing engine</span
+                ><span class="chip">coordinator</span
+                ><span class="chip">run.lock</span
+                ><span class="chip">freshness state</span
+                ><span class="chip">process drains</span>
+              </div>
+              <div class="proscons">
+                <ul class="list good">
+                  <li>Broad feedback before push</li>
+                  <li>Shared-resource containment</li>
+                  <li>Strong generated-drift coverage</li>
+                </ul>
+                <ul class="list cost">
+                  <li>Cross-worktree waiting</li>
+                  <li>Cloud timeouts</li>
+                  <li>Large Bash and test surface</li>
+                  <li>Overlaps CI</li>
+                </ul>
+              </div>
+            </article>
+            <div class="arrow" aria-hidden="true">→</div>
+            <article class="system new">
+              <p class="eyebrow">After · staged verification</p>
+              <h3>Local feedback is direct. CI owns the merge verdict.</h3>
+              <div class="flow">
+                <div>Pre-commit formats staged files</div>
+                <div>
+                  Author runs affected package commands at a coherent checkpoint
+                </div>
+                <div>Push starts immediately</div>
+                <div>
+                  Existing fixed CI fan-out runs affected jobs in parallel
+                </div>
+                <div>
+                  Review, exact-head readiness, merge consent, and live proof
+                  remain
+                </div>
+              </div>
+              <div class="chips">
+                <span class="chip">no local selector</span
+                ><span class="chip">no pre-push check</span
+                ><span class="chip">fixed CI jobs</span
+                ><span class="chip">fail-closed aggregate</span>
+              </div>
+              <div class="proscons">
+                <ul class="list good">
+                  <li>No shared local queue</li>
+                  <li>Fresh runner isolation</li>
+                  <li>Small, traceable architecture</li>
+                  <li>Same review and deployment proof</li>
+                </ul>
+                <ul class="list cost">
+                  <li>Some failures arrive after push</li>
+                  <li>Path filters need strong fixtures</li>
+                  <li>Hosted runner cost needs a ceiling</li>
+                </ul>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="local">
+        <div class="shell">
+          <div class="section-head">
+            <h2>Local checks run at named moments.</h2>
+            <p>
+              The trigger table, not agent discretion, defines the required
+              checkpoint. CI remains required merge evidence.
+            </p>
+          </div>
+          <div class="moments">
+            <article class="moment">
+              <b>Every commit</b>
+              <h3>Format staged files</h3>
+              <p>
+                Keep the Trunk formatter only. Do not add package commands,
+                generation, or browser work.
+              </p>
+            </article>
+            <article class="moment">
+              <b>Coherent checkpoint</b>
+              <h3>Check affected packages</h3>
+              <p>
+                Run direct lint, typecheck, test, codegen, React Doctor, build,
+                and browser checks when their named trigger applies.
+              </p>
+            </article>
+            <article class="moment">
+              <b>Every push</b>
+              <h3>Start CI now</h3>
+              <p>
+                Pre-push does not fetch, route, lock, wait, or create freshness
+                state.
+              </p>
+            </article>
+          </div>
+          <div class="scenario">
+            <h3>Example: a dashboard page with indexer changes</h3>
+            <ol class="steps">
+              <li>
+                <strong>Regenerate contracts</strong
+                ><span
+                  >Run indexer codegen when schema, config, ABI, entry point, or
+                  reachability changes. Run dashboard codegen for query
+                  consumers.</span
+                >
+              </li>
+              <li>
+                <strong>Check both packages</strong
+                ><span
+                  >Run each affected package's lint, typecheck, and CI-aligned
+                  local test command. Indexer test measured 191.5 seconds and
+                  needs optimization.</span
+                >
+              </li>
+              <li>
+                <strong>Check the page</strong
+                ><span
+                  >Run <code>dashboard:react-doctor:diff</code>, build the
+                  route, and verify route, console, interaction, and auth states
+                  in a browser.</span
+                >
+              </li>
+              <li>
+                <strong>Use broad CI</strong
+                ><span
+                  >CI runs coverage, Knip, dependency checks, full React Doctor,
+                  Playwright, size checks, generated variants, and the
+                  aggregate.</span
+                >
+              </li>
+            </ol>
+          </div>
+          <div class="callout">
+            <strong>Measured exception:</strong> Governance Watchdog uses
+            <code>test:unit</code> as its normal author checkpoint. Its generic
+            <code>test</code> alias requires a service on
+            <code>localhost:8080</code>.
+          </div>
+        </div>
+      </section>
+
+      <section id="authority">
+        <div class="shell">
+          <div class="section-head">
+            <h2>Reuse existing CI. Harden its authority.</h2>
+            <p>
+              Keep one required <code>CI / ci</code> aggregate, Code Quality,
+              Sentry suites, Vercel, and Vercel Preview Comments.
+            </p>
+          </div>
+          <div class="contract">
+            <article class="card">
+              <h3>Required pull request path</h3>
+              <ul>
+                <li>Fixed jobs and pinned path filter.</li>
+                <li>
+                  Unknown and control-plane paths select all conditional checks.
+                </li>
+                <li>
+                  Closed-world aggregate rejects failed, cancelled, missing, and
+                  unexpected results.
+                </li>
+                <li>PR jobs restore protected-main caches but never save.</li>
+                <li>
+                  Automated review, feedback ledger, exact-head readiness, and
+                  human merge consent remain.
+                </li>
+              </ul>
+            </article>
+            <article class="card">
+              <h3>Immutable no-skip audit</h3>
+              <ul>
+                <li>
+                  Workflow definition comes from protected <code>main</code>.
+                </li>
+                <li>
+                  Dispatch inputs are PR number, full source SHA, and full base
+                  SHA.
+                </li>
+                <li>
+                  Verify same-repository current PR head and current protected
+                  base at dispatch.
+                </li>
+                <li>
+                  Check out both recorded objects. Do not resolve moving branch
+                  refs again.
+                </li>
+                <li>
+                  Use a distinct run and display name. Record the run ID with
+                  its immutable inputs as operational evidence. It is not a PR
+                  check and cannot satisfy readiness.
+                </li>
+              </ul>
+            </article>
+          </div>
+          <div class="callout">
+            <strong>Spend is not approved:</strong> recommend 45 runner-minutes
+            per no-skip run and 450 cumulative runner-minutes across the
+            selected no-skip runs. A human must approve the ceiling and stop
+            condition before shadow execution. The Phase 0 cold planning
+            estimate is 41.18 runner-minutes. It is not an upper bound. An
+            all-cache-disabled current no-skip proof must run before shadow. The
+            Phase 0 sample selects one <code>CI</code> workflow run for each of
+            10 immutable PR heads. It counts every non-skipped job across all 13
+            attempts, including <code>Sentry suites</code> and the
+            <code>ci</code> aggregate. It excludes the separate
+            <code>Code Quality</code> workflow and the external
+            <code>Vercel</code> and <code>Vercel Preview Comments</code>
+            results. Included jobs use Blacksmith
+            <code>blacksmith-2vcpu-ubuntu-2404-arm</code>,
+            <code>blacksmith-2vcpu-ubuntu-2404</code>, and
+            <code>blacksmith-4vcpu-ubuntu-2404</code>, plus GitHub-hosted
+            <code>ubuntu-latest</code>. This is selected-workflow elapsed job
+            time, not total PR spend or provider-billed minutes.
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="shell">
+          <div class="section-head">
+            <h2>Six layers keep the quality claim honest.</h2>
+            <p>
+              No single result proves source behavior, reviewer intent, live
+              behavior, and changing external risks.
+            </p>
+          </div>
+          <div class="layers">
+            <div class="layer">
+              <strong>Author feedback</strong
+              ><span>Fast direct commands at named checkpoints.</span>
+            </div>
+            <div class="layer">
+              <strong>Filter fixtures</strong
+              ><span
+                >Positive, negative, rename, deletion, unknown, and
+                control-plane cases.</span
+              >
+            </div>
+            <div class="layer">
+              <strong>Required CI</strong
+              ><span>Affected jobs plus unconditional policy guards.</span>
+            </div>
+            <div class="layer">
+              <strong>No-skip audit</strong
+              ><span>Detect selection omissions before and after cutover.</span>
+            </div>
+            <div class="layer">
+              <strong>Review and consent</strong
+              ><span
+                >Fresh-context review, complete feedback, current-head
+                readiness, human merge.</span
+              >
+            </div>
+            <div class="layer">
+              <strong>Main and production</strong
+              ><span
+                >Every-main-SHA validation, scheduled assurance, and
+                service-specific live proof.</span
+              >
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="migration">
+        <div class="shell">
+          <div class="section-head">
+            <h2>Evidence earns each deletion.</h2>
+            <p>
+              The gate stays mandatory until shadow evidence passes and a human
+              approves a separate cutover.
+            </p>
+          </div>
+          <div class="contract" style="margin-bottom: 16px">
+            <article class="card">
+              <h3>Seven inventory dispositions</h3>
+              <ul>
+                <li><code>retained-required-ci</code>: required CI.</li>
+                <li>
+                  <code>retained-author-procedure</code>: author procedure.
+                </li>
+                <li><code>retained-after-merge</code>: after merge.</li>
+                <li><code>scheduled</code>: stated interval.</li>
+                <li><code>duplicate</code>: named retained safeguard.</li>
+                <li><code>obsolete-with-evidence</code>: proved obsolete.</li>
+                <li><code>deferred-with-owner</code>: owner and follow-up.</li>
+              </ul>
+            </article>
+            <article class="card">
+              <h3>Category detail stays separate</h3>
+              <p>
+                Conditional PR checks, reviewer procedures, and advisory
+                reminders remain inventory categories and reviewed meaning. Map
+                each to one of the seven dispositions based on its retained
+                enforcement or follow-up.
+              </p>
+            </article>
+          </div>
+          <ol class="track">
+            <li>
+              <strong>Inventory · #2123</strong
+              ><span
+                >Record every safeguard, metric, authority exception, worktree,
+                and #2042 consumer.</span
+              >
+            </li>
+            <li>
+              <strong>Trust boundary · #2124</strong
+              ><span
+                >Remove or accept exact PR credential exposure. Make PR caches
+                restore-only.</span
+              >
+            </li>
+            <li>
+              <strong>CI contracts · #2125</strong
+              ><span
+                >Fill confirmed coverage gaps. Test filters and the fail-closed
+                aggregate.</span
+              >
+            </li>
+            <li>
+              <strong>No-skip and shadow · #2126</strong
+              ><span
+                >Add the bounded audit. Compare at least 10 distinct PRs over 7
+                days within approved spend.</span
+              >
+            </li>
+            <li>
+              <strong>Cut over · #2127</strong
+              ><span
+                >Extend the after-manifest generator, then use human approval to
+                remove pre-push verification. Keep the diagnostic runtime.</span
+              >
+            </li>
+            <li>
+              <strong>Soak and delete · #2128</strong
+              ><span
+                >After another 10 merged PRs over 7 days, retire only proved
+                gate-only code.</span
+              >
+            </li>
+            <li>
+              <strong>Optimize</strong
+              ><span
+                >Change only measured bottlenecks. Do not add a new
+                platform.</span
+              >
+            </li>
+          </ol>
+          <div class="callout">
+            <strong>Before the after manifest:</strong> count replacement-owned
+            checker and test files, verification aliases, and changed
+            control-plane blocks. Accept both legacy Trunk markers absent after
+            full removal. Reject a partial or malformed legacy block.
+          </div>
+          <div class="numbers">
+            <div class="number">
+              <strong>10 PRs</strong><span>minimum shadow sample</span>
+            </div>
+            <div class="number">
+              <strong>7 days</strong><span>minimum calendar window</span>
+            </div>
+            <div class="number">
+              <strong>≥80%</strong
+              ><span>gate-specific line deletion target</span>
+            </div>
+            <div class="number">
+              <strong>2 approvals</strong
+              ><span>cutover and later deletion</span>
+            </div>
+          </div>
+          <p class="evidence-note">
+            Phase 0 records 83,113 lines as an upper-bound deletion candidate.
+            Mixed files still contain retained behavior. The cutover and
+            deletion issues must allocate or migrate that behavior, publish the
+            reviewed final denominator, and only then apply the 80% target.
+          </p>
+          <div class="contract" style="margin-top: 16px">
+            <article class="card">
+              <h3>Rollback before deletion</h3>
+              <p>
+                Stop merges, restore the recorded ruleset, then revert the
+                cutover commit. The retained runtime resumes the hook.
+              </p>
+            </article>
+            <article class="card">
+              <h3>Rollback after deletion</h3>
+              <p>
+                Revert retirement first. Restore and verify runtime,
+                coordinator, tests, process safeguards, and
+                <code>run.lock</code>. Re-enable the hook only after its runtime
+                exists.
+              </p>
+            </article>
+          </div>
+          <div class="callout">
+            <strong>Mixed worktrees:</strong> the snapshot has 25 registrations.
+            Keep legacy <code>run.lock</code> while an active supported worktree
+            can run the old gate. Never use <code>--no-lock</code> or clear
+            coordinator state.
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="shell">
+          <div class="section-head">
+            <h2>Complexity is a release condition.</h2>
+            <p>
+              The plan removes a local control platform. It must not build a
+              remote replacement.
+            </p>
+          </div>
+          <div class="contract">
+            <article class="card">
+              <h3>Allowed additions</h3>
+              <ul>
+                <li>Small filter and aggregate contract tests.</li>
+                <li>
+                  One thin orchestration script below 300 non-test lines if
+                  needed.
+                </li>
+                <li>
+                  A reviewed inventory and generated before/after manifest.
+                </li>
+                <li>Existing workflow jobs and schedules.</li>
+              </ul>
+            </article>
+            <article class="card">
+              <h3>Explicitly excluded</h3>
+              <ul>
+                <li>GitHub App or GCP project.</li>
+                <li>
+                  Service, database, queue, daemon, signer, or verdict store.
+                </li>
+                <li>
+                  Dynamic DAG, task registry, receipt schema, or cache protocol.
+                </li>
+                <li>
+                  New cross-worktree lock, socket, lease, journal, or port
+                  owner.
+                </li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+    </main>
+    <footer>
+      <div class="shell">
+        <span>Visual companion to the reviewed verification redesign.</span
+        ><a href="PLAN-progressive-verification-graph.md"
+          >Open the complete Markdown plan →</a
+        >
+      </div>
+    </footer>
+    <script>
+      const root = document.documentElement;
+      const button = document.getElementById("theme");
+      const modes = ["auto", "light", "dark"];
+      const systemDark = matchMedia("(prefers-color-scheme: dark)");
+      const storage = location.protocol === "file:" ? null : localStorage;
+      let mode = storage?.getItem("verification-plan-theme") || "auto";
+      function apply(next) {
+        mode = modes.includes(next) ? next : "auto";
+        root.dataset.theme =
+          mode === "auto" ? (systemDark.matches ? "dark" : "light") : mode;
+        button.textContent = `Theme: ${mode}`;
+        if (mode === "auto") storage?.removeItem("verification-plan-theme");
+        else storage?.setItem("verification-plan-theme", mode);
+      }
+      systemDark.addEventListener("change", () => {
+        if (mode === "auto") apply(mode);
+      });
+      button.addEventListener("click", () =>
+        apply(modes[(modes.indexOf(mode) + 1) % modes.length]),
+      );
+      apply(mode);
+    </script>
+  </body>
+</html>

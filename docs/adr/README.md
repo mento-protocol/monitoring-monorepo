@@ -64,7 +64,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | ADR                                                         | Decision                                                                             |
 | ----------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | [0006](0006-github-issues-backlog.md)                       | GitHub Issues (not `BACKLOG.md`) are the canonical agent work queue                  |
-| [0007](0007-agent-quality-gate-and-merge-oracle.md)         | Local quality gate + two-projection PR all-clear + Codex approval gate               |
+| [0007](0007-agent-quality-gate-and-merge-oracle.md)         | Transitional local gate + retained two-projection PR all-clear and Codex approval    |
 | [0008](0008-mandatory-hazard-checklists.md)                 | Cross-layer/stateful changes must run the dedicated PR checklists before review      |
 | [0009](0009-supply-chain-hardening.md)                      | Supply-chain posture: release-age gate, lockfile-lint, SHA-pinned Actions            |
 | [0010](0010-required-checks-no-paths-filters.md)            | Required CI checks carry no `paths:` filters; only advisory jobs may                 |
@@ -87,7 +87,8 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0075](0075-pr-merge.md)                                    | One sanctioned merge wrapper gates merges locally; the binding control stays human   |
 | [0076](0076-fair-quality-gate-coordinator.md)               | Fair weighted coordination replaces machine-wide full-run gate exclusion             |
 | [0077](0077-operator-triggered-backlog-sweep.md)            | Backlog sweeps start from an operator, run isolated workers, and stop at READY       |
-| [0078](0078-sealed-exact-file-patch-secret-suppression.md)  | Autoreview permits only sealed exact-file-patch secret suppression                   |
+| [0078](0078-staged-verification-redesign.md)                | Staged existing-CI replacement of the mandatory local gate                           |
+| [0079](0079-sealed-exact-file-patch-secret-suppression.md)  | Autoreview permits only sealed exact-file-patch secret suppression                   |
 
 ### shared-config
 

@@ -109,7 +109,7 @@ describe("buildTroveChartSeries", () => {
     ]);
   });
 
-  it("collapses same-second rows to the LAST row's value on the log-index tiebreak", () => {
+  it("collapses same-second balance steps but keeps both ICR observations", () => {
     // Two ops in one block share a timestamp; log 10 is the later op and
     // its resulting state is the truth for that second — a string sort
     // ("_9" > "_10") would keep the wrong one.
@@ -121,6 +121,8 @@ describe("buildTroveChartSeries", () => {
         logIndex: 10,
         collAfter: wei(700),
         debtAfter: wei(70),
+        priceAtEvent: wei(2),
+        icrAfterBps: 17_000,
       }),
       ledgerRow({
         id: "42220_100_9",
@@ -129,11 +131,14 @@ describe("buildTroveChartSeries", () => {
         logIndex: 9,
         collAfter: wei(500),
         debtAfter: wei(50),
+        priceAtEvent: wei(1),
+        icrAfterBps: 13_000,
       }),
     ];
     const series = buildTroveChartSeries(rows, { debtSnapshotsComplete: true });
     expect(series.coll).toEqual([point(1000, 700)]);
     expect(series.debt).toEqual([point(1000, 70)]);
+    expect(series.icr).toEqual([point(1000, 130), point(1000, 170)]);
   });
 
   it("returns a null debt series when debt snapshots are incomplete — never a gapped or zero-coerced one", () => {

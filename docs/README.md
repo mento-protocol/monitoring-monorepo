@@ -208,7 +208,8 @@ Authority: canonical
 - [`docs/adr/0075-pr-merge.md`](adr/0075-pr-merge.md) — One sanctioned human-only merge path
 - [`docs/adr/0076-fair-quality-gate-coordinator.md`](adr/0076-fair-quality-gate-coordinator.md) — Fair local quality-gate coordination across worktrees
 - [`docs/adr/0077-operator-triggered-backlog-sweep.md`](adr/0077-operator-triggered-backlog-sweep.md) — Operator-triggered backlog sweep with isolated workers
-- [`docs/adr/0078-sealed-exact-file-patch-secret-suppression.md`](adr/0078-sealed-exact-file-patch-secret-suppression.md) — Autoreview permits only sealed exact-file-patch secret suppression
+- [`docs/adr/0078-staged-verification-redesign.md`](adr/0078-staged-verification-redesign.md) — Staged replacement of the mandatory local gate with existing CI
+- [`docs/adr/0079-sealed-exact-file-patch-secret-suppression.md`](adr/0079-sealed-exact-file-patch-secret-suppression.md) — Autoreview permits only sealed exact-file-patch secret suppression
 
 Authority: non-canonical
 
@@ -251,5 +252,7 @@ Authority: non-canonical
 - [`docs/notes/react-compiler-annotation-pilot.md`](notes/react-compiler-annotation-pilot.md) (archived)
 - [`docs/notes/terraform-cicd-hardening-decisions-2026-05.md`](notes/terraform-cicd-hardening-decisions-2026-05.md) (archived)
 - [`docs/notes/ui-dashboard-performance-plan.md`](notes/ui-dashboard-performance-plan.md) (archived)
+- [`docs/notes/verification-redesign-phase-0-evidence.md`](notes/verification-redesign-phase-0-evidence.md)
 - [`docs/PLAN-ai-review-process.md`](PLAN-ai-review-process.md) (archived)
+- [`docs/PLAN-progressive-verification-graph.md`](PLAN-progressive-verification-graph.md)
 - [`docs/PLAN-trove-history-page.md`](PLAN-trove-history-page.md)

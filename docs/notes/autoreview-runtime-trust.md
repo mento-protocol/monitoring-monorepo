@@ -512,7 +512,7 @@ section. The full capture session can consume only one record occurrence. It
 masks only the removed anchor in a copy. It then scans the matched section, the
 pure patch, and the complete bundle again. Any byte drift, duplicate occurrence,
 malformed structure, or sibling finding fails closed.
-[ADR 0078](../adr/0078-sealed-exact-file-patch-secret-suppression.md) owns the
+[ADR 0079](../adr/0079-sealed-exact-file-patch-secret-suppression.md) owns the
 full audit contract.
 
 ## Explicit helper attestation

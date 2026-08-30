@@ -13,6 +13,9 @@ import type { CdpTroveLedgerEventRow } from "../../_lib/ledger";
 // Captures every Plot render's props (data/layout/config) so assertions run
 // against what Plotly would actually receive — the real chunk never loads.
 const plotCaptures = vi.hoisted(() => [] as Array<Record<string, unknown>>);
+const nowSecondsOverride = vi.hoisted(
+  () => ({ value: undefined }) as { value: number | null | undefined },
+);
 
 vi.mock("next/dynamic", () => ({
   default: () =>
@@ -21,6 +24,20 @@ vi.mock("next/dynamic", () => ({
       return <div data-testid="plot" />;
     },
 }));
+
+vi.mock("@/hooks/use-now-seconds", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/hooks/use-now-seconds")>();
+  return {
+    ...actual,
+    useNowSeconds: () => {
+      const liveNowSeconds = actual.useNowSeconds();
+      return nowSecondsOverride.value === undefined
+        ? liveNowSeconds
+        : nowSecondsOverride.value;
+    },
+  };
+});
 
 import { TroveBalanceChart } from "../trove-balance-chart";
 
@@ -139,6 +156,7 @@ describe("TroveBalanceChart", () => {
     vi.setSystemTime(new Date(NOW * 1000));
     vi.stubGlobal("IntersectionObserver", undefined);
     plotCaptures.length = 0;
+    nowSecondsOverride.value = undefined;
     handle = setup();
   });
 
@@ -183,6 +201,26 @@ describe("TroveBalanceChart", () => {
     expect(coll!.y).toEqual([40_000, 15_000, 15_000]);
   });
 
+  it("keeps the chart neutral until the shared client clock resolves", () => {
+    nowSecondsOverride.value = null;
+    render(handle!, chartProps());
+
+    expect(handle!.container.querySelector('[data-testid="plot"]')).toBeNull();
+    expect(
+      handle!.container.querySelector(
+        '[role="status"][aria-label="Loading trove chart"]',
+      ),
+    ).not.toBeNull();
+
+    nowSecondsOverride.value = NOW;
+    render(handle!, chartProps());
+
+    expect(
+      handle!.container.querySelector('[data-testid="plot"]'),
+    ).not.toBeNull();
+    expect(traces()[0]!.x.at(-1)).toBe(new Date(NOW * 1000).toISOString());
+  });
+
   it("defaults to All and re-windows with the pre-window step anchor when a range pill is pressed", () => {
     render(handle!, chartProps());
 
@@ -215,6 +253,44 @@ describe("TroveBalanceChart", () => {
     const cutoffIso = new Date((NOW - 7 * DAY) * 1000).toISOString();
     expect(coll!.x[0]).toBe(cutoffIso);
     expect(coll!.y).toEqual([40_000, 15_000, 15_000]);
+  });
+
+  it("moves the active range cutoff when the shared clock advances", () => {
+    render(
+      handle!,
+      chartProps({
+        rows: [
+          ledgerRow({
+            id: "42220_100_1",
+            timestamp: String(NOW - 2 * DAY),
+            collAfter: wei(40_000),
+          }),
+          ledgerRow({
+            id: "42220_200_1",
+            timestamp: String(NOW - DAY + 15),
+            blockNumber: "200",
+            collAfter: wei(15_000),
+          }),
+        ],
+      }),
+    );
+
+    const oneDay = handle!.container.querySelector<HTMLButtonElement>(
+      '[role="group"][aria-label="Trove chart time range"] button',
+    );
+    act(() =>
+      oneDay!.dispatchEvent(new MouseEvent("click", { bubbles: true })),
+    );
+    expect(traces()[0]!.x[0]).toBe(new Date((NOW - DAY) * 1000).toISOString());
+
+    act(() => vi.advanceTimersByTime(30_000));
+
+    expect(traces()[0]!.x[0]).toBe(
+      new Date((NOW + 30 - DAY) * 1000).toISOString(),
+    );
+    expect(traces()[0]!.x.at(-1)).toBe(
+      new Date((NOW + 30) * 1000).toISOString(),
+    );
   });
 
   it("adds the ICR percentage panel only when price data exists — its own axis, never shared", () => {
@@ -250,9 +326,43 @@ describe("TroveBalanceChart", () => {
     // between events while the oracle price moved.
     expect(icr!.mode).toBe("markers");
     expect(icr!.line).toBeUndefined();
+    expect(layout().hovermode).toBe("x");
     expect(handle!.container.textContent).not.toContain(
       "ICR panel unavailable",
     );
+  });
+
+  it("uses closest hover so same-second ICR markers expose their own values", () => {
+    const observedAt = NOW - DAY;
+    render(
+      handle!,
+      chartProps({
+        rows: [
+          ledgerRow({
+            id: "42220_200_10",
+            timestamp: String(observedAt),
+            blockNumber: "200",
+            logIndex: 10,
+            priceAtEvent: wei(2),
+            icrAfterBps: 17_000,
+          }),
+          ledgerRow({
+            id: "42220_200_9",
+            timestamp: String(observedAt),
+            blockNumber: "200",
+            logIndex: 9,
+            priceAtEvent: wei(1),
+            icrAfterBps: 13_000,
+          }),
+        ],
+      }),
+    );
+
+    const icr = traces().find((trace) => trace.yaxis === "y3");
+    const observedAtIso = new Date(observedAt * 1000).toISOString();
+    expect(icr!.x).toEqual([observedAtIso, observedAtIso]);
+    expect(icr!.y).toEqual([130, 170]);
+    expect(layout().hovermode).toBe("closest");
   });
 
   it("drops the ICR panel and says so when no row carries price data", () => {

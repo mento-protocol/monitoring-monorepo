@@ -25,10 +25,10 @@ maintenance utilities.
 subdirectories.
 
 - `deploy/`: deploy wrappers and Node helpers
-- `workflows/`: scripts backing Actions workflow jobs
+- `workflows/`: Actions workflow support
 - `bootstrap/`: container and hosted-session setup
 - `context/`: agent context, budget, doc catalog
-- `docs/`: audit planner, garden, navigation eval
+- `docs/`: audit, garden, navigation, verification evidence
 - `pr/`: PR and issue state projections
 - `supply-chain/`: lockfile, audit, pin, skew gates
 - `mcp/`: MCP broker, launcher, config rendering
@@ -54,14 +54,14 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 
 ## Why Files Stay Flat
 
-`scripts/` has thirteen path-pin classes. Move each pin with its file, except
-the `agent-autoreview.sh` feedback-runtime pins below.
+`scripts/` has 14 path-pin classes. Move each pin with its file, except the
+`agent-autoreview.sh` feedback-runtime pins.
 
-- **Autoreview runtime pins.** `agent-autoreview.sh` pins sibling runtime,
-  sealed `agent-autoreview-secret-suppressions.json` (ADR 0078), and optional
+- **Autoreview runtime pins.** `agent-autoreview.sh` pins runtime,
+  sealed `agent-autoreview-secret-suppressions.json` (ADR 0079), and optional
   `pr-feedback-state-claude.mjs` and
-  `pr-ready-state-review-signals.mjs`; feedback blobs use `origin/main`. Follow
-  ADR 0064's three-merge sequence when these paths move.
+  `pr-ready-state-review-signals.mjs`; feedback uses `origin/main`. Use ADR
+  0064's three-merge sequence for moves.
 - **Gate routing pins.** The gate excludes stub-repo tests with
   `$script_source_dir == $repo_root/scripts`, and pairs
   `bootstrap/codex-cloud-setup.{sh,test.sh}` for offline tests. It routes
@@ -91,13 +91,15 @@ the `agent-autoreview.sh` feedback-runtime pins below.
   `gate/routing-table/**`, `gate/mapping*`, the autoreview core, and its sealed
   policy. Runtime hashes use `$script_source_dir`; suites use `$repo_root`.
   Core edits route both suites; policy edits route autoreview. Missing pins
-  freeze the stamp (ADRs 0069 and 0078).
+  freeze the stamp (ADRs 0069 and 0079).
 - **Review-eval pins.** `review/run-eval-source-snapshot.sh` joins the
   four-source set in `docs/evals/review-skill.md`; update every listed consumer
   together.
-- **Evaluation fixture forbidden lists.** `forbidden_sources` in
-  `docs/evals/documentation-navigation-fixtures.json` names the navigation
-  eval's own implementation.
+- **Navigation-eval self-pin.** `forbidden_sources` in
+  `docs/evals/documentation-navigation-fixtures.json` names its implementation.
+- **Verification evidence.** Move
+  `scripts/docs/check-verification-redesign-evidence*.mjs` with the
+  `.gitattributes` patch rule.
 - **Sentry suite manifest.** `scripts/sentry/gate/sentry-suite-manifest.json`
   keys are exact repo-relative paths, reconciled against `findSentrySuites()`
   by set equality both ways. A moved or renamed suite fails the gate closed.
