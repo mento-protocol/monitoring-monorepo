@@ -5229,6 +5229,15 @@ test("the installed baseline survives the checkout the candidate needs", () => {
   assert.match(doc, new RegExp(`--against "\\$\\{TMPDIR:-/tmp\\}/${kept}"`));
 });
 
+test("the runbook forwards paid-run flags without a literal separator", () => {
+  const doc = readFileSync(
+    path.join(repoRoot, "docs/evals/review-skill.md"),
+    "utf8",
+  );
+  assert.doesNotMatch(doc, /pnpm review:eval:run -- --kind/);
+  assert.equal([...doc.matchAll(/pnpm review:eval:run --kind/g)].length, 5);
+});
+
 test("the ledger branch names one run, not one day", () => {
   const script = runEvalSourceSet();
   // Two runs finishing on the same UTC day — the installed and candidate pair

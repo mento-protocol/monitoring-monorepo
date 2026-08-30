@@ -3,7 +3,7 @@ title: Review Skill Evaluation
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-29
+last_verified: 2026-08-30
 doc_type: runbook
 scope: ci/process
 review_interval_days: 90
@@ -163,8 +163,8 @@ spending anything.
 ```bash
 pnpm review:eval -- --plan --kind canary --json   # 3 cells, about $15, ~25 min
 pnpm review:eval -- --plan --kind full --json     # 24 cells, about $88, ~2 h
-pnpm review:eval:run -- --kind canary             # the monthly smoke test
-pnpm review:eval:run -- --kind full               # the quarterly score of record
+pnpm review:eval:run --kind canary                # the monthly smoke test
+pnpm review:eval:run --kind full                  # the quarterly score of record
 ```
 
 `run-eval.sh` adds a detached worktree of `origin/main` and reads the contract,
@@ -250,12 +250,12 @@ Run the installed skill first, **publish its row before starting the
 candidate**, then name that row as the candidate's baseline with `--against`:
 
 ```bash
-pnpm review:eval:run -- --kind full
+pnpm review:eval:run --kind full
 # Prepare and publish this row through the manual publication flow below.
 cp "<installed-detail-dir>/row.json" \
   "${TMPDIR:-/tmp}/review-eval-installed-row.json"
 git -C . switch main                        # the candidate run branches from here
-pnpm review:eval:run -- --kind full --skill-ref ~/work/review-candidate \
+pnpm review:eval:run --kind full --skill-ref ~/work/review-candidate \
   --against "${TMPDIR:-/tmp}/review-eval-installed-row.json"
 # Prepare and publish the candidate row through the same flow.
 ```
@@ -565,7 +565,7 @@ anchor because its machine clock was slow.
    so a checkout without the tags reports every one of them as missing and
    materialization falls back to `refs/pull/<n>/head` and records
    `tag_pinned: false`. CI fetches tags for exactly this reason.
-3. Run `pnpm review:eval:run -- --kind full` from a clean checkout. Budget
+3. Run `pnpm review:eval:run --kind full` from a clean checkout. Budget
    about $88 and two hours.
 4. Prepare the artifacts with `review-eval-publication.mjs`, then use the
    `ship` workflow to open the ledger PR. Its body contains the complete
