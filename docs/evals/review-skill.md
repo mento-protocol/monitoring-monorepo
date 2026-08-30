@@ -339,7 +339,8 @@ before it invokes the runner. Run this from the root of your checkout.
   done
   mkdir -p "$target_dir" "$HOME/Library/Logs"
   rendered="$(/usr/bin/mktemp "$target_dir/.org.mento.review-eval.plist.XXXXXX")"
-  trap '/bin/rm -f "$rendered"' EXIT
+  previous=""
+  trap 'if [ -n "$rendered" ]; then /bin/rm -f "$rendered"; fi; if [ -n "$previous" ]; then /bin/rm -f "$previous"; fi' EXIT
   /bin/cp "$template" "$rendered"
   /usr/bin/plutil -remove ProgramArguments.5 "$rendered"
   /usr/bin/plutil -insert ProgramArguments.5 \
@@ -360,20 +361,81 @@ before it invokes the runner. Run this from the root of your checkout.
     "$repo_checkout/scripts/review/run-eval.sh"
   test "$(/usr/bin/plutil -extract EnvironmentVariables.PATH raw -o - "$rendered")" = \
     "$runtime_path"
-  /bin/mv -f "$rendered" "$target"
+  if [ -e "$target" ] || [ -L "$target" ]; then
+    if [ ! -f "$target" ] || [ -L "$target" ]; then
+      echo "$target must be a regular, non-symlink plist" >&2
+      exit 1
+    fi
+    previous="$(/usr/bin/mktemp "$target_dir/.org.mento.review-eval.previous.XXXXXX")"
+    /bin/cp "$target" "$previous"
+    /usr/bin/plutil -lint "$previous"
+  fi
+  domain="gui/$(id -u)"
+  service="$domain/org.mento.review-eval"
+  was_loaded=0
+  if service_state="$(launchctl print "$service" 2>/dev/null)"; then
+    was_loaded=1
+    case "$service_state" in
+      *"state = running"*)
+        echo "the review-eval scheduler is running; wait for it to finish" >&2
+        exit 1
+        ;;
+    esac
+    if [ -z "$previous" ]; then
+      echo "the loaded scheduler has no recoverable plist at $target" >&2
+      exit 1
+    fi
+    if ! launchctl bootout "$service"; then
+      echo "could not unload the existing review-eval scheduler" >&2
+      exit 1
+    fi
+  fi
+  if ! /bin/mv -f "$rendered" "$target"; then
+    if [ "$was_loaded" -eq 1 ] && ! launchctl bootstrap "$domain" "$target"; then
+      echo "replacement failed and the prior scheduler could not be reloaded" >&2
+      exit 1
+    fi
+    echo "could not replace the prior review-eval plist" >&2
+    exit 1
+  fi
+  rendered=""
+  if ! launchctl bootstrap "$domain" "$target"; then
+    if [ -n "$previous" ]; then
+      if ! /bin/mv -f "$previous" "$target"; then
+        trap - EXIT
+        echo "the new scheduler could not load and the prior plist could not be restored; recovery copy: $previous" >&2
+        exit 1
+      fi
+      previous=""
+    elif ! /bin/rm -f "$target"; then
+      echo "the new scheduler could not load and its plist could not be removed" >&2
+      exit 1
+    fi
+    if [ "$was_loaded" -eq 1 ] && ! launchctl bootstrap "$domain" "$target"; then
+      echo "the prior plist was restored, but its scheduler could not be reloaded" >&2
+      exit 1
+    fi
+    echo "the new scheduler could not load; the prior installation was restored" >&2
+    exit 1
+  fi
+  if [ -n "$previous" ]; then
+    /bin/rm -f "$previous"
+    previous=""
+  fi
   trap - EXIT
-  launchctl bootstrap gui/"$(id -u)" "$target"
 )
 ```
 
 The three `plutil -extract` checks verify the script path and required CLI path
 before the command replaces the installed plist. The temporary file is in the
 same directory as the target, so `mv` replaces the target atomically after all
-checks pass. The guarded block stops before `bootstrap` if a required CLI is
-missing or a render or validation command fails. Each `plutil` mutation receives
-its path as one argument, so spaces and XML metacharacters in a checkout, home
-path, or CLI path stay data. launchd reports a missing program only in its log,
-and a template with unresolved values can look installed while it never runs.
+checks pass. An idle loaded service is removed before replacement and loaded
+again afterward. The command refuses to stop a running evaluation. If a move or
+new load fails, it restores the prior file and loaded state. Each `plutil`
+mutation receives its path as one argument, so spaces and XML metacharacters in
+a checkout, home path, or CLI path stay data. launchd reports a missing program
+only in its log, and a template with unresolved values can look installed while
+it never runs.
 
 Run this separate opt-in command only when you intend to start a paid
 evaluation immediately:
