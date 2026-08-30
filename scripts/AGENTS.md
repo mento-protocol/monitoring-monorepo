@@ -104,29 +104,19 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
   keys are exact repo-relative paths, reconciled against `findSentrySuites()`
   by set equality both ways. A moved or renamed suite fails the gate closed.
   `sentry/fixture-scan-canary.test.mjs` re-pins four; ADR 0068 has the policy.
-- **Enumerated workflow pins.** 23 of 33 files in
-  `.github/workflows/` pin a `scripts/` path, and `sentry-triage-agent.yml`
-  stages an exact copy list at runtime; three Terraform filters instead
-  copy the broad `workflowAdmissionPatterns` boundary from
-  `terraform.stacks.json`. A miss is silent: the job stops while `ci` stays
-  green. ADR 0064 has the enumeration, the `routing.test.mjs` equality
-  contract, and glob rules. Review-eval pins: `docs/evals/review-skill.md`.
+- **Workflow pins.** `.github/workflows/` and `sentry-triage-agent.yml` pin
+  `scripts/` paths. Three Terraform filters use `workflowAdmissionPatterns`
+  from `terraform.stacks.json`. Update the ADR 0064 inventory, routing equality,
+  glob rules, and review-eval pins when a path moves.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.
 - **Trusted-validator probes.** `pr-description.yml` resolves the validator at
   the PR base-branch tip, not a PR snapshot. After a move, keep dual probes
   until the new path reaches the base (issue 1904; ADR 0064).
-- **PR validation boundary pins.** The `scripts` job in `ci.yml` and the
-  always-run `trunk.yml` job invoke
-  `workflows/check-pr-validation-boundary.test.mjs` by exact path. The Trunk
-  host covers edits to `.trunk/setup-ci` without widening CI path filters.
-  The checker follows local reusable workflows. It pins every pull request
-  write or credential job, its permission map, exact credential bindings,
-  environment, forwarded secrets, and reusable target. It scans all workflow
-  and local-action cache saves. It pins each retained restore, targeted
-  empty-restore cleanup, and required setup command. Move the test and its
-  paired implementation together. Update both steps.
+- **PR validation boundary pins.** Move
+  `workflows/check-pr-validation-boundary{,.test}.mjs` together. Keep its
+  `ci.yml` and `trunk.yml` calls aligned. ADR 0078 defines the boundary.
 - **Production infrastructure contract pins.**
   `production-infra-identity-contract/workflow-inventory.mjs` pins exact script
   paths for the workflows it audits.

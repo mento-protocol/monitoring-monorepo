@@ -150,8 +150,8 @@
     {
       "path": "scripts/AGENTS.md",
       "category": "doc",
-      "additions": 11,
-      "deletions": 1
+      "additions": 8,
+      "deletions": 8
     },
     {
       "path": "scripts/lighthouse-config.test.mjs",
@@ -224,9 +224,9 @@
       "net": 393
     },
     "doc": {
-      "additions": 250,
-      "deletions": 71,
-      "net": 179
+      "additions": 247,
+      "deletions": 78,
+      "net": 169
     }
   }
 }
