@@ -26,6 +26,7 @@ import "./routing.test.mjs";
 import "./refresh-routing.test.mjs";
 import "./security.test.mjs";
 import "./workflow.test.mjs";
+import "./dependabot-auto-merge.test.mjs";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),

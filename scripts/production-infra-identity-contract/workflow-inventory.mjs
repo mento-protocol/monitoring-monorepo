@@ -107,6 +107,18 @@ const APPLY_CONFIG_BY_WORKFLOW = {
 
 const PEG_POLICY_PUBLICATION_WORKFLOW =
   ".github/workflows/peg-policy-publication.yml";
+const DEPENDABOT_AUTO_MERGE_CANDIDATE_WORKFLOW =
+  ".github/workflows/dependabot-auto-merge-candidate.yml";
+const DEPENDABOT_AUTO_MERGE_WRITER_WORKFLOW =
+  ".github/workflows/dependabot-auto-merge.yml";
+// Hash parsed YAML, not comments. The pair is one security boundary: the
+// pull_request classifier is read-only, and the workflow_run writer re-reads
+// the classifier attempt before it can merge. Generate new hashes only after
+// reviewing both complete parsed workflows together.
+const DEPENDABOT_AUTO_MERGE_CANDIDATE_SEMANTIC_SHA256 =
+  "47416768116736584c78a544da85216911d246c4663aaf49708e078cfd94f98d";
+const DEPENDABOT_AUTO_MERGE_WRITER_SEMANTIC_SHA256 =
+  "6a50173006ec6f519a315b7b88285643996b7358f8cd386d48565294f7268dd4";
 const PEG_POLICY_PUBLICATION_CONSOLE_URL =
   "https://console.cloud.google.com/home/dashboard?project=mento-monitoring";
 const PROTECTED_APPLY_WORKFLOWS = [
@@ -637,10 +649,11 @@ function containsVariableSelectorIndirection(value) {
   );
 }
 
-// This is a regression tripwire for the deleted Dependabot workflow's paired
-// write scopes and for write-all. It is not a merge-capability detector:
-// contents: write alone can authorize the REST pull-request merge endpoint.
-function usesRetiredBroadWritePermissionShape(permissions) {
+// This is a regression tripwire for paired merge-capable write scopes and for
+// write-all. The exact Dependabot writer is the sole paired-scope exception.
+// This is not a general merge-capability detector: contents: write alone can
+// authorize the REST pull-request merge endpoint.
+function usesBroadWritePermissionShape(permissions) {
   return (
     permissions === "write-all" ||
     (isMapping(permissions) &&
@@ -649,27 +662,29 @@ function usesRetiredBroadWritePermissionShape(permissions) {
   );
 }
 
-function validateRetiredBroadWritePermissionShape(
+function validateBroadWritePermissionShape(
   workflowPath,
   parsedWorkflow,
   jobs,
+  allowedCombinedWriteJobs,
   errors,
 ) {
   const matches = [];
-  if (usesRetiredBroadWritePermissionShape(parsedWorkflow.permissions)) {
+  if (usesBroadWritePermissionShape(parsedWorkflow.permissions)) {
     matches.push("workflow");
   }
   for (const [jobName, job] of Object.entries(jobs)) {
     if (
       isMapping(job) &&
-      usesRetiredBroadWritePermissionShape(job.permissions)
+      usesBroadWritePermissionShape(job.permissions) &&
+      !allowedCombinedWriteJobs.has(jobName)
     ) {
       matches.push(`job ${jobName}`);
     }
   }
   if (matches.length > 0) {
     errors.push(
-      `${workflowPath}: repository workflows must not use permissions: write-all or the retired combined contents: write and pull-requests: write shape (${matches.join(", ")})`,
+      `${workflowPath}: repository workflows must not use permissions: write-all or combined contents: write and pull-requests: write outside the exact Dependabot writer (${matches.join(", ")})`,
     );
   }
 }
@@ -680,10 +695,35 @@ export function validateWorkflowInventory(
   errors,
 ) {
   const jobs = isMapping(parsedWorkflow.jobs) ? parsedWorkflow.jobs : {};
-  validateRetiredBroadWritePermissionShape(
+  const allowedCombinedWriteJobs = new Set();
+  if (
+    workflowPath === DEPENDABOT_AUTO_MERGE_CANDIDATE_WORKFLOW ||
+    workflowPath === DEPENDABOT_AUTO_MERGE_WRITER_WORKFLOW
+  ) {
+    const semanticHash = createHash("sha256")
+      .update(JSON.stringify(parsedWorkflow))
+      .digest("hex");
+    const expectedHash =
+      workflowPath === DEPENDABOT_AUTO_MERGE_CANDIDATE_WORKFLOW
+        ? DEPENDABOT_AUTO_MERGE_CANDIDATE_SEMANTIC_SHA256
+        : DEPENDABOT_AUTO_MERGE_WRITER_SEMANTIC_SHA256;
+    if (semanticHash === expectedHash) {
+      // Only the exact writer has the paired merge-capable write scopes. The
+      // candidate hash is pinned independently and receives no write scope.
+      if (workflowPath === DEPENDABOT_AUTO_MERGE_WRITER_WORKFLOW) {
+        allowedCombinedWriteJobs.add("auto-merge");
+      }
+    } else {
+      errors.push(
+        `${workflowPath}: must match the exact reviewed Dependabot auto-merge workflow pair inventory`,
+      );
+    }
+  }
+  validateBroadWritePermissionShape(
     workflowPath,
     parsedWorkflow,
     jobs,
+    allowedCombinedWriteJobs,
     errors,
   );
 
@@ -782,6 +822,20 @@ function postAuthLocalDependencyPaths() {
 }
 
 export function validateWorkflowDependencyInventory(files, errors) {
+  const hasDependabotCandidate = Object.hasOwn(
+    files,
+    DEPENDABOT_AUTO_MERGE_CANDIDATE_WORKFLOW,
+  );
+  const hasDependabotWriter = Object.hasOwn(
+    files,
+    DEPENDABOT_AUTO_MERGE_WRITER_WORKFLOW,
+  );
+  if (hasDependabotCandidate !== hasDependabotWriter) {
+    errors.push(
+      "the Dependabot auto-merge classifier and writer workflows must be present or absent as one reviewed pair",
+    );
+  }
+
   const registeredDependencies = new Map(
     LOCAL_DEPENDENCY_INVENTORY.map((dependency) => [
       dependency.path,

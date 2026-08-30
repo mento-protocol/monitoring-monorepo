@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
+import { load as loadYaml } from "js-yaml";
 import { validFixtureFiles } from "./fixtures.mjs";
 import { validateWorkflowContract } from "./workflow.mjs";
 
@@ -8,6 +9,10 @@ const workflowPath = ".github/workflows/alerts-rules.yml";
 const pegPolicyPublicationWorkflow =
   ".github/workflows/peg-policy-publication.yml";
 const infraWorkflow = ".github/workflows/infra.yml";
+const dependabotAutoMergeCandidateWorkflow =
+  ".github/workflows/dependabot-auto-merge-candidate.yml";
+const dependabotAutoMergeWorkflow =
+  ".github/workflows/dependabot-auto-merge.yml";
 const validCheckoutStep = `      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false`;
@@ -108,7 +113,83 @@ function liveWorkflowFiles() {
 
 const validFiles = validFixtureFiles();
 assert.deepEqual(validate(validFiles), []);
-assert.deepEqual(validate(liveWorkflowFiles()), []);
+const liveFiles = liveWorkflowFiles();
+assert.deepEqual(validate(liveFiles), []);
+
+expectFailure(
+  replaceWorkflowFile(
+    liveFiles,
+    dependabotAutoMergeCandidateWorkflow,
+    "      github.actor == 'dependabot[bot]' &&",
+    "      github.actor != 'dependabot[bot]' &&",
+  ),
+  "must match the exact reviewed Dependabot auto-merge workflow pair inventory",
+);
+
+expectFailure(
+  replaceWorkflowFile(
+    liveFiles,
+    dependabotAutoMergeWorkflow,
+    ".run_attempt == 1 and",
+    ".run_attempt > 0 and",
+  ),
+  "must match the exact reviewed Dependabot auto-merge workflow pair inventory",
+);
+
+const liveWithoutDependabotCandidate = { ...liveFiles };
+delete liveWithoutDependabotCandidate[dependabotAutoMergeCandidateWorkflow];
+expectFailure(
+  liveWithoutDependabotCandidate,
+  "classifier and writer workflows must be present or absent as one reviewed pair",
+);
+
+const liveWithoutDependabotWriter = { ...liveFiles };
+delete liveWithoutDependabotWriter[dependabotAutoMergeWorkflow];
+expectFailure(
+  liveWithoutDependabotWriter,
+  "classifier and writer workflows must be present or absent as one reviewed pair",
+);
+
+const dependabotConfig = loadYaml(
+  readFileSync(
+    new URL("../../.github/dependabot.yml", import.meta.url),
+    "utf8",
+  ),
+);
+const githubActionsUpdates = dependabotConfig.updates.filter(
+  (update) => update["package-ecosystem"] === "github-actions",
+);
+assert.equal(
+  githubActionsUpdates.length,
+  1,
+  "Dependabot must have one GitHub Actions update entry",
+);
+const [githubActionsUpdate] = githubActionsUpdates;
+assert.equal(githubActionsUpdate.directory, "/");
+assert.equal(githubActionsUpdate["target-branch"], undefined);
+assert.deepEqual(githubActionsUpdate.cooldown, { "default-days": 7 });
+assert.deepEqual(githubActionsUpdate.groups?.["actions-minor-patch"], {
+  patterns: ["actions/*"],
+  "update-types": ["minor", "patch"],
+  "exclude-patterns": [
+    "actions/create-github-app-token",
+    "anthropics/*",
+    "dependabot/*",
+  ],
+});
+assert.deepEqual(githubActionsUpdate.groups?.["third-party-minor-patch"], {
+  patterns: ["*"],
+  "update-types": ["minor", "patch"],
+  "exclude-patterns": ["actions/*", "anthropics/*", "dependabot/*"],
+});
+assert.deepEqual(githubActionsUpdate.groups?.["actions-major"], {
+  "update-types": ["major"],
+  "exclude-patterns": [
+    "actions/create-github-app-token",
+    "anthropics/*",
+    "dependabot/*",
+  ],
+});
 
 for (const permissions of [
   `    permissions:
@@ -130,7 +211,7 @@ ${permissions}
       - run: gh pr merge --auto --squash "$PR_URL"
 `,
     },
-    "repository workflows must not use permissions: write-all or the retired combined contents: write and pull-requests: write shape",
+    "repository workflows must not use permissions: write-all or combined contents: write and pull-requests: write outside the exact Dependabot writer",
   );
 }
 
@@ -154,7 +235,7 @@ jobs:
       - run: gh pr merge --auto --squash "$PR_URL"
 `,
     },
-    "repository workflows must not use permissions: write-all or the retired combined contents: write and pull-requests: write shape",
+    "repository workflows must not use permissions: write-all or combined contents: write and pull-requests: write outside the exact Dependabot writer",
   );
 }
 

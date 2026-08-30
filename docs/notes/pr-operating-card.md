@@ -3,7 +3,7 @@ title: PR Operating Card
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-28
+last_verified: 2026-08-30
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -357,10 +357,12 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    state, and the probes' blocker, thread and unreplied counts — a bare "it's
    green" hides which head the claim was established against.
 
-8. **Merge hygiene.** **Never merge a PR without the user's explicit, direct
-   approval of that specific merge.** Green CI, bot approvals, a READY
-   ready-state, and "ship it" do not authorize a merge. Drive the PR to ready,
-   present the evidence, then stop and ask.
+8. **Merge hygiene.** **Agent sessions never merge a PR without the user's
+   explicit, direct approval of that specific merge.** Green CI, bot approvals,
+   a READY ready-state, and "ship it" do not authorize a merge. Drive the PR to
+   ready, present the evidence, then stop and ask. The repository's narrow
+   Dependabot lane is the only machine-merge exception. It is not authority for
+   an agent to merge or to widen that lane.
 
    Once the user approves, they merge from their own terminal through the
    sanctioned path:
@@ -403,22 +405,40 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    boundary belongs on GitHub's side of the wire.
    [ADR 0075](../adr/0075-pr-merge.md) owns the ordered gates,
    the alternatives, and every residual, including what the deny does not
-   cover. Current default-branch source contains no Dependabot workflow that
-   enables auto-merge, so new runs use the same explicit human approval and
-   merge path. GitHub can rerun a deleted workflow's historical runs for 30
-   days with the original SHA, ref, and actor privileges. Source retirement is
-   therefore not the server-side human-only boundary. Before that boundary is
-   declared active, audit open Dependabot PRs, latent `autoMergeRequest`
-   values, in-flight runs, and every still-rerunnable historical run. The
-   server-side update ruleset or expiry of the last eligible rerun closes this
-   residual. As defense in depth, `pnpm tf:test` rejects the deleted workflow's
-   combined `contents: write` and `pull-requests: write` permission shape, and
-   rejects `permissions: write-all`. This is not a merge-callsite boundary:
-   `contents: write` alone can authorize the REST merge endpoint and remains
-   valid for workflows such as `update-snapshots.yml`. The wrapper mechanizes
-   the approval rule, and its refusal makes
-   "agents never merge" a local control rather than a habit. If the merge
-   itself satisfies Done means, sync the issue state and workboard afterward per
+   cover. [ADR 0081](../adr/0081-narrow-dependabot-auto-merge-exception.md)
+   owns the separate machine exception.
+   `.github/workflows/dependabot-auto-merge.yml` is a separate,
+   machine-authorized lane. It accepts only Dependabot-authored minor and patch
+   updates for GitHub-owned `actions/*` packages in the `github_actions`
+   `actions-minor-patch` group on `main`, after the seven-day cooldown. It
+   refuses major, security, maintainer-changed, third-party publisher,
+   `actions/create-github-app-token`, other-ecosystem, mixed-author, and
+   non-workflow-file changes at enable time. Load-bearing gate and credential
+   actions from other publishers, such as `re-actors/alls-green` and
+   `google-github-actions/auth`, stay on the human path. A read-only
+   `pull_request` classifier verifies event identity and Dependabot metadata.
+   A default-branch `workflow_run` writer treats that result as untrusted. It
+   re-reads the workflow, run, first-attempt jobs, current PR and head, all
+   commits, and all files. It never checks out PR code or reads upstream
+   outputs, artifacts, or caches. It enables auto-merge with
+   `--match-head-commit`. This lane deliberately creates a
+   standing auto-merge request so GitHub can wait for every required check. The
+   expected head binds the enable call, not a later update while that request
+   waits. The human wrapper's synchronous REST rule does not apply to it.
+   Merges made with this workflow's
+   automatic `GITHUB_TOKEN` do not emit this repository's `push` workflows;
+   required pull-request checks are the final automated evidence for this
+   narrow lane. The writer refuses if `main` has a merge queue. Before issue
+   #2091 activates its lifecycle ruleset, it must migrate this final writer
+   from `GITHUB_TOKEN` to a dedicated repository-scoped merge App token from
+   IaC-owned repository Actions secrets. Activation must prove the App
+   credentials are enabled, the writer migration is verified, and legacy
+   auto-merge state is drained. The shared GitHub Actions App identity must not
+   receive a ruleset bypass. The
+   wrapper mechanizes the approval rule for human and agent-driven merges. Its
+   refusal makes "agents never merge" a local control rather than a habit. If
+   an operator-approved merge satisfies Done means, sync the issue state and
+   workboard afterward per
    [`agent-issue-workflow.md`](agent-issue-workflow.md). If live proof remains,
    continue to production closeout first. After a partial merge, keep the issue
    open. Before `issue:release` restores `agent-ready`, update the issue body:
@@ -446,8 +466,10 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
 
 These bind regardless of which step you are on:
 
-- **Never merge without explicit approval** for that specific merge (step 8),
-  and the approved merge runs through `pnpm pr:merge` in a human terminal.
+- **Agent sessions never merge without explicit approval** for that specific
+  merge (step 8), and the approved merge runs through `pnpm pr:merge` in a
+  human terminal. The exact Dependabot machine lane in step 8 is the only
+  exception.
 - **Reply before resolving** every feedback item, in the two forms above; a
   clear reply stops re-raising bots from looping.
 - **`Closes #N` only when Done means is fully met**, else `Refs #N`.

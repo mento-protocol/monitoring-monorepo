@@ -1,9 +1,9 @@
 ---
-title: One sanctioned human-only merge path
+title: One sanctioned operator merge path
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-28
+last_verified: 2026-08-30
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -13,7 +13,7 @@ garden_lane: adrs-architecture
 
 # ADR 0075 — The sanctioned merge wrapper, and what it does not prove
 
-**Status:** Accepted (Aug 2026), in force.
+**Status:** Accepted (Aug 2026), in force; qualified by ADR 0081.
 **Scope:** ci/process
 
 ## Context
@@ -34,10 +34,14 @@ agent could ignore either and merge anyway.
 
 ## Decision
 
-**Route every merge through one wrapper, `pnpm pr:merge`, that runs the
-repository's own gates in a fixed order and refuses by default. Keep the human
-approval rule as the binding control, and state plainly that no local check can
-replace it.**
+**Route every operator-approved merge through one wrapper, `pnpm pr:merge`,
+that runs the repository's own gates in a fixed order and refuses by default.
+Keep human approval as the binding control for this path, and state plainly
+that no local check can replace it.**
+
+[ADR 0081](0081-narrow-dependabot-auto-merge-exception.md) qualifies this
+decision with one separate machine lane for a bounded Dependabot update group.
+It does not change this wrapper or authorize an agent session to use it.
 
 The ordered gates in `scripts/pr/merge-pr.mjs`:
 
@@ -185,9 +189,10 @@ credentials that cannot merge — and is tracked separately as follow-up.
 
 ## Consequences
 
-- `pnpm pr:merge` is the only sanctioned merge entry point, and operating-card
-  step 8 names it. The approval rule is unchanged: the wrapper mechanizes it
-  and does not relax it. Agents remain forbidden from running it at all.
+- `pnpm pr:merge` is the only sanctioned operator merge entry point, and
+  operating-card step 8 names it. The wrapper mechanizes human approval and
+  does not relax it. Agents remain forbidden from running it at all. ADR 0081
+  owns the only separate machine exception.
 - Merging now depends on both PR projections. A pull request that is
   check-green but has unresolved review threads no longer merges without a
   recorded reason, which matches the repository's own two-projection all-clear.
@@ -209,6 +214,8 @@ credentials that cannot merge — and is tracked separately as follow-up.
   cap. The suite asserts the cap over all four, which is the only per-PR
   enforcement: `scripts/` has no `max-lines` rule.
 - Raw merge API calls and CI tokens remain outside this local control's reach.
+  ADR 0081 constrains one reviewed CI token path. Issue #2091 owns the later
+  GitHub-side credential and lifecycle boundary.
 
 ## Evidence
 

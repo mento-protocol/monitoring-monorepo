@@ -1,0 +1,160 @@
+---
+title: Narrow Dependabot auto-merge exception
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-08-30
+scope: ci/process
+date: 2026-08
+doc_type: adr
+review_interval_days: 90
+garden_lane: adrs-architecture
+---
+
+# ADR 0081 — Narrow Dependabot auto-merge exception
+
+**Status:** Accepted (Aug 2026), in force.
+**Scope:** ci/process
+
+## Context
+
+[ADR 0075](0075-pr-merge.md) routes operator-approved merges through
+`pnpm pr:merge`. That wrapper gives a human a final briefing and records
+consent. It also means every routine dependency update waits for the same
+manual merge action after all required checks pass.
+
+The repository already limits Dependabot to the GitHub Actions ecosystem.
+Dependabot groups GitHub-owned `actions/*` minor and patch updates separately,
+delays routine releases for seven days, and keeps major updates, other
+publishers, and review-sensitive actions on the human path. This gives one
+small update class a stable machine-checkable boundary. The user accepted an
+automatic merge for that class. The user did not authorize a general automatic
+merge path.
+
+A write job on `pull_request_target` is not suitable. Dependabot-triggered
+`pull_request_target` runs receive a read-only token. Expanding that design
+would also combine pull-request classification and repository write authority
+in one event surface. A `workflow_run` workflow loads from the default branch
+and can hold write authority after an unprivileged upstream run completes. Its
+upstream payload and artifacts remain untrusted inputs.
+
+## Decision
+
+Add one machine-merge exception for routine GitHub-owned `actions/*` updates in
+the `actions-minor-patch` Dependabot group. Keep every other merge on the
+operator-approved path in ADR 0075.
+
+Use two workflows as one pinned security boundary:
+
+1. `.github/workflows/dependabot-auto-merge-candidate.yml` runs on
+   `pull_request` for `opened` and `synchronize`. It has only read permissions.
+   It checks the repository, actor, triggering actor, PR author, base, same-repo
+   head, exact Dependabot group branch, and first run attempt. The pinned
+   `dependabot/fetch-metadata` action must report the `github_actions`
+   ecosystem, root directory, `main` target, `actions-minor-patch` group,
+   minor or patch update, and no maintainer changes. Every dependency must use
+   the GitHub-owned `actions/*` namespace. The list must not include
+   `actions/create-github-app-token`. The workflow does not check out code,
+   read secrets, or write repository state.
+2. `.github/workflows/dependabot-auto-merge.yml` runs on completion of the
+   named classifier. It treats the event as an untrusted signal. It re-reads
+   the workflow identity and run by ID. It requires the exact repository,
+   workflow ID, path, name, event, successful conclusion, first attempt,
+   Dependabot actor and triggering actor, group branch, and 40-character head
+   SHA. It reads the first attempt's jobs with pagination. Exactly one
+   `classify` job must exist, and the event, metadata, and eligibility steps
+   must have succeeded.
+3. The writer looks up exactly one open same-repository PR by owner and head
+   branch. It binds the PR to the run head, `main`, Dependabot author, and
+   non-draft state. It reads every commit and file with pagination. Every
+   commit must be verified and Dependabot-authored. GitHub caps the pull-request
+   commit endpoint at 250, so the writer rejects a reported count above 250 and
+   requires the returned count to match exactly. Every file must be a modified
+   top-level workflow YAML file. The classifier and writer files are always
+   excluded from this lane.
+4. The writer refuses when `main` has a merge queue. It re-reads the PR after
+   all checks. It then calls `gh pr merge --auto --squash` with
+   `--match-head-commit`. Branch-scoped concurrency cancels a stale writer when
+   a newer run for the same Dependabot branch starts.
+
+The writer never checks out code, downloads artifacts, restores caches, or
+executes pull-request content. `pnpm tf:test` pins the parsed semantics of both
+workflows. The autofix trust checker continues to reject every
+`pull_request_target` workflow and requires the writer's explicit
+`sentry-autofix/*` exclusion.
+
+The built-in `GITHUB_TOKEN` is an interim writer credential. Issue #2091 must
+migrate the trusted default-branch writer to a dedicated repository-scoped
+merge App token from IaC-owned repository Actions secrets before it activates
+the controlled main lifecycle ruleset. Activation must prove the App
+credentials are enabled, the writer migration is verified, and every legacy
+Dependabot auto-merge run or request is drained. The shared GitHub Actions App
+and local agent App must not receive this ruleset exemption.
+
+## Alternatives considered
+
+- **Keep every Dependabot merge manual.** This preserves one policy for every
+  PR. Rejected because the user chose automatic merge for the bounded routine
+  group and accepted its stated residuals.
+- **Use one `pull_request_target` workflow.** Rejected because Dependabot runs
+  do not receive the required write token and because the design combines
+  untrusted PR classification with the write surface.
+- **Pass classifier outputs or artifacts to the writer.** Rejected because
+  pull-request-controlled outputs and artifacts would become inputs to a
+  privileged workflow. The writer re-reads authoritative GitHub state instead.
+- **Give the shared GitHub Actions App a future ruleset bypass.** Rejected
+  because that identity is shared by unrelated workflows. Issue #2091 owns a
+  dedicated repository-scoped App.
+- **Auto-merge every Dependabot update.** Rejected. Major, security,
+  maintainer-changed, other-ecosystem, non-`actions/*`, and
+  `actions/create-github-app-token` updates retain human review and merge. The
+  human path includes load-bearing gate actions such as
+  `re-actors/alls-green` and credential actions such as
+  `google-github-actions/auth`.
+
+## Consequences
+
+- Routine GitHub-owned `actions/*` minor and patch groups can merge after all
+  required checks pass. The seven-day cooldown applies before Dependabot opens
+  the version update. Security updates bypass cooldown and remain outside this
+  group.
+- `--match-head-commit` binds the enable call to the checked head. GitHub can
+  keep a standing auto-merge request after a later trusted maintainer push.
+  The writer cannot bind that later update. The controlled lifecycle ruleset
+  in #2091 must restrict this path before it becomes a server-side boundary.
+- The writer refuses while `main` has a merge queue. A future queue rollout
+  must keep this lane disabled until a new reviewed design defines its queue
+  behavior. The queue read and the `gh pr merge --auto` call are not atomic. A
+  queue enabled in that interval can still change the call into an enqueue.
+- A merge made with the built-in `GITHUB_TOKEN` does not start `push` event
+  workflows. Required pull-request checks are the final automated evidence for
+  the interim lane. The future App migration changes the credential boundary
+  and requires a fresh check of post-merge workflow behavior.
+- The writer identifies the classifier by its stable GitHub workflow ID, path,
+  run shape, and job shape. A future classifier policy change must drain all
+  in-flight runs from the prior version or add an explicit runtime version
+  binding before the new writer becomes active.
+- ADR 0075 remains active for every operator, agent-assisted, major,
+  security, maintainer-changed, excluded-publisher, and other-ecosystem merge.
+  This ADR qualifies it with one named machine exception. It does not authorize
+  an agent session to merge a PR.
+
+## Evidence
+
+- `.github/dependabot.yml` defines the group, exclusions, and seven-day
+  cooldown.
+- `.github/workflows/dependabot-auto-merge-candidate.yml` and
+  `.github/workflows/dependabot-auto-merge.yml` enforce the two-stage boundary.
+- `scripts/production-infra-identity-contract/workflow-inventory.mjs` pins both
+  parsed workflows and grants paired merge write scopes only to the exact
+  writer. Its fixture suite rejects changes to either workflow and incomplete
+  pairs.
+- `scripts/workflows/check-autofix-ci-trust.mjs` rejects
+  `pull_request_target` and checks the writer's `workflow_run` autofix
+  exclusion.
+- Historical PR #1872 showed that a Dependabot `pull_request` run can have an
+  empty `pull_requests` list while its run head SHA still matches the PR head.
+  The writer therefore performs a strict owner-and-head PR lookup instead of
+  trusting that list.
+- PR #2137 records the implementation and focused validation. Issue #2091 owns
+  the credential migration and controlled lifecycle ruleset.
