@@ -366,8 +366,8 @@ evaluation immediately:
 launchctl kickstart -p gui/"$(id -u)"/org.mento.review-eval
 ```
 
-Omit `kickstart` after a current baseline run. It starts another paid
-evaluation immediately.
+Skip `kickstart` if the current baseline already exists. Running it starts
+another paid evaluation immediately.
 
 It fires on the 8th at 10:20 and logs to
 `~/Library/Logs/mento-review-eval.log`. launchd, not cron: a laptop is asleep
