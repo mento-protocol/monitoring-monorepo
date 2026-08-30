@@ -419,16 +419,22 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    `pull_request` classifier verifies event identity and Dependabot metadata.
    A default-branch `workflow_run` writer treats that result as untrusted. It
    re-reads the workflow, run, first-attempt jobs with `total_count`, current PR
-   and head, all commits, all files, the current PR body's exact
-   `Maintainer changes` marker, and the base's merge-queue state. It never
-   checks out PR code or reads upstream outputs, artifacts, or caches. It waits
-   for every required check and verifies a non-empty passing required-only
-   projection. The wait is an untrusted delay. The writer repeats the complete
-   workflow, run, job, PR, head, maintainer-change body, commit, file, and queue
-   proof after it. It then calls the synchronous REST merge endpoint with the
-   exact head SHA and squash method.
+   and head, the complete issue-event close history, all commits, all files,
+   the current PR body's exact `Maintainer changes` marker, and the base's
+   merge-queue state. It never checks out PR code or reads upstream outputs,
+   artifacts, or caches. It waits for every required check and verifies a
+   non-empty passing required-only projection. The wait is an untrusted delay.
+   The writer repeats the complete workflow, run, job, PR, head,
+   maintainer-change body, close-history, commit, file, and queue proof after
+   it. It then calls the synchronous REST merge endpoint with the exact head
+   SHA and squash method.
    The endpoint cannot enqueue or leave a standing auto-merge request. A later
-   push cannot satisfy the exact-head write.
+   push cannot satisfy the exact-head write. A recorded close remains a durable
+   human veto after the same PR and head are reopened. Dependabot must open a
+   new PR before this lane can merge that update automatically. The writer
+   makes the issue-event read its final authoritative read. The REST write
+   cannot pin that history, so a close and reopen inside the remaining request
+   window is a residual race.
    Merges made with this workflow's
    automatic `GITHUB_TOKEN` do not emit this repository's `push` workflows;
    required pull-request checks are the final automated evidence for this
@@ -441,11 +447,11 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    writer job's `environment:` reference and switch only the final write from
    `GITHUB_TOKEN` to the dedicated repository-scoped merge App token. Do not
    reverse this order: a workflow reference can auto-create an unprotected
-   Environment. The restricted `GITHUB_TOKEN` remains the reader for Actions
-   and pull-request evidence. Activation must prove the App credentials are
-   enabled, the writer migration is verified, and auto-merge requests created
-   by the prior writer are drained. The shared GitHub Actions App identity must
-   not receive a ruleset bypass. The
+   Environment. The restricted `GITHUB_TOKEN` remains the reader for Actions,
+   pull-request, and close-history evidence. Activation must prove the App
+   credentials are enabled, the writer migration is verified, and auto-merge
+   requests created by the prior writer are drained. The shared GitHub Actions
+   App identity must not receive a ruleset bypass. The
    wrapper mechanizes the approval rule for human and agent-driven merges. Its
    refusal makes "agents never merge" a local control rather than a habit. If
    an operator-approved merge satisfies Done means, sync the issue state and

@@ -148,6 +148,16 @@ function scenario({
     jobsPages: [{ total_count: 1, jobs: [successfulJob(runId, headSha)] }],
     prPages: [[{ number }]],
     pr,
+    historyPages: [
+      [
+        {
+          id: 8400,
+          event: "labeled",
+          actor: { login: "dependabot[bot]" },
+          created_at: "2026-08-30T09:00:00Z",
+        },
+      ],
+    ],
     commitsPages: [commits],
     filesPages: [files.map((filename) => ({ filename, status: "modified" }))],
     queue: { data: { repository: { mergeQueue: null } } },
@@ -228,6 +238,10 @@ if (args[1] === "graphql") {
 if (route?.includes("/actions/workflows/")) emit(take("workflow"));
 else if (route?.includes("/attempts/1/jobs")) emit(take("jobsPages"));
 else if (route?.includes("/actions/runs/")) emit(take("run"));
+else if (route?.includes("/issues/") && route?.endsWith("/events")) {
+  if ((fixture.historyExit ?? 0) !== 0) process.exit(fixture.historyExit);
+  emit(take("historyPages"));
+}
 else if (/\\/pulls\\/[^/]+\\/commits$/u.test(route ?? "")) emit(take("commitsPages"));
 else if (/\\/pulls\\/[^/]+\\/files$/u.test(route ?? "")) emit(take("filesPages"));
 else if (/\\/pulls\\/[^/]+$/u.test(route ?? "")) emit(take("pr"));
@@ -418,6 +432,7 @@ for (const [label, count] of [
   ["classifier jobs", routeCalls(pr1872Result, "/attempts/1/jobs").length],
   ["PR lookup", routeCalls(pr1872Result, "/pulls").length],
   ["PR state", routeCalls(pr1872Result, "/pulls/1872").length],
+  ["close history", routeCalls(pr1872Result, "/issues/1872/events").length],
   ["commit list", routeCalls(pr1872Result, "/pulls/1872/commits").length],
   ["file list", routeCalls(pr1872Result, "/pulls/1872/files").length],
   [
@@ -432,6 +447,18 @@ for (const [label, count] of [
     count,
     2,
     `${label} must be proved before and after required-check waiting`,
+  );
+}
+
+const closeHistoryCalls = routeCalls(pr1872Result, "/issues/1872/events");
+for (const { args } of closeHistoryCalls) {
+  assert(
+    args.includes("--method") &&
+      args.includes("GET") &&
+      args.includes("--paginate") &&
+      args.includes("--slurp") &&
+      args.includes("per_page=100"),
+    "every close-history proof must use a paginated read-only request",
   );
 }
 
@@ -593,6 +620,180 @@ assert(
 assert(
   !maintainerBodyResult.merged,
   "a same-head maintainer-change body edit must not reach merge",
+);
+
+for (const event of ["closed", "reopened"]) {
+  const priorCloseFixture = scenario({
+    number: 1872,
+    runId: 31995129967,
+    headRef: pr1872HeadRef,
+    headSha: pr1872Head,
+    commits: [commit(pr1872Head)],
+    files: pr1872Files,
+  });
+  priorCloseFixture.historyPages = [
+    [
+      {
+        id: 8411,
+        event,
+        actor: { login: "chapati23" },
+        created_at: "2026-08-30T10:00:00Z",
+      },
+    ],
+  ];
+  const priorCloseResult = runWriter(priorCloseFixture);
+  assert.notEqual(
+    priorCloseResult.status,
+    0,
+    `a prior ${event} event must remain a durable human veto`,
+  );
+  assert(
+    priorCloseResult.stdout.includes(
+      "The pull request history is malformed or contains a close or reopen event.",
+    ),
+    `a prior ${event} event must fail the close-history proof:\n${priorCloseResult.stdout}\n${priorCloseResult.stderr}`,
+  );
+  assert(
+    !priorCloseResult.merged,
+    `a prior ${event} event must not reach merge`,
+  );
+}
+
+const laterHistoryPageFixture = scenario({
+  number: 1872,
+  runId: 31995129967,
+  headRef: pr1872HeadRef,
+  headSha: pr1872Head,
+  commits: [commit(pr1872Head)],
+  files: pr1872Files,
+});
+laterHistoryPageFixture.historyPages = [
+  [{ id: 8414, event: "labeled" }],
+  [{ id: 8415, event: "closed" }],
+];
+const laterHistoryPageResult = runWriter(laterHistoryPageFixture);
+assert.notEqual(
+  laterHistoryPageResult.status,
+  0,
+  "a close event on a later history page must refuse",
+);
+assert(
+  laterHistoryPageResult.stdout.includes(
+    "The pull request history is malformed or contains a close or reopen event.",
+  ),
+  `a later-page close must fail the complete history proof:\n${laterHistoryPageResult.stdout}\n${laterHistoryPageResult.stderr}`,
+);
+assert(
+  !laterHistoryPageResult.merged,
+  "a later-page close must not reach merge",
+);
+
+const closeDuringWaitFixture = scenario({
+  number: 1872,
+  runId: 31995129967,
+  headRef: pr1872HeadRef,
+  headSha: pr1872Head,
+  commits: [commit(pr1872Head)],
+  files: pr1872Files,
+});
+closeDuringWaitFixture.historyPagesSequence = [
+  [[]],
+  [
+    [
+      {
+        id: 8412,
+        event: "closed",
+        actor: { login: "chapati23" },
+        created_at: "2026-08-30T10:01:00Z",
+      },
+      {
+        id: 8413,
+        event: "reopened",
+        actor: { login: "chapati23" },
+        created_at: "2026-08-30T10:02:00Z",
+      },
+    ],
+  ],
+];
+const closeDuringWaitResult = runWriter(closeDuringWaitFixture);
+assert.notEqual(
+  closeDuringWaitResult.status,
+  0,
+  "a human close and reopen at the same head during required-check waiting must refuse",
+);
+assert(
+  closeDuringWaitResult.stdout.includes(
+    "The pull request history is malformed or contains a close or reopen event.",
+  ),
+  `the second close-history read must preserve the human veto:\n${closeDuringWaitResult.stdout}\n${closeDuringWaitResult.stderr}`,
+);
+assert.equal(
+  routeCalls(closeDuringWaitResult, "/issues/1872/events").length,
+  2,
+  "the close and reopen must be detected by the second authoritative read",
+);
+assert(
+  !closeDuringWaitResult.merged,
+  "a close and reopen at the same head must not reach merge",
+);
+
+for (const [label, historyPages] of [
+  ["missing slurped page", []],
+  ["non-array page", [{}]],
+  ["missing event type", [[{}]]],
+  ["non-string event type", [[{ event: null }]]],
+]) {
+  const malformedHistoryFixture = scenario({
+    number: 1872,
+    runId: 31995129967,
+    headRef: pr1872HeadRef,
+    headSha: pr1872Head,
+    commits: [commit(pr1872Head)],
+    files: pr1872Files,
+  });
+  malformedHistoryFixture.historyPages = historyPages;
+  const malformedHistoryResult = runWriter(malformedHistoryFixture);
+  assert.notEqual(
+    malformedHistoryResult.status,
+    0,
+    `close history with ${label} must refuse`,
+  );
+  assert(
+    malformedHistoryResult.stdout.includes(
+      "The pull request history is malformed or contains a close or reopen event.",
+    ),
+    `close history with ${label} must fail closed:\n${malformedHistoryResult.stdout}\n${malformedHistoryResult.stderr}`,
+  );
+  assert(
+    !malformedHistoryResult.merged,
+    `close history with ${label} must not reach merge`,
+  );
+}
+
+const unreadableHistoryFixture = scenario({
+  number: 1872,
+  runId: 31995129967,
+  headRef: pr1872HeadRef,
+  headSha: pr1872Head,
+  commits: [commit(pr1872Head)],
+  files: pr1872Files,
+});
+unreadableHistoryFixture.historyExit = 97;
+const unreadableHistoryResult = runWriter(unreadableHistoryFixture);
+assert.notEqual(
+  unreadableHistoryResult.status,
+  0,
+  "an unreadable close history must refuse",
+);
+assert(
+  unreadableHistoryResult.stdout.includes(
+    "The pull request close history is unreadable.",
+  ),
+  `an unreadable close history must fail closed:\n${unreadableHistoryResult.stdout}\n${unreadableHistoryResult.stderr}`,
+);
+assert(
+  !unreadableHistoryResult.merged,
+  "an unreadable close history must not reach merge",
 );
 
 const lowercaseMaintainerBodyFixture = scenario({

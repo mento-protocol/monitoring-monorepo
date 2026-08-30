@@ -71,17 +71,22 @@ Use two workflows as one pinned security boundary:
    non-draft state. The pinned metadata action derives `maintainer-changes`
    from the exact case-sensitive `Maintainer changes` marker in the PR body.
    The writer applies that same rule to the current authoritative PR body. It
-   reads every commit and file with pagination. Every commit must be verified
-   and Dependabot-authored. GitHub caps the pull-request commit endpoint at
-   250, so the writer rejects a reported count above 250 and requires the
-   returned count to match exactly. Every file must be a modified top-level
-   workflow YAML file. The classifier and writer files are always excluded
-   from this lane.
+   reads the complete issue-event history with pagination. Every page must be
+   an array, and every event must be an object with a string event type. Any
+   `closed` or `reopened` event refuses the merge. A recorded human close
+   therefore remains a durable veto if someone reopens the same PR at the same
+   head. The writer also reads every commit and file with pagination. Every
+   commit must be verified and Dependabot-authored. GitHub caps the pull-request
+   commit endpoint at 250, so the writer rejects a reported count above 250 and
+   requires the returned count to match exactly. Every file must be a modified
+   top-level workflow YAML file. The classifier and writer files are always
+   excluded from this lane.
 4. The writer refuses when `main` has a merge queue. It waits for every
    required check with `gh pr checks --required --watch --fail-fast`, then
    verifies a non-empty passing required-only projection. The wait is an
    untrusted delay. The writer repeats the complete workflow, run, job, PR,
-   head, maintainer-change body, commit, file, and queue proof after it.
+   head, maintainer-change body, close-history, commit, file, and queue proof
+   after it.
 5. The writer calls `PUT /repos/{owner}/{repo}/pulls/{number}/merge` with the
    verified head SHA and squash method. This synchronous endpoint cannot
    enqueue or create an auto-merge request. Branch-scoped concurrency cancels
@@ -103,12 +108,12 @@ change add the job's `environment:` reference and switch only the final REST
 write to the dedicated repository-scoped merge App token. Adding the reference
 before the protected Environment exists can auto-create an unprotected
 Environment, so this PR does not add it. The restricted `GITHUB_TOKEN` must
-remain the reader for workflow, run, job, required-check, pull-request, commit,
-file, and queue evidence. The dedicated App token must reach only the final
-merge call. Activation must prove the App credentials are enabled, the writer
-migration is verified, and every auto-merge request created by the prior writer
-is drained. The shared GitHub Actions App and local agent App must not receive
-this ruleset exemption.
+remain the reader for workflow, run, job, required-check, pull-request,
+close-history, commit, file, and queue evidence. The dedicated App token must
+reach only the final merge call. Activation must prove the App credentials are
+enabled, the writer migration is verified, and every auto-merge request created
+by the prior writer is drained. The shared GitHub Actions App and local agent
+App must not receive this ruleset exemption.
 
 ## Alternatives considered
 
@@ -161,6 +166,13 @@ this ruleset exemption.
   run shape, and job shape. A future classifier policy change must drain all
   in-flight runs from the prior version or add an explicit runtime version
   binding before the new writer becomes active.
+- Closing an eligible PR is a durable human veto on every later authoritative
+  read. Reopening it, including at the same head, does not restore automatic
+  eligibility. Dependabot must open a new eligible PR before this lane can
+  merge that update automatically.
+- The final issue-event read is the last authoritative read before the merge
+  request. The REST merge endpoint cannot pin issue-event history. A close and
+  reopen after that read but before the write remains a narrow residual race.
 - ADR 0075 remains active for every operator, agent-assisted, major,
   security, maintainer-changed, excluded-publisher, and other-ecosystem merge.
   This ADR qualifies it with one named machine exception. It does not authorize

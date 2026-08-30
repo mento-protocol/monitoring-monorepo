@@ -8,8 +8,10 @@ name: Dependabot auto-merge
 #
 # The writer waits for every required check, repeats every classifier and pull
 # request proof, including the pinned metadata action's current-body
-# maintainer-change rule, then calls the synchronous exact-head REST merge
-# endpoint. The endpoint cannot enqueue or leave a standing auto-merge request.
+# maintainer-change rule and the pull request's complete close history, then
+# calls the synchronous exact-head REST merge endpoint. A recorded close remains
+# a durable human veto after the same head is reopened. The endpoint cannot
+# enqueue or leave a standing auto-merge request.
 #
 # The interim GITHUB_TOKEN merge does not emit push-triggered workflows. Issue
 # #2091 must move only the final write to the dedicated repository-scoped merge
@@ -92,6 +94,7 @@ jobs:
             local pr_pages
             local observed_pr_number
             local pr_json
+            local history_pages
             local expected_commit_count
             local expected_file_count
             local commit_pages
@@ -266,6 +269,7 @@ jobs:
               echo '::error::The current pull request reports maintainer changes.'
               exit 1
             fi
+
             if ! expected_commit_count=$(jq -er '.commits' <<< "$pr_json"); then
               echo '::error::The pull request commit count is invalid.'
               exit 1
@@ -336,6 +340,32 @@ jobs:
               echo '::error::The routine auto-merge lane cannot prove that main has no merge queue.'
               exit 1
             fi
+
+            # Keep this as the final authoritative read. It makes a human close
+            # durable across a same-head reopen and keeps the residual request
+            # window as short as this non-transactional API permits.
+            if ! history_pages=$(GH_TOKEN="$GH_READ_TOKEN" gh api --method GET --paginate --slurp \
+              "repos/$EXPECTED_REPOSITORY/issues/$PR_NUMBER/events" \
+              -f per_page=100); then
+              echo '::error::The pull request close history is unreadable.'
+              exit 1
+            fi
+            if ! jq -e \
+              'type == "array" and
+               length >= 1 and
+               all(.[]; type == "array") and
+               ([.[][]] as $events |
+               all($events[];
+                 type == "object" and
+                 has("event") and
+                 (.event | type) == "string") and
+               all($events[];
+                 .event != "closed" and
+                 .event != "reopened"))' \
+              <<< "$history_pages" >/dev/null; then
+              echo '::error::The pull request history is malformed or contains a close or reopen event.'
+              exit 1
+            fi
           }
 
           verify_authoritative_state
@@ -365,9 +395,9 @@ jobs:
           fi
 
           # The wait is an untrusted delay. Repeat the complete workflow, run,
-          # job, PR, head, maintainer-change body, commit, file, and queue proof
-          # after it. The exact-head REST request below cannot accept a later push
-          # or create queued state.
+          # job, PR, head, maintainer-change body, durable close-history, commit,
+          # file, and queue proof after it. The exact-head REST request below
+          # cannot accept a later push or create queued state.
           verify_authoritative_state
 
           if ! MERGE_JSON=$(GH_TOKEN="$FINAL_MERGE_TOKEN" gh api --method PUT \

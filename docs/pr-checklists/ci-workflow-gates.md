@@ -154,18 +154,23 @@ The lane has two pinned workflows. The `pull_request` classifier has read-only
 permissions. It verifies the event and pinned Dependabot metadata. The
 default-branch `workflow_run` writer treats completion as an untrusted signal.
 It re-reads the exact workflow and run, first-attempt job and step results,
-current PR and head, the current PR body's exact `Maintainer changes` marker,
-every commit, every changed file, and the base's merge queue. It requires one
-open same-repository PR, verified Dependabot-authored commits, and only
-modified top-level workflow YAML. It always rejects changes to either trust
-workflow. It waits for every required check and verifies a non-empty passing
-required-only projection. It then repeats the complete workflow, run, job, PR,
-head, maintainer-change body, commit, file, and queue proof. The final write is
-a synchronous REST merge with the exact head SHA and squash method. It cannot
-enqueue or create an auto-merge request. Neither workflow checks out or
-executes PR code. The writer does not read upstream outputs, artifacts, or
-caches. `pnpm tf:test` pins both parsed workflow shapes. The autofix trust
-checker rejects every `pull_request_target` workflow.
+current PR and head, the complete issue-event close history, the current PR
+body's exact `Maintainer changes` marker, every commit, every changed file, and
+the base's merge queue. It requires one open same-repository PR, no prior
+`closed` or `reopened` event, verified Dependabot-authored commits, and only
+modified top-level workflow YAML. A recorded close remains a durable human veto
+after the same PR and head are reopened. Dependabot must open a new PR before
+the update can enter this lane again. The writer always rejects changes to
+either trust workflow. It waits for every required check and verifies a
+non-empty passing required-only projection. It then repeats the complete
+workflow, run, job, PR, head, maintainer-change body, close-history, commit,
+file, and queue proof. The issue-event read is the final authoritative read.
+The final write is a synchronous REST merge with the exact head SHA and squash
+method. It cannot enqueue, create an auto-merge request, or pin issue-event
+history. A close and reopen inside the remaining request window is a residual
+race. Neither workflow checks out or executes PR code. The writer does not read
+upstream outputs, artifacts, or caches. `pnpm tf:test` pins both parsed workflow
+shapes. The autofix trust checker rejects every `pull_request_target` workflow.
 
 Before changing the classifier policy or successful job shape, drain every
 in-flight run from the prior classifier version or add an explicit runtime
@@ -187,10 +192,10 @@ live protection and secret metadata pass verification may a separate reviewed
 workflow change add the writer job's `environment:` reference and switch the
 final token. Do not add the workflow reference first because GitHub can
 auto-create an unprotected Environment. The restricted `GITHUB_TOKEN` remains
-the reader for authoritative Actions and pull-request state. Activation must
-also prove the App credentials are enabled, the migration is verified, and
-auto-merge requests created by the prior writer are drained. Do not give the
-shared GitHub Actions App identity a ruleset bypass.
+the reader for authoritative Actions, pull-request, and close-history state.
+Activation must also prove the App credentials are enabled, the migration is
+verified, and auto-merge requests created by the prior writer are drained. Do
+not give the shared GitHub Actions App identity a ruleset bypass.
 
 - [ ] If you add a new external review integration — GitHub App or Action — that is load-bearing for review or merge gating, keep its updates outside routine groups when an isolated review improves the self-update boundary
 - [ ] If you add a new `package-ecosystem` to `dependabot.yml`, keep it on the

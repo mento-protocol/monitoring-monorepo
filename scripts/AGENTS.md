@@ -117,10 +117,8 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 - **PR validation boundary pins.** Move
   `workflows/check-pr-validation-boundary{,.test}.mjs` together. Keep its
   `ci.yml` and `trunk.yml` calls aligned. ADR 0078 defines the boundary.
-- **Production identity pins.**
-  `production-infra-identity-contract/workflow-inventory.mjs` pins exact
-  workflows, including the paired Dependabot merge boundary.
-  `workflows/check-pr-validation-boundary.mjs` imports that pair contract.
+- **Production identity pins.** `production-infra-identity-contract/` pins
+  exact workflows. The PR-boundary checker imports its Dependabot pair.
 - **External console pins.** Codex Cloud pins
   `bootstrap/codex-cloud-{setup,maintenance}.sh`; Claude Code web pins
   `bootstrap/claude-code-web-setup.sh` through `.claude/hooks/session-start.sh`.
