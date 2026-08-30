@@ -6,7 +6,7 @@
     {
       "path": ".github/actions/pnpm-install/action.yml",
       "category": "action",
-      "additions": 30,
+      "additions": 40,
       "deletions": 2
     },
     {
@@ -124,6 +124,48 @@
       "deletions": 8
     },
     {
+      "path": "docs/evals/review-skill-ledger.jsonl",
+      "category": "doc",
+      "additions": 2,
+      "deletions": 0
+    },
+    {
+      "path": "docs/evals/review-skill-runs/2026-08-29-ec451b1f-full-528ae414/failure.md",
+      "category": "doc",
+      "additions": 5,
+      "deletions": 0
+    },
+    {
+      "path": "docs/evals/review-skill-runs/2026-08-29-ec451b1f-full-528ae414/plan.json",
+      "category": "doc",
+      "additions": 412,
+      "deletions": 0
+    },
+    {
+      "path": "docs/evals/review-skill-runs/2026-08-29-ec451b1f-full-528ae414/row.json",
+      "category": "doc",
+      "additions": 151,
+      "deletions": 0
+    },
+    {
+      "path": "docs/evals/review-skill-runs/2026-08-30-ec451b1f-full-528ae414/failure.md",
+      "category": "doc",
+      "additions": 5,
+      "deletions": 0
+    },
+    {
+      "path": "docs/evals/review-skill-runs/2026-08-30-ec451b1f-full-528ae414/plan.json",
+      "category": "doc",
+      "additions": 412,
+      "deletions": 0
+    },
+    {
+      "path": "docs/evals/review-skill-runs/2026-08-30-ec451b1f-full-528ae414/row.json",
+      "category": "doc",
+      "additions": 151,
+      "deletions": 0
+    },
+    {
       "path": "docs/metrics/verification-redesign-safeguards.jsonl",
       "category": "doc",
       "additions": 10,
@@ -192,13 +234,13 @@
     {
       "path": "scripts/workflows/check-pr-validation-boundary.mjs",
       "category": "check",
-      "additions": 294,
+      "additions": 298,
       "deletions": 0
     },
     {
       "path": "scripts/workflows/check-pr-validation-boundary.test.mjs",
       "category": "test",
-      "additions": 439,
+      "additions": 509,
       "deletions": 0
     },
     {
@@ -233,24 +275,24 @@
       "net": -495
     },
     "action": {
-      "additions": 33,
+      "additions": 43,
       "deletions": 2,
-      "net": 31
+      "net": 41
     },
     "check": {
-      "additions": 351,
+      "additions": 355,
       "deletions": 92,
-      "net": 259
+      "net": 263
     },
     "test": {
-      "additions": 474,
+      "additions": 544,
       "deletions": 61,
-      "net": 413
+      "net": 483
     },
     "doc": {
-      "additions": 248,
+      "additions": 1386,
       "deletions": 79,
-      "net": 169
+      "net": 1307
     }
   }
 }

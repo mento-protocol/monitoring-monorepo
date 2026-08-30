@@ -138,6 +138,76 @@ test("structural mutations fail closed at each M2 boundary", () => {
   mutateOnce(
     root,
     ".github/actions/pnpm-install/action.yml",
+    'echo "PNPM_CONFIG_STORE_DIR=$GITHUB_WORKSPACE/.pnpm-store" >> "$GITHUB_ENV"',
+    'echo "PNPM_CONFIG_STORE_DIR=$GITHUB_WORKSPACE/.other" >> "$GITHUB_ENV"',
+    /configured exactly once/u,
+  );
+  mutateOnce(
+    root,
+    ".github/actions/pnpm-install/action.yml",
+    "        path: .pnpm-store",
+    "        path: ~/.local/share/pnpm/store",
+    /pinned workspace-relative store/u,
+  );
+  mutateOnce(
+    root,
+    ".github/actions/pnpm-install/action.yml",
+    "      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0",
+    "      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0",
+    /one restore and one protected-main save/u,
+  );
+  mutateOnce(
+    root,
+    ".github/actions/pnpm-install/action.yml",
+    "      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0",
+    "      uses: ./missing-pnpm-restore",
+    /one restore and one protected-main save/u,
+  );
+  mutateOnce(
+    root,
+    ".github/actions/pnpm-install/action.yml",
+    "      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0",
+    "      uses: ./missing-pnpm-save",
+    /one restore and one protected-main save/u,
+  );
+  mutateOnce(
+    root,
+    ".github/actions/pnpm-install/action.yml",
+    "    - name: Clear incomplete pnpm store restore",
+    "    - name: Duplicate pnpm restore\n      continue-on-error: true\n      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0\n      with:\n        path: .pnpm-store\n        key: trusted-main-v1-pnpm-store-duplicate\n    - name: Clear incomplete pnpm store restore",
+    /one restore and one protected-main save/u,
+  );
+  mutateOnce(
+    root,
+    ".github/actions/pnpm-install/action.yml",
+    "    - name: Save pnpm store",
+    "    - name: Duplicate pnpm save\n      if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n      continue-on-error: true\n      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0\n      with:\n        path: .pnpm-store\n        key: trusted-main-v1-pnpm-store-duplicate\n    - name: Save pnpm store",
+    /one restore and one protected-main save/u,
+  );
+  mutateOnce(
+    root,
+    ".github/actions/pnpm-install/action.yml",
+    "    - name: Prepare pnpm store target",
+    "    - name: Skip pnpm store preparation",
+    /cleared exactly once/u,
+  );
+  mutateOnce(
+    root,
+    ".github/actions/pnpm-install/action.yml",
+    "    - name: Clear incomplete pnpm store restore",
+    '    - name: Configure pnpm store\n      shell: bash\n      run: echo "PNPM_CONFIG_STORE_DIR=$GITHUB_WORKSPACE/.other" >> "$GITHUB_ENV"\n    - name: Clear incomplete pnpm store restore',
+    /configured exactly once/u,
+  );
+  mutateOnce(
+    root,
+    ".github/actions/pnpm-install/action.yml",
+    "    - name: Clear incomplete pnpm store restore",
+    "    - name: Prepare pnpm store target\n      shell: bash\n      run: echo duplicate\n    - name: Clear incomplete pnpm store restore",
+    /cleared exactly once/u,
+  );
+  mutateOnce(
+    root,
+    ".github/actions/pnpm-install/action.yml",
     "    - name: Install dependencies\n      shell: bash",
     "    - name: Install dependencies\n      env:\n        CACHE_HIT: ${{ steps.pnpm-cache.outputs.cache-hit }}\n      shell: bash",
     /exact install command/u,
