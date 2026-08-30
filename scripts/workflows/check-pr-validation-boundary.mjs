@@ -80,7 +80,7 @@ function bool(value, expected) { return value === expected || String(value).toLo
 // prettier-ignore
 export function hasProtectedMainSaveGuard(value) { const condition = expr(value); const clauses = new Set(condition.split("&&").map((part) => part.trim())); return !condition.includes("||") && clauses.has("github.event_name == 'push'") && clauses.has("github.ref == 'refs/heads/main'"); }
 
-function reachableSteps(root) {
+function reachableWorkflowFiles(root) {
   const workflowFiles = listYaml(root, ".github/workflows");
   const workflows = workflowFiles.filter((path) =>
     collectTriggers(load(root, path)).has("pull_request"),
@@ -100,12 +100,11 @@ function reachableSteps(root) {
         queued.push(match[1]);
     }
   }
-  return [
-    ...queued,
-    ...listYaml(root, ".github/actions"),
-    ...listYaml(root, ".trunk/setup-ci"),
-  ].flatMap((path) => steps(load(root, path)));
+  return queued;
 }
+
+// prettier-ignore
+function reachableSteps(root) { return [...reachableWorkflowFiles(root), ...listYaml(root, ".github/actions"), ...listYaml(root, ".trunk/setup-ci")].flatMap((path) => steps(load(root, path))); }
 
 // prettier-ignore
 function coldSequence(root, path, job, restoreId, cleanupName, cleanupIf, cleanupRun, commandName, commandRun, commandIf = "") {
@@ -144,11 +143,10 @@ function checkCaches(root, violations) {
 }
 
 // prettier-ignore
-function checkAuthority(root, violations) {
+export function authorityInventory(root = process.cwd()) {
   const authority = [];
-  for (const path of listYaml(root, ".github/workflows")) {
+  for (const path of reachableWorkflowFiles(root)) {
     const workflow = load(root, path);
-    if (!collectTriggers(workflow).has("pull_request")) continue;
     const env = JSON.stringify(workflow.env ?? {});
     const inherited = { envSecrets: /secrets\s*\./iu.test(env), envWorkflowToken: /github\s*\.\s*token/iu.test(env), workflowPermissions: workflow.permissions };
     for (const [jobId, job] of Object.entries(workflow.jobs ?? {})) {
@@ -156,8 +154,11 @@ function checkAuthority(root, violations) {
       if (hasWritePermission(permissions) || jobReceivesCredential(job, inherited)) authority.push(authorityLine(path, jobId, workflow, job));
     }
   }
-  add(violations, JSON.stringify(authority.sort()) === JSON.stringify(AUTHORITY), "approved PR authority permissions or credential bindings changed");
+  return authority.sort();
 }
+
+// prettier-ignore
+function checkAuthority(root, violations) { add(violations, JSON.stringify(authorityInventory(root)) === JSON.stringify(AUTHORITY), "approved PR authority permissions or credential bindings changed"); }
 
 // prettier-ignore
 function checkCi(root, violations) {
@@ -237,11 +238,14 @@ function fileLines(root, path) { const body = readFileSync(join(root, path), "ut
 // `git diff <base>` includes staged and tracked unstaged changes. Untracked
 // files are rejected below so they cannot disappear from a generated receipt.
 // prettier-ignore
+export function numstatCount(value) { if (value === "-") return 0; if (!/^\d+$/u.test(value)) throw new Error(`invalid git numstat count: ${value}`); return Number(value); }
+
+// prettier-ignore
 export function complexitySnapshot(root = process.cwd(), baseSha = M2_BASE_SHA) {
   const output = git(root, ["diff", "--numstat", "--no-renames", baseSha, "--", ".", `:(exclude)${M2_RECEIPT}`]);
   const files = output ? output.split("\n").map((line) => {
     const [additions, deletions, path] = line.split("\t");
-    return { path, category: category(path), additions: Number(additions), deletions: Number(deletions) };
+    return { path, category: category(path), additions: numstatCount(additions), deletions: numstatCount(deletions) };
   }) : [];
   const totals = Object.fromEntries(CATEGORIES.map((name) => [name, { additions: 0, deletions: 0, net: 0 }]));
   for (const file of files) {

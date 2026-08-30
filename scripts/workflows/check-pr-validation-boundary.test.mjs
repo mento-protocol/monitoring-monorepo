@@ -14,10 +14,12 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   M2_RECEIPT,
+  authorityInventory,
   checkComplexityReceipt,
   checkStructuralRepository,
   complexitySnapshot,
   hasProtectedMainSaveGuard,
+  numstatCount,
 } from "./check-pr-validation-boundary.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -338,7 +340,7 @@ test("structural mutations fail closed at each M2 boundary", () => {
   );
 });
 
-test("PR-local reusable workflows stay inside the cache boundary", () => {
+test("PR-local reusable workflows stay inside cache and authority boundaries", () => {
   const root = structuralFixture();
   const caller = join(root, ".github/workflows/code-health-duplication.yml");
   writeFileSync(
@@ -348,15 +350,22 @@ test("PR-local reusable workflows stay inside the cache boundary", () => {
   write(
     root,
     ".github/workflows/reusable-cache.yml",
-    "name: reusable cache\non: workflow_call\njobs:\n  setup:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020\n        with:\n          node-version-file: .node-version\n",
+    "name: reusable cache\non: workflow_call\njobs:\n  setup:\n    runs-on: ubuntu-latest\n    permissions:\n      issues: write\n    steps:\n      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020\n        with:\n          node-version-file: .node-version\n",
   );
-  assert.match(
-    checkStructuralRepository(root).join("\n"),
-    /setup-node must disable implicit and explicit/u,
+  const violations = checkStructuralRepository(root).join("\n");
+  assert.match(violations, /setup-node must disable implicit and explicit/u);
+  assert.match(violations, /approved PR authority/u);
+  assert(
+    authorityInventory(root).includes(
+      'reusable-cache.yml|setup|{"issues":"write"}|[]|null|null|null',
+    ),
   );
 });
 
 test("the M2 receipt matches fixed-base numstat and protects the Phase 0 manifest", () => {
+  assert.equal(numstatCount("-"), 0);
+  assert.equal(numstatCount("12"), 12);
+  assert.throws(() => numstatCount("invalid"), /invalid git numstat count/u);
   const root = tempRoot();
   write(
     root,
@@ -383,6 +392,7 @@ test("the M2 receipt matches fixed-base numstat and protects the Phase 0 manifes
     "one\ntwo\nthree\n",
   );
   write(root, "docs/adr/m2.md", "M2\n");
+  write(root, "docs/m2.bin", "\0M2\n");
   assert.match(
     checkComplexityReceipt(root, base).violations.join("\n"),
     /stage untracked files/u,
@@ -398,6 +408,10 @@ test("the M2 receipt matches fixed-base numstat and protects the Phase 0 manifes
   assert.equal(
     receipt.files.find((file) => file.path === ".lighthouserc.cjs")?.category,
     "check",
+  );
+  assert.deepEqual(
+    receipt.files.find((file) => file.path === "docs/m2.bin"),
+    { path: "docs/m2.bin", category: "doc", additions: 0, deletions: 0 },
   );
   write(root, M2_RECEIPT, `${JSON.stringify(receipt, null, 2)}\n`);
   git(root, ["add", M2_RECEIPT]);

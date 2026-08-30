@@ -168,13 +168,13 @@
     {
       "path": "scripts/workflows/check-pr-validation-boundary.mjs",
       "category": "check",
-      "additions": 290,
+      "additions": 294,
       "deletions": 0
     },
     {
       "path": "scripts/workflows/check-pr-validation-boundary.test.mjs",
       "category": "test",
-      "additions": 425,
+      "additions": 439,
       "deletions": 0
     },
     {
@@ -214,14 +214,14 @@
       "net": 31
     },
     "check": {
-      "additions": 300,
+      "additions": 304,
       "deletions": 40,
-      "net": 260
+      "net": 264
     },
     "test": {
-      "additions": 436,
+      "additions": 450,
       "deletions": 43,
-      "net": 393
+      "net": 407
     },
     "doc": {
       "additions": 247,
