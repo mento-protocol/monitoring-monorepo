@@ -418,15 +418,15 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    `google-github-actions/auth`, stay on the human path. A read-only
    `pull_request` classifier verifies event identity and Dependabot metadata.
    A default-branch `workflow_run` writer treats that result as untrusted. It
-   re-reads the workflow, run, first-attempt jobs, current PR and head, all
-   commits, all files, the current PR body's exact `Maintainer changes` marker,
-   and the base's merge-queue state. It never checks out PR code or reads
-   upstream outputs, artifacts, or caches. It waits for every required check
-   and verifies a non-empty passing required-only projection. The wait is an
-   untrusted delay. The writer repeats the complete workflow, run, job, PR,
-   head, maintainer-change body, commit, file, and queue proof after it. It then
-   calls the synchronous REST merge endpoint with the exact head SHA and squash
-   method.
+   re-reads the workflow, run, first-attempt jobs with `total_count`, current PR
+   and head, all commits, all files, the current PR body's exact
+   `Maintainer changes` marker, and the base's merge-queue state. It never
+   checks out PR code or reads upstream outputs, artifacts, or caches. It waits
+   for every required check and verifies a non-empty passing required-only
+   projection. The wait is an untrusted delay. The writer repeats the complete
+   workflow, run, job, PR, head, maintainer-change body, commit, file, and queue
+   proof after it. It then calls the synchronous REST merge endpoint with the
+   exact head SHA and squash method.
    The endpoint cannot enqueue or leave a standing auto-merge request. A later
    push cannot satisfy the exact-head write.
    Merges made with this workflow's

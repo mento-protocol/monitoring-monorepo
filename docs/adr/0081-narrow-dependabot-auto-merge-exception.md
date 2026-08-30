@@ -61,7 +61,9 @@ Use two workflows as one pinned security boundary:
    the workflow identity and run by ID. It requires the exact repository,
    workflow ID, path, name, event, successful conclusion, first attempt,
    Dependabot actor and triggering actor, group branch, and 40-character head
-   SHA. It reads the first attempt's jobs with pagination. Exactly one
+   SHA. It reads the first attempt's jobs with pagination. Every returned page
+   must be an object with a safe integer `total_count` and a `jobs` array. The
+   shared `total_count` must equal the flattened job count. Exactly one
    `classify` job must exist, and the event, metadata, and eligibility steps
    must have succeeded.
 3. The writer looks up exactly one open same-repository PR by owner and head

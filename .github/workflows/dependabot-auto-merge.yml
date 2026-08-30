@@ -171,7 +171,23 @@ jobs:
             if ! jq -e \
               --argjson run_id "$RUN_ID" \
               --arg head "$EXPECTED_HEAD" \
-              '[.[].jobs[]] as $jobs |
+              'def safe_integer:
+                 if type == "number" then
+                   . >= 0 and . <= 9007199254740991 and . == floor
+                 else
+                   false
+                 end;
+               type == "array" and
+               (length >= 1) and
+               all(.[]; type == "object" and
+                 has("total_count") and
+                 (.total_count | safe_integer) and
+                 has("jobs") and
+                 (.jobs | type == "array")) and
+               (.[0].total_count as $total_count |
+               all(.[]; .total_count == $total_count) and
+               ([.[].jobs[]] as $jobs |
+               $total_count == ($jobs | length) and
                ($jobs | length) == 1 and
                $jobs[0].name == "classify" and
                $jobs[0].run_id == $run_id and
@@ -180,7 +196,7 @@ jobs:
                $jobs[0].conclusion == "success" and
                ([ $jobs[0].steps[] | select(.name == "Validate candidate event" and .conclusion == "success") ] | length) == 1 and
                ([ $jobs[0].steps[] | select(.name == "Fetch verified Dependabot metadata" and .conclusion == "success") ] | length) == 1 and
-               ([ $jobs[0].steps[] | select(.name == "Mark routine update eligible" and .conclusion == "success") ] | length) == 1' \
+               ([ $jobs[0].steps[] | select(.name == "Mark routine update eligible" and .conclusion == "success") ] | length) == 1))' \
               <<< "$job_pages" >/dev/null; then
               echo '::error::The classifier attempt does not have the exact successful job shape.'
               exit 1

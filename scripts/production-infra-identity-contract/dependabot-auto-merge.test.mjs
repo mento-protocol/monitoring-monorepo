@@ -145,7 +145,7 @@ function scenario({
       head_sha: headSha,
       head_commit: { id: headSha },
     },
-    jobsPages: [{ jobs: [successfulJob(runId, headSha)] }],
+    jobsPages: [{ total_count: 1, jobs: [successfulJob(runId, headSha)] }],
     prPages: [[{ number }]],
     pr,
     commitsPages: [commits],
@@ -432,6 +432,49 @@ for (const [label, count] of [
     count,
     2,
     `${label} must be proved before and after required-check waiting`,
+  );
+}
+
+for (const [label, jobsPages] of [
+  ["missing total_count", [{ jobs: [successfulJob(31995129967, pr1872Head)] }]],
+  [
+    "malformed total_count",
+    [{ total_count: "1", jobs: [successfulJob(31995129967, pr1872Head)] }],
+  ],
+  [
+    "unsafe total_count",
+    [{ total_count: 1.5, jobs: [successfulJob(31995129967, pr1872Head)] }],
+  ],
+  [
+    "mismatched total_count",
+    [{ total_count: 2, jobs: [successfulJob(31995129967, pr1872Head)] }],
+  ],
+  ["malformed jobs page", [[successfulJob(31995129967, pr1872Head)]]],
+]) {
+  const fixture = scenario({
+    number: 1872,
+    runId: 31995129967,
+    headRef: pr1872HeadRef,
+    headSha: pr1872Head,
+    commits: [commit(pr1872Head)],
+    files: pr1872Files,
+  });
+  fixture.jobsPages = jobsPages;
+  const result = runWriter(fixture);
+  assert.notEqual(
+    result.status,
+    0,
+    `a classifier job page with ${label} must refuse`,
+  );
+  assert(
+    result.stdout.includes(
+      "The classifier attempt does not have the exact successful job shape.",
+    ),
+    `job-page metadata failure must be explicit for ${label}:\n${result.stdout}\n${result.stderr}`,
+  );
+  assert(
+    !result.merged,
+    `a classifier job page with ${label} must not reach merge`,
   );
 }
 
