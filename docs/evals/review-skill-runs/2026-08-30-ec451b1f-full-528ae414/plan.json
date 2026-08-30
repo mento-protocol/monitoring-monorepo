@@ -15,7 +15,7 @@
   "baseline_selection": "automatic",
   "baseline": null,
   "resume_from": null,
-  "plan_dir": "/Users/chapati/code/mento/monitoring-monorepo.review-eval/docs/evals/review-skill-runs/2026-08-30-ec451b1f-full-528ae414",
+  "plan_dir": "docs/evals/review-skill-runs/2026-08-30-ec451b1f-full-528ae414",
   "inputs": {
     "skill_digest": "528ae4142dc0d4a2917d3d04bcf4399416213a6bb9e9fdc0052fd7d88a5f967c",
     "skill_ref": "installed",
