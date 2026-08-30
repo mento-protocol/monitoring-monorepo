@@ -21,8 +21,9 @@ variable "vercel_team_id" {
 
 variable "github_token" {
   description = <<-EOT
-    GitHub PAT for writing repository Actions secrets, variables, repository
-    settings, and the main lifecycle ruleset on
+    GitHub PAT for writing repository Actions and Environment secrets,
+    variables, repository settings, Environments, deployment policies, and the
+    main lifecycle ruleset on
     `mento-protocol/monitoring-monorepo`.
     Fine-grained PAT scoped to that repo with Repository → Secrets: Read/write,
     Variables: Read/write, Administration: Read/write, and Environments:
@@ -33,9 +34,11 @@ variable "github_token" {
     `github_workflow_repository_permissions` (`github-actions-permissions.tf`,
     issue #1557) and `github_repository_ruleset`
     (`github-controlled-main-lifecycle-ruleset.tf`, issue #2091), and Environments for the
-    `sentry-pipeline` GitHub Environment +
-    its `github_actions_environment_secret` mirrors (`github-environment.tf`,
-    issue #1289) — a PAT missing any of these 403s.
+    `sentry-pipeline` GitHub Environment and its
+    `github_actions_environment_secret` mirrors (`github-environment.tf`, issue
+    #1289), plus the `dependabot-merge` Environment, exact branch policy, and
+    two Environment secrets (`github-dependabot-merge-app-credentials.tf`,
+    issue #2091) — a PAT missing any of these 403s.
   EOT
   type        = string
   sensitive   = true
@@ -99,28 +102,28 @@ variable "local_agent_github_app_credential_active" {
 }
 
 variable "dependabot_merge_app_id_encrypted_value" {
-  description = "Base64 ciphertext for the source-pinned dedicated Dependabot merge App ID, encrypted outside Terraform with the monitoring-monorepo repository Actions public key. Leave empty until the reviewed credential phase. Terraform state must never contain the plaintext value."
+  description = "Base64 ciphertext for the source-pinned dedicated Dependabot merge App ID, encrypted outside Terraform with the monitoring-monorepo dependabot-merge Environment public key. Leave empty until the reviewed credential phase. Terraform state must never contain the plaintext value."
   type        = string
   sensitive   = true
   default     = ""
 }
 
-variable "dependabot_merge_app_actions_public_key_id" {
-  description = "Public key ID returned with the monitoring-monorepo repository Actions public key used to encrypt both dedicated Dependabot merge App credential ciphertexts. On rotation, keep this ID for a one-secret ciphertext update. If GitHub changed the ID, update it and both ciphertexts together."
+variable "dependabot_merge_app_environment_public_key_id" {
+  description = "Public key ID returned for the monitoring-monorepo dependabot-merge Environment and used to encrypt both dedicated Dependabot merge App credential ciphertexts. On rotation, keep this ID for a one-secret ciphertext update. If GitHub changed the ID, update it and both ciphertexts together."
   type        = string
   default     = ""
 
   validation {
     condition = (
-      var.dependabot_merge_app_actions_public_key_id == "" ||
-      can(regex("^[A-Za-z0-9_-]{1,256}$", var.dependabot_merge_app_actions_public_key_id))
+      var.dependabot_merge_app_environment_public_key_id == "" ||
+      can(regex("^[A-Za-z0-9_-]{1,256}$", var.dependabot_merge_app_environment_public_key_id))
     )
-    error_message = "dependabot_merge_app_actions_public_key_id must be empty or a bounded GitHub Actions public-key ID."
+    error_message = "dependabot_merge_app_environment_public_key_id must be empty or a bounded GitHub Actions Environment public-key ID."
   }
 }
 
 variable "dependabot_merge_app_private_key_encrypted_value" {
-  description = "Base64 ciphertext for the dedicated Dependabot merge App private key, encrypted outside Terraform with the monitoring-monorepo repository Actions public key. Leave empty until the reviewed credential phase. Terraform state must never contain plaintext key material."
+  description = "Base64 ciphertext for the dedicated Dependabot merge App private key, encrypted outside Terraform with the monitoring-monorepo dependabot-merge Environment public key. Leave empty until the reviewed credential phase. Terraform state must never contain plaintext key material."
   type        = string
   sensitive   = true
   default     = ""
@@ -128,12 +131,13 @@ variable "dependabot_merge_app_private_key_encrypted_value" {
 
 variable "platform_settings_audit_token" {
   description = <<-EOT
-    Fine-grained GitHub PAT with Administration: Read on
-    `mento-protocol/monitoring-monorepo` ONLY (no other scope), consumed solely
+    Fine-grained GitHub PAT with Administration: Read, Actions: Read, and
+    Environments: Read on `mento-protocol/monitoring-monorepo` ONLY, consumed solely
     by `.github/workflows/platform-settings-drift.yml` to read
-    repository workflow-permission and ruleset endpoints and assert the repo
-    default workflow-token permission and main rulesets stay at their pinned
-    values (issues #2091, #1564, #1557).
+    repository workflow-permission, ruleset, Environment, deployment-policy,
+    and secret-name endpoints. It asserts the repo default workflow-token
+    permission and main lifecycle boundary stay at their pinned values (issues
+    #2091, #1564, #1557). It never reads a public key or secret value.
     Mirrors into the `PLATFORM_SETTINGS_AUDIT_TOKEN` environment secret on the
     `sentry-pipeline` GitHub Environment (`github-environment.tf`, issue #1289),
     count-gated so `terraform apply` succeeds while unset. The source policy may

@@ -91,14 +91,16 @@ per command:
   distinct local-agent App ID and the dedicated App's exact Contents/write,
   Pull requests/write, and Workflows/write permission map. An Actions
   permission or an operator-supplied App ID fails closed.
-- The dedicated merge App credential phase permits only the two exact
-  ciphertext-backed repository Actions secrets beside a no-op lifecycle
-  ruleset. The resources use supported `value_encrypted` and one explicit
-  public key ID. One-secret rotation keeps that ID. Public-key rotation updates
+- The dedicated merge App bootstrap uses two ordered phases beside a no-op
+  lifecycle ruleset. The first permits only the `dependabot-merge` Environment
+  with admin bypass disabled and one exact custom `main` branch policy. The
+  second permits only the two exact ciphertext-backed Environment secrets.
+  The secret resources use supported `value_encrypted` and one explicit
+  Environment public key ID. One-secret rotation keeps that ID. Public-key rotation updates
   both secrets and both ciphertexts. Initial-provisioning or active recovery
   can create an exact missing secret and, when the public key changed, update
   the survivor in the same plan. Plaintext, deprecated `encrypted_value`,
-  another secret store,
+  another Environment or secret store,
   partial key rotation, and unrelated changes fail closed.
 - The first broker-scaffold plan requires all five canonical creates. A
   reviewed recovery gate permits only a partial create/no-op mix after a failed

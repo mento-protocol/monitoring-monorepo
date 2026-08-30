@@ -119,7 +119,7 @@ pnpm issue:board backfill --issue 901 --dry-run # Preview fill-only ownership-fi
 pnpm issue:board:test                          # Offline tests for the issue-board helper
 
 # Local App broker after cutover; see the credential runbook
-pnpm github:agent -- --profile read -- pr-view <number>
+pnpm github:agent --profile read -- pr-view <number>
 pnpm github:agent:test                         # Offline broker-boundary tests
 
 # Sentry triage pipeline (Stage A — deterministic ingest; Stage B — read-only triage + digest; ADR 0036)

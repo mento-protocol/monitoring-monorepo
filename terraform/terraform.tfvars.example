@@ -9,8 +9,9 @@ vercel_token = "vcp_..."
 # vercel_team_id = "team_4l4TPoxnWEcusT8VeXkHbzF2"
 
 # ── GitHub ────────────────────────────────────────────────────────────────────
-# PAT for writing repository Actions secrets, variables, settings, and the main
-# lifecycle ruleset on `mento-protocol/monitoring-monorepo`. Fine-grained PAT
+# PAT for writing repository Actions and Environment secrets, variables,
+# settings, Environments, deployment policies, and the main lifecycle ruleset
+# on `mento-protocol/monitoring-monorepo`. Fine-grained PAT
 # scoped to that repository. Organization administration is not required.
 #
 # Create at: https://github.com/settings/personal-access-tokens/new
@@ -22,9 +23,10 @@ vercel_token = "vcp_..."
 #      Administration is required by github_workflow_repository_permissions in
 #      github-actions-permissions.tf — issue #1557 — and the lifecycle
 #      github_repository_ruleset in github-controlled-main-lifecycle-ruleset.tf — issue
-#      #2091. Environments is required by the
-#      sentry-pipeline GitHub Environment + its environment secrets in
-#      github-environment.tf — issue #1289. GitHub scopes these repo
+#      #2091. Environments is required by the sentry-pipeline GitHub Environment
+#      and its secrets in github-environment.tf — issue #1289 — and by the
+#      dependabot-merge Environment, policy, and secrets in
+#      github-dependabot-merge-app-credentials.tf — issue #2091. GitHub scopes these repo
 #      permissions independently. All are repo-level — org-admin is still NOT
 #      needed. Do not grant Contents. Keep this human-operated credential out
 #      of Actions and other automation.)
@@ -46,9 +48,12 @@ github_token = "github_pat_..."
 # Pin both App IDs and this exact permission map only in that same atomic source
 # change.
 #
-# The default-branch workflow_run writer introduced by #2137 reads these two
-# repository Actions secrets. Before the credential phase, encrypt the App ID
-# and private key outside Terraform with this repository's Actions public key.
+# First enable and apply only the dependabot-merge Environment and exact main
+# policy. Verify that live boundary. Then read its public key, encrypt the App
+# ID and private key outside Terraform, and enable the credential source gate
+# in a separate reviewed change. A later reviewed default-branch workflow_run
+# writer may declare `environment: dependabot-merge` only after the protected
+# Environment and both secrets are live.
 # Pin the public key ID returned with that key. Put only that public ID and the
 # two base64 ciphertexts in this gitignored operator file. Before rotation,
 # confirm the current public key ID. If it is unchanged, rotate only the needed
@@ -56,8 +61,8 @@ github_token = "github_pat_..."
 # together. Never
 # put plaintext App credentials in Terraform, Terraform state, an Actions
 # argument, or tracked source. The plan guard permits only these two exact
-# ciphertext-backed resources during the credential phase.
-# dependabot_merge_app_actions_public_key_id = "<repository Actions public-key ID>"
+# ciphertext-backed Environment resources during the credential phase.
+# dependabot_merge_app_environment_public_key_id = "<dependabot-merge Environment Actions public-key ID>"
 # dependabot_merge_app_id_encrypted_value = "<base64 sealed-box ciphertext>"
 # dependabot_merge_app_private_key_encrypted_value = "<base64 sealed-box ciphertext>"
 
@@ -119,12 +124,14 @@ local_agent_github_app_private_key_rotation_counter = 0
 # (.github/workflows/platform-settings-drift.yml, issue #1564). Separate from
 # github_token above: it is a CI secret (mirrored to PLATFORM_SETTINGS_AUDIT_TOKEN),
 # so it must NEVER hold write scope. It reads the workflow-permission and
-# repository-ruleset endpoints to confirm the default workflow token and both
-# main rulesets still match the platform stack.
+# repository-ruleset, dependabot-merge Environment, deployment-policy, and
+# secret-name endpoints to confirm the default workflow token and lifecycle
+# boundary still match the platform stack. It never reads a public key or value.
 #   Create at: https://github.com/settings/personal-access-tokens/new
 #     Resource owner: mento-protocol
 #     Repository access: mento-protocol/monitoring-monorepo
-#     Permissions: Repository → Administration: Read-only (nothing else)
+#     Permissions: Repository → Administration: Read-only, Actions: Read-only,
+#       Environments: Read-only (nothing else)
 #     In particular, do not grant Contents.
 # Before ruleset activation, the source policy may keep the ruleset leg inert.
 # After activation, leaving this unset makes the workflow fail visibly.

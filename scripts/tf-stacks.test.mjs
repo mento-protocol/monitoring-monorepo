@@ -28,9 +28,20 @@ const repoRoot = path.resolve(
 const script = path.join(repoRoot, "scripts/tf-stacks.mjs");
 const originMainFetchCommand =
   "fetch --quiet origin refs/heads/main:refs/remotes/origin/main";
+const ambientGithubAuthVariables = Object.freeze([
+  "GH_TOKEN",
+  "GITHUB_TOKEN",
+  "GH_ENTERPRISE_TOKEN",
+  "GITHUB_ENTERPRISE_TOKEN",
+  "GITHUB_PERSONAL_ACCESS_TOKEN",
+  "GITHUB_APP_ID",
+  "GITHUB_APP_INSTALLATION_ID",
+  "GITHUB_APP_PEM_FILE",
+]);
 const testMainLifecycleBoundaryPolicy = Object.freeze({
   repository: "mento-protocol/monitoring-monorepo",
   controlled_main_lifecycle_resources_enabled: true,
+  human_merge_operator_team_slug: "merge-operators",
   human_merge_operator_team_id: 424242,
   dependabot_merge_app_id: 515151,
   dependabot_merge_app_repository_permissions: {
@@ -41,6 +52,7 @@ const testMainLifecycleBoundaryPolicy = Object.freeze({
   local_agent_github_app_id: 616161,
   controlled_main_lifecycle_ruleset_id: 24680,
   controlled_main_lifecycle_ruleset_enforcement: "active",
+  dependabot_merge_environment_enabled: true,
   dependabot_merge_app_credentials_enabled: true,
   dependabot_merge_writer_migration_verified: true,
   legacy_dependabot_auto_merge_drained: true,
@@ -121,59 +133,100 @@ const defaultPlatformPlan = {
       },
     },
     {
-      address: "github_actions_secret.dependabot_merge_app_id[0]",
+      address: "github_repository_environment.dependabot_merge[0]",
       mode: "managed",
-      type: "github_actions_secret",
-      name: "dependabot_merge_app_id",
+      type: "github_repository_environment",
+      name: "dependabot_merge",
       index: 0,
       change: {
         actions: ["no-op"],
         before: {
-          key_id: "actions-key-id",
+          can_admins_bypass: false,
+          deployment_branch_policy: [
+            {
+              custom_branch_policies: true,
+              protected_branches: false,
+            },
+          ],
+          environment: "dependabot-merge",
           repository: "monitoring-monorepo",
-          secret_name: "DEPENDABOT_MERGE_APP_ID",
-          value_encrypted: "dGVzdC1jaXBoZXJ0ZXh0",
         },
         after: {
-          key_id: "actions-key-id",
+          can_admins_bypass: false,
+          deployment_branch_policy: [
+            {
+              custom_branch_policies: true,
+              protected_branches: false,
+            },
+          ],
+          environment: "dependabot-merge",
           repository: "monitoring-monorepo",
-          secret_name: "DEPENDABOT_MERGE_APP_ID",
-          value_encrypted: "dGVzdC1jaXBoZXJ0ZXh0",
         },
         after_unknown: {},
       },
     },
     {
-      address: "github_actions_secret.dependabot_merge_app_private_key[0]",
+      address:
+        "github_repository_environment_deployment_policy.dependabot_merge_main[0]",
       mode: "managed",
-      type: "github_actions_secret",
-      name: "dependabot_merge_app_private_key",
+      type: "github_repository_environment_deployment_policy",
+      name: "dependabot_merge_main",
       index: 0,
       change: {
         actions: ["no-op"],
         before: {
-          key_id: "actions-key-id",
+          branch_pattern: "main",
+          environment: "dependabot-merge",
           repository: "monitoring-monorepo",
-          secret_name: "DEPENDABOT_MERGE_APP_PRIVATE_KEY",
-          value_encrypted: "dGVzdC1jaXBoZXJ0ZXh0",
         },
         after: {
-          key_id: "actions-key-id",
+          branch_pattern: "main",
+          environment: "dependabot-merge",
           repository: "monitoring-monorepo",
-          secret_name: "DEPENDABOT_MERGE_APP_PRIVATE_KEY",
-          value_encrypted: "dGVzdC1jaXBoZXJ0ZXh0",
         },
         after_unknown: {},
       },
     },
+    ...[
+      ["dependabot_merge_app_id", "DEPENDABOT_MERGE_APP_ID"],
+      ["dependabot_merge_app_private_key", "DEPENDABOT_MERGE_APP_PRIVATE_KEY"],
+    ].map(([name, secretName]) => ({
+      address: `github_actions_environment_secret.${name}[0]`,
+      mode: "managed",
+      type: "github_actions_environment_secret",
+      name,
+      index: 0,
+      change: {
+        actions: ["no-op"],
+        before: {
+          environment: "dependabot-merge",
+          key_id: "actions-key-id",
+          repository: "monitoring-monorepo",
+          secret_name: secretName,
+          value_encrypted: "dGVzdC1jaXBoZXJ0ZXh0",
+        },
+        after: {
+          environment: "dependabot-merge",
+          key_id: "actions-key-id",
+          repository: "monitoring-monorepo",
+          secret_name: secretName,
+          value_encrypted: "dGVzdC1jaXBoZXJ0ZXh0",
+        },
+        after_unknown: {},
+      },
+    })),
   ],
 };
 
 function runRaw(args, options = {}) {
+  const environment = { ...process.env };
+  for (const variable of ambientGithubAuthVariables) {
+    delete environment[variable];
+  }
   return spawnSync(process.execPath, [script, ...args], {
     cwd: repoRoot,
     encoding: "utf8",
-    env: { ...process.env, ...options.env },
+    env: { ...environment, ...options.env },
     stdio: ["ignore", "pipe", "pipe"],
   });
 }
@@ -1509,16 +1562,7 @@ function runPlatformPlanPolicyTests(tempDir) {
     }
   }
 
-  for (const variable of [
-    "GH_TOKEN",
-    "GITHUB_TOKEN",
-    "GH_ENTERPRISE_TOKEN",
-    "GITHUB_ENTERPRISE_TOKEN",
-    "GITHUB_PERSONAL_ACCESS_TOKEN",
-    "GITHUB_APP_ID",
-    "GITHUB_APP_INSTALLATION_ID",
-    "GITHUB_APP_PEM_FILE",
-  ]) {
+  for (const variable of ambientGithubAuthVariables) {
     for (const commandArgs of [
       ["plan", "platform"],
       ["apply", "platform", "-auto-approve"],
@@ -1668,6 +1712,25 @@ function runPlatformPlanPolicyTests(tempDir) {
     fakeTools.terraformLog,
     fakeTools.terraformEnvironmentLog,
     "platform Terraform must use the source snapshot's private default workspace data directory",
+  );
+  resetLogs(
+    fakeTools.terraformLog,
+    fakeTools.gitLog,
+    fakeTools.terraformEnvironmentLog,
+  );
+
+  const inheritedGhToken = process.env.GH_TOKEN;
+  process.env.GH_TOKEN = environmentCanary;
+  try {
+    run(["plan", "platform"], { env: baseEnv });
+  } finally {
+    if (inheritedGhToken === undefined) delete process.env.GH_TOKEN;
+    else process.env.GH_TOKEN = inheritedGhToken;
+  }
+  assertTerraformCommands(
+    fakeTools.terraformLog,
+    ["init", "plan", "show"],
+    "ordinary fixtures must clear an inherited GitHub credential before they invoke the wrapper",
   );
   resetLogs(
     fakeTools.terraformLog,

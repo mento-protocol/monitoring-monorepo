@@ -35,7 +35,7 @@ subdirectories.
 - `alerts/`: alert-rule lint, peg-policy checks
 - `repo-health/`: code-health, file-size, lint
 - `terraform/`: movable Terraform guards/helpers
-- `gate/`: routing engine + coordinator
+- `gate/`: routing engine, coordinator, and routing-table modules
 - `sentry/`: triage/autofix/gate/broker/ci-wiring
 - `github/`: local GitHub App host broker, agent client, and credential tests
 

@@ -16,6 +16,11 @@ import { isDeepStrictEqual } from "node:util";
 
 export const CORE_RULESET_ID = 13494367;
 export const LIFECYCLE_RULESET_NAME = "controlled-main-lifecycle";
+export const DEPENDABOT_MERGE_ENVIRONMENT = "dependabot-merge";
+const DEPENDABOT_MERGE_SECRET_NAMES = Object.freeze([
+  "DEPENDABOT_MERGE_APP_ID",
+  "DEPENDABOT_MERGE_APP_PRIVATE_KEY",
+]);
 const GITHUB_ACTIONS_APP_ID = 15368;
 const DEPENDABOT_APP_ID = 29110;
 export const SOURCE_MAIN_LIFECYCLE_BOUNDARY_POLICY = Object.freeze(
@@ -253,6 +258,50 @@ function validateLifecycleRuleset(ruleset, expected, violations) {
   }
 }
 
+function validateDependabotMergeEnvironment(api, violations) {
+  const environment = api.dependabotMergeEnvironment;
+  if (
+    environment.name !== DEPENDABOT_MERGE_ENVIRONMENT ||
+    environment.can_admins_bypass !== false ||
+    !isDeepStrictEqual(environment.deployment_branch_policy, {
+      custom_branch_policies: true,
+      protected_branches: false,
+    })
+  ) {
+    violations.push(
+      "Dependabot merge Environment must disable admin bypass and use only custom deployment-branch policies",
+    );
+  }
+
+  const policies = api.dependabotMergeDeploymentBranchPolicies;
+  if (
+    policies.length !== 1 ||
+    !Number.isSafeInteger(policies[0]?.id) ||
+    policies[0].id <= 0 ||
+    policies[0]?.name !== "main" ||
+    policies[0]?.type !== "branch" ||
+    Object.keys(policies[0] ?? {}).some(
+      (key) => !["id", "name", "type"].includes(key),
+    )
+  ) {
+    violations.push(
+      "Dependabot merge Environment must have exactly one deployment policy for branch main",
+    );
+  }
+
+  const secretNames = api.dependabotMergeEnvironmentSecretNames;
+  if (
+    !isDeepStrictEqual(
+      [...secretNames].sort(),
+      [...DEPENDABOT_MERGE_SECRET_NAMES].sort(),
+    )
+  ) {
+    violations.push(
+      "Dependabot merge Environment must expose exactly the two reviewed secret metadata names",
+    );
+  }
+}
+
 function parsePositiveInteger(value) {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
     return undefined;
@@ -265,6 +314,7 @@ function parsePolicy(policy) {
   if (
     !isObject(policy) ||
     policy.repository !== "mento-protocol/monitoring-monorepo" ||
+    policy.human_merge_operator_team_slug !== "merge-operators" ||
     resourcesEnabled !== true ||
     !isDeepStrictEqual(policy.dependabot_merge_app_repository_permissions, {
       contents: "write",
@@ -272,6 +322,7 @@ function parsePolicy(policy) {
       workflows: "write",
     }) ||
     typeof policy.ruleset_audit_active !== "boolean" ||
+    typeof policy.dependabot_merge_environment_enabled !== "boolean" ||
     typeof policy.dependabot_merge_app_credentials_enabled !== "boolean" ||
     typeof policy.dependabot_merge_writer_migration_verified !== "boolean" ||
     typeof policy.legacy_dependabot_auto_merge_drained !== "boolean" ||
@@ -284,6 +335,7 @@ function parsePolicy(policy) {
   return {
     auditActive: policy.ruleset_audit_active,
     credentialsEnabled: policy.dependabot_merge_app_credentials_enabled,
+    environmentEnabled: policy.dependabot_merge_environment_enabled,
     dependabotAppId: parsePositiveInteger(policy.dependabot_merge_app_id),
     enforcement: policy.controlled_main_lifecycle_ruleset_enforcement,
     legacyAutoMergeDrained: policy.legacy_dependabot_auto_merge_drained,
@@ -301,10 +353,21 @@ export function evaluateMainRulesets(
   api,
   { policy = SOURCE_MAIN_LIFECYCLE_BOUNDARY_POLICY } = {},
 ) {
-  if (!isObject(api) || !Array.isArray(api.rulesets)) {
+  if (
+    !isObject(api) ||
+    !Array.isArray(api.rulesets) ||
+    !isObject(api.dependabotMergeEnvironment) ||
+    !Array.isArray(api.dependabotMergeDeploymentBranchPolicies) ||
+    !Array.isArray(api.dependabotMergeEnvironmentSecretNames) ||
+    api.dependabotMergeEnvironmentSecretNames.some(
+      (name) => typeof name !== "string",
+    )
+  ) {
     return {
       status: "malformed",
-      violations: ["API input must contain a rulesets array."],
+      violations: [
+        "API input must contain rulesets plus normalized Dependabot merge Environment, deployment-policy, and secret-name metadata.",
+      ],
     };
   }
   if (api.rulesets.some((ruleset) => !isObject(ruleset))) {
@@ -319,7 +382,7 @@ export function evaluateMainRulesets(
     return {
       status: "malformed",
       violations: [
-        "source policy must pin the repository, inert-or-enabled boundary resource gate, Team, dedicated Dependabot App, exact Contents/write, Pull requests/write, and Workflows/write App permissions, lifecycle enforcement, and boolean credential, exact-head REST writer-migration, legacy auto-merge request absence, and audit states.",
+        "source policy must pin the repository, exact merge-operators Team slug, inert-or-enabled boundary resource gate, Team, dedicated Dependabot App, exact Contents/write, Pull requests/write, and Workflows/write App permissions, lifecycle enforcement, and boolean Environment, credential, exact-head REST writer-migration, legacy auto-merge request absence, and audit states.",
       ],
     };
   }
@@ -342,10 +405,13 @@ export function evaluateMainRulesets(
   }
   if (
     expected.localAgentAppId === undefined ||
+    [GITHUB_ACTIONS_APP_ID, DEPENDABOT_APP_ID].includes(
+      expected.localAgentAppId,
+    ) ||
     expected.localAgentAppId === expected.dependabotAppId
   ) {
     violations.push(
-      "source-pinned local-agent App ID is missing or reuses the dedicated Dependabot merge App ID",
+      "source-pinned local-agent App ID is missing, names the shared GitHub Actions or Dependabot App, or reuses the dedicated Dependabot merge App ID",
     );
   }
   if (
@@ -362,12 +428,13 @@ export function evaluateMainRulesets(
     );
   }
   if (
+    !expected.environmentEnabled ||
     !expected.credentialsEnabled ||
     !expected.writerMigrationVerified ||
     !expected.legacyAutoMergeDrained
   ) {
     violations.push(
-      "live ruleset audit requires enabled dedicated-App credentials, verified exact-head REST writer migration, and absence of every legacy auto-merge request",
+      "live ruleset audit requires enabled dedicated-App credentials, the enabled main-only Environment, verified exact-head REST writer migration, and absence of every legacy auto-merge request",
     );
   }
   if (api.rulesets.length !== 2) {
@@ -393,6 +460,7 @@ export function evaluateMainRulesets(
   } else {
     validateLifecycleRuleset(lifecycle[0], expected, violations);
   }
+  validateDependabotMergeEnvironment(api, violations);
 
   return {
     status: violations.length > 0 ? "drift" : "ok",
@@ -419,7 +487,7 @@ export function runCli(
   const verdict = evaluateMainRulesets(api, { policy });
   if (verdict.status === "ok") {
     stdout.write(
-      "OK: state=ok; core controls are unchanged and the controlled main lifecycle ruleset matches reviewed source.\n",
+      "OK: state=ok; core controls, controlled main lifecycle ruleset, and main-only Dependabot merge Environment match reviewed source.\n",
     );
     return EXIT.ok;
   }

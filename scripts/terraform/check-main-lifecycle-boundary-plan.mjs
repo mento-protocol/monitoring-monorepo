@@ -13,20 +13,39 @@ const DEPENDABOT_MERGE_APP_REPOSITORY_PERMISSIONS = Object.freeze({
 });
 export const MAIN_LIFECYCLE_RULESET_ADDRESS =
   "github_repository_ruleset.controlled_main_lifecycle[0]";
+const DEPENDABOT_MERGE_ENVIRONMENT = "dependabot-merge";
 const DEPENDABOT_MERGE_CREDENTIAL_RESOURCE_SPECS = Object.freeze([
   Object.freeze({
-    address: "github_actions_secret.dependabot_merge_app_id[0]",
+    address: "github_repository_environment.dependabot_merge[0]",
     index: 0,
-    name: "dependabot_merge_app_id",
-    secretName: "DEPENDABOT_MERGE_APP_ID",
-    type: "github_actions_secret",
+    kind: "environment",
+    name: "dependabot_merge",
+    type: "github_repository_environment",
   }),
   Object.freeze({
-    address: "github_actions_secret.dependabot_merge_app_private_key[0]",
+    address:
+      "github_repository_environment_deployment_policy.dependabot_merge_main[0]",
     index: 0,
+    kind: "deployment-policy",
+    name: "dependabot_merge_main",
+    type: "github_repository_environment_deployment_policy",
+  }),
+  Object.freeze({
+    address: "github_actions_environment_secret.dependabot_merge_app_id[0]",
+    index: 0,
+    kind: "secret",
+    name: "dependabot_merge_app_id",
+    secretName: "DEPENDABOT_MERGE_APP_ID",
+    type: "github_actions_environment_secret",
+  }),
+  Object.freeze({
+    address:
+      "github_actions_environment_secret.dependabot_merge_app_private_key[0]",
+    index: 0,
+    kind: "secret",
     name: "dependabot_merge_app_private_key",
     secretName: "DEPENDABOT_MERGE_APP_PRIVATE_KEY",
-    type: "github_actions_secret",
+    type: "github_actions_environment_secret",
   }),
 ]);
 const BROKER_SCAFFOLD_RESOURCE_SPECS = Object.freeze([
@@ -158,7 +177,9 @@ function dependabotCredentialSpec(resourceChange) {
 
 function relatedDependabotCredentialEntry(resourceChange) {
   const reservedNames = new Set(
-    DEPENDABOT_MERGE_CREDENTIAL_RESOURCE_SPECS.map((spec) => spec.secretName),
+    DEPENDABOT_MERGE_CREDENTIAL_RESOURCE_SPECS.map(
+      (spec) => spec.secretName,
+    ).filter(Boolean),
   );
   return (
     DEPENDABOT_MERGE_CREDENTIAL_RESOURCE_SPECS.some(
@@ -186,6 +207,8 @@ function exactIdentity(entry) {
 
 function validateSourcePolicy(policy, errors) {
   const resourcesEnabled = policy?.controlled_main_lifecycle_resources_enabled;
+  const dependabotEnvironmentEnabled =
+    policy?.dependabot_merge_environment_enabled;
   const dependabotCredentialsEnabled =
     policy?.dependabot_merge_app_credentials_enabled;
   const dependabotWriterMigrationVerified =
@@ -207,6 +230,9 @@ function validateSourcePolicy(policy, errors) {
     ) &&
     Number.isSafeInteger(policy?.local_agent_github_app_id) &&
     policy.local_agent_github_app_id > 0 &&
+    ![GITHUB_ACTIONS_APP_ID, DEPENDABOT_APP_ID].includes(
+      policy.local_agent_github_app_id,
+    ) &&
     policy.local_agent_github_app_id !== policy.dependabot_merge_app_id;
   const inertIdentitiesValid =
     policy?.human_merge_operator_team_id === 0 &&
@@ -215,6 +241,7 @@ function validateSourcePolicy(policy, errors) {
   const inertStateValid =
     policy?.controlled_main_lifecycle_ruleset_id === 0 &&
     policy?.controlled_main_lifecycle_ruleset_enforcement === "disabled" &&
+    dependabotEnvironmentEnabled === false &&
     dependabotCredentialsEnabled === false &&
     dependabotWriterMigrationVerified === false &&
     legacyDependabotAutoMergeDrained === false &&
@@ -225,6 +252,7 @@ function validateSourcePolicy(policy, errors) {
   if (
     !isObject(policy) ||
     policy.repository !== "mento-protocol/monitoring-monorepo" ||
+    policy.human_merge_operator_team_slug !== "merge-operators" ||
     typeof resourcesEnabled !== "boolean" ||
     (resourcesEnabled ? !enabledIdentitiesValid : !inertIdentitiesValid) ||
     (!resourcesEnabled && !inertStateValid) ||
@@ -238,6 +266,7 @@ function validateSourcePolicy(policy, errors) {
       policy.controlled_main_lifecycle_ruleset_enforcement,
     ) ||
     typeof policy.ruleset_audit_active !== "boolean" ||
+    typeof dependabotEnvironmentEnabled !== "boolean" ||
     typeof dependabotCredentialsEnabled !== "boolean" ||
     typeof dependabotWriterMigrationVerified !== "boolean" ||
     typeof legacyDependabotAutoMergeDrained !== "boolean" ||
@@ -251,7 +280,7 @@ function validateSourcePolicy(policy, errors) {
       : brokerImpersonator !== "")
   ) {
     errors.push(
-      "source policy must select either the exact inert zero-sentinel state with boundary resources disabled or the enabled state with approved positive Team, dedicated Dependabot merge App, and distinct local-agent App IDs; it must also pin the repository, exact Contents/write, Pull requests/write, and Workflows/write dedicated-App permissions, non-negative managed lifecycle ruleset ID, valid enforcement state, boolean credential, exact-head REST writer-migration, legacy auto-merge request absence, audit, broker-scaffold, and recovery gates, and one service-account principal only while the scaffold gate is enabled",
+      "source policy must select either the exact inert zero-sentinel state with boundary resources disabled or the enabled state with approved positive Team, dedicated Dependabot merge App, and distinct local-agent App IDs; it must also pin the repository, exact merge-operators Team slug, exact Contents/write, Pull requests/write, and Workflows/write dedicated-App permissions, non-negative managed lifecycle ruleset ID, valid enforcement state, boolean Environment, credential, exact-head REST writer-migration, legacy auto-merge request absence, audit, broker-scaffold, and recovery gates, and one service-account principal only while the scaffold gate is enabled",
     );
     return undefined;
   }
@@ -267,6 +296,7 @@ function validateSourcePolicy(policy, errors) {
     brokerScaffoldEnabled,
     dependabotAppId,
     dependabotCredentialsEnabled,
+    dependabotEnvironmentEnabled,
     dependabotWriterMigrationVerified,
     enforcement,
     legacyDependabotAutoMergeDrained,
@@ -282,17 +312,26 @@ function validateSourcePolicy(policy, errors) {
     rulesetId === 0 &&
     (enforcement !== "disabled" ||
       auditActive ||
+      dependabotEnvironmentEnabled ||
       dependabotCredentialsEnabled ||
       dependabotWriterMigrationVerified ||
       legacyDependabotAutoMergeDrained)
   ) {
     errors.push(
-      "initial lifecycle ruleset creation requires managed ID 0, disabled enforcement, disabled Dependabot credentials, no migration or legacy-drain claim, and an inactive audit",
+      "initial lifecycle ruleset creation requires managed ID 0, disabled enforcement, disabled Dependabot Environment and credentials, no migration or legacy-drain claim, and an inactive audit",
     );
   }
-  if (dependabotCredentialsEnabled && rulesetId <= 0) {
+  if (dependabotEnvironmentEnabled && rulesetId <= 0) {
     errors.push(
-      "Dependabot merge App credential provisioning requires a source-pinned managed lifecycle ruleset ID",
+      "Dependabot merge Environment provisioning requires a source-pinned managed lifecycle ruleset ID",
+    );
+  }
+  if (
+    dependabotCredentialsEnabled &&
+    (!dependabotEnvironmentEnabled || rulesetId <= 0)
+  ) {
+    errors.push(
+      "Dependabot merge App credential provisioning requires the enabled main-only Environment and a source-pinned managed lifecycle ruleset ID",
     );
   }
   if (dependabotWriterMigrationVerified && !dependabotCredentialsEnabled) {
@@ -352,10 +391,102 @@ function exactDependabotCredentialIdentity(entry, spec) {
   );
 }
 
-function validateDependabotCredentialShape(value, spec, errors) {
+function exactDependabotEnvironmentShape(value) {
+  return (
+    isObject(value) &&
+    value.repository === "monitoring-monorepo" &&
+    value.environment === DEPENDABOT_MERGE_ENVIRONMENT &&
+    value.can_admins_bypass === false &&
+    Array.isArray(value.deployment_branch_policy) &&
+    value.deployment_branch_policy.length === 1 &&
+    value.deployment_branch_policy[0]?.protected_branches === false &&
+    value.deployment_branch_policy[0]?.custom_branch_policies === true
+  );
+}
+
+function validateDependabotEnvironmentShape(value, errors) {
+  if (!exactDependabotEnvironmentShape(value)) {
+    errors.push(
+      "the Dependabot merge Environment must disable admin bypass and use one explicit custom deployment-branch policy",
+    );
+  }
+}
+
+function validateDependabotEnvironmentRepairBeforeShape(value, errors) {
   if (
     !isObject(value) ||
     value.repository !== "monitoring-monorepo" ||
+    value.environment !== DEPENDABOT_MERGE_ENVIRONMENT ||
+    typeof value.can_admins_bypass !== "boolean" ||
+    !Array.isArray(value.deployment_branch_policy) ||
+    !(
+      value.deployment_branch_policy.length === 0 ||
+      (value.deployment_branch_policy.length === 1 &&
+        typeof value.deployment_branch_policy[0]?.protected_branches ===
+          "boolean" &&
+        typeof value.deployment_branch_policy[0]?.custom_branch_policies ===
+          "boolean")
+    )
+  ) {
+    errors.push(
+      "a Dependabot merge Environment repair requires the exact repository and name plus a bounded known prior policy shape or the provider's empty no-policy list",
+    );
+  } else if (exactDependabotEnvironmentShape(value)) {
+    errors.push(
+      "a Dependabot merge Environment repair must strengthen at least one unsafe Environment control",
+    );
+  }
+}
+
+function exactDependabotDeploymentPolicyShape(value) {
+  return (
+    isObject(value) &&
+    value.repository === "monitoring-monorepo" &&
+    value.environment === DEPENDABOT_MERGE_ENVIRONMENT &&
+    value.branch_pattern === "main"
+  );
+}
+
+function validateDependabotDeploymentPolicyShape(value, errors) {
+  if (!exactDependabotDeploymentPolicyShape(value)) {
+    errors.push(
+      "the Dependabot merge Environment deployment policy must allow only the exact main branch",
+    );
+  }
+}
+
+function validateDependabotDeploymentPolicyRepairBeforeShape(value, errors) {
+  if (
+    !isObject(value) ||
+    value.repository !== "monitoring-monorepo" ||
+    value.environment !== DEPENDABOT_MERGE_ENVIRONMENT ||
+    typeof value.branch_pattern !== "string" ||
+    value.branch_pattern.length === 0 ||
+    value.branch_pattern.length > 255
+  ) {
+    errors.push(
+      "a Dependabot merge deployment-policy repair requires a bounded known prior branch pattern with the exact repository and Environment",
+    );
+  } else if (exactDependabotDeploymentPolicyShape(value)) {
+    errors.push(
+      "a Dependabot merge deployment-policy repair must strengthen an unsafe branch pattern to exact main",
+    );
+  }
+}
+
+function validateDependabotBoundaryRepairBeforeShape(value, spec, errors) {
+  if (spec.kind === "environment") {
+    validateDependabotEnvironmentRepairBeforeShape(value, errors);
+    return;
+  }
+  validateDependabotDeploymentPolicyRepairBeforeShape(value, errors);
+}
+
+function validateDependabotSecretShape(value, spec, errors) {
+  if (
+    !isObject(value) ||
+    value.repository !== "monitoring-monorepo" ||
+    value.environment !== DEPENDABOT_MERGE_ENVIRONMENT ||
     value.secret_name !== spec.secretName ||
     typeof value.key_id !== "string" ||
     !/^[A-Za-z0-9_-]{1,256}$/u.test(value.key_id) ||
@@ -365,9 +496,21 @@ function validateDependabotCredentialShape(value, spec, errors) {
     nonEmpty(value.value)
   ) {
     errors.push(
-      "Dependabot merge App credentials must use only the two exact repository Actions secrets with one explicit public-key ID and pre-encrypted values",
+      "Dependabot merge App credentials must use only the two exact dependabot-merge Environment secrets with one explicit Environment public-key ID and pre-encrypted values",
     );
   }
+}
+
+function validateDependabotCredentialShape(value, spec, errors) {
+  if (spec.kind === "environment") {
+    validateDependabotEnvironmentShape(value, errors);
+    return;
+  }
+  if (spec.kind === "deployment-policy") {
+    validateDependabotDeploymentPolicyShape(value, errors);
+    return;
+  }
+  validateDependabotSecretShape(value, spec, errors);
 }
 
 function validateDependabotMergeCredentials(
@@ -379,17 +522,22 @@ function validateDependabotMergeCredentials(
   const related = plan.resource_changes.filter(
     relatedDependabotCredentialEntry,
   );
-  if (!expected?.dependabotCredentialsEnabled) {
+  if (!expected?.dependabotEnvironmentEnabled) {
     if (related.length > 0) {
       errors.push(
-        "a disabled Dependabot credential source gate forbids both dedicated-App repository Actions secret resources",
+        "a disabled Dependabot Environment source gate forbids the dedicated main-only Environment, deployment policy, and App secret resources",
       );
     }
     return;
   }
-  if (related.length !== DEPENDABOT_MERGE_CREDENTIAL_RESOURCE_SPECS.length) {
+  const expectedSpecs = DEPENDABOT_MERGE_CREDENTIAL_RESOURCE_SPECS.filter(
+    (spec) => expected.dependabotCredentialsEnabled || spec.kind !== "secret",
+  );
+  if (related.length !== expectedSpecs.length) {
     errors.push(
-      "an enabled Dependabot credential source gate requires exactly the App ID and private-key repository Actions secrets",
+      expected.dependabotCredentialsEnabled
+        ? "an enabled Dependabot credential source gate requires exactly the main-only Environment, its main deployment policy, and the App ID and private-key Environment secrets"
+        : "an enabled Dependabot Environment source gate requires exactly the Environment and its main deployment policy without App secrets",
     );
     return;
   }
@@ -416,15 +564,28 @@ function validateDependabotMergeCredentials(
       !sameActions(actions, ["update"])
     ) {
       errors.push(
-        "Dependabot merge App credentials may only be created, unchanged, or updated in place",
+        "Dependabot merge Environment and App credentials may only be created, unchanged, or updated in place",
+      );
+    }
+    if (containsTrue(entry?.change?.after_unknown ?? {})) {
+      errors.push(
+        "Dependabot merge Environment and App credential managed fields must be known before apply",
       );
     }
     validateDependabotCredentialShape(entry?.change?.after, spec, errors);
     if (!sameActions(actions, ["create"])) {
-      validateDependabotCredentialShape(entry?.change?.before, spec, errors);
+      if (sameActions(actions, ["update"]) && spec.kind !== "secret") {
+        validateDependabotBoundaryRepairBeforeShape(
+          entry?.change?.before,
+          spec,
+          errors,
+        );
+      } else {
+        validateDependabotCredentialShape(entry?.change?.before, spec, errors);
+      }
     } else if (entry?.change?.before !== null) {
       errors.push(
-        "a Dependabot merge App credential create must have no prior value",
+        "a Dependabot merge Environment or credential create must have no prior value",
       );
     }
     if (
@@ -432,34 +593,58 @@ function validateDependabotMergeCredentials(
       !isDeepStrictEqual(entry?.change?.before, entry?.change?.after)
     ) {
       errors.push(
-        "a Dependabot merge App credential no-op must preserve its complete resource shape",
+        "a Dependabot merge Environment or credential no-op must preserve its complete resource shape",
       );
     }
   }
+  if (
+    expectedSpecs.some((spec) => !seen.has(spec.name)) ||
+    [...seen].some((name) => !expectedSpecs.some((spec) => spec.name === name))
+  ) {
+    errors.push(
+      "Dependabot merge Environment and credential resources must match the exact resources enabled for this phase",
+    );
+  }
 
+  const secretEntries = related.filter(
+    (entry) => dependabotCredentialSpec(entry)?.kind === "secret",
+  );
+  const boundaryEntries = related.filter(
+    (entry) => dependabotCredentialSpec(entry)?.kind !== "secret",
+  );
   const creates = related.filter((entry) =>
     sameActions(entry?.change?.actions, ["create"]),
   );
-  const updates = related.filter((entry) =>
+  const secretCreates = secretEntries.filter((entry) =>
+    sameActions(entry?.change?.actions, ["create"]),
+  );
+  const secretUpdates = secretEntries.filter((entry) =>
+    sameActions(entry?.change?.actions, ["update"]),
+  );
+  const boundaryUpdates = boundaryEntries.filter((entry) =>
     sameActions(entry?.change?.actions, ["update"]),
   );
   const afterKeyIds = new Set(
-    related.map((entry) => entry?.change?.after?.key_id),
+    secretEntries.map((entry) => entry?.change?.after?.key_id),
   );
-  if (afterKeyIds.size !== 1) {
+  if (expected.dependabotCredentialsEnabled && afterKeyIds.size !== 1) {
     errors.push(
-      "both Dependabot merge App credential resources must use the same repository Actions public-key ID",
+      "both Dependabot merge App credential resources must use the same Environment Actions public-key ID",
     );
   }
-  const existing = related.filter(
+  const existing = secretEntries.filter(
     (entry) => !sameActions(entry?.change?.actions, ["create"]),
   );
   const beforeKeyIds = new Set(
     existing.map((entry) => entry?.change?.before?.key_id),
   );
-  if (existing.length > 0 && beforeKeyIds.size !== 1) {
+  if (
+    expected.dependabotCredentialsEnabled &&
+    existing.length > 0 &&
+    beforeKeyIds.size !== 1
+  ) {
     errors.push(
-      "existing Dependabot merge App credential resources must share one prior repository Actions public-key ID",
+      "existing Dependabot merge App credential resources must share one prior Environment Actions public-key ID",
     );
   }
   const outsideCredentials = nonNoOpEntries(plan).filter(
@@ -480,19 +665,22 @@ function validateDependabotMergeCredentials(
     const publicKeyRecovery =
       (initialProvisioning || activeRecovery) &&
       creates.length === 1 &&
-      updates.length === 1;
+      secretCreates.length === 1 &&
+      secretUpdates.length === 1 &&
+      boundaryUpdates.length === 0;
     if (
-      (updates.length > 0 && !publicKeyRecovery) ||
+      ((secretUpdates.length > 0 || boundaryUpdates.length > 0) &&
+        !publicKeyRecovery) ||
       (!initialProvisioning && !activeRecovery) ||
       !sameActions(rulesetEntry?.change?.actions, ["no-op"]) ||
       outsideCredentials.length > 0
     ) {
       errors.push(
-        "Dependabot credential creation requires either the pinned disabled pre-migration phase or coherent active-state recovery, an unchanged ruleset, and no unrelated change",
+        "Dependabot Environment or credential creation requires either the pinned disabled pre-migration phase or coherent active-state recovery, an unchanged ruleset, and no unrelated change",
       );
     }
     if (publicKeyRecovery) {
-      const survivingUpdate = updates[0];
+      const survivingUpdate = secretUpdates[0];
       if (
         survivingUpdate?.change?.before?.key_id ===
           survivingUpdate?.change?.after?.key_id ||
@@ -504,9 +692,19 @@ function validateDependabotMergeCredentials(
         );
       }
     }
-  } else if (updates.length > 0) {
+  } else if (boundaryUpdates.length > 0) {
     if (
-      ![1, 2].includes(updates.length) ||
+      secretUpdates.length > 0 ||
+      !sameActions(rulesetEntry?.change?.actions, ["no-op"]) ||
+      outsideCredentials.length > 0
+    ) {
+      errors.push(
+        "a Dependabot Environment repair may update only its exact main-only boundary beside the unchanged ruleset",
+      );
+    }
+  } else if (secretUpdates.length > 0) {
+    if (
+      ![1, 2].includes(secretUpdates.length) ||
       !sameActions(rulesetEntry?.change?.actions, ["no-op"]) ||
       outsideCredentials.length > 0
     ) {
@@ -516,8 +714,8 @@ function validateDependabotMergeCredentials(
     }
     const oldKeyId = existing[0]?.change?.before?.key_id;
     const newKeyId = existing[0]?.change?.after?.key_id;
-    if (updates.length === 1) {
-      const update = updates[0];
+    if (secretUpdates.length === 1) {
+      const update = secretUpdates[0];
       if (
         update?.change?.before?.key_id !== update?.change?.after?.key_id ||
         update?.change?.before?.value_encrypted ===
@@ -528,9 +726,9 @@ function validateDependabotMergeCredentials(
         );
       }
     } else if (
-      updates.length === 2 &&
+      secretUpdates.length === 2 &&
       (oldKeyId === newKeyId ||
-        updates.some(
+        secretUpdates.some(
           (entry) =>
             entry?.change?.before?.key_id !== oldKeyId ||
             entry?.change?.after?.key_id !== newKeyId ||
@@ -539,7 +737,7 @@ function validateDependabotMergeCredentials(
         ))
     ) {
       errors.push(
-        "a repository Actions public-key rotation must update both credential key IDs and both ciphertexts together",
+        "an Environment Actions public-key rotation must update both credential key IDs and both ciphertexts together",
       );
     }
   }
@@ -1030,17 +1228,21 @@ function rejectMutableTeamMirror(plan, errors) {
 
 function rejectDependabotCredentialMirrors(plan, errors) {
   const reservedNames = new Set(
-    DEPENDABOT_MERGE_CREDENTIAL_RESOURCE_SPECS.map((spec) => spec.secretName),
+    DEPENDABOT_MERGE_CREDENTIAL_RESOURCE_SPECS.map(
+      (spec) => spec.secretName,
+    ).filter(Boolean),
   );
   const mirrors = plan.resource_changes.filter((entry) => {
     const secretName = entry?.change?.after?.secret_name;
     return (
-      reservedNames.has(secretName) && entry?.type !== "github_actions_secret"
+      reservedNames.has(secretName) &&
+      (entry?.type !== "github_actions_environment_secret" ||
+        entry?.change?.after?.environment !== DEPENDABOT_MERGE_ENVIRONMENT)
     );
   });
   if (mirrors.length > 0) {
     errors.push(
-      "dedicated Dependabot merge App credentials must exist only in their exact repository Actions secret resources and must not be mirrored into Environment, Dependabot, Codespaces, or organization secret stores",
+      "dedicated Dependabot merge App credentials must exist only in their exact dependabot-merge Environment secret resources and must not be mirrored into repository, Dependabot, Codespaces, another Environment, or organization secret stores",
     );
   }
 }
@@ -1053,9 +1255,22 @@ export function validateMainLifecycleBoundaryPlan(
   } = {},
 ) {
   const errors = [];
-  if (recoveryTargetOnly) return errors;
   if (!isObject(plan) || !Array.isArray(plan.resource_changes)) {
     return ["Terraform plan JSON must include resource_changes"];
+  }
+  if (recoveryTargetOnly) {
+    const boundaryEntries = plan.resource_changes.filter(
+      (entry) =>
+        relatedRulesetEntry(entry) ||
+        relatedDependabotCredentialEntry(entry) ||
+        relatedBrokerScaffoldEntry(entry),
+    );
+    if (boundaryEntries.length > 0) {
+      errors.push(
+        "the Peg-policy recovery-only plan must not include controlled lifecycle ruleset, dedicated-App credential, or local-agent broker resources",
+      );
+    }
+    return errors;
   }
   const expected = validateSourcePolicy(policy, errors);
   validateGithubProvider(plan, errors);

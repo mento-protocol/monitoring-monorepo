@@ -1,6 +1,7 @@
 {
   "repository": "mento-protocol/monitoring-monorepo",
   "controlled_main_lifecycle_resources_enabled": false,
+  "human_merge_operator_team_slug": "merge-operators",
   "human_merge_operator_team_id": 0,
   "dependabot_merge_app_id": 0,
   "dependabot_merge_app_repository_permissions": {
@@ -11,6 +12,7 @@
   "local_agent_github_app_id": 0,
   "controlled_main_lifecycle_ruleset_id": 0,
   "controlled_main_lifecycle_ruleset_enforcement": "disabled",
+  "dependabot_merge_environment_enabled": false,
   "dependabot_merge_app_credentials_enabled": false,
   "dependabot_merge_writer_migration_verified": false,
   "legacy_dependabot_auto_merge_drained": false,

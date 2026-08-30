@@ -871,7 +871,7 @@ function normalizeRun(value) {
   }
   return {
     id: responseId(run.id),
-    name: responseText(run.name, 256),
+    name: nullableResponseText(run.name, 256),
     event: responseText(run.event, 64),
     status: responseText(run.status, 64),
     conclusion: nullableResponseText(run.conclusion, 64),

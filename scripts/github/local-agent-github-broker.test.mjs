@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { generateKeyPairSync, verify } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -77,6 +78,24 @@ const BASE_ENV = Object.freeze({
   MENTO_LOCAL_AGENT_GITHUB_APP_ID: String(APP_ID),
   MENTO_LOCAL_AGENT_GITHUB_APP_INSTALLATION_ID: String(INSTALLATION_ID),
 });
+
+function packageEntryEnvironment() {
+  const environment = {};
+  for (const name of [
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "PATH",
+    "PNPM_HOME",
+    "TMPDIR",
+  ]) {
+    if (process.env[name] !== undefined) environment[name] = process.env[name];
+  }
+  environment.MENTO_LOCAL_AGENT_GITHUB_APP_ID = String(APP_ID);
+  environment.MENTO_LOCAL_AGENT_GITHUB_APP_INSTALLATION_ID =
+    String(INSTALLATION_ID);
+  return environment;
+}
 
 function clientOptions(
   profile = PROFILE.READ,
@@ -415,6 +434,22 @@ test("the policy accepts only bounded positional parameters", () => {
   for (const [profile, operation, args] of rejected) {
     assert.throws(() => parseStructuredOperation(profile, operation, args));
   }
+});
+
+test("the pnpm package entry forwards profile flags without an extra separator", () => {
+  const result = spawnSync(
+    "pnpm",
+    ["github:agent", "--profile", PROFILE.READ, "--", "unsupported-operation"],
+    {
+      cwd: new URL("../..", import.meta.url),
+      encoding: "utf8",
+      env: packageEntryEnvironment(),
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /unknown structured GitHub operation/u);
+  assert.doesNotMatch(result.stderr, /one fixed --profile is required/u);
 });
 
 test("every operation maps to one fixed selected-repository REST request", () => {
@@ -903,6 +938,21 @@ test("every active operation returns only its bounded normalized schema", async 
       assert.equal(call.options.headers.HTTPS_PROXY, undefined);
       assert.equal(call.options.headers.LD_PRELOAD, undefined);
     }
+  }
+});
+
+test("workflow run reads preserve a null provider name", async () => {
+  for (const [operation, args, payload] of [
+    ["run-view", ["11"], runFixture({ name: null })],
+    ["run-list", ["5"], { workflow_runs: [runFixture({ name: null })] }],
+  ]) {
+    const parameters = parseStructuredOperation(PROFILE.READ, operation, args);
+    const result = await executeGithubOperation(
+      { operation, parameters, token: INSTALLATION_TOKEN },
+      { fetchImpl: async () => jsonResponse(payload) },
+    );
+    const normalized = Array.isArray(result) ? result[0] : result;
+    assert.equal(normalized.name, null, operation);
   }
 });
 

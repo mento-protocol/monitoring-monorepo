@@ -21,6 +21,7 @@ const BROKER_IMPERSONATOR =
 const POLICY_BASE = Object.freeze({
   repository: "mento-protocol/monitoring-monorepo",
   controlled_main_lifecycle_resources_enabled: true,
+  human_merge_operator_team_slug: "merge-operators",
   human_merge_operator_team_id: TEAM_ID,
   dependabot_merge_app_id: DEPENDABOT_MERGE_APP_ID,
   dependabot_merge_app_repository_permissions: {
@@ -31,6 +32,7 @@ const POLICY_BASE = Object.freeze({
   local_agent_github_app_id: LOCAL_AGENT_APP_ID,
   controlled_main_lifecycle_ruleset_id: MANAGED_RULESET_ID,
   controlled_main_lifecycle_ruleset_enforcement: "active",
+  dependabot_merge_environment_enabled: true,
   dependabot_merge_app_credentials_enabled: true,
   dependabot_merge_writer_migration_verified: true,
   legacy_dependabot_auto_merge_drained: true,
@@ -43,6 +45,7 @@ const BOOTSTRAP_POLICY = Object.freeze({
   ...POLICY_BASE,
   controlled_main_lifecycle_ruleset_id: 0,
   controlled_main_lifecycle_ruleset_enforcement: "disabled",
+  dependabot_merge_environment_enabled: false,
   dependabot_merge_app_credentials_enabled: false,
   dependabot_merge_writer_migration_verified: false,
   legacy_dependabot_auto_merge_drained: false,
@@ -57,6 +60,8 @@ const INERT_POLICY = Object.freeze({
 const SCAFFOLD_POLICY = Object.freeze({
   ...POLICY_BASE,
   controlled_main_lifecycle_ruleset_enforcement: "disabled",
+  dependabot_merge_writer_migration_verified: false,
+  legacy_dependabot_auto_merge_drained: false,
   local_agent_github_broker_scaffold_enabled: true,
   local_agent_github_broker_impersonator: BROKER_IMPERSONATOR,
 });
@@ -66,9 +71,18 @@ const CREDENTIAL_POLICY = Object.freeze({
   dependabot_merge_writer_migration_verified: false,
   legacy_dependabot_auto_merge_drained: false,
 });
+const ENVIRONMENT_POLICY = Object.freeze({
+  ...CREDENTIAL_POLICY,
+  dependabot_merge_app_credentials_enabled: false,
+});
 const SCAFFOLD_RECOVERY_POLICY = Object.freeze({
   ...SCAFFOLD_POLICY,
   local_agent_github_broker_partial_recovery_enabled: true,
+});
+const COMPLETED_DEPENDABOT_SCAFFOLD_RECOVERY_POLICY = Object.freeze({
+  ...SCAFFOLD_RECOVERY_POLICY,
+  dependabot_merge_writer_migration_verified: true,
+  legacy_dependabot_auto_merge_drained: true,
 });
 
 function rulesetAfter({
@@ -147,30 +161,70 @@ function rulesetEntry({
 function dependabotCredentialEntries({ actions = ["no-op"] } = {}) {
   return [
     {
-      address: "github_actions_secret.dependabot_merge_app_id[0]",
+      address: "github_actions_environment_secret.dependabot_merge_app_id[0]",
       index: 0,
       mode: "managed",
       name: "dependabot_merge_app_id",
+      kind: "secret",
       secretName: "DEPENDABOT_MERGE_APP_ID",
-      type: "github_actions_secret",
+      type: "github_actions_environment_secret",
     },
     {
-      address: "github_actions_secret.dependabot_merge_app_private_key[0]",
+      address:
+        "github_actions_environment_secret.dependabot_merge_app_private_key[0]",
       index: 0,
       mode: "managed",
       name: "dependabot_merge_app_private_key",
+      kind: "secret",
       secretName: "DEPENDABOT_MERGE_APP_PRIVATE_KEY",
-      type: "github_actions_secret",
+      type: "github_actions_environment_secret",
     },
-  ].map(({ secretName, ...entry }) => {
-    const value = {
-      key_id: ACTIONS_PUBLIC_KEY_ID,
-      value_encrypted: Buffer.from(`encrypted-${secretName}`).toString(
-        "base64",
-      ),
-      repository: "monitoring-monorepo",
-      secret_name: secretName,
-    };
+    {
+      address: "github_repository_environment.dependabot_merge[0]",
+      index: 0,
+      kind: "environment",
+      mode: "managed",
+      name: "dependabot_merge",
+      type: "github_repository_environment",
+    },
+    {
+      address:
+        "github_repository_environment_deployment_policy.dependabot_merge_main[0]",
+      index: 0,
+      kind: "deployment-policy",
+      mode: "managed",
+      name: "dependabot_merge_main",
+      type: "github_repository_environment_deployment_policy",
+    },
+  ].map(({ kind, secretName, ...entry }) => {
+    const value =
+      kind === "environment"
+        ? {
+            can_admins_bypass: false,
+            deployment_branch_policy: [
+              {
+                custom_branch_policies: true,
+                protected_branches: false,
+              },
+            ],
+            environment: "dependabot-merge",
+            repository: "monitoring-monorepo",
+          }
+        : kind === "deployment-policy"
+          ? {
+              branch_pattern: "main",
+              environment: "dependabot-merge",
+              repository: "monitoring-monorepo",
+            }
+          : {
+              environment: "dependabot-merge",
+              key_id: ACTIONS_PUBLIC_KEY_ID,
+              value_encrypted: Buffer.from(`encrypted-${secretName}`).toString(
+                "base64",
+              ),
+              repository: "monitoring-monorepo",
+              secret_name: secretName,
+            };
     return {
       ...entry,
       change: {
@@ -265,8 +319,13 @@ function expectPass(candidate, policy = POLICY_BASE, options = {}) {
   assert.deepEqual(errorsFor(candidate, policy, options), []);
 }
 
-function expectFailure(candidate, expected, policy = POLICY_BASE) {
-  const errors = errorsFor(candidate, policy);
+function expectFailure(
+  candidate,
+  expected,
+  policy = POLICY_BASE,
+  options = {},
+) {
+  const errors = errorsFor(candidate, policy, options);
   assert(
     errors.some((error) => error.includes(expected)),
     `expected ${JSON.stringify(errors)} to include ${JSON.stringify(expected)}`,
@@ -375,9 +434,24 @@ const initialCreate = rulesetEntry({
 initialCreate.change.after_unknown = { ruleset_id: true };
 expectPass(plan([initialCreate]), BOOTSTRAP_POLICY);
 
-// The dedicated App credential phase writes ciphertext only to the repository
-// Actions secret store while the managed ruleset is pinned and disabled.
+// The dedicated App credential phase creates and protects the main-only
+// Environment before it writes ciphertext while the ruleset stays disabled.
 const credentialRuleset = rulesetEntry({ enforcement: "disabled" });
+const environmentCreates = dependabotCredentialEntries({
+  actions: ["create"],
+}).slice(2);
+expectPass(
+  plan([credentialRuleset, ...environmentCreates]),
+  ENVIRONMENT_POLICY,
+);
+expectFailure(
+  plan([
+    credentialRuleset,
+    ...dependabotCredentialEntries({ actions: ["create"] }),
+  ]),
+  "without App secrets",
+  ENVIRONMENT_POLICY,
+);
 const credentialCreates = dependabotCredentialEntries({ actions: ["create"] });
 expectPass(plan([credentialRuleset, ...credentialCreates]), CREDENTIAL_POLICY);
 const partialCredentialRecovery = dependabotCredentialEntries();
@@ -439,7 +513,7 @@ expectFailure(
 );
 expectFailure(
   plan([credentialRuleset, credentialCreates[0]]),
-  "requires exactly the App ID and private-key",
+  "requires exactly the main-only Environment",
   CREDENTIAL_POLICY,
 );
 const plaintextCredential = dependabotCredentialEntries();
@@ -471,7 +545,7 @@ credentialRotation[1].change.after.value_encrypted =
   Buffer.from("rotated-ciphertext").toString("base64");
 expectPass(plan([rulesetEntry(), ...credentialRotation]), POLICY_BASE);
 const publicKeyRotation = dependabotCredentialEntries();
-for (const [index, entry] of publicKeyRotation.entries()) {
+for (const [index, entry] of publicKeyRotation.slice(0, 2).entries()) {
   entry.change.actions = ["update"];
   entry.change.after.key_id = "actions-key-new";
   entry.change.after.value_encrypted = Buffer.from(
@@ -486,7 +560,7 @@ partialPublicKeyRotation[1].change.after.value_encrypted =
   Buffer.from("new-key-ciphertext").toString("base64");
 expectFailure(
   plan([rulesetEntry(), ...partialPublicKeyRotation]),
-  "same repository Actions public-key ID",
+  "same Environment Actions public-key ID",
   POLICY_BASE,
 );
 const unrelatedCredentialRotationChange = {
@@ -506,10 +580,10 @@ expectFailure(
   POLICY_BASE,
 );
 const dependabotSecretMirror = {
-  address: "github_dependabot_secret.dependabot_merge_app_private_key",
+  address: "github_actions_secret.dependabot_merge_app_private_key",
   mode: "managed",
   name: "dependabot_merge_app_private_key",
-  type: "github_dependabot_secret",
+  type: "github_actions_secret",
   change: {
     actions: ["create"],
     before: null,
@@ -527,6 +601,112 @@ expectFailure(
     dependabotSecretMirror,
   ]),
   "must not be mirrored",
+);
+
+for (const [mutate, expected] of [
+  [
+    (entries) => (entries[2].change.after.can_admins_bypass = true),
+    "disable admin bypass",
+  ],
+  [
+    (entries) =>
+      (entries[2].change.after.deployment_branch_policy[0].protected_branches = true),
+    "explicit custom deployment-branch policy",
+  ],
+  [
+    (entries) =>
+      (entries[2].change.after.deployment_branch_policy[0].custom_branch_policies = false),
+    "explicit custom deployment-branch policy",
+  ],
+  [
+    (entries) => (entries[3].change.after.branch_pattern = "*"),
+    "allow only the exact main branch",
+  ],
+  [
+    (entries) => (entries[0].change.after.environment = "unprotected"),
+    "two exact dependabot-merge Environment secrets",
+  ],
+]) {
+  const candidate = dependabotCredentialEntries();
+  mutate(candidate);
+  expectFailure(plan([rulesetEntry(), ...candidate]), expected);
+}
+
+for (const index of [0, 1, 2, 3]) {
+  const unknownCredentialField = dependabotCredentialEntries();
+  unknownCredentialField[index].change.after_unknown = { managed: true };
+  expectFailure(
+    plan([rulesetEntry(), ...unknownCredentialField]),
+    "managed fields must be known before apply",
+  );
+}
+
+const environmentStrengtheningRepair = dependabotCredentialEntries();
+environmentStrengtheningRepair[2].change.actions = ["update"];
+environmentStrengtheningRepair[2].change.before.can_admins_bypass = true;
+environmentStrengtheningRepair[2].change.before.deployment_branch_policy = [
+  { custom_branch_policies: false, protected_branches: true },
+];
+expectPass(
+  plan([rulesetEntry(), ...environmentStrengtheningRepair]),
+  POLICY_BASE,
+);
+
+const emptyPolicyStrengtheningRepair = dependabotCredentialEntries();
+emptyPolicyStrengtheningRepair[2].change.actions = ["update"];
+emptyPolicyStrengtheningRepair[2].change.before.deployment_branch_policy = [];
+expectPass(
+  plan([rulesetEntry(), ...emptyPolicyStrengtheningRepair]),
+  POLICY_BASE,
+);
+
+const deploymentPolicyStrengtheningRepair = dependabotCredentialEntries();
+deploymentPolicyStrengtheningRepair[3].change.actions = ["update"];
+deploymentPolicyStrengtheningRepair[3].change.before.branch_pattern = "*";
+expectPass(
+  plan([rulesetEntry(), ...deploymentPolicyStrengtheningRepair]),
+  POLICY_BASE,
+);
+
+const malformedEnvironmentRepair = structuredClone(
+  environmentStrengtheningRepair,
+);
+malformedEnvironmentRepair[2].change.before.repository = "attacker-repo";
+expectFailure(
+  plan([rulesetEntry(), ...malformedEnvironmentRepair]),
+  "bounded known prior policy shape",
+);
+const nullPolicyEnvironmentRepair = structuredClone(
+  environmentStrengtheningRepair,
+);
+nullPolicyEnvironmentRepair[2].change.before.deployment_branch_policy = null;
+expectFailure(
+  plan([rulesetEntry(), ...nullPolicyEnvironmentRepair]),
+  "bounded known prior policy shape",
+);
+
+const wideningEnvironmentUpdate = dependabotCredentialEntries();
+wideningEnvironmentUpdate[2].change.actions = ["update"];
+wideningEnvironmentUpdate[2].change.after.can_admins_bypass = true;
+expectFailure(
+  plan([rulesetEntry(), ...wideningEnvironmentUpdate]),
+  "must disable admin bypass",
+);
+
+const destructiveEnvironmentChange = dependabotCredentialEntries();
+destructiveEnvironmentChange[2].change.actions = ["delete"];
+expectFailure(
+  plan([rulesetEntry(), ...destructiveEnvironmentChange]),
+  "only be created, unchanged, or updated in place",
+);
+
+expectFailure(
+  plan([
+    rulesetEntry(),
+    ...environmentStrengtheningRepair,
+    unrelatedCredentialRotationChange,
+  ]),
+  "may update only its exact main-only boundary",
 );
 
 for (const policy of [
@@ -589,6 +769,27 @@ expectFailure(
 );
 
 expectPass(plan([]), POLICY_BASE, { recoveryTargetOnly: true });
+expectPass(plan([inertUnrelatedEntry]), POLICY_BASE, {
+  recoveryTargetOnly: true,
+});
+expectFailure(
+  null,
+  "Terraform plan JSON must include resource_changes",
+  POLICY_BASE,
+  { recoveryTargetOnly: true },
+);
+for (const entry of [
+  rulesetEntry(),
+  dependabotCredentialEntries()[0],
+  brokerScaffoldEntries()[0],
+]) {
+  expectFailure(
+    plan([entry]),
+    "Peg-policy recovery-only plan must not include",
+    POLICY_BASE,
+    { recoveryTargetOnly: true },
+  );
+}
 
 for (const actions of [
   ["delete"],
@@ -688,7 +889,7 @@ expectFailure(
   BOOTSTRAP_POLICY,
 );
 
-// Phase 4 requires one reviewed source transition and one coherent creation
+// Phase 4B requires one reviewed source transition and one coherent creation
 // plan. The ruleset is already pinned, disabled, and unchanged.
 const phaseFourRuleset = rulesetEntry({ enforcement: "disabled" });
 const phaseFourScaffold = brokerScaffoldEntries({ actions: ["create"] });
@@ -729,6 +930,14 @@ expectPass(
     ...partialScaffold,
   ]),
   SCAFFOLD_RECOVERY_POLICY,
+);
+expectPass(
+  plan([
+    phaseFourRuleset,
+    ...dependabotCredentialEntries(),
+    ...partialScaffold,
+  ]),
+  COMPLETED_DEPENDABOT_SCAFFOLD_RECOVERY_POLICY,
 );
 expectPass(
   plan([
@@ -792,6 +1001,14 @@ expectFailure(
     ...SCAFFOLD_RECOVERY_POLICY,
     local_agent_github_broker_scaffold_enabled: false,
     local_agent_github_broker_impersonator: "",
+  },
+);
+expectFailure(
+  plan([initialCreate, ...partialScaffold]),
+  "partial recovery requires the enabled scaffold",
+  {
+    ...SCAFFOLD_RECOVERY_POLICY,
+    controlled_main_lifecycle_ruleset_id: 0,
   },
 );
 expectFailure(
@@ -881,6 +1098,12 @@ expectFailure(plan(), "distinct local-agent App IDs", {
   ...POLICY_BASE,
   local_agent_github_app_id: DEPENDABOT_MERGE_APP_ID,
 });
+for (const sharedAppId of [15368, 29110]) {
+  expectFailure(plan(), "distinct local-agent App IDs", {
+    ...POLICY_BASE,
+    local_agent_github_app_id: sharedAppId,
+  });
+}
 
 const mutableMirror = {
   address: "github_actions_variable.human_merge_operator_team_id",
@@ -1037,6 +1260,8 @@ for (const policy of [
     ...POLICY_BASE,
     local_agent_github_app_id: DEPENDABOT_MERGE_APP_ID,
   },
+  { ...POLICY_BASE, local_agent_github_app_id: 15368 },
+  { ...POLICY_BASE, local_agent_github_app_id: 29110 },
   {
     ...POLICY_BASE,
     dependabot_merge_app_repository_permissions: {
@@ -1053,6 +1278,8 @@ for (const policy of [
       workflows: "write",
     },
   },
+  { ...POLICY_BASE, dependabot_merge_environment_enabled: "true" },
+  { ...POLICY_BASE, human_merge_operator_team_slug: "wrong-team" },
   { ...POLICY_BASE, dependabot_merge_app_credentials_enabled: "true" },
   { ...POLICY_BASE, dependabot_merge_writer_migration_verified: "true" },
   { ...POLICY_BASE, legacy_dependabot_auto_merge_drained: "true" },
@@ -1189,9 +1416,29 @@ assert.match(
   /actor_id\s*=\s*local\.human_merge_operator_team_id[\s\S]*?actor_type\s*=\s*"Team"[\s\S]*?bypass_mode\s*=\s*"pull_request"[\s\S]*?actor_id\s*=\s*local\.dependabot_merge_app_id[\s\S]*?actor_type\s*=\s*"Integration"[\s\S]*?bypass_mode\s*=\s*"exempt"/u,
   "the ruleset source must keep exactly the human Team and dedicated Dependabot App bypass modes",
 );
+assert.equal(
+  SOURCE_MAIN_LIFECYCLE_BOUNDARY_POLICY.human_merge_operator_team_slug,
+  "merge-operators",
+  "reviewed policy must pin the exact new human Team slug",
+);
 assert.match(
   terraformSource,
-  /!contains\(\[15368, 29110\], local\.dependabot_merge_app_id\)[\s\S]*?local\.local_agent_github_app_id > 0[\s\S]*?local\.dependabot_merge_app_id != local\.local_agent_github_app_id/u,
+  /human_merge_operator_team_slug\s*=\s*local\.main_lifecycle_boundary_policy\.human_merge_operator_team_slug[\s\S]*?local\.human_merge_operator_team_slug == "merge-operators"/u,
+  "Terraform must reject a different human merge Team slug",
+);
+for (const [sourceName, source] of [
+  ["ADR 0080", lifecycleAdrSource],
+  ["activation runbook", lifecycleRunbookSource],
+]) {
+  assert.match(
+    source,
+    /exact slug[\s\S]*?`merge-operators`[\s\S]*?built-in Write/iu,
+    `${sourceName} must require the exact Team slug and least built-in repository role`,
+  );
+}
+assert.match(
+  terraformSource,
+  /!contains\(\[15368, 29110\], local\.dependabot_merge_app_id\)[\s\S]*?local\.local_agent_github_app_id > 0[\s\S]*?!contains\(\[15368, 29110\], local\.local_agent_github_app_id\)[\s\S]*?local\.dependabot_merge_app_id != local\.local_agent_github_app_id/u,
   "the ruleset source must reject the shared Actions App, Dependabot App, and local agent App identities",
 );
 assert.doesNotMatch(
@@ -1216,8 +1463,27 @@ assert.match(
 );
 assert.match(
   dependabotSource,
-  /resource "github_actions_secret" "dependabot_merge_app_id"[\s\S]*?secret_name\s*=\s*"DEPENDABOT_MERGE_APP_ID"[\s\S]*?key_id\s*=\s*var\.dependabot_merge_app_actions_public_key_id[\s\S]*?value_encrypted\s*=\s*var\.dependabot_merge_app_id_encrypted_value/u,
-  "the App ID must use the repository Actions secret store with pre-encrypted input",
+  /resource "github_repository_environment" "dependabot_merge"[\s\S]*?can_admins_bypass\s*=\s*false[\s\S]*?deployment_branch_policy \{[\s\S]*?protected_branches\s*=\s*false[\s\S]*?custom_branch_policies\s*=\s*true/u,
+  "the credential source must define a custom-policy Environment without admin bypass",
+);
+assert.match(
+  dependabotSource,
+  /resource "github_repository_environment_deployment_policy" "dependabot_merge_main"[\s\S]*?environment\s*=\s*github_repository_environment\.dependabot_merge\[0\]\.environment[\s\S]*?branch_pattern\s*=\s*"main"/u,
+  "the Environment deployment policy must allow only the exact main branch",
+);
+assert.match(
+  dependabotSource,
+  /resource "github_actions_environment_secret" "dependabot_merge_app_id"[\s\S]*?environment\s*=\s*github_repository_environment\.dependabot_merge\[0\]\.environment[\s\S]*?secret_name\s*=\s*"DEPENDABOT_MERGE_APP_ID"[\s\S]*?key_id\s*=\s*var\.dependabot_merge_app_environment_public_key_id[\s\S]*?value_encrypted\s*=\s*var\.dependabot_merge_app_id_encrypted_value[\s\S]*?depends_on\s*=\s*\[[\s\S]*?github_repository_environment_deployment_policy\.dependabot_merge_main/u,
+  "the App ID must use the protected Environment secret store after its exact deployment policy exists",
+);
+assert.equal(
+  (
+    dependabotSource.match(
+      /count\s+=\s+local\.controlled_main_lifecycle_resources_enabled && local\.dependabot_merge_environment_enabled \? 1 : 0/gu,
+    ) ?? []
+  ).length,
+  2,
+  "the Environment and policy must stay absent while the Environment source gate is false",
 );
 assert.equal(
   (
@@ -1226,7 +1492,7 @@ assert.equal(
     ) ?? []
   ).length,
   2,
-  "both dedicated-App secrets must stay absent while the boundary resource gate is false",
+  "both dedicated-App secrets must stay absent while the credential source gate is false",
 );
 assert.equal(
   (
@@ -1238,13 +1504,32 @@ assert.equal(
 );
 assert.match(
   dependabotSource,
-  /resource "github_actions_secret" "dependabot_merge_app_private_key"[\s\S]*?secret_name\s*=\s*"DEPENDABOT_MERGE_APP_PRIVATE_KEY"[\s\S]*?key_id\s*=\s*var\.dependabot_merge_app_actions_public_key_id[\s\S]*?value_encrypted\s*=\s*var\.dependabot_merge_app_private_key_encrypted_value/u,
-  "the App private key must use the repository Actions secret store with pre-encrypted input",
+  /resource "github_actions_environment_secret" "dependabot_merge_app_private_key"[\s\S]*?environment\s*=\s*github_repository_environment\.dependabot_merge\[0\]\.environment[\s\S]*?secret_name\s*=\s*"DEPENDABOT_MERGE_APP_PRIVATE_KEY"[\s\S]*?key_id\s*=\s*var\.dependabot_merge_app_environment_public_key_id[\s\S]*?value_encrypted\s*=\s*var\.dependabot_merge_app_private_key_encrypted_value[\s\S]*?depends_on\s*=\s*\[[\s\S]*?github_repository_environment_deployment_policy\.dependabot_merge_main/u,
+  "the App private key must use the protected Environment secret store after its exact deployment policy exists",
+);
+assert.doesNotMatch(
+  dependabotSource,
+  /resource "github_actions_secret" "dependabot_merge_app_/u,
+  "the bypass-App credentials must not use repository-wide Actions secrets",
 );
 assert.doesNotMatch(
   dependabotSource,
   /(?:plaintext_value|\bvalue|\bencrypted_value)\s*=/u,
   "the Dependabot credential resources must never accept plaintext values",
+);
+const dependabotWorkflowSource = readFileSync(
+  new URL("../../.github/workflows/dependabot-auto-merge.yml", import.meta.url),
+  "utf8",
+);
+assert.doesNotMatch(
+  dependabotWorkflowSource,
+  /^\s*environment:\s*dependabot-merge\s*$/mu,
+  "the current writer must not reference the Environment before the protected resource exists live",
+);
+assert.match(
+  lifecycleRunbookSource,
+  /create and protect[\s\S]*?dependabot-merge[\s\S]*?Environment[\s\S]*?install[\s\S]*?Environment secrets[\s\S]*?separate reviewed writer change[\s\S]*?environment:\s*dependabot-merge/iu,
+  "the runbook must require Environment protection and secrets before a separate writer migration",
 );
 assert.match(
   appSource,
@@ -1256,10 +1541,22 @@ assert.match(
   /local_agent_github_broker_partial_recovery_enabled\s*=\s*local\.main_lifecycle_boundary_policy\.local_agent_github_broker_partial_recovery_enabled/u,
   "the partial-recovery lane must come only from reviewed source",
 );
+const partialRecoverySourceGate = terraformSource.match(
+  /local\.local_agent_github_broker_partial_recovery_enabled == false \|\|\s*\(\s*(local\.local_agent_github_broker_scaffold_enabled[\s\S]*?ruleset_audit_active == false)\s*\)\s*\) &&\s*\(\s*local\.controlled_main_lifecycle_ruleset_enforcement != "active"/u,
+)?.[1];
+assert.ok(
+  partialRecoverySourceGate,
+  "the Terraform source must retain one identifiable partial-recovery precondition",
+);
 assert.match(
-  terraformSource,
-  /local\.local_agent_github_broker_partial_recovery_enabled == false[\s\S]*?local\.local_agent_github_broker_scaffold_enabled[\s\S]*?controlled_main_lifecycle_ruleset_enforcement == "disabled"[\s\S]*?ruleset_audit_active == false/u,
-  "the Terraform source must keep partial recovery bounded to the disabled scaffold phase",
+  partialRecoverySourceGate,
+  /local_agent_github_broker_scaffold_enabled[\s\S]*?controlled_main_lifecycle_ruleset_id > 0[\s\S]*?controlled_main_lifecycle_ruleset_enforcement == "disabled"[\s\S]*?ruleset_audit_active == false/u,
+  "the Terraform source must keep partial recovery bounded to the enabled scaffold and pinned disabled ruleset phase",
+);
+assert.doesNotMatch(
+  partialRecoverySourceGate,
+  /dependabot_merge_app_credentials_enabled|dependabot_merge_writer_migration_verified|legacy_dependabot_auto_merge_drained/u,
+  "partial recovery must preserve the independently reviewed Dependabot gate values instead of forcing them false",
 );
 assert.doesNotMatch(
   appSource,

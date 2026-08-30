@@ -229,8 +229,8 @@ resource "github_actions_environment_secret" "sentry_archive_token" {
   value       = var.sentry_archive_token
 }
 
-# PLATFORM_SETTINGS_AUDIT_TOKEN — fine-grained GitHub PAT (Administration: Read
-# on this repo only). Consumed only by the `check` job in
+# PLATFORM_SETTINGS_AUDIT_TOKEN — fine-grained GitHub PAT (Administration: Read,
+# Actions: Read, and Environments: Read on this repo only). Consumed only by the `check` job in
 # platform-settings-drift.yml, which now declares `environment: sentry-pipeline`.
 resource "github_actions_environment_secret" "platform_settings_audit_token" {
   # checkov:skip=CKV_GIT_4: same state-backed plaintext trade-off; see

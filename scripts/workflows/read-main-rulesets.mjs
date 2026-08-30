@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 
 const MAX_CAPTURE_BYTES = 16 * 1024 * 1024;
 const MAX_RULESETS = 100;
+const MAX_ENVIRONMENT_METADATA_ENTRIES = 100;
+const DEPENDABOT_MERGE_ENVIRONMENT = "dependabot-merge";
 
 class MainRulesetReadError extends Error {}
 
@@ -123,11 +125,135 @@ function readRuleset(repository, rulesetId, runGh) {
   return ruleset;
 }
 
+function readJsonObject(repository, path, runGh, noun) {
+  let raw;
+  try {
+    raw = runGh(["api", `repos/${repository}/${path}`]);
+  } catch (error) {
+    if (error instanceof MainRulesetReadError) throw error;
+    throw new MainRulesetReadError(`could not read ${noun}`);
+  }
+  const value = parseJson(raw, `${noun} was not valid JSON`);
+  if (!isObject(value)) {
+    throw new MainRulesetReadError(`${noun} had an unexpected shape`);
+  }
+  return value;
+}
+
+function isObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function readDependabotMergeEnvironment(repository, runGh) {
+  const value = readJsonObject(
+    repository,
+    `environments/${DEPENDABOT_MERGE_ENVIRONMENT}`,
+    runGh,
+    "Dependabot merge Environment",
+  );
+  if (value.name !== DEPENDABOT_MERGE_ENVIRONMENT) {
+    throw new MainRulesetReadError(
+      "Dependabot merge Environment did not match its requested name",
+    );
+  }
+  return {
+    can_admins_bypass: value.can_admins_bypass,
+    deployment_branch_policy: value.deployment_branch_policy,
+    name: value.name,
+  };
+}
+
+function exactCountedList(value, field, noun) {
+  const entries = value[field];
+  if (
+    !Number.isSafeInteger(value.total_count) ||
+    value.total_count < 0 ||
+    value.total_count > MAX_ENVIRONMENT_METADATA_ENTRIES ||
+    !Array.isArray(entries) ||
+    entries.length !== value.total_count
+  ) {
+    throw new MainRulesetReadError(
+      `${noun} count or pagination shape was inconsistent`,
+    );
+  }
+  return entries;
+}
+
+function readDependabotMergeDeploymentPolicies(repository, runGh) {
+  const value = readJsonObject(
+    repository,
+    `environments/${DEPENDABOT_MERGE_ENVIRONMENT}/deployment-branch-policies?per_page=100`,
+    runGh,
+    "Dependabot merge deployment-policy list",
+  );
+  const entries = exactCountedList(
+    value,
+    "branch_policies",
+    "Dependabot merge deployment-policy list",
+  );
+  if (
+    entries.some(
+      (entry) =>
+        !isObject(entry) ||
+        !Number.isSafeInteger(entry.id) ||
+        entry.id <= 0 ||
+        typeof entry.name !== "string" ||
+        entry.name.length === 0 ||
+        entry.name.length > 255 ||
+        typeof entry.type !== "string" ||
+        entry.type.length === 0 ||
+        entry.type.length > 32,
+    )
+  ) {
+    throw new MainRulesetReadError(
+      "Dependabot merge deployment-policy list contained malformed metadata",
+    );
+  }
+  return entries.map(({ id, name, type }) => ({ id, name, type }));
+}
+
+function readDependabotMergeSecretNames(repository, runGh) {
+  const value = readJsonObject(
+    repository,
+    `environments/${DEPENDABOT_MERGE_ENVIRONMENT}/secrets?per_page=100`,
+    runGh,
+    "Dependabot merge Environment secret list",
+  );
+  const entries = exactCountedList(
+    value,
+    "secrets",
+    "Dependabot merge Environment secret list",
+  );
+  const names = entries.map((entry) => entry?.name);
+  if (
+    names.some(
+      (name) =>
+        typeof name !== "string" || name.length === 0 || name.length > 255,
+    ) ||
+    new Set(names).size !== names.length
+  ) {
+    throw new MainRulesetReadError(
+      "Dependabot merge Environment secret list contained malformed or duplicate names",
+    );
+  }
+  return names;
+}
+
 export function collectMainRulesets({ repository, runGh = defaultRunGh }) {
   validateRepository(repository);
   const runBoundedGh = boundedRunner(runGh);
   const ids = listRulesetIds(repository, runBoundedGh);
   return {
+    dependabotMergeEnvironment: readDependabotMergeEnvironment(
+      repository,
+      runBoundedGh,
+    ),
+    dependabotMergeDeploymentBranchPolicies:
+      readDependabotMergeDeploymentPolicies(repository, runBoundedGh),
+    dependabotMergeEnvironmentSecretNames: readDependabotMergeSecretNames(
+      repository,
+      runBoundedGh,
+    ),
     rulesets: ids.map((rulesetId) =>
       readRuleset(repository, rulesetId, runBoundedGh),
     ),

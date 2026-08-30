@@ -47,7 +47,7 @@ The completed cutover has these properties:
 - live proof records a local-agent App permission-ceiling denial, exact live
   ruleset JSON, an approved Team merge, and one routine Dependabot merge under
   the dedicated App;
-- the daily audit reports `main-ruleset-audit state=ok`.
+- the daily audit reports `main-lifecycle-boundary-audit state=ok`.
 
 ## Source and live-state boundary
 
@@ -192,11 +192,17 @@ cancellation, or live setting change.
 
 ## Phase 1: create the human Team
 
-A human organization administrator creates the merge-operator Team, grants it
-the required repository role, and limits membership to approved humans. Record
-the Team slug, numeric Team ID, members, repository role, actor, and time.
+A human organization administrator creates one new Team with the exact slug
+`merge-operators`. Grant it the built-in Write repository role. Write is the
+least built-in role that can push and merge pull requests. Do not grant
+Maintain or Admin. If the organization uses a custom role instead, a human must
+select and record it during activation. The custom role must be based on Write
+and must not include repository-administration or ruleset-edit authority. Limit
+membership to approved humans. Record the exact slug, numeric Team ID, members,
+repository role, actor, and time.
 
-Keep the verified numeric ID in the private activation record until Phase 3.
+Verify the Team slug is exactly `merge-operators`. Keep the verified numeric ID
+in the private activation record until Phase 3.
 Do not create an intermediate source state with one positive identity and the
 resource gate false. Do not use a slug, node ID, user ID, App ID, installation
 ID, tfvar, repository variable, or environment variable as the bypass
@@ -223,19 +229,10 @@ App. Record:
 - absence of Administration and organization permissions;
 - the owner and time of the check.
 
-Generate one private key through the human GitHub surface. Keep the downloaded
-PEM in a mode-`0700` operator-owned intake directory and mode-`0600` file
-outside repositories, agent homes, shared temporary paths, sync roots, and
-backup roots. Do not print it.
-
-Read the repository Actions public key and key ID through an approved read-only
-path. Encrypt the App ID and private key locally with that public key. Put only
-the public key ID and two sealed-box base64 ciphertexts in the gitignored
-operator tfvars file as shown in `terraform/terraform.tfvars.example`. Do not
-put either plaintext in Terraform, state, an environment variable, CLI `-var`,
-tracked source, or any Actions secret command. Remove the transient PEM after
-the ciphertext copy is verified. Revoke the key and start again if custody or
-removal is uncertain.
+Do not generate a private key yet. Phase 4A first creates and protects the
+`dependabot-merge` Environment. The operator can read that Environment's
+Actions public key only after it exists. Generate and encrypt the App key in
+the later credential step so plaintext custody stays short.
 
 Keep the positive App ID and exact permission map in the private activation
 record until Phase 3. Keep `dependabot_merge_app_credentials_enabled`,
@@ -297,6 +294,7 @@ state. The resulting policy has:
   Workflows/write permission map;
 - managed lifecycle ruleset ID `0`;
 - enforcement disabled;
+- `dependabot-merge` Environment disabled;
 - dedicated-App credentials disabled;
 - exact-head REST writer-migration evidence false;
 - legacy auto-merge request absence evidence false;
@@ -321,7 +319,8 @@ preflight. The exact policy must permit one creation only. Require:
 - no action for core ruleset ID `13494367`;
 - no broker service account, secret, credential version, accessor binding, or
   impersonation binding;
-- no dedicated-App Actions secret resource;
+- no `dependabot-merge` Environment, deployment policy, or dedicated-App
+  Environment secret resource;
 - no replacement, deletion, unknown managed field, or second ruleset.
 
 Require the lifecycle ruleset create to be the plan's only non-no-op action.
@@ -335,56 +334,94 @@ Require a positive ID different from `13494367`. Pin it in a reviewed source
 change. Keep `controlled_main_lifecycle_resources_enabled` true. Repeat the
 guarded plan. It must be a no-op for the disabled ruleset.
 
-## Phase 4A: provision the dedicated merge App Actions secrets
+## Phase 4A: create the Environment, then install the App secrets
 
-Start with a separate reviewed source change. Set
-`dependabot_merge_app_credentials_enabled` to true. Keep the pinned lifecycle
+Start with a reviewed Environment source change. Set
+`dependabot_merge_environment_enabled` to true. Keep
+`dependabot_merge_app_credentials_enabled` false. Keep the pinned lifecycle
 ruleset disabled and unchanged. Keep writer-migration evidence, legacy drain
 evidence, and the drift audit false.
-
-Use the gitignored operator tfvars file for the repository Actions public key
-ID and the two sealed-box ciphertexts. The resources use only `key_id` and
-`value_encrypted`. They must never use `value`, `plaintext_value`, or deprecated
-`encrypted_value`. The wrapper rejects both ciphertexts in `TF_VAR_*` and CLI
-`-var` inputs.
 
 Review the guarded plan. Require exactly these two creates beside the disabled
 no-op lifecycle ruleset:
 
-- `github_actions_secret.dependabot_merge_app_id[0]` with secret name
-  `DEPENDABOT_MERGE_APP_ID`;
-- `github_actions_secret.dependabot_merge_app_private_key[0]` with secret name
-  `DEPENDABOT_MERGE_APP_PRIVATE_KEY`.
+- `github_repository_environment.dependabot_merge[0]`, with
+  `can_admins_bypass = false`, `protected_branches = false`, and
+  `custom_branch_policies = true`;
+- `github_repository_environment_deployment_policy.dependabot_merge_main[0]`,
+  with the exact branch pattern `main`.
 
-Require one shared public key ID, bounded base64 ciphertexts, no plaintext
-field, no other secret store, and no unrelated change. Obtain separate apply
-approval. Apply the checked plan. Read only the resulting secret names and
-metadata. Do not read, print, or reconstruct a secret value.
+Require no secret, workflow, ruleset, or unrelated change. Obtain separate
+apply approval. Apply the checked plan. Read the live Environment and branch
+policies. Require admin bypass false, custom policies true, protected branches
+false, and exactly one policy with type `branch` and name `main`.
 
-If the apply creates only one secret, record the failure. Replan with the same
-reviewed source and inputs. The guard permits only the existing exact secret as
-a no-op and the missing exact secret as a create. Stop if the plan updates,
-replaces, deletes, or touches another resource.
-If GitHub rotated the repository Actions public key before this retry,
-re-encrypt both values with the current key. The guarded recovery must create
-the missing secret and update the surviving secret together. Both after-values
-must use the same new key ID. The surviving key ID and ciphertext must both
-change. The guard rejects an unrelated change or an unchanged survivor.
+Only after that live proof, generate one App private key through the human
+GitHub surface. Keep the PEM in a mode-`0700` operator-owned intake directory
+and mode-`0600` file outside repositories, agent homes, shared temporary paths,
+sync roots, and backup roots. Do not print it. Read the `dependabot-merge`
+Environment Actions public key and key ID through an approved read-only path.
+Encrypt the App ID and private key locally with that public key. Put only the
+public key ID and two sealed-box base64 ciphertexts in the gitignored operator
+tfvars file. Remove the transient PEM after the ciphertext copy is verified.
+Revoke the key and start again if custody or removal is uncertain.
+
+Use a second reviewed source change to set
+`dependabot_merge_app_credentials_enabled` to true. The Environment gate stays
+true. Review the guarded plan. Require the Environment and branch policy to be
+no-ops. Require exactly these two creates:
+
+- `github_actions_environment_secret.dependabot_merge_app_id[0]` with secret
+  name `DEPENDABOT_MERGE_APP_ID`;
+- `github_actions_environment_secret.dependabot_merge_app_private_key[0]` with
+  secret name `DEPENDABOT_MERGE_APP_PRIVATE_KEY`.
+
+Both secrets must name `dependabot-merge` and depend on its exact branch policy.
+They use only `key_id` and `value_encrypted`. They must never use `value`,
+`plaintext_value`, or deprecated `encrypted_value`. Require one shared public
+key ID, bounded base64 ciphertexts, no other secret store, and no unrelated
+change. The wrapper rejects both ciphertexts in `TF_VAR_*` and CLI `-var`
+inputs. Obtain separate apply approval. Apply the checked plan. Read only the
+resulting secret names and metadata. Do not read, print, or reconstruct a
+secret value.
+
+Do not add `environment: dependabot-merge` to the writer in either source
+change. Create and protect the `dependabot-merge` Environment, then install its
+Environment secrets. Only a separate reviewed writer change may declare
+`environment: dependabot-merge` and consume them after both live proofs. Adding
+the reference earlier can auto-create an unprotected Environment.
+
+If the secret apply creates only one secret, record the failure. Replan with
+the same reviewed source and inputs. The guard permits only the existing exact
+secret as a no-op and the missing exact secret as a create. Stop if the plan
+updates, replaces, deletes, or touches another resource. If GitHub rotated the
+Environment Actions public key before this retry, re-encrypt both values with
+the current key. The guarded recovery must create the missing secret and update
+the surviving secret together. Both after-values must use the same new key ID.
+The surviving key ID and ciphertext must both change.
 
 After activation, do not disable the lifecycle ruleset to restore a secret that
 GitHub lost or an administrator deleted. Stop the writer. A coherent active
 source state permits only the missing exact secret or pair as creates beside
 the active no-op ruleset. Review and apply that recovery alone. Verify secret
 metadata, then repeat the dedicated-App writer proof before re-enabling it.
-If GitHub also rotated the repository Actions public key, create the missing
-secret and update the surviving secret together. Both after-values must use the
-same new key ID, and the surviving key ID and ciphertext must both change. The
-guard rejects a create with an unchanged survivor in that case.
 
-Before a later rotation, fetch the current Actions public key and key ID. A
-one-secret rotation keeps the same key ID and changes only that ciphertext. A
-public-key rotation changes both secret resources, both ciphertexts, and the
-shared key ID together. The guard rejects every partial key rotation.
+Before a later rotation, fetch the current Environment Actions public key and
+key ID. A one-secret rotation keeps the same key ID and changes only that
+ciphertext. A public-key rotation changes both secret resources, both
+ciphertexts, and the shared key ID together. The guard rejects every partial
+key rotation.
+
+If the daily audit finds a widened Environment control or branch pattern, stop
+the writer. Keep the source gates unchanged. Review a guarded platform plan
+that changes only the bounded unsafe Environment or deployment-policy value to
+the exact source shape beside the no-op ruleset. The guard accepts a known
+boolean Environment shape, the provider's empty no-policy list, or a bounded
+branch pattern as the prior value. It
+requires admin bypass false, custom policies true, protected branches false,
+and exact branch `main` after the repair. It rejects an unknown identity,
+malformed prior shape, widening update, destructive action, secret change, or
+unrelated change. Obtain separate apply approval and repeat the live audit.
 
 ## Phase 4B: provision the local-agent App key and broker principal
 
@@ -434,8 +471,12 @@ resource addresses, error, actor, and time.
 Use a separate reviewed source change to set
 `local_agent_github_broker_partial_recovery_enabled` to `true`. Keep the
 scaffold enabled. Keep the managed lifecycle ruleset ID pinned, its enforcement
-disabled, and the audit inactive. From clean current `main`, run the guarded
-plan with the same operator tfvars file. Require:
+disabled, and the audit inactive. Preserve the current reviewed values of the
+Dependabot credential, writer-migration, and legacy-drain gates. Phase 4A
+normally leaves the credential gate true before this recovery can run. The
+recovery gate does not force any of those independent values. From clean
+current `main`, run the guarded plan with the same operator tfvars file.
+Require:
 
 - exactly the five canonical scaffold resource addresses;
 - one to four `create` actions for missing members;
@@ -498,7 +539,7 @@ report the broker active from unit tests alone.
 The agent-facing syntax is:
 
 ```bash
-pnpm github:agent -- --profile <profile> -- <operation> [arguments]
+pnpm github:agent --profile <profile> -- <operation> [arguments]
 ```
 
 The source enables bounded repository, issue, pull-request, and workflow-run
@@ -666,10 +707,15 @@ tested.
 
 After live proof, change only the reviewed audit selector to active. Merge that
 source change through the human path. Run the platform-settings drift workflow
-from trusted `main`. Require `main-ruleset-audit state=ok`.
+from trusted `main`. Require `main-lifecycle-boundary-audit state=ok`. The
+audit must prove both
+rulesets, the `dependabot-merge` Environment with admin bypass false, custom
+policies true, protected branches false, one branch policy named `main`, and
+only the two approved secret metadata names. It must not read a public key or
+secret value.
 
-An inert result is not proof. A missing Administration-read audit credential
-must fail after activation.
+An inert result is not proof. A missing Administration:Read, Actions:Read, and
+Environments:Read audit credential must fail after activation.
 
 ## Credential inventory
 
@@ -680,10 +726,12 @@ Before activation and at each review interval, inventory:
 - external CI, bot, broker, build, and deployment credentials;
 - cloud-agent credential types and repository selection;
 - the platform Administration PAT and its absence of Contents;
-- the ruleset-audit PAT and its read-only Administration scope;
+- the lifecycle-boundary audit PAT and its read-only Administration, Actions,
+  and Environments scopes;
 - the dedicated merge App registration, installation, exact Contents/write,
   Pull requests/write, and Workflows/write permissions with no Actions,
-  ciphertext-backed Actions secret metadata, and exempt bypass;
+  ciphertext-backed `dependabot-merge` Environment secret metadata, exact
+  `main` policy, and exempt bypass;
 - the local-agent App registration, installation, profiles, and lack of bypass;
 - protected Google principals that can read the App key;
 - Vercel Administration and Contents with the Free-plan acceptance record.
@@ -695,8 +743,9 @@ that reached an agent surface. Do not infer issuer identity from a secret name.
 
 Each App key rotation needs separate approval.
 
-For the dedicated merge App, stop the #2137 writer. Fetch the current repository
-Actions public key and key ID. If the ID is unchanged, encrypt and update only
+For the dedicated merge App, stop the #2137 writer. Fetch the current
+`dependabot-merge` Environment Actions public key and key ID. If the ID is
+unchanged, encrypt and update only
 the replaced credential ciphertext. If the ID changed, re-encrypt the App ID
 and replacement key, then update both ciphertexts and the shared key ID in one
 plan. Review and apply only the exact guarded secret update. Verify one writer

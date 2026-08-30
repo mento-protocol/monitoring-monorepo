@@ -17,12 +17,14 @@
 locals {
   main_lifecycle_boundary_policy                = jsondecode(file("${path.module}/main-lifecycle-boundary-policy.json"))
   controlled_main_lifecycle_resources_enabled   = local.main_lifecycle_boundary_policy.controlled_main_lifecycle_resources_enabled
+  human_merge_operator_team_slug                = local.main_lifecycle_boundary_policy.human_merge_operator_team_slug
   human_merge_operator_team_id                  = local.main_lifecycle_boundary_policy.human_merge_operator_team_id
   dependabot_merge_app_id                       = local.main_lifecycle_boundary_policy.dependabot_merge_app_id
   dependabot_merge_app_repository_permissions   = local.main_lifecycle_boundary_policy.dependabot_merge_app_repository_permissions
   local_agent_github_app_id                     = local.main_lifecycle_boundary_policy.local_agent_github_app_id
   controlled_main_lifecycle_ruleset_id          = local.main_lifecycle_boundary_policy.controlled_main_lifecycle_ruleset_id
   controlled_main_lifecycle_ruleset_enforcement = local.main_lifecycle_boundary_policy.controlled_main_lifecycle_ruleset_enforcement
+  dependabot_merge_environment_enabled          = local.main_lifecycle_boundary_policy.dependabot_merge_environment_enabled
   dependabot_merge_app_credentials_enabled      = local.main_lifecycle_boundary_policy.dependabot_merge_app_credentials_enabled
   dependabot_merge_writer_migration_verified    = local.main_lifecycle_boundary_policy.dependabot_merge_writer_migration_verified
   legacy_dependabot_auto_merge_drained          = local.main_lifecycle_boundary_policy.legacy_dependabot_auto_merge_drained
@@ -43,9 +45,9 @@ resource "github_repository_ruleset" "controlled_main_lifecycle" {
     }
   }
 
-  # A human creates and populates this Team outside the repo-scoped stack. Its
-  # numeric ID stays in reviewed source. The Team can bypass lifecycle rules
-  # only through pull requests.
+  # A human creates and populates the exact `merge-operators` Team outside the
+  # repo-scoped stack. Its numeric ID stays in reviewed source. The Team can
+  # bypass lifecycle rules only through pull requests.
   bypass_actors {
     actor_id    = local.human_merge_operator_team_id
     actor_type  = "Team"
@@ -76,6 +78,7 @@ resource "github_repository_ruleset" "controlled_main_lifecycle" {
       condition = (
         local.main_lifecycle_boundary_policy.repository == "mento-protocol/monitoring-monorepo" &&
         local.controlled_main_lifecycle_resources_enabled == true &&
+        local.human_merge_operator_team_slug == "merge-operators" &&
         local.human_merge_operator_team_id > 0 &&
         floor(local.human_merge_operator_team_id) == local.human_merge_operator_team_id &&
         local.human_merge_operator_team_id <= 9007199254740991 &&
@@ -90,12 +93,17 @@ resource "github_repository_ruleset" "controlled_main_lifecycle" {
         local.local_agent_github_app_id > 0 &&
         floor(local.local_agent_github_app_id) == local.local_agent_github_app_id &&
         local.local_agent_github_app_id <= 9007199254740991 &&
+        !contains([15368, 29110], local.local_agent_github_app_id) &&
         local.dependabot_merge_app_id != local.local_agent_github_app_id &&
         local.controlled_main_lifecycle_ruleset_id >= 0 &&
         floor(local.controlled_main_lifecycle_ruleset_id) == local.controlled_main_lifecycle_ruleset_id &&
         local.controlled_main_lifecycle_ruleset_id <= 9007199254740991 &&
         local.controlled_main_lifecycle_ruleset_id != 13494367 &&
         contains(["disabled", "active"], local.controlled_main_lifecycle_ruleset_enforcement) &&
+        (
+          local.dependabot_merge_environment_enabled == false ||
+          local.dependabot_merge_environment_enabled == true
+        ) &&
         (
           local.dependabot_merge_app_credentials_enabled == false ||
           local.dependabot_merge_app_credentials_enabled == true
@@ -129,12 +137,20 @@ resource "github_repository_ruleset" "controlled_main_lifecycle" {
           var.local_agent_github_app_credential_active == false
         ) &&
         (
-          local.dependabot_merge_app_credentials_enabled == false ||
+          local.dependabot_merge_environment_enabled == false ||
           local.controlled_main_lifecycle_ruleset_id > 0
+        ) &&
+        (
+          local.dependabot_merge_app_credentials_enabled == false ||
+          (
+            local.dependabot_merge_environment_enabled &&
+            local.controlled_main_lifecycle_ruleset_id > 0
+          )
         ) &&
         (
           local.dependabot_merge_writer_migration_verified == false ||
           (
+            local.dependabot_merge_environment_enabled &&
             local.dependabot_merge_app_credentials_enabled &&
             local.controlled_main_lifecycle_ruleset_id > 0
           )
@@ -149,10 +165,7 @@ resource "github_repository_ruleset" "controlled_main_lifecycle" {
             local.local_agent_github_broker_scaffold_enabled &&
             local.controlled_main_lifecycle_ruleset_id > 0 &&
             local.controlled_main_lifecycle_ruleset_enforcement == "disabled" &&
-            local.main_lifecycle_boundary_policy.ruleset_audit_active == false &&
-            local.dependabot_merge_app_credentials_enabled == false &&
-            local.dependabot_merge_writer_migration_verified == false &&
-            local.legacy_dependabot_auto_merge_drained == false
+            local.main_lifecycle_boundary_policy.ruleset_audit_active == false
           )
         ) &&
         (
@@ -178,7 +191,7 @@ resource "github_repository_ruleset" "controlled_main_lifecycle" {
           )
         )
       )
-      error_message = "terraform/main-lifecycle-boundary-policy.json must enable boundary resources, pin the repository, approved Team, dedicated Dependabot merge App, and local-agent App IDs, exact Contents/write, Pull requests/write, and Workflows/write dedicated-App permissions, non-core managed lifecycle ruleset ID, valid enforcement state, exact-head REST writer migration and legacy auto-merge request absence evidence, ordered audit activation, and coherent broker gates. The dedicated App ID must differ from GitHub Actions, Dependabot, and the local-agent App. Initial ruleset creation requires ID 0, disabled enforcement, an inactive audit, disabled credential and broker gates, and no migration or drain claim."
+      error_message = "terraform/main-lifecycle-boundary-policy.json must enable boundary resources, pin the repository, exact merge-operators Team slug, approved Team, dedicated Dependabot merge App, and local-agent App IDs, exact Contents/write, Pull requests/write, and Workflows/write dedicated-App permissions, non-core managed lifecycle ruleset ID, valid enforcement state, ordered main-only Environment and credential gates, exact-head REST writer migration and legacy auto-merge request absence evidence, ordered audit activation, and coherent broker gates. The dedicated App ID must differ from GitHub Actions, Dependabot, and the local-agent App. Initial ruleset creation requires ID 0, disabled enforcement, an inactive audit, disabled Environment, credential, and broker gates, and no migration or drain claim."
     }
   }
 }

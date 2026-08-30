@@ -66,11 +66,11 @@ these rules:
 
 The ruleset has exactly two bypass actors:
 
-- a human merge-operator Team in `pull_request` mode;
+- one human Team with exact slug `merge-operators` in `pull_request` mode;
 - one dedicated repository-scoped Dependabot merge App Integration in `exempt`
   mode.
 
-Reviewed source pins the Team ID and both App IDs. Only the Team and dedicated
+Reviewed source pins the exact Team slug, Team ID, and both App IDs. Only the Team and dedicated
 App are bypass actors. The dedicated App must differ from the
 shared GitHub Actions App `15368`, the built-in Dependabot App `29110`, and the
 local-agent App. Do not add OrganizationAdmin, RepositoryRole, a user, Vercel,
@@ -104,14 +104,27 @@ owner, and a non-public GitHub API endpoint. It rejects the shared App IDs and
 core ruleset ID `13494367`. During initial ruleset creation, it rejects every
 other non-no-op action.
 
-The dedicated App credentials use exactly two repository Actions secrets:
-`DEPENDABOT_MERGE_APP_ID` and `DEPENDABOT_MERGE_APP_PRIVATE_KEY`. The
-default-branch `workflow_run` writer from #2137 can read those secrets. The
-untrusted pull-request workflow cannot. An operator encrypts both values
-outside Terraform with the repository Actions public key. Terraform receives
-and stores only bounded base64 ciphertext. The plan guard rejects plaintext,
-another secret store, another secret name, a partial create, and unrelated
-changes. It permits one in-place ciphertext rotation at a time.
+The dedicated App credentials use exactly two secrets in the Terraform-owned
+`dependabot-merge` Environment: `DEPENDABOT_MERGE_APP_ID` and
+`DEPENDABOT_MERGE_APP_PRIVATE_KEY`. The Environment disables admin bypass. It
+uses custom branch policies and one exact `main` branch pattern. A first
+reviewed phase creates and protects the Environment. An operator then encrypts
+both values outside Terraform with that Environment's Actions public key. A
+second reviewed phase installs the two ciphertext-backed Environment secrets.
+Only after both phases are live may a separate reviewed #2137 writer change
+declare `environment: dependabot-merge` and consume them. This order prevents a
+workflow reference from auto-creating an unprotected Environment. The plan
+guard rejects plaintext, another secret store, another secret name, a partial
+create, and unrelated changes. It permits one in-place ciphertext rotation at
+a time.
+
+The guard also has one strengthening-only Environment repair lane. A reviewed
+plan may change a bounded known prior Environment, the provider's empty
+no-policy list, or a bounded branch-pattern value to the exact source shape
+beside the unchanged lifecycle ruleset. It rejects a
+malformed identity, an unknown prior shape, a widening or destructive action,
+a simultaneous secret change, and every unrelated action. The writer stays
+disabled until the live audit passes again.
 
 When the reviewed broker-scaffold gate first becomes true, the guard requires
 the complete five-resource local-agent broker create set and rejects every
@@ -141,9 +154,14 @@ zero. Unrelated safe platform plans remain available.
 
 The state changes in separate reviewed phases:
 
-1. A human creates and verifies the Team and both Apps. The operator keeps all
-   three numeric IDs and the permission evidence in the private activation
-   record. Intermediate source states remain invalid.
+1. A human organization administrator creates and verifies one new Team with
+   exact slug `merge-operators`. Grant the built-in Write repository role, the
+   least built-in role that can merge pull requests. Do not grant Maintain or
+   Admin. A human may instead select and record a custom Write-based role at
+   activation if it adds no administration or ruleset-edit authority. A human
+   also creates and verifies both Apps. The operator keeps all three numeric
+   IDs and the permission evidence in the private activation record.
+   Intermediate source states remain invalid.
 2. One reviewed source change pins the Team ID, both App IDs, and the dedicated
    App's exact repository permission map, and sets the boundary resource gate
    true. An approved platform apply then creates only the lifecycle ruleset
@@ -151,15 +169,20 @@ The state changes in separate reviewed phases:
    no credential or broker resource.
 3. A human reads the new ruleset ID. A reviewed source change pins that positive
    ID. The ID must never equal `13494367`.
-4. A reviewed credential source change enables the two ciphertext-backed
-   repository Actions secrets. Its approved platform plan creates only those
-   two secrets beside the disabled no-op ruleset.
+4. A reviewed Environment source change creates `dependabot-merge`, disables
+   admin bypass, enables custom branch policies, and adds the exact `main`
+   branch pattern. A human verifies that live boundary. A later reviewed
+   credential source change installs only the two ciphertext-backed
+   Environment secrets beside the disabled no-op ruleset.
 5. A separate reviewed source change enables the local-agent broker scaffold
    and pins its one service-account impersonator. Its approved plan creates only
    the service account, secret container, accessor binding, impersonation
    binding, and write-only credential version. Local and cloud agent credential
    cutover completes while the lifecycle rule is disabled.
-6. The #2137 final writer retains its restricted `GITHUB_TOKEN` for every
+6. Only after the protected Environment and both secrets exist live, a
+   separate reviewed #2137 writer change declares
+   `environment: dependabot-merge`. The final writer retains its restricted
+   `GITHUB_TOKEN` for every
    authoritative read. It waits for required checks, then mints a fresh
    dedicated-App token. It repeats the complete authoritative proof with the
    read token and exposes the App token only to one synchronous exact-head REST
@@ -175,9 +198,11 @@ The state changes in separate reviewed phases:
    local-agent App cannot bypass the lifecycle ruleset.
 9. A final reviewed source change activates daily drift enforcement.
 
-The daily read-only audit checks the exact core shape and the exact lifecycle
-shape. It uses the repository-scoped Administration-read audit credential for
-GET requests. Issue writes use the workflow token. Before activation, the
+The daily read-only audit checks the exact core shape, lifecycle shape,
+Environment shape, one `main` branch policy, and two exact secret metadata
+names. It never reads a public key or secret value. It uses the
+repository-scoped Administration:Read, Actions:Read, and Environments:Read
+audit credential for GET requests. Issue writes use the workflow token. Before activation, the
 audit reports an inert state. After activation, a missing audit credential or
 missing managed ruleset fails the workflow.
 
@@ -262,16 +287,17 @@ updates. Do not grant Administration, Actions, Checks, Issues, or organization
 permissions. The App ID must differ from `15368`, `29110`, and the local-agent
 App ID. Reviewed policy pins the exact permission map and both App IDs.
 
-The operator reads the repository Actions public key and key ID through an
-approved read-only path. The operator encrypts the dedicated App ID and private
-key outside Terraform with that public key. Terraform resources use the
+After an approved apply creates and protects `dependabot-merge`, the operator
+reads that Environment's Actions public key and key ID through an approved
+read-only path. The operator encrypts the dedicated App ID and private key
+outside Terraform with that public key. Terraform resources use the
 supported `value_encrypted` field and explicit `key_id`. The gitignored
 operator tfvars file contains only the public key ID and two sealed-box base64
 ciphertexts. Terraform state contains ciphertext, not either plaintext value.
 The wrapper rejects both ciphertexts in environment variables and CLI `-var`
 arguments.
 
-GitHub can rotate the repository Actions public key. Before any credential
+GitHub can rotate the Environment Actions public key. Before any credential
 rotation, fetch the current public key and key ID. If the ID is unchanged,
 encrypt and update only the replaced credential. If the ID changed, re-encrypt
 both plaintexts and update both secret resources and both ciphertexts in one
@@ -328,7 +354,7 @@ permission separation must remove it in a follow-up.
 
 ### Precursor and activation boundaries
 
-#2137 may first run its default-branch `workflow_run` writer with the restricted
+Issue `#2137` may first run its default-branch `workflow_run` writer with the restricted
 `GITHUB_TOKEN`. Its use for the final write is an interim deployment state.
 Before lifecycle enforcement becomes active, a separate reviewed change must
 retain `github.token` for every authoritative Actions and pull-request read.
@@ -355,21 +381,24 @@ actor, drain query, and query time. Only then may reviewed source set
 
 These actions require separate human approvals:
 
-- Team creation and membership;
+- exact `merge-operators` Team creation, repository role, and membership;
 - dedicated Dependabot merge App creation, permissions, and installation;
 - local-agent App creation, permissions, and installation;
 - the atomic source change that pins the Team, dedicated App, and local-agent
   App IDs, exact dedicated-App permissions, and enabled resource gate;
 - the later source change that pins the managed ruleset ID;
 - disabled ruleset plan and apply;
-- dedicated-App ciphertext credential source change, plan, and apply;
+- `dependabot-merge` Environment gate source change, exact-policy plan and
+  apply, and live policy proof;
+- dedicated-App Environment-secret gate source change, ciphertext plan and
+  apply, and live secret-metadata proof;
 - #2137 final-writer migration and live App-identity proof;
 - legacy writer-run and auto-merge-request drain;
 - source changes that record the writer-migration and drain evidence;
 - broker-scaffold source enablement and impersonator pin;
 - App-key plan and apply;
 - partial-recovery source enablement and bounded recovery apply after a failed
-  Phase 4 apply;
+  Phase 4B broker-scaffold apply;
 - partial-recovery source disablement after an all-no-op recovery plan;
 - root-owned broker installation;
 - local and cloud credential cutover;
@@ -399,8 +428,8 @@ source matches the live state and both rulesets pass the audit.
 If the local-agent App key custody is uncertain, revoke the key before removing
 local copies. Rotate it through the approved write-only Secret Manager path. If
 the dedicated Dependabot merge App key custody is uncertain, revoke that key,
-stop the writer, and replace both Actions-secret ciphertexts under the current
-public key ID through one approved plan. If a human or platform credential
+stop the writer, and replace both Environment-secret ciphertexts under the current
+Environment public key ID through one approved plan. If a human or platform credential
 reaches an agent surface, revoke or rotate that credential and repeat the
 cutover evidence.
 
@@ -427,7 +456,7 @@ separate the credential that submits the change from a human operator
 credential. It also does not protect branch creation or deletion. Queue
 completion can occur later under a platform integration. That behavior does
 not bind one synchronous update and its final actor to the dedicated App. The
-#2137 writer therefore refuses a queue and uses the synchronous REST merge
+The `#2137` writer therefore refuses a queue and uses the synchronous REST merge
 endpoint, which cannot enqueue. A future queue rule needs a separate design.
 
 **Separate credentials and bind both approved identities in a lifecycle
@@ -479,7 +508,7 @@ explicit residual.
   actor directly.
 - Agent credentials authenticate as one selected-repository App installation.
 - Checked-in source keeps the broker scaffold absent until a separate reviewed
-  Phase 4 change enables it and pins its impersonator.
+  Phase 4B change enables it and pins its impersonator.
 - Normal read operations receive no write permission.
 - A local agent never receives the App PEM, JWT, or installation token.
 - Host and cloud activation require live identity and refusal evidence.

@@ -18,6 +18,7 @@ const MANAGED_RULESET_ID = 24680;
 const TEST_POLICY = Object.freeze({
   repository: "mento-protocol/monitoring-monorepo",
   controlled_main_lifecycle_resources_enabled: true,
+  human_merge_operator_team_slug: "merge-operators",
   human_merge_operator_team_id: TEAM_ID,
   dependabot_merge_app_id: DEPENDABOT_MERGE_APP_ID,
   dependabot_merge_app_repository_permissions: {
@@ -28,6 +29,7 @@ const TEST_POLICY = Object.freeze({
   local_agent_github_app_id: LOCAL_AGENT_APP_ID,
   controlled_main_lifecycle_ruleset_id: MANAGED_RULESET_ID,
   controlled_main_lifecycle_ruleset_enforcement: "active",
+  dependabot_merge_environment_enabled: true,
   dependabot_merge_app_credentials_enabled: true,
   dependabot_merge_writer_migration_verified: true,
   legacy_dependabot_auto_merge_drained: true,
@@ -117,6 +119,21 @@ function lifecycleRuleset(policy = TEST_POLICY) {
 
 function fixture(policy = TEST_POLICY) {
   return {
+    dependabotMergeDeploymentBranchPolicies: [
+      { id: 71, name: "main", type: "branch" },
+    ],
+    dependabotMergeEnvironment: {
+      can_admins_bypass: false,
+      deployment_branch_policy: {
+        custom_branch_policies: true,
+        protected_branches: false,
+      },
+      name: "dependabot-merge",
+    },
+    dependabotMergeEnvironmentSecretNames: [
+      "DEPENDABOT_MERGE_APP_ID",
+      "DEPENDABOT_MERGE_APP_PRIVATE_KEY",
+    ],
     rulesets: [coreRuleset(), lifecycleRuleset(policy)],
   };
 }
@@ -214,6 +231,45 @@ for (const [mutate, expected] of [
   [(value) => (value.rulesets[1].id = 999), "source-pinned ID"],
   [(value) => (value.rulesets[1].id = CORE_RULESET_ID), "source-pinned ID"],
   [(value) => (value.rulesets[1].enforcement = "disabled"), "enforcement"],
+  [
+    (value) => (value.dependabotMergeEnvironment.can_admins_bypass = true),
+    "disable admin bypass",
+  ],
+  [
+    (value) =>
+      (value.dependabotMergeEnvironment.deployment_branch_policy.protected_branches = true),
+    "custom deployment-branch policies",
+  ],
+  [
+    (value) =>
+      (value.dependabotMergeEnvironment.deployment_branch_policy.custom_branch_policies = false),
+    "custom deployment-branch policies",
+  ],
+  [
+    (value) => (value.dependabotMergeDeploymentBranchPolicies[0].name = "*"),
+    "exactly one deployment policy for branch main",
+  ],
+  [
+    (value) => (value.dependabotMergeDeploymentBranchPolicies[0].type = "tag"),
+    "exactly one deployment policy for branch main",
+  ],
+  [
+    (value) =>
+      value.dependabotMergeDeploymentBranchPolicies.push({
+        id: 72,
+        name: "release/*",
+        type: "branch",
+      }),
+    "exactly one deployment policy for branch main",
+  ],
+  [
+    (value) => value.dependabotMergeEnvironmentSecretNames.pop(),
+    "exactly the two reviewed secret metadata names",
+  ],
+  [
+    (value) => value.dependabotMergeEnvironmentSecretNames.push("UNREVIEWED"),
+    "exactly the two reviewed secret metadata names",
+  ],
 ]) {
   const candidate = fixture();
   mutate(candidate);
@@ -225,9 +281,24 @@ assert.equal(
   "malformed",
 );
 assert.equal(
-  evaluateMainRulesets({ rulesets: [null] }, { policy: TEST_POLICY }).status,
+  evaluateMainRulesets(
+    { ...fixture(), rulesets: [null] },
+    { policy: TEST_POLICY },
+  ).status,
   "malformed",
 );
+for (const field of [
+  "dependabotMergeEnvironment",
+  "dependabotMergeDeploymentBranchPolicies",
+  "dependabotMergeEnvironmentSecretNames",
+]) {
+  const candidate = fixture();
+  delete candidate[field];
+  assert.equal(
+    evaluateMainRulesets(candidate, { policy: TEST_POLICY }).status,
+    "malformed",
+  );
+}
 expectDrift(fixture(), "Team ID is missing", {
   ...TEST_POLICY,
   human_merge_operator_team_id: 0,
@@ -244,6 +315,12 @@ expectDrift(fixture(), "reuses the dedicated Dependabot merge App ID", {
   ...TEST_POLICY,
   local_agent_github_app_id: DEPENDABOT_MERGE_APP_ID,
 });
+for (const sharedAppId of [15368, 29110]) {
+  expectDrift(fixture(), "names the shared GitHub Actions or Dependabot App", {
+    ...TEST_POLICY,
+    local_agent_github_app_id: sharedAppId,
+  });
+}
 for (const sharedAppId of [15368, 29110]) {
   expectDrift(fixture(), "shared GitHub Actions or Dependabot App", {
     ...TEST_POLICY,
@@ -266,6 +343,10 @@ expectDrift(fixture(), "enabled dedicated-App credentials", {
   ...TEST_POLICY,
   dependabot_merge_app_credentials_enabled: false,
 });
+expectDrift(fixture(), "enabled main-only Environment", {
+  ...TEST_POLICY,
+  dependabot_merge_environment_enabled: false,
+});
 expectDrift(fixture(), "verified exact-head REST writer migration", {
   ...TEST_POLICY,
   dependabot_merge_writer_migration_verified: false,
@@ -277,6 +358,12 @@ expectDrift(fixture(), "absence of every legacy auto-merge request", {
 assert.equal(
   evaluateMainRulesets(fixture(), {
     policy: { ...TEST_POLICY, repository: "attacker/repo" },
+  }).status,
+  "malformed",
+);
+assert.equal(
+  evaluateMainRulesets(fixture(), {
+    policy: { ...TEST_POLICY, human_merge_operator_team_slug: "wrong-team" },
   }).status,
   "malformed",
 );
@@ -364,6 +451,7 @@ const sourceCanDescribeLiveRuleset =
   ![15368, 29110].includes(sourcePolicy.dependabot_merge_app_id) &&
   Number.isSafeInteger(sourcePolicy.local_agent_github_app_id) &&
   sourcePolicy.local_agent_github_app_id > 0 &&
+  ![15368, 29110].includes(sourcePolicy.local_agent_github_app_id) &&
   sourcePolicy.local_agent_github_app_id !==
     sourcePolicy.dependabot_merge_app_id &&
   Number.isSafeInteger(sourcePolicy.controlled_main_lifecycle_ruleset_id) &&
@@ -371,6 +459,7 @@ const sourceCanDescribeLiveRuleset =
   sourcePolicy.controlled_main_lifecycle_ruleset_id !== CORE_RULESET_ID;
 const sourceAuditShouldPass =
   sourceCanDescribeLiveRuleset &&
+  sourcePolicy.dependabot_merge_environment_enabled &&
   sourcePolicy.dependabot_merge_app_credentials_enabled &&
   sourcePolicy.dependabot_merge_writer_migration_verified &&
   sourcePolicy.legacy_dependabot_auto_merge_drained &&
@@ -411,11 +500,31 @@ const workflow = readFileSync(
 assert.match(workflow, /main-lifecycle-boundary-policy\.json/u);
 assert.match(
   workflow,
-  /ruleset audit is active but PLATFORM_SETTINGS_AUDIT_TOKEN is absent/iu,
+  /lifecycle audit is active but PLATFORM_SETTINGS_AUDIT_TOKEN is absent/iu,
 );
-assert.match(workflow, /main-ruleset-audit state=ok/u);
+assert.match(workflow, /main-lifecycle-boundary-audit state=ok/u);
 assert.match(workflow, /controlled-main-lifecycle/u);
 assert.match(workflow, /scripts\/workflows\/read-main-rulesets\.mjs/u);
+assert.match(
+  workflow,
+  /name: Ensure drift labels exist[\s\S]*?if: \$\{\{ !cancelled\(\) && \(steps\.check\.outputs\.state == 'drift' \|\| steps\.rulesets\.outputs\.state == 'drift'\) \}\}/u,
+  "a ruleset operational failure must not discard an earlier workflow-permission drift label path",
+);
+assert.match(
+  workflow,
+  /name: Open or update drift issue[\s\S]*?if: \$\{\{ !cancelled\(\) && steps\.check\.outputs\.state == 'drift' \}\}/u,
+  "a later ruleset failure must not discard the earlier workflow-permission drift issue",
+);
+assert.match(
+  workflow,
+  /name: Open or update main-lifecycle-boundary drift issue[\s\S]*?if: \$\{\{ !cancelled\(\) && steps\.rulesets\.outputs\.state == 'drift' \}\}/u,
+  "an earlier workflow-permission failure must not discard a detected lifecycle-boundary drift issue",
+);
+assert.match(
+  workflow,
+  /Administration:Read, Actions:Read, and Environments:Read/u,
+  "the workflow must document every read permission used by the live boundary audit",
+);
 assert.match(
   workflow,
   /audit_active[\s\S]*?= "false"[\s\S]*?state=inert/u,

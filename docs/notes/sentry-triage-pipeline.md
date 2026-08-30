@@ -1833,10 +1833,13 @@ The audit does not adopt or update the core ruleset. It is
 the ONLY platform credential deliberately given a CI surface with Administration
 scope, and it is **read-only** — it can never change a setting. Provision
 `platform_settings_audit_token` as a fine-grained PAT with **Administration:
-Read** (nothing else) on this repo, then apply the platform stack. Before the
+Read**, **Actions: Read**, and **Environments: Read** on this repo, then apply
+the platform stack. It reads both rulesets, the protected `dependabot-merge`
+Environment, its one branch policy, and its two secret metadata names. It does
+not read a public key or secret value. Before the
 ruleset cutover, the source activation flag keeps that check inert. After
 activation, an absent audit token fails the workflow. A successful activation
-proof contains `main-ruleset-audit state=ok`; `state=inert` is not proof. On
+proof contains `main-lifecycle-boundary-audit state=ok`; `state=inert` is not proof. On
 drift, the workflow opens a `drift-detection` + `stack:platform` issue for the
 affected invariant. Do not point this at the write-capable `github_token`
 (which stays local-only) or grant Administration to the autofix App. Fine-grained PATs

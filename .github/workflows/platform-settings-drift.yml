@@ -19,18 +19,24 @@ name: Platform Settings Drift Detection
 # mirroring terraform-drift's issue UX.
 #
 # INVARIANT (#2091): after the approved platform apply, the unchanged core
-# ruleset and the `controlled-main-lifecycle` ruleset match their exact pinned
-# shapes. The lifecycle ruleset covers creation, update, and deletion. It lets
-# only the human merge Team and the dedicated repository-scoped Dependabot
-# merge App bypass those lifecycle rules. The core ruleset stays unmanaged
-# until the GitHub provider can preserve
+# ruleset, the `controlled-main-lifecycle` ruleset, and the main-only
+# `dependabot-merge` Environment match their exact pinned shapes. The lifecycle
+# ruleset covers creation, update, and deletion. It lets only the human merge
+# Team and the dedicated repository-scoped Dependabot merge App bypass those
+# lifecycle rules. The Environment disables admin bypass, uses one exact
+# `main` branch policy, and exposes only the two reviewed secret names. The
+# audit never reads a public key or secret value. The core ruleset stays
+# unmanaged until the GitHub provider can preserve
 # `require_extra_approval_for_unattributed_changes` losslessly.
 #
 # CREDENTIAL. The reads hit `GET /repos/{owner}/{repo}/actions/permissions/
-# workflow` and the repository ruleset list/detail endpoints. They require
-# `administration: read`. Authenticated by the
+# workflow`, repository ruleset list/detail endpoints, and the Dependabot merge
+# Environment detail, deployment-policy, and secret-name endpoints. They
+# require Administration:Read, Actions:Read, and Environments:Read.
+# Authenticated by the
 # dedicated `PLATFORM_SETTINGS_AUDIT_TOKEN` secret — a fine-grained PAT with
-# Administration:Read on THIS repo only, scoped to the `sentry-pipeline`
+# Administration:Read, Actions:Read, and Environments:Read on THIS repo only,
+# scoped to the `sentry-pipeline`
 # GitHub Environment and modeled by the platform stack
 # (terraform/github-environment.tf). Deliberately NOT the autofix App (whose minimal
 # Contents+PR trust boundary we do not widen) and NOT the CI `TF_VAR_github_token`
@@ -136,10 +142,10 @@ jobs:
               ;;
           esac
 
-      - name: Read live main rulesets and evaluate drift
+      - name: Read live main lifecycle boundary and evaluate drift
         id: rulesets
         env:
-          # The same dedicated, repository-scoped Administration:Read PAT.
+          # The same dedicated repository-scoped read-only PAT.
           # It performs only GET requests. Issue writes use github.token.
           GH_TOKEN: ${{ secrets.PLATFORM_SETTINGS_AUDIT_TOKEN }}
           REPO: ${{ github.repository }}
@@ -159,7 +165,7 @@ jobs:
             exit 0
           fi
           if [ -z "${GH_TOKEN}" ]; then
-            echo "::error::Main-ruleset audit is active but PLATFORM_SETTINGS_AUDIT_TOKEN is absent. Provision the repository-scoped Administration:Read credential through the approved platform plan/apply."
+            echo "::error::Main-lifecycle audit is active but PLATFORM_SETTINGS_AUDIT_TOKEN is absent. Provision the repository-scoped Administration:Read, Actions:Read, and Environments:Read credential through the approved platform plan/apply."
             exit 1
           fi
 
@@ -168,7 +174,7 @@ jobs:
           capture_rc=$?
           set -e
           if [ "$capture_rc" -ne 0 ]; then
-            echo "::error::Could not read repository rulesets with PLATFORM_SETTINGS_AUDIT_TOKEN — token expired/revoked, lacks administration:read, or GitHub returned malformed data. Rotate it through the platform stack or inspect the fixed-error log."
+            echo "::error::Could not read the main lifecycle boundary with PLATFORM_SETTINGS_AUDIT_TOKEN — token expired/revoked, lacks a required read permission, or GitHub returned malformed data. Rotate it through the platform stack or inspect the fixed-error log."
             exit 1
           fi
 
@@ -189,20 +195,20 @@ jobs:
           case "${vc}" in
             0)
               echo "state=ok" >> "$GITHUB_OUTPUT"
-              echo "main-ruleset-audit state=ok"
+              echo "main-lifecycle-boundary-audit state=ok"
               ;;
             2)
               echo "state=drift" >> "$GITHUB_OUTPUT"
-              echo "::warning::Main-ruleset drift detected — opening/updating a drift-detection issue."
+              echo "::warning::Main lifecycle boundary drift detected — opening/updating a drift-detection issue."
               ;;
             *)
-              echo "::error::check-main-rulesets-drift.mjs failed (exit ${vc}) — malformed API response; investigate the workflow logs."
+              echo "::error::check-main-rulesets-drift.mjs failed (exit ${vc}) — malformed boundary API response; investigate the workflow logs."
               exit 1
               ;;
           esac
 
       - name: Ensure drift labels exist
-        if: steps.check.outputs.state == 'drift' || steps.rulesets.outputs.state == 'drift'
+        if: ${{ !cancelled() && (steps.check.outputs.state == 'drift' || steps.rulesets.outputs.state == 'drift') }}
         env:
           GH_TOKEN: ${{ github.token }}
         # `github.rest.issues.create()` SILENTLY DROPS unknown label names, so a
@@ -216,7 +222,7 @@ jobs:
           gh label create "stack:platform" --color "0e8a16" --description "Affects Terraform stack: platform" --force
 
       - name: Open or update drift issue
-        if: steps.check.outputs.state == 'drift'
+        if: ${{ !cancelled() && steps.check.outputs.state == 'drift' }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           VERDICT: ${{ steps.check.outputs.verdict }}
@@ -304,8 +310,8 @@ jobs:
               console.log(`Opened drift issue #${created.data.number}`);
             }
 
-      - name: Open or update main-ruleset drift issue
-        if: steps.rulesets.outputs.state == 'drift'
+      - name: Open or update main-lifecycle-boundary drift issue
+        if: ${{ !cancelled() && steps.rulesets.outputs.state == 'drift' }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           VERDICT: ${{ steps.rulesets.outputs.verdict }}
@@ -319,11 +325,12 @@ jobs:
             const now = new Date().toISOString();
             const marker = "<!-- platform-settings-drift:main-rulesets -->";
             const body =
-              `**Stack:** \`platform\` (repository rulesets)\n` +
+              `**Stack:** \`platform\` (main lifecycle boundary)\n` +
               `**Check:** controlled main lifecycle boundary\n` +
               `**Last checked:** ${now}\n` +
               `[Full workflow logs](${runUrl})\n\n` +
-              `The live repository rulesets differ from the approved source. This can ` +
+              `The live repository rulesets or protected Dependabot merge Environment differ ` +
+              `from the approved source. This can ` +
               `also mean that code on \`main\` has not received its separately approved ` +
               `platform apply. Do not repair this boundary with an unreviewed settings ` +
               `change. Run the full platform plan from a clean current \`main\` checkout, ` +
@@ -362,7 +369,7 @@ jobs:
                 issue_number: existing.number,
                 labels,
               });
-              console.log(`Updated existing main-ruleset drift issue #${existing.number}`);
+              console.log(`Updated existing main-lifecycle-boundary drift issue #${existing.number}`);
             } else {
               const created = await github.rest.issues.create({
                 owner: context.repo.owner,
@@ -371,7 +378,7 @@ jobs:
                 body,
                 labels,
               });
-              console.log(`Opened main-ruleset drift issue #${created.data.number}`);
+              console.log(`Opened main-lifecycle-boundary drift issue #${created.data.number}`);
             }
 
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0

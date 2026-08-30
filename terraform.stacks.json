@@ -16,7 +16,7 @@
       "id": "platform",
       "name": "Platform",
       "path": "terraform",
-      "description": "Dashboard Vercel project, the dashboard's read-only Grafana service account and token, Upstash Redis, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, explicit routine-deploy source buckets, separated CI Workload Identity Federation identities, project IAM, repo-level GitHub Actions secrets and variables, the controlled main lifecycle ruleset with human Team and dedicated Dependabot merge App bypasses, the source-pinned exact dedicated-App permission contract and distinct local-agent App identity, the source-gated local-agent App broker scaffold, and a dormant unapplied Peg-policy GCS source foundation. It owns no Grafana alert rules, folders, or dashboards.",
+      "description": "Dashboard Vercel project, the dashboard's read-only Grafana service account and token, Upstash Redis, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, explicit routine-deploy source buckets, separated CI Workload Identity Federation identities, project IAM, repo-level GitHub Actions secrets and variables, the controlled main lifecycle ruleset with human Team and dedicated Dependabot merge App bypasses, the source-gated main-only Dependabot merge Environment and its secrets, the source-pinned exact dedicated-App permission contract and distinct local-agent App identity, the source-gated local-agent App broker scaffold, and a dormant unapplied Peg-policy GCS source foundation. It owns no Grafana alert rules, folders, or dashboards.",
       "state": {
         "backend": "gcs",
         "bucket": "mento-terraform-tfstate-6ed6",

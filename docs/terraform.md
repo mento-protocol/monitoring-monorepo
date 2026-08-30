@@ -118,18 +118,34 @@ merge. The writer creates no standing auto-merge request. Shared GitHub Actions
 App `15368`, built-in Dependabot App `29110`, and the local-agent App are
 forbidden.
 
-The dedicated App credential phase creates only
-`DEPENDABOT_MERGE_APP_ID` and `DEPENDABOT_MERGE_APP_PRIVATE_KEY` as repository
-Actions secrets beside the disabled no-op ruleset. The resources use supported
-`value_encrypted` with one explicit repository Actions public-key ID. Terraform
+The dedicated App bootstrap uses two ordered source phases beside the disabled
+no-op ruleset. The first creates and protects the `dependabot-merge`
+Environment. It disables admin bypass and permits only the exact custom `main`
+branch policy. After a human verifies that live resource, the second phase
+creates `DEPENDABOT_MERGE_APP_ID` and
+`DEPENDABOT_MERGE_APP_PRIVATE_KEY` as Environment secrets. The resources use
+supported `value_encrypted` with one explicit Environment Actions public-key ID. Terraform
 and state receive ciphertext only. A one-secret rotation keeps the key ID. A
 public-key rotation updates both ciphertexts and both resource key IDs
 together. The guard also permits an exact missing-secret recovery beside the
 coherent disabled provisioning state or active state. If the key changed after
 a partial create, the same recovery creates the missing secret and updates the
 survivor's key ID and ciphertext. It rejects plaintext, deprecated
-`encrypted_value`, another secret store, a partial key rotation, and unrelated
+`encrypted_value`, another Environment or secret store, a partial key rotation, and unrelated
 changes.
+
+Do not add `environment: dependabot-merge` to the #2137 writer in either
+bootstrap phase. A workflow reference can auto-create an unprotected
+Environment. Only a separate reviewed writer change may add that reference and
+consume the secrets after the protected Environment, exact branch policy, and
+both secret metadata names exist live.
+
+The plan guard permits a strengthening-only repair after Environment drift. It
+requires a bounded known prior Environment shape, the provider's empty
+no-policy list, or a bounded branch pattern; the exact safe source shape after
+the update; an unchanged lifecycle ruleset; and no
+secret or unrelated change. Stop the writer and obtain separate apply approval
+before that repair.
 
 A separate source change enables the five-resource local-agent broker scaffold
 and pins its impersonator. Its first plan may create only that complete
@@ -155,7 +171,7 @@ auto-merge request must be absent. Source records both writer-migration and
 legacy-request absence evidence before the guard permits the active ruleset.
 Live proof binds the Team path, the local-agent denial, the dedicated-App
 routine merge and final actor, and an audit with
-`main-ruleset-audit state=ok`.
+`main-lifecycle-boundary-audit state=ok`.
 
 Vercel retains Administration plus Contents as a Free-plan residual. It can
 change the rule and then `main`; drift is detective only.
@@ -397,8 +413,10 @@ Sentry credential routing lives in
 
 ## GitHub Environments
 
-All three Environments are Terraform-managed in
-`terraform/github-environment.tf` and restrict deployments with an **explicit
+The three current shared Environments are Terraform-managed in
+`terraform/github-environment.tf`. The source-gated `dependabot-merge`
+Environment is managed in
+`terraform/github-dependabot-merge-app-credentials.tf`. All four restrict deployments with an **explicit
 `main` branch pattern** (`custom_branch_policies = true` plus a
 `github_repository_environment_deployment_policy`), never
 `protected_branches = true`.
@@ -452,6 +470,13 @@ secrets. Every secret-bearing Sentry job declares it, so those secrets are
 reachable only from `main`, server-enforced even on a branch-modified
 `workflow_dispatch`. `CLAUDE_CODE_OAUTH_TOKEN` intentionally stays repo-level
 for `claude.yml`.
+
+`dependabot-merge` (issue #2091, ADR 0080) has admin bypass disabled, no
+reviewer, and one exact custom `main` branch policy. Its only secret metadata
+names are `DEPENDABOT_MERGE_APP_ID` and
+`DEPENDABOT_MERGE_APP_PRIVATE_KEY`. The daily platform-settings audit reads
+only the Environment, deployment-policy, and secret-name metadata. It never
+reads a public key or secret value.
 
 Never recreate retired `Production`/`production` names or manage
 Environment secrets outside their owning IaC/integration path. A new workflow
