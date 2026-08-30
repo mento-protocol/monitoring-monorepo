@@ -54,7 +54,7 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 
 ## Why Files Stay Flat
 
-`scripts/` has 14 path-pin classes. Move each pin with its file, except the
+`scripts/` has 15 path-pin classes. Move each pin with its file, except the
 `agent-autoreview.sh` feedback-runtime pins.
 
 - **Autoreview runtime pins.** `agent-autoreview.sh` pins runtime,

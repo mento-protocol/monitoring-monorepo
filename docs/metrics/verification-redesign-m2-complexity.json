@@ -150,8 +150,8 @@
     {
       "path": "scripts/AGENTS.md",
       "category": "doc",
-      "additions": 8,
-      "deletions": 8
+      "additions": 9,
+      "deletions": 9
     },
     {
       "path": "scripts/agent-quality-gate.sh",
@@ -164,6 +164,12 @@
       "category": "test",
       "additions": 24,
       "deletions": 18
+    },
+    {
+      "path": "scripts/bootstrap/claude-code-web-setup.sh",
+      "category": "check",
+      "additions": 4,
+      "deletions": 4
     },
     {
       "path": "scripts/gate/quality-gate-coordinator-support.sh",
@@ -232,8 +238,8 @@
       "net": 31
     },
     "check": {
-      "additions": 347,
-      "deletions": 88,
+      "additions": 351,
+      "deletions": 92,
       "net": 259
     },
     "test": {
@@ -242,8 +248,8 @@
       "net": 413
     },
     "doc": {
-      "additions": 247,
-      "deletions": 78,
+      "additions": 248,
+      "deletions": 79,
       "net": 169
     }
   }
