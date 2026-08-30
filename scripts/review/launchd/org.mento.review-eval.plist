@@ -8,10 +8,11 @@
   This file is a template and is not installable as it stands. A plist has no
   variable substitution, so the checkout inside ProgramArguments and the log
   file in StandardOutPath and StandardErrorPath carry __REPO_CHECKOUT__ and
-  __USER_HOME__ placeholders. PATH also carries __NODE_BIN_DIR__, which the
-  install step resolves from the operator's current Node executable. "Install
-  the scheduler" in docs/evals/review-skill.md replaces all three values; copy
-  this file unchanged and launchd cannot find the script, Node, or its log.
+  __USER_HOME__ placeholders. PATH also carries __RUNTIME_BIN_DIRS__, which the
+  install step resolves from the operator's current Node, Git, Codex, and Claude
+  executables. "Install the scheduler" in docs/evals/review-skill.md replaces
+  all three values; copy this file unchanged and launchd cannot find the script,
+  required CLIs, or its log.
 -->
 <plist version="1.0">
   <dict>
@@ -30,7 +31,7 @@
     <key>EnvironmentVariables</key>
     <dict>
       <key>PATH</key>
-      <string>__NODE_BIN_DIR__:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+      <string>__RUNTIME_BIN_DIRS__:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>
     <key>StartCalendarInterval</key>
     <array>

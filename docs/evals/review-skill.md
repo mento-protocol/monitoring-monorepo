@@ -312,10 +312,11 @@ human still has to finish the job.
 
 The plist is a template. A plist has no variable substitution, so the install
 step replaces three placeholders: `__REPO_CHECKOUT__` (the checkout that holds
-`run-eval.sh`), `__USER_HOME__` (the log location), and `__NODE_BIN_DIR__` (the
-directory that holds the current `node` executable). launchd does not read an
-interactive shell's `.zshrc`, so it cannot otherwise find Node installations
-managed by Volta or a similar tool. Run this from the root of your checkout.
+`run-eval.sh`), `__USER_HOME__` (the log location), and
+`__RUNTIME_BIN_DIRS__` (the directories that hold the current `node`, `git`,
+`codex`, and `claude` executables). launchd does not read an interactive
+shell's `.zshrc`, so it cannot otherwise find tools installed by Volta or in
+another user bin directory. Run this from the root of your checkout.
 
 ```bash
 (
@@ -323,22 +324,27 @@ managed by Volta or a similar tool. Run this from the root of your checkout.
   template="scripts/review/launchd/org.mento.review-eval.plist"
   target="$HOME/Library/LaunchAgents/org.mento.review-eval.plist"
   repo_checkout="$PWD"
-  if ! node_bin="$(command -v node)"; then
-    echo "node is not on PATH" >&2
-    exit 1
-  fi
-  case "$node_bin" in
-    /*) ;;
-    *) echo "node must resolve to an absolute path" >&2; exit 1 ;;
-  esac
-  node_bin_dir="$(dirname "$node_bin")"
+  runtime_bin_dirs=""
+  for command_name in node git codex claude; do
+    if ! command_path="$(command -v "$command_name")"; then
+      echo "$command_name is not on PATH" >&2
+      exit 1
+    fi
+    case "$command_path" in
+      /*) ;;
+      *) echo "$command_name must resolve to an absolute path" >&2; exit 1 ;;
+    esac
+    command_dir="$(dirname "$command_path")"
+    runtime_bin_dirs="${runtime_bin_dirs:+$runtime_bin_dirs:}$command_dir"
+  done
+  runtime_path="$runtime_bin_dirs:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
   mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
   cp "$template" "$target"
   /usr/bin/plutil -remove ProgramArguments.4 "$target"
   /usr/bin/plutil -insert ProgramArguments.4 \
     -string "$repo_checkout/scripts/review/run-eval.sh" "$target"
   /usr/bin/plutil -replace EnvironmentVariables.PATH \
-    -string "$node_bin_dir:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" "$target"
+    -string "$runtime_path" "$target"
   /usr/bin/plutil -replace StandardOutPath \
     -string "$HOME/Library/Logs/mento-review-eval.log" "$target"
   /usr/bin/plutil -replace StandardErrorPath \
@@ -347,17 +353,18 @@ managed by Volta or a similar tool. Run this from the root of your checkout.
   test "$(/usr/bin/plutil -extract ProgramArguments.4 raw -o - "$target")" = \
     "$repo_checkout/scripts/review/run-eval.sh"
   test "$(/usr/bin/plutil -extract EnvironmentVariables.PATH raw -o - "$target")" = \
-    "$node_bin_dir:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    "$runtime_path"
   launchctl bootstrap gui/"$(id -u)" "$target"
 )
 ```
 
-The two `plutil -extract` checks verify the script path and Node path before
-launchd loads the file. The guarded block stops before `bootstrap` if a render
-or validation command fails. Each `plutil` mutation receives its path as one
-argument, so spaces and XML metacharacters in a checkout or home path stay
-data. launchd reports a missing program only in its log, and a template with
-unresolved values can look installed while it never runs.
+The two `plutil -extract` checks verify the script path and required CLI path
+before launchd loads the file. The guarded block stops before `bootstrap` if a
+required CLI is missing or a render or validation command fails. Each `plutil`
+mutation receives its path as one argument, so spaces and XML metacharacters in
+a checkout, home path, or CLI path stay data. launchd reports a missing program
+only in its log, and a template with unresolved values can look installed while
+it never runs.
 
 Run this separate opt-in command only when you intend to start a paid
 evaluation immediately:

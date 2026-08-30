@@ -6577,8 +6577,8 @@ test("the launchd template carries safe arguments and installed PATH placeholder
     ...new Set([...plist.matchAll(/__[A-Z_]+__/g)].map((match) => match[0])),
   ].sort();
   assert.deepEqual(tokens, [
-    "__NODE_BIN_DIR__",
     "__REPO_CHECKOUT__",
+    "__RUNTIME_BIN_DIRS__",
     "__USER_HOME__",
   ]);
   for (const token of tokens) {
@@ -6605,9 +6605,14 @@ test("the launchd template carries safe arguments and installed PATH placeholder
   ]);
   assert.match(
     plist,
-    /<key>PATH<\/key>\s*<string>__NODE_BIN_DIR__:\/usr\/local\/bin:/,
+    /<key>PATH<\/key>\s*<string>__RUNTIME_BIN_DIRS__:\/usr\/local\/bin:/,
   );
-  assert.match(runbook, /node_bin="\$\(command -v node\)"/);
+  assert.match(runbook, /for command_name in node git codex claude/);
+  assert.match(runbook, /command_path="\$\(command -v "\$command_name"\)"/);
+  assert.match(
+    runbook,
+    /runtime_path="\$runtime_bin_dirs:\/usr\/local\/bin:\/usr\/bin:/,
+  );
   assert.match(runbook, /plutil -remove ProgramArguments\.4/);
   assert.match(runbook, /plutil -insert ProgramArguments\.4/);
   assert.match(runbook, /plutil -replace EnvironmentVariables\.PATH/);
@@ -6649,9 +6654,16 @@ test(
       const checkout = path.join(root, "checkout");
       const taskHome = path.join(root, "home");
       const fakeBin = path.join(root, "bin");
+      const runtimeCommands = ["node", "git", "codex", "claude"];
+      const runtimeBinDirs = runtimeCommands.map((commandName) =>
+        path.join(root, `${commandName} & bin`),
+      );
       const templateDir = path.join(checkout, "scripts/review/launchd");
       mkdirSync(templateDir, { recursive: true });
       mkdirSync(fakeBin, { recursive: true });
+      for (const runtimeBinDir of runtimeBinDirs) {
+        mkdirSync(runtimeBinDir, { recursive: true });
+      }
       cpSync(
         path.join(
           repoRoot,
@@ -6660,10 +6672,14 @@ test(
         path.join(templateDir, "org.mento.review-eval.plist"),
       );
 
-      const fakeNode = path.join(fakeBin, "node");
       const fakePlutil = path.join(fakeBin, "plutil");
       const fakeLaunchctl = path.join(fakeBin, "launchctl");
-      writeFileSync(fakeNode, "#!/bin/sh\nexit 0\n");
+      const fakeRuntimeCommands = runtimeCommands.map((commandName, index) =>
+        path.join(runtimeBinDirs[index], commandName),
+      );
+      for (const fakeRuntimeCommand of fakeRuntimeCommands) {
+        writeFileSync(fakeRuntimeCommand, "#!/bin/sh\nexit 0\n");
+      }
       writeFileSync(
         fakePlutil,
         `#!/bin/sh
@@ -6690,7 +6706,11 @@ fi
 printf '%s\\n' "$*" >> "$REVIEW_EVAL_LAUNCHCTL_LOG"
 `,
       );
-      for (const executable of [fakeNode, fakePlutil, fakeLaunchctl]) {
+      for (const executable of [
+        ...fakeRuntimeCommands,
+        fakePlutil,
+        fakeLaunchctl,
+      ]) {
         chmodSync(executable, 0o755);
       }
 
@@ -6700,7 +6720,7 @@ printf '%s\\n' "$*" >> "$REVIEW_EVAL_LAUNCHCTL_LOG"
         realpathSync(checkout),
         "scripts/review/run-eval.sh",
       );
-      const expectedPath = `${fakeBin}:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`;
+      const expectedPath = `${runtimeBinDirs.join(":")}:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`;
       const guardedInstall = installBlock.replaceAll(
         "/usr/bin/plutil",
         `"${fakePlutil}"`,
@@ -6715,7 +6735,7 @@ printf '%s\\n' "$*" >> "$REVIEW_EVAL_LAUNCHCTL_LOG"
           encoding: "utf8",
           env: {
             HOME: taskHome,
-            PATH: `${fakeBin}:/usr/bin:/bin`,
+            PATH: `${runtimeBinDirs.join(":")}:${fakeBin}:/usr/bin:/bin`,
             REVIEW_EVAL_EXPECTED_PATH: expectedPath,
             REVIEW_EVAL_EXPECTED_SCRIPT: expectedScript,
             REVIEW_EVAL_LAUNCHCTL_LOG: launchctlLog,
@@ -6769,7 +6789,14 @@ test(
         "checkout & eval",
         "scripts/review/run-eval.sh",
       );
-      const nodePath = `${path.join(root, "node & bin")}:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`;
+      const runtimePath = `${[
+        "node & bin",
+        "git & bin",
+        "codex & bin",
+        "claude & bin",
+      ]
+        .map((directory) => path.join(root, directory))
+        .join(":")}:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`;
       const logPath = path.join(root, "Logs", "review & eval.log");
       cpSync(
         path.join(
@@ -6785,7 +6812,7 @@ test(
       for (const args of [
         ["-remove", "ProgramArguments.4"],
         ["-insert", "ProgramArguments.4", "-string", script],
-        ["-replace", "EnvironmentVariables.PATH", "-string", nodePath],
+        ["-replace", "EnvironmentVariables.PATH", "-string", runtimePath],
         ["-replace", "StandardOutPath", "-string", logPath],
         ["-replace", "StandardErrorPath", "-string", logPath],
       ]) {
@@ -6806,7 +6833,7 @@ test(
         "--kind",
         "auto",
       ]);
-      assert.equal(extract("EnvironmentVariables.PATH"), nodePath);
+      assert.equal(extract("EnvironmentVariables.PATH"), runtimePath);
       assert.equal(extract("StandardOutPath"), logPath);
       assert.equal(extract("StandardErrorPath"), logPath);
     } finally {
