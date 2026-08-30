@@ -527,30 +527,49 @@ export async function listIssueComments(
   return comments;
 }
 
-export async function getPrIssues(options) {
+export async function getPrIssues(options, { graphql = ghGraphql } = {}) {
   if (!options.pr) return [];
   const repo = splitRepo(options.repo);
-  const response = await ghGraphql(
-    `query($owner:String!,$repo:String!,$number:Int!){
-      repository(owner:$owner,name:$repo){
-        pullRequest(number:$number){
-          id
-          state
-          closingIssuesReferences(first:100){
-            nodes {
-              number
-              repository {
-                nameWithOwner
+  const response = await graphql(
+    `
+      query ($owner: String!, $repo: String!, $number: Int!) {
+        repository(owner: $owner, name: $repo) {
+          pullRequest(number: $number) {
+            id
+            state
+            closingIssuesReferences(first: 100) {
+              nodes {
+                number
+                repository {
+                  nameWithOwner
+                }
+              }
+              pageInfo {
+                hasNextPage
               }
             }
           }
         }
       }
-    }`,
+    `,
     { owner: repo.owner, repo: repo.name, number: options.pr },
   );
   const pr = validateOpenPr(response?.data?.repository?.pullRequest, options);
-  const issues = pr.closingIssuesReferences?.nodes ?? [];
+  const connection = pr.closingIssuesReferences;
+  if (
+    !Array.isArray(connection?.nodes) ||
+    typeof connection.pageInfo?.hasNextPage !== "boolean"
+  ) {
+    throw new Error(
+      `PR #${options.pr} closing issue lookup returned an incomplete page`,
+    );
+  }
+  if (connection.pageInfo.hasNextPage) {
+    throw new Error(
+      `PR #${options.pr} has more than 100 closing issue references; pass --issue/--issues explicitly so review does not use an incomplete issue set`,
+    );
+  }
+  const issues = connection.nodes;
   return issues
     .filter((issue) => issue?.repository?.nameWithOwner === repo.nameWithOwner)
     .map((issue) => issue.number)

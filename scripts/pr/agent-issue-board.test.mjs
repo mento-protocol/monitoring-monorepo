@@ -81,6 +81,7 @@ import {
 } from "./issue-board-lock.mjs";
 import {
   getIssue,
+  getPrIssues,
   listIssueComments,
   listIssuesByLabels,
   listOpenPullRequestsForBranch,
@@ -2667,6 +2668,97 @@ test("issue lookup rejects incomplete Project item pages before using nodes", as
         }),
       /Project item lookup returned an incomplete page/,
       name,
+    );
+  }
+});
+
+function prIssuesResponse(connection) {
+  return {
+    data: {
+      repository: {
+        pullRequest: {
+          id: "pr-node-123",
+          state: "OPEN",
+          closingIssuesReferences: connection,
+        },
+      },
+    },
+  };
+}
+
+test("PR closing issue inference accepts only a complete first page", async () => {
+  let queryText = "";
+  const options = { ...LOCK_TEST_OPTIONS, pr: 123 };
+  const issues = await getPrIssues(options, {
+    graphql: async (query, variables) => {
+      queryText = query;
+      assertEqual(variables.owner, "mento-protocol");
+      assertEqual(variables.repo, "monitoring-monorepo");
+      assertEqual(variables.number, 123);
+      return prIssuesResponse({
+        nodes: [
+          {
+            number: 901,
+            repository: {
+              nameWithOwner: "mento-protocol/monitoring-monorepo",
+            },
+          },
+          {
+            number: 902,
+            repository: {
+              nameWithOwner: "mento-protocol/other",
+            },
+          },
+          {
+            number: "903",
+            repository: {
+              nameWithOwner: "mento-protocol/monitoring-monorepo",
+            },
+          },
+          null,
+        ],
+        pageInfo: { hasNextPage: false },
+      });
+    },
+  });
+
+  assert(
+    queryText.includes("closingIssuesReferences(first: 100)"),
+    "PR issue inference must use the bounded closing issue connection",
+  );
+  assert(
+    queryText.includes("pageInfo"),
+    "PR issue inference must request pagination state",
+  );
+  assertDeepEqual(issues, [901]);
+});
+
+test("PR closing issue inference rejects incomplete or paginated connections", async () => {
+  const cases = [
+    [
+      { nodes: [], pageInfo: { hasNextPage: true } },
+      /more than 100 closing issue references/,
+    ],
+    [{ nodes: [] }, /closing issue lookup returned an incomplete page/],
+    [null, /closing issue lookup returned an incomplete page/],
+    [
+      { nodes: null, pageInfo: { hasNextPage: false } },
+      /closing issue lookup returned an incomplete page/,
+    ],
+    [
+      { nodes: [], pageInfo: { hasNextPage: null } },
+      /closing issue lookup returned an incomplete page/,
+    ],
+  ];
+
+  for (const [connection, pattern] of cases) {
+    const options = { ...LOCK_TEST_OPTIONS, pr: 123 };
+    await assertRejects(
+      () =>
+        getPrIssues(options, {
+          graphql: async () => prIssuesResponse(connection),
+        }),
+      pattern,
     );
   }
 });

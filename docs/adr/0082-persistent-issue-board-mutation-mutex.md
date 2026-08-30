@@ -500,10 +500,11 @@ they use any item node. A truncated page, missing pagination state, title-only
 Project snapshot, missing Status, or duplicate selected Project items fails
 closed.
 
-Project fields, ownership, Status, backfill values, and issue comments also
-fail closed on incomplete GraphQL connections. Every page must contain a nodes
-array and a boolean `hasNextPage`. A one-page reader requires
-`hasNextPage: false`. A paginated reader applies the same check to every page.
+Project fields, ownership, Status, backfill values, issue comments, and PR
+closing issue inference also fail closed on incomplete GraphQL connections.
+Every page must contain a nodes array and a boolean `hasNextPage`. A one-page
+reader requires `hasNextPage: false`. A paginated reader applies the same check
+to every page.
 
 The Project API has no Status compare-and-swap. The human-owned boundary removes
 the overwrite race from the helper contract. A direct Status write before a

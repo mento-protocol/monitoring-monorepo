@@ -156,7 +156,8 @@ exception, use the MCP and gh-capable handoff in
 [`github-tooling-surfaces.md`](github-tooling-surfaces.md).
 
 Claim can use the live ready queue or explicit issue numbers. Review can infer
-same-repository `closingIssuesReferences`; pass `--issue` for `Refs` or mixed
+same-repository `closingIssuesReferences` only when the first 100-reference page
+is complete. Pass `--issue` or `--issues` for larger PRs, `Refs`, or mixed
 complete and partial scope.
 
 `--sweep-eligible` requires an explicit issue, Claim ID, `--branch`, and
