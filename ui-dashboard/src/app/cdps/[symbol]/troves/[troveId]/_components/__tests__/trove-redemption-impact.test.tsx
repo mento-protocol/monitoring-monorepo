@@ -105,7 +105,7 @@ function ledgerState(
 ): TroveLedgerState {
   return {
     supported: true,
-    probeFailed: false,
+    probeState: "checked",
     rows: [],
     truncated: false,
     complete: true,
@@ -386,6 +386,9 @@ describe("TroveRedemptionImpact", () => {
     const body = text();
     expect(body).toContain("Lifetime totals from the trove");
     expect(body).toContain("pending indexer rollout");
+    expect(
+      handle!.container.querySelector('[role="status"]')?.textContent,
+    ).toContain("pending indexer rollout");
     // Cumulative totals still answer half the ticket (from the header row).
     expect(body).toContain("-18,450.82 GBPm");
     expect(body).toContain("-25,163.91 USDm");
@@ -412,13 +415,20 @@ describe("TroveRedemptionImpact", () => {
     expect(ledger.refetch).not.toHaveBeenCalled();
   });
 
-  it("switches to the explicit batch notice when a debt snapshot is null", () => {
-    const ledger = ticketLedgerState({ debtSnapshotsComplete: false });
+  it("shows reconciled per-hit figures for batch-managed rows with complete event fields", () => {
+    const rows = ticketRows().map((row) =>
+      row.operation === 6 ? { ...row, debtBefore: null } : row,
+    );
+    const ledger = ticketLedgerState({
+      rows,
+      debtSnapshotsComplete: false,
+    });
     render({ ledger });
 
     const body = text();
-    expect(body).toContain("Batch data unavailable");
-    expect(body).not.toContain("Net equity");
+    expect(body).toContain("Net equity at oracle prices");
+    expect(body).toContain("all rebalancing");
+    expect(body).not.toContain("Batch data unavailable");
     expect(ledger.refetch).not.toHaveBeenCalled();
   });
 

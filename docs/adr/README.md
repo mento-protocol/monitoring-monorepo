@@ -88,6 +88,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0076](0076-fair-quality-gate-coordinator.md)               | Fair weighted coordination replaces machine-wide full-run gate exclusion             |
 | [0077](0077-operator-triggered-backlog-sweep.md)            | Backlog sweeps start from an operator, run isolated workers, and stop at READY       |
 | [0078](0078-staged-verification-redesign.md)                | Staged existing-CI replacement of the mandatory local gate                           |
+| [0079](0079-sealed-exact-file-patch-secret-suppression.md)  | Autoreview permits only sealed exact-file-patch secret suppression                   |
 
 ### shared-config
 

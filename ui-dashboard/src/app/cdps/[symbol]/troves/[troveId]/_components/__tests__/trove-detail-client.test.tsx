@@ -299,6 +299,7 @@ describe("TroveDetailClient", () => {
     troveError = null,
     operationRows = [op()],
     troveSchema = TROVE_SCHEMA_WITH_TX,
+    troveSchemaResolved = true,
     troveSchemaError = null,
     interestBatchRows,
     interestBatchError = null,
@@ -316,8 +317,11 @@ describe("TroveDetailClient", () => {
       | typeof TROVE_SCHEMA_WITH_TX
       | typeof TROVE_SCHEMA_WITHOUT_TX
       | typeof TROVE_SCHEMA_WITH_LEDGER;
-    /** When set, the probe reports never-succeeded + errored (`data`
-     *  undefined), the check-failed case — `troveSchema` is ignored. */
+    /** False leaves probe data undefined. Pair it with no error for the
+     *  unresolved state or an error for the never-succeeded failure. */
+    troveSchemaResolved?: boolean;
+    /** Independent of cached data: with resolved data this is stale;
+     *  without data it is a never-succeeded check failure. */
     troveSchemaError?: Error | null;
     /** `undefined` (default) simulates "never resolved" (loading, or a
      *  failure with nothing cached) — `data` stays `undefined`, matching
@@ -345,9 +349,11 @@ describe("TroveDetailClient", () => {
         return { data: markets, error: marketsError, isLoading: false };
       }
       if (query === CDP_TROVE_SCHEMA_FIELDS) {
-        return troveSchemaError != null
-          ? { data: undefined, error: troveSchemaError, isLoading: false }
-          : { data: troveSchema, error: null, isLoading: false };
+        return {
+          data: troveSchemaResolved ? troveSchema : undefined,
+          error: troveSchemaError,
+          isLoading: !troveSchemaResolved && troveSchemaError == null,
+        };
       }
       if (query === CDP_TROVE_BY_ID || query === CDP_TROVE_BY_ID_WITHOUT_TX) {
         return {
@@ -1004,14 +1010,53 @@ describe("TroveDetailClient", () => {
     expect(text).toContain("Per-redemption detail pending indexer rollout");
     // Checked-absent: the check-failed disclosure must NOT render.
     expect(text).not.toContain("availability check failed");
+    const statuses = Array.from(
+      handle!.container.querySelectorAll('[role="status"]'),
+    ).map((node) => node.textContent ?? "");
+    expect(
+      statuses.filter((status) => status.includes("pending indexer rollout")),
+    ).toHaveLength(2);
     expect(text).not.toContain("Trove ledger");
     expect(mockUseGQL.mock.calls.some(([q]) => q === CDP_TROVE_LEDGER)).toBe(
       false,
     );
   });
 
+  it("uses neutral status copy in both partial surfaces while the schema probe is unresolved", () => {
+    mockQueries({ troveSchemaResolved: false });
+    render(handle!);
+
+    const text = handle!.container.textContent ?? "";
+    expect(text).toContain("Trove operations");
+    expect(text).not.toContain("pending indexer rollout");
+    expect(text).not.toContain("availability check failed");
+    const statuses = Array.from(
+      handle!.container.querySelectorAll('[role="status"]'),
+    ).map((node) => node.textContent ?? "");
+    expect(
+      statuses.some((status) =>
+        status.includes(
+          "Checking complete-history availability — showing the interim view",
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      statuses.some((status) =>
+        status.includes(
+          "Checking complete-history availability before per-hit detail",
+        ),
+      ),
+    ).toBe(true);
+    expect(mockUseGQL.mock.calls.some(([q]) => q === CDP_TROVE_LEDGER)).toBe(
+      false,
+    );
+  });
+
   it("discloses a failed schema probe instead of claiming a pending rollout", () => {
-    mockQueries({ troveSchemaError: new Error("probe timeout") });
+    mockQueries({
+      troveSchemaResolved: false,
+      troveSchemaError: new Error("probe timeout"),
+    });
     render(handle!);
 
     const text = handle!.container.textContent ?? "";
@@ -1023,6 +1068,35 @@ describe("TroveDetailClient", () => {
     // But the cause is named — the rollout wording alone would misattribute
     // a backend failure to a pending rollout.
     expect(text).toContain("complete-history availability check failed");
+    expect(text).not.toContain("pending indexer rollout");
+    const statuses = Array.from(
+      handle!.container.querySelectorAll('[role="status"]'),
+    ).map((node) => node.textContent ?? "");
+    expect(
+      statuses.filter((status) =>
+        status.includes("complete-history availability check failed"),
+      ),
+    ).toHaveLength(2);
+  });
+
+  it("discloses a failed refresh behind a cached absent answer without claiming a pending rollout", () => {
+    mockQueries({ troveSchemaError: new Error("probe refresh failed") });
+    render(handle!);
+
+    const text = handle!.container.textContent ?? "";
+    expect(text).toContain("Trove operations");
+    expect(text).not.toContain("pending indexer rollout");
+    const statuses = Array.from(
+      handle!.container.querySelectorAll('[role="status"]'),
+    ).map((node) => node.textContent ?? "");
+    expect(
+      statuses.filter((status) =>
+        status.includes("availability check could not refresh"),
+      ),
+    ).toHaveLength(2);
+    expect(mockUseGQL.mock.calls.some(([q]) => q === CDP_TROVE_LEDGER)).toBe(
+      false,
+    );
   });
 
   it("renders the complete ledger — and disables the interim query — once the gate opens", () => {
@@ -1066,6 +1140,31 @@ describe("TroveDetailClient", () => {
       troveEntityId: "gbpm-0x8abc",
       limit: 1000,
     });
+  });
+
+  it("keeps a cached supported gate open and discloses its failed availability refresh", () => {
+    mockQueries({
+      troveSchema: TROVE_SCHEMA_WITH_LEDGER,
+      troveSchemaError: new Error("probe refresh failed"),
+      ledgerRows: [ledgerEvent()],
+    });
+    render(handle!);
+
+    const text = handle!.container.textContent ?? "";
+    expect(text).toContain("Trove ledger");
+    expect(text).toContain("using the last confirmed available result");
+    expect(text).not.toContain("pending indexer rollout");
+    const statuses = Array.from(
+      handle!.container.querySelectorAll('[role="status"]'),
+    ).map((node) => node.textContent ?? "");
+    expect(
+      statuses.some((status) =>
+        status.includes("availability check could not refresh"),
+      ),
+    ).toBe(true);
+    expect(mockUseGQL.mock.calls.some(([q]) => q === CDP_TROVE_LEDGER)).toBe(
+      true,
+    );
   });
 
   it("upgrades from interim to full ledger when a probe poll finds the entity — a re-evaluation, not a latch", () => {

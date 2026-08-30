@@ -99,7 +99,6 @@ function classifyArgs(
     supported: true,
     hasLoadedOnce: true,
     truncated: false,
-    debtSnapshotsComplete: true,
     rows: [hit()],
     watermark,
     cumulatives: watermark,
@@ -267,12 +266,11 @@ describe("classifyTroveRedemptionImpact", () => {
     ).toEqual({ kind: "totals", reason: "truncated" });
   });
 
-  it("switches to the batch notice when any row's debt snapshot is null", () => {
-    expect(
-      classifyTroveRedemptionImpact(
-        classifyArgs({ debtSnapshotsComplete: false }),
-      ),
-    ).toEqual({ kind: "totals", reason: "batch" });
+  it("reconciles a batch-managed redemption row with a null debt snapshot", () => {
+    const result = classifyTroveRedemptionImpact(
+      classifyArgs({ rows: [hit({ debtBefore: null })] }),
+    );
+    expect(result.kind).toBe("reconciled");
   });
 
   it("skips the check — no mismatch claim — when the watermark does not equal the newest row's pair", () => {
