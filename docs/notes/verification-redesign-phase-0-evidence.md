@@ -83,10 +83,10 @@ package-script checker from the 95,815 whole-file implementation and test lines
 leaves 83,113 lines as an upper-bound deletion candidate. This is not the final
 gate-specific denominator. The gate test suite mixes retained package-policy
 coverage with gate-only tests. The routing-table family mixes retained
-workflow-pin and generated-drift behavior with deferred local routing. Issues
-#2127 and #2128 must allocate or migrate these retained components, publish the
-reviewed final denominator, and only then apply the 80% target. The target does
-not apply to the 101,595-line raw before manifest.
+workflow-pin and generated-drift behavior with deferred local routing.
+Issues #2127 and #2128 must allocate or migrate these retained components. They
+must publish the reviewed final denominator before they apply the 80% target.
+The target does not apply to the 101,595-line raw before manifest.
 
 PR #2134 advanced the pre-M1 boundary from the #2042 terminal commit
 `e0346ec4756f9577bcbb1e13e06566ccc507e9e4`. It adds 46 whole-file lines to the

@@ -859,7 +859,7 @@ a separate plan and evidence that the current filters cannot meet the target.
 Do not cut over until every unlabelled pre-cutover requirement passes. Evaluate
 requirements marked **Post-cutover soak** during the #2127 and #2128 soak.
 Evaluate requirements marked **Deletion gate** immediately before the separate
-#2128 deletion approval.
+Issue #2128 deletion approval.
 
 ### Coverage
 
