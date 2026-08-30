@@ -5883,8 +5883,8 @@ test("the freshness workflow watches the frozen input directories", () => {
   // form is what reaches docs/evals/review-skill-truth/ and its siblings.
   assert.match(workflow, /- docs\/evals\/review-skill\*\*/);
   assert.doesNotMatch(workflow, /- docs\/evals\/review-skill\*$/m);
-  // Every step of the job runs a `review:eval*` alias, so a PR that renames or
-  // removes one has to run this workflow.
+  // Every contract-job command runs a `review:eval*` alias, so a PR that
+  // renames or removes one has to run this workflow.
   assert.match(workflow, /^ {6}- package\.json$/m);
   // Publication relies on the root ignore rule to keep raw cells out of Git
   // and autoreview bundles, so an ignore-only edit must run this suite too.
@@ -5900,6 +5900,11 @@ test("the freshness workflow watches the frozen input directories", () => {
   for (const alias of aliases) {
     assert.ok(scripts[alias], `package.json has no ${alias} script`);
   }
+  assert.match(
+    workflow,
+    /node scripts\/review\/review-eval-freshness-publication\.mjs --json/,
+  );
+  assert.doesNotMatch(workflow, /pnpm review:eval -- --schedule-issue --json/);
 });
 
 test("required CI routes the nested frozen inputs to the scripts job", () => {

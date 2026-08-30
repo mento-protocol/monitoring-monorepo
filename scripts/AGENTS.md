@@ -3,7 +3,7 @@ title: Scripts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-29
+last_verified: 2026-08-30
 doc_type: agent-instructions
 scope: scripts
 review_interval_days: 90
@@ -81,7 +81,6 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
   keys pin `AGENTS.md`, `CLAUDE.md` and the operating card. ADR 0073 has it.
   `pr/merge-pr*`, both PR-state helpers, and `agent-autoreview.sh` (Codex
   markers) route `pnpm pr:merge:test`.
-  `review/review-eval-publication{,.test}.mjs` routes the PR-description suite.
 - **Gate runtime pins.** Before `cd`, `agent-quality-gate.sh` resolves
   `gate/run-handles.sh`, coordinator files,
   `docs/docs-navigation-eval-helpers.mjs`, and `gate/lockfile-scope.mjs` from
@@ -93,9 +92,9 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
   `agent-autoreview-core.mjs`. Runtime hashes use `$script_source_dir`; suites
   use `$repo_root`. Core edits route both suites; missing pins freeze the stamp
   (ADR 0069).
-- **Review-eval pins.** `review/run-eval-source-snapshot.sh` joins the
-  four-source set in `docs/evals/review-skill.md`; update every listed consumer
-  together.
+- **Review-eval pins.** Sync the four inputs for
+  `review/run-eval-source-snapshot.sh` with `docs/evals/review-skill.md`.
+  `review/review-eval-*publication*` pins both test suites.
 - **Navigation-eval self-pin.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names its implementation.
 - **Verification evidence.** Move
@@ -129,8 +128,7 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
   EOL and `UPSTASH_MCP_LAUNCHER_SHA256` hashes it. A move changes both. See
   [`docs/notes/upstash-mcp-operator.md`](../docs/notes/upstash-mcp-operator.md).
 
-**List each new `scripts/` path pin here.** An unrecorded pin breaks silently on
-the next move.
+**List new `scripts/` path pins here.** Unlisted pins break silently.
 
 ## Sweep Checklist for a Move
 

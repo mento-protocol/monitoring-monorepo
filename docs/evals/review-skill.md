@@ -343,6 +343,12 @@ one rule: the run prints recovery commands and exits non-zero until an operator
 finishes the helper and `ship` workflow. launchd therefore records that a human
 still has to finish the job.
 
+The freshness workflow also routes a new staleness issue through
+`review-eval-freshness-publication.mjs`. The wrapper keeps the hash-covered
+issue planner unchanged, replaces its legacy PR instruction at the GitHub
+boundary, and fails closed if that template drifts. The issue requires
+`review-eval-publication.mjs` and `$PR_BODY`; it never starts a model.
+
 ### Install the scheduler
 
 The plist is a template. A plist has no variable substitution, so the install
@@ -647,6 +653,8 @@ path must exist on `main` before the first run after the moving commit.
 | `scripts/review/review-eval-appended.mjs`                   | appended-row evidence revalidation                       |
 | `scripts/review/review-eval-publication.mjs`                | current-key-safe local publication preparation           |
 | `scripts/review/review-eval-publication.test.mjs`           | publication confinement and PR-body shape tests          |
+| `scripts/review/review-eval-freshness-publication.mjs`      | publication-safe staleness issue synchronization         |
+| `scripts/review/review-eval-freshness-publication.test.mjs` | staleness issue boundary tests                           |
 | `scripts/review/review-eval-split-equivalence-fixtures.mjs` | generated Node and shell equivalence harnesses           |
 | `scripts/review/testdata/review-eval-split-equivalence/`    | frozen split inputs and observable-behavior snapshot     |
 | `scripts/review/review-eval-split-equivalence.test.mjs`     | frozen pre-split entry-point equivalence                 |
