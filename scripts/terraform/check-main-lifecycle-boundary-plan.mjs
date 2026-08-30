@@ -694,6 +694,14 @@ function validateDependabotMergeCredentials(
       secretCreates.length === 1 &&
       secretUpdates.length === 1 &&
       boundaryUpdates.length === 0;
+    const activeRecoveryBoundaryChanges = boundaryEntries.filter(
+      (entry) => !sameActions(entry?.change?.actions, ["no-op"]),
+    );
+    if (activeRecovery && activeRecoveryBoundaryChanges.length > 0) {
+      errors.push(
+        "active-state Dependabot credential recovery may create only missing exact Environment secret resources and must keep the Environment and deployment policy unchanged",
+      );
+    }
     if (
       ((secretUpdates.length > 0 || boundaryUpdates.length > 0) &&
         !publicKeyRecovery) ||

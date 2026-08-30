@@ -819,13 +819,25 @@ activeCredentialRecovery[1].change = dependabotCredentialEntries({
   actions: ["create"],
 })[1].change;
 expectPass(plan([rulesetEntry(), ...activeCredentialRecovery]), POLICY_BASE);
-expectPass(
+expectFailure(
   plan([
     rulesetEntry(),
     ...dependabotCredentialEntries({ actions: ["create"] }),
   ]),
+  "active-state Dependabot credential recovery may create only missing exact Environment secret resources",
   POLICY_BASE,
 );
+for (const boundaryIndex of [2, 3]) {
+  const activeBoundaryCreate = dependabotCredentialEntries();
+  activeBoundaryCreate[boundaryIndex].change = dependabotCredentialEntries({
+    actions: ["create"],
+  })[boundaryIndex].change;
+  expectFailure(
+    plan([rulesetEntry(), ...activeBoundaryCreate]),
+    "active-state Dependabot credential recovery may create only missing exact Environment secret resources",
+    POLICY_BASE,
+  );
+}
 const activePublicKeyRecovery = dependabotCredentialEntries();
 activePublicKeyRecovery[0].change = dependabotCredentialEntries({
   actions: ["create"],
