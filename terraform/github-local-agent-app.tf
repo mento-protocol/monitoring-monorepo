@@ -12,13 +12,13 @@
 # The App has no Administration permission or ruleset bypass.
 
 locals {
-  local_agent_github_broker_scaffold_enabled         = local.human_merge_boundary_policy.local_agent_github_broker_scaffold_enabled
-  local_agent_github_broker_partial_recovery_enabled = local.human_merge_boundary_policy.local_agent_github_broker_partial_recovery_enabled
-  local_agent_github_broker_impersonator             = local.human_merge_boundary_policy.local_agent_github_broker_impersonator
+  local_agent_github_broker_scaffold_enabled         = local.main_lifecycle_boundary_policy.local_agent_github_broker_scaffold_enabled
+  local_agent_github_broker_partial_recovery_enabled = local.main_lifecycle_boundary_policy.local_agent_github_broker_partial_recovery_enabled
+  local_agent_github_broker_impersonator             = local.main_lifecycle_boundary_policy.local_agent_github_broker_impersonator
 }
 
 resource "google_service_account" "local_agent_github_broker" {
-  count = local.local_agent_github_broker_scaffold_enabled ? 1 : 0
+  count = local.controlled_main_lifecycle_resources_enabled && local.local_agent_github_broker_scaffold_enabled ? 1 : 0
 
   project      = google_project.monitoring.project_id
   account_id   = "local-agent-github-broker"
@@ -36,7 +36,7 @@ resource "google_service_account" "local_agent_github_broker" {
 }
 
 resource "google_secret_manager_secret" "local_agent_github_app_private_key" {
-  count = local.local_agent_github_broker_scaffold_enabled ? 1 : 0
+  count = local.controlled_main_lifecycle_resources_enabled && local.local_agent_github_broker_scaffold_enabled ? 1 : 0
 
   project   = google_project.monitoring.project_id
   secret_id = "local-agent-github-app-private-key"
@@ -69,7 +69,7 @@ resource "google_secret_manager_secret" "local_agent_github_app_private_key" {
 # keeps the PEM, JWT, and installation token inside its fixed process and
 # returns only normalized operation results.
 resource "google_secret_manager_secret_version" "local_agent_github_app_private_key" {
-  count = local.local_agent_github_broker_scaffold_enabled && var.local_agent_github_app_credential_active ? 1 : 0
+  count = local.controlled_main_lifecycle_resources_enabled && local.local_agent_github_broker_scaffold_enabled && var.local_agent_github_app_credential_active ? 1 : 0
 
   secret                 = google_secret_manager_secret.local_agent_github_app_private_key[0].id
   secret_data_wo         = var.local_agent_github_app_private_key
@@ -81,17 +81,17 @@ resource "google_secret_manager_secret_version" "local_agent_github_app_private_
 
     precondition {
       condition = (
-        var.local_agent_github_app_id > 0 &&
+        local.local_agent_github_app_id > 0 &&
         var.local_agent_github_app_installation_id > 0 &&
         var.local_agent_github_app_private_key_rotation_counter > 0
       )
-      error_message = "Active local agent GitHub App credentials require positive App and installation IDs plus a positive rotation counter. Terraform sends the ephemeral private key only to the write-only Secret Manager field."
+      error_message = "Active local agent GitHub App credentials require a positive source-pinned App ID, positive operator-supplied installation ID, and positive rotation counter. Terraform sends the ephemeral private key only to the write-only Secret Manager field."
     }
   }
 }
 
 resource "google_secret_manager_secret_iam_member" "local_agent_github_broker_accessor" {
-  count = local.local_agent_github_broker_scaffold_enabled ? 1 : 0
+  count = local.controlled_main_lifecycle_resources_enabled && local.local_agent_github_broker_scaffold_enabled ? 1 : 0
 
   project   = google_project.monitoring.project_id
   secret_id = google_secret_manager_secret.local_agent_github_app_private_key[0].secret_id
@@ -106,7 +106,7 @@ resource "google_secret_manager_secret_iam_member" "local_agent_github_broker_ac
 
 resource "google_service_account_iam_member" "local_agent_github_broker_impersonator" {
   for_each = toset(
-    local.local_agent_github_broker_scaffold_enabled ?
+    local.controlled_main_lifecycle_resources_enabled && local.local_agent_github_broker_scaffold_enabled ?
     [local.local_agent_github_broker_impersonator] : []
   )
 

@@ -3,7 +3,7 @@ title: Terraform Stacks
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-28
+last_verified: 2026-08-30
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -17,7 +17,7 @@ ownership from directory names.
 
 | Stack                    | Path                             | State prefix             | Owns                                                                                                                                                                                             | Plan/apply policy                                                                                                   |
 | ------------------------ | -------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| `platform`               | `terraform/`                     | `monitoring-monorepo`    | Dashboard, Grafana read identity, Upstash, monitoring GCP, Peg storage, Cloud Run shape, Aegis bootstrap, deploy buckets, CI identities, repo Actions settings, and ADR 0078 boundary resources  | Manual plan; human-approved local apply                                                                             |
+| `platform`               | `terraform/`                     | `monitoring-monorepo`    | Dashboard, Grafana read identity, Upstash, monitoring GCP, Peg storage, Cloud Run shape, Aegis bootstrap, deploy buckets, CI identities, repo Actions settings, and ADR 0080 boundary resources  | Manual plan; human-approved local apply                                                                             |
 | `peg-policy-publication` | `alerts/peg-policy-publication/` | `peg-policy-publication` | One immutable GCS generation of `alerts/rules/peg-thresholds.json`; no Cloud Run configuration or Grafana resources                                                                              | Credential-free PR validation; manual `main` refresh plan, then `production-infra`-approved workflow apply          |
 | `alerts-rules`           | `alerts/rules/`                  | `alerts-rules`           | Protocol Grafana alert rules + Aegis service-health and testnet-health rule groups, Grafana folders, global Grafana notification policy, contact points, message templates, mute timings         | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
 | `alerts-delivery`        | `alerts/infra/`                  | `alerts-infra`           | QuickNode webhooks, alert Cloud Functions, Sentry bridge, Slack channel lifecycle, Splunk On-Call rotation announcements, related GCP resources, and stack-local trusted-main refresh grants     | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
@@ -86,32 +86,72 @@ approve other changes; human preflight and apply approval remain mandatory.
 [ADR 0061](adr/0061-exact-plan-guard-for-manual-platform-applies.md)
 owns the exact-plan boundary.
 
-## Human-only main lifecycle boundary
+## Controlled main lifecycle boundary
 
-[ADR 0078](adr/0078-human-only-main-update-boundary.md) and its
+[ADR 0080](adr/0080-controlled-main-lifecycle-boundary.md) and its
 [runbook](notes/local-agent-github-app-credential.md) own all phases, custody,
-proof, rollback, and import deferral. Each needs approval; source merge is inert.
+proof, rollback, and import deferral. Each needs approval. Initial source is
+inert because its boundary resource gate gives every boundary resource count
+zero and permits unrelated safe platform plans.
 
-Source pins the repository, Team, managed rule ID/enforcement, audit,
-broker-scaffold gate, partial-recovery gate, and broker principal. Reviewed
-source replaces zero sentinels. Phase 3 creates only a disabled
-creation/update/deletion rule with one Team `pull_request` bypass. A separate
-Phase 4 source change enables the five-resource broker scaffold and pins its
-impersonator. Its first plan may create only that complete scaffold and
-credential set. A reviewed recovery gate permits only the same canonical
-resources as a bounded create/no-op mix after a partial apply. Later plans use
-the pinned ruleset ID after cutover. Core rule `13494367` stays unmanaged
-because provider `6.12.1` loses its unattributed-change field.
+Source pins the boundary resource gate, repository, human Team, dedicated Dependabot merge App,
+distinct local-agent App, exact dedicated-App Contents/write, Pull
+requests/write, and Workflows/write permissions, managed rule ID and
+enforcement, dedicated-App credential gate, #2137 writer
+migration evidence, legacy auto-merge drain evidence, audit, broker gates, and
+broker principal. Initial source keeps the resource gate false and all identity
+and ruleset sentinels zero. After external verification, one Phase 3 change
+pins all three identities and enables resources. A later change pins the
+created ruleset ID. The local-agent App ID is reviewed policy, not an operator
+tfvar. The dedicated App has no Actions permission.
 
-Credential activation rejects an omitted, blank, malformed, non-RSA, weak,
-encrypted, or larger than 64 KiB App key. The wrapper requires the exact
-unindented HCL heredoc and rejects JSON assignments of the key. It checks the
-canonical PEM envelope and unused base64 pad bits. It also requires an exact
-decode and re-encode round trip before it parses and exercises the key in
-memory. It emits only a fixed error. The broker keeps its PEM, JWT, and token
-outside agents. Git, workflow, readiness, and transactional board lanes stay
-unavailable. Stronger credentials stay outside agent OSes. Dependabot
-auto-merge drains before live proof and an audit with
+The disabled ruleset contains creation, update, and deletion restrictions. The
+`update` rule is the identity boundary. `creation` prevents delete-and-recreate
+escape. `deletion` binds removal to the same actors. Core rule `13494367`
+already owns `non_fast_forward` and stays unmanaged because provider `6.12.1`
+loses its unattributed-change field.
+
+The ruleset has exactly two bypass actors. The Team uses `pull_request`. The
+dedicated repository-scoped Dependabot merge App Integration uses `exempt` so
+native auto-merge can complete after the #2137 writer exits. Shared GitHub
+Actions App `15368`, built-in Dependabot App `29110`, and the local-agent App
+are forbidden.
+
+The dedicated App credential phase creates only
+`DEPENDABOT_MERGE_APP_ID` and `DEPENDABOT_MERGE_APP_PRIVATE_KEY` as repository
+Actions secrets beside the disabled no-op ruleset. The resources use supported
+`value_encrypted` with one explicit repository Actions public-key ID. Terraform
+and state receive ciphertext only. A one-secret rotation keeps the key ID. A
+public-key rotation updates both ciphertexts and both resource key IDs
+together. The guard also permits an exact missing-secret recovery beside the
+coherent disabled provisioning state or active state. If the key changed after
+a partial create, the same recovery creates the missing secret and updates the
+survivor's key ID and ciphertext. It rejects plaintext, deprecated
+`encrypted_value`, another secret store, a partial key rotation, and unrelated
+changes.
+
+A separate source change enables the five-resource local-agent broker scaffold
+and pins its impersonator. Its first plan may create only that complete
+scaffold and credential set. A reviewed recovery gate permits only the same
+canonical resources as a bounded create/no-op mix after a partial apply.
+Later plans use the pinned ruleset ID after cutover.
+
+Local-agent credential activation rejects an omitted, blank, malformed,
+non-RSA, weak, encrypted, or larger than 64 KiB App key. The wrapper requires
+the exact unindented HCL heredoc and rejects JSON assignments of the key. It
+checks canonical PEM encoding, parses and exercises the key in memory, and
+emits only a fixed error. The broker keeps its PEM, JWT, and token outside
+agents. Git, workflow, readiness, and transactional board lanes stay
+unavailable. Stronger credentials stay outside agent OSes.
+
+Before active enforcement, #2137 must retain `github.token` for authoritative
+Actions reads and use the dedicated App token only for its final merge or
+auto-merge call. Its migration PR must pin that split in a source-contract
+test. Every legacy writer run must finish. Each open auto-merge request must be
+absent or attributable to the dedicated App. Source records both
+writer-migration and drain evidence before the guard permits the active
+ruleset. Live proof binds the Team path, the local-agent denial, the
+dedicated-App routine merge, and an audit with
 `main-ruleset-audit state=ok`.
 
 Vercel retains Administration plus Contents as a Free-plan residual. It can
@@ -212,8 +252,8 @@ ADR 0047 selects the final no-artifact protected-stack apply contract: make a
 private plan after approval, run fail-closed policy over its JSON, then apply
 those exact bytes. ADR 0061 implements the first narrow slice for manual
 platform plan/apply by guarding the Metrics Bridge template, ADR 0055 recovery,
-and ADR 0078 lifecycle rules through
-`check-human-merge-boundary-plan.mjs`. Issue #1576 owns the broader policy. The
+and ADR 0080 lifecycle rules through
+`check-main-lifecycle-boundary-plan.mjs`. Issue #1576 owns the broader policy. The
 other apply paths retain their documented apply-time re-plan window.
 
 The first local-agent broker-scaffold apply requires all five creates. If that

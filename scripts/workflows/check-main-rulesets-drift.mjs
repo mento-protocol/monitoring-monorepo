@@ -15,12 +15,14 @@ import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 
 export const CORE_RULESET_ID = 13494367;
-export const LIFECYCLE_RULESET_NAME = "human-only-main-lifecycle";
-export const SOURCE_HUMAN_MERGE_BOUNDARY_POLICY = Object.freeze(
+export const LIFECYCLE_RULESET_NAME = "controlled-main-lifecycle";
+const GITHUB_ACTIONS_APP_ID = 15368;
+const DEPENDABOT_APP_ID = 29110;
+export const SOURCE_MAIN_LIFECYCLE_BOUNDARY_POLICY = Object.freeze(
   JSON.parse(
     readFileSync(
       new URL(
-        "../../terraform/human-merge-boundary-policy.json",
+        "../../terraform/main-lifecycle-boundary-policy.json",
         import.meta.url,
       ),
       "utf8",
@@ -189,7 +191,7 @@ function validateLifecycleRuleset(ruleset, expected, violations) {
     })
   ) {
     violations.push(
-      "human lifecycle ruleset must match its source-pinned ID and enforcement on only refs/heads/main",
+      "controlled lifecycle ruleset must match its source-pinned ID and enforcement on only refs/heads/main",
     );
   }
   const expectedBypasses = sortByActor([
@@ -198,19 +200,24 @@ function validateLifecycleRuleset(ruleset, expected, violations) {
       actor_type: "Team",
       bypass_mode: "pull_request",
     },
+    {
+      actor_id: expected.dependabotAppId,
+      actor_type: "Integration",
+      bypass_mode: "exempt",
+    },
   ]);
   if (
     !isDeepStrictEqual(sortByActor(ruleset?.bypass_actors), expectedBypasses)
   ) {
     violations.push(
-      "human lifecycle ruleset must have only the source-pinned Team in pull_request mode",
+      "controlled lifecycle ruleset must have exactly the source-pinned Team in pull_request mode and dedicated Dependabot App Integration in exempt mode",
     );
   }
 
   const rules = sortByType(ruleset?.rules);
   if (!rules || rules.length !== 3) {
     violations.push(
-      "human lifecycle ruleset must contain exactly creation, deletion, and update rules",
+      "controlled lifecycle ruleset must contain exactly creation, deletion, and update rules",
     );
     return;
   }
@@ -225,7 +232,7 @@ function validateLifecycleRuleset(ruleset, expected, violations) {
     Object.keys(byType.get("deletion") ?? {}).length !== 1
   ) {
     violations.push(
-      "human lifecycle ruleset must contain only creation, deletion, and update rules",
+      "controlled lifecycle ruleset must contain only creation, deletion, and update rules",
     );
     return;
   }
@@ -240,7 +247,9 @@ function validateLifecycleRuleset(ruleset, expected, violations) {
         }))
     )
   ) {
-    violations.push("human lifecycle update rule has unexpected parameters");
+    violations.push(
+      "controlled lifecycle update rule has unexpected parameters",
+    );
   }
 }
 
@@ -252,27 +261,45 @@ function parsePositiveInteger(value) {
 }
 
 function parsePolicy(policy) {
+  const resourcesEnabled = policy?.controlled_main_lifecycle_resources_enabled;
   if (
     !isObject(policy) ||
     policy.repository !== "mento-protocol/monitoring-monorepo" ||
+    resourcesEnabled !== true ||
+    !isDeepStrictEqual(policy.dependabot_merge_app_repository_permissions, {
+      contents: "write",
+      pull_requests: "write",
+      workflows: "write",
+    }) ||
     typeof policy.ruleset_audit_active !== "boolean" ||
+    typeof policy.dependabot_merge_app_credentials_enabled !== "boolean" ||
+    typeof policy.dependabot_merge_writer_migration_verified !== "boolean" ||
+    typeof policy.legacy_dependabot_auto_merge_drained !== "boolean" ||
     !["disabled", "active"].includes(
-      policy.human_main_lifecycle_ruleset_enforcement,
+      policy.controlled_main_lifecycle_ruleset_enforcement,
     )
   ) {
     return undefined;
   }
   return {
     auditActive: policy.ruleset_audit_active,
-    enforcement: policy.human_main_lifecycle_ruleset_enforcement,
-    rulesetId: parsePositiveInteger(policy.human_main_lifecycle_ruleset_id),
+    credentialsEnabled: policy.dependabot_merge_app_credentials_enabled,
+    dependabotAppId: parsePositiveInteger(policy.dependabot_merge_app_id),
+    enforcement: policy.controlled_main_lifecycle_ruleset_enforcement,
+    legacyAutoMergeDrained: policy.legacy_dependabot_auto_merge_drained,
+    localAgentAppId: parsePositiveInteger(policy.local_agent_github_app_id),
+    resourcesEnabled,
+    rulesetId: parsePositiveInteger(
+      policy.controlled_main_lifecycle_ruleset_id,
+    ),
     teamId: parsePositiveInteger(policy.human_merge_operator_team_id),
+    writerMigrationVerified: policy.dependabot_merge_writer_migration_verified,
   };
 }
 
 export function evaluateMainRulesets(
   api,
-  { policy = SOURCE_HUMAN_MERGE_BOUNDARY_POLICY } = {},
+  { policy = SOURCE_MAIN_LIFECYCLE_BOUNDARY_POLICY } = {},
 ) {
   if (!isObject(api) || !Array.isArray(api.rulesets)) {
     return {
@@ -292,7 +319,7 @@ export function evaluateMainRulesets(
     return {
       status: "malformed",
       violations: [
-        "source policy must pin the repository, lifecycle enforcement, and boolean audit activation state.",
+        "source policy must pin the repository, inert-or-enabled boundary resource gate, Team, dedicated Dependabot App, exact Contents/write, Pull requests/write, and Workflows/write App permissions, lifecycle enforcement, and boolean credential, migration, drain, and audit states.",
       ],
     };
   }
@@ -301,6 +328,24 @@ export function evaluateMainRulesets(
   if (expected.teamId === undefined) {
     violations.push(
       "source-pinned merge-operator Team ID is missing or is not a positive integer",
+    );
+  }
+  if (
+    expected.dependabotAppId === undefined ||
+    [GITHUB_ACTIONS_APP_ID, DEPENDABOT_APP_ID].includes(
+      expected.dependabotAppId,
+    )
+  ) {
+    violations.push(
+      "source-pinned dedicated Dependabot merge App ID is missing, invalid, or names the shared GitHub Actions or Dependabot App",
+    );
+  }
+  if (
+    expected.localAgentAppId === undefined ||
+    expected.localAgentAppId === expected.dependabotAppId
+  ) {
+    violations.push(
+      "source-pinned local-agent App ID is missing or reuses the dedicated Dependabot merge App ID",
     );
   }
   if (
@@ -314,6 +359,15 @@ export function evaluateMainRulesets(
   if (!expected.auditActive || expected.enforcement !== "active") {
     violations.push(
       "live ruleset audit requires source-pinned active enforcement and completed audit activation",
+    );
+  }
+  if (
+    !expected.credentialsEnabled ||
+    !expected.writerMigrationVerified ||
+    !expected.legacyAutoMergeDrained
+  ) {
+    violations.push(
+      "live ruleset audit requires enabled dedicated-App credentials, verified writer migration, and drained legacy auto-merge requests",
     );
   }
   if (api.rulesets.length !== 2) {
@@ -334,7 +388,7 @@ export function evaluateMainRulesets(
   );
   if (lifecycle.length !== 1) {
     violations.push(
-      "human-only-main-lifecycle ruleset is missing or duplicated",
+      "controlled-main-lifecycle ruleset is missing or duplicated",
     );
   } else {
     validateLifecycleRuleset(lifecycle[0], expected, violations);
@@ -350,7 +404,10 @@ const EXIT = Object.freeze({ ok: 0, drift: 2, malformed: 3 });
 
 export function runCli(
   raw,
-  { policy = SOURCE_HUMAN_MERGE_BOUNDARY_POLICY, stdout = process.stdout } = {},
+  {
+    policy = SOURCE_MAIN_LIFECYCLE_BOUNDARY_POLICY,
+    stdout = process.stdout,
+  } = {},
 ) {
   let api;
   try {
@@ -362,7 +419,7 @@ export function runCli(
   const verdict = evaluateMainRulesets(api, { policy });
   if (verdict.status === "ok") {
     stdout.write(
-      "OK: state=ok; core controls are unchanged and the human-only main lifecycle ruleset matches reviewed source.\n",
+      "OK: state=ok; core controls are unchanged and the controlled main lifecycle ruleset matches reviewed source.\n",
     );
     return EXIT.ok;
   }

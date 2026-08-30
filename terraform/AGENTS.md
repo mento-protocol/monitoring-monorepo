@@ -3,7 +3,7 @@ title: Terraform Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-29
+last_verified: 2026-08-30
 doc_type: agent-instructions
 scope: terraform
 review_interval_days: 90
@@ -23,8 +23,8 @@ account and token, Upstash, the monitoring GCP project and APIs, private
 Peg-policy storage, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana
 Alloy bootstrap, deploy source buckets, the separated Terraform/service-deploy
 Workload Identity Federation chains, repo-level GitHub Actions settings, the
-Team-only main lifecycle ruleset, and the source-gated local-agent App broker
-secret bootstrap.
+controlled main lifecycle ruleset, the dedicated Dependabot merge App Actions
+secrets, and the source-gated local-agent App broker secret bootstrap.
 Core ruleset `13494367` remains unmanaged. Alerts live elsewhere:
 `alerts/rules/` owns protocol and Aegis
 Grafana rules plus global routing, `alerts/infra/` owns event-driven delivery,
@@ -63,18 +63,37 @@ handshake and image pull depend on these boundaries.
   human-approved plan/apply. If Terraform cannot manage a secret yet, add the
   missing IaC path or ask for direction; never reach for `gh secret set`,
   `vercel env add`, or an equivalent workaround.
-- ADR 0078 owns the human merge boundary. Keep all three lifecycle rules
-  Team-only in `pull_request` mode and core ruleset `13494367` unmanaged. Source
-  pins the repository, Team, rule ID, enforcement, audit, broker-scaffold gate,
-  partial-recovery gate, and broker impersonator; never move this authority to
-  a tfvar or repository variable. Keep the scaffold gate false until the
-  separate Phase 4 source approval. Keep the recovery gate false except for the
-  reviewed create/no-op recovery of a failed Phase 4 apply. Keep
-  provider targets fixed, Secret Manager write-only, and stronger credentials
-  off agent OSes. Parse and exercise the App RSA key only from the exact
-  unindented HCL heredoc in the wrapper's private tfvars copy. Reject JSON key
-  assignments. The runbook owns custody, approvals, recovery, cutover, proof,
-  and rotation.
+- ADR 0080 owns the controlled main lifecycle boundary. Keep creation, update,
+  and deletion in the separate ruleset. Keep core ruleset `13494367`
+  unmanaged. Allow exactly the human Team in `pull_request` mode and the
+  dedicated repository-scoped Dependabot merge App Integration in `exempt`
+  mode. Never add shared GitHub Actions App `15368`, built-in Dependabot App
+  `29110`, the local-agent App, or a third bypass.
+- Keep the boundary resource gate, repository, Team, dedicated App, distinct local-agent App, exact
+  dedicated-App Contents/write, Pull requests/write, and Workflows/write
+  permissions, rule ID, enforcement, credential,
+  writer-migration, legacy-drain, audit, broker, and recovery authority in the
+  reviewed policy. Initial source keeps the resource gate false and the Team,
+  both Apps, and managed ruleset at zero. Every boundary resource stays absent,
+  and unrelated safe platform plans remain valid. After external creation, one
+  reviewed Phase 3 source change pins all identities and enables the gate. Do
+  not accept either App identity from a tfvar.
+  The dedicated App has no Actions permission. Active enforcement requires the two
+  ciphertext-backed Actions secrets, the #2137 writer migration, and the
+  legacy auto-merge drain.
+- The dedicated-App Actions secret resources use supported `value_encrypted`
+  and one explicit public `key_id`. Never use plaintext or deprecated
+  `encrypted_value`. A one-secret rotation keeps the key ID. A public-key
+  rotation updates both resources and both ciphertexts together. Use only the
+  guarded exact recovery for a missing secret during initial provisioning or
+  active state. If the key changed, update the survivor in the same plan.
+- Keep the local-agent broker scaffold gate false until its separate source
+  approval. Keep its recovery gate false except during reviewed create/no-op
+  recovery. Keep provider targets fixed, Secret Manager write-only, and
+  stronger credentials off agent OSes. Parse and exercise the local-agent App
+  RSA key only from the exact unindented HCL heredoc in the wrapper's private
+  tfvars copy. Reject JSON key assignments. The runbook owns custody,
+  approvals, recovery, cutover, proof, and rotation.
 - Resource address renames need `moved` blocks. To retire a state-managed
   resource without destroying its remote counterpart, use a `removed` block
   with an explicit `destroy` choice.

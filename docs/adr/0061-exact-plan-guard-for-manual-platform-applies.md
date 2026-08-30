@@ -3,7 +3,7 @@ title: Manual platform applies use an exact private plan guard
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-29
+last_verified: 2026-08-30
 scope: terraform/infra
 date: 2026-08
 doc_type: adr
@@ -42,8 +42,9 @@ per command:
 - The wrapper accepts a small Terraform argument allowlist and rejects caller
   plan paths, destroy/replace/invoke modes, `-lock=false`, injected
   `TF_CLI_ARGS*`, and non-default `TF_WORKSPACE` values. It also rejects the
-  App private key and platform GitHub PAT in environment variables or CLI
-  `-var` arguments. It rejects caller `TF_CLI_CONFIG_FILE` and
+  local-agent App private key, both dedicated merge App ciphertexts, and
+  platform GitHub PAT in environment variables or CLI `-var` arguments. It
+  rejects caller `TF_CLI_CONFIG_FILE` and
   `TF_REATTACH_PROVIDERS` values before Git or Terraform runs. Unknown
   arguments fail with a fixed message that does not echo caller input.
 - Every Terraform phase runs non-interactively in the default workspace with a
@@ -75,11 +76,30 @@ per command:
   one canonical Metrics Bridge service entry. Aliases, module/index/deposed
   forms, previous addresses, deferred changes, action invocations, incomplete
   plans, errored plans, and unknown template changes fail closed.
-- The human merge-boundary policy checks the separate `main` lifecycle
-  ruleset. Initial creation must be disabled and have no prior value. Later
-  plans must use the source-pinned managed ruleset ID. Every plan rejects core
-  ruleset ID `13494367`. The exact Team, repository, lifecycle rules,
-  enforcement transition, and GitHub provider endpoint must stay known.
+- The controlled lifecycle policy checks the separate `main` ruleset. The
+  initial checked-in source keeps an explicit resource gate false and every boundary
+  resource absent, so unrelated platform plans remain available. The guard
+  rejects any lifecycle, credential, or broker resource in that inert phase.
+  One later source change pins all three identities and enables the gate.
+  Initial ruleset creation must be disabled and have no prior value. Later plans use the
+  source-pinned managed ruleset ID. Every plan rejects core ruleset ID
+  `13494367`. The repository, creation/update/deletion rules, Team
+  `pull_request` bypass, dedicated App Integration `exempt` bypass, enforcement
+  transition, and GitHub provider endpoint must stay known. Shared GitHub
+  Actions App `15368`, built-in Dependabot App `29110`, the local-agent App,
+  and a third bypass fail closed. Reviewed policy must also pin a positive,
+  distinct local-agent App ID and the dedicated App's exact Contents/write,
+  Pull requests/write, and Workflows/write permission map. An Actions
+  permission or an operator-supplied App ID fails closed.
+- The dedicated merge App credential phase permits only the two exact
+  ciphertext-backed repository Actions secrets beside a no-op lifecycle
+  ruleset. The resources use supported `value_encrypted` and one explicit
+  public key ID. One-secret rotation keeps that ID. Public-key rotation updates
+  both secrets and both ciphertexts. Initial-provisioning or active recovery
+  can create an exact missing secret and, when the public key changed, update
+  the survivor in the same plan. Plaintext, deprecated `encrypted_value`,
+  another secret store,
+  partial key rotation, and unrelated changes fail closed.
 - The first broker-scaffold plan requires all five canonical creates. A
   reviewed recovery gate permits only a partial create/no-op mix after a failed
   apply. It requires a disabled no-op lifecycle ruleset, an inactive audit, no
@@ -99,7 +119,7 @@ per command:
   operators.
 
 The wrapper composes the Metrics Bridge policy, the narrow ADR 0055 recovery
-policy, and the ADR 0078 lifecycle policy. These checks do not approve another
+policy, and the ADR 0080 lifecycle policy. These checks do not approve another
 platform change. Operators must still review a separate preflight plan and
 obtain explicit human approval before apply. The apply creates a fresh plan,
 so only the machine policy reviews the exact plan applied. Issue #1576 still

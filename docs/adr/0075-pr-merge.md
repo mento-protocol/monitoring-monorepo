@@ -1,9 +1,9 @@
 ---
-title: One sanctioned human-only merge path
+title: One sanctioned human merge path with a bounded Dependabot exception
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-28
+last_verified: 2026-08-30
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -34,10 +34,11 @@ agent could ignore either and merge anyway.
 
 ## Decision
 
-**Route every merge through one wrapper, `pnpm pr:merge`, that runs the
-repository's own gates in a fixed order and refuses by default. Keep the human
-approval rule as the binding control, and state plainly that no local check can
-replace it.**
+**Route every human merge through one wrapper, `pnpm pr:merge`, that runs the
+repository's own gates in a fixed order and refuses by default. Keep explicit
+human approval as the binding control for normal PRs. The reviewed #2137
+routine Dependabot lane is the only automated exception. ADR 0080 owns its
+dedicated App identity and server boundary.**
 
 The ordered gates in `scripts/pr/merge-pr.mjs`:
 
@@ -158,11 +159,13 @@ wrapper says so in its own header rather than implying otherwise:
 The durable boundary is on GitHub's side of the wire — branch protection, or
 credentials that cannot merge — and is tracked separately as follow-up.
 
-[ADR 0078](0078-human-only-main-update-boundary.md) defines that boundary. Its
-Team-only lifecycle ruleset and separate local agent App remove `main`
-lifecycle authority from the agent credential after the approved platform
-apply and credential cutover. Until then, this wrapper and the human approval
-rule remain live.
+[ADR 0080](0080-controlled-main-lifecycle-boundary.md) defines that boundary.
+Its controlled lifecycle ruleset names exactly the human Team and dedicated
+Dependabot merge App. The separate local-agent App has no bypass. After the
+approved platform apply and credential cutover, agents lose `main` lifecycle
+authority while the narrow #2137 automation lane remains available. Until
+then, this wrapper, the human approval rule, and #2137's interim writer controls
+remain live.
 
 ## Alternatives considered
 
@@ -191,9 +194,10 @@ rule remain live.
 
 ## Consequences
 
-- `pnpm pr:merge` is the only sanctioned merge entry point, and operating-card
-  step 8 names it. The approval rule is unchanged: the wrapper mechanizes it
-  and does not relax it. Agents remain forbidden from running it at all.
+- `pnpm pr:merge` is the only sanctioned human merge entry point, and
+  operating-card step 8 names it. The wrapper does not relax explicit approval.
+  Agents remain forbidden from running it. The reviewed #2137 final writer is
+  the sole automated exception and uses the separate dedicated App.
 - Merging now depends on both PR projections. A pull request that is
   check-green but has unresolved review threads no longer merges without a
   recorded reason, which matches the repository's own two-projection all-clear.
@@ -215,7 +219,7 @@ rule remain live.
   cap. The suite asserts the cap over all four, which is the only per-PR
   enforcement: `scripts/` has no `max-lines` rule.
 - Raw merge API calls and CI tokens remain outside this local control's reach.
-- ADR 0078 removes their ability to bypass the separate server-side lifecycle
+- ADR 0080 removes their ability to bypass the separate server-side lifecycle
   rule after activation.
 
 ## Evidence
@@ -248,5 +252,6 @@ rule remain live.
   `github/docs` `main` branch. The same `Repository.mergeQueue(branch:)` query
   returned null for this repository's `main` branch. This verifies the signal
   without merging either repository.
-- [ADR 0078](0078-human-only-main-update-boundary.md) owns the server-side
-  Team-only lifecycle rule, agent identity separation, and activation sequence.
+- [ADR 0080](0080-controlled-main-lifecycle-boundary.md) owns the server-side
+  controlled lifecycle rule, exact Team and dedicated-App bypasses, agent
+  identity separation, and activation sequence.

@@ -19,7 +19,7 @@ import "./production-infra-identity-contract/index.test.mjs";
 import "./sentry/gate/sentry-provider-contract.test.mjs";
 import "./alerts/check-peg-policy-publication.test.mjs";
 import "./terraform/check-metrics-bridge-template-plan.test.mjs";
-import { deterministicRsaTestKey } from "./terraform/check-human-merge-boundary-plan.test.mjs";
+import { deterministicRsaTestKey } from "./terraform/check-main-lifecycle-boundary-plan.test.mjs";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -28,22 +28,34 @@ const repoRoot = path.resolve(
 const script = path.join(repoRoot, "scripts/tf-stacks.mjs");
 const originMainFetchCommand =
   "fetch --quiet origin refs/heads/main:refs/remotes/origin/main";
-const testHumanMergeBoundaryPolicy = Object.freeze({
+const testMainLifecycleBoundaryPolicy = Object.freeze({
   repository: "mento-protocol/monitoring-monorepo",
+  controlled_main_lifecycle_resources_enabled: true,
   human_merge_operator_team_id: 424242,
-  human_main_lifecycle_ruleset_id: 24680,
-  human_main_lifecycle_ruleset_enforcement: "active",
+  dependabot_merge_app_id: 515151,
+  dependabot_merge_app_repository_permissions: {
+    contents: "write",
+    pull_requests: "write",
+    workflows: "write",
+  },
+  local_agent_github_app_id: 616161,
+  controlled_main_lifecycle_ruleset_id: 24680,
+  controlled_main_lifecycle_ruleset_enforcement: "active",
+  dependabot_merge_app_credentials_enabled: true,
+  dependabot_merge_writer_migration_verified: true,
+  legacy_dependabot_auto_merge_drained: true,
   ruleset_audit_active: false,
   local_agent_github_broker_scaffold_enabled: false,
   local_agent_github_broker_partial_recovery_enabled: false,
   local_agent_github_broker_impersonator: "",
 });
 const defaultLifecycleRuleset = {
-  name: "human-only-main-lifecycle",
+  name: "controlled-main-lifecycle",
   repository: "monitoring-monorepo",
   target: "branch",
   enforcement: "active",
-  ruleset_id: testHumanMergeBoundaryPolicy.human_main_lifecycle_ruleset_id,
+  ruleset_id:
+    testMainLifecycleBoundaryPolicy.controlled_main_lifecycle_ruleset_id,
   conditions: [
     {
       ref_name: [{ include: ["refs/heads/main"], exclude: [] }],
@@ -51,9 +63,14 @@ const defaultLifecycleRuleset = {
   ],
   bypass_actors: [
     {
-      actor_id: testHumanMergeBoundaryPolicy.human_merge_operator_team_id,
+      actor_id: testMainLifecycleBoundaryPolicy.human_merge_operator_team_id,
       actor_type: "Team",
       bypass_mode: "pull_request",
+    },
+    {
+      actor_id: testMainLifecycleBoundaryPolicy.dependabot_merge_app_id,
+      actor_type: "Integration",
+      bypass_mode: "exempt",
     },
   ],
   rules: [{ creation: true, update: true, deletion: true }],
@@ -91,14 +108,61 @@ const defaultPlatformPlan = {
       },
     },
     {
-      address: "github_repository_ruleset.human_only_main_lifecycle",
+      address: "github_repository_ruleset.controlled_main_lifecycle[0]",
+      index: 0,
       mode: "managed",
       type: "github_repository_ruleset",
-      name: "human_only_main_lifecycle",
+      name: "controlled_main_lifecycle",
       change: {
         actions: ["no-op"],
         before: structuredClone(defaultLifecycleRuleset),
         after: structuredClone(defaultLifecycleRuleset),
+        after_unknown: {},
+      },
+    },
+    {
+      address: "github_actions_secret.dependabot_merge_app_id[0]",
+      mode: "managed",
+      type: "github_actions_secret",
+      name: "dependabot_merge_app_id",
+      index: 0,
+      change: {
+        actions: ["no-op"],
+        before: {
+          key_id: "actions-key-id",
+          repository: "monitoring-monorepo",
+          secret_name: "DEPENDABOT_MERGE_APP_ID",
+          value_encrypted: "dGVzdC1jaXBoZXJ0ZXh0",
+        },
+        after: {
+          key_id: "actions-key-id",
+          repository: "monitoring-monorepo",
+          secret_name: "DEPENDABOT_MERGE_APP_ID",
+          value_encrypted: "dGVzdC1jaXBoZXJ0ZXh0",
+        },
+        after_unknown: {},
+      },
+    },
+    {
+      address: "github_actions_secret.dependabot_merge_app_private_key[0]",
+      mode: "managed",
+      type: "github_actions_secret",
+      name: "dependabot_merge_app_private_key",
+      index: 0,
+      change: {
+        actions: ["no-op"],
+        before: {
+          key_id: "actions-key-id",
+          repository: "monitoring-monorepo",
+          secret_name: "DEPENDABOT_MERGE_APP_PRIVATE_KEY",
+          value_encrypted: "dGVzdC1jaXBoZXJ0ZXh0",
+        },
+        after: {
+          key_id: "actions-key-id",
+          repository: "monitoring-monorepo",
+          secret_name: "DEPENDABOT_MERGE_APP_PRIVATE_KEY",
+          value_encrypted: "dGVzdC1jaXBoZXJ0ZXh0",
+        },
         after_unknown: {},
       },
     },
@@ -281,7 +345,7 @@ if (args[0] === "-C" && args[2] === "ls-files") {
 ) {
   process.stdout.write(
     "terraform/main.tf\\0terraform/metrics-bridge.tf\\0" +
-      "terraform/human-merge-boundary-policy.json\\0",
+      "terraform/main-lifecycle-boundary-policy.json\\0",
   );
 } else if (args[0] === "show" && args[1]?.endsWith(":terraform/main.tf")) {
   process.stdout.write("terraform {}\\n");
@@ -296,10 +360,10 @@ if (args[0] === "-C" && args[2] === "ls-files") {
   );
 } else if (
   args[0] === "show" &&
-  args[1]?.endsWith(":terraform/human-merge-boundary-policy.json")
+  args[1]?.endsWith(":terraform/main-lifecycle-boundary-policy.json")
 ) {
   process.stdout.write(${JSON.stringify(
-    `${JSON.stringify(testHumanMergeBoundaryPolicy, null, 2)}\n`,
+    `${JSON.stringify(testMainLifecycleBoundaryPolicy, null, 2)}\n`,
   )});
 } else {
   process.stderr.write("unexpected git command: " + command + "\\n");
@@ -1409,6 +1473,8 @@ function runPlatformPlanPolicyTests(tempDir) {
 
   const environmentCanary = "RESTRICTED_ENV_CREDENTIAL_CANARY";
   for (const variable of [
+    "TF_VAR_dependabot_merge_app_id_encrypted_value",
+    "TF_VAR_dependabot_merge_app_private_key_encrypted_value",
     "TF_VAR_local_agent_github_app_private_key",
     "TF_VAR_github_token",
   ]) {
@@ -1486,6 +1552,8 @@ function runPlatformPlanPolicyTests(tempDir) {
 
   const cliCanary = "RESTRICTED_CLI_CREDENTIAL_CANARY";
   for (const variable of [
+    "dependabot_merge_app_id_encrypted_value",
+    "dependabot_merge_app_private_key_encrypted_value",
     "local_agent_github_app_private_key",
     "github_token",
   ]) {
@@ -1738,7 +1806,8 @@ function runPlatformPlanPolicyTests(tempDir) {
   const invalidLifecyclePlan = structuredClone(defaultPlatformPlan);
   const invalidLifecycleRuleset = invalidLifecyclePlan.resource_changes.find(
     (entry) =>
-      entry.address === "github_repository_ruleset.human_only_main_lifecycle",
+      entry.address ===
+      "github_repository_ruleset.controlled_main_lifecycle[0]",
   );
   invalidLifecycleRuleset.change.actions = ["update"];
   invalidLifecycleRuleset.change.after.etag = "unexpected-update";
@@ -1750,8 +1819,8 @@ function runPlatformPlanPolicyTests(tempDir) {
   });
   assertIncludes(
     result.stderr,
-    "a human lifecycle ruleset update may only activate disabled enforcement",
-    "the platform wrapper must invoke the human lifecycle plan guard",
+    "a controlled lifecycle ruleset update may only activate disabled enforcement",
+    "the platform wrapper must invoke the controlled lifecycle plan guard",
   );
   assertTerraformCommands(
     fakeTools.terraformLog,

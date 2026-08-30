@@ -24,7 +24,7 @@ const paginated = fixtureRunner({
   pages: [[{ id: 11 }], [{ id: 22 }]],
   details: new Map([
     [11, { id: 11, name: "main" }],
-    [22, { id: 22, name: "human-only-main-lifecycle" }],
+    [22, { id: 22, name: "controlled-main-lifecycle" }],
   ]),
 });
 assert.deepEqual(
@@ -32,7 +32,7 @@ assert.deepEqual(
   {
     rulesets: [
       { id: 11, name: "main" },
-      { id: 22, name: "human-only-main-lifecycle" },
+      { id: 22, name: "controlled-main-lifecycle" },
     ],
   },
 );

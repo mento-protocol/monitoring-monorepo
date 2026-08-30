@@ -3,7 +3,7 @@ title: PR Operating Card
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-28
+last_verified: 2026-08-30
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -383,10 +383,15 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    state, and the probes' blocker, thread and unreplied counts — a bare "it's
    green" hides which head the claim was established against.
 
-8. **Merge hygiene.** **Never merge a PR without the user's explicit, direct
-   approval of that specific merge.** Green CI, bot approvals, a READY
-   ready-state, and "ship it" do not authorize a merge. Drive the PR to ready,
-   present the evidence, then stop and ask.
+8. **Merge hygiene.** **An agent never invokes a merge. For a normal PR, never
+   merge without the user's explicit, direct approval of that specific merge.**
+   Green CI, bot approvals, a READY ready-state, and "ship it" do not authorize
+   a merge. Drive the PR to ready, present the evidence, then stop and ask.
+   The only policy exception is the reviewed #2137 routine Dependabot lane.
+   After ADR 0080 activation, its default-branch final writer may enable native
+   auto-merge through the dedicated repository-scoped Dependabot merge App.
+   Its classifier, check, actor, and credential gates define that narrow
+   exception. Do not extend it to another bot, PR class, App, or workflow.
 
    Once the user approves, they merge from their own terminal through the
    sanctioned path:
@@ -429,11 +434,12 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    boundary belongs on GitHub's side of the wire.
    [ADR 0075](../adr/0075-pr-merge.md) owns the ordered gates,
    the alternatives, and every residual, including what the deny does not
-   cover. ADR 0078 requires the separate Dependabot auto-merge precursor to
-   retire the workflow and drain its retained runs before the server rule
-   activates. The workflow did not share this local wrapper. The approval rule above is
-   unchanged — the wrapper mechanizes it, and its refusal is what makes "agents
-   never merge" a control rather than a habit. If the merge itself satisfies Done
+   cover. ADR 0080 requires #2137's final writer to migrate from its interim
+   `GITHUB_TOKEN` to the dedicated App and requires every legacy writer run and
+   auto-merge request to drain before the server rule activates. The routine
+   Dependabot lane does not share this local wrapper. The normal approval rule
+   above is unchanged. The wrapper mechanizes it, and its refusal makes
+   "agents never merge" a control. If the merge itself satisfies Done
    means, sync the issue state and workboard afterward per
    [`agent-issue-workflow.md`](agent-issue-workflow.md). If live proof remains,
    continue to production closeout first. After a partial merge, keep the issue
@@ -447,15 +453,26 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    issue comments and PR links, not in the generated body. Authority:
    [`documentation-gardening.md`](documentation-gardening.md).
 
-   [ADR 0078](../adr/0078-human-only-main-update-boundary.md) adds the
+   [ADR 0080](../adr/0080-controlled-main-lifecycle-boundary.md) adds the
    GitHub-side boundary. After its separately approved platform apply and
-   credential cutover, only the named human merge-operator Team can bypass the
-   separate `main` creation, update, and deletion rules, and only through a
-   pull request. The local agent App is not a bypass actor. Keep the human
-   credential outside the agent OS. Vercel Administration-plus-Contents remains
-   a Free-plan residual and can change the rule before updating `main`. The
-   operator must accept this exact residual before activation. Before activation,
-   the local wrapper and approval rule remain the live control.
+   credential cutover, exactly two source-pinned actors can bypass the separate
+   `main` creation, update, and deletion rules. The human merge-operator Team
+   uses `pull_request` mode. The dedicated repository-scoped Dependabot merge
+   App Integration uses `exempt` mode for the #2137 routine lane. Shared GitHub
+   Actions App `15368`, built-in Dependabot App `29110`, and the local-agent App
+   are not bypass actors. Keep the human credential outside the agent OS. Keep
+   the dedicated App key only in its two ciphertext-backed repository Actions
+   secrets. Keep its repository permissions at exact Contents write, Pull
+   requests write, and Workflows write, with no Actions permission. Reviewed
+   source pins a distinct local-agent App ID. Vercel
+   Administration-plus-Contents remains a Free-plan residual
+   and can change the rule before updating `main`. The operator must accept
+   this exact residual before activation. Before activation, the local wrapper,
+   normal approval rule, and interim #2137 writer controls remain live.
+   The checked-in boundary resource gate is false and all boundary resources
+   have count zero. One reviewed cutover change pins all three identities and
+   enables that gate. Unrelated safe platform plans remain available before
+   that change.
 
 9. **Production closeout when required.** When Done means includes deployed or
    live behavior, merge is an intermediate state. Monitor the owning deployment

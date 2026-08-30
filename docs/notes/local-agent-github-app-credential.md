@@ -1,24 +1,25 @@
 ---
-title: Local agent GitHub App credential and main lifecycle cutover
+title: GitHub App credentials and controlled main lifecycle cutover
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-29
+last_verified: 2026-08-30
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
 garden_lane: operator-runbooks
 ---
 
-# Local agent GitHub App credential and main lifecycle cutover
+# GitHub App credentials and controlled main lifecycle cutover
 
 This runbook activates the target state in
-[ADR 0078](../adr/0078-human-only-main-update-boundary.md). Checked-in source
+[ADR 0080](../adr/0080-controlled-main-lifecycle-boundary.md). Checked-in source
 does not prove any GitHub, Google Cloud, host, or cloud-agent state.
 
-Stop at each approval boundary. Do not combine Team setup, App setup, source
-merge, Terraform plan, Terraform apply, host installation, credential cutover,
-ruleset activation, live proof, or drift activation.
+Stop at each approval boundary. Do not combine Team setup, either App setup,
+source merge, Terraform plan, Terraform apply, writer migration, legacy drain,
+host installation, credential cutover, ruleset activation, live proof, or drift
+activation.
 
 ## Required outcome
 
@@ -27,16 +28,25 @@ The completed cutover has these properties:
 - core ruleset `13494367` remains unchanged and unmanaged;
 - a separate active ruleset restricts creation, update, and deletion of
   `refs/heads/main`;
-- that ruleset has one source-pinned Team bypass in `pull_request` mode;
-- the selected-repository agent App has no Administration permission and no
-  ruleset bypass;
+- the reviewed boundary resource gate is true after cutover;
+- that ruleset has exactly two bypass actors: the source-pinned Team in
+  `pull_request` mode and the dedicated Dependabot merge App Integration in
+  `exempt` mode;
+- the dedicated merge App is installed only on this repository and has exactly
+  Contents write, Pull requests write, and Workflows write, with no Actions
+  permission;
+- the selected-repository local-agent App has no Administration permission and
+  no ruleset bypass;
+- the #2137 final writer uses the dedicated App, and no legacy `GITHUB_TOKEN`
+  auto-merge request remains;
 - each agent operation receives one fixed least-privilege profile;
 - the App PEM, JWT, and installation token remain inside the trusted broker;
 - the dedicated agent OS or container has no human or platform credential;
 - every writable cloud-agent surface uses a proved App installation identity;
 - Vercel Administration-plus-Contents remains an explicit Free-plan residual;
-- live proof records an App permission-ceiling denial, exact live ruleset JSON,
-  and an approved Team merge on the same ready PR;
+- live proof records a local-agent App permission-ceiling denial, exact live
+  ruleset JSON, an approved Team merge, and one routine Dependabot merge under
+  the dedicated App;
 - the daily audit reports `main-ruleset-audit state=ok`.
 
 ## Source and live-state boundary
@@ -45,8 +55,8 @@ Repository tests can prove parser, policy, profile, redaction, and plan-shape
 behavior. They cannot prove these external facts:
 
 - Team membership;
-- App registration or selected-repository installation;
-- App permission registration;
+- either App registration or selected-repository installation;
+- either App permission registration;
 - the live ruleset IDs or JSON;
 - Terraform apply completion;
 - root ownership and modes on the broker host;
@@ -54,18 +64,24 @@ behavior. They cannot prove these external facts:
 - removal of a human credential from an agent host;
 - a cloud platform's credential type;
 - the Vercel plan constraint;
-- the App's live permission registration and a permission-denied App merge or
-  `main` update attempt;
+- the local-agent App's live permission registration and a permission-denied
+  merge or `main` update attempt;
+- the #2137 final writer's authentication identity;
+- the actor that enabled or completed an open auto-merge request;
 
 Record each live fact separately. Do not infer it from source, a plan, an App
 name, an installation ID, or a successful read request.
 
 ## Credential boundary
 
-Use one GitHub App. Install it only on
-`mento-protocol/monitoring-monorepo`. Keep Administration and ruleset bypass
-absent. The App registration is the permission ceiling. The trusted broker
-requests the smaller profile needed by one operation.
+Use two separate GitHub Apps. Install each only on
+`mento-protocol/monitoring-monorepo`. The dedicated Dependabot merge App is the
+sole automation bypass. It has exactly Contents write, Pull requests write, and
+Workflows write. Workflows write permits the #2137 top-level workflow-update
+lane. It has no Actions permission.
+The local-agent App has no Administration permission and no ruleset bypass.
+The local-agent App registration is the broker permission ceiling. The trusted
+broker requests the smaller profile needed by one operation.
 
 | Profile             | Purpose                                            | Maximum requested authority             |
 | ------------------- | -------------------------------------------------- | --------------------------------------- |
@@ -108,11 +124,19 @@ or a caller-controlled child.
 
 Checked-in source keeps the broker scaffold absent. The reviewed scaffold and
 partial-recovery gates are false, and the impersonator is empty. A separate
-Phase 4 source change must enable the complete scaffold and pin its one
+Phase 4B source change must enable the complete scaffold and pin its one
 impersonating service account before the credential plan can pass. The recovery
 gate stays false during the ordinary all-five create.
 
 ## Accepted residuals
+
+### Exempt App audit record
+
+The dedicated Dependabot merge App uses `exempt` bypass mode so native
+auto-merge can complete after the writer exits. GitHub does not create a
+ruleset bypass-request record for an exempt actor. Bind each proof to the
+trusted writer run, workflow commit, App and installation IDs, pull request,
+exact head SHA, enablement actor, final merge actor, and merge commit.
 
 ### Vercel Free plan
 
@@ -148,18 +172,22 @@ the final #2111 implementation needs it.
 
 ## Phase 0: settle prerequisites
 
-1. Merge the separate Dependabot auto-merge retirement precursor with explicit
-   human approval.
-2. Wait until no Dependabot auto-merge run is queued, requested, pending,
-   waiting, or in progress.
-3. Read every open Dependabot PR. Require `autoMergeRequest: null` on each one.
-4. Do not rerun a retained Dependabot auto-merge run.
-5. Merge #2111 and #2131 through their own reviewed paths.
-6. Rebase the boundary source on the resulting current `main`.
-7. Repeat the open-PR auto-merge check immediately before the boundary source
-   merge and again before the first ruleset apply.
+1. Merge #2137 with its default-branch `workflow_run` final-writer boundary.
+   Its interim writer may use the restricted `GITHUB_TOKEN`.
+2. Merge #2111 and #2131 through their own reviewed paths.
+3. Rebase this boundary source on the resulting current `main`.
+4. Record every current #2137 writer run and each open Dependabot pull request
+   with an auto-merge request. This is the legacy-writer baseline.
+5. Keep lifecycle enforcement disabled. The later dedicated-App migration and
+   legacy drain must complete before activation.
 
-Stop if a run or auto-merge request reappears.
+The boundary source merges with
+`controlled_main_lifecycle_resources_enabled` false, zero identity and ruleset
+sentinels, and all phase gates false. Terraform therefore plans zero lifecycle,
+dedicated-App credential, or local-agent broker resources. The exact guard
+still permits unrelated safe platform plans. This source merge does not
+authorize a Team, App, credential, ruleset apply, writer migration,
+cancellation, or live setting change.
 
 ## Phase 1: create the human Team
 
@@ -167,20 +195,59 @@ A human organization administrator creates the merge-operator Team, grants it
 the required repository role, and limits membership to approved humans. Record
 the Team slug, numeric Team ID, members, repository role, actor, and time.
 
-Put the verified positive numeric ID in the reviewed policy source. Do not use
-a slug, node ID, user ID, App ID, installation ID, tfvar, repository variable,
-or environment variable as the bypass authority.
+Keep the verified numeric ID in the private activation record until Phase 3.
+Do not create an intermediate source state with one positive identity and the
+resource gate false. Do not use a slug, node ID, user ID, App ID, installation
+ID, tfvar, repository variable, or environment variable as the bypass
+authority.
 
 The repository-scoped platform PAT must not gain organization or Team
 administration for this phase.
 
-## Phase 2: create and install the App
+## Phase 2: create and install both Apps
 
-A human security administrator creates one App and installs it only on this
-repository. Grant only Actions read, Issues write, and Pull requests write.
-Do not grant Administration, Contents, Workflows, Checks, or organization
-Projects. The disabled Git and issue-board profiles need a separate reviewed
-App-permission change and activation proof. Record:
+### Phase 2A: dedicated Dependabot merge App
+
+A human security administrator creates a new dedicated App. Install it only on
+`mento-protocol/monitoring-monorepo`. Grant exactly Contents write, Pull
+requests write, and Workflows write. Workflows write is required for the #2137
+top-level workflow-update lane. Do not grant Administration, Actions, Checks,
+Issues, or organization permissions. Require an App ID different from shared
+GitHub Actions App `15368`, built-in Dependabot App `29110`, and the local-agent
+App. Record:
+
+- App ID and installation ID;
+- selected repository;
+- exact registered permission map;
+- absence of Administration and organization permissions;
+- the owner and time of the check.
+
+Generate one private key through the human GitHub surface. Keep the downloaded
+PEM in a mode-`0700` operator-owned intake directory and mode-`0600` file
+outside repositories, agent homes, shared temporary paths, sync roots, and
+backup roots. Do not print it.
+
+Read the repository Actions public key and key ID through an approved read-only
+path. Encrypt the App ID and private key locally with that public key. Put only
+the public key ID and two sealed-box base64 ciphertexts in the gitignored
+operator tfvars file as shown in `terraform/terraform.tfvars.example`. Do not
+put either plaintext in Terraform, state, an environment variable, CLI `-var`,
+tracked source, or any Actions secret command. Remove the transient PEM after
+the ciphertext copy is verified. Revoke the key and start again if custody or
+removal is uncertain.
+
+Keep the positive App ID and exact permission map in the private activation
+record until Phase 3. Keep `dependabot_merge_app_credentials_enabled`,
+`dependabot_merge_writer_migration_verified`, and
+`legacy_dependabot_auto_merge_drained` false in source.
+
+### Phase 2B: local-agent App
+
+A human security administrator creates a separate local-agent App and installs
+it only on this repository. Grant only Actions read, Issues write, and Pull
+requests write. Do not grant Administration, Contents, Workflows, Checks, or
+organization Projects. The disabled Git and issue-board profiles need a
+separate reviewed App-permission change and activation proof. Record:
 
 - App ID and installation ID;
 - selected repository;
@@ -188,6 +255,10 @@ App-permission change and activation proof. Record:
 - absence of Administration;
 - absence of a ruleset bypass;
 - the owner and time of the check.
+
+Keep the positive local-agent App ID in the private activation record until
+Phase 3. Do not supply it through a tfvar, repository variable, environment
+variable, or plan input. Keep it different from the dedicated merge App ID.
 
 Prepare a mode-`0700` operator-owned intake directory before key generation.
 Keep it outside repositories, worktrees, agent homes, shared temporary paths,
@@ -213,11 +284,21 @@ start again. File deletion does not revoke a key.
 
 ## Phase 3: create the disabled lifecycle ruleset
 
-The reviewed policy starts with:
+Make one reviewed source change that replaces all three identity sentinels and
+enables the boundary resource gate. Do not merge an intermediate identity
+state. The resulting policy has:
 
+- `controlled_main_lifecycle_resources_enabled` true;
 - the verified positive Team ID;
+- the verified positive dedicated Dependabot merge App ID;
+- the verified positive and distinct local-agent App ID;
+- the exact dedicated-App Contents/write, Pull requests/write, and
+  Workflows/write permission map;
 - managed lifecycle ruleset ID `0`;
 - enforcement disabled;
+- dedicated-App credentials disabled;
+- writer-migration evidence false;
+- legacy auto-merge drain evidence false;
 - drift audit inactive;
 - broker scaffold disabled;
 - broker partial recovery disabled;
@@ -230,11 +311,16 @@ preflight. The exact policy must permit one creation only. Require:
 - enforcement disabled;
 - exact `refs/heads/main` targeting;
 - creation, update, and deletion rules only;
-- one source-pinned Team bypass in `pull_request` mode;
+- exactly one source-pinned Team bypass in `pull_request` mode;
+- exactly one source-pinned dedicated Dependabot merge App Integration bypass
+  in `exempt` mode;
+- no shared GitHub Actions App, built-in Dependabot App, local-agent App,
+  administrator, role, user, or third bypass;
 - no core ruleset resource;
 - no action for core ruleset ID `13494367`;
 - no broker service account, secret, credential version, accessor binding, or
   impersonation binding;
+- no dedicated-App Actions secret resource;
 - no replacement, deletion, unknown managed field, or second ruleset.
 
 Require the lifecycle ruleset create to be the plan's only non-no-op action.
@@ -245,9 +331,61 @@ from the same clean current-`main` source. Do not use direct Terraform apply.
 
 Read the new live ruleset ID through the human Administration-read surface.
 Require a positive ID different from `13494367`. Pin it in a reviewed source
-change. Repeat the guarded plan. It must be a no-op for the disabled ruleset.
+change. Keep `controlled_main_lifecycle_resources_enabled` true. Repeat the
+guarded plan. It must be a no-op for the disabled ruleset.
 
-## Phase 4: provision the App key and broker principal
+## Phase 4A: provision the dedicated merge App Actions secrets
+
+Start with a separate reviewed source change. Set
+`dependabot_merge_app_credentials_enabled` to true. Keep the pinned lifecycle
+ruleset disabled and unchanged. Keep writer-migration evidence, legacy drain
+evidence, and the drift audit false.
+
+Use the gitignored operator tfvars file for the repository Actions public key
+ID and the two sealed-box ciphertexts. The resources use only `key_id` and
+`value_encrypted`. They must never use `value`, `plaintext_value`, or deprecated
+`encrypted_value`. The wrapper rejects both ciphertexts in `TF_VAR_*` and CLI
+`-var` inputs.
+
+Review the guarded plan. Require exactly these two creates beside the disabled
+no-op lifecycle ruleset:
+
+- `github_actions_secret.dependabot_merge_app_id[0]` with secret name
+  `DEPENDABOT_MERGE_APP_ID`;
+- `github_actions_secret.dependabot_merge_app_private_key[0]` with secret name
+  `DEPENDABOT_MERGE_APP_PRIVATE_KEY`.
+
+Require one shared public key ID, bounded base64 ciphertexts, no plaintext
+field, no other secret store, and no unrelated change. Obtain separate apply
+approval. Apply the checked plan. Read only the resulting secret names and
+metadata. Do not read, print, or reconstruct a secret value.
+
+If the apply creates only one secret, record the failure. Replan with the same
+reviewed source and inputs. The guard permits only the existing exact secret as
+a no-op and the missing exact secret as a create. Stop if the plan updates,
+replaces, deletes, or touches another resource.
+If GitHub rotated the repository Actions public key before this retry,
+re-encrypt both values with the current key. The guarded recovery must create
+the missing secret and update the surviving secret together. Both after-values
+must use the same new key ID. The surviving key ID and ciphertext must both
+change. The guard rejects an unrelated change or an unchanged survivor.
+
+After activation, do not disable the lifecycle ruleset to restore a secret that
+GitHub lost or an administrator deleted. Stop the writer. A coherent active
+source state permits only the missing exact secret or pair as creates beside
+the active no-op ruleset. Review and apply that recovery alone. Verify secret
+metadata, then repeat the dedicated-App writer proof before re-enabling it.
+If GitHub also rotated the repository Actions public key, create the missing
+secret and update the surviving secret together. Both after-values must use the
+same new key ID, and the surviving key ID and ciphertext must both change. The
+guard rejects a create with an unchanged survivor in that case.
+
+Before a later rotation, fetch the current Actions public key and key ID. A
+one-secret rotation keeps the same key ID and changes only that ciphertext. A
+public-key rotation changes both secret resources, both ciphertexts, and the
+shared key ID together. The guard rejects every partial key rotation.
+
+## Phase 4B: provision the local-agent App key and broker principal
 
 Start with a separate reviewed source change. Set the broker-scaffold policy
 gate to true and pin the one approved broker impersonating principal. Keep the
@@ -255,8 +393,9 @@ gate and principal in reviewed source. Do not select either from a tfvar,
 repository variable, or environment variable. The managed lifecycle ruleset
 ID must already be positive and pinned.
 
-Use the operator tfvars file for the App and installation IDs, positive
-rotation counter, credential-active selector, and App key. When the selector is
+Use the operator tfvars file for the installation ID, positive rotation
+counter, credential-active selector, and App key. The App ID stays in reviewed
+policy source. When the selector is
 true, Terraform accepts only canonical base64 lines and unused pad bits in an
 RSA PKCS#1 or unencrypted PKCS#8 PEM envelope no larger than 65,536 bytes. The
 platform wrapper reads that value from its private tfvars copy. It normalizes
@@ -283,7 +422,7 @@ gate is false. Obtain separate apply approval. Apply the checked plan. Remove
 any obsolete operator key copy only when the approved rotation and recovery
 process no longer needs it. Revoke the key if custody becomes uncertain.
 
-### Phase 4 partial-apply recovery
+### Phase 4B partial-apply recovery
 
 Terraform apply is not an atomic five-resource transaction. If it stops after
 one to four scaffold creates succeed, do not retry through the ordinary apply
@@ -305,7 +444,7 @@ plan with the same operator tfvars file. Require:
   action.
 
 The recovery gate rejects an all-five create. Return the source gate to false
-and use the ordinary Phase 4 lane if no member exists. Stop and request a
+and use the ordinary Phase 4B lane if no member exists. Stop and request a
 separate state-recovery design if the plan cannot represent the live resources
 as this exact create/no-op mix.
 
@@ -401,11 +540,56 @@ Repeat identity proof for each writable cloud-agent surface. Require a
 repository-scoped App installation identity with no lifecycle bypass. Keep an
 unproved surface read-only.
 
+## Phase 6A: migrate the #2137 writer and drain legacy authority
+
+Keep the lifecycle ruleset disabled. Make a separate reviewed change to the
+default-branch #2137 final writer. Retain the restricted `github.token` only for
+authoritative Actions workflow and run reads. Complete those reads before the
+writer mints a token for the dedicated Dependabot merge App from
+`DEPENDABOT_MERGE_APP_ID` and `DEPENDABOT_MERGE_APP_PRIVATE_KEY`. Pass the App
+token only to the final merge or auto-merge call. Do not replace `GH_TOKEN`
+globally. The dedicated App has no Actions permission, so its token cannot
+replace the read credential. Keep the untrusted classifier and trusted final
+writer separate. Do not expose either secret to pull-request code or artifacts.
+
+The separate migration PR must add a source-contract test. The test must prove
+that authoritative Actions reads use `github.token`, App-token minting follows
+those reads, and only the final merge or auto-merge step receives the App
+token. It must reject a job-level or global App-token assignment. This source
+cannot test a future workflow migration before that workflow change exists.
+
+Prove one writer run against an eligible routine Dependabot pull request.
+Record the workflow run ID, workflow commit, triggering run, pull request, exact
+head SHA, App ID, installation ID, token permission map, auto-merge enablement
+actor, and final merge actor. Stop if the writer or merge uses GitHub Actions
+App `15368`, Dependabot App `29110`, a user credential, or the local-agent App.
+
+Then drain the interim writer:
+
+1. Wait for every pre-migration writer run to reach a terminal state.
+2. Do not rerun a retained pre-migration writer run.
+3. Inspect every open Dependabot pull request with an auto-merge request.
+4. Complete or cancel each request enabled by the interim `GITHUB_TOKEN`
+   writer.
+5. Require each remaining request to be absent or attributable to the dedicated
+   App.
+6. Repeat the query immediately before lifecycle activation. Record its full
+   non-secret result and time.
+
+Only after both proofs pass may reviewed source set
+`dependabot_merge_writer_migration_verified` and
+`legacy_dependabot_auto_merge_drained` to true. Run the guarded platform plan.
+Require the active ruleset to remain disabled and every managed resource to be
+a no-op. The evidence booleans do not change live infrastructure by themselves.
+
 ## Phase 7: activate the lifecycle ruleset
 
-Change only the reviewed enforcement selector from disabled to active. Keep
-the source-pinned managed ruleset ID unchanged. Review the guarded plan.
-Require one in-place update at that exact ID and no core ruleset action.
+Require the dedicated-App credential gate, writer-migration evidence, and
+legacy-drain evidence to be true. Require the boundary resource gate to remain
+true. Change only the reviewed enforcement selector from disabled to active.
+Keep the source-pinned Team, both App IDs, and managed ruleset ID unchanged.
+Review the guarded plan. Require one in-place update at that exact ID and no
+core ruleset action.
 
 Obtain separate apply approval. Apply through the guarded wrapper. Read both
 live rulesets through the human Administration-read surface. Require:
@@ -415,36 +599,51 @@ live rulesets through the human Administration-read surface. Require:
 - active enforcement;
 - creation, update, and deletion rules only;
 - one approved Team bypass in `pull_request` mode;
-- no App, Integration, administrator, role, or user bypass.
+- one approved dedicated Dependabot merge App Integration bypass in `exempt`
+  mode;
+- no shared Actions App, built-in Dependabot App, local-agent App,
+  administrator, role, user, or third bypass.
 
 ## Phase 8: prove the boundary
 
-Use one ready, same-repository PR whose exact head passed required checks and
-reviews. Keep the PR unchanged during proof.
+Use one ready same-repository human-path PR and one eligible routine Dependabot
+PR. Keep each exact head unchanged during its proof.
 
-1. Read the selected-repository App installation through the human
-   Administration surface. Require Contents to be absent. Record the exact
-   installation identity, selected repository, and permission map.
-2. Through a trusted operator diagnostic that does not reveal the installation
-   token, ask GitHub to perform the App-authenticated merge or equivalent
-   `main` update. Require the fixed `permission-ceiling-denied` result. Do not
-   return headers, request bodies, tokens, or raw provider output.
+1. Read both selected-repository App installations through the human
+   Administration surface. Record each App ID, installation ID, selected
+   repository, and permission map. Require Contents to be absent from the
+   local-agent App. Require exactly Contents write, Pull requests write, and
+   Workflows write on the dedicated merge App. Require Actions to be absent.
+2. Through a trusted operator diagnostic that does not reveal the local-agent
+   installation token, ask GitHub to perform an authenticated merge or
+   equivalent `main` update on the human-path PR. Require the fixed
+   `permission-ceiling-denied` result. Do not return headers, request bodies,
+   tokens, or raw provider output.
 3. Record the exact live JSON for core ruleset `13494367` and the pinned
    lifecycle ruleset. Require the lifecycle ruleset to be active, target only
    `refs/heads/main`, contain only creation, update, and deletion restrictions,
-   and name only the approved Team in `pull_request` bypass mode.
-4. Have an approved Team member merge the same ready PR through the approved
-   human merge command. Require the merge record to identify that Team member;
-   this proves the source-pinned Team `pull_request` bypass path succeeded.
-5. Record the PR, exact head, App installation identity, permission-denial
-   class, human actor, merge record, both live ruleset JSON documents, and
-   time.
+   and name exactly the approved Team in `pull_request` mode and dedicated App
+   Integration in `exempt` mode.
+4. Have an approved Team member merge the unchanged human-path PR through the
+   approved human merge command. Require the merge record to identify that Team
+   member.
+5. Let the #2137 final writer process the unchanged routine Dependabot PR.
+   Require all normal core ruleset checks. Require native auto-merge to finish
+   under the dedicated App identity. Record the triggering and writer run IDs,
+   workflow commit, PR, head SHA, App and installation IDs, enablement actor,
+   final merge actor, and merge commit.
+6. Repeat the legacy auto-merge drain query. Require no request attributable to
+   the interim `GITHUB_TOKEN` writer.
+7. Record both PRs, both exact heads, the local-agent permission denial, the
+   human actor, the dedicated-App actor evidence, both live ruleset JSON
+   documents, drain result, and time.
 
-The App attempt proves the App permission ceiling. It cannot prove lifecycle
-ruleset evaluation because the App has no Contents permission. The exact live
-ruleset JSON and the Team merge are separate proof of the configured server
-control and approved human path. Do not describe the App denial as a lifecycle
-ruleset refusal.
+The local-agent App attempt proves its permission ceiling. It cannot prove
+lifecycle ruleset evaluation because the App has no Contents permission. The
+dedicated App is `exempt`, so GitHub does not produce a ruleset bypass request
+for that merge. The exact live ruleset JSON and the bound writer and merge
+actors provide the accepted automation evidence. The Team merge proves the
+human path separately.
 
 Do not add a rejected direct push as a substitute for any step. The core
 pull-request rule can reject that push before the lifecycle identity rule is
@@ -469,7 +668,10 @@ Before activation and at each review interval, inventory:
 - cloud-agent credential types and repository selection;
 - the platform Administration PAT and its absence of Contents;
 - the ruleset-audit PAT and its read-only Administration scope;
-- the App registration, installation, profiles, and lack of bypass;
+- the dedicated merge App registration, installation, exact Contents/write,
+  Pull requests/write, and Workflows/write permissions with no Actions,
+  ciphertext-backed Actions secret metadata, and exempt bypass;
+- the local-agent App registration, installation, profiles, and lack of bypass;
 - protected Google principals that can read the App key;
 - Vercel Administration and Contents with the Free-plan acceptance record.
 
@@ -478,19 +680,31 @@ that reached an agent surface. Do not infer issuer identity from a secret name.
 
 ## Rotation
 
-Key rotation needs separate approval. Disable the broker first. Generate and
-transfer the replacement through the secure intake procedure. Increment the
-reviewed write-only rotation counter. Review and apply the guarded credential
-plan. Install and verify the new key. Revoke the old key. Wait for old
-installation tokens to expire before re-enabling the broker.
+Each App key rotation needs separate approval.
+
+For the dedicated merge App, stop the #2137 writer. Fetch the current repository
+Actions public key and key ID. If the ID is unchanged, encrypt and update only
+the replaced credential ciphertext. If the ID changed, re-encrypt the App ID
+and replacement key, then update both ciphertexts and the shared key ID in one
+plan. Review and apply only the exact guarded secret update. Verify one writer
+run and merge actor before re-enabling routine automation. Revoke the old App
+key and wait for old installation tokens to expire.
+
+For the local-agent App, disable the broker first. Generate and transfer the
+replacement through the secure intake procedure. Increment the reviewed
+write-only rotation counter. Review and apply the guarded credential plan.
+Install and verify the new key. Revoke the old key. Wait for old installation
+tokens to expire before re-enabling the broker.
 
 Repeat the no-token, profile, repository, expiry, and refusal canaries after
 rotation.
 
 ## Rollback and incidents
 
-Disable the agent broker or App installation before changing the lifecycle
-rule. Do not weaken the server control to recover an agent workflow.
+Disable the agent broker, #2137 writer, affected key, or affected App
+installation before changing the lifecycle rule. Do not weaken the server
+control to recover an agent or Dependabot workflow. The human Team remains the
+recovery merge lane.
 
 A normal rollback leaves the active lifecycle ruleset in place. Disable the
 broker or App first. Use a reviewed source change, guarded plan, explicit apply
@@ -507,7 +721,13 @@ Treat these events as security incidents:
   address;
 - the lifecycle ruleset ID changes without the approved source transition;
 - `main` is created, updated, or deleted outside the approved path;
-- the App receives Administration or a bypass;
+- the dedicated merge App permission map differs from exact Contents write,
+  Pull requests write, and Workflows write, or it appears in another
+  repository;
+- the local-agent App receives Administration or a ruleset bypass;
+- a merge attributed to shared App `15368`, built-in App `29110`, the
+  local-agent App, or a user occurs in the routine Dependabot lane;
+- a pre-migration `GITHUB_TOKEN` auto-merge request remains at activation;
 - a token, JWT, or PEM reaches an agent or output surface;
 - a human or platform credential reaches an agent surface;
 - Vercel changes the ruleset or `main` outside its accepted operation;

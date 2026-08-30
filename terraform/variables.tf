@@ -32,28 +32,13 @@ variable "github_token" {
     `github_actions_variable`, Administration for
     `github_workflow_repository_permissions` (`github-actions-permissions.tf`,
     issue #1557) and `github_repository_ruleset`
-    (`github-main-lifecycle-ruleset.tf`, issue #2091), and Environments for the
+    (`github-controlled-main-lifecycle-ruleset.tf`, issue #2091), and Environments for the
     `sentry-pipeline` GitHub Environment +
     its `github_actions_environment_secret` mirrors (`github-environment.tf`,
     issue #1289) — a PAT missing any of these 403s.
   EOT
   type        = string
   sensitive   = true
-}
-
-variable "local_agent_github_app_id" {
-  description = "Numeric App ID of the separately created local-agent GitHub App. This App is installed only on monitoring-monorepo and is never a ruleset bypass actor. Leave 0 until the human bootstrap is complete."
-  type        = number
-  default     = 0
-
-  validation {
-    condition = (
-      var.local_agent_github_app_id >= 0 &&
-      floor(var.local_agent_github_app_id) == var.local_agent_github_app_id &&
-      var.local_agent_github_app_id <= 9007199254740991
-    )
-    error_message = "local_agent_github_app_id must be 0 or a positive integer GitHub App ID."
-  }
 }
 
 variable "local_agent_github_app_installation_id" {
@@ -111,6 +96,34 @@ variable "local_agent_github_app_credential_active" {
   description = "Create the IaC-owned local-agent GitHub App private-key version. Keep false until the separate App bootstrap and credential apply are approved."
   type        = bool
   default     = false
+}
+
+variable "dependabot_merge_app_id_encrypted_value" {
+  description = "Base64 ciphertext for the source-pinned dedicated Dependabot merge App ID, encrypted outside Terraform with the monitoring-monorepo repository Actions public key. Leave empty until the reviewed credential phase. Terraform state must never contain the plaintext value."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "dependabot_merge_app_actions_public_key_id" {
+  description = "Public key ID returned with the monitoring-monorepo repository Actions public key used to encrypt both dedicated Dependabot merge App credential ciphertexts. On rotation, keep this ID for a one-secret ciphertext update. If GitHub changed the ID, update it and both ciphertexts together."
+  type        = string
+  default     = ""
+
+  validation {
+    condition = (
+      var.dependabot_merge_app_actions_public_key_id == "" ||
+      can(regex("^[A-Za-z0-9_-]{1,256}$", var.dependabot_merge_app_actions_public_key_id))
+    )
+    error_message = "dependabot_merge_app_actions_public_key_id must be empty or a bounded GitHub Actions public-key ID."
+  }
+}
+
+variable "dependabot_merge_app_private_key_encrypted_value" {
+  description = "Base64 ciphertext for the dedicated Dependabot merge App private key, encrypted outside Terraform with the monitoring-monorepo repository Actions public key. Leave empty until the reviewed credential phase. Terraform state must never contain plaintext key material."
+  type        = string
+  sensitive   = true
+  default     = ""
 }
 
 variable "platform_settings_audit_token" {

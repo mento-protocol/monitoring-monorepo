@@ -8753,11 +8753,11 @@ run_gate "scripts/terraform/check-metrics-bridge-template-plan.mjs"
 assert_contains "- pnpm tf:test (Terraform stack wrapper changed)"
 assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs terraform (Terraform stack wrapper changed)"
 
-run_gate "scripts/terraform/check-human-merge-boundary-plan.mjs"
+run_gate "scripts/terraform/check-main-lifecycle-boundary-plan.mjs"
 assert_contains "- pnpm tf:test (Terraform stack wrapper changed)"
 assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs terraform (Terraform stack wrapper changed)"
 
-run_gate "scripts/terraform/check-human-merge-boundary-plan.test.mjs"
+run_gate "scripts/terraform/check-main-lifecycle-boundary-plan.test.mjs"
 assert_contains "- pnpm tf:test (Terraform stack wrapper changed)"
 assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs terraform (Terraform stack wrapper changed)"
 
@@ -12643,7 +12643,7 @@ run_gate "scripts/workflows/read-main-rulesets.test.mjs"
 assert_contains "- node scripts/workflows/check-main-rulesets-drift.test.mjs (platform-settings main-ruleset drift checker changed)"
 assert_contains "- node scripts/workflows/read-main-rulesets.test.mjs (platform-settings main-ruleset reader changed)"
 
-run_gate "terraform/human-merge-boundary-policy.json"
+run_gate "terraform/main-lifecycle-boundary-policy.json"
 assert_contains "- node scripts/workflows/check-main-rulesets-drift.test.mjs (platform-settings main-ruleset drift checker changed)"
 
 run_gate ".github/workflows/platform-settings-drift.yml"

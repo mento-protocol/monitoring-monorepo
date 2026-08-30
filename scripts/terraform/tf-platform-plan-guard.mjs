@@ -13,7 +13,7 @@ import {
   assertMetricsBridgeTemplatePlan,
   parseMetricsBridgeTemplateRolloutActive,
 } from "./check-metrics-bridge-template-plan.mjs";
-import { assertHumanMergeBoundaryPlan } from "./check-human-merge-boundary-plan.mjs";
+import { assertMainLifecycleBoundaryPlan } from "./check-main-lifecycle-boundary-plan.mjs";
 
 const PLAN_CAPTURE_MAX_BYTES = 64 * 1024 * 1024;
 const PEG_POLICY_CONTROLLER_RECOVERY_TARGET =
@@ -24,6 +24,10 @@ const APP_CREDENTIAL_ACTIVE_VARIABLE =
 const APP_PRIVATE_KEY_RESOURCE_ADDRESS =
   "google_secret_manager_secret_version.local_agent_github_app_private_key[0]";
 const GITHUB_PROVIDER_TOKEN_VARIABLE = "github_token";
+const DEPENDABOT_MERGE_APP_ID_CIPHERTEXT_VARIABLE =
+  "dependabot_merge_app_id_encrypted_value";
+const DEPENDABOT_MERGE_APP_KEY_CIPHERTEXT_VARIABLE =
+  "dependabot_merge_app_private_key_encrypted_value";
 const APP_PRIVATE_KEY_MAX_BYTES = 65536;
 const APP_PRIVATE_KEY_PREFLIGHT_ERROR =
   "refusing platform Terraform because the operator tfvars App key is missing or is not a canonical, parseable 2048-bit-or-stronger RSA PKCS#1 or unencrypted PKCS#8 private key";
@@ -42,6 +46,8 @@ const CANONICAL_APP_PRIVATE_KEY_PATTERNS = [
 ];
 const RESTRICTED_CLI_VARIABLES = new Set([
   APP_PRIVATE_KEY_VARIABLE,
+  DEPENDABOT_MERGE_APP_ID_CIPHERTEXT_VARIABLE,
+  DEPENDABOT_MERGE_APP_KEY_CIPHERTEXT_VARIABLE,
   GITHUB_PROVIDER_TOKEN_VARIABLE,
 ]);
 const AMBIENT_GITHUB_AUTH_VARIABLES = [
@@ -186,6 +192,8 @@ export function assertPlatformTerraformEnvironment(environment = process.env) {
     );
   }
   const restrictedCredentialVariables = [
+    "TF_VAR_dependabot_merge_app_id_encrypted_value",
+    "TF_VAR_dependabot_merge_app_private_key_encrypted_value",
     "TF_VAR_local_agent_github_app_private_key",
     "TF_VAR_github_token",
   ].filter((name) => Object.hasOwn(environment, name));
@@ -242,17 +250,17 @@ function parsePrivatePlanJson(runTerraform, executionStack, planPath) {
   }
 }
 
-function readHumanMergeBoundaryPolicy(executionStack) {
+function readMainLifecycleBoundaryPolicy(executionStack) {
   try {
     return JSON.parse(
       readFileSync(
-        path.join(executionStack.path, "human-merge-boundary-policy.json"),
+        path.join(executionStack.path, "main-lifecycle-boundary-policy.json"),
         "utf8",
       ),
     );
   } catch {
     throw new Error(
-      "could not read the human merge boundary policy from the verified Terraform source snapshot",
+      "could not read the controlled main lifecycle boundary policy from the verified Terraform source snapshot",
     );
   }
 }
@@ -577,13 +585,15 @@ export function runGuardedPlatformCommand({
     process.stderr.write(
       `Metrics Bridge platform plan policy: safe (${rolloutActive ? "rollout" : "stable"})\n`,
     );
-    const humanMergeBoundaryPolicy =
-      readHumanMergeBoundaryPolicy(executionStack);
-    assertHumanMergeBoundaryPlan(plan, {
-      policy: humanMergeBoundaryPolicy,
+    const mainLifecycleBoundaryPolicy =
+      readMainLifecycleBoundaryPolicy(executionStack);
+    assertMainLifecycleBoundaryPlan(plan, {
+      policy: mainLifecycleBoundaryPolicy,
       recoveryTargetOnly,
     });
-    process.stderr.write("Human merge boundary plan policy: safe\n");
+    process.stderr.write(
+      "Controlled main lifecycle boundary plan policy: safe\n",
+    );
 
     if (command !== "apply") return;
     if (!plan.applyable) {

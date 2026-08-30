@@ -107,10 +107,11 @@ Inventories, hashes, and identities stay with their domain.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.
-- **Human boundary pins.** Platform plans, ruleset drift, and the local App
-  broker are pinned across Terraform, workflows,
+- **Controlled lifecycle boundary pins.** Platform plans, ruleset drift,
+  dedicated Dependabot merge App Actions secrets, and the local App broker are
+  pinned across Terraform, workflows,
   gate routes, package scripts, CI, and operator docs. Move each implementation
-  with its test and every consumer. ADR 0078 and its credential runbook own the
+  with its test and every consumer. ADR 0080 and its credential runbook own the
   exact files and fixed host install paths.
 - **Trusted-validator probes.** `pr-description.yml` runs the validator from the
   PR base-branch tip, not a PR snapshot. After a move, keep dual probes
@@ -166,16 +167,25 @@ in the same PR.
   caller plan, credential environment or CLI input, provider-runtime override,
   and unknown argument without echo. Never persist plan data. ADR 0061 owns the
   exact guard and deploy-only exception.
-- ADR 0078 and its runbook own the App boundary. Keep the Team, ruleset ID,
-  broker-scaffold gate, partial-recovery gate, and broker principal in source.
-  Keep the scaffold gate false until the separate Phase 4 source approval. Keep
-  the recovery gate false except during reviewed create/no-op reconciliation.
-  Parse and exercise the App RSA key only from the exact unindented HCL heredoc
-  in the private tfvars copy. Reject JSON key assignments. Keep the PEM, JWT,
-  and token outside agents and caller-controlled children. Preserve fixed root-owned execution, profiles,
-  ambient-credential refusal, redaction, and no-token canaries. Agent input
-  cannot select Workflow write. Follow the runbook for PEM custody, activation,
-  and revoke-on-uncertain-custody.
+- ADR 0080 and its runbook own the App boundary. Keep the inert-or-enabled
+  resource gate, Team, dedicated
+  Dependabot merge App, distinct local-agent App, exact dedicated-App
+  Contents/write, Pull requests/write, and Workflows/write permissions,
+  ruleset ID, credential, writer-migration, legacy-drain,
+  audit, broker, recovery, and broker-principal gates in reviewed source.
+  Preserve exactly the Team `pull_request` and dedicated App Integration
+  `exempt` bypasses. The dedicated-App Actions secrets use only supported
+  `value_encrypted` with one explicit public key ID. Reject plaintext, shared
+  App IDs, an Actions permission, a partial public-key rotation, and another
+  secret store. Keep the
+  broker scaffold gate false until its separate source approval. Keep the
+  recovery gate false except during reviewed create/no-op reconciliation.
+  Parse and exercise the local-agent App RSA key only from the exact unindented
+  HCL heredoc in the private tfvars copy. Reject JSON key assignments. Keep the
+  PEM, JWT, and token outside agents and caller-controlled children. Preserve
+  fixed root-owned execution, profiles, ambient-credential refusal, redaction,
+  and no-token canaries. Agent input cannot select Workflow write. Follow the
+  runbook for both App keys, activation, and revoke-on-uncertain-custody.
 - `pnpm tf:test` enforces the deployment source-staging contract. Never add a
   deploy callsite, an indirect or dynamic deploy form, or a CLI service-account
   override; keep inert examples in `scripts/deploy-staging-contract.test.mjs`.

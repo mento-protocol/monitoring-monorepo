@@ -3,7 +3,7 @@ title: Sentry Triage Pipeline
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-28
+last_verified: 2026-08-30
 scope: ci/process
 doc_type: runbook
 review_interval_days: 90
@@ -1823,10 +1823,12 @@ The **settings audit** row is not a pipeline stage — it powers
 `read` and that the two `main` rulesets retain their exact approved shapes. The
 first invariant is pinned by
 `github_workflow_repository_permissions.default_read` (#1557). The second
-checks unchanged core ruleset `13494367` and the Team-only lifecycle ruleset from
-ADR 0078. The reviewed
-`terraform/human-merge-boundary-policy.json` file provides the expected Team
-ID and activation state. A repository variable cannot select the bypass actor.
+checks unchanged core ruleset `13494367` and the controlled Team plus dedicated
+Dependabot merge App lifecycle ruleset from
+ADR 0080. The reviewed
+`terraform/main-lifecycle-boundary-policy.json` file provides the expected
+Team, dedicated App, and ruleset IDs plus the credential, migration, drain, and
+activation states. A repository variable cannot select a bypass actor.
 The audit does not adopt or update the core ruleset. It is
 the ONLY platform credential deliberately given a CI surface with Administration
 scope, and it is **read-only** — it can never change a setting. Provision

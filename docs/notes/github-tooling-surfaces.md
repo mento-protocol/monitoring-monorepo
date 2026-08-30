@@ -3,7 +3,7 @@ title: GitHub Tooling Surfaces — gh CLI vs MCP
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-29
+last_verified: 2026-08-30
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -34,9 +34,20 @@ skills link here instead of duplicating it.
 
 ## Local credential identity
 
-ADR 0078 separates the local agent identity from the human merge identity.
+ADR 0080 separates the local agent identity from the human merge identity.
 The checked-in source defines the target state. It does not prove that the
 server ruleset or credential cutover is live.
+
+The routine Dependabot lane uses a third identity. Its dedicated
+repository-scoped merge App is the only automation bypass in the controlled
+lifecycle ruleset. #2137's default-branch `workflow_run` final writer reads the
+App ID and private key only from the two ciphertext-backed repository Actions
+secrets. Pull-request code, the local-agent broker, shared GitHub Actions App
+`15368`, and built-in Dependabot App `29110` must not receive that authority.
+Reviewed source pins its exact Contents/write, Pull requests/write, and
+Workflows/write permissions and a distinct local-agent App ID. Workflows write
+is required for #2137's top-level workflow-update lane. Actions permission is
+absent.
 
 After the separately approved activation, a local agent submits one structured
 operation to the root-owned broker. The broker mints a short-lived installation
@@ -70,11 +81,12 @@ infer local identity from an App installed for Codex Cloud, Claude, Sentry, or
 another workflow. An installed cloud App does not authenticate local `gh`.
 
 Before cutover, report the local credential as human-derived and treat the
-local wrapper as the live merge control. After cutover, prove the installation
-ID, absence of Contents permission, fixed permission-denial result, exact live
-ruleset JSON, and Team merge through the credential runbook's proof phase. The
-App denial proves its permission ceiling, not lifecycle-ruleset evaluation. Do
-not claim activation from Terraform source or an App registration alone.
+local wrapper as the live merge control. After cutover, prove the local App
+installation ID, absence of Contents permission, fixed permission-denial
+result, exact live ruleset JSON, Team merge, and dedicated-App routine
+Dependabot merge through the credential runbook's proof phase. The local App
+denial proves its permission ceiling, not lifecycle-ruleset evaluation. Do not
+claim activation from Terraform source or either App registration alone.
 
 After cutover, use a fresh dedicated agent OS account or container with no
 operator Git configuration or credential. Do not run an authenticated direct

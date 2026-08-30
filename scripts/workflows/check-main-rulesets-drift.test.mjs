@@ -6,18 +6,31 @@ import { readFileSync } from "node:fs";
 import {
   CORE_RULESET_ID,
   LIFECYCLE_RULESET_NAME,
-  SOURCE_HUMAN_MERGE_BOUNDARY_POLICY,
+  SOURCE_MAIN_LIFECYCLE_BOUNDARY_POLICY,
   evaluateMainRulesets,
   runCli,
 } from "./check-main-rulesets-drift.mjs";
 
 const TEAM_ID = 424242;
+const DEPENDABOT_MERGE_APP_ID = 515151;
+const LOCAL_AGENT_APP_ID = 616161;
 const MANAGED_RULESET_ID = 24680;
 const TEST_POLICY = Object.freeze({
   repository: "mento-protocol/monitoring-monorepo",
+  controlled_main_lifecycle_resources_enabled: true,
   human_merge_operator_team_id: TEAM_ID,
-  human_main_lifecycle_ruleset_id: MANAGED_RULESET_ID,
-  human_main_lifecycle_ruleset_enforcement: "active",
+  dependabot_merge_app_id: DEPENDABOT_MERGE_APP_ID,
+  dependabot_merge_app_repository_permissions: {
+    contents: "write",
+    pull_requests: "write",
+    workflows: "write",
+  },
+  local_agent_github_app_id: LOCAL_AGENT_APP_ID,
+  controlled_main_lifecycle_ruleset_id: MANAGED_RULESET_ID,
+  controlled_main_lifecycle_ruleset_enforcement: "active",
+  dependabot_merge_app_credentials_enabled: true,
+  dependabot_merge_writer_migration_verified: true,
+  legacy_dependabot_auto_merge_drained: true,
   ruleset_audit_active: true,
   local_agent_github_broker_scaffold_enabled: true,
   local_agent_github_broker_partial_recovery_enabled: false,
@@ -79,17 +92,22 @@ function coreRuleset() {
 
 function lifecycleRuleset(policy = TEST_POLICY) {
   return {
-    id: policy.human_main_lifecycle_ruleset_id,
+    id: policy.controlled_main_lifecycle_ruleset_id,
     name: LIFECYCLE_RULESET_NAME,
     target: "branch",
     source_type: "Repository",
     source: "mento-protocol/monitoring-monorepo",
-    enforcement: policy.human_main_lifecycle_ruleset_enforcement,
+    enforcement: policy.controlled_main_lifecycle_ruleset_enforcement,
     bypass_actors: [
       {
         actor_id: policy.human_merge_operator_team_id,
         actor_type: "Team",
         bypass_mode: "pull_request",
+      },
+      {
+        actor_id: policy.dependabot_merge_app_id,
+        actor_type: "Integration",
+        bypass_mode: "exempt",
       },
     ],
     conditions: { ref_name: { exclude: [], include: ["refs/heads/main"] } },
@@ -166,13 +184,17 @@ for (const [mutate, expected] of [
     "pull_request mode",
   ],
   [
+    (value) => (value.rulesets[1].bypass_actors[1].actor_id = 15368),
+    "dedicated Dependabot App",
+  ],
+  [
     (value) =>
       value.rulesets[1].bypass_actors.push({
         actor_id: 15368,
         actor_type: "Integration",
-        bypass_mode: "pull_request",
+        bypass_mode: "exempt",
       }),
-    "only the source-pinned Team",
+    "exactly the source-pinned Team",
   ],
   [
     (value) => (value.rulesets[1].rules = [{ type: "update" }]),
@@ -210,21 +232,101 @@ expectDrift(fixture(), "Team ID is missing", {
   ...TEST_POLICY,
   human_merge_operator_team_id: 0,
 });
+expectDrift(fixture(), "dedicated Dependabot merge App ID is missing", {
+  ...TEST_POLICY,
+  dependabot_merge_app_id: 0,
+});
+expectDrift(fixture(), "local-agent App ID is missing", {
+  ...TEST_POLICY,
+  local_agent_github_app_id: 0,
+});
+expectDrift(fixture(), "reuses the dedicated Dependabot merge App ID", {
+  ...TEST_POLICY,
+  local_agent_github_app_id: DEPENDABOT_MERGE_APP_ID,
+});
+for (const sharedAppId of [15368, 29110]) {
+  expectDrift(fixture(), "shared GitHub Actions or Dependabot App", {
+    ...TEST_POLICY,
+    dependabot_merge_app_id: sharedAppId,
+  });
+}
 expectDrift(fixture(), "managed lifecycle ruleset ID is missing", {
   ...TEST_POLICY,
-  human_main_lifecycle_ruleset_id: 0,
+  controlled_main_lifecycle_ruleset_id: 0,
 });
 expectDrift(fixture(), "managed lifecycle ruleset ID is missing", {
   ...TEST_POLICY,
-  human_main_lifecycle_ruleset_id: CORE_RULESET_ID,
+  controlled_main_lifecycle_ruleset_id: CORE_RULESET_ID,
 });
 expectDrift(fixture(), "completed audit activation", {
   ...TEST_POLICY,
   ruleset_audit_active: false,
 });
+expectDrift(fixture(), "enabled dedicated-App credentials", {
+  ...TEST_POLICY,
+  dependabot_merge_app_credentials_enabled: false,
+});
+expectDrift(fixture(), "verified writer migration", {
+  ...TEST_POLICY,
+  dependabot_merge_writer_migration_verified: false,
+});
+expectDrift(fixture(), "drained legacy auto-merge requests", {
+  ...TEST_POLICY,
+  legacy_dependabot_auto_merge_drained: false,
+});
 assert.equal(
   evaluateMainRulesets(fixture(), {
     policy: { ...TEST_POLICY, repository: "attacker/repo" },
+  }).status,
+  "malformed",
+);
+assert.equal(
+  evaluateMainRulesets(fixture(), {
+    policy: {
+      ...TEST_POLICY,
+      controlled_main_lifecycle_resources_enabled: false,
+    },
+  }).status,
+  "malformed",
+);
+const missingResourceGatePolicy = { ...TEST_POLICY };
+delete missingResourceGatePolicy.controlled_main_lifecycle_resources_enabled;
+assert.equal(
+  evaluateMainRulesets(fixture(), { policy: missingResourceGatePolicy }).status,
+  "malformed",
+);
+assert.equal(
+  evaluateMainRulesets(fixture(), {
+    policy: {
+      ...TEST_POLICY,
+      controlled_main_lifecycle_resources_enabled: "true",
+    },
+  }).status,
+  "malformed",
+);
+assert.equal(
+  evaluateMainRulesets(fixture(), {
+    policy: {
+      ...TEST_POLICY,
+      dependabot_merge_app_repository_permissions: {
+        contents: "write",
+        pull_requests: "write",
+      },
+    },
+  }).status,
+  "malformed",
+);
+assert.equal(
+  evaluateMainRulesets(fixture(), {
+    policy: {
+      ...TEST_POLICY,
+      dependabot_merge_app_repository_permissions: {
+        actions: "write",
+        contents: "write",
+        pull_requests: "write",
+        workflows: "write",
+      },
+    },
   }).status,
   "malformed",
 );
@@ -252,28 +354,43 @@ result = capture("not json");
 assert.equal(result.code, 3);
 assert.match(result.output, /^MALFORMED:/u);
 
-const sourcePolicy = SOURCE_HUMAN_MERGE_BOUNDARY_POLICY;
+const sourcePolicy = SOURCE_MAIN_LIFECYCLE_BOUNDARY_POLICY;
 const sourceCanDescribeLiveRuleset =
+  sourcePolicy.controlled_main_lifecycle_resources_enabled === true &&
   Number.isSafeInteger(sourcePolicy.human_merge_operator_team_id) &&
   sourcePolicy.human_merge_operator_team_id > 0 &&
-  Number.isSafeInteger(sourcePolicy.human_main_lifecycle_ruleset_id) &&
-  sourcePolicy.human_main_lifecycle_ruleset_id > 0 &&
-  sourcePolicy.human_main_lifecycle_ruleset_id !== CORE_RULESET_ID;
+  Number.isSafeInteger(sourcePolicy.dependabot_merge_app_id) &&
+  sourcePolicy.dependabot_merge_app_id > 0 &&
+  ![15368, 29110].includes(sourcePolicy.dependabot_merge_app_id) &&
+  Number.isSafeInteger(sourcePolicy.local_agent_github_app_id) &&
+  sourcePolicy.local_agent_github_app_id > 0 &&
+  sourcePolicy.local_agent_github_app_id !==
+    sourcePolicy.dependabot_merge_app_id &&
+  Number.isSafeInteger(sourcePolicy.controlled_main_lifecycle_ruleset_id) &&
+  sourcePolicy.controlled_main_lifecycle_ruleset_id > 0 &&
+  sourcePolicy.controlled_main_lifecycle_ruleset_id !== CORE_RULESET_ID;
 const sourceAuditShouldPass =
   sourceCanDescribeLiveRuleset &&
+  sourcePolicy.dependabot_merge_app_credentials_enabled &&
+  sourcePolicy.dependabot_merge_writer_migration_verified &&
+  sourcePolicy.legacy_dependabot_auto_merge_drained &&
   sourcePolicy.ruleset_audit_active &&
-  sourcePolicy.human_main_lifecycle_ruleset_enforcement === "active";
+  sourcePolicy.controlled_main_lifecycle_ruleset_enforcement === "active";
 const sourceVerdict = evaluateMainRulesets(fixture(sourcePolicy), {
   policy: sourcePolicy,
 });
 assert.equal(
   sourceVerdict.status,
-  sourceAuditShouldPass ? "ok" : "drift",
+  sourcePolicy.controlled_main_lifecycle_resources_enabled
+    ? sourceAuditShouldPass
+      ? "ok"
+      : "drift"
+    : "malformed",
   "the current source-policy phase must have the corresponding live-audit fixture",
 );
 if (sourcePolicy.ruleset_audit_active) {
   assert.equal(
-    sourcePolicy.human_main_lifecycle_ruleset_enforcement,
+    sourcePolicy.controlled_main_lifecycle_ruleset_enforcement,
     "active",
     "an active source audit must require active lifecycle enforcement",
   );
@@ -291,13 +408,13 @@ const workflow = readFileSync(
   ),
   "utf8",
 );
-assert.match(workflow, /human-merge-boundary-policy\.json/u);
+assert.match(workflow, /main-lifecycle-boundary-policy\.json/u);
 assert.match(
   workflow,
   /ruleset audit is active but PLATFORM_SETTINGS_AUDIT_TOKEN is absent/iu,
 );
 assert.match(workflow, /main-ruleset-audit state=ok/u);
-assert.match(workflow, /human-only-main-lifecycle/u);
+assert.match(workflow, /controlled-main-lifecycle/u);
 assert.match(workflow, /scripts\/workflows\/read-main-rulesets\.mjs/u);
 assert.match(
   workflow,

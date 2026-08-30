@@ -21,7 +21,7 @@ vercel_token = "vcp_..."
 #     (Variables is required for terraform_apply_slack_channel below;
 #      Administration is required by github_workflow_repository_permissions in
 #      github-actions-permissions.tf — issue #1557 — and the lifecycle
-#      github_repository_ruleset in github-main-lifecycle-ruleset.tf — issue
+#      github_repository_ruleset in github-controlled-main-lifecycle-ruleset.tf — issue
 #      #2091. Environments is required by the
 #      sentry-pipeline GitHub Environment + its environment secrets in
 #      github-environment.tf — issue #1289. GitHub scopes these repo
@@ -31,9 +31,35 @@ vercel_token = "vcp_..."
 github_token = "github_pat_..."
 
 # The approved numeric merge-operator Team ID is pinned in reviewed source at
-# human-merge-boundary-policy.json. It is not an operator tfvar. Replace that
-# file's zero sentinel only after a human organization administrator creates
-# and verifies the Team.
+# main-lifecycle-boundary-policy.json. It is not an operator tfvar. Keep all
+# identity sentinels zero and the boundary resource gate false while a human
+# organization administrator creates and verifies the Team and both Apps. One
+# later reviewed source change pins all three IDs and enables the gate.
+
+# Dedicated Dependabot merge App identity. A human creates this second App and
+# installs it only on mento-protocol/monitoring-monorepo. Grant exactly Contents
+# write, Pull requests write, and Workflows write. Workflows write is required
+# because the #2137 lane merges top-level workflow updates. Do not grant
+# Administration, Actions, Checks, Issues, or organization permissions. This App is the sole
+# automation bypass in the controlled lifecycle ruleset. It must differ from
+# GitHub Actions App 15368, Dependabot App 29110, and the local-agent App.
+# Pin both App IDs and this exact permission map only in that same atomic source
+# change.
+#
+# The default-branch workflow_run writer introduced by #2137 reads these two
+# repository Actions secrets. Before the credential phase, encrypt the App ID
+# and private key outside Terraform with this repository's Actions public key.
+# Pin the public key ID returned with that key. Put only that public ID and the
+# two base64 ciphertexts in this gitignored operator file. Before rotation,
+# confirm the current public key ID. If it is unchanged, rotate only the needed
+# ciphertext. If it changed, re-encrypt both values and update all three inputs
+# together. Never
+# put plaintext App credentials in Terraform, Terraform state, an Actions
+# argument, or tracked source. The plan guard permits only these two exact
+# ciphertext-backed resources during the credential phase.
+# dependabot_merge_app_actions_public_key_id = "<repository Actions public-key ID>"
+# dependabot_merge_app_id_encrypted_value = "<base64 sealed-box ciphertext>"
+# dependabot_merge_app_private_key_encrypted_value = "<base64 sealed-box ciphertext>"
 
 # Local agent GitHub App identity. A human creates and installs this App outside
 # Terraform because the platform token remains repository-scoped. Keep the App
@@ -67,14 +93,14 @@ github_token = "github_pat_..."
 # Owner, and production-infra-applier can impersonate it. The App still has no
 # Administration permission and no ruleset bypass.
 # The reviewed policy keeps the complete broker scaffold absent by default.
-# Phase 3 creates only the disabled lifecycle ruleset. A separate Phase 4
+# It also pins the local-agent App ID. Do not supply that identity as a tfvar.
+# The disabled lifecycle-ruleset phase runs before this broker phase. A separate
 # source change enables the scaffold and pins its impersonator before these
 # values can create anything. That guarded plan must create the service account,
 # secret container, credential version, accessor binding, and impersonation
 # binding together, with no unrelated change. A separate reviewed source gate
 # permits only the same five addresses as a create/no-op mix after a partial
 # apply. The recovery gate returns to false after an all-no-op plan.
-local_agent_github_app_id                           = 0
 local_agent_github_app_installation_id              = 0
 local_agent_github_app_credential_active            = false
 local_agent_github_app_private_key_rotation_counter = 0

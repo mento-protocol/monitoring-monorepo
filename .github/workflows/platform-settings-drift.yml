@@ -19,10 +19,12 @@ name: Platform Settings Drift Detection
 # mirroring terraform-drift's issue UX.
 #
 # INVARIANT (#2091): after the approved platform apply, the unchanged core
-# ruleset and the Team-only `human-only-main-lifecycle` ruleset match their
-# exact pinned shapes. The lifecycle ruleset covers creation, update, and
-# deletion. The core ruleset stays unmanaged until the GitHub provider can
-# preserve `require_extra_approval_for_unattributed_changes` losslessly.
+# ruleset and the `controlled-main-lifecycle` ruleset match their exact pinned
+# shapes. The lifecycle ruleset covers creation, update, and deletion. It lets
+# only the human merge Team and the dedicated repository-scoped Dependabot
+# merge App bypass those lifecycle rules. The core ruleset stays unmanaged
+# until the GitHub provider can preserve
+# `require_extra_approval_for_unattributed_changes` losslessly.
 #
 # CREDENTIAL. The reads hit `GET /repos/{owner}/{repo}/actions/permissions/
 # workflow` and the repository ruleset list/detail endpoints. They require
@@ -34,7 +36,7 @@ name: Platform Settings Drift Detection
 # Contents+PR trust boundary we do not widen) and NOT the CI `TF_VAR_github_token`
 # (which must not gain administration). Read-only by design: it can never CHANGE
 # a setting. The ruleset check may be inert only while
-# `terraform/human-merge-boundary-policy.json` keeps its reviewed activation
+# `terraform/main-lifecycle-boundary-policy.json` keeps its reviewed activation
 # flag false. After activation, a missing credential fails the workflow.
 # Runbook: docs/notes/local-agent-github-app-credential.md.
 
@@ -143,7 +145,7 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          policy="terraform/human-merge-boundary-policy.json"
+          policy="terraform/main-lifecycle-boundary-policy.json"
           audit_active=$(jq -r '
             if (.ruleset_audit_active | type) == "boolean" then
               .ruleset_audit_active | tostring
@@ -318,7 +320,7 @@ jobs:
             const marker = "<!-- platform-settings-drift:main-rulesets -->";
             const body =
               `**Stack:** \`platform\` (repository rulesets)\n` +
-              `**Check:** human-only main lifecycle boundary\n` +
+              `**Check:** controlled main lifecycle boundary\n` +
               `**Last checked:** ${now}\n` +
               `[Full workflow logs](${runUrl})\n\n` +
               `The live repository rulesets differ from the approved source. This can ` +
@@ -365,7 +367,7 @@ jobs:
               const created = await github.rest.issues.create({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                title: "Platform settings drift: human-only main lifecycle boundary",
+                title: "Platform settings drift: controlled main lifecycle boundary",
                 body,
                 labels,
               });

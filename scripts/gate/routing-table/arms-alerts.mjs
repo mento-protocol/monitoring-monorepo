@@ -97,8 +97,8 @@ export const ALERT_ARMS = [
     ],
   },
   {
-    why: "The reviewed policy selects the human Team actor, broker-scaffold phase, and drift-audit activation state. Keep its focused plan and drift evaluator tests above the broad Terraform arm, which is first-match routing.",
-    patterns: ["terraform/human-merge-boundary-policy.json"],
+    why: "The reviewed policy selects the inert-or-enabled resource gate, human Team, both distinct App IDs, dedicated App permission map, credential gate, writer-migration gate, legacy-drain gate, broker-scaffold phase, and drift-audit activation state. Keep its focused plan and drift evaluator tests above the broad Terraform arm, which is first-match routing.",
+    patterns: ["terraform/main-lifecycle-boundary-policy.json"],
     effects: [
       { surface: "terraform" },
       {
@@ -111,7 +111,7 @@ export const ALERT_ARMS = [
       },
       {
         command: "pnpm tf:test",
-        reason: "human merge boundary phase policy changed",
+        reason: "controlled main lifecycle phase policy changed",
       },
       {
         command: "node scripts/workflows/check-main-rulesets-drift.test.mjs",

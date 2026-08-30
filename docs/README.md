@@ -206,12 +206,12 @@ Authority: canonical
 - [`docs/adr/0072-md-only-docs-checks-job.md`](adr/0072-md-only-docs-checks-job.md) — The Markdown globs route to a small docs-checks CI job instead of the scripts job
 - [`docs/adr/0073-guardrail-prose-pinned-in-ci.md`](adr/0073-guardrail-prose-pinned-in-ci.md) — Normative guardrail sentences are pinned in CI, and scripts are not
 - [`docs/adr/0074-trove-ledger-parallel-append-only-entity.md`](adr/0074-trove-ledger-parallel-append-only-entity.md) — TroveLedgerEvent is a parallel append-only entity, not a widened TroveOperationEvent
-- [`docs/adr/0075-pr-merge.md`](adr/0075-pr-merge.md) — One sanctioned human-only merge path
+- [`docs/adr/0075-pr-merge.md`](adr/0075-pr-merge.md) — One sanctioned human merge path with a bounded Dependabot exception
 - [`docs/adr/0076-fair-quality-gate-coordinator.md`](adr/0076-fair-quality-gate-coordinator.md) — Fair local quality-gate coordination across worktrees
 - [`docs/adr/0077-operator-triggered-backlog-sweep.md`](adr/0077-operator-triggered-backlog-sweep.md) — Operator-triggered backlog sweep with isolated workers
 - [`docs/adr/0078-staged-verification-redesign.md`](adr/0078-staged-verification-redesign.md) — Staged replacement of the mandatory local gate with existing CI
 - [`docs/adr/0079-sealed-exact-file-patch-secret-suppression.md`](adr/0079-sealed-exact-file-patch-secret-suppression.md) — Autoreview permits only sealed exact-file-patch secret suppression
-- [`docs/adr/0078-human-only-main-update-boundary.md`](adr/0078-human-only-main-update-boundary.md) — Main branch lifecycle changes require human merge operators
+- [`docs/adr/0080-controlled-main-lifecycle-boundary.md`](adr/0080-controlled-main-lifecycle-boundary.md) — Main branch lifecycle changes use controlled human and Dependabot identities
 
 Authority: non-canonical
 

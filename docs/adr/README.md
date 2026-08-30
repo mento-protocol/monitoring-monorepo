@@ -84,12 +84,12 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0070](0070-sentry-requeue-settlement-sentinel.md)          | The archive's terminal label is withheld from the re-queue's shed and read back      |
 | [0072](0072-md-only-docs-checks-job.md)                     | The Markdown globs route to a small `docs-checks` job; some Markdown runs both jobs  |
 | [0073](0073-guardrail-prose-pinned-in-ci.md)                | Normative guardrail sentences are pinned in CI; script digests deliberately are not  |
-| [0075](0075-pr-merge.md)                                    | One sanctioned merge wrapper gates merges locally; the binding control stays human   |
+| [0075](0075-pr-merge.md)                                    | One sanctioned human merge path has one bounded routine Dependabot exception         |
 | [0076](0076-fair-quality-gate-coordinator.md)               | Fair weighted coordination replaces machine-wide full-run gate exclusion             |
 | [0077](0077-operator-triggered-backlog-sweep.md)            | Backlog sweeps start from an operator, run isolated workers, and stop at READY       |
 | [0078](0078-staged-verification-redesign.md)                | Staged existing-CI replacement of the mandatory local gate                           |
 | [0079](0079-sealed-exact-file-patch-secret-suppression.md)  | Autoreview permits only sealed exact-file-patch secret suppression                   |
-| [0078](0078-human-only-main-update-boundary.md)             | A Team-only lifecycle ruleset enforces the human merge boundary on GitHub            |
+| [0080](0080-controlled-main-lifecycle-boundary.md)          | A Team and one dedicated Dependabot App control main lifecycle changes               |
 
 ### shared-config
 
@@ -177,7 +177,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0061](0061-exact-plan-guard-for-manual-platform-applies.md)  | Manual platform applies check and consume one private exact plan                                                  |
 | [0063](0063-dashboard-grafana-history-read-access.md)         | The platform stack mints the dashboard's read-only Grafana identity and token                                     |
 | [0067](0067-pool-criticality-is-depletion-risk.md)            | Pool alerts page on depletion risk or rebalancer inaction, never on deviation magnitude                           |
-| [0078](0078-human-only-main-update-boundary.md)               | A separate Team-only lifecycle ruleset protects main; core adoption stays deferred                                |
+| [0080](0080-controlled-main-lifecycle-boundary.md)            | A Team and one dedicated Dependabot App control main; core adoption stays deferred                                |
 
 ### governance-watchdog
 

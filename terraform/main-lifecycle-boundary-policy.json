@@ -1,0 +1,21 @@
+{
+  "repository": "mento-protocol/monitoring-monorepo",
+  "controlled_main_lifecycle_resources_enabled": false,
+  "human_merge_operator_team_id": 0,
+  "dependabot_merge_app_id": 0,
+  "dependabot_merge_app_repository_permissions": {
+    "contents": "write",
+    "pull_requests": "write",
+    "workflows": "write"
+  },
+  "local_agent_github_app_id": 0,
+  "controlled_main_lifecycle_ruleset_id": 0,
+  "controlled_main_lifecycle_ruleset_enforcement": "disabled",
+  "dependabot_merge_app_credentials_enabled": false,
+  "dependabot_merge_writer_migration_verified": false,
+  "legacy_dependabot_auto_merge_drained": false,
+  "ruleset_audit_active": false,
+  "local_agent_github_broker_scaffold_enabled": false,
+  "local_agent_github_broker_partial_recovery_enabled": false,
+  "local_agent_github_broker_impersonator": ""
+}

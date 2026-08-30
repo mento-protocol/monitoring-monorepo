@@ -36,7 +36,7 @@ terraform {
     }
     github = {
       source = "integrations/github"
-      # Keep the ruleset adoption boundary on the schema reviewed in ADR 0078.
+      # Keep the ruleset adoption boundary on the schema reviewed in ADR 0080.
       # Version 6.12.1 cannot represent the live core ruleset's unattributed-
       # change approval field. A provider update needs a separate review before
       # it can change that fail-closed adoption decision.
@@ -64,7 +64,7 @@ provider "google" {
 }
 
 # GitHub provider — used to manage repo-level GitHub Actions secrets,
-# variables, repository settings, and the human-only main lifecycle ruleset on
+# variables, repository settings, and the controlled main lifecycle ruleset on
 # `monitoring-monorepo`.
 # `var.github_token` should be a fine-grained PAT scoped to
 # `mento-protocol/monitoring-monorepo` with Repository → Secrets: Read/write,
@@ -72,7 +72,7 @@ provider "google" {
 # Read/write. Administration is required by `github_workflow_repository_permissions`
 # in `github-actions-permissions.tf` (pins the default workflow-token permission
 # to read-only — issue #1557) and `github_repository_ruleset` in
-# `github-main-lifecycle-ruleset.tf`; Environments is required by the `sentry-pipeline`
+# `github-controlled-main-lifecycle-ruleset.tf`; Environments is required by the `sentry-pipeline`
 # GitHub Environment and its `github_actions_environment_secret` resources in
 # `github-environment.tf` (issue #1289) — managing the environment and writing
 # its secrets (environment public-key read + secret PUT) 403s without it.

@@ -119,8 +119,8 @@ export const TOOLING_MODULE_ARMS = [
     patterns: [
       "scripts/terraform/check-metrics-bridge-template-plan.mjs",
       "scripts/terraform/check-metrics-bridge-template-plan.test.mjs",
-      "scripts/terraform/check-human-merge-boundary-plan.mjs",
-      "scripts/terraform/check-human-merge-boundary-plan.test.mjs",
+      "scripts/terraform/check-main-lifecycle-boundary-plan.mjs",
+      "scripts/terraform/check-main-lifecycle-boundary-plan.test.mjs",
       "scripts/terraform/tf-platform-plan-guard.mjs",
       "scripts/tf-stacks.mjs",
       "scripts/tf-stacks.test.mjs",
