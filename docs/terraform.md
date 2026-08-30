@@ -94,16 +94,16 @@ proof, rollback, and import deferral. Each needs approval. Initial source is
 inert because its boundary resource gate gives every boundary resource count
 zero and permits unrelated safe platform plans.
 
-Source pins the boundary resource gate, repository, human Team, dedicated Dependabot merge App,
-distinct local-agent App, exact dedicated-App Contents/write, Pull
-requests/write, and Workflows/write permissions, managed rule ID and
-enforcement, dedicated-App credential gate, #2137 writer
-migration evidence, legacy auto-merge drain evidence, audit, broker gates, and
-broker principal. Initial source keeps the resource gate false and all identity
-and ruleset sentinels zero. After external verification, one Phase 3 change
-pins all three identities and enables resources. A later change pins the
-created ruleset ID. The local-agent App ID is reviewed policy, not an operator
-tfvar. The dedicated App has no Actions permission.
+Source pins the boundary resource gate, repository, human Team, dedicated
+Dependabot merge App, distinct local-agent App, exact dedicated-App
+Contents/write, Pull requests/write, and Workflows/write permissions, managed
+rule ID and enforcement, dedicated-App credential gate, #2137 exact-head REST
+writer-migration evidence, legacy auto-merge request absence evidence, audit,
+broker gates, and broker principal. Initial source keeps the resource gate false
+and all identity and ruleset sentinels zero. After external verification, one
+Phase 3 change pins all three identities and enables resources. A later change
+pins the created ruleset ID. The local-agent App ID is reviewed policy, not an
+operator tfvar. The dedicated App has no Actions permission.
 
 The disabled ruleset contains creation, update, and deletion restrictions. The
 `update` rule is the identity boundary. `creation` prevents delete-and-recreate
@@ -112,10 +112,11 @@ already owns `non_fast_forward` and stays unmanaged because provider `6.12.1`
 loses its unattributed-change field.
 
 The ruleset has exactly two bypass actors. The Team uses `pull_request`. The
-dedicated repository-scoped Dependabot merge App Integration uses `exempt` so
-native auto-merge can complete after the #2137 writer exits. Shared GitHub
-Actions App `15368`, built-in Dependabot App `29110`, and the local-agent App
-are forbidden.
+dedicated repository-scoped Dependabot merge App Integration uses `exempt` as
+the direct `main` lifecycle update actor for one synchronous exact-head REST
+merge. The writer creates no standing auto-merge request. Shared GitHub Actions
+App `15368`, built-in Dependabot App `29110`, and the local-agent App are
+forbidden.
 
 The dedicated App credential phase creates only
 `DEPENDABOT_MERGE_APP_ID` and `DEPENDABOT_MERGE_APP_PRIVATE_KEY` as repository
@@ -144,14 +145,16 @@ emits only a fixed error. The broker keeps its PEM, JWT, and token outside
 agents. Git, workflow, readiness, and transactional board lanes stay
 unavailable. Stronger credentials stay outside agent OSes.
 
-Before active enforcement, #2137 must retain `github.token` for authoritative
-Actions reads and use the dedicated App token only for its final merge or
-auto-merge call. Its migration PR must pin that split in a source-contract
-test. Every legacy writer run must finish. Each open auto-merge request must be
-absent or attributable to the dedicated App. Source records both
-writer-migration and drain evidence before the guard permits the active
-ruleset. Live proof binds the Team path, the local-agent denial, the
-dedicated-App routine merge, and an audit with
+Before active enforcement, #2137 must retain `github.token` for every
+authoritative read. It must wait for required checks, mint a fresh dedicated
+App token after that wait, repeat the complete authoritative proof with
+`github.token`, and expose the App token only to one final synchronous
+exact-head REST `PUT`. Its migration PR must pin that order and token split in
+a source-contract test. Every legacy writer run must finish. Every legacy
+auto-merge request must be absent. Source records both writer-migration and
+legacy-request absence evidence before the guard permits the active ruleset.
+Live proof binds the Team path, the local-agent denial, the dedicated-App
+routine merge and final actor, and an audit with
 `main-ruleset-audit state=ok`.
 
 Vercel retains Administration plus Contents as a Free-plan residual. It can

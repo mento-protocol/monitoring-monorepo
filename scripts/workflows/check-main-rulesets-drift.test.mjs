@@ -266,11 +266,11 @@ expectDrift(fixture(), "enabled dedicated-App credentials", {
   ...TEST_POLICY,
   dependabot_merge_app_credentials_enabled: false,
 });
-expectDrift(fixture(), "verified writer migration", {
+expectDrift(fixture(), "verified exact-head REST writer migration", {
   ...TEST_POLICY,
   dependabot_merge_writer_migration_verified: false,
 });
-expectDrift(fixture(), "drained legacy auto-merge requests", {
+expectDrift(fixture(), "absence of every legacy auto-merge request", {
   ...TEST_POLICY,
   legacy_dependabot_auto_merge_drained: false,
 });

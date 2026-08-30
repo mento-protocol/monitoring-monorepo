@@ -251,7 +251,7 @@ function validateSourcePolicy(policy, errors) {
       : brokerImpersonator !== "")
   ) {
     errors.push(
-      "source policy must select either the exact inert zero-sentinel state with boundary resources disabled or the enabled state with approved positive Team, dedicated Dependabot merge App, and distinct local-agent App IDs; it must also pin the repository, exact Contents/write, Pull requests/write, and Workflows/write dedicated-App permissions, non-negative managed lifecycle ruleset ID, valid enforcement state, boolean credential, migration, drain, audit, broker-scaffold, and recovery gates, and one service-account principal only while the scaffold gate is enabled",
+      "source policy must select either the exact inert zero-sentinel state with boundary resources disabled or the enabled state with approved positive Team, dedicated Dependabot merge App, and distinct local-agent App IDs; it must also pin the repository, exact Contents/write, Pull requests/write, and Workflows/write dedicated-App permissions, non-negative managed lifecycle ruleset ID, valid enforcement state, boolean credential, exact-head REST writer-migration, legacy auto-merge request absence, audit, broker-scaffold, and recovery gates, and one service-account principal only while the scaffold gate is enabled",
     );
     return undefined;
   }
@@ -297,12 +297,12 @@ function validateSourcePolicy(policy, errors) {
   }
   if (dependabotWriterMigrationVerified && !dependabotCredentialsEnabled) {
     errors.push(
-      "Dependabot writer migration evidence requires enabled IaC-owned App credentials",
+      "Dependabot exact-head REST writer migration evidence requires enabled IaC-owned App credentials",
     );
   }
   if (legacyDependabotAutoMergeDrained && !dependabotWriterMigrationVerified) {
     errors.push(
-      "legacy Dependabot auto-merge drain evidence requires verified dedicated-App writer migration",
+      "legacy Dependabot auto-merge request absence evidence requires verified dedicated-App exact-head REST writer migration",
     );
   }
   if (
@@ -312,7 +312,7 @@ function validateSourcePolicy(policy, errors) {
       !legacyDependabotAutoMergeDrained)
   ) {
     errors.push(
-      "active lifecycle enforcement requires enabled dedicated-App credentials, verified writer migration, and drained legacy auto-merge requests",
+      "active lifecycle enforcement requires enabled dedicated-App credentials, verified exact-head REST writer migration, and absence of every legacy auto-merge request",
     );
   }
   if (auditActive && (rulesetId <= 0 || enforcement !== "active")) {

@@ -553,7 +553,7 @@ expectFailure(
 );
 expectFailure(
   plan([credentialRuleset]),
-  "writer migration evidence requires enabled",
+  "exact-head REST writer migration evidence requires enabled",
   {
     ...CREDENTIAL_POLICY,
     dependabot_merge_app_credentials_enabled: false,
@@ -562,7 +562,7 @@ expectFailure(
 );
 expectFailure(
   plan([credentialRuleset, ...dependabotCredentialEntries()]),
-  "legacy Dependabot auto-merge drain evidence requires",
+  "legacy Dependabot auto-merge request absence evidence requires",
   {
     ...CREDENTIAL_POLICY,
     legacy_dependabot_auto_merge_drained: true,
@@ -1111,6 +1111,74 @@ const variableSource = readFileSync(
   new URL("../../terraform/variables.tf", import.meta.url),
   "utf8",
 );
+const lifecycleAdrSource = readFileSync(
+  new URL(
+    "../../docs/adr/0080-controlled-main-lifecycle-boundary.md",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const lifecycleRunbookSource = readFileSync(
+  new URL(
+    "../../docs/notes/local-agent-github-app-credential.md",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const operatingCardSource = readFileSync(
+  new URL("../../docs/notes/pr-operating-card.md", import.meta.url),
+  "utf8",
+);
+const terraformDocsSource = readFileSync(
+  new URL("../../docs/terraform.md", import.meta.url),
+  "utf8",
+);
+const exactHeadRestContractSources = Object.freeze({
+  "ADR 0080": lifecycleAdrSource,
+  "controlled lifecycle Terraform": terraformSource,
+  "local-agent credential runbook": lifecycleRunbookSource,
+  "PR operating card": operatingCardSource,
+  "Terraform guide": terraformDocsSource,
+});
+for (const [sourceName, source] of Object.entries(
+  exactHeadRestContractSources,
+)) {
+  assert.doesNotMatch(
+    source,
+    /native auto-merge|final merge or auto-merge|absent or attributable to the dedicated App|auto-merge enablement actor|required delayed native auto-merge identity|reliable later update path/iu,
+    `${sourceName} must not restore the obsolete native-auto-merge writer design`,
+  );
+}
+assert.match(
+  terraformSource,
+  /direct[\s\S]*?lifecycle update actor[\s\S]*?one synchronous,[\s\S]*?exact-head REST merge[\s\S]*?leaves no standing auto-merge request/u,
+  "the ruleset source must describe the dedicated App as the direct synchronous REST update actor",
+);
+assert.match(
+  lifecycleAdrSource,
+  /waits for all required[\s\S]*?checks[\s\S]*?repeats its authoritative proofs[\s\S]*?one synchronous exact-head[\s\S]*?REST merge[\s\S]*?cannot enqueue or leave a standing auto-merge request/u,
+  "ADR 0080 must pin the required-check wait, authoritative reproof, and synchronous REST merge contract",
+);
+assert.match(
+  lifecycleRunbookSource,
+  /wait for required checks for up to 60 minutes[\s\S]*?Mint[\s\S]*?after that wait[\s\S]*?before the repeated final proof[\s\S]*?every read uses `GH_READ_TOKEN` from `github\.token`[\s\S]*?only the final REST `PUT` receives the App token/u,
+  "the migration runbook must mint a fresh App token after the wait and scope it to the final PUT",
+);
+assert.match(
+  lifecycleRunbookSource,
+  /Require every open Dependabot pull request to have no auto-merge request[\s\S]*?must not create a replacement request under the[\s\S]*?dedicated App/u,
+  "the legacy drain must end with no standing request under any actor",
+);
+assert.match(
+  operatingCardSource,
+  /waits for all[\s\S]*?required checks[\s\S]*?repeats its authoritative proofs[\s\S]*?one[\s\S]*?synchronous exact-head REST merge[\s\S]*?creates no standing auto-merge request/u,
+  "the operating card must state the synchronous routine Dependabot exception",
+);
+assert.match(
+  terraformDocsSource,
+  /wait for required checks[\s\S]*?mint a fresh dedicated[\s\S]*?after that wait[\s\S]*?repeat the complete authoritative proof with[\s\S]*?`github\.token`[\s\S]*?only to one final synchronous[\s\S]*?exact-head REST `PUT`/u,
+  "the Terraform guide must preserve the read-token and final-write-token split",
+);
 assert.match(
   terraformSource,
   /resource "github_repository_ruleset" "controlled_main_lifecycle" \{[\s\S]*?count\s+=\s+local\.controlled_main_lifecycle_resources_enabled \? 1 : 0[\s\S]*?rules \{[\s\S]*?creation = true[\s\S]*?update\s+= true[\s\S]*?deletion = true[\s\S]*?lifecycle \{[\s\S]*?prevent_destroy = true/u,
@@ -1144,7 +1212,7 @@ assert.match(
 assert.match(
   terraformSource,
   /controlled_main_lifecycle_ruleset_enforcement != "active"[\s\S]*?dependabot_merge_app_credentials_enabled[\s\S]*?dependabot_merge_writer_migration_verified[\s\S]*?legacy_dependabot_auto_merge_drained/u,
-  "active enforcement must require credential provisioning, writer migration, and legacy-request drain evidence",
+  "active enforcement must require credential provisioning, exact-head REST writer migration, and legacy-request absence evidence",
 );
 assert.match(
   dependabotSource,

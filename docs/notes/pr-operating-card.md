@@ -388,10 +388,12 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    Green CI, bot approvals, a READY ready-state, and "ship it" do not authorize
    a merge. Drive the PR to ready, present the evidence, then stop and ask.
    The only policy exception is the reviewed #2137 routine Dependabot lane.
-   After ADR 0080 activation, its default-branch final writer may enable native
-   auto-merge through the dedicated repository-scoped Dependabot merge App.
-   Its classifier, check, actor, and credential gates define that narrow
-   exception. Do not extend it to another bot, PR class, App, or workflow.
+   After ADR 0080 activation, its default-branch final writer waits for all
+   required checks, repeats its authoritative proofs, and performs one
+   synchronous exact-head REST merge through the dedicated repository-scoped
+   Dependabot merge App. The writer creates no standing auto-merge request. Its
+   classifier, check, actor, and credential gates define that narrow exception.
+   Do not extend it to another bot, PR class, App, or workflow.
 
    Once the user approves, they merge from their own terminal through the
    sanctioned path:
@@ -435,10 +437,11 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    [ADR 0075](../adr/0075-pr-merge.md) owns the ordered gates,
    the alternatives, and every residual, including what the deny does not
    cover. ADR 0080 requires #2137's final writer to migrate from its interim
-   `GITHUB_TOKEN` to the dedicated App and requires every legacy writer run and
-   auto-merge request to drain before the server rule activates. The routine
-   Dependabot lane does not share this local wrapper. The normal approval rule
-   above is unchanged. The wrapper mechanizes it, and its refusal makes
+   `GITHUB_TOKEN` to the dedicated App for the final REST write and requires
+   every legacy writer run to finish and every legacy auto-merge request to be
+   absent before the server rule activates. The routine Dependabot lane does
+   not share this local wrapper. The normal approval rule above is unchanged.
+   The wrapper mechanizes it, and its refusal makes
    "agents never merge" a control. If the merge itself satisfies Done
    means, sync the issue state and workboard afterward per
    [`agent-issue-workflow.md`](agent-issue-workflow.md). If live proof remains,

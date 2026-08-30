@@ -52,10 +52,11 @@ resource "github_repository_ruleset" "controlled_main_lifecycle" {
     bypass_mode = "pull_request"
   }
 
-  # This repository-scoped App is the only automation bypass. It writes the
-  # narrow routine Dependabot lane. `exempt` lets native auto-merge complete
-  # under the App identity. The shared GitHub Actions App, the Dependabot App,
-  # and the local agent App are never bypass actors.
+  # This repository-scoped App is the only automation bypass. It is the direct
+  # `main` lifecycle update actor for the trusted writer's one synchronous,
+  # exact-head REST merge. `exempt` authorizes that direct update. The writer
+  # leaves no standing auto-merge request. The shared GitHub Actions App, the
+  # Dependabot App, and the local agent App are never bypass actors.
   bypass_actors {
     actor_id    = local.dependabot_merge_app_id
     actor_type  = "Integration"
@@ -177,7 +178,7 @@ resource "github_repository_ruleset" "controlled_main_lifecycle" {
           )
         )
       )
-      error_message = "terraform/main-lifecycle-boundary-policy.json must enable boundary resources, pin the repository, approved Team, dedicated Dependabot merge App, and local-agent App IDs, exact Contents/write, Pull requests/write, and Workflows/write dedicated-App permissions, non-core managed lifecycle ruleset ID, valid enforcement state, Dependabot writer migration and legacy-request drain evidence, ordered audit activation, and coherent broker gates. The dedicated App ID must differ from GitHub Actions, Dependabot, and the local-agent App. Initial ruleset creation requires ID 0, disabled enforcement, an inactive audit, disabled credential and broker gates, and no migration or drain claim."
+      error_message = "terraform/main-lifecycle-boundary-policy.json must enable boundary resources, pin the repository, approved Team, dedicated Dependabot merge App, and local-agent App IDs, exact Contents/write, Pull requests/write, and Workflows/write dedicated-App permissions, non-core managed lifecycle ruleset ID, valid enforcement state, exact-head REST writer migration and legacy auto-merge request absence evidence, ordered audit activation, and coherent broker gates. The dedicated App ID must differ from GitHub Actions, Dependabot, and the local-agent App. Initial ruleset creation requires ID 0, disabled enforcement, an inactive audit, disabled credential and broker gates, and no migration or drain claim."
     }
   }
 }

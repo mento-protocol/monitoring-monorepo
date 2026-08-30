@@ -319,7 +319,7 @@ export function evaluateMainRulesets(
     return {
       status: "malformed",
       violations: [
-        "source policy must pin the repository, inert-or-enabled boundary resource gate, Team, dedicated Dependabot App, exact Contents/write, Pull requests/write, and Workflows/write App permissions, lifecycle enforcement, and boolean credential, migration, drain, and audit states.",
+        "source policy must pin the repository, inert-or-enabled boundary resource gate, Team, dedicated Dependabot App, exact Contents/write, Pull requests/write, and Workflows/write App permissions, lifecycle enforcement, and boolean credential, exact-head REST writer-migration, legacy auto-merge request absence, and audit states.",
       ],
     };
   }
@@ -367,7 +367,7 @@ export function evaluateMainRulesets(
     !expected.legacyAutoMergeDrained
   ) {
     violations.push(
-      "live ruleset audit requires enabled dedicated-App credentials, verified writer migration, and drained legacy auto-merge requests",
+      "live ruleset audit requires enabled dedicated-App credentials, verified exact-head REST writer migration, and absence of every legacy auto-merge request",
     );
   }
   if (api.rulesets.length !== 2) {

@@ -37,8 +37,8 @@ The completed cutover has these properties:
   permission;
 - the selected-repository local-agent App has no Administration permission and
   no ruleset bypass;
-- the #2137 final writer uses the dedicated App, and no legacy `GITHUB_TOKEN`
-  auto-merge request remains;
+- the #2137 final writer performs one synchronous exact-head REST merge through
+  the dedicated App, and no legacy `GITHUB_TOKEN` auto-merge request remains;
 - each agent operation receives one fixed least-privilege profile;
 - the App PEM, JWT, and installation token remain inside the trusted broker;
 - the dedicated agent OS or container has no human or platform credential;
@@ -66,8 +66,8 @@ behavior. They cannot prove these external facts:
 - the Vercel plan constraint;
 - the local-agent App's live permission registration and a permission-denied
   merge or `main` update attempt;
-- the #2137 final writer's authentication identity;
-- the actor that enabled or completed an open auto-merge request;
+- the #2137 final writer's read and final-write authentication identities;
+- the final App merge actor and merge commit;
 
 Record each live fact separately. Do not infer it from source, a plan, an App
 name, an installation ID, or a successful read request.
@@ -132,11 +132,12 @@ gate stays false during the ordinary all-five create.
 
 ### Exempt App audit record
 
-The dedicated Dependabot merge App uses `exempt` bypass mode so native
-auto-merge can complete after the writer exits. GitHub does not create a
-ruleset bypass-request record for an exempt actor. Bind each proof to the
-trusted writer run, workflow commit, App and installation IDs, pull request,
-exact head SHA, enablement actor, final merge actor, and merge commit.
+The dedicated Dependabot merge App uses `exempt` bypass mode because it is the
+direct `main` lifecycle update actor for the trusted writer's one synchronous
+exact-head REST merge. The writer creates no standing auto-merge request.
+GitHub does not create a ruleset bypass-request record for an exempt actor.
+Bind each proof to the trusted writer run, workflow commit, App and installation
+IDs, pull request, exact head SHA, final App merge actor, and merge commit.
 
 ### Vercel Free plan
 
@@ -297,8 +298,8 @@ state. The resulting policy has:
 - managed lifecycle ruleset ID `0`;
 - enforcement disabled;
 - dedicated-App credentials disabled;
-- writer-migration evidence false;
-- legacy auto-merge drain evidence false;
+- exact-head REST writer-migration evidence false;
+- legacy auto-merge request absence evidence false;
 - drift audit inactive;
 - broker scaffold disabled;
 - broker partial recovery disabled;
@@ -543,38 +544,49 @@ unproved surface read-only.
 ## Phase 6A: migrate the #2137 writer and drain legacy authority
 
 Keep the lifecycle ruleset disabled. Make a separate reviewed change to the
-default-branch #2137 final writer. Retain the restricted `github.token` only for
-authoritative Actions workflow and run reads. Complete those reads before the
-writer mints a token for the dedicated Dependabot merge App from
-`DEPENDABOT_MERGE_APP_ID` and `DEPENDABOT_MERGE_APP_PRIVATE_KEY`. Pass the App
-token only to the final merge or auto-merge call. Do not replace `GH_TOKEN`
+default-branch #2137 final writer. Retain the restricted `github.token` for
+every authoritative Actions and pull-request read. Use `GH_READ_TOKEN` for
+those reads. The writer can wait for required checks for up to 60 minutes. Mint
+a fresh dedicated Dependabot merge App token from
+`DEPENDABOT_MERGE_APP_ID` and `DEPENDABOT_MERGE_APP_PRIVATE_KEY` after that wait
+and before the repeated final proof. Repeat the complete workflow, run, job,
+pull request, head, commit, file, queue, and required-check proof with
+`GH_READ_TOKEN`. Expose the fresh App token only to the final synchronous
+exact-head REST merge `PUT`. Do not mint the token before the wait, substitute
+an hour-old token, assign it at job or global scope, or replace `GH_TOKEN`
 globally. The dedicated App has no Actions permission, so its token cannot
 replace the read credential. Keep the untrusted classifier and trusted final
 writer separate. Do not expose either secret to pull-request code or artifacts.
 
 The separate migration PR must add a source-contract test. The test must prove
-that authoritative Actions reads use `github.token`, App-token minting follows
-those reads, and only the final merge or auto-merge step receives the App
-token. It must reject a job-level or global App-token assignment. This source
-cannot test a future workflow migration before that workflow change exists.
+that the required-check wait precedes App-token minting, the fresh mint precedes
+the repeated final proof, every read uses `GH_READ_TOKEN` from `github.token`,
+and only the final REST `PUT` receives the App token. It must prove that the
+request uses `PUT /repos/mento-protocol/monitoring-monorepo/pulls/{number}/merge`
+with the verified head SHA and squash method. It must reject an early mint, an
+old token, a job-level or global App-token assignment, `gh pr merge`, and any
+auto-merge or queue command. This source cannot test a future workflow
+migration before that workflow change exists.
 
 Prove one writer run against an eligible routine Dependabot pull request.
-Record the workflow run ID, workflow commit, triggering run, pull request, exact
-head SHA, App ID, installation ID, token permission map, auto-merge enablement
-actor, and final merge actor. Stop if the writer or merge uses GitHub Actions
-App `15368`, Dependabot App `29110`, a user credential, or the local-agent App.
+Record the workflow run ID, workflow commit, triggering run, pull request,
+exact head SHA, App ID, installation ID, token permission map, final App merge
+actor, and merge commit. Confirm that the writer left no standing auto-merge
+request. Stop if the writer or merge uses GitHub Actions App `15368`, Dependabot
+App `29110`, a user credential, or the local-agent App.
 
 Then drain the interim writer:
 
 1. Wait for every pre-migration writer run to reach a terminal state.
 2. Do not rerun a retained pre-migration writer run.
-3. Inspect every open Dependabot pull request with an auto-merge request.
+3. Inspect every open Dependabot pull request for an auto-merge request.
 4. Complete or cancel each request enabled by the interim `GITHUB_TOKEN`
    writer.
-5. Require each remaining request to be absent or attributable to the dedicated
-   App.
-6. Repeat the query immediately before lifecycle activation. Record its full
-   non-secret result and time.
+5. Require every open Dependabot pull request to have no auto-merge request.
+   The migrated writer must not create a replacement request under the
+   dedicated App.
+6. Repeat the query immediately before lifecycle activation. Require the same
+   empty result. Record its full non-secret result and time.
 
 Only after both proofs pass may reviewed source set
 `dependabot_merge_writer_migration_verified` and
@@ -628,12 +640,13 @@ PR. Keep each exact head unchanged during its proof.
    approved human merge command. Require the merge record to identify that Team
    member.
 5. Let the #2137 final writer process the unchanged routine Dependabot PR.
-   Require all normal core ruleset checks. Require native auto-merge to finish
-   under the dedicated App identity. Record the triggering and writer run IDs,
-   workflow commit, PR, head SHA, App and installation IDs, enablement actor,
-   final merge actor, and merge commit.
-6. Repeat the legacy auto-merge drain query. Require no request attributable to
-   the interim `GITHUB_TOKEN` writer.
+   Require all normal core ruleset checks. Require the writer to repeat its
+   authoritative proofs and perform one synchronous exact-head REST merge under
+   the dedicated App identity. Record the triggering and writer run IDs,
+   workflow commit, PR, head SHA, App and installation IDs, final App merge
+   actor, and merge commit.
+6. Repeat the legacy auto-merge drain query. Require no auto-merge request on
+   any open Dependabot pull request.
 7. Record both PRs, both exact heads, the local-agent permission denial, the
    human actor, the dedicated-App actor evidence, both live ruleset JSON
    documents, drain result, and time.
@@ -727,7 +740,8 @@ Treat these events as security incidents:
 - the local-agent App receives Administration or a ruleset bypass;
 - a merge attributed to shared App `15368`, built-in App `29110`, the
   local-agent App, or a user occurs in the routine Dependabot lane;
-- a pre-migration `GITHUB_TOKEN` auto-merge request remains at activation;
+- an auto-merge request remains on an open Dependabot pull request at
+  activation;
 - a token, JWT, or PEM reaches an agent or output surface;
 - a human or platform credential reaches an agent surface;
 - Vercel changes the ruleset or `main` outside its accepted operation;

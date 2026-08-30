@@ -82,13 +82,16 @@ same boundary. The `deletion` rule binds removal to the same actors. The
 unmanaged core ruleset already owns `non_fast_forward`. Duplicating that rule
 would add no identity control.
 
-Use `exempt` for the dedicated App. Native auto-merge can complete after the
-writer workflow exits. An exempt Integration remains authorized for that later
-update. This mode has a material audit limit: GitHub does not create a ruleset
-bypass request for an exempt actor. Activation evidence must therefore bind
-the workflow run, App installation, pull request, head SHA, and final merge
-actor. The App remains subject to the unchanged core ruleset because it is not
-a bypass actor there.
+Use `exempt` for the dedicated App. The trusted writer waits for all required
+checks, repeats its authoritative proofs, and submits one synchronous exact-head
+REST merge with the App token. That call updates `main` directly under the App
+identity. It cannot enqueue or leave a standing auto-merge request. `exempt`
+authorizes the App as that direct lifecycle update actor. This mode has a
+material audit limit: GitHub does not create a ruleset bypass request for an
+exempt actor. Activation evidence must therefore bind the workflow run, App
+installation, pull request, head SHA, final App merge actor, and merge commit.
+The App remains subject to the unchanged core ruleset because it is not a
+bypass actor there.
 
 Keep core ruleset `13494367` unmanaged. Do not import it at the lifecycle
 resource address. Provider `6.12.1` remains pinned until a separate review
@@ -128,13 +131,13 @@ must return the recovery gate to false before other platform work continues.
 The reviewed policy records the boundary resource gate, repository, Team ID,
 both App IDs, the exact
 dedicated-App repository permission map, managed lifecycle ruleset ID, desired
-enforcement, dedicated-App credential state, #2137 writer-migration evidence,
-legacy auto-merge drain evidence, drift-audit state, broker-scaffold gate,
-partial-recovery gate, and broker impersonator. The initial source keeps the
-resource gate false. It uses zero ID sentinels, disabled enforcement, an empty
-impersonator, the fixed permission map, and false evidence and phase gates.
-Every boundary resource has count zero. Unrelated safe platform plans remain
-available.
+enforcement, dedicated-App credential state, #2137 exact-head REST
+writer-migration evidence, legacy auto-merge request absence evidence,
+drift-audit state, broker-scaffold gate, partial-recovery gate, and broker
+impersonator. The initial source keeps the resource gate false. It uses zero ID
+sentinels, disabled enforcement, an empty impersonator, the fixed permission
+map, and false evidence and phase gates. Every boundary resource has count
+zero. Unrelated safe platform plans remain available.
 
 The state changes in separate reviewed phases:
 
@@ -156,14 +159,15 @@ The state changes in separate reviewed phases:
    the service account, secret container, accessor binding, impersonation
    binding, and write-only credential version. Local and cloud agent credential
    cutover completes while the lifecycle rule is disabled.
-6. The #2137 final writer retains its restricted `GITHUB_TOKEN` for
-   authoritative Actions workflow and run reads. After those reads, it mints a
-   dedicated-App token and passes that token only to the final merge or
-   auto-merge call. Live evidence binds a writer run and resulting routine
-   merge to that App installation. Every legacy auto-merge request is then
-   completed or cancelled. Every remaining request must be absent or
-   attributable to the dedicated App. Reviewed source records both completed
-   gates.
+6. The #2137 final writer retains its restricted `GITHUB_TOKEN` for every
+   authoritative read. It waits for required checks, then mints a fresh
+   dedicated-App token. It repeats the complete authoritative proof with the
+   read token and exposes the App token only to one synchronous exact-head REST
+   merge `PUT`. The writer creates no standing auto-merge request. Live
+   evidence binds the writer run and final merge to that App installation and
+   records the final App merge actor. Every legacy auto-merge request is then
+   completed or cancelled. A final query must prove that no such request
+   remains. Reviewed source records both completed gates.
 7. A reviewed source change selects active enforcement. An approved platform
    apply changes only enforcement on the pinned lifecycle ruleset.
 8. Live checks record the exact ruleset JSON, prove the Team pull-request path,
@@ -327,20 +331,25 @@ permission separation must remove it in a follow-up.
 #2137 may first run its default-branch `workflow_run` writer with the restricted
 `GITHUB_TOKEN`. Its use for the final write is an interim deployment state.
 Before lifecycle enforcement becomes active, a separate reviewed change must
-retain `github.token` for authoritative Actions workflow and run reads, then
-mint a token for the dedicated Dependabot merge App from the two IaC-owned
-repository Actions secrets. Only the final merge or auto-merge call receives
-the App token. The migration must not replace `GH_TOKEN` globally. The
-migration PR must add a source-contract test for this ordering and token split;
-ADR 0080 cannot assert the later workflow source before that change exists.
+retain `github.token` for every authoritative Actions and pull-request read.
+The writer can wait for required checks for up to 60 minutes. It must mint a
+fresh dedicated Dependabot merge App token after that wait and before it
+repeats the complete authoritative proof. It must use `github.token` for that
+repeated proof and expose the App token only to the final synchronous
+exact-head REST merge `PUT`. It must not mint the App token before the wait,
+use an hour-old token, or replace `GH_TOKEN` globally. The migration PR must add
+a source-contract test for the wait, mint order, repeated proof, exact REST
+route, head binding, and token split. ADR 0080 cannot assert the later workflow
+source before that change exists.
 
 After that migration, drain every legacy write before activation. Wait for all
 pre-migration writer runs to reach a terminal state. Inspect each open
-Dependabot pull request. Its auto-merge request must be absent or attributable
-to the dedicated App. Complete or cancel each request enabled by the legacy
-`GITHUB_TOKEN` writer. Do not rerun a retained legacy writer run. Record the
-writer run, pull request, head SHA, App and installation IDs, final merge actor,
-drain query, and query time. Only then may reviewed source set
+Dependabot pull request. Complete or cancel each auto-merge request enabled by
+the legacy `GITHUB_TOKEN` writer. The migrated writer creates no replacement
+request. Require the final query to show no auto-merge request on any open
+Dependabot pull request. Do not rerun a retained legacy writer run. Record the
+writer run, pull request, head SHA, App and installation IDs, final App merge
+actor, drain query, and query time. Only then may reviewed source set
 `dependabot_merge_writer_migration_verified` and
 `legacy_dependabot_auto_merge_drained` to `true`.
 
@@ -416,10 +425,10 @@ core approval controls remain useful defense in depth.
 eligible changes and can retest them against a newer base, but it does not
 separate the credential that submits the change from a human operator
 credential. It also does not protect branch creation or deletion. Queue
-completion can occur later under a platform integration, so it does not give
-the dedicated App the required delayed native auto-merge identity. A future
-queue rule needs a separate design; ADR 0075 keeps the human wrapper on the
-synchronous REST merge endpoint so it cannot enqueue.
+completion can occur later under a platform integration. That behavior does
+not bind one synchronous update and its final actor to the dedicated App. The
+#2137 writer therefore refuses a queue and uses the synchronous REST merge
+endpoint, which cannot enqueue. A future queue rule needs a separate design.
 
 **Separate credentials and bind both approved identities in a lifecycle
 ruleset.** Selected. The human Team credential and dedicated repository-scoped
@@ -437,11 +446,11 @@ repositories than the approved merge lane.
 Dependabot updates are approved for a narrow automated lane. The dedicated App
 keeps that exception separate from agents and shared GitHub integrations.
 
-**Use `pull_request` bypass mode for the dedicated App.** Rejected. Native
-auto-merge can execute after the writer workflow exits. `exempt` gives the
-dedicated Integration a reliable later update path. The missing bypass-request
-record is accepted and replaced with explicit workflow, App, PR, head, and
-merge-actor evidence.
+**Use `pull_request` bypass mode for the dedicated App.** Rejected. The
+dedicated App performs the final direct `main` update through one synchronous
+REST merge call. `exempt` makes that Integration the explicit lifecycle update
+actor. The missing bypass-request record is accepted and replaced with
+explicit workflow, App, PR, head, final merge actor, and merge-commit evidence.
 
 **Return a short-lived installation token to the agent.** Rejected. The agent
 could copy the token and bypass operation and profile parsing for its remaining
