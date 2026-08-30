@@ -1654,8 +1654,8 @@ export function handleGraphQL(
       return { StableSupplyDailySnapshot: stableDailySnapshots };
     case "StablesCurrentCustodyPerToken":
       return { StableTokenCustodyState: [] };
-    case "StablesLatestCustodyPerToken":
     case "StablesCustodyDailySnapshots":
+    case "StablesLatestCustodyPerToken":
       return { StableTokenCustodyDailySnapshot: [] };
     case "StablesChanges":
       return {
