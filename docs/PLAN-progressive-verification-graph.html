@@ -584,7 +584,7 @@
         </p>
         <div class="facts" aria-label="Current baseline">
           <div class="fact">
-            <strong>96,912</strong><span>raw counted control-plane lines</span>
+            <strong>101,595</strong><span>raw counted control-plane lines</span>
           </div>
           <div class="fact">
             <strong>24.7 min</strong><span>median local gate request</span>
@@ -597,6 +597,14 @@
           </div>
         </div>
         <p class="evidence-note">
+          The raw total covers 223 files: 95,815 implementation and test lines,
+          4,952 lines from four dedicated gate documents, and 828 other
+          reference and hook lines. The dedicated documents count as whole
+          files, which avoids a token-by-token matcher. The 83,113-line
+          upper-bound deletion candidate uses the implementation and test
+          surface only.
+        </p>
+        <p class="evidence-note">
           The 24.7-minute value is the provenance-limited seven-request median.
           A later
           <a
@@ -607,9 +615,12 @@
           scheduler wait. The gate exported <code>CI=true</code>, so mapped
           commands used their non-interactive CI path. Compare this result only
           with gate requests that used the same command environment. Its
-          measured commit is no longer an ancestor after rebase; the artifact
-          records an exact patch replay that reproduced the measured tree. It
-          does not replace the historical distribution.
+          measured commit is no longer an ancestor after rebase. The committed
+          <a href="metrics/verification-redesign-local-gate-source.patch"
+            >source patch</a
+          >
+          permits a fresh clone to reproduce the measured tree from a reachable
+          commit. It does not replace the historical distribution.
         </p>
       </header>
 
@@ -1001,6 +1012,12 @@
               ><span>cutover and later deletion</span>
             </div>
           </div>
+          <p class="evidence-note">
+            Phase 0 records 83,113 lines as an upper-bound deletion candidate.
+            Mixed files still contain retained behavior. The cutover and
+            deletion issues must allocate or migrate that behavior, publish the
+            reviewed final denominator, and only then apply the 80% target.
+          </p>
           <div class="contract" style="margin-top: 16px">
             <article class="card">
               <h3>Rollback before deletion</h3>

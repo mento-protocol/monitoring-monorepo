@@ -25,7 +25,7 @@ only its mandatory-local-gate target state.
 
 The local quality gate combines path routing, validation, process cleanup,
 cross-worktree scheduling, result reuse, and crash recovery. The raw Phase 0
-manifest records 96,912 counted control-plane lines at the terminal pre-M1
+manifest records 101,595 counted control-plane lines at the terminal pre-M1
 source. Recent local runs spent more time waiting for shared capacity than
 running mapped commands. The system protects real shared resources, but its
 mandatory push path now slows local and hosted development.
@@ -173,17 +173,26 @@ orchestration script below 300 non-test lines. No new replacement file can
 exceed 500 lines. Replacement-specific tests must stay below twice the new
 implementation size.
 
-The raw manifest counts every `scripts/gate/**` file as a whole file. This
-keeps the full gate-rooted before surface even when another consumer must retain
-a file. It also counts gate references and the full pre-push hook. At terminal
-pre-M1 source `a5692c4570d7fe33255c2ce863d7f79264a9ddb0`, the manifest records
-223 files and 96,912 counted lines. This includes 95,815 whole-file implementation
-and test lines plus 1,097 shared-reference and hook lines. The retained shared
-closure contributes 12,543 of the whole-file lines. The reviewed gate-specific
-implementation and test deletion denominator is therefore 83,272 lines.
+The raw manifest counts every `scripts/gate/**` file and each dedicated
+canonical gate document as a whole file. This keeps the full gate-rooted before
+surface even when another consumer must retain a file. It also counts other
+gate references and the full pre-push hook. At terminal pre-M1 source
+`a5692c4570d7fe33255c2ce863d7f79264a9ddb0`, the manifest records 223 files and
+101,595 counted lines. This includes 95,815 whole-file implementation and test
+lines, 4,952 whole-file dedicated-document lines, and 828 other
+shared-reference and hook lines. The retained shared closure contributes 12,543
+whole-file lines. The wholly retained package-script pin checker contributes
+another 159 lines. Subtracting both leaves 83,113 lines as an upper-bound
+deletion candidate.
+
+This upper bound is not the final gate-specific deletion denominator. The gate
+test suite mixes retained package-policy coverage with gate-only tests. The
+routing-table family mixes retained workflow-pin and generated-drift behavior
+with deferred local routing. Issues #2127 and #2128 must allocate or migrate
+these retained components and publish the reviewed final denominator.
 Replacement additions must be smaller than the gate-specific code they replace
-at each cutover stage. Final retirement must remove at least 80% of that
-83,272-line denominator.
+at each cutover stage. Final retirement must remove at least 80% of the final
+denominator.
 
 ## Rollback
 

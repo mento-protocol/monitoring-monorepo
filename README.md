@@ -314,12 +314,6 @@ pnpm deploy:indexer:logs "$COMMIT" --build
 pnpm deploy:indexer:logs "$COMMIT" --errors-only --since 2h
 pnpm deploy:indexer:perf "$COMMIT"
 pnpm deploy:indexer:verify "$COMMIT"
-```
-
-A monitor-only, preload, or readiness request does not authorize production
-promotion. Stop until the user gives explicit approval.
-
-```bash
 pnpm deploy:indexer:promote "$COMMIT"
 # After the full five-minute propagation window:
 pnpm deploy:indexer:verify "$COMMIT" --prod

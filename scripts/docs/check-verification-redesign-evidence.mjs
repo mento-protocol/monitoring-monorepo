@@ -23,16 +23,23 @@ export const DISPOSITION_FIELDS = Object.freeze({
 const DISPOSITION_EVIDENCE_FIELDS = new Set(Object.values(DISPOSITION_FIELDS));
 const RETAINED = new Set(Object.keys(DISPOSITION_FIELDS).slice(0, 3));
 const REQUIRED_RISKS = new Set(Array.from({ length: 13 }, (_, i) => i + 1));
-const DUPLICATE_TARGET_RULE =
-  "duplicate_of needs an existing acyclic retained target.";
-const WHOLE_FILE_PATHS = new Set([
-  ".trunk/hooks/pre-push",
-  "scripts/agent-quality-gate.sh",
-  "scripts/agent-quality-gate.test.sh",
-  "scripts/check-agent-quality-gate-package-scripts.mjs",
-]);
+const DUPLICATE_TARGET_RULE = "duplicate_of needs an acyclic retained target.";
+const GIT_OPTIONS = { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 };
+const WHOLE_FILE_PATHS = new Set(
+  ".trunk/hooks/pre-push docs/adr/0007-agent-quality-gate-and-merge-oracle.md docs/adr/0069-gate-routing-table-as-data.md docs/adr/0076-fair-quality-gate-coordinator.md docs/notes/agent-quality-gate-mechanics.md scripts/agent-quality-gate.sh scripts/agent-quality-gate.test.sh scripts/check-agent-quality-gate-package-scripts.mjs".split(
+    " ",
+  ),
+);
+const SCOPED_REFERENCE_PATTERN =
+  /^(?:(?:\.agents\/skills\/backlog-sweep\/SKILL\.md|\.claude\/skills\/backlog-sweep\/SKILL\.md|docs\/adr\/0077-operator-triggered-backlog-sweep\.md|docs\/notes\/backlog-sweep\.md):.*run\.lock|docs\/adr\/(?:0064-scripts-module-directories|0073-guardrail-prose-pinned-in-ci)\.md:.*\b(?:lockfile-scope|arms-packages|pins\.test|routing-table\.test|engine\.test|arms-scripts|arms-agent-modules)\.mjs\b|scripts\/sentry\/ci-wiring\/check-sentry-suites-in-ci-gate-probe\.mjs:.*\bfacts\.mjs\b|(?:\.agents\/roles\/verifier\.md|(?:\.agents|\.claude)\/skills\/backlog-sweep\/SKILL\.md|docs\/notes\/(?:backlog-sweep|pr-ready-state)\.md|docs\/pr-checklists\/review-prompt-exclusions\.md):.*--run(?!-)|docs\/notes\/pr-operating-card\.md:.*--(?:run|base)(?!-)|scripts\/pr\/check-adr-reminder\.mjs:.*(?:\bgate.*--(?:head|changed-paths-file)(?!-)|--(?:head|changed-paths-file)(?!-).*\bgate)|scripts\/agent-autoreview\.sh:.*\bgate_stat\b|(?!(?:scripts\/sentry\/ci-wiring\/check-sentry-suites-in-ci-gate-job\.test\.mjs|scripts\/sentry\/gate\/sentry-suite-gate-integrity\.mjs):)[^:]+:.*\bGATE_[A-Z0-9_]+)/u;
+const EXCLUDED_REFERENCE_PATH =
+  /^(?:ui-dashboard\/scripts\/(?:arkham-smoke-test\.mjs|intel-marathon\/tier1-bulk-enrich\.mjs)|indexer-envio\/\.cursor\/rules\/subgraph-migration\.mdc)$/u;
 const REFERENCE_PATTERN =
-  /agent[:-](?:quality-gate|prewarm)|gate:routing-table:test|quality[- ]gate|scripts\/gate\/|(?:^|["'`(])(?:\.\.?\/)*gate\/|\$[^"'\s]*\\?\/gate(?:\\?\/|["':])|["']gate["']\s*,\s*["'][^"']+\.(?:c|mjs|sh)["']|run\.lock|skip-if-fresh|\bGATE_[A-Z0-9_]+|\b(?:AGENT_QUALITY_GATE|AGENTQG|QUALITY_GATE)_[A-Z0-9_]+|\bagentqg[:-]|inheritGateMarkerStdio|mapped-command-process-identity\.mjs|\bdarwin-process-(?:identity|lineage)[a-z0-9._-]*|\btrunk-check-once(?:\.test)?\.sh/i;
+  /agent[:-](?:quality-gate|prewarm)|\bagent\.qualityGate(?:\.|\b)|gate:routing-table:test|scripts\/gate\/|(?:^|["'`(])(?:\.\.?\/)*gate\/|\$[^"'\s]*\\?\/gate(?:\\?\/|["':])|["']gate["']\s*,\s*["'][^"']+\.(?:c|mjs|sh)["']|\.terraform-agent-gate(?:\/|\b)|skip-if-fresh|--(?:allow-package-script-changes|full-local-tests|lock-wait|no-lock|command-timeout|command-not-started)(?!-)|\b(?:AGENT_(?:QUALITY|GATE|PREWARM)|AGENTQG|QUALITY_GATE)_[A-Z0-9_]+|\bAGENT_TURBO_SHARED_CACHE\b|\bagentqg[:-]|inheritGateMarkerStdio|mapped-command-process-identity\.mjs|\bdarwin-process-(?:identity|lineage)[a-z0-9._-]*|\b(?:portable-marker-v1|request-marker-empty-v1|darwin-coherent-lineage-v2|darwin-unique-lineage-v1|coordinator-owner-v1)\b|\btrunk-check-once(?:\.test)?\.sh/i;
+const matchesReference = (p, line) =>
+  REFERENCE_PATTERN.test(line) ||
+  SCOPED_REFERENCE_PATTERN.test(`${p}:${line}`) ||
+  (!EXCLUDED_REFERENCE_PATH.test(p) && /\bquality[- ]gates?\b/i.test(line));
 function fail(message) {
   throw new Error(message);
 }
@@ -98,7 +105,6 @@ export function validateInventory(records) {
   requireRiskList(risks, "Metadata risk_classes", REQUIRED_RISKS);
   if (risks.length !== REQUIRED_RISKS.size)
     fail("Metadata risk_classes must define exactly classes 1 through 13.");
-  const allowedRisks = REQUIRED_RISKS;
   const safeguards = records.filter((record) => record.kind === "safeguard");
   if (safeguards.length === 0 || records.length !== safeguards.length + 1)
     fail("Inventory may contain only metadata and safeguard records.");
@@ -112,7 +118,7 @@ export function validateInventory(records) {
     requireRiskList(
       record.risk_classes,
       `${record.id} risk_classes`,
-      allowedRisks,
+      REQUIRED_RISKS,
     );
     if (ids.has(record.id)) fail(`Duplicate safeguard id: ${record.id}`);
     ids.add(record.id);
@@ -134,22 +140,16 @@ export function validateInventory(records) {
   validateDuplicateTargets(safeguards);
   return { metadata: metadata[0], safeguard_count: safeguards.length };
 }
-function git(repoRoot, args) {
-  return execFileSync("git", ["-C", repoRoot, ...args], {
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-  });
-}
-function countLines(text) {
-  return text ? text.split("\n").length - (text.endsWith("\n") ? 1 : 0) : 0;
-}
+const git = (root, args) =>
+  execFileSync("git", ["-C", root, ...args], GIT_OPTIONS);
+const nlines = (s) => (s ? s.split("\n").length - +s.endsWith("\n") : 0);
 function surfaceFor(path, wholeFile) {
   if (path.startsWith(".trunk/hooks/")) return "hook";
+  if (/\.md$/u.test(path) || path.endsWith("AGENTS.md")) return "instruction";
   if (wholeFile)
     return /\.test\.[^/]+$/u.test(path) ? "test" : "implementation";
   if (path === "package.json") return "alias";
   if (/\.ya?ml$/u.test(path)) return "yaml-or-inline-shell";
-  if (/\.md$/u.test(path) || path.endsWith("AGENTS.md")) return "instruction";
   if (/\.sh$/u.test(path)) return "shell-reference";
   return "configuration-reference";
 }
@@ -157,7 +157,7 @@ function countReferenceLines(path, content) {
   const lines = content.split("\n");
   const selected = new Set();
   lines.forEach((line, index) => {
-    if (REFERENCE_PATTERN.test(line)) selected.add(index);
+    if (matchesReference(path, line)) selected.add(index);
   });
   if (path === ".trunk/trunk.yaml") {
     const start = lines.findIndex((line) =>
@@ -204,7 +204,7 @@ export function buildManifest({ repoRoot = DEFAULT_ROOT, source }) {
     const content = git(repoRoot, ["show", `${sourceSha}:${path}`]);
     if (content.includes("\0")) continue;
     const lines = wholeFile
-      ? countLines(content)
+      ? nlines(content)
       : countReferenceLines(path, content);
     if (lines === 0) continue;
     entries.push({
@@ -235,7 +235,7 @@ export function buildManifest({ repoRoot = DEFAULT_ROOT, source }) {
     source_sha: sourceSha,
     definitions: {
       whole_file:
-        "Physical lines in the gate entry points, every scripts/gate/** file, the package-script pin checker, and the full pre-push hook. The gate-rooted set includes retained shared-consumer code.",
+        "Physical lines in the gate entry points, dedicated canonical gate documents, every scripts/gate/** file, the package-script pin checker, and the full pre-push hook. The gate-rooted set includes retained shared-consumer code.",
       matching_lines:
         "Unique fixed-pattern lines in other tracked files, full Turbo input filters that pin gate sources, and the full Trunk gate action block.",
     },
@@ -253,9 +253,6 @@ export function checkManifest(actual, expected, baselineSourceSha) {
 export function renderManifest(manifest) {
   return `${JSON.stringify(manifest, null, 2)}\n`;
 }
-function readValidatedInventory(inventoryPath) {
-  return validateInventory(parseInventory(readFileSync(inventoryPath, "utf8")));
-}
 export function runCli(
   args,
   {
@@ -266,7 +263,9 @@ export function runCli(
   } = {},
 ) {
   const command = args[0];
-  const inventory = readValidatedInventory(inventoryPath);
+  const inventory = validateInventory(
+    parseInventory(readFileSync(inventoryPath, "utf8")),
+  );
   if (command === "--check-inventory") {
     stdout.write(
       `OK: ${inventory.safeguard_count} structurally valid safeguard records.\n`,

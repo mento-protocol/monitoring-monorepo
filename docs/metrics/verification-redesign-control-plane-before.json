@@ -2,7 +2,7 @@
   "schema_version": 1,
   "source_sha": "a5692c4570d7fe33255c2ce863d7f79264a9ddb0",
   "definitions": {
-    "whole_file": "Physical lines in the gate entry points, every scripts/gate/** file, the package-script pin checker, and the full pre-push hook. The gate-rooted set includes retained shared-consumer code.",
+    "whole_file": "Physical lines in the gate entry points, dedicated canonical gate documents, every scripts/gate/** file, the package-script pin checker, and the full pre-push hook. The gate-rooted set includes retained shared-consumer code.",
     "matching_lines": "Unique fixed-pattern lines in other tracked files, full Turbo input filters that pin gate sources, and the full Trunk gate action block."
   },
   "entries": [
@@ -17,7 +17,7 @@
       "path": ".agents/roles/verifier.md",
       "surface": "instruction",
       "count_mode": "matching-lines",
-      "lines": 2,
+      "lines": 3,
       "sha256": "76d539beaac7f6ef7fdab0fc350b9c979b345fb730c288b9874ad7015dcb461b"
     },
     {
@@ -31,7 +31,7 @@
       "path": ".agents/skills/backlog-sweep/SKILL.md",
       "surface": "instruction",
       "count_mode": "matching-lines",
-      "lines": 9,
+      "lines": 16,
       "sha256": "194e79f085441f9a6f2eeefbe1bc9fd219efedf3f22dbb8d460e4f2319dbb71d"
     },
     {
@@ -87,7 +87,7 @@
       "path": ".claude/skills/backlog-sweep/SKILL.md",
       "surface": "instruction",
       "count_mode": "matching-lines",
-      "lines": 9,
+      "lines": 16,
       "sha256": "194e79f085441f9a6f2eeefbe1bc9fd219efedf3f22dbb8d460e4f2319dbb71d"
     },
     {
@@ -161,11 +161,53 @@
       "sha256": "9f3e1ce13275e420b37ea40e58ad140a6aa6c7f5e7ce4d094b243423015d81ed"
     },
     {
+      "path": "aegis/.gitignore",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "59697aa79114a3fd854e163245f693e6950688d2be96256d850bc8348f374701"
+    },
+    {
+      "path": "aegis/terraform/.gitignore",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "7fd290c56c7b6dba2f9121a3b03cb93831c13bd20cef4b274c85d19f15259778"
+    },
+    {
       "path": "alerts/AGENTS.md",
       "surface": "instruction",
       "count_mode": "matching-lines",
       "lines": 1,
       "sha256": "e84106757aef6d1c21430280c569dd4a6b9cb324106043c4450cb44d23aeb3d8"
+    },
+    {
+      "path": "alerts/infra/.gitignore",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "2fb90408683344508e1527cc18f7e1ab5becedbfbe2ecd1a986e57fa5b4b57b2"
+    },
+    {
+      "path": "alerts/peg-policy-publication/.gitignore",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "f482badb2523d45c8be652d77e042a0b6261a4a43588f67a6f5749d85abcee3c"
+    },
+    {
+      "path": "alerts/rules/.gitignore",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "b3cb7c97cb0ccc9fa4aa044669d99b78ca7e7f0426193443101ede65ddb2889c"
+    },
+    {
+      "path": "bootstrap-worktree.sh",
+      "surface": "shell-reference",
+      "count_mode": "matching-lines",
+      "lines": 3,
+      "sha256": "8cc707e79ec22d19035cf691814576c9aa5eb3d46a3c0c265cd22ce44cf9b886"
     },
     {
       "path": "docs/PLAN-ai-review-process.md",
@@ -191,8 +233,8 @@
     {
       "path": "docs/adr/0007-agent-quality-gate-and-merge-oracle.md",
       "surface": "instruction",
-      "count_mode": "matching-lines",
-      "lines": 4,
+      "count_mode": "whole-file",
+      "lines": 60,
       "sha256": "6bfff1e7220cec6fc2021f4c52f2b1c3f875f6eecaf06792ce7ea0cbc0635f17"
     },
     {
@@ -255,7 +297,7 @@
       "path": "docs/adr/0064-scripts-module-directories.md",
       "surface": "instruction",
       "count_mode": "matching-lines",
-      "lines": 17,
+      "lines": 18,
       "sha256": "3d5666ef9094d8bdea5efe257b8890ad4617b58f1b90c99a499aafef5bd6913b"
     },
     {
@@ -282,8 +324,8 @@
     {
       "path": "docs/adr/0069-gate-routing-table-as-data.md",
       "surface": "instruction",
-      "count_mode": "matching-lines",
-      "lines": 40,
+      "count_mode": "whole-file",
+      "lines": 575,
       "sha256": "2985307f615bc632eb5e6088ef0339a6d76f3572a5a848ff08a9c845484c4d06"
     },
     {
@@ -297,14 +339,14 @@
       "path": "docs/adr/0073-guardrail-prose-pinned-in-ci.md",
       "surface": "instruction",
       "count_mode": "matching-lines",
-      "lines": 1,
+      "lines": 2,
       "sha256": "515e87a90a180e10d61f4bdefc20c6a0783b07caf67b4a31d9b9092fd81d97fe"
     },
     {
       "path": "docs/adr/0076-fair-quality-gate-coordinator.md",
       "surface": "instruction",
-      "count_mode": "matching-lines",
-      "lines": 66,
+      "count_mode": "whole-file",
+      "lines": 1297,
       "sha256": "957c234d7a337867a1cf48c5b3e92021ac5a8698d8444f0347a56bd629335f83"
     },
     {
@@ -451,7 +493,7 @@
       "path": "docs/evals/review-skill-runs/2026-08-28-76c7cde7-full-1afd9abd/result-1995-replay-1.json",
       "surface": "configuration-reference",
       "count_mode": "matching-lines",
-      "lines": 11,
+      "lines": 12,
       "sha256": "11f718be27418d88da4714b9373b15447990cbeeaea652b75af73469306e86f9"
     },
     {
@@ -479,28 +521,28 @@
       "path": "docs/evals/review-skill.md",
       "surface": "instruction",
       "count_mode": "matching-lines",
-      "lines": 2,
+      "lines": 1,
       "sha256": "3f930766327c642139be13a777087d31d7899adeca83d52d3a4bc728527f5a9a"
     },
     {
       "path": "docs/notes/agent-quality-gate-mechanics.md",
       "surface": "instruction",
-      "count_mode": "matching-lines",
-      "lines": 146,
+      "count_mode": "whole-file",
+      "lines": 3020,
       "sha256": "7b340d792a6d4b54f0b9a64c155f94c6acf9b0d98ae7ec3a3bb09eed87a626ea"
     },
     {
       "path": "docs/notes/autoreview-runtime-trust.md",
       "surface": "instruction",
       "count_mode": "matching-lines",
-      "lines": 1,
+      "lines": 2,
       "sha256": "f22baf151cad7122a1f50241c9e84be99a319dbbda4ddc1e9c260230d2b4dcf6"
     },
     {
       "path": "docs/notes/backlog-sweep.md",
       "surface": "instruction",
       "count_mode": "matching-lines",
-      "lines": 3,
+      "lines": 6,
       "sha256": "d19360a2e485c09e37047e8f53b9e8b77296f35ad93b1d9d56163bc8849cffe5"
     },
     {
@@ -549,14 +591,14 @@
       "path": "docs/notes/pr-operating-card.md",
       "surface": "instruction",
       "count_mode": "matching-lines",
-      "lines": 8,
+      "lines": 16,
       "sha256": "4753b675d53af74e63ea63a5fc9d8b2d0a868f5638ca94210fabadbc52e94cb8"
     },
     {
       "path": "docs/notes/pr-ready-state.md",
       "surface": "instruction",
       "count_mode": "matching-lines",
-      "lines": 2,
+      "lines": 3,
       "sha256": "7c53fddbb10586fbb3a4bdbd681913d3954104464fc55fa7e3c64150dfc42da3"
     },
     {
@@ -577,7 +619,7 @@
       "path": "docs/notes/worktree-and-web-setup.md",
       "surface": "instruction",
       "count_mode": "matching-lines",
-      "lines": 5,
+      "lines": 6,
       "sha256": "877d2aed1735c650e7bfb8aa5b708bce58e4e7f4ede0c5b9ae26e5b9b6d47b3e"
     },
     {
@@ -598,7 +640,7 @@
       "path": "docs/pr-checklists/code-health.md",
       "surface": "instruction",
       "count_mode": "matching-lines",
-      "lines": 1,
+      "lines": 2,
       "sha256": "d536e04317aa09162f48d45708886064e39e324a62f885e52027367de5aa2d67"
     },
     {
@@ -619,7 +661,7 @@
       "path": "docs/pr-checklists/review-prompt-exclusions.md",
       "surface": "instruction",
       "count_mode": "matching-lines",
-      "lines": 1,
+      "lines": 2,
       "sha256": "d6313ec21c1dd3dd7f27ecbbad7042860eec94ea1cfcb7e392d70092c380752c"
     },
     {
@@ -633,7 +675,7 @@
       "path": "governance-watchdog/.gitignore",
       "surface": "configuration-reference",
       "count_mode": "matching-lines",
-      "lines": 1,
+      "lines": 2,
       "sha256": "f49bd9afd3e34e59635fd42d9adf3f4630a8cc23b6e1be2ea970800bba72b932"
     },
     {
@@ -642,13 +684,6 @@
       "count_mode": "matching-lines",
       "lines": 1,
       "sha256": "fa77ade36ee8a31d9246ce3bb90c72959ff996740c841cb71a97fd7f8147447f"
-    },
-    {
-      "path": "indexer-envio/.cursor/rules/subgraph-migration.mdc",
-      "surface": "configuration-reference",
-      "count_mode": "matching-lines",
-      "lines": 1,
-      "sha256": "0a5d1a76b56c5ab7f2432e92cbfb84bc6142633f33f1e934310ea638d55d56ca"
     },
     {
       "path": "indexer-envio/README.md",
@@ -689,7 +724,7 @@
       "path": "scripts/agent-autoreview.mjs",
       "surface": "configuration-reference",
       "count_mode": "matching-lines",
-      "lines": 9,
+      "lines": 10,
       "sha256": "338f13d9003d3896d621fea300a29cfe53cae8493de805c1e9e2c99b88988e2d"
     },
     {
@@ -1340,7 +1375,7 @@
       "path": "scripts/pr/check-adr-reminder.mjs",
       "surface": "configuration-reference",
       "count_mode": "matching-lines",
-      "lines": 3,
+      "lines": 6,
       "sha256": "0d7f69267c83209f122d4dcce4d5fa0016b44600dd2c217650e595147f087e8f"
     },
     {
@@ -1361,7 +1396,7 @@
       "path": "scripts/production-infra-identity-contract/routing.test.mjs",
       "surface": "configuration-reference",
       "count_mode": "matching-lines",
-      "lines": 2,
+      "lines": 3,
       "sha256": "ff3e3d69e0e7cf26a58ea2793bc88931fb1d61c3293af496bbce291d10ad9562"
     },
     {
@@ -1370,20 +1405,6 @@
       "count_mode": "matching-lines",
       "lines": 15,
       "sha256": "5231af6be1eb1f905cf69e5367560681672804e949b65a64679bb9b03ea7c7e6"
-    },
-    {
-      "path": "scripts/review/review-eval.test.mjs",
-      "surface": "configuration-reference",
-      "count_mode": "matching-lines",
-      "lines": 2,
-      "sha256": "ad8a12928e36e4abc76d7b96ddde388ae00abf4254af0dd3816bbd70b5c5bd90"
-    },
-    {
-      "path": "scripts/review/run-eval-lifecycle.sh",
-      "surface": "shell-reference",
-      "count_mode": "matching-lines",
-      "lines": 4,
-      "sha256": "04bddd9468b69ebd3773272fed83ce91abadb32f23f46174e68a0d32270b896a"
     },
     {
       "path": "scripts/review/testdata/review-eval-split-equivalence/contract.json.txt",
@@ -1431,7 +1452,7 @@
       "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-coverage.test.mjs",
       "surface": "configuration-reference",
       "count_mode": "matching-lines",
-      "lines": 4,
+      "lines": 5,
       "sha256": "f7a60550f26afc0bbbdd36bc33c62eb081697378833cf0d61ff8a5271fec8ffc"
     },
     {
@@ -1459,14 +1480,14 @@
       "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-job.test.mjs",
       "surface": "configuration-reference",
       "count_mode": "matching-lines",
-      "lines": 48,
+      "lines": 1,
       "sha256": "6976aff046f0ca099b524bad845979736a219dadc38a3c167577e574936e5b64"
     },
     {
       "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-probe.mjs",
       "surface": "configuration-reference",
       "count_mode": "matching-lines",
-      "lines": 13,
+      "lines": 15,
       "sha256": "317da3c86d9f13e7be19d7a8b8988d8e77f2c2f4a7152dac250f38c46226221b"
     },
     {
@@ -1505,13 +1526,6 @@
       "sha256": "4cad8293017b13a24a8ffc20438247103528aeda55ccf857714816bd30e550ba"
     },
     {
-      "path": "scripts/sentry/gate/sentry-suite-gate-integrity.mjs",
-      "surface": "configuration-reference",
-      "count_mode": "matching-lines",
-      "lines": 4,
-      "sha256": "b77e03506a82d19e6cc5fa1b1cbc80f1591ae03798e53f16989ae1aea9c03e85"
-    },
-    {
       "path": "scripts/sentry/gate/sentry-suite-manifest.json",
       "surface": "configuration-reference",
       "count_mode": "matching-lines",
@@ -1529,15 +1543,8 @@
       "path": "scripts/setup.sh",
       "surface": "shell-reference",
       "count_mode": "matching-lines",
-      "lines": 1,
+      "lines": 4,
       "sha256": "e294a575ebf5f692e839ba0fe25e2ddb13193e9f341e4040408a334b6b2bbce3"
-    },
-    {
-      "path": "scripts/workflows/check-autofix-ci-trust.test.mjs",
-      "surface": "configuration-reference",
-      "count_mode": "matching-lines",
-      "lines": 1,
-      "sha256": "664d599dfdaaa74b7a03ea3d837ea72a23de70be5f32b1d629013356fe07448c"
     },
     {
       "path": "shared-config/AGENTS.md",
@@ -1547,37 +1554,30 @@
       "sha256": "25512eb2fa8826bf939b3fbe6245e9c635779257310e9ff9a8f211575ae0e3bc"
     },
     {
+      "path": "terraform/.gitignore",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "bbb6a4d2d552d4c12abb699fcf87284895de9da732a0469e48d324d844f8c8d7"
+    },
+    {
       "path": "turbo.json",
       "surface": "configuration-reference",
       "count_mode": "matching-lines",
       "lines": 92,
       "sha256": "8936aec39ec5236de8db8247a05237761a3f1cb98386e67a35f5eae08e2ff90b"
-    },
-    {
-      "path": "ui-dashboard/scripts/arkham-smoke-test.mjs",
-      "surface": "configuration-reference",
-      "count_mode": "matching-lines",
-      "lines": 3,
-      "sha256": "c45073615e720f10bbc2f8b717e4132589bc057d2de97837418e8561eff3210d"
-    },
-    {
-      "path": "ui-dashboard/scripts/intel-marathon/tier1-bulk-enrich.mjs",
-      "surface": "configuration-reference",
-      "count_mode": "matching-lines",
-      "lines": 5,
-      "sha256": "981a03c209f7ca02592a0fd76cf6627d442631333f0d0a71f201fe38f85dfe1f"
     }
   ],
   "totals": {
     "files": 223,
-    "counted_lines": 96912,
+    "counted_lines": 101595,
     "by_surface": {
       "alias": 5,
-      "configuration-reference": 427,
+      "configuration-reference": 380,
       "hook": 33,
       "implementation": 46174,
-      "instruction": 464,
-      "shell-reference": 124,
+      "instruction": 5192,
+      "shell-reference": 126,
       "test": 49641,
       "yaml-or-inline-shell": 44
     }

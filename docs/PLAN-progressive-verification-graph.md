@@ -110,31 +110,36 @@ cleanup, cross-worktree scheduling, and crash recovery.
   wait. The gate exported `CI=true`, so mapped commands used their
   non-interactive CI path. Compare this result only with gate requests that used
   the same command environment. Its measured commit is no longer an ancestor
-  after rebase; the artifact records an exact patch replay that reproduced the
-  measured tree. This one narrow route does not replace the seven-request
-  distribution.
+  after rebase. The committed
+  [source patch](metrics/verification-redesign-local-gate-source.patch) permits
+  a fresh clone to reproduce the measured tree from a reachable commit. This
+  one narrow route does not replace the seven-request distribution.
 - The gate self-test has needed a 40-minute CI timeout.
 - Remote Turbo result caching is disabled.
 
 The generated Phase 0 manifest widens this count to the complete control-plane
 surface. Its terminal pre-M1 source is
-`a5692c4570d7fe33255c2ce863d7f79264a9ddb0`. The raw manifest records 96,912
-counted lines across 223 files: 95,815 whole-file implementation and test lines
-plus 1,097 shared-reference and hook lines. It counts every `scripts/gate/**`
-file as a whole file so the before artifact preserves the full gate-rooted
-surface.
+`a5692c4570d7fe33255c2ce863d7f79264a9ddb0`. The raw manifest records 101,595
+counted lines across 223 files: 95,815 whole-file implementation and test lines,
+4,952 whole-file lines from the four dedicated canonical gate documents, and
+828 other shared-reference and hook lines. It counts every `scripts/gate/**`
+file and each dedicated gate document as a whole file. This preserves the full
+gate-rooted surface and avoids a token-by-token document matcher.
 
 The raw whole-file total includes a ten-file, 12,543-line shared closure for
 Darwin process identity, coherent lineage, autoreview provenance, Sentry
-process identity, and their tests. Those files remain retained. Subtracting
-them gives the reviewed gate-specific implementation and test deletion
-denominator of 83,272 lines. The raw 96,912-line manifest is the before-surface
-record. It is not the deletion denominator.
+process identity, and their tests. Those files remain retained. The 159-line
+package-script pin checker also remains retained. Subtracting both leaves
+83,113 lines as an upper-bound deletion candidate. This is not the final
+gate-specific denominator because mixed files contain retained behavior. Issues
+#2127 and #2128 must allocate or migrate those components before they publish
+the reviewed final denominator. The raw 101,595-line manifest is the
+before-surface record. It is not the deletion denominator.
 
 PR #2134 advanced the boundary from the #2042 terminal commit
 `e0346ec4756f9577bcbb1e13e06566ccc507e9e4`. It adds 46 whole-file lines to the
 gate-specific surface. It changes none of the ten retained shared files and
-adds no shared-reference or hook lines.
+does not change the dedicated-document, shared-reference, or hook surfaces.
 
 Comparable retained runs produce a 41.18-runner-minute cold planning estimate
 for the current deterministic job set. The estimate starts with a run where all
@@ -635,7 +640,7 @@ The initial implementation must meet all of these limits:
   control-plane surface.
 - The replacement-specific control-plane additions must have a net line count
   below the gate-specific code they replace at every cutover phase.
-- The final state must remove at least 80% of the 83,272 gate-specific
+- The final state must remove at least 80% of the reviewed final gate-specific
   implementation and test deletion denominator.
 - The final pull request must show the net line reduction and list every
   retained gate-rooted shared file with its reason.
@@ -797,8 +802,10 @@ cutover. Require zero observed migration-attributable safeguard omissions found
 by no-skip, scheduled, `main`, or deployment checks. Multiple heads or reruns
 from one pull request count as one pull request.
 
-The deletion scope starts from the 83,272-line gate-specific denominator.
-Retain the ten-file, 12,543-line shared closure. Issues #2127 and #2128 must
+The deletion scope starts from the 83,113-line upper-bound candidate. Retain the
+ten-file, 12,543-line shared closure and the 159-line package-script checker.
+Issues #2127 and #2128 must allocate or migrate retained behavior in mixed
+files, then publish the final denominator. They must also
 re-audit the shared consumers at the #2042 terminal commit
 `e0346ec4756f9577bcbb1e13e06566ccc507e9e4` and every gate-specific candidate
 through the current pre-M1 source
@@ -829,7 +836,10 @@ a separate plan and evidence that the current filters cannot meet the target.
 
 ## Acceptance Evidence
 
-Do not cut over until all requirements pass.
+Do not cut over until every unlabelled pre-cutover requirement passes. Evaluate
+requirements marked **Post-cutover soak** during the #2127 and #2128 soak.
+Evaluate requirements marked **Deletion gate** immediately before the separate
+#2128 deletion approval.
 
 ### Coverage
 
@@ -867,7 +877,7 @@ Do not cut over until all requirements pass.
 Use the same shadow sample of at least 10 distinct pull requests over at least 7
 calendar days for head-level measures unless a larger denominator is stated.
 
-- Shared local gate queue time is zero seconds after cutover. The staged
+- **Post-cutover soak:** shared local gate queue time is zero seconds. The staged
   formatter and selected author commands still have their own measured runtime.
 - For the 10-head sample, report median and maximum time to the first terminal
   required-CI result. Its p95 target is below two minutes only after at least 20
@@ -896,13 +906,15 @@ calendar days for head-level measures unless a larger denominator is stated.
   and aggregate result without running a custom planner.
 - The before-and-after manifest counts changed YAML, inline shell, actions,
   aliases, filters, hooks, and structural tests.
-- The final deletion removes at least 80% of the 83,272 gate-specific
-  implementation and test lines.
-- No local or cloud development session waits for a repository gate slot.
-- Pre-commit runs staged formatting only and has p95 below 10 seconds across at
-  least 20 comparable observations.
-- Pre-push runs no repository verification.
-- Required author checkpoints use direct package commands and named triggers.
+- **Deletion gate:** the final deletion removes at least 80% of the reviewed
+  final gate-specific implementation and test lines.
+- **Post-cutover soak:** no local or cloud development session waits for a
+  repository gate slot.
+- **Post-cutover soak:** pre-commit runs staged formatting only and has p95
+  below 10 seconds across at least 20 comparable observations.
+- **Post-cutover soak:** pre-push runs no repository verification.
+- **Post-cutover soak:** required author checkpoints use direct package commands
+  and named triggers.
 
 ## Rollback
 
@@ -943,10 +955,11 @@ Do not bypass a failing required check to restore throughput.
 
 ## Documentation and Decision Scope
 
-The first implementation pull request makes a repository-wide verification
-architecture decision. Add an ADR in that pull request. The ADR must state the
-trusted-contributor and one-maintainer threat model, hardened existing-CI
-decision, cache limits, complexity budget, migration evidence, and rollback.
+Phase 0 records the repository-wide verification architecture decision in ADR 0078. A later implementation pull request updates or supersedes that ADR only
+when it changes an architecture decision. Keep the trusted-contributor and
+one-maintainer threat model, hardened existing-CI decision, cache limits,
+complexity budget, migration evidence, and rollback current in the decision
+record.
 
 Audit all live gate instructions when the canonical workflow changes. The
 search includes root and scoped `AGENTS.md` files, README files, `docs/**`,

@@ -21,6 +21,7 @@ The machine-readable evidence is:
 - [Safeguard inventory](../metrics/verification-redesign-safeguards.jsonl)
 - [Control-plane before manifest](../metrics/verification-redesign-control-plane-before.json)
 - [Measurement baseline](../metrics/verification-redesign-baseline.json)
+- [Retained source patch](../metrics/verification-redesign-local-gate-source.patch)
 - [Architecture decision](../adr/0078-staged-verification-redesign.md)
 - [Migration plan](../PLAN-progressive-verification-graph.md)
 
@@ -36,20 +37,25 @@ routing. Reviewers own those judgments.
 
 The terminal pre-M1 control-plane source is
 `a5692c4570d7fe33255c2ce863d7f79264a9ddb0`. The generated raw manifest counts
-96,912 lines across 223 files. This total has two parts:
+101,595 lines across 223 files. This total has three parts:
 
 - 95,815 whole-file implementation and test lines. This set includes every
   `scripts/gate/**` file, both gate entry points, and the package-script pin
   checker.
-- 1,097 shared-reference and hook lines in aliases, YAML, inline shell, the full
-  pre-push hook, configuration, and instructions.
+- 4,952 whole-file instruction lines from ADRs 0007, 0069, and 0076 and the
+  gate mechanics document. These four files form the canonical gate decision
+  and mechanics set.
+- 828 matching shared-reference and hook lines in aliases, YAML, inline shell,
+  the full pre-push hook, configuration, and other instructions.
 
-The corrected generator matches repo-relative `scripts/gate/` paths;
+The corrected generator counts the four dedicated gate documents as whole
+files. It matches repo-relative `scripts/gate/` paths;
 module-relative, variable-qualified, bare, or split-segment `gate/` paths; gate
-identifier families; protocol markers; and shared process-helper references.
-Relative to the first Phase 0 candidate, this adds three previously absent
-files and 178 reference lines. The source boundary and whole-file denominator
-do not change.
+identifiers and command options; Terraform and cache markers; protocol markers;
+and shared process-helper references. Path-scoped rules retain legacy gate lock
+and bare helper references. They exclude unrelated review locks and UI data-
+quality phrases. The source boundary and implementation-and-test total do not
+change.
 
 The raw manifest fixes the complete gate-rooted before surface. It does not
 classify every whole file as a deletion candidate. The terminal source retains
@@ -68,17 +74,25 @@ this shared closure:
 | `scripts/gate/mapped-command-process-identity.mjs`      |            107 |
 | `scripts/gate/mapped-command-process-identity.test.mjs` |            178 |
 | **Retained shared closure**                             |     **12,543** |
+| `scripts/check-agent-quality-gate-package-scripts.mjs`  |            159 |
+| **Wholly retained implementation and test lines**       |     **12,702** |
 
-Subtracting the 12,543 retained shared lines from the 95,815 whole-file
-implementation and test lines gives an 83,272-line gate-specific deletion
-denominator. The 80% final-retirement target applies to this denominator. It
-does not apply to the 96,912-line raw before manifest.
+Subtracting the 12,543-line shared closure and the wholly retained 159-line
+package-script checker from the 95,815 whole-file implementation and test lines
+leaves 83,113 lines as an upper-bound deletion candidate. This is not the final
+gate-specific denominator. The gate test suite mixes retained package-policy
+coverage with gate-only tests. The routing-table family mixes retained
+workflow-pin and generated-drift behavior with deferred local routing. Issues
+#2127 and #2128 must allocate or migrate these retained components, publish the
+reviewed final denominator, and only then apply the 80% target. The target does
+not apply to the 101,595-line raw before manifest.
 
 PR #2134 advanced the pre-M1 boundary from the #2042 terminal commit
 `e0346ec4756f9577bcbb1e13e06566ccc507e9e4`. It adds 46 whole-file lines to the
 gate-specific surface: 17 in the gate entry point, 23 in its Bash regression
 suite, and 6 under `scripts/gate/**`. It changes none of the ten retained shared
-files. The 1,097 shared-reference and hook lines are also unchanged.
+files. The dedicated-document, shared-reference, and hook surfaces are also
+unchanged.
 
 The earlier 70,028-line estimate used source
 `8bcb675b6b241e57435ce0e864e8511c03d9fce2`. It covered the 9,289-line Bash
@@ -87,7 +101,8 @@ entry point, its then-21,655-line Bash regression suite, and 39,084 lines under
 lines, its Bash regression suite is 24,901 lines, `scripts/gate/**` is 58,762
 lines, and the package-script pin checker is 159 lines. These four values total
 the 95,815 whole-file implementation and test lines. The generated total adds
-the 1,097 shared-reference and hook lines for the after comparison.
+4,952 dedicated-document lines and 828 other shared-reference and hook lines
+for the after comparison.
 
 ## Local behavior
 
@@ -113,9 +128,12 @@ records one normal locked coordinator request over three sequential mapped
 commands. It passed in 168 seconds: zero seconds of scheduler wait, 70 seconds
 of command execution, and 98 seconds of unattributed orchestration. Its measured
 commit, `49c454da57485169f85b903c608aad66730f80af`, is no longer an ancestor of
-the current branch after rebase. The artifact records the exact raw-patch argv
-and digest, plus a temporary-index replay that reproduced the measured tree
-`45e2376dedc3f4a6a0302081e485b7cb9d3b1d98`. The gate exported `CI=true`, so
+the current branch after rebase. The artifact records the raw-patch command and
+digest. The committed
+[source patch](../metrics/verification-redesign-local-gate-source.patch)
+contains the exact patch bytes. Applying it from reachable commit
+`e0346ec4756f9577bcbb1e13e06566ccc507e9e4` in a fresh clone reproduced the
+measured tree `45e2376dedc3f4a6a0302081e485b7cb9d3b1d98`. The gate exported `CI=true`, so
 mapped commands used their non-interactive CI path. Compare this timing only
 with gate requests that used the same command environment. This narrow route
 validates the source-binding and timing method. It does not replace the

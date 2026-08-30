@@ -166,9 +166,13 @@
   "reproducibility": {
     "source_history_limit": "The measured commit 49c454da57485169f85b903c608aad66730f80af is no longer an ancestor of the current branch after rebase.",
     "reproduction_base_sha": "e0346ec4756f9577bcbb1e13e06566ccc507e9e4",
+    "reproduction_base_is_reachable_from_current_main": true,
     "rebased_patch_base_sha": "a5692c4570d7fe33255c2ce863d7f79264a9ddb0",
     "rebased_patch_head_sha": "5d3d85c27d43f69a3944948780051d8a7c01cb51",
     "rebased_patch_head_is_ancestor_of_current_branch": false,
+    "patch_artifact": "docs/metrics/verification-redesign-local-gate-source.patch",
+    "patch_bytes": 318922,
+    "patch_lines": 6610,
     "raw_patch_argv": [
       "git",
       "-c",
@@ -182,13 +186,19 @@
       "5d3d85c27d43f69a3944948780051d8a7c01cb51"
     ],
     "patch_sha256": "1dce787ccb8c59709f9bd6a4650eba9c3a037e5dc88bb0dfaf4c16876f4a51a2",
-    "method": "Applied the raw patch to reproduction_base_sha through a temporary index and wrote the resulting tree.",
+    "fresh_clone_replay_argv": [
+      "git read-tree e0346ec4756f9577bcbb1e13e06566ccc507e9e4",
+      "git apply --cached --binary docs/metrics/verification-redesign-local-gate-source.patch",
+      "git write-tree"
+    ],
+    "method": "In a fresh local clone, loaded reproduction_base_sha into the index, applied the committed raw patch, and wrote the resulting tree.",
     "reproduced_tree_sha": "45e2376dedc3f4a6a0302081e485b7cb9d3b1d98",
+    "fresh_clone_replay_verified": true,
     "matches_measured_head_tree": true
   },
   "result": "pass",
-  "scope_limit": "This one narrow serialized route proves the source binding and timing method. It does not replace the seven-request historical distribution or estimate a full branch gate.",
+  "scope_limit": "This one narrow serialized route proves the source-binding and timing method for this sample. It does not replace the seven-request historical distribution or estimate a full branch gate.",
   "environment_limit": "The gate exported CI=true, so mapped commands used their non-interactive CI path. Compare this timing only with gate requests that used the same command environment.",
   "artifact_boundary": "The source state was captured before this evidence file existed. The evidence file is added on a later tree.",
-  "provenance_limit": "This local record is source-bound and patch-reproducible. It is not an independently signed execution attestation."
+  "provenance_limit": "This local record retains the patch bytes needed to reproduce the measured source tree from a reachable commit. It is not an independently signed execution attestation."
 }

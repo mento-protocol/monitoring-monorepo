@@ -98,7 +98,8 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 - **Navigation-eval self-pin.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names its implementation.
 - **Verification evidence.** Four root aliases pin
-  `docs/check-verification-redesign-evidence{,.test}.mjs`; move them together.
+  `scripts/docs/check-verification-redesign-evidence{,.test}.mjs`; move them
+  together.
 - **Sentry suite manifest.** `scripts/sentry/gate/sentry-suite-manifest.json`
   keys are exact repo-relative paths, reconciled against `findSentrySuites()`
   by set equality both ways. A moved or renamed suite fails the gate closed.
