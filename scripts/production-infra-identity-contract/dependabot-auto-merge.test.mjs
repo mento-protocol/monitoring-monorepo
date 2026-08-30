@@ -150,31 +150,87 @@ function scenario({
     commitsPages: [commits],
     filesPages: [files.map((filename) => ({ filename, status: "modified" }))],
     queue: { data: { repository: { mergeQueue: null } } },
+    requiredChecks: [
+      { bucket: "pass", name: "ci", state: "SUCCESS" },
+      { bucket: "pass", name: "Code Quality", state: "SUCCESS" },
+      { bucket: "pass", name: "Vercel", state: "SUCCESS" },
+      {
+        bucket: "pass",
+        name: "Vercel Preview Comments",
+        state: "SUCCESS",
+      },
+    ],
+    merge: {
+      merged: true,
+      message: "Pull Request successfully merged",
+      sha: "deed9d4ca110580eefa54d565390d116acdf0dc4",
+    },
   };
 }
 
 const mockGhSource = `#!/usr/bin/env node
-const { readFileSync, writeFileSync } = require("node:fs");
+const { appendFileSync, readFileSync, writeFileSync } = require("node:fs");
 const fixture = JSON.parse(readFileSync(process.env.MOCK_GH_SCENARIO, "utf8"));
 const args = process.argv.slice(2);
 const emit = (value) => process.stdout.write(JSON.stringify(value));
-if (args[0] === "pr" && args[1] === "merge") {
-  writeFileSync(process.env.MOCK_GH_MERGE_MARKER, args.join(" "));
-  process.exit(0);
+const route = args.find((arg) => arg.startsWith("repos/"));
+const isMerge =
+  args[0] === "api" &&
+  args.includes("--method") &&
+  args.includes("PUT") &&
+  /\\/pulls\\/[^/]+\\/merge$/u.test(route ?? "");
+const token = process.env.GH_TOKEN ?? "";
+appendFileSync(
+  process.env.MOCK_GH_CALL_LOG,
+  JSON.stringify({ args, token }) + "\\n",
+);
+if (isMerge) {
+  if (token !== process.env.MOCK_EXPECTED_MERGE_TOKEN) process.exit(93);
+} else if (token !== process.env.MOCK_EXPECTED_READ_TOKEN) {
+  process.exit(94);
+}
+const state = JSON.parse(readFileSync(process.env.MOCK_GH_STATE, "utf8"));
+function take(key) {
+  const index = state[key] ?? 0;
+  state[key] = index + 1;
+  writeFileSync(process.env.MOCK_GH_STATE, JSON.stringify(state));
+  const sequence = fixture[key + "Sequence"];
+  return Array.isArray(sequence)
+    ? sequence[Math.min(index, sequence.length - 1)]
+    : fixture[key];
+}
+if (args[0] === "pr" && args[1] === "merge") process.exit(95);
+if (args[0] === "pr" && args[1] === "checks") {
+  if (args.includes("--watch")) {
+    process.stdout.write("required checks completed\\n");
+    process.exit(fixture.requiredChecksWatchExit ?? 0);
+  }
+  if (args.includes("--json")) {
+    emit(take("requiredChecks"));
+    process.exit(0);
+  }
+  process.exit(96);
 }
 if (args[0] !== "api") process.exit(91);
+if (isMerge) {
+  writeFileSync(
+    process.env.MOCK_GH_MERGE_MARKER,
+    JSON.stringify({ args, token }),
+  );
+  emit(fixture.merge);
+  process.exit(fixture.mergeExit ?? 0);
+}
 if (args[1] === "graphql") {
-  emit(fixture.queue);
+  emit(take("queue"));
   process.exit(0);
 }
-const route = args.find((arg) => arg.startsWith("repos/"));
-if (route?.includes("/actions/workflows/")) emit(fixture.workflow);
-else if (route?.includes("/attempts/1/jobs")) emit(fixture.jobsPages);
-else if (route?.includes("/actions/runs/")) emit(fixture.run);
-else if (/\\/pulls\\/[^/]+\\/commits$/u.test(route ?? "")) emit(fixture.commitsPages);
-else if (/\\/pulls\\/[^/]+\\/files$/u.test(route ?? "")) emit(fixture.filesPages);
-else if (/\\/pulls\\/[^/]+$/u.test(route ?? "")) emit(fixture.pr);
-else if (route?.endsWith("/pulls")) emit(fixture.prPages);
+if (route?.includes("/actions/workflows/")) emit(take("workflow"));
+else if (route?.includes("/attempts/1/jobs")) emit(take("jobsPages"));
+else if (route?.includes("/actions/runs/")) emit(take("run"));
+else if (/\\/pulls\\/[^/]+\\/commits$/u.test(route ?? "")) emit(take("commitsPages"));
+else if (/\\/pulls\\/[^/]+\\/files$/u.test(route ?? "")) emit(take("filesPages"));
+else if (/\\/pulls\\/[^/]+$/u.test(route ?? "")) emit(take("pr"));
+else if (route?.endsWith("/pulls")) emit(take("prPages"));
 else process.exit(92);
 `;
 
@@ -182,10 +238,14 @@ function runWriter(fixture) {
   const scratch = mkdtempSync(path.join(tmpdir(), "dependabot-merge-test-"));
   const ghPath = path.join(scratch, "gh");
   const scenarioPath = path.join(scratch, "scenario.json");
+  const statePath = path.join(scratch, "state.json");
+  const callLogPath = path.join(scratch, "calls.jsonl");
   const mergeMarker = path.join(scratch, "merge-called.txt");
   writeFileSync(ghPath, mockGhSource);
   chmodSync(ghPath, 0o755);
   writeFileSync(scenarioPath, JSON.stringify(fixture));
+  writeFileSync(statePath, "{}");
+  writeFileSync(callLogPath, "");
   const result = spawnSync("bash", ["-c", writerScript], {
     cwd: repositoryRoot,
     encoding: "utf8",
@@ -193,14 +253,38 @@ function runWriter(fixture) {
       ...process.env,
       PATH: `${scratch}:${process.env.PATH}`,
       GITHUB_REPOSITORY: expectedRepository,
+      GH_READ_TOKEN: "read-token",
+      FINAL_MERGE_TOKEN: "merge-token",
       RUN_ID: String(fixture.run.id),
       MOCK_GH_SCENARIO: scenarioPath,
+      MOCK_GH_STATE: statePath,
+      MOCK_GH_CALL_LOG: callLogPath,
       MOCK_GH_MERGE_MARKER: mergeMarker,
+      MOCK_EXPECTED_READ_TOKEN: "read-token",
+      MOCK_EXPECTED_MERGE_TOKEN: "merge-token",
     },
   });
   const merged = existsSync(mergeMarker);
+  const calls = readFileSync(callLogPath, "utf8")
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  const mergeRequest = merged
+    ? JSON.parse(readFileSync(mergeMarker, "utf8"))
+    : null;
   rmSync(scratch, { recursive: true, force: true });
-  return { ...result, merged };
+  return { ...result, calls, merged, mergeRequest };
+}
+
+function callsMatching(result, predicate) {
+  return result.calls.filter(({ args }) => predicate(args));
+}
+
+function routeCalls(result, suffix) {
+  return callsMatching(result, (args) =>
+    args.some((arg) => arg.startsWith("repos/") && arg.endsWith(suffix)),
+  );
 }
 
 const pr1872HeadRef =
@@ -255,6 +339,254 @@ assert.equal(
   `PR #1872 safe historical shape must pass:\n${pr1872Result.stdout}\n${pr1872Result.stderr}`,
 );
 assert(pr1872Result.merged, "PR #1872 safe shape must reach the merge command");
+const pr1872MergeCalls = routeCalls(pr1872Result, "/pulls/1872/merge");
+assert.equal(
+  pr1872MergeCalls.length,
+  1,
+  "the writer must make one final merge write",
+);
+assert.equal(
+  pr1872Result.mergeRequest.token,
+  "merge-token",
+  "only the final write must use the future dedicated-App token seam",
+);
+assert(
+  pr1872Result.mergeRequest.args.includes("PUT"),
+  "the final write must use the synchronous REST merge endpoint",
+);
+assert(
+  pr1872Result.mergeRequest.args.includes(`sha=${pr1872Head}`),
+  "the synchronous REST merge must pin the verified PR head",
+);
+assert(
+  pr1872Result.mergeRequest.args.includes("merge_method=squash"),
+  "the synchronous REST merge must use the repository squash policy",
+);
+assert(
+  !pr1872Result.calls.some(
+    ({ args }) => args[0] === "pr" && args[1] === "merge",
+  ),
+  "the writer must not use gh pr merge, which can enable auto-merge or enqueue",
+);
+assert(
+  !pr1872Result.calls.some(({ args }) => args.includes("--auto")),
+  "the writer must never create a standing auto-merge request",
+);
+for (const { args, token } of pr1872Result.calls) {
+  const finalMerge = args.some((arg) => arg.endsWith("/pulls/1872/merge"));
+  assert.equal(
+    token,
+    finalMerge ? "merge-token" : "read-token",
+    "the dedicated-App seam must be scoped to the final REST write",
+  );
+}
+
+const requiredCheckCalls = callsMatching(
+  pr1872Result,
+  (args) => args[0] === "pr" && args[1] === "checks",
+);
+assert.equal(
+  requiredCheckCalls.length,
+  2,
+  "the writer must wait for required checks and then read their final state",
+);
+assert(
+  requiredCheckCalls[0].args.includes("--watch") &&
+    requiredCheckCalls[0].args.includes("--fail-fast") &&
+    requiredCheckCalls[0].args.includes("--required"),
+  "the first required-check call must wait and fail fast",
+);
+assert(
+  requiredCheckCalls[1].args.includes("--json") &&
+    requiredCheckCalls[1].args.includes("--required"),
+  "the second required-check call must prove the terminal required-only state",
+);
+
+for (const [label, count] of [
+  [
+    "workflow identity",
+    routeCalls(
+      pr1872Result,
+      "/actions/workflows/dependabot-auto-merge-candidate.yml",
+    ).length,
+  ],
+  [
+    "classifier run",
+    routeCalls(pr1872Result, "/actions/runs/31995129967").length,
+  ],
+  ["classifier jobs", routeCalls(pr1872Result, "/attempts/1/jobs").length],
+  ["PR lookup", routeCalls(pr1872Result, "/pulls").length],
+  ["PR state", routeCalls(pr1872Result, "/pulls/1872").length],
+  ["commit list", routeCalls(pr1872Result, "/pulls/1872/commits").length],
+  ["file list", routeCalls(pr1872Result, "/pulls/1872/files").length],
+  [
+    "merge queue",
+    callsMatching(
+      pr1872Result,
+      (args) => args[0] === "api" && args[1] === "graphql",
+    ).length,
+  ],
+]) {
+  assert.equal(
+    count,
+    2,
+    `${label} must be proved before and after required-check waiting`,
+  );
+}
+
+const failedCheckFixture = scenario({
+  number: 1872,
+  runId: 31995129967,
+  headRef: pr1872HeadRef,
+  headSha: pr1872Head,
+  commits: [commit(pr1872Head)],
+  files: pr1872Files,
+});
+failedCheckFixture.requiredChecksWatchExit = 1;
+const failedCheckResult = runWriter(failedCheckFixture);
+assert.notEqual(
+  failedCheckResult.status,
+  0,
+  "a failed required check must refuse",
+);
+assert(
+  failedCheckResult.stdout.includes(
+    "A required pull-request check failed or did not complete.",
+  ),
+  `required-check failure must be explicit:\n${failedCheckResult.stdout}\n${failedCheckResult.stderr}`,
+);
+assert(
+  !failedCheckResult.merged,
+  "failed required checks must not reach merge",
+);
+
+const emptyCheckFixture = scenario({
+  number: 1872,
+  runId: 31995129967,
+  headRef: pr1872HeadRef,
+  headSha: pr1872Head,
+  commits: [commit(pr1872Head)],
+  files: pr1872Files,
+});
+emptyCheckFixture.requiredChecks = [];
+const emptyCheckResult = runWriter(emptyCheckFixture);
+assert.notEqual(
+  emptyCheckResult.status,
+  0,
+  "an empty required-check projection must refuse",
+);
+assert(
+  emptyCheckResult.stdout.includes(
+    "Every required pull-request check must pass.",
+  ),
+  `empty required-check state must fail closed:\n${emptyCheckResult.stdout}\n${emptyCheckResult.stderr}`,
+);
+assert(!emptyCheckResult.merged, "an empty check set must not reach merge");
+
+const maintainerPushFixture = scenario({
+  number: 1872,
+  runId: 31995129967,
+  headRef: pr1872HeadRef,
+  headSha: pr1872Head,
+  commits: [commit(pr1872Head)],
+  files: pr1872Files,
+});
+maintainerPushFixture.prSequence = [
+  maintainerPushFixture.pr,
+  {
+    ...maintainerPushFixture.pr,
+    head: {
+      ...maintainerPushFixture.pr.head,
+      sha: "7b2ee8ef06eb247108d4769cfcf9ec39effd4671",
+    },
+    commits: 2,
+  },
+];
+const maintainerPushResult = runWriter(maintainerPushFixture);
+assert.notEqual(
+  maintainerPushResult.status,
+  0,
+  "a maintainer push during required-check waiting must refuse",
+);
+assert(
+  maintainerPushResult.stdout.includes(
+    "The current pull request does not match the verified run.",
+  ),
+  `a changed head must fail the repeated PR proof:\n${maintainerPushResult.stdout}\n${maintainerPushResult.stderr}`,
+);
+assert(
+  !maintainerPushResult.merged,
+  "a later maintainer head must not reach the exact-head merge",
+);
+
+const changedClassifierFixture = scenario({
+  number: 1872,
+  runId: 31995129967,
+  headRef: pr1872HeadRef,
+  headSha: pr1872Head,
+  commits: [commit(pr1872Head)],
+  files: pr1872Files,
+});
+changedClassifierFixture.runSequence = [
+  changedClassifierFixture.run,
+  {
+    ...changedClassifierFixture.run,
+    triggering_actor: { login: "chapati23" },
+  },
+];
+const changedClassifierResult = runWriter(changedClassifierFixture);
+assert.notEqual(
+  changedClassifierResult.status,
+  0,
+  "a changed classifier proof after required-check waiting must refuse",
+);
+assert(
+  changedClassifierResult.stdout.includes(
+    "The authoritative upstream run is not an eligible classifier run.",
+  ),
+  `the second classifier read must fail closed:\n${changedClassifierResult.stdout}\n${changedClassifierResult.stderr}`,
+);
+assert(
+  !changedClassifierResult.merged,
+  "a changed classifier proof must not reach merge",
+);
+
+const activatedQueueFixture = scenario({
+  number: 1872,
+  runId: 31995129967,
+  headRef: pr1872HeadRef,
+  headSha: pr1872Head,
+  commits: [commit(pr1872Head)],
+  files: pr1872Files,
+});
+activatedQueueFixture.queueSequence = [
+  activatedQueueFixture.queue,
+  {
+    data: {
+      repository: {
+        mergeQueue: {
+          url: "https://github.com/mento-protocol/monitoring-monorepo/queue/main",
+        },
+      },
+    },
+  },
+];
+const activatedQueueResult = runWriter(activatedQueueFixture);
+assert.notEqual(
+  activatedQueueResult.status,
+  0,
+  "a queue activated during required-check waiting must refuse",
+);
+assert(
+  activatedQueueResult.stdout.includes(
+    "The routine auto-merge lane cannot prove that main has no merge queue.",
+  ),
+  `the second queue proof must fail closed:\n${activatedQueueResult.stdout}\n${activatedQueueResult.stderr}`,
+);
+assert(
+  !activatedQueueResult.merged,
+  "an activated queue must not reach the synchronous merge endpoint",
+);
 
 const queueErrorFixture = scenario({
   number: 1872,

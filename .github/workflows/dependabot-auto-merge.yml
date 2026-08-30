@@ -6,11 +6,14 @@ name: Dependabot auto-merge
 # read-only classifier's exact success shape. It never checks out code, reads
 # artifacts or caches, or executes pull-request content.
 #
-# The GITHUB_TOKEN merge does not emit push-triggered workflows. Required
-# pull-request checks are therefore the final automated evidence for this lane.
-# A standing auto-merge request can survive a later trusted maintainer push.
-# Issue #2091 must move this writer to the dedicated repository-scoped merge
-# App before the controlled main lifecycle ruleset is activated.
+# The writer waits for every required check, repeats every classifier and pull
+# request proof, then calls the synchronous exact-head REST merge endpoint. The
+# endpoint cannot enqueue or leave a standing auto-merge request.
+#
+# The interim GITHUB_TOKEN merge does not emit push-triggered workflows. Issue
+# #2091 must move only the final write to the dedicated repository-scoped merge
+# App before the controlled main lifecycle ruleset is activated. The restricted
+# GITHUB_TOKEN remains the reader for Actions and pull-request evidence.
 
 on:
   workflow_run:
@@ -36,15 +39,20 @@ jobs:
       github.event.workflow_run.conclusion == 'success' &&
       !startsWith(github.event.workflow_run.head_branch, 'sentry-autofix/')
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 60
     permissions:
       actions: read
+      checks: read
       contents: write
       pull-requests: write
+      statuses: read
     steps:
-      - name: Enable auto-merge for the verified head
+      - name: Merge the verified head after required checks
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_READ_TOKEN: ${{ github.token }}
+          # Issue #2091 replaces only this value with the dedicated App token.
+          # Every read above the final REST write keeps GH_READ_TOKEN.
+          FINAL_MERGE_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
           set -euo pipefail
@@ -56,6 +64,9 @@ jobs:
           readonly CANDIDATE_PATH='.github/workflows/dependabot-auto-merge-candidate.yml'
           readonly CANDIDATE_NAME='Dependabot auto-merge candidate'
           readonly WRITER_PATH='.github/workflows/dependabot-auto-merge.yml'
+          EXPECTED_HEAD=''
+          EXPECTED_HEAD_REF=''
+          PR_NUMBER=''
 
           if [[ "$GITHUB_REPOSITORY" != "$EXPECTED_REPOSITORY" ]]; then
             echo '::error::The writer is outside the expected repository.'
@@ -66,190 +77,279 @@ jobs:
             exit 1
           fi
 
-          WORKFLOW_JSON=$(gh api --method GET \
-            "repos/$EXPECTED_REPOSITORY/actions/workflows/$CANDIDATE_FILE")
-          if ! jq -e \
-            --arg name "$CANDIDATE_NAME" \
-            --arg path "$CANDIDATE_PATH" \
-            '.id > 0 and .name == $name and .path == $path and .state == "active"' \
-            <<< "$WORKFLOW_JSON" >/dev/null; then
-            echo '::error::The classifier workflow identity is invalid.'
-            exit 1
-          fi
-          WORKFLOW_ID=$(jq -er '.id' <<< "$WORKFLOW_JSON")
+          verify_authoritative_state() {
+            local workflow_json
+            local workflow_id
+            local run_json
+            local observed_head
+            local observed_head_ref
+            local job_pages
+            local pr_pages
+            local observed_pr_number
+            local pr_json
+            local expected_commit_count
+            local expected_file_count
+            local commit_pages
+            local file_pages
+            local queue_json
 
-          RUN_JSON=$(gh api --method GET \
-            "repos/$EXPECTED_REPOSITORY/actions/runs/$RUN_ID")
-          if ! jq -e \
-            --argjson run_id "$RUN_ID" \
-            --argjson workflow_id "$WORKFLOW_ID" \
-            --arg repo "$EXPECTED_REPOSITORY" \
-            --arg name "$CANDIDATE_NAME" \
-            --arg path "$CANDIDATE_PATH" \
-            '.id == $run_id and
-             .repository.full_name == $repo and
-             .head_repository.full_name == $repo and
-             .workflow_id == $workflow_id and
-             .name == $name and
-             .path == $path and
-             .event == "pull_request" and
-             .status == "completed" and
-             .conclusion == "success" and
-             .run_attempt == 1 and
-             .actor.login == "dependabot[bot]" and
-             .triggering_actor.login == "dependabot[bot]" and
-             (.head_branch | test("^dependabot/github_actions/actions-minor-patch-[0-9a-f]{10}$")) and
-             (.head_sha | test("^[0-9a-f]{40}$")) and
-             .head_commit.id == .head_sha' \
-            <<< "$RUN_JSON" >/dev/null; then
-            echo '::error::The authoritative upstream run is not an eligible classifier run.'
-            exit 1
-          fi
-          EXPECTED_HEAD=$(jq -er '.head_sha' <<< "$RUN_JSON")
-          EXPECTED_HEAD_REF=$(jq -er '.head_branch' <<< "$RUN_JSON")
+            if ! workflow_json=$(GH_TOKEN="$GH_READ_TOKEN" gh api --method GET \
+              "repos/$EXPECTED_REPOSITORY/actions/workflows/$CANDIDATE_FILE"); then
+              echo '::error::The classifier workflow identity is unreadable.'
+              exit 1
+            fi
+            if ! jq -e \
+              --arg name "$CANDIDATE_NAME" \
+              --arg path "$CANDIDATE_PATH" \
+              '.id > 0 and .name == $name and .path == $path and .state == "active"' \
+              <<< "$workflow_json" >/dev/null; then
+              echo '::error::The classifier workflow identity is invalid.'
+              exit 1
+            fi
+            if ! workflow_id=$(jq -er '.id' <<< "$workflow_json"); then
+              echo '::error::The classifier workflow ID is invalid.'
+              exit 1
+            fi
 
-          JOB_PAGES=$(gh api --method GET --paginate --slurp \
-            "repos/$EXPECTED_REPOSITORY/actions/runs/$RUN_ID/attempts/1/jobs" \
-            -f filter=all -f per_page=100)
-          if ! jq -e \
-            --argjson run_id "$RUN_ID" \
-            --arg head "$EXPECTED_HEAD" \
-            '[.[].jobs[]] as $jobs |
-             ($jobs | length) == 1 and
-             $jobs[0].name == "classify" and
-             $jobs[0].run_id == $run_id and
-             $jobs[0].head_sha == $head and
-             $jobs[0].status == "completed" and
-             $jobs[0].conclusion == "success" and
-             ([ $jobs[0].steps[] | select(.name == "Validate candidate event" and .conclusion == "success") ] | length) == 1 and
-             ([ $jobs[0].steps[] | select(.name == "Fetch verified Dependabot metadata" and .conclusion == "success") ] | length) == 1 and
-             ([ $jobs[0].steps[] | select(.name == "Mark routine update eligible" and .conclusion == "success") ] | length) == 1' \
-            <<< "$JOB_PAGES" >/dev/null; then
-            echo '::error::The classifier attempt does not have the exact successful job shape.'
-            exit 1
-          fi
+            if ! run_json=$(GH_TOKEN="$GH_READ_TOKEN" gh api --method GET \
+              "repos/$EXPECTED_REPOSITORY/actions/runs/$RUN_ID"); then
+              echo '::error::The authoritative upstream run is unreadable.'
+              exit 1
+            fi
+            if ! jq -e \
+              --argjson run_id "$RUN_ID" \
+              --argjson workflow_id "$workflow_id" \
+              --arg repo "$EXPECTED_REPOSITORY" \
+              --arg name "$CANDIDATE_NAME" \
+              --arg path "$CANDIDATE_PATH" \
+              '.id == $run_id and
+               .repository.full_name == $repo and
+               .head_repository.full_name == $repo and
+               .workflow_id == $workflow_id and
+               .name == $name and
+               .path == $path and
+               .event == "pull_request" and
+               .status == "completed" and
+               .conclusion == "success" and
+               .run_attempt == 1 and
+               .actor.login == "dependabot[bot]" and
+               .triggering_actor.login == "dependabot[bot]" and
+               (.head_branch | test("^dependabot/github_actions/actions-minor-patch-[0-9a-f]{10}$")) and
+               (.head_sha | test("^[0-9a-f]{40}$")) and
+               .head_commit.id == .head_sha' \
+              <<< "$run_json" >/dev/null; then
+              echo '::error::The authoritative upstream run is not an eligible classifier run.'
+              exit 1
+            fi
+            if ! observed_head=$(jq -er '.head_sha' <<< "$run_json"); then
+              echo '::error::The authoritative upstream head is invalid.'
+              exit 1
+            fi
+            if ! observed_head_ref=$(jq -er '.head_branch' <<< "$run_json"); then
+              echo '::error::The authoritative upstream branch is invalid.'
+              exit 1
+            fi
+            if [[ -z "$EXPECTED_HEAD" ]]; then
+              EXPECTED_HEAD="$observed_head"
+              EXPECTED_HEAD_REF="$observed_head_ref"
+            elif [[ "$observed_head" != "$EXPECTED_HEAD" || "$observed_head_ref" != "$EXPECTED_HEAD_REF" ]]; then
+              echo '::error::The authoritative upstream run changed during required-check waiting.'
+              exit 1
+            fi
 
-          PR_PAGES=$(gh api --method GET --paginate --slurp \
-            "repos/$EXPECTED_REPOSITORY/pulls" \
-            -f state=open -f base="$EXPECTED_BASE" \
-            -f head="$EXPECTED_OWNER:$EXPECTED_HEAD_REF" -f per_page=100)
-          if ! jq -e '[.[][]] | length == 1' <<< "$PR_PAGES" >/dev/null; then
-            echo '::error::The verified branch must identify exactly one open pull request.'
-            exit 1
-          fi
-          PR_NUMBER=$(jq -er '.[0][0].number' <<< "$PR_PAGES")
-          if [[ ! "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
-            echo '::error::The pull request number is invalid.'
-            exit 1
-          fi
+            if ! job_pages=$(GH_TOKEN="$GH_READ_TOKEN" gh api --method GET --paginate --slurp \
+              "repos/$EXPECTED_REPOSITORY/actions/runs/$RUN_ID/attempts/1/jobs" \
+              -f filter=all -f per_page=100); then
+              echo '::error::The classifier attempt jobs are unreadable.'
+              exit 1
+            fi
+            if ! jq -e \
+              --argjson run_id "$RUN_ID" \
+              --arg head "$EXPECTED_HEAD" \
+              '[.[].jobs[]] as $jobs |
+               ($jobs | length) == 1 and
+               $jobs[0].name == "classify" and
+               $jobs[0].run_id == $run_id and
+               $jobs[0].head_sha == $head and
+               $jobs[0].status == "completed" and
+               $jobs[0].conclusion == "success" and
+               ([ $jobs[0].steps[] | select(.name == "Validate candidate event" and .conclusion == "success") ] | length) == 1 and
+               ([ $jobs[0].steps[] | select(.name == "Fetch verified Dependabot metadata" and .conclusion == "success") ] | length) == 1 and
+               ([ $jobs[0].steps[] | select(.name == "Mark routine update eligible" and .conclusion == "success") ] | length) == 1' \
+              <<< "$job_pages" >/dev/null; then
+              echo '::error::The classifier attempt does not have the exact successful job shape.'
+              exit 1
+            fi
 
-          PR_JSON=$(gh api --method GET \
-            "repos/$EXPECTED_REPOSITORY/pulls/$PR_NUMBER")
-          if ! jq -e \
-            --arg repo "$EXPECTED_REPOSITORY" \
-            --arg owner "$EXPECTED_OWNER" \
-            --arg base "$EXPECTED_BASE" \
-            --arg head "$EXPECTED_HEAD" \
-            --arg head_ref "$EXPECTED_HEAD_REF" \
-            '.state == "open" and
-             .draft == false and
-             .user.login == "dependabot[bot]" and
-             .base.ref == $base and
-             .base.repo.full_name == $repo and
-             .head.repo.full_name == $repo and
-             .head.repo.owner.login == $owner and
-             .head.label == ($owner + ":" + $head_ref) and
-             .head.ref == $head_ref and
-             .head.sha == $head and
-             (.commits | type) == "number" and
-             .commits > 0 and
-             .commits <= 250 and
-             (.changed_files | type) == "number" and
-             .changed_files > 0' \
-            <<< "$PR_JSON" >/dev/null; then
-            echo '::error::The current pull request does not match the verified run.'
-            exit 1
-          fi
-          EXPECTED_COMMIT_COUNT=$(jq -er '.commits' <<< "$PR_JSON")
-          EXPECTED_FILE_COUNT=$(jq -er '.changed_files' <<< "$PR_JSON")
+            if ! pr_pages=$(GH_TOKEN="$GH_READ_TOKEN" gh api --method GET --paginate --slurp \
+              "repos/$EXPECTED_REPOSITORY/pulls" \
+              -f state=open -f base="$EXPECTED_BASE" \
+              -f head="$EXPECTED_OWNER:$EXPECTED_HEAD_REF" -f per_page=100); then
+              echo '::error::The pull request lookup is unreadable.'
+              exit 1
+            fi
+            if ! jq -e '[.[][]] | length == 1' <<< "$pr_pages" >/dev/null; then
+              echo '::error::The verified branch must identify exactly one open pull request.'
+              exit 1
+            fi
+            if ! observed_pr_number=$(jq -er '.[0][0].number' <<< "$pr_pages"); then
+              echo '::error::The pull request number is invalid.'
+              exit 1
+            fi
+            if [[ ! "$observed_pr_number" =~ ^[1-9][0-9]*$ ]]; then
+              echo '::error::The pull request number is invalid.'
+              exit 1
+            fi
+            if [[ -z "$PR_NUMBER" ]]; then
+              PR_NUMBER="$observed_pr_number"
+            elif [[ "$observed_pr_number" != "$PR_NUMBER" ]]; then
+              echo '::error::The verified branch identified a different pull request after required-check waiting.'
+              exit 1
+            fi
 
-          COMMIT_PAGES=$(gh api --method GET --paginate --slurp \
-            "repos/$EXPECTED_REPOSITORY/pulls/$PR_NUMBER/commits" \
-            -f per_page=100)
-          if ! jq -e \
-            --arg head "$EXPECTED_HEAD" \
-            --argjson expected_count "$EXPECTED_COMMIT_COUNT" \
-            '[.[][]] as $commits |
-             ($commits | length) == $expected_count and
-             ($commits | last | .sha) == $head and
-             ([ $commits[].sha ] | unique | length) == ($commits | length) and
-             all($commits[];
-               (.sha | test("^[0-9a-f]{40}$")) and
-               .author.login == "dependabot[bot]" and
-               .commit.verification.verified == true)' \
-            <<< "$COMMIT_PAGES" >/dev/null; then
-            echo '::error::Every commit must be unique, verified, and authored by Dependabot.'
-            exit 1
-          fi
+            if ! pr_json=$(GH_TOKEN="$GH_READ_TOKEN" gh api --method GET \
+              "repos/$EXPECTED_REPOSITORY/pulls/$PR_NUMBER"); then
+              echo '::error::The current pull request is unreadable.'
+              exit 1
+            fi
+            if ! jq -e \
+              --arg repo "$EXPECTED_REPOSITORY" \
+              --arg owner "$EXPECTED_OWNER" \
+              --arg base "$EXPECTED_BASE" \
+              --arg head "$EXPECTED_HEAD" \
+              --arg head_ref "$EXPECTED_HEAD_REF" \
+              '.state == "open" and
+               .draft == false and
+               .user.login == "dependabot[bot]" and
+               .base.ref == $base and
+               .base.repo.full_name == $repo and
+               .head.repo.full_name == $repo and
+               .head.repo.owner.login == $owner and
+               .head.label == ($owner + ":" + $head_ref) and
+               .head.ref == $head_ref and
+               .head.sha == $head and
+               (.commits | type) == "number" and
+               .commits > 0 and
+               .commits <= 250 and
+               (.changed_files | type) == "number" and
+               .changed_files > 0' \
+              <<< "$pr_json" >/dev/null; then
+              echo '::error::The current pull request does not match the verified run.'
+              exit 1
+            fi
+            if ! expected_commit_count=$(jq -er '.commits' <<< "$pr_json"); then
+              echo '::error::The pull request commit count is invalid.'
+              exit 1
+            fi
+            if ! expected_file_count=$(jq -er '.changed_files' <<< "$pr_json"); then
+              echo '::error::The pull request file count is invalid.'
+              exit 1
+            fi
 
-          FILE_PAGES=$(gh api --method GET --paginate --slurp \
-            "repos/$EXPECTED_REPOSITORY/pulls/$PR_NUMBER/files" \
-            -f per_page=100)
-          if ! jq -e \
-            --argjson expected_count "$EXPECTED_FILE_COUNT" \
-            --arg candidate "$CANDIDATE_PATH" \
-            --arg writer "$WRITER_PATH" \
-            '[.[][]] as $files |
-             ($files | length) == $expected_count and
-             ([ $files[].filename ] | unique | length) == ($files | length) and
-             all($files[];
-               .status == "modified" and
-               (.filename | test("^\\.github/workflows/[^/]+\\.ya?ml$")) and
-               .filename != $candidate and
-               .filename != $writer)' \
-            <<< "$FILE_PAGES" >/dev/null; then
-            echo '::error::Routine auto-merge accepts only modified top-level workflow YAML outside its own trust files.'
-            exit 1
-          fi
+            if ! commit_pages=$(GH_TOKEN="$GH_READ_TOKEN" gh api --method GET --paginate --slurp \
+              "repos/$EXPECTED_REPOSITORY/pulls/$PR_NUMBER/commits" \
+              -f per_page=100); then
+              echo '::error::The pull request commits are unreadable.'
+              exit 1
+            fi
+            if ! jq -e \
+              --arg head "$EXPECTED_HEAD" \
+              --argjson expected_count "$expected_commit_count" \
+              '[.[][]] as $commits |
+               ($commits | length) == $expected_count and
+               ($commits | last | .sha) == $head and
+               ([ $commits[].sha ] | unique | length) == ($commits | length) and
+               all($commits[];
+                 (.sha | test("^[0-9a-f]{40}$")) and
+                 .author.login == "dependabot[bot]" and
+                 .commit.verification.verified == true)' \
+              <<< "$commit_pages" >/dev/null; then
+              echo '::error::Every commit must be unique, verified, and authored by Dependabot.'
+              exit 1
+            fi
 
-          QUEUE_JSON=$(gh api graphql \
-            -f query='query($owner:String!,$repo:String!,$branch:String!){repository(owner:$owner,name:$repo){mergeQueue(branch:$branch){url}}}' \
-            -f owner="$EXPECTED_OWNER" -f repo='monitoring-monorepo' \
-            -f branch="$EXPECTED_BASE")
-          if ! jq -e \
-            '((.errors // []) | length) == 0 and
-             (.data.repository | type) == "object" and
-             (.data.repository | has("mergeQueue")) and
-             .data.repository.mergeQueue == null' \
-            <<< "$QUEUE_JSON" >/dev/null; then
-            echo '::error::The routine auto-merge lane cannot prove that main has no merge queue.'
-            exit 1
-          fi
+            if ! file_pages=$(GH_TOKEN="$GH_READ_TOKEN" gh api --method GET --paginate --slurp \
+              "repos/$EXPECTED_REPOSITORY/pulls/$PR_NUMBER/files" \
+              -f per_page=100); then
+              echo '::error::The pull request files are unreadable.'
+              exit 1
+            fi
+            if ! jq -e \
+              --argjson expected_count "$expected_file_count" \
+              --arg candidate "$CANDIDATE_PATH" \
+              --arg writer "$WRITER_PATH" \
+              '[.[][]] as $files |
+               ($files | length) == $expected_count and
+               ([ $files[].filename ] | unique | length) == ($files | length) and
+               all($files[];
+                 .status == "modified" and
+                 (.filename | test("^\\.github/workflows/[^/]+\\.ya?ml$")) and
+                 .filename != $candidate and
+                 .filename != $writer)' \
+              <<< "$file_pages" >/dev/null; then
+              echo '::error::Routine auto-merge accepts only modified top-level workflow YAML outside its own trust files.'
+              exit 1
+            fi
 
-          FINAL_PR_JSON=$(gh api --method GET \
-            "repos/$EXPECTED_REPOSITORY/pulls/$PR_NUMBER")
-          if ! jq -e \
-            --arg repo "$EXPECTED_REPOSITORY" \
-            --arg base "$EXPECTED_BASE" \
-            --arg head "$EXPECTED_HEAD" \
-            --arg head_ref "$EXPECTED_HEAD_REF" \
-            --argjson expected_count "$EXPECTED_FILE_COUNT" \
-            '.state == "open" and
-             .draft == false and
-             .user.login == "dependabot[bot]" and
-             .base.ref == $base and
-             .base.repo.full_name == $repo and
-             .head.repo.full_name == $repo and
-             .head.ref == $head_ref and
-             .head.sha == $head and
-             .changed_files == $expected_count' \
-            <<< "$FINAL_PR_JSON" >/dev/null; then
-            echo '::error::The pull request changed during final verification.'
-            exit 1
-          fi
+            if ! queue_json=$(GH_TOKEN="$GH_READ_TOKEN" gh api graphql \
+              -f query='query($owner:String!,$repo:String!,$branch:String!){repository(owner:$owner,name:$repo){mergeQueue(branch:$branch){url}}}' \
+              -f owner="$EXPECTED_OWNER" -f repo='monitoring-monorepo' \
+              -f branch="$EXPECTED_BASE"); then
+              echo '::error::The main merge queue state is unreadable.'
+              exit 1
+            fi
+            if ! jq -e \
+              '((.errors // []) | length) == 0 and
+               (.data.repository | type) == "object" and
+               (.data.repository | has("mergeQueue")) and
+               .data.repository.mergeQueue == null' \
+              <<< "$queue_json" >/dev/null; then
+              echo '::error::The routine auto-merge lane cannot prove that main has no merge queue.'
+              exit 1
+            fi
+          }
 
-          gh pr merge "$PR_NUMBER" \
+          verify_authoritative_state
+          readonly EXPECTED_HEAD EXPECTED_HEAD_REF PR_NUMBER
+
+          if ! GH_TOKEN="$GH_READ_TOKEN" gh pr checks "$PR_NUMBER" \
             --repo "$EXPECTED_REPOSITORY" \
-            --auto \
-            --squash \
-            --match-head-commit "$EXPECTED_HEAD"
+            --required \
+            --watch \
+            --fail-fast \
+            --interval 10; then
+            echo '::error::A required pull-request check failed or did not complete.'
+            exit 1
+          fi
+          if ! REQUIRED_CHECKS_JSON=$(GH_TOKEN="$GH_READ_TOKEN" gh pr checks "$PR_NUMBER" \
+            --repo "$EXPECTED_REPOSITORY" \
+            --required \
+            --json bucket,name,state); then
+            echo '::error::The final required-check state is unreadable.'
+            exit 1
+          fi
+          if ! jq -e \
+            'length > 0 and all(.[]; .bucket == "pass")' \
+            <<< "$REQUIRED_CHECKS_JSON" >/dev/null; then
+            echo '::error::Every required pull-request check must pass.'
+            exit 1
+          fi
+
+          # The wait is an untrusted delay. Repeat the complete workflow, run,
+          # job, PR, head, commit, file, and queue proof after it. The exact-head
+          # REST request below cannot accept a later push or create queued state.
+          verify_authoritative_state
+
+          if ! MERGE_JSON=$(GH_TOKEN="$FINAL_MERGE_TOKEN" gh api --method PUT \
+            "repos/$EXPECTED_REPOSITORY/pulls/$PR_NUMBER/merge" \
+            -f sha="$EXPECTED_HEAD" \
+            -f merge_method=squash); then
+            echo '::error::The synchronous exact-head merge request failed.'
+            exit 1
+          fi
+          if ! jq -e \
+            '.merged == true and (.sha | test("^[0-9a-f]{40}$"))' \
+            <<< "$MERGE_JSON" >/dev/null; then
+            echo '::error::The merge endpoint did not confirm a synchronous merge.'
+            exit 1
+          fi

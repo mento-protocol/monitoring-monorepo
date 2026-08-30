@@ -72,10 +72,15 @@ Use two workflows as one pinned security boundary:
    requires the returned count to match exactly. Every file must be a modified
    top-level workflow YAML file. The classifier and writer files are always
    excluded from this lane.
-4. The writer refuses when `main` has a merge queue. It re-reads the PR after
-   all checks. It then calls `gh pr merge --auto --squash` with
-   `--match-head-commit`. Branch-scoped concurrency cancels a stale writer when
-   a newer run for the same Dependabot branch starts.
+4. The writer refuses when `main` has a merge queue. It waits for every
+   required check with `gh pr checks --required --watch --fail-fast`, then
+   verifies a non-empty passing required-only projection. The wait is an
+   untrusted delay. The writer repeats the complete workflow, run, job, PR,
+   head, commit, file, and queue proof after it.
+5. The writer calls `PUT /repos/{owner}/{repo}/pulls/{number}/merge` with the
+   verified head SHA and squash method. This synchronous endpoint cannot
+   enqueue or create an auto-merge request. Branch-scoped concurrency cancels
+   a stale writer when a newer run for the same Dependabot branch starts.
 
 The writer never checks out code, downloads artifacts, restores caches, or
 executes pull-request content. `pnpm tf:test` pins the parsed semantics of both
@@ -84,12 +89,15 @@ workflows. The autofix trust checker continues to reject every
 `sentry-autofix/*` exclusion.
 
 The built-in `GITHUB_TOKEN` is an interim writer credential. Issue #2091 must
-migrate the trusted default-branch writer to a dedicated repository-scoped
-merge App token from IaC-owned repository Actions secrets before it activates
-the controlled main lifecycle ruleset. Activation must prove the App
-credentials are enabled, the writer migration is verified, and every legacy
-Dependabot auto-merge run or request is drained. The shared GitHub Actions App
-and local agent App must not receive this ruleset exemption.
+migrate only the final REST write to a dedicated repository-scoped merge App
+token from IaC-owned repository Actions secrets before it activates the
+controlled main lifecycle ruleset. The restricted `GITHUB_TOKEN` must remain
+the reader for workflow, run, job, required-check, pull-request, commit, file,
+and queue evidence. The dedicated App token must reach only the final merge
+call. Activation must prove the App credentials are enabled, the writer
+migration is verified, and every auto-merge request created by the prior writer
+is drained. The shared GitHub Actions App and local agent App must not receive
+this ruleset exemption.
 
 ## Alternatives considered
 
@@ -102,6 +110,10 @@ and local agent App must not receive this ruleset exemption.
 - **Pass classifier outputs or artifacts to the writer.** Rejected because
   pull-request-controlled outputs and artifacts would become inputs to a
   privileged workflow. The writer re-reads authoritative GitHub state instead.
+- **Use native auto-merge to wait for required checks.** Rejected. It creates a
+  standing request that can survive a later trusted maintainer push. A merge
+  queue activated after the queue read can also turn the CLI request into an
+  enqueue. The synchronous exact-head REST endpoint has neither behavior.
 - **Give the shared GitHub Actions App a future ruleset bypass.** Rejected
   because that identity is shared by unrelated workflows. Issue #2091 owns a
   dedicated repository-scoped App.
@@ -118,14 +130,18 @@ and local agent App must not receive this ruleset exemption.
   required checks pass. The seven-day cooldown applies before Dependabot opens
   the version update. Security updates bypass cooldown and remain outside this
   group.
-- `--match-head-commit` binds the enable call to the checked head. GitHub can
-  keep a standing auto-merge request after a later trusted maintainer push.
-  The writer cannot bind that later update. The controlled lifecycle ruleset
-  in #2091 must restrict this path before it becomes a server-side boundary.
+- The exact-head REST request rejects a later push. The complete proof repeated
+  after required-check waiting also rejects changed classifier, PR, commit, or
+  file state before the write.
 - The writer refuses while `main` has a merge queue. A future queue rollout
   must keep this lane disabled until a new reviewed design defines its queue
-  behavior. The queue read and the `gh pr merge --auto` call are not atomic. A
-  queue enabled in that interval can still change the call into an enqueue.
+  behavior. The final endpoint cannot enqueue, so a queue activated after the
+  last read cannot create deferred merge state.
+- The REST payload pins the head but cannot pin the base branch. The final
+  complete proof checks `main` immediately before the write. A retarget in the
+  remaining request window can still change the target branch.
+- The writer waits for required checks for at most 60 minutes. A longer or
+  failed check leaves the PR open and requires a later eligible classifier run.
 - A merge made with the built-in `GITHUB_TOKEN` does not start `push` event
   workflows. Required pull-request checks are the final automated evidence for
   the interim lane. The future App migration changes the credential boundary

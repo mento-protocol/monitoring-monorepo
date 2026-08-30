@@ -419,22 +419,26 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    `pull_request` classifier verifies event identity and Dependabot metadata.
    A default-branch `workflow_run` writer treats that result as untrusted. It
    re-reads the workflow, run, first-attempt jobs, current PR and head, all
-   commits, and all files. It never checks out PR code or reads upstream
-   outputs, artifacts, or caches. It enables auto-merge with
-   `--match-head-commit`. This lane deliberately creates a
-   standing auto-merge request so GitHub can wait for every required check. The
-   expected head binds the enable call, not a later update while that request
-   waits. The human wrapper's synchronous REST rule does not apply to it.
+   commits, all files, and the base's merge-queue state. It never checks out PR
+   code or reads upstream outputs, artifacts, or caches. It waits for every
+   required check and verifies a non-empty passing required-only projection.
+   The wait is an untrusted delay. The writer repeats the complete workflow,
+   run, job, PR, head, commit, file, and queue proof after it. It then calls the
+   synchronous REST merge endpoint with the exact head SHA and squash method.
+   The endpoint cannot enqueue or leave a standing auto-merge request. A later
+   push cannot satisfy the exact-head write.
    Merges made with this workflow's
    automatic `GITHUB_TOKEN` do not emit this repository's `push` workflows;
    required pull-request checks are the final automated evidence for this
    narrow lane. The writer refuses if `main` has a merge queue. Before issue
    #2091 activates its lifecycle ruleset, it must migrate this final writer
-   from `GITHUB_TOKEN` to a dedicated repository-scoped merge App token from
-   IaC-owned repository Actions secrets. Activation must prove the App
-   credentials are enabled, the writer migration is verified, and legacy
-   auto-merge state is drained. The shared GitHub Actions App identity must not
-   receive a ruleset bypass. The
+   final write from `GITHUB_TOKEN` to a dedicated repository-scoped merge App
+   token from IaC-owned repository Actions secrets. The restricted
+   `GITHUB_TOKEN` remains the reader for Actions and pull-request evidence.
+   Activation must prove the App credentials are enabled, the writer migration
+   is verified, and auto-merge requests created by the prior writer are
+   drained. The shared GitHub Actions App identity must not receive a ruleset
+   bypass. The
    wrapper mechanizes the approval rule for human and agent-driven merges. Its
    refusal makes "agents never merge" a local control rather than a habit. If
    an operator-approved merge satisfies Done means, sync the issue state and

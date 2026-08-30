@@ -154,32 +154,36 @@ The lane has two pinned workflows. The `pull_request` classifier has read-only
 permissions. It verifies the event and pinned Dependabot metadata. The
 default-branch `workflow_run` writer treats completion as an untrusted signal.
 It re-reads the exact workflow and run, first-attempt job and step results,
-current PR and head, every commit, and every changed file. It requires one open
-same-repository PR, verified Dependabot-authored commits, and only modified
-top-level workflow YAML. It always rejects changes to either trust workflow.
-It then passes the checked head to `gh pr merge --match-head-commit`. Neither
-workflow checks out or executes PR code. The writer does not read upstream
-outputs, artifacts, or caches. `pnpm tf:test` pins both parsed workflow shapes.
-The autofix trust checker rejects every `pull_request_target` workflow.
+current PR and head, every commit, every changed file, and the base's merge
+queue. It requires one open same-repository PR, verified Dependabot-authored
+commits, and only modified top-level workflow YAML. It always rejects changes
+to either trust workflow. It waits for every required check and verifies a
+non-empty passing required-only projection. It then repeats the complete
+workflow, run, job, PR, head, commit, file, and queue proof. The final write is
+a synchronous REST merge with the exact head SHA and squash method. It cannot
+enqueue or create an auto-merge request. Neither workflow checks out or
+executes PR code. The writer does not read upstream outputs, artifacts, or
+caches. `pnpm tf:test` pins both parsed workflow shapes. The autofix trust
+checker rejects every `pull_request_target` workflow.
 
 Before changing the classifier policy or successful job shape, drain every
 in-flight run from the prior classifier version or add an explicit runtime
 version binding. The writer uses the stable workflow ID and path. Those values
 alone do not distinguish old classifier source from new classifier source.
 
-This lane enables GitHub auto-merge before every required check has finished.
-It therefore creates a standing request by design. The synchronous REST rule in
-the human merge wrapper does not apply. The automatic `GITHUB_TOKEN` merge also
-does not emit this repository's `push` workflows. Required PR checks are the
-final automated evidence for this narrow lane. The writer refuses if `main`
-has a merge queue. A future queue rollout must keep this lane disabled until a
-new reviewed design defines its queue behavior. Before issue #2091 activates
-its lifecycle ruleset, it must migrate the final writer from `GITHUB_TOKEN` to
-a dedicated repository-scoped merge App token sourced by the trusted
-default-branch writer from IaC-owned repository Actions secrets. It must also
-prove the App credentials are enabled, the migration is verified, and legacy
-auto-merge state is drained. Do not give the shared GitHub Actions App identity
-a ruleset bypass.
+The automatic `GITHUB_TOKEN` merge does not emit this repository's `push`
+workflows. Required PR checks are the final automated evidence for this narrow
+lane. The writer refuses if `main` has a merge queue. The final REST endpoint
+has no enqueue behavior, so a queue activated after the last read cannot turn
+the write into deferred queue state. A future queue rollout must still keep
+this lane disabled until a reviewed design defines its queue behavior. Before
+issue #2091 activates its lifecycle ruleset, it must migrate only the final
+write from `GITHUB_TOKEN` to a dedicated repository-scoped merge App token from
+IaC-owned repository Actions secrets. The restricted `GITHUB_TOKEN` remains
+the reader for authoritative Actions and pull-request state. Activation must
+also prove the App credentials are enabled, the migration is verified, and
+auto-merge requests created by the prior writer are drained. Do not give the
+shared GitHub Actions App identity a ruleset bypass.
 
 - [ ] If you add a new external review integration — GitHub App or Action — that is load-bearing for review or merge gating, keep its updates outside routine groups when an isolated review improves the self-update boundary
 - [ ] If you add a new `package-ecosystem` to `dependabot.yml`, keep it on the
