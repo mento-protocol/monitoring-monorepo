@@ -919,7 +919,7 @@ describe("TroveLedgerEvent — append-only per-trove ledger", () => {
     assert.equal(trove?.lastLedgerLogIndex, 2);
   });
 
-  it("batched redemption rows take statusAfter and debtAfter from the replayed entity, not the stale staged classification", async () => {
+  it("reconciles a batch-managed redemption row with Trove cumulatives to the wei and uses replayed status/debt", async () => {
     let mockDb = MockDb.createMockDb();
     seedLoadedCollateral(mockDb);
     const troveId = 13n;
@@ -975,9 +975,15 @@ describe("TroveLedgerEvent — append-only per-trove ledger", () => {
     // Real per-trove redemption order on a batched trove
     // (`_applySingleRedemption`): BatchedTroveUpdated → TroveOperation(6)
     // → BatchUpdated → fee, then the aggregate Redemption after the loop.
-    // 950 of 1_000 debt is redeemed; the replayed share-derived debt (50)
-    // sits under minDebt (100), so the replay classifies the trove zombie
-    // while the staged row was classified from stale pre-replay debt.
+    // Use non-token-aligned values so the proof exercises exact wei, not
+    // rounded whole-token amounts. The replayed share-derived debt remains
+    // under minDebt (100), so the replay classifies the trove zombie while
+    // the staged row was classified from stale pre-replay debt.
+    const redeemedDebt = 950n * D18 + 17n;
+    const redeemedColl = 475n * D18 + 29n;
+    const feeCredited = 1n * D18 + 11n;
+    const debtAfter = 1_000n * D18 - redeemedDebt;
+    const collAfter = 500n * D18 - redeemedColl;
     const redeemTx = {
       blockNumber: 822,
       blockTimestamp: 710_000,
@@ -990,8 +996,8 @@ describe("TroveLedgerEvent — append-only per-trove ledger", () => {
           _troveId: troveId,
           _interestBatchManager: batchManager,
           _batchDebtShares: 1_000n * D18,
-          _coll: 25n * D18,
-          _stake: 25n * D18,
+          _coll: collAfter,
+          _stake: collAfter,
           _snapshotOfTotalCollRedist: 0n,
           _snapshotOfTotalDebtRedist: 0n,
           mockEventData: mockEventData({ ...redeemTx, logIndex: 1 }),
@@ -1000,15 +1006,15 @@ describe("TroveLedgerEvent — append-only per-trove ledger", () => {
           ...redeemTx,
           troveId,
           operation: OP.REDEEM_COLLATERAL,
-          debtChangeFromOperation: -950n * D18,
-          collChangeFromOperation: -475n * D18,
+          debtChangeFromOperation: -redeemedDebt,
+          collChangeFromOperation: -redeemedColl,
           logIndex: 2,
         }),
         LiquityTroveManager.BatchUpdated.createMockEvent({
           _interestBatchManager: batchManager,
           _operation: 0n,
-          _debt: 50n * D18,
-          _coll: 25n * D18,
+          _debt: debtAfter,
+          _coll: collAfter,
           _annualInterestRate: 6n * 10n ** 16n,
           _annualManagementFee: 0n,
           _totalDebtShares: 1_000n * D18,
@@ -1018,13 +1024,13 @@ describe("TroveLedgerEvent — append-only per-trove ledger", () => {
         redemptionFeeEvent({
           ...redeemTx,
           troveId,
-          fee: 1n * D18,
+          fee: feeCredited,
           logIndex: 4,
         }),
         redemptionEvent({
           ...redeemTx,
-          actualBoldAmount: 950n * D18,
-          ethFee: 1n * D18,
+          actualBoldAmount: redeemedDebt,
+          ethFee: feeCredited,
           redemptionPrice: 2_000n * D18,
           logIndex: 5,
         }),
@@ -1042,7 +1048,7 @@ describe("TroveLedgerEvent — append-only per-trove ledger", () => {
     );
     assert.equal(
       row.debtAfter,
-      50n * D18,
+      debtAfter,
       "debtAfter fills from the entity's replayed share-derived debt",
     );
     assert.equal(
@@ -1051,11 +1057,30 @@ describe("TroveLedgerEvent — append-only per-trove ledger", () => {
       "batched debtBefore stays null permanently",
     );
     assert.equal(row.collBefore, 500n * D18);
-    assert.equal(row.collAfter, 25n * D18);
+    assert.equal(row.collAfter, collAfter);
     assert.equal(row.redemptionPrice, 2_000n * D18);
-    assert.equal(row.redemptionFeeCredited, 1n * D18);
+    assert.equal(row.redemptionFeeCredited, feeCredited);
     const trove = mockDb.entities.Trove.get(makeTroveId(collateralId, "0xd"));
     assert.equal(trove?.status, "zombie");
+    assert.equal(trove?.redemptionCount, 1);
+    assert.equal(trove?.redeemedDebt, redeemedDebt);
+    assert.equal(trove?.redeemedColl, redeemedColl);
+    assert.equal(trove?.redemptionFeePaidCum, feeCredited);
+    assert.equal(
+      -row.debtChange,
+      trove?.redeemedDebt,
+      "ledger debt delta and Trove cumulative agree to the wei",
+    );
+    assert.equal(
+      -row.collChange,
+      trove?.redeemedColl,
+      "ledger collateral delta and Trove cumulative agree to the wei",
+    );
+    assert.equal(
+      row.redemptionFeeCredited,
+      trove?.redemptionFeePaidCum,
+      "ledger fee and Trove cumulative agree to the wei",
+    );
     assert.equal(trove?.lastLedgerBlock, 822n, "watermark stamps at finalize");
     assert.equal(trove?.lastLedgerLogIndex, 2);
   });
