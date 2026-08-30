@@ -57,11 +57,11 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 `scripts/` has 14 path-pin classes. Move each pin with its file, except the
 `agent-autoreview.sh` feedback-runtime pins.
 
-- **Autoreview runtime pins.** `agent-autoreview.sh` pins sibling runtime and
-  optional `pr-feedback-state-claude.mjs` and
-  `pr-ready-state-review-signals.mjs`; feedback blobs use `origin/main`. Move
-  feedback paths in three merges: add copies/fallback; repoint; remove old paths
-  after no pre-move wrapper remains (ADR 0064).
+- **Autoreview runtime pins.** `agent-autoreview.sh` pins runtime,
+  sealed `agent-autoreview-secret-suppressions.json` (ADR 0079), and optional
+  `pr-feedback-state-claude.mjs` and
+  `pr-ready-state-review-signals.mjs`; feedback uses `origin/main`. Use ADR
+  0064's three-merge sequence for moves.
 - **Gate routing pins.** The gate excludes stub-repo tests with
   `$script_source_dir == $repo_root/scripts`, and pairs
   `bootstrap/codex-cloud-setup.{sh,test.sh}` for offline tests. It routes
@@ -87,29 +87,31 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
   `$script_source_dir`; tests hash them from `$repo_root`. Move each path with
   its routes, signatures, fixtures, and literals (ADRs 0064 and
   0076).
-- **Gate mapping pins.** The signature and three Turbo inputs pin
-  `gate/routing-table/**`, `gate/mapping*`, and
-  `agent-autoreview-core.mjs`. Runtime hashes use `$script_source_dir`; suites
-  use `$repo_root`. Core edits route both suites; missing pins freeze the stamp
-  (ADR 0069).
-- **Review-eval pins.** Keep the source-snapshot consumers and the launchd
-  installer's template and runner pins in `docs/evals/review-skill.md` current.
+- **Gate mapping pins.** The signature and Turbo inputs pin
+  `gate/routing-table/**`, `gate/mapping*`, the autoreview core, and its sealed
+  policy. Runtime hashes use `$script_source_dir`; suites use `$repo_root`.
+  Core edits route both suites; policy edits route autoreview. Missing pins
+  freeze the stamp (ADRs 0069 and 0079).
+- **Review-eval pins.** `docs/evals/review-skill.md` pins
+  `scripts/review/install-review-eval-launchd.sh`,
+  `scripts/review/launchd/org.mento.review-eval.plist`,
+  `scripts/review/run-eval.sh`, `scripts/review/run-eval-source-snapshot.sh`,
+  `scripts/review/run-eval-lifecycle.sh`, and
+  `scripts/review/run-eval-runtime.sh`.
 - **Navigation-eval self-pin.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names its implementation.
 - **Verification evidence.** Move
   `scripts/docs/check-verification-redesign-evidence*.mjs` with the
   `.gitattributes` patch rule.
 - **Sentry suite manifest.** `scripts/sentry/gate/sentry-suite-manifest.json`
-  keys are exact repo-relative paths, reconciled against `findSentrySuites()`
-  by set equality both ways. A moved or renamed suite fails the gate closed.
-  `sentry/fixture-scan-canary.test.mjs` re-pins four; ADR 0068 has the policy.
-- **Enumerated workflow pins.** 23 of 33 files in
-  `.github/workflows/` pin a `scripts/` path, and `sentry-triage-agent.yml`
-  stages an exact copy list at runtime; three Terraform filters instead
-  copy the broad `workflowAdmissionPatterns` boundary from
-  `terraform.stacks.json`. A miss is silent: the job stops while `ci` stays
-  green. ADR 0064 has the enumeration, the `routing.test.mjs` equality
-  contract, and glob rules. Review-eval pins: `docs/evals/review-skill.md`.
+  reconciles exact paths with `findSentrySuites()` both ways. Moves fail closed.
+  `sentry/fixture-scan-canary.test.mjs` re-pins four (ADR 0068).
+- **Enumerated workflow pins.** 23 of 33 `.github/workflows/` files pin scripts;
+  `sentry-triage-agent.yml` stages an exact copy list. Three Terraform filters
+  copy `workflowAdmissionPatterns` from `terraform.stacks.json`. A miss stops
+  its job while `ci` stays green. ADR 0064 owns the enumeration,
+  `routing.test.mjs` equality, and globs. Review-eval pins live in
+  `docs/evals/review-skill.md`.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.

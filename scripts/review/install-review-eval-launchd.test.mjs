@@ -49,6 +49,7 @@ function makeHarness({ sharedHome } = {}) {
   const gitLog = path.join(root, "git.log");
   const printCount = path.join(root, "print.count");
   const plutilCount = path.join(root, "plutil.count");
+  const renameCount = path.join(root, "rename.count");
   const holdReady = path.join(root, "hold.ready");
   const holdRelease = path.join(root, "hold.release");
   const bashEnv = path.join(root, "bash-env.sh");
@@ -76,6 +77,11 @@ function makeHarness({ sharedHome } = {}) {
     `#!/bin/sh
 case "\${2:-}" in
   *renameSync*)
+    count=0
+    [ ! -f "$REVIEW_EVAL_RENAME_COUNT" ] || count="$(/bin/cat "$REVIEW_EVAL_RENAME_COUNT")"
+    count=$((count + 1))
+    printf '%s\\n' "$count" > "$REVIEW_EVAL_RENAME_COUNT"
+    [ "$count" -ne "$REVIEW_EVAL_RENAME_FAIL_AT" ] || exit 72
     if [ -n "$REVIEW_EVAL_RENAME_SIGNAL" ]; then
       /bin/kill -s "$REVIEW_EVAL_RENAME_SIGNAL" "$PPID"
     fi
@@ -178,7 +184,6 @@ case "$1" in
       printf '%s\\n' replacement-installer > "$REVIEW_EVAL_INSTALL_LOCK"
     fi
     if [ "$REVIEW_EVAL_BOOTSTRAP_FAILS" = 1 ]; then
-      [ "$REVIEW_EVAL_ROLLBACK_FAILS" = 0 ] || /bin/chmod 0555 "$REVIEW_EVAL_TARGET_DIR"
       exit 70
     fi
     ;;
@@ -221,6 +226,7 @@ function /bin/launchctl { "$REVIEW_EVAL_FAKE_LAUNCHCTL" "$@"; }
       gitLog,
       printCount,
       plutilCount,
+      renameCount,
       holdReady,
       holdRelease,
     ]) {
@@ -276,15 +282,15 @@ function /bin/launchctl { "$REVIEW_EVAL_FAKE_LAUNCHCTL" "$@"; }
       REVIEW_EVAL_PRIOR_LABEL: options.priorLabel ?? "org.mento.review-eval",
       REVIEW_EVAL_RACE_CONTENDER: options.raceContender ? "1" : "0",
       REVIEW_EVAL_REAL_NODE: process.execPath,
+      REVIEW_EVAL_RENAME_COUNT: renameCount,
+      REVIEW_EVAL_RENAME_FAIL_AT: options.rollbackFails ? "2" : "0",
       REVIEW_EVAL_RENAME_SIGNAL: options.renameSignal ?? "",
       REVIEW_EVAL_REPLACE_LOCK: options.replaceLock ? "1" : "0",
-      REVIEW_EVAL_ROLLBACK_FAILS: options.rollbackFails ? "1" : "0",
       REVIEW_EVAL_RUN_LOCK: runLock,
       REVIEW_EVAL_SECOND_STATE: options.secondState ?? "absent",
       REVIEW_EVAL_SIGNAL_BOOTSTRAP_SUCCEEDS: options.signalBootstrapSucceeds
         ? "1"
         : "0",
-      REVIEW_EVAL_TARGET_DIR: targetDir,
     };
   }
 
@@ -466,7 +472,6 @@ test("the launchd installer serializes, refuses loaded state, and rolls files ba
       bootstrapFails: true,
       rollbackFails: true,
     });
-    chmodSync(harness.targetDir, 0o755);
     assert.notEqual(rollbackFailure.status, 0);
     assert.match(rollbackFailure.stderr, /recovery copy:/);
     assert.equal(

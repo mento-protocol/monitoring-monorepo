@@ -5423,6 +5423,7 @@ verify_current_helper_matches_ref() {
   local helper_paths=(
     scripts/agent-autoreview.mjs
     scripts/agent-autoreview-core.mjs
+    scripts/agent-autoreview-secret-suppressions.json
     scripts/gate/darwin-process-identity.c
     scripts/gate/darwin-process-identity-runtime.inc.c
     scripts/gate/darwin-process-identity-helper.mjs
@@ -5482,6 +5483,7 @@ verify_autoreview_runtime_matches_baseline() {
     scripts/agent-autoreview.sh
     scripts/agent-autoreview.mjs
     scripts/agent-autoreview-core.mjs
+    scripts/agent-autoreview-secret-suppressions.json
     scripts/gate/darwin-process-identity.c
     scripts/gate/darwin-process-identity-runtime.inc.c
     scripts/gate/darwin-process-identity-helper.mjs
@@ -5536,6 +5538,7 @@ materialize_trusted_autoreview_runtime() {
   local runtime_paths=(
     scripts/agent-autoreview.mjs
     scripts/agent-autoreview-core.mjs
+    scripts/agent-autoreview-secret-suppressions.json
     scripts/gate/darwin-process-identity.c
     scripts/gate/darwin-process-identity-runtime.inc.c
     scripts/gate/darwin-process-identity-helper.mjs
@@ -5649,6 +5652,7 @@ wrapper_runtime_source_snapshot() {
     my @source_files = (
       "agent-autoreview.mjs",
       "agent-autoreview-core.mjs",
+      "agent-autoreview-secret-suppressions.json",
       "gate/darwin-process-identity.c",
       "gate/darwin-process-identity-runtime.inc.c",
       "gate/darwin-process-identity-helper.mjs",
@@ -5685,6 +5689,7 @@ wrapper_runtime_source_acl_is_trusted() {
   for source_file in \
     "$source_scripts_dir/agent-autoreview.mjs" \
     "$source_scripts_dir/agent-autoreview-core.mjs" \
+    "$source_scripts_dir/agent-autoreview-secret-suppressions.json" \
     "$source_scripts_dir/gate/darwin-process-identity.c" \
     "$source_scripts_dir/gate/darwin-process-identity-runtime.inc.c" \
     "$source_scripts_dir/gate/darwin-process-identity-helper.mjs" \
@@ -5722,6 +5727,7 @@ materialize_filesystem_autoreview_runtime() {
     my @files = (
       [".", "agent-autoreview.mjs"],
       [".", "agent-autoreview-core.mjs"],
+      [".", "agent-autoreview-secret-suppressions.json"],
       ["gate", "darwin-process-identity.c"],
       ["gate", "darwin-process-identity-runtime.inc.c"],
       ["gate", "darwin-process-identity-helper.mjs"],
@@ -8925,11 +8931,11 @@ EOF
       capture_output_file "$staging_dir/patches/staged.stat" "staged diff stat" 0 \
         git_output "$repo" diff --cached --stat --find-renames -l5000 --no-ext-diff --no-textconv "$frozen_head_oid" --
       capture_output_file "$staging_dir/patches/staged.diff" "staged diff" 0 \
-        git_output "$repo" diff --cached --patch --find-renames -l5000 --no-ext-diff --no-textconv "$frozen_head_oid" --
+        git_output "$repo" diff --cached --patch --full-index --unified=3 --no-color --find-renames -l5000 --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ "$frozen_head_oid" --
       capture_output_file "$staging_dir/patches/unstaged.stat" "unstaged diff stat" 0 \
         git_output "$repo" diff --stat --find-renames -l5000 --no-ext-diff --no-textconv
       capture_output_file "$staging_dir/patches/unstaged.diff" "unstaged diff" 0 \
-        git_output "$repo" diff --patch --find-renames -l5000 --no-ext-diff --no-textconv
+        git_output "$repo" diff --patch --full-index --unified=3 --no-color --find-renames -l5000 --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/
       capture_output_file "$staging_dir/patches/untracked-paths.txt" "untracked paths" 0 \
         emit_untracked_paths "$repo"
       capture_untracked_files \
@@ -8943,7 +8949,7 @@ EOF
       capture_output_file "$staging_dir/patches/branch.stat" "branch diff stat" 0 \
         git_output "$repo" diff --stat --find-renames -l5000 --no-ext-diff --no-textconv "$target_ref...$frozen_head_oid" --
       capture_output_file "$staging_dir/patches/branch.diff" "branch diff" 0 \
-        git_output "$repo" diff --patch --find-renames -l5000 --no-ext-diff --no-textconv "$target_ref...$frozen_head_oid" --
+        git_output "$repo" diff --patch --full-index --unified=3 --no-color --find-renames -l5000 --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ "$target_ref...$frozen_head_oid" --
       ;;
     branch-local)
       capture_output_file "$staging_dir/git-status.txt" "git status" 0 \
@@ -8953,15 +8959,15 @@ EOF
       capture_output_file "$staging_dir/patches/branch.stat" "branch diff stat" 0 \
         git_output "$repo" diff --stat --find-renames -l5000 --no-ext-diff --no-textconv "$target_ref...$frozen_head_oid" --
       capture_output_file "$staging_dir/patches/branch.diff" "branch diff" 0 \
-        git_output "$repo" diff --patch --find-renames -l5000 --no-ext-diff --no-textconv "$target_ref...$frozen_head_oid" --
+        git_output "$repo" diff --patch --full-index --unified=3 --no-color --find-renames -l5000 --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ "$target_ref...$frozen_head_oid" --
       capture_output_file "$staging_dir/patches/staged.stat" "staged diff stat" 0 \
         git_output "$repo" diff --cached --stat --find-renames -l5000 --no-ext-diff --no-textconv "$frozen_head_oid" --
       capture_output_file "$staging_dir/patches/staged.diff" "staged diff" 0 \
-        git_output "$repo" diff --cached --patch --find-renames -l5000 --no-ext-diff --no-textconv "$frozen_head_oid" --
+        git_output "$repo" diff --cached --patch --full-index --unified=3 --no-color --find-renames -l5000 --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ "$frozen_head_oid" --
       capture_output_file "$staging_dir/patches/unstaged.stat" "unstaged diff stat" 0 \
         git_output "$repo" diff --stat --find-renames -l5000 --no-ext-diff --no-textconv
       capture_output_file "$staging_dir/patches/unstaged.diff" "unstaged diff" 0 \
-        git_output "$repo" diff --patch --find-renames -l5000 --no-ext-diff --no-textconv
+        git_output "$repo" diff --patch --full-index --unified=3 --no-color --find-renames -l5000 --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/
       capture_output_file "$staging_dir/patches/untracked-paths.txt" "untracked paths" 0 \
         emit_untracked_paths "$repo"
       capture_untracked_files \
@@ -8972,10 +8978,12 @@ EOF
     commit)
       capture_output_file "$staging_dir/changed-paths.txt" "changed paths" 0 \
         emit_commit_changed_paths "$repo" "$target_ref"
+      capture_output_file "$staging_dir/patches/commit.metadata" "commit metadata" 0 \
+        git_output "$repo" show --no-patch --format=fuller "$target_ref"
       capture_output_file "$staging_dir/patches/commit.stat" "commit diff stat" 0 \
-        git_output "$repo" show --stat --find-renames -l5000 --no-ext-diff --no-textconv --format=fuller "$target_ref"
+        git_output "$repo" show --stat --find-renames -l5000 --no-ext-diff --no-textconv --format= "$target_ref"
       capture_output_file "$staging_dir/patches/commit.diff" "commit diff" 0 \
-        git_output "$repo" show --patch --find-renames -l5000 --no-ext-diff --no-textconv --format=fuller "$target_ref"
+        git_output "$repo" show --patch --full-index --unified=3 --no-color --find-renames -l5000 --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ --format= "$target_ref"
       ;;
   esac
 

@@ -1759,6 +1759,7 @@ copy_autoreview_helper_runtime() {
   cp \
     "$repo_root/scripts/agent-autoreview.mjs" \
     "$repo_root/scripts/agent-autoreview-core.mjs" \
+    "$repo_root/scripts/agent-autoreview-secret-suppressions.json" \
     "$destination/"
   cp \
     "$repo_root/scripts/gate/darwin-process-identity.c" \
@@ -8113,11 +8114,81 @@ run_git_replace_ref_regression() {
   expect_empty_stderr
 }
 
+run_suppression_policy_review_path_regression() {
+  local review_repo="$tmp_dir/suppression-policy-review-path"
+  local policy_path="$review_repo/scripts/agent-autoreview-secret-suppressions.json"
+  local valid_bundle="$tmp_dir/suppression-policy-valid-bundle"
+  local secret_bundle="$tmp_dir/suppression-policy-secret-bundle"
+  local secret_reason
+
+  init_review_repo "$review_repo"
+  mkdir -p "$review_repo/scripts"
+  cp \
+    "$repo_root/scripts/agent-autoreview-secret-suppressions.json" \
+    "$policy_path"
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+
+  git -C "$review_repo" switch -c policy-valid >/dev/null 2>&1
+  # shellcheck disable=SC2016
+  "$node_bin" -e '
+    const fs = require("node:fs");
+    const policyPath = process.argv[1];
+    const records = JSON.parse(fs.readFileSync(policyPath, "utf8"));
+    records[0].reason += " Reviewed path fixture.";
+    fs.writeFileSync(policyPath, `${JSON.stringify(records, null, 2)}\n`);
+  ' "$policy_path"
+  commit_review_repo "$review_repo" "change suppression policy reason"
+
+  run_helper_in_repo "$review_repo" \
+    --prepare-bundle-dir "$valid_bundle" \
+    --mode branch \
+    --base main \
+    --engine local
+  expect_file_contains \
+    "$valid_bundle/changed-paths.txt" \
+    "scripts/agent-autoreview-secret-suppressions.json"
+  expect_file_contains \
+    "$valid_bundle/patches/branch.diff" \
+    "Reviewed path fixture."
+  expect_empty_stderr
+
+  git -C "$review_repo" switch main >/dev/null 2>&1
+  git -C "$review_repo" switch -c policy-secret >/dev/null 2>&1
+  secret_reason="$(printf '%s%s%s' \
+    'https://example.invalid/?to' \
+    'ken=live-policy-credential-' \
+    'abcdefghijklmnopqrstuvwxyz')"
+  # shellcheck disable=SC2016
+  "$node_bin" -e '
+    const fs = require("node:fs");
+    const policyPath = process.argv[1];
+    const records = JSON.parse(fs.readFileSync(policyPath, "utf8"));
+    records[0].reason = process.argv[2];
+    fs.writeFileSync(policyPath, `${JSON.stringify(records, null, 2)}\n`);
+  ' "$policy_path" "$secret_reason"
+  commit_review_repo "$review_repo" "add secret-bearing policy reason"
+
+  run_helper_in_repo_expect_failure "$review_repo" \
+    --prepare-bundle-dir "$secret_bundle" \
+    --mode branch \
+    --base main \
+    --engine local
+  expect_stderr_contains "secret-bearing URL"
+  if [[ -e "$secret_bundle" ]]; then
+    printf 'secret-bearing suppression policy published a review bundle\n' >&2
+    exit 1
+  fi
+}
+
 run_trusted_helper_runtime_regression() {
   local review_repo="$tmp_dir/trusted-helper-runtime"
   local branch_bundle="$tmp_dir/trusted-helper-branch-bundle"
   local commit_bundle="$tmp_dir/trusted-helper-commit-bundle"
+  local old_runtime_dir="$tmp_dir/trusted-helper-old-runtime"
+  local old_runtime_bundle="$tmp_dir/trusted-helper-old-runtime-bundle.md"
   local dirty_helper_bundle="$tmp_dir/trusted-helper-dirty-helper-bundle"
+  local dirty_suppression_bundle="$tmp_dir/trusted-helper-dirty-suppression-bundle"
   local dirty_process_identity_bundle="$tmp_dir/trusted-helper-dirty-process-identity-bundle"
   local dirty_shell_bundle="$tmp_dir/trusted-helper-dirty-shell-bundle"
   local changed_runtime_bundle="$tmp_dir/trusted-helper-changed-runtime-bundle"
@@ -8197,6 +8268,43 @@ run_trusted_helper_runtime_regression() {
   )
   expect_file_exists "$commit_bundle/autoreview-prompt.md"
 
+  copy_autoreview_helper_runtime "$old_runtime_dir"
+  rm "$old_runtime_dir/agent-autoreview-secret-suppressions.json"
+  chmod +x "$old_runtime_dir/agent-autoreview.mjs"
+  set +e
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=$hermetic_git_bin" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "GIT_CONFIG_GLOBAL=/dev/null" \
+      "AUTOREVIEW_EXTRA_BIN_DIRS=" \
+      "$node_bin" "$old_runtime_dir/agent-autoreview.mjs" \
+      --mode branch \
+      --base main \
+      --prepare-only \
+      --bundle-output "$old_runtime_bundle" \
+      >"$local_stdout" 2>"$local_stderr"
+  )
+  status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    printf 'old helper runtime accepted a missing suppression policy\n' >&2
+    exit 1
+  fi
+  if ! grep -Fq \
+    "agent-autoreview-secret-suppressions.json" \
+    "$local_stderr"; then
+    printf 'old helper runtime failed for the wrong reason:\n%s\n' \
+      "$(cat "$local_stderr")" >&2
+    exit 1
+  fi
+  if [[ -e "$old_runtime_bundle" ]]; then
+    printf 'old helper runtime published a review bundle\n' >&2
+    exit 1
+  fi
+
   set +e
   (
     cd "$review_repo"
@@ -8228,7 +8336,41 @@ run_trusted_helper_runtime_regression() {
 
   git -C "$review_repo" checkout -- \
     scripts/agent-autoreview.mjs \
-    scripts/agent-autoreview-core.mjs
+    scripts/agent-autoreview-core.mjs \
+    scripts/agent-autoreview-secret-suppressions.json
+  printf ' ' >>"$review_repo/scripts/agent-autoreview-secret-suppressions.json"
+  set +e
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=$PATH" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "$review_repo/scripts/agent-autoreview.sh" \
+      --prepare-bundle-dir "$dirty_suppression_bundle" \
+      --mode local \
+      --engine local >"$local_stdout" 2>"$local_stderr"
+  )
+  status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    printf 'local bundle accepted a dirty exact-patch suppression config\n' >&2
+    exit 1
+  fi
+  if ! grep -Fq \
+    "local review target changes executable autoreview runtime: scripts/agent-autoreview-secret-suppressions.json" \
+    "$local_stderr"; then
+    printf 'dirty exact-patch suppression config failed for the wrong reason:\n%s\n' \
+      "$(cat "$local_stderr")" >&2
+    exit 1
+  fi
+  if [[ -e "$dirty_suppression_bundle" ]]; then
+    printf 'bundle was published with a dirty exact-patch suppression config\n' >&2
+    exit 1
+  fi
+
+  git -C "$review_repo" checkout -- \
+    scripts/agent-autoreview-secret-suppressions.json
   printf '\n// dirty mapped-command identity helper\n' \
     >>"$review_repo/scripts/gate/mapped-command-process-identity.mjs"
   set +e
@@ -8497,6 +8639,7 @@ run_trusted_helper_runtime_regression() {
     scripts/agent-autoreview.sh \
     scripts/agent-autoreview.mjs \
     scripts/agent-autoreview-core.mjs \
+    scripts/agent-autoreview-secret-suppressions.json \
     scripts/gate/mapped-command-process-identity.mjs
   commit_review_repo "$hostile_base_repo" "restore protected runtime"
   (
@@ -11991,6 +12134,80 @@ NODE
   expect_empty_stderr
 }
 
+run_exact_patch_capture_contract_regression() {
+  local review_repo="$tmp_dir/exact-patch-capture"
+  local direct_branch_output="$tmp_dir/exact-patch-direct-branch.md"
+  local direct_commit_output="$tmp_dir/exact-patch-direct-commit.md"
+  local wrapper_branch_bundle="$tmp_dir/exact-patch-wrapper-branch"
+  local wrapper_commit_bundle="$tmp_dir/exact-patch-wrapper-commit"
+  local old_oid
+  local new_oid
+  local expected_index
+  init_review_repo "$review_repo"
+  printf 'one\ntwo\nthree\nold\nfive\nsix\nseven\n' \
+    >"$review_repo/sample.txt"
+  commit_review_repo "$review_repo" init
+  old_oid="$(git -C "$review_repo" rev-parse HEAD:sample.txt)"
+  git -C "$review_repo" switch -c feature >/dev/null 2>&1
+  printf 'one\ntwo\nthree\nnew\nfive\nsix\nseven\n' \
+    >"$review_repo/sample.txt"
+  commit_review_repo "$review_repo" "exact patch capture message"
+  new_oid="$(git -C "$review_repo" rev-parse HEAD:sample.txt)"
+  expected_index="index $old_oid..$new_oid 100644"
+
+  run_node_helper_in_repo_expect_success "$review_repo" \
+    --mode branch \
+    --base main \
+    --prepare-only \
+    --bundle-output "$direct_branch_output"
+  expect_file_contains \
+    "$direct_branch_output" \
+    "diff --git a/sample.txt b/sample.txt"
+  expect_file_contains "$direct_branch_output" "$expected_index"
+  expect_file_contains "$direct_branch_output" "@@ -1,7 +1,7 @@"
+
+  run_helper_in_repo "$review_repo" \
+    --prepare-bundle-dir "$wrapper_branch_bundle" \
+    --mode branch \
+    --base main \
+    --engine local
+  expect_file_contains \
+    "$wrapper_branch_bundle/patches/branch.diff" \
+    "diff --git a/sample.txt b/sample.txt"
+  expect_file_contains \
+    "$wrapper_branch_bundle/patches/branch.diff" \
+    "$expected_index"
+  expect_file_contains \
+    "$wrapper_branch_bundle/patches/branch.diff" \
+    "@@ -1,7 +1,7 @@"
+
+  run_node_helper_in_repo_expect_success "$review_repo" \
+    --mode commit \
+    --commit HEAD \
+    --prepare-only \
+    --bundle-output "$direct_commit_output"
+  expect_file_contains "$direct_commit_output" "exact patch capture message"
+  expect_file_contains "$direct_commit_output" "$expected_index"
+
+  run_helper_in_repo "$review_repo" \
+    --prepare-bundle-dir "$wrapper_commit_bundle" \
+    --mode commit \
+    --commit HEAD \
+    --engine local
+  expect_file_contains \
+    "$wrapper_commit_bundle/patches/commit.metadata" \
+    "exact patch capture message"
+  expect_file_contains \
+    "$wrapper_commit_bundle/patches/commit.diff" \
+    "$expected_index"
+  if [[ "$(sed -n '1p' "$wrapper_commit_bundle/patches/commit.diff")" != \
+    "diff --git a/sample.txt b/sample.txt" ]]; then
+    printf 'commit patch contains prose before its first file-patch header\n' >&2
+    exit 1
+  fi
+  expect_empty_stderr
+}
+
 run_sensitive_input_regressions() {
   local review_repo="$tmp_dir/sensitive-inputs"
   local bundle_output="$tmp_dir/sensitive-prompt.md"
@@ -12253,6 +12470,7 @@ run_runtime_trust_family() {
   run_external_wrapper_source_trust_regression
   run_symlinked_node_codex_regression
   run_repo_controlled_node_regression
+  run_suppression_policy_review_path_regression
   run_trusted_helper_runtime_regression
   run_hostile_git_path_regression
   run_unsafe_script_fallback_regressions
@@ -12282,6 +12500,7 @@ run_bundle_integrity_family() {
   run_numstat_path_parsing_regressions
   run_moved_content_rescan_regressions
   run_bundle_output_deferred_regression
+  run_exact_patch_capture_contract_regression
   run_sensitive_input_regressions
   run_attested_untracked_serializer_regression
   run_untrusted_cleanup_retention_regression
@@ -13648,11 +13867,15 @@ case "$test_focus" in
     ;;
   review-target-trust)
     run_review_target_metadata_regression
+    run_suppression_policy_review_path_regression
     run_trusted_helper_runtime_regression
     run_same_checkout_explicit_helper_fail_closed_regression
     run_same_checkout_protected_runtime_regression
     run_nested_wrapper_fail_closed_regression
     run_external_wrapper_source_trust_regression
+    ;;
+  suppression-policy-review-path)
+    run_suppression_policy_review_path_regression
     ;;
   prepared-bundle-safety)
     run_frozen_checklist_provenance_regression

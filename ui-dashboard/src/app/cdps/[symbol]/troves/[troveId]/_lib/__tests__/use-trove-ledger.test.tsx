@@ -169,6 +169,7 @@ describe("useTroveLedger", () => {
     render(handle!);
 
     expect(latest!.supported).toBe(false);
+    expect(latest!.probeState).toBe("unresolved");
     expect(latest!.watermark).toBeNull();
     expect(
       mockUseGQL.mock.calls.some(([query]) => query === CDP_TROVE_LEDGER),
@@ -184,7 +185,7 @@ describe("useTroveLedger", () => {
     expect(latest!.supported).toBe(false);
     // Checked-absent, not check-failed: the interim rollout wording is
     // honest here.
-    expect(latest!.probeFailed).toBe(false);
+    expect(latest!.probeState).toBe("checked");
     expect(
       mockUseGQL.mock.calls.some(([query]) => query === CDP_TROVE_LEDGER),
     ).toBe(false);
@@ -198,15 +199,31 @@ describe("useTroveLedger", () => {
     render(handle!);
 
     expect(latest!.supported).toBe(false);
-    expect(latest!.probeFailed).toBe(true);
+    expect(latest!.probeState).toBe("check-failed");
   });
 
-  it("keeps probeFailed false when a probe refresh fails behind a stale success", () => {
-    mockQueries({ probeError: new Error("refresh failed") });
+  it("marks a cached answer stale after a refresh error and keeps that answer's gate direction", () => {
+    mockQueries({
+      probe: PROBE_WITHOUT_LEDGER,
+      probeError: new Error("refresh failed"),
+    });
+    render(handle!);
+
+    expect(latest!.supported).toBe(false);
+    expect(latest!.probeState).toBe("stale");
+    expect(
+      mockUseGQL.mock.calls.some(([query]) => query === CDP_TROVE_LEDGER),
+    ).toBe(false);
+
+    mockQueries({
+      probeError: new Error("refresh failed"),
+      ledger: ledgerData([ledgerRow()]),
+    });
     render(handle!);
 
     expect(latest!.supported).toBe(true);
-    expect(latest!.probeFailed).toBe(false);
+    expect(latest!.probeState).toBe("stale");
+    expect(latest!.rows).toHaveLength(1);
   });
 
   it("fires the gated query with the sentinel request limit and the Zod guard once supported", () => {
@@ -214,6 +231,7 @@ describe("useTroveLedger", () => {
     render(handle!);
 
     expect(latest!.supported).toBe(true);
+    expect(latest!.probeState).toBe("checked");
     const call = mockUseGQL.mock.calls.find(
       ([query]) => query === CDP_TROVE_LEDGER,
     );

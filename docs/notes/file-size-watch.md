@@ -46,54 +46,52 @@ Use `--format issue` for GitHub Issues; do not append this report to `BACKLOG.md
 
 | Rough |   Raw | Delta | Status        | File                                                                                      |
 | ----: | ----: | ----: | ------------- | ----------------------------------------------------------------------------------------- |
-|  9647 | 11976 |  +102 | hard cap      | `scripts/agent-quality-gate.sh`                                                           |
-|  2421 |  2506 | (new) | hard cap      | `scripts/gate/quality-gate-coordinator-environment.mjs`                                   |
-|  2007 |  2098 |   +94 | hard cap      | `scripts/gate/darwin-broker-launch-preflight.mjs`                                         |
-|  1727 |  1793 | (new) | hard cap      | `scripts/gate/quality-gate-coordinator-legacy.mjs`                                        |
-|  1639 |  1838 | (new) | hard cap      | `scripts/review/review-eval.mjs`                                                          |
-|  1525 |  1611 | (new) | hard cap      | `scripts/gate/darwin-process-lineage.mjs`                                                 |
-|  1390 |  1466 |  +184 | hard cap      | `scripts/gate/darwin-process-lineage-state.mjs`                                           |
+|  9661 | 11994 |   +18 | hard cap      | `scripts/agent-quality-gate.sh`                                                           |
+|  2421 |  2506 |     0 | hard cap      | `scripts/gate/quality-gate-coordinator-environment.mjs`                                   |
+|  2209 |  2310 |  +212 | hard cap      | `scripts/gate/darwin-broker-launch-preflight.mjs`                                         |
+|  1727 |  1793 |     0 | hard cap      | `scripts/gate/quality-gate-coordinator-legacy.mjs`                                        |
+|  1525 |  1611 |     0 | hard cap      | `scripts/gate/darwin-process-lineage.mjs`                                                 |
+|  1390 |  1466 |     0 | hard cap      | `scripts/gate/darwin-process-lineage-state.mjs`                                           |
 |  1261 |  2105 |     0 | hard cap      | `scripts/sentry/triage/sentry-triage-archive.mjs`                                         |
-|  1251 |  1311 | (new) | hard cap      | `scripts/gate/darwin-process-identity-helper.mjs`                                         |
-|  1098 |  1443 | (new) | hard cap      | `scripts/review/review-eval-run.mjs`                                                      |
+|  1251 |  1311 |     0 | hard cap      | `scripts/gate/darwin-process-identity-helper.mjs`                                         |
 |   982 |  1054 |     0 | near hard cap | `metrics-bridge/src/peg/poller.ts`                                                        |
-|   967 |  1506 | (new) | near hard cap | `scripts/review/run-eval.sh`                                                              |
 |   946 |  1032 |     0 | soft cap      | `scripts/deploy-staging-callsite-discovery.mjs`                                           |
-|   932 |   997 |   +20 | soft cap      | `scripts/gate/quality-gate-coordinator-support.sh`                                        |
-|   867 |   982 |    +5 | soft cap      | `scripts/pr/pr-ready-state.mjs`                                                           |
+|   932 |   997 |     0 | soft cap      | `scripts/gate/quality-gate-coordinator-support.sh`                                        |
+|   867 |   982 |     0 | soft cap      | `scripts/pr/pr-ready-state.mjs`                                                           |
 |   862 |   904 |     0 | soft cap      | `scripts/deploy-staging-contract.mjs`                                                     |
 |   859 |  1505 |     0 | soft cap      | `scripts/sentry/triage/sentry-triage-ingest.mjs`                                          |
 |   844 |   901 |     0 | soft cap      | `scripts/alerts/check-peg-registry-integrity.mjs`                                         |
 |   814 |  1174 |     0 | soft cap      | `indexer-envio/src/handlers/sortedOracles.ts`                                             |
-|   805 |   866 |  +102 | soft cap      | `indexer-envio/src/handlers/liquity/troveManager.ts`                                      |
-|   802 |   891 |    +7 | soft cap      | `scripts/pr/pr-ready-state-core.mjs`                                                      |
+|   805 |   866 |     0 | soft cap      | `indexer-envio/src/handlers/liquity/troveManager.ts`                                      |
+|   802 |   891 |     0 | soft cap      | `scripts/pr/pr-ready-state-core.mjs`                                                      |
 |   788 |  1119 |     0 | soft cap      | `ui-dashboard/src/components/oracle-chart.tsx`                                            |
-|   775 |   903 | (new) | soft cap      | `scripts/review/review-eval-fixtures.mjs`                                                 |
-|   775 |   814 | (new) | soft cap      | `scripts/gate/quality-gate-coordinator.sh`                                                |
-|   768 |   911 | (new) | soft cap      | `scripts/gate/run-handles.sh`                                                             |
-|   759 |   793 | (new) | soft cap      | `scripts/gate/darwin-process-lineage-model.mjs`                                           |
-|   754 |   799 | (new) | soft cap      | `scripts/gate/agent-quality-gate-scheduler-fixture.mjs`                                   |
-|   753 |   945 | (new) | soft cap      | `scripts/review/review-eval-ledger.mjs`                                                   |
-|   740 |   995 |   +15 | soft cap      | `indexer-envio/src/rpc/effects.ts`                                                        |
+|   775 |   903 |     0 | soft cap      | `scripts/review/review-eval-fixtures.mjs`                                                 |
+|   775 |   814 |     0 | soft cap      | `scripts/gate/quality-gate-coordinator.sh`                                                |
+|   768 |   911 |     0 | soft cap      | `scripts/gate/run-handles.sh`                                                             |
+|   759 |   793 |     0 | soft cap      | `scripts/gate/darwin-process-lineage-model.mjs`                                           |
+|   755 |   800 |    +1 | soft cap      | `scripts/gate/agent-quality-gate-scheduler-fixture.mjs`                                   |
+|   753 |   945 |     0 | soft cap      | `scripts/review/review-eval-ledger.mjs`                                                   |
+|   749 |   865 |  -973 | soft cap      | `scripts/review/review-eval.mjs`                                                          |
+|   740 |   995 |     0 | soft cap      | `indexer-envio/src/rpc/effects.ts`                                                        |
 |   735 |   778 |     0 | soft cap      | `scripts/production-infra-identity-contract/workflow-inventory.mjs`                       |
-|   725 |   765 | (new) | soft cap      | `scripts/gate/darwin-process-lineage.sh`                                                  |
+|   725 |   765 |     0 | soft cap      | `scripts/gate/darwin-process-lineage.sh`                                                  |
 |   720 |   809 |     0 | soft cap      | `scripts/production-infra-identity-contract/fixtures.mjs`                                 |
 |   709 |   772 |     0 | soft cap      | `ui-dashboard/src/app/pool/[poolId]/_components/pool-detail-page-client.tsx`              |
-|   704 |   785 | (new) | soft cap      | `scripts/gate/darwin-process-identity.c`                                                  |
+|   704 |   785 |     0 | soft cap      | `scripts/gate/darwin-process-identity.c`                                                  |
 |   699 |  1051 |     0 | soft cap      | `indexer-envio/src/breakers.ts`                                                           |
 |   669 |   810 |     0 | soft cap      | `ui-dashboard/src/lib/homepage-og.ts`                                                     |
 |   659 |   718 |     0 | soft cap      | `scripts/tf-stacks.mjs`                                                                   |
 |   651 |   744 |     0 | soft cap      | `indexer-envio/src/rpc/oracle-state.ts`                                                   |
 |   649 |   821 |     0 | soft cap      | `indexer-envio/src/rpc/breakers.ts`                                                       |
 |   644 |   670 |     0 | soft cap      | `scripts/docs/docs-navigation-eval-result.mjs`                                            |
-|   641 |   649 |    +4 | soft cap      | `scripts/gate/quality-gate-coordinator-core.mjs`                                          |
-|   641 |   855 | (new) | soft cap      | `scripts/review/review-eval-report.mjs`                                                   |
+|   641 |   855 |     0 | soft cap      | `scripts/review/review-eval-report.mjs`                                                   |
+|   641 |   649 |     0 | soft cap      | `scripts/gate/quality-gate-coordinator-core.mjs`                                          |
 |   622 |   748 |     0 | soft cap      | `metrics-bridge/src/metrics.ts`                                                           |
+|   621 |   809 |    +6 | soft cap      | `scripts/review/review-eval-score.mjs`                                                    |
 |   619 |   868 |     0 | soft cap      | `ui-dashboard/src/lib/volume.ts`                                                          |
-|   617 |   803 | (new) | soft cap      | `scripts/review/review-eval-score.mjs`                                                    |
-|   616 |   630 |   +10 | soft cap      | `scripts/gate/quality-gate-coordinator-server.mjs`                                        |
+|   616 |   630 |     0 | soft cap      | `scripts/gate/quality-gate-coordinator-server.mjs`                                        |
 |   613 |   970 |     0 | soft cap      | `ui-dashboard/src/lib/health.ts`                                                          |
-|   613 |   795 | (new) | soft cap      | `scripts/review/review-eval-result-shape.mjs`                                             |
+|   613 |   797 |    +2 | soft cap      | `scripts/review/review-eval-result-shape.mjs`                                             |
 |   612 |   689 |     0 | soft cap      | `aegis/src/metric.spec.ts`                                                                |
 |   608 |   799 |     0 | soft cap      | `indexer-envio/src/handlers/fpmm/state-sync.ts`                                           |
 |   604 |   637 |     0 | soft cap      | `scripts/production-infra-identity-contract/surfaces.mjs`                                 |
@@ -101,43 +99,43 @@ Use `--format issue` for GitHub Issues; do not append this report to `BACKLOG.md
 |   601 |   656 |     0 | soft cap      | `scripts/production-infra-identity-contract/workflow.mjs`                                 |
 |   599 |   619 |     0 | watch         | `indexer-envio/src/handlers/liquity/stabilityPool.ts`                                     |
 |   598 |   659 |     0 | watch         | `scripts/alerts/alert-rules-lint-peg-policy.mjs`                                          |
-|   598 |   620 | (new) | watch         | `scripts/gate/routing-table/arms-tooling-modules.mjs`                                     |
-|   591 |   619 |    +1 | watch         | `scripts/docs/docs-navigation-eval-helpers.mjs`                                           |
-|   591 |   607 | (new) | watch         | `scripts/gate/quality-gate-coordinator-journal.mjs`                                       |
+|   598 |   620 |     0 | watch         | `scripts/gate/routing-table/arms-tooling-modules.mjs`                                     |
+|   591 |   619 |     0 | watch         | `scripts/docs/docs-navigation-eval-helpers.mjs`                                           |
+|   591 |   607 |     0 | watch         | `scripts/gate/quality-gate-coordinator-journal.mjs`                                       |
 |   590 |   626 |     0 | watch         | `metrics-bridge/src/peg/metrics.ts`                                                       |
-|   589 |   610 |    +1 | watch         | `scripts/gate/quality-gate-coordinator.mjs`                                               |
-|   584 |   657 | (new) | watch         | `scripts/gate/darwin-process-identity-runtime.inc.c`                                      |
+|   589 |   610 |     0 | watch         | `scripts/gate/quality-gate-coordinator.mjs`                                               |
+|   584 |   657 |     0 | watch         | `scripts/gate/darwin-process-identity-runtime.inc.c`                                      |
+|   582 |   616 |    +5 | watch         | `scripts/gate/routing-table/groups-head.mjs`                                              |
 |   580 |   642 |     0 | watch         | `ui-dashboard/src/lib/cdp-borrowing-revenue.ts`                                           |
-|   577 |   611 | (new) | watch         | `scripts/gate/routing-table/groups-head.mjs`                                              |
 |   574 |   692 |     0 | watch         | `ui-dashboard/src/app/pool/[poolId]/_tabs/oracle-tab.tsx`                                 |
 |   574 |   682 |     0 | watch         | `ui-dashboard/src/lib/network-fetcher/pagination.ts`                                      |
 |   569 |   719 |     0 | watch         | `ui-dashboard/src/lib/queries/volume.ts`                                                  |
-|   565 |   617 |   +16 | watch         | `scripts/context/docs-index-helpers.mjs`                                                  |
-|   560 |   913 |    +1 | watch         | `scripts/sentry/autofix/sentry-autofix-finalize.mjs`                                      |
+|   565 |   617 |     0 | watch         | `scripts/context/docs-index-helpers.mjs`                                                  |
+|   560 |   913 |     0 | watch         | `scripts/sentry/autofix/sentry-autofix-finalize.mjs`                                      |
 |   560 |   784 |     0 | watch         | `ui-dashboard/src/app/page-client.tsx`                                                    |
-|   560 |   647 | (new) | watch         | `scripts/lib/hcl.mjs`                                                                     |
+|   560 |   647 |     0 | watch         | `scripts/lib/hcl.mjs`                                                                     |
 |   557 |   709 |     0 | watch         | `indexer-envio/src/handlers/broker.ts`                                                    |
-|   555 |   952 |    +1 | watch         | `scripts/sentry/triage/sentry-triage-project-core.mjs`                                    |
+|   555 |   952 |     0 | watch         | `scripts/sentry/triage/sentry-triage-project-core.mjs`                                    |
 |   546 |   669 |     0 | watch         | `indexer-envio/src/pool/self-heal.ts`                                                     |
 |   536 |   606 |     0 | watch         | `ui-dashboard/src/app/volume/page-client.tsx`                                             |
-|   535 |   614 | (new) | watch         | `ui-dashboard/src/app/cdps/[symbol]/troves/[troveId]/_components/trove-balance-chart.tsx` |
+|   535 |   614 |     0 | watch         | `ui-dashboard/src/app/cdps/[symbol]/troves/[troveId]/_components/trove-balance-chart.tsx` |
 |   527 |   638 |     0 | watch         | `ui-dashboard/src/lib/pool-og.ts`                                                         |
-|   526 |   772 |    -1 | watch         | `scripts/deploy/deploy-indexer-status.mjs`                                                |
+|   526 |   772 |     0 | watch         | `scripts/deploy/deploy-indexer-status.mjs`                                                |
 |   518 |   793 |     0 | watch         | `scripts/sentry/gate/sentry-suite-gate.mjs`                                               |
-|   516 |   632 | (new) | watch         | `scripts/bootstrap/codex-cloud-setup.sh`                                                  |
+|   516 |   632 |     0 | watch         | `scripts/bootstrap/codex-cloud-setup.sh`                                                  |
 |   511 |   725 |     0 | watch         | `ui-dashboard/src/components/volume-over-time-chart.tsx`                                  |
 |   506 |   806 |     0 | watch         | `scripts/sentry/ci-wiring/check-sentry-suites-in-ci-core.mjs`                             |
 |   503 |   724 |     0 | watch         | `ui-dashboard/src/components/time-series-chart-card.tsx`                                  |
 |   500 |   654 |     0 | watch         | `indexer-envio/src/handlers/wormhole/nttManager.ts`                                       |
-|   487 |   644 | (new) | watch         | `ui-dashboard/src/lib/queries/liquity.ts`                                                 |
+|   487 |   644 |     0 | watch         | `ui-dashboard/src/lib/queries/liquity.ts`                                                 |
 |   476 |   610 |     0 | watch         | `ui-dashboard/src/lib/address-labels/snapshot.ts`                                         |
 |   468 |   607 |     0 | watch         | `ui-dashboard/src/app/stables/_lib/aggregate.ts`                                          |
 |   464 |   606 |     0 | watch         | `scripts/supply-chain/lockfile-lint-override-ranges.mjs`                                  |
 |   457 |   624 |     0 | watch         | `indexer-envio/src/handlers/biPoolManager.ts`                                             |
 |   450 |   618 |     0 | watch         | `ui-dashboard/src/app/peg-monitoring/_lib/peg-board-model.ts`                             |
-|   432 |   724 |  -226 | watch         | `scripts/sentry/triage/sentry-triage-project.mjs`                                         |
+|   432 |   724 |     0 | watch         | `scripts/sentry/triage/sentry-triage-project.mjs`                                         |
 |   425 |   932 |     0 | watch         | `scripts/sentry/triage/sentry-triage-requeue.mjs`                                         |
-|   394 |   697 |    -1 | watch         | `scripts/sentry/triage/sentry-triage-digest.mjs`                                          |
+|   394 |   697 |     0 | watch         | `scripts/sentry/triage/sentry-triage-digest.mjs`                                          |
 |   373 |   707 |     0 | watch         | `scripts/sentry/broker/sentry-mcp-broker.mjs`                                             |
 |   368 |   608 |     0 | watch         | `scripts/pr/pr-feedback-state-claude.mjs`                                                 |
 |   338 |   610 |     0 | watch         | `scripts/supply-chain/override-prune-report.mjs`                                          |
@@ -146,8 +144,8 @@ Use `--format issue` for GitHub Issues; do not append this report to `BACKLOG.md
 
 Exempt (3): splitting these would change a named mechanism rather than refactor a file, so they never open an issue. `docs/adr/0065-scripts-file-size-watchlist-scope.md` owns the list and its review cadence.
 
-| Rough |  Raw | Cap      | File                                | Why it is exempt                                                                                                                                                                                                                                                            |
-| ----: | ---: | -------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-|  8567 | 9279 | hard cap | `scripts/agent-autoreview.sh`       | trust root: the wrapper hashes its own blob against frozen HEAD before an explicit-ref review, so a sourced sibling falls outside the identity it proves                                                                                                                    |
-|  4892 | 5302 | hard cap | `scripts/agent-autoreview.mjs`      | trust root: the wrapper materializes the entry point, core, native Darwin identity runtime, and process-identity dependency under a 2 MB aggregate cap from explicit trust lists and private nested directories; splitting either large helper changes the attested runtime |
-|  2706 | 2988 | hard cap | `scripts/agent-autoreview-core.mjs` | trust root: the wrapper materializes the entry point, core, native Darwin identity runtime, and process-identity dependency under a 2 MB aggregate cap from explicit trust lists and private nested directories; splitting either large helper changes the attested runtime |
+| Rough |  Raw | Cap      | File                                | Why it is exempt                                                                                                                                                                                                                                                                                                   |
+| ----: | ---: | -------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+|  8649 | 9374 | hard cap | `scripts/agent-autoreview.sh`       | trust root: the wrapper hashes its own blob against frozen HEAD before an explicit-ref review, so a sourced sibling falls outside the identity it proves                                                                                                                                                           |
+|  4980 | 5394 | hard cap | `scripts/agent-autoreview.mjs`      | trust root: the wrapper materializes the entry point, core, sealed exact-patch suppression policy, native Darwin identity runtime, and process-identity dependency under a 2 MB aggregate cap from explicit trust lists and private nested directories; splitting either large helper changes the attested runtime |
+|  3035 | 3330 | hard cap | `scripts/agent-autoreview-core.mjs` | trust root: the wrapper materializes the entry point, core, sealed exact-patch suppression policy, native Darwin identity runtime, and process-identity dependency under a 2 MB aggregate cap from explicit trust lists and private nested directories; splitting either large helper changes the attested runtime |
