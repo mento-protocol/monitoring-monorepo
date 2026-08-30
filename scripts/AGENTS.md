@@ -92,10 +92,8 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
   `agent-autoreview-core.mjs`. Runtime hashes use `$script_source_dir`; suites
   use `$repo_root`. Core edits route both suites; missing pins freeze the stamp
   (ADR 0069).
-- **Review-eval pins.** `review/run-eval-source-snapshot.sh` joins the
-  four-source set in `docs/evals/review-skill.md`; update every listed consumer
-  together. The same runbook pins `review/install-review-eval-launchd.sh`,
-  which pins the launchd plist template and `review/run-eval.sh` paths.
+- **Review-eval pins.** Keep the source-snapshot consumers and the launchd
+  installer's template and runner pins in `docs/evals/review-skill.md` current.
 - **Navigation-eval self-pin.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names its implementation.
 - **Verification evidence.** Move
