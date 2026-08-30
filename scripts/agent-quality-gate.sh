@@ -3498,7 +3498,7 @@ drain_condemned_runs() {
       entry_token_value="$gate_condemned_record_token"
       entry_lifecycle_contract="$gate_condemned_record_lifecycle_contract"
       drain_condemned_run_commands \
-        "$entry_token_value" stale-run "" "" 0 0 \
+        "$entry_token_value" stale-run "" "" 0 \
         "$entry_lifecycle_contract"
       gate_lock_drained_tokens="${gate_lock_drained_tokens} ${entry_token_value}"
       # Removed only here, with every process confirmed gone, and by a name
@@ -5107,12 +5107,11 @@ drain_condemned_run_commands() {
   local seed_pgid="${3:-}"
   local seed_start="${4:-}"
   local quiet_seed_only="${5:-0}"
-  local announce_captured_non_seed="${6:-0}"
-  local lifecycle_contract="${7:-}"
+  local lifecycle_contract="${6:-}"
   local wrapper entry pid recorded current runtime_recorded runtime_current
   local signal_probe
   local alive alive_identities recycled unverified captured_file
-  local captured_pid capture_has_non_seed=0
+  local captured_pid
   local raw_capture captured_line captured_line_pid captured_line_start
   local captured_line_extra pending_pid="" pending_start=""
   local waited=0
@@ -5148,12 +5147,6 @@ drain_condemned_run_commands() {
   fi
   if [[ "$quiet_seed_only" != 0 && "$quiet_seed_only" != 1 ]]; then
     echo "error: mapped-command drain received an invalid quiet-sentinel flag." >&2
-    gate_drain_fail_for_context "$drain_context"
-    return $?
-  fi
-  if [[ "$announce_captured_non_seed" != 0 &&
-    "$announce_captured_non_seed" != 1 ]]; then
-    echo "error: mapped-command drain received an invalid early-announcement flag." >&2
     gate_drain_fail_for_context "$drain_context"
     return $?
   fi
@@ -5367,17 +5360,9 @@ EOF
     return $?
   fi
 
-  if [[ "$quiet_seed_only" -eq 1 && "$announce_captured_non_seed" -eq 1 ]]; then
-    while IFS='|' read -r captured_pid _; do
-      [[ -z "$captured_pid" || "$captured_pid" == "$seed_pgid" ]] && continue
-      capture_has_non_seed=1
-      break
-    done << EOF
-$gate_drain_capture
-EOF
-  fi
-  if [[ "$quiet_seed_only" -eq 0 || "$capture_has_non_seed" -eq 1 ||
-    "$gate_drain_scan_failed" -ne 0 ]]; then
+  # A parallel worker's durable capture can include a short-lived helper from
+  # its sentinel. Defer quiet-sentinel diagnostics to the live census below.
+  if [[ "$quiet_seed_only" -eq 0 ]]; then
     echo "$drain_start_message"
     announced=1
   fi
@@ -5396,17 +5381,6 @@ EOF
       capture_process_tree "$wrapper"
     done
     gate_drain_capture_seed_group "$token"
-    if [[ "$quiet_seed_only" -eq 1 &&
-      "$announce_captured_non_seed" -eq 1 && "$announced" -eq 0 ]]; then
-      while IFS='|' read -r captured_pid _; do
-        [[ -z "$captured_pid" || "$captured_pid" == "$seed_pgid" ]] && continue
-        echo "$drain_start_message"
-        announced=1
-        break
-      done << EOF
-$gate_drain_capture
-EOF
-    fi
     if ! gate_drain_test_refresh_barrier; then
       echo "error: the test-only drain refresh barrier did not release." >&2
       gate_drain_fail_for_context "$drain_context"
@@ -5677,7 +5651,6 @@ drain_completed_command_identity() {
   local condemned_dir=""
   local coordinator_active=0
   local legacy_lock_active=0
-  local announce_captured_non_seed=0
   [[ -n "$token" ]] || return 0
   gate_lifecycle_contract_is_supported "$lifecycle_contract" || {
     echo "error: completed-command drain has no supported lifecycle contract." >&2
@@ -5692,10 +5665,6 @@ drain_completed_command_identity() {
     -n "$gate_lock_token" ]]; then
     legacy_lock_active=1
   fi
-  if [[ "$coordinator_active" -eq 1 || "$legacy_lock_active" -eq 1 ]]; then
-    announce_captured_non_seed=1
-  fi
-
   if [[ "$legacy_lock_active" -eq 1 ]]; then
     # One assignment-only command closes the signal window between the two
     # guards: cleanup must preserve both the marker and the legacy owner until
@@ -5727,8 +5696,7 @@ drain_completed_command_identity() {
   # token must never race this one over its append-only capture file.
   drain_condemned_run_commands \
     "$token" active-command "$seed_pgid" "$seed_start" \
-    "$quiet_seed_only" "$announce_captured_non_seed" \
-    "$lifecycle_contract" || return $?
+    "$quiet_seed_only" "$lifecycle_contract" || return $?
   if [[ "$legacy_lock_active" -eq 1 ]]; then
     rm -f "${condemned_dir}/${token}" || return 2
   fi
@@ -11076,7 +11044,7 @@ run_mapped_entries_parallel() {
   # Locked workers retain the same identity for the launch handshake, which
   # stops work from starting before the parent records the worker.
   worker_parent_pid="$$"
-  worker_parent_start="$(gate_lock_process_start "$worker_parent_pid")"
+  worker_parent_start="$(gate_lock_process_runtime_start "$worker_parent_pid")"
   if [[ -z "$worker_parent_start" ]]; then
     if gate_lock_identity_source_available; then
       echo "error: could not identify the parallel worker parent." >&2
@@ -11479,8 +11447,31 @@ run_mapped_entries_parallel() {
         # watchdog children stay in that group instead of becoming new jobs.
         set +m
         parallel_worker_parent_is_live() {
-          local current_parent_start
+          local current_parent_start proc_stat proc_remainder proc_state proc_start
+          local -a proc_fields
           if [[ "$worker_parent_start" == "$gate_lock_identity_unavailable" ]]; then
+            kill -0 "$worker_parent_pid" 2>/dev/null
+            return $?
+          fi
+          # Avoid spawning ps helpers inside the worker group on Linux. A fast
+          # command can finish while one of those helpers is live, which makes
+          # the sentinel drain misclassify it as a command descendant.
+          if [[ "$worker_parent_start" == proc:* ]]; then
+            if IFS= read -r proc_stat 2>/dev/null \
+              < "/proc/${worker_parent_pid}/stat" &&
+              [[ "$proc_stat" == *") "* ]]; then
+              proc_remainder="${proc_stat##*) }"
+              read -r -a proc_fields <<< "$proc_remainder"
+              proc_state="${proc_fields[0]:-}"
+              proc_start="${proc_fields[19]:-}"
+              if [[ "$proc_start" =~ ^[0-9]+$ && -n "$proc_state" ]]; then
+                [[ "proc:${proc_start}" == "$worker_parent_start" &&
+                  "$proc_state" != Z* ]]
+                return $?
+              fi
+            fi
+            # One unreadable sample is not proof that the exact parent died.
+            # Keep the sentinel while the PID exists and retry on the next poll.
             kill -0 "$worker_parent_pid" 2>/dev/null
             return $?
           fi

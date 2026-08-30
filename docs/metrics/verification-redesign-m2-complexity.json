@@ -154,6 +154,24 @@
       "deletions": 8
     },
     {
+      "path": "scripts/agent-quality-gate.sh",
+      "category": "check",
+      "additions": 32,
+      "deletions": 41
+    },
+    {
+      "path": "scripts/agent-quality-gate.test.sh",
+      "category": "test",
+      "additions": 24,
+      "deletions": 18
+    },
+    {
+      "path": "scripts/gate/quality-gate-coordinator-support.sh",
+      "category": "check",
+      "additions": 2,
+      "deletions": 2
+    },
+    {
       "path": "scripts/lighthouse-config.test.mjs",
       "category": "test",
       "additions": 7,
@@ -214,14 +232,14 @@
       "net": 31
     },
     "check": {
-      "additions": 304,
-      "deletions": 40,
-      "net": 264
+      "additions": 338,
+      "deletions": 83,
+      "net": 255
     },
     "test": {
-      "additions": 450,
-      "deletions": 43,
-      "net": 407
+      "additions": 474,
+      "deletions": 61,
+      "net": 413
     },
     "doc": {
       "additions": 247,
