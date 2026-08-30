@@ -41,9 +41,10 @@ server ruleset or credential cutover is live.
 The routine Dependabot lane uses a third identity. Its dedicated
 repository-scoped merge App is the only automation bypass in the controlled
 lifecycle ruleset. #2137's default-branch `workflow_run` final writer reads the
-App ID and private key only from the two ciphertext-backed repository Actions
-secrets. Pull-request code, the local-agent broker, shared GitHub Actions App
-`15368`, and built-in Dependabot App `29110` must not receive that authority.
+App ID and private key only from the two ciphertext-backed `dependabot-merge`
+Environment secrets behind the exact `main` deployment policy. Pull-request
+code, the local-agent broker, shared GitHub Actions App `15368`, and built-in
+Dependabot App `29110` must not receive that authority.
 Reviewed source pins its exact Contents/write, Pull requests/write, and
 Workflows/write permissions and a distinct local-agent App ID. Workflows write
 is required for #2137's top-level workflow-update lane. Actions permission is

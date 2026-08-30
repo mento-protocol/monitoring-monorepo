@@ -464,8 +464,9 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    App Integration uses `exempt` mode for the #2137 routine lane. Shared GitHub
    Actions App `15368`, built-in Dependabot App `29110`, and the local-agent App
    are not bypass actors. Keep the human credential outside the agent OS. Keep
-   the dedicated App key only in its two ciphertext-backed repository Actions
-   secrets. Keep its repository permissions at exact Contents write, Pull
+   the dedicated App ID and private key only in the two ciphertext-backed
+   `dependabot-merge` Environment secrets behind the exact `main` deployment
+   policy. Keep its repository permissions at exact Contents write, Pull
    requests write, and Workflows write, with no Actions permission. Reviewed
    source pins a distinct local-agent App ID. Vercel
    Administration-plus-Contents remains a Free-plan residual
