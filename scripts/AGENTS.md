@@ -97,12 +97,9 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
   together.
 - **Navigation-eval self-pin.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names its implementation.
-- **Verification evidence.** Four root aliases pin
-  `scripts/docs/check-verification-redesign-evidence{,.test}.mjs`. The combined
-  evidence alias also pins
-  `scripts/docs/check-verification-redesign-evidence-source-patch.test.mjs`.
-  Move all three files together. `.gitattributes` pins the retained source patch
-  as exact bytes and treats its single-space context lines as patch data.
+- **Verification evidence.** Move
+  `scripts/docs/check-verification-redesign-evidence*.mjs` with the
+  `.gitattributes` patch rule.
 - **Sentry suite manifest.** `scripts/sentry/gate/sentry-suite-manifest.json`
   keys are exact repo-relative paths, reconciled against `findSentrySuites()`
   by set equality both ways. A moved or renamed suite fails the gate closed.
