@@ -3,7 +3,7 @@ title: Scripts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-29
+last_verified: 2026-08-30
 doc_type: agent-instructions
 scope: scripts
 review_interval_days: 90
@@ -117,6 +117,16 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 - **Trusted-validator probes.** `pr-description.yml` resolves the validator at
   the PR base-branch tip, not a PR snapshot. After a move, keep dual probes
   until the new path reaches the base (issue 1904; ADR 0064).
+- **PR validation boundary pins.** The `scripts` job in `ci.yml` and the
+  always-run `trunk.yml` job invoke
+  `workflows/check-pr-validation-boundary.test.mjs` by exact path. The Trunk
+  host covers edits to `.trunk/setup-ci` without widening CI path filters.
+  The checker follows local reusable workflows. It pins every pull request
+  write or credential job, its permission map, exact credential bindings,
+  environment, forwarded secrets, and reusable target. It scans all workflow
+  and local-action cache saves. It pins each retained restore, targeted
+  empty-restore cleanup, and required setup command. Move the test and its
+  paired implementation together. Update both steps.
 - **Production infrastructure contract pins.**
   `production-infra-identity-contract/workflow-inventory.mjs` pins exact script
   paths for the workflows it audits.

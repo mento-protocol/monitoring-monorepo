@@ -109,6 +109,13 @@ function findLcpResult(result, path) {
 }
 
 describe("Lighthouse route assertion matrix", () => {
+  it("keeps raw reports off public storage", () => {
+    assert.deepEqual(config.ci.upload, {
+      target: "filesystem",
+      outputDir: ".lighthouseci/reports",
+    });
+  });
+
   it("matches each audited route exactly once", () => {
     const paths = [
       ...ROOT_AND_POOLS_PATHS,

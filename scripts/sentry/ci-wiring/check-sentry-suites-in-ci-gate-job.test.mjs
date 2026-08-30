@@ -83,7 +83,10 @@ export const CANONICAL_JOB = {
     },
     {
       uses: "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
-      with: { "node-version-file": ".node-version" },
+      with: {
+        "node-version-file": ".node-version",
+        "package-manager-cache": false,
+      },
     },
     { name: "Run and assert the Sentry suites", run: GATE_COMMAND },
     // Steps 4-5 (issue #1779, PR C). Both run AFTER the gate: the install's
