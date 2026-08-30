@@ -91,6 +91,7 @@ function pullRequest(number, headRef, headSha, changedFiles, commitCount) {
     number,
     state: "open",
     draft: false,
+    body: "Bumps the routine GitHub Actions dependency group.",
     user: { login: "dependabot[bot]" },
     base: { ref: "main", repo: { full_name: expectedRepository } },
     head: {
@@ -517,6 +518,58 @@ assert(
 assert(
   !maintainerPushResult.merged,
   "a later maintainer head must not reach the exact-head merge",
+);
+
+const maintainerBodyFixture = scenario({
+  number: 1872,
+  runId: 31995129967,
+  headRef: pr1872HeadRef,
+  headSha: pr1872Head,
+  commits: [commit(pr1872Head)],
+  files: pr1872Files,
+});
+maintainerBodyFixture.prSequence = [
+  maintainerBodyFixture.pr,
+  {
+    ...maintainerBodyFixture.pr,
+    body: `${maintainerBodyFixture.pr.body}\n\nMaintainer changes`,
+  },
+];
+const maintainerBodyResult = runWriter(maintainerBodyFixture);
+assert.notEqual(
+  maintainerBodyResult.status,
+  0,
+  "a same-head maintainer-change body edit during required-check waiting must refuse",
+);
+assert(
+  maintainerBodyResult.stdout.includes(
+    "The current pull request reports maintainer changes.",
+  ),
+  `a current-body maintainer-change marker must fail the repeated PR proof:\n${maintainerBodyResult.stdout}\n${maintainerBodyResult.stderr}`,
+);
+assert(
+  !maintainerBodyResult.merged,
+  "a same-head maintainer-change body edit must not reach merge",
+);
+
+const lowercaseMaintainerBodyFixture = scenario({
+  number: 1872,
+  runId: 31995129967,
+  headRef: pr1872HeadRef,
+  headSha: pr1872Head,
+  commits: [commit(pr1872Head)],
+  files: pr1872Files,
+});
+lowercaseMaintainerBodyFixture.pr.body = `${lowercaseMaintainerBodyFixture.pr.body}\n\nmaintainer changes`;
+const lowercaseMaintainerBodyResult = runWriter(lowercaseMaintainerBodyFixture);
+assert.equal(
+  lowercaseMaintainerBodyResult.status,
+  0,
+  `the writer must mirror the pinned action's case-sensitive marker:\n${lowercaseMaintainerBodyResult.stdout}\n${lowercaseMaintainerBodyResult.stderr}`,
+);
+assert(
+  lowercaseMaintainerBodyResult.merged,
+  "a lowercase lookalike must not widen the pinned maintainer-change rule",
 );
 
 const changedClassifierFixture = scenario({

@@ -66,17 +66,20 @@ Use two workflows as one pinned security boundary:
    must have succeeded.
 3. The writer looks up exactly one open same-repository PR by owner and head
    branch. It binds the PR to the run head, `main`, Dependabot author, and
-   non-draft state. It reads every commit and file with pagination. Every
-   commit must be verified and Dependabot-authored. GitHub caps the pull-request
-   commit endpoint at 250, so the writer rejects a reported count above 250 and
-   requires the returned count to match exactly. Every file must be a modified
-   top-level workflow YAML file. The classifier and writer files are always
-   excluded from this lane.
+   non-draft state. The pinned metadata action derives `maintainer-changes`
+   from the exact case-sensitive `Maintainer changes` marker in the PR body.
+   The writer applies that same rule to the current authoritative PR body. It
+   reads every commit and file with pagination. Every commit must be verified
+   and Dependabot-authored. GitHub caps the pull-request commit endpoint at
+   250, so the writer rejects a reported count above 250 and requires the
+   returned count to match exactly. Every file must be a modified top-level
+   workflow YAML file. The classifier and writer files are always excluded
+   from this lane.
 4. The writer refuses when `main` has a merge queue. It waits for every
    required check with `gh pr checks --required --watch --fail-fast`, then
    verifies a non-empty passing required-only projection. The wait is an
    untrusted delay. The writer repeats the complete workflow, run, job, PR,
-   head, commit, file, and queue proof after it.
+   head, maintainer-change body, commit, file, and queue proof after it.
 5. The writer calls `PUT /repos/{owner}/{repo}/pulls/{number}/merge` with the
    verified head SHA and squash method. This synchronous endpoint cannot
    enqueue or create an auto-merge request. Branch-scoped concurrency cancels
@@ -89,12 +92,18 @@ workflows. The autofix trust checker continues to reject every
 `sentry-autofix/*` exclusion.
 
 The built-in `GITHUB_TOKEN` is an interim writer credential. Issue #2091 must
-migrate only the final REST write to a dedicated repository-scoped merge App
-token from IaC-owned repository Actions secrets before it activates the
-controlled main lifecycle ruleset. The restricted `GITHUB_TOKEN` must remain
-the reader for workflow, run, job, required-check, pull-request, commit, file,
-and queue evidence. The dedicated App token must reach only the final merge
-call. Activation must prove the App credentials are enabled, the writer
+first use Terraform to create a dedicated protected GitHub Environment whose
+deployment policy admits only the explicit `main` branch. The dedicated merge
+App credentials must exist only as Actions secrets scoped to that Environment.
+The operator must verify the live Environment protection and secret metadata
+before a workflow can reference it. Only then may a separate reviewed workflow
+change add the job's `environment:` reference and switch only the final REST
+write to the dedicated repository-scoped merge App token. Adding the reference
+before the protected Environment exists can auto-create an unprotected
+Environment, so this PR does not add it. The restricted `GITHUB_TOKEN` must
+remain the reader for workflow, run, job, required-check, pull-request, commit,
+file, and queue evidence. The dedicated App token must reach only the final
+merge call. Activation must prove the App credentials are enabled, the writer
 migration is verified, and every auto-merge request created by the prior writer
 is drained. The shared GitHub Actions App and local agent App must not receive
 this ruleset exemption.
@@ -131,8 +140,8 @@ this ruleset exemption.
   the version update. Security updates bypass cooldown and remain outside this
   group.
 - The exact-head REST request rejects a later push. The complete proof repeated
-  after required-check waiting also rejects changed classifier, PR, commit, or
-  file state before the write.
+  after required-check waiting also rejects changed classifier, PR, commit,
+  file, or maintainer-change body state before the write.
 - The writer refuses while `main` has a merge queue. A future queue rollout
   must keep this lane disabled until a new reviewed design defines its queue
   behavior. The final endpoint cannot enqueue, so a queue activated after the

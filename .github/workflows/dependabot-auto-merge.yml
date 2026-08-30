@@ -7,8 +7,9 @@ name: Dependabot auto-merge
 # artifacts or caches, or executes pull-request content.
 #
 # The writer waits for every required check, repeats every classifier and pull
-# request proof, then calls the synchronous exact-head REST merge endpoint. The
-# endpoint cannot enqueue or leave a standing auto-merge request.
+# request proof, including the pinned metadata action's current-body
+# maintainer-change rule, then calls the synchronous exact-head REST merge
+# endpoint. The endpoint cannot enqueue or leave a standing auto-merge request.
 #
 # The interim GITHUB_TOKEN merge does not emit push-triggered workflows. Issue
 # #2091 must move only the final write to the dedicated repository-scoped merge
@@ -64,6 +65,10 @@ jobs:
           readonly CANDIDATE_PATH='.github/workflows/dependabot-auto-merge-candidate.yml'
           readonly CANDIDATE_NAME='Dependabot auto-merge candidate'
           readonly WRITER_PATH='.github/workflows/dependabot-auto-merge.yml'
+          # dependabot/fetch-metadata at
+          # 25dd0e34f4fe68f24cc83900b1fe3fe149efef98 derives
+          # maintainer-changes from this exact case-sensitive PR-body marker.
+          readonly MAINTAINER_CHANGE_MARKER='Maintainer changes'
           EXPECTED_HEAD=''
           EXPECTED_HEAD_REF=''
           PR_NUMBER=''
@@ -237,6 +242,14 @@ jobs:
               echo '::error::The current pull request does not match the verified run.'
               exit 1
             fi
+            if ! jq -e \
+              --arg marker "$MAINTAINER_CHANGE_MARKER" \
+              '(.body | type) == "string" and
+               (.body | contains($marker) | not)' \
+              <<< "$pr_json" >/dev/null; then
+              echo '::error::The current pull request reports maintainer changes.'
+              exit 1
+            fi
             if ! expected_commit_count=$(jq -er '.commits' <<< "$pr_json"); then
               echo '::error::The pull request commit count is invalid.'
               exit 1
@@ -336,8 +349,9 @@ jobs:
           fi
 
           # The wait is an untrusted delay. Repeat the complete workflow, run,
-          # job, PR, head, commit, file, and queue proof after it. The exact-head
-          # REST request below cannot accept a later push or create queued state.
+          # job, PR, head, maintainer-change body, commit, file, and queue proof
+          # after it. The exact-head REST request below cannot accept a later push
+          # or create queued state.
           verify_authoritative_state
 
           if ! MERGE_JSON=$(GH_TOKEN="$FINAL_MERGE_TOKEN" gh api --method PUT \

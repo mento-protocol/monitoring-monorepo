@@ -154,12 +154,13 @@ The lane has two pinned workflows. The `pull_request` classifier has read-only
 permissions. It verifies the event and pinned Dependabot metadata. The
 default-branch `workflow_run` writer treats completion as an untrusted signal.
 It re-reads the exact workflow and run, first-attempt job and step results,
-current PR and head, every commit, every changed file, and the base's merge
-queue. It requires one open same-repository PR, verified Dependabot-authored
-commits, and only modified top-level workflow YAML. It always rejects changes
-to either trust workflow. It waits for every required check and verifies a
-non-empty passing required-only projection. It then repeats the complete
-workflow, run, job, PR, head, commit, file, and queue proof. The final write is
+current PR and head, the current PR body's exact `Maintainer changes` marker,
+every commit, every changed file, and the base's merge queue. It requires one
+open same-repository PR, verified Dependabot-authored commits, and only
+modified top-level workflow YAML. It always rejects changes to either trust
+workflow. It waits for every required check and verifies a non-empty passing
+required-only projection. It then repeats the complete workflow, run, job, PR,
+head, maintainer-change body, commit, file, and queue proof. The final write is
 a synchronous REST merge with the exact head SHA and squash method. It cannot
 enqueue or create an auto-merge request. Neither workflow checks out or
 executes PR code. The writer does not read upstream outputs, artifacts, or
@@ -178,8 +179,14 @@ has no enqueue behavior, so a queue activated after the last read cannot turn
 the write into deferred queue state. A future queue rollout must still keep
 this lane disabled until a reviewed design defines its queue behavior. Before
 issue #2091 activates its lifecycle ruleset, it must migrate only the final
-write from `GITHUB_TOKEN` to a dedicated repository-scoped merge App token from
-IaC-owned repository Actions secrets. The restricted `GITHUB_TOKEN` remains
+write from `GITHUB_TOKEN` to a dedicated repository-scoped merge App token.
+First use Terraform to create and verify a dedicated protected GitHub
+Environment whose deployment policy admits only explicit `main`. Store the App
+credentials only as Actions secrets scoped to that Environment. Only after the
+live protection and secret metadata pass verification may a separate reviewed
+workflow change add the writer job's `environment:` reference and switch the
+final token. Do not add the workflow reference first because GitHub can
+auto-create an unprotected Environment. The restricted `GITHUB_TOKEN` remains
 the reader for authoritative Actions and pull-request state. Activation must
 also prove the App credentials are enabled, the migration is verified, and
 auto-merge requests created by the prior writer are drained. Do not give the
