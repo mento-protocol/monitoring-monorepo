@@ -156,8 +156,8 @@
     {
       "path": "scripts/agent-quality-gate.sh",
       "category": "check",
-      "additions": 32,
-      "deletions": 41
+      "additions": 41,
+      "deletions": 46
     },
     {
       "path": "scripts/agent-quality-gate.test.sh",
@@ -232,9 +232,9 @@
       "net": 31
     },
     "check": {
-      "additions": 338,
-      "deletions": 83,
-      "net": 255
+      "additions": 347,
+      "deletions": 88,
+      "net": 259
     },
     "test": {
       "additions": 474,

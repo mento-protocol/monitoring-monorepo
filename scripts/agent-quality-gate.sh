@@ -5381,11 +5381,6 @@ EOF
       capture_process_tree "$wrapper"
     done
     gate_drain_capture_seed_group "$token"
-    if ! gate_drain_test_refresh_barrier; then
-      echo "error: the test-only drain refresh barrier did not release." >&2
-      gate_drain_fail_for_context "$drain_context"
-      return $?
-    fi
     while IFS='|' read -r pid recorded runtime_recorded; do
       [[ -n "$pid" ]] || continue
       # Only signal something that reads as a PID. Appends are single short
@@ -5510,6 +5505,15 @@ EOF
         echo "$drain_start_message"
         announced=1
       fi
+    fi
+
+    # The crash fixture pauses after the durable refresh and live census but
+    # before any signal. This ordering preserves the liveness diagnostic
+    # before the recovery hand-off.
+    if ! gate_drain_test_refresh_barrier; then
+      echo "error: the test-only drain refresh barrier did not release." >&2
+      gate_drain_fail_for_context "$drain_context"
+      return $?
     fi
 
     # Unverifiable entries keep the drain open even though nothing is sent to
