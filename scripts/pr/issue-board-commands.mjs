@@ -1,57 +1,118 @@
 /**
- * Issue-board commands: claim, review, release, and backfill.
+ * Issue-board review, backfill, and result-rendering commands.
  *
- * Each command drives one label transition, projects it onto the workboard,
- * and posts the matching issue comment. Label edits happen first and roll back
- * when the project write fails, so labels stay authoritative.
+ * Claim and release transactions live in their scoped modules. Review uses the
+ * label and ownership transition. Project Status remains human-owned. Backfill
+ * uses the trusted comment parser.
  */
 
 import {
-  chooseUntriedCandidate,
-  isClaimable,
-  isRecoverableClaimRaceError,
-  isReleasable,
+  exactQueueState,
+  IssueOwnershipConflictError,
   isReviewable,
   labelNames,
-  shouldRollbackFailedTransition,
-  stateFromLabels,
+  splitRepo,
 } from "./issue-board-state.mjs";
 import {
-  ensureProjectItem,
   findIssueProjectItem,
   getProject,
-  hasDifferentClaimId,
   readBackfillProjectFields,
   requireBackfillFields,
-  requireClaimIdField,
-  updateProjectFields,
-  verifyClaimOwnership,
+  updateProjectMetadata as writeProjectMetadata,
   writeBackfillProjectFields,
 } from "./issue-board-projects.mjs";
 import {
-  ensurePrExists,
+  assertExactClaimOwnership,
+  readClaimOwnership,
+  requireOwnershipFields,
+  writeProjectOwnershipMetadata,
+} from "./issue-board-ownership.mjs";
+import {
+  IssueOwnerMutationCapabilityError,
+  withIssueMutationLock,
+} from "./issue-board-lock.mjs";
+import {
+  commentOnIssue,
   editIssueLabels,
-  getGitBranch,
   getIssue,
+  getPullRequest,
   getPrIssues,
   listIssueComments,
-  listReadyIssues,
-  runGh,
-  sleep,
+  listOpenPullRequestsForBranch,
 } from "./issue-board-transport.mjs";
 import { backfillIssue } from "./issue-board-backfill.mjs";
+import { release } from "./issue-board-release.mjs";
+import { buildClaimComment, claim } from "./issue-board-transactions.mjs";
 
-const CLAIM_SETTLE_MS = 1500;
+export { buildClaimComment, claim, release };
 
-export function buildClaimComment(metadata, issue) {
-  const lines = [
-    `Agent claim: ${metadata.agent} claimed #${issue.number} for implementation.`,
-    "",
-    `Claim ID: ${metadata.claimId}`,
-  ];
-  if (metadata.branch) lines.push(`Branch: ${metadata.branch}`);
-  lines.push(`Claimed at: ${metadata.claimedAt}`);
-  return lines.join("\n");
+function sameOwnership(left, right) {
+  return ["claimId", "agent", "branch", "claimedAt", "pr"].every(
+    (field) => left[field] === right[field],
+  );
+}
+
+const EMPTY_OWNERSHIP = Object.freeze({
+  claimId: null,
+  agent: null,
+  branch: null,
+  claimedAt: null,
+  pr: null,
+});
+
+function isReviewState(issue) {
+  const labels = labelNames(issue);
+  return (
+    String(issue.state ?? "").toUpperCase() === "OPEN" &&
+    labels.has("in-pr") &&
+    !labels.has("agent-active") &&
+    !labels.has("agent-ready") &&
+    !labels.has("needs-grooming")
+  );
+}
+
+function validateReviewPr(options, pr) {
+  const canonicalRepo = splitRepo(options.repo).nameWithOwner.toLowerCase();
+  if (
+    pr.state !== "OPEN" ||
+    !pr.headRefName ||
+    pr.headRepository?.nameWithOwner?.toLowerCase() !== canonicalRepo
+  ) {
+    throw new Error(
+      `PR #${options.pr} must be open from ${options.repo} with a named head branch`,
+    );
+  }
+  return pr;
+}
+
+async function assertReviewProof(
+  options,
+  issueNumber,
+  previousOwnership,
+  targetBranch,
+  dependencies,
+) {
+  const pr = validateReviewPr(
+    options,
+    await dependencies.getPullRequest(options, options.pr),
+  );
+  if (pr.headRefName !== targetBranch) {
+    throw new Error(
+      `PR #${options.pr} head changed from ${targetBranch} to ${pr.headRefName}`,
+    );
+  }
+  if (options.rebindBranch) {
+    const oldBranchPrs = await dependencies.listOpenPullRequestsForBranch(
+      options,
+      previousOwnership.branch,
+    );
+    if (oldBranchPrs.length > 0) {
+      throw new Error(
+        `Issue #${issueNumber} cannot rebind while claimed branch ${previousOwnership.branch} has open PR #${oldBranchPrs[0].number}`,
+      );
+    }
+  }
+  return pr;
 }
 
 function buildReviewComment(metadata, issue) {
@@ -62,175 +123,338 @@ function buildReviewComment(metadata, issue) {
   return lines.join("\n");
 }
 
-function buildReleaseComment(metadata, issue, state) {
-  const label = state === "grooming" ? "needs-grooming" : "agent-ready";
-  return `Released agent claim: #${issue.number} is back in ${label}.`;
-}
-
-async function commentOnIssue(options, issue, body) {
-  if (!options.comment) return;
-  await runGh(
-    [
-      "issue",
-      "comment",
-      String(issue.number),
-      "-R",
-      options.repo,
-      "--body",
-      body,
-    ],
-    { dryRun: options.dryRun, mutates: true },
+async function restoreFailedReview(
+  options,
+  project,
+  issue,
+  itemId,
+  previousOwnership,
+  nextOwnership,
+  dependencies,
+) {
+  const currentIssue = await dependencies.getIssue(options, issue.number);
+  const currentState = exactQueueState(currentIssue);
+  if (!currentState || currentState === "ready") {
+    throw new Error(
+      `Issue #${issue.number} has no exact non-ready state for review recovery`,
+    );
+  }
+  const currentOwnership = await dependencies.readClaimOwnership(
+    options,
+    project,
+    itemId,
   );
+  const isPreviousEndpoint =
+    currentState === "active" &&
+    sameOwnership(currentOwnership, previousOwnership);
+  const isNextEndpoint =
+    currentState === "review" && sameOwnership(currentOwnership, nextOwnership);
+  const isExternalState =
+    currentState === "grooming" &&
+    sameOwnership(currentOwnership, EMPTY_OWNERSHIP);
+  if (!isPreviousEndpoint && !isNextEndpoint && !isExternalState) {
+    throw new IssueOwnershipConflictError(
+      `Issue #${issue.number} review recovery is ambiguous at ${currentState} with partial or changed ownership`,
+      {
+        issue: issue.number,
+        expected: [previousOwnership, nextOwnership],
+        actual: currentOwnership,
+      },
+    );
+  }
+  if (isNextEndpoint) {
+    await assertReviewProof(
+      options,
+      issue.number,
+      previousOwnership,
+      nextOwnership.branch,
+      dependencies,
+    );
+  }
+  const verifiedIssue = await dependencies.getIssue(options, issue.number);
+  const verifiedOwnership = await dependencies.readClaimOwnership(
+    options,
+    project,
+    itemId,
+  );
+  if (
+    exactQueueState(verifiedIssue) !== currentState ||
+    !sameOwnership(verifiedOwnership, currentOwnership)
+  ) {
+    throw new Error(
+      `Issue #${issue.number} review recovery state changed during verification`,
+    );
+  }
+  if (isNextEndpoint) {
+    await assertReviewProof(
+      options,
+      issue.number,
+      previousOwnership,
+      nextOwnership.branch,
+      dependencies,
+    );
+  }
+  return { state: currentState, preserved: !isPreviousEndpoint };
 }
 
-function claimIdFor(options, now = new Date()) {
-  const stamp = now.toISOString().replace(/[-:.]/g, "").slice(0, 15);
-  const suffix = Math.random().toString(36).slice(2, 8);
-  return `${options.agent}-${stamp}-${suffix}`;
-}
-
-async function transitionIssue(options, project, issue, state, metadata) {
-  const previousState = stateFromLabels(issue);
-  await editIssueLabels(options, issue, state);
+async function reviewLocked(
+  options,
+  project,
+  number,
+  preview,
+  metadata,
+  dependencies,
+  lease,
+  capability,
+) {
+  let mutationAttempted = false;
+  let issue = preview.issue;
   try {
-    const itemId = await ensureProjectItem(options, project, issue);
-    await updateProjectFields(options, project, itemId, state, metadata);
-    return itemId;
-  } catch (err) {
-    const observedDifferentClaim =
-      !options.dryRun && state === "active"
-        ? await hasDifferentClaimId(options, project, issue, metadata.claimId)
-        : false;
+    issue = await dependencies.getIssue(options, number);
+    if (!isReviewable(issue)) {
+      throw new Error(
+        `Issue #${issue.number} is not reviewable; expected open agent-active without agent-ready/in-pr`,
+      );
+    }
+    const itemId = await dependencies.findIssueProjectItem(
+      options,
+      issue,
+      project,
+    );
+    const ownership = itemId
+      ? await dependencies.readClaimOwnership(options, project, itemId)
+      : null;
     if (
-      !options.dryRun &&
-      shouldRollbackFailedTransition(
-        state,
-        previousState,
-        observedDifferentClaim,
-      )
+      itemId !== preview.itemId ||
+      !ownership ||
+      !sameOwnership(ownership, preview.ownership)
     ) {
-      const current = await getIssue(options, issue.number);
-      await editIssueLabels(options, current, previousState);
+      throw new IssueOwnershipConflictError(
+        `Issue #${number} ownership changed before review`,
+        {
+          issue: number,
+          expected: preview.ownership,
+          actual: ownership,
+        },
+      );
+    }
+    await assertReviewProof(
+      options,
+      number,
+      preview.ownership,
+      metadata.branch,
+      dependencies,
+    );
+
+    const currentIssue = await dependencies.getIssue(options, number);
+    const currentItemId = await dependencies.findIssueProjectItem(
+      options,
+      currentIssue,
+      project,
+    );
+    const currentOwnership = currentItemId
+      ? await dependencies.readClaimOwnership(options, project, currentItemId)
+      : null;
+    if (
+      !isReviewable(currentIssue) ||
+      currentItemId !== itemId ||
+      !currentOwnership ||
+      !sameOwnership(currentOwnership, preview.ownership)
+    ) {
+      throw new IssueOwnershipConflictError(
+        `Issue #${number} changed before review mutation`,
+        {
+          issue: number,
+          expected: preview.ownership,
+          actual: currentOwnership,
+        },
+      );
+    }
+    await assertReviewProof(
+      options,
+      number,
+      preview.ownership,
+      metadata.branch,
+      dependencies,
+    );
+
+    mutationAttempted = true;
+    await dependencies.editIssueLabels(options, currentIssue, "review");
+    await assertReviewProof(
+      options,
+      number,
+      preview.ownership,
+      metadata.branch,
+      dependencies,
+    );
+    const ownershipBeforeWrite = await dependencies.readClaimOwnership(
+      options,
+      project,
+      itemId,
+    );
+    assertExactClaimOwnership(
+      currentIssue,
+      ownershipBeforeWrite,
+      preview.ownership,
+      "before review metadata write",
+    );
+    await writeProjectOwnershipMetadata(
+      options,
+      project,
+      itemId,
+      currentIssue,
+      "review",
+      ownershipBeforeWrite,
+      { branch: metadata.branch, pr: metadata.pr },
+      {
+        readOwnership: dependencies.readClaimOwnership,
+        updateMetadata: dependencies.updateProjectMetadata,
+      },
+      capability,
+      "review",
+    );
+    await assertReviewProof(
+      options,
+      number,
+      preview.ownership,
+      metadata.branch,
+      dependencies,
+    );
+
+    if (options.dryRun) {
+      return { number: issue.number, title: issue.title, state: "review" };
+    }
+    const verifiedOwnership = await dependencies.readClaimOwnership(
+      options,
+      project,
+      itemId,
+    );
+    const verifiedIssue = await dependencies.getIssue(options, number);
+    await assertReviewProof(
+      options,
+      number,
+      preview.ownership,
+      metadata.branch,
+      dependencies,
+    );
+    if (!sameOwnership(verifiedOwnership, metadata)) {
+      throw new IssueOwnershipConflictError(
+        `Issue #${number} review ownership verification failed`,
+        {
+          issue: number,
+          expected: metadata,
+          actual: verifiedOwnership,
+        },
+      );
+    }
+    if (!isReviewState(verifiedIssue)) {
+      throw new Error(
+        `Issue #${number} did not retain the exact in-pr review state`,
+      );
+    }
+    try {
+      await dependencies.commentOnIssue(
+        options,
+        verifiedIssue,
+        buildReviewComment(metadata, verifiedIssue),
+      );
+    } catch (commentError) {
+      const message =
+        commentError instanceof Error
+          ? commentError.message
+          : String(commentError);
+      process.stderr.write(
+        `Issue #${issue.number} moved to review, but its review comment failed: ${message}\n`,
+      );
+    }
+    return {
+      number: verifiedIssue.number,
+      title: verifiedIssue.title,
+      state: "review",
+    };
+  } catch (err) {
+    if (err instanceof IssueOwnerMutationCapabilityError) throw err;
+    if (!mutationAttempted) {
+      lease.markSafeToUnlock("review rejected before mutation");
+      throw err;
+    }
+    try {
+      const recovery = await restoreFailedReview(
+        options,
+        project,
+        issue,
+        preview.itemId,
+        preview.ownership,
+        metadata,
+        dependencies,
+      );
+      lease.markSafeToUnlock(
+        recovery.preserved
+          ? recovery.state === "review"
+            ? "applied review state preserved"
+            : `newer ${recovery.state} review state preserved`
+          : "review pre-state verified",
+      );
+    } catch (compensationError) {
+      const message = err instanceof Error ? err.message : String(err);
+      const compensationMessage =
+        compensationError instanceof Error
+          ? compensationError.message
+          : String(compensationError);
+      throw new AggregateError(
+        [err, compensationError],
+        `${message}\nFailed to establish a stable non-ready recovery state after review: ${compensationMessage}`,
+        { cause: compensationError },
+      );
     }
     throw err;
   }
 }
 
-function claimMetadata(options, branch) {
-  return {
-    agent: options.agent,
-    branch: branch || undefined,
-    claimId: claimIdFor(options),
-    claimedAt: new Date().toISOString(),
-    pr: options.pr ?? null,
-  };
-}
-
-async function claimIssue(options, project, issue, metadata) {
-  requireClaimIdField(project);
-  if (!isClaimable(issue)) {
-    throw new Error(
-      `Issue #${issue.number} is not claimable; expected open agent-ready without agent-active/in-pr/needs-grooming`,
-    );
-  }
-  const itemId = await transitionIssue(
-    options,
-    project,
-    issue,
-    "active",
-    metadata,
-  );
-  if (options.dryRun) {
-    await commentOnIssue(options, issue, buildClaimComment(metadata, issue));
-    return { number: issue.number, title: issue.title, state: "active" };
-  }
-  await sleep(CLAIM_SETTLE_MS);
-  await verifyClaimOwnership(options, project, itemId, issue, metadata);
-  const verified = await getIssue(options, issue.number);
-  if (
-    String(verified.state ?? "").toUpperCase() !== "OPEN" ||
-    !labelNames(verified).has("agent-active")
-  ) {
-    throw new Error(
-      `Issue #${issue.number} did not retain agent-active on an open issue`,
-    );
-  }
-  if (!isReviewable(verified)) {
-    throw new Error(`Issue #${issue.number} has conflicting state labels`);
-  }
-  await commentOnIssue(
-    options,
-    verified,
-    buildClaimComment(metadata, verified),
-  );
-  return { number: verified.number, title: verified.title, state: "active" };
-}
-
-export async function claim(options) {
-  const branch = options.branch || (await getGitBranch());
-  const project = await getProject(options);
-  const results = [];
-  if (options.issues.length > 0) {
-    for (const number of options.issues) {
-      const issue = await getIssue(options, number);
-      results.push(
-        await claimIssue(
-          options,
-          project,
-          issue,
-          claimMetadata(options, branch),
-        ),
-      );
-    }
-    return results;
-  }
-
-  const triedNumbers = new Set();
-  const candidateLimit = Math.min(Math.max(options.count * 5, 10), 100);
-  while (results.length < options.count) {
-    const candidates = await listReadyIssues({
-      ...options,
-      count: candidateLimit,
-    });
-    const candidate = chooseUntriedCandidate(candidates, triedNumbers);
-    if (!candidate) break;
-    triedNumbers.add(candidate.number);
-    const issue = await getIssue(options, candidate.number);
-    if (!isClaimable(issue)) continue;
-    try {
-      results.push(
-        await claimIssue(
-          options,
-          project,
-          issue,
-          claimMetadata(options, branch),
-        ),
-      );
-    } catch (err) {
-      if (!isRecoverableClaimRaceError(err)) throw err;
-      const message = err instanceof Error ? err.message : String(err);
-      process.stderr.write(`Skipped #${issue.number}: ${message}\n`);
-    }
-  }
-
-  if (results.length === 0) {
-    throw new Error("No claimable agent-ready issues found");
-  }
-  return results;
-}
-
-export async function review(options) {
+export async function review(options, overrides = {}) {
   if (!options.pr) {
     throw new Error(
       "review requires --pr so reviewed issues are linked to a pull request",
     );
   }
-  if (options.issues.length > 0) {
-    await ensurePrExists(options);
+  if (options.rebindBranch && !options.claimId) {
+    throw new Error("--rebind-branch requires --claim-id");
   }
-  const project = await getProject(options);
+  const dependencies = {
+    commentOnIssue: overrides.commentOnIssue ?? commentOnIssue,
+    editIssueLabels: overrides.editIssueLabels ?? editIssueLabels,
+    findIssueProjectItem:
+      overrides.findIssueProjectItem ?? findIssueProjectItem,
+    getIssue: overrides.getIssue ?? getIssue,
+    getPullRequest: overrides.getPullRequest ?? getPullRequest,
+    getPrIssues: overrides.getPrIssues ?? getPrIssues,
+    getProject: overrides.getProject ?? getProject,
+    listOpenPullRequestsForBranch:
+      overrides.listOpenPullRequestsForBranch ?? listOpenPullRequestsForBranch,
+    readClaimOwnership: overrides.readClaimOwnership ?? readClaimOwnership,
+    updateProjectMetadata:
+      overrides.updateProjectMetadata ??
+      ((
+        options,
+        project,
+        itemId,
+        _state,
+        metadata,
+        capability,
+        issue,
+        operation,
+      ) =>
+        writeProjectMetadata(capability, options, project, itemId, metadata, {
+          issueNumber: issue.number,
+          operation,
+        })),
+    withIssueMutationLock:
+      overrides.withIssueMutationLock ?? withIssueMutationLock,
+  };
+  const project = await dependencies.getProject(options);
+  requireOwnershipFields(project);
   const inferredIssues =
-    options.issues.length > 0 ? [] : await getPrIssues(options);
+    options.issues.length > 0 ? [] : await dependencies.getPrIssues(options);
   const issueNumbers =
     options.issues.length > 0 ? options.issues : inferredIssues;
   if (issueNumbers.length === 0) {
@@ -238,83 +462,155 @@ export async function review(options) {
       "review requires --issue/--issues or a PR with closing issues",
     );
   }
-  const branch = options.branch || (await getGitBranch());
-  const metadata = {
-    agent: options.agent,
-    branch: branch || undefined,
-    pr: options.pr,
-  };
   const results = [];
   for (const number of issueNumbers) {
-    const issue = await getIssue(options, number);
-    if (!isReviewable(issue)) {
-      throw new Error(
-        `Issue #${issue.number} is not reviewable; expected open agent-active without agent-ready/in-pr`,
-      );
+    const previewIssue = await dependencies.getIssue(options, number);
+    const previewItemId = await dependencies.findIssueProjectItem(
+      options,
+      previewIssue,
+      project,
+    );
+    if (!previewItemId) {
+      throw new Error(`Issue #${number} has no Project ownership item`);
     }
-    await transitionIssue(options, project, issue, "review", metadata);
-    await commentOnIssue(options, issue, buildReviewComment(metadata, issue));
-    results.push({ number: issue.number, title: issue.title, state: "review" });
-  }
-  return results;
-}
-
-export async function release(options) {
-  if (options.issues.length === 0) {
-    throw new Error("release requires --issue/--issues");
-  }
-  const project = await getProject(options);
-  const metadata = {
-    agent: null,
-    branch: null,
-    claimId: null,
-    claimedAt: null,
-    pr: null,
-  };
-  const results = [];
-  for (const number of options.issues) {
-    const issue = await getIssue(options, number);
-    if (!isReleasable(issue)) {
-      throw new Error(
-        `Issue #${issue.number} is not releasable; expected open agent-active or in-pr without agent-ready/needs-grooming`,
-      );
-    }
-    await transitionIssue(
+    const previewOwnership = await dependencies.readClaimOwnership(
       options,
       project,
-      issue,
-      options.releaseState,
-      metadata,
+      previewItemId,
     );
-    await commentOnIssue(
+    if (
+      !previewOwnership.claimId ||
+      !previewOwnership.agent ||
+      !previewOwnership.branch
+    ) {
+      throw new Error(
+        `Issue #${number} review requires durable Claim ID, Agent, and Branch ownership`,
+      );
+    }
+    if (options.rebindBranch && previewOwnership.claimId !== options.claimId) {
+      throw new IssueOwnershipConflictError(
+        `Issue #${number} is owned by project Claim ID ${previewOwnership.claimId} instead of ${options.claimId}`,
+        {
+          issue: number,
+          expectedClaimId: options.claimId,
+          actualClaimId: previewOwnership.claimId,
+        },
+      );
+    }
+    const previewPr = validateReviewPr(
       options,
-      issue,
-      buildReleaseComment(metadata, issue, options.releaseState),
+      await dependencies.getPullRequest(options, options.pr),
     );
-    results.push({
-      number: issue.number,
-      title: issue.title,
-      state: options.releaseState,
-    });
+    if (
+      !options.rebindBranch &&
+      previewPr.headRefName !== previewOwnership.branch
+    ) {
+      throw new Error(
+        `PR #${options.pr} head ${previewPr.headRefName} does not match claimed branch ${previewOwnership.branch}; use --claim-id ${previewOwnership.claimId} --rebind-branch only after proving the branch move`,
+      );
+    }
+    if (
+      options.rebindBranch &&
+      previewPr.headRefName === previewOwnership.branch
+    ) {
+      throw new Error(
+        `Issue #${number} already owns PR head branch ${previewOwnership.branch}; --rebind-branch requires a different proven PR head`,
+      );
+    }
+    const metadata = {
+      agent: previewOwnership.agent,
+      branch: previewPr.headRefName,
+      claimId: previewOwnership.claimId,
+      claimedAt: previewOwnership.claimedAt,
+      pr: options.pr,
+    };
+    results.push(
+      await dependencies.withIssueMutationLock(
+        options,
+        number,
+        {
+          operation: "review",
+          projectId: project.id,
+          ...metadata,
+          previousBranch: options.rebindBranch ? previewOwnership.branch : null,
+          previousPr: options.rebindBranch ? previewOwnership.pr : null,
+        },
+        (lease, capability) =>
+          reviewLocked(
+            options,
+            project,
+            number,
+            {
+              issue: previewIssue,
+              itemId: previewItemId,
+              ownership: previewOwnership,
+            },
+            metadata,
+            dependencies,
+            lease,
+            capability,
+          ),
+      ),
+    );
   }
   return results;
 }
 
 export async function backfill(options, dependencies = {}) {
+  const operations = {
+    getIssue: dependencies.getIssue ?? getIssue,
+    getProject: dependencies.getProject ?? getProject,
+    findIssueProjectItem:
+      dependencies.findIssueProjectItem ?? findIssueProjectItem,
+    listIssueComments: dependencies.listIssueComments ?? listIssueComments,
+    requireBackfillFields:
+      dependencies.requireBackfillFields ?? requireBackfillFields,
+    readBackfillProjectFields:
+      dependencies.readBackfillProjectFields ?? readBackfillProjectFields,
+    readClaimOwnership: dependencies.readClaimOwnership ?? readClaimOwnership,
+    writeBackfillProjectFields:
+      dependencies.writeBackfillProjectFields ??
+      ((options, project, itemId, writes, capability, issue) =>
+        writeBackfillProjectFields(
+          capability,
+          options,
+          project,
+          itemId,
+          writes,
+          { issueNumber: issue.number, operation: "backfill" },
+        )),
+  };
+  const lock = dependencies.withIssueMutationLock ?? withIssueMutationLock;
+  const previewIssue = await operations.getIssue(options, options.issues[0]);
+  const previewProject = await operations.getProject(options);
+  const previewItemId = await operations.findIssueProjectItem(
+    options,
+    previewIssue,
+    previewProject,
+  );
+  const ownership = previewItemId
+    ? await operations.readClaimOwnership(
+        options,
+        previewProject,
+        previewItemId,
+      )
+    : null;
   return [
-    await backfillIssue(options, {
-      getIssue: dependencies.getIssue ?? getIssue,
-      getProject: dependencies.getProject ?? getProject,
-      findIssueProjectItem:
-        dependencies.findIssueProjectItem ?? findIssueProjectItem,
-      listIssueComments: dependencies.listIssueComments ?? listIssueComments,
-      requireBackfillFields:
-        dependencies.requireBackfillFields ?? requireBackfillFields,
-      readBackfillProjectFields:
-        dependencies.readBackfillProjectFields ?? readBackfillProjectFields,
-      writeBackfillProjectFields:
-        dependencies.writeBackfillProjectFields ?? writeBackfillProjectFields,
-    }),
+    await lock(
+      options,
+      options.issues[0],
+      {
+        operation: "backfill",
+        projectId: previewProject.id,
+        agent: ownership?.agent ?? options.agent,
+        claimId: ownership?.claimId ?? null,
+        branch: ownership?.branch ?? null,
+        claimedAt: ownership?.claimedAt ?? null,
+        pr: ownership?.pr ?? null,
+      },
+      (lease, capability) =>
+        backfillIssue(options, operations, lease, capability),
+    ),
   ];
 }
 
@@ -325,7 +621,12 @@ export function renderResults(results) {
       const writes = issue.writes
         ?.map((write) => `${write.field}=${write.value}`)
         .join(", ");
-      return `#${issue.number} ${issue.state}: ${issue.title}${writes ? ` (${writes})` : ""}`;
+      const details = [
+        writes,
+        issue.claimId ? `Claim ID: ${issue.claimId}` : null,
+        issue.recovered ? "recovered" : null,
+      ].filter(Boolean);
+      return `#${issue.number} ${issue.state}: ${issue.title}${details.length > 0 ? ` (${details.join(", ")})` : ""}`;
     })
     .join("\n");
 }

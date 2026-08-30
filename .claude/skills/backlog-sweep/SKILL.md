@@ -5,7 +5,7 @@ title: Backlog Sweep Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-27
+last_verified: 2026-08-28
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -208,37 +208,72 @@ Work the batch **sequentially**: claim one issue, brief its worker, then move
 to the next. Claiming ahead of the briefing would park the whole batch in
 `agent-active` while only one worker exists to move it.
 
-**Re-read eligibility immediately before each claim.** Claims are sequential,
-so minutes pass between the ranking that selected the last issue and the moment
-it is claimed. `issue:claim` checks only that the issue is open and carries a
-claimable queue label; it does not know about `risk:low`, `Blocked`, a
-dependency added to the body, or an authority cap. Run the same
-`gh issue view --repo … --json number,title,state,labels,body,projectItems,blockedBy`
-read from the eligibility step again, against this issue, right before claiming
-it. An issue that stopped qualifying — closed included — is dropped, not
-claimed: say so in the report and move to the next receipt entry.
+**Re-read the body immediately before every claim.** Claims are sequential, so
+minutes pass between selection and the last claim. Run the same live issue read
+from the eligibility step against the specific issue immediately before its
+claim. If the body now names an external dependency, do not claim the issue.
+Record the change. Any replacement must follow the replacement rule below:
+print it before claiming it and give it the same abort window as the original
+batch.
 
-**Claim the specific number, never a count, and name the branch:**
+Capture and print that read once, then hash the exact body from the same JSON:
 
 ```bash
-pnpm issue:claim --issue <n> --agent <name> --branch <worker-branch>
+issue_json="$(gh issue view "$issue" --repo mento-protocol/monitoring-monorepo \
+  --json number,title,state,labels,body,projectItems,blockedBy)"
+printf '%s\n' "$issue_json"
+body_sha256="$(printf '%s' "$issue_json" | jq -rj '.body // ""' | \
+  shasum -a 256 | awk '{print $1}')"
+```
+
+**Let the helper revalidate its part of eligibility.** `--sweep-eligible`
+rechecks the open queue state, the exact `risk:low` and `pkg:*` sets, native
+blockers, and the selected Project item's ID-bound `Blocked` status around the
+label and ownership transition. It rejects every missing, changed, or `Blocked`
+Status it observes. It never writes Status. Project Status is human-owned, so a
+human change after the final observation remains visible and linearizes after
+the claim. The receipt still owns the fit cap. The helper does not classify
+free-form body text. `--body-sha256` binds the body that the orchestrator
+classified to locked pre-transition and post-transition checks. An external
+body edit after the final check remains visible because the helper never writes
+the body. The custom mutex does not serialize that external editor.
+
+**Claim the specific number with a stable owner token, and name the branch:**
+
+```bash
+pnpm issue:claim --issue <n> --agent <name> --branch <worker-branch> \
+  --claim-id <claim-id> --sweep-eligible --body-sha256 "$body_sha256"
 ```
 
 `--count` claims whatever the ready queue holds at that moment, which is not
 the set the receipt selected — a race with any other session silently swaps an
 issue in, and the report would then cite a receipt that never chose it.
 
-`--branch` is not optional here. Without it the helper falls back to the
-current checkout's branch, and the orchestrator runs this command from its own
-session — so every claim would file the orchestrator's branch in the Project
-`Branch` field and in the permanent claim comment, pointing every human at one
-checkout that owns none of the work. Decide the worker's branch name before
-claiming and pass it.
+`--branch` and `--body-sha256` are required with `--sweep-eligible`. Decide the
+isolated worker's branch name before the claim. The helper rejects a sweep claim
+before it takes the mutex when either value is absent. This prevents the
+orchestrator's checkout branch from becoming the worker's durable owner value.
 
 `<name>` is the runtime actually running the sweep — `claude` or `codex`. This
 skill is mirrored to both stores, so a hard-coded name would file every Codex
 sweep's claim under the wrong owner, and the claim comment and Project `Agent`
 field are what a human reads to find the session holding an issue.
+
+Generate one `<claim-id>` as `claim-<UUID>` before the command. Record it beside
+the worker path in the sweep's durable state, and reuse it unchanged after an
+interruption. It must satisfy the helper's 1-200 character token contract. Do
+not derive a second token after a nonzero result; the stable value is how the
+helper and the sweep distinguish this claim from another session's claim.
+
+The helper serializes claim, review, release, sync, and backfill through one
+persistent per-issue Git ref. All repo-owned writes to Claim ID, Agent, Branch,
+Claimed At, and PR use that mutex. Direct external writes stay outside the
+guarantee. Project V2 has no conditional field write. An external same-field
+write in the read-write gap can be overwritten without detection. Stop all
+helpers before manual owner-field repair. If an uncertain result leaves a stale
+`LOCK`, stop and hand its ref, SHA, and payload to an operator. The operator must
+prove that the original helper cannot resume before recovery. Do not delete,
+force-update, or steal the lock.
 
 **Read the claim result before briefing anyone.** The claim can lose a race —
 another session can take the issue between the ranking that selected it and
@@ -246,22 +281,21 @@ this command. Spawn the worker only for a claim that succeeded. A worker briefed
 on an issue this sweep does not hold duplicates whatever its real owner is
 already doing.
 
-**A nonzero claim is not proof the claim did not happen.** `issue:claim`
-transitions the issue before it verifies ownership and posts the claim comment,
-so a failure in a later step exits nonzero with the issue already
-`agent-active`. Treating that as "not staffed, leave it alone" strands it on the
-board with no worker and no report row — the same orphan the unstaffable-claim
-rule below prevents.
-
-So after **any** claim error, re-read the issue and decide from what is visible:
-the state labels, and whether a claim comment naming this sweep's agent is
-present. `issue:claim` generates its `Claim ID` internally and never prints it,
-so there is no expected ID to compare against; do not try. If the issue is
-`agent-active` and no other session's claim comment sits on it, treat the claim
-as this sweep's and either staff it or release it, as the unstaffable-claim rule
-below does. If another session's
-claim is there, it is a lost claim. If it is neither `agent-active` nor `in-pr`,
-nothing landed and there is nothing to undo.
+**Retry one ordinary nonzero claim with the same token.** First inspect the
+error. Never retry when it reports `ISSUE_MUTATION_LOCK_STALE`, an unknown mutex
+outcome, a stale `LOCK`, or a candidate `LOCK` or `UNLOCK`. Stop the sweep for
+that issue. An operator must prove that the original helper cannot resume, read
+the current ref and board state, and complete the ADR 0082 recovery before any
+retry. For an ordinary nonzero result, the helper uses the reserved Claim ID to
+recover a valid `agent-active` claim. It verifies or creates the matching
+trusted claim comment before it reports recovery success. If that retry also
+fails and the Project
+Claim ID still equals `<claim-id>` with a durable Branch, release that owned
+partial claim to `needs-grooming` with the same token. Empty, missing, foreign,
+or branchless Project ownership that recovery observes is not overwritten. The
+owned mutex instead quarantines a still-ready failed issue in `needs-grooming`.
+It preserves a newer non-ready label state. Report either state for operator
+inspection. Do not infer ownership from the absence of a comment.
 
 On a refused claim, leave the issue alone and record the loss in the report.
 The refusal names only the label state it found —
@@ -271,16 +305,18 @@ back `agent-active` or `in-pr`; take that holder's `Claim ID` from the project
 field or the claim comment. When it closed or returned to `needs-grooming`
 between the read and the claim there is no holder at all: record the state
 change, and do not go looking for one — an old comment would name a session
-that has nothing to do with this refusal. A replacement from the next eligible receipt entry
-is allowed, but **print it before claiming it**, exactly as the batch was
-printed: the printed batch is the audit record of what this sweep worked on,
+that has nothing to do with this refusal. After a body-only pre-claim skip or a
+refused claim, a replacement from the next eligible receipt entry is allowed.
+**Print it before claiming it and give it the same abort window as the original
+batch.** The printed batch is the audit record of what this sweep worked on,
 and an unannounced substitute makes that record wrong. When the receipt is
 exhausted, finish with the smaller batch.
 
 **A claim the sweep cannot staff is released at once.** Spawning a worker can
 fail — a runtime's concurrent-agent limit, a transient error — and the issue is
 already `agent-active` by then. Release it immediately with
-`pnpm issue:release --issue <n>`, comment why, and record it in the report.
+`pnpm issue:release --issue <n> --claim-id <claim-id>`, comment why, and record
+it in the report.
 Leaving a claimed issue with no worker parks it where nothing will pick it up.
 This is also the reason the batch is claimed one issue at a time: the failure
 costs one release rather than the whole batch.
@@ -313,7 +349,7 @@ Then spawn one worker subagent per issue. Give each a brief containing:
       done
     fi
     git clone "$repo" "$dir" || exit 1  # never mark a clone that failed
-    printf '%s\n' "$sweep_id" > "$dir/.git/sweep-owner"
+    printf '%s\n' "$sweep_id" > "$dir/.git/sweep-owner" || exit 1
   fi
   cd "$dir" || exit 1                   # everything after this runs here
   ```
@@ -588,36 +624,45 @@ crossed without anyone watching.
   leaving it parked in `agent-active`:
 
   ```bash
-  pnpm issue:release --issue <n>                    # remaining work still clear
-  pnpm issue:release --issue <n> --needs-grooming   # clarity is missing
+  pnpm issue:release --issue <n> --claim-id <claim-id>
+  pnpm issue:release --issue <n> --claim-id <claim-id> --needs-grooming
   ```
 
   Post a comment on the issue saying what the worker learned — what it tried,
   where it stopped, and what a human would need to decide. A silent release
   sends the next run straight back into the same wall.
 
-  **Only while the issue is still `agent-active` and has no open PR.** Check
-  both. A worker can open its PR and stall before `pnpm issue:review` runs, so
-  the label still reads `agent-active` while a PR is already up for review; a
-  label-only test releases it and the next sweep duplicates that work.
-  `gh pr list --repo mento-protocol/monitoring-monorepo --head <worker-branch>
---state open` settles it, and an open PR is handled exactly like the `in-pr`
-  case below. Pass `--repo` for the same reason the eligibility read carries it:
-  an unqualified lookup resolves through `GH_REPO` or the local remote, and a
-  miss here does not fail loudly — it reads as "no open PR" and releases an
-  issue that has one.
-
-  Once the worker has opened its PR and run `pnpm issue:review`, the issue is
-  `in-pr`, and releasing it
-  then returns it to the ready queue while the PR is still open — a later sweep
-  claims it and duplicates work that is already up for review, because
-  `rank-backlog` deliberately does not read a `Refs` cross-reference as
-  ownership. `issue:release` accepts `in-pr` and will not stop you. The
-  canonical lifecycle in
+  The helper accepts only that Claim ID on `agent-active`. It refuses `in-pr`
+  and repeats the claimed-branch PR proof before and after each write and after
+  its final state reads. If a PR appears before the final proof, the helper
+  restores the prior active state and exact ownership snapshot, then exits
+  nonzero. A PR can still open after the final proof because GitHub exposes
+  separate APIs. The canonical lifecycle in
   [`agent-issue-workflow.md`](../../../docs/notes/agent-issue-workflow.md)
-  releases _after_ an unmerged PR closes. So a worker that stalls with a PR
-  already open keeps the issue `in-pr` and hands the PR to the operator as a
-  decision item; releasing is what the operator does after they close it.
+  releases _after_ an unmerged PR closes. A worker that stalls with an open PR
+  keeps `in-pr` and hands the PR to the operator as a decision item.
+
+  After the operator closes that PR unmerged, release through the stored
+  PR/repository/branch proof:
+
+  ```bash
+  pnpm issue:release --issue <n> --claim-id <claim-id> --closed-unmerged-pr
+  ```
+
+  Add `--needs-grooming` when the remaining work is unclear. This explicit path
+  refuses a merged PR and any open replacement PR from the stored branch.
+
+  If the operator instead merges a partial-stage PR and the issue remains open,
+  revise the ordinary issue body's remaining scope, then use the separate
+  post-sweep continuation:
+
+  ```bash
+  pnpm issue:release --issue <n> --claim-id <claim-id> --merged-pr --needs-grooming
+  ```
+
+  This path proves the exact stored merged PR and refuses an open replacement.
+  It never restores `agent-ready`. The sweep has already stopped at READY and
+  never performs the merge or this post-merge operator action.
 
 - **MUST file an issue before deferring.** Every knowingly deferred follow-up
   gets a GitHub issue, linked from the PR's `## Deferrals` section. An

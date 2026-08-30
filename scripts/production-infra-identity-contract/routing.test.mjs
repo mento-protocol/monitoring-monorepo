@@ -401,6 +401,19 @@ try {
     ),
     "production-infra-contract must run pnpm tf:test",
   );
+  assert.deepEqual(
+    productionInfraContract.steps.filter(
+      (step) => String(step.run).trim() === "pnpm issue:board:test",
+    ),
+    [
+      {
+        name: "Issue board owner-mutation confinement contract",
+        if: "${{ !cancelled() }}",
+        run: "pnpm issue:board:test",
+      },
+    ],
+    "production-infra-contract must run the issue-board owner-mutation proof after ordinary step failures",
+  );
   assert(
     ciWorkflow.jobs.ci.needs.includes("production-infra-contract"),
     "ci sentinel must require production-infra-contract",

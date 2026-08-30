@@ -72,9 +72,11 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
   `pnpm sentry:project:test` in the projection arm.
   `deploy/deploy-indexer-verify{,-analysis}{,.test}.mjs` and
   `deploy/deploy-indexer-verify-status-identity.mjs` use one any-depth arm;
-  both verifier tests run. The exact `pr/agent-issue-board{,.test}.mjs` and
-  `pr/issue-board-{backfill,cli,commands,projects,state,sync,transport}.mjs` set
-  routes to `pnpm issue:board:test`. Exact
+  both verifier tests run. The exact `pr/agent-issue-board{,.test}.mjs`,
+  `pr/issue-board-{backfill,cli,commands,projects,state,sync,transport}.mjs`,
+  and `pr/issue-board-{lock,ownership,release,sync-lock,transactions}.mjs` set
+  routes to `pnpm issue:board:test`. Required CI runs it after failures. ADR
+  0082 owns confinement. Exact
   `repo-health/check-guardrail-prose{,.test}.mjs` and
   `repo-health/guardrail-prose.json` route to the guardrail suite. `ci.yml` pins
   both paths in two jobs, quick-commands names the checker, and the manifest's

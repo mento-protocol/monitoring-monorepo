@@ -2,51 +2,48 @@
  * Fill missing Project ownership fields from trusted agent claim comments.
  *
  * This is deliberately a fill-only recovery path. It does not update Status
- * and it does not offer compare-and-swap semantics across GitHub surfaces.
+ * or PR. It fences all five owner fields, but Project V2 does not offer a
+ * conditional field update across GitHub surfaces.
  */
 
 import {
+  isSafeSingleLineText,
   OPTIONAL_PROJECT_FIELDS,
   isBackfillable,
+  isValidClaimAgent,
+  isValidClaimBranch,
   labelNames,
   projectDateFieldValue,
+  validateClaimId,
 } from "./issue-board-state.mjs";
 
 const TRUSTED_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
-const CLAIM_FIELDS = [
+const BACKFILL_WRITABLE_FIELDS = [
   OPTIONAL_PROJECT_FIELDS.claimId,
   OPTIONAL_PROJECT_FIELDS.agent,
   OPTIONAL_PROJECT_FIELDS.branch,
   OPTIONAL_PROJECT_FIELDS.claimedAt,
 ];
-const MAX_AGENT_LENGTH = 120;
-const MAX_CLAIM_ID_LENGTH = 160;
-const MAX_BRANCH_LENGTH = 256;
+const OWNERSHIP_FIELDS = [
+  ...BACKFILL_WRITABLE_FIELDS,
+  OPTIONAL_PROJECT_FIELDS.pr,
+];
 const MAX_COMMENT_ID_LENGTH = 512;
 
 function claimFields(metadata) {
-  return CLAIM_FIELDS.filter(
+  return BACKFILL_WRITABLE_FIELDS.filter(
     (field) =>
       field !== OPTIONAL_PROJECT_FIELDS.branch || metadata[field] != null,
   );
 }
 
-function hasControlCharacter(value) {
-  for (const character of value) {
-    const codePoint = character.codePointAt(0);
-    if (codePoint <= 0x1f || codePoint === 0x7f) return true;
+function isValidClaimId(value) {
+  try {
+    validateClaimId(value);
+    return true;
+  } catch {
+    return false;
   }
-  return false;
-}
-
-function isSafeSingleLineText(value, maxLength) {
-  return (
-    typeof value === "string" &&
-    value.length > 0 &&
-    value.length <= maxLength &&
-    value === value.trim() &&
-    !hasControlCharacter(value)
-  );
 }
 
 function isValidIsoTimestamp(value) {
@@ -105,7 +102,7 @@ export function parseClaimComment(comment, issueNumber) {
     !match ||
     Number(match[2]) !== issueNumber ||
     !match[1].trim() ||
-    !isSafeSingleLineText(match[1], MAX_AGENT_LENGTH)
+    !isValidClaimAgent(match[1])
   )
     return null;
 
@@ -126,9 +123,8 @@ export function parseClaimComment(comment, issueNumber) {
   const branch = values.get("Branch");
   const claimedAt = values.get("Claimed at");
   if (
-    !isSafeSingleLineText(claimId, MAX_CLAIM_ID_LENGTH) ||
-    (branch !== undefined &&
-      !isSafeSingleLineText(branch, MAX_BRANCH_LENGTH)) ||
+    !isValidClaimId(claimId) ||
+    (branch !== undefined && !isValidClaimBranch(branch)) ||
     !isValidIsoTimestamp(claimedAt)
   ) {
     return null;
@@ -217,7 +213,7 @@ function backfillFieldFingerprint(fields) {
 function backfillValuesFingerprint(values) {
   return JSON.stringify(
     Object.fromEntries(
-      CLAIM_FIELDS.map((field) => [field, values[field] ?? null]),
+      OWNERSHIP_FIELDS.map((field) => [field, values[field] ?? null]),
     ),
   );
 }
@@ -306,73 +302,89 @@ async function readSnapshot(options, dependencies) {
   return { issue, project, fields, itemId, claim, values };
 }
 
-export async function backfillIssue(options, dependencies) {
-  const initial = await readSnapshot(options, dependencies);
-  if (options.dryRun) {
-    const writes = buildBackfillPlan(initial.values, initial.claim.metadata);
-    return {
-      number: initial.issue.number,
-      title: initial.issue.title,
-      state: "backfill dry-run",
-      writes,
-    };
-  }
+export async function backfillIssue(
+  options,
+  dependencies,
+  lease = null,
+  capability = null,
+) {
+  let mutationAttempted = false;
+  try {
+    const initial = await readSnapshot(options, dependencies);
+    if (options.dryRun) {
+      const writes = buildBackfillPlan(initial.values, initial.claim.metadata);
+      return {
+        number: initial.issue.number,
+        title: initial.issue.title,
+        state: "backfill dry-run",
+        writes,
+      };
+    }
 
-  const beforeWrite = await readSnapshot(options, dependencies);
-  if (snapshotFingerprint(initial) !== snapshotFingerprint(beforeWrite)) {
-    throw new Error(
-      `Issue #${initial.issue.number} changed before backfill write`,
-    );
-  }
-  const writes = buildBackfillPlan(
-    beforeWrite.values,
-    beforeWrite.claim.metadata,
-  );
-  const expectedIdentity = snapshotIdentityFingerprint(beforeWrite);
-  const expectedValues = { ...beforeWrite.values };
-  for (const write of writes) {
-    const current = await readSnapshot(options, dependencies);
-    assertSnapshotMatches(
-      expectedIdentity,
-      expectedValues,
-      current,
-      beforeWrite.issue.number,
-    );
-    const currentPlan = buildBackfillPlan(
-      current.values,
-      current.claim.metadata,
-    );
-    if (
-      !currentPlan.some(
-        (candidate) =>
-          candidate.field === write.field && candidate.value === write.value,
-      )
-    ) {
+    const beforeWrite = await readSnapshot(options, dependencies);
+    if (snapshotFingerprint(initial) !== snapshotFingerprint(beforeWrite)) {
       throw new Error(
-        `Issue #${beforeWrite.issue.number} changed before backfill write`,
+        `Issue #${initial.issue.number} changed before backfill write`,
       );
     }
-    await dependencies.writeBackfillProjectFields(
-      options,
-      current.project,
-      current.itemId,
-      [write],
+    const writes = buildBackfillPlan(
+      beforeWrite.values,
+      beforeWrite.claim.metadata,
     );
-    expectedValues[write.field] = write.value;
+    const expectedIdentity = snapshotIdentityFingerprint(beforeWrite);
+    const expectedValues = { ...beforeWrite.values };
+    for (const write of writes) {
+      const current = await readSnapshot(options, dependencies);
+      assertSnapshotMatches(
+        expectedIdentity,
+        expectedValues,
+        current,
+        beforeWrite.issue.number,
+      );
+      const currentPlan = buildBackfillPlan(
+        current.values,
+        current.claim.metadata,
+      );
+      if (
+        !currentPlan.some(
+          (candidate) =>
+            candidate.field === write.field && candidate.value === write.value,
+        )
+      ) {
+        throw new Error(
+          `Issue #${beforeWrite.issue.number} changed before backfill write`,
+        );
+      }
+      mutationAttempted = true;
+      await dependencies.writeBackfillProjectFields(
+        options,
+        current.project,
+        current.itemId,
+        [write],
+        capability,
+        current.issue,
+      );
+      expectedValues[write.field] = write.value;
+    }
+    const verified = await readSnapshot(options, dependencies);
+    if (
+      snapshotIdentityFingerprint(verified) !== expectedIdentity ||
+      !hasExpectedValues(verified, expectedValues)
+    ) {
+      throw new Error(
+        `Issue #${beforeWrite.issue.number} backfill verification failed`,
+      );
+    }
+    return {
+      number: verified.issue.number,
+      title: verified.issue.title,
+      state: writes.length === 0 ? "backfill already matched" : "backfilled",
+      writes,
+    };
+  } catch (err) {
+    if (!mutationAttempted) {
+      lease?.markSafeToUnlock("backfill rejected before mutation");
+    }
+    throw err;
   }
-  const verified = await readSnapshot(options, dependencies);
-  if (
-    snapshotIdentityFingerprint(verified) !== expectedIdentity ||
-    !hasExpectedValues(verified, expectedValues)
-  ) {
-    throw new Error(
-      `Issue #${beforeWrite.issue.number} backfill verification failed`,
-    );
-  }
-  return {
-    number: verified.issue.number,
-    title: verified.issue.title,
-    state: writes.length === 0 ? "backfill already matched" : "backfilled",
-    writes,
-  };
 }

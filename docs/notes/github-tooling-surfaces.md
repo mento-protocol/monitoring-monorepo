@@ -3,7 +3,7 @@ title: GitHub Tooling Surfaces — gh CLI vs MCP
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-25
+last_verified: 2026-08-29
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -154,11 +154,22 @@ keep `pnpm pr:ready-state` and `gh pr checks` as the canonical probes.
 
 ## Issue workboard transitions
 
-`pnpm issue:claim`, `issue:review`, and `issue:release` shell out to gh —
-including `gh api graphql` for Project #12 status and the Claim ID ownership
-field — so they cannot run in Claude cloud sessions absent the
-capability-gate exception. The cloud fallback is a
-partial MCP emulation plus an explicit gh-capable handoff:
+`pnpm issue:claim`, `issue:review`, `issue:release`, `issue:board sync`, and
+`issue:board backfill` shell out to gh. They use GraphQL for Project #12 and the
+Git data APIs for the persistent per-issue mutex. The mutex uses GraphQL
+`updateRefs` with an exact `beforeOid` on a retained custom ref. The active
+credential needs Project write access and repository Contents write access.
+Each helper rejects a non-`github.com` `GH_HOST` and a host-qualified `GH_REPO`.
+The transport also sets `GH_HOST=github.com` and removes `GH_REPO` before every
+gh call. Explicit repository and Project flags cannot authorize another host.
+These commands cannot run in Claude cloud sessions absent the capability-gate
+exception. On a gh-capable surface, a claim can accept a stable `--claim-id`;
+the sweep path requires it. Release requires that token and uses the stored
+branch. An explicit review rebind uses the same token, proves the selected open
+same-repository PR, and refuses an open PR on the old stored Branch. A merged-PR
+continuation proves the stored merged PR and moves the open issue only to
+`needs-grooming`. The cloud fallback is a partial MCP emulation plus an explicit
+gh-capable handoff:
 
 1. Perform the label transition with `issue_write` (send the full resulting
    label set, e.g. swap `agent-ready` for `agent-active` on claim, or
@@ -167,27 +178,32 @@ partial MCP emulation plus an explicit gh-capable handoff:
    comments include the `Claim ID:` and `Claimed at:` lines, plus `Branch:`
    when known), and state in it that Project #12 fields were not set from this
    session.
-3. The Project Claim ID race guard is absent on this path, so the claim
-   comment is the ownership record; check for a fresher competing claim
-   comment before starting work.
+3. The persistent Git ref mutex and Project ownership checks are absent on this
+   path. The claim comment is the temporary ownership record. Check for a
+   fresher competing claim comment before starting work.
 4. Hand off to a gh-capable surface. Run
    `pnpm issue:board backfill --issue <n> --dry-run`, then rerun it without
    `--dry-run` only when the proposed ownership-field writes are correct. The
-   helper reads the newest valid trusted claim comment. It fills empty Project
-   fields as follows: `Claim ID`, `Agent`, and `Claimed At`. It fills `Branch`
-   only when the claim supplies it. It preserves Project Status and rejects
-   non-empty conflicts.
-   Before every field write, it re-reads the lifecycle, exact trusted claim
-   snapshot, Project field types, and current values. GitHub provides no
-   compare-and-swap operation. A concurrent write can still occur after that
-   read and before the mutation. The helper does not roll back because a
-   rollback could erase concurrent state. Run `pnpm issue:board sync --dry-run`
-   separately to preview status reconciliation. This command is
-   repository-wide and does not accept issue-number scope. Obtain explicit
-   authority for a repository-wide mutation before you rerun the command
-   without `--dry-run`. The apply re-reads live state, so a clean preview does
-   not narrow its mutation scope. The authority must cover the full projection,
-   including unrelated items.
+   helper reads the newest valid trusted claim comment. It writes `Claim ID`,
+   `Agent`, and `Claimed At` when its latest snapshot reports them as empty. It
+   writes `Branch` only when the claim supplies it and the latest snapshot
+   reports it as empty. It preserves Project Status and rejects conflicts that
+   the snapshot shows.
+   Before every field write and during final verification, it re-reads the
+   lifecycle, exact trusted claim snapshot, Project field types, and all five
+   owner fields, including PR. It never writes PR. The persistent per-issue
+   mutex excludes claim, review, release, sync, and another backfill. All
+   repo-owned owner-field writes use that mutex. Direct external writes do not.
+   A direct external same-field write in the Project read-write gap can be
+   overwritten without detection. Stop all helpers before manual owner-field
+   repair. The helper does not roll back because a rollback could erase external
+   state. Run `pnpm issue:board sync` separately after closure to clear queue
+   labels. Sync preserves Project Status. First run
+   `pnpm issue:board sync --dry-run`. This command is repository-wide and does
+   not accept issue-number scope. Obtain explicit authority for the full
+   repository-wide mutation before you rerun it without `--dry-run`. The apply
+   re-reads live state, so a clean preview does not narrow its mutation scope.
+   The authority must cover the full projection, including unrelated items.
 
 ## Known MCP gaps
 
