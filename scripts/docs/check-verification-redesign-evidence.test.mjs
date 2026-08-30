@@ -312,6 +312,19 @@ function withGitFixture(run) {
         'const sentryGate = ["scripts", "sentry", "gate", "manifest.json"];',
         "",
       ].join("\n"),
+      "scripts/sentry/broker/sentry-mcp-probe.mjs": [
+        "const marker = inheritGateMarkerStdio;",
+        'const helper = "./mapped-command-process-identity.mjs";',
+        'const runtime = "darwin-process-identity-runtime.inc.c";',
+        'const lineage = "darwin-process-lineage.mjs";',
+        'const trunk = "trunk-check-once.test.sh";',
+        'const request = "agentqg:request";',
+        'const worker = "agentqg-worker";',
+        "const capacity = AGENT_QUALITY_GATE_CAPACITY;",
+        "const run = AGENTQG_RUN;",
+        "const suite = QUALITY_GATE_TEST_RUN;",
+        "",
+      ].join("\n"),
       "package.json":
         '{\n  "scripts": {"agent:quality-gate": "./scripts/agent-quality-gate.sh"}\n}\n',
       "README.md": "Use the quality gate.\nUnrelated line.\n",
@@ -392,10 +405,15 @@ test("buildManifest counts whole files and matching reference lines", () => {
           count_mode: "matching-lines",
           lines: 4,
         },
+        {
+          path: "scripts/sentry/broker/sentry-mcp-probe.mjs",
+          count_mode: "matching-lines",
+          lines: 10,
+        },
         { path: "turbo.json", count_mode: "matching-lines", lines: 4 },
       ],
     );
-    assert.equal(manifest.totals.counted_lines, 35);
+    assert.equal(manifest.totals.counted_lines, 45);
     assert.equal(
       manifest.entries.find(({ path }) =>
         path.endsWith("startup-attestation.mjs"),

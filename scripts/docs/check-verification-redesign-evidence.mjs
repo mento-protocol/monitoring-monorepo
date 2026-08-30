@@ -32,7 +32,7 @@ const WHOLE_FILE_PATHS = new Set([
   "scripts/check-agent-quality-gate-package-scripts.mjs",
 ]);
 const REFERENCE_PATTERN =
-  /agent[:-](?:quality-gate|prewarm)|gate:routing-table:test|quality[- ]gate|scripts\/gate\/|(?:^|["'`(])(?:\.\.?\/)*gate\/|\$[^"'\s]*\\?\/gate(?:\\?\/|["':])|["']gate["']\s*,\s*["'][^"']+\.(?:c|mjs|sh)["']|run\.lock|skip-if-fresh|\bGATE_[A-Z0-9_]+/i;
+  /agent[:-](?:quality-gate|prewarm)|gate:routing-table:test|quality[- ]gate|scripts\/gate\/|(?:^|["'`(])(?:\.\.?\/)*gate\/|\$[^"'\s]*\\?\/gate(?:\\?\/|["':])|["']gate["']\s*,\s*["'][^"']+\.(?:c|mjs|sh)["']|run\.lock|skip-if-fresh|\bGATE_[A-Z0-9_]+|\b(?:AGENT_QUALITY_GATE|AGENTQG|QUALITY_GATE)_[A-Z0-9_]+|\bagentqg[:-]|inheritGateMarkerStdio|mapped-command-process-identity\.mjs|\bdarwin-process-(?:identity|lineage)[a-z0-9._-]*|\btrunk-check-once(?:\.test)?\.sh/i;
 function fail(message) {
   throw new Error(message);
 }

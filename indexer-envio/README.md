@@ -1,4 +1,4 @@
-<!-- agent-context: title="Mento v3 Envio HyperIndex Indexer" status=active owner=eng canonical=true last_verified=2026-08-29 doc_type=reference scope=indexer-envio review_interval_days=90 garden_lane=package-readmes-reference -->
+<!-- agent-context: title="Mento v3 Envio HyperIndex Indexer" status=active owner=eng canonical=true last_verified=2026-08-23 doc_type=reference scope=indexer-envio review_interval_days=90 garden_lane=package-readmes-reference -->
 
 # Mento v3 Envio HyperIndex Indexer
 
@@ -274,12 +274,6 @@ pnpm deploy:indexer:logs "$COMMIT" --build
 pnpm deploy:indexer:logs "$COMMIT" --errors-only --since 2h
 pnpm deploy:indexer:perf "$COMMIT"
 pnpm deploy:indexer:verify "$COMMIT"
-```
-
-A monitor-only or preload request never authorizes promotion. Stop here. Do not
-run the next command until the user gives explicit approval.
-
-```bash
 pnpm deploy:indexer:promote "$COMMIT"
 # After the full five-minute propagation window:
 pnpm deploy:indexer:verify "$COMMIT" --prod

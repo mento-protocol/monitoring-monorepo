@@ -118,9 +118,9 @@ cleanup, cross-worktree scheduling, and crash recovery.
 
 The generated Phase 0 manifest widens this count to the complete control-plane
 surface. Its terminal pre-M1 source is
-`a5692c4570d7fe33255c2ce863d7f79264a9ddb0`. The raw manifest records 96,814
-counted lines across 222 files: 95,815 whole-file implementation and test lines
-plus 999 shared-reference and hook lines. It counts every `scripts/gate/**`
+`a5692c4570d7fe33255c2ce863d7f79264a9ddb0`. The raw manifest records 96,912
+counted lines across 223 files: 95,815 whole-file implementation and test lines
+plus 1,097 shared-reference and hook lines. It counts every `scripts/gate/**`
 file as a whole file so the before artifact preserves the full gate-rooted
 surface.
 
@@ -128,7 +128,7 @@ The raw whole-file total includes a ten-file, 12,543-line shared closure for
 Darwin process identity, coherent lineage, autoreview provenance, Sentry
 process identity, and their tests. Those files remain retained. Subtracting
 them gives the reviewed gate-specific implementation and test deletion
-denominator of 83,272 lines. The raw 96,814-line manifest is the before-surface
+denominator of 83,272 lines. The raw 96,912-line manifest is the before-surface
 record. It is not the deletion denominator.
 
 PR #2134 advanced the boundary from the #2042 terminal commit

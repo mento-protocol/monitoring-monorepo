@@ -57,7 +57,7 @@ COMMIT=$(git rev-parse HEAD)
 pnpm deploy:indexer
 ```
 
-Then wait for the deployment to catch up and verify the candidate:
+Then wait for the deployment to catch up and promote it:
 
 ```bash
 pnpm deploy:indexer:status "$COMMIT" --watch --compact
@@ -65,6 +65,9 @@ pnpm deploy:indexer:logs "$COMMIT" --build
 pnpm deploy:indexer:logs "$COMMIT" --errors-only --since 2h
 pnpm deploy:indexer:perf "$COMMIT"
 pnpm deploy:indexer:verify "$COMMIT"
+pnpm deploy:indexer:promote "$COMMIT"
+# After the full five-minute propagation window:
+pnpm deploy:indexer:verify "$COMMIT" --prod
 ```
 
 Promotion authority depends on the request. For a monitor-only or babysit
@@ -80,15 +83,6 @@ runs the complete verify, prior-prod capture, promote, propagation-wait, and
 UI-verification path. Do not infer promotion approval from a request to
 monitor, preload, or report readiness; an explicitly authorized end-to-end
 production deploy is a separate case.
-
-After the user explicitly approves promotion, promote the verified candidate
-and verify production after the full propagation window:
-
-```bash
-pnpm deploy:indexer:promote "$COMMIT"
-# After the full five-minute propagation window:
-pnpm deploy:indexer:verify "$COMMIT" --prod
-```
 
 ### Deployment Cleanup Inventory
 

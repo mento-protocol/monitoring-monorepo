@@ -31,7 +31,7 @@
       "path": ".agents/skills/backlog-sweep/SKILL.md",
       "surface": "instruction",
       "count_mode": "matching-lines",
-      "lines": 8,
+      "lines": 9,
       "sha256": "194e79f085441f9a6f2eeefbe1bc9fd219efedf3f22dbb8d460e4f2319dbb71d"
     },
     {
@@ -87,7 +87,7 @@
       "path": ".claude/skills/backlog-sweep/SKILL.md",
       "surface": "instruction",
       "count_mode": "matching-lines",
-      "lines": 8,
+      "lines": 9,
       "sha256": "194e79f085441f9a6f2eeefbe1bc9fd219efedf3f22dbb8d460e4f2319dbb71d"
     },
     {
@@ -136,7 +136,7 @@
       "path": ".github/workflows/sentry-triage-agent.yml",
       "surface": "yaml-or-inline-shell",
       "count_mode": "matching-lines",
-      "lines": 1,
+      "lines": 2,
       "sha256": "ae5271aae92508244575ea44b613dfce4c1b800b82dee5eb05e879be6b4d3a97"
     },
     {
@@ -304,7 +304,7 @@
       "path": "docs/adr/0076-fair-quality-gate-coordinator.md",
       "surface": "instruction",
       "count_mode": "matching-lines",
-      "lines": 56,
+      "lines": 66,
       "sha256": "957c234d7a337867a1cf48c5b3e92021ac5a8698d8444f0347a56bd629335f83"
     },
     {
@@ -402,14 +402,14 @@
       "path": "docs/evals/review-skill-judge-calibration.json",
       "surface": "configuration-reference",
       "count_mode": "matching-lines",
-      "lines": 18,
+      "lines": 19,
       "sha256": "aa930bb14f90b5c747706771685eb0696100e1ce9e64ab8595440b55fde017dd"
     },
     {
       "path": "docs/evals/review-skill-runs/2026-08-28-76c7cde7-full-1afd9abd/calibration.json",
       "surface": "configuration-reference",
       "count_mode": "matching-lines",
-      "lines": 6,
+      "lines": 7,
       "sha256": "5e78b065d3ca37bb0e2f9e97a6b21923e032918f15ea9186a178234e1b226f8a"
     },
     {
@@ -437,14 +437,14 @@
       "path": "docs/evals/review-skill-runs/2026-08-28-76c7cde7-full-1afd9abd/result-1995-pipeline-1.json",
       "surface": "configuration-reference",
       "count_mode": "matching-lines",
-      "lines": 7,
+      "lines": 8,
       "sha256": "8d8abc84c5c1a4e0b9bd633e5bd635539999bf5f6b120d10069516a4d1efc1dc"
     },
     {
       "path": "docs/evals/review-skill-runs/2026-08-28-76c7cde7-full-1afd9abd/result-1995-pipeline-2.json",
       "surface": "configuration-reference",
       "count_mode": "matching-lines",
-      "lines": 8,
+      "lines": 9,
       "sha256": "0fbca439e7d147978194a25584cef7a9edb4640f716a57688b7470f3be653e85"
     },
     {
@@ -486,7 +486,7 @@
       "path": "docs/notes/agent-quality-gate-mechanics.md",
       "surface": "instruction",
       "count_mode": "matching-lines",
-      "lines": 100,
+      "lines": 146,
       "sha256": "7b340d792a6d4b54f0b9a64c155f94c6acf9b0d98ae7ec3a3bb09eed87a626ea"
     },
     {
@@ -689,21 +689,21 @@
       "path": "scripts/agent-autoreview.mjs",
       "surface": "configuration-reference",
       "count_mode": "matching-lines",
-      "lines": 4,
+      "lines": 9,
       "sha256": "338f13d9003d3896d621fea300a29cfe53cae8493de805c1e9e2c99b88988e2d"
     },
     {
       "path": "scripts/agent-autoreview.sh",
       "surface": "shell-reference",
       "count_mode": "matching-lines",
-      "lines": 62,
+      "lines": 67,
       "sha256": "8f9b1ce9136afd20b7acdc7e49fe9d0a6991ef5f802fdc5b66e8ed1b9b857d91"
     },
     {
       "path": "scripts/agent-autoreview.test.sh",
       "surface": "shell-reference",
       "count_mode": "matching-lines",
-      "lines": 33,
+      "lines": 48,
       "sha256": "ba71e446eaa8c38367c7599c2ccd086070836cdc6ad0e802b7f6abaa61e300c0"
     },
     {
@@ -1410,8 +1410,15 @@
       "path": "scripts/sentry/broker/sentry-mcp-broker.test.mjs",
       "surface": "configuration-reference",
       "count_mode": "matching-lines",
-      "lines": 1,
+      "lines": 3,
       "sha256": "e797a8e19d683ef46d89406538431b1ca8506edf5925f192d86832b4892461bf"
+    },
+    {
+      "path": "scripts/sentry/broker/sentry-mcp-probe.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 3,
+      "sha256": "550d4272921194050d099eac8c5206c878c335616fe432df6cca103d7f9e445a"
     },
     {
       "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-core.mjs",
@@ -1431,14 +1438,14 @@
       "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.mjs",
       "surface": "configuration-reference",
       "count_mode": "matching-lines",
-      "lines": 1,
+      "lines": 2,
       "sha256": "b86098e6663799bf729c466c8163e32a7c70554d4d45c2acdf594326ecc54c64"
     },
     {
       "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.test.mjs",
       "surface": "configuration-reference",
       "count_mode": "matching-lines",
-      "lines": 6,
+      "lines": 7,
       "sha256": "70a207438c243046e90bc9fdf2656672d87ac06e6686b9fafb8e58b73d92089a"
     },
     {
@@ -1473,7 +1480,7 @@
       "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-lifecycle.test.mjs",
       "surface": "configuration-reference",
       "count_mode": "matching-lines",
-      "lines": 4,
+      "lines": 7,
       "sha256": "1a99afd5df059f49dfa0fcdbecba63484272fcc45b330bf219abe4c68f11d165"
     },
     {
@@ -1562,17 +1569,17 @@
     }
   ],
   "totals": {
-    "files": 222,
-    "counted_lines": 96814,
+    "files": 223,
+    "counted_lines": 96912,
     "by_surface": {
       "alias": 5,
-      "configuration-reference": 408,
+      "configuration-reference": 427,
       "hook": 33,
       "implementation": 46174,
-      "instruction": 406,
-      "shell-reference": 104,
+      "instruction": 464,
+      "shell-reference": 124,
       "test": 49641,
-      "yaml-or-inline-shell": 43
+      "yaml-or-inline-shell": 44
     }
   }
 }

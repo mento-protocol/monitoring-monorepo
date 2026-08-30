@@ -25,7 +25,7 @@ only its mandatory-local-gate target state.
 
 The local quality gate combines path routing, validation, process cleanup,
 cross-worktree scheduling, result reuse, and crash recovery. The raw Phase 0
-manifest records 96,814 counted control-plane lines at the terminal pre-M1
+manifest records 96,912 counted control-plane lines at the terminal pre-M1
 source. Recent local runs spent more time waiting for shared capacity than
 running mapped commands. The system protects real shared resources, but its
 mandatory push path now slows local and hosted development.
@@ -177,8 +177,8 @@ The raw manifest counts every `scripts/gate/**` file as a whole file. This
 keeps the full gate-rooted before surface even when another consumer must retain
 a file. It also counts gate references and the full pre-push hook. At terminal
 pre-M1 source `a5692c4570d7fe33255c2ce863d7f79264a9ddb0`, the manifest records
-222 files and 96,814 counted lines. This includes 95,815 whole-file implementation
-and test lines plus 999 shared-reference and hook lines. The retained shared
+223 files and 96,912 counted lines. This includes 95,815 whole-file implementation
+and test lines plus 1,097 shared-reference and hook lines. The retained shared
 closure contributes 12,543 of the whole-file lines. The reviewed gate-specific
 implementation and test deletion denominator is therefore 83,272 lines.
 Replacement additions must be smaller than the gate-specific code they replace
