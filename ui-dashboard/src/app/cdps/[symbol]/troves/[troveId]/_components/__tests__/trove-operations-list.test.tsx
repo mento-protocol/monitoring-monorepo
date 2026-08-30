@@ -10,7 +10,16 @@ vi.mock("@/components/tx-hash-cell", () => ({
   TxHashCell: ({ txHash }: { txHash: string }) => <td>{txHash}</td>,
 }));
 
-import { TroveOperationsList } from "../trove-operations-list";
+import { TroveOperationsList as TroveOperationsListComponent } from "../trove-operations-list";
+
+function TroveOperationsList(
+  props: Omit<
+    React.ComponentProps<typeof TroveOperationsListComponent>,
+    "probeState"
+  >,
+) {
+  return <TroveOperationsListComponent {...props} probeState="checked" />;
+}
 
 const D18 = BigInt(10) ** BigInt(18);
 

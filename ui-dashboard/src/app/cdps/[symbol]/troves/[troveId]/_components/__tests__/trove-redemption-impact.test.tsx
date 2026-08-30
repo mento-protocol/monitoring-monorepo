@@ -105,7 +105,7 @@ function ledgerState(
 ): TroveLedgerState {
   return {
     supported: true,
-    probeFailed: false,
+    probeState: "checked",
     rows: [],
     truncated: false,
     complete: true,
@@ -386,6 +386,9 @@ describe("TroveRedemptionImpact", () => {
     const body = text();
     expect(body).toContain("Lifetime totals from the trove");
     expect(body).toContain("pending indexer rollout");
+    expect(
+      handle!.container.querySelector('[role="status"]')?.textContent,
+    ).toContain("pending indexer rollout");
     // Cumulative totals still answer half the ticket (from the header row).
     expect(body).toContain("-18,450.82 GBPm");
     expect(body).toContain("-25,163.91 USDm");

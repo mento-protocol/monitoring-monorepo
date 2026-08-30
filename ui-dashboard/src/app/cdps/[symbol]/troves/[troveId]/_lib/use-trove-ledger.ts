@@ -26,6 +26,10 @@ import {
   type TroveLedgerWatermark,
   type TroveRedemptionCumulatives,
 } from "./ledger";
+import {
+  classifyTroveLedgerProbe,
+  type TroveLedgerProbeState,
+} from "./trove-ledger-probe";
 
 export type TroveLedgerState = {
   /** The introspection gate: the live schema serves `TroveLedgerEvent` and
@@ -34,13 +38,10 @@ export type TroveLedgerState = {
    *  direction swaps the view (upgrade on promotion, honest fallback on
    *  rollback). Fails closed while the probe loads or errors. */
   supported: boolean;
-  /** True when the probe has NEVER succeeded and its latest attempt
-   *  errored: `supported` false then means "could not check the schema",
-   *  not "checked, entity absent" — the caller renders an honest
-   *  check-failed notice instead of the rollout wording. A failed refresh
-   *  AFTER a success keeps SWR's stale probe data, so the gate holds the
-   *  last real answer and this stays false. */
-  probeFailed: boolean;
+  /** Full schema-probe disclosure state. `supported` still fails closed for
+   *  unresolved and check-failed probes. A stale probe keeps the cached
+   *  checked answer, so the gate holds its last confirmed direction. */
+  probeState: TroveLedgerProbeState;
   /** Chronological (oldest-first) ledger rows, capped at the render limit.
    *  When truncated, the OLDEST rows were dropped (desc fetch, reversed
    *  client-side) so the recent events under investigation survive. */
@@ -140,7 +141,7 @@ export function useTroveLedger(troveEntityId: string | null): TroveLedgerState {
   const anchor = resolveLedgerWatermark(ledger.data);
   return {
     supported,
-    probeFailed: probe.data == null && probe.error != null,
+    probeState: classifyTroveLedgerProbe(probe.data, probe.error),
     rows,
     truncated,
     complete: hasLoadedOnce && !truncated,

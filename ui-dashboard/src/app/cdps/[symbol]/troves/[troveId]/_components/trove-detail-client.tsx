@@ -35,6 +35,7 @@ import {
   useTroveLedger,
   type TroveLedgerState,
 } from "../_lib/use-trove-ledger";
+import { troveLedgerSupportedProbeMessage } from "../_lib/trove-ledger-probe";
 import { useTroveQueue, type TroveQueueState } from "../_lib/use-trove-queue";
 import { TroveBalanceChart } from "./trove-balance-chart";
 import { TroveDetailSkeleton } from "./trove-detail-skeleton";
@@ -531,8 +532,16 @@ function TroveEventHistory({
   truncated: boolean;
 }) {
   if (ledger.supported) {
+    const availabilityMessage = troveLedgerSupportedProbeMessage(
+      ledger.probeState,
+    );
     return (
       <>
+        {availabilityMessage != null && (
+          <p role="status" className="text-xs text-amber-400">
+            {availabilityMessage}
+          </p>
+        )}
         <TroveBalanceChart
           rows={ledger.rows}
           truncated={ledger.truncated}
@@ -559,32 +568,22 @@ function TroveEventHistory({
       </>
     );
   }
+  const hasLifetimeTotals = hasTroveLifetimeTotals(trove);
   return (
-    <>
-      {ledger.probeFailed && (
-        // A never-succeeded, errored probe means "could not check the
-        // schema" — without this line the interim view's rollout wording
-        // would misattribute a backend failure to a pending rollout.
-        <p role="status" className="text-xs text-amber-400">
-          The complete-history availability check failed — showing the interim
-          view while it retries automatically. Per-redemption detail may exist
-          but cannot be confirmed right now.
-        </p>
-      )}
-      <TroveOperationsList
-        rows={operationRows}
-        truncated={truncated}
-        isLoading={operations.isLoading}
-        error={operations.error}
-        // `operations.data != null`, not `operationRows.length > 0`: the
-        // latter can't tell "never loaded" from "loaded, confirmed empty"
-        // (see the prop's doc comment on TroveOperationsList).
-        hasLoadedOnce={operations.data != null}
-        hasLifetimeTotals={hasTroveLifetimeTotals(trove)}
-        chainId={collateral.chainId}
-        debtSymbol={collateral.symbol}
-      />
-    </>
+    <TroveOperationsList
+      rows={operationRows}
+      truncated={truncated}
+      isLoading={operations.isLoading}
+      error={operations.error}
+      probeState={ledger.probeState}
+      // `operations.data != null`, not `operationRows.length > 0`: the
+      // latter can't tell "never loaded" from "loaded, confirmed empty"
+      // (see the prop's doc comment on TroveOperationsList).
+      hasLoadedOnce={operations.data != null}
+      hasLifetimeTotals={hasLifetimeTotals}
+      chainId={collateral.chainId}
+      debtSymbol={collateral.symbol}
+    />
   );
 }
 
