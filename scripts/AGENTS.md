@@ -50,44 +50,12 @@ Inventories, hashes, and identities stay with their domain.
 
 ## Why Files Stay Flat
 
-`scripts/` has 15 path-pin classes. Move each pin with its file, except the
-`agent-autoreview.sh` feedback-runtime pins.
+`scripts/` has 15 path-pin classes. ADR 0064 owns the full move inventory.
+The gate mechanics runbook owns the exact
+[autoreview, routing, runtime, and mapping pins](../docs/notes/agent-quality-gate-mechanics.md#script-path-pins).
+Move every pin with its file. Use its staged move procedure for feedback
+runtime paths read from `origin/main`.
 
-- **Autoreview runtime pins.** `agent-autoreview.sh` pins runtime,
-  sealed `agent-autoreview-secret-suppressions.json` (ADR 0079), and optional
-  `pr-feedback-state-claude.mjs` and
-  `pr-ready-state-review-signals.mjs`; feedback uses `origin/main`. Use ADR
-  0064's three-merge sequence for moves.
-- **Gate routing pins.** The gate excludes stub-repo tests with
-  `$script_source_dir == $repo_root/scripts`, and pairs
-  `bootstrap/codex-cloud-setup.{sh,test.sh}` for offline tests. It routes
-  `sentry/autofix/sentry-autofix-refused-inventory.mjs` alone to
-  `pnpm sentry:autofix:run-record:test` and
-  `pnpm sentry:autofix:finalize:test`. Exact
-  `sentry/triage/sentry-triage-project-route.mjs` runs
-  `pnpm sentry:project:test` in the projection arm.
-  `deploy/deploy-indexer-verify{,-analysis}{,.test}.mjs` and
-  `deploy/deploy-indexer-verify-status-identity.mjs` use one any-depth arm;
-  both verifier tests run. The exact `pr/agent-issue-board{,.test}.mjs` and
-  `pr/issue-board-{backfill,cli,commands,projects,state,sync,transport}.mjs` set
-  routes to `pnpm issue:board:test`. Exact
-  `repo-health/check-guardrail-prose{,.test}.mjs` and
-  `repo-health/guardrail-prose.json` route to the guardrail suite. `ci.yml` pins
-  both paths in two jobs, quick-commands names the checker, and the manifest's
-  keys pin `AGENTS.md`, `CLAUDE.md` and the operating card. ADR 0073 has it.
-  `pr/merge-pr*`, both PR-state helpers, and `agent-autoreview.sh` (Codex
-  markers) route `pnpm pr:merge:test`.
-- **Gate runtime pins.** Before `cd`, `agent-quality-gate.sh` resolves
-  `gate/run-handles.sh`, coordinator files,
-  `docs/docs-navigation-eval-helpers.mjs`, and `gate/lockfile-scope.mjs` from
-  `$script_source_dir`; tests hash them from `$repo_root`. Move each path with
-  its routes, signatures, fixtures, and literals (ADRs 0064 and
-  0076).
-- **Gate mapping pins.** The signature and Turbo inputs pin
-  `gate/routing-table/**`, `gate/mapping*`, the autoreview core, and its sealed
-  policy. Runtime hashes use `$script_source_dir`; suites use `$repo_root`.
-  Core edits route both suites; policy edits route autoreview. Missing pins
-  freeze the stamp (ADRs 0069 and 0079).
 - **Review-eval pins.** `review/run-eval-source-snapshot.sh` joins the
   four-source set in `docs/evals/review-skill.md`; update every listed consumer
   together.
@@ -107,12 +75,9 @@ Inventories, hashes, and identities stay with their domain.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.
-- **Controlled lifecycle boundary pins.** Platform plans, ruleset drift,
-  dedicated Dependabot merge App Actions secrets, and the local App broker are
-  pinned across Terraform, workflows,
-  gate routes, package scripts, CI, and operator docs. Move each implementation
-  with its test and every consumer. ADR 0080 and its credential runbook own the
-  exact files and fixed host install paths.
+- **Controlled lifecycle boundary pins.** Platform plan, ruleset drift,
+  Actions-secret, and broker paths are cross-tree pins. ADR 0080 and its
+  runbook own their exact files, tests, consumers, and fixed host paths.
 - **Trusted-validator probes.** `pr-description.yml` runs the validator from the
   PR base-branch tip, not a PR snapshot. After a move, keep dual probes
   until the new path reaches the base (issue 1904; ADR 0064).
@@ -167,25 +132,10 @@ in the same PR.
   caller plan, credential environment or CLI input, provider-runtime override,
   and unknown argument without echo. Never persist plan data. ADR 0061 owns the
   exact guard and deploy-only exception.
-- ADR 0080 and its runbook own the App boundary. Keep the inert-or-enabled
-  resource gate, Team, dedicated
-  Dependabot merge App, distinct local-agent App, exact dedicated-App
-  Contents/write, Pull requests/write, and Workflows/write permissions,
-  ruleset ID, credential, writer-migration, legacy-drain,
-  audit, broker, recovery, and broker-principal gates in reviewed source.
-  Preserve exactly the Team `pull_request` and dedicated App Integration
-  `exempt` bypasses. The dedicated-App Actions secrets use only supported
-  `value_encrypted` with one explicit public key ID. Reject plaintext, shared
-  App IDs, an Actions permission, a partial public-key rotation, and another
-  secret store. Keep the
-  broker scaffold gate false until its separate source approval. Keep the
-  recovery gate false except during reviewed create/no-op reconciliation.
-  Parse and exercise the local-agent App RSA key only from the exact unindented
-  HCL heredoc in the private tfvars copy. Reject JSON key assignments. Keep the
-  PEM, JWT, and token outside agents and caller-controlled children. Preserve
-  fixed root-owned execution, profiles, ambient-credential refusal, redaction,
-  and no-token canaries. Agent input cannot select Workflow write. Follow the
-  runbook for both App keys, activation, and revoke-on-uncertain-custody.
+- Controlled lifecycle and GitHub App code follows
+  [ADR 0080](../docs/adr/0080-controlled-main-lifecycle-boundary.md) and its
+  [runbook](../docs/notes/local-agent-github-app-credential.md). Preserve every
+  source, recovery, broker, host, redaction, and custody control they own.
 - `pnpm tf:test` enforces the deployment source-staging contract. Never add a
   deploy callsite, an indirect or dynamic deploy form, or a CLI service-account
   override; keep inert examples in `scripts/deploy-staging-contract.test.mjs`.
