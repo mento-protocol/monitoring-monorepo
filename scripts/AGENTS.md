@@ -78,7 +78,7 @@ runtime paths read from `origin/main`.
 - **Controlled lifecycle boundary pins.** Platform plan, ruleset drift,
   Actions-secret, and broker paths are cross-tree pins. ADR 0080 and its
   runbook own their exact files, tests, consumers, and fixed host paths.
-- **Trusted-validator probes.** `pr-description.yml` runs the validator from the
+- **Trusted-validator probes.** `pr-description.yml` resolves the validator at
   PR base-branch tip, not a PR snapshot. After a move, keep dual probes
   until the new path reaches the base (issue 1904; ADR 0064).
 - **PR validation boundary pins.** Move
