@@ -26,12 +26,13 @@ The machine-readable evidence is:
 - [Migration plan](../PLAN-progressive-verification-graph.md)
 
 Use `pnpm verification:evidence:check` for the Phase 0 author closeout. It runs
-the checker regression suite, validates the inventory schema, and compares the
-fixed-source line manifest. Use `pnpm verification:manifest:write` to regenerate
-that manifest. Phase 0 does not add the closeout to the gate or required CI
-because this issue changes no blocking behavior. The checker does not decide
-inventory completeness, safeguard meaning, risk coverage, ownership, or
-routing. Reviewers own those judgments.
+the checker regression suite, verifies and replays the retained timing-source
+patch, validates the inventory schema, and compares the fixed-source line
+manifest. Use `pnpm verification:manifest:write` to regenerate that manifest.
+Phase 0 does not add the closeout to the gate or required CI because this issue
+changes no blocking behavior. The checker does not decide inventory
+completeness, safeguard meaning, risk coverage, ownership, or routing. Reviewers
+own those judgments.
 
 ## Snapshot boundary
 

@@ -37,7 +37,7 @@
     "verification:inventory:check": "node scripts/docs/check-verification-redesign-evidence.mjs --check-inventory",
     "verification:manifest:write": "node scripts/docs/check-verification-redesign-evidence.mjs --write-manifest",
     "verification:manifest:check": "node scripts/docs/check-verification-redesign-evidence.mjs --check-manifest",
-    "verification:evidence:check": "node --test scripts/docs/check-verification-redesign-evidence.test.mjs && pnpm verification:inventory:check && pnpm verification:manifest:check",
+    "verification:evidence:check": "node --test scripts/docs/check-verification-redesign-evidence.test.mjs scripts/docs/check-verification-redesign-evidence-source-patch.test.mjs && pnpm verification:inventory:check && pnpm verification:manifest:check",
     "review:eval": "node scripts/review/review-eval.mjs",
     "review:eval:test": "node --test \"scripts/review/*.test.mjs\"",
     "review:eval:run": "bash scripts/review/run-eval.sh",

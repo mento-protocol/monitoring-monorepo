@@ -425,7 +425,7 @@
       }
       .track {
         display: grid;
-        grid-template-columns: repeat(6, 1fr);
+        grid-template-columns: repeat(7, 1fr);
         margin: 0;
         padding: 0;
         list-style: none;
@@ -948,35 +948,42 @@
           </div>
           <ol class="track">
             <li>
-              <strong>Inventory</strong
+              <strong>Inventory · #2123</strong
               ><span
                 >Record every safeguard, metric, authority exception, worktree,
                 and #2042 consumer.</span
               >
             </li>
             <li>
-              <strong>Harden</strong
+              <strong>Trust boundary · #2124</strong
               ><span
-                >Fill confirmed CI gaps. Fix filters, aggregate, cache writes,
-                and authority.</span
+                >Remove or accept exact PR credential exposure. Make PR caches
+                restore-only.</span
               >
             </li>
             <li>
-              <strong>Shadow</strong
+              <strong>CI contracts · #2125</strong
               ><span
-                >Compare at least 10 distinct PRs over at least 7 days within
-                approved spend.</span
+                >Fill confirmed coverage gaps. Test filters and the fail-closed
+                aggregate.</span
               >
             </li>
             <li>
-              <strong>Cut over</strong
+              <strong>No-skip and shadow · #2126</strong
+              ><span
+                >Add the bounded audit. Compare at least 10 distinct PRs over 7
+                days within approved spend.</span
+              >
+            </li>
+            <li>
+              <strong>Cut over · #2127</strong
               ><span
                 >Extend the after-manifest generator, then use human approval to
                 remove pre-push verification. Keep the diagnostic runtime.</span
               >
             </li>
             <li>
-              <strong>Delete</strong
+              <strong>Soak and delete · #2128</strong
               ><span
                 >After another 10 merged PRs over 7 days, retire only proved
                 gate-only code.</span
@@ -1102,14 +1109,15 @@
       const button = document.getElementById("theme");
       const modes = ["auto", "light", "dark"];
       const systemDark = matchMedia("(prefers-color-scheme: dark)");
-      let mode = localStorage.getItem("verification-plan-theme") || "auto";
+      const storage = location.protocol === "file:" ? null : localStorage;
+      let mode = storage?.getItem("verification-plan-theme") || "auto";
       function apply(next) {
         mode = modes.includes(next) ? next : "auto";
         root.dataset.theme =
           mode === "auto" ? (systemDark.matches ? "dark" : "light") : mode;
         button.textContent = `Theme: ${mode}`;
-        if (mode === "auto") localStorage.removeItem("verification-plan-theme");
-        else localStorage.setItem("verification-plan-theme", mode);
+        if (mode === "auto") storage?.removeItem("verification-plan-theme");
+        else storage?.setItem("verification-plan-theme", mode);
       }
       systemDark.addEventListener("change", () => {
         if (mode === "auto") apply(mode);

@@ -701,16 +701,42 @@ The Phase 0 snapshot found 25 registered worktrees. Two are confirmed active,
 23 require owner confirmation, and none are proved stale. Refresh this count at
 cutover because worktree registration is live state.
 
-### Phase 1: Fill existing CI gaps
+### Phase 1: Remove PR credential and cache-write authority (#2124)
+
+Resolve each recorded pull request credential exception. Isolate credentialed
+publication from candidate execution or record explicit human acceptance for
+the exact retained exposure. Give candidate-code jobs read-only repository
+permissions. Remove unused `checks: write` grants. Preserve the reviewed
+Codecov, Sentry, and Sentry-autofix ordering boundaries.
+
+Let pull request jobs restore only disposable setup caches populated by
+protected `main`. Pull request jobs never save a cache. A cache hit never
+replaces a required command. Remove the Envio cache path that can skip required
+code generation. A missing or corrupt cache falls back to a cold run.
+
+The first implementation pull request stops here. Issue #2124 changes no CI
+coverage, path filters, required contexts, hooks, rulesets, or local gate
+behavior.
+
+### Phase 2: Harden fixed CI coverage and aggregate (#2125)
 
 Map retained safeguards to the CI jobs that already run them. Add only confirmed
 gate-only gaps to existing jobs. The first known candidates are
 `pnpm adr:check` and `pnpm adr:check:test`.
 
-Add the closed-world aggregate contract. Add path-filter fixtures. Let pull
-request jobs restore protected-`main` setup caches, but never save a cache.
-Remove any cache hit that skips Envio code generation. Preserve every-`main`
-validation and SHA-unique `main` concurrency.
+Add the closed-world aggregate contract and path-filter fixtures. Preserve
+every-`main` validation and SHA-unique `main` concurrency.
+
+Keep the current gate self-tests active while the mandatory gate remains
+enforced. Exclude them only from the replacement benchmark and target command
+set. Delete only gate-specific tests with the gate in Phase 5. Retain the
+shared-consumer process-identity and lineage tests. Do not add 21,000 lines of
+scheduler tests to the replacement for a scheduler that will be deleted.
+
+The second implementation pull request stops here. Issue #2125 does not add or
+run the no-skip audit. It changes no hook, ruleset, or local gate behavior.
+
+### Phase 3: Add the no-skip audit and shadow (#2126)
 
 Add an opt-in protected-default-branch no-skip workflow with a distinct run and
 display name. Keep its run ID and immutable inputs as operational evidence. Do
@@ -718,19 +744,9 @@ not publish a candidate-head pull request context or create a second job named
 `ci`. Keep the existing `CI / ci` implementation and required context
 unchanged.
 
-Add a scheduled no-skip run after the cold cost measurement passes. Register it
-in the existing notifier coverage.
-
-Keep the current gate self-tests active while the mandatory gate remains
-enforced. Exclude them only from the replacement benchmark and target command
-set. Delete only gate-specific tests with the gate in Phase 4. Retain the
-shared-consumer process-identity and lineage tests. Do not add 21,000 lines of
-scheduler tests to the replacement for a scheduler that will be deleted.
-
-The first implementation pull request stops here. It adds no new authority and
-does not weaken the local gate.
-
-### Phase 2: Shadow and compare
+Add a scheduled no-skip run only after the cold cost measurement passes and a
+human approves the spend ceiling. Register the schedule in the existing
+notifier coverage.
 
 Run the existing path-gated CI and the distinct no-skip shadow on selected pull
 request heads. Compare at least one recorded head from each of at least 10
@@ -758,7 +774,11 @@ filter. Add negative fixtures for workflow weakening, deleted files, renamed
 files, unknown paths, skipped jobs, cancelled jobs, and missing aggregate
 inputs.
 
-### Phase 3: Human-approved cutover
+Issue #2126 owns both the no-skip implementation and this evidence window. Its
+implementation pull request uses `Refs`, and the issue stays open until the
+10-PR, 7-day receipt passes.
+
+### Phase 4: Human-approved cutover (#2127)
 
 Use a separate change and explicit human approval because this phase removes a
 control that blocks the acting agent.
@@ -795,7 +815,7 @@ planned retirement condition. Do not use `--no-lock`, clear coordinator state,
 or remove mixed-version compatibility while an active supported worktree still
 uses the old gate.
 
-### Phase 4: Delete the legacy system
+### Phase 5: Soak and delete the legacy system (#2128)
 
 Observe at least 10 merged pull requests over at least 7 calendar days after
 cutover. Require zero observed migration-attributable safeguard omissions found
@@ -827,7 +847,7 @@ Update or supersede ADRs 0008 and 0033 when checklist or reminder entry points
 change. Keep ADR 0075 active because this plan does not change merge consent or
 merge-queue behavior. Record the final line reduction and retained safeguards.
 
-### Phase 5: Optimize only measured bottlenecks
+### Phase 6: Optimize only measured bottlenecks
 
 If required CI misses its target, optimize the measured critical path. First
 remove duplicate work, split independent work, reduce setup, and fix slow tests.
@@ -1002,7 +1022,7 @@ changes, so their digest-bound verdicts describe the prior revision.
 | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Required code-owner approval deadlocks a one-maintainer repository | Remove it as a cutover prerequisite. Record the one-operator risk and retain current automated review, feedback, readiness, and human merge controls.                         |
 | Full CI on every PR exceeds cost and latency limits                | Keep the existing affected fan-out. Test filters and run a separate scheduled or opt-in no-skip lane.                                                                         |
-| The target CI mostly exists                                        | Change Phase 1 to inventory-driven gap filling. Do not rebuild the workflow.                                                                                                  |
+| The target CI mostly exists                                        | Keep Phase 2 limited to inventory-driven gap filling. Do not rebuild the workflow.                                                                                            |
 | A job omitted from `ci.needs` is invisible                         | Add one closed-world static contract for jobs, `needs`, conditional jobs, and allowed skips.                                                                                  |
 | Local gate results are not available for every PR SHA              | Compare path-gated CI with no-skip CI. Use local gate results only when available.                                                                                            |
 | One global flake limit is already unrealistic                      | Use per-suite budgets and a separate temporary browser budget.                                                                                                                |
