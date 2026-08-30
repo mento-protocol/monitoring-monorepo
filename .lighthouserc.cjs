@@ -208,9 +208,11 @@ module.exports = {
       ],
     },
     upload: {
-      // Use temporary-public-storage for report hosting (no LHCI server needed).
-      // The URL is posted to the PR comment by the workflow.
-      target: "temporary-public-storage",
+      // The preview workflow passes a Vercel bypass header through Lighthouse
+      // settings. Lighthouse copies resolved settings into each report. Keep
+      // those raw reports on the ephemeral runner; never publish them.
+      target: "filesystem",
+      outputDir: ".lighthouseci/reports",
     },
   },
 };

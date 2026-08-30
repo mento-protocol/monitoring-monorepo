@@ -3,7 +3,7 @@ title: Staged replacement of the mandatory local gate with existing CI
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-29
+last_verified: 2026-08-30
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -59,11 +59,84 @@ A cache hit must never skip a required command or generated-output comparison.
 Credential use must run outside candidate-code execution, or a later human
 decision must accept and document the exact remaining exposure.
 
-The current audit found `checks: write`, Codecov tokens, implicit setup-node
-cache saves, and direct `actions/cache` saves in pull request jobs. Those are
-migration blockers. The positive Sentry contract remains: its built-in gate
-runs before install, with `contents: read`, no secret, and no earlier candidate
-code.
+The Phase 0 audit found `checks: write`, Codecov tokens, implicit setup-node
+cache saves, and direct `actions/cache` saves in pull request jobs. M2 removes
+the unused write grants and PR cache saves. The positive Sentry contract
+remains: its built-in gate runs before install, with `contents: read`, no
+secret, and no earlier candidate code.
+
+### Apply the M2 pull request trust boundary
+
+Candidate CI jobs use read-only repository permissions. The package jobs no
+longer have `checks: write`. Schema diff, Terraform plan, and Lighthouse stop
+mutating pull request comments. They publish bounded job summaries instead.
+Claude auto-review receives the workflow-scoped GitHub token explicitly and no
+longer receives `id-token: write`. Candidate checkouts do not persist Git
+credentials.
+
+Four credential exposures remain because isolating them would add an artifact
+handoff, publisher workflow, broker, or external service:
+
+- A same-repository PR can run candidate commands before Codecov receives
+  `CODECOV_TOKEN`. The token can forge advisory Codecov uploads. It cannot
+  write repository content or satisfy a required ruleset context. The upload
+  step skips `sentry-autofix/*`. GitHub withholds the repository secret from
+  forks and Dependabot.
+- Terraform PR plans execute candidate HCL with a read-only GCP plan identity.
+  That identity can read cleartext Terraform state. It cannot apply changes.
+- Lighthouse passes the Vercel preview bypass value to candidate configuration
+  and scripts in its trusted-preview lane. Lighthouse records resolved request
+  headers in raw reports. Those reports stay on the ephemeral runner and are
+  excluded from artifacts and public storage.
+- Claude sends candidate text to the external reviewer. Its workflow-scoped
+  token can write PR feedback.
+
+The Codecov token is absent on forks and Dependabot, and its step skips
+`sentry-autofix/*`. Terraform, Lighthouse, and automatic Claude review exclude
+all three contexts. An `OWNER` or `MEMBER` can explicitly invoke on-demand
+Claude review on otherwise excluded content. On 2026-08-30, the human operator
+accepted that invocation boundary and the four automatic exposures exactly as
+listed above. The repository accepts them under the trusted-contributor model
+to retain useful PR checks without adding another control platform. Any wider
+permission, credential, context, or invocation path requires a new decision.
+
+M2 also found that the prior Lighthouse temporary-public-storage path could
+publish raw reports that contained the Vercel bypass request header. Treat the
+current project token as disclosed. M2 keeps raw reports on the runner and
+uploads only header-free diagnostics. The operator approved M2 publication
+before rotation on 2026-08-30. This accepts that an unknown token holder can
+bypass Vercel deployment authentication and selected edge protections for all
+project deployments until revocation. The token does not grant Vercel or
+GitHub mutation authority. Rotate it through the documented Terraform toggle
+path; this approval does not authorize either apply. See Vercel's
+[Protection Bypass for Automation contract](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation).
+
+Pull request jobs disable setup-node's implicit package-manager cache. They use
+nonfatal `actions/cache/restore` steps in the `trusted-main-v1-*` namespace.
+Only protected-main push jobs use `actions/cache/save`. Install, lint,
+typecheck, test, build, browser setup, and code generation commands still run
+after every restore. M2 removes the Envio generated-output cache because its
+hit path skipped required code generation.
+
+Each setup restore has a fixed target and a fixed required command. An empty
+`cache-hit` output causes the workflow to remove only that target before the
+required command runs. This handles a miss and a failed partial extraction.
+A prefix-key hit returns `false`; the workflow keeps that complete restore and
+still runs the required command.
+
+The M2 structural checker follows local reusable workflows from every direct
+pull request trigger. It inventories every pull request job with write
+permission or credential access. Each entry pins its permission map, exact
+credential bindings, environment, forwarded secrets, and reusable target. The
+checker also scans every workflow and local action for cache saves. It pins the
+exact cleanup and required-command sequence for each retained setup cache. A
+workflow change fails until a reviewer updates this closed inventory and its
+mutation tests.
+
+The M2 pull request can prove a cold miss in the new namespace. A protected-
+main save and a later PR hit cannot exist before this change reaches `main`.
+Record both as post-merge evidence for #2124. A missing or corrupt cache must
+remain a cold-run condition, not a validation failure or a skipped command.
 
 ### Keep local checks bounded and non-authoritative
 
@@ -194,6 +267,12 @@ Replacement additions must be smaller than the gate-specific code they replace
 at each cutover stage. Final retirement must remove at least 80% of the final
 denominator.
 
+M2 records its full changed control-plane surface from protected-main baseline
+`ccef910fa6fc267751681176ffdeef01daf90b40` in the additive complexity
+manifest. It removes the existing comment writers instead of adding publisher
+jobs. The manifest and focused contract test enforce the per-file and
+test-to-implementation limits without changing the immutable Phase 0 manifest.
+
 ## Rollback
 
 Before legacy deletion, restore the recorded ruleset first and revert the
@@ -236,7 +315,8 @@ would recreate the local gate.
 
 ## Consequences
 
-- The migration does not change blocking behavior in Phase 0.
+- M1 inventory and M2 authority hardening do not change required contexts,
+  path filters, hooks, rulesets, or local gate behavior.
 - Required CI, review, readiness, merge consent, deployment proof, Terraform
   approval, and secret ownership remain separate controls.
 - Local author feedback becomes faster after cutover, but a developer can first
@@ -252,7 +332,8 @@ would recreate the local gate.
 - [Phase 0 evidence](../notes/verification-redesign-phase-0-evidence.md)
 - [Safeguard inventory](../metrics/verification-redesign-safeguards.jsonl)
 - [Control-plane before manifest](../metrics/verification-redesign-control-plane-before.json)
-- Issues #2006, #2032, #2042, #2094, #2122, and #2123
+- [M2 additive complexity manifest](../metrics/verification-redesign-m2-complexity.json)
+- Issues #2006, #2032, #2042, #2094, #2122, #2123, and #2124
 - ADRs [0007](0007-agent-quality-gate-and-merge-oracle.md),
   [0069](0069-gate-routing-table-as-data.md),
   [0072](0072-md-only-docs-checks-job.md),

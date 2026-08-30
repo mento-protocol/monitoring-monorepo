@@ -149,10 +149,10 @@ fi
 
 echo "==> Running Envio codegen"
 # Skip the (~6s) regen when the type facade already exists AND every input Envio
-# codegen reads is byte-identical. The input set mirrors the .envio cache key in
-# .github/workflows/ci.yml (config*.yaml, schema.graphql, the indexer package
-# manifest, abis/**, scripts/**) — notably the ABIs, which feed the generated
-# event types — so the skip can never serve stale types. Hashing config*.yaml
+# codegen reads is byte-identical. This marker is private to hosted setup; CI
+# has no .envio cache and always runs codegen. Keep this input set aligned with
+# config*.yaml, schema.graphql, the indexer package manifest, abis/**, and
+# scripts/**. The ABIs feed the generated event types. Hashing config*.yaml
 # (real files) rather than the config.yaml symlink also survives checkouts that
 # do not materialise symlinks. The marker lives in the gitignored .envio dir.
 codegen_marker="indexer-envio/.envio/.web-bootstrap-codegen.sha256"

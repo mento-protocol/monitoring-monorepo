@@ -926,7 +926,7 @@ gate_coordinator_recover_stale_obligations() {
     # Drain only the token this parent claimed. The legacy directory-wide scan
     # would also take records claimed by another coordinator client.
     if ! drain_condemned_run_commands \
-      "$drain_token" "$drain_context" "" "" 0 0 \
+      "$drain_token" "$drain_context" "" "" 0 \
       "$lifecycle_contract"; then
       echo "error: coordinator drain obligation ${obligation_id} did not reach an empty process tree." >&2
       return 2
@@ -943,7 +943,7 @@ gate_coordinator_recover_stale_obligations() {
       *" ${request_token} "*) continue ;;
     esac
     if ! drain_condemned_run_commands \
-      "$request_token" "$drain_context" "" "" 0 0 \
+      "$request_token" "$drain_context" "" "" 0 \
       "request-marker-empty-v1"; then
       echo "error: coordinator request ${request_id} did not reach an empty process tree." >&2
       return 2

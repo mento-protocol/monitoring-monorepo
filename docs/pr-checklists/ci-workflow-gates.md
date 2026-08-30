@@ -3,7 +3,7 @@ title: CI Workflow Gates Checklist
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-20
+last_verified: 2026-08-30
 doc_type: checklist
 scope: ci/process
 review_interval_days: 90
@@ -53,7 +53,7 @@ advisory schema-diff workflow in the PR UI.
 
 - [ ] **Ruleset-required** workflows MUST NOT use `paths:` / `paths-ignore:` filters — they must run on every PR. If you want path-conditional work, run every PR but skip the expensive job inside via `if:` checks (or `paths-filter`-style gating that reports a green check on no-op).
 - [ ] Registry-backed Terraform routing uses the broad `workflowAdmissionPatterns` list in `terraform.stacks.json`. Keep the required CI workflow unfiltered at workflow level. Its internal `terraform` filter and the Infra push/pull-request filters copy that list. Do not enumerate stack-specific paths in those filters. `pnpm tf:test` enforces exact equality and proves that the boundary subsumes every `changedPathPatterns` entry.
-- [ ] **Advisory** workflows (everything _not_ in the ruleset list above) SHOULD use a workflow-level `paths:` filter so they don't boot a runner on irrelevant PRs. A skipped advisory check is simply absent — it cannot leave a _required_ check pending. This is a deliberate CI-cost control; see `lighthouse.yml`, `size-limit.yml`, and `supply-chain.yml` for the pattern (the workflow-level `paths:` mirrors the in-job `filter` step, which is kept as a fail-closed backstop). **Exception:** a workflow that posts a sticky PR comment AND clears it on revert (e.g. `schema-diff.yml`) must stay unfiltered — a `paths:` skip on a revert PR strands the stale comment because the cleanup step never runs. Keep run/skip in-job there.
+- [ ] **Advisory** workflows (everything _not_ in the ruleset list above) SHOULD use a workflow-level `paths:` filter so they don't boot a runner on irrelevant PRs. A skipped advisory check is simply absent — it cannot leave a _required_ check pending. This is a deliberate CI-cost control; see `lighthouse.yml`, `size-limit.yml`, and `supply-chain.yml` for the pattern. **M2 exception:** `schema-diff.yml` keeps its existing every-PR trigger during credential and cache hardening. It routes in-job, fails closed on path-filter errors, and publishes only a read-only job summary. Reconsider its trigger in the fixed-coverage phase; do not change it incidentally.
 - [ ] **Scheduled advisory** workflows SHOULD state the detection/rebuild SLO they serve and use the slowest cadence that satisfies it. Backstop monitors for multi-hour/day failure modes should prefer daily or similarly low cadence unless there is an explicit operator page-time requirement; do not default to every 15 minutes just because the check is cheap.
 - [ ] If you make an advisory workflow required, add it to the ruleset **and** remove its `paths:` filter in the same change.
 
@@ -88,16 +88,21 @@ action is SHA-pinned.
 Canonical good example: the workflow-level `concurrency` block in
 `.github/workflows/metrics-bridge.yml`.
 
-## 5. Caching keys
+## 5. Cache trust and keys
 
-A cache key that misses an input silently serves stale build artifacts.
+A cache crosses commit and workflow boundaries. Treat restore authority, save
+authority, and key inputs as separate controls.
 
-- [ ] If the workflow runs codegen (e.g. `pnpm indexer:codegen`, `pnpm dashboard:codegen`), the cache key or committed-output verification MUST include the codegen scripts and every config/schema file that codegen reads (e.g. `config.multichain.mainnet.yaml`, `config.multichain.testnet.yaml`, `schema.graphql`, `scripts/run-envio-with-env.mjs`, `ui-dashboard/scripts/generate-graphql-types.mjs`, `scripts/envio-schema-stubs.graphql`). If the output is committed, verify with `git status --porcelain -- <path>` rather than `git diff` alone so missing generated files fail as untracked output.
+- [ ] Every PR-reachable `actions/setup-node` step MUST set `package-manager-cache: false`. Its implicit cache post-step can save data. Use explicit split restore and save actions instead.
+- [ ] Pull request jobs MAY restore disposable setup caches with `actions/cache/restore`. The restore must use a `trusted-main-v1-*` namespace populated by protected `main` and set `continue-on-error: true`. If `cache-hit` is empty, remove only the fixed cache target before the required setup command. This clears a miss or failed partial extraction. Keep a complete prefix-key restore, whose `cache-hit` output is `false`, and still run the command. Pull request jobs MUST NOT use `actions/cache` or `actions/cache/save`.
+- [ ] A cache save MUST use `actions/cache/save`, use the same `trusted-main-v1-*` namespace, and require both `github.event_name == 'push'` and `github.ref == 'refs/heads/main'`. Keep saves nonfatal. A caller input alone never authorizes a save.
+- [ ] A cache hit MUST NOT skip install, lint, typecheck, test, build, code generation, or generated-output comparison. Caches accelerate setup only. Every required command runs on every invocation.
+- [ ] If the workflow runs codegen (e.g. `pnpm indexer:codegen`, `pnpm dashboard:codegen`), execute it on every invocation. Include every codegen input in any disposable setup-cache key. This includes scripts, config, schemas, and ABIs. If output is committed, verify it with `git status --porcelain -- <path>` so untracked generated files fail too.
 - [ ] Lockfile (`pnpm-lock.yaml`) is necessary but NOT sufficient — codegen output depends on more than dep versions
 - [ ] pnpm patch files under `patches/**` are package-manager inputs. Patch-only PRs MUST trigger frozen install and package quality paths, because `pnpm-lock.yaml` records patch hashes and a stale or missing patch hash fails frozen install.
-- [ ] For caches of **external binaries whose version is resolved transitively** (Playwright Chromium under `~/.cache/ms-playwright`, Cypress browsers under `~/.cache/Cypress`, etc.), the cache key MUST include `pnpm-lock.yaml`, NOT just `package.json`. A caret-range dep (`@playwright/test: ^1.60.0`) lets a lockfile-only update flip the resolved Playwright version — and thus the Chromium revision it wants — without changing `package.json`'s hash. Result: every CI run restores the stale cache, the install step re-downloads (~130 MB for Chromium), but `actions/cache` won't re-save under the already-hit key, so the download repeats indefinitely until something forces a `package.json` change. Caught on PR #633 (`.github/workflows/lighthouse.yml` Playwright Chromium cache step). Pair with a `restore-keys:` fallback so unrelated lockfile churn still benefits from a near-match cache.
+- [ ] For caches of **external binaries whose version is resolved transitively** (Playwright Chromium under `~/.cache/ms-playwright`, Cypress browsers under `~/.cache/Cypress`, etc.), the cache key MUST include `pnpm-lock.yaml`, not only `package.json`. A lockfile-only dependency update can change the required binary revision. Use a same-namespace `restore-keys:` fallback for near matches. The protected-main save then writes the exact new key after setup completes.
 
-- [ ] If a cache stores **architecture-specific binaries** (Playwright Chromium, trunk's `~/.cache/trunk` tool dir), the key MUST include `${{ runner.arch }}` — installers typically validate version, not architecture, so a cross-arch restore passes validation and dies at exec time (`Exec format error`, or trunk's `execve failed: Text file busy` from re-downloading over restored binaries; seen on PR #821). Text-only caches (e.g. envio codegen's `.envio/types.d.ts`) deliberately do NOT take an arch component — adding one just orphans the warm cache (PR #822 review).
+- [ ] If a cache stores **architecture-specific binaries** (Playwright Chromium, trunk's `~/.cache/trunk` tool dir), the key MUST include `${{ runner.arch }}`. Installers can validate a version but miss an architecture mismatch. A cross-architecture restore then fails at execution. A text-only cache does not need an architecture component, but it must still use the trusted namespace and must never replace a required command.
 
 ## 6. Fail-closed audit / security workflows
 
@@ -188,6 +193,13 @@ closed.
 - [ ] Never introduce `pull_request_target` — the checker refuses it outright
 - [ ] Checkouts in jobs that execute PR-head code set `persist-credentials: false` (the checkout token in `.git/config` is readable by any test/build the PR controls)
 - [ ] `node scripts/workflows/check-autofix-ci-trust.mjs` must pass after the change
+- [ ] `node scripts/workflows/check-pr-validation-boundary.test.mjs` must pass
+      after a permission, cache, Codecov, schema-diff, or Dependabot workflow
+      change. It pins the closed write and credential job inventories, exact
+      permission maps, credential bindings, environments, forwarded secrets,
+      and reusable targets. It follows local reusable workflows. It scans
+      every cache save. It also pins each retained restore, targeted cleanup,
+      and required command.
 
 ## 11. Lessons already paid for
 

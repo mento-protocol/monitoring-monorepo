@@ -65,6 +65,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
+          package-manager-cache: false
       # No `pnpm install`. The evaluation harness is Node standard library only,
       # so `pnpm <alias>` needs nothing from node_modules. Same reasoning as the
       # lockfile job in supply-chain.yml, and it keeps the job under a minute.
@@ -119,6 +120,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
+          package-manager-cache: false
       - name: Synchronize the review-skill evaluation staleness issue
         env:
           # `--schedule-issue` takes the repository from GITHUB_REPOSITORY,

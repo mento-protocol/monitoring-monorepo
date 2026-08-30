@@ -28,9 +28,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Check GitHub Actions pins
         run: node scripts/workflows/check-github-action-pins.mjs
       - uses: ./.trunk/setup-ci
+      - name: PR validation boundary suite
+        # This required workflow always runs, including when a PR changes only
+        # .trunk/setup-ci. The suite rejects implicit PR cache saves before
+        # setup-node's post action can publish one from a successful job.
+        run: node scripts/workflows/check-pr-validation-boundary.test.mjs
       - name: pnpm audit high gate self-tests
         run: node scripts/supply-chain/pnpm-audit-high-gate.test.mjs
       - name: pnpm audit governance-watchdog deploy lockfile (high+ only)
@@ -39,15 +45,28 @@ jobs:
         run: node scripts/supply-chain/pnpm-audit-high-gate.mjs --dir alerts/infra/oncall-announcer --label alerts/infra/oncall-announcer
       - name: pnpm audit handler deploy lockfile (high+ only)
         run: node scripts/supply-chain/pnpm-audit-high-gate.mjs --dir alerts/infra/onchain-event-handler --label alerts/infra/onchain-event-handler
-      - name: Cache Trunk artifacts
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore Trunk artifacts
+        id: trunk-cache
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/trunk
           # Trunk stores downloaded tool binaries here, so the key must keep
           # architectures separate. Cross-arch restores caused `execve failed:
           # Text file busy` on PR #821.
-          key: trunk-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('.trunk/trunk.yaml') }}
+          key: trusted-main-v1-trunk-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('.trunk/trunk.yaml') }}
+      - name: Clear incomplete Trunk restore
+        if: steps.trunk-cache.outputs.cache-hit == ''
+        run: >-
+          node -e 'const { rmSync } = require("node:fs"); const { homedir } = require("node:os"); const { join } = require("node:path"); rmSync(join(homedir(), ".cache", "trunk"), { force: true, recursive: true });'
       - name: Run Trunk
         run: ./tools/trunk check --ci --all
+      - name: Save Trunk artifacts
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.trunk-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/trunk
+          key: trusted-main-v1-trunk-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('.trunk/trunk.yaml') }}
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
