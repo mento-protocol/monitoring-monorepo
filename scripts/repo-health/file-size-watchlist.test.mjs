@@ -377,8 +377,8 @@ test("every exemption names a file that is still real and still over the cap", (
 
 test("the trust root pins the complete nested helper runtime", () => {
   // The exemption depends on one closed, attested runtime. Keep the two large
-  // helpers, native Darwin identity runtime, and process-identity dependency
-  // in each trust enumeration.
+  // helpers, sealed suppression policy, native Darwin identity runtime, and
+  // process-identity dependency in each trust enumeration.
   // Windows are bounded so an unrelated literal elsewhere in the wrapper
   // cannot stand in for the active materializer.
   const wrapper = readFileSync(
@@ -388,6 +388,7 @@ test("the trust root pins the complete nested helper runtime", () => {
   const runtimePaths = [
     "agent-autoreview.mjs",
     "agent-autoreview-core.mjs",
+    "agent-autoreview-secret-suppressions.json",
     "gate/darwin-process-identity.c",
     "gate/darwin-process-identity-runtime.inc.c",
     "gate/darwin-process-identity-helper.mjs",
@@ -413,7 +414,7 @@ test("the trust root pins the complete nested helper runtime", () => {
   const lists = [
     /local helper_paths=\(\n([\s\S]{0,500}?)\n\s*\)/,
     /my @source_files = \(([\s\S]{0,460}?)\n\s*\);/,
-    /for source_file in \\\n([\s\S]{0,580}?); do/,
+    /for source_file in \\\n([\s\S]{0,680}?); do/,
   ];
   for (const list of lists) {
     const found = wrapper.match(list);

@@ -30,14 +30,15 @@ import process from "node:process";
 import {
   assertNoSecretLikeContent,
   buildBoundedReviewPrompts,
+  createTrustedGitPatchSecretSuppression,
   createReviewInputCollector,
   isWithin,
   MAX_REVIEW_INPUT_BYTES,
   normalizedGitFileMode,
   readBoundedRegularFile,
   readSafeEvidenceFile,
+  reviewBundlePathReason,
   reviewPromptOutputPaths,
-  sensitivePathReason,
   serializeSafeUntrackedFile,
   utf8Size,
   writeReviewPromptOutputs,
@@ -181,7 +182,8 @@ Adapter-only options (pnpm agent:autoreview, before any -- separator):
 Note:
   Inside an active Codex session, a repo adapter should use --prepare-bundle-dir
   plus its bound pre/post verification flow. For this standalone helper only,
-  use --prepare-only --bundle-output <path> instead of nested codex exec.
+  use a trusted runtime outside the reviewed checkout with --prepare-only
+  --bundle-output <path> instead of nested codex exec.
 `);
 }
 
@@ -2626,7 +2628,42 @@ function aggregateInputLimitError(label) {
 // change. `-l5000` owns the rename candidate limit, finite for the reason the
 // wrapper's capture block records. `changedPaths` keeps the pin, so a move's
 // source path still reaches the sensitive-path refusal.
-function gitBundlePart(collector, label, repo, gitArgs) {
+function createSecretScanningBundleCollector(repo) {
+  const reviewCollector = createReviewInputCollector();
+  const scanCollector = createReviewInputCollector();
+  const exactPatchSuppression = createTrustedGitPatchSecretSuppression(repo);
+  return {
+    add(label, value, { trustedGitPatch = false } = {}) {
+      const scanValue = trustedGitPatch
+        ? exactPatchSuppression.maskTrustedGitPatch(value)
+        : value;
+      assertNoSecretLikeContent(
+        label,
+        scanValue,
+        trustedGitPatch ? { gitDiff: true } : undefined,
+      );
+      reviewCollector.add(label, value);
+      scanCollector.add(label, scanValue);
+    },
+    remainingBytes() {
+      return reviewCollector.remainingBytes();
+    },
+    toBundle() {
+      return {
+        bundle: reviewCollector.toString(),
+        scanBundle: scanCollector.toString(),
+      };
+    },
+  };
+}
+
+function gitBundlePart(
+  collector,
+  label,
+  repo,
+  gitArgs,
+  { trustedGitPatch = false } = {},
+) {
   const maxBuffer = Math.max(
     1024,
     Math.min(MAX_GIT_OUTPUT_BYTES, collector.remainingBytes() + 1),
@@ -2640,7 +2677,7 @@ function gitBundlePart(collector, label, repo, gitArgs) {
     }
     throw error;
   }
-  collector.add(label, output);
+  collector.add(label, output, { trustedGitPatch });
 }
 
 function appendLocalBundle(repo, target, collector) {
@@ -2658,17 +2695,28 @@ function appendLocalBundle(repo, target, collector) {
     "-l5000",
     "--",
   ]);
-  gitBundlePart(collector, "staged diff", repo, [
-    "diff",
-    "--no-ext-diff",
-    "--no-textconv",
-    "--cached",
-    target.head,
-    "--patch",
-    "--find-renames",
-    "-l5000",
-    "--",
-  ]);
+  gitBundlePart(
+    collector,
+    "staged diff",
+    repo,
+    [
+      "diff",
+      "--full-index",
+      "--unified=3",
+      "--no-color",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--src-prefix=a/",
+      "--dst-prefix=b/",
+      "--cached",
+      target.head,
+      "--patch",
+      "--find-renames",
+      "-l5000",
+      "--",
+    ],
+    { trustedGitPatch: true },
+  );
   collector.add("unstaged diff heading", "# Unstaged Diff");
   gitBundlePart(collector, "unstaged diff stat", repo, [
     "diff",
@@ -2678,14 +2726,25 @@ function appendLocalBundle(repo, target, collector) {
     "--find-renames",
     "-l5000",
   ]);
-  gitBundlePart(collector, "unstaged diff", repo, [
-    "diff",
-    "--no-ext-diff",
-    "--no-textconv",
-    "--patch",
-    "--find-renames",
-    "-l5000",
-  ]);
+  gitBundlePart(
+    collector,
+    "unstaged diff",
+    repo,
+    [
+      "diff",
+      "--full-index",
+      "--unified=3",
+      "--no-color",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--src-prefix=a/",
+      "--dst-prefix=b/",
+      "--patch",
+      "--find-renames",
+      "-l5000",
+    ],
+    { trustedGitPatch: true },
+  );
   const untracked = gitPathList(repo, [
     "ls-files",
     "--others",
@@ -2714,9 +2773,9 @@ function appendLocalBundle(repo, target, collector) {
 }
 
 function localBundle(repo, target) {
-  const collector = createReviewInputCollector();
+  const collector = createSecretScanningBundleCollector(repo);
   appendLocalBundle(repo, target, collector);
-  return collector.toString();
+  return collector.toBundle();
 }
 
 function appendBranchBundle(repo, target, collector) {
@@ -2733,36 +2792,54 @@ function appendBranchBundle(repo, target, collector) {
     `${target.ref}...${target.head}`,
     "--",
   ]);
-  gitBundlePart(collector, "branch diff", repo, [
-    "diff",
-    "--no-ext-diff",
-    "--no-textconv",
-    "--patch",
-    "--find-renames",
-    "-l5000",
-    `${target.ref}...${target.head}`,
-    "--",
-  ]);
+  gitBundlePart(
+    collector,
+    "branch diff",
+    repo,
+    [
+      "diff",
+      "--full-index",
+      "--unified=3",
+      "--no-color",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--src-prefix=a/",
+      "--dst-prefix=b/",
+      "--patch",
+      "--find-renames",
+      "-l5000",
+      `${target.ref}...${target.head}`,
+      "--",
+    ],
+    { trustedGitPatch: true },
+  );
 }
 
 function branchBundle(repo, target) {
-  const collector = createReviewInputCollector();
+  const collector = createSecretScanningBundleCollector(repo);
   appendBranchBundle(repo, target, collector);
-  return collector.toString();
+  return collector.toBundle();
 }
 
 function branchLocalBundle(repo, target) {
-  const collector = createReviewInputCollector();
+  const collector = createSecretScanningBundleCollector(repo);
   appendBranchBundle(repo, target, collector);
   collector.add("local diff heading", "# Local Diff");
   appendLocalBundle(repo, target, collector);
-  return collector.toString();
+  return collector.toBundle();
 }
 
 function commitBundle(repo, commitRef) {
-  const collector = createReviewInputCollector();
+  const collector = createSecretScanningBundleCollector(repo);
   collector.add("commit diff heading", "# Commit Diff");
   collector.add("commit ref", `commit: ${commitRef}`);
+  gitBundlePart(collector, "commit metadata", repo, [
+    "show",
+    "--no-patch",
+    "--format=fuller",
+    "--end-of-options",
+    commitRef,
+  ]);
   gitBundlePart(collector, "commit diff stat", repo, [
     "show",
     "--no-ext-diff",
@@ -2770,24 +2847,35 @@ function commitBundle(repo, commitRef) {
     "--stat",
     "--find-renames",
     "-l5000",
-    "--format=fuller",
+    "--format=",
     "--end-of-options",
     commitRef,
     "--",
   ]);
-  gitBundlePart(collector, "commit diff", repo, [
-    "show",
-    "--no-ext-diff",
-    "--no-textconv",
-    "--patch",
-    "--find-renames",
-    "-l5000",
-    "--format=fuller",
-    "--end-of-options",
-    commitRef,
-    "--",
-  ]);
-  return collector.toString();
+  gitBundlePart(
+    collector,
+    "commit diff",
+    repo,
+    [
+      "show",
+      "--full-index",
+      "--unified=3",
+      "--no-color",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--src-prefix=a/",
+      "--dst-prefix=b/",
+      "--patch",
+      "--find-renames",
+      "-l5000",
+      "--format=",
+      "--end-of-options",
+      commitRef,
+      "--",
+    ],
+    { trustedGitPatch: true },
+  );
+  return collector.toBundle();
 }
 
 function changedPaths(repo, target) {
@@ -4684,11 +4772,11 @@ function scopeBaseline(repo, target, paths) {
   return { changedFiles: paths.size, nonTestLoc };
 }
 
-function assertReviewableBundle(paths, bundle) {
+function assertReviewableBundle(paths, bundle, scanBundle) {
   const blocked = [...paths]
     .map((relativePath) => ({
       relativePath,
-      reason: sensitivePathReason(relativePath),
+      reason: reviewBundlePathReason(relativePath),
     }))
     .filter(({ reason }) => reason);
   if (blocked.length > 0) {
@@ -4715,10 +4803,10 @@ function assertReviewableBundle(paths, bundle) {
       "refusing gitlink/submodule changes because dependency contents are absent from the review bundle",
     );
   }
-  // The bundle is the only scanned text git itself produced, so it is the only
-  // one whose hunk structure can be trusted and therefore the only one allowed
-  // the redaction accept-shape. Supplemental input stays on the closed default.
-  assertNoSecretLikeContent("selected change", bundle, { gitDiff: true });
+  // Each pure Git patch was scanned separately before assembly. This second
+  // suppression-free scan proves that masking one exact removed anchor did not
+  // hide a sibling finding elsewhere in the complete selected change.
+  assertNoSecretLikeContent("selected change", scanBundle, { gitDiff: true });
 }
 
 function hashHeadIdentity(hash, state) {
@@ -5072,7 +5160,7 @@ async function main() {
       args.datasets.length > 0;
     let bundleOutputs = [];
     if (needsBundle) {
-      const bundle =
+      const { bundle, scanBundle } =
         target.mode === "local"
           ? localBundle(repo, target)
           : target.mode === "branch"
@@ -5080,7 +5168,7 @@ async function main() {
             : target.mode === "branch-local"
               ? branchLocalBundle(repo, target)
               : commitBundle(repo, target.ref);
-      assertReviewableBundle(paths, bundle);
+      assertReviewableBundle(paths, bundle, scanBundle);
       assertNoSecretLikeContent("current branch", branch);
       if (target.requested_ref) {
         assertNoSecretLikeContent(

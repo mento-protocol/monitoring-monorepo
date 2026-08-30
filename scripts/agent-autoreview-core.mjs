@@ -11,12 +11,15 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 export const MAX_REVIEW_PROMPT_BYTES = 512_000;
 export const MAX_REVIEW_CHUNK_CONTEXT_BYTES = 64_000;
 export const MAX_REVIEW_PASSES = 8;
 export const MAX_REVIEW_INPUT_BYTES =
   MAX_REVIEW_PROMPT_BYTES * MAX_REVIEW_PASSES;
+const EXACT_PATCH_SUPPRESSION_REPO_PATH =
+  "scripts/agent-autoreview-secret-suppressions.json";
 
 export function utf8Size(text) {
   return Buffer.byteLength(text, "utf8");
@@ -767,6 +770,11 @@ export function sensitivePathReason(rawPath) {
     return "sensitive data filename";
   }
   return null;
+}
+
+export function reviewBundlePathReason(rawPath) {
+  if (rawPath === EXACT_PATCH_SUPPRESSION_REPO_PATH) return null;
+  return sensitivePathReason(rawPath);
 }
 
 // A shell parameter expansion carrying a default, assign, alternate, or error
@@ -1783,8 +1791,9 @@ function placeholderRedactionOf(removed, spans, added) {
 // a single placeholder cannot cover a second credential-bearing removal that is
 // really an unreplaced deletion.
 //
-// The exception applies only when `gitDiff` is set, which one call site does for
-// the git-generated review bundle. Supplemental input — `--prompt`, prompt
+// The exception applies only when `gitDiff` is set. Autoreview sets it for pure
+// Git patch captures and for the final assembly after it has scanned every
+// non-patch part on the closed default. Supplemental input — `--prompt`, prompt
 // files, datasets, branch names, refs — is arbitrary text that an author can
 // shape at will, so no line there belongs to a hunk and every credential-shaped
 // token is refused exactly as it was before the exception existed. Requiring a
@@ -2156,6 +2165,347 @@ export function secretLikeReason(text, { gitDiff = false } = {}) {
       return "literal credential assignment";
   }
   return null;
+}
+
+const EXACT_PATCH_SUPPRESSION_FILE = path.posix.basename(
+  EXACT_PATCH_SUPPRESSION_REPO_PATH,
+);
+const MAX_EXACT_PATCH_SUPPRESSION_BYTES = 64 * 1024;
+const MAX_EXACT_PATCH_SUPPRESSIONS = 16;
+const MAX_EXACT_PATCH_LINES = 256;
+const MAX_EXACT_PATCH_LINE_BYTES = 8192;
+const EXACT_PATCH_SUPPRESSION_KEYS = [
+  "reason",
+  "expectedFinding",
+  "anchorIndex",
+  "oldLine",
+  "patchLines",
+];
+
+function exactArrayEqual(left, right) {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
+}
+
+function assertPrintableAscii(value, label, minimum, maximum) {
+  if (
+    typeof value !== "string" ||
+    value.length < minimum ||
+    value.length > maximum ||
+    !/^[\x20-\x7e]*$/.test(value)
+  ) {
+    throw new Error(
+      `${label} must contain ${minimum}-${maximum} printable ASCII characters`,
+    );
+  }
+}
+
+function parseOrdinaryExactFilePatch(record, recordIndex) {
+  const label = `exact patch suppression record ${recordIndex}`;
+  const lines = record.patchLines;
+  const diffHeader =
+    /^diff --git a\/([A-Za-z0-9._/[\]-]+) b\/([A-Za-z0-9._/[\]-]+)$/.exec(
+      lines[0],
+    );
+  if (!diffHeader || diffHeader[1] !== diffHeader[2]) {
+    throw new Error(`${label} must name one unchanged path`);
+  }
+  const filePath = diffHeader[1];
+  if (
+    filePath
+      .split("/")
+      .some((part) => part === "" || part === "." || part === "..")
+  ) {
+    throw new Error(`${label} has a noncanonical path`);
+  }
+  const indexHeader =
+    /^index ([0-9a-f]{40}|[0-9a-f]{64})\.\.([0-9a-f]{40}|[0-9a-f]{64}) (100644|100755)$/.exec(
+      lines[1],
+    );
+  if (
+    !indexHeader ||
+    indexHeader[1].length !== indexHeader[2].length ||
+    /^0+$/.test(indexHeader[1]) ||
+    /^0+$/.test(indexHeader[2]) ||
+    indexHeader[1] === indexHeader[2]
+  ) {
+    throw new Error(`${label} must pin full, distinct ordinary blob IDs`);
+  }
+  if (lines[2] !== `--- a/${filePath}` || lines[3] !== `+++ b/${filePath}`) {
+    throw new Error(`${label} has invalid old or new path headers`);
+  }
+  const hunkHeader =
+    /^@@ -([1-9][0-9]*)(?:,([0-9]+))? \+([1-9][0-9]*)(?:,([0-9]+))? @@(?: [\x20-\x7e]*)?$/.exec(
+      lines[4],
+    );
+  if (!hunkHeader) {
+    throw new Error(`${label} must contain one ordinary hunk`);
+  }
+  const oldStart = Number.parseInt(hunkHeader[1], 10);
+  const oldCount = Number.parseInt(hunkHeader[2] ?? "1", 10);
+  const newStart = Number.parseInt(hunkHeader[3], 10);
+  const newCount = Number.parseInt(hunkHeader[4] ?? "1", 10);
+  if (
+    ![oldStart, oldCount, newStart, newCount].every(Number.isSafeInteger) ||
+    oldCount < 1 ||
+    newCount < 1
+  ) {
+    throw new Error(`${label} has invalid hunk coordinates`);
+  }
+
+  let oldCursor = oldStart;
+  let newCursor = newStart;
+  let derivedAnchorOldLine = null;
+  for (let lineIndex = 5; lineIndex < lines.length; lineIndex += 1) {
+    const marker = lines[lineIndex].charAt(0);
+    if (
+      !lines[lineIndex] ||
+      (marker !== " " && marker !== "+" && marker !== "-")
+    ) {
+      throw new Error(`${label} contains a non-ordinary hunk line`);
+    }
+    if (lineIndex === record.anchorIndex) {
+      if (marker !== "-") {
+        throw new Error(`${label} anchor must be a removed hunk line`);
+      }
+      derivedAnchorOldLine = oldCursor;
+    }
+    if (marker === " " || marker === "-") oldCursor += 1;
+    if (marker === " " || marker === "+") newCursor += 1;
+  }
+  if (oldCursor - oldStart !== oldCount || newCursor - newStart !== newCount) {
+    throw new Error(`${label} hunk counts do not match its lines`);
+  }
+  if (derivedAnchorOldLine !== record.oldLine) {
+    throw new Error(
+      `${label} anchor old line does not match its hunk position`,
+    );
+  }
+  const anchorLine = lines[record.anchorIndex];
+  if (lines.slice(5).filter((line) => line === anchorLine).length !== 1) {
+    throw new Error(`${label} must contain exactly one anchor`);
+  }
+
+  const patchText = `${lines.join("\n")}\n`;
+  const finding = secretLikeReason(patchText, { gitDiff: true });
+  if (finding !== record.expectedFinding) {
+    throw new Error(
+      `${label} expected finding does not match the suppression-free scan`,
+    );
+  }
+  const maskedLines = [...lines];
+  maskedLines[record.anchorIndex] = "-";
+  if (
+    secretLikeReason(`${maskedLines.join("\n")}\n`, { gitDiff: true }) !== null
+  ) {
+    throw new Error(
+      `${label} leaves another secret-like finding after masking`,
+    );
+  }
+  return record;
+}
+
+function parseExactPatchSuppressions(rawConfig, label) {
+  if (
+    typeof rawConfig !== "string" ||
+    Buffer.byteLength(rawConfig, "utf8") > MAX_EXACT_PATCH_SUPPRESSION_BYTES
+  ) {
+    throw new Error(
+      `${label} exceeds the ${MAX_EXACT_PATCH_SUPPRESSION_BYTES}-byte limit`,
+    );
+  }
+  for (const character of rawConfig) {
+    const code = character.codePointAt(0);
+    if (code !== 0x0a && (code < 0x20 || code > 0x7e)) {
+      throw new Error(`${label} contains a non-printing or non-ASCII byte`);
+    }
+  }
+  if (!rawConfig.endsWith("\n") || rawConfig.endsWith("\n\n")) {
+    throw new Error(`${label} must end with exactly one newline`);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(rawConfig);
+  } catch {
+    throw new Error(`${label} must be valid JSON`);
+  }
+  if (
+    !Array.isArray(parsed) ||
+    parsed.length < 1 ||
+    parsed.length > MAX_EXACT_PATCH_SUPPRESSIONS
+  ) {
+    throw new Error(
+      `${label} must contain 1-${MAX_EXACT_PATCH_SUPPRESSIONS} records`,
+    );
+  }
+
+  const records = [];
+  const seenRecords = new Set();
+  const seenPatches = new Set();
+  for (let recordIndex = 0; recordIndex < parsed.length; recordIndex += 1) {
+    const record = parsed[recordIndex];
+    const recordLabel = `${label} record ${recordIndex}`;
+    if (
+      !record ||
+      Array.isArray(record) ||
+      !exactArrayEqual(Object.keys(record), EXACT_PATCH_SUPPRESSION_KEYS)
+    ) {
+      throw new Error(`${recordLabel} has unknown, missing, or reordered keys`);
+    }
+    assertPrintableAscii(record.reason, `${recordLabel} reason`, 1, 240);
+    assertPrintableAscii(
+      record.expectedFinding,
+      `${recordLabel} expected finding`,
+      1,
+      80,
+    );
+    if (
+      !Number.isSafeInteger(record.anchorIndex) ||
+      record.anchorIndex < 5 ||
+      !Number.isSafeInteger(record.oldLine) ||
+      record.oldLine < 1 ||
+      !Array.isArray(record.patchLines) ||
+      record.patchLines.length < 6 ||
+      record.patchLines.length > MAX_EXACT_PATCH_LINES ||
+      record.anchorIndex >= record.patchLines.length
+    ) {
+      throw new Error(`${recordLabel} has invalid bounds`);
+    }
+    for (const [lineIndex, line] of record.patchLines.entries()) {
+      assertPrintableAscii(
+        line,
+        `${recordLabel} patch line ${lineIndex}`,
+        1,
+        MAX_EXACT_PATCH_LINE_BYTES,
+      );
+    }
+    const recordKey = JSON.stringify(record);
+    const patchKey = record.patchLines.join("\n");
+    if (seenRecords.has(recordKey) || seenPatches.has(patchKey)) {
+      throw new Error(`${label} contains a duplicate record or file patch`);
+    }
+    seenRecords.add(recordKey);
+    seenPatches.add(patchKey);
+    records.push(parseOrdinaryExactFilePatch(record, recordIndex));
+  }
+  if (rawConfig !== `${JSON.stringify(parsed, null, 2)}\n`) {
+    throw new Error(`${label} must use canonical JSON bytes`);
+  }
+  return records;
+}
+
+function splitExactGitFilePatches(patchText) {
+  if (typeof patchText !== "string") {
+    throw new Error("trusted Git patch must be text");
+  }
+  if (patchText === "") return [];
+  if (!patchText.endsWith("\n")) {
+    throw new Error("trusted Git patch must end with a newline");
+  }
+  if (!patchText.startsWith("diff --git ")) {
+    throw new Error("trusted Git patch must start with a file-patch header");
+  }
+  const lines = patchText.slice(0, -1).split("\n");
+  const sections = [];
+  let current = null;
+  for (const line of lines) {
+    if (line.startsWith("diff --git ")) {
+      if (current) sections.push(current);
+      current = [line];
+    } else if (current) {
+      current.push(line);
+    }
+  }
+  if (current) sections.push(current);
+  return sections;
+}
+
+function exactPatchSuppressionSession(records) {
+  let matchedRecordIndex = null;
+  return {
+    maskTrustedGitPatch(patchText) {
+      const lines = patchText === "" ? [] : patchText.slice(0, -1).split("\n");
+      const sections = splitExactGitFilePatches(patchText);
+      let lineOffset = 0;
+      for (const section of sections) {
+        const matches = [];
+        for (
+          let recordIndex = 0;
+          recordIndex < records.length;
+          recordIndex += 1
+        ) {
+          if (exactArrayEqual(section, records[recordIndex].patchLines)) {
+            matches.push(recordIndex);
+          }
+        }
+        if (matches.length > 1) {
+          throw new Error(
+            "trusted Git file patch matches multiple suppression records",
+          );
+        }
+        if (matches.length === 1) {
+          const recordIndex = matches[0];
+          if (matchedRecordIndex !== null) {
+            throw new Error(
+              "trusted Git patch suppression matches more than one record occurrence",
+            );
+          }
+          matchedRecordIndex = recordIndex;
+          const record = records[recordIndex];
+          const maskedSection = [...section];
+          maskedSection[record.anchorIndex] = "-";
+          if (
+            secretLikeReason(`${maskedSection.join("\n")}\n`, {
+              gitDiff: true,
+            }) !== null
+          ) {
+            throw new Error(
+              "trusted Git file patch leaves a secret-like finding after masking",
+            );
+          }
+          lines[lineOffset + record.anchorIndex] = "-";
+        }
+        lineOffset += section.length;
+      }
+      return patchText === "" ? "" : `${lines.join("\n")}\n`;
+    },
+  };
+}
+
+export function createExactPatchSecretSuppressionForTest(rawConfig) {
+  return exactPatchSuppressionSession(
+    parseExactPatchSuppressions(rawConfig, "test exact patch suppression"),
+  );
+}
+
+export function createTrustedGitPatchSecretSuppression(reviewedRepo) {
+  const reviewedRoot = realpathSync(reviewedRepo);
+  const materializedCoreDirectory = path.dirname(
+    realpathSync(fileURLToPath(import.meta.url)),
+  );
+  const configPath = path.join(
+    materializedCoreDirectory,
+    EXACT_PATCH_SUPPRESSION_FILE,
+  );
+  if (isWithin(configPath, reviewedRoot)) {
+    throw new Error(
+      "sealed exact patch suppression config must be outside the reviewed checkout",
+    );
+  }
+  const { data } = readBoundedRegularFile(
+    configPath,
+    "sealed exact patch suppression config",
+    MAX_EXACT_PATCH_SUPPRESSION_BYTES,
+  );
+  const rawConfig = decodeUtf8(data, "sealed exact patch suppression config");
+  return exactPatchSuppressionSession(
+    parseExactPatchSuppressions(
+      rawConfig,
+      "sealed exact patch suppression config",
+    ),
+  );
 }
 
 export function assertNoSecretLikeContent(label, text, options) {

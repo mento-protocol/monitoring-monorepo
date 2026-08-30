@@ -144,6 +144,7 @@ export const AGENT_MODULE_ARMS = [
   {
     patterns: [
       "scripts/agent-autoreview.mjs",
+      "scripts/agent-autoreview-secret-suppressions.json",
       "scripts/agent-autoreview-core.test.mjs",
       "scripts/agent-autoreview-target-guard.test.mjs",
     ],

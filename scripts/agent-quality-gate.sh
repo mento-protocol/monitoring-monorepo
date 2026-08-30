@@ -7188,6 +7188,7 @@ implementation_signature() {
     scripts/agent-quality-gate.sh \
     scripts/agent-quality-gate.test.sh \
     scripts/agent-autoreview-core.mjs \
+    scripts/agent-autoreview-secret-suppressions.json \
     scripts/gate/run-handles.sh \
     scripts/gate/darwin-broker-launch-preflight.mjs \
     scripts/gate/darwin-broker-launch-preflight.test.mjs \
@@ -7245,7 +7246,7 @@ implementation_signature() {
     scripts/gate/mapping/*.test.mjs | scripts/gate/routing-table/*.test.mjs)
         implementation_path="$repo_root/$path"
         ;;
-      scripts/agent-quality-gate.sh | scripts/agent-autoreview-core.mjs | scripts/docs/docs-navigation-eval-helpers.mjs | scripts/gate/lockfile-scope.mjs | scripts/gate/run-handles.sh | scripts/gate/darwin-broker-launch-preflight.mjs | scripts/gate/darwin-process-identity.c | scripts/gate/darwin-process-identity-runtime.inc.c | scripts/gate/darwin-process-identity-helper.mjs | scripts/gate/darwin-process-lineage-model.mjs | scripts/gate/darwin-process-lineage-state.mjs | scripts/gate/darwin-process-lineage.mjs | scripts/gate/darwin-process-lineage.sh | scripts/gate/trunk-check-once.sh | scripts/gate/mapping.mjs | scripts/gate/mapping/*.mjs | scripts/gate/routing-table/*.mjs | scripts/gate/quality-gate-coordinator.sh | scripts/gate/quality-gate-coordinator-support.sh)
+      scripts/agent-quality-gate.sh | scripts/agent-autoreview-core.mjs | scripts/agent-autoreview-secret-suppressions.json | scripts/docs/docs-navigation-eval-helpers.mjs | scripts/gate/lockfile-scope.mjs | scripts/gate/run-handles.sh | scripts/gate/darwin-broker-launch-preflight.mjs | scripts/gate/darwin-process-identity.c | scripts/gate/darwin-process-identity-runtime.inc.c | scripts/gate/darwin-process-identity-helper.mjs | scripts/gate/darwin-process-lineage-model.mjs | scripts/gate/darwin-process-lineage-state.mjs | scripts/gate/darwin-process-lineage.mjs | scripts/gate/darwin-process-lineage.sh | scripts/gate/trunk-check-once.sh | scripts/gate/mapping.mjs | scripts/gate/mapping/*.mjs | scripts/gate/routing-table/*.mjs | scripts/gate/quality-gate-coordinator.sh | scripts/gate/quality-gate-coordinator-support.sh)
         implementation_path="$script_source_dir/${path#scripts/}"
         ;;
       *)

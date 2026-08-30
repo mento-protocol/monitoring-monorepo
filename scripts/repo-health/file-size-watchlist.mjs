@@ -36,7 +36,7 @@ export const SCRIPTS_EXEMPTIONS = [
   },
   {
     reason:
-      "trust root: the wrapper materializes the entry point, core, native Darwin identity runtime, and process-identity dependency under a 2 MB aggregate cap from explicit trust lists and private nested directories; splitting either large helper changes the attested runtime",
+      "trust root: the wrapper materializes the entry point, core, sealed exact-patch suppression policy, native Darwin identity runtime, and process-identity dependency under a 2 MB aggregate cap from explicit trust lists and private nested directories; splitting either large helper changes the attested runtime",
     paths: [
       "scripts/agent-autoreview.mjs",
       "scripts/agent-autoreview-core.mjs",

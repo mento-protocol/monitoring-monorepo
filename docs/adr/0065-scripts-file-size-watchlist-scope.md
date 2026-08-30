@@ -91,10 +91,10 @@ change could extend. Both make extending them a change to how the autoreview
 wrapper proves its own integrity, and this repository does not make that change
 to satisfy a line count.
 
-| File                                                | Mechanism                                                                                                                                                                                                                                                                                                                                                                 |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agent-autoreview.sh`                               | `verify_current_wrapper_matches_ref` hashes the wrapper's own blob against the frozen-HEAD snapshot before an explicit branch or commit review. A sourced sibling falls outside the identity that check proves, so moving bulk out weakens the property rather than preserving it.                                                                                        |
-| `agent-autoreview.mjs`, `agent-autoreview-core.mjs` | The wrapper materializes the entry point, core, Darwin identity sources and lineage modules, and `gate/mapped-command-process-identity.mjs` under a 2 MB aggregate cap. Explicit trust lists, private nested directories, no-follow copies, file modes, and protected-ref blob checks attest the complete runtime. Splitting either large helper changes that trust root. |
+| File                                                | Mechanism                                                                                                                                                                                                                                                                                                                                                                                                      |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent-autoreview.sh`                               | `verify_current_wrapper_matches_ref` hashes the wrapper's own blob against the frozen-HEAD snapshot before an explicit branch or commit review. A sourced sibling falls outside the identity that check proves, so moving bulk out weakens the property rather than preserving it.                                                                                                                             |
+| `agent-autoreview.mjs`, `agent-autoreview-core.mjs` | The wrapper materializes the entry point, core, sealed exact-patch suppression JSON, Darwin identity sources and lineage modules, and `gate/mapped-command-process-identity.mjs` under a 2 MB aggregate cap. Explicit trust lists, private nested directories, no-follow copies, file modes, and protected-ref blob checks attest the complete runtime. Splitting either large helper changes that trust root. |
 
 **Nothing whose split is merely expensive is exempt.** `agent-quality-gate.sh`
 is the largest example and stays measured at the hard cap without an exemption.
@@ -118,8 +118,8 @@ three ways it rots. The exempt path set is spelled out in the test, and the test
 also asserts this file records each path, so adding or dropping an entry reds
 until this record moves with it. Each exempted file must still exist and still
 be above the watch threshold, so one that shrank or moved reds. And the wrapper
-must still carry all nine runtime entries in each trust list and the 2 MB cap
-the reason cites. A
+must still carry all ten non-shell runtime entries in each trust list and the
+2 MB cap the reason cites. A
 further test proves the suppression is the exemption's work, not the scope's, by
 scanning identical content at an exempt path and at a plain sibling.
 

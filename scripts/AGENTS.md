@@ -57,11 +57,11 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 `scripts/` has 14 path-pin classes. Move each pin with its file, except the
 `agent-autoreview.sh` feedback-runtime pins.
 
-- **Autoreview runtime pins.** `agent-autoreview.sh` pins sibling runtime and
-  optional `pr-feedback-state-claude.mjs` and
-  `pr-ready-state-review-signals.mjs`; feedback blobs use `origin/main`. Move
-  feedback paths in three merges: add copies/fallback; repoint; remove old paths
-  after no pre-move wrapper remains (ADR 0064).
+- **Autoreview runtime pins.** `agent-autoreview.sh` pins runtime,
+  sealed `agent-autoreview-secret-suppressions.json` (ADR 0079), and optional
+  `pr-feedback-state-claude.mjs` and
+  `pr-ready-state-review-signals.mjs`; feedback uses `origin/main`. Use ADR
+  0064's three-merge sequence for moves.
 - **Gate routing pins.** The gate excludes stub-repo tests with
   `$script_source_dir == $repo_root/scripts`, and pairs
   `bootstrap/codex-cloud-setup.{sh,test.sh}` for offline tests. It routes
@@ -87,11 +87,11 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
   `$script_source_dir`; tests hash them from `$repo_root`. Move each path with
   its routes, signatures, fixtures, and literals (ADRs 0064 and
   0076).
-- **Gate mapping pins.** The signature and three Turbo inputs pin
-  `gate/routing-table/**`, `gate/mapping*`, and
-  `agent-autoreview-core.mjs`. Runtime hashes use `$script_source_dir`; suites
-  use `$repo_root`. Core edits route both suites; missing pins freeze the stamp
-  (ADR 0069).
+- **Gate mapping pins.** The signature and Turbo inputs pin
+  `gate/routing-table/**`, `gate/mapping*`, the autoreview core, and its sealed
+  policy. Runtime hashes use `$script_source_dir`; suites use `$repo_root`.
+  Core edits route both suites; policy edits route autoreview. Missing pins
+  freeze the stamp (ADRs 0069 and 0079).
 - **Review-eval pins.** `review/run-eval-source-snapshot.sh` joins the
   four-source set in `docs/evals/review-skill.md`; update every listed consumer
   together.
