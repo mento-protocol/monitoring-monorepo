@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 // prettier-ignore
 import { collectTriggers, hasWritePermission, jobReceivesCredential, parseWorkflow } from "./check-autofix-ci-trust.mjs";
 import { isMapping, workflowJobSteps } from "../lib/workflow-yaml.mjs";
+import { validateWorkflowInventory } from "../production-infra-identity-contract/workflow-inventory.mjs";
 
 export const M2_BASE_SHA = "ccef910fa6fc267751681176ffdeef01daf90b40";
 export const M2_RECEIPT =
@@ -42,7 +43,6 @@ const AUTHORITY = [
   'ci.yml|ui|{"actions":"read","contents":"read"}|["secrets.CODECOV_TOKEN"]|null|null|null',
   'claude.yml|auto-review|{"actions":"read","contents":"read","pull-requests":"write"}|["github.token","secrets.CLAUDE_CODE_OAUTH_TOKEN"]|null|null|null',
   'claude.yml|claude|{"actions":"read","contents":"read","issues":"write","pull-requests":"write"}|["github.token","secrets.CLAUDE_CODE_OAUTH_TOKEN"]|null|null|null',
-  'dependabot-auto-merge.yml|auto-merge|{"contents":"write","pull-requests":"write"}|["secrets.GITHUB_TOKEN","secrets.GITHUB_TOKEN"]|null|null|null',
   'governance-watchdog.yml|apply|{"actions":"read","contents":"read","deployments":"read","id-token":"write"}|["github.token","secrets.TF_VAR_BILLING_ACCOUNT","secrets.TF_VAR_DISCORD_TEST_WEBHOOK_URL","secrets.TF_VAR_DISCORD_WEBHOOK_URL","secrets.TF_VAR_GITHUB_TOKEN","secrets.TF_VAR_GOVERNANCE_WATCHDOG_QUICKNODE_API_KEY","secrets.TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID","secrets.TF_VAR_QUICKNODE_SECURITY_TOKEN","secrets.TF_VAR_TELEGRAM_BOT_TOKEN","secrets.TF_VAR_TELEGRAM_CHAT_ID","secrets.TF_VAR_TELEGRAM_TEST_CHAT_ID","secrets.TF_VAR_VICTOROPS_WEBHOOK_URL","secrets.TF_VAR_X_AUTH_TOKEN"]|{"name":"production-infra","url":"https://console.cloud.google.com/home/dashboard?project=mento-terraform-seed-ffac"}|null|null',
   'governance-watchdog.yml|plan|{"actions":"read","contents":"read","id-token":"write"}|["github.token","secrets.GCP_SERVICE_ACCOUNT_PLAN","secrets.GCP_WORKLOAD_IDENTITY_PROVIDER","secrets.TF_VAR_BILLING_ACCOUNT","secrets.TF_VAR_DISCORD_TEST_WEBHOOK_URL","secrets.TF_VAR_DISCORD_WEBHOOK_URL","secrets.TF_VAR_GITHUB_TOKEN","secrets.TF_VAR_GOVERNANCE_WATCHDOG_QUICKNODE_API_KEY","secrets.TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID","secrets.TF_VAR_QUICKNODE_SECURITY_TOKEN","secrets.TF_VAR_SLACK_BOT_TOKEN","secrets.TF_VAR_TELEGRAM_BOT_TOKEN","secrets.TF_VAR_TELEGRAM_CHAT_ID","secrets.TF_VAR_TELEGRAM_TEST_CHAT_ID","secrets.TF_VAR_VICTOROPS_WEBHOOK_URL","secrets.TF_VAR_X_AUTH_TOKEN"]|null|null|null',
   'lighthouse.yml|lighthouse|{"contents":"read","deployments":"read","pull-requests":"read","statuses":"read"}|["secrets.VERCEL_AUTOMATION_BYPASS_SECRET","secrets.VERCEL_AUTOMATION_BYPASS_SECRET"]|null|null|null',
@@ -205,15 +205,12 @@ function checkSchema(root, violations) {
 
 // prettier-ignore
 function checkDependabot(root, violations) {
-  const workflow = load(root, ".github/workflows/dependabot-auto-merge.yml");
-  const job = workflow.jobs?.["auto-merge"];
-  add(violations, Object.keys(workflow.jobs ?? {}).join() === "auto-merge" && expr(job?.if) === "github.event.pull_request.user.login == 'dependabot[bot]'", "Dependabot auto-merge must contain one actor-gated job");
-  const safe = workflowJobSteps(job).every((step) => {
-    const uses = String(step.uses ?? "");
-    const commands = String(step.run ?? "").split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
-    return step["working-directory"] == null && (uses === "" || uses === "dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98") && commands.every((line) => line.startsWith("echo ") || line === 'gh pr merge --auto --squash "$PR_URL"');
-  });
-  add(violations, safe, "Dependabot auto-merge must not execute candidate code");
+  for (const path of [
+    ".github/workflows/dependabot-auto-merge-candidate.yml",
+    ".github/workflows/dependabot-auto-merge.yml",
+  ]) {
+    validateWorkflowInventory(path, load(root, path), violations);
+  }
 }
 
 // prettier-ignore

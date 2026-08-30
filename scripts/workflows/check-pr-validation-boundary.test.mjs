@@ -326,17 +326,17 @@ test("structural mutations fail closed at each M2 boundary", () => {
   );
   mutateOnce(
     root,
-    ".github/workflows/dependabot-auto-merge.yml",
-    "    if: github.event.pull_request.user.login == 'dependabot[bot]'",
-    "    if: github.event.pull_request.user.login != 'dependabot[bot]'",
-    /actor-gated/u,
+    ".github/workflows/dependabot-auto-merge-candidate.yml",
+    "      github.actor == 'dependabot[bot]'",
+    "      github.actor != 'dependabot[bot]'",
+    /exact reviewed Dependabot auto-merge workflow pair inventory/u,
   );
   mutateOnce(
     root,
     ".github/workflows/dependabot-auto-merge.yml",
-    'run: gh pr merge --auto --squash "$PR_URL"',
-    "run: pnpm test",
-    /execute candidate code/u,
+    ".run_attempt == 1 and",
+    ".run_attempt > 0 and",
+    /exact reviewed Dependabot auto-merge workflow pair inventory/u,
   );
 });
 

@@ -120,6 +120,7 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 - **Production identity pins.**
   `production-infra-identity-contract/workflow-inventory.mjs` pins exact
   workflows, including the paired Dependabot merge boundary.
+  `workflows/check-pr-validation-boundary.mjs` imports that pair contract.
 - **External console pins.** Codex Cloud pins
   `bootstrap/codex-cloud-{setup,maintenance}.sh`; Claude Code web pins
   `bootstrap/claude-code-web-setup.sh` through `.claude/hooks/session-start.sh`.
