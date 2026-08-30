@@ -14,6 +14,27 @@ const DEPENDABOT_MERGE_APP_REPOSITORY_PERMISSIONS = Object.freeze({
 export const MAIN_LIFECYCLE_RULESET_ADDRESS =
   "github_repository_ruleset.controlled_main_lifecycle[0]";
 const DEPENDABOT_MERGE_ENVIRONMENT = "dependabot-merge";
+const BROKER_PROJECT_ID = "mento-monitoring";
+const BROKER_SERVICE_ACCOUNT_ID = "local-agent-github-broker";
+const BROKER_SERVICE_ACCOUNT_EMAIL = `${BROKER_SERVICE_ACCOUNT_ID}@${BROKER_PROJECT_ID}.iam.gserviceaccount.com`;
+const BROKER_SERVICE_ACCOUNT_MEMBER = `serviceAccount:${BROKER_SERVICE_ACCOUNT_EMAIL}`;
+const BROKER_SERVICE_ACCOUNT_NAME = `projects/${BROKER_PROJECT_ID}/serviceAccounts/${BROKER_SERVICE_ACCOUNT_EMAIL}`;
+const BROKER_SERVICE_ACCOUNT_DISPLAY_NAME =
+  "Local agent GitHub credential broker";
+const BROKER_SERVICE_ACCOUNT_DESCRIPTION =
+  "Broker identity that reads the local-agent GitHub App key to mint non-bypass installation tokens outside agent processes.";
+const BROKER_SECRET_ID = "local-agent-github-app-private-key";
+const BROKER_SECRET_NAME = `projects/${BROKER_PROJECT_ID}/secrets/${BROKER_SECRET_ID}`;
+const BROKER_SECRET_LABELS = Object.freeze({
+  managed_by: "terraform",
+  purpose: "local-agent-github-app",
+});
+const BROKER_SECRET_EFFECTIVE_LABELS = Object.freeze({
+  "goog-terraform-provisioned": "true",
+  ...BROKER_SECRET_LABELS,
+});
+const BROKER_SECRET_ACCESSOR_ROLE = "roles/secretmanager.secretAccessor";
+const BROKER_IMPERSONATOR_ROLE = "roles/iam.serviceAccountTokenCreator";
 const DEPENDABOT_MERGE_CREDENTIAL_RESOURCE_SPECS = Object.freeze([
   Object.freeze({
     address: "github_repository_environment.dependabot_merge[0]",
@@ -52,6 +73,7 @@ const BROKER_SCAFFOLD_RESOURCE_SPECS = Object.freeze([
   Object.freeze({
     address: "google_service_account.local_agent_github_broker[0]",
     index: 0,
+    kind: "service-account",
     name: "local_agent_github_broker",
     type: "google_service_account",
   }),
@@ -59,6 +81,7 @@ const BROKER_SCAFFOLD_RESOURCE_SPECS = Object.freeze([
     address:
       "google_secret_manager_secret.local_agent_github_app_private_key[0]",
     index: 0,
+    kind: "secret",
     name: "local_agent_github_app_private_key",
     type: "google_secret_manager_secret",
   }),
@@ -66,6 +89,7 @@ const BROKER_SCAFFOLD_RESOURCE_SPECS = Object.freeze([
     address:
       "google_secret_manager_secret_version.local_agent_github_app_private_key[0]",
     index: 0,
+    kind: "secret-version",
     name: "local_agent_github_app_private_key",
     replaceable: true,
     type: "google_secret_manager_secret_version",
@@ -74,12 +98,14 @@ const BROKER_SCAFFOLD_RESOURCE_SPECS = Object.freeze([
     address:
       "google_secret_manager_secret_iam_member.local_agent_github_broker_accessor[0]",
     index: 0,
+    kind: "secret-accessor",
     name: "local_agent_github_broker_accessor",
     type: "google_secret_manager_secret_iam_member",
   }),
   Object.freeze({
     address: undefined,
     index: undefined,
+    kind: "impersonator",
     name: "local_agent_github_broker_impersonator",
     type: "google_service_account_iam_member",
   }),
@@ -761,26 +787,455 @@ function exactBrokerScaffoldIdentity(entry, spec, expected) {
   );
 }
 
-function validateCanonicalBrokerScaffoldChange(entry, errors) {
+const BROKER_PROJECT_REFERENCES = Object.freeze([
+  "google_project.monitoring.project_id",
+  "google_project.monitoring",
+]);
+const BROKER_SERVICE_ACCOUNT_EMAIL_REFERENCES = Object.freeze([
+  "google_service_account.local_agent_github_broker[0].email",
+  "google_service_account.local_agent_github_broker[0]",
+  "google_service_account.local_agent_github_broker",
+]);
+const BROKER_SERVICE_ACCOUNT_NAME_REFERENCES = Object.freeze([
+  "google_service_account.local_agent_github_broker[0].name",
+  "google_service_account.local_agent_github_broker[0]",
+  "google_service_account.local_agent_github_broker",
+]);
+const BROKER_SECRET_ID_REFERENCES = Object.freeze([
+  "google_secret_manager_secret.local_agent_github_app_private_key[0].secret_id",
+  "google_secret_manager_secret.local_agent_github_app_private_key[0]",
+  "google_secret_manager_secret.local_agent_github_app_private_key",
+]);
+const BROKER_SECRET_NAME_REFERENCES = Object.freeze([
+  "google_secret_manager_secret.local_agent_github_app_private_key[0].id",
+  "google_secret_manager_secret.local_agent_github_app_private_key[0]",
+  "google_secret_manager_secret.local_agent_github_app_private_key",
+]);
+
+function exactObjectKeys(value, expected) {
+  return (
+    isObject(value) &&
+    isDeepStrictEqual(Object.keys(value).sort(), [...expected].sort())
+  );
+}
+
+function exactFields(value, expected) {
+  return Object.entries(expected).every(([name, expectedValue]) =>
+    isDeepStrictEqual(value?.[name], expectedValue),
+  );
+}
+
+function boundedProviderText(value, maximum = 4096) {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= maximum &&
+    ![...value].some((character) => {
+      const point = character.codePointAt(0);
+      return point < 0x20 || point === 0x7f;
+    })
+  );
+}
+
+function exactTimestamp(value) {
+  return (
+    typeof value === "string" &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/u.test(value) &&
+    Number.isFinite(Date.parse(value))
+  );
+}
+
+function exactExpressionKeys(expressions, expected) {
+  return exactObjectKeys(expressions, Object.keys(expected));
+}
+
+function constantExpression(value) {
+  return { constant_value: value };
+}
+
+function referenceExpression(references) {
+  return { references: [...references] };
+}
+
+function expectedBrokerConfigurationExpressions(spec) {
+  if (spec.kind === "service-account") {
+    return {
+      account_id: constantExpression(BROKER_SERVICE_ACCOUNT_ID),
+      description: constantExpression(BROKER_SERVICE_ACCOUNT_DESCRIPTION),
+      display_name: constantExpression(BROKER_SERVICE_ACCOUNT_DISPLAY_NAME),
+      project: referenceExpression(BROKER_PROJECT_REFERENCES),
+    };
+  }
+  if (spec.kind === "secret") {
+    return {
+      labels: constantExpression(BROKER_SECRET_LABELS),
+      project: referenceExpression(BROKER_PROJECT_REFERENCES),
+      replication: [{ auto: [{}] }],
+      secret_id: constantExpression(BROKER_SECRET_ID),
+    };
+  }
+  if (spec.kind === "secret-version") {
+    return {
+      deletion_policy: constantExpression("DISABLE"),
+      secret: referenceExpression(BROKER_SECRET_NAME_REFERENCES),
+      secret_data_wo: referenceExpression([
+        "var.local_agent_github_app_private_key",
+      ]),
+      secret_data_wo_version: referenceExpression([
+        "var.local_agent_github_app_private_key_rotation_counter",
+      ]),
+    };
+  }
+  if (spec.kind === "secret-accessor") {
+    return {
+      member: referenceExpression(BROKER_SERVICE_ACCOUNT_EMAIL_REFERENCES),
+      project: referenceExpression(BROKER_PROJECT_REFERENCES),
+      role: constantExpression(BROKER_SECRET_ACCESSOR_ROLE),
+      secret_id: referenceExpression(BROKER_SECRET_ID_REFERENCES),
+    };
+  }
+  return {
+    member: referenceExpression(["each.value"]),
+    role: constantExpression(BROKER_IMPERSONATOR_ROLE),
+    service_account_id: referenceExpression(
+      BROKER_SERVICE_ACCOUNT_NAME_REFERENCES,
+    ),
+  };
+}
+
+function validateBrokerScaffoldConfiguration(plan, spec, errors) {
+  const resources = plan.configuration?.root_module?.resources;
+  const baseAddress = `${spec.type}.${spec.name}`;
+  const matches = Array.isArray(resources)
+    ? resources.filter(
+        (resource) =>
+          resource?.type === spec.type && resource?.name === spec.name,
+      )
+    : [];
+  const resource = matches[0];
+  const expectedExpressions = expectedBrokerConfigurationExpressions(spec);
+  if (
+    matches.length !== 1 ||
+    resource?.address !== baseAddress ||
+    resource?.mode !== "managed" ||
+    resource?.provider_config_key !== "google" ||
+    resource?.schema_version !== 0 ||
+    !exactExpressionKeys(resource?.expressions, expectedExpressions) ||
+    !isDeepStrictEqual(resource?.expressions, expectedExpressions)
+  ) {
+    errors.push(
+      "broker scaffold Terraform configuration must use only the pinned project, canonical resource references, write-only key variable, rotation counter, and exact IAM values",
+    );
+  }
+}
+
+function exactServiceAccountShape(value, mode) {
+  const fixed = {
+    account_id: BROKER_SERVICE_ACCOUNT_ID,
+    create_ignore_already_exists: null,
+    description: BROKER_SERVICE_ACCOUNT_DESCRIPTION,
+    disabled: false,
+    display_name: BROKER_SERVICE_ACCOUNT_DISPLAY_NAME,
+    email: BROKER_SERVICE_ACCOUNT_EMAIL,
+    member: BROKER_SERVICE_ACCOUNT_MEMBER,
+    project: BROKER_PROJECT_ID,
+    timeouts: null,
+  };
+  const keys = Object.keys(fixed);
+  if (mode === "live") keys.push("id", "name", "unique_id");
+  return (
+    exactObjectKeys(value, keys) &&
+    exactFields(value, fixed) &&
+    (mode !== "live" ||
+      (value.id === BROKER_SERVICE_ACCOUNT_NAME &&
+        value.name === BROKER_SERVICE_ACCOUNT_NAME &&
+        /^[1-9][0-9]{0,63}$/u.test(value.unique_id)))
+  );
+}
+
+function exactSecretShape(value, mode) {
+  const fixed = {
+    annotations: null,
+    deletion_protection: false,
+    effective_labels: BROKER_SECRET_EFFECTIVE_LABELS,
+    labels: BROKER_SECRET_LABELS,
+    project: BROKER_PROJECT_ID,
+    replication: [
+      {
+        auto: [{ customer_managed_encryption: [] }],
+        user_managed: [],
+      },
+    ],
+    rotation: [],
+    secret_id: BROKER_SECRET_ID,
+    tags: null,
+    terraform_labels: BROKER_SECRET_EFFECTIVE_LABELS,
+    timeouts: null,
+    topics: [],
+    ttl: null,
+    version_aliases: null,
+    version_destroy_ttl: null,
+  };
+  const keys = Object.keys(fixed);
+  if (mode === "live") {
+    keys.push(
+      "create_time",
+      "effective_annotations",
+      "expire_time",
+      "id",
+      "name",
+    );
+  }
+  return (
+    exactObjectKeys(value, keys) &&
+    exactFields(value, fixed) &&
+    (mode !== "live" ||
+      (exactTimestamp(value.create_time) &&
+        isDeepStrictEqual(value.effective_annotations, {}) &&
+        value.expire_time === null &&
+        value.id === BROKER_SECRET_NAME &&
+        value.name === BROKER_SECRET_NAME))
+  );
+}
+
+function exactSecretVersionShape(value, mode) {
+  const fixed = {
+    deletion_policy: "DISABLE",
+    enabled: true,
+    is_secret_data_base64: false,
+    secret_data: null,
+    secret_data_wo: null,
+    timeouts: null,
+  };
+  const keys = [...Object.keys(fixed), "secret_data_wo_version"];
+  if (mode !== "create-unknown-secret") {
+    fixed.secret = BROKER_SECRET_NAME;
+    keys.push("secret");
+  }
+  if (mode === "live") {
+    keys.push("create_time", "destroy_time", "id", "name", "version");
+  }
+  const rotation = value?.secret_data_wo_version;
+  if (
+    !exactObjectKeys(value, keys) ||
+    !exactFields(value, fixed) ||
+    !Number.isSafeInteger(rotation) ||
+    rotation <= 0
+  ) {
+    return false;
+  }
+  if (mode !== "live") return true;
+  const version = value.version;
+  const versionName = `${BROKER_SECRET_NAME}/versions/${version}`;
+  return (
+    exactTimestamp(value.create_time) &&
+    value.destroy_time === null &&
+    /^[1-9][0-9]*$/u.test(version) &&
+    value.id === versionName &&
+    value.name === versionName
+  );
+}
+
+function exactIamComputedFields(value, expectedId) {
+  return boundedProviderText(value?.etag, 2048) && value?.id === expectedId;
+}
+
+function exactSecretAccessorShape(value, mode) {
+  const fixed = {
+    condition: [],
+    member: BROKER_SERVICE_ACCOUNT_MEMBER,
+    project: BROKER_PROJECT_ID,
+    role: BROKER_SECRET_ACCESSOR_ROLE,
+    secret_id: BROKER_SECRET_ID,
+  };
+  const keys = Object.keys(fixed);
+  if (mode === "live") keys.push("etag", "id");
+  return (
+    exactObjectKeys(value, keys) &&
+    exactFields(value, fixed) &&
+    (mode !== "live" ||
+      exactIamComputedFields(
+        value,
+        `${BROKER_SECRET_NAME} ${BROKER_SECRET_ACCESSOR_ROLE} ${BROKER_SERVICE_ACCOUNT_MEMBER}`,
+      ))
+  );
+}
+
+function exactImpersonatorShape(value, mode, impersonator) {
+  const fixed = {
+    condition: [],
+    member: impersonator,
+    role: BROKER_IMPERSONATOR_ROLE,
+  };
+  const keys = Object.keys(fixed);
+  if (mode !== "create-unknown-service-account") {
+    fixed.service_account_id = BROKER_SERVICE_ACCOUNT_NAME;
+    keys.push("service_account_id");
+  }
+  if (mode === "live") keys.push("etag", "id");
+  return (
+    exactObjectKeys(value, keys) &&
+    exactFields(value, fixed) &&
+    (mode !== "live" ||
+      exactIamComputedFields(
+        value,
+        `${BROKER_SERVICE_ACCOUNT_NAME} ${BROKER_IMPERSONATOR_ROLE} ${impersonator}`,
+      ))
+  );
+}
+
+function exactBrokerValueShape(spec, value, mode, expected) {
+  if (spec.kind === "service-account") {
+    return exactServiceAccountShape(value, mode);
+  }
+  if (spec.kind === "secret") return exactSecretShape(value, mode);
+  if (spec.kind === "secret-version") {
+    return exactSecretVersionShape(value, mode);
+  }
+  if (spec.kind === "secret-accessor") {
+    return exactSecretAccessorShape(value, mode);
+  }
+  return exactImpersonatorShape(value, mode, expected.brokerImpersonator);
+}
+
+function expectedBrokerCreateUnknown(spec, dependencies) {
+  if (spec.kind === "service-account") {
+    return { id: true, name: true, unique_id: true };
+  }
+  if (spec.kind === "secret") {
+    return {
+      create_time: true,
+      effective_annotations: true,
+      effective_labels: {},
+      expire_time: true,
+      id: true,
+      labels: {},
+      name: true,
+      replication: [
+        {
+          auto: [{ customer_managed_encryption: [] }],
+          user_managed: [],
+        },
+      ],
+      rotation: [],
+      terraform_labels: {},
+      topics: [],
+    };
+  }
+  if (spec.kind === "secret-version") {
+    return {
+      create_time: true,
+      destroy_time: true,
+      id: true,
+      name: true,
+      ...(dependencies.secretCreated ? { secret: true } : {}),
+      version: true,
+    };
+  }
+  if (spec.kind === "secret-accessor") {
+    return { condition: [], etag: true, id: true };
+  }
+  return {
+    condition: [],
+    etag: true,
+    id: true,
+    ...(dependencies.serviceAccountCreated ? { service_account_id: true } : {}),
+  };
+}
+
+function expectedBrokerReplacementUnknown() {
+  return {
+    create_time: true,
+    destroy_time: true,
+    id: true,
+    name: true,
+    version: true,
+  };
+}
+
+function validateBrokerUnknownShape(entry, expectedUnknown, errors) {
+  if (!isDeepStrictEqual(entry?.change?.after_unknown, expectedUnknown)) {
+    errors.push(
+      "broker scaffold planned unknown fields must match only the pinned provider-computed shape",
+    );
+  }
+}
+
+function validateCanonicalBrokerScaffoldChange(
+  entry,
+  spec,
+  dependencies,
+  expected,
+  errors,
+) {
   const actions = entry?.change?.actions;
   if (sameActions(actions, ["create"])) {
-    if (entry?.change?.before !== null || !isObject(entry?.change?.after)) {
+    const mode =
+      spec.kind === "secret-version" && dependencies.secretCreated
+        ? "create-unknown-secret"
+        : spec.kind === "impersonator" && dependencies.serviceAccountCreated
+          ? "create-unknown-service-account"
+          : "create";
+    if (
+      entry?.change?.before !== null ||
+      !exactBrokerValueShape(spec, entry?.change?.after, mode, expected)
+    ) {
       errors.push(
-        "a broker scaffold create must have no prior value and one known current resource shape",
+        `broker scaffold ${spec.kind} create must have no prior value and the exact pinned planned shape`,
       );
+    }
+    validateBrokerUnknownShape(
+      entry,
+      expectedBrokerCreateUnknown(spec, dependencies),
+      errors,
+    );
+    if (
+      entry?.change?.replace_paths !== undefined &&
+      !isDeepStrictEqual(entry.change.replace_paths, [])
+    ) {
+      errors.push("a broker scaffold create must not carry replacement paths");
     }
     return;
   }
   if (sameActions(actions, ["no-op"])) {
     if (
-      !isObject(entry?.change?.before) ||
-      !isObject(entry?.change?.after) ||
+      !exactBrokerValueShape(spec, entry?.change?.before, "live", expected) ||
+      !exactBrokerValueShape(spec, entry?.change?.after, "live", expected) ||
       !isDeepStrictEqual(entry.change.before, entry.change.after)
     ) {
       errors.push(
-        "a broker scaffold no-op must preserve the same current resource shape",
+        `broker scaffold ${spec.kind} no-op must preserve the exact pinned live shape`,
       );
     }
+    validateBrokerUnknownShape(entry, {}, errors);
+    if (
+      entry?.change?.replace_paths !== undefined &&
+      !isDeepStrictEqual(entry.change.replace_paths, [])
+    ) {
+      errors.push("a broker scaffold no-op must not carry replacement paths");
+    }
+    return;
+  }
+  if (spec.replaceable && sameActions(actions, ["create", "delete"])) {
+    const before = entry?.change?.before;
+    const after = entry?.change?.after;
+    if (
+      !exactBrokerValueShape(spec, before, "live", expected) ||
+      !exactBrokerValueShape(spec, after, "create", expected) ||
+      after?.secret_data_wo_version !== before?.secret_data_wo_version + 1 ||
+      !isDeepStrictEqual(entry?.change?.replace_paths, [
+        ["secret_data_wo_version"],
+      ])
+    ) {
+      errors.push(
+        "broker scaffold secret-version replacement must rotate only the write-only value through the next counter and exact replacement path",
+      );
+    }
+    validateBrokerUnknownShape(
+      entry,
+      expectedBrokerReplacementUnknown(),
+      errors,
+    );
   }
 }
 
@@ -832,7 +1287,7 @@ function validateBrokerScaffold(plan, rulesetEntry, expected, errors) {
     if (!exactBrokerScaffoldIdentity(entry, spec, expected)) {
       errors.push("a broker scaffold resource has an unexpected identity");
     }
-    validateCanonicalBrokerScaffoldChange(entry, errors);
+    validateBrokerScaffoldConfiguration(plan, spec, errors);
     const actions = entry?.change?.actions;
     const allowed =
       sameActions(actions, ["create"]) ||
@@ -843,6 +1298,31 @@ function validateBrokerScaffold(plan, rulesetEntry, expected, errors) {
         "broker scaffold resources may only be created, unchanged, or rotate the write-only credential version",
       );
     }
+  }
+
+  const serviceAccountEntry = entriesBySpec.get(
+    "google_service_account.local_agent_github_broker",
+  );
+  const secretEntry = entriesBySpec.get(
+    "google_secret_manager_secret.local_agent_github_app_private_key",
+  );
+  const dependencies = {
+    secretCreated: sameActions(secretEntry?.change?.actions, ["create"]),
+    serviceAccountCreated: sameActions(serviceAccountEntry?.change?.actions, [
+      "create",
+    ]),
+  };
+  for (const [key, entry] of entriesBySpec) {
+    const spec = BROKER_SCAFFOLD_RESOURCE_SPECS.find(
+      (candidate) => `${candidate.type}.${candidate.name}` === key,
+    );
+    validateCanonicalBrokerScaffoldChange(
+      entry,
+      spec,
+      dependencies,
+      expected,
+      errors,
+    );
   }
 
   const createEntries = related.filter((entry) =>

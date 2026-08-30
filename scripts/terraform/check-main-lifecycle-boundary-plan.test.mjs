@@ -18,6 +18,21 @@ const MANAGED_RULESET_ID = 24680;
 const ACTIONS_PUBLIC_KEY_ID = "actions-key-old";
 const BROKER_IMPERSONATOR =
   "serviceAccount:local-agent-broker@mento-monitoring.iam.gserviceaccount.com";
+const BROKER_PROJECT_ID = "mento-monitoring";
+const BROKER_SERVICE_ACCOUNT_ID = "local-agent-github-broker";
+const BROKER_SERVICE_ACCOUNT_EMAIL = `${BROKER_SERVICE_ACCOUNT_ID}@${BROKER_PROJECT_ID}.iam.gserviceaccount.com`;
+const BROKER_SERVICE_ACCOUNT_MEMBER = `serviceAccount:${BROKER_SERVICE_ACCOUNT_EMAIL}`;
+const BROKER_SERVICE_ACCOUNT_NAME = `projects/${BROKER_PROJECT_ID}/serviceAccounts/${BROKER_SERVICE_ACCOUNT_EMAIL}`;
+const BROKER_SECRET_ID = "local-agent-github-app-private-key";
+const BROKER_SECRET_NAME = `projects/${BROKER_PROJECT_ID}/secrets/${BROKER_SECRET_ID}`;
+const BROKER_SECRET_LABELS = Object.freeze({
+  managed_by: "terraform",
+  purpose: "local-agent-github-app",
+});
+const BROKER_SECRET_EFFECTIVE_LABELS = Object.freeze({
+  "goog-terraform-provisioned": "true",
+  ...BROKER_SECRET_LABELS,
+});
 const POLICY_BASE = Object.freeze({
   repository: "mento-protocol/monitoring-monorepo",
   controlled_main_lifecycle_resources_enabled: true,
@@ -237,11 +252,177 @@ function dependabotCredentialEntries({ actions = ["no-op"] } = {}) {
   });
 }
 
-function brokerScaffoldEntries({ actions = ["no-op"] } = {}) {
-  return [
+function serviceAccountValue(mode) {
+  const value = {
+    account_id: BROKER_SERVICE_ACCOUNT_ID,
+    create_ignore_already_exists: null,
+    description:
+      "Broker identity that reads the local-agent GitHub App key to mint non-bypass installation tokens outside agent processes.",
+    disabled: false,
+    display_name: "Local agent GitHub credential broker",
+    email: BROKER_SERVICE_ACCOUNT_EMAIL,
+    member: BROKER_SERVICE_ACCOUNT_MEMBER,
+    project: BROKER_PROJECT_ID,
+    timeouts: null,
+  };
+  if (mode === "live") {
+    value.id = BROKER_SERVICE_ACCOUNT_NAME;
+    value.name = BROKER_SERVICE_ACCOUNT_NAME;
+    value.unique_id = "104242424242424242424";
+  }
+  return value;
+}
+
+function secretValue(mode) {
+  const value = {
+    annotations: null,
+    deletion_protection: false,
+    effective_labels: structuredClone(BROKER_SECRET_EFFECTIVE_LABELS),
+    labels: structuredClone(BROKER_SECRET_LABELS),
+    project: BROKER_PROJECT_ID,
+    replication: [
+      {
+        auto: [{ customer_managed_encryption: [] }],
+        user_managed: [],
+      },
+    ],
+    rotation: [],
+    secret_id: BROKER_SECRET_ID,
+    tags: null,
+    terraform_labels: structuredClone(BROKER_SECRET_EFFECTIVE_LABELS),
+    timeouts: null,
+    topics: [],
+    ttl: null,
+    version_aliases: null,
+    version_destroy_ttl: null,
+  };
+  if (mode === "live") {
+    value.create_time = "2026-08-30T10:00:00Z";
+    value.effective_annotations = {};
+    value.expire_time = null;
+    value.id = BROKER_SECRET_NAME;
+    value.name = BROKER_SECRET_NAME;
+  }
+  return value;
+}
+
+function secretVersionValue(mode, counter) {
+  const value = {
+    deletion_policy: "DISABLE",
+    enabled: true,
+    is_secret_data_base64: false,
+    secret_data: null,
+    secret_data_wo: null,
+    secret_data_wo_version: counter,
+    timeouts: null,
+  };
+  if (mode !== "create-unknown-secret") value.secret = BROKER_SECRET_NAME;
+  if (mode === "live") {
+    value.create_time = "2026-08-30T10:00:00Z";
+    value.destroy_time = null;
+    value.id = `${BROKER_SECRET_NAME}/versions/7`;
+    value.name = `${BROKER_SECRET_NAME}/versions/7`;
+    value.version = "7";
+  }
+  return value;
+}
+
+function secretAccessorValue(mode) {
+  const value = {
+    condition: [],
+    member: BROKER_SERVICE_ACCOUNT_MEMBER,
+    project: BROKER_PROJECT_ID,
+    role: "roles/secretmanager.secretAccessor",
+    secret_id: BROKER_SECRET_ID,
+  };
+  if (mode === "live") {
+    value.etag = "BwYAAAAAAA0=";
+    value.id =
+      `${BROKER_SECRET_NAME} roles/secretmanager.secretAccessor ` +
+      BROKER_SERVICE_ACCOUNT_MEMBER;
+  }
+  return value;
+}
+
+function impersonatorValue(mode) {
+  const value = {
+    condition: [],
+    member: BROKER_IMPERSONATOR,
+    role: "roles/iam.serviceAccountTokenCreator",
+  };
+  if (mode !== "create-unknown-service-account") {
+    value.service_account_id = BROKER_SERVICE_ACCOUNT_NAME;
+  }
+  if (mode === "live") {
+    value.etag = "BwYAAAAAAA1=";
+    value.id =
+      `${BROKER_SERVICE_ACCOUNT_NAME} roles/iam.serviceAccountTokenCreator ` +
+      BROKER_IMPERSONATOR;
+  }
+  return value;
+}
+
+function brokerValue(kind, mode, counter = 1) {
+  if (kind === "service-account") return serviceAccountValue(mode);
+  if (kind === "secret") return secretValue(mode);
+  if (kind === "secret-version") {
+    return secretVersionValue(mode, counter);
+  }
+  if (kind === "secret-accessor") return secretAccessorValue(mode);
+  return impersonatorValue(mode);
+}
+
+function brokerCreateUnknown(kind, dependencies) {
+  if (kind === "service-account") {
+    return { id: true, name: true, unique_id: true };
+  }
+  if (kind === "secret") {
+    return {
+      create_time: true,
+      effective_annotations: true,
+      effective_labels: {},
+      expire_time: true,
+      id: true,
+      labels: {},
+      name: true,
+      replication: [
+        {
+          auto: [{ customer_managed_encryption: [] }],
+          user_managed: [],
+        },
+      ],
+      rotation: [],
+      terraform_labels: {},
+      topics: [],
+    };
+  }
+  if (kind === "secret-version") {
+    return {
+      create_time: true,
+      destroy_time: true,
+      id: true,
+      name: true,
+      ...(dependencies.secretCreated ? { secret: true } : {}),
+      version: true,
+    };
+  }
+  if (kind === "secret-accessor") {
+    return { condition: [], etag: true, id: true };
+  }
+  return {
+    condition: [],
+    etag: true,
+    id: true,
+    ...(dependencies.serviceAccountCreated ? { service_account_id: true } : {}),
+  };
+}
+
+function brokerScaffoldEntries({ actions = ["no-op"], versionActions } = {}) {
+  const definitions = [
     {
       address: "google_service_account.local_agent_github_broker[0]",
       index: 0,
+      kind: "service-account",
       mode: "managed",
       name: "local_agent_github_broker",
       type: "google_service_account",
@@ -250,6 +431,7 @@ function brokerScaffoldEntries({ actions = ["no-op"] } = {}) {
       address:
         "google_secret_manager_secret.local_agent_github_app_private_key[0]",
       index: 0,
+      kind: "secret",
       mode: "managed",
       name: "local_agent_github_app_private_key",
       type: "google_secret_manager_secret",
@@ -258,6 +440,7 @@ function brokerScaffoldEntries({ actions = ["no-op"] } = {}) {
       address:
         "google_secret_manager_secret_version.local_agent_github_app_private_key[0]",
       index: 0,
+      kind: "secret-version",
       mode: "managed",
       name: "local_agent_github_app_private_key",
       type: "google_secret_manager_secret_version",
@@ -266,6 +449,7 @@ function brokerScaffoldEntries({ actions = ["no-op"] } = {}) {
       address:
         "google_secret_manager_secret_iam_member.local_agent_github_broker_accessor[0]",
       index: 0,
+      kind: "secret-accessor",
       mode: "managed",
       name: "local_agent_github_broker_accessor",
       type: "google_secret_manager_secret_iam_member",
@@ -273,19 +457,186 @@ function brokerScaffoldEntries({ actions = ["no-op"] } = {}) {
     {
       address: `google_service_account_iam_member.local_agent_github_broker_impersonator[${JSON.stringify(BROKER_IMPERSONATOR)}]`,
       index: BROKER_IMPERSONATOR,
+      kind: "impersonator",
       mode: "managed",
       name: "local_agent_github_broker_impersonator",
       type: "google_service_account_iam_member",
     },
-  ].map((entry) => ({
-    ...entry,
-    change: {
-      actions: [...actions],
-      after: { fixture: entry.address },
-      after_unknown: {},
-      before: actions[0] === "create" ? null : { fixture: entry.address },
+  ];
+  const dependencies = {
+    secretCreated: actions[0] === "create",
+    serviceAccountCreated: actions[0] === "create",
+  };
+  return definitions.map(({ kind, ...entry }) => {
+    const entryActions =
+      kind === "secret-version" && versionActions
+        ? [...versionActions]
+        : [...actions];
+    if (entryActions[0] === "create" && entryActions.length === 1) {
+      const mode =
+        kind === "secret-version" && dependencies.secretCreated
+          ? "create-unknown-secret"
+          : kind === "impersonator" && dependencies.serviceAccountCreated
+            ? "create-unknown-service-account"
+            : "create";
+      return {
+        ...entry,
+        change: {
+          actions: entryActions,
+          after: brokerValue(kind, mode),
+          after_unknown: brokerCreateUnknown(kind, dependencies),
+          before: null,
+        },
+      };
+    }
+    if (entryActions.length === 2) {
+      return {
+        ...entry,
+        change: {
+          actions: entryActions,
+          after: brokerValue(kind, "create", 2),
+          after_unknown: {
+            create_time: true,
+            destroy_time: true,
+            id: true,
+            name: true,
+            version: true,
+          },
+          before: brokerValue(kind, "live", 1),
+          replace_paths: [["secret_data_wo_version"]],
+        },
+      };
+    }
+    const value = brokerValue(kind, "live", 1);
+    return {
+      ...entry,
+      change: {
+        actions: entryActions,
+        after: structuredClone(value),
+        after_unknown: {},
+        before: structuredClone(value),
+      },
+    };
+  });
+}
+
+function brokerScaffoldConfigurationResources() {
+  const project = {
+    references: [
+      "google_project.monitoring.project_id",
+      "google_project.monitoring",
+    ],
+  };
+  return [
+    {
+      address: "google_service_account.local_agent_github_broker",
+      expressions: {
+        account_id: { constant_value: BROKER_SERVICE_ACCOUNT_ID },
+        description: {
+          constant_value:
+            "Broker identity that reads the local-agent GitHub App key to mint non-bypass installation tokens outside agent processes.",
+        },
+        display_name: {
+          constant_value: "Local agent GitHub credential broker",
+        },
+        project: structuredClone(project),
+      },
+      mode: "managed",
+      name: "local_agent_github_broker",
+      provider_config_key: "google",
+      schema_version: 0,
+      type: "google_service_account",
     },
-  }));
+    {
+      address:
+        "google_secret_manager_secret.local_agent_github_app_private_key",
+      expressions: {
+        labels: { constant_value: structuredClone(BROKER_SECRET_LABELS) },
+        project: structuredClone(project),
+        replication: [{ auto: [{}] }],
+        secret_id: { constant_value: BROKER_SECRET_ID },
+      },
+      mode: "managed",
+      name: "local_agent_github_app_private_key",
+      provider_config_key: "google",
+      schema_version: 0,
+      type: "google_secret_manager_secret",
+    },
+    {
+      address:
+        "google_secret_manager_secret_version.local_agent_github_app_private_key",
+      expressions: {
+        deletion_policy: { constant_value: "DISABLE" },
+        secret: {
+          references: [
+            "google_secret_manager_secret.local_agent_github_app_private_key[0].id",
+            "google_secret_manager_secret.local_agent_github_app_private_key[0]",
+            "google_secret_manager_secret.local_agent_github_app_private_key",
+          ],
+        },
+        secret_data_wo: {
+          references: ["var.local_agent_github_app_private_key"],
+        },
+        secret_data_wo_version: {
+          references: [
+            "var.local_agent_github_app_private_key_rotation_counter",
+          ],
+        },
+      },
+      mode: "managed",
+      name: "local_agent_github_app_private_key",
+      provider_config_key: "google",
+      schema_version: 0,
+      type: "google_secret_manager_secret_version",
+    },
+    {
+      address:
+        "google_secret_manager_secret_iam_member.local_agent_github_broker_accessor",
+      expressions: {
+        member: {
+          references: [
+            "google_service_account.local_agent_github_broker[0].email",
+            "google_service_account.local_agent_github_broker[0]",
+            "google_service_account.local_agent_github_broker",
+          ],
+        },
+        project: structuredClone(project),
+        role: { constant_value: "roles/secretmanager.secretAccessor" },
+        secret_id: {
+          references: [
+            "google_secret_manager_secret.local_agent_github_app_private_key[0].secret_id",
+            "google_secret_manager_secret.local_agent_github_app_private_key[0]",
+            "google_secret_manager_secret.local_agent_github_app_private_key",
+          ],
+        },
+      },
+      mode: "managed",
+      name: "local_agent_github_broker_accessor",
+      provider_config_key: "google",
+      schema_version: 0,
+      type: "google_secret_manager_secret_iam_member",
+    },
+    {
+      address:
+        "google_service_account_iam_member.local_agent_github_broker_impersonator",
+      expressions: {
+        member: { references: ["each.value"] },
+        role: { constant_value: "roles/iam.serviceAccountTokenCreator" },
+        service_account_id: {
+          references: [
+            "google_service_account.local_agent_github_broker[0].name",
+            "google_service_account.local_agent_github_broker[0]",
+            "google_service_account.local_agent_github_broker",
+          ],
+        },
+      },
+      mode: "managed",
+      name: "local_agent_github_broker_impersonator",
+      provider_config_key: "google",
+      schema_version: 0,
+      type: "google_service_account_iam_member",
+    },
+  ];
 }
 
 function plan(entries = [rulesetEntry(), ...dependabotCredentialEntries()]) {
@@ -301,6 +652,9 @@ function plan(entries = [rulesetEntry(), ...dependabotCredentialEntries()]) {
             token: { references: ["var.github_token"] },
           },
         },
+      },
+      root_module: {
+        resources: brokerScaffoldConfigurationResources(),
       },
     },
     variables: {},
@@ -901,6 +1255,175 @@ expectPass(
   ]),
   SCAFFOLD_POLICY,
 );
+expectPass(
+  plan([
+    phaseFourRuleset,
+    ...dependabotCredentialEntries(),
+    ...brokerScaffoldEntries(),
+  ]),
+  SCAFFOLD_POLICY,
+);
+
+function brokerPlan(entries) {
+  return plan([phaseFourRuleset, ...dependabotCredentialEntries(), ...entries]);
+}
+
+function mutateNoOpBrokerEntry(index, mutate) {
+  const entries = brokerScaffoldEntries();
+  mutate(entries[index].change.before);
+  mutate(entries[index].change.after);
+  return entries;
+}
+
+for (const [entries, expected] of [
+  [
+    mutateNoOpBrokerEntry(0, (value) => {
+      value.project = "operator-redirect";
+    }),
+    "service-account no-op must preserve the exact pinned live shape",
+  ],
+  [
+    mutateNoOpBrokerEntry(0, (value) => {
+      value.account_id = "different-broker";
+    }),
+    "service-account no-op must preserve the exact pinned live shape",
+  ],
+  [
+    mutateNoOpBrokerEntry(0, (value) => {
+      value.description = "weaker description";
+    }),
+    "service-account no-op must preserve the exact pinned live shape",
+  ],
+  [
+    mutateNoOpBrokerEntry(1, (value) => {
+      value.project = "operator-redirect";
+    }),
+    "secret no-op must preserve the exact pinned live shape",
+  ],
+  [
+    mutateNoOpBrokerEntry(1, (value) => {
+      value.labels.purpose = "other-purpose";
+    }),
+    "secret no-op must preserve the exact pinned live shape",
+  ],
+  [
+    mutateNoOpBrokerEntry(1, (value) => {
+      value.replication = [{ auto: [], user_managed: [{ replicas: [] }] }];
+    }),
+    "secret no-op must preserve the exact pinned live shape",
+  ],
+  [
+    mutateNoOpBrokerEntry(2, (value) => {
+      value.secret = "projects/operator-redirect/secrets/other";
+    }),
+    "secret-version no-op must preserve the exact pinned live shape",
+  ],
+  [
+    mutateNoOpBrokerEntry(2, (value) => {
+      value.secret_data = "state-visible-secret";
+    }),
+    "secret-version no-op must preserve the exact pinned live shape",
+  ],
+  [
+    mutateNoOpBrokerEntry(3, (value) => {
+      value.secret_id = "other-secret";
+    }),
+    "secret-accessor no-op must preserve the exact pinned live shape",
+  ],
+  [
+    mutateNoOpBrokerEntry(3, (value) => {
+      value.role = "roles/owner";
+    }),
+    "secret-accessor no-op must preserve the exact pinned live shape",
+  ],
+  [
+    mutateNoOpBrokerEntry(3, (value) => {
+      value.member = "allUsers";
+    }),
+    "secret-accessor no-op must preserve the exact pinned live shape",
+  ],
+  [
+    mutateNoOpBrokerEntry(4, (value) => {
+      value.service_account_id =
+        "projects/operator-redirect/serviceAccounts/other@example.com";
+    }),
+    "impersonator no-op must preserve the exact pinned live shape",
+  ],
+  [
+    mutateNoOpBrokerEntry(4, (value) => {
+      value.role = "roles/owner";
+    }),
+    "impersonator no-op must preserve the exact pinned live shape",
+  ],
+  [
+    mutateNoOpBrokerEntry(4, (value) => {
+      value.member = "group:agents@example.com";
+    }),
+    "impersonator no-op must preserve the exact pinned live shape",
+  ],
+]) {
+  expectFailure(brokerPlan(entries), expected, SCAFFOLD_POLICY);
+}
+
+const projectAliasPlan = brokerPlan(brokerScaffoldEntries());
+projectAliasPlan.configuration.root_module.resources.find(
+  (resource) => resource.type === "google_service_account",
+).expressions.project = { references: ["var.gcp_project_id"] };
+expectFailure(
+  projectAliasPlan,
+  "Terraform configuration must use only the pinned project",
+  SCAFFOLD_POLICY,
+);
+
+const secretAliasPlan = brokerPlan(brokerScaffoldEntries());
+secretAliasPlan.configuration.root_module.resources.find(
+  (resource) => resource.type === "google_secret_manager_secret_version",
+).expressions.secret = { references: ["var.broker_secret_alias"] };
+expectFailure(
+  secretAliasPlan,
+  "Terraform configuration must use only the pinned project",
+  SCAFFOLD_POLICY,
+);
+
+const nonWriteOnlyPlan = brokerPlan(brokerScaffoldEntries());
+const nonWriteOnlyConfiguration =
+  nonWriteOnlyPlan.configuration.root_module.resources.find(
+    (resource) => resource.type === "google_secret_manager_secret_version",
+  );
+delete nonWriteOnlyConfiguration.expressions.secret_data_wo;
+nonWriteOnlyConfiguration.expressions.secret_data = {
+  references: ["var.local_agent_github_app_private_key"],
+};
+expectFailure(
+  nonWriteOnlyPlan,
+  "Terraform configuration must use only the pinned project",
+  SCAFFOLD_POLICY,
+);
+
+const unknownBrokerProject = structuredClone(phaseFourScaffold);
+unknownBrokerProject[0].change.after_unknown.project = true;
+expectFailure(
+  brokerPlan(unknownBrokerProject),
+  "planned unknown fields must match only",
+  SCAFFOLD_POLICY,
+);
+
+const unknownAccessorRole = brokerScaffoldEntries();
+unknownAccessorRole[3].change.after_unknown = { role: true };
+expectFailure(
+  brokerPlan(unknownAccessorRole),
+  "planned unknown fields must match only",
+  SCAFFOLD_POLICY,
+);
+
+const malformedBrokerValue = brokerScaffoldEntries();
+malformedBrokerValue[1].change.before = null;
+malformedBrokerValue[1].change.after = null;
+expectFailure(
+  brokerPlan(malformedBrokerValue),
+  "secret no-op must preserve the exact pinned live shape",
+  SCAFFOLD_POLICY,
+);
 expectFailure(
   plan([phaseFourRuleset, ...phaseFourScaffold, phaseThreeExtra]),
   "may change only the documented five-resource",
@@ -961,7 +1484,7 @@ const recoveryChangedNoOp = structuredClone(partialScaffold);
 recoveryChangedNoOp[1].change.after.fixture = "changed-shape";
 expectFailure(
   plan([phaseFourRuleset, ...recoveryChangedNoOp]),
-  "no-op must preserve the same current resource shape",
+  "no-op must preserve the exact pinned live shape",
   SCAFFOLD_RECOVERY_POLICY,
 );
 const recoveryCreateWithPriorValue = structuredClone(partialScaffold);
@@ -971,8 +1494,9 @@ expectFailure(
   "create must have no prior value",
   SCAFFOLD_RECOVERY_POLICY,
 );
-const recoveryReplacement = brokerScaffoldEntries();
-recoveryReplacement[2].change.actions = ["create", "delete"];
+const recoveryReplacement = brokerScaffoldEntries({
+  versionActions: ["create", "delete"],
+});
 expectFailure(
   plan([phaseFourRuleset, ...recoveryReplacement]),
   "partial recovery permits only canonical create and no-op",
@@ -1042,14 +1566,44 @@ expectFailure(
   SCAFFOLD_POLICY,
 );
 
-const rotationEntries = brokerScaffoldEntries();
-rotationEntries[2].change.actions = ["create", "delete"];
+const rotationEntries = brokerScaffoldEntries({
+  versionActions: ["create", "delete"],
+});
 expectPass(
   plan([
     phaseFourRuleset,
     ...dependabotCredentialEntries(),
     ...rotationEntries,
   ]),
+  SCAFFOLD_POLICY,
+);
+const unchangedRotationCounter = structuredClone(rotationEntries);
+unchangedRotationCounter[2].change.after.secret_data_wo_version = 1;
+expectFailure(
+  brokerPlan(unchangedRotationCounter),
+  "replacement must rotate only the write-only value through the next counter",
+  SCAFFOLD_POLICY,
+);
+const redirectedRotationSecret = structuredClone(rotationEntries);
+redirectedRotationSecret[2].change.after.secret =
+  "projects/operator-redirect/secrets/other";
+expectFailure(
+  brokerPlan(redirectedRotationSecret),
+  "replacement must rotate only the write-only value through the next counter",
+  SCAFFOLD_POLICY,
+);
+const wrongRotationReplacementPath = structuredClone(rotationEntries);
+wrongRotationReplacementPath[2].change.replace_paths = [["secret"]];
+expectFailure(
+  brokerPlan(wrongRotationReplacementPath),
+  "replacement must rotate only the write-only value through the next counter",
+  SCAFFOLD_POLICY,
+);
+const unknownRotationTarget = structuredClone(rotationEntries);
+unknownRotationTarget[2].change.after_unknown.secret = true;
+expectFailure(
+  brokerPlan(unknownRotationTarget),
+  "planned unknown fields must match only",
   SCAFFOLD_POLICY,
 );
 const rotationWithExtra = structuredClone(rotationEntries);

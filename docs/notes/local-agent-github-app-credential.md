@@ -460,6 +460,17 @@ gate is false. Obtain separate apply approval. Apply the checked plan. Remove
 any obsolete operator key copy only when the approved rotation and recovery
 process no longer needs it. Revoke the key if custody becomes uncertain.
 
+The guard also checks each planned value. It pins project
+`mento-monitoring`, the broker account ID, display name, description, Secret
+Manager secret ID, two labels, automatic Google-managed replication, exact
+Secret Accessor binding, and exact Service Account Token Creator binding. The
+credential version must use `secret_data_wo`, `DISABLE` deletion policy, and
+the next positive rotation counter. The plan configuration must reference the
+canonical project, service account, and secret resources. Only the pinned
+provider-computed IDs, names, timestamps, etags, and version number may remain
+unknown during creation. A rotation may replace only the credential version
+through `secret_data_wo_version`.
+
 ### Phase 4B partial-apply recovery
 
 Terraform apply is not an atomic five-resource transaction. If it stops after
