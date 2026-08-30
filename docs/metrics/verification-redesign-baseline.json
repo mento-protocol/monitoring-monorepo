@@ -1,0 +1,1442 @@
+{
+  "schema_version": 1,
+  "collected_at": "2026-08-29",
+  "owners": {
+    "measurement": "eng",
+    "cost_approval": "human maintainer",
+    "cutover_approval": "human maintainer"
+  },
+  "source_shas": {
+    "control_plane": "a5692c4570d7fe33255c2ce863d7f79264a9ddb0",
+    "local_author_measurement_base_head": "8bcb675b6b241e57435ce0e864e8511c03d9fce2",
+    "issue_2042_terminal": "e0346ec4756f9577bcbb1e13e06566ccc507e9e4",
+    "historical_issue_2042_snapshot": "8e2965a6ffbd92bcc0c2793a6892754e4c674a6b",
+    "full_ci_proxy": "cf9906a63a96323b1ceb23e5e25f828f3ee221a6"
+  },
+  "local_gate": {
+    "earlier_core_physical_lines": 70028,
+    "earlier_core_source_sha": "8bcb675b6b241e57435ce0e864e8511c03d9fce2",
+    "complete_manifest_files": 223,
+    "complete_manifest_counted_lines": 101595,
+    "manifest_whole_file_implementation_test_lines": 95815,
+    "manifest_dedicated_gate_document_lines": 4952,
+    "manifest_other_reference_hook_lines": 828,
+    "retained_shared_gate_rooted_lines": 12543,
+    "retained_package_script_pin_checker_lines": 159,
+    "wholly_retained_implementation_test_lines": 12702,
+    "upper_bound_deletion_candidate_lines": 83113,
+    "upper_bound_deletion_candidate_definition": "95,815 whole-file implementation and test lines minus the 12,543-line retained shared gate-rooted closure and the wholly retained 159-line package-script pin checker",
+    "upper_bound_limit": "This is not a final gate-specific deletion denominator. Mixed files still contain retained package-policy, workflow-pin, and generated-drift behavior. Issues 2127 and 2128 must allocate or migrate those retained components before publishing the final denominator and applying the 80% target.",
+    "issue_2134_gate_specific_whole_file_delta_lines": 46,
+    "issue_2134_retained_shared_closure_delta_lines": 0,
+    "retained_shared_gate_rooted_files": [
+      "scripts/gate/darwin-process-identity.c",
+      "scripts/gate/darwin-process-identity-runtime.inc.c",
+      "scripts/gate/darwin-process-identity-helper.mjs",
+      "scripts/gate/darwin-process-identity.test.mjs",
+      "scripts/gate/darwin-process-lineage-model.mjs",
+      "scripts/gate/darwin-process-lineage-state.mjs",
+      "scripts/gate/darwin-process-lineage.mjs",
+      "scripts/gate/darwin-process-lineage.test.mjs",
+      "scripts/gate/mapped-command-process-identity.mjs",
+      "scripts/gate/mapped-command-process-identity.test.mjs"
+    ],
+    "completed_request_sample": {
+      "observations": 7,
+      "denominator": "seven completed local gate requests",
+      "median_total_seconds": 1482,
+      "maximum_total_seconds": 2816,
+      "window_utc": null,
+      "source_sha": null,
+      "literal_argv": null,
+      "timing_capture_method": null,
+      "later_timeout_seconds": 1800,
+      "later_timeout_observations": 1,
+      "source": "retained reviewed plan records",
+      "unavailable_evidence": "The raw .tmp/agent-quality-gate/durations.jsonl records expired. The retained aggregate does not identify exact UTC timestamps, source SHAs, literal argv, or the timing-capture method for the seven completed requests or the separate timeout."
+    },
+    "queue_execution_sample": {
+      "observations": 2,
+      "denominator": "two completed local gate requests with retained total and execution durations",
+      "observed_on": "2026-08-21",
+      "window_utc": null,
+      "source_sha": null,
+      "literal_argv": null,
+      "timing_capture_method": null,
+      "queue_seconds_formula": "total_seconds - execution_seconds",
+      "records": [
+        {
+          "total_seconds": 1710,
+          "execution_seconds": 14,
+          "queue_seconds": 1696
+        },
+        {
+          "total_seconds": 1306,
+          "execution_seconds": 64,
+          "queue_seconds": 1242
+        }
+      ],
+      "median_queue_seconds": 1469,
+      "maximum_queue_seconds": 1696,
+      "median_execution_seconds": 39,
+      "maximum_execution_seconds": 64,
+      "source": "ADR 0076 retained the 2026-08-21 local observations",
+      "unavailable_evidence": "The raw .tmp/agent-quality-gate/durations.jsonl records expired. The retained evidence identifies the date and total and execution values, but not exact UTC timestamps, source SHAs, literal argv, or the timing-capture method."
+    },
+    "source_bound_sample": {
+      "observations": 1,
+      "artifact": "docs/metrics/verification-redesign-local-gate-source-bound-sample.json",
+      "denominator": "one independently executed coordinator-leader request over three sequential mapped commands",
+      "measured_source_sha": "49c454da57485169f85b903c608aad66730f80af",
+      "measured_source_is_ancestor_of_current_branch": false,
+      "patch_artifact": "docs/metrics/verification-redesign-local-gate-source.patch",
+      "patch_sha256": "1dce787ccb8c59709f9bd6a4650eba9c3a037e5dc88bb0dfaf4c16876f4a51a2",
+      "reproduced_tree_sha": "45e2376dedc3f4a6a0302081e485b7cb9d3b1d98",
+      "fresh_clone_replay_verified": true,
+      "result": "pass",
+      "queue_seconds": 0,
+      "execution_seconds": 70,
+      "run_total_seconds": 168,
+      "unattributed_orchestration_seconds": 98,
+      "scope_limit": "This narrow serialized route validates the source binding and timing method. It does not replace the seven-request historical distribution or estimate a full branch gate.",
+      "environment_limit": "The gate exported CI=true, so mapped commands used their non-interactive CI path. Compare this timing only with gate requests that used the same command environment."
+    },
+    "coordinator_benchmark": {
+      "command": "node scripts/gate/agent-quality-gate-scheduler-benchmark.mjs",
+      "cwd": "/Users/chapati/code/mento/monitoring-monorepo.gate-lock",
+      "measurement_window": "2026-08-25T22:03:01.145Z..2026-08-25T22:07:52.371Z",
+      "window_method": "Trace timestamps bound invocation and the benchmark JSON measuredAt result; they are not internal phase clocks.",
+      "denominator": "one A/B fixture: one legacy execution and one coordinator execution",
+      "base_head_sha": "865403a135231107ed8968882288f11f6803e9ff",
+      "exact_source_tree_sha": null,
+      "source_limit": "The benchmark ran in a dirty worktree based on base_head_sha. Its uncommitted benchmark fix and state were not retained, so no commit identifies the exact measured tree.",
+      "later_published_pr_head_sha": "df515df9315eb2f70d758c32b2b919e958c70a9d",
+      "legacy_total_ms": 157276,
+      "coordinator_total_ms": 124983,
+      "long_queue_ms": [93224, 128758],
+      "short_queue_ms": [4225, 4358],
+      "source": "issue 2006 and merged PR 2075 benchmark record"
+    }
+  },
+  "staged_formatter": {
+    "base_head_sha": "8bcb675b6b241e57435ce0e864e8511c03d9fce2",
+    "exact_source_tree_sha": null,
+    "source_limit": "The formatter ran in a dirty Phase 0 worktree. No git write-tree or other tree hash was retained, so no commit or tree SHA binds the exact measured bytes.",
+    "window": "2026-08-28T18:00:08.358Z..2026-08-28T18:00:17.340Z",
+    "command": "/usr/bin/time -p ./tools/trunk fmt docs/README.md docs/adr/README.md docs/notes/quick-commands.md package.json docs/PLAN-progressive-verification-graph.html docs/PLAN-progressive-verification-graph.md docs/adr/0077-staged-verification-redesign.md docs/metrics/verification-redesign-baseline.json docs/metrics/verification-redesign-control-plane-before.json docs/metrics/verification-redesign-safeguards.jsonl docs/notes/verification-redesign-phase-0-evidence.md scripts/workflows/check-verification-redesign-evidence.mjs scripts/workflows/check-verification-redesign-evidence.test.mjs",
+    "denominator": "one formatter invocation over 13 candidate paths; 11 files checked",
+    "candidate_paths": 13,
+    "checked_files": 11,
+    "tool_wall_seconds": 8.982217958,
+    "time_real_seconds": 9.11,
+    "time_user_seconds": 0.13,
+    "time_sys_seconds": 0.05,
+    "result": "pass",
+    "boundary": "One staged Phase 0 candidate set before origin/main advanced. The observed argv used ADR 0077; integration later renumbered that file to ADR 0078.",
+    "limit": "One observation is not a p95."
+  },
+  "author_commands": {
+    "environment": "warm local worktree; pnpm store and package caches may be warm; commands were invoked in sequence outside the gate, but the trace cannot exclude overlap for the dashboard test rerun",
+    "base_head_sha": "8bcb675b6b241e57435ce0e864e8511c03d9fce2",
+    "exact_source_tree_sha": null,
+    "source_limit": "The commands ran in a dirty Phase 0 worktree. No git write-tree or other tree hash was retained, so no commit or tree SHA binds the exact measured bytes.",
+    "window": "2026-08-28T17:35:59.992Z..2026-08-28T17:44:17.099Z",
+    "denominator": "33 recorded terminal invocations; one observation per listed argv",
+    "timing_method": "Early invocations use nested exec wall time. Later invocations use outer Date.now across exec calls and waits.",
+    "uncertainty": "The 37.857-second dashboard test was a clean rerun after the first invocation yielded a live session at 30.001 seconds. The trace does not prove that the first process ended before the rerun, so overlap cannot be excluded.",
+    "measurements": [
+      {
+        "scope": "shared-config",
+        "command": "lint",
+        "argv": "pnpm --filter @mento-protocol/config lint",
+        "seconds": 3.58,
+        "result": "pass"
+      },
+      {
+        "scope": "shared-config",
+        "command": "typecheck",
+        "argv": "pnpm --filter @mento-protocol/config typecheck",
+        "seconds": 1.014,
+        "result": "pass"
+      },
+      {
+        "scope": "shared-config",
+        "command": "test",
+        "argv": "pnpm --filter @mento-protocol/config test",
+        "seconds": 1.66,
+        "result": "pass"
+      },
+      {
+        "scope": "ui-dashboard",
+        "command": "lint",
+        "argv": "pnpm --filter @mento-protocol/ui-dashboard lint",
+        "seconds": 24.602,
+        "result": "pass"
+      },
+      {
+        "scope": "ui-dashboard",
+        "command": "typecheck",
+        "argv": "pnpm --filter @mento-protocol/ui-dashboard typecheck",
+        "seconds": 11.451,
+        "result": "pass"
+      },
+      {
+        "scope": "ui-dashboard",
+        "command": "test",
+        "argv": "pnpm --filter @mento-protocol/ui-dashboard test",
+        "seconds": 37.857,
+        "result": "pass"
+      },
+      {
+        "scope": "indexer-envio",
+        "command": "lint",
+        "argv": "pnpm --filter @mento-protocol/indexer-envio lint",
+        "seconds": 9.33,
+        "result": "pass"
+      },
+      {
+        "scope": "indexer-envio",
+        "command": "typecheck",
+        "argv": "pnpm --filter @mento-protocol/indexer-envio typecheck",
+        "seconds": 4.298,
+        "result": "pass"
+      },
+      {
+        "scope": "indexer-envio",
+        "command": "test",
+        "argv": "pnpm --filter @mento-protocol/indexer-envio test",
+        "seconds": 191.524,
+        "result": "pass"
+      },
+      {
+        "scope": "metrics-bridge",
+        "command": "lint",
+        "argv": "pnpm --filter @mento-protocol/metrics-bridge lint",
+        "seconds": 6.541,
+        "result": "pass"
+      },
+      {
+        "scope": "metrics-bridge",
+        "command": "typecheck",
+        "argv": "pnpm --filter @mento-protocol/metrics-bridge typecheck",
+        "seconds": 2.877,
+        "result": "pass"
+      },
+      {
+        "scope": "metrics-bridge",
+        "command": "test",
+        "argv": "pnpm --filter @mento-protocol/metrics-bridge test",
+        "seconds": 3.133,
+        "result": "pass"
+      },
+      {
+        "scope": "integration-probes",
+        "command": "lint",
+        "argv": "pnpm --filter @mento-protocol/integration-probes lint",
+        "seconds": 4.593,
+        "result": "pass"
+      },
+      {
+        "scope": "integration-probes",
+        "command": "typecheck",
+        "argv": "pnpm --filter @mento-protocol/integration-probes typecheck",
+        "seconds": 1.735,
+        "result": "pass"
+      },
+      {
+        "scope": "integration-probes",
+        "command": "test",
+        "argv": "pnpm --filter @mento-protocol/integration-probes test",
+        "seconds": 1.5,
+        "result": "pass"
+      },
+      {
+        "scope": "aegis",
+        "command": "lint",
+        "argv": "pnpm --filter @mento-protocol/aegis lint",
+        "seconds": 8.001,
+        "result": "pass"
+      },
+      {
+        "scope": "aegis",
+        "command": "typecheck",
+        "argv": "pnpm --filter @mento-protocol/aegis typecheck",
+        "seconds": 5.484,
+        "result": "pass"
+      },
+      {
+        "scope": "aegis",
+        "command": "test",
+        "argv": "pnpm --filter @mento-protocol/aegis test",
+        "seconds": 12.477,
+        "result": "pass"
+      },
+      {
+        "scope": "alerts-onchain-event-handler",
+        "command": "lint",
+        "argv": "pnpm --filter @mento-protocol/alerts-onchain-event-handler lint",
+        "seconds": 4.002,
+        "result": "pass"
+      },
+      {
+        "scope": "alerts-onchain-event-handler",
+        "command": "typecheck",
+        "argv": "pnpm --filter @mento-protocol/alerts-onchain-event-handler typecheck",
+        "seconds": 3.894,
+        "result": "pass"
+      },
+      {
+        "scope": "alerts-onchain-event-handler",
+        "command": "test",
+        "argv": "pnpm --filter @mento-protocol/alerts-onchain-event-handler test",
+        "seconds": 3.712,
+        "result": "pass"
+      },
+      {
+        "scope": "alerts-oncall-announcer",
+        "command": "lint",
+        "argv": "pnpm --filter @mento-protocol/alerts-oncall-announcer lint",
+        "seconds": 2.647,
+        "result": "pass"
+      },
+      {
+        "scope": "alerts-oncall-announcer",
+        "command": "typecheck",
+        "argv": "pnpm --filter @mento-protocol/alerts-oncall-announcer typecheck",
+        "seconds": 1.847,
+        "result": "pass"
+      },
+      {
+        "scope": "alerts-oncall-announcer",
+        "command": "test",
+        "argv": "pnpm --filter @mento-protocol/alerts-oncall-announcer test",
+        "seconds": 1.472,
+        "result": "pass"
+      },
+      {
+        "scope": "governance-watchdog",
+        "command": "lint",
+        "argv": "pnpm --filter @mento-protocol/governance-watchdog lint",
+        "seconds": 4.779,
+        "result": "pass"
+      },
+      {
+        "scope": "governance-watchdog",
+        "command": "typecheck",
+        "argv": "pnpm --filter @mento-protocol/governance-watchdog typecheck",
+        "seconds": 3.821,
+        "result": "pass"
+      },
+      {
+        "scope": "governance-watchdog",
+        "command": "test",
+        "argv": "pnpm --filter @mento-protocol/governance-watchdog test",
+        "seconds": 3.804,
+        "result": "fail: integration curl requires localhost:8080"
+      },
+      {
+        "scope": "governance-watchdog",
+        "command": "test:unit",
+        "argv": "pnpm --filter @mento-protocol/governance-watchdog test:unit",
+        "seconds": 2.122,
+        "result": "pass"
+      },
+      {
+        "scope": "ui-dashboard",
+        "command": "dashboard:codegen",
+        "argv": "pnpm dashboard:codegen",
+        "seconds": 1.201,
+        "result": "pass"
+      },
+      {
+        "scope": "indexer-envio",
+        "command": "indexer:codegen",
+        "argv": "pnpm indexer:codegen",
+        "seconds": 2.2,
+        "result": "pass"
+      },
+      {
+        "scope": "indexer-envio",
+        "command": "indexer:testnet:codegen",
+        "argv": "pnpm indexer:testnet:codegen",
+        "seconds": 1.574,
+        "result": "pass"
+      },
+      {
+        "scope": "ui-dashboard",
+        "command": "dashboard:react-doctor:diff",
+        "argv": "pnpm dashboard:react-doctor:diff",
+        "seconds": 2.211,
+        "result": "pass: no changed dashboard source; not a representative scan"
+      },
+      {
+        "scope": "ui-dashboard",
+        "command": "dashboard:build",
+        "argv": "pnpm dashboard:build",
+        "seconds": 28.792,
+        "result": "pass"
+      }
+    ]
+  },
+  "ci_workflow_ten_pr_sample": {
+    "requested_api_filter": "created=2026-08-21..2026-08-28",
+    "selection_as_of": "2026-08-28T17:14:14.810Z",
+    "selection": "ten most recent completed, non-cancelled pull_request CI workflow runs after retaining at most one selected immutable head per pull request at collection time",
+    "wall_seconds_method": "GitHub Actions workflow updatedAt minus createdAt",
+    "runner_seconds_method": "for each attempt, sum startedAt-to-completedAt for every non-skipped job whose startedAt is at or after attempt.createdAt; sum all attempts for each workflow run; setup_seconds uses setup_measurement_definition",
+    "copied_job_deduplication": "GitHub copies earlier successful jobs into later-attempt payloads; exclude a job from an attempt when job.startedAt is before attempt.createdAt",
+    "jobs_run_method": "count every non-skipped job execution across all attempts after copied-job deduplication",
+    "denominator": "ten selected CI workflow runs, one from each of ten distinct pull requests; this is not total cost per pull request",
+    "cost_scope": {
+      "metric": "elapsed Actions job-seconds in each selected CI workflow run, not provider-billed minutes or total pull-request verification cost",
+      "workflow_source": ".github/workflows/ci.yml at source_shas.control_plane",
+      "surfaces": [
+        {
+          "surface": "CI",
+          "kind": "GitHub Actions workflow",
+          "included": true,
+          "detail": "Includes every non-skipped job execution in the selected CI workflow across all attempts, including the required ci aggregate job."
+        },
+        {
+          "surface": "Code Quality",
+          "kind": "required job in the separate Trunk workflow",
+          "included": false,
+          "detail": "Excluded because the sample selects only CI workflow runs."
+        },
+        {
+          "surface": "Sentry suites",
+          "kind": "required job in the CI workflow",
+          "included": true,
+          "detail": "Included when the Sentry suites job executes inside the selected CI workflow run."
+        },
+        {
+          "surface": "Vercel",
+          "kind": "external required commit status",
+          "included": false,
+          "detail": "Excluded because it is not a GitHub Actions job in the selected CI workflow."
+        },
+        {
+          "surface": "Vercel Preview Comments",
+          "kind": "external required check run",
+          "included": false,
+          "detail": "Excluded because it is not a GitHub Actions job in the selected CI workflow."
+        }
+      ],
+      "runner_providers": [
+        {
+          "provider": "Blacksmith",
+          "included": true,
+          "labels": [
+            "blacksmith-2vcpu-ubuntu-2404-arm",
+            "blacksmith-2vcpu-ubuntu-2404",
+            "blacksmith-4vcpu-ubuntu-2404"
+          ]
+        },
+        {
+          "provider": "GitHub-hosted Actions",
+          "included": true,
+          "labels": ["ubuntu-latest"]
+        }
+      ],
+      "runner_label_method": "Read the literal runs-on values from workflow_source at source_shas.control_plane; the retained job timing records do not establish provider billing rounding."
+    },
+    "retried_cost_correction": {
+      "query": "gh run view RUN --attempt N --json createdAt,updatedAt,conclusion,jobs",
+      "query_window_utc": "2026-08-29T06:52:20.752Z..2026-08-29T06:52:28.450Z",
+      "scope": "the three sampled workflow runs with two attempts; the seven single-attempt records retain their original measurements",
+      "method": "For each attempt, include a job only when conclusion is not skipped, job.startedAt is at or after attempt.createdAt, and completedAt is at or after startedAt. Sum job windows for runner seconds. Sum top-level pnpm-install composite step windows and explicit step names beginning with Install for setup seconds.",
+      "records": [
+        {
+          "run_id": 33169049284,
+          "head_sha": "d5b901d09d3720fa7038fd35ffd5a77a8a4d72e2",
+          "attempts": [
+            {
+              "attempt": 1,
+              "window": "2026-08-28T11:56:11Z..2026-08-28T12:03:45Z",
+              "conclusion": "failure",
+              "job_ids": [
+                98841497443, 98841497499, 98841497571, 98841497622, 98841553790,
+                98841553802, 98841553804, 98843031344
+              ],
+              "jobs_run": 8,
+              "runner_seconds": 598,
+              "setup_seconds": 93
+            },
+            {
+              "attempt": 2,
+              "window": "2026-08-28T12:04:45Z..2026-08-28T12:31:04Z",
+              "conclusion": "success",
+              "job_ids": [98843303305, 98849128337],
+              "jobs_run": 2,
+              "runner_seconds": 1567,
+              "setup_seconds": 21
+            }
+          ]
+        },
+        {
+          "run_id": 33167596633,
+          "head_sha": "4da52eaa2ab309de4b2845c20b02602da711bb81",
+          "attempts": [
+            {
+              "attempt": 1,
+              "window": "2026-08-28T11:33:22Z..2026-08-28T11:48:58Z",
+              "conclusion": "failure",
+              "job_ids": [
+                98836621171, 98836621296, 98836621322, 98836621449, 98836711485,
+                98836711539, 98839830703
+              ],
+              "jobs_run": 7,
+              "runner_seconds": 1043,
+              "setup_seconds": 70
+            },
+            {
+              "attempt": 2,
+              "window": "2026-08-28T11:53:52Z..2026-08-28T12:19:42Z",
+              "conclusion": "success",
+              "job_ids": [98840904790, 98846588928],
+              "jobs_run": 2,
+              "runner_seconds": 1534,
+              "setup_seconds": 19
+            }
+          ]
+        },
+        {
+          "run_id": 33095791527,
+          "head_sha": "6dac6cd517c97d122c6f6dce08b6b3160c486251",
+          "attempts": [
+            {
+              "attempt": 1,
+              "window": "2026-08-27T16:56:08Z..2026-08-27T17:04:38Z",
+              "conclusion": "failure",
+              "job_ids": [
+                98600438024, 98600438156, 98600438270, 98600438275, 98600573741,
+                98600573917, 98600573988, 98602738917
+              ],
+              "jobs_run": 8,
+              "runner_seconds": 903,
+              "setup_seconds": 157
+            },
+            {
+              "attempt": 2,
+              "window": "2026-08-27T17:05:11Z..2026-08-27T17:35:16Z",
+              "conclusion": "success",
+              "job_ids": [98602960701, 98611884814],
+              "jobs_run": 2,
+              "runner_seconds": 1787,
+              "setup_seconds": 25
+            }
+          ]
+        }
+      ]
+    },
+    "records": [
+      {
+        "run_id": 33190480578,
+        "pull_request": 2120,
+        "head_sha": "7aafd09eb3b8320cf18a04d98d696b4750e737df",
+        "created_at": "2026-08-28T16:32:54Z",
+        "updated_at": "2026-08-28T17:03:22Z",
+        "latest_conclusion": "success",
+        "attempt_count": 1,
+        "wall_seconds": 1828,
+        "runner_seconds": 2010,
+        "setup_seconds": 118,
+        "jobs_run": 8
+      },
+      {
+        "run_id": 33190140002,
+        "pull_request": 2121,
+        "head_sha": "b372ca068481b385f50335c305cde2f92070d5ae",
+        "created_at": "2026-08-28T16:28:39Z",
+        "updated_at": "2026-08-28T16:33:06Z",
+        "latest_conclusion": "success",
+        "attempt_count": 1,
+        "wall_seconds": 267,
+        "runner_seconds": 433,
+        "setup_seconds": 136,
+        "jobs_run": 7
+      },
+      {
+        "run_id": 33187923763,
+        "pull_request": 2110,
+        "head_sha": "1aaeac51eef3cbcde4906b8151a85413a26731d6",
+        "created_at": "2026-08-28T16:00:53Z",
+        "updated_at": "2026-08-28T16:35:05Z",
+        "latest_conclusion": "success",
+        "attempt_count": 1,
+        "wall_seconds": 2052,
+        "runner_seconds": 3789,
+        "setup_seconds": 424,
+        "jobs_run": 20
+      },
+      {
+        "run_id": 33174898520,
+        "pull_request": 2119,
+        "head_sha": "5510c7bd173d7ff0630f467984beb99f7923b488",
+        "created_at": "2026-08-28T13:19:52Z",
+        "updated_at": "2026-08-28T13:47:45Z",
+        "latest_conclusion": "success",
+        "attempt_count": 1,
+        "wall_seconds": 1673,
+        "runner_seconds": 1800,
+        "setup_seconds": 100,
+        "jobs_run": 8
+      },
+      {
+        "run_id": 33169134202,
+        "pull_request": 2115,
+        "head_sha": "2e29381b5d2468709d1894f4ec6e28b93dd13070",
+        "created_at": "2026-08-28T11:57:31Z",
+        "updated_at": "2026-08-28T12:01:21Z",
+        "latest_conclusion": "success",
+        "attempt_count": 1,
+        "wall_seconds": 230,
+        "runner_seconds": 358,
+        "setup_seconds": 111,
+        "jobs_run": 7
+      },
+      {
+        "run_id": 33169049284,
+        "pull_request": 2113,
+        "head_sha": "d5b901d09d3720fa7038fd35ffd5a77a8a4d72e2",
+        "created_at": "2026-08-28T11:56:11Z",
+        "updated_at": "2026-08-28T12:31:04Z",
+        "latest_conclusion": "success",
+        "attempt_count": 2,
+        "wall_seconds": 2093,
+        "runner_seconds": 2165,
+        "setup_seconds": 114,
+        "jobs_run": 10
+      },
+      {
+        "run_id": 33167596633,
+        "pull_request": 2112,
+        "head_sha": "4da52eaa2ab309de4b2845c20b02602da711bb81",
+        "created_at": "2026-08-28T11:33:22Z",
+        "updated_at": "2026-08-28T12:19:42Z",
+        "latest_conclusion": "success",
+        "attempt_count": 2,
+        "wall_seconds": 2780,
+        "runner_seconds": 2577,
+        "setup_seconds": 89,
+        "jobs_run": 9
+      },
+      {
+        "run_id": 33161320761,
+        "pull_request": 2106,
+        "head_sha": "847db46107b6ab2d25e260f74fcb0febe3c9c586",
+        "created_at": "2026-08-28T09:55:08Z",
+        "updated_at": "2026-08-28T10:21:53Z",
+        "latest_conclusion": "success",
+        "attempt_count": 1,
+        "wall_seconds": 1605,
+        "runner_seconds": 1743,
+        "setup_seconds": 93,
+        "jobs_run": 7
+      },
+      {
+        "run_id": 33153711994,
+        "pull_request": 2109,
+        "head_sha": "cffbbcc2adfc6ffefa2452f09ed939f210360ba3",
+        "created_at": "2026-08-28T08:01:55Z",
+        "updated_at": "2026-08-28T08:28:06Z",
+        "latest_conclusion": "success",
+        "attempt_count": 1,
+        "wall_seconds": 1571,
+        "runner_seconds": 1717,
+        "setup_seconds": 89,
+        "jobs_run": 8
+      },
+      {
+        "run_id": 33095791527,
+        "pull_request": 2093,
+        "head_sha": "6dac6cd517c97d122c6f6dce08b6b3160c486251",
+        "created_at": "2026-08-27T16:56:08Z",
+        "updated_at": "2026-08-27T17:35:16Z",
+        "latest_conclusion": "success",
+        "attempt_count": 2,
+        "wall_seconds": 2348,
+        "runner_seconds": 2690,
+        "setup_seconds": 182,
+        "jobs_run": 10
+      }
+    ],
+    "wall_seconds": { "median": 1750.5, "maximum": 2780 },
+    "runner_seconds": { "median": 1905, "maximum": 3789 },
+    "setup_seconds": { "median": 112.5, "maximum": 424 },
+    "p95": null,
+    "p95_reason": "ten observations are below the required twenty-observation denominator"
+  },
+  "setup_measurement_definition": {
+    "included": "top-level ./.github/actions/pnpm-install composite durations and explicit workflow steps whose names start with Install",
+    "excluded": "checkout, standalone cache actions, setup-terraform, and other setup or tool steps",
+    "limit": "The setup_seconds fields measure this selected subset, not total workflow setup cost."
+  },
+  "ten_pr_reliability_proxy": {
+    "source": "the ten ci_workflow_ten_pr_sample run IDs, full head SHAs, timestamps, conclusions, and attempt counts",
+    "observation_window": "2026-08-27T16:56:08Z..2026-08-28T17:03:22Z",
+    "selection_query": "event=pull_request created=2026-08-21..2026-08-28",
+    "selection_as_of": "2026-08-28T17:14:14.810Z",
+    "job_query": "gh run view RUN --attempt N --json createdAt,jobs for each run and attempt",
+    "job_query_window": "2026-08-28T21:07:24Z..2026-08-28T21:07:41Z",
+    "job_count_method": "count a completed non-skipped job only when conclusion is not skipped and job.startedAt is at or after attempt.createdAt; GitHub copies earlier successful jobs into later-attempt payloads",
+    "raw_detail_retention": "GitHub Actions job and log detail is retained for 90 days",
+    "latest_completed_non_cancelled_runs": 10,
+    "latest_failed_runs": 0,
+    "final_failure_yield": 0,
+    "final_failure_yield_formula": "zero failed final conclusions divided by ten completed non-cancelled final attempts",
+    "initial_attempt_failures": 3,
+    "initial_attempt_failure_yield": 0.3,
+    "initial_attempt_failure_yield_formula": "three failed initial attempts divided by ten initial attempts",
+    "attempt_executions": 13,
+    "extra_attempts": 3,
+    "retry_rate": 0.2308,
+    "retry_rate_formula": "three extra attempts divided by thirteen workflow attempt executions",
+    "retried_runs": 3,
+    "retried_run_share": 0.3,
+    "retried_run_share_formula": "three retried runs divided by ten sampled runs",
+    "retry_records": [
+      {
+        "run_id": 33169049284,
+        "head_sha": "d5b901d09d3720fa7038fd35ffd5a77a8a4d72e2",
+        "failed_job_id": 98841553802,
+        "classification": "control-plane test flake: replacement holder did not fork, drain refresh barrier failed, and scheduler infrastructure failed; the same head passed on rerun",
+        "attempts": [
+          {
+            "attempt": 1,
+            "window": "2026-08-28T11:56:11Z..2026-08-28T12:03:45Z",
+            "conclusion": "failure"
+          },
+          {
+            "attempt": 2,
+            "window": "2026-08-28T12:04:45Z..2026-08-28T12:31:04Z",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "run_id": 33167596633,
+        "head_sha": "4da52eaa2ab309de4b2845c20b02602da711bb81",
+        "failed_job_id": 98836711485,
+        "classification": "control-plane test flake: the intentional worker sentinel was reported as a leaked descendant; the same head passed on rerun",
+        "attempts": [
+          {
+            "attempt": 1,
+            "window": "2026-08-28T11:33:22Z..2026-08-28T11:48:58Z",
+            "conclusion": "failure"
+          },
+          {
+            "attempt": 2,
+            "window": "2026-08-28T11:53:52Z..2026-08-28T12:19:42Z",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "run_id": 33095791527,
+        "head_sha": "6dac6cd517c97d122c6f6dce08b6b3160c486251",
+        "failed_job_id": 98600573741,
+        "classification": "control-plane test flake: replacement holder, barrier, and scheduler infrastructure failed; the same head passed on rerun",
+        "attempts": [
+          {
+            "attempt": 1,
+            "window": "2026-08-27T16:56:08Z..2026-08-27T17:04:38Z",
+            "conclusion": "failure"
+          },
+          {
+            "attempt": 2,
+            "window": "2026-08-27T17:05:11Z..2026-08-27T17:35:16Z",
+            "conclusion": "success"
+          }
+        ]
+      }
+    ],
+    "suite_flake_definition": "A classified flaky execution is a non-skipped job that failed for a confirmed test-infrastructure reason and passed on a later attempt of the same head.",
+    "classification_log_query_window": "2026-08-28T21:16:28Z..2026-08-28T21:16:32Z",
+    "classification_method": "manual exact-error classification from gh run view RUN --attempt 1 --job JOB --log-failed, followed by confirmation that attempt 2 passed at the same head",
+    "aggregate_ci": {
+      "executed_attempts": 13,
+      "classified_flaky_executions": 3,
+      "independent_suite": false,
+      "reason": "ci aggregates prerequisite results and is not an independent suite denominator"
+    },
+    "jobs": [
+      {
+        "job": "Autoreview adversarial suite",
+        "executed_attempts": 1,
+        "classified_flaky_executions": 0,
+        "classified_flake_rate": 0
+      },
+      {
+        "job": "Autoreview root-runtime trust",
+        "executed_attempts": 1,
+        "classified_flaky_executions": 0,
+        "classified_flake_rate": 0
+      },
+      {
+        "job": "Code Health (cross-package)",
+        "executed_attempts": 4,
+        "classified_flaky_executions": 0,
+        "classified_flake_rate": 0
+      },
+      {
+        "job": "Detect changes",
+        "executed_attempts": 10,
+        "classified_flaky_executions": 0,
+        "classified_flake_rate": 0
+      },
+      {
+        "job": "Documentation corpus checks",
+        "executed_attempts": 6,
+        "classified_flaky_executions": 0,
+        "classified_flake_rate": 0
+      },
+      {
+        "job": "Guardrail prose pins",
+        "executed_attempts": 10,
+        "classified_flaky_executions": 0,
+        "classified_flake_rate": 0
+      },
+      {
+        "job": "Lint + test root scripts",
+        "executed_attempts": 11,
+        "classified_flaky_executions": 3,
+        "classified_flake_rate": 0.2727
+      },
+      {
+        "job": "Production infrastructure contract",
+        "executed_attempts": 10,
+        "classified_flaky_executions": 0,
+        "classified_flake_rate": 0
+      },
+      {
+        "job": "Quality Checks (aegis)",
+        "executed_attempts": 1,
+        "classified_flaky_executions": 0,
+        "classified_flake_rate": 0
+      },
+      {
+        "job": "Quality Checks (alerts Cloud Functions)",
+        "executed_attempts": 1,
+        "classified_flaky_executions": 0,
+        "classified_flake_rate": 0
+      },
+      {
+        "job": "Quality Checks (governance-watchdog)",
+        "executed_attempts": 1,
+        "classified_flaky_executions": 0,
+        "classified_flake_rate": 0
+      },
+      {
+        "job": "Quality Checks (indexer-envio)",
+        "executed_attempts": 1,
+        "classified_flaky_executions": 0,
+        "classified_flake_rate": 0
+      },
+      {
+        "job": "Quality Checks (integration-probes)",
+        "executed_attempts": 1,
+        "classified_flaky_executions": 0,
+        "classified_flake_rate": 0
+      },
+      {
+        "job": "Quality Checks (metrics-bridge)",
+        "executed_attempts": 1,
+        "classified_flaky_executions": 0,
+        "classified_flake_rate": 0
+      },
+      {
+        "job": "Quality Checks (shared-config)",
+        "executed_attempts": 1,
+        "classified_flaky_executions": 0,
+        "classified_flake_rate": 0
+      },
+      {
+        "job": "Quality Checks (ui-dashboard)",
+        "executed_attempts": 4,
+        "classified_flaky_executions": 0,
+        "classified_flake_rate": 0
+      },
+      {
+        "job": "Sentry suites",
+        "executed_attempts": 10,
+        "classified_flaky_executions": 0,
+        "classified_flake_rate": 0
+      },
+      {
+        "job": "Terraform Validate (registry)",
+        "executed_attempts": 6,
+        "classified_flaky_executions": 0,
+        "classified_flake_rate": 0
+      },
+      {
+        "job": "Version skew",
+        "executed_attempts": 1,
+        "classified_flaky_executions": 0,
+        "classified_flake_rate": 0
+      }
+    ],
+    "limit": "This is a tiny same-head manual-rerun sample. Several suite denominators are one. It omits failures fixed by a new push and cannot approve cutover."
+  },
+  "first_results": {
+    "required_context_sample": {
+      "source": "the same ten ci_workflow_ten_pr_sample workflow creations plus commit check-runs with filter=all and legacy commit statuses on each full head SHA",
+      "query_window": "2026-08-28T21:19:30Z..2026-08-28T21:19:40Z",
+      "queries": [
+        "GET repos/mento-protocol/monitoring-monorepo/commits/{sha}/check-runs?filter=all&per_page=100",
+        "GET repos/mento-protocol/monitoring-monorepo/statuses/{sha}?per_page=100"
+      ],
+      "raw_detail_retention": "The committed receipt persists. The metric does not rely on an undocumented API retention period.",
+      "formula": "union completed check-runs and legacy commit statuses, match check-runs by name and app ID and Vercel statuses by context and provider identity, exclude terminal results before workflow creation, then subtract workflow creation from the earliest terminal result",
+      "denominator": "ten distinct pull request heads",
+      "pre_anchor_results_excluded": 2,
+      "records": [
+        {
+          "run_id": 33190480578,
+          "head_sha": "7aafd09eb3b8320cf18a04d98d696b4750e737df",
+          "workflow_created_at": "2026-08-28T16:32:54Z",
+          "result_surface": "check_run",
+          "result_id": 98914426144,
+          "app_id": 8329,
+          "first_terminal_contexts": ["Vercel Preview Comments"],
+          "first_terminal_at": "2026-08-28T16:33:03Z",
+          "seconds": 9
+        },
+        {
+          "run_id": 33190140002,
+          "head_sha": "b372ca068481b385f50335c305cde2f92070d5ae",
+          "workflow_created_at": "2026-08-28T16:28:39Z",
+          "result_surface": "check_run",
+          "result_id": 98913233666,
+          "app_id": 15368,
+          "first_terminal_contexts": ["Sentry suites"],
+          "first_terminal_at": "2026-08-28T16:29:34Z",
+          "seconds": 55
+        },
+        {
+          "run_id": 33187923763,
+          "head_sha": "1aaeac51eef3cbcde4906b8151a85413a26731d6",
+          "workflow_created_at": "2026-08-28T16:00:53Z",
+          "result_surface": "commit_status",
+          "result_id": 53107986828,
+          "context": "Vercel",
+          "creator_login": "vercel[bot]",
+          "state": "success",
+          "first_terminal_contexts": ["Vercel"],
+          "first_terminal_at": "2026-08-28T16:01:02Z",
+          "seconds": 9
+        },
+        {
+          "run_id": 33174898520,
+          "head_sha": "5510c7bd173d7ff0630f467984beb99f7923b488",
+          "workflow_created_at": "2026-08-28T13:19:52Z",
+          "result_surface": "check_run",
+          "result_id": 98860987604,
+          "app_id": 15368,
+          "first_terminal_contexts": ["Sentry suites"],
+          "first_terminal_at": "2026-08-28T13:21:25Z",
+          "seconds": 93
+        },
+        {
+          "run_id": 33169134202,
+          "head_sha": "2e29381b5d2468709d1894f4ec6e28b93dd13070",
+          "workflow_created_at": "2026-08-28T11:57:31Z",
+          "result_surface": "check_run",
+          "result_id": 98841684018,
+          "app_id": 8329,
+          "first_terminal_contexts": ["Vercel Preview Comments"],
+          "first_terminal_at": "2026-08-28T11:57:31Z",
+          "seconds": 0
+        },
+        {
+          "run_id": 33169049284,
+          "head_sha": "d5b901d09d3720fa7038fd35ffd5a77a8a4d72e2",
+          "workflow_created_at": "2026-08-28T11:56:11Z",
+          "result_surface": "commit_status",
+          "result_id": 53092959939,
+          "context": "Vercel",
+          "creator_login": "vercel[bot]",
+          "state": "success",
+          "first_terminal_contexts": ["Vercel"],
+          "first_terminal_at": "2026-08-28T11:56:23Z",
+          "seconds": 12
+        },
+        {
+          "run_id": 33167596633,
+          "head_sha": "4da52eaa2ab309de4b2845c20b02602da711bb81",
+          "workflow_created_at": "2026-08-28T11:33:22Z",
+          "result_surface": "check_run",
+          "result_id": 98836623521,
+          "app_id": 8329,
+          "first_terminal_contexts": ["Vercel Preview Comments"],
+          "first_terminal_at": "2026-08-28T11:33:23Z",
+          "seconds": 1
+        },
+        {
+          "run_id": 33161320761,
+          "head_sha": "847db46107b6ab2d25e260f74fcb0febe3c9c586",
+          "workflow_created_at": "2026-08-28T09:55:08Z",
+          "result_surface": "check_run",
+          "result_id": 98816203531,
+          "app_id": 8329,
+          "first_terminal_contexts": ["Vercel Preview Comments"],
+          "first_terminal_at": "2026-08-28T09:55:08Z",
+          "seconds": 0
+        },
+        {
+          "run_id": 33153711994,
+          "head_sha": "cffbbcc2adfc6ffefa2452f09ed939f210360ba3",
+          "workflow_created_at": "2026-08-28T08:01:55Z",
+          "result_surface": "commit_status",
+          "result_id": 53082065581,
+          "context": "Vercel",
+          "creator_login": "vercel[bot]",
+          "state": "success",
+          "first_terminal_contexts": ["Vercel"],
+          "first_terminal_at": "2026-08-28T08:02:04Z",
+          "seconds": 9
+        },
+        {
+          "run_id": 33095791527,
+          "head_sha": "6dac6cd517c97d122c6f6dce08b6b3160c486251",
+          "workflow_created_at": "2026-08-27T16:56:08Z",
+          "result_surface": "check_run",
+          "result_id": 98603009315,
+          "app_id": 15368,
+          "first_terminal_contexts": ["Sentry suites"],
+          "first_terminal_at": "2026-08-27T16:57:50Z",
+          "seconds": 102
+        }
+      ],
+      "seconds_sorted": [0, 0, 1, 9, 9, 9, 12, 55, 93, 102],
+      "median_seconds": 9,
+      "maximum_seconds": 102,
+      "p95": null,
+      "p95_reason": "ten observations are below the required twenty-observation denominator"
+    },
+    "first_useful_failure_sample": {
+      "source": "GitHub retained failed-job logs and run and job metadata",
+      "log_collection_window": "2026-08-28T21:14:24Z..2026-08-28T21:14:29Z",
+      "selection_query": "event=pull_request created=2026-08-21..2026-08-28",
+      "selection_as_of": "2026-08-28T17:17:00.268Z",
+      "selection": "five most recent completed pull_request CI runs whose latest attempt concluded failure in the query snapshot",
+      "attempted_observations": 5,
+      "usable_observations": 5,
+      "excluded_observations": [],
+      "denominator": "five classified actionable failed runs",
+      "formula": "classified actionable failed job completedAt minus workflow createdAt",
+      "raw_detail_retention": "GitHub Actions job and log detail is retained for 90 days",
+      "records": [
+        {
+          "run_id": 33167653003,
+          "head_sha": "ff14510605dbebe1c731294d61e013d5d6f618dc",
+          "workflow_created_at": "2026-08-28T11:34:15Z",
+          "job": "Lint + test root scripts",
+          "job_id": 98836996928,
+          "failed_job_completed_at": "2026-08-28T11:50:28Z",
+          "seconds": 973,
+          "classification": "actionable control-plane failure: normal parallel completion reported its intentional worker sentinel as a leaked descendant"
+        },
+        {
+          "run_id": 33160280992,
+          "head_sha": "09fd2670877a6af59eec3a30f45b64234472e9f4",
+          "workflow_created_at": "2026-08-28T09:39:42Z",
+          "job": "Lint + test root scripts",
+          "job_id": 98812923079,
+          "failed_job_completed_at": "2026-08-28T09:45:49Z",
+          "seconds": 367,
+          "classification": "actionable control-plane failure: scheduler integration timed out while it waited for three mapped commands to reach the start barrier"
+        },
+        {
+          "run_id": 33159811477,
+          "head_sha": "33299a9d5862b27b1517e953ae99b3cf2f9df50e",
+          "workflow_created_at": "2026-08-28T09:32:47Z",
+          "job": "Lint + test root scripts",
+          "job_id": 98811470025,
+          "failed_job_completed_at": "2026-08-28T09:40:17Z",
+          "seconds": 450,
+          "classification": "actionable control-plane failure: the replacement holder did not fork its first descendant and the test-only drain refresh barrier did not release"
+        },
+        {
+          "run_id": 33157683071,
+          "head_sha": "a210dbad25c44dd26e1534fafbba0db63d2621d7",
+          "workflow_created_at": "2026-08-28T09:01:47Z",
+          "job": "Lint + test root scripts",
+          "job_id": 98804394597,
+          "failed_job_completed_at": "2026-08-28T09:03:03Z",
+          "seconds": 76,
+          "classification": "actionable code failure: ESLint no-useless-escape at review-eval test line 4204 column 30"
+        },
+        {
+          "run_id": 33156798594,
+          "head_sha": "bb128fe9e3681e014ebb008f2f5181e621a0ad4a",
+          "workflow_created_at": "2026-08-28T08:48:25Z",
+          "job": "Lint + test root scripts",
+          "job_id": 98801581970,
+          "failed_job_completed_at": "2026-08-28T08:50:07Z",
+          "seconds": 102,
+          "classification": "actionable code failure: ESLint no-useless-escape at review-eval test line 4170 column 30"
+        }
+      ],
+      "seconds_sorted": [76, 102, 367, 450, 973],
+      "median_seconds": 367,
+      "maximum_seconds": 973,
+      "p95": null,
+      "p95_reason": "five classified observations are below the required twenty-observation denominator"
+    }
+  },
+  "full_deterministic_ci_proxy": {
+    "run_id": 32968304840,
+    "attempts": [1, 2],
+    "source_sha": "cf9906a63a96323b1ceb23e5e25f828f3ee221a6",
+    "created_at": "2026-08-26T12:23:24Z",
+    "ci_completed_at": "2026-08-26T13:11:28Z",
+    "workflow_updated_at": "2026-08-26T13:11:30Z",
+    "denominator": "one cross-attempt logical pull request workflow record",
+    "attempt_1_window": "2026-08-26T12:23:24Z..2026-08-26T12:49:28Z",
+    "attempt_1_conclusion": "cancelled",
+    "attempt_2_started_at": "2026-08-26T13:01:40Z",
+    "attempt_2_root_job_id": 98187038872,
+    "attempt_2_root_job_window": "2026-08-26T13:02:06Z..2026-08-26T13:11:18Z",
+    "attempt_2_ci_job_id": 98190012159,
+    "attempt_2_ci_job_window": "2026-08-26T13:11:21Z..2026-08-26T13:11:28Z",
+    "logical_job_records": 19,
+    "carried_successful_jobs": 17,
+    "wall_seconds": 2884,
+    "workflow_updated_wall_seconds": 2886,
+    "runner_seconds": 2102,
+    "runner_minutes": 35.033,
+    "setup_seconds": 342,
+    "method": "wall time is final ci completion minus original workflow creation; runner time sums the 19 logical job records carried by the current run record; setup uses the recorded selected-step definition",
+    "uncertainty": "This cross-attempt proxy is not a fresh 19-job second attempt. Attempt 2 reran the root scripts and aggregate ci while the current logical record carried 17 earlier successes. It had warm caches and queue delay. External Vercel status and check results are not Actions jobs and are excluded from runner and setup totals. This is not a provider-billed cold no-skip run."
+  },
+  "cold_full_deterministic_ci_estimate": {
+    "classification": "planning estimate from comparable retained runs; not an upper bound, provider-billed result, or observed current no-skip run",
+    "cold_basis": {
+      "run_id": 32469559880,
+      "pull_request": 1987,
+      "source_sha": "6b7e70052c294599e1bf446265ff022845137387",
+      "window": "2026-08-21T09:47:25Z..2026-08-21T09:57:38Z",
+      "denominator": "one pull request workflow run",
+      "wall_seconds": 613,
+      "jobs_total": 18,
+      "jobs_executed": 16,
+      "jobs_skipped": 2,
+      "runner_seconds": 2255,
+      "setup_seconds": 419,
+      "pnpm_install_jobs": 14,
+      "pnpm_cache_state": "all 14 logs reported pnpm cache is not found",
+      "specialized_cache_state": "Playwright, Foundry, and Envio generated-data caches restored"
+    },
+    "current_job_additions": [
+      {
+        "component": "Playwright cold delta",
+        "runner_seconds": 9,
+        "setup_seconds": 9,
+        "method": "18-second cache-miss install minus 9-second cache-hit install",
+        "sources": [
+          {
+            "state": "cache hit",
+            "run_id": 32469559880,
+            "head_sha": "6b7e70052c294599e1bf446265ff022845137387",
+            "job_id": 96733416851,
+            "step_window": "2026-08-21T09:49:59Z..2026-08-21T09:50:08Z"
+          },
+          {
+            "state": "cache miss",
+            "run_id": 27220346420,
+            "head_sha": "3243291388342290dfd5aeea11c9dc7f4901c952",
+            "job_id": 80373271725,
+            "step_window": "2026-06-09T16:26:06Z..2026-06-09T16:26:24Z"
+          }
+        ]
+      },
+      {
+        "component": "Envio codegen delta",
+        "runner_seconds": 3,
+        "setup_seconds": 0,
+        "method": "three-second cache-miss codegen versus a cache-hit skipped step; codegen is outside the selected setup metric",
+        "sources": [
+          {
+            "state": "cache miss",
+            "run_id": 33053670097,
+            "head_sha": "903faedf8740b3267ccaa9c13a8639bf800f86ac",
+            "job_id": 98455153125,
+            "step_window": "2026-08-27T08:22:29Z..2026-08-27T08:22:32Z"
+          },
+          {
+            "state": "cache hit and codegen skipped",
+            "run_id": 32469559880,
+            "head_sha": "6b7e70052c294599e1bf446265ff022845137387",
+            "job_id": 96733416855,
+            "job_window": "2026-08-21T09:48:03Z..2026-08-21T09:54:37Z",
+            "skipped_step_at": "2026-08-21T09:48:35Z"
+          }
+        ]
+      },
+      {
+        "component": "Terraform job",
+        "runner_seconds": 67,
+        "setup_seconds": 0,
+        "run_id": 32968304840,
+        "head_sha": "cf9906a63a96323b1ceb23e5e25f828f3ee221a6",
+        "job_id": 98187040589,
+        "job_window": "2026-08-26T12:23:53Z..2026-08-26T12:25:00Z"
+      },
+      {
+        "component": "Autoreview root-runtime job",
+        "runner_seconds": 55,
+        "setup_seconds": 0,
+        "run_id": 32968304840,
+        "head_sha": "cf9906a63a96323b1ceb23e5e25f828f3ee221a6",
+        "job_id": 98187041068,
+        "job_window": "2026-08-26T12:24:01Z..2026-08-26T12:24:56Z"
+      },
+      {
+        "component": "Documentation job with cold-install substitution",
+        "runner_seconds": 71,
+        "setup_seconds": 47,
+        "method": "44-second retained warm job plus 27 seconds replacing its 20-second warm install with the 47-second maximum observed cold install",
+        "sources": [
+          {
+            "state": "warm documentation job",
+            "run_id": 32968304840,
+            "head_sha": "cf9906a63a96323b1ceb23e5e25f828f3ee221a6",
+            "job_id": 98187040214,
+            "job_window": "2026-08-26T12:24:01Z..2026-08-26T12:24:45Z"
+          },
+          {
+            "state": "47-second cold pnpm-install maximum",
+            "run_id": 32469559880,
+            "head_sha": "6b7e70052c294599e1bf446265ff022845137387",
+            "job_id": 96733416949,
+            "step_window": "2026-08-21T09:48:17Z..2026-08-21T09:49:04Z"
+          }
+        ]
+      },
+      {
+        "component": "Guardrail prose job",
+        "runner_seconds": 11,
+        "setup_seconds": 0,
+        "run_id": 33053670097,
+        "head_sha": "903faedf8740b3267ccaa9c13a8639bf800f86ac",
+        "job_id": 98455035670,
+        "job_window": "2026-08-27T08:21:29Z..2026-08-27T08:21:40Z"
+      }
+    ],
+    "estimated_runner_seconds": 2471,
+    "estimated_runner_minutes": 41.183,
+    "estimated_setup_seconds": 475,
+    "method": "start with the retained cold-pnpm run and add retained current-job durations plus measured cache deltas",
+    "uncertainty": "No retained run proves a current all-cache-miss no-skip execution. Foundry cold cost is unknown. Job definitions and timings come from different sources and dates.",
+    "required_pre_shadow_proof": "Run the non-required no-skip lane at immutable trusted source and base SHAs with every cache read and write disabled. Execute every current deterministic job, retain timestamps, and stop before shadow if the result breaches the human-approved ceiling."
+  },
+  "ruleset": {
+    "id": 13494367,
+    "name": "main",
+    "updated_at": "2026-08-12T17:34:59.630+02:00",
+    "strict_required_status_checks_policy": false,
+    "required_contexts": [
+      { "context": "Vercel", "app_id": 8329 },
+      { "context": "Vercel Preview Comments", "app_id": 8329 },
+      { "context": "Code Quality", "app_id": 15368 },
+      { "context": "ci", "app_id": 15368 },
+      { "context": "Sentry suites", "app_id": 15368 }
+    ],
+    "other_rules": [
+      "deletion",
+      "non-fast-forward",
+      "linear-history",
+      "pull-request",
+      "thread-resolution"
+    ],
+    "merge_queue": false,
+    "required_workflow": false,
+    "bypass": "organization admins always; current collection user can bypass"
+  },
+  "ci_authority_exceptions": [
+    {
+      "exception": "checks:write in package jobs",
+      "disposition": "narrow in issue 2124 before sole CI authority"
+    },
+    {
+      "exception": "CODECOV_TOKEN after candidate install/build/test",
+      "disposition": "isolate or obtain explicit human acceptance in issue 2124"
+    },
+    {
+      "exception": "setup-node pnpm cache implicit save in PR jobs",
+      "disposition": "make restore-only in issue 2124"
+    },
+    {
+      "exception": "schema-diff pnpm-install can save its setup-node cache after candidate checkout",
+      "disposition": "make restore-only in issue 2124"
+    },
+    {
+      "exception": "direct actions/cache saves in CI UI, CI indexer, Lighthouse, and Trunk",
+      "disposition": "make pull request use restore-only in issue 2124"
+    },
+    {
+      "exception": "four same-repository Terraform PR plans have id-token:write, pull-request comment write, and cleartext state-read authority; Alerts Infra and Governance Watchdog also have issues:write",
+      "disposition": "retain a narrow accepted plan-and-comment boundary or remove in issue 2124"
+    },
+    {
+      "exception": "Dependabot auto-merge has contents:write and pull-requests:write",
+      "disposition": "re-verify its actor and label boundary in issue 2124; keep it outside validation verdict authority"
+    },
+    {
+      "exception": "Claude review has issues:write, pull-requests:write, id-token:write, and an OAuth secret",
+      "disposition": "retain outside validation verdict authority and re-verify in issue 2124"
+    },
+    {
+      "exception": "Lighthouse trusted preview has issues:write, pull-requests:write, and a Vercel bypass secret",
+      "disposition": "keep secretless fixture separate and isolate trusted preview in issue 2124"
+    },
+    {
+      "exception": "schema-diff pull-requests:write while candidate filter, setup, and parser code can execute",
+      "disposition": "split candidate validation from the narrow trusted sticky-comment mutation in issue 2124"
+    }
+  ],
+  "worktrees": {
+    "registered_count": 25,
+    "stale_proved_by_prune_dry_run": 0,
+    "snapshot_at": "2026-08-28T17:27:56.252Z",
+    "list_command": "git worktree list --porcelain",
+    "stale_probe_command": "git worktree prune --dry-run --verbose",
+    "entries": [
+      {
+        "name": "monitoring-monorepo.gate-redesign",
+        "head_sha": "8bcb675b6b241e57435ce0e864e8511c03d9fce2",
+        "classification": "supported active"
+      },
+      {
+        "name": "monitoring-monorepo.gate-lock",
+        "head_sha": "8e2965a6ffbd92bcc0c2793a6892754e4c674a6b",
+        "classification": "supported active"
+      },
+      {
+        "name": "monitoring-monorepo",
+        "head_sha": "d5b901d09d3720fa7038fd35ffd5a77a8a4d72e2",
+        "classification": "owner-confirmation required"
+      },
+      {
+        "name": "monitoring-monorepo.review-eval",
+        "head_sha": "c5e9d03864d12ba10ddef2a2df427165129abd0e",
+        "classification": "owner-confirmation required"
+      },
+      {
+        "name": "monitoring-monorepo.review-eval-follow-up",
+        "head_sha": "a53fa9ccd7e5ddde0518a7986d22b29f9beda7d9",
+        "classification": "owner-confirmation required"
+      },
+      {
+        "name": "monitoring-monorepo.shoggoth-hardening",
+        "head_sha": "d994c6af00e3d29d245f1211d474f8a7f52deb2a",
+        "classification": "owner-confirmation required"
+      },
+      {
+        "name": "monitoring-monorepo.trove-history-followup",
+        "head_sha": "8bcb675b6b241e57435ce0e864e8511c03d9fce2",
+        "classification": "owner-confirmation required"
+      },
+      {
+        "name": "monitoring-monorepo.trove-history-ui-polish",
+        "head_sha": "b372ca068481b385f50335c305cde2f92070d5ae",
+        "classification": "owner-confirmation required"
+      },
+      {
+        "name": "agent-a11b84fec5aa28ebd",
+        "head_sha": "ef56752a2a3d86ece8cf25642c71bc8a5f9723ed",
+        "classification": "owner-confirmation required"
+      },
+      {
+        "name": "agent-a28442daae2f4f6a7",
+        "head_sha": "da1143bbd0924312d69617f762f2a22091313a23",
+        "classification": "owner-confirmation required"
+      },
+      {
+        "name": "gate-fix-2108",
+        "head_sha": "4da52eaa2ab309de4b2845c20b02602da711bb81",
+        "classification": "owner-confirmation required"
+      },
+      {
+        "name": "gate-mergebase-stamp",
+        "head_sha": "37f05f5f0744930fcdee74e09d67fcb2ab270a95",
+        "classification": "owner-confirmation required"
+      },
+      {
+        "name": "gate-rec4-deps-arm",
+        "head_sha": "94984ac3a71732c1512979bb11f28084ab94fea3",
+        "classification": "owner-confirmation required"
+      },
+      {
+        "name": "codex-2091",
+        "head_sha": "61ab51af8cc07242a6d16b81d7ef77165d748e91",
+        "classification": "owner-confirmation required"
+      },
+      {
+        "name": "mento-2114",
+        "head_sha": "d994c6af00e3d29d245f1211d474f8a7f52deb2a",
+        "classification": "owner-confirmation required"
+      },
+      {
+        "name": "mento-2114-trusted",
+        "head_sha": "d994c6af00e3d29d245f1211d474f8a7f52deb2a",
+        "classification": "owner-confirmation required"
+      },
+      {
+        "name": "mento-2116",
+        "head_sha": "d994c6af00e3d29d245f1211d474f8a7f52deb2a",
+        "classification": "owner-confirmation required"
+      },
+      {
+        "name": "mento-2117",
+        "head_sha": "d994c6af00e3d29d245f1211d474f8a7f52deb2a",
+        "classification": "owner-confirmation required"
+      },
+      {
+        "name": "mento-2118",
+        "head_sha": "d994c6af00e3d29d245f1211d474f8a7f52deb2a",
+        "classification": "owner-confirmation required"
+      },
+      {
+        "name": "monitoring-pr2036-recovery",
+        "head_sha": "99acb360470f6483f1d370e9459afec381935485",
+        "classification": "owner-confirmation required"
+      },
+      {
+        "name": "monitoring-pr2052-recovery",
+        "head_sha": "42ca3aa3cf3b0cc2ce8eebdb89c4c1f1918758d7",
+        "classification": "owner-confirmation required"
+      },
+      {
+        "name": "monitoring-pr2119-refresh",
+        "head_sha": "b488f07efcb4f926e59cf8a6e5f1213eadb3b182",
+        "classification": "owner-confirmation required"
+      },
+      {
+        "name": "monitoring-social-preview-docs",
+        "head_sha": "a5c40c325ea8d692e741a2e17c49c9bb88a75af1",
+        "classification": "owner-confirmation required"
+      },
+      {
+        "name": "nav-fix-main",
+        "head_sha": "50d1cb17082015bd1d0aab99dcab2596a7a1c6b6",
+        "classification": "owner-confirmation required"
+      },
+      {
+        "name": "nav-main-check2",
+        "head_sha": "1762ae1f2034b106f6f3b33aa3ab4f4e40565604",
+        "classification": "owner-confirmation required"
+      }
+    ]
+  },
+  "shadow_spend_recommendation": {
+    "runner_minutes_per_run_ceiling": 45,
+    "per_run_scope": "one no-skip workflow execution for one immutable sampled head",
+    "runner_minutes_total_ceiling": 450,
+    "total_scope": "cumulative no-skip workflow runner minutes across the approved shadow sample",
+    "pre_launch_stop": "Do not start shadow execution if the all-cache-disabled no-skip proof exceeds the human-approved per-run ceiling or ten runs project above the approved total.",
+    "running_stop": "Suspend after any run exceeds the human-approved 45-runner-minute per-run ceiling or when cumulative use reaches the approved total.",
+    "approval": "A human maintainer must approve both ceilings before issue 2126 starts shadow execution."
+  }
+}
