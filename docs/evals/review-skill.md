@@ -312,21 +312,22 @@ human still has to finish the job.
 
 The plist is a template. A plist has no variable substitution, so the install
 step replaces three placeholders: `__REPO_CHECKOUT__` (the checkout that holds
-`run-eval.sh`), `__USER_HOME__` (the log location), and
-`__RUNTIME_BIN_DIRS__` (the directories that hold the current `node`, `git`,
-`codex`, and `claude` executables). launchd does not read an interactive
-shell's `.zshrc`, so it cannot otherwise find tools installed by Volta or in
-another user bin directory. Run this from the root of your checkout.
+`run-eval.sh`), `__USER_HOME__` (the log location), and `__RUNTIME_PATH__` (the
+current `PATH` after the installer verifies `node`, `git`, `codex`, and
+`claude`). launchd does not read an interactive shell's startup files. The
+installed job executes the runner directly, so later shell startup cannot
+replace the captured path. Run this from the root of your checkout.
 
 ```bash
 (
   set -euo pipefail
   template="scripts/review/launchd/org.mento.review-eval.plist"
-  target="$HOME/Library/LaunchAgents/org.mento.review-eval.plist"
+  target_dir="$HOME/Library/LaunchAgents"
+  target="$target_dir/org.mento.review-eval.plist"
   repo_checkout="$PWD"
-  runtime_bin_dirs=""
+  runtime_path="$PATH:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
   for command_name in node git codex claude; do
-    if ! command_path="$(command -v "$command_name")"; then
+    if ! command_path="$(PATH="$runtime_path" command -v "$command_name")"; then
       echo "$command_name is not on PATH" >&2
       exit 1
     fi
@@ -334,37 +335,39 @@ another user bin directory. Run this from the root of your checkout.
       /*) ;;
       *) echo "$command_name must resolve to an absolute path" >&2; exit 1 ;;
     esac
-    command_dir="$(dirname "$command_path")"
-    runtime_bin_dirs="${runtime_bin_dirs:+$runtime_bin_dirs:}$command_dir"
   done
-  runtime_path="$runtime_bin_dirs:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-  mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
-  cp "$template" "$target"
-  /usr/bin/plutil -remove ProgramArguments.4 "$target"
-  /usr/bin/plutil -insert ProgramArguments.4 \
-    -string "$repo_checkout/scripts/review/run-eval.sh" "$target"
+  mkdir -p "$target_dir" "$HOME/Library/Logs"
+  rendered="$(/usr/bin/mktemp "$target_dir/.org.mento.review-eval.plist.XXXXXX")"
+  trap '/bin/rm -f "$rendered"' EXIT
+  /bin/cp "$template" "$rendered"
+  /usr/bin/plutil -remove ProgramArguments.0 "$rendered"
+  /usr/bin/plutil -insert ProgramArguments.0 \
+    -string "$repo_checkout/scripts/review/run-eval.sh" "$rendered"
   /usr/bin/plutil -replace EnvironmentVariables.PATH \
-    -string "$runtime_path" "$target"
+    -string "$runtime_path" "$rendered"
   /usr/bin/plutil -replace StandardOutPath \
-    -string "$HOME/Library/Logs/mento-review-eval.log" "$target"
+    -string "$HOME/Library/Logs/mento-review-eval.log" "$rendered"
   /usr/bin/plutil -replace StandardErrorPath \
-    -string "$HOME/Library/Logs/mento-review-eval.log" "$target"
-  /usr/bin/plutil -lint "$target"
-  test "$(/usr/bin/plutil -extract ProgramArguments.4 raw -o - "$target")" = \
+    -string "$HOME/Library/Logs/mento-review-eval.log" "$rendered"
+  /usr/bin/plutil -lint "$rendered"
+  test "$(/usr/bin/plutil -extract ProgramArguments.0 raw -o - "$rendered")" = \
     "$repo_checkout/scripts/review/run-eval.sh"
-  test "$(/usr/bin/plutil -extract EnvironmentVariables.PATH raw -o - "$target")" = \
+  test "$(/usr/bin/plutil -extract EnvironmentVariables.PATH raw -o - "$rendered")" = \
     "$runtime_path"
+  /bin/mv -f "$rendered" "$target"
+  trap - EXIT
   launchctl bootstrap gui/"$(id -u)" "$target"
 )
 ```
 
 The two `plutil -extract` checks verify the script path and required CLI path
-before launchd loads the file. The guarded block stops before `bootstrap` if a
-required CLI is missing or a render or validation command fails. Each `plutil`
-mutation receives its path as one argument, so spaces and XML metacharacters in
-a checkout, home path, or CLI path stay data. launchd reports a missing program
-only in its log, and a template with unresolved values can look installed while
-it never runs.
+before the command replaces the installed plist. The temporary file is in the
+same directory as the target, so `mv` replaces the target atomically after all
+checks pass. The guarded block stops before `bootstrap` if a required CLI is
+missing or a render or validation command fails. Each `plutil` mutation receives
+its path as one argument, so spaces and XML metacharacters in a checkout, home
+path, or CLI path stay data. launchd reports a missing program only in its log,
+and a template with unresolved values can look installed while it never runs.
 
 Run this separate opt-in command only when you intend to start a paid
 evaluation immediately:

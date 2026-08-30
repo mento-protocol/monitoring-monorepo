@@ -6578,7 +6578,7 @@ test("the launchd template carries safe arguments and installed PATH placeholder
   ].sort();
   assert.deepEqual(tokens, [
     "__REPO_CHECKOUT__",
-    "__RUNTIME_BIN_DIRS__",
+    "__RUNTIME_PATH__",
     "__USER_HOME__",
   ]);
   for (const token of tokens) {
@@ -6595,26 +6595,19 @@ test("the launchd template carries safe arguments and installed PATH placeholder
     ...programArgumentsBlock[1].matchAll(/<string>(.*?)<\/string>/g),
   ].map((match) => match[1]);
   assert.deepEqual(programArguments, [
-    "/bin/zsh",
-    "-lc",
-    'exec "$@"',
-    "org.mento.review-eval",
     "__REPO_CHECKOUT__/scripts/review/run-eval.sh",
     "--kind",
     "auto",
   ]);
-  assert.match(
-    plist,
-    /<key>PATH<\/key>\s*<string>__RUNTIME_BIN_DIRS__:\/usr\/local\/bin:/,
-  );
+  assert.match(plist, /<key>PATH<\/key>\s*<string>__RUNTIME_PATH__<\/string>/);
   assert.match(runbook, /for command_name in node git codex claude/);
-  assert.match(runbook, /command_path="\$\(command -v "\$command_name"\)"/);
+  assert.match(runbook, /runtime_path="\$PATH:\/usr\/local\/bin:/);
   assert.match(
     runbook,
-    /runtime_path="\$runtime_bin_dirs:\/usr\/local\/bin:\/usr\/bin:/,
+    /command_path="\$\(PATH="\$runtime_path" command -v "\$command_name"\)"/,
   );
-  assert.match(runbook, /plutil -remove ProgramArguments\.4/);
-  assert.match(runbook, /plutil -insert ProgramArguments\.4/);
+  assert.match(runbook, /plutil -remove ProgramArguments\.0/);
+  assert.match(runbook, /plutil -insert ProgramArguments\.0/);
   assert.match(runbook, /plutil -replace EnvironmentVariables\.PATH/);
   assert.doesNotMatch(runbook, /sed -e "s\|__REPO_CHECKOUT__/);
 
@@ -6623,10 +6616,16 @@ test("the launchd template carries safe arguments and installed PATH placeholder
   assert.equal(extraBlocks.length, 0);
   assert.match(installBlock, /^\(\n {2}set -euo pipefail\n/);
   assert.doesNotMatch(installBlock, /kickstart/);
+  assert.doesNotMatch(installBlock, /\/bin\/zsh|-lc|exec "\$@"/);
+  assert.ok(
+    installBlock.indexOf("/bin/mv -f") >
+      installBlock.lastIndexOf("plutil -extract"),
+    "the installed plist must not change before every validation command",
+  );
   assert.ok(
     installBlock.indexOf("launchctl bootstrap") >
-      installBlock.lastIndexOf("plutil -extract"),
-    "bootstrap must follow every render and validation command",
+      installBlock.indexOf("/bin/mv -f"),
+    "bootstrap must follow the atomic validated replacement",
   );
   assert.match(installBlock, /launchctl bootstrap[^\n]*"\$target"\n\)$/);
   assert.doesNotMatch(kickstartBlock, /bootstrap|plutil/);
@@ -6654,7 +6653,7 @@ test(
       const checkout = path.join(root, "checkout");
       const taskHome = path.join(root, "home");
       const fakeBin = path.join(root, "bin");
-      const runtimeCommands = ["node", "git", "codex", "claude"];
+      const runtimeCommands = ["codex", "node", "claude", "git"];
       const runtimeBinDirs = runtimeCommands.map((commandName) =>
         path.join(root, `${commandName} & bin`),
       );
@@ -6694,7 +6693,7 @@ if [ "$count" -eq "$REVIEW_EVAL_PLUTIL_FAIL_AT" ]; then
 fi
 if [ "$1" = "-extract" ]; then
   case "$2" in
-    ProgramArguments.4) printf '%s\\n' "$REVIEW_EVAL_EXPECTED_SCRIPT" ;;
+    ProgramArguments.0) printf '%s\\n' "$REVIEW_EVAL_EXPECTED_SCRIPT" ;;
     EnvironmentVariables.PATH) printf '%s\\n' "$REVIEW_EVAL_EXPECTED_PATH" ;;
   esac
 fi
@@ -6720,7 +6719,13 @@ printf '%s\\n' "$*" >> "$REVIEW_EVAL_LAUNCHCTL_LOG"
         realpathSync(checkout),
         "scripts/review/run-eval.sh",
       );
-      const expectedPath = `${runtimeBinDirs.join(":")}:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`;
+      const inheritedPath = `${runtimeBinDirs.join(":")}:${fakeBin}:/usr/bin:/bin`;
+      const expectedPath = `${inheritedPath}:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`;
+      const installedTarget = path.join(
+        taskHome,
+        "Library/LaunchAgents/org.mento.review-eval.plist",
+      );
+      const installedSentinel = "previous valid scheduler\n";
       const guardedInstall = installBlock.replaceAll(
         "/usr/bin/plutil",
         `"${fakePlutil}"`,
@@ -6730,12 +6735,14 @@ printf '%s\\n' "$*" >> "$REVIEW_EVAL_LAUNCHCTL_LOG"
         rmSync(launchctlLog, { force: true });
         rmSync(plutilCount, { force: true });
         mkdirSync(taskHome, { recursive: true });
+        mkdirSync(path.dirname(installedTarget), { recursive: true });
+        writeFileSync(installedTarget, installedSentinel);
         return spawnSync("/bin/bash", ["-c", guardedInstall], {
           cwd: checkout,
           encoding: "utf8",
           env: {
             HOME: taskHome,
-            PATH: `${runtimeBinDirs.join(":")}:${fakeBin}:/usr/bin:/bin`,
+            PATH: inheritedPath,
             REVIEW_EVAL_EXPECTED_PATH: expectedPath,
             REVIEW_EVAL_EXPECTED_SCRIPT: expectedScript,
             REVIEW_EVAL_LAUNCHCTL_LOG: launchctlLog,
@@ -6756,6 +6763,11 @@ printf '%s\\n' "$*" >> "$REVIEW_EVAL_LAUNCHCTL_LOG"
           existsSync(launchctlLog),
           false,
           `plutil failure ${failAt} reached launchctl`,
+        );
+        assert.equal(
+          readFileSync(installedTarget, "utf8"),
+          installedSentinel,
+          `plutil failure ${failAt} replaced the installed scheduler`,
         );
       }
 
@@ -6778,7 +6790,7 @@ printf '%s\\n' "$*" >> "$REVIEW_EVAL_LAUNCHCTL_LOG"
 );
 
 test(
-  "the launchd install mutations preserve one quoted program vector",
+  "the launchd install mutations preserve one direct program vector",
   { skip: process.platform !== "darwin" },
   () => {
     const root = mkdtempSync(path.join(tmpdir(), "review eval & launchd-"));
@@ -6810,8 +6822,8 @@ test(
           encoding: "utf8",
         });
       for (const args of [
-        ["-remove", "ProgramArguments.4"],
-        ["-insert", "ProgramArguments.4", "-string", script],
+        ["-remove", "ProgramArguments.0"],
+        ["-insert", "ProgramArguments.0", "-string", script],
         ["-replace", "EnvironmentVariables.PATH", "-string", runtimePath],
         ["-replace", "StandardOutPath", "-string", logPath],
         ["-replace", "StandardErrorPath", "-string", logPath],
@@ -6825,10 +6837,6 @@ test(
         return result.stdout.trim();
       };
       assert.deepEqual(JSON.parse(extract("ProgramArguments", "json")), [
-        "/bin/zsh",
-        "-lc",
-        'exec "$@"',
-        "org.mento.review-eval",
         script,
         "--kind",
         "auto",
