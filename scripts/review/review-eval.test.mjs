@@ -6570,6 +6570,10 @@ test("the launchd template carries safe arguments and installed PATH placeholder
     path.join(repoRoot, "docs/evals/review-skill.md"),
     "utf8",
   );
+  const installer = readFileSync(
+    path.join(repoRoot, "scripts/review/install-review-eval-launchd.sh"),
+    "utf8",
+  );
   // The managed-context rule: no author-account path may survive in either file.
   assert.doesNotMatch(plist, /\/Users\//);
   assert.doesNotMatch(runbook, /\/Users\//);
@@ -6606,39 +6610,36 @@ test("the launchd template carries safe arguments and installed PATH placeholder
     "auto",
   ]);
   assert.match(plist, /<key>PATH<\/key>\s*<string>__RUNTIME_PATH__<\/string>/);
-  assert.match(runbook, /for command_name in node git codex claude/);
-  assert.match(runbook, /runtime_path="\$PATH:\/usr\/local\/bin:/);
+  assert.match(installer, /for command_name in node git codex claude/);
+  assert.match(installer, /runtime_path="\$PATH:\/usr\/local\/bin:/);
   assert.match(
-    runbook,
+    installer,
     /command_path="\$\(PATH="\$runtime_path" command -v "\$command_name"\)"/,
   );
-  assert.match(runbook, /plutil -remove ProgramArguments\.5/);
-  assert.match(runbook, /plutil -insert ProgramArguments\.5/);
-  assert.match(runbook, /plutil -remove ProgramArguments\.6/);
-  assert.match(runbook, /plutil -insert ProgramArguments\.6/);
-  assert.match(runbook, /plutil -replace EnvironmentVariables\.PATH/);
-  assert.doesNotMatch(runbook, /sed -e "s\|__REPO_CHECKOUT__/);
+  assert.match(installer, /-remove ProgramArguments\.5/);
+  assert.match(installer, /-insert ProgramArguments\.5/);
+  assert.match(installer, /-remove ProgramArguments\.6/);
+  assert.match(installer, /-insert ProgramArguments\.6/);
+  assert.match(installer, /-replace EnvironmentVariables\.PATH/);
+  assert.doesNotMatch(installer, /sed -e "s\|__REPO_CHECKOUT__/);
 
   const [installBlock, kickstartBlock, ...extraBlocks] =
     launchdRunbookBlocks(runbook);
   assert.equal(extraBlocks.length, 0);
-  assert.match(installBlock, /^\(\n {2}set -euo pipefail\n/);
+  assert.equal(installBlock, "./scripts/review/install-review-eval-launchd.sh");
   assert.doesNotMatch(installBlock, /kickstart/);
-  assert.doesNotMatch(installBlock, /-lc/);
-  assert.ok(
-    installBlock.indexOf("/bin/mv -f") >
-      installBlock.lastIndexOf("plutil -extract"),
-    "the installed plist must not change before every validation command",
-  );
-  assert.ok(
-    installBlock.indexOf("launchctl bootstrap") >
-      installBlock.indexOf("/bin/mv -f"),
-    "bootstrap must follow the atomic validated replacement",
-  );
-  assert.match(installBlock, /launchctl print "\$service"/);
-  assert.match(installBlock, /launchctl bootout "\$service"/);
-  assert.match(installBlock, /state = running/);
-  assert.match(installBlock, /prior installation was restored/);
+  assert.match(installer, /^#!\/usr\/bin\/env bash\n\nset -euo pipefail/);
+  assert.match(installer, /launchctl_path=\/bin\/launchctl/);
+  assert.match(installer, /\/usr\/bin\/id -u/);
+  assert.match(installer, /\/bin\/mkdir -p/);
+  assert.match(installer, /linkSync\(process\.argv\[1\], process\.argv\[2\]\)/);
+  assert.match(installer, /\$lock_owner -ef \$run_lock/);
+  assert.match(installer, /fetch --quiet origin main/);
+  assert.match(installer, /rev-parse origin\/main/);
+  assert.match(installer, /status --porcelain=v1 --untracked-files=normal/);
+  assert.match(installer, /-extract Label raw/);
+  assert.match(installer, /"\$launchctl_path" bootstrap/);
+  assert.doesNotMatch(installer, /bootout|kickstart/);
   assert.doesNotMatch(kickstartBlock, /bootstrap|plutil/);
   assert.match(
     kickstartBlock,
@@ -6649,305 +6650,6 @@ test("the launchd template carries safe arguments and installed PATH placeholder
     /separate opt-in command only when you intend to start a paid\nevaluation immediately/,
   );
 });
-
-test(
-  "the guarded launchd install fails closed and recovers prior state",
-  {},
-  () => {
-    const runbook = readFileSync(
-      path.join(repoRoot, "docs/evals/review-skill.md"),
-      "utf8",
-    );
-    const [installBlock] = launchdRunbookBlocks(runbook);
-    const root = mkdtempSync(path.join(tmpdir(), "review-eval-launchd-guard-"));
-    try {
-      const checkout = path.join(root, "checkout");
-      const taskHome = path.join(root, "home");
-      const fakeBin = path.join(root, "bin");
-      const runtimeCommands = ["codex", "node", "claude", "git"];
-      const runtimeBinDirs = runtimeCommands.map((commandName) =>
-        path.join(root, `${commandName} & bin`),
-      );
-      const templateDir = path.join(checkout, "scripts/review/launchd");
-      mkdirSync(templateDir, { recursive: true });
-      mkdirSync(fakeBin, { recursive: true });
-      for (const runtimeBinDir of runtimeBinDirs) {
-        mkdirSync(runtimeBinDir, { recursive: true });
-      }
-      cpSync(
-        path.join(
-          repoRoot,
-          "scripts/review/launchd/org.mento.review-eval.plist",
-        ),
-        path.join(templateDir, "org.mento.review-eval.plist"),
-      );
-
-      const fakePlutil = path.join(fakeBin, "plutil");
-      const fakeLaunchctl = path.join(fakeBin, "launchctl");
-      const fakeMv = path.join(fakeBin, "mv");
-      const fakeRuntimeCommands = runtimeCommands.map((commandName, index) =>
-        path.join(runtimeBinDirs[index], commandName),
-      );
-      for (const fakeRuntimeCommand of fakeRuntimeCommands) {
-        writeFileSync(fakeRuntimeCommand, "#!/bin/sh\nexit 0\n");
-      }
-      writeFileSync(
-        fakePlutil,
-        `#!/bin/sh
-count=0
-if [ -f "$REVIEW_EVAL_PLUTIL_COUNT_FILE" ]; then
-  count="$(/bin/cat "$REVIEW_EVAL_PLUTIL_COUNT_FILE")"
-fi
-count=$((count + 1))
-printf '%s\\n' "$count" > "$REVIEW_EVAL_PLUTIL_COUNT_FILE"
-if [ "$count" -eq "$REVIEW_EVAL_PLUTIL_FAIL_AT" ]; then
-  exit 64
-fi
-if [ "$1" = "-extract" ]; then
-  case "$2" in
-    ProgramArguments.5) printf '%s\\n' "$REVIEW_EVAL_EXPECTED_PATH" ;;
-    ProgramArguments.6) printf '%s\\n' "$REVIEW_EVAL_EXPECTED_SCRIPT" ;;
-    EnvironmentVariables.PATH) printf '%s\\n' "$REVIEW_EVAL_EXPECTED_PATH" ;;
-  esac
-fi
-`,
-      );
-      writeFileSync(
-        fakeLaunchctl,
-        `#!/bin/sh
-case "$1" in
-  print)
-    case "$REVIEW_EVAL_SERVICE_STATE" in
-      absent) exit 113 ;;
-      running) printf '%s\\n' 'state = running' ;;
-      idle) printf '%s\\n' 'state = waiting' ;;
-      *) exit 64 ;;
-    esac
-    ;;
-  bootout)
-    printf '%s\\n' "$*" >> "$REVIEW_EVAL_LAUNCHCTL_LOG"
-    if [ "$REVIEW_EVAL_BOOTOUT_FAILS" = "1" ]; then exit 71; fi
-    ;;
-  bootstrap)
-    count=0
-    if [ -f "$REVIEW_EVAL_BOOTSTRAP_COUNT_FILE" ]; then
-      count="$(/bin/cat "$REVIEW_EVAL_BOOTSTRAP_COUNT_FILE")"
-    fi
-    count=$((count + 1))
-    printf '%s\\n' "$count" > "$REVIEW_EVAL_BOOTSTRAP_COUNT_FILE"
-    printf '%s\\n' "$*" >> "$REVIEW_EVAL_LAUNCHCTL_LOG"
-    case ",$REVIEW_EVAL_BOOTSTRAP_FAIL_AT," in
-      *,$count,*) exit 72 ;;
-    esac
-    ;;
-  *) exit 73 ;;
-esac
-`,
-      );
-      writeFileSync(
-        fakeMv,
-        `#!/bin/sh
-count=0
-if [ -f "$REVIEW_EVAL_MV_COUNT_FILE" ]; then
-  count="$(/bin/cat "$REVIEW_EVAL_MV_COUNT_FILE")"
-fi
-count=$((count + 1))
-printf '%s\\n' "$count" > "$REVIEW_EVAL_MV_COUNT_FILE"
-if [ "$count" -eq "$REVIEW_EVAL_MV_FAIL_AT" ]; then exit 74; fi
-exec /bin/mv "$@"
-`,
-      );
-      for (const executable of [
-        ...fakeRuntimeCommands,
-        fakePlutil,
-        fakeLaunchctl,
-        fakeMv,
-      ]) {
-        chmodSync(executable, 0o755);
-      }
-
-      const launchctlLog = path.join(root, "launchctl.log");
-      const bootstrapCount = path.join(root, "bootstrap.count");
-      const mvCount = path.join(root, "mv.count");
-      const plutilCount = path.join(root, "plutil.count");
-      const expectedScript = path.join(
-        realpathSync(checkout),
-        "scripts/review/run-eval.sh",
-      );
-      const inheritedPath = `${runtimeBinDirs.join(":")}:${fakeBin}:/usr/bin:/bin`;
-      const expectedPath = `${inheritedPath}:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`;
-      const installedTarget = path.join(
-        taskHome,
-        "Library/LaunchAgents/org.mento.review-eval.plist",
-      );
-      const installedSentinel = "previous valid scheduler\n";
-      const guardedInstall = installBlock
-        .replaceAll("/usr/bin/plutil", `"${fakePlutil}"`)
-        .replaceAll("/bin/mv", `"${fakeMv}"`);
-      const runInstall = (
-        failAt,
-        {
-          bootstrapFailAt = [],
-          bootoutFails = false,
-          moveFailAt = 0,
-          serviceState = "idle",
-        } = {},
-      ) => {
-        rmSync(taskHome, { recursive: true, force: true });
-        rmSync(launchctlLog, { force: true });
-        rmSync(bootstrapCount, { force: true });
-        rmSync(mvCount, { force: true });
-        rmSync(plutilCount, { force: true });
-        mkdirSync(taskHome, { recursive: true });
-        mkdirSync(path.dirname(installedTarget), { recursive: true });
-        writeFileSync(installedTarget, installedSentinel);
-        return spawnSync("/bin/bash", ["-c", guardedInstall], {
-          cwd: checkout,
-          encoding: "utf8",
-          env: {
-            HOME: taskHome,
-            PATH: inheritedPath,
-            REVIEW_EVAL_BOOTSTRAP_COUNT_FILE: bootstrapCount,
-            REVIEW_EVAL_BOOTSTRAP_FAIL_AT: bootstrapFailAt.join(","),
-            REVIEW_EVAL_BOOTOUT_FAILS: bootoutFails ? "1" : "0",
-            REVIEW_EVAL_EXPECTED_PATH: expectedPath,
-            REVIEW_EVAL_EXPECTED_SCRIPT: expectedScript,
-            REVIEW_EVAL_LAUNCHCTL_LOG: launchctlLog,
-            REVIEW_EVAL_MV_COUNT_FILE: mvCount,
-            REVIEW_EVAL_MV_FAIL_AT: String(moveFailAt),
-            REVIEW_EVAL_PLUTIL_COUNT_FILE: plutilCount,
-            REVIEW_EVAL_PLUTIL_FAIL_AT: String(failAt),
-            REVIEW_EVAL_SERVICE_STATE: serviceState,
-          },
-        });
-      };
-      const launchctlOperations = () =>
-        existsSync(launchctlLog)
-          ? readFileSync(launchctlLog, "utf8")
-              .trim()
-              .split("\n")
-              .map((line) => line.split(" ")[0])
-          : [];
-
-      for (let failAt = 1; failAt <= 12; failAt += 1) {
-        const failed = runInstall(failAt);
-        assert.notEqual(
-          failed.status,
-          0,
-          `plutil failure ${failAt} did not stop the guarded install`,
-        );
-        assert.equal(
-          existsSync(launchctlLog),
-          false,
-          `plutil failure ${failAt} reached launchctl`,
-        );
-        assert.equal(
-          readFileSync(installedTarget, "utf8"),
-          installedSentinel,
-          `plutil failure ${failAt} replaced the installed scheduler`,
-        );
-      }
-
-      const unloaded = runInstall(0, { serviceState: "absent" });
-      assert.equal(unloaded.status, 0, unloaded.stdout + unloaded.stderr);
-      assert.deepEqual(launchctlOperations(), ["bootstrap"]);
-      assert.notEqual(readFileSync(installedTarget, "utf8"), installedSentinel);
-
-      const successful = runInstall(0);
-      assert.equal(
-        successful.status,
-        0,
-        JSON.stringify({
-          stdout: successful.stdout,
-          stderr: successful.stderr,
-          plutilCalls: readFileSync(plutilCount, "utf8"),
-        }),
-      );
-      assert.match(
-        readFileSync(launchctlLog, "utf8"),
-        /^bootout gui\/[^\n]+\/org\.mento\.review-eval\nbootstrap gui\//,
-      );
-      assert.doesNotMatch(readFileSync(launchctlLog, "utf8"), /kickstart/);
-
-      const running = runInstall(0, { serviceState: "running" });
-      assert.notEqual(running.status, 0);
-      assert.match(running.stderr, /scheduler is running/);
-      assert.deepEqual(launchctlOperations(), []);
-      assert.equal(readFileSync(installedTarget, "utf8"), installedSentinel);
-
-      const bootoutFailure = runInstall(0, { bootoutFails: true });
-      assert.notEqual(bootoutFailure.status, 0);
-      assert.match(bootoutFailure.stderr, /could not unload/);
-      assert.deepEqual(launchctlOperations(), ["bootout"]);
-      assert.equal(readFileSync(installedTarget, "utf8"), installedSentinel);
-
-      const replacementFailure = runInstall(0, { moveFailAt: 1 });
-      assert.notEqual(replacementFailure.status, 0);
-      assert.match(replacementFailure.stderr, /could not replace/);
-      assert.deepEqual(launchctlOperations(), ["bootout", "bootstrap"]);
-      assert.equal(readFileSync(installedTarget, "utf8"), installedSentinel);
-
-      const replacementLoadFailure = runInstall(0, {
-        bootstrapFailAt: [1],
-      });
-      assert.notEqual(replacementLoadFailure.status, 0);
-      assert.match(
-        replacementLoadFailure.stderr,
-        /prior installation was restored/,
-      );
-      assert.deepEqual(launchctlOperations(), [
-        "bootout",
-        "bootstrap",
-        "bootstrap",
-      ]);
-      assert.equal(readFileSync(installedTarget, "utf8"), installedSentinel);
-
-      const unloadedLoadFailure = runInstall(0, {
-        bootstrapFailAt: [1],
-        serviceState: "absent",
-      });
-      assert.notEqual(unloadedLoadFailure.status, 0);
-      assert.match(
-        unloadedLoadFailure.stderr,
-        /prior installation was restored/,
-      );
-      assert.deepEqual(launchctlOperations(), ["bootstrap"]);
-      assert.equal(readFileSync(installedTarget, "utf8"), installedSentinel);
-
-      const reloadFailure = runInstall(0, { bootstrapFailAt: [1, 2] });
-      assert.notEqual(reloadFailure.status, 0);
-      assert.match(reloadFailure.stderr, /prior plist was restored/);
-      assert.match(reloadFailure.stderr, /could not be reloaded/);
-      assert.deepEqual(launchctlOperations(), [
-        "bootout",
-        "bootstrap",
-        "bootstrap",
-      ]);
-      assert.equal(readFileSync(installedTarget, "utf8"), installedSentinel);
-
-      const fileRollbackFailure = runInstall(0, {
-        bootstrapFailAt: [1],
-        moveFailAt: 2,
-      });
-      assert.notEqual(fileRollbackFailure.status, 0);
-      assert.match(fileRollbackFailure.stderr, /recovery copy:/);
-      assert.deepEqual(launchctlOperations(), ["bootout", "bootstrap"]);
-      const recoveryCopies = readdirSync(path.dirname(installedTarget)).filter(
-        (name) => name.startsWith(".org.mento.review-eval.previous."),
-      );
-      assert.equal(recoveryCopies.length, 1);
-      assert.equal(
-        readFileSync(
-          path.join(path.dirname(installedTarget), recoveryCopies[0]),
-          "utf8",
-        ),
-        installedSentinel,
-      );
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  },
-);
 
 test(
   "the launchd install preserves login credentials and one safe program vector",

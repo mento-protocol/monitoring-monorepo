@@ -94,7 +94,8 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
   (ADR 0069).
 - **Review-eval pins.** `review/run-eval-source-snapshot.sh` joins the
   four-source set in `docs/evals/review-skill.md`; update every listed consumer
-  together.
+  together. The same runbook pins `review/install-review-eval-launchd.sh`,
+  which pins the launchd plist template and `review/run-eval.sh` paths.
 - **Navigation-eval self-pin.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names its implementation.
 - **Verification evidence.** Move
