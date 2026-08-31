@@ -53,17 +53,16 @@ function detectedCodeRabbitSignals(comment) {
   return signals;
 }
 
-function requestTarget(body) {
+function requestTargets(body) {
   const text = String(body ?? "");
-  if (/(?:^|\n)\s*@coderabbitai\s+review\s*(?:\n|$)/i.test(text)) {
-    return "coderabbit";
-  }
-  if (/(?:^|\n)\s*@codex\s+review\s*(?:\n|$)/i.test(text)) return "codex";
-  if (/(?:^|\n)\s*@claude\s+review\s*(?:\n|$)/i.test(text)) {
-    return "claude";
-  }
-  if (/(?:^|\n)\s*bugbot\s+run\s*(?:\n|$)/i.test(text)) return "cursor";
-  return null;
+  return [
+    ["coderabbit", /(?:^|\n)\s*@coderabbitai\s+review\s*(?:\n|$)/i],
+    ["codex", /(?:^|\n)\s*@codex\s+review\s*(?:\n|$)/i],
+    ["claude", /(?:^|\n)\s*@claude\s+review\s*(?:\n|$)/i],
+    ["cursor", /(?:^|\n)\s*bugbot\s+run\s*(?:\n|$)/i],
+  ]
+    .filter(([, pattern]) => pattern.test(text))
+    .map(([target]) => target);
 }
 
 function classifyRequestMarker(body, target, knownHeads) {
@@ -141,7 +140,7 @@ export function buildSignals({
   ];
   for (const { value, surface } of runSources) {
     const bot = botKeyForLogin(authorLogin(value));
-    if (!bot) continue;
+    if (bot !== "coderabbit") continue;
     for (const runId of extractRunIds(value.body)) {
       const key = `${bot}:${runId}`;
       if (seenRuns.has(key)) continue;
@@ -166,24 +165,24 @@ export function buildSignals({
           evidence.freeTierNotices.push(record);
       }
     }
-    const target = requestTarget(comment.body);
-    if (!target) continue;
-    const marker = classifyRequestMarker(comment.body, target, knownHeads);
-    const record = {
-      ...signalEvidence(comment, { prUrl, type: "manual_request" }),
-      target,
-      marker: marker.kind,
-      markerReason: marker.reason,
-      head: marker.head,
-    };
-    if (!isTrustedRequestAuthor(comment)) {
-      evidence.rejectedManualRequests.push({
-        ...record,
-        rejectedReason: "request_author_is_not_trusted",
-      });
-      continue;
+    for (const target of requestTargets(comment.body)) {
+      const marker = classifyRequestMarker(comment.body, target, knownHeads);
+      const record = {
+        ...signalEvidence(comment, { prUrl, type: "manual_request" }),
+        target,
+        marker: marker.kind,
+        markerReason: marker.reason,
+        head: marker.head,
+      };
+      if (!isTrustedRequestAuthor(comment)) {
+        evidence.rejectedManualRequests.push({
+          ...record,
+          rejectedReason: "request_author_is_not_trusted",
+        });
+        continue;
+      }
+      evidence.manualRequests.push(record);
     }
-    evidence.manualRequests.push(record);
   }
 
   return {

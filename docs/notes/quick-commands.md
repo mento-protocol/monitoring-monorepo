@@ -77,7 +77,7 @@ pnpm pr:ready-state --pr 123 --json              # Final current-head required-r
 pnpm pr:merge --pr 123   # Human-only sanctioned merge; --not-ready-reason "<why>" overrides
 # Collect a manual monthly review cohort. The UTC interval is half-open: [since, until).
 # Write live reports to a new path outside the repo. Do not commit them.
-node scripts/pr/review-process-metrics.mjs --since <YYYY-MM-01T00:00:00Z> --until <next-YYYY-MM-01T00:00:00Z> --output /private/tmp/review-process-metrics-<YYYY-MM>.json
+node scripts/pr/review-process-metrics.mjs --since <YYYY-MM-01T00:00:00Z> --until <next-YYYY-MM-01T00:00:00Z> --output "${TMPDIR:-/tmp}/review-process-metrics-<YYYY-MM>.json"
 pnpm lockfile:lint                 # Fail-closed integrity/registry/override-floor check; no install
 pnpm skew:check                    # Fail on dependency skew vs pnpm catalog; no install
 pnpm sanitize:test                 # Fixture-test scripts/sanitize-terraform-output.sh secret redaction

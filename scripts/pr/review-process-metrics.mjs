@@ -24,6 +24,7 @@ export * from "./review-process-metrics-signals.mjs";
 const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
 const DEFAULT_LIMIT = 20;
 const PAGE_SIZE = 100;
+const PULL_REQUEST_COMMITS_LIMIT = 250;
 
 function usage() {
   return `Usage: node scripts/pr/review-process-metrics.mjs [options]
@@ -108,7 +109,7 @@ export function parseArgs(argv) {
     switch (arg) {
       case "--repo":
         args.repo = argv[++index] ?? "";
-        if (!/^[^/\s]+\/[^/\s]+$/.test(args.repo)) {
+        if (!/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(args.repo)) {
           throw new Error("--repo requires owner/repo");
         }
         break;
@@ -183,7 +184,7 @@ function ghJson(args) {
 
 export function assertCompletePaginatedSurface(
   pages,
-  { surface, expectedCount = null, id = (item) => item.id },
+  { surface, expectedCount = null, sourceLimit = null, id = (item) => item.id },
 ) {
   if (!Array.isArray(pages) || pages.length === 0) {
     throw new Error(`${surface} pagination returned no page envelope`);
@@ -211,8 +212,12 @@ export function assertCompletePaginatedSurface(
     throw new Error(`${surface} pagination returned duplicate items`);
   }
   if (expectedCount !== null && items.length !== expectedCount) {
+    const limitReason =
+      sourceLimit !== null && expectedCount > sourceLimit
+        ? `; the GitHub endpoint caps this surface at ${sourceLimit} items`
+        : "";
     throw new Error(
-      `${surface} pagination is incomplete: expected ${expectedCount}, received ${items.length}`,
+      `${surface} pagination is incomplete: expected ${expectedCount}, received ${items.length}${limitReason}`,
     );
   }
   return {
@@ -226,6 +231,7 @@ export function assertCompletePaginatedSurface(
       pages: pages.length,
       itemCount: items.length,
       expectedCount,
+      sourceLimit,
       pageSize: PAGE_SIZE,
     },
   };
@@ -287,6 +293,7 @@ function fetchPrEvidence(repo, number, collectedAt) {
   const commits = fetchPaginated(repo, `pulls/${number}/commits`, {
     surface: `PR #${number} commits`,
     expectedCount: pr.commits,
+    sourceLimit: PULL_REQUEST_COMMITS_LIMIT,
     id: (commit) => commit.sha,
   });
   return summarizePullRequestMetricsV2({

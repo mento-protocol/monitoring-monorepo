@@ -98,43 +98,47 @@ export function isFindingLikeText(value) {
   );
 }
 
-function hasAffirmativeOccurrence(body, pattern) {
+function affirmativeOccurrence(body, pattern) {
   const text = String(body ?? "");
-  return [...text.matchAll(pattern)].some((match) => {
-    const prefix = text.slice(Math.max(0, match.index - 120), match.index);
-    return !/\b(?:no|not|without|zero)\s+(?:[\w'-]+\s+){0,2}$/i.test(prefix);
+  const match = [...text.matchAll(pattern)].find((candidate) => {
+    const matchIndex = candidate.index ?? 0;
+    const prefix = text.slice(Math.max(0, matchIndex - 120), matchIndex);
+    const scope = prefix.split(/[.!?;\n]|\b(?:but|however|yet)\b/i).at(-1);
+    return !/\b(?:no|not|without|zero)\b/i.test(scope ?? "");
   });
+  return match?.[0] ?? null;
 }
 
-function hasAffirmativeChangesRequested(body) {
-  return hasAffirmativeOccurrence(body, /\bchanges requested\b/gi);
+function affirmativeChangesRequested(body) {
+  return affirmativeOccurrence(body, /\bchanges requested\b/gi);
 }
 
-function hasAffirmativeSeverity(body) {
-  return hasAffirmativeOccurrence(
+function affirmativeSeverity(body) {
+  return affirmativeOccurrence(
     body,
     /\b(?:critical|high|medium|low) severity\b/gi,
   );
 }
 
-function isActionableFindingEvidence(value, bot, { reviewState = null } = {}) {
+function actionableFindingSignal(value, bot, { reviewState = null } = {}) {
   const body = String(value ?? "");
   if (String(reviewState ?? "").toUpperCase() === "CHANGES_REQUESTED") {
-    return true;
+    return "review state: CHANGES_REQUESTED";
   }
   if (bot === "coderabbit") {
     return (
-      /<!--\s*cr-indicator-types\s*:/i.test(body) ||
-      /_\s*(?:\p{Extended_Pictographic}️?\s*)?(?:Critical|Major|Minor|Trivial)\s*_/u.test(
-        body,
-      )
+      body.match(/<!--\s*cr-indicator-types\s*:[^>]{1,120}-->/i)?.[0] ??
+      body.match(
+        /_\s*(?:\p{Extended_Pictographic}️?\s*)?(?:Critical|Major|Minor|Trivial)\s*_/u,
+      )?.[0] ??
+      null
     );
   }
-  if (bot === "cursor") return /\bBUGBOT_BUG_ID\b/.test(body);
+  if (bot === "cursor") return body.match(/\bBUGBOT_BUG_ID\b/)?.[0] ?? null;
   return (
-    /\[[Pp][0-3]\]/.test(body) ||
-    hasAffirmativeSeverity(body) ||
-    hasAffirmativeChangesRequested(body)
+    body.match(/\[[Pp][0-3]\]/)?.[0] ??
+    affirmativeSeverity(body) ??
+    affirmativeChangesRequested(body)
   );
 }
 
@@ -175,7 +179,10 @@ function createdAt(value) {
   );
 }
 
-export function baseEvidence(value, { prUrl, surface, finding = false }) {
+export function baseEvidence(
+  value,
+  { prUrl, surface, finding = false, findingSignal = null },
+) {
   return {
     id: String(value.id ?? value.node_id ?? "unknown"),
     url: evidenceUrl(value, prUrl),
@@ -187,6 +194,7 @@ export function baseEvidence(value, { prUrl, surface, finding = false }) {
     updatedAt: value.updatedAt ?? value.updated_at ?? null,
     path: value.path ?? null,
     finding,
+    ...(findingSignal === null ? {} : { findingSignal }),
     excerpt: normalizedExcerpt(value.body),
   };
 }
@@ -438,23 +446,31 @@ export function buildPerBotEvidence({
   for (const comment of issueComments) {
     const bot = botKeyForLogin(authorLogin(comment));
     if (!bot) continue;
-    const finding = isActionableFindingEvidence(comment.body, bot);
+    const findingSignal = actionableFindingSignal(comment.body, bot);
+    const finding = findingSignal !== null;
     addEvidenceRecord(byBot[bot], "issue_comments", {
-      ...baseEvidence(comment, { prUrl, surface: "issue_comments", finding }),
+      ...baseEvidence(comment, {
+        prUrl,
+        surface: "issue_comments",
+        finding,
+        findingSignal,
+      }),
       ...(finding ? unthreadedDisposition() : {}),
     });
   }
   for (const review of reviews) {
     const bot = botKeyForLogin(authorLogin(review));
     if (!bot) continue;
-    const finding = isActionableFindingEvidence(review.body, bot, {
+    const findingSignal = actionableFindingSignal(review.body, bot, {
       reviewState: review.state,
     });
+    const finding = findingSignal !== null;
     addEvidenceRecord(byBot[bot], "review_submissions", {
       ...baseEvidence(review, {
         prUrl,
         surface: "review_submissions",
         finding,
+        findingSignal,
       }),
       state: review.state ?? null,
       commitId: review.commit_id ?? review.commitId ?? null,
@@ -465,7 +481,10 @@ export function buildPerBotEvidence({
     const bot = botKeyForLogin(authorLogin(comment));
     if (!bot) continue;
     const isRoot = comment.in_reply_to_id == null;
-    const finding = isRoot && isActionableFindingEvidence(comment.body, bot);
+    const findingSignal = isRoot
+      ? actionableFindingSignal(comment.body, bot)
+      : null;
+    const finding = findingSignal !== null;
     const disposition = finding
       ? classifyInlineDisposition(
           repliesByRoot.get(comment.id) ?? [],
@@ -475,7 +494,12 @@ export function buildPerBotEvidence({
         )
       : {};
     addEvidenceRecord(byBot[bot], "review_comments", {
-      ...baseEvidence(comment, { prUrl, surface: "review_comments", finding }),
+      ...baseEvidence(comment, {
+        prUrl,
+        surface: "review_comments",
+        finding,
+        findingSignal,
+      }),
       inReplyToId:
         comment.in_reply_to_id == null ? null : String(comment.in_reply_to_id),
       ...disposition,

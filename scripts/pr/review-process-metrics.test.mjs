@@ -365,6 +365,20 @@ test("parses one half-open UTC cohort and rejects ambiguous selectors", () => {
     () => parseUtcTimestamp("2026-02-31T00:00:00Z", "--since"),
     /not a valid timestamp/,
   );
+  assert.equal(
+    parseArgs(["--repo", "owner-name/repo.name_2", "--prs", "42"]).repo,
+    "owner-name/repo.name_2",
+  );
+  for (const repo of [
+    "owner/repo?per_page=1",
+    "owner/repo#fragment",
+    "owner/repo%2Fother",
+  ]) {
+    assert.throws(
+      () => parseArgs(["--repo", repo, "--prs", "42"]),
+      /requires owner\/repo/,
+    );
+  }
 });
 
 test("selects merged PRs in the half-open UTC interval", () => {
@@ -398,6 +412,15 @@ test("fails closed on incomplete, malformed, or duplicated pagination", () => {
         expectedCount: 2,
       }),
     /incomplete/,
+  );
+  assert.throws(
+    () =>
+      assertCompletePaginatedSurface([[{ id: 1 }]], {
+        surface: "PR #42 commits",
+        expectedCount: 251,
+        sourceLimit: 250,
+      }),
+    /GitHub endpoint caps this surface at 250 items/,
   );
   assert.throws(
     () =>
@@ -547,6 +570,45 @@ test("classifies sanitized per-bot evidence and observed CodeRabbit signals", ()
   );
 });
 
+test("preserves the matched signal outside the bounded evidence excerpt", () => {
+  const value = structuredClone(fixture);
+  value.reviewComments.push({
+    id: 400,
+    html_url: "https://github.com/example/repo/pull/42#discussion_r400",
+    created_at: "2026-08-01T10:50:00Z",
+    path: "src/long-finding.ts",
+    user: { login: "coderabbitai[bot]", type: "Bot" },
+    body: `${"Long review context. ".repeat(20)}<!-- cr-indicator-types:potential_issue -->`,
+  });
+
+  const record = summarizeFixture(
+    value,
+  ).evidence.byBot.coderabbit.surfaces.review_comments.evidence.find(
+    ({ id }) => id === "400",
+  );
+  assert.equal(record.finding, true);
+  assert.equal(
+    record.findingSignal,
+    "<!-- cr-indicator-types:potential_issue -->",
+  );
+  assert.equal(record.excerpt.includes("cr-indicator-types"), false);
+});
+
+test("attributes CodeRabbit run IDs only to CodeRabbit-authored records", () => {
+  const value = structuredClone(fixture);
+  value.reviews.push({
+    id: 206,
+    state: "COMMENTED",
+    user: { login: "chatgpt-codex-connector[bot]", type: "Bot" },
+    body: "Quoted fixture marker: **Run ID**: `aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee`",
+  });
+
+  const reviewRuns = summarizeFixture(value).evidence.signals.reviewRuns;
+  assert.equal(reviewRuns.count, 1);
+  assert.equal(reviewRuns.byBot.coderabbit, 1);
+  assert.equal(reviewRuns.byBot.codex, 0);
+});
+
 test("uses the latest explicit same-bot stance without weakening human authority", () => {
   const botReply = (id, createdAt, body) => ({
     id,
@@ -657,6 +719,41 @@ test("uses review state and negation-safe text for submission findings", () => {
   );
 });
 
+test("keeps coordinated severity negations scoped to their clause", () => {
+  const value = structuredClone(fixture);
+  value.reviews.push(
+    {
+      id: 207,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "No critical, high, or medium severity findings.",
+    },
+    {
+      id: 208,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "No high severity finding, but a medium severity finding remains.",
+    },
+  );
+
+  const records = summarizeFixture(
+    value,
+  ).evidence.byBot.claude.surfaces.review_submissions.evidence.filter(
+    ({ id }) => id === "207" || id === "208",
+  );
+  assert.deepEqual(
+    records.map(({ id, finding, findingSignal }) => ({
+      id,
+      finding,
+      findingSignal: findingSignal ?? null,
+    })),
+    [
+      { id: "207", finding: false, findingSignal: null },
+      { id: "208", finding: true, findingSignal: "medium severity" },
+    ],
+  );
+});
+
 test("trusts request authors and proves exact-head markers from PR history", () => {
   const value = structuredClone(fixture);
   const request = (id, login, head, authorAssociation = "NONE") => ({
@@ -691,6 +788,26 @@ test("trusts request authors and proves exact-head markers from PR history", () 
       }),
     ),
   );
+});
+
+test("counts each distinct review target requested by one trusted comment", () => {
+  const value = structuredClone(fixture);
+  value.issueComments = [
+    {
+      id: 113,
+      author_association: "OWNER",
+      user: { login: "maintainer", type: "User" },
+      body: "@coderabbitai review\n@codex review\n@codex review",
+    },
+  ];
+
+  const manual = summarizeFixture(value).evidence.signals.manualRequests;
+  assert.equal(manual.count, 2);
+  assert.deepEqual(
+    manual.evidence.map(({ target }) => target),
+    ["coderabbit", "codex"],
+  );
+  assert.equal(manual.bare, 2);
 });
 
 test("rejects mixed, duplicate, and distinct exact-head markers", () => {
@@ -753,6 +870,32 @@ test("emits schema v2 without rewriting schema-v1 inputs", () => {
     "unknown",
   ]);
   assert.equal(aggregateMetricsV2([pullRequest]).pullRequests, 1);
+});
+
+test("scopes exact-head request deduplication to each pull request", () => {
+  const first = summarizeFixture();
+  const secondValue = structuredClone(fixture);
+  secondValue.pr.number = 43;
+  secondValue.pr.html_url = "https://github.com/example/repo/pull/43";
+  const second = summarizeFixture(secondValue);
+
+  const acrossPullRequests = aggregateMetricsV2([first, second]).evidence
+    .signals.manualRequests;
+  assert.equal(acrossPullRequests.markedExactHead, 2);
+  assert.equal(acrossPullRequests.uniqueExactHeads, 2);
+  assert.equal(acrossPullRequests.duplicateExactHeadRequests, 0);
+
+  const duplicateValue = structuredClone(fixture);
+  duplicateValue.issueComments.push({
+    ...structuredClone(duplicateValue.issueComments[5]),
+    id: 108,
+  });
+  const withinOnePullRequest = aggregateMetricsV2([
+    summarizeFixture(duplicateValue),
+  ]).evidence.signals.manualRequests;
+  assert.equal(withinOnePullRequest.markedExactHead, 2);
+  assert.equal(withinOnePullRequest.uniqueExactHeads, 1);
+  assert.equal(withinOnePullRequest.duplicateExactHeadRequests, 1);
 });
 
 test("creates report files exclusively with private permissions", () => {

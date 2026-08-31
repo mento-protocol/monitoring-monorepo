@@ -138,16 +138,21 @@ function aggregateSignals(prs) {
       ]),
     ),
   };
-  const requests = prs.flatMap(
-    (pr) => pr.evidence.signals.manualRequests.evidence,
+  const requestEntries = prs.flatMap((pr) =>
+    pr.evidence.signals.manualRequests.evidence.map((request) => ({
+      prNumber: pr.number,
+      request,
+    })),
   );
+  const requests = requestEntries.map(({ request }) => request);
   const rejectedRequests = prs.flatMap(
     (pr) => pr.evidence.signals.manualRequests.rejectedEvidence,
   );
   const headCounts = new Map();
-  for (const request of requests) {
+  for (const { prNumber, request } of requestEntries) {
     if (request.marker !== "marked_exact_head") continue;
-    headCounts.set(request.head, (headCounts.get(request.head) ?? 0) + 1);
+    const key = `${prNumber}:${request.head}`;
+    headCounts.set(key, (headCounts.get(key) ?? 0) + 1);
   }
   result.manualRequests = {
     count: requests.length,
