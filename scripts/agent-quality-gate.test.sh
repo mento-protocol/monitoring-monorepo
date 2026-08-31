@@ -10065,8 +10065,17 @@ mergebase_stamp_lock="$(mktemp -d /tmp/qgm.XXXXXX)"
   git config user.name "Quality Gate Test"
   printf 'fixture\n' > fixture.txt
   mkdir -p bin tools
+  # `scripts/gate/trunk-check-once.sh` asks the launcher for its daemon state
+  # before it runs the check and refuses to classify an unrecognized answer, so
+  # a stub that treats `daemon status` as a check never reaches the check at
+  # all. The branch returns before the counter, so every count below keeps its
+  # meaning.
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
+if [[ "${1:-} ${2:-}" == "daemon status" ]]; then
+  echo "✖ Daemon stopped"
+  exit 1
+fi
 counter_file="${COUNTER_FILE:?}"
 count=0
 if [[ -f "$counter_file" ]]; then
@@ -10177,6 +10186,10 @@ tipbound_stamp_repo="$(mktemp -d)"
   printf 'name: Metrics Bridge\n' > .github/workflows/metrics-bridge.yml
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
+if [[ "${1:-} ${2:-}" == "daemon status" ]]; then
+  echo "✖ Daemon stopped"
+  exit 1
+fi
 counter_file="${COUNTER_FILE:?}"
 count=0
 if [[ -f "$counter_file" ]]; then
@@ -10185,11 +10198,15 @@ fi
 printf '%s\n' "$((count + 1))" > "$counter_file"
 STUB
   # The stub makes mapped commands free. It must still delegate every inline
-  # Node helper and gate module used to build and execute the plan.
+  # Node helper and gate module used to build and execute the plan. `-p`
+  # carries the Darwin broker's `node -p 'process.execPath'` runtime probe:
+  # stub it out and the broker reads an empty runtime path and refuses to bind
+  # before first dispatch.
   cat > bin/node <<'STUB'
 #!/usr/bin/env bash
 if [[ "${1:-}" == "--input-type=module" ||
   "${1:-}" == -e ||
+  "${1:-}" == -p ||
   "${1:-}" == */quality-gate-coordinator.mjs ||
   "${1:-}" == */quality-gate-coordinator-environment.mjs ]]; then
   exec "${REAL_NODE:?}" "$@"
@@ -10260,6 +10277,10 @@ disjoint_base_stamp_repo="$(mktemp -d)"
   mkdir -p bin tools
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
+if [[ "${1:-} ${2:-}" == "daemon status" ]]; then
+  echo "✖ Daemon stopped"
+  exit 1
+fi
 counter_file="${COUNTER_FILE:?}"
 count=0
 if [[ -f "$counter_file" ]]; then
