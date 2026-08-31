@@ -16,9 +16,9 @@ function main(stream) {
   const hasContracts = contracts.length > 0;
   const contractSet = hasContracts ? new Set(contracts) : null;
 
-  // Target token address for MedianUpdated events: CELO/cUSD rate feed
-  const targetTokenAddress =
-    "0x765de816845861e75a25fca122bb6898b8b1282a".toLowerCase();
+  // Target token address for MedianUpdated events: Chainlink EUR/USD rate feed
+  const targetRateFeedAddress =
+    "0x26076b9702885d475ac8c3db3bd9f250dc5a318b".toLowerCase();
 
   for (const block of stream.data) {
     const filteredReceipts = block.receipts.map((receipt) => {
@@ -39,7 +39,7 @@ function main(stream) {
           // Only include MedianUpdated events with the specific token address
           if (
             log.name === "MedianUpdated" &&
-            log.token.toLowerCase() === targetTokenAddress
+            log.token.toLowerCase() === targetRateFeedAddress
           ) {
             result.push({
               transactionHash: receipt.transactionHash,
