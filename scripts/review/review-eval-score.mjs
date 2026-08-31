@@ -257,8 +257,8 @@ let blindCwd = null;
 
 /**
  * An empty scratch directory for the blind judges. Created once per process
- * and never written to: it exists so a judge that ignores `allowedTools: []`
- * still starts nowhere near the repository that holds the answer key.
+ * and never written to. It keeps the judge away from the repository that holds
+ * the answer key if the CLI ever stops honoring the explicit no-tools flag.
  */
 export function blindJudgeCwd() {
   if (!blindCwd) {

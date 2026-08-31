@@ -10064,11 +10064,14 @@ STUB
   # The stub makes mapped commands free. It must still delegate every inline
   # Node helper and gate module used to build and execute the plan. A stubbed-out
   # helper makes the gate refuse the run, which is the guard working, not the
-  # fixture.
+  # fixture. `-p` carries the Darwin broker's `node -p 'process.execPath'`
+  # runtime probe: stub it out and the broker reads an empty runtime path and
+  # refuses to bind before first dispatch.
   cat > bin/node <<'STUB'
 #!/usr/bin/env bash
 if [[ "${1:-}" == "--input-type=module" ||
   "${1:-}" == -e ||
+  "${1:-}" == -p ||
   "${1:-}" == */quality-gate-coordinator.mjs ||
   "${1:-}" == */quality-gate-coordinator-environment.mjs ]]; then
   exec "${REAL_NODE:?}" "$@"
@@ -10295,7 +10298,12 @@ STUB
   base_ref="$(git rev-parse --verify HEAD)"
   counter="$index_state_stamp_repo/.tmp/agent-quality-gate/trunk-count"
   printf 'changed\n' >> fixture.txt
-  printf 'brand new\n' > new.txt
+  # This file is made executable further down to prove that a mode change
+  # invalidates the stamp. The Darwin broker preflight refuses to dispatch when
+  # a routed path carries the executable bit but no inspectable source contract
+  # (rule `opaque-executable`), so the file needs a shebang to stay routable.
+  # The shebang changes nothing the assertions below observe.
+  printf '#!/usr/bin/env bash\nbrand new\n' > new.txt
 
   index_state_gate() {
     COUNTER_FILE="$counter" \
@@ -10357,7 +10365,16 @@ rm -rf "$index_state_stamp_repo"
 # path/command plan and the fixture's gate implementation independently. Every
 # change must execute the mapped command again instead of reusing the stamp.
 signature_stamp_repo="$(mktemp -d)"
-signature_runtime_root="$gate_cache_dir/signature-runtime-source"
+# The staged gate runtime must sit on a canonical path. On macOS `mktemp -d`
+# hands back a /var path that symlinks to /private/var, and
+# scripts/gate/darwin-process-lineage.mjs gates its CLI entrypoint on
+# `resolve(process.argv[1]) === fileURLToPath(import.meta.url)`. Node's ESM
+# loader resolves the symlink on the import.meta.url side only, so the two
+# disagree, the entrypoint never runs, and the gate reports malformed
+# exact-identity evidence. Canonicalizing the staging root keeps both sides
+# equal. Issue 2156 tracks removing the mismatch in the module itself.
+mkdir -p "$gate_cache_dir/signature-runtime-source"
+signature_runtime_root="$(cd "$gate_cache_dir/signature-runtime-source" && pwd -P)"
 mkdir -p \
   "$signature_runtime_root/scripts/docs" \
   "$signature_runtime_root/scripts/gate/mapping" \
@@ -10372,6 +10389,11 @@ cp "$repo_root/scripts/gate/run-handles.sh" \
   "$signature_runtime_root/scripts/gate/run-handles.sh"
 cp "$repo_root/scripts/gate/darwin-broker-launch-preflight.mjs" \
   "$signature_runtime_root/scripts/gate/darwin-broker-launch-preflight.mjs"
+# BROKER_CLIENT_ALLOWLIST pins four policy sources by SHA-256 and refuses to
+# dispatch when one is absent. The coordinator glob below stages the other
+# three; this suite is the fourth.
+cp "$repo_root/scripts/gate/darwin-broker-launch-preflight.test.mjs" \
+  "$signature_runtime_root/scripts/gate/darwin-broker-launch-preflight.test.mjs"
 cp "$repo_root/scripts/gate/darwin-process-identity.c" \
   "$signature_runtime_root/scripts/gate/darwin-process-identity.c"
 cp "$repo_root/scripts/gate/darwin-process-identity-runtime.inc.c" \

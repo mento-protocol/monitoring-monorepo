@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventType, type QuicknodeEvent } from "../../events/types.js";
 
 const SORTED_ORACLES_ADDRESS = "0xefb84935239dacdecf7c5ba76d8de40b077b7b33";
+const CHAINLINK_EUR_USD_RATE_FEED_ADDRESS =
+  "0x26076B9702885d475ac8c3dB3Bd9F250Dc5A318B";
 const CELO_CUSD_RATE_FEED_ADDRESS =
   "0x765DE816845861e75A25fCA122bb6898B8B1282a";
 
@@ -30,10 +32,15 @@ describe("handleHealthCheckEvent", () => {
     vi.restoreAllMocks();
   });
 
-  it("logs [HealthCheck] for a cUSD MedianUpdated event from SortedOracles", async () => {
+  it("logs [HealthCheck] for a Chainlink EUR/USD MedianUpdated event from SortedOracles", async () => {
     const { default: handleHealthCheckEvent } = await import("../index.js");
 
-    handleHealthCheckEvent(makeMedianUpdated(SORTED_ORACLES_ADDRESS));
+    handleHealthCheckEvent(
+      makeMedianUpdated(
+        SORTED_ORACLES_ADDRESS,
+        CHAINLINK_EUR_USD_RATE_FEED_ADDRESS,
+      ),
+    );
 
     expect(console.info).toHaveBeenCalledWith(
       "[HealthCheck]: Block",
@@ -58,6 +65,19 @@ describe("handleHealthCheckEvent", () => {
       makeMedianUpdated(
         SORTED_ORACLES_ADDRESS,
         "0x0000000000000000000000000000000000000001",
+      ),
+    );
+
+    expect(console.info).not.toHaveBeenCalled();
+  });
+
+  it("ignores the retired CELO/cUSD heartbeat feed", async () => {
+    const { default: handleHealthCheckEvent } = await import("../index.js");
+
+    handleHealthCheckEvent(
+      makeMedianUpdated(
+        SORTED_ORACLES_ADDRESS,
+        "0x765DE816845861e75A25fCA122bb6898B8B1282a",
       ),
     );
 

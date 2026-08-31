@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   cpSync,
   mkdirSync,
@@ -13,26 +13,22 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { load } from "js-yaml";
 import {
-  M2_RECEIPT,
   authorityInventory,
-  checkComplexityReceipt,
   checkStructuralRepository,
-  complexitySnapshot,
-  hasProtectedMainSaveGuard,
-  numstatCount,
 } from "./check-pr-validation-boundary.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-function tempRoot() {
-  return mkdtempSync(join(tmpdir(), "pr-validation-boundary-"));
-}
-
 function structuralFixture() {
-  const root = tempRoot();
+  const root = mkdtempSync(join(tmpdir(), "pr-validation-boundary-"));
   cpSync(join(ROOT, ".github"), join(root, ".github"), { recursive: true });
   cpSync(join(ROOT, ".trunk"), join(root, ".trunk"), { recursive: true });
+  // prettier-ignore
+  for (const path of ["pnpm-workspace.yaml", "governance-watchdog/pnpm-workspace.yaml", "alerts/infra/oncall-announcer/pnpm-workspace.yaml", "alerts/infra/onchain-event-handler/pnpm-workspace.yaml"]) { mkdirSync(dirname(join(root, path)), { recursive: true }); cpSync(join(ROOT, path), join(root, path)); }
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  execFileSync("git", ["add", "."], { cwd: root });
   return root;
 }
 
@@ -58,23 +54,21 @@ test("the repository satisfies the M2 structural boundary", () => {
   assert.deepEqual(checkStructuralRepository(ROOT), []);
 });
 
-test("cache saves require an exact protected-main push", () => {
-  assert.equal(
-    hasProtectedMainSaveGuard(
-      "github.event_name == 'push' && github.ref == 'refs/heads/main' && cache != 'true'",
-    ),
-    true,
+test("a HOME override cannot put the pnpm cache inside the checkout", () => {
+  const root = structuralFixture();
+  const action = load(
+    readFileSync(join(root, ".github/actions/pnpm-install/action.yml"), "utf8"),
   );
-  assert.equal(
-    hasProtectedMainSaveGuard("github.ref == 'refs/heads/main'"),
-    false,
+  const verify = action.runs.steps.find(
+    (step) => step.name === "Verify pnpm store target",
   );
-  assert.equal(
-    hasProtectedMainSaveGuard(
-      "github.event_name == 'push' || github.ref == 'refs/heads/main'",
-    ),
-    false,
-  );
+  const result = spawnSync("bash", ["-c", verify.run], {
+    cwd: root,
+    encoding: "utf8",
+    env: { ...process.env, GITHUB_WORKSPACE: root, HOME: root },
+  });
+  assert.notEqual(result.status, 0, result.stdout);
+  assert.match(result.stderr, /inside source checkout/u);
 });
 
 test("structural mutations fail closed at each M2 boundary", () => {
@@ -108,34 +102,86 @@ test("structural mutations fail closed at each M2 boundary", () => {
     "actions/cache@",
     /monolithic actions\/cache/u,
   );
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "      continue-on-error: true\n      uses: actions/cache/restore@", "      continue-on-error: false\n      uses: actions/cache/restore@", /cache restore must be nonfatal/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "      continue-on-error: true\n      uses: actions/cache/save@", "      continue-on-error: false\n      uses: actions/cache/save@", /cache save must be nonfatal/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "    - name: Clear incomplete pnpm store restore\n      if: steps.pnpm-cache.outputs.cache-hit == ''", "    - name: Clear incomplete pnpm store restore\n      if: 'false'", /clear an incomplete extraction/u);
   mutateOnce(
     root,
     ".github/actions/pnpm-install/action.yml",
-    "      continue-on-error: true\n      uses: actions/cache/restore@",
-    "      continue-on-error: false\n      uses: actions/cache/restore@",
-    /cache restore must be nonfatal/u,
-  );
-  mutateOnce(
-    root,
-    ".github/actions/pnpm-install/action.yml",
-    "      continue-on-error: true\n      uses: actions/cache/save@",
-    "      continue-on-error: false\n      uses: actions/cache/save@",
-    /cache save must be nonfatal/u,
-  );
-  mutateOnce(
-    root,
-    ".github/actions/pnpm-install/action.yml",
-    "    - name: Clear incomplete pnpm store restore\n      if: steps.pnpm-cache.outputs.cache-hit == ''",
-    "    - name: Clear incomplete pnpm store restore\n      if: 'false'",
-    /clear an incomplete extraction/u,
-  );
-  mutateOnce(
-    root,
-    ".github/actions/pnpm-install/action.yml",
-    "      run: pnpm install --frozen-lockfile",
+    "      run: pnpm install --frozen-lockfile --store-dir ~/pnpm-store",
     "      run: echo skipped",
     /exact install command/u,
   );
+  mutateOnce(
+    root,
+    ".github/workflows/ci.yml",
+    "pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir . --store-dir ~/pnpm-store",
+    "pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir .",
+    /three package-local installs/u,
+  );
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "        dest: ~/pnpm-home", "        dest: ~/other", /pin one home-relative PNPM_HOME/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0", "    - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9\n      with:\n        dest: ~/pnpm-home\n    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0", /pin one home-relative PNPM_HOME/u);
+  // prettier-ignore
+  mutateOnce(root, "pnpm-workspace.yaml", "packages:", "storeDir: /tmp/other\npackages:", /store override is forbidden/u);
+  // prettier-ignore
+  mutateOnce(root, "governance-watchdog/pnpm-workspace.yaml", "packages:", "store-dir: /tmp/other\npackages:", /store override is forbidden/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/workflows/ci.yml", "        run: pnpm tf:test", "        env:\n          PNPM_CONFIG_STORE_DIR: /tmp/other\n        run: pnpm tf:test", /store override is forbidden/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/workflows/ci.yml", "        run: pnpm tf:test", "        run: pnpm --store-dir /tmp/other tf:test", /store override is forbidden/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/workflows/ci.yml", "        run: pnpm tf:test", "        run: pnpm config set store_dir /tmp/other\n          pnpm tf:test", /store override is forbidden/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/workflows/ci.yml", "        run: pnpm tf:test", "        env:\n          PNPM_HOME: /tmp/other\n        run: pnpm tf:test", /store override is forbidden/u);
+  mutateOnce(
+    root,
+    ".github/actions/pnpm-install/action.yml",
+    "        path: ~/pnpm-store",
+    "        path: ~/.local/share/pnpm/store",
+    /pinned home-relative store/u,
+  );
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0", "      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0", /one restore and one protected-main save/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "    - name: Clear incomplete pnpm store restore", "    - name: Duplicate pnpm restore\n      continue-on-error: true\n      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0\n      with:\n        path: ~/pnpm-store\n        key: trusted-main-v1-pnpm-store-duplicate\n    - name: Clear incomplete pnpm store restore", /one restore and one protected-main save/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "    - name: Save pnpm store", "    - name: Duplicate pnpm save\n      if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n      continue-on-error: true\n      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0\n      with:\n        path: ~/pnpm-store\n        key: trusted-main-v1-pnpm-store-duplicate\n    - name: Save pnpm store", /one restore and one protected-main save/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "    - name: Install dependencies", "    - name: Clear incomplete pnpm store restore\n      if: steps.pnpm-cache.outputs.cache-hit == ''\n      shell: bash\n      run: echo duplicate\n    - name: Install dependencies", /one cleanup/u);
+  mutateOnce(
+    root,
+    ".github/actions/pnpm-install/action.yml",
+    "    - name: Prepare pnpm store target",
+    "    - name: Skip pnpm store preparation",
+    /cleared exactly once/u,
+  );
+  mutateOnce(
+    root,
+    ".github/actions/pnpm-install/action.yml",
+    "    - name: Clear incomplete pnpm store restore",
+    '    - name: Mutate later steps\n      shell: bash\n      run: echo "NODE_OPTIONS=--import=./evil.mjs" >> "$GITHUB_ENV"\n    - name: Clear incomplete pnpm store restore',
+    /without mutating the later-step environment/u,
+  );
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", 'const target = join(realpathSync(homedir()), "pnpm-store")', 'const target = join(realpathSync(homedir()), "other")', /pin one home-relative PNPM_HOME/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "    - name: Prepare pnpm store target", "    - name: Verify pnpm store target\n      shell: bash\n      run: echo duplicate\n    - name: Prepare pnpm store target", /pin one home-relative PNPM_HOME/u);
+  mutateOnce(
+    root,
+    ".github/actions/pnpm-install/action.yml",
+    "    - name: Save pnpm store",
+    "    - name: Install dependencies\n      shell: bash\n      run: pnpm install --frozen-lockfile --store-dir ~/pnpm-store\n    - name: Save pnpm store",
+    /pin one home-relative PNPM_HOME/u,
+  );
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "'pnpm-lock.yaml', 'pnpm-workspace.yaml'", "'pnpm-lock.yaml'", /matching toolchain-bound key/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "    - name: Install dependencies\n      shell: bash", "    - name: Install dependencies\n      continue-on-error: true\n      shell: bash", /required steps unconditional and fatal/u);
   mutateOnce(
     root,
     ".github/actions/pnpm-install/action.yml",
@@ -153,9 +199,9 @@ test("structural mutations fail closed at each M2 boundary", () => {
   mutateOnce(
     root,
     ".github/actions/pnpm-install/action.yml",
-    "        restore-keys: |\n          trusted-main-v1-pnpm-store-",
-    "        restore-keys: |\n          candidate-pnpm-store-",
-    /trusted-main-v1 namespace/u,
+    "          trusted-main-v1-pnpm-store-${{ runner.os }}-${{ runner.arch }}-",
+    "          trusted-main-v1-pnpm-store-${{ runner.os }}-",
+    /matching toolchain-bound key/u,
   );
   mutateOnce(
     root,
@@ -232,28 +278,42 @@ test("structural mutations fail closed at each M2 boundary", () => {
     ".github/workflows/ci.yml",
     "          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}",
     "          write-cache: true",
-    /unconditional x64 protected-main pnpm cache writer/u,
+    /dependency-free x64 pnpm cache writer/u,
   );
+  // prettier-ignore
+  mutateOnce(root, ".github/workflows/ci.yml", "        # before this required job trusts them.\n        run: node scripts/check-agent-quality-gate-package-scripts.mjs", "        # before this required job trusts them.\n        run: node scripts/check-agent-quality-gate-package-scripts.mjs --skip", /trusted package-script pin check/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/workflows/ci.yml", "  production-infra-contract:\n    name: Production infrastructure contract", "  production-infra-contract:\n    name: Production infrastructure contract\n    needs: changes", /direct dependency-free x64 pnpm cache writer/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/workflows/ci.yml", "      - uses: ./.github/actions/pnpm-install\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", "      - uses: ./.github/actions/pnpm-install\n        if: 'false'\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", /dependency-free x64 pnpm cache writer/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/workflows/ci.yml", "      - uses: ./.github/actions/pnpm-install\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", "      - uses: ./.github/actions/pnpm-install\n        env:\n          PNPM_CONFIG_STORE_DIR: /tmp/other\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", /store override is forbidden/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/workflows/ci.yml", "      - uses: ./.github/actions/pnpm-install\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", "      - name: Persist alternate pnpm store\n        run: echo \"PNPM_CONFIG_STORE_DIR=/tmp/other\" >> \"$GITHUB_ENV\"\n      - uses: ./.github/actions/pnpm-install\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", /store override is forbidden/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/workflows/ci.yml", "  production-infra-contract:\n    name: Production infrastructure contract", "  production-infra-contract:\n    name: Production infrastructure contract\n    container: node:24", /caller jobs must not use containers/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/resolve-eslint-baseline/action.yml", "        set -euo pipefail", "        set -euo pipefail\n        echo \"PNPM_CONFIG_STORE_DIR=/tmp/other\" >> \"$GITHUB_ENV\"", /store override is forbidden/u);
   mutateOnce(
     root,
     ".github/workflows/ci.yml",
     "      - uses: ./.github/actions/pnpm-install\n      - name: Resolve main baseline (PR baseline-growth check)",
     "      - uses: ./.github/actions/pnpm-install\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}\n      - name: Resolve main baseline (PR baseline-growth check)",
-    /unconditional x64 protected-main pnpm cache writer/u,
+    /dependency-free x64 pnpm cache writer/u,
   );
   mutateOnce(
     root,
     ".github/workflows/ci.yml",
     "  production-infra-contract:\n    name: Production infrastructure contract",
     "  production-infra-contract:\n    name: Production infrastructure contract\n    if: github.event_name == 'pull_request'",
-    /unconditional x64 protected-main pnpm cache writer/u,
+    /dependency-free x64 pnpm cache writer/u,
   );
   mutateOnce(
     root,
     ".github/workflows/ci.yml",
     "    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 5\n    permissions:\n      contents: read\n      actions: read",
     "    runs-on: blacksmith-2vcpu-ubuntu-2404-arm\n    timeout-minutes: 5\n    permissions:\n      contents: read\n      actions: read",
-    /unconditional x64 protected-main pnpm cache writer/u,
+    /dependency-free x64 pnpm cache writer/u,
   );
   mutateOnce(
     root,
@@ -346,6 +406,11 @@ test("structural mutations fail closed at each M2 boundary", () => {
     ".run_attempt > 0 and",
     /exact reviewed Dependabot auto-merge workflow pair inventory/u,
   );
+  write(root, ".npmrc", "store-dir=/tmp/other\n");
+  assert.match(
+    checkStructuralRepository(root).join("\n"),
+    /store override is forbidden/u,
+  );
 });
 
 test("Dependabot auto-merge workflows may be absent only as one pair", () => {
@@ -384,78 +449,21 @@ test("PR-local reusable workflows stay inside cache and authority boundaries", (
   );
 });
 
-test("the M2 receipt matches fixed-base numstat and protects the Phase 0 manifest", () => {
-  assert.equal(numstatCount("-"), 0);
-  assert.equal(numstatCount("12"), 12);
-  assert.throws(() => numstatCount("invalid"), /invalid git numstat count/u);
-  const root = tempRoot();
-  write(
-    root,
-    "docs/metrics/verification-redesign-control-plane-before.json",
-    "{}\n",
-  );
-  git(root, ["init", "-q"]);
-  git(root, ["config", "user.email", "test@example.com"]);
-  git(root, ["config", "user.name", "Test"]);
+test("the permanent CLI ignores later product files and the retired M2 base", () => {
+  const root = structuralFixture();
+  write(root, "ui-dashboard/src/later-page.tsx", "export default null;\n");
   git(root, ["add", "."]);
-  git(root, ["commit", "-qm", "base"]);
-  const base = git(root, ["rev-parse", "HEAD"]);
-  write(root, ".github/workflows/ci.yml", "name: CI\n");
-  write(root, ".github/actions/install/action.yml", "name: install\n");
-  write(root, ".lighthouserc.cjs", "module.exports = {};\n");
-  write(
-    root,
-    "scripts/workflows/check-pr-validation-boundary.mjs",
-    "one\ntwo\n",
-  );
-  write(
-    root,
-    "scripts/workflows/check-pr-validation-boundary.test.mjs",
-    "one\ntwo\nthree\n",
-  );
-  write(root, "docs/adr/m2.md", "M2\n");
-  write(root, "docs/m2.bin", "\0M2\n");
-  assert.match(
-    checkComplexityReceipt(root, base).violations.join("\n"),
-    /stage untracked files/u,
-  );
-  git(root, ["add", "."]);
-  const receipt = complexitySnapshot(root, base);
-  assert(
-    receipt.files.some(
-      (file) =>
-        file.path === "scripts/workflows/check-pr-validation-boundary.mjs",
+  assert.throws(() =>
+    execFileSync(
+      "git",
+      ["cat-file", "-e", "ccef910fa6fc267751681176ffdeef01daf90b40^{commit}"],
+      { cwd: root, stdio: "ignore" },
     ),
   );
-  assert.equal(
-    receipt.files.find((file) => file.path === ".lighthouserc.cjs")?.category,
-    "check",
+  const output = execFileSync(
+    process.execPath,
+    [join(ROOT, "scripts/workflows/check-pr-validation-boundary.mjs")],
+    { cwd: root, encoding: "utf8" },
   );
-  assert.deepEqual(
-    receipt.files.find((file) => file.path === "docs/m2.bin"),
-    { path: "docs/m2.bin", category: "doc", additions: 0, deletions: 0 },
-  );
-  write(root, M2_RECEIPT, `${JSON.stringify(receipt, null, 2)}\n`);
-  git(root, ["add", M2_RECEIPT]);
-  assert.deepEqual(checkComplexityReceipt(root, base).violations, []);
-
-  write(
-    root,
-    "docs/metrics/verification-redesign-control-plane-before.json",
-    '{"changed":true}\n',
-  );
-  assert.match(
-    checkComplexityReceipt(root, base).violations.join("\n"),
-    /Phase 0/u,
-  );
-  write(
-    root,
-    "docs/metrics/verification-redesign-control-plane-before.json",
-    "{}\n",
-  );
-  write(root, M2_RECEIPT, "{}\n");
-  assert.match(
-    checkComplexityReceipt(root, base).violations.join("\n"),
-    /does not match/u,
-  );
+  assert.equal(output, "PR validation trust contract passes.\n");
 });

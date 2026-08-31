@@ -28,10 +28,17 @@ even when you never open an authority.
    pnpm issue:claim --count 3 --agent codex
    ```
 
-   Claiming moves the issue out of the ready queue; if you cannot continue,
-   release it with `pnpm issue:release --issue <n>` (add `--needs-grooming`
-   when clarity is missing; default restores `agent-ready`). Authority:
+   Claiming moves the issue out of the ready queue. Keep each printed Claim ID.
+   If you cannot continue, release it with
+   `pnpm issue:release --issue <n> --claim-id <claim-id>` (add
+   `--needs-grooming` when clarity is missing; default restores
+   `agent-ready`). Authority:
    [`agent-issue-workflow.md`](agent-issue-workflow.md).
+   After a PR closes unmerged, add `--closed-unmerged-pr`. The helper then
+   proves the stored PR and branch binding before release.
+   A manual `--count` claim records the current checked-out branch. If step 2
+   creates the final PR branch afterward, keep the Claim ID for the explicit
+   owner-checked branch rebind in step 6.
 
 2. **Implement.** Work in a dedicated per-PR worktree and unique branch, never
    directly on `main`. Keep the diff surgical: touch only what the task needs,
@@ -180,7 +187,11 @@ even when you never open an authority.
    the issue with `Closes #N` **only when the issue's Done means is fully
    satisfied**; otherwise use `Refs #N`. For issue-backed work, once the PR is
    open, run `pnpm issue:review --pr <pr> --issue <issue>` to move the issue
-   out of `agent-active` and into review. Authority:
+   out of `agent-active` and into review. If the stored claim Branch differs
+   because the PR branch was created after the claim, run
+   `pnpm issue:review --pr <pr> --issue <issue> --claim-id <claim-id> --rebind-branch`.
+   This path proves the open same-repository PR and refuses an open PR on the
+   old Branch. Do not pass `--branch` to review. Authority:
    [`agent-issue-workflow.md`](agent-issue-workflow.md).
 
    **Resolve the repository identities first.** Before any PR lookup, resolve
@@ -460,14 +471,14 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    workboard afterward per
    [`agent-issue-workflow.md`](agent-issue-workflow.md). If live proof remains,
    continue to production closeout first. After a partial merge, keep the issue
-   open. Before `issue:release` restores `agent-ready`, update the issue body:
-   mark merged work complete, isolate the remaining acceptance criteria, and
-   restate the current Done means. Use `needs-grooming` instead when the
-   remaining scope is unclear. Generated documentation-garden packets are the
-   exception: do not edit their immutable issue bodies or restore
-   `agent-ready`. Set `needs-grooming`. A human can resume the frozen packet or
-   create a linked ordinary follow-up before closing it. Record merged work in
-   issue comments and PR links, not in the generated body. Authority:
+   open. Update the issue body to mark merged work complete, isolate the
+   remaining acceptance criteria, and restate the current Done means. Then run
+   `pnpm issue:release --issue <n> --claim-id <claim-id> --merged-pr --needs-grooming`.
+   The helper proves the stored merged PR and Branch, clears the exact owner,
+   and never restores `agent-ready`. Generated documentation-garden packets are
+   the exception: do not edit their immutable issue bodies. A human can resume
+   the frozen packet or create a linked ordinary follow-up before closing it.
+   Record merged work in issue comments and PR links. Authority:
    [`documentation-gardening.md`](documentation-gardening.md).
 
 9. **Production closeout when required.** When Done means includes deployed or

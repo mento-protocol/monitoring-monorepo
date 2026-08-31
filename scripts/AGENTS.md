@@ -62,23 +62,22 @@ feedback-runtime pins.
   `pr-feedback-state-claude.mjs` and
   `pr-ready-state-review-signals.mjs`; feedback uses `origin/main`. Use ADR
   0064's three-merge sequence for moves.
-- **Gate routing pins.** The gate excludes stub-repo tests with
-  `$script_source_dir == $repo_root/scripts`, and pairs
-  `bootstrap/codex-cloud-setup.{sh,test.sh}` for offline tests. It routes
-  `sentry/autofix/sentry-autofix-refused-inventory.mjs` alone to
-  `pnpm sentry:autofix:run-record:test` and
-  `pnpm sentry:autofix:finalize:test`. Exact
-  `sentry/triage/sentry-triage-project-route.mjs` runs
-  `pnpm sentry:project:test` in the projection arm.
+- **Gate routing pins.** Stub-repo tests require
+  `$script_source_dir == $repo_root/scripts`.
+  `bootstrap/codex-cloud-setup.{sh,test.sh}` pair for offline tests.
+  `sentry/autofix/sentry-autofix-refused-inventory.mjs` routes
+  `pnpm sentry:autofix:{run-record,finalize}:test`. Exact
+  `sentry/triage/sentry-triage-project-route.mjs` routes
+  `pnpm sentry:project:test`.
   `deploy/deploy-indexer-verify{,-analysis}{,.test}.mjs` and
   `deploy/deploy-indexer-verify-status-identity.mjs` use one any-depth arm;
-  both verifier tests run. The exact `pr/agent-issue-board{,.test}.mjs` and
-  `pr/issue-board-{backfill,cli,commands,projects,state,sync,transport}.mjs` set
-  routes to `pnpm issue:board:test`. Exact
+  both verifier tests run. Exact `pr/agent-issue-board{,.test}.mjs` and
+  `pr/issue-board-{backfill,cli,commands,lock,ownership,projects,release,state,sync,sync-lock,transactions,transport}.mjs`
+  route to `pnpm issue:board:test`; CI runs it after failures. ADR 0082 owns
+  confinement. Exact
   `repo-health/check-guardrail-prose{,.test}.mjs` and
-  `repo-health/guardrail-prose.json` route to the guardrail suite. `ci.yml` pins
-  both paths in two jobs, quick-commands names the checker, and the manifest's
-  keys pin `AGENTS.md`, `CLAUDE.md` and the operating card. ADR 0073 has it.
+  `repo-health/guardrail-prose.json` route to the guardrail suite. `ci.yml`,
+  quick-commands, and the manifest pin it as ADR 0073 specifies.
   `pr/merge-pr*`, both PR-state helpers, and `agent-autoreview.sh` (Codex
   markers) route `pnpm pr:merge:test`.
 - **Gate runtime pins.** Before `cd`, `agent-quality-gate.sh` resolves
@@ -115,12 +114,13 @@ feedback-runtime pins.
   the PR base-branch tip, not a PR snapshot. After a move, keep dual probes
   until the new path reaches the base (issue 1904; ADR 0064).
 - **PR validation boundary pins.** Move
-  `workflows/check-pr-validation-boundary{,.test}.mjs` together. Keep its
-  `ci.yml` and `trunk.yml` calls aligned. ADR 0078 defines the boundary.
-- **Identity pins.** Under `production-infra-identity-contract/`, keep
+  `workflows/check-pr-validation-boundary{,.test}.mjs` together. Align its
+  `ci.yml` and `trunk.yml` calls. ADR 0078 defines the boundary.
+- **Production infrastructure identity pins.** Under
+  `production-infra-identity-contract/`, keep
   `workflow-inventory.mjs`, `workflow.test.mjs`,
   `dependabot-auto-merge.test.mjs`, and `index.test.mjs` aligned with the
-  boundary import.
+  boundary import. `workflow-inventory.mjs` pins audited workflow script paths.
 - **External console pins.** Codex Cloud pins
   `bootstrap/codex-cloud-{setup,maintenance}.sh`; Claude Code web pins
   `bootstrap/claude-code-web-setup.sh` through `.claude/hooks/session-start.sh`.

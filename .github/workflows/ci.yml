@@ -746,12 +746,12 @@ jobs:
       # handler checks so CI exercises the same dependency graph that deploys.
       - name: Install handler deploy dependencies
         working-directory: alerts/infra/onchain-event-handler
-        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir .
+        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir . --store-dir ~/pnpm-store
       # Same package-local install for the on-call announcer Cloud Function
       # source root.
       - name: Install on-call announcer deploy dependencies
         working-directory: alerts/infra/oncall-announcer
-        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir .
+        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir . --store-dir ~/pnpm-store
       - name: Typecheck (onchain-event-handler)
         working-directory: alerts/infra/onchain-event-handler
         run: pnpm run typecheck
@@ -839,7 +839,7 @@ jobs:
       # exercises the same dependency graph that deploys.
       - name: Install deploy dependencies
         working-directory: governance-watchdog
-        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir .
+        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir . --store-dir ~/pnpm-store
       - name: Typecheck
         working-directory: governance-watchdog
         run: pnpm run typecheck
@@ -1390,8 +1390,8 @@ jobs:
 
   production-infra-contract:
     name: Production infrastructure contract
-    # This required job is deliberately unconditional: tf:test validates
-    # deployment and production-infrastructure contracts for every candidate.
+    # This required job is deliberately unconditional. It validates production
+    # infrastructure and the repo-wide issue-board proof for every candidate.
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     permissions:
@@ -1401,11 +1401,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Validate trusted package-script pins
+        # Runs before pnpm-install because the install executes PR-authored
+        # lifecycle hooks. It also pins the tf:test and issue:board:test aliases
+        # before this required job trusts them.
+        run: node scripts/check-agent-quality-gate-package-scripts.mjs
       - uses: ./.github/actions/pnpm-install
         with:
           write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - name: Terraform production infrastructure contract
         run: pnpm tf:test
+      - name: Issue board owner-mutation confinement contract
+        if: ${{ !cancelled() }}
+        run: pnpm issue:board:test
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
 
@@ -1616,7 +1624,7 @@ jobs:
       contents: read
       actions: read
     steps:
-      - uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
+      - uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
         with:
           jobs: ${{ toJSON(needs) }}
           allowed-skips: shared,ui,indexer,bridge,integration-probes,aegis,alerts,gov-watchdog,terraform,deps,scripts,docs-checks,autoreview-suite,autoreview-root-runtime,version-skew

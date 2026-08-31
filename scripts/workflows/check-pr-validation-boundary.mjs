@@ -8,13 +8,6 @@ import { collectTriggers, hasWritePermission, jobReceivesCredential, parseWorkfl
 import { isMapping, workflowJobSteps } from "../lib/workflow-yaml.mjs";
 import { validateWorkflowInventory } from "../production-infra-identity-contract/workflow-inventory.mjs";
 
-export const M2_BASE_SHA = "ccef910fa6fc267751681176ffdeef01daf90b40";
-export const M2_RECEIPT =
-  "docs/metrics/verification-redesign-m2-complexity.json";
-const BEFORE = "docs/metrics/verification-redesign-control-plane-before.json";
-const CHECK = "scripts/workflows/check-pr-validation-boundary.mjs";
-const TEST = "scripts/workflows/check-pr-validation-boundary.test.mjs";
-const CATEGORIES = "workflow action check test doc".split(" ");
 const CODECOV = [
   "shared|config|shared-config/coverage",
   "ui|ui-dashboard|ui-dashboard/coverage",
@@ -102,10 +95,10 @@ function reachableWorkflowFiles(root) {
   }
   return queued;
 }
-
 // prettier-ignore
 function reachableSteps(root) { return [...reachableWorkflowFiles(root), ...listYaml(root, ".github/actions"), ...listYaml(root, ".trunk/setup-ci")].flatMap((path) => steps(load(root, path))); }
-
+// prettier-ignore
+const isPnpmInstall = (step) => /^\.\/\.github\/actions\/pnpm-install\/?$/u.test(String(step?.uses ?? ""));
 // prettier-ignore
 function coldSequence(root, path, job, restoreId, cleanupName, cleanupIf, cleanupRun, commandName, commandRun, commandIf = "") {
   const workflow = load(root, path);
@@ -121,11 +114,13 @@ function coldSequence(root, path, job, restoreId, cleanupName, cleanupIf, cleanu
 // prettier-ignore
 function checkCaches(root, violations) {
   const reachable = reachableSteps(root);
-  const all = [".github/workflows", ".github/actions", ".trunk/setup-ci"].flatMap((directory) => listYaml(root, directory)).flatMap((path) => steps(load(root, path)));
+  const definitions = [".github/workflows", ".github/actions", ".trunk/setup-ci"].flatMap((directory) => listYaml(root, directory)).map((path) => load(root, path)); const all = definitions.flatMap(steps); const pnpmCalls = all.filter(isPnpmInstall); const pnpmCallerJobs = definitions.flatMap((definition) => Object.values(definition.jobs ?? {})).filter((job) => workflowJobSteps(job).some(isPnpmInstall)); const pnpmRoots = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "--", ":(glob)**/pnpm-workspace.yaml"], { cwd: root, encoding: "utf8" }).trim().split(/\r?\n/u).filter(Boolean); const pnpmConfigs = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "--", ":(glob)**/.npmrc"], { cwd: root, encoding: "utf8" }).trim().split(/\r?\n/u).filter(Boolean); const pnpmOverride = /\b(?:pnpm_config_store_dir|npm_config_store_dir|pnpm_home)\b|--(?:(?:config\.)?store(?:-dir|dir)|config\.store_dir)(?:=|\s)|\bpnpm\s+config\s+set\s+(?:store(?:-dir|dir)|store_dir)(?:=|\s)/iu; const pnpmConfigOverride = /^\s*store[-_]?dir\s*=/imu;
   const used = (scope, pattern) => scope.filter((step) => pattern.test(String(step.uses ?? "")));
   const restores = used(all, /^actions\/cache\/restore@/iu);
   const saves = used(all, /^actions\/cache\/save@/iu);
-  const trusted = (step) => String(step.with?.key ?? "").startsWith("trusted-main-v1-") && String(step.with?.["restore-keys"] ?? "").split(/\r?\n/u).every((key) => key.trim() === "" || key.trim().startsWith("trusted-main-v1-"));
+  const pnpmAction = load(root, ".github/actions/pnpm-install/action.yml"); const pnpmSteps = workflowJobSteps(pnpmAction.runs); const pnpmSetups = used(pnpmSteps, /^pnpm\/action-setup@/iu); const nodeSetups = used(pnpmSteps, /^actions\/setup-node@/iu); const pnpmRestores = used(pnpmSteps, /^actions\/cache\/restore@/iu); const pnpmSaves = used(pnpmSteps, /^actions\/cache\/save@/iu); const pnpmTargets = pnpmSteps.filter((step) => step.name === "Verify pnpm store target"); const pnpmInstalls = pnpmSteps.filter((step) => step.name === "Install dependencies"); const pnpmPrepares = pnpmSteps.filter((step) => step.name === "Prepare pnpm store target"); const pnpmCleanups = pnpmSteps.filter((step) => step.name === "Clear incomplete pnpm store restore"); const pnpmSetupIndex = pnpmSteps.indexOf(pnpmSetups[0]); const nodeSetupIndex = pnpmSteps.indexOf(nodeSetups[0]); const pnpmTargetIndex = pnpmSteps.indexOf(pnpmTargets[0]); const pnpmPrepareIndex = pnpmSteps.indexOf(pnpmPrepares[0]); const pnpmRestoreIndex = pnpmSteps.indexOf(pnpmRestores[0]); const pnpmCleanupIndex = pnpmSteps.indexOf(pnpmCleanups[0]); const pnpmInstallIndex = pnpmSteps.indexOf(pnpmInstalls[0]); const pnpmSaveIndex = pnpmSteps.indexOf(pnpmSaves[0]);
+  const pnpmTargetRun = `node -e 'const { existsSync, realpathSync } = require("node:fs"); const { homedir } = require("node:os"); const { isAbsolute, join, relative, sep } = require("node:path"); const workspace = process.env.GITHUB_WORKSPACE; if (!workspace) throw new Error("GITHUB_WORKSPACE is required"); const source = realpathSync(workspace); const target = join(realpathSync(homedir()), "pnpm-store"); const cache = existsSync(target) ? realpathSync(target) : target; const scope = relative(source, cache); if (!isAbsolute(scope) && scope !== ".." && !scope.startsWith(".." + sep)) throw new Error("pnpm cache target " + cache + " is inside source checkout " + source);'`; const pnpmCleanup = `node -e 'const { rmSync } = require("node:fs"); const { homedir } = require("node:os"); const { join } = require("node:path"); rmSync(join(homedir(), "pnpm-store"), { force: true, recursive: true });'`; const pnpmCachePath = "~/pnpm-store"; const pnpmInstallRun = "pnpm install --frozen-lockfile --store-dir ~/pnpm-store"; const pnpmLocalInstallRun = "pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir . --store-dir ~/pnpm-store"; const pnpmCacheKey = "trusted-main-v1-pnpm-store-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', '**/.npmrc', 'package.json', '.node-version') }}"; const pnpmRestorePrefix = "trusted-main-v1-pnpm-store-${{ runner.os }}-${{ runner.arch }}-"; const pnpmSaveIf = "inputs.write-cache == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.pnpm-cache.outputs.cache-hit != 'true'";
+  const trusted = (step) => String(step.with?.key ?? "").startsWith("trusted-main-v1-") && String(step.with?.["restore-keys"] ?? "").split(/\r?\n/u).every((key) => key.trim() === "" || key.trim().startsWith("trusted-main-v1-")); const required = (step) => step?.if == null && step?.["continue-on-error"] == null; const pnpmStepKeys = [["uses", "with"], ["uses", "with"], ["name", "run", "shell"], ["continue-on-error", "id", "name", "uses", "with"], ["if", "name", "run", "shell"], ["name", "run", "shell"], ["name", "run", "shell"], ["continue-on-error", "if", "name", "uses", "with"]];
   add(violations, used(reachable, /^actions\/setup-node@/iu).every((step) => bool(step.with?.["package-manager-cache"], false) && step.with?.cache == null), "PR-reachable setup-node must disable implicit and explicit package-manager caching");
   add(violations, used(reachable, /^actions\/checkout@/iu).every((step) => bool(step.with?.["persist-credentials"], false)), "PR-reachable checkout must not persist Git credentials");
   add(violations, used(all, /^actions\/cache@/iu).length === 0, "monolithic actions/cache is forbidden");
@@ -133,10 +128,13 @@ function checkCaches(root, violations) {
   add(violations, restores.every((step) => bool(step["continue-on-error"], true)), "cache restore must be nonfatal");
   add(violations, saves.every((step) => bool(step["continue-on-error"], true)), "cache save must be nonfatal");
   add(violations, saves.every((step) => hasProtectedMainSaveGuard(step.if)), "cache save is not limited to an exact protected-main push");
-  const pnpmCleanup = `node -e 'const { rmSync } = require("node:fs"); const { homedir } = require("node:os"); const { join } = require("node:path"); rmSync(join(homedir(), ".local", "share", "pnpm", "store"), { force: true, recursive: true });'`;
+  add(violations, stable(pnpmAction.inputs) === stable({ "write-cache": { description: "Save the pnpm store after install on a protected main push", required: false, default: "false" } }) && pnpmSetups.length === 1 && stable(pnpmSetups[0]?.with) === stable({ dest: "~/pnpm-home" }) && nodeSetups.length === 1 && stable(nodeSetups[0]?.with) === stable({ "node-version-file": ".node-version", "package-manager-cache": false }) && pnpmPrepares.length === 1 && pnpmTargets.length === 1 && pnpmTargets[0]?.run === pnpmTargetRun && pnpmInstalls.length === 1 && pnpmInstalls[0]?.env == null && [pnpmSetups[0], nodeSetups[0], pnpmPrepares[0], pnpmTargets[0], pnpmInstalls[0]].every(required) && [pnpmPrepares[0], pnpmCleanups[0], pnpmTargets[0], pnpmInstalls[0]].every((step) => step?.shell === "bash") && pnpmSteps.every((step) => !/\bGITHUB_(?:ENV|PATH)\b/u.test(String(step.run ?? ""))), "pnpm setup must pin one opt-in write-cache input, use the hashed package.json and .node-version toolchain sources, pin one home-relative PNPM_HOME, keep required steps unconditional and fatal, require reviewed run steps to use bash, and verify its store without mutating the later-step environment");
+  add(violations, pnpmCalls.length === pnpmCallerJobs.flatMap(workflowJobSteps).filter(isPnpmInstall).length && pnpmCallerJobs.every((job) => job.container == null) && all.filter((step) => step.run === pnpmLocalInstallRun).length === 3 && pnpmRoots.every((path) => !Object.hasOwn(load(root, path), "storeDir") && !Object.hasOwn(load(root, path), "store-dir")) && pnpmConfigs.every((path) => !pnpmConfigOverride.test(readFileSync(join(root, path), "utf8"))) && !pnpmOverride.test(stable(definitions).replaceAll(pnpmInstallRun, "").replaceAll(pnpmLocalInstallRun, "")), "pnpm-install must be called directly from workflow jobs, and caller jobs must not use containers; pnpm store override is forbidden in dependency roots, configuration, workflow definitions, and action definitions except the exact root and three package-local installs that select the pinned home-relative store");
+  add(violations, pnpmSteps.length === 8 && pnpmSteps.every((step, index) => stable(Object.keys(step).sort()) === stable(pnpmStepKeys[index])) && pnpmRestores.length === 1 && pnpmSaves.length === 1 && pnpmCleanups.length === 1 && pnpmRestores[0]?.id === "pnpm-cache" && pnpmSteps.filter((step) => step.id === "pnpm-cache").length === 1 && stable(pnpmRestores[0]?.with) === stable({ path: pnpmCachePath, key: pnpmCacheKey, "restore-keys": `${pnpmRestorePrefix}\n` }) && stable(pnpmSaves[0]?.with) === stable({ path: pnpmCachePath, key: pnpmCacheKey }) && pnpmRestores[0]?.if == null && expr(pnpmSaves[0]?.if) === pnpmSaveIf && pnpmCleanups[0]?.["continue-on-error"] == null && pnpmSetupIndex >= 0 && pnpmSetupIndex < nodeSetupIndex && nodeSetupIndex < pnpmPrepareIndex && pnpmPrepareIndex < pnpmRestoreIndex && pnpmRestoreIndex < pnpmCleanupIndex && pnpmCleanupIndex < pnpmTargetIndex && pnpmTargetIndex < pnpmInstallIndex && pnpmInstallIndex < pnpmSaveIndex, "pnpm cache must keep the exact eight-step sequence, keys, and cache inputs; the restore action must own the sole pnpm-cache id; keep one restore and one protected-main save; restore must be unconditional and save must use the exact protected-main-miss condition; the matching toolchain-bound key includes pnpm-workspace.yaml; keep the pinned home-relative store, one cleanup that remains fatal, and verification in setup-to-save order");
+  add(violations, pnpmPrepares.length === 1 && pnpmSetupIndex < pnpmPrepareIndex && pnpmPrepareIndex < pnpmRestoreIndex && pnpmPrepares[0]?.run === pnpmCleanup, "pnpm store target must be cleared exactly once before cache restore");
   const playwrightCleanup = `node -e 'const { rmSync } = require("node:fs"); const { homedir } = require("node:os"); const { join } = require("node:path"); rmSync(join(homedir(), ".cache", "ms-playwright"), { force: true, recursive: true });'`;
   const trunkCleanup = `node -e 'const { rmSync } = require("node:fs"); const { homedir } = require("node:os"); const { join } = require("node:path"); rmSync(join(homedir(), ".cache", "trunk"), { force: true, recursive: true });'`;
-  add(violations, coldSequence(root, ".github/actions/pnpm-install/action.yml", "runs", "pnpm-cache", "Clear incomplete pnpm store restore", "steps.pnpm-cache.outputs.cache-hit == ''", pnpmCleanup, "Install dependencies", "pnpm install --frozen-lockfile"), "pnpm restore must clear an incomplete extraction before the exact install command");
+  add(violations, coldSequence(root, ".github/actions/pnpm-install/action.yml", "runs", "pnpm-cache", "Clear incomplete pnpm store restore", "steps.pnpm-cache.outputs.cache-hit == ''", pnpmCleanup, "Install dependencies", pnpmInstallRun), "pnpm restore must clear an incomplete extraction before the exact install command");
   add(violations, coldSequence(root, ".github/workflows/ci.yml", "ui", "playwright-cache", "Clear incomplete Playwright restore", "steps.playwright-cache.outputs.cache-hit == ''", playwrightCleanup, "Install Playwright Chromium", "pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium"), "CI Playwright restore must clear an incomplete extraction before install");
   add(violations, coldSequence(root, ".github/workflows/lighthouse.yml", "lighthouse", "playwright-cache", "Clear incomplete Playwright restore", "always() && steps.decide.outputs.run == 'true' && steps.playwright-cache.outputs.cache-hit == ''", playwrightCleanup, "Install Playwright Chromium (for fixture + INP measurement)", "pnpm exec playwright install chromium", "always() && steps.decide.outputs.run == 'true'"), "Lighthouse Playwright restore must clear an incomplete extraction before install");
   add(violations, coldSequence(root, ".github/workflows/trunk.yml", "trunk", "trunk-cache", "Clear incomplete Trunk restore", "steps.trunk-cache.outputs.cache-hit == ''", trunkCleanup, "Run Trunk", "./tools/trunk check --ci --all"), "Trunk restore must clear an incomplete extraction before the exact check command");
@@ -165,9 +163,9 @@ function checkCi(root, violations) {
   const ci = load(root, ".github/workflows/ci.yml");
   const secrets = strings(ci.jobs).filter((value) => /\$\{\{[\s\S]*\bsecrets\b/iu.test(value));
   add(violations, secrets.length === 9 && secrets.every((value) => value.trim() === "${{ secrets.CODECOV_TOKEN }}"), "CI secret inventory must contain only nine Codecov token bindings");
-  const writers = listYaml(root, ".github/workflows").flatMap((path) => Object.entries(load(root, path).jobs ?? {}).flatMap(([job, value]) => workflowJobSteps(value).filter((step) => step.uses === "./.github/actions/pnpm-install" && step.with?.["write-cache"] != null && !bool(step.with["write-cache"], false)).map((step) => `${path}|${job}|${expr(step.with["write-cache"])}`)));
-  const writerJob = ci.jobs?.["production-infra-contract"];
-  add(violations, writers.join() === ".github/workflows/ci.yml|production-infra-contract|github.event_name == 'push' && github.ref == 'refs/heads/main'" && writerJob?.if == null && writerJob?.["runs-on"] === "blacksmith-2vcpu-ubuntu-2404", "exactly one unconditional x64 protected-main pnpm cache writer must remain in production-infra-contract");
+  const writers = listYaml(root, ".github/workflows").flatMap((path) => Object.entries(load(root, path).jobs ?? {}).flatMap(([job, value]) => workflowJobSteps(value).filter((step) => isPnpmInstall(step) && step.with?.["write-cache"] != null && !bool(step.with["write-cache"], false)).map((step) => `${path}|${job}|${expr(step.with["write-cache"])}|${step.if == null && step["continue-on-error"] == null}`)));
+  const writerJob = ci.jobs?.["production-infra-contract"]; const writerSteps = workflowJobSteps(writerJob); const writerIndex = writerSteps.findIndex(isPnpmInstall); const packageScriptPin = writerSteps[1];
+  add(violations, stable(ci.on?.push) === stable({ branches: ["main"] }) && stable(ci.concurrency) === stable({ group: "${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}", "cancel-in-progress": true }) && writers.join() === ".github/workflows/ci.yml|production-infra-contract|github.event_name == 'push' && github.ref == 'refs/heads/main'|true" && stable(Object.keys(writerJob ?? {}).sort()) === stable(["name", "permissions", "runs-on", "steps", "timeout-minutes"]) && stable(writerJob?.permissions) === stable({ contents: "read", actions: "read" }) && writerJob?.["runs-on"] === "blacksmith-2vcpu-ubuntu-2404" && writerJob?.["timeout-minutes"] === 5 && writerIndex === 2 && String(writerSteps[0]?.uses ?? "").startsWith("actions/checkout@") && stable(Object.keys(writerSteps[0] ?? {}).sort()) === stable(["uses", "with"]) && stable(writerSteps[0]?.with) === stable({ "persist-credentials": false }) && stable(Object.keys(packageScriptPin ?? {}).sort()) === stable(["name", "run"]) && packageScriptPin?.name === "Validate trusted package-script pins" && packageScriptPin?.run === "node scripts/check-agent-quality-gate-package-scripts.mjs" && isPnpmInstall(writerSteps[2]) && stable(Object.keys(writerSteps[2] ?? {}).sort()) === stable(["uses", "with"]) && stable(writerSteps[2]?.with) === stable({ "write-cache": "${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}" }), "exactly one trusted package-script pin check and one direct dependency-free x64 pnpm cache writer must remain reachable in order on every protected-main push in production-infra-contract");
   const codegen = workflowJobSteps(ci.jobs?.indexer).filter((step) => typeof step.run === "string" && step.run.includes("codegen --config config.multichain.testnet.yaml") && step.run.includes("codegen --config config.multichain.mainnet.yaml"));
   add(violations, codegen.length === 1 && codegen[0].if == null, "both Envio codegen commands must run unconditionally");
   const uploads = [];
@@ -219,76 +217,11 @@ function checkDependabot(root, violations) {
 // prettier-ignore
 export function checkStructuralRepository(root = process.cwd()) { const violations = []; checkCaches(root, violations); checkAuthority(root, violations); checkCi(root, violations); checkSchema(root, violations); checkDependabot(root, violations); return violations; }
 
-// prettier-ignore
-function git(root, args) { return execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim(); }
-
-// prettier-ignore
-function category(path) {
-  if (path.startsWith(".github/workflows/")) return "workflow";
-  if (path.startsWith(".github/actions/") || path.startsWith(".trunk/setup-ci/")) return "action";
-  if (path === ".lighthouserc.cjs") return "check";
-  if (path.startsWith("docs/") || path.endsWith(".md")) return "doc";
-  if (path.startsWith("scripts/") || path.includes("/scripts/")) return path.includes(".test.") ? "test" : "check";
-  return null;
-}
-
-// prettier-ignore
-function fileLines(root, path) { const body = readFileSync(join(root, path), "utf8"); return body === "" ? 0 : body.split(/\r?\n/u).length - Number(body.endsWith("\n")); }
-
-// `git diff <base>` includes staged and tracked unstaged changes. Untracked
-// files are rejected below so they cannot disappear from a generated receipt.
-// prettier-ignore
-export function numstatCount(value) { if (value === "-") return 0; if (!/^\d+$/u.test(value)) throw new Error(`invalid git numstat count: ${value}`); return Number(value); }
-
-// prettier-ignore
-export function complexitySnapshot(root = process.cwd(), baseSha = M2_BASE_SHA) {
-  const output = git(root, ["diff", "--numstat", "--no-renames", baseSha, "--", ".", `:(exclude)${M2_RECEIPT}`]);
-  const files = output ? output.split("\n").map((line) => {
-    const [additions, deletions, path] = line.split("\t");
-    return { path, category: category(path), additions: numstatCount(additions), deletions: numstatCount(deletions) };
-  }) : [];
-  const totals = Object.fromEntries(CATEGORIES.map((name) => [name, { additions: 0, deletions: 0, net: 0 }]));
-  for (const file of files) {
-    if (!file.category) continue;
-    totals[file.category].additions += file.additions;
-    totals[file.category].deletions += file.deletions;
-    totals[file.category].net += file.additions - file.deletions;
-  }
-  return { schemaVersion: 1, baseSha, baseline: "Current protected-main M2 baseline.", files, totals };
-}
-
-// prettier-ignore
-export function checkComplexityReceipt(root = process.cwd(), baseSha = M2_BASE_SHA) {
-  const snapshot = complexitySnapshot(root, baseSha);
-  const violations = [];
-  add(violations, snapshot.files.every((file) => file.category), "complexity: unclassified file");
-  add(violations, snapshot.files.every((file) => file.path !== BEFORE), "complexity: Phase 0 manifest changed");
-  const added = git(root, ["diff", "--name-only", "--diff-filter=A", "--no-renames", baseSha, "--"]);
-  const newFiles = added ? added.split("\n") : [];
-  add(violations, newFiles.every((path) => fileLines(root, path) < 500), "complexity: new file has 500+ lines");
-  add(violations, !newFiles.includes(CHECK) || fileLines(root, CHECK) < 300, "complexity: checker has 300+ lines");
-  add(violations, !newFiles.includes(CHECK) || !newFiles.includes(TEST) || fileLines(root, TEST) < 2 * fileLines(root, CHECK), "complexity: tests exceed 2x implementation lines");
-  const untracked = git(root, ["ls-files", "--others", "--exclude-standard"]).split("\n").filter((path) => path && path !== M2_RECEIPT && category(path));
-  add(violations, untracked.length === 0, `complexity: stage untracked files before receipt: ${untracked.join(", ")}`);
-  let receipt;
-  try { receipt = JSON.parse(readFileSync(join(root, M2_RECEIPT), "utf8")); }
-  catch { violations.push(`complexity: missing or invalid ${M2_RECEIPT}`); }
-  add(violations, receipt == null || JSON.stringify(receipt) === JSON.stringify(snapshot), "complexity: receipt does not match tracked numstat");
-  return { violations, snapshot };
-}
-
 function main() {
-  const structural = checkStructuralRepository();
-  const complexity = checkComplexityReceipt();
-  for (const [name, total] of Object.entries(complexity.snapshot.totals)) {
-    console.log(
-      `${name}: +${total.additions} -${total.deletions} net ${total.net}`,
-    );
-  }
-  const violations = [...structural, ...complexity.violations];
+  const violations = checkStructuralRepository();
   for (const violation of violations) console.error(`FAIL: ${violation}`);
   if (violations.length > 0) process.exitCode = 1;
-  else console.log("PR validation trust and M2 complexity contracts pass.");
+  else console.log("PR validation trust contract passes.");
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) main();

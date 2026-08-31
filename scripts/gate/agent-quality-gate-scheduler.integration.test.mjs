@@ -1295,6 +1295,20 @@ test("a coordinator-disabled gate handles a killed coordinator leader safely", a
         },
       );
     }
+    const draining = await fixture.waitForDrain(scenario);
+    assert.equal(draining.drainObligations.length, 1);
+    const retainedCoordinatorPid = draining.coordinatorIdentity.pid;
+    if (process.platform === "darwin") {
+      assert.ok(
+        Number.isSafeInteger(retainedCoordinatorPid) &&
+          retainedCoordinatorPid > 0,
+      );
+      assert.equal(
+        draining.drainObligations[0].lifecycleContract,
+        "darwin-coherent-lineage-v2",
+      );
+      assert.equal(await fixture.processRunning(retainedCoordinatorPid), true);
+    }
 
     const legacy = await fixture.startGate({
       worktree: legacyWorktree,
@@ -1303,10 +1317,7 @@ test("a coordinator-disabled gate handles a killed coordinator leader safely", a
       label: "legacy-recovery-client",
       coordinator: false,
       shortDelayMs: 250,
-      extraEnvironment:
-        process.platform === "darwin"
-          ? { AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS: "0" }
-          : {},
+      lockWaitSeconds: process.platform === "darwin" ? 2 : 30,
     });
     const legacyResult = await legacy.done;
     if (process.platform === "darwin") {
@@ -1317,8 +1328,16 @@ test("a coordinator-disabled gate handles a killed coordinator leader safely", a
       );
       assert.match(
         legacyResult.stderr,
-        /requires exact per-command lineage evidence/u,
+        /error: timed out after \d+s waiting for the gate run lock at .+\/run\.lock\./u,
       );
+      assert.match(
+        legacyResult.stderr,
+        new RegExp(
+          `Holder pid ${retainedCoordinatorPid} is still alive; let it finish, then retry\\.`,
+          "u",
+        ),
+      );
+      assert.equal(await fixture.processRunning(retainedCoordinatorPid), true);
     } else {
       assertPassed(legacyResult);
       await waitUntil(

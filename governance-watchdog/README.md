@@ -4,8 +4,9 @@
 
 The watchdog receives Celo events from QuickNode, rejects unauthenticated or
 replayed deliveries, validates supported events, and posts governance
-notifications to Discord and Telegram. A separate SortedOracles event powers
-the webhook health check.
+notifications to Discord and Telegram. A separate SortedOracles event from the
+Chainlink EUR/USD feed powers a QuickNode-to-watchdog delivery canary. Its
+absence signals a delivery-path gap, not governance or oracle-feed health.
 
 The service owns a dedicated Terraform-created GCP project with a randomized
 ID. It is not part of the `mento-alerts` or `mento-monitoring` projects.
