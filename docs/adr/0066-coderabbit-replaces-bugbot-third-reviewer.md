@@ -148,16 +148,14 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
    billing. The $0 OSS tier (Pro+ features, ~1/hour, manual-trigger-only
    under 10 stars, no add-on) remains the documented fallback if spend must
    return to zero.
-2. **Commit `.coderabbit.yaml`** before the first review lands: start from the
-   assertive-adjacent default only if noise proves low; otherwise use the
-   `chill` profile or the July 2026 `quiet` profile (critical findings inline,
-   the rest summarized), `path_filters` excluding lockfiles and generated
-   trees, and `auto_pause_after_reviewed_commits: 5`. The initial value of 2
-   paused normal one-fix PRs because the opening review counts as the first
-   reviewed commit. The vendor default of 5 preserves the burst guard without
-   treating one normal fix round as active development. The ship and babysit
-   closeout requests one manual review for an exact head when the automatic
-   review is stale or missing after the optional check becomes terminal.
+2. **Commit `.coderabbit.yaml`** (done 2026-08-19 in PR #1927): use the `chill`
+   profile, `path_filters` that exclude lockfiles and generated trees, and
+   `auto_pause_after_reviewed_commits: 5`. The initial value of 2 paused normal
+   one-fix PRs because the opening review counts as the first reviewed commit.
+   The vendor default of 5 preserves the burst guard without treating one
+   normal fix round as active development. The ship and babysit closeout
+   requests one manual review for an exact head when the automatic review is
+   stale or missing after the optional check becomes terminal.
 3. **Run both reviewers for two weeks** (complete 2026-08-31). Compare their
    findings on the same PRs. Use the result to confirm or reverse the decision.
 4. **Disable BugBot** (complete 2026-08-31). Stop new reviews and preserve
@@ -239,8 +237,8 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   resolves that file from the **source branch** of the PR under review,
   falling back to defaults when absent, so a PR can weaken or replace the
   profile that reviews it. That was acceptable only while the bot's output
-  fed nothing required. This PR (the ADD side of step 4) satisfies the
-  pre-gate condition this bullet used to defer:
+  fed nothing required. PR #1927, the 2026-08-19 CodeRabbit ADD phase,
+  satisfied the pre-gate condition this bullet used to defer:
   `scripts/coderabbit-config.test.mjs` pins the
   committed config by exact equality and runs in required CI
   (`pnpm coderabbit:config:test`), so a source-branch edit to
