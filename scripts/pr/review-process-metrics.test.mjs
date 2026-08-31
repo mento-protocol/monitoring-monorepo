@@ -1103,12 +1103,18 @@ test("uses complete clauses for suffix negation and although contrasts", () => {
       user: { login: "claude[bot]", type: "Bot" },
       body: "No high severity finding, although a medium severity finding remains.",
     },
+    {
+      id: 218,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "High severity: no bounds check exists.",
+    },
   );
 
   const records = summarizeFixture(
     value,
   ).evidence.byBot.claude.surfaces.review_submissions.evidence.filter(
-    ({ id }) => id === "216" || id === "217",
+    ({ id }) => id === "216" || id === "217" || id === "218",
   );
   assert.deepEqual(
     records.map(({ id, finding, findingSignal }) => ({
@@ -1119,6 +1125,7 @@ test("uses complete clauses for suffix negation and although contrasts", () => {
     [
       { id: "216", finding: false, findingSignal: null },
       { id: "217", finding: true, findingSignal: "medium severity" },
+      { id: "218", finding: true, findingSignal: "High severity" },
     ],
   );
 });
@@ -1138,12 +1145,36 @@ test("applies clause-aware negation to priority badges", () => {
       user: { login: "claude[bot]", type: "Bot" },
       body: "None — no [P1]/[P2]/[P3] findings. [P1] The parser still drops a valid record.",
     },
+    {
+      id: 222,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "[P1] No validation is performed before parsing.",
+    },
+    {
+      id: 223,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "P2 Badge: The parser still drops a valid record.",
+    },
+    {
+      id: 224,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "No P2 Badge findings.",
+    },
+    {
+      id: 225,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "P3 Badge findings: none.",
+    },
   );
 
   const records = summarizeFixture(
     value,
   ).evidence.byBot.claude.surfaces.review_submissions.evidence.filter(
-    ({ id }) => id === "220" || id === "221",
+    ({ id }) => Number(id) >= 220 && Number(id) <= 225,
   );
   assert.deepEqual(
     records.map(({ id, finding, findingSignal }) => ({
@@ -1154,6 +1185,10 @@ test("applies clause-aware negation to priority badges", () => {
     [
       { id: "220", finding: false, findingSignal: null },
       { id: "221", finding: true, findingSignal: "[P1]" },
+      { id: "222", finding: true, findingSignal: "[P1]" },
+      { id: "223", finding: true, findingSignal: "P2 Badge" },
+      { id: "224", finding: false, findingSignal: null },
+      { id: "225", finding: false, findingSignal: null },
     ],
   );
 });

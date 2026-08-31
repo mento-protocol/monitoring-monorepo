@@ -98,6 +98,21 @@ export function isFindingLikeText(value) {
   );
 }
 
+function containsNegation(value) {
+  return (
+    /\b(?:no|not|without|zero|never|none|neither|cannot)\b/i.test(value) ||
+    /\b(?:did|do|does|is|are|was|were|has|have|had|ca|could|would|should|wo)n['’]t\b/i.test(
+      value,
+    )
+  );
+}
+
+function isExplicitEmptySummary(value) {
+  return /^\s*(?:findings?\s*)?(?::|[—-])\s*(?:none|zero|no\s+findings?)\b/i.test(
+    value,
+  );
+}
+
 function affirmativeOccurrence(body, pattern) {
   const text = String(body ?? "");
   const match = [...text.matchAll(pattern)].find((candidate) => {
@@ -106,13 +121,7 @@ function affirmativeOccurrence(body, pattern) {
     const boundary = /[.!?;\n]|\b(?:although|but|however|yet)\b/i;
     const prefix = text.slice(0, matchIndex).split(boundary).at(-1) ?? "";
     const suffix = text.slice(matchEnd).split(boundary)[0] ?? "";
-    const scope = `${prefix} ${suffix}`;
-    return !(
-      /\b(?:no|not|without|zero|never|none|neither|cannot)\b/i.test(scope) ||
-      /\b(?:did|do|does|is|are|was|were|has|have|had|ca|could|would|should|wo)n['’]t\b/i.test(
-        scope,
-      )
-    );
+    return !containsNegation(prefix) && !isExplicitEmptySummary(suffix);
   });
   return match?.[0] ?? null;
 }
@@ -129,7 +138,10 @@ function affirmativeSeverity(body) {
 }
 
 function affirmativePriority(body) {
-  return affirmativeOccurrence(body, /\[[Pp][0-3]\]/g);
+  return affirmativeOccurrence(
+    body,
+    /(?:\[[Pp][0-3]\]|\b[Pp][0-3]\s+Badge\b)/gi,
+  );
 }
 
 function actionableFindingSignal(value, bot, { reviewState = null } = {}) {
