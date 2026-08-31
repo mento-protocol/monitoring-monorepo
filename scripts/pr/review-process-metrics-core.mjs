@@ -104,7 +104,14 @@ function affirmativeOccurrence(body, pattern) {
     const matchIndex = candidate.index ?? 0;
     const prefix = text.slice(Math.max(0, matchIndex - 120), matchIndex);
     const scope = prefix.split(/[.!?;\n]|\b(?:but|however|yet)\b/i).at(-1);
-    return !/\b(?:no|not|without|zero)\b/i.test(scope ?? "");
+    return !(
+      /\b(?:no|not|without|zero|never|none|neither|cannot)\b/i.test(
+        scope ?? "",
+      ) ||
+      /\b(?:did|do|does|is|are|was|were|has|have|had|ca|could|would|should|wo)n['’]t\b/i.test(
+        scope ?? "",
+      )
+    );
   });
   return match?.[0] ?? null;
 }
@@ -215,10 +222,14 @@ function isTrustedHumanReply(reply, prAuthorLogin) {
 
 function humanClassification(body) {
   const text = String(body ?? "");
-  if (/^\s*Fixed in\s+`?[0-9a-f]{7,40}`?\s+[—-]\s+\S/im.test(text)) {
-    return "fixed";
+  const fixed = text.match(/^\s*(Fixed in\s+`?[0-9a-f]{7,40}`?\s+[—-])\s+\S/im);
+  if (fixed) {
+    return { category: "fixed", signal: fixed[1] };
   }
-  if (/^\s*Won['’]t fix:\s+\S/im.test(text)) return "wont_fix";
+  const wontFix = text.match(/^\s*(Won['’]t fix:)\s+\S/im);
+  if (wontFix) {
+    return { category: "wont_fix", signal: wontFix[1] };
+  }
   return null;
 }
 
@@ -250,7 +261,11 @@ function explicitBotStances(body) {
           ...text.matchAll(
             new RegExp(`${sentenceBoundary}(${pattern})${sentenceEnd}`, "gim"),
           ),
-        ].map((match) => ({ stance, index: match.index ?? 0 })),
+        ].map((match) => ({
+          stance,
+          index: match.index ?? 0,
+          signal: match[1],
+        })),
       ),
     )
     .sort((left, right) => left.index - right.index);
@@ -261,13 +276,16 @@ function orderedSameBotStances(replies, findingBot) {
     .flatMap((reply, replyIndex) => {
       if (botKeyForLogin(authorLogin(reply)) !== findingBot) return [];
       const replyTime = Date.parse(createdAt(reply) ?? "");
-      return explicitBotStances(reply.body).map(({ stance, index }) => ({
-        stance,
-        index,
-        reply,
-        replyIndex,
-        replyTime: Number.isFinite(replyTime) ? replyTime : Infinity,
-      }));
+      return explicitBotStances(reply.body).map(
+        ({ stance, index, signal }) => ({
+          stance,
+          index,
+          signal,
+          reply,
+          replyIndex,
+          replyTime: Number.isFinite(replyTime) ? replyTime : Infinity,
+        }),
+      );
     })
     .sort(
       (left, right) =>
@@ -288,35 +306,48 @@ function classifyInlineDisposition(replies, prUrl, findingBot, prAuthorLogin) {
     (reply) => !isTrustedHumanReply(reply, prAuthorLogin),
   );
   const classified = humanReplies
-    .map((reply) => ({ reply, category: humanClassification(reply.body) }))
-    .filter(({ category }) => category !== null);
-  const categories = new Set(classified.map(({ category }) => category));
+    .map((reply) => ({
+      reply,
+      classification: humanClassification(reply.body),
+    }))
+    .filter(({ classification }) => classification !== null);
+  const categories = new Set(
+    classified.map(({ classification }) => classification.category),
+  );
   const botStances = orderedSameBotStances(replies, findingBot);
   const finalBotStance = botStances.reduce((effectiveStance, { stance }) => {
     if (stance === "concession") return "concession";
     return effectiveStance === null ? null : "restoration";
   }, null);
-  const evidence = classified.map(({ reply, category }) => ({
+  const evidence = classified.map(({ reply, classification }) => ({
     ...baseEvidence(reply, {
       prUrl,
       surface: "review_comments",
     }),
-    category,
+    category: classification.category,
+    dispositionSignal: classification.signal,
   }));
-  const stanceEvidence = (stance) =>
-    [
-      ...new Set(
-        botStances
-          .filter((item) => item.stance === stance)
-          .map((item) => item.reply),
-      ),
-    ].map((reply) =>
-      baseEvidence(reply, { prUrl, surface: "review_comments" }),
-    );
-  const untrustedReplyEvidence = untrustedReplies.map((reply) => ({
-    ...baseEvidence(reply, { prUrl, surface: "review_comments" }),
-    claimedCategory: humanClassification(reply.body),
-  }));
+  const stanceEvidence = (stance) => {
+    const matchesByReply = new Map();
+    for (const item of botStances) {
+      if (item.stance !== stance || matchesByReply.has(item.reply)) continue;
+      matchesByReply.set(item.reply, item);
+    }
+    return [...matchesByReply.values()].map(({ reply, signal }) => ({
+      ...baseEvidence(reply, { prUrl, surface: "review_comments" }),
+      dispositionSignal: signal,
+    }));
+  };
+  const untrustedReplyEvidence = untrustedReplies.map((reply) => {
+    const classification = humanClassification(reply.body);
+    return {
+      ...baseEvidence(reply, { prUrl, surface: "review_comments" }),
+      claimedCategory: classification?.category ?? null,
+      ...(classification === null
+        ? {}
+        : { dispositionSignal: classification.signal }),
+    };
+  });
   const classificationEvidence = {
     humanClassificationEvidence: evidence,
     botConcessionEvidence: stanceEvidence("concession"),

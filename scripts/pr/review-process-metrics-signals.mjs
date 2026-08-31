@@ -53,6 +53,19 @@ function detectedCodeRabbitSignals(comment) {
   return signals;
 }
 
+function isCanonicalCodeRabbitReviewRun(value, surface) {
+  if (detectedCodeRabbitSignals(value).length > 0) return false;
+  if (surface === "review_submissions") return true;
+  if (surface !== "issue_comments") return false;
+
+  const body = String(value.body ?? "");
+  return (
+    /auto-generated comment:\s*summarize by coderabbit\.ai/i.test(body) &&
+    /<!--\s*recent_review_start\s*-->/i.test(body) &&
+    /<!--\s*recent_review_end\s*-->/i.test(body)
+  );
+}
+
 function requestTargets(body) {
   const text = String(body ?? "");
   return [
@@ -141,6 +154,7 @@ export function buildSignals({
   for (const { value, surface } of runSources) {
     const bot = botKeyForLogin(authorLogin(value));
     if (bot !== "coderabbit") continue;
+    if (!isCanonicalCodeRabbitReviewRun(value, surface)) continue;
     for (const runId of extractRunIds(value.body)) {
       const key = `${bot}:${runId}`;
       if (seenRuns.has(key)) continue;

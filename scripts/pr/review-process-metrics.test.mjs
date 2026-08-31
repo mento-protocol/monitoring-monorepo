@@ -609,6 +609,76 @@ test("attributes CodeRabbit run IDs only to CodeRabbit-authored records", () => 
   assert.equal(reviewRuns.byBot.codex, 0);
 });
 
+test("counts review runs only from canonical CodeRabbit completion evidence", () => {
+  const value = structuredClone(fixture);
+  value.issueComments.push(
+    {
+      id: 410,
+      user: { login: "coderabbitai[bot]", type: "Bot" },
+      body: "<!-- This is an auto-generated comment: review paused by coderabbit.ai -->\n> ## Reviews paused\n> Reviews paused due to new commits.\n**Run ID**: `22222222-2222-2222-2222-222222222222`",
+    },
+    {
+      id: 411,
+      user: { login: "coderabbitai[bot]", type: "Bot" },
+      body: "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->\n> ## Review limit reached\n**Run ID**: `33333333-3333-3333-3333-333333333333`",
+    },
+    {
+      id: 412,
+      user: { login: "coderabbitai[bot]", type: "Bot" },
+      body: [
+        "<!-- This is an auto-generated comment: summarize by coderabbit.ai -->",
+        "<!-- This is an auto-generated comment: skip review by coderabbit.ai -->",
+        "",
+        "> [!IMPORTANT]",
+        "> ## Review skipped",
+        ">",
+        "> Review was skipped due to path filters",
+        ">",
+        "> <details>",
+        "> <summary>:no_entry: Files ignored due to path filters (1)</summary>",
+        ">",
+        "> * `docs/evals/example.jsonl` is excluded by `!docs/evals/**`",
+        ">",
+        "> </details>",
+        ">",
+        "> <details>",
+        "> <summary>Run configuration</summary>",
+        ">",
+        "> **Run ID**: `44444444-4444-4444-4444-444444444444`",
+        ">",
+        "> </details>",
+        "",
+        "<!-- end of auto-generated comment: skip review by coderabbit.ai -->",
+      ].join("\n"),
+    },
+    {
+      id: 413,
+      user: { login: "coderabbitai[bot]", type: "Bot" },
+      body: "<!-- This is an auto-generated comment: skip review by coderabbit.ai -->\n> This repository does not receive automatic reviews because it has fewer than 10 stars.\n**Run ID**: `55555555-5555-5555-5555-555555555555`",
+    },
+    {
+      id: 414,
+      user: { login: "coderabbitai[bot]", type: "Bot" },
+      body: "Diagnostic context only.\n**Run ID**: `66666666-6666-6666-6666-666666666666`",
+    },
+  );
+
+  const signals = summarizeFixture(value).evidence.signals;
+  assert.equal(signals.reviewRuns.count, 1);
+  assert.deepEqual(
+    signals.reviewRuns.evidence.map(({ id }) => id),
+    ["101"],
+  );
+  assert.equal(signals.pauses.count, 2);
+  assert.equal(signals.rateLimits.count, 2);
+  assert.equal(signals.pathFilterSkips.count, 2);
+  assert.equal(signals.freeTierNotices.count, 2);
+  assert.deepEqual(
+    signals.pathFilterSkips.evidence.map(({ id }) => id),
+    ["104", "412"],
+  );
+});
+
 test("uses the latest explicit same-bot stance without weakening human authority", () => {
   const botReply = (id, createdAt, body) => ({
     id,
@@ -677,6 +747,92 @@ test("uses the latest explicit same-bot stance without weakening human authority
   assert.equal(neutralAfterConcession.disposition, "bot_conceded");
   assert.equal(neutralAfterConcession.botConcessionEvidence.length, 1);
   assert.equal(neutralAfterConcession.botRestorationEvidence.length, 0);
+});
+
+test("preserves disposition signals outside bounded reply excerpts", () => {
+  const longPrefix = `${"Long reply context. ".repeat(20)}\n`;
+  const summarizeRoot = (...replies) => {
+    const value = structuredClone(fixture);
+    value.reviewComments.push(...replies);
+    return summarizeFixture(
+      value,
+    ).evidence.byBot.coderabbit.surfaces.review_comments.evidence.find(
+      ({ id }) => id === "308",
+    );
+  };
+  const humanReply = (id, body) => ({
+    id,
+    in_reply_to_id: 308,
+    created_at: `2026-08-01T10:${id - 370}:00Z`,
+    user: { login: "maintainer", type: "User" },
+    body,
+  });
+  const botReply = (id, body) => ({
+    id,
+    in_reply_to_id: 308,
+    created_at: `2026-08-01T10:${id - 370}:00Z`,
+    user: { login: "coderabbitai[bot]", type: "Bot" },
+    body,
+  });
+
+  const fixed = summarizeRoot(
+    humanReply(
+      420,
+      `${longPrefix}Fixed in \`deadbee\` — added the missing guard.`,
+    ),
+  );
+  assert.equal(fixed.disposition, "fixed");
+  assert.equal(
+    fixed.humanClassificationEvidence[0].dispositionSignal,
+    "Fixed in `deadbee` —",
+  );
+  assert.equal(
+    fixed.humanClassificationEvidence[0].excerpt.includes("Fixed in"),
+    false,
+  );
+
+  const wontFix = summarizeRoot(
+    humanReply(
+      421,
+      `${longPrefix}Won't fix: the verified contract requires this behavior.`,
+    ),
+  );
+  assert.equal(wontFix.disposition, "wont_fix");
+  assert.equal(
+    wontFix.humanClassificationEvidence[0].dispositionSignal,
+    "Won't fix:",
+  );
+  assert.equal(
+    wontFix.humanClassificationEvidence[0].excerpt.includes("Won't fix"),
+    false,
+  );
+
+  const conceded = summarizeRoot(
+    botReply(422, `${longPrefix}I withdraw this finding.`),
+  );
+  assert.equal(conceded.disposition, "bot_conceded");
+  assert.equal(
+    conceded.botConcessionEvidence[0].dispositionSignal,
+    "I withdraw this finding",
+  );
+  assert.equal(
+    conceded.botConcessionEvidence[0].excerpt.includes("withdraw"),
+    false,
+  );
+
+  const restored = summarizeRoot(
+    botReply(423, "I withdraw this finding."),
+    botReply(424, `${longPrefix}I stand by this finding.`),
+  );
+  assert.equal(restored.disposition, "unknown");
+  assert.equal(
+    restored.botRestorationEvidence[0].dispositionSignal,
+    "I stand by this finding",
+  );
+  assert.equal(
+    restored.botRestorationEvidence[0].excerpt.includes("stand by"),
+    false,
+  );
 });
 
 test("uses review state and negation-safe text for submission findings", () => {
@@ -750,6 +906,76 @@ test("keeps coordinated severity negations scoped to their clause", () => {
     [
       { id: "207", finding: false, findingSignal: null },
       { id: "208", finding: true, findingSignal: "medium severity" },
+    ],
+  );
+});
+
+test("recognizes contracted and equivalent clause negations", () => {
+  const value = structuredClone(fixture);
+  value.reviews.push(
+    {
+      id: 209,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "Didn't find any high severity findings.",
+    },
+    {
+      id: 210,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "Never found changes requested in this review.",
+    },
+    {
+      id: 211,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "None were medium severity findings.",
+    },
+    {
+      id: 212,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "Neither critical nor low severity findings remain.",
+    },
+    {
+      id: 213,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "Didn't find high severity findings, but a medium severity finding remains.",
+    },
+    {
+      id: 214,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "None were high severity findings. Changes requested for the parser.",
+    },
+    {
+      id: 215,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "There aren’t any low severity findings.",
+    },
+  );
+
+  const records = summarizeFixture(
+    value,
+  ).evidence.byBot.claude.surfaces.review_submissions.evidence.filter(
+    ({ id }) => Number(id) >= 209 && Number(id) <= 215,
+  );
+  assert.deepEqual(
+    records.map(({ id, finding, findingSignal }) => ({
+      id,
+      finding,
+      findingSignal: findingSignal ?? null,
+    })),
+    [
+      { id: "209", finding: false, findingSignal: null },
+      { id: "210", finding: false, findingSignal: null },
+      { id: "211", finding: false, findingSignal: null },
+      { id: "212", finding: false, findingSignal: null },
+      { id: "213", finding: true, findingSignal: "medium severity" },
+      { id: "214", finding: true, findingSignal: "Changes requested" },
+      { id: "215", finding: false, findingSignal: null },
     ],
   );
 });
