@@ -116,7 +116,7 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
   until the new path reaches the base (issue 1904; ADR 0064).
 - **PR validation boundary pins.** Move
   `workflows/check-pr-validation-boundary{,-pnpm.test,.test}.mjs` together.
-  Keep its `ci.yml` and `trunk.yml` calls aligned. ADR 0078 defines the boundary.
+  Align `ci.yml` and `trunk.yml` calls. ADR 0078 defines the boundary.
 - **Production infrastructure contract pins.**
   `production-infra-identity-contract/workflow-inventory.mjs` pins exact script
   paths for the workflows it audits.
