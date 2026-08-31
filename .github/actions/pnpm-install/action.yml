@@ -17,24 +17,25 @@ runs:
   steps:
     - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
       with:
-        dest: ${{ github.workspace }}/.pnpm-store
+        dest: ~/pnpm-home
     - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
         node-version-file: .node-version
         package-manager-cache: false
     # The pinned setup action exports PNPM_HOME under its destination. Keep that
-    # destination in the workspace so install and every later pnpm command use
-    # one store. The literal cache input stays stable across runner providers.
+    # destination outside the checkout so later tools do not inherit a source
+    # path through pnpm's NODE variable. The home-relative path also gives all
+    # Linux runner providers the same cache version.
     - name: Prepare pnpm store target
       shell: bash
       run: >-
-        node -e 'const { rmSync } = require("node:fs"); const { join } = require("node:path"); const root = process.env.GITHUB_WORKSPACE; if (!root) throw new Error("GITHUB_WORKSPACE is required"); rmSync(join(root, ".pnpm-store", "node_modules", ".bin", "store"), { force: true, recursive: true });'
+        node -e 'const { rmSync } = require("node:fs"); const { homedir } = require("node:os"); const { join } = require("node:path"); rmSync(join(homedir(), "pnpm-home", "node_modules", ".bin", "store"), { force: true, recursive: true });'
     - name: Restore pnpm store
       id: pnpm-cache
       continue-on-error: true
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: .pnpm-store/node_modules/.bin/store
+        path: ~/pnpm-home/node_modules/.bin/store
         key: trusted-main-v1-pnpm-store-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', '**/.npmrc', 'package.json', '.node-version') }}
         restore-keys: |
           trusted-main-v1-pnpm-store-${{ runner.os }}-${{ runner.arch }}-
@@ -42,11 +43,11 @@ runs:
       if: steps.pnpm-cache.outputs.cache-hit == ''
       shell: bash
       run: >-
-        node -e 'const { rmSync } = require("node:fs"); const { join } = require("node:path"); const root = process.env.GITHUB_WORKSPACE; if (!root) throw new Error("GITHUB_WORKSPACE is required"); rmSync(join(root, ".pnpm-store", "node_modules", ".bin", "store"), { force: true, recursive: true });'
+        node -e 'const { rmSync } = require("node:fs"); const { homedir } = require("node:os"); const { join } = require("node:path"); rmSync(join(homedir(), "pnpm-home", "node_modules", ".bin", "store"), { force: true, recursive: true });'
     - name: Verify pnpm store target
       shell: bash
       run: >-
-        node -e 'const { execFileSync } = require("node:child_process"); const { isAbsolute, join, relative, sep } = require("node:path"); const root = process.env.GITHUB_WORKSPACE; if (!root) throw new Error("GITHUB_WORKSPACE is required"); const cache = join(root, ".pnpm-store", "node_modules", ".bin", "store"); const store = execFileSync("pnpm", ["store", "path", "--silent"], { encoding: "utf8" }).trim(); const path = relative(cache, store); if (isAbsolute(path) || path === ".." || path.startsWith(".." + sep)) throw new Error("pnpm store " + store + " is outside cache target " + cache);'
+        node -e 'const { execFileSync } = require("node:child_process"); const { realpathSync } = require("node:fs"); const { homedir } = require("node:os"); const { isAbsolute, join, relative, sep } = require("node:path"); const workspace = process.env.GITHUB_WORKSPACE; if (!workspace) throw new Error("GITHUB_WORKSPACE is required"); const source = realpathSync(workspace); const cache = join(realpathSync(join(homedir(), "pnpm-home")), "node_modules", ".bin", "store"); const scope = relative(source, cache); if (!isAbsolute(scope) && scope !== ".." && !scope.startsWith(".." + sep)) throw new Error("pnpm cache target " + cache + " is inside source checkout " + source); const store = execFileSync("pnpm", ["store", "path", "--silent"], { encoding: "utf8" }).trim(); const path = relative(cache, store); if (isAbsolute(path) || path === ".." || path.startsWith(".." + sep)) throw new Error("pnpm store " + store + " is outside cache target " + cache);'
     - name: Install dependencies
       shell: bash
       run: pnpm install --frozen-lockfile
@@ -55,5 +56,5 @@ runs:
       continue-on-error: true
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: .pnpm-store/node_modules/.bin/store
+        path: ~/pnpm-home/node_modules/.bin/store
         key: trusted-main-v1-pnpm-store-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', '**/.npmrc', 'package.json', '.node-version') }}
