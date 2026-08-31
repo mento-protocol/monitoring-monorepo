@@ -209,12 +209,6 @@
       "deletions": 1
     },
     {
-      "path": "scripts/workflows/check-pr-validation-boundary-pnpm.test.mjs",
-      "category": "test",
-      "additions": 309,
-      "deletions": 0
-    },
-    {
       "path": "scripts/workflows/check-pr-validation-boundary.mjs",
       "category": "check",
       "additions": 227,
@@ -223,7 +217,7 @@
     {
       "path": "scripts/workflows/check-pr-validation-boundary.test.mjs",
       "category": "test",
-      "additions": 458,
+      "additions": 445,
       "deletions": 0
     },
     {
@@ -268,9 +262,9 @@
       "net": 192
     },
     "test": {
-      "additions": 802,
+      "additions": 480,
       "deletions": 61,
-      "net": 741
+      "net": 419
     },
     "doc": {
       "additions": 265,

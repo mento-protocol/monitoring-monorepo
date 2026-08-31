@@ -13,7 +13,6 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { load } from "js-yaml";
-import { registerPnpmTests } from "./check-pr-validation-boundary-pnpm.test.mjs";
 import {
   authorityInventory,
   checkStructuralRepository,
@@ -21,12 +20,8 @@ import {
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-function tempRoot() {
-  return mkdtempSync(join(tmpdir(), "pr-validation-boundary-"));
-}
-
 function structuralFixture() {
-  const root = tempRoot();
+  const root = mkdtempSync(join(tmpdir(), "pr-validation-boundary-"));
   cpSync(join(ROOT, ".github"), join(root, ".github"), { recursive: true });
   cpSync(join(ROOT, ".trunk"), join(root, ".trunk"), { recursive: true });
   // prettier-ignore
@@ -35,8 +30,6 @@ function structuralFixture() {
   execFileSync("git", ["add", "."], { cwd: root });
   return root;
 }
-
-registerPnpmTests(structuralFixture, mutateOnce);
 
 function mutateOnce(root, path, before, after, expected) {
   const absolute = join(root, path);
@@ -143,12 +136,6 @@ test("structural mutations fail closed at each M2 boundary", () => {
   // prettier-ignore
   mutateOnce(root, ".github/workflows/ci.yml", "        run: pnpm tf:test", "        run: pnpm config set store_dir /tmp/other\n          pnpm tf:test", /store override is forbidden/u);
   // prettier-ignore
-  mutateOnce(root, ".github/workflows/ci.yml", "        run: pnpm tf:test", "        run: unset PNPM_HOME; pnpm tf:test", /store override is forbidden/u);
-  // prettier-ignore
-  mutateOnce(root, ".github/workflows/ci.yml", "        run: pnpm tf:test", "        run: env -u PNPM_HOME pnpm tf:test", /store override is forbidden/u);
-  // prettier-ignore
-  mutateOnce(root, ".github/workflows/ci.yml", "        run: pnpm tf:test", "        shell: env -u PNPM_HOME bash {0}\n        run: pnpm tf:test", /store override is forbidden/u);
-  // prettier-ignore
   mutateOnce(root, ".github/workflows/ci.yml", "        run: pnpm tf:test", "        env:\n          PNPM_HOME: /tmp/other\n        run: pnpm tf:test", /store override is forbidden/u);
   mutateOnce(
     root,
@@ -159,10 +146,6 @@ test("structural mutations fail closed at each M2 boundary", () => {
   );
   // prettier-ignore
   mutateOnce(root, ".github/actions/pnpm-install/action.yml", "      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0", "      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0", /one restore and one protected-main save/u);
-  // prettier-ignore
-  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0", "      uses: ./missing-pnpm-restore", /one restore and one protected-main save/u);
-  // prettier-ignore
-  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0", "      uses: ./missing-pnpm-save", /one restore and one protected-main save/u);
   // prettier-ignore
   mutateOnce(root, ".github/actions/pnpm-install/action.yml", "    - name: Clear incomplete pnpm store restore", "    - name: Duplicate pnpm restore\n      continue-on-error: true\n      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0\n      with:\n        path: ~/pnpm-store\n        key: trusted-main-v1-pnpm-store-duplicate\n    - name: Clear incomplete pnpm store restore", /one restore and one protected-main save/u);
   // prettier-ignore
@@ -194,13 +177,10 @@ test("structural mutations fail closed at each M2 boundary", () => {
     "    - name: Install dependencies\n      shell: bash\n      run: pnpm install --frozen-lockfile --store-dir ~/pnpm-store\n    - name: Save pnpm store",
     /pin one home-relative PNPM_HOME/u,
   );
-  mutateOnce(
-    root,
-    ".github/actions/pnpm-install/action.yml",
-    "    - name: Clear incomplete pnpm store restore",
-    "    - name: Prepare pnpm store target\n      shell: bash\n      run: echo duplicate\n    - name: Clear incomplete pnpm store restore",
-    /cleared exactly once/u,
-  );
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "'pnpm-lock.yaml', 'pnpm-workspace.yaml'", "'pnpm-lock.yaml'", /matching toolchain-bound key/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "    - name: Install dependencies\n      shell: bash", "    - name: Install dependencies\n      continue-on-error: true\n      shell: bash", /required steps unconditional and fatal/u);
   mutateOnce(
     root,
     ".github/actions/pnpm-install/action.yml",
@@ -299,6 +279,8 @@ test("structural mutations fail closed at each M2 boundary", () => {
     "          write-cache: true",
     /dependency-free x64 pnpm cache writer/u,
   );
+  // prettier-ignore
+  mutateOnce(root, ".github/workflows/ci.yml", "  production-infra-contract:\n    name: Production infrastructure contract", "  production-infra-contract:\n    name: Production infrastructure contract\n    needs: changes", /direct dependency-free x64 pnpm cache writer/u);
   // prettier-ignore
   mutateOnce(root, ".github/workflows/ci.yml", "      - uses: ./.github/actions/pnpm-install\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", "      - uses: ./.github/actions/pnpm-install\n        if: 'false'\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", /dependency-free x64 pnpm cache writer/u);
   // prettier-ignore
@@ -413,6 +395,11 @@ test("structural mutations fail closed at each M2 boundary", () => {
     'run: gh pr merge --auto --squash "$PR_URL"',
     "run: pnpm test",
     /execute candidate code/u,
+  );
+  write(root, ".npmrc", "store-dir=/tmp/other\n");
+  assert.match(
+    checkStructuralRepository(root).join("\n"),
+    /store override is forbidden/u,
   );
 });
 

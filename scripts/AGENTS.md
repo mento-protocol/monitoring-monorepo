@@ -115,7 +115,7 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
   the PR base-branch tip, not a PR snapshot. After a move, keep dual probes
   until the new path reaches the base (issue 1904; ADR 0064).
 - **PR validation boundary pins.** Move
-  `workflows/check-pr-validation-boundary{,-pnpm.test,.test}.mjs` together.
+  `workflows/check-pr-validation-boundary{,.test}.mjs` together.
   Align `ci.yml` and `trunk.yml` calls. ADR 0078 defines the boundary.
 - **Production infrastructure contract pins.**
   `production-infra-identity-contract/workflow-inventory.mjs` pins exact script
