@@ -1,0 +1,239 @@
+{
+  "schemaVersion": 1,
+  "baseSha": "34143341bec76065b9c1c1b9cde6bf733a57e39e",
+  "baseline": "M3 additive complexity receipt for #2125.",
+  "scope": "Every changed and untracked M3 path relative to baseSha, except this receipt.",
+  "derivation": {
+    "method": "Use git diff --numstat from baseSha for tracked paths and physical line counts for untracked paths. The receipt path self-excludes from its own scope and totals.",
+    "trackedCommand": "git diff --numstat 34143341bec76065b9c1c1b9cde6bf733a57e39e -- . ':!docs/metrics/verification-redesign-m3-complexity.json'",
+    "untrackedMethod": "List untracked, non-ignored paths with git ls-files --others --exclude-standard, exclude this receipt, and count each remaining file with awk END NR.",
+    "receiptPath": "docs/metrics/verification-redesign-m3-complexity.json",
+    "receiptSelfExcluded": true
+  },
+  "priorM2Receipt": {
+    "path": "docs/metrics/verification-redesign-m2-complexity.json",
+    "sha256": "1d45c7823660eb93f14642806c15f73a8e42bd3d083a791bdd44783edede9936",
+    "totals": {
+      "additions": 1334,
+      "deletions": 987,
+      "net": 347
+    }
+  },
+  "files": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "category": "workflow",
+      "additions": 95,
+      "deletions": 30
+    },
+    {
+      "path": "docs/adr/0078-staged-verification-redesign.md",
+      "category": "doc",
+      "additions": 27,
+      "deletions": 2
+    },
+    {
+      "path": "docs/metrics/verification-redesign-safeguards.jsonl",
+      "category": "doc",
+      "additions": 10,
+      "deletions": 8
+    },
+    {
+      "path": "docs/notes/quick-commands.md",
+      "category": "doc",
+      "additions": 2,
+      "deletions": 1
+    },
+    {
+      "path": "docs/pr-checklists/ci-workflow-gates.md",
+      "category": "doc",
+      "additions": 26,
+      "deletions": 1
+    },
+    {
+      "path": "docs/pr-checklists/code-health.md",
+      "category": "doc",
+      "additions": 3,
+      "deletions": 3
+    },
+    {
+      "path": "package.json",
+      "category": "package",
+      "additions": 2,
+      "deletions": 0
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "category": "package",
+      "additions": 22,
+      "deletions": 19
+    },
+    {
+      "path": "scripts/AGENTS.md",
+      "category": "doc",
+      "additions": 8,
+      "deletions": 7
+    },
+    {
+      "path": "scripts/check-agent-quality-gate-package-scripts.mjs",
+      "category": "check",
+      "additions": 2,
+      "deletions": 0
+    },
+    {
+      "path": "scripts/gate/routing-table/indexer-invariant-parity.test.mjs",
+      "category": "test",
+      "additions": 3,
+      "deletions": 3
+    },
+    {
+      "path": "scripts/production-infra-identity-contract/routing.test.mjs",
+      "category": "test",
+      "additions": 6,
+      "deletions": 6
+    },
+    {
+      "path": "scripts/workflows/check-pr-validation-boundary.mjs",
+      "category": "check",
+      "additions": 2,
+      "deletions": 2
+    },
+    {
+      "path": "scripts/workflows/check-pr-validation-boundary.test.mjs",
+      "category": "test",
+      "additions": 18,
+      "deletions": 4
+    },
+    {
+      "path": "scripts/workflows/check-ci-contract.mjs",
+      "category": "check",
+      "additions": 299,
+      "deletions": 0,
+      "countMethod": "physical-lines"
+    },
+    {
+      "path": "scripts/workflows/check-ci-contract.test.mjs",
+      "category": "test",
+      "additions": 497,
+      "deletions": 0,
+      "countMethod": "physical-lines"
+    }
+  ],
+  "totals": {
+    "workflow": {
+      "additions": 95,
+      "deletions": 30,
+      "net": 65
+    },
+    "check": {
+      "additions": 303,
+      "deletions": 2,
+      "net": 301
+    },
+    "test": {
+      "additions": 524,
+      "deletions": 13,
+      "net": 511
+    },
+    "doc": {
+      "additions": 76,
+      "deletions": 22,
+      "net": 54
+    },
+    "package": {
+      "additions": 24,
+      "deletions": 19,
+      "net": 5
+    },
+    "all": {
+      "additions": 1022,
+      "deletions": 86,
+      "net": 936
+    }
+  },
+  "replacementSpecific": {
+    "implementationAdditions": {
+      "definition": "Checker additions plus workflow and filter additions, the package command and matcher pin, and the trusted package-script pin. Generated lockfile lines and prose do not count as implementation additions.",
+      "files": [
+        {
+          "path": "scripts/workflows/check-ci-contract.mjs",
+          "additions": 299
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "additions": 95
+        },
+        {
+          "path": "package.json",
+          "additions": 2
+        },
+        {
+          "path": "scripts/check-agent-quality-gate-package-scripts.mjs",
+          "additions": 2
+        },
+        {
+          "path": "scripts/workflows/check-pr-validation-boundary.mjs",
+          "additions": 2
+        }
+      ],
+      "total": 400
+    },
+    "testAdditions": {
+      "definition": "Replacement-specific test additions, including additions to changed test files.",
+      "files": [
+        {
+          "path": "scripts/workflows/check-ci-contract.test.mjs",
+          "additions": 497
+        },
+        {
+          "path": "scripts/workflows/check-pr-validation-boundary.test.mjs",
+          "additions": 18
+        },
+        {
+          "path": "scripts/production-infra-identity-contract/routing.test.mjs",
+          "additions": 6
+        },
+        {
+          "path": "scripts/gate/routing-table/indexer-invariant-parity.test.mjs",
+          "additions": 3
+        }
+      ],
+      "total": 524
+    },
+    "testToImplementationRatio": 1.31,
+    "limits": {
+      "checkerPhysicalLines": 299,
+      "checkerPhysicalLinesUnder300": true,
+      "testPhysicalLines": 497,
+      "newReplacementFilePhysicalLineLimit": 500,
+      "bothNewReplacementFilesUnder500": true,
+      "twiceImplementationAdditions": 800,
+      "testAdditionsUnderTwiceImplementationAdditions": true
+    }
+  },
+  "cumulativeM2AndM3": {
+    "additions": 2356,
+    "deletions": 1073,
+    "net": 1283
+  },
+  "phase0": {
+    "countedFiles": 223,
+    "countedLines": 101595
+  },
+  "upperBoundDeletionCandidate": {
+    "lines": 83113,
+    "percentOfPhase0Lines": 81.8082
+  },
+  "retirementTarget": {
+    "percent": 80,
+    "denominator": "Reviewed final gate-specific implementation and test lines.",
+    "status": "unpublished",
+    "rawPhase0ManifestIsNotDenominator": true
+  },
+  "forbiddenMechanisms": [],
+  "phaseClaim": {
+    "mode": "additive",
+    "claimsCutoverAdditionsBelowDeletionsCondition": false,
+    "statement": "M3 is additive. It claims no cutover condition that replacement additions are below deletions."
+  }
+}

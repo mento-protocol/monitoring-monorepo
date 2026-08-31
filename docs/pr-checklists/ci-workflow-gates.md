@@ -53,11 +53,36 @@ advisory schema-diff workflow in the PR UI.
 
 - [ ] **Ruleset-required** workflows MUST NOT use `paths:` / `paths-ignore:` filters — they must run on every PR. If you want path-conditional work, run every PR but skip the expensive job inside via `if:` checks (or `paths-filter`-style gating that reports a green check on no-op).
 - [ ] Registry-backed Terraform routing uses the broad `workflowAdmissionPatterns` list in `terraform.stacks.json`. Keep the required CI workflow unfiltered at workflow level. Its internal `terraform` filter and the Infra push/pull-request filters copy that list. Do not enumerate stack-specific paths in those filters. `pnpm tf:test` enforces exact equality and proves that the boundary subsumes every `changedPathPatterns` entry.
-- [ ] **Advisory** workflows (everything _not_ in the ruleset list above) SHOULD use a workflow-level `paths:` filter so they don't boot a runner on irrelevant PRs. A skipped advisory check is simply absent — it cannot leave a _required_ check pending. This is a deliberate CI-cost control; see `lighthouse.yml`, `size-limit.yml`, and `supply-chain.yml` for the pattern. **M2 exception:** `schema-diff.yml` keeps its existing every-PR trigger during credential and cache hardening. It routes in-job, fails closed on path-filter errors, and publishes only a read-only job summary. Reconsider its trigger in the fixed-coverage phase; do not change it incidentally.
+- [ ] **Advisory** workflows (everything _not_ in the ruleset list above) SHOULD use a workflow-level `paths:` filter so they don't boot a runner on irrelevant PRs. A skipped advisory check is simply absent — it cannot leave a _required_ check pending. This is a deliberate CI-cost control; see `lighthouse.yml`, `size-limit.yml`, and `supply-chain.yml` for the pattern. `schema-diff.yml` is a reviewed exception. It keeps its every-PR trigger so every pull request gets a visible job summary. Its in-job classifier skips irrelevant work and runs the schema diff when path detection fails.
 - [ ] **Scheduled advisory** workflows SHOULD state the detection/rebuild SLO they serve and use the slowest cadence that satisfies it. Backstop monitors for multi-hour/day failure modes should prefer daily or similarly low cadence unless there is an explicit operator page-time requirement; do not default to every 15 minutes just because the check is cheap.
 - [ ] If you make an advisory workflow required, add it to the ruleset **and** remove its `paths:` filter in the same change.
 
 > ⚠️ The ruleset and these docs have drifted before: several advisory gates were written as if required (run-on-every-PR, no `paths:`) when the ruleset never enforced them. When you add or "promote" a check, update both the ruleset and this list.
+
+### Fixed fan-out contract
+
+Run `pnpm ci:contract:test` after a change to `ci.yml`, its fixed job set, or
+the pull request validation boundary. The unconditional `Production
+infrastructure contract` job runs the same command on every pull request and
+`main` push.
+
+The command checks these contracts without defining a second runtime router:
+
+- The reviewed fixed jobs, `ci.needs`, conditional jobs, and `allowed-skips`
+  have exact set equality.
+- Every functional filter has positive, negative, rename, and deletion
+  fixtures. Separate unknown-path and control-plane fixtures prove that those
+  paths select every conditional job.
+- The pinned path-filter action emits one documented count per filter. Keep the
+  `all`, `routed`, and `ordinary` count comparison aligned with the functional
+  filter aliases. Do not export changed-file lists.
+- Pull request runs cancel stale heads. Each `main` SHA uses a distinct,
+  non-cancelling concurrency group.
+- Failed, cancelled, missing, unexpected, and disallowed skipped results fail
+  the aggregate and name each invalid job.
+- The existing pull request validation-boundary suite remains part of this
+  command. It pins permissions, credential access, cache restores, cache saves,
+  cleanup, and required-command ordering.
 
 ## 2. Branch enforcement on `workflow_dispatch`
 
