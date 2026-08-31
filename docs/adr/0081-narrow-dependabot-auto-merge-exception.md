@@ -119,15 +119,18 @@ The retired workflow used native auto-merge. Its standing requests can outlive
 the workflow version that created them. Complete this cutover when PR #2137 is
 merged:
 
-1. Require every queued or running legacy `dependabot-auto-merge.yml` run to
-   reach a terminal state. Restart this cutover if another legacy run starts.
-2. List every open Dependabot PR with a limit of 1,000 and include
+1. Disable the legacy `dependabot-auto-merge.yml` workflow on GitHub and verify
+   that its state is inactive. This prevents a new legacy run during cutover.
+2. Require every queued or running legacy run to reach a terminal state.
+3. List every open Dependabot PR with a limit of 1,000 and include
    `autoMergeRequest` in the result. Require every value to be `null`. If a
    value is not `null`, disable auto-merge for that PR and repeat the audit.
-3. Merge PR #2137 immediately through the normal human merge path.
-4. Repeat the open-PR audit after the merge. Disable any request that appeared
-   during the cutover window, then repeat the audit until every value is
-   `null`.
+4. Merge PR #2137 immediately through the normal human merge path.
+5. Enable the replacement workflow on GitHub and verify that its state is
+   active.
+6. Repeat the open-PR audit after the merge. Disable any request that appeared
+   before the legacy workflow stopped, then repeat the audit until every value
+   is `null`.
 
 The pre-merge and post-merge audits close the transition from standing native
 requests to synchronous exact-head merge requests. They do not add a recurring
