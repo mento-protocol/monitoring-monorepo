@@ -268,10 +268,12 @@ at each cutover stage. Final retirement must remove at least 80% of the final
 denominator.
 
 M2 records its full changed control-plane surface from protected-main baseline
-`ccef910fa6fc267751681176ffdeef01daf90b40` in the additive complexity
-manifest. It removes the existing comment writers instead of adding publisher
-jobs. The manifest and focused contract test enforce the per-file and
-test-to-implementation limits without changing the immutable Phase 0 manifest.
+`ccef910fa6fc267751681176ffdeef01daf90b40` in a frozen additive complexity
+receipt. The receipt contains M2 and its #2161 correction. It excludes the
+unrelated #2145 and #2159 review-eval artifacts and records that derivation.
+This historical #2124 evidence does not change after M2 closes. Later phases
+record phase-scoped evidence instead of extending it. The permanent checker
+continues to enforce the structural trust boundary.
 
 ## Rollback
 

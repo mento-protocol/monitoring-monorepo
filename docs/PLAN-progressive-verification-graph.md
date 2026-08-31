@@ -763,9 +763,11 @@ writers, Lighthouse comment writer, schema-diff comment writer, and their
 write permissions are removed. Job summaries retain the result near the run.
 Lighthouse raw reports remain runner-local and outside public storage and the
 uploaded diagnostics artifact.
-The additive complexity manifest starts at protected-main SHA
-`ccef910fa6fc267751681176ffdeef01daf90b40` and counts every changed workflow,
-action, checker, test, document, and deleted helper.
+The frozen additive complexity receipt starts at protected-main SHA
+`ccef910fa6fc267751681176ffdeef01daf90b40`. It records M2 and its #2161
+correction. Its derivation excludes the unrelated #2145 and #2159 review-eval
+artifacts. It remains historical #2124 evidence. Each later phase records its
+own scoped complexity evidence instead of extending the M2 receipt.
 
 ### Phase 2: Harden fixed CI coverage and aggregate (#2125)
 

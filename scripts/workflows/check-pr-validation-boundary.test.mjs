@@ -14,12 +14,8 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { registerPnpmTests } from "./check-pr-validation-boundary-pnpm.test.mjs";
 import {
-  M2_RECEIPT,
   authorityInventory,
-  checkComplexityReceipt,
   checkStructuralRepository,
-  complexitySnapshot,
-  numstatCount,
 } from "./check-pr-validation-boundary.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -417,78 +413,21 @@ test("PR-local reusable workflows stay inside cache and authority boundaries", (
   );
 });
 
-test("the M2 receipt matches fixed-base numstat and protects the Phase 0 manifest", () => {
-  assert.equal(numstatCount("-"), 0);
-  assert.equal(numstatCount("12"), 12);
-  assert.throws(() => numstatCount("invalid"), /invalid git numstat count/u);
-  const root = tempRoot();
-  write(
-    root,
-    "docs/metrics/verification-redesign-control-plane-before.json",
-    "{}\n",
-  );
-  git(root, ["init", "-q"]);
-  git(root, ["config", "user.email", "test@example.com"]);
-  git(root, ["config", "user.name", "Test"]);
+test("the permanent CLI ignores later product files and the retired M2 base", () => {
+  const root = structuralFixture();
+  write(root, "ui-dashboard/src/later-page.tsx", "export default null;\n");
   git(root, ["add", "."]);
-  git(root, ["commit", "-qm", "base"]);
-  const base = git(root, ["rev-parse", "HEAD"]);
-  write(root, ".github/workflows/ci.yml", "name: CI\n");
-  write(root, ".github/actions/install/action.yml", "name: install\n");
-  write(root, ".lighthouserc.cjs", "module.exports = {};\n");
-  write(
-    root,
-    "scripts/workflows/check-pr-validation-boundary.mjs",
-    "one\ntwo\n",
-  );
-  write(
-    root,
-    "scripts/workflows/check-pr-validation-boundary.test.mjs",
-    "one\ntwo\nthree\n",
-  );
-  write(root, "docs/adr/m2.md", "M2\n");
-  write(root, "docs/m2.bin", "\0M2\n");
-  assert.match(
-    checkComplexityReceipt(root, base).violations.join("\n"),
-    /stage untracked files/u,
-  );
-  git(root, ["add", "."]);
-  const receipt = complexitySnapshot(root, base);
-  assert(
-    receipt.files.some(
-      (file) =>
-        file.path === "scripts/workflows/check-pr-validation-boundary.mjs",
+  assert.throws(() =>
+    execFileSync(
+      "git",
+      ["cat-file", "-e", "ccef910fa6fc267751681176ffdeef01daf90b40^{commit}"],
+      { cwd: root, stdio: "ignore" },
     ),
   );
-  assert.equal(
-    receipt.files.find((file) => file.path === ".lighthouserc.cjs")?.category,
-    "check",
+  const output = execFileSync(
+    process.execPath,
+    [join(ROOT, "scripts/workflows/check-pr-validation-boundary.mjs")],
+    { cwd: root, encoding: "utf8" },
   );
-  assert.deepEqual(
-    receipt.files.find((file) => file.path === "docs/m2.bin"),
-    { path: "docs/m2.bin", category: "doc", additions: 0, deletions: 0 },
-  );
-  write(root, M2_RECEIPT, `${JSON.stringify(receipt, null, 2)}\n`);
-  git(root, ["add", M2_RECEIPT]);
-  assert.deepEqual(checkComplexityReceipt(root, base).violations, []);
-
-  write(
-    root,
-    "docs/metrics/verification-redesign-control-plane-before.json",
-    '{"changed":true}\n',
-  );
-  assert.match(
-    checkComplexityReceipt(root, base).violations.join("\n"),
-    /Phase 0/u,
-  );
-  write(
-    root,
-    "docs/metrics/verification-redesign-control-plane-before.json",
-    "{}\n",
-  );
-  write(root, M2_RECEIPT, "{}\n");
-  assert.match(
-    checkComplexityReceipt(root, base).violations.join("\n"),
-    /does not match/u,
-  );
+  assert.equal(output, "PR validation trust contract passes.\n");
 });

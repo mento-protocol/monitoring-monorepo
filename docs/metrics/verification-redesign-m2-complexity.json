@@ -1,7 +1,26 @@
 {
   "schemaVersion": 1,
   "baseSha": "ccef910fa6fc267751681176ffdeef01daf90b40",
-  "baseline": "Current protected-main M2 baseline.",
+  "baseline": "Frozen M2 additive complexity receipt for #2124.",
+  "scope": "M2 and corrective PR #2161 only.",
+  "derivation": {
+    "method": "Diff the final PR #2161 tree from baseSha and exclude the receipt plus the seven paths changed only by intervening PRs #2145 and #2159.",
+    "m2MergeSha": "c868483e44a006e7af338649705d9453cf979015",
+    "correctionBaseSha": "37ac4b7bee6b7043d1e3b42fe5a86358f51481e8",
+    "excludedCommits": [
+      "4b48c3b0276a1434afc5abbc64aba15162546d66",
+      "37ac4b7bee6b7043d1e3b42fe5a86358f51481e8"
+    ],
+    "excludedPaths": [
+      "docs/evals/review-skill-ledger.jsonl",
+      "docs/evals/review-skill-runs/2026-08-29-ec451b1f-full-528ae414/failure.md",
+      "docs/evals/review-skill-runs/2026-08-29-ec451b1f-full-528ae414/plan.json",
+      "docs/evals/review-skill-runs/2026-08-29-ec451b1f-full-528ae414/row.json",
+      "docs/evals/review-skill-runs/2026-08-30-ec451b1f-full-528ae414/failure.md",
+      "docs/evals/review-skill-runs/2026-08-30-ec451b1f-full-528ae414/plan.json",
+      "docs/evals/review-skill-runs/2026-08-30-ec451b1f-full-528ae414/row.json"
+    ]
+  },
   "files": [
     {
       "path": ".github/actions/pnpm-install/action.yml",
@@ -114,56 +133,14 @@
     {
       "path": "docs/PLAN-progressive-verification-graph.md",
       "category": "doc",
-      "additions": 61,
+      "additions": 63,
       "deletions": 13
     },
     {
       "path": "docs/adr/0078-staged-verification-redesign.md",
       "category": "doc",
-      "additions": 89,
+      "additions": 91,
       "deletions": 8
-    },
-    {
-      "path": "docs/evals/review-skill-ledger.jsonl",
-      "category": "doc",
-      "additions": 2,
-      "deletions": 0
-    },
-    {
-      "path": "docs/evals/review-skill-runs/2026-08-29-ec451b1f-full-528ae414/failure.md",
-      "category": "doc",
-      "additions": 5,
-      "deletions": 0
-    },
-    {
-      "path": "docs/evals/review-skill-runs/2026-08-29-ec451b1f-full-528ae414/plan.json",
-      "category": "doc",
-      "additions": 412,
-      "deletions": 0
-    },
-    {
-      "path": "docs/evals/review-skill-runs/2026-08-29-ec451b1f-full-528ae414/row.json",
-      "category": "doc",
-      "additions": 151,
-      "deletions": 0
-    },
-    {
-      "path": "docs/evals/review-skill-runs/2026-08-30-ec451b1f-full-528ae414/failure.md",
-      "category": "doc",
-      "additions": 5,
-      "deletions": 0
-    },
-    {
-      "path": "docs/evals/review-skill-runs/2026-08-30-ec451b1f-full-528ae414/plan.json",
-      "category": "doc",
-      "additions": 412,
-      "deletions": 0
-    },
-    {
-      "path": "docs/evals/review-skill-runs/2026-08-30-ec451b1f-full-528ae414/row.json",
-      "category": "doc",
-      "additions": 151,
-      "deletions": 0
     },
     {
       "path": "docs/metrics/verification-redesign-safeguards.jsonl",
@@ -240,13 +217,13 @@
     {
       "path": "scripts/workflows/check-pr-validation-boundary.mjs",
       "category": "check",
-      "additions": 299,
+      "additions": 227,
       "deletions": 0
     },
     {
       "path": "scripts/workflows/check-pr-validation-boundary.test.mjs",
       "category": "test",
-      "additions": 494,
+      "additions": 433,
       "deletions": 0
     },
     {
@@ -286,19 +263,19 @@
       "net": 44
     },
     "check": {
-      "additions": 356,
+      "additions": 284,
       "deletions": 92,
-      "net": 264
+      "net": 192
     },
     "test": {
-      "additions": 838,
+      "additions": 777,
       "deletions": 61,
-      "net": 777
+      "net": 716
     },
     "doc": {
-      "additions": 1386,
+      "additions": 252,
       "deletions": 79,
-      "net": 1307
+      "net": 173
     }
   }
 }

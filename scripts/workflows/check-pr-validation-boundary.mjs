@@ -7,13 +7,6 @@ import { fileURLToPath } from "node:url";
 import { collectTriggers, hasWritePermission, jobReceivesCredential, parseWorkflow } from "./check-autofix-ci-trust.mjs";
 import { isMapping, workflowJobSteps } from "../lib/workflow-yaml.mjs";
 
-export const M2_BASE_SHA = "ccef910fa6fc267751681176ffdeef01daf90b40";
-export const M2_RECEIPT =
-  "docs/metrics/verification-redesign-m2-complexity.json";
-const BEFORE = "docs/metrics/verification-redesign-control-plane-before.json";
-const CHECK = "scripts/workflows/check-pr-validation-boundary.mjs";
-const TEST = "scripts/workflows/check-pr-validation-boundary.test.mjs";
-const CATEGORIES = "workflow action check test doc".split(" ");
 const CODECOV = [
   "shared|config|shared-config/coverage",
   "ui|ui-dashboard|ui-dashboard/coverage",
@@ -224,76 +217,11 @@ function checkDependabot(root, violations) {
 // prettier-ignore
 export function checkStructuralRepository(root = process.cwd()) { const violations = []; checkCaches(root, violations); checkAuthority(root, violations); checkCi(root, violations); checkSchema(root, violations); checkDependabot(root, violations); return violations; }
 
-// prettier-ignore
-function git(root, args) { return execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim(); }
-
-// prettier-ignore
-function category(path) {
-  if (path.startsWith(".github/workflows/")) return "workflow";
-  if (path.startsWith(".github/actions/") || path.startsWith(".trunk/setup-ci/")) return "action";
-  if (path === ".lighthouserc.cjs") return "check";
-  if (path.startsWith("docs/") || path.endsWith(".md")) return "doc";
-  if (path.startsWith("scripts/") || path.includes("/scripts/")) return path.includes(".test.") ? "test" : "check";
-  return null;
-}
-
-// prettier-ignore
-function fileLines(root, path) { const body = readFileSync(join(root, path), "utf8"); return body === "" ? 0 : body.split(/\r?\n/u).length - Number(body.endsWith("\n")); }
-
-// `git diff <base>` includes staged and tracked unstaged changes. Untracked
-// files are rejected below so they cannot disappear from a generated receipt.
-// prettier-ignore
-export function numstatCount(value) { if (value === "-") return 0; if (!/^\d+$/u.test(value)) throw new Error(`invalid git numstat count: ${value}`); return Number(value); }
-
-// prettier-ignore
-export function complexitySnapshot(root = process.cwd(), baseSha = M2_BASE_SHA) {
-  const output = git(root, ["diff", "--numstat", "--no-renames", baseSha, "--", ".", `:(exclude)${M2_RECEIPT}`]);
-  const files = output ? output.split("\n").map((line) => {
-    const [additions, deletions, path] = line.split("\t");
-    return { path, category: category(path), additions: numstatCount(additions), deletions: numstatCount(deletions) };
-  }) : [];
-  const totals = Object.fromEntries(CATEGORIES.map((name) => [name, { additions: 0, deletions: 0, net: 0 }]));
-  for (const file of files) {
-    if (!file.category) continue;
-    totals[file.category].additions += file.additions;
-    totals[file.category].deletions += file.deletions;
-    totals[file.category].net += file.additions - file.deletions;
-  }
-  return { schemaVersion: 1, baseSha, baseline: "Current protected-main M2 baseline.", files, totals };
-}
-
-// prettier-ignore
-export function checkComplexityReceipt(root = process.cwd(), baseSha = M2_BASE_SHA) {
-  const snapshot = complexitySnapshot(root, baseSha);
-  const violations = [];
-  add(violations, snapshot.files.every((file) => file.category), "complexity: unclassified file");
-  add(violations, snapshot.files.every((file) => file.path !== BEFORE), "complexity: Phase 0 manifest changed");
-  const added = git(root, ["diff", "--name-only", "--diff-filter=A", "--no-renames", baseSha, "--"]);
-  const newFiles = added ? added.split("\n") : [];
-  add(violations, newFiles.every((path) => fileLines(root, path) < 500), "complexity: new file has 500+ lines");
-  add(violations, !newFiles.includes(CHECK) || fileLines(root, CHECK) < 300, "complexity: checker has 300+ lines");
-  add(violations, !newFiles.includes(CHECK) || !newFiles.includes(TEST) || fileLines(root, TEST) < 2 * fileLines(root, CHECK), "complexity: tests exceed 2x implementation lines");
-  const untracked = git(root, ["ls-files", "--others", "--exclude-standard"]).split("\n").filter((path) => path && path !== M2_RECEIPT && category(path));
-  add(violations, untracked.length === 0, `complexity: stage untracked files before receipt: ${untracked.join(", ")}`);
-  let receipt;
-  try { receipt = JSON.parse(readFileSync(join(root, M2_RECEIPT), "utf8")); }
-  catch { violations.push(`complexity: missing or invalid ${M2_RECEIPT}`); }
-  add(violations, receipt == null || JSON.stringify(receipt) === JSON.stringify(snapshot), "complexity: receipt does not match tracked numstat");
-  return { violations, snapshot };
-}
-
 function main() {
-  const structural = checkStructuralRepository();
-  const complexity = checkComplexityReceipt();
-  for (const [name, total] of Object.entries(complexity.snapshot.totals)) {
-    console.log(
-      `${name}: +${total.additions} -${total.deletions} net ${total.net}`,
-    );
-  }
-  const violations = [...structural, ...complexity.violations];
+  const violations = checkStructuralRepository();
   for (const violation of violations) console.error(`FAIL: ${violation}`);
   if (violations.length > 0) process.exitCode = 1;
-  else console.log("PR validation trust and M2 complexity contracts pass.");
+  else console.log("PR validation trust contract passes.");
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) main();
