@@ -707,6 +707,51 @@ test("counts review runs only from canonical CodeRabbit completion evidence", ()
   );
 });
 
+test("extracts one unambiguous Run ID from CodeRabbit review submissions", () => {
+  const value = structuredClone(fixture);
+  value.issueComments = [];
+  value.reviews = [
+    {
+      id: 501,
+      state: "COMMENTED",
+      user: { login: "coderabbitai[bot]", type: "Bot" },
+      body: "Completed review without a Run ID.",
+    },
+    {
+      id: 502,
+      state: "COMMENTED",
+      user: { login: "coderabbitai[bot]", type: "Bot" },
+      body: "**Run ID**: `bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb`",
+    },
+    {
+      id: 503,
+      state: "COMMENTED",
+      user: { login: "coderabbitai[bot]", type: "Bot" },
+      body: "**Run ID**: `cccccccc-cccc-cccc-cccc-cccccccccccc`\n**Run ID**: `dddddddd-dddd-dddd-dddd-dddddddddddd`",
+    },
+  ];
+
+  const reviewRuns = summarizeFixture(value).evidence.signals.reviewRuns;
+  assert.equal(reviewRuns.count, 1);
+  assert.deepEqual(reviewRuns.evidence, [
+    {
+      id: "502",
+      url: "https://github.com/example/repo/pull/42",
+      author: "coderabbitai[bot]",
+      authorAssociation: null,
+      surface: "review_submissions",
+      createdAt: null,
+      updatedAt: null,
+      path: null,
+      finding: false,
+      excerpt: "**Run ID**: `bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb`",
+      type: "review_run",
+      bot: "coderabbit",
+      runId: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+    },
+  ]);
+});
+
 test("uses the latest explicit same-bot stance without weakening human authority", () => {
   const botReply = (id, createdAt, body) => ({
     id,

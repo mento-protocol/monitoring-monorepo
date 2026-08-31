@@ -53,8 +53,14 @@ function detectedCodeRabbitSignals(comment) {
   return signals;
 }
 
-function completedCodeRabbitReviewRunIds(value) {
+function completedCodeRabbitReviewRunIds(value, surface) {
   const body = String(value.body ?? "");
+  if (surface === "review_submissions") {
+    const runIds = extractRunIds(body);
+    return runIds.length === 1 ? runIds : [];
+  }
+  if (surface !== "issue_comments") return [];
+
   if (
     !/<!--\s*This is an auto-generated comment:\s*(?:summarize|skip review) by coderabbit\.ai\s*-->/i.test(
       body,
@@ -171,7 +177,7 @@ export function buildSignals({
   for (const { value, surface } of runSources) {
     const bot = botKeyForLogin(authorLogin(value));
     if (bot !== "coderabbit") continue;
-    for (const runId of completedCodeRabbitReviewRunIds(value)) {
+    for (const runId of completedCodeRabbitReviewRunIds(value, surface)) {
       const key = `${bot}:${runId}`;
       if (seenRuns.has(key)) continue;
       seenRuns.add(key);
