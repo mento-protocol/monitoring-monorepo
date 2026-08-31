@@ -6,6 +6,8 @@
  * offline suite (`pnpm issue:board:test`) exercises end to end.
  */
 
+import { createHash } from "node:crypto";
+
 import { ISSUE_STATE_LABELS } from "../lib/gh-issue-lifecycle.mjs";
 
 export { ISSUE_STATE_LABELS };
@@ -13,32 +15,156 @@ export { ISSUE_STATE_LABELS };
 export const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
 export const DEFAULT_PROJECT_OWNER = "mento-protocol";
 export const DEFAULT_PROJECT_NUMBER = 12;
+export const GITHUB_CLI_HOST = "github.com";
+export const PROSPECTIVE_PROJECT_ITEM_ID = "dry-run:prospective-project-item";
+
+const CLAIM_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
+const BODY_SHA256_PATTERN = /^[0-9a-f]{64}$/;
+const UNSAFE_SINGLE_LINE_CHARACTER_PATTERN = /[\p{Cc}\p{Zl}\p{Zp}]/u;
+export const MAX_CLAIM_AGENT_LENGTH = 120;
+export const MAX_CLAIM_BRANCH_LENGTH = 256;
+
+function hasUnsafeSingleLineCharacter(value) {
+  return UNSAFE_SINGLE_LINE_CHARACTER_PATTERN.test(value);
+}
+
+export function isSafeSingleLineText(value, maxLength) {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= maxLength &&
+    value === value.trim() &&
+    !hasUnsafeSingleLineCharacter(value)
+  );
+}
+
+export function assertCanonicalGithubCliEnvironment(env = process.env) {
+  const ambientHost = env.GH_HOST;
+  if (
+    ambientHost != null &&
+    ambientHost !== "" &&
+    ambientHost !== GITHUB_CLI_HOST
+  ) {
+    throw new Error(
+      `GH_HOST must be unset or exactly ${GITHUB_CLI_HOST} for issue-board operations`,
+    );
+  }
+
+  const ambientRepo = env.GH_REPO;
+  if (ambientRepo != null && ambientRepo !== "") {
+    const repoParts = String(ambientRepo).split("/");
+    if (repoParts.length !== 2) {
+      throw new Error(
+        "GH_REPO must be an unqualified owner/repo for issue-board operations",
+      );
+    }
+  }
+}
+
+export function pinnedGithubCliEnvironment(env = process.env) {
+  assertCanonicalGithubCliEnvironment(env);
+  const pinned = { ...env, GH_HOST: GITHUB_CLI_HOST };
+  delete pinned.GH_REPO;
+  return pinned;
+}
+
+export class IssueOwnershipConflictError extends Error {
+  constructor(message, details = {}, options = {}) {
+    super(message, options);
+    this.name = "IssueOwnershipConflictError";
+    this.code = "ISSUE_OWNERSHIP_CONFLICT";
+    this.details = details;
+  }
+}
+
+export class IssueClaimCandidateLossError extends Error {
+  constructor(message, options = {}) {
+    super(message, options);
+    this.name = "IssueClaimCandidateLossError";
+    this.code = "ISSUE_CLAIM_CANDIDATE_LOSS";
+  }
+}
+
+export function validateClaimId(value) {
+  if (typeof value !== "string" || !CLAIM_ID_PATTERN.test(value)) {
+    throw new Error(
+      "Claim ID must be 1-200 characters from A-Z, a-z, 0-9, dot, underscore, colon, or hyphen",
+    );
+  }
+  return value;
+}
+
+export function validateClaimAgent(value) {
+  if (!isSafeSingleLineText(value, MAX_CLAIM_AGENT_LENGTH)) {
+    throw new Error(
+      `Agent must be 1-${MAX_CLAIM_AGENT_LENGTH} single-line characters with no leading or trailing whitespace and no control characters`,
+    );
+  }
+  return value;
+}
+
+export function isValidClaimAgent(value) {
+  try {
+    validateClaimAgent(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function validateClaimBranch(value) {
+  if (!isSafeSingleLineText(value, MAX_CLAIM_BRANCH_LENGTH)) {
+    throw new Error(
+      `Branch must be 1-${MAX_CLAIM_BRANCH_LENGTH} single-line characters with no leading or trailing whitespace and no control characters`,
+    );
+  }
+  return value;
+}
+
+export function isValidClaimBranch(value) {
+  try {
+    validateClaimBranch(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function issueBodySha256(body) {
+  return createHash("sha256")
+    .update(String(body ?? ""), "utf8")
+    .digest("hex");
+}
+
+export function validateIssueBodySha256(value) {
+  if (typeof value !== "string" || !BODY_SHA256_PATTERN.test(value)) {
+    throw new Error(
+      "Body SHA-256 must be exactly 64 lowercase hexadecimal characters",
+    );
+  }
+  return value;
+}
 
 const STATE_TRANSITIONS = {
   ready: {
     addLabels: ["agent-ready"],
     removeLabels: ["agent-active", "in-pr", "needs-grooming"],
-    statusOptions: ["Todo", "Ready"],
   },
   active: {
     addLabels: ["agent-active"],
     removeLabels: ["agent-ready", "in-pr", "needs-grooming"],
-    statusOptions: ["In Progress"],
   },
   review: {
     addLabels: ["in-pr"],
     removeLabels: ["agent-ready", "agent-active", "needs-grooming"],
-    statusOptions: ["In Review", "Review", "In Progress"],
   },
   grooming: {
     addLabels: ["needs-grooming"],
     removeLabels: ["agent-ready", "agent-active", "in-pr"],
-    statusOptions: ["Needs Grooming", "Blocked", "Todo"],
   },
   done: {
     addLabels: [],
     removeLabels: ISSUE_STATE_LABELS,
-    statusOptions: ["Done"],
   },
 };
 
@@ -56,18 +182,6 @@ export function splitRepo(repo) {
     throw new Error(`Repository must be owner/name, got: ${repo}`);
   }
   return { owner, name, nameWithOwner: `${owner}/${name}` };
-}
-
-export function selectStatusOption(statusOptions, state) {
-  const transition = STATE_TRANSITIONS[state];
-  if (!transition) throw new Error(`Unknown state: ${state}`);
-  for (const name of transition.statusOptions) {
-    const option = statusOptions.find((candidate) => candidate.name === name);
-    if (option) return option;
-  }
-  throw new Error(
-    `Project Status field is missing one of: ${transition.statusOptions.join(", ")}`,
-  );
 }
 
 export function labelsForState(state) {
@@ -95,6 +209,14 @@ export function stateFromLabels(issue) {
   return null;
 }
 
+export function exactQueueState(issue) {
+  const labels = labelNames(issue);
+  const queueLabels = ISSUE_STATE_LABELS.filter((label) => labels.has(label));
+  if (String(issue.state ?? "").toUpperCase() !== "OPEN") return null;
+  if (queueLabels.length !== 1) return null;
+  return stateFromLabels(issue);
+}
+
 export function isClaimable(issue) {
   const labels = labelNames(issue);
   return (
@@ -104,6 +226,63 @@ export function isClaimable(issue) {
     !labels.has("in-pr") &&
     !labels.has("needs-grooming")
   );
+}
+
+function hasExactUnblockedProjectStatus(issue, project) {
+  if (!project?.id || !project.statusField?.id) return false;
+  const selectedItems = (issue.projectItems ?? []).filter(
+    (item) => item?.project?.id === project.id,
+  );
+  if (selectedItems.length !== 1) return false;
+  const status = selectedItems[0]?.status;
+  return (
+    status?.fieldId === project.statusField.id &&
+    typeof status.name === "string" &&
+    status.name.length > 0 &&
+    typeof status.optionId === "string" &&
+    status.optionId.length > 0 &&
+    status.name !== "Blocked"
+  );
+}
+
+function hasNativeBlocker(issue) {
+  const blockedBy = issue.blockedBy;
+  if (
+    !blockedBy ||
+    !Number.isInteger(blockedBy.totalCount) ||
+    !Array.isArray(blockedBy.nodes)
+  ) {
+    return true;
+  }
+  return blockedBy.totalCount > 0 || blockedBy.nodes.filter(Boolean).length > 0;
+}
+
+function hasSweepRouting(issue) {
+  const labels = [...labelNames(issue)];
+  const riskLabels = labels.filter((label) => label.startsWith("risk:"));
+  const packageLabels = labels.filter((label) => label.startsWith("pkg:"));
+  return (
+    riskLabels.length === 1 &&
+    riskLabels[0] === "risk:low" &&
+    packageLabels.length === 1
+  );
+}
+
+export function hasSweepClaimAttributes(issue, project) {
+  return (
+    String(issue.state ?? "").toUpperCase() === "OPEN" &&
+    hasSweepRouting(issue) &&
+    !hasNativeBlocker(issue) &&
+    hasExactUnblockedProjectStatus(issue, project)
+  );
+}
+
+export function isSweepClaimable(issue, project) {
+  return isClaimable(issue) && hasSweepClaimAttributes(issue, project);
+}
+
+export function isActiveSweepClaim(issue, project) {
+  return isReviewable(issue) && hasSweepClaimAttributes(issue, project);
 }
 
 export function isBackfillable(issue) {
@@ -131,12 +310,11 @@ export function isReviewable(issue) {
 
 export function isReleasable(issue) {
   const labels = labelNames(issue);
-  const hasActiveClaim = labels.has("agent-active");
-  const hasReviewClaim = labels.has("in-pr");
   return (
     issue.state === "OPEN" &&
-    hasActiveClaim !== hasReviewClaim &&
+    labels.has("agent-active") &&
     !labels.has("agent-ready") &&
+    !labels.has("in-pr") &&
     !labels.has("needs-grooming")
   );
 }
@@ -161,13 +339,9 @@ export function projectDateFieldValue(value) {
   return value == null || value === "" ? null : value.slice(0, 10);
 }
 
-export function shouldRollbackFailedTransition(
-  state,
-  previousState,
-  observedDifferentClaim = false,
-) {
+export function shouldRollbackFailedTransition(state, previousState) {
   if (!previousState) return false;
-  return state !== "active" || !observedDifferentClaim;
+  return state !== "active";
 }
 
 export function chooseUntriedCandidate(candidates, triedNumbers) {
@@ -178,11 +352,20 @@ export function chooseUntriedCandidate(candidates, triedNumbers) {
 }
 
 export function isRecoverableClaimRaceError(err) {
-  const message = err instanceof Error ? err.message : String(err);
-  return (
-    message.includes("is not claimable") ||
-    message.includes("claim was overwritten") ||
-    message.includes("did not retain agent-active") ||
-    message.includes("has conflicting state labels")
-  );
+  const seen = new Set();
+  let current = err;
+  let recoverable = false;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    if (current.code === "ISSUE_MUTATION_LOCK_STALE") return false;
+    if (current.partialClaim === true) return false;
+    if (
+      current instanceof IssueOwnershipConflictError ||
+      current instanceof IssueClaimCandidateLossError
+    ) {
+      recoverable = true;
+    }
+    current = current instanceof Error ? current.cause : null;
+  }
+  return recoverable;
 }

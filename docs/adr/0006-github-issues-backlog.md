@@ -3,7 +3,7 @@ title: GitHub Issues are the canonical agent work queue, not BACKLOG.md
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-08-29
 scope: ci/process
 date: 2026-05
 doc_type: adr
@@ -21,16 +21,21 @@ garden_lane: adrs-architecture
 A long-lived `BACKLOG.md` accumulated work items, but agents can't safely _claim_
 a markdown bullet: two sessions grab the same line, nothing tracks who's active,
 and there's no queryable "what's ready" state. Agent-driven work needs a queue
-with atomic claim + state.
+with server-serialized helper claims and queryable state.
 
 ## Decision
 
 **GitHub Issues are the canonical active-work queue.** Ready work carries
 `agent-ready`. `pnpm issue:claim` transitions one claimable issue to
-`agent-active`, records and verifies its Project Claim ID, and projects it to
-In Progress. `pnpm issue:review` later transitions an issue represented by an
-open PR to `in-pr`. `BACKLOG.md` is transition storage only; durable context
-lives in `AGENTS.md`, checklists, notes, or tests.
+`agent-active`, records and verifies its full Project ownership snapshot, and
+preserves the human-owned Project Status. `pnpm issue:review` moves represented
+work to `in-pr`. Claim ID ownership, the backlog-sweep eligibility recheck,
+branch rebind, owner-checked release paths, #2071 multi-stage compatibility,
+transaction compensation, and the shared claim/review/release/sync/backfill
+mutex are specified in
+[ADR 0082](0082-persistent-issue-board-mutation-mutex.md).
+`BACKLOG.md` is transition storage only; durable context lives in `AGENTS.md`,
+checklists, notes, or tests.
 
 ## Alternatives considered
 
@@ -49,4 +54,5 @@ lives in `AGENTS.md`, checklists, notes, or tests.
 ## Evidence
 
 - Backlog→Issues migrations PR #662, #673 (2026-05-28); issue workboard helper PR #984 (2026-06-17).
+- Issue #2071 compatibility evidence is retained in ADR 0082.
 - Lifecycle in [`docs/notes/agent-issue-workflow.md`](../notes/agent-issue-workflow.md); rules in [`AGENTS.md`](../../AGENTS.md).

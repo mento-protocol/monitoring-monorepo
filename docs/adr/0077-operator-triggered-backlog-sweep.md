@@ -3,7 +3,7 @@ title: Operator-triggered backlog sweep with isolated workers
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-27
+last_verified: 2026-08-28
 scope: process
 date: 2026-08
 doc_type: adr
@@ -57,12 +57,27 @@ ready-for-review PR. It stops at READY and prints the operator's merge commands.
   opens no PR. It selects, claims, keeps workers moving, and writes the report.
 - **One worker per issue, one isolated checkout per worker.** Each worker owns a
   clone it alone commits from, proven by a marker inside `.git/`.
+- **Claims use the issue-board transaction.** Each issue gets a stable Claim ID,
+  and the helper revalidates the machine-readable sweep predicate around its
+  transition. The persistent per-issue mutex from
+  [ADR 0082](0082-persistent-issue-board-mutation-mutex.md) serializes helper
+  mutations. General release requires that token and refuses review state or an
+  open PR on the claimed branch. The explicit closed-unmerged path releases
+  review state only after it proves the stored PR and branch binding. Sweep
+  claims name the final worker branch before mutation, so normal review can
+  prove that binding without a rebind. The general manual workflow can instead
+  use the same-Claim-ID explicit rebind after it creates a PR branch.
 - **Workers poll their own long processes in-turn.** The orchestrator holds no
   timers; it re-invokes a worker that has gone quiet.
 - **Concurrency is bounded by the gate coordinator's capacity.** Worker gates
   are scheduled by it and count against it; the batch is capped at 4 and
   defaults to 2.
 - **The run stops at READY.** The sweep never merges.
+
+After a human merges a partial-stage sweep PR, the separate issue lifecycle can
+move the still-open issue to `needs-grooming` through the explicit stored merged
+PR proof. That operator action happens after the sweep has stopped. It does not
+grant the sweep merge authority.
 
 ## Alternatives considered
 
