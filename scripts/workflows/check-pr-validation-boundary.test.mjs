@@ -12,13 +12,13 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { registerPnpmTests } from "./check-pr-validation-boundary-pnpm.test.mjs";
 import {
   M2_RECEIPT,
   authorityInventory,
   checkComplexityReceipt,
   checkStructuralRepository,
   complexitySnapshot,
-  hasProtectedMainSaveGuard,
   numstatCount,
 } from "./check-pr-validation-boundary.mjs";
 
@@ -32,8 +32,14 @@ function structuralFixture() {
   const root = tempRoot();
   cpSync(join(ROOT, ".github"), join(root, ".github"), { recursive: true });
   cpSync(join(ROOT, ".trunk"), join(root, ".trunk"), { recursive: true });
+  // prettier-ignore
+  for (const path of ["pnpm-workspace.yaml", "governance-watchdog/pnpm-workspace.yaml", "alerts/infra/oncall-announcer/pnpm-workspace.yaml", "alerts/infra/onchain-event-handler/pnpm-workspace.yaml"]) { mkdirSync(dirname(join(root, path)), { recursive: true }); cpSync(join(ROOT, path), join(root, path)); }
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  execFileSync("git", ["add", "."], { cwd: root });
   return root;
 }
+
+registerPnpmTests(structuralFixture, mutateOnce);
 
 function mutateOnce(root, path, before, after, expected) {
   const absolute = join(root, path);
@@ -55,25 +61,6 @@ function write(root, path, body) {
 
 test("the repository satisfies the M2 structural boundary", () => {
   assert.deepEqual(checkStructuralRepository(ROOT), []);
-});
-
-test("cache saves require an exact protected-main push", () => {
-  assert.equal(
-    hasProtectedMainSaveGuard(
-      "github.event_name == 'push' && github.ref == 'refs/heads/main' && cache != 'true'",
-    ),
-    true,
-  );
-  assert.equal(
-    hasProtectedMainSaveGuard("github.ref == 'refs/heads/main'"),
-    false,
-  );
-  assert.equal(
-    hasProtectedMainSaveGuard(
-      "github.event_name == 'push' || github.ref == 'refs/heads/main'",
-    ),
-    false,
-  );
 });
 
 test("structural mutations fail closed at each M2 boundary", () => {
@@ -107,27 +94,12 @@ test("structural mutations fail closed at each M2 boundary", () => {
     "actions/cache@",
     /monolithic actions\/cache/u,
   );
-  mutateOnce(
-    root,
-    ".github/actions/pnpm-install/action.yml",
-    "      continue-on-error: true\n      uses: actions/cache/restore@",
-    "      continue-on-error: false\n      uses: actions/cache/restore@",
-    /cache restore must be nonfatal/u,
-  );
-  mutateOnce(
-    root,
-    ".github/actions/pnpm-install/action.yml",
-    "      continue-on-error: true\n      uses: actions/cache/save@",
-    "      continue-on-error: false\n      uses: actions/cache/save@",
-    /cache save must be nonfatal/u,
-  );
-  mutateOnce(
-    root,
-    ".github/actions/pnpm-install/action.yml",
-    "    - name: Clear incomplete pnpm store restore\n      if: steps.pnpm-cache.outputs.cache-hit == ''",
-    "    - name: Clear incomplete pnpm store restore\n      if: 'false'",
-    /clear an incomplete extraction/u,
-  );
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "      continue-on-error: true\n      uses: actions/cache/restore@", "      continue-on-error: false\n      uses: actions/cache/restore@", /cache restore must be nonfatal/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "      continue-on-error: true\n      uses: actions/cache/save@", "      continue-on-error: false\n      uses: actions/cache/save@", /cache save must be nonfatal/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "    - name: Clear incomplete pnpm store restore\n      if: steps.pnpm-cache.outputs.cache-hit == ''", "    - name: Clear incomplete pnpm store restore\n      if: 'false'", /clear an incomplete extraction/u);
   mutateOnce(
     root,
     ".github/actions/pnpm-install/action.yml",
@@ -135,55 +107,47 @@ test("structural mutations fail closed at each M2 boundary", () => {
     "      run: echo skipped",
     /exact install command/u,
   );
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "        dest: ${{ github.workspace }}/.pnpm-store", "        dest: ${{ github.workspace }}/.other", /pin one workspace PNPM_HOME/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0", "    - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9\n      with:\n        dest: ${{ github.workspace }}/.pnpm-store\n    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0", /pin one workspace PNPM_HOME/u);
+  // prettier-ignore
+  mutateOnce(root, "pnpm-workspace.yaml", "packages:", "storeDir: /tmp/other\npackages:", /store override is forbidden/u);
+  // prettier-ignore
+  mutateOnce(root, "governance-watchdog/pnpm-workspace.yaml", "packages:", "store-dir: /tmp/other\npackages:", /store override is forbidden/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/workflows/ci.yml", "        run: pnpm tf:test", "        env:\n          PNPM_CONFIG_STORE_DIR: /tmp/other\n        run: pnpm tf:test", /store override is forbidden/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/workflows/ci.yml", "        run: pnpm tf:test", "        run: pnpm --store-dir /tmp/other tf:test", /store override is forbidden/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/workflows/ci.yml", "        run: pnpm tf:test", "        run: pnpm config set store_dir /tmp/other\n          pnpm tf:test", /store override is forbidden/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/workflows/ci.yml", "        run: pnpm tf:test", "        run: unset PNPM_HOME; pnpm tf:test", /store override is forbidden/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/workflows/ci.yml", "        run: pnpm tf:test", "        run: env -u PNPM_HOME pnpm tf:test", /store override is forbidden/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/workflows/ci.yml", "        run: pnpm tf:test", "        shell: env -u PNPM_HOME bash {0}\n        run: pnpm tf:test", /store override is forbidden/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/workflows/ci.yml", "        run: pnpm tf:test", "        env:\n          PNPM_HOME: /tmp/other\n        run: pnpm tf:test", /store override is forbidden/u);
   mutateOnce(
     root,
     ".github/actions/pnpm-install/action.yml",
-    'echo "PNPM_CONFIG_STORE_DIR=$GITHUB_WORKSPACE/.pnpm-store" >> "$GITHUB_ENV"',
-    'echo "PNPM_CONFIG_STORE_DIR=$GITHUB_WORKSPACE/.other" >> "$GITHUB_ENV"',
-    /configured exactly once/u,
-  );
-  mutateOnce(
-    root,
-    ".github/actions/pnpm-install/action.yml",
-    "        path: .pnpm-store",
+    "        path: .pnpm-store/node_modules/.bin/store",
     "        path: ~/.local/share/pnpm/store",
     /pinned workspace-relative store/u,
   );
-  mutateOnce(
-    root,
-    ".github/actions/pnpm-install/action.yml",
-    "      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0",
-    "      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0",
-    /one restore and one protected-main save/u,
-  );
-  mutateOnce(
-    root,
-    ".github/actions/pnpm-install/action.yml",
-    "      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0",
-    "      uses: ./missing-pnpm-restore",
-    /one restore and one protected-main save/u,
-  );
-  mutateOnce(
-    root,
-    ".github/actions/pnpm-install/action.yml",
-    "      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0",
-    "      uses: ./missing-pnpm-save",
-    /one restore and one protected-main save/u,
-  );
-  mutateOnce(
-    root,
-    ".github/actions/pnpm-install/action.yml",
-    "    - name: Clear incomplete pnpm store restore",
-    "    - name: Duplicate pnpm restore\n      continue-on-error: true\n      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0\n      with:\n        path: .pnpm-store\n        key: trusted-main-v1-pnpm-store-duplicate\n    - name: Clear incomplete pnpm store restore",
-    /one restore and one protected-main save/u,
-  );
-  mutateOnce(
-    root,
-    ".github/actions/pnpm-install/action.yml",
-    "    - name: Save pnpm store",
-    "    - name: Duplicate pnpm save\n      if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n      continue-on-error: true\n      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0\n      with:\n        path: .pnpm-store\n        key: trusted-main-v1-pnpm-store-duplicate\n    - name: Save pnpm store",
-    /one restore and one protected-main save/u,
-  );
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0", "      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0", /one restore and one protected-main save/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0", "      uses: ./missing-pnpm-restore", /one restore and one protected-main save/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0", "      uses: ./missing-pnpm-save", /one restore and one protected-main save/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "    - name: Clear incomplete pnpm store restore", "    - name: Duplicate pnpm restore\n      continue-on-error: true\n      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0\n      with:\n        path: .pnpm-store/node_modules/.bin/store\n        key: trusted-main-v1-pnpm-store-duplicate\n    - name: Clear incomplete pnpm store restore", /one restore and one protected-main save/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "    - name: Save pnpm store", "    - name: Duplicate pnpm save\n      if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n      continue-on-error: true\n      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0\n      with:\n        path: .pnpm-store/node_modules/.bin/store\n        key: trusted-main-v1-pnpm-store-duplicate\n    - name: Save pnpm store", /one restore and one protected-main save/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "    - name: Install dependencies", "    - name: Clear incomplete pnpm store restore\n      if: steps.pnpm-cache.outputs.cache-hit == ''\n      shell: bash\n      run: echo duplicate\n    - name: Install dependencies", /one cleanup/u);
   mutateOnce(
     root,
     ".github/actions/pnpm-install/action.yml",
@@ -195,8 +159,19 @@ test("structural mutations fail closed at each M2 boundary", () => {
     root,
     ".github/actions/pnpm-install/action.yml",
     "    - name: Clear incomplete pnpm store restore",
-    '    - name: Configure pnpm store\n      shell: bash\n      run: echo "PNPM_CONFIG_STORE_DIR=$GITHUB_WORKSPACE/.other" >> "$GITHUB_ENV"\n    - name: Clear incomplete pnpm store restore',
-    /configured exactly once/u,
+    '    - name: Mutate later steps\n      shell: bash\n      run: echo "NODE_OPTIONS=--import=./evil.mjs" >> "$GITHUB_ENV"\n    - name: Clear incomplete pnpm store restore',
+    /without mutating the later-step environment/u,
+  );
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", 'const cache = join(root, ".pnpm-store", "node_modules", ".bin", "store")', 'const cache = join(root, ".other")', /pin one workspace PNPM_HOME/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "    - name: Prepare pnpm store target", "    - name: Verify pnpm store target\n      shell: bash\n      run: echo duplicate\n    - name: Prepare pnpm store target", /pin one workspace PNPM_HOME/u);
+  mutateOnce(
+    root,
+    ".github/actions/pnpm-install/action.yml",
+    "    - name: Save pnpm store",
+    "    - name: Install dependencies\n      shell: bash\n      run: pnpm install --frozen-lockfile\n    - name: Save pnpm store",
+    /pin one workspace PNPM_HOME/u,
   );
   mutateOnce(
     root,
@@ -222,9 +197,9 @@ test("structural mutations fail closed at each M2 boundary", () => {
   mutateOnce(
     root,
     ".github/actions/pnpm-install/action.yml",
-    "        restore-keys: |\n          trusted-main-v1-pnpm-store-",
-    "        restore-keys: |\n          candidate-pnpm-store-",
-    /trusted-main-v1 namespace/u,
+    "          trusted-main-v1-pnpm-store-${{ runner.os }}-${{ runner.arch }}-",
+    "          trusted-main-v1-pnpm-store-${{ runner.os }}-",
+    /matching toolchain-bound key/u,
   );
   mutateOnce(
     root,
@@ -301,28 +276,38 @@ test("structural mutations fail closed at each M2 boundary", () => {
     ".github/workflows/ci.yml",
     "          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}",
     "          write-cache: true",
-    /unconditional x64 protected-main pnpm cache writer/u,
+    /dependency-free x64 pnpm cache writer/u,
   );
+  // prettier-ignore
+  mutateOnce(root, ".github/workflows/ci.yml", "      - uses: ./.github/actions/pnpm-install\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", "      - uses: ./.github/actions/pnpm-install\n        if: 'false'\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", /dependency-free x64 pnpm cache writer/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/workflows/ci.yml", "      - uses: ./.github/actions/pnpm-install\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", "      - uses: ./.github/actions/pnpm-install\n        env:\n          PNPM_CONFIG_STORE_DIR: /tmp/other\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", /store override is forbidden/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/workflows/ci.yml", "      - uses: ./.github/actions/pnpm-install\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", "      - name: Persist alternate pnpm store\n        run: echo \"PNPM_CONFIG_STORE_DIR=/tmp/other\" >> \"$GITHUB_ENV\"\n      - uses: ./.github/actions/pnpm-install\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", /store override is forbidden/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/workflows/ci.yml", "  production-infra-contract:\n    name: Production infrastructure contract", "  production-infra-contract:\n    name: Production infrastructure contract\n    container: node:24", /caller jobs must not use containers/u);
+  // prettier-ignore
+  mutateOnce(root, ".github/actions/resolve-eslint-baseline/action.yml", "        set -euo pipefail", "        set -euo pipefail\n        echo \"PNPM_CONFIG_STORE_DIR=/tmp/other\" >> \"$GITHUB_ENV\"", /store override is forbidden/u);
   mutateOnce(
     root,
     ".github/workflows/ci.yml",
     "      - uses: ./.github/actions/pnpm-install\n      - name: Resolve main baseline (PR baseline-growth check)",
     "      - uses: ./.github/actions/pnpm-install\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}\n      - name: Resolve main baseline (PR baseline-growth check)",
-    /unconditional x64 protected-main pnpm cache writer/u,
+    /dependency-free x64 pnpm cache writer/u,
   );
   mutateOnce(
     root,
     ".github/workflows/ci.yml",
     "  production-infra-contract:\n    name: Production infrastructure contract",
     "  production-infra-contract:\n    name: Production infrastructure contract\n    if: github.event_name == 'pull_request'",
-    /unconditional x64 protected-main pnpm cache writer/u,
+    /dependency-free x64 pnpm cache writer/u,
   );
   mutateOnce(
     root,
     ".github/workflows/ci.yml",
     "    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 5\n    permissions:\n      contents: read\n      actions: read",
     "    runs-on: blacksmith-2vcpu-ubuntu-2404-arm\n    timeout-minutes: 5\n    permissions:\n      contents: read\n      actions: read",
-    /unconditional x64 protected-main pnpm cache writer/u,
+    /dependency-free x64 pnpm cache writer/u,
   );
   mutateOnce(
     root,

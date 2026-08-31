@@ -6,7 +6,7 @@
     {
       "path": ".github/actions/pnpm-install/action.yml",
       "category": "action",
-      "additions": 40,
+      "additions": 43,
       "deletions": 2
     },
     {
@@ -232,15 +232,21 @@
       "deletions": 1
     },
     {
+      "path": "scripts/workflows/check-pr-validation-boundary-pnpm.test.mjs",
+      "category": "test",
+      "additions": 309,
+      "deletions": 0
+    },
+    {
       "path": "scripts/workflows/check-pr-validation-boundary.mjs",
       "category": "check",
-      "additions": 298,
+      "additions": 299,
       "deletions": 0
     },
     {
       "path": "scripts/workflows/check-pr-validation-boundary.test.mjs",
       "category": "test",
-      "additions": 509,
+      "additions": 494,
       "deletions": 0
     },
     {
@@ -275,19 +281,19 @@
       "net": -495
     },
     "action": {
-      "additions": 43,
+      "additions": 46,
       "deletions": 2,
-      "net": 41
+      "net": 44
     },
     "check": {
-      "additions": 355,
+      "additions": 356,
       "deletions": 92,
-      "net": 263
+      "net": 264
     },
     "test": {
-      "additions": 544,
+      "additions": 838,
       "deletions": 61,
-      "net": 483
+      "net": 777
     },
     "doc": {
       "additions": 1386,
