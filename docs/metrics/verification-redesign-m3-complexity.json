@@ -107,14 +107,14 @@
     {
       "path": "scripts/workflows/check-ci-contract.mjs",
       "category": "check",
-      "additions": 294,
+      "additions": 295,
       "deletions": 0,
       "countMethod": "physical-lines"
     },
     {
       "path": "scripts/workflows/check-ci-contract.test.mjs",
       "category": "test",
-      "additions": 499,
+      "additions": 498,
       "deletions": 0,
       "countMethod": "physical-lines"
     }
@@ -126,14 +126,14 @@
       "net": 65
     },
     "check": {
-      "additions": 298,
+      "additions": 299,
       "deletions": 2,
-      "net": 296
+      "net": 297
     },
     "test": {
-      "additions": 526,
+      "additions": 525,
       "deletions": 13,
-      "net": 513
+      "net": 512
     },
     "doc": {
       "additions": 74,
@@ -157,7 +157,7 @@
       "files": [
         {
           "path": "scripts/workflows/check-ci-contract.mjs",
-          "additions": 294
+          "additions": 295
         },
         {
           "path": ".github/workflows/ci.yml",
@@ -176,14 +176,14 @@
           "additions": 2
         }
       ],
-      "total": 395
+      "total": 396
     },
     "testAdditions": {
       "definition": "Replacement-specific test additions, including additions to changed test files.",
       "files": [
         {
           "path": "scripts/workflows/check-ci-contract.test.mjs",
-          "additions": 499
+          "additions": 498
         },
         {
           "path": "scripts/workflows/check-pr-validation-boundary.test.mjs",
@@ -198,16 +198,16 @@
           "additions": 3
         }
       ],
-      "total": 526
+      "total": 525
     },
-    "testToImplementationRatio": 1.3316455696202532,
+    "testToImplementationRatio": 1.3257575757575757,
     "limits": {
-      "checkerPhysicalLines": 294,
+      "checkerPhysicalLines": 295,
       "checkerPhysicalLinesUnder300": true,
-      "testPhysicalLines": 499,
+      "testPhysicalLines": 498,
       "newReplacementFilePhysicalLineLimit": 500,
       "bothNewReplacementFilesUnder500": true,
-      "twiceImplementationAdditions": 790,
+      "twiceImplementationAdditions": 792,
       "testAdditionsUnderTwiceImplementationAdditions": true
     }
   },

@@ -191,15 +191,14 @@ const STATIC_MUTATIONS = [
       filters.ordinary = [];
     },
   ],
-  [
-    "empty routed filter",
-    /routed filter is not the functional-filter union/u,
-    ({ filters }) => {
-      filters.routed = [];
-    },
-  ],
+  // prettier-ignore
+  ["empty routed filter", /routed filter is not the functional-filter union/u, ({ filters }) => { filters.routed = []; }],
   // prettier-ignore
   ["functional exclusion rule", /ui must not use exclusion rules/u, ({ filters }) => filters.ui.push("!ui-dashboard/generated/**")],
+  // prettier-ignore
+  ["null functional filter", /ui must be an array/u, ({ filters }) => { filters.ui = null; filters.routed = FILTER_NAMES.map((name) => filters[name]); }],
+  // prettier-ignore
+  ["scalar functional filter", /ui must be an array/u, ({ filters }) => { filters.ui = "ui-dashboard/**"; filters.routed = FILTER_NAMES.map((name) => filters[name]); }],
   [
     "missing aggregate need",
     /ci\.needs misses scripts/u,
