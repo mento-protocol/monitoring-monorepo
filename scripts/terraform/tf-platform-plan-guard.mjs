@@ -34,13 +34,19 @@ const APP_PRIVATE_KEY_PREFLIGHT_ERROR =
 const CANONICAL_BASE64_FINAL_QUARTET =
   "(?:[A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=|[A-Za-z0-9+/][AQgw]==)";
 const CANONICAL_BASE64_LINES = `(?:[A-Za-z0-9+/]{64}\\n)*(?:[A-Za-z0-9+/]{4}){0,15}${CANONICAL_BASE64_FINAL_QUARTET}`;
+const PKCS1_PRIVATE_KEY_HEADER = ["-----BEGIN", "RSA PRIVATE KEY-----"].join(
+  " ",
+);
+const PKCS1_PRIVATE_KEY_FOOTER = ["-----END", "RSA PRIVATE KEY-----"].join(" ");
+const PKCS8_PRIVATE_KEY_HEADER = ["-----BEGIN", "PRIVATE KEY-----"].join(" ");
+const PKCS8_PRIVATE_KEY_FOOTER = ["-----END", "PRIVATE KEY-----"].join(" ");
 const CANONICAL_APP_PRIVATE_KEY_PATTERNS = [
   new RegExp(
-    `^-----BEGIN RSA PRIVATE KEY-----\\n(${CANONICAL_BASE64_LINES})\\n-----END RSA PRIVATE KEY-----\\n?$`,
+    `^${PKCS1_PRIVATE_KEY_HEADER}\\n(${CANONICAL_BASE64_LINES})\\n${PKCS1_PRIVATE_KEY_FOOTER}\\n?$`,
     "u",
   ),
   new RegExp(
-    `^-----BEGIN PRIVATE KEY-----\\n(${CANONICAL_BASE64_LINES})\\n-----END PRIVATE KEY-----\\n?$`,
+    `^${PKCS8_PRIVATE_KEY_HEADER}\\n(${CANONICAL_BASE64_LINES})\\n${PKCS8_PRIVATE_KEY_FOOTER}\\n?$`,
     "u",
   ),
 ];

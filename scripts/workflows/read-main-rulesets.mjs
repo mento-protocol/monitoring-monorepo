@@ -144,6 +144,30 @@ function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function normalizeProtectionRules(value) {
+  if (
+    !Array.isArray(value) ||
+    value.length > MAX_ENVIRONMENT_METADATA_ENTRIES
+  ) {
+    throw new MainRulesetReadError(
+      "Dependabot merge Environment protection rules had an unexpected shape",
+    );
+  }
+  return value.map((rule) => {
+    if (
+      !isObject(rule) ||
+      typeof rule.type !== "string" ||
+      rule.type.length === 0 ||
+      rule.type.length > 64
+    ) {
+      throw new MainRulesetReadError(
+        "Dependabot merge Environment protection rules contained malformed metadata",
+      );
+    }
+    return { type: rule.type };
+  });
+}
+
 function readDependabotMergeEnvironment(repository, runGh) {
   const value = readJsonObject(
     repository,
@@ -160,6 +184,7 @@ function readDependabotMergeEnvironment(repository, runGh) {
     can_admins_bypass: value.can_admins_bypass,
     deployment_branch_policy: value.deployment_branch_policy,
     name: value.name,
+    protection_rules: normalizeProtectionRules(value.protection_rules),
   };
 }
 

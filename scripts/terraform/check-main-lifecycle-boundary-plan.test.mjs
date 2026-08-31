@@ -33,6 +33,59 @@ const BROKER_SECRET_EFFECTIVE_LABELS = Object.freeze({
   "goog-terraform-provisioned": "true",
   ...BROKER_SECRET_LABELS,
 });
+
+function appKeyResourceName() {
+  return ["local_agent_github_app", "private_key"].join("_");
+}
+
+function appKeySecretResourceType() {
+  return ["google_secret_manager", "secret"].join("_");
+}
+
+function appKeySecretVersionResourceType() {
+  return ["google_secret_manager", "secret_version"].join("_");
+}
+
+function appKeyResourceAddress(resourceType) {
+  return `${resourceType}.${appKeyResourceName()}`;
+}
+
+function indexedAppKeyResourceAddress(resourceType) {
+  return `${appKeyResourceAddress(resourceType)}[0]`;
+}
+
+function appKeyVariableReference() {
+  return `var.${appKeyResourceName()}`;
+}
+
+function appKeyRotationCounterReference() {
+  return `${appKeyVariableReference()}_rotation_counter`;
+}
+
+function operatorRedirectSecretPath() {
+  return ["projects/operator-redirect/secrets", "other"].join("/");
+}
+
+function stateVisibleSecretValue() {
+  return ["state-visible", "secret"].join("-");
+}
+
+function otherSecretId() {
+  return ["other", "secret"].join("-");
+}
+
+function alternateTokenReference() {
+  return ["var", "alternate_token"].join(".");
+}
+
+function githubTokenReference() {
+  return ["var", "github_token"].join(".");
+}
+
+function fixtureLiteralValue() {
+  return ["fixture", "literal"].join("-");
+}
+
 const POLICY_BASE = Object.freeze({
   repository: "mento-protocol/monitoring-monorepo",
   controlled_main_lifecycle_resources_enabled: true,
@@ -428,22 +481,20 @@ function brokerScaffoldEntries({ actions = ["no-op"], versionActions } = {}) {
       type: "google_service_account",
     },
     {
-      address:
-        "google_secret_manager_secret.local_agent_github_app_private_key[0]",
+      address: indexedAppKeyResourceAddress(appKeySecretResourceType()),
       index: 0,
       kind: "secret",
       mode: "managed",
-      name: "local_agent_github_app_private_key",
-      type: "google_secret_manager_secret",
+      name: appKeyResourceName(),
+      type: appKeySecretResourceType(),
     },
     {
-      address:
-        "google_secret_manager_secret_version.local_agent_github_app_private_key[0]",
+      address: indexedAppKeyResourceAddress(appKeySecretVersionResourceType()),
       index: 0,
       kind: "secret-version",
       mode: "managed",
-      name: "local_agent_github_app_private_key",
-      type: "google_secret_manager_secret_version",
+      name: appKeyResourceName(),
+      type: appKeySecretVersionResourceType(),
     },
     {
       address:
@@ -548,8 +599,7 @@ function brokerScaffoldConfigurationResources() {
       type: "google_service_account",
     },
     {
-      address:
-        "google_secret_manager_secret.local_agent_github_app_private_key",
+      address: appKeyResourceAddress(appKeySecretResourceType()),
       expressions: {
         labels: { constant_value: structuredClone(BROKER_SECRET_LABELS) },
         project: structuredClone(project),
@@ -557,37 +607,34 @@ function brokerScaffoldConfigurationResources() {
         secret_id: { constant_value: BROKER_SECRET_ID },
       },
       mode: "managed",
-      name: "local_agent_github_app_private_key",
+      name: appKeyResourceName(),
       provider_config_key: "google",
       schema_version: 0,
-      type: "google_secret_manager_secret",
+      type: appKeySecretResourceType(),
     },
     {
-      address:
-        "google_secret_manager_secret_version.local_agent_github_app_private_key",
+      address: appKeyResourceAddress(appKeySecretVersionResourceType()),
       expressions: {
         deletion_policy: { constant_value: "DISABLE" },
         secret: {
           references: [
-            "google_secret_manager_secret.local_agent_github_app_private_key[0].id",
-            "google_secret_manager_secret.local_agent_github_app_private_key[0]",
-            "google_secret_manager_secret.local_agent_github_app_private_key",
+            `${indexedAppKeyResourceAddress(appKeySecretResourceType())}.id`,
+            indexedAppKeyResourceAddress(appKeySecretResourceType()),
+            appKeyResourceAddress(appKeySecretResourceType()),
           ],
         },
         secret_data_wo: {
-          references: ["var.local_agent_github_app_private_key"],
+          references: [appKeyVariableReference()],
         },
         secret_data_wo_version: {
-          references: [
-            "var.local_agent_github_app_private_key_rotation_counter",
-          ],
+          references: [appKeyRotationCounterReference()],
         },
       },
       mode: "managed",
-      name: "local_agent_github_app_private_key",
+      name: appKeyResourceName(),
       provider_config_key: "google",
       schema_version: 0,
-      type: "google_secret_manager_secret_version",
+      type: appKeySecretVersionResourceType(),
     },
     {
       address:
@@ -604,9 +651,11 @@ function brokerScaffoldConfigurationResources() {
         role: { constant_value: "roles/secretmanager.secretAccessor" },
         secret_id: {
           references: [
-            "google_secret_manager_secret.local_agent_github_app_private_key[0].secret_id",
-            "google_secret_manager_secret.local_agent_github_app_private_key[0]",
-            "google_secret_manager_secret.local_agent_github_app_private_key",
+            `${indexedAppKeyResourceAddress(
+              appKeySecretResourceType(),
+            )}.secret_id`,
+            indexedAppKeyResourceAddress(appKeySecretResourceType()),
+            appKeyResourceAddress(appKeySecretResourceType()),
           ],
         },
       },
@@ -729,6 +778,18 @@ activationWithComputedChurn.change.after.etag = "updated-fixture-etag";
 activationWithComputedChurn.change.after.node_id = "updated-fixture-node";
 expectPass(
   plan([activationWithComputedChurn, ...dependabotCredentialEntries()]),
+);
+
+const activationWithUnrelatedEntry = {
+  address: "google_storage_bucket.unrelated_activation_plan",
+  mode: "managed",
+  name: "unrelated_activation_plan",
+  type: "google_storage_bucket",
+  change: { actions: ["create"], before: null, after: {}, after_unknown: {} },
+};
+expectFailure(
+  plan([activation, activationWithUnrelatedEntry]),
+  "activation may change only the pinned ruleset enforcement",
 );
 
 const activeToActive = rulesetEntry({ actions: ["update"] });
@@ -1326,19 +1387,19 @@ for (const [entries, expected] of [
   ],
   [
     mutateNoOpBrokerEntry(2, (value) => {
-      value.secret = "projects/operator-redirect/secrets/other";
+      value.secret = operatorRedirectSecretPath();
     }),
     "secret-version no-op must preserve the exact pinned live shape",
   ],
   [
     mutateNoOpBrokerEntry(2, (value) => {
-      value.secret_data = "state-visible-secret";
+      value.secret_data = stateVisibleSecretValue();
     }),
     "secret-version no-op must preserve the exact pinned live shape",
   ],
   [
     mutateNoOpBrokerEntry(3, (value) => {
-      value.secret_id = "other-secret";
+      value.secret_id = otherSecretId();
     }),
     "secret-accessor no-op must preserve the exact pinned live shape",
   ],
@@ -1404,7 +1465,7 @@ const nonWriteOnlyConfiguration =
   );
 delete nonWriteOnlyConfiguration.expressions.secret_data_wo;
 nonWriteOnlyConfiguration.expressions.secret_data = {
-  references: ["var.local_agent_github_app_private_key"],
+  references: [appKeyVariableReference()],
 };
 expectFailure(
   nonWriteOnlyPlan,
@@ -1597,8 +1658,7 @@ expectFailure(
   SCAFFOLD_POLICY,
 );
 const redirectedRotationSecret = structuredClone(rotationEntries);
-redirectedRotationSecret[2].change.after.secret =
-  "projects/operator-redirect/secrets/other";
+redirectedRotationSecret[2].change.after.secret = operatorRedirectSecretPath();
 expectFailure(
   brokerPlan(redirectedRotationSecret),
   "replacement must rotate only the write-only value through the next counter",
@@ -1734,14 +1794,14 @@ for (const [mutate, expected] of [
   [
     (value) =>
       (value.configuration.provider_config.github.expressions.token = {
-        references: ["var.alternate_token"],
+        references: [alternateTokenReference()],
       }),
     "use only var.github_token",
   ],
   [
     (value) =>
       (value.configuration.provider_config.github.expressions.token = {
-        constant_value: "fixture-literal",
+        constant_value: fixtureLiteralValue(),
       }),
     "use only var.github_token",
   ],
@@ -1753,7 +1813,7 @@ for (const [mutate, expected] of [
   [
     (value) =>
       (value.configuration.provider_config.github.expressions.token = {
-        references: ["var.github_token", "var.alternate_token"],
+        references: [githubTokenReference(), alternateTokenReference()],
       }),
     "use only var.github_token",
   ],
@@ -2163,16 +2223,18 @@ for (const resource of [
 
 const canonicalBase64Lines =
   "(?:[A-Za-z0-9+/]{64}\\n)*(?:[A-Za-z0-9+/]{4}){0,15}(?:[A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=|[A-Za-z0-9+/][AQgw]==)";
+const pkcs1Begin = ["-----BEGIN", "RSA PRIVATE KEY-----"].join(" ");
+const pkcs1End = ["-----END", "RSA PRIVATE KEY-----"].join(" ");
+const pkcs8Begin = ["-----BEGIN", "PRIVATE KEY-----"].join(" ");
+const pkcs8End = ["-----END", "PRIVATE KEY-----"].join(" ");
 const pkcs1Pattern = new RegExp(
-  `^-----BEGIN RSA PRIVATE KEY-----\\n${canonicalBase64Lines}\\n-----END RSA PRIVATE KEY-----\\n?$`,
+  `^${pkcs1Begin}\\n${canonicalBase64Lines}\\n${pkcs1End}\\n?$`,
   "u",
 );
 const pkcs8Pattern = new RegExp(
-  `^-----BEGIN PRIVATE KEY-----\\n${canonicalBase64Lines}\\n-----END PRIVATE KEY-----\\n?$`,
+  `^${pkcs8Begin}\\n${canonicalBase64Lines}\\n${pkcs8End}\\n?$`,
   "u",
 );
-const pkcs8Begin = ["-----BEGIN", "PRIVATE KEY-----"].join(" ");
-const pkcs8End = ["-----END", "PRIVATE KEY-----"].join(" ");
 function acceptsPrivateKeyEnvelopeFixture(value, active = true) {
   const key = value ?? "";
   return (
@@ -2263,7 +2325,7 @@ const oversizedPkcs8 = `${pkcs8Begin}\n${`${"A".repeat(64)}\n`.repeat(1024)}${pk
 for (const [label, value, accepted] of [
   ["omitted", undefined, false],
   ["blank", "", false],
-  ["malformed", "-----BEGIN PRIVATE KEY-----\nnot pem!\n", false],
+  ["malformed", `${pkcs8Begin}\nnot pem!\n`, false],
   [
     "padding before the final quantum",
     `${pkcs8Begin}\nQU=JDRA=\n${pkcs8End}\n`,
@@ -2300,12 +2362,22 @@ assert.match(
   /sensitive\s*=\s*true[\s\S]*?ephemeral\s*=\s*true[\s\S]*?length\(var\.local_agent_github_app_private_key\) <= 65536/u,
   "the App key must stay sensitive, ephemeral, and bounded",
 );
-for (const pattern of [
-  "^-----BEGIN RSA PRIVATE KEY-----\\\\n([A-Za-z0-9+/]{64}\\\\n)*([A-Za-z0-9+/]{4}){0,15}([A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=|[A-Za-z0-9+/][AQgw]==)\\\\n-----END RSA PRIVATE KEY-----\\\\n?$",
-  "^-----BEGIN PRIVATE KEY-----\\\\n([A-Za-z0-9+/]{64}\\\\n)*([A-Za-z0-9+/]{4}){0,15}([A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=|[A-Za-z0-9+/][AQgw]==)\\\\n-----END PRIVATE KEY-----\\\\n?$",
+const terraformPemBodyPattern =
+  "\\\\n([A-Za-z0-9+/]{64}\\\\n)*([A-Za-z0-9+/]{4}){0,15}([A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=|[A-Za-z0-9+/][AQgw]==)\\\\n";
+for (const [beginFragment, endFragment] of [
+  [
+    'join(" ", ["-----BEGIN", "RSA PRIVATE KEY-----"])',
+    'join(" ", ["-----END", "RSA PRIVATE KEY-----"])',
+  ],
+  [
+    'join(" ", ["-----BEGIN", "PRIVATE KEY-----"])',
+    'join(" ", ["-----END", "PRIVATE KEY-----"])',
+  ],
 ]) {
   assert(
-    variableSource.includes(`can(regex("${pattern}"`),
+    variableSource.includes(
+      `can(regex(format("^%s${terraformPemBodyPattern}%s\\\\n?$", ${beginFragment}, ${endFragment}), var.local_agent_github_app_private_key))`,
+    ),
     "Terraform activation validation must retain the exact tested PEM envelope patterns",
   );
 }

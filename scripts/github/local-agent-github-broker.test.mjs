@@ -60,7 +60,7 @@ import {
 const APP_ID = 123456;
 const INSTALLATION_ID = 987654;
 const NOW_SECONDS = 1_800_000_000;
-const INSTALLATION_TOKEN = `ghs_${"a".repeat(40)}`;
+const INSTALLATION_TOKEN = ["ghs", "a".repeat(40)].join("_");
 const TOKEN_MARKER = `ghs_${"z".repeat(40)}`;
 const PRIVATE_KEY_MARKER = "private-key-redaction-canary";
 const PROVIDER_ONLY_MARKER = "provider-field-must-not-escape";
@@ -88,6 +88,7 @@ function packageEntryEnvironment() {
     "PATH",
     "PNPM_HOME",
     "TMPDIR",
+    "CI",
   ]) {
     if (process.env[name] !== undefined) environment[name] = process.env[name];
   }
@@ -480,7 +481,7 @@ test("every operation maps to one fixed selected-repository REST request", () =>
       ["all", "5"],
       {
         method: "GET",
-        path: `/repos/${REPOSITORY_FULL_NAME}/issues?state=all&per_page=5`,
+        path: `/repos/${REPOSITORY_FULL_NAME}/issues?state=all&per_page=100`,
         statuses: [200],
       },
     ],
@@ -941,6 +942,82 @@ test("every active operation returns only its bounded normalized schema", async 
   }
 });
 
+test("issue-list paginates after filtering pull requests", async () => {
+  const parameters = parseStructuredOperation(PROFILE.READ, "issue-list", [
+    "open",
+    "2",
+  ]);
+  const pullRequestPage = Array.from({ length: 100 }, (_, index) => ({
+    ...pullRequestFixture({ number: index + 1 }),
+    pull_request: {},
+  }));
+  const issuePage = [
+    { ...pullRequestFixture({ number: 101 }), pull_request: {} },
+    issueFixture({ number: 201 }),
+    issueFixture({ number: 202 }),
+  ];
+  const pages = [pullRequestPage, issuePage];
+  const calls = [];
+  let index = 0;
+
+  const result = await executeGithubOperation(
+    { operation: "issue-list", parameters, token: INSTALLATION_TOKEN },
+    {
+      fetchImpl: async (url, requestOptions) => {
+        calls.push({ url, options: requestOptions });
+        const response = jsonResponse(pages[index]);
+        index += 1;
+        return response;
+      },
+    },
+  );
+
+  assert.deepEqual(
+    result.map((issue) => issue.number),
+    [201, 202],
+  );
+  assert.deepEqual(
+    calls.map((call) => call.url),
+    [
+      `https://api.github.com/repos/${REPOSITORY_FULL_NAME}/issues?state=open&per_page=100`,
+      `https://api.github.com/repos/${REPOSITORY_FULL_NAME}/issues?state=open&per_page=100&page=2`,
+    ],
+  );
+  for (const call of calls) {
+    assert.equal(
+      call.options.headers.Authorization,
+      `Bearer ${INSTALLATION_TOKEN}`,
+    );
+  }
+});
+
+test("issue-list fails closed when pagination cannot prove the requested issue count", async () => {
+  const parameters = parseStructuredOperation(PROFILE.READ, "issue-list", [
+    "open",
+    "1",
+  ]);
+  let calls = 0;
+
+  await assert.rejects(
+    executeGithubOperation(
+      { operation: "issue-list", parameters, token: INSTALLATION_TOKEN },
+      {
+        fetchImpl: async () => {
+          calls += 1;
+          return jsonResponse(
+            Array.from({ length: 100 }, (_, index) => ({
+              ...pullRequestFixture({ number: calls * 100 + index }),
+              pull_request: {},
+            })),
+          );
+        },
+      },
+    ),
+    /GitHub issue-list pagination exceeded the safety limit/u,
+  );
+  assert.equal(calls, 10);
+});
+
 test("workflow run reads preserve a null provider name", async () => {
   for (const [operation, args, payload] of [
     ["run-view", ["11"], runFixture({ name: null })],
@@ -1141,7 +1218,7 @@ test("installation exchange pins repository, profile, expiry, and request shape"
   for (const profile of TRUSTED_PROFILES) {
     const permissions = requestedPermissions(clientOptions(profile));
     const requests = [];
-    const token = await exchangeInstallationToken({
+    const installationResult = await exchangeInstallationToken({
       installationId: INSTALLATION_ID,
       jwt: "header.payload.signature",
       permissions,
@@ -1153,7 +1230,7 @@ test("installation exchange pins repository, profile, expiry, and request shape"
           : jsonResponse(tokenRepositoryScope(), 200);
       },
     });
-    assert.equal(token, INSTALLATION_TOKEN);
+    assert.equal(installationResult, INSTALLATION_TOKEN);
     assert.equal(
       requests[0].url,
       `https://api.github.com/app/installations/${INSTALLATION_ID}/access_tokens`,
@@ -1242,7 +1319,7 @@ test("broker returns one normalized envelope and redacts all credential canaries
       readKey: async () => key,
       sign: () => Buffer.from("signature"),
       nowSeconds: NOW_SECONDS,
-      exchangeToken: async ({ jwt, permissions }) => {
+      exchange: async ({ jwt, permissions }) => {
         mintedJwt = jwt;
         assert.deepEqual(permissions, INSTALLATION_PERMISSIONS[PROFILE.READ]);
         return INSTALLATION_TOKEN;

@@ -114,6 +114,27 @@ function qualityGatePlan(changedPath) {
   );
 }
 
+function terraformChangedStackMatrix(changedPath) {
+  writeFileSync(changedPathsFile, `${changedPath}\n`);
+  return JSON.parse(
+    execFileSync(
+      process.execPath,
+      [
+        path.join(repositoryRoot, "scripts/tf-stacks.mjs"),
+        "changed",
+        "--paths-file",
+        changedPathsFile,
+        "--json",
+      ],
+      {
+        cwd: repositoryRoot,
+        encoding: "utf8",
+        maxBuffer: 10 * 1024 * 1024,
+      },
+    ),
+  );
+}
+
 // Every non-empty change set in the real tree runs `pnpm tf:test` through the
 // gate's unconditional sweep, so the presence of the command proves nothing
 // about the changed path. The reason string does: the contract-surface arm
@@ -149,6 +170,14 @@ function assertRoutesAgentGateSelfTest(changedPath) {
     routedCommands.length,
     1,
     `${changedPath} must route exactly one agent gate self-test:\n${plan}`,
+  );
+}
+
+function assertRoutesPlatformStack(changedPath) {
+  const matrix = terraformChangedStackMatrix(changedPath);
+  assert(
+    matrix.include.some((stack) => stack.id === "platform"),
+    `${changedPath} must validate the platform Terraform stack`,
   );
 }
 
@@ -445,6 +474,9 @@ try {
   }
   assertRoutesContractSurface(
     "scripts/production-infra-identity-contract/identity.mjs",
+  );
+  assertRoutesPlatformStack(
+    "scripts/production-infra-identity-contract/surfaces.mjs",
   );
 
   assertRoutesAgentGateSelfTest(

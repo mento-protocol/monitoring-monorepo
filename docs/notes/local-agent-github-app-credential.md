@@ -117,10 +117,12 @@ rejects caller `PATH`, `NODE_OPTIONS`, proxy variables, loader variables, gh
 configuration, Git credential configuration, keychain helpers, SSH agents,
 unknown operation fields, unknown profiles, and a different repository.
 
-The App private key stays in Secret Manager after provisioning. The broker
-creates the App JWT and installation token in memory. None of the three values
-may reach stdout, stderr, returned JSON, a temporary file, the agent process,
-or a caller-controlled child.
+The local-agent App private key stays in Secret Manager after provisioning. The
+dedicated Dependabot merge App key stays only in the ciphertext-backed
+`dependabot-merge` Environment secret from Phase 4A. The broker creates the
+local-agent App JWT and installation token in memory. None of the three
+local-agent values may reach stdout, stderr, returned JSON, a temporary file,
+the agent process, or a caller-controlled child.
 
 Checked-in source keeps the broker scaffold absent. The reviewed scaffold and
 partial-recovery gates are false, and the impersonator is empty. A separate
@@ -650,10 +652,11 @@ a no-op. The evidence booleans do not change live infrastructure by themselves.
 
 Require the dedicated-App credential gate, writer-migration evidence, and
 legacy-drain evidence to be true. Require the boundary resource gate to remain
-true. Change only the reviewed enforcement selector from disabled to active.
-Keep the source-pinned Team, both App IDs, and managed ruleset ID unchanged.
-Review the guarded plan. Require one in-place update at that exact ID and no
-core ruleset action.
+true. Require explicit owner acceptance of the Vercel Free-plan residual, or a
+reviewed compensating control that removes that residual. Change only the
+reviewed enforcement selector from disabled to active. Keep the source-pinned
+Team, both App IDs, and managed ruleset ID unchanged. Review the guarded plan.
+Require one in-place update at that exact ID and no core ruleset action.
 
 Obtain separate apply approval. Apply through the guarded wrapper. Read both
 live rulesets through the human Administration-read surface. Require:
@@ -667,6 +670,9 @@ live rulesets through the human Administration-read surface. Require:
   mode;
 - no shared Actions App, built-in Dependabot App, local-agent App,
   administrator, role, user, or third bypass.
+  Require the `dependabot-merge` Environment to keep an empty
+  `protection_rules` list, one exact custom `main` branch policy, and only the
+  two approved secret metadata names.
 
 ## Phase 8: prove the boundary
 

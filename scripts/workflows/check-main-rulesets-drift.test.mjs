@@ -129,6 +129,7 @@ function fixture(policy = TEST_POLICY) {
         protected_branches: false,
       },
       name: "dependabot-merge",
+      protection_rules: [],
     },
     dependabotMergeEnvironmentSecretNames: [
       "DEPENDABOT_MERGE_APP_ID",
@@ -246,6 +247,13 @@ for (const [mutate, expected] of [
     "custom deployment-branch policies",
   ],
   [
+    (value) =>
+      value.dependabotMergeEnvironment.protection_rules.push({
+        type: "wait_timer",
+      }),
+    "no protection rules",
+  ],
+  [
     (value) => (value.dependabotMergeDeploymentBranchPolicies[0].name = "*"),
     "exactly one deployment policy for branch main",
   ],
@@ -289,11 +297,17 @@ assert.equal(
 );
 for (const field of [
   "dependabotMergeEnvironment",
+  "dependabotMergeEnvironment.protection_rules",
   "dependabotMergeDeploymentBranchPolicies",
   "dependabotMergeEnvironmentSecretNames",
 ]) {
   const candidate = fixture();
-  delete candidate[field];
+  if (field.includes(".")) {
+    const [parent, child] = field.split(".");
+    delete candidate[parent][child];
+  } else {
+    delete candidate[field];
+  }
   assert.equal(
     evaluateMainRulesets(candidate, { policy: TEST_POLICY }).status,
     "malformed",

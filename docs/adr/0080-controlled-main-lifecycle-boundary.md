@@ -191,16 +191,19 @@ The state changes in separate reviewed phases:
    records the final App merge actor. Every legacy auto-merge request is then
    completed or cancelled. A final query must prove that no such request
    remains. Reviewed source records both completed gates.
-7. A reviewed source change selects active enforcement. An approved platform
-   apply changes only enforcement on the pinned lifecycle ruleset.
+7. After explicit owner acceptance of the Vercel residual, or after a reviewed
+   compensating control removes that residual, a reviewed source change selects
+   active enforcement. An approved platform apply changes only enforcement on
+   the pinned lifecycle ruleset.
 8. Live checks record the exact ruleset JSON, prove the Team pull-request path,
    prove a routine Dependabot merge under the dedicated App, and prove that the
    local-agent App cannot bypass the lifecycle ruleset.
 9. A final reviewed source change activates daily drift enforcement.
 
 The daily read-only audit checks the exact core shape, lifecycle shape,
-Environment shape, one `main` branch policy, and two exact secret metadata
-names. It never reads a public key or secret value. It uses the
+Environment shape, empty Environment protection-rule list, one `main` branch
+policy, and two exact secret metadata names. It never reads a public key or
+secret value. It uses the
 repository-scoped Administration:Read, Actions:Read, and Environments:Read
 audit credential for GET requests. Issue writes use the workflow token. Before activation, the
 audit reports an inert state. After activation, a missing audit credential or

@@ -30,7 +30,7 @@ vercel_token = "vcp_..."
 #      permissions independently. All are repo-level — org-admin is still NOT
 #      needed. Do not grant Contents. Keep this human-operated credential out
 #      of Actions and other automation.)
-github_token = "github_pat_..."
+github_token = "<github fine-grained PAT>"
 
 # The approved numeric merge-operator Team ID is pinned in reviewed source at
 # main-lifecycle-boundary-policy.json. It is not an operator tfvar. Keep all

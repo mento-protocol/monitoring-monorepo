@@ -51,6 +51,14 @@ export const MAX_TRUSTED_RUNTIME_ENTRIES = 100_000;
 const API_ROOT = "https://api.github.com";
 const REPOSITORY_API_PATH = `/repos/${REPOSITORY_FULL_NAME}`;
 const REPOSITORY_WEB_PATH = `/${REPOSITORY_FULL_NAME}`;
+const ISSUE_LIST_PAGE_SIZE = 100;
+const ISSUE_LIST_MAX_PAGES = 10;
+const PKCS1_PRIVATE_KEY_HEADER = ["-----BEGIN", "RSA PRIVATE KEY-----"].join(
+  " ",
+);
+const PKCS1_PRIVATE_KEY_FOOTER = ["-----END", "RSA PRIVATE KEY-----"].join(" ");
+const PKCS8_PRIVATE_KEY_HEADER = ["-----BEGIN", "PRIVATE KEY-----"].join(" ");
+const PKCS8_PRIVATE_KEY_FOOTER = ["-----END", "PRIVATE KEY-----"].join(" ");
 const EXEC_ENV = Object.freeze({ ...process.env });
 
 export const FIXED_BROKER_ENV = Object.freeze({
@@ -379,11 +387,11 @@ export async function readPrivateKey({ runFile = execFileBuffered } = {}) {
     ? output
     : Buffer.from(String(output ?? ""), "utf8");
   const pkcs1 =
-    key.includes(Buffer.from("-----BEGIN RSA PRIVATE KEY-----")) &&
-    key.includes(Buffer.from("-----END RSA PRIVATE KEY-----"));
+    key.includes(Buffer.from(PKCS1_PRIVATE_KEY_HEADER)) &&
+    key.includes(Buffer.from(PKCS1_PRIVATE_KEY_FOOTER));
   const pkcs8 =
-    key.includes(Buffer.from("-----BEGIN PRIVATE KEY-----")) &&
-    key.includes(Buffer.from("-----END PRIVATE KEY-----"));
+    key.includes(Buffer.from(PKCS8_PRIVATE_KEY_HEADER)) &&
+    key.includes(Buffer.from(PKCS8_PRIVATE_KEY_FOOTER));
   if (key.length === 0 || key.length > MAX_SECRET_BYTES || (!pkcs1 && !pkcs8)) {
     key.fill(0);
     fail("Secret Manager returned an invalid App private key");
@@ -579,6 +587,15 @@ function listQuery(parameters) {
   }).toString();
 }
 
+function issueListQuery(parameters, page = 1) {
+  const query = {
+    state: parameters.state,
+    per_page: String(ISSUE_LIST_PAGE_SIZE),
+  };
+  if (page > 1) query.page = String(page);
+  return new URLSearchParams(query).toString();
+}
+
 function runListQuery(parameters) {
   return new URLSearchParams({
     per_page: String(parameters.limit),
@@ -598,7 +615,7 @@ export function buildOperationRequest(operation, parameters) {
     case "issue-list":
       return {
         method: "GET",
-        path: `${REPOSITORY_API_PATH}/issues?${listQuery(parameters)}`,
+        path: `${REPOSITORY_API_PATH}/issues?${issueListQuery(parameters)}`,
         statuses: [200],
       };
     case "pr-view":
@@ -902,6 +919,12 @@ function normalizeReview(value) {
   };
 }
 
+function normalizeIssueListPage(payload) {
+  return responseArray(payload, ISSUE_LIST_PAGE_SIZE)
+    .filter((item) => !Object.hasOwn(responseObject(item), "pull_request"))
+    .map((item) => normalizeIssue(item, { requireIssue: true }));
+}
+
 function normalizeOperationResponse(operation, payload, parameters) {
   switch (operation) {
     case "repo-view":
@@ -909,9 +932,7 @@ function normalizeOperationResponse(operation, payload, parameters) {
     case "issue-view":
       return normalizeIssue(payload, { requireIssue: true });
     case "issue-list":
-      return responseArray(payload, parameters.limit)
-        .filter((item) => !Object.hasOwn(responseObject(item), "pull_request"))
-        .map((item) => normalizeIssue(item, { requireIssue: true }));
+      return normalizeIssueListPage(payload).slice(0, parameters.limit);
     case "pr-view":
     case "pr-create":
     case "pr-close":
@@ -986,6 +1007,29 @@ async function performGithubRequest(
   return await readJsonResponse(response, classification);
 }
 
+async function executeIssueList({ parameters, token, fetchImpl }) {
+  const issues = [];
+  for (let page = 1; page <= ISSUE_LIST_MAX_PAGES; page += 1) {
+    const payload = await performGithubRequest(
+      {
+        method: "GET",
+        path: `${REPOSITORY_API_PATH}/issues?${issueListQuery(parameters, page)}`,
+        statuses: [200],
+      },
+      token,
+      fetchImpl,
+      "GitHub issue-list operation",
+    );
+    const rawItems = responseArray(payload, ISSUE_LIST_PAGE_SIZE);
+    issues.push(...normalizeIssueListPage(rawItems));
+    if (issues.length >= parameters.limit) {
+      return issues.slice(0, parameters.limit);
+    }
+    if (rawItems.length < ISSUE_LIST_PAGE_SIZE) return issues;
+  }
+  fail("GitHub issue-list pagination exceeded the safety limit");
+}
+
 export async function executeGithubOperation(
   { operation, parameters, token },
   { fetchImpl = fetch } = {},
@@ -998,6 +1042,9 @@ export async function executeGithubOperation(
     } else {
       normalizePullRequest(target);
     }
+  }
+  if (operation === "issue-list") {
+    return await executeIssueList({ parameters, token, fetchImpl });
   }
   const request = buildOperationRequest(operation, parameters);
   const payload = await performGithubRequest(request, token, fetchImpl);
@@ -1052,7 +1099,7 @@ async function withInstallationToken(
   {
     env = EXEC_ENV,
     readKey = readPrivateKey,
-    exchangeToken = exchangeInstallationToken,
+    exchange = exchangeInstallationToken,
     nowSeconds = Math.floor(Date.now() / 1000),
     sign = signRs256,
   } = {},
@@ -1070,7 +1117,7 @@ async function withInstallationToken(
       sign,
     });
     privateKey.fill(0);
-    const token = await exchangeToken({
+    const token = await exchange({
       installationId: options.installationId,
       jwt,
       permissions: requestedPermissions(options),

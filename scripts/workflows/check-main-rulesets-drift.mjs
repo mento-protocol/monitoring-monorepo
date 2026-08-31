@@ -263,13 +263,14 @@ function validateDependabotMergeEnvironment(api, violations) {
   if (
     environment.name !== DEPENDABOT_MERGE_ENVIRONMENT ||
     environment.can_admins_bypass !== false ||
+    !isDeepStrictEqual(environment.protection_rules, []) ||
     !isDeepStrictEqual(environment.deployment_branch_policy, {
       custom_branch_policies: true,
       protected_branches: false,
     })
   ) {
     violations.push(
-      "Dependabot merge Environment must disable admin bypass and use only custom deployment-branch policies",
+      "Dependabot merge Environment must disable admin bypass, have no protection rules, and use only custom deployment-branch policies",
     );
   }
 
@@ -357,6 +358,7 @@ export function evaluateMainRulesets(
     !isObject(api) ||
     !Array.isArray(api.rulesets) ||
     !isObject(api.dependabotMergeEnvironment) ||
+    !Array.isArray(api.dependabotMergeEnvironment.protection_rules) ||
     !Array.isArray(api.dependabotMergeDeploymentBranchPolicies) ||
     !Array.isArray(api.dependabotMergeEnvironmentSecretNames) ||
     api.dependabotMergeEnvironmentSecretNames.some(
@@ -366,7 +368,7 @@ export function evaluateMainRulesets(
     return {
       status: "malformed",
       violations: [
-        "API input must contain rulesets plus normalized Dependabot merge Environment, deployment-policy, and secret-name metadata.",
+        "API input must contain rulesets plus normalized Dependabot merge Environment, protection-rule, deployment-policy, and secret-name metadata.",
       ],
     };
   }

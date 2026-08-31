@@ -12,6 +12,7 @@ const ENVIRONMENT = {
     protected_branches: false,
   },
   name: "dependabot-merge",
+  protection_rules: [],
 };
 const DEPLOYMENT_POLICIES = {
   branch_policies: [{ id: 71, name: "main", type: "branch" }],
@@ -99,6 +100,20 @@ assert.deepEqual(paginated.calls.slice(1), [
   ["api", `repos/${REPOSITORY}/rulesets/22`],
 ]);
 
+const protectedEnvironment = fixtureRunner({
+  environment: {
+    ...ENVIRONMENT,
+    protection_rules: [{ type: "wait_timer", wait_timer: 5 }],
+  },
+});
+assert.deepEqual(
+  collectMainRulesets({
+    repository: REPOSITORY,
+    runGh: protectedEnvironment.runGh,
+  }).dependabotMergeEnvironment.protection_rules,
+  [{ type: "wait_timer" }],
+);
+
 function expectFailure(options, expected) {
   assert.throws(
     () => collectMainRulesets({ repository: REPOSITORY, ...options }),
@@ -139,6 +154,14 @@ for (const [options, expected] of [
   [
     { environment: { ...ENVIRONMENT, name: "wrong" } },
     "Dependabot merge Environment did not match its requested name",
+  ],
+  [
+    { environment: { ...ENVIRONMENT, protection_rules: null } },
+    "Dependabot merge Environment protection rules had an unexpected shape",
+  ],
+  [
+    { environment: { ...ENVIRONMENT, protection_rules: [{ id: 1 }] } },
+    "Dependabot merge Environment protection rules contained malformed metadata",
   ],
   [
     {

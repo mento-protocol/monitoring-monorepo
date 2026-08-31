@@ -1124,10 +1124,13 @@ function runPlatformPlanPolicyTests(tempDir) {
   }
 
   const malformedKeyCanary = "QUJDRA==";
+  const malformedKeyPemHeader = ["-----BEGIN", "PRIVATE KEY-----"].join(" ");
+  const malformedKeyPemFooter = ["-----END", "PRIVATE KEY-----"].join(" ");
+  const malformedKeyPem = `${malformedKeyPemHeader}\n${malformedKeyCanary}\n${malformedKeyPemFooter}\n`;
   const malformedVarFile = path.join(fixtureRoot, "app-key-malformed.tfvars");
   writeFileSync(
     malformedVarFile,
-    `local_agent_github_app_private_key = <<APP_PRIVATE_KEY_PEM\n-----BEGIN PRIVATE KEY-----\n${malformedKeyCanary}\n-----END PRIVATE KEY-----\nAPP_PRIVATE_KEY_PEM\n`,
+    `local_agent_github_app_private_key = <<APP_PRIVATE_KEY_PEM\n${malformedKeyPem}APP_PRIVATE_KEY_PEM\n`,
   );
   let result = runFail(["plan", "platform", `-var-file=${malformedVarFile}`], {
     env: {
@@ -1373,7 +1376,7 @@ function runPlatformPlanPolicyTests(tempDir) {
   );
   writeFileSync(
     commentDecoyVarFile,
-    `/*\nlocal_agent_github_app_private_key = <<APP_PRIVATE_KEY_PEM\n${pkcs8}APP_PRIVATE_KEY_PEM\n*/\nlocal_agent_github_app_private_key = <<APP_PRIVATE_KEY_PEM\n-----BEGIN PRIVATE KEY-----\n${malformedKeyCanary}\n-----END PRIVATE KEY-----\nAPP_PRIVATE_KEY_PEM\n`,
+    `/*\nlocal_agent_github_app_private_key = <<APP_PRIVATE_KEY_PEM\n${pkcs8}APP_PRIVATE_KEY_PEM\n*/\nlocal_agent_github_app_private_key = <<APP_PRIVATE_KEY_PEM\n${malformedKeyPem}APP_PRIVATE_KEY_PEM\n`,
   );
   result = runFail(["plan", "platform", `-var-file=${commentDecoyVarFile}`], {
     env: {

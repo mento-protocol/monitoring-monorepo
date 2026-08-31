@@ -49,6 +49,7 @@
         "scripts/workflows/check-main-rulesets-drift.test.mjs",
         "scripts/workflows/read-main-rulesets.mjs",
         "scripts/workflows/read-main-rulesets.test.mjs",
+        "scripts/production-infra-identity-contract/**",
         "scripts/tf-stacks.mjs",
         ".github/workflows/ci.yml",
         ".github/workflows/infra.yml",

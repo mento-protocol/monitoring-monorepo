@@ -174,7 +174,9 @@ routine merge and final actor, and an audit with
 `main-lifecycle-boundary-audit state=ok`.
 
 Vercel retains Administration plus Contents as a Free-plan residual. It can
-change the rule and then `main`; drift is detective only.
+change the rule and then `main`; drift is detective only. Phase 7 active
+enforcement stays blocked until explicit owner acceptance of this residual, or
+until a reviewed compensating control removes it.
 
 `peg-policy-publication` permits only backend-free local validation with
 `pnpm tf validate peg-policy-publication`. Local plan and apply are disabled,
@@ -474,9 +476,11 @@ for `claude.yml`.
 `dependabot-merge` (issue #2091, ADR 0080) has admin bypass disabled, no
 reviewer, and one exact custom `main` branch policy. Its only secret metadata
 names are `DEPENDABOT_MERGE_APP_ID` and
-`DEPENDABOT_MERGE_APP_PRIVATE_KEY`. The daily platform-settings audit reads
-only the Environment, deployment-policy, and secret-name metadata. It never
-reads a public key or secret value.
+`DEPENDABOT_MERGE_APP_PRIVATE_KEY`. For this Environment subset, the daily
+platform-settings audit reads only Environment, protection-rule,
+deployment-policy, and secret-name metadata. The same workflow also checks the
+default workflow-token permission and both `main` rulesets. It never reads a
+public key or secret value.
 
 Never recreate retired `Production`/`production` names or manage
 Environment secrets outside their owning IaC/integration path. A new workflow

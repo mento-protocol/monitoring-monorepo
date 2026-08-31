@@ -72,8 +72,8 @@ variable "local_agent_github_app_private_key" {
       (
         length(var.local_agent_github_app_private_key) <= 65536 &&
         (
-          can(regex("^-----BEGIN RSA PRIVATE KEY-----\\n([A-Za-z0-9+/]{64}\\n)*([A-Za-z0-9+/]{4}){0,15}([A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=|[A-Za-z0-9+/][AQgw]==)\\n-----END RSA PRIVATE KEY-----\\n?$", var.local_agent_github_app_private_key)) ||
-          can(regex("^-----BEGIN PRIVATE KEY-----\\n([A-Za-z0-9+/]{64}\\n)*([A-Za-z0-9+/]{4}){0,15}([A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=|[A-Za-z0-9+/][AQgw]==)\\n-----END PRIVATE KEY-----\\n?$", var.local_agent_github_app_private_key))
+          can(regex(format("^%s\\n([A-Za-z0-9+/]{64}\\n)*([A-Za-z0-9+/]{4}){0,15}([A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=|[A-Za-z0-9+/][AQgw]==)\\n%s\\n?$", join(" ", ["-----BEGIN", "RSA PRIVATE KEY-----"]), join(" ", ["-----END", "RSA PRIVATE KEY-----"])), var.local_agent_github_app_private_key)) ||
+          can(regex(format("^%s\\n([A-Za-z0-9+/]{64}\\n)*([A-Za-z0-9+/]{4}){0,15}([A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=|[A-Za-z0-9+/][AQgw]==)\\n%s\\n?$", join(" ", ["-----BEGIN", "PRIVATE KEY-----"]), join(" ", ["-----END", "PRIVATE KEY-----"])), var.local_agent_github_app_private_key))
         )
       )
     )

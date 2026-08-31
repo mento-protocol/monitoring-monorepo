@@ -1667,6 +1667,27 @@ function validateRulesetEntry(entry, expected, errors) {
   validateRulesetShape(entry?.change?.after, expected, errors);
 }
 
+function validateRulesetActivationIsolated(
+  plan,
+  rulesetEntry,
+  expected,
+  errors,
+) {
+  if (
+    expected?.enforcement !== "active" ||
+    expected?.auditActive ||
+    !sameActions(rulesetEntry?.change?.actions, ["update"])
+  ) {
+    return;
+  }
+  const changed = nonNoOpEntries(plan);
+  if (changed.length !== 1 || changed[0] !== rulesetEntry) {
+    errors.push(
+      "active lifecycle ruleset activation may change only the pinned ruleset enforcement",
+    );
+  }
+}
+
 function validateGithubProvider(plan, errors) {
   if (Object.hasOwn(plan.variables ?? {}, "github_owner")) {
     errors.push(
@@ -1786,6 +1807,7 @@ export function validateMainLifecycleBoundaryPlan(
     return errors;
   }
   validateRulesetEntry(related[0], expected, errors);
+  validateRulesetActivationIsolated(plan, related[0], expected, errors);
   validateBrokerScaffold(plan, related[0], expected, errors);
   validateDependabotMergeCredentials(plan, related[0], expected, errors);
   return errors;
