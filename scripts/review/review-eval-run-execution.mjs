@@ -188,11 +188,15 @@ export function claudeArgv({
     "json",
     "--permission-mode",
     "bypassPermissions",
-    // `--allowed-tools` is a required variadic option. Emitting it with an
-    // empty list makes the CLI swallow the following `--max-turns 1` as two
-    // tool names, so every blind judge and calibration replay would run
-    // unbounded. Omit the flag when there are no tools to allow.
-    ...(allowedTools.length > 0 ? ["--allowed-tools", ...allowedTools] : []),
+    // `--allowed-tools` grants permission but does not limit which built-in
+    // tools the model can see. `--tools` owns availability. Pass the requested
+    // set through both controls. Its comma-joined value also keeps the variadic
+    // options from swallowing the next flag. An empty set must use the CLI's
+    // explicit `--tools ""` form, or the default tools remain available and a
+    // blind judge can spend its only turn on a tool call and exit without JSON.
+    ...(allowedTools.length > 0
+      ? ["--tools", allowedTools.join(","), "--allowed-tools", ...allowedTools]
+      : ["--tools", ""]),
     "--max-turns",
     String(maxTurns),
   ];
