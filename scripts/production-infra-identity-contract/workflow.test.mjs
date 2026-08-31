@@ -136,6 +136,34 @@ expectFailure(
   "must match the exact reviewed Dependabot auto-merge workflow pair inventory",
 );
 
+for (const [from, to] of [
+  [
+    "github.event.workflow_run.actor.login == 'dependabot[bot]' &&",
+    "github.event.workflow_run.actor.login != 'dependabot[bot]' &&",
+  ],
+  [
+    "github.event.workflow_run.triggering_actor.login == 'dependabot[bot]' &&",
+    "github.event.workflow_run.triggering_actor.login != 'dependabot[bot]' &&",
+  ],
+  [
+    "github.event.workflow_run.run_attempt == 1 &&",
+    "github.event.workflow_run.run_attempt > 0 &&",
+  ],
+  [
+    "startsWith(github.event.workflow_run.head_branch, 'dependabot/github_actions/actions-minor-patch-') &&",
+    "startsWith(github.event.workflow_run.head_branch, 'dependabot/') &&",
+  ],
+  [
+    "!startsWith(github.event.workflow_run.head_branch, 'sentry-autofix/')",
+    "!startsWith(github.event.workflow_run.head_branch, 'sentry/')",
+  ],
+]) {
+  expectFailure(
+    replaceWorkflowFile(liveFiles, dependabotAutoMergeWorkflow, from, to),
+    "must match the exact reviewed Dependabot auto-merge workflow pair inventory",
+  );
+}
+
 const liveWithoutDependabotCandidate = { ...liveFiles };
 delete liveWithoutDependabotCandidate[dependabotAutoMergeCandidateWorkflow];
 expectFailure(
