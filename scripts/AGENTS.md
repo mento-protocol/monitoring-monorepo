@@ -16,8 +16,7 @@ Read the relevant [ADR](../docs/adr/README.md) before changing script behavior.
 
 ## Scope
 
-`scripts/` holds deploy and maintenance tools, agent gates, and code-health
-checks.
+`scripts/` holds deploy, maintenance, gate, and code-health tools.
 
 ## Layout
 
@@ -64,9 +63,7 @@ feedback-runtime pins.
   0064's three-merge sequence for moves.
 - **Gate routing pins.** Stub-repo tests require
   `$script_source_dir == $repo_root/scripts`.
-  The review-process metrics arm pins its CLI, core, signal collector, legacy
-  projection, report, test, and sanitized CodeRabbit fixture so any schema-v2
-  evidence change runs the offline suite.
+  `review-process-metrics` paths need exact suite routes.
   `bootstrap/codex-cloud-setup.{sh,test.sh}` pair for offline tests.
   `sentry/autofix/sentry-autofix-refused-inventory.mjs` routes
   `pnpm sentry:autofix:{run-record,finalize}:test`. Exact
@@ -132,8 +129,7 @@ feedback-runtime pins.
   EOL and `UPSTASH_MCP_LAUNCHER_SHA256` hashes it. A move changes both. See
   [`docs/notes/upstash-mcp-operator.md`](../docs/notes/upstash-mcp-operator.md).
 
-**List each new `scripts/` path pin here.** An unrecorded pin breaks silently on
-the next move.
+List each new path pin here; unrecorded pins can break on moves.
 
 ## Sweep Checklist for a Move
 
