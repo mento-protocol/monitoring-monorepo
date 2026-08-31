@@ -11,7 +11,6 @@ import {
   IssueOwnershipConflictError,
   isReleasable,
   labelNames,
-  splitRepo,
 } from "./issue-board-state.mjs";
 import {
   findIssueProjectItem,
@@ -34,6 +33,7 @@ import {
   getIssue,
   getPullRequest,
   listOpenPullRequestsForBranch,
+  pullRequestHeadRepositoryNameWithOwner,
 } from "./issue-board-transport.mjs";
 
 const EMPTY_OWNERSHIP = {
@@ -202,10 +202,9 @@ async function assertClosedPrBinding(options, issue, ownership, dependencies) {
       `Issue #${issue.number} stored PR #${ownership.pr} must be CLOSED and unmerged before release`,
     );
   }
-  const canonicalRepo = splitRepo(options.repo).nameWithOwner.toLowerCase();
   if (
     pr.headRefName !== ownership.branch ||
-    pr.headRepository?.nameWithOwner?.toLowerCase() !== canonicalRepo
+    pullRequestHeadRepositoryNameWithOwner(pr) !== options.repo.toLowerCase()
   ) {
     throw new Error(
       `Issue #${issue.number} stored PR #${ownership.pr} does not match claimed branch ${ownership.branch} in ${options.repo}`,
@@ -224,10 +223,9 @@ async function assertMergedPrBinding(options, issue, ownership, dependencies) {
       `Issue #${issue.number} stored PR #${ownership.pr} must be MERGED with a merge timestamp before continuation`,
     );
   }
-  const canonicalRepo = splitRepo(options.repo).nameWithOwner.toLowerCase();
   if (
     pr.headRefName !== ownership.branch ||
-    pr.headRepository?.nameWithOwner?.toLowerCase() !== canonicalRepo
+    pullRequestHeadRepositoryNameWithOwner(pr) !== options.repo.toLowerCase()
   ) {
     throw new Error(
       `Issue #${issue.number} stored PR #${ownership.pr} does not match claimed branch ${ownership.branch} in ${options.repo}`,

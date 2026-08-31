@@ -82,10 +82,12 @@ import {
 } from "./issue-board-lock.mjs";
 import {
   getIssue,
+  getPullRequest,
   getPrIssues,
   listIssueComments,
   listIssuesByLabels,
   listOpenPullRequestsForBranch,
+  pullRequestHeadRepositoryNameWithOwner,
 } from "./issue-board-transport.mjs";
 
 const EMPTY_BODY_SHA256 = issueBodySha256("");
@@ -1996,26 +1998,41 @@ test("queue-label issue lists use one all-state OR query", async () => {
 
 test("open PR branch proof filters the repository and fails closed at its cap", async () => {
   const options = { repo: "mento-protocol/monitoring-monorepo" };
+  const calls = [];
   const prs = await listOpenPullRequestsForBranch(options, "fix/901", {
-    json: async () => [
-      {
-        number: 1901,
-        headRefName: "fix/901",
-        headRepository: {
-          nameWithOwner: "mento-protocol/monitoring-monorepo",
+    json: async (args) => {
+      calls.push(args);
+      return [
+        {
+          number: 1901,
+          headRefName: "fix/901",
+          headRepository: { name: "monitoring-monorepo" },
+          headRepositoryOwner: { login: "mento-protocol" },
         },
-      },
-      {
-        number: 2901,
-        headRefName: "fix/901",
-        headRepository: { nameWithOwner: "fork/monitoring-monorepo" },
-      },
-    ],
-    maxResults: 3,
+        {
+          number: 2901,
+          headRefName: "fix/901",
+          headRepository: { name: "monitoring-monorepo" },
+          headRepositoryOwner: { login: "fork" },
+        },
+        { number: 3901, headRefName: "fix/901", headRepository: {} },
+        {
+          number: 4901,
+          headRefName: "fix/901",
+          headRepository: { name: "monitoring-monorepo" },
+          headRepositoryOwner: { login: "mento-protocol/foreign" },
+        },
+      ];
+    },
+    maxResults: 5,
   });
   assertDeepEqual(
     prs.map((pr) => pr.number),
     [1901],
+  );
+  assertEqual(
+    calls[0].at(-1),
+    "number,url,headRefName,headRepository,headRepositoryOwner",
   );
   await assertRejects(
     () =>
@@ -2025,6 +2042,50 @@ test("open PR branch proof filters the repository and fails closed at its cap", 
       }),
     /cannot prove that no replacement PR exists/,
   );
+});
+
+test("PR lookup requests explicit repository owner and name fields", async () => {
+  const calls = [];
+  const pr = await getPullRequest(
+    { repo: "mento-protocol/monitoring-monorepo" },
+    1901,
+    {
+      json: async (args) => {
+        calls.push(args);
+        return {
+          number: 1901,
+          headRepository: { name: "monitoring-monorepo" },
+          headRepositoryOwner: { login: "mento-protocol" },
+        };
+      },
+    },
+  );
+  assertEqual(
+    calls[0].at(-1),
+    "number,url,state,mergedAt,headRefName,headRepository,headRepositoryOwner",
+  );
+  assertEqual(
+    pullRequestHeadRepositoryNameWithOwner(pr),
+    "mento-protocol/monitoring-monorepo",
+  );
+});
+
+test("PR repository identity fails closed on incomplete or malformed fields", () => {
+  for (const pr of [
+    {},
+    { headRepository: { name: "monitoring-monorepo" } },
+    { headRepositoryOwner: { login: "mento-protocol" } },
+    {
+      headRepository: { name: "monitoring-monorepo" },
+      headRepositoryOwner: { login: "mento-protocol/foreign" },
+    },
+    {
+      headRepository: { name: " monitoring-monorepo" },
+      headRepositoryOwner: { login: "mento-protocol" },
+    },
+  ]) {
+    assertEqual(pullRequestHeadRepositoryNameWithOwner(pr), null);
+  }
 });
 
 test("project mutation scope failures receive the same guidance", () => {
@@ -2854,9 +2915,8 @@ test("review verifies the complete durable ownership snapshot", async () => {
           getPullRequest: async () => ({
             state: "OPEN",
             headRefName: "fix/905",
-            headRepository: {
-              nameWithOwner: "mento-protocol/monitoring-monorepo",
-            },
+            headRepository: { name: "monitoring-monorepo" },
+            headRepositoryOwner: { login: "mento-protocol" },
           }),
           editIssueLabels: async (_options, current, state) => {
             issue = {
@@ -2921,9 +2981,8 @@ test("review rejects a missing stored Agent before lock or board mutation", asyn
             return {
               state: "OPEN",
               headRefName: "fix/906",
-              headRepository: {
-                nameWithOwner: "mento-protocol/monitoring-monorepo",
-              },
+              headRepository: { name: "monitoring-monorepo" },
+              headRepositoryOwner: { login: "mento-protocol" },
             };
           },
           editIssueLabels: async () => {
@@ -2991,9 +3050,8 @@ function stageReviewDependencies(state, overrides = {}) {
       number: 2079,
       state: "OPEN",
       headRefName: "feat/rank-backlog-skill",
-      headRepository: {
-        nameWithOwner: "mento-protocol/monitoring-monorepo",
-      },
+      headRepository: { name: "monitoring-monorepo" },
+      headRepositoryOwner: { login: "mento-protocol" },
     }),
     listOpenPullRequestsForBranch: async () => [],
     editIssueLabels: async (_options, current, target) => {
@@ -3031,9 +3089,8 @@ test("explicit review rebind preserves #2071 ownership on the proven PR branch",
           number: 2079,
           state: "OPEN",
           headRefName: "feat/rank-backlog-skill",
-          headRepository: {
-            nameWithOwner: "mento-protocol/monitoring-monorepo",
-          },
+          headRepository: { name: "monitoring-monorepo" },
+          headRepositoryOwner: { login: "mento-protocol" },
         };
       },
       listOpenPullRequestsForBranch: async (_options, branch) => {
@@ -3171,9 +3228,8 @@ test("review rebind preserves its applied state when the selected PR changes at 
               state: "OPEN",
               headRefName:
                 prReads < 6 ? "feat/rank-backlog-skill" : "feat/replacement",
-              headRepository: {
-                nameWithOwner: "mento-protocol/monitoring-monorepo",
-              },
+              headRepository: { name: "monitoring-monorepo" },
+              headRepositoryOwner: { login: "mento-protocol" },
             };
           },
         }),
@@ -11478,9 +11534,8 @@ test("closed-unmerged PR release proves the stored repo and branch binding", asy
         state: "CLOSED",
         mergedAt: null,
         headRefName: "fix/2205",
-        headRepository: {
-          nameWithOwner: "mento-protocol/monitoring-monorepo",
-        },
+        headRepository: { name: "monitoring-monorepo" },
+        headRepositoryOwner: { login: "mento-protocol" },
       }),
       listOpenPullRequestsForBranch: async () => [],
       editIssueLabels: async (_options, issue, target) => {
@@ -11561,9 +11616,8 @@ function mergedContinuationDependencies(state, overrides = {}) {
       state: "MERGED",
       mergedAt: "2026-08-27T13:02:47Z",
       headRefName: "feat/rank-backlog-skill",
-      headRepository: {
-        nameWithOwner: "mento-protocol/monitoring-monorepo",
-      },
+      headRepository: { name: "monitoring-monorepo" },
+      headRepositoryOwner: { login: "mento-protocol" },
     }),
     listOpenPullRequestsForBranch: async () => [],
     editIssueLabels: async (_options, current, target) => {
@@ -11599,9 +11653,8 @@ test("merged stage-one PR can continue #2071 only in needs-grooming", async () =
           state: "MERGED",
           mergedAt: "2026-08-27T13:02:47Z",
           headRefName: "feat/rank-backlog-skill",
-          headRepository: {
-            nameWithOwner: "mento-protocol/monitoring-monorepo",
-          },
+          headRepository: { name: "monitoring-monorepo" },
+          headRepositoryOwner: { login: "mento-protocol" },
         };
       },
       listOpenPullRequestsForBranch: async () => {
@@ -11643,9 +11696,8 @@ test("merged continuation requires both MERGED state and mergedAt", async () => 
               number: 2079,
               ...pr,
               headRefName: "feat/rank-backlog-skill",
-              headRepository: {
-                nameWithOwner: "mento-protocol/monitoring-monorepo",
-              },
+              headRepository: { name: "monitoring-monorepo" },
+              headRepositoryOwner: { login: "mento-protocol" },
             }),
             editIssueLabels: async () => {
               edits += 1;
@@ -11729,9 +11781,8 @@ test("a replacement PR race restores the exact stored review snapshot", async ()
             state: "CLOSED",
             mergedAt: null,
             headRefName: "fix/2207",
-            headRepository: {
-              nameWithOwner: "mento-protocol/monitoring-monorepo",
-            },
+            headRepository: { name: "monitoring-monorepo" },
+            headRepositoryOwner: { login: "mento-protocol" },
           }),
           listOpenPullRequestsForBranch: async () => {
             openReads += 1;
@@ -12073,9 +12124,8 @@ test("lifecycle owner writers run only inside their executed mutex callbacks", a
       getPullRequest: async () => ({
         state: "OPEN",
         headRefName: "fix/2302",
-        headRepository: {
-          nameWithOwner: "mento-protocol/monitoring-monorepo",
-        },
+        headRepository: { name: "monitoring-monorepo" },
+        headRepositoryOwner: { login: "mento-protocol" },
       }),
       findIssueProjectItem: async () => "item-2302",
       readClaimOwnership: async () => ({ ...reviewOwnership }),

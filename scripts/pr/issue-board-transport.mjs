@@ -410,7 +410,7 @@ export async function listOpenPullRequestsForBranch(
     "--limit",
     String(maxResults),
     "--json",
-    "number,url,headRefName,headRepository",
+    "number,url,headRefName,headRepository,headRepositoryOwner",
   ]);
   if ((prs ?? []).length >= maxResults) {
     throw new Error(
@@ -421,19 +421,39 @@ export async function listOpenPullRequestsForBranch(
   return (prs ?? []).filter(
     (pr) =>
       pr.headRefName === branch &&
-      pr.headRepository?.nameWithOwner?.toLowerCase() === canonicalRepo,
+      pullRequestHeadRepositoryNameWithOwner(pr) === canonicalRepo,
   );
 }
 
-export async function getPullRequest(options, number) {
-  const pr = await ghJson([
+export function pullRequestHeadRepositoryNameWithOwner(pr) {
+  const owner = pr?.headRepositoryOwner?.login;
+  const name = pr?.headRepository?.name;
+  if (
+    typeof owner !== "string" ||
+    owner.length === 0 ||
+    owner.trim() !== owner ||
+    typeof name !== "string" ||
+    name.length === 0 ||
+    name.trim() !== name
+  ) {
+    return null;
+  }
+  try {
+    return splitRepo(`${owner}/${name}`).nameWithOwner.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+export async function getPullRequest(options, number, { json = ghJson } = {}) {
+  const pr = await json([
     "pr",
     "view",
     String(number),
     "-R",
     options.repo,
     "--json",
-    "number,url,state,mergedAt,headRefName,headRepository",
+    "number,url,state,mergedAt,headRefName,headRepository,headRepositoryOwner",
   ]);
   if (!pr?.number) {
     throw new Error(`PR #${number} was not found in ${options.repo}`);

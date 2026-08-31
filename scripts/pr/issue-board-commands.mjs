@@ -11,7 +11,6 @@ import {
   IssueOwnershipConflictError,
   isReviewable,
   labelNames,
-  splitRepo,
 } from "./issue-board-state.mjs";
 import {
   findIssueProjectItem,
@@ -39,6 +38,7 @@ import {
   getPrIssues,
   listIssueComments,
   listOpenPullRequestsForBranch,
+  pullRequestHeadRepositoryNameWithOwner,
 } from "./issue-board-transport.mjs";
 import { backfillIssue } from "./issue-board-backfill.mjs";
 import { release } from "./issue-board-release.mjs";
@@ -72,11 +72,10 @@ function isReviewState(issue) {
 }
 
 function validateReviewPr(options, pr) {
-  const canonicalRepo = splitRepo(options.repo).nameWithOwner.toLowerCase();
   if (
     pr.state !== "OPEN" ||
     !pr.headRefName ||
-    pr.headRepository?.nameWithOwner?.toLowerCase() !== canonicalRepo
+    pullRequestHeadRepositoryNameWithOwner(pr) !== options.repo.toLowerCase()
   ) {
     throw new Error(
       `PR #${options.pr} must be open from ${options.repo} with a named head branch`,
