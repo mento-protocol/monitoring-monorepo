@@ -15,7 +15,15 @@ import {
   summarizeReadyState,
   summarizeTerminalReadyState,
 } from "./pr-ready-state-core.mjs";
+import {
+  fetchHeadUpdatedAt,
+  findCodeRabbitPathFilterSkipCandidate,
+  headUpdatedAtFromTimeline,
+  validateCodeRabbitPathFilterSkip,
+} from "./pr-ready-state-review-signals.mjs";
 import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
+
+export { fetchHeadUpdatedAt, headUpdatedAtFromTimeline };
 
 const GH_OUTPUT_MAX_BYTES = 20 * 1024 * 1024;
 
@@ -578,51 +586,6 @@ export function annotateStatusCheckSources(statusCheckRollup, sourceMap) {
   });
 }
 
-function validIsoTimestamp(value) {
-  return Number.isFinite(Date.parse(value ?? "")) ? value : null;
-}
-
-function timelineEventTimestamp(item) {
-  return (
-    validIsoTimestamp(item?.created_at) ??
-    validIsoTimestamp(item?.submitted_at) ??
-    validIsoTimestamp(item?.updated_at) ??
-    null
-  );
-}
-
-export function headUpdatedAtFromTimeline(timelineItems = [], headSha) {
-  const normalizedHeadSha = String(headSha ?? "").toLowerCase();
-  if (!normalizedHeadSha) return null;
-
-  let headCommitIndex = -1;
-  let headCommitTimestamp = null;
-  for (const [index, item] of timelineItems.entries()) {
-    if (
-      item?.event === "committed" &&
-      String(item.sha ?? "").toLowerCase() === normalizedHeadSha
-    ) {
-      headCommitIndex = index;
-      headCommitTimestamp = timelineEventTimestamp(item);
-    }
-  }
-  if (headCommitIndex < 0) return null;
-  if (headCommitTimestamp) return headCommitTimestamp;
-
-  for (const item of timelineItems.slice(headCommitIndex + 1)) {
-    const timestamp = timelineEventTimestamp(item);
-    if (timestamp) return timestamp;
-  }
-  return null;
-}
-
-export function fetchHeadUpdatedAt({ headSha, timelineItems, observedAt }) {
-  return minIsoTimestamp(
-    headUpdatedAtFromTimeline(timelineItems, headSha),
-    validIsoTimestamp(observedAt),
-  );
-}
-
 async function fetchReviewThreads({ repo, number }) {
   const query = `
     query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
@@ -765,6 +728,7 @@ export async function fetchReadyState({
     [
       "author",
       "baseRefName",
+      "changedFiles",
       "headRefName",
       "headRefOid",
       "isDraft",
@@ -850,6 +814,31 @@ export async function fetchReadyState({
     timelineItems: timelineResult.ok ? timelineResult.value : [],
     observedAt,
   });
+  const pathFilterCandidate = findCodeRabbitPathFilterSkipCandidate({
+    issueComments,
+    headUpdatedAt,
+  });
+  let codeRabbitPathFilterSkip = null;
+  if (pathFilterCandidate) {
+    const filesResult = await ghApiJsonPagesResult(repo, [
+      `repos/${path}/pulls/${number}/files?per_page=100`,
+    ]);
+    const currentPrResult = filesResult.ok
+      ? await ghApiJsonResult(repo, [`repos/${path}/pulls/${number}`])
+      : { ok: false, value: null };
+    const currentPr = currentPrResult.ok ? currentPrResult.value : null;
+    codeRabbitPathFilterSkip = validateCodeRabbitPathFilterSkip({
+      candidate: pathFilterCandidate,
+      currentFiles: filesResult.ok
+        ? filesResult.value.map((file) => file?.filename ?? null)
+        : null,
+      expectedChangedFileCount: pr.changedFiles,
+      filesComplete:
+        filesResult.ok &&
+        currentPr?.head?.sha === pr.headRefOid &&
+        currentPr?.changed_files === pr.changedFiles,
+    });
+  }
   const annotatedPr = {
     ...pr,
     headUpdatedAt,
@@ -869,6 +858,7 @@ export async function fetchReadyState({
     requiredStatusContextsError: requiredStatusContexts.error,
     requiredStatusContextsAvailable: requiredStatusContexts.error === null,
     includeFeedbackDetails,
+    codeRabbitPathFilterSkip,
   });
 }
 

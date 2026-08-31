@@ -3,7 +3,7 @@ title: GitHub Tooling Surfaces — gh CLI vs MCP
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-29
+last_verified: 2026-08-31
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -116,6 +116,7 @@ the skills document the two native paths.
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `gh pr view --json number,state,mergeable,...` | `pull_request_read` method `get` (includes `mergeable_state`, head SHA, draft/state)                    |
 | `gh pr checks` / status rollup                 | `pull_request_read` methods `get_status` and `get_check_runs`                                           |
+| complete `pulls/<n>/files` pagination          | `pull_request_read` method `get_files`, paged to the end                                                |
 | review threads via GraphQL `reviewThreads`     | `pull_request_read` method `get_review_comments` (threads with `isResolved`/`isOutdated`)               |
 | `gh api .../reviews`                           | `pull_request_read` method `get_reviews`                                                                |
 | `gh api .../issues/<n>/comments`               | `pull_request_read` method `get_comments`                                                               |
@@ -263,10 +264,18 @@ polled. Do not foreground-poll and never sleep-poll.
      `<!-- recent_review_start -->` and `<!-- recent_review_end -->` enclose
      it, it contains a Run ID, its full reviewed commit range ends at the
      current head, and its comment update time is at or after the current head
-     update time. Ignore empty reply-only reviews, skipped runs, and rate-limit
-     notices. After the optional CodeRabbit check becomes terminal, refresh
-     once. If the signal is missing or stale and no trusted top-level comment
-     contains both `@coderabbitai review` and
+     update time. Ignore empty reply-only reviews and rate-limit notices. A
+     path-filter skip is `not_applicable` only when the trusted comment carries
+     the canonical summary and skip markers, exact path-filter text, one Run
+     ID, and one non-empty counted ignored-file block. Page `get_files` to the
+     end and require the unique ignored paths, reported count, complete current
+     filenames, and PR changed-file count to agree exactly. Re-read the head
+     after paging. If MCP cannot prove complete pagination, the current file
+     count, or an unchanged head, fail closed and treat the skip as no current
+     review signal. Generic no-file, incremental no-change, rate-limit, and
+     free-tier replies never count. After the optional CodeRabbit check becomes
+     terminal, refresh once. If the signal is missing or stale and no trusted
+     top-level comment contains both `@coderabbitai review` and
      `<!-- coderabbit-final-head-review:<full-head-sha> -->`, use
      `add_issue_comment` to post `@coderabbitai review`, a blank line, and that
      exact marker. A marker comment is trusted only when its author association

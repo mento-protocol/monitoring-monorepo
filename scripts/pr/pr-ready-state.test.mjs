@@ -21,6 +21,10 @@ import {
   summarizeTerminalReadyState,
   splitRequiredAndOptionalChecks,
 } from "./pr-ready-state-core.mjs";
+import {
+  findCodeRabbitPathFilterSkipCandidate,
+  validateCodeRabbitPathFilterSkip,
+} from "./pr-ready-state-review-signals.mjs";
 import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
 import {
   annotateStatusCheckSources,
@@ -2211,6 +2215,55 @@ test("compact output includes readiness counters and Codex signal state", () => 
 
 // --- CodeRabbit advisory check context (ADR 0066) --------------------------
 
+function codeRabbitPathFilterSkipBody(
+  paths,
+  {
+    declaredCount = paths.length,
+    includeRunId = true,
+    skipText = "Review was skipped due to path filters",
+  } = {},
+) {
+  return [
+    "<!-- This is an auto-generated comment: summarize by coderabbit.ai -->",
+    "<!-- This is an auto-generated comment: skip review by coderabbit.ai -->",
+    "",
+    "> [!IMPORTANT]",
+    "> ## Review skipped",
+    ">",
+    `> ${skipText}`,
+    ">",
+    "> <details>",
+    `> <summary>:no_entry: Files ignored due to path filters (${declaredCount})</summary>`,
+    ">",
+    ...paths.map((path) => `> * \`${path}\` is excluded by \`!docs/evals/**\``),
+    ">",
+    "> </details>",
+    ">",
+    "> <details>",
+    "> <summary>Run configuration</summary>",
+    ">",
+    ...(includeRunId
+      ? ["> **Run ID**: `751277c1-32d3-480a-89bd-9f9ba9a7ab0f`"]
+      : []),
+    ">",
+    "> </details>",
+    "",
+    "<!-- end of auto-generated comment: skip review by coderabbit.ai -->",
+  ].join("\n");
+}
+
+function codeRabbitSkipComment(body, overrides = {}) {
+  return {
+    user: { login: "coderabbitai[bot]" },
+    body,
+    html_url:
+      "https://github.com/mento-protocol/monitoring-monorepo/pull/2145#issuecomment-5467686069",
+    created_at: "2026-08-30T08:40:29Z",
+    updated_at: "2026-08-30T09:08:59Z",
+    ...overrides,
+  };
+}
+
 test("splits the CodeRabbit check into optional lag alongside Cursor Bugbot", () => {
   const split = splitRequiredAndOptionalChecks([
     { name: "Code Quality", status: "COMPLETED", conclusion: "SUCCESS" },
@@ -2237,6 +2290,150 @@ test("splits the CodeRabbit check into optional lag alongside Cursor Bugbot", ()
       ],
     },
   );
+});
+
+test("accepts only a trusted current CodeRabbit path-filter skip candidate", () => {
+  const paths = [
+    "docs/evals/review-skill-ledger.jsonl",
+    "docs/evals/review-skill-runs/example/failure.md",
+  ];
+  const candidate = findCodeRabbitPathFilterSkipCandidate({
+    issueComments: [codeRabbitSkipComment(codeRabbitPathFilterSkipBody(paths))],
+    headUpdatedAt: Date.parse("2026-08-30T08:40:00Z"),
+  });
+
+  assertDeepEqual(candidate, {
+    declaredCount: 2,
+    ignoredPaths: paths,
+    sourceUrl:
+      "https://github.com/mento-protocol/monitoring-monorepo/pull/2145#issuecomment-5467686069",
+    observedAt: "2026-08-30T09:08:59Z",
+  });
+});
+
+test("rejects ambiguous CodeRabbit skip and no-review comments before file fetch", () => {
+  const paths = ["docs/evals/one.jsonl", "docs/evals/two.jsonl"];
+  const validBody = codeRabbitPathFilterSkipBody(paths);
+  const invalidComments = [
+    codeRabbitSkipComment(validBody, {
+      user: { login: "outside-user" },
+    }),
+    codeRabbitSkipComment(validBody, {
+      updated_at: "2026-08-30T08:39:59Z",
+    }),
+    codeRabbitSkipComment(validBody.replace("summarize by", "summary by")),
+    codeRabbitSkipComment(validBody.replace("skip review by", "skipped by")),
+    codeRabbitSkipComment(
+      validBody.replace("end of auto-generated comment", "end comment"),
+    ),
+    codeRabbitSkipComment(
+      codeRabbitPathFilterSkipBody(paths, { includeRunId: false }),
+    ),
+    codeRabbitSkipComment(
+      codeRabbitPathFilterSkipBody(paths, { skipText: "Review skipped" }),
+    ),
+    codeRabbitSkipComment(
+      codeRabbitPathFilterSkipBody(paths, { declaredCount: 3 }),
+    ),
+    codeRabbitSkipComment(codeRabbitPathFilterSkipBody([paths[0], paths[0]])),
+    codeRabbitSkipComment(validBody, { html_url: null, url: null }),
+    codeRabbitSkipComment(
+      "<!-- This is an auto-generated reply by CodeRabbit -->\nNo files to review.",
+    ),
+    codeRabbitSkipComment(
+      "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->\nReview rate limited.",
+    ),
+    codeRabbitSkipComment(
+      "Review skipped\n\nNo new commits to review since the last review.",
+    ),
+    codeRabbitSkipComment(
+      "Automatic reviews are disabled for pull requests from unseated authors.",
+    ),
+  ];
+
+  for (const comment of invalidComments) {
+    assertEqual(
+      findCodeRabbitPathFilterSkipCandidate({
+        issueComments: [comment],
+        headUpdatedAt: Date.parse("2026-08-30T08:40:00Z"),
+      }),
+      null,
+      comment.body,
+    );
+  }
+  assertEqual(
+    findCodeRabbitPathFilterSkipCandidate({
+      issueComments: [codeRabbitSkipComment(validBody)],
+      headUpdatedAt: null,
+    }),
+    null,
+  );
+});
+
+test("requires a complete exact current-file match for path-filter evidence", () => {
+  const paths = ["docs/evals/one.jsonl", "docs/evals/two.jsonl"];
+  const candidate = findCodeRabbitPathFilterSkipCandidate({
+    issueComments: [codeRabbitSkipComment(codeRabbitPathFilterSkipBody(paths))],
+    headUpdatedAt: Date.parse("2026-08-30T08:40:00Z"),
+  });
+  const validate = (currentFiles, expectedChangedFileCount, filesComplete) =>
+    validateCodeRabbitPathFilterSkip({
+      candidate,
+      currentFiles,
+      expectedChangedFileCount,
+      filesComplete,
+    });
+
+  assertDeepEqual(validate([...paths].reverse(), 2, true), {
+    reason: "path_filters",
+    sourceUrl:
+      "https://github.com/mento-protocol/monitoring-monorepo/pull/2145#issuecomment-5467686069",
+    ignoredPaths: paths,
+  });
+  assertEqual(validate([paths[0]], 1, true), null, "subset");
+  assertEqual(validate([...paths, "docs/third.md"], 3, true), null, "superset");
+  assertEqual(validate(paths, 3, true), null, "changed-file count mismatch");
+  assertEqual(validate(paths, 2, false), null, "pagination or head recheck");
+  assertEqual(validate([paths[0], paths[0]], 2, true), null, "duplicates");
+  assertEqual(validate([], 0, true), null, "empty evidence");
+});
+
+test("projects an exact path-filter skip as optional not-applicable evidence", () => {
+  const paths = ["docs/evals/one.jsonl", "docs/evals/two.jsonl"];
+  const issueComments = [
+    codeRabbitSkipComment(codeRabbitPathFilterSkipBody(paths)),
+  ];
+  const candidate = findCodeRabbitPathFilterSkipCandidate({
+    issueComments,
+    headUpdatedAt: Date.parse("2026-08-30T08:40:00Z"),
+  });
+  const pathFilterSkip = validateCodeRabbitPathFilterSkip({
+    candidate,
+    currentFiles: paths,
+    expectedChangedFileCount: 2,
+    filesComplete: true,
+  });
+  const summary = summarizeReadyState({
+    pr: {
+      ...basePr,
+      headRefOid: "b".repeat(40),
+      headUpdatedAt: "2026-08-30T08:40:00Z",
+    },
+    issueComments,
+    codeRabbitPathFilterSkip: pathFilterSkip,
+  });
+
+  assertEqual(summary.codeRabbitReviewSignal, "not_applicable");
+  assertDeepEqual(summary.gates.codeRabbitReviewSignal, {
+    ready: true,
+    required: false,
+    state: "not_applicable",
+    fallbackAction: "wait",
+    reason: "path_filters",
+    sourceUrl:
+      "https://github.com/mento-protocol/monitoring-monorepo/pull/2145#issuecomment-5467686069",
+    ignoredPaths: paths,
+  });
 });
 
 test("classifies only real CodeRabbit runs as exact-head reviews", () => {

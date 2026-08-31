@@ -3,7 +3,7 @@ title: PR Ready State
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-26
+last_verified: 2026-08-31
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -81,17 +81,15 @@ Required blockers:
 
 Optional signals:
 
-- Cursor Bugbot or other advisory bot reviews when they are not required by
-  branch protection.
+- Advisory bot reviews when they are not required by branch protection.
 - Non-required check runs, flaky advisory jobs, or lint/report jobs configured
   outside the required status rollup.
 - Older bot comments or reviews that do not apply to the current head, provided
   every required current-head comment has been handled.
 
-Cursor Bugbot commonly lags behind the raw status rollup. Treat that lag as a
-separate advisory state: report it in the readiness output, but do not hold the
-all-clear on it unless the Cursor check or review is required by branch
-protection.
+Cursor BugBot is disabled. The optional check classifier and feedback parser
+retain explicit compatibility for open PRs that still carry legacy Cursor
+state. Do not wait for or request a new Cursor review.
 
 CodeRabbit's `CodeRabbit` check context (ADR 0066) is advisory the same way,
 with one added trap: it reports `SUCCESS` even when no review ran. A
@@ -116,8 +114,23 @@ clean-run block enclosed by `<!-- recent_review_start -->` and
 `<!-- recent_review_end -->`. The clean-run block must contain the Run ID and a
 reviewed commit range that ends at the full current head. Its comment update
 time must be at or after the head update time. Empty review records, skipped
-runs, and rate-limit notices do not count. A head-bound closeout request uses
-this exact body:
+runs, and rate-limit notices do not count.
+
+A trusted path-filter skip is `not_applicable` only when the CodeRabbit comment
+contains the canonical summary, skip-start, and skip-end markers, the exact
+`Review was skipped due to path filters` text, one Run ID, and one non-empty
+counted ignored-file block. The comment update time must be at or after the
+current-head update time. The probe then fetches every page of the current PR
+file list and re-reads the PR head. The ignored paths must be unique and equal
+the complete current file set, and all declared and API file counts must agree.
+The gate returns `reason: path_filters`, `sourceUrl`, and `ignoredPaths` with
+state `not_applicable`, readiness `true`, and `fallbackAction: wait`. A generic
+`No files to review` reply, incremental no-change reply, rate-limit notice,
+free-tier notice, malformed count, incomplete page set, file-set mismatch,
+stale comment, or changed head fails closed and does not suppress a review
+request.
+
+A head-bound closeout request uses this exact body:
 
 ```text
 @coderabbitai review
@@ -130,13 +143,16 @@ recognized repository agent bot, counts as `requested`. A marker quoted by an
 outside commenter does not suppress the real closeout request.
 
 After the optional CodeRabbit check becomes terminal, refresh the projection
-once. If the signal is `missing` or `stale`, re-resolve `headRefOid` immediately
-before posting and require it to equal the marker head. A `requested` signal
-suppresses ordinary duplicate posts for the same head. GitHub's issue-comment
-API has no conditional-create operation, so the marker is a detection and
-best-effort suppression mechanism rather than an atomic claim. The CodeRabbit
-check and review remain advisory: report a pending or rate-limited result as
-optional lag. The rate limit is a shared quota, not a per-PR allowance.
+once. Batch fixes before the push and wait for that automatic review attempt
+before requesting another review. If the signal is `missing` or `stale`,
+re-resolve `headRefOid` immediately before posting and require it to equal the
+marker head. Post at most one marked request for that head. A `requested`,
+`reviewed`, or `not_applicable` signal suppresses another post. GitHub's
+issue-comment API has no conditional-create operation, so the marker is a
+detection and best-effort suppression mechanism rather than an atomic claim.
+The CodeRabbit check and review remain advisory: report a pending or
+rate-limited result as optional lag. The rate limit is a shared quota, not a
+per-PR allowance.
 [ADR 0066](../adr/0066-coderabbit-replaces-bugbot-third-reviewer.md) records
 the two tiers: the free OSS tier meters per repository on a star-scaled 1–10
 reviews/hour, and a paid seat meters per developer identity across every PR
@@ -286,8 +302,8 @@ Expected top-level fields:
     "ready": false,
     "items": [
       {
-        "kind": "review",
-        "name": "Cursor Bugbot",
+        "kind": "check",
+        "name": "GraphQL schema diff",
         "state": "pending",
         "required": false,
         "url": "https://github.com/..."
@@ -307,10 +323,13 @@ Expected top-level fields:
       "fallbackAction": "wait"
     },
     "codeRabbitReviewSignal": {
-      "ready": false,
+      "ready": true,
       "required": false,
-      "state": "missing",
-      "fallbackAction": "request_review_once_for_head_after_optional_check"
+      "state": "not_applicable",
+      "fallbackAction": "wait",
+      "reason": "path_filters",
+      "sourceUrl": "https://github.com/...",
+      "ignoredPaths": ["docs/evals/example.jsonl"]
     },
     "reviewCommentReplies": {
       "ready": true,
@@ -337,8 +356,8 @@ Expected top-level fields:
     }
   ],
   "codexReviewSignal": "in_flight",
-  "codeRabbitReviewSignal": "missing",
-  "summary": "Required check trunk is still pending; Cursor Bugbot is advisory and still pending."
+  "codeRabbitReviewSignal": "not_applicable",
+  "summary": "Required check trunk is still pending; one advisory check is still pending."
 }
 ```
 
@@ -400,7 +419,9 @@ Field expectations:
   contains a Run ID, its full commit range ends at the current head, and its
   comment update time is at or after the current head update time. Empty
   reply-only reviews, skipped runs, and rate-limit notices do not count. A
-  head-bound request is `requested` until a real run lands.
+  head-bound request is `requested` until a real run lands. A validated
+  path-filter skip is `not_applicable`; its gate includes `reason`, `sourceUrl`,
+  and `ignoredPaths` as described above.
 - `requiredStatusContexts[]`: required check contexts from classic branch
   protection or branch rulesets. Ruleset-derived entries include status-check
   rules and required-workflow rules when their check names are present in the
@@ -450,14 +471,15 @@ Field expectations:
    context; deployment/status bot comments may be informational.
 7. If ready-state `ready` is false, fix or wait only on `required.blockers` and
    required `gates`.
-8. After the optional CodeRabbit check becomes terminal, refresh once. If
-   `gates.codeRabbitReviewSignal.state` is `missing` or `stale`, post one
-   head-bound closeout request with the body above. Do not post when the state
-   is `requested` or `reviewed`.
-9. Report optional lag separately, especially Cursor Bugbot lag and visibly
-   in-progress review-producing workflows. If you are still watching the PR when
-   one finishes, rerun `pr:feedback-state` to catch late feedback; do not treat
-   the optional workflow status itself as a blocker.
+8. After a batched fix push, wait for the optional automatic CodeRabbit check
+   to become terminal, then refresh once. If
+   `gates.codeRabbitReviewSignal.state` is `missing` or `stale`, recheck the
+   head and post at most one marked closeout request for that head. Do not post
+   when the state is `requested`, `reviewed`, or `not_applicable`.
+9. Report visibly in-progress review-producing workflows as optional lag. If
+   you are still watching the PR when one finishes, rerun `pr:feedback-state`
+   to catch late feedback; do not treat the optional workflow status itself as
+   a blocker. Ignore legacy Cursor check lag; BugBot is disabled.
 10. After the CodeRabbit closeout step and any final optional-review refresh,
     rerun `pr:feedback-state` and then `pr:ready-state`. Signal all-clear only
     when feedback-state has no required blocker and ready-state `ready` is true
