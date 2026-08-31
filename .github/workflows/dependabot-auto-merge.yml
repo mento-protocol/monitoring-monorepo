@@ -26,7 +26,9 @@ on:
 permissions: {}
 
 concurrency:
-  group: dependabot-auto-merge-${{ github.event.workflow_run.head_branch }}
+  # Concurrency is evaluated before the job trust check. Isolate a fork run
+  # that reuses the Dependabot branch name from the base-repository writer.
+  group: dependabot-auto-merge-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: true
 
 jobs:
@@ -37,6 +39,7 @@ jobs:
     # checks out or executes upstream content.
     if: >-
       github.repository == 'mento-protocol/monitoring-monorepo' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
       github.event.workflow_run.name == 'Dependabot auto-merge candidate' &&
       github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.conclusion == 'success' &&

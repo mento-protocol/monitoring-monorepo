@@ -418,6 +418,8 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    `google-github-actions/auth`, stay on the human path. A read-only
    `pull_request` classifier verifies event identity and Dependabot metadata.
    A default-branch `workflow_run` writer treats that result as untrusted. It
+   binds pre-job concurrency to the upstream head repository and branch, so a
+   fork with the same branch name cannot cancel the trusted writer run. It
    re-reads the workflow, run, first-attempt jobs with `total_count`, current PR
    and head, the complete issue-event close history, all commits, all files,
    the current PR body's exact `Maintainer changes` marker, and the base's

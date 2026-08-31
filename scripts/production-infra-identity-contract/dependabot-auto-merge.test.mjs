@@ -29,6 +29,21 @@ const writerPath = path.join(
 const candidate = loadYaml(readFileSync(candidatePath, "utf8"));
 const writer = loadYaml(readFileSync(writerPath, "utf8"));
 
+assert.deepEqual(candidate.concurrency, {
+  group:
+    "dependabot-auto-merge-candidate-${{ github.event.pull_request.head.repo.full_name }}-${{ github.event.pull_request.number }}",
+  "cancel-in-progress": true,
+});
+assert.deepEqual(writer.concurrency, {
+  group:
+    "dependabot-auto-merge-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}",
+  "cancel-in-progress": true,
+});
+assert.match(
+  writer.jobs["auto-merge"].if,
+  /github\.event\.workflow_run\.head_repository\.full_name == github\.repository/u,
+);
+
 function stepScript(job, stepName) {
   assert(Array.isArray(job?.steps), `job for ${stepName} must contain steps`);
   const matches = job.steps.filter((step) => step.name === stepName);

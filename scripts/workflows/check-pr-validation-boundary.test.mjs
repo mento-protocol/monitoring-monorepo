@@ -350,12 +350,16 @@ test("structural mutations fail closed at each M2 boundary", () => {
 
 test("Dependabot auto-merge workflows may be absent only as one pair", () => {
   const root = structuralFixture();
-  rmSync(join(root, ".github/workflows/dependabot-auto-merge-candidate.yml"));
-  assert.deepEqual(checkStructuralRepository(root), [
-    "the Dependabot auto-merge classifier and writer workflows must be present or absent as one reviewed pair",
-  ]);
-  rmSync(join(root, ".github/workflows/dependabot-auto-merge.yml"));
-  assert.deepEqual(checkStructuralRepository(root), []);
+  try {
+    rmSync(join(root, ".github/workflows/dependabot-auto-merge-candidate.yml"));
+    assert.deepEqual(checkStructuralRepository(root), [
+      "the Dependabot auto-merge classifier and writer workflows must be present or absent as one reviewed pair",
+    ]);
+    rmSync(join(root, ".github/workflows/dependabot-auto-merge.yml"));
+    assert.deepEqual(checkStructuralRepository(root), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("PR-local reusable workflows stay inside cache and authority boundaries", () => {

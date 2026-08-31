@@ -55,7 +55,8 @@ Use two workflows as one pinned security boundary:
    minor or patch update, and no maintainer changes. Every dependency must use
    the GitHub-owned `actions/*` namespace. The list must not include
    `actions/create-github-app-token`. The workflow does not check out code,
-   read secrets, or write repository state.
+   read secrets, or write repository state. Its concurrency key binds the head
+   repository and PR number before cancellation can occur.
 2. `.github/workflows/dependabot-auto-merge.yml` runs on completion of the
    named classifier. It treats the event as an untrusted signal. It re-reads
    the workflow identity and run by ID. It requires the exact repository,
@@ -89,8 +90,9 @@ Use two workflows as one pinned security boundary:
    after it.
 5. The writer calls `PUT /repos/{owner}/{repo}/pulls/{number}/merge` with the
    verified head SHA and squash method. This synchronous endpoint cannot
-   enqueue or create an auto-merge request. Branch-scoped concurrency cancels
-   a stale writer when a newer run for the same Dependabot branch starts.
+   enqueue or create an auto-merge request. Head-repository-and-branch-scoped
+   concurrency cancels a stale writer when a newer run for the same Dependabot
+   branch starts. A fork that reuses the branch name has a separate group.
 
 The writer never checks out code, downloads artifacts, restores caches, or
 executes pull-request content. `pnpm tf:test` pins the parsed semantics of both

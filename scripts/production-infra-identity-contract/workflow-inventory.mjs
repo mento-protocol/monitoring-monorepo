@@ -116,9 +116,9 @@ const DEPENDABOT_AUTO_MERGE_WRITER_WORKFLOW =
 // the classifier attempt before it can merge. Generate new hashes only after
 // reviewing both complete parsed workflows together.
 const DEPENDABOT_AUTO_MERGE_CANDIDATE_SEMANTIC_SHA256 =
-  "47416768116736584c78a544da85216911d246c4663aaf49708e078cfd94f98d";
+  "998885c0891953685abff7474292f0d6946808ed2e7b55218215362f7fc8d230";
 const DEPENDABOT_AUTO_MERGE_WRITER_SEMANTIC_SHA256 =
-  "c6dd83e6b989ad120848159a86ab8ac6b021d74ac868edfa7a3b060ecac7edbe";
+  "566cf5a6f8ab71a55397eebfd89d20bd4310f7a9acda550834f929001ef251e5";
 const PEG_POLICY_PUBLICATION_CONSOLE_URL =
   "https://console.cloud.google.com/home/dashboard?project=mento-monitoring";
 const PROTECTED_APPLY_WORKFLOWS = [

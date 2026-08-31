@@ -13,7 +13,9 @@ on:
 permissions: {}
 
 concurrency:
-  group: dependabot-auto-merge-candidate-${{ github.event.pull_request.head.ref }}
+  # Include the head repository before cancellation can run. A fork that reuses
+  # the Dependabot branch name must not cancel the base-repository classifier.
+  group: dependabot-auto-merge-candidate-${{ github.event.pull_request.head.repo.full_name }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
