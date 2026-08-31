@@ -669,8 +669,8 @@ live rulesets through the human Administration-read surface. Require:
 - one approved dedicated Dependabot merge App Integration bypass in `exempt`
   mode;
 - no shared Actions App, built-in Dependabot App, local-agent App,
-  administrator, role, user, or third bypass.
-  Require the `dependabot-merge` Environment to keep an empty
+  administrator, role, user, or third bypass;
+- the `dependabot-merge` Environment keeps an empty
   `protection_rules` list, one exact custom `main` branch policy, and only the
   two approved secret metadata names.
 
