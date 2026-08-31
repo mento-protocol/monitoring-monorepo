@@ -64,6 +64,9 @@ feedback-runtime pins.
   0064's three-merge sequence for moves.
 - **Gate routing pins.** Stub-repo tests require
   `$script_source_dir == $repo_root/scripts`.
+  The review-process metrics arm pins its CLI, core, signal collector, legacy
+  projection, report, test, and sanitized CodeRabbit fixture so any schema-v2
+  evidence change runs the offline suite.
   `bootstrap/codex-cloud-setup.{sh,test.sh}` pair for offline tests.
   `sentry/autofix/sentry-autofix-refused-inventory.mjs` routes
   `pnpm sentry:autofix:{run-record,finalize}:test`. Exact

@@ -3,7 +3,7 @@ title: Quick Commands
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-29
+last_verified: 2026-08-31
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -75,7 +75,9 @@ pnpm agent:context-budget --strict # Enforce root, scoped-file, and aggregate-ro
 pnpm --silent pr:feedback-state --pr 123 --json  # Normalize unresolved/reply-required feedback before all-clear
 pnpm pr:ready-state --pr 123 --json              # Final current-head required-readiness probe
 pnpm pr:merge --pr 123   # Human-only sanctioned merge; --not-ready-reason "<why>" overrides
-node scripts/pr/review-process-metrics.mjs --prs <pr1,pr2,...> --output <result.json>  # Collect a new cohort after defining its boundary and tracking issue
+# Collect a manual monthly review cohort. The UTC interval is half-open: [since, until).
+# Write live reports to a new path outside the repo. Do not commit them.
+node scripts/pr/review-process-metrics.mjs --since <YYYY-MM-01T00:00:00Z> --until <next-YYYY-MM-01T00:00:00Z> --output /private/tmp/review-process-metrics-<YYYY-MM>.json
 pnpm lockfile:lint                 # Fail-closed integrity/registry/override-floor check; no install
 pnpm skew:check                    # Fail on dependency skew vs pnpm catalog; no install
 pnpm sanitize:test                 # Fixture-test scripts/sanitize-terraform-output.sh secret redaction

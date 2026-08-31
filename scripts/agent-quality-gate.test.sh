@@ -12557,7 +12557,22 @@ assert_contains "- pnpm agent:review-materiality:test (agent review materiality 
 run_gate "scripts/pr/review-process-metrics.mjs"
 assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-process metrics collector changed)"
 
+run_gate "scripts/pr/review-process-metrics-core.mjs"
+assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-process metrics collector changed)"
+
+run_gate "scripts/pr/review-process-metrics-legacy.mjs"
+assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-process metrics collector changed)"
+
+run_gate "scripts/pr/review-process-metrics-report.mjs"
+assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-process metrics collector changed)"
+
+run_gate "scripts/pr/review-process-metrics-signals.mjs"
+assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-process metrics collector changed)"
+
 run_gate "scripts/pr/review-process-metrics.test.mjs"
+assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-process metrics collector changed)"
+
+run_gate "scripts/pr/fixtures/review-process-metrics-coderabbit.json"
 assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-process metrics collector changed)"
 
 # The CodeRabbit config pin (ADR 0066). The config is a repo-root .yaml, so it

@@ -1,0 +1,175 @@
+{
+  "source": "sanitized observed CodeRabbit payload shapes",
+  "pr": {
+    "number": 42,
+    "title": "Sanitized review fixture",
+    "html_url": "https://github.com/example/repo/pull/42",
+    "created_at": "2026-08-01T10:00:00Z",
+    "merged_at": "2026-08-01T12:00:00Z",
+    "changed_files": 2,
+    "additions": 20,
+    "deletions": 4,
+    "head": {
+      "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "user": { "login": "maintainer", "type": "User" }
+  },
+  "issueComments": [
+    {
+      "id": 101,
+      "html_url": "https://github.com/example/repo/pull/42#issuecomment-101",
+      "created_at": "2026-08-01T10:20:00Z",
+      "updated_at": "2026-08-01T10:20:00Z",
+      "user": { "login": "coderabbitai[bot]", "type": "Bot" },
+      "body": "<!-- This is an auto-generated comment: summarize by coderabbit.ai -->\n<!-- recent_review_start -->\nNo actionable comments were generated in the recent review.\n**Run ID**: `11111111-2222-3333-4444-555555555555`\nReviewing files between aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa and bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.\n<!-- recent_review_end -->"
+    },
+    {
+      "id": 102,
+      "html_url": "https://github.com/example/repo/pull/42#issuecomment-102",
+      "created_at": "2026-08-01T10:21:00Z",
+      "user": { "login": "coderabbitai[bot]", "type": "Bot" },
+      "body": "<!-- This is an auto-generated comment: review paused by coderabbit.ai -->\n> ## Reviews paused\n> Reviews paused due to an influx of new commits."
+    },
+    {
+      "id": 103,
+      "html_url": "https://github.com/example/repo/pull/42#issuecomment-103",
+      "created_at": "2026-08-01T10:22:00Z",
+      "user": { "login": "coderabbitai[bot]", "type": "Bot" },
+      "body": "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->\n> ## Review limit reached"
+    },
+    {
+      "id": 104,
+      "html_url": "https://github.com/example/repo/pull/42#issuecomment-104",
+      "created_at": "2026-08-01T10:23:00Z",
+      "user": { "login": "coderabbitai[bot]", "type": "Bot" },
+      "body": "<!-- This is an auto-generated comment: skip review by coderabbit.ai -->\n> ## Review skipped\n> Review was skipped due to path filters"
+    },
+    {
+      "id": 105,
+      "html_url": "https://github.com/example/repo/pull/42#issuecomment-105",
+      "created_at": "2026-08-01T10:24:00Z",
+      "user": { "login": "coderabbitai[bot]", "type": "Bot" },
+      "body": "<!-- This is an auto-generated comment: skip review by coderabbit.ai -->\n> This repository does not receive automatic reviews because it has fewer than 10 stars."
+    },
+    {
+      "id": 106,
+      "html_url": "https://github.com/example/repo/pull/42#issuecomment-106",
+      "created_at": "2026-08-01T10:25:00Z",
+      "author_association": "OWNER",
+      "user": { "login": "maintainer", "type": "User" },
+      "body": "@coderabbitai review\n\n<!-- coderabbit-final-head-review:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -->"
+    },
+    {
+      "id": 107,
+      "html_url": "https://github.com/example/repo/pull/42#issuecomment-107",
+      "created_at": "2026-08-01T10:26:00Z",
+      "author_association": "OWNER",
+      "user": { "login": "maintainer", "type": "User" },
+      "body": "@coderabbitai review"
+    }
+  ],
+  "reviews": [
+    {
+      "id": 201,
+      "html_url": "https://github.com/example/repo/pull/42#pullrequestreview-201",
+      "submitted_at": "2026-08-01T10:30:00Z",
+      "commit_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state": "COMMENTED",
+      "user": { "login": "coderabbitai[bot]", "type": "Bot" },
+      "body": "**Run ID**: `11111111-2222-3333-4444-555555555555`"
+    }
+  ],
+  "reviewComments": [
+    {
+      "id": 301,
+      "html_url": "https://github.com/example/repo/pull/42#discussion_r301",
+      "created_at": "2026-08-01T10:31:00Z",
+      "path": "src/fixed.ts",
+      "user": { "login": "coderabbitai[bot]", "type": "Bot" },
+      "body": "_🟠 Major_\n<!-- cr-indicator-types:potential_issue -->"
+    },
+    {
+      "id": 302,
+      "in_reply_to_id": 301,
+      "html_url": "https://github.com/example/repo/pull/42#discussion_r302",
+      "created_at": "2026-08-01T10:40:00Z",
+      "path": "src/fixed.ts",
+      "user": { "login": "maintainer", "type": "User" },
+      "body": "Fixed in `abcdef1` — added the missing guard."
+    },
+    {
+      "id": 303,
+      "html_url": "https://github.com/example/repo/pull/42#discussion_r303",
+      "created_at": "2026-08-01T10:32:00Z",
+      "path": "src/wont-fix.ts",
+      "user": { "login": "coderabbitai[bot]", "type": "Bot" },
+      "body": "_🟡 Minor_\n<!-- cr-indicator-types:potential_issue -->"
+    },
+    {
+      "id": 304,
+      "in_reply_to_id": 303,
+      "html_url": "https://github.com/example/repo/pull/42#discussion_r304",
+      "created_at": "2026-08-01T10:41:00Z",
+      "path": "src/wont-fix.ts",
+      "user": { "login": "maintainer", "type": "User" },
+      "body": "Won't fix: the canonical contract requires this behavior."
+    },
+    {
+      "id": 305,
+      "html_url": "https://github.com/example/repo/pull/42#discussion_r305",
+      "created_at": "2026-08-01T10:33:00Z",
+      "path": "src/conceded.ts",
+      "user": { "login": "coderabbitai[bot]", "type": "Bot" },
+      "body": "_🟡 Minor_\n<!-- cr-indicator-types:potential_issue -->"
+    },
+    {
+      "id": 306,
+      "in_reply_to_id": 305,
+      "html_url": "https://github.com/example/repo/pull/42#discussion_r306",
+      "created_at": "2026-08-01T10:42:00Z",
+      "path": "src/conceded.ts",
+      "user": { "login": "maintainer", "type": "User" },
+      "body": "Won't fix: the suggestion conflicts with the verified runtime order."
+    },
+    {
+      "id": 307,
+      "in_reply_to_id": 305,
+      "html_url": "https://github.com/example/repo/pull/42#discussion_r307",
+      "created_at": "2026-08-01T10:43:00Z",
+      "path": "src/conceded.ts",
+      "user": { "login": "coderabbitai[bot]", "type": "Bot" },
+      "body": "I withdraw this finding."
+    },
+    {
+      "id": 308,
+      "html_url": "https://github.com/example/repo/pull/42#discussion_r308",
+      "created_at": "2026-08-01T10:34:00Z",
+      "path": "src/unclassified.ts",
+      "user": { "login": "coderabbitai[bot]", "type": "Bot" },
+      "body": "_🟡 Minor_\n<!-- cr-indicator-types:potential_issue -->"
+    },
+    {
+      "id": 309,
+      "html_url": "https://github.com/example/repo/pull/42#discussion_r309",
+      "created_at": "2026-08-01T10:35:00Z",
+      "path": "src/unknown.ts",
+      "user": { "login": "cursor[bot]", "type": "Bot" },
+      "body": "<!-- BUGBOT_BUG_ID: sanitized -->"
+    },
+    {
+      "id": 310,
+      "in_reply_to_id": 309,
+      "html_url": "https://github.com/example/repo/pull/42#discussion_r310",
+      "created_at": "2026-08-01T10:44:00Z",
+      "path": "src/unknown.ts",
+      "user": { "login": "maintainer", "type": "User" },
+      "body": "Handled after checking the current code."
+    }
+  ],
+  "commits": [
+    {
+      "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "commit": { "committer": { "date": "2026-08-01T10:10:00Z" } }
+    }
+  ]
+}
