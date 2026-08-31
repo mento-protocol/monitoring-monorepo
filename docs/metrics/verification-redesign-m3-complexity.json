@@ -29,7 +29,7 @@
     {
       "path": "docs/adr/0078-staged-verification-redesign.md",
       "category": "doc",
-      "additions": 22,
+      "additions": 27,
       "deletions": 2
     },
     {
@@ -47,7 +47,7 @@
     {
       "path": "docs/pr-checklists/ci-workflow-gates.md",
       "category": "doc",
-      "additions": 24,
+      "additions": 27,
       "deletions": 2
     },
     {
@@ -81,6 +81,12 @@
       "deletions": 0
     },
     {
+      "path": "scripts/gate/routing-table/indexer-invariant-parity.test.mjs",
+      "category": "test",
+      "additions": 3,
+      "deletions": 3
+    },
+    {
       "path": "scripts/production-infra-identity-contract/routing.test.mjs",
       "category": "test",
       "additions": 6,
@@ -95,20 +101,20 @@
     {
       "path": "scripts/workflows/check-pr-validation-boundary.test.mjs",
       "category": "test",
-      "additions": 11,
+      "additions": 18,
       "deletions": 4
     },
     {
       "path": "scripts/workflows/check-ci-contract.mjs",
       "category": "check",
-      "additions": 285,
+      "additions": 294,
       "deletions": 0,
       "countMethod": "physical-lines"
     },
     {
       "path": "scripts/workflows/check-ci-contract.test.mjs",
       "category": "test",
-      "additions": 492,
+      "additions": 499,
       "deletions": 0,
       "countMethod": "physical-lines"
     }
@@ -120,19 +126,19 @@
       "net": 65
     },
     "check": {
-      "additions": 289,
+      "additions": 298,
       "deletions": 2,
-      "net": 287
+      "net": 296
     },
     "test": {
-      "additions": 509,
-      "deletions": 10,
-      "net": 499
+      "additions": 526,
+      "deletions": 13,
+      "net": 513
     },
     "doc": {
-      "additions": 66,
+      "additions": 74,
       "deletions": 19,
-      "net": 47
+      "net": 55
     },
     "package": {
       "additions": 24,
@@ -140,9 +146,9 @@
       "net": 5
     },
     "all": {
-      "additions": 983,
-      "deletions": 80,
-      "net": 903
+      "additions": 1017,
+      "deletions": 83,
+      "net": 934
     }
   },
   "replacementSpecific": {
@@ -151,7 +157,7 @@
       "files": [
         {
           "path": "scripts/workflows/check-ci-contract.mjs",
-          "additions": 285
+          "additions": 294
         },
         {
           "path": ".github/workflows/ci.yml",
@@ -170,41 +176,45 @@
           "additions": 2
         }
       ],
-      "total": 386
+      "total": 395
     },
     "testAdditions": {
       "definition": "Replacement-specific test additions, including additions to changed test files.",
       "files": [
         {
           "path": "scripts/workflows/check-ci-contract.test.mjs",
-          "additions": 492
+          "additions": 499
         },
         {
           "path": "scripts/workflows/check-pr-validation-boundary.test.mjs",
-          "additions": 11
+          "additions": 18
         },
         {
           "path": "scripts/production-infra-identity-contract/routing.test.mjs",
           "additions": 6
+        },
+        {
+          "path": "scripts/gate/routing-table/indexer-invariant-parity.test.mjs",
+          "additions": 3
         }
       ],
-      "total": 509
+      "total": 526
     },
-    "testToImplementationRatio": 1.3186528497409327,
+    "testToImplementationRatio": 1.3316455696202532,
     "limits": {
-      "checkerPhysicalLines": 285,
+      "checkerPhysicalLines": 294,
       "checkerPhysicalLinesUnder300": true,
-      "testPhysicalLines": 492,
+      "testPhysicalLines": 499,
       "newReplacementFilePhysicalLineLimit": 500,
       "bothNewReplacementFilesUnder500": true,
-      "twiceImplementationAdditions": 772,
+      "twiceImplementationAdditions": 790,
       "testAdditionsUnderTwiceImplementationAdditions": true
     }
   },
   "cumulativeM2AndM3": {
-    "additions": 2317,
-    "deletions": 1067,
-    "net": 1250
+    "additions": 2351,
+    "deletions": 1070,
+    "net": 1281
   },
   "phase0": {
     "countedFiles": 223,

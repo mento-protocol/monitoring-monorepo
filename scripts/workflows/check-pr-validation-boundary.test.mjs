@@ -286,6 +286,13 @@ test("structural mutations fail closed at each M2 boundary", () => {
     "",
     /dependency-free package-script validator/u,
   );
+  mutateOnce(
+    root,
+    ".github/workflows/ci.yml",
+    "      - name: Validate trusted package-script pins\n        # Runs before pnpm-install because the install executes PR-authored\n        # lifecycle hooks. It also pins the tf:test and issue:board:test aliases\n        # before this required job trusts them.\n        run: node scripts/check-agent-quality-gate-package-scripts.mjs\n",
+    "      - name: Validate trusted package-script pins\n        # Runs before pnpm-install because the install executes PR-authored\n        # lifecycle hooks. It also pins the tf:test and issue:board:test aliases\n        # before this required job trusts them.\n        run: node scripts/check-agent-quality-gate-package-scripts.mjs\n      - name: Validate trusted package-script pins\n        run: node scripts/check-agent-quality-gate-package-scripts.mjs\n",
+    /exactly one dependency-free package-script validator/u,
+  );
   // prettier-ignore
   mutateOnce(root, ".github/workflows/ci.yml", "  production-infra-contract:\n    name: Production infrastructure contract", "  production-infra-contract:\n    name: Production infrastructure contract\n    needs: changes", /direct dependency-free x64 pnpm cache writer/u);
   // prettier-ignore

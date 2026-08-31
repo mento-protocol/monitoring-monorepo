@@ -150,6 +150,11 @@ fallback selects every conditional job for an unknown path, a control-plane
 path, or an incomplete pull request file list. It does not add a planner,
 dynamic matrix, or second routing format.
 
+The pinned `dorny/paths-filter` action emits a documented count for each
+filter. The `routed` filter reuses the functional filters through YAML aliases.
+The fallback compares the `all` count with the `routed` and `ordinary` counts.
+The workflow does not export changed-file lists.
+
 The `pnpm ci:contract:test` command checks fixed job membership, conditional
 filters, pull request and `main` concurrency, aggregate failure states, and the
 M2 permission and cache boundary. The unconditional `Production infrastructure

@@ -217,6 +217,15 @@ export function workflowViolations(workflow, filters) {
     JSON.stringify(FILTER_NAMES.map((name) => filters?.[name]))
   )
     errors.push("routed filter is not the functional-filter union");
+  for (const name of [...FILTER_NAMES, "controlPlane"]) {
+    if (
+      (filters?.[name] ?? [])
+        .flat(Infinity)
+        .some((rule) => String(rule).startsWith("!"))
+    ) {
+      errors.push(`${name} must not use exclusion rules`);
+    }
+  }
   for (const [name, commands] of Object.entries(REQUIRED_COMMANDS)) {
     for (const [command, condition] of commands) {
       const step = (jobs[name]?.steps ?? []).find(

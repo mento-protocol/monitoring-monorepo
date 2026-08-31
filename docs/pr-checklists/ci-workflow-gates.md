@@ -73,6 +73,9 @@ The command checks these contracts without defining a second runtime router:
 - Every functional filter has positive, negative, rename, and deletion
   fixtures. Separate unknown-path and control-plane fixtures prove that those
   paths select every conditional job.
+- The pinned path-filter action emits one documented count per filter. Keep the
+  `all`, `routed`, and `ordinary` count comparison aligned with the functional
+  filter aliases. Do not export changed-file lists.
 - Pull request runs cancel stale heads. Each `main` SHA uses a distinct,
   non-cancelling concurrency group.
 - Failed, cancelled, missing, unexpected, and disallowed skipped results fail

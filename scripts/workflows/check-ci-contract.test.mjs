@@ -198,6 +198,8 @@ const STATIC_MUTATIONS = [
       filters.routed = [];
     },
   ],
+  // prettier-ignore
+  ["functional exclusion rule", /ui must not use exclusion rules/u, ({ filters }) => filters.ui.push("!ui-dashboard/generated/**")],
   [
     "missing aggregate need",
     /ci\.needs misses scripts/u,
@@ -372,6 +374,11 @@ test("ordinary package and documentation diffs keep affected selection", async (
   ]);
   assert.equal(unroutedDocsAsset.forceAll, true);
   assert.deepEqual(unroutedDocsAsset.unknown, ["docs/notes/example.json"]);
+  const narrowed = structuredClone(LIVE.filters);
+  narrowed.ui = ["ui-dashboard/src/**"];
+  narrowed.routed = FILTER_NAMES.map((name) => narrowed[name]);
+  // prettier-ignore
+  assertAllConditionalJobsUseForceAll(await forceAllForChanges(narrowed, [changed("ui-dashboard/public/logo.svg")]));
 });
 
 test("overlapping functional filters count one changed path once", async () => {
