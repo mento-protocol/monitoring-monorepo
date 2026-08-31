@@ -286,7 +286,7 @@ Expected top-level fields:
     "ready": false,
     "items": [
       {
-        "kind": "review",
+        "kind": "check",
         "name": "Cursor Bugbot",
         "state": "pending",
         "required": false,
