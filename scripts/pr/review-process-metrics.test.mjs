@@ -611,12 +611,17 @@ test("attributes CodeRabbit run IDs only to CodeRabbit-authored records", () => 
 
 test("counts review runs only from canonical CodeRabbit completion evidence", () => {
   const value = structuredClone(fixture);
-  const completedBody = (wrapper, runId, outerLines = []) =>
+  const completedBody = (
+    wrapper,
+    runId,
+    outerLines = [],
+    completionSuffix = "",
+  ) =>
     [
       `<!-- This is an auto-generated comment: ${wrapper} by coderabbit.ai -->`,
       ...outerLines,
       "<!-- recent_review_start -->",
-      "No actionable comments were generated in the recent review.",
+      `No actionable comments were generated in the recent review.${completionSuffix}`,
       `**Run ID**: \`${runId}\``,
       "<!-- recent_review_end -->",
     ].join("\n");
@@ -689,13 +694,43 @@ test("counts review runs only from canonical CodeRabbit completion evidence", ()
         "<!-- recent_review_end -->",
       ].join("\n"),
     },
+    {
+      id: 419,
+      user: { login: "coderabbitai[bot]", type: "Bot" },
+      body: completedBody(
+        "summarize",
+        "abababab-abab-abab-abab-abababababab",
+        [],
+        " 🎉",
+      ),
+    },
+    {
+      id: 420,
+      user: { login: "coderabbitai[bot]", type: "Bot" },
+      body: completedBody(
+        "summarize",
+        "bcbcbcbc-bcbc-bcbc-bcbc-bcbcbcbcbcbc",
+        [],
+        " 🚀",
+      ),
+    },
+    {
+      id: 421,
+      user: { login: "coderabbitai[bot]", type: "Bot" },
+      body: completedBody(
+        "summarize",
+        "cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd",
+        [],
+        " Review complete.",
+      ),
+    },
   );
 
   const signals = summarizeFixture(value).evidence.signals;
-  assert.equal(signals.reviewRuns.count, 3);
+  assert.equal(signals.reviewRuns.count, 4);
   assert.deepEqual(
     signals.reviewRuns.evidence.map(({ id }) => id),
-    ["101", "410", "411"],
+    ["101", "410", "411", "419"],
   );
   assert.equal(signals.pauses.count, 2);
   assert.equal(signals.rateLimits.count, 2);
@@ -1084,6 +1119,41 @@ test("uses complete clauses for suffix negation and although contrasts", () => {
     [
       { id: "216", finding: false, findingSignal: null },
       { id: "217", finding: true, findingSignal: "medium severity" },
+    ],
+  );
+});
+
+test("applies clause-aware negation to priority badges", () => {
+  const value = structuredClone(fixture);
+  value.reviews.push(
+    {
+      id: 220,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "None — no [P1]/[P2]/[P3] findings.",
+    },
+    {
+      id: 221,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "None — no [P1]/[P2]/[P3] findings. [P1] The parser still drops a valid record.",
+    },
+  );
+
+  const records = summarizeFixture(
+    value,
+  ).evidence.byBot.claude.surfaces.review_submissions.evidence.filter(
+    ({ id }) => id === "220" || id === "221",
+  );
+  assert.deepEqual(
+    records.map(({ id, finding, findingSignal }) => ({
+      id,
+      finding,
+      findingSignal: findingSignal ?? null,
+    })),
+    [
+      { id: "220", finding: false, findingSignal: null },
+      { id: "221", finding: true, findingSignal: "[P1]" },
     ],
   );
 });

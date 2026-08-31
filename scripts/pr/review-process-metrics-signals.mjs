@@ -79,7 +79,7 @@ function completedCodeRabbitReviewRunIds(value, surface) {
 
   const block = body.slice(blockStart, blockEnd);
   if (
-    !/(?:^|\n)\s*>?\s*No actionable comments were generated in the recent review\.\s*(?=\n|$)/i.test(
+    !/(?:^|\n)[ \t]*>?[ \t]*No actionable comments were generated in the recent review\.(?:[ \t]+🎉)?[ \t]*(?=\r?(?:\n|$))/i.test(
       block,
     )
   ) {

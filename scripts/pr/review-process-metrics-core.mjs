@@ -128,6 +128,10 @@ function affirmativeSeverity(body) {
   );
 }
 
+function affirmativePriority(body) {
+  return affirmativeOccurrence(body, /\[[Pp][0-3]\]/g);
+}
+
 function actionableFindingSignal(value, bot, { reviewState = null } = {}) {
   const body = String(value ?? "");
   if (String(reviewState ?? "").toUpperCase() === "CHANGES_REQUESTED") {
@@ -144,7 +148,7 @@ function actionableFindingSignal(value, bot, { reviewState = null } = {}) {
   }
   if (bot === "cursor") return body.match(/\bBUGBOT_BUG_ID\b/)?.[0] ?? null;
   return (
-    body.match(/\[[Pp][0-3]\]/)?.[0] ??
+    affirmativePriority(body) ??
     affirmativeSeverity(body) ??
     affirmativeChangesRequested(body)
   );
