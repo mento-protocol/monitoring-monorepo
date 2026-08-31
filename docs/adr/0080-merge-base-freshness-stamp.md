@@ -67,7 +67,11 @@ head, labelled with which binding produced it (`merge-base:<oid>` or
    whether the command plan's text names the base ref or its resolved tip at
    all, rather than keeping a list of tip-reading commands. A future verb that
    passes the base down inherits tip binding without anyone remembering to
-   extend a list, and a false positive costs only the stricter binding.
+   extend a list, and a false positive costs only the stricter binding. The
+   search matches the `printf %q` spelling of the base as well as its raw text,
+   because that is what the plan actually carries: every verb interpolates the
+   base through `shellQuote`, and git permits characters in a ref name that
+   `%q` escapes, so `origin/qu'ote` reaches the plan as `origin/qu\'ote`.
 3. **The binding kind is part of the field.** A tip-bound stamp and a
    merge-base-bound stamp cannot be read as each other on a branch whose base
    has not advanced, where the two OIDs coincide.

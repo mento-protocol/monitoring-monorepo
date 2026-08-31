@@ -10264,6 +10264,97 @@ STUB
 )
 rm -rf "$tipbound_stamp_repo"
 
+# The plan carries the `printf %q` SPELLING of the base, not its raw text, so a
+# base ref that needs escaping is not the string the predicate searches for.
+# Git permits `'` in a ref name, and `origin/qu'ote` reaches the plan as
+# `origin/qu\'ote`. Before the predicate quoted its needles, the ADR reminder
+# below was invisible to it and this plan bound the merge-base while reading
+# the tip.
+quoteref_stamp_repo="$(mktemp -d)"
+(
+  cd "$quoteref_stamp_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p .github/workflows bin tools
+  printf 'name: Metrics Bridge\n' > .github/workflows/metrics-bridge.yml
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-} ${2:-}" == "daemon status" ]]; then
+  echo "✖ Daemon stopped"
+  exit 1
+fi
+counter_file="${COUNTER_FILE:?}"
+count=0
+if [[ -f "$counter_file" ]]; then
+  count="$(cat "$counter_file")"
+fi
+printf '%s\n' "$((count + 1))" > "$counter_file"
+STUB
+  cat > bin/node <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--input-type=module" ||
+  "${1:-}" == -e ||
+  "${1:-}" == -p ||
+  "${1:-}" == */quality-gate-coordinator.mjs ||
+  "${1:-}" == */quality-gate-coordinator-environment.mjs ]]; then
+  exec "${REAL_NODE:?}" "$@"
+fi
+case "${1:-}" in
+  *"/scripts/gate/mapping.mjs") exec "${REAL_NODE:?}" "$@" ;;
+esac
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  chmod +x bin/node bin/pnpm tools/trunk
+  git add .
+  git commit -qm init
+  quoteref_one="$(git rev-parse --verify HEAD)"
+  # A ref name git accepts and `printf %q` must escape.
+  quoteref_name="origin/qu'ote"
+  git update-ref "refs/remotes/$quoteref_name" "$quoteref_one"
+  printf '# changed\n' >> .github/workflows/metrics-bridge.yml
+  counter="$quoteref_stamp_repo/.tmp/agent-quality-gate/trunk-count"
+  stamp_file="$quoteref_stamp_repo/.tmp/agent-quality-gate/last-success.stamp"
+
+  quoteref_gate() {
+    REAL_NODE="$(command -v node)" \
+      AGENT_QUALITY_GATE_COORDINATOR=0 \
+      COUNTER_FILE="$counter" \
+      PATH="$quoteref_stamp_repo/bin:$PATH" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+        --base "$quoteref_name" --run "$@" \
+        > "$output_file" 2>&1
+  }
+
+  quoteref_gate
+  # The escaped spelling is written out rather than recomputed, so a change in
+  # how the base is quoted fails here instead of passing vacuously.
+  grep -Fq -- "--base origin/qu\\'ote --head HEAD" "$output_file" ||
+    fail "the quoted-ref fixture did not emit the %q spelling it means to test"
+  grep -q '^stamp=v3.*base=tip:[a-f0-9]\{40\}' "$stamp_file" ||
+    fail "a base ref needing shell escaping did not keep tip binding"
+
+  # Negative control: the fixture must be able to reuse before the advance.
+  quoteref_gate --skip-if-fresh
+  [[ "$(cat "$counter")" == "1" ]] ||
+    fail "an exact repeat did not reuse the quoted-ref fixture's fresh success"
+
+  quoteref_two="$(git commit-tree \
+    "$(git rev-parse --verify "${quoteref_one}^{tree}")" \
+    -p "$quoteref_one" -m "base advance")"
+  git update-ref "refs/remotes/$quoteref_name" "$quoteref_two"
+  [[ "$(git merge-base "$quoteref_name" HEAD)" == "$quoteref_one" ]] ||
+    fail "the quoted-ref fixture moved the merge-base it meant to hold still"
+  quoteref_gate --skip-if-fresh
+  [[ "$(cat "$counter")" == "2" ]] ||
+    fail "a shell-escaped base ref reused its stamp across a tip advance"
+)
+rm -rf "$quoteref_stamp_repo"
+
 # The peg registry check is the third tip reader. It compares the working policy
 # against the one at the base tip, and until its verb passed `--base-ref` the
 # emitted command named the base nowhere, so the predicate could not see it and

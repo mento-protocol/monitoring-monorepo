@@ -7452,6 +7452,7 @@ gate_command_plan_reads_base() {
   local plan_file="$1"
   local base_tip="$2"
   local st=0
+  local quoted_base_ref quoted_base_tip
   # Anything unexpected answers "yes". The caller then keeps the stricter tip
   # binding, so an unreadable plan can never buy a wider reuse window.
   [[ -f "$plan_file" ]] || return 0
@@ -7472,8 +7473,22 @@ gate_command_plan_reads_base() {
   # gate's base, make its verb name it instead — see
   # `add_peg_registry_integrity_check`. Listing a command here only ever makes
   # the binding STRICTER, so a stale entry costs a re-run, never a missed check.
+  # The plan carries the `printf %q` SPELLING of the base, not its raw text:
+  # every verb that names the base interpolates it through `shellQuote`
+  # (scripts/gate/mapping/shell-quote.mjs), which exists to reproduce
+  # `printf %q`. Git permits `'` and `"` in ref names, so a base like
+  # `origin/qu'ote` reaches the plan as `origin/qu\'ote` and a fixed-string
+  # search for the raw ref misses it — selecting merge-base binding for a plan
+  # that does read the tip. Ask THIS bash for the spelling instead of
+  # reimplementing the escape table. A ref needing no escaping quotes to
+  # itself, so the plain case matches exactly as before. The base tip is a
+  # resolved OID by the time this runs, hence already its own spelling; it is
+  # quoted anyway so the guarantee does not depend on a caller's early return.
+  printf -v quoted_base_ref '%q' "$base_ref"
+  printf -v quoted_base_tip '%q' "$base_tip"
   grep -qF \
-    -e "$base_ref" -e "$base_tip" \
+    -e "$base_ref" -e "$quoted_base_ref" \
+    -e "$base_tip" -e "$quoted_base_tip" \
     -e 'docs:navigation-eval -- --validate' \
     -e 'scripts/agent-autoreview.test.sh' \
     -e 'agent:autoreview:test' \
