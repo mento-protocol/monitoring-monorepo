@@ -167,14 +167,22 @@ function codeRabbitCommentTimestamp(comment) {
   );
 }
 
-function hasOneMatch(body, pattern) {
+function singleMatch(body, pattern) {
   const flags = pattern.flags.includes("g")
     ? pattern.flags
     : `${pattern.flags}g`;
-  return (
-    [...String(body ?? "").matchAll(new RegExp(pattern.source, flags))]
-      .length === 1
-  );
+  const matches = [
+    ...String(body ?? "").matchAll(new RegExp(pattern.source, flags)),
+  ];
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function matchesInCanonicalOrder(matches) {
+  return matches.every((match, index) => {
+    if (index === 0) return true;
+    const previous = matches[index - 1];
+    return previous.index + previous[0].length <= match.index;
+  });
 }
 
 function pathFilterSkipCandidate(comment, headUpdatedAt) {
@@ -190,21 +198,34 @@ function pathFilterSkipCandidate(comment, headUpdatedAt) {
   }
 
   const body = String(comment.body ?? "");
+  const summaryMatch = singleMatch(body, CODERABBIT_SUMMARY_MARKER);
+  const skipStartMatch = singleMatch(body, CODERABBIT_SKIP_REVIEW_MARKER);
+  const skipTextMatch = singleMatch(body, CODERABBIT_PATH_FILTER_SKIP_TEXT);
+  const ignoredBlockMatch = singleMatch(body, CODERABBIT_IGNORED_FILES_BLOCK);
+  const runMarkerMatch = singleMatch(body, CODERABBIT_REVIEW_RUN_MARKER);
+  const skipEndMatch = singleMatch(body, CODERABBIT_SKIP_REVIEW_END_MARKER);
   if (
-    !hasOneMatch(body, CODERABBIT_SUMMARY_MARKER) ||
-    !hasOneMatch(body, CODERABBIT_SKIP_REVIEW_MARKER) ||
-    !hasOneMatch(body, CODERABBIT_SKIP_REVIEW_END_MARKER) ||
-    !hasOneMatch(body, CODERABBIT_PATH_FILTER_SKIP_TEXT) ||
-    !hasOneMatch(body, CODERABBIT_REVIEW_RUN_MARKER)
+    !summaryMatch ||
+    !skipStartMatch ||
+    !skipTextMatch ||
+    !ignoredBlockMatch ||
+    !runMarkerMatch ||
+    !skipEndMatch ||
+    !matchesInCanonicalOrder([
+      summaryMatch,
+      skipStartMatch,
+      skipTextMatch,
+      ignoredBlockMatch,
+      runMarkerMatch,
+      skipEndMatch,
+    ])
   ) {
     return null;
   }
 
-  const ignoredBlocks = [...body.matchAll(CODERABBIT_IGNORED_FILES_BLOCK)];
-  if (ignoredBlocks.length !== 1) return null;
-  const declaredCount = Number(ignoredBlocks[0][1]);
+  const declaredCount = Number(ignoredBlockMatch[1]);
   const ignoredPaths = [
-    ...ignoredBlocks[0][2].matchAll(CODERABBIT_IGNORED_FILE),
+    ...ignoredBlockMatch[2].matchAll(CODERABBIT_IGNORED_FILE),
   ]
     .map((match) => match[1])
     .filter(Boolean);

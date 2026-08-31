@@ -121,9 +121,10 @@ time must be at or after the head update time. Empty review records, skipped
 runs, and rate-limit notices do not count.
 
 A trusted path-filter skip is `not_applicable` only when the CodeRabbit comment
-contains the canonical summary, skip-start, and skip-end markers, the exact
-`Review was skipped due to path filters` text, one Run ID, and one non-empty
-counted ignored-file block. The comment update time must be at or after the
+contains exactly one summary marker followed by one skip-start marker and one
+skip-end marker. The exact `Review was skipped due to path filters` text, one
+non-empty counted ignored-file block, and one Run ID must appear in that order
+between the skip markers. The comment update time must be at or after the
 current-head update time. The probe then fetches every page of the current PR
 file list and re-reads the PR head. The ignored paths must be unique and equal
 the complete current file set, and all declared and API file counts must agree.
@@ -361,7 +362,7 @@ Expected top-level fields:
   ],
   "codexReviewSignal": "in_flight",
   "codeRabbitReviewSignal": "not_applicable",
-  "summary": "Required check trunk is still pending; one advisory check is still pending."
+  "summary": "1 required blocker(s) remain."
 }
 ```
 

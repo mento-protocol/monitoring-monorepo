@@ -3,6 +3,8 @@
  * Offline unit tests for scripts/pr/pr-ready-state.mjs parsing helpers.
  */
 
+import { readFileSync } from "node:fs";
+
 import {
   classifyCheck,
   findTopLevelBotComments,
@@ -2065,6 +2067,37 @@ test("summarizes not-ready state when blockers remain", () => {
   );
 });
 
+test("keeps the documented one-blocker summary aligned with readiness output", () => {
+  const summary = summarizeReadyState({
+    pr: {
+      ...basePr,
+      statusCheckRollup: [
+        { name: "trunk", status: "IN_PROGRESS", conclusion: null },
+      ],
+    },
+    reactions: [
+      {
+        content: "+1",
+        created_at: "2026-05-21T13:23:00Z",
+        user: { login: "chatgpt-codex-connector[bot]" },
+      },
+    ],
+    requiredStatusContexts: [{ context: "trunk", integrationId: null }],
+    requiredStatusContextsAvailable: true,
+  });
+  const readinessDoc = readFileSync(
+    new URL("../../docs/notes/pr-ready-state.md", import.meta.url),
+    "utf8",
+  );
+
+  assertEqual(summary.required.blockers.length, 1);
+  assertEqual(summary.summary, "1 required blocker(s) remain.");
+  assert(
+    readinessDoc.includes(`"summary": ${JSON.stringify(summary.summary)}`),
+    "expected the documented JSON example to use the one-blocker summary",
+  );
+});
+
 test("summarizes ready state when all blocking surfaces are clean", () => {
   const summary = summarizeReadyState({
     pr: {
@@ -2378,6 +2411,65 @@ test("rejects ambiguous CodeRabbit skip and no-review comments before file fetch
     }),
     null,
   );
+});
+
+test("rejects path-filter components outside the canonical ordered section", () => {
+  const paths = ["docs/evals/one.jsonl", "docs/evals/two.jsonl"];
+  const validBody = codeRabbitPathFilterSkipBody(paths);
+  const summaryMarker =
+    "<!-- This is an auto-generated comment: summarize by coderabbit.ai -->";
+  const skipStartMarker =
+    "<!-- This is an auto-generated comment: skip review by coderabbit.ai -->";
+  const skipText = "> Review was skipped due to path filters";
+  const runMarker = "> **Run ID**: `751277c1-32d3-480a-89bd-9f9ba9a7ab0f`";
+  const skipEndMarker =
+    "<!-- end of auto-generated comment: skip review by coderabbit.ai -->";
+  const ignoredBlock = [
+    "> <details>",
+    "> <summary>:no_entry: Files ignored due to path filters (2)</summary>",
+    ">",
+    ...paths.map((path) => `> * \`${path}\` is excluded by \`!docs/evals/**\``),
+    ">",
+    "> </details>",
+  ].join("\n");
+  const invalidBodies = [
+    {
+      name: "summary marker after skip start",
+      body: validBody.replace(
+        `${summaryMarker}\n${skipStartMarker}`,
+        `${skipStartMarker}\n${summaryMarker}`,
+      ),
+    },
+    {
+      name: "skip text before skip start",
+      body: validBody
+        .replace(`${skipText}\n`, "")
+        .replace(`${skipStartMarker}\n`, `${skipText}\n${skipStartMarker}\n`),
+    },
+    {
+      name: "ignored block after Run ID",
+      body: validBody
+        .replace(`${ignoredBlock}\n`, "")
+        .replace(`${runMarker}\n`, `${runMarker}\n${ignoredBlock}\n`),
+    },
+    {
+      name: "Run ID after skip end",
+      body: validBody
+        .replace(`${runMarker}\n`, "")
+        .replace(skipEndMarker, `${skipEndMarker}\n${runMarker}`),
+    },
+  ];
+
+  for (const invalid of invalidBodies) {
+    assertEqual(
+      findCodeRabbitPathFilterSkipCandidate({
+        issueComments: [codeRabbitSkipComment(invalid.body)],
+        headUpdatedAt: Date.parse("2026-08-30T08:40:00Z"),
+      }),
+      null,
+      invalid.name,
+    );
+  }
 });
 
 test("requires a complete exact current-file match for path-filter evidence", () => {
