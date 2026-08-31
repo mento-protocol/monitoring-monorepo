@@ -144,32 +144,53 @@ const STATIC_MUTATIONS = [
     /changes\.ui output changed/u,
     ({ workflow }) => (workflow.jobs.changes.outputs.ui = "true"),
   ],
-  [
-    "changed paths-filter pin",
-    /paths-filter action pin/u,
-    ({ workflow }) => {
-      pathFilterStep(workflow).uses = "dorny/paths-filter@unreviewed";
-    },
-  ],
-  [
-    "file-list output",
-    /must not export duplicated file lists/u,
-    ({ workflow }) => {
-      pathFilterStep(workflow).with["list-files"] = "json";
-    },
-  ],
+  // prettier-ignore
+  ["workflow runtime env", /workflow runtime/u, ({ workflow }) => { workflow.env = { NODE_OPTIONS: "--require=./hook.cjs" }; }],
+  // prettier-ignore
+  ["workflow run defaults", /workflow runtime/u, ({ workflow }) => { workflow.defaults = { run: { shell: "bash {0} || true" } }; }],
+  // prettier-ignore
+  ["changes job runtime env", /changes job runtime/u, ({ workflow }) => { workflow.jobs.changes.env = { NODE_OPTIONS: "--require=./hook.cjs" }; }],
+  // prettier-ignore
+  ["changes predecessor env writer", /changes steps/u, ({ workflow }) => { workflow.jobs.changes.steps.splice(1, 0, { run: "echo NODE_OPTIONS=--require=./hook.cjs >> $GITHUB_ENV" }); }],
+  // prettier-ignore
+  ["changes runner", /changes job runtime/u, ({ workflow }) => { workflow.jobs.changes["runs-on"] = "self-hosted"; }],
+  // prettier-ignore
+  ["changes permissions", /changes job runtime/u, ({ workflow }) => { workflow.jobs.changes.permissions = { contents: "write" }; }],
+  // prettier-ignore
+  ["package job runtime env", /ui job runtime/u, ({ workflow }) => { workflow.jobs.ui.env = { NODE_OPTIONS: "--require=./hook.cjs" }; }],
+  // prettier-ignore
+  ["package job run defaults", /ui job runtime/u, ({ workflow }) => { workflow.jobs.ui.defaults = { run: { shell: "bash {0} || true" } }; }],
+  // prettier-ignore
+  ["package predecessor env writer", /GITHUB_ENV/u, ({ workflow }) => { workflow.jobs.ui.steps.unshift({ run: "echo NODE_OPTIONS=--require=./hook.cjs >> $GITHUB_ENV" }); }],
+  // prettier-ignore
+  ["conditional job extra dependency", /ui job runtime/u, ({ workflow }) => { workflow.jobs.ui.needs = ["changes", "indexer"]; }],
+  // prettier-ignore
+  ["allowed package job env changed", /indexer job runtime/u, ({ workflow }) => { workflow.jobs.indexer.env.ENVIO_STRICT_START_BLOCK = "false"; }],
+  // prettier-ignore
+  ["changes checkout identity", /changes steps/u, ({ workflow }) => { workflow.jobs.changes.steps[0].uses = "actions/checkout@unreviewed"; }],
+  // prettier-ignore
+  ["changes timeline identity", /changes steps/u, ({ workflow }) => { workflow.jobs.changes.steps[2].uses = "Kesin11/actions-timeline@unreviewed"; }],
+  // prettier-ignore
+  ["changed paths-filter pin", /paths-filter action pin/u, ({ workflow }) => { pathFilterStep(workflow).uses = "dorny/paths-filter@unreviewed"; }],
+  // prettier-ignore
+  ["duplicated paths-filter step", /paths-filter step count/u, ({ workflow }) => { workflow.jobs.changes.steps.push(structuredClone(pathFilterStep(workflow))); }],
+  // prettier-ignore
+  ["conditional paths-filter step", /paths-filter step shape/u, ({ workflow }) => { pathFilterStep(workflow).if = false; }],
+  // prettier-ignore
+  ["nonfatal paths-filter step", /paths-filter step shape/u, ({ workflow }) => { pathFilterStep(workflow)["continue-on-error"] = true; }],
+  // prettier-ignore
+  ["paths-filter token override", /paths-filter inputs/u, ({ workflow }) => { pathFilterStep(workflow).with.token = ""; }],
+  // prettier-ignore
+  ["paths-filter base override", /paths-filter inputs/u, ({ workflow }) => { pathFilterStep(workflow).with.base = "HEAD"; }],
+  // prettier-ignore
+  ["file-list output", /paths-filter inputs/u, ({ workflow }) => { pathFilterStep(workflow).with["list-files"] = "json"; }],
   [
     "missing path filter",
     /path filters misses ui/u,
     ({ filters }) => delete filters.ui,
   ],
-  [
-    "unexpected path filter",
-    /path filters has unexpected rogue/u,
-    ({ filters }) => {
-      filters.rogue = ["rogue/**"];
-    },
-  ],
+  // prettier-ignore
+  ["unexpected path filter", /path filters has unexpected rogue/u, ({ filters }) => { filters.rogue = ["rogue/**"]; }],
   [
     "narrowed all filter",
     /all must match every path/u,
@@ -199,40 +220,24 @@ const STATIC_MUTATIONS = [
   ["null functional filter", /ui must be an array/u, ({ filters }) => { filters.ui = null; filters.routed = FILTER_NAMES.map((name) => filters[name]); }],
   // prettier-ignore
   ["scalar functional filter", /ui must be an array/u, ({ filters }) => { filters.ui = "ui-dashboard/**"; filters.routed = FILTER_NAMES.map((name) => filters[name]); }],
-  [
-    "missing aggregate need",
-    /ci\.needs misses scripts/u,
-    ({ workflow }) => {
-      workflow.jobs.ci.needs = workflow.jobs.ci.needs.filter(
-        (name) => name !== "scripts",
-      );
-    },
-  ],
-  [
-    "unexpected aggregate need",
-    /ci\.needs has unexpected rogue/u,
-    ({ workflow }) => {
-      workflow.jobs.ci.needs.push("rogue");
-    },
-  ],
-  [
-    "changed aggregate pin",
-    /alls-green action pin/u,
-    ({ workflow }) => {
-      aggregateStep(workflow).uses = "re-actors/alls-green@unreviewed";
-    },
-  ],
-  [
-    "missing allowed skip",
-    /allowed-skips misses ui/u,
-    ({ workflow }) => {
-      const gate = aggregateStep(workflow);
-      gate.with["allowed-skips"] = gate.with["allowed-skips"]
-        .split(",")
-        .filter((name) => name !== "ui")
-        .join(",");
-    },
-  ],
+  // prettier-ignore
+  ["missing aggregate need", /ci\.needs misses scripts/u, ({ workflow }) => { workflow.jobs.ci.needs = workflow.jobs.ci.needs.filter((name) => name !== "scripts"); }],
+  // prettier-ignore
+  ["unexpected aggregate need", /ci\.needs has unexpected rogue/u, ({ workflow }) => { workflow.jobs.ci.needs.push("rogue"); }],
+  // prettier-ignore
+  ["changed aggregate pin", /alls-green action pin/u, ({ workflow }) => { aggregateStep(workflow).uses = "re-actors/alls-green@unreviewed"; }],
+  // prettier-ignore
+  ["ci job runtime env", /ci job runtime/u, ({ workflow }) => { workflow.jobs.ci.env = { NODE_OPTIONS: "--require=./hook.cjs" }; }],
+  // prettier-ignore
+  ["ci predecessor env writer", /ci steps/u, ({ workflow }) => { workflow.jobs.ci.steps.unshift({ run: "echo NODE_OPTIONS=--require=./hook.cjs >> $GITHUB_ENV" }); }],
+  // prettier-ignore
+  ["ci runner", /ci job runtime/u, ({ workflow }) => { workflow.jobs.ci["runs-on"] = "self-hosted"; }],
+  // prettier-ignore
+  ["ci permissions", /ci job runtime/u, ({ workflow }) => { workflow.jobs.ci.permissions = { contents: "write" }; }],
+  // prettier-ignore
+  ["ci timeline identity", /ci steps/u, ({ workflow }) => { workflow.jobs.ci.steps[1].uses = "Kesin11/actions-timeline@unreviewed"; }],
+  // prettier-ignore
+  ["missing allowed skip", /allowed-skips misses ui/u, ({ workflow }) => { const gate = aggregateStep(workflow); gate.with["allowed-skips"] = gate.with["allowed-skips"].split(",").filter((name) => name !== "ui").join(","); }],
   [
     "unexpected allowed skip",
     /allowed-skips has unexpected changes/u,
@@ -254,22 +259,16 @@ const STATIC_MUTATIONS = [
       aggregateStep(workflow).with.jobs = "${{ toJSON(needs.shared) }}";
     },
   ],
-  [
-    "changed timeout",
-    /ui timeout-minutes must be 25/u,
-    ({ workflow }) => {
-      workflow.jobs.ui["timeout-minutes"] = 1;
-    },
-  ],
-  [
-    "nonblocking required command",
-    /ui no longer enforces VERCEL_DEPLOYMENT_ID/u,
-    ({ workflow }) => {
-      workflow.jobs.ui.steps.find((step) =>
-        step.name?.startsWith("Production build"),
-      )["continue-on-error"] = true;
-    },
-  ],
+  // prettier-ignore
+  ["changed timeout", /ui timeout-minutes must be 25/u, ({ workflow }) => { workflow.jobs.ui["timeout-minutes"] = 1; }],
+  // prettier-ignore
+  ["nonblocking required command", /ui no longer enforces VERCEL_DEPLOYMENT_ID/u, ({ workflow }) => { workflow.jobs.ui.steps.find((step) => step.name?.startsWith("Production build"))["continue-on-error"] = true; }],
+  // prettier-ignore
+  ["required command runtime env", /ui no longer enforces VERCEL_DEPLOYMENT_ID/u, ({ workflow }) => { workflow.jobs.ui.steps.find((step) => step.name?.startsWith("Production build")).env = { NODE_OPTIONS: "--require=./hook.cjs" }; }],
+  // prettier-ignore
+  ["required command shell", /ui no longer enforces VERCEL_DEPLOYMENT_ID/u, ({ workflow }) => { workflow.jobs.ui.steps.find((step) => step.name?.startsWith("Production build")).shell = "bash {0}"; }],
+  // prettier-ignore
+  ["required command working directory", /ui no longer enforces VERCEL_DEPLOYMENT_ID/u, ({ workflow }) => { workflow.jobs.ui.steps.find((step) => step.name?.startsWith("Production build"))["working-directory"] = "ui-dashboard"; }],
   [
     "cross-cancelling main concurrency",
     /workflow concurrency/u,

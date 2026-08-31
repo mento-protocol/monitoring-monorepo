@@ -3,16 +3,16 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  parseActionList,
-  sentinelBlockers,
-} from "../sentry/ci-wiring/check-sentry-suites-in-ci-core.mjs";
+// prettier-ignore
+import { envMutationBlockers, parseActionList, sentinelBlockers } from "../sentry/ci-wiring/check-sentry-suites-in-ci-core.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const FORCE_ALL = "needs.changes.outputs.forceAll == 'true'";
 const DORNY_PIN = "dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d";
 const ALLS_GREEN_PIN =
   "re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35";
+// prettier-ignore
+const CHECKOUT_STEP = Object.freeze({ uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", with: { "persist-credentials": false } }), TIMELINE_STEP = Object.freeze({ uses: "Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad", if: "always()" });
 // prettier-ignore
 const ORDINARY = "*.md|aegis/**|alerts/**|docs/**|governance-watchdog/**|indexer-envio/**|integration-probes/**|metrics-bridge/**|terraform/**|ui-dashboard/**".split("|");
 // prettier-ignore
@@ -25,13 +25,8 @@ export const FILTER_NAMES = Object.freeze("shared|ui|indexer|bridge|integrationP
 // prettier-ignore
 export const CONDITIONAL_JOBS = Object.freeze("shared|ui|indexer|bridge|integration-probes|aegis|alerts|gov-watchdog|terraform|deps|scripts|docs-checks|autoreview-suite|autoreview-root-runtime|version-skew".split("|"));
 
-export const FIXED_JOBS = Object.freeze([
-  "changes",
-  ...CONDITIONAL_JOBS,
-  "guardrail-prose",
-  "production-infra-contract",
-  "sentry-suites",
-]);
+// prettier-ignore
+export const FIXED_JOBS = Object.freeze(["changes", ...CONDITIONAL_JOBS, "guardrail-prose", "production-infra-contract", "sentry-suites"]);
 
 const EXPECTED_CONDITIONS = Object.freeze({
   shared: `${FORCE_ALL} || needs.changes.outputs.shared == 'true'`,
@@ -54,6 +49,10 @@ const EXPECTED_CONDITIONS = Object.freeze({
 // prettier-ignore
 const EXPECTED_TIMEOUTS = Object.freeze({ changes: 2, shared: 10, ui: 25, indexer: 20, bridge: 10, "integration-probes": 10, alerts: 10, "gov-watchdog": 10, terraform: 10, aegis: 15, scripts: 40, "guardrail-prose": 5, "docs-checks": 10, "production-infra-contract": 5, "sentry-suites": 5, "autoreview-suite": 90, "autoreview-root-runtime": 5, "version-skew": 5, deps: 5, ci: 2 });
 // prettier-ignore
+const EXPECTED_RUNNERS = Object.freeze({ changes: "blacksmith-2vcpu-ubuntu-2404-arm", shared: "blacksmith-2vcpu-ubuntu-2404", ui: "blacksmith-4vcpu-ubuntu-2404", indexer: "blacksmith-4vcpu-ubuntu-2404", bridge: "blacksmith-2vcpu-ubuntu-2404", "integration-probes": "blacksmith-2vcpu-ubuntu-2404", aegis: "blacksmith-2vcpu-ubuntu-2404", alerts: "blacksmith-2vcpu-ubuntu-2404", "gov-watchdog": "blacksmith-4vcpu-ubuntu-2404", terraform: "blacksmith-2vcpu-ubuntu-2404-arm", deps: "blacksmith-2vcpu-ubuntu-2404", scripts: "blacksmith-2vcpu-ubuntu-2404", "docs-checks": "blacksmith-2vcpu-ubuntu-2404", "autoreview-suite": "ubuntu-latest", "autoreview-root-runtime": "blacksmith-2vcpu-ubuntu-2404", "version-skew": "blacksmith-2vcpu-ubuntu-2404", "guardrail-prose": "ubuntu-latest", "production-infra-contract": "blacksmith-2vcpu-ubuntu-2404", "sentry-suites": "ubuntu-latest", ci: "ubuntu-latest" });
+// prettier-ignore
+const EXPECTED_JOB_ENV = Object.freeze({ indexer: { ENVIO_STRICT_START_BLOCK: "true" }, aegis: { FOUNDRY_PROFILE: "ci" } });
+// prettier-ignore
 const REQUIRED_COMMANDS = Object.freeze({ ui: [["VERCEL_DEPLOYMENT_ID=ci pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw", null]], scripts: [["node scripts/workflows/check-ci-contract.mjs", null], ["pnpm adr:check", null], ["pnpm adr:check:test", null]], "production-infra-contract": [["pnpm ci:contract:test", "${{ !cancelled() }}"]] });
 
 function list(value) {
@@ -64,10 +63,8 @@ function list(value) {
 function setErrors(label, actual, expected) {
   const missing = expected.filter((entry) => !actual.includes(entry));
   const extra = actual.filter((entry) => !expected.includes(entry));
-  return [
-    ...missing.map((entry) => `${label} misses ${entry}`),
-    ...extra.map((entry) => `${label} has unexpected ${entry}`),
-  ];
+  // prettier-ignore
+  return [...missing.map((entry) => `${label} misses ${entry}`), ...extra.map((entry) => `${label} has unexpected ${entry}`)];
 }
 
 export function aggregateViolations(results) {
@@ -99,9 +96,8 @@ export async function loadCi(root = ROOT) {
   const workflow = load(
     readFileSync(join(root, ".github/workflows/ci.yml"), "utf8"),
   );
-  const filterStep = workflow.jobs?.changes?.steps?.find(
-    (step) => step.id === "filter",
-  );
+  // prettier-ignore
+  const filterStep = workflow.jobs?.changes?.steps?.find((step) => step.id === "filter");
   return { workflow, filters: load(filterStep?.with?.filters ?? "") };
 }
 
@@ -119,9 +115,8 @@ export async function matchedFiles(filters, name, changes) {
       ? [change.previousPath, change.path]
       : [change.path],
   );
-  return [
-    ...new Set(paths.filter((path) => matchers.some((match) => match(path)))),
-  ];
+  // prettier-ignore
+  return [...new Set(paths.filter((path) => matchers.some((match) => match(path))))];
 }
 
 export async function forceAllForChanges(filters, changes, reportedCount) {
@@ -150,13 +145,19 @@ export function workflowViolations(workflow, filters) {
   const errors = [];
   const jobs = workflow.jobs ?? {};
   if (workflow.name !== "CI") errors.push("workflow name must remain CI");
+  if (workflow.env !== undefined || workflow.defaults !== undefined)
+    errors.push("workflow runtime changed");
   errors.push(
     ...setErrors("workflow jobs", Object.keys(jobs), [...FIXED_JOBS, "ci"]),
   );
   for (const name of [...FIXED_JOBS, "ci"]) {
+    const job = jobs[name] ?? {};
     if (jobs[name]?.["continue-on-error"] !== undefined) {
       errors.push(`${name} must not use job-level continue-on-error`);
     }
+    // prettier-ignore
+    if (job["runs-on"] !== EXPECTED_RUNNERS[name] || JSON.stringify(job.env ?? null) !== JSON.stringify(EXPECTED_JOB_ENV[name] ?? null) || ["defaults", "strategy", "container", "services", "uses", "environment", "secrets", "with"].some((key) => job[key] !== undefined) || (CONDITIONAL_JOBS.includes(name) && job.needs !== "changes")) errors.push(`${name} job runtime changed`);
+    errors.push(...envMutationBlockers(job.steps, name));
   }
   errors.push(
     ...setErrors(
@@ -167,16 +168,13 @@ export function workflowViolations(workflow, filters) {
       CONDITIONAL_JOBS,
     ),
   );
-  for (const [name, expected] of Object.entries(EXPECTED_CONDITIONS)) {
-    if (jobs[name]?.if !== expected)
-      errors.push(`${name} has an invalid if guard`);
-  }
-  for (const [name, timeout] of Object.entries(EXPECTED_TIMEOUTS)) {
-    if (jobs[name]?.["timeout-minutes"] !== timeout) {
-      errors.push(`${name} timeout-minutes must be ${timeout}`);
-    }
-  }
+  // prettier-ignore
+  for (const [name, expected] of Object.entries(EXPECTED_CONDITIONS)) if (jobs[name]?.if !== expected) errors.push(`${name} has an invalid if guard`);
+  // prettier-ignore
+  for (const [name, timeout] of Object.entries(EXPECTED_TIMEOUTS)) if (jobs[name]?.["timeout-minutes"] !== timeout) errors.push(`${name} timeout-minutes must be ${timeout}`);
   const changes = jobs.changes ?? {};
+  // prettier-ignore
+  if (Object.keys(changes).sort().join() !== "name,outputs,permissions,runs-on,steps,timeout-minutes" || changes["runs-on"] !== "blacksmith-2vcpu-ubuntu-2404-arm" || JSON.stringify(changes.permissions) !== '{"contents":"read","actions":"read","pull-requests":"read"}') errors.push("changes job runtime changed");
   errors.push(
     ...setErrors("changes outputs", Object.keys(changes.outputs ?? {}), [
       ...FILTER_NAMES,
@@ -190,12 +188,18 @@ export function workflowViolations(workflow, filters) {
     if (changes.outputs?.[name] !== `\${{ steps.filter.outputs.${name} }}`)
       errors.push(`changes.${name} output changed`);
   }
-  const filter = changes.steps?.find((step) => step.id === "filter");
+  // prettier-ignore
+  const filterSteps = list(changes.steps).filter((step) => step.id === "filter");
+  const filter = filterSteps[0];
+  if (filterSteps.length !== 1) errors.push("paths-filter step count changed");
+  // prettier-ignore
+  if (Object.keys(filter ?? {}).sort().join() !== "id,uses,with") errors.push("paths-filter step shape changed");
+  if (Object.keys(filter?.with ?? {}).join() !== "filters")
+    errors.push("paths-filter inputs changed");
   if (filter?.uses !== DORNY_PIN)
     errors.push("paths-filter action pin changed");
-  if (filter?.with?.["list-files"] !== undefined) {
-    errors.push("paths-filter must not export duplicated file lists");
-  }
+  // prettier-ignore
+  if (changes.steps?.length !== 3 || JSON.stringify(changes.steps[0]) !== JSON.stringify(CHECKOUT_STEP) || changes.steps[1] !== filter || JSON.stringify(changes.steps[2]) !== JSON.stringify(TIMELINE_STEP)) errors.push("changes steps changed");
   errors.push(
     ...setErrors("path filters", Object.keys(filters ?? {}), [
       ...FILTER_NAMES,
@@ -232,15 +236,13 @@ export function workflowViolations(workflow, filters) {
       const step = (jobs[name]?.steps ?? []).find(
         (candidate) => candidate.run === command,
       );
-      if (
-        !step ||
-        (step.if ?? null) !== condition ||
-        step["continue-on-error"] != null
-      )
-        errors.push(`${name} no longer enforces ${command}`);
+      // prettier-ignore
+      if (!step || (step.if ?? null) !== condition || Object.keys(step).sort().join() !== (condition == null ? "name,run" : "if,name,run")) errors.push(`${name} no longer enforces ${command}`);
     }
   }
   const ci = jobs.ci ?? {};
+  // prettier-ignore
+  if (Object.keys(ci).sort().join() !== "if,name,needs,permissions,runs-on,steps,timeout-minutes" || ci["runs-on"] !== "ubuntu-latest" || JSON.stringify(ci.permissions) !== '{"contents":"read","actions":"read"}') errors.push("ci job runtime changed");
   errors.push(...setErrors("ci.needs", list(ci.needs), FIXED_JOBS));
   try {
     const trusted = new Map(
@@ -258,6 +260,8 @@ export function workflowViolations(workflow, filters) {
   );
   if (gate?.uses !== ALLS_GREEN_PIN)
     errors.push("alls-green action pin changed");
+  // prettier-ignore
+  if (ci.steps?.length !== 2 || ci.steps[0] !== gate || JSON.stringify(ci.steps[1]) !== JSON.stringify(TIMELINE_STEP)) errors.push("ci steps changed");
   errors.push(
     ...setErrors(
       "allowed-skips",

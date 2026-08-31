@@ -71,8 +71,8 @@
     {
       "path": "scripts/AGENTS.md",
       "category": "doc",
-      "additions": 3,
-      "deletions": 1
+      "additions": 8,
+      "deletions": 7
     },
     {
       "path": "scripts/check-agent-quality-gate-package-scripts.mjs",
@@ -107,14 +107,14 @@
     {
       "path": "scripts/workflows/check-ci-contract.mjs",
       "category": "check",
-      "additions": 295,
+      "additions": 299,
       "deletions": 0,
       "countMethod": "physical-lines"
     },
     {
       "path": "scripts/workflows/check-ci-contract.test.mjs",
       "category": "test",
-      "additions": 498,
+      "additions": 497,
       "deletions": 0,
       "countMethod": "physical-lines"
     }
@@ -126,19 +126,19 @@
       "net": 65
     },
     "check": {
-      "additions": 299,
+      "additions": 303,
       "deletions": 2,
-      "net": 297
+      "net": 301
     },
     "test": {
-      "additions": 525,
+      "additions": 524,
       "deletions": 13,
-      "net": 512
+      "net": 511
     },
     "doc": {
-      "additions": 71,
-      "deletions": 16,
-      "net": 55
+      "additions": 76,
+      "deletions": 22,
+      "net": 54
     },
     "package": {
       "additions": 24,
@@ -146,9 +146,9 @@
       "net": 5
     },
     "all": {
-      "additions": 1014,
-      "deletions": 80,
-      "net": 934
+      "additions": 1022,
+      "deletions": 86,
+      "net": 936
     }
   },
   "replacementSpecific": {
@@ -157,7 +157,7 @@
       "files": [
         {
           "path": "scripts/workflows/check-ci-contract.mjs",
-          "additions": 295
+          "additions": 299
         },
         {
           "path": ".github/workflows/ci.yml",
@@ -176,14 +176,14 @@
           "additions": 2
         }
       ],
-      "total": 396
+      "total": 400
     },
     "testAdditions": {
       "definition": "Replacement-specific test additions, including additions to changed test files.",
       "files": [
         {
           "path": "scripts/workflows/check-ci-contract.test.mjs",
-          "additions": 498
+          "additions": 497
         },
         {
           "path": "scripts/workflows/check-pr-validation-boundary.test.mjs",
@@ -198,23 +198,23 @@
           "additions": 3
         }
       ],
-      "total": 525
+      "total": 524
     },
-    "testToImplementationRatio": 1.3257575757575757,
+    "testToImplementationRatio": 1.31,
     "limits": {
-      "checkerPhysicalLines": 295,
+      "checkerPhysicalLines": 299,
       "checkerPhysicalLinesUnder300": true,
-      "testPhysicalLines": 498,
+      "testPhysicalLines": 497,
       "newReplacementFilePhysicalLineLimit": 500,
       "bothNewReplacementFilesUnder500": true,
-      "twiceImplementationAdditions": 792,
+      "twiceImplementationAdditions": 800,
       "testAdditionsUnderTwiceImplementationAdditions": true
     }
   },
   "cumulativeM2AndM3": {
-    "additions": 2348,
-    "deletions": 1067,
-    "net": 1281
+    "additions": 2356,
+    "deletions": 1073,
+    "net": 1283
   },
   "phase0": {
     "countedFiles": 223,
