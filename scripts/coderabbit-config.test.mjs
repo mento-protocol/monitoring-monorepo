@@ -28,6 +28,8 @@ const REPO_ROOT = path.resolve(
   "..",
 );
 const CONFIG_PATH = path.join(REPO_ROOT, ".coderabbit.yaml");
+const GATE_LIFECYCLE_SELECTOR =
+  "scripts/{agent-quality-gate.sh,agent-quality-gate.test.sh,gate/**/*.{c,mjs,sh}}";
 
 // The canonical config. Keep this and `.coderabbit.yaml` edited together.
 const EXPECTED_CONFIG = {
@@ -52,7 +54,7 @@ const EXPECTED_CONFIG = {
           "Do not request a split only from the physical line count. Report threshold drift only when the change grows a file that remains above policy; report a separate cohesion defect independently.\n",
       },
       {
-        path: "scripts/{agent-quality-gate.sh,gate/**/*.{mjs,sh}}",
+        path: GATE_LIFECYCLE_SELECTOR,
         instructions:
           "Apply the execution and settlement model in `docs/notes/agent-quality-gate-mechanics.md`.\n" +
           "Before reporting an ordering or lifecycle defect, trace route mapping through executor phases, command classification, settlement ownership, and the focused regression tests.\n" +
@@ -147,6 +149,36 @@ test("auto-review stays on with the measured five-commit burst guard", () => {
   const { auto_review: autoReview } = EXPECTED_CONFIG.reviews;
   assert.equal(autoReview.enabled, true);
   assert.equal(autoReview.auto_pause_after_reviewed_commits, 5);
+});
+
+test("the gate lifecycle selector covers runtime and regression sources", () => {
+  const selector = loadConfig().reviews.path_instructions[1].path;
+  assert.equal(selector, GATE_LIFECYCLE_SELECTOR);
+
+  const matchingPaths = [
+    "scripts/agent-quality-gate.sh",
+    "scripts/agent-quality-gate.test.sh",
+    "scripts/gate/darwin-process-identity-runtime.inc.c",
+    "scripts/gate/darwin-process-identity.c",
+    "scripts/gate/mapping.mjs",
+    "scripts/gate/mapping/facts.mjs",
+    "scripts/gate/run-handles.sh",
+  ];
+
+  for (const candidate of matchingPaths) {
+    assert.equal(
+      path.matchesGlob(candidate, selector),
+      true,
+      `${selector} must match ${candidate}`,
+    );
+  }
+
+  const unrelatedPath = "scripts/deploy/deploy-indexer-status.mjs";
+  assert.equal(
+    path.matchesGlob(unrelatedPath, selector),
+    false,
+    `${selector} must not match ${unrelatedPath}`,
+  );
 });
 
 process.stdout.write(`\n${asserted} passed, ${failed} failed\n`);

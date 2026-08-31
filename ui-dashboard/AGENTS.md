@@ -98,9 +98,10 @@ threshold-derived history uses the threshold captured at event time.
   effective lines. The package `max-lines` rule skips blank lines and comments.
   Generated files under `src/lib/__generated__/`, tests, and `src/lib/types.ts`
   are exempt. Compare the effective count with the merge base. A change that
-  reduces an already-over-threshold file does not require another split. Split
-  net growth that leaves a file above the soft cap into `_lib`, `_components`,
-  or `_tabs`.
+  reduces an already-over-threshold file does not require another split. For a
+  route page, split net growth that leaves the file above the soft cap into
+  `_lib`, `_components`, or `_tabs`. For an oversized non-route file, split
+  such growth into cohesive sibling modules.
 
 ## Server Boundaries and CSP
 

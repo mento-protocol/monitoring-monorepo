@@ -80,11 +80,11 @@ feedback-runtime pins.
   quick-commands, and the manifest pin it as ADR 0073 specifies.
   `pr/merge-pr*`, both PR-state helpers, and `agent-autoreview.sh` (Codex
   markers) route `pnpm pr:merge:test`.
-- **Gate runtime pins.** `agent-quality-gate.sh` and its tests pin gate helpers,
-  routes, signatures, fixtures, and literals (ADRs 0064 and 0076).
-  `.coderabbit.yaml` and `coderabbit-config.test.mjs` also pin
-  `scripts/{agent-quality-gate.sh,gate/**/*.{mjs,sh}}` for review scope. Move
-  all copies with the files.
+- **Gate runtime pins.** The gate runtime and tests pin helpers, routes,
+  signatures, fixtures, and literals (ADRs 0064 and 0076). `.coderabbit.yaml`
+  and `coderabbit-config.test.mjs` pin
+  `scripts/{agent-quality-gate.sh,agent-quality-gate.test.sh,gate/**/*.{c,mjs,sh}}`
+  for review scope. Move all copies together.
 - **Gate mapping pins.** The signature and Turbo inputs pin
   `gate/routing-table/**`, `gate/mapping*`, the autoreview core, and its sealed
   policy. Runtime hashes use `$script_source_dir`; suites use `$repo_root`.

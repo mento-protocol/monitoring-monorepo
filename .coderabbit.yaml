@@ -61,7 +61,7 @@ reviews:
         Do not apply these thresholds to `ui-dashboard/src/lib/__generated__/**`, `**/__tests__/**`, `**/*.test.{ts,tsx}`, or `ui-dashboard/src/lib/types.ts`.
         Compare the effective count with the merge base. Do not request a split when the change reduces an already-over-threshold file.
         Do not request a split only from the physical line count. Report threshold drift only when the change grows a file that remains above policy; report a separate cohesion defect independently.
-    - path: "scripts/{agent-quality-gate.sh,gate/**/*.{mjs,sh}}"
+    - path: "scripts/{agent-quality-gate.sh,agent-quality-gate.test.sh,gate/**/*.{c,mjs,sh}}"
       instructions: |
         Apply the execution and settlement model in `docs/notes/agent-quality-gate-mechanics.md`.
         Before reporting an ordering or lifecycle defect, trace route mapping through executor phases, command classification, settlement ownership, and the focused regression tests.
