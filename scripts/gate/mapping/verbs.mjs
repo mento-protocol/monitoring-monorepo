@@ -302,6 +302,25 @@ export const addAdrReminder = (plan, reason, facts) => {
   plan.addCommand(command, reason);
 };
 
+export const addPegRegistryIntegrityCheck = (plan, reason, facts) => {
+  // The validator compares the working policy against the one at the BASE
+  // REF's tip: `inferredPolicyBaseRef()` defaults to `origin/main` and
+  // `readPolicyFromGit` runs `git show <ref>:<policy path>`. Its answer
+  // therefore moves when the tip moves, even though nothing in the worktree
+  // changed. Naming the base in the command text is what keeps the freshness
+  // stamp TIP-bound for any plan carrying this check; a bare invocation reads
+  // the tip while the stamp binds only the merge-base, so an advance of the
+  // base could skip a lineage check whose answer had just changed.
+  //
+  // The ref, not `facts.baseOid`, for the same reason the ADR reminder takes
+  // one: this argument has to resolve, and the OID carries an
+  // `__unresolved__:` sentinel when the gate could not resolve it.
+  const command =
+    "node scripts/alerts/check-peg-registry-integrity.mjs" +
+    ` --base-ref ${shellQuote(facts.baseRef)}`;
+  plan.addCommand(command, reason);
+};
+
 export const addSentrySuiteGateCommands = (plan, reason) => {
   plan.addCommand(
     "/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry/gate/sentry-suite-gate.test.mjs",

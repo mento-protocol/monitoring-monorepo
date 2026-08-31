@@ -38,11 +38,16 @@ detection already uses the three-dot diff `git diff "$base_ref...$head_ref"`,
 which is scoped to the merge-base. The tip is not an input to the validated
 content; it was an input to the cache key over it.
 
-Two commands in the plan genuinely do read the tip. `react-doctor:diff` bakes
-the resolved base OID into its Turbo cache key, and `check-adr-reminder.mjs`
-receives `--base <ref>` and resolves that ref when it runs. For the second, the
-plan text carries only the ref _name_, so the command-plan hash is byte-identical
-on both sides of a fetch: nothing else in the stamp would have noticed.
+Three commands in the plan genuinely do read the tip. `react-doctor:diff` bakes
+the resolved base OID into its Turbo cache key, `check-adr-reminder.mjs`
+receives `--base <ref>` and resolves that ref when it runs, and
+`check-peg-registry-integrity.mjs` reads the previous peg policy out of the base
+tip with `git show <ref>:<policy path>`. For the second, the plan text carries
+only the ref _name_, so the command-plan hash is byte-identical on both sides of
+a fetch: nothing else in the stamp would have noticed. The third named the base
+nowhere at all — it defaulted to `origin/main` inside `inferredPolicyBaseRef()`
+while the gate emitted a bare command — so the gate now passes it
+`--base-ref <ref>` from the same facts the other two read.
 
 ## Decision
 
@@ -51,9 +56,13 @@ head, labelled with which binding produced it (`merge-base:<oid>` or
 `tip:<oid>`). Three guards bound the change.
 
 1. **Failure is closed.** An unresolvable base, head, or merge-base — disjoint
-   histories, a ref naming no commit, or a criss-cross reporting several merge
-   bases — falls back to the tip OID, the older and stricter binding. No
-   failure path answers "fresh".
+   histories, a ref naming no commit, or a criss-cross where
+   `git merge-base --all` reports several merge bases — falls back to the tip
+   OID, the older and stricter binding. No failure path answers "fresh". The
+   `--all` is load-bearing: plain `git merge-base` prints one OID even when
+   several best merge bases exist, and which one it picks is unspecified, so
+   asking without `--all` would bind an arbitrary pick instead of failing
+   closed.
 2. **A plan that can observe the base tip keeps tip binding.** The gate asks
    whether the command plan's text names the base ref or its resolved tip at
    all, rather than keeping a list of tip-reading commands. A future verb that
@@ -93,14 +102,38 @@ produce different answers. Rejected as a real weakening for no measured gain.
 wrong the first time a verb passes the base down without updating it. The
 structural predicate fails toward the stricter binding instead. Rejected.
 
+The predicate reads only what the plan text says, so it carries an obligation
+the allowlist did not: a command that reads the base must be made to NAME the
+base. Review of this change found `check-peg-registry-integrity.mjs` reading
+`origin/main` through an internal default while the gate emitted a bare command,
+which no textual predicate could have caught. The fix belongs at the emitter,
+not in a second list: its verb now passes `--base-ref <ref>`, and
+`engine.test.mjs` fails if any routing-table arm spells the check as a bare
+command again. The predicate keeps its self-maintaining property for every
+command that states its base, and one guard test holds the emitters to it.
+
+An audit of every emitted command then found two that the emitter fix cannot
+reach, because the ref they read is not the gate's base. `docs:navigation-eval
+-- --validate` tests ancestry against `refs/remotes/origin/main` as the DEFAULT
+branch, and the autoreview suite reads protected-main checklist blobs at
+`origin/main^{commit}`. Handing either the gate's `--base` would change what it
+asserts — on a stacked PR the default branch is still `main`. These are named in
+a short marker list inside the predicate, the fallback this ADR otherwise
+rejects, and the reasoning holds because the failure is asymmetric: a listed
+command only ever gets the stricter binding, so a stale entry costs a re-run
+while a missing one costs a skipped check. The residual is that a rename makes a
+marker stale silently; the `markerbound` stamps-freshness fixture is what
+notices, since it asserts tip binding for a real navigation-eval plan.
+
 ## Consequences
 
 A warm stamp now survives an advance of `origin/main` that leaves the
 merge-base alone, which is the common case. It does not survive a rebase, which
 moves the merge-base, nor any change to the validated content, the plan, or the
-gate's own implementation. Plans containing `react-doctor:diff` or the ADR
-reminder keep the old behaviour and gain nothing; dashboard-wide and
-workflow-touching changes are therefore unaffected.
+gate's own implementation. Plans containing `react-doctor:diff`, the ADR
+reminder, or the peg registry check keep the old behaviour and gain nothing;
+dashboard-wide, workflow-touching and peg-policy changes are therefore
+unaffected.
 
 Guidance to warm the stamp only after `git fetch origin main` is no longer
 required for the stamp's sake, and

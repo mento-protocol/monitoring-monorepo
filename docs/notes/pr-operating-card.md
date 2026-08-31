@@ -87,7 +87,10 @@ even when you never open an authority.
    fetches before it runs the gate in any case. The freshness stamp binds the
    **merge-base**, not the base tip, so an advance of `main` that leaves the
    merge-base alone keeps a warm stamp; a rebase moves the merge-base and
-   still costs a full re-run. A bare invocation
+   still costs a full re-run. That applies only to plans that never read the
+   base: a plan naming the base ref or its tip — `react-doctor:diff`, the ADR
+   reminder, and the peg registry check — keeps tip binding, so any base
+   advance re-runs it. A bare invocation
    diffs against `origin/main`; a fork checkout must pass
    `--base <base-remote>/main`, and a stacked PR (base not `main`) must
    resolve `baseRefName` and pass `--base <base-remote>/<baseRefName>` — a

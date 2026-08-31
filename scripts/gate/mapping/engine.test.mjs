@@ -249,6 +249,45 @@ test("the ADR reminder is fed the gate's own base, head and path set", () => {
   assert.ok(command.includes("--include-untracked --changed-paths-file"));
 });
 
+// The peg validator reads the previous policy from the base ref's TIP, so it
+// is a tip reader in the same class as react-doctor and the ADR reminder. The
+// stamp's tip-reader predicate is textual, so the base has to appear in the
+// command or a merge-base-bound stamp could skip a check whose answer moved.
+test("the peg registry check is fed the gate's own base ref", () => {
+  const plan = new Plan();
+  verbs.addPegRegistryIntegrityCheck(plan, "r", stubFacts());
+  const [command] = commandsOf(plan);
+  assert.ok(
+    command.startsWith("node scripts/alerts/check-peg-registry-integrity.mjs"),
+  );
+  assert.ok(command.includes("--base-ref origin/main"));
+});
+
+// A future arm spelling this check as a bare `command:` string would read the
+// base tip while the plan text stayed silent about it, reopening the hole the
+// verb closes. Every emission has to route through the verb.
+test("no routing-table arm emits the peg registry check without its base", () => {
+  const bare = "node scripts/alerts/check-peg-registry-integrity.mjs";
+  const offenders = [];
+  const walk = (node, path) => {
+    if (Array.isArray(node)) {
+      node.forEach((entry, index) => walk(entry, `${path}[${index}]`));
+      return;
+    }
+    if (!node || typeof node !== "object") return;
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "command" && value === bare) offenders.push(path);
+      walk(value, `${path}.${key}`);
+    }
+  };
+  walk(ROUTING_PLAN, "ROUTING_PLAN");
+  assert.deepEqual(
+    offenders,
+    [],
+    "route these through add_peg_registry_integrity_check instead",
+  );
+});
+
 test("the Sentry suite gate schedules BOTH commands, neither substituting", () => {
   const plan = new Plan();
   verbs.addSentrySuiteGateCommands(plan, "r");
@@ -466,6 +505,10 @@ test("full and reduced config-consumer plans build shared-config exactly once", 
 test("peg registry checks build shared-config before loading its exports", () => {
   for (const command of [
     "node scripts/alerts/check-peg-registry-integrity.mjs",
+    // The form the verb actually emits. `commandConsumesWorkspaceConfig`
+    // matches it through its `startsWith(script + " ")` branch; without that
+    // the based check would run before shared-config was built.
+    "node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/main",
     "node scripts/alerts/check-peg-registry-integrity.test.mjs",
   ]) {
     const plan = new Plan();

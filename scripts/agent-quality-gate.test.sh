@@ -10264,6 +10264,198 @@ STUB
 )
 rm -rf "$tipbound_stamp_repo"
 
+# The peg registry check is the third tip reader. It compares the working policy
+# against the one at the base tip, and until its verb passed `--base-ref` the
+# emitted command named the base nowhere, so the predicate could not see it and
+# a merge-base-bound stamp could skip a lineage check whose answer had moved.
+# Only a peg path changes here: a workflow change would add the ADR reminder and
+# confound which command produced the tip binding.
+pegbound_stamp_repo="$(mktemp -d)"
+(
+  cd "$pegbound_stamp_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p metrics-bridge bin tools
+  printf '{ "assets": [] }\n' > metrics-bridge/peg-registry.json
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-} ${2:-}" == "daemon status" ]]; then
+  echo "✖ Daemon stopped"
+  exit 1
+fi
+counter_file="${COUNTER_FILE:?}"
+count=0
+if [[ -f "$counter_file" ]]; then
+  count="$(cat "$counter_file")"
+fi
+printf '%s\n' "$((count + 1))" > "$counter_file"
+STUB
+  # As in the tip-binding fixture: the stub keeps mapped commands free but must
+  # still delegate the gate's own inline helpers and the Darwin broker probe.
+  cat > bin/node <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--input-type=module" ||
+  "${1:-}" == -e ||
+  "${1:-}" == -p ||
+  "${1:-}" == */quality-gate-coordinator.mjs ||
+  "${1:-}" == */quality-gate-coordinator-environment.mjs ]]; then
+  exec "${REAL_NODE:?}" "$@"
+fi
+case "${1:-}" in
+  *"/scripts/gate/mapping.mjs") exec "${REAL_NODE:?}" "$@" ;;
+esac
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  chmod +x bin/node bin/pnpm tools/trunk
+  git add .
+  git commit -qm init
+  pegbound_one="$(git rev-parse --verify HEAD)"
+  git update-ref refs/remotes/origin/main "$pegbound_one"
+  printf '{ "assets": ["changed"] }\n' > metrics-bridge/peg-registry.json
+  counter="$pegbound_stamp_repo/.tmp/agent-quality-gate/trunk-count"
+  stamp_file="$pegbound_stamp_repo/.tmp/agent-quality-gate/last-success.stamp"
+
+  pegbound_gate() {
+    REAL_NODE="$(command -v node)" \
+      AGENT_QUALITY_GATE_COORDINATOR=0 \
+      COUNTER_FILE="$counter" \
+      PATH="$pegbound_stamp_repo/bin:$PATH" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+        --base origin/main --run "$@" \
+        > "$output_file" 2>&1
+  }
+
+  pegbound_gate
+  grep -Fq -- "check-peg-registry-integrity.mjs --base-ref origin/main" \
+    "$output_file" ||
+    fail "the peg fixture did not schedule the peg check carrying its base ref"
+  if grep -Fq -- "check-adr-reminder.mjs" "$output_file"; then
+    fail "the peg fixture also scheduled the ADR reminder, confounding the binding"
+  fi
+  grep -q '^stamp=v3.*base=tip:[a-f0-9]\{40\}' "$stamp_file" ||
+    fail "a plan carrying the peg check did not keep tip binding"
+
+  # Negative control: the fixture must be able to reuse before the advance, or
+  # the re-execution below proves nothing.
+  pegbound_gate --skip-if-fresh
+  [[ "$(cat "$counter")" == "1" ]] ||
+    fail "an exact repeat did not reuse the peg fixture's fresh success"
+
+  # The peg check reads the tip, so a tip advance that leaves the merge-base
+  # alone must still re-run it. Under merge-base binding this reused.
+  pegbound_two="$(git commit-tree \
+    "$(git rev-parse --verify "${pegbound_one}^{tree}")" \
+    -p "$pegbound_one" -m "base advance")"
+  git update-ref refs/remotes/origin/main "$pegbound_two"
+  [[ "$(git merge-base origin/main HEAD)" == "$pegbound_one" ]] ||
+    fail "the peg fixture moved the merge-base it meant to hold still"
+  pegbound_gate --skip-if-fresh
+  [[ "$(cat "$counter")" == "2" ]] ||
+    fail "a plan carrying the peg check reused its stamp across a tip advance"
+)
+rm -rf "$pegbound_stamp_repo"
+
+# A command that reads a branch tip WITHOUT naming it is invisible to the
+# structural predicate, so the gate carries a short marker list for that class.
+# `docs:navigation-eval -- --validate` is the case under test: it asks whether a
+# scored commit is an ancestor of refs/remotes/origin/main, a ref it resolves
+# internally as the DEFAULT branch rather than receiving as the gate's base.
+# This fixture is also what catches a STALE marker — rename the command and the
+# marker stops matching, and the tip binding below silently becomes merge-base.
+markerbound_stamp_repo="$(mktemp -d)"
+(
+  cd "$markerbound_stamp_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p docs/evals bin tools
+  printf '{ "cases": [] }\n' > docs/evals/documentation-navigation-baseline.json
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-} ${2:-}" == "daemon status" ]]; then
+  echo "✖ Daemon stopped"
+  exit 1
+fi
+counter_file="${COUNTER_FILE:?}"
+count=0
+if [[ -f "$counter_file" ]]; then
+  count="$(cat "$counter_file")"
+fi
+printf '%s\n' "$((count + 1))" > "$counter_file"
+STUB
+  cat > bin/node <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--input-type=module" ||
+  "${1:-}" == -e ||
+  "${1:-}" == -p ||
+  "${1:-}" == */quality-gate-coordinator.mjs ||
+  "${1:-}" == */quality-gate-coordinator-environment.mjs ]]; then
+  exec "${REAL_NODE:?}" "$@"
+fi
+case "${1:-}" in
+  *"/scripts/gate/mapping.mjs") exec "${REAL_NODE:?}" "$@" ;;
+esac
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  chmod +x bin/node bin/pnpm tools/trunk
+  git add .
+  git commit -qm init
+  markerbound_one="$(git rev-parse --verify HEAD)"
+  git update-ref refs/remotes/origin/main "$markerbound_one"
+  printf '{ "cases": ["changed"] }\n' \
+    > docs/evals/documentation-navigation-baseline.json
+  counter="$markerbound_stamp_repo/.tmp/agent-quality-gate/trunk-count"
+  stamp_file="$markerbound_stamp_repo/.tmp/agent-quality-gate/last-success.stamp"
+
+  markerbound_gate() {
+    REAL_NODE="$(command -v node)" \
+      AGENT_QUALITY_GATE_COORDINATOR=0 \
+      COUNTER_FILE="$counter" \
+      PATH="$markerbound_stamp_repo/bin:$PATH" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+        --base origin/main --run "$@" \
+        > "$output_file" 2>&1
+  }
+
+  markerbound_gate
+  grep -Fq -- "docs:navigation-eval -- --validate" "$output_file" ||
+    fail "the marker fixture did not schedule the tip-reading navigation eval"
+  # Keep the case unconfounded: no other scheduled command may name the base.
+  for confound in "check-adr-reminder.mjs" "REACT_DOCTOR_BASE_REF" \
+    "check-peg-registry-integrity.mjs"; do
+    if grep -Fq -- "$confound" "$output_file"; then
+      fail "the marker fixture also scheduled $confound, confounding the binding"
+    fi
+  done
+  grep -q '^stamp=v3.*base=tip:[a-f0-9]\{40\}' "$stamp_file" ||
+    fail "a plan carrying a listed tip-reading command did not keep tip binding"
+
+  # Negative control: the fixture must be able to reuse before the advance.
+  markerbound_gate --skip-if-fresh
+  [[ "$(cat "$counter")" == "1" ]] ||
+    fail "an exact repeat did not reuse the marker fixture's fresh success"
+
+  markerbound_two="$(git commit-tree \
+    "$(git rev-parse --verify "${markerbound_one}^{tree}")" \
+    -p "$markerbound_one" -m "base advance")"
+  git update-ref refs/remotes/origin/main "$markerbound_two"
+  [[ "$(git merge-base origin/main HEAD)" == "$markerbound_one" ]] ||
+    fail "the marker fixture moved the merge-base it meant to hold still"
+  markerbound_gate --skip-if-fresh
+  [[ "$(cat "$counter")" == "2" ]] ||
+    fail "a listed tip-reading command reused its stamp across a tip advance"
+)
+rm -rf "$markerbound_stamp_repo"
+
 # Fail closed when the merge-base cannot be computed. A base ref sharing no
 # history with HEAD has none, and the binding must fall back to the tip rather
 # than to any weaker answer.
@@ -10335,6 +10527,99 @@ STUB
     fail "a base with no merge-base reused its stamp across a tip advance"
 )
 rm -rf "$disjoint_base_stamp_repo"
+
+# Fail closed when the merge-base is AMBIGUOUS. A criss-cross history has
+# several best merge bases, and plain `git merge-base` answers with one of them
+# without saying so, which is why the gate asks with `--all`. Binding an
+# unspecified pick would answer "fresh" for a history whose merge-base is not a
+# single commit, so the binding must fall back to the tip.
+crisscross_base_stamp_repo="$(mktemp -d)"
+(
+  cd "$crisscross_base_stamp_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p bin tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-} ${2:-}" == "daemon status" ]]; then
+  echo "✖ Daemon stopped"
+  exit 1
+fi
+counter_file="${COUNTER_FILE:?}"
+count=0
+if [[ -f "$counter_file" ]]; then
+  count="$(cat "$counter_file")"
+fi
+printf '%s\n' "$((count + 1))" > "$counter_file"
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  chmod +x bin/pnpm tools/trunk
+  write_installed_dependency_fixture "$PWD"
+  git add .
+  git commit -qm init
+  # Two children of the root, then two independent merges of both children.
+  # The merges share exactly two best common ancestors. Every commit carries
+  # the root tree, so the three-dot diff is the same whichever base git picks
+  # and the only changed path is the uncommitted one below.
+  crisscross_root_tree="$(git rev-parse --verify 'HEAD^{tree}')"
+  crisscross_root="$(git rev-parse --verify HEAD)"
+  crisscross_one="$(git commit-tree "$crisscross_root_tree" \
+    -p "$crisscross_root" -m "side one")"
+  crisscross_two="$(git commit-tree "$crisscross_root_tree" \
+    -p "$crisscross_root" -m "side two")"
+  crisscross_base="$(git commit-tree "$crisscross_root_tree" \
+    -p "$crisscross_one" -p "$crisscross_two" -m "base merge")"
+  crisscross_head="$(git commit-tree "$crisscross_root_tree" \
+    -p "$crisscross_one" -p "$crisscross_two" -m "head merge")"
+  git update-ref refs/remotes/origin/main "$crisscross_base"
+  git reset -q --hard "$crisscross_head"
+  [[ "$(git merge-base --all origin/main HEAD | wc -l | tr -d '[:space:]')" == "2" ]] ||
+    fail "the criss-cross fixture did not produce two best merge bases"
+  # The hazard itself: the naive call cannot report the ambiguity. If a future
+  # git starts refusing or listing here, this fixture should be revisited.
+  [[ "$(git merge-base origin/main HEAD | wc -l | tr -d '[:space:]')" == "1" ]] ||
+    fail "plain git merge-base no longer answers a criss-cross with one OID"
+  printf 'changed\n' >> fixture.txt
+  counter="$crisscross_base_stamp_repo/.tmp/agent-quality-gate/trunk-count"
+  stamp_file="$crisscross_base_stamp_repo/.tmp/agent-quality-gate/last-success.stamp"
+
+  crisscross_gate() {
+    AGENT_QUALITY_GATE_COORDINATOR=0 \
+      COUNTER_FILE="$counter" \
+      PATH="$crisscross_base_stamp_repo/bin:$PATH" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+        --base origin/main --run "$@" \
+        > "$output_file" 2>&1
+  }
+
+  crisscross_gate
+  grep -q '^stamp=v3.*base=tip:[a-f0-9]\{40\}' "$stamp_file" ||
+    fail "an ambiguous merge-base did not fall back to the base tip"
+
+  # Negative control, as above: the fixture must be able to reuse before the
+  # advance, or the re-execution below proves nothing.
+  crisscross_gate --skip-if-fresh
+  [[ "$(cat "$counter")" == "1" ]] ||
+    fail "an exact repeat did not reuse the criss-cross fixture's fresh success"
+
+  # Tip binding is in force, so advancing the tip must bust the stamp. The two
+  # best merge bases are unchanged by this advance, so a run that reused here
+  # would prove the binding had silently become merge-base.
+  crisscross_advanced="$(git commit-tree "$crisscross_root_tree" \
+    -p "$crisscross_base" -m "base advance")"
+  git update-ref refs/remotes/origin/main "$crisscross_advanced"
+  [[ "$(git merge-base --all origin/main HEAD | wc -l | tr -d '[:space:]')" == "2" ]] ||
+    fail "the criss-cross base advance collapsed the ambiguity it meant to hold"
+  crisscross_gate --skip-if-fresh
+  [[ "$(cat "$counter")" == "2" ]] ||
+    fail "an ambiguous merge-base reused its stamp across a tip advance"
+)
+rm -rf "$crisscross_base_stamp_repo"
 
 # Workflow changes add the ADR reminder command, whose execution argument uses
 # a randomized changed-paths scratch file. That volatile path must be

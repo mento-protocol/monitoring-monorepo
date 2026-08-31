@@ -7428,12 +7428,15 @@ write_command_plan "$command_plan_file"
 #
 #   * Failure is closed. An unresolvable base, head, or merge-base — disjoint
 #     histories, a ref naming no commit, or the criss-cross case where
-#     `git merge-base` reports several — falls back to the tip OID, which is
-#     the old and stricter binding. No failure path answers "fresh".
+#     `git merge-base --all` reports several — falls back to the tip OID, which
+#     is the old and stricter binding. No failure path answers "fresh".
 #   * A command plan that can OBSERVE the base tip keeps tip binding.
 #     `react-doctor:diff` bakes the resolved base OID into its Turbo cache key,
-#     and `check-adr-reminder.mjs` takes `--base <ref>` and resolves it when it
-#     runs; both read the tip, not the merge-base. The predicate asks whether
+#     `check-adr-reminder.mjs` takes `--base <ref>` and resolves it when it
+#     runs, and `check-peg-registry-integrity.mjs` takes `--base-ref <ref>` and
+#     reads the previous peg policy from that tip; all three read the tip, not
+#     the merge-base. Each is emitted by a verb that puts the base into the
+#     command text, which is what this predicate can see. The predicate asks whether
 #     the plan text names the base at all instead of listing those two, so a
 #     future verb that passes the base down inherits tip binding without
 #     anybody remembering to extend a list. A false positive costs only the
@@ -7453,7 +7456,28 @@ gate_command_plan_reads_base() {
   # binding, so an unreadable plan can never buy a wider reuse window.
   [[ -f "$plan_file" ]] || return 0
   [[ -n "$base_ref" && -n "$base_tip" ]] || return 0
-  grep -qF -e "$base_ref" -e "$base_tip" -- "$plan_file" || st=$?
+  # The markers below name two commands that read a branch tip WITHOUT naming
+  # it in their own text, so nothing structural can see them. The autoreview
+  # suite gets both of its spellings, which share a plan dedupe key:
+  #
+  #   * `docs:navigation-eval -- --validate` tests whether a scored commit is
+  #     an ancestor of `refs/remotes/origin/main`
+  #     (scripts/docs/docs-navigation-eval-result.mjs, DEFAULT_BRANCH_REF).
+  #   * the autoreview suite reads protected-main checklist blobs at
+  #     `origin/main^{commit}` (scripts/agent-autoreview.test.sh).
+  #
+  # Both resolve the DEFAULT branch on purpose. That is a different thing from
+  # the gate's base ref and must not be replaced by it, which is why they are
+  # listed rather than fixed at the emitter. Where a command's base IS the
+  # gate's base, make its verb name it instead — see
+  # `add_peg_registry_integrity_check`. Listing a command here only ever makes
+  # the binding STRICTER, so a stale entry costs a re-run, never a missed check.
+  grep -qF \
+    -e "$base_ref" -e "$base_tip" \
+    -e 'docs:navigation-eval -- --validate' \
+    -e 'scripts/agent-autoreview.test.sh' \
+    -e 'agent:autoreview:test' \
+    -- "$plan_file" || st=$?
   # 0 names the base, 1 does not. Any other status is a grep failure rather
   # than an answer, so it must not reach the merge-base branch.
   [[ "$st" -eq 1 ]] && return 1
@@ -7473,10 +7497,15 @@ gate_stamp_base_binding() {
     printf 'tip:%s\n' "$base_tip"
     return 0
   fi
-  merge_base="$(git merge-base "$base_ref" "$head_ref" 2>/dev/null)" ||
+  # `--all` is load-bearing. Plain `git merge-base A B` prints exactly ONE OID
+  # even when several best merge bases exist; it picks one, and which one is
+  # not specified. Binding that pick would answer "fresh" for a history whose
+  # merge-base is genuinely ambiguous. `--all` prints every best merge base, so
+  # the criss-cross case arrives as several lines and fails the test below.
+  merge_base="$(git merge-base --all "$base_ref" "$head_ref" 2>/dev/null)" ||
     merge_base=""
-  # A single full OID and nothing else. Several merge bases arrive as several
-  # lines and fail this test, which is the fallback the criss-cross case wants.
+  # A single full OID and nothing else. Bash matches this pattern against the
+  # whole string with no newline handling, so any multi-line answer fails it.
   if [[ ! "$merge_base" =~ ^[a-f0-9]{40}([a-f0-9]{24})?$ ]]; then
     printf 'tip:%s\n' "$base_tip"
     return 0
