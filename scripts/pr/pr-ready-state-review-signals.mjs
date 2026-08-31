@@ -89,7 +89,12 @@ export function fetchHeadUpdatedAt({ headSha, timelineItems, observedAt }) {
 
 function isAtOrAfter(timestamp, lowerBound) {
   const parsed = parseTimestamp(timestamp);
-  return parsed !== null && lowerBound !== null && parsed >= lowerBound;
+  const parsedLowerBound = Number.isFinite(lowerBound)
+    ? lowerBound
+    : parseTimestamp(lowerBound);
+  return (
+    parsed !== null && parsedLowerBound !== null && parsed >= parsedLowerBound
+  );
 }
 
 function isCurrentSignal(timestamp, lowerBound) {

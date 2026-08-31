@@ -2309,6 +2309,16 @@ test("accepts only a trusted current CodeRabbit path-filter skip candidate", () 
       "https://github.com/mento-protocol/monitoring-monorepo/pull/2145#issuecomment-5467686069",
     observedAt: "2026-08-30T09:08:59Z",
   });
+  assertDeepEqual(
+    findCodeRabbitPathFilterSkipCandidate({
+      issueComments: [
+        codeRabbitSkipComment(codeRabbitPathFilterSkipBody(paths)),
+      ],
+      headUpdatedAt: "2026-08-30T08:40:00Z",
+    }),
+    candidate,
+    "accept the ISO timestamp returned by fetchHeadUpdatedAt",
+  );
 });
 
 test("rejects ambiguous CodeRabbit skip and no-review comments before file fetch", () => {
