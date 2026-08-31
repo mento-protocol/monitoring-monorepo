@@ -94,8 +94,10 @@ threshold-derived history uses the threshold captured at event time.
   coexist.
 - Dynamic status uses `role="status"` or `role="alert"`; sortable headers expose
   `aria-sort`. Add deterministic axe coverage for new shared semantic controls.
-- Source files have a 600-line soft cap and 1,000-line lint cap; split route
-  pages into `_lib`, `_components`, or `_tabs` before crossing the soft cap.
+- Source files have a soft cap of 600 effective lines and a lint cap of 1,000
+  effective lines. The package `max-lines` rule skips blank lines and comments.
+  Tests and `src/lib/types.ts` are exempt. Split route pages into `_lib`,
+  `_components`, or `_tabs` before crossing the soft cap.
 
 ## Server Boundaries and CSP
 

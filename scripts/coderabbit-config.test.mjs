@@ -40,6 +40,25 @@ const EXPECTED_CONFIG = {
     suggested_reviewers: false,
     auto_apply_labels: false,
     collapse_walkthrough: true,
+    path_instructions: [
+      {
+        path: "ui-dashboard/src/**/*.{ts,tsx}",
+        instructions:
+          "Apply the file-size policy in `ui-dashboard/AGENTS.md` and `ui-dashboard/eslint.config.mjs`.\n" +
+          "Count effective lines after excluding blank lines and comments.\n" +
+          "Treat 600 effective lines as the soft review threshold and 1,000 effective lines as the lint cap.\n" +
+          "Do not apply these thresholds to `**/__tests__/**`, `**/*.test.{ts,tsx}`, or `ui-dashboard/src/lib/types.ts`.\n" +
+          "Do not request a split only from the physical line count. Report a size finding only when the effective count exceeds policy or the changed file has a separate cohesion defect.\n",
+      },
+      {
+        path: "scripts/gate/**/*.{mjs,sh}",
+        instructions:
+          "Apply the execution and settlement model in `docs/notes/agent-quality-gate-mechanics.md`.\n" +
+          "Before reporting an ordering or lifecycle defect, trace route mapping through executor phases, command classification, settlement ownership, and the focused regression tests.\n" +
+          "Mapper insertion order and the location of a deferred cleanup call do not prove runtime order.\n" +
+          "Report an ordering or lifecycle finding only when the changed path can bypass a required prerequisite or settlement step, or when focused coverage no longer reaches that path.\n",
+      },
+    ],
     path_filters: [
       "!pnpm-lock.yaml",
       "!**/pnpm-lock.yaml",
