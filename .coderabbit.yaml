@@ -48,7 +48,7 @@ reviews:
   # ownership change.
   #
   # Canary after a human-approved merge: observe at least 40 eligible PRs and
-  # five applicable changes per instruction. Remove an instruction immediately
+  # five applicable findings per instruction. Remove an instruction immediately
   # if independent evidence shows that it suppressed a valid defect.
   path_instructions:
     - path: "ui-dashboard/src/**/*.{ts,tsx}"
@@ -56,9 +56,9 @@ reviews:
         Apply the file-size policy in `ui-dashboard/AGENTS.md` and `ui-dashboard/eslint.config.mjs`.
         Count effective lines after excluding blank lines and comments.
         Treat 600 effective lines as the soft review threshold and 1,000 effective lines as the lint cap.
-        Do not apply these thresholds to `**/__tests__/**`, `**/*.test.{ts,tsx}`, or `ui-dashboard/src/lib/types.ts`.
+        Do not apply these thresholds to `ui-dashboard/src/lib/__generated__/**`, `**/__tests__/**`, `**/*.test.{ts,tsx}`, or `ui-dashboard/src/lib/types.ts`.
         Do not request a split only from the physical line count. Report a size finding only when the effective count exceeds policy or the changed file has a separate cohesion defect.
-    - path: "scripts/gate/**/*.{mjs,sh}"
+    - path: "scripts/{agent-quality-gate.sh,gate/**/*.{mjs,sh}}"
       instructions: |
         Apply the execution and settlement model in `docs/notes/agent-quality-gate-mechanics.md`.
         Before reporting an ordering or lifecycle defect, trace route mapping through executor phases, command classification, settlement ownership, and the focused regression tests.

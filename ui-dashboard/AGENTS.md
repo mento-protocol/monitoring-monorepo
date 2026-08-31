@@ -96,8 +96,9 @@ threshold-derived history uses the threshold captured at event time.
   `aria-sort`. Add deterministic axe coverage for new shared semantic controls.
 - Source files have a soft cap of 600 effective lines and a lint cap of 1,000
   effective lines. The package `max-lines` rule skips blank lines and comments.
-  Tests and `src/lib/types.ts` are exempt. Split route pages into `_lib`,
-  `_components`, or `_tabs` before crossing the soft cap.
+  Generated files under `src/lib/__generated__/`, tests, and `src/lib/types.ts`
+  are exempt. Split route pages into `_lib`, `_components`, or `_tabs` before
+  crossing the soft cap.
 
 ## Server Boundaries and CSP
 
