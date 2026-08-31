@@ -430,7 +430,7 @@ function ownerMutationBinding(
   project,
   itemId,
   fieldId,
-  { dataType, field, issueNumber, operation },
+  { dataType, field, issueNumber, mutationKind, operation },
 ) {
   return {
     repo: options.repo,
@@ -439,6 +439,7 @@ function ownerMutationBinding(
     projectNumber: options.projectNumber,
     projectId: project.id,
     operation,
+    mutationKind,
     field,
     fieldId,
     dataType,
@@ -460,28 +461,21 @@ function clearProjectField(
       dataType,
       field,
       issueNumber,
+      mutationKind: "clear",
       operation,
     }),
-    (trustedTarget) =>
-      graphql(
-        `
-          mutation ($project: ID!, $item: ID!, $field: ID!) {
-            clearProjectV2ItemFieldValue(
-              input: { projectId: $project, itemId: $item, fieldId: $field }
-            ) {
-              projectV2Item {
-                id
-              }
-            }
+    `
+      mutation ($project: ID!, $item: ID!, $field: ID!) {
+        clearProjectV2ItemFieldValue(
+          input: { projectId: $project, itemId: $item, fieldId: $field }
+        ) {
+          projectV2Item {
+            id
           }
-        `,
-        {
-          project: trustedTarget.projectId,
-          item: trustedTarget.itemId,
-          field: trustedTarget.fieldId,
-        },
-        { dryRun: options.dryRun, mutates: true },
-      ),
+        }
+      }
+    `,
+    { graphql },
   );
 }
 
@@ -510,34 +504,26 @@ export function updateTextField(
       dataType: "TEXT",
       field,
       issueNumber,
+      mutationKind: "update",
       operation,
     }),
-    (trustedTarget) =>
-      graphql(
-        `
-          mutation ($project: ID!, $item: ID!, $field: ID!, $text: String!) {
-            updateProjectV2ItemFieldValue(
-              input: {
-                projectId: $project
-                itemId: $item
-                fieldId: $field
-                value: { text: $text }
-              }
-            ) {
-              projectV2Item {
-                id
-              }
-            }
+    `
+      mutation ($project: ID!, $item: ID!, $field: ID!, $text: String!) {
+        updateProjectV2ItemFieldValue(
+          input: {
+            projectId: $project
+            itemId: $item
+            fieldId: $field
+            value: { text: $text }
           }
-        `,
-        {
-          project: trustedTarget.projectId,
-          item: trustedTarget.itemId,
-          field: trustedTarget.fieldId,
-          text,
-        },
-        { dryRun: options.dryRun, mutates: true },
-      ),
+        ) {
+          projectV2Item {
+            id
+          }
+        }
+      }
+    `,
+    { graphql, value: text },
   );
 }
 
@@ -566,34 +552,26 @@ function updateDateField(
       dataType: "DATE",
       field,
       issueNumber,
+      mutationKind: "update",
       operation,
     }),
-    (trustedTarget) =>
-      graphql(
-        `
-          mutation ($project: ID!, $item: ID!, $field: ID!, $date: Date!) {
-            updateProjectV2ItemFieldValue(
-              input: {
-                projectId: $project
-                itemId: $item
-                fieldId: $field
-                value: { date: $date }
-              }
-            ) {
-              projectV2Item {
-                id
-              }
-            }
+    `
+      mutation ($project: ID!, $item: ID!, $field: ID!, $date: Date!) {
+        updateProjectV2ItemFieldValue(
+          input: {
+            projectId: $project
+            itemId: $item
+            fieldId: $field
+            value: { date: $date }
           }
-        `,
-        {
-          project: trustedTarget.projectId,
-          item: trustedTarget.itemId,
-          field: trustedTarget.fieldId,
-          date,
-        },
-        { dryRun: options.dryRun, mutates: true },
-      ),
+        ) {
+          projectV2Item {
+            id
+          }
+        }
+      }
+    `,
+    { graphql, value: date },
   );
 }
 

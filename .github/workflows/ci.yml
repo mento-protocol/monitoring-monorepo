@@ -1401,6 +1401,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Validate trusted package-script pins
+        # Runs before pnpm-install because the install executes PR-authored
+        # lifecycle hooks. It also pins the tf:test and issue:board:test aliases
+        # before this required job trusts them.
+        run: node scripts/check-agent-quality-gate-package-scripts.mjs
       - uses: ./.github/actions/pnpm-install
         with:
           write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}

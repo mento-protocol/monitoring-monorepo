@@ -235,10 +235,13 @@ other prose as executable code. The repository-wide text lane still scans them.
 Both `updateProjectV2ItemFieldValue` and
 `clearProjectV2ItemFieldValue` must remain in
 `scripts/pr/issue-board-projects.mjs`. Each operation must execute in its exact
-field helper as the direct callback of `executeIssueOwnerMutation`. The call
-must pass the active capability and `ownerMutationBinding(...)`. Its GraphQL
-call must use `{ dryRun: options.dryRun, mutates: true }`. Nonvacuity checks
-require both operations and their executable text to remain present.
+field helper through `executeIssueOwnerMutation`. The call must pass the active
+capability, `ownerMutationBinding(...)`, the static GraphQL document, and the
+GraphQL transport. The executor parses the document, requires one exact
+protected mutation field and exact variables, injects the proven Project,
+item, and field IDs, and owns the `{ dryRun, mutates: true }` transport flags.
+Nonvacuity checks require both operations and their executable text to remain
+present.
 
 The required `production-infra-contract` CI job runs `pnpm issue:board:test`
 for every pull request, including after another step fails. It skips the proof
@@ -250,9 +253,10 @@ file set.
 The compiler proof cannot reduce a GraphQL document that depends on mutable
 state, runtime-only branches, function results, or other dynamic data. The
 repository-wide text inventory still rejects a complete protected field name.
-A runtime builder can evade this static proof if it splits the field name across
-dynamic values so that no file contains the complete name. Ignored files,
-external packages, and runtime-downloaded code also stay outside the inventory.
+The runtime executor closes the internal dynamic-builder gap: it rejects any
+document that does not match the exact protected clear or typed update contract
+before GraphQL runs. Ignored files, external packages, runtime-downloaded code,
+and mutations made without this helper stay outside the inventory and executor.
 
 External issue-label, blocker, owner-field, and PR mutations do not acquire the
 ref. They are outside the helper's concurrency guarantee.

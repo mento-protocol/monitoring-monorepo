@@ -77,6 +77,7 @@ import {
 } from "./issue-board-projects.mjs";
 import {
   createIssueOwnerProofTestOperations,
+  executeIssueOwnerMutation,
   IssueOwnerMutationCapabilityError,
 } from "./issue-board-lock.mjs";
 import {
@@ -215,21 +216,18 @@ const OWNER_MUTATION_EXECUTORS = new Map([
   [
     "clearProjectField",
     {
-      callee: "graphql",
       operation: CLEAR_OWNER_MUTATION_NAME,
     },
   ],
   [
     "updateDateField",
     {
-      callee: "graphql",
       operation: UPDATE_OWNER_MUTATION_NAME,
     },
   ],
   [
     "updateTextField",
     {
-      callee: "graphql",
       operation: UPDATE_OWNER_MUTATION_NAME,
     },
   ],
@@ -806,42 +804,6 @@ function enclosingFunctionName(node) {
   return null;
 }
 
-function propertyName(property) {
-  if (!property.name) return null;
-  if (ts.isIdentifier(property.name) || ts.isStringLiteralLike(property.name)) {
-    return property.name.text;
-  }
-  return null;
-}
-
-function hasExactMutationGuard(node) {
-  const current = unwrapStaticExpression(node);
-  if (!ts.isObjectLiteralExpression(current)) return false;
-  const properties = new Map();
-  for (const property of current.properties) {
-    if (!ts.isPropertyAssignment(property)) return false;
-    const name = propertyName(property);
-    if (!name || properties.has(name)) return false;
-    properties.set(name, unwrapStaticExpression(property.initializer));
-  }
-  if (
-    properties.size !== 2 ||
-    !properties.has("dryRun") ||
-    !properties.has("mutates")
-  ) {
-    return false;
-  }
-  const dryRun = properties.get("dryRun");
-  const mutates = properties.get("mutates");
-  return (
-    ts.isPropertyAccessExpression(dryRun) &&
-    ts.isIdentifier(dryRun.expression) &&
-    dryRun.expression.text === "options" &&
-    dryRun.name.text === "dryRun" &&
-    mutates.kind === ts.SyntaxKind.TrueKeyword
-  );
-}
-
 function symbolComesFrom(inventory, node, path, name) {
   const symbol = resolvedSymbol(
     inventory.checker,
@@ -1239,43 +1201,31 @@ function exactGuardedOwnerMutationCall(
   argumentIndex,
   fields,
 ) {
-  if (path !== OWNER_MUTATION_EXECUTOR_PATH || argumentIndex !== 0)
+  if (path !== OWNER_MUTATION_EXECUTOR_PATH || argumentIndex !== 2)
     return false;
   const functionName = enclosingFunctionName(call);
   const executor = OWNER_MUTATION_EXECUTORS.get(functionName);
   if (
     !executor ||
     !ts.isIdentifier(call.expression) ||
-    call.expression.text !== executor.callee ||
-    call.arguments.length !== 3 ||
-    !hasExactMutationGuard(call.arguments[2])
-  ) {
-    return false;
-  }
-  let callback = call.parent;
-  while (callback && !ts.isArrowFunction(callback)) {
-    callback = callback.parent;
-  }
-  if (!callback || unwrapStaticExpression(callback.body) !== call) return false;
-  const capabilityCall = callback.parent;
-  if (
-    !ts.isCallExpression(capabilityCall) ||
-    !ts.isIdentifier(capabilityCall.expression) ||
-    capabilityCall.expression.text !== "executeIssueOwnerMutation" ||
+    call.expression.text !== "executeIssueOwnerMutation" ||
     !symbolComesFrom(
       inventory,
-      capabilityCall.expression,
+      call.expression,
       "scripts/pr/issue-board-lock.mjs",
       "executeIssueOwnerMutation",
     ) ||
-    capabilityCall.arguments.length !== 3 ||
-    capabilityCall.arguments[2] !== callback ||
-    !ts.isIdentifier(capabilityCall.arguments[0]) ||
-    capabilityCall.arguments[0].text !== "capability"
+    call.arguments.length !== 4
   ) {
     return false;
   }
-  const binding = capabilityCall.arguments[1];
+  if (
+    !ts.isIdentifier(call.arguments[0]) ||
+    call.arguments[0].text !== "capability"
+  ) {
+    return false;
+  }
+  const binding = call.arguments[1];
   return (
     ts.isCallExpression(binding) &&
     ts.isIdentifier(binding.expression) &&
@@ -8118,6 +8068,62 @@ test("owner capability rejects forged identity and every wrong write scope", asy
   assertEqual(graphqlCalls, 1);
 });
 
+test("owner capability rejects a runtime-built mutation document before GraphQL", async () => {
+  const server = createFakeLockServer();
+  const project = ownershipProject();
+  let graphqlCalls = 0;
+  const runtimeField = ["clearProjectV2Item", "FieldValue"].join("");
+  const runtimeDocument = `
+    mutation ($project: ID!, $item: ID!, $field: ID!) {
+      ${runtimeField}(
+        input: { projectId: $project, itemId: $item, fieldId: $field }
+      ) {
+        projectV2Item { id }
+      }
+    }
+  `;
+
+  await withIssueMutationLock(
+    LOCK_TEST_OPTIONS,
+    2602,
+    { operation: "claim", projectId: project.id, agent: "codex" },
+    async (_lease, capability) => {
+      const error = await assertRejects(
+        () =>
+          executeIssueOwnerMutation(
+            capability,
+            {
+              repo: LOCK_TEST_OPTIONS.repo,
+              issueNumber: 2602,
+              projectOwner: LOCK_TEST_OPTIONS.projectOwner,
+              projectNumber: LOCK_TEST_OPTIONS.projectNumber,
+              projectId: project.id,
+              operation: "claim",
+              mutationKind: "update",
+              field: "Branch",
+              fieldId: "branch",
+              dataType: "TEXT",
+              itemId: "item-2602",
+            },
+            runtimeDocument,
+            {
+              graphql: async () => {
+                graphqlCalls += 1;
+              },
+              value: "fix/2602",
+            },
+          ),
+        /must contain only/,
+      );
+      assert(error instanceof IssueOwnerMutationCapabilityError);
+      assertEqual(graphqlCalls, 0);
+    },
+    server.operations,
+  );
+  assertEqual(graphqlCalls, 0);
+  assertEqual(server.commits.get(server.refOid).payload.state, "UNLOCK");
+});
+
 test("trusted owner proof rejects a foreign item and forged field map before mutation", async () => {
   const server = createFakeLockServer();
   const project = ownershipProject();
@@ -8261,15 +8267,15 @@ test("a fresh claim adopts only the independently proven Project item", async ()
 test("owner mutation variables use the frozen trusted target IDs", async () => {
   const project = ownershipProject();
   const server = createFakeLockServer({ ownerProject: project });
-  const mutationProjects = [];
+  const mutations = [];
   await withIssueMutationLock(
     LOCK_TEST_OPTIONS,
     2704,
     { operation: "claim", projectId: project.id, agent: "codex" },
     async (_lease, capability) => {
       const write = guardedTextWrite(capability, {
-        graphql: async (_query, variables) => {
-          mutationProjects.push(variables.project);
+        graphql: async (document, variables, transport) => {
+          mutations.push({ document, variables, transport });
           return { data: {} };
         },
         issueNumber: 2704,
@@ -8280,7 +8286,19 @@ test("owner mutation variables use the frozen trusted target IDs", async () => {
     },
     server.operations,
   );
-  assertDeepEqual(mutationProjects, ["project"]);
+  assertEqual(mutations.length, 1);
+  const expectedField = ["updateProjectV2Item", "FieldValue"].join("");
+  assert(mutations[0].document.includes(expectedField));
+  assertDeepEqual(mutations[0].variables, {
+    project: "project",
+    item: "item-2704",
+    field: "branch",
+    text: "fix/2704",
+  });
+  assertDeepEqual(mutations[0].transport, {
+    dryRun: false,
+    mutates: true,
+  });
   assertEqual(server.commits.get(server.refOid).payload.state, "UNLOCK");
 });
 
@@ -12907,8 +12925,8 @@ test("owner mutation proof rejects a shadow capability executor", () => {
   assertConfinementCanary(
     {
       [OWNER_MUTATION_EXECUTOR_PATH]: `
-        function executeIssueOwnerMutation(_capability, _binding, mutation) {
-          return mutation();
+        function executeIssueOwnerMutation() {
+          return {};
         }
         function ownerMutationBinding() {
           return {};
@@ -12925,11 +12943,8 @@ test("owner mutation proof rejects a shadow capability executor", () => {
           return executeIssueOwnerMutation(
             capability,
             ownerMutationBinding(),
-            () => graphql(
-              ${JSON.stringify(CANARY_UPDATE_MUTATION)},
-              { project: project.id, item: itemId, field: fieldId, text },
-              { dryRun: options.dryRun, mutates: true },
-            ),
+            ${JSON.stringify(CANARY_UPDATE_MUTATION)},
+            { graphql, value: text },
           );
         }
       `,

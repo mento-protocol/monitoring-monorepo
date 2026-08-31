@@ -8,6 +8,8 @@
 
 import { createHash, randomUUID } from "node:crypto";
 
+import { Kind, parse as parseGraphql, stripIgnoredCharacters } from "graphql";
+
 import {
   IssueOwnershipConflictError,
   OPTIONAL_PROJECT_FIELDS,
@@ -51,6 +53,7 @@ const OWNER_FIELD_TYPES = Object.freeze({
   [OPTIONAL_PROJECT_FIELDS.claimedAt]: "DATE",
   [OPTIONAL_PROJECT_FIELDS.pr]: "TEXT",
 });
+const OWNER_MUTATION_KINDS = new Set(["clear", "update"]);
 
 const issueOwnerCapabilities = new WeakMap();
 const issueOwnerProofTestTransports = new WeakMap();
@@ -341,6 +344,7 @@ function capabilityError(message, binding = {}, options = {}) {
       projectNumber: binding.projectNumber ?? null,
       projectId: binding.projectId ?? null,
       operation: binding.operation ?? null,
+      mutationKind: binding.mutationKind ?? null,
       field: binding.field ?? null,
       fieldId: binding.fieldId ?? null,
       dataType: binding.dataType ?? null,
@@ -411,7 +415,102 @@ function requireActiveCapability(capability, binding) {
       binding,
     );
   }
+  if (!OWNER_MUTATION_KINDS.has(binding.mutationKind)) {
+    throw capabilityError(
+      "Owner-field mutation requires a clear or update mutation kind",
+      binding,
+    );
+  }
   return record;
+}
+
+function ownerMutationField(mutationKind) {
+  const suffix = "FieldValue";
+  return mutationKind === "clear"
+    ? `clearProjectV2Item${suffix}`
+    : `updateProjectV2Item${suffix}`;
+}
+
+function expectedOwnerMutationDocument(binding) {
+  const field = ownerMutationField(binding.mutationKind);
+  if (binding.mutationKind === "clear") {
+    return `
+      mutation ($project: ID!, $item: ID!, $field: ID!) {
+        ${field}(
+          input: { projectId: $project, itemId: $item, fieldId: $field }
+        ) {
+          projectV2Item { id }
+        }
+      }
+    `;
+  }
+  const valueField = binding.dataType === "DATE" ? "date" : "text";
+  const valueType = binding.dataType === "DATE" ? "Date!" : "String!";
+  return `
+    mutation (
+      $project: ID!
+      $item: ID!
+      $field: ID!
+      $${valueField}: ${valueType}
+    ) {
+      ${field}(
+        input: {
+          projectId: $project
+          itemId: $item
+          fieldId: $field
+          value: { ${valueField}: $${valueField} }
+        }
+      ) {
+        projectV2Item { id }
+      }
+    }
+  `;
+}
+
+function requireTrustedOwnerMutationDocument(binding, document) {
+  if (typeof document !== "string" || !document.trim()) {
+    throw capabilityError(
+      "Owner-field mutation requires a GraphQL document",
+      binding,
+    );
+  }
+  let parsed;
+  try {
+    parsed = parseGraphql(document);
+  } catch (err) {
+    throw capabilityError(
+      "Owner-field mutation GraphQL document is invalid",
+      binding,
+      { cause: err },
+    );
+  }
+  const operations = parsed.definitions.filter(
+    (definition) => definition.kind === Kind.OPERATION_DEFINITION,
+  );
+  const fields = operations[0]?.selectionSet?.selections ?? [];
+  const expectedField = ownerMutationField(binding.mutationKind);
+  if (
+    parsed.definitions.length !== 1 ||
+    operations.length !== 1 ||
+    operations[0].operation !== "mutation" ||
+    fields.length !== 1 ||
+    fields[0].kind !== Kind.FIELD ||
+    fields[0].name.value !== expectedField
+  ) {
+    throw capabilityError(
+      `Owner-field mutation GraphQL document must contain only ${expectedField}`,
+      binding,
+    );
+  }
+  if (
+    stripIgnoredCharacters(document) !==
+    stripIgnoredCharacters(expectedOwnerMutationDocument(binding))
+  ) {
+    throw capabilityError(
+      `Owner-field mutation GraphQL document does not match the trusted ${binding.mutationKind} contract`,
+      binding,
+    );
+  }
 }
 
 function sameOwnerTargetSchema(left, right) {
@@ -540,14 +639,20 @@ function trackIssueOwnerMutationOutcome(record, pending, lineage) {
   });
 }
 
-export function executeIssueOwnerMutation(capability, binding, mutation) {
-  if (typeof mutation !== "function") {
+export function executeIssueOwnerMutation(
+  capability,
+  binding,
+  document,
+  { graphql = ghGraphql, value } = {},
+) {
+  if (typeof graphql !== "function") {
     throw capabilityError(
-      "Owner-field mutation executor requires a mutation function",
+      "Owner-field mutation executor requires a GraphQL transport",
       binding,
     );
   }
   const record = requireActiveCapability(capability, binding);
+  requireTrustedOwnerMutationDocument(binding, document);
   if (record.allowedFields.length === 0) {
     throw capabilityError(
       `Operation ${record.operation} cannot write Project field ID ${JSON.stringify(binding.fieldId)}`,
@@ -563,7 +668,18 @@ export function executeIssueOwnerMutation(capability, binding, mutation) {
     Promise.resolve().then(async () => {
       const trustedTarget =
         resolvedTarget ?? (await adoptTrustedOwnerTarget(record, binding));
-      return mutation(trustedTarget);
+      const variables = {
+        project: trustedTarget.projectId,
+        item: trustedTarget.itemId,
+        field: trustedTarget.fieldId,
+      };
+      if (binding.mutationKind === "update") {
+        variables[binding.dataType === "DATE" ? "date" : "text"] = value;
+      }
+      return graphql(document, variables, {
+        dryRun: record.dryRun,
+        mutates: true,
+      });
     }),
     Object.freeze(Object.create(null)),
   );

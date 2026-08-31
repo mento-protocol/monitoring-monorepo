@@ -166,11 +166,10 @@ Take the top N — default 2 — that satisfy **all** of:
   the workboard, no non-empty `blockedBy` relationship, and not waiting on an
   external dependency named in its body. The three do not imply each other:
   a native blocked-by link needs no body sentence and moves no Project field.
-- **Carries a `pkg:*` label at all.** An issue with no package area makes the
+- **Carries exactly one `pkg:*` label.** An issue with no package area makes the
   independence test below vacuous: it shares no label with anything, so two
-  such issues both pass and then edit the same package. Nothing else rejects
-  the gap — the Agent Task form starts an issue at `needs-grooming`, and
-  `issue:claim` validates queue state rather than routing labels. Treat a
+  such issues both pass and then edit the same package. Multiple package areas
+  are ambiguous and make the same independence check unreliable. Treat a
   missing or ambiguous package area as ineligible rather than as independence.
 - **Mutually independent.** No two issues in one batch share a `pkg:*` label —
   `pkg:dashboard`, `pkg:indexer`, `pkg:alerts`, `pkg:terraform`, `pkg:tooling`,

@@ -395,6 +395,19 @@ try {
     ),
     "production-infra-contract must install dependencies locally",
   );
+  const productionInfraValidatorIndex = productionInfraContract.steps.findIndex(
+    (step) =>
+      String(step.run).trim() ===
+      "node scripts/check-agent-quality-gate-package-scripts.mjs",
+  );
+  const productionInfraInstallIndex = productionInfraContract.steps.findIndex(
+    (step) => step.uses === "./.github/actions/pnpm-install",
+  );
+  assert(
+    productionInfraValidatorIndex >= 0 &&
+      productionInfraValidatorIndex < productionInfraInstallIndex,
+    "production-infra-contract must validate trusted package scripts before dependency installation",
+  );
   assert(
     productionInfraContract.steps.some(
       (step) => String(step.run).trim() === "pnpm tf:test",
