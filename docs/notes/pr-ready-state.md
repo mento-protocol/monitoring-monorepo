@@ -81,7 +81,8 @@ Required blockers:
 
 Optional signals:
 
-- Advisory bot reviews when they are not required by branch protection.
+- Legacy Cursor Bugbot checks on PRs opened before its 2026-08-31 disablement,
+  when branch protection does not require them.
 - Non-required check runs, flaky advisory jobs, or lint/report jobs configured
   outside the required status rollup.
 - Older bot comments or reviews that do not apply to the current head, provided
@@ -89,7 +90,10 @@ Optional signals:
 
 Cursor BugBot is disabled. The optional check classifier and feedback parser
 retain explicit compatibility for open PRs that still carry legacy Cursor
-state. Do not wait for or request a new Cursor review.
+state. Report legacy check lag as advisory, but do not hold the all-clear on it
+unless branch protection requires it. Actionable Cursor feedback and an
+aggregate `CHANGES_REQUESTED` verdict remain required blockers. Do not wait for
+or request a new Cursor review.
 
 CodeRabbit's `CodeRabbit` check context (ADR 0066) is advisory the same way,
 with one added trap: it reports `SUCCESS` even when no review ran. A
@@ -479,7 +483,8 @@ Field expectations:
 9. Report visibly in-progress review-producing workflows as optional lag. If
    you are still watching the PR when one finishes, rerun `pr:feedback-state`
    to catch late feedback; do not treat the optional workflow status itself as
-   a blocker. Ignore legacy Cursor check lag; BugBot is disabled.
+   a blocker. Report legacy Cursor check lag as compatibility context only; do
+   not wait for or request a new BugBot review.
 10. After the CodeRabbit closeout step and any final optional-review refresh,
     rerun `pr:feedback-state` and then `pr:ready-state`. Signal all-clear only
     when feedback-state has no required blocker and ready-state `ready` is true
