@@ -62,7 +62,6 @@ test("the repository satisfies the M2 structural boundary", () => {
 
 test("a HOME override cannot put the pnpm cache inside the checkout", () => {
   const root = structuralFixture();
-  mkdirSync(join(root, "pnpm-home"), { recursive: true });
   const action = load(
     readFileSync(join(root, ".github/actions/pnpm-install/action.yml"), "utf8"),
   );
@@ -118,9 +117,16 @@ test("structural mutations fail closed at each M2 boundary", () => {
   mutateOnce(
     root,
     ".github/actions/pnpm-install/action.yml",
-    "      run: pnpm install --frozen-lockfile",
+    "      run: pnpm install --frozen-lockfile --store-dir ~/pnpm-store",
     "      run: echo skipped",
     /exact install command/u,
+  );
+  mutateOnce(
+    root,
+    ".github/workflows/ci.yml",
+    "pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir . --store-dir ~/pnpm-store",
+    "pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir .",
+    /three package-local installs/u,
   );
   // prettier-ignore
   mutateOnce(root, ".github/actions/pnpm-install/action.yml", "        dest: ~/pnpm-home", "        dest: ~/other", /pin one home-relative PNPM_HOME/u);
@@ -147,7 +153,7 @@ test("structural mutations fail closed at each M2 boundary", () => {
   mutateOnce(
     root,
     ".github/actions/pnpm-install/action.yml",
-    "        path: ~/pnpm-home/node_modules/.bin/store",
+    "        path: ~/pnpm-store",
     "        path: ~/.local/share/pnpm/store",
     /pinned home-relative store/u,
   );
@@ -158,9 +164,9 @@ test("structural mutations fail closed at each M2 boundary", () => {
   // prettier-ignore
   mutateOnce(root, ".github/actions/pnpm-install/action.yml", "      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0", "      uses: ./missing-pnpm-save", /one restore and one protected-main save/u);
   // prettier-ignore
-  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "    - name: Clear incomplete pnpm store restore", "    - name: Duplicate pnpm restore\n      continue-on-error: true\n      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0\n      with:\n        path: ~/pnpm-home/node_modules/.bin/store\n        key: trusted-main-v1-pnpm-store-duplicate\n    - name: Clear incomplete pnpm store restore", /one restore and one protected-main save/u);
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "    - name: Clear incomplete pnpm store restore", "    - name: Duplicate pnpm restore\n      continue-on-error: true\n      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0\n      with:\n        path: ~/pnpm-store\n        key: trusted-main-v1-pnpm-store-duplicate\n    - name: Clear incomplete pnpm store restore", /one restore and one protected-main save/u);
   // prettier-ignore
-  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "    - name: Save pnpm store", "    - name: Duplicate pnpm save\n      if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n      continue-on-error: true\n      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0\n      with:\n        path: ~/pnpm-home/node_modules/.bin/store\n        key: trusted-main-v1-pnpm-store-duplicate\n    - name: Save pnpm store", /one restore and one protected-main save/u);
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "    - name: Save pnpm store", "    - name: Duplicate pnpm save\n      if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n      continue-on-error: true\n      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0\n      with:\n        path: ~/pnpm-store\n        key: trusted-main-v1-pnpm-store-duplicate\n    - name: Save pnpm store", /one restore and one protected-main save/u);
   // prettier-ignore
   mutateOnce(root, ".github/actions/pnpm-install/action.yml", "    - name: Install dependencies", "    - name: Clear incomplete pnpm store restore\n      if: steps.pnpm-cache.outputs.cache-hit == ''\n      shell: bash\n      run: echo duplicate\n    - name: Install dependencies", /one cleanup/u);
   mutateOnce(
@@ -178,14 +184,14 @@ test("structural mutations fail closed at each M2 boundary", () => {
     /without mutating the later-step environment/u,
   );
   // prettier-ignore
-  mutateOnce(root, ".github/actions/pnpm-install/action.yml", 'const cache = join(realpathSync(join(homedir(), "pnpm-home")), "node_modules", ".bin", "store")', 'const cache = join(realpathSync(join(homedir(), "other")), "node_modules", ".bin", "store")', /pin one home-relative PNPM_HOME/u);
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", 'const target = join(realpathSync(homedir()), "pnpm-store")', 'const target = join(realpathSync(homedir()), "other")', /pin one home-relative PNPM_HOME/u);
   // prettier-ignore
   mutateOnce(root, ".github/actions/pnpm-install/action.yml", "    - name: Prepare pnpm store target", "    - name: Verify pnpm store target\n      shell: bash\n      run: echo duplicate\n    - name: Prepare pnpm store target", /pin one home-relative PNPM_HOME/u);
   mutateOnce(
     root,
     ".github/actions/pnpm-install/action.yml",
     "    - name: Save pnpm store",
-    "    - name: Install dependencies\n      shell: bash\n      run: pnpm install --frozen-lockfile\n    - name: Save pnpm store",
+    "    - name: Install dependencies\n      shell: bash\n      run: pnpm install --frozen-lockfile --store-dir ~/pnpm-store\n    - name: Save pnpm store",
     /pin one home-relative PNPM_HOME/u,
   );
   mutateOnce(

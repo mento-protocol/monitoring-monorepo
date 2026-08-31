@@ -746,12 +746,12 @@ jobs:
       # handler checks so CI exercises the same dependency graph that deploys.
       - name: Install handler deploy dependencies
         working-directory: alerts/infra/onchain-event-handler
-        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir .
+        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir . --store-dir ~/pnpm-store
       # Same package-local install for the on-call announcer Cloud Function
       # source root.
       - name: Install on-call announcer deploy dependencies
         working-directory: alerts/infra/oncall-announcer
-        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir .
+        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir . --store-dir ~/pnpm-store
       - name: Typecheck (onchain-event-handler)
         working-directory: alerts/infra/onchain-event-handler
         run: pnpm run typecheck
@@ -839,7 +839,7 @@ jobs:
       # exercises the same dependency graph that deploys.
       - name: Install deploy dependencies
         working-directory: governance-watchdog
-        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir .
+        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir . --store-dir ~/pnpm-store
       - name: Typecheck
         working-directory: governance-watchdog
         run: pnpm run typecheck

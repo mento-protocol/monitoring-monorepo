@@ -124,6 +124,11 @@ required command runs. This handles a miss and a failed partial extraction.
 A prefix-key hit returns `false`; the workflow keeps that complete restore and
 still runs the required command.
 
+The pnpm action separates its executable home from its dependency store. It
+keeps the executable in `~/pnpm-home` and caches `~/pnpm-store`. Root and
+package-local CI installs select the cache target explicitly. Miss cleanup
+cannot remove pnpm's own files.
+
 The M2 structural checker follows local reusable workflows from every direct
 pull request trigger. It inventories every pull request job with write
 permission or credential access. Each entry pins its permission map, exact

@@ -511,6 +511,10 @@ empty `cache-hit` output removes only that target before the command runs. This
 clears a missing or failed partial restore. A prefix-key hit returns `false`;
 the workflow keeps that complete restore and still runs the command.
 
+The pnpm executable stays in `~/pnpm-home`. The dependency cache stays in
+`~/pnpm-store`. Every root and package-local CI install selects that store
+explicitly. Cache cleanup cannot remove the pnpm executable.
+
 Do not use:
 
 - A cached pass instead of running a required test, lint, typecheck, build, or

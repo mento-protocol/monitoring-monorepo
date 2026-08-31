@@ -25,8 +25,8 @@
     {
       "path": ".github/actions/pnpm-install/action.yml",
       "category": "action",
-      "additions": 44,
-      "deletions": 2
+      "additions": 45,
+      "deletions": 3
     },
     {
       "path": ".github/workflows/aegis-terraform.yml",
@@ -49,8 +49,8 @@
     {
       "path": ".github/workflows/ci.yml",
       "category": "workflow",
-      "additions": 32,
-      "deletions": 38
+      "additions": 35,
+      "deletions": 41
     },
     {
       "path": ".github/workflows/claude.yml",
@@ -127,19 +127,19 @@
     {
       "path": "docs/PLAN-progressive-verification-graph.html",
       "category": "doc",
-      "additions": 32,
+      "additions": 36,
       "deletions": 4
     },
     {
       "path": "docs/PLAN-progressive-verification-graph.md",
       "category": "doc",
-      "additions": 63,
+      "additions": 67,
       "deletions": 13
     },
     {
       "path": "docs/adr/0078-staged-verification-redesign.md",
       "category": "doc",
-      "additions": 91,
+      "additions": 96,
       "deletions": 8
     },
     {
@@ -223,7 +223,7 @@
     {
       "path": "scripts/workflows/check-pr-validation-boundary.test.mjs",
       "category": "test",
-      "additions": 452,
+      "additions": 458,
       "deletions": 0
     },
     {
@@ -253,13 +253,13 @@
   ],
   "totals": {
     "workflow": {
-      "additions": 254,
-      "deletions": 749,
+      "additions": 257,
+      "deletions": 752,
       "net": -495
     },
     "action": {
-      "additions": 47,
-      "deletions": 2,
+      "additions": 48,
+      "deletions": 3,
       "net": 45
     },
     "check": {
@@ -268,14 +268,14 @@
       "net": 192
     },
     "test": {
-      "additions": 796,
+      "additions": 802,
       "deletions": 61,
-      "net": 735
+      "net": 741
     },
     "doc": {
-      "additions": 252,
+      "additions": 265,
       "deletions": 79,
-      "net": 173
+      "net": 186
     }
   }
 }
