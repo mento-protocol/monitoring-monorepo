@@ -1237,8 +1237,8 @@ jobs:
         run: node scripts/workflows/check-notifier-coverage.mjs
       - name: Autofix CI trust unit tests
         # Behavioral coverage of scripts/workflows/check-autofix-ci-trust.mjs
-        # (trigger/secret detectors, pull_request_target refusal, guard +
-        # annotation acceptance).
+        # (trigger/secret detectors, unconditional pull_request_target refusal,
+        # workflow_run guards, and guard/annotation acceptance).
         run: node scripts/workflows/check-autofix-ci-trust.test.mjs
       - name: Autofix CI trust assertion
         # Machine-authored sentry-autofix/* PRs pass every fork/dependabot

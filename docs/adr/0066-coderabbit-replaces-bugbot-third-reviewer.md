@@ -3,7 +3,7 @@ title: CodeRabbit replaces Cursor BugBot as the third PR review bot
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-21
+last_verified: 2026-08-30
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -24,8 +24,10 @@ pre-push Codex autoreview. BugBot is advisory only for CI status: its check is
 not required and its lag does not block (ADR 0007). Its comment content is not
 fully advisory, though — `pr:feedback-state` treats `BUGBOT_BUG_ID` as an
 actionable marker and blocks `pr:ready-state` until every flagged comment is
-answered (`scripts/pr/pr-feedback-state-core.mjs`); the dependabot auto-merge flow
-separately cites BugBot's risk summary as advisory only. Codex and Claude run
+answered (`scripts/pr/pr-feedback-state-core.mjs`). The Dependabot auto-merge
+flow that existed when this ADR was accepted cited BugBot's risk summary as
+advisory only. The current narrow workflow pair does not use a review bot as
+an eligibility input. Codex and Claude run
 on subscriptions the team already pays for other reasons. BugBot is the only
 reviewer with its own bill.
 
@@ -153,9 +155,9 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
    The BugBot sweep — retiring `BUGBOT_BUG_ID`,
    `docs/adr/0007-agent-quality-gate-and-merge-oracle.md`'s "Advisory bot lag
    (for example, Cursor)" line, and the comment in
-   `.github/workflows/dependabot-auto-merge.yml` — follows once the ~2-week
+   the then-current Dependabot auto-merge workflow — follows once the ~2-week
    parallel window (step 3) ends and BugBot is disabled in the Cursor
-   dashboard.
+   dashboard. The current narrow workflow pair no longer contains that comment.
 5. **Measure.** Run `scripts/pr/review-process-metrics.mjs` on before/after
    cohorts and re-check the fixed/won't-fix reply ratio per bot after ~40
    merged PRs. If CodeRabbit's accepted-finding rate is materially below

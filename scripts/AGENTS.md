@@ -16,8 +16,8 @@ Read the relevant [ADR](../docs/adr/README.md) before changing script behavior.
 
 ## Scope
 
-`scripts/` holds deploy wrappers, agent quality gates, code-health checks, and
-maintenance utilities.
+`scripts/` holds deploy and maintenance tools, agent gates, and code-health
+checks.
 
 ## Layout
 
@@ -54,8 +54,8 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 
 ## Why Files Stay Flat
 
-There are 16 path-pin classes. Move each pin with its file, except the
-`agent-autoreview.sh` runtime pins.
+Move all 15 path-pin classes with their files, except `agent-autoreview.sh`
+feedback-runtime pins.
 
 - **Autoreview runtime pins.** `agent-autoreview.sh` pins runtime,
   sealed `agent-autoreview-secret-suppressions.json` (ADR 0079), and optional
@@ -116,15 +116,17 @@ There are 16 path-pin classes. Move each pin with its file, except the
   the PR base-branch tip, not a PR snapshot. After a move, keep dual probes
   until the new path reaches the base (issue 1904; ADR 0064).
 - **PR validation boundary pins.** Move
-  `workflows/check-pr-validation-boundary{,.test}.mjs` together.
-  Align `ci.yml` and `trunk.yml` calls. ADR 0078 defines the boundary.
-- **Production infrastructure contract pins.**
-  `production-infra-identity-contract/workflow-inventory.mjs` pins exact script
-  paths for the workflows it audits.
+  `workflows/check-pr-validation-boundary{,.test}.mjs` together. Align its
+  `ci.yml` and `trunk.yml` calls. ADR 0078 defines the boundary.
+- **Production infrastructure identity pins.** Under
+  `production-infra-identity-contract/`, keep
+  `workflow-inventory.mjs`, `workflow.test.mjs`,
+  `dependabot-auto-merge.test.mjs`, and `index.test.mjs` aligned with the
+  boundary import. `workflow-inventory.mjs` pins audited workflow script paths.
 - **External console pins.** Codex Cloud pins
   `bootstrap/codex-cloud-{setup,maintenance}.sh`; Claude Code web pins
   `bootstrap/claude-code-web-setup.sh` through `.claude/hooks/session-start.sh`.
-  Moves need operator updates outside repo grep.
+  Moves need external operator updates.
 - **Reviewed-artifact byte pins.** `.gitattributes` pins the Upstash launcher
   EOL and `UPSTASH_MCP_LAUNCHER_SHA256` hashes it. A move changes both. See
   [`docs/notes/upstash-mcp-operator.md`](../docs/notes/upstash-mcp-operator.md).

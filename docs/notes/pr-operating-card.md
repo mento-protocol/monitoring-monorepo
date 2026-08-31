@@ -3,7 +3,7 @@ title: PR Operating Card
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-28
+last_verified: 2026-08-31
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -368,10 +368,12 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    state, and the probes' blocker, thread and unreplied counts — a bare "it's
    green" hides which head the claim was established against.
 
-8. **Merge hygiene.** **Never merge a PR without the user's explicit, direct
-   approval of that specific merge.** Green CI, bot approvals, a READY
-   ready-state, and "ship it" do not authorize a merge. Drive the PR to ready,
-   present the evidence, then stop and ask.
+8. **Merge hygiene.** **Agent sessions never merge a PR without the user's
+   explicit, direct approval of that specific merge.** Green CI, bot approvals,
+   a READY ready-state, and "ship it" do not authorize a merge. Drive the PR to
+   ready, present the evidence, then stop and ask. The repository's narrow
+   Dependabot lane is the only machine-merge exception. It is not authority for
+   an agent to merge or to widen that lane.
 
    Once the user approves, they merge from their own terminal through the
    sanctioned path:
@@ -414,11 +416,53 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    boundary belongs on GitHub's side of the wire.
    [ADR 0075](../adr/0075-pr-merge.md) owns the ordered gates,
    the alternatives, and every residual, including what the deny does not
-   cover. The Dependabot auto-merge workflow runs in CI, not an agent session,
-   and is unaffected. The approval rule above is
-   unchanged — the wrapper mechanizes it, and its refusal is what makes "agents
-   never merge" a control rather than a habit. If the merge itself satisfies Done
-   means, sync the issue state and workboard afterward per
+   cover. [ADR 0081](../adr/0081-narrow-dependabot-auto-merge-exception.md)
+   owns the separate machine exception.
+   `.github/workflows/dependabot-auto-merge.yml` is a separate,
+   machine-authorized lane. It accepts only Dependabot-authored minor and patch
+   updates for GitHub-owned `actions/*` packages in the `github_actions`
+   `actions-minor-patch` group on `main`, after the seven-day cooldown. It
+   refuses major, security, maintainer-changed, third-party publisher,
+   `actions/create-github-app-token`, other-ecosystem, mixed-author, and
+   non-workflow-file changes at enable time. Load-bearing gate and credential
+   actions from other publishers, such as `re-actors/alls-green` and
+   `google-github-actions/auth`, stay on the human path. A read-only
+   `pull_request` classifier verifies event identity and Dependabot metadata.
+   A default-branch `workflow_run` writer treats that result as untrusted. It
+   binds pre-job concurrency to the upstream head repository and branch, so a
+   fork with the same branch name cannot cancel the trusted writer run. It
+   re-reads the workflow, run, first-attempt jobs with `total_count`, current PR
+   and head, the complete issue-event close history, all commits, all files,
+   the current PR body's exact `Maintainer changes` marker, and the base's
+   merge-queue state. It never checks out PR code or reads upstream outputs,
+   artifacts, or caches. It waits for every required check and verifies a
+   non-empty passing required-only projection. The wait is an untrusted delay.
+   The writer repeats the complete workflow, run, job, PR, head,
+   maintainer-change body, close-history, commit, file, and queue proof after
+   it. It then calls the synchronous REST merge endpoint with the exact head
+   SHA and squash method.
+   The endpoint cannot enqueue or leave a standing auto-merge request. A later
+   push cannot satisfy the exact-head write. A recorded close remains a durable
+   human veto after the same PR and head are reopened. Dependabot must open a
+   new PR before this lane can merge that update automatically. The writer
+   makes the issue-event read its final authoritative read. The REST write
+   cannot pin that history, so a close and reopen inside the remaining request
+   window is a residual race.
+   Merges made with this workflow's
+   automatic `GITHUB_TOKEN` do not emit this repository's `push` workflows;
+   required pull-request checks are the final automated evidence for this
+   narrow lane. The writer refuses if `main` has a merge queue. The repository
+   accepts the built-in token's residual risk for this bounded routine group.
+   `GH_READ_TOKEN` and `FINAL_MERGE_TOKEN` both resolve to `github.token` by
+   design. Keep them separate so tests can prove that evidence reads use the
+   read seam and only the synchronous exact-head REST request uses the final
+   write seam. Issue #2091 was closed as not planned. Do not add a
+   `merge-operators` Team, credential broker, dedicated merge App, protected
+   merge Environment, or controlled lifecycle ruleset for this lane. The
+   wrapper mechanizes the approval rule for human and agent-driven merges. Its
+   refusal makes "agents never merge" a local control rather than a habit. If
+   an operator-approved merge satisfies Done means, sync the issue state and
+   workboard afterward per
    [`agent-issue-workflow.md`](agent-issue-workflow.md). If live proof remains,
    continue to production closeout first. After a partial merge, keep the issue
    open. Update the issue body to mark merged work complete, isolate the
@@ -446,8 +490,10 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
 
 These bind regardless of which step you are on:
 
-- **Never merge without explicit approval** for that specific merge (step 8),
-  and the approved merge runs through `pnpm pr:merge` in a human terminal.
+- **Agent sessions never merge without explicit approval** for that specific
+  merge (step 8), and the approved merge runs through `pnpm pr:merge` in a
+  human terminal. The exact Dependabot machine lane in step 8 is the only
+  exception.
 - **Reply before resolving** every feedback item, in the two forms above; a
   clear reply stops re-raising bots from looping.
 - **`Closes #N` only when Done means is fully met**, else `Refs #N`.

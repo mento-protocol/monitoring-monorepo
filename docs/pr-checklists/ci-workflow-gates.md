@@ -146,18 +146,80 @@ Audit workflows that "tolerate transient errors" become attack surface — an at
 
 Dependabot is scoped to the `github-actions` ecosystem (`.github/dependabot.yml`). npm is handled by pnpm with `minimumReleaseAge: 4320` in `pnpm-workspace.yaml`; GitHub-issued security advisories on `pnpm-lock.yaml` still come through as Dependabot PRs without an `npm` entry.
 
-PRs are grouped + cooldown-throttled and pass through a tiered auto-merge gate (`.github/workflows/dependabot-auto-merge.yml`):
+Dependabot groups routine updates. One exact group can auto-merge through
+`.github/workflows/dependabot-auto-merge.yml`.
 
-- **Patch / minor** → auto-merge once required CI checks pass (CI / Vercel / Code Quality / Vercel Preview Comments). Cursor Bugbot's risk summary is advisory.
-- **Major** → human review required. The two recurring failure modes are (a) action input/output signature breaks not caught by CI, (b) ESM-only migrations that quietly skip dependents. `@codex review` is the on-demand second opinion.
-- **Maintainer changes** (the action's upstream maintainer set changed) → held for manual review regardless of tier. Supply-chain signal.
-- **Security advisories** (any tier including major) → bypass Dependabot cooldown so CVE patches flow fast; major-tier security PRs still require human merge.
-- **Any `anthropics/*` or `dependabot/*` action** → never auto-merged (glob covers future renames + sibling actions). Self-loop: claude-code-action is the auto-reviewer, dependabot/fetch-metadata is what classifies update-type for the auto-merge workflow — a regression in either ships unreviewed and breaks the gate that would catch follow-ups.
+- **GitHub-owned `actions/*` patch / minor in `actions-minor-patch`:**
+  auto-merge after required checks pass.
+- **Third-party GitHub Actions:** require a human merge. This includes
+  load-bearing gates such as `re-actors/alls-green` and credential actions
+  such as `google-github-actions/auth`.
+- **Major:** require human review and a human merge. Check action input/output
+  changes and ESM-only migrations that can skip dependents. Use `@codex review`
+  for a second opinion.
+- **Maintainer changes:** require a human merge at every tier.
+- **Security advisories:** bypass cooldown and stay outside the named routine
+  group. Require a human merge.
+- **`actions/create-github-app-token`:** require a human merge. This action can
+  mint GitHub App installation tokens. Keep credential tooling outside the lane
+  so it cannot change an authentication boundary by itself.
+- **`anthropics/*`:** require a human merge. These actions participate in the
+  review boundary and remain separate from other third-party groups.
+- **`dependabot/*`:** require a human merge. `dependabot/fetch-metadata`
+  classifies this auto-merge lane, so it cannot update itself through the lane.
+  Dependabot-owned actions remain separate from other third-party groups.
+- **Every non-GitHub-Actions ecosystem:** require a human merge.
 
-Cooldown default in `dependabot.yml`: `default-days: 7`. Per-semver-tier cooldown (`semver-major-days` etc.) is NOT supported for the github-actions ecosystem — only `default-days` is honored, so all tiers share the same delay. Cooldown does NOT apply to security updates (GitHub-enforced). Because auto-merge handles the click, the 7-day delay on routine bumps costs zero friction.
+All version-update tiers use `default-days: 7`; the `github-actions` ecosystem
+has no per-tier cooldown. GitHub skips cooldown for security updates. Requiring
+the exact `actions-minor-patch` dependency group and `actions/*` publisher
+boundary keep those immediate security updates outside auto-merge.
 
-- [ ] If you add a new external review integration — GitHub App or Action — that's load-bearing for review/merge gating (Cursor Bugbot, Codex, Claude, CodeRabbit), add it to the auto-merge exclusion list with the same self-loop rationale
-- [ ] If you add a new `package-ecosystem` to `dependabot.yml`, decide whether it inherits the same auto-merge policy or needs a separate rule — npm in particular has a larger transitive blast radius than github-actions
+The lane has two pinned workflows. The `pull_request` classifier has read-only
+permissions. It verifies the event and pinned Dependabot metadata. The
+default-branch `workflow_run` writer treats completion as an untrusted signal.
+It re-reads the exact workflow and run, first-attempt job and step results,
+current PR and head, the complete issue-event close history, the current PR
+body's exact `Maintainer changes` marker, every commit, every changed file, and
+the base's merge queue. It requires one open same-repository PR, no prior
+`closed` or `reopened` event, verified Dependabot-authored commits, and only
+modified top-level workflow YAML. A recorded close remains a durable human veto
+after the same PR and head are reopened. Dependabot must open a new PR before
+the update can enter this lane again. The writer always rejects changes to
+either trust workflow. It waits for every required check and verifies a
+non-empty passing required-only projection. It then repeats the complete
+workflow, run, job, PR, head, maintainer-change body, close-history, commit,
+file, and queue proof. The issue-event read is the final authoritative read.
+The final write is a synchronous REST merge with the exact head SHA and squash
+method. It cannot enqueue, create an auto-merge request, or pin issue-event
+history. A close and reopen inside the remaining request window is a residual
+race. Neither workflow checks out or executes PR code. The writer does not read
+upstream outputs, artifacts, or caches. `pnpm tf:test` pins both parsed workflow
+shapes. The autofix trust checker rejects every `pull_request_target` workflow.
+
+Before changing the classifier policy or successful job shape, drain every
+in-flight run from the prior classifier version or add an explicit runtime
+version binding. The writer uses the stable workflow ID and path. Those values
+alone do not distinguish old classifier source from new classifier source.
+
+The automatic `GITHUB_TOKEN` merge does not emit this repository's `push`
+workflows. Required PR checks are the final automated evidence for this narrow
+lane. The writer refuses if `main` has a merge queue. The final REST endpoint
+has no enqueue behavior, so a queue activated after the last read cannot turn
+the write into deferred queue state. A future queue rollout must still keep
+this lane disabled until a reviewed design defines its queue behavior. The
+repository accepts the built-in token's residual risk for this bounded routine
+group. `GH_READ_TOKEN` and `FINAL_MERGE_TOKEN` both resolve to `github.token` by
+design. Keep the variables separate so tests can prove that all evidence reads
+use the read seam and only the synchronous exact-head REST request uses the
+final-write seam. Issue #2091 was closed as not planned. This lane will not add a
+`merge-operators` Team, credential broker, dedicated merge App, protected merge
+Environment, or controlled lifecycle ruleset.
+
+- [ ] If you add a new external review integration — GitHub App or Action — that is load-bearing for review or merge gating, keep its updates outside routine groups when an isolated review improves the self-update boundary
+- [ ] If you add a new `package-ecosystem` to `dependabot.yml`, keep it on the
+      human path unless a separate reviewed decision defines its exact lane.
+      npm has a larger transitive blast radius than GitHub Actions.
 
 ## 8. Runner architecture (ARM vs x64)
 
@@ -215,7 +277,9 @@ closed.
       `mento-protocol/monitoring-monorepo/.github/workflows/…@ref`), whose
       callee may bind a credential the caller cannot see. All need the same
       guard or annotation
-- [ ] Never introduce `pull_request_target` — the checker refuses it outright
+- [ ] Do not introduce `pull_request_target`. The checker refuses every use.
+      Use an unprivileged PR classifier and a default-branch writer only after
+      a separate reviewed decision defines the full boundary.
 - [ ] Checkouts in jobs that execute PR-head code set `persist-credentials: false` (the checkout token in `.git/config` is readable by any test/build the PR controls)
 - [ ] `node scripts/workflows/check-autofix-ci-trust.mjs` must pass after the change
 - [ ] `node scripts/workflows/check-pr-validation-boundary.test.mjs` must pass

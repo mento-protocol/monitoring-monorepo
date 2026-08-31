@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "baseSha": "95d0bfcab00c007c331838f2aac2f3ab4e310ac6",
+  "baseSha": "34143341bec76065b9c1c1b9cde6bf733a57e39e",
   "baseline": "M3 additive complexity receipt for #2125.",
   "scope": "Every changed and untracked M3 path relative to baseSha, except this receipt.",
   "derivation": {
     "method": "Use git diff --numstat from baseSha for tracked paths and physical line counts for untracked paths. The receipt path self-excludes from its own scope and totals.",
-    "trackedCommand": "git diff --numstat 95d0bfcab00c007c331838f2aac2f3ab4e310ac6 -- . ':!docs/metrics/verification-redesign-m3-complexity.json'",
+    "trackedCommand": "git diff --numstat 34143341bec76065b9c1c1b9cde6bf733a57e39e -- . ':!docs/metrics/verification-redesign-m3-complexity.json'",
     "untrackedMethod": "List untracked, non-ignored paths with git ls-files --others --exclude-standard, exclude this receipt, and count each remaining file with awk END NR.",
     "receiptPath": "docs/metrics/verification-redesign-m3-complexity.json",
     "receiptSelfExcluded": true
@@ -47,8 +47,8 @@
     {
       "path": "docs/pr-checklists/ci-workflow-gates.md",
       "category": "doc",
-      "additions": 27,
-      "deletions": 2
+      "additions": 26,
+      "deletions": 1
     },
     {
       "path": "docs/pr-checklists/code-health.md",
@@ -71,8 +71,8 @@
     {
       "path": "scripts/AGENTS.md",
       "category": "doc",
-      "additions": 5,
-      "deletions": 3
+      "additions": 3,
+      "deletions": 1
     },
     {
       "path": "scripts/check-agent-quality-gate-package-scripts.mjs",
@@ -136,8 +136,8 @@
       "net": 512
     },
     "doc": {
-      "additions": 74,
-      "deletions": 19,
+      "additions": 71,
+      "deletions": 16,
       "net": 55
     },
     "package": {
@@ -146,8 +146,8 @@
       "net": 5
     },
     "all": {
-      "additions": 1017,
-      "deletions": 83,
+      "additions": 1014,
+      "deletions": 80,
       "net": 934
     }
   },
@@ -212,8 +212,8 @@
     }
   },
   "cumulativeM2AndM3": {
-    "additions": 2351,
-    "deletions": 1070,
+    "additions": 2348,
+    "deletions": 1067,
     "net": 1281
   },
   "phase0": {
