@@ -32,9 +32,9 @@ updates:
     # normal human merge path.
     #
     # Review-sensitive packages stay in separate, human-merged PRs:
-    #   - `actions/create-github-app-token` — issue #2091 uses this action to
-    #     mint the dedicated merge credential. It cannot update through the
-    #     lane whose credential boundary it creates.
+    #   - `actions/create-github-app-token` — this action can mint GitHub App
+    #     installation tokens. Keep credential tooling on the human path so
+    #     this lane cannot change an authentication boundary by itself.
     #   - `anthropics/*` — claude-code-action is the auto-review reviewer;
     #     a broken reviewer can break the gate that would review its
     #     follow-ups. Glob covers future Anthropic actions.

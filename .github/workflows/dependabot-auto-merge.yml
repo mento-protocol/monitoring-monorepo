@@ -13,10 +13,11 @@ name: Dependabot auto-merge
 # a durable human veto after the same head is reopened. The endpoint cannot
 # enqueue or leave a standing auto-merge request.
 #
-# The interim GITHUB_TOKEN merge does not emit push-triggered workflows. Issue
-# #2091 must move only the final write to the dedicated repository-scoped merge
-# App before the controlled main lifecycle ruleset is activated. The restricted
-# GITHUB_TOKEN remains the reader for Actions and pull-request evidence.
+# The repository GITHUB_TOKEN performs the evidence reads and the final write.
+# Separate environment variables keep the read path and final-write seam
+# testable, although both values resolve to the same job token by design. This
+# token does not emit push-triggered workflows. Required pull-request checks are
+# the accepted final automated evidence for this narrow lane.
 
 on:
   workflow_run:
@@ -60,8 +61,8 @@ jobs:
       - name: Merge the verified head after required checks
         env:
           GH_READ_TOKEN: ${{ github.token }}
-          # Issue #2091 replaces only this value with the dedicated App token.
-          # Every read above the final REST write keeps GH_READ_TOKEN.
+          # Keep the final-write seam separate from every evidence read. Both
+          # variables use the repository GITHUB_TOKEN by design.
           FINAL_MERGE_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.event.workflow_run.id }}
         run: |

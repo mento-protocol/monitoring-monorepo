@@ -3,7 +3,7 @@ title: Narrow Dependabot auto-merge exception
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-30
+last_verified: 2026-08-31
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -100,22 +100,18 @@ workflows. The autofix trust checker continues to reject every
 `pull_request_target` workflow and requires the writer's explicit
 `sentry-autofix/*` exclusion.
 
-The built-in `GITHUB_TOKEN` is an interim writer credential. Issue #2091 must
-first use Terraform to create a dedicated protected GitHub Environment whose
-deployment policy admits only the explicit `main` branch. The dedicated merge
-App credentials must exist only as Actions secrets scoped to that Environment.
-The operator must verify the live Environment protection and secret metadata
-before a workflow can reference it. Only then may a separate reviewed workflow
-change add the job's `environment:` reference and switch only the final REST
-write to the dedicated repository-scoped merge App token. Adding the reference
-before the protected Environment exists can auto-create an unprotected
-Environment, so this PR does not add it. The restricted `GITHUB_TOKEN` must
-remain the reader for workflow, run, job, required-check, pull-request,
-close-history, commit, file, and queue evidence. The dedicated App token must
-reach only the final merge call. Activation must prove the App credentials are
-enabled, the writer migration is verified, and every auto-merge request created
-by the prior writer is drained. The shared GitHub Actions App and local agent
-App must not receive this ruleset exemption.
+The writer uses the repository's built-in `GITHUB_TOKEN` for authoritative
+reads and the final merge write. The workflow passes that token through
+`GH_READ_TOKEN` and `FINAL_MERGE_TOKEN`. This keeps a testable code boundary:
+all evidence reads must use the read variable, and only the synchronous
+exact-head REST request may use the final-write variable. It does not provide
+credential separation because both variables resolve to `github.token`.
+
+The repository accepts this residual risk for a small, mostly
+single-contributor project and this bounded update class. It will not add a
+`merge-operators` Team, credential broker, dedicated merge App, protected merge
+Environment, or controlled lifecycle ruleset for this lane. Issue #2091 was closed
+as not planned after this decision.
 
 ## Alternatives considered
 
@@ -132,9 +128,10 @@ App must not receive this ruleset exemption.
   standing request that can survive a later trusted maintainer push. A merge
   queue activated after the queue read can also turn the CLI request into an
   enqueue. The synchronous exact-head REST endpoint has neither behavior.
-- **Give the shared GitHub Actions App a future ruleset bypass.** Rejected
-  because that identity is shared by unrelated workflows. Issue #2091 owns a
-  dedicated repository-scoped App.
+- **Add a separate GitHub-side merge identity and lifecycle controls.** Rejected
+  as disproportionate for this repository and update class. The rejected design
+  included a `merge-operators` Team, credential broker, dedicated merge App,
+  protected merge Environment, and controlled lifecycle ruleset.
 - **Auto-merge every Dependabot update.** Rejected. Major, security,
   maintainer-changed, other-ecosystem, non-`actions/*`, and
   `actions/create-github-app-token` updates retain human review and merge. The
@@ -162,8 +159,8 @@ App must not receive this ruleset exemption.
   failed check leaves the PR open and requires a later eligible classifier run.
 - A merge made with the built-in `GITHUB_TOKEN` does not start `push` event
   workflows. Required pull-request checks are the final automated evidence for
-  the interim lane. The future App migration changes the credential boundary
-  and requires a fresh check of post-merge workflow behavior.
+  this lane. The repository accepts this behavior for the bounded routine
+  group.
 - The writer identifies the classifier by its stable GitHub workflow ID, path,
   run shape, and job shape. A future classifier policy change must drain all
   in-flight runs from the prior version or add an explicit runtime version
@@ -197,5 +194,6 @@ App must not receive this ruleset exemption.
   empty `pull_requests` list while its run head SHA still matches the PR head.
   The writer therefore performs a strict owner-and-head PR lookup instead of
   trusting that list.
-- PR #2137 records the implementation and focused validation. Issue #2091 owns
-  the credential migration and controlled lifecycle ruleset.
+- PR #2137 records the implementation and focused validation. Issue #2091 was
+  closed as not planned after the repository accepted the remaining
+  `GITHUB_TOKEN` risk and declined separate lifecycle controls.

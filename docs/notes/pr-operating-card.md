@@ -3,7 +3,7 @@ title: PR Operating Card
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-30
+last_verified: 2026-08-31
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -451,20 +451,14 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    Merges made with this workflow's
    automatic `GITHUB_TOKEN` do not emit this repository's `push` workflows;
    required pull-request checks are the final automated evidence for this
-   narrow lane. The writer refuses if `main` has a merge queue. Before issue
-   #2091 activates its lifecycle ruleset, Terraform must create a dedicated
-   protected GitHub Environment whose deployment policy admits only explicit
-   `main`. The dedicated merge App credentials must exist only as
-   Environment-scoped Actions secrets. Verify that live protection and secret
-   metadata first. A separate reviewed workflow change can then add the
-   writer job's `environment:` reference and switch only the final write from
-   `GITHUB_TOKEN` to the dedicated repository-scoped merge App token. Do not
-   reverse this order: a workflow reference can auto-create an unprotected
-   Environment. The restricted `GITHUB_TOKEN` remains the reader for Actions,
-   pull-request, and close-history evidence. Activation must prove the App
-   credentials are enabled, the writer migration is verified, and auto-merge
-   requests created by the prior writer are drained. The shared GitHub Actions
-   App identity must not receive a ruleset bypass. The
+   narrow lane. The writer refuses if `main` has a merge queue. The repository
+   accepts the built-in token's residual risk for this bounded routine group.
+   `GH_READ_TOKEN` and `FINAL_MERGE_TOKEN` both resolve to `github.token` by
+   design. Keep them separate so tests can prove that evidence reads use the
+   read seam and only the synchronous exact-head REST request uses the final
+   write seam. Issue #2091 was closed as not planned. Do not add a
+   `merge-operators` Team, credential broker, dedicated merge App, protected
+   merge Environment, or controlled lifecycle ruleset for this lane. The
    wrapper mechanizes the approval rule for human and agent-driven merges. Its
    refusal makes "agents never merge" a local control rather than a habit. If
    an operator-approved merge satisfies Done means, sync the issue state and

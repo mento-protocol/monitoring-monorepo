@@ -80,6 +80,20 @@ const writerScript = stepScript(
   writer.jobs["auto-merge"],
   "Merge the verified head after required checks",
 );
+const writerMergeStep = writer.jobs["auto-merge"].steps.find(
+  (step) => step.name === "Merge the verified head after required checks",
+);
+assert.deepEqual(
+  {
+    GH_READ_TOKEN: writerMergeStep.env.GH_READ_TOKEN,
+    FINAL_MERGE_TOKEN: writerMergeStep.env.FINAL_MERGE_TOKEN,
+  },
+  {
+    GH_READ_TOKEN: "${{ github.token }}",
+    FINAL_MERGE_TOKEN: "${{ github.token }}",
+  },
+  "the production read and final-write seams must use the repository GITHUB_TOKEN",
+);
 
 const expectedRepository = "mento-protocol/monitoring-monorepo";
 const workflowIdentity = {
@@ -415,7 +429,7 @@ assert.equal(
 assert.equal(
   pr1872Result.mergeRequest.token,
   "merge-token",
-  "only the final write must use the future dedicated-App token seam",
+  "only the final write must use the separate final-write token seam",
 );
 assert(
   pr1872Result.mergeRequest.args.includes("PUT"),
@@ -444,7 +458,7 @@ for (const { args, token } of pr1872Result.calls) {
   assert.equal(
     token,
     finalMerge ? "merge-token" : "read-token",
-    "the dedicated-App seam must be scoped to the final REST write",
+    "the final-write token seam must be scoped to the final REST write",
   );
 }
 

@@ -3,7 +3,7 @@ title: One sanctioned operator merge path
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-30
+last_verified: 2026-08-31
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -214,8 +214,10 @@ credentials that cannot merge — and is tracked separately as follow-up.
   cap. The suite asserts the cap over all four, which is the only per-PR
   enforcement: `scripts/` has no `max-lines` rule.
 - Raw merge API calls and CI tokens remain outside this local control's reach.
-  ADR 0081 constrains one reviewed CI token path. Issue #2091 owns the later
-  GitHub-side credential and lifecycle boundary.
+  ADR 0081 constrains one reviewed CI token path and accepts its use of the
+  repository `GITHUB_TOKEN`. Issue #2091 was closed as not planned; the ADR 0081
+  lane will not add a separate GitHub-side merge credential or lifecycle
+  boundary.
 
 ## Evidence
 

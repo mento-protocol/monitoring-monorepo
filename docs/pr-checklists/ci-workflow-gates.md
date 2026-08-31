@@ -3,7 +3,7 @@ title: CI Workflow Gates Checklist
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-30
+last_verified: 2026-08-31
 doc_type: checklist
 scope: ci/process
 review_interval_days: 90
@@ -135,9 +135,9 @@ Dependabot groups routine updates. One exact group can auto-merge through
 - **Maintainer changes:** require a human merge at every tier.
 - **Security advisories:** bypass cooldown and stay outside the named routine
   group. Require a human merge.
-- **`actions/create-github-app-token`:** require a human merge. Issue #2091
-  uses it to mint the dedicated merge credential, so it cannot update through
-  the lane whose credential boundary it creates.
+- **`actions/create-github-app-token`:** require a human merge. This action can
+  mint GitHub App installation tokens. Keep credential tooling outside the lane
+  so it cannot change an authentication boundary by itself.
 - **`anthropics/*`:** require a human merge. These actions participate in the
   review boundary and remain separate from other third-party groups.
 - **`dependabot/*`:** require a human merge. `dependabot/fetch-metadata`
@@ -182,20 +182,14 @@ workflows. Required PR checks are the final automated evidence for this narrow
 lane. The writer refuses if `main` has a merge queue. The final REST endpoint
 has no enqueue behavior, so a queue activated after the last read cannot turn
 the write into deferred queue state. A future queue rollout must still keep
-this lane disabled until a reviewed design defines its queue behavior. Before
-issue #2091 activates its lifecycle ruleset, it must migrate only the final
-write from `GITHUB_TOKEN` to a dedicated repository-scoped merge App token.
-First use Terraform to create and verify a dedicated protected GitHub
-Environment whose deployment policy admits only explicit `main`. Store the App
-credentials only as Actions secrets scoped to that Environment. Only after the
-live protection and secret metadata pass verification may a separate reviewed
-workflow change add the writer job's `environment:` reference and switch the
-final token. Do not add the workflow reference first because GitHub can
-auto-create an unprotected Environment. The restricted `GITHUB_TOKEN` remains
-the reader for authoritative Actions, pull-request, and close-history state.
-Activation must also prove the App credentials are enabled, the migration is
-verified, and auto-merge requests created by the prior writer are drained. Do
-not give the shared GitHub Actions App identity a ruleset bypass.
+this lane disabled until a reviewed design defines its queue behavior. The
+repository accepts the built-in token's residual risk for this bounded routine
+group. `GH_READ_TOKEN` and `FINAL_MERGE_TOKEN` both resolve to `github.token` by
+design. Keep the variables separate so tests can prove that all evidence reads
+use the read seam and only the synchronous exact-head REST request uses the
+final-write seam. Issue #2091 was closed as not planned. This lane will not add a
+`merge-operators` Team, credential broker, dedicated merge App, protected merge
+Environment, or controlled lifecycle ruleset.
 
 - [ ] If you add a new external review integration — GitHub App or Action — that is load-bearing for review or merge gating, keep its updates outside routine groups when an isolated review improves the self-update boundary
 - [ ] If you add a new `package-ecosystem` to `dependabot.yml`, keep it on the
