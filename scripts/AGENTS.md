@@ -92,12 +92,8 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
   policy. Runtime hashes use `$script_source_dir`; suites use `$repo_root`.
   Core edits route both suites; policy edits route autoreview. Missing pins
   freeze the stamp (ADRs 0069 and 0079).
-- **Review-eval pins.** `docs/evals/review-skill.md` pins
-  `scripts/review/install-review-eval-launchd.sh`,
-  `scripts/review/launchd/org.mento.review-eval.plist`,
-  `scripts/review/run-eval.sh`, `scripts/review/run-eval-source-snapshot.sh`,
-  `scripts/review/run-eval-lifecycle.sh`, and
-  `scripts/review/run-eval-runtime.sh`.
+- **Review-eval pins.** `docs/evals/review-skill.md` pins the launchd installer,
+  plist, and four `run-eval*.sh` sources. Update all listed consumers together.
 - **Navigation-eval self-pin.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names its implementation.
 - **Verification evidence.** Move
