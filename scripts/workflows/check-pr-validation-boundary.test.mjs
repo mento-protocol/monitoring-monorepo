@@ -219,8 +219,8 @@ test("structural mutations fail closed at each M2 boundary", () => {
   mutateOnce(
     root,
     ".github/workflows/ci.yml",
-    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      contents: read",
-    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      checks: write\n      contents: read",
+    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      contents: read",
+    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      checks: write\n      contents: read",
     /approved PR authority/u,
   );
   mutateOnce(
@@ -268,8 +268,8 @@ test("structural mutations fail closed at each M2 boundary", () => {
   mutateOnce(
     root,
     ".github/workflows/ci.yml",
-    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      contents: read",
-    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      issues: write\n      contents: read",
+    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      contents: read",
+    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      issues: write\n      contents: read",
     /approved PR authority/u,
   );
   mutateOnce(
@@ -278,6 +278,13 @@ test("structural mutations fail closed at each M2 boundary", () => {
     "          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}",
     "          write-cache: true",
     /dependency-free x64 pnpm cache writer/u,
+  );
+  mutateOnce(
+    root,
+    ".github/workflows/ci.yml",
+    "      - name: Validate trusted package-script pins\n        # Runs before pnpm-install because the install executes PR-authored\n        # lifecycle hooks. It also pins the tf:test and issue:board:test aliases\n        # before this required job trusts them.\n        run: node scripts/check-agent-quality-gate-package-scripts.mjs\n",
+    "",
+    /dependency-free package-script validator/u,
   );
   // prettier-ignore
   mutateOnce(root, ".github/workflows/ci.yml", "  production-infra-contract:\n    name: Production infrastructure contract", "  production-infra-contract:\n    name: Production infrastructure contract\n    needs: changes", /direct dependency-free x64 pnpm cache writer/u);

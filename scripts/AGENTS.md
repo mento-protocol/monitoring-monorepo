@@ -3,7 +3,7 @@ title: Scripts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-30
+last_verified: 2026-08-31
 doc_type: agent-instructions
 scope: scripts
 review_interval_days: 90
@@ -54,8 +54,8 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 
 ## Why Files Stay Flat
 
-`scripts/` has 15 path-pin classes. Move each pin with its file, except the
-`agent-autoreview.sh` feedback-runtime pins.
+There are 16 path-pin classes. Move each pin with its file, except the
+`agent-autoreview.sh` runtime pins.
 
 - **Autoreview runtime pins.** `agent-autoreview.sh` pins runtime,
   sealed `agent-autoreview-secret-suppressions.json` (ADR 0079), and optional
@@ -107,6 +107,8 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
   `scripts/` paths. Three Terraform filters use `workflowAdmissionPatterns`
   from `terraform.stacks.json`. Update the ADR 0064 inventory, routing equality,
   glob rules, and review-eval pins when a path moves.
+  `check-ci-contract{,.test}.mjs` pins fixed CI jobs, filters, required
+  commands, and the aggregate.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.
