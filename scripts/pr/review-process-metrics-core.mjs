@@ -102,14 +102,15 @@ function affirmativeOccurrence(body, pattern) {
   const text = String(body ?? "");
   const match = [...text.matchAll(pattern)].find((candidate) => {
     const matchIndex = candidate.index ?? 0;
-    const prefix = text.slice(Math.max(0, matchIndex - 120), matchIndex);
-    const scope = prefix.split(/[.!?;\n]|\b(?:but|however|yet)\b/i).at(-1);
+    const matchEnd = matchIndex + candidate[0].length;
+    const boundary = /[.!?;\n]|\b(?:although|but|however|yet)\b/i;
+    const prefix = text.slice(0, matchIndex).split(boundary).at(-1) ?? "";
+    const suffix = text.slice(matchEnd).split(boundary)[0] ?? "";
+    const scope = `${prefix} ${suffix}`;
     return !(
-      /\b(?:no|not|without|zero|never|none|neither|cannot)\b/i.test(
-        scope ?? "",
-      ) ||
+      /\b(?:no|not|without|zero|never|none|neither|cannot)\b/i.test(scope) ||
       /\b(?:did|do|does|is|are|was|were|has|have|had|ca|could|would|should|wo)n['’]t\b/i.test(
-        scope ?? "",
+        scope,
       )
     );
   });

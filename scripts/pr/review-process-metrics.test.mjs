@@ -611,71 +611,99 @@ test("attributes CodeRabbit run IDs only to CodeRabbit-authored records", () => 
 
 test("counts review runs only from canonical CodeRabbit completion evidence", () => {
   const value = structuredClone(fixture);
+  const completedBody = (wrapper, runId, outerLines = []) =>
+    [
+      `<!-- This is an auto-generated comment: ${wrapper} by coderabbit.ai -->`,
+      ...outerLines,
+      "<!-- recent_review_start -->",
+      "No actionable comments were generated in the recent review.",
+      `**Run ID**: \`${runId}\``,
+      "<!-- recent_review_end -->",
+    ].join("\n");
   value.issueComments.push(
     {
       id: 410,
       user: { login: "coderabbitai[bot]", type: "Bot" },
-      body: "<!-- This is an auto-generated comment: review paused by coderabbit.ai -->\n> ## Reviews paused\n> Reviews paused due to new commits.\n**Run ID**: `22222222-2222-2222-2222-222222222222`",
+      body: completedBody("summarize", "22222222-2222-2222-2222-222222222222"),
     },
     {
       id: 411,
       user: { login: "coderabbitai[bot]", type: "Bot" },
-      body: "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->\n> ## Review limit reached\n**Run ID**: `33333333-3333-3333-3333-333333333333`",
+      body: completedBody(
+        "skip review",
+        "33333333-3333-3333-3333-333333333333",
+        ["> ## Review skipped", "> Review was skipped due to path filters"],
+      ),
     },
     {
       id: 412,
       user: { login: "coderabbitai[bot]", type: "Bot" },
       body: [
         "<!-- This is an auto-generated comment: summarize by coderabbit.ai -->",
-        "<!-- This is an auto-generated comment: skip review by coderabbit.ai -->",
-        "",
-        "> [!IMPORTANT]",
-        "> ## Review skipped",
-        ">",
-        "> Review was skipped due to path filters",
-        ">",
-        "> <details>",
-        "> <summary>:no_entry: Files ignored due to path filters (1)</summary>",
-        ">",
-        "> * `docs/evals/example.jsonl` is excluded by `!docs/evals/**`",
-        ">",
-        "> </details>",
-        ">",
-        "> <details>",
-        "> <summary>Run configuration</summary>",
-        ">",
-        "> **Run ID**: `44444444-4444-4444-4444-444444444444`",
-        ">",
-        "> </details>",
-        "",
-        "<!-- end of auto-generated comment: skip review by coderabbit.ai -->",
+        "**Run ID**: `44444444-4444-4444-4444-444444444444`",
+        "<!-- recent_review_start -->",
+        "No actionable comments were generated in the recent review.",
+        "<!-- recent_review_end -->",
       ].join("\n"),
     },
     {
       id: 413,
       user: { login: "coderabbitai[bot]", type: "Bot" },
-      body: "<!-- This is an auto-generated comment: skip review by coderabbit.ai -->\n> This repository does not receive automatic reviews because it has fewer than 10 stars.\n**Run ID**: `55555555-5555-5555-5555-555555555555`",
+      body: "<!-- This is an auto-generated comment: review paused by coderabbit.ai -->\n> ## Reviews paused\n> Reviews paused due to new commits.\n**Run ID**: `55555555-5555-5555-5555-555555555555`",
     },
     {
       id: 414,
       user: { login: "coderabbitai[bot]", type: "Bot" },
-      body: "Diagnostic context only.\n**Run ID**: `66666666-6666-6666-6666-666666666666`",
+      body: "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->\n> ## Review limit reached\n**Run ID**: `66666666-6666-6666-6666-666666666666`",
+    },
+    {
+      id: 415,
+      user: { login: "coderabbitai[bot]", type: "Bot" },
+      body: [
+        "<!-- This is an auto-generated comment: summarize by coderabbit.ai -->",
+        "<!-- This is an auto-generated comment: skip review by coderabbit.ai -->",
+        "> ## Review skipped",
+        "> Review was skipped due to path filters",
+        "> **Run ID**: `77777777-7777-7777-7777-777777777777`",
+        "<!-- end of auto-generated comment: skip review by coderabbit.ai -->",
+      ].join("\n"),
+    },
+    {
+      id: 416,
+      user: { login: "coderabbitai[bot]", type: "Bot" },
+      body: "<!-- This is an auto-generated comment: skip review by coderabbit.ai -->\n> This repository does not receive automatic reviews because it has fewer than 10 stars.\n**Run ID**: `88888888-8888-8888-8888-888888888888`",
+    },
+    {
+      id: 417,
+      user: { login: "coderabbitai[bot]", type: "Bot" },
+      body: "Diagnostic context only.\n**Run ID**: `99999999-9999-9999-9999-999999999999`",
+    },
+    {
+      id: 418,
+      user: { login: "coderabbitai[bot]", type: "Bot" },
+      body: [
+        "<!-- This is an auto-generated comment: summarize by coderabbit.ai -->",
+        "No actionable comments were generated in the recent review.",
+        "<!-- recent_review_start -->",
+        "**Run ID**: `aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa`",
+        "<!-- recent_review_end -->",
+      ].join("\n"),
     },
   );
 
   const signals = summarizeFixture(value).evidence.signals;
-  assert.equal(signals.reviewRuns.count, 1);
+  assert.equal(signals.reviewRuns.count, 3);
   assert.deepEqual(
     signals.reviewRuns.evidence.map(({ id }) => id),
-    ["101"],
+    ["101", "410", "411"],
   );
   assert.equal(signals.pauses.count, 2);
   assert.equal(signals.rateLimits.count, 2);
-  assert.equal(signals.pathFilterSkips.count, 2);
+  assert.equal(signals.pathFilterSkips.count, 3);
   assert.equal(signals.freeTierNotices.count, 2);
   assert.deepEqual(
     signals.pathFilterSkips.evidence.map(({ id }) => id),
-    ["104", "412"],
+    ["104", "411", "415"],
   );
 });
 
@@ -976,6 +1004,41 @@ test("recognizes contracted and equivalent clause negations", () => {
       { id: "213", finding: true, findingSignal: "medium severity" },
       { id: "214", finding: true, findingSignal: "Changes requested" },
       { id: "215", finding: false, findingSignal: null },
+    ],
+  );
+});
+
+test("uses complete clauses for suffix negation and although contrasts", () => {
+  const value = structuredClone(fixture);
+  value.reviews.push(
+    {
+      id: 216,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "High severity findings: none.",
+    },
+    {
+      id: 217,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "No high severity finding, although a medium severity finding remains.",
+    },
+  );
+
+  const records = summarizeFixture(
+    value,
+  ).evidence.byBot.claude.surfaces.review_submissions.evidence.filter(
+    ({ id }) => id === "216" || id === "217",
+  );
+  assert.deepEqual(
+    records.map(({ id, finding, findingSignal }) => ({
+      id,
+      finding,
+      findingSignal: findingSignal ?? null,
+    })),
+    [
+      { id: "216", finding: false, findingSignal: null },
+      { id: "217", finding: true, findingSignal: "medium severity" },
     ],
   );
 });

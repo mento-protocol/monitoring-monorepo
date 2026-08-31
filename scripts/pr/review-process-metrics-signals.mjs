@@ -53,17 +53,34 @@ function detectedCodeRabbitSignals(comment) {
   return signals;
 }
 
-function isCanonicalCodeRabbitReviewRun(value, surface) {
-  if (detectedCodeRabbitSignals(value).length > 0) return false;
-  if (surface === "review_submissions") return true;
-  if (surface !== "issue_comments") return false;
-
+function completedCodeRabbitReviewRunIds(value) {
   const body = String(value.body ?? "");
-  return (
-    /auto-generated comment:\s*summarize by coderabbit\.ai/i.test(body) &&
-    /<!--\s*recent_review_start\s*-->/i.test(body) &&
-    /<!--\s*recent_review_end\s*-->/i.test(body)
-  );
+  if (
+    !/<!--\s*This is an auto-generated comment:\s*(?:summarize|skip review) by coderabbit\.ai\s*-->/i.test(
+      body,
+    )
+  ) {
+    return [];
+  }
+
+  const starts = [...body.matchAll(/<!--\s*recent_review_start\s*-->/gi)];
+  const ends = [...body.matchAll(/<!--\s*recent_review_end\s*-->/gi)];
+  if (starts.length !== 1 || ends.length !== 1) return [];
+
+  const blockStart = (starts[0].index ?? 0) + starts[0][0].length;
+  const blockEnd = ends[0].index ?? -1;
+  if (blockEnd < blockStart) return [];
+
+  const block = body.slice(blockStart, blockEnd);
+  if (
+    !/(?:^|\n)\s*>?\s*No actionable comments were generated in the recent review\.\s*(?=\n|$)/i.test(
+      block,
+    )
+  ) {
+    return [];
+  }
+  const runIds = extractRunIds(block);
+  return runIds.length === 1 ? runIds : [];
 }
 
 function requestTargets(body) {
@@ -154,8 +171,7 @@ export function buildSignals({
   for (const { value, surface } of runSources) {
     const bot = botKeyForLogin(authorLogin(value));
     if (bot !== "coderabbit") continue;
-    if (!isCanonicalCodeRabbitReviewRun(value, surface)) continue;
-    for (const runId of extractRunIds(value.body)) {
+    for (const runId of completedCodeRabbitReviewRunIds(value)) {
       const key = `${bot}:${runId}`;
       if (seenRuns.has(key)) continue;
       seenRuns.add(key);
