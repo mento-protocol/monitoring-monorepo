@@ -110,8 +110,28 @@ credential separation because both variables resolve to `github.token`.
 The repository accepts this residual risk for a small, mostly
 single-contributor project and this bounded update class. It will not add a
 `merge-operators` Team, credential broker, dedicated merge App, protected merge
-Environment, or controlled lifecycle ruleset for this lane. Issue #2091 was closed
-as not planned after this decision.
+Environment, or controlled lifecycle ruleset for this lane. Issue #2091 was
+closed as not planned after this decision.
+
+## One-time cutover
+
+The retired workflow used native auto-merge. Its standing requests can outlive
+the workflow version that created them. Complete this cutover when PR #2137 is
+merged:
+
+1. Require every queued or running legacy `dependabot-auto-merge.yml` run to
+   reach a terminal state. Restart this cutover if another legacy run starts.
+2. List every open Dependabot PR with a limit of 1,000 and include
+   `autoMergeRequest` in the result. Require every value to be `null`. If a
+   value is not `null`, disable auto-merge for that PR and repeat the audit.
+3. Merge PR #2137 immediately through the normal human merge path.
+4. Repeat the open-PR audit after the merge. Disable any request that appeared
+   during the cutover window, then repeat the audit until every value is
+   `null`.
+
+The pre-merge and post-merge audits close the transition from standing native
+requests to synchronous exact-head merge requests. They do not add a recurring
+operator step after the cutover is complete.
 
 ## Alternatives considered
 
