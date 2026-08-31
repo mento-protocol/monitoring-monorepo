@@ -24,9 +24,9 @@
 //   PREVIEW_URL          — Vercel preview URL (no trailing slash)
 //   BYPASS_HEADERS_JSON  — JSON object with both bypass headers
 //                          (`x-vercel-protection-bypass` + `x-vercel-set-bypass-cookie`).
-//                          Built by the workflow shell from BYPASS_SECRET so the raw
-//                          secret never reaches PR-controlled Node code — matches the
-//                          lhci step's `unset BYPASS_SECRET` pattern.
+//                          The object contains the raw bypass value and is visible to
+//                          this candidate-controlled process. The workflow restricts
+//                          it to trusted same-repository human PRs.
 //   INP_BUDGET_MS        — optional, default 200 (web-vitals "good" threshold).
 //
 // Exit codes:

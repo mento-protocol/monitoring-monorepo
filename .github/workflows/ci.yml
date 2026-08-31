@@ -415,7 +415,6 @@ jobs:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
-      checks: write
       contents: read
       actions: read
     steps:
@@ -455,7 +454,6 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 25
     permissions:
-      checks: write
       contents: read
       actions: read
     steps:
@@ -515,7 +513,9 @@ jobs:
           fi
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/ui-dashboard test:coverage
-      - name: Cache Playwright Chromium
+      - name: Restore Playwright Chromium
+        id: playwright-cache
+        continue-on-error: true
         # `playwright install chromium` re-downloads ~130 MB on every run
         # otherwise (~84s of uncached CI time). The cache key hashes BOTH
         # `ui-dashboard/package.json` (the version range, e.g. `^1.60.0`)
@@ -523,21 +523,18 @@ jobs:
         # Keying on package.json alone misses lockfile-only
         # `@playwright/test` updates within the caret range — in that case
         # the key would stay constant while the Chromium revision Playwright
-        # wants flips, so every run restores the stale cache, the install
-        # step re-downloads, but actions/cache won't re-save under the
-        # already-hit key, so the next run re-downloads again indefinitely.
-        # Hashing the lockfile makes the key flip on any real Playwright
-        # version bump. Mirrors the proven step in lighthouse.yml.
+        # wants flips. Hashing the lockfile makes the key flip on any real
+        # Playwright version bump. Mirrors the restore step in lighthouse.yml.
         #
         # `runner.arch` is in the key so a runner-architecture change (e.g.
         # an ARM migration) can never restore another arch's Chromium —
         # binaries are arch-specific, and `playwright install` validates
         # version, not architecture, so a cross-arch restore would pass
         # validation and then die with an exec-format error.
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-chromium-${{ runner.arch }}-${{ hashFiles('ui-dashboard/package.json', 'pnpm-lock.yaml') }}
+          key: trusted-main-v1-playwright-chromium-${{ runner.arch }}-${{ hashFiles('ui-dashboard/package.json', 'pnpm-lock.yaml') }}
           # `restore-keys` lets an unrelated lockfile or `package.json`
           # edit still reuse the most recent chromium cache instead of
           # triggering a ~130 MB fresh download. `playwright install` then
@@ -545,9 +542,20 @@ jobs:
           # (no-op on match, re-download only on a real Playwright version
           # bump). `--with-deps` still installs OS libraries (fast).
           restore-keys: |
-            playwright-chromium-${{ runner.arch }}-
+            trusted-main-v1-playwright-chromium-${{ runner.arch }}-
+      - name: Clear incomplete Playwright restore
+        if: steps.playwright-cache.outputs.cache-hit == ''
+        run: >-
+          node -e 'const { rmSync } = require("node:fs"); const { homedir } = require("node:os"); const { join } = require("node:path"); rmSync(join(homedir(), ".cache", "ms-playwright"), { force: true, recursive: true });'
       - name: Install Playwright Chromium
         run: pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium
+      - name: Save Playwright Chromium
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.playwright-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: trusted-main-v1-playwright-chromium-${{ runner.arch }}-${{ hashFiles('ui-dashboard/package.json', 'pnpm-lock.yaml') }}
       - name: Browser interaction tests
         run: pnpm --filter @mento-protocol/ui-dashboard test:browser
       - name: Upload snapshot diffs on failure
@@ -574,7 +582,6 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     permissions:
-      checks: write
       contents: read
       actions: read
     # Job-level env so it's visible to both typecheck and tests. Tests import
@@ -589,21 +596,6 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/pnpm-install
-      # Envio codegen output is deterministic on (envio version, config*.yaml,
-      # schema.graphql, abis). v3 emits to `.envio/types.d.ts`, which the
-      # tracked `envio-env.d.ts` triple-slash references — both `tsc` and
-      # vitest depend on it being present. Cache the .envio/ dir keyed on
-      # those inputs so PRs that don't touch indexer configs skip the 2-3
-      # minute codegen pass entirely. src/** is intentionally NOT in the key
-      # — handler code doesn't affect codegen output, and including it would
-      # invalidate the cache on every indexer PR (the common case), defeating
-      # the cache.
-      - name: Cache Envio .envio/
-        id: cache-generated
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: indexer-envio/.envio
-          key: envio-generated-v3-${{ runner.os }}-${{ hashFiles('indexer-envio/config*.yaml', 'indexer-envio/schema.graphql', 'indexer-envio/package.json', 'indexer-envio/abis/**', 'indexer-envio/scripts/**') }}
       - name: Validate YAML address drift
         # Every hex address in config*.yaml must resolve to either
         # @mento-protocol/contracts, indexer-envio/config/nttAddresses.json,
@@ -617,7 +609,6 @@ jobs:
         # Run codegen against every config file to catch schema/config drift
         # early. config.multichain.mainnet.yaml is run last — its output is
         # used by typecheck + tests below.
-        if: steps.cache-generated.outputs.cache-hit != 'true'
         run: |
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.testnet.yaml
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.mainnet.yaml
@@ -660,7 +651,6 @@ jobs:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
-      checks: write
       contents: read
       actions: read
     steps:
@@ -707,7 +697,6 @@ jobs:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
-      checks: write
       contents: read
       actions: read
     steps:
@@ -745,7 +734,6 @@ jobs:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
-      checks: write
       contents: read
       actions: read
     steps:
@@ -839,7 +827,6 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
-      checks: write
       contents: read
       actions: read
     steps:
@@ -961,7 +948,6 @@ jobs:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 15
     permissions:
-      checks: write
       contents: read
       actions: read
     env:
@@ -1018,7 +1004,6 @@ jobs:
     # and runner variance instead of weakening those assertions.
     timeout-minutes: 40
     permissions:
-      checks: write
       contents: read
       actions: read
     steps:
@@ -1173,8 +1158,8 @@ jobs:
         run: pnpm alerts:rules:lint:test
       - name: Terraform output sanitizer fixture suite
         # Fixture coverage for scripts/sanitize-terraform-output.sh, the sole
-        # redaction layer before terraform plan/apply output reaches public
-        # GitHub issue bodies and PR sticky comments.
+        # redaction layer before Terraform plan/apply output reaches workflow
+        # logs, job summaries, Slack, or GitHub issues.
         run: pnpm sanitize:test
       - name: Notifier coverage unit tests
         # Behavioral coverage of scripts/workflows/check-notifier-coverage.mjs:
@@ -1200,6 +1185,12 @@ jobs:
         # secrets are unreachable from PR-head code. Issue #1388 — an
         # activation gate for the autofix leg.
         run: node scripts/workflows/check-autofix-ci-trust.mjs
+      - name: PR validation boundary suite
+        # Pins the M2 read-only permission, secret ordering, restore-only cache,
+        # main-only save, required-command, schema-summary, and Dependabot
+        # execution contracts. The one-time complexity receipt stays outside
+        # routine CI so later repository work does not inherit an M2 baseline.
+        run: node scripts/workflows/check-pr-validation-boundary.test.mjs
       - name: Platform settings drift unit tests
         # Behavioral coverage of
         # scripts/workflows/check-workflow-permissions-drift.mjs — the decision
@@ -1272,6 +1263,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
+          package-manager-cache: false
       - name: Guardrail prose pins
         run: node scripts/repo-health/check-guardrail-prose.mjs
       - name: Guardrail prose pin suite
@@ -1410,6 +1402,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/pnpm-install
+        with:
+          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - name: Terraform production infrastructure contract
         run: pnpm tf:test
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
@@ -1446,6 +1440,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
+          package-manager-cache: false
       - name: Run and assert the Sentry suites
         run: /usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry/gate/sentry-suite-gate.mjs
       # Steps 4-5 run AFTER the gate, and only after it. The install's composite
@@ -1512,6 +1507,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
+          package-manager-cache: false
       - name: Exercise Blacksmith toolcache Node as root
         shell: bash
         run: |
@@ -1548,7 +1544,6 @@ jobs:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     permissions:
-      checks: write
       contents: read
       actions: read
     steps:
@@ -1578,7 +1573,6 @@ jobs:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     permissions:
-      checks: write
       contents: read
       actions: read
     steps:
@@ -1622,7 +1616,7 @@ jobs:
       contents: read
       actions: read
     steps:
-      - uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
+      - uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
         with:
           jobs: ${{ toJSON(needs) }}
           allowed-skips: shared,ui,indexer,bridge,integration-probes,aegis,alerts,gov-watchdog,terraform,deps,scripts,docs-checks,autoreview-suite,autoreview-root-runtime,version-skew

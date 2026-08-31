@@ -3,7 +3,7 @@ title: Scripts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-29
+last_verified: 2026-08-30
 doc_type: agent-instructions
 scope: scripts
 review_interval_days: 90
@@ -54,7 +54,7 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 
 ## Why Files Stay Flat
 
-`scripts/` has 14 path-pin classes. Move each pin with its file, except the
+`scripts/` has 15 path-pin classes. Move each pin with its file, except the
 `agent-autoreview.sh` feedback-runtime pins.
 
 - **Autoreview runtime pins.** `agent-autoreview.sh` pins runtime,
@@ -104,20 +104,22 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
   `scripts/docs/check-verification-redesign-evidence*.mjs` with the
   `.gitattributes` patch rule.
 - **Sentry suite manifest.** `scripts/sentry/gate/sentry-suite-manifest.json`
-  reconciles exact paths with `findSentrySuites()` both ways. Moves fail closed.
-  `sentry/fixture-scan-canary.test.mjs` re-pins four (ADR 0068).
-- **Enumerated workflow pins.** 23 of 33 `.github/workflows/` files pin scripts;
-  `sentry-triage-agent.yml` stages an exact copy list. Three Terraform filters
-  copy `workflowAdmissionPatterns` from `terraform.stacks.json`. A miss stops
-  its job while `ci` stays green. ADR 0064 owns the enumeration,
-  `routing.test.mjs` equality, and globs. Review-eval pins live in
-  `docs/evals/review-skill.md`.
+  keys are exact repo-relative paths, reconciled against `findSentrySuites()`
+  by set equality both ways. A moved or renamed suite fails the gate closed.
+  `sentry/fixture-scan-canary.test.mjs` re-pins four; ADR 0068 has the policy.
+- **Workflow pins.** `.github/workflows/` and `sentry-triage-agent.yml` pin
+  `scripts/` paths. Three Terraform filters use `workflowAdmissionPatterns`
+  from `terraform.stacks.json`. Update the ADR 0064 inventory, routing equality,
+  glob rules, and review-eval pins when a path moves.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.
 - **Trusted-validator probes.** `pr-description.yml` resolves the validator at
   the PR base-branch tip, not a PR snapshot. After a move, keep dual probes
   until the new path reaches the base (issue 1904; ADR 0064).
+- **PR validation boundary pins.** Move
+  `workflows/check-pr-validation-boundary{,.test}.mjs` together. Keep its
+  `ci.yml` and `trunk.yml` calls aligned. ADR 0078 defines the boundary.
 - **Production infrastructure contract pins.**
   `production-infra-identity-contract/workflow-inventory.mjs` pins exact script
   paths for the workflows it audits.
