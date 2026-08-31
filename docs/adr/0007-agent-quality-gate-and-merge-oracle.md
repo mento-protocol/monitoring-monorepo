@@ -38,9 +38,10 @@ Two layers:
 - **Hosted all-clear** uses two machine-readable projections in order:
   `pnpm pr:feedback-state` must first report a clean feedback ledger, then
   `pnpm pr:ready-state` is the final required-readiness oracle for current-head
-  CI, review gates, and the Codex PR-description gate. Advisory review status
-  does not block unless branch protection requires it. Actionable feedback
-  still blocks through the feedback ledger.
+  CI, review gates, and the Codex PR-description gate. Advisory check or run
+  lag does not block unless branch protection requires it. Actionable feedback
+  blocks through the feedback ledger, and any aggregate `CHANGES_REQUESTED`
+  review verdict blocks readiness.
 
 ## Alternatives considered
 

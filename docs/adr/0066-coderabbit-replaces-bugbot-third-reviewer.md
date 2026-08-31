@@ -62,8 +62,8 @@ Decision criteria: review quality and cost.
 - **This repo's own history** (last 40 merged PRs, #1843–#1911, sampled
   2026-08-18): 26 inline bot findings, all 26 answered "Fixed in `<commit>`",
   zero won't-fix. BugBot contributed 5 findings on 4 PRs, Codex 15 on 3 PRs,
-  Claude 6 on 3 PRs. All three bots currently deliver accepted findings; the
-  sample is too small and bursty to measure noise rates.
+  Claude 6 on 3 PRs. All three bots delivered accepted findings in this sample;
+  the sample is too small and bursty to measure noise rates.
 - **The strongest independent head-to-head** (146 PRs / 679 findings, four
   bots run in parallel for 3 weeks, published May 2026): false-positive
   rates — the study counts FP/(fixed+FP), excluding pending findings — were
@@ -78,11 +78,11 @@ Decision criteria: review quality and cost.
   an independent re-run of Greptile's own 50-bug set measured 45% recall
   against the self-reported 82%.
 
-Read together: no candidate has a decisive quality edge. BugBot is the quiet,
-precision-first member of the stack — a role Codex (deliberately P0/P1-only)
-already fills. CodeRabbit and Greptile are the two credible replacements, and
-both measured lower false-positive rates than BugBot in the independent
-study.
+Read together: no candidate had a decisive quality edge. During the comparison,
+BugBot was the quiet, precision-first reviewer — a role Codex (deliberately
+P0/P1-only) already filled. CodeRabbit and Greptile were the two credible
+replacements, and both measured lower false-positive rates than BugBot in the
+independent study.
 
 ### Two-week comparison outcome
 
