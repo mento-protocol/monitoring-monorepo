@@ -44,12 +44,26 @@ async function fetchDistinctAddresses(
   // without an upfront count.
   for (; page < HARD_PAGE_CAP; page += 1) {
     const offset = page * PAGE_SIZE;
-    // react-doctor-disable-next-line react-doctor/async-await-in-loop
-    const data = await client.request<DistinctQueryShape>({
-      document: query,
-      variables: { chainId, limit: PAGE_SIZE, offset },
-      signal: AbortSignal.timeout(HASURA_REQUEST_TIMEOUT_MS),
-    });
+    let data: DistinctQueryShape;
+    try {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop
+      data = await client.request<DistinctQueryShape>({
+        document: query,
+        variables: { chainId, limit: PAGE_SIZE, offset },
+        signal: AbortSignal.timeout(HASURA_REQUEST_TIMEOUT_MS),
+      });
+    } catch (err) {
+      // Fail open: this runs fanned out across several targets via
+      // Promise.all in discoverMentoAddresses, so an unguarded throw here
+      // (e.g. one page timing out) would reject the whole discovery run and
+      // fail the cron check-in even though the other targets succeeded.
+      // Keep whatever this target already collected instead.
+      Sentry.captureException(err, {
+        tags: { table, field, source: "hasura", degraded: "partial-pages" },
+        extra: { page, addressesCollected: all.size },
+      });
+      break;
+    }
     const rows = data.rows ?? [];
     if (rows.length === 0) break;
     for (const r of rows) {
