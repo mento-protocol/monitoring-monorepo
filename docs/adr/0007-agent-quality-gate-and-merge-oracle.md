@@ -3,7 +3,7 @@ title: Local agent quality gate plus two-projection PR all-clear and Codex gate
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-29
+last_verified: 2026-08-31
 scope: ci/process
 date: 2026-05
 doc_type: adr
@@ -38,8 +38,9 @@ Two layers:
 - **Hosted all-clear** uses two machine-readable projections in order:
   `pnpm pr:feedback-state` must first report a clean feedback ledger, then
   `pnpm pr:ready-state` is the final required-readiness oracle for current-head
-  CI, review gates, and the Codex PR-description gate. Advisory bot lag (for
-  example, Cursor) does not block unless branch protection requires it.
+  CI, review gates, and the Codex PR-description gate. Advisory review status
+  does not block unless branch protection requires it. Actionable feedback
+  still blocks through the feedback ledger.
 
 ## Alternatives considered
 

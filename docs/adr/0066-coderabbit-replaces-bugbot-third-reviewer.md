@@ -3,7 +3,7 @@ title: CodeRabbit replaces Cursor BugBot as the third PR review bot
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-30
+last_verified: 2026-08-31
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -13,23 +13,28 @@ garden_lane: adrs-architecture
 
 # ADR 0066 — CodeRabbit replaces Cursor BugBot as the third PR review bot
 
-**Status:** Accepted (Aug 2026) — cutover per the plan under Decision.
+**Status:** Accepted (Aug 2026) — BugBot disabled on 2026-08-31.
 **Scope:** ci/process
 
 ## Context
 
-Every PR gets three AI reviewers: Cursor BugBot (`cursor[bot]`), OpenAI Codex
-(`chatgpt-codex-connector[bot]`), and Claude Code (`claude[bot]`), plus a local
-pre-push Codex autoreview. BugBot is advisory only for CI status: its check is
-not required and its lag does not block (ADR 0007). Its comment content is not
-fully advisory, though — `pr:feedback-state` treats `BUGBOT_BUG_ID` as an
-actionable marker and blocks `pr:ready-state` until every flagged comment is
-answered (`scripts/pr/pr-feedback-state-core.mjs`). The Dependabot auto-merge
-flow that existed when this ADR was accepted cited BugBot's risk summary as
-advisory only. The current narrow workflow pair does not use a review bot as
-an eligibility input. Codex and Claude run
-on subscriptions the team already pays for other reasons. BugBot is the only
-reviewer with its own bill.
+Before this decision, every PR got three AI reviewers: Cursor BugBot
+(`cursor[bot]`), OpenAI Codex (`chatgpt-codex-connector[bot]`), and Claude Code
+(`claude[bot]`), plus a local pre-push Codex autoreview. BugBot's check was not
+required, and its lag did not block under ADR 0007. Its actionable comments
+still blocked the feedback ledger. The Dependabot auto-merge flow that existed
+when this ADR was accepted cited BugBot's risk summary as advisory. The current
+narrow workflow pair does not use a review bot as an eligibility input. The
+current review stack replaces BugBot with CodeRabbit. Codex and Claude continue
+to run on subscriptions that the team pays for other reasons.
+
+BugBot was disabled in the Cursor dashboard on 2026-08-31. Legacy feedback
+still uses its original policy. `pr:feedback-state` continues to recognize
+`BUGBOT_BUG_ID` and `cursor[bot]` until every open legacy PR is terminal. The
+open-PR sweep on 2026-08-31 found one active case: PR #2036 has a current-head,
+unresolved, unreplied Cursor finding. The `Cursor Bugbot` check also remains an
+optional context during this compatibility period. These compatibility paths
+do not trigger new BugBot reviews.
 
 That bill changed shape. Cursor announced on 2026-05-11 (effective at each
 customer's first renewal after 2026-06-08) that BugBot dropped its flat
@@ -78,6 +83,22 @@ precision-first member of the stack — a role Codex (deliberately P0/P1-only)
 already fills. CodeRabbit and Greptile are the two credible replacements, and
 both measured lower false-positive rates than BugBot in the independent
 study.
+
+### Two-week comparison outcome
+
+The repository completed the planned parallel comparison before the operator
+disabled BugBot. CodeRabbit touched 141 of 145 PRs. It posted 326 inline
+findings on 93 PRs. The audit classified 319 findings: maintainers marked 284
+fixed and 35 as won't-fix. CodeRabbit conceded 28 of the won't-fix findings as
+false positives. It posted six Critical findings: five were fixed and one was
+conceded.
+
+Twenty PRs received findings from both reviewers. CodeRabbit posted 105
+findings on those PRs, and BugBot posted 29. Only nine findings matched the
+same file and line. The low overlap supports the original conclusion that the
+reviewers were complementary, but CodeRabbit supplied more review coverage
+during the comparison. The operator chose to keep the Pro+ plan and disabled
+BugBot after reviewing these results.
 
 ### Cost at this repo's shape (1 PR-author seat, ~280 PRs/month, public repo)
 
@@ -137,31 +158,17 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
    treating one normal fix round as active development. The ship and babysit
    closeout requests one manual review for an exact head when the automatic
    review is stale or missing after the optional check becomes terminal.
-3. **Parallel-run for ~2 weeks.** Switch BugBot to manual triggering
-   (`bugbot run`) during the window to bound how often it runs — a trigger
-   limit, not a spending cap; the account-level monthly spend limit is the
-   only hard ceiling — compare both bots' findings on the same PRs, then
-   disable BugBot in the Cursor dashboard.
-   Until step 4 lands, CodeRabbit is not in the feedback-ledger bot roster, so
-   its comments do not block `pr:ready-state` — triage them manually during
-   the window.
-4. **Update the bot rosters and docs — two phases, not one cutover PR.** The
-   ADD side lands here, side by side with BugBot, nothing BugBot-related
-   removed: `scripts/pr/pr-feedback-state-core.mjs`,
-   `scripts/pr/pr-feedback-state-claude.mjs` (CodeRabbit's markers enter;
-   `BUGBOT_BUG_ID` stays live), `scripts/pr/pr-ready-state-core.mjs`,
-   `scripts/pr/review-process-metrics.mjs`, their tests,
-   `docs/notes/pr-ready-state.md`, and `docs/pr-checklists/ci-workflow-gates.md`.
-   The BugBot sweep — retiring `BUGBOT_BUG_ID`,
-   `docs/adr/0007-agent-quality-gate-and-merge-oracle.md`'s "Advisory bot lag
-   (for example, Cursor)" line, and the comment in
-   the then-current Dependabot auto-merge workflow — follows once the ~2-week
-   parallel window (step 3) ends and BugBot is disabled in the Cursor
-   dashboard. The current narrow workflow pair no longer contains that comment.
-5. **Measure.** Run `scripts/pr/review-process-metrics.mjs` on before/after
-   cohorts and re-check the fixed/won't-fix reply ratio per bot after ~40
-   merged PRs. If CodeRabbit's accepted-finding rate is materially below
-   BugBot's or noise stays high after tuning, revisit (fallbacks below).
+3. **Run both reviewers for two weeks** (complete 2026-08-31). Compare their
+   findings on the same PRs. Use the result to confirm or reverse the decision.
+4. **Disable BugBot** (complete 2026-08-31). Stop new reviews and preserve
+   legacy feedback enforcement for open PRs. The live sweep found that PR
+   #2036 still needs this compatibility. Remove it only after every PR with a
+   legacy Cursor feedback or check surface is terminal. Issue #2178 owns the
+   related readiness projection update.
+5. **Keep measurement repeatable.** Preserve historical Cursor recognition in
+   `scripts/pr/review-process-metrics.mjs`. Use before and after cohorts to
+   assess future review changes. Do not erase historical evidence when the
+   live compatibility path retires.
 
 ## Alternatives considered
 
@@ -221,11 +228,12 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   preventing duplicate requests for the same head.
   `@coderabbitai rate limit` reports remaining capacity without consuming
   a review.
-- The cutover PR must sweep every live `cursor[bot]`/BugBot reference — the
-  step-4 list above, re-verified by grep at cutover time rather than a fixed
-  count, since references have already drifted once during this ADR's own
-  review. `pr:feedback-state` severity regexes keyed on `BUGBOT_BUG_ID` retire
-  with it.
+- The 2026-08-31 open-PR sweep found one current-head Cursor finding on PR
+  #2036. Keep `cursor[bot]`, `BUGBOT_BUG_ID`, and the optional `Cursor Bugbot`
+  check classification until that PR and any other open legacy PR are
+  terminal. Retire these paths only after another live sweep returns no active
+  legacy feedback. Preserve Cursor recognition in historical metrics and
+  frozen review fixtures after the live path retires.
 - CodeRabbit is a new third-party GitHub App with repo read access and PR
   comment/review write access, steered by `.coderabbit.yaml` — and CodeRabbit
   resolves that file from the **source branch** of the PR under review,
@@ -283,6 +291,12 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   PRs created after `.coderabbit.yaml` merged carried CodeRabbit's generated
   pause marker. Six of those PRs had only 2-4 total commits. Two of the 29 PRs
   carried the rate-limit marker, and neither also carried the pause marker.
+- Two-week cutover sample, queried from GitHub on 2026-08-31: 145 PRs after
+  installation; CodeRabbit touched 141 and posted 326 inline findings on 93.
+  The audit classified 319 findings: 284 fixed and 35 won't-fix, including 28
+  vendor-conceded false positives. On 20 shared finding PRs, CodeRabbit
+  posted 105 findings and BugBot posted 29; nine matched the same file and
+  line. The same sweep found one open current-head Cursor finding on PR #2036.
 - Greptile pricing and OSS terms: greptile.com/pricing,
   greptile.com/blog/greptile-v4 (2026-03-05 model change),
   greptile.com/docs/code-review-bot/trigger-code-review (re-review is opt-in
