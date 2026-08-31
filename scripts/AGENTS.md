@@ -3,7 +3,7 @@ title: Scripts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-30
+last_verified: 2026-08-31
 doc_type: agent-instructions
 scope: scripts
 review_interval_days: 90
@@ -80,12 +80,11 @@ feedback-runtime pins.
   quick-commands, and the manifest pin it as ADR 0073 specifies.
   `pr/merge-pr*`, both PR-state helpers, and `agent-autoreview.sh` (Codex
   markers) route `pnpm pr:merge:test`.
-- **Gate runtime pins.** Before `cd`, `agent-quality-gate.sh` resolves
-  `gate/run-handles.sh`, coordinator files,
-  `docs/docs-navigation-eval-helpers.mjs`, and `gate/lockfile-scope.mjs` from
-  `$script_source_dir`; tests hash them from `$repo_root`. Move each path with
-  its routes, signatures, fixtures, and literals (ADRs 0064 and
-  0076).
+- **Gate runtime pins.** `agent-quality-gate.sh` and its tests pin gate helpers,
+  routes, signatures, fixtures, and literals (ADRs 0064 and 0076).
+  `.coderabbit.yaml` and `coderabbit-config.test.mjs` also pin
+  `scripts/{agent-quality-gate.sh,gate/**/*.{mjs,sh}}` for review scope. Move
+  all copies with the files.
 - **Gate mapping pins.** The signature and Turbo inputs pin
   `gate/routing-table/**`, `gate/mapping*`, the autoreview core, and its sealed
   policy. Runtime hashes use `$script_source_dir`; suites use `$repo_root`.

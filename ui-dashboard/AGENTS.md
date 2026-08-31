@@ -3,7 +3,7 @@ title: Monitoring Dashboard Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-29
+last_verified: 2026-08-31
 doc_type: agent-instructions
 scope: ui-dashboard
 review_interval_days: 90
@@ -97,8 +97,10 @@ threshold-derived history uses the threshold captured at event time.
 - Source files have a soft cap of 600 effective lines and a lint cap of 1,000
   effective lines. The package `max-lines` rule skips blank lines and comments.
   Generated files under `src/lib/__generated__/`, tests, and `src/lib/types.ts`
-  are exempt. Split route pages into `_lib`, `_components`, or `_tabs` before
-  crossing the soft cap.
+  are exempt. Compare the effective count with the merge base. A change that
+  reduces an already-over-threshold file does not require another split. Split
+  net growth that leaves a file above the soft cap into `_lib`, `_components`,
+  or `_tabs`.
 
 ## Server Boundaries and CSP
 
