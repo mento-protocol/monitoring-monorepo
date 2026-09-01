@@ -3,7 +3,7 @@ title: Scripts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-30
+last_verified: 2026-08-31
 doc_type: agent-instructions
 scope: scripts
 review_interval_days: 90
@@ -102,10 +102,11 @@ feedback-runtime pins.
   keys are exact repo-relative paths, reconciled against `findSentrySuites()`
   by set equality both ways. A moved or renamed suite fails the gate closed.
   `sentry/fixture-scan-canary.test.mjs` re-pins four; ADR 0068 has the policy.
-- **Workflow pins.** `.github/workflows/` and `sentry-triage-agent.yml` pin
-  `scripts/` paths. Three Terraform filters use `workflowAdmissionPatterns`
-  from `terraform.stacks.json`. Update the ADR 0064 inventory, routing equality,
-  glob rules, and review-eval pins when a path moves.
+- **Workflow pins.** Workflows and `sentry-triage-agent.yml` pin `scripts/`.
+  Terraform filters use `terraform.stacks.json` `workflowAdmissionPatterns`.
+  `check-ci-contract{,.test}.mjs` pins jobs, filters,
+  commands, and the aggregate. Moves update ADR 0064, routing equality,
+  glob rules, and review-eval pins.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.
@@ -113,8 +114,8 @@ feedback-runtime pins.
   the PR base-branch tip, not a PR snapshot. After a move, keep dual probes
   until the new path reaches the base (issue 1904; ADR 0064).
 - **PR validation boundary pins.** Move
-  `workflows/check-pr-validation-boundary{,.test}.mjs` together. Align its
-  `ci.yml` and `trunk.yml` calls. ADR 0078 defines the boundary.
+  `workflows/check-pr-validation-boundary{,.test}.mjs` with `ci.yml` and
+  `trunk.yml`. ADR 0078 defines the boundary.
 - **Production infrastructure identity pins.** Under
   `production-infra-identity-contract/`, keep
   `workflow-inventory.mjs`, `workflow.test.mjs`,

@@ -312,8 +312,8 @@ try {
   );
   assert.equal(
     terraformJob.if,
-    "needs.changes.outputs.terraform == 'true'",
-    "ci.yml Terraform validation must use the registry-backed admission result",
+    "needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.terraform == 'true'",
+    "ci.yml Terraform validation must use the fail-closed fallback or registry-backed admission result",
   );
   const ciValidateChangedStacks = terraformJob.steps.find(
     (step) => step.name === "Validate changed stacks",
@@ -403,10 +403,10 @@ try {
   const productionInfraInstallIndex = productionInfraContract.steps.findIndex(
     (step) => step.uses === "./.github/actions/pnpm-install",
   );
-  assert(
-    productionInfraValidatorIndex >= 0 &&
-      productionInfraValidatorIndex < productionInfraInstallIndex,
-    "production-infra-contract must validate trusted package scripts before dependency installation",
+  assert.equal(
+    productionInfraValidatorIndex,
+    productionInfraInstallIndex - 1,
+    "production-infra-contract must validate trusted package scripts immediately before dependency installation and package aliases",
   );
   assert(
     productionInfraContract.steps.some(
