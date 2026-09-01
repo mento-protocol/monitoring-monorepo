@@ -89,6 +89,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0077](0077-operator-triggered-backlog-sweep.md)            | Backlog sweeps start from an operator, run isolated workers, and stop at READY       |
 | [0078](0078-staged-verification-redesign.md)                | Staged existing-CI replacement of the mandatory local gate                           |
 | [0079](0079-sealed-exact-file-patch-secret-suppression.md)  | Autoreview permits only sealed exact-file-patch secret suppression                   |
+| [0080](0080-merge-base-freshness-stamp.md)                  | The gate's freshness stamp binds the merge-base, with tip binding kept where read    |
 | [0081](0081-narrow-dependabot-auto-merge-exception.md)      | One narrow Dependabot group can auto-merge through a two-stage trust boundary        |
 | [0082](0082-persistent-issue-board-mutation-mutex.md)       | One persistent compare-and-swap Git ref serializes issue-board helper mutations      |
 | [0083](0083-non-ledger-review-eval-experiments.md)          | Review-skill experiments use a separate staged non-ledger lane                       |

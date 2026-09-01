@@ -224,6 +224,22 @@ test("react-doctor:diff carries the base ref AND its resolved oid", () => {
   );
 });
 
+// The gate's freshness stamp binds the merge-base rather than the base tip, so
+// the plan text is what keeps a tip-reading command honest across an advance of
+// the base. Assert the text really does move with the OID: were it to carry
+// only the ref NAME, the command-plan hash would be identical on both sides of
+// a fetch and a warm stamp would hide a stale react-doctor answer.
+test("react-doctor:diff command text moves when the base OID moves", () => {
+  const commandFor = (baseOid) => {
+    const plan = new Plan();
+    verbs.addUiReactDoctorDiff(plan, "r", stubFacts({ baseOid }));
+    return commandsOf(plan)[0];
+  };
+  const before = commandFor("1111111111111111111111111111111111111111");
+  const after = commandFor("2222222222222222222222222222222222222222");
+  assert.notEqual(before, after);
+});
+
 test("the ADR reminder is fed the gate's own base, head and path set", () => {
   const plan = new Plan();
   verbs.addAdrReminder(plan, "r", stubFacts());
@@ -231,6 +247,77 @@ test("the ADR reminder is fed the gate's own base, head and path set", () => {
   assert.ok(command.startsWith("node scripts/pr/check-adr-reminder.mjs"));
   assert.ok(command.includes("--base origin/main --head HEAD"));
   assert.ok(command.includes("--include-untracked --changed-paths-file"));
+});
+
+// The peg validator reads the previous policy from the base ref's TIP, so it
+// is a tip reader in the same class as react-doctor and the ADR reminder. The
+// stamp's tip-reader predicate is textual, so the base has to appear in the
+// command or a merge-base-bound stamp could skip a check whose answer moved.
+// It is fed the RESOLVED OID, not the ref: the validator's `validateGitRef`
+// admits only [A-Za-z0-9._/-]+, so a ref spelling the gate accepts but that
+// allowlist rejects would fail the whole plan. Hex always passes.
+test("the peg registry check is fed the gate's resolved base OID", () => {
+  const plan = new Plan();
+  const facts = stubFacts();
+  verbs.addPegRegistryIntegrityCheck(plan, "r", facts);
+  const [command] = commandsOf(plan);
+  assert.ok(
+    command.startsWith("node scripts/alerts/check-peg-registry-integrity.mjs"),
+  );
+  assert.ok(command.includes(`--base-ref ${facts.baseOid}`));
+  assert.match(facts.baseOid, /^[a-f0-9]{40}$/);
+});
+
+// Only the sentinel falls back to the ref. That path is fail-closed downstream:
+// an unresolvable ref makes readPolicyFromGit throw rather than report "no
+// baseline", which it reserves for a ref that resolves without the policy file.
+test("an unresolved base OID falls back to the ref spelling", () => {
+  const plan = new Plan();
+  verbs.addPegRegistryIntegrityCheck(
+    plan,
+    "r",
+    stubFacts({ baseOid: "__unresolved__:origin/main" }),
+  );
+  assert.ok(commandsOf(plan)[0].includes("--base-ref origin/main"));
+});
+
+// The emitted text must move with the base, or a plan hash identical on both
+// sides of a fetch would hide a stale peg answer.
+test("the peg check's command text moves when the base OID moves", () => {
+  const commandFor = (baseOid) => {
+    const plan = new Plan();
+    verbs.addPegRegistryIntegrityCheck(plan, "r", stubFacts({ baseOid }));
+    return commandsOf(plan)[0];
+  };
+  assert.notEqual(
+    commandFor("1111111111111111111111111111111111111111"),
+    commandFor("2222222222222222222222222222222222222222"),
+  );
+});
+
+// A future arm spelling this check as a bare `command:` string would read the
+// base tip while the plan text stayed silent about it, reopening the hole the
+// verb closes. Every emission has to route through the verb.
+test("no routing-table arm emits the peg registry check without its base", () => {
+  const bare = "node scripts/alerts/check-peg-registry-integrity.mjs";
+  const offenders = [];
+  const walk = (node, path) => {
+    if (Array.isArray(node)) {
+      node.forEach((entry, index) => walk(entry, `${path}[${index}]`));
+      return;
+    }
+    if (!node || typeof node !== "object") return;
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "command" && value === bare) offenders.push(path);
+      walk(value, `${path}.${key}`);
+    }
+  };
+  walk(ROUTING_PLAN, "ROUTING_PLAN");
+  assert.deepEqual(
+    offenders,
+    [],
+    "route these through add_peg_registry_integrity_check instead",
+  );
 });
 
 test("the Sentry suite gate schedules BOTH commands, neither substituting", () => {
@@ -450,6 +537,10 @@ test("full and reduced config-consumer plans build shared-config exactly once", 
 test("peg registry checks build shared-config before loading its exports", () => {
   for (const command of [
     "node scripts/alerts/check-peg-registry-integrity.mjs",
+    // The form the verb actually emits. `commandConsumesWorkspaceConfig`
+    // matches it through its `startsWith(script + " ")` branch; without that
+    // the based check would run before shared-config was built.
+    "node scripts/alerts/check-peg-registry-integrity.mjs --base-ref 0123456789abcdef0123456789abcdef01234567",
     "node scripts/alerts/check-peg-registry-integrity.test.mjs",
   ]) {
     const plan = new Plan();
@@ -744,6 +835,50 @@ function manifestRepo(mutate) {
   );
   return dir;
 }
+
+// The freshness stamp binds the merge-base; `facts.baseOid` deliberately does
+// not. It is the base ref's TIP, and the gate keeps tip binding for any plan
+// whose text carries it. Pin that difference: if this ever became the
+// merge-base, react-doctor's Turbo cache key would stop moving when the base
+// moved and a stale diff answer could survive a fetch.
+test("facts.baseOid resolves the base ref's tip, not the merge-base", () => {
+  const dir = mkdtempSync(join(tmpdir(), "engine-base-oid-"));
+  const git = (...args) =>
+    execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim();
+  mkdirSync(join(dir, "empty-hooks"), { recursive: true });
+  writeFileSync(join(dir, "fixture.txt"), "fixture\n");
+  git("init", "-q");
+  git("config", "user.email", "engine-test@example.invalid");
+  git("config", "user.name", "engine test");
+  git("config", "commit.gpgsign", "false");
+  git("config", "core.hooksPath", join(dir, "empty-hooks"));
+  git("add", "-A");
+  git("commit", "-qm", "fixture");
+  // A same-tree child of HEAD that HEAD itself does not contain: the base tip
+  // advances while the merge-base stays where it was.
+  const mergeBase = git("rev-parse", "--verify", "HEAD");
+  const tip = git(
+    "commit-tree",
+    git("rev-parse", "--verify", "HEAD^{tree}"),
+    "-p",
+    mergeBase,
+    "-m",
+    "base advance",
+  );
+  git("update-ref", "refs/remotes/origin/main", tip);
+  assert.equal(git("merge-base", "origin/main", "HEAD"), mergeBase);
+  assert.notEqual(tip, mergeBase);
+
+  const facts = new Facts({
+    repoRoot: dir,
+    baseRef: "origin/main",
+    headRef: "HEAD",
+    changedPathsFile: join(dir, "paths"),
+    isRealTree: false,
+    scriptSourceDir: join(dir, "scripts"),
+  });
+  assert.equal(facts.baseOid, tip);
+});
 
 const classOf = (dir) =>
   new Facts({

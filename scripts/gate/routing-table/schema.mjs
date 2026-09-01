@@ -43,6 +43,7 @@ export const VERBS = Object.freeze({
   add_surface: 1,
   add_checklist: 2,
   add_adr_reminder: 1,
+  add_peg_registry_integrity_check: 1,
   add_turbo_package_task: 3,
   add_package_quality_commands: 2,
   add_package_vitest_typecheck_commands: 2,

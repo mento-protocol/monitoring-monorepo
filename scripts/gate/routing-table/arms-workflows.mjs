@@ -304,8 +304,8 @@ export const WORKFLOW_ARMS = [
             patterns: ["alerts/rules/peg-thresholds.json"],
             effects: [
               {
-                command: "node scripts/alerts/check-peg-registry-integrity.mjs",
-                reason: "peg threshold policy changed",
+                verb: "add_peg_registry_integrity_check",
+                args: ["peg threshold policy changed"],
               },
             ],
           },

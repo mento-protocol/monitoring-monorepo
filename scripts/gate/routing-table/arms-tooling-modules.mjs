@@ -444,8 +444,8 @@ export const TOOLING_MODULE_ARMS = [
     ],
     effects: [
       {
-        command: "node scripts/alerts/check-peg-registry-integrity.mjs",
-        reason: "peg registry integrity checker changed",
+        verb: "add_peg_registry_integrity_check",
+        args: ["peg registry integrity checker changed"],
       },
       {
         command: "node scripts/alerts/check-peg-registry-integrity.test.mjs",
@@ -475,8 +475,8 @@ export const TOOLING_MODULE_ARMS = [
         reason: "peg policy version digest changed",
       },
       {
-        command: "node scripts/alerts/check-peg-registry-integrity.mjs",
-        reason: "peg policy version digest changed",
+        verb: "add_peg_registry_integrity_check",
+        args: ["peg policy version digest changed"],
       },
       {
         command: "node scripts/alerts/check-peg-registry-integrity.test.mjs",

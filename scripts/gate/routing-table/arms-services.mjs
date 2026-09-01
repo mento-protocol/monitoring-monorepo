@@ -26,8 +26,8 @@ export const SERVICE_ARMS = [
             patterns: ["metrics-bridge/peg-registry.json"],
             effects: [
               {
-                command: "node scripts/alerts/check-peg-registry-integrity.mjs",
-                reason: "peg registry changed",
+                verb: "add_peg_registry_integrity_check",
+                args: ["peg registry changed"],
               },
             ],
           },
@@ -250,8 +250,8 @@ export const SERVICE_ARMS = [
             ],
             effects: [
               {
-                command: "node scripts/alerts/check-peg-registry-integrity.mjs",
-                reason: "peg registry authority input changed",
+                verb: "add_peg_registry_integrity_check",
+                args: ["peg registry authority input changed"],
               },
             ],
           },
