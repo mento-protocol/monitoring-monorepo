@@ -18,7 +18,7 @@ stays mandatory until the approved cutover stage completes.
 [ADR 0007](0007-agent-quality-gate-and-merge-oracle.md) remains active for the
 hosted two-projection all-clear and Codex approval gate. This ADR supersedes
 only its mandatory-local-gate target state. [ADR
-0083](0083-github-ui-operator-merge.md) supersedes this ADR's original
+0084](0084-github-ui-operator-merge.md) supersedes this ADR's original
 operator merge-path assumption.
 
 **Scope:** ci/process
@@ -403,5 +403,5 @@ would recreate the local gate.
 - ADRs [0007](0007-agent-quality-gate-and-merge-oracle.md),
   [0069](0069-gate-routing-table-as-data.md),
   [0072](0072-md-only-docs-checks-job.md),
-  [0083](0083-github-ui-operator-merge.md), and
+  [0084](0084-github-ui-operator-merge.md), and
   [0076](0076-fair-quality-gate-coordinator.md)

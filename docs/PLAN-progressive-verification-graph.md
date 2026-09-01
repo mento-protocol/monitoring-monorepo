@@ -942,7 +942,7 @@ With separate human approval, delete:
 
 Update or supersede ADRs 0007, 0069, 0076, and 0072 as their decisions change.
 Update or supersede ADRs 0008 and 0033 when checklist or reminder entry points
-change. Keep ADR 0083 active for the direct GitHub merge path. Record the
+change. Keep ADR 0084 active for the direct GitHub merge path. Record the
 final line reduction and retained safeguards.
 
 ### Phase 6: Optimize only measured bottlenecks

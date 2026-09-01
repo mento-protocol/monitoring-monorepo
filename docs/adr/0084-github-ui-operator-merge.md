@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0083 — Use GitHub for ordinary pull request merges
+# ADR 0084 — Use GitHub for ordinary pull request merges
 
 **Status:** Accepted (Sep 2026), in force.
 **Scope:** ci/process

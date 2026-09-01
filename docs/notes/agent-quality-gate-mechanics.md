@@ -2863,16 +2863,19 @@ before result publication. A waiter recomputes it before accepting a shared
 success.
 
 The worktree-local whole-run stamp can exit before coordinator registration.
-Its v4 freshness key binds every complete-key input except HEAD. It also records
-the exact HEAD and coordinator fingerprint. An unchanged HEAD requires that
-fingerprint to match. If HEAD changed, reuse still requires the same repository,
-base, paths, plan, validated bytes and modes, implementation, timeout,
-effective `--lock-wait` budget, fail-fast policy, OS, architecture, Node and
-pnpm identities, coordinator policy and runtime, and material environment. This
-exception lets a warm run made before a commit satisfy the pre-push hook after
-the commit records the same validated bytes. Legacy and explicit no-lock runs
-retain the v3 stamp. Any other change reruns the mapped commands. An unchanged
-stamp still expires after two hours to avoid masking drift.
+Its v4 freshness key binds every complete-key input except HEAD and the base
+tip. It also records the exact HEAD, the exact base tip, and the coordinator
+fingerprint. An unchanged HEAD and an unchanged base tip together require that
+fingerprint to match. If either moved, reuse still requires the same
+repository, base binding, paths, plan, validated bytes and modes,
+implementation, timeout, effective `--lock-wait` budget, fail-fast policy, OS,
+architecture, Node and pnpm identities, coordinator policy and runtime, and
+material environment. The two exceptions let a warm run made before a commit
+satisfy the pre-push hook after the commit records the same validated bytes,
+and let a warm run survive an advance of `origin/main` that leaves the
+merge-base alone. Legacy and explicit no-lock runs retain the v3 stamp. Any
+other change reruns the mapped commands. An unchanged stamp still expires after
+two hours to avoid masking drift.
 
 Validated file content is bound by each path's bytes, its worktree file mode,
 and the `git diff --summary` lines for it — minus the `create mode` lines,
@@ -2886,10 +2889,45 @@ edited bytes, a changed file mode, and an add that puts a path the gate routes
 into the changed-path set — `git add -f` of an ignored file, which no
 `--exclude-standard` listing reports until it is tracked.
 
-The base commit is a bound input, so warm the stamp **after**
-`git fetch origin main`, not before: the pre-push hook fetches before it runs
-the gate, and a stamp warmed against a stale `origin/main` is invalidated by
-that fetch — correctly, because the validation base really did move.
+The stamp's base field holds the **merge-base** of the base ref and the head,
+not the base ref's tip, and it records which of the two it holds. What the gate
+validates is already merge-base-scoped: the changed-path set comes from
+`git diff "$base_ref...$head_ref"`. Under the older tip binding every advance of
+`origin/main` invalidated every warm stamp on the machine even when the branch's
+own bytes and its merge-base had not moved, and the pre-push hook fetches
+`origin main` immediately before it runs the gate — so a warm-up that merely
+overlapped somebody else's merge paid for the whole gate a second time. Warming
+after the fetch is no longer required to keep the stamp.
+
+Three guards keep the narrower binding from widening what the gate accepts.
+Failure is closed: an unresolvable base, head, or merge-base — disjoint
+histories, a ref naming no commit, or a criss-cross where
+`git merge-base --all` reports several merge bases — falls back to the tip OID,
+which is the older and stricter binding, and never to a reuse. The gate asks
+with `--all` because plain `git merge-base` prints one unspecified pick from
+the several, which would bind rather than fail closed. A plan that can **observe** the base tip keeps tip binding:
+`react-doctor:diff` bakes the resolved base OID into its Turbo cache key,
+`check-adr-reminder.mjs` takes `--base <ref>` and resolves it when it runs, and
+`check-peg-registry-integrity.mjs` takes `--base-ref` — the resolved base OID,
+because that validator's own allowlist rejects ref spellings the gate accepts —
+and reads the previous peg policy out of that commit, so
+the gate asks whether the plan text names the base at all rather than carrying a
+list of such commands — a future verb that passes the base down inherits tip
+binding on its own, and a false positive costs only the stricter binding. Two
+commands read a branch tip they never name, so the predicate also carries a
+short marker list for them: `docs:navigation-eval -- --validate` tests ancestry
+against `refs/remotes/origin/main`, and the autoreview suite reads
+protected-main checklist blobs at `origin/main^{commit}`. Both mean the DEFAULT
+branch rather than the gate's base, so they are listed instead of being handed
+`--base`; a listed command only ever gets the stricter binding. A marker match
+also binds `+default-branch:<oid>` as a second component, because on a stacked
+PR the base tip and the merge-base hold still while `origin/main` advances —
+and that advance is what changes these commands' answers. The
+binding kind is part of the field, so a tip-bound and a merge-base-bound stamp
+cannot be read as each other on a branch whose base has not advanced. A stamp
+warmed before a rebase is not reused after it, because a rebase moves the
+merge-base itself. [ADR 0080](../adr/0080-merge-base-freshness-stamp.md) records
+the decision and the alternatives.
 
 Below the whole-run stamp, `--run` also keeps per-command success stamps
 (`.tmp/agent-quality-gate/command-stamps.tsv`) so a run that was killed

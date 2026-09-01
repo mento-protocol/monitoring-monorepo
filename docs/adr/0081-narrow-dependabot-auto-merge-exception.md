@@ -18,7 +18,7 @@ garden_lane: adrs-architecture
 
 ## Context
 
-[ADR 0083](0083-github-ui-operator-merge.md) routes ordinary merges directly
+[ADR 0084](0084-github-ui-operator-merge.md) routes ordinary merges directly
 through GitHub after current-head all-clear and explicit approval. Every routine
 dependency update would otherwise wait for the same operator-authorized merge after
 all required checks pass.
@@ -42,7 +42,7 @@ upstream payload and artifacts remain untrusted inputs.
 
 Add one unattended merge exception for routine GitHub-owned `actions/*` updates
 in the `actions-minor-patch` Dependabot group. Keep every other merge on the
-operator-authorized GitHub path in ADR 0083.
+operator-authorized GitHub path in ADR 0084.
 
 Use two workflows as one pinned security boundary:
 
@@ -195,7 +195,7 @@ operator step after the cutover is complete.
 - The final issue-event read is the last authoritative read before the merge
   request. The REST merge endpoint cannot pin issue-event history. A close and
   reopen after that read but before the write remains a narrow residual race.
-- ADR 0083 governs every ordinary, major, security, maintainer-changed,
+- ADR 0084 governs every ordinary, major, security, maintainer-changed,
   excluded-publisher, and other-ecosystem merge. This ADR qualifies it with one
   named machine exception. It does not authorize an agent session to merge a
   PR.

@@ -139,7 +139,7 @@ PR it opens.
   recorded in [ADR 0076](0076-fair-quality-gate-coordinator.md) and
   [`docs/notes/agent-quality-gate-mechanics.md`](../notes/agent-quality-gate-mechanics.md).
 - The never-merge boundary rests on the operating card and
-  [ADR 0083](0083-github-ui-operator-merge.md). The sweep stops at READY. A
+  [ADR 0084](0084-github-ui-operator-merge.md). The sweep stops at READY. A
   human can merge through the GitHub UI.
 
 ## References

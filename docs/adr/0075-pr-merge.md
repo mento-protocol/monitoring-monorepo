@@ -4,7 +4,7 @@ status: archived
 owner: eng
 canonical: false
 last_verified: 2026-09-01
-superseded_by: ADR-0083
+superseded_by: ADR-0084
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -14,7 +14,7 @@ garden_lane: adrs-architecture
 
 # ADR 0075 — The sanctioned merge wrapper, and what it does not prove
 
-**Status:** Superseded by [ADR 0083](0083-github-ui-operator-merge.md) (Sep
+**Status:** Superseded by [ADR 0084](0084-github-ui-operator-merge.md) (Sep
 2026). Historical decision retained.
 **Scope:** ci/process
 
