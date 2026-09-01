@@ -218,6 +218,10 @@ test("classifies non-canonical plan-only edits as trivial", () => {
   });
 
   assertEqual(report.tier, "trivial");
+  assertEqual(
+    report.recommendedReview[0],
+    "Run the quality gate from operating-card step 3.",
+  );
   assertEqual(report.contextUpdateRequired, false);
   assertEqual(report.contextUpdateMissing, false);
 });

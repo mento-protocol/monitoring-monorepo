@@ -1148,6 +1148,9 @@ const hostedGateEntryPoints = [
   ".agents/skills/ship/SKILL.md",
   ".claude/skills/ship/SKILL.md",
   ".agents/roles/verifier.md",
+  ".github/ISSUE_TEMPLATE/agent-task.yml",
+  "docs/notes/quick-commands.md",
+  "scripts/docs/docs-garden-issue-helpers.mjs",
 ];
 const activeTrunkLines = trunk
   .split("\n")
