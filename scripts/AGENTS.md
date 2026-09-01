@@ -94,12 +94,11 @@ feedback-runtime pins.
   `.dependency-cruiser.cjs` and root `package.json` both name
   `gate/mapping/engine.test.mjs` (scanned roots);
   `gate/mapping/post-passes.mjs` schedules `code-health:deps` itself.
-- **Review-eval pins.** `docs/evals/review-skill.md` tracks
-  `review/run-eval{,-source-snapshot,-lifecycle,-runtime}.sh`,
-  `review/install-review-eval-launchd.{sh,test.mjs}`,
-  `review/launchd/org.mento.review-eval.plist`, and
-  `review/review-eval.test.mjs`.
-  `review/review-eval-*publication*` pins both tests.
+- **Review-eval pins.** The runbook tracks `scripts/review/run-eval*.sh`,
+  `install-review-eval-launchd*`, the launchd plist, and
+  `review-eval-*publication*` with their tests. Its file table,
+  `review:eval:experiment`, and ADR 0083 pin
+  `scripts/review/review-eval-experiment*.mjs`.
 - **Navigation-eval pin.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names its source.
 - **Verification evidence.** `.gitattributes` pins
