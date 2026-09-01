@@ -13141,12 +13141,15 @@ run_gate "scripts/bootstrap/deleted-helper.sh" "docs/deployment.md"
 assert_contains "- ./tools/trunk check --ci --all (changed paths require full-repo Trunk checks)"
 assert_not_contains "- ./tools/trunk check --ci docs/deployment.md ("
 
-# And for repo-root dotfiles: linters read their config from one, so deleting
-# it changes the verdict on files that did not change. A nested dotfile is not
-# repo-wide config and stays an ordinary deletion.
+# And for dotfiles at any depth: linters read their config from one, and
+# prettier/markdownlint/yamllint cascade to the nearest, so deleting either a
+# root or a package-level config changes the verdict on files that did not
+# change. A non-dotfile deletion stays ordinary however deep it sits.
 run_gate ".codespellrc-deleted" "docs/deployment.md"
 assert_contains "- ./tools/trunk check --ci --all (changed paths require full-repo Trunk checks)"
-run_gate "ui-dashboard/.eslintrc-deleted.json" "docs/deployment.md"
+run_gate "aegis/.prettierrc-deleted" "docs/deployment.md"
+assert_contains "- ./tools/trunk check --ci --all (changed paths require full-repo Trunk checks)"
+run_gate "ui-dashboard/src/deleted-thing.tsx" "docs/deployment.md"
 assert_contains "- ./tools/trunk check --ci docs/deployment.md (changed existing paths should pass targeted Trunk checks)"
 
 # Code-health routing: ensure a `.dependency-cruiser.cjs` change schedules
@@ -13182,6 +13185,12 @@ assert_contains "- pnpm code-health:deps"
 run_gate "ui-dashboard/AGENTS.md"
 assert_not_contains "- pnpm code-health:deps"
 run_gate "ui-dashboard/src/thing.ts"
+assert_contains "- pnpm code-health:deps"
+
+# A JSON inside a root is a dependency TARGET even though it holds no imports:
+# indexer source statically imports config/nttAddresses.json, so retargeting it
+# moves an edge the cross-package rules judge.
+run_gate "indexer-envio/config/nttAddresses.json"
 assert_contains "- pnpm code-health:deps"
 
 # The root manifest carries the `code-health:deps` script line that

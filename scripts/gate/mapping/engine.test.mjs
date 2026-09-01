@@ -523,16 +523,51 @@ test("a deleted repo-root dotfile forces full, because linters read it repo-wide
   }
 });
 
-test("a deleted dotfile BELOW the root does not force full", () => {
-  // The rule is anchored at the repo root on purpose. A nested dotfile is not
-  // repo-wide configuration, so it stays an ordinary deletion.
-  const plan = new Plan();
-  addTrunkCheckCommand(
-    plan,
-    ["ui-dashboard/.eslintrc.json", "docs/note.md"],
-    stubFacts({ presentPaths: ["docs/note.md"] }),
-  );
-  assert.deepEqual(commandsOf(plan), ["./tools/trunk check --ci docs/note.md"]);
+test("a deleted NESTED dotfile forces full, because linter configs cascade", () => {
+  // Measured: prettier, markdownlint and yamllint take the nearest config, so a
+  // package can carry its own. With `aegis/.prettierrc` deleted, the untouched
+  // `aegis/src/app.module.ts` starts failing prettier — its `singleQuote`
+  // setting went with the file — while a targeted run over survivors exits 0.
+  for (const deleted of [
+    "aegis/.prettierrc",
+    "ui-dashboard/.prettierrc.json",
+    "metrics-bridge/.markdownlint.yaml",
+    "alerts/infra/.prettierignore",
+  ]) {
+    const plan = new Plan();
+    addTrunkCheckCommand(
+      plan,
+      [deleted, "docs/note.md"],
+      stubFacts({ presentPaths: ["docs/note.md"] }),
+    );
+    assert.deepEqual(
+      commandsOf(plan).filter((c) => !c.includes("--filter=shellcheck")),
+      ["./tools/trunk check --ci --all"],
+      `${deleted} configures a linter for files that did not change`,
+    );
+  }
+});
+
+test("a deleted NON-dotfile stays an ordinary deletion at any depth", () => {
+  // The other direction: the rule keys on the leading dot, not on depth, so an
+  // ordinary nested source or docs deletion still targets the survivors.
+  for (const deleted of [
+    "ui-dashboard/src/gone.tsx",
+    "docs/notes/gone.md",
+    "aegis/config/gone.json",
+  ]) {
+    const plan = new Plan();
+    addTrunkCheckCommand(
+      plan,
+      [deleted, "docs/note.md"],
+      stubFacts({ presentPaths: ["docs/note.md"] }),
+    );
+    assert.deepEqual(
+      commandsOf(plan),
+      ["./tools/trunk check --ci docs/note.md"],
+      `${deleted} carries no configuration for files that did not change`,
+    );
+  }
 });
 
 test("a deleted path still in the full-scan list forces full", () => {
@@ -968,7 +1003,6 @@ test("an in-root path dep-cruiser cannot parse drops the command", () => {
     "ui-dashboard/AGENTS.md",
     "ui-dashboard/README.md",
     "aegis/src/Thing.sol",
-    "shared-config/knip.json",
     "indexer-envio/config/celo.yaml",
   ]) {
     assert.equal(
@@ -987,6 +1021,38 @@ test("every dep-cruiser extension keeps the command inside a root", () => {
       `${extension} is parsed by dependency-cruiser`,
     );
   }
+});
+
+test("a JSON dependency target inside a root keeps the command", () => {
+  // Parsing is not the only way into the graph: Node resolution reaches a JSON
+  // module, so it can be the far end of an edge between two scanned roots
+  // while holding no imports of its own.
+  assert.equal(
+    depsSurvives(["indexer-envio/config/nttAddresses.json"]),
+    true,
+    "a config JSON that source imports is a real dependency target",
+  );
+  assert.equal(depsSurvives(["shared-config/data/tokens.json"]), true);
+});
+
+test("the JSON-target case this pin stands for is still real", () => {
+  // Fixture pin. dependency-cruiser exports `allExtensions` for what it parses
+  // but nothing for what its resolver accepts, so the target half cannot be
+  // pinned against the library. This keeps it honest instead: if the import
+  // moves, re-point the pin rather than delete the rule.
+  const repoRoot = join(
+    fileURLToPath(new URL(".", import.meta.url)),
+    "../../..",
+  );
+  const source = readFileSync(
+    join(repoRoot, "indexer-envio/src/handlers/stables/config.ts"),
+    "utf8",
+  );
+  assert.match(
+    source,
+    /import\s+\w+\s+from\s+"[^"]*config\/nttAddresses\.json"/,
+    "indexer source must still statically import a config JSON",
+  );
 });
 
 test("a package.json inside a root keeps the command", () => {

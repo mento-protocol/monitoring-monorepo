@@ -213,8 +213,8 @@ full-repo Trunk locally. A deleted path is dropped from the targeted argument
 list — Trunk fails on an argument that is not there — and the surviving paths
 are still linted. Five deletion cases keep the whole-repo scan: a change set
 with no survivor to target, a deleted path that is itself in the whole-repo
-list, a deleted path under `.github/`, a deleted `*.sh`, and a deleted
-repo-root dotfile. The last three are cross-file semantics. actionlint resolves `uses: ./.github/actions/<name>` and
+list, a deleted path under `.github/`, a deleted `*.sh`, and a deleted dotfile
+at any depth. The last three are cross-file semantics. actionlint resolves `uses: ./.github/actions/<name>` and
 `uses: ./.github/workflows/<file>` against the tree, so deleting one invalidates
 surviving callers that are not in the change set and that a targeted run would
 never name. ShellCheck does the same for `# shellcheck source=<repo-relative
@@ -224,16 +224,22 @@ surviving callers from clean to SC1091. A caller that sources only through a
 runtime `${DIR}/…` path is the separate false positive `.shellcheckrc`
 documents, already suppressed per line; the rule does not try to tell the two
 apart, because a sourced-by analysis would rot the first time a caller changed
-how it spells the path. A deleted repo-root dotfile is the third: codespell,
+how it spells the path. A deleted dotfile at any depth is the third: codespell,
 shellcheck, and osv-scanner read `.codespellrc`, `.shellcheckrc`, and
-`.osv-scanner.toml` from the root, and `.gitignore` decides what Trunk looks at
-at all. Remove `.codespellrc` and the unchanged
-`scripts/terraform/tf-platform-plan-guard.mjs` gains a codespell hit on
-`applyable`, an ignore-word that file carried — while the targeted run over the
-survivors still exits 0. The rule is structural, "any deleted root dotfile",
-rather than a list that would rot silently toward under-scanning the first time
-a linter gained a root config; `.trunk/**` needs no entry because it is already
-whole-repo on edit and delete. Note the matching gap for _edits_: modifying
+`.osv-scanner.toml` from the root, `.gitignore` decides what Trunk looks at at
+all, and prettier, markdownlint and yamllint cascade to the nearest config so a
+package can carry its own. Both levels are measured. Remove `.codespellrc` and
+the unchanged `scripts/terraform/tf-platform-plan-guard.mjs` gains a codespell
+hit on `applyable`, an ignore-word that file carried. Remove `aegis/.prettierrc`
+and the untouched `aegis/src/app.module.ts` starts failing prettier, because the
+package's `singleQuote` setting went with it. In both cases the targeted run
+over the survivors still exits 0. The rule is structural, "any deleted
+dotfile", rather than a list or a name-shape class like `.*rc`/`.*ignore`: both
+rot silently toward under-scanning, a list when a linter gains a config and a
+name class when one is spelled outside the shape, as `.osv-scanner.toml`
+already is. It over-includes dotfiles no linter reads — `.terraform.lock.hcl`,
+`.env.example`, `.dockerignore` — which costs a full scan and is never wrong.
+`.trunk/**` needs no entry because it is already whole-repo on edit and delete. Note the matching gap for _edits_: modifying
 `.codespellrc` has the same cross-file reach and still only targets survivors,
 covered today for `.shellcheckrc` alone by its own filtered full scan. Every
 other enabled Trunk linter judges a file on its own bytes. checkov would join
@@ -796,11 +802,18 @@ list, the positional arguments of the root `code-health:deps` script and the
 manifest routes that suite so a script-only edit shrinking the scanned roots
 cannot merge without the staleness test running. A change outside every root
 drops the command. A change inside a root keeps it only when dependency-cruiser
-can read the path: an extension it parses — the enabled half of
-`depcruise --info`, pinned in `engine.test.mjs` against the `allExtensions` the
-library exports — or any `package.json` beneath the root, where a workspace
-dependency is declared. An in-root path it never parses, such as
-`ui-dashboard/AGENTS.md` or a `.sol` file, drops the command even though a
+can read the path, in one of two ways. It parses the extension — the enabled
+half of `depcruise --info`, pinned in `engine.test.mjs` against the
+`allExtensions` the library exports. Or its resolver can reach the file as a
+dependency target: `.json` and `.node` hold no imports but Node resolution
+resolves them, so they can be the far end of an edge between two scanned roots.
+`indexer-envio/src/handlers/stables/config.ts` imports
+`../../../config/nttAddresses.json`, and retargeting that JSON moves an edge the
+cross-package rules judge while no `.ts` file changes. dependency-cruiser
+exports nothing for what its resolver accepts, so that half is pinned by a
+fixture asserting the `nttAddresses.json` import still exists rather than
+against the library. An in-root path that is neither parsed nor resolvable —
+`ui-dashboard/AGENTS.md`, a `.yaml`, a `.sol` — drops the command even though a
 package quality arm scheduled it; before that narrowing such a change bought a
 ~22s cruise of an unchanged 1,321-module graph. A change to
 `.dependency-cruiser.cjs` or to the narrowing pass itself keeps it. So does a

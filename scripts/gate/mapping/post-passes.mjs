@@ -56,23 +56,32 @@ const TRUNK_FULL_SCAN = [
  * the two apart, because any sourced-by analysis would rot the first time a
  * caller changed how it spells the path.
  *
- * A deleted repo-root dotfile is the third class. Several enabled linters read
- * their configuration from one — codespell from `.codespellrc`, shellcheck from
+ * A deleted dotfile is the third class, at any depth. Several enabled linters
+ * read configuration from one — codespell from `.codespellrc`, shellcheck from
  * `.shellcheckrc`, osv-scanner from `.osv-scanner.toml` — and `.gitignore` and
- * `.gitattributes` decide what Trunk looks at in the first place. Deleting one
- * changes the verdict on files that did not change: with `.codespellrc` removed,
- * `scripts/terraform/tf-platform-plan-guard.mjs` goes from clean to one
- * codespell hit on `applyable`, an ignore-word the config carries. A targeted
+ * `.gitattributes` decide what Trunk looks at in the first place. Prettier,
+ * markdownlint and yamllint additionally cascade: the nearest config wins, so a
+ * package can carry its own. Deleting one changes the verdict on files that did
+ * not change, and both levels are measured. Remove `.codespellrc` and
+ * `scripts/terraform/tf-platform-plan-guard.mjs` gains a codespell hit on
+ * `applyable`, an ignore-word that config carries. Remove `aegis/.prettierrc`
+ * and `aegis/src/app.module.ts` — untouched — starts failing prettier, because
+ * the package's `singleQuote` setting went with it. In both cases the targeted
  * run over the survivors still exits 0, so the gate passes locally and the
  * required full scan is where it surfaces.
  *
- * This is deliberately the structural rule "any deleted root dotfile" rather
- * than a list of the config files that exist today. A list would rot the first
- * time a linter gained a root config, and rot silently, in the direction of
- * under-scanning. The rule over-includes a few root dotfiles no Trunk linter
- * reads (`.coderabbit.yaml`, `.vercelignore`); forcing a full scan on their
- * deletion costs time and is never wrong. `.trunk/**` is already whole-repo on
- * both edit and delete, so Trunk's own configs need no entry here.
+ * This is deliberately the structural rule "any deleted dotfile" rather than a
+ * list of the config files that exist today, or a name-shape class like
+ * `.*rc`/`.*ignore`. Both of those rot, and rot silently in the direction of
+ * under-scanning: a list the first time a linter gains a config, a name class
+ * the first time one is spelled outside the shape (`.osv-scanner.toml` already
+ * is). The plain rule cannot rot because it names nothing. It over-includes
+ * dotfiles no Trunk linter reads — `.terraform.lock.hcl`, `.env.example`,
+ * `.dockerignore`, `.coderabbit.yaml` — so deleting one buys a full scan it did
+ * not need. That costs time and is never wrong, which is the correct direction
+ * for a rule whose other failure mode is a green local gate over broken files.
+ * `.trunk/**` is already whole-repo on both edit and delete, so Trunk's own
+ * configs need no entry here.
  *
  * The remaining enabled Trunk linters (prettier, markdownlint, yamllint,
  * trufflehog, git-diff-check) judge each file on its own bytes, so an ordinary
@@ -80,7 +89,7 @@ const TRUNK_FULL_SCAN = [
  * list for local `module { source = "./…" }` references; this repo has none
  * today, and `.tf` deletions stay covered by the whole-repo branches.
  */
-const TRUNK_DELETION_FULL_SCAN = [/^\.github\//, /\.sh$/, /^\.[^/]+$/];
+const TRUNK_DELETION_FULL_SCAN = [/^\.github\//, /\.sh$/, /(^|\/)\.[^/]+$/];
 
 export function addTrunkCheckCommand(plan, changedPaths, facts) {
   const present = [];
@@ -463,20 +472,48 @@ export const DEPCRUISE_EXTENSIONS = Object.freeze([
 ]);
 
 /**
+ * Extensions that appear in the graph as dependency TARGETS without being
+ * parsed for dependencies of their own.
+ *
+ * Parsing is not the only way a file reaches the graph. Node resolution
+ * resolves a JSON module and a native addon, so a file with either extension
+ * can be the far end of an edge between two scanned roots even though it can
+ * hold no imports. `indexer-envio/src/handlers/stables/config.ts` imports
+ * `../../../config/nttAddresses.json`; moving or retargeting that JSON changes
+ * an edge, and the rules that judge indexer-to-dashboard reach would see it,
+ * while no `.ts` file changed. The parse list alone dropped the command there.
+ *
+ * dependency-cruiser exports `allExtensions` for what it parses but nothing for
+ * what its resolver accepts, so this half cannot be pinned against the library.
+ * It is short because it is fixed by Node's own resolution rather than by
+ * dependency-cruiser's configuration, and `engine.test.mjs` pins it against the
+ * real `nttAddresses.json` import instead — a fixture that fails loudly if the
+ * case it stands for ever stops existing.
+ */
+export const DEPCRUISE_TARGET_EXTENSIONS = Object.freeze([".json", ".node"]);
+
+/**
  * A changed path dependency-cruiser can read inside a root it scans.
  *
- * Two shapes qualify. A source file it parses, by extension. And any
- * `package.json` beneath a root, because that is where a workspace dependency
- * is declared — `ui-dashboard/package.json` carries
+ * Three shapes qualify. A source file it parses, by extension. A file its
+ * resolver can reach as a dependency target, which is how a JSON config joins
+ * the graph. And any `package.json` beneath a root, because that is where a
+ * workspace dependency is declared — `ui-dashboard/package.json` carries
  * `"@mento-protocol/config": "workspace:*"`, the edge into `shared-config/` —
  * so it decides resolution the same way the root manifests do.
  */
 const DEPCRUISE_ROOT_PREFIX = new RegExp(`^(${DEPCRUISE_ROOTS.join("|")})/`);
 
+const DEPCRUISE_READABLE_EXTENSIONS = Object.freeze([
+  ...DEPCRUISE_EXTENSIONS,
+  ...DEPCRUISE_TARGET_EXTENSIONS,
+]);
+
 function inRootAndReadable(path) {
   if (!DEPCRUISE_ROOT_PREFIX.test(path)) return false;
-  if (/(^|\/)package\.json$/.test(path)) return true;
-  return DEPCRUISE_EXTENSIONS.some((extension) => path.endsWith(extension));
+  return DEPCRUISE_READABLE_EXTENSIONS.some((extension) =>
+    path.endsWith(extension),
+  );
 }
 
 /**
