@@ -695,7 +695,7 @@ test("freshness, CI routes, and Turbo inputs pin the external family source", ()
   const changesJob = /\n {2}changes:\n([\s\S]*?)\n {2}shared:\n/.exec(ci)?.[1];
   assert.ok(changesJob, "ci.yml has no bounded changes job");
   const rootRuntimeFilter =
-    /\n {12}autoreviewRootRuntime:\n([\s\S]*?)\n {12}versionSkew:\n/.exec(
+    /\n {12}autoreviewRootRuntime: &autoreviewRootRuntime\n([\s\S]*?)\n {12}versionSkew: &versionSkew\n/.exec(
       changesJob,
     )?.[1];
   assert.ok(rootRuntimeFilter, "ci.yml has no autoreviewRootRuntime filter");
@@ -724,8 +724,8 @@ test("freshness, CI routes, and Turbo inputs pin the external family source", ()
   );
   assert.match(
     rootRuntimeJob,
-    /^ {4}if: needs\.changes\.outputs\.autoreviewRootRuntime == 'true'$/m,
-    "the focused root-runtime job does not consume the autoreviewRootRuntime filter",
+    /^ {4}if: needs\.changes\.outputs\.forceAll == 'true' \|\| needs\.changes\.outputs\.autoreviewRootRuntime == 'true'$/m,
+    "the focused root-runtime job does not consume forceAll or the autoreviewRootRuntime filter",
   );
   const turbo = JSON.parse(read("/turbo.json"));
   const input = "$TURBO_ROOT$/scripts/agent-autoreview-core.mjs";

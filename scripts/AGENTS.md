@@ -84,29 +84,30 @@ feedback-runtime pins.
   `gate/run-handles.sh`, coordinator files,
   `docs/docs-navigation-eval-helpers.mjs`, and `gate/lockfile-scope.mjs` from
   `$script_source_dir`; tests hash them from `$repo_root`. Move each path with
-  its routes, signatures, fixtures, literals, and the review selector
-  `.coderabbit.yaml` and `coderabbit-config.test.mjs` pin (ADRs 0064 and 0076).
+  its routes, signatures, fixtures, literals, and the `.coderabbit.yaml` review
+  scope (ADRs 0064 and 0076).
 - **Gate mapping pins.** Signature and Turbo inputs pin
   `gate/routing-table/**`, `gate/mapping*`, the autoreview core, and its sealed
-  policy; hashes follow the same split. Core edits route both suites;
-  policy edits route autoreview. Missing pins freeze the stamp (ADRs 0069 and
-  0079).
-- **Review-eval pins.** `review/run-eval-source-snapshot.sh` joins the
-  four-source set in `docs/evals/review-skill.md`; update every listed consumer
-  together.
+  policy. Runtime hashes use `$script_source_dir`; suites use `$repo_root`.
+  Core edits route both suites; policy edits route autoreview. Missing pins
+  freeze the stamp (ADRs 0069 and 0079).
+- **Review-eval pins.** Sync the four inputs for
+  `review/run-eval-source-snapshot.sh` with `docs/evals/review-skill.md`.
+  `review/review-eval-*publication*` pins both test suites.
 - **Navigation-eval self-pin.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names its implementation.
 - **Verification evidence.** Move
-  `scripts/docs/check-verification-redesign-evidence*.mjs` with the
+  `scripts/docs/check-verification-redesign-evidence*.mjs` with its
   `.gitattributes` patch rule.
 - **Sentry suite manifest.** `scripts/sentry/gate/sentry-suite-manifest.json`
   keys are exact repo-relative paths, reconciled against `findSentrySuites()`
   by set equality both ways. A moved or renamed suite fails the gate closed.
   `sentry/fixture-scan-canary.test.mjs` re-pins four; ADR 0068 has the policy.
-- **Workflow pins.** `.github/workflows/` and `sentry-triage-agent.yml` pin
-  `scripts/` paths. Three Terraform filters use `workflowAdmissionPatterns`
-  from `terraform.stacks.json`. Update the ADR 0064 inventory, routing equality,
-  glob rules, and review-eval pins when a path moves.
+- **Workflow pins.** Workflows and `sentry-triage-agent.yml` pin `scripts/`.
+  Terraform filters use `terraform.stacks.json` `workflowAdmissionPatterns`.
+  `check-ci-contract{,.test}.mjs` pins jobs, filters,
+  commands, and the aggregate. Moves update ADR 0064, routing equality,
+  glob rules, and review-eval pins.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.
@@ -114,8 +115,8 @@ feedback-runtime pins.
   the PR base-branch tip, not a PR snapshot. After a move, keep dual probes
   until the new path reaches the base (issue 1904; ADR 0064).
 - **PR validation boundary pins.** Move
-  `workflows/check-pr-validation-boundary{,.test}.mjs` together. Align its
-  `ci.yml` and `trunk.yml` calls. ADR 0078 defines the boundary.
+  `workflows/check-pr-validation-boundary{,.test}.mjs` with `ci.yml` and
+  `trunk.yml`. ADR 0078 defines the boundary.
 - **Production infrastructure identity pins.** Under
   `production-infra-identity-contract/`, keep
   `workflow-inventory.mjs`, `workflow.test.mjs`,
@@ -129,8 +130,7 @@ feedback-runtime pins.
   EOL and `UPSTASH_MCP_LAUNCHER_SHA256` hashes it. A move changes both. See
   [`docs/notes/upstash-mcp-operator.md`](../docs/notes/upstash-mcp-operator.md).
 
-**List each new `scripts/` path pin here.** An unrecorded pin breaks silently on
-the next move.
+**List new `scripts/` path pins here.** Unlisted pins break silently.
 
 ## Sweep Checklist for a Move
 
