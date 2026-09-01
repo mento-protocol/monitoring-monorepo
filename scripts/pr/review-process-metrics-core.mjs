@@ -103,13 +103,16 @@ function containsNegation(value) {
     /\b(?:no|not|without|zero|never|none|neither|cannot)\b/i.test(value) ||
     /\b(?:did|do|does|is|are|was|were|has|have|had|ca|could|would|should|wo)n['’]t\b/i.test(
       value,
-    )
+    ) ||
+    /^\s*(?:findings?\s*(?::|[—-])\s*)?0\s*$/i.test(value)
   );
 }
 
 function isExplicitEmptySummary(value) {
-  return /^\s*(?:findings?\s*)?(?::|[—-])\s*(?:none|zero|no\s+findings?)\b/i.test(
-    value,
+  return (
+    /^\s*(?:findings?\s*)?(?::|[—-])\s*(?:none|zero|no\s+findings?)\b/i.test(
+      value,
+    ) || /^\s*(?:findings?\s*)?(?::|[—-])\s*0\s*$/i.test(value)
   );
 }
 

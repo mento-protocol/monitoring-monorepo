@@ -1193,6 +1193,55 @@ test("applies clause-aware negation to priority badges", () => {
   );
 });
 
+test("treats numeric zero summaries as empty without hiding defect prose", () => {
+  const value = structuredClone(fixture);
+  value.reviews.push(
+    {
+      id: 226,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "0 high severity findings.",
+    },
+    {
+      id: 227,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "P2 Badge findings: 0.",
+    },
+    {
+      id: 228,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "High severity: value 0 is rejected before validation.",
+    },
+    {
+      id: 229,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "P1 Badge: The parser rejects 0 as a valid value.",
+    },
+  );
+
+  const records = summarizeFixture(
+    value,
+  ).evidence.byBot.claude.surfaces.review_submissions.evidence.filter(
+    ({ id }) => Number(id) >= 226 && Number(id) <= 229,
+  );
+  assert.deepEqual(
+    records.map(({ id, finding, findingSignal }) => ({
+      id,
+      finding,
+      findingSignal: findingSignal ?? null,
+    })),
+    [
+      { id: "226", finding: false, findingSignal: null },
+      { id: "227", finding: false, findingSignal: null },
+      { id: "228", finding: true, findingSignal: "High severity" },
+      { id: "229", finding: true, findingSignal: "P1 Badge" },
+    ],
+  );
+});
+
 test("trusts request authors and proves exact-head markers from PR history", () => {
   const value = structuredClone(fixture);
   const request = (id, login, head, authorAssociation = "NONE") => ({
