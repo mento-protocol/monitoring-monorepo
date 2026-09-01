@@ -598,7 +598,7 @@ list. This resolves the circular completeness problem in the first draft.
 
 ## Review and Merge Authority
 
-Keep current-head readiness checks. A human operator normally merges through
+Keep exact-head readiness checks. A human operator normally merges through
 the GitHub UI. An agent can merge only with explicit, direct approval for that
 specific merge. Do not add a custom merge wrapper or merge queue during the
 initial migration.
@@ -611,14 +611,14 @@ At cutover:
 - Require the current automated review and feedback-ledger conditions.
 - Require the branch to be current with the protected base before merge, or
   rerun the required checks after the base changes.
-- Check the current head, base, checks, reviews, and feedback on the PR page
+- Check the exact head SHA, base, checks, reviews, and feedback on the PR page
   immediately before using the merge button.
 - Keep agents at ALL_CLEAR unless the user directly approves that specific
   merge.
 
 This flow records the accepted one-operator risk. The human who owns the change
 also owns the final merge decision. Automated reviewers, feedback-state, CI
-contracts, and current-head readiness provide independent evidence. They do
+contracts, and exact-head readiness provide independent evidence. They do
 not become a second human approval.
 
 This design accepts extra CI reruns when `main` moves. That cost is simpler than
