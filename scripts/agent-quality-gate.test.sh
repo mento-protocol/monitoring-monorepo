@@ -7248,7 +7248,7 @@ packages:
 assert_contains "- pnpm skew:check (lockfile change scoped to importers)"
 assert_contains "- pnpm lockfile:lint (lockfile change scoped to importers)"
 assert_contains "- pnpm --filter @mento-protocol/metrics-bridge test:coverage (lockfile importer metrics-bridge changed (coverage floor))"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (root lockfile changed (peg registry authority dependency))"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/main (root lockfile changed (peg registry authority dependency))"
 assert_not_contains "cd aegis && forge test"
 assert_not_contains "@mento-protocol/integration-probes test:coverage"
 assert_not_contains "workspace dependency/config changed (coverage floor)"
@@ -7761,7 +7761,7 @@ run_gate "metrics-bridge/src/peg/metrics.ts"
 assert_contains "- pnpm alerts:rules:lint (metrics-bridge gauge registry changed (alerts cross-check))"
 
 run_gate "metrics-bridge/peg-registry.json"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/main (peg registry changed)"
 
 run_gate "metrics-bridge/src/rpc.ts"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
@@ -7981,7 +7981,7 @@ assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/t
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules init -backend=false -input=false (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules validate -no-color (alerts/rules Terraform changed)"
 assert_contains "- pnpm alerts:rules:lint (alerts/rules PromQL lint + metric cross-check)"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg threshold policy changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/main (peg threshold policy changed)"
 
 run_gate "alerts/rules/main.tf"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs alerts/rules (alerts/rules Terraform changed)"
@@ -8174,7 +8174,7 @@ assert_contains "- pnpm --filter @mento-protocol/metrics-bridge typecheck (metri
 assert_contains "- pnpm --filter @mento-protocol/metrics-bridge test:coverage (metrics bridge build context changed (coverage floor))"
 
 run_gate "shared-config/deployment-namespaces.json"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/main (peg registry authority input changed)"
 assert_order \
   "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (shared-config vendored indexer fixture changed)" \
   "- pnpm indexer:testnet:codegen (shared-config vendored indexer fixture changed)"
@@ -8200,22 +8200,22 @@ assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the das
 run_gate "shared-config/src/chains.ts"
 assert_contains "- pnpm --filter @mento-protocol/config test:coverage (shared-config changed (coverage floor))"
 assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the dashboard bundle)"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/main (peg registry authority input changed)"
 # The cache key includes shared-config inputs for browser tests, but the local
 # gate still does not broaden shared-config-only edits into Playwright runs.
 assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (shared-config exports feed the dashboard bundle)"
 
 run_gate "shared-config/oracle-reporters.json"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/main (peg registry authority input changed)"
 
 run_gate "shared-config/chain-metadata.json"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/main (peg registry authority input changed)"
 
 run_gate "shared-config/src/oracle-reporters.ts"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/main (peg registry authority input changed)"
 
 run_gate "shared-config/src/tokens.ts"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/main (peg registry authority input changed)"
 
 run_gate "shared-config/src/thresholds.ts"
 assert_contains "- node scripts/alerts/check-deviation-threshold-drift.mjs (shared deviation threshold source changed)"
@@ -13329,15 +13329,15 @@ run_gate "scripts/alerts/alert-rules-lint-peg-policy.mjs"
 assert_contains "- pnpm alerts:rules:lint:test (alert-rules lint helper changed)"
 
 run_gate "scripts/alerts/check-peg-registry-integrity.mjs"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry integrity checker changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/main (peg registry integrity checker changed)"
 assert_contains "- node scripts/alerts/check-peg-registry-integrity.test.mjs (peg registry integrity checker changed)"
 
 run_gate "scripts/alerts/check-peg-registry-integrity-lineage.mjs"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry integrity checker changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/main (peg registry integrity checker changed)"
 assert_contains "- node scripts/alerts/check-peg-registry-integrity.test.mjs (peg registry integrity checker changed)"
 
 run_gate "scripts/alerts/check-peg-registry-integrity.test.mjs"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry integrity checker changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/main (peg registry integrity checker changed)"
 assert_contains "- node scripts/alerts/check-peg-registry-integrity.test.mjs (peg registry integrity checker changed)"
 
 run_gate "scripts/alerts/check-peg-policy-publication.mjs"
@@ -13349,7 +13349,7 @@ assert_contains "- pnpm tf:test (peg policy publication boundary changed)"
 # The shared digest both peg validators compare against: one file, both suites.
 run_gate "scripts/lib/peg-policy-digest.mjs"
 assert_contains "- pnpm alerts:rules:lint:test (peg policy version digest changed)"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg policy version digest changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/main (peg policy version digest changed)"
 assert_contains "- node scripts/alerts/check-peg-registry-integrity.test.mjs (peg policy version digest changed)"
 
 run_gate "scripts/pr/check-pr-description.mjs"
