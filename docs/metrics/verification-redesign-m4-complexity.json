@@ -1,11 +1,12 @@
 {
   "schemaVersion": 1,
   "baseSha": "b4bf201c3b87580771c55ec615fcc9a4e51ae267",
-  "baseline": "M4 additive complexity receipt for #2126.",
-  "scope": "Every changed and untracked M4 path relative to baseSha, except this receipt.",
+  "sourceSha": "f54555974ac1c021d5e4a9231da0ecb1cd318934",
+  "baseline": "Initial M4 additive complexity segment for #2126.",
+  "scope": "Every changed initial M4 path from baseSha through sourceSha, except this receipt. The repairs array records later M4 corrections.",
   "derivation": {
-    "method": "Use git diff --numstat from baseSha for tracked paths and physical line counts for untracked paths. The receipt path self-excludes from its own scope and totals.",
-    "trackedCommand": "git diff --numstat b4bf201c3b87580771c55ec615fcc9a4e51ae267 -- . ':!docs/metrics/verification-redesign-m4-complexity.json'",
+    "method": "Use git diff --numstat from baseSha through sourceSha for tracked paths and physical line counts for untracked paths. The receipt path self-excludes from its own scope and totals.",
+    "trackedCommand": "git diff --numstat b4bf201c3b87580771c55ec615fcc9a4e51ae267 f54555974ac1c021d5e4a9231da0ecb1cd318934 -- . ':!docs/metrics/verification-redesign-m4-complexity.json'",
     "untrackedMethod": "List untracked, non-ignored paths with git ls-files --others --exclude-standard, exclude this receipt, and count each remaining file with awk END NR.",
     "receiptPath": "docs/metrics/verification-redesign-m4-complexity.json",
     "receiptSelfExcluded": true
@@ -241,11 +242,349 @@
       "testAdditionsUnderTwiceImplementationAdditions": true
     }
   },
+  "repairSegments": [
+    {
+      "name": "permission-ceiling",
+      "pr": 2197,
+      "baseSha": "2367b077eb547a53b923af2f179cc76bdf690a3b",
+      "sourceSha": "aa67b23f646aa50122f3c82c221c926c7509ef0a",
+      "trackedCommand": "git diff --numstat 2367b077eb547a53b923af2f179cc76bdf690a3b aa67b23f646aa50122f3c82c221c926c7509ef0a -- . ':!docs/metrics/verification-redesign-m4-complexity.json'",
+      "files": [
+        {
+          "path": ".github/workflows/ci.yml",
+          "category": "workflow",
+          "additions": 4,
+          "deletions": 1
+        },
+        {
+          "path": "scripts/workflows/check-no-skip-audit.mjs",
+          "category": "check",
+          "additions": 6,
+          "deletions": 1
+        },
+        {
+          "path": "scripts/workflows/check-no-skip-audit.test.mjs",
+          "category": "test",
+          "additions": 3,
+          "deletions": 0
+        }
+      ],
+      "totals": {
+        "workflow": {
+          "additions": 4,
+          "deletions": 1,
+          "net": 3
+        },
+        "check": {
+          "additions": 6,
+          "deletions": 1,
+          "net": 5
+        },
+        "test": {
+          "additions": 3,
+          "deletions": 0,
+          "net": 3
+        },
+        "all": {
+          "additions": 13,
+          "deletions": 2,
+          "net": 11
+        }
+      },
+      "replacementSpecific": {
+        "implementationAdditions": 10,
+        "testAdditions": 3,
+        "testToImplementationRatio": 0.3,
+        "twiceImplementationAdditions": 20,
+        "testAdditionsUnderTwiceImplementationAdditions": true
+      }
+    },
+    {
+      "name": "audit-boundary",
+      "pr": 2207,
+      "baseSha": "c6483d435a26251571585e4f9c7522254e66924c",
+      "sourceSha": "66df33056382418a186ff93a766bd0d52d956bec",
+      "trackedCommand": "git diff --numstat c6483d435a26251571585e4f9c7522254e66924c 66df33056382418a186ff93a766bd0d52d956bec -- . ':!docs/metrics/verification-redesign-m4-complexity.json'",
+      "files": [
+        {
+          "path": ".github/workflows/ci.yml",
+          "category": "workflow",
+          "additions": 35,
+          "deletions": 9
+        },
+        {
+          "path": ".github/workflows/mutation-testing.yml",
+          "category": "workflow",
+          "additions": 2,
+          "deletions": 2
+        },
+        {
+          "path": ".github/workflows/no-skip-audit.yml",
+          "category": "workflow",
+          "additions": 48,
+          "deletions": 1
+        },
+        {
+          "path": ".github/workflows/sentry-triage-ingest.yml",
+          "category": "workflow",
+          "additions": 3,
+          "deletions": 2
+        },
+        {
+          "path": ".github/workflows/supply-chain.yml",
+          "category": "workflow",
+          "additions": 3,
+          "deletions": 2
+        },
+        {
+          "path": "docs/PLAN-progressive-verification-graph.html",
+          "category": "doc",
+          "additions": 28,
+          "deletions": 19
+        },
+        {
+          "path": "docs/PLAN-progressive-verification-graph.md",
+          "category": "doc",
+          "additions": 44,
+          "deletions": 13
+        },
+        {
+          "path": "docs/README.md",
+          "category": "doc",
+          "additions": 1,
+          "deletions": 0
+        },
+        {
+          "path": "docs/adr/0062-sentry-suites-self-run-gate.md",
+          "category": "doc",
+          "additions": 6,
+          "deletions": 7
+        },
+        {
+          "path": "docs/adr/0078-staged-verification-redesign.md",
+          "category": "doc",
+          "additions": 43,
+          "deletions": 12
+        },
+        {
+          "path": "docs/metrics/verification-redesign-m4-shadow-evidence.md",
+          "category": "doc",
+          "additions": 320,
+          "deletions": 0
+        },
+        {
+          "path": "docs/metrics/verification-redesign-safeguards.jsonl",
+          "category": "doc",
+          "additions": 4,
+          "deletions": 4
+        },
+        {
+          "path": "docs/notes/agent-quality-gate-mechanics.md",
+          "category": "doc",
+          "additions": 6,
+          "deletions": 1
+        },
+        {
+          "path": "docs/notes/quick-commands.md",
+          "category": "doc",
+          "additions": 4,
+          "deletions": 1
+        },
+        {
+          "path": "docs/pr-checklists/ci-workflow-gates.md",
+          "category": "doc",
+          "additions": 56,
+          "deletions": 1
+        },
+        {
+          "path": "docs/pr-checklists/recurring-review-patterns.md",
+          "category": "doc",
+          "additions": 1,
+          "deletions": 1
+        },
+        {
+          "path": "scripts/AGENTS.md",
+          "category": "doc",
+          "additions": 7,
+          "deletions": 5
+        },
+        {
+          "path": "scripts/agent-autoreview-indexer-invariant-contract.test.mjs",
+          "category": "test",
+          "additions": 239,
+          "deletions": 0
+        },
+        {
+          "path": "scripts/agent-quality-gate.test.sh",
+          "category": "test",
+          "additions": 18,
+          "deletions": 210
+        },
+        {
+          "path": "scripts/bootstrap/agent-setup-contract.test.sh",
+          "category": "test",
+          "additions": 252,
+          "deletions": 0
+        },
+        {
+          "path": "scripts/gate/mapping/verbs.mjs",
+          "category": "check",
+          "additions": 1,
+          "deletions": 0
+        },
+        {
+          "path": "scripts/gate/routing-table/arms-agent-modules.mjs",
+          "category": "check",
+          "additions": 17,
+          "deletions": 2
+        },
+        {
+          "path": "scripts/gate/routing-table/arms-packages.mjs",
+          "category": "check",
+          "additions": 5,
+          "deletions": 0
+        },
+        {
+          "path": "scripts/gate/routing-table/arms-scripts.mjs",
+          "category": "check",
+          "additions": 10,
+          "deletions": 3
+        },
+        {
+          "path": "scripts/gate/routing-table/indexer-invariant-parity.test.mjs",
+          "category": "test",
+          "additions": 2,
+          "deletions": 174
+        },
+        {
+          "path": "scripts/workflows/check-ci-contract.mjs",
+          "category": "check",
+          "additions": 1,
+          "deletions": 1
+        },
+        {
+          "path": "scripts/workflows/check-ci-contract.test.mjs",
+          "category": "test",
+          "additions": 6,
+          "deletions": 7
+        },
+        {
+          "path": "scripts/workflows/check-no-skip-audit.mjs",
+          "category": "check",
+          "additions": 70,
+          "deletions": 10
+        },
+        {
+          "path": "scripts/workflows/check-no-skip-audit.test.mjs",
+          "category": "test",
+          "additions": 250,
+          "deletions": 9
+        }
+      ],
+      "totals": {
+        "workflow": {
+          "additions": 91,
+          "deletions": 16,
+          "net": 75
+        },
+        "check": {
+          "additions": 104,
+          "deletions": 16,
+          "net": 88
+        },
+        "test": {
+          "additions": 767,
+          "deletions": 400,
+          "net": 367
+        },
+        "doc": {
+          "additions": 520,
+          "deletions": 64,
+          "net": 456
+        },
+        "all": {
+          "additions": 1482,
+          "deletions": 496,
+          "net": 986
+        }
+      },
+      "replacementSpecific": {
+        "implementationAdditions": 195,
+        "testAdditions": 767,
+        "testToImplementationRatio": 3.9333,
+        "twiceImplementationAdditions": 390,
+        "testAdditionsUnderTwiceImplementationAdditions": false,
+        "budgetEvaluation": "informational segment; evaluate the initial implementation limit on cumulativeM4"
+      }
+    }
+  ],
+  "cumulativeM4": {
+    "method": "Sum the initial segment and both repair segments. These additive activity counts preserve each reviewed diff. They are not a direct diff across unrelated main-branch merges.",
+    "totals": {
+      "action": {
+        "additions": 26,
+        "deletions": 18,
+        "net": 8
+      },
+      "workflow": {
+        "additions": 434,
+        "deletions": 90,
+        "net": 344
+      },
+      "check": {
+        "additions": 377,
+        "deletions": 69,
+        "net": 308
+      },
+      "test": {
+        "additions": 1038,
+        "deletions": 416,
+        "net": 622
+      },
+      "doc": {
+        "additions": 700,
+        "deletions": 103,
+        "net": 597
+      },
+      "package": {
+        "additions": 1,
+        "deletions": 1,
+        "net": 0
+      },
+      "all": {
+        "additions": 2576,
+        "deletions": 697,
+        "net": 1879
+      }
+    },
+    "replacementSpecific": {
+      "implementationAdditions": 838,
+      "testAdditions": 1038,
+      "testToImplementationRatio": 1.2387,
+      "limits": {
+        "thinOrchestrationScriptPhysicalLines": 245,
+        "thinOrchestrationScriptUnder300": true,
+        "newWorkflowPhysicalLines": 152,
+        "newReplacementFilePhysicalLines": {
+          ".github/workflows/no-skip-audit.yml": 152,
+          "scripts/workflows/check-no-skip-audit.mjs": 245,
+          "scripts/workflows/check-no-skip-audit.test.mjs": 415,
+          "scripts/agent-autoreview-indexer-invariant-contract.test.mjs": 239,
+          "scripts/bootstrap/agent-setup-contract.test.sh": 252
+        },
+        "newReplacementFilePhysicalLineLimit": 500,
+        "allNewReplacementFilesUnder500": true,
+        "twiceImplementationAdditions": 1676,
+        "testAdditionsUnderTwiceImplementationAdditions": true
+      }
+    }
+  },
   "forbiddenMechanisms": [],
   "phaseClaim": {
     "mode": "additive",
     "claimsCutoverAdditionsBelowDeletionsCondition": false,
-    "claimsShadowRunEvidence": false,
-    "statement": "M4 adds the manual audit lane and its static contract. It adds no schedule and records no shadow run. Operational run evidence remains in GitHub and the later Markdown evidence record."
+    "recordsShadowRunIncidentEvidence": true,
+    "claimsEligibleShadowCohort": false,
+    "statement": "M4 adds the manual audit lane and its static contract. It adds no schedule. The separate Markdown record contains incident evidence from the first run. M4 does not claim an eligible shadow cohort or cutover evidence."
   }
 }
