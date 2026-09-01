@@ -26,6 +26,8 @@ const FORCE_ALL = "${{ inputs.no_skip_audit || steps.filter.outputs.controlPlane
 // prettier-ignore
 const CODECOV_IF = "${{ !inputs.no_skip_audit && !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}", WRITE_CACHE = "${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' }}";
 // prettier-ignore
+const READ_SCOPES = Object.freeze({ actions: "read", contents: "read", "pull-requests": "read" });
+// prettier-ignore
 const ADMISSION_HASH = "4d7f93bcbbd354c4ade518fb9db9c36e211f5d9af39d5bc62ccfa8b8b52bdc3e", SUMMARY_HASH = "23691af2c65d242efe88a75d9ff73f55a9baf78fc2bd38fcc04e2956992e1f5e", BASELINE_HASH = "467641beda8b2b45d49d0c62429d8e95f62b05c1db96f6665b106012a09cef12";
 
 // prettier-ignore
@@ -83,7 +85,7 @@ function checkDispatcher(root, errors) {
   add(errors, checkout?.uses === CHECKOUT && stable(checkout.with) === stable({ ref: "${{ inputs.source_sha }}", "fetch-depth": 0, "persist-credentials": false }), "admission must check out the exact source with full history and no credentials");
   add(errors, summary?.shell === "bash" && stable(summary.env) === stable({ SOURCE_SHA: "${{ inputs.source_sha }}", BASE_SHA: "${{ inputs.base_sha }}", PR_NUMBER: "${{ inputs.pr_number }}" }) && hash(summary.run) === SUMMARY_HASH, "admission object proof or operational summary changed");
   const audit = workflow.jobs?.audit ?? {};
-  add(errors, stable(audit) === stable({ name: "Full deterministic no-skip audit", needs: "admit", permissions: { actions: "read", contents: "read", "pull-requests": "read" }, uses: "$/.github/workflows/ci.yml", with: { no_skip_audit: true, audit_source_sha: "${{ inputs.source_sha }}", audit_base_sha: "${{ inputs.base_sha }}" } }), "audit job must depend on admission and call protected CI with exact inputs");
+  add(errors, stable(audit) === stable({ name: "Full deterministic no-skip audit", needs: "admit", permissions: READ_SCOPES, uses: "$/.github/workflows/ci.yml", with: { no_skip_audit: true, audit_source_sha: "${{ inputs.source_sha }}", audit_base_sha: "${{ inputs.base_sha }}" } }), "audit job must depend on admission and call protected CI with exact inputs");
   add(errors, !stable(workflow).includes("secrets") && !stable(workflow).includes("write"), "no-skip caller must not receive secrets or write authority");
 }
 
@@ -96,6 +98,9 @@ function checkCandidateGraph(root, errors) {
   const changesCheckout = workflowJobSteps(ci.jobs?.changes).filter((step) => String(step.uses ?? "").startsWith("actions/checkout@"));
   const filter = workflowJobSteps(ci.jobs?.changes).find((step) => step.id === "filter");
   add(errors, changesCheckout.length === 1 && changesCheckout[0].uses === CHECKOUT && changesCheckout[0].if === CACHE_OFF && stable(changesCheckout[0].with) === stable({ "persist-credentials": false }) && filter?.if === CACHE_OFF, "audit must bypass mutable change selection and force every routed job");
+  const caller = yaml(root, DISPATCH).jobs?.audit ?? {}, allowedScopes = new Set(Object.keys(READ_SCOPES));
+  add(errors, stable(ci.permissions) === stable(READ_SCOPES) && stable(caller.permissions) === stable(READ_SCOPES), "no-skip caller and reusable CI permission ceilings must match exact read-only scopes");
+  add(errors, Object.values(ci.jobs ?? {}).every((job) => isMapping(job.permissions) && Object.keys(job.permissions).length > 0 && Object.entries(job.permissions).every(([scope, access]) => allowedScopes.has(scope) && access === "read")), "every reusable CI job must keep explicit narrow read-only permissions");
   const candidateJobs = Object.entries(ci.jobs ?? {}).filter(([name]) => !["changes", "ci"].includes(name));
   for (const [name, job] of candidateJobs) {
     const list = workflowJobSteps(job), checkouts = list.filter((step) => String(step.uses ?? "").startsWith("actions/checkout@")), checkout = checkouts[0];
