@@ -36,6 +36,7 @@ workflow documentation. A human operator normally merges through the GitHub UI.
 The default agent workflow drives a PR to ALL_CLEAR and then stops. An agent
 can merge only when the user gives explicit, direct approval for that specific
 merge. The agent then rechecks the current PR state and uses GitHub directly.
+The merge request must bind the probed head SHA and abort on a mismatch.
 `ship it`, ALL_CLEAR, and general workflow approval do not authorize a merge.
 
 Remove the wrapper-specific agent command denies for `gh pr merge` and the

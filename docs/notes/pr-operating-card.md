@@ -391,7 +391,9 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    the current head, required checks, and feedback state, and uses GitHub's
    merge button. If the user gives explicit, direct approval for an agent to
    merge that specific PR, the agent re-runs the current-state probes and uses
-   GitHub's merge API. GitHub's PR and merge record is the merge evidence.
+   GitHub's merge API. The merge request must bind the probed head with
+   `--match-head-commit <head-sha>` or the REST `sha` field and abort on a
+   mismatch. GitHub's PR and merge record is the merge evidence.
    [ADR 0083](../adr/0083-github-ui-operator-merge.md) owns this merge path. [ADR
    0081](../adr/0081-narrow-dependabot-auto-merge-exception.md) owns the
    separate machine exception.
