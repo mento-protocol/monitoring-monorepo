@@ -5,6 +5,10 @@ import {
   botKeyForLogin,
   isTrustedRequestAuthor,
 } from "./review-process-metrics-core.mjs";
+import {
+  effectiveHeadBeforeComment,
+  provenForcePush,
+} from "./review-process-metrics-timeline.mjs";
 
 function extractRunIds(body) {
   return [
@@ -101,13 +105,202 @@ function requestTargets(body) {
     .map(([target]) => target);
 }
 
-function classifyRequestMarker(body, target, knownHeads) {
-  const text = String(body ?? "");
+const FULL_SHA_PATTERN = /^[0-9a-f]{40}$/i;
+
+function normalizedFullSha(value) {
+  const text = typeof value === "string" ? value : "";
+  return FULL_SHA_PATTERN.test(text) ? text.toLowerCase() : null;
+}
+
+function evidenceTimestamp(value) {
+  if (
+    typeof value !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value)
+  ) {
+    return null;
+  }
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function stableNodeId(value) {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function strictDatabaseId(value) {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) {
+    return value;
+  }
+  if (typeof value === "string" && /^[1-9][0-9]*$/.test(value)) return value;
+  return null;
+}
+
+function matchTimelineComment(comment, timeline) {
+  if (!Array.isArray(timeline)) {
+    return { item: null, index: null, reason: "timeline_is_not_an_array" };
+  }
+  const commented = timeline
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => item?.event === "commented");
+  const nodeId = stableNodeId(comment.node_id);
+  if (nodeId !== null) {
+    const matches = commented.filter(
+      ({ item }) => stableNodeId(item.node_id) === nodeId,
+    );
+    if (matches.length > 1) {
+      return {
+        item: null,
+        index: null,
+        reason: "timeline_comment_node_id_is_ambiguous",
+      };
+    }
+    if (matches.length === 1) {
+      const commentId = strictDatabaseId(comment.id);
+      const timelineId = strictDatabaseId(matches[0].item.id);
+      if (
+        commentId !== null &&
+        timelineId !== null &&
+        commentId !== timelineId
+      ) {
+        return {
+          item: null,
+          index: null,
+          reason: "timeline_comment_id_conflicts_with_node_id",
+        };
+      }
+      return { ...matches[0], reason: null };
+    }
+  }
+
+  const commentId = strictDatabaseId(comment.id);
+  if (commentId === null) {
+    return {
+      item: null,
+      index: null,
+      reason: "request_comment_has_no_stable_identity",
+    };
+  }
+  const idMatches = commented.filter(
+    ({ item }) => strictDatabaseId(item.id) === commentId,
+  );
+  if (idMatches.length === 0) {
+    return { item: null, index: null, reason: "timeline_comment_not_found" };
+  }
+  if (idMatches.length > 1) {
+    return {
+      item: null,
+      index: null,
+      reason: "timeline_comment_id_is_ambiguous",
+    };
+  }
+  const matchedNodeId = stableNodeId(idMatches[0].item.node_id);
+  if (nodeId !== null && matchedNodeId !== null && nodeId !== matchedNodeId) {
+    return {
+      item: null,
+      index: null,
+      reason: "timeline_comment_node_id_mismatch",
+    };
+  }
+  return { ...idMatches[0], reason: null };
+}
+
+function proveCommentRecency(comment, timelineComment) {
+  const createdAt = evidenceTimestamp(comment.created_at);
+  const timelineCreatedAt = evidenceTimestamp(timelineComment.created_at);
+  if (createdAt === null || timelineCreatedAt === null) {
+    return {
+      timestamp: null,
+      reason: "timeline_comment_created_at_is_unprovable",
+    };
+  }
+  if (createdAt !== timelineCreatedAt) {
+    return {
+      timestamp: null,
+      reason: "timeline_comment_created_at_mismatch",
+    };
+  }
+
+  const updatedAt = evidenceTimestamp(comment.updated_at);
+  const timelineUpdatedAt = evidenceTimestamp(timelineComment.updated_at);
+  if (updatedAt === null || timelineUpdatedAt === null) {
+    return {
+      timestamp: null,
+      reason: "timeline_comment_updated_at_is_unprovable",
+    };
+  }
+  if (updatedAt !== timelineUpdatedAt) {
+    return {
+      timestamp: null,
+      reason: "timeline_comment_updated_at_mismatch",
+    };
+  }
+  if (updatedAt !== createdAt) {
+    return { timestamp: null, reason: "request_comment_was_edited" };
+  }
+  return { timestamp: createdAt, reason: null };
+}
+
+function proveMarkerHeadAtComment(comment, markerHead, timeline) {
+  const matched = matchTimelineComment(comment, timeline);
+  if (matched.reason !== null) {
+    return {
+      kind: "unknown",
+      reason: matched.reason,
+      effectiveHead: null,
+      timelineCommentNodeId: null,
+      timelineCommentIndex: null,
+    };
+  }
+  const recency = proveCommentRecency(comment, matched.item);
+  if (recency.reason !== null) {
+    return {
+      kind: "unknown",
+      reason: recency.reason,
+      effectiveHead: null,
+      timelineCommentNodeId: stableNodeId(matched.item.node_id),
+      timelineCommentIndex: matched.index,
+    };
+  }
+  const effective = effectiveHeadBeforeComment(
+    timeline,
+    matched.index,
+    recency.timestamp,
+  );
+  if (effective.reason !== null) {
+    return {
+      kind: "unknown",
+      reason: effective.reason,
+      effectiveHead: effective.head,
+      timelineCommentNodeId: stableNodeId(matched.item.node_id),
+      timelineCommentIndex: matched.index,
+    };
+  }
+  return {
+    kind: effective.head === markerHead ? "marked_exact_head" : "unknown",
+    reason:
+      effective.head === markerHead
+        ? null
+        : "marker_was_not_effective_head_at_request",
+    effectiveHead: effective.head,
+    timelineCommentNodeId: stableNodeId(matched.item.node_id),
+    timelineCommentIndex: matched.index,
+  };
+}
+
+function classifyRequestMarker(comment, target, knownHeads, timeline) {
+  const text = String(comment.body ?? "");
   const markerStarts = [
     ...text.matchAll(/<!--\s*coderabbit-final-head-review:/gi),
   ];
   if (target !== "coderabbit" || markerStarts.length === 0) {
-    return { kind: "bare", head: null, reason: null };
+    return {
+      kind: "bare",
+      head: null,
+      reason: null,
+      effectiveHead: null,
+      timelineCommentNodeId: null,
+      timelineCommentIndex: null,
+    };
   }
   const heads = [
     ...text.matchAll(
@@ -115,13 +308,27 @@ function classifyRequestMarker(body, target, knownHeads) {
     ),
   ].map((match) => match[1].toLowerCase());
   if (markerStarts.length !== 1 || heads.length !== 1) {
-    return { kind: "unknown", head: null, reason: "malformed_head_marker" };
+    return {
+      kind: "unknown",
+      head: null,
+      reason: "malformed_head_marker",
+      effectiveHead: null,
+      timelineCommentNodeId: null,
+      timelineCommentIndex: null,
+    };
   }
   const head = heads[0];
   if (!knownHeads.has(head)) {
-    return { kind: "unknown", head, reason: "head_not_in_pr_history" };
+    return {
+      kind: "unknown",
+      head,
+      reason: "head_not_in_pr_history",
+      effectiveHead: null,
+      timelineCommentNodeId: null,
+      timelineCommentIndex: null,
+    };
   }
-  return { kind: "marked_exact_head", head, reason: null };
+  return { ...proveMarkerHeadAtComment(comment, head, timeline), head };
 }
 
 function summarizeManualRequests(evidence, rejectedEvidence) {
@@ -154,6 +361,7 @@ export function buildSignals({
   commits,
   issueComments,
   reviews,
+  timeline = [],
 }) {
   const evidence = {
     reviewRuns: [],
@@ -165,9 +373,21 @@ export function buildSignals({
     rejectedManualRequests: [],
   };
   const knownHeads = new Set(
-    [currentHeadOid, ...commits.map((commit) => commit.sha)]
-      .filter(Boolean)
-      .map((head) => String(head).toLowerCase()),
+    [
+      normalizedFullSha(currentHeadOid),
+      ...commits.map((commit) => normalizedFullSha(commit.sha)),
+      ...timeline
+        .filter(({ event }) => event === "committed")
+        .map(({ sha }) => normalizedFullSha(sha)),
+      ...timeline
+        .filter(({ event }) => event === "head_ref_force_pushed")
+        .flatMap((event) => {
+          const proof = provenForcePush(event);
+          return proof.reason === null
+            ? [proof.beforeHead, proof.afterHead]
+            : [];
+        }),
+    ].filter(Boolean),
   );
   const seenRuns = new Set();
   const runSources = [
@@ -202,13 +422,21 @@ export function buildSignals({
       }
     }
     for (const target of requestTargets(comment.body)) {
-      const marker = classifyRequestMarker(comment.body, target, knownHeads);
+      const marker = classifyRequestMarker(
+        comment,
+        target,
+        knownHeads,
+        timeline,
+      );
       const record = {
         ...signalEvidence(comment, { prUrl, type: "manual_request" }),
         target,
         marker: marker.kind,
         markerReason: marker.reason,
         head: marker.head,
+        effectiveHead: marker.effectiveHead,
+        timelineCommentNodeId: marker.timelineCommentNodeId,
+        timelineCommentIndex: marker.timelineCommentIndex,
       };
       if (!isTrustedRequestAuthor(comment)) {
         evidence.rejectedManualRequests.push({

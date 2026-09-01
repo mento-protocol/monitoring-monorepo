@@ -1,11 +1,12 @@
 import {
-  isClaudeBotLogin,
+  authorLogin,
+  isClaudeEvidence,
   isClaudeSummary,
   isCodexApprovalComment,
   isCodexBotLogin,
   isCodexUsageLimit,
   isFindingLikeText,
-  isReviewBotLogin,
+  isReviewBotEvidence,
 } from "./review-process-metrics-core.mjs";
 
 function timestamp(value) {
@@ -18,10 +19,6 @@ function hoursBetween(start, end) {
   const endTime = timestamp(end);
   if (startTime === null || endTime === null) return null;
   return Math.round(((endTime - startTime) / 3_600_000) * 100) / 100;
-}
-
-function authorLogin(value) {
-  return String(value?.author?.login ?? value?.user?.login ?? "").toLowerCase();
 }
 
 function isLegacyReviewRequest(value) {
@@ -49,6 +46,7 @@ function rootReviewCommentsWithoutReplies(reviewComments) {
 }
 
 function earliestReviewTimestamp({
+  prUrl,
   issueComments = [],
   reviewComments = [],
   reviews = [],
@@ -56,7 +54,7 @@ function earliestReviewTimestamp({
   const candidates = [];
   for (const comment of issueComments) {
     if (
-      isReviewBotLogin(authorLogin(comment)) ||
+      isReviewBotEvidence(comment, prUrl) ||
       isLegacyReviewRequest(comment.body)
     ) {
       candidates.push(timestamp(comment.createdAt ?? comment.created_at));
@@ -135,33 +133,35 @@ export function summarizePullRequestMetrics({
   const issueComments = pr.comments ?? [];
   const reviews = pr.reviews ?? [];
   const commits = pr.commits ?? [];
+  const prUrl = pr.url ?? null;
   const rootReviewComments = uniqueRootReviewComments(reviewComments);
   const firstReviewAt = earliestReviewTimestamp({
+    prUrl,
     issueComments,
     reviewComments,
     reviews,
   });
   const reviewBotTopLevel = issueComments.filter((comment) =>
-    isReviewBotLogin(authorLogin(comment)),
+    isReviewBotEvidence(comment, prUrl),
   );
   const reviewBotInlineRoots = rootReviewComments.filter((comment) =>
-    isReviewBotLogin(authorLogin(comment)),
+    isReviewBotEvidence(comment, prUrl),
   );
   const humanReviewRequests = issueComments.filter(
     (comment) =>
-      !isReviewBotLogin(authorLogin(comment)) &&
+      !isReviewBotEvidence(comment, prUrl) &&
       isLegacyReviewRequest(comment.body),
   );
   const findingLikeTopLevel = issueComments.filter(
     (comment) =>
-      isReviewBotLogin(authorLogin(comment)) && isFindingLikeText(comment.body),
+      isReviewBotEvidence(comment, prUrl) && isFindingLikeText(comment.body),
   );
   const findingLikeInline = rootReviewComments.filter((comment) =>
     isFindingLikeText(comment.body),
   );
   const claudeTopLevel = issueComments.filter(
     (comment) =>
-      isClaudeBotLogin(authorLogin(comment)) && isClaudeSummary(comment.body),
+      isClaudeEvidence(comment, prUrl) && isClaudeSummary(comment.body),
   );
   const codexTopLevel = issueComments.filter((comment) =>
     isCodexBotLogin(authorLogin(comment)),
@@ -170,7 +170,7 @@ export function summarizePullRequestMetrics({
   return {
     number: pr.number,
     title: pr.title,
-    url: pr.url,
+    url: prUrl,
     createdAt: pr.createdAt,
     mergedAt: pr.mergedAt,
     collectedAt,
@@ -182,11 +182,10 @@ export function summarizePullRequestMetrics({
     commitsAfterFirstReview: countCommitsAfter(commits, firstReviewAt),
     reviews: {
       submissions: reviews.length,
-      byBots: reviews.filter((review) => isReviewBotLogin(authorLogin(review)))
+      byBots: reviews.filter((review) => isReviewBotEvidence(review, prUrl))
         .length,
-      byHumans: reviews.filter(
-        (review) => !isReviewBotLogin(authorLogin(review)),
-      ).length,
+      byHumans: reviews.filter((review) => !isReviewBotEvidence(review, prUrl))
+        .length,
     },
     comments: {
       topLevel: issueComments.length,

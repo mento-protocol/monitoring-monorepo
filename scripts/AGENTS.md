@@ -38,32 +38,32 @@ subdirectories.
 - `sentry/`: triage/autofix/gate/broker/ci-wiring
 
 `lib/` and `production-infra-identity-contract/` predate the reorg.
-`.config/wt.toml` and eight docs pin flat `setup.sh`.
-`redrive-onchain-deadletter.{mjs,test.mjs}` stays flat under
-`alerts/infra/`; ADR 0064 gives the lint reason.
+Eight docs and `.config/wt.toml` pin flat `setup.sh`.
+ADR 0064 keeps `redrive-onchain-deadletter.{mjs,test.mjs}` flat under
+`alerts/infra/` for lint.
 
-`lib/` holds cores that multiple clusters read: `hcl.mjs` for Terraform HCL,
-`workflow-yaml.mjs` for Actions and shell parsing,
-`pnpm-override-selector.mjs` for pnpm overrides, and
-`gh-issue-lifecycle.mjs` for shared GitHub issue and label mechanics, which doc
-schedulers also read. Local projection keeps only `agent-ready` on create and
-all lifecycle labels on closed repair. ADR 0064 lists readers.
+Shared `lib/` cores: `hcl.mjs` (Terraform HCL), `workflow-yaml.mjs` (Actions/shell),
+`pnpm-override-selector.mjs` (pnpm overrides), and `gh-issue-lifecycle.mjs`
+(shared issue/label mechanics; doc schedulers read it). Projection keeps
+`agent-ready` on create and all lifecycle labels on closed repair. ADR 0064
+lists readers.
 `peg-policy-digest.mjs` defines the peg version-digest contract for both
 validators. Inventories, pinned hashes, and identities stay with their domain.
 
 ## Why Files Stay Flat
 
-Move all 15 path-pin classes with their files, except `agent-autoreview.sh`
+Move 15 path-pin classes with their files except `agent-autoreview.sh`
 feedback-runtime pins.
 
-- **Autoreview runtime pins.** `agent-autoreview.sh` pins runtime,
-  sealed `agent-autoreview-secret-suppressions.json` (ADR 0079), and optional
-  `pr-feedback-state-claude.mjs` and
-  `pr-ready-state-review-signals.mjs`; feedback uses `origin/main`. Use ADR
-  0064's three-merge sequence for moves.
+- **Autoreview runtime pins.** `agent-autoreview.sh` pins runtime, sealed
+  `agent-autoreview-secret-suppressions.json` (ADR 0079), and optional
+  `pr-feedback-state-claude.mjs` and `pr-ready-state-review-signals.mjs`.
+  Feedback uses `origin/main`. Use ADR 0064's three-merge move sequence.
 - **Gate routing pins.** Stub-repo tests require
   `$script_source_dir == $repo_root/scripts`.
-  `review-process-metrics` paths need exact suite routes.
+  `pr/review-process-metrics{,-{core,finding-classifier,legacy,report,signals,timeline},.test}.mjs`
+  and
+  `pr/fixtures/review-process-metrics-coderabbit.json` need exact suite routes.
   `bootstrap/codex-cloud-setup.{sh,test.sh}` pair for offline tests.
   `sentry/autofix/sentry-autofix-refused-inventory.mjs` routes
   `pnpm sentry:autofix:{run-record,finalize}:test`. Exact
@@ -83,9 +83,8 @@ feedback-runtime pins.
 - **Gate runtime pins.** Before `cd`, `agent-quality-gate.sh` resolves
   `gate/run-handles.sh`, coordinator files,
   `docs/docs-navigation-eval-helpers.mjs`, and `gate/lockfile-scope.mjs` from
-  `$script_source_dir`; tests hash them from `$repo_root`. Move each path with
-  its routes, signatures, fixtures, and literals (ADRs 0064 and
-  0076).
+  `$script_source_dir`; tests hash them from `$repo_root`. Move paths with their
+  routes, signatures, fixtures, and literals (ADRs 0064 and 0076).
 - **Gate mapping pins.** The signature and Turbo inputs pin
   `gate/routing-table/**`, `gate/mapping*`, the autoreview core, and its sealed
   policy. Runtime hashes use `$script_source_dir`; suites use `$repo_root`.
@@ -129,12 +128,11 @@ feedback-runtime pins.
   EOL and `UPSTASH_MCP_LAUNCHER_SHA256` hashes it. A move changes both. See
   [`docs/notes/upstash-mcp-operator.md`](../docs/notes/upstash-mcp-operator.md).
 
-List each new path pin here; unrecorded pins can break on moves.
+List new path pins here; unrecorded pins can break moves.
 
 ## Sweep Checklist for a Move
 
-Apply every item in
-[ADR 0064's move checklist](../docs/adr/0064-scripts-module-directories.md#sweep-checklist-for-a-move)
+Apply [ADR 0064's move checklist](../docs/adr/0064-scripts-module-directories.md#sweep-checklist-for-a-move)
 in the same PR.
 
 ## Operating Rules

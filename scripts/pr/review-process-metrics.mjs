@@ -15,16 +15,23 @@ import {
   aggregateMetricsV2,
   summarizePullRequestMetricsV2,
 } from "./review-process-metrics-report.mjs";
+import {
+  assertCompleteForcePushGraphqlPages,
+  enrichTimelineForcePushes,
+  parseForcePushGraphqlPage,
+} from "./review-process-metrics-timeline.mjs";
 
 export * from "./review-process-metrics-core.mjs";
 export * from "./review-process-metrics-legacy.mjs";
 export * from "./review-process-metrics-report.mjs";
 export * from "./review-process-metrics-signals.mjs";
+export * from "./review-process-metrics-timeline.mjs";
 
 const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
 const DEFAULT_LIMIT = 20;
 const PAGE_SIZE = 100;
 const PULL_REQUEST_COMMITS_LIMIT = 250;
+const FORCE_PUSH_QUERY = `query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){timelineItems(first:100,after:$cursor,itemTypes:[HEAD_REF_FORCE_PUSHED_EVENT]){totalCount pageInfo{hasNextPage endCursor} nodes{... on HeadRefForcePushedEvent{id createdAt beforeCommit{oid} afterCommit{oid}}}}}}}`;
 
 function usage() {
   return `Usage: node scripts/pr/review-process-metrics.mjs [options]
@@ -237,6 +244,32 @@ export function assertCompletePaginatedSurface(
   };
 }
 
+export function timelineItemIdentity(item) {
+  const nodeId =
+    typeof item?.node_id === "string" && item.node_id.length > 0
+      ? item.node_id
+      : null;
+  if (nodeId !== null) return JSON.stringify(["node", nodeId]);
+
+  const sourceNodeId =
+    typeof item?.source?.issue?.node_id === "string" &&
+    item.source.issue.node_id.length > 0
+      ? item.source.issue.node_id
+      : null;
+  const createdAt =
+    typeof item?.created_at === "string" && item.created_at.length > 0
+      ? item.created_at
+      : null;
+  if (
+    item?.event === "cross-referenced" &&
+    sourceNodeId !== null &&
+    createdAt !== null
+  ) {
+    return JSON.stringify(["cross-referenced", sourceNodeId, createdAt]);
+  }
+  return null;
+}
+
 function fetchPaginated(repo, endpoint, options) {
   const separator = endpoint.includes("?") ? "&" : "?";
   const pages = ghJson([
@@ -246,6 +279,39 @@ function fetchPaginated(repo, endpoint, options) {
     "--slurp",
   ]);
   return assertCompletePaginatedSurface(pages, options);
+}
+
+function fetchForcePushes(repo, number) {
+  const [owner, name] = repo.split("/");
+  const pages = [];
+  const seenCursors = new Set();
+  let cursor = null;
+  do {
+    const args = [
+      "api",
+      "graphql",
+      "-f",
+      `query=${FORCE_PUSH_QUERY}`,
+      "-f",
+      `owner=${owner}`,
+      "-f",
+      `name=${name}`,
+      "-F",
+      `number=${number}`,
+    ];
+    if (cursor !== null) args.push("-f", `cursor=${cursor}`);
+    const page = parseForcePushGraphqlPage(ghJson(args), cursor);
+    pages.push(page);
+    cursor = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
+    if (cursor !== null && seenCursors.has(cursor)) {
+      throw new Error(`PR #${number} force-push pagination repeated a cursor`);
+    }
+    if (cursor !== null) seenCursors.add(cursor);
+  } while (cursor !== null);
+  return assertCompleteForcePushGraphqlPages(
+    pages,
+    `PR #${number} force-push timeline`,
+  );
 }
 
 function mapPullRequestFromRest(pr) {
@@ -290,6 +356,36 @@ function fetchPrEvidence(repo, number, collectedAt) {
     surface: `PR #${number} review comments`,
     expectedCount: pr.review_comments,
   });
+  const timeline = fetchPaginated(repo, `issues/${number}/timeline`, {
+    surface: `PR #${number} timeline`,
+    id: timelineItemIdentity,
+  });
+  const restForcePushCount = timeline.items.filter(
+    ({ event }) => event === "head_ref_force_pushed",
+  ).length;
+  const forcePushes =
+    restForcePushCount === 0
+      ? {
+          items: [],
+          pagination: {
+            complete: true,
+            proof: "complete_rest_timeline_proves_empty_force_push_set",
+            pages: 0,
+            itemCount: 0,
+            expectedCount: 0,
+            source: "rest",
+          },
+        }
+      : fetchForcePushes(repo, number);
+  const enrichedTimeline = enrichTimelineForcePushes(
+    timeline.items,
+    forcePushes.items,
+  );
+  if (!enrichedTimeline.complete) {
+    throw new Error(
+      `PR #${number} force-push proof conflicts with the REST timeline: ${JSON.stringify(enrichedTimeline.conflicts)}`,
+    );
+  }
   const commits = fetchPaginated(repo, `pulls/${number}/commits`, {
     surface: `PR #${number} commits`,
     expectedCount: pr.commits,
@@ -301,11 +397,22 @@ function fetchPrEvidence(repo, number, collectedAt) {
     issueComments: issueComments.items,
     reviews: reviews.items,
     reviewComments: reviewComments.items,
+    timeline: enrichedTimeline.items,
     commits: commits.items,
     pagination: {
       issueComments: issueComments.pagination,
       reviewSubmissions: reviews.pagination,
       reviewComments: reviewComments.pagination,
+      timeline: {
+        ...timeline.pagination,
+        forcePushGraphql: {
+          ...forcePushes.pagination,
+          expectedCount: restForcePushCount,
+          restTimelineItemCount: restForcePushCount,
+          bindingProof:
+            "one_to_one_node_id_and_timestamp_with_rest_commit_cross_check_when_present",
+        },
+      },
       commits: commits.pagination,
     },
     collectedAt,

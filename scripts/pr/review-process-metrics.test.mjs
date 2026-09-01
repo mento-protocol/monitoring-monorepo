@@ -15,8 +15,10 @@ import {
   aggregateMetrics,
   aggregateMetricsV2,
   assertCompleteCohort,
+  assertCompleteForcePushGraphqlPages,
   assertCompletePaginatedSurface,
   buildReport,
+  enrichTimelineForcePushes,
   isClaudeSummary,
   isCodexApprovalComment,
   isCodexUsageLimit,
@@ -25,21 +27,21 @@ import {
   isClaudeBotLogin,
   isReviewBotLogin,
   parseArgs,
+  parseForcePushGraphqlPage,
   parseUtcTimestamp,
   selectMergedAfter,
   selectMergedBefore,
   selectMergedInUtcWindow,
   summarizePullRequestMetrics,
   summarizePullRequestMetricsV2,
+  timelineItemIdentity,
   writeReportFile,
 } from "./review-process-metrics.mjs";
 
+const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const fixture = JSON.parse(
   readFileSync(
-    join(
-      dirname(fileURLToPath(import.meta.url)),
-      "fixtures/review-process-metrics-coderabbit.json",
-    ),
+    join(SCRIPT_DIRECTORY, "fixtures/review-process-metrics-coderabbit.json"),
     "utf8",
   ),
 );
@@ -51,6 +53,10 @@ function summarizeFixture(value = fixture) {
       issueComments: { complete: true },
       reviewSubmissions: { complete: true },
       reviewComments: { complete: true },
+      timeline: {
+        complete: true,
+        forcePushGraphql: { complete: true },
+      },
       commits: { complete: true },
     },
     collectedAt: "2026-08-01T12:01:00Z",
@@ -435,6 +441,243 @@ test("fails closed on incomplete, malformed, or duplicated pagination", () => {
         surface: "fixture",
       }),
     /no page envelope/,
+  );
+});
+
+test("uses stable timeline identities for node and cross-reference events", () => {
+  assert.equal(
+    timelineItemIdentity({ node_id: "IC_fixture" }),
+    JSON.stringify(["node", "IC_fixture"]),
+  );
+  const referenceEvent = {
+    event: "cross-referenced",
+    created_at: "2026-08-19T16:03:23Z",
+    source: { issue: { node_id: "PR_fixture_source" } },
+  };
+  assert.equal(
+    timelineItemIdentity(referenceEvent),
+    JSON.stringify([
+      "cross-referenced",
+      "PR_fixture_source",
+      "2026-08-19T16:03:23Z",
+    ]),
+  );
+  assert.equal(
+    timelineItemIdentity({
+      event: "cross-referenced",
+      created_at: referenceEvent.created_at,
+      source: { issue: {} },
+    }),
+    null,
+  );
+  assert.throws(
+    () =>
+      assertCompletePaginatedSurface(
+        [[referenceEvent], [structuredClone(referenceEvent)]],
+        { surface: "timeline", id: timelineItemIdentity },
+      ),
+    /duplicate/,
+  );
+});
+
+function forcePushGraphqlPayload({
+  nodes,
+  totalCount = nodes.length,
+  hasNextPage = false,
+  endCursor = null,
+}) {
+  return {
+    data: {
+      repository: {
+        pullRequest: {
+          timelineItems: {
+            totalCount,
+            pageInfo: { hasNextPage, endCursor },
+            nodes,
+          },
+        },
+      },
+    },
+  };
+}
+
+function forcePushGraphqlNode(id, createdAt, beforeHead, afterHead) {
+  return {
+    id,
+    createdAt,
+    beforeCommit: { oid: beforeHead },
+    afterCommit: { oid: afterHead },
+  };
+}
+
+test("parses complete GraphQL force-push pages without trusting totalCount", () => {
+  const headA = "a".repeat(40);
+  const headB = "b".repeat(40);
+  const headC = "c".repeat(40);
+  const first = parseForcePushGraphqlPage(
+    forcePushGraphqlPayload({
+      nodes: [
+        forcePushGraphqlNode(
+          "FP_graphql_a",
+          "2026-08-01T10:10:00Z",
+          headA,
+          headB,
+        ),
+      ],
+      totalCount: 99,
+      hasNextPage: true,
+      endCursor: "cursor-1",
+    }),
+  );
+  const second = parseForcePushGraphqlPage(
+    forcePushGraphqlPayload({
+      nodes: [
+        forcePushGraphqlNode(
+          "FP_graphql_b",
+          "2026-08-01T10:20:00Z",
+          headB,
+          headC,
+        ),
+      ],
+      totalCount: 99,
+    }),
+    "cursor-1",
+  );
+  const complete = assertCompleteForcePushGraphqlPages(
+    [first, second],
+    "fixture force pushes",
+  );
+  assert.equal(complete.items.length, 2);
+  assert.equal(complete.pagination.complete, true);
+  assert.equal(complete.pagination.reportedUnfilteredTimelineItemCount, 99);
+  const emptyFilteredPage = parseForcePushGraphqlPage(
+    forcePushGraphqlPayload({ nodes: [], totalCount: 9 }),
+  );
+  assert.equal(
+    assertCompleteForcePushGraphqlPages(
+      [emptyFilteredPage],
+      "empty fixture force pushes",
+    ).items.length,
+    0,
+  );
+
+  assert.throws(
+    () =>
+      parseForcePushGraphqlPage(
+        forcePushGraphqlPayload({
+          nodes: [
+            {
+              id: "FP_incomplete",
+              createdAt: "2026-08-01T10:30:00Z",
+              beforeCommit: { oid: headA },
+              afterCommit: null,
+            },
+          ],
+        }),
+      ),
+    /incomplete event evidence/,
+  );
+  assert.throws(
+    () =>
+      parseForcePushGraphqlPage({
+        ...forcePushGraphqlPayload({ nodes: [] }),
+        errors: [{ message: "partial result" }],
+      }),
+    /invalid page envelope/,
+  );
+  assert.throws(
+    () => assertCompleteForcePushGraphqlPages([first], "fixture force pushes"),
+    /incomplete page chain/,
+  );
+  assert.throws(
+    () =>
+      assertCompleteForcePushGraphqlPages(
+        [first, { ...second, requestCursor: "wrong-cursor" }],
+        "fixture force pushes",
+      ),
+    /conflicting cursor chain/,
+  );
+  assert.throws(
+    () =>
+      assertCompleteForcePushGraphqlPages(
+        [first, { ...second, totalCount: 100 }],
+        "fixture force pushes",
+      ),
+    /conflicting total counts/,
+  );
+  assert.throws(
+    () =>
+      assertCompleteForcePushGraphqlPages(
+        [first, { ...second, items: first.items }],
+        "fixture force pushes",
+      ),
+    /duplicate events/,
+  );
+});
+
+test("binds GraphQL proof to REST force-push events with omitted commits", () => {
+  const headA = "a".repeat(40);
+  const headB = "b".repeat(40);
+  const createdAt = "2026-08-01T10:10:00Z";
+  const proof = {
+    nodeId: "FP_live_rest_shape",
+    createdAt,
+    beforeHead: headA,
+    afterHead: headB,
+  };
+  const enriched = enrichTimelineForcePushes(
+    [
+      {
+        event: "head_ref_force_pushed",
+        node_id: proof.nodeId,
+        created_at: createdAt,
+      },
+    ],
+    [proof],
+  );
+  assert.equal(enriched.complete, true);
+  assert.deepEqual(enriched.items[0].force_push_proof, {
+    kind: "graphql",
+    ...proof,
+  });
+
+  const timestampConflict = enrichTimelineForcePushes(
+    [
+      {
+        event: "head_ref_force_pushed",
+        node_id: proof.nodeId,
+        created_at: "2026-08-01T10:11:00Z",
+      },
+    ],
+    [proof],
+  );
+  assert.equal(timestampConflict.complete, false);
+  assert.equal(
+    timestampConflict.conflicts[0].reason,
+    "force_push_enrichment_timestamp_conflict",
+  );
+
+  const commitConflict = enrichTimelineForcePushes(
+    [
+      {
+        event: "head_ref_force_pushed",
+        node_id: proof.nodeId,
+        created_at: createdAt,
+        commit_id: "c".repeat(40),
+      },
+    ],
+    [proof],
+  );
+  assert.equal(commitConflict.complete, false);
+  assert.equal(
+    commitConflict.conflicts[0].reason,
+    "force_push_enrichment_commit_conflict",
+  );
+  const missingRestEvent = enrichTimelineForcePushes([], [proof]);
+  assert.equal(missingRestEvent.complete, false);
+  assert.equal(
+    missingRestEvent.conflicts[0].reason,
+    "force_push_rest_timeline_event_not_found",
   );
 });
 
@@ -2439,20 +2682,162 @@ test("treats numeric zero summaries as empty without hiding defect prose", () =>
   );
 });
 
-test("trusts request authors and proves exact-head markers from PR history", () => {
+test("classifies observed coordinated priority negations", () => {
   const value = structuredClone(fixture);
-  const request = (id, login, head, authorAssociation = "NONE") => ({
-    id,
-    author_association: authorAssociation,
-    user: { login, type: login.endsWith("[bot]") ? "Bot" : "User" },
-    body: `@coderabbitai review\n\n<!-- coderabbit-final-head-review:${head} -->`,
-  });
-  value.issueComments.push(
+  value.reviews = [
+    {
+      id: 401,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "No inline findings — nothing rose to [P1]/[P2]/[P3].",
+    },
+    {
+      id: 402,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "No inline comments were posted — I did not find any concrete correctness, security, or convention findings tied to a specific line worth flagging at [P1]/[P2].",
+    },
+    {
+      id: 403,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "None at [P1] or [P2]. One [P3] observation.",
+    },
+    {
+      id: 404,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "1. **[P3]** None.",
+    },
+    {
+      id: 405,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "**[P3] No issues found — verified correctness.**",
+    },
+    {
+      id: 406,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "`[P3]` None.",
+    },
+    {
+      id: 407,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "**None at [P1]/[P2]. One [P3] observation.**",
+    },
+    {
+      id: 408,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "**[P1] The parser still drops a valid record.**",
+    },
+    {
+      id: 409,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "**[P3] None of the inputs are validated.**",
+    },
+  ];
+
+  const records =
+    summarizeFixture(value).evidence.byBot.claude.surfaces.review_submissions
+      .evidence;
+  assert.deepEqual(
+    records.map(({ id, finding, findingSignal }) => ({
+      id,
+      finding,
+      findingSignal: findingSignal ?? null,
+    })),
+    [
+      { id: "401", finding: false, findingSignal: null },
+      { id: "402", finding: false, findingSignal: null },
+      { id: "403", finding: true, findingSignal: "[P3]" },
+      { id: "404", finding: false, findingSignal: null },
+      { id: "405", finding: false, findingSignal: null },
+      { id: "406", finding: false, findingSignal: null },
+      { id: "407", finding: true, findingSignal: "[P3]" },
+      { id: "408", finding: true, findingSignal: "[P1]" },
+      { id: "409", finding: true, findingSignal: "[P3]" },
+    ],
+  );
+});
+
+test("attributes only canonical Claude GitHub Actions reviews", () => {
+  const value = structuredClone(fixture);
+  value.issueComments = [
+    {
+      id: 404,
+      user: { login: "github-actions[bot]", type: "Bot" },
+      body: [
+        "**Claude finished @maintainer's task in 2m 0s** —— [View job](https://github.com/example/repo/actions/runs/123456)",
+        "### Claude finished the review",
+        "[P2] Preserve the exact-head boundary.",
+      ].join("\n\n"),
+    },
+    {
+      id: 405,
+      user: { login: "github-actions[bot]", type: "Bot" },
+      body: "### Claude finished the review\n[P1] Unrelated workflow output.",
+    },
+    {
+      id: 406,
+      user: { login: "github-actions[bot]", type: "Bot" },
+      body: "**Claude finished @maintainer's task**\n[P1] Missing the action run link.",
+    },
+    {
+      id: 407,
+      user: { login: "github-actions[bot]", type: "Bot" },
+      body: [
+        "**Claude finished @maintainer's task in 2m 0s** —— [View job](https://github.com/other/repository/actions/runs/123456)",
+        "### Review: completed",
+        "[P1] This run belongs to another repository.",
+      ].join("\n\n"),
+    },
+  ];
+
+  const summary = summarizeFixture(value);
+  assert.deepEqual(
+    summary.evidence.byBot.claude.surfaces.issue_comments.evidence.map(
+      ({ id, finding, findingSignal }) => ({ id, finding, findingSignal }),
+    ),
+    [{ id: "404", finding: true, findingSignal: "[P2]" }],
+  );
+  assert.equal(summary.botReviewSignals.claudeSummaryComments, 1);
+  assert.equal(summary.botReviewSignals.topLevelReviewBotComments, 1);
+});
+
+test("trusts request authors and proves exact-head markers from the timeline", () => {
+  const value = structuredClone(fixture);
+  const request = (id, login, head, authorAssociation = "NONE") => {
+    const timestamp = `2026-08-01T10:${id - 81}:00Z`;
+    return {
+      id,
+      node_id: `IC_fixture_${id}`,
+      created_at: timestamp,
+      updated_at: timestamp,
+      author_association: authorAssociation,
+      user: { login, type: login.endsWith("[bot]") ? "Bot" : "User" },
+      body: `@coderabbitai review\n\n<!-- coderabbit-final-head-review:${head} -->`,
+    };
+  };
+  const requests = [
     request(108, "outsider", "a".repeat(40)),
     request(109, "maintainer", "c".repeat(40), "OWNER"),
     request(110, "claude[bot]", "a".repeat(40)),
     request(111, "unknown-automation[bot]", "a".repeat(40)),
     request(112, "outside-pr-author", "a".repeat(40)),
+  ];
+  value.issueComments.push(...requests);
+  value.timeline.push(
+    ...requests.map((comment) => ({
+      event: "commented",
+      id: comment.id,
+      node_id: comment.node_id,
+      created_at: comment.created_at,
+      updated_at: comment.updated_at,
+    })),
   );
   value.pr.user.login = "outside-pr-author";
   const manual = summarizeFixture(value).evidence.signals.manualRequests;
@@ -2473,6 +2858,384 @@ test("trusts request authors and proves exact-head markers from PR history", () 
       }),
     ),
   );
+});
+
+test("binds exact-head markers to the effective head at comment time", () => {
+  const value = structuredClone(fixture);
+  const headA = "a".repeat(40);
+  const headB = "b".repeat(40);
+  const headC = "c".repeat(40);
+  const request = (id, head, createdAt, updatedAt = createdAt) => ({
+    id,
+    node_id: `IC_timeline_${id}`,
+    created_at: createdAt,
+    updated_at: updatedAt,
+    author_association: "OWNER",
+    user: { login: "maintainer", type: "User" },
+    body: `@coderabbitai review\n\n<!-- coderabbit-final-head-review:${head} -->`,
+  });
+  const intermediate = request(130, headA, "2026-08-01T10:10:00Z");
+  const stale = request(131, headA, "2026-08-01T10:20:00Z");
+  const forcePushed = request(132, headC, "2026-08-01T10:22:00Z");
+  const edited = request(
+    133,
+    headB,
+    "2026-08-01T10:30:00Z",
+    "2026-08-01T10:31:00Z",
+  );
+  const absent = request(134, headB, "2026-08-01T10:32:00Z");
+  value.pr.head.sha = headB;
+  value.commits = [headA, headB, headC].map((sha) => ({ sha }));
+  value.issueComments = [intermediate, stale, forcePushed, edited, absent];
+  value.timeline = [
+    { event: "committed", node_id: "C_timeline_a", sha: headA },
+    {
+      event: "commented",
+      id: intermediate.id,
+      node_id: intermediate.node_id,
+      created_at: intermediate.created_at,
+      updated_at: intermediate.updated_at,
+    },
+    { event: "committed", node_id: "C_timeline_b1", sha: headB },
+    {
+      event: "commented",
+      id: stale.id,
+      node_id: stale.node_id,
+      created_at: stale.created_at,
+      updated_at: stale.updated_at,
+    },
+    {
+      event: "head_ref_force_pushed",
+      node_id: "FP_timeline_c",
+      commit_id: headC,
+      created_at: "2026-08-01T10:21:00Z",
+      force_push_proof: {
+        kind: "graphql",
+        nodeId: "FP_timeline_c",
+        createdAt: "2026-08-01T10:21:00Z",
+        beforeHead: headB,
+        afterHead: headC,
+      },
+    },
+    {
+      event: "commented",
+      id: forcePushed.id,
+      node_id: forcePushed.node_id,
+      created_at: forcePushed.created_at,
+      updated_at: forcePushed.updated_at,
+    },
+    { event: "committed", node_id: "C_timeline_b2", sha: headB },
+    {
+      event: "commented",
+      id: edited.id,
+      node_id: edited.node_id,
+      created_at: edited.created_at,
+      updated_at: edited.updated_at,
+    },
+  ];
+
+  const manual = summarizeFixture(value).evidence.signals.manualRequests;
+  assert.equal(manual.markedExactHead, 2);
+  assert.equal(manual.unknown, 3);
+  assert.deepEqual(
+    manual.evidence.map(
+      ({
+        marker,
+        markerReason,
+        head,
+        effectiveHead,
+        timelineCommentIndex,
+      }) => ({
+        marker,
+        markerReason,
+        head,
+        effectiveHead,
+        timelineCommentIndex,
+      }),
+    ),
+    [
+      {
+        marker: "marked_exact_head",
+        markerReason: null,
+        head: headA,
+        effectiveHead: headA,
+        timelineCommentIndex: 1,
+      },
+      {
+        marker: "unknown",
+        markerReason: "marker_was_not_effective_head_at_request",
+        head: headA,
+        effectiveHead: headB,
+        timelineCommentIndex: 3,
+      },
+      {
+        marker: "marked_exact_head",
+        markerReason: null,
+        head: headC,
+        effectiveHead: headC,
+        timelineCommentIndex: 5,
+      },
+      {
+        marker: "unknown",
+        markerReason: "request_comment_was_edited",
+        head: headB,
+        effectiveHead: null,
+        timelineCommentIndex: 7,
+      },
+      {
+        marker: "unknown",
+        markerReason: "timeline_comment_not_found",
+        head: headB,
+        effectiveHead: null,
+        timelineCommentIndex: null,
+      },
+    ],
+  );
+});
+
+test("proves exact heads before and after an enriched force push", () => {
+  const value = structuredClone(fixture);
+  const headA = "a".repeat(40);
+  const headB = "b".repeat(40);
+  const request = (id, head, createdAt) => ({
+    id,
+    node_id: `IC_force_${id}`,
+    created_at: createdAt,
+    updated_at: createdAt,
+    author_association: "OWNER",
+    user: { login: "maintainer", type: "User" },
+    body: `@coderabbitai review\n\n<!-- coderabbit-final-head-review:${head} -->`,
+  });
+  const before = request(140, headA, "2026-08-01T10:10:00Z");
+  const after = request(141, headB, "2026-08-01T10:12:00Z");
+  const forcePush = enrichTimelineForcePushes(
+    [
+      {
+        event: "head_ref_force_pushed",
+        node_id: "FP_between_requests",
+        created_at: "2026-08-01T10:11:00Z",
+      },
+    ],
+    [
+      {
+        nodeId: "FP_between_requests",
+        createdAt: "2026-08-01T10:11:00Z",
+        beforeHead: headA,
+        afterHead: headB,
+      },
+    ],
+  ).items[0];
+  value.pr.head.sha = headB;
+  value.commits = [{ sha: headB }];
+  value.issueComments = [before, after];
+  value.timeline = [
+    { event: "committed", node_id: "C_before_force", sha: headA },
+    {
+      event: "commented",
+      id: before.id,
+      node_id: before.node_id,
+      created_at: before.created_at,
+      updated_at: before.updated_at,
+    },
+    { event: "committed", node_id: "C_after_force", sha: headB },
+    forcePush,
+    {
+      event: "commented",
+      id: after.id,
+      node_id: after.node_id,
+      created_at: after.created_at,
+      updated_at: after.updated_at,
+    },
+  ];
+
+  const manual = summarizeFixture(value).evidence.signals.manualRequests;
+  assert.equal(manual.markedExactHead, 2);
+  assert.deepEqual(
+    manual.evidence.map(({ head, effectiveHead, markerReason }) => ({
+      head,
+      effectiveHead,
+      markerReason,
+    })),
+    [
+      { head: headA, effectiveHead: headA, markerReason: null },
+      { head: headB, effectiveHead: headB, markerReason: null },
+    ],
+  );
+});
+
+test("restores the last proven head after head ref deletion", () => {
+  const value = structuredClone(fixture);
+  const head = "a".repeat(40);
+  const request = (id, createdAt) => ({
+    id,
+    node_id: `IC_restore_${id}`,
+    created_at: createdAt,
+    updated_at: createdAt,
+    author_association: "OWNER",
+    user: { login: "maintainer", type: "User" },
+    body: `@coderabbitai review\n\n<!-- coderabbit-final-head-review:${head} -->`,
+  });
+  const whileDeleted = request(142, "2026-08-01T10:12:00Z");
+  const afterRestore = request(143, "2026-08-01T10:14:00Z");
+  value.issueComments = [whileDeleted, afterRestore];
+  value.timeline = [
+    { event: "committed", node_id: "C_restore", sha: head },
+    {
+      event: "head_ref_deleted",
+      node_id: "HD_restore",
+      created_at: "2026-08-01T10:11:00Z",
+    },
+    {
+      event: "commented",
+      id: whileDeleted.id,
+      node_id: whileDeleted.node_id,
+      created_at: whileDeleted.created_at,
+      updated_at: whileDeleted.updated_at,
+    },
+    {
+      event: "head_ref_restored",
+      node_id: "HR_restore",
+      created_at: "2026-08-01T10:13:00Z",
+    },
+    {
+      event: "commented",
+      id: afterRestore.id,
+      node_id: afterRestore.node_id,
+      created_at: afterRestore.created_at,
+      updated_at: afterRestore.updated_at,
+    },
+  ];
+
+  const manual = summarizeFixture(value).evidence.signals.manualRequests;
+  assert.deepEqual(
+    manual.evidence.map(({ marker, markerReason, effectiveHead }) => ({
+      marker,
+      markerReason,
+      effectiveHead,
+    })),
+    [
+      {
+        marker: "unknown",
+        markerReason: "timeline_head_ref_is_deleted",
+        effectiveHead: null,
+      },
+      {
+        marker: "marked_exact_head",
+        markerReason: null,
+        effectiveHead: head,
+      },
+    ],
+  );
+});
+
+test("fails exact-head proof closed on missing or conflicting enrichment", () => {
+  const headA = "a".repeat(40);
+  const headB = "b".repeat(40);
+  const summarize = (forcePush) => {
+    const value = structuredClone(fixture);
+    const request = {
+      id: 144,
+      node_id: "IC_unproven_force",
+      created_at: "2026-08-01T10:12:00Z",
+      updated_at: "2026-08-01T10:12:00Z",
+      author_association: "OWNER",
+      user: { login: "maintainer", type: "User" },
+      body: `@coderabbitai review\n\n<!-- coderabbit-final-head-review:${headB} -->`,
+    };
+    value.pr.head.sha = headB;
+    value.commits = [{ sha: headA }, { sha: headB }];
+    value.issueComments = [request];
+    value.timeline = [
+      forcePush,
+      {
+        event: "commented",
+        id: request.id,
+        node_id: request.node_id,
+        created_at: request.created_at,
+        updated_at: request.updated_at,
+      },
+    ];
+    return summarizeFixture(value).evidence.signals.manualRequests.evidence[0];
+  };
+  const base = {
+    event: "head_ref_force_pushed",
+    node_id: "FP_unproven",
+    created_at: "2026-08-01T10:11:00Z",
+  };
+  assert.deepEqual(
+    {
+      marker: summarize(base).marker,
+      reason: summarize(base).markerReason,
+    },
+    {
+      marker: "unknown",
+      reason: "timeline_force_push_enrichment_missing",
+    },
+  );
+  const conflicting = {
+    ...base,
+    force_push_proof: {
+      kind: "graphql",
+      nodeId: "FP_different",
+      createdAt: base.created_at,
+      beforeHead: headA,
+      afterHead: headB,
+    },
+  };
+  const conflictResult = summarize(conflicting);
+  assert.equal(conflictResult.marker, "unknown");
+  assert.equal(
+    conflictResult.markerReason,
+    "timeline_force_push_enrichment_conflicts",
+  );
+});
+
+test("fails closed when a later timeline item predates the marker comment", () => {
+  const value = structuredClone(fixture);
+  const headA = "a".repeat(40);
+  const headB = "b".repeat(40);
+  const request = {
+    id: 145,
+    node_id: "IC_force_order_conflict",
+    created_at: "2026-08-01T10:12:00Z",
+    updated_at: "2026-08-01T10:12:00Z",
+    author_association: "OWNER",
+    user: { login: "maintainer", type: "User" },
+    body: `@coderabbitai review\n\n<!-- coderabbit-final-head-review:${headA} -->`,
+  };
+  value.pr.head.sha = headB;
+  value.commits = [{ sha: headA }, { sha: headB }];
+  value.issueComments = [request];
+  value.timeline = [
+    {
+      event: "commented",
+      id: request.id,
+      node_id: request.node_id,
+      created_at: request.created_at,
+      updated_at: request.updated_at,
+    },
+    {
+      event: "head_ref_force_pushed",
+      node_id: "FP_force_order_conflict",
+      created_at: "2026-08-01T10:11:00Z",
+      force_push_proof: {
+        kind: "graphql",
+        nodeId: "FP_force_order_conflict",
+        createdAt: "2026-08-01T10:11:00Z",
+        beforeHead: headA,
+        afterHead: headB,
+      },
+    },
+  ];
+
+  const evidence =
+    summarizeFixture(value).evidence.signals.manualRequests.evidence[0];
+  assert.equal(evidence.marker, "unknown");
+  assert.equal(
+    evidence.markerReason,
+    "timeline_order_conflicts_with_force_push_timestamp",
+  );
+  assert.equal(evidence.effectiveHead, null);
 });
 
 test("counts each distinct review target requested by one trusted comment", () => {
@@ -2527,8 +3290,26 @@ test("rejects schema-v2 summaries without complete pagination evidence", () => {
         ...fixture,
         pagination: {
           issueComments: { complete: true },
-          reviewSubmissions: { complete: false },
+          reviewSubmissions: { complete: true },
           reviewComments: { complete: true },
+          timeline: { complete: false },
+          commits: { complete: true },
+        },
+      }),
+    /require complete pagination evidence/,
+  );
+  assert.throws(
+    () =>
+      summarizePullRequestMetricsV2({
+        ...fixture,
+        pagination: {
+          issueComments: { complete: true },
+          reviewSubmissions: { complete: true },
+          reviewComments: { complete: true },
+          timeline: {
+            complete: true,
+            forcePushGraphql: { complete: false },
+          },
           commits: { complete: true },
         },
       }),
@@ -2571,9 +3352,20 @@ test("scopes exact-head request deduplication to each pull request", () => {
   assert.equal(acrossPullRequests.duplicateExactHeadRequests, 0);
 
   const duplicateValue = structuredClone(fixture);
-  duplicateValue.issueComments.push({
+  const duplicateRequest = {
     ...structuredClone(duplicateValue.issueComments[5]),
     id: 108,
+    node_id: "IC_fixture_108",
+    created_at: "2026-08-01T10:27:00Z",
+    updated_at: "2026-08-01T10:27:00Z",
+  };
+  duplicateValue.issueComments.push(duplicateRequest);
+  duplicateValue.timeline.push({
+    event: "commented",
+    id: duplicateRequest.id,
+    node_id: duplicateRequest.node_id,
+    created_at: duplicateRequest.created_at,
+    updated_at: duplicateRequest.updated_at,
   });
   const withinOnePullRequest = aggregateMetricsV2([
     summarizeFixture(duplicateValue),
@@ -2581,6 +3373,24 @@ test("scopes exact-head request deduplication to each pull request", () => {
   assert.equal(withinOnePullRequest.markedExactHead, 2);
   assert.equal(withinOnePullRequest.uniqueExactHeads, 1);
   assert.equal(withinOnePullRequest.duplicateExactHeadRequests, 1);
+});
+
+test("keeps every review-metrics source module under 600 physical lines", () => {
+  const modules = [
+    "review-process-metrics.mjs",
+    "review-process-metrics-core.mjs",
+    "review-process-metrics-finding-classifier.mjs",
+    "review-process-metrics-legacy.mjs",
+    "review-process-metrics-report.mjs",
+    "review-process-metrics-signals.mjs",
+    "review-process-metrics-timeline.mjs",
+  ];
+  for (const module of modules) {
+    const source = readFileSync(join(SCRIPT_DIRECTORY, module), "utf8");
+    const lines =
+      source.split(/\r?\n/u).length - (source.endsWith("\n") ? 1 : 0);
+    assert.ok(lines <= 600, `${module} has ${lines} physical lines`);
+  }
 });
 
 test("creates report files exclusively with private permissions", () => {

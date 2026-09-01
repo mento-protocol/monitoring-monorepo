@@ -17,6 +17,7 @@
   "issueComments": [
     {
       "id": 101,
+      "node_id": "IC_fixture_101",
       "html_url": "https://github.com/example/repo/pull/42#issuecomment-101",
       "created_at": "2026-08-01T10:20:00Z",
       "updated_at": "2026-08-01T10:20:00Z",
@@ -25,47 +26,115 @@
     },
     {
       "id": 102,
+      "node_id": "IC_fixture_102",
       "html_url": "https://github.com/example/repo/pull/42#issuecomment-102",
       "created_at": "2026-08-01T10:21:00Z",
+      "updated_at": "2026-08-01T10:21:00Z",
       "user": { "login": "coderabbitai[bot]", "type": "Bot" },
       "body": "<!-- This is an auto-generated comment: review paused by coderabbit.ai -->\n> ## Reviews paused\n> Reviews paused due to an influx of new commits."
     },
     {
       "id": 103,
+      "node_id": "IC_fixture_103",
       "html_url": "https://github.com/example/repo/pull/42#issuecomment-103",
       "created_at": "2026-08-01T10:22:00Z",
+      "updated_at": "2026-08-01T10:22:00Z",
       "user": { "login": "coderabbitai[bot]", "type": "Bot" },
       "body": "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->\n> ## Review limit reached"
     },
     {
       "id": 104,
+      "node_id": "IC_fixture_104",
       "html_url": "https://github.com/example/repo/pull/42#issuecomment-104",
       "created_at": "2026-08-01T10:23:00Z",
+      "updated_at": "2026-08-01T10:23:00Z",
       "user": { "login": "coderabbitai[bot]", "type": "Bot" },
       "body": "<!-- This is an auto-generated comment: skip review by coderabbit.ai -->\n> ## Review skipped\n> Review was skipped due to path filters"
     },
     {
       "id": 105,
+      "node_id": "IC_fixture_105",
       "html_url": "https://github.com/example/repo/pull/42#issuecomment-105",
       "created_at": "2026-08-01T10:24:00Z",
+      "updated_at": "2026-08-01T10:24:00Z",
       "user": { "login": "coderabbitai[bot]", "type": "Bot" },
       "body": "<!-- This is an auto-generated comment: skip review by coderabbit.ai -->\n> This repository does not receive automatic reviews because it has fewer than 10 stars."
     },
     {
       "id": 106,
+      "node_id": "IC_fixture_106",
       "html_url": "https://github.com/example/repo/pull/42#issuecomment-106",
       "created_at": "2026-08-01T10:25:00Z",
+      "updated_at": "2026-08-01T10:25:00Z",
       "author_association": "OWNER",
       "user": { "login": "maintainer", "type": "User" },
       "body": "@coderabbitai review\n\n<!-- coderabbit-final-head-review:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -->"
     },
     {
       "id": 107,
+      "node_id": "IC_fixture_107",
       "html_url": "https://github.com/example/repo/pull/42#issuecomment-107",
       "created_at": "2026-08-01T10:26:00Z",
+      "updated_at": "2026-08-01T10:26:00Z",
       "author_association": "OWNER",
       "user": { "login": "maintainer", "type": "User" },
       "body": "@coderabbitai review"
+    }
+  ],
+  "timeline": [
+    {
+      "event": "committed",
+      "node_id": "C_fixture_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "event": "commented",
+      "id": 101,
+      "node_id": "IC_fixture_101",
+      "created_at": "2026-08-01T10:20:00Z",
+      "updated_at": "2026-08-01T10:20:00Z"
+    },
+    {
+      "event": "commented",
+      "id": 102,
+      "node_id": "IC_fixture_102",
+      "created_at": "2026-08-01T10:21:00Z",
+      "updated_at": "2026-08-01T10:21:00Z"
+    },
+    {
+      "event": "commented",
+      "id": 103,
+      "node_id": "IC_fixture_103",
+      "created_at": "2026-08-01T10:22:00Z",
+      "updated_at": "2026-08-01T10:22:00Z"
+    },
+    {
+      "event": "commented",
+      "id": 104,
+      "node_id": "IC_fixture_104",
+      "created_at": "2026-08-01T10:23:00Z",
+      "updated_at": "2026-08-01T10:23:00Z"
+    },
+    {
+      "event": "commented",
+      "id": 105,
+      "node_id": "IC_fixture_105",
+      "created_at": "2026-08-01T10:24:00Z",
+      "updated_at": "2026-08-01T10:24:00Z"
+    },
+    {
+      "event": "commented",
+      "id": 106,
+      "node_id": "IC_fixture_106",
+      "created_at": "2026-08-01T10:25:00Z",
+      "updated_at": "2026-08-01T10:25:00Z"
+    },
+    {
+      "event": "commented",
+      "id": 107,
+      "node_id": "IC_fixture_107",
+      "created_at": "2026-08-01T10:26:00Z",
+      "updated_at": "2026-08-01T10:26:00Z"
     }
   ],
   "reviews": [

@@ -1,11 +1,14 @@
-import { buildPerBotEvidence } from "./review-process-metrics-core.mjs";
+import {
+  buildPerBotEvidence,
+  REVIEW_BOT_KEYS,
+} from "./review-process-metrics-core.mjs";
 import {
   aggregateMetrics,
   summarizePullRequestMetrics,
 } from "./review-process-metrics-legacy.mjs";
 import { buildSignals } from "./review-process-metrics-signals.mjs";
 
-const BOTS = ["coderabbit", "codex", "claude", "cursor"];
+const BOTS = REVIEW_BOT_KEYS;
 const DISPOSITIONS = [
   "fixed",
   "wont_fix",
@@ -18,13 +21,17 @@ const PAGINATED_SURFACES = [
   "issueComments",
   "reviewSubmissions",
   "reviewComments",
+  "timeline",
   "commits",
 ];
 
 function assertCompletePagination(pagination) {
   if (
     pagination == null ||
-    PAGINATED_SURFACES.some((surface) => pagination[surface]?.complete !== true)
+    PAGINATED_SURFACES.some(
+      (surface) => pagination[surface]?.complete !== true,
+    ) ||
+    pagination.timeline?.forcePushGraphql?.complete !== true
   ) {
     throw new Error("schema-v2 metrics require complete pagination evidence");
   }
@@ -35,6 +42,7 @@ export function summarizePullRequestMetricsV2({
   issueComments = [],
   reviews = [],
   reviewComments = [],
+  timeline = [],
   commits = [],
   pagination,
   collectedAt = new Date().toISOString(),
@@ -79,6 +87,7 @@ export function summarizePullRequestMetricsV2({
         commits,
         issueComments,
         reviews,
+        timeline,
       }),
     },
   };

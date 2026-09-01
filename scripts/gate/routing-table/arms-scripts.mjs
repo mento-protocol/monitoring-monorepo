@@ -11,8 +11,8 @@
  */
 
 /**
- * The documentation and shell arms of the `tree` group, plus the two files that
- * reach no other `scripts/` arm.
+ * The documentation and shell arms of the `tree` group, plus exact config files
+ * that reach no other `scripts/` arm.
  *
  * ADR 0064's pairing rule lives here, in the two `scripts/*.sh` groups: an arm
  * anchored on a literal prefix at the top of `scripts/` stops matching one
@@ -338,6 +338,19 @@ export const SCRIPT_ARMS = [
       {
         command: "pnpm coderabbit:config:test",
         reason: "CodeRabbit review config changed",
+      },
+    ],
+  },
+  {
+    patterns: ["scripts/pr/fixtures/review-process-metrics-coderabbit.json"],
+    effects: [
+      {
+        why: "The live CodeRabbit fixture is JSON, so it cannot reach the JavaScript-module dispatch that owns the collector sources. Route the fixture's exact path here to keep its parser contract under the same suite.",
+        surface: "scripts",
+      },
+      {
+        command: "node scripts/pr/review-process-metrics.test.mjs",
+        reason: "review-process metrics collector changed",
       },
     ],
   },
