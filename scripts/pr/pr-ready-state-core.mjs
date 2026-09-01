@@ -5,6 +5,7 @@ import {
   hasCodexApprovalReaction,
   hasCodexInFlightReaction,
   parseTimestamp,
+  summarizeCodeRabbitReviewGate,
 } from "./pr-ready-state-review-signals.mjs";
 
 export {
@@ -17,10 +18,8 @@ export {
   isCodexReviewRequestBody,
 } from "./pr-ready-state-review-signals.mjs";
 const OPTIONAL_CHECK_NAMES = new Set([
-  // The "CodeRabbit" check context is advisory in the same way "Cursor Bugbot"
-  // is, and weaker: it PASSES when the review was rate-limited and never ran
-  // (ADR 0066). Report its lag, never await it, and never read a pass on it as
-  // a readiness signal — the ledger reads CodeRabbit's inline findings instead.
+  // CodeRabbit is advisory and reports SUCCESS when a rate-limited review never
+  // ran. Report its lag, but read review evidence instead of its conclusion.
   "CodeRabbit",
   "Core Web Vitals + accessibility (ui-dashboard)",
   "Cursor Bugbot",
@@ -647,6 +646,7 @@ export function summarizeReadyState({
   requiredStatusContextsError = null,
   requiredStatusContextsAvailable = requiredStatusContexts.length > 0,
   includeFeedbackDetails = false,
+  codeRabbitPathFilterSkip = null,
 }) {
   const statusChecks = groupStatusChecks(pr.statusCheckRollup ?? []);
   const splitChecks = splitRequiredAndOptionalChecks(
@@ -694,6 +694,7 @@ export function summarizeReadyState({
     reviews: pr.reviews ?? [],
     headUpdatedAt,
     currentHeadOid,
+    pathFilterSkip: codeRabbitPathFilterSkip,
   });
   const activeReadinessOverrides = findActiveReadinessOverrides(
     issueComments,
@@ -813,14 +814,10 @@ export function summarizeReadyState({
           ? "request_review_once_after_grace"
           : "wait",
     },
-    codeRabbitReviewSignal: {
-      ready: codeRabbitReviewSignal === "reviewed",
-      required: false,
-      state: codeRabbitReviewSignal,
-      fallbackAction: ["missing", "stale"].includes(codeRabbitReviewSignal)
-        ? "request_review_once_for_head_after_optional_check"
-        : "wait",
-    },
+    codeRabbitReviewSignal: summarizeCodeRabbitReviewGate(
+      codeRabbitReviewSignal,
+      codeRabbitPathFilterSkip,
+    ),
     reviewCommentReplies: {
       ready: unrepliedRootReviewComments.length === 0,
       required: true,

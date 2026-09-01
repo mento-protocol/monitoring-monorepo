@@ -3,7 +3,7 @@ title: Fair local quality-gate coordination across worktrees
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-29
+last_verified: 2026-08-30
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -667,15 +667,22 @@ verified success that is no more than two hours old.
 
 The worktree-local whole-run stamp can satisfy `--skip-if-fresh` before request
 registration. Its compatibility key binds every complete-key input except the
-HEAD OID. The stamp also records the exact HEAD and coordinator fingerprint.
-An unchanged HEAD requires that exact fingerprint to match. A changed HEAD can
-reuse the stamp only when the base, paths, plan, validated bytes and modes,
-implementation, toolchain, timeout, local parallelism, fail-fast policy,
-effective `--lock-wait` budget, runtime policy, OS, architecture, and material
-environment still match. This narrow exception
-keeps a gate run made before a commit valid after that commit records the same
-validated bytes. Coordinator singleflight and retained-result reuse remain
-bound to the complete key, including HEAD.
+HEAD OID and the base tip. The stamp also records the exact HEAD, the exact
+base tip, and the coordinator fingerprint. An unchanged HEAD and base tip
+together require that exact fingerprint to match. A changed HEAD or base tip
+can reuse the stamp only when the base binding, paths, plan, validated bytes
+and modes, implementation, toolchain, timeout, local parallelism, fail-fast
+policy, effective `--lock-wait` budget, runtime policy, OS, architecture, and
+material environment still match. These narrow exceptions keep a gate run made
+before a commit valid after that commit records the same validated bytes, and
+keep it valid across an advance of the base that leaves the merge-base alone.
+Coordinator singleflight and retained-result reuse remain bound to the complete
+key, including HEAD and the base tip.
+
+The base-tip exception arrived after this record.
+[ADR 0080](0080-merge-base-freshness-stamp.md) owns the stamp's base binding and
+the guards on it; this ADR's decision — coalescing and retention on the complete
+execution key — is unchanged by it.
 
 The leader revalidates the complete key immediately before the first command
 and after the last command. A mismatch invalidates the execution. It cannot

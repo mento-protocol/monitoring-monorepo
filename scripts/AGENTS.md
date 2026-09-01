@@ -90,16 +90,11 @@ feedback-runtime pins.
   policy. Runtime hashes use `$script_source_dir`; suites use `$repo_root`.
   Core edits route both suites; policy edits route autoreview. Missing pins
   freeze the stamp (ADRs 0069 and 0079).
-- **Review-eval pins.** `docs/evals/review-skill.md` tracks
-  `scripts/review/run-eval.sh`,
-  `scripts/review/run-eval-source-snapshot.sh`,
-  `scripts/review/run-eval-lifecycle.sh`,
-  `scripts/review/run-eval-runtime.sh`,
-  `scripts/review/install-review-eval-launchd.sh`,
-  `scripts/review/launchd/org.mento.review-eval.plist`,
-  `scripts/review/review-eval.test.mjs`, and
-  `scripts/review/install-review-eval-launchd.test.mjs`.
-  `review/review-eval-*publication*` pins both tests.
+- **Review-eval pins.** The runbook tracks `scripts/review/run-eval*.sh`,
+  `install-review-eval-launchd*`, the launchd plist, and
+  `review-eval-*publication*` with their tests. Its file table,
+  `review:eval:experiment`, and ADR 0083 pin
+  `scripts/review/review-eval-experiment*.mjs`.
 - **Navigation-eval pin.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names its source.
 - **Verification evidence.** `.gitattributes` pins

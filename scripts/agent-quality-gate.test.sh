@@ -7326,9 +7326,14 @@ run_lockfile_scope_gate() {
     printf '%s' "$lockfile_scope_base_yaml" > pnpm-lock.yaml
     git add package.json pnpm-lock.yaml
     git commit -qm init
+    # This fixture's base resolves, so the peg check is emitted with the
+    # RESOLVED OID rather than the ref spelling. Hand it out so the assertion
+    # can pin the whole command instead of a prefix.
+    git rev-parse --verify HEAD > "$repo/head-oid"
     printf '%s' "$head_yaml" > pnpm-lock.yaml
     "$repo_root/scripts/agent-quality-gate.sh" --base HEAD > "$output_file"
   )
+  lockfile_scope_head_oid="$(cat "$repo/head-oid")"
   rm -rf "$repo"
 }
 
@@ -7357,7 +7362,7 @@ packages:
 assert_contains "- pnpm skew:check (lockfile change scoped to importers)"
 assert_contains "- pnpm lockfile:lint (lockfile change scoped to importers)"
 assert_contains "- pnpm --filter @mento-protocol/metrics-bridge test:coverage (lockfile importer metrics-bridge changed (coverage floor))"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (root lockfile changed (peg registry authority dependency))"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref $lockfile_scope_head_oid (root lockfile changed (peg registry authority dependency))"
 assert_not_contains "cd aegis && forge test"
 assert_not_contains "@mento-protocol/integration-probes test:coverage"
 assert_not_contains "workspace dependency/config changed (coverage floor)"
@@ -7870,7 +7875,7 @@ run_gate "metrics-bridge/src/peg/metrics.ts"
 assert_contains "- pnpm alerts:rules:lint (metrics-bridge gauge registry changed (alerts cross-check))"
 
 run_gate "metrics-bridge/peg-registry.json"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/test (peg registry changed)"
 
 run_gate "metrics-bridge/src/rpc.ts"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
@@ -8090,7 +8095,7 @@ assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/t
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules init -backend=false -input=false (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules validate -no-color (alerts/rules Terraform changed)"
 assert_contains "- pnpm alerts:rules:lint (alerts/rules PromQL lint + metric cross-check)"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg threshold policy changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/test (peg threshold policy changed)"
 
 run_gate "alerts/rules/main.tf"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs alerts/rules (alerts/rules Terraform changed)"
@@ -8283,7 +8288,7 @@ assert_contains "- pnpm --filter @mento-protocol/metrics-bridge typecheck (metri
 assert_contains "- pnpm --filter @mento-protocol/metrics-bridge test:coverage (metrics bridge build context changed (coverage floor))"
 
 run_gate "shared-config/deployment-namespaces.json"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/test (peg registry authority input changed)"
 assert_order \
   "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (shared-config vendored indexer fixture changed)" \
   "- pnpm indexer:testnet:codegen (shared-config vendored indexer fixture changed)"
@@ -8309,22 +8314,22 @@ assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the das
 run_gate "shared-config/src/chains.ts"
 assert_contains "- pnpm --filter @mento-protocol/config test:coverage (shared-config changed (coverage floor))"
 assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the dashboard bundle)"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/test (peg registry authority input changed)"
 # The cache key includes shared-config inputs for browser tests, but the local
 # gate still does not broaden shared-config-only edits into Playwright runs.
 assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (shared-config exports feed the dashboard bundle)"
 
 run_gate "shared-config/oracle-reporters.json"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/test (peg registry authority input changed)"
 
 run_gate "shared-config/chain-metadata.json"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/test (peg registry authority input changed)"
 
 run_gate "shared-config/src/oracle-reporters.ts"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/test (peg registry authority input changed)"
 
 run_gate "shared-config/src/tokens.ts"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/test (peg registry authority input changed)"
 
 run_gate "shared-config/src/thresholds.ts"
 assert_contains "- node scripts/alerts/check-deviation-threshold-drift.mjs (shared deviation threshold source changed)"
@@ -9928,8 +9933,8 @@ fi
 for recomputed_stamp_inherit_mode in "${recomputed_stamp_inherit_modes[@]}"; do
   for recomputed_stamp_caller in initial post-wait; do
     for recomputed_stamp_failure in \
-      write-plan ref-oid hash-paths hash-plan implementation content \
-      coordinator-context; do
+      write-plan ref-oid base-binding hash-paths hash-plan implementation \
+      content coordinator-context; do
       if ! /bin/bash -c '
         set -euo pipefail
         inherit_mode="$1"
@@ -9959,6 +9964,10 @@ for recomputed_stamp_inherit_mode in "${recomputed_stamp_inherit_modes[@]}"; do
         ref_oid() {
           printf "%040d\n" 1
           [[ "$failure_mode" != ref-oid ]] || return 91
+        }
+        gate_stamp_base_binding() {
+          printf "merge-base:%040d\n" 6
+          [[ "$failure_mode" != base-binding ]] || return 91
         }
         hash_file() {
           local probe
@@ -10245,11 +10254,18 @@ STUB
     fail "coordinated freshness debug output reported the wrong schema"
   rm -f "$debug_stdout" "$debug_stderr" "${stamp_file}.before-debug"
 
+  grep -q '^execution_base_tip=[a-f0-9]\{40\}\([a-f0-9]\{24\}\)\?$' \
+    "$stamp_file" ||
+    fail "coordinated success did not record its exact base tip"
+
   cp "$stamp_file" "${stamp_file}.valid"
+  # Keep every line the reader validates except the fingerprint itself. Dropping
+  # the recorded base tip would make the stamp unreadable and the gate would
+  # re-run for that reason instead of the mismatch this case is testing.
   {
     sed -n '1,2p' "${stamp_file}.valid"
     printf 'execution_fingerprint=%064d\n' 0
-    sed -n '4p' "${stamp_file}.valid"
+    sed -n '4,5p' "${stamp_file}.valid"
   } > "$stamp_file"
   coordinated_fresh_gate '-C debuginfo=0' --skip-if-fresh
   if grep -Fq -- "Previous successful agent quality gate run is still fresh; skipping mapped commands." \
@@ -10293,6 +10309,776 @@ STUB
 )
 rm -rf "$coordinated_fresh_stamp_repo" "$coordinated_fresh_stamp_lock"
 rm -f "$coordinated_fresh_tool_version"
+
+# The stamp binds the MERGE-BASE of the base ref and the head, not the base
+# ref's tip. `origin/main` advances many times a day, and under tip binding
+# every advance invalidated every warm stamp on the machine even when the
+# branch's own bytes and its merge-base had not moved. The base ref here is a
+# NAME whose tip is advanced underneath it, exactly as `git fetch origin main`
+# does in the pre-push hook, so the command plan stays byte-identical and the
+# base binding is the only input under test. HEAD is unchanged across the
+# advance, which is the path where the coordinator's exact-fingerprint check
+# would otherwise re-impose tip binding on its own.
+mergebase_stamp_repo="$(mktemp -d)"
+mergebase_stamp_lock="$(mktemp -d /tmp/qgm.XXXXXX)"
+(
+  cd "$mergebase_stamp_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p bin tools
+  # `scripts/gate/trunk-check-once.sh` asks the launcher for its daemon state
+  # before it runs the check and refuses to classify an unrecognized answer, so
+  # a stub that treats `daemon status` as a check never reaches the check at
+  # all. The branch returns before the counter, so every count below keeps its
+  # meaning.
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-} ${2:-}" == "daemon status" ]]; then
+  echo "✖ Daemon stopped"
+  exit 1
+fi
+counter_file="${COUNTER_FILE:?}"
+count=0
+if [[ -f "$counter_file" ]]; then
+  count="$(cat "$counter_file")"
+fi
+printf '%s\n' "$((count + 1))" > "$counter_file"
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  chmod +x bin/pnpm tools/trunk
+  write_installed_dependency_fixture "$PWD"
+  git add .
+  git commit -qm init
+  mergebase_one="$(git rev-parse --verify HEAD)"
+  git update-ref refs/remotes/origin/main "$mergebase_one"
+  printf 'changed\n' >> fixture.txt
+  counter="$mergebase_stamp_repo/.tmp/agent-quality-gate/trunk-count"
+  stamp_file="$mergebase_stamp_repo/.tmp/agent-quality-gate/last-success.stamp"
+
+  cleanup_mergebase_stamp_fixture() {
+    gate_test_stop_coordinators_in_root \
+      "merge-base stamp fixture coordinator" "$mergebase_stamp_lock"
+  }
+  trap cleanup_mergebase_stamp_fixture EXIT
+
+  mergebase_gate() {
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$mergebase_stamp_lock" \
+      AGENT_QUALITY_GATE_COORDINATOR=1 \
+      AGENT_QUALITY_GATE_CAPACITY=3 \
+      COUNTER_FILE="$counter" \
+      PATH="$mergebase_stamp_repo/bin:$PATH" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+        --base origin/main --run --lock-wait 30 "$@" \
+        > "$output_file" 2>&1
+  }
+
+  mergebase_gate
+  grep -q '^stamp=v4.*base=merge-base:[a-f0-9]\{40\}' "$stamp_file" ||
+    fail "a plan that cannot observe the base tip did not bind the merge-base"
+  grep -Fq "execution_base_tip=${mergebase_one}" "$stamp_file" ||
+    fail "the stamp did not record the base tip it was warmed against"
+
+  # Negative control: without moving anything, the fixture must already be able
+  # to reuse. An exact repeat that re-executed would make every counter check
+  # below meaningless.
+  mergebase_gate --skip-if-fresh
+  [[ "$(cat "$counter")" == "1" ]] ||
+    fail "an exact repeat did not reuse the merge-base fixture's fresh success"
+
+  # Advance the base tip onto a same-tree child. The merge-base with HEAD stays
+  # at the original commit, so the warm stamp must survive.
+  mergebase_two="$(git commit-tree \
+    "$(git rev-parse --verify "${mergebase_one}^{tree}")" \
+    -p "$mergebase_one" -m "base advance")"
+  git update-ref refs/remotes/origin/main "$mergebase_two"
+  [[ "$(git merge-base origin/main HEAD)" == "$mergebase_one" ]] ||
+    fail "the base advance fixture moved the merge-base it meant to hold still"
+  mergebase_gate --skip-if-fresh
+  [[ "$(cat "$counter")" == "1" ]] ||
+    fail "a base-tip advance that left the merge-base alone busted the stamp"
+  grep -Fq -- "Previous successful agent quality gate run is still fresh; skipping mapped commands." \
+    "$output_file" ||
+    fail "a merge-base-preserving base advance did not report its freshness skip"
+
+  # Rebasing onto the advanced base moves the merge-base itself. The same
+  # validated bytes are no longer validated against the same history, so the
+  # stamp must not survive it.
+  git reset -q --hard "$mergebase_two"
+  printf 'changed\n' >> fixture.txt
+  [[ "$(git merge-base origin/main HEAD)" == "$mergebase_two" ]] ||
+    fail "the rebase fixture did not move the merge-base"
+  mergebase_gate --skip-if-fresh
+  [[ "$(cat "$counter")" == "2" ]] ||
+    fail "a stamp warmed before a rebase was reused after the merge-base moved"
+  if grep -Fq -- "Previous successful agent quality gate run is still fresh; skipping mapped commands." \
+    "$output_file"; then
+    fail "a moved merge-base reported a freshness skip"
+  fi
+
+  cleanup_mergebase_stamp_fixture
+  for _ in {1..100}; do
+    [[ ! -e "$mergebase_stamp_lock/run.lock" ]] && break
+    sleep 0.05
+  done
+  trap - EXIT
+)
+rm -rf "$mergebase_stamp_repo" "$mergebase_stamp_lock"
+
+# A command plan that can OBSERVE the base tip keeps tip binding. Workflow
+# changes add the ADR reminder, which receives `--base <ref>` and resolves that
+# ref when it runs, so its answer moves with the tip while its command text does
+# not. The base ref is a name here for exactly that reason: the plan hash is
+# byte-identical across the advance, so only the binding predicate can bust the
+# stamp. `react-doctor:diff` is the other tip reader and bakes the resolved base
+# OID into its Turbo cache key; `scripts/gate/mapping/engine.test.mjs` covers
+# that its command text moves with the OID.
+tipbound_stamp_repo="$(mktemp -d)"
+(
+  cd "$tipbound_stamp_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p .github/workflows bin tools
+  printf 'name: Metrics Bridge\n' > .github/workflows/metrics-bridge.yml
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-} ${2:-}" == "daemon status" ]]; then
+  echo "✖ Daemon stopped"
+  exit 1
+fi
+counter_file="${COUNTER_FILE:?}"
+count=0
+if [[ -f "$counter_file" ]]; then
+  count="$(cat "$counter_file")"
+fi
+printf '%s\n' "$((count + 1))" > "$counter_file"
+STUB
+  # The stub makes mapped commands free. It must still delegate every inline
+  # Node helper and gate module used to build and execute the plan. `-p`
+  # carries the Darwin broker's `node -p 'process.execPath'` runtime probe:
+  # stub it out and the broker reads an empty runtime path and refuses to bind
+  # before first dispatch.
+  cat > bin/node <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--input-type=module" ||
+  "${1:-}" == -e ||
+  "${1:-}" == -p ||
+  "${1:-}" == */quality-gate-coordinator.mjs ||
+  "${1:-}" == */quality-gate-coordinator-environment.mjs ]]; then
+  exec "${REAL_NODE:?}" "$@"
+fi
+case "${1:-}" in
+  *"/scripts/gate/mapping.mjs") exec "${REAL_NODE:?}" "$@" ;;
+esac
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  chmod +x bin/node bin/pnpm tools/trunk
+  git add .
+  git commit -qm init
+  tipbound_one="$(git rev-parse --verify HEAD)"
+  git update-ref refs/remotes/origin/main "$tipbound_one"
+  printf '# changed\n' >> .github/workflows/metrics-bridge.yml
+  counter="$tipbound_stamp_repo/.tmp/agent-quality-gate/trunk-count"
+  stamp_file="$tipbound_stamp_repo/.tmp/agent-quality-gate/last-success.stamp"
+
+  tipbound_gate() {
+    REAL_NODE="$(command -v node)" \
+      AGENT_QUALITY_GATE_COORDINATOR=0 \
+      COUNTER_FILE="$counter" \
+      PATH="$tipbound_stamp_repo/bin:$PATH" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+        --base origin/main --run "$@" \
+        > "$output_file" 2>&1
+  }
+
+  tipbound_gate
+  grep -Fq -- "check-adr-reminder.mjs" "$output_file" ||
+    fail "the tip-binding fixture did not schedule a base-reading command"
+  grep -q '^stamp=v3.*base=tip:[a-f0-9]\{40\}' "$stamp_file" ||
+    fail "a plan that reads the base tip did not keep tip binding"
+
+  # Negative control: the plan's randomized changed-paths scratch path is
+  # normalized out, so an exact repeat must reuse. Without this the counter
+  # check below could pass on a fixture that can never reuse at all.
+  tipbound_gate --skip-if-fresh
+  [[ "$(cat "$counter")" == "1" ]] ||
+    fail "an exact repeat did not reuse the tip-binding fixture's fresh success"
+
+  tipbound_two="$(git commit-tree \
+    "$(git rev-parse --verify "${tipbound_one}^{tree}")" \
+    -p "$tipbound_one" -m "base advance")"
+  git update-ref refs/remotes/origin/main "$tipbound_two"
+  [[ "$(git merge-base origin/main HEAD)" == "$tipbound_one" ]] ||
+    fail "the tip-binding fixture moved the merge-base it meant to hold still"
+  tipbound_gate --skip-if-fresh
+  [[ "$(cat "$counter")" == "2" ]] ||
+    fail "a plan that reads the base tip reused its stamp across a tip advance"
+)
+rm -rf "$tipbound_stamp_repo"
+
+# The plan carries the `printf %q` SPELLING of the base, not its raw text, so a
+# base ref that needs escaping is not the string the predicate searches for.
+# Git permits `'` in a ref name, and `origin/qu'ote` reaches the plan as
+# `origin/qu\'ote`. Before the predicate quoted its needles, the ADR reminder
+# below was invisible to it and this plan bound the merge-base while reading
+# the tip.
+quoteref_stamp_repo="$(mktemp -d)"
+(
+  cd "$quoteref_stamp_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p .github/workflows bin tools
+  printf 'name: Metrics Bridge\n' > .github/workflows/metrics-bridge.yml
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-} ${2:-}" == "daemon status" ]]; then
+  echo "✖ Daemon stopped"
+  exit 1
+fi
+counter_file="${COUNTER_FILE:?}"
+count=0
+if [[ -f "$counter_file" ]]; then
+  count="$(cat "$counter_file")"
+fi
+printf '%s\n' "$((count + 1))" > "$counter_file"
+STUB
+  cat > bin/node <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--input-type=module" ||
+  "${1:-}" == -e ||
+  "${1:-}" == -p ||
+  "${1:-}" == */quality-gate-coordinator.mjs ||
+  "${1:-}" == */quality-gate-coordinator-environment.mjs ]]; then
+  exec "${REAL_NODE:?}" "$@"
+fi
+case "${1:-}" in
+  *"/scripts/gate/mapping.mjs") exec "${REAL_NODE:?}" "$@" ;;
+esac
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  chmod +x bin/node bin/pnpm tools/trunk
+  git add .
+  git commit -qm init
+  quoteref_one="$(git rev-parse --verify HEAD)"
+  # A ref name git accepts and `printf %q` must escape.
+  quoteref_name="origin/qu'ote"
+  git update-ref "refs/remotes/$quoteref_name" "$quoteref_one"
+  printf '# changed\n' >> .github/workflows/metrics-bridge.yml
+  counter="$quoteref_stamp_repo/.tmp/agent-quality-gate/trunk-count"
+  stamp_file="$quoteref_stamp_repo/.tmp/agent-quality-gate/last-success.stamp"
+
+  quoteref_gate() {
+    REAL_NODE="$(command -v node)" \
+      AGENT_QUALITY_GATE_COORDINATOR=0 \
+      COUNTER_FILE="$counter" \
+      PATH="$quoteref_stamp_repo/bin:$PATH" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+        --base "$quoteref_name" --run "$@" \
+        > "$output_file" 2>&1
+  }
+
+  quoteref_gate
+  # The escaped spelling is written out rather than recomputed, so a change in
+  # how the base is quoted fails here instead of passing vacuously.
+  grep -Fq -- "--base origin/qu\\'ote --head HEAD" "$output_file" ||
+    fail "the quoted-ref fixture did not emit the %q spelling it means to test"
+  grep -q '^stamp=v3.*base=tip:[a-f0-9]\{40\}' "$stamp_file" ||
+    fail "a base ref needing shell escaping did not keep tip binding"
+
+  # Negative control: the fixture must be able to reuse before the advance.
+  quoteref_gate --skip-if-fresh
+  [[ "$(cat "$counter")" == "1" ]] ||
+    fail "an exact repeat did not reuse the quoted-ref fixture's fresh success"
+
+  quoteref_two="$(git commit-tree \
+    "$(git rev-parse --verify "${quoteref_one}^{tree}")" \
+    -p "$quoteref_one" -m "base advance")"
+  git update-ref "refs/remotes/$quoteref_name" "$quoteref_two"
+  [[ "$(git merge-base "$quoteref_name" HEAD)" == "$quoteref_one" ]] ||
+    fail "the quoted-ref fixture moved the merge-base it meant to hold still"
+  quoteref_gate --skip-if-fresh
+  [[ "$(cat "$counter")" == "2" ]] ||
+    fail "a shell-escaped base ref reused its stamp across a tip advance"
+)
+rm -rf "$quoteref_stamp_repo"
+
+# The peg registry check is the third tip reader. It compares the working policy
+# against the one at the base tip, and until its verb passed `--base-ref` the
+# emitted command named the base nowhere, so the predicate could not see it and
+# a merge-base-bound stamp could skip a lineage check whose answer had moved.
+# Only a peg path changes here: a workflow change would add the ADR reminder and
+# confound which command produced the tip binding.
+pegbound_stamp_repo="$(mktemp -d)"
+(
+  cd "$pegbound_stamp_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p metrics-bridge bin tools
+  printf '{ "assets": [] }\n' > metrics-bridge/peg-registry.json
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-} ${2:-}" == "daemon status" ]]; then
+  echo "✖ Daemon stopped"
+  exit 1
+fi
+counter_file="${COUNTER_FILE:?}"
+count=0
+if [[ -f "$counter_file" ]]; then
+  count="$(cat "$counter_file")"
+fi
+printf '%s\n' "$((count + 1))" > "$counter_file"
+STUB
+  # As in the tip-binding fixture: the stub keeps mapped commands free but must
+  # still delegate the gate's own inline helpers and the Darwin broker probe.
+  cat > bin/node <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--input-type=module" ||
+  "${1:-}" == -e ||
+  "${1:-}" == -p ||
+  "${1:-}" == */quality-gate-coordinator.mjs ||
+  "${1:-}" == */quality-gate-coordinator-environment.mjs ]]; then
+  exec "${REAL_NODE:?}" "$@"
+fi
+case "${1:-}" in
+  *"/scripts/gate/mapping.mjs") exec "${REAL_NODE:?}" "$@" ;;
+esac
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  chmod +x bin/node bin/pnpm tools/trunk
+  git add .
+  git commit -qm init
+  pegbound_one="$(git rev-parse --verify HEAD)"
+  git update-ref refs/remotes/origin/main "$pegbound_one"
+  printf '{ "assets": ["changed"] }\n' > metrics-bridge/peg-registry.json
+  counter="$pegbound_stamp_repo/.tmp/agent-quality-gate/trunk-count"
+  stamp_file="$pegbound_stamp_repo/.tmp/agent-quality-gate/last-success.stamp"
+
+  pegbound_gate() {
+    REAL_NODE="$(command -v node)" \
+      AGENT_QUALITY_GATE_COORDINATOR=0 \
+      COUNTER_FILE="$counter" \
+      PATH="$pegbound_stamp_repo/bin:$PATH" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+        --base origin/main --run "$@" \
+        > "$output_file" 2>&1
+  }
+
+  pegbound_gate
+  # The base resolves here, so the check is emitted with the resolved OID: the
+  # validator's allowlist rejects ref spellings the gate accepts, and hex never
+  # trips it.
+  grep -Fq -- "check-peg-registry-integrity.mjs --base-ref ${pegbound_one}" \
+    "$output_file" ||
+    fail "the peg fixture did not schedule the peg check carrying its base ref"
+  if grep -Fq -- "check-adr-reminder.mjs" "$output_file"; then
+    fail "the peg fixture also scheduled the ADR reminder, confounding the binding"
+  fi
+  grep -q '^stamp=v3.*base=tip:[a-f0-9]\{40\}' "$stamp_file" ||
+    fail "a plan carrying the peg check did not keep tip binding"
+
+  # Negative control: the fixture must be able to reuse before the advance, or
+  # the re-execution below proves nothing.
+  pegbound_gate --skip-if-fresh
+  [[ "$(cat "$counter")" == "1" ]] ||
+    fail "an exact repeat did not reuse the peg fixture's fresh success"
+
+  # The peg check reads the tip, so a tip advance that leaves the merge-base
+  # alone must still re-run it. Under merge-base binding this reused.
+  pegbound_two="$(git commit-tree \
+    "$(git rev-parse --verify "${pegbound_one}^{tree}")" \
+    -p "$pegbound_one" -m "base advance")"
+  git update-ref refs/remotes/origin/main "$pegbound_two"
+  [[ "$(git merge-base origin/main HEAD)" == "$pegbound_one" ]] ||
+    fail "the peg fixture moved the merge-base it meant to hold still"
+  pegbound_gate --skip-if-fresh
+  [[ "$(cat "$counter")" == "2" ]] ||
+    fail "a plan carrying the peg check reused its stamp across a tip advance"
+)
+rm -rf "$pegbound_stamp_repo"
+
+# A command that reads a branch tip WITHOUT naming it is invisible to the
+# structural predicate, so the gate carries a short marker list for that class.
+# `docs:navigation-eval -- --validate` is the case under test: it asks whether a
+# scored commit is an ancestor of refs/remotes/origin/main, a ref it resolves
+# internally as the DEFAULT branch rather than receiving as the gate's base.
+# This fixture is also what catches a STALE marker — rename the command and the
+# marker stops matching, and the tip binding below silently becomes merge-base.
+markerbound_stamp_repo="$(mktemp -d)"
+(
+  cd "$markerbound_stamp_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p docs/evals bin tools
+  printf '{ "cases": [] }\n' > docs/evals/documentation-navigation-baseline.json
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-} ${2:-}" == "daemon status" ]]; then
+  echo "✖ Daemon stopped"
+  exit 1
+fi
+counter_file="${COUNTER_FILE:?}"
+count=0
+if [[ -f "$counter_file" ]]; then
+  count="$(cat "$counter_file")"
+fi
+printf '%s\n' "$((count + 1))" > "$counter_file"
+STUB
+  cat > bin/node <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--input-type=module" ||
+  "${1:-}" == -e ||
+  "${1:-}" == -p ||
+  "${1:-}" == */quality-gate-coordinator.mjs ||
+  "${1:-}" == */quality-gate-coordinator-environment.mjs ]]; then
+  exec "${REAL_NODE:?}" "$@"
+fi
+case "${1:-}" in
+  *"/scripts/gate/mapping.mjs") exec "${REAL_NODE:?}" "$@" ;;
+esac
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  chmod +x bin/node bin/pnpm tools/trunk
+  git add .
+  git commit -qm init
+  markerbound_one="$(git rev-parse --verify HEAD)"
+  git update-ref refs/remotes/origin/main "$markerbound_one"
+  printf '{ "cases": ["changed"] }\n' \
+    > docs/evals/documentation-navigation-baseline.json
+  counter="$markerbound_stamp_repo/.tmp/agent-quality-gate/trunk-count"
+  stamp_file="$markerbound_stamp_repo/.tmp/agent-quality-gate/last-success.stamp"
+
+  markerbound_gate() {
+    REAL_NODE="$(command -v node)" \
+      AGENT_QUALITY_GATE_COORDINATOR=0 \
+      COUNTER_FILE="$counter" \
+      PATH="$markerbound_stamp_repo/bin:$PATH" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+        --base origin/main --run "$@" \
+        > "$output_file" 2>&1
+  }
+
+  markerbound_gate
+  grep -Fq -- "docs:navigation-eval -- --validate" "$output_file" ||
+    fail "the marker fixture did not schedule the tip-reading navigation eval"
+  # Keep the case unconfounded: no other scheduled command may name the base.
+  for confound in "check-adr-reminder.mjs" "REACT_DOCTOR_BASE_REF" \
+    "check-peg-registry-integrity.mjs"; do
+    if grep -Fq -- "$confound" "$output_file"; then
+      fail "the marker fixture also scheduled $confound, confounding the binding"
+    fi
+  done
+  grep -q '^stamp=v3.*base=tip:[a-f0-9]\{40\}' "$stamp_file" ||
+    fail "a plan carrying a listed tip-reading command did not keep tip binding"
+  # The default branch is bound as its own component, because it is a different
+  # ref from the base whenever `--base` is not `origin/main`.
+  grep -Fq -- "+default-branch:${markerbound_one}" "$stamp_file" ||
+    fail "a marker plan did not bind the default branch's own OID"
+
+  # Negative control: the fixture must be able to reuse before the advance.
+  markerbound_gate --skip-if-fresh
+  [[ "$(cat "$counter")" == "1" ]] ||
+    fail "an exact repeat did not reuse the marker fixture's fresh success"
+
+  markerbound_two="$(git commit-tree \
+    "$(git rev-parse --verify "${markerbound_one}^{tree}")" \
+    -p "$markerbound_one" -m "base advance")"
+  git update-ref refs/remotes/origin/main "$markerbound_two"
+  [[ "$(git merge-base origin/main HEAD)" == "$markerbound_one" ]] ||
+    fail "the marker fixture moved the merge-base it meant to hold still"
+  markerbound_gate --skip-if-fresh
+  [[ "$(cat "$counter")" == "2" ]] ||
+    fail "a listed tip-reading command reused its stamp across a tip advance"
+)
+rm -rf "$markerbound_stamp_repo"
+
+# The stacked-PR case, which is the whole reason the default branch is a
+# SEPARATE component. Here `--base` is a parent branch, so the base tip and the
+# merge-base both hold still while `origin/main` advances underneath — and
+# `origin/main` is exactly what the marker command reads. Binding only the base
+# would reuse the stamp and skip a check whose answer had changed.
+stackedmarker_stamp_repo="$(mktemp -d)"
+(
+  cd "$stackedmarker_stamp_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p docs/evals bin tools
+  printf '{ "cases": [] }\n' > docs/evals/documentation-navigation-baseline.json
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-} ${2:-}" == "daemon status" ]]; then
+  echo "✖ Daemon stopped"
+  exit 1
+fi
+counter_file="${COUNTER_FILE:?}"
+count=0
+if [[ -f "$counter_file" ]]; then
+  count="$(cat "$counter_file")"
+fi
+printf '%s\n' "$((count + 1))" > "$counter_file"
+STUB
+  cat > bin/node <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--input-type=module" ||
+  "${1:-}" == -e ||
+  "${1:-}" == -p ||
+  "${1:-}" == */quality-gate-coordinator.mjs ||
+  "${1:-}" == */quality-gate-coordinator-environment.mjs ]]; then
+  exec "${REAL_NODE:?}" "$@"
+fi
+case "${1:-}" in
+  *"/scripts/gate/mapping.mjs") exec "${REAL_NODE:?}" "$@" ;;
+esac
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  chmod +x bin/node bin/pnpm tools/trunk
+  git add .
+  git commit -qm init
+  stackedmarker_root="$(git rev-parse --verify HEAD)"
+  # The stack: `origin/parent` is the gate's base, `origin/main` is the default
+  # branch the marker command reads. They start at the same commit so the
+  # advance below is the only difference between the two runs.
+  git update-ref refs/remotes/origin/parent "$stackedmarker_root"
+  git update-ref refs/remotes/origin/main "$stackedmarker_root"
+  printf '{ "cases": ["changed"] }\n' \
+    > docs/evals/documentation-navigation-baseline.json
+  counter="$stackedmarker_stamp_repo/.tmp/agent-quality-gate/trunk-count"
+  stamp_file="$stackedmarker_stamp_repo/.tmp/agent-quality-gate/last-success.stamp"
+
+  stackedmarker_gate() {
+    REAL_NODE="$(command -v node)" \
+      AGENT_QUALITY_GATE_COORDINATOR=0 \
+      COUNTER_FILE="$counter" \
+      PATH="$stackedmarker_stamp_repo/bin:$PATH" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+        --base origin/parent --run "$@" \
+        > "$output_file" 2>&1
+  }
+
+  stackedmarker_gate
+  grep -Fq -- "docs:navigation-eval -- --validate" "$output_file" ||
+    fail "the stacked fixture did not schedule the tip-reading navigation eval"
+  grep -Fq -- "+default-branch:${stackedmarker_root}" "$stamp_file" ||
+    fail "the stacked fixture did not bind the default branch"
+
+  # Negative control: the fixture must be able to reuse before the advance.
+  stackedmarker_gate --skip-if-fresh
+  [[ "$(cat "$counter")" == "1" ]] ||
+    fail "an exact repeat did not reuse the stacked fixture's fresh success"
+
+  # Advance ONLY the default branch. Same tree, so nothing the gate validates
+  # changes; the base ref and the merge-base are asserted unmoved below, which
+  # is what makes the re-run attributable to the default-branch component.
+  stackedmarker_main="$(git commit-tree \
+    "$(git rev-parse --verify "${stackedmarker_root}^{tree}")" \
+    -p "$stackedmarker_root" -m "default branch advance")"
+  git update-ref refs/remotes/origin/main "$stackedmarker_main"
+  [[ "$(git rev-parse --verify origin/parent)" == "$stackedmarker_root" ]] ||
+    fail "the stacked fixture moved the base tip it meant to hold still"
+  [[ "$(git merge-base origin/parent HEAD)" == "$stackedmarker_root" ]] ||
+    fail "the stacked fixture moved the merge-base it meant to hold still"
+  stackedmarker_gate --skip-if-fresh
+  [[ "$(cat "$counter")" == "2" ]] ||
+    fail "a default-branch advance reused a stamp whose marker command reads it"
+  grep -Fq -- "+default-branch:${stackedmarker_main}" "$stamp_file" ||
+    fail "the re-run did not rebind the advanced default branch"
+)
+rm -rf "$stackedmarker_stamp_repo"
+
+# Fail closed when the merge-base cannot be computed. A base ref sharing no
+# history with HEAD has none, and the binding must fall back to the tip rather
+# than to any weaker answer.
+disjoint_base_stamp_repo="$(mktemp -d)"
+(
+  cd "$disjoint_base_stamp_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p bin tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-} ${2:-}" == "daemon status" ]]; then
+  echo "✖ Daemon stopped"
+  exit 1
+fi
+counter_file="${COUNTER_FILE:?}"
+count=0
+if [[ -f "$counter_file" ]]; then
+  count="$(cat "$counter_file")"
+fi
+printf '%s\n' "$((count + 1))" > "$counter_file"
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  chmod +x bin/pnpm tools/trunk
+  write_installed_dependency_fixture "$PWD"
+  git add .
+  git commit -qm init
+  # A parentless commit over the same tree shares no history with HEAD.
+  disjoint_one="$(git commit-tree \
+    "$(git rev-parse --verify 'HEAD^{tree}')" -m "disjoint base")"
+  git update-ref refs/remotes/origin/main "$disjoint_one"
+  if git merge-base origin/main HEAD > /dev/null 2>&1; then
+    fail "the disjoint fixture produced a merge-base"
+  fi
+  printf 'changed\n' >> fixture.txt
+  counter="$disjoint_base_stamp_repo/.tmp/agent-quality-gate/trunk-count"
+  stamp_file="$disjoint_base_stamp_repo/.tmp/agent-quality-gate/last-success.stamp"
+
+  disjoint_gate() {
+    AGENT_QUALITY_GATE_COORDINATOR=0 \
+      COUNTER_FILE="$counter" \
+      PATH="$disjoint_base_stamp_repo/bin:$PATH" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+        --base origin/main --run "$@" \
+        > "$output_file" 2>&1
+  }
+
+  disjoint_gate
+  grep -q '^stamp=v3.*base=tip:[a-f0-9]\{40\}' "$stamp_file" ||
+    fail "an uncomputable merge-base did not fall back to the base tip"
+
+  # Negative control, as above: the fixture must be able to reuse before the
+  # advance, or the re-execution below proves nothing.
+  disjoint_gate --skip-if-fresh
+  [[ "$(cat "$counter")" == "1" ]] ||
+    fail "an exact repeat did not reuse the disjoint fixture's fresh success"
+
+  disjoint_two="$(git commit-tree \
+    "$(git rev-parse --verify "${disjoint_one}^{tree}")" \
+    -p "$disjoint_one" -m "disjoint base advance")"
+  git update-ref refs/remotes/origin/main "$disjoint_two"
+  disjoint_gate --skip-if-fresh
+  [[ "$(cat "$counter")" == "2" ]] ||
+    fail "a base with no merge-base reused its stamp across a tip advance"
+)
+rm -rf "$disjoint_base_stamp_repo"
+
+# Fail closed when the merge-base is AMBIGUOUS. A criss-cross history has
+# several best merge bases, and plain `git merge-base` answers with one of them
+# without saying so, which is why the gate asks with `--all`. Binding an
+# unspecified pick would answer "fresh" for a history whose merge-base is not a
+# single commit, so the binding must fall back to the tip.
+crisscross_base_stamp_repo="$(mktemp -d)"
+(
+  cd "$crisscross_base_stamp_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p bin tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-} ${2:-}" == "daemon status" ]]; then
+  echo "✖ Daemon stopped"
+  exit 1
+fi
+counter_file="${COUNTER_FILE:?}"
+count=0
+if [[ -f "$counter_file" ]]; then
+  count="$(cat "$counter_file")"
+fi
+printf '%s\n' "$((count + 1))" > "$counter_file"
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  chmod +x bin/pnpm tools/trunk
+  write_installed_dependency_fixture "$PWD"
+  git add .
+  git commit -qm init
+  # Two children of the root, then two independent merges of both children.
+  # The merges share exactly two best common ancestors. Every commit carries
+  # the root tree, so the three-dot diff is the same whichever base git picks
+  # and the only changed path is the uncommitted one below.
+  crisscross_root_tree="$(git rev-parse --verify 'HEAD^{tree}')"
+  crisscross_root="$(git rev-parse --verify HEAD)"
+  crisscross_one="$(git commit-tree "$crisscross_root_tree" \
+    -p "$crisscross_root" -m "side one")"
+  crisscross_two="$(git commit-tree "$crisscross_root_tree" \
+    -p "$crisscross_root" -m "side two")"
+  crisscross_base="$(git commit-tree "$crisscross_root_tree" \
+    -p "$crisscross_one" -p "$crisscross_two" -m "base merge")"
+  crisscross_head="$(git commit-tree "$crisscross_root_tree" \
+    -p "$crisscross_one" -p "$crisscross_two" -m "head merge")"
+  git update-ref refs/remotes/origin/main "$crisscross_base"
+  git reset -q --hard "$crisscross_head"
+  [[ "$(git merge-base --all origin/main HEAD | wc -l | tr -d '[:space:]')" == "2" ]] ||
+    fail "the criss-cross fixture did not produce two best merge bases"
+  # The hazard itself: the naive call cannot report the ambiguity. If a future
+  # git starts refusing or listing here, this fixture should be revisited.
+  [[ "$(git merge-base origin/main HEAD | wc -l | tr -d '[:space:]')" == "1" ]] ||
+    fail "plain git merge-base no longer answers a criss-cross with one OID"
+  printf 'changed\n' >> fixture.txt
+  counter="$crisscross_base_stamp_repo/.tmp/agent-quality-gate/trunk-count"
+  stamp_file="$crisscross_base_stamp_repo/.tmp/agent-quality-gate/last-success.stamp"
+
+  crisscross_gate() {
+    AGENT_QUALITY_GATE_COORDINATOR=0 \
+      COUNTER_FILE="$counter" \
+      PATH="$crisscross_base_stamp_repo/bin:$PATH" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+        --base origin/main --run "$@" \
+        > "$output_file" 2>&1
+  }
+
+  crisscross_gate
+  grep -q '^stamp=v3.*base=tip:[a-f0-9]\{40\}' "$stamp_file" ||
+    fail "an ambiguous merge-base did not fall back to the base tip"
+
+  # Negative control, as above: the fixture must be able to reuse before the
+  # advance, or the re-execution below proves nothing.
+  crisscross_gate --skip-if-fresh
+  [[ "$(cat "$counter")" == "1" ]] ||
+    fail "an exact repeat did not reuse the criss-cross fixture's fresh success"
+
+  # Tip binding is in force, so advancing the tip must bust the stamp. The two
+  # best merge bases are unchanged by this advance, so a run that reused here
+  # would prove the binding had silently become merge-base.
+  crisscross_advanced="$(git commit-tree "$crisscross_root_tree" \
+    -p "$crisscross_base" -m "base advance")"
+  git update-ref refs/remotes/origin/main "$crisscross_advanced"
+  [[ "$(git merge-base --all origin/main HEAD | wc -l | tr -d '[:space:]')" == "2" ]] ||
+    fail "the criss-cross base advance collapsed the ambiguity it meant to hold"
+  crisscross_gate --skip-if-fresh
+  [[ "$(cat "$counter")" == "2" ]] ||
+    fail "an ambiguous merge-base reused its stamp across a tip advance"
+)
+rm -rf "$crisscross_base_stamp_repo"
 
 # Workflow changes add the ADR reminder command, whose execution argument uses
 # a randomized changed-paths scratch file. That volatile path must be
@@ -12944,15 +13730,15 @@ run_gate "scripts/alerts/alert-rules-lint-peg-policy.mjs"
 assert_contains "- pnpm alerts:rules:lint:test (alert-rules lint helper changed)"
 
 run_gate "scripts/alerts/check-peg-registry-integrity.mjs"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry integrity checker changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/test (peg registry integrity checker changed)"
 assert_contains "- node scripts/alerts/check-peg-registry-integrity.test.mjs (peg registry integrity checker changed)"
 
 run_gate "scripts/alerts/check-peg-registry-integrity-lineage.mjs"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry integrity checker changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/test (peg registry integrity checker changed)"
 assert_contains "- node scripts/alerts/check-peg-registry-integrity.test.mjs (peg registry integrity checker changed)"
 
 run_gate "scripts/alerts/check-peg-registry-integrity.test.mjs"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry integrity checker changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/test (peg registry integrity checker changed)"
 assert_contains "- node scripts/alerts/check-peg-registry-integrity.test.mjs (peg registry integrity checker changed)"
 
 run_gate "scripts/alerts/check-peg-policy-publication.mjs"
@@ -12964,7 +13750,7 @@ assert_contains "- pnpm tf:test (peg policy publication boundary changed)"
 # The shared digest both peg validators compare against: one file, both suites.
 run_gate "scripts/lib/peg-policy-digest.mjs"
 assert_contains "- pnpm alerts:rules:lint:test (peg policy version digest changed)"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg policy version digest changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/test (peg policy version digest changed)"
 assert_contains "- node scripts/alerts/check-peg-registry-integrity.test.mjs (peg policy version digest changed)"
 
 run_gate "scripts/pr/check-pr-description.mjs"

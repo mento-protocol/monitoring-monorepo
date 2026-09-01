@@ -7424,7 +7424,160 @@ validation_content_signature() {
 command_plan_file="$(make_tmpfile)"
 write_command_plan "$command_plan_file"
 
+# ── Freshness-stamp base binding ────────────────────────────────────────────
+#
+# The stamp binds the MERGE-BASE of the base ref and the head rather than the
+# base ref's tip. What the gate validates is already merge-base-scoped: the
+# changed-path set comes from `git diff "$base_ref...$head_ref"`. Under tip
+# binding every advance of `origin/main` invalidated every warm stamp on the
+# machine, even when the branch's own bytes and its merge-base had not moved.
+# The pre-push hook fetches `origin main` immediately before it runs the gate,
+# so a warm-up that merely overlapped somebody else's merge paid for the whole
+# gate a second time.
+#
+# Three guards keep the narrower binding from weakening anything.
+#
+#   * Failure is closed. An unresolvable base, head, or merge-base — disjoint
+#     histories, a ref naming no commit, or the criss-cross case where
+#     `git merge-base --all` reports several — falls back to the tip OID, which
+#     is the old and stricter binding. No failure path answers "fresh".
+#   * A command plan that can OBSERVE the base tip keeps tip binding.
+#     `react-doctor:diff` bakes the resolved base OID into its Turbo cache key,
+#     `check-adr-reminder.mjs` takes `--base <ref>` and resolves it when it
+#     runs, and `check-peg-registry-integrity.mjs` takes `--base-ref <ref>` and
+#     reads the previous peg policy from that tip; all three read the tip, not
+#     the merge-base. Each is emitted by a verb that puts the base into the
+#     command text, which is what this predicate can see. The predicate asks whether
+#     the plan text names the base at all instead of listing those two, so a
+#     future verb that passes the base down inherits tip binding without
+#     anybody remembering to extend a list. A false positive costs only the
+#     stricter binding.
+#   * The binding kind is part of the field. A tip-bound stamp and a
+#     merge-base-bound stamp can never be read as each other in the case where
+#     the two OIDs coincide, which is every branch whose base has not advanced.
+#
+# Nothing else moves: the changed-path set, the command plan, the gate
+# implementation hash, the validated content signature, and the package-risk
+# policy all still bust the stamp exactly as they did before.
+gate_command_plan_reads_base() {
+  local plan_file="$1"
+  local base_tip="$2"
+  local st=0
+  local quoted_base_ref quoted_base_tip
+  # Anything unexpected answers "yes". The caller then keeps the stricter tip
+  # binding, so an unreadable plan can never buy a wider reuse window.
+  [[ -f "$plan_file" ]] || return 0
+  [[ -n "$base_ref" && -n "$base_tip" ]] || return 0
+  # The plan carries the `printf %q` SPELLING of the base, not its raw text:
+  # every verb that names the base interpolates it through `shellQuote`
+  # (scripts/gate/mapping/shell-quote.mjs), which exists to reproduce
+  # `printf %q`. Git permits `'` and `"` in ref names, so a base like
+  # `origin/qu'ote` reaches the plan as `origin/qu\'ote` and a fixed-string
+  # search for the raw ref misses it — selecting merge-base binding for a plan
+  # that does read the tip. Ask THIS bash for the spelling instead of
+  # reimplementing the escape table. A ref needing no escaping quotes to
+  # itself, so the plain case matches exactly as before. The base tip is a
+  # resolved OID by the time this runs, hence already its own spelling; it is
+  # quoted anyway so the guarantee does not depend on a caller's early return.
+  printf -v quoted_base_ref '%q' "$base_ref"
+  printf -v quoted_base_tip '%q' "$base_tip"
+  grep -qF \
+    -e "$base_ref" -e "$quoted_base_ref" \
+    -e "$base_tip" -e "$quoted_base_tip" \
+    -- "$plan_file" || st=$?
+  # 0 names the base, 1 does not. Any other status is a grep failure rather
+  # than an answer, so it must not reach the merge-base branch.
+  [[ "$st" -eq 1 ]] && return 1
+  return 0
+}
+
+# The markers below name two commands that read the DEFAULT branch's tip
+# WITHOUT naming any ref in their own text, so nothing structural can see them.
+# The autoreview suite gets both of its spellings, which share a plan dedupe
+# key:
+#
+#   * `docs:navigation-eval -- --validate` tests whether a scored commit is an
+#     ancestor of `refs/remotes/origin/main`
+#     (scripts/docs/docs-navigation-eval-result.mjs, DEFAULT_BRANCH_REF).
+#   * the autoreview suite reads protected-main checklist blobs at
+#     `origin/main^{commit}` (scripts/agent-autoreview.test.sh).
+#
+# Both mean the default branch on purpose, which is NOT the gate's base: on a
+# stacked PR the base is the parent branch while these still read `origin/main`.
+# Binding the base tip for them would therefore miss exactly the advance that
+# changes their answer, so the caller binds the default branch's own OID as a
+# separate stamp component. Where a command's base IS the gate's base, make its
+# verb name it instead — see `add_peg_registry_integrity_check`.
+gate_command_plan_reads_default_branch() {
+  local plan_file="$1"
+  local st=0
+  # Same fail-closed shape as the predicate above: anything unexpected answers
+  # "yes", which only ever adds a component and narrows reuse.
+  [[ -f "$plan_file" ]] || return 0
+  grep -qF \
+    -e 'docs:navigation-eval -- --validate' \
+    -e 'scripts/agent-autoreview.test.sh' \
+    -e 'agent:autoreview:test' \
+    -- "$plan_file" || st=$?
+  [[ "$st" -eq 1 ]] && return 1
+  return 0
+}
+
+# The ref both marker commands resolve. `docs-navigation-eval-result.mjs` calls
+# it DEFAULT_BRANCH_REF; keep the two spellings in step.
+gate_default_branch_ref="refs/remotes/origin/main"
+
+gate_stamp_base_binding() {
+  local plan_file="$1"
+  local base_tip="$2"
+  local merge_base
+  local suffix=""
+  local reads_default_branch=0
+  # A plan that reads the DEFAULT branch binds that branch's OID as its own
+  # component. It cannot ride on the base component: the two are different refs
+  # whenever `--base` is not `origin/main`, and on a stacked PR only this
+  # component moves when `origin/main` advances — which is precisely the advance
+  # that changes these commands' answers. `ref_oid` keeps its `__unresolved__:`
+  # sentinel on failure, and that sentinel differs from every OID, so a default
+  # branch that is absent and later appears still busts the stamp.
+  #
+  # Such a plan ALSO keeps tip binding below. Binding the base tip is not
+  # required by anything measured here, but it is strictly stricter, and the
+  # autoreview marker's runtime behaviour was established by reading its source
+  # rather than by running it. The narrower binding is not worth that gap for
+  # two commands this rare.
+  if gate_command_plan_reads_default_branch "$plan_file"; then
+    reads_default_branch=1
+    suffix="+default-branch:$(ref_oid "$gate_default_branch_ref")"
+  fi
+  if [[ -z "$base_ref" || -z "$head_ref" || -z "$base_tip" ]] ||
+    [[ "$base_tip" == __unresolved__:* ]]; then
+    printf 'tip:%s%s\n' "$base_tip" "$suffix"
+    return 0
+  fi
+  if [[ "$reads_default_branch" -eq 1 ]] ||
+    gate_command_plan_reads_base "$plan_file" "$base_tip"; then
+    printf 'tip:%s%s\n' "$base_tip" "$suffix"
+    return 0
+  fi
+  # `--all` is load-bearing. Plain `git merge-base A B` prints exactly ONE OID
+  # even when several best merge bases exist; it picks one, and which one is
+  # not specified. Binding that pick would answer "fresh" for a history whose
+  # merge-base is genuinely ambiguous. `--all` prints every best merge base, so
+  # the criss-cross case arrives as several lines and fails the test below.
+  merge_base="$(git merge-base --all "$base_ref" "$head_ref" 2>/dev/null)" ||
+    merge_base=""
+  # A single full OID and nothing else. Bash matches this pattern against the
+  # whole string with no newline handling, so any multi-line answer fails it.
+  if [[ ! "$merge_base" =~ ^[a-f0-9]{40}([a-f0-9]{24})?$ ]]; then
+    printf 'tip:%s%s\n' "$base_tip" "$suffix"
+    return 0
+  fi
+  printf 'merge-base:%s%s\n' "$merge_base" "$suffix"
+}
+
 base_oid="$(ref_oid "$base_ref")"
+stamp_base_binding="$(gate_stamp_base_binding "$command_plan_file" "$base_oid")"
 changed_paths_hash="$(hash_file "$changed_paths_file")"
 command_plan_hash="$(hash_file "$command_plan_file")"
 implementation_hash="$(implementation_hash_value)"
@@ -7490,7 +7643,7 @@ gate_coordinator_freshness_context_hash() {
 stamp_line() {
   if [[ -n "$gate_coordinator_freshness_context" ]]; then
     printf 'v4\tbase=%s\tpaths=%s\tplan=%s\timplementation=%s\tcontent=%s\tpackageRisk=%s\tallowPackageScripts=%s\tscrubPolicy=%s\tcoordinatorContext=%s\n' \
-      "$base_oid" \
+      "$stamp_base_binding" \
       "$changed_paths_hash" \
       "$command_plan_hash" \
       "$implementation_hash" \
@@ -7502,7 +7655,7 @@ stamp_line() {
     return
   fi
   printf 'v3\tbase=%s\tpaths=%s\tplan=%s\timplementation=%s\tcontent=%s\tpackageRisk=%s\tallowPackageScripts=%s\tscrubPolicy=%s\n' \
-    "$base_oid" \
+    "$stamp_base_binding" \
     "$changed_paths_hash" \
     "$command_plan_hash" \
     "$implementation_hash" \
@@ -7535,6 +7688,7 @@ current_stamp=""
 recomputed_stamp_line() {
   local fresh_paths_file fresh_plan_file fresh_base fresh_paths fresh_plan
   local fresh_implementation fresh_content fresh_coordinator_context
+  local fresh_base_tip
   fresh_paths_file="$(mktemp "$scratch_dir/fresh-paths.XXXXXX")" || return 1
   fresh_plan_file="$(mktemp "$scratch_dir/fresh-plan.XXXXXX")" || {
     rm -f "$fresh_paths_file"
@@ -7549,7 +7703,13 @@ recomputed_stamp_line() {
     rm -f "$fresh_paths_file" "$fresh_plan_file"
     return 1
   }
-  fresh_base="$(ref_oid "$base_ref")" || {
+  fresh_base_tip="$(ref_oid "$base_ref")" || {
+    rm -f "$fresh_paths_file" "$fresh_plan_file"
+    return 1
+  }
+  # The binding reads the freshly written plan, so it must run before the
+  # cleanup below removes it.
+  fresh_base="$(gate_stamp_base_binding "$fresh_plan_file" "$fresh_base_tip")" || {
     rm -f "$fresh_paths_file" "$fresh_plan_file"
     return 1
   }
@@ -7590,6 +7750,7 @@ is_fresh_success_stamp() {
   local stamped_value
   local stamped_execution_fingerprint
   local stamped_execution_head
+  local stamped_execution_base_tip
   local now
   [[ -f "$success_stamp_file" ]] || return 1
   stamped_at="$(sed -n '1s/^created_at=//p' "$success_stamp_file")"
@@ -7602,14 +7763,29 @@ is_fresh_success_stamp() {
     stamped_execution_head="$(
       sed -n '4s/^execution_head=//p' "$success_stamp_file"
     )"
+    stamped_execution_base_tip="$(
+      sed -n '5s/^execution_base_tip=//p' "$success_stamp_file"
+    )"
     [[ "$stamped_execution_fingerprint" =~ ^[a-f0-9]{64}$ ]] || return 1
     [[ "$stamped_execution_head" =~ ^[a-f0-9]{40}([a-f0-9]{24})?$ ]] || return 1
-    if [[ "$stamped_execution_head" == "$gate_coordinator_execution_head" ]]; then
+    # An absent or malformed base tip is not an answer. Refuse the stamp rather
+    # than fall through to a comparison that cannot be reasoned about.
+    [[ "$stamped_execution_base_tip" =~ ^[a-f0-9]{40}([a-f0-9]{24})?$ ||
+      "$stamped_execution_base_tip" == __unresolved__:* ]] || return 1
+    if [[ "$stamped_execution_head" == "$gate_coordinator_execution_head" &&
+      "$stamped_execution_base_tip" == "$base_oid" ]]; then
       [[ "$stamped_execution_fingerprint" == \
         "$gate_coordinator_registration_fingerprint" ]] || return 1
     fi
-    # If HEAD changed after a warm run, the matching v4 stamp above proves
-    # equality for every other execution input and permits only that transition.
+    # The coordinator's execution fingerprint binds every input the v4 stamp and
+    # the coordinator freshness context bind, plus HEAD and the base TIP. So
+    # when the v4 stamp matches, requiring fingerprint equality adds exactly two
+    # things: an unchanged HEAD and an unchanged base tip. Each is compared
+    # directly above, and each is allowed to move on its own terms — HEAD
+    # because a commit may record the same validated bytes, the base tip
+    # because the stamp binds the merge-base and the plan cannot observe the
+    # tip. Whichever moved, the matching stamp still proves every other
+    # execution input equal, so only those transitions are permitted.
   fi
   [[ "$stamped_at" =~ ^[0-9]+$ ]] || return 1
   now="$(date +%s)"
@@ -12036,6 +12212,10 @@ if [[ "${stamp_reuse_count:-0}" -eq 0 && "$trunk_arm_environment_blocked" != tru
       printf 'execution_fingerprint=%s\n' \
         "$gate_coordinator_registration_fingerprint"
       printf 'execution_head=%s\n' "$gate_coordinator_execution_head"
+      # The base tip is no longer recoverable from the stamp's own base field,
+      # which now carries the merge-base. Record it so the reader can tell an
+      # unchanged base tip from an advanced one.
+      printf 'execution_base_tip=%s\n' "$base_oid"
     fi
   } > "$success_stamp_file"; then
     echo "warning: the gate passed, but its local success stamp could not be written." >&2
