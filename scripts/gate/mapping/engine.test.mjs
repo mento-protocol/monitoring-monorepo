@@ -374,6 +374,37 @@ test("the root tooling bundle schedules the whole suite list", () => {
   assert.ok(commands.includes("node scripts/pr/pr-ready-state.test.mjs"));
 });
 
+test("every root manifest class schedules the focused package-policy contract", () => {
+  const expected = "bash scripts/bootstrap/agent-setup-contract.test.sh";
+  for (const manifestClass of [
+    "workspace",
+    "workspace-dev-metadata",
+    "root-tooling-scripts",
+    "package-scripts",
+  ]) {
+    const plan = new Plan();
+    routeChangedPaths(
+      ROUTING_PLAN,
+      ["package.json"],
+      stubFacts({
+        isRealTree: false,
+        presentPaths: ["package.json"],
+        rootPackageJsonClass: () => manifestClass,
+      }),
+      {
+        plan,
+        routeLockfileChange: () => {
+          throw new Error("unexpected lockfile route");
+        },
+      },
+    );
+    assert.ok(
+      commandsOf(plan).includes(expected),
+      `${manifestClass} did not route ${expected}`,
+    );
+  }
+});
+
 test("Darwin runtime files shared with autoreview route both regression suites", () => {
   const sharedRuntimePaths = [
     "scripts/gate/darwin-process-identity.c",
