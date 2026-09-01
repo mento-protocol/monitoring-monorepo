@@ -608,10 +608,56 @@
         "testAdditionsUnderTwiceImplementationAdditions": false,
         "budgetEvaluation": "informational segment; evaluate the initial implementation limit on cumulativeM4"
       }
+    },
+    {
+      "name": "retained-package-contract-routing",
+      "pr": 2207,
+      "baseSha": "9bff5e097cdc3a84f4a22073aebe833d8d5f5f94",
+      "sourceSha": "57af0c64759005fc7985987475dc1e7510813f4c",
+      "trackedCommand": "git diff --numstat 9bff5e097cdc3a84f4a22073aebe833d8d5f5f94 57af0c64759005fc7985987475dc1e7510813f4c -- . ':!docs/metrics/verification-redesign-m4-complexity.json'",
+      "files": [
+        {
+          "path": "scripts/gate/mapping/engine.test.mjs",
+          "category": "test",
+          "additions": 31,
+          "deletions": 0
+        },
+        {
+          "path": "scripts/gate/routing-table/groups-tail.mjs",
+          "category": "check",
+          "additions": 5,
+          "deletions": 0
+        }
+      ],
+      "totals": {
+        "check": {
+          "additions": 5,
+          "deletions": 0,
+          "net": 5
+        },
+        "test": {
+          "additions": 31,
+          "deletions": 0,
+          "net": 31
+        },
+        "all": {
+          "additions": 36,
+          "deletions": 0,
+          "net": 36
+        }
+      },
+      "replacementSpecific": {
+        "implementationAdditions": 5,
+        "testAdditions": 31,
+        "testToImplementationRatio": 6.2,
+        "twiceImplementationAdditions": 10,
+        "testAdditionsUnderTwiceImplementationAdditions": false,
+        "budgetEvaluation": "informational segment; evaluate the initial implementation limit on cumulativeM4"
+      }
     }
   ],
   "cumulativeM4": {
-    "method": "Sum the initial segment and three repair segments. These additive activity counts preserve each reviewed diff. They are not a direct diff across unrelated main-branch merges.",
+    "method": "Sum the initial segment and four repair segments. These additive activity counts preserve each reviewed diff. They are not a direct diff across unrelated main-branch merges.",
     "totals": {
       "action": {
         "additions": 26,
@@ -624,14 +670,14 @@
         "net": 346
       },
       "check": {
-        "additions": 378,
+        "additions": 383,
         "deletions": 70,
-        "net": 308
+        "net": 313
       },
       "test": {
-        "additions": 1046,
+        "additions": 1077,
         "deletions": 417,
-        "net": 629
+        "net": 660
       },
       "doc": {
         "additions": 724,
@@ -644,15 +690,15 @@
         "net": 0
       },
       "all": {
-        "additions": 2611,
+        "additions": 2647,
         "deletions": 718,
-        "net": 1893
+        "net": 1929
       }
     },
     "replacementSpecific": {
-      "implementationAdditions": 841,
-      "testAdditions": 1046,
-      "testToImplementationRatio": 1.2438,
+      "implementationAdditions": 846,
+      "testAdditions": 1077,
+      "testToImplementationRatio": 1.273,
       "limits": {
         "thinOrchestrationScriptPhysicalLines": 245,
         "thinOrchestrationScriptUnder300": true,
@@ -666,7 +712,7 @@
         },
         "newReplacementFilePhysicalLineLimit": 500,
         "allNewReplacementFilesUnder500": true,
-        "twiceImplementationAdditions": 1682,
+        "twiceImplementationAdditions": 1692,
         "testAdditionsUnderTwiceImplementationAdditions": true
       }
     }
