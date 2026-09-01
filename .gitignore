@@ -55,6 +55,10 @@ CLAUDE.md
 # get uploaded to Upstash via the `/forensic-report` skill — not git.
 .investigations/
 
+# Review-eval resume caches contain raw model transcripts. Keep them local and
+# outside Git and autoreview bundles. Scored result files live one level above.
+/docs/evals/review-skill-runs/*/cells/
+
 # clawpatch.ai — review-tool state stays local, not committed.
 .clawpatch/
 

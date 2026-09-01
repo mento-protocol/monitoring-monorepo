@@ -6,6 +6,7 @@ provider "registry.terraform.io/hashicorp/archive" {
   constraints = ">= 2.4.0"
   hashes = [
     "h1:WB6H5ksIZiyq1lQlD/PWeh+tn4FLsbSjVnRW3+4xe2Y=",
+    "h1:jdmKm+xl6ZcQrijxapnZ94RVuz/G4vk7hsIa1N0VT5Q=",
     "zh:0d14713fdc259fb377d0b899ad3c650a34194bd52194c863303ef22a65a580e2",
     "zh:369b56040c7a8085d04e7e8ffac1e2b321a3170e502f788819bc34b868ec016f",
     "zh:4d1a3b983ed6af5a52bfe12794674ae55cbadfa6021b37106ade68b433ad216a",
@@ -26,6 +27,7 @@ provider "registry.terraform.io/hashicorp/google" {
   version     = "7.33.0"
   constraints = ">= 3.43.0, >= 4.28.0, >= 5.41.0, >= 7.0.0, < 8.0.0"
   hashes = [
+    "h1:AtuVYxtxBEHMS9o/9HR2bg9Z/Ta4MLckXhSOwX8PWFs=",
     "h1:Juvz+QyHaKLTVv/pVo6vnA9V5ZqiFgCJ4FpqGLNl3DY=",
     "zh:10620bf55734d05701852dbbd55aa151860cbaf672001222c29ee93ec02d062e",
     "zh:1ca1a3829a1fdbbce17a540d2be63b1529e46debdb8dbf0057facc992110ff38",
@@ -46,6 +48,7 @@ provider "registry.terraform.io/hashicorp/google-beta" {
   version     = "7.33.0"
   constraints = ">= 3.43.0, >= 4.11.0, >= 5.41.0, < 8.0.0"
   hashes = [
+    "h1:Vp/UxR1orFX3lpx4iuxIkuRunHkSZfxonwh5P1B8/vE=",
     "h1:tfmZxEZ/qI6XZ3EXAsybUpqQ7cyihTWkUXjZLua45Rw=",
     "zh:0c2a87d4fc6cb4bdce514e02ac41f72b0a0b5c51aaf6ad2e13898344ad08e467",
     "zh:35b1cb96957257a46384e311a547b3ad7de61eb80f677120d48bd11173a2d1bf",
@@ -66,6 +69,7 @@ provider "registry.terraform.io/hashicorp/http" {
   version     = "3.6.0"
   constraints = ">= 3.4.0"
   hashes = [
+    "h1:FekY+4cjIw3QBdpk2dVQ20+t8AeDwCK/VaKOnjfeJvw=",
     "h1:ligOpkIiBTS1ZkLoFp3cwkRYCwYyaZj1Z7t3GdfNa+c=",
     "zh:0996c7db5d7627bc6ab8c4d217f18fb122d60e99e454812b080ee5695cad1003",
     "zh:25b7ee0ba9edc912a00365c776d062ae7c66d94050c6c13038447c8e8b95ddf2",
@@ -87,6 +91,7 @@ provider "registry.terraform.io/hashicorp/local" {
   version     = "2.9.0"
   constraints = ">= 2.5.0"
   hashes = [
+    "h1:9rBZCMNpxKwMlRbWH2QpwD3kqUCAejdOZQ/aiiDObXQ=",
     "h1:m24fjcInWvTVZ1XSo2MaNuKPe+X/gfG8SIi09rA7a7M=",
     "zh:0baa4566cf77f1ff52f4293d1c8536202dd23edc197c3196413a28343c3ac3a0",
     "zh:16b5559c3c07088ddad11a9bb9e9c0799999363c2958e9a5be2bcbbf2cd9ca64",
@@ -109,6 +114,7 @@ provider "registry.terraform.io/hashicorp/null" {
   constraints = ">= 2.1.0, >= 3.2.0"
   hashes = [
     "h1:a14TKo7Xvg4W8+H1VA6p+oLZTLxVQnYUD8LOaOs14A8=",
+    "h1:l+dm3lhmu4ys7GbvIldfn544olSPH0DOiYruuFSfQkY=",
     "zh:021748b5ea3b5f6956f2e75c42c5cdc113b391fb98ac71364a4965d23b37000f",
     "zh:3b27956f8541d46704fda234e0d535c2ae2a4b33411848b1ee262a1ec03568b0",
     "zh:3de4ed47d6d0f4d8edba4a5092c7c9799950eda63989d8d0d2586e6afcb0aa20",
@@ -130,6 +136,7 @@ provider "registry.terraform.io/hashicorp/random" {
   constraints = ">= 2.2.0, >= 3.6.0"
   hashes = [
     "h1:OO+IuvQJSPmWdN8AyyIEvPJbLvDQpgX/zbktoa9KsJE=",
+    "h1:UlBuNVuCGJ39tTv2c5gz2NRZnQbXfbIWbTzWcth5o74=",
     "zh:161ad0bd9a75768c82f53fb6e7172a9d8be2d4889b012645a34795031aaf1bf1",
     "zh:19dc9a5b17729725ccfc4f45b0500af0ee5bc6b6b160c7adb8f2bf617d2c80ea",
     "zh:269eda8fe42daa7974d5a34d166c3ba9defe80cde86c01e4dadcfdf2e1f05e5f",
@@ -151,6 +158,7 @@ provider "registry.terraform.io/hashicorp/time" {
   constraints = ">= 0.5.0"
   hashes = [
     "h1:/hlxsUpuN/lvPTNL9+NyVGsOyRsK5NsxwFMsj5CdOp4=",
+    "h1:4EThC3ocCFiFPMZQSUvSGSxoJqBcGWxMcFYmL67uS7Y=",
     "zh:12abfd6b800e4d7fa6db7310dec8ffd440b31993861ef188c7ed5260b3073937",
     "zh:23005521e800bb19e1597bf755c5f70d675d30b685d4255001ed5fa47d9df3f1",
     "zh:2fea249b582ae97cd1cc10385187ea50993bb47c28cc5df0305e57ceaabf0a10",
@@ -197,6 +205,7 @@ provider "registry.terraform.io/jianyuan/sentry" {
   constraints = "0.15.4"
   hashes = [
     "h1:3/hzlVdIzamZu6CWTAcHfGTDqla0xm3T8IJifRoUyk0=",
+    "h1:V9zQDnO6OvHH9v80KRAanhNsNByuE02eDfFkl/VyMe4=",
     "zh:028d879f7176806245ed4979aceae9566c367598aee5e3aafec366f8786908a0",
     "zh:096dec2a93bfeac1e598a3fe8123c908405e46d0c14617a2c1e70219d1f82268",
     "zh:0dde99e7b343fa01f8eefc378171fb8621bedb20f59157d6cc8e3d46c738105f",
@@ -218,6 +227,7 @@ provider "registry.terraform.io/mastercard/restapi" {
   version     = "3.0.0"
   constraints = ">= 2.0.1"
   hashes = [
+    "h1:Fqxoc6bsydl6iWGx6ZvyqUDdGt7Cb4sW/BSHhBeHGgw=",
     "h1:y1I3azDHOqRySTyDHsb3Xh1waP/99KfykZRagbRx1qI=",
     "zh:0b63bd3c25a31f090a41933f90b7dd6e984add1c4261d8f5caa73f4d5aa065a4",
     "zh:1c3e89cf19118fc07d7b04257251fc9897e722c16e0a0df7b07fcd261f8c12e7",

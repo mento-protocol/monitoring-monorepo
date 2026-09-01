@@ -391,7 +391,7 @@ try {
   );
   assert(
     productionInfraContract.steps.some(
-      (step) => step.uses === "./.github/actions/pnpm-install",
+      (step) => step.uses === "$/.github/actions/pnpm-install",
     ),
     "production-infra-contract must install dependencies locally",
   );
@@ -401,7 +401,7 @@ try {
       "node scripts/check-agent-quality-gate-package-scripts.mjs",
   );
   const productionInfraInstallIndex = productionInfraContract.steps.findIndex(
-    (step) => step.uses === "./.github/actions/pnpm-install",
+    (step) => step.uses === "$/.github/actions/pnpm-install",
   );
   assert.equal(
     productionInfraValidatorIndex,

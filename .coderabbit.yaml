@@ -30,6 +30,44 @@ reviews:
   auto_apply_labels: false
   collapse_walkthrough: true
 
+  # Evidence for dashboard size guidance:
+  # - PRs #2115 and #2143 repeated the same invalid max-lines finding on
+  #   dashboard tests. CodeRabbit withdrew both after reading the test exemptions.
+  # - PR #2142 counted physical lines. CodeRabbit withdrew the finding after the
+  #   repository's effective-line count showed 540 lines.
+  # Canonical sources: `ui-dashboard/AGENTS.md`,
+  # `ui-dashboard/eslint.config.mjs`, and
+  # `docs/pr-checklists/recurring-review-patterns.md`. Revalidate this
+  # instruction if the package line budgets, effective-line calculation,
+  # merge-base drift rule, or exemptions change.
+  #
+  # Evidence for gate lifecycle guidance:
+  # - PR #2075 inferred execution order from mapper insertion order.
+  # - PR #2131 inferred settlement order from the deferred release site.
+  # CodeRabbit withdrew both after tracing the executor and focused tests.
+  # Canonical source: `docs/notes/agent-quality-gate-mechanics.md`. Revalidate
+  # this instruction if execution phases, command classification, or settlement
+  # ownership change.
+  #
+  # Canary after a human-approved merge: observe at least 40 eligible PRs and
+  # five applicable findings per instruction. Remove an instruction immediately
+  # if independent evidence shows that it suppressed a valid defect.
+  path_instructions:
+    - path: "ui-dashboard/src/**/*.{ts,tsx}"
+      instructions: |
+        Apply the file-size policy in `ui-dashboard/AGENTS.md` and `ui-dashboard/eslint.config.mjs`.
+        Count effective lines after excluding blank lines and comments.
+        Treat 600 effective lines as the soft review threshold and 1,000 effective lines as the lint cap.
+        Do not apply these thresholds to `ui-dashboard/src/lib/__generated__/**`, `**/__tests__/**`, `**/*.test.{ts,tsx}`, or `ui-dashboard/src/lib/types.ts`.
+        Compare the effective count with the merge base. Do not request a split when the change reduces an already-over-threshold file.
+        Do not request a split only from the physical line count. Report threshold drift only when the change grows a file that remains above policy; report a separate cohesion defect independently.
+    - path: "scripts/{agent-quality-gate.sh,agent-quality-gate.test.sh,gate/**/*.{c,mjs,sh}}"
+      instructions: |
+        Apply the execution and settlement model in `docs/notes/agent-quality-gate-mechanics.md`.
+        Before reporting an ordering or lifecycle defect, trace route mapping through executor phases, command classification, settlement ownership, and the focused regression tests.
+        Mapper insertion order and the location of a deferred cleanup call do not prove runtime order.
+        Report an ordering or lifecycle finding when the trace shows a documented lifecycle invariant violation, such as a bypassed prerequisite, duplicate execution, deadlock, incorrect ownership, or missed settlement, or when focused coverage no longer reaches the changed path.
+
   # Generated, vendored, and machine-written trees. Reviewing them spends
   # reviewed-file capacity (the Pro+ fair-usage ladder is finite; no usage-based
   # add-on is enabled) on diffs no human authored.

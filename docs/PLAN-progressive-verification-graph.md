@@ -3,7 +3,7 @@ title: Simple Verification System Plan
 status: active
 owner: eng
 canonical: false
-last_verified: 2026-08-30
+last_verified: 2026-09-01
 doc_type: plan
 scope: repo-wide
 review_interval_days: 180
@@ -477,14 +477,23 @@ to the default-branch `GITHUB_SHA`, not the candidate input SHA. Publishing a
 candidate-head context would need the separate status-writer authority that
 this design excludes. The run cannot satisfy pull request readiness.
 
-Give validation jobs read-only permissions, no secrets, and restore-only
-protected-`main` caches. Never let the candidate change the workflow
-definition, command set, cache authority, run name, or display name. A moved
-pull request head makes the recorded result historical.
+Give validation jobs read-only permissions and no secrets. The initial cold
+proof disables persistent cache reads and writes. Never let the candidate
+change the workflow definition, command set, cache authority, run name, or
+display name. A moved pull request head makes the recorded result historical.
 
-This issue records the contract only. A later issue adds the workflow after a
-human approves the 45-runner-minute per-run recommendation, the 450-minute
-initial total, and the stop conditions.
+M4 adds the manual protected-`main` dispatcher and reuses `ci.yml` through a
+same-commit workflow call. The caller passes the admitted source and base SHAs.
+The called workflow resolves its local actions from the running protected
+commit. It bypasses change selection, forces every conditional job, checks out
+the candidate by full SHA in each executing job, and rejects every job skip in
+the audit aggregate. It normalizes ESLint baselines, React Doctor, Peg policy
+lineage, the ADR reminder, and Terraform selection to the admitted base.
+
+M4 does not add a schedule and does not run the shadow. The approved later
+execution ceiling is 45 runner-minutes per run and 450 runner-minutes total.
+The eligible cold proof counts as one sampled pull request. Stop after any run
+exceeds 45 runner-minutes or before cumulative use would exceed 450 minutes.
 
 ## Cache Policy
 
@@ -799,9 +808,40 @@ not publish a candidate-head pull request context or create a second job named
 `ci`. Keep the existing `CI / ci` implementation and required context
 unchanged.
 
+The M4 implementation pull request adds only the manual lane. Its protected
+dispatcher admits an open same-repository pull request only when the supplied
+source SHA is still its head and the supplied base SHA is still protected
+`main`. The reusable CI call skips the mutable path selector, forces all fixed
+jobs, uses a zero-skip aggregate, and runs candidate commands from exact source
+checkouts. The audit caller forwards no repository or environment secrets.
+Called jobs still receive GitHub's scoped read-only `GITHUB_TOKEN`. Codecov,
+failure artifacts, and post-candidate timeline actions do not run. The workflow
+disables every known pnpm, Playwright, Foundry, and Turbo persistent cache read,
+save, and post hook.
+
+GitHub gives `workflow_dispatch` jobs cache-service authority outside the
+`permissions` map. M4 cannot sandbox hostile same-repository candidate code that
+calls that service directly. Same-repository admission and the trusted-
+contributor threat model bound this residual. The cold proof establishes no
+cache use by the reviewed workflow and tool paths. It does not establish a
+general cache-service sandbox.
+
+The M4 pull request does not dispatch the lane, add a schedule, change required
+contexts, change rulesets, or alter the mandatory local gate. The first eligible
+cold proof runs only after M4 merges. It counts as one of the ten sampled pull
+requests if it meets the sample rules.
+
+The M4 phase-scoped complexity manifest records every changed control-plane
+path relative to its protected-main base. It is an additive implementation
+receipt. It is not a shadow-run evidence format and makes no cutover claim.
+
 Add a scheduled no-skip run only after the cold cost measurement passes and a
 human approves the spend ceiling. Register the schedule in the existing
 notifier coverage.
+
+The approved execution ceiling is 45 runner-minutes for one run and 450
+runner-minutes for the initial sample. Stop after a run exceeds 45 minutes.
+Do not start another run when it could exceed the cumulative ceiling.
 
 Run the existing path-gated CI and the distinct no-skip shadow on selected pull
 request heads. Compare at least one recorded head from each of at least 10
