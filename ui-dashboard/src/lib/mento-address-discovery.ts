@@ -65,7 +65,14 @@ async function fetchDistinctAddresses(
       // failure so discoverMentoAddresses can still fail an endpoint-wide
       // fault rather than reporting an empty run as a healthy one.
       Sentry.captureException(err, {
-        tags: { table, field, source: "hasura", degraded: "partial-pages" },
+        tags: {
+          table,
+          field,
+          source: "hasura",
+          // Separate the two shapes on-call has to tell apart: a target that
+          // died on its first page contributed nothing at all.
+          degraded: page > 0 ? "partial-pages" : "no-pages",
+        },
         extra: { page, addressesCollected: all.size },
       });
       failed = true;
@@ -120,17 +127,15 @@ export async function discoverMentoAddresses(
 
   // Any address the walk did collect is worth returning, however many targets
   // degraded getting it — the per-target Sentry reports carry that detail.
-  // Every target failing with nothing to show for it is the different case an
-  // endpoint-wide fault (auth, schema, network) produces: an empty success
-  // here is indistinguishable from "nothing to discover", so it would give
+  // An empty result is the case that needs care: it is a legitimate answer
+  // only when nothing failed. Reached with failures in it — an endpoint-wide
+  // fault (auth, schema, network) being the usual cause — it is
+  // indistinguishable from "nothing to discover", so returning it would give
   // the cron a healthy check-in for a run that read no data at all.
-  if (
-    all.size === 0 &&
-    found.length > 0 &&
-    found.every((walk) => walk.failed)
-  ) {
+  const failedTargets = found.filter((walk) => walk.failed).length;
+  if (all.size === 0 && failedTargets > 0) {
     throw new Error(
-      `[mento-address-discovery] all ${found.length} discovery targets failed`,
+      `[mento-address-discovery] discovered nothing; ${failedTargets}/${found.length} targets failed`,
     );
   }
 
