@@ -52,6 +52,7 @@ Options:
 
 --since and --until must be supplied together and define [since, until).
 UTC timestamps must be RFC 3339 values ending in Z.
+Unstructured finding prose classification fails closed above 256 labels or a 4,096-character labeled context.
 `;
 }
 
@@ -334,7 +335,6 @@ function fetchMergedPrList(repo) {
     .items.filter((pr) => pr.merged_at)
     .map(mapPullRequestFromRest);
 }
-
 export function assertPullRequestMetadata(
   pr,
   number,
@@ -343,17 +343,40 @@ export function assertPullRequestMetadata(
   if (pr?.number !== number) {
     throw new Error(`pull request metadata mismatch for #${number}`);
   }
-  if (requireMerged && !pr.merged_at) {
+  if (pr.state !== "open" && pr.state !== "closed") {
+    throw new Error(`pull request #${number} has invalid state metadata`);
+  }
+  const mergedAt = pr.merged_at;
+  if (
+    mergedAt !== null &&
+    (typeof mergedAt !== "string" || !Number.isFinite(Date.parse(mergedAt)))
+  ) {
+    throw new Error(`pull request #${number} has invalid merged_at metadata`);
+  }
+  if (pr.state === "open" && mergedAt !== null) {
+    throw new Error(`pull request #${number} has inconsistent open metadata`);
+  }
+  if (requireMerged && mergedAt === null) {
     throw new Error(`pull request #${number} is not merged`);
   }
   return pr;
 }
-
 export function assertOpenPullRequestSnapshotStable(initial, final, number) {
   assertPullRequestMetadata(initial, number);
   assertPullRequestMetadata(final, number);
   const initialHead = initial.head?.sha;
   const finalHead = final.head?.sha;
+  const initialUpdatedAt = initial.updated_at;
+  const finalUpdatedAt = final.updated_at;
+  const countFields = ["comments", "review_comments", "commits"];
+  const countsAreStable = countFields.every(
+    (field) =>
+      Number.isSafeInteger(initial[field]) &&
+      initial[field] >= 0 &&
+      Number.isSafeInteger(final[field]) &&
+      final[field] >= 0 &&
+      initial[field] === final[field],
+  );
   if (
     initial.merged_at !== null ||
     final.merged_at !== null ||
@@ -361,7 +384,13 @@ export function assertOpenPullRequestSnapshotStable(initial, final, number) {
     final.state !== "open" ||
     !GIT_OBJECT_ID.test(initialHead ?? "") ||
     !GIT_OBJECT_ID.test(finalHead ?? "") ||
-    initialHead !== finalHead
+    initialHead !== finalHead ||
+    typeof initialUpdatedAt !== "string" ||
+    !Number.isFinite(Date.parse(initialUpdatedAt)) ||
+    typeof finalUpdatedAt !== "string" ||
+    !Number.isFinite(Date.parse(finalUpdatedAt)) ||
+    initialUpdatedAt !== finalUpdatedAt ||
+    !countsAreStable
   ) {
     throw new Error(`pull request #${number} changed during collection`);
   }
@@ -422,7 +451,7 @@ function fetchPrEvidence(repo, number, collectedAt, options) {
     sourceLimit: PULL_REQUEST_COMMITS_LIMIT,
     id: (commit) => commit.sha,
   });
-  if (pr.merged_at === null) {
+  if (pr.state === "open") {
     assertOpenPullRequestSnapshotStable(
       pr,
       fetchPrMetadata(repo, number, options),

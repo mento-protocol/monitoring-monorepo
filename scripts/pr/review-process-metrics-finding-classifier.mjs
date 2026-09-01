@@ -1,6 +1,11 @@
-import { maskMarkdownNonProse } from "./review-process-metrics-markdown.mjs";
-
-const FINDING_LABEL_SOURCE = String.raw`(?:\[[Pp][0-3]\]|\b[Pp][0-3]\s+Badge\b|\b(?:critical|high|medium|low)\s+severity\b|\bchanges requested\b)`;
+import { parseMarkdownEvidence } from "./review-process-metrics-markdown.mjs";
+import {
+  botSpecificFindingSignal,
+  boundedFindingProse,
+} from "./review-process-metrics-finding-preflight.mjs";
+const FINDING_LABEL_SOURCE = String.raw`(?:\[[Pp][0-3]\]|\b[Pp][0-3]\s+Badge\b|\b(?:critical|high|medium|low)\s+severity\b|\bchanges\s+requested\b)`;
+const FINDING_LABEL = new RegExp(FINDING_LABEL_SOURCE, "i");
+const FINDING_HINT = /\b(?:p[0-3]|critical|high|medium|low|changes)\b/i;
 const FINDING_LABEL_SEPARATOR_SOURCE = String.raw`(?:,\s*(?:and|or|nor)\b|[/,&]|\b(?:and|or|nor)\b)`;
 const FINDING_LABEL_LIST_SOURCE = String.raw`${FINDING_LABEL_SOURCE}(?:\s*${FINDING_LABEL_SEPARATOR_SOURCE}\s*${FINDING_LABEL_SOURCE})*`;
 const COMPRESSED_SEVERITY_LABEL_LIST_SOURCE = String.raw`\b(?:critical|high|medium|low)\b(?:\s*${FINDING_LABEL_SEPARATOR_SOURCE}\s*\b(?:critical|high|medium|low)\b)*\s+severity\b`;
@@ -18,10 +23,8 @@ const EMPTY_FINDING_SUFFIX_ENTRY_SOURCE = String.raw`${FINDING_LABEL_GROUP_SOURC
 const EMPTY_FINDING_ENTRY_SOURCE = String.raw`(?:${EMPTY_FINDING_PREFIX_ENTRY_SOURCE}|${EMPTY_FINDING_SUFFIX_ENTRY_SOURCE})`;
 const EMPTY_FINDING_ENTRY_SEPARATOR_SOURCE = String.raw`(?:,\s*(?:and|or|nor)\b|[—–,/&\-]|\b(?:and|or|nor)\b)`;
 const EMPTY_FINDING_ENTRY = new RegExp(EMPTY_FINDING_ENTRY_SOURCE, "iy");
-const EMPTY_FINDING_ENTRY_SEPARATOR = new RegExp(
-  EMPTY_FINDING_ENTRY_SEPARATOR_SOURCE,
-  "iy",
-);
+// prettier-ignore
+const EMPTY_FINDING_ENTRY_SEPARATOR = new RegExp(EMPTY_FINDING_ENTRY_SEPARATOR_SOURCE, "iy");
 const NEGATED_COPULA_PREFIX = /\b(?:none|neither)\s+(?:are|is|was|were)\s*$/i;
 const NEGATED_FINDING_SUBJECT_PREFIX =
   /\b(?:no\s+(?:findings?|issues?|defects?|problems?|concerns?)|none\s+of\s+(?:the\s+)?(?:findings?|issues?|defects?|problems?|concerns?)|neither\s+(?:finding|issue|defect|problem|concern)s?)\s+(?:are|is|was|were|has|have|had)(?:\s+(?:of|rated|classified\s+as|marked|labelled|labeled|considered(?:\s+to\s+be)?))?\s*$/i;
@@ -29,14 +32,10 @@ const NEGATED_REVIEW_RESULT_PREFIX =
   /^(?:(?:[-+•>]|#{1,6})\s+)*(?:(?:overall|in\s+summary|in\s+this\s+review|after\s+(?:the\s+)?review)\s*,\s*)?(?:(?:(?:i|we)|the\s+(?:review|report|scan|analysis|reviewer|bot|model))\s+(?:(?:(?:did|do|does|has|have|had|could|would|should|ca)n['’]t|(?:did|do|does|has|have|had|could|would|should|can)\s+not|cannot|never)\s+(?:find|found|report|reported|identify|identified|detect|detected|flag|flagged|show|shown|contain|contained)(?:\s+(?:any(?:\s+of\s+the)?|a|an|the\s+following\s+(?:findings?|issues?)(?:\s+claimed\s+by\s+the\s+analyzer)?\s*:))?)|(?:didn['’]t|never)\s+(?:find|found|identify|identified|detect|detected|flag|flagged)(?:\s+(?:any(?:\s+of\s+the)?|a|an))?|there\s+(?:is|are|was|were)(?:n['’]t|\s+not)(?:\s+(?:any|a|an))?)$/i;
 const NEGATED_COPULAR_CLASSIFICATION_PREFIX =
   /^(?:this|that|it|the\s+(?:issues?|findings?|defects?|problems?|changes?))\s+(?:(?:is|are|was|were)\s+not|(?:is|are|was|were)n['’]t)(?:\s+(?:a|an))?$/i;
-const NEGATED_FINDING_SUFFIX = new RegExp(
-  String.raw`^\s*(?:${NEGATED_FINDING_NOUN_SOURCE})?${EMPTY_FINDING_ABSENCE_TAIL_SOURCE}(?:\s+at\s+all)?(?:\s+in\s+(?:this|the)\s+(?:review|report|scan|analysis|release|change|pull\s+request|PR))?\s*[,—–-]?\s*$`,
-  "i",
-);
-const EMPTY_FINDING_TABLE_CELL = new RegExp(
-  String.raw`^(?:(?:${ZERO_COUNT_SOURCE}|zero|none)(?:\s+${EMPTY_FINDING_NOUN_SOURCE})?|no\s+${EMPTY_FINDING_NOUN_SOURCE})$`,
-  "i",
-);
+// prettier-ignore
+const NEGATED_FINDING_SUFFIX = new RegExp(String.raw`^\s*(?:${NEGATED_FINDING_NOUN_SOURCE})?${EMPTY_FINDING_ABSENCE_TAIL_SOURCE}(?:\s+at\s+all)?(?:\s+in\s+(?:this|the)\s+(?:review|report|scan|analysis|release|change|pull\s+request|PR))?\s*[,—–-]?\s*$`, "i");
+// prettier-ignore
+const EMPTY_FINDING_TABLE_CELL = new RegExp(String.raw`^(?:(?:${ZERO_COUNT_SOURCE}|zero|none)(?:\s+${EMPTY_FINDING_NOUN_SOURCE})?|no\s+${EMPTY_FINDING_NOUN_SOURCE})$`, "i");
 const FINDING_TABLE_COUNT_CELL = new RegExp(
   String.raw`^(?:\d+(?:\.\d+)?|zero|one|two|three|four|five|six|seven|eight|nine)(?:\s+${EMPTY_FINDING_NOUN_SOURCE})?$`,
   "i",
@@ -59,7 +58,8 @@ const EMPTY_FINDING_TRAILING_CLAUSE = new RegExp(
 function normalizeFindingSummary(value) {
   return String(value ?? "")
     .replace(new RegExp(String.raw`\`(${FINDING_LABEL_SOURCE})\``, "gi"), "$1")
-    .replace(/[*_~]/g, "");
+    .replace(/[*_~]/g, "")
+    .replace(/[ \t]+/g, " ");
 }
 function isEmptyFindingSummary(value) {
   const normalized = normalizeFindingSummary(value)
@@ -85,7 +85,6 @@ function isEmptyFindingSummary(value) {
   }
   return false;
 }
-
 function isNegatedFindingPrefix(value, suffix) {
   const normalized = normalizeFindingSummary(value).trim();
   return Boolean(
@@ -96,7 +95,6 @@ function isNegatedFindingPrefix(value, suffix) {
     NEGATED_FINDING_SUFFIX.test(normalizeFindingSummary(suffix)),
   );
 }
-
 function isValidFindingTableTail(cells, startIndex) {
   let index = startIndex;
   while (index < cells.length) {
@@ -108,15 +106,10 @@ function isValidFindingTableTail(cells, startIndex) {
       continue;
     }
     if (
-      FINDING_TABLE_LABEL_CELL.test(cells[index]) &&
-      FINDING_TABLE_COUNT_CELL.test(cells[index + 1] ?? "")
-    ) {
-      index += 2;
-      continue;
-    }
-    if (
-      FINDING_TABLE_COUNT_CELL.test(cells[index]) &&
-      FINDING_TABLE_LABEL_CELL.test(cells[index + 1] ?? "")
+      (FINDING_TABLE_LABEL_CELL.test(cells[index]) &&
+        FINDING_TABLE_COUNT_CELL.test(cells[index + 1] ?? "")) ||
+      (FINDING_TABLE_COUNT_CELL.test(cells[index]) &&
+        FINDING_TABLE_LABEL_CELL.test(cells[index + 1] ?? ""))
     ) {
       index += 2;
       continue;
@@ -125,7 +118,6 @@ function isValidFindingTableTail(cells, startIndex) {
   }
   return true;
 }
-
 function isEmptyFindingTableRow(value, occurrence) {
   const normalized = normalizeFindingSummary(value).trim();
   if (!normalized.includes("|")) return false;
@@ -133,8 +125,7 @@ function isEmptyFindingTableRow(value, occurrence) {
     .split("|")
     .map((cell) => cell.trim())
     .filter(Boolean);
-  const normalizedOccurrence =
-    normalizeFindingSummary(occurrence).toLowerCase();
+  const needle = normalizeFindingSummary(occurrence).toLowerCase();
   const prefixCountPairs =
     cells.length % 2 === 0 &&
     cells.every((cell, index) =>
@@ -152,7 +143,7 @@ function isEmptyFindingTableRow(value, occurrence) {
           EMPTY_FINDING_TABLE_CELL.test(cell),
     );
   return cells.some((cell, occurrenceCellIndex) => {
-    if (!cell.toLowerCase().includes(normalizedOccurrence)) return false;
+    if (!cell.toLowerCase().includes(needle)) return false;
     if (prefixCountPairs && occurrenceCellIndex % 2 === 1) {
       return EMPTY_FINDING_TABLE_CELL.test(cells[occurrenceCellIndex - 1]);
     }
@@ -179,7 +170,6 @@ function isEmptyFindingTableRow(value, occurrence) {
     );
   });
 }
-
 function hasEmptyEntryBoundaryBefore(value) {
   const trimmed = value.trimEnd();
   if (!trimmed || /^(?:(?:[-+•>]|#{1,6})\s*)+$/.test(trimmed)) return true;
@@ -188,7 +178,6 @@ function hasEmptyEntryBoundaryBefore(value) {
     /(?:[,/&—–]|\b(?:and|or|nor))\s*$/i.test(value) || /-\s+$/u.test(value)
   );
 }
-
 function hasEmptyEntryBoundaryAfter(value) {
   if (!value.trim()) return true;
   const separator = value.match(
@@ -202,7 +191,6 @@ function hasEmptyEntryBoundaryAfter(value) {
     EMPTY_FINDING_TRAILING_CLAUSE.test(remainder)
   );
 }
-
 function isEmptyFindingOccurrence(prefix, occurrence, suffix) {
   const normalizedPrefix = normalizeFindingSummary(prefix);
   const normalizedOccurrence = normalizeFindingSummary(occurrence);
@@ -224,44 +212,125 @@ function isEmptyFindingOccurrence(prefix, occurrence, suffix) {
     );
   });
 }
-
 const FINDING_CLAUSE_BOUNDARY =
   /(?<!\d)\.|\.(?!\d)|[!?;\n]|\b(?:although|but|however|yet)\b/i;
-
-function affirmativeOccurrence(body, pattern) {
+const PRIORITY_CLAUSE_BOUNDARY =
+  /(?<!\d)\.|\.(?!\d)|[!?;\n]|\b(?:although|but|however|yet)\b(?!\s+(?:(?:\[[Pp][0-3]\]|\b[Pp][0-3]\s+Badge\b)|(?:only\s+)?(?:\d+(?:\.\d+)?|no|none|a|an|zero|one|two|three|four|five|six|seven|eight|nine)\s+(?:\[[Pp][0-3]\]|\b[Pp][0-3]\b(?:\s+Badge)?)|(?:(?:(?:it|this|that|the|these|those|they|both)(?:\s+(?:findings?|issues?|defects?|problems?|concerns?|errors?|observations?|comments?|items?|recommendations?|counts?|entries?|fixtures?|examples?|samples?|test\s+cases?))?\s+(?:is|are|was|were)\s+(?:(?:(?:only|just|merely|solely)\s+)?(?:used|included|shown)\s+(?:(?:only|just|merely|solely)\s+)?(?:as|in)\s+|(?:(?:only|just|merely|solely)\s+)?(?:covered|expected)\s+(?:(?:only|just|merely|solely)\s+)?by\s+|(?:(?:only|just|merely|solely)\s+)?)|(?:it|this|that|the|these|those|they|both)(?:\s+(?:findings?|observations?|comments?|items?|recommendations?|counts?|entries?|fixtures?|examples?|samples?|test\s+cases?))?\s+(?:(?:appears?|occurs?|exists?)\s+(?:(?:only|just|merely|solely)\s+in\s+|in\s+(?:only|just|merely|solely)\s+|in\s+(?=[^.!?;\n]*\b(?:only|just|merely|solely)\s*(?:[.!?;\n]|$)))|(?:only|just|merely|solely)\s+(?:appears?|occurs?|exists?)\s+in\s+)|(?:only|just|merely|solely)\s+as\s+)(?:(?:an?|the|this|that|these|those)\s+)?(?:(?:(?:parser|test|fixture|example|sample)\s+)*(?:fixtures?|examples?|samples?|tests?|test\s+cases?)|(?:(?:parser|test|fixture|example|sample)\s+)+data)\b(?:\s+(?:(?:used|included|shown)\s+in\s+(?:the\s+)?(?:tests?|fixtures?)|for\s+(?:(?:parser|test)\s+)?coverage))?(?:\s+(?:only|just|merely|solely))?(?=\s*(?:[.!?;\n]|$)))))/i;
+function affirmativeOccurrence(body, pattern, isSupported = () => true) {
   const text = String(body ?? "");
-  const match = [...text.matchAll(pattern)].find((candidate) => {
+  const priority = pattern === PRIORITY_SIGNAL;
+  // prettier-ignore
+  const boundary = priority ? PRIORITY_CLAUSE_BOUNDARY : FINDING_CLAUSE_BOUNDARY;
+  for (const candidate of text.matchAll(pattern)) {
     const matchIndex = candidate.index ?? 0;
     const matchEnd = matchIndex + candidate[0].length;
-    const prefix =
+    let prefix =
       text.slice(0, matchIndex).split(FINDING_CLAUSE_BOUNDARY).at(-1) ?? "";
-    const suffix = text.slice(matchEnd).split(FINDING_CLAUSE_BOUNDARY)[0] ?? "";
-    return (
+    const suffix = text.slice(matchEnd).split(boundary)[0] ?? "";
+    const full = priority
+      ? (text.slice(matchEnd).split(/(?<!\d)\.|\.(?!\d)|[!?\n]/)[0] ?? suffix)
+      : suffix;
+    if (priority) {
+      const context = text.slice(0, matchEnd).split(boundary).at(-1) ?? "";
+      const broader = context.slice(0, -candidate[0].length);
+      if (PRIORITY_COUNTED_ENTRY.test(broader))
+        prefix =
+          priorityCountContextValue(prefix, suffix) === null ? prefix : broader;
+    }
+    if (
+      isSupported(prefix, suffix, full) &&
       !isNegatedFindingPrefix(prefix, suffix) &&
-      !isEmptyFindingOccurrence(prefix, candidate[0], suffix)
-    );
-  });
-  return match?.[0] ?? null;
+      !isEmptyFindingOccurrence(prefix, candidate[0], full)
+    ) {
+      return normalizeFindingSummary(candidate[0]).trim();
+    }
+  }
+  return null;
 }
-
-function affirmativeChangesRequested(body) {
-  return affirmativeOccurrence(body, /\bchanges requested\b/gi);
+// prettier-ignore
+const affirmativeChangesRequested = (body) => affirmativeOccurrence(body, /\bchanges\s+requested\b/gi), affirmativeSeverity = (body) => affirmativeOccurrence(body, /\b(?:critical|high|medium|low)\s+severity\b/gi);
+const PRIORITY_SIGNAL = /(?:\[[Pp][0-3]\]|\b[Pp][0-3]\s+Badge\b)/gi;
+const PRIORITY_COUNT_NUMBER_SOURCE = String.raw`(?:\d+(?:\.\d+)?|no|none|a|an|zero|one|two|three|four|five|six|seven|eight|nine)`;
+const PRIORITY_FINDING_NOUN_SOURCE = String.raw`(?:${EMPTY_FINDING_NOUN_SOURCE}|observations?|comments?|items?|recommendations?)`;
+const PRIORITY_BOUNDED_STATUS_SOURCE = String.raw`(?:remains?(?:\s+(?:unresolved|open|actionable|confirmed))?|exists?|persists?|(?:is|are|was|were)\s+(?:still\s+)?(?:present|unresolved|open|actionable|confirmed|found|reported|identified|detected|flagged|noted)|(?:found|reported|identified|detected|flagged|noted)|requires?\s+(?:a\s+)?fix|must\s+be\s+(?:addressed|fixed|resolved))`;
+const FIXTURE_META_SOURCE = String.raw`(?:(?:(?:only|just|merely|solely)\s+(?:in|as)\s+|(?:in|as)\s+)(?:(?:parser|test|fixture|example|sample)\s+)*(?:fixtures?|examples?|samples?|tests?|test\s+cases?|data)(?:\s+(?:only|just|merely|solely))?|for\s+(?:(?:parser|test)\s+)?coverage|(?:it|this|that|the|these|those|they|all|both|each)(?:\s+(?:findings?|issues?|defects?|problems?|concerns?|errors?|observations?|comments?|items?|recommendations?|counts?|entries?))?\s+(?:(?:is|are|was|were)\s+(?:(?:only|just|merely|solely)\s+)?(?:(?:used|included|shown)\s+(?:(?:only|just|merely|solely)\s+)?(?:in|as)\s+)?|(?:(?:only|just|merely|solely)\s+)?(?:appears?|occurs?|exists?)\s+(?:(?:only|just|merely|solely)\s+)?in\s+)(?:(?:parser|test|fixture|example|sample)\s+)*(?:fixtures?|examples?|samples?|tests?|test\s+cases?|data)(?:\s+(?:only|just|merely|solely))?)`;
+// prettier-ignore
+const PRIORITY_BOUNDED_STATUS = new RegExp(String.raw`\b${PRIORITY_BOUNDED_STATUS_SOURCE}\b`, "iu");
+const META_TAIL = new RegExp(String.raw`${FIXTURE_META_SOURCE}\s*$`, "iu");
+const COPULAR_REPRESENTATIONAL_META_TAIL =
+  /\b(?:it|this|that|the|these|those|they|all|both|each)(?:\s+(?:findings?|issues?|defects?|problems?|concerns?|errors?|observations?|comments?|items?|recommendations?|counts?|entries?))?\s+(?:is|are|was|were)\s+(?:(?:only|just|merely|solely)\s+)?(?:(?:used|included|shown)\s+(?:(?:only|just|merely|solely)\s+)?(?:in|as)\s+)?(?:(?:an?|the|this|that|these|those)\s+)?(?:(?:parser|test|fixture|example|sample)\s+)*(?:fixtures?|examples?|samples?|tests?|test\s+cases?|data)\b(?:\s+(?:used|included|shown)\s+in\s+(?:the\s+)?(?:tests?|fixtures?)|\s+for\s+(?:(?:parser|test)\s+)?coverage)?(?:\s+(?:only|just|merely|solely))?\s*$/i;
+const COUNT_SERIES_SEPARATOR_SOURCE = String.raw`(?:(?:[,—–-]\s*)?(?:although|but|however|yet)\s+|,\s*(?:(?:and|or|nor)\s*)?|[;/&—–-]\s*|\b(?:and|or|nor)\b\s*)`;
+const PRIORITY_FINDING_ENTRY_PREFIX =
+  /^(?:\s*(?:(?:[-+•>]|#{1,6})\s+)*(?:\d+[.)]\s+)?(?:\[[ xX]\]\s+)?(?:["'(“‘]\s*)?(?:(?:review\s+)?(?:findings?|issues?|defects?|problems?|concerns?|errors?)(?:\s+#?\d+)?\s*(?::|[—–-])\s*)?|\s*\|(?:[^|\n]*\|)*\s*)$/i;
+const PRIORITY_COUNT_INTRO_SOURCE = String.raw`(?:(?:there\s+(?:are|is|was|were)|(?:i|we)\s+(?:found|reported)|the\s+(?:review|report|scan|analysis)\s+(?:found|reported|contains?|has|have)|this\s+(?:(?:review|report|scan|analysis)\s+)?(?:contains?|has|reports?))\s+)?`;
+// prettier-ignore
+const PRIORITY_COUNT_PREFIX = new RegExp(String.raw`^\s*(?:(?:[-+•>]|#{1,6})\s+)*(?:\d+[.)]\s+)?(?:\[[ xX]\]\s+)?(?:["'(“‘]\s*)?(?:(?:findings?|summary|counts?|results?|review\s+(?:summary|results))\s*:\s*)?${PRIORITY_COUNT_INTRO_SOURCE}(?:only\s+)?(${PRIORITY_COUNT_NUMBER_SOURCE})\s*$`, "iu");
+const PRIORITY_COUNTED_NOUN_SUFFIX = new RegExp(
+  String.raw`^(?:\s*${PRIORITY_FINDING_NOUN_SOURCE}\b(?:\s+${PRIORITY_BOUNDED_STATUS_SOURCE})?\s*,?\s*|\s*(?:issues?|defects?|problems?|concerns?|errors?)\b\s+${PRIORITY_BOUNDED_STATUS_SOURCE}\s*(?:[,—–-]\s*)?(?:although|but|however|yet)\s+(?:it|this|that|they)\s+(?:(?:only|just|merely|solely)\s+)?(?:appears?|occurs?|exists?)\b[^.!?;\n]*)$`,
+  "iu",
+);
+const PRIORITY_LABEL_FIRST_COUNT_SUFFIX = new RegExp(
+  String.raw`^\s*(?:(?:${PRIORITY_FINDING_NOUN_SOURCE}(?:\s+(?:count|total))?\s*)?(?::|[=—–-])\s*(?:only\s+)?(${PRIORITY_COUNT_NUMBER_SOURCE})\b(?:\s+${PRIORITY_FINDING_NOUN_SOURCE})?(?:\s+${PRIORITY_BOUNDED_STATUS_SOURCE})?|\(\s*(?:only\s+)?(${PRIORITY_COUNT_NUMBER_SOURCE})(?:\s+${PRIORITY_FINDING_NOUN_SOURCE})?(?:\s+${PRIORITY_BOUNDED_STATUS_SOURCE})?\s*\)|(?:only\s+)?(${PRIORITY_COUNT_NUMBER_SOURCE})\s+${PRIORITY_FINDING_NOUN_SOURCE}\b(?:\s+${PRIORITY_BOUNDED_STATUS_SOURCE})?)\s*(?=$|${COUNT_SERIES_SEPARATOR_SOURCE}(?:\[[Pp][0-3]\]|\b[Pp][0-3]\s+Badge\b))`,
+  "iu",
+);
+// prettier-ignore
+const COUNT_META = new RegExp(String.raw`^\s*(?:(?:${PRIORITY_FINDING_NOUN_SOURCE}(?:\s+(?:count|total))?\s*)?(?::|[=—–-])\s*|\(\s*)?(?:only\s+)?(${PRIORITY_COUNT_NUMBER_SOURCE})\s+(?:(findings?|observations?|comments?|items?|recommendations?)|(?:issues?|defects?|problems?|concerns?|errors?))\b([\s\S]*)$`, "iu");
+const COUNT_CONTRAST = /(?:\b(?:although|but|however|yet)\b|;)\s*(\S[\s\S]*)$/i;
+const ZERO_COUNT_DEFECT_TAIL =
+  /^(?![^.!?;\n]*\b(?:as\s+expected|by\s+design|intentionally|(?:are|is|was|were)\s+expected)\b)[^.!?;\n]*\b(?:after|because|if|when)\b[^.!?;\n]{0,120}\b(?:crash(?:es|ed)?|fail(?:s|ed)?|failure)\b/i;
+function contextualCountValue(value) {
+  const match = COUNT_META.exec(normalizeFindingSummary(value));
+  if (!match) return null;
+  const contrast = match[3].match(COUNT_CONTRAST)?.[1] ?? null;
+  const tail = contrast ?? `it ${match[3]}`;
+  const isMeta =
+    META_TAIL.test(match[3]) ||
+    PRIORITY_CLAUSE_BOUNDARY.exec(`but ${tail}`)?.index !== 0;
+  const count = findingCountValue(match[1]);
+  if (count === 0 && ZERO_COUNT_DEFECT_TAIL.test(match[3])) return 1;
+  // prettier-ignore
+  if (isMeta && (match[2] || count === 0 || COPULAR_REPRESENTATIONAL_META_TAIL.test(match[3]))) return 0;
+  return contrast === null ? null : count || 1;
 }
-
-function affirmativeSeverity(body) {
-  return affirmativeOccurrence(
-    body,
-    /\b(?:critical|high|medium|low) severity\b/gi,
+const PRIORITY_COUNTED_ENTRY =
+  /(?:(?:only\s+)?(?:\d+(?:\.\d+)?|no|none|a|an|zero|one|two|three|four|five|six|seven|eight|nine)\s+`?(?:\[[Pp][0-3]\]|\b[Pp][0-3]\b(?:\s+Badge)?)`?|`?(?:\[[Pp][0-3]\]|\b[Pp][0-3]\b(?:\s+Badge)?)`?\s*(?:(?:findings?|issues?|defects?|problems?|concerns?|errors?|observations?|comments?|items?|recommendations?)(?:\s+(?:count|total))?\s*)?(?:(?::|[=—–-])\s*|\(\s*)(?:\d+(?:\.\d+)?|no|none|a|an|zero|one|two|three|four|five|six|seven|eight|nine)\b)/iu;
+const PRIORITY_PREVIOUS_EMPTY_ENTRY_SEPARATOR =
+  /(?:[,/&—–-]|\b(?:although|and|but|however|nor|or|yet))\s*$/i;
+function hasPriorityFindingEntryContext(prefix) {
+  const normalized = normalizeFindingSummary(prefix);
+  if (PRIORITY_FINDING_ENTRY_PREFIX.test(normalized)) return true;
+  const separator = normalized.match(PRIORITY_PREVIOUS_EMPTY_ENTRY_SEPARATOR);
+  if (!separator || separator.index === undefined) return false;
+  const previous = normalized.slice(0, separator.index);
+  if (isEmptyFindingSummary(previous)) return true;
+  const end = previous.indexOf(":") + 1;
+  if (!end || !COUNT_SERIES_PREFIX.test(previous.slice(0, end))) return false;
+  return isEmptyFindingSummary(previous.slice(end));
+}
+function priorityCountContextValue(prefix, suffix) {
+  const normalizedPrefix = normalizeFindingSummary(prefix);
+  const normalizedSuffix = normalizeFindingSummary(suffix);
+  const prefixMatch = PRIORITY_COUNT_PREFIX.exec(normalizedPrefix);
+  if (prefixMatch && PRIORITY_COUNTED_NOUN_SUFFIX.test(normalizedSuffix))
+    return findingCountValue(prefixMatch[1]);
+  const suffixMatch = PRIORITY_LABEL_FIRST_COUNT_SUFFIX.exec(normalizedSuffix);
+  const count = suffixMatch?.slice(1).find((value) => value !== undefined);
+  const supported =
+    COUNT_SERIES_PREFIX.test(normalizedPrefix) ||
+    (/\b(?:although|but|however|yet)\s*$/i.test(normalizedPrefix) &&
+      PRIORITY_BOUNDED_STATUS.test(normalizedSuffix) &&
+      !META_TAIL.test(normalizedSuffix)) ||
+    hasPriorityFindingEntryContext(prefix);
+  if (count !== undefined) return supported ? findingCountValue(count) : null;
+  return contextualCountValue(
+    prefixMatch ? `${prefixMatch[1]} ${normalizedSuffix}` : normalizedSuffix,
   );
 }
-
-function affirmativePriority(body) {
-  return affirmativeOccurrence(
-    body,
-    /(?:\[[Pp][0-3]\]|\b[Pp][0-3]\s+Badge\b)/gi,
-  );
+function supportsPriority(prefix, suffix, full) {
+  if (prefix.endsWith("!") || /^[([]/u.test(suffix)) return false;
+  const count = priorityCountContextValue(prefix, full);
+  return count === null ? hasPriorityFindingEntryContext(prefix) : count !== 0;
 }
-
 function markdownTableCells(line) {
   if (!String(line ?? "").includes("|")) return null;
   const cells = String(line)
@@ -271,25 +340,27 @@ function markdownTableCells(line) {
   if (!cells.at(-1)) cells.pop();
   return cells.length >= 2 ? cells : null;
 }
-
-function isMarkdownTableSeparator(cells) {
-  return Boolean(
-    cells?.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell)),
-  );
-}
-
+const isMarkdownTableSeparator = (cells) =>
+  Boolean(cells?.every((cell) => /^:?-{3,}:?$/.test(cell)));
 function findingLabelCellSignal(cell) {
   if (!FINDING_TABLE_LABEL_CELL.test(cell)) return null;
-  return cell.match(new RegExp(FINDING_LABEL_SOURCE, "i"))?.[0] ?? null;
+  return cell.match(FINDING_LABEL)?.[0] ?? null;
 }
-
 function findingTableCountValue(cell) {
-  const normalized = normalizeFindingSummary(cell).trim();
-  if (EMPTY_FINDING_TABLE_CELL.test(normalized)) return 0;
-  if (!FINDING_TABLE_COUNT_CELL.test(normalized)) return null;
-  return findingCountValue(normalized.split(/\s+/u)[0]);
+  let text = normalizeFindingSummary(cell).trim();
+  text = text.replace(/^only\s+/iu, "");
+  const [count] = text.split(/\s+/u);
+  if (!count) return null;
+  const value = findingCountValue(count);
+  const suffix = text.slice(count.length);
+  if (
+    !suffix.trim() ||
+    PRIORITY_COUNTED_NOUN_SUFFIX.test(suffix) ||
+    PRIORITY_COUNTED_NOUN_SUFFIX.test(`findings${suffix}`)
+  )
+    return value;
+  return contextualCountValue(text) === 0 ? 0 : null;
 }
-
 function hasActionableFindingTableProse(row, proseColumns) {
   return proseColumns.some((column) => {
     const cell = normalizeFindingSummary(row[column] ?? "")
@@ -304,7 +375,6 @@ function hasActionableFindingTableProse(row, proseColumns) {
     );
   });
 }
-
 function analyzeFindingTable(headerCells, rows) {
   const normalizedHeaders = headerCells.map((cell) =>
     cell.toLowerCase().replace(/\s+/gu, " ").trim(),
@@ -319,26 +389,17 @@ function analyzeFindingTable(headerCells, rows) {
   );
   if (categoryColumns.length > 0) {
     for (const column of categoryColumns) {
+      const signal = findingLabelCellSignal(headerCells[column]);
       for (const row of rows) {
         const count = findingTableCountValue(row[column]);
         if (count === null) return { handled: false, signal: null };
-        if (hasActionableFindingTableProse(row, proseColumns)) {
-          return {
-            handled: true,
-            signal: findingLabelCellSignal(headerCells[column]),
-          };
-        }
-        if (count !== 0) {
-          return {
-            handled: true,
-            signal: findingLabelCellSignal(headerCells[column]),
-          };
+        if (hasActionableFindingTableProse(row, proseColumns) || count !== 0) {
+          return { handled: true, signal };
         }
       }
     }
     return { handled: true, signal: null };
   }
-
   const labelColumn = normalizedHeaders.findIndex((header) =>
     /^(?:severity|priority|badge|level)$/.test(header),
   );
@@ -362,7 +423,6 @@ function analyzeFindingTable(headerCells, rows) {
   }
   return { handled, signal: null };
 }
-
 function analyzeFindingTables(body) {
   const lines = String(body ?? "").split("\n");
   let signal = null;
@@ -391,97 +451,63 @@ function analyzeFindingTables(body) {
   }
   return { body: lines.join("\n"), signal };
 }
-
-const COUNT_NUMBER_SOURCE = String.raw`(?:\d+(?:\.\d+)?|no|none|a|an|zero|one|two|three|four|five|six|seven|eight|nine)`;
-const COUNT_SERIES_SEPARATOR_SOURCE = String.raw`(?:,\s*(?:(?:and|or|nor)\s*)?|[/&—–-]\s*|\b(?:and|or|nor)\b\s*)`;
-const SEVERITY_COUNT_ITEM_SOURCE = String.raw`${COUNT_NUMBER_SOURCE}\s+\b(?:critical|high|medium|low)\b(?:\s+severity)?(?:\s+${EMPTY_FINDING_NOUN_SOURCE})?`;
-const PRIORITY_COUNT_ITEM_SOURCE = String.raw`${COUNT_NUMBER_SOURCE}\s+\b[Pp][0-3]\b(?:\s+Badge)?(?:\s+${EMPTY_FINDING_NOUN_SOURCE})?`;
+const COUNT_SERIES_PREFIX =
+  /^\s*(?:(?:[-+•>]|#{1,6})\s+)*(?:\d+[.)]\s+)?(?:\[[ xX]\]\s+)?(?:(?:findings?|summary|counts?|results?|review\s+(?:summary|results))\s*:\s*)?(?:only\s+)?$/i;
+const SEVERITY_COUNT_ITEM_SOURCE = String.raw`${PRIORITY_COUNT_NUMBER_SOURCE}\s+\b(?:critical|high|medium|low)\b(?:\s+severity)?(?:\s+${EMPTY_FINDING_NOUN_SOURCE})?`;
+const PRIORITY_COUNT_LABEL_SOURCE = String.raw`(?:\[[Pp][0-3]\]|\b[Pp][0-3]\b(?:\s+Badge)?)`;
+const PRIORITY_COUNT_ITEM_SOURCE = String.raw`(?:only\s+)?${PRIORITY_COUNT_NUMBER_SOURCE}\s+${PRIORITY_COUNT_LABEL_SOURCE}(?:\s+${EMPTY_FINDING_NOUN_SOURCE})?(?:\s+${PRIORITY_BOUNDED_STATUS_SOURCE})?`;
 const SEVERITY_COUNT_SERIES = new RegExp(
-  String.raw`\b(?=[^.!?;\n]*\bseverity\b)${SEVERITY_COUNT_ITEM_SOURCE}(?:\s*${COUNT_SERIES_SEPARATOR_SOURCE}\s*${SEVERITY_COUNT_ITEM_SOURCE})+`,
+  String.raw`\b(?=${PRIORITY_COUNT_NUMBER_SOURCE}\s+)(?=[^.!?;\n]*\bseverity\b)${SEVERITY_COUNT_ITEM_SOURCE}(?:\s*${COUNT_SERIES_SEPARATOR_SOURCE}\s*${SEVERITY_COUNT_ITEM_SOURCE})+(?!\s*;\s*${SEVERITY_COUNT_ITEM_SOURCE})(?!\s*;\s*(?:(?:however|but|yet),?\s+)?${FIXTURE_META_SOURCE}\s*[.!?]?(?:\n|$))`,
   "gi",
 );
 const PRIORITY_COUNT_SERIES = new RegExp(
-  String.raw`\b(?=[^.!?;\n]*\bBadge\b)${PRIORITY_COUNT_ITEM_SOURCE}(?:\s*${COUNT_SERIES_SEPARATOR_SOURCE}\s*${PRIORITY_COUNT_ITEM_SOURCE})+`,
+  String.raw`\b${PRIORITY_COUNT_ITEM_SOURCE}(?:\s*${COUNT_SERIES_SEPARATOR_SOURCE}\s*${PRIORITY_COUNT_ITEM_SOURCE})+(?!\s*;\s*${PRIORITY_COUNT_ITEM_SOURCE})(?!\s*;\s*(?:(?:however|but|yet),?\s+)?${FIXTURE_META_SOURCE}\s*[.!?]?(?:\n|$))(?=\s*(?:[.!?;\n]|$))`,
   "gi",
 );
 const SEVERITY_COUNT_ITEM = new RegExp(
-  String.raw`\b(${COUNT_NUMBER_SOURCE})\s+(critical|high|medium|low)\b(?:\s+severity)?(?:\s+${EMPTY_FINDING_NOUN_SOURCE})?`,
+  String.raw`\b(${PRIORITY_COUNT_NUMBER_SOURCE})\s+(critical|high|medium|low)\b(?:\s+severity)?(?:\s+${EMPTY_FINDING_NOUN_SOURCE})?`,
   "gi",
 );
 const PRIORITY_COUNT_ITEM = new RegExp(
-  String.raw`\b(${COUNT_NUMBER_SOURCE})\s+([Pp][0-3])\b(?:\s+Badge)?(?:\s+${EMPTY_FINDING_NOUN_SOURCE})?`,
+  String.raw`\b(?:only\s+)?(${PRIORITY_COUNT_NUMBER_SOURCE})\s+(${PRIORITY_COUNT_LABEL_SOURCE})(?:\s+${EMPTY_FINDING_NOUN_SOURCE})?`,
   "gi",
 );
-
-function firstNonzeroCountSeriesLabel(body, seriesPattern, itemPattern) {
+function nonzeroCountLabel(body, priority = false) {
   const text = String(body ?? "");
-  for (const series of text.matchAll(seriesPattern)) {
+  const series = priority ? PRIORITY_COUNT_SERIES : SEVERITY_COUNT_SERIES;
+  const item = priority ? PRIORITY_COUNT_ITEM : SEVERITY_COUNT_ITEM;
+  for (const match of text.matchAll(series)) {
     const prefix =
       text
-        .slice(0, series.index ?? 0)
+        .slice(0, match.index ?? 0)
         .split(FINDING_CLAUSE_BOUNDARY)
         .at(-1) ?? "";
-    if (
-      NEGATED_REVIEW_RESULT_PREFIX.test(normalizeFindingSummary(prefix).trim())
-    ) {
-      continue;
-    }
-    for (const item of series[0].matchAll(itemPattern)) {
-      if (findingCountValue(item[1]) !== 0) {
-        return (
-          item[0].match(
-            /\b(?:critical|high|medium|low)\s+severity\b|\b[Pp][0-3]\s+Badge\b/i,
-          )?.[0] ?? item[2]
-        );
-      }
+    const normalized = normalizeFindingSummary(prefix).trim();
+    if (priority && !COUNT_SERIES_PREFIX.test(normalized)) continue;
+    if (NEGATED_REVIEW_RESULT_PREFIX.test(normalized)) continue;
+    for (const count of match[0].matchAll(item)) {
+      if (findingCountValue(count[1]) !== 0)
+        return count[0].match(FINDING_LABEL)?.[0] ?? count[2];
     }
   }
   return null;
 }
-
+const COUNT_WORDS = "zero one two three four five six seven eight nine";
 function findingCountValue(value) {
   const normalized = String(value ?? "").toLowerCase();
-  const wordValues = {
-    no: 0,
-    none: 0,
-    a: 1,
-    an: 1,
-    zero: 0,
-    one: 1,
-    two: 2,
-    three: 3,
-    four: 4,
-    five: 5,
-    six: 6,
-    seven: 7,
-    eight: 8,
-    nine: 9,
-  };
-  return wordValues[normalized] ?? Number(normalized);
+  const wordValue = COUNT_WORDS.split(" ").indexOf(normalized);
+  if (wordValue >= 0) return wordValue;
+  if (/^(?:no|none)$/u.test(normalized)) return 0;
+  return /^(?:a|an)$/u.test(normalized) ? 1 : Number(normalized);
 }
-
-function affirmativeCompressedCountSignal(body) {
-  return (
-    firstNonzeroCountSeriesLabel(
-      body,
-      PRIORITY_COUNT_SERIES,
-      PRIORITY_COUNT_ITEM,
-    ) ??
-    firstNonzeroCountSeriesLabel(
-      body,
-      SEVERITY_COUNT_SERIES,
-      SEVERITY_COUNT_ITEM,
-    )
-  );
-}
-
+const countSeriesSignal = (body) =>
+  nonzeroCountLabel(body, true) ?? nonzeroCountLabel(body);
 function withoutNegatedCountSeries(body) {
   let text = String(body ?? "");
   for (const pattern of [PRIORITY_COUNT_SERIES, SEVERITY_COUNT_SERIES]) {
     text = text.replace(pattern, (series, ...args) => {
-      const offset = args.at(-2);
       const prefix =
-        text.slice(0, offset).split(FINDING_CLAUSE_BOUNDARY).at(-1) ?? "";
+        text.slice(0, args.at(-2)).split(FINDING_CLAUSE_BOUNDARY).at(-1) ?? "";
       return NEGATED_REVIEW_RESULT_PREFIX.test(
         normalizeFindingSummary(prefix).trim(),
       )
@@ -491,7 +517,6 @@ function withoutNegatedCountSeries(body) {
   }
   return text;
 }
-
 const BRACKETED_PRIORITY_SOURCE = String.raw`\[[Pp][0-3]\]`;
 const BRACKETED_PRIORITY_SEPARATOR_SOURCE = String.raw`(?:/|,\s*(?:(?:and|or|nor)\s*)?|\b(?:and|or|nor)\b)`;
 const BRACKETED_PRIORITY_LIST_SOURCE = String.raw`${BRACKETED_PRIORITY_SOURCE}(?:\s*${BRACKETED_PRIORITY_SEPARATOR_SOURCE}\s*${BRACKETED_PRIORITY_SOURCE})*`;
@@ -525,7 +550,6 @@ const NEGATED_PRIORITY_CLAUSES = [
     "gim",
   ),
 ];
-
 function withoutNegatedPriorityClauses(body) {
   return NEGATED_PRIORITY_CLAUSES.reduce(
     (text, pattern) =>
@@ -537,37 +561,38 @@ function withoutNegatedPriorityClauses(body) {
     normalizeFindingSummary(body),
   );
 }
-
 export function actionableFindingSignal(
   value,
   bot,
   { reviewState = null } = {},
 ) {
-  const body = maskMarkdownNonProse(value, {
-    preserveGitHubAlerts: true,
-    preserveInlineCode: true,
-  });
   if (String(reviewState ?? "").toUpperCase() === "CHANGES_REQUESTED") {
     return "review state: CHANGES_REQUESTED";
   }
-  if (bot === "coderabbit") {
-    return (
-      body.match(/<!--\s*cr-indicator-types\s*:[^>]{1,120}-->/i)?.[0] ??
-      body.match(
-        /_\s*(?:\p{Extended_Pictographic}️?\s*)?(?:Critical|Major|Minor|Trivial)\s*_/u,
-      )?.[0] ??
-      null
-    );
+  if (
+    bot !== "coderabbit" &&
+    bot !== "cursor" &&
+    !FINDING_HINT.test(String(value ?? ""))
+  ) {
+    return null;
   }
-  if (bot === "cursor") return body.match(/\bBUGBOT_BUG_ID\b/)?.[0] ?? null;
-  const tableAnalysis = analyzeFindingTables(body);
+  const markdown = parseMarkdownEvidence(value, {
+    maskRawHtmlNonProse: true,
+    preserveGitHubAlerts: true,
+    preserveInlineCode: bot !== "coderabbit" && bot !== "cursor",
+    preserveSignalComments: bot === "coderabbit" || bot === "cursor",
+  });
+  const botSignal = botSpecificFindingSignal(markdown.body, bot);
+  if (botSignal !== undefined) return botSignal;
+  const tableAnalysis = analyzeFindingTables(markdown.formattedBody());
+  if (tableAnalysis.signal !== null) return tableAnalysis.signal;
   const proseBody = withoutNegatedPriorityClauses(
-    withoutNegatedCountSeries(tableAnalysis.body),
+    withoutNegatedCountSeries(boundedFindingProse(tableAnalysis.body)),
   );
+  // prettier-ignore
   return (
-    tableAnalysis.signal ??
-    affirmativeCompressedCountSignal(proseBody) ??
-    affirmativePriority(proseBody) ??
+    countSeriesSignal(proseBody) ??
+    affirmativeOccurrence(proseBody, PRIORITY_SIGNAL, supportsPriority) ??
     affirmativeSeverity(proseBody) ??
     affirmativeChangesRequested(proseBody)
   );

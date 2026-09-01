@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import {
+  existsSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -9,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -40,7 +42,11 @@ import {
   writeReportFile,
 } from "./review-process-metrics.mjs";
 import { actionableFindingSignal } from "./review-process-metrics-finding-classifier.mjs";
-import { maskMarkdownNonProse } from "./review-process-metrics-markdown.mjs";
+import { boundedFindingProse } from "./review-process-metrics-finding-preflight.mjs";
+import {
+  maskMarkdownFormattingSyntax,
+  maskMarkdownNonProse,
+} from "./review-process-metrics-markdown.mjs";
 
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const fixture = JSON.parse(
@@ -156,6 +162,84 @@ test("counts CodeRabbit findings as finding-like text", () => {
   // OLD path: the Cursor marker and priority badges still count.
   assert.equal(isFindingLikeText("<!-- BUGBOT_BUG_ID: example -->"), true);
   assert.equal(isFindingLikeText("[P2] Missing branch coverage"), true);
+  assert.equal(
+    actionableFindingSignal(
+      "<blockquote><!-- cr-indicator-types:potential_issue --></blockquote>",
+      "coderabbit",
+    ),
+    null,
+  );
+  assert.equal(
+    actionableFindingSignal(
+      "<pre><!-- BUGBOT_BUG_ID: fixture --></pre>",
+      "cursor",
+    ),
+    null,
+  );
+  assert.match(
+    actionableFindingSignal(
+      "<!-- cr-indicator-types:potential_issue -->",
+      "coderabbit",
+    ),
+    /cr-indicator-types/,
+  );
+  assert.equal(
+    actionableFindingSignal("<!-- BUGBOT_BUG_ID: historical -->", "cursor"),
+    "BUGBOT_BUG_ID",
+  );
+  for (const [body, bot] of [
+    ["Archived: `<!-- cr-indicator-types:potential_issue -->`", "coderabbit"],
+    ["Archived: `_🟠 Major_`", "coderabbit"],
+    ["Archived: `<!-- BUGBOT_BUG_ID: fixture -->`", "cursor"],
+    ["The BUGBOT_BUG_ID field is documented here.", "cursor"],
+    ["<!-- BUGBOT_BUG_ID docs only -->", "cursor"],
+    ["<!-- BUGBOT_BUG_ID: -->", "cursor"],
+    ["<!-- BUGBOT_BUG_ID:\n   -->", "cursor"],
+    [
+      "<!-- archived fixture: <!-- cr-indicator-types:potential_issue --> -->",
+      "coderabbit",
+    ],
+    ["<!-- archived fixture: <!-- BUGBOT_BUG_ID: fixture --> -->", "cursor"],
+    [
+      "<blockquote><blockquote>x</blockquote><!-- cr-indicator-types:potential_issue --></blockquote>",
+      "coderabbit",
+    ],
+    [
+      "<blockquote><blockquote>x</blockquote><!-- cr-indicator-types:potential_issue -->",
+      "coderabbit",
+    ],
+    ["<pre><pre>x</pre><!-- BUGBOT_BUG_ID: fixture --></pre>", "cursor"],
+  ]) {
+    assert.equal(actionableFindingSignal(body, bot), null, body);
+  }
+  assert.match(
+    actionableFindingSignal(
+      "<blockquote><blockquote>x</blockquote></blockquote>\n<!-- cr-indicator-types:potential_issue -->",
+      "coderabbit",
+    ),
+    /cr-indicator-types/,
+  );
+  assert.equal(
+    actionableFindingSignal(
+      "**<sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)</sub></sub> Move the author-only checker out of workflows**\n\nThis checker fails.",
+      "codex",
+    ),
+    "P2 Badge",
+  );
+  const longCodexTitle = "x".repeat(512);
+  assert.equal(
+    actionableFindingSignal(
+      `**<sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)</sub></sub> ${longCodexTitle}**\n\nThis checker fails.`,
+      "codex",
+    ),
+    "P2 Badge",
+  );
+  for (const body of [
+    "![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)",
+    "**<sub><sub>![P2 Badge](https://example.test/P2.svg)</sub></sub> Badge documentation**",
+  ]) {
+    assert.equal(actionableFindingSignal(body, "codex"), null, body);
+  }
 });
 
 test("does not count clean notes on zero-count finding table rows", () => {
@@ -181,7 +265,7 @@ test("does not count clean notes on zero-count finding table rows", () => {
     ].join("\n"),
   );
   for (const body of cleanTables) {
-    assert.equal(actionableFindingSignal(body, "claude"), null);
+    assert.equal(actionableFindingSignal(body, "claude"), null, body);
   }
 
   assert.equal(
@@ -195,6 +279,579 @@ test("does not count clean notes on zero-count finding table rows", () => {
     ),
     "High severity",
   );
+});
+
+test("requires priority labels to use finding-entry or bounded count context", () => {
+  for (const body of [
+    "Verified that the parser recognizes `[P1]` labels correctly.",
+    "Verified one `[P1]` finding example is parsed correctly.",
+    "Tests cover two `[P2]` issue formats.",
+    "One `[P1]` finding example is parsed correctly.",
+    "Two `[P2]` issue formats are supported.",
+    "A `P1 Badge` finding fixture is included.",
+    "A `P1 Badge` finding is included as a fixture.",
+    "A `P1 Badge` finding is shown in the fixture.",
+    "The report contains one `[P1]` finding example for parser coverage.",
+    "One `[P1]` issue is used as a parsing example.",
+    "One `[P1]` finding is parsed correctly by the test.",
+    "One `[P1]` finding is correctly parsed by the test.",
+    "One `[P1]` finding may not be shown in the fixture.",
+    "One `[P1]` finding requires parsing support in the fixture.",
+    "One `[P1]` finding requires parser changes before release.",
+    "One `[P1]` finding can corrupt the report.",
+    "One `[P1]` issue affects collection.",
+    "One `[P1]` issue may undercount findings.",
+    "One `[P1]` issue prevents publication.",
+    "I found a `[P1]` issue in metadata validation.",
+    "The report contains one `[P1]` finding in a fixture solely to test label parsing.",
+    "The fixture contains `[P1]`: one finding.",
+    "Tests expect `[P1]`: one finding.",
+    "The report format shows `[P1]`: 1 finding.",
+    "Tests cover one `[P1]` finding and zero `[P2]` findings.",
+    "The fixture contains zero `[P1]` findings and one `[P2]` finding.",
+    "The fixture contains zero `[P1]` findings, but one `[P2]` finding.",
+    "The fixture contains zero `[P1]` findings, but only one `[P2]` finding.",
+    "The fixture contains zero P1 findings, but one `[P2]` finding.",
+    "The fixture contains `[P1]`: zero findings, however `[P2]`: one finding.",
+    "The fixture contains `[P1]`: zero findings, however only one `[P2]` finding remains.",
+    "Summary: `[P1]`: zero findings, but `[P2]`: only zero findings.",
+    "One `[P1]` finding and zero `[P2]` findings are parser fixtures.",
+    "- One `[P1]` finding and zero `[P2]` findings are fixture examples.",
+    "One `[P1]` finding, zero `[P2]` findings, but both are parser fixtures.",
+    "One `[P1]` finding, but it is only a parser fixture.",
+    "There is one `[P1]` issue, but it is only a parser fixture.",
+    "There is one `[P1]` defect, yet this is fixture data.",
+    "There is one `[P1]` problem, however this is only a test example for parser coverage.",
+    "Findings: one `[P1]` finding, however this is a test example.",
+    "One `[P1]` finding, yet it is fixture data.",
+    "One `[P1]` finding remains, however these findings are fixture examples.",
+    "One `[P1]` finding, but this finding is only a parser fixture.",
+    "One `[P1]` finding, but the finding is only a parser fixture.",
+    "One `[P1]` finding, but these findings are only test examples.",
+    "One `[P1]` finding, but it is used as a parser fixture.",
+    "One `[P1]` finding, but only as a parser fixture.",
+    "Findings: one `[P1]` finding, however it appears only in a test example.",
+    "Findings: one `[P1]` finding, however it appears only in the test example.",
+    "One `[P1]` finding, but it is only used as a parser fixture.",
+    "Findings: one `[P1]` finding, however it appears only in this test example.",
+    "Findings: one `[P1]` finding, however it only appears in this test example.",
+    "Findings: one `[P1]` finding, however it appears in only a test example.",
+    "One `[P1]` finding remains, but it appears in fixtures only.",
+    "One `[P1]` finding remains, but it occurs in test cases merely.",
+    "One `[P1]` finding remains, but it exists in fixture data solely.",
+    "One `[P1]` finding remains, but this finding occurs only in fixtures.",
+    "[P1]: one finding remains, but it appears only in a test example.",
+    "[P1]: one finding remains, but this finding is only a parser fixture.",
+    "One [P1] finding appears only in tests.",
+    "[P1]: one finding appears only in tests.",
+    "[P1]: one finding is shown only in tests.",
+    "[P1]: one finding is included only in fixture examples.",
+    "[P1]: one finding is used only in parser tests.",
+    "[P1]: one finding is covered only by tests.",
+    "<blockquote>\n[P1] Parser drops data.\n</blockquote>",
+    "<pre>\n[P1] Parser drops data.\n</pre>",
+    "<code>\n[P1] Parser drops data.\n</code>",
+    "<!--\n[P1] Parser drops data.\n-->",
+    "One `[P1]` finding, but this example is only a parser fixture.",
+    "One `[P1]` finding, but this is only a parser fixture used in tests.",
+    "One `[P1]` finding, but this is only a test example for parser coverage.",
+    "One `[P1]` finding, but this is only a parser fixture used in the tests.",
+    "Findings: one `[P1]` finding, zero `[P2]` findings, however these are only test examples.",
+    "`[P1]`: 0 findings are parser fixtures.",
+    "`[P1]`: zero findings are covered by tests.",
+    "`[P1]`: no defects were expected by the fixture.",
+    "[P1](https://example.test/labels) documents the label syntax.",
+    "![P1](https://example.test/p1.png)",
+    "[P1][priority-label] documents the label syntax.",
+    [
+      "| Priority | Findings |",
+      "| --- | --- |",
+      "| [P1] | 0 findings remain |",
+    ].join("\n"),
+    [
+      "| Priority | Findings |",
+      "| --- | --- |",
+      "| [P1] | none remain |",
+      "| [P2] | zero remain open |",
+      "| [P3] | no remain |",
+    ].join("\n"),
+    [
+      "| Priority | Findings |",
+      "| --- | --- |",
+      "| [P1] | 0 findings are parser fixtures |",
+      "| [P2] | zero findings are covered by tests |",
+      "| [P3] | no findings were expected by the fixture |",
+    ].join("\n"),
+    "The result does not contain a P1 Badge field.",
+    "Don't flag P1 Badge findings in this report.",
+    "No `[P1]` issues remain open.",
+    "0 `[P1]` findings remain unresolved.",
+    "Zero `[P1]` issues are actionable.",
+    "None `[P1]` findings persist.",
+    "`[P1]`: 0 findings remain open.",
+    "`[P1]`: only 0 findings.",
+    "`[P1]`: no issues remain open.",
+    "`[P1]` findings: 0 remain open.",
+    "`[P1]` (0 findings remain open).",
+    [
+      "| Priority | Findings |",
+      "| --- | --- |",
+      "| [P1] | only zero findings |",
+    ].join("\n"),
+    [
+      "| Priority | Findings |",
+      "| --- | --- |",
+      "| [P1] | only 0 findings remain |",
+    ].join("\n"),
+  ]) {
+    assert.equal(actionableFindingSignal(body, "claude"), null, body);
+  }
+
+  for (const [body, signal] of [
+    ["`[P1]` The parser drops a valid record.", "[P1]"],
+    ["- `P2 Badge` The parser drops a valid record.", "P2 Badge"],
+    ["- [ ] `[P1]` The parser drops a valid record.", "[P1]"],
+    ["- [x] `[P2]` The parser drops a valid record.", "[P2]"],
+    ["1. [ ] `[P3]` The parser drops a valid record.", "[P3]"],
+    ["One `[P3]` observation remains.", "[P3]"],
+    ["Eight `[P1]` findings.", "[P1]"],
+    ["Concerns: `[P2]` This remains open.", "[P2]"],
+    ["There is one `[P1]` finding.", "[P1]"],
+    ["There are two `[P2]` issues.", "[P2]"],
+    ["We found one `[P1]` finding.", "[P1]"],
+    ["The review found one `[P1]` finding.", "[P1]"],
+    ["This report contains one `[P2]` issue.", "[P2]"],
+    ["One `[P1]` finding remains.", "[P1]"],
+    ["One `[P1]` finding identified.", "[P1]"],
+    ["One `[P1]` finding was found.", "[P1]"],
+    ["One `[P1]` issue is unresolved.", "[P1]"],
+    ["One `[P1]` issue is still unresolved.", "[P1]"],
+    ["One `[P1]` finding requires a fix.", "[P1]"],
+    ["One `[P1]` issue must be addressed.", "[P1]"],
+    ["One `[P1]` issue persists.", "[P1]"],
+    ["Everything else passes, but `[P1]` validation still fails.", "[P1]"],
+    ["No other findings, but `[P2]` the parser drops records.", "[P2]"],
+    ["Everything else passes, but one `[P1]` finding remains.", "[P1]"],
+    [
+      "The previous `[P1]` issue is fixed, but `[P2]` the parser still drops records.",
+      "[P2]",
+    ],
+    ["No prior `[P1]` concern remains, but `[P2]` validation fails.", "[P2]"],
+    [
+      "The docs explain zero `[P1]` findings in fixtures, but `[P2]` validation fails.",
+      "[P2]",
+    ],
+    [
+      "Tests cover one `[P1]` example, but `[P2]` validation still fails.",
+      "[P2]",
+    ],
+    [
+      "The fixture uses `[P1]`: zero findings as an example, but `[P2]` validation fails.",
+      "[P2]",
+    ],
+    ["`[P1]`: one finding remains.", "[P1]"],
+    ["`[P2]` 2 issues are open.", "[P2]"],
+    ["One `[P1]` finding, zero `[P2]` findings.", "[P1]"],
+    ["Zero `[P1]` findings, one `[P2]` finding.", "[P2]"],
+    ["Findings: one `[P1]` finding remains.", "[P1]"],
+    ["Findings: one `[P1]` finding, zero `[P2]` findings.", "[P1]"],
+    ["One `[P1]` finding remains, zero `[P2]` findings remain.", "[P1]"],
+    [
+      "Findings: one `[P1]` issue was identified, zero `[P2]` issues were found.",
+      "[P1]",
+    ],
+    ["One `[P1]` finding, but zero `[P2]` findings.", "[P1]"],
+    [
+      "One `[P1]` finding remains, but these fixtures show zero `[P2]` examples.",
+      "[P1]",
+    ],
+    [
+      "One `[P1]` finding remains, but these findings are data loss defects.",
+      "[P1]",
+    ],
+    ["One `[P1]` finding remains, but this is data exposure.", "[P1]"],
+    ["One `[P1]` issue remains, but it occurs in test cases.", "[P1]"],
+    ["One `[P1]` issue remains, but it exists in fixtures.", "[P1]"],
+    ["One `[P1]` finding, but this example corrupts parser data.", "[P1]"],
+    [
+      "One `[P1]` issue remains, but this issue only occurs in the parser test case.",
+      "[P1]",
+    ],
+    ["One `[P1]` issue remains, but it occurs only in test cases.", "[P1]"],
+    [
+      "One `[P1]` issue remains, but it occurs only in test cases; it corrupts production.",
+      "[P1]",
+    ],
+    ["One `[P1]` issue remains but it occurs only in test cases.", "[P1]"],
+    ["One `[P1]` issue remains—but it occurs only in test cases.", "[P1]"],
+    ["One [P1] issue remains—but it occurs only in test cases.", "[P1]"],
+    ["[P1]: 0-day values bypass validation.", "[P1]"],
+    ["One [P1] finding appears only in tests but corrupts production.", "[P1]"],
+    ["One [P1] finding appears only in tests; it corrupts production.", "[P1]"],
+    ["No [P1] findings—but one [P2] issue remains.", "[P2]"],
+    [
+      "[P1]: one finding appears only in tests but corrupts production.",
+      "[P1]",
+    ],
+    [
+      [
+        "| Priority | Findings |",
+        "| --- | --- |",
+        "| [P1] | 0 but parser crashes |",
+      ].join("\n"),
+      "[P1]",
+    ],
+    [
+      [
+        "| Priority | Findings |",
+        "| --- | --- |",
+        "| [P1] | zero parser crashes |",
+      ].join("\n"),
+      "[P1]",
+    ],
+    [
+      [
+        "| Priority | Findings |",
+        "| --- | --- |",
+        "| [P1] | no data validation |",
+      ].join("\n"),
+      "[P1]",
+    ],
+    [
+      [
+        "| Priority | Findings |",
+        "| --- | --- |",
+        "| [P1] | 0 findings, parser crashes |",
+      ].join("\n"),
+      "[P1]",
+    ],
+    [
+      "One `[P1]` finding remains, but these issues are data corruption bugs.",
+      "[P1]",
+    ],
+    [
+      "One `[P1]` finding remains, but only zero `[P2]` findings remain.",
+      "[P1]",
+    ],
+    [
+      "Zero `[P1]` findings remain, however only one `[P2]` finding remains.",
+      "[P2]",
+    ],
+    ["Zero `[P1]` findings remain but one `[P2]` finding remains.", "[P2]"],
+    ["One `[P1]` finding, although zero `[P2]` findings remain.", "[P1]"],
+    [
+      "One `[P1]` finding, zero `[P2]` findings, but no `[P3]` findings remain.",
+      "[P1]",
+    ],
+    [
+      "Zero `[P1]` findings, one `[P2]` finding, however no `[P3]` findings remain.",
+      "[P2]",
+    ],
+    ["`[P1]`: 0-day values bypass validation.", "[P1]"],
+    ["`[P1]`: No errors are reported when parsing fails.", "[P1]"],
+    ["No `[P1]` errors are reported when parsing fails.", "[P1]"],
+    ["No `[P1]` errors are reported if parsing crashes.", "[P1]"],
+    ["No `[P1]` errors are reported after parsing fails.", "[P1]"],
+    ["No `[P1]` errors are reported because parsing fails.", "[P1]"],
+    [
+      "No `[P1]` errors are reported when the negative test fails unexpectedly.",
+      "[P1]",
+    ],
+    [
+      "No `[P1]` errors are reported when tests fail in CI, so the gate passes broken changes.",
+      "[P1]",
+    ],
+    ["`[P1]`: Zero errors are surfaced when validation fails.", "[P1]"],
+    [
+      ["| Priority | Findings |", "| --- | --- |", "| [P1] | |"].join("\n"),
+      "[P1]",
+    ],
+    ["`[P1]`: 0, `[P2]`: 1.", "[P2]"],
+    ["`[P1]`: 0 but `[P2]`: 1.", "[P2]"],
+    ["Findings: `[P1]`: 0 findings, `[P2]`: 1 finding.", "[P2]"],
+    ["Review summary: `[P1]`: none and `[P2]`: one finding.", "[P2]"],
+    ["Summary: `[P1]`: one finding and `[P2]`: zero findings.", "[P1]"],
+    ["Summary: `[P1]`: one finding, although `[P2]`: zero findings.", "[P1]"],
+    ["- [ ] Findings: `[P1]`: zero findings and `[P2]`: one finding.", "[P2]"],
+    ["Counts: 1 `[P1]`; 0 `[P2]`.", "[P1]"],
+    ["Counts: one `P1 Badge`; zero `P2 Badge`.", "P1 Badge"],
+    ["Findings: one `[P1]`; zero `[P2]`; zero `[P3]`.", "[P1]"],
+    [
+      "The fixture uses `[P1]`: zero findings as an example, but `[P2]`: one issue remains.",
+      "[P2]",
+    ],
+  ]) {
+    assert.equal(actionableFindingSignal(body, "claude"), signal, body);
+  }
+
+  for (const body of [
+    "`[P1]`: 0 findings.",
+    "There are zero `[P1]` findings.",
+    "We found no `[P2]` issues.",
+    "The review found one `[P1]` finding example for parser coverage.",
+    "(One `[P1]` finding is shown only in parser fixtures.)",
+    "“One `[P1]` finding is shown only in parser fixtures.”",
+    "(Zero `[P1]` findings remain.)",
+    "“No `[P1]` findings remain.”",
+    "No `[P1]`/`[P2]` findings.",
+    "No `[P1]` errors are reported when parsing succeeds.",
+    "No `[P1]` errors are reported when the negative test fails, as expected.",
+    "No `[P1]` errors are expected when this parser fixture fails.",
+    "No `[P1]` errors are reported when parsing fails by design.",
+    "No `[P1]` errors are reported when parsing fails intentionally.",
+    "The fixture uses `[P1]`: zero findings as an example, but `[P2]`: one finding is shown only in tests.",
+    "The fixture uses `[P1]`: zero findings as an example, but `[P2]`: one finding is reported only in fixtures.",
+    "The fixture uses `[P1]`: zero findings as an example, but `[P2]`: one finding is present only in tests.",
+    "The fixture uses `[P1]`: zero findings as an example, but `[P2]`: one finding is found only in parser fixtures.",
+    "The fixture uses `[P1]`: zero findings as an example, but `[P2]`: one finding is identified only in tests.",
+    "The fixture uses `[P1]`: zero findings as an example, but `[P2]`: one finding remains only in tests.",
+    "The fixture uses `[P1]`: zero findings as an example, but `[P2]`: one finding persists only in parser examples.",
+    "The fixture uses `[P1]`: zero findings as an example, but `[P2]`: one finding is reported as test data.",
+    "The fixture uses `[P1]`: zero findings as an example, but `[P2]`: one finding is reported for parser coverage.",
+    "Findings: one `[P1]` finding, zero `[P2]` findings; these are fixture examples.",
+    "Findings: one `[P1]` finding, zero `[P2]` findings; all are fixture examples.",
+    "Findings: one `[P1]` finding, zero `[P2]` findings; each is fixture data.",
+    "Counts: 1 `[P1]`; 0 `[P2]`; these are used in parser tests.",
+    "Counts: 1 `[P1]`; 0 `[P2]`; these are included in test fixtures.",
+    "Counts: 1 `[P1]`; 0 `[P2]`; these are shown in parser examples.",
+    "Counts: 1 `[P1]`; 0 `[P2]`; these appear only in tests.",
+    "Findings: one `[P1]` finding; zero `[P2]` findings; zero `[P3]` findings; all are fixture examples.",
+    "<blockquote><blockquote>x</blockquote>[P1] Parser drops data.</blockquote>",
+  ]) {
+    assert.equal(actionableFindingSignal(body, "claude"), null);
+  }
+
+  const unsupported = "Verified `[P1]` label syntax.";
+  assert.equal(
+    actionableFindingSignal(
+      [...Array(255).fill(unsupported), "Concerns: `[P2]` remains open."].join(
+        "\n",
+      ),
+      "claude",
+    ),
+    "[P2]",
+  );
+  assert.throws(
+    () =>
+      actionableFindingSignal(
+        [
+          ...Array(256).fill(unsupported),
+          "Concerns: `[P2]` remains open.",
+        ].join("\n"),
+        "claude",
+      ),
+    /finding candidate limit exceeded \(maximum 256\)/,
+  );
+
+  const repeated = "review `[P1]` fixture. ".repeat(3_000).slice(0, 65_536);
+  let startedAt = performance.now();
+  assert.throws(
+    () => actionableFindingSignal(repeated, "claude"),
+    /finding candidate limit exceeded/,
+  );
+  assert.ok(performance.now() - startedAt < 1_000);
+
+  for (const body of [
+    "1 ".repeat(Math.ceil(65_536 / 2)).slice(0, 65_520) + " [P1] fixture.",
+    "[P1] " + "x ".repeat(32_760),
+  ]) {
+    startedAt = performance.now();
+    assert.throws(
+      () => actionableFindingSignal(body, "claude"),
+      /finding context limit exceeded \(maximum 4096 characters\)/,
+    );
+    assert.ok(performance.now() - startedAt < 1_000);
+  }
+
+  const unresolvedReferences = "![safe][ref]\n".repeat(6_000).slice(0, 65_536);
+  startedAt = performance.now();
+  assert.equal(actionableFindingSignal(unresolvedReferences, "claude"), null);
+  assert.ok(performance.now() - startedAt < 1_000);
+
+  const referenceLine = "![P1][ref]\n";
+  const referenceDefinition = "\n[ref]: https://example.test\n";
+  const resolvedReferences =
+    referenceLine.repeat(
+      Math.floor((65_536 - referenceDefinition.length) / referenceLine.length),
+    ) + referenceDefinition;
+  startedAt = performance.now();
+  assert.equal(actionableFindingSignal(resolvedReferences, "claude"), null);
+  assert.ok(performance.now() - startedAt < 1_000);
+
+  for (const [open, close] of [
+    ["<!--", "-->"],
+    ["<blockquote>", "</blockquote>"],
+  ]) {
+    const size = 65_536 - open.length - close.length;
+    const payload = "[P1] ".repeat(Math.ceil(size / 5)).slice(0, size);
+    startedAt = performance.now();
+    assert.equal(
+      actionableFindingSignal(`${open}${payload}${close}`, "claude"),
+      null,
+    );
+    assert.ok(performance.now() - startedAt < 1_000);
+  }
+});
+
+test("adds PR and record context to finding-classification failures", () => {
+  const body = "1 ".repeat(32_760) + " [P1] fixture.";
+  const directory = mkdtempSync(join(tmpdir(), "review-metrics-error-"));
+  try {
+    for (const [surface, collection] of [
+      ["issue_comments", "issueComments"],
+      ["review_submissions", "reviews"],
+      ["review_comments", "reviewComments"],
+    ]) {
+      const value = structuredClone(fixture);
+      value.issueComments = [];
+      value.reviews = [];
+      value.reviewComments = [];
+      const recordId = `${surface}-limit`;
+      value[collection] = [
+        {
+          id: recordId,
+          user: { login: "claude[bot]", type: "Bot" },
+          body,
+          state: "COMMENTED",
+        },
+      ];
+      const output = join(directory, `${surface}.json`);
+      assert.throws(
+        () => {
+          const report = summarizeFixture(value);
+          writeReportFile(output, `${JSON.stringify(report)}\n`);
+        },
+        (error) => {
+          assert.match(
+            error.message,
+            /https:\/\/github\.com\/example\/repo\/pull\/42/,
+          );
+          assert.match(error.message, new RegExp(surface));
+          assert.match(error.message, new RegExp(recordId));
+          assert.match(error.message, /finding context limit exceeded/);
+          return true;
+        },
+      );
+      assert.equal(existsSync(output), false);
+    }
+  } finally {
+    rmSync(directory, { recursive: true });
+  }
+});
+
+test("bounds unstructured finding prose before classification", () => {
+  assert.doesNotThrow(() => boundedFindingProse(`${"x".repeat(4_092)}[P1]`));
+  assert.throws(
+    () => boundedFindingProse(`${"x".repeat(4_093)}[P1]`),
+    /finding context limit exceeded/,
+  );
+  for (const label of ["high severity", "changes requested"]) {
+    const prefix = `${"x".repeat(4_095 - label.length)} `;
+    assert.doesNotThrow(() => boundedFindingProse(`${prefix}${label}`));
+    assert.throws(
+      () => boundedFindingProse(`x${prefix}${label}`),
+      /finding context limit exceeded/,
+    );
+  }
+  assert.throws(
+    () => boundedFindingProse(Array(257).fill("high severity.").join("\n")),
+    /finding candidate limit exceeded/,
+  );
+  assert.throws(
+    () => boundedFindingProse(`${"1.2".repeat(21_840).slice(0, 65_520)} [P1]`),
+    /finding context limit exceeded/,
+  );
+
+  const boundedContexts = Array.from(
+    { length: 256 },
+    () => `${"x".repeat(4_092)}[P1]`,
+  ).join("\n");
+  const startedAt = performance.now();
+  assert.doesNotThrow(() => boundedFindingProse(boundedContexts));
+  assert.ok(performance.now() - startedAt < 1_000);
+
+  const tooManyLabels = Array(257).fill("[P1] fixture.").join("\n");
+  assert.equal(
+    actionableFindingSignal(tooManyLabels, "claude", {
+      reviewState: "CHANGES_REQUESTED",
+    }),
+    "review state: CHANGES_REQUESTED",
+  );
+  assert.match(
+    actionableFindingSignal(
+      `<!-- cr-indicator-types:potential_issue -->\n${tooManyLabels}`,
+      "coderabbit",
+    ),
+    /cr-indicator-types/,
+  );
+  assert.equal(
+    actionableFindingSignal(
+      `<!-- BUGBOT_BUG_ID: active -->\n${tooManyLabels}`,
+      "cursor",
+    ),
+    "BUGBOT_BUG_ID",
+  );
+  assert.equal(
+    actionableFindingSignal(
+      `**<sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)</sub></sub> Canonical title**\n${tooManyLabels}`,
+      "codex",
+    ),
+    "P2 Badge",
+  );
+  assert.equal(
+    actionableFindingSignal(
+      [
+        "| Priority | Findings |",
+        "| --- | --- |",
+        ...Array(257).fill("| [P1] | 1 |"),
+      ].join("\n"),
+      "claude",
+    ),
+    "[P1]",
+  );
+
+  const longSentence = "1 ".repeat(32_768);
+  assert.equal(
+    actionableFindingSignal(
+      `${longSentence}. One [P1] issue remains.`,
+      "claude",
+    ),
+    "[P1]",
+  );
+  assert.equal(
+    actionableFindingSignal(
+      `One [P1] issue remains. ${longSentence}`,
+      "claude",
+    ),
+    "[P1]",
+  );
+  for (const body of [
+    `**One [P1] issue remains.** ${longSentence}`,
+    `(One [P1] issue remains.) ${longSentence}`,
+    `“One [P1] issue remains.” ${longSentence}`,
+    `One [P1] issue remains; ${longSentence}`,
+  ]) {
+    assert.equal(
+      actionableFindingSignal(body, "claude"),
+      "[P1]",
+      body.slice(0, 80),
+    );
+  }
+  for (const body of [
+    `(Context.) One [P1] issue remains. ${longSentence}`,
+    `"Context." One [P1] issue remains. ${longSentence}`,
+    `“Context.” One [P1] issue remains. ${longSentence}`,
+    `[Context.] One [P1] issue remains. ${longSentence}`,
+    "`Context.` One [P1] issue remains. " + longSentence,
+    `<em>Context.</em> One [P1] issue remains. ${longSentence}`,
+    `[Context.](https://example.test) One [P1] issue remains. ${longSentence}`,
+  ]) {
+    assert.equal(
+      actionableFindingSignal(body, "claude"),
+      "[P1]",
+      body.slice(0, 80),
+    );
+  }
 });
 
 test("identifies review-summary detector text", () => {
@@ -432,7 +1089,7 @@ test("parses one half-open UTC cohort and rejects ambiguous selectors", () => {
 });
 
 test("keeps explicit open PR metadata while merged selectors fail closed", () => {
-  const open = { number: 42, merged_at: null };
+  const open = { number: 42, state: "open", merged_at: null };
   assert.equal(assertPullRequestMetadata(open, 42), open);
   assert.throws(
     () => assertPullRequestMetadata(open, 42, { requireMerged: true }),
@@ -442,6 +1099,14 @@ test("keeps explicit open PR metadata while merged selectors fail closed", () =>
     () => assertPullRequestMetadata({ number: 43 }, 42),
     /pull request metadata mismatch for #42/,
   );
+  for (const malformed of [
+    { number: 42, state: "open" },
+    { number: 42, state: "open", merged_at: "invalid" },
+    { number: 42, state: "unknown", merged_at: null },
+    { number: 42, state: "open", merged_at: "2026-09-01T00:00:00Z" },
+  ]) {
+    assert.throws(() => assertPullRequestMetadata(malformed, 42));
+  }
 });
 
 test("serializes open PR mergedAt metadata as null", () => {
@@ -453,13 +1118,17 @@ test("serializes open PR mergedAt metadata as null", () => {
   assert.match(JSON.stringify(summary), /"mergedAt":null/);
 });
 
-test("fails open PR collection closed when its head or state changes", () => {
+test("fails open PR collection closed when its metadata snapshot changes", () => {
   const head = "a".repeat(40);
   const initial = {
     number: 42,
     merged_at: null,
     state: "open",
     head: { sha: head },
+    updated_at: "2026-09-01T00:00:00Z",
+    comments: 2,
+    review_comments: 3,
+    commits: 4,
   };
   const stable = structuredClone(initial);
   assert.equal(
@@ -471,10 +1140,17 @@ test("fails open PR collection closed when its head or state changes", () => {
     { ...structuredClone(initial), state: "closed" },
     { ...structuredClone(initial), merged_at: "2026-09-01T00:00:00Z" },
     { ...structuredClone(initial), head: {} },
+    {
+      ...structuredClone(initial),
+      updated_at: "2026-09-01T00:00:01Z",
+    },
+    { ...structuredClone(initial), comments: 3 },
+    { ...structuredClone(initial), review_comments: 4 },
+    { ...structuredClone(initial), commits: 5 },
   ]) {
     assert.throws(
       () => assertOpenPullRequestSnapshotStable(initial, changed, 42),
-      /pull request #42 changed during collection/,
+      /pull request #42 (?:changed during collection|has inconsistent open metadata)/,
     );
   }
   const missingHead = { ...structuredClone(initial), head: {} };
@@ -482,6 +1158,30 @@ test("fails open PR collection closed when its head or state changes", () => {
     () => assertOpenPullRequestSnapshotStable(missingHead, missingHead, 42),
     /pull request #42 changed during collection/,
   );
+  for (const field of [
+    "updated_at",
+    "comments",
+    "review_comments",
+    "commits",
+  ]) {
+    const malformed = structuredClone(initial);
+    delete malformed[field];
+    assert.throws(
+      () => assertOpenPullRequestSnapshotStable(malformed, malformed, 42),
+      /pull request #42 changed during collection/,
+    );
+  }
+  for (const malformed of [
+    { ...structuredClone(initial), updated_at: "invalid" },
+    { ...structuredClone(initial), comments: -1 },
+    { ...structuredClone(initial), review_comments: 1.5 },
+    { ...structuredClone(initial), commits: "4" },
+  ]) {
+    assert.throws(
+      () => assertOpenPullRequestSnapshotStable(malformed, malformed, 42),
+      /pull request #42 changed during collection/,
+    );
+  }
 });
 
 test("selects merged PRs in the half-open UTC interval", () => {
@@ -949,6 +1649,149 @@ test("attributes CodeRabbit run IDs only to CodeRabbit-authored records", () => 
   assert.equal(reviewRuns.byBot.codex, 0);
 });
 
+test("ignores blockquoted and fenced CodeRabbit signal fixtures", () => {
+  const value = structuredClone(fixture);
+  value.issueComments = [];
+  const signalCases = [
+    {
+      field: "pauses",
+      body: [
+        "<!-- This is an auto-generated comment: review paused by coderabbit.ai -->",
+        "> ## Reviews paused",
+        "> Reviews paused due to new commits.",
+      ].join("\n"),
+    },
+    {
+      field: "rateLimits",
+      body: [
+        "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->",
+        "> ## Review limit reached",
+      ].join("\n"),
+    },
+    {
+      field: "pathFilterSkips",
+      body: [
+        "<!-- This is an auto-generated comment: skip review by coderabbit.ai -->",
+        "> ## Review skipped",
+        "> Review was skipped due to path filters",
+      ].join("\n"),
+    },
+    {
+      field: "freeTierNotices",
+      body: [
+        "<!-- This is an auto-generated comment: skip review by coderabbit.ai -->",
+        "> This repository does not receive automatic reviews because it has fewer than 10 stars.",
+      ].join("\n"),
+    },
+  ];
+
+  for (const [index, { body }] of signalCases.entries()) {
+    const quotedBody = body
+      .split("\n")
+      .map((line) => `> ${line}`)
+      .join("\n");
+    value.issueComments.push(
+      {
+        id: 440 + index * 3,
+        user: { login: "coderabbitai[bot]", type: "Bot" },
+        body: `Archived fixture:\n\n${quotedBody}`,
+      },
+      {
+        id: 441 + index * 3,
+        user: { login: "coderabbitai[bot]", type: "Bot" },
+        body: `Archived fixture:\n\n\`\`\`markdown\n${body}\n\`\`\``,
+      },
+      {
+        id: 442 + index * 3,
+        user: { login: "coderabbitai[bot]", type: "Bot" },
+        body,
+      },
+    );
+  }
+
+  const signals = summarizeFixture(value).evidence.signals;
+  for (const [index, { field }] of signalCases.entries()) {
+    assert.equal(signals[field].count, 1);
+    assert.deepEqual(
+      signals[field].evidence.map(({ id }) => id),
+      [String(442 + index * 3)],
+    );
+  }
+});
+
+test("masks non-prose status payloads after root CodeRabbit markers", () => {
+  const value = structuredClone(fixture);
+  value.issueComments = [];
+  const signalCases = [
+    {
+      field: "pauses",
+      marker:
+        "<!-- This is an auto-generated comment: review paused by coderabbit.ai -->",
+      status: "## Reviews paused",
+    },
+    {
+      field: "rateLimits",
+      marker:
+        "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->",
+      status: "## Review limit reached",
+    },
+    {
+      field: "pathFilterSkips",
+      marker:
+        "<!-- This is an auto-generated comment: skip review by coderabbit.ai -->",
+      status: "Review was skipped due to path filters",
+    },
+    {
+      field: "freeTierNotices",
+      marker:
+        "<!-- This is an auto-generated comment: skip review by coderabbit.ai -->",
+      status:
+        "This repository does not receive automatic reviews because it has fewer than 10 stars.",
+    },
+  ];
+  let id = 500;
+
+  for (const signalCase of signalCases) {
+    const { marker, status } = signalCase;
+    const ignoredBodies = [
+      `${marker}\n\`\`\`markdown\n${status}\n\`\`\``,
+      `${marker}\nExample: \`${status}\``,
+      `${marker}\n    ${status}`,
+      `${marker}\n<pre>${status}</pre>`,
+      `${marker}\n<blockquote>${status}</blockquote>`,
+      `${marker}\n> \`\`\`markdown\n> ${status}\n> \`\`\``,
+      `Archived fixture:\n${marker}\n${status}`,
+      `    ${marker}\n${status}`,
+      `\`${marker}\`\n${status}`,
+      `<pre>${marker}</pre>\n${status}`,
+    ];
+    for (const body of ignoredBodies) {
+      value.issueComments.push({
+        id,
+        user: { login: "coderabbitai[bot]", type: "Bot" },
+        body,
+      });
+      id += 1;
+    }
+    signalCase.liveId = id;
+    value.issueComments.push({
+      id,
+      user: { login: "coderabbitai[bot]", type: "Bot" },
+      body: `${marker}\n> ${status}`,
+    });
+    id += 1;
+  }
+
+  const signals = summarizeFixture(value).evidence.signals;
+  for (const { field, liveId } of signalCases) {
+    assert.equal(signals[field].count, 1);
+    assert.deepEqual(
+      signals[field].evidence.map(({ id: evidenceId }) => evidenceId),
+      [String(liveId)],
+    );
+  }
+});
+
 test("counts review runs only from canonical CodeRabbit completion evidence", () => {
   const value = structuredClone(fixture);
   const completedBody = (
@@ -1065,12 +1908,97 @@ test("counts review runs only from canonical CodeRabbit completion evidence", ()
       ),
     },
   );
+  const archivedCompletion = completedBody(
+    "summarize",
+    "dededede-dede-dede-dede-dededededede",
+  );
+  value.issueComments.push({
+    id: 430,
+    user: { login: "coderabbitai[bot]", type: "Bot" },
+    body: archivedCompletion.replace(
+      "<!-- recent_review_start -->",
+      "\\<blockquote>\n<!-- recent_review_start -->",
+    ),
+  });
+  value.issueComments.push(
+    ...[
+      archivedCompletion
+        .split("\n")
+        .map((line) => `> ${line}`)
+        .join("\n"),
+      `\`\`\`markdown\n${archivedCompletion}\n\`\`\``,
+      `<blockquote>\n${archivedCompletion}\n</blockquote>`,
+      `<pre>\n${archivedCompletion}\n</pre>`,
+      `Archived fixture:\n${archivedCompletion}`,
+      archivedCompletion
+        .replace(
+          "<!-- recent_review_start -->",
+          "`<!-- recent_review_start -->`",
+        )
+        .replace("<!-- recent_review_end -->", "`<!-- recent_review_end -->`"),
+      archivedCompletion.replace(
+        "No actionable comments were generated in the recent review.",
+        "> No actionable comments were generated in the recent review.",
+      ),
+      archivedCompletion.replace(
+        "**Run ID**: `dededede-dede-dede-dede-dededededede`",
+        "```text\n**Run ID**: `dededede-dede-dede-dede-dededededede`\n```",
+      ),
+      archivedCompletion
+        .replace(
+          "<!-- recent_review_start -->",
+          'The format opens with "<!-- recent_review_start -->".',
+        )
+        .replace(
+          "<!-- recent_review_end -->",
+          'The format closes with "<!-- recent_review_end -->".',
+        ),
+      archivedCompletion.replace(
+        "**Run ID**: `dededede-dede-dede-dede-dededededede`",
+        "`**Run ID**: dededede-dede-dede-dede-dededededede`",
+      ),
+      archivedCompletion.replace(
+        "**Run ID**: `dededede-dede-dede-dede-dededededede`",
+        "[**Run ID**: `dededede-dede-dede-dede-dededededede`](https://example.test)",
+      ),
+      archivedCompletion.replace(
+        "**Run ID**: `dededede-dede-dede-dede-dededededede`",
+        "![**Run ID**: `dededede-dede-dede-dede-dededededede`](https://example.test/run.png)",
+      ),
+      archivedCompletion.replace(
+        "**Run ID**: `dededede-dede-dede-dede-dededededede`",
+        "Example **Run ID**: `dededede-dede-dede-dede-dededededede`",
+      ),
+      archivedCompletion
+        .replace(
+          "<!-- recent_review_start -->",
+          "<!-- archived\n<!-- recent_review_start -->\n-->",
+        )
+        .replace(
+          "<!-- recent_review_end -->",
+          "<!-- archived\n<!-- recent_review_end -->\n-->",
+        ),
+      archivedCompletion
+        .replace(
+          "<!-- recent_review_start -->",
+          "<details>\n<!-- recent_review_start -->",
+        )
+        .replace(
+          "<!-- recent_review_end -->",
+          "<!-- recent_review_end -->\n</details>",
+        ),
+    ].map((body, index) => ({
+      id: 422 + index,
+      user: { login: "coderabbitai[bot]", type: "Bot" },
+      body,
+    })),
+  );
 
   const signals = summarizeFixture(value).evidence.signals;
-  assert.equal(signals.reviewRuns.count, 4);
+  assert.equal(signals.reviewRuns.count, 5);
   assert.deepEqual(
     signals.reviewRuns.evidence.map(({ id }) => id),
-    ["101", "410", "411", "419"],
+    ["101", "410", "411", "419", "430"],
   );
   assert.equal(signals.pauses.count, 2);
   assert.equal(signals.rateLimits.count, 2);
@@ -1104,6 +2032,18 @@ test("extracts one unambiguous Run ID from CodeRabbit review submissions", () =>
       user: { login: "coderabbitai[bot]", type: "Bot" },
       body: "**Run ID**: `cccccccc-cccc-cccc-cccc-cccccccccccc`\n**Run ID**: `dddddddd-dddd-dddd-dddd-dddddddddddd`",
     },
+    ...[
+      "`**Run ID**: eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee`",
+      "> **Run ID**: `eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee`",
+      "```text\n**Run ID**: `eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee`\n```",
+      "[**Run ID**: `eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee`](https://example.test)",
+      "<pre>**Run ID**: `eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee`</pre>",
+    ].map((body, index) => ({
+      id: 504 + index,
+      state: "COMMENTED",
+      user: { login: "coderabbitai[bot]", type: "Bot" },
+      body,
+    })),
   ];
 
   const reviewRuns = summarizeFixture(value).evidence.signals.reviewRuns;
@@ -2772,7 +3712,7 @@ test("treats numeric zero summaries as empty without hiding defect prose", () =>
       { id: "319", finding: true, findingSignal: "high severity" },
       { id: "320", finding: true, findingSignal: "high severity" },
       { id: "321", finding: true, findingSignal: "high severity" },
-      { id: "322", finding: true, findingSignal: "P1 Badge" },
+      { id: "322", finding: false, findingSignal: null },
       { id: "323", finding: false, findingSignal: null },
       { id: "324", finding: false, findingSignal: null },
       { id: "325", finding: false, findingSignal: null },
@@ -2795,7 +3735,7 @@ test("treats numeric zero summaries as empty without hiding defect prose", () =>
       { id: "342", finding: false, findingSignal: null },
       { id: "343", finding: false, findingSignal: null },
       { id: "344", finding: true, findingSignal: "high severity" },
-      { id: "345", finding: true, findingSignal: "P1 Badge" },
+      { id: "345", finding: false, findingSignal: null },
       { id: "346", finding: true, findingSignal: "High severity" },
       { id: "347", finding: false, findingSignal: null },
       { id: "348", finding: true, findingSignal: "High severity" },
@@ -3065,6 +4005,64 @@ test("masks only parsed Markdown code blocks and block quotes", () => {
   assert.match(maskedAlert, /\[P2\] live alert finding/);
 });
 
+test("masks rendered Markdown and HTML syntax without masking prose", () => {
+  for (const source of [
+    "<em>Context.</em> One [P1] issue remains.",
+    "[Context.](https://example.test) One [P1] issue remains.",
+    "<div>\nContext. One [P1] issue remains.\n</div>",
+  ]) {
+    const masked = maskMarkdownFormattingSyntax(source);
+    assert.equal(masked.length, source.length);
+    assert.match(masked, /Context\./);
+    assert.match(masked, /One \[P1\] issue remains\./);
+    assert.doesNotMatch(masked, /<\/?(?:em|div)>|example\.test/);
+  }
+  assert.equal(
+    maskMarkdownFormattingSyntax("![P1 Badge](https://example.test/badge)"),
+    " ".repeat("![P1 Badge](https://example.test/badge)".length),
+  );
+  assert.equal(
+    actionableFindingSignal(
+      '<span data-severity="high severity">Context.</span> No issues remain.',
+      "claude",
+    ),
+    null,
+  );
+  assert.equal(
+    actionableFindingSignal(
+      "[Context.](https://example.test/high-severity) No issues remain.",
+      "claude",
+    ),
+    null,
+  );
+  for (const source of [
+    "![high severity]\n\n[high severity]: https://example.test/badge",
+    "[P1]\n\n[P1]: https://example.test/reference",
+    '[reference]: https://example.test "high severity"',
+    '[reference]: https://example.test "changes requested"',
+  ]) {
+    assert.equal(actionableFindingSignal(source, "claude"), null, source);
+  }
+  assert.equal(
+    actionableFindingSignal(
+      "[P1 Badge][finding] issue remains.\n\n[finding]: https://example.test",
+      "claude",
+    ),
+    "P1 Badge",
+  );
+  for (const [source, signal] of [
+    ["P1 <em>Badge</em>: parser crashes.", "P1 Badge"],
+    ["P1 [Badge](https://example.test): parser crashes.", "P1 Badge"],
+    ["P1 *Badge*: parser crashes.", "P1 Badge"],
+    ["High <em>severity</em>: parser crashes.", "High severity"],
+    ["high **severity**: parser crashes.", "high severity"],
+    ["Changes <em>requested</em>: parser crashes.", "Changes requested"],
+    ["**changes** requested: parser crashes.", "changes requested"],
+  ]) {
+    assert.equal(actionableFindingSignal(source, "claude"), signal, source);
+  }
+});
+
 test("ignores Markdown code blocks and block-quoted finding examples", () => {
   const value = structuredClone(fixture);
   value.reviews = [
@@ -3331,11 +4329,65 @@ test("ignores Markdown code blocks and block-quoted manual review examples", () 
       user: { login: "maintainer", type: "User" },
       body: "> [!NOTE]\n> @cursor review",
     },
+    {
+      id: 117,
+      author_association: "OWNER",
+      user: { login: "maintainer", type: "User" },
+      body: `<blockquote>\n@coderabbitai review\n<!-- coderabbit-final-head-review:${"a".repeat(40)} -->\n</blockquote>`,
+    },
+    {
+      id: 118,
+      author_association: "OWNER",
+      user: { login: "maintainer", type: "User" },
+      body: "<pre>\n@coderabbitai review\n</pre>",
+    },
+    {
+      id: 119,
+      author_association: "OWNER",
+      user: { login: "maintainer", type: "User" },
+      body: `@coderabbitai review\n<blockquote><!-- coderabbit-final-head-review:${"a".repeat(40)} --></blockquote>`,
+    },
+    {
+      id: 120,
+      author_association: "OWNER",
+      user: { login: "maintainer", type: "User" },
+      body: "`<blockquote>`\n\n@coderabbitai review",
+    },
+    {
+      id: 121,
+      author_association: "OWNER",
+      user: { login: "maintainer", type: "User" },
+      body: "```html\n<pre>\n```\n\n@codex review",
+    },
+    {
+      id: 122,
+      author_association: "OWNER",
+      user: { login: "maintainer", type: "User" },
+      body: `@coderabbitai review\n<!-- archived\n<!-- coderabbit-final-head-review:${"a".repeat(40)} -->\n-->`,
+    },
+    {
+      id: 123,
+      author_association: "OWNER",
+      user: { login: "maintainer", type: "User" },
+      body: "\\<blockquote>\n\n@coderabbitai review",
+    },
+    {
+      id: 124,
+      author_association: "OWNER",
+      user: { login: "maintainer", type: "User" },
+      body: "\\\\<blockquote>\n\n@coderabbitai review",
+    },
+    {
+      id: 125,
+      author_association: "OWNER",
+      user: { login: "maintainer", type: "User" },
+      body: `@coderabbitai review\n<details>\n<summary>Archived example</summary>\n<!-- coderabbit-final-head-review:${"a".repeat(40)} -->\n</details>`,
+    },
   ];
 
   const manual = summarizeFixture(value).evidence.signals.manualRequests;
-  assert.equal(manual.count, 3);
-  assert.equal(manual.bare, 3);
+  assert.equal(manual.count, 9);
+  assert.equal(manual.bare, 9);
   assert.equal(manual.markedExactHead, 0);
   assert.equal(manual.unknown, 0);
   assert.deepEqual(
@@ -3343,6 +4395,12 @@ test("ignores Markdown code blocks and block-quoted manual review examples", () 
     [
       { target: "codex", marker: "bare" },
       { target: "claude", marker: "bare" },
+      { target: "coderabbit", marker: "bare" },
+      { target: "coderabbit", marker: "bare" },
+      { target: "coderabbit", marker: "bare" },
+      { target: "codex", marker: "bare" },
+      { target: "coderabbit", marker: "bare" },
+      { target: "coderabbit", marker: "bare" },
       { target: "coderabbit", marker: "bare" },
     ],
   );
@@ -4186,6 +5244,7 @@ test("keeps every review-metrics source module under 600 physical lines", () => 
     "review-process-metrics.mjs",
     "review-process-metrics-core.mjs",
     "review-process-metrics-finding-classifier.mjs",
+    "review-process-metrics-finding-preflight.mjs",
     "review-process-metrics-legacy.mjs",
     "review-process-metrics-markdown.mjs",
     "review-process-metrics-report.mjs",

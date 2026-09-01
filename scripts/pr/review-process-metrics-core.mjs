@@ -479,6 +479,21 @@ function addEvidenceRecord(botEvidence, surface, record) {
   }
   target.evidence.push(record);
 }
+function recordFindingSignal(
+  value,
+  bot,
+  { prUrl, surface, reviewState = null },
+) {
+  try {
+    return actionableFindingSignal(value.body, bot, { reviewState });
+  } catch (error) {
+    const recordId = String(value.id ?? value.node_id ?? "unknown");
+    throw new Error(
+      `finding classification failed for ${prUrl}, ${surface} record ${recordId}: ${error.message}`,
+      { cause: error },
+    );
+  }
+}
 
 export function buildPerBotEvidence({
   prUrl,
@@ -501,7 +516,10 @@ export function buildPerBotEvidence({
   for (const comment of issueComments) {
     const bot = botKeyForEvidence(comment, prUrl);
     if (!bot) continue;
-    const findingSignal = actionableFindingSignal(comment.body, bot);
+    const findingSignal = recordFindingSignal(comment, bot, {
+      prUrl,
+      surface: "issue_comments",
+    });
     const finding = findingSignal !== null;
     addEvidenceRecord(byBot[bot], "issue_comments", {
       ...baseEvidence(comment, {
@@ -516,7 +534,9 @@ export function buildPerBotEvidence({
   for (const review of reviews) {
     const bot = botKeyForEvidence(review, prUrl);
     if (!bot) continue;
-    const findingSignal = actionableFindingSignal(review.body, bot, {
+    const findingSignal = recordFindingSignal(review, bot, {
+      prUrl,
+      surface: "review_submissions",
       reviewState: review.state,
     });
     const finding = findingSignal !== null;
@@ -537,7 +557,10 @@ export function buildPerBotEvidence({
     if (!bot) continue;
     const isRoot = comment.in_reply_to_id == null;
     const findingSignal = isRoot
-      ? actionableFindingSignal(comment.body, bot)
+      ? recordFindingSignal(comment, bot, {
+          prUrl,
+          surface: "review_comments",
+        })
       : null;
     const finding = findingSignal !== null;
     const disposition = finding

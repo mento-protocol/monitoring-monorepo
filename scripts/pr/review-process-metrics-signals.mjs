@@ -1,3 +1,5 @@
+import { fromMarkdown } from "mdast-util-from-markdown";
+
 import {
   REVIEW_BOT_KEYS,
   authorLogin,
@@ -11,12 +13,32 @@ import {
 } from "./review-process-metrics-timeline.mjs";
 import { maskMarkdownNonProse } from "./review-process-metrics-markdown.mjs";
 
+const CANONICAL_RUN_ID_LINE =
+  /^ {0,3}\*\*Run ID\*\*:[ \t]*`([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})`[ \t]*(?=\r?$)/gim;
+
+function rootLines(value, pattern, nodeType, exactNode = false) {
+  const source = String(value ?? "");
+  const ranges = fromMarkdown(source)
+    .children.filter(
+      ({ type, children = [] }) =>
+        type === nodeType && !children.some((child) => child.type === "html"),
+    )
+    .map(({ position }) => [position.start.offset, position.end.offset]);
+  return [...source.matchAll(pattern)].filter((match) => {
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    return ranges.some(([nodeStart, nodeEnd]) =>
+      exactNode
+        ? nodeStart === start && nodeEnd === end
+        : nodeStart <= start && nodeEnd >= end,
+    );
+  });
+}
+
 function extractRunIds(body) {
-  return [
-    ...String(body ?? "").matchAll(
-      /\*\*Run ID\*\*:\s*`?([0-9a-f][0-9a-f-]{7,})`?/gi,
-    ),
-  ].map((match) => match[1].toLowerCase());
+  return rootLines(body, CANONICAL_RUN_ID_LINE, "paragraph").map((match) =>
+    match[1].toLowerCase(),
+  );
 }
 
 function signalEvidence(value, { prUrl, type, surface = "issue_comments" }) {
@@ -26,31 +48,66 @@ function signalEvidence(value, { prUrl, type, surface = "issue_comments" }) {
   };
 }
 
+const ROOT_CODERABBIT_SIGNAL_MARKER =
+  /^(?:[ \t]*\r?\n)*(?: {0,3}<!--\s*This is an auto-generated comment:\s*summarize by coderabbit\.ai\s*-->[ \t]*\r?\n)? {0,3}<!--\s*This is an auto-generated comment:\s*(review paused|rate limited|skip review) by coderabbit\.ai\s*-->[ \t]*(?:\r?\n|$)/i;
+const ROOT_CODERABBIT_COMPLETION_MARKER =
+  /^(?:[ \t]*\r?\n)*(?: {0,3}<!--\s*This is an auto-generated comment:\s*summarize by coderabbit\.ai\s*-->[ \t]*\r?\n)? {0,3}<!--\s*This is an auto-generated comment:\s*(?:summarize|skip review) by coderabbit\.ai\s*-->[ \t]*(?:\r?\n|$)/i;
+const RECENT_REVIEW_MARKER =
+  /^ {0,3}<!--[ \t]*recent_review_(start|end)[ \t]*-->[ \t]*(?=\r?$)/gim;
+const ROOT_CODERABBIT_FINAL_HEAD_COMMENT =
+  /^ {0,3}<!--\s*coderabbit-final-head-review:[\s\S]*?(?:-->|(?![\s\S]))[ \t]*(?=\r?(?:\n|$))/gim;
+const ROOT_CODERABBIT_FINAL_HEAD_MARKER =
+  /^ {0,3}<!--\s*coderabbit-final-head-review:([0-9a-f]{40})\s*-->[ \t]*(?=\r?$)/gim;
+
+function directBlockquoteStatusEnvelope(value) {
+  const source = String(value ?? "");
+  const leadingBlank = /^(?:[ \t]*\r?\n)*/.exec(source)?.[0] ?? "";
+  let cursor = leadingBlank.length;
+  let envelope = "";
+  while (cursor < source.length) {
+    const newline = source.indexOf("\n", cursor);
+    const lineEnd = newline === -1 ? source.length : newline + 1;
+    const line = source.slice(cursor, lineEnd);
+    const quoted = /^[ \t]{0,3}>[ \t]?([^\r\n]*)(\r?\n|$)/.exec(line);
+    if (quoted === null || quoted[0].length !== line.length) break;
+    envelope += `${quoted[1]}${quoted[2]}`;
+    cursor = lineEnd;
+  }
+  return envelope === "" ? source : envelope;
+}
+
 function detectedCodeRabbitSignals(comment) {
   const body = String(comment.body ?? "");
+  const marker = ROOT_CODERABBIT_SIGNAL_MARKER.exec(body);
+  if (marker === null) return [];
+  const markerKind = marker[1].toLowerCase();
+  const statusText = maskMarkdownNonProse(
+    directBlockquoteStatusEnvelope(body.slice(marker[0].length)),
+    { maskRawHtmlNonProse: true },
+  );
   const signals = [];
   if (
-    /auto-generated comment:\s*review paused by coderabbit\.ai/i.test(body) &&
-    /##\s*Reviews paused/i.test(body)
+    markerKind === "review paused" &&
+    /##\s*Reviews paused/i.test(statusText)
   ) {
     signals.push("pause");
   }
   if (
-    /auto-generated comment:\s*rate limited by coderabbit\.ai/i.test(body) &&
-    /##\s*Review limit reached/i.test(body)
+    markerKind === "rate limited" &&
+    /##\s*Review limit reached/i.test(statusText)
   ) {
     signals.push("rate_limit");
   }
   if (
-    /auto-generated comment:\s*skip review by coderabbit\.ai/i.test(body) &&
-    /Review was skipped due to path filters/i.test(body)
+    markerKind === "skip review" &&
+    /Review was skipped due to path filters/i.test(statusText)
   ) {
     signals.push("path_filter_skip");
   }
   if (
-    /auto-generated comment:\s*skip review by coderabbit\.ai/i.test(body) &&
+    markerKind === "skip review" &&
     /does not receive automatic reviews because it has fewer than 10 stars/i.test(
-      body,
+      statusText,
     )
   ) {
     signals.push("free_tier_notice");
@@ -66,36 +123,34 @@ function completedCodeRabbitReviewRunIds(value, surface) {
   }
   if (surface !== "issue_comments") return [];
 
-  if (
-    !/<!--\s*This is an auto-generated comment:\s*(?:summarize|skip review) by coderabbit\.ai\s*-->/i.test(
-      body,
-    )
-  ) {
-    return [];
-  }
-
-  const starts = [...body.matchAll(/<!--\s*recent_review_start\s*-->/gi)];
-  const ends = [...body.matchAll(/<!--\s*recent_review_end\s*-->/gi)];
+  const rootMarker = ROOT_CODERABBIT_COMPLETION_MARKER.exec(body);
+  if (rootMarker === null) return [];
+  const source = body.slice(rootMarker[0].length);
+  const markers = rootLines(source, RECENT_REVIEW_MARKER, "html", true);
+  const starts = markers.filter(([, kind]) => kind.toLowerCase() === "start");
+  const ends = markers.filter(([, kind]) => kind.toLowerCase() === "end");
   if (starts.length !== 1 || ends.length !== 1) return [];
 
   const blockStart = (starts[0].index ?? 0) + starts[0][0].length;
   const blockEnd = ends[0].index ?? -1;
   if (blockEnd < blockStart) return [];
 
-  const block = body.slice(blockStart, blockEnd);
+  const block = maskMarkdownNonProse(source, {
+    maskRawHtmlNonProse: true,
+  }).slice(blockStart, blockEnd);
   if (
-    !/(?:^|\n)[ \t]*>?[ \t]*No actionable comments were generated in the recent review\.(?:[ \t]+🎉)?[ \t]*(?=\r?(?:\n|$))/i.test(
+    !/(?:^|\n)[ \t]*No actionable comments were generated in the recent review\.(?:[ \t]+🎉)?[ \t]*(?=\r?(?:\n|$))/i.test(
       block,
     )
   ) {
     return [];
   }
-  const runIds = extractRunIds(block);
+  const runIds = extractRunIds(source.slice(blockStart, blockEnd));
   return runIds.length === 1 ? runIds : [];
 }
 
 function requestTargets(body) {
-  const text = maskMarkdownNonProse(body);
+  const text = maskMarkdownNonProse(body, { maskRawHtmlNonProse: true });
   return [
     ["coderabbit", /(?:^|\n)\s*@coderabbitai\s+review\s*(?:\n|$)/i],
     ["codex", /(?:^|\n)\s*@codex\s+review\s*(?:\n|$)/i],
@@ -289,10 +344,12 @@ function proveMarkerHeadAtComment(comment, markerHead, timeline) {
 }
 
 function classifyRequestMarker(comment, target, knownHeads, timeline) {
-  const text = maskMarkdownNonProse(comment.body);
-  const markerStarts = [
-    ...text.matchAll(/<!--\s*coderabbit-final-head-review:/gi),
-  ];
+  const markerStarts = rootLines(
+    comment.body,
+    ROOT_CODERABBIT_FINAL_HEAD_COMMENT,
+    "html",
+    true,
+  );
   if (target !== "coderabbit" || markerStarts.length === 0) {
     return {
       kind: "bare",
@@ -303,11 +360,12 @@ function classifyRequestMarker(comment, target, knownHeads, timeline) {
       timelineCommentIndex: null,
     };
   }
-  const heads = [
-    ...text.matchAll(
-      /<!--\s*coderabbit-final-head-review:([0-9a-f]{40})\s*-->/gi,
-    ),
-  ].map((match) => match[1].toLowerCase());
+  const heads = rootLines(
+    comment.body,
+    ROOT_CODERABBIT_FINAL_HEAD_MARKER,
+    "html",
+    true,
+  ).map((match) => match[1].toLowerCase());
   if (markerStarts.length !== 1 || heads.length !== 1) {
     return {
       kind: "unknown",

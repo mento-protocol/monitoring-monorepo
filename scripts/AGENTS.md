@@ -42,28 +42,26 @@ Eight docs and `.config/wt.toml` pin flat `setup.sh`.
 ADR 0064 keeps `redrive-onchain-deadletter.{mjs,test.mjs}` flat in
 `alerts/infra/` for lint.
 
-Shared `lib/` cores: `hcl.mjs` (Terraform HCL), `workflow-yaml.mjs` (Actions/shell),
+`lib/` cores: `hcl.mjs` (Terraform HCL), `workflow-yaml.mjs` (Actions/shell),
 `pnpm-override-selector.mjs` (pnpm overrides), and `gh-issue-lifecycle.mjs`
-(shared issue/label mechanics; doc schedulers read it). Projection keeps
-`agent-ready` on create and all lifecycle labels on closed repair. ADR 0064
-lists readers.
-`peg-policy-digest.mjs` defines the peg version-digest contract for both
-validators. Inventories, pinned hashes, and identities stay with their domain.
+(issue/label mechanics; doc schedulers read it). Creation keeps
+`agent-ready`; closed repair keeps lifecycle labels. ADR 0064 lists readers.
+`peg-policy-digest.mjs` defines both validators' peg version digest. Keep
+inventories, pinned hashes, and identities in their domain.
 
 ## Why Files Stay Flat
 
 Move 15 path-pin classes with files except `agent-autoreview.sh`
 feedback-runtime pins.
 
-- **Autoreview runtime pins.** `agent-autoreview.sh` pins runtime, sealed
+- **Autoreview runtime pins.** `agent-autoreview.sh` pins its runtime, sealed
   `agent-autoreview-secret-suppressions.json` (ADR 0079), and optional
   `pr-feedback-state-claude.mjs` and `pr-ready-state-review-signals.mjs`.
-  Feedback uses `origin/main`. Use ADR 0064's three-merge move sequence.
-- **Gate routing pins.** Stub tests require
+  Feedback reads `origin/main`; ADR 0064 owns the three-merge move.
+- **Gate routing pins.** Stubs require
   `$script_source_dir == $repo_root/scripts`.
-  `pr/review-process-metrics{,-{core,finding-classifier,legacy,markdown,report,signals,timeline},.test}.mjs`
-  and
-  `pr/fixtures/review-process-metrics-coderabbit.json` use exact routes.
+  `pr/review-process-metrics{,-{core,finding-{classifier,preflight},legacy,markdown,report,signals,timeline},.test}.mjs`
+  and `pr/fixtures/review-process-metrics-coderabbit.json` have exact routes.
   `bootstrap/codex-cloud-setup.{sh,test.sh}` pair for offline tests.
   `sentry/autofix/sentry-autofix-refused-inventory.mjs` routes
   `pnpm sentry:autofix:{run-record,finalize}:test`. Exact
