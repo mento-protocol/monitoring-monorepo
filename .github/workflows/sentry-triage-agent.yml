@@ -322,7 +322,21 @@ jobs:
     # the bare `mcp__github`-style aggregate selectors alongside the
     # `mcp__github__` prefixes when deciding whether to add the action's OWN
     # built-in GitHub servers; it does not touch how a user-supplied
-    # --mcp-config server is launched or what env it reads. So there is still
+    # --mcp-config server is launched or what env it reads.
+    #   SCOPE OF THAT AUDIT, stated plainly: it covers the action repository's
+    #   own env plumbing, not the bundled Claude Code CLI (2.1.234 to 2.1.243)
+    #   or Agent SDK, which is what actually launches the stdio Sentry MCP
+    #   server from --mcp-config. That launcher is a published binary, not
+    #   source in the pinned tree, so no bump audit can read it, and the
+    #   preflight probe below spawns the server directly rather than through
+    #   the action, so it cannot observe the launcher either. What bounds the
+    #   gap is the direction a launcher regression can fail: the handle is the
+    #   ONLY thing the server needs from job env, so a CLI that stopped
+    #   forwarding it leaves the server unable to authenticate to the broker
+    #   and the triage tools dead — loudly, and without exposing anything. The
+    #   credential is not in that env to leak. Widening what the CLI forwards
+    #   cannot reach a Sentry token either, for the same reason: it is not
+    #   there. So there is still
     # no per-step env passthrough and no
     # first-class MCP env input — upstream deprecated `mcp_config` in favour of
     # `claude_args: --mcp-config`, which takes a path or JSON, never env. So

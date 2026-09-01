@@ -643,19 +643,6 @@ Accepted with its bounding: it is inference-only, so worst case is
 inference-quota abuse, not repo or queue compromise, and any use lands in an
 auditable public comment. Re-check on the next action bump.
 
-The v1.0.202 bump was checked against v1.0.194 (`459ad358` → `e5ad3c77`) on the
-three files this boundary rests on. The root `action.yml` is byte-identical, so
-no input and no env channel moved. `base-action/action.yml` changed only its
-bundled CLI version, 2.1.234 to 2.1.243. `parse-sdk-options.ts` gained the
-`delete env.ALL_INPUTS` above — one variable fewer in the agent subprocess, and
-`{ ...process.env }` still seeds that env, so the residual is unchanged and its
-scope is strictly narrower. `src/mcp/install-mcp-server.ts` changed too, but
-only so a bare `mcp__github`-style aggregate selector counts alongside the
-`mcp__github__` prefixes when the action decides whether to add its own
-built-in GitHub MCP servers; it does not change how the Sentry server this
-pipeline passes through `--mcp-config` is launched or what env it reads. The
-handle therefore still reaches that server through job env, exactly as below.
-
 ### The credential broker
 
 [ADR 0056](../adr/0056-agent-mcp-credential-broker.md) owns the decision and its
