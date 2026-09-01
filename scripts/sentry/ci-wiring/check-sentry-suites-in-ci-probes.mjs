@@ -273,6 +273,14 @@ export const SENTINEL_MUTATIONS = [
   ],
   ["`continue-on-error`", (w) => (w.jobs.ci["continue-on-error"] = true)],
   [
+    "a conditional ordinary gate without its audit pair",
+    (w) => {
+      w.jobs.ci.steps = w.jobs.ci.steps.filter(
+        (step) => step.if !== "${{ inputs.no_skip_audit }}",
+      );
+    },
+  ],
+  [
     "`production-infra-contract` under `allowed-failures`",
     (w) => {
       allsGreenStep(w).with["allowed-failures"] = "production-infra-contract";

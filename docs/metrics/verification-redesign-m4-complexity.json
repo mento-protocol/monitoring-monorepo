@@ -111,7 +111,7 @@
     {
       "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-core.mjs",
       "category": "check",
-      "additions": 17,
+      "additions": 21,
       "deletions": 4
     },
     {
@@ -123,7 +123,7 @@
     {
       "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-probes.mjs",
       "category": "check",
-      "additions": 13,
+      "additions": 21,
       "deletions": 7
     },
     {
@@ -195,9 +195,9 @@
       "net": 266
     },
     "check": {
-      "additions": 255,
+      "additions": 267,
       "deletions": 52,
-      "net": 203
+      "net": 215
     },
     "test": {
       "additions": 268,
@@ -215,21 +215,21 @@
       "net": 0
     },
     "all": {
-      "additions": 1069,
+      "additions": 1081,
       "deletions": 199,
-      "net": 870
+      "net": 882
     }
   },
   "replacementSpecific": {
     "implementationAdditions": {
       "definition": "All action, workflow, package, and checker additions in the phase-scoped diff. Documentation and tests do not count as implementation additions.",
-      "total": 621
+      "total": 633
     },
     "testAdditions": {
       "definition": "All additions to phase-scoped test files, including the focused audit mutation suite.",
       "total": 268
     },
-    "testToImplementationRatio": 0.4316,
+    "testToImplementationRatio": 0.4234,
     "limits": {
       "thinOrchestrationScriptPhysicalLines": 180,
       "thinOrchestrationScriptUnder300": true,
@@ -237,7 +237,7 @@
       "newTestPhysicalLines": 171,
       "newReplacementFilePhysicalLineLimit": 500,
       "allNewReplacementFilesUnder500": true,
-      "twiceImplementationAdditions": 1242,
+      "twiceImplementationAdditions": 1266,
       "testAdditionsUnderTwiceImplementationAdditions": true
     }
   },

@@ -471,7 +471,11 @@ export function sentinelBlockers(workflow, trustedJobs) {
     ordinaryGates.length === 1 &&
     ordinaryGates[0].if === ordinaryCondition &&
     auditGates.length === 1;
-  if (!(allsGreen.length === 1 && ordinaryGates.length === 1) && !splitAudit) {
+  const unconditional =
+    allsGreen.length === 1 &&
+    ordinaryGates.length === 1 &&
+    ordinaryGates[0].if === undefined;
+  if (!unconditional && !splitAudit) {
     blockers.push(
       `the \`ci\` sentinel has an invalid alls-green split — it must have one ordinary gate, plus one mutually exclusive no-skip gate when audit mode exists`,
     );
