@@ -63,7 +63,10 @@ concurrency:
   group: ${{ inputs.no_skip_audit && format('ci-no-skip-{0}', github.run_id) || format('{0}-{1}', github.workflow, github.event_name == 'pull_request' && github.ref || github.sha) }}
   cancel-in-progress: ${{ !inputs.no_skip_audit }}
 
-permissions: read-all
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
 
 jobs:
   changes:
