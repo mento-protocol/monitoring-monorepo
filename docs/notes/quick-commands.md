@@ -17,7 +17,7 @@ file when a common repo command changes.
 
 ```bash
 # pnpm-workspace.yaml minimumReleaseAge blocks registry versions under 3 days,
-# including new frozen-lockfile entries; @mento-protocol/* and reviewed security releases are exempt.
+# frozen-lockfile entries included; @mento-protocol/* and reviewed security releases are exempt.
 pnpm install
 
 # Indexer: mainnet covers Ethereum reserve-yield, Celo, Monad, Polygon
@@ -31,9 +31,9 @@ pnpm deploy:indexer:logs <commit> --errors-only --since 2h  # Errors; narrow --s
 pnpm deploy:indexer:metrics <commit>  # Per-chain hosted indexing progress
 pnpm deploy:indexer:info <commit>     # Hosted deployment info/cache state
 pnpm deploy:indexer:perf <commit>     # Combined status/metrics/log snapshot for perf comparisons
-pnpm deploy:indexer:verify <commit>   # Require sync, core rows, schema-compatible sUSDS baseline/sampler integrity, and Polygon replay
+pnpm deploy:indexer:verify <commit>   # Require sync, core rows, schema-compatible sUSDS baseline/sampler integrity, Polygon replay
 pnpm deploy:indexer:promote <commit>  # Promote a synced deployment to prod
-pnpm deploy:indexer:verify <commit> --prod  # After propagation, match fixed-endpoint _meta identity to target; verify semantic data
+pnpm deploy:indexer:verify <commit> --prod  # After propagation, match fixed-endpoint _meta identity to target; verify data
 pnpm deploy:indexer:rollback <last-good-sha>  # Restore prod: re-promote if registered, else rebuild + resync
 
 # Code health (CodeScene-equivalent OSS checks)
@@ -47,41 +47,40 @@ pnpm code-health:schema-diff       # GraphQL breaking-change diff vs origin/main
 pnpm code-health                   # Run knip + deps; exclude history + duplication
 pnpm agent:quality-gate            # Map changed paths to required local checks and PR checklists
 pnpm agent:quality-gate --run      # Run mapped checks through the fair coordinator; default capacity 3
-# Package scripts, package-manager settings, and lockfiles can change install code. Review before acknowledgment:
+# Package scripts, package-manager settings, and lockfiles can change install code; review before acknowledging:
 pnpm agent:quality-gate --run --allow-package-script-changes
 pnpm agent:context-check           # Validate repo-visible agent instructions, links, and routing
 pnpm agent:review-materiality      # Classify review depth + context-update signals for current diff
-pnpm agent:autoreview              # Isolated closeout; multi-pass uses --prepare-bundle-dir DIR + a fresh reviewer; gate owns tests
+pnpm agent:autoreview              # Isolated closeout; multi-pass uses --prepare-bundle-dir DIR + fresh reviewer; gate owns tests
 pnpm agent:autoreview:test         # Full regressions; defaults to up to 3 workers with progress + timings
 pnpm agent:autoreview:test -- --jobs 1  # Sequential full closeout for autoreview runtime changes
 pnpm agent:autoreview --verify-bundle-dir DIR  # Pre-review rehash; retain the printed manifest digest
 pnpm agent:autoreview --verify-bundle-dir DIR --expected-bundle-manifest DIGEST  # Bound post-review rehash
 pnpm docs:index --write            # Regenerate docs/README.md from tracked + non-ignored untracked Markdown
 pnpm docs:index --check            # Fail on catalog drift, invalid classification, or broken internal Markdown links
-pnpm docs:audit --dry-run          # Print this week's bounded semantic-review packet without mutating documentation
-pnpm docs:garden --dry-run --json  # Read the queue; preview the exact weekly garden issue decision; no mutation
+pnpm docs:audit --dry-run          # Print this week's bounded semantic-review packet; no mutation
+pnpm docs:garden --dry-run --json  # Read the queue; preview the weekly garden issue decision; no mutation
 pnpm docs:navigation-eval -- --check-fixtures  # Check fresh-agent navigation questions, routes, and budgets
 pnpm docs:navigation-eval -- --prompt          # Print the bounded read-only prompt; no model call
-pnpm docs:navigation-eval -- --prompt --base-commit <full-sha>  # Pin a committed result to a reachable default-branch ancestor
+pnpm docs:navigation-eval -- --prompt --base-commit <full-sha>  # Pin a result to a reachable default-branch ancestor
 pnpm docs:navigation-eval -- --validate <result.json>  # Recompute authority, evidence, route, and context scores
 pnpm ci:contract:test             # Test fixed CI and protected no-skip admission, cache, base, and aggregate contracts
-# After M4 reaches main and before each approved proof, read the current immutable inputs:
+# After M4 reaches main, read fresh immutable inputs before each approved proof;
+# the audit refuses a stale baseRefOid, so update or rebase the branch first.
+# Stop after any run exceeds 45 runner-minutes, or 450 cumulative.
 gh pr view <pr> --json number,state,headRefOid,baseRefName,baseRefOid,headRepositoryOwner
-# The audit refuses a stale baseRefOid. Update or rebase the PR branch, then read fresh inputs.
-# Stop after any run exceeds 45 runner-minutes. Do not exceed 450 cumulative runner-minutes.
 gh workflow run no-skip-audit.yml --ref main -f pr_number=<pr> -f source_sha=<headRefOid> -f base_sha=<baseRefOid>
 pnpm verification:inventory:check  # Validate Phase 0 inventory schema, unique IDs, and complete dispositions
-pnpm verification:manifest:write   # Regenerate the terminal pre-M1 gate-rooted control-plane baseline manifest
-pnpm verification:manifest:check   # Recompute and compare the terminal pre-M1 baseline manifest
-pnpm verification:evidence:check   # Test the Phase 0 checker, replay the source patch, and run both non-writing evidence checks
+pnpm verification:manifest:write   # Regenerate the pre-M1 gate-rooted control-plane baseline manifest
+pnpm verification:manifest:check   # Recompute and compare that pre-M1 baseline manifest
+pnpm verification:evidence:check   # Test the Phase 0 checker, replay the source patch, run both non-writing evidence checks
 pnpm agent:context-budget --strict # Enforce root, scoped-file, and aggregate-route AGENTS byte caps
-# Run feedback-state first. Final all-clear needs the current-head Codex
-# PR-description +1 or this exact-head human override:
-# /pr-ready-override gate=codex-description-approval head=<full-head-sha> reason=<why this is safe>
+# Run feedback-state first. All-clear needs the current-head Codex PR-description
+# +1 or an exact-head /pr-ready-override comment; syntax in docs/notes/pr-ready-state.md.
 pnpm --silent pr:feedback-state --pr 123 --json  # Normalize unresolved/reply-required feedback before all-clear
 pnpm pr:ready-state --pr 123 --json              # Final current-head required-readiness probe
 pnpm pr:merge --pr 123   # Human-only sanctioned merge; --not-ready-reason "<why>" overrides
-node scripts/pr/review-process-metrics.mjs --prs <pr1,pr2,...> --output <result.json>  # Collect a new cohort after defining its boundary and tracking issue
+node scripts/pr/review-process-metrics.mjs --prs <pr1,pr2,...> --output <result.json>  # New cohort; define boundary + tracking issue first
 pnpm lockfile:lint                 # Fail-closed integrity/registry/override-floor check; no install
 pnpm skew:check                    # Fail on dependency skew vs pnpm catalog; no install
 pnpm sanitize:test                 # Fixture-test scripts/sanitize-terraform-output.sh secret redaction
@@ -91,8 +90,8 @@ pnpm adr:check                      # Advisory architecture reminder for new pac
 pnpm adr:check:test                 # Offline ADR-reminder tests
 node scripts/workflows/check-github-action-pins.mjs  # Verify SHA-pinned workflow/composite-action `uses:`
 node scripts/repo-health/check-hermetic-vitest-setup.mjs  # Verify byte-identical workspace Vitest network guards
-node scripts/repo-health/check-guardrail-prose.mjs  # Verify scripts/repo-health/guardrail-prose.json text in AGENTS.md + operating card
-node scripts/repo-health/file-size-watchlist.mjs  # Refresh package src/scripts source watchlist; --format issue targets GitHub, not BACKLOG.md
+node scripts/repo-health/check-guardrail-prose.mjs  # Verify guardrail-prose.json text in AGENTS.md + operating card
+node scripts/repo-health/file-size-watchlist.mjs  # Refresh package src/scripts watchlist; --format issue targets GitHub, not BACKLOG.md
 pnpm indexer:testnet:codegen       # Generate types (multichain testnet: Celo Sepolia + Monad testnet + Polygon Amoy)
 pnpm indexer:testnet:dev           # Start indexer (multichain testnet)
 
@@ -101,8 +100,8 @@ pnpm dashboard:dev            # Dev server; auth-state checks: docs/notes/dashbo
 pnpm dashboard:codegen        # Generate GraphQL operation types from indexer-envio/schema.graphql
 pnpm dashboard:build          # Production build
 pnpm dashboard:size-limit     # Check post-build bundle budgets
-pnpm dashboard:lighthouse:pool-fixture # Blocking deterministic production-build canonical pool fixture; delayed breaker revalidation; 1 700 ms median LCP
-pnpm --filter @mento-protocol/ui-dashboard test:browser                   # Fixture browser + visual snapshot tests on cached next build via next start
+pnpm dashboard:lighthouse:pool-fixture # Blocking deterministic canonical pool fixture; delayed breaker revalidation; 1 700 ms median LCP
+pnpm --filter @mento-protocol/ui-dashboard test:browser                   # Fixture browser + visual snapshot tests on cached next build
 pnpm --filter @mento-protocol/ui-dashboard test:browser:production        # Same with a fresh fixture build
 pnpm --filter @mento-protocol/ui-dashboard test:browser:update-snapshots # Rebaseline legitimate visual snapshot changes
 pnpm dashboard:mutation       # Targeted StrykerJS baseline for dashboard pure logic
@@ -119,29 +118,28 @@ pnpm integrations:probe:test   # Unit tests for probe adapters/parsers
 pnpm issue:claim --count 3 --agent codex       # Claim ready issues, record ownership, preserve Project Status
 pnpm issue:claim --issue 901 --agent codex --branch fix/901 --claim-id sweep-901 --sweep-eligible --body-sha256 <digest> # Claim one inspected sweep snapshot
 pnpm issue:review --pr 123 --issue 901         # Move claimed issue to in-pr / review
-pnpm issue:review --pr 123 --issue 901 --claim-id <id> --rebind-branch # Prove and bind a PR branch created after claim
+pnpm issue:review --pr 123 --issue 901 --claim-id <id> --rebind-branch # Bind a PR branch created after the claim
 pnpm issue:release --issue 901 --claim-id <id> # Release the matching claim back to agent-ready
 pnpm issue:release --issue 901 --claim-id <id> --closed-unmerged-pr # Release after the stored PR closes unmerged
-pnpm issue:release --issue 901 --claim-id <id> --merged-pr --needs-grooming # Continue a still-open issue after its stored PR merges
+pnpm issue:release --issue 901 --claim-id <id> --merged-pr --needs-grooming # Continue a still-open issue past its merged PR
 pnpm issue:board sync --dry-run                # Preview the repository-wide queue-label and Project projection
 pnpm issue:board sync                          # Apply the authorized projection; preserve Project Status
-pnpm issue:board backfill --issue 901 --dry-run # Preview fill-only ownership-field recovery from a trusted claim comment
+pnpm issue:board backfill --issue 901 --dry-run # Preview fill-only owner-field recovery from a trusted claim comment
 pnpm issue:board:test                          # Offline tests for the issue-board helper
 
 # Sentry triage pipeline (Stage A — deterministic ingest; Stage B — read-only triage + digest; ADR 0036)
 pnpm sentry:ingest --dry-run                   # Print queue-issue mutations without applying (needs local SENTRY_TRIAGE_TOKEN)
-pnpm sentry:ingest:test                        # Offline tests for the ingest helper (docs/notes/sentry-triage-pipeline.md)
+pnpm sentry:ingest:test                        # Offline ingest-helper tests (docs/notes/sentry-triage-pipeline.md)
 pnpm sentry:digest:test                        # Offline tests for the per-run Slack verdict-digest collector
 pnpm sentry:broker:test                        # Offline tests for the triage agent's loopback credential broker (ADR 0056)
-SENTRY_TRIAGE_ISSUES='[123]' pnpm sentry:digest --channel '#sentry-triage'  # Print a batch's Slack digest payload (gh auth; does not post)
+SENTRY_TRIAGE_ISSUES='[123]' pnpm sentry:digest --channel '#sentry-triage'  # Print a batch's Slack digest payload; does not post
 
 # Public config package
 pnpm --filter @mento-protocol/config build     # Clean-build the public protocol metadata package
 npm pack ./shared-config --dry-run             # Inspect the files that would publish to npm
-# First-time bootstrap: an npm maintainer must seed @mento-protocol/config once,
-# then configure trusted publishing for workflow filename `publish-config.yml`
-# in repository `mento-protocol/monitoring-monorepo`.
-# Manual workflow_dispatch runs validate and pack only; only config-v* tags publish.
+# First-time bootstrap: an npm maintainer seeds @mento-protocol/config once, then
+# configures trusted publishing for `publish-config.yml` in this repository.
+# Manual workflow_dispatch validates and packs only; only config-v* tags publish.
 git tag "config-v$(node -p "require('./shared-config/package.json').version")"  # Create the publish tag from main
 git push origin "config-v$(node -p "require('./shared-config/package.json').version")"  # Publish via .github/workflows/publish-config.yml
 
@@ -162,9 +160,9 @@ pnpm aegis:tf:init                         # Grafana folder/dashboard stack
 pnpm aegis:tf:plan
 
 # Infrastructure (Terraform)
-# `terraform.stacks.json` owns routing. `platform` uses human-approved local
-# apply; `peg-policy-publication` is workflow-only. Other stacks normally apply
-# on `main` behind `production-infra`; local apply needs clean current `main` or
+# `terraform.stacks.json` owns routing. `platform` applies locally with human
+# approval; `peg-policy-publication` is workflow-only. Other stacks apply on
+# `main` behind `production-infra`; local apply needs clean current `main` or a
 # deliberate `--force-local-apply`.
 pnpm tf list                  # Registered Terraform stacks from terraform.stacks.json
 pnpm tf validate <stack>      # fmt/init -backend=false/validate for one stack
@@ -183,9 +181,9 @@ pnpm tf validate alerts-rules
 pnpm alerts:rules:init
 pnpm alerts:rules:plan
 # CI applies alerts-rules, alerts-delivery, and Aegis after `production-infra`
-# reviewer approval; that acknowledges the commit and earlier plan, not the exact apply plan.
+# reviewer approval, which acknowledges the commit and earlier plan, not the exact apply plan.
 
 # Dev janitor
-bash scripts/repo-health/dev-janitor.sh          # Dry-run: report stale trunk repo caches, pnpm store, git worktrees, /private/tmp trees
-bash scripts/repo-health/dev-janitor.sh --apply  # Delete stale trunk repo caches, prune pnpm store, and run git worktree prune
+bash scripts/repo-health/dev-janitor.sh          # Dry-run: stale trunk caches, pnpm store, git worktrees, /private/tmp trees
+bash scripts/repo-health/dev-janitor.sh --apply  # Delete stale trunk caches, prune pnpm store, run git worktree prune
 ```
