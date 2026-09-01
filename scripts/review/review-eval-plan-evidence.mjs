@@ -73,6 +73,7 @@ export function planProvenanceProblems({
   contract,
   baselineRow = null,
   expectedComparabilityKey = null,
+  requirePortablePlanDir = false,
 }) {
   const problems = [];
   const checkBaselineStanding = () => {
@@ -103,6 +104,16 @@ export function planProvenanceProblems({
   } catch (error) {
     problems.push(error instanceof Error ? error.message : String(error));
     return problems;
+  }
+  if (
+    requirePortablePlanDir &&
+    (typeof plan.plan_dir !== "string" ||
+      path.isAbsolute(plan.plan_dir) ||
+      plan.plan_dir !== row.detail_dir)
+  ) {
+    problems.push(
+      `plan.json in ${row.detail_dir} must carry the same repository-relative plan_dir as the row detail_dir before publication; found ${JSON.stringify(plan.plan_dir)}`,
+    );
   }
   /** True when the plan carries the complete explicit-baseline fingerprint. */
   const validBaselineIdentity = (value) =>
