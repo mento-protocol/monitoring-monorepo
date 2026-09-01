@@ -3131,7 +3131,6 @@ GATE_TEST_FOCUS=routing-packaging,routing-docs bash scripts/agent-quality-gate.t
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------ |
 | `gate-contract`      | Pins on the gate's source text, classifier resolution, Turbo task-graph inputs, agent context check.                               | 2s           |
 | `coordinator`        | Coordinator protocol, fair weighted capacity, barriers, named resources, coalescing, and recovery.                                 | 210s         |
-| `install-wiring`     | Pre-push hook installation, the install-marker library, the package-script pin validator.                                          | 1s           |
 | `routing-packaging`  | Manifests, package-manager config, root package-script and dev-metadata classification, lockfile-importer scoping.                 | 52s          |
 | `routing-sources`    | Source-path routing: scoped `vitest related`, indexer codegen order, shared-config blast radius, deploy/terraform arms.            | 86s          |
 | `execution-phases`   | Phase order, fail-fast prerequisites, local parallelism, quality-setup, and scheduler classification.                              | 41s          |
@@ -3141,6 +3140,12 @@ GATE_TEST_FOCUS=routing-packaging,routing-docs bash scripts/agent-quality-gate.t
 | `stamps-commands`    | Per-command stamps, always-rerun exemptions, command timeouts and interrupts.                                                      | 27s          |
 | `execution-parallel` | Parallel identity and process-group drains, detached-session lease ordering, the production identity contract, prerequisite reuse. | 51s          |
 | `lock-drain`         | Legacy compatibility lock: acquisition, stale-holder reclaim, drain obligations, and crash-point recovery.                         | 319s         |
+
+The retained SessionEnd, install-marker, setup-consumer, and package-policy
+checks are no longer a gate self-test family. Run
+`bash scripts/bootstrap/agent-setup-contract.test.sh`. Required CI runs this
+focused contract in the root scripts job. The temporary local gate also routes
+its inputs to the focused command.
 
 Rules that keep the focus honest:
 

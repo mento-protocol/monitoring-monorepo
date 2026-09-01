@@ -69,10 +69,13 @@ pnpm docs:navigation-eval -- --check-fixtures  # Check fresh-agent navigation qu
 pnpm docs:navigation-eval -- --prompt          # Print the bounded read-only prompt; no model call
 pnpm docs:navigation-eval -- --prompt --base-commit <full-sha>  # Pin a committed result to a reachable default-branch ancestor
 pnpm docs:navigation-eval -- --validate <result.json>  # Recompute authority, evidence, route, and context scores
-pnpm ci:contract:test             # Test fixed CI and protected no-skip admission, cache, base, and aggregate contracts
+pnpm ci:contract:test             # Test fixed CI, protected no-skip admission and package drift, cache, base, and aggregate contracts
+bash scripts/bootstrap/agent-setup-contract.test.sh  # Test retained SessionEnd, setup-marker, and package-policy behavior
+node --test scripts/agent-autoreview-indexer-invariant-contract.test.mjs  # Test retained indexer autoreview owners and schema
 # After M4 reaches main and before each approved proof, read the current immutable inputs:
 gh pr view <pr> --json number,state,headRefOid,baseRefName,baseRefOid,headRepositoryOwner
 # The audit refuses a stale baseRefOid. Update or rebase the PR branch, then read fresh inputs.
+# Do not dispatch no-skip for package-execution drift. A cohort row can use ordinary CI only when controlPlane selected every retained job, every job passed, and the PR did not change the evidence instrument.
 # Stop after any run exceeds 45 runner-minutes. Do not exceed 450 cumulative runner-minutes.
 gh workflow run no-skip-audit.yml --ref main -f pr_number=<pr> -f source_sha=<headRefOid> -f base_sha=<baseRefOid>
 pnpm verification:inventory:check  # Validate Phase 0 inventory schema, unique IDs, and complete dispositions
