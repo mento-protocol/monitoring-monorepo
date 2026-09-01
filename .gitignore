@@ -66,9 +66,7 @@ CLAUDE.md
 # Persisted to disk + Vercel Blob; never committed.
 .intel-marathon/
 
-# `pnpm pr:merge` consent ledger — one JSON line per approved merge, naming the
-# operator's GitHub login and the head commit they approved. It is a local
-# record of who pressed the button on this machine, not shared repository state.
+# Older checkouts can retain this retired merge-wrapper ledger.
 .merge-consents.jsonl
 
 # Backlog ranking receipts and the local exclusion ledger. One run writes one

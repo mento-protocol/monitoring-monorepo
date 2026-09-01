@@ -78,8 +78,6 @@ feedback-runtime pins.
   `repo-health/check-guardrail-prose{,.test}.mjs` and
   `repo-health/guardrail-prose.json` route the guardrail suite. `ci.yml`,
   quick-commands, and the manifest pin it (ADR 0073).
-  `pr/merge-pr*`, both PR-state helpers, and `agent-autoreview.sh` (Codex
-  markers) route `pnpm pr:merge:test`.
 - **Gate runtime pins.** Before `cd`, `agent-quality-gate.sh` resolves
   `gate/run-handles.sh`, coordinator files,
   `docs/docs-navigation-eval-helpers.mjs`, and `gate/lockfile-scope.mjs` from

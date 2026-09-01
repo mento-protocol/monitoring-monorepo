@@ -242,12 +242,6 @@ export const SCRIPT_ARMS = [
                 command: "pnpm agent:autoreview:test",
                 reason: "agent autoreview adapter changed",
               },
-              {
-                why: "merge-pr.test.mjs parses `running_inside_codex_sandbox()` out of this file and fails when the merge wrapper's AUTOMATION_ENV_MARKERS no longer covers every marker it reads. Without this effect the drift guard never runs on the edit that causes the drift.",
-                command: "pnpm pr:merge:test",
-                reason:
-                  "autoreview holds the Codex-session detector the merge wrapper mirrors",
-              },
             ],
           },
           {

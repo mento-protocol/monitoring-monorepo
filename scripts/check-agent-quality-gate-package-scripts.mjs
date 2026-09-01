@@ -82,12 +82,6 @@ const expectedScripts = {
   "pr:feedback-state:test": "node scripts/pr/pr-feedback-state.test.mjs",
   "pr:ready-state": "node scripts/pr/pr-ready-state.mjs",
   "pr:ready-state:test": "node scripts/pr/pr-ready-state.test.mjs",
-  // The only sanctioned merge path. Repointing this alias at a bare
-  // `gh pr merge` would strip the interactive-human refusal, the ready-state
-  // check, and the consent record in one line, so the alias is pinned with the
-  // other trust-bearing ones.
-  "pr:merge": "node scripts/pr/merge-pr.mjs",
-  "pr:merge:test": "node scripts/pr/merge-pr.test.mjs",
   // The .coderabbit.yaml allowlist pin (ADR 0066). CodeRabbit reads that config
   // from the PR's own source branch, so the suite that pins it is exactly the
   // command a weakening PR would want to drift.

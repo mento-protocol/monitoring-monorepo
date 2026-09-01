@@ -17,7 +17,9 @@ garden_lane: adrs-architecture
 stays mandatory until the approved cutover stage completes.
 [ADR 0007](0007-agent-quality-gate-and-merge-oracle.md) remains active for the
 hosted two-projection all-clear and Codex approval gate. This ADR supersedes
-only its mandatory-local-gate target state.
+only its mandatory-local-gate target state. [ADR
+0084](0084-github-ui-operator-merge.md) supersedes this ADR's original
+operator merge-path assumption.
 
 **Scope:** ci/process
 
@@ -32,8 +34,9 @@ mandatory push path now slows local and hosted development.
 
 The repository already has fixed GitHub Actions jobs, path filters, a
 fail-closed `CI / ci` aggregate, automated review, two readiness projections,
-and exact-head human merge consent. Replacing those controls with a new remote
-execution platform would add another policy and operations surface.
+and explicit merge approval after current-head all-clear. Replacing those
+controls with a new remote execution platform would add another policy and
+operations surface.
 
 The repository has one active human maintainer. A required second approval for
 every control-plane change would stop routine delivery. This decision therefore
@@ -378,7 +381,7 @@ would recreate the local gate.
 
 - M1 inventory and M2 authority hardening do not change required contexts,
   path filters, hooks, rulesets, or local gate behavior.
-- Required CI, review, readiness, merge consent, deployment proof, Terraform
+- Required CI, review, readiness, operator merge, deployment proof, Terraform
   approval, and secret ownership remain separate controls.
 - Local author feedback becomes faster after cutover, but a developer can first
   discover an omitted local check in CI.
@@ -400,5 +403,5 @@ would recreate the local gate.
 - ADRs [0007](0007-agent-quality-gate-and-merge-oracle.md),
   [0069](0069-gate-routing-table-as-data.md),
   [0072](0072-md-only-docs-checks-job.md),
-  [0075](0075-pr-merge.md), and
+  [0084](0084-github-ui-operator-merge.md), and
   [0076](0076-fair-quality-gate-coordinator.md)

@@ -23,9 +23,9 @@ ui-dashboard, mento-analytics-api, frontend-monorepo ×3 apps, minipay-dapp) and
 produces ~31 new issue groups/week, of which roughly 60% is operational noise
 (CSP reports, RPC timeouts, chunk-load errors) rather than fixable code bugs.
 We want automated investigation plus fix-or-close, org-wide. Sentry's own Seer
-was tried and rejected on quality/fit; hard constraints: agents never merge PRs,
-secrets are IaC-managed (ADR 0030), and the team runs Claude Max + Codex
-subscriptions.
+was tried and rejected on quality/fit; hard constraints: unattended agents
+never merge PRs, secrets are IaC-managed (ADR 0030), and the team runs Claude
+Max + Codex subscriptions.
 
 Two findings shaped the decision more than any feature comparison:
 
@@ -126,7 +126,7 @@ trust is earned in phases, and Codex remains the independent PR reviewer.**
 - Accepted residual risk: agent-authored verdict prose is instructed, not
   mechanically guaranteed, to stay redacted. A leaked-or-wrong verdict cannot
   merge code or mutate Sentry by itself — archiving requires a human-applied
-  approval label, and merge stays human everywhere — but in Phase 2b a
+  approval label, and merge still needs explicit operator authority — but in Phase 2b a
   `code-fix` verdict does trigger automated branch/PR creation (bounded by
   per-run caps and the review gauntlet); that mutation is accepted, not
   human-pre-gated. A private queue repo was considered and rejected while

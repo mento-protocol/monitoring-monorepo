@@ -388,53 +388,21 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
 8. **Merge hygiene.** **Agent sessions never merge a PR without the user's
    explicit, direct approval of that specific merge.** Green CI, bot approvals,
    a READY ready-state, and "ship it" do not authorize a merge. Drive the PR to
-   ready, present the evidence, then stop and ask. The repository's narrow
-   Dependabot lane is the only machine-merge exception. It is not authority for
-   an agent to merge or to widen that lane.
+   ready, present the evidence and PR link, then stop at ALL_CLEAR. The
+   repository's narrow Dependabot lane is the only unattended merge lane. It
+   is not authority for an agent to merge or to widen that lane.
 
-   Once the user approves, they merge from their own terminal through the
-   sanctioned path:
-
-   ```bash
-   pnpm pr:merge --pr <number>    # human-only; agents must never run this
-   ```
-
-   `scripts/pr/merge-pr.mjs` refuses outside an interactive human session, runs
-   both step 7 projections, shows a briefing, makes the operator type the
-   pull-request number back, re-reads every gate, records consent to gitignored
-   `.merge-consents.jsonl`, then calls the synchronous REST merge endpoint with
-   the approved head and squash method. The request cannot enqueue or enable
-   auto-merge. It can bypass a classic branch-protection merge queue, so the
-   wrapper proves `Repository.mergeQueue(branch:)` is null before the briefing
-   and again in a final GraphQL read that also returns `viewer.login` and the
-   pull request's current `baseRefName` and `autoMergeRequest`. A login or base
-   mismatch refuses, so the credential observation and queue query must still
-   name the confirmed operator and current target. That query covers ruleset
-   and classic queues while keeping the credential, base, and both intent gates
-   in the shortest available race window. The wrapper also reads ruleset rule
-   types as a second signal. Any unreadable intent state refuses. The request
-   omits commit title and message
-   fields, so the repository's squash defaults remain in effect. The wrapper
-   confirms afterwards that the PR reached `MERGED` on the approved base and
-   head. It never disables auto-merge during reconciliation. Any ambiguous
-   state refuses; a not-ready PR or unclean feedback ledger needs
-   `--not-ready-reason "<why>"`.
-   `.claude/settings.json` denies `gh pr merge` and its repository-qualified
-   spellings, which removes the obvious shortcuts. Neither layer is an
-   unforgeable boundary — a local process running as the operator can
-   synthesize any local signal. The credential-attribution window begins when
-   the final GraphQL child selects its credential and ends when the REST child
-   selects its credential. It includes the in-flight final query and the
-   consent-ledger write. A credential switch in this window can still
-   misattribute the local consent record. The REST request names the confirmed
-   repository and pull request and pins the approved head with `sha`. It cannot
-   pin the base, so a retarget after the final read can still land on another
-   branch. The approval rule above stays the binding control, and the durable
-   boundary belongs on GitHub's side of the wire.
-   [ADR 0075](../adr/0075-pr-merge.md) owns the ordered gates,
-   the alternatives, and every residual, including what the deny does not
-   cover. [ADR 0081](../adr/0081-narrow-dependabot-auto-merge-exception.md)
-   owns the separate machine exception.
+   A human operator normally opens the exact pull request in GitHub, confirms
+   the current head, required checks, and feedback state, and uses GitHub's
+   merge button. If the user gives explicit, direct approval for an agent to
+   merge that specific PR, the agent re-runs the current-state probes and uses
+   GitHub's merge API. The merge request must use
+   `--squash --match-head-commit <head-sha>` or the REST fields
+   `merge_method: "squash"` and `sha: "<head-sha>"`. It must abort on a head
+   mismatch. GitHub's PR and merge record is the merge evidence.
+   [ADR 0084](../adr/0084-github-ui-operator-merge.md) owns this merge path. [ADR
+   0081](../adr/0081-narrow-dependabot-auto-merge-exception.md) owns the
+   separate machine exception.
    `.github/workflows/dependabot-auto-merge.yml` is a separate,
    machine-authorized lane. It accepts only Dependabot-authored minor and patch
    updates for GitHub-owned `actions/*` packages in the `github_actions`
@@ -443,7 +411,7 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    `actions/create-github-app-token`, other-ecosystem, mixed-author, and
    non-workflow-file changes at enable time. Load-bearing gate and credential
    actions from other publishers, such as `re-actors/alls-green` and
-   `google-github-actions/auth`, stay on the human path. A read-only
+   `google-github-actions/auth`, stay on the operator-authorized path. A read-only
    `pull_request` classifier verifies event identity and Dependabot metadata.
    A default-branch `workflow_run` writer treats that result as untrusted. It
    binds pre-job concurrency to the upstream head repository and branch, so a
@@ -475,10 +443,10 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    read seam and only the synchronous exact-head REST request uses the final
    write seam. Issue #2091 was closed as not planned. Do not add a
    `merge-operators` Team, credential broker, dedicated merge App, protected
-   merge Environment, or controlled lifecycle ruleset for this lane. The
-   wrapper mechanizes the approval rule for human and agent-driven merges. Its
-   refusal makes "agents never merge" a local control rather than a habit. If
-   an operator-approved merge satisfies Done means, sync the issue state and
+   merge Environment, or controlled lifecycle ruleset for this lane. Agent
+   sessions stop at ALL_CLEAR unless the user directly approves that specific
+   merge. A human normally uses the GitHub UI for ordinary merges.
+   If an operator-approved merge satisfies Done means, sync the issue state and
    workboard afterward per
    [`agent-issue-workflow.md`](agent-issue-workflow.md). If live proof remains,
    continue to production closeout first. After a partial merge, keep the issue
@@ -508,9 +476,9 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
 These bind regardless of which step you are on:
 
 - **Agent sessions never merge without explicit approval** for that specific
-  merge (step 8), and the approved merge runs through `pnpm pr:merge` in a
-  human terminal. The exact Dependabot machine lane in step 8 is the only
-  exception.
+  merge. The default workflow stops at ALL_CLEAR. A human normally performs the
+  merge in the GitHub UI. An explicitly approved agent uses GitHub directly as
+  defined in step 8. The exact Dependabot lane is the only unattended exception.
 - **Reply before resolving** every feedback item, in the two forms above; a
   clear reply stops re-raising bots from looping.
 - **`Closes #N` only when Done means is fully met**, else `Refs #N`.
