@@ -2739,6 +2739,23 @@ test("classifies observed coordinated priority negations", () => {
       user: { login: "claude[bot]", type: "Bot" },
       body: "**[P3] None of the inputs are validated.**",
     },
+    {
+      id: 410,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: [
+        "### Findings",
+        "1. **[P3] No issues found — verified correctness of the argv construction.**",
+        "2. **[P3] Comment/prose update in `review-eval-score.mjs:257-260` is accurate.**",
+        "3. **No drift found.**",
+      ].join("\n\n"),
+    },
+    {
+      id: 411,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "**[P3] Comment/prose update in `review-eval-score.mjs:257-260` is inaccurate.**",
+    },
   ];
 
   const records =
@@ -2760,6 +2777,8 @@ test("classifies observed coordinated priority negations", () => {
       { id: "407", finding: true, findingSignal: "[P3]" },
       { id: "408", finding: true, findingSignal: "[P1]" },
       { id: "409", finding: true, findingSignal: "[P3]" },
+      { id: "410", finding: false, findingSignal: null },
+      { id: "411", finding: true, findingSignal: "[P3]" },
     ],
   );
 });
