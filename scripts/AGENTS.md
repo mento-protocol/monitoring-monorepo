@@ -100,7 +100,7 @@ feedback-runtime pins.
   `scripts/review/launchd/org.mento.review-eval.plist`,
   `scripts/review/review-eval.test.mjs`, and
   `scripts/review/install-review-eval-launchd.test.mjs`.
-  `review/review-eval-*publication*` pins both tests.
+  Publication helpers pin both tests. Experiment modules pin ADR 0083.
 - **Navigation-eval pin.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names its source.
 - **Verification evidence.** `.gitattributes` pins

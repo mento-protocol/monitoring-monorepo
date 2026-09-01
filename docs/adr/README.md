@@ -91,6 +91,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0079](0079-sealed-exact-file-patch-secret-suppression.md)  | Autoreview permits only sealed exact-file-patch secret suppression                   |
 | [0081](0081-narrow-dependabot-auto-merge-exception.md)      | One narrow Dependabot group can auto-merge through a two-stage trust boundary        |
 | [0082](0082-persistent-issue-board-mutation-mutex.md)       | One persistent compare-and-swap Git ref serializes issue-board helper mutations      |
+| [0083](0083-non-ledger-review-eval-experiments.md)          | Review-skill experiments use a separate staged non-ledger lane                       |
 
 ### shared-config
 
