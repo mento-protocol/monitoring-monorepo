@@ -15,6 +15,7 @@ import test from "node:test";
 import { digestObject } from "./review-eval-experiment-contract.mjs";
 import {
   experimentCacheFile,
+  mapExperimentLimit,
   readExperimentCache,
   writeExperimentCache,
 } from "./review-eval-experiment-cache.mjs";
@@ -34,6 +35,37 @@ function withRoot(run) {
     rmSync(artifactRoot, { recursive: true, force: true });
   }
 }
+
+test("bounded work stops assigning lanes after the first failure", async () => {
+  let releaseSecond;
+  let secondStarted;
+  const secondReady = new Promise((resolve) => {
+    secondStarted = resolve;
+  });
+  const secondRelease = new Promise((resolve) => {
+    releaseSecond = resolve;
+  });
+  const starts = [];
+  const run = mapExperimentLimit([0, 1, 2], 2, async (value) => {
+    starts.push(value);
+    if (value === 0) {
+      await secondReady;
+      throw new Error("lane zero failed");
+    }
+    if (value === 1) {
+      secondStarted();
+      await secondRelease;
+    }
+    return value;
+  });
+  const rejected = assert.rejects(run, /lane zero failed/);
+  await secondReady;
+  await new Promise((resolve) => setImmediate(resolve));
+  releaseSecond();
+  await rejected;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(starts, [0, 1]);
+});
 
 test("experiment cache publishes and reuses one exact identity", () =>
   withRoot((artifactRoot) => {

@@ -258,17 +258,27 @@ export function assertExperimentConcurrency(concurrency) {
 export async function mapExperimentLimit(values, concurrency, worker) {
   const output = new Array(values.length);
   let next = 0;
+  let stopped = false;
+  let firstError;
   const workers = Array.from(
     { length: Math.min(concurrency, values.length) },
     async () => {
-      while (next < values.length) {
+      while (!stopped && next < values.length) {
         const index = next;
         next += 1;
-        output[index] = await worker(values[index], index);
+        try {
+          output[index] = await worker(values[index], index);
+        } catch (error) {
+          if (!stopped) {
+            stopped = true;
+            firstError = error;
+          }
+        }
       }
     },
   );
   await Promise.all(workers);
+  if (stopped) throw firstError;
   return output;
 }
 
