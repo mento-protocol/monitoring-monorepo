@@ -516,10 +516,102 @@
         "testAdditionsUnderTwiceImplementationAdditions": false,
         "budgetEvaluation": "informational segment; evaluate the initial implementation limit on cumulativeM4"
       }
+    },
+    {
+      "name": "focused-contract-protection",
+      "pr": 2207,
+      "baseSha": "889ab0f0ab00214847d0db633b39c13cb153b95e",
+      "sourceSha": "c7affa0436846f7f60d7d68ecc4c6397a5cdf0aa",
+      "trackedCommand": "git diff --numstat 889ab0f0ab00214847d0db633b39c13cb153b95e c7affa0436846f7f60d7d68ecc4c6397a5cdf0aa -- . ':!docs/metrics/verification-redesign-m4-complexity.json'",
+      "files": [
+        {
+          "path": ".github/workflows/no-skip-audit.yml",
+          "category": "workflow",
+          "additions": 2,
+          "deletions": 0
+        },
+        {
+          "path": "docs/PLAN-progressive-verification-graph.html",
+          "category": "doc",
+          "additions": 3,
+          "deletions": 2
+        },
+        {
+          "path": "docs/PLAN-progressive-verification-graph.md",
+          "category": "doc",
+          "additions": 1,
+          "deletions": 0
+        },
+        {
+          "path": "docs/adr/0078-staged-verification-redesign.md",
+          "category": "doc",
+          "additions": 6,
+          "deletions": 5
+        },
+        {
+          "path": "docs/metrics/verification-redesign-m4-shadow-evidence.md",
+          "category": "doc",
+          "additions": 5,
+          "deletions": 5
+        },
+        {
+          "path": "docs/pr-checklists/ci-workflow-gates.md",
+          "category": "doc",
+          "additions": 9,
+          "deletions": 7
+        },
+        {
+          "path": "scripts/workflows/check-no-skip-audit.mjs",
+          "category": "check",
+          "additions": 1,
+          "deletions": 1
+        },
+        {
+          "path": "scripts/workflows/check-no-skip-audit.test.mjs",
+          "category": "test",
+          "additions": 8,
+          "deletions": 1
+        }
+      ],
+      "totals": {
+        "workflow": {
+          "additions": 2,
+          "deletions": 0,
+          "net": 2
+        },
+        "check": {
+          "additions": 1,
+          "deletions": 1,
+          "net": 0
+        },
+        "test": {
+          "additions": 8,
+          "deletions": 1,
+          "net": 7
+        },
+        "doc": {
+          "additions": 24,
+          "deletions": 19,
+          "net": 5
+        },
+        "all": {
+          "additions": 35,
+          "deletions": 21,
+          "net": 14
+        }
+      },
+      "replacementSpecific": {
+        "implementationAdditions": 3,
+        "testAdditions": 8,
+        "testToImplementationRatio": 2.6667,
+        "twiceImplementationAdditions": 6,
+        "testAdditionsUnderTwiceImplementationAdditions": false,
+        "budgetEvaluation": "informational segment; evaluate the initial implementation limit on cumulativeM4"
+      }
     }
   ],
   "cumulativeM4": {
-    "method": "Sum the initial segment and both repair segments. These additive activity counts preserve each reviewed diff. They are not a direct diff across unrelated main-branch merges.",
+    "method": "Sum the initial segment and three repair segments. These additive activity counts preserve each reviewed diff. They are not a direct diff across unrelated main-branch merges.",
     "totals": {
       "action": {
         "additions": 26,
@@ -527,24 +619,24 @@
         "net": 8
       },
       "workflow": {
-        "additions": 434,
+        "additions": 436,
         "deletions": 90,
-        "net": 344
+        "net": 346
       },
       "check": {
-        "additions": 377,
-        "deletions": 69,
+        "additions": 378,
+        "deletions": 70,
         "net": 308
       },
       "test": {
-        "additions": 1038,
-        "deletions": 416,
-        "net": 622
+        "additions": 1046,
+        "deletions": 417,
+        "net": 629
       },
       "doc": {
-        "additions": 700,
-        "deletions": 103,
-        "net": 597
+        "additions": 724,
+        "deletions": 122,
+        "net": 602
       },
       "package": {
         "additions": 1,
@@ -552,29 +644,29 @@
         "net": 0
       },
       "all": {
-        "additions": 2576,
-        "deletions": 697,
-        "net": 1879
+        "additions": 2611,
+        "deletions": 718,
+        "net": 1893
       }
     },
     "replacementSpecific": {
-      "implementationAdditions": 838,
-      "testAdditions": 1038,
-      "testToImplementationRatio": 1.2387,
+      "implementationAdditions": 841,
+      "testAdditions": 1046,
+      "testToImplementationRatio": 1.2438,
       "limits": {
         "thinOrchestrationScriptPhysicalLines": 245,
         "thinOrchestrationScriptUnder300": true,
-        "newWorkflowPhysicalLines": 152,
+        "newWorkflowPhysicalLines": 154,
         "newReplacementFilePhysicalLines": {
-          ".github/workflows/no-skip-audit.yml": 152,
+          ".github/workflows/no-skip-audit.yml": 154,
           "scripts/workflows/check-no-skip-audit.mjs": 245,
-          "scripts/workflows/check-no-skip-audit.test.mjs": 415,
+          "scripts/workflows/check-no-skip-audit.test.mjs": 422,
           "scripts/agent-autoreview-indexer-invariant-contract.test.mjs": 239,
           "scripts/bootstrap/agent-setup-contract.test.sh": 252
         },
         "newReplacementFilePhysicalLineLimit": 500,
         "allNewReplacementFilesUnder500": true,
-        "twiceImplementationAdditions": 1676,
+        "twiceImplementationAdditions": 1682,
         "testAdditionsUnderTwiceImplementationAdditions": true
       }
     }
