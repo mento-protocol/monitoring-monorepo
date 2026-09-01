@@ -56,13 +56,31 @@ const TRUNK_FULL_SCAN = [
  * the two apart, because any sourced-by analysis would rot the first time a
  * caller changed how it spells the path.
  *
- * The remaining enabled Trunk linters (prettier, markdownlint, codespell,
- * yamllint, trufflehog, git-diff-check) judge each file on its own bytes, so an
- * ordinary source or docs deletion cannot invalidate a survivor. checkov would
- * belong here for local `module { source = "./…" }` references; this repo has
- * none today, and `.tf` deletions stay covered by the whole-repo branches.
+ * A deleted repo-root dotfile is the third class. Several enabled linters read
+ * their configuration from one — codespell from `.codespellrc`, shellcheck from
+ * `.shellcheckrc`, osv-scanner from `.osv-scanner.toml` — and `.gitignore` and
+ * `.gitattributes` decide what Trunk looks at in the first place. Deleting one
+ * changes the verdict on files that did not change: with `.codespellrc` removed,
+ * `scripts/terraform/tf-platform-plan-guard.mjs` goes from clean to one
+ * codespell hit on `applyable`, an ignore-word the config carries. A targeted
+ * run over the survivors still exits 0, so the gate passes locally and the
+ * required full scan is where it surfaces.
+ *
+ * This is deliberately the structural rule "any deleted root dotfile" rather
+ * than a list of the config files that exist today. A list would rot the first
+ * time a linter gained a root config, and rot silently, in the direction of
+ * under-scanning. The rule over-includes a few root dotfiles no Trunk linter
+ * reads (`.coderabbit.yaml`, `.vercelignore`); forcing a full scan on their
+ * deletion costs time and is never wrong. `.trunk/**` is already whole-repo on
+ * both edit and delete, so Trunk's own configs need no entry here.
+ *
+ * The remaining enabled Trunk linters (prettier, markdownlint, yamllint,
+ * trufflehog, git-diff-check) judge each file on its own bytes, so an ordinary
+ * source or docs deletion cannot invalidate a survivor. checkov would join the
+ * list for local `module { source = "./…" }` references; this repo has none
+ * today, and `.tf` deletions stay covered by the whole-repo branches.
  */
-const TRUNK_DELETION_FULL_SCAN = [/^\.github\//, /\.sh$/];
+const TRUNK_DELETION_FULL_SCAN = [/^\.github\//, /\.sh$/, /^\.[^/]+$/];
 
 export function addTrunkCheckCommand(plan, changedPaths, facts) {
   const present = [];
@@ -415,6 +433,53 @@ const WORKSPACE_RESOLUTION_MANIFESTS = [
 ];
 
 /**
+ * Extensions dependency-cruiser can actually parse for dependencies.
+ *
+ * This is the enabled half of the list `depcruise --info` prints. It is pinned
+ * by `engine.test.mjs` against `allExtensions` exported by the library itself,
+ * so an upgrade that enables a transpiler — `.vue` and `.svelte` are present
+ * but unavailable today — turns into a red test rather than a scanned file the
+ * gate silently stops routing.
+ *
+ * A path inside a scanned root whose extension is not here cannot change a
+ * verdict: dependency-cruiser never parses it, so it can neither hold an import
+ * nor appear as one. `ui-dashboard/AGENTS.md` is the measured case — before this
+ * narrowing it kept a ~22s cruise of an unchanged 1,321-module graph, because a
+ * package quality arm scheduled the command and this pass only declined to
+ * remove it.
+ */
+export const DEPCRUISE_EXTENSIONS = Object.freeze([
+  ".js",
+  ".cjs",
+  ".mjs",
+  ".jsx",
+  ".ts",
+  ".tsx",
+  ".d.ts",
+  ".cts",
+  ".d.cts",
+  ".mts",
+  ".d.mts",
+]);
+
+/**
+ * A changed path dependency-cruiser can read inside a root it scans.
+ *
+ * Two shapes qualify. A source file it parses, by extension. And any
+ * `package.json` beneath a root, because that is where a workspace dependency
+ * is declared — `ui-dashboard/package.json` carries
+ * `"@mento-protocol/config": "workspace:*"`, the edge into `shared-config/` —
+ * so it decides resolution the same way the root manifests do.
+ */
+const DEPCRUISE_ROOT_PREFIX = new RegExp(`^(${DEPCRUISE_ROOTS.join("|")})/`);
+
+function inRootAndReadable(path) {
+  if (!DEPCRUISE_ROOT_PREFIX.test(path)) return false;
+  if (/(^|\/)package\.json$/.test(path)) return true;
+  return DEPCRUISE_EXTENSIONS.some((extension) => path.endsWith(extension));
+}
+
+/**
  * Triggers this pass schedules itself, rather than leaving to an arm.
  *
  * No arm routes a bare `pnpm-lock.yaml` or this module, so for these paths
@@ -425,10 +490,9 @@ const WORKSPACE_RESOLUTION_MANIFESTS = [
  * arm that could be re-scoped later. `plan.addCommand` dedupes, so naming a
  * command an arm already scheduled keeps the arm's reason.
  *
- * The scanned roots are deliberately NOT here. Their arms already decide, and
- * they decide better: a root's `README.md` matches the root prefix but cannot
- * change a dependency-cruiser verdict, so scheduling on the prefix alone would
- * add work the arms correctly leave out.
+ * The scanned roots are deliberately NOT here. An in-root source file reaches
+ * the command through its package's quality arm, which knows what else that
+ * package needs; this pass only decides whether to keep what the arm scheduled.
  */
 const CODE_HEALTH_DEPS_SELF_SCHEDULED = [
   ...WORKSPACE_RESOLUTION_MANIFESTS,
@@ -439,19 +503,16 @@ const CODE_HEALTH_DEPS_SELF_SCHEDULED = [
 /**
  * Changed paths that keep `pnpm code-health:deps` in the plan.
  *
- * The roots are the reason the command exists. The manifests decide what the
- * roots resolve to. `.dependency-cruiser.cjs` is the config whose rules the
- * command enforces, and this module is where the narrowing itself lives, so an
- * edit to either has to run the command it governs rather than be judged by it.
+ * Either dependency-cruiser can read the path inside a root it scans, or the
+ * path is one of the self-scheduled triggers above. Anything else — a root's
+ * `AGENTS.md`, a `.sol` file, a docs edit — is neither parsed nor reported, so
+ * it cannot move the verdict and the command comes out of the plan.
  */
-const CODE_HEALTH_DEPS_TRIGGERS = [
-  new RegExp(`^(${DEPCRUISE_ROOTS.join("|")})/`),
-  ...CODE_HEALTH_DEPS_SELF_SCHEDULED,
-];
-
 export function codeHealthDepsTriggered(changedPaths) {
-  return changedPaths.some((path) =>
-    CODE_HEALTH_DEPS_TRIGGERS.some((r) => r.test(path)),
+  return changedPaths.some(
+    (path) =>
+      inRootAndReadable(path) ||
+      CODE_HEALTH_DEPS_SELF_SCHEDULED.some((r) => r.test(path)),
   );
 }
 

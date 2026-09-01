@@ -13141,6 +13141,14 @@ run_gate "scripts/bootstrap/deleted-helper.sh" "docs/deployment.md"
 assert_contains "- ./tools/trunk check --ci --all (changed paths require full-repo Trunk checks)"
 assert_not_contains "- ./tools/trunk check --ci docs/deployment.md ("
 
+# And for repo-root dotfiles: linters read their config from one, so deleting
+# it changes the verdict on files that did not change. A nested dotfile is not
+# repo-wide config and stays an ordinary deletion.
+run_gate ".codespellrc-deleted" "docs/deployment.md"
+assert_contains "- ./tools/trunk check --ci --all (changed paths require full-repo Trunk checks)"
+run_gate "ui-dashboard/.eslintrc-deleted.json" "docs/deployment.md"
+assert_contains "- ./tools/trunk check --ci docs/deployment.md (changed existing paths should pass targeted Trunk checks)"
+
 # Code-health routing: ensure a `.dependency-cruiser.cjs` change schedules
 # the cross-package dep-cruiser gate + surfaces the code-health checklist.
 run_gate ".dependency-cruiser.cjs"
@@ -13168,6 +13176,20 @@ run_gate "scripts/gate/mapping/post-passes.mjs"
 assert_contains "- pnpm code-health:deps"
 run_gate "pnpm-lock.yaml"
 assert_contains "- pnpm code-health:deps"
+
+# In-root but unreadable by dep-cruiser: a package quality arm schedules the
+# command, and the scope pass drops it because nothing it can parse changed.
+run_gate "ui-dashboard/AGENTS.md"
+assert_not_contains "- pnpm code-health:deps"
+run_gate "ui-dashboard/src/thing.ts"
+assert_contains "- pnpm code-health:deps"
+
+# The root manifest carries the `code-health:deps` script line that
+# engine.test.mjs holds the scanned-root list set-equal to, so it must route
+# that suite; the class dispatch alone would send a script edit to the shell
+# gate only.
+run_gate "package.json"
+assert_contains "- node --test scripts/gate/mapping/engine.test.mjs (root manifest changed (gate pins its scanned roots against the code-health:deps script))"
 
 # Code-health routing: each package's knip.json routes to the matching
 # `pnpm --filter <pkg> knip` command + the same checklist. A typo in the

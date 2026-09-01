@@ -240,6 +240,12 @@ export const HEAD_GROUPS = [
         effects: [
           { set: "root_package_json_class" },
           {
+            why: "The `code-health:deps` script line lives in this file, and its positional arguments are one of the two sources `engine.test.mjs` holds the gate's scanned-root list set-equal to. The class dispatch below sends a script-only edit to the shell gate alone, and required CI never runs `engine.test.mjs`, so shrinking the scanned roots here would merge with the staleness test that exists to catch it never having been invoked. Routed for every root manifest change rather than only ones touching that line: a whole-file trigger cannot be defeated by reformatting, and this file changes rarely.",
+            command: "node --test scripts/gate/mapping/engine.test.mjs",
+            reason:
+              "root manifest changed (gate pins its scanned roots against the code-health:deps script)",
+          },
+          {
             dispatch: "root_package_json_class",
             arms: [
               {

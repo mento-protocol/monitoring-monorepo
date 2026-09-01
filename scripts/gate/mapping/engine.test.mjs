@@ -40,6 +40,7 @@ import { Facts } from "./facts.mjs";
 import { BUCKETS, Plan, commandDedupeKey } from "./plan.mjs";
 import {
   CODE_HEALTH_DEPS_COMMAND,
+  DEPCRUISE_EXTENSIONS,
   DEPCRUISE_ROOTS,
   addTrunkCheckCommand,
   addWorkspaceConfigBuild,
@@ -496,6 +497,44 @@ test("a deleted sourced shell helper forces full, because ShellCheck follows sou
   );
 });
 
+test("a deleted repo-root dotfile forces full, because linters read it repo-wide", () => {
+  // Measured: with `.codespellrc` gone, the unchanged
+  // scripts/terraform/tf-platform-plan-guard.mjs goes from clean to one
+  // codespell hit on `applyable`, an ignore-word that config carries. The
+  // targeted run over survivors still exits 0, so this passes locally and only
+  // the required full scan catches it.
+  for (const deleted of [
+    ".codespellrc",
+    ".shellcheckrc",
+    ".osv-scanner.toml",
+    ".gitignore",
+  ]) {
+    const plan = new Plan();
+    addTrunkCheckCommand(
+      plan,
+      [deleted, "docs/note.md"],
+      stubFacts({ presentPaths: ["docs/note.md"] }),
+    );
+    assert.deepEqual(
+      commandsOf(plan).filter((c) => !c.includes("--filter=shellcheck")),
+      ["./tools/trunk check --ci --all"],
+      `${deleted} configures a linter across files that did not change`,
+    );
+  }
+});
+
+test("a deleted dotfile BELOW the root does not force full", () => {
+  // The rule is anchored at the repo root on purpose. A nested dotfile is not
+  // repo-wide configuration, so it stays an ordinary deletion.
+  const plan = new Plan();
+  addTrunkCheckCommand(
+    plan,
+    ["ui-dashboard/.eslintrc.json", "docs/note.md"],
+    stubFacts({ presentPaths: ["docs/note.md"] }),
+  );
+  assert.deepEqual(commandsOf(plan), ["./tools/trunk check --ci docs/note.md"]);
+});
+
 test("a deleted path still in the full-scan list forces full", () => {
   const plan = new Plan();
   addTrunkCheckCommand(
@@ -921,6 +960,58 @@ test("every scanned root keeps pnpm code-health:deps", () => {
   }
 });
 
+test("an in-root path dep-cruiser cannot parse drops the command", () => {
+  // The over-preserve this closes: a package quality arm schedules the command
+  // for any in-root change, and the pass used to keep it on the root prefix
+  // alone. `ui-dashboard/AGENTS.md` cost a ~22s cruise of an unchanged graph.
+  for (const path of [
+    "ui-dashboard/AGENTS.md",
+    "ui-dashboard/README.md",
+    "aegis/src/Thing.sol",
+    "shared-config/knip.json",
+    "indexer-envio/config/celo.yaml",
+  ]) {
+    assert.equal(
+      depsSurvives([path]),
+      false,
+      `${path} is inside a scanned root but dependency-cruiser never parses it`,
+    );
+  }
+});
+
+test("every dep-cruiser extension keeps the command inside a root", () => {
+  for (const extension of DEPCRUISE_EXTENSIONS) {
+    assert.equal(
+      depsSurvives([`ui-dashboard/src/thing${extension}`]),
+      true,
+      `${extension} is parsed by dependency-cruiser`,
+    );
+  }
+});
+
+test("a package.json inside a root keeps the command", () => {
+  // Resolution, not parsing: this is where `"@mento-protocol/config":
+  // "workspace:*"` declares the edge into shared-config/.
+  assert.equal(depsSurvives(["ui-dashboard/package.json"]), true);
+  assert.equal(depsSurvives(["aegis/sub/package.json"]), true);
+});
+
+test("the pinned extensions match dependency-cruiser's own available list", async () => {
+  // Hermetic: the library exports the same list `depcruise --info` prints, so
+  // this needs no CLI spawn. An upgrade that enables `.vue` or `.svelte` turns
+  // into a red test rather than a file class the gate silently stops routing.
+  const { allExtensions } = await import("dependency-cruiser");
+  const available = allExtensions
+    .filter((entry) => entry.available)
+    .map((entry) => entry.extension);
+  const sorted = (values) => [...values].sort();
+  assert.deepEqual(
+    sorted(available),
+    sorted(DEPCRUISE_EXTENSIONS),
+    "the gate's parsed-extension pin and dependency-cruiser must agree",
+  );
+});
+
 test("a change outside every scanned root drops pnpm code-health:deps", () => {
   for (const path of [
     "governance-watchdog/src/index.ts",
@@ -964,7 +1055,7 @@ test("a non-root package manifest does not keep the command", () => {
 
 test("one in-root path anywhere in the set keeps the command", () => {
   assert.equal(
-    depsSurvives(["governance-watchdog/src/index.ts", "aegis/src/Thing.sol"]),
+    depsSurvives(["governance-watchdog/src/index.ts", "aegis/src/Thing.ts"]),
     true,
     "the pass asks what changed, not which package the arms routed",
   );
