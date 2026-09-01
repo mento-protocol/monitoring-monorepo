@@ -5,6 +5,7 @@ import { relative } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { renderPublicationBody } from "../review/review-eval-publication.mjs";
 import { buildPrBody } from "../sentry/autofix/sentry-autofix-finalize.mjs";
 import { validatePrDescription } from "./check-pr-description.mjs";
 
@@ -43,6 +44,20 @@ test("passes when Deferrals is omitted", () => {
 
 test("accepts the deterministic Sentry autofix PR body", () => {
   assertPass(buildPrBody({ shortId: "APP-MENTO-ORG-2S", queueIssue: 1278 }));
+});
+
+test("accepts the review-eval publication body with the report in Details", () => {
+  const report = `## Generated report heading
+
+The report can contain its own headings and a literal \`\`\`\` fence.
+`;
+  const publicationBody = renderPublicationBody({
+    detailDir: "docs/evals/review-skill-runs/example",
+    report,
+  });
+  const fence = "`".repeat(5);
+  assert.ok(publicationBody.includes(`${fence}markdown\n${report}${fence}`));
+  assertPass(publicationBody);
 });
 
 test("required workflow installs trusted validator dependencies before validation", () => {

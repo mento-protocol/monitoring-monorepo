@@ -28,9 +28,12 @@ on:
       # directories, and a PR touching only those would skip both checks.
       - docs/evals/review-skill**
       - scripts/review/**
-      # Every step below runs a `review:eval*` alias. A PR that renames or
-      # removes one breaks this workflow's own commands while touching neither
-      # path above, and nothing would notice until the next scheduled run.
+      # Publication relies on the scoped cells/ rule to keep raw model output
+      # out of Git and autoreview bundles.
+      - .gitignore
+      # Every contract-job command below runs a `review:eval*` alias. A PR that
+      # renames or removes one breaks this workflow while touching neither path
+      # above, and nothing would notice until the next scheduled run.
       - package.json
   workflow_dispatch:
 
@@ -123,12 +126,12 @@ jobs:
           package-manager-cache: false
       - name: Synchronize the review-skill evaluation staleness issue
         env:
-          # `--schedule-issue` takes the repository from GITHUB_REPOSITORY,
-          # which Actions sets, and arms its one mutating step from the absence
-          # of `--dry-run`. It reads no other variable, so none is set here.
+          # The publication wrapper takes the repository from
+          # GITHUB_REPOSITORY and arms its one mutating step from the absence of
+          # `--dry-run`. It reads no other variable, so none is set here.
           GH_TOKEN: ${{ github.token }}
         # Age comes from each row's `executed_at`, never from a file mtime,
         # which git does not preserve. The command creates or retains exactly
         # one issue, then exits non-zero when the ledger has crossed a red
         # threshold, so a stale evaluation turns this scheduled job red.
-        run: pnpm review:eval -- --schedule-issue --json
+        run: node scripts/review/review-eval-freshness-publication.mjs --json

@@ -91,9 +91,9 @@ feedback-runtime pins.
   policy. Runtime hashes use `$script_source_dir`; suites use `$repo_root`.
   Core edits route both suites; policy edits route autoreview. Missing pins
   freeze the stamp (ADRs 0069 and 0079).
-- **Review-eval pins.** `review/run-eval-source-snapshot.sh` joins the
-  four-source set in `docs/evals/review-skill.md`; update every listed consumer
-  together.
+- **Review-eval pins.** Sync the four inputs for
+  `review/run-eval-source-snapshot.sh` with `docs/evals/review-skill.md`.
+  `review/review-eval-*publication*` pins both test suites.
 - **Navigation-eval self-pin.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names its implementation.
 - **Verification evidence.** Move
@@ -130,8 +130,7 @@ feedback-runtime pins.
   EOL and `UPSTASH_MCP_LAUNCHER_SHA256` hashes it. A move changes both. See
   [`docs/notes/upstash-mcp-operator.md`](../docs/notes/upstash-mcp-operator.md).
 
-**List each new `scripts/` path pin here.** An unrecorded pin breaks silently on
-the next move.
+**List new `scripts/` path pins here.** Unlisted pins break silently.
 
 ## Sweep Checklist for a Move
 
