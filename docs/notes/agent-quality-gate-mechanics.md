@@ -2843,8 +2843,10 @@ run `./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main` as
 an observable background task, and retry the push after it passes. The direct
 launcher, base, and parallelism match the hook's freshness key. A `pnpm`
 launcher adds material lifecycle environment values and cannot warm this exact
-hook stamp. Local setup leaves this option unset, so a cold local pre-push still
-runs the mapped gate.
+hook stamp. This hook warm does not replace validation against the resolved PR
+base. A stacked PR must pass its resolved-base gate first, then warm the separate
+`origin/main` hook stamp. Local setup leaves this option unset, so a cold local
+pre-push still runs the mapped gate.
 
 Coordinator coalescing and retained-result reuse use the complete execution key
 described above, including HEAD. The leader recomputes it before execution and

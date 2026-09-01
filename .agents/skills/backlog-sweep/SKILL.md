@@ -457,7 +457,7 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   ```bash
   pnpm agent:quality-gate                                # inspect first
   ./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main  # hosted
-  pnpm agent:quality-gate --run                                      # local
+  pnpm agent:quality-gate --run --lock-wait 3600                     # local
   ```
 
   Run only the command for the current setup. Before a hosted run, fetch
@@ -473,9 +473,10 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   mangles the arguments on the way through the package manager. Every worker
   gate goes through the machine's gate coordinator and counts against its
   capacity — 3 by default, `AGENT_QUALITY_GATE_CAPACITY`. Gates from different
-  worktrees run together under that capacity; the hour-long `--lock-wait` is
-  what covers the rest, since it spans scheduler admission, a command lease, a
-  coalesced result, and an older legacy holder.
+  worktrees run together under that capacity. Local sweeps keep the hour-long
+  `--lock-wait`. Hosted sweeps use the hook's exact 1,800-second default so the
+  push can reuse their stamp. Both budgets span scheduler admission, a command
+  lease, a coalesced result, and an older legacy holder.
 
   **A package-manifest change needs the gate's acknowledgement, not a
   hand-off.** When the issue touches a package manifest, `pnpm-lock.yaml`, pnpm
@@ -487,7 +488,7 @@ changed.` Review the lifecycle and install scripts in the diff first, then
   ```bash
   git config agent.qualityGate.allowPackageScriptChanges true
   ./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main  # hosted
-  pnpm agent:quality-gate --run                                      # local
+  pnpm agent:quality-gate --run --lock-wait 3600                     # local
   ```
 
   Run only the command for the current setup.
