@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 // prettier-ignore
 import { collectTriggers, hasWritePermission, jobReceivesCredential, parseWorkflow } from "./check-autofix-ci-trust.mjs";
 import { isMapping, workflowJobSteps } from "../lib/workflow-yaml.mjs";
+import { validateWorkflowInventory } from "../production-infra-identity-contract/workflow-inventory.mjs";
 
 const CODECOV = [
   "shared|config|shared-config/coverage",
@@ -35,7 +36,6 @@ const AUTHORITY = [
   'ci.yml|ui|{"actions":"read","contents":"read"}|["secrets.CODECOV_TOKEN"]|null|null|null',
   'claude.yml|auto-review|{"actions":"read","contents":"read","pull-requests":"write"}|["github.token","secrets.CLAUDE_CODE_OAUTH_TOKEN"]|null|null|null',
   'claude.yml|claude|{"actions":"read","contents":"read","issues":"write","pull-requests":"write"}|["github.token","secrets.CLAUDE_CODE_OAUTH_TOKEN"]|null|null|null',
-  'dependabot-auto-merge.yml|auto-merge|{"contents":"write","pull-requests":"write"}|["secrets.GITHUB_TOKEN","secrets.GITHUB_TOKEN"]|null|null|null',
   'governance-watchdog.yml|apply|{"actions":"read","contents":"read","deployments":"read","id-token":"write"}|["github.token","secrets.TF_VAR_BILLING_ACCOUNT","secrets.TF_VAR_DISCORD_TEST_WEBHOOK_URL","secrets.TF_VAR_DISCORD_WEBHOOK_URL","secrets.TF_VAR_GITHUB_TOKEN","secrets.TF_VAR_GOVERNANCE_WATCHDOG_QUICKNODE_API_KEY","secrets.TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID","secrets.TF_VAR_QUICKNODE_SECURITY_TOKEN","secrets.TF_VAR_TELEGRAM_BOT_TOKEN","secrets.TF_VAR_TELEGRAM_CHAT_ID","secrets.TF_VAR_TELEGRAM_TEST_CHAT_ID","secrets.TF_VAR_VICTOROPS_WEBHOOK_URL","secrets.TF_VAR_X_AUTH_TOKEN"]|{"name":"production-infra","url":"https://console.cloud.google.com/home/dashboard?project=mento-terraform-seed-ffac"}|null|null',
   'governance-watchdog.yml|plan|{"actions":"read","contents":"read","id-token":"write"}|["github.token","secrets.GCP_SERVICE_ACCOUNT_PLAN","secrets.GCP_WORKLOAD_IDENTITY_PROVIDER","secrets.TF_VAR_BILLING_ACCOUNT","secrets.TF_VAR_DISCORD_TEST_WEBHOOK_URL","secrets.TF_VAR_DISCORD_WEBHOOK_URL","secrets.TF_VAR_GITHUB_TOKEN","secrets.TF_VAR_GOVERNANCE_WATCHDOG_QUICKNODE_API_KEY","secrets.TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID","secrets.TF_VAR_QUICKNODE_SECURITY_TOKEN","secrets.TF_VAR_SLACK_BOT_TOKEN","secrets.TF_VAR_TELEGRAM_BOT_TOKEN","secrets.TF_VAR_TELEGRAM_CHAT_ID","secrets.TF_VAR_TELEGRAM_TEST_CHAT_ID","secrets.TF_VAR_VICTOROPS_WEBHOOK_URL","secrets.TF_VAR_X_AUTH_TOKEN"]|null|null|null',
   'lighthouse.yml|lighthouse|{"contents":"read","deployments":"read","pull-requests":"read","statuses":"read"}|["secrets.VERCEL_AUTOMATION_BYPASS_SECRET","secrets.VERCEL_AUTOMATION_BYPASS_SECRET"]|null|null|null',
@@ -164,8 +164,8 @@ function checkCi(root, violations) {
   const secrets = strings(ci.jobs).filter((value) => /\$\{\{[\s\S]*\bsecrets\b/iu.test(value));
   add(violations, secrets.length === 9 && secrets.every((value) => value.trim() === "${{ secrets.CODECOV_TOKEN }}"), "CI secret inventory must contain only nine Codecov token bindings");
   const writers = listYaml(root, ".github/workflows").flatMap((path) => Object.entries(load(root, path).jobs ?? {}).flatMap(([job, value]) => workflowJobSteps(value).filter((step) => isPnpmInstall(step) && step.with?.["write-cache"] != null && !bool(step.with["write-cache"], false)).map((step) => `${path}|${job}|${expr(step.with["write-cache"])}|${step.if == null && step["continue-on-error"] == null}`)));
-  const writerJob = ci.jobs?.["production-infra-contract"]; const writerSteps = workflowJobSteps(writerJob); const writerIndex = writerSteps.findIndex(isPnpmInstall);
-  add(violations, stable(ci.on?.push) === stable({ branches: ["main"] }) && stable(ci.concurrency) === stable({ group: "${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}", "cancel-in-progress": true }) && writers.join() === ".github/workflows/ci.yml|production-infra-contract|github.event_name == 'push' && github.ref == 'refs/heads/main'|true" && stable(Object.keys(writerJob ?? {}).sort()) === stable(["name", "permissions", "runs-on", "steps", "timeout-minutes"]) && stable(writerJob?.permissions) === stable({ contents: "read", actions: "read" }) && writerJob?.["runs-on"] === "blacksmith-2vcpu-ubuntu-2404" && writerJob?.["timeout-minutes"] === 5 && writerIndex === 1 && String(writerSteps[0]?.uses ?? "").startsWith("actions/checkout@") && stable(Object.keys(writerSteps[0] ?? {}).sort()) === stable(["uses", "with"]) && stable(writerSteps[0]?.with) === stable({ "persist-credentials": false }) && isPnpmInstall(writerSteps[1]) && stable(Object.keys(writerSteps[1] ?? {}).sort()) === stable(["uses", "with"]) && stable(writerSteps[1]?.with) === stable({ "write-cache": "${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}" }), "exactly one direct dependency-free x64 pnpm cache writer must remain reachable on every protected-main push in production-infra-contract");
+  const writerJob = ci.jobs?.["production-infra-contract"]; const writerSteps = workflowJobSteps(writerJob); const writerIndex = writerSteps.findIndex(isPnpmInstall); const writerValidator = writerSteps[1]; const writerValidators = writerSteps.filter((step) => step?.run === "node scripts/check-agent-quality-gate-package-scripts.mjs");
+  add(violations, stable(ci.on?.push) === stable({ branches: ["main"] }) && stable(ci.concurrency) === stable({ group: "${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}", "cancel-in-progress": true }) && writers.join() === ".github/workflows/ci.yml|production-infra-contract|github.event_name == 'push' && github.ref == 'refs/heads/main'|true" && stable(Object.keys(writerJob ?? {}).sort()) === stable(["name", "permissions", "runs-on", "steps", "timeout-minutes"]) && stable(writerJob?.permissions) === stable({ contents: "read", actions: "read" }) && writerJob?.["runs-on"] === "blacksmith-2vcpu-ubuntu-2404" && writerJob?.["timeout-minutes"] === 5 && writerIndex === 2 && writerValidators.length === 1 && String(writerSteps[0]?.uses ?? "").startsWith("actions/checkout@") && stable(Object.keys(writerSteps[0] ?? {}).sort()) === stable(["uses", "with"]) && stable(writerSteps[0]?.with) === stable({ "persist-credentials": false }) && stable(Object.keys(writerValidator ?? {}).sort()) === stable(["name", "run"]) && writerValidator?.name === "Validate trusted package-script pins" && writerValidator?.run === "node scripts/check-agent-quality-gate-package-scripts.mjs" && isPnpmInstall(writerSteps[2]) && stable(Object.keys(writerSteps[2] ?? {}).sort()) === stable(["uses", "with"]) && stable(writerSteps[2]?.with) === stable({ "write-cache": "${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}" }), "exactly one dependency-free package-script validator (trusted package-script pin check) and one direct dependency-free x64 pnpm cache writer must remain reachable in order on every protected-main push in production-infra-contract");
   const codegen = workflowJobSteps(ci.jobs?.indexer).filter((step) => typeof step.run === "string" && step.run.includes("codegen --config config.multichain.testnet.yaml") && step.run.includes("codegen --config config.multichain.mainnet.yaml"));
   add(violations, codegen.length === 1 && codegen[0].if == null, "both Envio codegen commands must run unconditionally");
   const uploads = [];
@@ -203,15 +203,15 @@ function checkSchema(root, violations) {
 
 // prettier-ignore
 function checkDependabot(root, violations) {
-  const workflow = load(root, ".github/workflows/dependabot-auto-merge.yml");
-  const job = workflow.jobs?.["auto-merge"];
-  add(violations, Object.keys(workflow.jobs ?? {}).join() === "auto-merge" && expr(job?.if) === "github.event.pull_request.user.login == 'dependabot[bot]'", "Dependabot auto-merge must contain one actor-gated job");
-  const safe = workflowJobSteps(job).every((step) => {
-    const uses = String(step.uses ?? "");
-    const commands = String(step.run ?? "").split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
-    return step["working-directory"] == null && (uses === "" || uses === "dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98") && commands.every((line) => line.startsWith("echo ") || line === 'gh pr merge --auto --squash "$PR_URL"');
-  });
-  add(violations, safe, "Dependabot auto-merge must not execute candidate code");
+  const paths = [
+    ".github/workflows/dependabot-auto-merge-candidate.yml",
+    ".github/workflows/dependabot-auto-merge.yml",
+  ];
+  const presentPaths = paths.filter((path) => existsSync(join(root, path)));
+  add(violations, presentPaths.length !== 1, "the Dependabot auto-merge classifier and writer workflows must be present or absent as one reviewed pair");
+  for (const path of presentPaths) {
+    validateWorkflowInventory(path, load(root, path), violations);
+  }
 }
 
 // prettier-ignore

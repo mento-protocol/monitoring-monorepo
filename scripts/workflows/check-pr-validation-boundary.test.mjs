@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -219,8 +220,8 @@ test("structural mutations fail closed at each M2 boundary", () => {
   mutateOnce(
     root,
     ".github/workflows/ci.yml",
-    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      contents: read",
-    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      checks: write\n      contents: read",
+    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      contents: read",
+    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      checks: write\n      contents: read",
     /approved PR authority/u,
   );
   mutateOnce(
@@ -268,8 +269,8 @@ test("structural mutations fail closed at each M2 boundary", () => {
   mutateOnce(
     root,
     ".github/workflows/ci.yml",
-    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      contents: read",
-    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      issues: write\n      contents: read",
+    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      contents: read",
+    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      issues: write\n      contents: read",
     /approved PR authority/u,
   );
   mutateOnce(
@@ -279,6 +280,22 @@ test("structural mutations fail closed at each M2 boundary", () => {
     "          write-cache: true",
     /dependency-free x64 pnpm cache writer/u,
   );
+  mutateOnce(
+    root,
+    ".github/workflows/ci.yml",
+    "      - name: Validate trusted package-script pins\n        # Runs before pnpm-install because the install executes PR-authored\n        # lifecycle hooks. It also pins the tf:test and issue:board:test aliases\n        # before this required job trusts them.\n        run: node scripts/check-agent-quality-gate-package-scripts.mjs\n",
+    "",
+    /dependency-free package-script validator/u,
+  );
+  mutateOnce(
+    root,
+    ".github/workflows/ci.yml",
+    "      - name: Validate trusted package-script pins\n        # Runs before pnpm-install because the install executes PR-authored\n        # lifecycle hooks. It also pins the tf:test and issue:board:test aliases\n        # before this required job trusts them.\n        run: node scripts/check-agent-quality-gate-package-scripts.mjs\n",
+    "      - name: Validate trusted package-script pins\n        # Runs before pnpm-install because the install executes PR-authored\n        # lifecycle hooks. It also pins the tf:test and issue:board:test aliases\n        # before this required job trusts them.\n        run: node scripts/check-agent-quality-gate-package-scripts.mjs\n      - name: Validate trusted package-script pins\n        run: node scripts/check-agent-quality-gate-package-scripts.mjs\n",
+    /exactly one dependency-free package-script validator/u,
+  );
+  // prettier-ignore
+  mutateOnce(root, ".github/workflows/ci.yml", "        # before this required job trusts them.\n        run: node scripts/check-agent-quality-gate-package-scripts.mjs", "        # before this required job trusts them.\n        run: node scripts/check-agent-quality-gate-package-scripts.mjs --skip", /trusted package-script pin check/u);
   // prettier-ignore
   mutateOnce(root, ".github/workflows/ci.yml", "  production-infra-contract:\n    name: Production infrastructure contract", "  production-infra-contract:\n    name: Production infrastructure contract\n    needs: changes", /direct dependency-free x64 pnpm cache writer/u);
   // prettier-ignore
@@ -384,23 +401,44 @@ test("structural mutations fail closed at each M2 boundary", () => {
   );
   mutateOnce(
     root,
-    ".github/workflows/dependabot-auto-merge.yml",
-    "    if: github.event.pull_request.user.login == 'dependabot[bot]'",
-    "    if: github.event.pull_request.user.login != 'dependabot[bot]'",
-    /actor-gated/u,
+    ".github/workflows/dependabot-auto-merge-candidate.yml",
+    "    permissions:\n      contents: read\n      pull-requests: read",
+    "    permissions:\n      contents: write\n      pull-requests: write",
+    /combined contents: write and pull-requests: write outside the exact Dependabot writer/u,
+  );
+  mutateOnce(
+    root,
+    ".github/workflows/dependabot-auto-merge-candidate.yml",
+    "      github.actor == 'dependabot[bot]'",
+    "      github.actor != 'dependabot[bot]'",
+    /exact reviewed Dependabot auto-merge workflow pair inventory/u,
   );
   mutateOnce(
     root,
     ".github/workflows/dependabot-auto-merge.yml",
-    'run: gh pr merge --auto --squash "$PR_URL"',
-    "run: pnpm test",
-    /execute candidate code/u,
+    ".run_attempt == 1 and",
+    ".run_attempt > 0 and",
+    /exact reviewed Dependabot auto-merge workflow pair inventory/u,
   );
   write(root, ".npmrc", "store-dir=/tmp/other\n");
   assert.match(
     checkStructuralRepository(root).join("\n"),
     /store override is forbidden/u,
   );
+});
+
+test("Dependabot auto-merge workflows may be absent only as one pair", () => {
+  const root = structuralFixture();
+  try {
+    rmSync(join(root, ".github/workflows/dependabot-auto-merge-candidate.yml"));
+    assert.deepEqual(checkStructuralRepository(root), [
+      "the Dependabot auto-merge classifier and writer workflows must be present or absent as one reviewed pair",
+    ]);
+    rmSync(join(root, ".github/workflows/dependabot-auto-merge.yml"));
+    assert.deepEqual(checkStructuralRepository(root), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("PR-local reusable workflows stay inside cache and authority boundaries", () => {

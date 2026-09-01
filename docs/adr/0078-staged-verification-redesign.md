@@ -3,7 +3,7 @@ title: Staged replacement of the mandatory local gate with existing CI
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-30
+last_verified: 2026-08-31
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -142,6 +142,30 @@ The M2 pull request can prove a cold miss in the new namespace. A protected-
 main save and a later PR hit cannot exist before this change reaches `main`.
 Record both as post-merge evidence for #2124. A missing or corrupt cache must
 remain a cold-run condition, not a validation failure or a skipped command.
+
+### Apply the M3 fixed CI contract
+
+M3 keeps the fixed jobs and the stable `CI / ci` context. A closed-world
+fallback selects every conditional job for an unknown path, a control-plane
+path, or an incomplete pull request file list. It does not add a planner,
+dynamic matrix, or second routing format.
+
+The pinned `dorny/paths-filter` action emits a documented count for each
+filter. The `routed` filter reuses the functional filters through YAML aliases.
+The fallback compares the `all` count with the `routed` and `ordinary` counts.
+The workflow does not export changed-file lists.
+
+The `pnpm ci:contract:test` command checks fixed job membership, conditional
+filters, pull request and `main` concurrency, aggregate failure states, and the
+M2 permission and cache boundary. The unconditional `Production infrastructure
+contract` job runs it on every pull request and `main` push.
+
+M3 adds the two confirmed gate-only gaps to existing required jobs. The
+`scripts` job runs the ADR reminder and its tests. The `ui` job runs the normal
+production build and bundle-size limit. The separate Infra validation and
+bundle-size workflows duplicate required coverage. Lighthouse, PR Description,
+duplication, and schema diff remain reviewed advisory exceptions with their
+current triggers.
 
 ### Keep local checks bounded and non-authoritative
 
@@ -340,7 +364,8 @@ would recreate the local gate.
 - [Safeguard inventory](../metrics/verification-redesign-safeguards.jsonl)
 - [Control-plane before manifest](../metrics/verification-redesign-control-plane-before.json)
 - [M2 additive complexity manifest](../metrics/verification-redesign-m2-complexity.json)
-- Issues #2006, #2032, #2042, #2094, #2122, #2123, and #2124
+- [M3 additive complexity manifest](../metrics/verification-redesign-m3-complexity.json)
+- Issues #2006, #2032, #2042, #2094, #2122, #2123, #2124, and #2125
 - ADRs [0007](0007-agent-quality-gate-and-merge-oracle.md),
   [0069](0069-gate-routing-table-as-data.md),
   [0072](0072-md-only-docs-checks-job.md),
