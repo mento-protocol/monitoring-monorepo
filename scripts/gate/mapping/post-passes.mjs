@@ -384,15 +384,38 @@ export const DEPCRUISE_ROOTS = Object.freeze([
 ]);
 
 /**
+ * Workspace manifests that decide how a bare specifier resolves.
+ *
+ * A scanned root reaches another scanned root by package name, not by relative
+ * path: `ui-dashboard/package.json` declares
+ * `"@mento-protocol/config": "workspace:*"`, and 47 imports of that specifier
+ * resolve into `shared-config/`. Which directories are workspace packages, and
+ * what each specifier resolves to, is decided by these three files. Editing one
+ * can therefore add or remove an edge between two scanned roots while no file
+ * inside any root changes — so a change set holding only a manifest still has
+ * something dependency-cruiser can read.
+ *
+ * A root's own `package.json` needs no entry here: it already matches the root
+ * prefix below.
+ */
+const WORKSPACE_RESOLUTION_MANIFESTS = [
+  /^package\.json$/,
+  /^pnpm-lock\.yaml$/,
+  /^pnpm-workspace\.yaml$/,
+];
+
+/**
  * Changed paths that keep `pnpm code-health:deps` in the plan.
  *
- * The roots are the reason the command exists. The other two entries are
- * fail-closed: `.dependency-cruiser.cjs` is the config whose rules the command
- * enforces, and this module is where the narrowing itself lives, so an edit to
- * either has to run the command it governs rather than be judged by it.
+ * The roots are the reason the command exists. The manifests above decide what
+ * the roots resolve to. The last two entries are fail-closed:
+ * `.dependency-cruiser.cjs` is the config whose rules the command enforces, and
+ * this module is where the narrowing itself lives, so an edit to either has to
+ * run the command it governs rather than be judged by it.
  */
 const CODE_HEALTH_DEPS_TRIGGERS = [
   new RegExp(`^(${DEPCRUISE_ROOTS.join("|")})/`),
+  ...WORKSPACE_RESOLUTION_MANIFESTS,
   /^\.dependency-cruiser\.cjs$/,
   /^scripts\/gate\/mapping\/post-passes\.mjs$/,
 ];

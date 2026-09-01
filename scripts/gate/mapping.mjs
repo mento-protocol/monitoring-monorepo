@@ -317,7 +317,7 @@ export function buildPlan({ changedPaths, facts, routingSensitive = false }) {
 
   routeChangedPaths(ROUTING_PLAN, changedPaths, facts, context);
 
-  // Post-loop sweeps, before the five post-passes.
+  // Post-loop sweeps, before the six post-passes.
   if (facts.isRealTree) {
     plan.addCommand(
       "pnpm tf:test",

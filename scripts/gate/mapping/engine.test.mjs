@@ -920,6 +920,30 @@ test("a change outside every scanned root drops pnpm code-health:deps", () => {
   }
 });
 
+test("a workspace manifest keeps pnpm code-health:deps", () => {
+  // A scanned root reaches another scanned root by package name
+  // (`@mento-protocol/config` → `shared-config/`), so these three files can add
+  // or remove an edge between two roots with no file inside a root changing.
+  // Narrowing them away would hide exactly that class of graph change.
+  for (const path of [
+    "package.json",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+  ]) {
+    assert.equal(
+      depsSurvives([path]),
+      true,
+      `${path} decides what a bare specifier inside a scanned root resolves to`,
+    );
+  }
+});
+
+test("a non-root package manifest does not keep the command", () => {
+  // The manifest triggers are anchored, so a manifest belonging to a package
+  // dependency-cruiser never scans stays narrowed away.
+  assert.equal(depsSurvives(["governance-watchdog/package.json"]), false);
+});
+
 test("one in-root path anywhere in the set keeps the command", () => {
   assert.equal(
     depsSurvives(["governance-watchdog/src/index.ts", "aegis/src/Thing.sol"]),

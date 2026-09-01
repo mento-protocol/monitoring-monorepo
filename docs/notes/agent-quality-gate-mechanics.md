@@ -776,7 +776,12 @@ list, the positional arguments of the root `code-health:deps` script and the
 `includeOnly.path` alternation in `.dependency-cruiser.cjs`, and
 `engine.test.mjs` holds the gate's pinned copy set-equal to both. A change
 outside every root drops the command; a change inside any root, to
-`.dependency-cruiser.cjs`, or to the narrowing pass itself keeps it. The
+`.dependency-cruiser.cjs`, or to the narrowing pass itself keeps it. So does a
+change to `package.json`, `pnpm-lock.yaml`, or `pnpm-workspace.yaml`: a scanned
+root reaches another scanned root by package name — `ui-dashboard/package.json`
+declares `"@mento-protocol/config": "workspace:*"` — so those three files decide
+what a bare specifier resolves to and can add or remove an edge between two
+roots while no file inside a root changes. The
 `docs/pr-checklists/code-health.md` checklist is unaffected either way, because
 knip is the other half of it and still runs per package. This is the only pass
 that makes a plan smaller, so its condition is about what dependency-cruiser can
