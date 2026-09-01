@@ -3,7 +3,7 @@ title: Agent Quality Gate — Mechanics
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-30
+last_verified: 2026-09-01
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -160,11 +160,8 @@ routing-sensitive source, the shared classifier adds the offline
 scheduled evaluation. Every tracked Markdown change runs `pnpm docs:index
 --check` and `pnpm docs:navigation-eval:test`. The second command enforces the
 navigation source budgets that the Markdown-only CI job checks. Review the
-output, then run:
-
-```bash
-pnpm agent:quality-gate --run
-```
+output. Then run the local or hosted gate command from step 3 of the
+[PR operating card](pr-operating-card.md).
 
 Every non-empty candidate change set also runs the Terraform-stack suite. The
 gate spells it `pnpm tf:test`, unless a root-tooling `package.json` edit already
@@ -2810,7 +2807,8 @@ pnpm agent:review-materiality
 The command reports `trivial`, `standard`, or `full` materiality from changed
 path risk and diff size, plus whether the change likely needs AGENTS, README,
 runbook, checklist, or skill context updates. It is advisory and does not
-replace `pnpm agent:quality-gate --run`,
+replace the applicable gate command from step 3 of the
+[PR operating card](pr-operating-card.md),
 `pnpm agent:autoreview`, or `pnpm pr:ready-state`.
 
 To warm Turbo's local cache for the Turbo-backed package tasks mapped by the
@@ -2830,7 +2828,7 @@ concurrent logs do not interleave. The same dashboard `.next` serialization rule
 applies to prewarm.
 
 The Trunk pre-push hook delegates to this same path-aware gate with
-`--parallel 3 --skip-if-fresh`. Independent ordinary commands can run
+`--parallel 3 --skip-if-fresh --pre-push`. Independent ordinary commands can run
 concurrently within the global capacity. An all-capacity command runs after the
 active pool drains. The hook reuses a recent successful manual gate run when
 the whole-run freshness key is unchanged and the recorded success is no older
@@ -2838,14 +2836,27 @@ than the freshness TTL (two hours). Because it runs in parallel rather than
 `--fail-fast`, a red push runs the remaining in-flight ordinary commands before
 failing. Package-script acknowledgement is folded out
 of the reuse key when there is no package-script risk, so a warm
-`pnpm agent:quality-gate --run` — even one passed `--allow-package-script-changes`
-defensively — satisfies the flag-less hook's `--skip-if-fresh` check, and
-warm-then-push then skips the mapped commands. When a push DOES change package
-scripts or package-manager config, the acknowledgement is part of the reuse key:
-review the script/lifecycle diff first, then set
+`./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main` satisfies
+the flag-less hook's `--skip-if-fresh` check, and warm-then-push then skips the
+mapped commands. When a push DOES change package scripts or package-manager
+config, the acknowledgement is part of the reuse key: review the
+script/lifecycle diff first, then set
 `agent.qualityGate.allowPackageScriptChanges=true` in local git config (seen by
 both the manual warm run and the hook) so a just-passed acknowledged manual gate
 can satisfy the `--skip-if-fresh` check.
+
+Hosted setup sets `agent.qualityGate.cloudPrePushRequireFresh=true` in the
+repository git config. A hosted pre-push with a fresh exact stamp exits through
+the normal freshness path. A cold or invalid stamp exits with status 2 before
+scheduler registration, lock acquisition, or mapped work. Fetch `origin/main`,
+run `./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main` as
+an observable background task, and retry the push after it passes. The direct
+launcher, base, and parallelism match the hook's freshness key. A `pnpm`
+launcher adds material lifecycle environment values and cannot warm this exact
+hook stamp. This hook warm does not replace validation against the resolved PR
+base. A stacked PR must pass its resolved-base gate first, then warm the separate
+`origin/main` hook stamp. Local setup leaves this option unset, so a cold local
+pre-push still runs the mapped gate.
 
 Coordinator coalescing and retained-result reuse use the complete execution key
 described above, including HEAD. The leader recomputes it before execution and

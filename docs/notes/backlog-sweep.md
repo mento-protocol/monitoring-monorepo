@@ -255,11 +255,12 @@ coordinator adopts the legacy `run.lock` while scheduled or recovery work
 exists, so `run.lock/owner` names a live pid for as long as anyone on the
 machine is gating — hours at a time under ordinary parallel work. A sweep that
 treated that record as a busy signal would refuse to start in the normal case.
-Workers wait instead, with `--lock-wait 3600`, which spans scheduler admission,
-a command lease, a coalesced result, and an older legacy holder. No sweep
-passes `--no-lock` or deletes the lock directory: the gate owns its reclaim
-rules, and a record that looks stale from outside is routinely a live holder
-inside a long browser suite.
+Local workers wait with `--lock-wait 3600`. Hosted workers use the hook's exact
+1,800-second default so the push can reuse the warm stamp. Both waits span
+scheduler admission, a command lease, a coalesced result, and an older legacy
+holder. No sweep passes `--no-lock` or deletes the lock directory: the gate owns
+its reclaim rules, and a record that looks stale from outside is routinely a
+live holder inside a long browser suite.
 
 ## Resilience duties
 

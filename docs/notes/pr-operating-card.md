@@ -3,7 +3,7 @@ title: PR Operating Card
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-31
+last_verified: 2026-09-01
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -113,7 +113,19 @@ even when you never open an authority.
    Exact matching requests share one exact terminal result. A Trunk-qualified
    result reaches active followers but is never retained or
    reused. Background the `--run` gate and the `git push`; a 600s foreground
-   kill discards the freshness stamp.
+   kill discards the freshness stamp. Hosted setup requires this fresh stamp
+   before pre-push. A cold hosted pre-push exits before scheduler registration
+   or mapped work. Fetch `origin/main`, then run
+   `./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main` as an
+   observable background task. The launcher, base, and parallelism must match
+   the hook's freshness key. This hook warm does not replace validation against
+   the resolved PR base. When the resolved base tracking ref is not
+   `origin/main`, including fork and stacked PRs, run the required resolved-base
+   gate first. Then warm this separate `origin/main` stamp. Retry the push after
+   both gates pass. Local setup keeps the normal cold pre-push run. If the hosted
+   branch has package-script risk, review it first. Then set
+   `git config agent.qualityGate.allowPackageScriptChanges true` before the warm
+   run so the hook uses the same acknowledgement.
    Authority:
    [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md).
 

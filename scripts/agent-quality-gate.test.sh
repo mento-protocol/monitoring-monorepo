@@ -1139,6 +1139,35 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const gate = fs.readFileSync("scripts/agent-quality-gate.sh", "utf8");
 const trunk = fs.readFileSync(".trunk/trunk.yaml", "utf8");
+const hostedSetups = [
+  "scripts/bootstrap/claude-code-web-setup.sh",
+  "scripts/bootstrap/codex-cloud-maintenance.sh",
+  "scripts/bootstrap/codex-cloud-setup.sh",
+];
+const hostedGateEntryPoints = [
+  ".agents/skills/ship/SKILL.md",
+  ".claude/skills/ship/SKILL.md",
+  ".agents/roles/verifier.md",
+  ".github/ISSUE_TEMPLATE/agent-task.yml",
+  "docs/notes/quick-commands.md",
+  "scripts/docs/docs-garden-issue-helpers.mjs",
+];
+const sweepWorkerEntryPoints = [
+  ".agents/skills/backlog-sweep/SKILL.md",
+  ".claude/skills/backlog-sweep/SKILL.md",
+];
+const resolvedBaseEntryPoints = [
+  ".agents/skills/ship/SKILL.md",
+  ".claude/skills/ship/SKILL.md",
+  ".agents/roles/verifier.md",
+  "docs/notes/pr-operating-card.md",
+  "docs/notes/pr-ready-state.md",
+];
+const sweepLockEntryPoints = [
+  ".agents/skills/backlog-sweep/SKILL.md",
+  ".claude/skills/backlog-sweep/SKILL.md",
+  "docs/notes/backlog-sweep.md",
+];
 const activeTrunkLines = trunk
   .split("\n")
   .filter((line) => !line.trimStart().startsWith("#"))
@@ -1154,13 +1183,90 @@ const prologue = [
 assert.ok(gate.startsWith(prologue), "quality-gate public Bash prologue drifted");
 assert.match(
   activeTrunkLines,
-  /^[ \t]*run: git fetch --quiet origin main && \.\/scripts\/agent-quality-gate\.sh --run --parallel 3 --skip-if-fresh --base origin\/main[ \t]*$/mu,
+  /^[ \t]*run: git fetch --quiet origin main && \.\/scripts\/agent-quality-gate\.sh --run --parallel 3 --skip-if-fresh --pre-push --base origin\/main[ \t]*$/mu,
   "Trunk pre-push must execute the protected gate entry directly",
 );
 assert.doesNotMatch(
   activeTrunkLines,
   /(?:^|[^\w./])(?:(?:\/bin\/)?bash[ \t]+(?:\.\/)?scripts\/agent-quality-gate\.sh|scripts\/agent-quality-gate\.sh)/mu,
   "Trunk pre-push must not bypass or CDPATH-resolve the protected gate entry",
+);
+for (const setupPath of hostedSetups) {
+  const setup = fs.readFileSync(setupPath, "utf8");
+  assert.match(
+    setup,
+    /^git config core\.hooksPath \.trunk\/hooks\ngit config agent\.qualityGate\.cloudPrePushRequireFresh true$/mu,
+    `${setupPath} must require a fresh hosted pre-push stamp`,
+  );
+}
+for (const entryPointPath of hostedGateEntryPoints) {
+  const entryPoint = fs.readFileSync(entryPointPath, "utf8");
+  assert.match(
+    entryPoint,
+    /\.\/scripts\/agent-quality-gate\.sh --run --parallel 3 --base origin\/main/u,
+    `${entryPointPath} must use the exact hosted pre-push warm command`,
+  );
+}
+for (const entryPointPath of sweepWorkerEntryPoints) {
+  const entryPoint = fs.readFileSync(entryPointPath, "utf8");
+  assert.match(
+    entryPoint,
+    /After `\.\/scripts\/setup\.sh` in each fresh or resumed\n  clone, set `agent\.qualityGate\.cloudPrePushRequireFresh=true` when that boolean\n  is hosted\. Unset the key when it is local\./u,
+    `${entryPointPath} must propagate the setup type into every worker clone`,
+  );
+}
+for (const entryPointPath of resolvedBaseEntryPoints) {
+  const entryPoint = fs.readFileSync(entryPointPath, "utf8");
+  assert.match(
+    entryPoint,
+    /resolved base[\s\S]{0,120}not[\s\S]{0,40}`origin\/main`|hosted fork and stacked PRs/iu,
+    `${entryPointPath} must preserve fork and stacked resolved-base validation`,
+  );
+}
+const claudeSessionStart = fs.readFileSync(
+  ".claude/hooks/session-start.sh",
+  "utf8",
+);
+const claudeHostedConfigIndex = claudeSessionStart.indexOf(
+  "git -C \"$REPO_ROOT\" config agent.qualityGate.cloudPrePushRequireFresh true",
+);
+const claudeSourceFilterIndex = claudeSessionStart.indexOf('case "$SOURCE" in');
+assert.ok(claudeHostedConfigIndex >= 0, "Claude resume hosted config is missing");
+assert.ok(
+  claudeHostedConfigIndex < claudeSourceFilterIndex,
+  "Claude resume hosted config must precede the source filter",
+);
+for (const entryPointPath of sweepLockEntryPoints) {
+  const entryPoint = fs.readFileSync(entryPointPath, "utf8");
+  assert.match(
+    entryPoint,
+    /Local workers wait with `--lock-wait 3600`\.[\s\S]{0,140}Hosted workers use[\s\S]{0,80}1,800-second default/u,
+    `${entryPointPath} must preserve local and hosted sweep lock waits`,
+  );
+}
+const gateMechanics = fs.readFileSync(
+  "docs/notes/agent-quality-gate-mechanics.md",
+  "utf8",
+);
+assert.match(
+  gateMechanics,
+  /so a warm\n`\.\/scripts\/agent-quality-gate\.sh --run --parallel 3 --base origin\/main` satisfies/u,
+  "gate mechanics must name the exact reusable pre-push warm command",
+);
+const freshnessSkipIndex = gate.indexOf(
+  'echo "Previous successful agent quality gate run is still fresh; skipping mapped commands."',
+);
+const hostedRefusalIndex = gate.indexOf(
+  'echo "Hosted pre-push requires a fresh quality-gate stamp; no mapped command ran."',
+);
+const lockAcquisitionIndex = gate.lastIndexOf("\nacquire_gate_run_lock\n");
+assert.ok(freshnessSkipIndex >= 0, "quality-gate freshness skip is missing");
+assert.ok(hostedRefusalIndex > freshnessSkipIndex, "hosted refusal must follow freshness reuse");
+assert.ok(lockAcquisitionIndex > hostedRefusalIndex, "hosted refusal must precede lock acquisition");
+assert.match(
+  gate,
+  /start '\.\/scripts\/agent-quality-gate\.sh --run --parallel 3 --base origin\/main' as an observable background task\./u,
+  "hosted refusal must warm the exact hook launcher, base, and parallelism",
 );
 NODE
   fail "expected the public quality-gate entry contract to remain pinned"
@@ -9942,6 +10048,7 @@ STUB
   chmod +x tools/trunk
   git add .
   git commit -qm init
+  git config agent.qualityGate.cloudPrePushRequireFresh true
   base_ref="$(git rev-parse --verify HEAD)"
   printf 'changed\n' >> fixture.txt
   # Warm WITH --allow-package-script-changes; the skip run below passes NO such
@@ -9949,7 +10056,9 @@ STUB
   # share a freshness stamp, so the flag-less run skips (allowPackageScripts is
   # folded out of the stamp when packageRisk is false).
   COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
-    "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run --allow-package-script-changes > "$output_file" 2>&1
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --base "$base_ref" --run --parallel 3 --allow-package-script-changes \
+      > "$output_file" 2>&1
   git add fixture.txt
   git commit -qm "commit validated content"
   stamp_file="$fresh_stamp_repo/.tmp/agent-quality-gate/last-success.stamp"
@@ -9958,22 +10067,63 @@ STUB
     "$(( $(date +%s) - 60 * 60 ))" \
     "$stamp_value" \
     > "$stamp_file"
+  : > "$output_file"
   COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
-    "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run --skip-if-fresh >> "$output_file" 2>&1
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --base "$base_ref" --run --parallel 3 --skip-if-fresh --pre-push \
+      > "$output_file" 2>&1
   [[ "$(cat "$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "1" ]] ||
-    fail "one-hour-old exact gate stamp did not skip flag-less run after allow-flag warm"
+    fail "warm hosted pre-push executed a mapped command"
   grep -Fq -- "Previous successful agent quality gate run is still fresh; skipping mapped commands." "$output_file" ||
-    fail "one-hour-old exact gate stamp did not report a freshness skip"
+    fail "warm hosted pre-push did not report a freshness skip"
 
   printf 'created_at=%s\nstamp=%s\n' \
     "$(( $(date +%s) - 2 * 60 * 60 - 1 ))" \
     "$stamp_value" \
     > "$stamp_file"
   : > "$output_file"
+  cold_pre_push_exit=0
   COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
-    "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run --skip-if-fresh >> "$output_file" 2>&1
-  [[ "$(cat "$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "2" ]] ||
-    fail "gate reused an exact success stamp older than the hard two-hour cap"
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --base "$base_ref" --run --parallel 3 --skip-if-fresh --pre-push \
+      > "$output_file" 2>&1 || cold_pre_push_exit=$?
+  [[ "$cold_pre_push_exit" -eq 2 ]] ||
+    fail "cold hosted pre-push exited ${cold_pre_push_exit} instead of 2"
+  [[ "$(cat "$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "1" ]] ||
+    fail "cold hosted pre-push executed a mapped command"
+  grep -Fq -- "Hosted pre-push requires a fresh quality-gate stamp; no mapped command ran." "$output_file" ||
+    fail "cold hosted pre-push did not explain its refusal"
+
+  printf '{"name":"quality-gate-fixture","private":true}\n' > package.json
+  git add package.json
+  git commit -qm "add package-risk fixture"
+  : > "$output_file"
+  hosted_package_risk_exit=0
+  COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --base "$base_ref" --run --parallel 3 \
+      > "$output_file" 2>&1 || hosted_package_risk_exit=$?
+  [[ "$hosted_package_risk_exit" -eq 2 ]] ||
+    fail "cold hosted package-risk run exited ${hosted_package_risk_exit} instead of 2"
+  grep -Fq -- "git config agent.qualityGate.allowPackageScriptChanges true" "$output_file" ||
+    fail "cold hosted package-risk run did not explain the reusable acknowledgement"
+
+  git config --unset agent.qualityGate.cloudPrePushRequireFresh
+  : > "$output_file"
+  local_pre_push_exit=0
+  COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --base "$base_ref" --run --parallel 3 --skip-if-fresh --pre-push \
+      > "$output_file" 2>&1 || local_pre_push_exit=$?
+  [[ "$local_pre_push_exit" -eq 2 ]] ||
+    fail "cold local pre-push exited ${local_pre_push_exit} instead of 2"
+  [[ "$(cat "$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "1" ]] ||
+    fail "cold local pre-push executed a mapped command before package-risk refusal"
+  grep -Fq -- "Refusing to run because package manifests, patches, or lockfile changed." "$output_file" ||
+    fail "cold local pre-push did not reach the normal package-risk refusal"
+  if grep -Fq -- "Hosted pre-push requires a fresh quality-gate stamp" "$output_file"; then
+    fail "cold local pre-push used the hosted refusal"
+  fi
 )
 rm -rf "$fresh_stamp_repo"
 assert_not_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
