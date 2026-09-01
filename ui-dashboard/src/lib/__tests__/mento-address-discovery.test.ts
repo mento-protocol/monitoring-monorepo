@@ -100,6 +100,34 @@ describe("discoverMentoAddresses", () => {
     expect(calls).toBeGreaterThan(12);
   });
 
+  it("keeps partial results when only some targets fail", async () => {
+    let call = 0;
+    requestMock.mockImplementation(async () => {
+      call += 1;
+      // First target answers, every later one times out mid-walk.
+      if (call === 1) return { rows: [{ address: A(0x9) }] };
+      throw new Error("hasura timeout");
+    });
+
+    const result = await discoverMentoAddresses(
+      "https://hasura/graphql",
+      42220,
+    );
+    // The surviving target's addresses still reach the caller.
+    expect(result.addresses).toEqual([A(0x9)]);
+  });
+
+  it("throws when every target fails", async () => {
+    // Endpoint-wide fault: an auth/schema/network failure on the first page
+    // of every target. A zero-result success here would record a healthy
+    // cron check-in for a run that discovered nothing.
+    requestMock.mockRejectedValue(new Error("hasura unauthorized"));
+
+    await expect(
+      discoverMentoAddresses("https://hasura/graphql", 42220),
+    ).rejects.toThrow(/all \d+ discovery targets failed/);
+  });
+
   it("lowercases addresses and dedups", async () => {
     const upper = "0x" + "A".repeat(40);
     const lower = upper.toLowerCase();

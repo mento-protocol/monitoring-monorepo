@@ -30,13 +30,17 @@ const HASURA_REQUEST_TIMEOUT_MS = 10_000;
 type DistinctRow = { address: string };
 type DistinctQueryShape = Record<string, DistinctRow[]>;
 
+/** One target's walk: what it collected, and whether a page request failed. */
+type TargetWalk = { addresses: string[]; failed: boolean };
+
 async function fetchDistinctAddresses(
   client: GraphQLClient,
   target: DiscoveryEntity,
   chainId: number,
-): Promise<string[]> {
+): Promise<TargetWalk> {
   const { table, field } = target;
   const all = new Set<string>();
+  let failed = false;
   let page = 0;
   const query = buildDistinctQuery(target);
 
@@ -53,15 +57,18 @@ async function fetchDistinctAddresses(
         signal: AbortSignal.timeout(HASURA_REQUEST_TIMEOUT_MS),
       });
     } catch (err) {
-      // Fail open: this runs fanned out across several targets via
+      // Fail open per target: this runs fanned out across several targets via
       // Promise.all in discoverMentoAddresses, so an unguarded throw here
       // (e.g. one page timing out) would reject the whole discovery run and
       // fail the cron check-in even though the other targets succeeded.
-      // Keep whatever this target already collected instead.
+      // Keep whatever this target already collected instead, and report the
+      // failure so discoverMentoAddresses can still fail an endpoint-wide
+      // fault rather than reporting an empty run as a healthy one.
       Sentry.captureException(err, {
         tags: { table, field, source: "hasura", degraded: "partial-pages" },
         extra: { page, addressesCollected: all.size },
       });
+      failed = true;
       break;
     }
     const rows = data.rows ?? [];
@@ -80,7 +87,7 @@ async function fetchDistinctAddresses(
     );
   }
 
-  return Array.from(all);
+  return { addresses: Array.from(all), failed };
 }
 
 type DiscoveryResult = {
@@ -102,11 +109,24 @@ export async function discoverMentoAddresses(
     ),
   );
 
+  // A failure in some targets is degradation the caller can live with; a
+  // failure in *every* target means no target completed its walk, which an
+  // endpoint-wide fault (auth, schema, network) produces. Reporting that as
+  // a success would give the cron a healthy check-in — and, in the common
+  // shape where each target dies on its first page, a zero-result response
+  // indistinguishable from "nothing to discover".
+  if (found.length > 0 && found.every((walk) => walk.failed)) {
+    throw new Error(
+      `[mento-address-discovery] all ${found.length} discovery targets failed`,
+    );
+  }
+
   const all = new Set<string>();
   const perEntity: DiscoveryResult["perEntity"] = DISCOVERY_TARGETS.map(
     ({ table, field }, i) => {
-      for (const a of found[i]!) all.add(a);
-      return { table, field, count: found[i]!.length };
+      const addresses = found[i]!.addresses;
+      for (const a of addresses) all.add(a);
+      return { table, field, count: addresses.length };
     },
   );
 
