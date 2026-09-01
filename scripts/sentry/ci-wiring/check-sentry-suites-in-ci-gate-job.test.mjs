@@ -79,7 +79,11 @@ export const CANONICAL_JOB = {
   steps: [
     {
       uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-      with: { "persist-credentials": false },
+      with: {
+        ref: "${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}",
+        "fetch-depth": "${{ inputs.no_skip_audit && '0' || '1' }}",
+        "persist-credentials": false,
+      },
     },
     {
       uses: "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
@@ -93,7 +97,10 @@ export const CANONICAL_JOB = {
     // composite `postinstall` is PR-authored code, and putting it in front of
     // the gate would restore the R1 window this job exists to close. Their
     // position is pinned by the array-order equality above, not by a comment.
-    { uses: "./.github/actions/pnpm-install" },
+    {
+      uses: "$/.github/actions/pnpm-install",
+      with: { "restore-cache": "${{ !inputs.no_skip_audit }}" },
+    },
     { name: "Sentry CI wiring assertion", run: CHECKER_COMMAND },
   ],
 };

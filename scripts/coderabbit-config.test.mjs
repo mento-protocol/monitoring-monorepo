@@ -28,6 +28,8 @@ const REPO_ROOT = path.resolve(
   "..",
 );
 const CONFIG_PATH = path.join(REPO_ROOT, ".coderabbit.yaml");
+const GATE_LIFECYCLE_SELECTOR =
+  "scripts/{agent-quality-gate.sh,agent-quality-gate.test.sh,gate/**/*.{c,mjs,sh}}";
 
 // The canonical config. Keep this and `.coderabbit.yaml` edited together.
 const EXPECTED_CONFIG = {
@@ -40,6 +42,26 @@ const EXPECTED_CONFIG = {
     suggested_reviewers: false,
     auto_apply_labels: false,
     collapse_walkthrough: true,
+    path_instructions: [
+      {
+        path: "ui-dashboard/src/**/*.{ts,tsx}",
+        instructions:
+          "Apply the file-size policy in `ui-dashboard/AGENTS.md` and `ui-dashboard/eslint.config.mjs`.\n" +
+          "Count effective lines after excluding blank lines and comments.\n" +
+          "Treat 600 effective lines as the soft review threshold and 1,000 effective lines as the lint cap.\n" +
+          "Do not apply these thresholds to `ui-dashboard/src/lib/__generated__/**`, `**/__tests__/**`, `**/*.test.{ts,tsx}`, or `ui-dashboard/src/lib/types.ts`.\n" +
+          "Compare the effective count with the merge base. Do not request a split when the change reduces an already-over-threshold file.\n" +
+          "Do not request a split only from the physical line count. Report threshold drift only when the change grows a file that remains above policy; report a separate cohesion defect independently.\n",
+      },
+      {
+        path: GATE_LIFECYCLE_SELECTOR,
+        instructions:
+          "Apply the execution and settlement model in `docs/notes/agent-quality-gate-mechanics.md`.\n" +
+          "Before reporting an ordering or lifecycle defect, trace route mapping through executor phases, command classification, settlement ownership, and the focused regression tests.\n" +
+          "Mapper insertion order and the location of a deferred cleanup call do not prove runtime order.\n" +
+          "Report an ordering or lifecycle finding when the trace shows a documented lifecycle invariant violation, such as a bypassed prerequisite, duplicate execution, deadlock, incorrect ownership, or missed settlement, or when focused coverage no longer reaches the changed path.\n",
+      },
+    ],
     path_filters: [
       "!pnpm-lock.yaml",
       "!**/pnpm-lock.yaml",
@@ -127,6 +149,36 @@ test("auto-review stays on with the measured five-commit burst guard", () => {
   const { auto_review: autoReview } = EXPECTED_CONFIG.reviews;
   assert.equal(autoReview.enabled, true);
   assert.equal(autoReview.auto_pause_after_reviewed_commits, 5);
+});
+
+test("the gate lifecycle selector covers runtime and regression sources", () => {
+  const selector = loadConfig().reviews.path_instructions[1].path;
+  assert.equal(selector, GATE_LIFECYCLE_SELECTOR);
+
+  const matchingPaths = [
+    "scripts/agent-quality-gate.sh",
+    "scripts/agent-quality-gate.test.sh",
+    "scripts/gate/darwin-process-identity-runtime.inc.c",
+    "scripts/gate/darwin-process-identity.c",
+    "scripts/gate/mapping.mjs",
+    "scripts/gate/mapping/facts.mjs",
+    "scripts/gate/run-handles.sh",
+  ];
+
+  for (const candidate of matchingPaths) {
+    assert.equal(
+      path.matchesGlob(candidate, selector),
+      true,
+      `${selector} must match ${candidate}`,
+    );
+  }
+
+  const unrelatedPath = "scripts/deploy/deploy-indexer-status.mjs";
+  assert.equal(
+    path.matchesGlob(unrelatedPath, selector),
+    false,
+    `${selector} must not match ${unrelatedPath}`,
+  );
 });
 
 process.stdout.write(`\n${asserted} passed, ${failed} failed\n`);
