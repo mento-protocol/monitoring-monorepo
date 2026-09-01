@@ -2031,7 +2031,8 @@ while IFS= read -r -d '' validator_scrub_name; do
   fi
   validator_scrub_launcher+=(-u "$validator_scrub_name")
 done < <(
-  ESLINT_BASELINE_INPUT=ambient \
+  AGENT_QUALITY_GATE_DEBUG_STAMP=1 \
+    ESLINT_BASELINE_INPUT=ambient \
     ALERT_RULES_LINT_RULES_DIR=ambient \
     GIT_DIR=ambient \
     node scripts/gate/quality-gate-coordinator-environment.mjs \
@@ -2039,10 +2040,12 @@ done < <(
 )
 if [[ "$validator_scrub_scan_complete" -ne 1 ||
   ! "$validator_scrub_policy_hash" =~ ^[a-f0-9]{64}$ ]] ||
-  ! ESLINT_BASELINE_INPUT=ambient \
+  ! AGENT_QUALITY_GATE_DEBUG_STAMP=1 \
+    ESLINT_BASELINE_INPUT=ambient \
     ALERT_RULES_LINT_RULES_DIR=ambient \
     GIT_DIR=ambient \
     "${validator_scrub_launcher[@]}" /bin/bash -p -c '
+      [[ -z "${AGENT_QUALITY_GATE_DEBUG_STAMP+x}" ]]
       [[ -z "${ESLINT_BASELINE_INPUT+x}" ]]
       [[ -z "${ALERT_RULES_LINT_RULES_DIR+x}" ]]
       [[ -z "${GIT_DIR+x}" ]]
@@ -9824,6 +9827,71 @@ gate_test_stop_coordinators_in_root() {
   [[ "$stop_failed" -eq 0 ]]
 }
 
+# The debug formatter mirrors the active stamp instead of maintaining a
+# second field list. Cover both current schemas without starting a gate.
+stamp_debug_function="$(mktemp)"
+stamp_debug_stdout="$(mktemp)"
+stamp_debug_stderr="$(mktemp)"
+if ! node --input-type=module - \
+  "$repo_root/scripts/agent-quality-gate.sh" \
+  "$repo_root/scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.mjs" \
+  > "$stamp_debug_function" <<'NODE'
+import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+
+const [gatePath, extractorPath] = process.argv.slice(2);
+const { bashFunctionSource } = await import(pathToFileURL(extractorPath).href);
+process.stdout.write(
+  bashFunctionSource(
+    readFileSync(gatePath, "utf8"),
+    "gate_print_freshness_stamp_debug",
+    gatePath,
+  ),
+);
+NODE
+then
+  rm -f "$stamp_debug_function" "$stamp_debug_stdout" "$stamp_debug_stderr"
+  fail "could not extract the freshness-stamp debug formatter"
+fi
+if ! /bin/bash -c '
+  set -euo pipefail
+  source "$1"
+  gate_print_freshness_stamp_debug "$2"
+  gate_print_freshness_stamp_debug "$3"
+' stamp-debug "$stamp_debug_function" \
+  $'v3\tbase=base\tpaths=paths\tplan=plan\timplementation=implementation\tcontent=content\tpackageRisk=false\tallowPackageScripts=n/a\tscrubPolicy=scrub' \
+  $'v4\tbase=base\tpaths=paths\tplan=plan\timplementation=implementation\tcontent=content\tpackageRisk=false\tallowPackageScripts=n/a\tscrubPolicy=scrub\tcoordinatorContext=context' \
+  > "$stamp_debug_stdout" 2> "$stamp_debug_stderr"; then
+  rm -f "$stamp_debug_function" "$stamp_debug_stdout" "$stamp_debug_stderr"
+  fail "freshness-stamp debug formatter rejected a current schema"
+fi
+[[ ! -s "$stamp_debug_stdout" ]] ||
+  fail "freshness-stamp debug formatter wrote to stdout"
+[[ "$(grep -c '^agent-quality-gate stamp ' "$stamp_debug_stderr")" == "19" ]] ||
+  fail "freshness-stamp debug formatter did not mirror both current schemas"
+grep -Fxq 'agent-quality-gate stamp schema=v3' "$stamp_debug_stderr" ||
+  fail "freshness-stamp debug formatter omitted the v3 schema"
+grep -Fxq 'agent-quality-gate stamp schema=v4' "$stamp_debug_stderr" ||
+  fail "freshness-stamp debug formatter omitted the v4 schema"
+[[ "$(grep -c '^agent-quality-gate stamp coordinatorContext=' "$stamp_debug_stderr")" == "1" ]] ||
+  fail "freshness-stamp debug formatter did not preserve the v4-only field"
+: > "$stamp_debug_stdout"
+: > "$stamp_debug_stderr"
+if /bin/bash -c '
+  set -euo pipefail
+  source "$1"
+  gate_print_freshness_stamp_debug "$2"
+' stamp-debug-invalid "$stamp_debug_function" \
+  $'v4\tbase=base\tbroken-field\tcontent=content' \
+  > "$stamp_debug_stdout" 2> "$stamp_debug_stderr"; then
+  rm -f "$stamp_debug_function" "$stamp_debug_stdout" "$stamp_debug_stderr"
+  fail "freshness-stamp debug formatter accepted a malformed field"
+fi
+[[ ! -s "$stamp_debug_stdout" && ! -s "$stamp_debug_stderr" ]] ||
+  fail "freshness-stamp debug formatter emitted a partial malformed record"
+rm -f "$stamp_debug_function" "$stamp_debug_stdout" "$stamp_debug_stderr"
+unset stamp_debug_function stamp_debug_stderr stamp_debug_stdout
+
 # Both freshness callers place the recomputation inside an assignment followed
 # by `||`. Bash therefore disables implicit errexit inside the substituted
 # function. Extract the production function and make every load-bearing probe
@@ -10136,6 +10204,46 @@ STUB
   grep -Fq -- "Previous successful agent quality gate run is still fresh; skipping mapped commands." \
     "$output_file" ||
     fail "an exact coordinated repeat did not report its freshness skip"
+  if grep -q '^agent-quality-gate stamp ' "$output_file"; then
+    fail "freshness-stamp debug output was enabled by default"
+  fi
+
+  cp "$stamp_file" "${stamp_file}.before-debug"
+  debug_stdout="${output_file}.debug.stdout"
+  debug_stderr="${output_file}.debug.stderr"
+  AGENT_QUALITY_GATE_DEBUG_STAMP=1 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$coordinated_fresh_stamp_lock" \
+    AGENT_QUALITY_GATE_COORDINATOR=1 \
+    AGENT_QUALITY_GATE_CAPACITY=3 \
+    COUNTER_FILE="$counter" \
+    QG_TOOL_VERSION_FILE="$coordinated_fresh_tool_version" \
+    RUSTFLAGS='-C debuginfo=0' \
+    PATH="$coordinated_fresh_stamp_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --base "$base_ref" --run --lock-wait 30 --skip-if-fresh \
+      > "$debug_stdout" 2> "$debug_stderr"
+  [[ "$(cat "$counter")" == "1" ]] ||
+    fail "enabling freshness-stamp debug output invalidated exact reuse"
+  cmp -s "$stamp_file" "${stamp_file}.before-debug" ||
+    fail "enabling freshness-stamp debug output changed the durable stamp"
+  grep -Fq -- "Previous successful agent quality gate run is still fresh; skipping mapped commands." \
+    "$debug_stdout" ||
+    fail "the debug run did not preserve the normal freshness result on stdout"
+  if grep -q '^agent-quality-gate stamp ' "$debug_stdout"; then
+    fail "freshness-stamp debug output leaked onto stdout"
+  fi
+  [[ "$(grep -c '^agent-quality-gate stamp ' "$debug_stderr")" == "10" ]] ||
+    fail "coordinated freshness debug output did not report the complete v4 schema"
+  for field in schema base paths plan implementation content packageRisk \
+    allowPackageScripts scrubPolicy coordinatorContext; do
+    grep -q "^agent-quality-gate stamp ${field}=" "$debug_stderr" ||
+      fail "coordinated freshness debug output omitted ${field}"
+  done
+  grep -Fxq 'agent-quality-gate stamp schema=v4' "$debug_stderr" ||
+    fail "coordinated freshness debug output reported the wrong schema"
+  rm -f "$debug_stdout" "$debug_stderr" "${stamp_file}.before-debug"
 
   cp "$stamp_file" "${stamp_file}.valid"
   {
@@ -16898,8 +17006,8 @@ STUB
   assert_contains "timed out after"
   # The pre-push hook cannot pass --no-lock, so the timeout must also name the
   # recovery that works from a failed push.
-  assert_contains "./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main"
-  assert_contains "--skip-if-fresh cache-hits and exits before this lock"
+  assert_contains "git fetch --quiet origin main && ./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main"
+  assert_contains "before coordinator registration"
   [[ -d "$gate_lock_root/run.lock" ]] ||
     fail "a run that never acquired the lock must not delete the holder's lock"
 

@@ -2338,10 +2338,21 @@ for it is scoped to that exact name.
 
 The pre-push hook reaches neither bypass. It runs a fixed command line, and
 Trunk strips these variables. If coordination fails, the hook exits non-zero.
-After the reported recovery or compatibility blocker clears, run the local or
-hosted gate command from step 3 of the
-[PR operating card](pr-operating-card.md). A verified matching success lets the
-hook's `--skip-if-fresh` path exit before it registers another request.
+After the reported recovery or compatibility blocker clears, fetch the hook's
+base and warm the matching stamp with `git fetch --quiet origin main &&
+./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main`. A
+verified matching success lets the hook's `--skip-if-fresh` path exit before it
+registers another request.
+
+Set `AGENT_QUALITY_GATE_DEBUG_STAMP=1` to print the active freshness-stamp
+schema and fields, one per line on stderr. The first line names the schema. The
+remaining lines mirror the exact v3 or v4 fields, including `scrubPolicy` and
+the v4 `coordinatorContext`. The output therefore follows the active base
+binding instead of assuming whether it is a tip or merge-base. It prints only
+the stored identifiers and hashes. It does not print raw environment values.
+The switch does not change the stamp or stdout. To diagnose a miss, capture the
+warm command and the hook's exact fetch-and-run command back to back. The first
+changed line names the input that prevented reuse.
 
 **Heavy suites form barriers.** Dashboard coverage, its scoped `vitest related`
 substitute, browser work, production builds, and size-limit work take all
