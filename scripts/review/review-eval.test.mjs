@@ -6581,7 +6581,17 @@ test("a scheduled run refuses a checkout that is not at origin/main", () => {
   assert.match(script, /has uncommitted changes/);
 });
 
-test("the launchd template carries placeholders the runbook install step rewrites", () => {
+function launchdRunbookBlocks(runbook) {
+  const section = runbook.match(
+    /### Install the scheduler\n([\s\S]*?)\nIt fires on the 8th/,
+  );
+  assert.ok(section, "the scheduler install section was not found");
+  return [...section[1].matchAll(/```bash\n([\s\S]*?)\n```/g)].map(
+    (match) => match[1],
+  );
+}
+
+test("the launchd template carries safe arguments and installed PATH placeholders", () => {
   const plist = readFileSync(
     path.join(repoRoot, "scripts/review/launchd/org.mento.review-eval.plist"),
     "utf8",
@@ -6590,20 +6600,187 @@ test("the launchd template carries placeholders the runbook install step rewrite
     path.join(repoRoot, "docs/evals/review-skill.md"),
     "utf8",
   );
+  const installer = readFileSync(
+    path.join(repoRoot, "scripts/review/install-review-eval-launchd.sh"),
+    "utf8",
+  );
   // The managed-context rule: no author-account path may survive in either file.
   assert.doesNotMatch(plist, /\/Users\//);
   assert.doesNotMatch(runbook, /\/Users\//);
   const tokens = [
     ...new Set([...plist.matchAll(/__[A-Z_]+__/g)].map((match) => match[0])),
   ].sort();
-  assert.deepEqual(tokens, ["__REPO_CHECKOUT__", "__USER_HOME__"]);
+  assert.deepEqual(tokens, [
+    "__REPO_CHECKOUT__",
+    "__RUNTIME_PATH__",
+    "__USER_HOME__",
+  ]);
   for (const token of tokens) {
     assert.ok(
-      runbook.includes(`s|${token}|`),
-      `${token} is not rewritten by the documented install step`,
+      runbook.includes(`\`${token}\``),
+      `${token} is not documented by the install step`,
     );
   }
+  const programArgumentsBlock = plist.match(
+    /<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/,
+  );
+  assert.ok(programArgumentsBlock, "ProgramArguments was not found");
+  const programArguments = [
+    ...programArgumentsBlock[1].matchAll(/<string>(.*?)<\/string>/g),
+  ].map((match) => match[1]);
+  assert.deepEqual(programArguments, [
+    "/bin/zsh",
+    "-l",
+    "-c",
+    'set -eu; runtime_path="$1"; shift; export PATH="$runtime_path"; exec /bin/bash "$@"',
+    "org.mento.review-eval",
+    "__RUNTIME_PATH__",
+    "__REPO_CHECKOUT__/scripts/review/run-eval.sh",
+    "--kind",
+    "auto",
+  ]);
+  assert.match(plist, /<key>PATH<\/key>\s*<string>__RUNTIME_PATH__<\/string>/);
+  assert.match(installer, /for command_name in node git codex claude/);
+  assert.match(installer, /runtime_path="\$PATH:\/usr\/local\/bin:/);
+  assert.match(
+    installer,
+    /command_path="\$\(PATH="\$runtime_path" command -v "\$command_name"\)"/,
+  );
+  assert.match(installer, /-remove ProgramArguments\.5/);
+  assert.match(installer, /-insert ProgramArguments\.5/);
+  assert.match(installer, /-remove ProgramArguments\.6/);
+  assert.match(installer, /-insert ProgramArguments\.6/);
+  assert.match(installer, /-replace EnvironmentVariables\.PATH/);
+  assert.doesNotMatch(installer, /sed -e "s\|__REPO_CHECKOUT__/);
+
+  const [installBlock, kickstartBlock, ...extraBlocks] =
+    launchdRunbookBlocks(runbook);
+  assert.equal(extraBlocks.length, 0);
+  assert.equal(installBlock, "./scripts/review/install-review-eval-launchd.sh");
+  assert.doesNotMatch(installBlock, /kickstart/);
+  assert.match(installer, /^#!\/usr\/bin\/env bash\n\nset -euo pipefail/);
+  assert.match(installer, /launchctl_path=\/bin\/launchctl/);
+  assert.match(installer, /\/usr\/bin\/id -u/);
+  assert.match(installer, /\/bin\/mkdir -p/);
+  assert.match(installer, /linkSync\(process\.argv\[1\], process\.argv\[2\]\)/);
+  assert.match(installer, /\$lock_owner -ef \$run_lock/);
+  assert.match(installer, /fetch --quiet origin main/);
+  assert.match(installer, /rev-parse origin\/main/);
+  assert.match(installer, /status --porcelain=v1 --untracked-files=normal/);
+  assert.match(installer, /-extract Label raw/);
+  assert.match(installer, /"\$launchctl_path" bootstrap/);
+  assert.doesNotMatch(installer, /bootout|kickstart/);
+  assert.doesNotMatch(kickstartBlock, /bootstrap|plutil/);
+  assert.match(
+    kickstartBlock,
+    /^launchctl kickstart -p gui\/"\$\(id -u\)"\/org\.mento\.review-eval$/,
+  );
+  assert.match(
+    runbook,
+    /separate opt-in command only when you intend to start a paid\nevaluation immediately/,
+  );
 });
+
+test(
+  "the launchd install preserves login credentials and one safe program vector",
+  { skip: process.platform !== "darwin" },
+  () => {
+    const root = mkdtempSync(path.join(tmpdir(), "review eval & launchd-"));
+    try {
+      const target = path.join(root, "org.mento.review-eval.plist");
+      const script = path.join(
+        root,
+        "checkout & eval",
+        "scripts/review/run-eval.sh",
+      );
+      const runtimePath = `${[
+        "node & bin",
+        "git & bin",
+        "codex & bin",
+        "claude & bin",
+      ]
+        .map((directory) => path.join(root, directory))
+        .join(":")}:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`;
+      const logPath = path.join(root, "Logs", "review & eval.log");
+      cpSync(
+        path.join(
+          repoRoot,
+          "scripts/review/launchd/org.mento.review-eval.plist",
+        ),
+        target,
+      );
+      const plutil = (...args) =>
+        spawnSync("/usr/bin/plutil", [...args, target], {
+          encoding: "utf8",
+        });
+      for (const args of [
+        ["-remove", "ProgramArguments.5"],
+        ["-insert", "ProgramArguments.5", "-string", runtimePath],
+        ["-remove", "ProgramArguments.6"],
+        ["-insert", "ProgramArguments.6", "-string", script],
+        ["-replace", "EnvironmentVariables.PATH", "-string", runtimePath],
+        ["-replace", "StandardOutPath", "-string", logPath],
+        ["-replace", "StandardErrorPath", "-string", logPath],
+      ]) {
+        const result = plutil(...args);
+        assert.equal(result.status, 0, result.stdout + result.stderr);
+      }
+      const extract = (key, format = "raw") => {
+        const result = plutil("-extract", key, format, "-o", "-");
+        assert.equal(result.status, 0, result.stdout + result.stderr);
+        return result.stdout.trim();
+      };
+      const programArguments = JSON.parse(extract("ProgramArguments", "json"));
+      assert.deepEqual(programArguments, [
+        "/bin/zsh",
+        "-l",
+        "-c",
+        'set -eu; runtime_path="$1"; shift; export PATH="$runtime_path"; exec /bin/bash "$@"',
+        "org.mento.review-eval",
+        runtimePath,
+        script,
+        "--kind",
+        "auto",
+      ]);
+      assert.equal(extract("EnvironmentVariables.PATH"), runtimePath);
+      assert.equal(extract("StandardOutPath"), logPath);
+      assert.equal(extract("StandardErrorPath"), logPath);
+
+      const profileHome = path.join(root, "profile home");
+      const probeOutput = path.join(root, "login probe.txt");
+      mkdirSync(profileHome);
+      mkdirSync(path.dirname(script), { recursive: true });
+      writeFileSync(
+        path.join(profileHome, ".zprofile"),
+        "export REVIEW_EVAL_PROFILE_MARKER='profile marker'\nexport PATH='/profile only'\n",
+      );
+      writeFileSync(
+        script,
+        '#!/bin/bash\nprintf \'%s\\n\' "${REVIEW_EVAL_PROFILE_MARKER:-missing}" "$PATH" > "$REVIEW_EVAL_LOGIN_PROBE"\n',
+      );
+      const launched = spawnSync(
+        programArguments[0],
+        programArguments.slice(1),
+        {
+          encoding: "utf8",
+          env: {
+            HOME: profileHome,
+            PATH: "/launchd only",
+            REVIEW_EVAL_LOGIN_PROBE: probeOutput,
+            ZDOTDIR: profileHome,
+          },
+        },
+      );
+      assert.equal(launched.status, 0, launched.stdout + launched.stderr);
+      assert.deepEqual(readFileSync(probeOutput, "utf8").trim().split("\n"), [
+        "profile marker",
+        runtimePath,
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
 
 test("--revalidate-appended leaves an unpaired row's verdict alone", () => {
   const root = makeRoot();
