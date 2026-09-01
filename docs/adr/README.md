@@ -84,13 +84,14 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0070](0070-sentry-requeue-settlement-sentinel.md)          | The archive's terminal label is withheld from the re-queue's shed and read back      |
 | [0072](0072-md-only-docs-checks-job.md)                     | The Markdown globs route to a small `docs-checks` job; some Markdown runs both jobs  |
 | [0073](0073-guardrail-prose-pinned-in-ci.md)                | Normative guardrail sentences are pinned in CI; script digests deliberately are not  |
-| [0075](0075-pr-merge.md)                                    | One sanctioned merge wrapper gates merges locally; the binding control stays human   |
+| [0075](0075-pr-merge.md)                                    | Archived: local operator merge wrapper                                               |
 | [0076](0076-fair-quality-gate-coordinator.md)               | Fair weighted coordination replaces machine-wide full-run gate exclusion             |
 | [0077](0077-operator-triggered-backlog-sweep.md)            | Backlog sweeps start from an operator, run isolated workers, and stop at READY       |
 | [0078](0078-staged-verification-redesign.md)                | Staged existing-CI replacement of the mandatory local gate                           |
 | [0079](0079-sealed-exact-file-patch-secret-suppression.md)  | Autoreview permits only sealed exact-file-patch secret suppression                   |
 | [0081](0081-narrow-dependabot-auto-merge-exception.md)      | One narrow Dependabot group can auto-merge through a two-stage trust boundary        |
 | [0082](0082-persistent-issue-board-mutation-mutex.md)       | One persistent compare-and-swap Git ref serializes issue-board helper mutations      |
+| [0083](0083-github-ui-operator-merge.md)                    | Use GitHub for ordinary pull request merges                                          |
 
 ### shared-config
 

@@ -6,7 +6,7 @@ version: 2
 # npm updates for this monorepo are handled out-of-band (pnpm workspace,
 # `minimumReleaseAge: 4320` in pnpm-workspace.yaml). GitHub-issued security
 # advisories on pnpm-lock.yaml still come through as Dependabot PRs even
-# without an `npm` entry here. Those PRs use the normal CI and human-merge
+# without an `npm` entry here. Those PRs use the normal CI and operator-approved
 # gates because the auto-merge lane accepts only GitHub-owned `actions/*`
 # minor and patch updates in the named group below.
 updates:
@@ -29,11 +29,11 @@ updates:
     # Collapse the Monday batch into one PR per tier. Only GitHub-owned
     # `actions/*` minor and patch updates enter the narrow auto-merge group.
     # Other publishers, major updates, and every excluded action use the
-    # normal human merge path.
+    # normal operator-authorized merge path.
     #
-    # Review-sensitive packages stay in separate, human-merged PRs:
+    # Review-sensitive packages stay in separate, operator-authorized PRs:
     #   - `actions/create-github-app-token` — this action can mint GitHub App
-    #     installation tokens. Keep credential tooling on the human path so
+    #     installation tokens. Keep credential tooling on the operator-authorized path so
     #     this lane cannot change an authentication boundary by itself.
     #   - `anthropics/*` — claude-code-action is the auto-review reviewer;
     #     a broken reviewer can break the gate that would review its
@@ -79,7 +79,7 @@ updates:
     # Per-semver-tier cooldown (`semver-major-days` etc.) is NOT supported
     # for the github-actions ecosystem — only `default-days` is honored.
     # Security updates bypass cooldown. They are not in the named routine
-    # group, so they stay on the human merge path. Routine group updates can
+    # group, so they stay on the operator-authorized merge path. Routine group updates can
     # auto-merge after the delay and required checks.
     cooldown:
       default-days: 7

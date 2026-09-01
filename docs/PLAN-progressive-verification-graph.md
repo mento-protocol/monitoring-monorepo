@@ -50,9 +50,9 @@ Build the smallest system that gives fast feedback and a high quality bar:
 7. Keep unusually expensive, time-dependent, and live-provider checks in
    existing conditional, deployment, or scheduled lanes.
 8. Preserve the current automated review, feedback ledger, readiness checks,
-   and exact-head human merge consent. Record the accepted one-maintainer risk.
-9. Keep the current exact-head, human-approved merge path. Do not add a merge
-   queue in the initial design.
+   and explicit merge approval. Record the accepted one-maintainer risk.
+9. Use GitHub directly for merges. Do not add a custom merge wrapper or queue
+   in the initial design.
 10. Delete the gate coordinator, routing engine, journals, locks, and their
     regression suite after the cutover evidence passes.
 
@@ -68,8 +68,8 @@ increase in routine runner minutes.
 - Return the first useful CI failure quickly.
 - Keep required PR validation within a short and measured wall-clock budget.
 - Remove all cross-worktree waiting from normal local development.
-- Preserve automated review, explicit human merge consent, deployment proof,
-  and scheduled assurance.
+- Preserve automated review, explicit merge approval, deployment proof, and
+  scheduled assurance.
 - Make the safeguard small enough for a reviewer to understand in one sitting.
 
 No verification system can prove that a change has no regression. This design
@@ -217,12 +217,12 @@ with the mechanisms that already operate:
 - `pr:feedback-state` and exact-head `pr:ready-state` checks.
 - Contract tests that pin required jobs, filters, command aliases, workflow
   trust boundaries, and aggregate behavior.
-- Explicit human consent through the current merge wrapper.
+- GitHub merge with explicit operator authority.
 - A full no-skip shadow run for control-plane changes.
 
 The protected surface includes workflows, repository-owned actions, required
 job sets, command aliases, lifecycle and toolchain configuration, path filters,
-ruleset helpers, merge code, and readiness code. The inventory must name the
+ruleset helpers, and readiness code. The inventory must name the
 contract test or review step that protects each surface.
 
 If a second active human maintainer becomes available, adopt protected
@@ -235,13 +235,13 @@ verifier would be justified only if that threat enters scope.
 
 ## Assurance Stages
 
-| Stage            | Purpose                             | Work                                                                                          | Authority                                       |
-| ---------------- | ----------------------------------- | --------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| Local            | Fast feedback                       | Staged formatting and explicit package-native checks                                          | Required author checkpoint; not merge authority |
-| Pull request     | Source regression protection        | Existing affected fan-out, unconditional guards, and fail-closed aggregate                    | Required                                        |
-| Review and merge | Intent and control-plane protection | Automated review, feedback ledger, human consent, exact-head readiness, and current-base rule | Required                                        |
-| Deployment       | Live behavior proof                 | Existing service-specific rollout and smoke checks                                            | Required by current closeout policy             |
-| Scheduled        | Selection audit and changing risks  | No-skip CI, mutation, drift, security, browser, and cold checks                               | Operational                                     |
+| Stage            | Purpose                             | Work                                                                                              | Authority                                       |
+| ---------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| Local            | Fast feedback                       | Staged formatting and explicit package-native checks                                              | Required author checkpoint; not merge authority |
+| Pull request     | Source regression protection        | Existing affected fan-out, unconditional guards, and fail-closed aggregate                        | Required                                        |
+| Review and merge | Intent and control-plane protection | Automated review, feedback ledger, operator approval, exact-head readiness, and current-base rule | Required                                        |
+| Deployment       | Live behavior proof                 | Existing service-specific rollout and smoke checks                                                | Required by current closeout policy             |
+| Scheduled        | Selection audit and changing risks  | No-skip CI, mutation, drift, security, browser, and cold checks                                   | Operational                                     |
 
 These stages stay separate. The PR workflow does not become a deployment
 orchestrator. A scheduled result does not replace a required PR result.
@@ -586,7 +586,7 @@ The inventory must cover at least these risk classes:
 7. Package aliases, lifecycle scripts, lockfiles, and toolchain versions.
 8. Documentation metadata, links, context budgets, and runbook drift.
 9. Dependency, supply-chain, Knip, mutation, and baseline-growth checks.
-10. PR feedback, required checks, exact-head readiness, merge consent, and
+10. PR feedback, required checks, current-head readiness, authorized merge, and
     mandatory hazard-checklist routing.
 11. Deployment revision, service health, data, metrics, alerts, and rollback.
 12. Gate and coordinator self-tests that become obsolete with their subject.
@@ -598,8 +598,10 @@ list. This resolves the circular completeness problem in the first draft.
 
 ## Review and Merge Authority
 
-Keep the current human-only merge wrapper and exact-head checks. Do not add a
-merge queue during the initial migration.
+Keep current-head readiness checks. A human operator normally merges through
+the GitHub UI. An agent can merge only with explicit, direct approval for that
+specific merge. Do not add a custom merge wrapper or merge queue during the
+initial migration.
 
 At cutover:
 
@@ -609,20 +611,21 @@ At cutover:
 - Require the current automated review and feedback-ledger conditions.
 - Require the branch to be current with the protected base before merge, or
   rerun the required checks after the base changes.
-- Re-read the head, base, checks, reviews, and feedback after the human confirms
-  the merge.
-- Keep agents unable to merge without explicit approval for that exact merge.
+- Check the current head, base, checks, reviews, and feedback on the PR page
+  immediately before using the merge button.
+- Keep agents at ALL_CLEAR unless the user directly approves that specific
+  merge.
 
 This flow records the accepted one-operator risk. The human who owns the change
 also owns the final merge decision. Automated reviewers, feedback-state, CI
-contracts, and the exact-head wrapper provide independent evidence. They do not
-become a second human approval.
+contracts, and current-head readiness provide independent evidence. They do
+not become a second human approval.
 
 This design accepts extra CI reruns when `main` moves. That cost is simpler than
 a custom queue or merge-candidate attestation system. Measure the rerun cost.
 Consider GitHub's native merge queue only if base churn becomes a material
 bottleneck. That later change requires its own ADR, canary, workflow-event
-support, merge-wrapper change, and rollback plan.
+support, and rollback plan.
 
 ## Deployment and Scheduled Assurance
 
@@ -939,8 +942,8 @@ With separate human approval, delete:
 
 Update or supersede ADRs 0007, 0069, 0076, and 0072 as their decisions change.
 Update or supersede ADRs 0008 and 0033 when checklist or reminder entry points
-change. Keep ADR 0075 active because this plan does not change merge consent or
-merge-queue behavior. Record the final line reduction and retained safeguards.
+change. Keep ADR 0083 active for the direct GitHub merge path. Record the
+final line reduction and retained safeguards.
 
 ### Phase 6: Optimize only measured bottlenecks
 
@@ -982,7 +985,8 @@ Issue #2128 deletion approval.
 - The ADR records the accepted one-maintainer risk. The inventory gives each
   existing review, readiness, contract-test, and merge control a disposition.
 - A changed head invalidates prior readiness and feedback evidence.
-- The merge wrapper refuses a stale head or base.
+- The operator uses the current PR page. Branch rules re-evaluate required
+  checks before GitHub enables the merge.
 - The ruleset rollback record restores the prior required checks.
 - Every `main` SHA receives its own non-cancelled CI result.
 
@@ -1089,9 +1093,9 @@ does not grant that approval.
 
 | Finding                                                         | Revised decision                                                                                                                                                                                                                                   |
 | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Candidate workflows can spoof a protected aggregate             | Scope malicious authorized maintainers out of the threat model. Use current automated review, feedback-state, contract tests, exact-head readiness, and human merge consent. Record the one-maintainer risk.                                       |
+| Candidate workflows can spoof a protected aggregate             | Scope malicious authorized maintainers out of the threat model. Use current automated review, feedback-state, contract tests, current-head readiness, and operator-authorized GitHub merge. Record the one-maintainer risk.                        |
 | Candidate code can reach an attestation boundary                | Remove the attestor and verdict store. Give validation jobs no secrets or write permission. Keep credential effects separate.                                                                                                                      |
-| Merge queue conflicts with the sanctioned merge path            | Do not use a merge queue in the initial system. Keep exact-head human merge and require current-base validation.                                                                                                                                   |
+| Merge queue conflicts with the merge path                       | Do not use a merge queue in the initial system. Keep operator-authorized GitHub merge and require current-base validation.                                                                                                                         |
 | Cache identity and artifact binding are incomplete              | Do not cache verdicts or restore cross-job proof artifacts. Let PR jobs restore protected-`main` setup caches, but never save a cache.                                                                                                             |
 | Candidate task declarations can weaken task semantics           | Do not add candidate task declarations or a task registry. Use fixed workflow jobs and control-plane review.                                                                                                                                       |
 | Completeness proof is circular                                  | Build an independent, reviewed migration inventory before deleting any safeguard.                                                                                                                                                                  |
@@ -1114,7 +1118,7 @@ changes, so their digest-bound verdicts describe the prior revision.
 
 | Finding                                                            | Integrated decision                                                                                                                                                           |
 | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Required code-owner approval deadlocks a one-maintainer repository | Remove it as a cutover prerequisite. Record the one-operator risk and retain current automated review, feedback, readiness, and human merge controls.                         |
+| Required code-owner approval deadlocks a one-maintainer repository | Remove it as a cutover prerequisite. Record the one-operator risk and retain current automated review, feedback, readiness, and explicit merge approval.                      |
 | Full CI on every PR exceeds cost and latency limits                | Keep the existing affected fan-out. Test filters and run a separate scheduled or opt-in no-skip lane.                                                                         |
 | The target CI mostly exists                                        | Keep Phase 2 limited to inventory-driven gap filling. Do not rebuild the workflow.                                                                                            |
 | A job omitted from `ci.needs` is invisible                         | Add one closed-world static contract for jobs, `needs`, conditional jobs, and allowed skips.                                                                                  |

@@ -71,8 +71,6 @@
     "pr:feedback-state:test": "node scripts/pr/pr-feedback-state.test.mjs",
     "pr:ready-state": "node scripts/pr/pr-ready-state.mjs",
     "pr:ready-state:test": "node scripts/pr/pr-ready-state.test.mjs",
-    "pr:merge": "node scripts/pr/merge-pr.mjs",
-    "pr:merge:test": "node scripts/pr/merge-pr.test.mjs",
     "coderabbit:config:test": "node scripts/coderabbit-config.test.mjs",
     "tf": "node scripts/tf-stacks.mjs",
     "tf:test": "node scripts/tf-stacks.test.mjs",

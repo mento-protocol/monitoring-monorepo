@@ -1,6 +1,6 @@
 ---
 name: backlog-sweep
-description: "[repo-skill] Ship a small batch of ranked monitoring-monorepo backlog issues in one operator-started session: rank, pick the eligible top N, claim each by number, and drive each through its own worker subagent to a ready-for-review PR. Use when asked to sweep the backlog, work the top issues, or run a batch overnight. It never merges: it stops at READY and hands the operator the merge commands."
+description: "[repo-skill] Ship a small batch of ranked monitoring-monorepo backlog issues in one operator-started session: rank, pick the eligible top N, claim each by number, and drive each through its own worker subagent to a ready-for-review PR. Use when asked to sweep the backlog, work the top issues, or run a batch overnight. It never merges: it stops at READY and hands the operator the PR links."
 title: Backlog Sweep Skill
 status: active
 owner: eng
@@ -623,10 +623,8 @@ These are MUST-level. A sweep runs unattended, so a boundary crossed here is
 crossed without anyone watching.
 
 - **MUST NOT merge.** Green CI, a READY ready-state, and a batch that finished
-  early are not merge approval. `pnpm pr:merge` refuses outside an interactive
-  human session, so the sweep cannot merge even by accident — but the rule binds
-  regardless of the wrapper, which mechanizes it rather than replacing it. The
-  sweep ends at READY and hands the operator the commands.
+  early are not merge approval. The sweep ends at READY and gives the operator
+  the PR links. A human can open those links and merge in the GitHub UI.
 - **MUST NOT weaken or widen a control that blocks the run.** Root
   [`AGENTS.md`](../../../AGENTS.md) states it: never weaken a control that
   blocks your own work, because an agent that can widen its own gate has no
@@ -772,15 +770,9 @@ board.
 Print the same summary to the terminal; the file is the artifact, the terminal
 output is its summary.
 
-**End with the merge commands**, one line per PR that reached READY and nothing
-for the rest:
-
-```bash
-pnpm pr:merge --pr <number>
-```
-
-The operator runs those from their own terminal. Listing a command is not
-approval to run it, and this skill runs none of them.
+**End with the READY PR links**, one URL per PR that reached READY and nothing
+for the rest. A human can open each link and merge in the GitHub UI. Listing a
+link is not merge approval, and this skill never merges.
 
 Finally, send one spoken line saying the report is ready, through the fallback
 ladder in

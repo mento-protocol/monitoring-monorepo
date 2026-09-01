@@ -18,15 +18,15 @@ garden_lane: adrs-architecture
 
 ## Context
 
-[ADR 0075](0075-pr-merge.md) routes operator-approved merges through
-`pnpm pr:merge`. That wrapper gives a human a final briefing and records
-consent. It also means every routine dependency update waits for the same
-manual merge action after all required checks pass.
+[ADR 0083](0083-github-ui-operator-merge.md) routes ordinary merges directly
+through GitHub after current-head all-clear and explicit approval. Every routine
+dependency update would otherwise wait for the same operator-authorized merge after
+all required checks pass.
 
 The repository already limits Dependabot to the GitHub Actions ecosystem.
 Dependabot groups GitHub-owned `actions/*` minor and patch updates separately,
 delays routine releases for seven days, and keeps major updates, other
-publishers, and review-sensitive actions on the human path. This gives one
+publishers, and review-sensitive actions on the operator-authorized path. This gives one
 small update class a stable machine-checkable boundary. The user accepted an
 automatic merge for that class. The user did not authorize a general automatic
 merge path.
@@ -40,9 +40,9 @@ upstream payload and artifacts remain untrusted inputs.
 
 ## Decision
 
-Add one machine-merge exception for routine GitHub-owned `actions/*` updates in
-the `actions-minor-patch` Dependabot group. Keep every other merge on the
-operator-approved path in ADR 0075.
+Add one unattended merge exception for routine GitHub-owned `actions/*` updates
+in the `actions-minor-patch` Dependabot group. Keep every other merge on the
+operator-authorized GitHub path in ADR 0083.
 
 Use two workflows as one pinned security boundary:
 
@@ -125,7 +125,7 @@ merged:
 3. List every open Dependabot PR with a limit of 1,000 and include
    `autoMergeRequest` in the result. Require every value to be `null`. If a
    value is not `null`, disable auto-merge for that PR and repeat the audit.
-4. Merge PR #2137 immediately through the normal human merge path.
+4. Merge PR #2137 immediately through the normal operator-authorized GitHub path.
 5. Enable the replacement workflow on GitHub and verify that its state is
    active.
 6. Repeat the open-PR audit after the merge. Disable any request that appeared
@@ -157,8 +157,8 @@ operator step after the cutover is complete.
   protected merge Environment, and controlled lifecycle ruleset.
 - **Auto-merge every Dependabot update.** Rejected. Major, security,
   maintainer-changed, other-ecosystem, non-`actions/*`, and
-  `actions/create-github-app-token` updates retain human review and merge. The
-  human path includes load-bearing gate actions such as
+  `actions/create-github-app-token` updates retain human review and an
+  operator-authorized merge. That path includes load-bearing gate actions such as
   `re-actors/alls-green` and credential actions such as
   `google-github-actions/auth`.
 
@@ -195,10 +195,10 @@ operator step after the cutover is complete.
 - The final issue-event read is the last authoritative read before the merge
   request. The REST merge endpoint cannot pin issue-event history. A close and
   reopen after that read but before the write remains a narrow residual race.
-- ADR 0075 remains active for every operator, agent-assisted, major,
-  security, maintainer-changed, excluded-publisher, and other-ecosystem merge.
-  This ADR qualifies it with one named machine exception. It does not authorize
-  an agent session to merge a PR.
+- ADR 0083 governs every ordinary, major, security, maintainer-changed,
+  excluded-publisher, and other-ecosystem merge. This ADR qualifies it with one
+  named machine exception. It does not authorize an agent session to merge a
+  PR.
 
 ## Evidence
 

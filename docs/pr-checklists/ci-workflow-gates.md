@@ -193,24 +193,24 @@ Dependabot groups routine updates. One exact group can auto-merge through
 
 - **GitHub-owned `actions/*` patch / minor in `actions-minor-patch`:**
   auto-merge after required checks pass.
-- **Third-party GitHub Actions:** require a human merge. This includes
+- **Third-party GitHub Actions:** require an operator-authorized merge. This includes
   load-bearing gates such as `re-actors/alls-green` and credential actions
   such as `google-github-actions/auth`.
-- **Major:** require human review and a human merge. Check action input/output
+- **Major:** require human review and an operator-authorized merge. Check action input/output
   changes and ESM-only migrations that can skip dependents. Use `@codex review`
   for a second opinion.
-- **Maintainer changes:** require a human merge at every tier.
+- **Maintainer changes:** require an operator-authorized merge at every tier.
 - **Security advisories:** bypass cooldown and stay outside the named routine
-  group. Require a human merge.
-- **`actions/create-github-app-token`:** require a human merge. This action can
+  group. Require an operator-authorized merge.
+- **`actions/create-github-app-token`:** require an operator-authorized merge. This action can
   mint GitHub App installation tokens. Keep credential tooling outside the lane
   so it cannot change an authentication boundary by itself.
-- **`anthropics/*`:** require a human merge. These actions participate in the
+- **`anthropics/*`:** require an operator-authorized merge. These actions participate in the
   review boundary and remain separate from other third-party groups.
-- **`dependabot/*`:** require a human merge. `dependabot/fetch-metadata`
+- **`dependabot/*`:** require an operator-authorized merge. `dependabot/fetch-metadata`
   classifies this auto-merge lane, so it cannot update itself through the lane.
   Dependabot-owned actions remain separate from other third-party groups.
-- **Every non-GitHub-Actions ecosystem:** require a human merge.
+- **Every non-GitHub-Actions ecosystem:** require an operator-authorized merge.
 
 All version-update tiers use `default-days: 7`; the `github-actions` ecosystem
 has no per-tier cooldown. GitHub skips cooldown for security updates. Requiring
@@ -260,7 +260,7 @@ Environment, or controlled lifecycle ruleset.
 
 - [ ] If you add a new external review integration — GitHub App or Action — that is load-bearing for review or merge gating, keep its updates outside routine groups when an isolated review improves the self-update boundary
 - [ ] If you add a new `package-ecosystem` to `dependabot.yml`, keep it on the
-      human path unless a separate reviewed decision defines its exact lane.
+      operator-authorized path unless a separate reviewed decision defines its exact lane.
       npm has a larger transitive blast radius than GitHub Actions.
 
 ## 8. Runner architecture (ARM vs x64)

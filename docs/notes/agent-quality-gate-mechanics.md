@@ -669,8 +669,7 @@ procedure below.
   both paths in two jobs, quick-commands names the checker, and the manifest's
   keys pin `AGENTS.md`, `CLAUDE.md`, and the operating card.
   [ADR 0073](../adr/0073-guardrail-prose-pinned-in-ci.md) owns that contract.
-  `pr/merge-pr*`, both PR-state helpers, and `agent-autoreview.sh` (Codex
-  markers) route `pnpm pr:merge:test`. The exact
+  The exact
   `sentry/broker/mapped-command-process-identity.mjs` bridge routes
   `pnpm sentry:broker:test`. It keeps the probe's local import on the same
   canonical helper that the workflow stages.

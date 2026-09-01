@@ -625,7 +625,6 @@ export function summarizeTerminalReadyState(pr) {
       : "Pull request is closed without merging.",
     pr: summaryPr(pr),
     statusChecks: emptyStatusChecks(),
-    requiredChecks: [],
     requiredStatusContexts: [],
     unresolvedReviewThreads: [],
     unrepliedRootReviewComments: [],
@@ -863,12 +862,6 @@ export function summarizeReadyState({
     summary: summaryText,
     pr: summaryPr(pr, headUpdatedAt),
     statusChecks,
-    // `statusChecks` groups every check without recording whether branch
-    // protection requires it. Consumers that need the required subset — the
-    // merge wrapper's briefing among them — read this list, which is the exact
-    // one the blockers above are derived from, so a display and a blocker can
-    // never disagree about which checks count.
-    requiredChecks: splitChecks.required,
     requiredStatusContexts,
     unresolvedReviewThreads,
     unrepliedRootReviewComments,

@@ -1,9 +1,10 @@
 ---
 title: One sanctioned operator merge path
-status: active
+status: archived
 owner: eng
-canonical: true
-last_verified: 2026-08-31
+canonical: false
+last_verified: 2026-09-01
+superseded_by: ADR-0083
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -13,7 +14,8 @@ garden_lane: adrs-architecture
 
 # ADR 0075 — The sanctioned merge wrapper, and what it does not prove
 
-**Status:** Accepted (Aug 2026), in force; qualified by ADR 0081.
+**Status:** Superseded by [ADR 0083](0083-github-ui-operator-merge.md) (Sep
+2026). Historical decision retained.
 **Scope:** ci/process
 
 ## Context
