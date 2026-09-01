@@ -47,7 +47,7 @@ const EXPECTED_CONDITIONS = Object.freeze({
 });
 
 // prettier-ignore
-const EXPECTED_TIMEOUTS = Object.freeze({ changes: 2, shared: 10, ui: 25, indexer: 20, bridge: 10, "integration-probes": 10, alerts: 10, "gov-watchdog": 10, terraform: 10, aegis: 15, scripts: 40, "guardrail-prose": 5, "docs-checks": 10, "production-infra-contract": 5, "sentry-suites": 5, "autoreview-suite": 90, "autoreview-root-runtime": 5, "version-skew": 5, deps: 5, ci: 2 });
+const EXPECTED_TIMEOUTS = Object.freeze({ changes: 2, shared: 10, ui: 25, indexer: 20, bridge: 10, "integration-probes": 10, alerts: 10, "gov-watchdog": 10, terraform: 10, aegis: 15, scripts: 55, "guardrail-prose": 5, "docs-checks": 10, "production-infra-contract": 5, "sentry-suites": 5, "autoreview-suite": 90, "autoreview-root-runtime": 5, "version-skew": 5, deps: 5, ci: 2 });
 // prettier-ignore
 const EXPECTED_RUNNERS = Object.freeze({ changes: "blacksmith-2vcpu-ubuntu-2404-arm", shared: "blacksmith-2vcpu-ubuntu-2404", ui: "blacksmith-4vcpu-ubuntu-2404", indexer: "blacksmith-4vcpu-ubuntu-2404", bridge: "blacksmith-2vcpu-ubuntu-2404", "integration-probes": "blacksmith-2vcpu-ubuntu-2404", aegis: "blacksmith-2vcpu-ubuntu-2404", alerts: "blacksmith-2vcpu-ubuntu-2404", "gov-watchdog": "blacksmith-4vcpu-ubuntu-2404", terraform: "blacksmith-2vcpu-ubuntu-2404-arm", deps: "blacksmith-2vcpu-ubuntu-2404", scripts: "blacksmith-2vcpu-ubuntu-2404", "docs-checks": "blacksmith-2vcpu-ubuntu-2404", "autoreview-suite": "ubuntu-latest", "autoreview-root-runtime": "blacksmith-2vcpu-ubuntu-2404", "version-skew": "blacksmith-2vcpu-ubuntu-2404", "guardrail-prose": "ubuntu-latest", "production-infra-contract": "blacksmith-2vcpu-ubuntu-2404", "sentry-suites": "ubuntu-latest", ci: "ubuntu-latest" });
 // prettier-ignore
