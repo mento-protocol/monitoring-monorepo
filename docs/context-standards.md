@@ -55,7 +55,14 @@ Non-canonical context is allowed to be stale or contradictory. It should not be 
 unique Markdown surface in the proposed working tree: tracked files plus
 non-ignored untracked additions, minus working-tree deletions. It excludes `CLAUDE.md` and
 `.claude/skills/**` runtime mirrors because their canonical sources are
-`AGENTS.md` and `.agents/skills/**` respectively. Regenerate the catalog with
+`AGENTS.md` and `.agents/skills/**` respectively. It also excludes Markdown that
+is machine payload rather than a navigable document:
+`docs/evals/review-skill-finder-reports/**` (frozen contestant transcripts),
+`docs/evals/review-skill-runs/**` (one generated report per paid evaluation
+run), and `scripts/review/prompts/**` (the payloads the judges are sent, pinned
+by digest in the contract). The catalog is a bootstrap source of the navigation
+evaluation, so an unbounded drip of such entries spends the shared context
+reserve; the runbooks that explain those systems stay indexed. Regenerate the catalog with
 `pnpm docs:index --write`; `pnpm docs:index --check` fails when the index is
 stale or an internal Markdown target is broken.
 

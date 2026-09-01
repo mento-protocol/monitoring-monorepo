@@ -2,7 +2,7 @@
 /**
  * The gate's mapping layer: changed paths + repo facts in, command plan out.
  *
- * One Node process per gate run. It walks `ROUTING_GROUPS`, applies the four
+ * One Node process per gate run. It walks `ROUTING_GROUPS`, applies the five
  * whole-set post-passes, and writes the plan in the exact TSV shape
  * `write_command_plan` already emits, plus two further sections for the
  * surfaces and checklists the gate prints.
@@ -47,6 +47,7 @@ import { Plan, BUCKETS } from "./mapping/plan.mjs";
 import { routeChangedPaths } from "./mapping/route.mjs";
 import {
   addTrunkCheckCommand,
+  addWorkspaceConfigBuild,
   applyScopedTestCommands,
   compactTurboQualityCommands,
   sortCodegenCommands,
@@ -314,7 +315,7 @@ export function buildPlan({ changedPaths, facts, routingSensitive = false }) {
 
   routeChangedPaths(ROUTING_PLAN, changedPaths, facts, context);
 
-  // Post-loop sweeps, before the four post-passes.
+  // Post-loop sweeps, before the five post-passes.
   if (facts.isRealTree) {
     plan.addCommand(
       "pnpm tf:test",
@@ -330,6 +331,7 @@ export function buildPlan({ changedPaths, facts, routingSensitive = false }) {
 
   addTrunkCheckCommand(plan, changedPaths, facts);
   sortCodegenCommands(plan);
+  addWorkspaceConfigBuild(plan);
   compactTurboQualityCommands(plan);
   applyScopedTestCommands(plan, changedPaths, facts);
   return plan;

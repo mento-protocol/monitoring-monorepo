@@ -6,13 +6,55 @@ description: Setup pnpm + Node + install deps (frozen lockfile)
 # Third-party actions pinned to commit SHAs per the policy in
 # .github/workflows/claude.yml — update via Dependabot (.github/dependabot.yml).
 
+inputs:
+  write-cache:
+    description: Save the pnpm store after install on a protected main push
+    required: false
+    default: "false"
+
 runs:
   using: composite
   steps:
     - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      with:
+        dest: ~/pnpm-home
     - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
         node-version-file: .node-version
-        cache: pnpm
-    - shell: bash
-      run: pnpm install --frozen-lockfile
+        package-manager-cache: false
+    # Keep the pnpm executable and dependency store in separate home-relative
+    # paths. This prevents cold-miss cleanup from removing pnpm's own files.
+    # Both paths stay outside the checkout and remain stable across Linux
+    # runner providers.
+    - name: Prepare pnpm store target
+      shell: bash
+      run: >-
+        node -e 'const { rmSync } = require("node:fs"); const { homedir } = require("node:os"); const { join } = require("node:path"); rmSync(join(homedir(), "pnpm-store"), { force: true, recursive: true });'
+    - name: Restore pnpm store
+      id: pnpm-cache
+      continue-on-error: true
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/pnpm-store
+        key: trusted-main-v1-pnpm-store-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', '**/.npmrc', 'package.json', '.node-version') }}
+        restore-keys: |
+          trusted-main-v1-pnpm-store-${{ runner.os }}-${{ runner.arch }}-
+    - name: Clear incomplete pnpm store restore
+      if: steps.pnpm-cache.outputs.cache-hit == ''
+      shell: bash
+      run: >-
+        node -e 'const { rmSync } = require("node:fs"); const { homedir } = require("node:os"); const { join } = require("node:path"); rmSync(join(homedir(), "pnpm-store"), { force: true, recursive: true });'
+    - name: Verify pnpm store target
+      shell: bash
+      run: >-
+        node -e 'const { existsSync, realpathSync } = require("node:fs"); const { homedir } = require("node:os"); const { isAbsolute, join, relative, sep } = require("node:path"); const workspace = process.env.GITHUB_WORKSPACE; if (!workspace) throw new Error("GITHUB_WORKSPACE is required"); const source = realpathSync(workspace); const target = join(realpathSync(homedir()), "pnpm-store"); const cache = existsSync(target) ? realpathSync(target) : target; const scope = relative(source, cache); if (!isAbsolute(scope) && scope !== ".." && !scope.startsWith(".." + sep)) throw new Error("pnpm cache target " + cache + " is inside source checkout " + source);'
+    - name: Install dependencies
+      shell: bash
+      run: pnpm install --frozen-lockfile --store-dir ~/pnpm-store
+    - name: Save pnpm store
+      if: inputs.write-cache == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.pnpm-cache.outputs.cache-hit != 'true'
+      continue-on-error: true
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/pnpm-store
+        key: trusted-main-v1-pnpm-store-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', '**/.npmrc', 'package.json', '.node-version') }}

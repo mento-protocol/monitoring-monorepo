@@ -1,0 +1,73 @@
+{
+  "cell_id": "pr-1990-control-draw1",
+  "pr": 1990,
+  "condition": "control",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": null,
+  "claims": [
+    "A rate-limited CodeRabbit consumes the one-per-head request and permanently suppresses retry — `scripts/pr/pr-ready-state-core.mjs:786`: the terminal-check trigger fires precisely in the rate-limited case, so the PR merges with no exact-head CodeRabbit review and the signal stuck at `requested`, with no state permitting a retry",
+    "The ADR notes `@coderabbitai rate limit` reports remaining capacity without consuming a review (`docs/adr/0066...md:220`), but the procedure never checks it",
+    "The canonical JSON contract sample was not updated — `docs/notes/pr-ready-state.md:282` and `:305`: the sample output block still shows only `codexReviewSignal` in `gates` (lines 282-287) and only `\"codexReviewSignal\": \"in_flight\"` at top level (line 305), omitting `codeRabbitReviewSignal`",
+    "Redundant timestamp clause can only produce a false `stale` — `scripts/pr/pr-ready-state-core.mjs:776-779`: the `isCurrentSignal` `&&` clause adds no discrimination and, if `headUpdatedAt` resolves later than the comment, degrades a valid same-head request to `stale`, telling the agent to post a duplicate `@coderabbitai review`",
+    "The config test traded an invariant for a literal — `scripts/coderabbit-config.test.mjs:121-125`: the replacement asserts `auto_pause_after_reviewed_commits === 5` against `EXPECTED_CONFIG`, duplicating the pin test at line 118 and no longer expressing any policy bound, so a future change to 20 fails with a bare equality mismatch",
+    "Case-sensitivity asymmetry — `pr-ready-state-core.mjs:443` vs `:658`: `isCodeRabbitFinalHeadReviewRequestBody` lowercases both sides of the OID comparison while `isCurrentReviewSignal` uses strict `===` on `reviewCommitOid(review)`",
+    "`docs/adr/0066...md:281-283`: the ADR frames 5 as resolving the friction when it resolves roughly a third of the observed cases — the prose reads stronger than the data supports"
+  ],
+  "matched_ids": [
+    3829659544
+  ],
+  "judge_reasoning": {
+    "3829654081": "The review never raises file size, the 600-line cap, or splitting pr-ready-state-core.mjs; its findings there are about logic, not structure.",
+    "3829659544": "Review finding 2 states the doc's canonical sample JSON still shows only codexReviewSignal in gates and omits the newly documented codeRabbitReviewSignal — same defect.",
+    "3829659546": "No mention of ordering the CodeRabbit closeout rule relative to the feedback-state/ready-state projection pair, or of aligning the workflow with the ship mirrors.",
+    "3829659550": "Review finding 3 touches the same lines but argues the opposite (drop the timestamp clause as redundant); it never identifies that a null currentHeadOid lets the classifier return requested/reviewed without an exact head match."
+  },
+  "novel": {
+    "claims": 7,
+    "novelReal": 1,
+    "novelWrong": 1,
+    "novelVague": 4,
+    "restatedKnown": 1,
+    "alreadyMatched": 1,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "Verified at pr-ready-state-core.mjs:786 that `requested` is terminal with fallbackAction `wait` and docs forbid re-posting for the same head; this is the already-known Major functional-correctness defect anchored at core:783 / docs/notes/pr-ready-state.md:408 in the same requested/stale block and all-clear step."
+      },
+      "2": {
+        "class": "vague",
+        "why": "ADR line 220 does say `@coderabbitai rate limit` reports capacity without consuming a review, and no skill/doc procedure calls it — but that is an enhancement suggestion, not a defect in the added code or procedure."
+      },
+      "3": {
+        "class": "real",
+        "why": "docs/notes/pr-ready-state.md sample JSON at 282-287 and 305 still lists only codexReviewSignal in `gates` and at top level, while the same file's field expectations (351-355) and the code (terminalGates/summarizeReadyState) now emit codeRabbitReviewSignal — the canonical contract sample is out of sync."
+      },
+      "4": {
+        "class": "wrong",
+        "why": "isCodeRabbitFinalHeadReviewRequestBody returns true when currentHeadOid is null (line 442), so the isCurrentSignal clause at 778 is the only discriminator in that case; and headUpdatedAt is the head commit's timeline timestamp min'd with observedAt (pr-ready-state.mjs:589-618), which cannot postdate a comment carrying that head's OID, so the claimed false `stale` is unreachable."
+      },
+      "5": {
+        "class": "vague",
+        "why": "coderabbit-config.test.mjs:121-125 does assert the literal 5 against EXPECTED_CONFIG, but line 118 is the negative-control added-key assertion (not a pin of 5), and the deepEqual pin at line 96 still ties the yaml to that constant — a test-style preference about expressing a bound, not a defect."
+      },
+      "6": {
+        "class": "vague",
+        "why": "Confirmed the asymmetry (line 443 lowercases both sides; line 658 uses `===`), but line 658 is pre-existing code shared with the codex path and GitHub only returns lowercase 40-hex OIDs, so no failure is named — a consistency nit."
+      },
+      "7": {
+        "class": "vague",
+        "why": "ADR 277-283 states the sample (16/29 paused, six with 2-4 commits) and 281-283 only claims 5 'preserves the burst guard without treating one normal fix round as active development'; the objection is a subjective prose-strength critique with no concrete error."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 429,
+  "usd": 2.7075085000000003,
+  "scoring_usd": 1.4125569999999998
+}

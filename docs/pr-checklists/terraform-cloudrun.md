@@ -153,16 +153,19 @@ New GCP project, Cloud Function, or versioned-bucket stacks ship WITH retention 
 
 ## 9. Lessons already paid for
 
-- PR #199 — `/healthz` returned a Google-branded 404 because Cloud Run v2 reserves the path; moved bridge health to `/health`
-- PR #197 — bootstrap IAM only gated API enablement, not the project-level grants the impersonated SA needed
-- PR #198 — Cloud Run rejected `256Mi` because `cpu_idle = false` requires `≥512Mi`
-- PR #200 — Workload Identity Federation deploy failed at `getAccessToken` because deployer SA lacked `roles/iam.serviceAccountTokenCreator` on the runtime SA
-- PR #201 — removing `count` without `moved` blocks would have planned destroy
-  on a `deletion_protection = true` service; the bootstrap image/probe contract
-  and revision suffix rules needed explicit verification
-- PR #835 — governance-watchdog's auto-created `gcf-artifacts` repo had accumulated 64 build images (~1.9 GB) with no retention; the first lifecycle attempt used `num_newer_versions`, which never fires for hash-named source zips — replaced with age-based expiry in review
-- PR #995 — metrics-bridge Cloud Build failed because root
-  `pnpm.patchedDependencies` referenced `patches/@lhci__utils@0.15.1.patch`,
-  but the Dockerfile's reduced context did not copy `patches/` before
-  `pnpm install`; the deploy workflow also needed `patches/**` in its path
-  filter so patch-only dependency changes rebuild the image.
+Each incident is why the section it names exists; that section, not this list,
+states the current requirement.
+
+- PR #199 — `/healthz` 404 on Cloud Run v2; bridge health moved to `/health` (§2)
+- PR #197 — bootstrap IAM gated API enablement but not the project-level
+  grants the impersonated SA needed (§5)
+- PR #198 — `256Mi` rejected under `cpu_idle = false` (§2)
+- PR #200 — Workload Identity Federation failed at `getAccessToken`, missing
+  `roles/iam.serviceAccountTokenCreator` (§5)
+- PR #201 — `count` removed without `moved` blocks, against a
+  `deletion_protection = true` service (§1)
+- PR #835 — `gcf-artifacts` retention, and the `num_newer_versions` rule that
+  never fires for hash-named zips (§7)
+- PR #995 — metrics-bridge Cloud Build missed `patches/`
+  (`patches/@lhci__utils@0.15.1.patch`) in the Docker context and the deploy
+  workflow path filter (§4)

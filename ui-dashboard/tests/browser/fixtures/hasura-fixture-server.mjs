@@ -37,6 +37,10 @@ const ADDRESSES = {
   troveOwnerA: "0x4444444444444444444444444444444444444444",
   troveOwnerB: "0x5555555555555555555555555555555555555555",
   stabilityPoolLp: "0x9999999999999999999999999999999999999999",
+  // The ticket-#0754 case-study owner (docs/PLAN-trove-history-page.md).
+  troveHistoryOwner: "0xcca0a99b94529493ddffe7c61a3ae454828cd3bb",
+  celoTroveManagerChfm: "0xabababababababababababababababababababab",
+  celoStabilityPoolChfm: "0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
 };
 
 function nowSeconds() {
@@ -566,6 +570,375 @@ const cdpCollateralId = `42220-${ADDRESSES.celoTroveManagerGbpm}`;
 const cdpInstanceId = cdpCollateralId;
 const cdpNow = stableFixtureNow;
 
+// ---------------------------------------------------------------------------
+// Trove history route fixtures (docs/PLAN-trove-history-page.md, the ticket
+// #0754 case study): a SECOND CDP market so the case-study trove and its
+// complete ledger never disturb the GBPm market the pre-existing browser
+// assertions pin (row order there is redemption-priority order, and a new
+// 1.6% trove would take the first row). The case trove models the verified
+// timeline — open at 0.5%, five rebalance redemptions, a rate change to
+// 1.6%, then a +30,000 USDm / +2,500 debt adjust — with every snapshot
+// chained exactly (debtBefore + deltas = debtAfter) and the Trove
+// cumulatives equal to the ledger-row sums, so the impact panel's
+// reconciliation passes against the watermark of the newest row.
+
+const D18_WEI = 10n ** 18n;
+
+/** Whole-or-2dp token amounts to wei strings — same arithmetic as the
+ *  impact unit tests' `wei` helper, so chained snapshots stay exact. */
+function tokenWei(amount) {
+  return ((BigInt(Math.round(amount * 100)) * D18_WEI) / 100n).toString();
+}
+
+/** Annual interest rate percent (2dp) on the D18 scale (1e18 = 100%). */
+function ratePctWei(percent) {
+  return (BigInt(Math.round(percent * 100)) * 10n ** 14n).toString();
+}
+
+const cdpChfmCollateralId = `42220-${ADDRESSES.celoTroveManagerChfm}`;
+// Normalized on-chain hex id (no leading zeros) — the route param form.
+const CDP_CASE_TROVE_ID = "0x754";
+const cdpCaseTroveEntityId = `${cdpChfmCollateralId}-${CDP_CASE_TROVE_ID}`;
+
+const caseOpenedAt = cdpNow - 70 * DAY_SECONDS;
+const caseRedemptionsStartAt = cdpNow - 2 * DAY_SECONDS;
+const caseRateChangeAt = cdpNow - DAY_SECONDS;
+const caseAdjustAt = caseRateChangeAt + 300;
+
+// D18 debt-per-collateral oracle rate: 0.75 debt per USDm, so 3,690.00 of
+// debt is worth exactly 4,920.00 USDm at each hit — division is exact.
+const CASE_ORACLE_PRICE = ((3n * D18_WEI) / 4n).toString();
+
+function caseTxHash(index) {
+  return `0x${String(index).padStart(2, "0").repeat(32)}`;
+}
+
+function caseLedgerRow({
+  operation,
+  timestamp,
+  blockNumber,
+  logIndex,
+  txHash,
+  collChange,
+  debtChange,
+  upfrontFee = "0",
+  debtBefore,
+  debtAfter,
+  collBefore,
+  collAfter,
+  annualInterestRate,
+  statusBefore = "active",
+  statusAfter = "active",
+  redemptionFeeCredited = null,
+  isRebalance = null,
+  redemptionPrice = null,
+  icrAfterBps,
+}) {
+  return {
+    id: `42220_${blockNumber}_${logIndex}`,
+    operation,
+    collChange,
+    debtChange,
+    debtIncreaseFromUpfrontFee: upfrontFee,
+    debtIncreaseFromRedist: "0",
+    collIncreaseFromRedist: "0",
+    annualInterestRate,
+    debtBefore,
+    debtAfter,
+    collBefore,
+    collAfter,
+    statusBefore,
+    statusAfter,
+    redemptionFeeCredited,
+    isRebalance,
+    redemptionPrice,
+    priceAtEvent: CASE_ORACLE_PRICE,
+    icrAfterBps,
+    timestamp: String(timestamp),
+    blockNumber: String(blockNumber),
+    logIndex,
+    txHash,
+  };
+}
+
+/** One op-6 rebalance hit: repays 3,690.00 debt, takes 4,916.50 USDm net of
+ *  the 2.50 USDm fee credited to the trove. At the 0.75 oracle rate the
+ *  debt is worth 4,920.00 USDm, so each hit's net equity is +3.50 USDm. */
+function caseRedemptionRow(
+  index,
+  { debtBefore, debtAfter, collBefore, collAfter, icrAfterBps },
+) {
+  return caseLedgerRow({
+    operation: 6,
+    timestamp: caseRedemptionsStartAt + index * 600,
+    blockNumber: 20_950_000 + index * 30,
+    logIndex: 3,
+    txHash: caseTxHash(2 + index),
+    collChange: `-${tokenWei(4916.5)}`,
+    debtChange: `-${tokenWei(3690)}`,
+    debtBefore,
+    debtAfter,
+    collBefore,
+    collAfter,
+    annualInterestRate: ratePctWei(0.5),
+    redemptionFeeCredited: tokenWei(2.5),
+    isRebalance: true,
+    redemptionPrice: CASE_ORACLE_PRICE,
+    icrAfterBps,
+  });
+}
+
+// Chronological (oldest-first). Debt chain: 25,000.00 borrowed + 12.87
+// upfront fee → 25,012.87; +6.50 interest between rows → 25,019.37; five
+// hits of −3,690.00 → 6,569.37; +0.13 interest → 6,569.50; adjust
+// +2,500.00 + 1.25 fee → 9,070.75. Coll chain: 39,955.00; five hits of
+// −4,916.50 → 15,372.50; adjust +30,000.00 → 45,372.50.
+const cdpCaseTroveLedgerRowsAsc = [
+  caseLedgerRow({
+    operation: 0,
+    timestamp: caseOpenedAt,
+    blockNumber: 20_000_000,
+    logIndex: 10,
+    txHash: caseTxHash(1),
+    collChange: tokenWei(39_955),
+    debtChange: tokenWei(25_000),
+    upfrontFee: tokenWei(12.87),
+    debtBefore: "0",
+    debtAfter: tokenWei(25_012.87),
+    collBefore: "0",
+    collAfter: tokenWei(39_955),
+    annualInterestRate: ratePctWei(0.5),
+    statusBefore: "closed",
+    icrAfterBps: 11980,
+  }),
+  caseRedemptionRow(0, {
+    debtBefore: tokenWei(25_019.37),
+    debtAfter: tokenWei(21_329.37),
+    collBefore: tokenWei(39_955),
+    collAfter: tokenWei(35_038.5),
+    icrAfterBps: 12321,
+  }),
+  caseRedemptionRow(1, {
+    debtBefore: tokenWei(21_329.37),
+    debtAfter: tokenWei(17_639.37),
+    collBefore: tokenWei(35_038.5),
+    collAfter: tokenWei(30_122),
+    icrAfterBps: 12807,
+  }),
+  caseRedemptionRow(2, {
+    debtBefore: tokenWei(17_639.37),
+    debtAfter: tokenWei(13_949.37),
+    collBefore: tokenWei(30_122),
+    collAfter: tokenWei(25_205.5),
+    icrAfterBps: 13552,
+  }),
+  caseRedemptionRow(3, {
+    debtBefore: tokenWei(13_949.37),
+    debtAfter: tokenWei(10_259.37),
+    collBefore: tokenWei(25_205.5),
+    collAfter: tokenWei(20_289),
+    icrAfterBps: 14832,
+  }),
+  caseRedemptionRow(4, {
+    debtBefore: tokenWei(10_259.37),
+    debtAfter: tokenWei(6_569.37),
+    collBefore: tokenWei(20_289),
+    collAfter: tokenWei(15_372.5),
+    icrAfterBps: 17550,
+  }),
+  caseLedgerRow({
+    operation: 3,
+    timestamp: caseRateChangeAt,
+    blockNumber: 21_000_000,
+    logIndex: 5,
+    txHash: caseTxHash(7),
+    collChange: "0",
+    debtChange: "0",
+    debtBefore: tokenWei(6_569.5),
+    debtAfter: tokenWei(6_569.5),
+    collBefore: tokenWei(15_372.5),
+    collAfter: tokenWei(15_372.5),
+    annualInterestRate: ratePctWei(1.6),
+    icrAfterBps: 17550,
+  }),
+  caseLedgerRow({
+    operation: 2,
+    timestamp: caseAdjustAt,
+    blockNumber: 21_000_015,
+    logIndex: 8,
+    txHash: caseTxHash(8),
+    collChange: tokenWei(30_000),
+    debtChange: tokenWei(2_500),
+    upfrontFee: tokenWei(1.25),
+    debtBefore: tokenWei(6_569.5),
+    debtAfter: tokenWei(9_070.75),
+    collBefore: tokenWei(15_372.5),
+    collAfter: tokenWei(45_372.5),
+    annualInterestRate: ratePctWei(1.6),
+    icrAfterBps: 37516,
+  }),
+];
+
+const cdpCaseTroveLedgerRowsDesc = [...cdpCaseTroveLedgerRowsAsc].reverse();
+
+// The interim user-ops assembly (`CdpTroveOperations`) sees only the
+// TroveOperationEvent ordinals (opens/adjusts/rate changes — never op 6).
+const cdpCaseTroveUserOpsDesc = cdpCaseTroveLedgerRowsDesc
+  .filter((row) => [0, 2, 3].includes(row.operation))
+  .map((row) => ({
+    id: row.id,
+    troveId: CDP_CASE_TROVE_ID,
+    operation: row.operation,
+    collChange: row.collChange,
+    debtChange: row.debtChange,
+    annualInterestRate: row.annualInterestRate,
+    debtIncreaseFromUpfrontFee: row.debtIncreaseFromUpfrontFee,
+    timestamp: row.timestamp,
+    blockNumber: row.blockNumber,
+    txHash: row.txHash,
+  }));
+
+const cdpTroveHistoryCollateral = {
+  id: cdpChfmCollateralId,
+  chainId: 42220,
+  collIndex: 1,
+  symbol: "CHFm",
+  debtToken: ADDRESSES.celoChfm,
+  collToken: ADDRESSES.celoUsdm,
+  troveManager: ADDRESSES.celoTroveManagerChfm,
+  stabilityPool: ADDRESSES.celoStabilityPoolChfm,
+  minDebt: "1000000000000000000000",
+  minBoldInSp: "100000000000000000000",
+  systemParamsLoaded: true,
+  mcrBps: 11000,
+  ccrBps: 13500,
+  scrBps: 15000,
+};
+
+const cdpTroveHistoryInstance = {
+  id: cdpChfmCollateralId,
+  collateralId: cdpChfmCollateralId,
+  chainId: 42220,
+  systemColl: tokenWei(74_372.5),
+  systemDebt: tokenWei(26_070.75),
+  tcrBps: 21395,
+  spDeposits: tokenWei(8_000),
+  spColl: "0",
+  spHeadroom: tokenWei(8_000),
+  currentRedemptionRateBps: 50,
+  activeTroveCount: 3,
+  icrP1Bps: 12500,
+  icrP5Bps: 12500,
+  icrP50Bps: 13500,
+  icrFracBelowMcrBps: 0,
+  liqCountCum: 0,
+  redemptionCountCum: 5,
+  redemptionDebtCum: tokenWei(18_450),
+  redemptionFeeCum: tokenWei(12.5),
+  rebalanceRedemptionCountCum: 5,
+  rebalanceRedemptionDebtCum: tokenWei(18_450),
+  rebalanceRedemptionFeeCum: tokenWei(12.5),
+  borrowingFeeCum: tokenWei(14.12),
+  isShutDown: false,
+  shutDownAt: null,
+  shutDownTcrBps: null,
+  lastEventBlock: "21000015",
+  lastEventTimestamp: String(caseAdjustAt),
+};
+
+// The case trove's cumulatives equal the op-6 ledger-row sums exactly:
+// count 5, debt 5 × 3,690.00, coll 5 × 4,916.50, fees 5 × 2.50 — and the
+// current debt/coll equal the newest row's after-snapshots.
+const cdpTroveHistoryTroves = [
+  {
+    id: cdpCaseTroveEntityId,
+    collateralId: cdpChfmCollateralId,
+    chainId: 42220,
+    troveId: CDP_CASE_TROVE_ID,
+    owner: ADDRESSES.troveHistoryOwner,
+    previousOwner: "0x0000000000000000000000000000000000000000",
+    status: "active",
+    debt: tokenWei(9_070.75),
+    coll: tokenWei(45_372.5),
+    icrBps: 37516,
+    interestRate: ratePctWei(1.6),
+    interestBatchId: null,
+    openedAt: String(caseOpenedAt),
+    openedTxHash: caseTxHash(1),
+    closedAt: null,
+    closedTxHash: null,
+    lastUpdatedAt: String(caseAdjustAt),
+    lastUpdatedTxHash: caseTxHash(8),
+    liquidatedDebt: "0",
+    liquidatedColl: "0",
+    collSurplus: "0",
+    priceAtLiquidation: null,
+    redemptionCount: 5,
+    redeemedDebt: tokenWei(18_450),
+    redeemedColl: tokenWei(24_582.5),
+    redemptionFeePaidCum: tokenWei(12.5),
+  },
+  // The queue-shield trove: 12,000.00 of active debt at a LOWER rate, so the
+  // case trove holds position #2 of 3 with a 12,000.00 shield.
+  {
+    id: `${cdpChfmCollateralId}-0x21`,
+    collateralId: cdpChfmCollateralId,
+    chainId: 42220,
+    troveId: "0x21",
+    owner: ADDRESSES.troveOwnerA,
+    previousOwner: "0x0000000000000000000000000000000000000000",
+    status: "active",
+    debt: tokenWei(12_000),
+    coll: tokenWei(20_000),
+    icrBps: 12500,
+    interestRate: ratePctWei(0.9),
+    interestBatchId: null,
+    openedAt: String(cdpNow - 30 * DAY_SECONDS),
+    openedTxHash: caseTxHash(11),
+    closedAt: null,
+    closedTxHash: null,
+    lastUpdatedAt: String(cdpNow - 3 * DAY_SECONDS),
+    lastUpdatedTxHash: caseTxHash(11),
+    liquidatedDebt: "0",
+    liquidatedColl: "0",
+    collSurplus: "0",
+    priceAtLiquidation: null,
+    redemptionCount: 0,
+    redeemedDebt: "0",
+    redeemedColl: "0",
+    redemptionFeePaidCum: "0",
+  },
+  // A higher-rate trove so the ladder has a rung after the case trove.
+  {
+    id: `${cdpChfmCollateralId}-0x22`,
+    collateralId: cdpChfmCollateralId,
+    chainId: 42220,
+    troveId: "0x22",
+    owner: ADDRESSES.troveOwnerB,
+    previousOwner: "0x0000000000000000000000000000000000000000",
+    status: "active",
+    debt: tokenWei(5_000),
+    coll: tokenWei(9_000),
+    icrBps: 13500,
+    interestRate: ratePctWei(2.4),
+    interestBatchId: null,
+    openedAt: String(cdpNow - 20 * DAY_SECONDS),
+    openedTxHash: caseTxHash(12),
+    closedAt: null,
+    closedTxHash: null,
+    lastUpdatedAt: String(cdpNow - 4 * DAY_SECONDS),
+    lastUpdatedTxHash: caseTxHash(12),
+    liquidatedDebt: "0",
+    liquidatedColl: "0",
+    collSurplus: "0",
+    priceAtLiquidation: null,
+    redemptionCount: 0,
+    redeemedDebt: "0",
+    redeemedColl: "0",
+    redemptionFeePaidCum: "0",
+  },
+];
+
 const cdpCollaterals = [
   {
     id: cdpCollateralId,
@@ -583,6 +956,7 @@ const cdpCollaterals = [
     ccrBps: 13500,
     scrBps: 15000,
   },
+  cdpTroveHistoryCollateral,
 ];
 
 const cdpInstances = [
@@ -616,6 +990,7 @@ const cdpInstances = [
     lastEventBlock: "12345678",
     lastEventTimestamp: String(cdpNow - 300),
   },
+  cdpTroveHistoryInstance,
 ];
 
 const cdpTroves = [
@@ -676,6 +1051,7 @@ const cdpTroves = [
     redeemedDebt: "50000000000000000000",
     redeemedColl: "110000000000000000000",
   },
+  ...cdpTroveHistoryTroves,
 ];
 
 const cdpInterestBatches = [
@@ -708,6 +1084,29 @@ const cdpDailySnapshots = [
     spHeadroom: "1200000000000000000000",
     systemDebt: "3000000000000000000000",
     systemColl: "8000000000000000000000",
+  },
+];
+
+const cdpChfmDailySnapshots = [
+  {
+    id: `${cdpChfmCollateralId}-${stableFixtureToday - DAY_SECONDS}`,
+    instanceId: cdpChfmCollateralId,
+    timestamp: String(stableFixtureToday - DAY_SECONDS),
+    spDeposits: tokenWei(7_500),
+    spColl: "0",
+    spHeadroom: tokenWei(7_500),
+    systemDebt: tokenWei(23_569.5),
+    systemColl: tokenWei(44_372.5),
+  },
+  {
+    id: `${cdpChfmCollateralId}-${stableFixtureToday}`,
+    instanceId: cdpChfmCollateralId,
+    timestamp: String(stableFixtureToday),
+    spDeposits: tokenWei(8_000),
+    spColl: "0",
+    spHeadroom: tokenWei(8_000),
+    systemDebt: tokenWei(26_070.75),
+    systemColl: tokenWei(74_372.5),
   },
 ];
 
@@ -1255,8 +1654,8 @@ export function handleGraphQL(
       return { StableSupplyDailySnapshot: stableDailySnapshots };
     case "StablesCurrentCustodyPerToken":
       return { StableTokenCustodyState: [] };
-    case "StablesLatestCustodyPerToken":
     case "StablesCustodyDailySnapshots":
+    case "StablesLatestCustodyPerToken":
       return { StableTokenCustodyDailySnapshot: [] };
     case "StablesChanges":
       return {
@@ -1291,6 +1690,11 @@ export function handleGraphQL(
             { name: "id" },
             { name: "lastUpdatedAt" },
             { name: "lastUpdatedTxHash" },
+            // Ledger watermark columns: with TroveLedgerEventType below they
+            // open the trove history page's introspection gate, so fixture
+            // runs exercise the complete-ledger view, not the interim one.
+            { name: "lastLedgerBlock" },
+            { name: "lastLedgerLogIndex" },
           ],
         },
         StabilityPoolDepositorType: {
@@ -1298,6 +1702,17 @@ export function handleGraphQL(
             { name: "id" },
             { name: "cumulativeRebalanceUsed" },
             { name: "cumulativeLiquidationUsed" },
+          ],
+        },
+        TroveLedgerEventType: {
+          fields: [
+            { name: "id" },
+            { name: "operation" },
+            { name: "debtBefore" },
+            { name: "debtAfter" },
+            { name: "collBefore" },
+            { name: "collAfter" },
+            { name: "logIndex" },
           ],
         },
       };
@@ -1322,7 +1737,9 @@ export function handleGraphQL(
         LiquityInstanceDailySnapshot:
           String(variables.instanceId) === cdpInstanceId
             ? cdpDailySnapshots
-            : [],
+            : String(variables.instanceId) === cdpChfmCollateralId
+              ? cdpChfmDailySnapshots
+              : [],
       };
     case "CdpTransactions":
       return cdpTransactions;
@@ -1361,6 +1778,113 @@ export function handleGraphQL(
       return { TroveOperationEvent: cdpTroveOpSnapshots };
     case "AllCdpTroveOpSnapshots":
       return { TroveOperationEvent: cdpTroveOpSnapshots };
+    case "CdpTroveById":
+    case "CdpTroveByIdWithoutTx":
+      return {
+        Trove: cdpTroves.filter(
+          (trove) => trove.id === String(variables.troveEntityId),
+        ),
+      };
+    case "CdpInterestBatchById":
+      return {
+        InterestBatch: cdpInterestBatches.filter(
+          (batch) => batch.id === String(variables.batchId),
+        ),
+      };
+    // Interim user-ops assembly — fires on a cold trove-page load while the
+    // schema probe is still resolving, then hands over to CdpTroveLedger.
+    case "CdpTroveOperations":
+      return {
+        TroveOperationEvent:
+          String(variables.instanceId) === cdpChfmCollateralId &&
+          String(variables.troveId) === CDP_CASE_TROVE_ID
+            ? cdpCaseTroveUserOpsDesc.slice(
+                0,
+                variables.limit ?? cdpCaseTroveUserOpsDesc.length,
+              )
+            : [],
+      };
+    case "CdpTroveLedger": {
+      const troveEntityId = String(variables.troveEntityId);
+      const trove = cdpTroves.find((row) => row.id === troveEntityId);
+      if (trove == null) {
+        return { LedgerWatermark: [], TroveLedgerEvent: [] };
+      }
+      const rows =
+        troveEntityId === cdpCaseTroveEntityId
+          ? cdpCaseTroveLedgerRowsDesc
+          : [];
+      const newest = rows[0];
+      return {
+        // Watermark and cumulatives come from the SAME response as the rows
+        // — the newest row's (blockNumber, logIndex) pair anchors the impact
+        // panel's reconciliation. A trove with no ledger rows reports the
+        // "(0, 0) — no ledger row yet" watermark.
+        LedgerWatermark: [
+          {
+            lastLedgerBlock: newest?.blockNumber ?? "0",
+            lastLedgerLogIndex: newest?.logIndex ?? 0,
+            redemptionCount: trove.redemptionCount ?? 0,
+            redeemedDebt: trove.redeemedDebt ?? "0",
+            redeemedColl: trove.redeemedColl ?? "0",
+            redemptionFeePaidCum: trove.redemptionFeePaidCum ?? "0",
+          },
+        ],
+        TroveLedgerEvent: rows.slice(0, variables.limit ?? rows.length),
+      };
+    }
+    case "CdpTroveQueue": {
+      const collateralId = String(variables.collateralId);
+      return {
+        LiquityInstance: cdpRowsForCollateral(cdpInstances, collateralId).map(
+          ({ id, isShutDown, shutDownAt }) => ({ id, isShutDown, shutDownAt }),
+        ),
+        OpenTrove: cdpRowsForCollateral(cdpTroves, collateralId)
+          .filter((trove) => ["active", "zombie"].includes(trove.status))
+          .map(({ id, status, debt, interestRate, interestBatchId }) => ({
+            id,
+            status,
+            debt,
+            interestRate,
+            interestBatchId: interestBatchId ?? null,
+          })),
+        InterestBatch: cdpRowsForCollateral(
+          cdpInterestBatches,
+          collateralId,
+        ).map(({ id, annualInterestRate }) => ({ id, annualInterestRate })),
+      };
+    }
+    case "CdpTrovesByOwner": {
+      const address = String(variables.address).toLowerCase();
+      return {
+        Trove: cdpTroves
+          .filter(
+            (trove) =>
+              trove.chainId === Number(variables.chainId) &&
+              (trove.owner === address || trove.previousOwner === address),
+          )
+          .map(
+            ({
+              id,
+              collateralId,
+              troveId,
+              status,
+              debt,
+              coll,
+              lastUpdatedAt,
+            }) => ({
+              id,
+              collateralId,
+              troveId,
+              status,
+              debt,
+              coll,
+              lastUpdatedAt,
+            }),
+          )
+          .slice(0, variables.limit ?? cdpTroves.length),
+      };
+    }
     default:
       return unhandledOperation(op);
   }

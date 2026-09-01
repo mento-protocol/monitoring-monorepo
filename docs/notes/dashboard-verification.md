@@ -3,7 +3,7 @@ title: Dashboard Local and Browser Verification
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-14
+last_verified: 2026-08-25
 doc_type: runbook
 scope: ui-dashboard
 review_interval_days: 90
@@ -61,6 +61,49 @@ Public pages show `Sign in`; protected pages (`/address-book` and its nested
 `/address-book/entities` section, `/integrations`, and `/revenue`) redirect to
 `/sign-in?callbackUrl=...` when auth is configured.
 
+When API proof needs an existing authenticated browser session, keep the page
+on the target origin and run a read-only same-origin request through page
+evaluation:
+
+```js
+async function authenticatedApiCheck() {
+  const response = await fetch("/api/...", {
+    cache: "no-store",
+    credentials: "same-origin",
+  });
+  const status = response.status;
+  const text = await response.text();
+  let body = null;
+  let parseError = null;
+  if (text !== "") {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      parseError = "invalid-json";
+    }
+  }
+  return {
+    status,
+    parseError,
+    fields:
+      body === null
+        ? null
+        : {
+            // Select only the non-sensitive fields needed for this check.
+            expectedField: body.expectedField,
+          },
+  };
+}
+```
+
+Keep the raw response text and the full parsed body local. Record only the
+status and the minimum non-sensitive fields that prove the acceptance criteria.
+Set `parseError` to the fixed `invalid-json` category when non-empty response
+text cannot be parsed. Do not include response text or parser details in it.
+Redact secrets, private labels, forensic reports, and personal data. Do not
+inspect cookies or browser storage. Do not use this path for a cross-origin
+request or a mutation.
+
 For a simulated authenticated session:
 
 1. Start the dev server with the `AUTH_SECRET` above.
@@ -94,16 +137,16 @@ route-level smoke sequence and points here for the assertions.
 
 ### Polygon coverage
 
-- `/pools` and `/volume`: select Polygon, verify the URL contains `chain=137`, only Polygon rows/series remain, refresh preserves the selection, and selecting All removes the default query parameter without an RSC refetch.
-- Polygon pool detail: EURm/EUROP renders every active strategy (Open and Reserve once the promoted schema/data are available); during schema rollout, the page degrades to the legacy pointer without blanking the rest of the pool.
-- `/stables`: Polygon USDm and EURm appear as distinct chain-qualified burning-mode supplies rather than being merged with another chain's token row.
-- `/integrations`: Polygon appears for every configured adapter and empty/error states remain distinct from unsupported coverage.
+- `/pools` and `/volume`: select Polygon, verify `chain=137` in the URL, only Polygon rows/series remain, refresh keeps the selection, and selecting All removes the default query parameter without an RSC refetch.
+- Polygon pool detail: EURm/EUROP renders each active strategy (Open and Reserve once promoted schema/data exist); during schema rollout, the page degrades to the legacy pointer without blanking the rest of the pool.
+- `/stables`: Polygon USDm and EURm appear as distinct chain-qualified supplies not merged with another chain's token row.
+- `/integrations`: Polygon appears per configured adapter; empty/error states stay distinct from unsupported coverage.
 
 ### `/bridge-flows`
 
-- **KPI row (3 tiles):** `Total Bridge Transfers` (BreakdownTile w/ 24h/7d/30d breakdown), `Pending` (number or "1,000+"), `Avg deliver time` (h/m/s). None should be "—" or "…" on a healthy load.
-- **Charts row (3 columns):** `Bridged Volume (USD)` time-series chart with 7d/30d/all range buttons, `Token Breakdown` donut, `Top Bridgers` ranked list with address links.
-- **Recent transfers table (25 rows):** columns Provider, Route, Status, Token, Amount (USD), Amount, Sender, Receiver, Txs, Time. Per-cell click targets:
+- **KPI row (3 tiles):** `Total Bridge Transfers` (BreakdownTile, 24h/7d/30d), `Pending` (count or "1,000+"), `Avg deliver time` (h/m/s). None should be "—" or "…" on a healthy load.
+- **Charts row (3 columns):** `Bridged Volume (USD)` time-series with 7d/30d/all buttons, `Token Breakdown` donut, `Top Bridgers` ranked list with address links.
+- **Recent transfers table (25 rows):** columns Provider, Route, Status, Token, Amount (USD/native), Sender, Receiver, Txs, Time. Per-cell click targets:
   - **Wormholescan** (`wormholescan.io/#/tx/{sentTxHash}`): Provider badge, Amount (USD), Amount, and the `wh` pill in the Txs column
   - **Chain explorer** (Celoscan / Monadscan / Polygonscan): Token cell (`token contract`), Sender, Receiver, and the `src` pill in the Txs column
 - **Key interactions to spot-check:**
@@ -259,3 +302,36 @@ A local path, broken Markdown, or an unverified upload is not visual evidence.
 If either revision cannot be rendered, or the authenticated attachment surface
 is unavailable, stop before publication and report the blocker; do not call the
 UI PR shipped or ready. The user may waive visual evidence for a specific PR.
+
+## Dynamic social-preview verification
+
+For any direct or transitive change to dynamic metadata or an Open Graph image,
+verify every affected route and applicable state on the final deployed origin.
+Dependencies include renderers, data helpers, and shared fonts. Local and
+preview results are not production proof.
+
+- Send isolated, cookie-free requests with a normal browser user agent and each
+  relevant crawler user agent, such as Slackbot or Twitterbot. Record the
+  initial status, redirects, and final URL. Require the route contract and a
+  final HTTP 200.
+- In each raw initial HTML response, verify the exact document title and
+  description; canonical URL; Open Graph type, URL, title, description, image,
+  image alt, image width, image height, and image type; and Twitter card,
+  title, description, image, and image alt. Match the route and public-data
+  contract. Record expected absence for optional tags.
+- For public and private metadata states, test an explicit record in each state.
+  Require the safe private fallback and no restricted label, tag, or source.
+- Verify document `Cache-Control` and `Age` against its freshness policy. For
+  metadata that can become private, prevent stale shared caching or test
+  public-to-private revocation.
+- If hydration affects metadata, compare raw tags with the DOM. The DOM alone
+  is not crawler proof.
+- Fetch the exact image URL cookie-free with browser caching disabled. For an
+  access-controlled route, compare an authenticated fetch and reject any
+  credential dependence. Require HTTP 200. Match the response type and
+  dimensions with the declared image metadata. Require `Cache-Control` and
+  `Age` that match policy. Browser cache controls do not bypass a CDN cache.
+- Inspect the image for the correct route and data or fallback. Require no blank
+  or clipped content. Check browser console errors after both loads.
+- Test a URL that Slack has not expanded. An old message is cached evidence.
+  Require the new unfurl to match the inspected image.

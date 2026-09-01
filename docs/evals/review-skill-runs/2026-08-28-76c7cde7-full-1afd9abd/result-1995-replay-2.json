@@ -1,0 +1,70 @@
+{
+  "cell_id": "pr-1995-replay-draw2",
+  "pr": 1995,
+  "condition": "replay",
+  "draw": 2,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "The `GATE_TEST_FOCUS` guard misses no-lock gate runs — `scripts/agent-quality-gate.test.sh:601`: a real `--no-lock` run gets a green self-test having executed 1 of 11 families",
+    "Two comments assert the false premise and must move with the code: `scripts/agent-quality-gate.test.sh:595-597` (\"every command a real gate run spawns carries it\")",
+    "`docs/notes/agent-quality-gate-mechanics.md:1143-1145` also asserts the false premise and must move with the code",
+    "The partition verifier never checks `arm_suite_abort_trap` — `scripts/agent-quality-gate.test.sh:484-565`: a family added without the call runs with no ERR trap, yielding a bare nonzero exit with no `aborted: line N: …` line and no gate-output tail",
+    "The documented focused invocation isn't allowlisted — `.claude/settings.json:31-32`: the allowlist covers only the bare form, so agents likely hit a permission prompt on every focused run",
+    "(nit) `docs/notes/agent-quality-gate-mechanics.md:1116` says \"~9-minute suite\" while the table below sums to ~11m36s"
+  ],
+  "matched_ids": [
+    3830042123
+  ],
+  "judge_reasoning": {
+    "3829986398": "No mention of set -u / unset output_file in the abort trap; review only discusses ERR trap re-arming mechanics.",
+    "3829986403": "Review lists 'stray line after dispatch' as a cleared negative case but never raises that multiple dispatch calls pass and would double-run families.",
+    "3830003055": "Review's finding 2 concerns a missing arm_suite_abort_trap check, not the verifier accepting zero dispatch calls.",
+    "3830042123": "Finding 1 identifies exactly this: the GATE_TEST_FOCUS guard misses --no-lock/AGENT_QUALITY_GATE_LOCK=0 runs since AGENT_QUALITY_GATE_LOCK_HELD is unset, letting a focused subset green the full gate.",
+    "3830042128": "No mention of the hard-coded self-test path pin or the scripts path-pin inventory.",
+    "3830695396": "Review touches docs lines 1143-1145 (false premise comments) and a runtime-figure nit, but not the 'is set' vs 'is non-empty' / 'reds the suite' wording."
+  },
+  "novel": {
+    "claims": 6,
+    "novelReal": 3,
+    "novelWrong": 0,
+    "novelVague": 0,
+    "restatedKnown": 3,
+    "alreadyMatched": 1,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "Verified acquire_gate_run_lock (agent-quality-gate.sh:1616-1617) returns before claim_gate_run_lock exports AGENT_QUALITY_GATE_LOCK_HELD under --no-lock, so the guard at test.sh:601 misses it — this is the known 'Reject focus during lock-free gate runs' item"
+      },
+      "2": {
+        "class": "known",
+        "why": "The comment at test.sh:595-597 sits inside the same guard block (590-605) and states the identical false premise as the known lock-free-focus defect; it is the same defect restated at the comment"
+      },
+      "3": {
+        "class": "known",
+        "why": "docs/.../agent-quality-gate-mechanics.md:1144-1145 ('any command a real gate run spawns') is the doc twin of the same false premise already covered by the known guard/doc items"
+      },
+      "4": {
+        "class": "real",
+        "why": "The awk in verify_gate_family_partition (test.sh:520-530 then `open != \"\" { next }`) skips all in-family lines and never asserts the first line is arm_suite_abort_trap, though all 11 families rely on it (663,955,...,5934) and test.sh:16-22 confirms bash resets the ERR trap per function without set -E"
+      },
+      "5": {
+        "class": "real",
+        "why": ".claude/settings.json:31-32 allowlists only `bash [./]scripts/agent-quality-gate.test.sh:*`, which cannot prefix-match the documented `GATE_TEST_FOCUS=... bash ...` form; the repo already uses an env-prefixed entry pattern (`ESLINT_BASELINE_MAIN=* node *`, line 50) showing that form is required"
+      },
+      "6": {
+        "class": "real",
+        "why": "md:1116 says '~9-minute suite' while the solo-runtime column added at md:1125-1135 sums to 696s = 11m36s (verified arithmetic)"
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 603,
+  "usd": 2.99724,
+  "scoring_usd": 0.953743
+}

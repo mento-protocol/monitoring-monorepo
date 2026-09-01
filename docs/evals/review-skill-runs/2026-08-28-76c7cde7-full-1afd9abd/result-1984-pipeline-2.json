@@ -1,0 +1,86 @@
+{
+  "cell_id": "pr-1984-pipeline-draw2",
+  "pr": 1984,
+  "condition": "pipeline",
+  "draw": 2,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "scripts/sentry/autofix/sentry-autofix-refused-inventory.mjs:26 — the query hardcodes both label literals instead of importing the single-source declarations (FIX_REFUSED_LABEL, SENTRY_TRIAGE_QUEUE_LABEL); it is the only search query in the repo that inlines the strings",
+    "scripts/sentry/autofix/sentry-autofix-refused-inventory.mjs:26 — the query quotes neither label; it is the only unquoted one and the only one whose value contains a colon, which is precisely the case GitHub's search syntax requires quoting for",
+    "The failure mode is a silent 0: if the query is wrong for either reason, GitHub returns 200 with total_count: 0, which sails through validIssueList([], 0) at line 51 and renders a confident '- Refused stubs (all states): 0' instead of unknown",
+    "sentry-autofix-run-record.mjs:67 + sentry-autofix-finalize.mjs:853 — the DEFAULT_REPO fallback is dead (readFlag returns null, and a JS default parameter fires only on undefined); the CLI emits github.com/null links",
+    "The help text at finalize.mjs:691 advertises [--refused-inventory-repo <owner/name>] as optional; it isn't",
+    "docs/notes/sentry-triage-pipeline.md:1019-1021 — the count can't include this run's own refusals; GitHub's search index is eventually consistent so freshly-labelled stubs typically won't be in total_count, and the docs present total_count as authoritative with no caveat",
+    "An operator reads '- Refused (no PR): 1' and '- Refused stubs (all states): 4' in the same comment with no way to tell whether the 1 is inside the 4",
+    "scripts/agent-quality-gate.test.sh never ran — js-yaml is missing from node_modules, so scripts/gate/lockfile-scope.mjs fails to import",
+    "Nothing here proves the new step runs in CI. record-run is continue-on-error: true (sentry-autofix.yml:1320), so a failure of this helper never reds the run"
+  ],
+  "matched_ids": [
+    3828303385,
+    3828313974,
+    3828328194
+  ],
+  "judge_reasoning": {
+    "3828303385": "Review finding #1 is exactly the unquoted colon-bearing label in the refused-inventory query at line 26, with the quoted-form fix.",
+    "3828304403": "Review only notes the case pattern at agent-quality-gate.sh:4091 already contains the new path; it never flags a missing path-pin inventory registration.",
+    "3828313971": "No mention of markdownlint MD018 or a line opening with an issue reference in the docs; the doc finding raised is about search-index lag instead.",
+    "3828313974": "Review finding #2 identifies readFlag returning null, the JS default firing only on undefined, and the resulting github.com/null links, plus the misleading optional usage text.",
+    "3828328194": "Same finding #2 covers the repo default bypassed by null in renderRefusedStubInventory via the finalize path."
+  },
+  "novel": {
+    "claims": 9,
+    "novelReal": 1,
+    "novelWrong": 1,
+    "novelVague": 3,
+    "restatedKnown": 4,
+    "alreadyMatched": 3,
+    "verdicts": {
+      "1": {
+        "class": "real",
+        "why": "Verified sentry-autofix-refused-inventory.mjs:26 inlines \"sentry-triage\"/\"sentry:fix-refused\" while SENTRY_TRIAGE_QUEUE_LABEL (queue-io.mjs:39) and FIX_REFUSED_LABEL (triage/sentry-triage-queue-contract.mjs:191) exist and every other search query (family-handled.mjs:144, queue-io.mjs:278) interpolates the imported constants — this is the only inlined one, a real single-source/drift regression distinct from the quoting bug"
+      },
+      "2": {
+        "class": "known",
+        "why": "Restates the listed P1 at refused-inventory.mjs:26 (unquoted colon-bearing label breaks the Search API query)"
+      },
+      "3": {
+        "class": "known",
+        "why": "Just the impact of the same line-26 query defect; validIssueList([],0) returning true is correct behavior for a genuinely empty result, so it is no separate bug"
+      },
+      "4": {
+        "class": "known",
+        "why": "readFlag (finalize.mjs:710-716) returns null on a missing flag and the `repo = REFUSED_INVENTORY_DEFAULT_REPO` default only fires on undefined — this is the listed 'Repo default bypassed by null' at run-record.mjs:78"
+      },
+      "5": {
+        "class": "known",
+        "why": "The bracketed [--refused-inventory-repo] in the help block (finalize.mjs:691) is only 'not optional' because of the same null-bypasses-default defect already listed for run-record.mjs:78"
+      },
+      "6": {
+        "class": "vague",
+        "why": "Docs 1018-1024 do describe total_count without an index-lag caveat, but the claim's core assertion about GitHub search indexing is unverifiable against the code and names no code defect; the workflow already renders 'unknown' on read failure"
+      },
+      "7": {
+        "class": "vague",
+        "why": "Both lines exist (run-record.mjs:146 '- Refused (no PR)' and :82 '- Refused stubs (all states)') and their labels already state per-run vs all-states scope; a wording/legibility preference with no concrete failure"
+      },
+      "8": {
+        "class": "wrong",
+        "why": "node_modules is absent entirely in this checkout (an uninstalled sandbox), while js-yaml 4.3.1 is a declared dependency in package.json:155 and pnpm-lock.yaml — no defect in the change"
+      },
+      "9": {
+        "class": "vague",
+        "why": "continue-on-error: true at sentry-autofix.yml:1321 is on the documented best-effort record step (job comment lines 1283-1296 state a failed tracker write must not fail the run); the claim names no concrete defect, only absence of CI proof"
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 1514,
+  "usd": 2.96185,
+  "scoring_usd": 1.176091
+}

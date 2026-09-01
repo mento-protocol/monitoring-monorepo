@@ -1,0 +1,106 @@
+{
+  "cell_id": "pr-1999-replay-draw2",
+  "pr": 1999,
+  "condition": "replay",
+  "draw": 2,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "alerts/rules/peg-rule-definitions.tftest.hcl:68-69 — the required Terraform test still asserts the old title contract (requires peg_slack_title.template to contain $alert.Annotations.summary and $alert.Annotations.resolved_summary while peg-message-templates.tf:13-15 now renders only a status icon), so CI fails and this blocks the branch outright",
+    "ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts:109-110 — a rule that goes Alerting straight out of Error no longer opens an alert cycle (transitionKind classifies previous=Error, current=Alerting as error-recovered-alerting, which pairStateTransitions treats only as closing the :error cycle), so its resolution loses its duration (no 'lasted N min') and evidence falls back to the Normal transition's values, making downsideCause print the recovered measurement as the breach magnitude",
+    "route.test.ts:345,395 — neither of the two sequences that break (e.g. Normal→Error→Alerting→Normal) is covered by the test suite, which is why this got through",
+    "peg-alert-events.ts:230 — evaluation-failure copy says 'Price source' for rules that have no source; pegAlertSourceName(\"\") returns the literal 'Price source' for Structural Saturation Warning, Indexed Pool Unreachable, Heartbeat Missing and Policy Rollover Stuck, so a Grafana error renders 'Grafana could not evaluate the Price source Peg rule'",
+    "docs/notes/peg-monitoring.md:118-119 — 'Slack titles use the severity icon plus that summary' is now false; the title is the icon alone and the linked summary moved to the body",
+    "docs/notes/peg-monitoring.md:132-133 — 'The history backend reads only fired and resolved transitions… It does not read Pending or canceled transitions' is now false; it also reads Error, Error→Normal and Error→Alerting",
+    "docs/notes/peg-monitoring.md:110-111 — 'The state dot shows whether the condition is active, urgent, or resolved' is now false; recent-alerts.tsx:22-29 adds three monitoring-state labels",
+    "route.ts:58-84 — back to four upstream Grafana calls; fetchJson now fans each URL out to two requests under Promise.all, re-introducing the fan-out that commit 56dff428 cut from four to two",
+    "route.ts:58-84 — any non-2xx, non-JSON or 8s timeout on the added Error query throws out of Promise.all and the endpoint returns 502, so the Recent-alerts panel goes to 'unavailable' for a query that only ever adds supplementary rows; it should degrade gracefully",
+    "Unconfirmed — peg-alert-events.ts:162-171 fails the entire response closed on a single unrecognised row (any row failing stateLineSchema or carrying a values key outside the .strict() whitelist at :22-35 throws InvalidPegAlertsUpstreamError for the whole request), and now sees an Error-state row class whose values payload nobody has validated, which could turn rare evaluation errors into a fully blank panel",
+    "New cosmetic issue on Alerting→Error→Normal — the panel now shows a green 'Grafana can evaluate the rule again' row beside a red still-active row",
+    "Pre-existing, out of scope — route.ts:102-113 computes policyUrl and only null-checks it; it is never fetched"
+  ],
+  "matched_ids": [
+    3830366234,
+    3830366243,
+    3830371325,
+    3830416461
+  ],
+  "judge_reasoning": {
+    "3830366234": "Finding 1 names the stale peg-rule-definitions.tftest.hcl:68-69 title assertion requiring summary/resolved_summary against the now icon-only template, and confirms the CI gate fails.",
+    "3830366243": "Finding 4's first bullet flags docs/notes/peg-monitoring.md:118-119 claiming Slack titles are icon plus summary, now false since the summary moved to the body.",
+    "3830366247": "No mention anywhere of Grafana recovering into Pending or of errorStateHistoryUrl omitting a Pending recovery query; the review only discusses Error→Alerting and Error→Normal.",
+    "3830366547": "The review explicitly considered and rejected this exact claim ('misattributed', 'pre-existing, not change-caused'), so it does not identify it as a defect.",
+    "3830366556": "Pending is never discussed as a path that could orphan an unpaired error cycle; not raised.",
+    "3830371307": "The review touches lint line 1249 only to discard it as still-passing; it says nothing about unvalidated resource-marker indexes or link checks scanning the whole Terraform source.",
+    "3830371315": "No mention of a single consumable Response being reused across the now-four mocked fetches or the resulting spurious 502 in route.test.ts.",
+    "3830371325": "Finding 2 identifies the error-recovered-alerting classification in pairStateTransitions failing to open the alert cycle at the same location, with traced consequences (missing duration, wrong evidence row).",
+    "3830416461": "Finding 3 confirms pegAlertSourceName(\"\") returning 'Price source' for source-less rules and lists the affected rules, matching the defect."
+  },
+  "novel": {
+    "claims": 12,
+    "novelReal": 4,
+    "novelWrong": 1,
+    "novelVague": 3,
+    "restatedKnown": 4,
+    "alreadyMatched": 4,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "peg-rule-definitions.tftest.hcl:68-69 does assert $alert.Annotations.summary/resolved_summary while the new template renders only an icon — this is the known 'Update the stale Terraform title assertion' item"
+      },
+      "2": {
+        "class": "real",
+        "why": "transitionKind():109-110 returns error-recovered-alerting for previous=Error/current=Alerting; isOpening()/cycleKey() at 318-321 route it to the :error cycle only, so the later cleared row hits unpairedCleared (346/354) and is phrased with raised=undefined — no 'lasted', and evidence falls back to the Normal row, whose values.A downsideCause prints; base transitionKind treated any current=Alerting as raised, so this is a regression"
+      },
+      "3": {
+        "class": "real",
+        "why": "grepped every previous/current pair in route.test.ts: the two new tests (345, 398) cover Normal→Error→Normal and Alerting→Error→Alerting only; no test exercises Error→Alerting→Normal or Alerting→Error→Normal"
+      },
+      "4": {
+        "class": "known",
+        "why": "peg-alert-events.ts:230 with pegAlertSourceName('')→'Price source' (peg-alert-copy.ts:47-49) is the known 'Label source-less evaluation failures by rule' item"
+      },
+      "5": {
+        "class": "known",
+        "why": "docs/notes/peg-monitoring.md:118-119 is the only 'severity icon' text in the repo and is the runbook the known 'Keep the Peg runbook aligned with the new title' item points at"
+      },
+      "6": {
+        "class": "real",
+        "why": "doc lines 132-133 still say the backend reads only fired and resolved transitions, but route.ts:43-56 now also issues current=Error and previous=Error queries and peg-alert-events.ts:108-111 classifies three new Error kinds; the doc is untouched by the diff"
+      },
+      "7": {
+        "class": "wrong",
+        "why": "SEVERITY_COLOR (recent-alerts.tsx:10-14) and the dot itself are unchanged — the dot still shows active/urgent/resolved; only the aria-label text was extended, and the doc already says 'Each dot also has an accessible state label'"
+      },
+      "8": {
+        "class": "vague",
+        "why": "the count is accurate (fetchJson fans each URL to two, tests now assert 4 calls), but 56dff428 cut the calls to drop high-cardinality Pending queries, and the claim names no concrete harm beyond the count"
+      },
+      "9": {
+        "class": "real",
+        "why": "route.ts:65-82 puts both URLs in one Promise.all with no per-URL catch, so a non-ok/non-JSON Error-query response rejects the whole GET → 502 at 129-132 (timeout → 504), taking down the panel for a supplementary query"
+      },
+      "10": {
+        "class": "vague",
+        "why": "the fail-closed mechanism at 162-171 and the .strict() values whitelist at 22-35 are real, but the claim is self-labelled Unconfirmed and never establishes that Error rows carry values outside the whitelist"
+      },
+      "11": {
+        "class": "known",
+        "why": "Alerting→Error→Normal closes only the :error cycle and leaves the alert cycle in `open` (emitted at 356), i.e. the known 'peg-alert-events.ts:352 Error recovery leaves breach active'"
+      },
+      "12": {
+        "class": "vague",
+        "why": "policyUrl is indeed only null-checked (route.ts:102/111) and never fetched, but it is identical in base (81/90) — pre-existing and self-declared out of scope, no defect in this change"
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 526,
+  "usd": 3.610824499999999,
+  "scoring_usd": 1.5327834999999999
+}

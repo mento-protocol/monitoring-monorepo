@@ -130,6 +130,14 @@ Every document receives one evidence-backed disposition: **Keep**,
   envelope; once published, that envelope is immutable until closure. Semantic
   edits use a claimed issue and a normal reviewed PR.
 
+Generated packet bodies are the exception to the generic partial-merge body
+reconciliation rule. If a PR merges before the packet is complete, keep the
+generated title, body, and markers unchanged. Do not restore `agent-ready`; set
+`needs-grooming`. A human can resume the frozen packet or create a linked
+ordinary follow-up before closing it. Record merged work in issue comments and
+PR links, not in the generated body. Use `Closes` only after every file in the
+original packet is accounted for.
+
 Run `pnpm docs:index --check` after a gardening batch. If classification changed,
 regenerate the catalog with `pnpm docs:index --write` and review the generated
 diff before committing it.

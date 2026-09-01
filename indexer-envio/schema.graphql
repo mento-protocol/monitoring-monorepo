@@ -1363,7 +1363,7 @@ type Trove
   collateralId: String! @index
   troveId: String! @index
   owner: String! @index
-  previousOwner: String!
+  previousOwner: String! @index
   status: String! @index
   debt: BigInt!
   coll: BigInt!
@@ -1392,6 +1392,14 @@ type Trove
   lastUpdatedAt: BigInt!
   lastUpdatedBlock: BigInt!
   lastUpdatedTxHash: String
+  # Ledger reconciliation watermark: (blockNumber, logIndex) of the newest
+  # TroveLedgerEvent row written for this trove. Consumers reconcile
+  # cumulatives against ledger sums only when this pair equals the newest
+  # ledger row's pair — `lastUpdatedBlock` alone cannot distinguish two
+  # same-block transactions and also advances on NFT transfers that write no
+  # ledger row. (0, 0) means no ledger row yet.
+  lastLedgerBlock: BigInt!
+  lastLedgerLogIndex: Int!
 }
 
 type InterestRateBracket @index(fields: ["collateralId", "rate"]) {
@@ -1482,6 +1490,68 @@ type PendingRedemption @index(fields: ["collateralId", "txHash"]) {
   troveId: String!
   timestamp: BigInt!
   blockNumber: BigInt!
+}
+
+# Same-transaction capture of a trove's status before the paired
+# `TroveUpdated` / `BatchedTroveUpdated` handler mutates (or stages) state.
+# On-chain, the update event precedes `TroveOperation` for non-batch ops, so
+# by `TroveOperation` time the entity already holds post-operation values —
+# `statusBefore` is not recoverable arithmetically and must be captured here.
+# The `TroveOperation` handler consumes (deletes) the row. Batch-membership
+# ops emit `TroveOperation` first; their capture (written by the later
+# `BatchedTroveUpdated`) is never consumed and may linger — bounded by
+# batched-op count, zero in production today. id is
+# `pendingTroveKey(chainId, txHash, collateralId, troveId)`; get-by-id only,
+# no getWhere, so no composite index.
+type PendingTroveStatusCapture {
+  id: ID!
+  collateralId: String!
+  txHash: String!
+  troveId: String!
+  statusBefore: String!
+  # True when written by `BatchedTroveUpdated` — the paired update carried
+  # batch shares, so per-trove debt truth is batch-level, not on the Trove.
+  batched: Boolean!
+  timestamp: BigInt!
+  blockNumber: BigInt!
+}
+
+# Staged TroveLedgerEvent rows awaiting their same-transaction finalizer:
+# kind "redemption" (op 6) finalizes in the branch `Redemption` handler (the
+# only carrier of `_redemptionPrice`), kind "liquidation" (op 5) in the
+# aggregate `Liquidation` handler, kind "batch" (batch-membership and
+# in-batch ops) in the `BatchUpdated` replay. Each final row is written once,
+# complete — never set-then-patched. id is
+# `pendingTroveKey(chainId, txHash, collateralId, troveId)`; `ledgerEventId`
+# is the final row's id (the TroveOperation event's eventId).
+type PendingTroveLedgerEvent @index(fields: ["collateralId", "txHash"]) {
+  id: ID!
+  ledgerEventId: String!
+  chainId: Int!
+  collateralId: String! @index
+  txHash: String! @index
+  kind: String!
+  instanceId: String!
+  troveEntityId: String!
+  troveId: String!
+  owner: String!
+  operation: Int!
+  collChange: BigInt!
+  debtChange: BigInt!
+  debtIncreaseFromUpfrontFee: BigInt!
+  debtIncreaseFromRedist: BigInt!
+  collIncreaseFromRedist: BigInt!
+  annualInterestRate: BigInt!
+  debtBefore: BigInt
+  debtAfter: BigInt
+  collBefore: BigInt!
+  collAfter: BigInt!
+  statusBefore: String!
+  statusAfter: String!
+  redemptionFeeCredited: BigInt
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  logIndex: Int!
 }
 
 type PendingDepositOperation @index(fields: ["collateralId", "txHash"]) {
@@ -1830,7 +1900,8 @@ type StabilityPoolOperationEvent
 # switch happen without a re-sync.
 type TroveOperationEvent
   @index(fields: ["instanceId", "timestamp"])
-  @index(fields: ["chainId", "owner"]) {
+  @index(fields: ["chainId", "owner"])
+  @index(fields: ["instanceId", "troveId", "timestamp"]) {
   id: ID!
   chainId: Int!
   instanceId: String! @index
@@ -1839,14 +1910,76 @@ type TroveOperationEvent
   operation: Int!
   collChange: BigInt!
   debtChange: BigInt!
-  debtBefore: BigInt!
-  debtAfter: BigInt!
+  debtBefore: BigInt # null on batch-managed-trove rows; see troveOperationSnapshot.ts
+  debtAfter: BigInt # null on batch-managed-trove rows; see troveOperationSnapshot.ts
   collBefore: BigInt!
   collAfter: BigInt!
   annualInterestRate: BigInt!
   debtIncreaseFromUpfrontFee: BigInt!
   timestamp: BigInt! @index
   blockNumber: BigInt!
+  txHash: String!
+}
+
+# Append-only per-trove ledger: one row per `TroveOperation` event, ALL ten
+# Operation ordinals — redemptions, liquidations, and interest folds
+# included — so the dashboard can render a complete per-trove history.
+# Parallel to `TroveOperationEvent` (which stays user-ops-only and feeds the
+# market transaction tables); see ADR 0074 for why a new entity instead of
+# widening. Rows are assembled from their transaction's own events and never
+# mutated afterwards; the `Trove` entity remains the only mutable trove
+# state.
+#
+# Snapshots are post-accrual, pre-operation: `before` is derived from the
+# same-tx resulting state minus the event-carried deltas, so accrued
+# interest is already folded into `debtBefore` and the client-side interest
+# residual falls between rows, never inside one. Batch-op rows (membership
+# ops and in-batch touches) keep `debtBefore` null permanently — per-trove
+# pre-operation debt inside a batch is not derivable from events — and get
+# `debtAfter` (share-derived) plus `statusAfter` (post-replay
+# classification) filled once by the `BatchUpdated` replay, except op-5/6
+# rows on batched troves, which finalize in their own handlers and keep both
+# debt snapshots null. Collateral snapshots are always non-null.
+#
+# Ordering is the numeric triple (timestamp, blockNumber, logIndex). `id` is
+# the UNPADDED `eventId(chainId, block, logIndex)` of the `TroveOperation`
+# event and never participates in ordering ("_10" sorts before "_2").
+#
+# `priceAtEvent` is the block-close sample from `loadLiquityPrice` — an
+# archive eth_call observes post-block state — persisted only for rows at or
+# after the ledger's live cutoff (historical replay rows stay null by
+# design; no archive price persistence). Event-carried prices
+# (`redemptionPrice` on op 6, `Liquidation._price` on op 5 via the
+# txHash-linked LiquidationEvent) are exact, win for `icrAfterBps`, and
+# never overwrite `priceAtEvent`. Consumers render null as "—", never zero.
+type TroveLedgerEvent @index(fields: ["troveEntityId", "timestamp"]) {
+  id: ID!
+  chainId: Int!
+  instanceId: String! @index
+  troveEntityId: String!
+  troveId: String!
+  owner: String! @index
+  operation: Int!
+  collChange: BigInt!
+  debtChange: BigInt!
+  debtIncreaseFromUpfrontFee: BigInt!
+  debtIncreaseFromRedist: BigInt!
+  collIncreaseFromRedist: BigInt!
+  annualInterestRate: BigInt!
+  debtBefore: BigInt
+  debtAfter: BigInt
+  collBefore: BigInt!
+  collAfter: BigInt!
+  statusBefore: String!
+  statusAfter: String!
+  redemptionFeeCredited: BigInt
+  isRebalance: Boolean
+  redemptionPrice: BigInt
+  priceAtEvent: BigInt
+  icrAfterBps: Int
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  logIndex: Int!
   txHash: String!
 }
 

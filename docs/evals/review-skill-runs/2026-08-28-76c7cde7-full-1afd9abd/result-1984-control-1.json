@@ -1,0 +1,85 @@
+{
+  "cell_id": "pr-1984-control-draw1",
+  "pr": 1984,
+  "condition": "control",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": null,
+  "claims": [
+    "`--refused-inventory-repo` fallback is dead — `scripts/sentry/autofix/sentry-autofix-run-record.mjs:67` uses a default parameter (`repo = REFUSED_INVENTORY_DEFAULT_REPO`), which only fires on `undefined`, but `readFlag` (`sentry-autofix-finalize.mjs:711-716`) returns `null` when a flag is absent, so links render `github.com/null`",
+    "An empty value gives `https://github.com//issues/1304`",
+    "The `DEFAULT_REPO` constant is unreachable",
+    "No test covers `--refused-inventory-repo` through the CLI at all — the new finalize test (`sentry-autofix-finalize.test.mjs:1801`) only exercises the `unknown` branch, which never builds a URL",
+    "Label strings are hardcoded, bypassing the queue contract — `scripts/sentry/autofix/sentry-autofix-refused-inventory.mjs:26` inlines `label:sentry-triage label:sentry:fix-refused` as literals, while `QUEUE_LABEL` and `FIX_REFUSED_LABEL` are the repo's single source (`scripts/sentry/triage/sentry-triage-queue-contract.mjs:85,191`)",
+    "If either label string drifts, the query matches nothing and the fail-closed validation passes — `total_count: 0` with `items: []` satisfies `validIssueList(0, 0)`, so `parseRefusedStubInventory` returns `{state: \"known\", count: 0}` and the tracker reports `Refused stubs (all states): 0` forever — a miss renders as `0`, not `unknown`",
+    "The colon-bearing label is unquoted at `sentry-autofix-refused-inventory.mjs:26` (`label:sentry:fix-refused`), diverging from the repo's convention where the selector's query builder quotes it (`sentry-autofix-queue-io.mjs:278` renders `-label:\"${FIX_REFUSED_LABEL}\"`); if GitHub's parser doesn't take the full `sentry:fix-refused` as the qualifier value, you get a wrong count reported as `known`",
+    "The test at `sentry-autofix-run-record.test.mjs:116` pins the unquoted string, so it would need updating too",
+    "`parseRefusedStubInventoryResult` runs twice per render — once at `sentry-autofix-finalize.mjs:824`, then again inside `renderRefusedStubInventory` (`sentry-autofix-run-record.mjs:70`); the finalize-side call is just dead work"
+  ],
+  "matched_ids": [
+    3828303385,
+    3828313974,
+    3828328194
+  ],
+  "judge_reasoning": {
+    "3828303385": "Review section 3 explicitly flags the unquoted colon-bearing label at sentry-autofix-refused-inventory.mjs:26 and cites the same queue-io.mjs:278 quoting convention.",
+    "3828313971": "The review never mentions the markdownlint MD018 / line-starting-with-#1304 issue in docs/notes/sentry-triage-pipeline.md; it only says the doc changes accurately describe behavior.",
+    "3828313974": "Review section 1 identifies the null repo bypassing the default parameter, readFlag returning null, and the forwarding at finalize.mjs:853, with the same fix of falling back on nullish/empty.",
+    "3828328194": "Same defect as 3 — review section 1 describes links rendering as github.com/null and the unreachable REFUSED_INVENTORY_DEFAULT_REPO."
+  },
+  "novel": {
+    "claims": 9,
+    "novelReal": 3,
+    "novelWrong": 0,
+    "novelVague": 1,
+    "restatedKnown": 5,
+    "alreadyMatched": 3,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "readFlag returns null when --refused-inventory-repo is absent and the default param at run-record.mjs:67 only fires on undefined — this is the known 'Repo default bypassed by null' finding"
+      },
+      "2": {
+        "class": "known",
+        "why": "empty-string repo also skips the default (same default-param root cause at run-record.mjs:67), a variant of the known 'Repo default bypassed by null'"
+      },
+      "3": {
+        "class": "known",
+        "why": "same known finding restated; also literally imprecise — DEFAULT_REPO is still reached by readRefusedStubInventory/main in sentry-autofix-refused-inventory.mjs:236,246"
+      },
+      "4": {
+        "class": "real",
+        "why": "finalize.test.mjs:1823-1845 passes only --refused-inventory '{\"state\":\"unknown\"}' and never --refused-inventory-repo; grep shows no CLI test of the repo flag, and run-record.test.mjs:151 calls the renderer directly with an explicit repo"
+      },
+      "5": {
+        "class": "real",
+        "why": "refusedInventoryArgs at refused-inventory.mjs:26 inlines 'sentry-triage'/'sentry:fix-refused' instead of importing QUEUE_LABEL (contract:85) and FIX_REFUSED_LABEL (contract:191), which queue-io.mjs:278 does import"
+      },
+      "6": {
+        "class": "real",
+        "why": "traced parseRefusedStubInventory: total_count 0 + items [] + incomplete_results false passes validIssueList(min(0,10)) → {state:'known',count:0}, and the renderer emits '- Refused stubs (all states): 0' with no details — a broken query is indistinguishable from a truly empty one"
+      },
+      "7": {
+        "class": "known",
+        "why": "exactly the known P1 at sentry-autofix-refused-inventory.mjs:26 (unquoted colon-bearing label in the Search query)"
+      },
+      "8": {
+        "class": "known",
+        "why": "run-record.test.mjs:116 does pin the unquoted query string, but this is only the fix follow-on to the known P1 unquoted-label defect, not a separate one"
+      },
+      "9": {
+        "class": "vague",
+        "why": "confirmed the double call (finalize.mjs:824 then run-record.mjs:69) and that the parse is idempotent, so it is a harmless redundancy/simplification note with no behavioral defect"
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 244,
+  "usd": 1.8232819999999996,
+  "scoring_usd": 0.7955995
+}

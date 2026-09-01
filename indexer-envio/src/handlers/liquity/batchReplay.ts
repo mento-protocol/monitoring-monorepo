@@ -6,11 +6,17 @@ import type {
   PendingBatchMembershipOperation,
   PendingBatchedTroveUpdate,
   PendingRedemption,
+  PendingTroveLedgerEvent,
   Trove,
+  TroveLedgerEvent,
 } from "envio";
 import { pendingTroveKey } from "./keys.js";
 import { computeTroveIcrBps } from "./math.js";
 import { OP } from "./operations.js";
+import {
+  finalizeBatchTroveLedgerRow,
+  shouldPersistLedgerPrice,
+} from "./troveLedger.js";
 import {
   TROVE_STATUS,
   applySystemDebtDelta,
@@ -52,6 +58,11 @@ type BatchReplayContext = {
   };
   PendingRedemption: {
     get: (id: string) => Promise<PendingRedemption | undefined>;
+    deleteUnsafe: (id: string) => void;
+  };
+  TroveLedgerEvent: { set: (entity: TroveLedgerEvent) => void };
+  PendingTroveLedgerEvent: {
+    get: (id: string) => Promise<PendingTroveLedgerEvent | undefined>;
     deleteUnsafe: (id: string) => void;
   };
 };
@@ -219,6 +230,25 @@ export async function replayBatchedTroveUpdate(
     status: trove.status,
     debt: trove.debt,
   });
+  // Staged batch-kind ledger rows finalize here — the first point where
+  // per-trove debt (share math) and the replayed status classification
+  // exist. See `finalizeBatchTroveLedgerRow` for the explicit batch-row
+  // snapshot/status rule.
+  const ledgerWatermark = await finalizeBatchTroveLedgerRow(context, {
+    pendingId,
+    debtAfter: nextDebt,
+    statusAfter: trove.status,
+    blockClosePrice: shouldPersistLedgerPrice(args.blockTimestamp)
+      ? args.price
+      : null,
+  });
+  if (ledgerWatermark !== undefined) {
+    trove = {
+      ...trove,
+      lastLedgerBlock: ledgerWatermark.blockNumber,
+      lastLedgerLogIndex: ledgerWatermark.logIndex,
+    };
+  }
   context.Trove.set(trove);
   context.PendingBatchedTroveUpdate.deleteUnsafe(pending.id);
   if (pendingRedemption !== undefined) {

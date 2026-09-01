@@ -3,7 +3,7 @@ title: GitHub Tooling Surfaces — gh CLI vs MCP
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-21
+last_verified: 2026-08-29
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -19,10 +19,12 @@ skills link here instead of duplicating it.
 - **Local sessions (and Codex Cloud): gh-first.** The gh CLI works, so the
   shared probes (`pnpm pr:ready-state`, `pnpm pr:feedback-state`,
   `pnpm issue:claim`) are the source of truth.
-- **Claude cloud sessions: MCP-first.** The platform's GitHub credential proxy
-  blocks the API paths gh needs, so GitHub work goes through the GitHub MCP
-  tools, and monitoring goes through PR webhook subscription plus scheduled
-  self check-ins.
+- **Claude cloud sessions: MCP-first.** The gh binary is not installed by
+  default in cloud containers, and even where it is obtained, GraphQL stays
+  blocked (the probes rely on it — `pnpm pr:ready-state` fails on its first
+  call because `gh pr view --json` rides on GraphQL). GitHub work goes through
+  the GitHub MCP tools, and monitoring goes through PR webhook subscription
+  plus scheduled self-check-ins.
 
 ## Surface detection
 
@@ -32,16 +34,52 @@ skills link here instead of duplicating it.
    gate `scripts/bootstrap/claude-code-web-setup.sh` and `.claude/babysit-pr.sh`
    use.
 2. Otherwise → local (or Codex Cloud) → gh-first.
-3. The capability gate: a repo-scoped `gh api repos/<owner>/<repo>` call, a
-   minimal GraphQL query (`gh api graphql -f query='query{viewer{login}}'`),
-   and `gh api --slurp` support must all succeed. **Do not use
-   `gh auth status` or `/user` reachability as the signal** — in Claude cloud
-   sessions the proxy serves `/user` and `/rate_limit` (so `gh auth status`
-   succeeds) while every `/repos/*` path and GraphQL query is still blocked.
+3. The capability gate: run `command -v gh` **first**. Cloud containers do not
+   ship a gh binary by default, so the gate must fail here in the common case
+   rather than at the first `gh api` call below — a probe that skips this
+   check reads "command not found" as an evaluation failure instead of the
+   absence signal it actually is. When gh is present, a repo-scoped
+   `gh api repos/<owner>/<repo>` call, a minimal GraphQL query
+   (`gh api graphql -f query='query{viewer{login}}'`), and a flag-support check
+   for pagination slurping (`gh api --help | grep -- --slurp`) must all
+   succeed. Probe `--slurp` by capability, not by version: `--slurp` is only
+   valid alongside `--paginate` on a real endpoint, so a bare `gh api --slurp`
+   is not runnable, and distro builds backport flags unevenly — the observed
+   floor is that gh 2.45.0 (the default Ubuntu apt build) lacks it while gh
+   2.96.0 has it. `scripts/bootstrap/claude-code-web-setup.sh` runs this same
+   `--help` grep. **Do not use `gh auth status` or `/user`
+   reachability as the signal** — in Claude cloud sessions the proxy serves
+   `/user` and `/rate_limit` (so `gh auth status` succeeds) while GraphQL is
+   still blocked, and REST `/repos/*` behavior has been observed to vary (see
+   below).
 
 ## Why gh cannot work in Claude cloud sessions
 
-Empirical findings (2026-07-22, verified in two independent cloud containers):
+The empirical surface has moved between verification passes and is
+version/session-dependent — re-verify before relying on a specific claim
+below rather than treating any one pass as permanent.
+
+Current empirical findings (2026-08-24, two independent cloud containers):
+
+- **The gh binary is not installed by default.** The documented capability
+  gate fails at "command not found" before it reaches the `gh api` calls it
+  is meant to evaluate; the probe must start with `command -v gh` (see
+  Surface detection above).
+- **Obtaining a gh binary is itself unreliable.** A release-tarball fetch
+  from `github.com` can 403: the platform's GitHub credential proxy scopes
+  `github.com` access to session-attached repositories, and a release asset
+  is not one.
+- **REST `/repos/*` calls succeeded.** This contradicts the 2026-07-22 finding
+  below that every `/repos/*` path 403s. Treat the REST surface as
+  version-dependent rather than a fixed blanket block.
+- **GraphQL and the gh binary remain the reliably observed blockers.**
+  `pnpm pr:ready-state` and `pnpm pr:feedback-state` fail on their first call
+  regardless of REST behavior, because `gh pr view --json` rides on GraphQL
+  and no cloud container has been observed with a working gh binary.
+
+Superseded findings (2026-07-22, two independent cloud containers) — kept for
+history; the REST `/repos/*` claim below is contradicted by the 2026-08-24
+pass above:
 
 - Outbound TLS to `github.com` / `api.github.com` is intercepted by the
   platform's GitHub credential proxy (CONNECT succeeds; responses are the
@@ -55,16 +93,22 @@ Empirical findings (2026-07-22, verified in two independent cloud containers):
 - Allowed: `git` transport (via the local credential proxy the origin remote
   points at), `github.com` web pages and `raw.githubusercontent.com` for
   session-attached repos, and `api.github.com` `/user` + `/rate_limit`.
-- Blocked with structured 403s: every `api.github.com/repos/*` path (including
-  the attached repo) and all GraphQL except an internal pinned operation set
-  that serves the platform's own PR tooling. `pnpm pr:ready-state` fails on
-  its first call (`gh pr view --json` rides on GraphQL).
+- ~~Blocked with structured 403s: every `api.github.com/repos/*` path~~ —
+  superseded 2026-08-24 above. All GraphQL except an internal pinned
+  operation set that serves the platform's own PR tooling stays blocked.
+  `pnpm pr:ready-state` fails on its first call (`gh pr view --json` rides on
+  GraphQL).
 - The 403 body's remedy text ("an org admin must connect the Claude GitHub
   App") is misleading: the app being installed org-wide does not change this —
   the gate is per-session platform policy, and the supported API path in these
   sessions is the GitHub MCP server.
 
-Do not build a gh-over-MCP shim; the skills document the two native paths.
+Regardless of REST behavior, MCP-first stands as the default for Claude cloud
+sessions: the gh binary is not reliably available, GraphQL stays blocked, and
+the probes the skills depend on need both. The capability gate in Surface
+detection step 3 is the one exception, and no cloud container has yet
+satisfied it. Do not build a gh-over-MCP shim as a substitute for that gate;
+the skills document the two native paths.
 
 ## gh → MCP mapping
 
@@ -85,13 +129,47 @@ Do not build a gh-over-MCP shim; the skills document the two native paths.
 | `gh issue edit` / labels / comments            | `issue_write`, `issue_read`, `add_issue_comment`                                                        |
 | `pnpm pr:ready-state --watch` foreground loop  | `subscribe_pr_activity` webhook events + scheduled self check-ins (e.g. `send_later`); never sleep-poll |
 
+## Exact workflow-run selection
+
+Resolve the expected workflow path to exactly one workflow database ID. Stop if
+the path has zero or multiple matches. Then resolve the full target commit SHA,
+select runs with both IDs, and bind every claim to the returned run
+`databaseId`:
+
+```bash
+gh workflow list --all --limit 1000 --json id,path,state \
+  --jq '.[] | select(.path == "<expected-workflow-path>")'
+gh run list --workflow <workflow-database-id> --all --commit <full-sha> \
+  --limit 1000 \
+  --json databaseId,headSha,workflowDatabaseId,status,conclusion,url
+gh run view <databaseId>
+gh run watch <databaseId> --exit-status
+```
+
+Use the unique workflow row's `id` as `<workflow-database-id>`. Require each
+run's `headSha` to equal the target SHA and `workflowDatabaseId` to equal that
+ID. A workflow display name, branch filter, or list position is not sufficient
+evidence because each can select an older or unrelated run. For pull requests,
+keep `pnpm pr:ready-state` and `gh pr checks` as the canonical probes.
+
 ## Issue workboard transitions
 
-`pnpm issue:claim`, `issue:review`, and `issue:release` shell out to gh —
-including `gh api graphql` for Project #12 status and the Claim ID ownership
-field — so they cannot run in Claude cloud sessions absent the
-capability-gate exception. The cloud fallback is a
-partial MCP emulation plus an explicit gh-capable handoff:
+`pnpm issue:claim`, `issue:review`, `issue:release`, `issue:board sync`, and
+`issue:board backfill` shell out to gh. They use GraphQL for Project #12 and the
+Git data APIs for the persistent per-issue mutex. The mutex uses GraphQL
+`updateRefs` with an exact `beforeOid` on a retained custom ref. The active
+credential needs Project write access and repository Contents write access.
+Each helper rejects a non-`github.com` `GH_HOST` and a host-qualified `GH_REPO`.
+The transport also sets `GH_HOST=github.com` and removes `GH_REPO` before every
+gh call. Explicit repository and Project flags cannot authorize another host.
+These commands cannot run in Claude cloud sessions absent the capability-gate
+exception. On a gh-capable surface, a claim can accept a stable `--claim-id`;
+the sweep path requires it. Release requires that token and uses the stored
+branch. An explicit review rebind uses the same token, proves the selected open
+same-repository PR, and refuses an open PR on the old stored Branch. A merged-PR
+continuation proves the stored merged PR and moves the open issue only to
+`needs-grooming`. The cloud fallback is a partial MCP emulation plus an explicit
+gh-capable handoff:
 
 1. Perform the label transition with `issue_write` (send the full resulting
    label set, e.g. swap `agent-ready` for `agent-active` on claim, or
@@ -100,22 +178,32 @@ partial MCP emulation plus an explicit gh-capable handoff:
    comments include the `Claim ID:` and `Claimed at:` lines, plus `Branch:`
    when known), and state in it that Project #12 fields were not set from this
    session.
-3. The Project Claim ID race guard is absent on this path, so the claim
-   comment is the ownership record; check for a fresher competing claim
-   comment before starting work.
+3. The persistent Git ref mutex and Project ownership checks are absent on this
+   path. The claim comment is the temporary ownership record. Check for a
+   fresher competing claim comment before starting work.
 4. Hand off to a gh-capable surface. Run
    `pnpm issue:board backfill --issue <n> --dry-run`, then rerun it without
    `--dry-run` only when the proposed ownership-field writes are correct. The
-   helper reads the newest valid trusted claim comment. It fills empty Project
-   fields as follows: `Claim ID`, `Agent`, and `Claimed At`. It fills `Branch`
-   only when the claim supplies it. It preserves Project Status and rejects
-   non-empty conflicts.
-   Before every field write, it re-reads the lifecycle, exact trusted claim
-   snapshot, Project field types, and current values. GitHub provides no
-   compare-and-swap operation. A concurrent write can still occur after that
-   read and before the mutation. The helper does not roll back because a
-   rollback could erase concurrent state. Run `pnpm issue:board sync`
-   separately to reconcile status.
+   helper reads the newest valid trusted claim comment. It writes `Claim ID`,
+   `Agent`, and `Claimed At` when its latest snapshot reports them as empty. It
+   writes `Branch` only when the claim supplies it and the latest snapshot
+   reports it as empty. It preserves Project Status and rejects conflicts that
+   the snapshot shows.
+   Before every field write and during final verification, it re-reads the
+   lifecycle, exact trusted claim snapshot, Project field types, and all five
+   owner fields, including PR. It never writes PR. The persistent per-issue
+   mutex excludes claim, review, release, sync, and another backfill. All
+   repo-owned owner-field writes use that mutex. Direct external writes do not.
+   A direct external same-field write in the Project read-write gap can be
+   overwritten without detection. Stop all helpers before manual owner-field
+   repair. The helper does not roll back because a rollback could erase external
+   state. Run `pnpm issue:board sync` separately after closure to clear queue
+   labels. Sync preserves Project Status. First run
+   `pnpm issue:board sync --dry-run`. This command is repository-wide and does
+   not accept issue-number scope. Obtain explicit authority for the full
+   repository-wide mutation before you rerun it without `--dry-run`. The apply
+   re-reads live state, so a clean preview does not narrow its mutation scope.
+   The authority must cover the full projection, including unrelated items.
 
 ## Known MCP gaps
 
@@ -143,7 +231,11 @@ babysitter or CI).
 polled. Do not foreground-poll and never sleep-poll.
 
 1. Subscribe to PR events (`subscribe_pr_activity`) so comments, reviews, and CI
-   failures arrive as webhook activity.
+   failures arrive as webhook activity. An edit to an existing bot comment (for
+   example CodeRabbit or Codex updating its own summary in place) re-fires a
+   PR-activity wake the same as a new comment. Dedupe by comment id plus its
+   updated content, not by event count, or an edited-in-place summary reads as
+   new findings every time it changes.
 2. Arm a scheduled self check-in (for example `send_later`) before ending the
    turn, every 15-20 minutes against the operating card's one-hour default
    deadline. Webhooks do not cover CI success, new pushes, or merge-conflict

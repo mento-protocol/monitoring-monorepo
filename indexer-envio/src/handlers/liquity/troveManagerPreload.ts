@@ -94,6 +94,19 @@ export async function preloadTroveOperation(
       args.appliedFeeEventId,
       args.upfrontFee,
     ),
+    // Warm the same tx+trove key `maybeRecordTroveOperation` reads during
+    // processing to discriminate a batch-managed op — see
+    // `troveOperationSnapshot.ts`. `BatchedTroveUpdated` (which stages this
+    // row) fires before `TroveOperation` on-chain, so the key is derivable
+    // from the event alone with no entity-dependent branch.
+    context.PendingBatchedTroveUpdate.get(
+      pendingTroveKey(
+        args.chainId,
+        args.txHash,
+        args.collateralId,
+        args.troveId,
+      ),
+    ),
   ]);
   if (args.operation === OP.REDEEM_COLLATERAL) {
     setPendingRedemption(context, {

@@ -30,13 +30,14 @@ altitude.
 
 ## Lifecycle
 
-Frontmatter `status` follows the repo metadata contract (`active` = in force;
-`archived` = superseded/deprecated). The ADR's own lifecycle (Accepted /
-Superseded by ADR-NNNN) lives in the body's **Status** line. In-force ADRs are
-`canonical: true` and enrolled in the 90-day re-verification check — that is the
-enforcement behind "is this still true?". Supersede an ADR by adding a new one
-and flipping the old one to `status: archived` with a `superseded_by:` pointer;
-do not silently rewrite history.
+Frontmatter `status` follows the repo metadata contract (`draft` = proposed and
+not in force; `active` = in force; `archived` = superseded/deprecated). The ADR's
+own lifecycle (Proposed / Accepted / Superseded by ADR-NNNN) lives in the body's
+**Status** line. In-force ADRs are `canonical: true` and enrolled in the 90-day
+re-verification check — that is the enforcement behind "is this still true?".
+Supersede an ADR by adding a new one and flipping the old one to
+`status: archived` with a `superseded_by:` pointer; do not silently rewrite
+history.
 
 ## Adding an ADR
 
@@ -63,7 +64,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | ADR                                                         | Decision                                                                             |
 | ----------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | [0006](0006-github-issues-backlog.md)                       | GitHub Issues (not `BACKLOG.md`) are the canonical agent work queue                  |
-| [0007](0007-agent-quality-gate-and-merge-oracle.md)         | Local quality gate + two-projection PR all-clear + Codex approval gate               |
+| [0007](0007-agent-quality-gate-and-merge-oracle.md)         | Transitional local gate + retained two-projection PR all-clear and Codex approval    |
 | [0008](0008-mandatory-hazard-checklists.md)                 | Cross-layer/stateful changes must run the dedicated PR checklists before review      |
 | [0009](0009-supply-chain-hardening.md)                      | Supply-chain posture: release-age gate, lockfile-lint, SHA-pinned Actions            |
 | [0010](0010-required-checks-no-paths-filters.md)            | Required CI checks carry no `paths:` filters; only advisory jobs may                 |
@@ -81,6 +82,15 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0068](0068-sentry-fixture-authoring-policy.md)             | Adversarial fixtures are authored to scan clean; no value or line registry           |
 | [0069](0069-gate-routing-table-as-data.md)                  | The gate's routing table is data, compiled by the repo's own bash-`case` translator  |
 | [0070](0070-sentry-requeue-settlement-sentinel.md)          | The archive's terminal label is withheld from the re-queue's shed and read back      |
+| [0072](0072-md-only-docs-checks-job.md)                     | The Markdown globs route to a small `docs-checks` job; some Markdown runs both jobs  |
+| [0073](0073-guardrail-prose-pinned-in-ci.md)                | Normative guardrail sentences are pinned in CI; script digests deliberately are not  |
+| [0075](0075-pr-merge.md)                                    | One sanctioned merge wrapper gates merges locally; the binding control stays human   |
+| [0076](0076-fair-quality-gate-coordinator.md)               | Fair weighted coordination replaces machine-wide full-run gate exclusion             |
+| [0077](0077-operator-triggered-backlog-sweep.md)            | Backlog sweeps start from an operator, run isolated workers, and stop at READY       |
+| [0078](0078-staged-verification-redesign.md)                | Staged existing-CI replacement of the mandatory local gate                           |
+| [0079](0079-sealed-exact-file-patch-secret-suppression.md)  | Autoreview permits only sealed exact-file-patch secret suppression                   |
+| [0081](0081-narrow-dependabot-auto-merge-exception.md)      | One narrow Dependabot group can auto-merge through a two-stage trust boundary        |
+| [0082](0082-persistent-issue-board-mutation-mutex.md)       | One persistent compare-and-swap Git ref serializes issue-board helper mutations      |
 
 ### shared-config
 
@@ -106,6 +116,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0071](0071-susds-launch-aligned-daily-sampler.md)       | sUSDS actuals use a launch-aligned bounded daily sampler                                                                 |
 | [0039](0039-multistrategy-pools-historical-fx-volume.md) | Pool strategies are many-to-many; same-currency swaps use historical FX crosses                                          |
 | [0046](0046-event-sourced-oracle-freshness.md)           | Oracle freshness is reconstructed from persisted report events                                                           |
+| [0074](0074-trove-ledger-parallel-append-only-entity.md) | Trove history is a parallel append-only `TroveLedgerEvent`, not a widened `TroveOperationEvent`                          |
 
 ### ui-dashboard
 

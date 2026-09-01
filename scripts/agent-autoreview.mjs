@@ -30,18 +30,22 @@ import process from "node:process";
 import {
   assertNoSecretLikeContent,
   buildBoundedReviewPrompts,
+  createTrustedGitPatchSecretSuppression,
   createReviewInputCollector,
   isWithin,
   MAX_REVIEW_INPUT_BYTES,
   normalizedGitFileMode,
   readBoundedRegularFile,
   readSafeEvidenceFile,
+  reviewBundlePathReason,
   reviewPromptOutputPaths,
-  sensitivePathReason,
   serializeSafeUntrackedFile,
   utf8Size,
   writeReviewPromptOutputs,
 } from "./agent-autoreview-core.mjs";
+import { inheritGateMarkerStdio } from "./gate/mapped-command-process-identity.mjs";
+import { parseDarwinExactIdentity } from "./gate/darwin-process-lineage.mjs";
+import { validateState as validateDarwinLineageState } from "./gate/darwin-process-lineage-model.mjs";
 
 const REVIEW_SCHEMA = {
   type: "object",
@@ -112,6 +116,8 @@ const FROZEN_TARGET_MODES = new Set([
 ]);
 const MAX_GIT_OUTPUT_BYTES = MAX_REVIEW_INPUT_BYTES + 12 * 1024 * 1024;
 const MAX_TRUSTED_ENGINE_FILE_BYTES = 16 * 1024 * 1024;
+const MAX_DARWIN_CONTAINMENT_CONTRACT_BYTES = 4096;
+const MAX_DARWIN_LINEAGE_STATE_BYTES = 8 * 1024 * 1024;
 const CLAUDE_SAFE_MODE_MIN_VERSION = [2, 1, 169];
 const ENGINE_VERSION_PROBE_TIMEOUT_MS = 15_000;
 const AWS_CREDENTIAL_CONFIG_KEYS = new Set([
@@ -143,7 +149,9 @@ Options:
   --mode <auto|local|branch|commit>  Review target mode (default: auto)
   --base <ref>                       Base ref for branch mode
   --commit <ref>                     Commit ref for commit mode (default: HEAD)
-  --engine <codex|claude|local>      Review engine (default: AUTOREVIEW_ENGINE or codex)
+  --engine <codex|claude|local>      Review engine (default: AUTOREVIEW_ENGINE or codex;
+                                      falls back to claude when codex is not
+                                      installed and neither was set explicitly)
   --model <name>                     Model passed through to the engine
   --thinking <level>                 Codex reasoning effort or Claude effort
   --prompt <text>                    Extra review instruction (repeatable)
@@ -174,7 +182,8 @@ Adapter-only options (pnpm agent:autoreview, before any -- separator):
 Note:
   Inside an active Codex session, a repo adapter should use --prepare-bundle-dir
   plus its bound pre/post verification flow. For this standalone helper only,
-  use --prepare-only --bundle-output <path> instead of nested codex exec.
+  use a trusted runtime outside the reviewed checkout with --prepare-only
+  --bundle-output <path> instead of nested codex exec.
 `);
 }
 
@@ -184,6 +193,7 @@ function parseArgs(argv) {
     base: null,
     commit: "HEAD",
     engine: process.env.AUTOREVIEW_ENGINE || "codex",
+    engineExplicit: Boolean(process.env.AUTOREVIEW_ENGINE),
     model: null,
     thinking: null,
     prompts: [],
@@ -235,6 +245,7 @@ function parseArgs(argv) {
         break;
       case "--engine":
         args.engine = next();
+        args.engineExplicit = true;
         break;
       case "--model":
         args.model = next();
@@ -381,6 +392,191 @@ function sameDirectorySecurityMetadata(left, right) {
   return ["dev", "ino", "mode", "uid", "gid"].every(
     (field) => left[field] === right[field],
   );
+}
+
+function assertPrivateDarwinContainmentDirectory(candidate, label) {
+  if (
+    typeof candidate !== "string" ||
+    !path.isAbsolute(candidate) ||
+    path.resolve(candidate) !== candidate
+  ) {
+    throw new Error(`${label} path is not absolute and normalized`);
+  }
+  const fileStat = lstatSync(candidate, { bigint: true });
+  if (
+    !fileStat.isDirectory() ||
+    fileStat.uid !== effectiveUid() ||
+    (fileStat.mode & 0o777n) !== 0o700n ||
+    hasWriteGrantingAcl(candidate, fileStat, label)
+  ) {
+    throw new Error(`${label} is not a private current-user directory`);
+  }
+  return fileStat;
+}
+
+function readStablePrivateDarwinContainmentFile(
+  candidate,
+  { label, expectedMode, maximumBytes },
+) {
+  if (
+    typeof candidate !== "string" ||
+    !path.isAbsolute(candidate) ||
+    path.resolve(candidate) !== candidate
+  ) {
+    throw new Error(`${label} path is not absolute and normalized`);
+  }
+  let descriptor;
+  try {
+    const pathBefore = lstatSync(candidate, { bigint: true });
+    descriptor = openSync(candidate, secureReadFlags({ nonBlocking: true }));
+    const before = fstatSync(descriptor, { bigint: true });
+    if (
+      !before.isFile() ||
+      before.uid !== effectiveUid() ||
+      (before.mode & 0o777n) !== BigInt(expectedMode) ||
+      (before.mode & 0o6000n) !== 0n ||
+      before.nlink !== 1n ||
+      before.size <= 0n ||
+      before.size > BigInt(maximumBytes) ||
+      !sameFileMetadata(pathBefore, before) ||
+      hasWriteGrantingAcl(candidate, before, label)
+    ) {
+      throw new Error(`${label} is not a private stable regular file`);
+    }
+    const bytes = readFileSync(descriptor);
+    const after = fstatSync(descriptor, { bigint: true });
+    const pathAfter = lstatSync(candidate, { bigint: true });
+    if (
+      bytes.length !== Number(after.size) ||
+      !sameFileMetadata(before, after) ||
+      !sameFileMetadata(before, pathAfter)
+    ) {
+      throw new Error(`${label} changed while read`);
+    }
+    return bytes;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
+function assertDarwinWrapperContainment() {
+  if (process.platform !== "darwin") return;
+  const contractPath = process.env.AGENT_AUTOREVIEW_DARWIN_CONTAINMENT_FILE;
+  if (!contractPath) {
+    throw new Error(
+      "direct Darwin execution has no trusted containment contract; run pnpm agent:autoreview",
+    );
+  }
+
+  try {
+    const contractDirectory = path.dirname(contractPath);
+    const runtimeDirectory = path.dirname(contractDirectory);
+    if (
+      !path.basename(contractDirectory).startsWith("helper-containment.") ||
+      !path
+        .basename(runtimeDirectory)
+        .startsWith("agent-autoreview-command-runtime.")
+    ) {
+      throw new Error("Darwin containment path has an unexpected layout");
+    }
+    const runtimeBefore = assertPrivateDarwinContainmentDirectory(
+      runtimeDirectory,
+      "Darwin containment runtime",
+    );
+    const contractDirectoryBefore = assertPrivateDarwinContainmentDirectory(
+      contractDirectory,
+      "Darwin containment contract directory",
+    );
+    const contractBytes = readStablePrivateDarwinContainmentFile(contractPath, {
+      label: "Darwin containment contract",
+      expectedMode: 0o400,
+      maximumBytes: MAX_DARWIN_CONTAINMENT_CONTRACT_BYTES,
+    });
+    const contractText = contractBytes.toString("utf8");
+    if (
+      !contractText.endsWith("\n") ||
+      contractText.slice(0, -1).includes("\n") ||
+      contractText.includes("\r")
+    ) {
+      throw new Error("Darwin containment contract is malformed");
+    }
+    const fields = contractText.slice(0, -1).split("\t");
+    if (
+      fields.length !== 5 ||
+      fields[0] !== "agent-autoreview-darwin-containment-v1"
+    ) {
+      throw new Error("Darwin containment contract schema is unsupported");
+    }
+    const [, childPidText, ownerPidText, identityText, statePath] = fields;
+    if (
+      !/^[1-9][0-9]*$/u.test(childPidText) ||
+      !/^[1-9][0-9]*$/u.test(ownerPidText) ||
+      Number(childPidText) !== process.pid ||
+      Number(ownerPidText) !== process.ppid
+    ) {
+      throw new Error("Darwin containment contract does not own this process");
+    }
+    if (
+      path.dirname(statePath) !== runtimeDirectory ||
+      !/^lineage\.autoreview-deadline-[A-Za-z0-9_-]+\.json$/u.test(
+        path.basename(statePath),
+      )
+    ) {
+      throw new Error("Darwin containment lineage path is outside its runtime");
+    }
+    const stateBytes = readStablePrivateDarwinContainmentFile(statePath, {
+      label: "Darwin containment lineage state",
+      expectedMode: 0o600,
+      maximumBytes: MAX_DARWIN_LINEAGE_STATE_BYTES,
+    });
+    const token = path
+      .basename(statePath)
+      .slice("lineage.".length, -".json".length);
+    const state = validateDarwinLineageState(
+      JSON.parse(stateBytes.toString("utf8")),
+      token,
+    );
+    const exactIdentity = parseDarwinExactIdentity(identityText);
+    if (
+      state.root === null ||
+      state.launcher === null ||
+      state.settledAt !== null ||
+      state.settledReason !== null ||
+      exactIdentity.bootId !== state.bootId ||
+      exactIdentity.pid !== process.pid ||
+      exactIdentity.uniqueId !== state.root.uniqueId ||
+      exactIdentity.parentUniqueId !== state.root.parentUniqueId ||
+      state.root.pid !== process.pid ||
+      state.launcher.pid !== process.ppid ||
+      state.root.parentUniqueId !== state.launcher.uniqueId
+    ) {
+      throw new Error(
+        "Darwin containment contract does not match its bound lineage",
+      );
+    }
+    const runtimeAfter = lstatSync(runtimeDirectory, { bigint: true });
+    const contractDirectoryAfter = lstatSync(contractDirectory, {
+      bigint: true,
+    });
+    if (
+      !sameDirectorySecurityMetadata(runtimeBefore, runtimeAfter) ||
+      !sameDirectorySecurityMetadata(
+        contractDirectoryBefore,
+        contractDirectoryAfter,
+      )
+    ) {
+      throw new Error(
+        "Darwin containment directories changed during validation",
+      );
+    }
+  } catch (error) {
+    throw new Error(
+      `invalid Darwin containment contract: ${error.message}; run pnpm agent:autoreview`,
+      { cause: error },
+    );
+  } finally {
+    delete process.env.AGENT_AUTOREVIEW_DARWIN_CONTAINMENT_FILE;
+  }
 }
 
 function aclMetadataKey(fileStat) {
@@ -627,11 +823,25 @@ function clearReviewerForceKillTimer() {
   reviewerForceKillTimer = null;
 }
 
-function signalReviewerProcessGroup(child, signal) {
+function canSignalDetachedProcessGroup(platformName = process.platform) {
+  return platformName !== "win32" && platformName !== "darwin";
+}
+
+function signalReviewerChildOrGroup(
+  child,
+  signal,
+  { childHasClosed = false } = {},
+) {
   try {
-    if (process.platform !== "win32" && Number.isInteger(child.pid)) {
+    if (canSignalDetachedProcessGroup() && Number.isInteger(child.pid)) {
       process.kill(-child.pid, signal);
-    } else {
+    } else if (!childHasClosed) {
+      // Darwin process-group ids are reusable numeric identities. The trusted
+      // shell wrapper binds this helper to a durable lineage and an autonomous
+      // recovery watcher before launch. This helper only signals the child it
+      // still owns. A close callback has already reaped that child, so it must
+      // not signal the numeric PID either. Windows has no negative-pid
+      // process-group signal.
       child.kill(signal);
     }
   } catch (error) {
@@ -642,7 +852,7 @@ function signalReviewerProcessGroup(child, signal) {
 function terminateActiveReviewerChildren(signal = "SIGTERM") {
   for (const child of activeReviewerChildren) {
     try {
-      signalReviewerProcessGroup(child, signal);
+      signalReviewerChildOrGroup(child, signal);
     } catch {
       // The close/error path will finish process cleanup.
     }
@@ -1269,6 +1479,34 @@ function resolveTrustedCommand(command, rejectRoot, { required = true } = {}) {
     throw new Error(unavailableCommandMessage(command));
   }
   return null;
+}
+
+// Cloud containers and some CI shells have no installed codex CLI. The repo
+// docs call the bare invocation "the closeout", so it must still run there:
+// when the caller left --engine and AUTOREVIEW_ENGINE unset, fall back to the
+// claude engine instead of letting the codex search fail deep inside runCodex.
+// An engine the caller asked for explicitly never falls back -- it fails with
+// its own clear error instead.
+function applyDefaultEngineFallback(args, repo) {
+  if (args.engineExplicit || args.engine !== "codex") return;
+  if (resolveTrustedCommand("codex", repo, { required: false })) return;
+  if (process.env[commandOverrideVariable("codex")]) {
+    // trustedCommandCandidates() already treats an explicit binary override as
+    // authoritative -- a typo must surface as its own error rather than
+    // silently reviving whatever the PATH offers. Falling back to claude here
+    // would defeat that contract by swapping engines out from under a caller
+    // who named a specific codex binary, so surface codex's own error instead.
+    throw new Error(unavailableCommandMessage("codex"));
+  }
+  if (!resolveTrustedCommand("claude", repo, { required: false })) {
+    throw new Error(
+      `neither codex nor claude CLI is available. ${unavailableCommandMessage("codex")} ${unavailableCommandMessage("claude")}`,
+    );
+  }
+  console.error(
+    "agent:autoreview: codex CLI not found; falling back to --engine claude",
+  );
+  args.engine = "claude";
 }
 
 function trustedCurrentNode(rejectRoot) {
@@ -1936,9 +2174,9 @@ function captureDeadlineError(label) {
 // SIGKILL, not SIGTERM: spawnSync blocks until the child actually exits after
 // the timeout fires, so a child that handles or ignores SIGTERM would hang the
 // helper despite the "timeout" option. `detached: true` makes the child its own
-// process-group leader, so the sweep below reaches anything it forked instead of
-// leaving an orphan behind -- spawnSync's own timeout signals the direct child
-// only.
+// process-group leader. Linux can sweep that group. The trusted Darwin wrapper
+// settles descendants through its durable lineage record. spawnSync's timeout
+// signals the direct child only.
 function spawnGitWithinCaptureDeadline(git, gitArgs, options, label) {
   const remainingMs = CAPTURE_DEADLINE_MS - gitCaptureSpentMs;
   if (remainingMs <= 0) throw captureDeadlineError(label);
@@ -1956,6 +2194,7 @@ function spawnGitWithinCaptureDeadline(git, gitArgs, options, label) {
   const startedAt = performance.now();
   const result = spawnTrustedSync(git, gitArgs, {
     ...options,
+    stdio: inheritGateMarkerStdio(options.stdio),
     // The monotonic clock reports fractions of a millisecond; spawnSync only
     // takes whole ones.
     timeout: Math.ceil(remainingMs),
@@ -1973,18 +2212,16 @@ function spawnGitWithinCaptureDeadline(git, gitArgs, options, label) {
   // only claims the deadline when the capture actually reached it -- otherwise
   // a git the OOM killer or an operator stopped early would be reported with a
   // cause it did not have, beside a spent figure contradicting it. Any signalled
-  // spawn still sweeps the group the detached child leads.
+  // Linux sweeps the group after a signalled spawn. The Darwin wrapper owns
+  // exact descendant settlement.
   const outOfBuffer = result.error?.code === "ENOBUFS";
   const deadlineExpired =
     !outOfBuffer &&
     (result.error?.code === "ETIMEDOUT" ||
       (result.signal === "SIGKILL" && elapsedMs >= remainingMs - 50));
-  // Sweep every capture, not only the ones that ended badly. spawnSync has
-  // already waited for the child, so this group holds nothing but descendants
-  // the capture forked and left behind -- which are exactly what a detached
-  // spawn would otherwise strand, since they are no longer in the group a
-  // terminal signal reaches. Sweeping here rather than on the failure paths
-  // alone also leaves no window in which the pid could be recycled.
+  // On Linux, sweep every capture. spawnSync has already waited for the child,
+  // so the group holds only descendants the capture left behind. The guard in
+  // killProcessGroup prevents a reusable numeric group signal on Darwin.
   killProcessGroup(result.pid);
   if (deadlineExpired) throw captureDeadlineError(label);
   return result;
@@ -2113,14 +2350,13 @@ const GH_LOOKUP_TIMEOUT_MS = (() => {
     : 60_000;
 })();
 
-// spawnSync's built-in timeout only signals the direct child; it does not
-// reach descendants the child has already forked (a gh helper call that
-// backgrounds a subprocess, say). Every deadline-bounded spawn here -- the gh
-// lookups below and the Git captures above -- passes detached: true so the child
-// leads its own process group, letting this sweep the whole group after a
-// timeout instead of leaving an orphan running.
+// spawnSync's built-in timeout only signals the direct child. On Linux, each
+// deadline-bounded spawn leads a detached process group, so this sweep reaches
+// descendants. On Darwin, a negative pid is a reusable numeric process-group
+// identity. The trusted shell wrapper uses darwin-coherent-lineage-v2 to settle
+// descendants instead. Do not send a numeric process-group signal there.
 function killProcessGroup(pid) {
-  if (!pid) return;
+  if (!pid || !canSignalDetachedProcessGroup()) return;
   try {
     process.kill(-pid, "SIGKILL");
   } catch {
@@ -2157,7 +2393,7 @@ function detectPrBase(repo, branch) {
         cwd: repo,
         env,
         encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: inheritGateMarkerStdio(["ignore", "pipe", "pipe"]),
         timeout: GH_LOOKUP_TIMEOUT_MS,
         // SIGKILL, not SIGTERM: spawnSync blocks until the child actually
         // exits after the timeout fires, so a child that handles or ignores
@@ -2220,7 +2456,7 @@ function detectPrBase(repo, branch) {
         cwd: repo,
         env,
         encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: inheritGateMarkerStdio(["ignore", "pipe", "pipe"]),
         timeout: GH_LOOKUP_TIMEOUT_MS,
         killSignal: "SIGKILL",
         detached: true,
@@ -2392,7 +2628,42 @@ function aggregateInputLimitError(label) {
 // change. `-l5000` owns the rename candidate limit, finite for the reason the
 // wrapper's capture block records. `changedPaths` keeps the pin, so a move's
 // source path still reaches the sensitive-path refusal.
-function gitBundlePart(collector, label, repo, gitArgs) {
+function createSecretScanningBundleCollector(repo) {
+  const reviewCollector = createReviewInputCollector();
+  const scanCollector = createReviewInputCollector();
+  const exactPatchSuppression = createTrustedGitPatchSecretSuppression(repo);
+  return {
+    add(label, value, { trustedGitPatch = false } = {}) {
+      const scanValue = trustedGitPatch
+        ? exactPatchSuppression.maskTrustedGitPatch(value)
+        : value;
+      assertNoSecretLikeContent(
+        label,
+        scanValue,
+        trustedGitPatch ? { gitDiff: true } : undefined,
+      );
+      reviewCollector.add(label, value);
+      scanCollector.add(label, scanValue);
+    },
+    remainingBytes() {
+      return reviewCollector.remainingBytes();
+    },
+    toBundle() {
+      return {
+        bundle: reviewCollector.toString(),
+        scanBundle: scanCollector.toString(),
+      };
+    },
+  };
+}
+
+function gitBundlePart(
+  collector,
+  label,
+  repo,
+  gitArgs,
+  { trustedGitPatch = false } = {},
+) {
   const maxBuffer = Math.max(
     1024,
     Math.min(MAX_GIT_OUTPUT_BYTES, collector.remainingBytes() + 1),
@@ -2406,7 +2677,7 @@ function gitBundlePart(collector, label, repo, gitArgs) {
     }
     throw error;
   }
-  collector.add(label, output);
+  collector.add(label, output, { trustedGitPatch });
 }
 
 function appendLocalBundle(repo, target, collector) {
@@ -2424,17 +2695,28 @@ function appendLocalBundle(repo, target, collector) {
     "-l5000",
     "--",
   ]);
-  gitBundlePart(collector, "staged diff", repo, [
-    "diff",
-    "--no-ext-diff",
-    "--no-textconv",
-    "--cached",
-    target.head,
-    "--patch",
-    "--find-renames",
-    "-l5000",
-    "--",
-  ]);
+  gitBundlePart(
+    collector,
+    "staged diff",
+    repo,
+    [
+      "diff",
+      "--full-index",
+      "--unified=3",
+      "--no-color",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--src-prefix=a/",
+      "--dst-prefix=b/",
+      "--cached",
+      target.head,
+      "--patch",
+      "--find-renames",
+      "-l5000",
+      "--",
+    ],
+    { trustedGitPatch: true },
+  );
   collector.add("unstaged diff heading", "# Unstaged Diff");
   gitBundlePart(collector, "unstaged diff stat", repo, [
     "diff",
@@ -2444,14 +2726,25 @@ function appendLocalBundle(repo, target, collector) {
     "--find-renames",
     "-l5000",
   ]);
-  gitBundlePart(collector, "unstaged diff", repo, [
-    "diff",
-    "--no-ext-diff",
-    "--no-textconv",
-    "--patch",
-    "--find-renames",
-    "-l5000",
-  ]);
+  gitBundlePart(
+    collector,
+    "unstaged diff",
+    repo,
+    [
+      "diff",
+      "--full-index",
+      "--unified=3",
+      "--no-color",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--src-prefix=a/",
+      "--dst-prefix=b/",
+      "--patch",
+      "--find-renames",
+      "-l5000",
+    ],
+    { trustedGitPatch: true },
+  );
   const untracked = gitPathList(repo, [
     "ls-files",
     "--others",
@@ -2480,9 +2773,9 @@ function appendLocalBundle(repo, target, collector) {
 }
 
 function localBundle(repo, target) {
-  const collector = createReviewInputCollector();
+  const collector = createSecretScanningBundleCollector(repo);
   appendLocalBundle(repo, target, collector);
-  return collector.toString();
+  return collector.toBundle();
 }
 
 function appendBranchBundle(repo, target, collector) {
@@ -2499,36 +2792,54 @@ function appendBranchBundle(repo, target, collector) {
     `${target.ref}...${target.head}`,
     "--",
   ]);
-  gitBundlePart(collector, "branch diff", repo, [
-    "diff",
-    "--no-ext-diff",
-    "--no-textconv",
-    "--patch",
-    "--find-renames",
-    "-l5000",
-    `${target.ref}...${target.head}`,
-    "--",
-  ]);
+  gitBundlePart(
+    collector,
+    "branch diff",
+    repo,
+    [
+      "diff",
+      "--full-index",
+      "--unified=3",
+      "--no-color",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--src-prefix=a/",
+      "--dst-prefix=b/",
+      "--patch",
+      "--find-renames",
+      "-l5000",
+      `${target.ref}...${target.head}`,
+      "--",
+    ],
+    { trustedGitPatch: true },
+  );
 }
 
 function branchBundle(repo, target) {
-  const collector = createReviewInputCollector();
+  const collector = createSecretScanningBundleCollector(repo);
   appendBranchBundle(repo, target, collector);
-  return collector.toString();
+  return collector.toBundle();
 }
 
 function branchLocalBundle(repo, target) {
-  const collector = createReviewInputCollector();
+  const collector = createSecretScanningBundleCollector(repo);
   appendBranchBundle(repo, target, collector);
   collector.add("local diff heading", "# Local Diff");
   appendLocalBundle(repo, target, collector);
-  return collector.toString();
+  return collector.toBundle();
 }
 
 function commitBundle(repo, commitRef) {
-  const collector = createReviewInputCollector();
+  const collector = createSecretScanningBundleCollector(repo);
   collector.add("commit diff heading", "# Commit Diff");
   collector.add("commit ref", `commit: ${commitRef}`);
+  gitBundlePart(collector, "commit metadata", repo, [
+    "show",
+    "--no-patch",
+    "--format=fuller",
+    "--end-of-options",
+    commitRef,
+  ]);
   gitBundlePart(collector, "commit diff stat", repo, [
     "show",
     "--no-ext-diff",
@@ -2536,24 +2847,35 @@ function commitBundle(repo, commitRef) {
     "--stat",
     "--find-renames",
     "-l5000",
-    "--format=fuller",
+    "--format=",
     "--end-of-options",
     commitRef,
     "--",
   ]);
-  gitBundlePart(collector, "commit diff", repo, [
-    "show",
-    "--no-ext-diff",
-    "--no-textconv",
-    "--patch",
-    "--find-renames",
-    "-l5000",
-    "--format=fuller",
-    "--end-of-options",
-    commitRef,
-    "--",
-  ]);
-  return collector.toString();
+  gitBundlePart(
+    collector,
+    "commit diff",
+    repo,
+    [
+      "show",
+      "--full-index",
+      "--unified=3",
+      "--no-color",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--src-prefix=a/",
+      "--dst-prefix=b/",
+      "--patch",
+      "--find-renames",
+      "-l5000",
+      "--format=",
+      "--end-of-options",
+      commitRef,
+      "--",
+    ],
+    { trustedGitPatch: true },
+  );
+  return collector.toBundle();
 }
 
 function changedPaths(repo, target) {
@@ -3246,7 +3568,7 @@ function runCommandWithInput(
       cwd,
       detached: process.platform !== "win32",
       env,
-      stdio: ["pipe", "pipe", "pipe"],
+      stdio: inheritGateMarkerStdio(["pipe", "pipe", "pipe"]),
     });
     activeReviewerChildren.add(child);
     if (pendingTerminationSignal) terminateActiveReviewerChildren();
@@ -3296,7 +3618,7 @@ function runCommandWithInput(
     };
     const forceAbort = (error) => {
       try {
-        signalReviewerProcessGroup(child, "SIGKILL");
+        signalReviewerChildOrGroup(child, "SIGKILL");
       } catch {
         // Pipe destruction below still bounds command settlement.
       }
@@ -3308,7 +3630,7 @@ function runCommandWithInput(
     activeReviewerAborters.set(child, forceAbort);
     timeout = setTimeout(() => {
       timedOut = true;
-      signalReviewerProcessGroup(child, "SIGTERM");
+      signalReviewerChildOrGroup(child, "SIGTERM");
       killTimer = setTimeout(
         () =>
           forceAbort(
@@ -3342,7 +3664,9 @@ function runCommandWithInput(
     };
     child.stdin.on("error", handleStdinError);
     child.on("close", (code, signal) => {
-      signalReviewerProcessGroup(child, "SIGKILL");
+      signalReviewerChildOrGroup(child, "SIGKILL", {
+        childHasClosed: true,
+      });
       try {
         assertAllAttestedNodeLibraryPaths();
       } catch (error) {
@@ -3401,10 +3725,10 @@ function engineVersionProbeFailure(executable, cwd, env) {
       // No pipes: spawnSync waits for the captured stdio to close, so a
       // descendant still holding one would outlast the timeout and wedge the
       // review. Only the exit status matters here.
-      stdio: ["ignore", "ignore", "ignore"],
+      stdio: inheritGateMarkerStdio(["ignore", "ignore", "ignore"]),
       timeout: ENGINE_VERSION_PROBE_TIMEOUT_MS,
-      // SIGKILL cannot be caught or ignored, and detached: true makes the
-      // child its own group leader so the sweep below reaches its descendants.
+      // SIGKILL cannot be caught or ignored. detached: true lets Linux sweep
+      // descendants. The trusted Darwin wrapper owns descendant settlement.
       killSignal: "SIGKILL",
       detached: true,
     });
@@ -3455,13 +3779,23 @@ async function runCodex(repo, args, prompt) {
     }
   }
   if (unusableLaunchers.length > 0) {
-    throw new Error(
+    const error = new Error(
       unusableEngineLauncherMessage(
         "codex",
         unusableLaunchers,
         firstLauncherError.message,
       ),
     );
+    // A trusted-executable resolution only proves a candidate exists and is
+    // safe to run, not that it actually launches: an installed shim missing
+    // its underlying runtime resolves fine and clears
+    // applyDefaultEngineFallback()'s implicit-engine check, so that check
+    // alone cannot tell this case apart from a genuinely usable codex. Tag it
+    // here, once every resolved candidate has actually been tried and failed
+    // to launch, so an implicit caller can fall back to claude instead of
+    // failing on an engine it never really had.
+    error.allCodexLaunchersUnusable = true;
+    throw error;
   }
   throw new Error(unavailableCommandMessage("codex"));
 }
@@ -4438,11 +4772,11 @@ function scopeBaseline(repo, target, paths) {
   return { changedFiles: paths.size, nonTestLoc };
 }
 
-function assertReviewableBundle(paths, bundle) {
+function assertReviewableBundle(paths, bundle, scanBundle) {
   const blocked = [...paths]
     .map((relativePath) => ({
       relativePath,
-      reason: sensitivePathReason(relativePath),
+      reason: reviewBundlePathReason(relativePath),
     }))
     .filter(({ reason }) => reason);
   if (blocked.length > 0) {
@@ -4469,10 +4803,10 @@ function assertReviewableBundle(paths, bundle) {
       "refusing gitlink/submodule changes because dependency contents are absent from the review bundle",
     );
   }
-  // The bundle is the only scanned text git itself produced, so it is the only
-  // one whose hunk structure can be trusted and therefore the only one allowed
-  // the redaction accept-shape. Supplemental input stays on the closed default.
-  assertNoSecretLikeContent("selected change", bundle, { gitDiff: true });
+  // Each pure Git patch was scanned separately before assembly. This second
+  // suppression-free scan proves that masking one exact removed anchor did not
+  // hide a sibling finding elsewhere in the complete selected change.
+  assertNoSecretLikeContent("selected change", scanBundle, { gitDiff: true });
 }
 
 function hashHeadIdentity(hash, state) {
@@ -4709,6 +5043,8 @@ function flushStageDurations() {
 
 async function main() {
   const argv = process.argv.slice(2);
+  const helpOnly = argv.length === 1 && ["--help", "-h"].includes(argv[0]);
+  if (!helpOnly) assertDarwinWrapperContainment();
   if (argv[0] === "--serialize-untracked-file") {
     if (argv.length !== 2 || !argv[1]) {
       throw new Error(
@@ -4784,7 +5120,8 @@ async function main() {
 
   console.log(`autoreview target: ${target.mode}`);
   console.log(`branch: ${branch}`);
-  console.log(`engine: ${args.engine}`);
+  const requestedEngine = args.engine;
+  console.log(`engine: ${requestedEngine}`);
   if (target.requested_ref)
     console.log(`requested_ref: ${target.requested_ref}`);
   if (target.ref) console.log(`ref: ${target.ref}`);
@@ -4823,7 +5160,7 @@ async function main() {
       args.datasets.length > 0;
     let bundleOutputs = [];
     if (needsBundle) {
-      const bundle =
+      const { bundle, scanBundle } =
         target.mode === "local"
           ? localBundle(repo, target)
           : target.mode === "branch"
@@ -4831,7 +5168,7 @@ async function main() {
             : target.mode === "branch-local"
               ? branchLocalBundle(repo, target)
               : commitBundle(repo, target.ref);
-      assertReviewableBundle(paths, bundle);
+      assertReviewableBundle(paths, bundle, scanBundle);
       assertNoSecretLikeContent("current branch", branch);
       if (target.requested_ref) {
         assertNoSecretLikeContent(
@@ -4910,6 +5247,15 @@ async function main() {
     );
   }
 
+  // Resolved only once a semantic engine invocation is actually reached: a
+  // clean target already returned above, and --dry-run / --prepare-only
+  // never get here at all. Resolving earlier made both crash in an
+  // engine-free shell for something neither mode does.
+  applyDefaultEngineFallback(args, repo);
+  if (args.engine !== requestedEngine) {
+    console.log(`engine: ${args.engine}`);
+  }
+
   let report;
   const engineStartedAt = Date.now();
   try {
@@ -4940,10 +5286,41 @@ async function main() {
         guardTargetSelectionDuringReview,
         "source changed before semantic review; rerun autoreview against the updated tree",
       );
-      const raw =
-        args.engine === "codex"
-          ? await runCodex(repo, args, prompts[0])
-          : await runClaude(repo, args, prompts[0]);
+      let raw;
+      if (args.engine === "codex") {
+        try {
+          raw = await runCodex(repo, args, prompts[0]);
+        } catch (error) {
+          // applyDefaultEngineFallback() only proved a codex candidate exists
+          // and is trusted, not that it can launch -- runCodex() just
+          // exhausted every resolved candidate and confirmed none can. An
+          // explicit --engine codex still fails with the engine's own error;
+          // only the implicit default retries with claude, the same fallback
+          // applyDefaultEngineFallback() would have taken had it detected
+          // this earlier. AUTOREVIEW_CODEX_BIN is the second explicit form and
+          // gets the same treatment: applyDefaultEngineFallback() refuses to
+          // swap engines out from under a caller who named a codex binary, and
+          // that refusal must not lapse just because the named binary resolved
+          // and then failed to launch rather than failing to resolve.
+          if (
+            !args.engineExplicit &&
+            !process.env[commandOverrideVariable("codex")] &&
+            error?.allCodexLaunchersUnusable &&
+            resolveTrustedCommand("claude", repo, { required: false })
+          ) {
+            console.error(
+              "agent:autoreview: codex CLI resolved but could not launch; falling back to --engine claude",
+            );
+            args.engine = "claude";
+            console.log(`engine: ${args.engine}`);
+            raw = await runClaude(repo, args, prompts[0]);
+          } else {
+            throw error;
+          }
+        }
+      } else {
+        raw = await runClaude(repo, args, prompts[0]);
+      }
       report = validateReport(extractReviewJson(raw), paths);
       assertReviewSourceState(
         repo,
@@ -5001,7 +5378,11 @@ entrypoint()
   .then((code) => {
     process.exitCode = code;
   })
-  .catch((error) => {
+  .catch(async (error) => {
+    // A terminal signal can queue while spawnSync is blocked and become
+    // observable only after the rejected main promise settles. Give that
+    // callback one turn before choosing an ordinary error exit.
+    await new Promise((resolve) => setImmediate(resolve));
     if (!pendingTerminationSignal) {
       console.error(`autoreview failed: ${error.message}`);
     }

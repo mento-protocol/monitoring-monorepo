@@ -40,9 +40,9 @@ locals {
   }
 }
 
-# A healthcheck webhook to ensure Quicknode is operating as expected.
-# We use a webhook for `MedianUpdated` events for the CELO/USD feed on our SortedOracles contract,
-# Because we know with reasonable certainty that the feed will update every couple of minutes.
+# A delivery canary that verifies QuickNode can send SortedOracles webhooks to the watchdog.
+# It uses `MedianUpdated` events for the active Chainlink EUR/USD feed, which updates every
+# few minutes. It does not indicate governance-watchdog or oracle-feed health by itself.
 resource "restapi_object" "quicknode_webhook_healthcheck" {
   path = "/webhooks/rest/v1/webhooks"
 

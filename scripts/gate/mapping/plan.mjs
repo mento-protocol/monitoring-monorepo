@@ -10,8 +10,8 @@
  *     `production-infra-identity-contract/routing.test.mjs` asserts on a reason
  *     string, so "first wins" is a contract rather than an implementation
  *     detail.
- *   - Two command pairs share one dedupe KEY, so the pnpm alias and the direct
- *     bash entry point never schedule the same suite twice.
+ *   - Three command pairs share one dedupe KEY, so the pnpm alias and the
+ *     direct entry point never schedule the same suite twice.
  *   - `prepend` puts a command at the HEAD of the quality bucket. Trunk uses it,
  *     and it runs after everything else has been added, so the head is the only
  *     position that makes it first.
@@ -20,16 +20,27 @@
  */
 
 /**
- * The two commands that are the same suite reached two ways.
+ * The commands that are the same suite reached two ways.
  *
  * `add_command` deduplicates on this key, not on the raw string, so a change
  * touching both the alias and the script schedules one run rather than two.
+ *
+ * `pnpm tf:test` is the expensive one. The unconditional production-infra sweep
+ * schedules it for every non-empty change set, and the root-tooling bundle
+ * schedules the identical suite as a direct `node` call, so a package.json edit
+ * that touched only allowlisted aliases used to run the tree's largest suite
+ * twice — about a minute of pure repetition. The pair is safe in either
+ * direction because `check-agent-quality-gate-package-scripts.mjs` pins the
+ * alias to exactly that command and runs fail-fast as a prerequisite, so no
+ * `pnpm <alias>` executes under a drifted manifest.
  */
 const DEDUPE_ALIASES = new Map([
   ["pnpm agent:quality-gate:test", "agent-quality-gate.test"],
   ["bash scripts/agent-quality-gate.test.sh", "agent-quality-gate.test"],
   ["pnpm agent:autoreview:test", "agent-autoreview.test"],
   ["bash scripts/agent-autoreview.test.sh", "agent-autoreview.test"],
+  ["pnpm tf:test", "tf-stacks.test"],
+  ["node scripts/tf-stacks.test.mjs", "tf-stacks.test"],
 ]);
 
 /** The dedupe identity of a command string. */

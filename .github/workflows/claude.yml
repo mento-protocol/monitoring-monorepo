@@ -66,6 +66,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
+          persist-credentials: false
       - uses: anthropics/claude-code-action@459ad358ae43fea66bfefd0a1f8d840b4b9791fb # v1.0.194
         with:
           github_token: ${{ github.token }}
@@ -105,6 +106,9 @@ jobs:
     # injected diff could steer the reviewer into posting misleading
     # commentary, which is worse than no review. Codex review and the human
     # merge gate still cover autofix PRs.
+    # A later step skips review-skill evaluation PRs only after it verifies that
+    # every changed path is generated score evidence. The branch name alone is
+    # author-controlled and cannot grant a review exemption.
     if: |
       github.event_name == 'pull_request' &&
       github.event.pull_request.draft != true &&
@@ -119,13 +123,34 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      id-token: write
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 1
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify review-eval scorecard-only scope
+        id: review-scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          skip=false
+          merge_base="$(git merge-base "$BASE_SHA" "$HEAD_SHA" || true)"
+          if [[ "$HEAD_REF" == eval/review-skill-* && -n "$merge_base" ]] &&
+            git diff --quiet "$merge_base" "$HEAD_SHA" -- . \
+              ':(exclude)docs/evals/review-skill-ledger.jsonl' \
+              ':(exclude)docs/evals/review-skill-runs/**'; then
+            skip=true
+          fi
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
       - uses: anthropics/claude-code-action@459ad358ae43fea66bfefd0a1f8d840b4b9791fb # v1.0.194
+        if: steps.review-scope.outputs.skip != 'true'
         with:
+          # Keep review mutation inside this workflow-scoped token. The action
+          # does not need OIDC authority to obtain a broader installation token.
+          github_token: ${{ github.token }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           use_sticky_comment: true
           track_progress: true

@@ -1,0 +1,275 @@
+{
+  "schemaVersion": 1,
+  "baseSha": "ccef910fa6fc267751681176ffdeef01daf90b40",
+  "baseline": "Frozen M2 additive complexity receipt for #2124.",
+  "scope": "M2 and corrective PR #2161 only.",
+  "derivation": {
+    "method": "Diff the final PR #2161 tree from baseSha and exclude the receipt plus the seven paths changed only by intervening PRs #2145 and #2159.",
+    "m2MergeSha": "c868483e44a006e7af338649705d9453cf979015",
+    "correctionBaseSha": "37ac4b7bee6b7043d1e3b42fe5a86358f51481e8",
+    "excludedCommits": [
+      "4b48c3b0276a1434afc5abbc64aba15162546d66",
+      "37ac4b7bee6b7043d1e3b42fe5a86358f51481e8"
+    ],
+    "excludedPaths": [
+      "docs/evals/review-skill-ledger.jsonl",
+      "docs/evals/review-skill-runs/2026-08-29-ec451b1f-full-528ae414/failure.md",
+      "docs/evals/review-skill-runs/2026-08-29-ec451b1f-full-528ae414/plan.json",
+      "docs/evals/review-skill-runs/2026-08-29-ec451b1f-full-528ae414/row.json",
+      "docs/evals/review-skill-runs/2026-08-30-ec451b1f-full-528ae414/failure.md",
+      "docs/evals/review-skill-runs/2026-08-30-ec451b1f-full-528ae414/plan.json",
+      "docs/evals/review-skill-runs/2026-08-30-ec451b1f-full-528ae414/row.json"
+    ]
+  },
+  "files": [
+    {
+      "path": ".github/actions/pnpm-install/action.yml",
+      "category": "action",
+      "additions": 45,
+      "deletions": 3
+    },
+    {
+      "path": ".github/workflows/aegis-terraform.yml",
+      "category": "workflow",
+      "additions": 39,
+      "deletions": 93
+    },
+    {
+      "path": ".github/workflows/alerts-infra.yml",
+      "category": "workflow",
+      "additions": 7,
+      "deletions": 119
+    },
+    {
+      "path": ".github/workflows/alerts-rules.yml",
+      "category": "workflow",
+      "additions": 7,
+      "deletions": 118
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "category": "workflow",
+      "additions": 35,
+      "deletions": 41
+    },
+    {
+      "path": ".github/workflows/claude.yml",
+      "category": "workflow",
+      "additions": 6,
+      "deletions": 1
+    },
+    {
+      "path": ".github/workflows/code-health-duplication.yml",
+      "category": "workflow",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": ".github/workflows/governance-watchdog.yml",
+      "category": "workflow",
+      "additions": 7,
+      "deletions": 103
+    },
+    {
+      "path": ".github/workflows/lighthouse.yml",
+      "category": "workflow",
+      "additions": 60,
+      "deletions": 184
+    },
+    {
+      "path": ".github/workflows/pr-description.yml",
+      "category": "workflow",
+      "additions": 3,
+      "deletions": 2
+    },
+    {
+      "path": ".github/workflows/review-eval-freshness.yml",
+      "category": "workflow",
+      "additions": 2,
+      "deletions": 0
+    },
+    {
+      "path": ".github/workflows/schema-diff.yml",
+      "category": "workflow",
+      "additions": 54,
+      "deletions": 88
+    },
+    {
+      "path": ".github/workflows/supply-chain.yml",
+      "category": "workflow",
+      "additions": 14,
+      "deletions": 0
+    },
+    {
+      "path": ".github/workflows/trunk.yml",
+      "category": "workflow",
+      "additions": 22,
+      "deletions": 3
+    },
+    {
+      "path": ".lighthouserc.cjs",
+      "category": "check",
+      "additions": 5,
+      "deletions": 3
+    },
+    {
+      "path": ".trunk/setup-ci/action.yaml",
+      "category": "action",
+      "additions": 3,
+      "deletions": 0
+    },
+    {
+      "path": "aegis/README.md",
+      "category": "doc",
+      "additions": 2,
+      "deletions": 2
+    },
+    {
+      "path": "docs/PLAN-progressive-verification-graph.html",
+      "category": "doc",
+      "additions": 36,
+      "deletions": 4
+    },
+    {
+      "path": "docs/PLAN-progressive-verification-graph.md",
+      "category": "doc",
+      "additions": 67,
+      "deletions": 13
+    },
+    {
+      "path": "docs/adr/0078-staged-verification-redesign.md",
+      "category": "doc",
+      "additions": 96,
+      "deletions": 8
+    },
+    {
+      "path": "docs/metrics/verification-redesign-safeguards.jsonl",
+      "category": "doc",
+      "additions": 10,
+      "deletions": 10
+    },
+    {
+      "path": "docs/pr-checklists/ci-workflow-gates.md",
+      "category": "doc",
+      "additions": 19,
+      "deletions": 7
+    },
+    {
+      "path": "docs/pr-checklists/code-health.md",
+      "category": "doc",
+      "additions": 24,
+      "deletions": 24
+    },
+    {
+      "path": "docs/pr-checklists/review-prompt-exclusions.md",
+      "category": "doc",
+      "additions": 2,
+      "deletions": 2
+    },
+    {
+      "path": "scripts/AGENTS.md",
+      "category": "doc",
+      "additions": 9,
+      "deletions": 9
+    },
+    {
+      "path": "scripts/agent-quality-gate.sh",
+      "category": "check",
+      "additions": 41,
+      "deletions": 46
+    },
+    {
+      "path": "scripts/agent-quality-gate.test.sh",
+      "category": "test",
+      "additions": 24,
+      "deletions": 18
+    },
+    {
+      "path": "scripts/bootstrap/claude-code-web-setup.sh",
+      "category": "check",
+      "additions": 4,
+      "deletions": 4
+    },
+    {
+      "path": "scripts/gate/quality-gate-coordinator-support.sh",
+      "category": "check",
+      "additions": 2,
+      "deletions": 2
+    },
+    {
+      "path": "scripts/lighthouse-config.test.mjs",
+      "category": "test",
+      "additions": 7,
+      "deletions": 0
+    },
+    {
+      "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-job.test.mjs",
+      "category": "test",
+      "additions": 4,
+      "deletions": 1
+    },
+    {
+      "path": "scripts/workflows/check-pr-validation-boundary.mjs",
+      "category": "check",
+      "additions": 227,
+      "deletions": 0
+    },
+    {
+      "path": "scripts/workflows/check-pr-validation-boundary.test.mjs",
+      "category": "test",
+      "additions": 445,
+      "deletions": 0
+    },
+    {
+      "path": "ui-dashboard/scripts/assert-lhci-finalurl.mjs",
+      "category": "check",
+      "additions": 2,
+      "deletions": 6
+    },
+    {
+      "path": "ui-dashboard/scripts/lighthouse-comment-status.cjs",
+      "category": "check",
+      "additions": 0,
+      "deletions": 28
+    },
+    {
+      "path": "ui-dashboard/scripts/lighthouse-comment-status.test.mjs",
+      "category": "test",
+      "additions": 0,
+      "deletions": 42
+    },
+    {
+      "path": "ui-dashboard/scripts/measure-inp.mjs",
+      "category": "check",
+      "additions": 3,
+      "deletions": 3
+    }
+  ],
+  "totals": {
+    "workflow": {
+      "additions": 257,
+      "deletions": 752,
+      "net": -495
+    },
+    "action": {
+      "additions": 48,
+      "deletions": 3,
+      "net": 45
+    },
+    "check": {
+      "additions": 284,
+      "deletions": 92,
+      "net": 192
+    },
+    "test": {
+      "additions": 480,
+      "deletions": 61,
+      "net": 419
+    },
+    "doc": {
+      "additions": 265,
+      "deletions": 79,
+      "net": 186
+    }
+  }
+}

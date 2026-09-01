@@ -1,0 +1,61 @@
+{
+  "cell_id": "pr-1995-pipeline-draw1",
+  "pr": 1995,
+  "condition": "pipeline",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "The suite can silently run zero tests — `scripts/agent-quality-gate.test.sh:510-516`: the awk `body == 2` rule permits any number of `dispatch_gate_test_families` lines after the closing marker, including none; deleting or relocating the single call at line 7476 leaves `verify_gate_family_partition` passing and the suite exits 0 with no output at all",
+    "The partition introduces a single point of failure (a single line whose loss disables everything) and then doesn't check it — a bad rebase or careless edit turns the gate's own self-test into a no-op that reports green",
+    "The documented invocation isn't in the repo's agent allowlist — `.claude/settings.json:31-32`: `docs/notes/agent-quality-gate-mechanics.md:1119-1120` documents `GATE_TEST_FOCUS=routing-sources bash scripts/agent-quality-gate.test.sh`, but the allowlist only carries `Bash(bash scripts/agent-quality-gate.test.sh:*)` and the `./` variant, so the documented focused form prompts",
+    "Doc bullet overstates one case — `docs/notes/agent-quality-gate-mechanics.md:1139-1142`: it says `pnpm agent:quality-gate:test` runs in unfocused mode, but it is a bare `bash scripts/agent-quality-gate.test.sh` (`package.json:20`) so with `GATE_TEST_FOCUS` exported locally it runs focused; drop it from the first bullet's list"
+  ],
+  "matched_ids": [
+    3829986403,
+    3830003055
+  ],
+  "judge_reasoning": {
+    "3829986398": "Review never discusses the abort trap's use of output_file under set -u; it only argues the ERR trap survives helper return.",
+    "3829986403": "Finding 1 says the awk body==2 rule permits any number of dispatch lines and proposes counting them and requiring exactly one — same defect.",
+    "3830003055": "Finding 1 explicitly covers the zero-dispatch case: deleting the call still passes verify_gate_family_partition and the suite exits 0 with no output.",
+    "3830042123": "Review clears the dispatch guards (GITHUB_ACTIONS, AGENT_QUALITY_GATE_LOCK_HELD) and never notes the --no-lock / AGENT_QUALITY_GATE_LOCK=0 path lets a focused subset answer for the full gate.",
+    "3830042128": "Review discusses allowlist/settings-contract pinning for .claude/settings.json, not the hard-coded self-test path fallback missing from the scripts path-pin inventory.",
+    "3830695396": "Review's only doc finding is that a bullet wrongly lists pnpm agent:quality-gate:test; it does not flag the 'is set' vs 'is non-empty' wording or 'reds the suite'."
+  },
+  "novel": {
+    "claims": 4,
+    "novelReal": 2,
+    "novelWrong": 0,
+    "novelVague": 0,
+    "restatedKnown": 2,
+    "alreadyMatched": 2,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "Verified the awk `body == 2` rule (scripts/agent-quality-gate.test.sh:509-518) only skips blanks/comments/the dispatch line and never requires it, and the sole call is at line 7476 — this is the known 'Partition allows missing dispatch' item (test.sh:572)"
+      },
+      "2": {
+        "class": "known",
+        "why": "Same defect restated in prose: the unchecked single `dispatch_gate_test_families` call at line 7476 vs. the permissive `body == 2` awk rule — already listed as 'Partition allows missing dispatch' (test.sh:572)"
+      },
+      "3": {
+        "class": "real",
+        "why": "Docs line 1119-1120 documents `GATE_TEST_FOCUS=routing-sources bash scripts/agent-quality-gate.test.sh`, but .claude/settings.json:31-32 only allows the bare `bash [./]scripts/agent-quality-gate.test.sh:*` prefixes; the repo shows env-prefixed commands need their own pattern (line 50: `Bash(ESLINT_BASELINE_MAIN=* node *)`), so the documented form prompts"
+      },
+      "4": {
+        "class": "real",
+        "why": "package.json:20 is a bare `bash scripts/agent-quality-gate.test.sh`, and the refusal at test.sh:600-605 only fires on AGENT_QUALITY_GATE_LOCK_HELD/GITHUB_ACTIONS, so a locally exported GATE_TEST_FOCUS does run pnpm agent:quality-gate:test focused — the bullet at docs:1139-1142 claims otherwise"
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 1294,
+  "usd": 4.2897215,
+  "scoring_usd": 0.637521
+}

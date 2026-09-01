@@ -16,7 +16,7 @@ import {
 } from "./config.js";
 import { flushLiquitySnapshots, touchLiquityInstance } from "./instance.js";
 import { pendingTroveKey } from "./keys.js";
-import { computeTroveIcrBps, negativeToPositive } from "./math.js";
+import { computeTroveIcrBps } from "./math.js";
 import { loadLiquityPrice } from "./priceFeed.js";
 import {
   classifyKnownPendingStabilityPoolConsumptionSource,
@@ -30,6 +30,14 @@ import {
   preloadTroveOperation,
 } from "./troveManagerPreload.js";
 import {
+  TROVE_LEDGER_KIND,
+  attachRedemptionFeeToPendingLedgerRow,
+  capturePendingTroveStatus,
+  finalizeStagedTroveLedgerRows,
+  recordTroveLedgerOnOperation,
+  shouldPersistLedgerPrice,
+} from "./troveLedger.js";
+import {
   captureTroveOperationSnapshotState,
   maybeRecordTroveOperation,
 } from "./troveOperationSnapshot.js";
@@ -38,17 +46,10 @@ import {
   moveTroveUpdatedInterestRateBracketDebt,
   removesFromBatch,
 } from "./troveUpdates.js";
-import { OP, isBatchMembershipOperation } from "./operations.js";
-import {
-  setPendingBatchMembershipOperation,
-  setPendingRedemption,
-} from "./pendingOperations.js";
 import { getOrLoadSystemParams, preloadSystemParams } from "./systemParams.js";
 import {
+  applyTroveOperationTransition,
   isForcedOperation,
-  transitionClosedTrove,
-  transitionLiquidatedTrove,
-  transitionOpenedTrove,
 } from "./troveManagerTransitions.js";
 import {
   TROVE_STATUS,
@@ -74,6 +75,11 @@ indexer.onEvent(
     if (market === undefined) return;
     const collateralId = makeCollateralId(market);
     const troveId = normalizeTroveTokenId(event.params._troveId);
+    const persistLedgerPrice = shouldPersistLedgerPrice(
+      asBigInt(event.block.timestamp),
+    );
+    // preload-handler-note: the block-close ledger price is awaited in preload behind the same event-derived cutoff (phase-stable) used in processing; snapshots and status capture require ordered state.
+    // preload-effect-helpers: loadLiquityPrice
     if (context.isPreload) {
       await Promise.all([
         preloadTroveOperation(context, {
@@ -94,6 +100,17 @@ indexer.onEvent(
           collateralId,
           asBigInt(event.block.timestamp),
         ),
+        context.PendingTroveStatusCapture.get(
+          pendingTroveKey(
+            event.chainId,
+            event.transaction.hash,
+            collateralId,
+            troveId,
+          ),
+        ),
+        ...(persistLedgerPrice
+          ? [loadLiquityPrice(context, market, asBigInt(event.block.number))]
+          : []),
       ]);
       return;
     }
@@ -123,67 +140,39 @@ indexer.onEvent(
     const prevTroveState = { status: trove.status, debt: trove.debt };
     // See `captureTroveOperationSnapshotState` for why we capture these now.
     const snapshotState = captureTroveOperationSnapshotState(trove);
+    const entryInterestBatchId = trove.interestBatchId;
+    const ledgerPrice = persistLedgerPrice
+      ? await loadLiquityPrice(context, market, blockNumber)
+      : null;
+    // `BatchedTroveUpdated` (never `TroveUpdated`) fires before
+    // `TroveOperation` for a batch-managed op and stages this row keyed by
+    // tx+trove — its presence is how `maybeRecordTroveOperation` knows
+    // `snapshotState.debtAfter` above is stale. See that function's doc.
+    const pendingBatchedTroveUpdate =
+      await context.PendingBatchedTroveUpdate.get(
+        pendingTroveKey(
+          event.chainId,
+          event.transaction.hash,
+          collateralId,
+          troveId,
+        ),
+      );
 
     const op = Number(event.params._operation);
     const forced = isForcedOperation(op);
-
-    if (op === OP.OPEN_TROVE || op === OP.OPEN_TROVE_AND_JOIN_BATCH) {
-      ({ trove, instance } = transitionOpenedTrove(trove, instance, {
-        blockTimestamp,
-        blockNumber,
-        txHash: event.transaction.hash,
-      }));
-    } else if (op === OP.CLOSE_TROVE) {
-      ({ trove, instance } = transitionClosedTrove(trove, instance, {
-        blockTimestamp,
-        blockNumber,
-        txHash: event.transaction.hash,
-      }));
-    } else if (op === OP.LIQUIDATE) {
-      ({ trove, instance } = transitionLiquidatedTrove(trove, instance, {
-        collChange: event.params._collChangeFromOperation,
-        debtChange: event.params._debtChangeFromOperation,
-        blockTimestamp,
-        blockNumber,
-        txHash: event.transaction.hash,
-      }));
-    } else if (op === OP.REDEEM_COLLATERAL) {
-      trove = {
-        ...trove,
-        redemptionCount: trove.redemptionCount + 1,
-        redeemedColl:
-          trove.redeemedColl +
-          negativeToPositive(event.params._collChangeFromOperation),
-        redeemedDebt:
-          trove.redeemedDebt +
-          negativeToPositive(event.params._debtChangeFromOperation),
-      };
-      const collateral = await context.LiquityCollateral.get(collateralId);
-      const nextStatus = statusFromCollateral(trove.debt, collateral);
-      const transitioned = transitionTroveStatus(trove, nextStatus, instance);
-      trove = transitioned.trove;
-      instance = transitioned.instance;
-      setPendingRedemption(context, {
-        chainId: event.chainId,
-        txHash: event.transaction.hash,
-        collateralId,
-        troveId: trove.troveId,
-        timestamp: blockTimestamp,
-        blockNumber,
-      });
-    } else if (isBatchMembershipOperation(op)) {
-      setPendingBatchMembershipOperation(context, {
-        chainId: event.chainId,
-        txHash: event.transaction.hash,
-        collateralId,
-        troveId: trove.troveId,
-        operation: op,
-        annualInterestRate: event.params._annualInterestRate,
-        interestBatchId: trove.interestBatchId,
-        timestamp: blockTimestamp,
-        blockNumber,
-      });
-    }
+    ({ trove, instance } = await applyTroveOperationTransition(context, {
+      op,
+      trove,
+      instance,
+      chainId: event.chainId,
+      collateralId,
+      txHash: event.transaction.hash,
+      blockTimestamp,
+      blockNumber,
+      collChange: event.params._collChangeFromOperation,
+      debtChange: event.params._debtChangeFromOperation,
+      annualInterestRate: event.params._annualInterestRate,
+    }));
 
     if (!forced) trove = { ...trove, lastUserActionAt: blockTimestamp };
     instance = await recordBorrowingFeeAndApplyCum(
@@ -198,6 +187,23 @@ indexer.onEvent(
     instance = applySystemDebtDelta(instance, prevTroveState, {
       status: trove.status,
       debt: trove.debt,
+    });
+    trove = await recordTroveLedgerOnOperation(context, {
+      op,
+      collateralId,
+      instanceId: instance.id,
+      trove,
+      entryState: {
+        owner: snapshotState.owner,
+        status: prevTroveState.status,
+        debt: snapshotState.debtAfter,
+        coll: snapshotState.collAfter,
+        interestBatchId: entryInterestBatchId,
+      },
+      event,
+      blockNumber,
+      blockTimestamp,
+      price: ledgerPrice,
     });
     context.Trove.set(
       touchTroveUpdated(
@@ -217,6 +223,7 @@ indexer.onEvent(
       instanceId: instance.id,
       troveId,
       snapshotState,
+      pendingBatchedTroveUpdate,
       blockNumber,
       blockTimestamp,
     });
@@ -291,6 +298,19 @@ indexer.onEvent(
     // debt overwrite, reclassified re-read all happen below). Single
     // capture point so the delta math at the end is unambiguous.
     const prevTroveState = { status: trove.status, debt: trove.debt };
+    // Same-tx status capture for the ledger writer: on-chain, TroveUpdated
+    // precedes TroveOperation, so this handler is the last to see the
+    // pre-operation status. The TroveOperation handler consumes the row.
+    capturePendingTroveStatus(context, {
+      chainId: event.chainId,
+      txHash: event.transaction.hash,
+      collateralId,
+      troveId,
+      statusBefore: trove.status,
+      batched: false,
+      timestamp: blockTimestamp,
+      blockNumber,
+    });
     const [pendingRedemption, pendingBatchOperation] = await Promise.all([
       context.PendingRedemption.get(pendingId),
       context.PendingBatchMembershipOperation.get(pendingId),
@@ -372,11 +392,31 @@ indexer.onEvent(
     if (market === undefined) return;
     const collateralId = makeCollateralId(market);
     const troveId = normalizeTroveTokenId(event.params._troveId);
-    // Guard before the write: preload is the read-only cache-warming pass, and
-    // this handler reads nothing it needs to warm (the row is built purely from
-    // event params). Writing during preload only duplicated the set() the
-    // processing pass already performs.
-    if (context.isPreload) return;
+    // Preload warms the trove read the status capture below needs; the
+    // pending row itself is built purely from event params.
+    if (context.isPreload) {
+      await context.Trove.get(makeTroveId(collateralId, troveId));
+      return;
+    }
+    // Same-tx status capture for the ledger writer, marked batched: the
+    // paired update carries batch shares, so per-trove debt truth is
+    // batch-level and the ledger row keeps null debt snapshots. On-chain,
+    // batch-membership ops emit this event BEFORE TroveOperation (verified
+    // against TroveManager.sol emit sites), so the same-tx TroveOperation
+    // consumes and deletes the capture.
+    const troveForCapture = await context.Trove.get(
+      makeTroveId(collateralId, troveId),
+    );
+    capturePendingTroveStatus(context, {
+      chainId: event.chainId,
+      txHash: event.transaction.hash,
+      collateralId,
+      troveId,
+      statusBefore: troveForCapture?.status ?? TROVE_STATUS.CLOSED,
+      batched: true,
+      timestamp: asBigInt(event.block.timestamp),
+      blockNumber: asBigInt(event.block.number),
+    });
     const pendingUpdate = {
       id: pendingTroveKey(
         event.chainId,
@@ -565,6 +605,11 @@ indexer.onEvent(
         blockTimestamp: asBigInt(event.block.timestamp),
       });
     }
+    const persistLedgerPrice = shouldPersistLedgerPrice(
+      asBigInt(event.block.timestamp),
+    );
+    // preload-handler-note: the block-close ledger price is awaited in preload behind the same event-derived cutoff (phase-stable) used in processing; staged-row finalization requires ordered state.
+    // preload-effect-helpers: loadLiquityPrice
     if (context.isPreload) {
       await Promise.all([
         preloadLiquityMarket(context, market),
@@ -579,6 +624,9 @@ indexer.onEvent(
           event.transaction.hash,
           collateralId,
         ),
+        ...(persistLedgerPrice
+          ? [loadLiquityPrice(context, market, asBigInt(event.block.number))]
+          : []),
       ]);
       return;
     }
@@ -641,6 +689,18 @@ indexer.onEvent(
       latestTotalCollRedist: event.params._L_ETH,
       latestTotalDebtRedist: event.params._L_boldDebt,
     });
+    // Per-trove op-5 rows staged by the TroveOperation handler finalize
+    // here — only this aggregate carries the liquidation price.
+    const ledgerPrice = persistLedgerPrice
+      ? await loadLiquityPrice(context, market, blockNumber)
+      : null;
+    await finalizeStagedTroveLedgerRows(context, {
+      txHash: event.transaction.hash,
+      collateralId,
+      kind: TROVE_LEDGER_KIND.LIQUIDATION,
+      blockClosePrice: ledgerPrice,
+      eventPrice: event.params._price,
+    });
   },
 );
 
@@ -652,13 +712,24 @@ indexer.onEvent(
       event.srcAddress,
     );
     if (market === undefined) return;
+    const collateralId = makeCollateralId(market);
+    const persistLedgerPrice = shouldPersistLedgerPrice(
+      asBigInt(event.block.timestamp),
+    );
+    // preload-handler-note: the block-close ledger price is awaited in preload behind the same event-derived cutoff (phase-stable) used in processing; staged-row finalization requires ordered state.
+    // preload-effect-helpers: loadLiquityPrice
     if (context.isPreload) {
-      await preloadLiquityMarket(context, market);
-      await preloadBorrowingRevenueRollover(
-        context,
-        makeCollateralId(market),
-        asBigInt(event.block.timestamp),
-      );
+      await Promise.all([
+        preloadLiquityMarket(context, market),
+        preloadBorrowingRevenueRollover(
+          context,
+          collateralId,
+          asBigInt(event.block.timestamp),
+        ),
+        ...(persistLedgerPrice
+          ? [loadLiquityPrice(context, market, asBigInt(event.block.number))]
+          : []),
+      ]);
       return;
     }
     const blockNumber = asBigInt(event.block.number);
@@ -730,6 +801,21 @@ indexer.onEvent(
       rebalanceRedemptionDebtDayBucket:
         next.rebalanceRedemptionDebtDayBucket + rDebt,
     });
+    // Per-trove op-6 rows staged by the TroveOperation and fee handlers
+    // finalize here — the per-trove loop (TroveUpdated, TroveOperation(6),
+    // RedemptionFeePaidToTrove) precedes this branch aggregate, the only
+    // carrier of `_redemptionPrice`.
+    const ledgerPrice = persistLedgerPrice
+      ? await loadLiquityPrice(context, market, blockNumber)
+      : null;
+    await finalizeStagedTroveLedgerRows(context, {
+      txHash: event.transaction.hash,
+      collateralId,
+      kind: TROVE_LEDGER_KIND.REDEMPTION,
+      blockClosePrice: ledgerPrice,
+      eventPrice: event.params._redemptionPrice,
+      isRebalance,
+    });
   },
 );
 
@@ -742,10 +828,19 @@ indexer.onEvent(
     );
     if (market === undefined) return;
     const collateralId = makeCollateralId(market);
+    const feeTroveId = normalizeTroveTokenId(event.params._troveId);
     if (context.isPreload) {
-      await context.Trove.get(
-        makeTroveId(collateralId, normalizeTroveTokenId(event.params._troveId)),
-      );
+      await Promise.all([
+        context.Trove.get(makeTroveId(collateralId, feeTroveId)),
+        context.PendingTroveLedgerEvent.get(
+          pendingTroveKey(
+            event.chainId,
+            event.transaction.hash,
+            collateralId,
+            feeTroveId,
+          ),
+        ),
+      ]);
       return;
     }
     const trove = await getOrCreateTrove(context, {
@@ -759,6 +854,13 @@ indexer.onEvent(
     context.Trove.set({
       ...trove,
       redemptionFeePaidCum: trove.redemptionFeePaidCum + event.params._ETHFee,
+    });
+    await attachRedemptionFeeToPendingLedgerRow(context, {
+      chainId: event.chainId,
+      txHash: event.transaction.hash,
+      collateralId,
+      troveId: feeTroveId,
+      fee: event.params._ETHFee,
     });
   },
 );

@@ -145,7 +145,7 @@ assert.ok(
 
 test("the derived exact arms keep the current route counts", () => {
   assert.equal(indexerInvariantExcludedArm.patterns.length, 12);
-  assert.equal(indexerInvariantRoutedArm.patterns.length, 253);
+  assert.equal(indexerInvariantRoutedArm.patterns.length, 256);
 });
 const matchesAny = (patterns, candidatePath) =>
   patterns.some((pattern) => casePatternToRegExp(pattern).test(candidatePath));
@@ -187,7 +187,7 @@ test("the table and core agree on every current indexer module path", () => {
     ...walkIndexerModuleFiles(`${REPO}/indexer-envio/src`),
     ...walkIndexerModuleFiles(`${REPO}/indexer-envio/test`),
   ].sort();
-  assert.equal(paths.length, 220, "current module inventory changed");
+  assert.equal(paths.length, 223, "current module inventory changed");
   const decisions = getIndexerHandlerInvariantChecklistDecisions(paths);
   for (const decision of decisions) {
     assert.equal(
@@ -669,7 +669,7 @@ test("the external family schema fails closed before table derivation", async ()
   );
 });
 
-test("freshness and Turbo inputs pin the external family source", () => {
+test("freshness, CI routes, and Turbo inputs pin the external family source", () => {
   const signature = bashFunctionSource(
     read("/scripts/agent-quality-gate.sh"),
     "implementation_signature",
@@ -685,12 +685,60 @@ test("freshness and Turbo inputs pin the external family source", () => {
     signatureEntries?.includes("scripts/agent-autoreview-core.mjs"),
     "implementation_signature() does not list the external family source",
   );
+  assert.ok(
+    signatureEntries?.includes(
+      "scripts/agent-autoreview-secret-suppressions.json",
+    ),
+    "implementation_signature() does not list the sealed suppression config",
+  );
+  const ci = read("/.github/workflows/ci.yml");
+  const changesJob = /\n {2}changes:\n([\s\S]*?)\n {2}shared:\n/.exec(ci)?.[1];
+  assert.ok(changesJob, "ci.yml has no bounded changes job");
+  const rootRuntimeFilter =
+    /\n {12}autoreviewRootRuntime: &autoreviewRootRuntime\n([\s\S]*?)\n {12}versionSkew: &versionSkew\n/.exec(
+      changesJob,
+    )?.[1];
+  assert.ok(rootRuntimeFilter, "ci.yml has no autoreviewRootRuntime filter");
+  assert.match(
+    rootRuntimeFilter,
+    /^\s+- scripts\/agent-autoreview-secret-suppressions\.json$/m,
+    "autoreviewRootRuntime does not route the sealed suppression config",
+  );
+  assert.match(
+    changesJob,
+    /^ {6}autoreviewRootRuntime: \$\{\{ steps\.filter\.outputs\.autoreviewRootRuntime \}\}$/m,
+    "the changes job does not export the autoreviewRootRuntime filter",
+  );
+  const rootRuntimeJob =
+    /\n {2}autoreview-root-runtime:\n([\s\S]*?)\n {2}version-skew:\n/.exec(
+      ci,
+    )?.[1];
+  assert.ok(
+    rootRuntimeJob,
+    "ci.yml has no bounded autoreview-root-runtime job",
+  );
+  assert.match(
+    rootRuntimeJob,
+    /^ {4}needs: changes$/m,
+    "the focused root-runtime job does not depend on the changes job",
+  );
+  assert.match(
+    rootRuntimeJob,
+    /^ {4}if: needs\.changes\.outputs\.forceAll == 'true' \|\| needs\.changes\.outputs\.autoreviewRootRuntime == 'true'$/m,
+    "the focused root-runtime job does not consume forceAll or the autoreviewRootRuntime filter",
+  );
   const turbo = JSON.parse(read("/turbo.json"));
   const input = "$TURBO_ROOT$/scripts/agent-autoreview-core.mjs";
+  const suppressionInput =
+    "$TURBO_ROOT$/scripts/agent-autoreview-secret-suppressions.json";
   for (const task of ["build", "size-limit", "test:browser"]) {
     assert.ok(
       turbo.tasks[task].inputs.includes(input),
       `turbo task ${task} does not pin the external family source`,
+    );
+    assert.ok(
+      turbo.tasks[task].inputs.includes(suppressionInput),
+      `turbo task ${task} does not pin the sealed suppression config`,
     );
   }
 });

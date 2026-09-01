@@ -28,6 +28,20 @@ lint:
         # responses that contain harmless misspellings + are not formatted
         # for human review).
         - "**/.intel-marathon/**"
+    - linters: [ALL]
+      paths:
+        # Byte-frozen inputs of the review-skill eval. The contract pins a
+        # sha256 for every truth file, finder report and run prompt, and the
+        # contract's own bytes are the digest every ledger row is compared
+        # across. A formatter rewrite here is not cosmetic: it fails
+        # `review:eval -- --check-fixtures` and breaks comparability. Observed:
+        # prettier rewrote `__tests__` to `**tests**` inside a frozen report.
+        - docs/evals/review-skill-fixtures.json
+        - docs/evals/review-skill-judge-calibration.json
+        - docs/evals/review-skill-truth/**
+        - docs/evals/review-skill-finder-reports/**
+        - docs/evals/review-skill-runs/**
+        - scripts/review/prompts/**
     - linters: [markdownlint]
       paths:
         # LLM prompt payloads (e.g. the Sentry triage-agent prompt), not rendered
@@ -133,7 +147,7 @@ actions:
         Runs the path-aware agent quality gate before push. The gate maps the
         branch diff to the required local checks instead of always running the
         full monorepo pre-push suite.
-      run: git fetch --quiet origin main && bash scripts/agent-quality-gate.sh --run --parallel 3 --skip-if-fresh --pre-push --base origin/main
+      run: git fetch --quiet origin main && ./scripts/agent-quality-gate.sh --run --parallel 3 --skip-if-fresh --pre-push --base origin/main
       triggers:
         - git_hooks: [pre-push]
   enabled:

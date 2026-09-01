@@ -3080,6 +3080,32 @@ attested_helper_runtime_dir=""
 indexer_handler_invariant_paths_file=""
 attested_helper_runtime_identity=""
 attested_helper_runtime_manifest=""
+deadline_host_platform=""
+linux_deadline_ps_bin=""
+darwin_deadline_identity_module=""
+darwin_deadline_exact_identity=""
+deadline_current_shell_pid_result=""
+deadline_launch_barrier_result=""
+darwin_deadline_lineage_state_result=""
+darwin_deadline_lineage_counter=0
+darwin_autoreview_wrapper_exact_identity=""
+deadline_recovery_cancel_file_result=""
+deadline_recovery_armed_file_result=""
+deadline_recovery_output_file_result=""
+deadline_recovery_stderr_file_result=""
+darwin_helper_containment_file_result=""
+deadline_launch_go_default_seconds=10
+deadline_launch_abandon_default_seconds=10
+# Darwin captures and binds exact identities before a readiness wait that can
+# use 10 seconds. Give the parent 30 seconds for the full setup. The child gets
+# five more seconds to observe cancellation or exit after that budget expires.
+darwin_deadline_setup_budget_seconds=30
+deadline_launch_parent_crash_grace_seconds=5
+darwin_deadline_launch_go_seconds="$darwin_deadline_setup_budget_seconds"
+darwin_deadline_launch_abandon_seconds=$((
+  darwin_deadline_setup_budget_seconds +
+    deadline_launch_parent_crash_grace_seconds
+))
 
 # Bound each automatic-lookup gh call (and the multi-call feedback capture) so a
 # hung GitHub CLI cannot stall autoreview forever. Overridable for tests.
@@ -3178,20 +3204,1096 @@ run_trusted_external() {
   return "$status"
 }
 
+# Linux has a stable negative-PID process-group cleanup contract for these
+# detached jobs. Darwin PID and PGID values are reusable. Every Darwin signal
+# therefore uses a libproc unique identity that was captured while the target
+# was this shell's exact kernel child. An unknown host is an infrastructure
+# failure. It never inherits Linux signal authority.
+classify_deadline_host() {
+  local detected
+  if [[ -n "$deadline_host_platform" ]]; then
+    [[ "$deadline_host_platform" == "Linux" || "$deadline_host_platform" == "Darwin" ]] || return 2
+    return 0
+  fi
+  detected="$(/usr/bin/uname -s 2>/dev/null)" || {
+    echo "agent:autoreview: cannot classify the host for deadline process cleanup" >&2
+    return 2
+  }
+  case "$detected" in
+    Linux | Darwin) deadline_host_platform="$detected" ;;
+    *)
+      echo "agent:autoreview: unsupported host for deadline process cleanup: ${detected:-missing}" >&2
+      return 2
+      ;;
+  esac
+}
+
+can_signal_deadline_process_group() {
+  classify_deadline_host || return 2
+  [[ "$deadline_host_platform" == "Linux" ]]
+}
+
+deadline_current_shell_pid() {
+  local output_file
+
+  deadline_current_shell_pid_result=""
+  # $$ is the original shell PID inside a Bash subshell on macOS Bash 3.2.
+  # Run fixed-path Perl in this shell, without command substitution. Perl then
+  # observes the shell that will own the async job. A private file carries the
+  # value back without placing the ownership probe in a temporary Bash child.
+  output_file="$(
+    /usr/bin/mktemp \
+      "$command_runtime_dir/deadline-owner-pid.XXXXXX"
+  )" || return 2
+  /bin/chmod 0600 "$output_file" || {
+    /bin/rm -f -- "$output_file"
+    return 2
+  }
+  if ! system_perl -e 'print getppid(), "\n";' >"$output_file" ||
+    ! IFS= read -r deadline_current_shell_pid_result <"$output_file"; then
+    deadline_current_shell_pid_result=""
+    /bin/rm -f -- "$output_file"
+    return 2
+  fi
+  /bin/rm -f -- "$output_file"
+  [[ "$deadline_current_shell_pid_result" =~ ^[1-9][0-9]*$ ]] || {
+    deadline_current_shell_pid_result=""
+    return 2
+  }
+}
+
+# Create both possible barrier decisions before the child exists. Publishing a
+# decision is then one same-directory rename. It cannot fail because a shared
+# temporary directory filled between spawn and exact-identity capture. The
+# child uses only Bash builtins while it waits, so it cannot start the target or
+# create descendants before the parent captures and binds its kernel identity.
+# Its fixed setup deadline also bounds a child whose parent crashes.
+prepare_deadline_launch_barrier() {
+  local barrier_dir
+
+  deadline_launch_barrier_result=""
+  barrier_dir="$(
+    /usr/bin/mktemp -d \
+      "$command_runtime_dir/deadline-launch.XXXXXX"
+  )" || return 2
+  /bin/chmod 0700 "$barrier_dir" || return 2
+  printf 'go\n' >"$barrier_dir/go.pending" || return 2
+  printf 'cancel\n' >"$barrier_dir/cancel.pending" || return 2
+  /bin/chmod 0400 \
+    "$barrier_dir/go.pending" \
+    "$barrier_dir/cancel.pending" || return 2
+  deadline_launch_barrier_result="$barrier_dir/action"
+}
+
+close_deadline_launch_barrier() {
+  local action_file="$1"
+  local decision="$2"
+  local barrier_dir="${action_file%/*}"
+  local pending
+  local existing=""
+
+  [[ "$decision" == "go" || "$decision" == "cancel" ]] || return 2
+  [[
+    "$barrier_dir" == "$command_runtime_dir"/deadline-launch.* &&
+      "$action_file" == "$barrier_dir/action" &&
+      -d "$barrier_dir" &&
+      ! -L "$barrier_dir"
+  ]] || return 2
+  if [[ -e "$action_file" ]]; then
+    [[ -f "$action_file" && ! -L "$action_file" ]] || return 2
+    IFS= read -r existing <"$action_file" || return 2
+    [[ "$existing" == "$decision" ]]
+    return
+  fi
+  pending="$barrier_dir/$decision.pending"
+  [[ -f "$pending" && ! -L "$pending" ]] || return 2
+  /bin/mv "$pending" "$action_file"
+}
+
+wait_for_deadline_launch_barrier() {
+  local action_file="$1"
+  local owner_pid="$2"
+  local go_deadline="$3"
+  local abandon_deadline="$4"
+  local decision=""
+
+  [[
+    "$owner_pid" =~ ^[1-9][0-9]*$ &&
+      "$go_deadline" =~ ^[0-9]+$ &&
+      "$abandon_deadline" =~ ^[0-9]+$ &&
+      "$go_deadline" -le "$abandon_deadline"
+  ]] || return 125
+  # Bash 3.2 does not refresh $PPID after reparenting. Use only Bash builtins
+  # before release and impose an autonomous setup deadline instead. A parent
+  # crash therefore leaves this child only for its caller's bounded setup plus
+  # cleanup grace. Calling the target in this shell also supports trusted
+  # wrapper functions in "$@".
+  while [[ ! -e "$action_file" ]]; do
+    if ((SECONDS >= abandon_deadline)); then
+      return 125
+    fi
+    :
+  done
+  [[ -f "$action_file" && ! -L "$action_file" ]] || return 125
+  IFS= read -r decision <"$action_file" || return 125
+  [[ "$decision" == "go" ]] || return 125
+  ((SECONDS < go_deadline)) || return 125
+}
+
+exec_after_deadline_launch_barrier() {
+  local action_file="$1"
+  local owner_pid="$2"
+  local launch_go_deadline="$3"
+  local launch_abandon_deadline="$4"
+  shift 4
+
+  [[ "$#" -gt 0 ]] || return 125
+  # The parent shell owns lifecycle cleanup. A background barrier child must
+  # not inherit those handlers and re-enter the parent's reap path when the
+  # parent signals its process group. Disable job control in the child so a
+  # nested pipeline stays in this child's owned process group on Linux.
+  trap - HUP INT TERM
+  wait_for_deadline_launch_barrier \
+    "$action_file" "$owner_pid" \
+    "$launch_go_deadline" "$launch_abandon_deadline" || return 125
+  set +m
+  "$@"
+}
+
+darwin_deadline_setup_is_within_budget() {
+  local started_at="$1"
+
+  [[ "$started_at" =~ ^[0-9]+$ ]] || return 2
+  ((SECONDS >= started_at)) || return 2
+  ((SECONDS - started_at < darwin_deadline_setup_budget_seconds))
+}
+
+prepare_darwin_deadline_identity_helper() {
+  local runtime_dir
+  local source_snapshot
+  local source_snapshot_after
+  local module
+  local result
+
+  classify_deadline_host || return 2
+  [[ "$deadline_host_platform" == "Darwin" ]] || return 0
+  if [[ -n "$darwin_deadline_identity_module" ]]; then
+    [[
+      -f "$darwin_deadline_identity_module" &&
+        ! -L "$darwin_deadline_identity_module"
+    ]] || return 2
+    return 0
+  fi
+  runtime_dir="$command_runtime_dir/darwin-deadline-runtime"
+  if [[ -e "$runtime_dir" ]]; then
+    echo "agent:autoreview: Darwin deadline runtime path already exists" >&2
+    return 2
+  fi
+  /bin/mkdir "$runtime_dir" || return 2
+  /bin/chmod 0700 "$runtime_dir" || return 2
+  source_snapshot="$(wrapper_runtime_source_snapshot "$script_dir")" || {
+    echo "agent:autoreview: Darwin deadline identity source is unsafe" >&2
+    return 2
+  }
+  wrapper_runtime_source_acl_is_trusted "$script_dir" || {
+    echo "agent:autoreview: Darwin deadline identity source ACL is unsafe" >&2
+    return 2
+  }
+  materialize_filesystem_autoreview_runtime "$script_dir" "$runtime_dir" || {
+    echo "agent:autoreview: cannot snapshot the Darwin deadline identity source" >&2
+    return 2
+  }
+  source_snapshot_after="$(wrapper_runtime_source_snapshot "$script_dir")" ||
+    return 2
+  if [[ "$source_snapshot_after" != "$source_snapshot" ]] ||
+    ! wrapper_runtime_source_acl_is_trusted "$script_dir"; then
+    echo "agent:autoreview: Darwin deadline identity source changed during snapshot" >&2
+    return 2
+  fi
+  module="$runtime_dir/scripts/gate/darwin-process-lineage.mjs"
+  if [[ ! -f "$module" || -L "$module" ]]; then
+    echo "agent:autoreview: Darwin exact identity module is unavailable" >&2
+    return 2
+  fi
+  result="$(
+    run_trusted_node "$module" prepare-exact \
+      --scratch "$command_runtime_dir"
+  )" || return 2
+  if [[ "$result" != "ready" ]]; then
+    echo "agent:autoreview: Darwin deadline identity helper probe failed" >&2
+    return 2
+  fi
+  darwin_deadline_identity_module="$module"
+}
+
+prepare_deadline_signal_contract() {
+  classify_deadline_host || return 2
+  if [[ "$deadline_host_platform" == "Darwin" ]]; then
+    prepare_darwin_deadline_identity_helper || return 2
+  elif [[ -z "$linux_deadline_ps_bin" ]]; then
+    if [[ -x /bin/ps ]]; then
+      linux_deadline_ps_bin=/bin/ps
+    elif [[ -x /usr/bin/ps ]]; then
+      linux_deadline_ps_bin=/usr/bin/ps
+    else
+      echo "agent:autoreview: Linux deadline cleanup requires ps" >&2
+      return 2
+    fi
+  fi
+  return 0
+}
+
+capture_darwin_deadline_exact_child() {
+  local pid="$1"
+  local parent_pid="$2"
+  local captured
+
+  darwin_deadline_exact_identity=""
+  prepare_darwin_deadline_identity_helper || return 2
+  captured="$(
+    run_trusted_node "$darwin_deadline_identity_module" \
+      capture-exact-child-or-gone \
+      --scratch "$command_runtime_dir" \
+      --pid "$pid" \
+      --parent-pid "$parent_pid"
+  )" || return 2
+  case "$captured" in
+    agentqg-darwin-exact-v1:pid1-*:*) ;;
+    gone) return 3 ;;
+    *) return 2 ;;
+  esac
+  darwin_deadline_exact_identity="$captured"
+}
+
+capture_darwin_deadline_exact_parent() {
+  local expected_parent_pid="$1"
+  local output_file
+  local captured
+
+  darwin_deadline_exact_identity=""
+  prepare_darwin_deadline_identity_helper || return 2
+  output_file="$(
+    /usr/bin/mktemp \
+      "$command_runtime_dir/deadline-parent-identity.XXXXXX"
+  )" || return 2
+  /bin/chmod 0600 "$output_file" || {
+    /bin/rm -f -- "$output_file"
+    return 2
+  }
+  # Run the probe in this shell. A command substitution would insert a
+  # temporary Bash process between this launcher and the trusted Node probe,
+  # so the native exact-parent check would bind the wrong process.
+  if ! run_trusted_node "$darwin_deadline_identity_module" \
+    capture-exact-parent \
+    --scratch "$command_runtime_dir" \
+    --pid "$expected_parent_pid" >"$output_file" ||
+    ! IFS= read -r captured <"$output_file"; then
+    /bin/rm -f -- "$output_file"
+    return 2
+  fi
+  /bin/rm -f -- "$output_file"
+  case "$captured" in
+    agentqg-darwin-exact-v1:pid1-*:*) ;;
+    *) return 2 ;;
+  esac
+  darwin_deadline_exact_identity="$captured"
+}
+
+initialize_darwin_autoreview_wrapper_identity() {
+  darwin_autoreview_wrapper_exact_identity=""
+  prepare_deadline_signal_contract || return 2
+  [[ "$deadline_host_platform" == "Darwin" ]] || return 0
+  capture_darwin_deadline_exact_parent "$$" || return 2
+  darwin_autoreview_wrapper_exact_identity="$darwin_deadline_exact_identity"
+}
+
+darwin_deadline_exact_identity_status() {
+  local exact_identity="$1"
+  local result
+  case "$exact_identity" in
+    agentqg-darwin-exact-v1:pid1-*:*) ;;
+    gone)
+      printf 'gone\n'
+      return 0
+      ;;
+    *) return 2 ;;
+  esac
+  result="$(
+    run_trusted_node "$darwin_deadline_identity_module" status-exact \
+      --scratch "$command_runtime_dir" \
+      --identity "$exact_identity"
+  )" || return 2
+  [[ "$result" == "live" || "$result" == "zombie" || "$result" == "gone" ]] ||
+    return 2
+  printf '%s\n' "$result"
+}
+
+signal_darwin_deadline_exact_identity() {
+  local exact_identity="$1"
+  local signal_name="$2"
+  local result
+  [[ "$exact_identity" == "gone" ]] && return 0
+  case "$exact_identity" in
+    agentqg-darwin-exact-v1:pid1-*:*) ;;
+    *) return 2 ;;
+  esac
+  [[ "$signal_name" == "TERM" || "$signal_name" == "KILL" ]] || return 2
+  result="$(
+    run_trusted_node "$darwin_deadline_identity_module" signal-exact \
+      --scratch "$command_runtime_dir" \
+      --identity "$exact_identity" \
+      --signal "$signal_name"
+  )" || return 2
+  [[ "$result" == "signalled" || "$result" == "gone" ]]
+}
+
+prepare_darwin_deadline_lineage_state() {
+  local parent_pid="$1"
+  local token
+  local state_path
+  local result
+
+  darwin_deadline_lineage_state_result=""
+  [[ "$deadline_host_platform" == "Darwin" ]] || return 0
+  [[ "$parent_pid" =~ ^[1-9][0-9]*$ ]] || return 2
+  darwin_deadline_lineage_counter=$((darwin_deadline_lineage_counter + 1))
+  token="autoreview-deadline-${parent_pid}-${darwin_deadline_lineage_counter}"
+  state_path="$command_runtime_dir/lineage.$token.json"
+  result="$(
+    run_trusted_node "$darwin_deadline_identity_module" prepare \
+      --state "$state_path" \
+      --scratch "$command_runtime_dir" \
+      --token "$token"
+  )" || return 2
+  [[ "$result" == *'"active":true'* ]] || return 2
+  darwin_deadline_lineage_state_result="$state_path"
+}
+
+bind_darwin_deadline_lineage_state() {
+  local state_path="$1"
+  local pid="$2"
+  local parent_pid="$3"
+  local result
+
+  [[ "$deadline_host_platform" == "Darwin" ]] || return 0
+  [[
+    "$state_path" == "$command_runtime_dir"/lineage.autoreview-deadline-*.json &&
+      -f "$state_path" &&
+      ! -L "$state_path" &&
+      "$pid" =~ ^[1-9][0-9]*$ &&
+      "$parent_pid" =~ ^[1-9][0-9]*$
+  ]] || return 2
+  result="$(
+    run_trusted_node "$darwin_deadline_identity_module" bind \
+      --state "$state_path" \
+      --scratch "$command_runtime_dir" \
+      --pid "$pid" \
+      --parent-pid "$parent_pid"
+  )" || return 2
+  [[
+    "$result" == *'"active":true'* &&
+      "$result" == *'"rootUniqueId":"'*
+  ]]
+}
+
+settle_darwin_deadline_lineage_state() {
+  local state_path="$1"
+  local retain_state="${2:-1}"
+  local result
+
+  [[ "$deadline_host_platform" == "Darwin" ]] || return 0
+  [[
+    "$state_path" == "$command_runtime_dir"/lineage.autoreview-deadline-*.json &&
+      -f "$state_path" &&
+      ! -L "$state_path"
+  ]] || return 2
+  [[ "$retain_state" == "0" || "$retain_state" == "1" ]] || return 2
+  result="$(
+    run_trusted_node "$darwin_deadline_identity_module" settle \
+      --state "$state_path" \
+      --scratch "$command_runtime_dir" \
+      --timeout-seconds 30 \
+      --retain-state "$retain_state"
+  )" || return 2
+  [[
+    "$result" == *'"active":true'* &&
+      "$result" == *'"settled":true'* &&
+      "$result" == *'"retained":'*
+  ]] || return 2
+  if [[ "$retain_state" == "1" ]]; then
+    [[ "$result" == *'"retained":true'* ]]
+  else
+    [[ "$result" == *'"retained":false'* ]]
+  fi
+}
+
+discard_settled_darwin_deadline_lineage_state() {
+  local state_path="$1"
+  local result
+
+  [[ "$deadline_host_platform" == "Darwin" ]] || return 0
+  result="$(
+    run_trusted_node "$darwin_deadline_identity_module" discard-settled \
+      --state "$state_path" \
+      --scratch "$command_runtime_dir"
+  )" || return 2
+  [[
+    "$result" == *'"active":true'* &&
+      "$result" == *'"discarded":true'*
+  ]]
+}
+
+prepare_deadline_recovery_control() {
+  local control_dir
+  local cancel_file
+  local cancel_staged_file
+  local settle_staged_file
+  local armed_file
+  local armed_pending_file
+  local output_file
+  local stderr_file
+
+  deadline_recovery_cancel_file_result=""
+  deadline_recovery_armed_file_result=""
+  deadline_recovery_output_file_result=""
+  deadline_recovery_stderr_file_result=""
+  control_dir="$(
+    /usr/bin/mktemp -d \
+      "$command_runtime_dir/deadline-recovery.XXXXXX"
+  )" || return 2
+  /bin/chmod 0700 "$control_dir" || return 2
+  cancel_file="$control_dir/action"
+  cancel_staged_file="$control_dir/action.cancel.staged"
+  settle_staged_file="$control_dir/action.settle.staged"
+  armed_file="$control_dir/armed"
+  armed_pending_file="$control_dir/armed.pending"
+  output_file="$control_dir/result"
+  stderr_file="$control_dir/stderr"
+  printf 'cancel\n' >"$cancel_staged_file" || return 2
+  printf 'settle\n' >"$settle_staged_file" || return 2
+  : >"$output_file" || return 2
+  : >"$stderr_file" || return 2
+  : >"$armed_pending_file" || return 2
+  /bin/chmod 0600 \
+    "$armed_pending_file" "$output_file" "$stderr_file" ||
+    return 2
+  /bin/chmod 0400 "$cancel_staged_file" "$settle_staged_file" || return 2
+  deadline_recovery_cancel_file_result="$cancel_file"
+  deadline_recovery_armed_file_result="$armed_file"
+  deadline_recovery_output_file_result="$output_file"
+  deadline_recovery_stderr_file_result="$stderr_file"
+}
+
+publish_deadline_recovery_action() {
+  local cancel_file="$1"
+  local action="$2"
+  local control_dir="${cancel_file%/*}"
+  local pending_file
+
+  [[ "$action" == "cancel" || "$action" == "settle" ]] || return 2
+  pending_file="$cancel_file.$action.staged"
+
+  [[
+    "$control_dir" == "$command_runtime_dir"/deadline-recovery.* &&
+      "$cancel_file" == "$control_dir/action" &&
+      -d "$control_dir" &&
+      ! -L "$control_dir" &&
+      ! -e "$cancel_file" &&
+      ! -L "$cancel_file" &&
+      -f "$pending_file" &&
+      ! -L "$pending_file"
+  ]] || return 2
+  /bin/ln "$pending_file" "$cancel_file" || return 2
+  /usr/bin/perl -Mstrict -Mwarnings \
+    -MFcntl=O_NOFOLLOW,O_NONBLOCK,O_RDONLY,S_ISDIR \
+    -MIO::Handle -e '
+      my ($directory) = @ARGV;
+      sysopen(my $handle, $directory, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+        or exit 1;
+      my @before = stat($handle);
+      my @path_before = lstat($directory);
+      exit 1 unless @before && @path_before && S_ISDIR($before[2]) &&
+        $before[0] == $path_before[0] && $before[1] == $path_before[1];
+      $handle->sync() or exit 1;
+      my @after = stat($handle);
+      my @path_after = lstat($directory);
+      close($handle) or exit 1;
+      exit 1 unless @after && @path_after &&
+        $before[0] == $after[0] && $before[1] == $after[1] &&
+        $before[0] == $path_after[0] && $before[1] == $path_after[1];
+    ' "$control_dir"
+}
+
+publish_deadline_recovery_cancel() {
+  publish_deadline_recovery_action "$1" cancel
+}
+
+publish_deadline_recovery_settle() {
+  publish_deadline_recovery_action "$1" settle
+}
+
+prepare_darwin_helper_containment_contract() {
+  local contract_dir
+  local contract_file
+  local pending_file
+
+  darwin_helper_containment_file_result=""
+  contract_dir="$(
+    /usr/bin/mktemp -d \
+      "$command_runtime_dir/helper-containment.XXXXXX"
+  )" || return 2
+  /bin/chmod 0700 "$contract_dir" || return 2
+  contract_file="$contract_dir/contract"
+  pending_file="$contract_dir/contract.pending"
+  : >"$pending_file" || return 2
+  /bin/chmod 0600 "$pending_file" || return 2
+  darwin_helper_containment_file_result="$contract_file"
+}
+
+publish_darwin_helper_containment_contract() {
+  local contract_file="$1"
+  local child_pid="$2"
+  local owner_pid="$3"
+  local exact_identity="$4"
+  local state_path="$5"
+  local contract_dir="${contract_file%/*}"
+  local pending_file="$contract_dir/contract.pending"
+
+  [[
+    "$contract_dir" == "$command_runtime_dir"/helper-containment.* &&
+      "$contract_file" == "$contract_dir/contract" &&
+      -d "$contract_dir" &&
+      ! -L "$contract_dir" &&
+      -f "$pending_file" &&
+      ! -L "$pending_file" &&
+      "$child_pid" =~ ^[1-9][0-9]*$ &&
+      "$owner_pid" =~ ^[1-9][0-9]*$ &&
+      "$exact_identity" == agentqg-darwin-exact-v1:pid1-*:*
+  ]] || return 2
+  printf 'agent-autoreview-darwin-containment-v1\t%s\t%s\t%s\t%s\n' \
+    "$child_pid" "$owner_pid" "$exact_identity" "$state_path" \
+    >"$pending_file" || return 2
+  /bin/chmod 0400 "$pending_file" || return 2
+  /bin/mv "$pending_file" "$contract_file"
+}
+
+exec_darwin_contained_helper_after_barrier() {
+  local action_file="$1"
+  local owner_pid="$2"
+  local launch_go_deadline="$3"
+  local launch_abandon_deadline="$4"
+  local contract_file="$5"
+  shift 5
+
+  wait_for_deadline_launch_barrier \
+    "$action_file" "$owner_pid" \
+    "$launch_go_deadline" "$launch_abandon_deadline" || return 125
+  exec /usr/bin/env \
+    -u NODE_OPTIONS \
+    -u NODE_PATH \
+    -u OPENSSL_CONF \
+    -u OPENSSL_MODULES \
+    -u GLIBC_TUNABLES \
+    -u LD_AUDIT \
+    -u LD_DEBUG \
+    -u LD_DEBUG_OUTPUT \
+    -u LD_PRELOAD \
+    -u LD_LIBRARY_PATH \
+    -u LD_ORIGIN_PATH \
+    -u LD_PROFILE \
+    -u LD_SHOW_AUXV \
+    -u DYLD_INSERT_LIBRARIES \
+    -u DYLD_LIBRARY_PATH \
+    -u DYLD_FRAMEWORK_PATH \
+    -u DYLD_FALLBACK_LIBRARY_PATH \
+    -u DYLD_FALLBACK_FRAMEWORK_PATH \
+    -u DYLD_IMAGE_SUFFIX \
+    -u DYLD_PRINT_TO_FILE \
+    -u DYLD_ROOT_PATH \
+    -u DYLD_SHARED_REGION \
+    -u DYLD_VERSIONED_FRAMEWORK_PATH \
+    -u DYLD_VERSIONED_LIBRARY_PATH \
+    "PATH=$external_command_path" \
+    "AGENT_AUTOREVIEW_DARWIN_CONTAINMENT_FILE=$contract_file" \
+    "$node_bin" "$@"
+}
+
+run_darwin_deadline_recovery_watcher() {
+  local action_file="$1"
+  local owner_pid="$2"
+  local launch_go_deadline="$3"
+  local launch_abandon_deadline="$4"
+  local state_path="$5"
+  local controller_identity="$6"
+  local cancel_file="$7"
+  local armed_file="$8"
+  local settlement_timeout_seconds="$9"
+
+  wait_for_deadline_launch_barrier \
+    "$action_file" "$owner_pid" \
+    "$launch_go_deadline" "$launch_abandon_deadline" || return 125
+  exec /usr/bin/env \
+    -u NODE_OPTIONS \
+    -u NODE_PATH \
+    -u OPENSSL_CONF \
+    -u OPENSSL_MODULES \
+    -u DYLD_INSERT_LIBRARIES \
+    -u DYLD_LIBRARY_PATH \
+    -u DYLD_FRAMEWORK_PATH \
+    -u DYLD_FALLBACK_LIBRARY_PATH \
+    -u DYLD_FALLBACK_FRAMEWORK_PATH \
+    "$node_bin" "$darwin_deadline_identity_module" watch-settle \
+      --state "$state_path" \
+      --scratch "$command_runtime_dir" \
+      --controller-identity "$controller_identity" \
+      --cancel-file "$cancel_file" \
+      --armed-file "$armed_file" \
+      --timeout-seconds "$settlement_timeout_seconds"
+}
+
+darwin_deadline_recovery_armed_status() {
+  local armed_file="$1"
+  local observation_mode="${2:-once}"
+  local control_dir="${armed_file%/*}"
+
+  [[
+    "$control_dir" == "$command_runtime_dir"/deadline-recovery.* &&
+      "$armed_file" == "$control_dir/armed" &&
+      ("$observation_mode" == "once" || "$observation_mode" == "wait")
+  ]] || return 2
+  /usr/bin/perl - \
+    "$command_runtime_dir" "$control_dir" "$armed_file" \
+    "$observation_mode" <<'PERL'
+use strict;
+use warnings;
+use Errno qw(ENOENT);
+use Fcntl qw(O_NOFOLLOW O_NONBLOCK O_RDONLY S_ISDIR S_ISREG);
+use IO::Handle ();
+
+my ($scratch, $directory, $armed, $observation_mode) = @ARGV;
+sub fail { die "unsafe Darwin watcher armed marker\n"; }
+fail() unless $observation_mode eq "once" || $observation_mode eq "wait";
+sub same_stat {
+  my ($left, $right) = @_;
+  for my $index (0, 1, 2, 3, 4, 5, 6, 7, 9, 10) {
+    return 0 if $left->[$index] != $right->[$index];
+  }
+  return 1;
+}
+for my $path ($scratch, $directory) {
+  my @stat = lstat($path);
+  fail() unless @stat && S_ISDIR($stat[2]) && $stat[4] == $< &&
+    ($stat[2] & 07777) == 0700;
+}
+fail() unless $directory =~ /^\Q$scratch\E\/deadline-recovery\.[^\/]+$/;
+sub read_marker {
+  my ($path, $mode, $links, $expected) = @_;
+  sysopen(my $handle, $path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK) or fail();
+  my @before = stat($handle);
+  my @path_before = lstat($path);
+  fail() unless @before && @path_before && S_ISREG($before[2]) &&
+    $before[4] == $< && $before[3] == $links &&
+    ($before[2] & 07777) == $mode && same_stat(\@before, \@path_before);
+  my $bytes = "";
+  while (length($bytes) <= 7) {
+    my $chunk = "";
+    my $read = sysread($handle, $chunk, 8 - length($bytes));
+    fail() unless defined $read;
+    last if $read == 0;
+    $bytes .= $chunk;
+  }
+  my @after = stat($handle);
+  my @path_after = lstat($path);
+  close($handle) or fail();
+  fail() unless same_stat(\@before, \@after) &&
+    same_stat(\@before, \@path_after) && $bytes eq $expected;
+  return \@after;
+}
+my $pending = "$armed.pending";
+my $staged = "$armed.staged";
+my @armed_stat;
+for (my $attempt = 0; $attempt < 400; $attempt += 1) {
+  @armed_stat = lstat($armed);
+  last if @armed_stat;
+  fail() unless $! == ENOENT;
+  read_marker($pending, 0600, 1, "");
+  if ($observation_mode eq "once") {
+    print "pending\n";
+    exit 0;
+  }
+  select(undef, undef, undef, 0.025);
+}
+fail() unless @armed_stat;
+my $pending_before = read_marker($pending, 0600, 1, "");
+my $staged_before = read_marker($staged, 0400, 2, "armed\n");
+my $armed_before = read_marker($armed, 0400, 2, "armed\n");
+fail() unless same_stat($staged_before, $armed_before);
+sysopen(my $directory_handle, $directory, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+  or fail();
+my @directory_before = stat($directory_handle);
+my @directory_path_before = lstat($directory);
+fail() unless @directory_before && @directory_path_before &&
+  S_ISDIR($directory_before[2]) && $directory_before[4] == $< &&
+  ($directory_before[2] & 07777) == 0700 &&
+  same_stat(\@directory_before, \@directory_path_before);
+$directory_handle->sync() or fail();
+my @directory_after = stat($directory_handle);
+my @directory_path_after = lstat($directory);
+close($directory_handle) or fail();
+fail() unless same_stat(\@directory_before, \@directory_after) &&
+  same_stat(\@directory_before, \@directory_path_after);
+my $pending_after = read_marker($pending, 0600, 1, "");
+my $staged_after = read_marker($staged, 0400, 2, "armed\n");
+my $armed_after = read_marker($armed, 0400, 2, "armed\n");
+fail() unless same_stat($pending_before, $pending_after) &&
+  same_stat($staged_before, $staged_after) &&
+  same_stat($armed_before, $armed_after) &&
+  same_stat($staged_after, $armed_after);
+print "armed\n";
+PERL
+}
+
+wait_for_darwin_deadline_recovery_watcher_armed() {
+  local watcher_exact_identity="$1"
+  local armed_file="$2"
+  local marker_status
+  local watcher_status
+
+  marker_status="$(
+    darwin_deadline_recovery_armed_status "$armed_file" wait
+  )" || return 2
+  [[ "$marker_status" == "armed" ]] || return 2
+  watcher_status="$(
+    darwin_deadline_exact_identity_status "$watcher_exact_identity"
+  )" || return 2
+  [[ "$watcher_status" == "live" ]]
+}
+
+reap_failed_darwin_deadline_recovery_watcher() {
+  local watcher_pid="$1"
+  local watcher_exact_identity="$2"
+  local cancel_file="$3"
+
+  if ! publish_deadline_recovery_cancel "$cancel_file"; then
+    signal_darwin_deadline_exact_identity \
+      "$watcher_exact_identity" KILL || true
+  fi
+  wait "$watcher_pid" 2>/dev/null || true
+}
+
+settle_and_reap_darwin_deadline_recovery_watcher() {
+  local watcher_pid="$1"
+  local watcher_exact_identity="$2"
+  local cancel_file="$3"
+  local output_file="$4"
+  local stderr_file="$5"
+  local result=""
+  local watcher_status=""
+  local failed=0
+
+  if ! publish_deadline_recovery_settle "$cancel_file"; then
+    echo "agent:autoreview: cannot publish the Darwin settlement handoff" >&2
+    return 2
+  fi
+  wait "$watcher_pid" 2>/dev/null || failed=1
+  watcher_status="$(
+    darwin_deadline_exact_identity_status "$watcher_exact_identity"
+  )" || failed=1
+  [[ "$watcher_status" != "live" ]] || failed=1
+  if [[ -s "$output_file" ]]; then
+    IFS= read -r result <"$output_file" || failed=1
+  fi
+  if [[ "$failed" -eq 0 && "$result" == "settled" ]]; then
+    return 0
+  fi
+  echo "agent:autoreview: Darwin deadline recovery watcher did not settle cleanly" >&2
+  if [[ -s "$stderr_file" ]]; then
+    /bin/cat "$stderr_file" >&2 || true
+  fi
+  return 2
+}
+
+finalize_darwin_deadline_lineage_with_watcher() {
+  local state_path="$1"
+  local watcher_pid="$2"
+  local watcher_exact_identity="$3"
+  local cancel_file="$4"
+  local output_file="$5"
+  local stderr_file="$6"
+
+  settle_and_reap_darwin_deadline_recovery_watcher \
+    "$watcher_pid" "$watcher_exact_identity" \
+    "$cancel_file" "$output_file" "$stderr_file" || return 2
+  discard_settled_darwin_deadline_lineage_state "$state_path"
+}
+
+deadline_process_or_group_is_live() {
+  local pid="$1"
+  local exact_identity="${2:-}"
+  local status
+  classify_deadline_host || return 2
+  if [[ "$deadline_host_platform" == "Linux" ]]; then
+    kill -0 -- "-$pid" 2>/dev/null || kill -0 -- "$pid" 2>/dev/null
+    return
+  fi
+  status="$(darwin_deadline_exact_identity_status "$exact_identity")" || return 2
+  [[ "$status" == "live" ]]
+}
+
+deadline_direct_child_is_live() {
+  local pid="$1"
+  local exact_identity="${2:-}"
+  local status
+  classify_deadline_host || return 2
+  if [[ "$deadline_host_platform" == "Linux" ]]; then
+    kill -0 -- "$pid" 2>/dev/null
+    return
+  fi
+  status="$(darwin_deadline_exact_identity_status "$exact_identity")" || return 2
+  [[ "$status" == "live" ]]
+}
+
+signal_deadline_process_or_group() {
+  local pid="$1"
+  local signal_name="$2"
+  local exact_identity="${3:-}"
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 2
+  [[ "$signal_name" == "TERM" || "$signal_name" == "KILL" ]] || return 2
+  classify_deadline_host || return 2
+  if [[ "$deadline_host_platform" == "Linux" ]]; then
+    if kill -s "$signal_name" -- "-$pid" 2>/dev/null ||
+      kill -s "$signal_name" -- "$pid" 2>/dev/null; then
+      return 0
+    fi
+    if ! kill -0 -- "-$pid" 2>/dev/null &&
+      ! kill -0 -- "$pid" 2>/dev/null; then
+      return 0
+    fi
+    return 2
+  fi
+  signal_darwin_deadline_exact_identity "$exact_identity" "$signal_name"
+}
+
+linux_deadline_child_is_reapable() {
+  local pid="$1"
+  local state
+
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 2
+  classify_deadline_host || return 2
+  [[ "$deadline_host_platform" == "Linux" ]] || return 2
+  if ! kill -0 -- "$pid" 2>/dev/null; then
+    return 0
+  fi
+  [[
+    "$linux_deadline_ps_bin" == "/bin/ps" ||
+      "$linux_deadline_ps_bin" == "/usr/bin/ps"
+  ]] || return 2
+  [[ -x "$linux_deadline_ps_bin" ]] || return 2
+  if ! state="$("$linux_deadline_ps_bin" -o stat= -p "$pid" 2>/dev/null)"; then
+    kill -0 -- "$pid" 2>/dev/null && return 2
+    return 0
+  fi
+  [[ "$state" =~ ^[[:space:]]*[ZX] ]]
+}
+
+wait_for_linux_deadline_child_reapable() {
+  local pid="$1"
+  local maximum_attempts="${2:-100}"
+  local attempt
+  local status
+
+  [[ "$maximum_attempts" =~ ^[1-9][0-9]*$ ]] || return 2
+  for ((attempt = 0; attempt < maximum_attempts; attempt++)); do
+    if linux_deadline_child_is_reapable "$pid"; then
+      return 0
+    else
+      status=$?
+    fi
+    [[ "$status" -eq 1 ]] || return 2
+    sleep 0.05
+  done
+  return 1
+}
+
+# A signal trap can run while Bash has SIGCHLD blocked for its interrupted
+# foreground wait. Make the child reapable before calling wait so the nested
+# wait cannot block on a SIGCHLD that Bash cannot consume inside that trap.
+terminate_and_reap_linux_deadline_child() {
+  local pid="$1"
+  local exact_identity="${2:-}"
+  local failed=0
+
+  classify_deadline_host || return 2
+  [[ "$deadline_host_platform" == "Linux" ]] || return 2
+  signal_deadline_process_or_group \
+    "$pid" TERM "$exact_identity" || failed=1
+  sleep 1
+  signal_deadline_process_or_group \
+    "$pid" KILL "$exact_identity" || failed=1
+  if wait_for_linux_deadline_child_reapable "$pid" 100; then
+    wait "$pid" 2>/dev/null || true
+  else
+    failed=1
+  fi
+  [[ "$failed" -eq 0 ]]
+}
+
+# A waited child no longer reserves its numeric PID. Only Linux performs the
+# immediate descendant-group sweep after that reap. Darwin cannot signal the
+# direct PID or its reusable process-group number from this state.
+signal_deadline_group_after_reap() {
+  local pid="$1"
+  local signal_name="$2"
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  [[ "$signal_name" == "TERM" || "$signal_name" == "KILL" ]] || return 2
+  classify_deadline_host || return 2
+  if [[ "$deadline_host_platform" == "Linux" ]]; then
+    kill -s "$signal_name" -- "-$pid" 2>/dev/null ||
+      ! kill -0 -- "-$pid" 2>/dev/null
+    return
+  fi
+  [[ "$deadline_host_platform" == "Darwin" ]] || return 2
+  return 0
+}
+
 # Bound a foreground command with a wall-clock deadline without depending on a
 # timeout(1) binary (absent on stock macOS). Stdout is captured and replayed so
-# $(...) callers still receive it; stderr passes through. The job runs in its
-# own process group so a hung child tree is fully signalled on timeout, and 124
-# is returned so callers fail closed exactly as they do for other lookup errors.
+# $(...) callers still receive it; stderr passes through. Linux runs the job in
+# its own process group and signals the full tree. Darwin prepares a lineage
+# baseline before spawn, holds the child behind a launch barrier while it binds
+# the exact kernel identity, and settles that lineage on every exit. Exit 124
+# reports a timeout so callers fail closed exactly as for other lookup errors.
+cleanup_deadline_child_before_reraise() {
+  local child="$1"
+  local exact_identity="$2"
+  local lineage_state="$3"
+  local launch_barrier="$4"
+  local launch_released="$5"
+  local out_file="$6"
+  local failed=0
+  local barrier_closed=0
+
+  if [[ -n "$child" ]]; then
+    if [[ "$launch_released" -eq 0 ]]; then
+      if close_deadline_launch_barrier "$launch_barrier" cancel; then
+        barrier_closed=1
+      else
+        failed=1
+      fi
+      if [[ "$deadline_host_platform" == "Linux" ]]; then
+        terminate_and_reap_linux_deadline_child \
+          "$child" "$exact_identity" || failed=1
+      fi
+    elif [[ "$deadline_host_platform" == "Darwin" ]]; then
+      if ! finalize_darwin_deadline_lineage_with_watcher \
+        "$lineage_state" \
+        "$recovery_watcher" "$recovery_watcher_exact_identity" \
+        "$recovery_cancel_file" "$recovery_output_file" \
+        "$recovery_stderr_file"; then
+        # Settlement takes the exact descendant snapshot before it signals the
+        # root. If it fails, stop the still-reserved direct child identity as a
+        # final containment step. The failed lineage remains an error.
+        signal_darwin_deadline_exact_identity \
+          "$exact_identity" KILL || true
+        failed=1
+      else
+        recovery_watcher_reaped=1
+      fi
+    else
+      terminate_and_reap_linux_deadline_child \
+        "$child" "$exact_identity" || failed=1
+    fi
+    # A cancelled barrier child exits without running the target. A released
+    # child exits after exact Darwin settlement or Linux group cleanup. Wait in
+    # all cases so setup failures cannot leave an unreaped direct child.
+    if [[ "$deadline_host_platform" != "Linux" ]]; then
+      wait "$child" 2>/dev/null || true
+    fi
+    if [[ "$launch_released" -eq 0 && "$barrier_closed" -eq 0 ]]; then
+      failed=1
+    fi
+  fi
+  if [[
+    "$deadline_host_platform" == "Darwin" &&
+      -n "$recovery_watcher" &&
+      "$recovery_watcher_reaped" -eq 0
+  ]]; then
+    if [[ "$recovery_watcher_released" -eq 0 ]]; then
+      close_deadline_launch_barrier \
+        "$recovery_watcher_barrier" cancel || failed=1
+      wait "$recovery_watcher" 2>/dev/null || true
+      recovery_watcher_reaped=1
+    elif finalize_darwin_deadline_lineage_with_watcher \
+      "$lineage_state" \
+      "$recovery_watcher" "$recovery_watcher_exact_identity" \
+      "$recovery_cancel_file" "$recovery_output_file" \
+      "$recovery_stderr_file"; then
+      recovery_watcher_reaped=1
+    else
+      # A released watcher retains the exact lineage obligation when local
+      # settlement fails. It observes this launcher's exit and settles
+      # autonomously. Never replace that authority with a reusable PID signal.
+      failed=1
+    fi
+  fi
+  /bin/rm -f -- "$out_file"
+  if [[ "$failed" -ne 0 ]]; then
+    echo "agent:autoreview: cannot settle an exact deadline child during cleanup" >&2
+  fi
+  [[ "$failed" -eq 0 ]]
+}
+
 run_with_deadline() {
   local label="$1"
   local deadline="$2"
   shift 2
   local out_file
-  local child
+  local child=""
+  local child_exact_identity=""
+  local child_lineage_state=""
+  local child_launch_barrier=""
+  local child_launch_released=0
+  local recovery_watcher=""
+  local recovery_watcher_exact_identity=""
+  local recovery_watcher_barrier=""
+  local recovery_watcher_released=0
+  local recovery_watcher_reaped=0
+  local recovery_cancel_file=""
+  local recovery_armed_file=""
+  local recovery_output_file=""
+  local recovery_stderr_file=""
+  local recovery_timeout
+  local deadline_owner_pid=""
+  local identity_status
+  local live_status
   local waited=0
   local status
   local had_monitor=0
+  local deadline_setup_started_at=0
+  local launch_go_seconds="$deadline_launch_go_default_seconds"
+  local launch_abandon_seconds="$deadline_launch_abandon_default_seconds"
+  local launch_go_deadline=0
+  local launch_abandon_deadline=0
+  prepare_deadline_signal_contract || return 125
+  deadline_current_shell_pid || return 125
+  deadline_owner_pid="$deadline_current_shell_pid_result"
+  [[ "$deadline_owner_pid" =~ ^[1-9][0-9]*$ ]] || return 125
+  if [[ "$deadline_host_platform" == "Darwin" ]]; then
+    prepare_darwin_deadline_lineage_state "$deadline_owner_pid" || return 125
+    child_lineage_state="$darwin_deadline_lineage_state_result"
+    prepare_deadline_launch_barrier || return 125
+    recovery_watcher_barrier="$deadline_launch_barrier_result"
+    prepare_deadline_recovery_control || return 125
+    recovery_cancel_file="$deadline_recovery_cancel_file_result"
+    recovery_armed_file="$deadline_recovery_armed_file_result"
+    recovery_output_file="$deadline_recovery_output_file_result"
+    recovery_stderr_file="$deadline_recovery_stderr_file_result"
+    recovery_timeout=$((deadline + 90))
+    launch_go_seconds="$darwin_deadline_launch_go_seconds"
+    launch_abandon_seconds="$darwin_deadline_launch_abandon_seconds"
+  fi
+  prepare_deadline_launch_barrier || return 125
+  child_launch_barrier="$deadline_launch_barrier_result"
   if ! out_file="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/autoreview-deadline.XXXXXX")"; then
     echo "agent:autoreview: failed to allocate a deadline capture file for $label" >&2
     return 1
@@ -3199,37 +4301,171 @@ run_with_deadline() {
   case "$-" in
     *m*) had_monitor=1 ;;
   esac
+  # Arm cleanup before spawn. The child cannot run the target until the parent
+  # captures and binds its exact identity, then publishes the `go` decision.
+  trap 'cleanup_deadline_child_before_reraise "$child" "$child_exact_identity" "$child_lineage_state" "$child_launch_barrier" "$child_launch_released" "$out_file" || true; trap - INT TERM; kill -s TERM "$$"' TERM
+  trap 'cleanup_deadline_child_before_reraise "$child" "$child_exact_identity" "$child_lineage_state" "$child_launch_barrier" "$child_launch_released" "$out_file" || true; trap - INT TERM; kill -s INT "$$"' INT
+  deadline_setup_started_at="$SECONDS"
+  launch_go_deadline=$((deadline_setup_started_at + launch_go_seconds))
+  launch_abandon_deadline=$((
+    deadline_setup_started_at + launch_abandon_seconds
+  ))
   set -m
-  "$@" >"$out_file" &
+  exec_after_deadline_launch_barrier \
+    "$child_launch_barrier" "$deadline_owner_pid" \
+    "$launch_go_deadline" "$launch_abandon_deadline" \
+    "$@" >"$out_file" &
   child=$!
+  if [[ "$deadline_host_platform" == "Darwin" ]]; then
+    run_darwin_deadline_recovery_watcher \
+      "$recovery_watcher_barrier" "$deadline_owner_pid" \
+      "$launch_go_deadline" "$launch_abandon_deadline" \
+      "$child_lineage_state" "$darwin_autoreview_wrapper_exact_identity" \
+      "$recovery_cancel_file" "$recovery_armed_file" "$recovery_timeout" \
+      >"$recovery_output_file" 2>"$recovery_stderr_file" &
+    recovery_watcher=$!
+  fi
   if [[ "$had_monitor" -eq 0 ]]; then
     set +m
   fi
-  # If the wrapper itself is interrupted while this job is running, kill the
-  # whole backgrounded process group instead of leaving it to run orphaned and
-  # undetected -- exactly the hung-command class this function exists to
-  # bound. Re-raise the signal against ourselves afterward so the interrupted
-  # script still terminates with the expected signal-death semantics.
-  trap 'kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true; sleep 1; kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; rm -f "$out_file"; trap - INT TERM; kill -s TERM "$$"' TERM
-  trap 'kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true; sleep 1; kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; rm -f "$out_file"; trap - INT TERM; kill -s INT "$$"' INT
-  while [[ "$waited" -lt "$deadline" ]] && kill -0 "$child" 2>/dev/null; do
+  if [[ "$deadline_host_platform" == "Darwin" ]]; then
+    if capture_darwin_deadline_exact_child \
+      "$child" "$deadline_owner_pid"; then
+      child_exact_identity="$darwin_deadline_exact_identity"
+    else
+      identity_status=$?
+      if [[ "$identity_status" -eq 3 ]]; then
+        echo "agent:autoreview: Darwin deadline child exited behind its launch barrier" >&2
+      else
+        echo "agent:autoreview: cannot capture the exact Darwin deadline child identity" >&2
+      fi
+      cleanup_deadline_child_before_reraise \
+        "$child" "$child_exact_identity" "$child_lineage_state" \
+        "$child_launch_barrier" "$child_launch_released" "$out_file" || true
+      trap - INT TERM
+      return 125
+    fi
+    if ! bind_darwin_deadline_lineage_state \
+      "$child_lineage_state" "$child" "$deadline_owner_pid"; then
+      echo "agent:autoreview: cannot bind the Darwin deadline child lineage" >&2
+      cleanup_deadline_child_before_reraise \
+        "$child" "$child_exact_identity" "$child_lineage_state" \
+        "$child_launch_barrier" "$child_launch_released" "$out_file" || true
+      trap - INT TERM
+      return 125
+    fi
+    if capture_darwin_deadline_exact_child \
+      "$recovery_watcher" "$deadline_owner_pid"; then
+      recovery_watcher_exact_identity="$darwin_deadline_exact_identity"
+    else
+      echo "agent:autoreview: cannot capture the exact Darwin recovery watcher identity" >&2
+      cleanup_deadline_child_before_reraise \
+        "$child" "$child_exact_identity" "$child_lineage_state" \
+        "$child_launch_barrier" "$child_launch_released" "$out_file" || true
+      trap - INT TERM
+      return 125
+    fi
+    if ! close_deadline_launch_barrier "$recovery_watcher_barrier" go; then
+      echo "agent:autoreview: cannot release the Darwin recovery watcher" >&2
+      cleanup_deadline_child_before_reraise \
+        "$child" "$child_exact_identity" "$child_lineage_state" \
+        "$child_launch_barrier" "$child_launch_released" "$out_file" || true
+      trap - INT TERM
+      return 125
+    fi
+    recovery_watcher_released=1
+    if ! wait_for_darwin_deadline_recovery_watcher_armed \
+      "$recovery_watcher_exact_identity" "$recovery_armed_file"; then
+      echo "agent:autoreview: Darwin recovery watcher did not arm before deadline work" >&2
+      close_deadline_launch_barrier "$child_launch_barrier" cancel || true
+      wait "$child" 2>/dev/null || true
+      reap_failed_darwin_deadline_recovery_watcher \
+        "$recovery_watcher" "$recovery_watcher_exact_identity" \
+        "$recovery_cancel_file"
+      recovery_watcher_reaped=1
+      settle_darwin_deadline_lineage_state "$child_lineage_state" 0 || true
+      /bin/rm -f -- "$out_file"
+      trap - INT TERM
+      return 125
+    fi
+    if ! darwin_deadline_setup_is_within_budget \
+      "$deadline_setup_started_at"; then
+      echo "agent:autoreview: Darwin deadline setup exceeded its bounded budget" >&2
+      cleanup_deadline_child_before_reraise \
+        "$child" "$child_exact_identity" "$child_lineage_state" \
+        "$child_launch_barrier" "$child_launch_released" "$out_file" || true
+      trap - INT TERM
+      return 125
+    fi
+  fi
+  if ! close_deadline_launch_barrier "$child_launch_barrier" go; then
+    echo "agent:autoreview: cannot release the deadline child launch barrier" >&2
+    cleanup_deadline_child_before_reraise \
+      "$child" "$child_exact_identity" "$child_lineage_state" \
+      "$child_launch_barrier" "$child_launch_released" "$out_file" || true
+    trap - INT TERM
+    return 125
+  fi
+  child_launch_released=1
+  while [[ "$waited" -lt "$deadline" ]]; do
+    if deadline_direct_child_is_live \
+      "$child" "$child_exact_identity"; then
+      live_status=0
+    else
+      live_status=$?
+    fi
+    case "$live_status" in
+      0) ;;
+      1) break ;;
+      *)
+        echo "agent:autoreview: cannot read the exact deadline child status" >&2
+        cleanup_deadline_child_before_reraise \
+          "$child" "$child_exact_identity" "$child_lineage_state" \
+          "$child_launch_barrier" "$child_launch_released" "$out_file" || true
+        trap - INT TERM
+        return 125
+        ;;
+    esac
     sleep 1
     waited=$((waited + 1))
   done
-  if kill -0 "$child" 2>/dev/null; then
-    kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true
-    sleep 1
-    kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true
-    wait "$child" 2>/dev/null || true
+  if deadline_direct_child_is_live \
+    "$child" "$child_exact_identity"; then
+    if ! cleanup_deadline_child_before_reraise \
+      "$child" "$child_exact_identity" "$child_lineage_state" \
+      "$child_launch_barrier" "$child_launch_released" "$out_file"; then
+      trap - INT TERM
+      return 125
+    fi
     echo "agent:autoreview: $label timed out after ${deadline}s" >&2
-    rm -f "$out_file"
     trap - INT TERM
     return 124
+  else
+    live_status=$?
+    if [[ "$live_status" -ne 1 ]]; then
+      echo "agent:autoreview: cannot read the exact deadline child status" >&2
+      cleanup_deadline_child_before_reraise \
+        "$child" "$child_exact_identity" "$child_lineage_state" \
+        "$child_launch_barrier" "$child_launch_released" "$out_file" || true
+      trap - INT TERM
+      return 125
+    fi
   fi
   if wait "$child"; then
     status=0
   else
     status=$?
+  fi
+  if [[ "$deadline_host_platform" == "Darwin" ]] &&
+    ! finalize_darwin_deadline_lineage_with_watcher \
+      "$child_lineage_state" \
+      "$recovery_watcher" "$recovery_watcher_exact_identity" \
+      "$recovery_cancel_file" "$recovery_output_file" \
+      "$recovery_stderr_file"; then
+    echo "agent:autoreview: cannot settle Darwin deadline descendants after child exit" >&2
+    status=125
+  elif [[ "$deadline_host_platform" == "Darwin" ]]; then
+    recovery_watcher_reaped=1
   fi
   trap - INT TERM
   cat "$out_file"
@@ -3359,14 +4595,246 @@ run_trusted_node_in_clean_env() {
   return "$status"
 }
 
+reap_darwin_contained_helper_jobs() {
+  local failed=0
+
+  if [[ -n "$contained_helper" && "$contained_helper_reaped" -eq 0 ]]; then
+    if [[ "$contained_helper_released" -eq 0 ]]; then
+      close_deadline_launch_barrier \
+        "$contained_helper_barrier" cancel || failed=1
+    elif finalize_darwin_deadline_lineage_with_watcher \
+      "$contained_helper_lineage_state" \
+      "$contained_recovery_watcher" \
+      "$contained_recovery_watcher_exact_identity" \
+      "$contained_recovery_cancel_file" \
+      "$contained_recovery_output_file" \
+      "$contained_recovery_stderr_file"; then
+      contained_recovery_watcher_reaped=1
+    else
+      signal_darwin_deadline_exact_identity \
+        "$contained_helper_exact_identity" KILL || true
+      failed=1
+    fi
+    wait "$contained_helper" 2>/dev/null || true
+    contained_helper_reaped=1
+  fi
+  if [[
+    -n "$contained_recovery_watcher" &&
+      "$contained_recovery_watcher_reaped" -eq 0
+  ]]; then
+    if [[ "$contained_recovery_watcher_released" -eq 0 ]]; then
+      close_deadline_launch_barrier \
+        "$contained_recovery_watcher_barrier" cancel || failed=1
+      wait "$contained_recovery_watcher" 2>/dev/null || true
+      contained_recovery_watcher_reaped=1
+    elif finalize_darwin_deadline_lineage_with_watcher \
+      "$contained_helper_lineage_state" \
+      "$contained_recovery_watcher" \
+      "$contained_recovery_watcher_exact_identity" \
+      "$contained_recovery_cancel_file" \
+      "$contained_recovery_output_file" \
+      "$contained_recovery_stderr_file"; then
+      contained_recovery_watcher_reaped=1
+    else
+      failed=1
+    fi
+  fi
+  [[ "$failed" -eq 0 ]]
+}
+
+run_darwin_contained_trusted_node() {
+  local contained_helper=""
+  local contained_helper_exact_identity=""
+  local contained_helper_lineage_state=""
+  local contained_helper_barrier=""
+  local contained_helper_released=0
+  local contained_helper_reaped=0
+  local contained_recovery_watcher=""
+  local contained_recovery_watcher_exact_identity=""
+  local contained_recovery_watcher_barrier=""
+  local contained_recovery_watcher_released=0
+  local contained_recovery_watcher_reaped=0
+  local contained_recovery_cancel_file=""
+  local contained_recovery_armed_file=""
+  local contained_recovery_output_file=""
+  local contained_recovery_stderr_file=""
+  local contained_contract_file=""
+  local contained_owner_pid
+  local contained_status=125
+  local saved_signal_traps
+  local had_monitor=0
+  local deadline_setup_started_at=0
+  local launch_go_deadline=0
+  local launch_abandon_deadline=0
+
+  prepare_deadline_signal_contract || return 125
+  if [[ "$deadline_host_platform" != "Darwin" ]]; then
+    run_trusted_node "$@"
+    return
+  fi
+  [[ -n "$darwin_autoreview_wrapper_exact_identity" ]] || return 125
+  resolved_command_is_trusted "$node_bin" || return 127
+  deadline_current_shell_pid || return 125
+  contained_owner_pid="$deadline_current_shell_pid_result"
+  prepare_darwin_deadline_lineage_state "$contained_owner_pid" || return 125
+  contained_helper_lineage_state="$darwin_deadline_lineage_state_result"
+  prepare_deadline_launch_barrier || return 125
+  contained_helper_barrier="$deadline_launch_barrier_result"
+  prepare_deadline_launch_barrier || return 125
+  contained_recovery_watcher_barrier="$deadline_launch_barrier_result"
+  prepare_deadline_recovery_control || return 125
+  contained_recovery_cancel_file="$deadline_recovery_cancel_file_result"
+  contained_recovery_armed_file="$deadline_recovery_armed_file_result"
+  contained_recovery_output_file="$deadline_recovery_output_file_result"
+  contained_recovery_stderr_file="$deadline_recovery_stderr_file_result"
+  prepare_darwin_helper_containment_contract || return 125
+  contained_contract_file="$darwin_helper_containment_file_result"
+  saved_signal_traps="$(trap -p INT TERM HUP)"
+  case "$-" in
+    *m*) had_monitor=1 ;;
+  esac
+  trap 'reap_darwin_contained_helper_jobs; trap - INT TERM HUP; eval "$saved_signal_traps"; kill -s TERM "$$"' TERM
+  trap 'reap_darwin_contained_helper_jobs; trap - INT TERM HUP; eval "$saved_signal_traps"; kill -s INT "$$"' INT
+  trap 'reap_darwin_contained_helper_jobs; trap - INT TERM HUP; eval "$saved_signal_traps"; kill -s HUP "$$"' HUP
+  deadline_setup_started_at="$SECONDS"
+  launch_go_deadline=$((
+    deadline_setup_started_at + darwin_deadline_launch_go_seconds
+  ))
+  launch_abandon_deadline=$((
+    deadline_setup_started_at + darwin_deadline_launch_abandon_seconds
+  ))
+  set -m
+  exec_darwin_contained_helper_after_barrier \
+    "$contained_helper_barrier" "$contained_owner_pid" \
+    "$launch_go_deadline" "$launch_abandon_deadline" \
+    "$contained_contract_file" "$@" &
+  contained_helper=$!
+  run_darwin_deadline_recovery_watcher \
+    "$contained_recovery_watcher_barrier" "$contained_owner_pid" \
+    "$launch_go_deadline" "$launch_abandon_deadline" \
+    "$contained_helper_lineage_state" \
+    "$darwin_autoreview_wrapper_exact_identity" \
+    "$contained_recovery_cancel_file" "$contained_recovery_armed_file" 7290 \
+    >"$contained_recovery_output_file" \
+    2>"$contained_recovery_stderr_file" &
+  contained_recovery_watcher=$!
+  if [[ "$had_monitor" -eq 0 ]]; then
+    set +m
+  fi
+  if ! capture_darwin_deadline_exact_child \
+    "$contained_helper" "$contained_owner_pid"; then
+    echo "agent:autoreview: cannot capture the exact Darwin helper identity" >&2
+    reap_darwin_contained_helper_jobs || true
+    trap - INT TERM HUP
+    eval "$saved_signal_traps"
+    return 125
+  fi
+  contained_helper_exact_identity="$darwin_deadline_exact_identity"
+  if ! bind_darwin_deadline_lineage_state \
+    "$contained_helper_lineage_state" \
+    "$contained_helper" "$contained_owner_pid"; then
+    echo "agent:autoreview: cannot bind the Darwin helper lineage" >&2
+    reap_darwin_contained_helper_jobs || true
+    trap - INT TERM HUP
+    eval "$saved_signal_traps"
+    return 125
+  fi
+  if ! capture_darwin_deadline_exact_child \
+    "$contained_recovery_watcher" "$contained_owner_pid"; then
+    echo "agent:autoreview: cannot capture the exact Darwin helper recovery watcher" >&2
+    reap_darwin_contained_helper_jobs || true
+    trap - INT TERM HUP
+    eval "$saved_signal_traps"
+    return 125
+  fi
+  contained_recovery_watcher_exact_identity="$darwin_deadline_exact_identity"
+  if ! publish_darwin_helper_containment_contract \
+    "$contained_contract_file" \
+    "$contained_helper" "$contained_owner_pid" \
+    "$contained_helper_exact_identity" \
+    "$contained_helper_lineage_state"; then
+    echo "agent:autoreview: cannot publish the Darwin helper containment contract" >&2
+    reap_darwin_contained_helper_jobs || true
+    trap - INT TERM HUP
+    eval "$saved_signal_traps"
+    return 125
+  fi
+  if ! close_deadline_launch_barrier \
+    "$contained_recovery_watcher_barrier" go; then
+    echo "agent:autoreview: cannot release the Darwin helper recovery watcher" >&2
+    reap_darwin_contained_helper_jobs || true
+    trap - INT TERM HUP
+    eval "$saved_signal_traps"
+    return 125
+  fi
+  contained_recovery_watcher_released=1
+  if ! wait_for_darwin_deadline_recovery_watcher_armed \
+    "$contained_recovery_watcher_exact_identity" \
+    "$contained_recovery_armed_file"; then
+    echo "agent:autoreview: Darwin helper recovery watcher did not arm" >&2
+    close_deadline_launch_barrier "$contained_helper_barrier" cancel || true
+    wait "$contained_helper" 2>/dev/null || true
+    contained_helper_reaped=1
+    reap_failed_darwin_deadline_recovery_watcher \
+      "$contained_recovery_watcher" \
+      "$contained_recovery_watcher_exact_identity" \
+      "$contained_recovery_cancel_file"
+    contained_recovery_watcher_reaped=1
+    settle_darwin_deadline_lineage_state \
+      "$contained_helper_lineage_state" 0 || true
+    trap - INT TERM HUP
+    eval "$saved_signal_traps"
+    return 125
+  fi
+  if ! darwin_deadline_setup_is_within_budget \
+    "$deadline_setup_started_at"; then
+    echo "agent:autoreview: Darwin helper setup exceeded its bounded budget" >&2
+    reap_darwin_contained_helper_jobs || true
+    trap - INT TERM HUP
+    eval "$saved_signal_traps"
+    return 125
+  fi
+  if ! close_deadline_launch_barrier "$contained_helper_barrier" go; then
+    echo "agent:autoreview: cannot release the Darwin contained helper" >&2
+    reap_darwin_contained_helper_jobs || true
+    trap - INT TERM HUP
+    eval "$saved_signal_traps"
+    return 125
+  fi
+  contained_helper_released=1
+  if wait "$contained_helper"; then
+    contained_status=0
+  else
+    contained_status=$?
+  fi
+  contained_helper_reaped=1
+  if ! finalize_darwin_deadline_lineage_with_watcher \
+    "$contained_helper_lineage_state" \
+    "$contained_recovery_watcher" \
+    "$contained_recovery_watcher_exact_identity" \
+    "$contained_recovery_cancel_file" \
+    "$contained_recovery_output_file" \
+    "$contained_recovery_stderr_file"; then
+    echo "agent:autoreview: cannot settle the Darwin contained helper lineage" >&2
+    contained_status=125
+  else
+    contained_recovery_watcher_reaped=1
+  fi
+  trap - INT TERM HUP
+  eval "$saved_signal_traps"
+  resolved_command_is_trusted "$node_bin" || return 127
+  return "$contained_status"
+}
+
 run_helper() {
   if [[ -n "$attested_helper_override" && "$helper" == "$default_helper" ]]; then
     run_attested_helper "$@"
   elif [[ -n "$prepared_helper_override" ]]; then
     PATH="$external_command_path" \
-      run_trusted_node "$prepared_helper_override" "$@"
+      run_darwin_contained_trusted_node "$prepared_helper_override" "$@"
   elif [[ "$helper" == "$default_helper" ]]; then
-    PATH="$external_command_path" run_trusted_node "$helper" "$@"
+    PATH="$external_command_path" \
+      run_darwin_contained_trusted_node "$helper" "$@"
   else
     PATH="$external_command_path" /usr/bin/env \
       -u NODE_OPTIONS \
@@ -3427,7 +4895,8 @@ run_attested_helper() {
     echo "agent:autoreview: wrapper-attested helper runtime is unavailable: $attested_helper" >&2
     return 127
   fi
-  PATH="$external_command_path" run_trusted_node "$attested_helper" "$@" || status=$?
+  PATH="$external_command_path" \
+    run_darwin_contained_trusted_node "$attested_helper" "$@" || status=$?
   if [[ -n "$attested_helper_override" ]]; then
     if ! attested_helper_runtime_matches_manifest; then
       echo "agent:autoreview: wrapper-attested helper runtime changed during launch" >&2
@@ -3458,16 +4927,13 @@ run_indexer_handler_invariant_classifier() {
   return "$status"
 }
 
-run_external_command() {
-  PATH="$external_command_path" run_trusted_external "$@"
-}
-
 exec_helper() {
   if [[ -n "$prepared_helper_override" ]]; then
-    PATH="$external_command_path" run_trusted_node \
+    PATH="$external_command_path" run_darwin_contained_trusted_node \
       "$prepared_helper_override" "$@"
   elif [[ "$helper" == "$default_helper" ]]; then
-    PATH="$external_command_path" run_trusted_node "$helper" "$@"
+    PATH="$external_command_path" \
+      run_darwin_contained_trusted_node "$helper" "$@"
   else
     PATH="$external_command_path" /usr/bin/env \
       -u NODE_OPTIONS \
@@ -3957,6 +5423,14 @@ verify_current_helper_matches_ref() {
   local helper_paths=(
     scripts/agent-autoreview.mjs
     scripts/agent-autoreview-core.mjs
+    scripts/agent-autoreview-secret-suppressions.json
+    scripts/gate/darwin-process-identity.c
+    scripts/gate/darwin-process-identity-runtime.inc.c
+    scripts/gate/darwin-process-identity-helper.mjs
+    scripts/gate/darwin-process-lineage-model.mjs
+    scripts/gate/darwin-process-lineage-state.mjs
+    scripts/gate/darwin-process-lineage.mjs
+    scripts/gate/mapped-command-process-identity.mjs
   )
 
   for relative_path in "${helper_paths[@]}"; do
@@ -4009,6 +5483,14 @@ verify_autoreview_runtime_matches_baseline() {
     scripts/agent-autoreview.sh
     scripts/agent-autoreview.mjs
     scripts/agent-autoreview-core.mjs
+    scripts/agent-autoreview-secret-suppressions.json
+    scripts/gate/darwin-process-identity.c
+    scripts/gate/darwin-process-identity-runtime.inc.c
+    scripts/gate/darwin-process-identity-helper.mjs
+    scripts/gate/darwin-process-lineage-model.mjs
+    scripts/gate/darwin-process-lineage-state.mjs
+    scripts/gate/darwin-process-lineage.mjs
+    scripts/gate/mapped-command-process-identity.mjs
   )
 
   for relative_path in "${runtime_paths[@]}"; do
@@ -4056,6 +5538,14 @@ materialize_trusted_autoreview_runtime() {
   local runtime_paths=(
     scripts/agent-autoreview.mjs
     scripts/agent-autoreview-core.mjs
+    scripts/agent-autoreview-secret-suppressions.json
+    scripts/gate/darwin-process-identity.c
+    scripts/gate/darwin-process-identity-runtime.inc.c
+    scripts/gate/darwin-process-identity-helper.mjs
+    scripts/gate/darwin-process-lineage-model.mjs
+    scripts/gate/darwin-process-lineage-state.mjs
+    scripts/gate/darwin-process-lineage.mjs
+    scripts/gate/mapped-command-process-identity.mjs
   )
 
   for relative_path in "${runtime_paths[@]}"; do
@@ -4083,8 +5573,10 @@ materialize_trusted_autoreview_runtime() {
     total_size=$((total_size + size_value))
   done
 
-  mkdir -p "$runtime_dir/scripts"
+  mkdir "$runtime_dir/scripts"
   /bin/chmod 0700 "$runtime_dir/scripts"
+  mkdir "$runtime_dir/scripts/gate"
+  /bin/chmod 0700 "$runtime_dir/scripts/gate"
   for relative_path in "${runtime_paths[@]}"; do
     output_path="$runtime_dir/$relative_path"
     if ! git_output "$repo" cat-file blob \
@@ -4157,7 +5649,26 @@ wrapper_runtime_source_snapshot() {
       last if $parent eq $current;
       $current = $parent;
     }
-    for my $name ("agent-autoreview.mjs", "agent-autoreview-core.mjs") {
+    my @source_files = (
+      "agent-autoreview.mjs",
+      "agent-autoreview-core.mjs",
+      "agent-autoreview-secret-suppressions.json",
+      "gate/darwin-process-identity.c",
+      "gate/darwin-process-identity-runtime.inc.c",
+      "gate/darwin-process-identity-helper.mjs",
+      "gate/darwin-process-lineage-model.mjs",
+      "gate/darwin-process-lineage-state.mjs",
+      "gate/darwin-process-lineage.mjs",
+      "gate/mapped-command-process-identity.mjs",
+    );
+    my @gate_stat = lstat("$source_dir/gate");
+    exit 1 if !@gate_stat ||
+      !S_ISDIR($gate_stat[2]) ||
+      S_ISLNK($gate_stat[2]) ||
+      ($gate_stat[4] != 0 && $gate_stat[4] != $euid) ||
+      ($gate_stat[2] & 0022);
+    print join(":", "directory", @gate_stat[0, 1, 2, 4, 7, 9, 10]), "\n";
+    for my $name (@source_files) {
       my @stat = lstat("$source_dir/$name");
       exit 1 if !@stat ||
         !S_ISREG($stat[2]) ||
@@ -4177,9 +5688,18 @@ wrapper_runtime_source_acl_is_trusted() {
   local source_file
   for source_file in \
     "$source_scripts_dir/agent-autoreview.mjs" \
-    "$source_scripts_dir/agent-autoreview-core.mjs"; do
+    "$source_scripts_dir/agent-autoreview-core.mjs" \
+    "$source_scripts_dir/agent-autoreview-secret-suppressions.json" \
+    "$source_scripts_dir/gate/darwin-process-identity.c" \
+    "$source_scripts_dir/gate/darwin-process-identity-runtime.inc.c" \
+    "$source_scripts_dir/gate/darwin-process-identity-helper.mjs" \
+    "$source_scripts_dir/gate/darwin-process-lineage-model.mjs" \
+    "$source_scripts_dir/gate/darwin-process-lineage-state.mjs" \
+    "$source_scripts_dir/gate/darwin-process-lineage.mjs" \
+    "$source_scripts_dir/gate/mapped-command-process-identity.mjs"; do
     path_acl_is_trusted "$source_file" || return 1
   done
+  path_acl_is_trusted "$source_scripts_dir/gate" || return 1
   while true; do
     path_acl_is_trusted "$current" || return 1
     [[ "$current" != "/" ]] || break
@@ -4194,6 +5714,8 @@ materialize_filesystem_autoreview_runtime() {
   local runtime_dir="$2"
   mkdir "$runtime_dir/scripts"
   /bin/chmod 0700 "$runtime_dir/scripts"
+  mkdir "$runtime_dir/scripts/gate"
+  /bin/chmod 0700 "$runtime_dir/scripts/gate"
   # Copy the wrapper sibling runtime before an explicit helper can run. Each
   # source is opened no-follow and revalidated after the private copy closes.
   # shellcheck disable=SC2016
@@ -4202,9 +5724,17 @@ materialize_filesystem_autoreview_runtime() {
     use warnings;
 
     my ($source_dir, $runtime_dir, $euid) = @ARGV;
-    my @names = (
-      "agent-autoreview.mjs",
-      "agent-autoreview-core.mjs",
+    my @files = (
+      [".", "agent-autoreview.mjs"],
+      [".", "agent-autoreview-core.mjs"],
+      [".", "agent-autoreview-secret-suppressions.json"],
+      ["gate", "darwin-process-identity.c"],
+      ["gate", "darwin-process-identity-runtime.inc.c"],
+      ["gate", "darwin-process-identity-helper.mjs"],
+      ["gate", "darwin-process-lineage-model.mjs"],
+      ["gate", "darwin-process-lineage-state.mjs"],
+      ["gate", "darwin-process-lineage.mjs"],
+      ["gate", "mapped-command-process-identity.mjs"],
     );
     my $aggregate = 0;
     my $aggregate_limit = 2 * 1024 * 1024;
@@ -4216,11 +5746,30 @@ materialize_filesystem_autoreview_runtime() {
         !S_ISDIR($source_dir_before[2]) ||
         ($source_dir_before[4] != 0 && $source_dir_before[4] != $euid) ||
         ($source_dir_before[2] & 0022);
+    sysopen(
+      my $source_gate_dir_fh,
+      "$source_dir/gate",
+      O_RDONLY | O_DIRECTORY | O_NOFOLLOW,
+    ) or die "cannot pin wrapper runtime gate directory: $source_dir/gate: $!";
+    my @source_gate_dir_before = stat($source_gate_dir_fh);
+    die "unsafe wrapper runtime gate directory: $source_dir/gate"
+      if !@source_gate_dir_before ||
+        !S_ISDIR($source_gate_dir_before[2]) ||
+        ($source_gate_dir_before[4] != 0 &&
+          $source_gate_dir_before[4] != $euid) ||
+        ($source_gate_dir_before[2] & 0022);
     chdir($source_dir_fh)
       or die "cannot enter pinned wrapper runtime source directory: $source_dir: $!";
-    for my $name (@names) {
-      my $source = "$source_dir/$name";
-      my $destination = "$runtime_dir/scripts/$name";
+    for my $file (@files) {
+      my ($directory, $name) = @{$file};
+      my $relative = $directory eq "." ? $name : "$directory/$name";
+      my $source = "$source_dir/$relative";
+      my $destination = "$runtime_dir/scripts/$relative";
+      my $directory_fh = $directory eq "."
+        ? $source_dir_fh
+        : $source_gate_dir_fh;
+      chdir($directory_fh)
+        or die "cannot enter pinned wrapper runtime source directory: $source: $!";
       sysopen(my $input, $name, O_RDONLY | O_NOFOLLOW)
         or die "cannot open wrapper runtime source: $source: $!";
       binmode($input);
@@ -4284,6 +5833,19 @@ materialize_filesystem_autoreview_runtime() {
           ($published[2] & 07777) != $mode ||
           $published[7] != $before[7];
     }
+    chdir($source_dir_fh)
+      or die "cannot re-enter pinned wrapper runtime source directory: $source_dir: $!";
+    my @source_gate_dir_after = stat($source_gate_dir_fh);
+    my @source_gate_dir_path = lstat("$source_dir/gate");
+    die "wrapper runtime gate directory changed while copying: $source_dir/gate"
+      if !@source_gate_dir_after || !@source_gate_dir_path;
+    for my $index (0, 1, 2, 3, 4, 7, 9, 10) {
+      die "wrapper runtime gate directory changed while copying: $source_dir/gate"
+        if $source_gate_dir_before[$index] != $source_gate_dir_after[$index] ||
+          $source_gate_dir_before[$index] != $source_gate_dir_path[$index];
+    }
+    close($source_gate_dir_fh)
+      or die "cannot close wrapper runtime gate directory: $source_dir/gate: $!";
     my @source_dir_after = stat($source_dir_fh);
     my @source_dir_path = lstat($source_dir);
     die "wrapper runtime source directory changed while copying: $source_dir"
@@ -6073,33 +7635,127 @@ run_capture_pipeline() {
   fi
 }
 
-# Bound one capture with the wall clock the capture budget has left. The pipeline
-# runs as its own process group (`set -m`), so an expiry signals the capture
-# command and the byte limiter together instead of leaving either behind, and the
-# watchdog is a group leader too, so killing it takes its `sleep` with it. The
-# parent blocks in `wait` rather than polling, so a normal capture pays no added
-# latency; `wait` stderr is discarded because a signalled job would otherwise
-# print a job-control notice over the refusal this function exists to produce.
-# The watchdog records the expiry in $timeout_file before signalling, so the
-# caller distinguishes a deadline from any other non-zero capture.
+# Bound one capture with the wall clock the capture budget has left. The work
+# child uses the same pre-spawn Darwin lineage contract as run_with_deadline.
+# The watchdog is one fixed-path Perl process. It cannot create descendants and
+# only publishes the timeout marker. The parent owns every signal and reap.
+run_capture_deadline_watchdog() {
+  local action_file="$1"
+  local owner_pid="$2"
+  local launch_go_deadline="$3"
+  local launch_abandon_deadline="$4"
+  local deadline="$5"
+  local status_file="$6"
+  local timeout_file="$7"
+
+  wait_for_deadline_launch_barrier \
+    "$action_file" "$owner_pid" \
+    "$launch_go_deadline" "$launch_abandon_deadline" || return 125
+  # Replace the captured Bash root. The watchdog then remains one exact process
+  # and cannot create external descendants.
+  # shellcheck disable=SC2016 # The embedded Perl program is intentionally literal.
+  exec /usr/bin/env -i \
+    PATH=/usr/bin:/bin \
+    LC_ALL=C \
+    /usr/bin/perl -MFcntl=:DEFAULT,:mode -e '
+      use strict;
+      use warnings;
+      my ($seconds, $status_path, $timeout_path) = @ARGV;
+      exit 2 if !defined($seconds) || $seconds !~ /^[1-9][0-9]*$/;
+      select(undef, undef, undef, $seconds);
+      exit 0 if -s $status_path;
+      my @stat = lstat($timeout_path);
+      exit 2 if !@stat || !S_ISREG($stat[2]) || S_ISLNK($stat[2]) ||
+        $stat[4] != $>;
+      sysopen(
+        my $handle,
+        $timeout_path,
+        O_WRONLY | O_TRUNC | O_NOFOLLOW,
+      ) or exit 2;
+      print {$handle} "timeout\n" or exit 2;
+      close($handle) or exit 2;
+    ' "$deadline" "$status_file" "$timeout_file"
+}
+
 # Reap whatever `run_capture_with_deadline` has created so far and remove its
 # bookkeeping. Reads that function's locals by dynamic scope, and every step is
-# guarded on the pid actually existing, so it is safe to arm before either job
-# is started and safe to run twice. The watchdog dies outright; the capture tree
-# gets a SIGTERM first, since an interrupted capture is not the one the deadline
-# bounds and can afford an orderly stop.
+# guarded on the pid actually existing. Unreleased barrier children receive a
+# cancel decision and are reaped without running their target. Released Darwin
+# work settles through its exact lineage. Linux keeps process-group cleanup.
 reap_capture_jobs() {
-  if [[ -n "$watchdog" ]]; then
-    kill -KILL "-$watchdog" 2>/dev/null ||
-      kill -KILL "$watchdog" 2>/dev/null || true
+  local failed=0
+  if [[ -n "$watchdog" && "$watchdog_reaped" -eq 0 ]]; then
+    if [[ "$watchdog_launch_released" -eq 0 ]]; then
+      close_deadline_launch_barrier \
+        "$watchdog_launch_barrier" cancel || failed=1
+    elif [[ "$deadline_host_platform" != "Linux" ]]; then
+      signal_deadline_process_or_group \
+        "$watchdog" KILL "$watchdog_exact_identity" || failed=1
+    fi
+    if [[ "$deadline_host_platform" == "Linux" ]]; then
+      terminate_and_reap_linux_deadline_child \
+        "$watchdog" "$watchdog_exact_identity" || failed=1
+    else
+      wait "$watchdog" 2>/dev/null || true
+    fi
+    watchdog_reaped=1
   fi
-  if [[ -n "$child" ]]; then
-    kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true
-    sleep 1
-    kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true
-    wait "$child" 2>/dev/null || true
+  if [[ -n "$child" && "$child_reaped" -eq 0 ]]; then
+    if [[ "$child_launch_released" -eq 0 ]]; then
+      close_deadline_launch_barrier \
+        "$child_launch_barrier" cancel || failed=1
+      if [[ "$deadline_host_platform" == "Linux" ]]; then
+        terminate_and_reap_linux_deadline_child \
+          "$child" "$child_exact_identity" || failed=1
+        child_reaped=1
+      fi
+    elif [[ "$deadline_host_platform" == "Darwin" ]]; then
+      if ! finalize_darwin_deadline_lineage_with_watcher \
+        "$child_lineage_state" \
+        "$recovery_watcher" "$recovery_watcher_exact_identity" \
+        "$recovery_cancel_file" "$recovery_output_file" \
+        "$recovery_stderr_file"; then
+        signal_darwin_deadline_exact_identity \
+          "$child_exact_identity" KILL || true
+        failed=1
+      else
+        recovery_watcher_reaped=1
+      fi
+    else
+      terminate_and_reap_linux_deadline_child \
+        "$child" "$child_exact_identity" || failed=1
+      child_reaped=1
+    fi
+    if [[ "$child_reaped" -eq 0 ]]; then
+      wait "$child" 2>/dev/null || true
+      child_reaped=1
+    fi
   fi
-  rm -f "$timeout_file" "$status_file" "$partial_file"
+  if [[
+    "$deadline_host_platform" == "Darwin" &&
+      -n "$recovery_watcher" &&
+      "$recovery_watcher_reaped" -eq 0
+  ]]; then
+    if [[ "$recovery_watcher_released" -eq 0 ]]; then
+      close_deadline_launch_barrier \
+        "$recovery_watcher_barrier" cancel || failed=1
+      wait "$recovery_watcher" 2>/dev/null || true
+      recovery_watcher_reaped=1
+    elif finalize_darwin_deadline_lineage_with_watcher \
+      "$child_lineage_state" \
+      "$recovery_watcher" "$recovery_watcher_exact_identity" \
+      "$recovery_cancel_file" "$recovery_output_file" \
+      "$recovery_stderr_file"; then
+      recovery_watcher_reaped=1
+    else
+      failed=1
+    fi
+  fi
+  /bin/rm -f -- "$timeout_file" "$status_file" "$partial_file"
+  if [[ "$failed" -ne 0 ]]; then
+    echo "agent:autoreview: cannot settle an exact capture deadline child" >&2
+    return 2
+  fi
 }
 
 run_capture_with_deadline() {
@@ -6108,11 +7764,62 @@ run_capture_with_deadline() {
   local status_file="$3"
   local partial_file="$4"
   shift 4
-  local child
-  local watchdog
+  local child=""
+  local child_exact_identity=""
+  local child_lineage_state=""
+  local child_launch_barrier=""
+  local child_launch_released=0
+  local child_reaped=0
+  local recovery_watcher=""
+  local recovery_watcher_exact_identity=""
+  local recovery_watcher_barrier=""
+  local recovery_watcher_released=0
+  local recovery_watcher_reaped=0
+  local recovery_cancel_file=""
+  local recovery_armed_file=""
+  local recovery_output_file=""
+  local recovery_stderr_file=""
+  local recovery_timeout
+  local watchdog=""
+  local watchdog_exact_identity=""
+  local watchdog_launch_barrier=""
+  local watchdog_launch_released=0
+  local watchdog_reaped=0
+  local deadline_owner_pid=""
+  local identity_status
+  local live_status
+  local watchdog_live_status
   local status
   local saved_signal_traps
   local had_monitor=0
+  local host_signal_status
+  local deadline_setup_started_at=0
+  local launch_go_seconds="$deadline_launch_go_default_seconds"
+  local launch_abandon_seconds="$deadline_launch_abandon_default_seconds"
+  local launch_go_deadline=0
+  local launch_abandon_deadline=0
+  prepare_deadline_signal_contract || return 125
+  deadline_current_shell_pid || return 125
+  deadline_owner_pid="$deadline_current_shell_pid_result"
+  [[ "$deadline_owner_pid" =~ ^[1-9][0-9]*$ ]] || return 125
+  if [[ "$deadline_host_platform" == "Darwin" ]]; then
+    prepare_darwin_deadline_lineage_state "$deadline_owner_pid" || return 125
+    child_lineage_state="$darwin_deadline_lineage_state_result"
+    prepare_deadline_launch_barrier || return 125
+    recovery_watcher_barrier="$deadline_launch_barrier_result"
+    prepare_deadline_recovery_control || return 125
+    recovery_cancel_file="$deadline_recovery_cancel_file_result"
+    recovery_armed_file="$deadline_recovery_armed_file_result"
+    recovery_output_file="$deadline_recovery_output_file_result"
+    recovery_stderr_file="$deadline_recovery_stderr_file_result"
+    recovery_timeout=$((deadline + 90))
+    launch_go_seconds="$darwin_deadline_launch_go_seconds"
+    launch_abandon_seconds="$darwin_deadline_launch_abandon_seconds"
+  fi
+  prepare_deadline_launch_barrier || return 125
+  child_launch_barrier="$deadline_launch_barrier_result"
+  prepare_deadline_launch_barrier || return 125
+  watchdog_launch_barrier="$deadline_launch_barrier_result"
   # Unlike run_with_deadline, this runs in the wrapper's own shell, so `trap -`
   # alone would leave every later stage without whatever INT/TERM handling the
   # caller had. Snapshot the caller's disposition and put it back on every exit
@@ -6120,6 +7827,15 @@ run_capture_with_deadline() {
   # `trap -p` reports the caller's traps through a command substitution, and an
   # absent trap snapshots as an empty string that evaluates to nothing.
   saved_signal_traps="$(trap -p INT TERM HUP)"
+  if can_signal_deadline_process_group; then
+    :
+  else
+    host_signal_status=$?
+    case "$host_signal_status" in
+      1) ;;
+      *) return 125 ;;
+    esac
+  fi
   case "$-" in
     *m*) had_monitor=1 ;;
   esac
@@ -6134,68 +7850,259 @@ run_capture_with_deadline() {
   # the tree when a session closes. Each trap re-raises after restoring the
   # caller's disposition, so the interrupted script still dies with the expected
   # signal semantics.
-  child=""
-  watchdog=""
   trap 'reap_capture_jobs; trap - INT TERM HUP; eval "$saved_signal_traps"; kill -s TERM "$$"' TERM
   trap 'reap_capture_jobs; trap - INT TERM HUP; eval "$saved_signal_traps"; kill -s INT "$$"' INT
   trap 'reap_capture_jobs; trap - INT TERM HUP; eval "$saved_signal_traps"; kill -s HUP "$$"' HUP
+  deadline_setup_started_at="$SECONDS"
+  launch_go_deadline=$((deadline_setup_started_at + launch_go_seconds))
+  launch_abandon_deadline=$((
+    deadline_setup_started_at + launch_abandon_seconds
+  ))
   set -m
-  "$@" &
+  exec_after_deadline_launch_barrier \
+    "$child_launch_barrier" "$deadline_owner_pid" \
+    "$launch_go_deadline" "$launch_abandon_deadline" "$@" &
   child=$!
-  (
-    # This subshell inherits errexit, and everything it does is best-effort
-    # signalling. Left on, a failed step would abort the watchdog before the
-    # kill below -- a read-only or full $TMPDIR would make the marker write
-    # fail and silently disarm the deadline, which is the one mechanism here
-    # that must not fail open. Explicit `exit 0` still ends it deliberately.
-    set +e
-    sleep "$deadline"
-    # Say nothing about a capture that already finished: the parent has not
-    # necessarily reaped this watchdog yet, and a marker written over a
-    # completed capture would refuse a run that had nothing wrong with it.
-    # `kill -0` alone is not that check -- a child that exited moments ago is a
-    # zombie until the parent's `wait` reaps it, and a zombie and its group both
-    # still accept the signal. The pipeline renames its statuses into place as
-    # its last act, so that file appearing is what says it finished.
-    kill -0 "-$child" 2>/dev/null || kill -0 "$child" 2>/dev/null || exit 0
-    if [[ -s "$status_file" ]]; then
-      exit 0
-    fi
-    # If this write cannot land the kill still must, so the caller sees a
-    # killed capture rather than a stalled one; it then refuses on the missing
-    # statuses instead of naming the deadline.
-    printf 'timeout\n' >"$timeout_file" || true
-    # SIGKILL straight away, with no SIGTERM grace: a grace period would run
-    # after the deadline, so a capture that ignored SIGTERM would outlast the
-    # budget by exactly the grace. Nothing in a capture needs an orderly
-    # shutdown -- Git holds no lock these captures take and writes no temporary
-    # file -- and the refusal discards the output either way.
-    kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true
-  ) &
+  run_capture_deadline_watchdog \
+    "$watchdog_launch_barrier" "$deadline_owner_pid" \
+    "$launch_go_deadline" "$launch_abandon_deadline" \
+    "$deadline" "$status_file" "$timeout_file" &
   watchdog=$!
+  if [[ "$deadline_host_platform" == "Darwin" ]]; then
+    run_darwin_deadline_recovery_watcher \
+      "$recovery_watcher_barrier" "$deadline_owner_pid" \
+      "$launch_go_deadline" "$launch_abandon_deadline" \
+      "$child_lineage_state" "$darwin_autoreview_wrapper_exact_identity" \
+      "$recovery_cancel_file" "$recovery_armed_file" "$recovery_timeout" \
+      >"$recovery_output_file" 2>"$recovery_stderr_file" &
+    recovery_watcher=$!
+  fi
+  if [[ "$deadline_host_platform" == "Darwin" ]]; then
+    if capture_darwin_deadline_exact_child \
+      "$child" "$deadline_owner_pid"; then
+      child_exact_identity="$darwin_deadline_exact_identity"
+    else
+      identity_status=$?
+      echo "agent:autoreview: cannot capture the exact Darwin capture child identity" >&2
+      reap_capture_jobs || true
+      if [[ "$had_monitor" -eq 0 ]]; then
+        set +m
+      fi
+      trap - INT TERM HUP
+      eval "$saved_signal_traps"
+      return 125
+    fi
+    if ! bind_darwin_deadline_lineage_state \
+      "$child_lineage_state" "$child" "$deadline_owner_pid"; then
+      echo "agent:autoreview: cannot bind the Darwin capture child lineage" >&2
+      reap_capture_jobs || true
+      if [[ "$had_monitor" -eq 0 ]]; then
+        set +m
+      fi
+      trap - INT TERM HUP
+      eval "$saved_signal_traps"
+      return 125
+    fi
+    if capture_darwin_deadline_exact_child \
+      "$watchdog" "$deadline_owner_pid"; then
+      watchdog_exact_identity="$darwin_deadline_exact_identity"
+    else
+      echo "agent:autoreview: cannot capture the exact Darwin capture watchdog identity" >&2
+      reap_capture_jobs || true
+      if [[ "$had_monitor" -eq 0 ]]; then
+        set +m
+      fi
+      trap - INT TERM HUP
+      eval "$saved_signal_traps"
+      return 125
+    fi
+    if capture_darwin_deadline_exact_child \
+      "$recovery_watcher" "$deadline_owner_pid"; then
+      recovery_watcher_exact_identity="$darwin_deadline_exact_identity"
+    else
+      echo "agent:autoreview: cannot capture the exact Darwin capture recovery watcher identity" >&2
+      reap_capture_jobs || true
+      if [[ "$had_monitor" -eq 0 ]]; then
+        set +m
+      fi
+      trap - INT TERM HUP
+      eval "$saved_signal_traps"
+      return 125
+    fi
+    if ! close_deadline_launch_barrier "$recovery_watcher_barrier" go; then
+      echo "agent:autoreview: cannot release the Darwin capture recovery watcher" >&2
+      reap_capture_jobs || true
+      if [[ "$had_monitor" -eq 0 ]]; then
+        set +m
+      fi
+      trap - INT TERM HUP
+      eval "$saved_signal_traps"
+      return 125
+    fi
+    recovery_watcher_released=1
+    if ! wait_for_darwin_deadline_recovery_watcher_armed \
+      "$recovery_watcher_exact_identity" "$recovery_armed_file"; then
+      echo "agent:autoreview: Darwin capture recovery watcher did not arm" >&2
+      close_deadline_launch_barrier "$watchdog_launch_barrier" cancel || true
+      close_deadline_launch_barrier "$child_launch_barrier" cancel || true
+      wait "$watchdog" 2>/dev/null || true
+      wait "$child" 2>/dev/null || true
+      watchdog_reaped=1
+      child_reaped=1
+      reap_failed_darwin_deadline_recovery_watcher \
+        "$recovery_watcher" "$recovery_watcher_exact_identity" \
+        "$recovery_cancel_file"
+      recovery_watcher_reaped=1
+      settle_darwin_deadline_lineage_state "$child_lineage_state" 0 || true
+      if [[ "$had_monitor" -eq 0 ]]; then
+        set +m
+      fi
+      /bin/rm -f -- "$timeout_file" "$status_file" "$partial_file"
+      trap - INT TERM HUP
+      eval "$saved_signal_traps"
+      return 125
+    fi
+    if ! darwin_deadline_setup_is_within_budget \
+      "$deadline_setup_started_at"; then
+      echo "agent:autoreview: Darwin capture setup exceeded its bounded budget" >&2
+      reap_capture_jobs || true
+      if [[ "$had_monitor" -eq 0 ]]; then
+        set +m
+      fi
+      trap - INT TERM HUP
+      eval "$saved_signal_traps"
+      return 125
+    fi
+  fi
+  if ! close_deadline_launch_barrier "$watchdog_launch_barrier" go; then
+    echo "agent:autoreview: cannot release the capture watchdog launch barrier" >&2
+    reap_capture_jobs || true
+    if [[ "$had_monitor" -eq 0 ]]; then
+      set +m
+    fi
+    trap - INT TERM HUP
+    eval "$saved_signal_traps"
+    return 125
+  fi
+  watchdog_launch_released=1
+  if ! close_deadline_launch_barrier "$child_launch_barrier" go; then
+    echo "agent:autoreview: cannot release the capture child launch barrier" >&2
+    reap_capture_jobs || true
+    if [[ "$had_monitor" -eq 0 ]]; then
+      set +m
+    fi
+    trap - INT TERM HUP
+    eval "$saved_signal_traps"
+    return 125
+  fi
+  child_launch_released=1
   if [[ "$had_monitor" -eq 0 ]]; then
     set +m
   fi
+  while [[ ! -s "$status_file" && ! -s "$timeout_file" ]]; do
+    if deadline_process_or_group_is_live \
+      "$child" "$child_exact_identity"; then
+      live_status=0
+    else
+      live_status=$?
+    fi
+    case "$live_status" in
+      0) ;;
+      1) break ;;
+      *)
+        echo "agent:autoreview: cannot read the exact capture child status" >&2
+        reap_capture_jobs || true
+        trap - INT TERM HUP
+        eval "$saved_signal_traps"
+        return 125
+        ;;
+    esac
+    if deadline_direct_child_is_live \
+      "$watchdog" "$watchdog_exact_identity"; then
+      watchdog_live_status=0
+    else
+      watchdog_live_status=$?
+    fi
+    case "$watchdog_live_status" in
+      0) ;;
+      1)
+        # The watchdog publishes its terminal marker immediately before it
+        # exits. Recheck both terminal markers after observing that exit so a
+        # marker written during this poll body is not misclassified as a crash.
+        if [[ -s "$status_file" || -s "$timeout_file" ]]; then
+          break
+        fi
+        echo "agent:autoreview: capture deadline watchdog exited without a completion marker" >&2
+        reap_capture_jobs || true
+        trap - INT TERM HUP
+        eval "$saved_signal_traps"
+        return 125
+        ;;
+      *)
+        echo "agent:autoreview: cannot read the exact capture watchdog status" >&2
+        reap_capture_jobs || true
+        trap - INT TERM HUP
+        eval "$saved_signal_traps"
+        return 125
+        ;;
+    esac
+    sleep 0.05
+  done
+  if [[ -s "$timeout_file" ]]; then
+    if [[ "$deadline_host_platform" == "Darwin" ]]; then
+      if ! finalize_darwin_deadline_lineage_with_watcher \
+        "$child_lineage_state" \
+        "$recovery_watcher" "$recovery_watcher_exact_identity" \
+        "$recovery_cancel_file" "$recovery_output_file" \
+        "$recovery_stderr_file"; then
+        signal_darwin_deadline_exact_identity \
+          "$child_exact_identity" KILL || true
+        status=125
+      else
+        recovery_watcher_reaped=1
+      fi
+    elif ! signal_deadline_process_or_group \
+      "$child" KILL "$child_exact_identity"; then
+      status=125
+    fi
+  fi
   if wait "$child" 2>/dev/null; then
-    status=0
+    status="${status:-0}"
   else
-    status=$?
+    identity_status=$?
+    status="${status:-$identity_status}"
+  fi
+  child_reaped=1
+  if [[ "$deadline_host_platform" == "Darwin" && ! -s "$timeout_file" ]] &&
+    ! finalize_darwin_deadline_lineage_with_watcher \
+      "$child_lineage_state" \
+      "$recovery_watcher" "$recovery_watcher_exact_identity" \
+      "$recovery_cancel_file" "$recovery_output_file" \
+      "$recovery_stderr_file"; then
+    echo "agent:autoreview: cannot settle Darwin capture descendants after child exit" >&2
+    status=125
+  elif [[ "$deadline_host_platform" == "Darwin" && ! -s "$timeout_file" ]]; then
+    recovery_watcher_reaped=1
   fi
   if [[ -s "$timeout_file" ]]; then
-    # The watchdog wrote the marker just before signalling the group. Let it
-    # finish that signal before reaping it, then sweep the group once more, so
-    # nothing the capture started is still running when this returns.
+    # The watchdog wrote the marker as its last action. Reap the exact child.
     wait "$watchdog" 2>/dev/null || true
-    kill -KILL "-$child" 2>/dev/null || true
+    watchdog_reaped=1
   else
-    kill -KILL "-$watchdog" 2>/dev/null || kill -KILL "$watchdog" 2>/dev/null || true
-    wait "$watchdog" 2>/dev/null || true
-    # Sweep the capture's group on the way out too, not only when it timed out.
-    # `wait` has reaped the pipeline itself, so this group holds nothing but
-    # descendants the capture forked and left behind, and nothing else would
-    # ever reap them. Immediately after the wait, so the group id cannot have
-    # been recycled.
-    kill -KILL "-$child" 2>/dev/null || true
+    if signal_deadline_process_or_group \
+      "$watchdog" KILL "$watchdog_exact_identity"; then
+      wait "$watchdog" 2>/dev/null || true
+      watchdog_reaped=1
+    else
+      echo "agent:autoreview: cannot signal the exact capture watchdog" >&2
+      status=125
+    fi
+  fi
+  # Linux retains its post-reap group sweep. Darwin already proved an empty
+  # exact lineage and never uses the reusable numeric group id.
+  if ! signal_deadline_group_after_reap "$child" KILL; then
+    echo "agent:autoreview: cannot classify post-reap capture cleanup" >&2
+    status=125
   fi
   trap - INT TERM HUP
   eval "$saved_signal_traps"
@@ -7024,11 +8931,11 @@ EOF
       capture_output_file "$staging_dir/patches/staged.stat" "staged diff stat" 0 \
         git_output "$repo" diff --cached --stat --find-renames -l5000 --no-ext-diff --no-textconv "$frozen_head_oid" --
       capture_output_file "$staging_dir/patches/staged.diff" "staged diff" 0 \
-        git_output "$repo" diff --cached --patch --find-renames -l5000 --no-ext-diff --no-textconv "$frozen_head_oid" --
+        git_output "$repo" diff --cached --patch --full-index --unified=3 --no-color --find-renames -l5000 --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ "$frozen_head_oid" --
       capture_output_file "$staging_dir/patches/unstaged.stat" "unstaged diff stat" 0 \
         git_output "$repo" diff --stat --find-renames -l5000 --no-ext-diff --no-textconv
       capture_output_file "$staging_dir/patches/unstaged.diff" "unstaged diff" 0 \
-        git_output "$repo" diff --patch --find-renames -l5000 --no-ext-diff --no-textconv
+        git_output "$repo" diff --patch --full-index --unified=3 --no-color --find-renames -l5000 --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/
       capture_output_file "$staging_dir/patches/untracked-paths.txt" "untracked paths" 0 \
         emit_untracked_paths "$repo"
       capture_untracked_files \
@@ -7042,7 +8949,7 @@ EOF
       capture_output_file "$staging_dir/patches/branch.stat" "branch diff stat" 0 \
         git_output "$repo" diff --stat --find-renames -l5000 --no-ext-diff --no-textconv "$target_ref...$frozen_head_oid" --
       capture_output_file "$staging_dir/patches/branch.diff" "branch diff" 0 \
-        git_output "$repo" diff --patch --find-renames -l5000 --no-ext-diff --no-textconv "$target_ref...$frozen_head_oid" --
+        git_output "$repo" diff --patch --full-index --unified=3 --no-color --find-renames -l5000 --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ "$target_ref...$frozen_head_oid" --
       ;;
     branch-local)
       capture_output_file "$staging_dir/git-status.txt" "git status" 0 \
@@ -7052,15 +8959,15 @@ EOF
       capture_output_file "$staging_dir/patches/branch.stat" "branch diff stat" 0 \
         git_output "$repo" diff --stat --find-renames -l5000 --no-ext-diff --no-textconv "$target_ref...$frozen_head_oid" --
       capture_output_file "$staging_dir/patches/branch.diff" "branch diff" 0 \
-        git_output "$repo" diff --patch --find-renames -l5000 --no-ext-diff --no-textconv "$target_ref...$frozen_head_oid" --
+        git_output "$repo" diff --patch --full-index --unified=3 --no-color --find-renames -l5000 --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ "$target_ref...$frozen_head_oid" --
       capture_output_file "$staging_dir/patches/staged.stat" "staged diff stat" 0 \
         git_output "$repo" diff --cached --stat --find-renames -l5000 --no-ext-diff --no-textconv "$frozen_head_oid" --
       capture_output_file "$staging_dir/patches/staged.diff" "staged diff" 0 \
-        git_output "$repo" diff --cached --patch --find-renames -l5000 --no-ext-diff --no-textconv "$frozen_head_oid" --
+        git_output "$repo" diff --cached --patch --full-index --unified=3 --no-color --find-renames -l5000 --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ "$frozen_head_oid" --
       capture_output_file "$staging_dir/patches/unstaged.stat" "unstaged diff stat" 0 \
         git_output "$repo" diff --stat --find-renames -l5000 --no-ext-diff --no-textconv
       capture_output_file "$staging_dir/patches/unstaged.diff" "unstaged diff" 0 \
-        git_output "$repo" diff --patch --find-renames -l5000 --no-ext-diff --no-textconv
+        git_output "$repo" diff --patch --full-index --unified=3 --no-color --find-renames -l5000 --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/
       capture_output_file "$staging_dir/patches/untracked-paths.txt" "untracked paths" 0 \
         emit_untracked_paths "$repo"
       capture_untracked_files \
@@ -7071,10 +8978,12 @@ EOF
     commit)
       capture_output_file "$staging_dir/changed-paths.txt" "changed paths" 0 \
         emit_commit_changed_paths "$repo" "$target_ref"
+      capture_output_file "$staging_dir/patches/commit.metadata" "commit metadata" 0 \
+        git_output "$repo" show --no-patch --format=fuller "$target_ref"
       capture_output_file "$staging_dir/patches/commit.stat" "commit diff stat" 0 \
-        git_output "$repo" show --stat --find-renames -l5000 --no-ext-diff --no-textconv --format=fuller "$target_ref"
+        git_output "$repo" show --stat --find-renames -l5000 --no-ext-diff --no-textconv --format= "$target_ref"
       capture_output_file "$staging_dir/patches/commit.diff" "commit diff" 0 \
-        git_output "$repo" show --patch --find-renames -l5000 --no-ext-diff --no-textconv --format=fuller "$target_ref"
+        git_output "$repo" show --patch --full-index --unified=3 --no-color --find-renames -l5000 --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ --format= "$target_ref"
       ;;
   esac
 
@@ -7355,6 +9264,16 @@ EOF
   verify_context_bundle "$bundle_dir" "$expected_bundle_manifest" >/dev/null
   cat "$bundle_dir/helper-output.txt"
   printf 'agent:autoreview context bundle: %s\n' "$bundle_dir"
+}
+
+# Capture the top-level wrapper identity while the trusted probe is its direct
+# child. Deadline work can later run inside Bash command-substitution shells,
+# where $$ still names this wrapper but the probe's kernel parent is different.
+# The recovery watcher must retain the exact top-level identity before that
+# split occurs.
+initialize_darwin_autoreview_wrapper_identity || {
+  echo "agent:autoreview: cannot establish Darwin wrapper recovery authority" >&2
+  exit 125
 }
 
 if [[ -n "$verify_bundle_dir" ]]; then

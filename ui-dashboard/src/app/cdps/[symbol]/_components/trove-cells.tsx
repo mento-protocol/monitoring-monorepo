@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { AddressLink } from "@/components/address-link";
 import { Row, Td } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
@@ -5,12 +6,11 @@ import { formatTimestamp, relativeTime } from "@/lib/format";
 import { NETWORKS, networkIdForChainId } from "@/lib/networks";
 import { explorerTxUrl } from "@/lib/tokens";
 import type { CdpCollateral, CdpTrove } from "../../_lib/types";
-import { formatTokenAmount } from "../../_lib/format";
+import { cdpSymbolSlug, formatTokenAmount } from "../../_lib/format";
 import type { TroveDisplayRow } from "./trove-sort";
 
 const D18 = BigInt(10) ** BigInt(18);
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
-const MENTO_APP_BORROW_MANAGE_BASE_URL = "https://app.mento.org/borrow/manage";
 
 export type TroveRowView = "open" | "history";
 
@@ -129,16 +129,20 @@ function OwnerTroveCell({
   return (
     <div className="flex flex-col gap-0.5">
       <AddressLink address={owner} chainId={collateral.chainId} />
-      <a
-        href={troveManageUrl(trove.troveId, collateral.symbol)}
-        target="_blank"
-        rel="noopener noreferrer"
+      {/* Internal history link on BOTH tabs — the row's primary click
+          answers "what happened to this trove"; the Mento-app manage
+          action lives on the history page header ("Manage in app ↗"),
+          where only the owner needs it. The market slug in the path is
+          load-bearing: the raw troveId collides across markets. The
+          owner AddressLink above stays the explorer affordance. */}
+      <Link
+        href={`/cdps/${cdpSymbolSlug(collateral.symbol)}/troves/${encodeURIComponent(trove.troveId)}`}
         title={trove.troveId}
-        aria-label={`Manage trove ${trove.troveId} in the Mento app`}
+        aria-label={`View history for trove ${trove.troveId}`}
         className="font-mono text-[10px] text-slate-500 hover:text-slate-300 hover:underline focus:outline-none focus:ring-1 focus:ring-indigo-500"
       >
         {shortenHex(trove.troveId)}
-      </a>
+      </Link>
     </div>
   );
 }
@@ -339,12 +343,6 @@ function UpdatedValue({
       </span>
     </span>
   );
-}
-
-function troveManageUrl(troveId: string, tokenSymbol: string): string {
-  return `${MENTO_APP_BORROW_MANAGE_BASE_URL}/${encodeURIComponent(
-    troveId,
-  )}?token=${encodeURIComponent(tokenSymbol)}`;
 }
 
 function lastOwnerAddress(trove: CdpTrove): string {

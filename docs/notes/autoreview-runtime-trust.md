@@ -79,15 +79,16 @@ monotonic clock is available to the wrapper's shell, so a clock it cannot read,
 or one that moves backwards inside a stage, refuses the capture rather than
 restarting the stage on a fresh full budget. A capture that reaches the bound
 refuses by stage name and elapsed time and produces no bundle; it is never
-published partially and never skipped silently. Nothing the capture started
-outlives that refusal: the wrapper runs each capture as its own process group
-and SIGKILLs that group at the deadline, with no SIGTERM grace, because a grace
-period would run past the bound. Its interrupt path is the one that escalates,
-since an interrupted capture is not bound by the deadline. The helper spawns
-detached and sweeps the group after every capture, and registers terminal-signal
-handlers before it detaches anything: a caught signal cannot kill it
-mid-capture, so the deadline still fires and still reaps the tree, where a fatal
-one would strand a group no longer reachable from the terminal. The one capture
+published partially and never skipped silently. Cleanup fails closed if it
+cannot prove that the capture tree is empty. On Linux, the wrapper and helper
+run each capture in a detached process group and SIGKILL that group at the
+deadline without a SIGTERM grace period. On Darwin, the shell wrapper binds
+each deadline child and the helper to `darwin-coherent-lineage-v2` before
+launch. Settlement sends signals only to matching audit-token identities. A
+prebound recovery watcher records owned and ambiguous descendants while work
+runs and settles the exact lineage if the wrapper exits or is killed. Both
+runtimes install terminal-signal handlers before they launch capture work, so
+a caught signal runs cleanup before the wrapper re-raises it. The one capture
 the budget does not wrap is the PR feedback state, which already carries its own
 wall-clock bound; that bound is clamped to what the shared budget has left,
 minus the second that bound spends escalating, and the time it spends is charged
@@ -156,16 +157,20 @@ that PR, base branch, current head branch, and frozen head object ID.
 ## Pinned runtime and executable ancestry
 
 The adapter requires the current shell adapter's bytes and executable mode to
-match frozen `HEAD`. In every target mode it requires the shell, MJS helper, and
-core at that frozen `HEAD` to match the pinned protected-main object, then
-executes MJS files materialized from that protected object instead of a
-PR-selected base or mutable worktree. Commit mode also requires the selected
-commit's executable runtime to match the protected baseline. Local and
-branch-local prepared bundles require helper/core worktree bytes to match frozen
-`HEAD`. Any dirty or committed runtime change fails closed and must be reviewed
-from a separate trusted checkout with an explicit compatible
-`AUTOREVIEW_HELPER`. Direct default-helper execution in the owning checkout uses
-the same frozen-`HEAD` and protected-main checks and materialized MJS runtime.
+match frozen `HEAD`. In every target mode it requires the complete eleven-file
+runtime closure at that frozen `HEAD` to match the pinned protected-main object.
+This closure contains the shell, MJS helper, core, exact-patch suppression JSON,
+two Darwin identity sources, Darwin helper, Darwin lineage model, Darwin lineage
+state runtime, Darwin lineage entry point, and mapped-command process-identity
+helper. The adapter then executes MJS files materialized from that protected
+object instead of a PR-selected base or mutable worktree. Commit mode also
+requires the selected commit's executable runtime to match the protected
+baseline. Local and branch-local prepared bundles require the ten non-shell
+runtime files in the worktree to match frozen `HEAD`. Any dirty or committed
+runtime change fails closed and must be reviewed from a separate trusted
+checkout with an explicit compatible `AUTOREVIEW_HELPER`. Direct default-helper
+execution in the owning checkout uses the same frozen-`HEAD` and protected-main
+checks and materialized runtime.
 
 Wrapper-owned Node launches, including executable discovery and validation
 helpers, discard `NODE_OPTIONS` and `NODE_PATH`, plus dynamic-loader and
@@ -491,17 +496,37 @@ for composition only for a provider prefix that has to stay recognizable.
 Evidence reads reject symlinks and verify that the opened descriptor still
 identifies the file that was inspected, closing path-swap races.
 
+One narrow exception covers issue #2114. The sealed
+`agent-autoreview-secret-suppressions.json` file records one complete expected
+Git file patch, its full old blob ID, one removed anchor, the anchor's derived
+old line, and the exact first scanner finding. The helper loads this file next
+to the materialized core with the same stable bounded regular-file primitive.
+The changed-path check permits only its exact `scripts/` path so a trusted
+compatible runtime can review policy updates. The general sensitive-path check
+still rejects the filename, and the policy diff still receives the closed
+content scan.
+It accepts no checkout path or override. Git patch captures use full blob IDs,
+three context lines, fixed prefixes, and no external diff or text conversion.
+The matcher requires exact equality with one complete ordinary file-patch
+section. The full capture session can consume only one record occurrence. It
+masks only the removed anchor in a copy. It then scans the matched section, the
+pure patch, and the complete bundle again. Any byte drift, duplicate occurrence,
+malformed structure, or sibling finding fails closed.
+[ADR 0079](../adr/0079-sealed-exact-file-patch-secret-suppression.md) owns the
+full audit contract.
+
 ## Explicit helper attestation
 
 Source fingerprints and untracked-file serialization remain wrapper-owned
-operations executed by the attested helper; a trusted wrapper physically outside
-the reviewed checkout copies its sibling helper/core no-follow into the private
-command runtime and binds that snapshot to an identity plus full content
-manifest before use. The source directory is descriptor-pinned across both
-copies; its POSIX ancestry, source identities, and macOS ACLs are stable and
-non-write-granting before and after the copy. This attestation also applies when
-an explicit `AUTOREVIEW_HELPER` resolves to that external wrapper's own default
-sibling helper, as in the runtime-review command in the operator runbook.
+operations executed by the attested helper. A trusted wrapper physically outside
+the reviewed checkout copies its ten-file non-shell runtime closure no-follow
+into the private command runtime. It binds that snapshot to an identity and full
+content manifest before use. The source directories are descriptor-pinned
+across all copies. Their POSIX ancestry, source identities, and macOS ACLs stay
+stable and non-write-granting before and after the copy. This attestation also
+applies when an explicit `AUTOREVIEW_HELPER` resolves to that external wrapper's
+own default sibling helper, as in the runtime-review command in the operator
+runbook.
 
 An explicit replacement cannot run before wrapper-owned recursive cleanup is
 finished. After that handoff, the wrapper performs no recursive cleanup and

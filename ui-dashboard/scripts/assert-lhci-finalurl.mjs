@@ -26,12 +26,8 @@
 //   .lighthouseci/lhr-*.json — one full Lighthouse report per run, written
 //                              by `lhci collect` / `lhci autorun`. Each
 //                              has `finalUrl` (and `requestedUrl`) at the
-//                              top level. We don't read `.lighthouseci/
-//                              manifest.json` because `lhci autorun` only
-//                              writes that when uploading to the
-//                              filesystem target — with
-//                              `upload.target: "temporary-public-storage"`
-//                              (this repo's config) it's absent.
+//                              top level. The guard reads the source reports
+//                              directly and does not depend on upload metadata.
 //
 // Exit codes:
 //   0 — every audited finalUrl matched the expected host + one of the

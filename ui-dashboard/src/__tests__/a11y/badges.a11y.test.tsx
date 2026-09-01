@@ -31,6 +31,8 @@ import {
 } from "@/components/badges";
 import { BridgeProviderBadge } from "@/components/bridge-provider-badge";
 import { BridgeStatusBadge } from "@/components/bridge-status-badge";
+import { TroveStatusBadge } from "@/app/cdps/[symbol]/troves/[troveId]/_components/trove-status-badge";
+import { TROVE_STATUSES } from "@/app/cdps/[symbol]/troves/[troveId]/_lib/status";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -232,6 +234,50 @@ describe("SourceBadge / KindBadge a11y", () => {
     for (const [kind, expected] of KIND_VARIANTS) {
       const li = container.querySelector(`[data-testid="kind-${kind}"]`);
       expect(li?.textContent).toContain(expected);
+    }
+  });
+});
+
+describe("TroveStatusBadge a11y", () => {
+  // Every known status carries a tooltip (asChild button trigger); one
+  // unrecognized value renders the plain-span, no-tooltip branch instead —
+  // both shapes need coverage since they render structurally different DOM.
+  const STATUS_VARIANTS: readonly string[] = [
+    ...TROVE_STATUSES,
+    "some-future-status",
+  ];
+
+  it("has no axe violations across every status variant", async () => {
+    render(
+      <ul aria-label="Trove status badges">
+        {STATUS_VARIANTS.map((status) => (
+          <li key={status}>
+            <TroveStatusBadge status={status} />
+          </li>
+        ))}
+      </ul>,
+    );
+    const results = await axe(container);
+    expect(results.violations).toEqual([]);
+  });
+
+  it("wraps status text in a live region so a polled status change is announced", () => {
+    render(
+      <ul>
+        {STATUS_VARIANTS.map((status) => (
+          <li key={status} data-testid={`trove-status-${status}`}>
+            <TroveStatusBadge status={status} />
+          </li>
+        ))}
+      </ul>,
+    );
+    for (const status of STATUS_VARIANTS) {
+      const li = container.querySelector(
+        `[data-testid="trove-status-${status}"]`,
+      );
+      const liveRegion = li?.querySelector('[role="status"]');
+      expect(liveRegion).not.toBeNull();
+      expect(liveRegion?.getAttribute("aria-live")).toBe("polite");
     }
   });
 });

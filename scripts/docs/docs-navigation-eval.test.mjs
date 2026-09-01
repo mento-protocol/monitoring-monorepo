@@ -444,6 +444,9 @@ test("fixture byte budgets can contain every cheapest accepted route", () => {
   assert.deepEqual(selectedRoutes.get("commands-pr-readiness"), [
     "docs/notes/quick-commands.md",
   ]);
+  assert.deepEqual(selectedRoutes.get("deployment-terraform-registry-apply"), [
+    "docs/notes/quick-commands.md",
+  ]);
 
   const questionTooTight = structuredClone(context.suite);
   questionTooTight.targets.max_question_source_bytes =
@@ -475,6 +478,12 @@ test("fixture byte budgets can contain every cheapest accepted route", () => {
     1;
   assert.match(
     validateFixtureSuite(reserveTooHigh, context.inventory).join("\n"),
+    /cheapest accepted route union leaves .* bytes of headroom/,
+  );
+  assert.doesNotMatch(
+    validateFixtureSuite(reserveTooHigh, context.inventory, {
+      enforceHeadroomReserve: false,
+    }).join("\n"),
     /cheapest accepted route union leaves .* bytes of headroom/,
   );
 });
@@ -715,6 +724,91 @@ test("historical scoring requires a default-branch ancestor and survives deletio
       cwd: temp,
       encoding: "utf8",
     }).trim();
+    const pinnedContext = loadEvaluationContext(
+      {
+        repoRoot: temp,
+        fixturesPath: fixturePath,
+      },
+      { inventoryCommit: commit },
+    );
+    const pinnedFloor = navigationContextFloor(
+      pinnedContext.suite,
+      pinnedContext.inventory,
+    );
+    const reserveAtLimit = structuredClone(context.suite);
+    reserveAtLimit.targets.min_total_unique_source_headroom_bytes =
+      reserveAtLimit.targets.max_total_unique_source_bytes -
+      pinnedFloor.total_unique_route_bytes;
+    writeFileSync(
+      path.join(temp, fixturePath),
+      `${JSON.stringify(reserveAtLimit)}\n`,
+    );
+    assert.doesNotThrow(() =>
+      loadEvaluationContext({
+        repoRoot: temp,
+        fixturesPath: fixturePath,
+      }),
+    );
+    const reserveTooHigh = structuredClone(reserveAtLimit);
+    reserveTooHigh.targets.min_total_unique_source_headroom_bytes += 1;
+    writeFileSync(
+      path.join(temp, fixturePath),
+      `${JSON.stringify(reserveTooHigh)}\n`,
+    );
+    assert.throws(
+      () =>
+        loadEvaluationContext({
+          repoRoot: temp,
+          fixturesPath: fixturePath,
+        }),
+      /cheapest accepted route union leaves .* bytes of headroom/,
+    );
+    assert.doesNotThrow(() =>
+      loadEvaluationContext(
+        {
+          repoRoot: temp,
+          fixturesPath: fixturePath,
+        },
+        { inventoryCommit: commit },
+      ),
+    );
+    const hardCapAtLimit = structuredClone(reserveTooHigh);
+    hardCapAtLimit.targets.max_total_unique_source_bytes =
+      pinnedFloor.total_unique_route_bytes;
+    writeFileSync(
+      path.join(temp, fixturePath),
+      `${JSON.stringify(hardCapAtLimit)}\n`,
+    );
+    assert.doesNotThrow(() =>
+      loadEvaluationContext(
+        {
+          repoRoot: temp,
+          fixturesPath: fixturePath,
+        },
+        { inventoryCommit: commit },
+      ),
+    );
+    const hardCapTooLow = structuredClone(hardCapAtLimit);
+    hardCapTooLow.targets.max_total_unique_source_bytes -= 1;
+    writeFileSync(
+      path.join(temp, fixturePath),
+      `${JSON.stringify(hardCapTooLow)}\n`,
+    );
+    assert.throws(
+      () =>
+        loadEvaluationContext(
+          {
+            repoRoot: temp,
+            fixturesPath: fixturePath,
+          },
+          { inventoryCommit: commit },
+        ),
+      /cheapest accepted route union needs .* bytes; max_total_unique_source_bytes is/,
+    );
+    writeFileSync(
+      path.join(temp, fixturePath),
+      `${JSON.stringify(context.suite)}\n`,
+    );
     const historicalSource = (pathname) => {
       const bytes = execFileSync("git", ["show", `${commit}:${pathname}`], {
         cwd: temp,

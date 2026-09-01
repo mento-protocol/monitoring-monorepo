@@ -312,8 +312,8 @@ try {
   );
   assert.equal(
     terraformJob.if,
-    "needs.changes.outputs.terraform == 'true'",
-    "ci.yml Terraform validation must use the registry-backed admission result",
+    "needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.terraform == 'true'",
+    "ci.yml Terraform validation must use the fail-closed fallback or registry-backed admission result",
   );
   const ciValidateChangedStacks = terraformJob.steps.find(
     (step) => step.name === "Validate changed stacks",
@@ -395,11 +395,37 @@ try {
     ),
     "production-infra-contract must install dependencies locally",
   );
+  const productionInfraValidatorIndex = productionInfraContract.steps.findIndex(
+    (step) =>
+      String(step.run).trim() ===
+      "node scripts/check-agent-quality-gate-package-scripts.mjs",
+  );
+  const productionInfraInstallIndex = productionInfraContract.steps.findIndex(
+    (step) => step.uses === "./.github/actions/pnpm-install",
+  );
+  assert.equal(
+    productionInfraValidatorIndex,
+    productionInfraInstallIndex - 1,
+    "production-infra-contract must validate trusted package scripts immediately before dependency installation and package aliases",
+  );
   assert(
     productionInfraContract.steps.some(
       (step) => String(step.run).trim() === "pnpm tf:test",
     ),
     "production-infra-contract must run pnpm tf:test",
+  );
+  assert.deepEqual(
+    productionInfraContract.steps.filter(
+      (step) => String(step.run).trim() === "pnpm issue:board:test",
+    ),
+    [
+      {
+        name: "Issue board owner-mutation confinement contract",
+        if: "${{ !cancelled() }}",
+        run: "pnpm issue:board:test",
+      },
+    ],
+    "production-infra-contract must run the issue-board owner-mutation proof after ordinary step failures",
   );
   assert(
     ciWorkflow.jobs.ci.needs.includes("production-infra-contract"),

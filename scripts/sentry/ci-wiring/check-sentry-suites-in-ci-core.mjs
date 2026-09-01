@@ -427,7 +427,7 @@ export function sentinelBlockers(workflow, trustedJobs) {
 
   // A skipped job's check run reports success, so a sentinel that can skip
   // stops propagating a red `scripts` job to the required `ci` context. Its
-  // fourteen path-gated dependencies make `always()` load-bearing, not
+  // fifteen path-gated dependencies make `always()` load-bearing, not
   // decorative: without it the sentinel skips on any PR that skips one of them.
   if (sentinel.if !== "always()") {
     blockers.push(

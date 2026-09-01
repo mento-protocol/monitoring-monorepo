@@ -26,6 +26,7 @@
         "!AGENTS.md",
         "!CLAUDE.md"
       ],
+      "env": ["ESLINT_USE_FLAT_CONFIG"],
       "outputs": []
     },
     "typecheck": {
@@ -80,7 +81,7 @@
         "sentry.shared.ts",
         ".size-limit.cjs",
         "vercel.json",
-        ".env.production.local.example",
+        ".env*",
         "$TURBO_ROOT$/shared-config/src/**",
         "$TURBO_ROOT$/shared-config/*.json",
         "$TURBO_ROOT$/shared-config/package.json",
@@ -96,12 +97,20 @@
         "$TURBO_ROOT$/scripts/agent-quality-gate.sh",
         "$TURBO_ROOT$/scripts/agent-quality-gate.test.sh",
         "$TURBO_ROOT$/scripts/agent-autoreview-core.mjs",
+        "$TURBO_ROOT$/scripts/agent-autoreview-secret-suppressions.json",
         "$TURBO_ROOT$/scripts/gate/routing-table/**",
         "$TURBO_ROOT$/scripts/gate/mapping.mjs",
         "$TURBO_ROOT$/scripts/gate/mapping/**",
         "$TURBO_ROOT$/turbo.json"
       ],
-      "env": ["VERCEL_ENV", "VERCEL_DEPLOYMENT_ID", "VERCEL_GIT_COMMIT_SHA"],
+      "env": [
+        "BROWSERSLIST",
+        "BROWSERSLIST_*",
+        "VERCEL",
+        "VERCEL_ENV",
+        "VERCEL_DEPLOYMENT_ID",
+        "VERCEL_GIT_COMMIT_SHA"
+      ],
       "outputs": [".next/**", "!.next/cache/**", "!.next/dev/**"]
     },
     "fixture-build": {
@@ -116,7 +125,7 @@
         "sentry.*.config.*",
         "sentry.shared.ts",
         "vercel.json",
-        ".env.production.local.example",
+        ".env*",
         "scripts/fixture-build.mjs",
         "scripts/fixture-constants.mjs",
         "scripts/fixture-identity.mjs",
@@ -134,7 +143,10 @@
         "$TURBO_ROOT$/turbo.json"
       ],
       "env": [
+        "BROWSERSLIST",
+        "BROWSERSLIST_*",
         "VERCEL_ENV",
+        "VERCEL",
         "VERCEL_DEPLOYMENT_ID",
         "VERCEL_GIT_COMMIT_SHA",
         "NEXT_DIST_DIR",
@@ -162,6 +174,7 @@
         "$TURBO_ROOT$/scripts/agent-quality-gate.sh",
         "$TURBO_ROOT$/scripts/agent-quality-gate.test.sh",
         "$TURBO_ROOT$/scripts/agent-autoreview-core.mjs",
+        "$TURBO_ROOT$/scripts/agent-autoreview-secret-suppressions.json",
         "$TURBO_ROOT$/scripts/gate/routing-table/**",
         "$TURBO_ROOT$/scripts/gate/mapping.mjs",
         "$TURBO_ROOT$/scripts/gate/mapping/**",
@@ -182,7 +195,7 @@
         "sentry.*.config.*",
         "sentry.shared.ts",
         "vercel.json",
-        ".env.production.local.example",
+        ".env*",
         "playwright.config.ts",
         "scripts/run-browser-tests.mjs",
         "scripts/fixture-build.mjs",
@@ -207,6 +220,7 @@
         "$TURBO_ROOT$/scripts/agent-quality-gate.sh",
         "$TURBO_ROOT$/scripts/agent-quality-gate.test.sh",
         "$TURBO_ROOT$/scripts/agent-autoreview-core.mjs",
+        "$TURBO_ROOT$/scripts/agent-autoreview-secret-suppressions.json",
         "$TURBO_ROOT$/scripts/gate/routing-table/**",
         "$TURBO_ROOT$/scripts/gate/mapping.mjs",
         "$TURBO_ROOT$/scripts/gate/mapping/**",

@@ -3,7 +3,7 @@ title: Local agent quality gate plus two-projection PR all-clear and Codex gate
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-08-29
 scope: ci/process
 date: 2026-05
 doc_type: adr
@@ -13,7 +13,11 @@ garden_lane: adrs-architecture
 
 # ADR 0007 — Local agent quality gate + two-projection PR all-clear + Codex approval gate
 
-**Status:** Accepted (Apr–Jun 2026), in force.
+**Status:** Accepted (Apr–Jun 2026), in force during the staged transition.
+[ADR 0078](0078-staged-verification-redesign.md) supersedes the mandatory local
+gate as the target state. The current gate remains mandatory until the approved
+cutover. The hosted two-projection all-clear and Codex approval gate remain in
+force.
 **Scope:** ci/process
 
 ## Context

@@ -1,0 +1,253 @@
+{
+  "schema_version": 1,
+  "suite_id": "review-skill-v1",
+  "established_at": "2026-08-25",
+  "repo": "mento-protocol/monitoring-monorepo",
+  "provenance": {
+    "source": "~/.agents/skills/.skill-audit/bench2 (benchmark v2, closed 2026-08-24)",
+    "truth_method": "defects raised by independent CI reviewers on the PR head and then fixed by the author; harvested by bench2/extract_truth.py, frozen here as bytes, never re-derived",
+    "excluded": "PR 1978 harvested but has 0 acted-on findings"
+  },
+  "sut": {
+    "finder": {
+      "tool": "codex",
+      "model": "gpt-5.6-sol",
+      "effort": "high",
+      "argv": [
+        "codex",
+        "exec",
+        "review",
+        "--base",
+        "base",
+        "-m",
+        "gpt-5.6-sol",
+        "-c",
+        "model_reasoning_effort=\"high\""
+      ]
+    },
+    "verifier": {
+      "tool": "claude",
+      "model": "claude-opus-5",
+      "effort": "high"
+    },
+    "control": {
+      "tool": "claude",
+      "model": "claude-opus-5",
+      "effort": "high",
+      "solo": true
+    }
+  },
+  "judge": {
+    "model": "claude-fable-5",
+    "effort": "max"
+  },
+  "prompts": {
+    "request": {
+      "file": "scripts/review/prompts/request.md",
+      "sha256": "405cd6f411c5146da97d8756ea3259d9a8af37d73cdc39e9df487d0ec56580c1"
+    },
+    "handoff": {
+      "file": "scripts/review/prompts/handoff.md",
+      "sha256": "da22bcb238070bd472c379b4f39a5289bcaca884d2126f7f03945d670642fe48"
+    }
+  },
+  "tags_namespace": "eval/review-skill/v1",
+  "fixtures": [
+    {
+      "pr": 1982,
+      "title": "feat(tooling): backfill cloud claim fields",
+      "first_head": "ee739b4142564a3a4e9273da6ba345f3cda5e8d3",
+      "base_sha": "efcfb16d9b0b9c65fe50e7dac185295c8bb1c10a",
+      "tag_head": "eval/review-skill/v1/pr-1982/head",
+      "tag_base": "eval/review-skill/v1/pr-1982/base",
+      "truth_file": "docs/evals/review-skill-truth/pr-1982.json",
+      "truth_sha256": "2e8dc66599ccaab67769e49e8a0829e4ba53016937d67531241b996a5971f8ac",
+      "scorable_ids": [
+        3827636772,
+        3827647420,
+        3827655676,
+        3827655684,
+        3827663924
+      ],
+      "p1_ids": [
+        3827636772
+      ],
+      "grid": false,
+      "finder_reports": []
+    },
+    {
+      "pr": 1984,
+      "title": "feat(sentry): surface refused stub inventory",
+      "first_head": "07901b22c0da7db2b27f15dbbc3f5e8ea45623df",
+      "base_sha": "efcfb16d9b0b9c65fe50e7dac185295c8bb1c10a",
+      "tag_head": "eval/review-skill/v1/pr-1984/head",
+      "tag_base": "eval/review-skill/v1/pr-1984/base",
+      "truth_file": "docs/evals/review-skill-truth/pr-1984.json",
+      "truth_sha256": "b4962d6a8d66726541a482351c06f5397da4ee2658f1d64676790482f7e87766",
+      "scorable_ids": [
+        3828303385,
+        3828304403,
+        3828313971,
+        3828313974,
+        3828328194
+      ],
+      "p1_ids": [
+        3828303385,
+        3828304403,
+        3828313974
+      ],
+      "grid": false,
+      "finder_reports": []
+    },
+    {
+      "pr": 1990,
+      "title": "fix(review): reduce CodeRabbit pause friction",
+      "first_head": "6d0189349a48f5a6a553b2bdaad8dd4862fe7f75",
+      "base_sha": "99cc3680b3c801f0a5f3099142cf7d7cd6523593",
+      "tag_head": "eval/review-skill/v1/pr-1990/head",
+      "tag_base": "eval/review-skill/v1/pr-1990/base",
+      "truth_file": "docs/evals/review-skill-truth/pr-1990.json",
+      "truth_sha256": "03c802f0573c85fb79a8c2e5877a5322d6689522d2bc5a772e34e798a391782b",
+      "scorable_ids": [
+        3829654081,
+        3829659544,
+        3829659546,
+        3829659550,
+        3830259678,
+        3830394205
+      ],
+      "p1_ids": [
+        3829654081,
+        3829659546,
+        3829659550
+      ],
+      "grid": true,
+      "finder_reports": [
+        {
+          "file": "docs/evals/review-skill-finder-reports/pr-1990-draw1.md",
+          "sha256": "13ab8c873c4e5f3a7608373a542f07efd2a53cf57bc9c78a17e2afd908bf67fa",
+          "source": "bench2 combo_gpt-5.6-sol_high__claude-opus-5_high, captured 2026-08-24",
+          "chars": 4100
+        },
+        {
+          "file": "docs/evals/review-skill-finder-reports/pr-1990-draw2.md",
+          "sha256": "b0f33ffe31996076a1ff3d3321a3e5ff05f0364de90791d036105bfed34c0322",
+          "source": "bench2 cx_gpt-5.6-sol_high, captured 2026-08-24",
+          "chars": 819
+        }
+      ]
+    },
+    {
+      "pr": 1995,
+      "title": "test(scripts): partition the quality-gate self-test into focusable families",
+      "first_head": "4d108b3b9c42bf040bc3354cc53ed0dc69962de0",
+      "base_sha": "99cc3680b3c801f0a5f3099142cf7d7cd6523593",
+      "tag_head": "eval/review-skill/v1/pr-1995/head",
+      "tag_base": "eval/review-skill/v1/pr-1995/base",
+      "truth_file": "docs/evals/review-skill-truth/pr-1995.json",
+      "truth_sha256": "1493526f59e95669a6888f3e1bf77b3f7ad815bbf52959c505e02932be5ecbed",
+      "scorable_ids": [
+        3829986398,
+        3829986403,
+        3830003055,
+        3830042123,
+        3830042128,
+        3830695396
+      ],
+      "p1_ids": [
+        3830042128
+      ],
+      "grid": true,
+      "finder_reports": [
+        {
+          "file": "docs/evals/review-skill-finder-reports/pr-1995-draw1.md",
+          "sha256": "b76442adf5ff04431735a2a134d9bf505b5f5127d6da5455b49ccbfaf4d59316",
+          "source": "bench2 combo_gpt-5.6-sol_high__claude-opus-5_high, captured 2026-08-24",
+          "chars": 856
+        },
+        {
+          "file": "docs/evals/review-skill-finder-reports/pr-1995-draw2.md",
+          "sha256": "7398c85b61f97d0eb5261f3402db2c35bc13bc7a1fc2874b4fd9797b5e55b879",
+          "source": "bench2 cx_gpt-5.6-sol_high, captured 2026-08-24",
+          "chars": 789
+        }
+      ]
+    },
+    {
+      "pr": 1999,
+      "title": "fix: align Peg alert history with Slack notifications",
+      "first_head": "5e9845490149e2ff1f3f20c0d0b6d24cd5877bdc",
+      "base_sha": "d23602614e19904cdc6a6ce880dd89989c748661",
+      "tag_head": "eval/review-skill/v1/pr-1999/head",
+      "tag_base": "eval/review-skill/v1/pr-1999/base",
+      "truth_file": "docs/evals/review-skill-truth/pr-1999.json",
+      "truth_sha256": "548298b4d6ec65d5511e5af90ac88f10544e9ee23ab1e2cf3fbbfb9682061431",
+      "scorable_ids": [
+        3830366234,
+        3830366243,
+        3830366247,
+        3830366547,
+        3830366556,
+        3830371307,
+        3830371315,
+        3830371325,
+        3830371329,
+        3830416461
+      ],
+      "p1_ids": [
+        3830366234,
+        3830366547
+      ],
+      "grid": true,
+      "finder_reports": [
+        {
+          "file": "docs/evals/review-skill-finder-reports/pr-1999-draw1.md",
+          "sha256": "5143b499e8c7de6c0f161453034a74ec852f0e17d863bb3c21dc1a5b0b52e7a4",
+          "source": "bench2 combo_gpt-5.6-sol_high__claude-opus-5_high, captured 2026-08-24",
+          "chars": 5162
+        },
+        {
+          "file": "docs/evals/review-skill-finder-reports/pr-1999-draw2.md",
+          "sha256": "a8729485ec1f630193defccc185018f6565240c7e0e70ba20fd72a38a40d83ad",
+          "source": "bench2 cx_gpt-5.6-sol_high, captured 2026-08-24",
+          "chars": 2244
+        }
+      ]
+    },
+    {
+      "pr": 2001,
+      "title": "fix(dashboard): ignore zero-exposure stETH history rows",
+      "first_head": "61c802c1b241fa64899f8751007830bac3df4c9d",
+      "base_sha": "d23602614e19904cdc6a6ce880dd89989c748661",
+      "tag_head": "eval/review-skill/v1/pr-2001/head",
+      "tag_base": "eval/review-skill/v1/pr-2001/base",
+      "truth_file": "docs/evals/review-skill-truth/pr-2001.json",
+      "truth_sha256": "22ac3b9324fb55c4d42bf064fcc1e75bc043a12c6a264a01f2e35489ca39a5c3",
+      "scorable_ids": [
+        3830423746,
+        3830513980
+      ],
+      "p1_ids": [
+        3830423746,
+        3830513980
+      ],
+      "grid": false,
+      "finder_reports": []
+    }
+  ],
+  "verdict_rules": {
+    "noise_floor_defects": 3,
+    "regression_net_flips": 6,
+    "p1_recall_floor": 0.6,
+    "wrong_claims_ratio_ceiling": 2.0,
+    "canary_min_matched_grid": 9
+  },
+  "cadence_days": {
+    "canary": 30,
+    "full": 100,
+    "freshness_warn": 45,
+    "freshness_red": 60,
+    "complete_red": 90,
+    "full_red": 120
+  }
+}

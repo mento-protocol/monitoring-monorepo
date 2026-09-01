@@ -2,7 +2,7 @@
 
 Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain [Envio HyperIndex](https://docs.envio.dev/) indexer paired with a Next.js 16 + Plotly.js dashboard.
 
-<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=2026-08-23 doc_type=reference scope=repo-wide review_interval_days=90 garden_lane=package-readmes-reference -->
+<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=2026-08-28 doc_type=reference scope=repo-wide review_interval_days=90 garden_lane=package-readmes-reference -->
 
 **Live dashboard:** [monitoring.mento.org](https://monitoring.mento.org)
 
@@ -80,6 +80,9 @@ production-cutover matrix is
 - Node.js 24 LTS
 - [pnpm](https://pnpm.io/) 11.x
 - Docker (for local indexer dev — runs Postgres + Hasura)
+- On macOS, the Xcode Command Line Tools. Install them with
+  `xcode-select --install`. The quality gate uses their selected macOS SDK and
+  Clang toolchain for exact Darwin process identity.
 
 ### Install
 

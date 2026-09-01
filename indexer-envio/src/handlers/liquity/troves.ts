@@ -214,6 +214,8 @@ export const makePlaceholderTrove = ({
   lastUpdatedAt: blockTimestamp,
   lastUpdatedBlock: blockNumber,
   lastUpdatedTxHash: txHash,
+  lastLedgerBlock: 0n,
+  lastLedgerLogIndex: 0,
 });
 
 export async function getOrCreateTrove(

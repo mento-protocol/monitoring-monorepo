@@ -34,6 +34,7 @@ import {
 import { CdpActivityDigest } from "./cdp-activity-digest";
 import { CdpAllTransactionsTable } from "./cdp-all-transactions-table";
 import { CdpMarketCard } from "./cdp-market-card";
+import { CdpOwnerSearch, CdpOwnerSearchShell } from "./cdp-owner-search";
 import {
   CdpActivityDigestSkeleton,
   CdpMarketCardGridSkeleton,
@@ -180,21 +181,74 @@ export function CdpsPageClient() {
     );
   }
 
-  if (isLoadingWithoutData(isLoading, data)) return <CdpsPageSkeleton />;
   if (hasErrorWithoutData(error, data)) {
     return (
       <ErrorBox message={`Failed to load CDP markets — ${error.message}`} />
     );
   }
 
+  // The header and owner search render ONCE in this shared tree: an early
+  // skeleton return would remount them on the loading→loaded swap, dropping
+  // input focus mid-entry (the typed value survives via URL state; the DOM
+  // node and caret do not).
+  const marketsLoading = isLoadingWithoutData(isLoading, data);
   const collaterals = data?.LiquityCollateral ?? [];
-  if (collaterals.length === 0) {
+  if (!marketsLoading && collaterals.length === 0) {
     return <EmptyBox message="No CDP markets indexed yet." />;
   }
 
   return (
     <div className="space-y-6">
       <CdpsHeader />
+      <CdpOwnerSearchSection
+        collaterals={marketsLoading ? undefined : collaterals}
+        chainId={network.chainId}
+      />
+      {marketsLoading ? (
+        <CdpsPageSkeletonContent />
+      ) : (
+        <CdpsPageLoadedContent
+          collaterals={collaterals}
+          instances={instances}
+          aggregatesByCollateral={aggregatesByCollateral}
+          queryTruncated={queryTruncated}
+          activityByInstance={activityByInstance}
+          totalActivity={totalActivity}
+          txCapped={txCapped}
+          txLoading={txLoading}
+          txHasError={txHasError}
+          chainId={network.chainId}
+        />
+      )}
+    </div>
+  );
+}
+
+function CdpsPageLoadedContent({
+  collaterals,
+  instances,
+  aggregatesByCollateral,
+  queryTruncated,
+  activityByInstance,
+  totalActivity,
+  txCapped,
+  txLoading,
+  txHasError,
+  chainId,
+}: {
+  collaterals: CdpCollateral[];
+  instances: Map<string, CdpInstance>;
+  aggregatesByCollateral: Map<string, CdpAggregates>;
+  queryTruncated: boolean;
+  activityByInstance: Map<string, CdpMarketActivity>;
+  totalActivity: CdpActivitySummary;
+  txCapped: boolean;
+  txLoading: boolean;
+  txHasError: boolean;
+  chainId: number;
+}) {
+  return (
+    <>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {collaterals.map((collateral) => (
           <CdpMarketCard
@@ -226,11 +280,38 @@ export function CdpsPageClient() {
         activityLoading={txLoading}
         activityHasError={txHasError}
       />
-      <CdpTransactionsSection
-        collaterals={collaterals}
-        chainId={network.chainId}
-      />
-    </div>
+      <CdpTransactionsSection collaterals={collaterals} chainId={chainId} />
+    </>
+  );
+}
+
+// Owner lookup entry point (docs/PLAN-trove-history-page.md, "Route and
+// entry points"): mounted in BOTH the loading skeleton and the loaded
+// layout — like the header it needs no market data to render its input, so
+// it stays usable (and keeps its position) while `CDP_MARKETS` loads;
+// results wait on `collaterals` inside the component. The Suspense
+// boundary exists for the `useSearchParams()` read that initializes the
+// URL-addressable `?owner=` state (same contract as the transactions
+// table's filters).
+function CdpOwnerSearchSection({
+  collaterals,
+  chainId,
+}: {
+  collaterals: readonly CdpCollateral[] | undefined;
+  chainId: number;
+}) {
+  return (
+    <Suspense fallback={<CdpOwnerSearchFallback />}>
+      <CdpOwnerSearch collaterals={collaterals} chainId={chainId} />
+    </Suspense>
+  );
+}
+
+function CdpOwnerSearchFallback() {
+  return (
+    <CdpOwnerSearchShell>
+      <div className="mt-3 h-7 w-96 max-w-full animate-pulse rounded bg-slate-800/50" />
+    </CdpOwnerSearchShell>
   );
 }
 
@@ -271,12 +352,18 @@ function CdpsHeader() {
 }
 
 // Page-shaped skeleton for the initial CDP_MARKETS load (issue #1220). The
-// real header stays mounted (it needs no data) so it never moves between
-// the loading and loaded phases; everything below mirrors the loaded
-// section shapes (market-card grid, activity digest, transactions table)
-// under a single page-level live region — nested skeleton pieces are
-// `presentational` so they don't announce independently.
-function CdpsPageSkeleton() {
+// real header and owner-search input stay mounted (neither needs market
+// data) so they never move between the loading and loaded phases;
+// everything below mirrors the loaded section shapes (market-card grid,
+// activity digest, transactions table) under a single page-level live
+// region — nested skeleton pieces are `presentational` so they don't
+// announce independently.
+/** Market-dependent skeleton content only. The header and the interactive
+ *  owner search render once in `CdpsPageClient`'s shared tree so their DOM
+ *  nodes (and input focus) survive the loading→loaded swap — and so
+ *  keystroke-driven search updates are never announced as "Loading CDP
+ *  markets" changes by this live region. */
+function CdpsPageSkeletonContent() {
   return (
     <div
       className="space-y-6"
@@ -284,7 +371,6 @@ function CdpsPageSkeleton() {
       aria-live="polite"
       aria-label="Loading CDP markets"
     >
-      <CdpsHeader />
       <CdpMarketCardGridSkeleton />
       <CdpActivityDigestSkeleton />
       <section>

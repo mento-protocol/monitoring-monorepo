@@ -19,7 +19,12 @@ import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
 
 const GH_OUTPUT_MAX_BYTES = 20 * 1024 * 1024;
 
-function runGh(args) {
+/**
+ * Exported so the sanctioned merge wrapper reaches `gh` through the same
+ * bounded-output, non-zero-exit-rejects path this module uses, instead of
+ * carrying a second copy with its own failure semantics.
+ */
+export function runGh(args) {
   return new Promise((resolve, reject) => {
     const child = spawn("gh", args, {
       stdio: ["ignore", "pipe", "pipe"],

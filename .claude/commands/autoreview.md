@@ -16,6 +16,9 @@ pnpm agent:autoreview $ARGUMENTS
 bundle preparation/verification, runtime-change refusal handling, and other
 adapter mechanics. Follow it rather than duplicating those rules here.
 
+Test the validation claims as operating-card step 4 requires; that step owns
+the rule, so every review engine gets it.
+
 Verify every accepted finding before editing. If fixes are made, rerun focused
 checks and autoreview for that batch. Do not pause solely for cycle count before
 five review-triggered patch cycles are complete; pause for scope

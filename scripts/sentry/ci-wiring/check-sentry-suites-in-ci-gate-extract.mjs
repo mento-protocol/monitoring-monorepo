@@ -19,9 +19,18 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+import { inheritGateMarkerStdio } from "../../gate/mapped-command-process-identity.mjs";
 
 /**
  * How long any probe shell may run before it is killed and reported.
@@ -36,48 +45,156 @@ import { join } from "node:path";
  */
 export const PROBE_TIMEOUT_MS = 30_000;
 
+const PROBE_SUPERVISOR = String.raw`
+set -u
+
+timeout_marker="$1"
+completion_marker="$2"
+control_fifo="$3"
+timeout_seconds="$4"
+target_bash="$5"
+shift 5
+
+if ! /usr/bin/mkfifo "$control_fifo"; then
+  exit 125
+fi
+
+(
+  # Reverse the FIFO handshake so Bash 3.2 does not need fractional read timeouts.
+  # support. The target starts only after this watchdog is ready.
+  printf '%s\n' ready > "$control_fifo" || exit 126
+  /bin/sleep "$timeout_seconds"
+  if ! : > "$timeout_marker"; then
+    # A failed marker write is an infrastructure error, but it must still settle
+    # the target. Node will report EPROBESETTLEMENT because no marker exists.
+    kill -KILL -- "-$$"
+    exit 126
+  fi
+  # This shell is in the detached supervisor's group. The supervisor is still
+  # the live group leader, so its own $$ pins the numeric group identity while
+  # this signal is sent.
+  kill -KILL -- "-$$"
+  exit 127
+) &
+watchdog_pid=$!
+
+# Reading the ready token proves that the watchdog opened the FIFO and reached
+# its timer before the target starts.
+watchdog_ready=
+IFS= read -r watchdog_ready < "$control_fifo" || exit 125
+if [ "$watchdog_ready" != ready ]; then
+  exit 125
+fi
+"$target_bash" "$@"
+target_status=$?
+if ! printf '%s\n' "$target_status" > "$completion_marker"; then
+  # Settlement still wins if private status publication fails. With no marker,
+  # Node reports an infrastructure error instead of inventing a target status.
+  kill -KILL -- "-$$"
+  wait "$watchdog_pid"
+  exit 125
+fi
+
+# A target can return after it starts a descendant. Settle the complete group
+# before this live leader can be reaped and its numeric group id can be reused.
+kill -KILL -- "-$$"
+wait "$watchdog_pid"
+exit 125
+`;
+
 /**
  * Run a probe shell with a deadline, and make the deadline reach its children.
  *
- * `spawnSync`'s own `timeout` signals the shell it started and nothing else. The
- * classifier runs inside a `$(…)`, which is a separate process: killing the
- * parent leaves it spinning, reparented to init, burning a core until someone
- * notices. Measured, not assumed — a `while :; do :; done` fixture left two such
- * processes behind at 43% CPU each.
+ * Node starts a detached Bash supervisor instead of applying `spawnSync`'s
+ * numeric-pid timeout. A private FIFO proves that the in-group watchdog started
+ * its timer before the target starts. On timeout the watchdog writes a private
+ * marker and signals `-$$` while the supervisor is still the live group leader.
+ * On normal completion the supervisor writes the target status to private state
+ * and settles the complete group while its leader is live. Node then reconstructs
+ * the target result from that state.
  *
- * So the shell is started `detached`, which makes it a process-group leader, and
- * on timeout the whole group is killed by negative pid. Everything the probe
- * started is in that group; nothing else is.
+ * The reconstructed result uses Bash status semantics. A target signal becomes
+ * status 128 plus the signal number, and `signal` is null. Callers use only the
+ * zero or nonzero verdict.
  *
- * The deadline is SIGKILL, not the default SIGTERM, and that is what makes it a
- * deadline at all. `spawnSync` sends its `killSignal` and then keeps waiting for
- * the child to exit; it escalates only when the signal itself ERRORS, which
- * ignoring SIGTERM does not. A probe shell that traps or ignores it therefore
- * hangs `spawnSync` forever — and the group kill below can never run, because
- * the call it follows has not returned. SIGKILL cannot be trapped, so the shell
- * dies, `spawnSync` returns ETIMEDOUT, and the group cleanup gets its turn.
+ * Node never signals the returned pid or process-group id. After `spawnSync`
+ * returns, the supervisor has been reaped and that number can be reused. The
+ * private marker lets Node report the watchdog's live-leader group kill as the
+ * same ETIMEDOUT result callers received from the old Node timeout.
  *
  * @param {string} bash
  * @param {string[]} args
  * @param {object} options
  */
-export const runProbeShell = (bash, args, { dirs, ...options }) => {
-  const result = spawnSync(resolveInterpreter(bash), args, {
-    ...options,
-    encoding: "utf8",
-    cwd: dirs.empty,
-    env: probeEnv(dirs),
-    detached: true,
-    killSignal: "SIGKILL",
-  });
-  if (result.error?.code === "ETIMEDOUT" && typeof result.pid === "number") {
-    try {
-      process.kill(-result.pid, "SIGKILL");
-    } catch {
-      // The group is already gone, which is the outcome this wanted.
+export const runProbeShell = (
+  bash,
+  args,
+  { dirs, timeout = PROBE_TIMEOUT_MS, ...options },
+) => {
+  assert.ok(
+    Number.isFinite(timeout) && timeout > 0,
+    `probe timeout must be a positive finite number, got ${timeout}`,
+  );
+  const supervisorDir = mkdtempSync(join(dirs.temp, "supervisor-"));
+  const timeoutMarker = join(supervisorDir, "timed-out");
+  const completionMarker = join(supervisorDir, "completed");
+  const controlFifo = join(supervisorDir, "control");
+  // Both macOS and Linux `/bin/sleep` accept fractional seconds. Round only to
+  // the next millisecond so the caller's sub-second deadline stays bounded.
+  const timeoutMilliseconds = Math.max(1, Math.ceil(timeout));
+  const timeoutSeconds = `${Math.floor(timeoutMilliseconds / 1_000)}.${String(
+    timeoutMilliseconds % 1_000,
+  ).padStart(3, "0")}`;
+  let result;
+  try {
+    const interpreter = resolveInterpreter(bash);
+    result = spawnSync(
+      interpreter,
+      [
+        "-c",
+        PROBE_SUPERVISOR,
+        "sentry-gate-probe-supervisor",
+        timeoutMarker,
+        completionMarker,
+        controlFifo,
+        String(timeoutSeconds),
+        interpreter,
+        ...args,
+      ],
+      {
+        ...options,
+        stdio: inheritGateMarkerStdio(options.stdio),
+        encoding: "utf8",
+        cwd: dirs.empty,
+        env: probeEnv(dirs),
+        detached: true,
+      },
+    );
+    if (existsSync(timeoutMarker)) {
+      const error = new Error(`probe shell timed out after ${timeout}ms`);
+      error.code = "ETIMEDOUT";
+      result.error = error;
+    } else if (existsSync(completionMarker)) {
+      const completedStatus = readFileSync(completionMarker, "utf8").trim();
+      assert.match(
+        completedStatus,
+        /^(?:0|[1-9][0-9]{0,2})$/u,
+        "probe supervisor wrote an invalid completion status",
+      );
+      const status = Number(completedStatus);
+      assert.ok(status <= 255, "probe supervisor status is outside 0..255");
+      result = { ...result, status, signal: null };
+    } else {
+      const error = new Error(
+        "probe supervisor settled without a timeout or completion marker",
+      );
+      error.code = "EPROBESETTLEMENT";
+      result.error = error;
     }
+    return result;
+  } finally {
+    rmSync(supervisorDir, { recursive: true, force: true });
   }
-  return result;
 };
 
 /**

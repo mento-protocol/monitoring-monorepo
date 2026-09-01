@@ -230,6 +230,9 @@ export function loadEvaluationContext(
   const fixtureErrors = validateFixtureSuite(suite, inventory, {
     // The immutable pre-garden contract predates the live reserve target.
     requireHeadroomReserve: fixturesPath !== baselineFixturesPath,
+    // The reserve protects the current corpus. Historical result validation
+    // must remain stable after later corpus growth consumes that reserve.
+    enforceHeadroomReserve: inventoryCommit === null,
   });
   if (fixtureErrors.length > 0) {
     throw new Error(

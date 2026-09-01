@@ -120,6 +120,36 @@ test("excludes CLAUDE and mirrored Claude skills", () => {
   assert.equal(isDocumentationPath(".claude/commands/verify.md"), true);
 });
 
+test("excludes the review evaluation's machine payload", () => {
+  // docs/README.md is a bootstrap source of the navigation evaluation, so every
+  // catalog entry spends the shared context reserve. Frozen contestant
+  // transcripts and judge prompts are not documents, and the run directories
+  // would add one generated report per paid run forever — an unbounded drip
+  // against a fixed reserve. The runbook that explains the evaluation is a
+  // document and stays indexed.
+  assert.equal(
+    isDocumentationPath(
+      "docs/evals/review-skill-finder-reports/pr-1990-draw1.md",
+    ),
+    false,
+  );
+  assert.equal(
+    isDocumentationPath(
+      "docs/evals/review-skill-runs/2026-09-08-abc/report.md",
+    ),
+    false,
+  );
+  assert.equal(
+    isDocumentationPath("scripts/review/prompts/judge-match.md"),
+    false,
+  );
+  assert.equal(isDocumentationPath("docs/evals/review-skill.md"), true);
+  assert.equal(
+    isDocumentationPath("docs/evals/documentation-navigation.md"),
+    true,
+  );
+});
+
 test("working-tree deletions leave the generated inventory", () => {
   withRepo((repo) => {
     write(repo, "removed.md", "# Removed\n");
