@@ -352,23 +352,43 @@ boundary, and fails closed if that template drifts. The issue requires
 ### Install the scheduler
 
 The plist is a template. A plist has no variable substitution, so the install
-step substitutes its two placeholders: `__REPO_CHECKOUT__` (the checkout that
-holds `run-eval.sh`) and `__USER_HOME__` (the log location). Run this from the
-root of your checkout.
+step replaces three placeholders: `__REPO_CHECKOUT__` (the checkout that holds
+`run-eval.sh`), `__USER_HOME__` (the log location), and `__RUNTIME_PATH__` (the
+current `PATH` after the installer verifies `node`, `git`, `codex`, and
+`claude`). launchd does not inherit values that a login startup file exports.
+The installed job uses fixed `/bin/zsh` and `/bin/bash` interpreters. The login
+shell loads model credentials, then the command restores the captured path
+before it invokes the runner. Run this from the root of your checkout.
 
 ```bash
-sed -e "s|__REPO_CHECKOUT__|$PWD|g" \
-    -e "s|__USER_HOME__|$HOME|g" \
-    scripts/review/launchd/org.mento.review-eval.plist \
-    > ~/Library/LaunchAgents/org.mento.review-eval.plist
-grep -q "$PWD/scripts/review/run-eval.sh" ~/Library/LaunchAgents/org.mento.review-eval.plist
-launchctl bootstrap gui/"$(id -u)" ~/Library/LaunchAgents/org.mento.review-eval.plist
-launchctl kickstart -p gui/"$(id -u)"/org.mento.review-eval   # optional smoke test
+./scripts/review/install-review-eval-launchd.sh
 ```
 
-The `grep` is the check that the substitution actually landed: launchd reports
-a missing program only in its log, and a template that silently kept someone
-else's home directory would look installed while never running.
+The installer validates the template, runner, required CLI path, rendered
+plist, and any prior plist. It holds the checkout's review-eval run lock and a
+per-user target transaction lock while it checks the label, replaces the file,
+and loads the label. It never reclaims either lock and never unloads a label. If
+the label is loaded, first confirm that no evaluation runs. Then use
+`launchctl bootout` as a separate operator action and rerun the installer. A
+failed load restores the prior plist or removes the new file. The installer
+retains a recovery copy if file rollback fails. It fetches `origin/main` and
+refuses a dirty checkout or a checkout whose `HEAD` does not equal the fetched
+ref. It does not update the checkout.
+
+Fast-forward the scheduler checkout to current `origin/main` before each
+scheduled date. The runner fails closed if the checkout becomes stale after
+installation. A dedicated checkout with a safe automatic refresh remains
+deferred to [issue #2148](https://github.com/mento-protocol/monitoring-monorepo/issues/2148).
+
+Run this separate opt-in command only when you intend to start a paid
+evaluation immediately:
+
+```bash
+launchctl kickstart -p gui/"$(id -u)"/org.mento.review-eval
+```
+
+Skip `kickstart` if the current baseline already exists. Running it starts
+another paid evaluation immediately.
 
 It fires on the 8th at 10:20 and logs to
 `~/Library/Logs/mento-review-eval.log`. launchd, not cron: a laptop is asleep

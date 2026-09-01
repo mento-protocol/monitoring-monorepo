@@ -100,6 +100,80 @@ describe("discoverMentoAddresses", () => {
     expect(calls).toBeGreaterThan(12);
   });
 
+  it("keeps partial results when only some targets fail", async () => {
+    let call = 0;
+    requestMock.mockImplementation(async () => {
+      call += 1;
+      // First target answers, every later one times out mid-walk.
+      if (call === 1) return { rows: [{ address: A(0x9) }] };
+      throw new Error("hasura timeout");
+    });
+
+    const result = await discoverMentoAddresses(
+      "https://hasura/graphql",
+      42220,
+    );
+    // The surviving target's addresses still reach the caller.
+    expect(result.addresses).toEqual([A(0x9)]);
+  });
+
+  it("keeps collected addresses when every target fails after paging", async () => {
+    // Every target walks a full first page, then hits a late blip on page 2.
+    // All 12 end up degraded, but the run still read real data.
+    requestMock.mockImplementation(async ({ variables }) => {
+      if (variables.offset > 0) throw new Error("hasura timeout");
+      return {
+        rows: Array.from({ length: 1000 }, (_, i) => ({
+          address: `0x${i.toString(16).padStart(40, "0")}`,
+        })),
+      };
+    });
+
+    const result = await discoverMentoAddresses(
+      "https://hasura/graphql",
+      42220,
+    );
+    expect(result.addresses).toHaveLength(1000);
+  });
+
+  it("throws on an empty result when every target failed", async () => {
+    // Endpoint-wide fault: an auth/schema/network failure on the first page
+    // of every target. A zero-result success here would record a healthy
+    // cron check-in for a run that read no data at all.
+    requestMock.mockRejectedValue(new Error("hasura unauthorized"));
+
+    await expect(
+      discoverMentoAddresses("https://hasura/graphql", 42220),
+    ).rejects.toThrow(/discovered nothing; 12\/12 targets failed/);
+  });
+
+  it("throws on an empty result when only some targets failed", async () => {
+    let call = 0;
+    requestMock.mockImplementation(async () => {
+      call += 1;
+      // Half the targets error, the rest legitimately hold no rows. The
+      // totals still sum to zero, so the failures would otherwise pass for
+      // an honest "nothing to discover".
+      if (call % 2 === 0) throw new Error("hasura timeout");
+      return { rows: [] };
+    });
+
+    await expect(
+      discoverMentoAddresses("https://hasura/graphql", 42220),
+    ).rejects.toThrow(/discovered nothing; 6\/12 targets failed/);
+  });
+
+  it("returns an empty result when nothing failed", async () => {
+    // No rows and no errors is an honest answer, not a degraded run.
+    requestMock.mockResolvedValue({ rows: [] });
+
+    const result = await discoverMentoAddresses(
+      "https://hasura/graphql",
+      42220,
+    );
+    expect(result.addresses).toEqual([]);
+  });
+
   it("lowercases addresses and dedups", async () => {
     const upper = "0x" + "A".repeat(40);
     const lower = upper.toLowerCase();
