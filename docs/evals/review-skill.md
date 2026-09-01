@@ -167,214 +167,6 @@ pnpm review:eval:run --kind canary                # the monthly smoke test
 pnpm review:eval:run --kind full                  # the quarterly score of record
 ```
 
-## Lightweight experiment lane
-
-Use the experiment lane to reject weak review-skill changes before a canonical
-run. The experiment lane is separate from the canonical ledger. It does not
-read or write `review-skill-ledger.jsonl`. It cannot change a baseline or a
-freshness clock. It emits only `PROMISING`, `REJECT`, or `INCONCLUSIVE`.
-The canonical 24-cell lane is unchanged. Only that lane can emit `RED`,
-`GREEN`, or `PROMOTE`.
-
-Create one campaign before any model call. The plan freezes the incumbent and
-all candidate skill digests. It records a mode-sensitive experiment digest for
-source sealing and the canonical content digest for the 24-cell rerun
-fingerprint. It also freezes the contract, models, prompts, scorer, calibration
-set, stage order, cache identities, and a canonical 24-cell rerun plan. The
-qualification section is a plan only. It does not permit artifact reuse. A
-campaign can contain at most three candidates.
-
-```bash
-experiment_root="$HOME/.cache/mento-review-eval-experiments/manual-$(date -u +%Y%m%dT%H%M%SZ)"
-
-pnpm review:eval:experiment -- --plan \
-  --candidate prompt-a=/absolute/path/to/review-candidate-a \
-  --candidate prompt-b=/absolute/path/to/review-candidate-b \
-  --out "$experiment_root" --live-paired --json
-
-pnpm review:eval:experiment -- --run "$experiment_root" \
-  --candidate-id prompt-a --stage screen --dry-run --json
-pnpm review:eval:experiment -- --run "$experiment_root" \
-  --candidate-id prompt-a --stage screen --json
-```
-
-`--plan`, `--validate-plan`, `--evaluate`, and `--run ... --dry-run` do not call
-a model. Only `--run` without `--dry-run` spends model quota. The plan records
-all harness-scheduled paid work before the first model call. A dry run lists the
-planned fixture lanes. It does not estimate calls or dollars. The recorded
-`cost_usd` covers contestant envelopes only. It excludes finder, judge,
-subagent, and child-CLI spend. This lane has no dollar cap or complete cost
-accounting.
-
-`--evaluate` accepts caller-supplied result JSON. It does not authenticate run,
-cache, or calibration receipts. Use it only for a deterministic what-if
-decision. A decision that it writes is not experiment evidence.
-
-The artifact directory must be a child of
-`~/.cache/mento-review-eval-experiments/`. The mutable fixture base must be
-`~/.cache/mento-review-eval-experiment-fixtures/` or one of its children. Both
-roots must be outside the repository. They must also be disjoint. The fixture
-path includes the campaign ID, a digest of the artifact root, and the candidate
-ID. This rule prevents two campaign commands from sharing a mutable fixture by
-accident.
-
-The screen runs three paired replay lanes. It uses PR 1990 report 1, PR 1995
-report 2, and PR 1999 report 1. The holdout uses the complementary frozen
-report for each PR. The runner can execute at most three PR lanes at once. On a
-cache miss, it runs the incumbent and candidate sequentially inside one lane.
-The plan records `AB` or `BA` order. Later candidates in the exact same campaign
-can reuse the incumbent raw and match artifacts as a common control. The cache
-identity and raw payload use the candidate-neutral `shared-incumbent`
-comparison ID. Campaign and source identities must still match.
-
-The screen returns `PROMISING` only when all these conditions pass:
-
-- The candidate has at least two net additional known matches.
-- The candidate has no net P1 loss.
-- At least two PRs have a non-negative paired known-match delta.
-- Every arm is complete, non-empty, and free of a hard leak signal.
-
-A known-match net of minus two or less, or any P1 net loss, returns `REJECT`.
-A candidate arm with an empty output or hard leak signal also returns `REJECT`.
-Other invalid paired evidence returns `INCONCLUSIVE`. The scorer first extracts
-claims and matches known defects. It defers novel-claim classification. It runs
-that classification when candidate claims rise by at least three and by at
-least 25 percent. A candidate wrong-claim delta above one then returns
-`REJECT`. Other threshold misses return `INCONCLUSIVE`.
-
-Run the holdout only after a `PROMISING` screen:
-
-```bash
-pnpm review:eval:experiment -- --run "$experiment_root" \
-  --candidate-id prompt-a --stage holdout --json
-```
-
-The combined screen and holdout return `PROMISING` only when all these
-conditions pass:
-
-- The candidate has at least three net additional known matches.
-- The candidate matches at least 9 of the 12 P1 opportunities.
-- The candidate has at least two net additional P1 matches.
-- At least two PRs have a positive known-match delta.
-- The candidate has at most one wrong claim more than the incumbent.
-
-The holdout always completes wrong-claim classification before it can return
-`PROMISING`. The rejection rules above also apply. Any other threshold miss
-returns `INCONCLUSIVE`. Do not add optional samples to convert that result into
-a pass.
-
-The optional live-paired stage runs one current finder per PR. It gives the
-same report to both verifier arms. This removes differential finder sampling.
-The handoff uses a UTF-8 suffix of up to 30,000 bytes from the finder output.
-Evidence keeps the full raw output, the delivered tail, both byte counts, and
-both digests. The stage requires a `PROMISING` holdout. It applies the screen
-thresholds to its own three pairs. It remains an experiment confirmation. It
-is not the production pipeline score. The runner publishes one authenticated
-finder receipt per lane. A stage retry reuses that receipt and cannot draw a new
-finder sample.
-
-```bash
-pnpm review:eval:experiment -- --run "$experiment_root" \
-  --candidate-id prompt-a --stage live-paired --json
-```
-
-Each stage permits one initial attempt and at most one retry. A handled failure
-permits the retry. A process crash permits it only after operator settlement.
-A completed decision cannot get a second sample. A live owner also blocks a
-retry. One campaign lock allows one active paid command for the campaign. A
-process crash leaves a stale lock. The runner does not reclaim it because it
-cannot prove that every paid child process stopped. The operator must prove the
-persisted command lineage stopped before removing the lock and using the one
-retry.
-
-A campaign has one absolute deadline six hours after `planned_at`. A paid stage
-sets one absolute deadline at the earlier of three hours after its start or the
-campaign deadline. The runner derives that instant from the recorded
-`started_at` and `planned_at` values before it arms the relative timer. Fixture
-preparation and paid-result or cache writes check that fixed instant. Failure
-evidence can still record the terminal reason.
-Each harness-launched model process also has a one-hour limit. The process
-runner sends `TERM` to the whole process group, then sends `KILL` after the
-two-second grace period.
-`SIGINT`, `SIGTERM`, and `SIGHUP` abort the stage through the same path.
-The runner aborts a call when captured stdout would exceed 67,108,864
-characters. It retains only the final 4,000 stderr characters. Contestant,
-tool-enabled novelty-judge, and blind-judge calls allow at most 80, 60, and 1
-turns, respectively.
-
-Claim extraction, known matching, and novelty use separate content-addressed
-caches. Deferred novelty is absent. It is not recorded as zero. A calibration
-receipt can be reused for six hours only when the judge, CLI, host, scorer,
-prompts, and calibration-set identities match exactly. A reused receipt must
-remain valid during paid work. The runner shortens the stage deadline when the
-receipt expires first. The validator reopens the receipt inside its identity
-cache. It verifies its digest, frozen record order, outcomes, recomputed
-agreement, and age at each use.
-
-The plan, finder receipt, run receipts, calibration receipt, and cache artifacts
-use write-once publication. A hard link publishes complete bytes atomically.
-Stage validation reopens the raw, match, and novelty artifacts. It checks their
-self-digests, paths, reconstructed identities, content links, calibration
-receipt, and recorded counters. Each stage artifact records its publication
-validation time. The runner reopens the published stage artifact and recomputes
-the decision before it removes a stage barrier.
-
-Evidence authentication means exact identity checks and unkeyed SHA-256
-self-digests inside the confined local artifact root. It does not protect
-against a hostile host user.
-
-Before a paid call, the parent process seals the skill, truth, finder reports,
-handoff prompt, calibration set, fixture script, and scorer identities. It
-keeps answer-key and skill bytes in parent memory. The source seal persists
-only the sealed fixture script and a digest manifest. It materializes seed
-fixtures before judge calibration or another model call.
-
-Each filesystem-capable model process gets a new disposable fixture clone. This
-applies to the live finder, each contestant arm, and each tool-enabled novelty
-judge. The clone uses no local object sharing or hard links. It has no remote,
-uses `/dev/null` for hooks, and pins the planned head and separate frozen base
-SHA. Cleanup removes it in a `finally` block. No two such processes share a
-mutable checkout.
-
-The plan skips script launchers. It pins the real path, version, and
-executable-byte digest for the direct `claude` and `codex` provider binaries
-from the scrubbed `PATH`. A paid command resolves and verifies those identities
-again, then uses the recorded absolute paths. Every Claude user and judge prompt
-is sent through stdin. The treatment system prompt is a file inside the
-disposable clone. Every Claude call uses `--no-session-persistence`. User and
-judge prompt bytes and skill instructions do not appear in process arguments.
-
-Paid runs require Darwin `sandbox-exec`. The generated profile denies every
-registered repository worktree, the global experiment artifact root, and the
-global experiment fixture root. It also denies every incumbent and candidate
-skill source root and inspection of other processes. It permits self inspection
-for native runtime compatibility. It permits the active disposable fixture as
-a narrow file-access exception. The live finder, contestant, and tool-enabled
-novelty judge run in that profile. Other platforms fail closed. Live probes
-require read and write access to the active fixture. They require read and
-write denial for the plan and protected roots. They also reject inspection of
-other processes.
-
-The Seatbelt profile is defense in depth. It uses `allow default`. It keeps
-network access and broad host filesystem access outside the protected roots.
-The runner removes `GH_TOKEN`, `GITHUB_TOKEN`,
-`GITHUB_PERSONAL_ACCESS_TOKEN`, and `GH_ENTERPRISE_TOKEN`. It inherits other
-environment credentials. Tool-enabled processes can start subagents or child
-model CLIs. The time and process-group limits include those child processes,
-but the runner does not account for their model spend. It is not adversarial
-containment. Do not treat the probes as proof of a general host sandbox or a
-hard spend limit.
-
-The qualification section is only a `canonical-full-rerun-plan`. No canonical
-importer exists. `experiment_artifact_reuse_allowed` is false. Every treatment
-selected through this lane must run all 24 canonical cells again. Experiment
-receipts, cache entries, cell IDs, and fingerprints are never canonical
-qualification evidence.
-
-The current fixtures have guided review-skill edits. Treat them as development
-data. Add a new holdout whose truth did not guide the candidate before a new
-canonical result supports a broad generalization claim.
-
 `run-eval.sh` adds a detached worktree of `origin/main` and reads the contract,
 truth, prompts and scorer from there, so a dirty working tree cannot change
 what is measured. The ledger, the baseline it resolves and the branch the PR
@@ -603,6 +395,132 @@ It fires on the 8th at 10:20 and logs to
 at that hour about half the time, and launchd runs a missed calendar interval
 on the next wake while cron drops it. `--kind auto` reads the ledger and picks
 `full` when the last full run is more than 100 days old, otherwise `canary`.
+
+## Lightweight experiment lane
+
+Use this lane to reject weak review-skill changes before a canonical run. It
+compares one candidate with one incumbent. It never reads or writes
+`review-skill-ledger.jsonl`. It cannot update the baseline or freshness clock.
+Its only statuses are `PROMISING`, `REJECT`, and `INCONCLUSIVE`.
+
+Planning and validation do not call a model. Both modes validate local inputs
+and probe the provider CLI versions. Planning writes `plan.json` with the
+complete campaign and canonical 24-cell rerun manifest before paid work can
+start.
+
+```bash
+experiment_root="$HOME/.cache/mento-review-eval-experiments/manual-$(date -u +%Y%m%dT%H%M%SZ)"
+
+pnpm review:eval:experiment -- --plan \
+  --candidate candidate-a=/absolute/path/to/review-candidate \
+  --out "$experiment_root" \
+  --live-paired \
+  --json
+
+pnpm review:eval:experiment -- --validate-plan "$experiment_root" --json
+pnpm review:eval:experiment -- --run "$experiment_root" \
+  --stage screen --dry-run --json
+pnpm review:eval:experiment -- --run "$experiment_root" \
+  --stage screen --json
+```
+
+`--run` is the only mode that can call a model. `--dry-run` prints the
+planned fixture lanes and treatment order. It does not call a model or estimate
+cost.
+
+The plan binds these inputs:
+
+- Contract digest; fixture head and base SHAs; and truth, frozen finder-report,
+  and prompt digests.
+- Incumbent and candidate skill digests.
+- Finder, verifier, control, and judge model and effort settings.
+- Claude and Codex CLI versions, scorer identity, and the five-module experiment
+  harness digest.
+- Stage lanes, treatment order, and the canonical rerun manifest.
+
+The screen uses the first frozen report for PRs 1990, 1995, and 1999. It runs
+six verifier arms. Each fixture lane runs the two arms sequentially in its
+planned `AB` or `BA` order. At most three fixture lanes run at once.
+
+The screen returns `PROMISING` only when the candidate has at least two net
+known matches, no net P1 loss, and a non-negative known-match delta on at least
+two PRs. A known-match net of minus two or less, any P1 net loss, an empty
+candidate arm, or a candidate hard leak returns `REJECT`. Other misses return
+`INCONCLUSIVE`. If claim inflation requires classification, more than one extra
+wrong claim also returns `REJECT`.
+
+Run the holdout only after a `PROMISING` screen:
+
+```bash
+pnpm review:eval:experiment -- --run "$experiment_root" \
+  --stage holdout --json
+```
+
+The holdout uses the complementary frozen report for each grid fixture. It adds
+six verifier arms. Its decision combines those arms with the six screen arms. A
+finalist needs at least three net known matches, at least 9 of 12 candidate P1
+matches, at least two net P1 matches, gains on at least two PRs, and no more
+than one extra wrong claim. A known-match net of minus two or less, any net P1
+loss, or more than one extra wrong claim returns `REJECT`. Other threshold
+misses return `INCONCLUSIVE`.
+
+Claim extraction and known-defect matching run first. Novel-claim
+classification runs only when claim inflation requires it or the candidate
+reaches the holdout finalist decision. Claim inflation needs at least three
+extra claims and a ratio of at least 1.25. Deferred `wrong_claims` fields stay
+absent from the arm records.
+
+When planned, `live-paired` requires a `PROMISING` holdout:
+
+```bash
+pnpm review:eval:experiment -- --run "$experiment_root" \
+  --stage live-paired --json
+```
+
+The live stage generates one current finder output for each grid fixture. It
+delivers the same final UTF-8 suffix of at most 30,000 bytes to both verifier
+arms. It applies the screen thresholds to its own six arms. It confirms the
+experiment only. It is not the canonical pipeline score.
+
+The artifact root must be outside the repository. Completed artifacts use these
+paths:
+
+- `plan.json` contains the immutable campaign plan.
+- `cache/raw/<digest>.json` contains one verifier response.
+- `cache/score/<digest>.json` contains extracted claims, known matches, and
+  leak evidence for one raw response.
+- `cache/novel/<digest>.json` contains optional novel-claim classification for
+  one scored response.
+- `cache/stage/<digest>.json` contains the complete stage records and decision.
+
+Each cache identity includes the plan digest. Live raw identities also include
+the delivered finder-report digest. Score and novelty identities chain the raw
+and score artifact digests. The runner validates identities and content digests
+before reuse. It publishes a complete JSON file through a temporary file and an
+exclusive hard link to the final name. Readers ignore incomplete temporary
+files.
+
+A failed stage writes no completed stage entry. Cell-level raw, score, or
+novelty entries completed before the failure remain available. Run the same
+stage again to reuse exact entries and repeat missing or changed work. A new
+live finder output changes the raw identity unless its delivered digest is the
+same. The experiment runner does not provide crash-lineage recovery, retry
+journals, a campaign lock, calibration receipts, host sandboxing, or
+process-group control. Run one command for a campaign at a time. This is an
+operator-started local experiment.
+
+The plan contains a `canonical-full-rerun` manifest with
+`experiment_artifact_reuse_allowed: false`. No importer exists. Experiment
+results and caches never qualify as canonical evidence. Run the selected
+candidate through the canonical 24-cell runner:
+
+```bash
+pnpm review:eval:run --skill-ref /absolute/path/to/review-candidate \
+  --kind full
+```
+
+The current visible fixtures are development data. They do not prove broad
+generalization.
 
 ## Read the verdict
 
@@ -870,27 +788,6 @@ path must exist on `main` before the first run after the moving commit.
 | `docs/evals/review-skill-ledger.jsonl`                      | append-only score ledger, one row per run                |
 | `docs/evals/review-skill-runs/`                             | per-run scored detail                                    |
 | `scripts/review/review-eval.mjs`                            | the CLI                                                  |
-| `scripts/review/review-eval-experiment.mjs`                 | the non-ledger experiment CLI                            |
-| `scripts/review/review-eval-experiment-cli-campaign.mjs`    | campaign loading and runtime identity checks             |
-| `scripts/review/review-eval-experiment-cli-evidence.mjs`    | CLI receipt lookup, retry checks, and atomic writes      |
-| `scripts/review/review-eval-experiment-cli-options.mjs`     | experiment command parsing and help text                 |
-| `scripts/review/review-eval-experiment-cli-plan.mjs`        | campaign planning and executable-source identity         |
-| `scripts/review/review-eval-experiment-cli-run.mjs`         | paid-stage orchestration and absolute deadlines          |
-| `scripts/review/review-eval-experiment-cache.mjs`           | atomic cache storage and persisted lineage checks        |
-| `scripts/review/review-eval-experiment-contract.mjs`        | campaign plan, policy, and artifact identities           |
-| `scripts/review/review-eval-experiment-core.mjs`            | the stable experiment-module export facade               |
-| `scripts/review/review-eval-experiment-decision.mjs`        | paired screen and holdout decisions                      |
-| `scripts/review/review-eval-experiment-evidence.mjs`        | atomic plans, cache identities, locks, and retry rules   |
-| `scripts/review/review-eval-experiment-finder.mjs`          | authenticated, retry-stable live-finder receipts         |
-| `scripts/review/review-eval-experiment-isolation.mjs`       | Darwin Seatbelt profiles for untrusted paid processes    |
-| `scripts/review/review-eval-experiment-novelty.mjs`         | deferred tool-enabled novelty scoring                    |
-| `scripts/review/review-eval-experiment-prepare.mjs`         | fixture preparation and judge calibration                |
-| `scripts/review/review-eval-experiment-process.mjs`         | bounded process groups and deadline cleanup              |
-| `scripts/review/review-eval-experiment-run.mjs`             | bounded fixture-lane orchestration                       |
-| `scripts/review/review-eval-experiment-runtime.mjs`         | live contestant and staged scoring runtime               |
-| `scripts/review/review-eval-experiment-seal.mjs`            | in-memory source capture and fixture pre-materialization |
-| `scripts/review/review-eval-experiment-stage-evidence.mjs`  | self-checking stage receipts and decision replay         |
-| `scripts/review/review-eval-experiment.test.mjs`            | deterministic experiment contract tests                  |
 | `scripts/review/review-eval-run.mjs`                        | the stable run-helper import facade                      |
 | `scripts/review/review-eval-run-plan.mjs`                   | plan, input, matrix, and comparability-key construction  |
 | `scripts/review/review-eval-run-execution.mjs`              | judge execution, environment scrub, and fixture reset    |

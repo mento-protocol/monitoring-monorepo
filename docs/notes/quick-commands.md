@@ -46,9 +46,11 @@ pnpm code-health:duplication       # jscpd duplication → reports/jscpd/; advis
 pnpm code-health:schema-diff       # GraphQL breaking-change diff vs origin/main; advisory, never blocks
 pnpm code-health                   # Run knip + deps; exclude history + duplication
 pnpm agent:quality-gate            # Map changed paths to required local checks and PR checklists
-pnpm agent:quality-gate --run      # Run mapped checks through the fair coordinator; default capacity 3
+pnpm agent:quality-gate --run      # Local: run mapped checks; resolve non-main PR bases per operating-card step 3
+./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main  # Hosted: warm the hook after resolved-base validation
 # Package scripts, package-manager settings, and lockfiles can change install code. Review before acknowledgment:
-pnpm agent:quality-gate --run --allow-package-script-changes
+pnpm agent:quality-gate --run --allow-package-script-changes  # Local
+git config agent.qualityGate.allowPackageScriptChanges true   # Hosted, before the direct warm command
 pnpm agent:context-check           # Validate repo-visible agent instructions, links, and routing
 pnpm agent:review-materiality      # Classify review depth + context-update signals for current diff
 pnpm agent:autoreview              # Isolated closeout; multi-pass uses --prepare-bundle-dir DIR + a fresh reviewer; gate owns tests
@@ -56,10 +58,7 @@ pnpm agent:autoreview:test         # Full regressions; defaults to up to 3 worke
 pnpm agent:autoreview:test -- --jobs 1  # Sequential full closeout for autoreview runtime changes
 pnpm agent:autoreview --verify-bundle-dir DIR  # Pre-review rehash; retain the printed manifest digest
 pnpm agent:autoreview --verify-bundle-dir DIR --expected-bundle-manifest DIGEST  # Bound post-review rehash
-pnpm review:eval:experiment -- --help  # Non-ledger screen; canonical qualification always reruns all 24 cells
-pnpm review:eval:experiment -- --validate-plan <campaign-dir> --json  # Validate a campaign without a model call
-pnpm review:eval:experiment -- --run <campaign-dir> --candidate-id <id> --stage screen --dry-run --json  # List paid lanes without a cost estimate or model call
-pnpm docs:index --write            # Regenerate docs/README.md from tracked + non-ignored untracked Markdown
+pnpm review:eval:experiment -- --help  # Non-ledger paired screen; canonical qualification reruns all 24 cells\npnpm review:eval:experiment -- --validate-plan <campaign-dir> --json  # Validate one candidate campaign without a model call\npnpm review:eval:experiment -- --run <campaign-dir> --stage screen --dry-run --json  # List paid lanes without a model call\npnpm docs:index --write            # Regenerate docs/README.md from tracked + non-ignored untracked Markdown
 pnpm docs:index --check            # Fail on catalog drift, invalid classification, or broken internal Markdown links
 pnpm docs:audit --dry-run          # Print this week's bounded semantic-review packet without mutating documentation
 pnpm docs:garden --dry-run --json  # Read the queue; preview the exact weekly garden issue decision; no mutation

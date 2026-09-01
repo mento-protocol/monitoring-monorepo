@@ -100,8 +100,8 @@ feedback-runtime pins.
   `scripts/review/launchd/org.mento.review-eval.plist`,
   `scripts/review/review-eval.test.mjs`, and
   `scripts/review/install-review-eval-launchd.test.mjs`.
-  Publication helpers pin both tests. Experiment modules pin ADR 0083.
-- **Navigation-eval pin.** `forbidden_sources` in
+  `review/review-eval-*publication*` pins both tests.
+  `scripts/review/review-eval-experiment*.mjs` are pinned by the file table in\n `docs/evals/review-skill.md`, the `review:eval:experiment` package script,\n and ADR 0083.\n- **Navigation-eval pin.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names its source.
 - **Verification evidence.** `.gitattributes` pins
   `scripts/docs/check-verification-redesign-evidence*.mjs`.
@@ -178,8 +178,8 @@ in the same PR.
 
 ## Verification
 
-Run `pnpm agent:quality-gate --run`; its mapping routes `bash -n`,
-`pnpm lint:scripts`, and focused tests for what changed. Add
+Run the gate from operating-card step 3. It routes `bash -n`,
+`pnpm lint:scripts`, and focused tests. Add
 `pnpm agent:quality-gate:test` for gate routing changes,
 `node scripts/check-deploy-root-anchors.test.mjs` for deploy wrappers, and
 `pnpm agent:context-check` plus `pnpm docs:index` after a move.

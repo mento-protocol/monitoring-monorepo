@@ -1,465 +1,489 @@
-// Live model runtime for the non-ledger review-skill experiment lane.
-
-import { createHash } from "node:crypto";
-import { writeFileSync } from "node:fs";
-import path from "node:path";
+// Paid runtime for the small non-ledger review-skill experiment.
 
 import {
-  fixtureForPr,
-  forbiddenShasForFixture,
-} from "./review-eval-fixtures.mjs";
-import { scrubbedEnv } from "./review-eval-run-execution.mjs";
+  claudeExec,
+  resetFixture,
+  scrubbedEnv,
+} from "./review-eval-run-execution.mjs";
 import {
   leakSignals,
   loginsInFixtureTree,
   reviewerLogins,
 } from "./review-eval-run-cell.mjs";
-import { extractClaims, matchClaims } from "./review-eval-score.mjs";
-import { digestObject } from "./review-eval-experiment-contract.mjs";
+import { finderArgvDigest } from "./review-eval-run-plan.mjs";
 import {
-  experimentArtifactFile as artifactFile,
-  readExperimentIdentityCache as readIdentityCache,
-  validateExperimentRecordCaches,
-  writeExperimentCache as writeJsonOnce,
-} from "./review-eval-experiment-cache.mjs";
-import { buildCacheIdentity } from "./review-eval-experiment-evidence.mjs";
+  classifyNovel,
+  extractClaims,
+  matchClaims,
+} from "./review-eval-score.mjs";
 import {
-  EXPERIMENT_CALL_TIMEOUT_MS,
-  claudeStdinArgv,
-  spawnExperimentProcess,
-} from "./review-eval-experiment-process.mjs";
+  MAX_FIXTURE_LANES,
+  novelCacheIdentity,
+  rawCacheIdentity,
+  scoreCacheIdentity,
+  stagePlanFor,
+} from "./review-eval-experiment-contract.mjs";
 import {
-  ensureExperimentCalibration,
-  prepareExperimentFixtures,
-} from "./review-eval-experiment-prepare.mjs";
-import {
-  createDisposableExperimentFixture,
-  createExperimentJudgeExec,
-  disposeDisposableExperimentFixture,
-  isolateExperimentCommand,
-  registeredExperimentWorktrees,
-  verifyExperimentSandbox,
-} from "./review-eval-experiment-isolation.mjs";
-import {
-  ensureLiveFinderReceipt,
+  assertExperimentConcurrency,
+  defaultExperimentContestantExec,
+  defaultExperimentFinderExec,
+  defaultExperimentPrepareFixture,
+  defaultExperimentTruth,
+  experimentCellId,
+  experimentContestantArgv,
+  experimentModel,
+  experimentProviderText,
+  experimentTreatment,
   liveFinderHandoff,
-} from "./review-eval-experiment-finder.mjs";
-import {
-  capturedSkillDigest,
+  mapExperimentLimit,
+  parseExperimentContestantEnvelope,
+  purgeExperimentSkill,
+  readPinnedExperimentFile,
+  readExperimentCache,
+  renderExperimentHandoff,
+  resetExperimentFixture,
   stageExperimentSkill,
-} from "./review-eval-experiment-seal.mjs";
+  validateNovelExperimentPayload,
+  validateRawExperimentPayload,
+  validateScoreExperimentPayload,
+  writeExperimentCache,
+} from "./review-eval-experiment-cache.mjs";
 
-export {
-  ensureExperimentCalibration,
-  prepareExperimentFixtures,
-  validateExperimentRecordCaches,
-  liveFinderHandoff,
-};
-export { enrichRecordsWithNovelty } from "./review-eval-experiment-novelty.mjs";
+export const parseContestantEnvelope = parseExperimentContestantEnvelope;
 
-const CONTESTANT_TOOLS = [
-  "Read",
-  "Write",
-  "Edit",
-  "Bash",
-  "Grep",
-  "Glob",
-  "Agent",
-  "TodoWrite",
-];
-function sha256(bytes) {
-  return createHash("sha256").update(bytes).digest("hex");
-}
-
-function treatmentFor(plan, candidateId, treatment) {
-  if (treatment === "incumbent") return plan.incumbent;
-  const found = plan.candidates.find(
-    (candidate) => candidate.id === candidateId,
-  );
-  if (!found) throw new Error(`plan has no candidate ${candidateId}`);
-  return found;
-}
-
-function parseContestantEnvelope(raw) {
-  let envelope;
-  try {
-    envelope = JSON.parse(raw);
-  } catch (error) {
-    throw new Error(`contestant returned no JSON envelope: ${error.message}`, {
-      cause: error,
+async function laneSource({
+  plan,
+  contract,
+  lane,
+  fixture,
+  repoRoot,
+  env,
+  reset,
+  finderExec,
+}) {
+  if (lane.source.kind === "frozen-report") {
+    const text = readPinnedExperimentFile({
+      repoRoot,
+      record: lane.source,
+      label: `PR ${lane.pr} frozen report`,
     });
+    if (!text.trim()) throw new Error(`PR ${lane.pr} frozen report is empty`);
+    return { kind: lane.source.kind, text, digest: lane.source.sha256 };
   }
+  if (lane.source.kind !== "live-finder" || lane.source.shared !== true) {
+    throw new Error(`PR ${lane.pr} has an invalid experiment source`);
+  }
+  const finderDigest = finderArgvDigest(contract);
   if (
-    envelope?.is_error === true ||
-    typeof envelope?.result !== "string" ||
-    envelope.result.trim().length === 0
+    finderDigest !== plan.inputs.finder_argv_digest ||
+    finderDigest !== lane.source.finder_argv_digest
   ) {
-    throw new Error("contestant returned no usable review text");
+    throw new Error(`PR ${lane.pr} finder argv differs from the plan`);
   }
-  return envelope;
-}
-
-function safeModelEnv({ repoRoot }) {
-  return scrubbedEnv({ roots: [repoRoot] });
-}
-
-function readPinnedTruth({ sourceSeal, lane }) {
-  const truth = sourceSeal?.truth_by_pr?.[String(lane.pr)];
-  if (!truth) throw new Error(`source seal has no truth for PR ${lane.pr}`);
-  return truth;
-}
-
-function frozenFinderReport({ sourceSeal, lane }) {
-  const text = sourceSeal?.finder_reports?.[lane.source.file];
-  if (typeof text !== "string") {
-    throw new Error(`source seal has no finder report for PR ${lane.pr}`);
-  }
-  if (!text.trim())
-    throw new Error(`frozen finder report is empty for PR ${lane.pr}`);
-  return text;
-}
-
-function renderHandoff({ sourceSeal, otherReview }) {
-  return sourceSeal.handoff_template.replace(
-    "{{OTHER_REVIEW}}",
-    () => otherReview,
+  await resetExperimentFixture({
+    reset,
+    fixture,
+    lane,
+    label: `${lane.lane_id}-finder`,
+  });
+  const raw = experimentProviderText(
+    await finderExec({
+      argv: contract.sut.finder.argv,
+      cwd: fixture.path,
+      env,
+      lane,
+      plan,
+    }),
+    "live finder",
   );
+  const handoff = liveFinderHandoff(raw);
+  if (!handoff.text.trim()) {
+    throw new Error(`live finder returned no report for PR ${lane.pr}`);
+  }
+  return { kind: lane.source.kind, ...handoff };
 }
 
-/** Build the live arm function passed to runExperimentStage. */
 export function createExperimentArmExecutor({
   plan,
+  stage,
   contract,
   artifactRoot,
   repoRoot,
-  fixtureCacheDir,
-  sourceSeal,
-  preparedFixtures = new Map(),
-  calibrationReceipt,
-  timeoutMs = EXPERIMENT_CALL_TIMEOUT_MS,
-  runCommand = spawnExperimentProcess,
-  judgeExec: suppliedJudgeExec = null,
-  signal = null,
-  beforeWrite = null,
-  isolateCommand = isolateExperimentCommand,
-  sandboxWorktreeRoots = null,
-  createFixture = createDisposableExperimentFixture,
-  disposeFixture = disposeDisposableExperimentFixture,
-  sandboxProbe = null,
-  deadlineMs = Number.POSITIVE_INFINITY,
+  handoffTemplate = readPinnedExperimentFile({
+    repoRoot,
+    record: plan.inputs.prompts.handoff,
+    label: "handoff prompt",
+  }),
+  contestantExec = defaultExperimentContestantExec,
+  judgeExec = claudeExec,
+  reset = resetFixture,
+  loadTruth = defaultExperimentTruth,
+  readCache = readExperimentCache,
+  writeCache = writeExperimentCache,
+  env = scrubbedEnv({ roots: [repoRoot] }),
 }) {
-  if (calibrationReceipt?.receipt_digest == null) {
-    throw new Error("a calibration receipt is required before scoring");
-  }
-  if (sourceSeal?.manifest?.plan_digest !== plan.plan_digest) {
-    throw new Error("the experiment runtime source seal is missing or stale");
-  }
-  const fixtureCache = new Map(preparedFixtures);
-  const liveReports = new Map();
-  const env = safeModelEnv({ repoRoot });
-  const protectedRoots = [
-    plan.incumbent.skill_ref,
-    ...plan.candidates.map((candidate) => candidate.skill_ref),
-  ];
-  let worktreeRoots = sandboxWorktreeRoots;
-  const isolatedCommand = ({ file, args, fixturePath }) => {
-    if (worktreeRoots === null && isolateCommand === isolateExperimentCommand) {
-      worktreeRoots = registeredExperimentWorktrees({ repoRoot });
-    }
-    return isolateCommand({
-      file,
-      args,
-      repoRoot,
-      artifactRoot,
-      fixtureCacheDir,
-      fixturePath,
-      worktreeRoots,
-      protectedRoots,
-    });
-  };
-  const withDisposableFixture = async ({
-    seedFixture,
-    head,
-    base,
-    cellId,
-    role,
-    run,
-  }) => {
-    const active = createFixture({
-      seedFixture,
-      fixtureCacheDir,
-      head,
-      base,
-      cellId: `${cellId}-${role}`,
-      deadlineMs,
-    });
-    try {
-      if (isolateCommand === isolateExperimentCommand) {
-        verifyExperimentSandbox({
-          repoRoot,
-          artifactRoot,
-          fixtureCacheDir,
-          fixturePath: active.path,
-          worktreeRoots,
-          protectedRoots,
-        });
-      } else {
-        sandboxProbe?.({ fixturePath: active.path, role });
-      }
-      return await run(active);
-    } finally {
-      disposeFixture({ fixturePath: active.path, fixtureCacheDir });
-    }
-  };
-  const judgeExec =
-    suppliedJudgeExec ??
-    createExperimentJudgeExec({
-      claudeFile: plan.identities.claude_bin.path,
-      repoRoot,
-      artifactRoot,
-      fixtureCacheDir,
-      env,
-      timeoutMs,
-      signal,
-      runCommand,
-      isolateCommand: isolatedCommand,
-      worktreeRoots,
-      protectedRoots,
-    });
-
-  const fixtureReport = (pr) => {
-    if (!fixtureCache.has(pr)) {
-      throw new Error(
-        `fixture PR ${pr} was not materialized before paid execution`,
-      );
-    }
-    return fixtureCache.get(pr);
-  };
-
-  const otherReview = async ({ lane }) => {
-    if (lane.source.kind === "frozen-replay") {
-      const text = frozenFinderReport({ sourceSeal, lane });
-      return { text, digest: sha256(text) };
-    }
-    if (!liveReports.has(lane.lane_id)) {
-      liveReports.set(
-        lane.lane_id,
-        ensureLiveFinderReceipt({
-          plan,
-          contract,
-          lane,
-          artifactRoot,
-          fixture: fixtureReport(lane.pr),
-          env,
-          timeoutMs,
-          signal,
-          beforeWrite,
-          runCommand,
-          isolatedCommand,
-          withDisposableFixture,
-        }),
-      );
-    }
-    return liveReports.get(lane.lane_id);
-  };
-
-  return async ({ candidateId, stage, attempt, lane, arm }) => {
-    const finder = await otherReview({ lane });
-    const rawIdentity = buildCacheIdentity({
-      phase: "raw",
+  const judge = (request) => judgeExec({ ...request, env });
+  return async ({ lane, treatment, fixture, source }) => {
+    const rawIdentity = rawCacheIdentity({
       plan,
-      candidateId,
       stage,
-      pr: lane.pr,
-      treatment: arm.treatment,
-      finderArtifactDigest:
-        lane.source.kind === "live-finder" ? finder.digest : null,
+      lane,
+      treatment,
+      sourceDigest: source.digest,
     });
-    const rawFile = artifactFile(
+    let rawEntry = readCache({
       artifactRoot,
-      `cache/raw/${rawIdentity.digest}.json`,
-    );
-    let raw = readIdentityCache(rawFile, rawIdentity, "raw_digest");
-    const rawReused = raw !== null;
-    if (!raw) {
-      const fixture = fixtureReport(lane.pr);
-      const selected = treatmentFor(plan, candidateId, arm.treatment);
-      const snapshot = sourceSeal.skill_snapshots[selected.id];
-      if (
-        snapshot?.digest !== selected.skill_digest ||
-        capturedSkillDigest(snapshot.files ?? []) !== selected.skill_digest
-      ) {
-        throw new Error(`${selected.id} sealed skill snapshot changed`);
-      }
-      const prompt = renderHandoff({
-        sourceSeal,
-        otherReview: finder.text,
+      kind: "raw",
+      identity: rawIdentity,
+    });
+    const rawReused = rawEntry !== null;
+    if (!rawEntry) {
+      await resetExperimentFixture({
+        reset,
+        fixture,
+        lane,
+        label: experimentCellId(lane, treatment),
       });
-      const started = Date.now();
-      const response = await withDisposableFixture({
-        seedFixture: fixture,
-        head: lane.fixture.first_head,
-        base: lane.fixture.base_sha,
-        cellId: arm.canonical_cell_id,
-        role: arm.treatment,
-        run: async (active) => {
-          const preamble = stageExperimentSkill({
-            fixturePath: active.path,
-            snapshot,
-          });
-          const preambleFile = path.join(
-            active.path,
-            ".skill",
-            "experiment-system-prompt.txt",
-          );
-          writeFileSync(preambleFile, preamble, { mode: 0o600 });
-          beforeWrite?.();
-          const isolated = isolatedCommand({
-            file: plan.identities.claude_bin.path,
-            args: [
-              ...claudeStdinArgv({
-                prompt,
-                model: contract.sut.verifier.model,
-                effort: contract.sut.verifier.effort,
-                allowedTools: CONTESTANT_TOOLS,
-                maxTurns: 80,
-              }),
-              "--append-system-prompt-file",
-              preambleFile,
-            ],
-            fixturePath: active.path,
-          });
-          return runCommand({
-            ...isolated,
-            cwd: active.path,
-            env,
-            input: prompt,
-            timeoutMs,
-            signal,
-          });
+      const selected = experimentTreatment(plan, treatment);
+      const prompt = renderExperimentHandoff(handoffTemplate, source.text);
+      const model = experimentModel(plan, "verifier");
+      const systemPrompt = stageExperimentSkill({
+        fixturePath: fixture.path,
+        skill: selected,
+      });
+      let contestantOutput;
+      try {
+        contestantOutput = await contestantExec({
+          argv: experimentContestantArgv({ prompt, model, systemPrompt }),
+          prompt,
+          systemPrompt,
+          fixturePath: fixture.path,
+          skill: selected,
+          model,
+          env,
+          lane,
+          treatment,
+          plan,
+        });
+      } finally {
+        purgeExperimentSkill(fixture.path);
+      }
+      const envelope = parseContestantEnvelope(contestantOutput);
+      rawEntry = writeCache({
+        artifactRoot,
+        kind: "raw",
+        identity: rawIdentity,
+        payload: {
+          ok: true,
+          campaign_id: plan.campaign_id,
+          candidate_id: plan.candidate.id,
+          stage,
+          cell_id: experimentCellId(lane, treatment),
+          pr: lane.pr,
+          treatment,
+          source_digest: source.digest,
+          source_report: source.text,
+          output: envelope.result,
+          cost_usd: Number(envelope.total_cost_usd ?? 0),
+          turns: envelope.num_turns ?? null,
         },
       });
-      const envelope = parseContestantEnvelope(response.stdout);
-      const base = {
-        schema_version: 1,
-        namespace: plan.namespace,
-        identity: rawIdentity,
-        campaign_id: plan.campaign_id,
-        comparison_id: rawIdentity.comparison_id,
-        stage,
-        attempt,
-        cell_id: arm.canonical_cell_id,
-        pr: lane.pr,
-        treatment: arm.treatment,
-        condition: lane.source.kind === "live-finder" ? "pipeline" : "replay",
-        draw: lane.source.draw ?? 1,
-        model: contract.sut.verifier.model,
-        effort: contract.sut.verifier.effort,
-        finder: `${contract.sut.finder.model}@${contract.sut.finder.effort}`,
-        fixture_head: lane.fixture.first_head,
-        fingerprint: arm.execution_fingerprint,
-        ok: true,
-        output: envelope.result,
-        other_review: finder.text,
-        finder_chars: finder.text.length,
-        seconds: Number(((Date.now() - started) / 1000).toFixed(1)),
-        cost_usd: Number(envelope.total_cost_usd ?? 0),
-        turns: envelope.num_turns ?? null,
-      };
-      raw = { ...base, raw_digest: digestObject(base) };
-      writeJsonOnce(rawFile, raw, beforeWrite);
     }
-
-    const matchIdentity = buildCacheIdentity({
-      phase: "match",
+    const raw = validateRawExperimentPayload(rawEntry.payload, {
       plan,
-      candidateId,
       stage,
-      pr: lane.pr,
-      treatment: arm.treatment,
-      finderArtifactDigest:
-        lane.source.kind === "live-finder" ? finder.digest : null,
-      rawDigest: raw.raw_digest,
-      calibrationReceiptDigest: calibrationReceipt.receipt_digest,
+      lane,
+      treatment,
+      source,
+      cellId: experimentCellId(lane, treatment),
     });
-    const matchFile = artifactFile(
+    const rawDigest = rawEntry.artifact.content_digest;
+    const scoreIdentity = scoreCacheIdentity({ plan, rawDigest });
+    let scoreEntry = readCache({
       artifactRoot,
-      `cache/match/${matchIdentity.digest}.json`,
-    );
-    let matched = readIdentityCache(matchFile, matchIdentity, "match_digest");
-    const matchReused = matched !== null;
-    if (!matched) {
-      const fixture = fixtureReport(lane.pr);
-      const fixtureContract = fixtureForPr(contract, lane.pr);
-      const truth = readPinnedTruth({ sourceSeal, lane });
-      beforeWrite?.();
-      const claims = await extractClaims({
-        transcript: raw.output,
-        exec: judgeExec,
-        model: plan.identities.judge.model,
-        effort: plan.identities.judge.effort,
+      kind: "score",
+      identity: scoreIdentity,
+    });
+    const scoreReused = scoreEntry !== null;
+    if (!scoreEntry) {
+      const truth = await loadTruth({ repoRoot, lane, contract });
+      let claims = [];
+      let matches = { matchedIds: [], judgeReasoning: {} };
+      if (raw.output.trim()) {
+        await resetExperimentFixture({
+          reset,
+          fixture,
+          lane,
+          label: `${experimentCellId(lane, treatment)}-extract`,
+        });
+        claims = await extractClaims({
+          transcript: raw.output,
+          exec: judge,
+          ...experimentModel(plan, "judge"),
+        });
+        await resetExperimentFixture({
+          reset,
+          fixture,
+          lane,
+          label: `${experimentCellId(lane, treatment)}-match`,
+        });
+        matches = await matchClaims({
+          claims,
+          truthFindings: truth.findings,
+          scorableIds: lane.fixture.scorable_ids,
+          transcript: raw.output,
+          exec: judge,
+          ...experimentModel(plan, "judge"),
+        });
+      }
+      await resetExperimentFixture({
+        reset,
+        fixture,
+        lane,
+        label: `${experimentCellId(lane, treatment)}-leak`,
       });
-      beforeWrite?.();
-      const matches = await matchClaims({
-        claims,
-        truthFindings: truth.findings,
-        scorableIds: lane.fixture.scorable_ids,
-        transcript: raw.output,
-        exec: judgeExec,
-        model: plan.identities.judge.model,
-        effort: plan.identities.judge.effort,
+      const excluded = loginsInFixtureTree({
+        fixturePath: fixture.path,
+        logins: reviewerLogins(truth),
       });
-      const excludeLogins = [
-        ...loginsInFixtureTree({
-          fixturePath: fixture.path,
-          logins: reviewerLogins(truth),
-        }),
-      ];
       const leak = leakSignals({
         transcript: raw.output,
         truth,
         pr: lane.pr,
-        excludeLogins,
-        forbiddenShas: forbiddenShasForFixture({
-          fixture: fixtureContract,
-          repoRoot,
-          truth,
-        }),
+        excludeLogins: excluded,
+        forbiddenShas: fixture.forbidden ?? [],
       });
-      const base = {
-        schema_version: 1,
-        namespace: plan.namespace,
-        identity: matchIdentity,
-        raw_digest: raw.raw_digest,
-        claims,
-        claims_digest: digestObject(claims),
-        matched_ids: matches.matchedIds,
-        judge_reasoning: matches.judgeReasoning,
-        leak,
-      };
-      matched = { ...base, match_digest: digestObject(base) };
-      writeJsonOnce(matchFile, matched, beforeWrite);
+      scoreEntry = writeCache({
+        artifactRoot,
+        kind: "score",
+        identity: scoreIdentity,
+        payload: {
+          raw_digest: rawDigest,
+          claims,
+          matched_ids: matches.matchedIds,
+          judge_reasoning: matches.judgeReasoning,
+          leak,
+        },
+      });
     }
+    const score = validateScoreExperimentPayload(scoreEntry.payload, rawDigest);
     return {
       ok: true,
       campaign_id: plan.campaign_id,
-      candidate_id: candidateId,
+      candidate_id: plan.candidate.id,
       stage,
-      attempt,
-      cell_id: arm.canonical_cell_id,
-      fingerprint: raw.fingerprint,
+      cell_id: experimentCellId(lane, treatment),
       pr: lane.pr,
-      treatment: arm.treatment,
+      treatment,
       output: raw.output,
-      raw_digest: raw.raw_digest,
-      match_digest: matched.match_digest,
-      claims_digest: matched.claims_digest,
-      claims_count: matched.claims.length,
-      matched_ids: matched.matched_ids,
-      leak: matched.leak,
-      empty: matched.claims.length === 0,
-      cache_reuse: { raw: rawReused, match: matchReused },
-      artifacts: { raw: rawFile, match: matchFile },
+      claims: score.claims,
+      claims_count: score.claims.length,
+      matched_ids: score.matched_ids,
+      leak: score.leak,
+      empty: raw.output.trim().length === 0,
+      raw_digest: rawDigest,
+      score_digest: scoreEntry.artifact.content_digest,
+      cache_reuse: { raw: rawReused, score: scoreReused },
+      artifacts: { raw: rawEntry.file, score: scoreEntry.file },
     };
   };
+}
+
+export async function runExperimentRuntimeStage({
+  plan,
+  stage,
+  contract,
+  artifactRoot,
+  repoRoot,
+  fixtureCacheDir,
+  concurrency = MAX_FIXTURE_LANES,
+  prepareFixture = defaultExperimentPrepareFixture,
+  finderExec = defaultExperimentFinderExec,
+  reset = resetFixture,
+  ...armOptions
+}) {
+  assertExperimentConcurrency(concurrency);
+  const stagePlan = stagePlanFor({ plan, stage });
+  if (stagePlan.enabled !== true) {
+    throw new Error(`experiment stage ${stage} is disabled`);
+  }
+  if (
+    !Array.isArray(stagePlan.lanes) ||
+    stagePlan.lanes.length > MAX_FIXTURE_LANES
+  ) {
+    throw new Error(`experiment stage ${stage} exceeds three fixture lanes`);
+  }
+  const env = armOptions.env ?? scrubbedEnv({ roots: [repoRoot] });
+  const executeArm = createExperimentArmExecutor({
+    plan,
+    stage,
+    contract,
+    artifactRoot,
+    repoRoot,
+    reset,
+    env,
+    ...armOptions,
+  });
+  const laneRuns = await mapExperimentLimit(
+    stagePlan.lanes,
+    concurrency,
+    async (lane) => {
+      const fixture = await prepareFixture({
+        plan,
+        stage,
+        contract,
+        lane,
+        fixtureCacheDir,
+        repoRoot,
+      });
+      const source = await laneSource({
+        plan,
+        contract,
+        lane,
+        fixture,
+        repoRoot,
+        env,
+        reset,
+        finderExec,
+      });
+      const records = [];
+      for (const treatment of lane.sequence) {
+        records.push(await executeArm({ lane, treatment, fixture, source }));
+      }
+      return {
+        lane_id: lane.lane_id,
+        pr: lane.pr,
+        paired_order: lane.paired_order,
+        sequence: [...lane.sequence],
+        records,
+      };
+    },
+  );
+  return {
+    campaign_id: plan.campaign_id,
+    candidate_id: plan.candidate.id,
+    stage,
+    concurrency,
+    lanes: laneRuns.map(({ records: _records, ...lane }) => lane),
+    records: laneRuns.flatMap((lane) => lane.records),
+  };
+}
+
+export async function enrichExperimentNovelty({
+  plan,
+  records,
+  contract,
+  artifactRoot,
+  repoRoot,
+  fixtureCacheDir,
+  concurrency = MAX_FIXTURE_LANES,
+  prepareFixture = defaultExperimentPrepareFixture,
+  judgeExec = claudeExec,
+  reset = resetFixture,
+  loadTruth = defaultExperimentTruth,
+  readCache = readExperimentCache,
+  writeCache = writeExperimentCache,
+  env = scrubbedEnv({ roots: [repoRoot] }),
+}) {
+  assertExperimentConcurrency(concurrency);
+  const groups = new Map();
+  for (const record of records) {
+    const lane = stagePlanFor({ plan, stage: record.stage }).lanes.find(
+      (candidate) => candidate.pr === record.pr,
+    );
+    if (!lane || record.cell_id !== experimentCellId(lane, record.treatment)) {
+      throw new Error(
+        `record ${record.cell_id} has no planned experiment lane`,
+      );
+    }
+    const key = String(record.pr);
+    if (!groups.has(key)) groups.set(key, { lane, records: [] });
+    groups.get(key).records.push({ lane, record });
+  }
+  const judge = (request) => judgeExec({ ...request, env });
+  const enrichedGroups = await mapExperimentLimit(
+    [...groups.values()],
+    concurrency,
+    async ({ lane, records: laneRecords }) => {
+      const fixture = await prepareFixture({
+        plan,
+        stage: laneRecords[0].record.stage,
+        contract,
+        lane,
+        fixtureCacheDir,
+        repoRoot,
+      });
+      const truth = await loadTruth({ repoRoot, lane, contract });
+      const enriched = [];
+      for (const { lane: recordLane, record } of laneRecords) {
+        const scoreIdentity = scoreCacheIdentity({
+          plan,
+          rawDigest: record.raw_digest,
+        });
+        const scoreEntry = readCache({
+          artifactRoot,
+          kind: "score",
+          identity: scoreIdentity,
+        });
+        if (
+          !scoreEntry ||
+          scoreEntry.artifact.content_digest !== record.score_digest
+        ) {
+          throw new Error(
+            `${record.cell_id} score cache differs from its record`,
+          );
+        }
+        const score = validateScoreExperimentPayload(
+          scoreEntry.payload,
+          record.raw_digest,
+        );
+        const identity = novelCacheIdentity({
+          plan,
+          scoreDigest: record.score_digest,
+        });
+        let entry = readCache({
+          artifactRoot,
+          kind: "novel",
+          identity,
+        });
+        const reused = entry !== null;
+        if (!entry) {
+          await resetExperimentFixture({
+            reset,
+            fixture,
+            lane: recordLane,
+            label: `${record.cell_id}-novel`,
+          });
+          const verdict = await classifyNovel({
+            claims: score.claims,
+            matchedIds: score.matched_ids,
+            truthFindings: truth.findings,
+            exec: judge,
+            fixturePath: fixture.path,
+            ...experimentModel(plan, "judge"),
+          });
+          entry = writeCache({
+            artifactRoot,
+            kind: "novel",
+            identity,
+            payload: { score_digest: record.score_digest, verdict },
+          });
+        }
+        const payload = validateNovelExperimentPayload(
+          entry.payload,
+          record.score_digest,
+        );
+        enriched.push({
+          ...record,
+          wrong_claims: payload.verdict.novelWrong,
+          novel_real: payload.verdict.novelReal,
+          novel_digest: entry.artifact.content_digest,
+          cache_reuse: { ...record.cache_reuse, novel: reused },
+          artifacts: { ...record.artifacts, novel: entry.file },
+        });
+      }
+      return enriched;
+    },
+  );
+  return enrichedGroups.flat();
 }

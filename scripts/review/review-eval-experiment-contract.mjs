@@ -1,10 +1,17 @@
-// Plan and evidence identities for the non-ledger review-skill experiment lane.
+// Immutable plans and cache identities for the non-ledger experiment lane.
 
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { gridFixtures } from "./review-eval-fixtures.mjs";
-import { planCells } from "./review-eval-run-plan.mjs";
+import {
+  finderArgvDigest as canonicalFinderArgvDigest,
+  planCells,
+  skillDigest as canonicalSkillDigest,
+} from "./review-eval-run-plan.mjs";
+import { scorerDigest as canonicalScorerDigest } from "./review-eval-score.mjs";
 
 export const EXPERIMENT_SCHEMA_VERSION = 1;
 export const EXPERIMENT_NAMESPACE = "review-skill-experiments/v1";
@@ -18,22 +25,15 @@ export const EXPERIMENT_STAGES = Object.freeze([
   "holdout",
   "live-paired",
 ]);
-export const EXPERIMENT_CACHE_STAGES = Object.freeze(["raw", "match", "novel"]);
 export const SCREEN_PRS = Object.freeze([1990, 1995, 1999]);
-export const SCREEN_REPORT_DRAWS = Object.freeze({
-  1990: 1,
-  1995: 2,
-  1999: 1,
-});
-export const MAX_CANDIDATES = 3;
-export const MAX_STAGE_ATTEMPTS = 2;
 export const MAX_FIXTURE_LANES = 3;
-export const CALIBRATION_MAX_AGE_MS = 6 * 60 * 60 * 1000;
-export const CAMPAIGN_MAX_AGE_MS = 6 * 60 * 60 * 1000;
-export const DEFAULT_EXPERIMENT_ROOT = "~/.cache/mento-review-eval-experiments";
-
-const SHA256_PATTERN = /^[0-9a-f]{64}$/;
-const CANDIDATE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+export const EXPERIMENT_SOURCE_FILES = Object.freeze([
+  "scripts/review/review-eval-experiment.mjs",
+  "scripts/review/review-eval-experiment-contract.mjs",
+  "scripts/review/review-eval-experiment-decision.mjs",
+  "scripts/review/review-eval-experiment-cache.mjs",
+  "scripts/review/review-eval-experiment-runtime.mjs",
+]);
 
 export const DEFAULT_EXPERIMENT_POLICY = Object.freeze({
   screen: Object.freeze({
@@ -53,148 +53,189 @@ export const DEFAULT_EXPERIMENT_POLICY = Object.freeze({
     absolute_delta_min: 3,
     ratio_min: 1.25,
   }),
-  calibration: Object.freeze({
-    agreement_min: 35,
-    total: 40,
-    max_age_ms: CALIBRATION_MAX_AGE_MS,
-  }),
-  campaign: Object.freeze({ max_age_ms: CAMPAIGN_MAX_AGE_MS }),
-  max_candidates: MAX_CANDIDATES,
-  max_stage_attempts: MAX_STAGE_ATTEMPTS,
-  max_fixture_lanes: MAX_FIXTURE_LANES,
 });
+
+const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+const CANDIDATE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const experimentRepoRoot = fileURLToPath(new URL("../../", import.meta.url));
 
 function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function normalizeForDigest(value) {
-  if (Array.isArray(value)) return value.map(normalizeForDigest);
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
   if (!isObject(value)) return value;
   return Object.fromEntries(
     Object.keys(value)
       .sort()
-      .map((key) => [key, normalizeForDigest(value[key])]),
+      .map((key) => [key, stableValue(value[key])]),
   );
 }
 
 export function digestObject(value) {
   return createHash("sha256")
-    .update(JSON.stringify(normalizeForDigest(value)))
+    .update(JSON.stringify(stableValue(value)))
     .digest("hex");
 }
 
-function assertDigest(value, label) {
-  if (!SHA256_PATTERN.test(String(value ?? ""))) {
-    throw new Error(`${label} must be a lowercase sha256`);
+/** Hash the exact relative path and bytes of every lean harness module. */
+export function experimentSourceDigest({
+  files = EXPERIMENT_SOURCE_FILES,
+  root = experimentRepoRoot,
+  readFile = readFileSync,
+} = {}) {
+  if (!Array.isArray(files) || files.length === 0) {
+    throw new Error("experiment source files must be a non-empty array");
   }
-  return String(value);
+  const hash = createHash("sha256");
+  const frame = (value) => {
+    const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value);
+    const length = Buffer.alloc(8);
+    length.writeBigUInt64BE(BigInt(bytes.length));
+    hash.update(length);
+    hash.update(bytes);
+  };
+  frame("review-skill-experiment-harness/v1");
+  for (const file of files) {
+    if (
+      typeof file !== "string" ||
+      file.length === 0 ||
+      path.isAbsolute(file) ||
+      file.includes("\\") ||
+      path.posix.normalize(file) !== file ||
+      file === ".." ||
+      file.startsWith("../")
+    ) {
+      throw new Error(
+        `experiment source path ${JSON.stringify(file)} is invalid`,
+      );
+    }
+    frame(file);
+    frame(readFile(path.resolve(root, file)));
+  }
+  return hash.digest("hex");
 }
 
-function normalizeTreatment(value, { incumbent = false } = {}) {
+function assertDigest(value, label) {
+  const digest = String(value ?? "");
+  if (!SHA256_PATTERN.test(digest)) {
+    throw new Error(`${label} must be a lowercase sha256`);
+  }
+  return digest;
+}
+
+function nonempty(value, label) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`${label} must be a non-empty string`);
+  }
+  return value;
+}
+
+function treatment(value, { incumbent = false } = {}) {
   if (!isObject(value)) {
     throw new Error(`${incumbent ? "incumbent" : "candidate"} is missing`);
   }
   const id = incumbent ? "incumbent" : String(value.id ?? "");
   if (!CANDIDATE_ID_PATTERN.test(id) || (!incumbent && id === "incumbent")) {
-    throw new Error(`candidate id ${JSON.stringify(id)} is not valid`);
+    throw new Error(`candidate id ${JSON.stringify(id)} is invalid`);
   }
-  if (typeof value.skill_ref !== "string" || value.skill_ref.length === 0) {
-    throw new Error(`${id}.skill_ref must be a non-empty string`);
+  const skillRef = nonempty(value.skill_ref, `${id}.skill_ref`);
+  const currentDigest = canonicalSkillDigest(skillRef);
+  for (const field of ["skill_digest", "canonical_skill_digest"]) {
+    if (value[field] !== undefined && value[field] !== currentDigest) {
+      throw new Error(`${id}.${field} differs from the current skill bytes`);
+    }
   }
+  return { id, skill_ref: skillRef, skill_digest: currentDigest };
+}
+
+function oneCandidate(candidate, candidates) {
+  if (candidate && candidates) {
+    throw new Error("use candidate, not candidate and candidates together");
+  }
+  const selected =
+    candidate ?? (Array.isArray(candidates) ? candidates[0] : null);
+  if (!selected || (Array.isArray(candidates) && candidates.length !== 1)) {
+    throw new Error("an experiment campaign requires exactly one candidate");
+  }
+  return selected;
+}
+
+function cliIdentity(cliVersions, identities) {
+  const supplied = cliVersions ?? {
+    claude: identities?.claude_cli,
+    codex: identities?.codex_cli,
+    judge: identities?.judge_cli,
+  };
+  const claude = nonempty(supplied?.claude, "cliVersions.claude");
   return {
-    id,
-    skill_ref: value.skill_ref,
-    skill_digest: assertDigest(value.skill_digest, `${id}.skill_digest`),
-    canonical_skill_digest: assertDigest(
-      value.canonical_skill_digest,
-      `${id}.canonical_skill_digest`,
-    ),
-    dirty: value.dirty === true,
+    claude,
+    codex: nonempty(supplied?.codex, "cliVersions.codex"),
+    judge: nonempty(supplied?.judge ?? claude, "cliVersions.judge"),
   };
 }
 
-function normalizeIdentities(value) {
-  if (!isObject(value)) throw new Error("identities are missing");
-  const judge = value.judge;
-  if (
-    !isObject(judge) ||
-    typeof judge.model !== "string" ||
-    typeof judge.effort !== "string"
-  ) {
-    throw new Error("identities.judge must name a model and effort");
-  }
-  for (const field of ["claude_cli", "judge_cli", "codex_cli", "host"]) {
-    if (typeof value[field] !== "string" || value[field].length === 0) {
-      throw new Error(`identities.${field} must be a non-empty string`);
-    }
-  }
-  const executable = (field, expectedName) => {
-    const current = value[field];
-    if (
-      !isObject(current) ||
-      current.name !== expectedName ||
-      typeof current.path !== "string" ||
-      !path.isAbsolute(current.path) ||
-      typeof current.version !== "string" ||
-      current.version.length === 0
-    ) {
-      throw new Error(`identities.${field} is not a pinned executable`);
-    }
-    return {
-      name: expectedName,
-      path: current.path,
-      digest: assertDigest(current.digest, `identities.${field}.digest`),
-      version: current.version,
-    };
-  };
+function modelIdentity(contract) {
+  const copy = (value, label) => ({
+    model: nonempty(value?.model, `${label}.model`),
+    effort: nonempty(value?.effort, `${label}.effort`),
+  });
   return {
-    matcher_digest: assertDigest(
-      value.matcher_digest,
-      "identities.matcher_digest",
-    ),
-    calibration_digest: assertDigest(
-      value.calibration_digest,
-      "identities.calibration_digest",
-    ),
-    experiment_digest: assertDigest(
-      value.experiment_digest,
-      "identities.experiment_digest",
-    ),
-    orchestrator_digest: assertDigest(
-      value.orchestrator_digest,
-      "identities.orchestrator_digest",
-    ),
-    finder_argv_digest: assertDigest(
-      value.finder_argv_digest,
-      "identities.finder_argv_digest",
-    ),
-    claude_cli: value.claude_cli,
-    judge_cli: value.judge_cli,
-    codex_cli: value.codex_cli,
-    claude_bin: executable("claude_bin", "claude"),
-    codex_bin: executable("codex_bin", "codex"),
-    host: value.host,
-    judge: { model: judge.model, effort: judge.effort },
+    finder: copy(contract?.sut?.finder, "sut.finder"),
+    verifier: copy(contract?.sut?.verifier, "sut.verifier"),
+    control: copy(contract?.sut?.control, "sut.control"),
+    judge: copy(contract?.judge, "judge"),
   };
 }
 
-function selectedFixtures(contract) {
-  const fixtures = gridFixtures(contract).filter((fixture) =>
-    SCREEN_PRS.includes(fixture.pr),
+function frozenInputs(contract) {
+  const prompts = Object.fromEntries(
+    Object.entries(contract?.prompts ?? {}).map(([name, prompt]) => [
+      name,
+      {
+        file: nonempty(prompt?.file, `prompts.${name}.file`),
+        sha256: assertDigest(prompt?.sha256, `prompts.${name}.sha256`),
+      },
+    ]),
   );
-  const found = fixtures.map((fixture) => fixture.pr).sort((a, b) => a - b);
-  if (JSON.stringify(found) !== JSON.stringify([...SCREEN_PRS])) {
+  const fixtures = (contract?.fixtures ?? []).map((fixture) => ({
+    pr: fixture.pr,
+    first_head: nonempty(fixture.first_head, `PR ${fixture.pr} first_head`),
+    base_sha: nonempty(fixture.base_sha, `PR ${fixture.pr} base_sha`),
+    truth_file: nonempty(fixture.truth_file, `PR ${fixture.pr} truth_file`),
+    truth_sha256: assertDigest(
+      fixture.truth_sha256,
+      `PR ${fixture.pr} truth_sha256`,
+    ),
+    finder_reports: (fixture.finder_reports ?? []).map((report, index) => ({
+      index,
+      file: nonempty(report.file, `PR ${fixture.pr} report ${index} file`),
+      sha256: assertDigest(
+        report.sha256,
+        `PR ${fixture.pr} report ${index} sha256`,
+      ),
+    })),
+  }));
+  return { prompts, fixtures };
+}
+
+function experimentFixtures(contract) {
+  const fixtures = gridFixtures(contract).sort(
+    (left, right) => left.pr - right.pr,
+  );
+  const prs = fixtures.map(({ pr }) => pr);
+  if (
+    fixtures.length !== MAX_FIXTURE_LANES ||
+    JSON.stringify(prs) !== JSON.stringify(SCREEN_PRS)
+  ) {
     throw new Error(
-      `experiment contract must have grid fixtures ${SCREEN_PRS.join(", ")}`,
+      `experiment requires grid fixtures ${SCREEN_PRS.join(", ")}`,
     );
   }
   for (const fixture of fixtures) {
-    if (
-      !Array.isArray(fixture.finder_reports) ||
-      fixture.finder_reports.length < 2
-    ) {
-      throw new Error(`PR ${fixture.pr} needs two frozen finder reports`);
+    if ((fixture.finder_reports ?? []).length < 2) {
+      throw new Error(`PR ${fixture.pr} requires two frozen finder reports`);
     }
   }
   const p1Opportunities = fixtures.reduce(
@@ -202,289 +243,206 @@ function selectedFixtures(contract) {
     0,
   );
   if (p1Opportunities !== DEFAULT_EXPERIMENT_POLICY.combined.p1_opportunities) {
-    throw new Error(
-      `experiment fixtures carry ${p1Opportunities} P1 opportunities, expected ${DEFAULT_EXPERIMENT_POLICY.combined.p1_opportunities}`,
-    );
+    throw new Error(`experiment panel has ${p1Opportunities} P1 opportunities`);
   }
-  return fixtures.sort((a, b) => a.pr - b.pr);
+  return fixtures;
 }
 
-/** A is the incumbent and B is the candidate. */
-export function treatmentOrder({ candidateIndex, fixtureIndex }) {
-  if (!Number.isSafeInteger(candidateIndex) || candidateIndex < 0) {
-    throw new Error("candidateIndex must be a non-negative integer");
+/** A is the incumbent. B is the candidate. */
+export function treatmentOrder({ fixtureIndex, candidateIndex = 0 }) {
+  if (candidateIndex !== 0) {
+    throw new Error("one-candidate campaigns use candidateIndex 0");
   }
   if (!Number.isSafeInteger(fixtureIndex) || fixtureIndex < 0) {
     throw new Error("fixtureIndex must be a non-negative integer");
   }
-  return (candidateIndex + fixtureIndex) % 2 === 0 ? "AB" : "BA";
+  return fixtureIndex % 2 === 0 ? "AB" : "BA";
 }
 
-function fullFingerprint({ treatment, contractDigest, identities }) {
+function laneFixture(fixture) {
   return {
-    skill_digest: treatment.canonical_skill_digest,
-    kind: "full",
-    contract_digest: contractDigest,
-    claude_cli: identities.claude_cli,
-    codex_cli: identities.codex_cli,
-    finder_argv_digest: identities.finder_argv_digest,
-    orchestrator_digest: identities.orchestrator_digest,
+    first_head: fixture.first_head,
+    base_sha: fixture.base_sha,
+    truth_file: fixture.truth_file,
+    truth_sha256: fixture.truth_sha256,
+    scorable_ids: [...fixture.scorable_ids],
+    p1_ids: [...fixture.p1_ids],
   };
 }
 
-function experimentFingerprint({ treatment, contractDigest, identities }) {
-  return {
-    skill_digest: treatment.skill_digest,
-    kind: "experiment",
-    contract_digest: contractDigest,
-    claude_cli: identities.claude_cli,
-    codex_cli: identities.codex_cli,
-    claude_bin_digest: identities.claude_bin.digest,
-    codex_bin_digest: identities.codex_bin.digest,
-    finder_argv_digest: identities.finder_argv_digest,
-    orchestrator_digest: identities.experiment_digest,
-  };
-}
-
-function sourceForStage({ fixture, stage, identities }) {
+function stageSource({ stage, fixture, finderIdentity }) {
   if (stage === "live-paired") {
     return {
       kind: "live-finder",
-      finder_argv_digest: identities.finder_argv_digest,
+      finder_id: `live-pr-${fixture.pr}`,
+      shared: true,
+      finder_argv_digest: finderIdentity,
     };
   }
-  const screenDraw = SCREEN_REPORT_DRAWS[fixture.pr];
-  const draw = stage === "screen" ? screenDraw : screenDraw === 1 ? 2 : 1;
-  const report = fixture.finder_reports[draw - 1];
+  const reportIndex = stage === "screen" ? 0 : 1;
+  const report = fixture.finder_reports[reportIndex];
   return {
-    kind: "frozen-replay",
-    draw,
+    kind: "frozen-report",
+    report_index: reportIndex,
     file: report.file,
     sha256: report.sha256,
   };
 }
 
-function canonicalCellId(stage, fixture) {
-  if (stage === "live-paired") {
-    return `pr-${fixture.pr}-pipeline-draw1`;
-  }
-  const screenDraw = SCREEN_REPORT_DRAWS[fixture.pr];
-  const draw = stage === "screen" ? screenDraw : screenDraw === 1 ? 2 : 1;
-  return `pr-${fixture.pr}-replay-draw${draw}`;
-}
-
-function buildStagePlan({
-  stage,
-  fixtureList,
-  candidate,
-  candidateIndex,
-  incumbent,
-  contractDigest,
-  identities,
-  enabled,
-}) {
-  const treatments = new Map([
-    ["incumbent", incumbent],
-    ["candidate", candidate],
-  ]);
-  const lanes = fixtureList.map((fixture, fixtureIndex) => {
-    const pairedOrder = treatmentOrder({ candidateIndex, fixtureIndex });
-    const sequence =
-      pairedOrder === "AB"
-        ? ["incumbent", "candidate"]
-        : ["candidate", "incumbent"];
-    return {
-      lane_id: `${candidate.id}-${stage}-pr-${fixture.pr}`,
-      pr: fixture.pr,
-      paired_order: pairedOrder,
-      source: sourceForStage({ fixture, stage, identities }),
-      fixture: {
-        first_head: fixture.first_head,
-        base_sha: fixture.base_sha,
-        truth_file: fixture.truth_file,
-        truth_sha256: fixture.truth_sha256,
-        scorable_ids: [...fixture.scorable_ids],
-        p1_ids: [...fixture.p1_ids],
+function stagesFor({ contract, finderIdentity, includeLivePaired }) {
+  const fixtures = experimentFixtures(contract);
+  return Object.fromEntries(
+    EXPERIMENT_STAGES.map((stage) => [
+      stage,
+      {
+        stage,
+        enabled: stage !== "live-paired" || includeLivePaired === true,
+        lanes: fixtures.map((fixture, fixtureIndex) => {
+          const pairedOrder = treatmentOrder({ fixtureIndex });
+          return {
+            lane_id: `${stage}-pr-${fixture.pr}`,
+            pr: fixture.pr,
+            paired_order: pairedOrder,
+            fixture: laneFixture(fixture),
+            source: stageSource({ stage, fixture, finderIdentity }),
+            sequence:
+              pairedOrder === "AB"
+                ? ["incumbent", "candidate"]
+                : ["candidate", "incumbent"],
+          };
+        }),
       },
-      sequence: sequence.map((treatmentName) => {
-        const treatment = treatments.get(treatmentName);
-        return {
-          treatment: treatmentName,
-          canonical_cell_id: canonicalCellId(stage, fixture),
-          execution_fingerprint: experimentFingerprint({
-            treatment,
-            contractDigest,
-            identities,
-          }),
-        };
-      }),
-    };
-  });
-  return {
-    stage,
-    enabled,
-    candidate_id: candidate.id,
-    fixture_lane_limit: MAX_FIXTURE_LANES,
-    attempt_limit: MAX_STAGE_ATTEMPTS,
-    pair_arms_sequential: true,
-    scoring: {
-      first_pass: "extract-and-match",
-      novelty: "deferred-until-recall-pass",
-    },
-    lanes,
-  };
+    ]),
+  );
 }
 
-/** Build every experiment and qualification cell before any model can run. */
+export function canonicalRerunManifest({
+  contract,
+  contractDigest,
+  scorerDigest,
+  skillDigest,
+  finderArgvDigest,
+  cliVersions,
+  treatmentId = "candidate",
+}) {
+  const cells = planCells({ contract, kind: "full" });
+  if (cells.length !== 24) {
+    throw new Error(
+      `canonical full rerun must contain 24 cells, got ${cells.length}`,
+    );
+  }
+  const body = {
+    kind: "canonical-full-rerun",
+    treatment_id: nonempty(treatmentId, "treatmentId"),
+    experiment_artifact_reuse_allowed: false,
+    contract_digest: assertDigest(contractDigest, "contractDigest"),
+    scorer_digest: assertDigest(scorerDigest, "scorerDigest"),
+    skill_digest: assertDigest(skillDigest, "skillDigest"),
+    finder_argv_digest: assertDigest(finderArgvDigest, "finderArgvDigest"),
+    cli_versions: cliIdentity(cliVersions),
+    cell_count: cells.length,
+    cells: structuredClone(cells),
+  };
+  return { ...body, manifest_digest: digestObject(body) };
+}
+
+/** Build every lane before any model process starts. */
 export function buildExperimentPlan({
   contract,
   contractDigest,
   plannedAt = new Date().toISOString(),
   incumbent,
-  candidates,
-  identities,
+  candidate = null,
+  candidates = null,
+  cliVersions = null,
+  identities = null,
   includeLivePaired = false,
 }) {
   if (!isObject(contract)) throw new Error("contract is missing");
-  const normalizedContractDigest = assertDigest(
-    contractDigest,
-    "contractDigest",
-  );
-  const normalizedIncumbent = normalizeTreatment(incumbent, {
-    incumbent: true,
-  });
-  if (!Array.isArray(candidates) || candidates.length === 0) {
-    throw new Error("at least one candidate is required");
-  }
-  if (candidates.length > MAX_CANDIDATES) {
-    throw new Error(
-      `a campaign may contain at most ${MAX_CANDIDATES} candidates`,
-    );
-  }
-  const normalizedCandidates = candidates.map((candidate) =>
-    normalizeTreatment(candidate),
-  );
-  const ids = normalizedCandidates.map((candidate) => candidate.id);
-  if (new Set(ids).size !== ids.length) {
-    throw new Error("candidate ids must be unique");
-  }
-  const normalizedIdentities = normalizeIdentities(identities);
-  const fixtureList = selectedFixtures(contract);
-  const parsedAt = Date.parse(plannedAt);
-  if (!Number.isFinite(parsedAt))
-    throw new Error("plannedAt is not an instant");
-  const normalizedAt = new Date(parsedAt).toISOString();
+  const contractIdentity = assertDigest(contractDigest, "contractDigest");
+  const incumbentIdentity = treatment(incumbent, { incumbent: true });
+  const candidateIdentity = treatment(oneCandidate(candidate, candidates));
+  const versions = cliIdentity(cliVersions, identities);
+  const models = modelIdentity(contract);
+  const scorerIdentity = canonicalScorerDigest();
+  const finderIdentity = canonicalFinderArgvDigest(contract);
+  const milliseconds = Date.parse(plannedAt);
+  if (!Number.isFinite(milliseconds)) throw new Error("plannedAt is invalid");
+  const planned = new Date(milliseconds).toISOString();
+  const stages = stagesFor({ contract, finderIdentity, includeLivePaired });
   const seed = {
     namespace: EXPERIMENT_NAMESPACE,
-    suite_id: contract.suite_id,
-    planned_at: normalizedAt,
-    contract_digest: normalizedContractDigest,
-    incumbent: normalizedIncumbent,
-    candidates: normalizedCandidates,
-    identities: normalizedIdentities,
-    include_live_paired: includeLivePaired === true,
+    planned_at: planned,
+    contract_digest: contractIdentity,
+    candidate: candidateIdentity,
   };
-  const seedDigest = digestObject(seed);
-  const campaignId = `${normalizedAt.replace(/[-:.]/g, "").replace("Z", "Z")}-${seedDigest.slice(0, 8)}`;
-  const candidatePlans = normalizedCandidates.map(
-    (candidate, candidateIndex) => ({
-      candidate_id: candidate.id,
-      stages: Object.fromEntries(
-        EXPERIMENT_STAGES.map((stage) => [
-          stage,
-          buildStagePlan({
-            stage,
-            fixtureList,
-            candidate,
-            candidateIndex,
-            incumbent: normalizedIncumbent,
-            contractDigest: normalizedContractDigest,
-            identities: normalizedIdentities,
-            enabled: stage !== "live-paired" || includeLivePaired === true,
-          }),
-        ]),
-      ),
-    }),
-  );
-  const fullCells = planCells({ contract, kind: "full" });
-  const treatments = [normalizedIncumbent, ...normalizedCandidates];
-  const planWithoutDigest = {
+  const body = {
     schema_version: EXPERIMENT_SCHEMA_VERSION,
     namespace: EXPERIMENT_NAMESPACE,
-    suite_id: contract.suite_id,
-    campaign_id: campaignId,
-    planned_at: normalizedAt,
+    suite_id: nonempty(contract.suite_id, "contract.suite_id"),
+    campaign_id: `${planned.replace(/[-:.]/g, "")}-${digestObject(seed).slice(0, 10)}`,
+    planned_at: planned,
     ledger_eligible: false,
     canonical_verdict_eligible: false,
-    canonical_outcomes_allowed: [],
     experiment_statuses: [...EXPERIMENT_STATUSES],
-    contract_digest: normalizedContractDigest,
-    identities: normalizedIdentities,
-    calibration_identity: {
-      calibration_digest: normalizedIdentities.calibration_digest,
-      matcher_digest: normalizedIdentities.matcher_digest,
-      judge: { ...normalizedIdentities.judge },
-      judge_cli: normalizedIdentities.judge_cli,
-      host: normalizedIdentities.host,
-      prompts: Object.fromEntries(
-        Object.entries(contract.prompts ?? {}).map(([name, prompt]) => [
-          name,
-          prompt.sha256,
-        ]),
-      ),
+    contract_digest: contractIdentity,
+    inputs: {
+      scorer_digest: scorerIdentity,
+      harness_source_digest: experimentSourceDigest(),
+      finder_argv_digest: finderIdentity,
+      cli_versions: versions,
+      models,
+      ...frozenInputs(contract),
     },
-    policy: JSON.parse(JSON.stringify(DEFAULT_EXPERIMENT_POLICY)),
-    incumbent: normalizedIncumbent,
-    candidates: normalizedCandidates,
-    candidate_plans: candidatePlans,
-    qualification: {
-      kind: "canonical-full-rerun-plan",
-      experiment_artifact_reuse_allowed: false,
-      canonical_importer: null,
-      cells: fullCells,
-      treatments: treatments.map((treatment) => ({
-        treatment_id: treatment.id,
-        planned_fingerprint: fullFingerprint({
-          treatment,
-          contractDigest: normalizedContractDigest,
-          identities: normalizedIdentities,
-        }),
-      })),
-    },
+    policy: structuredClone(DEFAULT_EXPERIMENT_POLICY),
+    incumbent: incumbentIdentity,
+    candidate: candidateIdentity,
+    stages,
+    qualification: canonicalRerunManifest({
+      contract,
+      contractDigest: contractIdentity,
+      scorerDigest: scorerIdentity,
+      skillDigest: candidateIdentity.skill_digest,
+      finderArgvDigest: finderIdentity,
+      cliVersions: versions,
+      treatmentId: candidateIdentity.id,
+    }),
   };
-  return {
-    ...planWithoutDigest,
-    plan_digest: digestObject(planWithoutDigest),
-  };
+  return { ...body, plan_digest: digestObject(body) };
+}
+
+export function stagePlanFor({ plan, stage }) {
+  if (!EXPERIMENT_STAGES.includes(stage)) {
+    throw new Error(`unknown experiment stage ${JSON.stringify(stage)}`);
+  }
+  const stagePlan = plan?.stages?.[stage];
+  if (!isObject(stagePlan) || stagePlan.stage !== stage) {
+    throw new Error(`plan has no complete ${stage} stage`);
+  }
+  return stagePlan;
 }
 
 export function validateExperimentPlan({
   plan,
   contract,
-  contractDigest = null,
+  contractDigest = plan?.contract_digest,
+  cliVersions = plan?.inputs?.cli_versions,
 }) {
   const problems = [];
   try {
     if (!isObject(plan)) throw new Error("plan must be an object");
-    if (
-      contractDigest !== null &&
-      plan.contract_digest !== assertDigest(contractDigest, "contractDigest")
-    ) {
-      problems.push("plan contract digest differs from the current contract");
-    }
     const rebuilt = buildExperimentPlan({
       contract,
-      contractDigest: plan.contract_digest,
+      contractDigest,
       plannedAt: plan.planned_at,
       incumbent: plan.incumbent,
-      candidates: plan.candidates,
-      identities: plan.identities,
-      includeLivePaired:
-        plan.candidate_plans?.[0]?.stages?.["live-paired"]?.enabled === true,
+      candidate: plan.candidate,
+      cliVersions,
+      includeLivePaired: plan.stages?.["live-paired"]?.enabled === true,
     });
     if (JSON.stringify(plan) !== JSON.stringify(rebuilt)) {
       problems.push(
-        "plan does not match the complete deterministic campaign plan",
+        "plan differs from the complete deterministic campaign plan",
       );
     }
   } catch (error) {
@@ -493,95 +451,94 @@ export function validateExperimentPlan({
   return { ok: problems.length === 0, problems };
 }
 
-/** Return the remaining common-control campaign window in milliseconds. */
-export function experimentCampaignRemainingMs({ plan, now = new Date() }) {
-  const planned = Date.parse(plan?.planned_at);
-  const current = now instanceof Date ? now.getTime() : Date.parse(now);
-  if (!Number.isFinite(planned) || !Number.isFinite(current)) {
-    throw new Error("experiment campaign timestamp is invalid");
-  }
-  const age = current - planned;
-  if (age < 0) throw new Error("experiment campaign is future-dated");
-  return CAMPAIGN_MAX_AGE_MS - age;
+function treatmentFor(plan, name) {
+  if (name === "incumbent") return plan.incumbent;
+  if (name === "candidate") return plan.candidate;
+  throw new Error(`unknown treatment ${JSON.stringify(name)}`);
 }
 
-/** Refuse paid work after the bounded common-control campaign window. */
-export function assertExperimentCampaignFresh(options) {
-  if (experimentCampaignRemainingMs(options) < 0) {
-    throw new Error("experiment campaign is older than 6 hours");
-  }
-  return true;
+function withDigest(identity) {
+  return { ...identity, digest: digestObject(identity) };
 }
 
-/** Refuse paid work when any planned runtime or frozen prompt identity drifted. */
-export function assertExperimentRuntimeIdentity({
+export function rawCacheIdentity({
   plan,
-  contract,
-  contractDigest,
-  identities,
-  promptDigests,
+  stage,
+  lane,
+  treatment: treatmentName,
+  sourceDigest = null,
 }) {
-  const checks = [
-    ["contract_digest", plan.contract_digest, contractDigest],
-    [
-      "matcher_digest",
-      plan.identities.matcher_digest,
-      identities.matcher_digest,
-    ],
-    [
-      "calibration_digest",
-      plan.identities.calibration_digest,
-      identities.calibration_digest,
-    ],
-    [
-      "experiment_digest",
-      plan.identities.experiment_digest,
-      identities.experiment_digest,
-    ],
-    [
-      "orchestrator_digest",
-      plan.identities.orchestrator_digest,
-      identities.orchestrator_digest,
-    ],
-    [
-      "finder_argv_digest",
-      plan.identities.finder_argv_digest,
-      identities.finder_argv_digest,
-    ],
-    ["claude_cli", plan.identities.claude_cli, identities.claude_cli],
-    ["judge_cli", plan.identities.judge_cli, identities.judge_cli],
-    ["codex_cli", plan.identities.codex_cli, identities.codex_cli],
-    [
-      "claude_bin",
-      digestObject(plan.identities.claude_bin),
-      digestObject(identities.claude_bin),
-    ],
-    [
-      "codex_bin",
-      digestObject(plan.identities.codex_bin),
-      digestObject(identities.codex_bin),
-    ],
-    ["host", plan.identities.host, identities.host],
-  ];
-  for (const [name, planned, current] of checks) {
-    if (planned !== current) {
-      throw new Error(
-        `experiment runtime ${name} drifted: planned ${planned}, current ${current}`,
-      );
-    }
+  const plannedStage = stagePlanFor({ plan, stage });
+  const plannedLane = plannedStage.lanes.find(
+    (candidateLane) => candidateLane.lane_id === lane?.lane_id,
+  );
+  if (!plannedLane || JSON.stringify(plannedLane) !== JSON.stringify(lane)) {
+    throw new Error("raw cache lane differs from the immutable plan");
   }
-  if (
-    plan.identities.judge.model !== contract.judge.model ||
-    plan.identities.judge.effort !== contract.judge.effort
-  ) {
-    throw new Error("experiment runtime judge identity drifted");
+  if (!plannedLane.sequence.includes(treatmentName)) {
+    throw new Error("raw cache treatment is not in the planned sequence");
   }
-  for (const [name, prompt] of Object.entries(contract.prompts ?? {})) {
-    const planned = plan.calibration_identity.prompts?.[name];
-    const current = promptDigests?.[name];
-    if (planned !== prompt.sha256 || current !== prompt.sha256) {
-      throw new Error(`experiment runtime ${name} prompt digest drifted`);
-    }
+  const selectedTreatment = treatmentFor(plan, treatmentName);
+  let source = plannedLane.source;
+  if (source.kind === "live-finder") {
+    source = {
+      ...source,
+      report_digest: assertDigest(sourceDigest, "live finder report digest"),
+    };
+  } else if (sourceDigest !== null && sourceDigest !== source.sha256) {
+    throw new Error("frozen report digest differs from the plan");
   }
-  return true;
+  return withDigest({
+    schema_version: EXPERIMENT_SCHEMA_VERSION,
+    namespace: EXPERIMENT_NAMESPACE,
+    phase: "raw",
+    campaign_id: plan.campaign_id,
+    plan_digest: plan.plan_digest,
+    stage,
+    lane_id: plannedLane.lane_id,
+    pr: plannedLane.pr,
+    treatment: treatmentName,
+    skill_digest: selectedTreatment.skill_digest,
+    contract_digest: plan.contract_digest,
+    cli_version: plan.inputs.cli_versions.claude,
+    model: plan.inputs.models.verifier,
+    prompt: plan.inputs.prompts.handoff,
+    fixture: plannedLane.fixture,
+    source,
+  });
+}
+
+export function scoreCacheIdentity({ plan, rawDigest }) {
+  return withDigest({
+    schema_version: EXPERIMENT_SCHEMA_VERSION,
+    namespace: EXPERIMENT_NAMESPACE,
+    phase: "score",
+    plan_digest: plan.plan_digest,
+    raw_digest: assertDigest(rawDigest, "rawDigest"),
+    scorer_digest: plan.inputs.scorer_digest,
+    judge: plan.inputs.models.judge,
+    judge_cli_version: plan.inputs.cli_versions.judge,
+  });
+}
+
+export function novelCacheIdentity({ plan, scoreDigest }) {
+  return withDigest({
+    schema_version: EXPERIMENT_SCHEMA_VERSION,
+    namespace: EXPERIMENT_NAMESPACE,
+    phase: "novel",
+    plan_digest: plan.plan_digest,
+    score_digest: assertDigest(scoreDigest, "scoreDigest"),
+    scorer_digest: plan.inputs.scorer_digest,
+    judge: plan.inputs.models.judge,
+    judge_cli_version: plan.inputs.cli_versions.judge,
+  });
+}
+
+export function buildCacheIdentity({ phase, ...options }) {
+  if (phase === "raw") return rawCacheIdentity(options);
+  if (phase === "score" || phase === "match") {
+    return scoreCacheIdentity(options);
+  }
+  if (phase === "novel") return novelCacheIdentity(options);
+  throw new Error(`unknown cache identity phase ${JSON.stringify(phase)}`);
 }
