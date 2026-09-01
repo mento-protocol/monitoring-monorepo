@@ -116,13 +116,29 @@ function isExplicitEmptySummary(value) {
 const FINDING_LABEL_SOURCE = String.raw`(?:\[[Pp][0-3]\]|\b[Pp][0-3]\s+Badge\b|\b(?:critical|high|medium|low)\s+severity\b|\bchanges requested\b)`;
 const FINDING_LABEL_SEPARATOR_SOURCE = String.raw`(?:,\s*(?:and|or)\b|[/,]|\b(?:and|or)\b)`;
 const FINDING_LABEL_LIST_SOURCE = String.raw`${FINDING_LABEL_SOURCE}(?:\s*${FINDING_LABEL_SEPARATOR_SOURCE}\s*${FINDING_LABEL_SOURCE})*`;
-const NUMERIC_EMPTY_FINDING_CLAUSE = new RegExp(
-  String.raw`^\s*(?:[-*+•]\s+)?(?:0\s*(?:findings?\s*)?(?:(?::|[—–-])\s*)?${FINDING_LABEL_LIST_SOURCE}(?:\s+findings?)?|${FINDING_LABEL_LIST_SOURCE}\s*(?:findings?\s*)?(?::|[—–-])\s*0(?:\s+findings?)?)\s*,?\s*$`,
+const EMPTY_FINDING_PREFIX_SOURCE = String.raw`(?:0|zero|none|no)`;
+const EMPTY_FINDING_SUFFIX_SOURCE = String.raw`(?:0|zero|none|no\s+findings?)`;
+const EMPTY_FINDING_ENTRY_SOURCE = String.raw`(?:${EMPTY_FINDING_PREFIX_SOURCE}\s*(?:findings?\s*)?(?:(?::|[—–-])\s*)?${FINDING_LABEL_LIST_SOURCE}(?:\s+findings?)?|${FINDING_LABEL_LIST_SOURCE}\s*(?:findings?\s*)?(?::|[—–-])\s*${EMPTY_FINDING_SUFFIX_SOURCE}(?:\s+findings?)?)`;
+const EMPTY_FINDING_ENTRY_SEPARATOR_SOURCE = String.raw`(?:,\s*(?:and|or)\b|[—–,-]|\b(?:and|or)\b)`;
+const EMPTY_FINDING_SUMMARY = new RegExp(
+  String.raw`^\s*(?:(?:[-+•>]|#{1,6})\s+)*${EMPTY_FINDING_ENTRY_SOURCE}(?:\s*${EMPTY_FINDING_ENTRY_SEPARATOR_SOURCE}\s*${EMPTY_FINDING_ENTRY_SOURCE})*\s*,?\s*$`,
   "i",
 );
 
-function isNumericEmptyFindingClause(value) {
-  return NUMERIC_EMPTY_FINDING_CLAUSE.test(value);
+function isEmptyFindingSummaryClause(value) {
+  const normalized = String(value ?? "")
+    .replace(/[*_`~]/g, "")
+    .trim();
+  if (EMPTY_FINDING_SUMMARY.test(normalized)) return true;
+  if (!normalized.startsWith("|") || !normalized.endsWith("|")) return false;
+  const cells = normalized
+    .slice(1, -1)
+    .split("|")
+    .map((cell) => cell.trim())
+    .filter(Boolean);
+  return (
+    cells.length === 2 && EMPTY_FINDING_SUMMARY.test(`${cells[0]}: ${cells[1]}`)
+  );
 }
 
 function affirmativeOccurrence(body, pattern) {
@@ -137,7 +153,7 @@ function affirmativeOccurrence(body, pattern) {
     return (
       !containsNegation(prefix) &&
       !isExplicitEmptySummary(suffix) &&
-      !isNumericEmptyFindingClause(clause)
+      !isEmptyFindingSummaryClause(clause)
     );
   });
   return match?.[0] ?? null;

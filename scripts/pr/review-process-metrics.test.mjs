@@ -1304,12 +1304,90 @@ test("treats numeric zero summaries as empty without hiding defect prose", () =>
       user: { login: "claude[bot]", type: "Bot" },
       body: "0 changes requested, but [P1] validation still fails.",
     },
+    {
+      id: 244,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "- **High severity:** 0 findings.",
+    },
+    {
+      id: 245,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "**P2 Badge findings: 0**.",
+    },
+    {
+      id: 246,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "High severity: 0, Medium severity: 0.",
+    },
+    {
+      id: 247,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "0 high severity, 0 medium severity findings.",
+    },
+    {
+      id: 248,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "0 high severity findings — no changes requested.",
+    },
+    {
+      id: 249,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "High severity: field 0 is invalid, Medium severity: 0.",
+    },
+    {
+      id: 250,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "**High severity:** value 0 is rejected.",
+    },
+    {
+      id: 251,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "### High severity: 0 findings.",
+    },
+    {
+      id: 252,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "> P2 Badge findings: 0.",
+    },
+    {
+      id: 253,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "High severity: 0 and Medium severity: 0.",
+    },
+    {
+      id: 254,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "| High severity | 0 |",
+    },
+    {
+      id: 255,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "| 0 | P2 Badge findings |",
+    },
+    {
+      id: 256,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "| High severity | value 0 is rejected |",
+    },
   );
 
   const records = summarizeFixture(
     value,
   ).evidence.byBot.claude.surfaces.review_submissions.evidence.filter(
-    ({ id }) => Number(id) >= 226 && Number(id) <= 243,
+    ({ id }) => Number(id) >= 226 && Number(id) <= 256,
   );
   assert.deepEqual(
     records.map(({ id, finding, findingSignal }) => ({
@@ -1336,6 +1414,19 @@ test("treats numeric zero summaries as empty without hiding defect prose", () =>
       { id: "241", finding: false, findingSignal: null },
       { id: "242", finding: false, findingSignal: null },
       { id: "243", finding: true, findingSignal: "[P1]" },
+      { id: "244", finding: false, findingSignal: null },
+      { id: "245", finding: false, findingSignal: null },
+      { id: "246", finding: false, findingSignal: null },
+      { id: "247", finding: false, findingSignal: null },
+      { id: "248", finding: false, findingSignal: null },
+      { id: "249", finding: true, findingSignal: "High severity" },
+      { id: "250", finding: true, findingSignal: "High severity" },
+      { id: "251", finding: false, findingSignal: null },
+      { id: "252", finding: false, findingSignal: null },
+      { id: "253", finding: false, findingSignal: null },
+      { id: "254", finding: false, findingSignal: null },
+      { id: "255", finding: false, findingSignal: null },
+      { id: "256", finding: true, findingSignal: "High severity" },
     ],
   );
 });
