@@ -2825,11 +2825,11 @@ than the freshness TTL (two hours). Because it runs in parallel rather than
 `--fail-fast`, a red push runs the remaining in-flight ordinary commands before
 failing. Package-script acknowledgement is folded out
 of the reuse key when there is no package-script risk, so a warm
-`./scripts/agent-quality-gate.sh --run` — even one passed `--allow-package-script-changes`
-defensively — satisfies the flag-less hook's `--skip-if-fresh` check, and
-warm-then-push then skips the mapped commands. When a push DOES change package
-scripts or package-manager config, the acknowledgement is part of the reuse key:
-review the script/lifecycle diff first, then set
+`./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main` satisfies
+the flag-less hook's `--skip-if-fresh` check, and warm-then-push then skips the
+mapped commands. When a push DOES change package scripts or package-manager
+config, the acknowledgement is part of the reuse key: review the
+script/lifecycle diff first, then set
 `agent.qualityGate.allowPackageScriptChanges=true` in local git config (seen by
 both the manual warm run and the hook) so a just-passed acknowledged manual gate
 can satisfy the `--skip-if-fresh` check.

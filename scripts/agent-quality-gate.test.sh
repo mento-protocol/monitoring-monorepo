@@ -1163,6 +1163,11 @@ const resolvedBaseEntryPoints = [
   "docs/notes/pr-operating-card.md",
   "docs/notes/pr-ready-state.md",
 ];
+const sweepLockEntryPoints = [
+  ".agents/skills/backlog-sweep/SKILL.md",
+  ".claude/skills/backlog-sweep/SKILL.md",
+  "docs/notes/backlog-sweep.md",
+];
 const activeTrunkLines = trunk
   .split("\n")
   .filter((line) => !line.trimStart().startsWith("#"))
@@ -1230,6 +1235,23 @@ assert.ok(claudeHostedConfigIndex >= 0, "Claude resume hosted config is missing"
 assert.ok(
   claudeHostedConfigIndex < claudeSourceFilterIndex,
   "Claude resume hosted config must precede the source filter",
+);
+for (const entryPointPath of sweepLockEntryPoints) {
+  const entryPoint = fs.readFileSync(entryPointPath, "utf8");
+  assert.match(
+    entryPoint,
+    /Local workers wait with `--lock-wait 3600`\.[\s\S]{0,140}Hosted workers use[\s\S]{0,80}1,800-second default/u,
+    `${entryPointPath} must preserve local and hosted sweep lock waits`,
+  );
+}
+const gateMechanics = fs.readFileSync(
+  "docs/notes/agent-quality-gate-mechanics.md",
+  "utf8",
+);
+assert.match(
+  gateMechanics,
+  /so a warm\n`\.\/scripts\/agent-quality-gate\.sh --run --parallel 3 --base origin\/main` satisfies/u,
+  "gate mechanics must name the exact reusable pre-push warm command",
 );
 const freshnessSkipIndex = gate.indexOf(
   'echo "Previous successful agent quality gate run is still fresh; skipping mapped commands."',
