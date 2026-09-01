@@ -2826,7 +2826,7 @@ than the freshness TTL (two hours). Because it runs in parallel rather than
 `--fail-fast`, a red push runs the remaining in-flight ordinary commands before
 failing. Package-script acknowledgement is folded out
 of the reuse key when there is no package-script risk, so a warm
-`pnpm agent:quality-gate --run` — even one passed `--allow-package-script-changes`
+`./scripts/agent-quality-gate.sh --run` — even one passed `--allow-package-script-changes`
 defensively — satisfies the flag-less hook's `--skip-if-fresh` check, and
 warm-then-push then skips the mapped commands. When a push DOES change package
 scripts or package-manager config, the acknowledgement is part of the reuse key:
@@ -2839,10 +2839,12 @@ Hosted setup sets `agent.qualityGate.cloudPrePushRequireFresh=true` in the
 repository git config. A hosted pre-push with a fresh exact stamp exits through
 the normal freshness path. A cold or invalid stamp exits with status 2 before
 scheduler registration, lock acquisition, or mapped work. Fetch `origin/main`,
-run `pnpm agent:quality-gate --run --parallel 3` as an observable background
-task, and retry the push after it passes. The matching parallelism is part of
-the freshness key. Local setup leaves this option unset, so a cold local
-pre-push still runs the mapped gate.
+run `./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main` as
+an observable background task, and retry the push after it passes. The direct
+launcher, base, and parallelism match the hook's freshness key. A `pnpm`
+launcher adds material lifecycle environment values and cannot warm this exact
+hook stamp. Local setup leaves this option unset, so a cold local pre-push still
+runs the mapped gate.
 
 Coordinator coalescing and retained-result reuse use the complete execution key
 described above, including HEAD. The leader recomputes it before execution and

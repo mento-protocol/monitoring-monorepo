@@ -1187,8 +1187,8 @@ assert.ok(hostedRefusalIndex > freshnessSkipIndex, "hosted refusal must follow f
 assert.ok(lockAcquisitionIndex > hostedRefusalIndex, "hosted refusal must precede lock acquisition");
 assert.match(
   gate,
-  /start 'pnpm agent:quality-gate --run --parallel 3' as an observable background task\./u,
-  "hosted refusal must warm the exact hook parallelism",
+  /start '\.\/scripts\/agent-quality-gate\.sh --run --parallel 3 --base origin\/main' as an observable background task\./u,
+  "hosted refusal must warm the exact hook launcher, base, and parallelism",
 );
 NODE
   fail "expected the public quality-gate entry contract to remain pinned"
@@ -16809,7 +16809,7 @@ STUB
   assert_contains "timed out after"
   # The pre-push hook cannot pass --no-lock, so the timeout must also name the
   # recovery that works from a failed push.
-  assert_contains "pnpm agent:quality-gate --run --parallel 3"
+  assert_contains "./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main"
   assert_contains "--skip-if-fresh cache-hits and exits before this lock"
   [[ -d "$gate_lock_root/run.lock" ]] ||
     fail "a run that never acquired the lock must not delete the holder's lock"
