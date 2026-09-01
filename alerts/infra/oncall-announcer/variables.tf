@@ -62,9 +62,9 @@ variable "runtime" {
 }
 
 variable "schedule" {
-  description = "Cloud Scheduler cron expression for polling Splunk On-Call. The default checks shortly after the weekly Sunday 10:00 Europe/Berlin handover."
+  description = "Cloud Scheduler cron expression for polling Splunk On-Call. The default checks shortly after the weekly Monday 10:00 Europe/Berlin handover."
   type        = string
-  default     = "5,20 10 * * 0"
+  default     = "5,20 10 * * 1"
 }
 
 variable "scheduler_name" {

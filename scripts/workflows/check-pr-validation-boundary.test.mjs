@@ -107,7 +107,7 @@ test("structural mutations fail closed at each M2 boundary", () => {
   // prettier-ignore
   mutateOnce(root, ".github/actions/pnpm-install/action.yml", "      continue-on-error: true\n      uses: actions/cache/save@", "      continue-on-error: false\n      uses: actions/cache/save@", /cache save must be nonfatal/u);
   // prettier-ignore
-  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "    - name: Clear incomplete pnpm store restore\n      if: steps.pnpm-cache.outputs.cache-hit == ''", "    - name: Clear incomplete pnpm store restore\n      if: 'false'", /clear an incomplete extraction/u);
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "    - name: Clear incomplete pnpm store restore\n      if: inputs.restore-cache == 'true' && steps.pnpm-cache.outputs.cache-hit == ''", "    - name: Clear incomplete pnpm store restore\n      if: 'false'", /clear an incomplete extraction|exact protected controls/u);
   mutateOnce(
     root,
     ".github/actions/pnpm-install/action.yml",
@@ -220,8 +220,8 @@ test("structural mutations fail closed at each M2 boundary", () => {
   mutateOnce(
     root,
     ".github/workflows/ci.yml",
-    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      contents: read",
-    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      checks: write\n      contents: read",
+    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      contents: read",
+    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      checks: write\n      contents: read",
     /approved PR authority/u,
   );
   mutateOnce(
@@ -269,27 +269,41 @@ test("structural mutations fail closed at each M2 boundary", () => {
   mutateOnce(
     root,
     ".github/workflows/ci.yml",
-    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      contents: read",
-    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      issues: write\n      contents: read",
+    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      contents: read",
+    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      issues: write\n      contents: read",
     /approved PR authority/u,
   );
   mutateOnce(
     root,
     ".github/workflows/ci.yml",
-    "          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}",
+    "          write-cache: ${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' }}",
     "          write-cache: true",
     /dependency-free x64 pnpm cache writer/u,
+  );
+  mutateOnce(
+    root,
+    ".github/workflows/ci.yml",
+    "      - name: Validate trusted package-script pins\n        # Runs before pnpm-install because the install executes PR-authored\n        # lifecycle hooks. It also pins the tf:test and issue:board:test aliases\n        # before this required job trusts them.\n        run: node scripts/check-agent-quality-gate-package-scripts.mjs\n",
+    "",
+    /dependency-free package-script validator/u,
+  );
+  mutateOnce(
+    root,
+    ".github/workflows/ci.yml",
+    "      - name: Validate trusted package-script pins\n        # Runs before pnpm-install because the install executes PR-authored\n        # lifecycle hooks. It also pins the tf:test and issue:board:test aliases\n        # before this required job trusts them.\n        run: node scripts/check-agent-quality-gate-package-scripts.mjs\n",
+    "      - name: Validate trusted package-script pins\n        # Runs before pnpm-install because the install executes PR-authored\n        # lifecycle hooks. It also pins the tf:test and issue:board:test aliases\n        # before this required job trusts them.\n        run: node scripts/check-agent-quality-gate-package-scripts.mjs\n      - name: Validate trusted package-script pins\n        run: node scripts/check-agent-quality-gate-package-scripts.mjs\n",
+    /exactly one dependency-free package-script validator/u,
   );
   // prettier-ignore
   mutateOnce(root, ".github/workflows/ci.yml", "        # before this required job trusts them.\n        run: node scripts/check-agent-quality-gate-package-scripts.mjs", "        # before this required job trusts them.\n        run: node scripts/check-agent-quality-gate-package-scripts.mjs --skip", /trusted package-script pin check/u);
   // prettier-ignore
   mutateOnce(root, ".github/workflows/ci.yml", "  production-infra-contract:\n    name: Production infrastructure contract", "  production-infra-contract:\n    name: Production infrastructure contract\n    needs: changes", /direct dependency-free x64 pnpm cache writer/u);
   // prettier-ignore
-  mutateOnce(root, ".github/workflows/ci.yml", "      - uses: ./.github/actions/pnpm-install\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", "      - uses: ./.github/actions/pnpm-install\n        if: 'false'\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", /dependency-free x64 pnpm cache writer/u);
+  mutateOnce(root, ".github/workflows/ci.yml", "      - uses: $/.github/actions/pnpm-install\n        with:\n          restore-cache: ${{ !inputs.no_skip_audit }}\n          write-cache: ${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' }}", "      - uses: $/.github/actions/pnpm-install\n        if: 'false'\n        with:\n          restore-cache: ${{ !inputs.no_skip_audit }}\n          write-cache: ${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' }}", /dependency-free x64 pnpm cache writer/u);
   // prettier-ignore
-  mutateOnce(root, ".github/workflows/ci.yml", "      - uses: ./.github/actions/pnpm-install\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", "      - uses: ./.github/actions/pnpm-install\n        env:\n          PNPM_CONFIG_STORE_DIR: /tmp/other\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", /store override is forbidden/u);
+  mutateOnce(root, ".github/workflows/ci.yml", "      - uses: $/.github/actions/pnpm-install\n        with:\n          restore-cache: ${{ !inputs.no_skip_audit }}\n          write-cache: ${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' }}", "      - uses: $/.github/actions/pnpm-install\n        env:\n          PNPM_CONFIG_STORE_DIR: /tmp/other\n        with:\n          restore-cache: ${{ !inputs.no_skip_audit }}\n          write-cache: ${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' }}", /store override is forbidden/u);
   // prettier-ignore
-  mutateOnce(root, ".github/workflows/ci.yml", "      - uses: ./.github/actions/pnpm-install\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", "      - name: Persist alternate pnpm store\n        run: echo \"PNPM_CONFIG_STORE_DIR=/tmp/other\" >> \"$GITHUB_ENV\"\n      - uses: ./.github/actions/pnpm-install\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", /store override is forbidden/u);
+  mutateOnce(root, ".github/workflows/ci.yml", "      - uses: $/.github/actions/pnpm-install\n        with:\n          restore-cache: ${{ !inputs.no_skip_audit }}\n          write-cache: ${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' }}", "      - name: Persist alternate pnpm store\n        run: echo \"PNPM_CONFIG_STORE_DIR=/tmp/other\" >> \"$GITHUB_ENV\"\n      - uses: $/.github/actions/pnpm-install\n        with:\n          restore-cache: ${{ !inputs.no_skip_audit }}\n          write-cache: ${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' }}", /store override is forbidden/u);
   // prettier-ignore
   mutateOnce(root, ".github/workflows/ci.yml", "  production-infra-contract:\n    name: Production infrastructure contract", "  production-infra-contract:\n    name: Production infrastructure contract\n    container: node:24", /caller jobs must not use containers/u);
   // prettier-ignore
@@ -297,8 +311,8 @@ test("structural mutations fail closed at each M2 boundary", () => {
   mutateOnce(
     root,
     ".github/workflows/ci.yml",
-    "      - uses: ./.github/actions/pnpm-install\n      - name: Resolve main baseline (PR baseline-growth check)",
-    "      - uses: ./.github/actions/pnpm-install\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}\n      - name: Resolve main baseline (PR baseline-growth check)",
+    "      - uses: $/.github/actions/pnpm-install\n        with:\n          restore-cache: ${{ !inputs.no_skip_audit }}\n      - name: Resolve validation baseline",
+    "      - uses: $/.github/actions/pnpm-install\n        with:\n          restore-cache: ${{ !inputs.no_skip_audit }}\n          write-cache: ${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' }}\n      - name: Resolve validation baseline",
     /dependency-free x64 pnpm cache writer/u,
   );
   mutateOnce(

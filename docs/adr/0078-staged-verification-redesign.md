@@ -3,7 +3,7 @@ title: Staged replacement of the mandatory local gate with existing CI
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-30
+last_verified: 2026-09-01
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -143,6 +143,30 @@ main save and a later PR hit cannot exist before this change reaches `main`.
 Record both as post-merge evidence for #2124. A missing or corrupt cache must
 remain a cold-run condition, not a validation failure or a skipped command.
 
+### Apply the M3 fixed CI contract
+
+M3 keeps the fixed jobs and the stable `CI / ci` context. A closed-world
+fallback selects every conditional job for an unknown path, a control-plane
+path, or an incomplete pull request file list. It does not add a planner,
+dynamic matrix, or second routing format.
+
+The pinned `dorny/paths-filter` action emits a documented count for each
+filter. The `routed` filter reuses the functional filters through YAML aliases.
+The fallback compares the `all` count with the `routed` and `ordinary` counts.
+The workflow does not export changed-file lists.
+
+The `pnpm ci:contract:test` command checks fixed job membership, conditional
+filters, pull request and `main` concurrency, aggregate failure states, and the
+M2 permission and cache boundary. The unconditional `Production infrastructure
+contract` job runs it on every pull request and `main` push.
+
+M3 adds the two confirmed gate-only gaps to existing required jobs. The
+`scripts` job runs the ADR reminder and its tests. The `ui` job runs the normal
+production build and bundle-size limit. The separate Infra validation and
+bundle-size workflows duplicate required coverage. Lighthouse, PR Description,
+duplication, and schema diff remain reviewed advisory exceptions with their
+current triggers.
+
 ### Keep local checks bounded and non-authoritative
 
 After cutover, pre-commit runs staged formatting only. Pre-push starts no
@@ -178,13 +202,38 @@ immutable inputs are operational shadow evidence. They cannot satisfy pull
 request readiness.
 
 The audit uses existing GitHub Actions jobs. It adds no status writer, custom
-reporter, app, personal access token, task service, or result database. Phase 0
-records a 41.18-runner-minute cold planning estimate from comparable retained
-runs. It is not an upper bound or an observed current all-cache-miss run. Before
-shadow execution, run every current deterministic job at immutable trusted SHAs
-with cache reads and writes disabled. Stop if that proof breaches the approved
-ceiling. A scheduled run uses the same deterministic no-skip coverage after
-this proof passes.
+reporter, app, personal access token, task service, or result database. The M4
+dispatcher calls the existing `ci.yml` from the protected running commit. The
+called workflow also resolves its local setup actions from that commit. The
+audit skips the change selector, forces every conditional job, and rejects all
+job skips. Each candidate-executing job checks out the admitted source SHA.
+ESLint baselines, React Doctor, Peg policy lineage, the ADR reminder, and
+Terraform selection use the admitted base SHA.
+
+The audit caller has read-only permissions and forwards no repository or
+environment secrets. GitHub still gives each called job its scoped read-only
+`GITHUB_TOKEN`. Codecov, failure artifacts, and post-candidate timeline actions
+do not run. The initial cold mode disables every reviewed pnpm, Playwright,
+Foundry, and Turbo persistent cache read, save, and post hook. Ordinary pull
+requests keep affected selection and the fixed command set. M4 limits the
+Foundry action cache to protected-main pushes because that action has no
+restore-only mode. A later measured change may enable restore-only audit caches.
+
+GitHub gives `workflow_dispatch` jobs cache-service authority outside the
+workflow `permissions` map. M4 does not sandbox malicious same-repository
+candidate code that calls that service directly. Same-repository admission and
+the accepted trusted-contributor threat model bound this residual. The cold
+proof verifies the reviewed workflow and tool paths, not an unavailable
+platform cache sandbox.
+
+Phase 0 records a 41.18-runner-minute cold planning estimate from comparable
+retained runs. It is not an upper bound or an observed current all-cache-miss
+run. The approved later execution ceiling is 45 runner-minutes per run and 450
+runner-minutes total. The first eligible cold proof counts as one of the ten
+sampled pull requests. Stop after any run exceeds 45 runner-minutes. Do not
+start another run when it could exceed 450 cumulative runner-minutes. M4 adds
+no schedule and spends no shadow minutes. A scheduled run uses the same
+deterministic no-skip coverage only after the cold proof passes.
 
 The Phase 0 cost baseline selects one `CI` workflow run for each of ten
 immutable pull request heads. It counts every non-skipped job execution and
@@ -280,6 +329,11 @@ This historical #2124 evidence does not change after M2 closes. Later phases
 record phase-scoped evidence instead of extending it. The permanent checker
 continues to enforce the structural trust boundary.
 
+M4 records its changed and new control-plane files relative to protected-main
+baseline `b4bf201c3b87580771c55ec615fcc9a4e51ae267` in a separate phase-scoped
+complexity manifest. It is an additive implementation receipt. Operational
+shadow evidence stays in GitHub runs and the later Markdown evidence record.
+
 ## Rollback
 
 Before legacy deletion, restore the recorded ruleset first and revert the
@@ -340,7 +394,9 @@ would recreate the local gate.
 - [Safeguard inventory](../metrics/verification-redesign-safeguards.jsonl)
 - [Control-plane before manifest](../metrics/verification-redesign-control-plane-before.json)
 - [M2 additive complexity manifest](../metrics/verification-redesign-m2-complexity.json)
-- Issues #2006, #2032, #2042, #2094, #2122, #2123, and #2124
+- [M3 additive complexity manifest](../metrics/verification-redesign-m3-complexity.json)
+- [M4 additive complexity manifest](../metrics/verification-redesign-m4-complexity.json)
+- Issues #2006, #2032, #2042, #2094, #2122, #2123, #2124, #2125, and #2126
 - ADRs [0007](0007-agent-quality-gate-and-merge-oracle.md),
   [0069](0069-gate-routing-table-as-data.md),
   [0072](0072-md-only-docs-checks-job.md),

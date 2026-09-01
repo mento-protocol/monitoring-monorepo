@@ -1,12 +1,11 @@
-name: Resolve main baseline
+name: Resolve validation baseline
 description: >
-  Resolve a package's eslint-baseline.json as committed on origin/main and
-  export it as ESLINT_BASELINE_MAIN for the PR baseline-growth check.
+  Resolve a package's eslint-baseline.json at an immutable validation base and
+  export it as ESLINT_BASELINE_MAIN for the baseline-growth check.
 
 # Composite action used by .github/workflows/ci.yml to DRY the per-package
-# "Resolve main baseline (PR baseline-growth check)" step. Caller is
-# responsible for the `if: github.event_name == 'pull_request'` guard and
-# for `actions/checkout` before invoking this action.
+# baseline-growth step. Caller is responsible for its event guard and for
+# `actions/checkout` before invoking this action.
 
 inputs:
   package-path:
@@ -18,6 +17,10 @@ inputs:
       already used fetch-depth: 0 (origin/main is already available).
     required: false
     default: "true"
+  baseline-ref:
+    description: Immutable Git object that owns the baseline file
+    required: false
+    default: origin/main
 
 runs:
   using: composite
@@ -33,20 +36,20 @@ runs:
         # configured fetch refmap.
         git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
     - shell: bash
+      env:
+        BASELINE_REF: ${{ inputs.baseline-ref }}
       run: |
         set -euo pipefail
-        # Guard the implicit contract: with fetch-main 'false' the caller's
-        # checkout must have made origin/main available (fetch-depth: 0).
-        # Without this guard a misconfigured caller gets a cryptic
-        # "Not a valid object name 'origin/main'" with no hint at the cause.
-        if ! git rev-parse --verify --quiet refs/remotes/origin/main >/dev/null; then
-          echo "::error::refs/remotes/origin/main not found. Either keep fetch-main: 'true' or use fetch-depth: 0 in the caller's checkout." >&2
+        # A no-skip audit passes its admitted base SHA. Ordinary pull request
+        # runs keep origin/main. Resolve either form exactly before reading it.
+        if ! git rev-parse --verify --quiet "${BASELINE_REF}^{commit}" >/dev/null; then
+          echo "::error::Baseline ref ${BASELINE_REF} is not available. Fetch it before invoking this action." >&2
           exit 1
         fi
-        # Only tolerate a genuinely missing baseline file on main (package
-        # didn't exist there yet) — not a missing ref or ls-tree failure.
-        if git ls-tree --name-only origin/main -- "${{ inputs.package-path }}/eslint-baseline.json" | grep -q .; then
-          git show "origin/main:${{ inputs.package-path }}/eslint-baseline.json" > "/tmp/main-baseline-${{ inputs.package-path }}.json"
+        # Only tolerate a genuinely missing baseline file at the validated
+        # base. A missing object or tree read still fails closed.
+        if git ls-tree --name-only "$BASELINE_REF" -- "${{ inputs.package-path }}/eslint-baseline.json" | grep -q .; then
+          git show "${BASELINE_REF}:${{ inputs.package-path }}/eslint-baseline.json" > "/tmp/main-baseline-${{ inputs.package-path }}.json"
         else
           : > "/tmp/main-baseline-${{ inputs.package-path }}.json"
         fi

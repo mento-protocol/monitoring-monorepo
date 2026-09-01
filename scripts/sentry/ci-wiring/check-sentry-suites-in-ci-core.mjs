@@ -460,15 +460,32 @@ export function sentinelBlockers(workflow, trustedJobs) {
       typeof step.uses === "string" &&
       step.uses.startsWith("re-actors/alls-green@"),
   );
-  if (allsGreen.length !== 1) {
+  const ordinaryCondition = "${{ !inputs.no_skip_audit }}";
+  const auditCondition = "${{ inputs.no_skip_audit }}";
+  const ordinaryGates = allsGreen.filter(
+    (step) => step.if === undefined || step.if === ordinaryCondition,
+  );
+  const auditGates = allsGreen.filter((step) => step.if === auditCondition);
+  const splitAudit =
+    allsGreen.length === 2 &&
+    ordinaryGates.length === 1 &&
+    ordinaryGates[0].if === ordinaryCondition &&
+    auditGates.length === 1;
+  const unconditional =
+    allsGreen.length === 1 &&
+    ordinaryGates.length === 1 &&
+    ordinaryGates[0].if === undefined;
+  if (!unconditional && !splitAudit) {
     blockers.push(
-      `the \`ci\` sentinel has ${allsGreen.length} alls-green steps — it must have exactly the one that reads every job's result`,
+      `the \`ci\` sentinel has an invalid alls-green split — it must have one ordinary gate, plus one mutually exclusive no-skip gate when audit mode exists`,
     );
     return blockers;
   }
 
-  const [gate] = allsGreen;
-  for (const blocker of stepBlockers(gate)) {
+  const [gate] = ordinaryGates;
+  const ordinaryForBlocking =
+    gate.if === ordinaryCondition ? { ...gate, if: undefined } : gate;
+  for (const blocker of stepBlockers(ordinaryForBlocking)) {
     blockers.push(
       `the \`ci\` sentinel's alls-green step, the one step that turns a red job into a red \`ci\`, has ${blocker}`,
     );

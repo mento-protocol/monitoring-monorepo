@@ -3,7 +3,7 @@ title: Quick Commands
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-29
+last_verified: 2026-09-01
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -64,6 +64,12 @@ pnpm docs:navigation-eval -- --check-fixtures  # Check fresh-agent navigation qu
 pnpm docs:navigation-eval -- --prompt          # Print the bounded read-only prompt; no model call
 pnpm docs:navigation-eval -- --prompt --base-commit <full-sha>  # Pin a committed result to a reachable default-branch ancestor
 pnpm docs:navigation-eval -- --validate <result.json>  # Recompute authority, evidence, route, and context scores
+pnpm ci:contract:test             # Test fixed CI and protected no-skip admission, cache, base, and aggregate contracts
+# After M4 reaches main and before each approved proof, read the current immutable inputs:
+gh pr view <pr> --json number,state,headRefOid,baseRefName,baseRefOid,headRepositoryOwner
+# The audit refuses a stale baseRefOid. Update or rebase the PR branch, then read fresh inputs.
+# Stop after any run exceeds 45 runner-minutes. Do not exceed 450 cumulative runner-minutes.
+gh workflow run no-skip-audit.yml --ref main -f pr_number=<pr> -f source_sha=<headRefOid> -f base_sha=<baseRefOid>
 pnpm verification:inventory:check  # Validate Phase 0 inventory schema, unique IDs, and complete dispositions
 pnpm verification:manifest:write   # Regenerate the terminal pre-M1 gate-rooted control-plane baseline manifest
 pnpm verification:manifest:check   # Recompute and compare the terminal pre-M1 baseline manifest

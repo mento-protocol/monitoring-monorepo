@@ -53,7 +53,7 @@ export const PIN_VALIDATOR_COMMAND = [
 ];
 
 /** The local install action the `scripts` job must run AFTER the pin validator. */
-export const INSTALL_ACTION = "./.github/actions/pnpm-install";
+export const INSTALL_ACTION = "$/.github/actions/pnpm-install";
 
 /** The test file, so the check can assert its own CI step still exists. */
 export const SELF =
@@ -128,7 +128,7 @@ export const WORKFLOWS = readdirSync(WORKFLOWS_DIR, { withFileTypes: true })
  * local composite it runs — and a composite may itself `uses:` another local
  * composite, so an env write hiding two levels down reaches the runner just the
  * same. This opens each `action.yml`, records its steps, and recurses into any
- * nested `./` action until a fixpoint, with a visited set on the resolved
+ * nested `$/` or `./` action until a fixpoint, with a visited set on the resolved
  * `action.yml` path so a diamond is walked once and a cycle terminates instead
  * of looping. Third-party `uses:` (SHA-pinned, covered by
  * check-github-action-pins.mjs) are out of scope.
@@ -147,7 +147,7 @@ export const WORKFLOWS = readdirSync(WORKFLOWS_DIR, { withFileTypes: true })
  * covered by check-github-action-pins.mjs) are out of scope and not descended.
  *
  * @param {Record<string, any>} job
- * @param {string} [root] the repo root the `./` paths resolve against;
+ * @param {string} [root] the repo root the self-action paths resolve against;
  *   overridable so a synthetic tree can exercise the recursion without adding a
  *   real nested action to the repo.
  * @returns {{ steps: Record<string, any>[], files: string[], blockers: string[] }}
@@ -158,8 +158,14 @@ export function collectCompositeActions(job, root = ROOT) {
   const blockers = [];
   const visited = new Set();
 
+  const selfActionDirectory = (usesPath) =>
+    usesPath.startsWith("$/") || usesPath.startsWith("./")
+      ? usesPath.slice(2)
+      : null;
+
   const readAction = (usesPath) => {
-    const dir = usesPath.slice(2);
+    const dir = selfActionDirectory(usesPath);
+    if (dir === null) return null;
     for (const file of ["action.yml", "action.yaml"]) {
       const full = join(root, dir, file);
       let source;
@@ -199,7 +205,7 @@ export function collectCompositeActions(job, root = ROOT) {
     for (const step of action?.runs?.steps ?? []) {
       if (!isPlainObject(step)) continue;
       steps.push(step);
-      if (typeof step.uses === "string" && step.uses.startsWith("./")) {
+      if (typeof step.uses === "string" && selfActionDirectory(step.uses)) {
         descend(step.uses);
       }
     }
@@ -207,7 +213,7 @@ export function collectCompositeActions(job, root = ROOT) {
 
   for (const step of job?.steps ?? []) {
     if (!isPlainObject(step) || typeof step.uses !== "string") continue;
-    if (!step.uses.startsWith("./")) continue;
+    if (!selfActionDirectory(step.uses)) continue;
     descend(step.uses);
   }
   return { steps, files, blockers };
@@ -266,6 +272,14 @@ export const SENTINEL_MUTATIONS = [
       )),
   ],
   ["`continue-on-error`", (w) => (w.jobs.ci["continue-on-error"] = true)],
+  [
+    "a conditional ordinary gate without its audit pair",
+    (w) => {
+      w.jobs.ci.steps = w.jobs.ci.steps.filter(
+        (step) => step.if !== "${{ inputs.no_skip_audit }}",
+      );
+    },
+  ],
   [
     "`production-infra-contract` under `allowed-failures`",
     (w) => {
@@ -450,7 +464,7 @@ export const RUN_BY_ANOTHER_JOB = new Map([
  * `jobBlockers` looks for — `uses:`, `container`, `strategy`, `environment`,
  * `continue-on-error`, an `if:`, an `env:` at either level — plus everything it
  * does not, since anything outside the canonical shape is rejected whatever it
- * is called. Its only local composite is `./.github/actions/pnpm-install`,
+ * is called. Its only self-repository composite is `$/.github/actions/pnpm-install`,
  * which this map already routes through `production-infra-contract`, and
  * `gateJobBlockers` separately requires the sentinel to need it and to tolerate
  * neither its skip nor its failure. Listing it twice would add a weaker copy.

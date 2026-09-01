@@ -3,7 +3,7 @@ title: CI Workflow Gates Checklist
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-31
+last_verified: 2026-09-01
 doc_type: checklist
 scope: ci/process
 review_interval_days: 90
@@ -53,11 +53,78 @@ advisory schema-diff workflow in the PR UI.
 
 - [ ] **Ruleset-required** workflows MUST NOT use `paths:` / `paths-ignore:` filters — they must run on every PR. If you want path-conditional work, run every PR but skip the expensive job inside via `if:` checks (or `paths-filter`-style gating that reports a green check on no-op).
 - [ ] Registry-backed Terraform routing uses the broad `workflowAdmissionPatterns` list in `terraform.stacks.json`. Keep the required CI workflow unfiltered at workflow level. Its internal `terraform` filter and the Infra push/pull-request filters copy that list. Do not enumerate stack-specific paths in those filters. `pnpm tf:test` enforces exact equality and proves that the boundary subsumes every `changedPathPatterns` entry.
-- [ ] **Advisory** workflows (everything _not_ in the ruleset list above) SHOULD use a workflow-level `paths:` filter so they don't boot a runner on irrelevant PRs. A skipped advisory check is simply absent — it cannot leave a _required_ check pending. This is a deliberate CI-cost control; see `lighthouse.yml`, `size-limit.yml`, and `supply-chain.yml` for the pattern. **M2 exception:** `schema-diff.yml` keeps its existing every-PR trigger during credential and cache hardening. It routes in-job, fails closed on path-filter errors, and publishes only a read-only job summary. Reconsider its trigger in the fixed-coverage phase; do not change it incidentally.
+- [ ] **Advisory** workflows (everything _not_ in the ruleset list above) SHOULD use a workflow-level `paths:` filter so they don't boot a runner on irrelevant PRs. A skipped advisory check is simply absent — it cannot leave a _required_ check pending. This is a deliberate CI-cost control; see `lighthouse.yml`, `size-limit.yml`, and `supply-chain.yml` for the pattern. `schema-diff.yml` is a reviewed exception. It keeps its every-PR trigger so every pull request gets a visible job summary. Its in-job classifier skips irrelevant work and runs the schema diff when path detection fails.
 - [ ] **Scheduled advisory** workflows SHOULD state the detection/rebuild SLO they serve and use the slowest cadence that satisfies it. Backstop monitors for multi-hour/day failure modes should prefer daily or similarly low cadence unless there is an explicit operator page-time requirement; do not default to every 15 minutes just because the check is cheap.
 - [ ] If you make an advisory workflow required, add it to the ruleset **and** remove its `paths:` filter in the same change.
 
 > ⚠️ The ruleset and these docs have drifted before: several advisory gates were written as if required (run-on-every-PR, no `paths:`) when the ruleset never enforced them. When you add or "promote" a check, update both the ruleset and this list.
+
+### Fixed fan-out contract
+
+Run `pnpm ci:contract:test` after a change to `ci.yml`, its fixed job set, or
+the pull request validation boundary. The unconditional `Production
+infrastructure contract` job runs the same command on every pull request and
+`main` push.
+
+The command checks these contracts without defining a second runtime router:
+
+- The reviewed fixed jobs, `ci.needs`, conditional jobs, and `allowed-skips`
+  have exact set equality.
+- Every functional filter has positive, negative, rename, and deletion
+  fixtures. Separate unknown-path and control-plane fixtures prove that those
+  paths select every conditional job.
+- The pinned path-filter action emits one documented count per filter. Keep the
+  `all`, `routed`, and `ordinary` count comparison aligned with the functional
+  filter aliases. Do not export changed-file lists.
+- Pull request runs cancel stale heads. Each `main` SHA uses a distinct,
+  non-cancelling concurrency group.
+- Failed, cancelled, missing, unexpected, and disallowed skipped results fail
+  the aggregate and name each invalid job.
+- The existing pull request validation-boundary suite remains part of this
+  command. It pins permissions, credential access, cache restores, cache saves,
+  cleanup, and required-command ordering.
+- The no-skip audit suite pins protected-main admission, exact candidate and
+  base SHAs, zero skipped jobs, cold cache policy, and normalized PR-only checks.
+
+### Manual no-skip audit
+
+`.github/workflows/no-skip-audit.yml` is the only no-skip entry point. It runs
+only by manual dispatch from protected `main`. It accepts a pull request number,
+full current head SHA, and full current protected-main SHA. Admission fails if
+the pull request, either SHA, repository identity, base branch, or live `main`
+has moved.
+
+Admission requires the pull request base SHA, dispatch `GITHUB_SHA`, and live
+`main` SHA to be equal. An older pull request with a stale base SHA is
+intentionally ineligible. Update or rebase its branch, then read fresh immutable
+inputs. Treat this refusal as fail-closed admission, not a workflow failure.
+
+- [ ] Keep the dispatcher read-only. Do not forward repository or environment
+      secrets. Do not use `secrets: inherit`. Called jobs still receive GitHub's
+      scoped read-only `GITHUB_TOKEN`.
+- [ ] Call `$/.github/workflows/ci.yml` only after admission. Keep the call job
+      dependent on `admit`.
+- [ ] In audit mode, skip checkout and `dorny/paths-filter` in `changes`. The
+      protected workflow must set `forceAll`; it must not resolve a mutable branch.
+- [ ] Every candidate-executing job must check out the admitted source SHA with
+      full history and `persist-credentials: false`.
+- [ ] Resolve CI-owned local actions with `$/.github/actions/...`. The `$` form
+      uses the running protected commit and does not need a candidate checkout.
+- [ ] Pass the admitted base through step `env` for shell commands. Quote the
+      variable in the command. Do not interpolate a dispatch input inside `run`.
+- [ ] Disable persistent cache reads and writes in the cold audit. This includes
+      every reviewed pnpm, Playwright, Foundry, and Turbo restore, save, and post
+      hook. GitHub exposes cache-service authority outside `permissions`; the
+      trusted same-repository candidate remains inside the accepted threat model.
+- [ ] Skip Codecov, UI failure artifacts, and timeline actions in audit mode.
+- [ ] Use the separate audit aggregate with no `allowed-skips`. Keep the normal
+      pull request aggregate and its reviewed conditional skips unchanged.
+- [ ] Do not add a schedule until the eligible cold proof passes. Stop after a
+      run exceeds 45 runner-minutes. Do not exceed 450 cumulative runner-minutes.
+
+Run `pnpm ci:contract:test` after any change to these facts. Do not dispatch the
+audit from an implementation pull request. The first eligible cold proof runs
+after the workflow reaches protected `main`.
 
 ## 2. Branch enforcement on `workflow_dispatch`
 
@@ -74,7 +141,7 @@ Canonical good example: the `deploy` job guard in
 A `uses: org/action@v4` line trusts whoever owns that tag to never re-point it at malicious code. Tags are mutable; commit SHAs are not.
 
 - [ ] All third-party actions in workflows and composite actions MUST be pinned to a full commit SHA with the tag in a comment: `uses: org/action@<40-char-sha> # v6.0.2`
-- [ ] Local relative actions such as `uses: ./.github/actions/pnpm-install` are allowed; the scanner follows their `action.yml` / `action.yaml` targets and checks nested third-party `uses:` entries too.
+- [ ] Self-repository actions such as `uses: $/.github/actions/pnpm-install` and local relative actions such as `uses: ./.github/actions/pnpm-install` are allowed. Use `$` when the action must come from the running protected commit. Use `./` when the checked-out source intentionally owns the action. The scanner follows either target and checks nested third-party `uses:` entries too.
 - [ ] Run `node scripts/workflows/check-github-action-pins.mjs` locally when editing `.github/workflows/**`, `.github/actions/**`, or `.trunk/setup-ci/**`; the required `Code Quality` workflow runs the same check on every PR.
 
 Canonical good example: `.github/workflows/metrics-bridge.yml` — every external
