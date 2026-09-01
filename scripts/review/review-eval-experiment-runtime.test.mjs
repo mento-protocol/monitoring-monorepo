@@ -214,6 +214,7 @@ function baseOptions(harness, overrides = {}) {
     fixtureCacheDir: harness.fixtureCacheDir,
     prepareFixture: harness.prepareFixture,
     reset: async () => true,
+    scorerDigestNow: () => harness.plan.inputs.scorer_digest,
     judgeExec: judgeExec(),
     contestantExec: async () =>
       JSON.stringify({ is_error: false, result: "file.js:1 has a defect" }),
@@ -432,6 +433,61 @@ test("successful empty output is cached and malformed output is not", async (t) 
   );
 });
 
+test("runtime rejects scorer drift after a contestant finishes", async (t) => {
+  const harness = makeHarness({ laneCount: 1 });
+  t.after(harness.cleanup);
+  let currentDigest = harness.plan.inputs.scorer_digest;
+  await assert.rejects(
+    runExperimentRuntimeStage(
+      baseOptions(harness, {
+        scorerDigestNow: () => currentDigest,
+        contestantExec: async () => {
+          currentDigest = digest("x");
+          return JSON.stringify({
+            is_error: false,
+            result: "file.js:1 has a defect",
+          });
+        },
+        judgeExec: async () => {
+          throw new Error("drifted scorer reached a judge");
+        },
+      }),
+    ),
+    /re-plan before scoring/,
+  );
+  const scoreDir = path.join(harness.artifactRoot, "cache", "score");
+  assert.equal(existsSync(scoreDir) ? readdirSync(scoreDir).length : 0, 0);
+});
+
+test("runtime rejects scorer drift during judging before publication", async (t) => {
+  const harness = makeHarness({ laneCount: 1 });
+  t.after(harness.cleanup);
+  let currentDigest = harness.plan.inputs.scorer_digest;
+  let judgeCalls = 0;
+  await assert.rejects(
+    runExperimentRuntimeStage(
+      baseOptions(harness, {
+        scorerDigestNow: () => currentDigest,
+        judgeExec: async ({ prompt }) => {
+          judgeCalls += 1;
+          if (prompt.startsWith("Below is a code review.")) {
+            return JSON.stringify(["file.js:1 has a defect"]);
+          }
+          if (prompt.startsWith("You are matching a code review")) {
+            currentDigest = digest("x");
+            return JSON.stringify({ matches: [1], reasoning: {} });
+          }
+          throw new Error("unexpected judge prompt");
+        },
+      }),
+    ),
+    /re-plan before scoring/,
+  );
+  assert.equal(judgeCalls, 2);
+  const scoreDir = path.join(harness.artifactRoot, "cache", "score");
+  assert.equal(existsSync(scoreDir) ? readdirSync(scoreDir).length : 0, 0);
+});
+
 test("novel scoring follows base scoring and reuses its cache", async (t) => {
   const harness = makeHarness({ laneCount: 1 });
   t.after(harness.cleanup);
@@ -456,6 +512,31 @@ test("novel scoring follows base scoring and reuses its cache", async (t) => {
       cell_id: `${holdoutLane.lane_id}-${record.treatment}`,
     })),
   ];
+  let currentNovelDigest = harness.plan.inputs.scorer_digest;
+  await assert.rejects(
+    enrichExperimentNovelty({
+      plan: harness.plan,
+      records: base.records,
+      contract: harness.contract,
+      artifactRoot: harness.artifactRoot,
+      repoRoot: harness.repoRoot,
+      fixtureCacheDir: harness.fixtureCacheDir,
+      prepareFixture: harness.prepareFixture,
+      reset: async () => true,
+      scorerDigestNow: () => currentNovelDigest,
+      judgeExec: async () => {
+        currentNovelDigest = digest("x");
+        return JSON.stringify({
+          verdicts: {
+            1: { class: "wrong", why: "the fixture disproves the claim" },
+          },
+        });
+      },
+    }),
+    /re-plan before scoring/,
+  );
+  const novelDir = path.join(harness.artifactRoot, "cache", "novel");
+  assert.equal(existsSync(novelDir) ? readdirSync(novelDir).length : 0, 0);
   let prepareCalls = 0;
   const enriched = await enrichExperimentNovelty({
     plan: harness.plan,
@@ -469,6 +550,7 @@ test("novel scoring follows base scoring and reuses its cache", async (t) => {
       return harness.prepareFixture(options);
     },
     reset: async () => true,
+    scorerDigestNow: () => harness.plan.inputs.scorer_digest,
     judgeExec: judgeExec(events),
   });
   assert.deepEqual(events, [
@@ -493,6 +575,7 @@ test("novel scoring follows base scoring and reuses its cache", async (t) => {
     fixtureCacheDir: harness.fixtureCacheDir,
     prepareFixture: harness.prepareFixture,
     reset: async () => true,
+    scorerDigestNow: () => harness.plan.inputs.scorer_digest,
     judgeExec: async () => {
       throw new Error("cached novel judge ran again");
     },

@@ -1,13 +1,16 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   assertOutsideRepository,
+  isExperimentEntryPoint,
   parseExperimentArgs,
 } from "./review-eval-experiment.mjs";
 import { canonicalPath } from "./review-eval-fixtures.mjs";
@@ -23,6 +26,61 @@ test("experiment artifacts cannot enter the repository", (context) => {
   assert.equal(
     assertOutsideRepository(`${root}-outside`, root, "artifacts"),
     canonicalPath(`${root}-outside`),
+  );
+  const sourceRoot = fileURLToPath(new URL("../../", import.meta.url));
+  assert.throws(
+    () =>
+      assertOutsideRepository(
+        path.join(sourceRoot, ".experiment-cache"),
+        root,
+        "artifacts",
+      ),
+    /must be outside/,
+  );
+  const linkRoot = mkdtempSync(
+    path.join(os.tmpdir(), "review-experiment-source-link-"),
+  );
+  context.after(() => rmSync(linkRoot, { recursive: true, force: true }));
+  const sourceLink = path.join(linkRoot, "source");
+  symlinkSync(sourceRoot, sourceLink);
+  assert.throws(
+    () =>
+      assertOutsideRepository(
+        path.join(sourceLink, ".experiment-cache"),
+        root,
+        "fixture cache",
+      ),
+    /must be outside/,
+  );
+});
+
+test("experiment entry detection uses an escaped file URL", () => {
+  const entryPath = path.join(os.tmpdir(), "review eval #entry.mjs");
+  assert.equal(
+    isExperimentEntryPoint(entryPath, pathToFileURL(entryPath).href),
+    true,
+  );
+  assert.equal(isExperimentEntryPoint(entryPath, `file://${entryPath}`), false);
+});
+
+test("experiment CLI runs from an entry path with escaped characters", (context) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "review eval #entry-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const linkedReviewDir = path.join(root, "review");
+  symlinkSync(fileURLToPath(new URL(".", import.meta.url)), linkedReviewDir);
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--preserve-symlinks-main",
+      path.join(linkedReviewDir, "review-eval-experiment.mjs"),
+      "--help",
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(
+    result.stdout,
+    /Usage: node scripts\/review\/review-eval-experiment\.mjs/,
   );
 });
 

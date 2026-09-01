@@ -8,6 +8,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { pathToFileURL } from "node:url";
 import { parseArgs as parseNodeArgs } from "node:util";
 
 import {
@@ -16,7 +17,7 @@ import {
   loadContract,
 } from "./review-eval-fixtures.mjs";
 import { DEFAULT_SKILL_DIR, expandHome } from "./review-eval-run-plan.mjs";
-import { scrubbedEnv } from "./review-eval-run-execution.mjs";
+import { scrubbedEnv, sourceCheckouts } from "./review-eval-run-execution.mjs";
 import {
   buildExperimentPlan,
   digestObject,
@@ -181,17 +182,27 @@ function parseCandidate(value) {
 
 export function assertOutsideRepository(target, repoRoot, label) {
   const resolved = canonicalPath(path.resolve(target));
-  const repository = canonicalPath(path.resolve(repoRoot));
-  const relative = path.relative(repository, resolved);
-  if (
-    relative === "" ||
-    (!relative.startsWith(`..${path.sep}`) &&
-      relative !== ".." &&
-      !path.isAbsolute(relative))
-  ) {
-    throw new Error(`${label} ${resolved} must be outside ${repository}`);
+  const protectedRoots = new Set(
+    sourceCheckouts({ env: {}, roots: [repoRoot] }).map((root) =>
+      canonicalPath(path.resolve(root)),
+    ),
+  );
+  for (const repository of protectedRoots) {
+    const relative = path.relative(repository, resolved);
+    if (
+      relative === "" ||
+      (!relative.startsWith(`..${path.sep}`) &&
+        relative !== ".." &&
+        !path.isAbsolute(relative))
+    ) {
+      throw new Error(`${label} ${resolved} must be outside ${repository}`);
+    }
   }
   return resolved;
+}
+
+export function isExperimentEntryPoint(entryPath, moduleUrl = import.meta.url) {
+  return Boolean(entryPath) && moduleUrl === pathToFileURL(entryPath).href;
 }
 
 function providerVersion(name, env) {
@@ -461,7 +472,7 @@ export async function main(argv = process.argv.slice(2)) {
   output(value, options.json);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isExperimentEntryPoint(process.argv[1])) {
   main().catch((error) => {
     process.stderr.write(`${error.message}\n`);
     process.exitCode = 1;

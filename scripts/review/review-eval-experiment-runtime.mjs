@@ -15,6 +15,7 @@ import {
   classifyNovel,
   extractClaims,
   matchClaims,
+  scorerDigest,
 } from "./review-eval-score.mjs";
 import {
   MAX_FIXTURE_LANES,
@@ -50,6 +51,17 @@ import {
 } from "./review-eval-experiment-cache.mjs";
 
 export const parseContestantEnvelope = parseExperimentContestantEnvelope;
+
+export function assertExperimentScorer(plan, scorerDigestNow = scorerDigest) {
+  const current = scorerDigestNow();
+  if (current !== plan.inputs.scorer_digest) {
+    throw new Error(
+      `experiment plan uses scorer ${plan.inputs.scorer_digest.slice(0, 8)}; ` +
+        `the current scorer is ${current.slice(0, 8)}; re-plan before scoring`,
+    );
+  }
+  return current;
+}
 
 async function laneSource({
   plan,
@@ -120,6 +132,7 @@ export function createExperimentArmExecutor({
   loadTruth = defaultExperimentTruth,
   readCache = readExperimentCache,
   writeCache = writeExperimentCache,
+  scorerDigestNow = scorerDigest,
   env = scrubbedEnv({ roots: [repoRoot] }),
 }) {
   const judge = (request) => judgeExec({ ...request, env });
@@ -216,6 +229,7 @@ export function createExperimentArmExecutor({
           lane,
           label: `${experimentCellId(lane, treatment)}-extract`,
         });
+        assertExperimentScorer(plan, scorerDigestNow);
         claims = await extractClaims({
           transcript: raw.output,
           exec: judge,
@@ -227,6 +241,7 @@ export function createExperimentArmExecutor({
           lane,
           label: `${experimentCellId(lane, treatment)}-match`,
         });
+        assertExperimentScorer(plan, scorerDigestNow);
         matches = await matchClaims({
           claims,
           truthFindings: truth.findings,
@@ -253,6 +268,7 @@ export function createExperimentArmExecutor({
         excludeLogins: excluded,
         forbiddenShas: fixture.forbidden ?? [],
       });
+      assertExperimentScorer(plan, scorerDigestNow);
       scoreEntry = writeCache({
         artifactRoot,
         kind: "score",
@@ -383,6 +399,7 @@ export async function enrichExperimentNovelty({
   loadTruth = defaultExperimentTruth,
   readCache = readExperimentCache,
   writeCache = writeExperimentCache,
+  scorerDigestNow = scorerDigest,
   env = scrubbedEnv({ roots: [repoRoot] }),
 }) {
   assertExperimentConcurrency(concurrency);
@@ -454,6 +471,7 @@ export async function enrichExperimentNovelty({
             lane: recordLane,
             label: `${record.cell_id}-novel`,
           });
+          assertExperimentScorer(plan, scorerDigestNow);
           const verdict = await classifyNovel({
             claims: score.claims,
             matchedIds: score.matched_ids,
@@ -462,6 +480,7 @@ export async function enrichExperimentNovelty({
             fixturePath: fixture.path,
             ...experimentModel(plan, "judge"),
           });
+          assertExperimentScorer(plan, scorerDigestNow);
           entry = writeCache({
             artifactRoot,
             kind: "novel",
