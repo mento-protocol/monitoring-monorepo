@@ -961,15 +961,16 @@ test("unqualified non-canonical reliance is counted and fails", () => {
 });
 
 test("a qualified historical source requires loaded canonical verification", () => {
-  const result = validResult();
+  const contents = fixtureCorpus(context.suite);
+  const result = fixtureResult(contents);
   const answer = result.answers.find(
     (candidate) => candidate.question_id === "commands-pr-readiness",
   );
   const currentAuthority = "docs/notes/pr-ready-state.md";
-  answer.loaded_sources.push(source(currentAuthority));
+  answer.loaded_sources.push(fixtureSource(contents, currentAuthority));
   answer.authority_qualifications.push(qualification(currentAuthority));
   const historical = "docs/PLAN-ai-review-process.md";
-  answer.loaded_sources.push(source(historical));
+  answer.loaded_sources.push(fixtureSource(contents, historical));
   answer.authority_qualifications.push(
     qualification(historical, {
       qualification:
@@ -983,6 +984,7 @@ test("a qualified historical source requires loaded canonical verification", () 
     result,
     repoRoot,
     questionId: "commands-pr-readiness",
+    readSource: fixtureReader(contents),
   });
   assert.equal(
     scored.report.canonical_source_compliance.unqualified_noncanonical_sources,
