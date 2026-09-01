@@ -311,9 +311,12 @@ for (const operation of ["modify", "delete", "rename", "symlink"]) {
         git(root, "mv", path, "moved-action.yml");
       else {
         git(root, "rm", path);
-        mkdirSync(dirname(join(root, path)), { recursive: true });
-        execFileSync("ln", ["-s", "../../../README.md", path], { cwd: root });
-        git(root, "add", path);
+        const actionRoot = dirname(path);
+        mkdirSync(dirname(join(root, actionRoot)), { recursive: true });
+        execFileSync("ln", ["-s", "../../README.md", actionRoot], {
+          cwd: root,
+        });
+        git(root, "add", actionRoot);
       }
       git(
         root,
