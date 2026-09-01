@@ -1152,6 +1152,10 @@ const hostedGateEntryPoints = [
   "docs/notes/quick-commands.md",
   "scripts/docs/docs-garden-issue-helpers.mjs",
 ];
+const sweepWorkerEntryPoints = [
+  ".agents/skills/backlog-sweep/SKILL.md",
+  ".claude/skills/backlog-sweep/SKILL.md",
+];
 const activeTrunkLines = trunk
   .split("\n")
   .filter((line) => !line.trimStart().startsWith("#"))
@@ -1189,6 +1193,14 @@ for (const entryPointPath of hostedGateEntryPoints) {
     entryPoint,
     /\.\/scripts\/agent-quality-gate\.sh --run --parallel 3 --base origin\/main/u,
     `${entryPointPath} must use the exact hosted pre-push warm command`,
+  );
+}
+for (const entryPointPath of sweepWorkerEntryPoints) {
+  const entryPoint = fs.readFileSync(entryPointPath, "utf8");
+  assert.match(
+    entryPoint,
+    /After `\.\/scripts\/setup\.sh` in each fresh or resumed\n  clone, set `agent\.qualityGate\.cloudPrePushRequireFresh=true` when that boolean\n  is hosted\. Unset the key when it is local\./u,
+    `${entryPointPath} must propagate the setup type into every worker clone`,
   );
 }
 const freshnessSkipIndex = gate.indexOf(

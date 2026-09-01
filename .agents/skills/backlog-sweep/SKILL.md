@@ -78,11 +78,12 @@ The coordinator adopts the legacy `run.lock` while scheduled or recovery work
 exists, which makes `run.lock/owner` name a live pid for as long as anyone on
 the machine is gating — hours, routinely, during ordinary parallel work. A
 sweep that read that record as a busy signal would refuse to start in the
-normal case. Workers wait with `--lock-wait 3600`, which covers scheduler
-admission, a command lease, a coalesced result, and an older legacy holder.
-Never pass `--no-lock` and never delete the lock directory: the gate owns its
-own reclaim rules, and a record that looks stale from outside is routinely a
-live holder inside a long browser suite.
+normal case. Local workers wait with `--lock-wait 3600`. Hosted workers use the
+hook's exact 1,800-second default. Both cover scheduler admission, a command
+lease, a coalesced result, and an older legacy holder. Never pass `--no-lock`
+and never delete the lock directory: the gate owns its own reclaim rules, and a
+record that looks stale from outside is routinely a live holder inside a long
+browser suite.
 
 **State the usage reality before starting.** One shipped PR costs roughly 3% of
 the weekly usage window, and every push to it triggers another round of bot
@@ -424,6 +425,13 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   free — the script owns codegen and the browser dependencies and skips its own
   work when the inputs are unchanged — which is why this is a blanket rule
   rather than a condition to evaluate.
+
+  Before spawning workers, read the orchestrator checkout's
+  `agent.qualityGate.cloudPrePushRequireFresh` value and pass one hosted/local
+  boolean to every worker. After `./scripts/setup.sh` in each fresh or resumed
+  clone, set `agent.qualityGate.cloudPrePushRequireFresh=true` when that boolean
+  is hosted. Unset the key when it is local. A clone does not inherit local git
+  config, so never infer its setup type from the clone before this propagation.
 
   Branch as **the exact name the orchestrator passed to `issue:claim
 --branch`**, from `origin/main`. That name is already in the Project `Branch`
