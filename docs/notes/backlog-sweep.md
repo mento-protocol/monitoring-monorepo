@@ -3,7 +3,7 @@ title: Backlog Sweep
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-27
+last_verified: 2026-08-30
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -44,31 +44,67 @@ then holds about 60 seconds — a cheap abort for an operator still watching —
 on a wait that ends by itself. It never blocks on an answer, which would strand
 every batch started by an operator who is no longer there.
 
-Claims are sequential, so eligibility is re-read against each issue immediately
-before it is claimed rather than trusted from the ranking: `issue:claim` checks
-only that the issue is open and queue-claimable, and `risk:low`, `Blocked`, a
-new dependency, or an authority cap can all have changed in between. Each claim
-also passes `--branch` with the branch the worker will push, and the worker is
-briefed with that exact name — without it the helper
-falls back to the orchestrator's own branch and files that in the Project
-`Branch` field and the claim comment, pointing every reader at a checkout that
-owns none of the work.
+Claims are sequential. Immediately before each claim, the orchestrator repeats
+the live issue read and checks the body for a new external dependency. It skips
+the claim when that body-only blocker appears. Any replacement follows the
+print-and-wait rule below. It computes `--body-sha256` from the body in that same
+JSON snapshot. Each claim then uses `--sweep-eligible`, so the helper
+revalidates the open queue state, risk label, package label, native blockers,
+and the selected Project item's ID-bound `Blocked` status around its label and
+ownership transition. It rejects every
+missing, changed, or `Blocked` Status it observes. It never writes Status.
+Project Status is human-owned, so a human change after the final observation
+remains visible and linearizes after the claim. The receipt still owns the fit
+cap. The helper does not classify free-form body text. It verifies the expected
+body digest during locked pre-transition and post-transition reads. Each claim
+passes a stable `--claim-id` and required `--branch` with the branch the worker
+will push. The worker is briefed with that exact name. The helper rejects a
+sweep claim before it takes the mutex when the branch or body digest is absent.
+A direct GitHub body edit does not acquire the mutex. An edit after the final
+check remains visible because the helper never writes the body.
+
+The persistent per-issue mutex serializes claim, review, release, sync, and
+backfill helper calls. All repo-owned writes to Claim ID, Agent, Branch, Claimed
+At, and PR use this mutex. Direct external writes stay outside it. Project V2
+cannot make a field write conditional. A direct external same-field write in the
+read-write gap can be overwritten without detection. Stop all helpers before a
+manual owner-field repair. The helper re-reads external state and compensates a
+failed change when it can prove a safe endpoint. It can leave a stale `LOCK` for
+operator recovery when the result is uncertain. Every helper preserves the
+human-owned Project Status. The operator must first prove that the original
+helper cannot resume. See
+[`agent-issue-workflow.md`](agent-issue-workflow.md#workboard-commands).
 
 A claim can lose a race to another session between ranking and claiming, so
 each claim result is read before its worker is briefed. Only a successful claim
 gets a worker; a refused one is recorded in the report, and an exhausted receipt
 finishes with a smaller batch. A claim the sweep then cannot staff — a spawn
 that fails on a runtime's concurrency limit or any other error — is released
-immediately rather than left parked in `agent-active` with no worker. A claim
-command that exits nonzero is reconciled the same way rather than assumed not to
-have happened: the helper transitions the issue before it verifies ownership and
-posts its comment, so a later failure leaves it `agent-active` anyway. Reconcile
-from what is visible — the state labels and whether another session's claim
-comment is present — because `issue:claim` never prints the `Claim ID` it
-generates, so there is no expected value to compare. A
-replacement drawn from the next eligible receipt entry is printed before it is
-claimed, like the original batch — the printed batch is the record of what the
-sweep worked on, and an unannounced substitute makes that record wrong.
+immediately rather than left parked in `agent-active` with no worker. An
+ordinary claim command that exits nonzero is retried once with the same Claim
+ID. The helper uses that token to recover its own valid partial claim and keeps
+any partial failure out of `agent-ready`. An exact active Project Claim ID can
+be retried with the same token and exact non-empty ownership values. The helper
+writes only ownership fields that its latest snapshot reports as missing. A
+Branch move requires the explicit review rebind. An exact `needs-grooming`
+quarantine with a durable Branch can be cleared with
+`issue:release --needs-grooming`. When recovery observes empty, foreign, or
+branchless Project ownership, it does not overwrite those fields. The owned
+mutex instead moves a still-ready failed item to `needs-grooming`; report that
+quarantine for operator inspection. A newer non-ready label state is preserved.
+
+Retry once only for an ordinary nonzero claim result. Reuse the same Claim ID
+and Branch. When comments are enabled, the retry verifies or creates the
+matching trusted claim comment before it reports success. Never retry a result
+that reports `ISSUE_MUTATION_LOCK_STALE`, an
+unknown mutex outcome, a stale `LOCK`, or a candidate `LOCK` or `UNLOCK`. The
+operator must first prove that the original helper cannot resume. The operator
+must then read the current ref and board state and complete the ADR 0082
+recovery. After a body-only pre-claim skip or a refused claim, a replacement
+drawn from the next eligible receipt entry is printed before it is claimed and
+gets the same abort window as the original batch. The printed batch is the
+record of what the sweep worked on, and an unannounced substitute makes that
+record wrong.
 
 Stopping at READY is the design, and it is the same reason stage 1 stopped at
 the recommendation. The operator gets finished PRs with their evidence and
@@ -172,10 +208,9 @@ An issue enters a batch only when all of the following hold:
 - **Not blocked by any of three records** — not projected to `Blocked` on the
   workboard, no non-empty `blockedBy` relationship, and not waiting on an
   external dependency named in its body. None of the three implies another.
-- **Carries a `pkg:*` label** — an issue with no package area satisfies the
-  independence test vacuously and can then collide with a sibling in the same
-  package. Nothing else catches it: the Agent Task form starts at
-  `needs-grooming`, and `issue:claim` checks queue state, not routing labels.
+- **Carries exactly one `pkg:*` label** — no package area makes the independence
+  test vacuous, while several areas make ownership ambiguous. The
+  `--sweep-eligible` claim path enforces the same rule.
 - **Mutually independent** — no two issues in one batch share a `pkg:*` label.
   That label is the repo's existing ownership area
   ([`agent-issue-workflow.md`](agent-issue-workflow.md)), so "same subsystem" is
@@ -283,22 +318,28 @@ while it runs:
   qualify.
 - **Never bypass hooks.** No `--no-verify`, no hook-skipping environment
   variable, no push that dodges the pre-push gate.
-- **Release a bad pick honestly, while it is still `agent-active` and has no
-  open PR.** Both halves are checked: a worker can open its PR and stall before
-  `issue:review` runs, leaving the label at `agent-active` while a PR is
-  already up for review, so a label-only test would release it and hand the
-  next sweep duplicate work. A
-  misgroomed issue, or a worker that stalls before opening a PR, runs
-  `pnpm issue:release --issue <n>` — `--needs-grooming` when clarity is what is
-  missing — and comments what it learned: what it tried, where it stopped, what
-  a human must decide. A silent release sends the next run into the same wall.
-  Once `issue:review` has moved the issue to `in-pr`, releasing it returns it to
-  the ready queue with the PR still open, and a later sweep duplicates work
-  already up for review — `rank-backlog` does not read a `Refs` cross-reference
-  as ownership, and `issue:release` accepts `in-pr` without objecting. The
-  lifecycle in [`agent-issue-workflow.md`](agent-issue-workflow.md) releases
-  after an unmerged PR closes, so a stall with an open PR keeps `in-pr` and
-  hands the PR to the operator instead. Deferred follow-ups get GitHub issues,
+- **Release a bad pick honestly.** A misgroomed issue, or a worker that stalls
+  before opening a PR, runs
+  `pnpm issue:release --issue <n> --claim-id <claim-id>` — add
+  `--needs-grooming` when clarity is missing — and comments what it learned:
+  what it tried, where it stopped, and what a human must decide. The helper
+  accepts only the matching owner token on `agent-active`. It refuses `in-pr`
+  and repeats the claimed-branch PR proof before and after each write and after
+  its final state reads. A PR found before the final proof normally restores
+  the prior active state and exact ownership snapshot. If a `--needs-grooming`
+  release already reached the exact grooming state with empty ownership,
+  recovery preserves that completed non-ready endpoint and exits nonzero. A PR
+  can still open after the final proof because GitHub exposes separate APIs. A
+  silent release sends the next run into the same
+  wall. A stall with an open PR keeps `in-pr` and hands the PR to the operator.
+  After the operator closes it unmerged, run
+  `pnpm issue:release --issue <n> --claim-id <claim-id> --closed-unmerged-pr`.
+  This path proves the stored closed PR, repository, and branch and refuses an
+  open replacement PR. If the operator instead merges a partial-stage PR and
+  the issue remains open, update the remaining scope and run
+  `pnpm issue:release --issue <n> --claim-id <claim-id> --merged-pr --needs-grooming`.
+  This separate post-sweep path proves the stored merged PR and never restores
+  `agent-ready`. Deferred follow-ups get GitHub issues,
   linked from the PR's `## Deferrals` section; an evidence-backed won't-fix is
   not a deferral.
 

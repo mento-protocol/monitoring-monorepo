@@ -3,7 +3,7 @@ title: Review Skill Evaluation
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-29
+last_verified: 2026-08-30
 doc_type: runbook
 scope: ci/process
 review_interval_days: 90
@@ -163,8 +163,8 @@ spending anything.
 ```bash
 pnpm review:eval -- --plan --kind canary --json   # 3 cells, about $15, ~25 min
 pnpm review:eval -- --plan --kind full --json     # 24 cells, about $88, ~2 h
-pnpm review:eval:run -- --kind canary             # the monthly smoke test
-pnpm review:eval:run -- --kind full               # the quarterly score of record
+pnpm review:eval:run --kind canary                # the monthly smoke test
+pnpm review:eval:run --kind full                  # the quarterly score of record
 ```
 
 `run-eval.sh` adds a detached worktree of `origin/main` and reads the contract,
@@ -250,22 +250,27 @@ Run the installed skill first, **publish its row before starting the
 candidate**, then name that row as the candidate's baseline with `--against`:
 
 ```bash
-pnpm review:eval:run -- --kind full --pr    # publish the installed row first
-git -C . checkout main                      # the candidate run branches from here
-pnpm review:eval:run -- --kind full --skill-ref ~/work/review-candidate \
-  --against "${TMPDIR:-/tmp}/review-eval-installed-row.json" --pr
+pnpm review:eval:run --kind full
+# Prepare and publish this row through the manual publication flow below.
+cp "<installed-detail-dir>/row.json" \
+  "${TMPDIR:-/tmp}/review-eval-installed-row.json"
+git -C . switch main                        # the candidate run branches from here
+pnpm review:eval:run --kind full --skill-ref ~/work/review-candidate \
+  --against "${TMPDIR:-/tmp}/review-eval-installed-row.json"
+# Prepare and publish the candidate row through the same flow.
 ```
 
 The baseline is that file, not the installed row's `executed_at`. Publishing
-commits the row and its detail directory on the new `eval/review-skill-*`
-branch and leaves the checkout there; `git checkout main` then deletes both,
-because neither exists on local main. An `--against` naming the `executed_at`
-would resolve against a ledger that no longer holds the row and the candidate's
-pre-flight would abort — the right failure, and still a wasted installed run.
-So a successful `--pr` on an installed run keeps one copy of `row.json` outside
-the checkout, where no branch switch reaches it, and logs the exact `--against`
-argument. A row carries every bit the comparison reads, so no detail directory
-is needed for the baseline.
+commits the row and its detail directory on the ledger PR branch and leaves the
+checkout there; `git switch main` then deletes both, because neither exists on
+local main. An `--against` naming the `executed_at` would resolve against a
+ledger that no longer holds the row and the candidate's pre-flight would abort
+— the right failure, and still a wasted installed run.
+Copy the installed `row.json` outside the checkout before the branch switch.
+The manual publication helper does not create this copy. The external file
+survives the switch and supplies the exact `--against` argument. A row carries
+every bit the comparison reads, so no detail directory is needed for the
+baseline.
 
 Claude auto-review skips that branch only when the diff contains the ledger and
 files under `docs/evals/review-skill-runs/`. Any other changed path keeps normal
@@ -295,18 +300,54 @@ ledger's stored anchor. A candidate also stamps `skill_ref` and `dirty: true`
 into the ledger row. Never compare a candidate against a ledger row from three
 months ago: that comparison silently includes an unknown amount of model drift.
 
-The run ends by printing the branch, commit and `gh pr create` commands for the
-ledger PR. Pass `--pr` to execute them instead. There is no auto-merge; a human
-reads the forty-line report and approves.
+The current-key runner still prints low-level recovery commands and accepts
+`--pr`. Do not use either publication path. They use the generated report as
+the PR body and leave the absolute checkout path in `plan.json.plan_dir`.
+Changing those hash-covered orchestrator sources would start a new comparison
+lineage. Remove or reroute those paths only as part of a planned re-key.
+
+Required appended-row revalidation rejects a plan unless `plan_dir` is the same
+repo-relative path as the row's `detail_dir`. The PR-description check also
+rejects the raw generated report. These checks make the old publication path
+fail closed before merge while the current comparison key remains valid.
+
+Prepare the local artifacts first. Use the detail directory that the runner
+prints. The helper verifies that the selected directory,
+`plan.json.detail_dir`, and `plan.json.plan_dir` resolve to the same directory
+inside the repository. It then writes a repo-relative `plan_dir` and renders a
+PR body that contains the complete generated report under `## Details`.
+
+```bash
+DETAIL_DIR="docs/evals/review-skill-runs/<run-directory>"
+PR_BODY="${TMPDIR:-/tmp}/review-eval-pr-body.md"
+node scripts/review/review-eval-publication.mjs \
+  --detail-dir "$DETAIL_DIR" >"$PR_BODY"
+```
+
+For a failed run, add `--report-file failure.md`. The helper never runs a
+model, appends a row, stages or commits files, pushes, opens a pull request, or
+merges. After it succeeds, use the normal `ship` workflow. Stage only
+`docs/evals/review-skill-ledger.jsonl` and the selected detail directory. Give
+the workflow `$PR_BODY` as the PR description. The scoped `.gitignore` rule
+keeps each run's `cells/` resume cache, raw model transcripts, and tool output
+out of Git and autoreview bundles. Scored `result-*.json` evidence remains in
+the detail directory above `cells/` and stays eligible for the commit. There is
+no auto-merge. A human reads the report and approves.
 
 A run that fails publishes the same way. Its `status: failed` row is already in
 the checkout's ledger, and a run that leaves it there uncommitted wedges the
 schedule: the next run refuses to start against a ledger with uncommitted
 changes, and nothing reaches the freshness workflow. A scored row wedges it the
-same way, and the installed job runs without `--pr`, so both endings follow one
-rule: with `--pr` the row gets its own PR and the run exits zero; without it the
-run prints the publish commands and exits non-zero, so launchd records that a
-human still has to finish the job.
+same way. The installed job uses the non-publishing mode, so both endings follow
+one rule: the run prints recovery commands and exits non-zero until an operator
+finishes the helper and `ship` workflow. launchd therefore records that a human
+still has to finish the job.
+
+The freshness workflow also routes a new staleness issue through
+`review-eval-freshness-publication.mjs`. The wrapper keeps the hash-covered
+issue planner unchanged, replaces its legacy PR instruction at the GitHub
+boundary, and fails closed if that template drifts. The issue requires
+`review-eval-publication.mjs` and `$PR_BODY`; it never starts a model.
 
 ### Install the scheduler
 
@@ -550,11 +591,12 @@ anchor because its machine clock was slow.
    so a checkout without the tags reports every one of them as missing and
    materialization falls back to `refs/pull/<n>/head` and records
    `tag_pinned: false`. CI fetches tags for exactly this reason.
-3. Run `pnpm review:eval:run -- --kind full` from a clean checkout. Budget
+3. Run `pnpm review:eval:run --kind full` from a clean checkout. Budget
    about $88 and two hours.
-4. Open the ledger PR. Its body is the generated report. State in the PR
-   description that this row is the baseline of record and name the
-   `comparability_key` it anchors.
+4. Prepare the artifacts with `review-eval-publication.mjs`, then use the
+   `ship` workflow to open the ledger PR. Its body contains the complete
+   generated report and the execution-authenticity limit. State that this row
+   is the baseline of record and name the `comparability_key` it anchors.
 5. A later baseline change is a PROMOTE row and needs its own reviewed PR
    saying what changed and why. A fixture refresh never rewrites a baseline.
 
@@ -629,6 +671,10 @@ path must exist on `main` before the first run after the moving commit.
 | `scripts/review/review-eval-plan-evidence.mjs`              | plan, result, and calibration evidence checks            |
 | `scripts/review/review-eval-run-evidence.mjs`               | matrix completeness and evidence reuse checks            |
 | `scripts/review/review-eval-appended.mjs`                   | appended-row evidence revalidation                       |
+| `scripts/review/review-eval-publication.mjs`                | current-key-safe local publication preparation           |
+| `scripts/review/review-eval-publication.test.mjs`           | publication confinement and PR-body shape tests          |
+| `scripts/review/review-eval-freshness-publication.mjs`      | publication-safe staleness issue synchronization         |
+| `scripts/review/review-eval-freshness-publication.test.mjs` | staleness issue boundary tests                           |
 | `scripts/review/review-eval-split-equivalence-fixtures.mjs` | generated Node and shell equivalence harnesses           |
 | `scripts/review/testdata/review-eval-split-equivalence/`    | frozen split inputs and observable-behavior snapshot     |
 | `scripts/review/review-eval-split-equivalence.test.mjs`     | frozen pre-split entry-point equivalence                 |
@@ -639,3 +685,4 @@ path must exist on `main` before the first run after the moving commit.
 | `scripts/review/build-fixture.sh`                           | leak-proof fixture materialization                       |
 | `scripts/review/launchd/`                                   | the monthly scheduler                                    |
 | `.github/workflows/review-eval-freshness.yml`               | the LLM-free contract and freshness guard                |
+| `.gitignore`                                                | local-only raw `cells/` transcript boundary              |

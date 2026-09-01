@@ -1,13 +1,32 @@
 {
   "schemaVersion": 1,
   "baseSha": "ccef910fa6fc267751681176ffdeef01daf90b40",
-  "baseline": "Current protected-main M2 baseline.",
+  "baseline": "Frozen M2 additive complexity receipt for #2124.",
+  "scope": "M2 and corrective PR #2161 only.",
+  "derivation": {
+    "method": "Diff the final PR #2161 tree from baseSha and exclude the receipt plus the seven paths changed only by intervening PRs #2145 and #2159.",
+    "m2MergeSha": "c868483e44a006e7af338649705d9453cf979015",
+    "correctionBaseSha": "37ac4b7bee6b7043d1e3b42fe5a86358f51481e8",
+    "excludedCommits": [
+      "4b48c3b0276a1434afc5abbc64aba15162546d66",
+      "37ac4b7bee6b7043d1e3b42fe5a86358f51481e8"
+    ],
+    "excludedPaths": [
+      "docs/evals/review-skill-ledger.jsonl",
+      "docs/evals/review-skill-runs/2026-08-29-ec451b1f-full-528ae414/failure.md",
+      "docs/evals/review-skill-runs/2026-08-29-ec451b1f-full-528ae414/plan.json",
+      "docs/evals/review-skill-runs/2026-08-29-ec451b1f-full-528ae414/row.json",
+      "docs/evals/review-skill-runs/2026-08-30-ec451b1f-full-528ae414/failure.md",
+      "docs/evals/review-skill-runs/2026-08-30-ec451b1f-full-528ae414/plan.json",
+      "docs/evals/review-skill-runs/2026-08-30-ec451b1f-full-528ae414/row.json"
+    ]
+  },
   "files": [
     {
       "path": ".github/actions/pnpm-install/action.yml",
       "category": "action",
-      "additions": 30,
-      "deletions": 2
+      "additions": 45,
+      "deletions": 3
     },
     {
       "path": ".github/workflows/aegis-terraform.yml",
@@ -30,8 +49,8 @@
     {
       "path": ".github/workflows/ci.yml",
       "category": "workflow",
-      "additions": 32,
-      "deletions": 38
+      "additions": 35,
+      "deletions": 41
     },
     {
       "path": ".github/workflows/claude.yml",
@@ -108,19 +127,19 @@
     {
       "path": "docs/PLAN-progressive-verification-graph.html",
       "category": "doc",
-      "additions": 32,
+      "additions": 36,
       "deletions": 4
     },
     {
       "path": "docs/PLAN-progressive-verification-graph.md",
       "category": "doc",
-      "additions": 61,
+      "additions": 67,
       "deletions": 13
     },
     {
       "path": "docs/adr/0078-staged-verification-redesign.md",
       "category": "doc",
-      "additions": 89,
+      "additions": 96,
       "deletions": 8
     },
     {
@@ -192,13 +211,13 @@
     {
       "path": "scripts/workflows/check-pr-validation-boundary.mjs",
       "category": "check",
-      "additions": 294,
+      "additions": 227,
       "deletions": 0
     },
     {
       "path": "scripts/workflows/check-pr-validation-boundary.test.mjs",
       "category": "test",
-      "additions": 439,
+      "additions": 445,
       "deletions": 0
     },
     {
@@ -228,29 +247,29 @@
   ],
   "totals": {
     "workflow": {
-      "additions": 254,
-      "deletions": 749,
+      "additions": 257,
+      "deletions": 752,
       "net": -495
     },
     "action": {
-      "additions": 33,
-      "deletions": 2,
-      "net": 31
+      "additions": 48,
+      "deletions": 3,
+      "net": 45
     },
     "check": {
-      "additions": 351,
+      "additions": 284,
       "deletions": 92,
-      "net": 259
+      "net": 192
     },
     "test": {
-      "additions": 474,
+      "additions": 480,
       "deletions": 61,
-      "net": 413
+      "net": 419
     },
     "doc": {
-      "additions": 248,
+      "additions": 265,
       "deletions": 79,
-      "net": 169
+      "net": 186
     }
   }
 }

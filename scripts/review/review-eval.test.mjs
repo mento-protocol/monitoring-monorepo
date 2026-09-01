@@ -376,6 +376,7 @@ function writeRowEvidence(root, row) {
     comparability_key: row.comparability_key,
     kind: row.kind,
     detail_dir: row.detail_dir,
+    plan_dir: row.detail_dir,
     baseline_selection: row.vs_baseline?.selection ?? "automatic",
     baseline:
       row.vs_baseline?.selection === "explicit"
@@ -5239,6 +5240,15 @@ test("the installed baseline survives the checkout the candidate needs", () => {
   assert.match(doc, new RegExp(`--against "\\$\\{TMPDIR:-/tmp\\}/${kept}"`));
 });
 
+test("the runbook forwards paid-run flags without a literal separator", () => {
+  const doc = readFileSync(
+    path.join(repoRoot, "docs/evals/review-skill.md"),
+    "utf8",
+  );
+  assert.doesNotMatch(doc, /pnpm review:eval:run -- --kind/);
+  assert.equal([...doc.matchAll(/pnpm review:eval:run --kind/g)].length, 5);
+});
+
 test("the ledger branch names one run, not one day", () => {
   const script = runEvalSourceSet();
   // Two runs finishing on the same UTC day — the installed and candidate pair
@@ -5884,9 +5894,12 @@ test("the freshness workflow watches the frozen input directories", () => {
   // form is what reaches docs/evals/review-skill-truth/ and its siblings.
   assert.match(workflow, /- docs\/evals\/review-skill\*\*/);
   assert.doesNotMatch(workflow, /- docs\/evals\/review-skill\*$/m);
-  // Every step of the job runs a `review:eval*` alias, so a PR that renames or
-  // removes one has to run this workflow.
+  // Every contract-job command runs a `review:eval*` alias, so a PR that
+  // renames or removes one has to run this workflow.
   assert.match(workflow, /^ {6}- package\.json$/m);
+  // Publication relies on the root ignore rule to keep raw cells out of Git
+  // and autoreview bundles, so an ignore-only edit must run this suite too.
+  assert.match(workflow, /^ {6}- \.gitignore$/m);
   const aliases = [
     ...new Set(
       [...workflow.matchAll(/pnpm (review:eval[\w:]*)/g)].map((m) => m[1]),
@@ -5898,6 +5911,11 @@ test("the freshness workflow watches the frozen input directories", () => {
   for (const alias of aliases) {
     assert.ok(scripts[alias], `package.json has no ${alias} script`);
   }
+  assert.match(
+    workflow,
+    /node scripts\/review\/review-eval-freshness-publication\.mjs --json/,
+  );
+  assert.doesNotMatch(workflow, /pnpm review:eval -- --schedule-issue --json/);
 });
 
 test("required CI routes the nested frozen inputs to the scripts job", () => {
@@ -5917,6 +5935,7 @@ test("required CI routes the nested frozen inputs to the scripts job", () => {
   // The flat inputs — review-skill.md, the fixtures, the ledger — still need
   // the non-recursive form, which `*/**` does not match on its own.
   assert.match(workflow, /^ {14}- docs\/evals\/review-skill\*$/m);
+  assert.match(workflow, /^ {14}- \.gitignore$/m);
 });
 
 test("the ledger PR workflow recomputes the rows it appends", () => {
@@ -7424,6 +7443,18 @@ test("--revalidate-appended checks a row against its committed plan", () => {
     const clean = cli(flags, { root });
     assert.equal(clean.status, 0, clean.stdout + clean.stderr);
 
+    const rawPlanFile = path.join(detail, "plan.json");
+    const rawPlan = JSON.parse(readFileSync(rawPlanFile, "utf8"));
+    rawPlan.plan_dir = detail;
+    writeFileSync(rawPlanFile, JSON.stringify(rawPlan));
+    const unprepared = cli(flags, { root });
+    assert.equal(unprepared.status, 1);
+    assert.match(
+      JSON.parse(unprepared.stdout).problems.join(" | "),
+      /must carry the same repository-relative plan_dir as the row detail_dir/,
+    );
+    writeRowEvidence(root, row);
+
     writeFileSync(
       path.join(detail, "result-9999-pipeline-1.json"),
       JSON.stringify({
@@ -7859,6 +7890,7 @@ test("a hand-assembled bridge row keeps the full run's plan", () => {
       comparability_key: row.comparability_key,
       kind: "full",
       detail_dir: row.detail_dir,
+      plan_dir: row.detail_dir,
       baseline_selection: "automatic",
       baseline: null,
       inputs: row.inputs,
@@ -7871,9 +7903,38 @@ test("a hand-assembled bridge row keeps the full run's plan", () => {
         dir,
         row: { ...row, kind: "bridge" },
         contract,
+        requirePortablePlanDir: true,
       }),
       [],
     );
+
+    writeFileSync(
+      path.join(dir, "plan.json"),
+      JSON.stringify({ ...plan, plan_dir: dir }),
+    );
+    assert.match(
+      planProvenanceProblems({
+        dir,
+        row: { ...row, kind: "bridge" },
+        contract,
+        requirePortablePlanDir: true,
+      }).join(" | "),
+      /must carry the same repository-relative plan_dir as the row detail_dir/,
+    );
+    writeFileSync(
+      path.join(dir, "plan.json"),
+      JSON.stringify({ ...plan, plan_dir: { unexpected: true } }),
+    );
+    assert.match(
+      planProvenanceProblems({
+        dir,
+        row: { ...row, kind: "bridge" },
+        contract,
+        requirePortablePlanDir: true,
+      }).join(" | "),
+      /must carry the same repository-relative plan_dir as the row detail_dir/,
+    );
+    writeFileSync(path.join(dir, "plan.json"), JSON.stringify(plan));
 
     // Nothing else about a bridge row is waived. Re-keying it after the append
     // still opens a lineage no run produced.

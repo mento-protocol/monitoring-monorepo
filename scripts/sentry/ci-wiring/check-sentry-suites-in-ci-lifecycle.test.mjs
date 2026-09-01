@@ -52,10 +52,11 @@ function exactRunIndexes(job, command) {
 
 // Every job that runs `pnpm install` and then a trusted alias carries its own
 // copy of the validator, so every one of them needs the ordering pinned. ADR
-// 0072 added the second: `docs-checks` runs the same install action and the
-// same `agent:context-*` / `docs:*` aliases on a Markdown-only diff, where the
-// `scripts` job does not run at all.
-const PIN_ORDER_JOBS = ["scripts", "docs-checks"];
+// 0072 added `docs-checks`: it runs the same install action and the same
+// `agent:context-*` / `docs:*` aliases on a Markdown-only diff, where the
+// `scripts` job does not run at all. `production-infra-contract` is also
+// unconditional and trusts the pinned tf:test and issue:board:test aliases.
+const PIN_ORDER_JOBS = ["scripts", "docs-checks", "production-infra-contract"];
 
 for (const job of PIN_ORDER_JOBS) {
   test(`the \`${job}\` job validates pins before pnpm-install and any trusted alias`, () => {

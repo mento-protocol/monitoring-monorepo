@@ -6,18 +6,27 @@
  */
 
 import {
+  assertCanonicalGithubCliEnvironment,
   DEFAULT_PROJECT_NUMBER,
   DEFAULT_PROJECT_OWNER,
   DEFAULT_REPO,
   splitRepo,
+  validateClaimAgent,
+  validateClaimBranch,
+  validateClaimId,
+  validateIssueBodySha256,
 } from "./issue-board-state.mjs";
 
 export function usage() {
   return `Usage:
   pnpm issue:claim --count 3 [--agent codex] [--branch <name>] [--dry-run]
   pnpm issue:claim --issue 901 --issue 902 [--agent claude]
+  pnpm issue:claim --issue 901 --branch <name> --claim-id <token> --sweep-eligible --body-sha256 <digest>
   pnpm issue:review --pr 123 --issue 901 [--issue 902]
-  pnpm issue:release --issue 901 [--needs-grooming]
+  pnpm issue:review --pr 123 --issue 901 --claim-id <token> --rebind-branch
+  pnpm issue:release --issue 901 --claim-id <token> [--needs-grooming]
+  pnpm issue:release --issue 901 --claim-id <token> --closed-unmerged-pr
+  pnpm issue:release --issue 901 --claim-id <token> --merged-pr --needs-grooming
   pnpm issue:board sync --dry-run       # preview repository-wide changes
   pnpm issue:board sync                 # apply; requires explicit repository-wide authority
   pnpm issue:board backfill --issue 901 [--dry-run]
@@ -29,9 +38,15 @@ Options:
   --issue, --issues <numbers>      Issue number(s), comma-separated or repeated; not valid for sync
   --count <number>                 Number of ready issues to claim (default: 1)
   --agent <name>                   Agent/session label for comments and project fields
-  --branch <name>                  Branch/worktree hint for comments and project fields
+  --branch <name>                  Durable owner branch; required for sweep claims
+  --claim-id <token>               Stable ownership token for one explicit claim or release
+  --sweep-eligible                 Require the backlog-sweep claim predicate
+  --body-sha256 <digest>           Pin the body inspected for a sweep claim
   --pr <number-or-url>             Pull request number or URL for review moves
   --needs-grooming                 Release issues to needs-grooming instead of agent-ready
+  --closed-unmerged-pr             Release a stored PR after proving it closed unmerged
+  --merged-pr                      Continue a merged stored PR only in needs-grooming
+  --rebind-branch                  Move review ownership to the proven PR head branch
   --no-comment                     Do not post issue comments for claim/review/release
   --dry-run                        Print mutations without applying them
   --json                           Print machine-readable command results
@@ -100,6 +115,12 @@ function defaultAgent(env = process.env) {
 }
 
 export function parseArgs(argv, env = process.env) {
+  let branchExplicit = false;
+  const explicitTarget = {
+    repo: false,
+    projectOwner: false,
+    projectNumber: false,
+  };
   const options = {
     command: "help",
     repo: env.AGENT_ISSUE_REPO ?? DEFAULT_REPO,
@@ -114,12 +135,18 @@ export function parseArgs(argv, env = process.env) {
     issues: [],
     agent: defaultAgent(env),
     branch: env.AGENT_BRANCH ?? "",
+    claimId: null,
+    sweepEligible: false,
+    bodySha256: null,
     pr: null,
     prValue: null,
     dryRun: false,
     json: false,
     comment: true,
     releaseState: "ready",
+    closedUnmergedPr: false,
+    mergedPr: false,
+    rebindBranch: false,
   };
 
   const args = [...argv];
@@ -141,12 +168,15 @@ export function parseArgs(argv, env = process.env) {
     switch (arg) {
       case "--repo":
         options.repo = readValue();
+        explicitTarget.repo = true;
         break;
       case "--project-owner":
         options.projectOwner = readValue();
+        explicitTarget.projectOwner = true;
         break;
       case "--project-number":
         options.projectNumber = Number(readValue());
+        explicitTarget.projectNumber = true;
         break;
       case "--count":
         options.count = Number(readValue());
@@ -163,12 +193,31 @@ export function parseArgs(argv, env = process.env) {
         break;
       case "--branch":
         options.branch = readValue();
+        branchExplicit = true;
+        break;
+      case "--claim-id":
+        options.claimId = readValue();
+        break;
+      case "--sweep-eligible":
+        options.sweepEligible = true;
+        break;
+      case "--body-sha256":
+        options.bodySha256 = readValue();
         break;
       case "--pr":
         options.prValue = readValue();
         break;
       case "--needs-grooming":
         options.releaseState = "grooming";
+        break;
+      case "--closed-unmerged-pr":
+        options.closedUnmergedPr = true;
+        break;
+      case "--merged-pr":
+        options.mergedPr = true;
+        break;
+      case "--rebind-branch":
+        options.rebindBranch = true;
         break;
       case "--no-comment":
         options.comment = false;
@@ -201,12 +250,129 @@ export function parseArgs(argv, env = process.env) {
     options.pr = parsePr(options.prValue, options.repo);
   }
   delete options.prValue;
+  if (options.pr != null && options.command !== "review") {
+    throw new Error("--pr is valid only for review");
+  }
   if (options.command === "sync" && options.issueValues.length > 0) {
     throw new Error(
       "sync is repository-wide and does not accept --issue, --issues, or positional issue arguments",
     );
   }
   options.issues = parseIssueNumbers(options.issueValues, options.repo);
+  const lifecycleMutation = [
+    "claim",
+    "review",
+    "release",
+    "sync",
+    "backfill",
+  ].includes(options.command);
+  if (lifecycleMutation) {
+    assertCanonicalGithubCliEnvironment(env);
+  }
+  const redirectedTargets = [
+    {
+      envName: "AGENT_ISSUE_REPO",
+      envValue: env.AGENT_ISSUE_REPO,
+      defaultValue: DEFAULT_REPO,
+      explicit: explicitTarget.repo,
+      flag: "--repo",
+    },
+    {
+      envName: "AGENT_WORKBOARD_OWNER",
+      envValue: env.AGENT_WORKBOARD_OWNER,
+      defaultValue: DEFAULT_PROJECT_OWNER,
+      explicit: explicitTarget.projectOwner,
+      flag: "--project-owner",
+    },
+    {
+      envName: "AGENT_WORKBOARD_PROJECT_NUMBER",
+      envValue: env.AGENT_WORKBOARD_PROJECT_NUMBER,
+      defaultValue: String(DEFAULT_PROJECT_NUMBER),
+      explicit: explicitTarget.projectNumber,
+      flag: "--project-number",
+    },
+  ].filter(
+    (target) =>
+      target.envValue != null &&
+      String(target.envValue) !== String(target.defaultValue) &&
+      !target.explicit,
+  );
+  if (lifecycleMutation && redirectedTargets.length > 0) {
+    const target = redirectedTargets[0];
+    throw new Error(
+      `${target.envName} redirects a lifecycle mutation to ${target.envValue}; pass ${target.flag} explicitly to confirm the target`,
+    );
+  }
+  if (options.claimId != null) validateClaimId(options.claimId);
+  if (options.bodySha256 != null) validateIssueBodySha256(options.bodySha256);
+  if (
+    options.claimId != null &&
+    !["claim", "release"].includes(options.command) &&
+    !(options.command === "review" && options.rebindBranch)
+  ) {
+    throw new Error(
+      "--claim-id is valid only for claim, release, or review with --rebind-branch",
+    );
+  }
+  if (options.claimId != null && options.issues.length !== 1) {
+    throw new Error("--claim-id requires exactly one explicit issue");
+  }
+  if (options.command === "release" && options.claimId == null) {
+    throw new Error(
+      "release requires --claim-id from the claim output or comment",
+    );
+  }
+  if (options.sweepEligible && options.command !== "claim") {
+    throw new Error("--sweep-eligible is valid only for claim");
+  }
+  if (options.sweepEligible && options.issues.length !== 1) {
+    throw new Error("--sweep-eligible requires exactly one explicit issue");
+  }
+  if (options.sweepEligible && options.claimId == null) {
+    throw new Error("--sweep-eligible requires an explicit --claim-id");
+  }
+  if (options.sweepEligible && (!branchExplicit || !options.branch?.trim())) {
+    throw new Error("--sweep-eligible requires an explicit --branch");
+  }
+  if (options.sweepEligible && options.bodySha256 == null) {
+    throw new Error(
+      "--sweep-eligible requires --body-sha256 from the inspected issue body",
+    );
+  }
+  if (options.bodySha256 != null && !options.sweepEligible) {
+    throw new Error("--body-sha256 is valid only with --sweep-eligible");
+  }
+  if (branchExplicit && options.command !== "claim") {
+    throw new Error(
+      "--branch is valid only for claim; review rebinds from the proven PR head",
+    );
+  }
+  if (lifecycleMutation) {
+    options.agent = validateClaimAgent(options.agent);
+  }
+  if (branchExplicit && options.command === "claim") {
+    options.branch = validateClaimBranch(options.branch);
+  }
+  if (options.closedUnmergedPr && options.command !== "release") {
+    throw new Error("--closed-unmerged-pr is valid only for release");
+  }
+  if (options.mergedPr && options.command !== "release") {
+    throw new Error("--merged-pr is valid only for release");
+  }
+  if (options.mergedPr && options.closedUnmergedPr) {
+    throw new Error(
+      "--merged-pr and --closed-unmerged-pr are mutually exclusive",
+    );
+  }
+  if (options.mergedPr && options.releaseState !== "grooming") {
+    throw new Error("--merged-pr requires --needs-grooming");
+  }
+  if (options.rebindBranch && options.command !== "review") {
+    throw new Error("--rebind-branch is valid only for review");
+  }
+  if (options.rebindBranch && options.claimId == null) {
+    throw new Error("--rebind-branch requires --claim-id");
+  }
   if (options.command === "backfill") {
     const explicitIssue = options.issueValues[0]?.trim();
     if (

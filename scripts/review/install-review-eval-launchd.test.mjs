@@ -32,6 +32,7 @@ const template = path.join(
 
 function makeHarness({ sharedHome } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), "review-eval-launchd-install-"));
+  const harnessInstaller = path.join(root, path.basename(installer));
   const checkout = path.join(root, "checkout & eval");
   const taskHome = sharedHome ?? path.join(root, "home & logs");
   const fakeBin = path.join(root, "fake bin");
@@ -60,6 +61,8 @@ function makeHarness({ sharedHome } = {}) {
     path.join(root, `${name} & bin`),
   );
 
+  cpSync(installer, harnessInstaller);
+  chmodSync(harnessInstaller, 0o755);
   mkdirSync(templateDir, { recursive: true });
   mkdirSync(fakeBin, { recursive: true });
   mkdirSync(lockRoot, { recursive: true });
@@ -314,7 +317,7 @@ function /bin/launchctl { "$REVIEW_EVAL_FAKE_LAUNCHCTL" "$@"; }
       env: environment(options),
     };
     if (childUid !== undefined) spawnOptions.uid = childUid;
-    return spawnSync("/bin/bash", [installer], spawnOptions);
+    return spawnSync("/bin/bash", [harnessInstaller], spawnOptions);
   }
 
   function operations() {

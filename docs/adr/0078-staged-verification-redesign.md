@@ -3,7 +3,7 @@ title: Staged replacement of the mandatory local gate with existing CI
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-30
+last_verified: 2026-08-31
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -124,6 +124,11 @@ required command runs. This handles a miss and a failed partial extraction.
 A prefix-key hit returns `false`; the workflow keeps that complete restore and
 still runs the required command.
 
+The pnpm action separates its executable home from its dependency store. It
+keeps the executable in `~/pnpm-home` and caches `~/pnpm-store`. Root and
+package-local CI installs select the cache target explicitly. Miss cleanup
+cannot remove pnpm's own files.
+
 The M2 structural checker follows local reusable workflows from every direct
 pull request trigger. It inventories every pull request job with write
 permission or credential access. Each entry pins its permission map, exact
@@ -137,6 +142,30 @@ The M2 pull request can prove a cold miss in the new namespace. A protected-
 main save and a later PR hit cannot exist before this change reaches `main`.
 Record both as post-merge evidence for #2124. A missing or corrupt cache must
 remain a cold-run condition, not a validation failure or a skipped command.
+
+### Apply the M3 fixed CI contract
+
+M3 keeps the fixed jobs and the stable `CI / ci` context. A closed-world
+fallback selects every conditional job for an unknown path, a control-plane
+path, or an incomplete pull request file list. It does not add a planner,
+dynamic matrix, or second routing format.
+
+The pinned `dorny/paths-filter` action emits a documented count for each
+filter. The `routed` filter reuses the functional filters through YAML aliases.
+The fallback compares the `all` count with the `routed` and `ordinary` counts.
+The workflow does not export changed-file lists.
+
+The `pnpm ci:contract:test` command checks fixed job membership, conditional
+filters, pull request and `main` concurrency, aggregate failure states, and the
+M2 permission and cache boundary. The unconditional `Production infrastructure
+contract` job runs it on every pull request and `main` push.
+
+M3 adds the two confirmed gate-only gaps to existing required jobs. The
+`scripts` job runs the ADR reminder and its tests. The `ui` job runs the normal
+production build and bundle-size limit. The separate Infra validation and
+bundle-size workflows duplicate required coverage. Lighthouse, PR Description,
+duplication, and schema diff remain reviewed advisory exceptions with their
+current triggers.
 
 ### Keep local checks bounded and non-authoritative
 
@@ -268,10 +297,12 @@ at each cutover stage. Final retirement must remove at least 80% of the final
 denominator.
 
 M2 records its full changed control-plane surface from protected-main baseline
-`ccef910fa6fc267751681176ffdeef01daf90b40` in the additive complexity
-manifest. It removes the existing comment writers instead of adding publisher
-jobs. The manifest and focused contract test enforce the per-file and
-test-to-implementation limits without changing the immutable Phase 0 manifest.
+`ccef910fa6fc267751681176ffdeef01daf90b40` in a frozen additive complexity
+receipt. The receipt contains M2 and its #2161 correction. It excludes the
+unrelated #2145 and #2159 review-eval artifacts and records that derivation.
+This historical #2124 evidence does not change after M2 closes. Later phases
+record phase-scoped evidence instead of extending it. The permanent checker
+continues to enforce the structural trust boundary.
 
 ## Rollback
 
@@ -333,7 +364,8 @@ would recreate the local gate.
 - [Safeguard inventory](../metrics/verification-redesign-safeguards.jsonl)
 - [Control-plane before manifest](../metrics/verification-redesign-control-plane-before.json)
 - [M2 additive complexity manifest](../metrics/verification-redesign-m2-complexity.json)
-- Issues #2006, #2032, #2042, #2094, #2122, #2123, and #2124
+- [M3 additive complexity manifest](../metrics/verification-redesign-m3-complexity.json)
+- Issues #2006, #2032, #2042, #2094, #2122, #2123, #2124, and #2125
 - ADRs [0007](0007-agent-quality-gate-and-merge-oracle.md),
   [0069](0069-gate-routing-table-as-data.md),
   [0072](0072-md-only-docs-checks-job.md),

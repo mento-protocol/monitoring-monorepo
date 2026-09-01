@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validFixtureFiles } from "./fixtures.mjs";
@@ -60,11 +60,16 @@ function mutateCiWif(from, to) {
 }
 
 function liveRepositoryFiles() {
+  // The local gate runs before commit: include untracked additions and ignore
+  // cached paths that the worktree has already deleted.
   const filePaths = execFileSync(
     "git",
     [
       "ls-files",
       "-z",
+      "--cached",
+      "--others",
+      "--exclude-standard",
       "--",
       "terraform",
       "aegis/terraform",
@@ -76,6 +81,7 @@ function liveRepositoryFiles() {
     { cwd: repositoryRoot, encoding: "utf8" },
   )
     .split("\0")
+    .filter((filePath) => existsSync(path.join(repositoryRoot, filePath)))
     .filter(
       (filePath) =>
         filePath.endsWith(".tf") ||

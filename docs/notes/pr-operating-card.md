@@ -3,7 +3,7 @@ title: PR Operating Card
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-28
+last_verified: 2026-08-31
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -28,10 +28,17 @@ even when you never open an authority.
    pnpm issue:claim --count 3 --agent codex
    ```
 
-   Claiming moves the issue out of the ready queue; if you cannot continue,
-   release it with `pnpm issue:release --issue <n>` (add `--needs-grooming`
-   when clarity is missing; default restores `agent-ready`). Authority:
+   Claiming moves the issue out of the ready queue. Keep each printed Claim ID.
+   If you cannot continue, release it with
+   `pnpm issue:release --issue <n> --claim-id <claim-id>` (add
+   `--needs-grooming` when clarity is missing; default restores
+   `agent-ready`). Authority:
    [`agent-issue-workflow.md`](agent-issue-workflow.md).
+   After a PR closes unmerged, add `--closed-unmerged-pr`. The helper then
+   proves the stored PR and branch binding before release.
+   A manual `--count` claim records the current checked-out branch. If step 2
+   creates the final PR branch afterward, keep the Claim ID for the explicit
+   owner-checked branch rebind in step 6.
 
 2. **Implement.** Work in a dedicated per-PR worktree and unique branch, never
    directly on `main`. Keep the diff surgical: touch only what the task needs,
@@ -180,7 +187,11 @@ even when you never open an authority.
    the issue with `Closes #N` **only when the issue's Done means is fully
    satisfied**; otherwise use `Refs #N`. For issue-backed work, once the PR is
    open, run `pnpm issue:review --pr <pr> --issue <issue>` to move the issue
-   out of `agent-active` and into review. Authority:
+   out of `agent-active` and into review. If the stored claim Branch differs
+   because the PR branch was created after the claim, run
+   `pnpm issue:review --pr <pr> --issue <issue> --claim-id <claim-id> --rebind-branch`.
+   This path proves the open same-repository PR and refuses an open PR on the
+   old Branch. Do not pass `--branch` to review. Authority:
    [`agent-issue-workflow.md`](agent-issue-workflow.md).
 
    **Resolve the repository identities first.** Before any PR lookup, resolve
@@ -357,10 +368,12 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    state, and the probes' blocker, thread and unreplied counts — a bare "it's
    green" hides which head the claim was established against.
 
-8. **Merge hygiene.** **Never merge a PR without the user's explicit, direct
-   approval of that specific merge.** Green CI, bot approvals, a READY
-   ready-state, and "ship it" do not authorize a merge. Drive the PR to ready,
-   present the evidence, then stop and ask.
+8. **Merge hygiene.** **Agent sessions never merge a PR without the user's
+   explicit, direct approval of that specific merge.** Green CI, bot approvals,
+   a READY ready-state, and "ship it" do not authorize a merge. Drive the PR to
+   ready, present the evidence, then stop and ask. The repository's narrow
+   Dependabot lane is the only machine-merge exception. It is not authority for
+   an agent to merge or to widen that lane.
 
    Once the user approves, they merge from their own terminal through the
    sanctioned path:
@@ -403,21 +416,63 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    boundary belongs on GitHub's side of the wire.
    [ADR 0075](../adr/0075-pr-merge.md) owns the ordered gates,
    the alternatives, and every residual, including what the deny does not
-   cover. The Dependabot auto-merge workflow runs in CI, not an agent session,
-   and is unaffected. The approval rule above is
-   unchanged — the wrapper mechanizes it, and its refusal is what makes "agents
-   never merge" a control rather than a habit. If the merge itself satisfies Done
-   means, sync the issue state and workboard afterward per
+   cover. [ADR 0081](../adr/0081-narrow-dependabot-auto-merge-exception.md)
+   owns the separate machine exception.
+   `.github/workflows/dependabot-auto-merge.yml` is a separate,
+   machine-authorized lane. It accepts only Dependabot-authored minor and patch
+   updates for GitHub-owned `actions/*` packages in the `github_actions`
+   `actions-minor-patch` group on `main`, after the seven-day cooldown. It
+   refuses major, security, maintainer-changed, third-party publisher,
+   `actions/create-github-app-token`, other-ecosystem, mixed-author, and
+   non-workflow-file changes at enable time. Load-bearing gate and credential
+   actions from other publishers, such as `re-actors/alls-green` and
+   `google-github-actions/auth`, stay on the human path. A read-only
+   `pull_request` classifier verifies event identity and Dependabot metadata.
+   A default-branch `workflow_run` writer treats that result as untrusted. It
+   binds pre-job concurrency to the upstream head repository and branch, so a
+   fork with the same branch name cannot cancel the trusted writer run. It
+   re-reads the workflow, run, first-attempt jobs with `total_count`, current PR
+   and head, the complete issue-event close history, all commits, all files,
+   the current PR body's exact `Maintainer changes` marker, and the base's
+   merge-queue state. It never checks out PR code or reads upstream outputs,
+   artifacts, or caches. It waits for every required check and verifies a
+   non-empty passing required-only projection. The wait is an untrusted delay.
+   The writer repeats the complete workflow, run, job, PR, head,
+   maintainer-change body, close-history, commit, file, and queue proof after
+   it. It then calls the synchronous REST merge endpoint with the exact head
+   SHA and squash method.
+   The endpoint cannot enqueue or leave a standing auto-merge request. A later
+   push cannot satisfy the exact-head write. A recorded close remains a durable
+   human veto after the same PR and head are reopened. Dependabot must open a
+   new PR before this lane can merge that update automatically. The writer
+   makes the issue-event read its final authoritative read. The REST write
+   cannot pin that history, so a close and reopen inside the remaining request
+   window is a residual race.
+   Merges made with this workflow's
+   automatic `GITHUB_TOKEN` do not emit this repository's `push` workflows;
+   required pull-request checks are the final automated evidence for this
+   narrow lane. The writer refuses if `main` has a merge queue. The repository
+   accepts the built-in token's residual risk for this bounded routine group.
+   `GH_READ_TOKEN` and `FINAL_MERGE_TOKEN` both resolve to `github.token` by
+   design. Keep them separate so tests can prove that evidence reads use the
+   read seam and only the synchronous exact-head REST request uses the final
+   write seam. Issue #2091 was closed as not planned. Do not add a
+   `merge-operators` Team, credential broker, dedicated merge App, protected
+   merge Environment, or controlled lifecycle ruleset for this lane. The
+   wrapper mechanizes the approval rule for human and agent-driven merges. Its
+   refusal makes "agents never merge" a local control rather than a habit. If
+   an operator-approved merge satisfies Done means, sync the issue state and
+   workboard afterward per
    [`agent-issue-workflow.md`](agent-issue-workflow.md). If live proof remains,
    continue to production closeout first. After a partial merge, keep the issue
-   open. Before `issue:release` restores `agent-ready`, update the issue body:
-   mark merged work complete, isolate the remaining acceptance criteria, and
-   restate the current Done means. Use `needs-grooming` instead when the
-   remaining scope is unclear. Generated documentation-garden packets are the
-   exception: do not edit their immutable issue bodies or restore
-   `agent-ready`. Set `needs-grooming`. A human can resume the frozen packet or
-   create a linked ordinary follow-up before closing it. Record merged work in
-   issue comments and PR links, not in the generated body. Authority:
+   open. Update the issue body to mark merged work complete, isolate the
+   remaining acceptance criteria, and restate the current Done means. Then run
+   `pnpm issue:release --issue <n> --claim-id <claim-id> --merged-pr --needs-grooming`.
+   The helper proves the stored merged PR and Branch, clears the exact owner,
+   and never restores `agent-ready`. Generated documentation-garden packets are
+   the exception: do not edit their immutable issue bodies. A human can resume
+   the frozen packet or create a linked ordinary follow-up before closing it.
+   Record merged work in issue comments and PR links. Authority:
    [`documentation-gardening.md`](documentation-gardening.md).
 
 9. **Production closeout when required.** When Done means includes deployed or
@@ -435,8 +490,10 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
 
 These bind regardless of which step you are on:
 
-- **Never merge without explicit approval** for that specific merge (step 8),
-  and the approved merge runs through `pnpm pr:merge` in a human terminal.
+- **Agent sessions never merge without explicit approval** for that specific
+  merge (step 8), and the approved merge runs through `pnpm pr:merge` in a
+  human terminal. The exact Dependabot machine lane in step 8 is the only
+  exception.
 - **Reply before resolving** every feedback item, in the two forms above; a
   clear reply stops re-raising bots from looping.
 - **`Closes #N` only when Done means is fully met**, else `Refs #N`.

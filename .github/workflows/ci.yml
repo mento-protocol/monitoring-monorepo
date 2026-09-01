@@ -67,6 +67,7 @@ jobs:
       autoreviewSuite: ${{ steps.filter.outputs.autoreviewSuite }}
       autoreviewRootRuntime: ${{ steps.filter.outputs.autoreviewRootRuntime }}
       versionSkew: ${{ steps.filter.outputs.versionSkew }}
+      forceAll: ${{ steps.filter.outputs.controlPlane == 'true' || steps.filter.outputs.all_count != steps.filter.outputs.routed_count || steps.filter.outputs.all_count != steps.filter.outputs.ordinary_count || (github.event_name == 'pull_request' && github.event.pull_request.changed_files >= 3000) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -79,7 +80,7 @@ jobs:
             # wrapper. Any change to it needs to re-run every package's lint
             # so a broken wrapper can't merge silently — see PR-423 codex
             # finding (Run package lint when the lint gate changes).
-            shared:
+            shared: &shared
               - shared-config/**
               - scripts/eslint-baseline-diff.mjs
               - pnpm-lock.yaml
@@ -90,7 +91,7 @@ jobs:
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
               - .github/actions/resolve-eslint-baseline/**
-            ui:
+            ui: &ui
               - ui-dashboard/**
               - shared-config/**
               # GraphQL contract test validates dashboard queries against the
@@ -114,7 +115,7 @@ jobs:
             # shared-config originals (the indexer builds outside the pnpm
             # workspace — see indexer-envio/src/healthScore.ts). The indexer
             # does NOT import shared-config at runtime.
-            indexer:
+            indexer: &indexer
               - indexer-envio/**
               - shared-config/**
               - scripts/eslint-baseline-diff.mjs
@@ -126,7 +127,7 @@ jobs:
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
               - .github/actions/resolve-eslint-baseline/**
-            bridge:
+            bridge: &bridge
               - metrics-bridge/**
               - shared-config/**
               # GraphQL contract test validates bridge queries against the
@@ -145,7 +146,7 @@ jobs:
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
               - .github/actions/resolve-eslint-baseline/**
-            integrationProbes:
+            integrationProbes: &integrationProbes
               - integration-probes/**
               - shared-config/**
               - scripts/eslint-baseline-diff.mjs
@@ -158,7 +159,7 @@ jobs:
               - .github/workflows/integration-probes.yml
               - .github/actions/pnpm-install/**
               - .github/actions/resolve-eslint-baseline/**
-            aegis:
+            aegis: &aegis
               - aegis/**
               - scripts/eslint-baseline-diff.mjs
               - pnpm-lock.yaml
@@ -171,7 +172,7 @@ jobs:
               - .github/workflows/aegis-app-engine.yml
               - .github/actions/pnpm-install/**
               - .github/actions/resolve-eslint-baseline/**
-            terraform:
+            terraform: &terraform
               # Coarse admission only. `scripts/tf-stacks.mjs` classifies the
               # exact stacks after this job starts. Keep this list equal to
               # terraform.stacks.json `workflowAdmissionPatterns`; `pnpm
@@ -184,7 +185,7 @@ jobs:
               - scripts/**
               - .github/workflows/**
               - terraform.stacks.json
-            alerts:
+            alerts: &alerts
               - alerts/infra/onchain-event-handler/**
               - alerts/infra/oncall-announcer/**
               - alerts/infra/scripts/**
@@ -209,7 +210,7 @@ jobs:
             # Governance Watchdog Cloud Function. Deploys as a standalone
             # source root (package-local pnpm-lock.yaml), so its quality job
             # installs from that lockfile like the alerts functions.
-            govWatchdog:
+            govWatchdog: &govWatchdog
               - governance-watchdog/**
               - scripts/eslint-baseline-diff.mjs
               - pnpm-lock.yaml
@@ -224,7 +225,7 @@ jobs:
             # package filters false → the cross-package `deps` job would skip
             # → blocking architecture rule changes ship unvalidated. This
             # filter fires the `deps` job whenever the policy itself moves.
-            codeHealth:
+            codeHealth: &codeHealth
               - .dependency-cruiser.cjs
               - "*/knip.json"
               - .github/workflows/ci.yml
@@ -235,7 +236,7 @@ jobs:
             # imports, and syntax issues in build/quality scripts can't
             # merge unnoticed — see PR-423 codex finding (Keep root scripts
             # under ESLint).
-            rootScripts:
+            rootScripts: &rootScripts
               # `scripts/**` matches every path under scripts/ at any depth,
               # including the extensionless directory symlinks the extension
               # globs below miss. The extension globs stay to document the
@@ -270,6 +271,8 @@ jobs:
               # where `**` does cross separators. Different engine.)
               - docs/evals/review-skill*
               - docs/evals/review-skill*/**
+              # The review-eval suite pins the local-only raw cells/ boundary.
+              - .gitignore
               - .lighthouserc.cjs
               - "**/vitest.hermetic-setup.ts"
               - "**/vitest.config.ts"
@@ -349,7 +352,7 @@ jobs:
             # ci.yml for that same reason. Beyond those two, keep this filter
             # to Markdown: any other non-Markdown input belongs in the filter
             # of the job that consumes it.
-            docs:
+            docs: &docs
               - "*.md"
               - "**/*.md"
               - .github/workflows/ci.yml
@@ -359,7 +362,7 @@ jobs:
             # and runs sequentially in CI for deterministic fixture/process
             # cleanup. The local quality gate may orchestrate the same complete
             # family set in parallel.
-            autoreviewSuite:
+            autoreviewSuite: &autoreviewSuite
               - scripts/agent-autoreview.sh
               - scripts/agent-autoreview.mjs
               - scripts/agent-autoreview-core.mjs
@@ -381,7 +384,7 @@ jobs:
             # Focused x64 Blacksmith proof for the Linux/root Node trust path.
             # Keep this separate from the broader scripts job so a regression
             # cannot skip unrelated root suites and does not need pnpm install.
-            autoreviewRootRuntime:
+            autoreviewRootRuntime: &autoreviewRootRuntime
               - scripts/agent-autoreview.sh
               - scripts/agent-autoreview*.mjs
               - scripts/agent-autoreview-secret-suppressions.json
@@ -391,7 +394,7 @@ jobs:
             # This runs independently of package quality jobs so a manifest-only
             # PR cannot satisfy the required `ci` sentinel while bypassing the
             # catalog-vs-literal version invariant.
-            versionSkew:
+            versionSkew: &versionSkew
               - package.json
               - "**/package.json"
               - pnpm-workspace.yaml
@@ -405,13 +408,61 @@ jobs:
               - scripts/supply-chain/version-skew-check.test.mjs
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
+            # Closed-world fallback for the existing fixed fan-out. `routed`
+            # reuses the live filters through YAML aliases. `ordinary` names
+            # the stable product and documentation namespaces where affected
+            # selection is allowed. A path outside either set selects every
+            # conditional job. This catches a new top-level service even when
+            # its README also matches the broad documentation filter.
+            routed:
+              - *shared
+              - *ui
+              - *indexer
+              - *bridge
+              - *integrationProbes
+              - *aegis
+              - *terraform
+              - *alerts
+              - *govWatchdog
+              - *codeHealth
+              - *rootScripts
+              - *docs
+              - *autoreviewSuite
+              - *autoreviewRootRuntime
+              - *versionSkew
+            ordinary:
+              - "*.md"
+              - aegis/**
+              - alerts/**
+              - docs/**
+              - governance-watchdog/**
+              - indexer-envio/**
+              - integration-probes/**
+              - metrics-bridge/**
+              - terraform/**
+              - ui-dashboard/**
+            # Package-manager and package-local toolchain files inside an
+            # ordinary namespace can change how required checks execute.
+            # Select the full fixed set for those control-plane inputs.
+            controlPlane:
+              - "**/package.json"
+              - "**/pnpm-lock.yaml"
+              - "**/pnpm-workspace.yaml"
+              - "**/.npmrc"
+              - "**/tsconfig*.json"
+              - "**/eslint.config.*"
+              - "**/vitest*.{js,cjs,mjs,ts,cts,mts}"
+              - "**/knip.json"
+              - "**/react-doctor.config.json"
+            all:
+              - "**"
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
 
   shared:
     name: Quality Checks (shared-config)
     needs: changes
-    if: needs.changes.outputs.shared == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
@@ -450,7 +501,7 @@ jobs:
   ui:
     name: Quality Checks (ui-dashboard)
     needs: changes
-    if: needs.changes.outputs.ui == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.ui == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 25
     permissions:
@@ -513,6 +564,10 @@ jobs:
           fi
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/ui-dashboard test:coverage
+      - name: Production build and bundle-size budget
+        # The browser suite builds `.next-fixture`. This target builds the
+        # production `.next` output and then checks the committed size budget.
+        run: VERCEL_DEPLOYMENT_ID=ci pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw
       - name: Restore Playwright Chromium
         id: playwright-cache
         continue-on-error: true
@@ -578,7 +633,7 @@ jobs:
   indexer:
     name: Quality Checks (indexer-envio)
     needs: changes
-    if: needs.changes.outputs.indexer == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.indexer == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     permissions:
@@ -647,7 +702,7 @@ jobs:
   bridge:
     name: Quality Checks (metrics-bridge)
     needs: changes
-    if: needs.changes.outputs.bridge == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.bridge == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
@@ -693,7 +748,7 @@ jobs:
   integration-probes:
     name: Quality Checks (integration-probes)
     needs: changes
-    if: needs.changes.outputs.integrationProbes == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.integrationProbes == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
@@ -730,7 +785,7 @@ jobs:
   alerts:
     name: Quality Checks (alerts Cloud Functions)
     needs: changes
-    if: needs.changes.outputs.alerts == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.alerts == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
@@ -746,12 +801,12 @@ jobs:
       # handler checks so CI exercises the same dependency graph that deploys.
       - name: Install handler deploy dependencies
         working-directory: alerts/infra/onchain-event-handler
-        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir .
+        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir . --store-dir ~/pnpm-store
       # Same package-local install for the on-call announcer Cloud Function
       # source root.
       - name: Install on-call announcer deploy dependencies
         working-directory: alerts/infra/oncall-announcer
-        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir .
+        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir . --store-dir ~/pnpm-store
       - name: Typecheck (onchain-event-handler)
         working-directory: alerts/infra/onchain-event-handler
         run: pnpm run typecheck
@@ -823,7 +878,7 @@ jobs:
   gov-watchdog:
     name: Quality Checks (governance-watchdog)
     needs: changes
-    if: needs.changes.outputs.govWatchdog == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.govWatchdog == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
@@ -839,7 +894,7 @@ jobs:
       # exercises the same dependency graph that deploys.
       - name: Install deploy dependencies
         working-directory: governance-watchdog
-        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir .
+        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir . --store-dir ~/pnpm-store
       - name: Typecheck
         working-directory: governance-watchdog
         run: pnpm run typecheck
@@ -885,7 +940,7 @@ jobs:
   terraform:
     name: Terraform Validate (registry)
     needs: changes
-    if: needs.changes.outputs.terraform == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.terraform == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 10
     permissions:
@@ -944,7 +999,7 @@ jobs:
   aegis:
     name: Quality Checks (aegis)
     needs: changes
-    if: needs.changes.outputs.aegis == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.aegis == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 15
     permissions:
@@ -995,7 +1050,7 @@ jobs:
   scripts:
     name: Lint + test root scripts
     needs: changes
-    if: needs.changes.outputs.rootScripts == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.rootScripts == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     # The quality-gate routing regression suite reached 24m37s on this runner
     # after earlier job setup. The prior 25-minute cap cancelled it before
@@ -1049,6 +1104,11 @@ jobs:
         # the required `ci` sentinel path so config-only regressions cannot
         # merge behind the advisory Lighthouse workflow.
         run: node scripts/lighthouse-config.test.mjs
+      - name: Fixed CI structural contract
+        # This path-gated witness catches accidental removal of the full
+        # contract command from the unconditional job below. Workflow changes
+        # always admit the scripts job.
+        run: node scripts/workflows/check-ci-contract.mjs
       - name: Agent quality-gate routing regression suite
         # Verifies the path-to-command mapping in scripts/agent-quality-gate.sh.
         # Without this in CI, a routing regression only fails locally (pre-push)
@@ -1119,6 +1179,10 @@ jobs:
         run: pnpm docs:audit --dry-run
       - name: Documentation garden issue automation tests
         run: pnpm docs:garden:test
+      - name: ADR reminder
+        run: pnpm adr:check
+      - name: ADR reminder suite
+        run: pnpm adr:check:test
       - name: Documentation navigation evaluation tests
         run: pnpm docs:navigation-eval:test
       - name: Documentation navigation fixture contract
@@ -1175,8 +1239,8 @@ jobs:
         run: node scripts/workflows/check-notifier-coverage.mjs
       - name: Autofix CI trust unit tests
         # Behavioral coverage of scripts/workflows/check-autofix-ci-trust.mjs
-        # (trigger/secret detectors, pull_request_target refusal, guard +
-        # annotation acceptance).
+        # (trigger/secret detectors, unconditional pull_request_target refusal,
+        # workflow_run guards, and guard/annotation acceptance).
         run: node scripts/workflows/check-autofix-ci-trust.test.mjs
       - name: Autofix CI trust assertion
         # Machine-authored sentry-autofix/* PRs pass every fork/dependabot
@@ -1309,7 +1373,7 @@ jobs:
     # removed from there: a change to the documentation tooling must still run
     # them against the corpus. A mixed diff runs both jobs and pays for one
     # duplicate pass, which is the accepted cost of the split.
-    if: needs.changes.outputs.docs == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.docs == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
@@ -1390,8 +1454,8 @@ jobs:
 
   production-infra-contract:
     name: Production infrastructure contract
-    # This required job is deliberately unconditional: tf:test validates
-    # deployment and production-infrastructure contracts for every candidate.
+    # This required job is deliberately unconditional. It validates production
+    # infrastructure and the repo-wide issue-board proof for every candidate.
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     permissions:
@@ -1401,11 +1465,22 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Validate trusted package-script pins
+        # Runs before pnpm-install because the install executes PR-authored
+        # lifecycle hooks. It also pins the tf:test and issue:board:test aliases
+        # before this required job trusts them.
+        run: node scripts/check-agent-quality-gate-package-scripts.mjs
       - uses: ./.github/actions/pnpm-install
         with:
           write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - name: Terraform production infrastructure contract
         run: pnpm tf:test
+      - name: Issue board owner-mutation confinement contract
+        if: ${{ !cancelled() }}
+        run: pnpm issue:board:test
+      - name: Fixed CI contract
+        if: ${{ !cancelled() }}
+        run: pnpm ci:contract:test
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
 
@@ -1462,7 +1537,7 @@ jobs:
   autoreview-suite:
     name: Autoreview adversarial suite
     needs: changes
-    if: needs.changes.outputs.autoreviewSuite == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.autoreviewSuite == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
@@ -1494,7 +1569,7 @@ jobs:
   autoreview-root-runtime:
     name: Autoreview root-runtime trust
     needs: changes
-    if: needs.changes.outputs.autoreviewRootRuntime == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.autoreviewRootRuntime == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     permissions:
@@ -1540,7 +1615,7 @@ jobs:
   version-skew:
     name: Version skew
     needs: changes
-    if: needs.changes.outputs.versionSkew == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.versionSkew == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     permissions:
@@ -1569,7 +1644,7 @@ jobs:
     # workspace edit to recheck the architecture. Also fires on `codeHealth`
     # (dep-cruiser config + knip configs) so a PR that only edits the
     # rule file is validated against the codebase before merge.
-    if: needs.changes.outputs.shared == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.indexer == 'true' || needs.changes.outputs.bridge == 'true' || needs.changes.outputs.integrationProbes == 'true' || needs.changes.outputs.aegis == 'true' || needs.changes.outputs.codeHealth == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.indexer == 'true' || needs.changes.outputs.bridge == 'true' || needs.changes.outputs.integrationProbes == 'true' || needs.changes.outputs.aegis == 'true' || needs.changes.outputs.codeHealth == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     permissions:
