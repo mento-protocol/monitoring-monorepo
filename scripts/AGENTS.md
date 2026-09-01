@@ -43,12 +43,12 @@ subdirectories.
 `redrive-onchain-deadletter.{mjs,test.mjs}` stays flat under
 `alerts/infra/`; ADR 0064 gives the lint reason.
 
-`lib/` holds cores that multiple clusters read: `hcl.mjs` for Terraform HCL,
-`workflow-yaml.mjs` for Actions and shell parsing,
-`pnpm-override-selector.mjs` for pnpm overrides, and
-`gh-issue-lifecycle.mjs` for shared GitHub issue and label mechanics, which doc
-schedulers also read. Local projection keeps only `agent-ready` on create and
-all lifecycle labels on closed repair. ADR 0064 lists readers.
+`lib/` holds cores multiple clusters read: `hcl.mjs` (Terraform HCL),
+`workflow-yaml.mjs` (Actions and shell parsing), `pnpm-override-selector.mjs`
+(pnpm overrides), and `gh-issue-lifecycle.mjs` (GitHub issue and label
+mechanics), which doc schedulers also read. Local projection keeps only
+`agent-ready` on create and all lifecycle labels on closed repair. ADR 0064
+lists readers.
 `peg-policy-digest.mjs` defines the peg version-digest contract for both
 validators. Inventories, pinned hashes, and identities stay with their domain.
 
@@ -73,23 +73,24 @@ feedback-runtime pins.
   `deploy/deploy-indexer-verify-status-identity.mjs` use one any-depth arm;
   both verifier tests run. Exact `pr/agent-issue-board{,.test}.mjs` and
   `pr/issue-board-{backfill,cli,commands,lock,ownership,projects,release,state,sync,sync-lock,transactions,transport}.mjs`
-  route to `pnpm issue:board:test`; CI runs it after failures. ADR 0082 owns
+  route `pnpm issue:board:test`; CI runs it after failures. ADR 0082 owns
   confinement. Exact
   `repo-health/check-guardrail-prose{,.test}.mjs` and
-  `repo-health/guardrail-prose.json` route to the guardrail suite. `ci.yml`,
+  `repo-health/guardrail-prose.json` route the guardrail suite. `ci.yml`,
   quick-commands, and the manifest pin it as ADR 0073 specifies.
   `pr/merge-pr*`, both PR-state helpers, and `agent-autoreview.sh` (Codex
   markers) route `pnpm pr:merge:test`.
-- **Gate runtime pins.** The gate runtime and tests pin helpers, routes,
-  signatures, fixtures, and literals (ADRs 0064 and 0076). `.coderabbit.yaml`
-  and `coderabbit-config.test.mjs` pin
-  `scripts/{agent-quality-gate.sh,agent-quality-gate.test.sh,gate/**/*.{c,mjs,sh}}`
-  for review scope. Move all copies together.
-- **Gate mapping pins.** The signature and Turbo inputs pin
+- **Gate runtime pins.** Before `cd`, `agent-quality-gate.sh` resolves
+  `gate/run-handles.sh`, coordinator files,
+  `docs/docs-navigation-eval-helpers.mjs`, and `gate/lockfile-scope.mjs` from
+  `$script_source_dir`; tests hash them from `$repo_root`. Move each path with
+  its routes, signatures, fixtures, literals, and the review selector
+  `.coderabbit.yaml` and `coderabbit-config.test.mjs` pin (ADRs 0064 and 0076).
+- **Gate mapping pins.** Signature and Turbo inputs pin
   `gate/routing-table/**`, `gate/mapping*`, the autoreview core, and its sealed
-  policy. Runtime hashes use `$script_source_dir`; suites use `$repo_root`.
-  Core edits route both suites; policy edits route autoreview. Missing pins
-  freeze the stamp (ADRs 0069 and 0079).
+  policy; hashes follow the same split. Core edits route both suites;
+  policy edits route autoreview. Missing pins freeze the stamp (ADRs 0069 and
+  0079).
 - **Review-eval pins.** `review/run-eval-source-snapshot.sh` joins the
   four-source set in `docs/evals/review-skill.md`; update every listed consumer
   together.
