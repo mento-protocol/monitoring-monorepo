@@ -302,6 +302,39 @@ export const addAdrReminder = (plan, reason, facts) => {
   plan.addCommand(command, reason);
 };
 
+export const addPegRegistryIntegrityCheck = (plan, reason, facts) => {
+  // The validator compares the working policy against the one at the BASE
+  // REF's tip: `inferredPolicyBaseRef()` defaults to `origin/main` and
+  // `readPolicyFromGit` runs `git show <ref>:<policy path>`. Its answer
+  // therefore moves when the tip moves, even though nothing in the worktree
+  // changed. Naming the base in the command text is what keeps the freshness
+  // stamp TIP-bound for any plan carrying this check; a bare invocation reads
+  // the tip while the stamp binds only the merge-base, so an advance of the
+  // base could skip a lineage check whose answer had just changed.
+  //
+  // Pass the RESOLVED OID when there is one. The validator's `validateGitRef`
+  // admits only `[A-Za-z0-9._/-]+`, which rejects spellings the gate itself
+  // accepts — `HEAD~1`, and any ref carrying a quote — and every peg plan would
+  // then fail before validating anything. A hex OID always satisfies that
+  // allowlist, so sending it spares the gate from mirroring a regex that lives
+  // in another script and could tighten without warning. It also pins the base
+  // the gate measured, so a fetch landing mid-run cannot move the comparison.
+  //
+  // Fall back to the ref only for the `__unresolved__:` sentinel, which is not
+  // a rev the validator could use. That path stays fail-closed: an unresolvable
+  // ref makes `readPolicyFromGit` throw `cannot resolve policy base ref`, and a
+  // spelling outside the allowlist throws `invalid policy base ref`. Neither
+  // silently skips the lineage check — the no-baseline return is reserved for a
+  // ref that DOES resolve but does not yet carry the policy file.
+  const baseOid = facts.baseOid;
+  const resolved =
+    typeof baseOid === "string" && !baseOid.startsWith("__unresolved__:");
+  const command =
+    "node scripts/alerts/check-peg-registry-integrity.mjs" +
+    ` --base-ref ${shellQuote(resolved ? baseOid : facts.baseRef)}`;
+  plan.addCommand(command, reason);
+};
+
 export const addSentrySuiteGateCommands = (plan, reason) => {
   plan.addCommand(
     "/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry/gate/sentry-suite-gate.test.mjs",

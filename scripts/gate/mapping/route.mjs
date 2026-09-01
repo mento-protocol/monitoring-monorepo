@@ -34,6 +34,8 @@ const VERBS = {
   add_checklist: (plan, args) => plan.addChecklist(args[0], args[1]),
   add_adr_reminder: (plan, args, facts) =>
     verbs.addAdrReminder(plan, args[0], facts),
+  add_peg_registry_integrity_check: (plan, args, facts) =>
+    verbs.addPegRegistryIntegrityCheck(plan, args[0], facts),
   add_turbo_package_task: (plan, args) =>
     plan.addCommand(verbs.turboLocalCacheCommand(args[0], args[1]), args[2]),
   add_package_quality_commands: (plan, args) =>

@@ -156,9 +156,10 @@ function makeLockfileRouter(changedPaths, scriptSourceDir) {
       "pnpm install --frozen-lockfile",
       "workspace dependency/config changed",
     );
-    plan.addCommand(
-      "node scripts/alerts/check-peg-registry-integrity.mjs",
+    verbs.addPegRegistryIntegrityCheck(
+      plan,
       "root lockfile changed (peg registry authority dependency)",
+      facts,
     );
 
     const classifier = join(scriptSourceDir, "gate", "lockfile-scope.mjs");
