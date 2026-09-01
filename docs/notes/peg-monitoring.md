@@ -244,8 +244,10 @@ pnpm alerts:rules:lint:test
 pnpm alerts:rules:lint
 pnpm tf validate alerts-rules
 (cd alerts/rules && TF_DATA_DIR=.terraform-tf-wrapper terraform test -no-color)
-pnpm agent:quality-gate --run
 ```
+
+Then run the gate or gates from step 3 of the
+[PR operating card](pr-operating-card.md).
 
 The linter parses map-comprehension `format()` expressions, requires every
 `mento_peg_*` selector to bind one approved policy version, cross-checks metric

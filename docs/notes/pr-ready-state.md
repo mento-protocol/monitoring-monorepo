@@ -428,9 +428,10 @@ Field expectations:
    coordinator. They share weighted machine capacity. From invocation until
    this gate exits, do not start uncoordinated work there. Use same-machine spare
    workers only for read-only work. Run the gate or gates from operating-card
-   step 3. Local and hosted `main` PRs run one pass. Hosted stacked PRs run the
-   resolved-base pass and the separate `origin/main` hook warm. Run validation
-   outside the coordinator from a fully hydrated checkout on another machine.
+   step 3. Local PRs and hosted non-fork PRs targeting `origin/main` run one
+   pass. Hosted fork and stacked PRs run the resolved-base pass and the separate
+   `origin/main` hook warm. Run validation outside the coordinator from a fully
+   hydrated checkout on another machine.
 4. For non-trivial behavioral, workflow, security, data-flow, or UI batches,
    run `pnpm agent:autoreview` as a structured source-review closeout at the
    batch boundary rather than as an inner loop. Verify accepted findings before

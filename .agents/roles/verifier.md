@@ -20,10 +20,12 @@ Run diff-scoped verification and report only actionable results.
 2. Run `pnpm agent:quality-gate --dry-run` and confirm mapped commands/checklists match changed surfaces.
 3. Unless the requester asked for dry verification only, run the gate as a
    background task. A local setup runs `pnpm agent:quality-gate --run` against
-   the resolved PR base. A hosted setup always fetches `origin/main` and warms
-   the hook with
+   the resolved PR base. In a hosted setup, run the resolved-base gate first
+   when the resolved base tracking ref is not `origin/main`. This includes fork
+   and stacked PRs. Then fetch `origin/main` and warm the hook with
    `./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main`. If
-   the hosted PR base is not `main`, run its resolved-base gate first.
+   the resolved base is `origin/main`, this hook warm is also the resolved-base
+   gate.
    Before invoking it, ensure
    that no direct validation, dashboard server, or browser suite outside the
    coordinator is active on the same machine. Concurrent `--run` gates from

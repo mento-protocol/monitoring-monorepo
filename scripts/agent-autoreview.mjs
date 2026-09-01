@@ -292,7 +292,7 @@ function parseArgs(argv) {
       case "--parallel-tests":
         next();
         throw new Error(
-          "--parallel-tests was removed; run pnpm agent:quality-gate --run before autoreview",
+          "--parallel-tests was removed; run the local or hosted gate command from docs/notes/pr-operating-card.md step 3 before autoreview",
         );
       case "--timeout-seconds":
         args.timeoutSeconds = Number.parseInt(next(), 10);

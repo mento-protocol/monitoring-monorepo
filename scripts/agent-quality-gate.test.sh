@@ -1156,6 +1156,13 @@ const sweepWorkerEntryPoints = [
   ".agents/skills/backlog-sweep/SKILL.md",
   ".claude/skills/backlog-sweep/SKILL.md",
 ];
+const resolvedBaseEntryPoints = [
+  ".agents/skills/ship/SKILL.md",
+  ".claude/skills/ship/SKILL.md",
+  ".agents/roles/verifier.md",
+  "docs/notes/pr-operating-card.md",
+  "docs/notes/pr-ready-state.md",
+];
 const activeTrunkLines = trunk
   .split("\n")
   .filter((line) => !line.trimStart().startsWith("#"))
@@ -1203,6 +1210,27 @@ for (const entryPointPath of sweepWorkerEntryPoints) {
     `${entryPointPath} must propagate the setup type into every worker clone`,
   );
 }
+for (const entryPointPath of resolvedBaseEntryPoints) {
+  const entryPoint = fs.readFileSync(entryPointPath, "utf8");
+  assert.match(
+    entryPoint,
+    /resolved base[\s\S]{0,120}not[\s\S]{0,40}`origin\/main`|hosted fork and stacked PRs/iu,
+    `${entryPointPath} must preserve fork and stacked resolved-base validation`,
+  );
+}
+const claudeSessionStart = fs.readFileSync(
+  ".claude/hooks/session-start.sh",
+  "utf8",
+);
+const claudeHostedConfigIndex = claudeSessionStart.indexOf(
+  "git -C \"$REPO_ROOT\" config agent.qualityGate.cloudPrePushRequireFresh true",
+);
+const claudeSourceFilterIndex = claudeSessionStart.indexOf('case "$SOURCE" in');
+assert.ok(claudeHostedConfigIndex >= 0, "Claude resume hosted config is missing");
+assert.ok(
+  claudeHostedConfigIndex < claudeSourceFilterIndex,
+  "Claude resume hosted config must precede the source filter",
+);
 const freshnessSkipIndex = gate.indexOf(
   'echo "Previous successful agent quality gate run is still fresh; skipping mapped commands."',
 );

@@ -160,11 +160,8 @@ routing-sensitive source, the shared classifier adds the offline
 scheduled evaluation. Every tracked Markdown change runs `pnpm docs:index
 --check` and `pnpm docs:navigation-eval:test`. The second command enforces the
 navigation source budgets that the Markdown-only CI job checks. Review the
-output, then run:
-
-```bash
-pnpm agent:quality-gate --run
-```
+output. Then run the local or hosted gate command from step 3 of the
+[PR operating card](pr-operating-card.md).
 
 Every non-empty candidate change set also runs the Terraform-stack suite. The
 gate spells it `pnpm tf:test`, unless a root-tooling `package.json` edit already
@@ -2341,9 +2338,10 @@ for it is scoped to that exact name.
 
 The pre-push hook reaches neither bypass. It runs a fixed command line, and
 Trunk strips these variables. If coordination fails, the hook exits non-zero.
-Run `pnpm agent:quality-gate --run` normally after the reported recovery or
-compatibility blocker clears. A verified matching success lets the hook's
-`--skip-if-fresh` path exit before it registers another request.
+After the reported recovery or compatibility blocker clears, run the local or
+hosted gate command from step 3 of the
+[PR operating card](pr-operating-card.md). A verified matching success lets the
+hook's `--skip-if-fresh` path exit before it registers another request.
 
 **Heavy suites form barriers.** Dashboard coverage, its scoped `vitest related`
 substitute, browser work, production builds, and size-limit work take all
@@ -2798,7 +2796,8 @@ pnpm agent:review-materiality
 The command reports `trivial`, `standard`, or `full` materiality from changed
 path risk and diff size, plus whether the change likely needs AGENTS, README,
 runbook, checklist, or skill context updates. It is advisory and does not
-replace `pnpm agent:quality-gate --run`,
+replace the applicable gate command from step 3 of the
+[PR operating card](pr-operating-card.md),
 `pnpm agent:autoreview`, or `pnpm pr:ready-state`.
 
 To warm Turbo's local cache for the Turbo-backed package tasks mapped by the
