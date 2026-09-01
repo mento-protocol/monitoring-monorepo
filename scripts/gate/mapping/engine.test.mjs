@@ -27,6 +27,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -38,10 +39,13 @@ import { ROUTING_PLAN } from "../routing-table/index.mjs";
 import { Facts } from "./facts.mjs";
 import { BUCKETS, Plan, commandDedupeKey } from "./plan.mjs";
 import {
+  CODE_HEALTH_DEPS_COMMAND,
+  DEPCRUISE_ROOTS,
   addTrunkCheckCommand,
   addWorkspaceConfigBuild,
   applyScopedTestCommands,
   compactTurboQualityCommands,
+  narrowCodeHealthDepsCommand,
   scopedIsNonSourcePath,
   scopedTestInfraChanged,
   sortCodegenCommands,
@@ -408,17 +412,174 @@ test("Darwin runtime files shared with autoreview route both regression suites",
 
 // ── Post-pass 1: Trunk ─────────────────────────────────────────────────────
 
-test("a path that no longer exists forces a full-repo Trunk scan", () => {
+test("a change set of nothing but deletions forces a full-repo Trunk scan", () => {
   const plan = new Plan();
   addTrunkCheckCommand(
     plan,
-    ["deleted/file.ts"],
+    ["deleted/one.ts", "deleted/two.ts"],
     stubFacts({ presentPaths: [] }),
   );
-  assert.deepEqual(commandsOf(plan), ["./tools/trunk check --ci --all"]);
+  assert.deepEqual(
+    commandsOf(plan),
+    ["./tools/trunk check --ci --all"],
+    "there is no survivor to name on a targeted command line",
+  );
   assert.equal(
     reasonOf(plan, "./tools/trunk check --ci --all"),
-    "changed paths require full-repo Trunk checks",
+    "every changed path was deleted; full-repo Trunk checks",
+  );
+});
+
+test("a deleted path is dropped from the targeted Trunk argument list", () => {
+  const plan = new Plan();
+  addTrunkCheckCommand(
+    plan,
+    ["a/kept.ts", "a/deleted.ts", "b/kept.ts"],
+    stubFacts({ presentPaths: ["a/kept.ts", "b/kept.ts"] }),
+  );
+  assert.deepEqual(
+    commandsOf(plan),
+    ["./tools/trunk check --ci a/kept.ts b/kept.ts"],
+    "Trunk fails on an argument that is not there; the survivors still lint",
+  );
+});
+
+test("a deleted .github path forces full, because actionlint reads across files", () => {
+  for (const deleted of [
+    ".github/actions/pnpm-install/action.yml",
+    ".github/workflows/reusable.yml",
+  ]) {
+    const plan = new Plan();
+    addTrunkCheckCommand(
+      plan,
+      [deleted, "docs/note.md"],
+      stubFacts({ presentPaths: ["docs/note.md"] }),
+    );
+    assert.deepEqual(
+      commandsOf(plan),
+      ["./tools/trunk check --ci --all"],
+      `${deleted} is referenced by surviving workflows that are not in the change set`,
+    );
+  }
+});
+
+test("an ordinary deletion beside a survivor does NOT force full", () => {
+  // The standing invariant the narrowing rests on: every enabled Trunk linter
+  // except actionlint judges a file on its own bytes, so a deleted source file
+  // cannot invalidate a file nobody touched.
+  const plan = new Plan();
+  addTrunkCheckCommand(
+    plan,
+    ["ui-dashboard/src/gone.tsx", "ui-dashboard/src/kept.tsx"],
+    stubFacts({ presentPaths: ["ui-dashboard/src/kept.tsx"] }),
+  );
+  assert.deepEqual(commandsOf(plan), [
+    "./tools/trunk check --ci ui-dashboard/src/kept.tsx",
+  ]);
+});
+
+test("a deleted sourced shell helper forces full, because ShellCheck follows sources", () => {
+  // Measured: deleting scripts/bootstrap/codex-cloud-git-helpers.sh takes its
+  // two surviving callers from clean to SC1091, because each names it in a
+  // `# shellcheck source=` directive that resolves against the real tree. No
+  // survivor naming it is in the change set, so a targeted run never sees it.
+  const plan = new Plan();
+  addTrunkCheckCommand(
+    plan,
+    ["scripts/bootstrap/codex-cloud-git-helpers.sh", "docs/note.md"],
+    stubFacts({ presentPaths: ["docs/note.md"] }),
+  );
+  assert.deepEqual(
+    commandsOf(plan),
+    ["./tools/trunk check --ci --all"],
+    "surviving callers source the deleted helper and are not in the change set",
+  );
+});
+
+test("a deleted repo-root dotfile forces full, because linters read it repo-wide", () => {
+  // Measured: with `.codespellrc` gone, the unchanged
+  // scripts/terraform/tf-platform-plan-guard.mjs goes from clean to one
+  // codespell hit on `applyable`, an ignore-word that config carries. The
+  // targeted run over survivors still exits 0, so this passes locally and only
+  // the required full scan catches it.
+  for (const deleted of [
+    ".codespellrc",
+    ".shellcheckrc",
+    ".osv-scanner.toml",
+    ".gitignore",
+  ]) {
+    const plan = new Plan();
+    addTrunkCheckCommand(
+      plan,
+      [deleted, "docs/note.md"],
+      stubFacts({ presentPaths: ["docs/note.md"] }),
+    );
+    assert.deepEqual(
+      commandsOf(plan).filter((c) => !c.includes("--filter=shellcheck")),
+      ["./tools/trunk check --ci --all"],
+      `${deleted} configures a linter across files that did not change`,
+    );
+  }
+});
+
+test("a deleted NESTED dotfile forces full, because linter configs cascade", () => {
+  // Measured: prettier, markdownlint and yamllint take the nearest config, so a
+  // package can carry its own. With `aegis/.prettierrc` deleted, the untouched
+  // `aegis/src/app.module.ts` starts failing prettier — its `singleQuote`
+  // setting went with the file — while a targeted run over survivors exits 0.
+  for (const deleted of [
+    "aegis/.prettierrc",
+    "ui-dashboard/.prettierrc.json",
+    "metrics-bridge/.markdownlint.yaml",
+    "alerts/infra/.prettierignore",
+  ]) {
+    const plan = new Plan();
+    addTrunkCheckCommand(
+      plan,
+      [deleted, "docs/note.md"],
+      stubFacts({ presentPaths: ["docs/note.md"] }),
+    );
+    assert.deepEqual(
+      commandsOf(plan).filter((c) => !c.includes("--filter=shellcheck")),
+      ["./tools/trunk check --ci --all"],
+      `${deleted} configures a linter for files that did not change`,
+    );
+  }
+});
+
+test("a deleted NON-dotfile stays an ordinary deletion at any depth", () => {
+  // The other direction: the rule keys on the leading dot, not on depth, so an
+  // ordinary nested source or docs deletion still targets the survivors.
+  for (const deleted of [
+    "ui-dashboard/src/gone.tsx",
+    "docs/notes/gone.md",
+    "aegis/config/gone.json",
+  ]) {
+    const plan = new Plan();
+    addTrunkCheckCommand(
+      plan,
+      [deleted, "docs/note.md"],
+      stubFacts({ presentPaths: ["docs/note.md"] }),
+    );
+    assert.deepEqual(
+      commandsOf(plan),
+      ["./tools/trunk check --ci docs/note.md"],
+      `${deleted} carries no configuration for files that did not change`,
+    );
+  }
+});
+
+test("a deleted path still in the full-scan list forces full", () => {
+  const plan = new Plan();
+  addTrunkCheckCommand(
+    plan,
+    ["ui-dashboard/package.json", "ui-dashboard/src/kept.tsx"],
+    stubFacts({ presentPaths: ["ui-dashboard/src/kept.tsx"] }),
+  );
+  assert.deepEqual(
+    commandsOf(plan),
+    ["./tools/trunk check --ci --all"],
+    "the whole-repo list is matched against every changed path, deleted or not",
   );
 });
 
@@ -798,6 +959,243 @@ test("scopedTestInfraChanged sees infra anywhere in the set", () => {
   assert.equal(
     scopedTestInfraChanged(["ui-dashboard/src/a.ts", "shared-config/src/b.ts"]),
     true,
+  );
+});
+
+// ── Post-pass 6: dep-cruiser scope ─────────────────────────────────────────
+
+/** A plan holding only the command the pass may remove. */
+function depsPlan() {
+  const plan = new Plan();
+  plan.addCommand("pnpm exec turbo run lint --filter=x --cache=local:rw", "a");
+  plan.addCommand(CODE_HEALTH_DEPS_COMMAND, "package bundle");
+  plan.addCommand("pnpm --filter x test:coverage", "b");
+  return plan;
+}
+
+const depsSurvives = (changedPaths) => {
+  const plan = depsPlan();
+  narrowCodeHealthDepsCommand(plan, changedPaths);
+  return commandsOf(plan).includes(CODE_HEALTH_DEPS_COMMAND);
+};
+
+test("every scanned root keeps pnpm code-health:deps", () => {
+  // The standing invariant: a change dependency-cruiser can read must still be
+  // judged by it. Asserted for all six roots, not just the motivating one.
+  // This iterates the same constant the pass compiles its trigger from, so it
+  // proves the trigger is built correctly and NOT that the list is right — the
+  // staleness test below is what pins the list against its two sources.
+  for (const root of DEPCRUISE_ROOTS) {
+    assert.equal(
+      depsSurvives([`${root}/src/thing.ts`]),
+      true,
+      `${root} is a scanned root; narrowing it away would weaken the check`,
+    );
+  }
+});
+
+test("ANY path inside a scanned root keeps the command, whatever its type", () => {
+  // Reverted narrowing, kept as a regression test. Extension lists cannot
+  // decide graph membership: resolution can reach any file an import names
+  // with its extension, so `.md`, `.svg`, `.css`, `.json` and `.sol` are all
+  // possible edge targets. See the note on DEPCRUISE_ROOT_PREFIX.
+  for (const path of [
+    "ui-dashboard/AGENTS.md",
+    "ui-dashboard/README.md",
+    "ui-dashboard/public/logo.svg",
+    "ui-dashboard/src/app/globals.css",
+    "ui-dashboard/src/thing.ts",
+    "aegis/src/Thing.sol",
+    "indexer-envio/config/celo.yaml",
+    "indexer-envio/config/nttAddresses.json",
+    "ui-dashboard/package.json",
+  ]) {
+    assert.equal(
+      depsSurvives([path]),
+      true,
+      `${path} is inside a scanned root, so dependency-cruiser may report it`,
+    );
+  }
+});
+
+test("the in-root asset imports these cases stand for are still real", () => {
+  // Two real imports, kept from the reverted extension pins. They are why an
+  // in-root non-source change can move an edge: if either stops existing, the
+  // reasoning above needs re-checking rather than quiet trust.
+  const repoRoot = join(
+    fileURLToPath(new URL(".", import.meta.url)),
+    "../../..",
+  );
+  const read = (relative) => readFileSync(join(repoRoot, relative), "utf8");
+  assert.match(
+    read("indexer-envio/src/handlers/stables/config.ts"),
+    /import\s+\w+\s+from\s+"[^"]*config\/nttAddresses\.json"/,
+    "indexer source must still statically import a config JSON",
+  );
+  assert.match(
+    read("ui-dashboard/src/app/layout.tsx"),
+    /import\s+"\.\/globals\.css"/,
+    "dashboard source must still statically import a stylesheet",
+  );
+});
+
+test("a change outside every scanned root drops pnpm code-health:deps", () => {
+  for (const path of [
+    "governance-watchdog/src/index.ts",
+    "alerts/infra/onchain-event-handler/src/index.ts",
+    "alerts/infra/oncall-announcer/src/main.ts",
+    ".github/workflows/ci.yml",
+    "docs/notes/quick-commands.md",
+    "terraform/platform/main.tf",
+  ]) {
+    assert.equal(
+      depsSurvives([path]),
+      false,
+      `${path} is neither walked nor reported by dependency-cruiser`,
+    );
+  }
+});
+
+test("a workspace manifest keeps pnpm code-health:deps", () => {
+  // A scanned root reaches another scanned root by package name
+  // (`@mento-protocol/config` → `shared-config/`), so these three files can add
+  // or remove an edge between two roots with no file inside a root changing.
+  // Narrowing them away would hide exactly that class of graph change.
+  for (const path of [
+    "package.json",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+  ]) {
+    assert.equal(
+      depsSurvives([path]),
+      true,
+      `${path} decides what a bare specifier inside a scanned root resolves to`,
+    );
+  }
+});
+
+test("a non-root package manifest does not keep the command", () => {
+  // The manifest triggers are anchored, so a manifest belonging to a package
+  // dependency-cruiser never scans stays narrowed away.
+  assert.equal(depsSurvives(["governance-watchdog/package.json"]), false);
+});
+
+test("one in-root path anywhere in the set keeps the command", () => {
+  assert.equal(
+    depsSurvives(["governance-watchdog/src/index.ts", "aegis/src/Thing.ts"]),
+    true,
+    "the pass asks what changed, not which package the arms routed",
+  );
+});
+
+test("the dep-cruiser config and this pass keep the command", () => {
+  // Fail-closed: an edit to the rules, or to the narrowing itself, runs the
+  // command rather than being judged by it.
+  assert.equal(depsSurvives([".dependency-cruiser.cjs"]), true);
+  assert.equal(
+    depsSurvives([
+      "scripts/gate/mapping/post-passes.mjs",
+      "governance-watchdog/src/index.ts",
+    ]),
+    true,
+  );
+});
+
+/** A plan as an arm that never schedules dep-cruiser would leave it. */
+const depsAddedTo = (changedPaths) => {
+  const plan = new Plan();
+  plan.addCommand("pnpm exec turbo run lint --filter=x --cache=local:rw", "a");
+  narrowCodeHealthDepsCommand(plan, changedPaths);
+  return commandsOf(plan).filter((c) => c === CODE_HEALTH_DEPS_COMMAND).length;
+};
+
+test("the pass schedules the command when no arm did", () => {
+  // The defect this closes: declining to remove a command nothing added leaves
+  // the plan without it. Measured against the real gate, `post-passes.mjs` and
+  // `pnpm-lock.yaml` reach no arm that schedules dep-cruiser, so for those two
+  // the guarantee only exists if this pass adds the command itself.
+  for (const path of [
+    "scripts/gate/mapping/post-passes.mjs",
+    "pnpm-lock.yaml",
+    "package.json",
+    "pnpm-workspace.yaml",
+    ".dependency-cruiser.cjs",
+  ]) {
+    assert.equal(
+      depsAddedTo([path]),
+      1,
+      `${path} must schedule dep-cruiser even when no arm does`,
+    );
+  }
+});
+
+test("the pass does not schedule dep-cruiser for a scanned root alone", () => {
+  // The arms own the roots, and they decide better: a root's README matches the
+  // root prefix but cannot change a verdict. Scheduling here would add work the
+  // arms correctly leave out.
+  assert.equal(depsAddedTo(["shared-config/README.md"]), 0);
+  assert.equal(depsAddedTo(["ui-dashboard/src/thing.ts"]), 0);
+});
+
+test("the pass does not duplicate a command an arm already scheduled", () => {
+  const plan = depsPlan();
+  narrowCodeHealthDepsCommand(plan, [".dependency-cruiser.cjs"]);
+  assert.equal(
+    commandsOf(plan).filter((c) => c === CODE_HEALTH_DEPS_COMMAND).length,
+    1,
+    "addCommand dedupes, so the arm's entry and reason survive",
+  );
+  assert.equal(reasonOf(plan, CODE_HEALTH_DEPS_COMMAND), "package bundle");
+});
+
+test("the pass removes only its own command", () => {
+  const plan = depsPlan();
+  narrowCodeHealthDepsCommand(plan, ["docs/note.md"]);
+  assert.deepEqual(commandsOf(plan), [
+    "pnpm exec turbo run lint --filter=x --cache=local:rw",
+    "pnpm --filter x test:coverage",
+  ]);
+});
+
+test("the pinned roots match both sources that define them", () => {
+  // Staleness, both directions. Adding a seventh root to either source without
+  // updating DEPCRUISE_ROOTS would otherwise leave the gate quietly
+  // under-routing every change beneath it.
+  const repoRoot = join(
+    fileURLToPath(new URL(".", import.meta.url)),
+    "../../..",
+  );
+  const manifest = JSON.parse(
+    readFileSync(join(repoRoot, "package.json"), "utf8"),
+  );
+  const script = manifest.scripts["code-health:deps"];
+  assert.ok(script.startsWith("depcruise --config .dependency-cruiser.cjs "));
+  const scriptRoots = script
+    .slice("depcruise --config .dependency-cruiser.cjs ".length)
+    .split(" ")
+    .filter((token) => token !== "");
+
+  const config = createRequire(import.meta.url)(
+    join(repoRoot, ".dependency-cruiser.cjs"),
+  );
+  const includeOnly = config.options.includeOnly.path;
+  const match = /^\^\(([^)]+)\)\/$/.exec(includeOnly);
+  assert.ok(
+    match !== null,
+    `includeOnly.path is no longer a root alternation: ${includeOnly}`,
+  );
+  const configRoots = match[1].split("|");
+
+  const sorted = (values) => [...values].sort();
+  assert.deepEqual(
+    sorted(scriptRoots),
+    sorted(DEPCRUISE_ROOTS),
+    "the code-health:deps arguments and the gate's pinned roots must agree",
+  );
+  assert.deepEqual(
+    sorted(configRoots),
+    sorted(DEPCRUISE_ROOTS),
+    "the dependency-cruiser includeOnly roots and the gate's pinned roots must agree",
   );
 });
 

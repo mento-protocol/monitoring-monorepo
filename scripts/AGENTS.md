@@ -88,7 +88,10 @@ feedback-runtime pins.
   `gate/routing-table/**`, `gate/mapping*`, the autoreview core, and sealed
   policy. Runtime hashes use `$script_source_dir`; suites use `$repo_root`.
   Core edits route both suites; policy edits route autoreview. Missing pins
-  freeze the stamp (ADRs 0069 and 0079).
+  freeze the stamp (ADRs 0069 and 0079). Three exact pins move alone:
+  `.dependency-cruiser.cjs` and root `package.json` both name
+  `gate/mapping/engine.test.mjs` (scanned roots);
+  `gate/mapping/post-passes.mjs` schedules `code-health:deps` itself.
 - **Review-eval pins.** The runbook tracks `scripts/review/run-eval*.sh`,
   `install-review-eval-launchd*`, the launchd plist, and
   `review-eval-*publication*` with their tests. Its file table,
