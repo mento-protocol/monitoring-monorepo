@@ -199,11 +199,14 @@ contradict each other: ready says it can be Selected, grooming says it cannot.
 Count it in Method as unresolved and say which issue it was, so the conflict gets
 fixed on the issue rather than silently resolved by whichever rule ran first.
 
-Ownership is read from labels. `pnpm issue:claim` removes `agent-ready`, adds
-`agent-active`, and writes the Project `Claim ID` in the same operation, so the
-label is the signal every queue consumer keys on — `listReadyIssues` included.
-This skill only recommends; the operator's claim re-validates ownership through
-the helper's own Claim ID guard before any work starts.
+Ownership is read from labels. `pnpm issue:claim` holds the per-issue helper
+mutex while it removes `agent-ready`, adds `agent-active`, and writes the
+Project ownership fields. It preserves the human-owned Project Status. GitHub
+still applies label and Project writes through separate APIs. The label is the
+signal every queue consumer keys on —
+`listReadyIssues` included. This skill only recommends; the operator's claim
+re-validates ownership through the helper's own Claim ID guard before any work
+starts.
 
 Keep `needs-grooming` issues in the roster. They score badly on ease and fit on
 their own merits, and seeing where they land is the point. Never Select one:

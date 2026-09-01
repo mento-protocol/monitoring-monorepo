@@ -4499,7 +4499,7 @@ test("scoring resets each fixture, uses the contract judge, and totals its cost"
   }
 });
 
-test("a blind judge keeps its turn bound and emits no --allowed-tools", () => {
+test("a blind judge disables tools and keeps its turn bound", () => {
   const blind = claudeArgv({
     prompt: "judge this",
     model: "claude-opus-5",
@@ -4508,10 +4508,15 @@ test("a blind judge keeps its turn bound and emits no --allowed-tools", () => {
     maxTurns: BLIND_JUDGE_MAX_TURNS,
   });
   // An empty `--allowed-tools` makes the CLI eat the next flag and its value as
-  // tool names, which silently unbounds the judge. The flag must be absent.
+  // tool names. Omitting it exposes the defaults. Use the explicit no-tools
+  // form and keep the one-turn bound separate.
   assert.equal(blind.includes("--allowed-tools"), false);
+  const blindToolsAt = blind.indexOf("--tools");
+  assert.notEqual(blindToolsAt, -1);
+  assert.equal(blind[blindToolsAt + 1], "");
   const turnsAt = blind.indexOf("--max-turns");
   assert.notEqual(turnsAt, -1);
+  assert.equal(blindToolsAt + 2, turnsAt);
   assert.equal(blind[turnsAt + 1], "1");
 
   const tooled = claudeArgv({
@@ -4521,10 +4526,16 @@ test("a blind judge keeps its turn bound and emits no --allowed-tools", () => {
     allowedTools: ["Read", "Grep"],
     maxTurns: 60,
   });
-  const toolsAt = tooled.indexOf("--allowed-tools");
-  assert.notEqual(toolsAt, -1);
-  assert.deepEqual(tooled.slice(toolsAt + 1, toolsAt + 3), ["Read", "Grep"]);
-  assert.deepEqual(tooled.slice(toolsAt + 3), ["--max-turns", "60"]);
+  const availableToolsAt = tooled.indexOf("--tools");
+  assert.notEqual(availableToolsAt, -1);
+  assert.equal(tooled[availableToolsAt + 1], "Read,Grep");
+  const allowedToolsAt = tooled.indexOf("--allowed-tools");
+  assert.equal(allowedToolsAt, availableToolsAt + 2);
+  assert.deepEqual(tooled.slice(allowedToolsAt + 1, allowedToolsAt + 3), [
+    "Read",
+    "Grep",
+  ]);
+  assert.deepEqual(tooled.slice(allowedToolsAt + 3), ["--max-turns", "60"]);
 });
 
 test("a scoring subprocess inherits no GitHub credential", () => {

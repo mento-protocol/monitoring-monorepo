@@ -1,8 +1,10 @@
 /**
  * Issue-board reconciliation and closeout.
  *
- * Queue labels remain authoritative. This layer projects each observed state
- * onto the workboard and verifies concurrent close, reopen, and label changes.
+ * Queue labels remain authoritative. This layer keeps open queue items in the
+ * selected Project, removes stale queue labels from closed issues, and verifies
+ * concurrent close, reopen, and label changes. It never writes the human-owned
+ * Project Status field.
  */
 
 import {
@@ -15,7 +17,6 @@ import {
   ensureProjectItem,
   findIssueProjectItem,
   getProject,
-  updateProjectFields,
 } from "./issue-board-projects.mjs";
 import {
   addIssueLabels,
@@ -24,6 +25,13 @@ import {
   listIssuesByLabels,
   sleep,
 } from "./issue-board-transport.mjs";
+import { withIssueMutationLock } from "./issue-board-lock.mjs";
+import {
+  readClaimOwnership,
+  readIssueLockOwnership,
+  preflightStableSyncIssue,
+  runLockedSyncIssue,
+} from "./issue-board-sync-lock.mjs";
 
 const SYNC_RECONCILE_ATTEMPTS = 3;
 const SYNC_COMPENSATE_ATTEMPTS = 3;
@@ -336,25 +344,11 @@ async function syncIssue(options, project, listedIssue, operations) {
         continue;
       }
       throw new Error(
-        `Issue #${issue.number} lost its queue state during sync after ${attempt} attempt(s); last projection drift was ${drift}`,
+        `Issue #${issue.number} lost its queue state during sync after ${attempt} attempt(s); last queue drift was ${drift}`,
       );
     }
 
     if (state === "done") {
-      const itemId = await operations.findIssueProjectItem(
-        options,
-        issue,
-        project,
-      );
-      if (itemId) {
-        await operations.updateProjectFields(
-          options,
-          project,
-          itemId,
-          state,
-          {},
-        );
-      }
       if (options.dryRun) {
         await operations.editIssueLabels(options, issue, state);
         return { number: issue.number, title: issue.title, state };
@@ -370,21 +364,6 @@ async function syncIssue(options, project, listedIssue, operations) {
           continue;
         }
         break;
-      }
-
-      const closeoutItemId = await operations.findIssueProjectItem(
-        options,
-        closeoutIssue,
-        project,
-      );
-      if (closeoutItemId) {
-        await operations.updateProjectFields(
-          options,
-          project,
-          closeoutItemId,
-          state,
-          {},
-        );
       }
 
       const retryQueueSnapshot = retryQueueSnapshotForCloseout(
@@ -404,29 +383,7 @@ async function syncIssue(options, project, listedIssue, operations) {
           operations,
         );
         if (String(verifiedIssue.state ?? "").toUpperCase() === "CLOSED") {
-          const verifiedItemId = await operations.findIssueProjectItem(
-            options,
-            verifiedIssue,
-            project,
-          );
-          if (!verifiedItemId) {
-            return { number: issue.number, title: issue.title, state };
-          }
-          await operations.updateProjectFields(
-            options,
-            project,
-            verifiedItemId,
-            state,
-            {},
-          );
-          verifiedIssue = await verifySyncCloseout(
-            options,
-            verifiedIssue,
-            operations,
-          );
-          if (String(verifiedIssue.state ?? "").toUpperCase() === "CLOSED") {
-            return { number: issue.number, title: issue.title, state };
-          }
+          return { number: issue.number, title: issue.title, state };
         }
 
         let reopenedIssue = verifiedIssue;
@@ -487,8 +444,11 @@ async function syncIssue(options, project, listedIssue, operations) {
     }
 
     const itemId = await operations.ensureProjectItem(options, project, issue);
-    if (!itemId) return null;
-    await operations.updateProjectFields(options, project, itemId, state, {});
+    if (!itemId) {
+      throw new Error(
+        `Issue #${issue.number} Project membership mutation did not return the selected item ID`,
+      );
+    }
     if (options.dryRun) {
       return { number: issue.number, title: issue.title, state };
     }
@@ -517,7 +477,7 @@ async function syncIssue(options, project, listedIssue, operations) {
   }
 
   throw new Error(
-    `Issue #${issue.number} did not stabilize during sync after ${SYNC_RECONCILE_ATTEMPTS} attempts; last projection drift was ${drift}`,
+    `Issue #${issue.number} did not stabilize during sync after ${SYNC_RECONCILE_ATTEMPTS} attempts; last queue drift was ${drift}`,
   );
 }
 
@@ -530,8 +490,11 @@ export async function sync(options, dependencies = {}) {
     getIssue,
     getProject,
     listIssuesByLabels,
+    preflightStableSyncIssue,
+    readClaimOwnership,
+    readIssueLockOwnership,
     sleep,
-    updateProjectFields,
+    withIssueMutationLock,
     ...dependencies,
   };
   const project = await operations.getProject(options);
@@ -548,7 +511,23 @@ export async function sync(options, dependencies = {}) {
   const failures = [];
   for (const listedIssue of byNumber.values()) {
     try {
-      const result = await syncIssue(options, project, listedIssue, operations);
+      const stable = await operations.preflightStableSyncIssue(
+        options,
+        project,
+        listedIssue,
+        operations,
+      );
+      if (stable) {
+        results.push(stable);
+        continue;
+      }
+      const result = await runLockedSyncIssue(
+        options,
+        project,
+        listedIssue,
+        operations,
+        syncIssue,
+      );
       if (result) results.push(result);
     } catch (error) {
       failures.push({

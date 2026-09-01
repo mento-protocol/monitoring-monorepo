@@ -575,7 +575,7 @@
     </nav>
     <main id="main">
       <header id="top" class="shell">
-        <p class="eyebrow">Monitoring monorepo · Phase 0 plan</p>
+        <p class="eyebrow">Monitoring monorepo · Phase 1 trust hardening</p>
         <h1>Remove the queue. Keep the quality bar.</h1>
         <p class="lede">
           Replace the mandatory local gate with direct package feedback and
@@ -809,7 +809,18 @@
                   Closed-world aggregate rejects failed, cancelled, missing, and
                   unexpected results.
                 </li>
-                <li>PR jobs restore protected-main caches but never save.</li>
+                <li>
+                  PR jobs restore nonfatal <code>trusted-main-v1</code> caches
+                  but never save.
+                </li>
+                <li>
+                  An empty restore clears only its fixed cache target. The
+                  required setup command then runs cold.
+                </li>
+                <li>
+                  pnpm keeps its executable and dependency cache in separate
+                  home-relative paths. Cache cleanup cannot remove pnpm.
+                </li>
                 <li>
                   Automated review, feedback ledger, exact-head readiness, and
                   human merge consent remain.
@@ -841,6 +852,24 @@
                 </li>
               </ul>
             </article>
+          </div>
+          <div class="callout">
+            <strong>M2 keeps this small:</strong> remove 11 unused
+            <code>checks: write</code> grants. Replace schema, Terraform, and
+            Lighthouse PR comments with read-only job summaries. Remove Claude
+            OIDC authority. Keep only protected-main cache writers. Codecov,
+            read-only Terraform plans, protected-preview Lighthouse, and Claude
+            review retain the exact credential boundaries recorded in ADR 0078.
+            The human operator accepted those exact boundaries on 2026-08-30.
+            Raw Lighthouse reports stay on the ephemeral runner because they
+            contain resolved request headers. The diagnostics artifact excludes
+            them. The operator also accepted publication before rotation of the
+            disclosed Vercel bypass token; rotation remains an IaC-owned
+            follow-up. One structural checker follows local reusable workflows,
+            inventories every pull request write or credential job with its
+            exact permission and credential bindings, scans all cache saves, and
+            pins each retained restore, targeted cleanup, and required setup
+            command.
           </div>
           <div class="callout">
             <strong>Spend is not approved:</strong> recommend 45 runner-minutes
@@ -957,8 +986,8 @@
             <li>
               <strong>Trust boundary · #2124</strong
               ><span
-                >Remove or accept exact PR credential exposure. Make PR caches
-                restore-only.</span
+                >Remove PR write and cache-save authority. Record the exact
+                retained credential exposure for human acceptance.</span
               >
             </li>
             <li>
@@ -1074,6 +1103,9 @@
                   A reviewed inventory and generated before/after manifest.
                 </li>
                 <li>Existing workflow jobs and schedules.</li>
+                <li>
+                  M2 deletes comment writers instead of adding publisher jobs.
+                </li>
               </ul>
             </article>
             <article class="card">

@@ -117,10 +117,13 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
+          package-manager-cache: false
           # `cache: pnpm` is omitted. The only install is the UUID contract's
           # `pnpm install --lockfile-only` in a throwaway fixture; it resolves a
           # test lockfile and does not materialize dependencies for later steps.
@@ -152,9 +155,12 @@ jobs:
     timeout-minutes: 2
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
+          package-manager-cache: false
           # No pnpm install — the lint script is pure Node.js (zero deps).
           # This makes the job sub-30s: checkout (~5s) + node setup (~5s) +
           # script (~1s). pnpm/action-setup is not needed either.
@@ -207,9 +213,12 @@ jobs:
     timeout-minutes: 2
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
+          package-manager-cache: false
           # No pnpm install — scripts/context/check-agent-context.mjs is pure
           # Node.js (node builtins + sibling helper modules), same sub-30s
           # pattern as the lockfile-lint job.
@@ -236,10 +245,13 @@ jobs:
       issues: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
+          package-manager-cache: false
           # This report job does not run pnpm install; it queries the hosted
           # advisory DB directly from the committed lockfile.
       - name: pnpm audit (moderate+, report only)
@@ -426,6 +438,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           # Full history required: the minimumReleaseAgeExclude age check
           # runs `git blame` on pnpm-workspace.yaml. A default depth-1
           # shallow clone attributes every line to the boundary (HEAD)
@@ -435,6 +448,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
+          package-manager-cache: false
           # No pnpm install — scripts/supply-chain/override-prune-report.mjs is pure
           # Node.js (zero deps) and reads only the committed lockfiles.
       - name: override-prune-report self-tests

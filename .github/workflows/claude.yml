@@ -66,6 +66,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
+          persist-credentials: false
       - uses: anthropics/claude-code-action@459ad358ae43fea66bfefd0a1f8d840b4b9791fb # v1.0.194
         with:
           github_token: ${{ github.token }}
@@ -122,11 +123,12 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      id-token: write
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Verify review-eval scorecard-only scope
         id: review-scope
         env:
@@ -146,6 +148,9 @@ jobs:
       - uses: anthropics/claude-code-action@459ad358ae43fea66bfefd0a1f8d840b4b9791fb # v1.0.194
         if: steps.review-scope.outputs.skip != 'true'
         with:
+          # Keep review mutation inside this workflow-scoped token. The action
+          # does not need OIDC authority to obtain a broader installation token.
+          github_token: ${{ github.token }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           use_sticky_comment: true
           track_progress: true

@@ -3516,11 +3516,11 @@ if ! /bin/bash -c '
   drain_condemned_run_commands() {
     case "$1" in
       fixture-legacy-request-1-1)
-        [[ "$7" == request-marker-empty-v1 ]]
+        [[ "$6" == request-marker-empty-v1 ]]
         ;;
       *) return 1 ;;
     esac || return 1
-    printf "drain:%s:%s\n" "$1" "$7" >> "$trace"
+    printf "drain:%s:%s\n" "$1" "$6" >> "$trace"
   }
   gate_drain_settle_darwin_lineage_cohort() {
     [[ "$1" == stale-run && "$2" == fixture-legacy-drain-1-1 && "$#" -eq 2 ]]
@@ -3635,7 +3635,7 @@ if ! /bin/bash -c '
       fixture-cohort-request-a-1|fixture-cohort-request-b-1) ;;
       *) return 1 ;;
     esac
-    [[ "$7" == request-marker-empty-v1 ]] || return 1
+    [[ "$6" == request-marker-empty-v1 ]] || return 1
     printf "drain-request:%s\n" "$1" >> "$trace"
   }
   gate_drain_settle_darwin_lineage_cohort() {
@@ -3769,8 +3769,8 @@ if ! /bin/bash -c '
   }
   drain_condemned_run_commands() {
     case "$1" in
-      fixture-request-1-1) [[ "$7" == request-marker-empty-v1 ]] ;;
-      *) [[ "$7" == portable-marker-v1 ]] ;;
+      fixture-request-1-1) [[ "$6" == request-marker-empty-v1 ]] ;;
+      *) [[ "$6" == portable-marker-v1 ]] ;;
     esac || return 1
     printf "drain:%s\n" "$1" >> "$trace"
   }
@@ -4773,12 +4773,18 @@ STUB
     printf 'scripts/gate/agent-prewarm.mjs\n' > holder-paths.txt
     printf 'scripts/context/agent-context-budget.mjs\n' > contender-paths.txt
 
-    local holder_output="$fixture_repo/holder-output"
-    local contender_output="$fixture_repo/contender-output"
-    local descendant_pid_file="$fixture_repo/descendant-pid"
-    local replacement_pid_file="$fixture_repo/replacement-pid"
-    local drain_refresh_barrier="$fixture_repo/drain-refresh"
-    local contender_started="$fixture_repo/contender-started"
+    # Keep mutable fixture control files below the gate's existing scratch
+    # directory. Writing them in the repository root races the contender's
+    # material-environment root snapshot and can fail before registration.
+    local fixture_runtime="$fixture_repo/.tmp/agent-quality-gate/sequential-descendant-fixture"
+    mkdir -p "$fixture_runtime"
+
+    local holder_output="$fixture_runtime/holder-output"
+    local contender_output="$fixture_runtime/contender-output"
+    local descendant_pid_file="$fixture_runtime/descendant-pid"
+    local replacement_pid_file="$fixture_runtime/replacement-pid"
+    local drain_refresh_barrier="$fixture_runtime/drain-refresh"
+    local contender_started="$fixture_runtime/contender-started"
     local holder_pid=""
     local holder_start=""
     local contender_pid=""
@@ -4942,8 +4948,8 @@ STUB
     # Hold the drain after its top refresh and capture. The live descendant
     # replaces itself with a process that inherits the run handles, then exits.
     # The next refresh must capture the replacement before capacity is released.
-    holder_output="$fixture_repo/replacement-holder-output"
-    contender_output="$fixture_repo/replacement-contender-output"
+    holder_output="$fixture_runtime/replacement-holder-output"
+    contender_output="$fixture_runtime/replacement-contender-output"
     rm -f "$descendant_pid_file" "$replacement_pid_file" "$contender_started" \
       "${drain_refresh_barrier}.used" "${drain_refresh_barrier}.ready" \
       "${drain_refresh_barrier}.release"
@@ -5112,8 +5118,8 @@ STUB
     # failed active-command drain must keep the mapped-command verdict, its
     # descendant, and its journal obligation. A later coordinator client must
     # drain that exact obligation before it starts mapped work.
-    holder_output="$fixture_repo/coordinator-failed-holder-output"
-    contender_output="$fixture_repo/coordinator-recovery-output"
+    holder_output="$fixture_runtime/coordinator-failed-holder-output"
+    contender_output="$fixture_runtime/coordinator-recovery-output"
     rm -f "$descendant_pid_file" "$contender_started"
     holder_start=""
     contender_start=""
@@ -5304,8 +5310,8 @@ STUB
     # The completed run must publish a token-scoped obligation before that
     # failure, leave its marker, and let the next legacy holder drain it before
     # any mapped command starts.
-    holder_output="$fixture_repo/legacy-holder-output"
-    contender_output="$fixture_repo/legacy-contender-output"
+    holder_output="$fixture_runtime/legacy-holder-output"
+    contender_output="$fixture_runtime/legacy-contender-output"
     rm -f "$descendant_pid_file" "$contender_started"
     holder_start=""
     contender_start=""
@@ -5434,7 +5440,7 @@ fi
 exec "${REAL_PGREP_COMMAND:?}" "$@"
 STUB
     chmod +x bin/pgrep
-    holder_output="$fixture_repo/no-lock-failed-drain-output"
+    holder_output="$fixture_runtime/no-lock-failed-drain-output"
     rm -f "$descendant_pid_file"
     holder_start=""
     descendant_start=""
@@ -10058,11 +10064,14 @@ STUB
   # The stub makes mapped commands free. It must still delegate every inline
   # Node helper and gate module used to build and execute the plan. A stubbed-out
   # helper makes the gate refuse the run, which is the guard working, not the
-  # fixture.
+  # fixture. `-p` carries the Darwin broker's `node -p 'process.execPath'`
+  # runtime probe: stub it out and the broker reads an empty runtime path and
+  # refuses to bind before first dispatch.
   cat > bin/node <<'STUB'
 #!/usr/bin/env bash
 if [[ "${1:-}" == "--input-type=module" ||
   "${1:-}" == -e ||
+  "${1:-}" == -p ||
   "${1:-}" == */quality-gate-coordinator.mjs ||
   "${1:-}" == */quality-gate-coordinator-environment.mjs ]]; then
   exec "${REAL_NODE:?}" "$@"
@@ -10289,7 +10298,12 @@ STUB
   base_ref="$(git rev-parse --verify HEAD)"
   counter="$index_state_stamp_repo/.tmp/agent-quality-gate/trunk-count"
   printf 'changed\n' >> fixture.txt
-  printf 'brand new\n' > new.txt
+  # This file is made executable further down to prove that a mode change
+  # invalidates the stamp. The Darwin broker preflight refuses to dispatch when
+  # a routed path carries the executable bit but no inspectable source contract
+  # (rule `opaque-executable`), so the file needs a shebang to stay routable.
+  # The shebang changes nothing the assertions below observe.
+  printf '#!/usr/bin/env bash\nbrand new\n' > new.txt
 
   index_state_gate() {
     COUNTER_FILE="$counter" \
@@ -10351,7 +10365,16 @@ rm -rf "$index_state_stamp_repo"
 # path/command plan and the fixture's gate implementation independently. Every
 # change must execute the mapped command again instead of reusing the stamp.
 signature_stamp_repo="$(mktemp -d)"
-signature_runtime_root="$gate_cache_dir/signature-runtime-source"
+# The staged gate runtime must sit on a canonical path. On macOS `mktemp -d`
+# hands back a /var path that symlinks to /private/var, and
+# scripts/gate/darwin-process-lineage.mjs gates its CLI entrypoint on
+# `resolve(process.argv[1]) === fileURLToPath(import.meta.url)`. Node's ESM
+# loader resolves the symlink on the import.meta.url side only, so the two
+# disagree, the entrypoint never runs, and the gate reports malformed
+# exact-identity evidence. Canonicalizing the staging root keeps both sides
+# equal. Issue 2156 tracks removing the mismatch in the module itself.
+mkdir -p "$gate_cache_dir/signature-runtime-source"
+signature_runtime_root="$(cd "$gate_cache_dir/signature-runtime-source" && pwd -P)"
 mkdir -p \
   "$signature_runtime_root/scripts/docs" \
   "$signature_runtime_root/scripts/gate/mapping" \
@@ -10366,6 +10389,11 @@ cp "$repo_root/scripts/gate/run-handles.sh" \
   "$signature_runtime_root/scripts/gate/run-handles.sh"
 cp "$repo_root/scripts/gate/darwin-broker-launch-preflight.mjs" \
   "$signature_runtime_root/scripts/gate/darwin-broker-launch-preflight.mjs"
+# BROKER_CLIENT_ALLOWLIST pins four policy sources by SHA-256 and refuses to
+# dispatch when one is absent. The coordinator glob below stages the other
+# three; this suite is the fourth.
+cp "$repo_root/scripts/gate/darwin-broker-launch-preflight.test.mjs" \
+  "$signature_runtime_root/scripts/gate/darwin-broker-launch-preflight.test.mjs"
 cp "$repo_root/scripts/gate/darwin-process-identity.c" \
   "$signature_runtime_root/scripts/gate/darwin-process-identity.c"
 cp "$repo_root/scripts/gate/darwin-process-identity-runtime.inc.c" \

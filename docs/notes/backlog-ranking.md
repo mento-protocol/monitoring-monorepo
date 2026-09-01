@@ -140,7 +140,8 @@ canonical in [`backlog-sweep.md`](backlog-sweep.md).
 The three questions stage 2 was waiting on are answered there rather than here:
 a claim that stays safe under concurrency is the specific-number claim and the
 helper's own `Claim ID` guard; the stop condition for a bad pick is an honest
-`pnpm issue:release` with a comment saying what was learned; and an issue that
+`pnpm issue:release --issue <n> --claim-id <claim-id>` with a comment saying
+what was learned; and an issue that
 turns out to need a decision mid-flight is released the same way — with
 `--needs-grooming` when clarity is what is missing — as long as no PR is open
 for it yet. Once one is, the issue stays `in-pr` and the PR goes to the operator

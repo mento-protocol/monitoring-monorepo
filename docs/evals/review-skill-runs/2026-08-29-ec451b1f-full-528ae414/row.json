@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "kind": "full",
+  "executed_at": "2026-08-29T21:13:09Z",
+  "status": "failed",
+  "verdict": "INCOMPLETE",
+  "comparability_key": "ec451b1fe78c8928840299f37189a035e3e8ea8ed20f36fb5c32158f0eab09c8",
+  "contract_digest": "7223888cc6bd15c9bdb3bf1f6929a516719dd497ee6d2f1bc577a6405e8202e9",
+  "inputs": {
+    "skill_digest": "528ae4142dc0d4a2917d3d04bcf4399416213a6bb9e9fdc0052fd7d88a5f967c",
+    "skill_ref": "installed",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "d0790e1d52542ac8e22bbc84932e98d635035f685ca201321bda3ab4c196033a",
+    "claude_cli": "2.1.247 (Claude Code)",
+    "codex_cli": "codex-cli 0.151.0",
+    "host": "Mac"
+  },
+  "conditions": {
+    "pipeline": {
+      "model": "claude-opus-5",
+      "effort": "high",
+      "finder": "gpt-5.6-sol@high",
+      "draws": 1,
+      "recall": {
+        "matched": 0,
+        "opportunities": 34,
+        "rate": 0
+      },
+      "p1": {
+        "matched": 0,
+        "opportunities": 12,
+        "rate": 0
+      },
+      "novel_real": 0,
+      "wrong_claims": 0,
+      "usd": 0,
+      "seconds": 0,
+      "per_defect": {
+        "3827636772": [
+          0
+        ],
+        "3827647420": [
+          0
+        ],
+        "3827655676": [
+          0
+        ],
+        "3827655684": [
+          0
+        ],
+        "3827663924": [
+          0
+        ],
+        "3828303385": [
+          0
+        ],
+        "3828304403": [
+          0
+        ],
+        "3828313971": [
+          0
+        ],
+        "3828313974": [
+          0
+        ],
+        "3828328194": [
+          0
+        ],
+        "3829654081": [
+          0
+        ],
+        "3829659544": [
+          0
+        ],
+        "3829659546": [
+          0
+        ],
+        "3829659550": [
+          0
+        ],
+        "3829986398": [
+          0
+        ],
+        "3829986403": [
+          0
+        ],
+        "3830003055": [
+          0
+        ],
+        "3830042123": [
+          0
+        ],
+        "3830042128": [
+          0
+        ],
+        "3830259678": [
+          0
+        ],
+        "3830366234": [
+          0
+        ],
+        "3830366243": [
+          0
+        ],
+        "3830366247": [
+          0
+        ],
+        "3830366547": [
+          0
+        ],
+        "3830366556": [
+          0
+        ],
+        "3830371307": [
+          0
+        ],
+        "3830371315": [
+          0
+        ],
+        "3830371325": [
+          0
+        ],
+        "3830371329": [
+          0
+        ],
+        "3830394205": [
+          0
+        ],
+        "3830416461": [
+          0
+        ],
+        "3830423746": [
+          0
+        ],
+        "3830513980": [
+          0
+        ],
+        "3830695396": [
+          0
+        ]
+      }
+    }
+  },
+  "judge_calibration": {
+    "agreement": 0,
+    "total": 1
+  },
+  "vs_baseline": null,
+  "detail_dir": "docs/evals/review-skill-runs/2026-08-29-ec451b1f-full-528ae414",
+  "notes": "run failed: scoring failed"
+}

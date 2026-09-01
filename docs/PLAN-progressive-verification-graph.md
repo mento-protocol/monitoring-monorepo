@@ -3,7 +3,7 @@ title: Simple Verification System Plan
 status: active
 owner: eng
 canonical: false
-last_verified: 2026-08-29
+last_verified: 2026-08-30
 doc_type: plan
 scope: repo-wide
 review_interval_days: 180
@@ -189,11 +189,21 @@ The primary threats are accidental:
 Pull request code can still be hostile to the CI runner. Required validation
 jobs must use read-only repository permissions and no secrets. A job that needs
 a credential must not execute pull request code before it uses that credential.
-Keep validation and external publication in separate jobs where this boundary
-matters. Preserve the current safe Sentry ordering. The current Codecov
-token-after-candidate-commands ordering is an exception. Issue #2124 must
-isolate Codecov publication or record explicit human acceptance of this
-boundary.
+Keep validation and external publication separate where the benefit justifies
+the handoff. Preserve the current safe Sentry ordering. M2 keeps the advisory
+Codecov upload in each package job and records the exact
+token-after-candidate-commands exposure. It removes PR
+comment writers from schema diff, Terraform plans, and Lighthouse instead of
+adding publisher jobs. It also removes Claude's OIDC permission and gives the
+reviewer only the workflow-scoped GitHub token. The retained Codecov,
+read-only Terraform plan, Lighthouse preview, and Claude review exposures are
+accepted exactly in ADR 0078. Automatic Claude review excludes forks,
+Dependabot, and Sentry-autofix. An `OWNER` or `MEMBER` can still invoke
+on-demand Claude review on otherwise excluded content. Lighthouse raw reports
+stay on the ephemeral runner because they contain resolved request headers.
+Only header-free diagnostics enter the workflow artifact. The operator also
+accepted publication before rotation of the disclosed Vercel bypass token.
+Rotation remains an IaC-owned follow-up and requires separate apply approval.
 
 The repository currently has one active human maintainer. Required code-owner
 approval or a last-pusher restriction would make routine control-plane changes
@@ -490,9 +500,20 @@ Protected `main` jobs may populate shared setup caches for:
   the cache as disposable input.
 
 Pull request jobs may restore setup caches populated by protected `main`. Pull
-request jobs must not save caches. This simple rule covers dependencies,
-executables, generated code, browser binaries, provider binaries, and build
-output without a second cache-policy language.
+request jobs must not save caches. M2 disables setup-node's implicit cache and
+uses nonfatal `actions/cache/restore` with a new `trusted-main-v1-*` namespace.
+Only a protected-main push can call `actions/cache/save`. This simple rule
+covers dependencies, executables, generated code, browser binaries, provider
+binaries, and build output without a second cache-policy language.
+
+Each retained setup cache has a fixed target and a fixed required command. An
+empty `cache-hit` output removes only that target before the command runs. This
+clears a missing or failed partial restore. A prefix-key hit returns `false`;
+the workflow keeps that complete restore and still runs the command.
+
+The pnpm executable stays in `~/pnpm-home`. The dependency cache stays in
+`~/pnpm-store`. Every root and package-local CI install selects that store
+explicitly. Cache cleanup cannot remove the pnpm executable.
 
 Do not use:
 
@@ -504,8 +525,9 @@ Do not use:
   cache database.
 - An Envio cache hit that skips code generation or generated-output comparison.
 
-If a setup cache is missing or corrupt, the job must run cold. Cache failure
-must not change the required command set or produce success by itself.
+If a setup cache is missing or corrupt, the job must clear the fixed cache
+target and run cold. Cache failure must not change the required command set or
+produce success by itself.
 
 This policy removes the cache-isolation, key-completeness, signer, revocation,
 and artifact-restoration problems found in the first review.
@@ -718,6 +740,39 @@ The first implementation pull request stops here. Issue #2124 changes no CI
 coverage, path filters, required contexts, hooks, rulesets, or local gate
 behavior.
 
+M2 implements this phase inside the existing workflows and actions. It removes
+unused `checks: write` grants. Schema diff, four Terraform plans, and Lighthouse
+publish job summaries without PR write permission. Claude auto-review uses an
+explicit workflow-scoped token without OIDC. Codecov remains advisory. The four
+retained credential exposures are listed and accepted exactly in ADR 0078.
+That ADR also records the separate approval to publish before rotation of the
+disclosed Vercel bypass token. Rotation remains an IaC-owned follow-up.
+
+PR jobs restore only `trusted-main-v1-*` setup caches. Protected-main pushes
+own saves. Every required command still runs. The Envio generated-output cache
+and its codegen skip are gone. A cold PR miss is pre-merge evidence. The first
+protected-main save and a later PR hit are post-merge evidence because the new
+namespace cannot exist on `main` before this PR merges.
+
+The M2 structural checker follows local reusable workflows from every direct
+pull request trigger. It inventories all pull request jobs with write
+permission or credential access. Each entry pins its permission map, exact
+credential bindings, environment, forwarded secrets, and reusable target. The
+checker scans every workflow and local action for cache saves. It also pins
+each retained restore, targeted empty-restore cleanup, and required setup
+command. Mutation tests prove these boundaries fail closed.
+
+M2 also chooses deletion over new publisher jobs. The four Terraform comment
+writers, Lighthouse comment writer, schema-diff comment writer, and their
+write permissions are removed. Job summaries retain the result near the run.
+Lighthouse raw reports remain runner-local and outside public storage and the
+uploaded diagnostics artifact.
+The frozen additive complexity receipt starts at protected-main SHA
+`ccef910fa6fc267751681176ffdeef01daf90b40`. It records M2 and its #2161
+correction. Its derivation excludes the unrelated #2145 and #2159 review-eval
+artifacts. It remains historical #2124 evidence. Each later phase records its
+own scoped complexity evidence instead of extending the M2 receipt.
+
 ### Phase 2: Harden fixed CI coverage and aggregate (#2125)
 
 Map retained safeguards to the CI jobs that already run them. Add only confirmed
@@ -881,8 +936,7 @@ Issue #2128 deletion approval.
 - Validation jobs have read-only permissions and no secrets.
 - Sentry preserves its safe credential ordering. Other credential-bearing jobs
   execute no prior pull request code or have explicit human acceptance of the
-  boundary. Issue #2124 must isolate Codecov publication or record that
-  acceptance.
+  boundary. ADR 0078 lists the exact M2 exceptions and their approval status.
 - Pull request jobs restore only protected-`main` setup caches and never save a
   cache. Every required command still executes on a cache hit.
 - The ADR records the accepted one-maintainer risk. The inventory gives each
