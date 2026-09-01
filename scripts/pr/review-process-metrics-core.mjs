@@ -113,10 +113,11 @@ function isExplicitEmptySummary(value) {
   );
 }
 
-const FINDING_LABEL_SOURCE = String.raw`(?:\[[Pp][0-3]\]|\b[Pp][0-3]\s+Badge\b|\b(?:critical|high|medium|low)\s+severity\b)`;
-const FINDING_LABEL_LIST_SOURCE = String.raw`${FINDING_LABEL_SOURCE}(?:\s*(?:[/,]|\band\b|\bor\b)\s*${FINDING_LABEL_SOURCE})*`;
+const FINDING_LABEL_SOURCE = String.raw`(?:\[[Pp][0-3]\]|\b[Pp][0-3]\s+Badge\b|\b(?:critical|high|medium|low)\s+severity\b|\bchanges requested\b)`;
+const FINDING_LABEL_SEPARATOR_SOURCE = String.raw`(?:,\s*(?:and|or)\b|[/,]|\b(?:and|or)\b)`;
+const FINDING_LABEL_LIST_SOURCE = String.raw`${FINDING_LABEL_SOURCE}(?:\s*${FINDING_LABEL_SEPARATOR_SOURCE}\s*${FINDING_LABEL_SOURCE})*`;
 const NUMERIC_EMPTY_FINDING_CLAUSE = new RegExp(
-  String.raw`^\s*(?:0\s*(?:findings?\s*)?(?:(?::|[—-])\s*)?${FINDING_LABEL_LIST_SOURCE}(?:\s+findings?)?|${FINDING_LABEL_LIST_SOURCE}\s*(?:findings?\s*)?(?::|[—-])\s*0(?:\s+findings?)?)\s*$`,
+  String.raw`^\s*(?:[-*+•]\s+)?(?:0\s*(?:findings?\s*)?(?:(?::|[—–-])\s*)?${FINDING_LABEL_LIST_SOURCE}(?:\s+findings?)?|${FINDING_LABEL_LIST_SOURCE}\s*(?:findings?\s*)?(?::|[—–-])\s*0(?:\s+findings?)?)\s*,?\s*$`,
   "i",
 );
 

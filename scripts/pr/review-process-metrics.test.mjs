@@ -1256,12 +1256,60 @@ test("treats numeric zero summaries as empty without hiding defect prose", () =>
       user: { login: "claude[bot]", type: "Bot" },
       body: "[P1]/[P2]/[P3]: 0 findings.",
     },
+    {
+      id: 236,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "0 changes requested.",
+    },
+    {
+      id: 237,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "Changes requested: 0.",
+    },
+    {
+      id: 238,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "Changes requested: field 0 is rejected.",
+    },
+    {
+      id: 239,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "- High severity: 0 findings.",
+    },
+    {
+      id: 240,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "0 [P1], [P2], and [P3] findings.",
+    },
+    {
+      id: 241,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "[P1], [P2], and [P3]: 0 findings.",
+    },
+    {
+      id: 242,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "0 high severity findings, but no medium severity findings.",
+    },
+    {
+      id: 243,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "0 changes requested, but [P1] validation still fails.",
+    },
   );
 
   const records = summarizeFixture(
     value,
   ).evidence.byBot.claude.surfaces.review_submissions.evidence.filter(
-    ({ id }) => Number(id) >= 226 && Number(id) <= 235,
+    ({ id }) => Number(id) >= 226 && Number(id) <= 243,
   );
   assert.deepEqual(
     records.map(({ id, finding, findingSignal }) => ({
@@ -1280,6 +1328,14 @@ test("treats numeric zero summaries as empty without hiding defect prose", () =>
       { id: "233", finding: false, findingSignal: null },
       { id: "234", finding: false, findingSignal: null },
       { id: "235", finding: false, findingSignal: null },
+      { id: "236", finding: false, findingSignal: null },
+      { id: "237", finding: false, findingSignal: null },
+      { id: "238", finding: true, findingSignal: "Changes requested" },
+      { id: "239", finding: false, findingSignal: null },
+      { id: "240", finding: false, findingSignal: null },
+      { id: "241", finding: false, findingSignal: null },
+      { id: "242", finding: false, findingSignal: null },
+      { id: "243", finding: true, findingSignal: "[P1]" },
     ],
   );
 });
